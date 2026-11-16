@@ -422,8 +422,12 @@ fn call(at: usize, to: usize) -> [u8; 16] {
     word(0x144, 4, &[(34, 48, rel(at, to)), (86, 1, 1), (87, 3, 7)])
 }
 
-fn ret(reg: u64) -> [u8; 16] {
-    word(0x150, 4, &[(24, 8, reg), (86, 1, 1), (87, 3, 7)])
+fn ret(at: usize, reg: u64) -> [u8; 16] {
+    word(
+        0x150,
+        4,
+        &[(24, 8, reg), (34, 48, rel(at, 0)), (86, 1, 1), (87, 3, 7)],
+    )
 }
 
 fn exit() -> [u8; 16] {
@@ -458,7 +462,7 @@ fn calls(sites: usize) -> Vec<u8> {
             (84, 3, 7),
         ],
     ));
-    b.extend(ret(4));
+    b.extend(ret(6, 4));
     b.extend(halt(7));
     b
 }
@@ -469,7 +473,7 @@ fn call_is_inlined_at_each_site() {
     let p = Program::parse(&calls(2));
     let t = text(&p);
     assert_eq!(t[1], "CALL.REL.NOINC 0x50");
-    assert!(t[6].starts_with("RET.REL.NODEC R4"), "{}", t[6]);
+    assert_eq!(t[6], "RET.REL.NODEC R4 0x0");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("call", &s.spirv);
     assert_eq!(
@@ -484,7 +488,7 @@ fn call_without_return_address_is_rejected() {
     let mut b = Vec::new();
     b.extend(call(0, 2));
     b.extend(exit());
-    b.extend(ret(4));
+    b.extend(ret(2, 4));
     b.extend(halt(3));
     let e = translate(&Program::parse(&b)).err().map(|e| e.0);
     assert_eq!(e.as_deref(), Some("CALL without its return address"));
@@ -545,4 +549,22 @@ fn loop_with_two_exits_dispatches_after_it() {
     dump("loop_two_exits", &s.spirv);
     assert!(spirv_has(&s.spirv, 246), "no OpLoopMerge");
     assert!(spirv_has(&s.spirv, 251), "no exit dispatch");
+}
+
+#[test]
+fn kill_demotes_and_goes_on() {
+    let mut b = sph(2, 5, &[(6, 0xaa), (18, 0xf)]);
+    b.extend(ipa(0, 0x70, 0, 0));
+    b.extend(mov_imm(9, 0x4200_0000));
+    b.extend(isetp(0, 0, 9, 1));
+    b.extend(word(0x15b, 4, &[(12, 3, 0), (87, 3, 7)]));
+    b.extend(ipa(1, 0x80, 0, 0));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[3], "@P0 KILL");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("kill", &s.spirv);
+    assert!(s.interface.kills);
+    assert!(spirv_has(&s.spirv, 5380), "no OpDemoteToHelperInvocation");
+    assert!(!spirv_has(&s.spirv, 252), "OpKill");
 }

@@ -59,6 +59,8 @@ const CAP_CLIP_DISTANCE: u32 = 32;
 const CAP_INTERPOLATION_FUNCTION: u32 = 52;
 const CAP_MULTI_VIEWPORT: u32 = 57;
 const CAP_VIEWPORT_INDEX_LAYER: u32 = 5254;
+const CAP_DEMOTE: u32 = 5379;
+const OP_DEMOTE: u16 = 5380;
 
 /// What the stage I/O needs to know about the whole program.
 #[derive(Default)]
@@ -119,6 +121,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "ALD" => ald(c, i),
         "AST" => ast(c, i),
         "IPA" => ipa(c, i),
+        "KILL" => kill(c, i),
         "ISBERD" | "ISBEWR" => bad(format!("stage buffer {}", i.mnemonic)),
         _ => return None,
     })
@@ -484,6 +487,49 @@ fn ast(c: &mut Ctx, i: &Inst) -> Res<()> {
         let u = c.load_reg(s.wrapping_add(k as u8));
         c.store_slot(&slot, u);
     }
+    Ok(())
+}
+
+/// KILL demotes the invocation to a helper and execution goes on, as the
+/// hardware does (NAK lowers both demote and terminate to it): the quad
+/// keeps its derivatives and the outputs and stores of the killed
+/// invocation are dropped.
+fn kill(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if c.stage != Stage::Fragment {
+        return bad("KILL outside a fragment shader");
+    }
+    let mut cond: Option<u32> = None;
+    for o in &i.ops {
+        let Operand::Pred(n, not) = o else {
+            return bad(format!("KILL operand {o}"));
+        };
+        if *n == 7 && !*not {
+            continue;
+        }
+        let v = c.pred_operand(o)?;
+        cond = Some(match cond {
+            None => v,
+            Some(a) => {
+                let b = c.boolt();
+                c.m.emit(op::LOGICAL_AND, b, &[a, v])
+            }
+        });
+    }
+    c.cap(CAP_DEMOTE);
+    c.exts.insert("SPV_EXT_demote_to_helper_invocation");
+    c.iface.kills = true;
+    let Some(cv) = cond else {
+        c.m.emit_void(OP_DEMOTE, &[]);
+        return Ok(());
+    };
+    let then = c.m.id();
+    let merge = c.m.id();
+    c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+    c.m.emit_void(op::BRANCH_CONDITIONAL, &[cv, then, merge]);
+    c.m.emit_void(op::LABEL, &[then]);
+    c.m.emit_void(OP_DEMOTE, &[]);
+    c.m.emit_void(op::BRANCH, &[merge]);
+    c.m.emit_void(op::LABEL, &[merge]);
     Ok(())
 }
 

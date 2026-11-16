@@ -89,6 +89,9 @@ pub struct Interface {
     pub writes_depth: bool,
     /// The fragment shader writes the sample mask (SPH output map).
     pub writes_sample_mask: bool,
+    /// The fragment shader kills invocations (OpDemoteToHelperInvocation:
+    /// the device needs shaderDemoteToHelperInvocation).
+    pub kills: bool,
 }
 
 /// A translated program.

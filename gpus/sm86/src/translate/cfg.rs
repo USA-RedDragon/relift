@@ -4,16 +4,16 @@
 //! Each selection merges at its immediate post-dominator inside the
 //! innermost loop; back edges become continues and loop exits become
 //! breaks. A loop with several exits stores which one it took in a variable
-//! and breaks; the code after the loop dispatches on it. EXIT and KILL are
-//! not blocks: every edge to them returns (after the epilogue) or kills in
-//! place. BSSY/BSYNC only mark the reconvergence that the structure already
+//! and breaks; the code after the loop dispatches on it. EXIT is not a
+//! block: every edge to it returns (after the epilogue) in place. KILL is
+//! not control flow at all (see the io module). BSSY/BSYNC only mark the reconvergence that the structure already
 //! gives, so they emit nothing.
 //!
 //! `CALL.REL` subroutines are inlined at every call site: a block is a pair
 //! of the call stack and its first instruction, and `RET` continues after
 //! the innermost call. The callee returns through the address its caller
-//! put in a register with `MOV`, which must be the instruction after the
-//! `CALL`; a callee that never returns (it exits) needs no address.
+//! put in a register with `MOV`, which with the RET's offset must name the
+//! instruction after the `CALL`.
 //!
 //! A CALL whose callee never reaches a RET is a plain jump.
 //!
@@ -29,12 +29,10 @@
 
 use super::{Code, Ctx, Res, bad};
 use crate::Operand;
-use crate::program::Stage;
 use crate::spirv::op;
 use std::collections::{HashMap, HashSet};
 
 const EXIT: usize = usize::MAX;
-const KILL: usize = usize::MAX - 1;
 const MAX_CALL_DEPTH: usize = 8;
 
 #[derive(Clone, Copy, Debug)]
@@ -60,7 +58,7 @@ struct Block {
 }
 
 fn terminal(b: usize) -> bool {
-    b == EXIT || b == KILL
+    b == EXIT
 }
 
 struct Lp {
@@ -86,7 +84,7 @@ fn conditions(i: &crate::Inst, w: crate::Word) -> Res<Vec<Operand>> {
     if let Some(g) = &i.guard {
         c.push(g.clone());
     }
-    if i.mnemonic == "BRA" || i.mnemonic == "EXIT" || i.mnemonic == "KILL" {
+    if i.mnemonic == "BRA" || i.mnemonic == "EXIT" {
         for o in &i.ops {
             match o {
                 Operand::Pred(n, not) => c.push(Operand::Pred(*n, *not)),
@@ -109,7 +107,7 @@ fn raw_target(w: crate::Word) -> i64 {
 }
 
 fn is_transfer(i: &crate::Inst) -> bool {
-    matches!(i.mnemonic, "BRA" | "EXIT" | "KILL" | "CALL" | "RET" | "BRX")
+    matches!(i.mnemonic, "BRA" | "EXIT" | "CALL" | "RET" | "BRX" | "BRXU")
 }
 
 /// Ends a block with no fall-through: an unguarded BRA, EXIT, BRX or RET.
@@ -213,12 +211,14 @@ fn returns(code: &Code, end: usize, t: usize) -> bool {
 }
 
 /// The register a CALL's return address goes through is set by a `MOV`
-/// of the address after the call shortly before it.
-fn return_address_set(code: &Code, k: usize) -> bool {
-    let want = 16 * (k as u64 + 1);
+/// shortly before it. `RET.REL` at `ret` jumps to the register plus its own
+/// offset, so the address moved is the return point minus that offset.
+fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
+    let off = 16 * (ret as i64 + 1) + raw_target(code.words[ret]);
+    let want = (16 * (k as i64 + 1) - off) as u32;
     (k.saturating_sub(16)..k).rev().any(|j| {
         let w = code.words[j];
-        w.opcode() == 0x802 && u64::from(w.get(32, 32)) == want && code.insts[j].guard.is_none()
+        w.opcode() == 0x802 && w.get(32, 32) == want && code.insts[j].guard.is_none()
     })
 }
 
@@ -284,7 +284,7 @@ fn build(code: &Code) -> Res<Vec<Block>> {
                 }
                 leaders[k + 1] = true;
             }
-            "EXIT" | "KILL" | "BRX" | "BRXU" => leaders[k + 1] = true,
+            "EXIT" | "BRX" | "BRXU" => leaders[k + 1] = true,
             "JMP" | "JMX" | "BPT" | "RTT" | "WARPSYNC.EXCLUSIVE" => {
                 return bad(format!("control {}", i.mnemonic));
             }
@@ -319,7 +319,7 @@ fn build(code: &Code) -> Res<Vec<Block>> {
         let mut term = None;
         match last.mnemonic {
             "BRA" => target = Some(to(&stack, bra_target(last, end)?)),
-            "EXIT" | "KILL" => target = None,
+            "EXIT" => target = None,
             "CALL"
                 if !*calls.entry(stop - 1).or_insert_with(|| {
                     bra_target(last, end).is_ok_and(|t| returns(code, end, t))
@@ -344,7 +344,7 @@ fn build(code: &Code) -> Res<Vec<Block>> {
                 let Some((&site, rest)) = stack.split_last() else {
                     return bad("RET outside a call");
                 };
-                if !return_address_set(code, site) {
+                if !return_address_set(code, site, stop - 1) {
                     return bad("CALL without its return address");
                 }
                 target = Some(to(rest, site + 1));
@@ -372,7 +372,6 @@ fn build(code: &Code) -> Res<Vec<Block>> {
                 let conds = conditions(last, w)?;
                 let to = match last.mnemonic {
                     "EXIT" => EXIT,
-                    "KILL" => KILL,
                     _ => match target {
                         Some(k) => ids.get(k, &mut blocks),
                         None => return bad(format!("{} without a target", last.mnemonic)),
@@ -618,7 +617,6 @@ impl Graph {
 enum Dest {
     Label(u32),
     Ret,
-    Kill,
     /// Leave the loop through its exit with this index.
     Break(u32, u32, u32),
     Inline(usize),
@@ -642,9 +640,6 @@ impl Emit<'_> {
     fn resolve(&self, t: usize, follow: Option<(usize, u32)>, lp: Option<&Lp>) -> Res<Dest> {
         if t == EXIT {
             return Ok(Dest::Ret);
-        }
-        if t == KILL {
-            return Ok(Dest::Kill);
         }
         if let Some(l) = lp {
             if t == l.header {
@@ -681,12 +676,6 @@ impl Emit<'_> {
             Dest::Ret => {
                 c.epilogue();
                 c.m.emit_void(op::RETURN, &[]);
-            }
-            Dest::Kill => {
-                if c.stage != Stage::Fragment {
-                    return bad("KILL outside a fragment shader");
-                }
-                c.m.emit_void(op::KILL, &[]);
             }
             Dest::Break(var, k, brk) => {
                 let v = c.m.c_u32(k);
