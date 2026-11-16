@@ -13,6 +13,7 @@
 #include <relift/settings.h>
 
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 enum { VI_TYPE_APPLICATION = 0, VI_TYPE_MANAGER = 1, VI_TYPE_SYSTEM = 2 };
@@ -126,9 +127,16 @@ hos_revent *vi_vsync_event(bool start)
     pthread_mutex_lock(&vsync_lock);
     if (!vsync_ev)
         vsync_ev = rl_hos_event_create();
-    if (start && !vsync_running && !vsync_quit && vsync_ev && pthread_create(&vsync_thread, NULL, vsync_main, NULL) == 0)
-        vsync_running = true;
     hos_revent *e = vsync_ev;
+    if (start && !vsync_running && !vsync_quit && e) {
+        int rc = pthread_create(&vsync_thread, NULL, vsync_main, NULL);
+        if (rc == 0) {
+            vsync_running = true;
+        } else {
+            rl_log(RL_LOG_ERROR, "vi", "cannot start the vsync thread: %s", strerror(rc));
+            e = NULL;
+        }
+    }
     pthread_mutex_unlock(&vsync_lock);
     return e;
 }
@@ -478,8 +486,10 @@ static rl_result vsync_event(rl_ipc_req *r, bool debug)
         s->vsync_taken[id] = true;
     }
     hos_revent *e = vi_vsync_event(true);
-    if (!e)
+    if (!e) {
+        s->vsync_taken[id] = false;
         return KR_OUT_OF_RESOURCE;
+    }
     return rl_ipc_push_copy(r, &e->obj);
 }
 

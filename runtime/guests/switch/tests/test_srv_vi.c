@@ -7,7 +7,10 @@
 #include "vi.h"
 #include "srv_link.h"
 
+#include <dlfcn.h>
+#include <errno.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -968,6 +971,37 @@ TEST(vi_vsync_grid_after)
     CHECK_EQ(vi_clock_after(&c, 1000 - VI_VSYNC_NS), 1000);
     CHECK_EQ(vi_clock_after(&c, 1000 - VI_VSYNC_NS - 1), 1000 - VI_VSYNC_NS);
     CHECK_EQ(vi_clock_after(&c, 1000 + 5 * VI_VSYNC_NS + 3), 1000 + 6 * VI_VSYNC_NS);
+}
+
+static int g_fail_threads;
+
+/** @brief Makes pthread_create fail while g_fail_threads is set, as a host at its task limit does. */
+int pthread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *arg)
+{
+    static int (*real)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+    if (g_fail_threads)
+        return EAGAIN;
+    if (!real)
+        *(void **)&real = dlsym(RTLD_NEXT, "pthread_create");
+    return real(t, a, fn, arg);
+}
+
+TEST(vi_vsync_event_errors_when_its_thread_cannot_start)
+{
+    fx f;
+    CHECK(fx_setup(&f, false));
+    rl_ctx *c = f.c;
+    tc_req q = tc_new(5202);
+    tc_put64(&q, 0);
+    g_fail_threads = 1;
+    tc_res r = tc_send(c, f.disp, q);
+    g_fail_threads = 0;
+    CHECK_EQ(r.result, KR_OUT_OF_RESOURCE);
+    CHECK_EQ(r.ncopy, 0);
+    r = tc_send(c, f.disp, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy, 1);
+    rl_vi_stop();
 }
 
 TEST(vi_vsync_signal)
