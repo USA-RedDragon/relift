@@ -153,6 +153,7 @@ pub mod glsl {
     pub const COS: u32 = 14;
     pub const EXP2: u32 = 29;
     pub const LOG2: u32 = 30;
+    pub const TANH: u32 = 21;
     pub const SQRT: u32 = 31;
     pub const INVERSE_SQRT: u32 = 32;
     pub const FMA: u32 = 50;

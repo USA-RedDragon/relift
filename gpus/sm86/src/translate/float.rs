@@ -1,5 +1,5 @@
-//! 32-bit float ALU: FADD, FMUL, FFMA with every rounding mode, MUFU,
-//! FMNMX, FSEL, FSETP, FSET and FRND.
+//! 32-bit float ALU: FADD, FMUL, FFMA with every rounding mode, FMNMX,
+//! FSEL, FSETP, FSET and FRND.
 //!
 //! SPIR-V has no per-instruction rounding mode for arithmetic, so RZ, RM
 //! and RP round to nearest and then step one ulp when the exact error says
@@ -40,7 +40,7 @@ pub(crate) fn round_of(i: &Inst) -> Round {
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
         "FADD" | "FMUL" | "FFMA" => arith(c, i),
-        "MUFU" => mufu(c, i),
+        "MUFU" => super::mufu::mufu(c, i),
         "FMNMX" => fmnmx(c, i),
         "FSEL" => fsel(c, i),
         "FSETP" => fsetp(c, i),
@@ -542,37 +542,6 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
         }
     };
     let r = c.sat(r, i.has("SAT"));
-    let u = c.as_bits(r);
-    c.store_dst(&i.ops[0], u)
-}
-
-fn mufu(c: &mut Ctx, i: &Inst) -> Res<()> {
-    if i.has("F16") {
-        return super::int::conv::mufu16(c, i);
-    }
-    let f = c.f32t();
-    let a = c.fsrc(&i.ops[1])?;
-    let kind = i.mods.first().copied().unwrap_or("");
-    if i.mods.len() > 1 {
-        return bad("MUFU modifiers");
-    }
-    let r = match kind {
-        "RCP" => {
-            let one = c.m.c_f32(1.0f32.to_bits());
-            c.m.emit(op::F_DIV, f, &[one, a])
-        }
-        "RSQ" => c.ext(f, glsl::INVERSE_SQRT, &[a]),
-        "SQRT" => c.ext(f, glsl::SQRT, &[a]),
-        "EX2" => c.ext(f, glsl::EXP2, &[a]),
-        "LG2" => c.ext(f, glsl::LOG2, &[a]),
-        "SIN" | "COS" => {
-            let k = c.m.c_f32(std::f32::consts::TAU.to_bits());
-            let x = c.m.emit(op::F_MUL, f, &[a, k]);
-            c.ext(f, if kind == "SIN" { glsl::SIN } else { glsl::COS }, &[x])
-        }
-        "TANH" => c.ext(f, 21, &[a]),
-        k => return bad(format!("MUFU.{k}")),
-    };
     let u = c.as_bits(r);
     c.store_dst(&i.ops[0], u)
 }

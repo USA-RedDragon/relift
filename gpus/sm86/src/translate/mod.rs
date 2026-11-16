@@ -11,6 +11,7 @@ mod float;
 mod int;
 mod io;
 mod mem;
+mod mufu;
 mod tex;
 
 pub use tex::{
@@ -94,6 +95,15 @@ pub struct Interface {
     pub kills: bool,
 }
 
+/// Translation options.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// Build MUFU RCP, RSQ, SQRT, EX2 and LG2 from the integer model of the
+    /// SM86 unit instead of the GLSL operations, which only the NVIDIA driver
+    /// lowers to the same results (see the `mufu` module).
+    pub exact_mufu: bool,
+}
+
 /// A translated program.
 pub struct Shader {
     pub stage: Stage,
@@ -152,6 +162,7 @@ pub(crate) struct Ctx {
     pub io: io::State,
     /// Function-scope `u32` variables beyond the registers, zeroed at entry.
     pub locals: Vec<u32>,
+    pub exact_mufu: bool,
 }
 
 impl Ctx {
@@ -548,8 +559,14 @@ fn decode_all(p: &Program) -> Res<Code> {
     })
 }
 
-/// Translates one program to a SPIR-V module with one entry point `main`.
+/// Translates one program to a SPIR-V module with one entry point `main`,
+/// with the default [`Options`].
 pub fn translate(p: &Program) -> Res<Shader> {
+    translate_with(p, &Options::default())
+}
+
+/// Translates one program to a SPIR-V module with one entry point `main`.
+pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     let stage = p.stage();
     if !matches!(stage, Stage::Vertex | Stage::Fragment | Stage::Compute) {
         return bad(format!("stage {stage:?}"));
@@ -581,6 +598,7 @@ pub fn translate(p: &Program) -> Res<Shader> {
         tex: tex::Prep::new(&code.insts, &code.words),
         io: io::State::default(),
         locals: Vec::new(),
+        exact_mufu: o.exact_mufu,
     };
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);

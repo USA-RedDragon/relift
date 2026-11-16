@@ -1,5 +1,5 @@
 use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::{Interp, translate};
+use relift_gpu_sm86::translate::{Interp, Options, translate, translate_with};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -240,6 +240,49 @@ fn directed_rounding_translates() {
             "{text:?}"
         );
         translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    }
+}
+
+#[test]
+fn mufu_forms_translate_with_and_without_the_model() {
+    const F_DIV: u32 = 136;
+    let names = [
+        "COS", "SIN", "EX2", "LG2", "RCP", "RSQ", "RCP64H", "RSQ64H", "SQRT", "TANH",
+    ];
+    for (k, name) in names.iter().enumerate() {
+        for half in [false, true] {
+            let mut b = Vec::new();
+            b.extend(word(
+                0x108,
+                1,
+                &[
+                    (16, 8, 4),
+                    (32, 8, 5),
+                    (74, 6, k as u64),
+                    (73, 1, u64::from(half)),
+                ],
+            ));
+            exit_and_halt(&mut b);
+            let p = Program::parse(&b);
+            let shown = text(&p)[0].clone();
+            let want = format!("MUFU.{name}{}", if half { ".F16" } else { "" });
+            assert!(shown.starts_with(&want), "{shown}");
+            for exact_mufu in [false, true] {
+                let r = translate_with(&p, &Options { exact_mufu });
+                if half && name.ends_with("64H") {
+                    assert!(r.is_err(), "{want}");
+                    continue;
+                }
+                let s = r.unwrap_or_else(|e| panic!("{want}: {e}"));
+                header_ok(&s.spirv);
+                dump(&format!("mufu_{name}_{half}_{exact_mufu}"), &s.spirv);
+                assert_eq!(
+                    spirv_has(&s.spirv, F_DIV),
+                    *name == "RCP" && !exact_mufu,
+                    "{want} exact {exact_mufu}"
+                );
+            }
+        }
     }
 }
 

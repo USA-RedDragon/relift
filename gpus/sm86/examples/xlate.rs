@@ -1,11 +1,18 @@
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate;
+use relift_gpu_sm86::translate::{Options, translate_with};
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut o = Options::default();
+    let args: Vec<String> = std::env::args()
+        .filter(|a| {
+            let flag = a == "--exact-mufu";
+            o.exact_mufu |= flag;
+            !flag
+        })
+        .collect();
     let b = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("{}: {e}", args[1]));
     let p = Program::parse(&b);
-    match translate(&p) {
+    match translate_with(&p, &o) {
         Ok(s) => {
             let bytes: Vec<u8> = s.spirv.iter().flat_map(|w| w.to_le_bytes()).collect();
             if let Some(out) = args.get(2) {
