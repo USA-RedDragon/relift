@@ -273,12 +273,14 @@ Reasons:
 ## 4. Lifted function signature
 
 ```c
-int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
+uint64_t F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
 ```
 
-- Return `RL_OK` (0) for a normal return, `RL_PENDING` (1) when `c->pend`
-  says the host stack must unwind (guest exception, thread exit, process
-  exit). Reason: the exceptions prototype measured the check after a call at below noise on
+- Return `RL_PENDING` (1) when `c->pend` says the host stack must unwind
+  (guest exception, thread exit, process exit). A normal return gives
+  `RL_OK` (0) on a CPU without a link register, and on A64 the guest
+  address the RET went to, which the call site compares with the call's
+  return address (section 5.4). Reason: the exceptions prototype measured the check after a call at below noise on
   both hosts (one `test/jne` or `cbnz`), against 0.4 to 3.4 ns per entry for
   setjmp. Thread and process exit reuse the same path so the runtime never
   longjmps over lifted frames. [verified: exceptions prototype; exit reuse inferred]
@@ -347,9 +349,8 @@ no one function or file grows past what clang can compile in a few GB.
 - Landing pads: every piece of a function with resume points has its own
   `lp_dispatch`, which reaches a resume point in another piece by the same
   transfer.
-- Return check (section 5.4): the stub stores x30 into `c->ra`, each piece
-  reads it into its `rl_ra` local, and each transfer stores it back before
-  the tail call, since a split callee's stub may have overwritten it.
+- Returns (section 5.4): a piece returns its RET's target like any
+  function, so the pieces carry nothing between them.
 - Pieces go in shards of their own (`emit.shard-kib`, 4 MiB by default, the
   byte budget for every shard).
 - **Maps.** Every piece has its own `rl_fn_info` in the map of the shard
@@ -555,73 +556,55 @@ reads. [verified: `core/emit/src/callee/tests.rs`, the libnx corpus]
 
 ## 5.4 Returns
 
-A lifted function returns `RL_OK` only when its RET goes where its caller
-expects: to x30 as it was at the function's entry. Any other target
-continues there through the runtime, as on the console. So a return
+An A64 lifted function returns the guest address its RET went to, and a
+call site goes on only when that is the call's return address. Any other
+target continues there through the runtime, as on the console. So a return
 address that the guest rewrote (longjmp-style code, user-mode context
 switches, a game patching its saved x30), one that was tampered with, or
 one whose pointer authentication failed behaves as it does on hardware,
 whichever RET form it is (RET, RET Xn, RETAA, RETAB, AUTIBSP then RET).
-[verified: `e2e_ret`, emitter unit tests]
+[verified: `e2e_ret`, `e2e_pac`, emitter and runtime unit tests]
 
-- **The expected address is x30 at entry.** `BL` and `BLR` set x30 to the
-  call's return address, and the call site continues at that address after
-  `RL_OK`. A tail call does not change x30, so its target inherits the
-  expectation. A runtime caller sets x30 to its own value (0 for a thread
-  entry). PACIASP/PACIBSP sign x30 after entry, and RETAA/RETAB or
-  AUTIBSP authenticate it back, so a signed return compares unsigned.
-- **The fast path:**
+- **The return value.** `rl_fn` returns `uint64_t` (section 4). A return
+  is `return <the RET target>;` after the stores of the dirty registers. A
+  host function with the lifted ABI (an override, a Vulkan thunk, `memcpy`)
+  returns `rl_arm64_ret(c)`, which is x30. `RL_PENDING` (1) means a pending
+  record is set; it is told apart from a RET to address 1 by `pend.kind`,
+  which is `RL_PEND_NONE` whenever no record is pending, so a RET to 1 is
+  a return to 1 (and faults there, as on the console). Other CPUs keep
+  `RL_OK` (0) and `RL_PENDING` in the wider type.
+- **The call site:**
 
   ```c
-  uint64_t rl_to = <the RET target>;
-  <stores of the dirty registers>
-  if (RL_LIKELY(rl_to == rl_ra))
-      return RL_OK;
-  return rl_arm64_ret_far(c, rl_to, UINT64_C(<pc of the RET>));
+  rc = F(c, mem);
+  if (RL_UNLIKELY(rc != UINT64_C(<return address>)))
+      return rl_arm64_ret_elsewhere(c, rc, UINT64_C(<pc of the call>));
   ```
 
-  `rl_ra` is a `const` local set from x30 at entry with `RL_LOAD_LINK`.
-  `rl_arm64_ret_far` is inline and makes no call, so a function that
-  returns through it can still be inlined.
-- **Proven returns have no check.** The emitter drops the check of a RET
-  whose target is, by register dataflow inside the function, x30 as it was
-  at entry with no write between: no BL or BLR, no load into x30, no move
-  to it, no PAC or AUT on the way. Only registers are followed, never
-  memory: once x30 is spilled to the stack, any store (the function's own,
-  through a pointer, or a callee's) can rewrite the slot, and on the
-  console that changes the return, so a reload is never proven. That leaves
-  leaves and other functions that keep x30 in its register. A commercial game: 38.9%
-  of the returns in its hot shards are proven (49345 of 126888); a Switch 2
-  game's four modules, 50.1% (64449 of 128632). Neither proves any return
-  in its cold code (124652 and 125184). [open: why cold code proves none]
-- **The entry load is alone on AArch64 hosts.** `RL_LOAD_LINK` is a relaxed
-  atomic load there. As a plain load clang pairs it with the load of the
-  next context field (`ldp x22, x8, [x0, #240]`, x30 and sp), and the
-  caller has just written those two fields with separate stores: a load
-  pair spanning two stores misses store-to-load forwarding on the M2 and
-  stalls every call (0.2 to 0.4 ns per call with the pair split by hand,
-  against 1.9 ns). On other hosts it is a plain load, which clang forwards from the
-  caller's store once it inlines the callee, so the compare folds away.
-- **Tail transfers** (a `B` or `BR` that leaves the function) in a
-  function that writes x30 check it first:
-  `if (RL_UNLIKELY(x30 != rl_ra)) return rl_arm64_jump_far(c, mem, F);`
-  before the `RL_MUSTTAIL` call. libnx's crt0 does this (`mov x30, exit;
-  b main`). `rl_arm64_jump_far` calls the target, whose return then goes to
-  the current x30, and continues there as a redirect. A call, not a
-  redirect to the target, keeps the host frames below it, so a libgcc-style
-  unwinder's `br` to a landing pad, which also runs with a foreign x30,
-  still finds the pad's frame (section 7).
-- **The redirect.** `rl_arm64_ret_far` records
-  `{RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}` and returns
-  `RL_PENDING`. No landing-pad check matches `RL_SP_NONE`, so every host
-  frame returns, and `rl_call_guest` (the thread entry and every runtime
-  call into guest code) continues at the target in a fresh host frame,
-  with the state the RET stored. A function entered that way that returns
-  normally went to the x30 it was entered with, so `rl_call_guest`
-  continues there; it returns to its own caller when a return or redirect
-  reaches the x30 it was called with. The Switch thread entry is
-  `rl_call_guest` with x30 = 0; it used to continue at `c->x[30]` after a
-  return, which is wrong after RETAA/RETAB (they leave x30 signed).
+  The same line replaces the pending check that followed every call (the
+  compare is against an immediate instead of zero), so a call site costs
+  what it did before the check existed. With landing pads the slow path
+  calls `rl_arm64_ret_elsewhere` and then runs the usual pad check.
+  Traps, guard slow paths and the other runtime helpers still return
+  `RL_OK` or `RL_PENDING` and keep the plain pending check.
+- **Nothing in the callee.** The expected address is a constant of the call
+  site, so the callee keeps no copy of x30 of entry: no entry load, no
+  callee-saved host register across its calls, no compare at its returns
+  and none at its tail transfers. A tail transfer (`B`, `BR` out of the
+  function, crt0's `mov x30, exit; b main`) is a plain `RL_MUSTTAIL` call
+  whose callee's return value goes up unchanged, so a foreign x30 at a tail
+  transfer needs no check either: whatever the last RET goes to is what
+  the call site sees. Split functions need nothing in the context.
+- **The redirect.** `rl_arm64_ret_elsewhere` (inline, no calls) passes a
+  pending callee up, and otherwise records
+  `{RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}` with `c->pc` = the
+  call and returns `RL_PENDING`. No landing-pad check matches
+  `RL_SP_NONE`, so every host frame returns, and `rl_call_guest` (the
+  thread entry and every runtime call into guest code) continues at the
+  target in a fresh host frame, with the state the RET stored. It returns
+  to its own caller when a function it entered returns to, or a redirect
+  reaches, the x30 it was called with. The Switch thread entry is
+  `rl_call_guest` with x30 = 0.
 - **The target needs a dispatch entry.** A redirect target is looked up
   like a computed jump: in a dev build a missing one is lifted and
   hot-loaded (section 6); in a shipped build it is missed code. The return
@@ -629,47 +612,87 @@ whichever RET form it is (RET, RET Xn, RETAA, RETAB, AUTIBSP then RET).
 - **A non-canonical target** (a bit set at or above the guest's virtual
   address size, 39 bits by default; the Switch layer sets it from the
   address space it lays out with `rl_arm64_set_va_bits`; no top-byte ignore
-  for instruction addresses) is an instruction abort: `rl_arm64_ret_far` and
-  `rl_dispatch_miss` report it with `rl_guest_fatal`, naming the target
-  (and the RET's pc) and that a failed pointer authentication gives such an
-  address. That is how the console ends a failed authenticated return
-  without FPAC: the authenticated value has an error code in its top bits
-  and the fetch faults.
-- **Split functions** carry the expected address in `c->ra` (section 4).
+  for instruction addresses) is an instruction abort: `rl_call_guest` and
+  `rl_dispatch_miss` report it with `rl_guest_fatal`, naming the target,
+  the call it returned from (or the function `rl_call_guest` entered) and
+  that a failed pointer authentication gives such an address. That is how
+  the console ends a failed authenticated return without FPAC: the
+  authenticated value has an error code in its top bits and the fetch
+  faults.
 - **Other CPUs.** The check is the frontend's `return_link`; only A64 has
   one so far. The WebAssembly emitter (section 15) does not check returns
   yet.
-- **Cost:** a compare and a branch at each return, a compare at each tail
-  transfer of a function that writes x30, and one more callee-saved host
-  register in a function that calls, which keeps x30 of entry live across
-  the calls. Measured against the same C with the checks removed (code
-  bytes of `.text` and `relift_text`, clang -O2):
+- **Why not check in the callee.** The first design compared the target
+  with x30 of entry in the callee (`if (rl_to == rl_ra) return RL_OK;`).
+  That kept x30 of entry live across every call the function makes, so a
+  function that calls needed one more callee-saved host register (push,
+  pop, a move) besides the load, compare and branch, and every tail
+  transfer of a function that writes x30 needed a compare too. On a commercial game
+  that was +2.84% instructions per frame on the render thread (x86-64,
+  12.835M against 12.835M + 0.364M). Here the only cost is the width of the
+  compare: on x86-64 `cmp rax, imm32` replaces `test eax, eax` (the return
+  addresses fit in 32 bits), and the callee's `xor eax, eax` becomes a move
+  of the target, which is usually in a register already. On AArch64 the
+  immediate does not fit a compare, so the call site builds it (`mov`,
+  `movk`) and compares (`cmp`, `b.ne`) where it had one `cbnz`: two or
+  three instructions per call, against the entry load, the callee-saved
+  register and the compare of the first design.
+- **Cost.** On x86-64 the fast path of a call site is the code without any
+  check but for `cmp rax, imm32` in place of `test rax, rax` (a game's
+  `OpCodes::~OpCodes`: the same instructions on the path through its call
+  and tail call, where the callee check added 8: a callee-saved register
+  pushed and popped with its stack alignment slot, a move, a second load
+  of x30 and the compare and branch before the tail call). The slow path is out of line and cold
+  (`rl_arm64_ret_elsewhere` is a call, not inline), about 2.8 instructions
+  per call site at the end of the function (the call's address, the
+  arguments, a copy of the epilogue). Static instructions of a game's hot
+  shards (clang 23 -O2, x86-64), against the same emitter without any
+  check:
 
-  | code | size |
-  |---|---|
-  | libnx `dispatch` (494 functions, 665 returns, 108 checked tail transfers) | +1.5% (+2.1% against de334d43) |
-  | five more libnx programs, against de334d43 | +1.6% to +2.7% |
-  | A commercial game, 53 of its shards (6503 functions) | +0.6% (game module +0.3%, nnSdk +1.5%, opengl +0.8%) |
+  | module | callee check | call-site check |
+  |---|---|---|
+  | game (31,793 functions, 185,051 call sites) | +0.93% | +1.51% |
+  | nnSdk (34,687 functions, 79,939 call sites) | +4.03% | +3.08% |
 
-  Time, from a guest program that calls a 16-deep chain of functions that
-  save x30 and return, 100 million times (1.6 billion calls and returns),
-  each function in a shard of its own so clang inlines none of them:
+  The game module grows more than before because its callee checks were
+  dropped where x30 provably kept its entry value, and every call site now
+  has its slow path.
 
-  | host | no check | first design (paired entry load, far return a call) | now |
+  Whole game: a commercial game's gameplay at 60 fps on x86-64 (i9-11900KF, clang
+  23.1.3, headless on an RTX 3070), perf `instructions:u` and `cycles:u`
+  of the render thread over 60 s from guest frame 15200, three runs each,
+  alternating, host load average 1.1 to 1.2 (6.6 for the first main run):
+
+  | build | render instructions per frame | render cycles per frame | `relift_text` |
   |---|---|---|---|
-  | Linux x86-64 (Ryzen 9 7950X, clang 23, loaded host), cycles | 3.77e10 | 3.93e10 | 3.90e10 (+3.3%) |
-  | macOS arm64 (Apple M2, Apple clang 21), user s | 4.8 to 5.4 | 8.5 | 5.4 to 5.8 (+6% to +12%, about 0.3 ns per call) |
+  | no check (main) | 12.844M, 12.832M, 12.830M (mean 12.835M) | 5.675M, 5.693M, 5.577M | 85,166,288 bytes |
+  | callee check | 13.199M (+2.84%) | within noise of main | +1.93% |
+  | call-site check | 12.869M, 12.861M, 12.859M (mean 12.863M, +0.22%) | 5.696M, 5.774M, 5.720M (+1.4% on the means; the spread of earlier runs was 5.17M to 5.83M) | 86,134,720 bytes (+1.14%) |
 
-  With the chain in one shard clang inlines it. On x86-64 the check then
-  folds away and the chain takes 2.14e9 cycles (1.22e10 with the atomic
-  load).
-  On the M2 the atomic entry load is not forwarded, so the inlined chain
-  keeps its checks and pending checks: 3.4 to 3.9 s against 0.7 to 0.8 s
-  without checks (the first design 4.6 s). Code that calls anything that
-  can be pending (a system call, an indirect call) has pending checks
-  anyway. [open: an AArch64 entry load that is neither paired nor opaque
-  to the inliner] [verified: measurements above; the cost on a whole game's
-  run time is not measured yet]
+  A guest program that calls a 16-deep chain of functions that save x30
+  and return, 100 million times (1.6 billion calls and returns), each
+  function in a shard of its own so clang inlines none of them (`sep`), and
+  all of them in one shard (`one`):
+
+  | host | no check | callee check | call-site check |
+  |---|---|---|---|
+  | x86-64 (Ryzen 9 7950X, clang 23), `sep`, user instructions | 49.33e9 | 58.63e9 | 49.23e9 |
+  | x86-64, `one`, user instructions | 12.50e9 | 31.90e9 | 32.30e9 |
+  | AArch64 (Apple M2, Apple clang 21), `sep`, user s | 2.62 | 7.45 | 3.01 |
+  | AArch64, `one`, user s | 0.93 | 4.10 | 2.15 |
+
+  On the M2 the call site keeps its return address in a callee-saved
+  register across the call (one more `stp`/`ldp` pair) and compares with
+  `cmp`/`b.ne` where it had `cbnz`: about 0.25 ns per call in `sep`. The
+  callee check's relaxed atomic entry load is gone with the check, so
+  nothing is opaque to the inliner any more. The inlined chain (`one`)
+  still keeps the compare of each call site where no check had none: a
+  callee that reloads x30 from the guest stack after a call returns a value
+  clang cannot prove is the address the caller stored, as the call could
+  have changed the slot (on the console it would change the return), while
+  without any check the inlined callee returned the constant `RL_OK` and
+  the pending checks folded away. [open: a whole game on AArch64; the M2 numbers are from a host whose disk was full, so only the
+  two builds above were remade]
 
 ## 6. Missed code
 
@@ -958,7 +981,7 @@ host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
   same overrides). The build registers them as `RL_FN_OVERRIDE` entries at
   the guest symbols' addresses; `longjmp` also carries `RL_FN_MAY_UNWIND`.
   - `rl_arm64_setjmp` stores x19 to x30, sp and d8 to d15 (`v[8..15].d[0]`)
-    into the jmp_buf at guest address x0 and returns `RL_OK` with x0 = 0.
+    into the jmp_buf at guest address x0 and returns x30 with x0 = 0.
     The buffer is guest memory, so guest code that reads or copies it sees
     what the guest's own `setjmp` would have written.
   - `rl_arm64_longjmp` reads that buffer, sets x0 to w1 (1 when w1 is 0,
@@ -1004,7 +1027,7 @@ thread the SDK's `__memcpy_device` alone was 7.6% of the samples and
 
 - **Overrides.** `rl_arm64_memmove` (x0 = dst, x1 = src, x2 = n) and
   `rl_arm64_memset` (x0 = dst, x1 = value, x2 = n) have the lifted signature,
-  return `RL_OK`, leave every register but the ones a call may change as
+  return x30 (section 5.4), leave every register but the ones a call may change as
   they were, and do `memmove` and `memset` on `mem + x`. The build registers
   them as `RL_FN_OVERRIDE` entries (not `RL_FN_MAY_UNWIND`) at the guest
   routine's address.
@@ -1912,6 +1935,13 @@ is not in.
   912 (in padding, so `sizeof(rl_ctx)` stays 960), `rl_arm64_ret_far`,
   `rl_arm64_jump_far` and `RL_LIKELY`, which emitted code now calls, and the
   `RL_PEND_REDIRECT` records lifted A64 code raises.
+- Version 7 moved the check to the call site (section 5.4): `rl_fn` returns
+  `uint64_t`, an A64 function returns its RET's target and a host function
+  with the lifted ABI x30 (`rl_arm64_ret`), each call site compares that
+  with its return address and calls `rl_arm64_ret_elsewhere` otherwise.
+  `rl_ctx.ra`, `RL_LOAD_LINK`, `rl_arm64_ret_far` and `rl_arm64_jump_far`
+  are gone (offset 912 is padding again); `RL_PENDING` now always comes
+  with a pending record, which is how it is told from a RET to address 1.
 
 ## 13. Hardware-register guests
 
