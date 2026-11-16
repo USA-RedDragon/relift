@@ -2158,6 +2158,10 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   for this guest yet. A transfer from one run to another is always a
   computed one, through dispatch, so the other run's check sees the bytes
   that are there when it runs.
+- `RELIFT_N64_TRACE=PATH` (a development aid, off by default) records
+  every lifted call site's first VI frame and cycle, its count and its last
+  frame, and writes them to PATH at exit in the order of first call, for a
+  diff against an emulator's executed-address trace.
 
 ### The RSP
 

@@ -24,6 +24,7 @@
 #include "cpu.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static rl_n64_run *g_run;
@@ -138,6 +139,83 @@ static int entry_check(rl_ctx *c, uint8_t *mem)
         snprintf(why, sizeof why, "the lifted run at 0x%08x has no function there", (uint32_t)c->pc);
     dump_rdram(g_run);
     return rl_guest_fatal(c, "n64", "missed code: %s", why);
+}
+
+/** @brief A call site the trace saw: its return address, the VI frame and cycle of its first call, its calls and the frame of its last. */
+typedef struct trace_site {
+    uint64_t ret;
+    uint64_t frame;
+    uint64_t cycle;
+    uint64_t count;
+    uint64_t last;
+} trace_site;
+
+static struct {
+    trace_site *sites;
+    size_t cap;
+    size_t count;
+    const char *path;
+} g_trace;
+
+static void trace_call(rl_ctx *c, uint64_t ret)
+{
+    size_t mask = g_trace.cap - 1u;
+    size_t i = (size_t)((ret >> 2) * UINT64_C(0x9E3779B97F4A7C15) >> 32) & mask;
+    while (g_trace.sites[i].ret) {
+        if (g_trace.sites[i].ret == ret) {
+            g_trace.sites[i].count++;
+            g_trace.sites[i].last = rl_n64_get_stats(machine(c))->frames;
+            return;
+        }
+        i = (i + 1u) & mask;
+    }
+    if (g_trace.count * 2u >= g_trace.cap)
+        return;
+    uint64_t frame = rl_n64_get_stats(machine(c))->frames;
+    g_trace.sites[i] = (trace_site){ret, frame, rl_sched_now(g_run->k), 1, frame};
+    g_trace.count++;
+}
+
+static int by_cycle(const void *a, const void *b)
+{
+    const trace_site *x = a, *y = b;
+    return x->cycle < y->cycle ? -1 : x->cycle > y->cycle;
+}
+
+void rl_n64_trace_calls(const char *path)
+{
+    g_trace.cap = (size_t)1 << 20;
+    g_trace.sites = calloc(g_trace.cap, sizeof *g_trace.sites);
+    if (!g_trace.sites)
+        return;
+    g_trace.path = path;
+    rl_mips_call_trace = trace_call;
+}
+
+void rl_n64_trace_write(void)
+{
+    if (!g_trace.sites)
+        return;
+    rl_mips_call_trace = NULL;
+    size_t n = 0;
+    for (size_t i = 0; i < g_trace.cap; i++)
+        if (g_trace.sites[i].ret)
+            g_trace.sites[n++] = g_trace.sites[i];
+    qsort(g_trace.sites, n, sizeof *g_trace.sites, by_cycle);
+    FILE *f = fopen(g_trace.path, "w");
+    if (!f) {
+        rl_log(RL_LOG_ERROR, "n64", "could not write %s", g_trace.path);
+        return;
+    }
+    fprintf(f, "call\tframe\tcycle\tcount\tlast_frame\n");
+    for (size_t i = 0; i < n; i++) {
+        const trace_site *t = &g_trace.sites[i];
+        fprintf(f, "0x%08x\t%llu\t%llu\t%llu\t%llu\n", (uint32_t)(t->ret - 8u), (unsigned long long)t->frame,
+                (unsigned long long)t->cycle, (unsigned long long)t->count, (unsigned long long)t->last);
+    }
+    fclose(f);
+    free(g_trace.sites);
+    g_trace.sites = NULL;
 }
 
 static uint64_t rsp_run(void *user, uint32_t *pc, uint64_t from, uint64_t to)

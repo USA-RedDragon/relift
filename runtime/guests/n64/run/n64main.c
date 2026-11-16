@@ -242,6 +242,7 @@ static void finish(host *H)
     save_now(H);
     if (H->stats)
         print_stats(H);
+    rl_n64_trace_write();
 }
 
 static void on_check(void *user, rl_ctx *c)
@@ -339,6 +340,9 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
         return 1;
     }
     H.run.dump = H.dump;
+    const char *trace = getenv("RELIFT_N64_TRACE");
+    if (trace && *trace)
+        rl_n64_trace_calls(trace);
     char why[256];
     if (rl_n64_run_rsp(&H.run, p->rsp, p->rsp_count, why, sizeof why) != 0) {
         fprintf(stderr, "relift-n64: %s\n", why);

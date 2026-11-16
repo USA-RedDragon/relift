@@ -51,4 +51,13 @@ void rl_n64_run_free(rl_n64_run *r);
 /** @brief Runs the CPU from the entry point. Returns RL_OK or RL_PENDING. */
 int rl_n64_run_start(rl_n64_run *r);
 
+/**
+ * @brief Records the first VI frame and cycle of every lifted call site
+ * from now on (a development trace); rl_n64_trace_write writes them to path,
+ * one call per line in the order of their first call.
+ */
+void rl_n64_trace_calls(const char *path);
+/** @brief Writes the call trace, if one runs, and stops it. */
+void rl_n64_trace_write(void);
+
 #endif

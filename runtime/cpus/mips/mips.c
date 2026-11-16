@@ -15,6 +15,8 @@
 static rl_mips_stats g_stats;
 static rl_mips_cache_hook *g_cache_hook;
 
+void (*rl_mips_call_trace)(rl_ctx *c, uint64_t ret);
+
 rl_mips_stats *rl_mips_get_stats(void) { return &g_stats; }
 
 void rl_mips_set_cache_hook(rl_mips_cache_hook *hook) { g_cache_hook = hook; }
