@@ -271,7 +271,20 @@ RL_RUNTIME_API void rl_n64_set_dp_submit(rl_n64 *m, rl_n64_dp_submit *hook, void
 /** @brief The RDP side took the commands up to current; busy says whether it still works on them. */
 RL_RUNTIME_API void rl_n64_dp_progress(rl_n64 *m, uint32_t current, bool busy);
 
-/** @brief The memory side of the boot the boot variant cic (6101 to 8303; 0 boots as 6102) does: see rl_n64_boot. */
+/**
+ * @brief What the PIF's boot (IPL1 and IPL2 in the PIF ROM, which relift
+ * does not have) leaves in the machine when it starts the CPU at the
+ * cartridge's boot code: the first 4 KiB of the ROM in DMEM (which binds the
+ * boot code's runs there), the PI domain 1 timing from the ROM header's
+ * first word, and the RI registers it sets. The boot code then runs as
+ * lifted code: it loads the game with a PI DMA, checks it, writes the boot
+ * words at 0x80000300 and jumps to the entry. The CPU registers are the run
+ * layer's. Returns false, and does nothing, when the program has no lifted
+ * boot code (a boot variant not known by its hash).
+ */
+RL_RUNTIME_API bool rl_n64_pif_boot(rl_n64 *m);
+
+/** @brief The boot variant cic (6101 to 8303; 0 boots as 6102) and the entry point of the high-level boot (rl_n64_boot). */
 typedef struct rl_n64_boot_info {
     /** @brief The boot variant. */
     uint32_t cic;
@@ -280,15 +293,17 @@ typedef struct rl_n64_boot_info {
 } rl_n64_boot_info;
 
 /**
- * @brief The high-level boot: no boot code runs. Sets what the console's
- * boot leaves in memory and in the RCP: the ROM header and boot area in
- * DMEM, the first MiB of the game from ROM offset 0x1000 at the entry
- * point (as a PI DMA, which binds the code there), the PI domain 1 timing
- * from the header, the RI registers, and the RDRAM size word at 0x80000318
- * (0x800003F0 for 6105) with the other boot words at 0x80000300. The CPU
- * registers are the run layer's.
+ * @brief The high-level boot, for a program without lifted boot code: no
+ * boot code runs. Sets what the PIF's boot and the boot code leave in
+ * memory and in the RCP: the PIF's part (rl_n64_pif_boot), the first MiB of
+ * the game from ROM offset 0x1000 at the entry point (as a PI DMA, which
+ * binds the code there), and the RDRAM size word at 0x80000318 (0x800003F0
+ * for 6105) with the other boot words at 0x80000300. The CPU registers are
+ * the run layer's.
  */
 RL_RUNTIME_API void rl_n64_boot(rl_n64 *m, const rl_n64_boot_info *b);
+/** @brief Whether the console is a PAL one (from the ROM header's region byte). */
+RL_RUNTIME_API bool rl_n64_is_pal(const rl_n64 *m);
 
 /**
  * @brief Gives the machine the program's units and code runs. Reserves the
@@ -311,5 +326,9 @@ RL_RUNTIME_API void rl_n64_code_set_stub(rl_n64 *m, rl_fn entry_stub);
 RL_RUNTIME_API void rl_n64_code_loaded(rl_n64 *m, uint32_t source, uint32_t offset, uint32_t dram, uint32_t len);
 /** @brief RDRAM [paddr, paddr + len) changed or its instruction cache lines were invalidated: runs there are checked again at their next entry. */
 RL_RUNTIME_API void rl_n64_code_written(rl_n64 *m, uint32_t paddr, uint32_t len);
+/** @brief SP memory [offset, offset + len) changed: boot code runs there are checked again at their next entry. */
+RL_RUNTIME_API void rl_n64_code_sp_written(rl_n64 *m, uint32_t offset, uint32_t len);
+/** @brief The function in SP memory's own dispatch slot of kseg1 address pc (code the boot runs there), or NULL. */
+RL_RUNTIME_API rl_fn rl_n64_code_sp_slot(rl_n64 *m, uint64_t pc);
 
 #endif

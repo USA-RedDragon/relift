@@ -1,8 +1,8 @@
 /**
  * @file machine.c
  * @brief The physical memory map and the registers of MI, RI, the RDRAM
- * modules and AI, and the high-level boot (the SP and DP registers are
- * sp.c's, SI and the PIF are si.c's and pif.c's).
+ * modules and AI, and what the PIF's boot leaves (the SP and DP registers
+ * are sp.c's, SI and the PIF are si.c's and pif.c's).
  *
  * Every register is a word; a narrower access reads the word and takes its
  * bytes, and a narrower write writes its bytes shifted into the word as the
@@ -77,6 +77,7 @@ void rl_n64_destroy(rl_n64 *m)
         rl_n64_cart_detach(m);
     }
     free(m->code.state);
+    free(m->code.sp_runs);
     free(m->code.order);
     free(m->code.filled);
     free(m->rdram);
@@ -205,6 +206,7 @@ static void write_word(rl_n64 *m, uint32_t a, uint32_t v)
     }
     if (a >= 0x04000000u && a < 0x04040000u) {
         st32(m->spmem + (a & 0x1FFCu), v);
+        rl_n64_code_sp_written(m, a & 0x1FFCu, 4);
         if (a & 0x1000u)
             rl_n64_imem_written(m, a & 0xFFCu, 4);
         return;
@@ -281,10 +283,37 @@ void rl_n64_write(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t value)
     write_word(m, paddr & ~3u, (uint32_t)value << shift);
 }
 
-void rl_n64_boot(rl_n64 *m, const rl_n64_boot_info *b)
+bool rl_n64_is_pal(const rl_n64 *m) { return m->pal; }
+
+/** @brief What the PIF's boot leaves before the boot code runs: the ROM's first 4 KiB in DMEM, the PI domain 1 timing from the header and the RI registers. */
+static void pif_state(rl_n64 *m)
 {
     size_t head = m->rom_len < 0x1000u ? m->rom_len : 0x1000u;
     memcpy(m->spmem, m->rom, head);
+    rl_n64_code_loaded(m, 0, 0, 0x04000000u, (uint32_t)head);
+    if (m->rom_len >= 4) {
+        m->pi.bsd[0].latency = m->rom[3];
+        m->pi.bsd[0].pulse_width = m->rom[2];
+        m->pi.bsd[0].page_size = m->rom[1] & 0xFu;
+        m->pi.bsd[0].release = (m->rom[1] >> 4) & 3u;
+    }
+    m->ri.regs[0] = 0x0Eu;
+    m->ri.regs[1] = 0x40u;
+    m->ri.regs[3] = 0x14u;
+    m->ri.regs[4] = 0x00063634u;
+}
+
+bool rl_n64_pif_boot(rl_n64 *m)
+{
+    if (!m->code.sp_count)
+        return false;
+    pif_state(m);
+    return true;
+}
+
+void rl_n64_boot(rl_n64 *m, const rl_n64_boot_info *b)
+{
+    pif_state(m);
     uint32_t dram = b->entry & 0x1FFFFFFFu;
     uint32_t len = 0x100000u;
     if (m->rom_len < 0x1000u)
@@ -298,16 +327,6 @@ void rl_n64_boot(rl_n64 *m, const rl_n64_boot_info *b)
     m->pi.dram = (dram + len) & 0xFFFFFEu;
     m->pi.cart = 0x10001000u + len;
     m->pi.wr_len = 0x7Fu;
-    if (m->rom_len >= 4) {
-        m->pi.bsd[0].latency = m->rom[3];
-        m->pi.bsd[0].pulse_width = m->rom[2];
-        m->pi.bsd[0].page_size = m->rom[1] & 0xFu;
-        m->pi.bsd[0].release = (m->rom[1] >> 4) & 3u;
-    }
-    m->ri.regs[0] = 0x0Eu;
-    m->ri.regs[1] = 0x40u;
-    m->ri.regs[3] = 0x14u;
-    m->ri.regs[4] = 0x00063634u;
     uint32_t tv = m->rom_len > 0x3E && (m->rom[0x3E] == 'P' || m->rom[0x3E] == 'D' || m->rom[0x3E] == 'F' ||
                                         m->rom[0x3E] == 'I' || m->rom[0x3E] == 'S' || m->rom[0x3E] == 'U' ||
                                         m->rom[0x3E] == 'X' || m->rom[0x3E] == 'Y')

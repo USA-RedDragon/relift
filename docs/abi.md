@@ -2169,6 +2169,23 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   register open a host frame (`rl_mips_call`).
 - MI's interrupt output is scheduler line 2, the CPU's IP2. The timer is a
   scheduler event at the cycle Count reaches Compare.
+- The boot runs the cartridge's boot code (IPL3, the ROM's bytes
+  `0x40..0x1000`) as lifted code. Only the PIF's part (IPL1 and IPL2 in the
+  PIF ROM, which relift does not have) is high level and takes no time:
+  `rl_n64_pif_boot` copies the ROM's first 4 KiB to DMEM, sets the PI domain
+  1 timing from the header word (latency bits 0 to 7, pulse width 8 to 15,
+  page size 16 to 19, release 20 and 21) and the RI registers the PIF's boot
+  leaves (`RI_SELECT` 0x14, so the boot code finds RDRAM set up), and the
+  CPU starts at `0xA4000040` with t3 that address, s4 the TV type (1 NTSC,
+  0 PAL), s6 the boot variant's seed, s3, s5 and s7 0, sp `0xA4001FF0`, ra
+  `0xA4001554` and Status `0x34000000`. The boot code then loads the game
+  with a PI DMA, checks it, writes the boot words at `0x80000300` and jumps
+  to the entry, all at the cycles its own instructions take, so the VI and
+  every later event keep the console's phase. The analysis lifts the boot
+  code only for a boot variant known by its hash; a program without it boots
+  at a high level (`rl_n64_boot`: the first MiB at the entry, the boot words
+  and the RDRAM size word, the registers the boot code leaves at the jump to
+  the game).
 - Code is bound at run time, never interpreted. The build lifts every code
   run the analysis found, at its link address, one unit per segment linked
   in RDRAM, and lists each run with its source, offset, length, link address
@@ -2181,7 +2198,13 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   dump with `--dump`, and the program stops. Dev builds have no hot-load
   for this guest yet. A transfer from one run to another is always a
   computed one, through dispatch, so the other run's check sees the bytes
-  that are there when it runs.
+  that are there when it runs. The boot code's runs, linked at their kseg1
+  addresses in SP memory, are bound the same way against DMEM and IMEM in
+  slots of their own (one per word of SP memory, outside the dispatch
+  table): a dispatch miss first asks the guest layer's lookup
+  (`rl_mips_set_lookup_hook`), which gives the slot there. Any write to SP
+  memory (a CPU store or an SP DMA) puts the check back over the runs it
+  touches.
 - `RELIFT_N64_TRACE=PATH` (a development aid) records every lifted call
   site's first VI frame and cycle, its count and its last frame, and
   writes them to PATH at exit in the order of first call, for a diff
@@ -2252,7 +2275,7 @@ cartridge's save memory (ported from ares, ISC; see its `NOTICE`).
   busy for 2150 RCP cycles, ignores a second write, and a read in that
   window ends it and gives the latch. The PIF to RDRAM DMA runs the joybus
   commands when it ends, so the game sees the controller at that moment.
-- The PIF is the high-level boot's: PIF ROM reads are 0 and the cartridge
+- The PIF's boot is high level: PIF ROM reads are 0 and the cartridge
   boot chip's challenge (the command bit 0x02 some boot variants use) is not
   answered. A block written to PIF RAM with the flag in byte 63 set is
   parsed (channels 0 to 4; 0xFF padding, 0x00 skip, 0xFD reset, 0xFE end);

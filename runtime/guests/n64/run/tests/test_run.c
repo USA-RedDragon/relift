@@ -3,8 +3,10 @@
  * @brief The VR4300 CPU on the Nintendo 64 machine with hand-written lifted
  * functions: the high-level boot's registers, code bound by its hash at the
  * first entry, a run whose bytes changed is missed code, an instruction
- * cache invalidation checks again, and a VI interrupt taken at a sync point
- * enters the general vector and returns. The ROM is synthetic.
+ * cache invalidation checks again, a VI interrupt taken at a sync point
+ * enters the general vector and returns, and boot code in DMEM starts the
+ * CPU there and is checked again after a write to DMEM. The ROM is
+ * synthetic.
  */
 #include "cpu.h"
 #include "runner.h"
@@ -19,13 +21,27 @@ static const rl_guest_desc test_guest = {
 };
 
 #define K0(a) (UINT64_C(0xFFFFFFFF80000000) | (a))
+#define K1(a) (UINT64_C(0xFFFFFFFFA0000000) | (a))
 
 static struct {
     int mains;
     int handlers;
     uint64_t handler_epc;
     int spins;
+    int boots;
+    uint64_t boot_sp, boot_ra, boot_t3;
 } hs;
+
+static int boot_fn(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    hs.boots++;
+    hs.boot_sp = c->r[29];
+    hs.boot_ra = c->r[31];
+    hs.boot_t3 = c->r[11];
+    rl_n64_write(c->machine, 0x04000044u, 4, 0);
+    return RL_OK;
+}
 
 static int handler(rl_ctx *c, uint8_t *mem)
 {
@@ -72,6 +88,10 @@ static const rl_fn_entry fns_spin[] = {
     {K0(0x1000), 8, RL_FN_RANGE, spin_fn},
 };
 
+static const rl_fn_entry fns_boot[] = {
+    {K1(0x04000040), 8, RL_FN_RANGE, boot_fn},
+};
+
 static uint8_t rom[0x102000];
 static rl_n64_run run;
 static rl_n64 *mach;
@@ -86,7 +106,7 @@ static uint64_t fnv(const uint8_t *b, uint32_t n)
     return h;
 }
 
-static int boot(const rl_fn_entry *fns, uint32_t n)
+static int boot_with(const rl_fn_entry *fns, uint32_t n, bool dmem)
 {
     if (rl_core_init(&test_guest, rl_mips_cpu()) != 0)
         return -1;
@@ -108,12 +128,16 @@ static int boot(const rl_fn_entry *fns, uint32_t n)
     code[0] = (rl_n64_code){0, 0, 0x1000u, 8u, K0(0x1000), fnv(rom + 0x1000, 8)};
     static const uint8_t zero[8];
     code[1] = (rl_n64_code){0, 0, 0, 8u, K0(0x180), fnv(zero, 8)};
+    if (dmem)
+        code[1] = (rl_n64_code){0, 0, 0x40u, 8u, K1(0x04000040), fnv(rom + 0x40, 8)};
     mach = rl_n64_create(rom, sizeof rom);
     static const rl_unit *list[] = {&unit};
     if (!mach || rl_n64_code_init(mach, list, 1, code, 2) != 0)
         return -1;
     return rl_n64_run_init(&run, mach, 6102, 0x80001000u);
 }
+
+static int boot(const rl_fn_entry *fns, uint32_t n) { return boot_with(fns, n, false); }
 
 TEST(n64_run_boots_with_the_registers_the_boot_code_leaves)
 {
@@ -161,4 +185,23 @@ TEST(n64_run_a_vi_interrupt_enters_the_vector_at_a_sync_point)
     CHECK_EQ(hs.handler_epc, K0(0x1004));
     CHECK_EQ(rl_n64_irq_pending(mach), 0);
     CHECK_EQ(run.c->cp0_status & 2u, 0u);
+}
+
+TEST(n64_run_starts_the_boot_code_in_dmem)
+{
+    CHECK(boot_with(fns_boot, 1, true) == 0);
+    CHECK_EQ(run.entry, K1(0x04000040));
+    CHECK_EQ(memcmp(rl_n64_spmem(mach), rom, 0x1000), 0);
+    CHECK_EQ(rl_n64_read(mach, 0x318u, 4), 0);
+    CHECK_EQ(rl_n64_read(mach, 0x0470000Cu, 4), 0x14u);
+    CHECK_EQ(rl_n64_run_start(&run), RL_OK);
+    CHECK_EQ(hs.boots, 1);
+    CHECK_EQ(hs.boot_t3, K1(0x04000040));
+    CHECK_EQ(hs.boot_sp, UINT64_C(0xFFFFFFFFA4001FF0));
+    CHECK_EQ(hs.boot_ra, UINT64_C(0xFFFFFFFFA4001554));
+    CHECK_EQ(rl_n64_get_stats(mach)->checks, 1u);
+    CHECK_EQ(rl_n64_get_stats(mach)->invalidations, 1u);
+    CHECK_EQ(rl_n64_run_start(&run), RL_PENDING);
+    CHECK_EQ(hs.boots, 1);
+    CHECK_EQ(rl_n64_get_stats(mach)->mismatches, 1u);
 }

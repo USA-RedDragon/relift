@@ -20,8 +20,12 @@
  * machine runs it in slices through rl_n64_rsp_ops, and its COP0 accesses
  * and BREAK go to the machine's SP and DP registers.
  *
- * The boot is high level: no boot code runs. The registers and CP0 are what
- * the console's boot code leaves when it jumps to the game.
+ * The boot runs the cartridge's boot code: the CPU starts at 0xA4000040 in
+ * DMEM with the registers and CP0 state the PIF's boot leaves there (only
+ * that part, in the PIF ROM, is high level, and it takes no time), and the
+ * lifted boot code loads and starts the game. A program without lifted boot
+ * code (a boot variant not known by its hash) boots at a high level: the
+ * registers and CP0 are what the boot code leaves when it jumps to the game.
  */
 #include "cpu.h"
 
@@ -121,6 +125,8 @@ static void cache_hook(rl_ctx *c, uint32_t op, uint64_t vaddr)
         return;
     rl_n64_code_written(machine(c), (uint32_t)vaddr & 0x1FFFFFE0u, 32);
 }
+
+static rl_fn sp_lookup(rl_ctx *c, uint64_t pc) { return rl_n64_code_sp_slot(machine(c), pc); }
 
 static void dump_rdram(rl_n64_run *r)
 {
@@ -284,15 +290,23 @@ static uint64_t seed(uint32_t cic)
 
 static uint64_t sext(uint32_t v) { return (uint64_t)(int64_t)(int32_t)v; }
 
-/** @brief The CPU state the boot code leaves at the jump to the game. */
-static void boot_cpu(rl_ctx *c, uint32_t cic, bool pal)
+/** @brief Where the PIF's boot starts the CPU: the boot code in DMEM. */
+#define BOOT_CODE 0xA4000040u
+
+/**
+ * @brief The CPU state the PIF's boot leaves at the jump to the boot code
+ * (ra in the PIF's boot; s3 cartridge boot, s4 TV type, s5 cold boot, s6 the
+ * CIC seed), which the boot code keeps until it jumps to the game: ra then
+ * holds the return address of its last call.
+ */
+static void boot_cpu(rl_ctx *c, uint32_t cic, bool pal, uint32_t ra)
 {
     memset(c->r, 0, sizeof c->r);
-    c->r[11] = sext(0xA4000040u);
+    c->r[11] = sext(BOOT_CODE);
     c->r[20] = pal ? 0 : 1;
     c->r[22] = seed(cic);
     c->r[29] = sext(0xA4001FF0u);
-    c->r[31] = sext(0xA4001550u);
+    c->r[31] = sext(ra);
     c->cp0_status = 0x34000000u;
     c->cp0_cause = 0;
     c->cp0_config = 0x7006E463u;
@@ -325,14 +339,19 @@ int rl_n64_run_init(rl_n64_run *r, rl_n64 *m, uint32_t cic, uint32_t entry)
     rl_n64_code_set_stub(m, entry_check);
     r->timer.fire = timer_fire;
     r->timer.opaque = r;
-    rl_n64_boot_info b = {.cic = cic, .entry = entry};
-    rl_n64_boot(m, &b);
-    uint8_t region = rl_n64_rdram(m)[0x303];
-    boot_cpu(r->c, cic, region == 0);
+    rl_mips_set_lookup_hook(sp_lookup);
+    if (rl_n64_pif_boot(m)) {
+        boot_cpu(r->c, cic, rl_n64_is_pal(m), 0xA4001554u);
+        r->entry = sext(BOOT_CODE);
+    } else {
+        rl_n64_boot_info b = {.cic = cic, .entry = entry};
+        rl_n64_boot(m, &b);
+        boot_cpu(r->c, cic, rl_n64_rdram(m)[0x303] == 0, 0xA4001550u);
+        r->entry = sext(entry);
+    }
     rl_mips_set_count(r->c, 0);
     rl_mips_cp0_sync(r->c);
     post_timer(r);
-    r->entry = sext(entry);
     return 0;
 }
 
@@ -344,6 +363,7 @@ void rl_n64_run_free(rl_n64_run *r)
     }
     rl_mips_set_bus(NULL);
     rl_mips_set_cache_hook(NULL);
+    rl_mips_set_lookup_hook(NULL);
     if (r->rsp) {
         rl_n64_set_rsp(r->m, NULL, NULL);
         rl_rsp_destroy(r->rsp);

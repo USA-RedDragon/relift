@@ -13,6 +13,12 @@
  * instruction cache invalidation puts the stub back over the runs it
  * touches, so the next entry checks again. Nothing is interpreted: an entry
  * that no run matches is missed code.
+ *
+ * The boot code runs in SP memory at its kseg1 addresses (0xA4000000 up).
+ * Its runs are bound the same way against the bytes of DMEM and IMEM, in
+ * slots of their own: the dispatch table spans the kseg0 code only, and a
+ * dispatch miss looks here (rl_n64_code_sp_slot). Any write to SP memory
+ * (rl_n64_code_sp_written) puts the stub back over the runs it touches.
  */
 #include "n64_int.h"
 
@@ -24,6 +30,29 @@
 /** @brief The physical address of a kseg0 or kseg1 address. */
 static uint32_t phys(uint64_t a) { return (uint32_t)a & 0x1FFFFFFFu; }
 
+/** @brief SP memory in kseg1. */
+#define SP_LO UINT64_C(0xFFFFFFFFA4000000)
+#define SP_HI UINT64_C(0xFFFFFFFFA4002000)
+
+static bool in_sp(uint64_t a) { return a >= SP_LO && a < SP_HI; }
+
+static void slot_set(rl_n64 *m, uint64_t a, rl_fn f)
+{
+    if (in_sp(a))
+        m->code.sp_slots[(a - SP_LO) >> 2] = f;
+    else
+        rl_dispatch_set(a, f);
+}
+
+static rl_fn slot_find(rl_n64 *m, uint64_t a)
+{
+    if (in_sp(a))
+        return (a & 3u) ? NULL : m->code.sp_slots[(a - SP_LO) >> 2];
+    return rl_dispatch_find(a);
+}
+
+rl_fn rl_n64_code_sp_slot(rl_n64 *m, uint64_t pc) { return in_sp(pc) ? slot_find(m, pc) : NULL; }
+
 int rl_n64_code_init(rl_n64 *m, const rl_unit *const *units, uint32_t unit_count, const rl_n64_code *code,
                      uint32_t count)
 {
@@ -32,12 +61,19 @@ int rl_n64_code_init(rl_n64 *m, const rl_unit *const *units, uint32_t unit_count
     m->code.code = code;
     m->code.count = count;
     m->code.state = calloc(count ? count : 1, 1);
-    if (!m->code.state)
+    m->code.sp_runs = calloc(count ? count : 1, sizeof *m->code.sp_runs);
+    if (!m->code.state || !m->code.sp_runs)
         return -1;
     uint64_t lo = UINT64_MAX, hi = 0;
     for (uint32_t i = 0; i < count; i++) {
         if (code[i].unit >= unit_count)
             return -1;
+        if (in_sp(code[i].link)) {
+            if (code[i].link + code[i].len > SP_HI)
+                return -1;
+            m->code.sp_runs[m->code.sp_count++] = i;
+            continue;
+        }
         if (code[i].link < lo)
             lo = code[i].link;
         if (code[i].link + code[i].len > hi)
@@ -65,7 +101,7 @@ void rl_n64_code_set_stub(rl_n64 *m, rl_fn entry_stub)
     for (uint32_t i = 0; i < m->code.count; i++) {
         const rl_n64_code *r = &m->code.code[i];
         for (uint32_t k = 0; k < r->len; k += 4)
-            rl_dispatch_set(r->link + k, entry_stub);
+            slot_set(m, r->link + k, entry_stub);
         m->code.state[i] = CODE_OUT;
     }
 }
@@ -86,7 +122,7 @@ static void unbind(rl_n64 *m, uint32_t i)
     if (!m->code.stub)
         return;
     for (uint32_t k = 0; k < r->len; k += 4)
-        rl_dispatch_set(r->link + k, m->code.stub);
+        slot_set(m, r->link + k, m->code.stub);
 }
 
 void rl_n64_code_written(rl_n64 *m, uint32_t paddr, uint32_t len)
@@ -96,6 +132,15 @@ void rl_n64_code_written(rl_n64 *m, uint32_t paddr, uint32_t len)
     for (uint32_t i = 0; i < m->code.count; i++)
         if (m->code.state[i] != CODE_OUT && overlaps(&m->code.code[i], paddr, len))
             unbind(m, i);
+}
+
+void rl_n64_code_sp_written(rl_n64 *m, uint32_t offset, uint32_t len)
+{
+    for (uint32_t k = 0; k < m->code.sp_count; k++) {
+        uint32_t i = m->code.sp_runs[k];
+        if (m->code.state[i] != CODE_OUT && overlaps(&m->code.code[i], 0x04000000u + offset, len))
+            unbind(m, i);
+    }
 }
 
 void rl_n64_code_loaded(rl_n64 *m, uint32_t source, uint32_t offset, uint32_t dram, uint32_t len)
@@ -121,11 +166,13 @@ static uint64_t fnv(const uint8_t *b, uint32_t n)
     return h;
 }
 
-/** @brief Whether run i's bytes are in RDRAM now. */
+/** @brief Whether run i's bytes are in RDRAM (SP memory for the boot code) now. */
 static bool matches(rl_n64 *m, uint32_t i)
 {
     const rl_n64_code *r = &m->code.code[i];
     uint32_t p = phys(r->link);
+    if (in_sp(r->link))
+        return fnv(m->spmem + (p & 0x1FFFu), r->len) == r->hash;
     if (p + r->len > RL_N64_RDRAM_SIZE)
         return false;
     return fnv(m->rdram + p, r->len) == r->hash;
@@ -140,19 +187,19 @@ static void bind(rl_n64 *m, uint32_t i)
             m->code.state[j] = CODE_OUT;
     uint64_t lo = r->link, hi = r->link + r->len;
     for (uint64_t a = lo; a < hi; a += 4)
-        rl_dispatch_set(a, NULL);
+        slot_set(m, a, NULL);
     for (uint32_t k = 0; k < u->fn_count; k++) {
         const rl_fn_entry *e = &u->fns[k];
         if (e->guest_addr < lo || e->guest_addr >= hi)
             continue;
         uint64_t end = e->guest_addr + ((e->flags & RL_FN_RANGE) ? e->guest_size : 4u);
         for (uint64_t a = e->guest_addr; a < end && a < hi; a += 4)
-            if (!rl_dispatch_find(a))
-                rl_dispatch_set(a, e->fn);
+            if (!slot_find(m, a))
+                slot_set(m, a, e->fn);
     }
     for (uint64_t a = lo; a < hi; a += 4)
-        if (!rl_dispatch_find(a))
-            rl_dispatch_set(a, m->code.stub);
+        if (!slot_find(m, a))
+            slot_set(m, a, m->code.stub);
     m->code.state[i] = CODE_LIVE;
 }
 
@@ -172,7 +219,7 @@ rl_fn rl_n64_code_check(rl_n64 *m, uint64_t pc, char *why, size_t n)
                 continue;
             m->stats.checks++;
             bind(m, i);
-            return rl_dispatch_find(pc);
+            return slot_find(m, pc);
         }
     m->stats.mismatches++;
     if (found)

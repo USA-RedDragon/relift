@@ -60,9 +60,12 @@ static void dma_row(rl_n64 *m)
     }
     d->mem = bank | ((d->mem + n) & 0xFFFu);
     d->dram = (d->dram + n) & 0xFFFFF8u;
-    if (m->sp.busy_wr)
+    if (m->sp.busy_wr) {
         rl_n64_code_written(m, dram0 & (RL_N64_RDRAM_SIZE - 1u), n);
-    else if (bank && m->sp.ops && m->sp.ops->imem_written)
+        return;
+    }
+    rl_n64_code_sp_written(m, bank | first, n);
+    if (bank && m->sp.ops && m->sp.ops->imem_written)
         m->sp.ops->imem_written(m->sp.user, first, n);
 }
 

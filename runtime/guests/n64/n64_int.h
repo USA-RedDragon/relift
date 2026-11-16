@@ -234,6 +234,11 @@ struct rl_n64 {
         uint32_t *order;
         rl_fn stub;
         uint8_t *filled;
+        /** @brief The runs linked in SP memory (the boot code), by index. */
+        uint32_t *sp_runs;
+        uint32_t sp_count;
+        /** @brief The dispatch slots of SP memory in kseg1, one per word: kept here, outside the dispatch table. */
+        rl_fn sp_slots[0x2000 / 4];
     } code;
 };
 
