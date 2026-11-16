@@ -1692,7 +1692,8 @@ end of report
 - `transfer` is `call`, `jump`, `entry`, `resume` or `none` (a stop at an
   instruction, then `at:` replaces `target:`). `site` is exact for jumps
   (`RL_JUMP`) and computed calls; it is `unknown` for an entry from the
-  runtime and for the resume of a landing pad, which no guest instruction
+  runtime, for a Game Boy dispatch into a switchable bank, whose window
+  entry carries no site, and for the resume of a landing pad, which no guest instruction
   makes (the emitter passes `RL_SITE_NONE`).
 - `target code` says what the build knew: lifted, no instruction (a trap
   slot of the code map: padding or data), not lifted inside a module's code
@@ -1720,8 +1721,13 @@ table for SM83), the guest backtrace, the site's lifted C from the build's
 and adds the target as a root for the next build: a `[hints]` entry in
 `game.toml` (Switch, as `relift run` does for hot-loaded code, and GBA,
 `rom+0x<offset>` for a cartridge ROM target, an odd offset for Thumb code,
-which `relift-gba-analyze` takes as roots of origin `hint`). `--no-hint`
-only prints.
+which `relift-gba-analyze` takes as roots of origin `hint`) or a line of the
+learned file (Game Boy: `BBB:AAAA` for a ROM target in bank `BBB`, `ram AAAA
+KKK` for code in RAM with its opcode key). `--no-hint` only prints. The SM83
+layer keeps what the last dispatch miss knew (`rl_sm83_last_miss`: the
+target and the `RL_JUMP` site, or the CALL or RST before the return
+address), because the Game Boy guest takes every miss through its own path
+first and reports it only when no lifted code can run there.
 
 It also says why analysis left the site unresolved, at no cost to the
 build: for a GBA or Game Boy project the build's `unresolved.txt` already

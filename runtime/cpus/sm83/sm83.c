@@ -197,22 +197,52 @@ static const rl_cpu_desc g_sm83 = {
 const rl_cpu_desc *rl_sm83_cpu(void) { return &g_sm83; }
 
 static rl_fn g_miss;
+static _Thread_local struct {
+    uint16_t target;
+    uint64_t site;
+    uintptr_t host_ret;
+    bool jump;
+    bool set;
+} t_last;
 
 void rl_sm83_set_miss(rl_fn fn) { g_miss = fn; }
 
+bool rl_sm83_last_miss(rl_ctx *c, rl_miss_info *m)
+{
+    if (!t_last.set || t_last.target != c->pc)
+        return false;
+    t_last.set = false;
+    if (t_last.jump)
+        *m = (rl_miss_info){ t_last.target, t_last.site, RL_MISS_JUMP, 0 };
+    else
+        *m = rl_core_miss_classify(c, t_last.target, t_last.host_ret);
+    return true;
+}
+
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
-    if (g_miss)
+    uintptr_t ret = (uintptr_t)__builtin_return_address(0);
+    if (g_miss) {
+        t_last.target = c->pc;
+        t_last.host_ret = ret;
+        t_last.jump = false;
+        t_last.set = true;
         RL_MUSTTAIL return g_miss(c, mem);
-    return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
+    }
+    return rl_core_miss(c, mem, c->pc, ret);
 }
 
 int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
     c->pend.pc = 0;
-    if (g_miss)
+    if (g_miss) {
+        t_last.target = c->pc;
+        t_last.site = m.site;
+        t_last.jump = true;
+        t_last.set = true;
         RL_MUSTTAIL return g_miss(c, mem);
+    }
     return rl_core_miss_at(c, mem, &m);
 }
 

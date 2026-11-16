@@ -46,5 +46,12 @@ RL_RUNTIME_API const char *rl_sm83_flags_str(uint8_t f, char *buf);
  * target in c->pc; NULL restores the core's path.
  */
 RL_RUNTIME_API void rl_sm83_set_miss(rl_fn fn);
+/**
+ * @brief What the calling thread's last dispatch miss handed to the
+ * rl_sm83_set_miss path knew: the target, the site of a jump (RL_JUMP) or the
+ * call site and caller of a call. Consumes it. False when the last miss was
+ * not at c->pc.
+ */
+RL_RUNTIME_API bool rl_sm83_last_miss(rl_ctx *c, rl_miss_info *m);
 
 #endif

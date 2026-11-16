@@ -191,6 +191,16 @@ fn project(settings: &Settings) -> Result<Project, BoxError> {
     })
 }
 
+/// The learned file of the Game Boy project in the working directory,
+/// which the next build lifts from.
+///
+/// # Errors
+///
+/// No `game.toml` or no import.
+pub fn learned_file(settings: &Settings) -> Result<PathBuf, BoxError> {
+    Ok(project(settings)?.dir.join(LEARNED_FILE))
+}
+
 /// The ROM with the ROM-hack patches of `mods` applied in order, and the
 /// last hack's record.
 fn patched(

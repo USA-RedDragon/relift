@@ -528,6 +528,50 @@ fn switch_site(settings: &Settings, out: &Path, site: &Place) -> Vec<String> {
     .collect()
 }
 
+/// The learned-file line of a Game Boy target: `BBB:AAAA` for a ROM
+/// location (the bank from the report's `target where` line), `ram AAAA
+/// KKK` for code in RAM (the opcode key from the target's first bytes).
+fn gb_learned(r: &Report, addr: u64) -> Option<String> {
+    if addr >= 0x8000 {
+        let (_, words) = r.words("target words")?;
+        let op = *words.first()?;
+        let key = if op == 0xCB {
+            0x100 | *words.get(1)?
+        } else {
+            op
+        };
+        return Some(format!("ram {addr:04x} {key:03x}"));
+    }
+    let w = r.get("target where")?;
+    let bank: u64 = w
+        .strip_prefix("ROM bank ")?
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()?;
+    Some(format!("{bank:03x}:{addr:04x}"))
+}
+
+/// Adds `line` to the learned file `path` of the Game Boy project, which
+/// the next build lifts from; says what it did.
+fn learn(path: &Path, line: &str) -> Result<String, BoxError> {
+    let old = std::fs::read_to_string(path).unwrap_or_default();
+    if old.lines().any(|l| l.trim() == line) {
+        return Ok(format!("{line} is already in {}", path.display()));
+    }
+    let mut text = old;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(line);
+    text.push('\n');
+    relift_cache::write_if_changed(path, text.as_bytes())?;
+    Ok(format!(
+        "added {line} to {}; the next relift build lifts it",
+        path.display()
+    ))
+}
+
 /// What `relift report` does after printing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HintMode {
@@ -655,13 +699,18 @@ pub fn explain(r: &Report, out: Option<&Path>) -> String {
 }
 
 /// Adds the report's target as a root for the next build: a hint in
-/// `game.toml` (Switch, and GBA for the cartridge ROM). Returns what it
-/// did, for the user.
+/// `game.toml` (Switch, and GBA for the cartridge ROM), a line of the
+/// learned file `learned` (Game Boy). Returns what it did, for the user.
 ///
 /// # Errors
 ///
-/// A game.toml that cannot be read or written.
-pub fn add_hint(r: &Report, project: &Path, out: Option<&Path>) -> Result<String, BoxError> {
+/// A game.toml or learned file that cannot be read or written.
+pub fn add_hint(
+    r: &Report,
+    project: &Path,
+    out: Option<&Path>,
+    learned: Option<&Path>,
+) -> Result<String, BoxError> {
     let Some(target) = r.target() else {
         return Ok("the report names no target; nothing added".into());
     };
@@ -717,6 +766,18 @@ pub fn add_hint(r: &Report, project: &Path, out: Option<&Path>) -> Result<String
                 ));
             };
             hint(project, Hint { module, offset })?
+        }
+        Some("gb") => {
+            let Some(line) = gb_learned(r, target.addr) else {
+                return Ok(format!(
+                    "the report does not say what 0x{:x} holds; no root added",
+                    target.addr
+                ));
+            };
+            let Some(path) = learned else {
+                return Ok("the project has no learned file; no root added".into());
+            };
+            learn(path, &line)?
         }
         other => {
             return Ok(format!(
@@ -865,7 +926,15 @@ pub fn run(
         }
     }
     if hint == HintMode::Add && project {
-        println!("\n{}", add_hint(&r, Path::new("."), out.as_deref())?);
+        println!(
+            "\n{}",
+            add_hint(
+                &r,
+                Path::new("."),
+                out.as_deref(),
+                crate::gb::learned_file(settings).ok().as_deref(),
+            )?
+        );
     }
     Ok(())
 }
@@ -922,6 +991,20 @@ mod tests {
         );
         assert!(t.contains("  site: 0x8000010 main+0x10\n"), "{t}");
         assert!(t.contains("=> 0x8000010: "), "{t}");
+    }
+
+    #[test]
+    fn a_gb_target_is_learned_by_its_bank() {
+        let r = Report::parse(
+            "relift stop report 1\nkind: missed code\nguest: gb\ntarget: 0x5000\ntarget where: ROM bank 3 (mapped now), file offset 0xd000\nend of report\n",
+        )
+        .expect("parses");
+        assert_eq!(gb_learned(&r, 0x5000).as_deref(), Some("003:5000"));
+        let r = Report::parse(
+            "relift stop report 1\nkind: missed code\nguest: gb\ntarget: 0xc00f\ntarget words 0xc00f: cb 37 00\nend of report\n",
+        )
+        .expect("parses");
+        assert_eq!(gb_learned(&r, 0xc00f).as_deref(), Some("ram c00f 137"));
     }
 
     #[test]
@@ -986,9 +1069,9 @@ mod tests {
             ))
             .expect("parses")
         };
-        let t = add_hint(&r("main data segment"), &dir, None).expect("runs");
+        let t = add_hint(&r("main data segment"), &dir, None, None).expect("runs");
         assert!(t.contains("not in a module's text segment"), "{t}");
-        let t = add_hint(&r("main text segment"), &dir, None).expect("runs");
+        let t = add_hint(&r("main text segment"), &dir, None, None).expect("runs");
         assert!(t.starts_with("added main+0x1000 to the hints"), "{t}");
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
