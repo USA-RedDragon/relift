@@ -12,7 +12,10 @@ cargo clippy --manifest-path check/Cargo.toml --all-targets --all-features --loc
 cargo clippy --manifest-path guests/gb/devices/Cargo.toml --all-targets --all-features --locked -- -D warnings
 
 cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
-cargo test --workspace --locked
+# The SPIR-V the GPU translator writes is checked by the pinned spirv-val,
+# never skipped.
+spirv_val=$(spirv_val_dir)
+PATH="$spirv_val:$PATH" RELIFT_SPIRV_VAL_REQUIRE=1 cargo test --workspace --locked
 cargo test --manifest-path guests/gb/devices/Cargo.toml --release --locked
 
 java_work="$CI_WORK/android-java-tests"
