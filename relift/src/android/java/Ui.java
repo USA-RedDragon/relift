@@ -1070,6 +1070,7 @@ final class Ui {
         TextView back = text("\u2039", 80, Color.WHITE, false);
         back.setGravity(Gravity.CENTER);
         back.setOnClickListener(x -> back());
+        back.setContentDescription("Back");
         FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(px(100), ViewGroup.LayoutParams.MATCH_PARENT);
         bar.addView(back, bl);
         TextView t = text(title, 52, Color.WHITE, true);
@@ -1125,6 +1126,7 @@ final class Ui {
             super(act);
             p.setColor(0xffc4c8d0);
             setClickable(true);
+            setContentDescription("More options");
         }
 
         @Override
