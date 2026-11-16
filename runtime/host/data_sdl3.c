@@ -1,13 +1,18 @@
 /**
  * @file data_sdl3.c
  * @brief The game data check of a mobile app at start (relift/datacheck.h), with the manifest read through SDL3
- * (zlib license): from the iOS app bundle or the Android APK's assets.
+ * (zlib license): from the iOS app bundle or the Android APK's assets. An Android app takes over a failed check
+ * with its game data import.
  */
 #include <relift/datacheck.h>
 
 #include "core.h"
 
 #include <SDL3/SDL.h>
+
+#if defined(__ANDROID__)
+#include <relift/android.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +53,9 @@ int rl_app_check_data(void)
         rl_log(RL_LOG_INFO, "data", "game data matches the manifest: %llu files, %llu MiB, %s, %llu ms",
                (unsigned long long)r.files, (unsigned long long)(r.bytes >> 20), hash ? "sizes and SHA-256" : "sizes",
                (unsigned long long)ms);
+#if defined(__ANDROID__)
+        rl_android_data_checked("ok");
+#endif
         return 0;
     }
     char msg[1024];
@@ -59,6 +67,14 @@ int rl_app_check_data(void)
                  "Copy the game's romfs folder into %s again (relift push does it and checks it).",
                  (unsigned long long)r.bad, (unsigned long long)r.files, r.first, r.why, romfs ? romfs : "the app");
     rl_log(RL_LOG_ERROR, "data", "%s", msg);
+#if defined(__ANDROID__)
+    if (rc > 0) {
+        char report[700];
+        snprintf(report, sizeof report, "bad\t%llu\t%s", (unsigned long long)r.bad, r.first);
+        if (rl_android_data_checked(report))
+            return -1;
+    }
+#endif
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Game data", msg, NULL);
     return -1;
 }

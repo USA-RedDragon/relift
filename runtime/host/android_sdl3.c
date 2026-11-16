@@ -1,7 +1,7 @@
 /**
  * @file android_sdl3.c
  * @brief Android glue through SDL3 (zlib license): logcat for stdio, the app's files directory, the haptic tick,
- * the app's settings page and its GPU driver checks.
+ * the app's settings page, its GPU driver checks and its game data import.
  */
 #ifdef __ANDROID__
 
@@ -135,6 +135,8 @@ JNIEXPORT jstring JNICALL Java_dev_relift_app_GpuProbe_nativeProbe(JNIEnv *env, 
                                                                   jstring library);
 
 void rl_android_haptic(void) { call_activity("reliftHaptic", NULL); }
+
+bool rl_android_data_checked(const char *report) { return call_activity("reliftDataChecked", report); }
 
 void rl_android_settings(void)
 {

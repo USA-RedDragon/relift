@@ -25,6 +25,13 @@ RL_RUNTIME_API const char *rl_android_files_dir(void);
 /** @brief The app's external files directory (no trailing slash; the one a user can copy data into), or NULL. */
 RL_RUNTIME_API const char *rl_android_external_dir(void);
 
+/**
+ * @brief Tells the app the result of the game data check at start: "ok", or "bad", the count of bad files and the
+ * first one, tab-separated. On "bad" the app opens its game data import and ends the process. Returns false when the
+ * app has no such page (the caller shows its own message).
+ */
+RL_RUNTIME_API bool rl_android_data_checked(const char *report);
+
 /** @brief A short haptic tick (the system's virtual key feedback). */
 RL_RUNTIME_API void rl_android_haptic(void);
 
