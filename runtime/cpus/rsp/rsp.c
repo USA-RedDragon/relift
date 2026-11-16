@@ -308,7 +308,7 @@ static _Noreturn void missed(rl_rsp *r, const char *why)
     abort();
 }
 
-int rl_rsp_enter(rl_ctx *c, uint8_t *mem)
+uint64_t rl_rsp_enter(rl_ctx *c, uint8_t *mem)
 {
     rl_rsp *r = of(c);
     uint32_t w = abs_of(c, c->pc) >> 2;

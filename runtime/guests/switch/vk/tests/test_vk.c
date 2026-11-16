@@ -967,7 +967,7 @@ TEST(vk_shadow_unmap_flushes_guest_writes)
 static uint64_t g_cb_calls, g_cb_user, g_cb_sev, g_cb_x19, g_cb_len, g_cb_sp;
 static char g_cb_msg[256];
 
-static int guest_messenger(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t guest_messenger(rl_ctx *restrict c, uint8_t *mem)
 {
     g_cb_calls++;
     g_cb_sev = c->x[0];

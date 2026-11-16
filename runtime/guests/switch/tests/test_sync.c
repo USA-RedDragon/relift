@@ -79,7 +79,7 @@ static struct {
 
 static int idx_of(rl_ctx *c) { return (int)c->x[0]; }
 
-static int worker_mutex(rl_ctx *c, uint8_t *mem)
+static uint64_t worker_mutex(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -95,7 +95,7 @@ static int worker_mutex(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int worker_tls(rl_ctx *c, uint8_t *mem)
+static uint64_t worker_tls(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -109,14 +109,14 @@ static int worker_tls(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int worker_exit(rl_ctx *c, uint8_t *mem)
+static uint64_t worker_exit(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     __atomic_store_n(&S.done, 1, __ATOMIC_SEQ_CST);
     return rl_svc(c, mem, SVC_EXIT_THREAD);
 }
 
-static int worker_condvar(rl_ctx *c, uint8_t *mem)
+static uint64_t worker_condvar(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -132,7 +132,7 @@ static int worker_condvar(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int worker_arb(rl_ctx *c, uint8_t *mem)
+static uint64_t worker_arb(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     uint32_t rc = svc_c(c, SVC_WAIT_FOR_ADDRESS, S.arb, 0, 1, (uint64_t)-1);
@@ -140,7 +140,7 @@ static int worker_arb(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int worker_wait_event(rl_ctx *c, uint8_t *mem)
+static uint64_t worker_wait_event(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int32_t idx;
@@ -531,7 +531,7 @@ TEST(handle_table)
 }
 
 /** @brief A lifted-style function that calls a missing guest function through the dispatch table. */
-static int call_missing(rl_ctx *c, uint8_t *mem)
+static uint64_t call_missing(rl_ctx *c, uint8_t *mem)
 {
     c->pc = 0x9000000;
     return rl_lookup(c, 0x9000000)(c, mem);

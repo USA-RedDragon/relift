@@ -294,8 +294,8 @@ extern vkf_state vkf;
 
 /** @brief Starts a thunk call. */
 void vkf_begin(vkf_call *k, rl_ctx *c, uint8_t *mem);
-/** @brief Ends a thunk call: releases the arena and returns the code for the lifted caller. */
-int vkf_end(vkf_call *k);
+/** @brief Ends a thunk call: releases the arena and returns what the lifted caller gets (x30, or RL_PENDING when a guest callback left a pending record). */
+uint64_t vkf_end(vkf_call *k);
 /** @brief The innermost thunk call running on this host thread, or NULL. */
 vkf_call *vkf_current(void);
 /** @brief Allocates n bytes, 16-byte aligned, that live until the call ends. */
@@ -361,9 +361,9 @@ const char *const *vkf_strv(vkf_call *k, uint64_t g, uint64_t n);
 /** @brief Reports a pNext struct the layer does not know (it is dropped from the chain). */
 void vkf_unknown_stype(vkf_call *k, uint32_t stype);
 /** @brief Ends a call on a handle the guest never got from the layer: VK_ERROR_UNKNOWN. */
-int vkf_bad_handle(vkf_call *k, int cmd, uint64_t g);
+uint64_t vkf_bad_handle(vkf_call *k, int cmd, uint64_t g);
 /** @brief Ends a call to a command the host lacks: VK_ERROR_FEATURE_NOT_PRESENT. */
-int vkf_no_fn(vkf_call *k, int cmd);
+uint64_t vkf_no_fn(vkf_call *k, int cmd);
 /**
  * @brief Passes a command's result through; a failure (a negative result) is logged once for each
  * command and result, with the guest caller, so the call behind a game's failed check can be found.

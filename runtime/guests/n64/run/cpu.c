@@ -147,7 +147,7 @@ static void dump_rdram(rl_n64_run *r)
     free(bytes);
 }
 
-static int entry_check(rl_ctx *c, uint8_t *mem)
+static uint64_t entry_check(rl_ctx *c, uint8_t *mem)
 {
     char why[256];
     rl_fn f = rl_n64_code_check(machine(c), c->pc, why, sizeof why);

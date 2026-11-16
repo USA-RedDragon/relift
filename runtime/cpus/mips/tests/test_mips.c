@@ -29,7 +29,7 @@ static struct {
 } hs;
 
 /** @brief An interrupt handler: acknowledges by clearing IP2 and IP7 (writes Compare), then ERET. */
-static int handler(rl_ctx *c, uint8_t *mem)
+static uint64_t handler(rl_ctx *c, uint8_t *mem)
 {
     hs.handler_runs++;
     hs.epc_seen = c->cp0_epc;
@@ -39,14 +39,14 @@ static int handler(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief A leaf: r2 += 1, then JR ra. */
-static int leaf(rl_ctx *c, uint8_t *mem)
+static uint64_t leaf(rl_ctx *c, uint8_t *mem)
 {
     c->r[2] += 1;
     RL_MUSTTAIL return rl_indirect(c, c->r[31])(c, mem);
 }
 
 /** @brief JAL leaf twice, then stops. */
-static int caller(rl_ctx *c, uint8_t *mem)
+static uint64_t caller(rl_ctx *c, uint8_t *mem)
 {
     c->r[31] = K0(0x1008);
     rl_mips_call(c, K0(0x1008));
@@ -61,28 +61,28 @@ static int caller(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief A handler that does not return to EPC: switches to 0x3000. */
-static int switcher(rl_ctx *c, uint8_t *mem)
+static uint64_t switcher(rl_ctx *c, uint8_t *mem)
 {
     hs.handler_runs++;
     c->cp0_epc = K0(0x3000);
     RL_MUSTTAIL return rl_mips_eret_to(c, rl_mips_eret(c))(c, mem);
 }
 
-static int landing(rl_ctx *c, uint8_t *mem)
+static uint64_t landing(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->r[3] = 0x5A;
     return rl_pend_exit_process(c, 0);
 }
 
-static int (*g_vector)(rl_ctx *, uint8_t *) = handler;
+static uint64_t (*g_vector)(rl_ctx *, uint8_t *) = handler;
 
-static int vector(rl_ctx *c, uint8_t *mem) { return g_vector(c, mem); }
+static uint64_t vector(rl_ctx *c, uint8_t *mem) { return g_vector(c, mem); }
 
 /** @brief A lifted block with a sync point: takes interrupts with IP from the test. */
 static uint32_t g_ip;
 
-static int syncing(rl_ctx *c, uint8_t *mem)
+static uint64_t syncing(rl_ctx *c, uint8_t *mem)
 {
     uint64_t v = rl_mips_irq_enter(c, K0(0x4004), g_ip);
     if (v != RL_NO_IRQ) {

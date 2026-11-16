@@ -58,7 +58,7 @@ static int spin(rl_fn fn, rl_ctx *c)
     pthread_t t;
     if (pthread_create(&t, NULL, setter, NULL) != 0)
         return 2;
-    int rc = fn(c, g_mem);
+    uint64_t rc = fn(c, g_mem);
     pthread_join(t, NULL);
     return rc == RL_OK && c->x[0] == 1 ? 0 : 1;
 }

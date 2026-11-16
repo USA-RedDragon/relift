@@ -26,7 +26,7 @@ static struct {
 } hs;
 
 /** @brief A leaf: r0 += 1, then BX LR (a computed jump to LR). */
-static int leaf(rl_ctx *c, uint8_t *mem)
+static uint64_t leaf(rl_ctx *c, uint8_t *mem)
 {
     hs.leaf_runs++;
     hs.depth_in_leaf = c->depth;
@@ -35,14 +35,14 @@ static int leaf(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief Jumps on to the leaf (a tail call: B leaf). */
-static int tail(rl_ctx *c, uint8_t *mem)
+static uint64_t tail(rl_ctx *c, uint8_t *mem)
 {
     hs.tail_runs++;
     RL_MUSTTAIL return rl_indirect(c, 0x08000100u)(c, mem);
 }
 
 /** @brief Calls the leaf twice (BL leaf; BL tail), then stops by jumping to 0x08000400. */
-static int caller(rl_ctx *c, uint8_t *mem)
+static uint64_t caller(rl_ctx *c, uint8_t *mem)
 {
     c->r[14] = 0x08000204u;
     rl_arm32_call(c, 0x08000204u);
@@ -59,14 +59,14 @@ static int caller(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief Returns to an address no frame waits for: the leaf's LR was rewritten. */
-static int liar(rl_ctx *c, uint8_t *mem)
+static uint64_t liar(rl_ctx *c, uint8_t *mem)
 {
     c->r[14] = 0x08000300u;
     RL_MUSTTAIL return rl_indirect(c, 0x08000300u)(c, mem);
 }
 
 /** @brief BL liar, expecting to come back to 0x0800020C. */
-static int fooled(rl_ctx *c, uint8_t *mem)
+static uint64_t fooled(rl_ctx *c, uint8_t *mem)
 {
     rl_arm32_call(c, 0x0800020Cu);
     int rc = rl_indirect(c, 0x08000280u)(c, mem);
@@ -76,7 +76,7 @@ static int fooled(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief Where the liar went: stops the run with r1 = 0x5A. */
-static int landing(rl_ctx *c, uint8_t *mem)
+static uint64_t landing(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->r[1] = 0x5A;
@@ -84,14 +84,14 @@ static int landing(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief The end of caller's run. */
-static int stop(rl_ctx *c, uint8_t *mem)
+static uint64_t stop(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     return rl_pend_exit_process(c, 0);
 }
 
 /** @brief Leaves every frame and goes on at 0x08000300. */
-static int bounce(rl_ctx *c, uint8_t *mem)
+static uint64_t bounce(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->depth = 5;

@@ -22,7 +22,7 @@ static const VkQueueFamilyProperties switch_family = {
     .minImageTransferGranularity = { 1, 1, 1 },
 };
 
-int vkh_vkGetPhysicalDeviceQueueFamilyProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceQueueFamilyProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -40,7 +40,7 @@ int vkh_vkGetPhysicalDeviceQueueFamilyProperties(rl_ctx *restrict c, uint8_t *me
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceQueueFamilyProperties2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceQueueFamilyProperties2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -109,7 +109,7 @@ static VkQueue host_queue(vkf_call *k, VkDevice dev, uint32_t family, uint32_t i
     return q;
 }
 
-int vkh_vkGetDeviceQueue(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetDeviceQueue(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -122,7 +122,7 @@ int vkh_vkGetDeviceQueue(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetDeviceQueue2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetDeviceQueue2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

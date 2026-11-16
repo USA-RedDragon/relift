@@ -9,14 +9,14 @@
 
 #include <string.h>
 
-int rl_arm64_memmove(rl_ctx *c, uint8_t *mem)
+uint64_t rl_arm64_memmove(rl_ctx *c, uint8_t *mem)
 {
     memmove(mem + c->x[0], mem + c->x[1], c->x[2]);
-    return RL_OK;
+    return rl_arm64_ret(c);
 }
 
-int rl_arm64_memset(rl_ctx *c, uint8_t *mem)
+uint64_t rl_arm64_memset(rl_ctx *c, uint8_t *mem)
 {
     memset(mem + c->x[0], (int)(c->x[1] & 0xffu), c->x[2]);
-    return RL_OK;
+    return rl_arm64_ret(c);
 }

@@ -63,9 +63,9 @@
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
 #define RL_ABI_VERSION 8u
 
-/** @brief Lifted function return: normal return to the caller. */
+/** @brief Lifted function return on a CPU without a link register: normal return to the caller. An A64 function returns where its return went instead (docs/abi.md section 5.4). */
 #define RL_OK 0
-/** @brief Lifted function return: a pending record is set in the context; return 1 up the host stack. */
+/** @brief Lifted function return: a pending record is set in the context (pend.kind is not RL_PEND_NONE); return 1 up the host stack. */
 #define RL_PENDING 1
 
 /** @brief Pending record kinds (rl_pending.kind). */
@@ -113,8 +113,13 @@ struct rl_thread;
  */
 typedef struct rl_ctx rl_ctx;
 
-/** @brief Type of every lifted function, host override with the lifted ABI, and dispatch target. */
-typedef int rl_fn_t(rl_ctx *c, uint8_t *mem);
+/**
+ * @brief Type of every lifted function, host override with the lifted ABI, and
+ * dispatch target. Returns RL_OK or RL_PENDING, or on a CPU with a link
+ * register (A64) the guest address its return went to, or RL_PENDING with a
+ * pending record set (docs/abi.md section 5.4).
+ */
+typedef uint64_t rl_fn_t(rl_ctx *c, uint8_t *mem);
 /** @brief Pointer to a lifted function. */
 typedef rl_fn_t *rl_fn;
 
@@ -207,7 +212,7 @@ RL_RUNTIME_API uint64_t rl_io_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint3
 RL_RUNTIME_API void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value);
 
 /** @brief Defines a lifted function with the contract signature. */
-#define RL_LIFTED(name) int name(rl_ctx *restrict c, uint8_t *mem)
+#define RL_LIFTED(name) uint64_t name(rl_ctx *restrict c, uint8_t *mem)
 /** @brief Marks a guaranteed tail call: `RL_MUSTTAIL return f(c, mem);`. */
 #define RL_MUSTTAIL __attribute__((musttail))
 /** @brief Marks the unlikely branch of a pending check. */

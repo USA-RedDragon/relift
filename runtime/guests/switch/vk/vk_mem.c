@@ -323,7 +323,7 @@ static bool drop_optional_dedication(vkf_call *k, VkDevice dev, VkMemoryAllocate
     return true;
 }
 
-int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -668,7 +668,7 @@ static void release_one(vkf_dev *d, vkf_mem *r, bool host_alive, void *dev)
     free(r);
 }
 
-int vkh_vkFreeMemory(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkFreeMemory(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -691,7 +691,7 @@ int vkh_vkFreeMemory(rl_ctx *restrict c, uint8_t *mem)
 }
 
 
-int vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -767,7 +767,7 @@ int vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkUnmapMemory(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkUnmapMemory(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -814,9 +814,9 @@ static int ranges(rl_ctx *c, uint8_t *mem, int cmd, bool flush)
     return vkf_end(&k);
 }
 
-int vkh_vkFlushMappedMemoryRanges(rl_ctx *restrict c, uint8_t *mem) { return ranges(c, mem, VKG_vkFlushMappedMemoryRanges, true); }
+uint64_t vkh_vkFlushMappedMemoryRanges(rl_ctx *restrict c, uint8_t *mem) { return ranges(c, mem, VKG_vkFlushMappedMemoryRanges, true); }
 
-int vkh_vkInvalidateMappedMemoryRanges(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkInvalidateMappedMemoryRanges(rl_ctx *restrict c, uint8_t *mem)
 {
     return ranges(c, mem, VKG_vkInvalidateMappedMemoryRanges, false);
 }
@@ -869,7 +869,7 @@ void vkf_shadow_flush(vkf_call *k) { shadow_sync(k, true); }
 void vkf_shadow_pull(vkf_call *k) { shadow_sync(k, false); }
 
 
-int vkh_vkCreateBuffer(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateBuffer(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

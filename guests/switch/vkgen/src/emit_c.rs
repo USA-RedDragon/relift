@@ -294,7 +294,7 @@ fn emit_thunk(m: &mut Model, def: &str, primary: &str, o: &mut String) -> Result
     let src = arg_sources(m, &c)?;
     writeln!(
         o,
-        "static int vkt_{primary}(rl_ctx *restrict c, uint8_t *mem)\n{{"
+        "static uint64_t vkt_{primary}(rl_ctx *restrict c, uint8_t *mem)\n{{"
     )
     .ok();
     writeln!(o, "    vkf_call k;\n    vkf_begin(&k, c, mem);").ok();
@@ -585,7 +585,7 @@ pub fn emit(m: &mut Model) -> Result<CFiles, Error> {
     }
     writeln!(h).ok();
     for c in &m.cfg.hand_commands {
-        writeln!(h, "int vkh_{c}(rl_ctx *restrict c, uint8_t *mem);").ok();
+        writeln!(h, "uint64_t vkh_{c}(rl_ctx *restrict c, uint8_t *mem);").ok();
     }
     let mut hooks: Vec<&String> = m.cfg.before.values().chain(m.cfg.after.values()).collect();
     hooks.sort();

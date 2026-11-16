@@ -181,7 +181,7 @@ const char *rl_arm32_mode_name(uint32_t m)
     }
 }
 
-int rl_arm32_return(rl_ctx *c, uint8_t *mem)
+uint64_t rl_arm32_return(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->depth--;
@@ -324,13 +324,13 @@ static const rl_cpu_desc g_arm32 = {
 
 const rl_cpu_desc *rl_arm32_cpu(void) { return &g_arm32; }
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     g_stats.misses++;
     return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
 }
 
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
     g_stats.misses++;
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };

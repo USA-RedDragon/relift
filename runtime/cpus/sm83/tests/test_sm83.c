@@ -76,7 +76,7 @@ static void raise_line(uint32_t line)
 }
 
 /** @brief A handler: records its entry state and executes RET (or RETI). */
-static int handler(rl_ctx *c, uint8_t *mem)
+static uint64_t handler(rl_ctx *c, uint8_t *mem)
 {
     hs.sp_in = c->sp;
     hs.pushed_lo = mem[c->sp];
@@ -95,7 +95,7 @@ static int handler(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int task(rl_ctx *c, uint8_t *mem)
+static uint64_t task(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     hs.landed++;
@@ -104,7 +104,7 @@ static int task(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief A lifted-looking block: a sync point whose next pc is 0x0150. */
-static int block(rl_ctx *c, uint8_t *mem)
+static uint64_t block(rl_ctx *c, uint8_t *mem)
 {
     c->time.budget = 0;
     return rl_sync(c, mem, 0x0150);
@@ -113,7 +113,7 @@ static int block(rl_ctx *c, uint8_t *mem)
 static int vec_fn_runs[5];
 
 #define VEC(n)                                                                  \
-    static int vec##n(rl_ctx *c, uint8_t *mem)                                  \
+    static uint64_t vec##n(rl_ctx *c, uint8_t *mem)                             \
     {                                                                           \
         vec_fn_runs[n]++;                                                       \
         c->pc = (uint16_t)RL_SM83_IRQ_VECTOR(n);                                \

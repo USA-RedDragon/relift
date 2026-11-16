@@ -215,7 +215,7 @@ static inline void rl_st128(uint8_t *mem, uint64_t a, rl_u128 v) { memcpy(mem + 
  * enters it, or stops the program with a report (missed code). Reads the
  * target from c->pc, an IMEM address (an unbound slot's base is 0).
  */
-RL_RUNTIME_API int rl_rsp_enter(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_rsp_enter(rl_ctx *c, uint8_t *mem);
 
 /**
  * @brief A transfer to offset target of the running image: takes the base

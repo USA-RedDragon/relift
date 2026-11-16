@@ -283,14 +283,14 @@ TEST(core_threads_carry_the_cpu_context)
     rl_thread_free(t);
 }
 
-static int fn_a(rl_ctx *c, uint8_t *mem)
+static uint64_t fn_a(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->r[1] = 0xA;
     return RL_OK;
 }
 
-static int fn_b(rl_ctx *c, uint8_t *mem)
+static uint64_t fn_b(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->r[1] = 0xB;
@@ -379,7 +379,7 @@ TEST(core_hot_units_fill_a_fixed_table)
     rl_thread_free(t);
 }
 
-static int fn_first(rl_ctx *c, uint8_t *mem)
+static uint64_t fn_first(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->r[1] = 0xF;

@@ -689,7 +689,7 @@ static uint64_t irq_hook(rl_ctx *c, uint8_t *mem, uint64_t next)
     return 0x2000;
 }
 
-static int irq_handler(rl_ctx *c, uint8_t *mem)
+static uint64_t irq_handler(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     gs.handler_runs++;
@@ -797,7 +797,7 @@ static uint64_t ret_hook(rl_ctx *c, uint8_t *mem, uint64_t expected)
     return rd.returns_to;
 }
 
-static int task_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t task_fn(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     rd.landed++;
@@ -871,7 +871,7 @@ TEST(sched_sync_redirects_a_handler_that_returns_elsewhere)
     rl_thread_free(t);
 }
 
-static int nest_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t nest_fn(rl_ctx *c, uint8_t *mem)
 {
     rd.tasks++;
     rl_sched_raise(rl_sched_of(gs.k), 0);
@@ -915,7 +915,7 @@ static void note_stack(void)
         stack_hi = p;
 }
 
-static int switch_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t switch_fn(rl_ctx *c, uint8_t *mem)
 {
     note_stack();
     if (rd.landed++ < 1000) {
@@ -953,7 +953,7 @@ TEST(sched_sync_run_from_keeps_the_host_stack_flat_across_redirects)
     rl_thread_free(t);
 }
 
-static int sync_block(rl_ctx *c, uint8_t *mem)
+static uint64_t sync_block(rl_ctx *c, uint8_t *mem)
 {
     rl_sched_raise(rl_sched_of(gs.k), 0);
     return rl_sync(c, mem, 0x1100);

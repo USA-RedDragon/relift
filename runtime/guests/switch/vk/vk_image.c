@@ -124,7 +124,7 @@ static void substitute_formats(vkf_call *k, VkImageCreateInfo *ci, const vkf_dec
     }
 }
 
-int vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -267,7 +267,7 @@ static VkResult bind_own(vkf_call *k, VkDevice dev, VkImage img, vkf_image *im)
     return VK_SUCCESS;
 }
 
-int vkh_vkBindImageMemory(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkBindImageMemory(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -282,7 +282,7 @@ int vkh_vkBindImageMemory(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkBindImageMemory2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkBindImageMemory2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -310,7 +310,7 @@ int vkh_vkBindImageMemory2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCreateImageView(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateImageView(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -519,7 +519,7 @@ static bool depth_uploads(vkf_call *k, VkCommandBuffer cb, uint64_t buffer, uint
     return true;
 }
 
-int vkh_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -552,7 +552,7 @@ int vkh_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCmdCopyBufferToImage2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdCopyBufferToImage2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -657,7 +657,7 @@ static VkImageCopy *copy_regions(vkf_call *k, const char *cmd, const vkf_image *
     return out;
 }
 
-int vkh_vkCmdCopyImage(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdCopyImage(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -675,7 +675,7 @@ int vkh_vkCmdCopyImage(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCmdCopyImage2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdCopyImage2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -725,7 +725,7 @@ static void depth_readback(vkf_call *k, uint64_t img, const VkImageSubresourceLa
         rl_log(RL_LOG_WARN, "vk", "a depth read back of a format %d image gives D32 float texels, not the console's 24-bit ones", (int)guest);
 }
 
-int vkh_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -744,7 +744,7 @@ int vkh_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCmdCopyImageToBuffer2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdCopyImageToBuffer2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

@@ -13,7 +13,7 @@ enum {
     UNW_D0 = 0x110,
 };
 
-int rl_arm64_unw_jumpto(rl_ctx *c, uint8_t *mem)
+uint64_t rl_arm64_unw_jumpto(rl_ctx *c, uint8_t *mem)
 {
     uint64_t b = c->x[0];
     rl_resume_regs r;

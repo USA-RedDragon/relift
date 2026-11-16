@@ -246,18 +246,18 @@ static sigjmp_buf jb;
 static void on_fault(int sig) { (void)sig; siglongjmp(jb, 1); }
 static uint8_t buf[WINDOW] __attribute__((aligned(64)));
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { missed = 1; miss = c->pc; } return RL_OK; }
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { return rl_dispatch_miss(c, mem); }
-int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm) { (void)c; (void)mem; (void)imm; events |= 4; return RL_PENDING; }
-int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (void)mem; (void)pc; (void)insn; events |= 1; return RL_PENDING; }
-int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (void)mem; (void)pc; (void)insn; events |= 2; return RL_PENDING; }
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { missed = 1; miss = c->pc; } return RL_OK; }
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { return rl_dispatch_miss(c, mem); }
+int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm) { (void)mem; (void)imm; events |= 4; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
+int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)mem; (void)pc; (void)insn; events |= 1; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
+int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)mem; (void)pc; (void)insn; events |= 2; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
 uint64_t rl_mrs_cntpct(rl_ctx *c) { (void)c; events |= 8; return 0; }
 void rl_msr_fpcr(rl_ctx *c, uint64_t v) { events |= 8; c->fpcr = (uint32_t)v; }
 void rl_wfe(rl_ctx *c) { (void)c; events |= 8; }
 void rl_preempt(rl_ctx *c) { c->time.budget = INT64_MAX; }
 int rl_arm64_fp_flags(void) { return 0; }
 int rl_arm64_fp_flags_on;
-int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn) { return fn(c, mem); }
+uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc) { if (to == RL_PENDING && c->pend.kind != RL_PEND_NONE) return RL_PENDING; c->pc = pc; c->pend.pc = to; c->pend.sp = RL_SP_NONE; c->pend.kind = RL_PEND_REDIRECT; return RL_PENDING; }
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn) { (void)c; (void)mem; (void)fn; abort(); }
 
 static void fill(uint64_t seed)
@@ -348,10 +348,9 @@ int main(int argc, char **argv)
             return 3;
         uint64_t res[4 + CTX];
         if (sigsetjmp(jb, 1) == 0) {
-            int r = cases[rec[0]](&ctx, mem);
-            if (r == RL_PENDING && ctx.pend.kind == RL_PEND_REDIRECT)
-                r = RL_OK;
-            res[0] = (uint64_t)r;
+            uint64_t r = cases[rec[0]](&ctx, mem);
+            int pending = r == RL_PENDING && ctx.pend.kind != RL_PEND_NONE && ctx.pend.kind != RL_PEND_REDIRECT;
+            res[0] = pending ? RL_PENDING : RL_OK;
         } else {
             res[0] = UINT64_MAX;
             events |= 16;

@@ -94,12 +94,12 @@ typedef struct gbx {
 static gbx G;
 
 #ifndef RL_GB_LIFTED_ONLY
-static int interp(rl_ctx *c, uint8_t *mem);
+static uint64_t interp(rl_ctx *c, uint8_t *mem);
 #endif
-static int unlifted(rl_ctx *c, uint8_t *mem);
-static int ram_fn(rl_ctx *c, uint8_t *mem);
+static uint64_t unlifted(rl_ctx *c, uint8_t *mem);
+static uint64_t ram_fn(rl_ctx *c, uint8_t *mem);
 
-static int window_fn(rl_ctx *c, uint8_t *mem);
+static uint64_t window_fn(rl_ctx *c, uint8_t *mem);
 
 const rl_gbx_stats *rl_gbx_stats_get(void) { return &G.st; }
 
@@ -306,9 +306,9 @@ static rl_fn find(uint16_t pc)
     return f ? f : unlifted;
 }
 
-static int window_fn(rl_ctx *c, uint8_t *mem) { RL_MUSTTAIL return find(c->pc)(c, mem); }
+static uint64_t window_fn(rl_ctx *c, uint8_t *mem) { RL_MUSTTAIL return find(c->pc)(c, mem); }
 
-static int sled_fn(rl_ctx *c, uint8_t *mem);
+static uint64_t sled_fn(rl_ctx *c, uint8_t *mem);
 
 int rl_gbx_add_ram(uint16_t pc, uint16_t op, rl_fn fn)
 {
@@ -536,7 +536,7 @@ int rl_gbx_add_unit(const rl_unit *u, uint32_t bank)
 }
 
 /** @brief The dispatch miss: lifted RAM code for the open instruction, else unlifted. */
-static int miss_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t miss_fn(rl_ctx *c, uint8_t *mem)
 {
     if (c->pc >= WINDOW_END && c->pc <= 0xFFFF && G.ram_n[c->pc - WINDOW_END])
         RL_MUSTTAIL return ram_fn(c, mem);
@@ -965,7 +965,7 @@ int rl_gb_sync(rl_ctx *c, uint8_t *mem, uint64_t next, uint32_t info)
 }
 
 /** @brief Lifted RAM code: the function for the open instruction at c->pc, else the interpreter. */
-static int ram_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t ram_fn(rl_ctx *c, uint8_t *mem)
 {
     rl_fn f = ram_enter(c, (uint16_t)c->pc);
     if (f)
@@ -979,7 +979,7 @@ static int ram_fn(rl_ctx *c, uint8_t *mem)
  * of its own, as lifted nop instructions would, until the next is not in a
  * sled.
  */
-static int sled_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t sled_fn(rl_ctx *c, uint8_t *mem)
 {
     uint16_t pc = (uint16_t)c->pc;
     for (;;) {
@@ -1019,7 +1019,7 @@ int rl_gb_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
 }
 
 /** @brief An open instruction with no lifted code: the interpreter, or the stop in a build without it. */
-static int unlifted(rl_ctx *c, uint8_t *mem)
+static uint64_t unlifted(rl_ctx *c, uint8_t *mem)
 {
 #ifdef RL_GB_LIFTED_ONLY
     (void)mem;
@@ -1046,7 +1046,7 @@ static int region(uint16_t pc) { return pc < WINDOW_END ? RL_GBX_ROM : RL_GBX_RA
  * lifted function, which it calls when a call got there and goes on in
  * otherwise.
  */
-static int interp(rl_ctx *c, uint8_t *mem)
+static uint64_t interp(rl_ctx *c, uint8_t *mem)
 {
     uint16_t base = c->sp;
     G.st.interp_entries[region(G.ipc)]++;

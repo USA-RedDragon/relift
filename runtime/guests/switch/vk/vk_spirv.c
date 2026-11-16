@@ -160,7 +160,7 @@ void vkf_spirv_device_features(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd, VkD
     ci->pEnabledFeatures = f;
 }
 
-int vkh_vkCreateShaderModule(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateShaderModule(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

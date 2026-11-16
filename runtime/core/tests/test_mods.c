@@ -8,10 +8,10 @@
 #include <relift/mods.h>
 #include <relift/settings.h>
 
-static int v0(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
-static int v1(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
-static int v2(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 2; }
-static int v3(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 3; }
+static uint64_t v0(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
+static uint64_t v1(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
+static uint64_t v2(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 2; }
+static uint64_t v3(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 3; }
 
 static rl_fn g_slot = v0;
 static const uint16_t g_fn_mods[] = {0, 1};

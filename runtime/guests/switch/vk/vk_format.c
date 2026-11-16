@@ -296,7 +296,7 @@ void vkf_depth_end_pass(vkf_call *k)
         o->depth_now = false;
 }
 
-int vkh_vkCmdSetDepthBias(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdSetDepthBias(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

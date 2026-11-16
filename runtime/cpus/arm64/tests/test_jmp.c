@@ -8,6 +8,13 @@
 #include "arm64.h"
 #include "runner.h"
 
+
+#define CHECK_RET(call)               \
+    do {                              \
+        uint64_t want_ = c->x[30];    \
+        CHECK_EQ(call, want_);        \
+    } while (0)
+
 static const rl_guest_desc jmp_guest = {
     .name = "arm64-jmp-test",
     .page_size = 0x4000,
@@ -71,13 +78,13 @@ static RL_LIFTED(g_inner)
     c->x[1] = g_val;
     c->sp = sp;
     c->x[30] = INNER_AFTER_LONGJMP;
-    int rc = rl_arm64_longjmp(c, mem);
-    if (RL_UNLIKELY(rc))
-        return RL_PENDING;
+    uint64_t rc = rl_arm64_longjmp(c, mem);
+    if (RL_UNLIKELY(rc != INNER_AFTER_LONGJMP))
+        return rl_arm64_ret_elsewhere(c, rc, INNER_AFTER_LONGJMP - 4);
     g_inner_ran_after++;
     c->x[30] = rl_ld64(mem, sp + 8);
     c->sp = sp + 16;
-    return RL_OK;
+    return rl_arm64_ret(c);
 }
 
 static RL_LIFTED(g_middle)
@@ -89,8 +96,9 @@ static RL_LIFTED(g_middle)
         c->x[0] = JB_MIDDLE;
         c->sp = sp;
         c->x[30] = MIDDLE_AFTER_SETJMP;
-        int rc = rl_arm64_setjmp(c, mem);
-        if (RL_UNLIKELY(rc)) {
+        uint64_t rc = rl_arm64_setjmp(c, mem);
+        if (RL_UNLIKELY(rc != MIDDLE_AFTER_SETJMP)) {
+            rl_arm64_ret_elsewhere(c, rc, MIDDLE_AFTER_SETJMP - 4);
             if (c->pend.sp == sp)
                 goto lp_dispatch;
             return RL_PENDING;
@@ -103,8 +111,9 @@ static RL_LIFTED(g_middle)
     c->x[20] = 0x2020;
     c->sp = sp;
     c->x[30] = MIDDLE_AFTER_INNER;
-    int rc = g_inner(c, mem);
-    if (g_middle_checks && RL_UNLIKELY(rc)) {
+    uint64_t rc = g_inner(c, mem);
+    if (g_middle_checks && RL_UNLIKELY(rc != MIDDLE_AFTER_INNER)) {
+        rl_arm64_ret_elsewhere(c, rc, MIDDLE_AFTER_INNER - 4);
         if (g_middle_setjmp && c->pend.sp == sp)
             goto lp_dispatch;
         return RL_PENDING;
@@ -113,7 +122,7 @@ static RL_LIFTED(g_middle)
 out:
     c->x[30] = rl_ld64(mem, sp + 8);
     c->sp = sp + 32;
-    return RL_OK;
+    return rl_arm64_ret(c);
 lp_dispatch:
     x0 = c->x[0];
     sp = c->sp;
@@ -136,8 +145,9 @@ static RL_LIFTED(g_outer)
     c->x[0] = JB_OUTER;
     c->sp = sp;
     c->x[30] = OUTER_AFTER_SETJMP;
-    int rc = rl_arm64_setjmp(c, mem);
-    if (RL_UNLIKELY(rc)) {
+    uint64_t rc = rl_arm64_setjmp(c, mem);
+    if (RL_UNLIKELY(rc != OUTER_AFTER_SETJMP)) {
+        rl_arm64_ret_elsewhere(c, rc, OUTER_AFTER_SETJMP - 4);
         if (c->pend.sp == sp)
             goto lp_dispatch;
         return RL_PENDING;
@@ -151,7 +161,8 @@ at_1010:
     c->sp = sp;
     c->x[30] = OUTER_AFTER_MIDDLE;
     rc = g_middle(c, mem);
-    if (RL_UNLIKELY(rc)) {
+    if (RL_UNLIKELY(rc != OUTER_AFTER_MIDDLE)) {
+        rl_arm64_ret_elsewhere(c, rc, OUTER_AFTER_MIDDLE - 4);
         if (c->pend.sp == sp)
             goto lp_dispatch;
         return RL_PENDING;
@@ -162,7 +173,7 @@ out:
     c->x[19] = x19;
     c->x[30] = rl_ld64(mem, sp + 8);
     c->sp = sp + 48;
-    return RL_OK;
+    return rl_arm64_ret(c);
 lp_dispatch:
     x0 = c->x[0];
     x19 = c->x[19];
@@ -188,7 +199,7 @@ TEST(jmp_longjmp_returns_to_the_setjmp_frame)
     rl_ctx *c = boot();
     CHECK(c != NULL);
     c->x[30] = 0x9990;
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    CHECK_RET(g_outer(c, g_mem));
     CHECK_EQ(c->x[2], 42);
     CHECK_EQ(c->x[19], 0x1919);
     CHECK_EQ(c->v[8].d[0], D8_VALUE);
@@ -209,7 +220,7 @@ TEST(jmp_buffer_holds_the_saved_registers)
         c->v[i].d[0] = 0xD00u + (unsigned)i;
     c->sp = 0x7770;
     c->x[0] = JB_OUTER;
-    CHECK_EQ(rl_arm64_setjmp(c, g_mem), RL_OK);
+    CHECK_RET(rl_arm64_setjmp(c, g_mem));
     CHECK_EQ(c->x[0], 0);
     CHECK_EQ(rl_ld64(g_mem, JB_OUTER + 0), 0x113);
     CHECK_EQ(rl_ld64(g_mem, JB_OUTER + 88), 0x11E);
@@ -224,10 +235,10 @@ TEST(jmp_zero_value_becomes_one)
     rl_ctx *c = boot();
     CHECK(c != NULL);
     g_val = 0;
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    CHECK_RET(g_outer(c, g_mem));
     CHECK_EQ(c->x[2], 1);
     g_val = 0x100000000u - 1u;
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    CHECK_RET(g_outer(c, g_mem));
     CHECK_EQ(c->x[2], 0xFFFFFFFFu);
 }
 
@@ -236,7 +247,7 @@ TEST(jmp_passes_a_frame_with_its_own_resume_point)
     rl_ctx *c = boot();
     CHECK(c != NULL);
     g_middle_setjmp = 1;
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    CHECK_RET(g_outer(c, g_mem));
     CHECK_EQ(c->x[2], 42);
     CHECK_EQ(c->x[19], 0x1919);
     CHECK_EQ(g_middle_ran_after, 0);
@@ -247,7 +258,7 @@ TEST(jmp_to_a_returned_frame_reaches_the_thread_entry)
 {
     rl_ctx *c = boot();
     CHECK(c != NULL);
-    CHECK_EQ(g_setjmp_and_return(c, g_mem), RL_OK);
+    CHECK_EQ(g_setjmp_and_return(c, g_mem), OUTER_AFTER_SETJMP);
     uint64_t saved_sp = rl_ld64(g_mem, JB_OUTER + 96);
     c->sp = STACK_TOP - 0x200;
     CHECK_EQ(g_middle(c, g_mem), RL_PENDING);
@@ -281,7 +292,7 @@ TEST(jmp_layout_is_the_guest_libcs)
     c->sp = 0x6660;
     c->v[15].d[0] = 0xCC;
     c->x[0] = JB_OUTER;
-    CHECK_EQ(rl_arm64_setjmp(c, g_mem), RL_OK);
+    CHECK_RET(rl_arm64_setjmp(c, g_mem));
     CHECK_EQ(rl_ld64(g_mem, JB_OUTER + 16), 0xAA);
     CHECK_EQ(rl_ld64(g_mem, JB_OUTER + 104), 0xBB);
     CHECK_EQ(rl_ld64(g_mem, JB_OUTER + 8), 0x6660);
@@ -305,7 +316,7 @@ TEST(jmp_control_a_dropped_check_runs_code_longjmp_skipped)
     rl_ctx *c = boot();
     CHECK(c != NULL);
     g_middle_checks = 0;
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    CHECK_RET(g_outer(c, g_mem));
     CHECK_EQ(g_middle_ran_after, 1);
     CHECK(c->x[2] != 42);
 }

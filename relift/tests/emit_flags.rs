@@ -126,8 +126,8 @@ extern const unsigned case_count;
 static uint8_t buf[WINDOW] __attribute__((aligned(64)));
 static int fatal;
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
 int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm) { (void)c; (void)mem; (void)imm; abort(); }
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (void)mem; (void)pc; (void)insn; fatal = 1; return RL_PENDING; }
 int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...) { (void)c; (void)tag; (void)fmt; fatal = 1; return RL_PENDING; }
@@ -138,7 +138,7 @@ void rl_wfe(rl_ctx *c) { (void)c; }
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn) { (void)c; (void)mem; (void)fn; abort(); }
 int rl_arm64_fp_flags_on;
 int rl_arm64_fp_flags(void) { return rl_arm64_fp_flags_on; }
-int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn) { return fn(c, mem); }
+uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc) { if (to == RL_PENDING && c->pend.kind != RL_PEND_NONE) return RL_PENDING; c->pc = pc; c->pend.pc = to; c->pend.sp = RL_SP_NONE; c->pend.kind = RL_PEND_REDIRECT; return RL_PENDING; }
 
 static void load(rl_ctx *c, const uint64_t *r)
 {
@@ -176,7 +176,7 @@ int main(int argc, char **argv)
         load(&a, rec + 3);
         rl_arm64_fp_flags_on = 1;
         rl_fp_host_clear();
-        int ra = cases[rec[0]](&a, mem);
+        uint64_t ra = cases[rec[0]](&a, mem);
         uint32_t fa = (a.fpsr | rl_fp_host_flags()) & 0x9Fu;
         rl_fp_host_clear();
         runs++;

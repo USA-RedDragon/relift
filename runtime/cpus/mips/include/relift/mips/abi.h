@@ -544,11 +544,11 @@ static inline uint64_t rl_mips_fcvt(uint64_t x, unsigned from, unsigned to)
 }
 
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
-RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 /** @brief Closes the innermost host frame: the target of rl_indirect for a return. */
-RL_RUNTIME_API int rl_mips_return(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_mips_return(rl_ctx *c, uint8_t *mem);
 /** @brief Returns RL_PENDING: the target of a transfer that leaves with the pending record set. */
-RL_RUNTIME_API int rl_mips_pending(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_mips_pending(rl_ctx *c, uint8_t *mem);
 
 /** @brief The host function for guest address target, or NULL when none is mapped. */
 static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
@@ -599,7 +599,7 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
  * address of the transferring instruction in c->pend.pc. Has the lifted
  * signature so the miss stays a tail call.
  */
-RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 #ifdef RL_N64_TRACE
 /** @brief Called at every lifted call with its return address when set (a development trace); NULL by default. Exists only in builds that define RL_N64_TRACE. */
 RL_RUNTIME_API extern void (*rl_mips_call_trace)(rl_ctx *c, uint64_t ret);

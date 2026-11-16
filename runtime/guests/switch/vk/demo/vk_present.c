@@ -556,7 +556,7 @@ static int run(void)
     return 0;
 }
 
-static int entry(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t entry(rl_ctx *restrict c, uint8_t *mem)
 {
     g_c = c;
     g_mem = mem;

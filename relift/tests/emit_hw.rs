@@ -170,7 +170,7 @@ static uint64_t miss;
 static int missed;
 static int taken;
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { missed = 1; miss = c->pc; } return RL_OK; }
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { missed = 1; miss = c->pc; } return RL_OK; }
 
 static void log4(uint64_t k, uint64_t a, uint64_t b, uint64_t t)
 {

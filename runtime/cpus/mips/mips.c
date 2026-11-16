@@ -204,7 +204,7 @@ uint64_t rl_mips_irq_return(rl_ctx *c, uint8_t *mem, uint64_t expected)
     return c->pc;
 }
 
-int rl_mips_return(rl_ctx *c, uint8_t *mem)
+uint64_t rl_mips_return(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->depth--;
@@ -212,7 +212,7 @@ int rl_mips_return(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-int rl_mips_pending(rl_ctx *c, uint8_t *mem)
+uint64_t rl_mips_pending(rl_ctx *c, uint8_t *mem)
 {
     (void)c;
     (void)mem;
@@ -307,7 +307,7 @@ static const rl_cpu_desc g_mips = {
 
 const rl_cpu_desc *rl_mips_cpu(void) { return &g_mips; }
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     rl_fn f = g_lookup_hook ? g_lookup_hook(c, c->pc) : NULL;
     if (f)
@@ -316,7 +316,7 @@ int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
     return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
 }
 
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
     g_stats.misses++;
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };

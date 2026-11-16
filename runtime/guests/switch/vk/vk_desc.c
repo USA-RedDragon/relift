@@ -49,7 +49,7 @@ static void dpool_free(vkf_dpool *p)
     free(p);
 }
 
-int vkh_vkCreateDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -86,7 +86,7 @@ static bool pool_full(VkResult r) { return r == VK_ERROR_OUT_OF_POOL_MEMORY || r
 
 static uint32_t twice(uint32_t v) { return v > UINT32_MAX / 2 ? UINT32_MAX : v * 2; }
 
-int vkh_vkAllocateDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkAllocateDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -140,7 +140,7 @@ int vkh_vkAllocateDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -179,7 +179,7 @@ int vkh_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkResetDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkResetDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -210,7 +210,7 @@ static void destroy_extra(vkf_call *k, VkDevice dev, vkf_dpool *p)
         VKF_FN(k->fns, vkDestroyDescriptorPool)(dev, p->extra[i], NULL);
 }
 
-int vkh_vkDestroyDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroyDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -293,7 +293,7 @@ static void sort_bindings(vkf_call *k, VkDescriptorSetLayoutCreateInfo *ci)
     }
 }
 
-int vkh_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -315,7 +315,7 @@ int vkh_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetDescriptorSetLayoutSupport(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetDescriptorSetLayoutSupport(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

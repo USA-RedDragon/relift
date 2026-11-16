@@ -60,7 +60,7 @@ typedef struct { uint32_t key; uint16_t at; } variant;
 static uint8_t pending(void *o) { (void)o; return 0; }
 
 /* The call pushed its return address; this host function is the RET. */
-int zex_bdos(rl_ctx *c, uint8_t *m)
+uint64_t zex_bdos(rl_ctx *c, uint8_t *m)
 {
     if (c->c == 2) {
         putchar(c->e);
@@ -73,7 +73,7 @@ int zex_bdos(rl_ctx *c, uint8_t *m)
     return RL_OK;
 }
 
-int zex_iut(rl_ctx *c, uint8_t *m)
+uint64_t zex_iut(rl_ctx *c, uint8_t *m)
 {
     uint32_t key = m[0x1d42] | (uint32_t)m[0x1d43] << 8 | (uint32_t)m[0x1d44] << 16 | (uint32_t)m[0x1d45] << 24;
     size_t lo = 0, hi = sizeof iut / sizeof iut[0];
@@ -89,7 +89,7 @@ int zex_iut(rl_ctx *c, uint8_t *m)
     RL_MUSTTAIL return f(c, m);
 }
 
-int zex_and(rl_ctx *c, uint8_t *m)
+uint64_t zex_and(rl_ctx *c, uint8_t *m)
 {
     if (m[0x1d64] != 0xE6)
         return rl_guest_fatal(c, "zex", "the flag mask AND was overwritten");

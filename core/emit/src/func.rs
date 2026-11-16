@@ -100,12 +100,8 @@ struct Ctx<'a> {
     /// The guest address of the instruction being written: the site a
     /// transfer through dispatch names when it misses, or [`SITE_NONE`].
     site: u64,
-    /// The return check, when the frontend has one, and whether a tail
-    /// transfer must check the link register against `rl_ra` (it may have
-    /// changed since entry).
-    link: Option<(ReturnLink, bool)>,
-    /// The returns that need no check ([`entry_link_returns`]).
-    plain: &'a BTreeSet<u64>,
+    /// The return check, when the frontend has one.
+    link: Option<ReturnLink>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -185,12 +181,8 @@ impl Ctx<'_> {
             if let Some((s, k)) = self.split {
                 let to = s.piece_of[&t];
                 if to != k {
-                    let ra = match self.link {
-                        Some((l, _)) => format!(" {} = rl_ra;", l.slot),
-                        None => String::new(),
-                    };
                     return format!(
-                        "{}c->pc = UINT64_C({t:#x});{ra} RL_MUSTTAIL return {}(c, mem);",
+                        "{}c->pc = UINT64_C({t:#x}); RL_MUSTTAIL return {}(c, mem);",
                         self.lead(),
                         s.names[to]
                     );
@@ -202,9 +194,6 @@ impl Ctx<'_> {
             self.callees.insert(t);
             return self.tail(&target.name.clone());
         }
-        if let Some((_, true)) = self.link {
-            return self.tail(&format!("rl_indirect(c, UINT64_C({t:#x}))"));
-        }
         format!(
             "{}RL_JUMP(UINT64_C({t:#x}), UINT64_C({:#x}));",
             self.lead(),
@@ -212,34 +201,15 @@ impl Ctx<'_> {
         )
     }
 
-    /// A tail transfer to the C function `f` that leaves the function: a
-    /// tail call while the link register holds the address the function's
-    /// caller expects, else the runtime's far jump.
+    /// A tail transfer to the C function `f` that leaves the function.
     fn tail(&self, f: &str) -> String {
-        match self.link {
-            Some((l, true)) => format!(
-                "{}if (RL_UNLIKELY({} != rl_ra)) return {}(c, mem, {f}); RL_MUSTTAIL return {f}(c, mem);",
-                self.lead(),
-                home(self.fe, l.reg),
-                l.far_jump
-            ),
-            _ => format!("{}RL_MUSTTAIL return {f}(c, mem);", self.lead()),
-        }
+        format!("{}RL_MUSTTAIL return {f}(c, mem);", self.lead())
     }
 
     /// The stores of the dirty registers before a jump on the same line.
     fn lead(&self) -> String {
         let s = self.store(&self.dirty);
         if s.is_empty() { s } else { s + " " }
-    }
-}
-
-/// The C lvalue of the context home of register `r`, which must be a
-/// field.
-fn home(fe: &dyn Frontend, r: Reg) -> String {
-    match fe.home(r) {
-        Home::Field(lv) => lv,
-        Home::Flag { word, bit } => format!("(({word} >> {bit}) & 1u)"),
     }
 }
 
@@ -432,84 +402,6 @@ fn resume_points(f: &Function<'_>, targets: &Targets<'_>) -> BTreeSet<u64> {
         .collect()
 }
 
-/// The returns of `f` whose target is, by register dataflow, the link
-/// register's value at the function's entry: on every path from the entry
-/// no instruction writes it (no `Set`, call or trap), no other entry (a
-/// landing pad, a resume point, every instruction under `anywhere`, the
-/// instruction after one that does not lift) reaches the return, and the
-/// return's target is the block's `Get` of it before any `Set`. Such a
-/// return goes where the C caller resumes, so it needs no check.
-fn entry_link_returns(
-    f: &Function<'_>,
-    targets: &Targets<'_>,
-    blocks: &BTreeMap<u64, Block>,
-    resumes: &BTreeSet<u64>,
-    link: Reg,
-    anywhere: bool,
-) -> BTreeSet<u64> {
-    if anywhere {
-        return BTreeSet::new();
-    }
-    let pcs: Vec<u64> = f.insts.keys().copied().collect();
-    let mut unknown: BTreeSet<u64> = resumes.clone();
-    let mut preds: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
-    for (k, &pc) in pcs.iter().enumerate() {
-        let b = blocks.get(&pc);
-        if b.is_none() {
-            unknown.extend(pcs.get(k + 1));
-        }
-        for t in successors(f, pc, b) {
-            if inside(f, targets, t) {
-                preds.entry(t).or_default().push(pc);
-            }
-        }
-    }
-    let sets = |insts: &[relift_ir::Inst]| {
-        insts
-            .iter()
-            .any(|i| matches!(i.op, Op::Set(r, _) if r == link))
-    };
-    let kills =
-        |b: &Block| matches!(b.exit.flow, Flow::Call { .. } | Flow::Trap(_)) || sets(&b.insts);
-    let mut kept: BTreeSet<u64> = pcs
-        .iter()
-        .copied()
-        .filter(|pc| !unknown.contains(pc))
-        .collect();
-    loop {
-        let before = kept.len();
-        let now: BTreeSet<u64> = kept
-            .iter()
-            .copied()
-            .filter(|pc| {
-                let from = preds.get(pc).map_or(&[][..], Vec::as_slice);
-                (*pc == f.entry || !from.is_empty())
-                    && from
-                        .iter()
-                        .all(|p| kept.contains(p) && blocks.get(p).is_some_and(|b| !kills(b)))
-            })
-            .collect();
-        kept = now;
-        if kept.len() == before {
-            break;
-        }
-    }
-    kept.into_iter()
-        .filter(|pc| {
-            let Some(b) = blocks.get(pc) else {
-                return false;
-            };
-            let (Flow::Return, Next::Dynamic(v)) = (b.exit.flow, b.exit.next) else {
-                return false;
-            };
-            b.insts
-                .get(v.index())
-                .is_some_and(|i| i.op == Op::Get(link))
-                && !sets(&b.insts[..v.index()])
-        })
-        .collect()
-}
-
 /// The constant addresses the instruction at `pc` may continue at.
 fn successors(f: &Function<'_>, pc: u64, b: Option<&Block>) -> Vec<u64> {
     let Some(b) = b else {
@@ -563,16 +455,12 @@ pub(crate) fn emit_function(
     let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
     let shape = Shape::of(fe);
-    let plain = fe.return_link().map_or_else(BTreeSet::new, |l| {
-        entry_link_returns(f, targets, &blocks, &resumes, l.reg, anywhere)
-    });
     let env = Env {
         fe,
         f,
         targets,
         blocks: &blocks,
         resumes: &resumes,
-        plain: &plain,
         io,
         anywhere,
         in_context: opts.regs_in_context,
@@ -616,14 +504,10 @@ pub(crate) fn emit_function(
             .map(|i| format!("{}_part{}", f.name, i + 1))
             .collect(),
     };
-    let ra = match fe.return_link() {
-        Some(l) => format!("    {} = {};\n", l.slot, home(fe, l.reg)),
-        None => String::new(),
-    };
     let mut pieces = vec![Piece {
         name: f.name.clone(),
         text: format!(
-            "\nRL_TEXT RL_LIFTED({})\n{{\n{ra}    c->pc = UINT64_C({:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
+            "\nRL_TEXT RL_LIFTED({})\n{{\n    c->pc = UINT64_C({:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
             f.name, f.entry, split.names[split.piece_of[&f.entry]]
         ),
         first_pc: None,
@@ -672,9 +556,6 @@ pub(crate) struct Env<'a> {
     pub(crate) targets: &'a Targets<'a>,
     pub(crate) blocks: &'a BTreeMap<u64, Block>,
     resumes: &'a BTreeSet<u64>,
-    /// The returns that go to the entry's link register value
-    /// ([`entry_link_returns`]).
-    plain: &'a BTreeSet<u64>,
     io: &'a IoMap,
     anywhere: bool,
     in_context: bool,
@@ -736,14 +617,6 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if has_fp {
         used.extend(fe.fp_state());
     }
-    let returns = pcs
-        .iter()
-        .filter_map(|pc| blocks.get(pc))
-        .any(|b| b.exit.flow == Flow::Return && !env.plain.contains(&b.pc));
-    let link = fe.return_link().and_then(|l| {
-        let moved = split.is_some() || written.contains(&l.reg);
-        (split.is_some() || returns || moved).then_some((l, moved))
-    });
     used.extend(hoisted.iter().copied());
     used.extend(lp_reg);
     let regs = fe.regs();
@@ -818,18 +691,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if let Some(clk) = clock {
         let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
     }
-    if let Some((l, _)) = link {
-        let from = if split.is_some() {
-            l.slot.to_string()
-        } else {
-            home(fe, l.reg)
-        };
-        let _ = writeln!(
-            t,
-            "    const uint64_t rl_ra = RL_LOAD_LINK({from});\n    (void)rl_ra;"
-        );
-    }
-    t.push_str("    int rc;\n    (void)rc;\n");
+    t.push_str("    uint64_t rc;\n    (void)rc;\n");
     if plan.shared().is_some() {
         t.push_str("    unsigned rl_k = 0;\n");
     }
@@ -866,8 +728,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         used: &used,
         slow: Vec::new(),
         site: 0,
-        link,
-        plain: env.plain,
+        link: fe.return_link(),
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -1218,7 +1079,19 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     };
     cx.dirty = cx.plan.dirty_out(b.pc);
     let out_store = cx.store(&cx.dirty);
-    let after = |cx: &mut Ctx<'_>, s: &mut String, call: String, to: u64| {
+    let (link, lp_sp) = (cx.link, cx.lp_sp.clone());
+    let returned = |ret: u64| match (link, &lp_sp) {
+        (Some(l), Some(sp)) => format!(
+            "    if (RL_UNLIKELY(rc != UINT64_C({ret:#x}))) {{\n        {}(c, rc, UINT64_C({:#x}));\n        if (c->pend.sp == {sp})\n            goto lp_dispatch;\n        return RL_PENDING;\n    }}",
+            l.elsewhere, b.pc
+        ),
+        (Some(l), None) => format!(
+            "    if (RL_UNLIKELY(rc != UINT64_C({ret:#x})))\n        return {}(c, rc, UINT64_C({:#x}));",
+            l.elsewhere, b.pc
+        ),
+        (None, _) => check.clone(),
+    };
+    let after = |cx: &mut Ctx<'_>, s: &mut String, call: String, to: u64, check: &str| {
         let rl = cx.reload(&cx.plan.live_at(to).without(cx.plan.kept(b.pc)));
         let _ = writeln!(
             s,
@@ -1242,22 +1115,13 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         s.push_str("    RL_LOOP_FENCE();\n");
     }
     match b.exit.flow {
-        Flow::Return => match cx.link {
-            Some((l, _)) if !cx.plain.contains(&b.pc) => {
-                let _ = writeln!(
-                    s,
-                    "    uint64_t rl_to = {};\n{}    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return {}(c, rl_to, UINT64_C({:#x}));",
-                    next_expr(b, &val),
-                    Ctx::line(&out_store, "    "),
-                    l.far_return,
-                    b.pc
-                );
-            }
-            _ => {
-                s.push_str(&Ctx::line(&out_store, "    "));
-                s.push_str("    return RL_OK;\n");
-            }
-        },
+        Flow::Return => {
+            s.push_str(&Ctx::line(&out_store, "    "));
+            let _ = match cx.link {
+                Some(_) => writeln!(s, "    return {};", next_expr(b, &val)),
+                None => writeln!(s, "    return RL_OK;"),
+            };
+        }
         Flow::Call { ret } => {
             let call = match b.exit.next {
                 Next::Const(t) if let Some(target) = cx.targets.get(&t) => {
@@ -1268,7 +1132,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 Next::Dynamic(v) => format!("rl_indirect(c, {})(c, mem)", val(v)),
                 Next::Select { .. } => return Err((raw, "a conditional call".into())),
             };
-            after(cx, &mut s, call, ret);
+            after(cx, &mut s, call, ret, &returned(ret));
             let _ = writeln!(s, "    {}", cx.jump(ret));
         }
         Flow::Trap(code) => {
@@ -1276,7 +1140,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 return Err((raw, "a trap with a computed resume".into()));
             };
             let trap = cx.fe.trap(code);
-            after(cx, &mut s, trap, t);
+            after(cx, &mut s, trap, t, &check);
             let _ = writeln!(s, "    {}", cx.jump(t));
         }
         Flow::Jump => match b.exit.next {
@@ -1304,18 +1168,13 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     }
                     s.push_str("    default: break;\n    }\n");
                 }
-                let _ = match cx.link {
-                    Some((_, true)) => {
-                        writeln!(s, "    {}", cx.tail(&format!("rl_indirect(c, {})", val(v))))
-                    }
-                    _ => writeln!(
-                        s,
-                        "{}    RL_JUMP({}, UINT64_C({:#x}));",
-                        Ctx::line(&out_store, "    "),
-                        val(v),
-                        b.pc
-                    ),
-                };
+                let _ = writeln!(
+                    s,
+                    "{}    RL_JUMP({}, UINT64_C({:#x}));",
+                    Ctx::line(&out_store, "    "),
+                    val(v),
+                    b.pc
+                );
             }
         },
     }

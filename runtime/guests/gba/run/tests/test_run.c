@@ -34,7 +34,7 @@ static struct {
     uint64_t cycles_after;
 } hs;
 
-static int handler(rl_ctx *c, uint8_t *mem)
+static uint64_t handler(rl_ctx *c, uint8_t *mem)
 {
     hs.handler_runs++;
     hs.handler_mode = c->m;
@@ -78,7 +78,7 @@ static void done(rl_ctx *c)
 }
 
 /** @brief Three VBlankIntrWait calls in ARM state, then stops. */
-static int swi_main(rl_ctx *c, uint8_t *mem)
+static uint64_t swi_main(rl_ctx *c, uint8_t *mem)
 {
     setup_irq(c, mem);
     c->r[4] = 0x44u;
@@ -97,7 +97,7 @@ static int swi_main(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief Spins with a sync point per instruction until two interrupts ran, then stops. */
-static int spin_main(rl_ctx *c, uint8_t *mem)
+static uint64_t spin_main(rl_ctx *c, uint8_t *mem)
 {
     setup_irq(c, mem);
     c->r[4] = 0x44u;
@@ -121,7 +121,7 @@ static const rl_fn_entry fns[] = {
 
 static rl_fn g_main;
 
-static int entry(rl_ctx *c, uint8_t *mem) { return g_main(c, mem); }
+static uint64_t entry(rl_ctx *c, uint8_t *mem) { return g_main(c, mem); }
 
 static const rl_fn_entry entries[] = {
     {0x08000000u, 4, 0, entry},
@@ -279,14 +279,14 @@ TEST(gba_run_an_irq_rising_after_the_last_access_began_waits_an_instruction)
     CHECK_EQ(hs.handler_runs, 1);
 }
 
-static int variant_a(rl_ctx *c, uint8_t *mem)
+static uint64_t variant_a(rl_ctx *c, uint8_t *mem)
 {
     (void)c;
     (void)mem;
     return 11;
 }
 
-static int variant_b(rl_ctx *c, uint8_t *mem)
+static uint64_t variant_b(rl_ctx *c, uint8_t *mem)
 {
     (void)c;
     (void)mem;

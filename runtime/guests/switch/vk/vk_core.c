@@ -83,7 +83,7 @@ void vkf_begin(vkf_call *k, rl_ctx *c, uint8_t *mem)
     t_call = k;
 }
 
-int vkf_end(vkf_call *k)
+uint64_t vkf_end(vkf_call *k)
 {
     if (k->mark.chunk) {
         t_arena.cur = k->mark.chunk;
@@ -413,7 +413,7 @@ void vkf_unknown_stype(vkf_call *k, uint32_t stype)
     rl_report_unknown(0x766b0000000000ull | stype, "vk", "pNext struct with sType %u is not forwarded; dropped from the chain", stype);
 }
 
-int vkf_bad_handle(vkf_call *k, int cmd, uint64_t g)
+uint64_t vkf_bad_handle(vkf_call *k, int cmd, uint64_t g)
 {
     rl_log(RL_LOG_ERROR, "vk", "%s: 0x%llx is not a handle the guest got from the forwarding layer", vkg_cmds[cmd].name,
            (unsigned long long)g);
@@ -477,7 +477,7 @@ VkResult vkf_result(vkf_call *k, int cmd, VkResult r)
     return r;
 }
 
-int vkf_no_fn(vkf_call *k, int cmd)
+uint64_t vkf_no_fn(vkf_call *k, int cmd)
 {
     if (rl_once(0x766b6e6f666e0000ull | (uint64_t)cmd))
         rl_log(RL_LOG_ERROR, "vk", "%s: the host has no such command", vkg_cmds[cmd].name);
@@ -621,7 +621,7 @@ int rl_vk_device_map_mode(uint64_t guest_device)
 
 static bool emulated(int cmd) { return cmd == VKG_vkCreateViSurfaceNN; }
 
-int vkh_vkGetInstanceProcAddr(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetInstanceProcAddr(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -651,7 +651,7 @@ int vkh_vkGetInstanceProcAddr(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetDeviceProcAddr(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetDeviceProcAddr(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -737,7 +737,7 @@ static int32_t answer_exts(vkf_call *k, const VkExtensionProperties *list, uint3
     return w < n ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-int vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -760,7 +760,7 @@ int vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -793,7 +793,7 @@ int vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
 }
 
 
-int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -880,7 +880,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkDestroyInstance(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroyInstance(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -908,7 +908,7 @@ static void free_decode_maps(vkf_dev *d)
     pthread_mutex_destroy(&d->decode_lock);
 }
 
-int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1033,7 +1033,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1063,7 +1063,7 @@ int vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
 }
 
 
-int vkh_vkAllocateCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkAllocateCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1094,7 +1094,7 @@ static void *cb_secondary(const vkf_obj *o) { return o->as_primary ? o->other : 
 /** @brief A secondary command buffer's primary twin, or NULL. */
 static void *cb_twin(const vkf_obj *o) { return o->as_primary ? o->host : o->other; }
 
-int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1126,7 +1126,7 @@ int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

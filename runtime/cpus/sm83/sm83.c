@@ -39,7 +39,7 @@ void rl_sm83_set_ie(rl_ctx *c, uint8_t lines)
     apply_mask(c);
 }
 
-int rl_sm83_halt(rl_ctx *c, uint8_t *mem)
+uint64_t rl_sm83_halt(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     struct rl_thread *t = rl_common(c)->thread;
@@ -58,7 +58,7 @@ int rl_sm83_halt(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-int rl_sm83_stop(rl_ctx *c, uint8_t *mem)
+uint64_t rl_sm83_stop(rl_ctx *c, uint8_t *mem)
 {
     struct rl_thread *t = rl_common(c)->thread;
     rl_sched_cpu *k = t ? t->clock : NULL;
@@ -219,7 +219,7 @@ bool rl_sm83_last_miss(rl_ctx *c, rl_miss_info *m)
     return true;
 }
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     uintptr_t ret = (uintptr_t)__builtin_return_address(0);
     if (g_miss) {
@@ -232,7 +232,7 @@ int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
     return rl_core_miss(c, mem, c->pc, ret);
 }
 
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
     c->pend.pc = 0;

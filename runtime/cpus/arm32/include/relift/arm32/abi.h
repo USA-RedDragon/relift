@@ -168,9 +168,9 @@ static inline void rl_st32(uint8_t *mem, uint64_t a, uint32_t v) { memcpy(mem + 
 static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v) { memcpy(mem + a, &v, 8); }
 
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
-RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 /** @brief Closes the innermost host frame: the target of rl_indirect for a return. */
-RL_RUNTIME_API int rl_arm32_return(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_arm32_return(rl_ctx *c, uint8_t *mem);
 
 /** @brief Looks up the host function for guest address target; NULL on a miss. */
 static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
@@ -221,7 +221,7 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
  * address of the transferring instruction in c->pend.pc. Has the lifted
  * signature so the miss stays a tail call.
  */
-RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /** @brief A lifted call that returns to ret opens a host frame. */
 static inline void rl_arm32_call(rl_ctx *c, uint32_t ret)

@@ -197,7 +197,7 @@ static vkf_wsub *sub_new(const vkf_fns *fns, VkDevice dev, vkf_dev *d)
 
 static uint64_t g_begins;
 
-int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -401,7 +401,7 @@ static const VkCommandBuffer *wrap_list(vkf_call *k, VkDevice dev, vkf_dev *d, c
 
 static VkDevice queue_device(vkf_call *k) { return (VkDevice)k->obj->parent->host; }
 
-int vkh_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -429,7 +429,7 @@ int vkh_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

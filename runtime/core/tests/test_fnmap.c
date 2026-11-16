@@ -7,8 +7,8 @@
 #include "crash.h"
 #include "runner.h"
 
-static int fa(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
-static int fb(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
+static uint64_t fa(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
+static uint64_t fb(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
 
 static rl_fn_info g_info[2];
 static rl_fn_map g_m;
@@ -103,9 +103,9 @@ TEST(fnmap_report_text)
     CHECK(strstr(buf, "_ZN5guest1m1aEv+0x5 (guest::m::a())") != NULL);
 }
 
-static int pa(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
-static int pb(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
-static int pc_(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 2; }
+static uint64_t pa(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
+static uint64_t pb(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
+static uint64_t pc_(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 2; }
 
 TEST(fnmap_pieces_resolve_to_their_function_in_any_host_order)
 {

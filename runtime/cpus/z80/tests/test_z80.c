@@ -134,12 +134,12 @@ static int entry(rl_ctx *c, uint8_t *mem, uint32_t kind)
     return RL_OK;
 }
 
-static int entry_nmi(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_NMI); }
-static int entry_im0(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_IM0); }
-static int entry_im1(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_IM1); }
-static int entry_im2(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_IM2); }
+static uint64_t entry_nmi(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_NMI); }
+static uint64_t entry_im0(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_IM0); }
+static uint64_t entry_im1(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_IM1); }
+static uint64_t entry_im2(rl_ctx *c, uint8_t *mem) { return entry(c, mem, RL_Z80_ENTRY_IM2); }
 
-static int task(rl_ctx *c, uint8_t *mem)
+static uint64_t task(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     hs.landed++;
@@ -704,7 +704,7 @@ TEST(z80_a_miss_reports_the_target)
     rl_thread_free(t);
 }
 
-static int custom_miss(rl_ctx *c, uint8_t *mem)
+static uint64_t custom_miss(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->b = 9;

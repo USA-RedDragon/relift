@@ -554,7 +554,7 @@ static void host_ids(vkf_call *k, VkPhysicalDevice pd, uint64_t g)
     }
 }
 
-int vkh_vkGetPhysicalDeviceProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -569,7 +569,7 @@ int vkh_vkGetPhysicalDeviceProperties(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceProperties2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceProperties2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -645,7 +645,7 @@ static void features_of(vkf_call *k, VkPhysicalDevice pd, guest_features *g)
     }
 }
 
-int vkh_vkGetPhysicalDeviceFeatures(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceFeatures(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -660,7 +660,7 @@ int vkh_vkGetPhysicalDeviceFeatures(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceFeatures2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceFeatures2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -675,7 +675,7 @@ int vkh_vkGetPhysicalDeviceFeatures2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceMemoryProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceMemoryProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -686,7 +686,7 @@ int vkh_vkGetPhysicalDeviceMemoryProperties(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceMemoryProperties2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceMemoryProperties2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -728,7 +728,7 @@ static VkFormatProperties guest_format(vkf_call *k, VkPhysicalDevice pd, VkForma
     return g;
 }
 
-int vkh_vkGetPhysicalDeviceFormatProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceFormatProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -741,7 +741,7 @@ int vkh_vkGetPhysicalDeviceFormatProperties(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -788,7 +788,7 @@ static bool switch_has(VkFormat format, VkImageTiling tiling)
     return tiling == VK_IMAGE_TILING_LINEAR ? s.linearTilingFeatures != 0 : s.optimalTilingFeatures != 0;
 }
 
-int vkh_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -815,7 +815,7 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *me
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -849,7 +849,7 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *m
     return vkf_end(&k);
 }
 
-int vkh_vkEnumerateInstanceVersion(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkEnumerateInstanceVersion(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

@@ -64,7 +64,7 @@ static bool host_wait_flag(int *p)
 
 static int idx_of(rl_ctx *c) { return (int)c->x[0]; }
 
-static int w_count(rl_ctx *c, uint8_t *mem)
+static uint64_t w_count(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -79,7 +79,7 @@ static int w_count(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_flag(rl_ctx *c, uint8_t *mem)
+static uint64_t w_flag(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -88,7 +88,7 @@ static int w_flag(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_wait_event(rl_ctx *c, uint8_t *mem)
+static uint64_t w_wait_event(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -97,7 +97,7 @@ static int w_wait_event(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_ping(rl_ctx *c, uint8_t *mem)
+static uint64_t w_ping(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -107,7 +107,7 @@ static int w_ping(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_pong(rl_ctx *c, uint8_t *mem)
+static uint64_t w_pong(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -117,7 +117,7 @@ static int w_pong(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_migrate(rl_ctx *c, uint8_t *mem)
+static uint64_t w_migrate(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -129,7 +129,7 @@ static int w_migrate(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_yield(rl_ctx *c, uint8_t *mem)
+static uint64_t w_yield(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     for (int k = 0; k < 3; k++) {
@@ -139,7 +139,7 @@ static int w_yield(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_flag_then_sleep(rl_ctx *c, uint8_t *mem)
+static uint64_t w_flag_then_sleep(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -149,7 +149,7 @@ static int w_flag_then_sleep(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_sleep_then_flag(rl_ctx *c, uint8_t *mem)
+static uint64_t w_sleep_then_flag(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -159,17 +159,17 @@ static int w_sleep_then_flag(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_ret_twice(rl_ctx *c, uint8_t *mem)
+static uint64_t w_ret_twice(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     uint64_t ra = c->x[30];
     if (ra)
         set(&S.flag[0], 1);
     c->x[30] = ra ? 0 : c->pc;
-    return rl_arm64_ret_far(c, c->x[30], c->pc);
+    return rl_arm64_ret(c);
 }
 
-static int w_host_wait(rl_ctx *c, uint8_t *mem)
+static uint64_t w_host_wait(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
@@ -181,7 +181,7 @@ static int w_host_wait(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_lock(rl_ctx *c, uint8_t *mem)
+static uint64_t w_lock(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);

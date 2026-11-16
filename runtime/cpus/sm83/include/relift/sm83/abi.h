@@ -181,7 +181,7 @@ static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v) { memcpy(mem + 
 static inline void rl_st128(uint8_t *mem, uint64_t a, rl_u128 v) { memcpy(mem + a, &v, 16); }
 
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
-RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 
 /** @brief Looks up the host function for guest address target; NULL on a miss. */
 static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
@@ -224,7 +224,7 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
  * address of the transferring instruction in c->pend.pc. Has the lifted
  * signature so the miss stays a tail call.
  */
-RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /**
  * @brief The guest executes an instruction the SM83 does not define, or one
@@ -261,7 +261,7 @@ RL_RUNTIME_API void rl_sm83_set_ie(rl_ctx *c, uint8_t lines);
  * continues at the next instruction. Returns RL_OK, or RL_PENDING when
  * nothing could ever raise a line (the guest is stopped with a report).
  */
-RL_RUNTIME_API int rl_sm83_halt(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_sm83_halt(rl_ctx *c, uint8_t *mem);
 
 /**
  * @brief STOP, called after the lifter charged the instruction's cost (4 cycles; the lifter adds 4 more when the result
@@ -272,6 +272,6 @@ RL_RUNTIME_API int rl_sm83_halt(rl_ctx *c, uint8_t *mem);
  * RL_SM83_STOP_WAKE_CYCLES, with an interrupt pending as without. Returns 0 after a stop that ended the guest (with a
  * report) too.
  */
-RL_RUNTIME_API int rl_sm83_stop(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_sm83_stop(rl_ctx *c, uint8_t *mem);
 
 #endif

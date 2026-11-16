@@ -33,21 +33,21 @@ static void say(rl_ctx *c, uint8_t *mem, uint64_t addr, uint64_t len)
 
 static uint64_t g_code_free;
 
-static int lifted_export(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t lifted_export(rl_ctx *restrict c, uint8_t *mem)
 {
     (void)mem;
     c->x[0] = 1;
     return RL_OK;
 }
 
-static int host_export(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t host_export(rl_ctx *restrict c, uint8_t *mem)
 {
     (void)mem;
     c->x[0] = 2;
     return RL_OK;
 }
 
-static int linked_entry(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t linked_entry(rl_ctx *restrict c, uint8_t *mem)
 {
     if (rl_ld64(mem, BASE + 0x2800) == IMPORTED && rl_ld64(mem, BASE + 0x2808) == IMPORTED + 0x10 &&
         rl_ld64(mem, BASE + 0x2810) == 0)
@@ -62,7 +62,7 @@ static int linked_entry(rl_ctx *restrict c, uint8_t *mem)
 }
 
 /** @brief Mode 3: another module defines the import, so the slots keep their link-time zero. */
-static int left_entry(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t left_entry(rl_ctx *restrict c, uint8_t *mem)
 {
     if (rl_ld64(mem, BASE + 0x2800) == 0 && rl_ld64(mem, BASE + 0x2808) == 0)
         say(c, mem, BASE + 0x1F00, 9);
@@ -70,7 +70,7 @@ static int left_entry(rl_ctx *restrict c, uint8_t *mem)
     return rl_svc(c, mem, 0x07);
 }
 
-static int fake_entry(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t fake_entry(rl_ctx *restrict c, uint8_t *mem)
 {
     uint64_t x1 = c->x[1];
     if (g_mode == 2)

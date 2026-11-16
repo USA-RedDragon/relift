@@ -118,52 +118,51 @@ void rl_arm64_set_va_bits(unsigned bits) { g_va_bits = bits < 64 ? bits : 64; }
 
 static int canonical(uint64_t a) { return g_va_bits >= 64 || a >> g_va_bits == 0; }
 
+static int abort_report(rl_ctx *c, uint64_t to, uint64_t from, int call)
+{
+    return rl_guest_fatal(c, "guest",
+                          "instruction abort: return to 0x%llx %s guest pc 0x%llx, outside the %u-bit address space (a "
+                          "failed pointer authentication of a return address gives such an address)",
+                          (unsigned long long)to, call ? "from the call at" : "from the function entered at",
+                          (unsigned long long)from, g_va_bits);
+}
+
 int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry)
 {
     uint64_t ra = c->x[30];
     uint64_t pc = entry;
     for (;;) {
-        uint64_t to = c->x[30];
         c->pc = pc;
-        int r = rl_lookup(c, pc)(c, mem);
-        if (r == RL_OK) {
-            if (to == ra)
-                return RL_OK;
-            pc = to;
-            continue;
+        uint64_t to = rl_lookup(c, pc)(c, mem);
+        int call = 0;
+        if (to == RL_PENDING && c->pend.kind != RL_PEND_NONE) {
+            if (c->pend.kind != RL_PEND_REDIRECT)
+                return RL_PENDING;
+            to = c->pend.pc;
+            c->pend.kind = RL_PEND_NONE;
+            call = 1;
         }
-        if (c->pend.kind != RL_PEND_REDIRECT)
-            return r;
-        pc = c->pend.pc;
-        c->pend.kind = RL_PEND_NONE;
-        if (pc == ra)
+        if (to == ra)
             return RL_OK;
-        if (!canonical(pc))
-            return rl_guest_fatal(c, "guest",
-                                  "instruction abort: return at guest pc 0x%llx to 0x%llx, outside the %u-bit address "
-                                  "space (a failed pointer authentication of a return address gives such an address)",
-                                  (unsigned long long)c->pc, (unsigned long long)pc, g_va_bits);
+        if (!canonical(to))
+            return abort_report(c, to, call ? c->pc : pc, call);
+        pc = to;
     }
 }
 
-int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn)
+uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc)
 {
-    uint64_t to = c->x[30];
-    if (fn(c, mem) != RL_OK)
-        return RL_PENDING;
-    if (!canonical(to))
-        return rl_guest_fatal(c, "guest",
-                              "instruction abort: return to 0x%llx, outside the %u-bit address space (a failed pointer "
-                              "authentication of a return address gives such an address)",
-                              (unsigned long long)to, g_va_bits);
-    c->pend.pc = to;
-    c->pend.sp = RL_SP_NONE;
-    c->pend.kind = RL_PEND_REDIRECT;
-    c->pend.code = 0;
+    if (to != RL_PENDING || c->pend.kind == RL_PEND_NONE) {
+        c->pc = pc;
+        c->pend.pc = to;
+        c->pend.sp = RL_SP_NONE;
+        c->pend.kind = RL_PEND_REDIRECT;
+        c->pend.code = 0;
+    }
     return RL_PENDING;
 }
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     if (!canonical(c->pc))
         return rl_guest_fatal(c, "guest",
@@ -177,7 +176,7 @@ int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
     return rl_core_miss_at(c, mem, &m);
 }
 
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
     c->pend.pc = 0;
@@ -187,7 +186,7 @@ int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
     return rl_core_miss_at(c, mem, &m);
 }
 
-int rl_dispatch_cold(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_cold(rl_ctx *c, uint8_t *mem)
 {
     rl_fn f = rl_core_cold(c->pc);
     if (f)
@@ -209,7 +208,7 @@ int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r)
     return RL_PENDING;
 }
 
-int rl_pad_resume(rl_ctx *c, uint8_t *mem)
+uint64_t rl_pad_resume(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->pend.pc = c->pc;

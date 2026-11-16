@@ -148,10 +148,7 @@ impl Frontend for Arm64 {
 
     fn return_link(&self) -> Option<ReturnLink> {
         Some(ReturnLink {
-            reg: regs::x(30),
-            slot: "c->ra",
-            far_return: "rl_arm64_ret_far",
-            far_jump: "rl_arm64_jump_far",
+            elsewhere: "rl_arm64_ret_elsewhere",
         })
     }
 

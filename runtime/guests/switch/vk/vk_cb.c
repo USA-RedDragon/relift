@@ -257,7 +257,7 @@ void vkh_out_VkDebugReportCallbackCreateInfoEXT(vkf_call *k, uint64_t g, const V
     (void)h;
 }
 
-int vkh_vkCreateDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -279,7 +279,7 @@ int vkh_vkCreateDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkDestroyDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroyDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -294,7 +294,7 @@ int vkh_vkDestroyDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCreateDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -316,7 +316,7 @@ int vkh_vkCreateDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkDestroyDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroyDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

@@ -160,8 +160,6 @@ struct rl_ctx {
     uint64_t disp_count;
     /** @brief Preemption clock: its budget stays positive while the thread may run on; the guest layer ends it to preempt the thread. */
     rl_time time;
-    /** @brief Expected return address of a split function: x30 at its entry, written by its stub and before each transfer between its pieces (docs/abi.md section 5.4). */
-    uint64_t ra;
 } __attribute__((aligned(64)));
 
 _Static_assert(sizeof(rl_v128) == 16, "rl_v128 size");
@@ -183,7 +181,6 @@ _Static_assert(offsetof(rl_ctx, disp_table) == 872, "disp_table");
 _Static_assert(offsetof(rl_ctx, disp_lo) == 880, "disp_lo");
 _Static_assert(offsetof(rl_ctx, disp_count) == 888, "disp_count");
 _Static_assert(offsetof(rl_ctx, time) == 896, "time");
-_Static_assert(offsetof(rl_ctx, ra) == 912, "ra");
 _Static_assert(sizeof(rl_ctx) == 960, "rl_ctx size");
 _Static_assert(_Alignof(rl_ctx) == 64, "rl_ctx alignment");
 
@@ -454,10 +451,10 @@ static inline rl_u128 rl_cas128(uint8_t *mem, uint64_t a, rl_u128 expected, rl_u
 }
 
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
-RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 
 /** @brief The function of a dev build's RL_CODE_COLD slot not dispatched to yet: logs the entry at c->pc (rl_core_cold) and runs the cold code there. */
-RL_RUNTIME_API int rl_dispatch_cold(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_cold(rl_ctx *c, uint8_t *mem);
 
 /** @brief Looks up the host function for guest address target; NULL on a miss or a misaligned target. */
 static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
@@ -501,49 +498,28 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
  * address of the transferring instruction in c->pend.pc. Has the lifted
  * signature so the miss stays a tail call.
  */
-RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /**
- * @brief Reads a link register at a function's entry for its return check
- * (docs/abi.md section 5.4). On AArch64 hosts a relaxed atomic load, which
- * clang never pairs with the load of a neighbouring field: such a pair,
- * whose halves the caller stored separately, misses store forwarding. On
- * other hosts a plain load, which the compiler can forward from the
- * caller's store once it inlines the function, so the check folds away.
+ * @brief What an A64 host function with the lifted ABI returns when it
+ * returns normally: x30, the address its caller's RET would go to (docs/abi.md
+ * section 5.4).
  */
-#if defined(__aarch64__)
-#define RL_LOAD_LINK(lv) __atomic_load_n(&(lv), __ATOMIC_RELAXED)
-#else
-#define RL_LOAD_LINK(lv) (lv)
-#endif
+static inline uint64_t rl_arm64_ret(const rl_ctx *c) { return c->x[30]; }
 
 /**
- * @brief A return to target, which is not the address the function's caller
- * expects (x30 at the function's entry), from the return instruction at pc,
- * with the context stored (docs/abi.md section 5.4): sets c->pc to pc and
- * records {RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}, so every host
- * frame returns and the runtime entry (rl_call_guest) continues at target, or
- * reports an instruction abort for a target outside the guest's virtual
- * address range (rl_arm64_set_va_bits). Inline and without calls, so a
- * function that returns through it stays cheap to inline. Returns RL_PENDING.
+ * @brief The slow path of a call site whose callee did not return the call's
+ * return address, with the context stored (docs/abi.md section 5.4). to is
+ * what the callee returned and pc the guest address of the call. RL_PENDING
+ * with a pending record set passes up; anything else is a return to to:
+ * records {RL_PEND_REDIRECT, pc = to, sp = RL_SP_NONE} with c->pc = pc, so
+ * every host frame returns and the runtime entry (rl_call_guest) continues at
+ * to, or reports an instruction abort for a target outside the guest's
+ * virtual address range (rl_arm64_set_va_bits). Out of line and cold, so
+ * the call site's slow path is a tail jump and its fast path stays as short
+ * as a plain pending check. Returns RL_PENDING.
  */
-static inline int rl_arm64_ret_far(rl_ctx *c, uint64_t target, uint64_t pc)
-{
-    c->pc = pc;
-    c->pend.pc = target;
-    c->pend.sp = RL_SP_NONE;
-    c->pend.kind = RL_PEND_REDIRECT;
-    c->pend.code = 0;
-    return RL_PENDING;
-}
-
-/**
- * @brief A tail transfer to fn while x30 is not the address the function's
- * caller expects, with the context stored: calls fn, whose return goes to the
- * current x30, and then continues there like rl_arm64_ret_far. Returns
- * RL_PENDING.
- */
-RL_RUNTIME_API int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn);
+RL_RUNTIME_API __attribute__((cold)) uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc);
 
 /** @brief Register values installed by an unwinder or longjmp: the guest unwinder's install step converts its own layout to this. */
 typedef struct rl_resume_regs {
@@ -567,7 +543,7 @@ RL_RUNTIME_API int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r);
  * from 0x110), installs it and calls rl_resume with the block's pc and sp.
  * Returns RL_PENDING.
  */
-RL_RUNTIME_API int rl_arm64_unw_jumpto(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_arm64_unw_jumpto(rl_ctx *c, uint8_t *mem);
 
 /**
  * @brief The dispatch-table function at every landing pad that is not a
@@ -575,7 +551,7 @@ RL_RUNTIME_API int rl_arm64_unw_jumpto(rl_ctx *c, uint8_t *mem);
  * {pc = the pad, sp = c->sp, RL_PEND_UNWIND} and returns RL_PENDING, so the
  * host stack unwinds to the frame whose landing-pad dispatch owns the pad.
  */
-RL_RUNTIME_API int rl_pad_resume(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_pad_resume(rl_ctx *c, uint8_t *mem);
 
 /**
  * @brief Where a guest libc's jmp_buf keeps the registers setjmp saves:
@@ -604,25 +580,25 @@ RL_RUNTIME_API const rl_arm64_jmp_layout *rl_arm64_jmp_layout_current(void);
  * d8 to d15 into the jmp_buf at guest address x0 and returns with x0 = 0. The
  * caller's call site is a resume point at the return address (section 7.1).
  */
-RL_RUNTIME_API int rl_arm64_setjmp(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_arm64_setjmp(rl_ctx *c, uint8_t *mem);
 /**
  * @brief Override of guest longjmp (`RL_FN_OVERRIDE | RL_FN_MAY_UNWIND`): reads
  * the jmp_buf at guest address x0 and calls rl_resume with pc = the saved x30,
  * the saved sp and x0 = w1, or 1 when w1 is 0. Returns RL_PENDING.
  */
-RL_RUNTIME_API int rl_arm64_longjmp(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_arm64_longjmp(rl_ctx *c, uint8_t *mem);
 /**
  * @brief Override of a guest libc memcpy or memmove (`RL_FN_OVERRIDE`): copies
  * x2 bytes from guest address x1 to x0 as memmove does and returns with x0
  * unchanged (section 7.2).
  */
-RL_RUNTIME_API int rl_arm64_memmove(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_arm64_memmove(rl_ctx *c, uint8_t *mem);
 /**
  * @brief Override of a guest libc memset (`RL_FN_OVERRIDE`): fills x2 bytes at
  * guest address x0 with the low byte of x1 and returns with x0 unchanged
  * (section 7.2).
  */
-RL_RUNTIME_API int rl_arm64_memset(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API uint64_t rl_arm64_memset(rl_ctx *c, uint8_t *mem);
 /** @brief rl_arm64_setjmp with an explicit layout and jmp_buf address. */
 RL_RUNTIME_API int rl_arm64_setjmp_at(rl_ctx *c, uint8_t *mem, const rl_arm64_jmp_layout *l, uint64_t buf);
 /** @brief rl_arm64_longjmp with an explicit layout, jmp_buf address and value. */

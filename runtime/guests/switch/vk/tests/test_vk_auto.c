@@ -37,7 +37,7 @@ static void say(rl_ctx *c, uint8_t *mem, const char *s)
     (void)rl_svc(c, mem, 0x27);
 }
 
-static int entry(rl_ctx *restrict c, uint8_t *mem)
+static uint64_t entry(rl_ctx *restrict c, uint8_t *mem)
 {
     uint64_t got = rl_ld64(mem, GOT);
     bool thunk = got >= THUNKS && got < THUNKS + 0x100000;

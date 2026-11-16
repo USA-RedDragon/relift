@@ -44,7 +44,7 @@ static struct {
     uint64_t boot_sp, boot_ra, boot_t3;
 } hs;
 
-static int boot_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t boot_fn(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     hs.boots++;
@@ -55,7 +55,7 @@ static int boot_fn(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int handler(rl_ctx *c, uint8_t *mem)
+static uint64_t handler(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     hs.handlers++;
@@ -72,7 +72,7 @@ static int64_t eret_budget[2];
  * while EXL is set. ERET may go anywhere (an OS switching threads), so it
  * must end the budget itself for the line to be taken at the next sync point.
  */
-static int handler2(rl_ctx *c, uint8_t *mem)
+static uint64_t handler2(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     hs.handlers++;
@@ -87,7 +87,7 @@ static int handler2(rl_ctx *c, uint8_t *mem)
     RL_MUSTTAIL return rl_mips_eret_to(c, to)(c, mem);
 }
 
-static int main_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t main_fn(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     hs.mains++;
@@ -95,7 +95,7 @@ static int main_fn(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int spin_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t spin_fn(rl_ctx *c, uint8_t *mem)
 {
     hs.mains++;
     rl_n64_write(c->machine, 0x0430000Cu, 4, c->r[3] ? 0x82u : 0x80u);

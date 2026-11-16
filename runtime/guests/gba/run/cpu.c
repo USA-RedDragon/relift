@@ -97,7 +97,7 @@ int rl_gba_cpu_fetch_code(rl_ctx *c, uint32_t pc, unsigned thumb, uint32_t unit)
     return 0;
 }
 
-static int unknown_code(rl_ctx *c, uint8_t *mem)
+static uint64_t unknown_code(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     return rl_guest_stop_at(c, "changed code", c->pc & ~1u,

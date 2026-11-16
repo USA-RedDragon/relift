@@ -172,14 +172,14 @@ static rl_fn g_miss;
 
 void rl_z80_set_miss(rl_fn fn) { g_miss = fn; }
 
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     if (g_miss)
         RL_MUSTTAIL return g_miss(c, mem);
     return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
 }
 
-int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
     c->pend.pc = 0;

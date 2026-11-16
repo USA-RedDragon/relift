@@ -49,7 +49,7 @@ static void point(rl_ctx *c)
         rl_preempt(c);
 }
 
-static int w_count(rl_ctx *c, uint8_t *mem)
+static uint64_t w_count(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     char me = (char)('a' + c->x[0]);
@@ -64,7 +64,7 @@ static int w_count(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int w_sleep_flag(rl_ctx *c, uint8_t *mem)
+static uint64_t w_sleep_flag(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->x[0] = 3000000;

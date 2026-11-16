@@ -60,7 +60,7 @@ static const uint16_t g_loop_succ[12] = {1, RL_RSP_NO_SUCC, 0, 0, RL_RSP_NO_SUCC
 
 static uint32_t g_entries;
 
-static int loop_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t loop_fn(rl_ctx *c, uint8_t *mem)
 {
     g_entries++;
     int rc;
@@ -192,7 +192,7 @@ TEST(rsp_imem_writes_send_the_next_entry_back_to_the_check)
 static const uint8_t g_cop0_bytes[12] = {0x40, 0x81, 0x20, 0x00, 0x40, 0x03, 0x28, 0x00, 0x00, 0x00, 0x00, 0x0D};
 static const uint16_t g_cop0_succ[9] = {1, RL_RSP_NO_SUCC, 0, 2, RL_RSP_NO_SUCC, 0, RL_RSP_NO_SUCC, RL_RSP_NO_SUCC, 0};
 
-static int cop0_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t cop0_fn(rl_ctx *c, uint8_t *mem)
 {
     int rc;
     rl_rsp_mtc0(c, 4, c->r[1], 1);
@@ -276,7 +276,7 @@ TEST(rsp_one_image_runs_at_several_places_and_across_the_end_of_imem)
 static uint8_t g_wrap_bytes[0x1000];
 static uint16_t g_wrap_succ[3 * 0x400];
 
-static int wrap_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t wrap_fn(rl_ctx *c, uint8_t *mem)
 {
     int rc;
     if (c->pc == 0xFFC)

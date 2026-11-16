@@ -163,7 +163,7 @@ const HARNESS: &str = r#"
 #include <lanesabi.h>
 extern const rl_fn cases[];
 extern const unsigned case_count;
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
+uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
 int main(int argc, char **argv)
 {
     if (argc != 3)

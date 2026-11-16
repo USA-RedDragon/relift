@@ -82,7 +82,7 @@ static uint64_t the_device(vkf_call *k, VkInstance inst)
     return vkf_wrap(k, VKG_KIND_VkPhysicalDevice, vi->physical);
 }
 
-int vkh_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -112,7 +112,7 @@ int vkh_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkEnumeratePhysicalDeviceGroups(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkEnumeratePhysicalDeviceGroups(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

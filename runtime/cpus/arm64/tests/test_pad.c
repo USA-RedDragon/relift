@@ -42,18 +42,21 @@ static RL_LIFTED(g_install)
 
 static RL_LIFTED(g_middle)
 {
+    uint64_t ra = c->x[30];
     uint64_t sp = c->sp - 32;
     c->sp = sp;
     c->x[30] = 0x1108;
-    int rc = g_install(c, mem);
-    if (RL_UNLIKELY(rc)) {
+    uint64_t rc = g_install(c, mem);
+    if (RL_UNLIKELY(rc != 0x1108)) {
+        rl_arm64_ret_elsewhere(c, rc, 0x1104);
         if (c->pend.sp == sp)
             goto lp_dispatch;
         return RL_PENDING;
     }
     g_middle_ran_after++;
     c->sp = sp + 32;
-    return RL_OK;
+    c->x[30] = ra;
+    return ra;
 lp_dispatch:
     sp = c->sp;
     switch (c->pend.pc) {
@@ -61,7 +64,8 @@ lp_dispatch:
         c->pend.kind = RL_PEND_NONE;
         g_middle_ran_after += 100;
         c->sp = sp + 32;
-        return RL_OK;
+        c->x[30] = ra;
+        return ra;
     default:
         rl_bad_resume(c, mem, MIDDLE);
     }
@@ -69,18 +73,21 @@ lp_dispatch:
 
 static RL_LIFTED(g_outer)
 {
+    uint64_t ra = c->x[30];
     uint64_t sp = c->sp - 48;
     c->sp = sp;
     c->x[30] = 0x1008;
-    int rc = g_middle(c, mem);
-    if (RL_UNLIKELY(rc)) {
+    uint64_t rc = g_middle(c, mem);
+    if (RL_UNLIKELY(rc != 0x1008)) {
+        rl_arm64_ret_elsewhere(c, rc, 0x1004);
         if (c->pend.sp == sp)
             goto lp_dispatch;
         return RL_PENDING;
     }
     g_outer_ran_after++;
     c->sp = sp + 48;
-    return RL_OK;
+    c->x[30] = ra;
+    return ra;
 lp_dispatch:
     sp = c->sp;
     switch (c->pend.pc) {
@@ -89,7 +96,8 @@ lp_dispatch:
         g_outer_caught++;
         g_outer_x0 = c->x[0];
         c->sp = sp + 48;
-        return RL_OK;
+        c->x[30] = ra;
+        return ra;
     default:
         rl_bad_resume(c, mem, OUTER);
     }
@@ -133,7 +141,8 @@ TEST(pad_jump_resumes_the_frame_that_owns_the_pad)
 {
     rl_ctx *c = boot(OUTER_PAD, STACK_TOP - 48);
     CHECK(c != NULL);
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    c->x[30] = 0x9990;
+    CHECK_EQ(g_outer(c, g_mem), 0x9990);
     CHECK_EQ(g_outer_caught, 1);
     CHECK_EQ(g_outer_x0, 0x77);
     CHECK_EQ(g_middle_ran_after, 0);
@@ -146,7 +155,8 @@ TEST(pad_jump_stops_at_the_nearest_frame_with_that_sp)
 {
     rl_ctx *c = boot(MIDDLE_PAD, STACK_TOP - 48 - 32);
     CHECK(c != NULL);
-    CHECK_EQ(g_outer(c, g_mem), RL_OK);
+    c->x[30] = 0x9990;
+    CHECK_EQ(g_outer(c, g_mem), 0x9990);
     CHECK_EQ(g_middle_ran_after, 100);
     CHECK_EQ(g_outer_caught, 0);
     CHECK_EQ(g_outer_ran_after, 1);

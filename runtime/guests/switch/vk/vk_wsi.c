@@ -23,7 +23,7 @@ bool vkf_offscreen(void)
     return p && p->offscreen;
 }
 
-int vkh_vkCreateViSurfaceNN(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateViSurfaceNN(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -55,7 +55,7 @@ int vkh_vkCreateViSurfaceNN(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkDestroySurfaceKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroySurfaceKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -79,7 +79,7 @@ static const rl_vk_surface_provider headless = {
 
 const rl_vk_surface_provider *rl_vk_headless_surfaces(void) { return &headless; }
 
-int vkh_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -103,7 +103,7 @@ int vkh_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -137,7 +137,7 @@ int vkh_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8_t *mem
     return vkf_end(&k);
 }
 
-int vkh_vkGetDeviceGroupSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetDeviceGroupSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

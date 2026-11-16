@@ -54,12 +54,13 @@ int rl_arm64_longjmp_at(rl_ctx *c, uint8_t *mem, const rl_arm64_jmp_layout *l, u
     return rl_resume(c, mem, &r);
 }
 
-int rl_arm64_setjmp(rl_ctx *c, uint8_t *mem)
+uint64_t rl_arm64_setjmp(rl_ctx *c, uint8_t *mem)
 {
-    return rl_arm64_setjmp_at(c, mem, g_layout, c->x[0]);
+    rl_arm64_setjmp_at(c, mem, g_layout, c->x[0]);
+    return rl_arm64_ret(c);
 }
 
-int rl_arm64_longjmp(rl_ctx *c, uint8_t *mem)
+uint64_t rl_arm64_longjmp(rl_ctx *c, uint8_t *mem)
 {
     return rl_arm64_longjmp_at(c, mem, g_layout, c->x[0], (uint32_t)c->x[1]);
 }

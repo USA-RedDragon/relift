@@ -57,7 +57,6 @@ TEST(arm64_descriptor_matches_the_context)
     CHECK_EQ(d->ctx_size, sizeof(rl_ctx));
     CHECK_EQ(d->ctx_size, 960);
     CHECK_EQ(d->time_offset, offsetof(rl_ctx, time));
-    CHECK_EQ(offsetof(rl_ctx, ra), 912);
     CHECK_EQ(d->ctx_align, 64);
     CHECK_EQ(d->common_offset, offsetof(rl_ctx, pend));
     CHECK_EQ(d->code_shift, 2);
@@ -205,19 +204,19 @@ TEST(arm64_resume_installs_registers)
     CHECK_EQ(c->pend.sp, 0x7FF0);
 }
 
-static int entry_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t entry_fn(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->x[0] = 0x600D;
     return RL_OK;
 }
 
-static int jumps_missing(rl_ctx *c, uint8_t *mem) { RL_JUMP(0x10002, UINT64_C(0x10004)); }
+static uint64_t jumps_missing(rl_ctx *c, uint8_t *mem) { RL_JUMP(0x10002, UINT64_C(0x10004)); }
 
-static int calls_missing(rl_ctx *c, uint8_t *mem)
+static uint64_t calls_missing(rl_ctx *c, uint8_t *mem)
 {
     c->x[30] = 0x1000c;
-    int rc = rl_indirect(c, 0x10002)(c, mem);
+    uint64_t rc = rl_indirect(c, 0x10002)(c, mem);
     if (rc)
         return rc;
     c->x[1] = 1;
@@ -279,48 +278,61 @@ TEST(arm64_dispatch_through_lookup)
     c->pend.kind = RL_PEND_NONE;
 }
 
-static int ret_rewritten(rl_ctx *c, uint8_t *mem)
+static uint64_t ret_rewritten(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->x[30] = 0x20100;
-    return rl_arm64_ret_far(c, 0x20100, 0x2000c);
+    return rl_arm64_ret(c);
 }
 
-static int ret_moved_here(rl_ctx *c, uint8_t *mem)
+static uint64_t ret_moved_here(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    uint64_t ra = c->x[30];
     c->x[0] = 0xBEEF;
     c->x[30] = 0;
-    if (c->x[30] == ra)
-        return RL_OK;
-    return rl_arm64_ret_far(c, c->x[30], 0x20108);
+    return rl_arm64_ret(c);
 }
 
-static int leaf_ok(rl_ctx *c, uint8_t *mem)
+static uint64_t leaf_ok(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->x[1] = 7;
-    return RL_OK;
+    return rl_arm64_ret(c);
 }
 
-static int tail_with_new_x30(rl_ctx *c, uint8_t *mem)
+static uint64_t tail_with_new_x30(rl_ctx *c, uint8_t *mem)
 {
     c->x[30] = 0x20300;
-    return rl_arm64_jump_far(c, mem, leaf_ok);
+    RL_MUSTTAIL return leaf_ok(c, mem);
 }
 
-static int after_tail(rl_ctx *c, uint8_t *mem)
+static uint64_t after_tail(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     c->x[2] = c->x[1] + 1;
-    return rl_arm64_ret_far(c, 0, 0x20304);
+    return 0;
 }
 
-static int ret_wild(rl_ctx *c, uint8_t *mem)
+static uint64_t ret_wild(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    return rl_arm64_ret_far(c, c->x[30] ^ (1ull << 53), 0x20404);
+    return c->x[30] ^ (1ull << 53);
+}
+
+static uint64_t call_wild(rl_ctx *c, uint8_t *mem)
+{
+    c->x[30] = 0x2050c;
+    uint64_t rc = ret_wild(c, mem);
+    if (RL_UNLIKELY(rc != UINT64_C(0x2050c)))
+        return rl_arm64_ret_elsewhere(c, rc, UINT64_C(0x20508));
+    return 0;
+}
+
+static uint64_t ret_one(rl_ctx *c, uint8_t *mem)
+{
+    (void)c;
+    (void)mem;
+    return 1;
 }
 
 static rl_ctx *boot_ret(void)
@@ -334,12 +346,14 @@ static rl_ctx *boot_ret(void)
         { 0x20200, 16, 0, tail_with_new_x30 },
         { 0x20300, 16, 0, after_tail },
         { 0x20400, 16, 0, ret_wild },
+        { 0x20500, 16, 0, call_wild },
+        { 0x20600, 16, 0, ret_one },
     };
     static rl_unit u;
     memset(&u, 0, sizeof u);
     u.abi_version = RL_ABI_VERSION;
     u.ctx_size = sizeof(rl_ctx);
-    u.fn_count = 5;
+    u.fn_count = 7;
     u.fns = e;
     u.name = "arm64-ret";
     const rl_unit *list[] = { &u };
@@ -370,14 +384,44 @@ TEST(arm64_a_tail_transfer_with_another_x30_returns_to_that_x30)
     CHECK_EQ(c->x[2], 8);
 }
 
-TEST(arm64_a_return_records_a_redirect_that_passes_every_frame)
+TEST(arm64_a_return_elsewhere_records_a_redirect_that_passes_every_frame)
 {
     rl_ctx *c = boot_ret();
     CHECK(c != NULL);
-    CHECK_EQ(rl_arm64_ret_far(c, 0x20100, 0x2000c), RL_PENDING);
+    CHECK_EQ(rl_arm64_ret_elsewhere(c, 0x20100, 0x2000c), RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_REDIRECT);
     CHECK_EQ(c->pend.pc, 0x20100);
     CHECK_EQ(c->pend.sp, RL_SP_NONE);
+    CHECK_EQ(c->pc, 0x2000c);
+    c->pend.kind = RL_PEND_NONE;
+}
+
+TEST(arm64_a_pending_callee_passes_through_the_return_check)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    c->pend.kind = RL_PEND_EXIT_THREAD;
+    c->pend.pc = 0;
+    CHECK_EQ(rl_arm64_ret_elsewhere(c, RL_PENDING, 0x2000c), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_THREAD);
+    CHECK_EQ(c->pend.pc, 0);
+    c->pend.kind = RL_PEND_NONE;
+}
+
+TEST(arm64_a_return_to_1_is_a_return_not_a_pending_record)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    c->x[30] = 0;
+    int fds[2];
+    char out[1024];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_call_guest(c, rl_mem_base(), 0x20600);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK(strstr(out, "summary: no function at guest 0x1\n") != NULL);
 }
 
 TEST(arm64_a_return_to_a_non_canonical_address_is_an_instruction_abort)
@@ -393,8 +437,24 @@ TEST(arm64_a_return_to_a_non_canonical_address_is_an_instruction_abort)
     capture_end(fds, saved, out, sizeof out);
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
-    CHECK(strstr(out, "instruction abort: return at guest pc 0x20404 to 0x20000000020008, outside the 39-bit address space") != NULL);
+    CHECK(strstr(out, "instruction abort: return to 0x20000000020008 from the function entered at guest pc 0x20400, outside the 39-bit address space") != NULL);
     CHECK(strstr(out, "failed pointer authentication") != NULL);
+}
+
+TEST(arm64_a_call_returning_to_a_non_canonical_address_is_an_instruction_abort)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    c->x[30] = 0;
+    int fds[2];
+    char out[1024];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_call_guest(c, rl_mem_base(), 0x20500);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK(strstr(out, "instruction abort: return to 0x2000000002050c from the call at guest pc 0x20508, outside the 39-bit address space") != NULL);
 }
 
 TEST(arm64_a_fetch_from_a_non_canonical_address_is_an_instruction_abort)

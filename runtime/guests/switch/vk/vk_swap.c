@@ -183,7 +183,7 @@ void vkf_vi_caps(uint64_t surface, VkSurfaceCapabilitiesKHR *caps)
                                 VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 }
 
-int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -207,7 +207,7 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *m
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -234,7 +234,7 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -262,7 +262,7 @@ static const VkSurfaceFormatKHR vi_formats[] = {
     { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
 };
 
-int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     const VkSurfaceFormatKHR *formats = vi_formats;
     const uint32_t n = sizeof vi_formats / sizeof vi_formats[0];
@@ -290,7 +290,7 @@ int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -747,7 +747,7 @@ static VkResult swap_images(vkf_swap *s, const VkSwapchainCreateInfoKHR *ci)
     return VK_SUCCESS;
 }
 
-int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -830,7 +830,7 @@ static void swap_forget(vkf_swap *s)
     pthread_mutex_unlock(&g_lock);
 }
 
-int vkh_vkDestroySwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkDestroySwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -874,7 +874,7 @@ void vkf_swap_device_teardown(const vkf_obj *dobj)
     }
 }
 
-int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1055,7 +1055,7 @@ static VkResult acquire_signal(vkf_call *k, const vkf_swap *s, VkSemaphore sem, 
     return r;
 }
 
-int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1077,7 +1077,7 @@ int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -1506,7 +1506,7 @@ static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
     pthread_mutex_unlock(&s->lock);
 }
 
-int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

@@ -42,7 +42,7 @@ static void keep_store(VkAttachmentStoreOp *op)
         *op = VK_ATTACHMENT_STORE_OP_STORE;
 }
 
-int vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -74,7 +74,7 @@ int vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -112,7 +112,7 @@ static void keep_rendering(VkRenderingAttachmentInfo *a)
     keep_store(&a->storeOp);
 }
 
-int vkh_vkCmdBeginRendering(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCmdBeginRendering(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
@@ -133,7 +133,7 @@ int vkh_vkCmdBeginRendering(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-int vkh_vkCreateGraphicsPipelines(rl_ctx *restrict c, uint8_t *mem)
+uint64_t vkh_vkCreateGraphicsPipelines(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);

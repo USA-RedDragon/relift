@@ -9,6 +9,13 @@
 
 #include <string.h>
 
+
+#define CHECK_RET(call)               \
+    do {                              \
+        uint64_t want_ = c->x[30];    \
+        CHECK_EQ(call, want_);        \
+    } while (0)
+
 static const rl_guest_desc mem_guest = {
     .name = "arm64-memops-test",
     .page_size = 0x4000,
@@ -45,7 +52,7 @@ TEST(memmove_copies_every_size_and_alignment)
                 c->x[1] = 0x100 + s;
                 c->x[2] = n;
                 c->x[30] = 0x77;
-                CHECK_EQ(rl_arm64_memmove(c, g_mem), RL_OK);
+                CHECK_RET(rl_arm64_memmove(c, g_mem));
                 CHECK(memcmp(want, g_mem, sizeof want) == 0);
                 CHECK_EQ(c->x[0], 0x1000 + d);
                 CHECK_EQ(c->x[30], 0x77);
@@ -63,12 +70,12 @@ TEST(memmove_handles_overlap_both_ways)
     c->x[0] = 0x201;
     c->x[1] = 0x200;
     c->x[2] = 300;
-    CHECK_EQ(rl_arm64_memmove(c, g_mem), RL_OK);
+    CHECK_RET(rl_arm64_memmove(c, g_mem));
     CHECK(memcmp(g_mem + 0x201, orig + 0x200, 300) == 0);
     memcpy(g_mem, orig, sizeof orig);
     c->x[0] = 0x200;
     c->x[1] = 0x201;
-    CHECK_EQ(rl_arm64_memmove(c, g_mem), RL_OK);
+    CHECK_RET(rl_arm64_memmove(c, g_mem));
     CHECK(memcmp(g_mem + 0x200, orig + 0x201, 300) == 0);
 }
 
@@ -83,7 +90,7 @@ TEST(memset_fills_with_the_low_byte)
         c->x[0] = 0x400 + n % 5;
         c->x[1] = 0xabcdef5a1ull;
         c->x[2] = n;
-        CHECK_EQ(rl_arm64_memset(c, g_mem), RL_OK);
+        CHECK_RET(rl_arm64_memset(c, g_mem));
         CHECK_EQ(c->x[0], 0x400 + n % 5);
         for (uint64_t i = 0; i < n; i++)
             CHECK_EQ(g_mem[0x400 + n % 5 + i], 0xa1);
@@ -105,7 +112,7 @@ static int vm_boot(rl_vm *vm, rl_ctx **c)
     return 0;
 }
 
-static bool faults_at(rl_ctx *c, int (*fn)(rl_ctx *, uint8_t *), uint64_t *addr)
+static bool faults_at(rl_ctx *c, rl_fn fn, uint64_t *addr)
 {
     rl_fault_catch fc;
     rl_fault_catch *prev = rl_fault_arm(&fc);
@@ -160,11 +167,11 @@ TEST(memmove_is_seen_by_the_exclusive_monitor_as_a_plain_store)
     c->x[0] = 0x800;
     c->x[1] = 0x900;
     c->x[2] = 8;
-    CHECK_EQ(rl_arm64_memmove(c, g_mem), RL_OK);
+    CHECK_RET(rl_arm64_memmove(c, g_mem));
     CHECK_EQ(rl_stx(&m, g_mem, 0x800, 8, 5, RL_ORD_PLAIN), 1);
     v = rl_ldx(&m, g_mem, 0x800, 8, RL_ORD_PLAIN);
     memcpy(g_mem + 0x900, &v, 8);
-    CHECK_EQ(rl_arm64_memmove(c, g_mem), RL_OK);
+    CHECK_RET(rl_arm64_memmove(c, g_mem));
     CHECK_EQ(rl_stx(&m, g_mem, 0x800, 8, 5, RL_ORD_PLAIN), 0);
     CHECK_EQ(rl_ld64(g_mem, 0x800), 5);
 }
