@@ -249,6 +249,7 @@ impl Ctx {
     fn arith_exact(&mut self, k: Arith, xs: &[u32], mode: Round, ftz: bool, scale: i32) -> u32 {
         let dm = self.dn_dmode();
         let ins = self.arith_inputs(xs, ftz);
+        let mut unscaled = None;
         let fast = match k {
             Arith::Add => self.fadd_round(ins[0], ins[1], mode, ftz),
             Arith::Mul => {
@@ -256,6 +257,7 @@ impl Ctx {
                 if scale == 0 {
                     p
                 } else {
+                    unscaled = Some(p);
                     let f = self.f32t();
                     let s = self.m.c_f32(2f32.powi(scale).to_bits());
                     self.exact_mul(f, p, s)
@@ -282,6 +284,16 @@ impl Ctx {
         let b2 = self.dn_shl1(fast_bits);
         let lim = self.dn_ku(0x0200_0000);
         let mut slow = self.dn_bc(op::U_LESS_THAN, b2, lim);
+        if let Some(p) = unscaled {
+            let pb = self.as_bits(p);
+            let p2 = self.dn_shl1(pb);
+            let lo = self.dn_ku(0x3600_0000);
+            let hi = self.dn_ku(0xc600_0000);
+            let small = self.dn_bc(op::U_LESS_THAN, p2, lo);
+            let big = self.dn_bc(op::U_GREATER_THAN_EQUAL, p2, hi);
+            let edge = self.or(small, big);
+            slow = self.or(slow, edge);
+        }
         if !ftz && dm != Denorm::Preserve {
             for &x in &xs {
                 let d = self.is_denormal(x);
