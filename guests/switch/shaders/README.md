@@ -15,7 +15,7 @@ relift-shaders scan game.nup --out shaders/ [--cache cache/] [-j 8] [--package 0
 `size`, `n` times found, up to four `srcs`) and `summary.json` (counts, the
 containers seen, and errors such as a missing zstd dictionary or a zstd frame
 that decodes past 1 GiB, which is reported rather than cut short). The cache
-defaults to `<out>/.cache`.
+defaults to `<out>/.cache`. A `--package` that holds no file is an error.
 
 A program is the bytes of the 0x80-byte shader program header (graphics only)
 and the code through the `BRA self` terminator. The scan unwraps zstd frames

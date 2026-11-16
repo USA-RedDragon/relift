@@ -377,8 +377,8 @@ fn nup_scan_matches_the_directory_scan() {
             ..opts(&root.join("cache2"))
         },
     )
-    .expect("scans");
-    assert!(none.programs.is_empty());
+    .expect_err("a missing package is an error");
+    assert!(none.to_string().contains("package 3"), "{none}");
 }
 
 #[test]

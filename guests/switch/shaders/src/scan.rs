@@ -667,6 +667,11 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
     let mut files = source.files()?;
     if let Some(p) = opts.package {
         files.retain(|f| f.pkg == p);
+        if files.is_empty() {
+            return Err(Error::Format(format!(
+                "no files of package {p} in the input"
+            )));
+        }
     }
     let dicts = load_dicts(source, &files)?;
     let cx = Ctx {
