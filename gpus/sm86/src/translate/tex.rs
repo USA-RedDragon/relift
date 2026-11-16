@@ -22,7 +22,7 @@
 //! numeric kind from the texture format's compatibility class, so that any
 //! array an instruction names holds a valid descriptor. The instruction's
 //! dimension field picks the array; TXQ has none and uses the dimension of
-//! the other instructions on the same bound handle (2D if none).
+//! the other instructions on the same bound handle.
 //! Indices from a register are decorated `NonUniform`.
 //!
 //! Binary (`.D`) surface accesses read and write unsigned texels of the
@@ -51,14 +51,17 @@
 //!
 //! # Limits
 //!
-//! Vulkan allows a non-constant texel offset only for gathers. A TEX or
-//! TXD offset is a constant when a block-local MOV sets its register;
-//! otherwise the coordinates move by the offset over the size of the LOD
-//! the instruction names (level 0 for implicit LODs), which is exact for
-//! one level only. Implicit LODs and biases outside fragment shaders sample
-//! level 0. Buffer textures, TLD.CL, TXD.LC, TXQ sample positions, uniform
-//! register handles, SUQUERY, SUATOM.CAS and wrapping INC and DEC are not
-//! translated; sparse fault predicates read as resident.
+//! Vulkan allows a non-constant texel offset only for gathers, so a TEX or
+//! TXD offset must be a constant that a block-local MOV sets (a
+//! ConstOffset, in texels of each level sampled, as on the guest); other
+//! offsets are rejected. Implicit LODs, biases and TMML take derivatives
+//! across quads of lanes in fragment and compute programs (see
+//! [`Ctx::quad_derivatives`]) and are rejected in vertex programs. TXQ
+//! needs the handle to be sampled elsewhere in the program with one
+//! dimension. Buffer textures, TLD.CL, TXD.LC, TXQ sample positions,
+//! uniform register handles with an offset, SUQUERY, SUATOM.CAS and
+//! wrapping INC and DEC are not translated; sparse fault predicates read as
+//! resident.
 
 use super::mem::tuple_reg;
 use super::{Ctx, Res, TEXTURE_SET, bad};
@@ -70,6 +73,7 @@ use std::collections::BTreeMap;
 const UNIFORM_CONSTANT: u32 = 0;
 const IMAGE_CLASS: u32 = 11;
 const NON_UNIFORM: u32 = 5300;
+const CAP_COMPUTE_DERIVATIVE_GROUP_LINEAR: u32 = 5350;
 
 /// Binding of the sampler pool in set [`TEXTURE_SET`](super::TEXTURE_SET).
 pub const SAMPLER_BINDING: u32 = 0;
@@ -195,7 +199,8 @@ const TEX_DIMS: [Option<Dim>; 8] = [
 /// immediates that block-local moves leave in registers (texel offsets).
 #[derive(Default)]
 pub(crate) struct Prep {
-    dims: BTreeMap<(u32, u32), Dim>,
+    /// `None` when instructions name the handle with different dimensions.
+    dims: BTreeMap<(u32, u32), Option<Dim>>,
     starts: Vec<bool>,
     imm: Vec<Option<(u8, u32)>>,
     writes: Vec<Vec<(u8, u8)>>,
@@ -309,7 +314,10 @@ impl Prep {
                     _ => TEX_DIMS[w.get(61, 3) as usize],
                 };
                 if let Some(d) = dim {
-                    p.dims.entry(key).or_insert(d);
+                    let e = p.dims.entry(key).or_insert(Some(d));
+                    if *e != Some(d) {
+                        *e = None;
+                    }
                 }
             }
         }
@@ -710,24 +718,24 @@ impl Ctx {
         Some(self.const_offset(v >> at, d.offsets(), bits))
     }
 
-    /// Moves float coordinates by run-time texel offsets at LOD `level`.
-    fn shift_coords(&mut self, coords: &mut [u32], offs: &[u32], img: u32, d: Dim, level: u32) {
-        self.cap(50);
-        let i = self.tx_i32();
-        let n = d.size_len();
-        let st = if n == 1 { i } else { self.m.t_vec(i, n as u32) };
-        let size = self.m.emit(op::IMAGE_QUERY_SIZE_LOD, st, &[img, level]);
-        let f = self.f32t();
-        for (k, o) in offs.iter().enumerate() {
-            let s = if n == 1 {
-                size
-            } else {
-                self.m.emit(op::COMPOSITE_EXTRACT, i, &[size, k as u32])
-            };
-            let sf = self.m.emit(op::CONVERT_S_TO_F, f, &[s]);
-            let of = self.m.emit(op::CONVERT_S_TO_F, f, &[*o]);
-            let q = self.m.emit(op::F_DIV, f, &[of, sf]);
-            coords[k] = self.m.emit(op::F_ADD, f, &[coords[k], q]);
+    /// Implicit LODs take derivatives across each quad of lanes (lanes
+    /// `4n` to `4n + 3`, as x, x + 1, then the next row), in compute
+    /// programs too (measured on an RTX 3090). A compute program gets the
+    /// same quads from the linear derivative groups of
+    /// `SPV_KHR_compute_shader_derivatives`; a vertex program has no
+    /// derivatives in Vulkan.
+    fn quad_derivatives(&mut self, what: &str) -> Res<()> {
+        match self.stage {
+            Stage::Fragment => Ok(()),
+            Stage::Compute => {
+                self.cap(CAP_COMPUTE_DERIVATIVE_GROUP_LINEAR);
+                self.exts.insert("SPV_KHR_compute_shader_derivatives");
+                self.iface.compute_derivatives = true;
+                Ok(())
+            }
+            _ => bad(format!(
+                "{what} with an implicit LOD outside a fragment or compute shader"
+            )),
         }
     }
 
@@ -948,11 +956,21 @@ fn tex(c: &mut Ctx) -> Res<()> {
     }
     let s = sources(c, &g0, &g1, scr)?;
     let (h, nu) = handle(c, key, &s)?;
-    let frag = c.stage == Stage::Fragment;
-    let implicit = frag && matches!(lod, 0 | 2 | 4 | 5);
+    let implicit = matches!(lod, 0 | 2 | 4 | 5);
+    if implicit {
+        c.quad_derivatives("TEX")?;
+    }
+    let konst = if aoffi {
+        match c.known_offset(s.reg(Slot::Off), d, 4, 0) {
+            Some(k) => Some(k),
+            None => return bad("TEX offsets not known at translation"),
+        }
+    } else {
+        None
+    };
     let v = c.by_kind(key, !dc, &mut |c, k| {
-        let (si, img) = c.sampled(k, d, h, nu);
-        let mut coords = float_coords(c, &s, d)?;
+        let (si, _) = c.sampled(k, d, h, nu);
+        let coords = float_coords(c, &s, d)?;
         let mut mask = 0u32;
         let mut ops = Vec::new();
         let lod_v = if implicit {
@@ -963,27 +981,8 @@ fn tex(c: &mut Ctx) -> Res<()> {
         } else {
             Some(c.m.c_f32(0))
         };
-        let mut konst = None;
-        if aoffi {
-            konst = c.known_offset(s.reg(Slot::Off), d, 4, 0);
-            if konst.is_none() {
-                let o = s.get(Slot::Off)?;
-                let offs = c.dyn_offsets(o, d.offsets(), 4, 0);
-                let level = match (lod, lod_v) {
-                    (3, Some(l)) => {
-                        let i = c.tx_i32();
-                        let f = c.f32t();
-                        let z = c.m.c_f32(0);
-                        let l = c.ext(f, glsl::N_MAX, &[l, z]);
-                        c.m.emit(op::CONVERT_F_TO_S, i, &[l])
-                    }
-                    _ => c.m.c_i32(0),
-                };
-                c.shift_coords(&mut coords, &offs, img, d, level);
-            }
-        }
         let coord = with_layer(c, &s, d, coords)?;
-        if implicit && matches!(lod, 2 | 5) {
+        if matches!(lod, 2 | 5) {
             mask |= 1;
             let b = s.get(Slot::Lod)?;
             ops.push(c.as_float(b));
@@ -1279,7 +1278,11 @@ fn tmml(c: &mut Ctx) -> Res<()> {
     let s = sources(c, &g0, &g1, false)?;
     let (h, nu) = handle(c, key, &s)?;
     let zero = c.m.c_u32(0);
-    let v = if c.stage == Stage::Fragment {
+    if w.get(72, 4) & 4 != 0 {
+        return bad("TMML third component");
+    }
+    c.quad_derivatives("TMML")?;
+    let v = {
         c.cap(50);
         let (si, _) = c.sampled(Kind::Float, d, h, nu);
         let coords = float_coords(c, &s, d)?;
@@ -1302,9 +1305,6 @@ fn tmml(c: &mut Ctx) -> Res<()> {
         let rel = c.tx_opk(op::BITWISE_AND, yu, 0xffff);
         let abs = c.tx_opk(op::BITWISE_AND, xu, 0xffff);
         c.tx_uvec4_of([rel, abs, zero, zero])
-    } else {
-        let rel = c.m.c_u32(0xe000);
-        c.tx_uvec4_of([rel, zero, zero, zero])
     };
     c.tex_result(v, w.get(72, 4), 0);
     Ok(())
@@ -1335,19 +1335,17 @@ fn txd(c: &mut Ctx) -> Res<()> {
     let g1: Vec<Slot> = (0..2 * d.coords() as u8).map(Slot::Grad).collect();
     let s = sources(c, &g0, &g1, false)?;
     let (h, nu) = handle(c, key, &s)?;
-    let v = c.by_kind(key, true, &mut |c, k| {
-        let (si, img) = c.sampled(k, d, h, nu);
-        let mut coords = float_coords(c, &s, d)?;
-        let mut konst = None;
-        if aoffi {
-            konst = c.known_offset(s.reg(Slot::Packed), d, 4, 16);
-            if konst.is_none() {
-                let p = s.get(Slot::Packed)?;
-                let offs = c.dyn_offsets(p, d.offsets(), 4, 16);
-                let z = c.m.c_i32(0);
-                c.shift_coords(&mut coords, &offs, img, d, z);
-            }
+    let konst = if aoffi {
+        match c.known_offset(s.reg(Slot::Packed), d, 4, 16) {
+            Some(k) => Some(k),
+            None => return bad("TXD offsets not known at translation"),
         }
+    } else {
+        None
+    };
+    let v = c.by_kind(key, true, &mut |c, k| {
+        let (si, _) = c.sampled(k, d, h, nu);
+        let coords = float_coords(c, &s, d)?;
         let coord = with_layer(c, &s, d, coords)?;
         let mut dx = Vec::new();
         let mut dy = Vec::new();
@@ -1394,9 +1392,9 @@ fn txq(c: &mut Ctx) -> Res<()> {
     }
     let s = sources(c, &g0, &[], false)?;
     let (h, nu) = handle(c, key, &s)?;
-    let d = key
-        .and_then(|k| c.tex.dims.get(&k).copied())
-        .unwrap_or(Dim::D2);
+    let Some(d) = key.and_then(|k| c.tex.dims.get(&k).copied().flatten()) else {
+        return bad("TXQ of a texture of unknown dimension");
+    };
     c.cap(50);
     let img = c.texture(Kind::Float, d, h, nu);
     let u = c.u32t();

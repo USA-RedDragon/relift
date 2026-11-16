@@ -101,6 +101,11 @@ pub struct Interface {
     /// The fragment shader kills invocations (OpDemoteToHelperInvocation:
     /// the device needs shaderDemoteToHelperInvocation).
     pub kills: bool,
+    /// The compute program takes implicit-LOD derivatives across quads of
+    /// four consecutive invocations (DerivativeGroupLinearKHR: the device
+    /// needs computeDerivativeGroupLinear and a workgroup size that is a
+    /// multiple of four).
+    pub compute_derivatives: bool,
     /// The fallbacks taken for the target host.
     pub host: HostReport,
 }
@@ -744,6 +749,9 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         Stage::Fragment => crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[main, 7]),
         Stage::Compute => {
             crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[main, 17, 1, 1, 1]);
+            if c.iface.compute_derivatives {
+                crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[main, 5290]);
+            }
             let ws = c.workgroup_size();
             c.m.deco(ws, 11, &[25]);
         }

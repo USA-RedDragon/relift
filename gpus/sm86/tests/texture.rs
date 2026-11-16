@@ -1,4 +1,4 @@
-use relift_gpu_sm86::program::Program;
+use relift_gpu_sm86::program::{Program, Stage};
 use relift_gpu_sm86::translate::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
     texture_binding, translate,
@@ -147,10 +147,16 @@ fn constant_offsets_stay_constant() {
 }
 
 #[test]
-fn run_time_offsets_move_the_coordinates() {
-    let s = compute(&[tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)])]);
-    assert!(insts(&s.spirv, 88).iter().all(|i| i[5] & 0x18 == 0));
-    assert!(!insts(&s.spirv, 103).is_empty());
+fn run_time_sample_offsets_are_rejected() {
+    for w in [
+        tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)]),
+        tex(0x16c, &[(61, 3, 1), (76, 1, 1)]),
+    ] {
+        let mut b = w.to_vec();
+        exit_and_halt(&mut b);
+        let e = translate(&Program::parse(&b)).err().map(|e| e.to_string());
+        assert!(e.is_some_and(|e| e.contains("offsets")));
+    }
 }
 
 #[test]
@@ -158,15 +164,10 @@ fn fetch_gather_and_queries() {
     let s = compute(&[
         tex(0x166, &[(61, 3, 5), (87, 3, 3)]),
         tex(0x163, &[(61, 3, 1), (76, 2, 2), (87, 2, 1)]),
-        tex(0x16f, &[(62, 2, 0)]),
         tex(0x16c, &[(61, 3, 1)]),
-        tex(0x169, &[(61, 3, 1)]),
     ]);
     assert_eq!(insts(&s.spirv, 95).len(), 3);
     assert_eq!(insts(&s.spirv, 96).len(), 12);
-    assert!(!insts(&s.spirv, 103).is_empty());
-    assert!(!insts(&s.spirv, 106).is_empty());
-    assert!(insts(&s.spirv, 105).is_empty());
     assert!(
         s.interface
             .texture_bindings
@@ -177,7 +178,7 @@ fn fetch_gather_and_queries() {
 #[test]
 fn fragment_queries_the_lod() {
     let mut b = sph_fragment();
-    b.extend(tex(0x169, &[(61, 3, 3)]));
+    b.extend(tex(0x169, &[(61, 3, 3), (72, 4, 3)]));
     b.extend(tex(0x160, &[(61, 3, 1), (87, 3, 2)]));
     exit_and_halt(&mut b);
     let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
@@ -272,9 +273,80 @@ fn rejects_texture_forms_it_cannot_translate() {
         tex(0x166, &[(61, 3, 1), (77, 1, 1), (87, 3, 1)]),
         tex(0x16f, &[(62, 2, 2)]),
         tex(0x16c, &[(61, 3, 1), (87, 1, 1)]),
+        tex(0x169, &[(61, 3, 1), (72, 4, 7)]),
     ] {
         let mut b = w.to_vec();
         exit_and_halt(&mut b);
         assert!(translate(&Program::parse(&b)).is_err());
     }
+}
+
+fn sph_vertex() -> Vec<u8> {
+    let mut w = [0u32; 32];
+    w[0] = 1 | (4 << 5) | (1 << 10);
+    w.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+fn program(head: Vec<u8>, body: &[[u8; 16]]) -> Program {
+    let mut b = head;
+    for w in body {
+        b.extend(w);
+    }
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+#[test]
+fn txq_takes_the_dimension_the_handle_is_sampled_with() {
+    let s = compute(&[
+        tex(0x166, &[(61, 3, 5), (87, 3, 3)]),
+        tex(0x16f, &[(62, 2, 0)]),
+    ]);
+    let sizes = insts(&s.spirv, 103);
+    assert!(!sizes.is_empty());
+    assert!(!insts(&s.spirv, 106).is_empty());
+    for body in [
+        vec![tex(0x16f, &[(62, 2, 0)])],
+        vec![
+            tex(0x166, &[(61, 3, 5), (87, 3, 3)]),
+            tex(0x166, &[(61, 3, 2), (87, 3, 3)]),
+            tex(0x16f, &[(62, 2, 0)]),
+        ],
+    ] {
+        let e = translate(&program(Vec::new(), &body))
+            .err()
+            .map(|e| e.to_string());
+        assert!(e.is_some_and(|e| e.contains("TXQ")));
+    }
+}
+
+const EXECUTION_MODE: u32 = 16;
+const DERIVATIVE_GROUP_LINEAR: u32 = 5290;
+
+#[test]
+fn implicit_lods_take_quad_derivatives_in_compute() {
+    for (body, sample, op) in [
+        (tex(0x160, &[(61, 3, 1), (87, 3, 0)]), 87, None),
+        (tex(0x160, &[(61, 3, 1), (87, 3, 2)]), 87, Some(1)),
+        (tex(0x169, &[(61, 3, 1), (72, 4, 3)]), 105, None),
+    ] {
+        let s = compute(&[body]);
+        assert!(s.interface.compute_derivatives);
+        let i = insts(&s.spirv, sample);
+        assert_eq!(i.len(), if sample == 87 { 3 } else { 1 });
+        if let Some(bias) = op {
+            assert!(i.iter().all(|i| i[5] == bias));
+        }
+        assert!(
+            insts(&s.spirv, EXECUTION_MODE)
+                .iter()
+                .any(|m| m[2] == DERIVATIVE_GROUP_LINEAR)
+        );
+        let v = program(sph_vertex(), &[body]);
+        assert_eq!(v.stage(), Stage::Vertex);
+        assert!(translate(&v).is_err());
+    }
+    let s = compute(&[tex(0x160, &[(61, 3, 1), (87, 3, 1)])]);
+    assert!(!s.interface.compute_derivatives);
+    assert!(insts(&s.spirv, 87).is_empty());
 }
