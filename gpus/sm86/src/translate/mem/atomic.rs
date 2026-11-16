@@ -4,11 +4,14 @@
 //! Operations SPIR-V has no instruction for (INC, DEC, and the float ones)
 //! run as a compare-exchange loop. The generic `ATOM` is treated as global.
 //! Atomic floats are done on the bit pattern, so no device float atomic
-//! extension is needed.
+//! extension is needed, with the guest's flush-to-zero rounding on any
+//! host. 64-bit global atomics take a lock (see [`super::atomic64`]) on
+//! hosts without them.
 
 use super::scratch::Space;
 use super::{addr_operand, spv, store_words};
-use crate::spirv::{glsl, op};
+use crate::spirv::op;
+use crate::translate::float::Round;
 use crate::translate::{Ctx, Res, bad};
 use crate::{Inst, Operand};
 
@@ -180,6 +183,9 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<u32
     };
     let xv = load(c, x);
     let yv = y.map(|y| load(c, y));
+    if s.ty.wide() && !c.host.int64_atomics_buffer {
+        return Ok(c.locked_rmw64(addr, |c, old| apply64(c, s, t, old, xv, yv)));
+    }
     let ptr = c.global_ptr(addr, t);
     let scope = c.m.c_u32(SCOPE_DEVICE);
     Ok(rmw(c, ptr, scope, s, t, xv, yv))
@@ -208,16 +214,10 @@ fn rmw(c: &mut Ctx, ptr: u32, scope: u32, s: &Spec, t: u32, x: u32, y: Option<u3
     if s.ty == Ty::F32 {
         return match s.op {
             Aop::Exch => simple(c, spv::ATOMIC_EXCHANGE),
-            o => cas_loop(c, ptr, scope, t, |c, old| {
-                let f = c.f32t();
-                let of = c.m.emit(op::BITCAST, f, &[old]);
-                let xf = c.m.emit(op::BITCAST, f, &[x]);
-                let r = match o {
-                    Aop::Add => c.m.emit(op::F_ADD, f, &[of, xf]),
-                    Aop::Min => c.ext(f, glsl::N_MIN, &[of, xf]),
-                    _ => c.ext(f, glsl::N_MAX, &[of, xf]),
-                };
-                c.m.emit(op::BITCAST, t, &[r])
+            o => cas_loop(c, ptr, scope, t, |c, old| match o {
+                Aop::Add => c.fadd_exact(old, x, Round::Nearest, true),
+                Aop::Min => c.fminmax(old, x, true).0,
+                _ => c.fminmax(old, x, true).1,
             }),
         };
     }
@@ -269,6 +269,66 @@ fn rmw(c: &mut Ctx, ptr: u32, scope: u32, s: &Spec, t: u32, x: u32, y: Option<u3
             let dec = c.m.emit(op::I_SUB, t, &[old, one]);
             c.select(t, reset, x, dec)
         }),
+    }
+}
+
+/// The new value of a 64-bit atomic from the old one.
+fn apply64(c: &mut Ctx, s: &Spec, t: u32, old: u32, x: u32, y: Option<u32>) -> u32 {
+    let b = c.boolt();
+    let signed = s.ty.signed();
+    let pick = |c: &mut Ctx, o: u16, keep_old_if: bool| {
+        let cmp = c.m.emit(o, b, &[old, x]);
+        if keep_old_if {
+            c.select(t, cmp, old, x)
+        } else {
+            c.select(t, cmp, x, old)
+        }
+    };
+    match s.op {
+        Aop::Add => c.m.emit(op::I_ADD, t, &[old, x]),
+        Aop::Min => pick(
+            c,
+            if signed {
+                op::S_LESS_THAN
+            } else {
+                op::U_LESS_THAN
+            },
+            true,
+        ),
+        Aop::Max => pick(
+            c,
+            if signed {
+                op::S_GREATER_THAN
+            } else {
+                op::U_GREATER_THAN
+            },
+            true,
+        ),
+        Aop::And => c.m.emit(op::BITWISE_AND, t, &[old, x]),
+        Aop::Or => c.m.emit(op::BITWISE_OR, t, &[old, x]),
+        Aop::Xor => c.m.emit(op::BITWISE_XOR, t, &[old, x]),
+        Aop::Exch => x,
+        Aop::Cas => {
+            let new = y.unwrap_or(x);
+            let eq = c.m.emit(op::I_EQUAL, b, &[old, x]);
+            c.select(t, eq, new, old)
+        }
+        Aop::Inc => {
+            let one = const_of(c, t, 1);
+            let zero = const_of(c, t, 0);
+            let ge = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[old, x]);
+            let inc = c.m.emit(op::I_ADD, t, &[old, one]);
+            c.select(t, ge, zero, inc)
+        }
+        Aop::Dec => {
+            let one = const_of(c, t, 1);
+            let zero = const_of(c, t, 0);
+            let z = c.m.emit(op::I_EQUAL, b, &[old, zero]);
+            let gt = c.m.emit(op::U_GREATER_THAN, b, &[old, x]);
+            let reset = c.m.emit(op::LOGICAL_OR, b, &[z, gt]);
+            let dec = c.m.emit(op::I_SUB, t, &[old, one]);
+            c.select(t, reset, x, dec)
+        }
     }
 }
 

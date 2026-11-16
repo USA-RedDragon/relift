@@ -1,0 +1,101 @@
+//! Global memory without buffer device addresses.
+//!
+//! The guest's 64-bit address space is cut into segments of
+//! `1 << shift` bytes, `shift` the specialization constant
+//! [`SEGMENT_SHIFT_SPEC`] (default [`SEGMENT_SHIFT_DEFAULT`], the smallest
+//! `maxStorageBufferRange` among the hosts). Segment `k` is element `k` of
+//! a runtime array of storage buffers at set [`GUEST_MEMORY_SET`] binding 0,
+//! and covers guest addresses `k << shift` to `(k + 1) << shift`. The
+//! runtime binds, for each segment a program may reach, a buffer holding
+//! that window of guest memory, and puts guest addresses in the constant
+//! banks unchanged. An access is naturally aligned, so it never crosses a
+//! segment. Each access type has its own view of the binding: a block with a
+//! runtime array of that type.
+
+use crate::spirv::op;
+use crate::translate::{
+    Ctx, GUEST_MEMORY_SET, GlobalPath, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC,
+};
+
+const STORAGE_BUFFER: u32 = 12;
+const DECO_BLOCK: u32 = 2;
+const DECO_ARRAY_STRIDE: u32 = 6;
+const DECO_ALIASED: u32 = 20;
+const DECO_BINDING: u32 = 33;
+const DECO_SET: u32 = 34;
+const DECO_OFFSET: u32 = 35;
+const DECO_NON_UNIFORM: u32 = 5300;
+const CAP_SHADER_NON_UNIFORM: u32 = 5301;
+const CAP_RUNTIME_DESCRIPTOR_ARRAY: u32 = 5302;
+const CAP_STORAGE_BUFFER_NON_UNIFORM: u32 = 5308;
+const VIEW_KEY: u32 = 0x3_0000;
+
+impl Ctx {
+    /// The byte size of an access type: `u32`, `u64` or a vector of
+    /// `u32`.
+    fn access_bytes(&mut self, ty: u32) -> u32 {
+        let u = self.u32t();
+        if ty == u {
+            return 4;
+        }
+        if ty == self.m.t_u64() {
+            return 8;
+        }
+        (2..=4)
+            .find(|&n| self.m.t_vec(u, n) == ty)
+            .map_or(4, |n| 4 * n)
+    }
+
+    fn segment_view(&mut self, ty: u32, size: u32) -> u32 {
+        let key = VIEW_KEY + ty;
+        if let Some(&v) = self.builtins.get(&key) {
+            return v;
+        }
+        self.cap(CAP_RUNTIME_DESCRIPTOR_ARRAY);
+        self.cap(CAP_SHADER_NON_UNIFORM);
+        self.cap(CAP_STORAGE_BUFFER_NON_UNIFORM);
+        let arr_unique = self.m.id();
+        crate::spirv::inst(&mut self.m.types, op::TYPE_RUNTIME_ARRAY, &[arr_unique, ty]);
+        self.m.deco(arr_unique, DECO_ARRAY_STRIDE, &[size]);
+        let st = self.m.t_struct_unique(&[arr_unique]);
+        self.m.deco(st, DECO_BLOCK, &[]);
+        self.m.member_deco(st, 0, DECO_OFFSET, &[0]);
+        let segs = self.m.t_runtime_array(st);
+        let p = self.m.t_ptr(STORAGE_BUFFER, segs);
+        let var = self.m.global(p, STORAGE_BUFFER);
+        self.m.deco(var, DECO_SET, &[GUEST_MEMORY_SET]);
+        self.m.deco(var, DECO_BINDING, &[0]);
+        self.m.deco(var, DECO_ALIASED, &[]);
+        self.builtins.insert(key, var);
+        self.globals.push(var);
+        var
+    }
+
+    /// A storage buffer pointer to `ty` at 64-bit guest address `addr`.
+    pub(crate) fn segment_ptr(&mut self, addr: u32, ty: u32) -> u32 {
+        self.iface.host.global = GlobalPath::Segments {
+            shift: SEGMENT_SHIFT_DEFAULT,
+        };
+        let size = self.access_bytes(ty);
+        let var = self.segment_view(ty, size);
+        let u = self.u32t();
+        let t = self.m.t_u64();
+        let shift = self.m.spec_u32(SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC);
+        let sh64 = self.m.emit(op::U_CONVERT, t, &[shift]);
+        let seg = self.m.emit(op::SHIFT_RIGHT_LOGICAL, t, &[addr, sh64]);
+        let seg = self.m.emit(op::U_CONVERT, u, &[seg]);
+        self.m.deco(seg, DECO_NON_UNIFORM, &[]);
+        let one = self.m.c_u64(1);
+        let span = self.m.emit(op::SHIFT_LEFT_LOGICAL, t, &[one, sh64]);
+        let mask = self.m.emit(op::I_SUB, t, &[span, one]);
+        let off = self.m.emit(op::BITWISE_AND, t, &[addr, mask]);
+        let off = self.m.emit(op::U_CONVERT, u, &[off]);
+        let k = self.m.c_u32(size.trailing_zeros());
+        let elem = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[off, k]);
+        let z = self.m.c_u32(0);
+        let p = self.m.t_ptr(STORAGE_BUFFER, ty);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, seg, z, elem]);
+        self.m.deco(ptr, DECO_NON_UNIFORM, &[]);
+        ptr
+    }
+}

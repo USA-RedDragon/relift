@@ -1,6 +1,6 @@
 use relift_gpu_sm86::program::Program;
 use relift_gpu_sm86::translate::{
-    ClockPath, Denorm, HostProfile, Options, WarpPath, translate_with,
+    Atomic64Path, ClockPath, Denorm, GlobalPath, HostProfile, Options, WarpPath, translate_with,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -210,4 +210,72 @@ fn clock_without_a_host_clock_counts() {
     assert_eq!(s.interface.host.clock, ClockPath::Counter);
     assert!(!spirv_ops(&s.spirv).contains(&READ_CLOCK));
     assert!(s.interface.cbufs.contains(&0));
+}
+
+fn global_program() -> Program {
+    let mut b = Vec::new();
+    b.extend(word(
+        0x181,
+        1,
+        &[
+            (16, 8, 6),
+            (24, 8, 4),
+            (40, 24, 8),
+            (72, 1, 1),
+            (73, 3, 5),
+            (81, 3, 7),
+        ],
+    ));
+    b.extend(word(
+        0x1a8,
+        1,
+        &[
+            (16, 8, 8),
+            (24, 8, 4),
+            (32, 8, 2),
+            (40, 24, 16),
+            (72, 1, 1),
+            (73, 3, 2),
+            (81, 3, 7),
+            (87, 4, 0),
+        ],
+    ));
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+const ATOMIC_COMPARE_EXCHANGE: u32 = 230;
+const ATOMIC_I_ADD: u32 = 234;
+const CONVERT_U_TO_PTR: u32 = 120;
+
+#[test]
+fn global_memory_without_device_addresses_uses_segments() {
+    let p = global_program();
+    let t = text_of(&p);
+    assert!(
+        t[0].starts_with("LDG.E") && t[1].contains("ATOMG.E.ADD"),
+        "{t:?}"
+    );
+    let s = on(&p, HostProfile::lavapipe());
+    assert_eq!(s.interface.host.global, GlobalPath::Bda);
+    assert_eq!(s.interface.host.atomics64, Atomic64Path::None);
+    assert!(s.interface.global_memory);
+    let ops = spirv_ops(&s.spirv);
+    assert!(ops.contains(&CONVERT_U_TO_PTR));
+    assert!(ops.contains(&ATOMIC_I_ADD));
+    let s = on(&p, HostProfile::minimal());
+    assert_eq!(s.interface.host.global, GlobalPath::Segments { shift: 27 });
+    assert_eq!(s.interface.host.atomics64, Atomic64Path::Locked);
+    assert!(!s.interface.global_memory);
+    let ops = spirv_ops(&s.spirv);
+    assert!(!ops.contains(&CONVERT_U_TO_PTR));
+    assert!(!ops.contains(&ATOMIC_I_ADD));
+    assert!(ops.contains(&ATOMIC_COMPARE_EXCHANGE));
+}
+
+fn text_of(p: &Program) -> Vec<String> {
+    p.decode()
+        .into_iter()
+        .map(|d| d.map(|i| i.to_string()).unwrap_or_default())
+        .collect()
 }

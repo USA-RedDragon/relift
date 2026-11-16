@@ -12,9 +12,11 @@
 //! barriers, special registers).
 
 mod atomic;
+mod atomic64;
 mod clock;
 pub(crate) mod lanes;
 mod scratch;
+mod segments;
 mod warp;
 
 use super::{Ctx, PHYSICAL_STORAGE_BUFFER, Res, bad};
@@ -189,7 +191,13 @@ impl Ctx {
     }
 
     /// A physical storage buffer pointer to `ty` at 64-bit address `addr`.
+    /// Without buffer device addresses on the host, a pointer into the
+    /// guest memory segments instead (see [`segments`]).
     pub(crate) fn global_ptr(&mut self, addr: u32, ty: u32) -> u32 {
+        if !self.host.bda {
+            return self.segment_ptr(addr, ty);
+        }
+        self.iface.host.global = super::GlobalPath::Bda;
         self.iface.global_memory = true;
         let p = self.m.t_ptr(PHYSICAL_STORAGE_BUFFER, ty);
         self.m.emit(op::CONVERT_U_TO_PTR, p, &[addr])

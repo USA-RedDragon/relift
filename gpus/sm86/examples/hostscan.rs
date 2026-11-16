@@ -105,6 +105,7 @@ fn scan(p: &Program, t: &mut Tally) {
     let insts: Vec<_> = p.decode().into_iter().map(|d| d.ok()).collect();
     let n = insts.len();
     let mut div = vec![false; n];
+    let mut div_exit = vec![false; n];
     for (k, i) in insts.iter().enumerate() {
         let Some(i) = i else { continue };
         let guarded = divergent_guard(i);
@@ -118,7 +119,7 @@ fn scan(p: &Program, t: &mut Tally) {
                 }
             }
             "EXIT" | "RET" | "KILL" if guarded => {
-                for d in div.iter_mut().skip(k + 1) {
+                for d in div_exit.iter_mut().skip(k + 1) {
                     *d = true;
                 }
             }
@@ -137,6 +138,7 @@ fn scan(p: &Program, t: &mut Tally) {
     let mut warp_quad = 0u64;
     let mut warp_full = 0u64;
     let mut after_div = 0u64;
+    let mut after_exit = 0u64;
     let mut guarded = 0u64;
     let mut clock = false;
     let mut a64g = false;
@@ -153,6 +155,8 @@ fn scan(p: &Program, t: &mut Tally) {
             }
             if div[k] {
                 after_div += 1;
+            } else if div_exit[k] {
+                after_exit += 1;
             } else if divergent_guard(i) {
                 guarded += 1;
             }
@@ -184,6 +188,12 @@ fn scan(p: &Program, t: &mut Tally) {
             t.add(format!("{sn} programs with quad-only warp ops"), 1);
         }
         if stage == Stage::Compute {
+            if after_div == 0 && after_exit > 0 {
+                t.add(
+                    "compute programs with warp ops in uniform flow after a guarded exit",
+                    1,
+                );
+            }
             if after_div > 0 {
                 t.add("compute programs with warp ops in divergent flow", 1);
                 t.add("compute warp ops in divergent flow", after_div);
