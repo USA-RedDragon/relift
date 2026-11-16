@@ -264,7 +264,10 @@ static int run_body(void *arg)
     finish(H);
     if (H->win)
         b->close(H->win);
-    return r == RL_OK ? 0 : 1;
+    if (r == RL_OK)
+        return 0;
+    const rl_pending *pend = &rl_common(H->run.t->ctx)->pend;
+    return pend->kind == RL_PEND_EXIT_PROCESS && pend->code ? (int)pend->code : 1;
 }
 
 static const char *arg_value(int argc, char **argv, int *i)
@@ -274,6 +277,53 @@ static const char *arg_value(int argc, char **argv, int *i)
         exit(2);
     }
     return argv[++*i];
+}
+
+static rl_gba *g_report_gba;
+
+/** @brief Report peek: memory regions only (no I/O), through rl_gba_peek. */
+static bool report_peek(uint64_t a, void *out, size_t n)
+{
+    if (!g_report_gba || a > 0xFFFFFFFFull || n > 0x100000000ull - a)
+        return false;
+    uint8_t *o = out;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t x = (uint32_t)(a + i);
+        unsigned r = x >> 24;
+        if (r != 0x02 && r != 0x03 && r != 0x05 && r != 0x06 && r != 0x07 && (r < 0x08 || r > 0x0D))
+            return false;
+        o[i] = (uint8_t)rl_gba_peek(g_report_gba, x, 1);
+    }
+    return true;
+}
+
+/** @brief Report place: the GBA memory region of a. */
+static void report_where(uint64_t a, char *buf, size_t n)
+{
+    static const char *const names[16] = { "BIOS", "unmapped", "EWRAM", "IWRAM", "I/O", "palette", "VRAM", "OAM",
+                                            "cartridge ROM (wait state 0)", "cartridge ROM (wait state 0)",
+                                            "cartridge ROM (wait state 1)", "cartridge ROM (wait state 1)",
+                                            "cartridge ROM (wait state 2)", "cartridge ROM (wait state 2)",
+                                            "cartridge save", "cartridge save" };
+    if (a > 0xFFFFFFFFull || (a >> 24) > 0x0F)
+        snprintf(buf, n, "unmapped");
+    else
+        snprintf(buf, n, "%s", names[a >> 24]);
+}
+
+static const rl_report_guest g_report_guest = { report_peek, report_where, 0, NULL };
+
+/** @brief Tells stop reports the machine: the ROM and its two mirrors (wait states 1 and 2) as module rom, the RAMs as modules of their own. */
+static void report_machine(rl_gba *g, const rl_gba_program *p)
+{
+    g_report_gba = g;
+    rl_report_set_guest(&g_report_guest);
+    rl_report_info("guest", "gba");
+    rl_report_module("rom", 0x08000000u, p->rom_len, NULL);
+    rl_report_module("rom", 0x0A000000u, p->rom_len, NULL);
+    rl_report_module("rom", 0x0C000000u, p->rom_len, NULL);
+    rl_report_module("ewram", 0x02000000u, 0x40000u, NULL);
+    rl_report_module("iwram", 0x03000000u, 0x8000u, NULL);
 }
 
 int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
@@ -333,6 +383,7 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
         fprintf(stderr, "relift-gba: cannot create the machine\n");
         return 1;
     }
+    report_machine(g, p);
     H.run.variants = p->variants;
     H.run.variant_count = p->variant_count;
     if (!no_save && si.kind != RL_GBA_SAVE_NONE) {

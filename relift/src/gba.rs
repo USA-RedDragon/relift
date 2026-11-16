@@ -419,6 +419,7 @@ fn compile(
         ])
         .chain(extras.defines())
         .chain(static_rt)
+        .chain((!release && cross.is_none()).then(|| "-DRL_DEV_RUN".to_string()))
         .collect();
     let obj = |src: &Path, tag: &str| {
         let stem = src

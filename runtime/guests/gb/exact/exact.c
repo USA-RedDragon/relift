@@ -20,8 +20,10 @@
  * into lifted functions go back to lifted code.
  */
 #include "exact_int.h"
+#include "crash.h"
 #include "sm83.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,6 +50,8 @@ typedef struct gbx {
     const uint8_t *rom;
     size_t rom_len;
     rl_fn *banks[BANKS];
+    /** @brief The lifted unit of each ROM bank, for the reports' bank-aware lookup. */
+    const rl_unit *bank_units[BANKS];
     rl_gbx_ram_fn *ram[0x10000 - WINDOW_END];
     uint16_t ram_n[0x10000 - WINDOW_END];
     bool open;
@@ -86,6 +90,70 @@ const rl_gbx_stats *rl_gbx_stats_get(void) { return &G.st; }
 void rl_gbx_log_interpreted(bool on) { G.logging = on; }
 
 void rl_gbx_log_entries(bool on) { G.learning = on; }
+
+
+/** @brief Report peek: the bus as the library sees it, without side effects. */
+static bool report_peek(uint64_t a, void *out, size_t n)
+{
+    if (!G.h || a > 0xFFFF || n > 0x10000 - a)
+        return false;
+    uint8_t *o = out;
+    for (size_t i = 0; i < n; i++)
+        o[i] = rlgbd_peek(G.h, (uint16_t)(a + i));
+    return true;
+}
+
+/** @brief Report place: the memory region of a, with the ROM bank and file offset the window maps now. */
+static void report_where(uint64_t a, char *buf, size_t n)
+{
+    if (a < WINDOW)
+        snprintf(buf, n, "ROM bank %u, file offset 0x%llx", G.h ? rlgbd_rom_bank0(G.h) : 0u,
+                 (unsigned long long)((G.h ? rlgbd_rom_bank0(G.h) : 0u) * 0x4000ull + a));
+    else if (a < WINDOW_END) {
+        uint32_t b = G.h ? rlgbd_rom_bank(G.h) : 1u;
+        snprintf(buf, n, "ROM bank %u (mapped now), file offset 0x%llx", b,
+                 (unsigned long long)(b * 0x4000ull + a - WINDOW));
+    } else if (a < 0xA000)
+        snprintf(buf, n, "VRAM");
+    else if (a < 0xC000)
+        snprintf(buf, n, "cartridge RAM");
+    else if (a < 0xE000)
+        snprintf(buf, n, "WRAM");
+    else if (a < 0xFE00)
+        snprintf(buf, n, "echo RAM");
+    else if (a < 0xFEA0)
+        snprintf(buf, n, "OAM");
+    else if (a < 0xFF80)
+        snprintf(buf, n, "I/O");
+    else
+        snprintf(buf, n, "HRAM");
+}
+
+/**
+ * @brief Report lookup: a function of the bank mapped in the window now, for
+ * 0x4000-0x7FFF, where every bank's code shares the addresses.
+ */
+static int report_find(uint64_t a, rl_fn_hit *out)
+{
+    if (a < WINDOW || a >= WINDOW_END)
+        return -1;
+    uint32_t bank = G.h ? rlgbd_rom_bank(G.h) : 1u;
+    const rl_unit *u = bank < BANKS ? G.bank_units[bank] : NULL;
+    for (uint32_t k = 0; u && k < u->map_count; k++) {
+        const rl_fn_map *m = u->maps[k];
+        for (uint32_t i = 0; i < m->count; i++)
+            if (a >= m->fns[i].guest_addr && a - m->fns[i].guest_addr < m->fns[i].guest_size) {
+                out->map = m;
+                out->fn = &m->fns[i];
+                out->off = a - m->fns[i].guest_addr;
+                out->exact = true;
+                return 1;
+            }
+    }
+    return 0;
+}
+
+static const rl_report_guest g_report_guest = { report_peek, report_where, 1, report_find };
 
 static uint64_t seen_hash(uint64_t k)
 {
@@ -310,7 +378,8 @@ int rl_gbx_add_unit(const rl_unit *u, uint32_t bank)
         if (a >= WINDOW && a < WINDOW_END && !G.banks[bank][a - WINDOW])
             G.banks[bank][a - WINDOW] = u->fns[i].fn;
     }
-    return 0;
+    G.bank_units[bank] = u;
+    return u->map_count ? rl_fn_maps_register(u->maps, u->map_count) : 0;
 }
 
 /** @brief The dispatch miss: lifted RAM code for the open instruction, else the interpreter. */
@@ -348,6 +417,9 @@ int rl_gbx_init(rlgbd *h, const uint8_t *rom, size_t rom_len, bool dmg, bool mbc
     unit.name = "gb-window";
     const rl_unit *list[] = {&unit};
     rl_sm83_set_miss(miss_fn);
+    rl_report_set_guest(&g_report_guest);
+    rl_report_info("guest", "gb");
+    rl_report_module("rom0", 0, WINDOW, NULL);
     return rl_units_register(list, 1);
 }
 
