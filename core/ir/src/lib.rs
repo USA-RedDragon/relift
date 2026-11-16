@@ -32,6 +32,7 @@ mod crypto;
 mod half;
 pub mod interp;
 mod io;
+pub mod lane;
 mod ops;
 pub mod opt;
 mod regs;
@@ -41,9 +42,10 @@ pub use bin::{BinError, FORMAT as BIN_FORMAT, Reader, put_str, put_uvar, read_bl
 pub use block::{Block, Exit, Flow, Inst, Next, VerifyError};
 pub use builder::Builder;
 pub use io::{AddrClass, IoMap, IoRange};
+pub use lane::{LaneKind, LaneOp, LaneWidth, Permute};
 pub use ops::{
     AtomicOp, BinOp, Call, CmpOp, CryptoOp, Endian, ExtKind, FpArgs, FpOp, FpRound, IoKind, Konst,
-    Op, Order, UnOp, Value, Width,
+    LaneArgs, Op, Order, UnOp, Value, Width,
 };
 pub use opt::{classify_io, dce, simplify};
 pub use regs::{Reg, RegDecl, RegFile};

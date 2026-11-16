@@ -726,6 +726,11 @@ pub fn run_verified(
             }
             Op::Sync => 0,
             Op::Crypto(op, x) => crate::crypto::eval(*op, v(*x)),
+            Op::Lane(op, args) => {
+                let vals: Vec<u128> = args.iter().map(|a| v(*a)).collect();
+                crate::lane::eval(*op, &vals)
+            }
+            Op::Permute(p) => crate::lane::eval_permute(&p.pattern, v(p.a), p.b.map(v)),
             Op::AtomicRmw {
                 op,
                 addr,

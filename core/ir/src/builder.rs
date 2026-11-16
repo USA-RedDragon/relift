@@ -1,7 +1,8 @@
 use crate::block::check_op;
 use crate::{
     AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpArgs, FpOp, Inst,
-    IoKind, Next, Op, Order, Reg, RegFile, UnOp, Value, Width,
+    IoKind, LaneKind, LaneOp, LaneWidth, Next, Op, Order, Permute, Reg, RegFile, UnOp, Value,
+    Width,
 };
 
 /// Builds a [`Block`] one operation at a time, checking widths as it goes.
@@ -364,6 +365,52 @@ impl Builder {
     /// A cipher step.
     pub fn crypto(&mut self, op: CryptoOp, x: Value) -> Value {
         self.val(Op::Crypto(op, x), op.width())
+    }
+
+    /// A per-lane operation; `args` are its operands in order.
+    pub fn lane(&mut self, op: LaneOp, args: &[Value]) -> Value {
+        self.val(Op::Lane(op, args.into()), op.result_width())
+    }
+
+    /// A one-operand per-lane operation without an immediate.
+    pub fn lane1(&mut self, kind: LaneKind, lane: LaneWidth, a: Value) -> Value {
+        self.lane(LaneOp::new(kind, lane), &[a])
+    }
+
+    /// A two-operand per-lane operation without an immediate.
+    pub fn lane2(&mut self, kind: LaneKind, lane: LaneWidth, a: Value, b: Value) -> Value {
+        self.lane(LaneOp::new(kind, lane), &[a, b])
+    }
+
+    /// A per-lane operation with an immediate (a shift amount or lane
+    /// index) on `a`, and on `b` for [`LaneKind::Insert`].
+    pub fn lane_imm(&mut self, kind: LaneKind, lane: LaneWidth, imm: u8, args: &[Value]) -> Value {
+        self.lane(LaneOp::with_imm(kind, lane, imm), args)
+    }
+
+    /// Bitwise `mask ? a : b`.
+    pub fn lane_select(&mut self, mask: Value, a: Value, b: Value) -> Value {
+        self.lane(LaneOp::new(LaneKind::Select, LaneWidth::L64), &[mask, a, b])
+    }
+
+    /// A byte permutation of one source, see [`Permute`].
+    pub fn permute(&mut self, a: Value, pattern: [u8; 16]) -> Value {
+        let p = Permute {
+            pattern,
+            a,
+            b: None,
+        };
+        self.val(Op::Permute(Box::new(p)), Width::W128)
+    }
+
+    /// A byte permutation of two sources, see [`Permute`].
+    pub fn permute2(&mut self, a: Value, b: Value, pattern: [u8; 16]) -> Value {
+        let p = Permute {
+            pattern,
+            a,
+            b: Some(b),
+        };
+        self.val(Op::Permute(Box::new(p)), Width::W128)
     }
 
     /// Calls a named intrinsic.

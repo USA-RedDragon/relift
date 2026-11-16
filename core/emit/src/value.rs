@@ -546,6 +546,7 @@ pub(crate) fn emit_op(
         Op::Tick(_) | Op::TickIf(..) | Op::IoLoad { .. } | Op::IoStore { .. } | Op::Sync => {
             return crate::time::emit(fe, b, i, &val, io);
         }
+        Op::Lane(..) | Op::Permute(_) => return Err(format!("lane operation {:?}", inst.op)),
         Op::Crypto(op, x) => fe
             .crypto(*op, &val(*x))
             .ok_or_else(|| format!("cipher step {op:?}"))?,

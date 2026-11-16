@@ -62,7 +62,7 @@
 //! | `atomic.U.E.O addr, value` | [`Op::AtomicRmw`], `U` is `add clr eor set smax smin umax umin swp` |
 //! | `cas.E.O addr, expected, value` | [`Op::CompareSwap`] |
 //! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns sm4.sbox` |
-//! | `fence.O` / `clear.excl` | fence, clear the monitor |
+//! | `lane.K.W args` | [`Op::Lane`]: `K` is a [`LaneKind`] mnemonic (`add qadds mulhs shli widenlos narrow mulwloss bcast extract insert splat` and so on, see `LANE` in this file), `W` the lane width 8, 16, 32 or 64 (omitted for the bitwise kinds `and or xor andn not select`); shift, broadcast, extract and insert end in `, N`, a decimal immediate |\n//! | `lane.perm v, PAT` / `lane.perm2 a, b, PAT` | [`Op::Permute`]; `PAT` is the 16 byte indices as a 128-bit hex value, byte `i` of the value giving result byte `i` |\n//! | `fence.O` / `clear.excl` | fence, clear the monitor |
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
 //! | `fp.rint.R fp.tosint.R fp.touint.R fp.fromsint fp.fromuint fp.convert v` | [`FpOp`] conversions; `R` is `n`, `a`, `m`, `p` or `z` ([`FpRound`]) |
 //! | `intrinsic "name" args` | [`Op::Intrinsic`], args may be empty |
@@ -86,7 +86,8 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{
     AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpArgs, FpOp, FpRound,
-    Inst, IoKind, Next, Op, Order, RegFile, UnOp, Value, Width,
+    Inst, IoKind, LaneKind, LaneOp, LaneWidth, Next, Op, Order, Permute, RegFile, UnOp, Value,
+    Width,
 };
 
 const UN: [(UnOp, &str); 7] = [
@@ -180,6 +181,61 @@ const CRYPTO: [(CryptoOp, &str); 5] = [
     (CryptoOp::AesMixColumns, "aes.mixcolumns"),
     (CryptoOp::AesInvMixColumns, "aes.invmixcolumns"),
     (CryptoOp::Sm4Sbox, "sm4.sbox"),
+];
+
+const LANE: [(LaneKind, &str); 52] = [
+    (LaneKind::Add, "add"),
+    (LaneKind::Sub, "sub"),
+    (LaneKind::AddSatS, "qadds"),
+    (LaneKind::AddSatU, "qaddu"),
+    (LaneKind::SubSatS, "qsubs"),
+    (LaneKind::SubSatU, "qsubu"),
+    (LaneKind::MulLo, "mul"),
+    (LaneKind::MulHiS, "mulhs"),
+    (LaneKind::MulHiU, "mulhu"),
+    (LaneKind::MulHiSU, "mulhsu"),
+    (LaneKind::And, "and"),
+    (LaneKind::Or, "or"),
+    (LaneKind::Xor, "xor"),
+    (LaneKind::AndNot, "andn"),
+    (LaneKind::Not, "not"),
+    (LaneKind::MinS, "mins"),
+    (LaneKind::MinU, "minu"),
+    (LaneKind::MaxS, "maxs"),
+    (LaneKind::MaxU, "maxu"),
+    (LaneKind::Abs, "abs"),
+    (LaneKind::Neg, "neg"),
+    (LaneKind::Eq, "eq"),
+    (LaneKind::Ne, "ne"),
+    (LaneKind::Slt, "slt"),
+    (LaneKind::Sle, "sle"),
+    (LaneKind::Ult, "ult"),
+    (LaneKind::Ule, "ule"),
+    (LaneKind::ShlImm, "shli"),
+    (LaneKind::LShrImm, "lshri"),
+    (LaneKind::AShrImm, "ashri"),
+    (LaneKind::Shl, "shl"),
+    (LaneKind::LShr, "lshr"),
+    (LaneKind::AShr, "ashr"),
+    (LaneKind::Select, "select"),
+    (LaneKind::WidenLoS, "widenlos"),
+    (LaneKind::WidenLoU, "widenlou"),
+    (LaneKind::WidenHiS, "widenhis"),
+    (LaneKind::WidenHiU, "widenhiu"),
+    (LaneKind::NarrowTrunc, "narrow"),
+    (LaneKind::NarrowSS, "narrowss"),
+    (LaneKind::NarrowUU, "narrowuu"),
+    (LaneKind::NarrowSU, "narrowsu"),
+    (LaneKind::MulWideLoSS, "mulwloss"),
+    (LaneKind::MulWideLoUU, "mulwlouu"),
+    (LaneKind::MulWideLoSU, "mulwlosu"),
+    (LaneKind::MulWideHiSS, "mulwhiss"),
+    (LaneKind::MulWideHiUU, "mulwhiuu"),
+    (LaneKind::MulWideHiSU, "mulwhisu"),
+    (LaneKind::Broadcast, "bcast"),
+    (LaneKind::Extract, "extract"),
+    (LaneKind::Insert, "insert"),
+    (LaneKind::Splat, "splat"),
 ];
 
 fn name_of<T: Copy + PartialEq>(table: &[(T, &'static str)], x: T) -> &'static str {
@@ -346,6 +402,23 @@ impl fmt::Display for Block {
                     value.0
                 )?,
                 Op::Crypto(op, x) => write!(f, "crypto.{} v{}", name_of(&CRYPTO, *op), x.0)?,
+                Op::Lane(l, args) => {
+                    write!(f, "lane.{}", name_of(&LANE, l.kind))?;
+                    if !l.kind.bitwise() {
+                        write!(f, ".{}", l.lane.bits())?;
+                    }
+                    write_args(f, args)?;
+                    if l.kind.has_imm() {
+                        write!(f, ", {}", l.imm)?;
+                    }
+                }
+                Op::Permute(p) => {
+                    match p.b {
+                        Some(b) => write!(f, "lane.perm2 v{}, v{}", p.a.0, b.0)?,
+                        None => write!(f, "lane.perm v{}", p.a.0)?,
+                    }
+                    write!(f, ", {:#x}", p.pattern_value())?;
+                }
                 Op::AtomicRmw {
                     op,
                     addr,
@@ -767,6 +840,43 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
         Op::Cmp(cmp, v[0], v[1])
     } else if let Some(f) = text.strip_prefix("fp.").and_then(|s| lookup(&FP, s)) {
         Op::Fp(f, FpArgs::new(&c.values(f.arity(), defined)?))
+    } else if let Some(rest) = text
+        .strip_prefix("lane.")
+        .filter(|r| !r.starts_with("perm"))
+    {
+        let mut parts = rest.split('.');
+        let name = parts.next().unwrap_or("");
+        let Some(kind) = lookup(&LANE, name) else {
+            return c.err(at, format!("unknown lane operation `{name}`"));
+        };
+        let lane = if kind.bitwise() {
+            LaneWidth::L64
+        } else {
+            let wt = parts.next().unwrap_or("");
+            match wt.parse::<u32>().ok().and_then(LaneWidth::from_bits) {
+                Some(l) => l,
+                None => {
+                    return c.err(
+                        at,
+                        format!("expected a lane width 8, 16, 32 or 64 in `{text}`"),
+                    );
+                }
+            }
+        };
+        if let Some(extra) = parts.next() {
+            return c.err(at, format!("unexpected `{extra}` in `{text}`"));
+        }
+        let args = c.values(kind.arity(), defined)?;
+        let mut imm = 0;
+        if kind.has_imm() {
+            c.comma()?;
+            let it = c.word("an immediate")?;
+            imm = match it.text.parse::<u8>() {
+                Ok(n) if it.text.chars().all(|d| d.is_ascii_digit()) => n,
+                _ => return c.err(it.col, "expected an immediate as decimal 0 to 255"),
+            };
+        }
+        Op::Lane(LaneOp::with_imm(kind, lane, imm), FpArgs::new(&args))
     } else if let Some(k) = text
         .strip_prefix("crypto.")
         .and_then(|s| lookup(&CRYPTO, s))
@@ -774,6 +884,17 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
         Op::Crypto(k, c.value(defined)?)
     } else {
         match text {
+            "lane.perm" | "lane.perm2" => {
+                let two = text == "lane.perm2";
+                let v = c.values(if two { 2 } else { 1 }, defined)?;
+                c.comma()?;
+                let pat = c.hex("a byte pattern")?;
+                Op::Permute(Box::new(Permute {
+                    pattern: pat.to_le_bytes(),
+                    a: v[0],
+                    b: v.get(1).copied(),
+                }))
+            }
             "const" => Op::konst(c.hex("a constant")?),
             "get" => Op::Get(reg(c)?),
             "set" => {

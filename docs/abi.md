@@ -2296,6 +2296,24 @@ program in `relift/tests/e2e_diff.rs` (match, test fault, system call) and
 keyframe calls and functions of up to 9.6k guest instructions in a game and
 caught a flipped read in 5 of 5 calls]
 
+## 16.1 Lane operations
+
+`Op::Lane` and `Op::Permute` (`core/ir/src/lane.rs`) work on 128-bit values
+read as 8, 16, 32 or 64-bit lanes, lane 0 being the least significant bits.
+They are pure, have no guest-visible state, and belong to no guest: the RSP
+vector unit, ARM NEON and wasm SIMD128 all lower to the same set. The module
+documentation of `lane.rs` is the contract: the semantics of every kind
+(saturation, shift amounts of the lane width or more, out-of-range shuffle
+indices giving 0, mask lanes of all ones or zeros), the lane widths each kind
+accepts, and a table of the NEON, SSE2 to SSE4.1 and wasm SIMD128
+instructions an emitter uses for each. `relift_ir::lane::eval` is the
+reference the interpreter runs; `core/ir/tests/lane.rs` checks every kind and
+width against an independent per-lane reference. An emitter that does not
+lower them yet refuses the block through its existing unsupported path.
+Text mnemonics are `lane.KIND.WIDTH` (`lane.qadds.16 v1, v2`,
+`lane.shli.32 v1, 5`), `lane.perm` and `lane.perm2`; the binary form is
+`relift_ir::BIN_FORMAT` 2.
+
 ## Checks run for this contract
 
 All with clang 23.1.1 on Linux unless noted. Probe sources are scratch, not

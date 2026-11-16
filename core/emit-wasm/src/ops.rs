@@ -597,6 +597,7 @@ impl Em<'_> {
                 self.store_le(a, v, nb);
                 self.i(I::End);
             }
+            Op::Lane(..) | Op::Permute(_) => return Err("a lane operation".into()),
             Op::Crypto(c, x) => {
                 let x = loc(self, *x);
                 self.crypto(*c, x, dst);

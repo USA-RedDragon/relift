@@ -5,11 +5,12 @@
 
 use crate::{
     AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpArgs, FpOp, FpRound,
-    Inst, IoKind, Konst, Next, Op, Order, Reg, RegFile, UnOp, Value, Width,
+    Inst, IoKind, Konst, LaneKind, LaneOp, LaneWidth, Next, Op, Order, Permute, Reg, RegFile, UnOp,
+    Value, Width,
 };
 
 /// The version of the byte layout of [`write_block`] and [`Reader`].
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 
 /// A byte string that [`Reader`] could not take.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,6 +176,8 @@ coded! {
     FpRound: TiesEven, TiesAway, Floor, Ceil, Zero;
     IoKind: Any, Device;
     AtomicOp: Add, Clear, Xor, Or, SMax, SMin, UMax, UMin, Swap;
+    LaneWidth: L8, L16, L32, L64;
+    LaneKind: Add, Sub, AddSatS, AddSatU, SubSatS, SubSatU, MulLo, MulHiS, MulHiU, MulHiSU, And, Or, Xor, AndNot, Not, MinS, MinU, MaxS, MaxU, Abs, Neg, Eq, Ne, Slt, Sle, Ult, Ule, ShlImm, LShrImm, AShrImm, Shl, LShr, AShr, Select, WidenLoS, WidenLoU, WidenHiS, WidenHiU, NarrowTrunc, NarrowSS, NarrowUU, NarrowSU, MulWideLoSS, MulWideLoUU, MulWideLoSU, MulWideHiSS, MulWideHiUU, MulWideHiSU, Broadcast, Extract, Insert, Splat;
     CryptoOp: AesSubBytes, AesInvSubBytes, AesMixColumns, AesInvMixColumns, Sm4Sbox;
 }
 
@@ -390,6 +393,20 @@ fn put_op(out: &mut Vec<u8>, op: &Op) {
             put_val(out, *expected);
             put_val(out, *value);
         }
+        Op::Lane(l, args) => {
+            out.extend_from_slice(&[27, l.kind.code(), l.lane.code(), l.imm]);
+            for a in args {
+                put_val(out, *a);
+            }
+        }
+        Op::Permute(p) => {
+            out.push(28 + u8::from(p.b.is_some()));
+            out.extend_from_slice(&p.pattern);
+            put_val(out, p.a);
+            if let Some(b) = p.b {
+                put_val(out, b);
+            }
+        }
     }
 }
 
@@ -547,6 +564,26 @@ fn get_op(r: &mut Reader<'_>) -> Res<Op> {
                 endian,
                 order,
             }
+        }
+        27 => {
+            let kind = LaneKind::decode(r.u8()?)?;
+            let lane = LaneWidth::decode(r.u8()?)?;
+            let imm = r.u8()?;
+            let mut args = [Value(0); 3];
+            for a in &mut args[..kind.arity()] {
+                *a = val(r)?;
+            }
+            Op::Lane(
+                LaneOp::with_imm(kind, lane, imm),
+                FpArgs::new(&args[..kind.arity()]),
+            )
+        }
+        c @ (28 | 29) => {
+            let mut pattern = [0u8; 16];
+            pattern.copy_from_slice(r.bytes(16)?);
+            let a = val(r)?;
+            let b = if c == 29 { Some(val(r)?) } else { None };
+            Op::Permute(Box::new(Permute { pattern, a, b }))
         }
         _ => return bad("bad operation code"),
     })

@@ -1,4 +1,4 @@
-use crate::Reg;
+use crate::{LaneOp, Permute, Reg};
 
 /// The width of a value in bits, from 1 to 128.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -502,6 +502,9 @@ impl std::hash::Hash for FpArgs {
     }
 }
 
+/// The operands of an [`Op::Lane`], held inline: at most three.
+pub type LaneArgs = FpArgs;
+
 /// A call of a named intrinsic, the payload of [`Op::Intrinsic`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Call {
@@ -671,6 +674,12 @@ pub enum Op {
         /// The ordering.
         order: Order,
     },
+    /// A per-lane operation on 128-bit values, see [`crate::lane`]. The
+    /// operands are one to three values; no effect.
+    Lane(LaneOp, LaneArgs),
+    /// A constant byte permutation of one or two 128-bit values giving 128
+    /// bits, see [`Permute`]. No effect.
+    Permute(Box<Permute>),
 }
 
 impl Op {
@@ -762,6 +771,12 @@ impl Op {
                 kind: *kind,
             },
             Op::Crypto(c, v) => Op::Crypto(*c, r(v)),
+            Op::Lane(l, args) => Op::Lane(*l, args.map(r)),
+            Op::Permute(p) => Op::Permute(Box::new(Permute {
+                pattern: p.pattern,
+                a: r(&p.a),
+                b: p.b.as_ref().map(r),
+            })),
             Op::AtomicRmw {
                 op,
                 addr,
@@ -826,7 +841,8 @@ impl Op {
                 value,
                 ..
             } => vec![*addr, *expected, *value],
-            Op::Fp(_, args) => args.to_vec(),
+            Op::Fp(_, args) | Op::Lane(_, args) => args.to_vec(),
+            Op::Permute(p) => std::iter::once(p.a).chain(p.b).collect(),
             Op::Intrinsic(call) => call.args.clone(),
         }
     }

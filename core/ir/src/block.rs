@@ -280,6 +280,18 @@ pub(crate) fn check_op(
             same(w(*expected)?, r)?;
             bytes(r)
         }
+        Op::Lane(l, args) => {
+            let ws = args.iter().map(|a| w(*a)).collect::<Result<Vec<_>, _>>()?;
+            l.check(&ws, width)
+        }
+        Op::Permute(p) => {
+            same(need()?, Width::W128)?;
+            same(w(p.a)?, Width::W128)?;
+            if let Some(b) = p.b {
+                same(w(b)?, Width::W128)?;
+            }
+            Ok(())
+        }
         Op::Crypto(c, x) => {
             same(need()?, c.width())?;
             same(w(*x)?, c.width())
