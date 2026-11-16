@@ -14,6 +14,10 @@
  * an entry that no lifted run matches, stops the guest with a report (and
  * an RDRAM dump with --dump); nothing is interpreted.
  *
+ * The RSP is the layer of cpus/rsp over the machine's DMEM and IMEM: the
+ * machine runs it in slices through rl_n64_rsp_ops, and its COP0 accesses
+ * and BREAK go to the machine's SP and DP registers.
+ *
  * The boot is high level: no boot code runs. The registers and CP0 are what
  * the console's boot code leaves when it jumps to the game.
  */
@@ -136,6 +140,43 @@ static int entry_check(rl_ctx *c, uint8_t *mem)
     return rl_guest_fatal(c, "n64", "missed code: %s", why);
 }
 
+static uint64_t rsp_run(void *user, uint32_t *pc, uint64_t from, uint64_t to)
+{
+    return rl_rsp_run(user, pc, from, to);
+}
+
+static void rsp_imem(void *user, uint32_t offset, uint32_t len) { rl_rsp_imem_written(user, offset, len); }
+
+static const rl_n64_rsp_ops g_rsp_ops = {rsp_run, rsp_imem};
+
+static uint32_t rsp_mfc0(void *user, uint32_t rd, uint64_t cycle) { return rl_n64_rsp_mfc0(user, rd, cycle); }
+
+static void rsp_mtc0(void *user, uint32_t rd, uint32_t value, uint64_t cycle)
+{
+    rl_n64_rsp_mtc0(user, rd, value, cycle);
+}
+
+static void rsp_brk(void *user, uint64_t cycle) { rl_n64_rsp_break(user, cycle); }
+
+static bool rsp_halted(void *user) { return rl_n64_rsp_halted(user); }
+
+static const rl_rsp_bus g_rsp_bus = {rsp_mfc0, rsp_mtc0, rsp_brk, rsp_halted};
+
+int rl_n64_run_rsp(rl_n64_run *r, const rl_rsp_image *const *images, uint32_t count, char *why, size_t n)
+{
+    if (!rl_rsp_images_ok(images, count, why, n))
+        return -1;
+    uint8_t *sp = rl_n64_spmem(r->m);
+    r->rsp = rl_rsp_create(sp, sp + 0x1000, images, count, &g_rsp_bus, r->m);
+    if (!r->rsp) {
+        snprintf(why, n, "out of memory for the RSP");
+        return -1;
+    }
+    rl_rsp_set_dump(r->rsp, r->dump);
+    rl_n64_set_rsp(r->m, &g_rsp_ops, r->rsp);
+    return 0;
+}
+
 /** @brief The seed the boot variant leaves in s6. */
 static uint64_t seed(uint32_t cic)
 {
@@ -215,6 +256,11 @@ void rl_n64_run_free(rl_n64_run *r)
     }
     rl_mips_set_bus(NULL);
     rl_mips_set_cache_hook(NULL);
+    if (r->rsp) {
+        rl_n64_set_rsp(r->m, NULL, NULL);
+        rl_rsp_destroy(r->rsp);
+        r->rsp = NULL;
+    }
     if (g_run == r)
         g_run = NULL;
     r->s = NULL;

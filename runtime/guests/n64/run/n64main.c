@@ -139,6 +139,8 @@ static void print_stats(host *H)
 {
     const rl_n64_stats *s = rl_n64_get_stats(H->run.m);
     const rl_mips_stats *a = rl_mips_get_stats();
+    static const rl_rsp_stats none;
+    const rl_rsp_stats *q = H->run.rsp ? rl_rsp_get_stats(H->run.rsp) : &none;
     fprintf(stderr,
             "relift-n64: frames %u, cycles %llu, interpreted 0, pi dmas %llu, sp dmas %llu, binds %llu, checks %llu, "
             "mismatches %llu, invalidations %llu, rsp starts %llu, exceptions %llu, slow paths %llu, returns %llu, "
@@ -148,6 +150,12 @@ static void print_stats(host *H)
             (unsigned long long)s->mismatches, (unsigned long long)s->invalidations,
             (unsigned long long)s->rsp_starts, (unsigned long long)a->exceptions, (unsigned long long)a->slow,
             (unsigned long long)a->returns, (unsigned long long)a->redirects, (unsigned long long)a->misses);
+    fprintf(stderr,
+            "relift-n64: rsp interpreted 0, cycles %llu, slices %llu, breaks %llu, binds %llu, invalidations %llu, "
+            "misses %llu, dp submits %llu\n",
+            (unsigned long long)q->cycles, (unsigned long long)q->slices, (unsigned long long)s->rsp_breaks,
+            (unsigned long long)q->binds, (unsigned long long)q->invalidations, (unsigned long long)q->misses,
+            (unsigned long long)s->dp_submits);
 }
 
 static void report(host *H, rl_ctx *c)
@@ -161,17 +169,27 @@ static void report(host *H, rl_ctx *c)
     printf("regs %s\n", buf);
     printf("vi origin=%06x width=%u control=%04x\n", rl_n64_vi_reg(H->run.m, 1), rl_n64_vi_reg(H->run.m, 2),
            rl_n64_vi_reg(H->run.m, 0));
-    printf("mem rdram=%016llx\n",
-           (unsigned long long)fnv(0xCBF29CE484222325ull, rl_n64_rdram(H->run.m), RL_N64_RDRAM_SIZE));
+    const uint8_t *sp = rl_n64_spmem(H->run.m);
+    printf("mem rdram=%016llx dmem=%016llx imem=%016llx\n",
+           (unsigned long long)fnv(0xCBF29CE484222325ull, rl_n64_rdram(H->run.m), RL_N64_RDRAM_SIZE),
+           (unsigned long long)fnv(0xCBF29CE484222325ull, sp, 0x1000),
+           (unsigned long long)fnv(0xCBF29CE484222325ull, sp + 0x1000, 0x1000));
     fflush(stdout);
     if (H->dump) {
-        char path[4096];
-        snprintf(path, sizeof path, "%s.rdram", H->dump);
-        FILE *f = fopen(path, "wb");
-        if (!f || fwrite(rl_n64_rdram(H->run.m), 1, RL_N64_RDRAM_SIZE, f) != RL_N64_RDRAM_SIZE)
-            fprintf(stderr, "relift-n64: could not write %s\n", path);
-        if (f)
-            fclose(f);
+        const struct {
+            const char *ext;
+            const uint8_t *p;
+            size_t n;
+        } parts[3] = {{"rdram", rl_n64_rdram(H->run.m), RL_N64_RDRAM_SIZE}, {"dmem", sp, 0x1000}, {"imem", sp + 0x1000, 0x1000}};
+        for (int i = 0; i < 3; i++) {
+            char path[4096];
+            snprintf(path, sizeof path, "%s.%s", H->dump, parts[i].ext);
+            FILE *f = fopen(path, "wb");
+            if (!f || fwrite(parts[i].p, 1, parts[i].n, f) != parts[i].n)
+                fprintf(stderr, "relift-n64: could not write %s\n", path);
+            if (f)
+                fclose(f);
+        }
     }
 }
 
@@ -302,6 +320,11 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
         return 1;
     }
     H.run.dump = H.dump;
+    char why[256];
+    if (rl_n64_run_rsp(&H.run, p->rsp, p->rsp_count, why, sizeof why) != 0) {
+        fprintf(stderr, "relift-n64: %s\n", why);
+        return 1;
+    }
     rl_n64_set_frame_hook(m, on_frame, &H);
     H.run.check = on_check;
     H.run.check_user = &H;

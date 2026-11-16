@@ -9,6 +9,7 @@
 #include <relift/abi_core.h>
 
 #include "n64.h"
+#include "rsp.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -24,6 +25,9 @@ typedef struct rl_n64_program {
     /** @brief The code runs the machine binds. */
     const rl_n64_code *code;
     uint32_t code_count;
+    /** @brief The lifted RSP images. */
+    const rl_rsp_image *const *rsp;
+    uint32_t rsp_count;
     /** @brief The title, for reports. */
     const char *title;
     /** @brief The boot variant (6101 to 8303, 0 when unknown). */
@@ -36,9 +40,10 @@ typedef struct rl_n64_program {
  * @brief Runs the ROM in a window (the SDL3 backend when built and a display
  * exists) or headless. Options: --headless, --frames N (stop at the start of
  * the Nth VI frame and print the frame count, the hash of the scanned-out
- * framebuffer, its size, the registers and an RDRAM hash), --png FILE (the
+ * framebuffer, its size, the registers and hashes of RDRAM, DMEM and IMEM), --png FILE (the
  * framebuffer at exit), --png-dir DIR with --png-every N (every Nth frame),
- * --dump PREFIX (PREFIX.rdram at the stop, and when code is missed),
+ * --dump PREFIX (PREFIX.rdram, .dmem and .imem at the stop; RDRAM when CPU
+ * code is missed, IMEM and DMEM when RSP code is),
  * --stats (counters on stderr) and the runtime's --relift-set and
  * --relift-settings.
  */

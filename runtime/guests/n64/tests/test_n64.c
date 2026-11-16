@@ -124,6 +124,11 @@ TEST(n64_sp_dma_moves_rows_between_rdram_and_dmem)
     rl_n64_write(t.m, 0x04040000u, 4, 0x0100u);
     rl_n64_write(t.m, 0x04040004u, 4, 0x8000u);
     rl_n64_write(t.m, 0x04040008u, 4, (8u << 20) | (1u << 12) | 15u);
+    CHECK_EQ(rl_n64_read(t.m, 0x04040018u, 4), 1u);
+    CHECK_EQ(rl_n64_spmem(t.m)[0x101], 0);
+    advance(&t, 64);
+    CHECK_EQ(rl_n64_read(t.m, 0x04040018u, 4), 0u);
+    CHECK_EQ(rl_n64_read(t.m, 0x04040008u, 4), 0x800FF8u);
     CHECK_EQ(rl_n64_spmem(t.m)[0x100], 0);
     CHECK_EQ(rl_n64_spmem(t.m)[0x10F], 15);
     CHECK_EQ(rl_n64_spmem(t.m)[0x110], 24);

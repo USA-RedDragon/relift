@@ -17,6 +17,15 @@ typedef struct n64_bsd {
     uint8_t release;
 } n64_bsd;
 
+/** @brief One SP DMA transfer's registers: the DMEM or IMEM address (bit 12 IMEM), the RDRAM address, the row shape. */
+typedef struct n64_sp_dma {
+    uint32_t mem;
+    uint32_t dram;
+    uint32_t length;
+    uint32_t count;
+    uint32_t skip;
+} n64_sp_dma;
+
 /** @brief Where a code run is: not loaded, loaded and not checked, or checked and in dispatch. */
 enum { CODE_OUT, CODE_LOADED, CODE_LIVE };
 
@@ -57,16 +66,35 @@ struct rl_n64 {
     } pi;
 
     struct {
-        uint32_t mem_addr;
-        uint32_t dram_addr;
-        uint32_t rd_len;
-        uint32_t wr_len;
-        uint32_t status;
+        n64_sp_dma pending;
+        n64_sp_dma current;
+        bool full_rd, full_wr;
+        bool busy_rd, busy_wr;
+        /** @brief The RSP cycle the current row ends at. */
+        uint64_t row_end;
+        bool halted, broken, sstep, intbreak, io_full;
+        uint8_t signals;
         uint32_t semaphore;
         uint32_t pc;
+        /** @brief The RSP's clock: the cycle it has run to. */
+        uint64_t cycle;
+        /** @brief The latest RSP cycle of any SP access; the SP side never goes back. */
+        uint64_t last;
+        /** @brief Whether the RSP's code is running (its accesses come through the COP0 entries). */
+        bool in_rsp;
+        rl_event slice;
+        rl_event dma_event;
+        const rl_n64_rsp_ops *ops;
+        void *user;
     } sp;
 
-    uint32_t dp[8];
+    struct {
+        uint32_t start, end, current;
+        bool start_valid, end_valid, xbus, freeze, flush, busy, ready;
+        uint64_t clock_base;
+        rl_n64_dp_submit *submit;
+        void *submit_user;
+    } dp;
 
     struct {
         uint32_t dram;
@@ -143,5 +171,22 @@ uint32_t rl_n64_vi_read(rl_n64 *m, unsigned index);
 void rl_n64_vi_write(rl_n64 *m, unsigned index, uint32_t value);
 /** @brief Starts the line events. */
 void rl_n64_vi_attach(rl_n64 *m);
+
+/** @brief The SP side at creation: the RSP halted, the DP ready. */
+void rl_n64_sp_init(rl_n64 *m);
+/** @brief Sets up the SP events. */
+void rl_n64_sp_attach(rl_n64 *m);
+/** @brief Runs the RSP and the SP DMA up to CPU tick tick (nothing while the RSP's own code runs). */
+void rl_n64_sp_catch_up(rl_n64 *m, uint64_t tick);
+/** @brief A CPU read of the SP registers (0x04040000 to 0x0404001F) or SP_PC at a, now. */
+uint32_t rl_n64_sp_read(rl_n64 *m, uint32_t a);
+/** @brief A CPU write of the SP registers or SP_PC. */
+void rl_n64_sp_write(rl_n64 *m, uint32_t a, uint32_t v);
+/** @brief A CPU read of DP register i (0 to 7), now. */
+uint32_t rl_n64_dp_read(rl_n64 *m, unsigned i);
+/** @brief A CPU write of DP register i. */
+void rl_n64_dp_write(rl_n64 *m, unsigned i, uint32_t v);
+/** @brief IMEM [offset, offset + len) was written by the CPU. */
+void rl_n64_imem_written(rl_n64 *m, uint32_t offset, uint32_t len);
 
 #endif

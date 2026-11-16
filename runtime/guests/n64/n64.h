@@ -4,8 +4,10 @@
  * (core/include/relift/sched.h): the physical memory map, MI (interrupt
  * mask and pending bits, version), the RI and RDRAM registers, PI (the
  * cartridge domains, DMA in both directions with its duration, status and
- * interrupt), the SP registers with DMA to DMEM and IMEM (the RSP does not
- * run yet), the DP registers, VI (the registers, the line counter, the
+ * interrupt), the SP interface (DMA to DMEM and IMEM with its duration, the
+ * status, semaphore and signals, the RSP's start, halt and BREAK, run in
+ * slices by the run layer), the DP command registers, VI (the registers,
+ * the line counter, the
  * interrupt at its line and the raw framebuffer scan-out), AI and SI
  * registers, PIF RAM, the high-level boot and the binding of lifted code to
  * the RDRAM ranges the machine loads it to.
@@ -15,7 +17,7 @@
  * rl_n64_write and asks rl_n64_irq_pending which MI lines are up, and lifted
  * code reaches RDRAM directly through rl_n64_rdram.
  *
- * Timing of PI DMA and of the VI lines follows ares (ISC license, see
+ * Timing of PI DMA, SP DMA and the VI lines follows ares (ISC license, see
  * NOTICE).
  */
 #ifndef RELIFT_N64_H
@@ -84,8 +86,12 @@ typedef struct rl_n64_stats {
     uint64_t invalidations;
     /** @brief VI frames. */
     uint64_t frames;
-    /** @brief RSP starts (SP_STATUS halt cleared); the RSP does not run yet. */
+    /** @brief RSP starts (SP_STATUS halt cleared while halted). */
     uint64_t rsp_starts;
+    /** @brief BREAKs the RSP ran. */
+    uint64_t rsp_breaks;
+    /** @brief Command lists handed to the RDP side (DPC_END writes and unfreezes with commands). */
+    uint64_t dp_submits;
 } rl_n64_stats;
 
 /** @brief Called at the start of each VI frame (the line the picture begins at, or every 200 lines of a VI that is off). */
@@ -122,6 +128,44 @@ RL_RUNTIME_API uint32_t rl_n64_vi_reg(rl_n64 *m, unsigned index);
  * (room for 640 * 576 * 3 bytes) and the size. Returns false when VI is off.
  */
 RL_RUNTIME_API bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height);
+
+/**
+ * @brief How the machine runs the RSP; the run layer's RSP layer fills it
+ * (the machine knows no CPU). run runs lifted code from *pc at RSP cycle
+ * from until cycle to or until the RSP halts, returns the cycle it stopped
+ * at (a block may end past to) and leaves the next pc in *pc; imem_written
+ * says IMEM [offset, offset + len) changed.
+ */
+typedef struct rl_n64_rsp_ops {
+    uint64_t (*run)(void *user, uint32_t *pc, uint64_t from, uint64_t to);
+    void (*imem_written)(void *user, uint32_t offset, uint32_t len);
+} rl_n64_rsp_ops;
+
+/** @brief Sets how the RSP runs (NULL: a start halts at once, with a report). */
+RL_RUNTIME_API void rl_n64_set_rsp(rl_n64 *m, const rl_n64_rsp_ops *ops, void *user);
+/** @brief The RSP's MFC0 of rd (0 to 7 SP, 8 to 15 DP) at RSP cycle cycle. */
+RL_RUNTIME_API uint32_t rl_n64_rsp_mfc0(rl_n64 *m, uint32_t rd, uint64_t cycle);
+/** @brief The RSP's MTC0 of value to rd at RSP cycle cycle. */
+RL_RUNTIME_API void rl_n64_rsp_mtc0(rl_n64 *m, uint32_t rd, uint32_t value, uint64_t cycle);
+/** @brief The RSP's BREAK at RSP cycle cycle: halted and broken, the SP interrupt when SP_STATUS asks for it. */
+RL_RUNTIME_API void rl_n64_rsp_break(rl_n64 *m, uint64_t cycle);
+/** @brief Whether the RSP is halted. */
+RL_RUNTIME_API bool rl_n64_rsp_halted(const rl_n64 *m);
+/** @brief SP_PC: where the RSP starts or stopped. */
+RL_RUNTIME_API uint32_t rl_n64_sp_pc(const rl_n64 *m);
+
+/**
+ * @brief The RDP side's command hook: the command list [start, end) of
+ * RDRAM (or of DMEM when xbus) is ready, as a DPC_END write or an unfreeze
+ * makes it. The hook owns its completion: it reports progress with
+ * rl_n64_dp_progress and raises the DP interrupt itself. Without a hook the
+ * commands are taken at once (DPC_CURRENT reaches DPC_END) and do nothing.
+ */
+typedef void rl_n64_dp_submit(void *user, rl_n64 *m, uint32_t start, uint32_t end, bool xbus);
+/** @brief Sets the DP command hook (NULL: none). */
+RL_RUNTIME_API void rl_n64_set_dp_submit(rl_n64 *m, rl_n64_dp_submit *hook, void *user);
+/** @brief The RDP side took the commands up to current; busy says whether it still works on them. */
+RL_RUNTIME_API void rl_n64_dp_progress(rl_n64 *m, uint32_t current, bool busy);
 
 /** @brief The memory side of the boot the boot variant cic (6101 to 8303; 0 boots as 6102) does: see rl_n64_boot. */
 typedef struct rl_n64_boot_info {

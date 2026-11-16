@@ -1,12 +1,13 @@
 /**
  * @file machine.c
  * @brief The physical memory map and the registers of MI, RI, the RDRAM
- * modules, SP, DP, AI, SI and PIF RAM, and the high-level boot.
+ * modules, AI, SI and PIF RAM, and the high-level boot (the SP and DP
+ * registers are sp.c's).
  *
  * Every register is a word; a narrower access reads the word and takes its
  * bytes, and a narrower write writes its bytes shifted into the word as the
- * CPU's bus puts them out. The RSP and the RDP do not run yet: a start of
- * the RSP is counted and the RSP halts again at once, as if it broke.
+ * CPU's bus puts them out. Before any access outside RDRAM the RSP is
+ * brought up to the CPU's tick.
  */
 #include "n64_int.h"
 
@@ -51,7 +52,7 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     }
     m->rom = rom;
     m->rom_len = rom_len;
-    m->sp.status = 1;
+    rl_n64_sp_init(m);
     return m;
 }
 
@@ -62,6 +63,8 @@ void rl_n64_destroy(rl_n64 *m)
     if (m->s) {
         rl_sched_cancel(m->s, &m->pi.done);
         rl_sched_cancel(m->s, &m->vi.line);
+        rl_sched_cancel(m->s, &m->sp.slice);
+        rl_sched_cancel(m->s, &m->sp.dma_event);
     }
     free(m->code.state);
     free(m->code.order);
@@ -78,6 +81,7 @@ int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k)
     m->k = k;
     rl_n64_pi_attach(m);
     rl_n64_vi_attach(m);
+    rl_n64_sp_attach(m);
     mi_update(m);
     return 0;
 }
@@ -141,120 +145,6 @@ static void mi_write(rl_n64 *m, unsigned i, uint32_t v)
                 m->mi.mask |= 1u << b;
         }
         mi_update(m);
-    }
-}
-
-/** @brief Copies an SP DMA: count rows of len bytes, skip bytes apart in RDRAM, in direction to_rdram. */
-static void sp_dma(rl_n64 *m, uint32_t reg, bool to_rdram)
-{
-    uint32_t len = (reg & 0xFF8u) + 8u, count = (reg >> 12 & 0xFFu) + 1u, skip = reg >> 20 & 0xFF8u;
-    uint32_t mem = m->sp.mem_addr & 0x1FF8u, bank = mem & 0x1000u, dram = m->sp.dram_addr & 0xFFFFF8u;
-    uint32_t first = dram;
-    m->stats.sp_dmas++;
-    for (uint32_t r = 0; r < count; r++) {
-        for (uint32_t k = 0; k < len; k++) {
-            uint32_t s = bank | ((mem + k) & 0xFFFu);
-            uint32_t d = (dram + k) & (RL_N64_RDRAM_SIZE - 1u);
-            if (to_rdram)
-                m->rdram[d] = m->spmem[s];
-            else
-                m->spmem[s] = m->rdram[d];
-        }
-        mem = bank | ((mem + len) & 0xFFFu);
-        dram += len + skip;
-    }
-    m->sp.mem_addr = mem;
-    m->sp.dram_addr = dram;
-    if (to_rdram)
-        rl_n64_code_written(m, first, dram - first);
-}
-
-static uint32_t sp_read(rl_n64 *m, unsigned i)
-{
-    switch (i) {
-    case 0:
-        return m->sp.mem_addr;
-    case 1:
-        return m->sp.dram_addr;
-    case 2:
-        return m->sp.rd_len;
-    case 3:
-        return m->sp.wr_len;
-    case 4:
-        return m->sp.status;
-    case 5:
-    case 6:
-        return 0;
-    case 7: {
-        uint32_t v = m->sp.semaphore;
-        m->sp.semaphore = 1;
-        return v;
-    }
-    default:
-        return 0;
-    }
-}
-
-static void sp_status_write(rl_n64 *m, uint32_t v)
-{
-    uint32_t st = m->sp.status;
-    if (v & 0x2u)
-        st |= 0x1u;
-    if (v & 0x4u)
-        st &= ~0x2u;
-    if (v & 0x8u)
-        rl_n64_mi_lower(m, RL_N64_IRQ_SP);
-    if (v & 0x10u)
-        rl_n64_mi_raise(m, RL_N64_IRQ_SP);
-    if (v & 0x20u)
-        st &= ~0x20u;
-    if (v & 0x40u)
-        st |= 0x20u;
-    if (v & 0x80u)
-        st &= ~0x40u;
-    if (v & 0x100u)
-        st |= 0x40u;
-    for (unsigned b = 0; b < 8; b++) {
-        if (v & (1u << (9 + 2 * b)))
-            st &= ~(1u << (7 + b));
-        if (v & (1u << (10 + 2 * b)))
-            st |= 1u << (7 + b);
-    }
-    if ((v & 0x1u) && (st & 0x1u)) {
-        m->stats.rsp_starts++;
-        rl_report_unknown(0x4E36345350ull, "n64", "the game starts the RSP, which does not run yet; it halts at once");
-        st |= 0x2u;
-        if (st & 0x40u)
-            rl_n64_mi_raise(m, RL_N64_IRQ_SP);
-    }
-    m->sp.status = st;
-}
-
-static void sp_write(rl_n64 *m, unsigned i, uint32_t v)
-{
-    switch (i) {
-    case 0:
-        m->sp.mem_addr = v & 0x1FF8u;
-        break;
-    case 1:
-        m->sp.dram_addr = v & 0xFFFFF8u;
-        break;
-    case 2:
-        m->sp.rd_len = v;
-        sp_dma(m, v, false);
-        break;
-    case 3:
-        m->sp.wr_len = v;
-        sp_dma(m, v, true);
-        break;
-    case 4:
-        sp_status_write(m, v);
-        break;
-    case 7:
-        m->sp.semaphore = 0;
-        break;
-    default:
-        break;
     }
 }
 
@@ -358,11 +248,9 @@ static uint32_t read_word(rl_n64 *m, uint32_t a)
     unsigned r = (a >> 2) & 15u;
     switch (a >> 20) {
     case 0x040:
-        if (a == 0x04080000u)
-            return m->sp.pc;
-        return (a & 0xFFFE0u) == 0x40000u ? sp_read(m, r) : 0;
+        return rl_n64_sp_read(m, a);
     case 0x041:
-        return r == 3 ? 0x80u : m->dp[r & 7u];
+        return rl_n64_dp_read(m, r & 7u);
     case 0x043:
         return mi_read(m, r);
     case 0x044:
@@ -393,18 +281,17 @@ static void write_word(rl_n64 *m, uint32_t a, uint32_t v)
     }
     if (a >= 0x04000000u && a < 0x04040000u) {
         st32(m->spmem + (a & 0x1FFCu), v);
+        if (a & 0x1000u)
+            rl_n64_imem_written(m, a & 0xFFCu, 4);
         return;
     }
     unsigned r = (a >> 2) & 15u;
     switch (a >> 20) {
     case 0x040:
-        if (a == 0x04080000u)
-            m->sp.pc = v & 0xFFCu;
-        else if ((a & 0xFFFE0u) == 0x40000u)
-            sp_write(m, r, v);
+        rl_n64_sp_write(m, a, v);
         return;
     case 0x041:
-        m->dp[r & 7u] = v;
+        rl_n64_dp_write(m, r & 7u, v);
         return;
     case 0x043:
         mi_write(m, r, v);
@@ -440,6 +327,7 @@ uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size)
             v = v << 8 | m->rdram[(paddr + i) & (RL_N64_RDRAM_SIZE - 1u)];
         return v;
     }
+    rl_n64_sp_catch_up(m, rl_n64_now(m));
     if (size == 8)
         return (uint64_t)read_word(m, paddr & ~7u) << 32 | read_word(m, (paddr & ~7u) + 4u);
     uint32_t w = read_word(m, paddr & ~3u);
@@ -457,6 +345,7 @@ void rl_n64_write(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t value)
             m->rdram[(paddr + i) & (RL_N64_RDRAM_SIZE - 1u)] = (uint8_t)(value >> (8u * (size - 1u - i)));
         return;
     }
+    rl_n64_sp_catch_up(m, rl_n64_now(m));
     if (size == 8) {
         write_word(m, paddr & ~7u, (uint32_t)(value >> 32));
         write_word(m, (paddr & ~7u) + 4u, (uint32_t)value);
