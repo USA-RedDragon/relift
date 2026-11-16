@@ -36,6 +36,15 @@
 /** @brief Bus cycles per second (the ARM7 clock and the timers' F). */
 #define RL_NDS_BUS_HZ 33513982u
 
+/** @brief Ticks of one dot of the display (six bus cycles; GBATEK "DS Video Stuff"). */
+#define RL_NDS_DOT_TICKS 12u
+/** @brief Ticks of one line: 355 dots, 256 of them drawn. */
+#define RL_NDS_LINE_TICKS 4260u
+/** @brief Lines of one frame: 192 drawn, 71 of VBlank. */
+#define RL_NDS_LINES 263u
+/** @brief Ticks of one frame (59.8261 Hz). */
+#define RL_NDS_FRAME_TICKS (RL_NDS_LINE_TICKS * RL_NDS_LINES)
+
 /** @brief The CPUs, as the cpu argument of the bus calls. */
 enum {
     RL_NDS_ARM9 = 0,
@@ -194,6 +203,9 @@ enum {
     RL_NDS_IRQ_SPI = 1u << 23,
     RL_NDS_IRQ_WIFI = 1u << 24,
 };
+
+/** @brief The display line (VCOUNT) at the ARM9's current tick. */
+unsigned rl_nds_vcount(const rl_nds *m);
 
 /** @brief Requests the interrupts in sources of cpu at its current tick (for devices outside this layer). */
 void rl_nds_request_irq(rl_nds *m, unsigned cpu, uint32_t sources);

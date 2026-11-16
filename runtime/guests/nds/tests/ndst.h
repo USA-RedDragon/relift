@@ -31,7 +31,8 @@ void ndst_both(ndst *t, uint64_t tick);
 
 /**
  * @brief Runs the op stream ops (scene.h) as untimed ARM9 accesses; the
- * values its reads return go to out (at most max). Returns how many reads
+ * values its reads return go to out (at most max). A wait for a line moves
+ * both clocks to the start of the next such line. Returns how many reads
  * there were.
  */
 uint32_t ndst_scene(ndst *t, const uint32_t *ops, uint32_t *out, uint32_t max);

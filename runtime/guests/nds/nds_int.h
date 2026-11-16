@@ -20,6 +20,11 @@
 /** @brief Offset of IPCFIFORECV from the I/O base. */
 #define NDS_FIFORECV 0x100000u
 
+/** @brief Lines drawn per frame; VBlank starts at this line. */
+#define NDS_VISIBLE 192u
+/** @brief Ticks from the start of a line to the HBlank flag and interrupt (the oracle's 1,584 bus cycles). */
+#define NDS_HBLANK_TICKS 3168u
+
 /** @brief Bytes of one watched line of code memory. */
 #define NDS_LINE 32u
 /** @brief First watch line of each code memory: main RAM, shared work RAM, ARM7 work RAM, ITCM. */
@@ -145,6 +150,16 @@ typedef struct nds_math {
     uint64_t div_done, sqrt_done;
 } nds_math;
 
+/** @brief The display timing (lcd.c). */
+typedef struct nds_lcd {
+    /** @brief A tick at which a frame started (line 0, dot 0). */
+    uint64_t origin;
+    /** @brief DISPSTAT of each CPU: the IRQ enables (bits 3 to 5) and LYC (bits 7 to 15). */
+    uint16_t stat[2];
+    /** @brief The next line edge that requests an interrupt. */
+    rl_event ev;
+} nds_lcd;
+
 /** @brief What an address decodes to. */
 typedef enum nds_kind {
     /** @brief Nothing: reads 0, writes are dropped. */
@@ -225,6 +240,7 @@ struct rl_nds {
     nds_ipc ipc;
     nds_timer tm[2][4];
     nds_math math;
+    nds_lcd lcd;
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
@@ -351,6 +367,17 @@ void nds_ranks(rl_nds *m);
 void nds_wake_line(rl_nds *m, unsigned cpu);
 /** @brief Routes the wake lines and sets the masks and ranks. */
 int nds_order_attach(rl_nds *m);
+
+/** @brief Power-on state of the display timing. */
+void nds_lcd_reset(rl_nds *m);
+/** @brief Starts the display at line 0 at the ARM9's current tick and posts its first edge. */
+void nds_lcd_attach(rl_nds *m);
+/** @brief The position in the frame at tick t, in ticks from line 0 dot 0. */
+uint64_t nds_lcd_pos(const rl_nds *m, uint64_t t);
+/** @brief DISPSTAT (bits 0 to 15) and VCOUNT (bits 16 to 24) of cpu at tick now. */
+uint32_t nds_lcd_read(const rl_nds *m, unsigned cpu, uint64_t now);
+/** @brief A write of the mask bits of v to cpu's DISPSTAT and VCOUNT word at tick now. */
+void nds_lcd_write(rl_nds *m, unsigned cpu, uint32_t v, uint32_t mask, uint64_t now);
 
 /** @brief Power-on state of the eight timers. */
 void nds_timer_reset(rl_nds *m);

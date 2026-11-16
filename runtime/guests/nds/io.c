@@ -2,7 +2,8 @@
  * @file io.c
  * @brief The I/O registers of both CPUs as one scheduler device: the word
  * dispatch with byte lanes to the interrupt controllers (irq.c), IPC
- * (ipc.c), the timers (timer.c) and the ARM9's math unit (math.c), the
+ * (ipc.c), the timers (timer.c), the ARM9's math unit (math.c), the
+ * display timing (lcd.c), the
  * system registers (EXMEMCNT and EXMEMSTAT,
  * WRAMCNT and WRAMSTAT, VRAMCNT, POSTFLG, HALTCNT) and register file stubs
  * for the registers no device models yet.
@@ -64,6 +65,8 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
     case 0x210:
     case 0x214:
         return nds_irq_read(m, cpu, off);
+    case 0x004:
+        return nds_lcd_read(m, cpu, now);
     case 0x204:
         return exmem_read(m, cpu) | (cpu == RL_NDS_ARM7 ? regs_word(m, cpu, off) & 0xFFFF0000u : 0);
     case 0x240:
@@ -109,6 +112,9 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     case 0x210:
     case 0x214:
         nds_irq_write(m, cpu, off, v, mask, now);
+        return;
+    case 0x004:
+        nds_lcd_write(m, cpu, v, mask, now);
         return;
     case 0x204:
         if (mask & 0xFFFF)
@@ -174,6 +180,7 @@ void nds_io_reset(rl_nds *m)
     nds_ipc_reset(m);
     nds_timer_reset(m);
     nds_math_reset(m);
+    nds_lcd_reset(m);
 }
 
 static uint64_t io_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)

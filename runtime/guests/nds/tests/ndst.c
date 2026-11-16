@@ -79,6 +79,12 @@ uint32_t ndst_scene(ndst *t, const uint32_t *p, uint32_t *out, uint32_t max)
             n++;
             break;
         }
+        case OP_WAITLINE:
+            while (rl_nds_vcount(t->m) != a) {
+                uint64_t now = rl_sched_now(t->k[RL_NDS_ARM9]);
+                ndst_both(t, now - now % RL_NDS_LINE_TICKS + RL_NDS_LINE_TICKS);
+            }
+            break;
         default:
             fprintf(stderr, "ndst: op %u is not known here\n", op);
             abort();

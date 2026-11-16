@@ -248,6 +248,7 @@ int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7
         return -1;
     }
     nds_timer_attach(m);
+    nds_lcd_attach(m);
     return 0;
 }
 
