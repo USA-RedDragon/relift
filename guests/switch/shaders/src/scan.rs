@@ -4,7 +4,11 @@
 //!
 //! Every job's result is cached under a key made of the file's path, size
 //! and identity (the SHA-256 a NUP records, or the content hash of a
-//! directory file), the dictionaries in use and the ranges asked of it. A
+//! directory file), the dictionaries in use and the ranges asked of it,
+//! salted with what shapes every result: the cache version, the crate
+//! version, a digest of this crate's own sources (so a change to the carve
+//! or any reader misses the cache), whether labels carry a package and the
+//! package selection. A
 //! cached job decompresses and reads nothing; a cached result is used only
 //! while every program it names is still in the output directory.
 
@@ -29,6 +33,28 @@ const MAX_SRCS: usize = 4;
 const GAP: u64 = 256 << 10;
 const SPAN: u64 = 32 << 20;
 const CTRL: [u8; 4] = [0x34, 0x12, 0x76, 0x98];
+const CODE: [&str; 8] = [
+    include_str!("scan.rs"),
+    include_str!("carve.rs"),
+    include_str!("ktgl.rs"),
+    include_str!("inflate.rs"),
+    include_str!("sarc.rs"),
+    include_str!("zst.rs"),
+    include_str!("source.rs"),
+    include_str!("error.rs"),
+];
+
+fn salt(packages: bool, package: Option<usize>) -> String {
+    let mut s = format!(
+        "v{CACHE_VERSION}\u{1}{}\u{1}{packages}\u{1}{package:?}",
+        env!("CARGO_PKG_VERSION")
+    );
+    for c in CODE {
+        s.push('\u{1}');
+        s.push_str(&sha256_hex(c.as_bytes()));
+    }
+    sha256_hex(s.as_bytes())
+}
 
 /// How to run a scan.
 #[derive(Clone, Debug, Default)]
@@ -263,6 +289,7 @@ struct Ctx<'a> {
     claimed: Mutex<HashSet<String>>,
     hits: AtomicU64,
     packages: bool,
+    salt: String,
 }
 
 impl Ctx<'_> {
@@ -373,7 +400,12 @@ impl Ctx<'_> {
     }
 
     fn key(&self, parts: &[&str]) -> String {
-        sha256_hex(parts.join("\u{1}").as_bytes())
+        let mut s = self.salt.clone();
+        for p in parts {
+            s.push('\u{1}');
+            s.push_str(p);
+        }
+        sha256_hex(s.as_bytes())
     }
 
     fn run_file(&self, f: &SourceFile, class: Class) -> Result<Out> {
@@ -645,6 +677,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         claimed: Mutex::new(HashSet::new()),
         hits: AtomicU64::new(0),
         packages: source.has_packages(),
+        salt: salt(source.has_packages(), opts.package),
     };
     let by_path: HashMap<(usize, &str), &SourceFile> = files
         .iter()

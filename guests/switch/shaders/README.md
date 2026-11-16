@@ -28,9 +28,11 @@ this crate's own).
 Each input file is one cached job, keyed by its path, size and content (the
 SHA-256 a NUP records; a hash of the file for a directory, size and
 modification time above 32 MiB), the dictionaries and, for an `.fdata`, the
-byte ranges the indexes name. A rerun with no change restores every job from
-the cache without reading or decompressing the input; a result is used only
-while its programs are still in `--out`. Jobs run on `-j` threads.
+byte ranges the indexes name, salted with the cache and crate versions, a
+digest of the crate's sources, whether labels name packages and `--package`.
+A rerun with no change restores every job from the cache without reading or
+decompressing the input; a result is used only while its programs are still in
+`--out`. Jobs run on `-j` threads.
 
 The library takes any `Source`: `DirSource`, or `NupSource` over any
 `relift_switch_formats::storage::Storage` (a file, memory, or a remote

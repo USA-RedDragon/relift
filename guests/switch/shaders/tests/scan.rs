@@ -382,6 +382,54 @@ fn nup_scan_matches_the_directory_scan() {
 }
 
 #[test]
+fn the_cache_key_covers_package_labels_and_the_package_selection() {
+    let g = game();
+    let root = scratch("key");
+    let tree = root.join("tree");
+    put(&tree, &g.files);
+    let cache = root.join("cache");
+    let dir = scan(&DirSource::new(&tree), &root.join("out"), &opts(&cache)).expect("scans");
+    assert!(
+        dir.programs
+            .values()
+            .all(|p| p.srcs.iter().all(|s| !s.starts_with("pkg")))
+    );
+    let files: Vec<(&str, &[u8])> = g
+        .files
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
+    let image = nup::build(&[BuildPackage {
+        title_id: 0x0100_1234_5678_0000,
+        version: 0,
+        kind: PackageKind::Base,
+        standalone: false,
+        files,
+        empty_dirs: vec![],
+        meta: vec![],
+    }]);
+    let source = NupSource::new(Arc::new(MemStorage(image))).expect("the NUP opens");
+    let nup = scan(&source, &root.join("out"), &opts(&cache)).expect("scans");
+    assert_eq!(
+        nup.stats.hits, 0,
+        "a NUP labels by package: no directory result fits"
+    );
+    assert!(
+        nup.programs
+            .values()
+            .all(|p| p.srcs.iter().all(|s| s.starts_with("pkg0:")))
+    );
+    let one = Options {
+        package: Some(0),
+        ..opts(&cache)
+    };
+    let picked = scan(&source, &root.join("out"), &one).expect("scans");
+    assert_eq!(picked.stats.hits, 0, "the package selection is in the key");
+    let again = scan(&source, &root.join("out"), &one).expect("scans");
+    assert_eq!(again.stats.hits, again.stats.jobs);
+}
+
+#[test]
 fn zstd_dictionaries_come_from_the_games_pack() {
     let p = graphics(2, 21);
     let frame = zstd_dict(&blob(&[&p]));
