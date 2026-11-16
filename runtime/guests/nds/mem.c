@@ -243,6 +243,7 @@ int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7
         m->cpu[0] = m->cpu[1] = NULL;
         return -1;
     }
+    nds_timer_attach(m);
     return 0;
 }
 

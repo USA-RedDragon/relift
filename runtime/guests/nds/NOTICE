@@ -1,0 +1,33 @@
+Provenance of the NDS machine layer (runtime/guests/nds)
+
+Most of this layer is fresh C written from GBATEK (problemkaputt.de/gbatek.htm:
+"DS Memory Maps", "DS Memory Control", "DS Memory Timings", "DS Interrupts",
+"DS Inter Process Communication (IPC)", "DS Timers", "DS Maths", "ARM CP15
+Tightly Coupled Memory"): mem.c, bus.c, io.c, irq.c, ipc.c, math.c. The
+ordering of the two CPUs (order.c) follows relift's spike 20-nds q3.
+
+ares has no NDS core. The DS timers are the GBA's timers clocked by the DS bus
+(GBATEK "DS Timers"), so timer.c is relift's GBA timer (runtime/guests/gba/
+timer.c) for two CPUs with bus-cycle counters. That file was ported from ares,
+https://github.com/ares-emulator/ares, commit
+0b928930af4cc59ed99e942996f0d3c815379388, ISC license (text below), and
+timer.c keeps the ISC notice in its header.
+
+timer.c   prescalers, cascade, overflow, the control and reload latches
+                                   gba/cpu/timer.cpp, io.cpp, cpu.cpp
+
+ares license:
+
+Copyright (c) 2004-2025 ares team, Near et al
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

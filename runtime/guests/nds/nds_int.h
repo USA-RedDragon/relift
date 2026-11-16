@@ -51,6 +51,27 @@ typedef struct nds_ipc {
     bool send_cond[2], recv_cond[2];
 } nds_ipc;
 
+/** @brief One timer, its counter in bus cycles (GBA timer.c's closed form). */
+typedef struct nds_timer {
+    uint32_t val;
+    uint64_t at;
+    uint64_t load;
+    uint16_t reload;
+    uint8_t ctl;
+    uint8_t cpu, n;
+    rl_nds *m;
+    rl_event ev;
+} nds_timer;
+
+/** @brief The ARM9's division and square root unit. */
+typedef struct nds_math {
+    uint16_t divcnt, sqrtcnt;
+    uint64_t numer, denom, result, rem, param;
+    uint32_t sqrt_result;
+    /** @brief The ticks at which the busy bits clear. */
+    uint64_t div_done, sqrt_done;
+} nds_math;
+
 /** @brief What an address decodes to. */
 typedef enum nds_kind {
     /** @brief Nothing: reads 0, writes are dropped. */
@@ -114,6 +135,8 @@ struct rl_nds {
 
     nds_irq irq[2];
     nds_ipc ipc;
+    nds_timer tm[2][4];
+    nds_math math;
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
@@ -201,6 +224,22 @@ void nds_ranks(rl_nds *m);
 void nds_wake_line(rl_nds *m, unsigned cpu);
 /** @brief Routes the wake lines and sets the masks and ranks. */
 int nds_order_attach(rl_nds *m);
+
+/** @brief Power-on state of the eight timers. */
+void nds_timer_reset(rl_nds *m);
+/** @brief Starts the timers' clocks at the CPUs' current ticks. */
+void nds_timer_attach(rl_nds *m);
+/** @brief TMxCNT_L (counter) and TMxCNT_H (control) of word offset off at tick now. */
+uint32_t nds_timer_read(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now);
+/** @brief A write of the mask bits of v to the reload and control of word offset off at tick now. */
+void nds_timer_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+
+/** @brief Power-on state of the math unit. */
+void nds_math_reset(rl_nds *m);
+/** @brief A math unit register at word offset off at tick now (the busy bits are time-dependent). */
+uint32_t nds_math_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief A write of the mask bits of v to a math unit register; control and parameter writes start the unit. */
+void nds_math_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 
 /** @brief The scheduler address of cpu's I/O address addr: the ARM7's registers sit 4 GiB above the ARM9's. */
 static inline uint64_t nds_io_key(unsigned cpu, uint32_t addr) { return (uint64_t)cpu << 32 | addr; }

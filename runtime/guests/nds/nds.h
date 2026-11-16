@@ -5,8 +5,8 @@
  * mirrors, the shared work RAM banks, the tightly coupled memories of the
  * ARM9 (from the ARMv5TE CP15 registers of the CPU layer), the BIOS regions
  * as high-level stubs, the I/O registers of each CPU with its interrupt
- * controller, IPCSYNC and the IPC FIFOs, and the access costs of every
- * region.
+ * controller, IPCSYNC and the IPC FIFOs, four timers per CPU, the ARM9's
+ * division and square root unit, and the access costs of every region.
  *
  * Time. One scheduler tick is half a bus cycle (1/67,027,964 s): an ARM9
  * cycle is one tick (rl_sched_add_cpu ratio 1) and an ARM7 cycle two ticks

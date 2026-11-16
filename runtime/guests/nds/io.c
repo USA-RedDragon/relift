@@ -1,8 +1,9 @@
 /**
  * @file io.c
  * @brief The I/O registers of both CPUs as one scheduler device: the word
- * dispatch with byte lanes to the interrupt controllers (irq.c) and IPC
- * (ipc.c), the system registers (EXMEMCNT and EXMEMSTAT,
+ * dispatch with byte lanes to the interrupt controllers (irq.c), IPC
+ * (ipc.c), the timers (timer.c) and the ARM9's math unit (math.c), the
+ * system registers (EXMEMCNT and EXMEMSTAT,
  * WRAMCNT and WRAMSTAT, VRAMCNT, POSTFLG, HALTCNT) and register file stubs
  * for the registers no device models yet.
  *
@@ -44,8 +45,14 @@ static void exmem_write(rl_nds *m, unsigned cpu, uint16_t v, uint16_t mask)
     nds_costs_rebuild(m);
 }
 
+static bool math_reg(unsigned cpu, uint32_t off) { return cpu == RL_NDS_ARM9 && off >= 0x280 && off < 0x2C0; }
+
 static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 {
+    if (off >= 0x100 && off < 0x110)
+        return nds_timer_read(m, cpu, off, now);
+    if (math_reg(cpu, off))
+        return nds_math_read(m, off, now);
     switch (off) {
     case 0x180:
     case 0x184:
@@ -82,6 +89,14 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 
 static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now)
 {
+    if (off >= 0x100 && off < 0x110) {
+        nds_timer_write(m, cpu, off, v, mask, now);
+        return;
+    }
+    if (math_reg(cpu, off)) {
+        nds_math_write(m, off, v, mask, now);
+        return;
+    }
     switch (off) {
     case 0x180:
     case 0x184:
@@ -156,6 +171,8 @@ void nds_io_reset(rl_nds *m)
     m->halt_req = false;
     nds_irq_reset(m);
     nds_ipc_reset(m);
+    nds_timer_reset(m);
+    nds_math_reset(m);
 }
 
 static uint64_t io_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)
