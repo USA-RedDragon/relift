@@ -1113,3 +1113,54 @@ fn only_measured_presets_count_on_a_fused_fma() {
         assert_eq!(s.interface.host.fma_khr, h.fused_fma, "{}", h.name);
     }
 }
+
+/// `(mode, operand)` of every OpExecutionMode in a module.
+fn modes_of(words: &[u32]) -> Vec<(u32, u32)> {
+    let mut v = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        if words[k] & 0xffff == 16 && n >= 4 {
+            v.push((words[k + 2], words[k + 3]));
+        }
+        k += n.max(1);
+    }
+    v
+}
+
+const SIGNED_ZERO_INF_NAN_PRESERVE: u32 = 4461;
+
+/// Float programs ask for SignedZeroInfNanPreserve where the host has it and
+/// are reported inexact where it does not; integer-only programs are not.
+#[test]
+fn float_programs_preserve_signed_zeros_infinities_and_nans() {
+    let float = program(fadd(RN), 0, 0, 0);
+    let int = program(mov(14, 1), 0, 0, 0);
+    for h in HostProfile::presets() {
+        assert!(h.signed_zero_inf_nan_preserve, "{}", h.name);
+        let s = translate_with(&float, &host(h.clone())).unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            modes_of(&s.spirv).contains(&(SIGNED_ZERO_INF_NAN_PRESERVE, 32)),
+            "{}",
+            h.name
+        );
+        assert!(s.interface.host.inexact.is_empty(), "{}", h.name);
+    }
+    let h = HostProfile::minimal();
+    assert!(!h.signed_zero_inf_nan_preserve);
+    let lacking = HostProfile {
+        signed_zero_inf_nan_preserve: false,
+        ..HostProfile::nvidia()
+    };
+    let s = translate_with(&float, &host(lacking.clone())).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!modes_of(&s.spirv).contains(&(SIGNED_ZERO_INF_NAN_PRESERVE, 32)));
+    assert!(
+        s.interface
+            .host
+            .inexact
+            .iter()
+            .any(|l| l.contains("SignedZeroInfNanPreserve"))
+    );
+    let s = translate_with(&int, &host(lacking)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.host.inexact.is_empty());
+}

@@ -89,6 +89,11 @@ pub struct HostProfile {
     pub denorm_preserve_mode: bool,
     /// `shaderDenormFlushToZeroFloat32`.
     pub denorm_flush_mode: bool,
+    /// `shaderSignedZeroInfNanPreserveFloat32`: the SignedZeroInfNanPreserve
+    /// execution mode can be requested. Without it a compiler may treat
+    /// signed zeros, infinities and NaNs loosely, and a program with float
+    /// arithmetic is reported inexact.
+    pub signed_zero_inf_nan_preserve: bool,
     /// `shaderFmaFloat32` (VK_KHR_shader_fma): `OpFmaKHR` is available and
     /// fused. GLSL `Fma` only has to be as precise as a multiply and an add,
     /// so without this FFMA is built from integer operations. Set in the
@@ -134,6 +139,7 @@ impl HostProfile {
             denorm: Denorm::Flush,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
+            signed_zero_inf_nan_preserve: true,
             fused_fma: true,
             clock: Clock::Device,
             max_shared_bytes: 49152,
@@ -211,6 +217,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
+            signed_zero_inf_nan_preserve: true,
             fused_fma: false,
             clock: Clock::None,
             max_shared_bytes: 32768,
@@ -240,6 +247,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: true,
+            signed_zero_inf_nan_preserve: true,
             fused_fma: false,
             clock: Clock::Device,
             max_shared_bytes: 32768,
@@ -304,6 +312,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
+            signed_zero_inf_nan_preserve: true,
             fused_fma: false,
             clock: Clock::Device,
             max_shared_bytes: 32768,
@@ -361,6 +370,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
+            signed_zero_inf_nan_preserve: false,
             fused_fma: false,
             clock: Clock::None,
             max_shared_bytes: 16384,

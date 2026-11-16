@@ -37,6 +37,8 @@ const FUNCTION_CALL: u16 = 57;
 const RETURN_VALUE: u16 = 254;
 const CAP_DENORM_PRESERVE: u32 = 4464;
 const MODE_DENORM_PRESERVE: u32 = 4459;
+const CAP_SZINP: u32 = 4466;
+const MODE_SZINP: u32 = 4461;
 const ZERO_EXP: i32 = -300;
 const STICKY: i32 = -60;
 
@@ -49,6 +51,8 @@ pub(crate) struct State {
     funcs: BTreeMap<(u8, u8, bool, i32), u32>,
     /// The function variable that carries a repaired result.
     var: Option<u32>,
+    /// SignedZeroInfNanPreserve can be requested.
+    szinp: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -97,9 +101,16 @@ impl Ctx {
             self.iface.host.check_flush = true;
         }
         self.denorm.mode = Some(mode);
+        if self.host.signed_zero_inf_nan_preserve {
+            self.cap(CAP_SZINP);
+            self.denorm.szinp = true;
+        }
     }
 
-    /// Writes the execution mode chosen by [`Ctx::denorm_plan`].
+    /// Writes the execution modes chosen by [`Ctx::denorm_plan`]:
+    /// DenormPreserve, and SignedZeroInfNanPreserve wherever the program
+    /// declares 32-bit floats. A program with floats on a host that cannot
+    /// preserve them is reported inexact.
     pub(crate) fn denorm_mode(&mut self, main: u32) {
         if self.iface.host.denorm_mode == Some(Denorm::Preserve) {
             crate::spirv::inst(
@@ -108,6 +119,33 @@ impl Ctx {
                 &[main, MODE_DENORM_PRESERVE, 32],
             );
         }
+        if self.denorm.szinp {
+            crate::spirv::inst(
+                &mut self.m.modes,
+                op::EXECUTION_MODE,
+                &[main, MODE_SZINP, 32],
+            );
+        } else if self.declares_f32() {
+            self.iface.host.inexact.push(
+                "32-bit float arithmetic without SignedZeroInfNanPreserve: signed zeros, \
+                 infinities and NaNs may be lost"
+                    .to_string(),
+            );
+        }
+    }
+
+    /// The module declares the 32-bit float type.
+    fn declares_f32(&self) -> bool {
+        let t = &self.m.types;
+        let mut k = 0;
+        while k < t.len() {
+            let n = (t[k] >> 16) as usize;
+            if t[k] & 0xffff == u32::from(op::TYPE_FLOAT) && t.get(k + 2) == Some(&32) {
+                return true;
+            }
+            k += n.max(1);
+        }
+        false
     }
 
     fn dn_dmode(&self) -> Denorm {
