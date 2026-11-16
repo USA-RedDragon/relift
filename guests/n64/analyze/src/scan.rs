@@ -213,16 +213,19 @@ pub(crate) fn starts(w: &Words, r: (usize, usize), base: u32) -> Vec<usize> {
 /// The most targets and starts the vote pairs.
 const VOTE_CAP: usize = 2048;
 
-/// The link address of region `r`: the address `V` that the most `JAL`
-/// targets of the region give as `V + 4 * s` for a start `s` of the region,
-/// with at least 3 votes and twice the runner-up. Gives the address and
-/// its votes.
+/// The link address of region `r`: the address `V` that the most distinct
+/// `JAL` targets of the region give as `V + 4 * s` for a start `s` of the
+/// region, with at least 3 votes and twice the runner-up. Each target
+/// votes once, so a function outside the region that many calls reach does
+/// not outvote the region's own. Gives the address and its votes.
 pub(crate) fn vote(w: &Words, r: (usize, usize), starts: &[usize]) -> Option<(u32, u32)> {
     let span = 4 * (r.1 - r.0) as u64;
     let mut t: Vec<u32> = (r.0..r.1)
         .filter(|&i| w.valid(i) && w.w[i] >> 26 == 3)
         .map(|i| 0x8000_0000 | (w.w[i] & 0x03FF_FFFF) << 2)
         .collect();
+    t.sort_unstable();
+    t.dedup();
     if t.len() < 3 || starts.is_empty() {
         return None;
     }

@@ -48,8 +48,8 @@
 //!   branch). The parts of a region that a boot or DMA segment holds use
 //!   that segment's address; the rest becomes a region segment linked at
 //!   the address its own `JAL` targets vote for: the address `V` for which
-//!   the most targets are `V` plus the offset of a function start of the
-//!   region, with 3 votes and twice the runner-up. A region without one is
+//!   the most distinct targets are `V` plus the offset of a function start
+//!   of the region, with 3 votes and twice the runner-up. A region without one is
 //!   followed only through its own relative branches.
 //! - Function starts: a word that lowers the stack pointer by a constant
 //!   and the word after a return and its delay slot are roots
