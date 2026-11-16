@@ -49,6 +49,38 @@ impl Sph {
             _ => return None,
         })
     }
+
+    /// Bits `lo..lo + len` of the header.
+    pub fn field(&self, lo: usize, len: usize) -> u32 {
+        let mut v = 0u64;
+        for k in 0..len {
+            let b = lo + k;
+            v |= u64::from((self.words[b / 32] >> (b % 32)) & 1) << k;
+        }
+        v as u32
+    }
+
+    /// Invocations per input primitive: the output vertex count of a
+    /// tessellation control program, the invocation count of a geometry
+    /// program.
+    pub fn threads_per_input_primitive(&self) -> u32 {
+        self.field(88, 8)
+    }
+
+    /// Geometry output topology: 1 point list, 6 line strip, 7 triangle
+    /// strip.
+    pub fn output_topology(&self) -> u32 {
+        self.field(120, 4)
+    }
+
+    pub fn max_output_vertices(&self) -> u32 {
+        self.field(128, 12)
+    }
+
+    /// Vertex streams a geometry program emits to.
+    pub fn stream_out_mask(&self) -> u32 {
+        self.field(28, 4)
+    }
 }
 
 #[derive(Clone, Debug)]

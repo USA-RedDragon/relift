@@ -22,6 +22,7 @@ pub use host::{
     HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC,
     SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp, WarpPath,
 };
+pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use tex::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
     texture_binding,
@@ -107,6 +108,13 @@ pub struct Interface {
     /// needs computeDerivativeGroupLinear and a workgroup size that is a
     /// multiple of four).
     pub compute_derivatives: bool,
+    /// Patch locations read (tessellation evaluation) or written
+    /// (tessellation control).
+    pub patch_inputs: BTreeSet<u32>,
+    pub patch_outputs: BTreeSet<u32>,
+    /// Output vertices of a tessellation control program, or the most a
+    /// geometry program emits.
+    pub output_vertices: u32,
     /// The fallbacks taken for the target host.
     pub host: HostReport,
 }
@@ -125,6 +133,8 @@ pub struct Options {
     /// pipeline binds (a target not named is float); the output variable of
     /// a target has that type (see the `io` module).
     pub color_kinds: BTreeMap<u32, Kind>,
+    /// Pipeline state of the tessellation and geometry stages.
+    pub pipeline: Pipeline,
 }
 
 /// A translated program.
@@ -636,9 +646,6 @@ pub fn translate(p: &Program) -> Res<Shader> {
 /// Translates one program for the device `o.host`.
 pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     let stage = p.stage();
-    if !matches!(stage, Stage::Vertex | Stage::Fragment | Stage::Compute) {
-        return bad(format!("stage {stage:?}"));
-    }
     let code = decode_all(p)?;
     let mut m = Module::new();
     let glsl_id = m.id();
@@ -676,6 +683,8 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     };
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();
+    c.io.vtg.pipe = o.pipeline.clone();
+    io::vtg::prescan(&mut c, &code.insts)?;
     c.denorm_plan(&code.insts);
     c.warp_plan(&code.insts, code.fast_paths);
     c.mem_plan(&code.insts);
@@ -686,6 +695,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     let entry = c.m.id();
     c.m.emit_void(op::LABEL, &[entry]);
     let var_at = c.m.body.len();
+    c.tcs_prologue()?;
     let body = c.m.id();
     c.m.emit_void(op::BRANCH, &[body]);
     cfg::emit(&mut c, &code, body)?;
@@ -726,6 +736,7 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
     }
     c.m.body.splice(var_at..var_at, decls);
     io::finish(&mut c, main);
+    io::vtg::modes(&mut c, main)?;
     let mut iface: Vec<u32> = Vec::new();
     iface.extend(c.inputs.values());
     iface.extend(c.outputs.values());
@@ -747,9 +758,12 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
     let addressing = if c.iface.global_memory { 5348 } else { 0 };
     crate::spirv::inst(&mut c.m.head, op::MEMORY_MODEL, &[addressing, 1]);
     let model = match stage {
+        Stage::Vertex => 0,
+        Stage::TessControl => 1,
+        Stage::TessEval => 2,
+        Stage::Geometry => 3,
         Stage::Fragment => 4,
         Stage::Compute => 5,
-        _ => 0,
     };
     let mut ep = vec![model, main];
     ep.extend(crate::spirv::str_words("main"));

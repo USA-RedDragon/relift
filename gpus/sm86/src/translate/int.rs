@@ -124,7 +124,10 @@ fn s2r(c: &mut Ctx, i: &Inst) -> Res<()> {
         "SR_CTAID.X" => c.uvec3_input(BUILTIN_WORKGROUP_ID, 0),
         "SR_CTAID.Y" => c.uvec3_input(BUILTIN_WORKGROUP_ID, 1),
         "SR_CTAID.Z" => c.uvec3_input(BUILTIN_WORKGROUP_ID, 2),
-        s => return bad(format!("special register {s}")),
+        s => match c.vtg_sysval(s) {
+            Some(v) => v,
+            None => return bad(format!("special register {s}")),
+        },
     };
     c.store_dst(&i.ops[0], v)
 }

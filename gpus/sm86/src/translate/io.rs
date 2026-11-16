@@ -21,8 +21,8 @@
 //! InterpolateAtCentroid when the program also reads it at the center.
 //!
 //! ALD and AST in the vertex and fragment stages name one vertex, so the
-//! vertex register they may carry (for the tessellation and geometry
-//! stages) is ignored.
+//! vertex register they may carry is ignored; the tessellation and
+//! geometry stages are in [`vtg`].
 //!
 //! The instance id `a[0x2f8]` counts from 0 in each draw, without the base
 //! instance, and the vertex id `a[0x2fc]` includes the base vertex: NVK
@@ -51,6 +51,8 @@ use crate::{Inst, Operand};
 use std::collections::BTreeMap;
 
 use super::Ctx;
+
+pub(crate) mod vtg;
 
 const B_POSITION: u32 = 0;
 const B_POINT_SIZE: u32 = 1;
@@ -89,6 +91,7 @@ pub(crate) struct State {
     centroid: BTreeMap<u32, bool>,
     /// Numeric kind of each render target's format (Options::color_kinds).
     pub(crate) color_kinds: BTreeMap<u32, Kind>,
+    pub vtg: vtg::State,
 }
 
 /// Records how each fragment input is sampled before any code is emitted.
@@ -138,11 +141,16 @@ pub(crate) fn finish(c: &mut Ctx, main: u32) {
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
+        "ALD" if vtg::is_vtg(c.stage) => vtg::ald(c, i),
+        "AST" if vtg::is_vtg(c.stage) => vtg::ast(c, i),
         "ALD" => ald(c, i),
         "AST" => ast(c, i),
         "IPA" => ipa(c, i),
         "KILL" => kill(c, i),
-        "ISBERD" | "ISBEWR" => bad(format!("stage buffer {}", i.mnemonic)),
+        "ISBERD" => vtg::isberd(c, i),
+        "ISBEWR" => bad(format!("stage buffer {}", i.mnemonic)),
+        "OUT" => vtg::out(c, i),
+        "LEPC" => vtg::lepc(c, i),
         _ => return None,
     })
 }
@@ -290,6 +298,15 @@ impl Ctx {
         }
         Ok(match off {
             0x5c => Slot::Drop,
+            0x60 if self.stage == Stage::Geometry => Slot::Int(self.gs_primitive_out()),
+            0x64 if self.stage == Stage::Geometry => {
+                self.cap(CAP_GEOMETRY);
+                self.int_slot(B_LAYER, OUTPUT)
+            }
+            0x68 if self.stage == Stage::Geometry => {
+                self.cap(CAP_MULTI_VIEWPORT);
+                self.int_slot(B_VIEWPORT_INDEX, OUTPUT)
+            }
             0x64 | 0x68 => {
                 self.cap(CAP_VIEWPORT_INDEX_LAYER);
                 self.exts.insert("SPV_EXT_shader_viewport_index_layer");

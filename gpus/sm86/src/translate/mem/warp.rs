@@ -7,6 +7,7 @@
 //! barriers (an arrival count) are not supported.
 
 use super::spv;
+use crate::program::Stage;
 use crate::spirv::op;
 use crate::translate::{Ctx, Res, bad};
 use crate::{Inst, Operand};
@@ -335,6 +336,7 @@ fn bmov(c: &mut Ctx, i: &Inst) -> Res<()> {
     let active = matches!(s, Operand::Sym(x) if x == "MACTIVE");
     match d {
         Operand::Reg(255, _) if barrier_name(s).is_some() => Ok(()),
+        Operand::Sym(x) if x == "ATEXIT_PC" => Ok(()),
         d if barrier_name(d).is_some() && (barrier_name(s).is_some() || plain || active) => Ok(()),
         Operand::Reg(..) if active => {
             let m = c.active();
@@ -382,6 +384,10 @@ fn bar(c: &mut Ctx, i: &Inst) -> Res<()> {
     };
     if counted {
         return bad("BAR with a thread count");
+    }
+    if c.stage == Stage::TessControl {
+        crate::translate::io::vtg::tcs_barrier(c);
+        return Ok(());
     }
     let exec = c.m.c_u32(SCOPE_WORKGROUP);
     let sem =
