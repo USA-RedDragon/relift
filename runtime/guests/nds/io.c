@@ -58,6 +58,8 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
         return nds_timer_read(m, cpu, off, now);
     if (dma_reg(cpu, off))
         return nds_dma_read(m, cpu, off);
+    if (off == 0x130 || (off == 0x134 && cpu == RL_NDS_ARM7))
+        return nds_keypad_read(m, cpu, off);
     if (math_reg(cpu, off))
         return nds_math_read(m, off, now);
     switch (off) {
@@ -108,6 +110,14 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     }
     if (dma_reg(cpu, off)) {
         nds_dma_write(m, cpu, off, v, mask, now);
+        return;
+    }
+    if (off == 0x130) {
+        nds_keypad_write(m, cpu, v, mask, now);
+        return;
+    }
+    if (off == 0x134 && cpu == RL_NDS_ARM7) {
+        m->rcnt = (uint16_t)((m->rcnt & ~mask) | (v & mask & 0xFFFFu));
         return;
     }
     if (math_reg(cpu, off)) {
@@ -184,6 +194,8 @@ void nds_io_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
 void nds_io_reset(rl_nds *m)
 {
     memset(m->regs, 0, sizeof m->regs);
+    m->rcnt = 0x8000;
+    memset(&m->pad, 0, sizeof m->pad);
     m->wramcnt = 0;
     m->exmem[0] = m->exmem[1] = 0;
     m->postflg[0] = m->postflg[1] = 0;

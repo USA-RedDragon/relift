@@ -258,6 +258,40 @@ bool rl_nds_halt(rl_nds *m, unsigned cpu);
  */
 bool rl_nds_irq_poll(rl_nds *m, unsigned cpu);
 
+/** @brief The buttons of rl_nds_input.keys, in the order of KEYINPUT. */
+enum {
+    RL_NDS_KEY_A = 1u << 0,
+    RL_NDS_KEY_B = 1u << 1,
+    RL_NDS_KEY_SELECT = 1u << 2,
+    RL_NDS_KEY_START = 1u << 3,
+    RL_NDS_KEY_RIGHT = 1u << 4,
+    RL_NDS_KEY_LEFT = 1u << 5,
+    RL_NDS_KEY_UP = 1u << 6,
+    RL_NDS_KEY_DOWN = 1u << 7,
+    RL_NDS_KEY_R = 1u << 8,
+    RL_NDS_KEY_L = 1u << 9,
+};
+
+/** @brief What the player holds: the console's keys, the touch screen and the lid. */
+typedef struct rl_nds_input {
+    /** @brief RL_NDS_KEY_* pressed, as KEYINPUT. */
+    uint16_t keys;
+    /** @brief The X and Y buttons (EXTKEYIN, ARM7). */
+    bool x, y;
+    /** @brief The lid is closed (EXTKEYIN bit 7, the hinge). */
+    bool lid_closed;
+    /** @brief The pen is on the touch screen at pixel (touch_x, touch_y) of the lower screen (0..255, 0..191). */
+    bool touch;
+    uint8_t touch_x, touch_y;
+} rl_nds_input;
+
+/**
+ * @brief Sets what the player holds, at cpu's current tick: KEYINPUT of both
+ * CPUs, EXTKEYIN, and the touch screen controller's pen. A keypad interrupt
+ * condition (KEYCNT) that becomes true requests IRQ 12 on that CPU.
+ */
+void rl_nds_set_input(rl_nds *m, const rl_nds_input *in);
+
 /** @brief Kinds of access in the cost table. */
 enum {
     RL_NDS_CODE = 0,

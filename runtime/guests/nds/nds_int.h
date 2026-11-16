@@ -268,6 +268,12 @@ typedef struct nds_dev {
     rl_nds *m;
 } nds_dev;
 
+/** @brief KEYCNT of each CPU and the host's input. */
+typedef struct nds_keypad {
+    uint16_t cnt[2];
+    rl_nds_input in;
+} nds_keypad;
+
 /** @brief The machine. */
 struct rl_nds {
     uint8_t main[RL_NDS_MAIN_SIZE];
@@ -298,6 +304,8 @@ struct rl_nds {
     /** @brief The page tables of the video RAM views. */
     nds_vpage vpg[NDS_VPAGES];
     nds_vview vview[NDS_VIEWS];
+    /** @brief RCNT (ARM7 word offset 0x134, low half): a register file that starts at 0x8000. */
+    uint16_t rcnt;
     /** @brief The ARM7 wrote HALTCNT: the store ends in a halt. */
     bool halt_req;
     /** @brief The CPU waits in rl_nds_halt. */
@@ -317,6 +325,7 @@ struct rl_nds {
     nds_lcd lcd;
     nds_disp disp;
     nds_dma dma[2];
+    nds_keypad pad;
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
@@ -547,6 +556,13 @@ enum {
  * that is still running ignores the trigger.
  */
 void nds_dma_start(rl_nds *m, unsigned cpu, unsigned timing, uint64_t tick);
+
+/** @brief KEYINPUT with KEYCNT (word offset 0x130) of cpu, or EXTKEYIN with its neighbor RCNT (0x134, ARM7). */
+uint32_t nds_keypad_read(rl_nds *m, unsigned cpu, uint32_t off);
+/** @brief A write of the mask bits of v to KEYCNT (word offset 0x130, the upper half). */
+void nds_keypad_write(rl_nds *m, unsigned cpu, uint32_t v, uint32_t mask, uint64_t now);
+/** @brief EXTKEYIN as the ARM7 reads it. */
+uint16_t nds_extkeyin(const rl_nds *m);
 
 /** @brief The access cost in ticks of cpu (kind RL_NDS_CODE or RL_NDS_DATA) at addr. */
 unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq);

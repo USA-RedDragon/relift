@@ -160,10 +160,10 @@ TEST(palette_and_oam_mirror_and_take_no_bytes_from_the_arm9)
 TEST(io_registers_are_per_cpu_and_unknown_ones_are_register_files)
 {
     ndst *t = ndst_new();
-    w9(t, 0x04000130u, 2, 0x1234);
-    w7(t, 0x04000130u, 2, 0x5678);
-    CHECK_EQ(r9(t, 0x04000130u, 2), 0x1234);
-    CHECK_EQ(r7(t, 0x04000130u, 2), 0x5678);
+    w9(t, 0x04000050u, 2, 0x1234);
+    w7(t, 0x04000050u, 2, 0x5678);
+    CHECK_EQ(r9(t, 0x04000050u, 2), 0x1234);
+    CHECK_EQ(r7(t, 0x04000050u, 2), 0x5678);
     CHECK_EQ(r9(t, 0x04002000u, 4), 0);
     CHECK_EQ(r9(t, 0x04000300u, 1), 0);
     w9(t, 0x04000300u, 1, 0xFF);
