@@ -402,6 +402,16 @@ final class Drivers {
         prefs.edit().putString("system." + Build.FINGERPRINT, probe).commit();
     }
 
+    /**
+     * Whether a package's test load answered as the phone's own driver: the
+     * system loader falls back to it when the package's library is not a
+     * Vulkan driver, so such a package does not work either.
+     */
+    boolean isSystem(String probe) {
+        String sys = prefs.getString("system." + Build.FINGERPRINT, null);
+        return sys != null && sys.startsWith("ok\n") && sys.equals(probe);
+    }
+
     static SystemDriver parseSystem(String probe) {
         SystemDriver d = new SystemDriver();
         String[] l = probe.split("\n", -1);

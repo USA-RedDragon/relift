@@ -608,7 +608,7 @@ final class Ui {
                 if (after != null) {
                     after.run();
                 }
-                if (!r.startsWith("ok\n")) {
+                if (!r.startsWith("ok\n") || drivers.isSystem(r)) {
                     drivers.discard(s);
                     Log.w(Drivers.TAG, "GPU driver " + s.pkg.name + " did not start: " + r.replace('\n', ' '));
                     message("This driver doesn't work with this phone", "It could not start on this phone's GPU ("
