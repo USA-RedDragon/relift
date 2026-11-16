@@ -111,6 +111,7 @@ hand_commands = [
     "vkCreateRenderPass2",
     "vkCmdBeginRendering",
     "vkCreateGraphicsPipelines",
+    "vkCreateShaderModule",
     "vkAllocateCommandBuffers",
     "vkFreeCommandBuffers",
     "vkDestroyCommandPool",

@@ -16,6 +16,7 @@
 #include "services.h"
 #include "vi.h"
 #include "vkf.h"
+#include "vk_overlay_spv.h"
 
 #include <relift/settings.h>
 #include <relift/touchpad.h>
@@ -3893,6 +3894,46 @@ static const uint32_t g_rg32f_comp[] = {
     0x00000015, 0x0000000a, 0x0000000c, 0x0003003e, 0x00000015, 0x00000013, 0x0004003d, 0x0000000d,
     0x00000017, 0x00000016, 0x00040063, 0x00000017, 0x00000012, 0x0000001c, 0x000100fd, 0x00010038,
 };
+
+/** @brief The format operands of the module's storage OpTypeImages and whether it declares both formatless capabilities. */
+static void storage_formats(const uint32_t *w, size_t n, uint32_t *fmts, unsigned *nf, bool *caps)
+{
+    bool rd = false, wr = false;
+    *nf = 0;
+    for (size_t i = 5; i < n; i += w[i] >> 16) {
+        uint32_t op = w[i] & 0xFFFF;
+        if (op == 17)
+            rd |= w[i + 1] == 55, wr |= w[i + 1] == 56;
+        if (op == 25 && w[i + 7] == 2)
+            fmts[(*nf)++] = w[i + 8];
+    }
+    *caps = rd && wr;
+}
+
+/** @brief The rewrite gives the storage image type of the rg32f shader (both bindings share it) the Unknown format and adds the formatless capabilities; a module without storage images is left alone. */
+TEST(vk_spirv_storage_formats_become_unknown)
+{
+    size_t n = sizeof g_rg32f_comp / 4;
+    static uint32_t out[sizeof g_rg32f_comp / 4 + 4];
+    uint32_t f[8];
+    unsigned nf;
+    bool caps;
+    storage_formats(g_rg32f_comp, n, f, &nf, &caps);
+    CHECK_EQ(nf, 1);
+    CHECK_EQ(f[0], 6);
+    CHECK(!caps);
+    size_t m = vkf_spirv_formatless(g_rg32f_comp, n, out);
+    CHECK_EQ(m, n + 4);
+    storage_formats(out, m, f, &nf, &caps);
+    CHECK_EQ(nf, 1);
+    CHECK_EQ(f[0], 0);
+    CHECK(caps);
+    static uint32_t again[sizeof g_rg32f_comp / 4 + 8];
+    CHECK_EQ(vkf_spirv_formatless(out, m, again), 0);
+    static uint32_t plain[sizeof vkf_overlay_frag / 4 + sizeof vkf_overlay_vert / 4 + 4];
+    CHECK_EQ(vkf_spirv_formatless(vkf_overlay_frag, sizeof vkf_overlay_frag / 4, plain), 0);
+    CHECK_EQ(vkf_spirv_formatless(vkf_overlay_vert, sizeof vkf_overlay_vert / 4, plain), 0);
+}
 
 /** @brief A 1x1 R8G8B8A8_UNORM storage image, its memory and a view of the same format. */
 static void storage_texel(uint64_t pd, uint64_t dev, uint64_t *image, uint64_t *mem, uint64_t *view)

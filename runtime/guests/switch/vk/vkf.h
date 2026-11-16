@@ -168,6 +168,8 @@ struct vkf_dev {
     bool keep_attachments;
     /** @brief The host has no 24-bit depth: D24S8 and X8D24 reach it as D32S8 and D32 (vk_format.c). */
     bool depth24;
+    /** @brief The formatless storage features are on: shaders' storage image formats become Unknown (vk_spirv.c). */
+    bool formatless;
     /** @brief The host format of each format the layer can decode (vkf_decode_index), the format itself when the host takes it. */
     VkFormat decode_host[VKF_DECODE_FORMATS];
     /** @brief Some format is decoded: images, uploads and buffer bindings are tracked (vk_image.c). */
@@ -415,6 +417,10 @@ extern const vkf_switch_profile vkf_switch;
 VkFormatProperties vkf_switch_format_props(VkFormat format);
 /** @brief The format images of format f use on the host: on a host without 24-bit depth, the D32 format that stands in for D24 (vk_format.c). */
 VkFormat vkf_host_format(const vkf_fns *fns, VkPhysicalDevice pd, VkFormat f);
+/** @brief Rewrites SPIR-V of n words so storage images and texel buffers take their view's format, into out (n + 4 words); returns its length, or 0 when nothing changes. */
+size_t vkf_spirv_formatless(const uint32_t *in, size_t n, uint32_t *out);
+/** @brief Turns the formatless storage features on for a device whose host has them and sets d->formatless. */
+void vkf_spirv_device_features(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd, VkDeviceCreateInfo *ci);
 /** @brief Sets d->depth24 from the host's depth formats. */
 void vkf_depth_device_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd);
 /** @brief The format a guest format reaches the host as on device d: f, or its 32-bit depth stand-in. */

@@ -975,6 +975,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     vkf_decode_device_setup(&k, d, pd);
     vkf_depth_device_setup(&k, d, pd);
     vkf_decode_device_features(&k, pd, ci);
+    vkf_spirv_device_features(&k, d, pd, ci);
     const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_extra + 2) * sizeof *exts);
     uint32_t n = 0;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++)

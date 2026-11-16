@@ -1739,24 +1739,6 @@ static int vkt_vkCreateSemaphore(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkCreateShaderModule(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCreateShaderModule, c->x[0]);
-    const VkShaderModuleCreateInfo * a1 = vkg_ain_VkShaderModuleCreateInfo(&k, c->x[1], 1);
-    const VkAllocationCallbacks * a2 = NULL;
-    VkShaderModule * a3 = (VkShaderModule *)vkf_ptr(&k, c->x[3]);
-    PFN_vkCreateShaderModule fn = (PFN_vkCreateShaderModule)k.fns->f[VKG_vkCreateShaderModule];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCreateShaderModule);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateShaderModule, r);
-    return vkf_end(&k);
-}
-
 static int vkt_vkDebugMarkerSetObjectNameEXT(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -3940,7 +3922,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCreateSampler,
     vkt_vkCreateSamplerYcbcrConversion,
     vkt_vkCreateSemaphore,
-    vkt_vkCreateShaderModule,
+    vkh_vkCreateShaderModule,
     vkh_vkCreateSwapchainKHR,
     vkh_vkCreateViSurfaceNN,
     vkt_vkDebugMarkerSetObjectNameEXT,
