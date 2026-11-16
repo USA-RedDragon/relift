@@ -10,6 +10,8 @@
  */
 #include "nds_int.h"
 
+#include "bios.h"
+
 void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks)
 {
     if (!m->cpu[cpu] || ticks == 0)
@@ -55,6 +57,8 @@ static uint32_t bus_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, 
         return nds_io_read(m, cpu, addr, size, 0);
     case NDS_K_SLOT:
         return nds_slot_read(m, cpu, addr, size);
+    case NDS_K_BIOS:
+        return rl_nds_bios_read(cpu, addr, size);
     default:
         return 0;
     }
