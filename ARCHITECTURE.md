@@ -52,11 +52,12 @@ list of hard rules; read it before changing anything.
   reruns both generators and fails on any difference. A form joins
   `cpus/arm64/gen/forms.txt` only after `relift-check forms` passes it and its
   mutation control on an oracle that implements its features. The ARMv4T
-  tables and templates (`cpus/arm32/src/decode/generated.rs`,
-  `cpus/arm32/src/lift/generated/{a32,t16}.rs`) come the same way from
-  sail-arm's AArch32 part and the overlay `cpus/arm32/gen/armv4t.sail`
-  (`cpus/arm32/gen/README.md`), which carries the ARM7TDMI rules where the
-  Armv8 model differs, and the same CI job checks them. The MIPS tables
+  and ARMv5TE tables and templates (`cpus/arm32/src/decode/generated.rs`,
+  `cpus/arm32/src/lift/generated/{a32,t16}.rs` and `{a32,t16}_v5te.rs`)
+  come the same way from sail-arm's AArch32 part and the overlays
+  `cpus/arm32/gen/armv4t.sail` and `armv5te.sail`
+  (`cpus/arm32/gen/README.md`), which carry the ARM7TDMI and ARM946E-S rules
+  where the Armv8 model differs, and the same CI job checks them. The MIPS tables
   and templates, one set per profile (`cpus/mips/src/P/decode/generated.rs`,
   `cpus/mips/src/P/lift/generated/*.rs` for `vr4300` and `r3000a`), come
   from sail-cheri-mips's MIPS model and the profile's overlay
@@ -221,7 +222,7 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 | CPU | `runtime/cpus/sm83` | The SM83 lifted-code ABI and `rl_ctx`, interrupts, HALT and STOP, over a callback table |
 | CPU | `runtime/cpus/z80` | The Z80 lifted-code ABI and `rl_ctx`, NMI and maskable interrupts through the lifted entry blocks, HALT, ports, over a callback table |
 | guest | `runtime/guests/gb` | The Game Boy memory map, mappers and I/O routed to scheduler device slots; `gb/exact` is the program that runs lifted code with the device library |
-| CPU | `runtime/cpus/arm32` | The ARMv4T lifted-code ABI and `rl_ctx`, mode banks, exceptions, the I bit's mask, the return address stack |
+| CPU | `runtime/cpus/arm32` | The ARMv4T lifted-code ABI and `rl_ctx`, mode banks, exceptions, the I bit's mask, the return address stack; the ARMv5TE CP15 registers, TCM areas and protection regions |
 | guest | `runtime/guests/gba` | The Game Boy Advance machine, picture unit and high-level BIOS; `gba/run` is the program that runs lifted code on it |
 | CPU | `runtime/cpus/mips` | The VR4300 lifted-code ABI and `rl_ctx`, CP0, exceptions and ERET, Count and Compare, the TLB, the FPU slow path, the guard slow paths, the return address stack |
 | CPU | `runtime/cpus/rsp` | The RSP lifted-code ABI and its own `rl_ctx`, the run of lifted microcode in slices out of IMEM, binding images by their bytes in IMEM, COP0 and BREAK over a bus |
