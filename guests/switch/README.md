@@ -20,5 +20,41 @@ relift-nso show main.nso
 
 Tests build synthetic input; no game data is used. The runtime half is
 `runtime/guests/switch`: the Horizon kernel, the scheduler, IPC and the
-services, and `vk/` for Vulkan forwarding. To build and run a game, use
-`relift import` and `relift run` (see the top-level README).
+services, and `vk/` for Vulkan forwarding.
+
+## Building a game
+
+```sh
+relift import game.nup                 # a NUP container
+relift import dump/                    # an extracted tree
+relift import dump/ --update 65536     # a chosen update
+relift import dump/ --update base      # the base alone
+relift build                           # a shipped build
+relift run                             # a dev build with hot-loading, then run it
+```
+
+The extracted tree uses the layout the reference NUP packer
+([github.com/a55uka/nup](https://github.com/a55uka/nup), "Packing a dump")
+reads:
+
+| Directory | Holds |
+|---|---|
+| `base/exefs/`, `base/romfs/` | the base program |
+| `updates/<decimal version>/exefs/`, `.../romfs/` | one update per version; its romfs is the full patched tree, not a delta |
+| `dlc/<16-hex add-on title id>/<index>/romfs/` | one add-on per index (`<index>` is an opaque directory name) |
+
+A directory holding `exefs/` and/or `romfs/` directly is taken as a base.
+The newest update (the highest version) is used unless `--update` names
+another; its exefs and romfs replace the base's when it has them. The same
+choice applies to the update packages of a `.nup`. The program ID comes from
+`main.npdm`. Import also writes `control.nacp` and `icon.jpg` when the dump
+has them; they give the game's title and icon (`docs/packaging.md`).
+Encrypted dumps are refused: convert them with a separate tool first.
+
+`relift build --mods <list>` builds code mods in: Atmosphere or Ryujinx mod
+directories, `.ips` files and `.pchtxt` files, applied in order. Two mods that
+write different bytes at one address are refused. Data mods and cheats are
+chosen at run time (`RELIFT_MODS`, `runtime/README.md`).
+
+Missed code, hot-loading, stop reports, `relift coverage` and `relift diff`
+are described in `docs/usage.md`.
