@@ -93,4 +93,13 @@ pub trait Platform {
         let _ = addr;
         true
     }
+
+    /// Whether the image is loaded into writable memory, where any store
+    /// the analysis cannot place may change a word: a load from the image
+    /// other than of a literal then gives the word's symbol rather than
+    /// its value, and the value serves only to resolve computed transfers
+    /// through it.
+    fn image_writable(&self) -> bool {
+        false
+    }
 }

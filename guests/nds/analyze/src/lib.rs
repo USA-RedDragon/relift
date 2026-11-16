@@ -164,6 +164,10 @@ pub struct Nds<'a> {
 }
 
 impl Platform for Nds<'_> {
+    fn image_writable(&self) -> bool {
+        true
+    }
+
     fn profile(&self) -> Profile {
         match self.cpu {
             Cpu::Arm9 => Profile::V5te,

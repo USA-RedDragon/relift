@@ -12,6 +12,7 @@ struct Machine {
     profile: Profile,
     segments: Vec<(u32, Vec<u8>)>,
     external: Option<(u32, u32)>,
+    writable: bool,
 }
 
 impl Machine {
@@ -20,6 +21,7 @@ impl Machine {
             profile,
             segments: vec![(BASE, vec![0; 0x1000])],
             external: None,
+            writable: false,
         }
     }
 
@@ -102,6 +104,10 @@ impl Platform for Machine {
             .iter()
             .map(|(b, d)| (*b, d.as_slice()))
             .collect()
+    }
+
+    fn image_writable(&self) -> bool {
+        self.writable
     }
 
     fn external(&self, addr: u32) -> bool {
@@ -503,4 +509,29 @@ fn a_linked_jump_through_an_empty_table_returns() {
         found(&r, arm(BASE + 0x14)),
         "the instruction after a linked jump is reached"
     );
+}
+
+#[test]
+fn a_flag_loaded_from_a_writable_image_decides_no_branch() {
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(1, BASE, BASE + 0x20),
+            0xE591_0000,
+            0xE350_0000,
+            0x0A00_0000,
+            A_MOV_R0_1,
+            A_BX_LR,
+        ],
+    );
+    m.arm(BASE + 0x20, &[BASE + 0x40]);
+    let ro = m.run(Options::default(), arm(BASE));
+    assert!(
+        !found(&ro, arm(BASE + 0x10)),
+        "a read-only zero flag takes the branch"
+    );
+    m.writable = true;
+    let rw = m.run(Options::default(), arm(BASE));
+    assert!(found(&rw, arm(BASE + 0x10)));
 }

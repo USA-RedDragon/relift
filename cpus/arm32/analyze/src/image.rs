@@ -36,7 +36,8 @@ impl<'a> Image<'a> {
 
     /// Whether code stores to one of the image bytes `addr..addr + n`.
     pub(crate) fn variable(&self, addr: u32, n: u32) -> bool {
-        (0..n).any(|i| self.written.contains(&addr.wrapping_add(i)))
+        self.platform.image_writable()
+            || (0..n).any(|i| self.written.contains(&addr.wrapping_add(i)))
     }
 
     /// What `addr` holds.
