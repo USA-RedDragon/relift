@@ -1224,9 +1224,27 @@ static VkResult losing_acquire(VkDevice dev, VkSwapchainKHR sw, uint64_t timeout
 
 static rl_vk_surface_provider g_losable = { .instance_extensions = g_headless_exts, .create = headless_create, .recreate = lost_recreate };
 
+static bool vi_surface_offered(void)
+{
+    uint64_t gn = galloc(4);
+    if (VKR(G("vkEnumerateInstanceExtensionProperties", 0, gn, 0)) != VK_SUCCESS)
+        return false;
+    uint64_t props = galloc(g32(gn) * sizeof(VkExtensionProperties));
+    if (VKR(G("vkEnumerateInstanceExtensionProperties", 0, gn, props)) != VK_SUCCESS)
+        return false;
+    for (uint32_t i = 0; i < g32(gn); i++)
+        if (!strcmp((const char *)g_mem + props + i * sizeof(VkExtensionProperties), "VK_NN_vi_surface"))
+            return true;
+    return false;
+}
+
 TEST(vk_a_lost_host_surface_is_made_again_behind_the_guest)
 {
     CHECK_EQ(boot(&g_losable), 0);
+    if (!vi_surface_offered()) {
+        fprintf(stderr, "  the host has no VK_EXT_headless_surface: lost surface test skipped\n");
+        return;
+    }
     const char *exts[] = { "VK_KHR_surface", "VK_NN_vi_surface" };
     CHECK(make_instance(exts, 2, 0) != 0);
     VkViSurfaceCreateInfoNN sci = { .sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, .window = GP(galloc(64)) };
@@ -1343,6 +1361,10 @@ static const rl_touchpad_guest g_pause_guest = {
 TEST(vk_a_paused_frame_repaints_through_suboptimal_presents)
 {
     CHECK_EQ(boot(&g_losable), 0);
+    if (!vi_surface_offered()) {
+        fprintf(stderr, "  the host has no VK_EXT_headless_surface: paused repaint test skipped\n");
+        return;
+    }
     rl_touchpad_declare(&g_pause_guest);
     rl_touchpad_set_touch_screen(true);
     rl_touchpad_view(64, 64, 1.0f, NULL);
