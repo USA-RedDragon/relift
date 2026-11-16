@@ -127,7 +127,7 @@ fn fragment_perspective_color() {
 #[test]
 fn rejects_what_it_cannot_translate() {
     let mut b = Vec::new();
-    b.extend(word(0x149, 4, &[(24, 8, 4), (87, 3, 7)]));
+    b.extend(word(0x150, 4, &[(24, 8, 4), (86, 1, 1), (87, 3, 7)]));
     exit_and_halt(&mut b);
     assert!(translate(&Program::parse(&b)).is_err());
 }
@@ -241,4 +241,308 @@ fn directed_rounding_translates() {
         );
         translate(&p).unwrap_or_else(|e| panic!("{e}"));
     }
+}
+
+fn text(p: &Program) -> Vec<String> {
+    p.decode()
+        .into_iter()
+        .map(|d| {
+            d.map(|i| i.to_string())
+                .unwrap_or_else(|e| format!("?? {e}"))
+        })
+        .collect()
+}
+
+fn dump(name: &str, words: &[u32]) {
+    if let Some(dir) = std::env::var_os("RELIFT_SM86_DUMP") {
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let path = std::path::Path::new(&dir).join(format!("{name}.spv"));
+        relift_cache::write_if_changed(&path, &bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+}
+
+fn decorated(words: &[u32], deco: u32) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        if words[k] & 0xffff == 71 && words.get(k + 2) == Some(&deco) {
+            return true;
+        }
+        k += n.max(1);
+    }
+    false
+}
+
+fn builtin_used(words: &[u32], b: u32) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        if words[k] & 0xffff == 71 && words.get(k + 2) == Some(&11) && words.get(k + 3) == Some(&b)
+        {
+            return true;
+        }
+        k += n.max(1);
+    }
+    false
+}
+
+fn ipa(dst: u64, attr: u32, loc: u64, freq: u64) -> [u8; 16] {
+    word(
+        0x126,
+        1,
+        &[
+            (16, 8, dst),
+            (64, 8, u64::from(attr >> 2)),
+            (24, 8, 255),
+            (32, 8, 255),
+            (76, 2, loc),
+            (78, 2, freq),
+            (81, 3, 7),
+        ],
+    )
+}
+
+fn mov_imm(dst: u64, v: u32) -> [u8; 16] {
+    word(
+        0x002,
+        4,
+        &[(16, 8, dst), (32, 32, u64::from(v)), (72, 4, 0xf)],
+    )
+}
+
+fn rel(at: usize, to: usize) -> u64 {
+    (((to as i64 * 16 - (at as i64 * 16 + 16)) / 4) as u64) & 0xffff_ffff_ffff
+}
+
+fn isetp(pdst: u64, a: u64, b: u64, cmp: u64) -> [u8; 16] {
+    word(
+        0x00c,
+        1,
+        &[
+            (24, 8, a),
+            (32, 8, b),
+            (73, 1, 1),
+            (76, 3, cmp),
+            (81, 3, pdst),
+            (84, 3, 7),
+            (87, 3, 7),
+        ],
+    )
+}
+
+#[test]
+fn fragment_inputs_follow_the_sph() {
+    let mut b = sph(2, 5, &[(6, 0x0f | (0xaa << 8) | (0x55 << 16)), (18, 0xf)]);
+    b.extend(ipa(0, 0x80, 1, 0));
+    b.extend(ipa(1, 0x84, 1, 0));
+    b.extend(ipa(4, 0x7c, 0, 0));
+    b.extend(ipa(2, 0x90, 0, 0));
+    b.extend(ipa(3, 0x90, 1, 0));
+    b.extend(ipa(5, 0xa0, 0, 1));
+    b.extend(ipa(6, 0x3fc, 0, 1));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    let t = text(&p);
+    assert_eq!(t[0], "IPA.PASS.CENTROID R0, a[0x80]");
+    assert_eq!(t[5], "IPA.CONSTANT R5, a[0xa0]");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("fragment_inputs", &s.spirv);
+    let i = &s.interface.inputs;
+    assert_eq!(i.get(&0), Some(&Some(Interp::Linear)));
+    assert_eq!(i.get(&1), Some(&Some(Interp::Perspective)));
+    assert_eq!(i.get(&2), Some(&Some(Interp::Flat)));
+    assert!(decorated(&s.spirv, 16), "no Centroid");
+    assert!(decorated(&s.spirv, 13), "no NoPerspective");
+    assert!(spirv_has(&s.spirv, 12), "no InterpolateAtCentroid");
+    assert!(builtin_used(&s.spirv, 17), "no FrontFacing");
+}
+
+#[test]
+fn fragment_outputs_take_four_registers_per_target() {
+    let mut b = sph(2, 5, &[(18, 0x31), (19, 3)]);
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    dump("fragment_outputs", &s.spirv);
+    assert_eq!(
+        s.interface
+            .color_targets
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    assert!(s.interface.writes_depth && s.interface.writes_sample_mask);
+    assert!(builtin_used(&s.spirv, 22) && builtin_used(&s.spirv, 20));
+}
+
+#[test]
+fn vertex_system_values() {
+    let mut b = sph(1, 1, &[(18, 0x3)]);
+    b.extend(word(
+        0x121,
+        1,
+        &[(16, 8, 0), (24, 8, 255), (32, 8, 255), (40, 11, 0x2fc)],
+    ));
+    b.extend(word(
+        0x121,
+        1,
+        &[(16, 8, 1), (24, 8, 255), (32, 8, 255), (40, 11, 0x2f8)],
+    ));
+    for a in [0x5c, 0x6c, 0x2c0, 0x2c4] {
+        b.extend(word(
+            0x122,
+            1,
+            &[(24, 8, 255), (32, 8, 0), (40, 11, a), (64, 8, 255)],
+        ));
+    }
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[2], "AST a[0x5c], R0");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("vertex_system_values", &s.spirv);
+    assert_eq!(s.interface.clip_distances, 2);
+    for bi in [42, 43, 1, 3] {
+        assert!(builtin_used(&s.spirv, bi), "built-in {bi}");
+    }
+}
+
+fn count_op(words: &[u32], opcode: u32) -> usize {
+    let mut k = 5;
+    let mut n = 0;
+    while k < words.len() {
+        if words[k] & 0xffff == opcode {
+            n += 1;
+        }
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    n
+}
+
+fn call(at: usize, to: usize) -> [u8; 16] {
+    word(0x144, 4, &[(34, 48, rel(at, to)), (86, 1, 1), (87, 3, 7)])
+}
+
+fn ret(reg: u64) -> [u8; 16] {
+    word(0x150, 4, &[(24, 8, reg), (86, 1, 1), (87, 3, 7)])
+}
+
+fn exit() -> [u8; 16] {
+    word(0x14d, 4, &[(87, 3, 7)])
+}
+
+fn halt(at: usize) -> [u8; 16] {
+    bra(at, at, None)
+}
+
+fn calls(sites: usize) -> Vec<u8> {
+    let mut b = Vec::new();
+    for k in 0..2 {
+        if k < sites {
+            b.extend(mov_imm(4, 0x20 * (k as u32 + 1)));
+            b.extend(call(2 * k + 1, 5));
+        } else {
+            b.extend(word(0x118, 4, &[]));
+            b.extend(word(0x118, 4, &[]));
+        }
+    }
+    b.extend(exit());
+    b.extend(word(
+        0x010,
+        4,
+        &[
+            (16, 8, 1),
+            (24, 8, 1),
+            (32, 32, 1),
+            (64, 8, 255),
+            (81, 3, 7),
+            (84, 3, 7),
+        ],
+    ));
+    b.extend(ret(4));
+    b.extend(halt(7));
+    b
+}
+
+#[test]
+fn call_is_inlined_at_each_site() {
+    let one = translate(&Program::parse(&calls(1))).unwrap_or_else(|e| panic!("{e}"));
+    let p = Program::parse(&calls(2));
+    let t = text(&p);
+    assert_eq!(t[1], "CALL.REL.NOINC 0x50");
+    assert!(t[6].starts_with("RET.REL.NODEC R4"), "{}", t[6]);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("call", &s.spirv);
+    assert_eq!(
+        count_op(&s.spirv, 128),
+        2 * count_op(&one.spirv, 128),
+        "callee not inlined twice"
+    );
+}
+
+#[test]
+fn call_without_return_address_is_rejected() {
+    let mut b = Vec::new();
+    b.extend(call(0, 2));
+    b.extend(exit());
+    b.extend(ret(4));
+    b.extend(halt(3));
+    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    assert_eq!(e.as_deref(), Some("CALL without its return address"));
+}
+
+#[test]
+fn brx_becomes_a_switch() {
+    let mut b = Vec::new();
+    b.extend(word(0x145, 4, &[(16, 4, 0), (34, 48, rel(0, 7))]));
+    b.extend(mov_imm(2, 0x50));
+    b.extend(word(
+        0x149,
+        4,
+        &[(24, 8, 2), (34, 48, rel(2, 0)), (87, 3, 7)],
+    ));
+    b.extend(mov_imm(1, 1));
+    b.extend(bra(4, 7, None));
+    b.extend(mov_imm(1, 2));
+    b.extend(bra(6, 7, None));
+    b.extend(word(0x141, 4, &[(16, 4, 0), (87, 3, 7)]));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    let t = text(&p);
+    assert!(t[2].starts_with("BRX R2 -0x30"), "{}", t[2]);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("brx", &s.spirv);
+    assert!(spirv_has(&s.spirv, 251), "no OpSwitch");
+}
+
+#[test]
+fn loop_with_two_exits_dispatches_after_it() {
+    let mut b = Vec::new();
+    b.extend(mov_imm(0, 0));
+    b.extend(word(
+        0x010,
+        4,
+        &[
+            (16, 8, 0),
+            (24, 8, 0),
+            (32, 32, 1),
+            (64, 8, 255),
+            (81, 3, 7),
+            (84, 3, 7),
+        ],
+    ));
+    b.extend(isetp(0, 0, 8, 2));
+    b.extend(bra(3, 8, Some(0)));
+    b.extend(isetp(1, 0, 9, 2));
+    b.extend(bra(5, 10, Some(1)));
+    b.extend(bra(6, 1, None));
+    b.extend(word(0x118, 4, &[]));
+    b.extend(mov_imm(1, 1));
+    b.extend(bra(9, 11, None));
+    b.extend(mov_imm(1, 2));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("loop_two_exits", &s.spirv);
+    assert!(spirv_has(&s.spirv, 246), "no OpLoopMerge");
+    assert!(spirv_has(&s.spirv, 251), "no exit dispatch");
 }

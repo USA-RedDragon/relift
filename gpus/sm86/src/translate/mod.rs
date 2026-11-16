@@ -79,6 +79,16 @@ pub struct Interface {
     /// Specialization constant id per bound handle whose texture's numeric
     /// kind the runtime picks (see [`Kind`]).
     pub texture_kinds: BTreeMap<(u32, u32), u32>,
+    /// SPIR-V BuiltIn numbers of the built-in inputs and outputs used.
+    pub builtins: BTreeSet<u32>,
+    /// Length of the ClipDistance output (the highest clip distance the SPH
+    /// output map names, plus one); the guest's pipeline state says which of
+    /// them clip and which cull.
+    pub clip_distances: u32,
+    /// The fragment shader writes depth (SPH output map).
+    pub writes_depth: bool,
+    /// The fragment shader writes the sample mask (SPH output map).
+    pub writes_sample_mask: bool,
 }
 
 /// A translated program.
@@ -136,6 +146,9 @@ pub(crate) struct Ctx {
     pub pc: u64,
     pub sph_words: [u32; 32],
     pub tex: tex::Prep,
+    pub io: io::State,
+    /// Function-scope `u32` variables beyond the registers, zeroed at entry.
+    pub locals: Vec<u32>,
 }
 
 impl Ctx {
@@ -561,6 +574,8 @@ pub fn translate(p: &Program) -> Res<Shader> {
         pc: 0,
         sph_words: p.sph.as_ref().map_or([0; 32], |s| s.words),
         tex: tex::Prep::new(&code.insts, &code.words),
+        io: io::State::default(),
+        locals: Vec::new(),
     };
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);
@@ -583,7 +598,13 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
     let b = c.m.t_bool();
     let pb = c.m.t_ptr(FUNCTION, b);
     let mut decls = Vec::new();
-    let ints: Vec<u32> = c.regs.values().chain(c.uregs.values()).copied().collect();
+    let ints: Vec<u32> = c
+        .regs
+        .values()
+        .chain(c.uregs.values())
+        .chain(c.locals.iter())
+        .copied()
+        .collect();
     let bools: Vec<u32> = c.preds.values().chain(c.upreds.values()).copied().collect();
     for &v in &ints {
         crate::spirv::inst(&mut decls, op::VARIABLE, &[pu, v, FUNCTION]);
@@ -600,13 +621,7 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         crate::spirv::inst(&mut decls, op::STORE, &[v, fals]);
     }
     c.m.body.splice(var_at..var_at, decls);
-    for (loc, &var) in &c.inputs {
-        match c.iface.inputs.get(loc) {
-            Some(Some(Interp::Flat)) => c.m.deco(var, 14, &[]),
-            Some(Some(Interp::Linear)) => c.m.deco(var, 13, &[]),
-            _ => {}
-        }
-    }
+    io::finish(&mut c, main);
     let mut iface: Vec<u32> = Vec::new();
     iface.extend(c.inputs.values());
     iface.extend(c.outputs.values());

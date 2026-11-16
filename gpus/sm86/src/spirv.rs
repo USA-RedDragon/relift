@@ -75,6 +75,7 @@ pub mod op {
     pub const LABEL: u16 = 248;
     pub const BRANCH: u16 = 249;
     pub const BRANCH_CONDITIONAL: u16 = 250;
+    pub const SWITCH: u16 = 251;
     pub const RETURN: u16 = 253;
     pub const KILL: u16 = 252;
     pub const IS_NAN: u16 = 156;
@@ -171,6 +172,7 @@ pub mod glsl {
     pub const U_CLAMP: u32 = 44;
     pub const LDEXP: u32 = 53;
     pub const F_SIGN: u32 = 6;
+    pub const INTERPOLATE_AT_CENTROID: u32 = 76;
 }
 
 #[derive(Default)]
