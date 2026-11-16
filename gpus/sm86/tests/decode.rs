@@ -160,3 +160,475 @@ fn attributes() {
         .f(64, 8, 255);
     assert_eq!(t.text(0), "AST a[0xec], R3");
 }
+
+#[test]
+fn integer_conversion_alu() {
+    let t = B::op(0x024, 1)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0xff)
+        .f(32, 8, 0xff)
+        .f(64, 8, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.MOV.U32 R6, RZ, RZ, R3");
+    let t = B::op(0x024, 3)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0xff)
+        .f(32, 27, 0xc04200)
+        .f(64, 8, 0xff)
+        .f(73, 1, 0x0)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.MOV.U32 R6, RZ, RZ, c[0x3][0x108]");
+    let t = B::op(0x024, 4)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0x6)
+        .f(32, 32, 0x10)
+        .f(64, 8, 0xff)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.SHL.U32 R6, R6, 0x10, RZ");
+    let t = B::op(0x024, 4)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0x6)
+        .f(32, 32, 0x2)
+        .f(64, 8, 0xff)
+        .f(73, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.SHL R6, R6, 0x2, RZ");
+    let t = B::op(0x024, 4)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0x6)
+        .f(32, 32, 0x1)
+        .f(64, 8, 0x7)
+        .f(73, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.IADD R6, R6, 0x1, R7");
+    let t = B::op(0x024, 4)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0x6)
+        .f(32, 32, 0x10000)
+        .f(64, 8, 0xff)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.U32 R6, R6, 0x10000, RZ");
+    let t = B::op(0x024, 1)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0xff)
+        .f(32, 8, 0xff)
+        .f(64, 8, 0x3)
+        .f(73, 1, 0x1)
+        .f(75, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.MOV R6, RZ, RZ, -R3");
+    let t = B::op(0x024, 1)
+        .f(16, 8, 0x7)
+        .f(24, 8, 0xff)
+        .f(32, 8, 0xff)
+        .f(64, 8, 0x3)
+        .f(73, 1, 0x1)
+        .f(74, 1, 0x1)
+        .f(87, 3, 0x1);
+    assert_eq!(t.text(0), "IMAD.X R7, RZ, RZ, R3, P1");
+    let t = B::op(0x025, 1)
+        .f(16, 8, 0x4)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(64, 8, 0x6)
+        .f(73, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.WIDE R4, P0, R2, R3, R6");
+    let t = B::op(0x027, 4)
+        .f(16, 8, 0x3)
+        .f(24, 8, 0xe)
+        .f(32, 32, 0xc0000001)
+        .f(64, 8, 0xff)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMAD.HI.U32 R3, P0, R14, -0x3fffffff, RZ");
+    let t = B::op(0x011, 4)
+        .f(16, 8, 0x45)
+        .f(24, 8, 0xc)
+        .f(32, 32, 0x45f0)
+        .f(64, 8, 0xff)
+        .f(75, 5, 0x4)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "LEA R69, P0, R12, 0x45f0, 0x4");
+    let t = B::op(0x011, 1)
+        .f(16, 8, 0x2c)
+        .f(24, 8, 0x2c)
+        .f(32, 8, 0x35)
+        .f(64, 8, 0xff)
+        .f(75, 5, 0x11)
+        .f(80, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "LEA.HI R44, P0, R44, R53, RZ, 0x11");
+    let t = B::op(0x019, 4)
+        .f(16, 8, 0x8)
+        .f(24, 8, 0x2)
+        .f(32, 32, 0x2)
+        .f(64, 8, 0xff)
+        .f(73, 2, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "SHF.L.U32 R8, R2, 0x2, RZ");
+    let t = B::op(0x019, 4)
+        .f(16, 8, 0x2a)
+        .f(24, 8, 0xff)
+        .f(32, 32, 0x1)
+        .f(64, 8, 0x2a)
+        .f(73, 2, 0x3)
+        .f(76, 1, 0x1)
+        .f(80, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "SHF.R.U32.HI R42, RZ, 0x1, R42");
+    let t = B::op(0x019, 2)
+        .f(16, 8, 0x5)
+        .f(24, 8, 0x3)
+        .f(32, 32, 0x4)
+        .f(64, 8, 0x2)
+        .f(73, 2, 0x1)
+        .f(80, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "SHF.L.U64.HI R5, R3, R2, 0x4");
+    let t = B::op(0x016, 4)
+        .f(16, 8, 0x14)
+        .f(24, 8, 0x14)
+        .f(32, 32, 0x7650)
+        .f(64, 8, 0xff)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "PRMT R20, R20, 0x7650, RZ");
+    let t = B::op(0x016, 4)
+        .f(16, 8, 0x14)
+        .f(24, 8, 0x14)
+        .f(32, 32, 0x7650)
+        .f(64, 8, 0xff)
+        .f(72, 3, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "PRMT.RC8 R20, R20, 0x7650, RZ");
+    let t = B::op(0x017, 1)
+        .f(16, 8, 0x16)
+        .f(24, 8, 0x17)
+        .f(32, 8, 0x16)
+        .f(73, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IMNMX R22, R23, R22, PT");
+    let t = B::op(0x01a, 4)
+        .f(16, 8, 0x0)
+        .f(24, 8, 0x0)
+        .f(32, 32, 0x3)
+        .f(75, 1, 0x1)
+        .f(73, 1, 0x0)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "SGXT.W.U32 R0, R0, 0x3");
+    let t = B::op(0x01b, 4)
+        .f(16, 8, 0x5)
+        .f(24, 8, 0x6)
+        .f(32, 32, 0x7)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "BMSK R5, R6, 0x7");
+    let t = B::op(0x01c, 4)
+        .f(81, 3, 0x0)
+        .f(84, 3, 0x7)
+        .f(87, 3, 0x7)
+        .f(77, 3, 0x7)
+        .f(68, 3, 0x7)
+        .f(72, 5, 0x10)
+        .f(64, 3, 0x0);
+    assert_eq!(t.text(0), "PLOP3.LUT P0, PT, PT, PT, PT, 0x80, 0x0");
+    let t = B::op(0x003, 4)
+        .f(16, 8, 0x25)
+        .f(24, 8, 0xff)
+        .f(32, 32, 0x4)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "P2R R37, PR, RZ, 0x4");
+    let t = B::op(0x004, 4)
+        .f(24, 8, 0x7)
+        .f(32, 32, 0x70)
+        .f(76, 2, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "R2P PR, R7.B3, 0x70");
+    let t = B::op(0x004, 4).f(24, 8, 0x7).f(32, 32, 0xff).f(87, 3, 0x7);
+    assert_eq!(t.text(0), "R2P PR, R7");
+    let t = B::op(0x005, 4)
+        .f(16, 8, 0xa)
+        .f(72, 8, 0x50)
+        .f(80, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "CS2R R10, SR_CLOCKLO");
+    let t = B::op(0x005, 4)
+        .f(16, 8, 0xa)
+        .f(72, 8, 0xff)
+        .f(80, 1, 0x0)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "CS2R.32 R10, SRZ");
+    let t = B::op(0x022, 4)
+        .f(16, 8, 0x18)
+        .f(24, 8, 0xc)
+        .f(64, 8, 0x9)
+        .f(32, 8, 0xeb)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "FSWZADD R24, R12, R9, ZPNPNPZP");
+    let t = B::op(0x082, 4)
+        .f(16, 6, 0x4)
+        .f(32, 32, 0x3f800000)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UMOV UR4, 0x3f800000");
+    let t = B::op(0x082, 6).f(16, 6, 0x5).f(32, 6, 0x3f).f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UMOV UR5, URZ");
+    let t = B::op(0x08c, 4)
+        .f(16, 6, 0x0)
+        .f(24, 6, 0x4)
+        .f(32, 32, 0x10)
+        .f(76, 3, 0x2)
+        .f(73, 1, 0x1)
+        .f(81, 3, 0x1)
+        .f(84, 3, 0x7)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UISETP.EQ.AND UP1, UPT, UR4, 0x10, UPT");
+    let t = B::op(0x090, 4)
+        .f(16, 6, 0x4)
+        .f(24, 6, 0x4)
+        .f(32, 32, 0x24)
+        .f(64, 6, 0x3f)
+        .f(81, 3, 0x0)
+        .f(84, 3, 0x7)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UIADD3 UR4, UP0, UR4, 0x24, URZ");
+    let t = B::op(0x091, 4)
+        .f(16, 6, 0x4)
+        .f(24, 6, 0x4)
+        .f(32, 32, 0x40)
+        .f(64, 6, 0x3f)
+        .f(75, 5, 0x4)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "ULEA UR4, UP0, UR4, 0x40, 0x4");
+    let t = B::op(0x092, 4)
+        .f(16, 6, 0x6)
+        .f(24, 6, 0x5)
+        .f(32, 32, 0xff)
+        .f(64, 6, 0x3f)
+        .f(72, 8, 0xc0)
+        .f(81, 3, 0x7)
+        .f(87, 3, 0x7)
+        .f(90, 1, 0x1);
+    assert_eq!(t.text(0), "ULOP3.LUT UR6, UR5, 0xff, URZ, 0xc0, !UPT");
+    let t = B::op(0x099, 4)
+        .f(16, 6, 0x4)
+        .f(24, 6, 0x4)
+        .f(32, 32, 0x4)
+        .f(64, 6, 0x3f)
+        .f(73, 2, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "USHF.L.U32 UR4, UR4, 0x4, URZ");
+    let t = B::op(0x09c, 4)
+        .f(81, 3, 0x0)
+        .f(84, 3, 0x7)
+        .f(87, 3, 0x7)
+        .f(77, 3, 0x7)
+        .f(68, 3, 0x7)
+        .f(72, 5, 0x10);
+    assert_eq!(t.text(0), "UPLOP3.LUT UP0, UPT, UPT, UPT, UPT, 0x80, 0x0");
+    let t = B::op(0x0a4, 1)
+        .f(16, 6, 0x5)
+        .f(24, 6, 0x5)
+        .f(32, 6, 0x6)
+        .f(64, 6, 0x3f)
+        .f(73, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UIMAD UR5, UR5, UR6, URZ");
+    let t = B::op(0x0a5, 1)
+        .f(16, 6, 0xa)
+        .f(24, 6, 0xc)
+        .f(32, 6, 0xe)
+        .f(64, 6, 0xa)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UIMAD.WIDE.U32 UR10, UP0, UR12, UR14, UR10");
+    let t = B::op(0x0bd, 1)
+        .f(16, 6, 0x4)
+        .f(32, 6, 0x4)
+        .f(73, 1, 0x0)
+        .f(74, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UFLO.U32.SH UR4, UP0, UR4");
+    let t = B::op(0x0be, 1).f(16, 6, 0x4).f(32, 6, 0x5).f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UBREV UR4, UR5");
+    let t = B::op(0x0bf, 1).f(16, 6, 0x9).f(32, 6, 0x8).f(87, 3, 0x7);
+    assert_eq!(t.text(0), "UPOPC UR9, UR8");
+    let t = B::op(0x100, 1)
+        .f(16, 8, 0x6)
+        .f(32, 8, 0x6)
+        .f(73, 1, 0x0)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "FLO.U32 R6, P0, R6");
+    let t = B::op(0x101, 1).f(16, 8, 0x6).f(32, 8, 0x6).f(87, 3, 0x7);
+    assert_eq!(t.text(0), "BREV R6, R6");
+    let t = B::op(0x109, 1).f(16, 8, 0x7).f(32, 8, 0x7).f(87, 3, 0x7);
+    assert_eq!(t.text(0), "POPC R7, R7");
+    let t = B::op(0x045, 1)
+        .f(16, 8, 0x8)
+        .f(32, 8, 0x1)
+        .f(84, 3, 0x2)
+        .f(75, 3, 0x2)
+        .f(74, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "I2FP.F32.S32 R8, R1");
+    let t = B::op(0x045, 1)
+        .f(16, 8, 0x44)
+        .f(32, 8, 0x41)
+        .f(84, 3, 0x2)
+        .f(75, 3, 0x2)
+        .f(78, 2, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "I2FP.F32.U32.RZ R68, R65");
+    let t = B::op(0x105, 1)
+        .f(16, 8, 0x2a)
+        .f(32, 8, 0x2e)
+        .f(75, 2, 0x2)
+        .f(77, 1, 0x1)
+        .f(78, 2, 0x3)
+        .f(80, 1, 0x1)
+        .f(84, 3, 0x2)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "F2I.FTZ.U32.TRUNC.NTZ R42, R46");
+    let t = B::op(0x105, 1)
+        .f(16, 8, 0x6)
+        .f(32, 8, 0x8)
+        .f(75, 2, 0x1)
+        .f(77, 1, 0x1)
+        .f(84, 3, 0x2)
+        .f(80, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "F2I.FTZ.U16.NTZ R6, R8");
+    let t = B::op(0x106, 1)
+        .f(16, 8, 0x1)
+        .f(32, 8, 0x6)
+        .f(74, 1, 0x0)
+        .f(75, 3, 0x2)
+        .f(84, 3, 0x1)
+        .f(60, 2, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "I2F.U16 R1, R6.H1");
+    let t = B::op(0x107, 1)
+        .f(16, 8, 0x7)
+        .f(32, 8, 0x6)
+        .f(75, 3, 0x2)
+        .f(84, 3, 0x2)
+        .f(78, 2, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "FRND.FLOOR R7, R6");
+    let t = B::op(0x104, 1)
+        .f(16, 8, 0x1)
+        .f(32, 8, 0x3)
+        .f(75, 3, 0x1)
+        .f(84, 3, 0x2)
+        .f(78, 2, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "F2F.F16.F32.RM R1, R3");
+    let t = B::op(0x03e, 1)
+        .f(16, 8, 0x6)
+        .f(24, 8, 0x9)
+        .f(32, 8, 0x6)
+        .f(75, 3, 0x0)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "F2FP.PACK_AB R6, R9, R6");
+    let t = B::op(0x030, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(77, 1, 0x1)
+        .f(78, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HADD2.F32.SAT R1, R2, R3");
+    let t = B::op(0x030, 2)
+        .f(16, 8, 0x25)
+        .f(24, 8, 0x1b)
+        .f(32, 32, 0xbc003c00)
+        .f(64, 8, 0xff)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HADD2 R37, R27, -1, 1");
+    let t = B::op(0x031, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(64, 8, 0x4)
+        .f(79, 1, 0x1)
+        .f(76, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HFMA2.FMZ.RELU R1, R2, R3, R4");
+    let t = B::op(0x032, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(75, 2, 0x3)
+        .f(77, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HMUL2.FMZ.SAT R1, R2.H0_H0, R3");
+    let t = B::op(0x033, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(76, 4, 0x1)
+        .f(71, 1, 0x1)
+        .f(69, 2, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HSET2.BF.LT.OR R1, R2, R3, PT");
+    let t = B::op(0x034, 1)
+        .f(81, 3, 0x1)
+        .f(84, 3, 0x7)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(76, 4, 0x4)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HSETP2.GT.AND P1, PT, R2, R3, PT");
+    let t = B::op(0x035, 4)
+        .f(16, 8, 0x4)
+        .f(24, 8, 0xff)
+        .f(32, 32, 0x1000)
+        .f(64, 8, 0xff)
+        .f(72, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "HFMA2.MMA R4, -RZ, 0, 0.00048828125, RZ");
+    let t = B::op(0x040, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(81, 1, 0x1)
+        .f(87, 3, 0x7)
+        .f(90, 1, 0x1);
+    assert_eq!(t.text(0), "HMNMX2.NAN R1, R2, R3, !PT");
+    let t = B::op(0x026, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(64, 8, 0x4)
+        .f(73, 2, 0x1)
+        .f(76, 2, 0x3)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "IDP.2A.HI.S16.U8 R1, R2, R3, R4");
+    let t = B::op(0x028, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(78, 2, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "DMUL.RM R1, R2, R3");
+    let t = B::op(0x029, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(64, 8, 0x4)
+        .f(75, 1, 0x1)
+        .f(78, 2, 0x2)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "DADD.RP R1, R2, -R4");
+    let t = B::op(0x02a, 1)
+        .f(81, 3, 0x1)
+        .f(84, 3, 0x7)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(76, 4, 0x4)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "DSETP.GT.AND P1, PT, R2, R3, PT");
+    let t = B::op(0x02b, 1)
+        .f(16, 8, 0x1)
+        .f(24, 8, 0x2)
+        .f(32, 8, 0x3)
+        .f(64, 8, 0x4)
+        .f(74, 1, 0x1)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "DFMA R1, R2, R3, |R4|");
+}
