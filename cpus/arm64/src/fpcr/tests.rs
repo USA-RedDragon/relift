@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::{Code, Host, msr_fpcr, prove};
+use crate::cpu::{Cpu, Va};
 use crate::decode::Features;
 use crate::lift::lift_for_emit;
 
@@ -82,7 +83,9 @@ impl Prog {
     fn constant(&self) -> bool {
         let block = |pc: u64| {
             let w = *self.words.get(&pc)?;
-            lift_for_emit(w, pc, &Features::ALL).ok().map(Arc::new)
+            lift_for_emit(w, pc, &Cpu::new(Features::ALL, Va::BITS39))
+                .ok()
+                .map(Arc::new)
         };
         let slot = |_: u64| None;
         let table = |_: u64| None;
