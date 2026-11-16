@@ -80,7 +80,9 @@ const KEYWORDS: &[&str] = &[
     "bitone",
 ];
 
-const OPS2: &[&str] = &["==", "!=", "<=", ">=", "<<", ">>", "->", "=>", "..", "++"];
+const OPS2: &[&str] = &[
+    "==", "!=", "<=", ">=", "<<", ">>", "->", "=>", "..", "++", "^^",
+];
 const OPS1: &str = "-+*/^&|<>=:,;(){}[].@~%!";
 
 fn is_id_start(c: char) -> bool {
@@ -227,14 +229,27 @@ pub(crate) fn tokenize(s: &str) -> PResult<Vec<Tok>> {
             pos += 3;
             continue;
         }
-        if let Some(op) = OPS2.iter().find(|op| rest(op)) {
-            out.push(tok(K::Op, pos, pos + op.len()));
-            pos += op.len();
-            continue;
-        }
-        if OPS1.contains(c) {
-            out.push(tok(K::Op, pos, pos + 1));
-            pos += 1;
+        let op_len = OPS2
+            .iter()
+            .find(|op| rest(op))
+            .map(|op| op.len())
+            .or_else(|| OPS1.contains(c).then_some(1));
+        if let Some(l) = op_len {
+            // A user infix operator: symbols then `_` and letters (`<_s`,
+            // `>>_s`, `*_u`), as Sail's lexer reads them.
+            let mut e = pos + l;
+            if e + 1 < n
+                && ch[e] == '_'
+                && ch[e + 1].is_ascii_alphabetic()
+                && matches!(c, '<' | '>' | '*' | '+' | '-' | '=' | '/')
+            {
+                e += 1;
+                while e < n && ch[e].is_ascii_alphanumeric() {
+                    e += 1;
+                }
+            }
+            out.push(tok(K::Op, pos, e));
+            pos = e;
             continue;
         }
         let near: String = ch[pos..n.min(pos + 40)].iter().collect();
@@ -247,8 +262,29 @@ pub(crate) fn tokenize(s: &str) -> PResult<Vec<Tok>> {
     Ok(out)
 }
 
+thread_local! {
+    /// The operators the loaded model declares with `infix`, `infixl` or
+    /// `infixr`: precedence and associativity.
+    static USER_INFIX: std::cell::RefCell<std::collections::HashMap<String, (u8, char)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Records a model's `infix N op` declaration (Sail's precedence scale,
+/// higher binds tighter, which the table below shares).
+pub fn declare_infix(op: &str, prec: u8, assoc: char) {
+    USER_INFIX.with(|t| t.borrow_mut().insert(op.to_string(), (prec, assoc)));
+}
+
 /// The precedence and associativity (`l`, `r` or `n`) of a binary operator.
 fn binop(op: &str) -> Option<(u8, char)> {
+    if let Some(x) = USER_INFIX.with(|t| t.borrow().get(op).copied()) {
+        // `infix 1 >>` in a model would make shifts bind looser than
+        // comparisons; keep the builtin shifts where Sail's own library
+        // has them and use the declaration for new operators only.
+        if !matches!(op, "<<" | ">>") {
+            return Some(x);
+        }
+    }
     Some(match op {
         "-->" => (1, 'r'),
         "<-->" => (1, 'n'),
@@ -464,6 +500,13 @@ impl Parser {
                 };
             } else if self.at("as") {
                 self.skip()?;
+                // `x as atom('n)` / `x as int('n)`: a type, binding only
+                // type variables, which the evaluator does not need.
+                if self.peek(0).k == K::Id && self.at_k("(", 1) {
+                    let t = self.typ()?;
+                    p = Pat::Typed(Box::new(p), t);
+                    continue;
+                }
                 let nm = self.ident()?;
                 p = Pat::As(Box::new(p), nm);
             } else {
@@ -623,7 +666,7 @@ impl Parser {
             let e = self.expr(0)?;
             if self.at("in") {
                 self.skip()?;
-                let body = self.expr(0)?;
+                let body = self.expr_or_assign()?;
                 return Ok(Stmt::Expr(Expr::LetIn(p, Box::new(e), Box::new(body))));
             }
             return Ok(Stmt::Let(p, e));
@@ -652,6 +695,19 @@ impl Parser {
             return Ok(Stmt::Decl(e, t, rhs));
         }
         Ok(Stmt::Expr(e))
+    }
+
+    /// An expression, or an assignment `lhs = rhs` written where an
+    /// expression goes (an `if` branch, a `let ... in` body, a
+    /// parenthesized statement), as a one-statement block.
+    pub fn expr_or_assign(&mut self) -> PResult<Expr> {
+        let e = self.expr(0)?;
+        if self.at("=") {
+            self.skip()?;
+            let rhs = self.expr(0)?;
+            return Ok(Expr::Block(vec![Stmt::Assign(e, rhs)]));
+        }
+        Ok(e)
     }
 
     /// An expression whose binary operators bind at least as tightly as `minprec`.
@@ -692,15 +748,27 @@ impl Parser {
             let e = self.unary()?;
             return Ok(Expr::Call("not_bool".into(), vec![e]));
         }
+        if self.at("*") {
+            // `*r`: the register a reference names; references are the
+            // registers themselves here.
+            self.skip()?;
+            return self.unary();
+        }
         let p = self.primary()?;
         self.postfix(p)
     }
 
     fn postfix(&mut self, mut e: Expr) -> PResult<Expr> {
         loop {
-            if self.at(".") {
+            if self.at(".") || (self.at("->") && self.peek(1).k == K::Id && self.at_k("(", 2)) {
+                // `R.F()` and `R->F()`: the getter and setter of a bitfield
+                // field in older Sail, the field itself here.
                 self.skip()?;
                 let f = self.ident()?;
+                if self.at("(") && self.at_k(")", 1) {
+                    self.skip()?;
+                    self.skip()?;
+                }
                 e = Expr::Field(Box::new(e), f);
             } else if self.at("[") {
                 self.skip()?;
@@ -725,14 +793,25 @@ impl Parser {
         Ok(e)
     }
 
+    /// An expression with an optional `: T` ascription after it.
+    fn expr_typed(&mut self) -> PResult<Expr> {
+        let e = self.expr(0)?;
+        if self.at(":") {
+            self.skip()?;
+            let t = self.typ()?;
+            return Ok(Expr::Typed(Box::new(e), t));
+        }
+        Ok(e)
+    }
+
     fn args(&mut self) -> PResult<Vec<Expr>> {
         self.expect("(")?;
         let mut args = Vec::new();
         if !self.at(")") {
-            args.push(self.expr(0)?);
+            args.push(self.expr_typed()?);
             while self.at(",") {
                 self.skip()?;
-                args.push(self.expr(0)?);
+                args.push(self.expr_typed()?);
             }
         }
         self.expect(")")?;
@@ -797,18 +876,27 @@ impl Parser {
                 self.skip()?;
                 return Ok(Expr::Lit(Lit::Unit));
             }
-            let e = self.expr(0)?;
+            let mut e = self.expr(0)?;
+            if self.at("=") {
+                self.skip()?;
+                let rhs = self.expr(0)?;
+                self.expect(")")?;
+                return Ok(Expr::Block(vec![Stmt::Assign(e, rhs)]));
+            }
             if self.at(":") {
                 self.skip()?;
                 let t = self.typ()?;
-                self.expect(")")?;
-                return Ok(Expr::Typed(Box::new(e), t));
+                e = Expr::Typed(Box::new(e), t);
+                if !self.at(",") {
+                    self.expect(")")?;
+                    return Ok(e);
+                }
             }
             if self.at(",") {
                 let mut es = vec![e];
                 while self.at(",") {
                     self.skip()?;
-                    es.push(self.expr(0)?);
+                    es.push(self.expr_typed()?);
                 }
                 self.expect(")")?;
                 return Ok(Expr::Tuple(es));
@@ -877,11 +965,11 @@ impl Parser {
                     self.skip()?;
                     let c = self.expr(0)?;
                     self.expect("then")?;
-                    let t = self.expr(0)?;
+                    let t = self.expr_or_assign()?;
                     let mut el = None;
                     if self.at("else") {
                         self.skip()?;
-                        el = Some(Box::new(self.expr(0)?));
+                        el = Some(Box::new(self.expr_or_assign()?));
                     }
                     return Ok(Expr::If(Box::new(c), Box::new(t), el));
                 }
@@ -991,7 +1079,7 @@ impl Parser {
                     self.expect("=")?;
                     let e = self.expr(0)?;
                     self.expect("in")?;
-                    let body = self.expr(0)?;
+                    let body = self.expr_or_assign()?;
                     return Ok(Expr::LetIn(p, Box::new(e), Box::new(body)));
                 }
                 "ref" => {
@@ -1085,5 +1173,71 @@ mod tests {
             )])
         );
         assert_eq!(arms[1].body, Expr::Lit(Lit::Unit));
+    }
+
+    #[test]
+    fn user_infix_operators_lex_as_one_token() {
+        declare_infix("<_s", 4, 'n');
+        let e = parse_expr("a <_s b & c").expect("parses");
+        let Expr::Binop(op, _, _) = &e else {
+            panic!("not a binop: {e:?}");
+        };
+        assert_eq!(op, "&");
+        declare_infix(">>_s", 7, 'l');
+        let e = parse_expr("x >>_s 2").expect("parses");
+        assert!(matches!(&e, Expr::Binop(op, _, _) if op == ">>_s"));
+    }
+
+    #[test]
+    fn old_bitfield_accessors_are_fields() {
+        let get = parse_expr("CP0Status.EXL()").expect("parses");
+        assert_eq!(
+            get,
+            Expr::Field(Box::new(Expr::Id("CP0Status".into())), "EXL".into())
+        );
+        let set = parse_expr("CP0Status->EXL()").expect("parses");
+        assert_eq!(set, get);
+    }
+
+    #[test]
+    fn assignments_go_where_expressions_do() {
+        let e = parse_expr("if c then x = a else y = b").expect("parses");
+        let Expr::If(_, t, Some(el)) = e else {
+            panic!("not an if");
+        };
+        assert!(matches!(*t, Expr::Block(ref s) if matches!(s[..], [Stmt::Assign(..)])));
+        assert!(matches!(*el, Expr::Block(ref s) if matches!(s[..], [Stmt::Assign(..)])));
+        let e = parse_expr("let p = e in x = f").expect("parses");
+        assert!(matches!(e, Expr::LetIn(_, _, ref b) if matches!(**b, Expr::Block(_))));
+        let e = parse_expr("(f(a) = v)").expect("parses");
+        assert!(matches!(e, Expr::Block(_)));
+    }
+
+    #[test]
+    fn tuple_items_and_arguments_take_types() {
+        let e = parse_expr("(undefined : bits(32), x)").expect("parses");
+        let Expr::Tuple(es) = e else {
+            panic!("not a tuple");
+        };
+        assert!(matches!(es[0], Expr::Typed(..)));
+        let e = parse_expr("f(undefined : bits(8), y : bits(2))").expect("parses");
+        let Expr::Call(_, args) = e else {
+            panic!("not a call");
+        };
+        assert!(args.iter().all(|a| matches!(a, Expr::Typed(..))));
+    }
+
+    #[test]
+    fn as_with_a_type_is_a_typed_pattern() {
+        assert!(matches!(pat("i as atom('n)"), Pat::Typed(..)));
+        assert!(matches!(pat("i as j"), Pat::As(..)));
+    }
+
+    #[test]
+    fn dereference_and_replicate() {
+        assert_eq!(parse_expr("*r").expect("parses"), Expr::Id("r".into()));
+        declare_infix("^^", 8, 'l');
+        let e = parse_expr("x ^^ 4").expect("parses");
+        assert!(matches!(&e, Expr::Binop(op, _, _) if op == "^^"));
     }
 }

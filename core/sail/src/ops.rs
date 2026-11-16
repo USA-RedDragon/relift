@@ -684,7 +684,8 @@ impl<C: Cpu> Gen<'_, C> {
 
     /// Zero or sign extension of `a` to `n` bits.
     pub fn extend(&mut self, a: &V, n: u32, signed: bool) -> R<V> {
-        let a = self.defd(a);
+        let a = self.bitify(a)?;
+        let a = self.defd(&a);
         let w = a
             .width()
             .ok_or_else(|| crate::eval::err(format!("extend {a:?}")))?;

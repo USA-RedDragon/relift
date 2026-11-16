@@ -58,6 +58,8 @@ pub struct Model {
     /// loaded, with the number of function texts each changed.
     pub patched: Vec<(String, usize)>,
     sigs: RefCell<HashMap<String, Option<Rc<Sig>>>>,
+    /// The names `$ifdef` treats as defined (none by default).
+    pub defines: std::collections::HashSet<String>,
 }
 
 const START_KWS: &[&str] = &[
@@ -138,15 +140,56 @@ fn relax_pattern(c: &str, mask: u32) -> Option<String> {
     Some(format!("{}{}{}", &c[..s], new.join(", "), &c[e..]))
 }
 
+/// Blanks block comments (Sail's nest), keeping line breaks, so text in a
+/// comment at column 0 does not start an item.
+fn strip_block_comments(text: &str) -> String {
+    let b: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let (mut i, mut depth, mut in_str) = (0, 0usize, false);
+    while i < b.len() {
+        let c = b[i];
+        if depth == 0 && c == '"' && (i == 0 || b[i - 1] != '\\') {
+            in_str = !in_str;
+        }
+        if !in_str && c == '/' && b.get(i + 1) == Some(&'/') && depth == 0 {
+            while i < b.len() && b[i] != '\n' {
+                out.push(b[i]);
+                i += 1;
+            }
+            continue;
+        }
+        if !in_str && c == '/' && b.get(i + 1) == Some(&'*') {
+            depth += 1;
+            out.push_str("  ");
+            i += 2;
+            continue;
+        }
+        if depth > 0 && c == '*' && b.get(i + 1) == Some(&'/') {
+            depth -= 1;
+            out.push_str("  ");
+            i += 2;
+            continue;
+        }
+        out.push(if depth > 0 && c != '\n' { ' ' } else { c });
+        i += 1;
+    }
+    out
+}
+
 /// Drops `$` directives, and the lines of inactive `$ifdef` and `$ifndef`
-/// branches (nothing is defined), keeping line numbering.
-fn preprocess(text: &str) -> String {
+/// branches (a name is defined when it is in `defines`), keeping line
+/// numbering.
+fn preprocess(text: &str, defines: &std::collections::HashSet<String>) -> String {
+    let text = strip_block_comments(text);
+    let text = text.as_str();
     let mut out: Vec<&str> = Vec::new();
     let mut stack: Vec<bool> = Vec::new();
     for line in text.split('\n') {
         let s = line.trim();
         if s.starts_with("$ifdef") || s.starts_with("$ifndef") {
-            stack.push(s.starts_with("$ifndef"));
+            let name = s.split_whitespace().nth(1).unwrap_or("");
+            let def = defines.contains(name);
+            stack.push(if s.starts_with("$ifndef") { !def } else { def });
             out.push("");
         } else if s.starts_with("$else") {
             if let Some(top) = stack.last_mut() {
@@ -237,7 +280,20 @@ impl Model {
     /// Loads the library files in `sail_lib` (missing ones are skipped) and the
     /// model sources `files` in `src`.
     pub fn load(sail_lib: &Path, src: &Path, files: &[&str]) -> std::io::Result<Model> {
-        let mut m = Model::default();
+        Model::load_defined(sail_lib, src, files, &[])
+    }
+
+    /// [`Model::load`] with the names `$ifdef` treats as defined.
+    pub fn load_defined(
+        sail_lib: &Path,
+        src: &Path,
+        files: &[&str],
+        defines: &[&str],
+    ) -> std::io::Result<Model> {
+        let mut m = Model {
+            defines: defines.iter().map(|d| d.to_string()).collect(),
+            ..Model::default()
+        };
         for f in LIB_FILES {
             let p = sail_lib.join(f);
             if p.exists() {
@@ -305,7 +361,7 @@ impl Model {
         }
         let mut replaced = Vec::new();
         let mut prepend: Vec<(String, Vec<String>)> = Vec::new();
-        for it in split_items(&preprocess(text)) {
+        for it in split_items(&preprocess(text, &self.defines)) {
             let kw = first_word(&it).to_string();
             if kw == "function" {
                 let b = it.as_bytes();
@@ -325,7 +381,7 @@ impl Model {
                     continue;
                 }
                 if let Some(e) = ident(b, p) {
-                    let name = it[p..e].to_string();
+                    let name = op_name(&it, p, e);
                     self.funcs.insert(name.clone(), vec![it.clone()]);
                     self.parsed.borrow_mut().remove(&name);
                     replaced.push(name);
@@ -407,7 +463,7 @@ impl Model {
 
     /// Adds the items of one `.sail` text.
     pub fn load_text(&mut self, text: &str) {
-        for it in split_items(&preprocess(text)) {
+        for it in split_items(&preprocess(text, &self.defines)) {
             let kw = first_word(&it).to_string();
             let _ = self.add(&kw, &it);
         }
@@ -427,6 +483,18 @@ impl Model {
             "overload" => self.add_overload(it),
             "type" => self.add_type(it),
             "union" => self.add_union(it),
+            "infix" | "infixl" | "infixr" => {
+                let f: Vec<&str> = it.split_whitespace().collect();
+                let assoc = match kw {
+                    "infixl" => 'l',
+                    "infixr" => 'r',
+                    _ => 'n',
+                };
+                if let [_, n, op, ..] = f[..] {
+                    crate::parse::declare_infix(op, n.parse().ok()?, assoc);
+                }
+                Some(())
+            }
             _ => Some(()),
         }
     }
@@ -442,13 +510,10 @@ impl Model {
             name = Some(&it[q..e]);
         }
         let name = match name {
-            Some(n) => n,
-            None => &it[p..ident(b, p)?],
+            Some(n) => n.to_string(),
+            None => op_name(it, p, ident(b, p)?),
         };
-        self.funcs
-            .entry(name.to_string())
-            .or_default()
-            .push(it.to_string());
+        self.funcs.entry(name).or_default().push(it.to_string());
         Some(())
     }
 
@@ -458,8 +523,17 @@ impl Model {
         if b.get(p) == Some(&b'"') {
             p += 1;
         }
-        let e = ident(b, p)?;
-        self.vals.insert(it[p..e].to_string(), it.to_string());
+        let mut e = ident(b, p)?;
+        // `val cast f : ...`: an implicit coercion (the evaluator's own
+        // rules cover bool, bit and bits(1)); the name is the next word.
+        if &it[p..e] == "cast"
+            && let Some(q) = ws1(b, e)
+            && let Some(e2) = ident(b, q)
+        {
+            p = q;
+            e = e2;
+        }
+        self.vals.insert(op_name(it, p, e), it.to_string());
         Some(())
     }
 
@@ -690,6 +764,18 @@ impl Model {
     fn add_union(&mut self, it: &str) -> Option<()> {
         let b = it.as_bytes();
         let p = ws1(b, 5)?;
+        if it[p..].starts_with("clause")
+            && let Some(q) = ws1(b, p + 6)
+            && let Some(e) = ident(b, q)
+        {
+            let rest = &it[e..];
+            let eq = rest.find('=')?;
+            let after = rest[eq + 1..].trim_start();
+            let c_end = after.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))?;
+            self.unions
+                .insert(after[..c_end].to_string(), it[q..e].to_string());
+            return Some(());
+        }
         let e = ident(b, p)?;
         let name = &it[p..e];
         for f in braced(it)?.split(',') {
@@ -750,6 +836,21 @@ impl Model {
     }
 }
 
+/// The name of a function or `val` whose name word ends at `e`: for
+/// `operator <_s` it is `op<_s`, as the evaluator calls binary operators.
+fn op_name(it: &str, p: usize, e: usize) -> String {
+    let w = &it[p..e];
+    if w != "operator" {
+        return w.to_string();
+    }
+    let rest = it[e..].trim_start();
+    let sym: String = rest
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '(')
+        .collect();
+    format!("op{sym}")
+}
+
 /// The text between the first `{` and the last `}` of `it`.
 fn braced(it: &str) -> Option<&str> {
     let ob = it.find('{')?;
@@ -757,13 +858,15 @@ fn braced(it: &str) -> Option<&str> {
     Some(if cb > ob + 1 { &it[ob + 1..cb] } else { "" })
 }
 
-fn parse_clause(raw: &str) -> Result<Clause, String> {
+pub fn parse_clause(raw: &str) -> Result<Clause, String> {
     let mut p = Parser::new(raw)?;
     p.expect("function")?;
     if p.peek_text() == "clause" {
         p.skip()?;
     }
-    p.ident()?;
+    if p.ident()? == "operator" {
+        p.skip()?;
+    }
     let mut guard = None;
     let params;
     if p.at("(") && !p.at_k(")", 1) {
@@ -792,7 +895,7 @@ fn parse_clause(raw: &str) -> Result<Clause, String> {
         }
     }
     p.expect("=")?;
-    let body = p.expr(0)?;
+    let body = p.expr_or_assign()?;
     Ok(Clause {
         params,
         guard,
@@ -823,7 +926,13 @@ fn strip_effects(s: &str) -> String {
 }
 
 fn parse_sig_type(raw: &str, name: &str) -> Option<(Vec<Typ>, Typ)> {
-    let i = raw.find(name)? + name.len();
+    let i = match name.strip_prefix("op") {
+        Some(sym) if raw.contains("operator") && !sym.is_empty() => {
+            let o = raw.find("operator")? + "operator".len();
+            raw[o..].find(sym)? + o + sym.len()
+        }
+        _ => raw.find(name)? + name.len(),
+    };
     let rest = &raw[i..];
     let mut depth = 0i32;
     let mut colon = None;
@@ -848,7 +957,7 @@ fn parse_sig_type(raw: &str, name: &str) -> Option<(Vec<Typ>, Typ)> {
             match ch {
                 '(' | '{' => depth += 1,
                 ')' | '}' => depth -= 1,
-                '.' if depth == 0 && matches!(cs.get(k + 1), Some((_, ' ' | '\n'))) => {
+                '.' if depth == 0 && matches!(cs.get(k + 1), Some((_, ' ' | '\n' | '('))) => {
                     body = body[j + 1..].to_string();
                     break;
                 }
@@ -876,6 +985,12 @@ fn extern_of(raw: &str) -> Option<String> {
     }
     if e == p {
         return None;
+    }
+    if &raw[p..e] == "operator" {
+        e = skip_ws(b, e);
+        while e < b.len() && !is_ws(b[e]) {
+            e += 1;
+        }
     }
     let p = skip_ws(b, e);
     if b.get(p) != Some(&b'=') {
@@ -955,5 +1070,45 @@ mod tests {
         assert!(dec[1].contains("[_, bitzero] as op"));
         let hits: Vec<usize> = m.patched.iter().map(|p| p.1).collect();
         assert_eq!(hits, vec![1, 0, 1]);
+    }
+
+    #[test]
+    fn nested_block_comments_hide_items() {
+        let mut m = Model::default();
+        m.load_text(
+            "/* outer /* inner */\nfunction clause hidden x = x\n*/\n\
+             function seen x = x\n",
+        );
+        assert!(m.funcs.contains_key("seen"));
+        assert!(!m.funcs.contains_key("hidden"));
+    }
+
+    #[test]
+    fn ifdef_follows_the_defines() {
+        let text = "$ifdef FEATURE\nfunction a x = x\n$else\nfunction b x = x\n$endif\n";
+        let mut on = Model {
+            defines: ["FEATURE".to_string()].into_iter().collect(),
+            ..Model::default()
+        };
+        on.load_text(text);
+        assert!(on.funcs.contains_key("a") && !on.funcs.contains_key("b"));
+        let mut off = Model::default();
+        off.load_text(text);
+        assert!(off.funcs.contains_key("b") && !off.funcs.contains_key("a"));
+    }
+
+    #[test]
+    fn operators_casts_and_union_clauses() {
+        let mut m = Model::default();
+        m.load_text(
+            "val operator <_s : (bits(8), bits(8)) -> bool\n\
+             function operator <_s (x, y) = lt(x, y)\n\
+             val cast bool_to_bits : bool -> bits(1)\n\
+             union clause ast = ADD : (bits(5), bits(5))\n",
+        );
+        assert!(m.funcs.contains_key("op<_s"));
+        assert!(m.vals.contains_key("op<_s"));
+        assert!(m.vals.contains_key("bool_to_bits"));
+        assert_eq!(m.unions.get("ADD").map(String::as_str), Some("ast"));
     }
 }

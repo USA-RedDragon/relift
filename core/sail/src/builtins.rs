@@ -18,6 +18,15 @@ impl<C: Cpu> Gen<'_, C> {
             .ok_or_else(|| crate::eval::err(format!("not bits: {v:?}")))
     }
 
+    /// A shift amount given as a bit vector (`shift_bits_*`), as the
+    /// unsigned integer it is.
+    fn shift_amount(&mut self, n: &V) -> R<V> {
+        if n.kind() == Kind::Bits {
+            return self.int_of(n, false);
+        }
+        Ok(n.clone())
+    }
+
     /// Runs the builtin `name`, or gives `None` when there is no such builtin.
     pub fn builtin(&mut self, name: &str, a: &[V], hint: Option<u32>) -> R<Option<V>> {
         let arg = |i: usize| -> R<&V> {
@@ -55,7 +64,19 @@ impl<C: Cpu> Gen<'_, C> {
             "gt_int" => self.cmp(Cmp::Gt, arg(0)?, arg(1)?)?,
             "gteq_int" => self.cmp(Cmp::Ge, arg(0)?, arg(1)?)?,
             "eq_unit" => V::Bool(true),
+            // `~` parses as `not_bool`; on a vector it is `not_vec`.
+            "not_bool" if arg(0)?.kind() == Kind::Bits && arg(0)?.width() != Some(1) => {
+                self.bits_not(arg(0)?)?
+            }
             "not_bool" => self.not(arg(0)?)?,
+            "skip" => V::Unit,
+            "mults_vec" | "mult_vec" | "mults_vec_int" => {
+                let s = name == "mults_vec";
+                let w = self.wid(arg(0)?)?;
+                let x = self.extend(arg(0)?, 2 * w, s)?;
+                let y = self.extend(arg(1)?, 2 * w, s)?;
+                self.bits_op(BOp::Mul, &x, &y)?
+            }
             "and_bool" | "and_bool_no_flow" => self.and(arg(0)?, arg(1)?)?,
             "or_bool" => self.or(arg(0)?, arg(1)?)?,
             "add_bits" => self.bits_op(BOp::Add, arg(0)?, arg(1)?)?,
@@ -77,13 +98,16 @@ impl<C: Cpu> Gen<'_, C> {
                 self.bits_op(op, &x, &y)?
             }
             "sail_shiftleft" | "shiftl" | "shift_bits_left" => {
-                self.shift(arg(0)?, arg(1)?, "shl")?
+                let n = self.shift_amount(arg(1)?)?;
+                self.shift(arg(0)?, &n, "shl")?
             }
             "sail_shiftright" | "shiftr" | "shift_bits_right" => {
-                self.shift(arg(0)?, arg(1)?, "lshr")?
+                let n = self.shift_amount(arg(1)?)?;
+                self.shift(arg(0)?, &n, "lshr")?
             }
             "sail_arith_shiftright" | "arith_shiftr" | "shift_bits_right_arith" => {
-                self.shift(arg(0)?, arg(1)?, "ashr")?
+                let n = self.shift_amount(arg(1)?)?;
+                self.shift(arg(0)?, &n, "ashr")?
             }
             "sail_zero_extend" | "zero_extend" | "ZeroExtend0" => {
                 let n = self.cw(arg(1)?)?;

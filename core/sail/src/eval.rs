@@ -170,6 +170,8 @@ pub struct Gen<'m, C: Cpu> {
     pub used_cut: BTreeSet<&'static str>,
     /// The per-CPU run state.
     pub cpu: C,
+    /// The name the `match` being evaluated refines in its literal arms.
+    refine: Option<String>,
 }
 
 impl<'m, C: Cpu> Gen<'m, C> {
@@ -190,6 +192,7 @@ impl<'m, C: Cpu> Gen<'m, C> {
             value,
             used_cut: BTreeSet::new(),
             cpu: C::default(),
+            refine: None,
         }
     }
 
@@ -637,11 +640,15 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 self.push();
                 let mut v = V::Unit;
                 let mut r = Ok(());
-                for s in ss {
+                for (i, s) in ss.iter().enumerate() {
                     if self.guard.dead {
                         break;
                     }
-                    match self.stmt(s) {
+                    let res = match s {
+                        Stmt::Expr(e) if i + 1 == ss.len() => self.eval(e, hint),
+                        s => self.stmt(s),
+                    };
+                    match res {
                         Ok(x) => v = x,
                         Err(e) => {
                             r = Err(e);
@@ -656,7 +663,7 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 let hint = self.pat_hint(p);
                 let v = self.eval(x, hint)?;
                 self.push();
-                let r = self.bind_pat(p, v).and_then(|_| self.eval(body, None));
+                let r = self.bind_pat(p, v).and_then(|_| self.eval(body, hint));
                 self.pop();
                 r
             }
@@ -677,7 +684,19 @@ impl<'m, C: Cpu> Gen<'m, C> {
             }
             Expr::Match(x, arms) => {
                 let v = self.eval(x, None)?;
-                self.match_arms(&v, arms, hint)
+                // Matching a name whose value is not concrete against
+                // literal arms: inside each arm the name is that literal,
+                // so a width or size it gives is concrete there.
+                let prev = self.refine.take();
+                if let Expr::Id(n) = x.as_ref()
+                    && !v.is_concrete()
+                    && matches!(v.kind(), Kind::Int | Kind::Bits)
+                {
+                    self.refine = Some(n.clone());
+                }
+                let r = self.match_arms(&v, arms, hint);
+                self.refine = prev;
+                r
             }
             Expr::Foreach {
                 var,
@@ -884,14 +903,68 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 };
                 self.extract(&bv, &l, w)
             }
-            Expr::Binop(op, a, b) => self.binop(op, a, b),
+            Expr::Binop(op, a, b) => self.binop(op, a, b, hint),
             Expr::Call(f, args) => {
+                let hints = self.arg_hints(f, args.len());
                 let mut vs = Vec::new();
-                for a in args {
-                    vs.push(self.eval(a, None)?);
+                for (i, a) in args.iter().enumerate() {
+                    vs.push(self.eval(a, hints.get(i).copied().flatten())?);
                 }
                 self.call(f, vs, hint)
             }
+        }
+    }
+
+    /// The widths a call of `f` with `n` arguments expects of them, from
+    /// its signature's concrete `bits(N)` parameters (implicit parameters
+    /// skipped).
+    fn arg_hints(&mut self, f: &str, n: usize) -> Vec<Option<u32>> {
+        let Some(sig) = self.m.sig(f) else {
+            return Vec::new();
+        };
+        let Some((ptys, _)) = &sig.fun else {
+            return Vec::new();
+        };
+        let ptys: Vec<Typ> = if ptys.len() > n {
+            ptys.iter().filter(|t| !is_implicit(t)).cloned().collect()
+        } else {
+            ptys.clone()
+        };
+        let save = self.out.len();
+        let out = ptys
+            .iter()
+            .map(|t| match t {
+                Typ::App(nm, a)
+                    if (nm == "bits" || nm == "bitvector")
+                        && matches!(a.first(), Some(TypArg::Expr(Expr::Lit(_)))) =>
+                {
+                    self.type_width(t)
+                }
+                Typ::Id(_) => self.type_width(t),
+                _ => None,
+            })
+            .collect();
+        self.out.truncate(save);
+        out
+    }
+
+    /// The return width of `f`, when its signature gives a concrete one.
+    fn ret_hint(&mut self, f: &str) -> Option<u32> {
+        let sig = self.m.sig(f)?;
+        let (_, r) = sig.fun.as_ref()?;
+        match r {
+            Typ::App(nm, a)
+                if (nm == "bits" || nm == "bitvector")
+                    && matches!(a.first(), Some(TypArg::Expr(Expr::Lit(_)))) =>
+            {
+                let r = r.clone();
+                self.type_width(&r)
+            }
+            Typ::Id(_) => {
+                let r = r.clone();
+                self.type_width(&r)
+            }
+            _ => None,
         }
     }
 
@@ -1062,6 +1135,34 @@ impl<'m, C: Cpu> Gen<'m, C> {
             && let Some(v) = self.locals.get(n)
         {
             return v.width();
+        }
+        if let Expr::Id(n) = l
+            && let Some((ty, _)) = self.m.registers.get(n)
+        {
+            let ty = ty.clone();
+            if let Ok(t) = crate::parse::parse_typ(&ty)
+                && let Some(w) = self.type_width(&t)
+            {
+                return Some(w);
+            }
+            if let Some((w, _)) = self.m.bitfields.get(ty.trim()) {
+                return Some(*w);
+            }
+        }
+        if let Expr::Call(f, args) = l {
+            return self
+                .arg_hints(f, args.len() + 1)
+                .get(args.len())
+                .copied()
+                .flatten();
+        }
+        if let Expr::Field(b, f) = l
+            && let Expr::Id(r) = b.as_ref()
+            && let Some((ty, _)) = self.m.registers.get(r)
+            && let Some((_, fs)) = self.m.bitfields.get(ty.trim())
+            && let Some((hi, lo)) = fs.get(f)
+        {
+            return Some(hi - lo + 1);
         }
         None
     }
@@ -1256,9 +1357,33 @@ impl<'m, C: Cpu> Gen<'m, C> {
                     self.push();
                     self.match_arms(v, rest, hint)
                 }
-                _ => self.run_branch(&c, &mut |g| g.eval(&arm.body, hint), &mut |g| {
-                    g.match_arms(v, rest, hint)
-                }),
+                _ => {
+                    let refine = match (&self.refine, &arm.pat) {
+                        (Some(n), Pat::Lit(l)) if arm.guard.is_none() => {
+                            let lv = lit(l);
+                            let lv = match (&lv, v.kind()) {
+                                (V::Int(_), Kind::Int) | (V::Bits(..), Kind::Bits) => Some(lv),
+                                _ => None,
+                            };
+                            lv.map(|x| (n.clone(), x))
+                        }
+                        _ => None,
+                    };
+                    self.run_branch(
+                        &c,
+                        &mut |g| {
+                            if let Some((n, x)) = &refine {
+                                g.push();
+                                g.bind(n, x.clone());
+                                let r = g.eval(&arm.body, hint);
+                                g.pop();
+                                return r;
+                            }
+                            g.eval(&arm.body, hint)
+                        },
+                        &mut |g| g.match_arms(v, rest, hint),
+                    )
+                }
             }
         })();
         self.pop();
@@ -1406,12 +1531,12 @@ impl<'m, C: Cpu> Gen<'m, C> {
         }
     }
 
-    fn binop(&mut self, op: &str, a: &Expr, b: &Expr) -> R<V> {
+    fn binop(&mut self, op: &str, a: &Expr, b: &Expr, hint: Option<u32>) -> R<V> {
         match op {
             "&" | "|" => {
-                let x = self.eval(a, None)?;
+                let x = self.eval(a, hint)?;
                 if x.kind() == Kind::Bits && x.width() != Some(1) || matches!(x, V::Bits(..)) {
-                    let y = self.eval(b, None)?;
+                    let y = self.eval(b, x.width())?;
                     if y.kind() == Kind::Bits || x.width() != Some(1) {
                         let o = if op == "&" { BOp::And } else { BOp::Or };
                         return self.bits_op(o, &x, &y);
@@ -1442,9 +1567,46 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 self.or(&nx, &y)
             }
             _ => {
-                let x = self.eval(a, None)?;
-                let y = self.eval(b, None)?;
-                self.call(&format!("op{op}"), vec![x, y], None)
+                // Sail infers the width of an implicit-width operand
+                // (`sign_extend(x) + y`) from the other one: the hint goes
+                // to both sides of an operator whose operands share the
+                // result's width, and the first operand's width to the
+                // second; when the first needs the second's, the second is
+                // evaluated first.
+                let same = matches!(op, "+" | "-" | "&" | "|" | "^");
+                let cmpish = !same && op != "@" && !op.starts_with('*') && op != "^^";
+                let ha = if same { hint } else { None };
+                if !same && !cmpish {
+                    let ha = if matches!(op, "<<" | ">>" | ">>_s") {
+                        hint
+                    } else {
+                        None
+                    };
+                    let x = self.eval(a, ha)?;
+                    let y = self.eval(b, None)?;
+                    return self.call(&format!("op{op}"), vec![x, y], hint);
+                }
+                let mark = self.out.len();
+                let (x, y) = match self.eval(a, ha) {
+                    Ok(x) => {
+                        let hb = if same { hint.or(x.width()) } else { x.width() };
+                        let y = self.eval(b, hb)?;
+                        (x, y)
+                    }
+                    Err(E::Fail(_)) | Err(E::NoMatch) => {
+                        self.out.truncate(mark);
+                        let hb = if same { hint } else { None };
+                        let y = self.eval(b, hb)?;
+                        let x = self.eval(a, y.width())?;
+                        (x, y)
+                    }
+                    Err(e) => return Err(e),
+                };
+                self.call(
+                    &format!("op{op}"),
+                    vec![x, y],
+                    if same { hint } else { None },
+                )
             }
         }
     }
@@ -1462,6 +1624,9 @@ impl<'m, C: Cpu> Gen<'m, C> {
             && !self.m.funcs.contains_key(name)
         {
             return Ok(V::Bf(t.into(), Box::new(args[0].clone())));
+        }
+        if name == "op^" && args.len() == 2 && args.iter().all(|a| a.kind() == Kind::Bool) {
+            return self.cmp(Cmp::Ne, &args[0], &args[1]);
         }
         if name == "op^" && args.len() == 2 {
             if let (V::Int(a), V::Int(b)) = (&args[0], &args[1]) {
@@ -1558,6 +1723,12 @@ impl<'m, C: Cpu> Gen<'m, C> {
             return Some((Vec::new(), tv));
         }
         let mut args = args.to_vec();
+        if args.is_empty()
+            && ptys.iter().filter(|t| !is_implicit(t)).count() == 1
+            && ptys.iter().any(|t| *t == Typ::Id("unit".into()))
+        {
+            args.push(V::Unit);
+        }
         if args.len() != ptys.len() {
             if args.len() + nimpl == ptys.len() && nimpl == 1 {
                 let h = hint?;
@@ -1625,6 +1796,15 @@ impl<'m, C: Cpu> Gen<'m, C> {
             }
             Typ::App(n, args) => match n.as_str() {
                 "bits" | "bitvector" => {
+                    // a bool where bits(1) goes: Sail's `cast bool_to_bits`
+                    if k == Kind::Bool {
+                        if let Some(TypArg::Expr(Expr::Id(v))) = args.first()
+                            && v.starts_with('\'')
+                        {
+                            tv.insert(v.clone(), V::Int(1));
+                        }
+                        return true;
+                    }
                     if k != Kind::Bits {
                         return false;
                     }
@@ -1724,7 +1904,8 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 V::Bool(true) => {}
                 _ => return fail(format!("symbolic clause selection in {name}")),
             }
-            let v = self.eval(&c.body, None)?;
+            let rh = self.ret_hint(name);
+            let v = self.eval(&c.body, rh)?;
             let rets = self.frames.last().expect("frame").clone();
             if rets.is_empty() {
                 return Ok(v);
