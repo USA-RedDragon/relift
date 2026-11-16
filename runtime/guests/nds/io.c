@@ -163,8 +163,8 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     case 0x204:
         if (mask & 0xFFFF)
             exmem_write(m, cpu, (uint16_t)v, (uint16_t)mask);
-        if (cpu == RL_NDS_ARM7 && (m->powcnt2 & 2) && (mask >> 16 & 0xFF))
-            m->wifiwait = (uint8_t)(((m->wifiwait & ~(mask >> 16)) | ((v >> 16) & (mask >> 16))) & 0x3F);
+        if (cpu == RL_NDS_ARM7 && (m->powcnt2 & 2) && (mask >> 16))
+            m->wifiwait = (uint16_t)((m->wifiwait & ~(mask >> 16)) | ((v >> 16) & (mask >> 16)));
         return;
     case 0x240:
     case 0x244:

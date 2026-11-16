@@ -21,7 +21,7 @@ TEST(powcnt2_gates_wifiwaitcnt)
     CHECK_EQ(r7(t, POWCNT, 4), 3);
     CHECK_EQ(r7(t, WIFIWAIT, 2), 0x30);
     w7(t, WIFIWAIT, 2, 0xFFFF);
-    CHECK_EQ(r7(t, WIFIWAIT, 2), 0x3F);
+    CHECK_EQ(r7(t, WIFIWAIT, 2), 0xFFFF);
     w7(t, WIFIWAIT, 2, 0x30);
     w7(t, POWCNT, 4, 1);
     CHECK_EQ(r7(t, WIFIWAIT, 2), 0);

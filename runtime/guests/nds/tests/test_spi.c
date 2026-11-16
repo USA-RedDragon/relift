@@ -363,3 +363,29 @@ TEST(the_free_register_the_adjustment_and_the_alarms_store_what_is_written)
     rtc_read(t, 4, 3, v);
     CHECK_EQ(memcmp(v, a, 3), 0);
 }
+
+TEST(the_boot_state_leaves_the_chip_id_the_header_crcs_and_the_user_settings_in_main_ram)
+{
+    ndst *t = fixture();
+    static uint8_t img[0x200];
+    img[0x6C] = 0x34;
+    img[0x6D] = 0x12;
+    img[0x15E] = 0xE2;
+    img[0x15F] = 0x43;
+    CHECK(rl_nds_set_cartridge(t->m, img, (size_t)128 << 20) == 0);
+    rl_nds_boot_state(t->m);
+    CHECK_EQ(r9(t, 0x027FF800u, 4), 0x7FC2);
+    CHECK_EQ(r9(t, 0x027FF804u, 4), 0x7FC2);
+    CHECK_EQ(r9(t, 0x027FFC00u, 4), 0x7FC2);
+    CHECK_EQ(r9(t, 0x027FFC04u, 4), 0x7FC2);
+    CHECK_EQ(r9(t, 0x027FF808u, 2), 0x43E2);
+    CHECK_EQ(r9(t, 0x027FFC08u, 2), 0x43E2);
+    CHECK_EQ(r9(t, 0x027FFC0Au, 2), 0x1234);
+    CHECK_EQ(r9(t, 0x027FFC10u, 2), 0x5835);
+    uint8_t user[0x70];
+    rl_nds_user_settings(t->m, user);
+    for (unsigned i = 0; i < 0x70; i += 4)
+        CHECK_EQ(r9(t, 0x027FFC80u + i, 4), (uint32_t)user[i] | (uint32_t)user[i + 1] << 8 | (uint32_t)user[i + 2] << 16 | (uint32_t)user[i + 3] << 24);
+    CHECK_EQ(r9(t, 0x04000204u, 2), 0xE880);
+    CHECK_EQ(r7(t, 0x04000204u, 2), 0xE880);
+}

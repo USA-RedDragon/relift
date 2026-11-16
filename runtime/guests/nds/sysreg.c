@@ -1,7 +1,7 @@
 /**
  * @file sysreg.c
  * @brief The ARM7's small system registers: POWCNT2 (speakers and Wifi
- * power), WIFIWAITCNT (reachable only while Wifi is powered; it holds the 0x30 the firmware leaves), BIOSPROT (reads
+ * power), WIFIWAITCNT (16 bits, reachable only while Wifi is powered; it holds the 0x30 the oracle shows), BIOSPROT (reads
  * the value the boot code leaves, ignores writes) and the sound controller's
  * registers as a register file with the readback masks of GBATEK (channel
  * control, SOUNDCNT, SOUNDBIAS, capture control and destination; the address,
@@ -24,7 +24,6 @@ enum {
     CAP_DAD_MASK = 0x07FFFFFCu,
     SOUNDCNT_MASK = 0xBF7F,
     BIAS_MASK = 0x3FF,
-    WAIT_MASK = 0x3F,
 };
 
 void nds_sys_reset(rl_nds *m)

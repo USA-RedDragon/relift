@@ -345,9 +345,9 @@ struct rl_nds {
     nds_spi spi;
     nds_rtc rtc;
     nds_sound snd;
-    /** @brief POWCNT2 (ARM7 0x04000304, bits 0 and 1) and WIFIWAITCNT (0x04000206, bits 0 to 5). */
+    /** @brief POWCNT2 (ARM7 0x04000304, bits 0 and 1) and WIFIWAITCNT (0x04000206, all 16 bits). */
     uint8_t powcnt2;
-    uint8_t wifiwait;
+    uint16_t wifiwait;
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
