@@ -1183,6 +1183,21 @@ name = "relift-sail"
 version = "0.1.0"
 
 [[package]]
+name = "relift-sms-formats"
+version = "0.1.0"
+
+[[package]]
+name = "relift-sms-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "relift-proc",
+ "relift-sms-formats",
+ "serde_json",
+]
+
+[[package]]
 name = "relift-switch"
 version = "0.1.0"
 dependencies = [
