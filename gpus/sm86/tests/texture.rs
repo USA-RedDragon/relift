@@ -1,7 +1,10 @@
+mod common;
+
+use common::translate;
 use relift_gpu_sm86::program::{Program, Stage};
 use relift_gpu_sm86::translate::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
-    texture_binding, translate,
+    texture_binding,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {

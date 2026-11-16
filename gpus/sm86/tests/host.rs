@@ -1,6 +1,9 @@
+mod common;
+
+use common::translate_with;
 use relift_gpu_sm86::program::Program;
 use relift_gpu_sm86::translate::{
-    Atomic64Path, ClockPath, Denorm, GlobalPath, HostProfile, Options, WarpPath, translate_with,
+    Atomic64Path, ClockPath, Denorm, GlobalPath, HostProfile, Options, WarpPath,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {

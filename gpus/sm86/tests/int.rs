@@ -1,5 +1,7 @@
+mod common;
+
+use common::translate;
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate;
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =

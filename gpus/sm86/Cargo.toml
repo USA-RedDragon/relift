@@ -13,3 +13,4 @@ workspace = true
 
 [dev-dependencies]
 relift-cache = { workspace = true }
+relift-proc = { workspace = true }

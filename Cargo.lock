@@ -1096,6 +1096,7 @@ name = "relift-gpu-sm86"
 version = "0.1.0"
 dependencies = [
  "relift-cache",
+ "relift-proc",
 ]
 
 [[package]]

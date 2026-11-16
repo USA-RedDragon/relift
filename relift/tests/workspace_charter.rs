@@ -248,7 +248,7 @@ const CHARTERS: &[Charter] = &[
         band: 2,
         why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words only",
         normal: NONE,
-        dev: &["relift-cache"],
+        dev: &["relift-cache", "relift-proc"],
         build: NONE,
     },
     Charter {
