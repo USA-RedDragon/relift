@@ -36,6 +36,21 @@ pub fn target(name: &str) -> Result<Option<Target>, BoxError> {
     .into())
 }
 
+/// The system libraries and link flags of an Android program: a shared
+/// library for the app, 16 KiB page ready, with its relative relocations
+/// packed (RELR, in the Android tags API 28 and newer read), which keeps a
+/// lifted program's millions of code map pointers from taking 24 bytes each.
+const ANDROID_LIBS: [&str; 8] = [
+    "-lm",
+    "-ldl",
+    "-shared",
+    "-Wl,-soname,libmain.so",
+    "-Wl,-z,max-page-size=16384",
+    "-Wl,--no-undefined",
+    "-Wl,--pack-dyn-relocs=relr",
+    "-Wl,--use-android-relr-tags",
+];
+
 /// The tools, libraries and signing of one target, found.
 pub enum Build {
     Android(Box<android::AndroidBuild>),
@@ -125,16 +140,7 @@ impl Build {
     #[must_use]
     pub fn libs(&self) -> Vec<String> {
         match self {
-            Self::Android(_) => [
-                "-lm",
-                "-ldl",
-                "-shared",
-                "-Wl,-soname,libmain.so",
-                "-Wl,-z,max-page-size=16384",
-                "-Wl,--no-undefined",
-            ]
-            .map(String::from)
-            .into(),
+            Self::Android(_) => ANDROID_LIBS.map(String::from).into(),
             Self::Ios(i) => i.libs(),
         }
     }
@@ -143,6 +149,12 @@ impl Build {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_libraries_pack_their_relative_relocations() {
+        assert!(ANDROID_LIBS.contains(&"-Wl,--pack-dyn-relocs=relr"));
+        assert!(ANDROID_LIBS.contains(&"-Wl,--use-android-relr-tags"));
+    }
 
     #[test]
     fn names_pick_the_target_kind() {
