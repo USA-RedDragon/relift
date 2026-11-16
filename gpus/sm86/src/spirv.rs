@@ -239,6 +239,11 @@ impl Module {
         let len = self.c_u32(n);
         self.ty(op::TYPE_ARRAY, &[t, len])
     }
+    /// An array type whose length is the constant or specialization
+    /// constant `len`.
+    pub fn t_array_of(&mut self, t: u32, len: u32) -> u32 {
+        self.ty(op::TYPE_ARRAY, &[t, len])
+    }
     pub fn t_struct_unique(&mut self, members: &[u32]) -> u32 {
         let i = self.id();
         let mut a = vec![i];

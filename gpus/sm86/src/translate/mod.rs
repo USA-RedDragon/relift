@@ -472,7 +472,7 @@ impl Ctx {
             }
             _ => {}
         }
-        for f in [float::inst, int::inst, io::inst, mem::inst, tex::inst] {
+        for f in [mem::inst, float::inst, int::inst, io::inst, tex::inst] {
             if let Some(r) = f(self, i) {
                 return r;
             }
