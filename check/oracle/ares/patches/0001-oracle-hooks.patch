@@ -1,0 +1,95 @@
+diff --git a/ares/n64/cpu/exceptions.cpp b/ares/n64/cpu/exceptions.cpp
+index 870e7d4..0dff803 100644
+--- a/ares/n64/cpu/exceptions.cpp
++++ b/ares/n64/cpu/exceptions.cpp
+@@ -1,4 +1,5 @@
+ auto CPU::Exception::trigger(u32 code, u32 coprocessor, bool tlbMiss) -> void {
++  if(oracleHooks.exception) oracleHooks.exception(code, self.ipu.pc, tlbMiss);
+   self.debugger.exception(code);
+   if (code != 0) {  //ignore interrupt exceptions
+     reportGDBException(code, self.ipu.pc); 
+diff --git a/ares/n64/mi/mi.hpp b/ares/n64/mi/mi.hpp
+index 10c613b..4188b3c 100644
+--- a/ares/n64/mi/mi.hpp
++++ b/ares/n64/mi/mi.hpp
+@@ -41,7 +41,7 @@ struct MI : Memory::RCP<MI> {
+   //serialization.cpp
+   auto serialize(serializer&) -> void;
+ 
+-private:
++public:
+   struct Interrupt {
+     b1 line = 1;
+     b1 mask;
+diff --git a/ares/n64/n64.hpp b/ares/n64/n64.hpp
+index e493fa3..c12a23e 100644
+--- a/ares/n64/n64.hpp
++++ b/ares/n64/n64.hpp
+@@ -96,6 +96,11 @@ namespace ares::Nintendo64 {
+   };
+   extern Queue queue;
+ 
++  struct OracleHooks {
++    void (*exception)(u32 code, u64 pc, bool tlbMiss) = nullptr;
++  };
++  extern OracleHooks oracleHooks;
++
+   struct BCD {
+     static auto encode(u8 value) -> u8 { return value / 10 << 4 | value % 10; }
+     static auto decode(u8 value) -> u8 { return (value >> 4) * 10 + (value & 15); }
+diff --git a/ares/n64/system/system.cpp b/ares/n64/system/system.cpp
+index 25b26ef..bd1ca7a 100644
+--- a/ares/n64/system/system.cpp
++++ b/ares/n64/system/system.cpp
+@@ -63,6 +63,7 @@ auto option(string name, string value) -> bool {
+   return true;
+ }
+ 
++OracleHooks oracleHooks;
+ System system;
+ Queue queue;
+ Random random;
+diff --git a/ares/n64/system/system.hpp b/ares/n64/system/system.hpp
+index 1c6bda6..20c9aba 100644
+--- a/ares/n64/system/system.hpp
++++ b/ares/n64/system/system.hpp
+@@ -29,7 +29,7 @@ struct System {
+   auto serialize(bool synchronize = true) -> serializer;
+   auto unserialize(serializer&) -> bool;
+ 
+-private:
++public:
+   struct Information {
+     string name = "Nintendo 64";
+     Model model = Model::Nintendo64;
+diff --git a/ares/n64/vulkan/vulkan.cpp b/ares/n64/vulkan/vulkan.cpp
+index 3f463a9..93ce8c4 100644
+--- a/ares/n64/vulkan/vulkan.cpp
++++ b/ares/n64/vulkan/vulkan.cpp
+@@ -47,6 +47,9 @@ struct Vulkan::Implementation {
+   u32 endCount = 0;
+ };
+ 
++static std::vector<u8> hiddenFallback;
++static u8* hiddenFallbackData() { hiddenFallback.assign(rdram.ram.size, 0); return hiddenFallback.data(); }
++
+ auto Vulkan::load(Node::Object) -> bool {
+   if (vulkan.enable) {
+     Util::set_thread_logging_interface(&loggingInterface);
+@@ -60,14 +63,14 @@ auto Vulkan::load(Node::Object) -> bool {
+     if (!implementation) {
+       platform->status("Vulkan init failed: No RDP rendering support");
+       vulkan.enable = false;
+-      rdram.hidden.data = nullptr;
++      rdram.hidden.data = hiddenFallbackData();
+     } else {
+       platform->status("Vulkan Enabled: using paraLLEl-RDP");
+       rdram.hidden.data = (u8*)implementation->processor->begin_read_hidden_rdram();
+     }
+   } else {
+     platform->status("Vulkan Disabled: No RDP rendering support");
+-    rdram.hidden.data = nullptr;
++    rdram.hidden.data = hiddenFallbackData();
+   }
+ 
+   return true;

@@ -402,6 +402,7 @@ version = "0.1.0"
 dependencies = [
  "relift-cache",
  "relift-cpu-arm64",
+ "relift-cpu-mips",
  "relift-cpu-sm83",
  "relift-diff",
  "relift-guest",
@@ -416,6 +417,13 @@ name = "relift-cpu-arm64"
 version = "0.1.0"
 dependencies = [
  "relift-guest",
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-mips"
+version = "0.1.0"
+dependencies = [
  "relift-ir",
 ]
 
