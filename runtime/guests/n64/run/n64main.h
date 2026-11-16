@@ -44,7 +44,9 @@ typedef struct rl_n64_program {
  * the Nth VI frame and print the frame count, the hash of the scanned-out
  * framebuffer, its size, the registers and hashes of RDRAM, DMEM and IMEM), --png FILE (the VI picture at exit; --raw-png FILE the raw
  * framebuffer at exit), --png-dir DIR with --png-every N (every Nth frame),
- * --dump PREFIX (PREFIX.rdram, .dmem and .imem at the stop; RDRAM when CPU
+ * --wav FILE (the sound as 16-bit stereo at RL_N64_AUDIO_RATE, written at the
+ * stop; the sound's hash, peak and frame count are on stderr with --frames),
+ * --no-audio (open no sound output), --dump PREFIX (PREFIX.rdram, .dmem and .imem at the stop; RDRAM when CPU
  * code is missed, IMEM and DMEM when RSP code is),
  * --save BASE (the save files BASE.eep, BASE.sra and BASE.fla instead of
  * the ones rl_n64_save_path names), --no-save, --stats (counters on stderr)

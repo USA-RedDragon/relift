@@ -7,6 +7,7 @@
 #include "n64main.h"
 #include "cpu.h"
 
+#include <relift/audio.h>
 #include <relift/ports.h>
 #include <relift/settings.h>
 #include <relift/window.h>
@@ -16,7 +17,7 @@
 #include <string.h>
 #include <time.h>
 
-#define FRAME_NS 16683350ull
+#define AUDIO_CHUNK 2048u
 #define MAX_W 640u
 #define MAX_H 576u
 
@@ -35,6 +36,16 @@ typedef struct host {
     uint32_t png_every;
     const char *dump;
     uint64_t next_ns;
+    uint64_t last_cycles;
+    bool audio;
+    rl_audio_out *out;
+    const char *wav;
+    int16_t *wav_pcm;
+    size_t wav_frames;
+    size_t wav_cap;
+    uint64_t audio_hash;
+    uint64_t audio_frames;
+    int audio_peak;
     uint8_t rgb[MAX_W * MAX_H * 3];
     uint32_t w, h;
     bool have;
@@ -137,6 +148,68 @@ static bool write_png(const char *path, const uint8_t *rgb, uint32_t w, uint32_t
     return ok;
 }
 
+static void audio_keep(host *H, const int16_t *pcm, size_t frames)
+{
+    for (size_t i = 0; i < frames * 2u; i++) {
+        uint16_t v = (uint16_t)pcm[i];
+        H->audio_hash = (H->audio_hash ^ (v & 0xFFu)) * 0x100000001B3ull;
+        H->audio_hash = (H->audio_hash ^ (v >> 8)) * 0x100000001B3ull;
+        int a = pcm[i] < 0 ? -pcm[i] : pcm[i];
+        if (a > H->audio_peak)
+            H->audio_peak = a;
+    }
+    H->audio_frames += frames;
+    if (!H->wav)
+        return;
+    if (H->wav_frames + frames > H->wav_cap) {
+        size_t cap = H->wav_cap ? H->wav_cap * 2u : 65536u;
+        while (cap < H->wav_frames + frames)
+            cap *= 2u;
+        int16_t *n = realloc(H->wav_pcm, cap * 4u);
+        if (!n) {
+            H->wav = NULL;
+            return;
+        }
+        H->wav_pcm = n;
+        H->wav_cap = cap;
+    }
+    memcpy(H->wav_pcm + H->wav_frames * 2u, pcm, frames * 4u);
+    H->wav_frames += frames;
+}
+
+/** @brief Hands the audio the machine made since the last call to the output, the hash and the capture. */
+static void audio_drain(host *H)
+{
+    int16_t pcm[AUDIO_CHUNK * 2u];
+    size_t n;
+    while ((n = rl_n64_audio_take(H->run.m, pcm, AUDIO_CHUNK)) > 0) {
+        audio_keep(H, pcm, n);
+        if (H->out)
+            rl_audio_write(H->out, pcm, (uint32_t)n);
+    }
+}
+
+static void le32(uint8_t *p, uint32_t v)
+{
+    for (int i = 0; i < 4; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static bool wav_write(const host *H)
+{
+    uint32_t bytes = (uint32_t)(H->wav_frames * 4u);
+    uint8_t h[44] = "RIFFxxxxWAVEfmt \x10\0\0\0\1\0\2\0xxxxxxxx\4\0\x10\0data";
+    le32(h + 4, 36u + bytes);
+    le32(h + 24, RL_N64_AUDIO_RATE);
+    le32(h + 28, RL_N64_AUDIO_RATE * 4u);
+    le32(h + 40, bytes);
+    FILE *f = fopen(H->wav, "wb");
+    bool ok = f && fwrite(h, 1, 44, f) == 44 && (!bytes || fwrite(H->wav_pcm, 1, bytes, f) == bytes);
+    if (f && fclose(f) != 0)
+        ok = false;
+    return ok;
+}
+
 /** @brief Takes the picture VI outputs now. */
 static void scan(host *H) { H->have = rl_n64_scanout(H->run.m, H->rgb, &H->w, &H->h); }
 
@@ -231,13 +304,17 @@ static void on_frame(void *user, rl_n64 *m)
         if (H->have && !write_png(path, H->rgb, H->w, H->h))
             rl_log(RL_LOG_WARN, "n64", "could not write %s", path);
     }
+    audio_drain(H);
+    uint64_t cycles = rl_sched_cycles(H->run.k);
+    uint64_t span = (cycles - H->last_cycles) * 1000000000ull / RL_N64_HZ;
+    H->last_cycles = cycles;
     if (H->win) {
         if (H->have)
             rl_window_present_rgb(H->win, H->rgb, H->w, H->h);
         uint64_t t = now_ns();
-        if (!H->next_ns || t > H->next_ns + 4 * FRAME_NS)
+        if (!H->next_ns || t > H->next_ns + 4 * span)
             H->next_ns = t;
-        H->next_ns += FRAME_NS;
+        H->next_ns += span;
         if (H->next_ns > t)
             rl_sleep_ns(H->next_ns - t);
     }
@@ -260,6 +337,15 @@ static void finish(host *H)
         if (rl_n64_framebuffer(H->run.m, raw, &w, &h) && !write_png(H->raw_png, raw, w, h))
             fprintf(stderr, "relift-n64: could not write %s\n", H->raw_png);
     }
+    audio_drain(H);
+    if (H->wav && !wav_write(H))
+        fprintf(stderr, "relift-n64: could not write %s\n", H->wav);
+    if (H->audio && (H->wav || H->stop_frames))
+        fprintf(stderr, "relift-n64: audio: %llu frames at %u Hz, peak %d, hash %016llx\n",
+                (unsigned long long)H->audio_frames, RL_N64_AUDIO_RATE, H->audio_peak,
+                (unsigned long long)H->audio_hash);
+    free(H->wav_pcm);
+    H->wav_pcm = NULL;
     save_now(H);
     if (H->stats)
         print_stats(H);
@@ -292,8 +378,15 @@ static int run_body(void *arg)
     const rl_window_backend *b = rl_window_backend_current();
     if (b && b->present_rgb)
         H->win = b->open(H->p->title && *H->p->title ? H->p->title : "relift", 640, 480);
+    if (H->audio && H->win) {
+        H->out = rl_audio_open(RL_N64_AUDIO_RATE, 2);
+        if (H->out)
+            rl_audio_pause(H->out, false);
+    }
     int r = rl_n64_run_start(&H->run);
     finish(H);
+    rl_audio_close(H->out);
+    H->out = NULL;
     if (H->win)
         b->close(H->win);
     return r == RL_OK ? 0 : 1;
@@ -314,7 +407,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     memset(&H, 0, sizeof H);
     H.p = p;
     const char *save = NULL;
-    bool no_save = false, headless = false;
+    bool no_save = false, headless = false, no_audio = false;
     rl_n64_declare_settings();
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
@@ -327,6 +420,10 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
             H.png = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--raw-png"))
             H.raw_png = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--wav"))
+            H.wav = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--no-audio"))
+            no_audio = true;
         else if (!strcmp(a, "--png-dir"))
             H.png_dir = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png-every"))
@@ -346,6 +443,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
             return 2;
         }
     }
+    H.audio = !no_audio;
     if (H.png_dir && !H.png_every)
         H.png_every = 1;
     static const rl_guest_desc guest = {.name = "n64", .page_size = 0x1000, .address_bits = 32, .tick_hz = RL_N64_HZ};
