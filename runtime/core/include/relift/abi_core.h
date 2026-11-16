@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 6u
+#define RL_ABI_VERSION 7u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0

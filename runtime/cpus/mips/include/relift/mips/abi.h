@@ -33,6 +33,14 @@
 #define RL_MIPS_SHADOW 1024u
 /** @brief Entries of the VR4300 TLB. */
 #define RL_MIPS_TLB_ENTRIES 32u
+/** @brief Lines of the instruction cache (16 KiB of 32-byte lines). */
+#define RL_MIPS_ICACHE_LINES 512u
+/** @brief Lines of the data cache (8 KiB of 16-byte lines). */
+#define RL_MIPS_DCACHE_LINES 512u
+/** @brief The valid bit of a cache line's tag word; bits 31 to 12 are the line's physical address. */
+#define RL_MIPS_LINE_VALID 1u
+/** @brief The dirty bit of a data cache line's tag word. */
+#define RL_MIPS_LINE_DIRTY 2u
 
 /**
  * @brief The register slots of relift-cpu-mips in slot order:
@@ -317,6 +325,10 @@ struct rl_ctx {
     uint32_t depth;
     /** @brief Return addresses of the open host frames of lifted calls, innermost last. */
     uint64_t shadow[RL_MIPS_SHADOW];
+    /** @brief The instruction cache's tags (RL_MIPS_LINE_VALID and the physical address), indexed by vaddr bits 13 to 5. */
+    uint32_t icache[RL_MIPS_ICACHE_LINES];
+    /** @brief The data cache's tags (RL_MIPS_LINE_VALID, RL_MIPS_LINE_DIRTY and the physical address), indexed by vaddr bits 12 to 4. */
+    uint32_t dcache[RL_MIPS_DCACHE_LINES];
 };
 
 #define RL_MIPS_SLOT_ASSERT(name, field, bits)                                                                         \
@@ -343,6 +355,8 @@ _Static_assert(offsetof(rl_ctx, time) == 776, "time");
 _Static_assert(offsetof(rl_ctx, machine) == 792, "machine");
 _Static_assert(offsetof(rl_ctx, tlb) == 800, "tlb");
 _Static_assert(offsetof(rl_ctx, shadow) == 1872, "shadow");
+_Static_assert(offsetof(rl_ctx, icache) == 10064, "icache");
+_Static_assert(offsetof(rl_ctx, dcache) == 12112, "dcache");
 _Static_assert(_Alignof(rl_ctx) == 8, "rl_ctx alignment");
 
 /** @brief Offset of the core's block (rl_ctx_common) in rl_ctx: pend to disp_count. */
@@ -632,8 +646,55 @@ RL_RUNTIME_API uint32_t rl_mips_fcmp(uint32_t cond, uint32_t fmt, uint32_t fcr31
 RL_RUNTIME_API uint64_t rl_mips_random(rl_ctx *c);
 /** @brief The intrinsic mips_tlb(op, run): TLBR (0), TLBWI (1), TLBWR (2) or TLBP (3) when run is 1. */
 RL_RUNTIME_API void rl_mips_tlb(rl_ctx *c, uint32_t op, uint32_t run);
-/** @brief The intrinsic mips_cache(op, vaddr, run): CACHE with operation op at vaddr when run is 1 (the cache hook's). */
+/** @brief The intrinsic mips_cache(op, vaddr, run): CACHE with operation op at vaddr when run is 1: the cache's tags and its cycles (cache.c), then the cache hook. */
 RL_RUNTIME_API void rl_mips_cache(rl_ctx *c, uint32_t op, uint64_t vaddr, uint32_t run);
+/** @brief The instruction cache's line fill for a fetch at pc (cache.c): takes its cycles off the budget; nothing outside cached memory. */
+RL_RUNTIME_API void rl_mips_icache_fill(rl_ctx *c, uint64_t pc);
+/**
+ * @brief The data cache's part of a load or store (write 1) at vaddr
+ * (cache.c), for any cached address: a hit takes one cycle and marks a
+ * stored line dirty; a miss writes a dirty line back, fills the line and
+ * takes their cycles. Nothing for kseg1 or an address that does not
+ * translate.
+ */
+RL_RUNTIME_API void rl_mips_dcache_access(rl_ctx *c, uint64_t vaddr, uint32_t write);
+
+/**
+ * @brief The intrinsic mips_icache(pc): a fetch at pc, where lifted code may
+ * start fetching a line it has not fetched before (the block's entry, a
+ * delay slot that starts a line). A line that is not in the instruction
+ * cache is filled. The fast path is a kseg0 hit, which costs nothing.
+ */
+static inline void rl_mips_icache(rl_ctx *c, uint64_t pc)
+{
+    uint32_t a = (uint32_t)pc;
+    if ((a >> 29) == 4u && c->icache[(a >> 5) & (RL_MIPS_ICACHE_LINES - 1u)] == ((a & 0x1FFFF000u) | RL_MIPS_LINE_VALID))
+        return;
+    rl_mips_icache_fill(c, pc);
+}
+
+/**
+ * @brief The intrinsic mips_dcache(vaddr, write, run): the data cache's part
+ * of a load or store (write 1) at vaddr when run is 1. Only kseg0 is cached
+ * here (lifted code leaves through a guard for any other cached address): a
+ * hit takes one cycle and marks a stored line dirty, a miss goes to
+ * rl_mips_dcache_access. kseg1 takes nothing (a device read takes the
+ * guest bus's cycles).
+ */
+static inline void rl_mips_dcache(rl_ctx *c, uint64_t vaddr, uint32_t write, uint32_t run)
+{
+    uint32_t a = (uint32_t)vaddr;
+    if (!run || (a >> 29) != 4u)
+        return;
+    uint32_t *line = &c->dcache[(a >> 4) & (RL_MIPS_DCACHE_LINES - 1u)];
+    if (RL_UNLIKELY((*line & ~RL_MIPS_LINE_DIRTY) != ((a & 0x1FFFF000u) | RL_MIPS_LINE_VALID))) {
+        rl_mips_dcache_access(c, vaddr, write);
+        return;
+    }
+    *line |= write ? RL_MIPS_LINE_DIRTY : 0u;
+    c->time.budget -= 1;
+}
+
 /**
  * @brief After a lifted write of Status, Cause or Compare (and at any sync
  * point): reads the guest's writes of Count and Wired, checks the timer,

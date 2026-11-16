@@ -31,6 +31,9 @@
 //!   flag bits of the fast path come from the intrinsic `mips_fcr31(op, fmt,
 //!   fcr31, a, b)` and a compare's condition bit from `mips_fcmp(cond, fmt,
 //!   fcr31, a, b)`; both give the new FCR31.
+//! - Every load and store also calls the intrinsic `mips_dcache(vaddr,
+//!   write, run)`, the data cache's part of the access (its tags and
+//!   cycles are the runtime's), after the access.
 //! - The CP0 Random register is the intrinsic `mips_random()`, and the TLB
 //!   instructions and CACHE are `mips_tlb(op, run)` and `mips_cache(op,
 //!   vaddr, run)`, where `run` is 1 when the instruction is not annulled.
@@ -69,6 +72,7 @@ pub struct Options {
 pub struct St {
     core: Core,
     sys: Vec<Sys>,
+    va: Option<Value>,
 }
 
 impl St {
@@ -82,6 +86,7 @@ impl St {
         St {
             core: Core::new(pc, opts.plain_below, Endian::Big),
             sys: Vec::new(),
+            va: None,
         }
     }
 
@@ -253,8 +258,20 @@ impl St {
         };
         let code = self.core.exc_code(e);
         self.core.exit_if(b, bad, g, code);
+        self.va = Some(va);
         let m = b.konst(Width::W64, 0x1FFF_FFFF);
         b.bin(BinOp::And, va, m)
+    }
+
+    /// The data cache's part of the access the last [`St::translate`]
+    /// translated, under `g`.
+    fn dcache(&mut self, b: &mut Builder, write: bool, g: Option<Value>) {
+        let Some(va) = self.va.take() else {
+            return;
+        };
+        let w = b.konst(Width::W32, u128::from(write));
+        let r = self.core.runs(b, g);
+        b.intrinsic("mips_dcache", &[va, w, r], None);
     }
 
     /// A big-endian load of `n` bytes at `pa` under `g`; a conditional one
@@ -267,7 +284,9 @@ impl St {
         _ll: bool,
         g: Option<Value>,
     ) -> Value {
-        self.core.load(b, pa, n, Exc::TLBL, g)
+        let v = self.core.load(b, pa, n, Exc::TLBL, g);
+        self.dcache(b, false, g);
+        v
     }
 
     /// A big-endian store of `n` bytes of `v` at `pa` under `g`; a
@@ -275,6 +294,7 @@ impl St {
     /// TLBS guard.
     pub fn store(&mut self, b: &mut Builder, pa: Value, n: u32, v: Value, g: Option<Value>) {
         self.core.store(b, pa, n, v, Exc::TLBS, g);
+        self.dcache(b, true, g);
     }
 
     /// SC and SCD: the overlay calls this only when LLbit is set, and the

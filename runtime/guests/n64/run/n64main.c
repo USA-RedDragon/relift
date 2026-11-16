@@ -164,6 +164,9 @@ static void print_stats(host *H)
             (unsigned long long)q->cycles, (unsigned long long)q->slices, (unsigned long long)s->rsp_breaks,
             (unsigned long long)q->binds, (unsigned long long)q->invalidations, (unsigned long long)q->misses,
             (unsigned long long)s->dp_submits);
+    fprintf(stderr, "relift-n64: icache fills %llu, dcache fills %llu, dcache write backs %llu\n",
+            (unsigned long long)a->icache_misses, (unsigned long long)a->dcache_misses,
+            (unsigned long long)a->dcache_writebacks);
 }
 
 static void report(host *H, rl_ctx *c)

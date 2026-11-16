@@ -135,10 +135,24 @@ typedef struct rl_mips_stats {
     uint64_t exceptions;
     /** @brief Guard slow paths taken. */
     uint64_t slow;
+    /** @brief Instruction cache line fills. */
+    uint64_t icache_misses;
+    /** @brief Data cache line fills. */
+    uint64_t dcache_misses;
+    /** @brief Data cache line write backs. */
+    uint64_t dcache_writebacks;
 } rl_mips_stats;
 
 /** @brief The counters. */
 RL_RUNTIME_API rl_mips_stats *rl_mips_get_stats(void);
+
+/**
+ * @brief CACHE operation op (bits 4 to 0 of the instruction's op field) at
+ * vaddr on the cache tags (cache.c): the index and hit invalidates, write
+ * backs, fills, and the tag loads and stores through TagLo, with their
+ * cycles taken off the budget.
+ */
+RL_RUNTIME_API void rl_mips_cache_op(rl_ctx *c, uint32_t op, uint64_t vaddr);
 
 /** @brief The mnemonic of an ExcCode ("Int", "TLBL", ...), or "???". */
 RL_RUNTIME_API const char *rl_mips_exc_name(uint32_t code);

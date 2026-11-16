@@ -2,9 +2,9 @@
  * @file mips.c
  * @brief The VR4300 CPU layer: the descriptor the core allocates contexts
  * from, CP0 exception entry and return, interrupts over the IP bits, Count
- * and Compare from the cycle clock, CACHE, the return address stack of
- * lifted calls, the run loop, dispatch misses and register summaries for
- * crash reports.
+ * and Compare from the cycle clock, CACHE (whose cache tags are cache.c's),
+ * the return address stack of lifted calls, the run loop, dispatch misses
+ * and register summaries for crash reports.
  */
 #include "mips.h"
 
@@ -220,6 +220,7 @@ int rl_mips_redirect(rl_ctx *c, uint64_t pc)
 rl_fn rl_mips_eret_to(rl_ctx *c, uint64_t target)
 {
     c->pc = target;
+    rl_mips_icache(c, target);
     if (c->depth - 1u < RL_MIPS_SHADOW && c->shadow[c->depth - 1u] == irq_frame(target)) {
         c->irq_open--;
         return rl_mips_return;
@@ -233,7 +234,10 @@ rl_fn rl_mips_eret_to(rl_ctx *c, uint64_t target)
 
 void rl_mips_cache(rl_ctx *c, uint32_t op, uint64_t vaddr, uint32_t run)
 {
-    if ((run & 1u) && g_cache_hook)
+    if (!(run & 1u))
+        return;
+    rl_mips_cache_op(c, op & 31u, vaddr);
+    if (g_cache_hook)
         g_cache_hook(c, op & 31u, vaddr);
 }
 

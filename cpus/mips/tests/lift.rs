@@ -48,7 +48,7 @@ impl Intrinsics for Runtime {
                 Ok((fcr & !(1 << 23)) | (u128::from(c) << 23))
             }
             "mips_random" => Ok(31),
-            "mips_tlb" | "mips_cache" => Ok(0),
+            "mips_tlb" | "mips_cache" | "mips_dcache" => Ok(0),
             _ => Err(Error::UnknownIntrinsic(name)),
         }
     }
@@ -502,6 +502,31 @@ fn an_annulled_slot_takes_no_cycle() {
     assert_eq!(t.len(), 2);
     assert_eq!(t[0], Op::Tick(1));
     assert!(matches!(t[1], Op::TickIf(_, 5)), "{t:?}");
+}
+
+#[test]
+fn loads_and_stores_go_through_the_data_cache() {
+    for (w, write) in [(i_type(0x23, 1, 2, 0), 0), (i_type(0x2b, 1, 2, 0), 1)] {
+        let l = lift::lift(PC, w, 0).expect("lifts");
+        let calls: Vec<&Op> = ops(&l.block)
+            .into_iter()
+            .filter(|o| matches!(o, Op::Intrinsic(c) if c.name == "mips_dcache"))
+            .collect();
+        assert_eq!(calls.len(), 1, "{w:#010x}");
+        let Op::Intrinsic(c) = calls[0] else {
+            unreachable!()
+        };
+        let Op::Const(k) = &l.block.insts[c.args[1].index()].op else {
+            panic!("a constant write flag")
+        };
+        assert_eq!(k.get(), write);
+    }
+    let l = lift::lift(PC, r_type(1, 2, 3, 0, 0x20), 0).expect("lifts");
+    assert!(
+        !ops(&l.block)
+            .iter()
+            .any(|o| matches!(o, Op::Intrinsic(c) if c.name == "mips_dcache"))
+    );
 }
 
 #[test]

@@ -129,6 +129,13 @@ static rl_ctx *boot(void)
 /** @brief Guest physical memory of the slow-path tests. */
 static uint8_t test_mem[0x400000];
 
+/** @brief The cycles f takes off c's budget. */
+#define CYCLES(c, f) (__extension__({                                                                                \
+    int64_t b0_ = (c)->time.budget;                                                                                    \
+    f;                                                                                                                 \
+    b0_ - (c)->time.budget;                                                                                            \
+}))
+
 /** @brief Moves the cycle clock on by n. */
 static void spend(rl_ctx *c, int64_t n) { c->time.budget -= n; }
 
@@ -473,10 +480,15 @@ TEST(mips_guard_runs_a_tlb_mapped_load_and_store)
     c->r[4] = 0x00400100u;
     c->r[5] = UINT64_C(0x1122334455667788);
     uint32_t sd = 0x3Fu << 26 | 4u << 21 | 5u << 16 | 8u;
-    CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBS, K0(0x2000), sd), RL_OK);
+    memset(c->icache, 0, sizeof c->icache);
+    memset(c->dcache, 0, sizeof c->dcache);
+    int rc = 0;
+    CHECK_EQ(CYCLES(c, rc = rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBS, K0(0x2000), sd)), 48 + 1 + 40);
+    CHECK_EQ(rc, RL_OK);
     CHECK_EQ(rl_mips_ld(mem, 0x100108u, 8), UINT64_C(0x1122334455667788));
     uint32_t lw = 0x23u << 26 | 4u << 21 | 6u << 16 | 12u;
-    CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBL, K0(0x2000), lw), RL_OK);
+    CHECK_EQ(CYCLES(c, rc = rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBL, K0(0x2000), lw)), 1 + 1);
+    CHECK_EQ(rc, RL_OK);
     CHECK_EQ(c->r[6], 0x55667788u);
     uint32_t lb = 0x20u << 26 | 4u << 21 | 6u << 16 | 8u;
     CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBL, K0(0x2000), lb), RL_OK);
@@ -630,6 +642,49 @@ TEST(mips_cache_calls_the_hook_when_it_runs)
     CHECK_EQ(cache_calls, 1);
     CHECK_EQ(cache_va, K0(0x110));
     rl_mips_set_cache_hook(NULL);
+}
+
+
+TEST(mips_icache_fills_a_line_once_and_never_for_kseg1)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    memset(c->icache, 0, sizeof c->icache);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x1000))), 48);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x101C))), 0);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x1020))), 48);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x5000))), 48);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x1000))), 48);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, UINT64_C(0xFFFFFFFFA0001000))), 0);
+    rl_mips_cache(c, 0x10, K0(0x1000), 1);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x1000))), 48);
+    rl_mips_cache(c, 0x04, K0(0x1000), 1);
+    CHECK_EQ(c->cp0_tag_lo, 0x80u | 0x100u);
+    rl_mips_cache(c, 0x00, K0(0x1000), 1);
+    CHECK_EQ(CYCLES(c, rl_mips_icache(c, K0(0x1000))), 48);
+}
+
+TEST(mips_dcache_hits_fills_and_writes_back_dirty_lines)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    memset(c->dcache, 0, sizeof c->dcache);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x100), 0, 1)), 40);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x10C), 1, 1)), 1);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x10C), 1, 0)), 0);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x2100), 0, 1)), 80);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x100), 0, 1)), 40);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, UINT64_C(0xFFFFFFFFA0000100), 1, 1)), 0);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x100), 1, 1)), 1);
+    CHECK_EQ(CYCLES(c, rl_mips_cache(c, 0x19, K0(0x100), 1)), 40);
+    CHECK_EQ(CYCLES(c, rl_mips_cache(c, 0x19, K0(0x100), 1)), 0);
+    rl_mips_dcache(c, K0(0x100), 1, 1);
+    CHECK_EQ(CYCLES(c, rl_mips_cache(c, 0x15, K0(0x100), 1)), 40);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x100), 0, 1)), 40);
+    CHECK_EQ(CYCLES(c, rl_mips_cache(c, 0x0D, K0(0x3100), 1)), 0);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x3104), 1, 1)), 1);
+    CHECK_EQ(CYCLES(c, rl_mips_cache(c, 0x01, K0(0x3100), 1)), 40);
+    CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x3104), 0, 1)), 40);
 }
 
 TEST(mips_crash_reports_name_the_cause_and_registers)

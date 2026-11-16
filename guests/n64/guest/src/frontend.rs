@@ -8,8 +8,13 @@
 //!   machine (`rl_n64_cpu_read`, `rl_n64_cpu_write`); an access the
 //!   instruction makes only under a condition leaves through its guard when
 //!   it is not in RDRAM, so a device sees only the accesses that happen;
-//! - every instruction costs one cycle and every block ends in a sync
-//!   point, where the runtime takes interrupts;
+//! - every instruction ticks its cycles (the lifter's), and every block
+//!   ends in a sync point, where the runtime takes interrupts;
+//! - a fetch that may start an instruction cache line calls
+//!   `rl_mips_icache` with its address: a delay slot that starts a line
+//!   here, and the first instruction of a block the program enters other
+//!   than from the instruction before it, or that starts a line, through
+//!   [`fetch_check`]; loads and stores call `rl_mips_dcache`;
 //! - `JAL` and `JALR` with a link register are calls, which open a host
 //!   frame (`rl_mips_call`); `JR` to the address on top of the frame stack
 //!   returns from it;
@@ -45,6 +50,12 @@ pub const COUNT: &str = "n64.count";
 /// The intrinsic that ends the budget after a CP0 write the runtime must
 /// see; the block's sync point then calls `rl_n64_cp0_sync`.
 pub const CP0_SYNC: &str = "n64.cp0_sync";
+/// The intrinsic of a fetch that may start an instruction cache line: its
+/// address.
+pub const ICACHE: &str = "n64.icache";
+
+/// The bytes of an instruction cache line.
+pub const ICACHE_LINE: u64 = 32;
 
 /// The guard code of `ERET`.
 pub const ERET_GUARD: u32 = 0x4000;
@@ -210,6 +221,68 @@ fn reshape(b: &mut Block, s: &Shape) {
     push(b, Op::Sync, None);
 }
 
+/// Inserts `ops` (which may use each other's values, numbered from `at`) in
+/// front of `b.insts[at]`, renumbering the values from `at` on.
+fn insert(b: &mut Block, at: usize, ops: Vec<Inst>) {
+    let n = ops.len() as u32;
+    let renum = |v: &Value| if v.index() >= at { Value(v.0 + n) } else { *v };
+    let old = std::mem::take(&mut b.insts);
+    let mut insts = Vec::with_capacity(old.len() + ops.len());
+    for (i, inst) in old.into_iter().enumerate() {
+        if i == at {
+            insts.extend(ops.iter().cloned());
+        }
+        insts.push(Inst {
+            op: inst.op.map_values(&renum),
+            width: inst.width,
+        });
+    }
+    if at == insts.len() {
+        insts.extend(ops);
+    }
+    b.insts = insts;
+    b.exit.next = match b.exit.next {
+        Next::Dynamic(v) => Next::Dynamic(renum(&v)),
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => Next::Select {
+            cond: renum(&cond),
+            taken,
+            not_taken,
+        },
+        next => next,
+    };
+}
+
+/// Inserts the fetch of `pc` ([`ICACHE`]) in front of `b.insts[at]`.
+fn insert_fetch(b: &mut Block, at: usize, pc: u64) {
+    let ops = vec![
+        Inst {
+            op: Op::Const(Konst::new(u128::from(pc))),
+            width: Some(Width::W64),
+        },
+        Inst {
+            op: Op::intrinsic(ICACHE, vec![Value(at as u32)]),
+            width: None,
+        },
+    ];
+    insert(b, at, ops);
+}
+
+/// Makes the block of the instruction at `pc` fetch it through the
+/// instruction cache first: after its guards (a guard's slow path does its
+/// own fetch) and before any other effect.
+pub fn fetch_check(b: &mut Block, pc: u64) {
+    let at = b
+        .insts
+        .iter()
+        .rposition(|i| matches!(i.op, Op::Guard(..)))
+        .map_or(0, |g| g + 1);
+    insert_fetch(b, at, pc);
+}
+
 impl N64 {
     /// Lifts the instruction `word` at `pc`, with `slot` the word after it
     /// (its delay slot when it has one), for the N64 layer.
@@ -250,6 +323,13 @@ impl N64 {
                 |i| matches!(i.op, Op::Set(r, _) if r == regs::CP0_COUNT || r == regs::CP0_WIRED),
             );
         reshape(&mut b, &shape);
+        let slot_pc = pc.wrapping_add(4);
+        if l.encs.len() == 2
+            && slot_pc.is_multiple_of(ICACHE_LINE)
+            && let Some(t) = b.insts.iter().position(|i| matches!(i.op, Op::Tick(_)))
+        {
+            insert_fetch(&mut b, t + 1, slot_pc);
+        }
         if let Some(op) = shape.tlb_trap {
             b.exit = Exit {
                 next: Next::Const(after),
@@ -332,6 +412,10 @@ impl Frontend for N64 {
             ("mips_cache", [op, va, run]) => {
                 format!("rl_mips_cache(c, (uint32_t)({op}), (uint64_t)({va}), (uint32_t)({run}))")
             }
+            ("mips_dcache", [va, w, run]) => {
+                format!("rl_mips_dcache(c, (uint64_t)({va}), (uint32_t)({w}), (uint32_t)({run}))")
+            }
+            (ICACHE, [pc]) => format!("rl_mips_icache(c, (uint64_t)({pc}))"),
             (COUNT, []) => "rl_mips_count(c)".into(),
             (CALL, [ret]) => format!("rl_mips_call(c, (uint64_t)({ret}))"),
             (CP0_SYNC, []) => "rl_n64_cp0_break(c)".into(),
@@ -528,6 +612,57 @@ mod tests {
             N64.guard_exit(ERET_GUARD, PC, 0).as_deref(),
             Some("rl_mips_eret_to(c, rl_mips_eret(c))")
         );
+    }
+
+    #[test]
+    fn fetches_that_may_start_a_cache_line_go_through_the_icache() {
+        let beq = 0x1000_0003;
+        let lw = 0x8C22_0000;
+        let b = N64.lift_at(PC + 0x1C, beq, lw).expect("lifts");
+        b.verify().expect("verifies");
+        let o = ops(&b);
+        let tick = o
+            .iter()
+            .position(|o| matches!(o, Op::Tick(_)))
+            .expect("a tick");
+        let fetch = o
+            .iter()
+            .position(|o| matches!(o, Op::Intrinsic(c) if c.name == ICACHE))
+            .expect("the slot's fetch");
+        let load = o
+            .iter()
+            .position(|o| matches!(o, Op::IoLoad { .. }))
+            .expect("the slot's load");
+        assert!(tick < fetch && fetch < load);
+        let b = N64.lift_at(PC, beq, lw).expect("lifts");
+        assert!(
+            !intrinsics(&b).contains(&ICACHE),
+            "the slot is in the branch's line"
+        );
+        let mut b = N64.lift_at(PC, lw, 0).expect("lifts");
+        fetch_check(&mut b, PC);
+        b.verify().expect("verifies");
+        let o = ops(&b);
+        let guard = o
+            .iter()
+            .rposition(|o| matches!(o, Op::Guard(..)))
+            .expect("a guard");
+        let fetch = o
+            .iter()
+            .position(|o| matches!(o, Op::Intrinsic(c) if c.name == ICACHE))
+            .expect("the fetch");
+        assert!(guard < fetch);
+        assert!(
+            o[..fetch]
+                .iter()
+                .all(|o| !o.has_effect() || matches!(o, Op::Guard(..))),
+            "no effect before the fetch"
+        );
+        assert_eq!(
+            N64.intrinsic(ICACHE, &["p".into()]).as_deref(),
+            Some("rl_mips_icache(c, (uint64_t)(p))")
+        );
+        assert!(intrinsics(&b).contains(&"mips_dcache"));
     }
 
     #[test]

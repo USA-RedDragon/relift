@@ -30,7 +30,7 @@ use relift_ir::{Block, Flow, Next, Op};
 use relift_n64_analyze::{Boot, Report, Source};
 use relift_n64_formats::Cic;
 
-use crate::frontend::{N64, RDRAM_END, dispatch_exit, io_map};
+use crate::frontend::{ICACHE_LINE, N64, RDRAM_END, dispatch_exit, fetch_check, io_map};
 
 /// The physical address bits of a kseg0 or kseg1 address.
 const PHYS: u32 = 0x1FFF_FFFF;
@@ -137,6 +137,46 @@ impl Runs {
         self.0
             .iter()
             .any(|&(lo, hi)| (lo..hi).contains(&a) && (lo..hi).contains(&b))
+    }
+}
+
+/// Makes every instruction a run may start a fetch at go through the
+/// instruction cache ([`fetch_check`]): the start of a line, the entries
+/// of `entries`, a branch or jump target and the return of a call. An
+/// instruction reached only from the one before it in the same line is
+/// in the cache already.
+fn fetch_entries(blocks: &mut Blocks, entries: &[u64]) {
+    let mut at: BTreeSet<u64> = entries.iter().copied().collect();
+    for (&pc, (r, _)) in blocks.iter() {
+        if pc.is_multiple_of(ICACHE_LINE) {
+            at.insert(pc);
+        }
+        let Ok(b) = r else {
+            continue;
+        };
+        let after = pc.wrapping_add(u64::from(b.len));
+        if let Flow::Call { ret } = b.exit.flow {
+            at.insert(ret);
+        }
+        match b.exit.next {
+            Next::Const(t) if t != after => {
+                at.insert(t);
+            }
+            Next::Select {
+                taken, not_taken, ..
+            } => {
+                at.insert(taken);
+                if not_taken != after {
+                    at.insert(not_taken);
+                }
+            }
+            _ => {}
+        }
+    }
+    for pc in at {
+        if let Some((Ok(b), _)) = blocks.get_mut(&pc) {
+            fetch_check(b, pc);
+        }
     }
 }
 
@@ -256,6 +296,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             .collect();
         entries.sort_unstable();
         entries.dedup();
+        fetch_entries(&mut blocks, &entries);
         let mut covered: BTreeSet<u64> = BTreeSet::new();
         let mut fns: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
         let none = BTreeSet::new();

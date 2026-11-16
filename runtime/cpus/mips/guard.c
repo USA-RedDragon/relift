@@ -5,7 +5,10 @@
  * the TLB and the bus; a COP1 operation the fast path does not take runs on
  * the FPU rules; anything else enters its exception. A guard in a delay
  * slot also runs the branch (its link write and target), since the lifted
- * block wrote nothing before the guard.
+ * block wrote nothing before the guard. The lifted block ticks nothing
+ * either, so each instruction run here takes its fetch and its issue
+ * cycle (and an access its data cache cycles), but no multiply, divide or
+ * FPU cycles.
  */
 #include "mips.h"
 
@@ -147,6 +150,7 @@ static mem_result run_access(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn
         out.vector = rl_mips_xlat_exception(c, x, store, va, pc, in_delay);
         return out;
     }
+    rl_mips_dcache_access(c, va, store);
     uint64_t old = c->r[rt];
     unsigned k4 = (unsigned)(pa & 3u), k8 = (unsigned)(pa & 7u);
     uint64_t a4 = pa & ~UINT64_C(3), a8 = pa & ~UINT64_C(7);
@@ -320,9 +324,17 @@ static bool run_guarded(rl_ctx *c, uint8_t *mem, uint32_t code, uint64_t pc, uin
     return true;
 }
 
+/** @brief The fetch and the issue cycle of the instruction at pc, which the lifted block left before. */
+static void issue(rl_ctx *c, uint64_t pc)
+{
+    rl_mips_icache(c, pc);
+    c->time.budget -= 1;
+}
+
 int rl_mips_guard(rl_ctx *c, uint8_t *mem, uint32_t code, uint64_t pc, uint32_t w0)
 {
     uint64_t v;
+    issue(c, pc);
     if (!run_guarded(c, mem, code & ~(uint32_t)RL_MIPS_GUARD_IN_DELAY, pc, w0, false, &v))
         return RL_OK;
     return rl_mips_redirect(c, v);
@@ -404,9 +416,11 @@ static branch run_branch(rl_ctx *c, uint64_t pc, uint32_t w)
 
 rl_fn rl_mips_guard_exit(rl_ctx *c, uint8_t *mem, uint32_t code, uint64_t pc, uint32_t w0, uint32_t w1)
 {
+    issue(c, pc);
     branch b = run_branch(c, pc, w0);
     if (b.slot) {
         uint64_t v;
+        issue(c, pc + 4u);
         if (run_guarded(c, mem, code & ~(uint32_t)RL_MIPS_GUARD_IN_DELAY, pc + 4u, w1, true, &v)) {
             rl_mips_redirect(c, v);
             return rl_mips_pending;
