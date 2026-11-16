@@ -64,6 +64,7 @@ typedef struct rl_switch_program {
     /** @brief The console the program was built for (enum rl_switch_console). */
     uint32_t console;
     /** @brief NPDM system resource size in bytes. */
+    uint64_t system_resource_size;
 } rl_switch_program;
 
 /**

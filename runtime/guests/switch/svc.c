@@ -58,6 +58,8 @@ static const char *const svc_names[0x80] = {
     [0x29] = "GetInfo",
     [0x2A] = "FlushEntireDataCache",
     [0x2B] = "FlushDataCache",
+    [0x2C] = "MapPhysicalMemory",
+    [0x2D] = "UnmapPhysicalMemory",
     [0x30] = "GetResourceLimitLimitValue",
     [0x31] = "GetResourceLimitCurrentValue",
     [0x34] = "WaitForAddress",
@@ -156,7 +158,8 @@ static rl_result get_info(uint64_t *out, uint32_t id, uint32_t handle, uint64_t 
         case 13: *out = l->aslr_end - l->aslr_start; break;
         case 14: *out = l->stack_start; break;
         case 15: *out = l->stack_end - l->stack_start; break;
-        case 16: case 17: *out = 0; break;
+        case 16: *out = hos.cfg.system_resource_size; break;
+        case 17: *out = 0; break;
         case 18: *out = hos.cfg.program_id; break;
         case 20: *out = hos.user_exception_ctx; break;
         case 23: *out = 1; break;
@@ -441,6 +444,8 @@ static int dispatch(rl_ctx *c, uint32_t imm)
     }
     case 0x2A: rc = KR_SUCCESS; break;
     case 0x2B: rc = x[1] ? hos_cache_range(x[0], x[1]) : KR_SUCCESS; break;
+    case 0x2C: rc = hos_map_physical_memory(x[0], x[1]); break;
+    case 0x2D: rc = hos_unmap_physical_memory(x[0], x[1]); break;
     case 0x30:
     case 0x37: {
         uint64_t v = 0;

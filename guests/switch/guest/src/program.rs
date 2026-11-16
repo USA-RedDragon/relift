@@ -880,6 +880,7 @@ fn program_c(
             p.nso.build_id_hex()
         );
     }
+    let sysres = npdm.map_or(0, |n| u64::from(n.system_resource_size));
     let (space, prio, core, stack, pid) = match npdm {
         Some(n) => (
             match n.address_space {
@@ -901,7 +902,7 @@ fn program_c(
         .unwrap_or(CODE_START);
     let _ = write!(
         t,
-        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u, {}u }};\n",
+        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u, {}u, UINT64_C({sysres:#x}) }};\n",
         placed.len(),
         units.len(),
         mods.map_or_else(|| "0".to_string(), |m| format!("&{m}")),
@@ -1183,7 +1184,7 @@ mod tests {
         ));
         assert!(c.contains("rl_switch_main(&rl_program, argc, argv)"));
         assert!(
-            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u, 0u };"),
+            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u, 0u, UINT64_C(0x0) };"),
             "{c}"
         );
         assert!(c.contains("extern const uint8_t rl_image_id[];"));
@@ -1212,7 +1213,7 @@ mod tests {
             "{c}"
         );
         assert!(
-            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u, 0u };"),
+            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u, 0u, UINT64_C(0x0) };"),
             "{c}"
         );
         let files = program_files(
@@ -1230,7 +1231,7 @@ mod tests {
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("extern const rl_mods rl_mods_bundled;"), "{c}");
         assert!(
-            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u, 0u };"),
+            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u, 0u, UINT64_C(0x0) };"),
             "{c}"
         );
     }

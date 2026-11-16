@@ -620,3 +620,43 @@ TEST(data_cache_svcs_check_their_range)
         CHECK_EQ(t_svc(c, imm, HOS_CUR_PROCESS, heap + 0x200000, 0x1000, 0, 0, 0), KR_INVALID_MEM_STATE);
     }
 }
+
+static rl_ctx *boot_system_resource(uint64_t size)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    cfg.system_resource_size = size;
+    return t_boot(&cfg);
+}
+
+TEST(map_physical_memory_backs_the_alias_region)
+{
+    rl_ctx *c = boot_system_resource(0x4000000);
+    CHECK(c);
+    CHECK_EQ(t_svc(c, SVC_GET_INFO, 0, 16, HOS_CUR_PROCESS, 0, 0, 0), 0);
+    CHECK_EQ(c->x[1], 0x4000000);
+    uint64_t alias = hos.lay.alias_start, info = t_heap(c, 0x200000);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, alias + 0x1000, 0x1000, 0, 0, 0, 0), 0);
+    t_mem()[alias + 0x1000] = 7;
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, alias, 0x4000, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_mem()[alias + 0x1000], 7);
+    CHECK_EQ(t_mem()[alias + 0x3000], 0);
+    t_meminfo mi = query(c, info, alias);
+    CHECK_EQ(mi.type, MS_NORMAL & 0xFF);
+    CHECK_EQ(mi.size, 0x4000);
+    CHECK_EQ(mi.perm, HOS_PERM_RW);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, alias + 0x2000, 0x4000, 0, 0, 0, 0), 0);
+    mi = query(c, info, alias + 0x2000);
+    CHECK_EQ(mi.type, 0);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, alias + 0x1001, 0x1000, 0, 0, 0, 0), KR_INVALID_ADDRESS);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, alias, 0, 0, 0, 0, 0), KR_INVALID_SIZE);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, hos.lay.heap_start, 0x1000, 0, 0, 0, 0), KR_INVALID_MEM_RANGE);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, hos.lay.heap_start, 0x1000, 0, 0, 0, 0), KR_INVALID_MEM_RANGE);
+}
+
+TEST(map_physical_memory_needs_a_system_resource)
+{
+    rl_ctx *c = boot_system_resource(0);
+    CHECK(c);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, hos.lay.alias_start, 0x1000, 0, 0, 0, 0), KR_INVALID_STATE);
+}

@@ -341,7 +341,7 @@ uint64_t hos_used_memory(void)
     while (a < hos.vm.size) {
         rl_vm_block b = rl_vm_query(&hos.vm, a);
         uint32_t s = state_of(&b);
-        if (s == MS_HEAP || s == MS_CODE_STATIC || s == MS_CODE_MUTABLE || s == MS_THREAD_LOCAL)
+        if (s == MS_HEAP || s == MS_NORMAL || s == MS_CODE_STATIC || s == MS_CODE_MUTABLE || s == MS_THREAD_LOCAL)
             used += b.size;
         a = b.addr + b.size;
     }
@@ -497,6 +497,64 @@ rl_result hos_unmap_memory(uint64_t dst, uint64_t src, uint64_t size)
         rl_vm_kernel_copy(&hos.vm, src, dst, size);
         if (rl_vm_set(&hos.vm, dst, size, RL_VM_NONE, 0, RL_VM_DISCARD))
             rc = KR_OUT_OF_MEMORY;
+    }
+    hos_unlock();
+    return rc;
+}
+
+static rl_result physical_args(uint64_t addr, uint64_t size)
+{
+    if (!aligned(addr))
+        return KR_INVALID_ADDRESS;
+    if (!aligned(size) || size == 0)
+        return KR_INVALID_SIZE;
+    if (addr + size <= addr)
+        return KR_INVALID_MEM_RANGE;
+    if (!hos.cfg.system_resource_size)
+        return KR_INVALID_STATE;
+    if (!inside(addr, size, hos.lay.alias_start, hos.lay.alias_end))
+        return KR_INVALID_MEM_RANGE;
+    return KR_SUCCESS;
+}
+
+rl_result hos_map_physical_memory(uint64_t addr, uint64_t size)
+{
+    hos_note_guest_range(addr, size);
+    rl_result rc = physical_args(addr, size);
+    if (rc)
+        return rc;
+    hos_lock();
+    for (uint64_t at = addr; rc == KR_SUCCESS && at < addr + size;) {
+        rl_vm_block b = rl_vm_query(&hos.vm, at);
+        uint64_t end = b.addr + b.size < addr + size ? b.addr + b.size : addr + size;
+        if (state_of(&b) == MS_FREE && rl_vm_set(&hos.vm, at, end - at, RL_VM_RW, tag_of(MS_NORMAL, 0), RL_VM_FRESH))
+            rc = KR_OUT_OF_MEMORY;
+        at = end;
+    }
+    hos_unlock();
+    return rc;
+}
+
+rl_result hos_unmap_physical_memory(uint64_t addr, uint64_t size)
+{
+    rl_result rc = physical_args(addr, size);
+    if (rc)
+        return rc;
+    hos_lock();
+    for (uint64_t at = addr; at < addr + size;) {
+        rl_vm_block b = rl_vm_query(&hos.vm, at);
+        if (state_of(&b) != MS_FREE && (state_of(&b) != MS_NORMAL || attr_of(&b) != 0)) {
+            rc = KR_INVALID_MEM_STATE;
+            break;
+        }
+        at = b.addr + b.size;
+    }
+    for (uint64_t at = addr; rc == KR_SUCCESS && at < addr + size;) {
+        rl_vm_block b = rl_vm_query(&hos.vm, at);
+        uint64_t end = b.addr + b.size < addr + size ? b.addr + b.size : addr + size;
+        if (state_of(&b) == MS_NORMAL && rl_vm_set(&hos.vm, at, end - at, RL_VM_NONE, 0, RL_VM_DISCARD))
+            rc = KR_OUT_OF_MEMORY;
+        at = end;
     }
     hos_unlock();
     return rc;

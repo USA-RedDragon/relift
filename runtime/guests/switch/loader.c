@@ -471,6 +471,7 @@ static int run_program(void *arg)
     if (hi - cfg.code_start > cfg.code_size)
         cfg.code_size = hi - cfg.code_start;
     cfg.program_id = p->program_id;
+    cfg.system_resource_size = p->system_resource_size;
     cfg.main_prio = p->main_prio;
     cfg.main_core = p->main_core;
     if (p->main_stack_size)

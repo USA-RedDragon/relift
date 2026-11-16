@@ -409,6 +409,8 @@ enum rl_switch_console { RL_CONSOLE_SWITCH = 0, RL_CONSOLE_SWITCH2 = 1 };
 typedef struct rl_hos_config {
     /** @brief The console (enum rl_switch_console). */
     uint32_t console;
+    /** @brief NPDM system resource size (svcGetInfo 16); nonzero allows svcMapPhysicalMemory. */
+    uint64_t system_resource_size;
     /** @brief NPDM address space type: 0 32-bit, 1 36-bit, 2 32-bit without alias, 3 39-bit. */
     uint32_t address_space_type;
     /** @brief Start of the code region (where modules load). */
@@ -676,6 +678,10 @@ rl_result hos_set_heap_size(uint64_t size, uint64_t *out);
 rl_result hos_set_memory_permission(uint64_t addr, uint64_t size, uint32_t perm);
 rl_result hos_set_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, uint32_t value);
 rl_result hos_map_memory(uint64_t dst, uint64_t src, uint64_t size);
+/** @brief svcMapPhysicalMemory: backs the free pages of [addr, addr + size) in the alias region with new memory. */
+rl_result hos_map_physical_memory(uint64_t addr, uint64_t size);
+/** @brief svcUnmapPhysicalMemory: frees the pages svcMapPhysicalMemory mapped in [addr, addr + size). */
+rl_result hos_unmap_physical_memory(uint64_t addr, uint64_t size);
 rl_result hos_unmap_memory(uint64_t dst, uint64_t src, uint64_t size);
 rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_info);
 /** @brief Checks a data cache operation's range: inside the address space and mapped throughout (the host keeps guest memory coherent). Lock not held. */
