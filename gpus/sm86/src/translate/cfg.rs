@@ -211,14 +211,38 @@ fn returns(code: &Code, end: usize, t: usize) -> bool {
 }
 
 /// The register a CALL's return address goes through is set by a `MOV`
-/// shortly before it. `RET.REL` at `ret` jumps to the register plus its own
-/// offset, so the address moved is the return point minus that offset.
+/// shortly before it. `RET.REL` at `ret` jumps to the register it reads
+/// plus its own offset, so the address moved is the return point minus the
+/// offset, into that register or one the callee copies into it with
+/// unguarded register MOVs.
 fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
-    let off = 16 * (ret as i64 + 1) + raw_target(code.words[ret]);
+    let rw = code.words[ret];
+    if rw.bit(91) {
+        return false;
+    }
+    let mut regs = vec![rw.get(24, 8)];
+    if let Ok(callee) = bra_target(&code.insts[k], code.insts.len()) {
+        for j in (callee..ret).rev() {
+            let w = code.words[j];
+            if w.opcode() == 0x202
+                && w.get(72, 4) == 0xf
+                && code.insts[j].guard.is_none()
+                && regs.contains(&w.get(16, 8))
+            {
+                let src = w.get(32, 8);
+                regs.retain(|r| *r != w.get(16, 8));
+                regs.push(src);
+            }
+        }
+    }
+    let off = 16 * (ret as i64 + 1) + raw_target(rw);
     let want = (16 * (k as i64 + 1) - off) as u32;
     (k.saturating_sub(16)..k).rev().any(|j| {
         let w = code.words[j];
-        w.opcode() == 0x802 && w.get(32, 32) == want && code.insts[j].guard.is_none()
+        w.opcode() == 0x802
+            && regs.contains(&w.get(16, 8))
+            && w.get(32, 32) == want
+            && code.insts[j].guard.is_none()
     })
 }
 

@@ -600,6 +600,25 @@ fn call_without_return_address_is_rejected() {
 }
 
 #[test]
+fn return_address_must_be_in_the_register_ret_reads() {
+    let mut b = calls(1);
+    b[..16].copy_from_slice(&mov_imm(5, 0x20));
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "MOV R5, 0x20");
+    let e = translate(&p).err().map(|e| e.0);
+    assert_eq!(e.as_deref(), Some("CALL without its return address"));
+    let mut b = calls(1);
+    b[5 * 16..6 * 16].copy_from_slice(&word(0x002, 1, &[(16, 8, 6), (32, 8, 4), (72, 4, 0xf)]));
+    b[6 * 16..7 * 16].copy_from_slice(&ret(6, 6));
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[5], "MOV R6, R4");
+    translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    b[..16].copy_from_slice(&mov_imm(5, 0x20));
+    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    assert_eq!(e.as_deref(), Some("CALL without its return address"));
+}
+
+#[test]
 fn brx_becomes_a_switch() {
     let mut b = Vec::new();
     b.extend(word(0x145, 4, &[(16, 4, 0), (34, 48, rel(0, 7))]));
