@@ -228,6 +228,10 @@ int sms_init(sms *m, const sms_config *cfg, const uint8_t *rom, size_t rom_len)
         m->ram[0x0700] = 0x9B;
     }
     m->io_enable = m->ram_enable = m->card_enable = m->cart_enable = m->exp_enable = true;
+    if (m->mapper == SMS_MAPPER_BIOS) {
+        m->bios_enable = true;
+        m->cart_enable = false;
+    }
     m->gg_parallel = 0x7F;
     m->gg_direction = 0x7F;
     m->gg_nmi_enable = true;
@@ -291,6 +295,8 @@ static uint8_t cart_read(const sms *m, uint16_t a, uint8_t data)
         if (a <= 0xBFFF)
             return rom_at(m, (uint32_t)m->bank[2] << 14 | (a & 0x3FFFu));
         return data;
+    case SMS_MAPPER_BIOS:
+        return data;
     }
     return data;
 }
@@ -343,6 +349,8 @@ static void cart_write(sms *m, uint16_t a, uint8_t data)
         if (a >= 0xA000 && a <= 0xBFFF)
             m->bank[2] = data;
         return;
+    case SMS_MAPPER_BIOS:
+        return;
     }
 }
 
@@ -356,8 +364,12 @@ uint8_t sms_peek(const sms *m, uint16_t a)
     uint8_t data = m->pullup;
     if (a >= 0xC000 && m->ram_enable)
         data = m->ram[a & 0x1FFFu];
-    if (!is_gg(m) ? m->cart_enable : (a >= 0x400 || !m->bios_enable))
+    if (m->mapper == SMS_MAPPER_BIOS) {
+        if (m->bios_enable && a <= 0xBFFF)
+            data = rom_at(m, a <= 0x03FF ? a : (uint32_t)m->bank[a >> 14] << 14 | (a & 0x3FFFu));
+    } else if (!is_gg(m) ? m->cart_enable : (a >= 0x400 || !m->bios_enable)) {
         data = cart_read(m, a, data);
+    }
     return data;
 }
 
@@ -377,8 +389,12 @@ void sms_write(sms *m, uint16_t a, uint8_t data, uint64_t now)
     }
     if (a >= 0xC000 && m->ram_enable)
         m->ram[a & 0x1FFFu] = data;
-    if (!is_gg(m) ? m->cart_enable : (a >= 0x400 || !m->bios_enable))
+    if (m->mapper == SMS_MAPPER_BIOS) {
+        if (m->bios_enable && a >= 0xFFFD)
+            m->bank[a - 0xFFFDu] = data;
+    } else if (!is_gg(m) ? m->cart_enable : (a >= 0x400 || !m->bios_enable)) {
         cart_write(m, a, data);
+    }
 }
 
 static int32_t padded_slot_bank(const sms *m, unsigned s)
@@ -394,6 +410,8 @@ static int32_t padded_slot_bank(const sms *m, unsigned s)
         return (int32_t)((((uint32_t)m->bank[s] << 14) & m->rom_mask) >> 14);
     case SMS_MAPPER_KOREA:
         return s < 2 ? (int32_t)s : (int32_t)((((uint32_t)m->bank[2] << 14) & m->rom_mask) >> 14);
+    case SMS_MAPPER_BIOS:
+        return m->bios_enable ? (int32_t)((((uint32_t)m->bank[s] << 14) & m->rom_mask) >> 14) : -1;
     }
     return -1;
 }

@@ -56,6 +56,8 @@ typedef enum sms_mapper {
     SMS_MAPPER_CODEMASTERS = 1,
     /** @brief The Korean mapper (writes to 0xA000-0xBFFF select the bank at 0x8000). */
     SMS_MAPPER_KOREA = 2,
+    /** @brief No cartridge: the image is the console's BIOS, banked at 0xFFFD to 0xFFFF and enabled by the memory control port. */
+    SMS_MAPPER_BIOS = 3,
 } sms_mapper;
 
 /** @brief Bits of an input mask: one per button, set while it is held. */

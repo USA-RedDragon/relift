@@ -219,3 +219,20 @@ TEST(machine_sg1000_ports_reach_the_tms9918_and_the_pad)
     CHECK_EQ(sms_in(&m, 0xDD, edge), 0xFF);
     CHECK_EQ(sms_in(&m, 0x7E, edge), 0xFF);
 }
+
+TEST(machine_bios_image_is_banked_and_unmapped_by_the_memory_control_port)
+{
+    boot(SMS_SYSTEM_MS, SMS_MAPPER_BIOS, 0x20000);
+    CHECK_EQ(sms_read(&m, 0x4000, 0), bank_byte(1));
+    sms_write(&m, 0xFFFF, 5, 0);
+    CHECK_EQ(sms_read(&m, 0x8000, 0), bank_byte(5));
+    CHECK_EQ(sms_slot_bank(&m, 2), 5);
+    sms_write(&m, 0xFFFD, 3, 0);
+    CHECK_EQ(sms_read(&m, 0x0000, 0), bank_byte(0));
+    CHECK_EQ(sms_read(&m, 0x0400, 0), bank_byte(3));
+    sms_out(&m, 0x3E, 0x08, 0);
+    CHECK_EQ(sms_read(&m, 0x8000, 0), 0xFF);
+    CHECK_EQ(sms_slot_bank(&m, 2), -1);
+    sms_out(&m, 0x3E, 0x00, 0);
+    CHECK_EQ(sms_read(&m, 0x8000, 0), bank_byte(5));
+}
