@@ -2,4 +2,5 @@
 
 pub mod cpu;
 mod eh;
+pub mod nvndriver;
 pub mod program;
