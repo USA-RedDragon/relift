@@ -12,4 +12,5 @@
 
 pub mod decode;
 pub mod lift;
+pub mod pipe;
 pub mod regs;
