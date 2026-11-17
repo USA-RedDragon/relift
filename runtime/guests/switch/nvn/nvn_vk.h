@@ -1,0 +1,153 @@
+/**
+ * @file nvn_vk.h
+ * @brief What the NVN2 layer's Vulkan files (nvn_vk.c, nvn_draw.c) share:
+ * the host device, host images and the replay state of a queue.
+ */
+#ifndef RELIFT_NVN_VK_H
+#define RELIFT_NVN_VK_H
+
+#include "nvn_priv.h"
+#include "vkf.h"
+
+#include <pthread.h>
+
+#define VK(name) VKF_FN(&g.fns, name)
+#define MAX_RT 8u
+#define MAX_IMAGES 4096u
+/** @brief Graphics and compute stages, in NVNshaderStage order. */
+#define NVN_STAGES 6u
+/** @brief Uniform buffer slots of a stage (c[3] to c[16]). */
+#define NVN_UBO_SLOTS 14u
+#define NVN_VERTEX_BUFFERS 16u
+#define NVN_VERTEX_ATTRIBS 16u
+
+/** @brief A texture's host image. */
+typedef struct vimg {
+    uint64_t storage;
+    nvn_tex_desc d;
+    VkFormat format;
+    VkImageAspectFlags aspect;
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView view;
+    /** @brief Views of single levels and layers, for render targets. */
+    struct {
+        uint32_t level, layer;
+        VkImageView view;
+    } sub[16];
+    uint32_t nsub;
+} vimg;
+
+/** @brief A render target: one level and layer of an image. */
+typedef struct rt {
+    vimg *v;
+    uint32_t level, layer;
+    VkImageView view;
+} rt;
+
+/** @brief A host-visible buffer, mapped. */
+typedef struct staging {
+    VkBuffer buf;
+    VkDeviceMemory memory;
+    uint8_t *map;
+    uint64_t size;
+} staging;
+
+/** @brief The host device and what lives as long as it. */
+typedef struct nvn_vkdev {
+    pthread_once_t once;
+    pthread_mutex_t lock;
+    bool ok;
+    bool depth_clip_control;
+    vkf_fns fns;
+    VkInstance instance;
+    VkPhysicalDevice phys;
+    VkDevice dev;
+    uint32_t family;
+    VkQueue queue;
+    VkCommandPool pool;
+    VkCommandBuffer cb;
+    VkFence fence;
+    VkPhysicalDeviceMemoryProperties memprops;
+    char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+    vimg *images[MAX_IMAGES];
+    uint32_t nimages;
+    uint64_t presents;
+    /** @brief Guest bytes copied for the commands of the batch being recorded: buffers, indices, constants. */
+    staging arena;
+    uint64_t arena_used;
+} nvn_vkdev;
+
+extern nvn_vkdev g;
+
+/** @brief Draw state a queue keeps across command sets, as the GPU keeps it. */
+typedef struct nvn_gfx {
+    uint32_t ncolor;
+    rt color[MAX_RT];
+    rt depth;
+    VkRect2D scissor;
+    bool scissor_set;
+    /** @brief GPU code address of the program bound to each stage, 0 for none. */
+    uint64_t code[NVN_STAGES];
+    struct {
+        uint64_t addr, size;
+    } ubo[NVN_STAGES][NVN_UBO_SLOTS], vb[NVN_VERTEX_BUFFERS];
+    uint32_t nattribs, nstreams;
+    uint8_t attribs[NVN_VERTEX_ATTRIBS][4];
+    uint8_t streams[NVN_VERTEX_BUFFERS][8];
+    uint8_t depth_stencil[8], color_state[4], channel_mask[4], polygon[4], multisample[24];
+    uint8_t blend[MAX_RT][8];
+    bool have_depth_stencil, have_color_state, have_channel_mask, have_polygon, have_multisample;
+    bool have_blend[MAX_RT];
+    float viewports[16][4], depth_ranges[16][2];
+    VkRect2D scissors[16];
+    uint32_t stencil_value_mask[2], stencil_mask[2], stencil_ref[2];
+    bool primitive_restart;
+    uint32_t restart_index;
+    float polygon_offset[3];
+    float blend_color[4];
+    float line_width;
+} nvn_gfx;
+
+/** @brief One command set being replayed. */
+typedef struct replay {
+    rl_ctx *c;
+    uint8_t *mem;
+    const nvn_cmdset *s;
+    nvn_gfx *st;
+    bool recording;
+    uint64_t syncs[64];
+    uint32_t nsyncs;
+    /** @brief The float result (s0) of the last getter. */
+    float fret;
+} replay;
+
+int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want);
+bool nvn_vk_staging_new(staging *s, uint64_t size);
+void nvn_vk_staging_free(staging *s);
+void nvn_vk_barrier(VkCommandBuffer cb);
+bool nvn_vk_begin(replay *r);
+/** @brief Submits what r recorded and waits for it; the arena is free again after. */
+bool nvn_vk_flush(replay *r);
+/** @brief Stops the game with a report (after flushing what r recorded). Returns RL_PENDING. */
+int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
+/** @brief The host format of an NVNformat; VK_FORMAT_UNDEFINED for one the layer does not map. */
+VkFormat nvn_vk_format(uint32_t f, VkImageAspectFlags *aspect);
+/** @brief Begins dynamic rendering on the queue's render targets; area gets their common extent. */
+bool nvn_vk_begin_rendering(replay *r, VkRect2D *area);
+/** @brief Copies n guest bytes at addr into the arena (zero-filled to pad bytes); offset of the copy in *off. */
+bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
+/**
+ * @brief Calls the SDK driver's getter name on a copy of the state bytes blob (at most 256 bytes) with the integer
+ * arguments args, then out_n (at most 4) output pointers 4 bytes apart; out gets 4 words (16 bytes from the single
+ * pointer when out_n is 1, so an array output fits), so it must hold 4. The integer result goes to *ret, the float
+ * result to r->fret.
+ */
+int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const uint64_t *args, unsigned nargs,
+                  unsigned out_n, uint32_t *out, uint64_t *ret);
+/** @brief Frees what draws of the batch just finished held (descriptor sets); called after each wait. */
+void nvn_draw_reset(void);
+/** @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one. */
+int nvn_draw_cmd(replay *r, const nvn_cmd *e);
+
+#endif

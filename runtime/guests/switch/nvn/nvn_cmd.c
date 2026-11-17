@@ -29,6 +29,8 @@ typedef struct nvn_cmdbuf {
     bool recording;
     nvn_cmd *cmds;
     uint32_t n, cap;
+    uint8_t *bytes;
+    uint32_t nbytes, capbytes;
 } nvn_cmdbuf;
 
 static struct {
@@ -39,7 +41,78 @@ static struct {
 
 static nvn_cmdbuf *cb_of(rl_ctx *c) { return (nvn_cmdbuf *)nvn_obj_get(c->x[0], NVN_CMDBUF); }
 
-static void cb_drop(nvn_obj *o) { free(((nvn_cmdbuf *)o)->cmds); }
+static void cb_drop(nvn_obj *o)
+{
+    free(((nvn_cmdbuf *)o)->cmds);
+    free(((nvn_cmdbuf *)o)->bytes);
+}
+
+/** @brief An argument of a recorded command that points at guest bytes the command buffer copies when it records. */
+typedef struct nvn_snap_rule {
+    uint32_t op;
+    /** @brief The argument register holding the pointer. */
+    uint8_t reg;
+    /** @brief The register holding the element count, or 0xff for one element. */
+    uint8_t count_reg;
+    /** @brief Bytes per element. */
+    uint16_t elem;
+} nvn_snap_rule;
+
+#define ONE 0xffu
+static const nvn_snap_rule snap_rules[] = {
+    { NVN_CMD_CLEAR_COLOR, 2, ONE, 16 },
+    { NVN_CMD_CLEAR_COLORI, 2, ONE, 16 },
+    { NVN_CMD_CLEAR_COLORUI, 2, ONE, 16 },
+    { NVN_CMD_SET_VIEWPORTS, 3, 2, 16 },
+    { NVN_CMD_SET_SCISSORS, 3, 2, 16 },
+    { NVN_CMD_SET_DEPTH_RANGES, 3, 2, 8 },
+    { NVN_CMD_SET_RENDER_TARGETS, 2, 1, 8 },
+    { NVN_CMD_SET_RENDER_TARGETS, 3, 1, 8 },
+    { NVN_CMD_SET_RENDER_TARGETS, 5, ONE, NVN_VIEW_BYTES },
+    { NVN_CMD_BIND_BLEND_STATE, 1, ONE, 8 },
+    { NVN_CMD_BIND_COLOR_STATE, 1, ONE, 4 },
+    { NVN_CMD_BIND_CHANNEL_MASK_STATE, 1, ONE, 4 },
+    { NVN_CMD_BIND_DEPTH_STENCIL_STATE, 1, ONE, 8 },
+    { NVN_CMD_BIND_MULTISAMPLE_STATE, 1, ONE, 24 },
+    { NVN_CMD_BIND_POLYGON_STATE, 1, ONE, 4 },
+    { NVN_CMD_BIND_VERTEX_ATTRIB_STATE, 2, 1, 4 },
+    { NVN_CMD_BIND_VERTEX_STREAM_STATE, 2, 1, 8 },
+};
+#undef ONE
+
+/** @brief Copies n guest bytes at a into b's byte store; the value a recorded command keeps instead of a. */
+static bool snap(nvn_cmdbuf *b, const uint8_t *mem, uint64_t a, uint64_t n, uint64_t *out)
+{
+    if (!a) {
+        *out = 0;
+        return true;
+    }
+    n = (n + 7) & ~7ull;
+    if (n > 0x10000 || b->nbytes + n > 0x7fffffffu)
+        return false;
+    if (b->nbytes + n > b->capbytes) {
+        uint32_t cap = b->capbytes ? b->capbytes : 1024;
+        while (cap < b->nbytes + n)
+            cap *= 2;
+        uint8_t *nb = realloc(b->bytes, cap);
+        if (!nb)
+            return false;
+        b->bytes = nb;
+        b->capbytes = cap;
+    }
+    memcpy(b->bytes + b->nbytes, mem + a, n);
+    *out = NVN_SNAP | b->nbytes;
+    b->nbytes += (uint32_t)n;
+    return true;
+}
+
+const void *nvn_cmd_bytes(const nvn_cmdset *s, uint64_t v)
+{
+    if (!(v & NVN_SNAP))
+        return NULL;
+    uint64_t off = v & ~NVN_SNAP;
+    return off < s->nbytes ? s->bytes + off : NULL;
+}
 
 static uint64_t not_cb(rl_ctx *c, const char *proc)
 {
@@ -180,6 +253,7 @@ uint64_t nvnh_nvnCommandBufferBeginRecording(rl_ctx *c, uint8_t *mem)
         return not_cb(c, "nvnCommandBufferBeginRecording");
     b->recording = true;
     b->n = 0;
+    b->nbytes = 0;
     return nvn_ret(c);
 }
 
@@ -190,14 +264,19 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
     nvn_cmdbuf *b = cb_of(c);
     if (!b)
         return not_cb(c, "nvnCommandBufferEndRecording");
-    nvn_cmdset *s = malloc(sizeof *s + (size_t)b->n * sizeof(nvn_cmd));
+    nvn_cmdset *s = malloc(sizeof *s + (size_t)b->n * sizeof(nvn_cmd) + b->nbytes);
     if (!s)
         return (uint64_t)rl_guest_fatal(c, "nvn", "out of memory for a command set of %u commands", b->n);
     s->n = b->n;
+    s->nbytes = b->nbytes;
+    s->bytes = (uint8_t *)(s->cmds + b->n);
     if (b->n)
         memcpy(s->cmds, b->cmds, (size_t)b->n * sizeof(nvn_cmd));
+    if (b->nbytes)
+        memcpy(s->bytes, b->bytes, b->nbytes);
     b->recording = false;
     b->n = 0;
+    b->nbytes = 0;
     pthread_mutex_lock(&sets.lock);
     if (sets.n == sets.cap) {
         uint32_t cap = sets.cap ? sets.cap * 2 : 256;
@@ -219,7 +298,6 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
 
 uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
 {
-    (void)mem;
     nvn_cmdbuf *b = cb_of(c);
     if (!b)
         return (uint64_t)rl_guest_fatal(c, "nvn", "%s on 0x%llx, not a command buffer", nvn_cmd_name(op),
@@ -238,6 +316,23 @@ uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
         e->x[i] = c->x[i];
         e->d[i] = c->v[i].d[0];
     }
+    for (size_t i = 0; i < sizeof snap_rules / sizeof snap_rules[0]; i++) {
+        const nvn_snap_rule *r = &snap_rules[i];
+        if (r->op != op)
+            continue;
+        uint64_t count = r->count_reg == 0xffu ? 1 : (uint64_t)(uint32_t)c->x[r->count_reg];
+        if (!snap(b, mem, c->x[r->reg], count * r->elem, &e->x[r->reg]))
+            return (uint64_t)rl_guest_fatal(c, "nvn", "%s: cannot keep %llu bytes of argument %u", nvn_cmd_name(op),
+                                            (unsigned long long)(count * r->elem), r->reg);
+    }
+    if (op == NVN_CMD_SET_RENDER_TARGETS && (e->x[3] & NVN_SNAP))
+        for (uint32_t i = 0; i < (uint32_t)c->x[1]; i++) {
+            uint64_t at = (e->x[3] & ~NVN_SNAP) + 8u * i, view, kept;
+            memcpy(&view, b->bytes + at, 8);
+            if (!snap(b, mem, view, NVN_VIEW_BYTES, &kept))
+                return (uint64_t)rl_guest_fatal(c, "nvn", "%s: cannot keep texture view %u", nvn_cmd_name(op), i);
+            memcpy(b->bytes + at, &kept, 8);
+        }
     return nvn_ret(c);
 }
 
@@ -286,22 +381,15 @@ NVN_RECORDED(NVN_RECORDER)
 
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle)
 {
-    (void)mem;
     const nvn_cmdset *s = nvn_cmdset_of(handle);
     if (!s)
         return rl_guest_fatal(c, "nvn", "queue 0x%llx: 0x%llx is not a command handle relift made",
                               (unsigned long long)queue, (unsigned long long)handle);
     if (rl_cfg()->trace_os)
         for (uint32_t i = 0; i < s->n; i++)
-            rl_log(RL_LOG_INFO, "nvn", "  submit %s", nvn_cmd_name(s->cmds[i].op));
-    return RL_OK;
-}
-
-int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture)
-{
-    (void)c;
-    (void)mem;
-    (void)queue;
-    (void)texture;
-    return RL_OK;
+            rl_log(RL_LOG_INFO, "nvn", "  submit %s(0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx)", nvn_cmd_name(s->cmds[i].op),
+                   (unsigned long long)s->cmds[i].x[1], (unsigned long long)s->cmds[i].x[2],
+                   (unsigned long long)s->cmds[i].x[3], (unsigned long long)s->cmds[i].x[4],
+                   (unsigned long long)s->cmds[i].x[5]);
+    return nvn_vk_run(c, mem, queue, s);
 }

@@ -162,6 +162,22 @@ uint64_t nvnh_nvnEventGetMemoryOffset(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/** @brief NVNformats with integer channels, which the SDK driver's format table marks as having no float fast clear. */
+static const uint64_t int_formats[3] = { 0x4001b19b19b19b18ull, 0x01b1840000000000ull, 0x600000000ull };
+
+/**
+ * @brief nvnDeviceRegisterFastClearColor(NVNdevice *, const float *color, NVNformat): NVNboolean. A fast clear
+ * color only lets the GPU compress clears; relift's clears do not depend on it. The driver refuses formats with
+ * integer channels and accepts the rest while its table has room; relift's table never fills.
+ */
+uint64_t nvnh_nvnDeviceRegisterFastClearColor(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    uint32_t f = (uint32_t)c->x[2];
+    c->x[0] = f < 192 && !(int_formats[f / 64] >> (f % 64) & 1);
+    return nvn_ret(c);
+}
+
 /** @brief Procs that answer 0: no queue error, no command memory relift tracks, no attached debugger. */
 uint64_t nvn_zero(rl_ctx *c, uint8_t *mem)
 {

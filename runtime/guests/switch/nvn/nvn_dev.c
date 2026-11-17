@@ -97,6 +97,11 @@ uint64_t nvnh_nvnDeviceGetInteger(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+static uint32_t g_origin_mode, g_depth_mode;
+
+uint32_t nvn_device_depth_mode(void) { return __atomic_load_n(&g_depth_mode, __ATOMIC_RELAXED); }
+uint32_t nvn_device_origin_mode(void) { return __atomic_load_n(&g_origin_mode, __ATOMIC_RELAXED); }
+
 /** @brief nvnDeviceSetWindowOriginMode(NVNdevice *, NVNwindowOriginMode). */
 uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)
 {
@@ -104,6 +109,7 @@ uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)
     nvn_device *d = (nvn_device *)nvn_obj_get(c->x[0], NVN_DEVICE);
     if (d)
         d->origin_mode = (uint32_t)c->x[1];
+    __atomic_store_n(&g_origin_mode, (uint32_t)c->x[1], __ATOMIC_RELAXED);
     return nvn_ret(c);
 }
 
@@ -114,6 +120,7 @@ uint64_t nvnh_nvnDeviceSetDepthMode(rl_ctx *c, uint8_t *mem)
     nvn_device *d = (nvn_device *)nvn_obj_get(c->x[0], NVN_DEVICE);
     if (d)
         d->depth_mode = (uint32_t)c->x[1];
+    __atomic_store_n(&g_depth_mode, (uint32_t)c->x[1], __ATOMIC_RELAXED);
     return nvn_ret(c);
 }
 

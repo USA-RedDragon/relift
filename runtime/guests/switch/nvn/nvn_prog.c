@@ -5,8 +5,6 @@
  */
 #include "nvn_priv.h"
 
-/** @brief Most shader stages a program holds. */
-#define PROGRAM_STAGES 6u
 
 /** @brief NVNshaderData as the guest lays it out: the GPU address of the code and a pointer to the control section. */
 typedef struct shader_data {
@@ -16,7 +14,8 @@ typedef struct shader_data {
 
 typedef struct nvn_program {
     nvn_obj o;
-    shader_data stages[PROGRAM_STAGES];
+    shader_data stages[NVN_PROGRAM_STAGES];
+    uint64_t code[NVN_PROGRAM_STAGES];
     uint32_t n;
     uint64_t sets;
 } nvn_program;
@@ -42,17 +41,33 @@ uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
 {
     nvn_program *p = (nvn_program *)nvn_obj_get(c->x[0], NVN_PROGRAM);
     int32_t n = (int32_t)c->x[1];
-    if (!p || n < 0 || (uint32_t)n > PROGRAM_STAGES)
+    if (!p || n < 0 || (uint32_t)n > NVN_PROGRAM_STAGES)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx, %d): not a program or too many stages",
                                         (unsigned long long)c->x[0], n);
     memcpy(p->stages, mem + c->x[2], (size_t)n * sizeof(shader_data));
     p->n = (uint32_t)n;
+    for (uint32_t i = 0; i < p->n; i++) {
+        char key[65];
+        p->code[i] = p->stages[i].data;
+        if (!nvn_shader_note(mem, p->stages[i].data, key))
+            return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx): stage %u at 0x%llx has no end",
+                                            (unsigned long long)c->x[0], i, (unsigned long long)p->stages[i].data);
+        if (rl_cfg()->trace_os)
+            rl_log(RL_LOG_INFO, "nvn", "program 0x%llx stage %u: %s", (unsigned long long)c->x[0], i, key);
+    }
     if (p->sets++ == 0 && rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "nvnProgramSetShaders(0x%llx): %d stages, first code 0x%llx control 0x%llx",
                (unsigned long long)c->x[0], n, (unsigned long long)p->stages[0].data,
                (unsigned long long)p->stages[0].control);
     c->x[0] = 1;
     return nvn_ret(c);
+}
+
+const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n)
+{
+    nvn_program *p = (nvn_program *)nvn_obj_get(prog, NVN_PROGRAM);
+    *n = p ? p->n : 0;
+    return p ? p->code : NULL;
 }
 
 /** @brief nvnProgramSetDebugLabel(NVNprogram *, const char *). */

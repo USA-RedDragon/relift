@@ -54,7 +54,8 @@
     X(nvnTextureGetTextureAddress)                                                                                     \
     X(nvnWindowGetNumTextures)                                                                                         \
     X(nvnWindowGetNumActiveTextures)                                                                                   \
-    X(nvnWindowSetNumActiveTextures)
+    X(nvnWindowSetNumActiveTextures)                                                                                   \
+    X(nvnDeviceRegisterFastClearColor)
 
 /** @brief Procs that do nothing relift needs and return 0 (nvn_zero). */
 #define NVN_ZERO_PROCS(X)                                                                                              \
@@ -129,6 +130,8 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture);
 /** @brief A texture as relift lays it out. */
 typedef struct nvn_tex_desc {
     uint32_t target, format, width, height, depth, levels, samples, flags;
+    /** @brief NVNtextureSwizzle of each channel (the builder's), as the texture is sampled without a view. */
+    uint32_t swizzle[4];
     uint64_t stride, pool, offset;
     /** @brief Bytes of storage, its alignment and the bytes from one layer to the next. */
     uint64_t size, align, layer_stride;
@@ -156,6 +159,51 @@ bool nvn_tex_copy(const nvn_tex_desc *d, uint8_t *storage, uint32_t level, uint3
                   uint8_t *packed, bool to_storage);
 /** @brief The layout of the texture at guest address tex, or NULL. */
 const nvn_tex_desc *nvn_texture_desc(uint64_t tex);
+/**
+ * @brief Texture id's registration: the texture's guest address (0 when the id is free), whether it was
+ * registered as an image, and a copy of its view's bytes (has_view false for none).
+ */
+uint64_t nvn_tex_registered(uint32_t id, uint8_t view[16], bool *has_view, bool *image);
+/** @brief The builder bytes of the sampler registered as id (128 bytes), or NULL. */
+const uint8_t *nvn_sampler_registered(uint32_t id);
+
+/** @brief Makes folder dir and the folders above it. */
+void nvn_mkdirs(const char *dir);
+/** @brief The build's shader folder, where programs the table lacks and device.json are written (nvn_shader.c). */
+const char *nvn_shader_dir(void);
+/** @brief Bytes of the program at guest address code: its header if it has one and its code through the first BRA to itself; 0 when none ends within 4 MiB. */
+uint64_t nvn_shader_extent(const uint8_t *mem, uint64_t code);
+/** @brief The key (SHA-256 hex) of the program at code and its length; false when it has no end. */
+bool nvn_shader_key(const uint8_t *mem, uint64_t code, char key[65], uint64_t *len);
+/** @brief Records the program at code in the shader folder unless the table has it; its key goes to key. False when it has no end. */
+bool nvn_shader_note(const uint8_t *mem, uint64_t code, char key[65]);
+/** @brief The NVNshaderStage of the program at code (vertex 0, fragment 1, geometry 2, tessellation control 3 and evaluation 4, compute 5). */
+int nvn_shader_stage(const uint8_t *mem, uint64_t code);
+/** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */
+uint32_t nvn_device_depth_mode(void);
+uint32_t nvn_device_origin_mode(void);
+/** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
+uint32_t *nvn_shader_spirv(const char *key, size_t *words);
+/** @brief Shader stages a program holds. */
+#define NVN_PROGRAM_STAGES 6u
+/** @brief The GPU code addresses of the stages of the program at guest address prog (count in *n), or NULL. */
+const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n);
+
+/** @brief Bytes of an NVNtextureView. */
+#define NVN_VIEW_BYTES 16u
+
+/** @brief What an NVNtextureView changes about its texture; a field the view leaves alone has its has_ flag false. */
+typedef struct nvn_view {
+    bool has_levels, has_layers, has_format, has_swizzle, has_ds_mode, has_target;
+    int32_t base_level, num_levels, min_layer, num_layers;
+    uint32_t format, swizzle[4], ds_mode, target;
+} nvn_view;
+
+/**
+ * @brief Reads the NVNtextureView whose bytes are view (a copy) through the SDK driver's getters, as a call from
+ * the proc running on c. Returns RL_OK, or RL_PENDING, which the caller must return at once.
+ */
+int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], nvn_view *out);
 
 /** @brief Command buffer procs that are not recorded (nvn_cmd.c). */
 #define NVN_CMDBUF_PROCS(X)                                                                                            \
@@ -196,13 +244,19 @@ const nvn_tex_desc *nvn_texture_desc(uint64_t tex);
     X(NVN_CMD_BIND_VERTEX_BUFFER, nvnCommandBufferBindVertexBuffer) \
     X(NVN_CMD_BIND_VERTEX_STREAM_STATE, nvnCommandBufferBindVertexStreamState) \
     X(NVN_CMD_CLEAR_COLOR, nvnCommandBufferClearColor) \
+    X(NVN_CMD_CLEAR_COLORI, nvnCommandBufferClearColori) \
+    X(NVN_CMD_CLEAR_COLORUI, nvnCommandBufferClearColorui) \
     X(NVN_CMD_CLEAR_DEPTH_STENCIL, nvnCommandBufferClearDepthStencil) \
     X(NVN_CMD_COPY_BUFFER_TO_BUFFER, nvnCommandBufferCopyBufferToBuffer) \
     X(NVN_CMD_COPY_BUFFER_TO_TEXTURE, nvnCommandBufferCopyBufferToTexture) \
     X(NVN_CMD_COPY_TEXTURE_TO_BUFFER, nvnCommandBufferCopyTextureToBuffer) \
     X(NVN_CMD_COPY_TEXTURE_TO_TEXTURE, nvnCommandBufferCopyTextureToTexture) \
+    X(NVN_CMD_DISPATCH_COMPUTE, nvnCommandBufferDispatchCompute) \
+    X(NVN_CMD_DRAW_ARRAYS, nvnCommandBufferDrawArrays) \
+    X(NVN_CMD_DRAW_ELEMENTS, nvnCommandBufferDrawElements) \
     X(NVN_CMD_DRAW_ELEMENTS_BASE_VERTEX, nvnCommandBufferDrawElementsBaseVertex) \
     X(NVN_CMD_END_TRANSFORM_FEEDBACK, nvnCommandBufferEndTransformFeedback) \
+    X(NVN_CMD_FENCE_SYNC, nvnCommandBufferFenceSync) \
     X(NVN_CMD_REPORT_COUNTER, nvnCommandBufferReportCounter) \
     X(NVN_CMD_RESET_COUNTER, nvnCommandBufferResetCounter) \
     X(NVN_CMD_SET_COPY_IMAGE_STRIDE, nvnCommandBufferSetCopyImageStride) \
@@ -214,14 +268,18 @@ const nvn_tex_desc *nvn_texture_desc(uint64_t tex);
     X(NVN_CMD_SET_PRIMITIVE_RESTART, nvnCommandBufferSetPrimitiveRestart) \
     X(NVN_CMD_SET_RASTERIZER_DISCARD, nvnCommandBufferSetRasterizerDiscard) \
     X(NVN_CMD_SET_RENDER_TARGETS, nvnCommandBufferSetRenderTargets) \
+    X(NVN_CMD_SET_SAMPLER_POOL, nvnCommandBufferSetSamplerPool) \
     X(NVN_CMD_SET_SCISSOR, nvnCommandBufferSetScissor) \
     X(NVN_CMD_SET_SCISSORS, nvnCommandBufferSetScissors) \
+    X(NVN_CMD_SET_SHADER_SCRATCH_MEMORY, nvnCommandBufferSetShaderScratchMemory) \
     X(NVN_CMD_SET_STENCIL_MASK, nvnCommandBufferSetStencilMask) \
     X(NVN_CMD_SET_STENCIL_REF, nvnCommandBufferSetStencilRef) \
     X(NVN_CMD_SET_STENCIL_VALUE_MASK, nvnCommandBufferSetStencilValueMask) \
     X(NVN_CMD_SET_TILED_CACHE_ACTION, nvnCommandBufferSetTiledCacheAction) \
+    X(NVN_CMD_SET_TEXTURE_POOL, nvnCommandBufferSetTexturePool) \
     X(NVN_CMD_SET_TILED_CACHE_TILE_SIZE, nvnCommandBufferSetTiledCacheTileSize) \
-    X(NVN_CMD_SET_VIEWPORTS, nvnCommandBufferSetViewports)
+    X(NVN_CMD_SET_VIEWPORTS, nvnCommandBufferSetViewports) \
+    X(NVN_CMD_WAIT_SYNC, nvnCommandBufferWaitSync)
 
 /** @brief Recorded command ops. */
 enum nvn_cmd_op {
@@ -242,8 +300,18 @@ typedef struct nvn_cmd {
 /** @brief The commands of one NVNcommandHandle. */
 typedef struct nvn_cmdset {
     uint32_t n;
+    /** @brief Guest bytes the commands pointed at, copied when they were recorded. */
+    uint32_t nbytes;
+    uint8_t *bytes;
     nvn_cmd cmds[];
 } nvn_cmdset;
+
+/** @brief Marks a recorded argument that is an offset into its set's bytes instead of a guest pointer. */
+#define NVN_SNAP (1ull << 63)
+/** @brief The bytes a recorded argument v points at (one marked NVN_SNAP), or NULL for a guest NULL. */
+const void *nvn_cmd_bytes(const nvn_cmdset *s, uint64_t v);
+/** @brief Runs command set s on relift's Vulkan device for queue (nvn_vk.c). Returns RL_OK, or RL_PENDING after a stop. */
+int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s);
 
 /** @brief Records the calling proc as op in its command buffer (x0) and returns as the proc. */
 uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op);

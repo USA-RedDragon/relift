@@ -10,6 +10,7 @@
  */
 #include "nvn_priv.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 
 #define GOB_BYTES_W 64u
@@ -180,6 +181,15 @@ static int read_builder(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc 
         if (rc != RL_OK)
             return rc;
     }
+    uint64_t sp = c->sp, out = (sp - 32) & ~15ull;
+    uint64_t sw[5] = { builder, out, out + 4, out + 8, out + 12 };
+    c->sp = out;
+    int src = nvn_driver_call(c, mem, "nvnTextureBuilderGetSwizzle", sw, 5, NULL);
+    c->sp = sp;
+    if (src != RL_OK)
+        return src;
+    uint32_t swz[4];
+    memcpy(swz, mem + out, sizeof swz);
     memset(d, 0, sizeof *d);
     d->target = (uint32_t)v[0];
     d->format = (uint32_t)v[1];
@@ -192,6 +202,7 @@ static int read_builder(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc 
     d->stride = v[8];
     d->pool = v[9];
     d->offset = v[10];
+    memcpy(d->swizzle, swz, sizeof swz);
     if (!nvn_tex_layout(d))
         return rl_guest_fatal(c, "nvn", "texture format %u is not in relift's format table", d->format);
     return RL_OK;
@@ -244,6 +255,41 @@ uint64_t nvnh_nvnTextureFinalize(rl_ctx *c, uint8_t *mem)
     (void)mem;
     nvn_obj_free(nvn_obj_get(c->x[0], NVN_TEXTURE));
     return nvn_ret(c);
+}
+
+int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], nvn_view *out)
+{
+    memset(out, 0, sizeof *out);
+    uint64_t sp = c->sp, base = (sp - 64) & ~15ull;
+    uint64_t v = base, o = base + NVN_VIEW_BYTES;
+    memcpy(mem + v, view, NVN_VIEW_BYTES);
+    c->sp = base;
+    static const char *const getters[] = { "nvnTextureViewGetLevels",  "nvnTextureViewGetLayers",
+                                           "nvnTextureViewGetFormat",  "nvnTextureViewGetSwizzle",
+                                           "nvnTextureViewGetDepthStencilMode", "nvnTextureViewGetTarget" };
+    bool *has[] = { &out->has_levels, &out->has_layers, &out->has_format,
+                    &out->has_swizzle, &out->has_ds_mode, &out->has_target };
+    int rc = RL_OK;
+    for (unsigned i = 0; i < 6 && rc == RL_OK; i++) {
+        memset(mem + o, 0, 16);
+        uint64_t args[5] = { v, o, o + 4, o + 8, o + 12 }, ret = 0;
+        rc = nvn_driver_call(c, mem, getters[i], args, 5, &ret);
+        if (rc != RL_OK)
+            break;
+        *has[i] = (ret & 0xff) != 0;
+        uint32_t w[4];
+        memcpy(w, mem + o, sizeof w);
+        switch (i) {
+        case 0: out->base_level = (int32_t)w[0]; out->num_levels = (int32_t)w[1]; break;
+        case 1: out->min_layer = (int32_t)w[0]; out->num_layers = (int32_t)w[1]; break;
+        case 2: out->format = w[0]; break;
+        case 3: memcpy(out->swizzle, w, sizeof w); break;
+        case 4: out->ds_mode = w[0]; break;
+        default: out->target = w[0]; break;
+        }
+    }
+    c->sp = sp;
+    return rc;
 }
 
 const nvn_tex_desc *nvn_texture_desc(uint64_t tex)
@@ -339,7 +385,8 @@ uint64_t nvnh_nvnSamplerPoolFinalize(rl_ctx *c, uint8_t *mem)
 
 /** @brief Registrations by descriptor id (relift keeps one table for all texture pools and one for all sampler pools). */
 static struct {
-    uint64_t *tex, *view, *sampler;
+    uint64_t *tex, *sampler;
+    uint8_t (*view)[17];
     bool *image;
     uint32_t ntex, nsampler;
 } reg;
@@ -368,7 +415,7 @@ static bool tex_room(uint32_t id)
     uint64_t *t = grow(reg.tex, sizeof *t, reg.ntex, cap);
     if (t)
         reg.tex = t;
-    uint64_t *v = grow(reg.view, sizeof *v, reg.ntex, cap);
+    uint8_t (*v)[17] = grow(reg.view, sizeof *v, reg.ntex, cap);
     if (v)
         reg.view = v;
     bool *im = grow(reg.image, sizeof *im, reg.ntex, cap);
@@ -380,29 +427,57 @@ static bool tex_room(uint32_t id)
     return true;
 }
 
-static uint64_t register_texture(rl_ctx *c, bool image)
+static pthread_mutex_t reg_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static uint64_t register_texture(rl_ctx *c, uint8_t *mem, bool image)
 {
     uint32_t id = (uint32_t)c->x[1];
-    if (!tex_room(id))
+    pthread_mutex_lock(&reg_lock);
+    if (!tex_room(id)) {
+        pthread_mutex_unlock(&reg_lock);
         return (uint64_t)rl_guest_fatal(c, "nvn", "out of memory registering texture %u", id);
+    }
     reg.tex[id] = c->x[2];
-    reg.view[id] = c->x[3];
+    reg.view[id][16] = c->x[3] != 0;
+    if (c->x[3])
+        memcpy(reg.view[id], mem + c->x[3], 16);
     reg.image[id] = image;
+    pthread_mutex_unlock(&reg_lock);
     return nvn_ret(c);
+}
+
+uint64_t nvn_tex_registered(uint32_t id, uint8_t view[16], bool *has_view, bool *image)
+{
+    pthread_mutex_lock(&reg_lock);
+    uint64_t t = id < reg.ntex ? reg.tex[id] : 0;
+    if (t) {
+        memcpy(view, reg.view[id], 16);
+        *has_view = reg.view[id][16] != 0;
+        *image = reg.image[id];
+    }
+    pthread_mutex_unlock(&reg_lock);
+    return t;
+}
+
+const uint8_t *nvn_sampler_registered(uint32_t id)
+{
+    pthread_mutex_lock(&reg_lock);
+    uint64_t s = id < reg.nsampler ? reg.sampler[id] : 0;
+    pthread_mutex_unlock(&reg_lock);
+    nvn_sampler *o = s ? (nvn_sampler *)nvn_obj_get(s, NVN_SAMPLER) : NULL;
+    return o ? (const uint8_t *)o->builder_copy : NULL;
 }
 
 /** @brief nvnTexturePoolRegisterTexture(const NVNtexturePool *, int id, const NVNtexture *, const NVNtextureView *). */
 uint64_t nvnh_nvnTexturePoolRegisterTexture(rl_ctx *c, uint8_t *mem)
 {
-    (void)mem;
-    return register_texture(c, false);
+    return register_texture(c, mem, false);
 }
 
 /** @brief nvnTexturePoolRegisterImage(const NVNtexturePool *, int id, const NVNtexture *, const NVNtextureView *). */
 uint64_t nvnh_nvnTexturePoolRegisterImage(rl_ctx *c, uint8_t *mem)
 {
-    (void)mem;
-    return register_texture(c, true);
+    return register_texture(c, mem, true);
 }
 
 /** @brief nvnSamplerPoolRegisterSampler(const NVNsamplerPool *, int id, const NVNsampler *). */
@@ -410,15 +485,19 @@ uint64_t nvnh_nvnSamplerPoolRegisterSampler(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     uint32_t id = (uint32_t)c->x[1];
+    pthread_mutex_lock(&reg_lock);
     if (id >= reg.nsampler) {
         uint32_t cap = cap_for(reg.nsampler, id + 1);
         uint64_t *sm = grow(reg.sampler, sizeof *sm, reg.nsampler, cap);
-        if (!sm)
+        if (!sm) {
+            pthread_mutex_unlock(&reg_lock);
             return (uint64_t)rl_guest_fatal(c, "nvn", "out of memory registering sampler %u", id);
+        }
         reg.sampler = sm;
         reg.nsampler = cap;
     }
     reg.sampler[id] = c->x[2];
+    pthread_mutex_unlock(&reg_lock);
     return nvn_ret(c);
 }
 
