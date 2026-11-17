@@ -73,6 +73,8 @@ pub enum Console {
     Gg,
     /// A Game Gear running a Master System cartridge.
     GgMs,
+    /// An SG-1000.
+    Sg,
 }
 
 /// The video standard and region.
@@ -480,6 +482,7 @@ pub fn program_c(p: &Program<'_>, l: &Lifted) -> String {
         Console::Ms => "SMS_SYSTEM_MS",
         Console::Gg => "SMS_SYSTEM_GG",
         Console::GgMs => "SMS_SYSTEM_GG_MS",
+        Console::Sg => "SMS_SYSTEM_SG",
     };
     let region = match p.region {
         Region::NtscU => "SMS_REGION_NTSC_U",

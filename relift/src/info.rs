@@ -382,8 +382,8 @@ pub fn handheld_document(
     Ok(info)
 }
 
-/// The document of a Master System or Game Gear build (`platform` `sms`
-/// or `gg`): the name, the platform and the input section of its ports;
+/// The document of a Master System, Game Gear or SG-1000 build
+/// (`platform` `sms`, `gg` or `sg1000`): the name, the platform and the input section of its ports;
 /// the cartridge has no title or save information in its header.
 #[must_use]
 pub fn sms_document(name: &str, platform: &str, settings: Vec<Setting>, ports: &PortSet) -> Info {

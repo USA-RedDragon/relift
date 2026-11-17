@@ -39,7 +39,7 @@ enum Command {
         /// The output directory (gets c/).
         #[arg(long)]
         out: PathBuf,
-        /// The console: ms, gg or gg-ms.
+        /// The console: ms, gg, gg-ms or sg.
         #[arg(long, default_value = "ms")]
         console: String,
     },
@@ -85,6 +85,7 @@ fn lift_trace(
     let console = match console {
         "gg" => Console::Gg,
         "gg-ms" => Console::GgMs,
+        "sg" => Console::Sg,
         _ => Console::Ms,
     };
     let c = out.join("c");

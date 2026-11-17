@@ -300,6 +300,7 @@ pub fn desktop_file(slug: &str, name: &str, platform: &str) -> String {
         "gba" => "Game Boy Advance game",
         "sms" => "Master System game",
         "gg" => "Game Gear game",
+        "sg1000" => "SG-1000 game",
         _ => "Game",
     };
     format!(

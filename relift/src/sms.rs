@@ -1,4 +1,4 @@
-//! The Master System and Game Gear stage: `relift import` of a cartridge
+//! The Master System, Game Gear and SG-1000 stage: `relift import` of a cartridge
 //! ROM, `relift build` of a native program from it, and `relift run`.
 //!
 //! The import copies the ROM (less a copier header) into the project's
@@ -45,11 +45,11 @@ const SMS_LAYERS: Layers = Layers {
 };
 
 /// The extensions of the cartridge images the import takes.
-const EXTENSIONS: [&str; 2] = ["sms", "gg"];
+const EXTENSIONS: [&str; 4] = ["sms", "gg", "sg", "sc"];
 
-/// Whether `path` is a Master System or Game Gear cartridge image: a
-/// `.sms` or `.gg` file whose layout the formats crate takes, or any file
-/// with a `TMR SEGA` header.
+/// Whether `path` is a Master System, Game Gear or SG-1000 cartridge image:
+/// a `.sms`, `.gg`, `.sg` or `.sc` file whose layout the formats crate
+/// takes, or any file with a `TMR SEGA` header.
 #[must_use]
 pub fn is_rom(path: &Path) -> bool {
     if !path.is_file() {
@@ -61,9 +61,7 @@ pub fn is_rom(path: &Path) -> bool {
         .map(str::to_ascii_lowercase);
     let named = ext.as_deref().is_some_and(|e| EXTENSIONS.contains(&e));
     std::fs::read(path).is_ok_and(|rom| {
-        Cartridge::parse(&rom, ext.as_deref()).is_ok_and(|c| {
-            (named || c.header.is_some()) && !matches!(c.system, Some((System::Sg1000, _)))
-        })
+        Cartridge::parse(&rom, ext.as_deref()).is_ok_and(|c| named || c.header.is_some())
     })
 }
 
@@ -89,6 +87,7 @@ fn quote(s: &str) -> String {
 fn console_of(c: &Cartridge) -> &'static str {
     match c.system {
         Some((System::Gg, _)) => "gg",
+        Some((System::Sg1000, _)) => "sg",
         _ => "sms",
     }
 }
@@ -132,17 +131,22 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " {title} ({} bytes, {}, {} mapper), into {}{}, {}",
         rom.len(),
-        if console == "gg" {
-            "Game Gear"
-        } else {
-            "Master System"
-        },
+        console_name(console),
         cart.mapper.kind.name(),
         out.display(),
         if wrote { "; wrote game.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
+}
+
+/// The console's name for people.
+fn console_name(console: &str) -> &'static str {
+    match console {
+        "gg" => "Game Gear",
+        "sg" => "SG-1000",
+        _ => "Master System",
+    }
 }
 
 /// The project's ROM and settings: the ROM bytes, the title, the console,
@@ -166,8 +170,11 @@ fn project() -> Result<Project, BoxError> {
     let console = match s("console").as_deref() {
         Some("gg") => Console::Gg,
         Some("gg-ms") => Console::GgMs,
+        Some("sg") => Console::Sg,
         Some("sms") | None => Console::Ms,
-        Some(o) => return Err(format!("game.toml: console {o:?} is not sms, gg or gg-ms").into()),
+        Some(o) => {
+            return Err(format!("game.toml: console {o:?} is not sms, gg, gg-ms or sg").into());
+        }
     };
     let region = match s("region").as_deref() {
         Some("ntsc-j") => Region::NtscJ,
@@ -303,10 +310,10 @@ pub fn build(
         relift_cache::write_if_changed(&path, text.as_bytes())?;
         prog.push(path);
     }
-    let platform = if p.console == Console::Gg {
-        "gg"
-    } else {
-        "sms"
+    let platform = match p.console {
+        Console::Gg => "gg",
+        Console::Sg => "sg1000",
+        Console::Ms | Console::GgMs => "sms",
     };
     let ports = relift_input::native_ports(platform)?;
     let game_settings = crate::game_settings::read(Path::new("game.toml"))?;

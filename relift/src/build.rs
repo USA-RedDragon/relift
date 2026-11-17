@@ -2088,7 +2088,7 @@ pub fn run_build(
             crate::gb::build(settings, mods, !dev, target, ui)?
         } else if crate::sms::is_project() {
             if !mods.is_empty() {
-                return Err("mods are not supported for Master System ROMs yet".into());
+                return Err("mods are not supported for Sega 8-bit ROMs yet".into());
             }
             crate::sms::build(settings, true, target, ui)?
         } else if crate::gba::is_project() {

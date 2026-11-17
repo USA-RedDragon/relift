@@ -446,6 +446,7 @@ pub fn platform_name(platform: &str) -> &str {
         "nds" => "Nintendo DS",
         "sms" => "Master System",
         "gg" => "Game Gear",
+        "sg1000" => "SG-1000",
         other => other,
     }
 }

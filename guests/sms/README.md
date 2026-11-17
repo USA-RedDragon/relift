@@ -1,9 +1,8 @@
 # guests/sms
 
 The Sega Master System, Game Gear and SG-1000 guest. State: `relift
-import` takes a `.sms` or `.gg` cartridge, and `relift build` lifts it from
-an ares oracle trace until discovery lands (below); the SG-1000 has its
-video chip but no machine yet.
+import` takes a `.sms`, `.gg` or `.sg` cartridge, and `relift build` lifts it
+from an ares oracle trace until discovery lands (below).
 
 | Crate | Folder | Does |
 |---|---|---|
@@ -34,8 +33,8 @@ relift run
 ```
 
 `relift import` copies the ROM (less a copier header) into the project and
-writes `game.toml` with `guest = "sms"`, the console (`sms`, `gg`, or
-`gg-ms` for a Master System cartridge on a Game Gear), the region (`ntsc-u`,
+writes `game.toml` with `guest = "sms"`, the console (`sms`, `gg`, `gg-ms`
+for a Master System cartridge on a Game Gear, or `sg`), the region (`ntsc-u`,
 `ntsc-j` with the FM unit, `pal`) and the mapper guess; edit them there.
 Until discovery's report is wired in, `relift build` takes the code from the
 executed instructions of an ares oracle trace (`exec.tsv`, the spike's
@@ -44,7 +43,11 @@ takes `--headless`, `--frames N`, `--input FILE` (an input script per
 frame), `--png`, `--png-dir`, `--wav FILE`, `--no-audio` and `--stats`; in
 a window it reads the pad from the keyboard or a gamepad and plays the PSG
 and FM sound. `relift/tests/e2e_sms.rs` runs the whole path on a synthetic
-cartridge.
+cartridge. `relift/tests/e2e_sg.rs` builds our own SG-1000 test ROM (the
+TMS9918A's four modes with pseudo-random VRAM, sprites, the frame
+interrupt, the pad and the PSG) and checks five frames against the CRCs
+the ares SG-1000 core gives; its 600-frame run and instruction log matched
+ares.
 
 ## Lifted code
 
