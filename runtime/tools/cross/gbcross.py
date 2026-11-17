@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Cross-builds the C runtime and a Game Boy, Game Boy Advance or Nintendo 64
-test program for one host target.
+"""Cross-builds the C runtime and a Game Boy, Game Boy Advance, Nintendo 64 or
+Master System test program for one host target.
 
-  python3 -I gbcross.py --target windows-x64 --relift BIN --work DIR [--guest gba|n64] [--run]
+  python3 -I gbcross.py --target windows-x64 --relift BIN --work DIR [--guest gba|n64|sms] [--run]
 
 The Game Boy program is lifted from a generated 32 KiB ROM that loads the
 Mooneye pass registers and stops at `ld b,b`; the Game Boy Advance program
 from a generated cartridge that draws a pattern in bitmap mode 3 and loops
 (--rom FILE takes another ROM instead); the Nintendo 64 program from a
 generated ROM that draws with the RDP, shows it through VI and loops, with
-parallel-rdp's C++ in the runtime (linked against the target's libc++). `relift build` runs on this host and
+parallel-rdp's C++ in the runtime (linked against the target's libc++); the
+Master System program from a generated cartridge whose frame interrupt counts
+and plays a tone, lifted from a generated exec trace. `relift build` runs on this host and
 leaves the generated C and its compile commands in its cache; this script
 compiles those sources, the runtime and, for the Game Boy, the Rust device
 library again for TARGET and links them without the SDL3 window, sound,
@@ -18,8 +20,8 @@ RELIFT_SDL3_DIR, RELIFT_OPUS_DIR and RELIFT_MOLTENVK_DIR at nothing, so the
 host's own libraries never reach the cross build. With --run the program
 runs (on this machine for the host target, under wine for Windows on another
 host, through adb for the Android targets): the Game Boy program in the
-mooneye protocol, the Game Boy Advance and Nintendo 64 programs for a few
-frames, whose frame, register and memory hashes must equal those of the host
+mooneye protocol, the Game Boy Advance, Nintendo 64 and Master System programs for a few
+frames, whose frame, sound, register and memory hashes must equal those of the host
 build (the Nintendo 64 runs, here and there, with no Vulkan driver, so both
 take the machine's own scan-out and an RDP that draws nothing). A missing
 tool stops the run with what to install. Standard library only.
@@ -176,7 +178,39 @@ def make_gba_rom(path):
 
 GBA_ARGS = ["--headless", "--no-save", "--frames", "5"]
 N64_ARGS = ["--headless", "--no-save", "--no-audio", "--frames", "5"]
+SMS_ARGS = ["--headless", "--frames", "30"]
 NO_VULKAN = {"VK_ICD_FILENAMES": "none.json", "VK_DRIVER_FILES": "none.json"}
+
+
+SMS_CODE = [
+    (0x0000, bytes.fromhex("F3ED5631F0DF3E60D3BF3E81D3BFFB7618FD")),
+    (0x0038, bytes.fromhex("F5DBBF3A00C03C3200C03E8ED37F3E07D37F3E90D37FF1FBED4D")),
+]
+
+
+def make_sms_rom(path):
+    """Writes a 32 KiB Master System cartridge whose frame interrupt counts in
+    work RAM and writes a tone to the PSG, and next to it the exec trace of its
+    instructions that `relift build` lifts while discovery is not wired in
+    (RELIFT_SMS_TRACE). Returns the trace's path."""
+    rom = bytearray(0x8000)
+    for at, code in SMS_CODE:
+        rom[at:at + len(code)] = code
+    rom[0x7FF0:0x7FF8] = b"TMR SEGA"
+    rom[0x7FFF] = 0x4C
+    with open(path, "wb") as f:
+        f.write(rom)
+    lengths = {0x00: 1, 0x31: 3, 0x3A: 3, 0x32: 3, 0x3E: 2, 0xD3: 2, 0xDB: 2, 0x18: 2, 0xED: 2}
+    trace = os.path.join(os.path.dirname(path), "exec.tsv")
+    with open(trace, "w") as f:
+        f.write("cpu\tpc\tregion\toffset\tfirst_frame\tcount\tbytes\n")
+        for at, code in SMS_CODE:
+            off = 0
+            while off < len(code):
+                a = at + off
+                f.write(f"z80\t{a:06x}\trom\t{a:x}\t0\t1\t{rom[a:a + 4].hex()}\n")
+                off += lengths.get(code[off], 1)
+    return trace
 
 
 def mips(op, rs, rt, imm):
@@ -216,7 +250,7 @@ def make_n64_rom(path):
 
 def gba_report(text):
     """The lines of a Game Boy Advance or Nintendo 64 run that must match between hosts."""
-    return [l for l in text.splitlines() if l.startswith(("frames ", "regs ", "io ", "vi ", "mem"))]
+    return [l for l in text.splitlines() if l.startswith(("frames ", "regs ", "io ", "vi ", "mem", "audio "))]
 
 
 def ninja_builds(path):
@@ -235,7 +269,9 @@ def host_build(args, env):
         rom = os.path.abspath(args.rom)
     else:
         rom = os.path.join(args.work, "rlcross." + ("z64" if args.guest == "n64" else args.guest))
-        {"gb": make_rom, "gba": make_gba_rom, "n64": make_n64_rom}[args.guest](rom)
+        trace = {"gb": make_rom, "gba": make_gba_rom, "n64": make_n64_rom, "sms": make_sms_rom}[args.guest](rom)
+        if args.guest == "sms":
+            env = dict(env, RELIFT_SMS_TRACE=trace)
     for cmd in ([args.relift, "-q", "import", rom], [args.relift, "-q", "build"]):
         r = run(cmd, cwd=proj, env=env)
         if r.returncode:
@@ -246,7 +282,7 @@ def host_build(args, env):
         raise Missing("ninja, which relift needs to leave its compile commands for this script: apt install ninja-build, or brew install ninja")
     if len(game) != 1:
         sys.exit(f"{cache}: expected one game build.ninja, found {game}")
-    m = re.search(r"(gba?|n64)-runtime/([0-9a-f]+)/runtime\.o", open(game[0]).read())
+    m = re.search(r"(gba?|n64|sms)-runtime/([0-9a-f]+)/runtime\.o", open(game[0]).read())
     runtime = m and os.path.join(cache, m.group(1) + "-runtime", m.group(2), "build.ninja")
     if not runtime or not os.path.isfile(runtime):
         sys.exit(f"{game[0]}: links no runtime build that has a build.ninja")
@@ -453,7 +489,7 @@ def main():
     ap.add_argument("--target", required=True, choices=sorted(TARGETS))
     ap.add_argument("--relift", required=True)
     ap.add_argument("--work", required=True)
-    ap.add_argument("--guest", choices=["gb", "gba", "n64"], default="gb")
+    ap.add_argument("--guest", choices=["gb", "gba", "n64", "sms"], default="gb")
     ap.add_argument("--rom", help="build this ROM instead of the generated one")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--serial")
@@ -490,8 +526,8 @@ def main():
         if args.run:
             kind = TARGETS[args.target]["kind"]
             gba = None
-            prog, extra = (N64_ARGS, NO_VULKAN) if args.guest == "n64" else (GBA_ARGS, None)
-            if args.guest in ("gba", "n64"):
+            prog, extra = {"n64": (N64_ARGS, NO_VULKAN), "sms": (SMS_ARGS, None)}.get(args.guest, (GBA_ARGS, None))
+            if args.guest in ("gba", "n64", "sms"):
                 host_exe = os.path.join(os.path.dirname(game), "game.exe" if platform.system() == "Windows" else "game")
                 r = run([host_exe] + prog, env=dict(os.environ, RELIFT_VIDEO="headless", **(extra or {})))
                 gba = gba_report(r.stdout)

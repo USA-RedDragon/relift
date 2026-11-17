@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Cross-build the runtime and a Game Boy program (or with --guest gba a Game
-# Boy Advance program, with --guest n64 a Nintendo 64 program) for one relift
+# Boy Advance program, with --guest n64 a Nintendo 64 program, with --guest
+# sms a Master System program) for one relift
 # host target, check the release, and run it where the host can (windows-x64
 # under wine).
 # For ios-arm64 it also builds SDL3 and libopus for iOS (and unpacks MoltenVK)
@@ -33,7 +34,7 @@ if [ "$target" = ios-arm64 ]; then
   home="$work/home"
   mkdir -p "$home"
   (cd "$work/proj" && CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" HOME="$home" \
-    RELIFT_CACHE_DIR="$cache" "$relift" build --target ios-arm64)
+    RELIFT_CACHE_DIR="$cache" RELIFT_SMS_TRACE="$work/exec.tsv" "$relift" build --target ios-arm64)
   app="$cache/projects/proj/build/ios-arm64/proj.app"
   plutil -lint "$app/Info.plist"
   python3 -I runtime/tools/cross/release_guard.py --binary "$app/game" --no-interpreter

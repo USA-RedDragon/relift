@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        guest: [gb, gba, n64]
+        guest: [gb, gba, n64, sms]
         target: [windows-x64, windows-arm64, android-arm64]
         include:
           - target: windows-x64
@@ -97,7 +97,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        guest: [gb, gba, n64]
+        guest: [gb, gba, n64, sms]
         target: [macos-x64, ios-arm64]
         include:
           - target: macos-x64
