@@ -80,10 +80,9 @@ static void code_moved(rl_nds_run *r) { memset(r->seen, 0, (size_t)r->fn_total *
  */
 static int64_t fetch9(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
 {
-    (void)seq;
     rl_nds_arm *k = cpu_of(c);
     if (k->id == RL_NDS_ARM7)
-        return rl_nds_code_cost7(k->run->m, addr, 1u << log2);
+        return rl_nds_code_cost7(k->run->m, addr, 1u << log2, seq);
     return rl_nds_code_cost(k->run->m, addr, 1u << log2);
 }
 

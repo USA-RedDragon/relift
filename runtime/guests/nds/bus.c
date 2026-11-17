@@ -138,13 +138,16 @@ static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64
  * instruction's own fetch by its address (the CPU fetches 8 or 4 bytes
  * further on), a refill's two by the branch target. A fetch whose name is
  * the last one's or the next after it continues the stream; another starts
- * it at its name. The stream's address decides the 32-byte block.
+ * it at its name. The stream's address decides the 32-byte block. A
+ * refill's first fetch always starts the stream: a branch to the next
+ * instruction costs the console a full refill (B, BX and MOV PC there 18
+ * cycles more than a NOP, Thumb B 9).
  */
-unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size)
+unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 {
     uint64_t now = nds_now(m, RL_NDS_ARM7);
     uint64_t from = now < m->burst7_end ? m->burst7_end : now;
-    bool goes_on = addr == m->burst7_name || addr == m->burst7_name + size;
+    bool goes_on = seq && (addr == m->burst7_name || addr == m->burst7_name + size);
     uint32_t at = goes_on ? m->burst7_next : addr;
     uint64_t end;
     if (goes_on && from == m->burst7_end && (at & 31u) && m->ram_free <= from) {

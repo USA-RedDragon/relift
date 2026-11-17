@@ -29,11 +29,7 @@ cpu,idx,name,region,place,mode,attr,hw,relift,note
 7,148,stm8,main,wram,warm,-,23,2518,ARM7 STM and byte stores to main RAM
 7,162,s_stm8,main,wram,warm,-,23,2518,ARM7 STM and byte stores to main RAM
 7,171,swp,wram7,wram,warm,-,8,918,ARM7 SWP: one cycle more than the load and store
-7,256,b,none,main,warm,-,35,2818,ARM7 branch refill and Thumb fetches in main RAM
-7,258,bx_arm,none,main,warm,-,35,2818,ARM7 branch refill and Thumb fetches in main RAM
-7,259,mov_pc,none,main,warm,-,35,2818,ARM7 branch refill and Thumb fetches in main RAM
-7,263,bx_thumb,none,main,warm,-,58,5118,ARM7 branch refill and Thumb fetches in main RAM
-7,267,t_b,none,main,warm,-,21,1418,ARM7 branch refill and Thumb fetches in main RAM
+7,263,bx_thumb,none,main,warm,-,58,6518,"ARM7 Thumb BX PC to ARM in main RAM: 7 over, the burst across its 32-byte blocks"
 7,373,str_alu4,main,main,warm,-,41,4818,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 7,374,str_alu16,main,main,warm,-,65,7918,ARM7 write to main RAM followed by fetches: posting
 7,407,swp,wram7,main,warm,-,24,2518,ARM7 SWP: one cycle more than the load and store
