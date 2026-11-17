@@ -903,14 +903,9 @@ pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
             if compute {
                 // The mesh record takes the outputs a program leaves
                 // unwritten too: zero them so every host stores the same.
-                let p = &c.io.mesh.pipe;
-                let words = p.vertex_words(c.io.mesh.components.len() as u32)
-                    + p.primitive_words(c.io.mesh.prims.len() as u32);
                 let attr = c.attr_var();
-                let n = c.m.c_u32(words);
-                let step = c.m.c_u32(lanes);
-                c.counted_loop(vars[0], lane, n, step, |c, i| {
-                    let p = c.elem_ptr(attr, WORKGROUP, i);
+                fallback::record_outputs(c, vars[0], lane, lanes, |c, _, s| {
+                    let p = c.elem_ptr(attr, WORKGROUP, s);
                     c.m.emit_void(op::STORE, &[p, zero]);
                 });
             }
@@ -991,10 +986,6 @@ pub(crate) fn vertex_word(c: &mut Ctx, v: u32, k: u32) -> u32 {
 
 pub(crate) fn components(c: &Ctx) -> Vec<Component> {
     c.io.mesh.components.clone()
-}
-
-pub(crate) fn prim_components(c: &Ctx) -> Vec<PrimComponent> {
-    c.io.mesh.prims.clone()
 }
 
 /// Per-primitive component `k` of primitive `p` from the attribute stage

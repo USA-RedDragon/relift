@@ -92,14 +92,71 @@ const CAP_VIEWPORT_INDEX_LAYER: u32 = 5254;
 const SEM_WORKGROUP_MEMORY: u32 = 0x100;
 
 /// Words of a mesh record for a mesh program with `components`
-/// per-vertex components: the primitive count, the indices, then the
-/// per-vertex and per-primitive outputs as the stage buffer holds them
-/// (blocks of 32 vertices or primitives, component by component), so the
-/// mesh pass copies them word for word and neighboring vertices read
-/// neighboring words.
+/// per-vertex components. A record is the primitive count and the indices
+/// (only when the draw is not [`indexed`]: an indexed draw takes them from
+/// the index region), then one row per per-vertex component of
+/// `max_vertices` words and one row per per-primitive component of
+/// `max_primitives` words, so neighboring vertices read neighboring words
+/// and the stage buffer's padding to blocks of 32 is not stored.
 pub fn mesh_record_words(p: &MeshPipeline, components: u32) -> u32 {
     let prims = p.primitive_components().map_or(0, |v| v.len() as u32);
-    1 + p.index_words() + p.vertex_words(components) + p.primitive_words(prims)
+    let rows = p.max_vertices * components + p.max_primitives * prims;
+    if indexed(p) {
+        rows
+    } else {
+        1 + p.index_words() + rows
+    }
+}
+
+/// Runs `f(c, record word, stage buffer word)`, spread over the lanes, for
+/// every output word of a mesh record ([`mesh_record_words`]): word `i`
+/// of the per-vertex rows, then of the per-primitive rows, with the word
+/// of the attribute stage buffer it comes from. `var` is a function
+/// variable for the loop.
+pub(crate) fn record_outputs(
+    c: &mut Ctx,
+    var: u32,
+    lane: u32,
+    lanes: u32,
+    mut f: impl FnMut(&mut Ctx, u32, u32),
+) {
+    let p = c.io.mesh.pipe.clone();
+    let nc = c.io.mesh.components.len() as u32;
+    let np = c.io.mesh.prims.len() as u32;
+    let regions = [
+        (p.max_vertices, nc, 0, 0),
+        (
+            p.max_primitives,
+            np,
+            p.max_vertices * nc,
+            p.vertex_words(nc),
+        ),
+    ];
+    let step = c.m.c_u32(lanes);
+    for (rows, n, rec0, stage0) in regions {
+        if n == 0 {
+            continue;
+        }
+        let end = c.m.c_u32(rows * n);
+        c.counted_loop(var, lane, end, step, |c, i| {
+            let u = c.u32t();
+            let r = c.m.c_u32(rows);
+            let e = c.m.emit(op::U_MOD, u, &[i, r]);
+            let k = c.m.emit(op::U_DIV, u, &[i, r]);
+            let blk = c.lk_shr(e, 5);
+            let blk = c.lk_mul(blk, 32 * n);
+            let lo = c.m.c_u32(31);
+            let lo = c.m.emit(op::BITWISE_AND, u, &[e, lo]);
+            let row = c.lk_shl(k, 5);
+            let at = add(c, blk, lo);
+            let at = add(c, at, row);
+            let s0 = c.m.c_u32(stage0);
+            let at = add(c, at, s0);
+            let r0 = c.m.c_u32(rec0);
+            let rec = add(c, i, r0);
+            f(c, rec, at);
+        });
+    }
 }
 
 /// The draw is indexed: without per-primitive outputs, vertices that
@@ -110,20 +167,6 @@ pub fn mesh_record_words(p: &MeshPipeline, components: u32) -> u32 {
 /// (max_vertices + 1) - 1`, must be within `maxDrawIndexedIndexValue`.
 pub fn indexed(p: &MeshPipeline) -> bool {
     p.primitive_components().is_ok_and(|v| v.is_empty())
-}
-
-/// Word of component `k` of element `e` in blocks of 32 elements of `n`
-/// components each, from `base`.
-fn block_word(c: &mut Ctx, base: u32, e: u32, n: u32, k: u32) -> u32 {
-    let u = c.u32t();
-    let blk = c.lk_shr(e, 5);
-    let blk = c.lk_mul(blk, 32 * n);
-    let lo = c.m.c_u32(31);
-    let lo = c.m.emit(op::BITWISE_AND, u, &[e, lo]);
-    let at = add(c, blk, lo);
-    let kk = c.m.c_u32(32 * k);
-    let at = add(c, at, kk);
-    add(c, base, at)
 }
 
 /// The storage buffer variable.
@@ -352,20 +395,15 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
         }
         _ => {
             let p = c.io.mesh.pipe.clone();
-            let comps = super::components(c);
-            let nc = comps.len() as u32;
+            let nc = super::components(c).len() as u32;
             let mr = mesh_record_words(&p, nc);
             let recs = header(c, buf, H_MESH_RECS);
             let off = c.lk_mul(lin, mr);
             let rec = add(c, recs, off);
             let n = super::primitive_count(c);
             let zero = c.m.c_u32(0);
-            let b = c.boolt();
-            let lane0 = c.m.emit(op::I_EQUAL, b, &[lane, zero]);
-            c.if_then(lane0, |c| store(c, buf, rec, n));
-            let vpp = p.topology.vertices();
             let one = c.m.c_u32(1);
-            let ib = add(c, rec, one);
+            let vpp = p.topology.vertices();
             let ni = c.lk_mul(n, vpp);
             let map = c.map_var();
             let maxv = c.m.c_u32(p.max_vertices - 1);
@@ -377,7 +415,7 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
                 let glsl = c.glsl;
                 c.m.emit(op::EXT_INST, u, &[glsl, crate::spirv::glsl::U_MIN, v, maxv])
             };
-            if indexed(&p) {
+            let vb = if indexed(&p) {
                 let iw = p.index_words();
                 let idx = header(c, buf, H_INDEXES);
                 let off = c.lk_mul(lin, iw);
@@ -398,23 +436,26 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
                     let at = add(c, idx, i);
                     store(c, buf, at, v);
                 });
+                rec
             } else {
+                let b = c.boolt();
+                let lane0 = c.m.emit(op::I_EQUAL, b, &[lane, zero]);
+                c.if_then(lane0, |c| store(c, buf, rec, n));
+                let ib = add(c, rec, one);
                 c.counted_loop(i_var, lane, ni, step, |c, i| {
                     let v = local(c, i);
                     let at = add(c, ib, i);
                     store(c, buf, at, v);
                 });
-            }
-            let iw = c.m.c_u32(p.index_words());
-            let vb = add(c, ib, iw);
-            let np = super::prim_components(c).len() as u32;
-            let words = c.m.c_u32(p.vertex_words(nc) + p.primitive_words(np));
+                let iw = c.m.c_u32(p.index_words());
+                add(c, ib, iw)
+            };
             let attr = c.attr_var();
-            c.counted_loop(i_var, lane, words, step, |c, i| {
+            record_outputs(c, i_var, lane, lanes, |c, r, s| {
                 let u = c.u32t();
-                let ptr = c.elem_ptr(attr, WORKGROUP, i);
+                let ptr = c.elem_ptr(attr, WORKGROUP, s);
                 let w = c.m.emit(op::LOAD, u, &[ptr]);
-                let at = add(c, vb, i);
+                let at = add(c, vb, r);
                 store(c, buf, at, w);
             });
         }
@@ -566,26 +607,28 @@ pub fn vertex(p: &MeshPipeline, sph: &[u32; 32]) -> Res<Vec<u32>> {
     c.m.emit_void(op::LABEL, &[body]);
     let off = c.lk_mul(g, mr);
     let rec = add(&mut c, recs, off);
-    let ib = add(&mut c, rec, one);
-    let (v, prim) = match prim {
+    let (v, prim, vb) = match prim {
         Some((prim, corner)) => {
+            let ib = add(&mut c, rec, one);
             let pi = c.lk_mul(prim, p.topology.vertices());
             let pi = add(&mut c, ib, pi);
             let pi = add(&mut c, pi, corner);
-            (load(&mut c, buf, pi), prim)
+            let iw = c.m.c_u32(p.index_words());
+            let vb = add(&mut c, ib, iw);
+            (load(&mut c, buf, pi), prim, vb)
         }
         None => {
             let k = c.m.c_u32(p.max_vertices + 1);
             let v = c.m.emit(op::U_MOD, u, &[iv, k]);
-            (v, v)
+            (v, v, rec)
         }
     };
-    let iw = c.m.c_u32(p.index_words());
-    let vb = add(&mut c, ib, iw);
     let v4 = c.m.t_vec(f, 4);
     let clip_count = 32 - (sph[18] & 0xff).leading_zeros();
     for (k, comp) in comps.iter().enumerate() {
-        let at = block_word(&mut c, vb, v, nc, k as u32);
+        let row = c.m.c_u32(k as u32 * p.max_vertices);
+        let at = add(&mut c, vb, row);
+        let at = add(&mut c, at, v);
         let bits = load(&mut c, buf, at);
         let val = c.m.emit(op::BITCAST, f, &[bits]);
         let pf = c.m.t_ptr(OUTPUT, f);
@@ -629,13 +672,13 @@ pub fn vertex(p: &MeshPipeline, sph: &[u32; 32]) -> Res<Vec<u32>> {
         c.m.emit_void(op::STORE, &[target, val]);
     }
     let prims = p.primitive_components()?;
-    let np = prims.len() as u32;
-    let pw = c.m.c_u32(p.vertex_words(nc));
-    let vbase = add(&mut c, ib, iw);
-    let pb = add(&mut c, vbase, pw);
+    let pw = c.m.c_u32(p.max_vertices * nc);
+    let pb = add(&mut c, vb, pw);
     let i32t = c.m.t_i32();
     for (k, comp) in prims.iter().enumerate() {
-        let at = block_word(&mut c, pb, prim, np, k as u32);
+        let row = c.m.c_u32(k as u32 * p.max_primitives);
+        let at = add(&mut c, pb, row);
+        let at = add(&mut c, at, prim);
         let bits = load(&mut c, buf, at);
         match *comp {
             PrimComponent::Generic(loc, s) => {

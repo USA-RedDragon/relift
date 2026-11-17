@@ -9,9 +9,9 @@ mod common;
 
 use common::{translate_with, validate};
 use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::mesh_fallback::{indexed, scan, vertex};
+use relift_gpu_sm86::translate::mesh_fallback::{indexed, mesh_record_words, scan, vertex};
 use relift_gpu_sm86::translate::{
-    HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options,
+    HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options, mesh_components,
 };
 
 struct Case {
@@ -168,6 +168,27 @@ fn pipelines_without_per_primitive_outputs_draw_indexed() {
         .collect();
     listed.sort();
     assert_eq!(listed, ["ext-cull", "nv-prim"]);
+}
+
+/// A mesh record holds the declared maximum of vertices and primitives
+/// per output row, not the stage buffer's blocks of 32, and an indexed
+/// draw's record holds no count or indices (they go to the index region).
+#[test]
+fn mesh_records_are_sized_from_the_declared_maximums() {
+    let want = [
+        ("ext-cull", 1 + 40 * 3 + 48 * 10 + 40 * 3),
+        ("nv-lines", 50 * 8),
+        ("nv-prim", 1 + 20 * 3 + 40 * 8 + 20 * 5),
+        ("nv-small", 3 * 8),
+    ];
+    for (name, words) in want {
+        let c = cases().into_iter().find(|c| c.name == name).unwrap();
+        let mesh = &c.programs.iter().find(|(k, _)| k == "mesh").unwrap().1;
+        let n = mesh_components(&mesh.sph.as_ref().unwrap().words)
+            .unwrap()
+            .len() as u32;
+        assert_eq!(mesh_record_words(&c.pipe, n), words, "{name}");
+    }
 }
 
 #[test]
