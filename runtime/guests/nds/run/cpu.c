@@ -378,6 +378,10 @@ static uint32_t irq_frame(rl_nds_arm *k, uint32_t next)
     return h;
 }
 
+/**
+ * @brief Takes an interrupt at the sync point before next: through the BIOS's handler with the high vectors, or at the
+ * program's own IRQ vector in the instruction TCM with the ARM9's low vectors.
+ */
 static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
 {
     (void)mem;
@@ -389,9 +393,11 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
         return RL_NO_IRQ;
     }
     if (k->id == RL_NDS_ARM9 && k->vectors != 0xFFFF0000u) {
-        rl_guest_fatal(c, "nds", "an IRQ with the ARM9's vectors at 0x%08x: only the BIOS's high vectors are implemented", k->vectors);
-        rl_process_exit(RL_EXIT_SOFTWARE);
-        return RL_NO_IRQ;
+        k->stats.irqs++;
+        rl_arm32_exception(c, RL_ARM32_IRQ, (uint32_t)next + 4u);
+        k->i = 1;
+        c->t = 0;
+        return k->vectors + 0x18u;
     }
     uint32_t h = irq_frame(k, (uint32_t)next);
     rl_arm32_call(c, c->r[14]);
