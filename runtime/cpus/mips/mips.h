@@ -95,6 +95,20 @@ typedef void rl_mips_cache_hook(rl_ctx *c, uint32_t op, uint64_t vaddr);
 RL_RUNTIME_API void rl_mips_set_cache_hook(rl_mips_cache_hook *hook);
 
 /**
+ * @brief A data cache line that changes: line index (vaddr bits 12 to 4)
+ * goes from tag word old to tag word now (RL_MIPS_LINE_VALID,
+ * RL_MIPS_LINE_DIRTY and the physical address). written_back says whether a
+ * dirty old line's bytes went to memory (a fill's or a CACHE write back) or
+ * were dropped (Hit Invalidate, Index Store Tag). Lifted code reads and
+ * writes guest memory directly, so memory holds what the CPU sees; the hook
+ * keeps what the rest of the machine sees under a line that differs (see
+ * cache.c). It runs before the access that missed touches memory.
+ */
+typedef void rl_mips_dline_hook(rl_ctx *c, uint32_t index, uint32_t old, uint32_t now, bool written_back);
+/** @brief Installs the data line hook (NULL: the cache keeps tags only). */
+RL_RUNTIME_API void rl_mips_set_dline_hook(rl_mips_dline_hook *hook);
+
+/**
  * @brief Finds the function for a guest address the dispatch table does not
  * hold (code a guest layer binds outside the table), or NULL.
  */

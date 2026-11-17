@@ -105,10 +105,46 @@ int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k)
 
 uint8_t *rl_n64_rdram(rl_n64 *m) { return m->rdram; }
 
+/** @brief The RDRAM line a data line with tag word t at index holds, or NULL for a line outside RDRAM. */
+static uint8_t *dline_ram(rl_n64 *m, uint32_t index, uint32_t t)
+{
+    uint32_t a = (t & RL_N64_DCACHE_TAG) | (index << 4 & 0xFF0u);
+    return a < RL_N64_RDRAM_SIZE ? m->rdram + a : NULL;
+}
+
+void rl_n64_set_dcache(rl_n64 *m, const uint32_t *tags)
+{
+    m->dc.tags = tags;
+    memset(m->dc.stale, 0, sizeof m->dc.stale);
+    for (uint32_t i = 0; tags && i < RL_N64_DCACHE_LINES; i++) {
+        uint8_t *line = (tags[i] & RL_N64_DCACHE_VALID) ? dline_ram(m, i, tags[i]) : NULL;
+        if (line)
+            memcpy(m->dc.ram[i], line, 16);
+    }
+}
+
+void rl_n64_dline_changed(rl_n64 *m, uint32_t index, uint32_t old, uint32_t now, bool written_back)
+{
+    index &= RL_N64_DCACHE_LINES - 1u;
+    uint8_t *was = (old & RL_N64_DCACHE_VALID) ? dline_ram(m, index, old) : NULL;
+    if (was && ((old & RL_N64_DCACHE_DIRTY) ? !written_back : m->dc.stale[index]))
+        memcpy(was, m->dc.ram[index], 16);
+    m->dc.stale[index] = false;
+    uint8_t *is = (now & RL_N64_DCACHE_VALID) ? dline_ram(m, index, now) : NULL;
+    if (is)
+        memcpy(m->dc.ram[index], is, 16);
+}
+
 void rl_n64_rdram_get(const rl_n64 *m, uint32_t a, uint8_t *out, uint32_t len)
 {
     for (uint32_t i = 0; i < len; i++)
         out[i] = rl_n64_rd8(m, a + i);
+}
+
+void rl_n64_rdram_get_cpu(const rl_n64 *m, uint32_t a, uint8_t *out, uint32_t len)
+{
+    for (uint32_t i = 0; i < len; i++)
+        out[i] = rl_n64_cpu_rd8(m, a + i);
 }
 
 void rl_n64_rdram_put(rl_n64 *m, uint32_t a, const uint8_t *in, uint32_t len)
@@ -266,7 +302,7 @@ uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size)
     if (paddr < RL_N64_RDRAM_SIZE) {
         uint64_t v = 0;
         for (uint32_t i = 0; i < size; i++)
-            v = v << 8 | rl_n64_rd8(m, paddr + i);
+            v = v << 8 | rl_n64_cpu_rd8(m, paddr + i);
         return v;
     }
     rl_n64_sp_catch_up(m, rl_n64_now(m));
@@ -284,7 +320,7 @@ void rl_n64_write(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t value)
     paddr &= 0x1FFFFFFFu;
     if (paddr < RL_N64_RDRAM_SIZE) {
         for (uint32_t i = 0; i < size; i++)
-            rl_n64_wr8(m, paddr + i, (uint8_t)(value >> (8u * (size - 1u - i))));
+            rl_n64_cpu_wr8(m, paddr + i, (uint8_t)(value >> (8u * (size - 1u - i))));
         return;
     }
     rl_n64_sp_catch_up(m, rl_n64_now(m));

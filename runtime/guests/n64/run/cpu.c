@@ -126,6 +126,15 @@ static void cache_hook(rl_ctx *c, uint32_t op, uint64_t vaddr)
     rl_n64_code_written(machine(c), (uint32_t)vaddr & 0x1FFFFFE0u, 32);
 }
 
+_Static_assert(RL_N64_DCACHE_LINES == RL_MIPS_DCACHE_LINES && RL_N64_DCACHE_VALID == RL_MIPS_LINE_VALID &&
+                   RL_N64_DCACHE_DIRTY == RL_MIPS_LINE_DIRTY,
+               "the machine reads the CPU's data cache tag words");
+
+static void dline_hook(rl_ctx *c, uint32_t index, uint32_t old, uint32_t now, bool written_back)
+{
+    rl_n64_dline_changed(machine(c), index, old, now, written_back);
+}
+
 static rl_fn sp_lookup(rl_ctx *c, uint64_t pc) { return rl_n64_code_sp_slot(machine(c), pc); }
 
 static void dump_rdram(rl_n64_run *r)
@@ -137,7 +146,7 @@ static void dump_rdram(rl_n64_run *r)
     uint8_t *bytes = malloc(RL_N64_RDRAM_SIZE);
     FILE *f = bytes ? fopen(path, "wb") : NULL;
     if (f)
-        rl_n64_rdram_get(r->m, 0, bytes, RL_N64_RDRAM_SIZE);
+        rl_n64_rdram_get_cpu(r->m, 0, bytes, RL_N64_RDRAM_SIZE);
     if (!f || fwrite(bytes, 1, RL_N64_RDRAM_SIZE, f) != RL_N64_RDRAM_SIZE)
         rl_log(RL_LOG_ERROR, "n64", "could not write %s", path);
     else
@@ -340,6 +349,8 @@ int rl_n64_run_init(rl_n64_run *r, rl_n64 *m, uint32_t cic, uint32_t entry)
     rl_sched_set_irq_return(r->k, rl_mips_irq_return);
     rl_mips_set_bus(&g_bus);
     rl_mips_set_cache_hook(cache_hook);
+    rl_mips_set_dline_hook(dline_hook);
+    rl_n64_set_dcache(m, r->c->dcache);
     rl_n64_code_set_stub(m, entry_check);
     r->timer.fire = timer_fire;
     r->timer.opaque = r;
@@ -367,7 +378,10 @@ void rl_n64_run_free(rl_n64_run *r)
     }
     rl_mips_set_bus(NULL);
     rl_mips_set_cache_hook(NULL);
+    rl_mips_set_dline_hook(NULL);
     rl_mips_set_lookup_hook(NULL);
+    if (r->m)
+        rl_n64_set_dcache(r->m, NULL);
     if (r->rsp) {
         rl_n64_set_rsp(r->m, NULL, NULL);
         rl_rsp_destroy(r->rsp);

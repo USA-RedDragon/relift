@@ -472,3 +472,52 @@ TEST(n64_boot_places_the_game_and_the_boot_words)
     CHECK_EQ(rl_n64_read(t.m, 0x318u, 4), 0);
     mach_free(&t);
 }
+
+TEST(n64_dma_sees_rdram_not_the_cpus_dirty_lines_and_the_cpu_sees_its_lines_until_dropped)
+{
+    mach t = mach_new(0x2000);
+    static uint32_t tags[RL_N64_DCACHE_LINES];
+    memset(tags, 0, sizeof tags);
+    rl_n64_set_dcache(t.m, tags);
+    uint8_t *ram = rl_n64_rdram(t.m);
+    const uint8_t old[4] = {1, 2, 3, 4}, dma[4] = {9, 9, 9, 9};
+    uint8_t got[4];
+    rl_n64_rdram_put(t.m, 0x2100u, old, 4);
+
+    uint32_t line = 0x2000u | RL_N64_DCACHE_VALID | RL_N64_DCACHE_DIRTY;
+    rl_n64_dline_changed(t.m, 0x010u, 0, line, true);
+    tags[0x010] = line;
+    ram[0x2100u ^ 3u] = 0xAA;
+    rl_n64_rdram_get(t.m, 0x2100u, got, 4);
+    CHECK(memcmp(got, old, 4) == 0);
+
+    rl_n64_rdram_put(t.m, 0x2104u, dma, 4);
+    CHECK_EQ(ram[0x2104u ^ 3u], 0);
+    rl_n64_rdram_get(t.m, 0x2104u, got, 4);
+    CHECK(memcmp(got, dma, 4) == 0);
+
+    rl_n64_dline_changed(t.m, 0x010u, line, line & ~RL_N64_DCACHE_DIRTY, true);
+    tags[0x010] = line & ~RL_N64_DCACHE_DIRTY;
+    rl_n64_rdram_get(t.m, 0x2100u, got, 4);
+    CHECK_EQ(got[0], 0xAA);
+    CHECK_EQ(ram[0x2104u ^ 3u], 0);
+
+    rl_n64_rdram_put(t.m, 0x2108u, dma, 4);
+    CHECK_EQ(ram[0x2108u ^ 3u], 0);
+    rl_n64_rdram_get(t.m, 0x2108u, got, 4);
+    CHECK(memcmp(got, dma, 4) == 0);
+    rl_n64_dline_changed(t.m, 0x010u, tags[0x010], 0, true);
+    tags[0x010] = 0;
+    CHECK_EQ(ram[0x2108u ^ 3u], 9);
+    CHECK_EQ(ram[0x2100u ^ 3u], 0xAA);
+
+    rl_n64_dline_changed(t.m, 0x010u, 0, line, true);
+    tags[0x010] = line;
+    ram[0x210Cu ^ 3u] = 0x55;
+    rl_n64_dline_changed(t.m, 0x010u, line, line & ~RL_N64_DCACHE_VALID, false);
+    tags[0x010] = 0;
+    CHECK_EQ(ram[0x210Cu ^ 3u], 0);
+
+    rl_n64_set_dcache(t.m, NULL);
+    mach_free(&t);
+}

@@ -69,6 +69,17 @@ struct rl_n64 {
     const uint8_t *rom;
     size_t rom_len;
     uint8_t *rdram;
+    /**
+     * @brief The CPU's data cache as the rest of the machine sees it (see
+     * rl_n64_set_dcache): the tag words (NULL: no cache), and for each line
+     * the bytes RDRAM holds under it and whether a device wrote there while
+     * the line was clean.
+     */
+    struct {
+        const uint32_t *tags;
+        uint8_t ram[RL_N64_DCACHE_LINES][16];
+        bool stale[RL_N64_DCACHE_LINES];
+    } dc;
     /** @brief The allocation rdram lies in, aligned up to RL_N64_RDRAM_ALIGN so a GPU can import it. */
     void *rdram_block;
     bool pal;
@@ -252,19 +263,69 @@ struct rl_n64 {
 
 /** @brief The CPU's tick now. */
 uint64_t rl_n64_now(const rl_n64 *m);
-/** @brief The guest byte of RDRAM at address a (wrapping): RDRAM holds host-order 32-bit words. */
-static inline uint8_t rl_n64_rd8(const rl_n64 *m, uint32_t a) { return m->rdram[(a ^ 3u) & (RL_N64_RDRAM_SIZE - 1u)]; }
+/*
+ * RDRAM holds host-order 32-bit words, as the CPU sees them: its data
+ * cache's lines included. The rd and wr accessors are the rest of the
+ * machine's (DMA, VI, the PIF): under a valid line whose bytes differ from
+ * RDRAM's (dirty, or written by a device while clean) they read and write the
+ * bytes the machine keeps for the line, which leaves the CPU's view alone.
+ */
+
+/** @brief The index of the valid data line that holds RDRAM address a, or -1. */
+static inline int rl_n64_dline(const rl_n64 *m, uint32_t a)
+{
+    const uint32_t *t = m->dc.tags;
+    if (!t)
+        return -1;
+    uint32_t i = (a >> 4) & (RL_N64_DCACHE_LINES - 1u);
+    uint32_t want = (a & RL_N64_DCACHE_TAG) | RL_N64_DCACHE_VALID;
+    if ((t[i] & ~RL_N64_DCACHE_DIRTY) == want)
+        return (int)i;
+    i ^= RL_N64_DCACHE_LINES / 2u;
+    return (t[i] & ~RL_N64_DCACHE_DIRTY) == want ? (int)i : -1;
+}
+
+/** @brief Where the machine reads the RDRAM line of a (16 bytes, host-order words). */
+static inline const uint8_t *rl_n64_rd_line(const rl_n64 *m, uint32_t a)
+{
+    a &= RL_N64_RDRAM_SIZE - 1u;
+    int i = rl_n64_dline(m, a);
+    if (i >= 0 && ((m->dc.tags[i] & RL_N64_DCACHE_DIRTY) || m->dc.stale[i]))
+        return m->dc.ram[i];
+    return m->rdram + (a & ~15u);
+}
+
+/** @brief Where the machine writes the RDRAM line of a: the line's kept bytes under a valid line, which then differs. */
+static inline uint8_t *rl_n64_wr_line(rl_n64 *m, uint32_t a)
+{
+    a &= RL_N64_RDRAM_SIZE - 1u;
+    int i = rl_n64_dline(m, a);
+    if (i < 0)
+        return m->rdram + (a & ~15u);
+    if (!(m->dc.tags[i] & RL_N64_DCACHE_DIRTY) && !m->dc.stale[i]) {
+        memcpy(m->dc.ram[i], m->rdram + (a & ~15u), 16);
+        m->dc.stale[i] = true;
+    }
+    return m->dc.ram[i];
+}
+
+/** @brief The guest byte of RDRAM at address a (wrapping). */
+static inline uint8_t rl_n64_rd8(const rl_n64 *m, uint32_t a) { return rl_n64_rd_line(m, a)[(a ^ 3u) & 15u]; }
 /** @brief Writes the guest byte v of RDRAM at address a (wrapping). */
-static inline void rl_n64_wr8(rl_n64 *m, uint32_t a, uint8_t v) { m->rdram[(a ^ 3u) & (RL_N64_RDRAM_SIZE - 1u)] = v; }
+static inline void rl_n64_wr8(rl_n64 *m, uint32_t a, uint8_t v) { rl_n64_wr_line(m, a)[(a ^ 3u) & 15u] = v; }
 /** @brief The 32-bit word of RDRAM at a (a multiple of 4). */
 static inline uint32_t rl_n64_rd32(const rl_n64 *m, uint32_t a)
 {
     uint32_t w;
-    memcpy(&w, m->rdram + (a & (RL_N64_RDRAM_SIZE - 4u)), 4);
+    memcpy(&w, rl_n64_rd_line(m, a) + (a & 12u), 4);
     return w;
 }
 /** @brief Writes the 32-bit word v of RDRAM at a (a multiple of 4). */
-static inline void rl_n64_wr32(rl_n64 *m, uint32_t a, uint32_t v) { memcpy(m->rdram + (a & (RL_N64_RDRAM_SIZE - 4u)), &v, 4); }
+static inline void rl_n64_wr32(rl_n64 *m, uint32_t a, uint32_t v) { memcpy(rl_n64_wr_line(m, a) + (a & 12u), &v, 4); }
+/** @brief The guest byte of RDRAM at a as the CPU sees it (wrapping). */
+static inline uint8_t rl_n64_cpu_rd8(const rl_n64 *m, uint32_t a) { return m->rdram[(a ^ 3u) & (RL_N64_RDRAM_SIZE - 1u)]; }
+/** @brief Writes the guest byte v of RDRAM at a as the CPU does (wrapping). */
+static inline void rl_n64_cpu_wr8(rl_n64 *m, uint32_t a, uint8_t v) { m->rdram[(a ^ 3u) & (RL_N64_RDRAM_SIZE - 1u)] = v; }
 
 /** @brief Sets bits of MI_INTR. */
 void rl_n64_mi_raise(rl_n64 *m, uint32_t bits);

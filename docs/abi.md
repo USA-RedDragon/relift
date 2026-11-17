@@ -2316,16 +2316,28 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   CVT.S.D 1, the other conversions and roundings 4. A branch ticks before
   its delay slot runs, and a slot a likely branch annuls takes no cycle.
   Every block ends in a sync point.
-- The caches are modeled for their cycles, not their data (RDRAM is always
-  up to date): `rl_ctx` keeps the tags of the 16 KiB instruction cache
-  (32-byte lines) and the 8 KiB write-back data cache (16-byte lines, a
-  dirty bit). A fetch where a run may start a line (a line's first word, a
-  function entry, a branch or jump target, a call's return, a delay slot
-  that starts a line, the target of `rl_mips_eret_to`) calls
-  `rl_mips_icache`: a kseg0 or mapped line that is not in the cache costs
-  48 cycles. Every load and store calls `rl_mips_dcache` after the access:
-  a cached hit takes 1 cycle (a store marks the line dirty), a miss 40, plus
-  40 to write a dirty line back first. kseg1 costs nothing in either cache.
+- `rl_ctx` keeps the tags of the 16 KiB instruction cache (32-byte lines)
+  and the 8 KiB write-back data cache (16-byte lines, a dirty bit). A fetch
+  where a run may start a line (a line's first word, a function entry, a
+  branch or jump target, a call's return, a delay slot that starts a line,
+  the target of `rl_mips_eret_to`) calls `rl_mips_icache`: a kseg0 or
+  mapped line that is not in the cache costs 48 cycles. Every load calls
+  `rl_mips_dcache` after the access and every store before it writes
+  memory: a cached hit takes 1 cycle (a store marks the line dirty), a miss
+  40, plus 40 to write a dirty line back first. kseg1 costs nothing in
+  either cache.
+- The data cache holds data. RDRAM holds what the CPU sees, its lines
+  included, since lifted code reads and writes it directly; each change of
+  a data line goes to the line hook (`rl_mips_set_dline_hook`), and the
+  machine keeps the bytes RDRAM itself holds under each line: a fill keeps
+  RDRAM's line, a dirty line written back leaves RDRAM as it is, a line
+  dropped (Hit Invalidate, or a clean line a device wrote under) gives its
+  kept bytes back. DMA, the AI and the PIF read and write those kept bytes
+  under a dirty line or one a device wrote, so they see no store until it
+  is written back and the CPU's loads see a line's old bytes after a DMA
+  under it. The renderer reads RDRAM itself: at a frame edge the kept bytes
+  of such lines in the picture VI scans out are swapped in until the
+  scan-out is done.
   CACHE (`rl_mips_cache_op`) invalidates, writes back, fills and loads and
   stores tags through TagLo with the same costs. A guard's slow path takes
   its instruction's fetch, its issue cycle and its data cache cycles, but

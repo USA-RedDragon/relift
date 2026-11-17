@@ -406,6 +406,14 @@ impl Core {
         b.io_load(pa, Width::new(8 * n), self.endian, IoKind::Any)
     }
 
+    /// Leaves through the guard of `dev` when the store at `pa` under `g`
+    /// may not be plain memory, as [`Core::store`] does first; for what must
+    /// come between that guard and the store.
+    pub(crate) fn store_guard(&mut self, b: &mut Builder, pa: Value, dev: Exc, g: Option<Value>) {
+        let g = self.guard(b, g);
+        self.device_exit(b, pa, g, dev);
+    }
+
     /// A store of `n` bytes of `v` at `pa` under `g`; `dev` as for
     /// [`Core::load`].
     pub(crate) fn store(

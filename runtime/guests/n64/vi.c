@@ -63,6 +63,63 @@ static uint32_t pixel32(const rl_n64 *m, uint32_t a)
     return rl_n64_rd32(m, a) >> 8;
 }
 
+/**
+ * @brief The data lines in the RDRAM VI scans out (with two lines of the
+ * framebuffer on each side) whose bytes the CPU holds and RDRAM does not:
+ * their number, and with swap, RDRAM and the machine's kept bytes of each
+ * exchanged.
+ */
+static unsigned held_lines(rl_n64 *m, bool swap)
+{
+    const uint32_t *tags = m->dc.tags;
+    uint32_t depth = m->vi.control & 3u, stride = (m->vi.width & 0xFFFu) * (depth == 3 ? 4u : 2u);
+    if (!tags || depth < 2)
+        return 0;
+    uint32_t vstart = (m->vi.v_video >> 16) & 0x3FFu, vend = m->vi.v_video & 0x3FFu;
+    uint32_t lines = vend > vstart ? ((vend - vstart) / 2u) * (m->vi.y_scale & 0xFFFu) / 1024u : 0;
+    if (!lines || lines > 576u)
+        lines = 576u;
+    uint32_t origin = m->vi.origin & 0xFFFFFFu;
+    uint32_t lo = origin > 2u * stride ? origin - 2u * stride : 0, hi = origin + (lines + 2u) * stride;
+    unsigned n = 0;
+    for (uint32_t i = 0; i < RL_N64_DCACHE_LINES; i++) {
+        uint32_t t = tags[i];
+        if (!(t & RL_N64_DCACHE_VALID) || !((t & RL_N64_DCACHE_DIRTY) || m->dc.stale[i]))
+            continue;
+        uint32_t a = (t & RL_N64_DCACHE_TAG) | (i << 4 & 0xFF0u);
+        if (a < lo || a >= hi || a >= RL_N64_RDRAM_SIZE)
+            continue;
+        n++;
+        if (swap) {
+            uint8_t tmp[16];
+            memcpy(tmp, m->rdram + a, 16);
+            memcpy(m->rdram + a, m->dc.ram[i], 16);
+            memcpy(m->dc.ram[i], tmp, 16);
+        }
+    }
+    return n;
+}
+
+/**
+ * @brief The renderer's scan-out at the frame edge. It reads RDRAM itself,
+ * where the CPU's lines are; when a line the CPU holds lies in the picture,
+ * RDRAM's bytes go in its place until the scan-out is done.
+ */
+static void scan_out(rl_n64 *m)
+{
+    bool held = m->dp.ops->vi_picture && held_lines(m, false) != 0;
+    if (held) {
+        m->dp.ops->sync_full(m->dp.user);
+        held_lines(m, true);
+    }
+    m->dp.ops->vi_frame(m->dp.user, m->vi.field);
+    if (held) {
+        uint32_t w, h;
+        m->dp.ops->vi_picture(m->dp.user, &w, &h);
+        held_lines(m, true);
+    }
+}
+
 static void frame(rl_n64 *m)
 {
     m->stats.frames++;
@@ -94,7 +151,7 @@ static void line(rl_n64 *m)
     }
     if (m->vi.vcounter == ((m->vi.v_video >> 16) & 0x3FFu) >> 1) {
         if (m->dp.ops && m->dp.ops->vi_frame)
-            m->dp.ops->vi_frame(m->dp.user, m->vi.field);
+            scan_out(m);
         frame(m);
     }
     if (half_lines & 1u) {

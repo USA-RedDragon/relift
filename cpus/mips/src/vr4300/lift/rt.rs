@@ -32,8 +32,10 @@
 //!   fcr31, a, b)` and a compare's condition bit from `mips_fcmp(cond, fmt,
 //!   fcr31, a, b)`; both give the new FCR31.
 //! - Every load and store also calls the intrinsic `mips_dcache(vaddr,
-//!   write, run)`, the data cache's part of the access (its tags and
-//!   cycles are the runtime's), after the access.
+//!   write, run)`, the data cache's part of the access (its tags, the
+//!   bytes the machine keeps under its lines and its cycles are the
+//!   runtime's): after a load, and before a store writes memory, so a
+//!   line's fill keeps the bytes the store replaces.
 //! - The CP0 Random register is the intrinsic `mips_random()`, and the TLB
 //!   instructions and CACHE are `mips_tlb(op, run)` and `mips_cache(op,
 //!   vaddr, run)`, where `run` is 1 when the instruction is not annulled.
@@ -293,8 +295,9 @@ impl St {
     /// conditional one that may not be plain memory leaves through the
     /// TLBS guard.
     pub fn store(&mut self, b: &mut Builder, pa: Value, n: u32, v: Value, g: Option<Value>) {
-        self.core.store(b, pa, n, v, Exc::TLBS, g);
+        self.core.store_guard(b, pa, Exc::TLBS, g);
         self.dcache(b, true, g);
+        self.core.store(b, pa, n, v, Exc::TLBS, g);
     }
 
     /// SC and SCD: the overlay calls this only when LLbit is set, and the

@@ -3,9 +3,12 @@
  * @brief The VR4300's caches as far as time goes: the tags of the 16 KiB
  * instruction cache (32-byte lines) and the 8 KiB write-back data cache
  * (16-byte lines, with a dirty bit), the cycles of a line fill and a write
- * back, and CACHE on both. The data stays in guest memory: lifted code
- * reads and writes RDRAM directly, so a line holds no bytes and a write
- * back moves none; DMA sees memory as if every line were written back.
+ * back, and CACHE on both. Lifted code reads and writes guest memory
+ * directly, so memory holds the bytes the CPU sees, its lines' included;
+ * every change of a data line goes to the line hook (rl_mips_set_dline_hook),
+ * which keeps the bytes the rest of the machine sees under the lines that
+ * differ: a line's fill keeps memory's bytes, a dirty line written back
+ * leaves memory as it is, and a line dropped gives its kept bytes back.
  *
  * Only kseg0 and TLB-mapped addresses are cached; kseg1 is not. A fill
  * takes 48 cycles for an instruction line and 40 for a data line, a write
@@ -39,7 +42,22 @@ enum {
     TAG = 0xFFFFF000u,
 };
 
+static rl_mips_dline_hook *g_dline_hook;
+
+void rl_mips_set_dline_hook(rl_mips_dline_hook *hook) { g_dline_hook = hook; }
+
 static void charge(rl_ctx *c, uint32_t n) { c->time.budget -= (int64_t)n; }
+
+/** @brief Sets the data line at line to now, telling the line hook when it changes. */
+static void dset(rl_ctx *c, uint32_t *line, uint32_t now, bool written_back)
+{
+    uint32_t old = *line;
+    if (old == now)
+        return;
+    *line = now;
+    if (g_dline_hook)
+        g_dline_hook(c, (uint32_t)(line - c->dcache), old, now, written_back);
+}
 
 /** @brief The physical address of a cached vaddr, or false for kseg1 and an address that does not translate. */
 static bool cached(const rl_ctx *c, uint64_t vaddr, uint32_t *paddr)
@@ -87,7 +105,7 @@ static void dfill(rl_ctx *c, uint64_t vaddr, uint32_t paddr, uint32_t write)
         charge(c, WRITEBACK);
         rl_mips_get_stats()->dcache_writebacks++;
     }
-    *line = (paddr & TAG) | RL_MIPS_LINE_VALID | (write ? RL_MIPS_LINE_DIRTY : 0u);
+    dset(c, line, (paddr & TAG) | RL_MIPS_LINE_VALID | (write ? RL_MIPS_LINE_DIRTY : 0u), true);
     charge(c, DFILL);
     rl_mips_get_stats()->dcache_misses++;
 }
@@ -156,30 +174,33 @@ void rl_mips_cache_op(rl_ctx *c, uint32_t op, uint64_t vaddr)
             charge(c, WRITEBACK);
             rl_mips_get_stats()->dcache_writebacks++;
         }
-        if (*dl & RL_MIPS_LINE_VALID)
-            *dl = pa & TAG;
-        *dl &= ~(uint32_t)(RL_MIPS_LINE_VALID | RL_MIPS_LINE_DIRTY);
+        dset(c, dl, ((*dl & RL_MIPS_LINE_VALID) ? pa & TAG : *dl) & ~(uint32_t)(RL_MIPS_LINE_VALID | RL_MIPS_LINE_DIRTY),
+             true);
         break;
     case 0x05:
         c->cp0_tag_lo = tag_lo(*dl, 3u);
         break;
     case 0x09:
-        *dl = from_tag_lo(c->cp0_tag_lo) | (*dl & RL_MIPS_LINE_DIRTY) |
-              (tag_lo_valid(c->cp0_tag_lo) ? RL_MIPS_LINE_VALID : 0u);
+        dset(c, dl,
+             from_tag_lo(c->cp0_tag_lo) | (*dl & RL_MIPS_LINE_DIRTY) |
+                 (tag_lo_valid(c->cp0_tag_lo) ? RL_MIPS_LINE_VALID : 0u),
+             false);
         break;
-    case 0x0D:
+    case 0x0D: {
+        uint32_t dirty = *dl & RL_MIPS_LINE_DIRTY;
         if (!hit(*dl, pa)) {
             if ((*dl & (RL_MIPS_LINE_VALID | RL_MIPS_LINE_DIRTY)) == (RL_MIPS_LINE_VALID | RL_MIPS_LINE_DIRTY)) {
                 charge(c, WRITEBACK);
                 rl_mips_get_stats()->dcache_writebacks++;
             }
-            *dl &= ~RL_MIPS_LINE_DIRTY;
+            dirty = 0;
         }
-        *dl = (pa & TAG) | (*dl & RL_MIPS_LINE_DIRTY) | RL_MIPS_LINE_VALID;
+        dset(c, dl, (pa & TAG) | dirty | RL_MIPS_LINE_VALID, true);
         break;
+    }
     case 0x11:
         if (hit(*dl, pa))
-            *dl &= ~RL_MIPS_LINE_VALID;
+            dset(c, dl, *dl & ~RL_MIPS_LINE_VALID, false);
         break;
     case 0x15:
         if (hit(*dl, pa)) {
@@ -187,14 +208,14 @@ void rl_mips_cache_op(rl_ctx *c, uint32_t op, uint64_t vaddr)
                 charge(c, WRITEBACK);
                 rl_mips_get_stats()->dcache_writebacks++;
             }
-            *dl &= ~RL_MIPS_LINE_VALID;
+            dset(c, dl, *dl & ~RL_MIPS_LINE_VALID, true);
         }
         break;
     case 0x19:
         if (hit(*dl, pa) && (*dl & RL_MIPS_LINE_DIRTY)) {
             charge(c, WRITEBACK);
             rl_mips_get_stats()->dcache_writebacks++;
-            *dl &= ~RL_MIPS_LINE_DIRTY;
+            dset(c, dl, *dl & ~RL_MIPS_LINE_DIRTY, true);
         }
         break;
     default:

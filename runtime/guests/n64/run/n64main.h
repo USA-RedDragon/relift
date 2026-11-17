@@ -50,7 +50,7 @@ typedef struct rl_n64_program {
  * framebuffer at exit), --png-dir DIR with --png-every N (every Nth frame),
  * --wav FILE (the sound as 16-bit stereo at RL_N64_AUDIO_RATE, written at the
  * stop; the sound's hash, peak and frame count are on stderr with --frames),
- * --no-audio (open no sound output), --dump PREFIX (PREFIX.rdram, .dmem and .imem at the stop; RDRAM when CPU
+ * --no-audio (open no sound output), --dump PREFIX (PREFIX.rdram as the CPU sees it, .dmem and .imem at the stop; RDRAM when CPU
  * code is missed, IMEM and DMEM when RSP code is),
  * --save BASE (the save files BASE.eep, BASE.sra and BASE.fla instead of
  * the ones rl_n64_save_path names), --no-save, --stats (counters on stderr)

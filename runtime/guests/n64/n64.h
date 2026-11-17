@@ -115,9 +115,11 @@ RL_RUNTIME_API int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k);
  * and rl_n64_rdram_put.
  */
 RL_RUNTIME_API uint8_t *rl_n64_rdram(rl_n64 *m);
-/** @brief Copies len guest bytes of RDRAM from address a (wrapping) to out, in the guest's order. */
+/** @brief Copies len guest bytes of RDRAM from address a (wrapping) to out, in the guest's order, as DMA reads them. */
 RL_RUNTIME_API void rl_n64_rdram_get(const rl_n64 *m, uint32_t a, uint8_t *out, uint32_t len);
-/** @brief Copies len guest bytes from in to RDRAM at address a (wrapping). */
+/** @brief Copies len guest bytes of RDRAM from address a (wrapping) to out as the CPU sees them: its data cache's dirty lines included. */
+RL_RUNTIME_API void rl_n64_rdram_get_cpu(const rl_n64 *m, uint32_t a, uint8_t *out, uint32_t len);
+/** @brief Copies len guest bytes from in to RDRAM at address a (wrapping), as DMA writes them. */
 RL_RUNTIME_API void rl_n64_rdram_put(rl_n64 *m, uint32_t a, const uint8_t *in, uint32_t len);
 /** @brief SP DMEM (0x1000 bytes) followed by IMEM (0x1000 bytes). */
 RL_RUNTIME_API uint8_t *rl_n64_spmem(rl_n64 *m);
@@ -312,6 +314,30 @@ RL_RUNTIME_API uint32_t rl_n64_sp_pc(const rl_n64 *m);
 /** @brief The most 64-bit command words the DP takes in one list, as ares's queue. */
 #define RL_N64_DP_QUEUE 0x8000u
 
+/** @brief Lines of the CPU's data cache. */
+#define RL_N64_DCACHE_LINES 512u
+/** @brief The valid bit of a data cache tag word. */
+#define RL_N64_DCACHE_VALID 1u
+/** @brief The dirty bit of a data cache tag word. */
+#define RL_N64_DCACHE_DIRTY 2u
+/** @brief The physical address bits of a data cache tag word. */
+#define RL_N64_DCACHE_TAG 0xFFFFF000u
+/**
+ * @brief Gives the machine the CPU's data cache tags (RL_N64_DCACHE_LINES
+ * tag words indexed by virtual address bits 12 to 4; NULL: no cache). RDRAM
+ * then holds what the CPU sees, and the machine keeps what RDRAM holds under
+ * each line that differs: DMA and VI read and write that, and see no byte
+ * of a dirty line until it is written back. Call rl_n64_dline_changed at
+ * every change of a line.
+ */
+RL_RUNTIME_API void rl_n64_set_dcache(rl_n64 *m, const uint32_t *tags);
+/**
+ * @brief The data line index went from tag word old to now (see
+ * rl_n64_set_dcache), before the access that changed it; written_back says
+ * whether a dirty old line's bytes reached RDRAM or were dropped.
+ */
+RL_RUNTIME_API void rl_n64_dline_changed(rl_n64 *m, uint32_t index, uint32_t old, uint32_t now, bool written_back);
+
 /**
  * @brief The renderer behind the DP. The machine takes each command list
  * as ares does: at the DPC_END write (or the unfreeze) it reads [current,
@@ -334,7 +360,8 @@ typedef struct rl_n64_rdp_ops {
      * vi_frame starts the scan-out of a frame at the frame edge of an active
      * VI, with the field; vi_picture returns the last frame's picture as
      * width * height RGBA bytes, valid until the next vi_frame, NULL before
-     * the first.
+     * the first; it waits for the scan-out vi_frame started, which reads
+     * RDRAM until then.
      */
     void (*vi_register)(void *user, unsigned index, uint32_t value);
     void (*vi_frame)(void *user, unsigned field);

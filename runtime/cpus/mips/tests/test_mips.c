@@ -687,6 +687,54 @@ TEST(mips_dcache_hits_fills_and_writes_back_dirty_lines)
     CHECK_EQ(CYCLES(c, rl_mips_dcache(c, K0(0x3104), 0, 1)), 40);
 }
 
+typedef struct dline_seen {
+    unsigned calls;
+    uint32_t index, old, now;
+    bool written_back;
+} dline_seen;
+static dline_seen g_dline;
+
+static void on_dline(rl_ctx *c, uint32_t index, uint32_t old, uint32_t now, bool written_back)
+{
+    (void)c;
+    g_dline = (dline_seen){g_dline.calls + 1, index, old, now, written_back};
+}
+
+TEST(mips_dcache_tells_the_line_hook_of_each_change_of_a_line)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    memset(c->dcache, 0, sizeof c->dcache);
+    g_dline.calls = 0;
+    rl_mips_set_dline_hook(on_dline);
+    rl_mips_dcache(c, K0(0x2104), 1, 1);
+    CHECK_EQ(g_dline.calls, 1);
+    CHECK_EQ(g_dline.index, 0x010);
+    CHECK_EQ(g_dline.old, 0);
+    CHECK_EQ(g_dline.now, 0x2000u | RL_MIPS_LINE_VALID | RL_MIPS_LINE_DIRTY);
+    rl_mips_dcache(c, K0(0x2108), 1, 1);
+    rl_mips_dcache(c, K0(0x2100), 0, 1);
+    CHECK_EQ(g_dline.calls, 1);
+    rl_mips_dcache(c, K0(0x4100), 0, 1);
+    CHECK_EQ(g_dline.calls, 2);
+    CHECK_EQ(g_dline.old, 0x2000u | RL_MIPS_LINE_VALID | RL_MIPS_LINE_DIRTY);
+    CHECK_EQ(g_dline.now, 0x4000u | RL_MIPS_LINE_VALID);
+    CHECK(g_dline.written_back);
+    rl_mips_dcache(c, K0(0x4100), 1, 1);
+    rl_mips_cache(c, 0x19, K0(0x4100), 1);
+    CHECK_EQ(g_dline.calls, 3);
+    CHECK_EQ(g_dline.now, 0x4000u | RL_MIPS_LINE_VALID);
+    CHECK(g_dline.written_back);
+    rl_mips_dcache(c, K0(0x4100), 1, 1);
+    rl_mips_cache(c, 0x11, K0(0x4100), 1);
+    CHECK_EQ(g_dline.calls, 4);
+    CHECK_EQ(g_dline.now, 0x4000u | RL_MIPS_LINE_DIRTY);
+    CHECK(!g_dline.written_back);
+    rl_mips_cache(c, 0x11, K0(0x4100), 1);
+    CHECK_EQ(g_dline.calls, 4);
+    rl_mips_set_dline_hook(NULL);
+}
+
 TEST(mips_crash_reports_name_the_cause_and_registers)
 {
     rl_ctx *c = boot();

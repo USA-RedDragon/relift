@@ -282,7 +282,7 @@ static void report(host *H, rl_ctx *c)
     uint8_t *rdram = malloc(RL_N64_RDRAM_SIZE);
     if (!rdram)
         return;
-    rl_n64_rdram_get(H->run.m, 0, rdram, RL_N64_RDRAM_SIZE);
+    rl_n64_rdram_get_cpu(H->run.m, 0, rdram, RL_N64_RDRAM_SIZE);
     printf("mem rdram=%016llx dmem=%016llx imem=%016llx\n",
            (unsigned long long)fnv(0xCBF29CE484222325ull, rdram, RL_N64_RDRAM_SIZE),
            (unsigned long long)fnv(0xCBF29CE484222325ull, sp, 0x1000),
