@@ -290,6 +290,7 @@ static const rl_switch_hook g_hook = {
     .replace = hook_replace,
     .defined = hook_defined,
     .wants = hook_wants,
+    .consoles = 1u << RL_CONSOLE_SWITCH2,
 };
 
 const rl_switch_hook *rl_nvn_switch_hook(void) { return &g_hook; }

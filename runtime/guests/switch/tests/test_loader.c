@@ -188,6 +188,25 @@ static const rl_switch_hook g_hook = {
     .defined = hook_defined,
 };
 
+static int auto_wants(void *user, const char *symbol)
+{
+    (void)user;
+    return !strcmp(symbol, "rl_test_import");
+}
+
+/** @brief Auto hooks for one console each; the test program is a Switch program, so only the first turns on. */
+static const rl_switch_hook g_switch_hook = {
+    .name = "loader-switch",
+    .wants = auto_wants,
+    .consoles = 1u << RL_CONSOLE_SWITCH,
+};
+
+static const rl_switch_hook g_switch2_hook = {
+    .name = "loader-switch2",
+    .wants = auto_wants,
+    .consoles = 1u << RL_CONSOLE_SWITCH2,
+};
+
 static void put32(uint32_t off, uint32_t v) { memcpy(g_image + off, &v, 4); }
 static void put64(uint32_t off, uint64_t v) { memcpy(g_image + off, &v, 8); }
 
@@ -422,6 +441,8 @@ TEST(loader_links_hook_symbols)
     static bool added;
     if (!added) {
         CHECK_EQ(rl_switch_add_hook(&g_hook), 0);
+        CHECK_EQ(rl_switch_register_auto_hook(&g_switch_hook), 0);
+        CHECK_EQ(rl_switch_register_auto_hook(&g_switch2_hook), 0);
         added = true;
     }
     fill_linked_image();
@@ -434,6 +455,8 @@ TEST(loader_links_hook_symbols)
     CHECK_EQ(count_lines(out, "PASS hook"), 1);
     CHECK_EQ(count_lines(out, "PASS defs"), 1);
     CHECK(strstr(out, "replaced functions: 1, resolved imports: 2") != NULL);
+    CHECK(strstr(out, "hook loader-switch turned on") != NULL);
+    CHECK(strstr(out, "hook loader-switch2 turned on") == NULL);
     remove_base();
     fill_image();
     g_mode = 0;

@@ -99,6 +99,13 @@ typedef struct rl_switch_hook {
      * program adds it with rl_switch_add_hook.
      */
     int (*wants)(void *user, const char *symbol);
+    /**
+     * @brief For a hook the loader adds by itself: the consoles whose
+     * programs it serves, a mask of 1u << rl_switch_console; 0 is every
+     * console. A Switch program on the Switch 2 links the same symbol names
+     * (nvnBootstrapLoader) to another API, so a console's API layer names it.
+     */
+    uint32_t consoles;
     /** @brief Passed to every function. */
     void *user;
 } rl_switch_hook;

@@ -577,7 +577,7 @@ static bool is_added(const rl_switch_hook *h)
 /** @brief True when a dynamic symbol of any module (defined or imported) is one the hook wants. */
 static bool wants_hook(const rl_switch_program *p, const rl_switch_hook *h)
 {
-    if (!h->wants || !p || !p->modules)
+    if (!h->wants || !p || !p->modules || (h->consoles && !(h->consoles & (1u << p->console))))
         return false;
     for (uint32_t i = 0; i < p->module_count; i++) {
         const rl_switch_module *m = &p->modules[i];
