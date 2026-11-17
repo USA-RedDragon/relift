@@ -15,7 +15,8 @@
 //! block or no warp operation may run between the target and the next
 //! merge on that chain, no BREAK may let lanes run warp operations before
 //! their BSYNC,
-//! and no BMOV may change a barrier; anything else is rejected. Elsewhere
+//! and no BMOV may change a barrier that is read before it is set again;
+//! anything else is rejected. Elsewhere
 //! which lanes run together cannot be observed. A BSSY whose target is no
 //! merge, with a warp operation after it, has its region funneled: the
 //! edges from the region into the target's block and the edges that leave
@@ -1563,6 +1564,70 @@ impl Graph {
         out
     }
 
+    /// Whether every convergence barrier the BMOV at `k` (in block `b`)
+    /// writes is written again, by a BSSY or another BMOV, on every path
+    /// before anything reads it: the reset of the barriers at a program's
+    /// start, or a clear right before the BSSY that sets the barrier.
+    fn dead_barrier_writes(&self, code: &Code, b: usize, k: usize) -> bool {
+        use super::mem::lanes::barrier_name;
+        let insts = &code.insts;
+        let i = &insts[k];
+        let mut written = Vec::new();
+        written.extend(i.ops.first().and_then(barrier_name));
+        if i.has("CLEAR") {
+            written.extend(i.ops.get(1).and_then(barrier_name));
+        }
+        let names =
+            |j: &crate::Inst, n: u8, at: usize| j.ops.get(at).and_then(barrier_name) == Some(n);
+        written.into_iter().all(|n| {
+            let step = |j: &crate::Inst| -> Option<bool> {
+                if j.mnemonic == "BSSY" && j.guard.is_none() && names(j, n, 0) {
+                    return Some(true);
+                }
+                if j.mnemonic == "BMOV" && j.guard.is_none() {
+                    let to_barrier = j.ops.first().and_then(barrier_name).is_some();
+                    let discarded = matches!(j.ops.first(), Some(Operand::Reg(255, _)));
+                    if names(j, n, 1) && !to_barrier && !discarded {
+                        return Some(false);
+                    }
+                    if names(j, n, 0) || (j.has("CLEAR") && names(j, n, 1)) {
+                        return Some(true);
+                    }
+                    return None;
+                }
+                j.ops
+                    .iter()
+                    .any(|o| barrier_name(o) == Some(n))
+                    .then_some(false)
+            };
+            let scan = |range: std::ops::Range<usize>| {
+                range
+                    .map(|j| step(&insts[j]))
+                    .find(Option::is_some)
+                    .flatten()
+            };
+            let blk = &self.blocks[b];
+            let mut work = Vec::new();
+            match scan(k + 1..blk.end) {
+                Some(ok) => return ok,
+                None => work.extend(self.succs[b].iter().copied()),
+            }
+            let mut seen = vec![false; self.blocks.len()];
+            while let Some(u) = work.pop() {
+                if std::mem::replace(&mut seen[u], true) {
+                    continue;
+                }
+                let ub = &self.blocks[u];
+                match scan(ub.first..ub.end) {
+                    Some(true) => {}
+                    Some(false) => return false,
+                    None => work.extend(self.succs[u].iter().copied()),
+                }
+            }
+            true
+        })
+    }
+
     /// Checks that the structure reconverges the guest's lanes where its
     /// BSSY/BSYNC regions do (see the module documentation).
     pub(crate) fn check_reconvergence(&mut self, code: &Code) -> Res<Option<OffMerge>> {
@@ -1571,7 +1636,7 @@ impl Graph {
             let blk = self.blocks[b].clone();
             for k in blk.first..blk.end {
                 let i = &insts[k];
-                if super::mem::lanes::writes_barrier(i) {
+                if super::mem::lanes::writes_barrier(i) && !self.dead_barrier_writes(code, b, k) {
                     return bad(format!(
                         "BMOV changes a convergence barrier at {:#x}",
                         16 * k

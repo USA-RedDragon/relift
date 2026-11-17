@@ -413,6 +413,7 @@ fn bmov_reads_the_active_mask_and_rejects_other_state() {
         1,
         &[(12, 3, 0), (16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)],
     ));
+    b.extend(bsync(1));
     exit_and_halt(&mut b);
     let p = Program::parse(&b);
     assert_eq!(text(&p)[0], "BMOV.32 B1, R2");
@@ -420,6 +421,39 @@ fn bmov_reads_the_active_mask_and_rejects_other_state() {
     assert_eq!(
         e.as_deref(),
         Some("BMOV changes a convergence barrier at 0x0")
+    );
+}
+
+/// `BMOV.32.CLEAR RZ, B0`, as the compiler puts before a BSSY.
+fn bmov_clear() -> [u8; 16] {
+    0x000f_e200_0010_0000_0000_0000_00ff_7355u128.to_le_bytes()
+}
+
+#[test]
+fn barrier_writes_set_again_before_a_read_are_harmless() {
+    let mut b = Vec::new();
+    b.extend(bmov_clear());
+    b.extend(bssy(0, 1, 4));
+    b.extend(bra(2, 4, Some(0)));
+    b.extend(vote_any());
+    b.extend(bsync(0));
+    b.extend(vote_any());
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "BMOV.32.CLEAR RZ, B0");
+    translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    let mut b = Vec::new();
+    b.extend(bssy(0, 0, 4));
+    b.extend(bra(1, 3, Some(0)));
+    b.extend(bmov_clear());
+    b.extend(bsync(0));
+    b.extend(vote_any());
+    exit_and_halt(&mut b);
+    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    assert_eq!(
+        e.as_deref(),
+        Some("BMOV changes a convergence barrier at 0x20"),
+        "a clear inside the region its BSYNC reads"
     );
 }
 
