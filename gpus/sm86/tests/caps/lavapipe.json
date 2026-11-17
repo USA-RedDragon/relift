@@ -54,6 +54,12 @@
      "deviceName": "llvmpipe (LLVM 23.1.1, 256 bits)",
      "limits": {
       "maxComputeSharedMemorySize": 32768,
+      "maxComputeWorkGroupInvocations": 1024,
+      "maxComputeWorkGroupSize": [
+       1024,
+       1024,
+       1024
+      ],
       "maxStorageBufferRange": 134217728
      },
      "vendorID": 65541

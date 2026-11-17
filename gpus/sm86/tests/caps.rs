@@ -62,6 +62,12 @@ fn members(v: &Value, caps: &mut DeviceCaps) {
         for (k, x) in o {
             if x.is_object() {
                 members(x, caps);
+            } else if let Some(a) = x.as_array().filter(|a| a.iter().all(Value::is_number)) {
+                for (i, e) in a.iter().enumerate() {
+                    let n = number(e).expect("a number");
+                    let old = caps.values.insert(format!("{k}[{i}]"), n);
+                    assert!(old.is_none_or(|o| o == n), "{k}[{i}]: {old:?} and {n}");
+                }
             } else if let Some(n) = number(x) {
                 let old = caps.values.insert(k.clone(), n);
                 assert!(old.is_none_or(|o| o == n), "{k}: {old:?} and {n}");
@@ -110,4 +116,44 @@ fn adreno_reports_what_it_lacks() {
     assert!(!p.int64 && !p.int64_atomics_buffer && !p.int64_atomics_image);
     assert!(!p.float32_atomic_add);
     assert_eq!(p.clock, relift_gpu_sm86::translate::Clock::None);
+}
+
+/// Thor's Adreno 740 can require 64-wide full subgroups in compute: the
+/// mesh fallback packs two guest workgroups into each. Devices with a
+/// fixed size below 32 keep one.
+#[test]
+fn mesh_slots_fill_a_required_wide_subgroup() {
+    let p = HostProfile::adreno();
+    assert_eq!(p.compute_subgroup, Some(64));
+    assert_eq!(p.mesh_slots, 2);
+    for p in [HostProfile::lavapipe(), HostProfile::mali()] {
+        assert_eq!((p.compute_subgroup, p.mesh_slots), (None, 1), "{}", p.name);
+    }
+    assert_eq!(HostProfile::nvidia().compute_subgroup, Some(32));
+}
+
+/// A device at Vulkan's minimum limits: no capture has fewer than 1024
+/// invocations per workgroup, so this one is built from the minimum values
+/// the specification requires, with a wide subgroup the device could
+/// require. The limits come through, and a required subgroup wider than
+/// the workgroup allows takes no slots.
+#[test]
+fn workgroup_limits_come_from_the_device() {
+    let mut caps = load("adreno");
+    caps.values
+        .insert("maxComputeWorkGroupInvocations".into(), 128);
+    for (k, n) in [128, 128, 64].into_iter().enumerate() {
+        caps.values
+            .insert(format!("maxComputeWorkGroupSize[{k}]"), n);
+    }
+    let p = HostProfile::from_device("minimum", &caps);
+    assert_eq!(p.max_workgroup_invocations, 128);
+    assert_eq!(p.max_workgroup_size, [128, 128, 64]);
+    assert_eq!(p.mesh_slots, 2);
+    caps.values.insert("minSubgroupSize".into(), 128);
+    caps.values
+        .insert("maxComputeWorkGroupInvocations".into(), 64);
+    let p = HostProfile::from_device("minimum", &caps);
+    assert_eq!(p.compute_subgroup, Some(128));
+    assert_eq!(p.mesh_slots, 1);
 }

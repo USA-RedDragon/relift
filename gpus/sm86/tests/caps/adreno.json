@@ -111,6 +111,12 @@
     "deviceName": "Adreno (TM) 740",
     "limits": {
      "maxComputeSharedMemorySize": 32768.0,
+     "maxComputeWorkGroupInvocations": 1024.0,
+     "maxComputeWorkGroupSize": [
+      1024.0,
+      1024.0,
+      1024.0
+     ],
      "maxStorageBufferRange": 134217728.0
     },
     "vendorID": 20803.0

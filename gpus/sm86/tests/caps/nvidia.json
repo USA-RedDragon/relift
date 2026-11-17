@@ -61,6 +61,12 @@
      "deviceName": "NVIDIA GeForce RTX 3090",
      "limits": {
       "maxComputeSharedMemorySize": 49152,
+      "maxComputeWorkGroupInvocations": 1024,
+      "maxComputeWorkGroupSize": [
+       1024,
+       1024,
+       64
+      ],
       "maxStorageBufferRange": 4294967295
      },
      "vendorID": 4318

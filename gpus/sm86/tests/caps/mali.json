@@ -65,6 +65,12 @@
     "VkPhysicalDeviceProperties": {
      "limits": {
       "maxComputeSharedMemorySize": 32768,
+      "maxComputeWorkGroupInvocations": 1024,
+      "maxComputeWorkGroupSize": [
+       1024,
+       1024,
+       1024
+      ],
       "maxStorageBufferRange": 2147483648
      },
      "vendorID": 5045

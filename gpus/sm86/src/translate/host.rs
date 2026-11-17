@@ -130,6 +130,24 @@ pub struct HostProfile {
     /// The host's transcendental operations give the SM86 MUFU results (see
     /// [`HostProfile::from_device`]).
     pub native_mufu: bool,
+    /// `maxComputeWorkGroupInvocations`: Vulkan guarantees 128.
+    pub max_workgroup_invocations: u32,
+    /// `maxComputeWorkGroupSize`: Vulkan guarantees 128, 128 and 64.
+    pub max_workgroup_size: [u32; 3],
+    /// `minSubgroupSize` and `maxSubgroupSize` (both `subgroupSize` without
+    /// `subgroupSizeControl`).
+    pub subgroup_sizes: (u32, u32),
+    /// The subgroup size the runtime requires of compute pipelines whose
+    /// warp operations run on subgroups (`requiredSubgroupSize`, with
+    /// `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT`): the
+    /// smallest multiple of 32 the device can require in compute, `None`
+    /// where it can require none.
+    pub compute_subgroup: Option<u32>,
+    /// Guest task and mesh workgroups packed into one compute workgroup of
+    /// the mesh fallback (`Options::mesh_slots`): one per 32-lane cluster
+    /// of a required subgroup wider than 32 ([`Warp::Wide`]), so that the
+    /// subgroup is full, and 1 elsewhere.
+    pub mesh_slots: u32,
 }
 
 impl Default for HostProfile {
@@ -170,6 +188,11 @@ impl HostProfile {
             max_storage_buffers: 1 << 20,
             max_storage_buffer_range: u64::from(u32::MAX),
             native_mufu: true,
+            max_workgroup_invocations: 1024,
+            max_workgroup_size: [1024, 1024, 64],
+            subgroup_sizes: (32, 32),
+            compute_subgroup: Some(32),
+            mesh_slots: 1,
         }
     }
 
@@ -191,6 +214,8 @@ impl HostProfile {
             max_sampled_images: 8_388_606,
             max_storage_buffers: 8_388_606,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (32, 64),
             ..HostProfile::nvidia()
         }
     }
@@ -214,6 +239,8 @@ impl HostProfile {
             max_sampled_images: u32::MAX,
             max_storage_buffers: u32::MAX,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (32, 64),
             ..HostProfile::nvidia()
         }
     }
@@ -240,6 +267,8 @@ impl HostProfile {
             max_sampled_images: 1 << 25,
             max_storage_buffers: 1 << 25,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (8, 32),
             ..HostProfile::nvidia()
         }
     }
@@ -264,6 +293,9 @@ impl HostProfile {
             max_sampled_images: 1_000_000,
             max_storage_buffers: 1_000_000,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (4, 32),
+            compute_subgroup: None,
             ..HostProfile::nvidia()
         }
     }
@@ -293,6 +325,10 @@ impl HostProfile {
             max_storage_buffers: 1 << 24,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (64, 128),
+            compute_subgroup: Some(64),
+            mesh_slots: 2,
             ..HostProfile::nvidia()
         }
     }
@@ -320,6 +356,11 @@ impl HostProfile {
             max_storage_buffers: 1 << 24,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            max_workgroup_invocations: 2048,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (64, 128),
+            compute_subgroup: Some(64),
+            mesh_slots: 2,
             ..HostProfile::nvidia()
         }
     }
@@ -344,6 +385,9 @@ impl HostProfile {
             max_storage_buffers: 1 << 23,
             max_storage_buffer_range: 1 << 31,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (16, 16),
+            compute_subgroup: None,
             ..HostProfile::nvidia()
         }
     }
@@ -374,6 +418,9 @@ impl HostProfile {
             max_storage_buffers: 1_015_808,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            max_workgroup_size: [1024, 1024, 1024],
+            subgroup_sizes: (8, 8),
+            compute_subgroup: None,
             ..HostProfile::nvidia()
         }
     }
@@ -432,6 +479,11 @@ impl HostProfile {
             max_storage_buffers: 1 << 16,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            max_workgroup_invocations: 128,
+            max_workgroup_size: [128, 128, 64],
+            subgroup_sizes: (1, 128),
+            compute_subgroup: None,
+            mesh_slots: 1,
         }
     }
 
@@ -519,6 +571,12 @@ impl HostProfile {
             max_storage_buffers: caps.get32("maxPerStageDescriptorUpdateAfterBindStorageBuffers"),
             max_storage_buffer_range: caps.get("maxStorageBufferRange"),
             native_mufu: nvidia && caps.get("deviceID") >= 0x2200,
+            max_workgroup_invocations: caps.get32("maxComputeWorkGroupInvocations"),
+            max_workgroup_size: [0, 1, 2]
+                .map(|k| caps.get32(&format!("maxComputeWorkGroupSize[{k}]"))),
+            subgroup_sizes: caps.subgroup_sizes(),
+            compute_subgroup: caps.compute_subgroup(),
+            mesh_slots: caps.mesh_slots(),
         }
     }
 }
@@ -546,8 +604,9 @@ pub const SUBGROUP_QUAD: u64 = 0x80;
 /// flag sets as their bits. The subgroup stages and operations may come
 /// under either of their names (`supportedStages` of
 /// `VkPhysicalDeviceSubgroupProperties` or `subgroupSupportedStages` of
-/// `VkPhysicalDeviceVulkan11Properties`). A feature reads as enabled only
-/// where its extension, if it has one, is listed too.
+/// `VkPhysicalDeviceVulkan11Properties`). An array member is one value
+/// per element, `name[k]` (`maxComputeWorkGroupSize[2]`). A feature reads
+/// as enabled only where its extension, if it has one, is listed too.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DeviceCaps {
     pub extensions: BTreeSet<String>,
@@ -591,6 +650,38 @@ impl DeviceCaps {
 
     fn operations(&self) -> u64 {
         self.get("supportedOperations") | self.get("subgroupSupportedOperations")
+    }
+
+    fn subgroup_sizes(&self) -> (u32, u32) {
+        let (min, max) = if self.on("subgroupSizeControl") {
+            (self.get32("minSubgroupSize"), self.get32("maxSubgroupSize"))
+        } else {
+            (self.get32("subgroupSize"), self.get32("subgroupSize"))
+        };
+        (min, max)
+    }
+
+    /// Whether a compute pipeline can require a subgroup size with full
+    /// subgroups.
+    fn compute_size_control(&self) -> bool {
+        self.on("subgroupSizeControl")
+            && self.get("requiredSubgroupSizeStages") & STAGE_COMPUTE != 0
+            && self.on("computeFullSubgroups")
+    }
+
+    fn compute_subgroup(&self) -> Option<u32> {
+        if self.stages() & STAGE_COMPUTE == 0 || !self.compute_size_control() {
+            return None;
+        }
+        let (min, max) = self.subgroup_sizes();
+        (1..=4).map(|k| 32 * k).find(|n| min <= *n && *n <= max)
+    }
+
+    fn mesh_slots(&self) -> u32 {
+        match (self.warp(STAGE_COMPUTE), self.compute_subgroup()) {
+            (Warp::Wide, Some(n)) if n <= self.get32("maxComputeWorkGroupInvocations") => n / 32,
+            _ => 1,
+        }
     }
 
     fn warp(&self, stage: u64) -> Warp {

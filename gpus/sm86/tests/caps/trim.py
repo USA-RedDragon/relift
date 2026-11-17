@@ -35,7 +35,7 @@ MEMBERS = {
     'shaderFmaFloat32', 'shaderDeviceClock', 'shaderSubgroupClock',
     'maxComputeSharedMemorySize', 'maxDescriptorSetUpdateAfterBindSamplers',
     'maxDescriptorSetUpdateAfterBindSampledImages', 'maxPerStageDescriptorUpdateAfterBindStorageBuffers',
-    'maxStorageBufferRange',
+    'maxStorageBufferRange', 'maxComputeWorkGroupInvocations', 'maxComputeWorkGroupSize',
     'taskShader', 'meshShader', 'maxMeshOutputVertices', 'maxMeshOutputPrimitives', 'maxTaskPayloadSize',
     'maxTaskWorkGroupInvocations', 'maxMeshWorkGroupInvocations', 'maxMeshSharedMemorySize',
 }
