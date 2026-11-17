@@ -63,6 +63,9 @@ typedef struct smsrun {
     rl_sms_stats st;
     FILE *trace;
     uint64_t trace_left;
+    FILE *ram_log;
+    uint64_t ram_frame;
+    uint64_t ram_edge;
 } smsrun;
 
 static smsrun G;
@@ -80,6 +83,9 @@ void rl_sms_input(sms_input_fn *fn, void *user)
 
 static FILE *g_trace;
 static uint64_t g_trace_count;
+static FILE *g_ram_log;
+
+void rl_sms_ram_log(FILE *f) { g_ram_log = f; }
 
 void rl_sms_trace(FILE *f, uint64_t count)
 {
@@ -272,6 +278,35 @@ static int enter_frame(uint16_t ret, uint32_t tag)
     return 0;
 }
 
+/** @brief The CPU T-state of the start of the frame edge line (240, or 192 on the SG-1000) of frame k. */
+static uint64_t edge_cycle(uint64_t k)
+{
+    sms *m = &G.m;
+    bool sg = m->system == SMS_SYSTEM_SG;
+    uint64_t lines = sg ? SMS_TMS_LINES : sms_vdp_lines(&m->vdp);
+    uint64_t line = sg ? 192u : 240u;
+    return sms_cycle_of(m, (k * lines + line) * SMS_VDP_LINE);
+}
+
+static uint32_t ram_hash(void)
+{
+    const sms *m = &G.m;
+    size_t n = m->system == SMS_SYSTEM_SG ? 0x400u : sizeof m->ram;
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ m->ram[i]) * 16777619u;
+    return h;
+}
+
+/** @brief Writes the work RAM hash of each frame at the first instruction boundary at or after its frame edge line, before interrupts are taken. */
+static void ram_sample(void)
+{
+    while (G.m.cycles >= G.ram_edge) {
+        fprintf(G.ram_log, "%llu\t%08x\n", (unsigned long long)G.ram_frame, ram_hash());
+        G.ram_edge = edge_cycle(++G.ram_frame);
+    }
+}
+
 /**
  * @brief Runs the boundary before the instruction at pc: takes the
  * interrupts that are due, each in a host frame that returns to pc in code
@@ -279,6 +314,8 @@ static int enter_frame(uint16_t ret, uint32_t tag)
  */
 static int boundary(rl_ctx *c, uint8_t *mem, uint16_t pc, uint32_t tag)
 {
+    if (G.ram_log)
+        ram_sample();
     for (;;) {
         if (G.stop)
             return rl_pend_exit_process(c, 0);
@@ -497,6 +534,7 @@ int rl_sms_run(const rl_sms_program *p, const uint8_t *inputs, size_t input_coun
     G.user = user;
     G.trace = g_trace;
     G.trace_left = g_trace_count;
+    G.ram_log = g_ram_log;
     sms_config cfg = {.system = p->system, .region = p->region, .mapper = p->mapper};
     if (sms_init(&G.m, &cfg, p->rom, p->rom_len) != 0)
         return 1;
@@ -506,6 +544,7 @@ int rl_sms_run(const rl_sms_program *p, const uint8_t *inputs, size_t input_coun
     G.m.input_user = g_input_user;
     G.m.buttons = input_count ? inputs[0] : g_input ? g_input(g_input_user) : 0;
     G.m.on_frame = on_frame;
+    G.ram_edge = edge_cycle(0);
     static const rl_guest_desc guest = {.name = "sms", .page_size = 0x400, .address_bits = 18, .tick_hz = 3579545};
     if (rl_core_init(&guest, rl_z80_cpu()) != 0)
         return 1;

@@ -85,6 +85,8 @@ RL_RUNTIME_API int rl_sms_run(const rl_sms_program *p, const uint8_t *inputs, si
                               void *user);
 /** @brief Makes the next run write its first count instructions to f: each boundary's T-state, pc and registers, interrupt entries and port accesses, in the form of the ares oracle's insn.tsv. */
 RL_RUNTIME_API void rl_sms_trace(FILE *f, uint64_t count);
+/** @brief Makes the next run write, for each frame, the hash of work RAM at the first instruction boundary at or after the start of the frame edge line (the ares oracle's ramhash.tsv). */
+RL_RUNTIME_API void rl_sms_ram_log(FILE *f);
 /** @brief Makes the next runs without an input script read the buttons from fn at each frame edge; NULL for none held. */
 RL_RUNTIME_API void rl_sms_input(sms_input_fn *fn, void *user);
 /** @brief The counters of the current or last run. */

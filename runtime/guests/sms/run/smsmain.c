@@ -37,6 +37,7 @@ typedef struct host {
     FILE *frame_log;
     FILE *state_log;
     FILE *insn_log;
+    FILE *ram_log;
     uint64_t insn_count;
     uint8_t *inputs;
     size_t input_count;
@@ -434,6 +435,12 @@ int rl_sms_main(const rl_sms_program *p, int argc, char **argv)
                 fprintf(stderr, "relift-sms: cannot write %s\n", path);
                 return 2;
             }
+        } else if (!strcmp(a, "--ram-log")) {
+            const char *path = arg_value(argc, argv, &i);
+            if (!(H.ram_log = fopen(path, "w"))) {
+                fprintf(stderr, "relift-sms: cannot write %s\n", path);
+                return 2;
+            }
         } else if (!strcmp(a, "--insn-log")) {
             const char *path = arg_value(argc, argv, &i);
             if (!(H.insn_log = fopen(path, "w"))) {
@@ -486,6 +493,8 @@ int rl_sms_main(const rl_sms_program *p, int argc, char **argv)
         rl_sms_input(read_pad, &P);
     if (H.insn_log)
         rl_sms_trace(H.insn_log, H.insn_count ? H.insn_count : UINT64_MAX);
+    if (H.ram_log)
+        rl_sms_ram_log(H.ram_log);
     if (headless)
         rl_settings_set("video", "headless");
     rl_window_set_events(on_window, &H);
@@ -505,6 +514,8 @@ int rl_sms_main(const rl_sms_program *p, int argc, char **argv)
         fclose(H.state_log);
     if (H.insn_log)
         fclose(H.insn_log);
+    if (H.ram_log)
+        fclose(H.ram_log);
     free(H.inputs);
     return r;
 }

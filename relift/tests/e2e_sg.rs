@@ -5,7 +5,8 @@
 //! bytes, and on every frame interrupt counts, reads the pad, moves a
 //! sprite and changes a PSG tone; every 64 frames it switches between
 //! graphics 1, graphics 2, text and multicolor. The CRCs of five frames,
-//! one per mode, are those the ares SG-1000 core gives for the same ROM
+//! one per mode, and the hashes of RAM at the start of line 192 of four of
+//! them, are those the ares SG-1000 core gives for the same ROM
 //! (measured with the spike's oracle; the whole run of 600 frames, and its
 //! instruction log, matched ares). Skipped with a note when clang is not on
 //! `PATH`.
@@ -120,9 +121,12 @@ fn the_sg1000_test_rom_matches_ares_in_every_mode() {
     assert!(out.status.success(), "{stderr}");
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
     let log = root.join("frames.tsv");
+    let ram_log = root.join("ram.tsv");
     let out = relift_proc::command(root.join("cache/projects/game/build/host/game"))
         .args(["--headless", "--no-audio", "--frames", "300", "--frame-log"])
         .arg(&log)
+        .arg("--ram-log")
+        .arg(&ram_log)
         .env("RELIFT_REPORT_DIR", &root)
         .output()
         .expect("the program runs");
@@ -133,12 +137,14 @@ fn the_sg1000_test_rom_matches_ares_in_every_mode() {
         String::from_utf8_lossy(&out.stderr)
     );
     let log = std::fs::read_to_string(&log).expect("the frame log");
-    let crc = |frame: &str| {
-        log.lines()
+    let ram_log = std::fs::read_to_string(&ram_log).expect("the RAM log");
+    let field = |text: &str, frame: &str| {
+        text.lines()
             .find(|l| l.split('\t').next() == Some(frame))
             .and_then(|l| l.split('\t').nth(1))
             .map(str::to_string)
     };
+    let crc = |frame: &str| field(&log, frame);
     for (frame, want) in [
         ("59", "507057ca"),
         ("119", "7dce0065"),
@@ -147,6 +153,18 @@ fn the_sg1000_test_rom_matches_ares_in_every_mode() {
         ("299", "79f7fd54"),
     ] {
         assert_eq!(crc(frame).as_deref(), Some(want), "frame {frame}");
+    }
+    for (frame, want) in [
+        ("59", "bb864a95"),
+        ("119", "ccb3ae0a"),
+        ("179", "d4d03953"),
+        ("239", "c8c60180"),
+    ] {
+        assert_eq!(
+            field(&ram_log, frame).as_deref(),
+            Some(want),
+            "RAM at frame {frame}"
+        );
     }
     let _ = std::fs::remove_dir_all(&root);
 }
