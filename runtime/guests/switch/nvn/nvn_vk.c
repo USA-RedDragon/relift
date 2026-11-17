@@ -720,29 +720,101 @@ static bool same_rows(const nvn_tex_desc *a, const nvn_tex_desc *b)
            a->block_h == b->block_h && a->stride == b->stride;
 }
 
+/** @brief Whether u and v keep any byte of their storage in common. */
+static bool overlaps(const vimg *u, const vimg *v)
+{
+    return u->storage < v->storage + v->d.size && v->storage < u->storage + u->d.size;
+}
+
 /**
- * @brief Returns v after copying into it the common rows of the most
- * recently written image that shares its storage, when that one was
- * written after v.
+ * @brief Writes every level and layer of u back to its guest storage, in
+ * the guest's layout, so a texture of another layout over the same bytes
+ * reads what the GPU last wrote. Color images and depth images of one
+ * aspect (whose host texels are the guest's bytes) only.
+ */
+static bool write_back(replay *r, vimg *u)
+{
+    const nvn_tex_desc *d = &u->d;
+    uint32_t bpb, bw, bh;
+    if (!nvn_tex_format(d->format, &bpb, &bw, &bh) || d->target == NVN_TARGET_BUFFER ||
+        (u->aspect != VK_IMAGE_ASPECT_COLOR_BIT && u->aspect != VK_IMAGE_ASPECT_DEPTH_BIT) ||
+        u->format == VK_FORMAT_D32_SFLOAT_S8_UINT || u->format == VK_FORMAT_D24_UNORM_S8_UINT)
+        return false;
+    VkImageSubresourceRange rr = range_of(u);
+    uint64_t total = 0;
+    for (uint32_t l = 0; l < rr.levelCount; l++) {
+        uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
+        total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount * depth_of(d, l);
+    }
+    staging s;
+    if (!nvn_vk_staging_new(&s, total))
+        return false;
+    VkBufferImageCopy bic[NVN_TEX_MAX_LEVELS];
+    uint64_t at = 0;
+    uint32_t n = rr.levelCount < NVN_TEX_MAX_LEVELS ? rr.levelCount : NVN_TEX_MAX_LEVELS;
+    for (uint32_t l = 0; l < n; l++) {
+        uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1, dl = depth_of(d, l);
+        bic[l] = (VkBufferImageCopy){ .bufferOffset = at,
+                                      .imageSubresource = { .aspectMask = u->aspect,
+                                                            .mipLevel = l,
+                                                            .layerCount = rr.layerCount },
+                                      .imageExtent = { w, h, dl } };
+        at += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * dl * rr.layerCount;
+    }
+    nvn_vk_begin(r);
+    nvn_vk_barrier(g.cb);
+    VK(vkCmdCopyImageToBuffer)(g.cb, u->image, VK_IMAGE_LAYOUT_GENERAL, s.buf, n, bic);
+    nvn_vk_barrier(g.cb);
+    bool ok = nvn_vk_flush(r);
+    at = 0;
+    for (uint32_t l = 0; ok && l < n; l++) {
+        uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1, dl = depth_of(d, l);
+        uint64_t layer_bytes = (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * dl;
+        nvn_region rg = { 0, 0, 0, (int32_t)w, (int32_t)h, (int32_t)dl };
+        for (uint32_t k = 0; ok && k < rr.layerCount; k++)
+            ok = nvn_tex_copy(d, r->mem + u->storage, l, k, &rg, s.map + at + layer_bytes * k, true);
+        at += layer_bytes * rr.layerCount;
+    }
+    nvn_vk_staging_free(&s);
+    return ok;
+}
+
+/**
+ * @brief Brings v up to date with the images over its storage that the
+ * GPU wrote after v last took their bytes, oldest first: one of the same rows (see
+ * same_rows) by an image copy, any other through its guest storage (it is
+ * written back and v filled again from the bytes). Returns v, or NULL with
+ * the game stopped when the newer image cannot be written back.
  */
 static vimg *sync_alias(replay *r, vimg *v)
 {
-    vimg *src = NULL;
-    for (uint32_t i = 0; i < g.nimages; i++) {
-        vimg *u = g.images[i];
-        if (u != v && u->storage == v->storage && u->written > v->written && (!src || u->written > src->written))
-            src = u;
+    for (;;) {
+        vimg *src = NULL;
+        for (uint32_t i = 0; i < g.nimages; i++) {
+            vimg *u = g.images[i];
+            if (u != v && overlaps(u, v) && u->written > v->written && (!src || u->written < src->written))
+                src = u;
+        }
+        if (!src)
+            return v;
+        if (src->storage == v->storage && same_rows(&src->d, &v->d)) {
+            uint32_t h = src->d.height < v->d.height ? src->d.height : v->d.height;
+            nvn_vk_begin(r);
+            nvn_vk_barrier(g.cb);
+            VkImageCopy ic = { { src->aspect, 0, 0, 1 }, { 0, 0, 0 }, { v->aspect, 0, 0, 1 }, { 0, 0, 0 },
+                               { v->d.width, h, 1 } };
+            VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
+            nvn_vk_barrier(g.cb);
+        } else if (!write_back(r, src) || !upload(r, v)) {
+            nvn_vk_stop(r,
+                        "texture storage 0x%llx (format %u, %ux%u) was written as format %u, %ux%u, which cannot be "
+                        "read back into the guest's layout",
+                        (unsigned long long)v->storage, v->d.format, v->d.width, v->d.height, src->d.format,
+                        src->d.width, src->d.height);
+            return NULL;
+        }
+        v->written = src->written;
     }
-    if (!src)
-        return v;
-    uint32_t h = src->d.height < v->d.height ? src->d.height : v->d.height;
-    nvn_vk_begin(r);
-    nvn_vk_barrier(g.cb);
-    VkImageCopy ic = { { src->aspect, 0, 0, 1 }, { 0, 0, 0 }, { v->aspect, 0, 0, 1 }, { 0, 0, 0 }, { v->d.width, h, 1 } };
-    VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
-    nvn_vk_barrier(g.cb);
-    v->written = src->written;
-    return v;
 }
 
 void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
@@ -761,16 +833,9 @@ static vimg *image_of(replay *r, uint64_t tex)
         if (v->storage != storage)
             continue;
         if (v->d.format == d->format && v->d.width == d->width && v->d.height == d->height &&
-            v->d.depth == d->depth && v->d.levels == d->levels && v->d.target == d->target)
+            v->d.depth == d->depth && v->d.levels == d->levels && v->d.target == d->target &&
+            v->d.samples == d->samples && v->d.flags == d->flags)
             return sync_alias(r, v);
-        if (same_rows(&v->d, d))
-            continue;
-        rl_guest_fatal(r->c, "nvn",
-                       "texture 0x%llx (format %u, %ux%u) shares storage 0x%llx with another texture (format %u, "
-                       "%ux%u); aliased storage is not handled",
-                       (unsigned long long)tex, d->format, d->width, d->height, (unsigned long long)storage,
-                       v->d.format, v->d.width, v->d.height);
-        return NULL;
     }
     VkImageAspectFlags aspect;
     VkFormat f = nvn_vk_format(d->format, &aspect);
