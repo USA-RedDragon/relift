@@ -213,6 +213,36 @@ TEST(libnx_time_initialize_and_shared_memory)
     CHECK(near((int64_t)tc_u64(&r, 0), now_wall(), 3));
 }
 
+/** @brief The steady time in ns the SDK 22 SharedMemoryClient computes from the point at 0xD0 (sdk 0x5d9040), or -1 when it would fail. */
+static int64_t sdk_steady_ns(env *e, const libnx_time *t, uint8_t source[16])
+{
+    int64_t a[7];
+    shm_read(t->shm, 0xD0, a, sizeof a);
+    memcpy(source, &a[5], 16);
+    if (!a[5] && !a[6])
+        return -1;
+    (void)t_svc(e->c, SVC_GET_SYSTEM_TICK, 0, 0, 0, 0, 0, 0);
+    int64_t ns = armTicksToNs(e->c->x[0]);
+    int64_t v = (((ns - a[0]) * a[1]) >> a[2]) + a[3];
+    int64_t lo = v < a[4] ? v : a[4], hi = v > a[4] ? v : a[4];
+    return ns + (a[1] < 0 ? hi : lo);
+}
+
+TEST(time_shared_memory_adjustment_point_is_the_steady_clock)
+{
+    env e = boot();
+    libnx_time t;
+    CHECK(time_initialize(&e, "time:u", &t));
+    uint8_t source[16], libnx_source[16];
+    int64_t ns = sdk_steady_ns(&e, &t, source);
+    CHECK(ns > 0);
+    CHECK(near(ns / 1000000000ll, shm_steady_seconds(&e, &t, libnx_source), 1));
+    CHECK(memcmp(source, libnx_source, 16) == 0);
+    tc_res r = call(&e, t.steady, 0, NULL, 0);
+    CHECK_EQ(rc_of(r), 0);
+    CHECK(near((int64_t)tc_u64(&r, 0), ns / 1000000000ll, 2));
+}
+
 TEST(time_shared_memory_is_one_page_shared_by_sessions)
 {
     env e = boot();

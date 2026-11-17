@@ -46,6 +46,7 @@ enum {
 #define SHMEM_LOCAL 0x38u
 #define SHMEM_NETWORK 0x80u
 #define SHMEM_AUTO_CORRECTION 0xC8u
+#define SHMEM_ADJUSTMENT 0xD0u
 #define SHMEM_HEADER 8u
 #define LOCATION_NAME_SIZE 0x24u
 #define STANDARD_USER_CLOCK_INITIAL_YEAR 2019u
@@ -64,7 +65,25 @@ typedef struct clock_ctx {
     uint8_t source[16];
 } clock_ctx;
 
+/**
+ * @brief The ContinuousAdjustmentTimePoint at 0xD0 ([15.0.0+], Ryujinx's name):
+ * nn::time::detail::SharedMemoryClient reads the steady clock from it, not
+ * from 0x00 (verified: SDK 22.2.0 sdk 0x5d9040). That code takes the tick as
+ * ns, adds clamp(((ns - base_ns) * multiplier >> shift) + start, limit), the
+ * clamp a min when the multiplier is not negative, and fails with 2116-0103 when
+ * the source id is zero.
+ */
+typedef struct adjustment_ctx {
+    int64_t base_ns;
+    int64_t multiplier;
+    int64_t shift;
+    int64_t start;
+    int64_t limit;
+    uint8_t source[16];
+} adjustment_ctx;
+
 _Static_assert(sizeof(steady_ctx) == 24 && sizeof(clock_ctx) == 32, "libnx shared memory layout");
+_Static_assert(sizeof(adjustment_ctx) == 56, "SDK shared memory layout");
 
 enum { CLOCK_LOCAL_USER = 0, CLOCK_NETWORK = 1, CLOCKS = 2 };
 
@@ -121,12 +140,20 @@ static void shm_put(uint32_t off, const void *data, uint32_t size)
     __atomic_store_n((uint32_t *)(void *)base, counter, __ATOMIC_RELEASE);
 }
 
+/**
+ * @brief Writes the steady clock both ways the SDKs read it. The adjustment
+ * point carries no slew (multiplier 0), so its constant start and limit
+ * are relift's steady offsets and the SDK's steady time is steady_ns().
+ */
 static void shm_put_steady(void)
 {
     steady_ctx s;
     s.base_time = g_time.test_offset_ns + g_time.internal_offset_ns;
     memcpy(s.source, g_time.source, 16);
     shm_put(SHMEM_STEADY, &s, sizeof s);
+    adjustment_ctx a = { .base_ns = ticks_ns(), .start = s.base_time, .limit = s.base_time };
+    memcpy(a.source, g_time.source, 16);
+    shm_put(SHMEM_ADJUSTMENT, &a, sizeof a);
 }
 
 static void shm_put_clock(uint32_t clock)
