@@ -11,6 +11,9 @@
 #include "wake.c"
 
 static u8 wram_buf[4096] __attribute__((aligned(32)));
+/* Main RAM (calico's ARM7 .sbss is there): the main RAM code kernels run from +0x420, where they ran
+ * on the consoles modulo 4 KiB (0x02049420). */
+static u8 main_code[0x420 + 4096] __attribute__((section(".sbss.main_code"), aligned(4096)));
 static Mailbox mb;
 static u32 mb_slots[4];
 
@@ -46,8 +49,8 @@ static void run(hw_job7 *j)
             j->status = 2;
             return;
         }
-        memcpy((void *)j->slot, (const void *)f, len);
-        f = (kfn *)j->slot;
+        memcpy(main_code + 0x420, (const void *)f, len);
+        f = (kfn *)(main_code + 0x420);
     }
     u32 base, base2;
     switch (c->region) {

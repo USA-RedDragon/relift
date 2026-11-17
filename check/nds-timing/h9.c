@@ -243,7 +243,6 @@ static bool run7(unsigned ci, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
     hw_job7 *job = &job_mem;
     hw_memset(job, 0, sizeof *job);
     job->ci = ci;
-    job->slot = 0x023FE000u;
     job->mainbuf = (u32)a7_buf;
     dcache_flush(job, sizeof *job);
     __asm__ volatile("mrs r0, cpsr\n orr r0, r0, #0xc0\n msr cpsr_c, r0" ::: "r0", "memory");

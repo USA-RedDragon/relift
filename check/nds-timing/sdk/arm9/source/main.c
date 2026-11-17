@@ -24,7 +24,10 @@
 static u8 dtcm_buf[2048] DTCM_BSS __attribute__((aligned(32)));
 static u32 itcm_code[512] __attribute__((section(".itcm"), aligned(32)));
 static u32 itcm_data[512] __attribute__((section(".itcm"), aligned(32)));
-static u8 *main_buf, *reg_buf, *a7_slot, *a7_buf;
+/* The MPU test region, and from +16384 the uncached code kernels: a fixed address keeps them where
+ * the consoles ran them (0x02054000), past the loadlist bytes the ARM9 binary carries. */
+static u8 reg_buf[32768] __attribute__((aligned(65536)));
+static u8 *main_buf, *a7_buf;
 static hw_job7 *job;
 static FILE *out;
 static int test_region = -1;
@@ -83,7 +86,7 @@ static int pick_region(void)
         r[i] = region_get(i);
     __asm__ volatile("mov %0, sp" : "=r"(sp));
     u32 critical[] = {sp, CP15_R("c9, c1, 0") & ~0xFFFu, (u32)dtcm_buf, (u32)itcm_code, (u32)&pick_region,
-                      (u32)main_buf, (u32)a7_slot, (u32)job, 0x04000000, 0x04000400, 0x05000000, 0x06800000,
+                      (u32)main_buf, (u32)job, 0x04000000, 0x04000400, 0x05000000, 0x06800000,
                       0x07000000, 0xFFFF0000, 0x027FFC00, 0x02FFFC00, (u32)k9_fn[0]};
     for (int cand = 7; cand >= 0; cand--) {
         u32 t[8];
@@ -241,7 +244,6 @@ static bool run7(unsigned ci, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
         return false;
     memset(job, 0, sizeof *job);
     job->ci = ci;
-    job->slot = (u32)a7_slot;
     job->mainbuf = (u32)a7_buf;
     armDCacheFlush(job, sizeof *job);
     pxiBeginReceive(PxiChannel_User0);
@@ -370,8 +372,6 @@ int main(void)
     hw_timer_start();
 
     main_buf = memalign(32, 4096);
-    reg_buf = memalign(32768, 32768);
-    a7_slot = memalign(32, 4096);
     a7_buf = memalign(32, 4096);
     job = memalign(32, sizeof *job);
     memset(main_buf, 0x5A, 4096);
@@ -405,8 +405,8 @@ int main(void)
          test_region);
     for (int i = 0; i < 8; i++)
         line("# region%d=%08lx\n", i, (unsigned long)region_get(i));
-    line("# buffers main=%08lx test=%08lx a7slot=%08lx a7buf=%08lx dtcm=%08lx itcm=%08lx\n", (unsigned long)main_buf,
-         (unsigned long)reg_buf, (unsigned long)a7_slot, (unsigned long)a7_buf, (unsigned long)dtcm_buf,
+    line("# buffers main=%08lx test=%08lx a7buf=%08lx dtcm=%08lx itcm=%08lx\n", (unsigned long)main_buf,
+         (unsigned long)reg_buf, (unsigned long)a7_buf, (unsigned long)dtcm_buf,
          (unsigned long)itcm_data);
     line("# timer ticks at 33.513982 MHz; t16/t48 = minimum of %d runs of %d and %d loop iterations;\n", HW_REPS,
          HW_N1, HW_N2);
