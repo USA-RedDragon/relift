@@ -119,13 +119,18 @@ impl St {
 
     /// The instruction byte at `addr` in a live template: an opcode or
     /// prefix byte as lifted, an operand byte read from memory in the
-    /// machine cycle starting at T-state `t` when the instruction runs.
+    /// machine cycle starting at T-state `t` when the instruction runs. The
+    /// taken half of a conditional call reads its operands again, untimed,
+    /// since the half before the decision already charged those cycles.
     pub fn operand(&mut self, b: &mut Builder, addr: u128, t: u32, g: Option<Value>) -> Value {
         let off = (addr as u16).wrapping_sub(self.pc);
         if off < 8 && self.opcodes & (1 << off) != 0 {
             return b.konst(Width::W8, self.fetch(addr));
         }
         let a = b.konst(Width::W16, addr & 0xFFFF);
+        if self.taken && !self.live {
+            return b.io_load(a, Width::W8, Endian::Little, IoKind::Any);
+        }
         self.read(b, a, t, g)
     }
 

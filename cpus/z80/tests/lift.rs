@@ -374,7 +374,8 @@ fn sync_policy() {
 
 /// Runs every opcode of every page once with operands taken from the bytes
 /// lifted and once lifted with live operands, from the same random state
-/// and memory: registers, memory, clock, port accesses and exits agree.
+/// and memory, the taken half of a conditional call or return included:
+/// registers, memory, clock, port accesses and exits agree.
 /// Then the live form of each instruction with operands runs with other
 /// operand bytes in memory and must agree with the fixed form lifted from
 /// those bytes.
@@ -440,17 +441,22 @@ fn live_operands_read_the_bytes_in_memory() {
                 *b = rnd() as u8;
             }
             mem[usize::from(pc)..usize::from(pc) + 4].copy_from_slice(&in_mem);
-            let run = |l: &Lifted| {
+            let run = |l: &Lifted, from: &[u8; 4], o: &Options| {
                 let mut c = Cpu::new(&[]);
                 c.st.regs = regs.clone();
                 c.mem.bytes = mem.clone();
-                let next = c.run(l);
+                let mut next = c.run(l);
+                if next == HALF | u64::from(pc) {
+                    let half = lift_bytes(from, next, o).expect("lifts the taken half");
+                    next = c.run(&half);
+                }
                 let ports = c.m.ports.borrow().clone();
                 let clock = c.clock();
                 (next, c.st.regs.clone(), c.mem.bytes, clock, ports)
             };
-            let a = run(&fixed);
-            let b = run(&l);
+            let fixed_opts = opts();
+            let a = run(&fixed, &in_mem, &fixed_opts);
+            let b = run(&l, &lifted, &live);
             assert!(a == b, "{in_mem:02x?} lifted from {lifted:02x?}");
             compared += 1;
             if in_mem != lifted {
