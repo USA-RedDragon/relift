@@ -143,6 +143,20 @@ fn stm_with_the_s_bit_stores_the_user_bank() {
 }
 
 #[test]
+fn ldm_with_the_s_bit_and_writeback_loads_the_user_bank() {
+    let mut c = Cpu::new(Mode::Irq);
+    c.put(regs::r(1), 0x0200_0010);
+    c.put(regs::r(13), 0x1313);
+    for (i, b) in c.mem.bytes[0x14..0x18].iter_mut().enumerate() {
+        *b = [0xdd, 0xd0, 0, 0][i];
+    }
+    c.run(0xe9f1_2000, false);
+    assert_eq!(c.get(Bank::Usr.slot(13).expect("usr r13")), 0xd0dd);
+    assert_eq!(c.get(regs::r(13)), 0x1313);
+    assert_eq!(c.get(regs::r(1)), 0x0200_0014);
+}
+
+#[test]
 fn swi_enters_supervisor_mode() {
     let mut c = Cpu::new(Mode::Sys);
     c.put(regs::C, 1);
