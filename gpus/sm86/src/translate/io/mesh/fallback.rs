@@ -81,8 +81,9 @@ pub const H_DRAW_INDEXED: u32 = 17;
 pub const HEADER_WORDS: u32 = 32;
 /// The widest x of an indirect dispatch the passes write.
 pub const DISPATCH_X: u32 = 65535;
-/// Invocations of a scan workgroup.
-const SCAN_LANES: u32 = 128;
+/// Invocations of a scan workgroup: the most every host preset's
+/// `maxComputeWorkGroupInvocations` allows (Vulkan only promises 128).
+const SCAN_LANES: u32 = 512;
 
 const STORAGE_BUFFER: u32 = 12;
 const B_VERTEX_INDEX: u32 = 42;
@@ -503,7 +504,7 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
     Ok(())
 }
 
-/// The scan pass (one workgroup of 128 invocations) over the mesh counts
+/// The scan pass (one workgroup of 512 invocations) over the mesh counts
 /// of the task records, for a mesh program of `slots` guest workgroups per
 /// workgroup (`Interface::mesh_slots`).
 pub fn scan(slots: u32) -> Vec<u32> {
@@ -524,7 +525,7 @@ pub fn scan(slots: u32) -> Vec<u32> {
     };
     let m1 = c.m.c_u32(SCAN_LANES - 1);
     let nn = add(&mut c, n, m1);
-    let chunk = c.lk_shr(nn, 7);
+    let chunk = c.lk_shr(nn, SCAN_LANES.trailing_zeros());
     let start = c.m.emit(op::I_MUL, u, &[lane, chunk]);
     let end = add(&mut c, start, chunk);
     let glsl = c.glsl;
@@ -551,7 +552,7 @@ pub fn scan(slots: u32) -> Vec<u32> {
     let p_own = c.elem_ptr(sh, WORKGROUP, lane);
     c.m.emit_void(op::STORE, &[p_own, own]);
     c.workgroup_barrier(SEM_WORKGROUP_MEMORY);
-    for d in [1u32, 2, 4, 8, 16, 32, 64] {
+    for d in (0..SCAN_LANES.trailing_zeros()).map(|k| 1u32 << k) {
         let dk = c.m.c_u32(d);
         let has = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lane, dk]);
         let from = c.m.emit(op::I_SUB, u, &[lane, dk]);
