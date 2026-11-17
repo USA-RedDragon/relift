@@ -119,7 +119,8 @@ ARM32_INC := $(CORE_INC) -Icpus/arm32/include -Icpus/arm32
 MIPS_INC := $(CORE_INC) -Icpus/mips/include -Icpus/mips
 RSP_INC := $(CORE_INC) -Icpus/rsp/include -Icpus/rsp
 NDS_INC := $(ARM32_INC) -Iguests/nds
-VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen -Iguests/switch/nvn
+ZSTD_DEFS := -DZSTDLIB_VISIBLE= -DZSTDLIB_HIDDEN=
+VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen -Iguests/switch/nvn -Ithird_party/zstd $(ZSTD_DEFS)
 RUNNER_INC := -Icore/tests
 
 CORE_SRCS := $(wildcard core/*.c) $(HOST_SRCS)
@@ -211,7 +212,7 @@ ARM32_OBJS := $(call obj,$(ARM32_SRCS))
 MIPS_OBJS := $(call obj,$(MIPS_SRCS))
 RSP_OBJS := $(call obj,$(RSP_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
-VK_OBJS := $(call obj,$(VK_SRCS))
+VK_OBJS := $(call obj,$(VK_SRCS)) $(BUILD)/obj/third_party/zstd/zstddeclib.o
 GB_OBJS := $(call obj,$(GB_SRCS))
 GBDEV_OBJS := $(call obj,$(GBDEV_SRCS))
 GBX_OBJS := $(call obj,$(GBX_SRCS))
@@ -366,7 +367,13 @@ $(SWITCH_OBJS): $(BUILD)/obj/%.o: %.c $(SWITCH_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(SWITCH_INC) $(CFLAGS) -c $< -o $@
 
-$(VK_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS)
+# Vendored third-party code is built as its authors ship it, without the
+# runtime's warning set (third_party/zstd/NOTICE).
+$(BUILD)/obj/third_party/zstd/zstddeclib.o: third_party/zstd/zstddeclib.c
+	@mkdir -p $(dir $@)
+	$(CC) $(filter-out $(WARN),$(CFLAGS_BASE)) $(ZSTD_DEFS) $(CFLAGS) -c $< -o $@
+
+$(filter-out $(BUILD)/obj/third_party/%,$(VK_OBJS)): $(BUILD)/obj/%.o: %.c $(VK_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(VK_INC) $(CFLAGS) -c $< -o $@
 

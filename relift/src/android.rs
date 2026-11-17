@@ -25,6 +25,8 @@ pub const MIN_API: u32 = 30;
 /// orientation kept (SDL asks for any orientation the user allows when its
 /// window is resizable, which put the game in portrait on a device held
 /// upright).
+/// The license of the Zstandard decoder the Switch runtime compiles in.
+const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
 const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 /// The Java sources of the app, compiled into `classes.dex` with SDL3's
@@ -979,6 +981,9 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
     }
     for (name, text) in a.deps.adrenotools.iter().flat_map(|t| &t.licenses) {
         z.add(&format!("assets/licenses/{name}.txt"), std::fs::read(text)?);
+    }
+    if a.about.vulkan {
+        z.add("assets/licenses/zstd.txt", LICENSE_ZSTD.as_bytes().to_vec());
     }
     let unaligned = w.join("unaligned.apk");
     relift_cache::write_if_changed(&unaligned, &z.finish()?)?;

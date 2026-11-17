@@ -1,0 +1,17 @@
+Provenance of the vendored Zstandard decoder (runtime/third_party/zstd)
+
+zstddeclib.c   the single-file Zstandard decompressor of zstd v1.5.7
+               (https://github.com/facebook/zstd, release tarball
+               zstd-1.5.7.tar.gz, SHA-256
+               eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3),
+               generated unchanged by its build/single_file_libs/combine.py:
+               combine.py -r ../../lib -x legacy/zstd_legacy.h
+                 -o zstddeclib.c zstddeclib-in.c
+               (SHA-256 of the output
+               5eb38abe0a7eea13674b312a006df72002d4192f0f0b4d09e6f03fb927a1f3d0).
+zstd.h,        lib/zstd.h and lib/zstd_errors.h of the same release,
+zstd_errors.h  unchanged.
+
+Zstandard is offered under the BSD license or the GPLv2; relift uses it
+under the BSD license, whose text is in LICENSE beside this file.
+relift reads the build's compressed shader table with it.

@@ -28,6 +28,8 @@ use crate::ui::Ui;
 pub const INFO_PATH: &str = "usr/share/relift/info.json";
 
 const LICENSE_RELIFT: &str = include_str!("../../LICENSE");
+/// The license of the Zstandard decoder compiled into Switch programs.
+const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
 
 /// Libraries that always come from the system: the C library family, the
 /// compiler runtimes, the graphics stack and the display servers' clients.
@@ -308,12 +310,15 @@ pub fn desktop_file(slug: &str, name: &str, platform: &str) -> String {
     )
 }
 
-fn licenses_file(name: &str, bundled: &[Bundled]) -> String {
+fn licenses_file(name: &str, bundled: &[Bundled], switch: bool) -> String {
     let mut s = format!(
         "{name}\n\nThis AppImage holds a program built with relift and these third-party components.\nThe game's own code and data belong to their rights holders.\n\n- relift runtime and the code relift generated: MIT (the text is in relift-LICENSE)\n- AppImage type 2 runtime ({}), the start of this file: MIT, {} (the text is in type2-runtime-LICENSE)\n",
         crate::appimage_runtime::TAG,
         crate::appimage_runtime::HOME
     );
+    if switch {
+        s.push_str("- Zstandard decoder (zstd v1.5.7), compiled into the program: BSD-3-Clause, https://github.com/facebook/zstd (the text is in zstd-LICENSE)\n");
+    }
     for b in bundled {
         match KNOWN.iter().find(|k| b.soname.starts_with(k.prefix)) {
             Some(k) => s.push_str(&format!(
@@ -336,13 +341,17 @@ fn write_licenses(
     slug: &str,
     name: &str,
     bundled: &[Bundled],
+    switch: bool,
 ) -> Result<(), BoxError> {
     let dir = root.join("usr/share/licenses").join(slug);
     std::fs::create_dir_all(&dir)?;
     relift_cache::write_if_changed(
         &dir.join("BUNDLED.txt"),
-        licenses_file(name, bundled).as_bytes(),
+        licenses_file(name, bundled, switch).as_bytes(),
     )?;
+    if switch {
+        relift_cache::write_if_changed(&dir.join("zstd-LICENSE"), LICENSE_ZSTD.as_bytes())?;
+    }
     relift_cache::write_if_changed(&dir.join("relift-LICENSE"), LICENSE_RELIFT.as_bytes())?;
     relift_cache::write_if_changed(
         &dir.join("type2-runtime-LICENSE"),
@@ -416,7 +425,7 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
         None => (false, false),
     };
     relift_cache::write_if_changed(&dir.join(INFO_PATH), &info.to_bytes())?;
-    write_licenses(dir, &slug, &name, &bundled)?;
+    write_licenses(dir, &slug, &name, &bundled, platform == "switch")?;
     let run = dir.join("AppRun");
     relift_cache::write_if_changed(&run, app_run(&slug, platform, romfs, dlc).as_bytes())?;
     set_mode(&run, 0o755)?;
@@ -651,8 +660,10 @@ mod tests {
                 path: "/x/libfoo.so.1".into(),
             },
         ];
-        let t = licenses_file("G", &b);
+        let t = licenses_file("G", &b, false);
         assert!(t.contains("SDL3 (libSDL3.so.0): Zlib"));
+        assert!(!t.contains("Zstandard"));
+        assert!(licenses_file("G", &b, true).contains("Zstandard decoder (zstd v1.5.7)"));
         assert!(t.contains("libfoo.so.1") && t.contains("not known"));
     }
 

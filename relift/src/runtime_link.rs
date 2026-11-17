@@ -292,14 +292,23 @@ pub fn find_moltenvk(cache_root: &Path) -> Option<LinkedVulkan> {
     .or_else(|| moltenvk_in(Path::new("/usr/local/opt/molten-vk"), "Homebrew"))
 }
 
-/// The sources of the Vulkan forwarding layer and of the NVN2 layer over it.
+/// The sources of the Vulkan forwarding layer and of the NVN2 layer over it,
+/// with the vendored Zstandard decoder the NVN2 layer reads the build's
+/// compressed shader table through.
 fn vk_sources(rt: &Path) -> std::io::Result<Vec<PathBuf>> {
     let switch = rt.join("guests").join("switch");
     let mut v = c_files(&switch.join("vk"))?;
     v.extend(c_files(&switch.join("vk").join("gen"))?);
     v.extend(c_files(&switch.join("nvn"))?);
+    v.push(rt.join(ZSTD_DIR).join("zstddeclib.c"));
     Ok(v)
 }
+
+/// The vendored Zstandard decoder (`runtime/third_party/zstd/NOTICE`).
+const ZSTD_DIR: &str = "third_party/zstd";
+
+/// Keeps the decoder's symbols out of the runtime's exported ones.
+const ZSTD_DEFS: [&str; 2] = ["-DZSTDLIB_VISIBLE=", "-DZSTDLIB_HIDDEN="];
 
 /// The extra sources of the runtime at `rt`, with SDL3 and MoltenVK looked
 /// up under `cache_root`.
@@ -520,12 +529,16 @@ impl Extras {
         rt_flags: &[String],
         obj: &dyn Fn(&Path) -> PathBuf,
     ) -> Vec<Compile> {
-        let vk_inc = [
+        let vk_inc: Vec<String> = [
             "guests/switch/vk",
             "guests/switch/vk/gen",
             "guests/switch/nvn",
+            ZSTD_DIR,
         ]
-        .map(|p| format!("-I{}", rt.join(p).display()));
+        .map(|p| format!("-I{}", rt.join(p).display()))
+        .into_iter()
+        .chain(ZSTD_DEFS.map(String::from))
+        .collect();
         let mut out: Vec<Compile> = self
             .vk
             .iter()
