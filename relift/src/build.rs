@@ -1406,11 +1406,34 @@ fn lift_and_emit(
     let ports_c = cdir.join("game_ports.c");
     relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("game.toml"))?.as_bytes())?;
     prog.push(ports_c);
+    let console = program_console(npdm.as_ref(), &game)?;
+    if console == relift_switch::cpu::Console::Switch2 {
+        let jobs = relift_proc::workers::jobs().max(1);
+        let built = crate::shaders::build(out, &cdir, jobs as usize)?;
+        if built.programs > 0 {
+            let refused: Vec<String> = built
+                .refused
+                .iter()
+                .map(|(k, n)| format!("{n} {k}"))
+                .collect();
+            ui.note(&Line::new().text(format!(
+                "shaders: {} of {} translated{}",
+                built.translated,
+                built.programs,
+                if refused.is_empty() {
+                    String::new()
+                } else {
+                    format!("; refused: {}", refused.join(", "))
+                }
+            )));
+        }
+        prog.push(built.c_file);
+    }
     for f in program::program_files(
         &placed,
         program::Process {
             npdm: npdm.as_ref(),
-            console: program_console(npdm.as_ref(), &game)?,
+            console,
         },
         &units,
         &emitted.code_maps,

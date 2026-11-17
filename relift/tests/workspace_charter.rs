@@ -654,6 +654,7 @@ const CHARTERS: &[Charter] = &[
             "relift-gba",
             "relift-gba-analyze",
             "relift-gba-formats",
+            "relift-gpu-sm86",
             "relift-guest",
             "relift-host",
             "relift-info",
