@@ -551,3 +551,21 @@ TEST(audren_mixes_adpcm_voices)
         CHECK_EQ(s[i], 0);
     free(u);
 }
+
+TEST(aud_u_gives_the_switch2_audio_managers)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x400000);
+    CHECK_EQ(open_service(c, heap, "audren:u"), 0);
+    uint32_t h = open_service(c, heap, "aud:u");
+    CHECK(h);
+    reply r = call(c, h, &(msg){ .cmd = 2 });
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    r = call(c, h, &(msg){ .cmd = 1 });
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+}
