@@ -157,6 +157,29 @@ jobs:
       - name: end-to-end tests of relift
         run: scripts/ci/tests-relift-e2e.sh
 
+  nds-timing-sdk:
+    name: Nintendo DS timing test ROM, devkitPro build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: nds-timing-sdk
+          workspaces: |
+            .
+
+      - name: Build the ROM in the devkitPro image, run it through relift and compare
+        run: scripts/ci/nds-timing-sdk.sh
+
   docs:
     name: docs facts are current and the site builds
     runs-on: ubuntu-latest
