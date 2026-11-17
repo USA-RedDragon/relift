@@ -22,6 +22,8 @@
  *   sampler <index> <filter> <norm> <cmp>
  *                                  filter 0 nearest 1 linear; cmp 0 off, else VkCompareOp + 1
  *   dump <path>                    the last image's first level, written afterwards
+ *   texdims <path>                 the texture dimension table (set 2 binding 31) from a file;
+ *                                  zeros without one
  * The device is the first whose name holds the given text. KRUN_CACHE=<path> writes the pipeline
  * cache there. Exits with 77 when the module needs VK_KHR_shader_fma and the device lacks it.
  */
@@ -264,10 +266,11 @@ int main(int argc, char **argv) {
     int segshift = -1;
     Img imgs[8]; int ni = 0;
     VkWriteDescriptorSet writes[64]; VkDescriptorImageInfo infos[64]; int nw = 0;
-    char *save = 0; const char *dump = 0;
+    char *save = 0; const char *dump = 0; const char *texdims = 0;
     for (char *l = strtok_r(spec, "\n", &save); l; l = strtok_r(0, "\n", &save)) {
         char a[512], b[512], c[64]; unsigned long x, y, z, u, t;
         if (sscanf(l, "dump %511s", a) == 1) dump = strdup(a);
+        else if (sscanf(l, "texdims %511s", a) == 1) texdims = strdup(a);
         else if (sscanf(l, "local %lu %lu %lu", &x, &y, &z) == 3) { sdata[0] = x; sdata[1] = y; sdata[2] = z; }
         else if (sscanf(l, "groups %lu %lu %lu", &x, &y, &z) == 3) { groups[0] = x; groups[1] = y; groups[2] = z; }
         else if (sscanf(l, "shared %lu", &x) == 1) sdata[3] = x / 4;
@@ -336,6 +339,8 @@ int main(int argc, char **argv) {
         CK(vkCreateDescriptorSetLayout(dev, &li, 0, &sl[s]));
     }
     VkDescriptorSetLayoutBinding tb[NBIND]; VkDescriptorBindingFlags tf[NBIND]; uint32_t nt = 0;
+    tb[nt] = (VkDescriptorSetLayoutBinding){ 31, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 };
+    tf[nt++] = 0;
     for (int k = 0; k < NBIND; k++) {
         if (k == 31) continue;
         VkDescriptorType ty = k == 0 ? VK_DESCRIPTOR_TYPE_SAMPLER : k < 32 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -357,6 +362,8 @@ int main(int argc, char **argv) {
         CK(vkCreateDescriptorSetLayout(dev, &l3, 0, &sl[3]));
     }
     Buf locks = mkbuf(16384, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    Buf dims = mkbuf(4096, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    if (texdims) { size_t fn; void *d = slurp(texdims, &fn); memcpy(dims.map, d, fn < 4096 ? fn : 4096); free(d); }
     VkPushConstantRange pr = { VK_SHADER_STAGE_ALL, 0, 128 };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, 0, 0, 4, sl, 1, &pr };
     VkPipelineLayout pl; CK(vkCreatePipelineLayout(dev, &pli, 0, &pl));
@@ -371,7 +378,7 @@ int main(int argc, char **argv) {
 
     VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 36 }, { VK_DESCRIPTOR_TYPE_SAMPLER, COUNT },
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32 * COUNT }, { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 80 * COUNT },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXB + 1 } };
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXB + 2 } };
     VkDescriptorPoolCreateInfo dpi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, 0, 0, 4, 5, ps };
     VkDescriptorPool dp; CK(vkCreateDescriptorPool(dev, &dpi, 0, &dp));
     VkDescriptorSetAllocateInfo dai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0, dp, 4, sl };
@@ -383,6 +390,11 @@ int main(int argc, char **argv) {
     }
     for (int k = 0; k < nw; k++) writes[k].dstSet = ds[2];
     vkUpdateDescriptorSets(dev, nw, writes, 0, 0);
+    {
+        VkDescriptorBufferInfo bi = { dims.b, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[2], 31, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bi, 0 };
+        vkUpdateDescriptorSets(dev, 1, &w, 0, 0);
+    }
     {
         VkDescriptorBufferInfo bi = { locks.b, 0, VK_WHOLE_SIZE };
         VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[3], 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bi, 0 };

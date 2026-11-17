@@ -1,0 +1,21 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_nonuniform_qualifier : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430) buffer W { uint w[]; };
+layout(push_constant) uniform Bank { W a; W o; };
+layout(set = 2, binding = 0) uniform sampler smp[4];
+layout(set = 2, binding = 2) uniform texture2D t2[4];
+layout(set = 2, binding = 4) uniform textureCube tc[4];
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    uint v = a.w[g];
+    uint i = v & 1u;
+    int lod = int((v >> 2) & 1u);
+    ivec2 s2 = textureSize(sampler2D(t2[nonuniformEXT(i)], smp[0]), lod);
+    ivec2 sc = textureSize(samplerCube(tc[nonuniformEXT(i + 2u)], smp[0]), lod);
+    o.w[4u * g] = uint(s2.x);
+    o.w[4u * g + 1u] = uint(s2.y);
+    o.w[4u * g + 2u] = uint(sc.x);
+    o.w[4u * g + 3u] = uint(sc.y) ^ v;
+}

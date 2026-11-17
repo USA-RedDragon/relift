@@ -34,8 +34,8 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use tex::{
-    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_KIND_SPEC,
-    image_binding, texture_binding,
+    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING,
+    TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
 
 use crate::program::{Program, Stage};

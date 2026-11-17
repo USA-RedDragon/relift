@@ -18,7 +18,8 @@ KAT_DEVS devices; it needs no NVIDIA device, glslangValidator or zstd.
 
 A spec names its files with placeholders: SPV (the module), OUT (the prefix of the output files)
 and IN<n> (input file n). `input <n> <bytes> <kind> <seed>` lines make input n: kind u32 for
-random words, f32:<lo>:<hi> for floats drawn between lo and hi, zero for zeros. The translated
+random words, f32:<lo>:<hi> for floats drawn between lo and hi, words:<a>,<b>,... for those words
+then zeros, zero for zeros. The translated
 program finds its buffer addresses in constant bank 0, so a spec places them there with `put`
 lines as well as in the push constants the GLSL reads. A run that needs VK_KHR_shader_fma on a
 device without it is skipped, and so is a translation that runs warp operations on 32-wide host
@@ -54,6 +55,9 @@ def make_input(n, kind, seed):
         return struct.pack('<%df' % (n // 4), *[rng.uniform(lo, hi) for _ in range(n // 4)])
     if kind == 'zero':
         return bytes(n)
+    if kind.startswith('words:'):
+        w = [int(x, 0) for x in kind[6:].split(',')]
+        return struct.pack('<%dI' % (n // 4), *(w + [0] * (n // 4 - len(w))))
     sys.exit('unknown input kind %s' % kind)
 
 

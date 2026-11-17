@@ -109,7 +109,9 @@ its pipeline cache, which is translated for every host preset in
 (default llvmpipe and the NVIDIA device). Every output must equal the
 reference word for word, except where the translator reports the program
 inexact for that host. `--record` writes the SASS, the inputs and the
-reference outputs.
+reference outputs. Where a case puts texture handles in the driver's
+constant bank (`put` lines), the offsets are the ones the driver chose for
+`krun.c`'s descriptor set layout; a change to that layout moves them.
 
     KAT_DEVS=llvmpipe KAT_HOSTS="lavapipe mali adreno" python3 -I kat/compute/kat.py <absolute work dir> --replay tests/kat/compute.txt
 
@@ -123,3 +125,4 @@ and validates for every host preset.
 | i64, i64add | 64-bit global atomics, with and without the lock on hosts without them |
 | membar | MEMBAR.VC between shared memory stores and loads around a BAR |
 | texoff | texel offsets on TEX and TLD, strong 128-bit loads and stores |
+| txq | TXQ of handles from a register (descriptor-indexed 2D and cube textures), with the runtime's dimension table |

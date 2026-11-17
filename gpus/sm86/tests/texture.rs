@@ -3,8 +3,8 @@ mod common;
 use common::translate;
 use relift_gpu_sm86::program::{Program, Stage};
 use relift_gpu_sm86::translate::{
-    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_KIND_SPEC,
-    image_binding, texture_binding,
+    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING,
+    TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -490,13 +490,13 @@ fn txq_takes_the_dimension_the_handle_is_sampled_with() {
     }
     let mut w = tex(0x170, &[(62, 2, 0)]);
     w[1] = (w[1] & !0x0e) | (1 << 1);
-    let e = translate(&program(Vec::new(), &[w]))
-        .err()
-        .map(|e| e.to_string());
+    let s = translate(&program(Vec::new(), &[w])).unwrap_or_else(|e| panic!("{e}"));
     assert!(
-        e.is_some_and(|e| e.contains("TXQ")),
-        "a handle from a register"
+        s.interface.texture_bindings.contains(&TEXTURE_DIMS_BINDING),
+        "a handle from a register reads the runtime's dimension table"
     );
+    assert!(s.interface.texture_dims.is_empty());
+    assert_eq!(insts(&s.spirv, SWITCH).len(), 1);
 }
 
 const SWITCH: u32 = 251;

@@ -65,8 +65,10 @@
 //! takes the dimension its bound handle is sampled with elsewhere in the
 //! program; without one, the runtime gives the bound texture's dimension in
 //! a specialization constant ([`TEXTURE_DIM_SPEC`] onwards, listed in
-//! `Interface::texture_dims`), and TXQ of a handle from a register is
-//! rejected. TMML names only the base dimension (2D for a 2D array, as
+//! `Interface::texture_dims`). TXQ of a handle from a register reads the
+//! dimension of the texture its id names from a table the runtime keeps
+//! beside the pool ([`TEXTURE_DIMS_BINDING`]), as the guest's TXQ reads it
+//! from the texture header. TMML names only the base dimension (2D for a 2D array, as
 //! NVIDIA's compiler emits it), so its handle's array view is used when the
 //! sampling instructions name the array dimension. Buffer textures, TLD.CL, TXD.LC, TXQ sample positions,
 //! uniform register handles with an offset, SUQUERY other than the
@@ -84,6 +86,7 @@ use crate::{Inst, Operand, Word};
 use std::collections::BTreeMap;
 
 const UNIFORM_CONSTANT: u32 = 0;
+const STORAGE_BUFFER: u32 = 12;
 const IMAGE_CLASS: u32 = 11;
 const NON_UNIFORM: u32 = 5300;
 const COHERENT: u32 = 23;
@@ -91,6 +94,14 @@ const CAP_COMPUTE_DERIVATIVE_GROUP_LINEAR: u32 = 5350;
 
 /// Binding of the sampler pool in set [`TEXTURE_SET`](super::TEXTURE_SET).
 pub const SAMPLER_BINDING: u32 = 0;
+
+/// Binding of the texture dimension table in set
+/// [`TEXTURE_SET`](super::TEXTURE_SET): a storage buffer of one 32-bit
+/// word per texture id of the pool, the [`Dim`] of that texture (the
+/// dimension its header gives; a six-layer 2D array the runtime also
+/// views as a cube stays a 2D array). TXQ of a handle from a register
+/// reads it.
+pub const TEXTURE_DIMS_BINDING: u32 = 31;
 
 /// First specialization constant id of the per-handle numeric kinds.
 pub const TEXTURE_KIND_SPEC: u32 = 0x100;
@@ -580,6 +591,36 @@ fn texref(c: &Ctx) -> Res<Option<(u32, u32)>> {
 }
 
 impl Ctx {
+    /// The [`Dim`] of the texture whose id handle `h` holds, from the
+    /// runtime's table ([`TEXTURE_DIMS_BINDING`]).
+    fn texture_dim_of(&mut self, h: u32) -> u32 {
+        let u = self.u32t();
+        let var = match self.tex.vars.get(&TEXTURE_DIMS_BINDING) {
+            Some(&v) => v,
+            None => {
+                let arr = self.m.t_runtime_array(u);
+                self.m.deco(arr, 6, &[4]);
+                let st = self.m.t_struct_unique(&[arr]);
+                self.m.deco(st, 2, &[]);
+                self.m.member_deco(st, 0, 35, &[0]);
+                self.m.member_deco(st, 0, 24, &[]);
+                let p = self.m.t_ptr(STORAGE_BUFFER, st);
+                let var = self.m.global(p, STORAGE_BUFFER);
+                self.m.deco(var, 34, &[TEXTURE_SET]);
+                self.m.deco(var, 33, &[TEXTURE_DIMS_BINDING]);
+                self.globals.push(var);
+                self.tex.vars.insert(TEXTURE_DIMS_BINDING, var);
+                self.iface.texture_bindings.insert(TEXTURE_DIMS_BINDING);
+                var
+            }
+        };
+        let id = self.and_k(h, 0xfffff);
+        let z = self.m.c_u32(0);
+        let pu = self.m.t_ptr(STORAGE_BUFFER, u);
+        let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, z, id]);
+        self.m.emit(op::LOAD, u, &[p])
+    }
+
     fn tx_i32(&mut self) -> u32 {
         self.m.t_i32()
     }
@@ -1540,29 +1581,38 @@ fn txq(c: &mut Ctx) -> Res<()> {
             let next = TEXTURE_DIM_SPEC + c.iface.texture_dims.len() as u32;
             let id = *c.iface.texture_dims.entry(k).or_insert(next);
             let sel = c.m.spec_u32(Dim::D2 as u32, id);
-            let t = c.tx_uvec4();
-            let merge = c.m.id();
-            let labels: Vec<u32> = ALL_DIMS.iter().map(|_| c.m.id()).collect();
-            let mut sw = vec![sel, labels[Dim::D2 as usize]];
-            for (d, l) in ALL_DIMS.iter().zip(&labels) {
-                sw.extend([*d as u32, *l]);
-            }
-            c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
-            c.m.emit_void(op::SWITCH, &sw);
-            let mut phi = Vec::new();
-            for (d, l) in ALL_DIMS.iter().zip(&labels) {
-                c.m.emit_void(op::LABEL, &[*l]);
-                let v = txq_of(c, *d, h, nu, lod);
-                phi.extend([v, *l]);
-                c.m.emit_void(op::BRANCH, &[merge]);
-            }
-            c.m.emit_void(op::LABEL, &[merge]);
-            c.m.emit(op::PHI, t, &phi)
+            txq_by_dim(c, sel, h, nu, lod)
         }
-        None => return bad("TXQ of a texture of unknown dimension"),
+        None => {
+            let sel = c.texture_dim_of(h);
+            txq_by_dim(c, sel, h, nu, lod)
+        }
     };
     c.tex_result(v, w.get(72, 4), 0);
     Ok(())
+}
+
+/// TXQ of the texture at `h` viewed as the dimension `sel` names (a [`Dim`]
+/// value; any other value reads as 2D).
+fn txq_by_dim(c: &mut Ctx, sel: u32, h: u32, nu: bool, lod: Option<u32>) -> u32 {
+    let t = c.tx_uvec4();
+    let merge = c.m.id();
+    let labels: Vec<u32> = ALL_DIMS.iter().map(|_| c.m.id()).collect();
+    let mut sw = vec![sel, labels[Dim::D2 as usize]];
+    for (d, l) in ALL_DIMS.iter().zip(&labels) {
+        sw.extend([*d as u32, *l]);
+    }
+    c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+    c.m.emit_void(op::SWITCH, &sw);
+    let mut phi = Vec::new();
+    for (d, l) in ALL_DIMS.iter().zip(&labels) {
+        c.m.emit_void(op::LABEL, &[*l]);
+        let v = txq_of(c, *d, h, nu, lod);
+        phi.extend([v, *l]);
+        c.m.emit_void(op::BRANCH, &[merge]);
+    }
+    c.m.emit_void(op::LABEL, &[merge]);
+    c.m.emit(op::PHI, t, &phi)
 }
 
 /// Every texture dimension, in [`Dim`]'s order.
