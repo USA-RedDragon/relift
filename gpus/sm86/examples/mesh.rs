@@ -3,8 +3,10 @@
 //!
 //! `mesh <program> <out.spv> [host] [--compute] [--slots N] [pipeline...]`
 //! prints the guest workgroups per workgroup the translation took last.
-//! `mesh helpers <mesh program> <dir> [--slots N] [pipeline...]` writes
-//! `scan-tasks.spv` (for a mesh program of N slots) and `vertex.spv`.
+//! `mesh helpers <mesh program> <dir> [host] [--slots N] [pipeline...]`
+//! writes `scan-tasks.spv` (for a mesh program of N slots, its workgroup
+//! as wide as the host allows) and `vertex.spv`. Without `--slots` a
+//! translation takes the host's slots.
 //!
 //! Pipeline flags: `--verts N`, `--prims N`, `--topo point|line|tri`,
 //! `--task-lanes N`, `--mesh-lanes N`, `--payload BYTES`, `--prim-sph FILE`,
@@ -25,7 +27,7 @@ fn write(path: &str, words: &[u32]) {
 fn main() {
     let mut p = MeshPipeline::default();
     let mut compute = false;
-    let mut slots = 1;
+    let mut slots = 0;
     let mut rest = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -66,11 +68,15 @@ fn main() {
     let src = &rest[usize::from(helpers)];
     let b = std::fs::read(src).unwrap_or_else(|e| panic!("{src}: {e}"));
     let prog = Program::parse(&b);
+    let host = match rest.get(2 + usize::from(helpers)) {
+        Some(n) => HostProfile::preset(n).unwrap_or_else(|| panic!("no host preset {n}")),
+        None => HostProfile::default(),
+    };
     if helpers {
         let sph = prog.sph.as_ref().expect("a mesh program has an SPH").words;
         let n = mesh_components(&sph).expect("mesh outputs").len() as u32;
         let dir = &rest[2];
-        write(&format!("{dir}/scan-tasks.spv"), &scan(slots));
+        write(&format!("{dir}/scan-tasks.spv"), &scan(&host, slots));
         write(
             &format!("{dir}/vertex.spv"),
             &vertex(&p, &sph).expect("vertex shader"),
@@ -82,10 +88,10 @@ fn main() {
         );
         return;
     }
-    let mut o = Options::default();
-    if let Some(n) = rest.get(2) {
-        o.host = HostProfile::preset(n).unwrap_or_else(|| panic!("no host preset {n}"));
-    }
+    let mut o = Options {
+        host,
+        ..Options::default()
+    };
     o.pipeline.mesh = p;
     o.mesh_compute = compute;
     o.mesh_slots = slots;

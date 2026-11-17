@@ -9,7 +9,9 @@ mod common;
 
 use common::{translate_with, validate};
 use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::mesh_fallback::{indexed, mesh_record_words, scan, vertex};
+use relift_gpu_sm86::translate::mesh_fallback::{
+    indexed, mesh_record_words, scan, scan_lanes, vertex,
+};
 use relift_gpu_sm86::translate::{
     HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options, mesh_components,
 };
@@ -162,8 +164,9 @@ fn the_compute_back_end_helpers_validate() {
     for c in cases() {
         let mesh = &c.programs.iter().find(|(k, _)| k == "mesh").unwrap().1;
         let sph = mesh.sph.as_ref().unwrap().words;
-        validate(&scan(1));
-        validate(&scan(4));
+        validate(&scan(&HostProfile::default(), 1));
+        validate(&scan(&HostProfile::default(), 4));
+        validate(&scan(&HostProfile::minimal(), 1));
         validate(&vertex(&c.pipe, &sph).unwrap_or_else(|e| panic!("{}: {e}", c.name)));
     }
 }
@@ -433,4 +436,52 @@ fn lavapipe_writes_the_cull_flag_with_constant_stores() {
     assert_eq!(lvp, [Some(true), Some(false)]);
     let nv = stores(HostProfile::nvidia());
     assert_eq!(nv, [None]);
+}
+
+/// The scan pass is as wide as the host allows, up to 512 invocations, and
+/// the compute back end takes the host's guest workgroups per workgroup
+/// unless asked for others, never more than the host's workgroup holds.
+#[test]
+fn the_compute_back_end_follows_the_host_limits() {
+    assert_eq!(scan_lanes(&HostProfile::nvidia()), 512);
+    assert_eq!(scan_lanes(&HostProfile::minimal()), 128);
+    let narrow = HostProfile {
+        max_workgroup_size: [96, 96, 64],
+        ..HostProfile::nvidia()
+    };
+    assert_eq!(scan_lanes(&narrow), 64);
+    for (lanes, host) in [(512, HostProfile::nvidia()), (128, HostProfile::minimal())] {
+        let words = scan(&host, 1);
+        validate(&words);
+        assert_eq!(local_size(&words), lanes, "{}", host.name);
+    }
+    let tiny = HostProfile {
+        max_workgroup_invocations: 32,
+        ..HostProfile::adreno()
+    };
+    for c in cases() {
+        for (k, p) in &c.programs {
+            if k == "frag" {
+                continue;
+            }
+            for host in [
+                HostProfile::adreno(),
+                HostProfile::nvidia(),
+                HostProfile::lavapipe(),
+            ] {
+                let taken = |slots: u32| {
+                    let mut o = options(host.clone(), &c.pipe, true);
+                    o.mesh_slots = slots;
+                    translate_with(p, &o).unwrap().interface.mesh_slots
+                };
+                let tag = format!("{} {k} on {}", c.name, host.name);
+                assert_eq!(taken(0), taken(host.mesh_slots), "{tag}");
+            }
+            let mut o = options(tiny.clone(), &c.pipe, true);
+            o.mesh_slots = 2;
+            let s = translate_with(p, &o).unwrap();
+            assert_eq!(s.interface.mesh_slots, 1, "{} {k}", c.name);
+        }
+    }
+    assert_eq!(HostProfile::adreno().mesh_slots, 2);
 }

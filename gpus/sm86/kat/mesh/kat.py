@@ -153,7 +153,7 @@ def draw(work, o, name, case, progs, prim_sph, tolerate_native):
             if back == 'compute':
                 slots[k] = int(r.split()[-1])
             validate(spv)
-    r = run([X, 'helpers', progs['mesh'], o, '--slots', str(slots['mesh'])] + pipe + compute).split()
+    r = run([X, 'helpers', progs['mesh'], o, host, '--slots', str(slots['mesh'])] + pipe + compute).split()
     for h in ('scan-tasks', 'vertex'):
         validate(os.path.join(o, h + '.spv'))
     record_words = int(r[3])

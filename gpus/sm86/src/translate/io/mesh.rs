@@ -928,14 +928,18 @@ pub(crate) fn prescan(c: &mut Ctx, mesh_compute: bool) -> Res<()> {
 }
 
 /// Decides how many guest workgroups a workgroup of the compute back end
-/// runs (see `Options::mesh_slots`): `slots` when the program's warp
-/// operations keep to a guest warp's 32 invocations and nothing in it
-/// depends on a workgroup holding one guest workgroup alone, else 1.
+/// runs (see `Options::mesh_slots`): `slots` (0: the host's) when the
+/// program's warp operations keep to a guest warp's 32 invocations, the
+/// host allows a workgroup of that many, and nothing in it depends on a
+/// workgroup holding one guest workgroup alone, else 1.
 pub(crate) fn pack_plan(c: &mut Ctx, insts: &[Inst], slots: u32) -> Res<()> {
     if !c.stage.is_mesh_pipeline() || c.native() {
         return Ok(());
     }
-    let slots = slots.max(1);
+    let slots = match slots {
+        0 => c.host.mesh_slots.max(1),
+        n => n,
+    };
     if !matches!(slots, 1 | 2 | 4) {
         return bad(format!("{slots} guest workgroups per workgroup"));
     }
@@ -943,7 +947,8 @@ pub(crate) fn pack_plan(c: &mut Ctx, insts: &[Inst], slots: u32) -> Res<()> {
         c.iface.host.warp,
         WarpPath::None | WarpPath::Subgroup | WarpPath::Cluster
     );
-    let slots = if warp && !insts.iter().any(per_workgroup) {
+    let fits = 32 * slots <= c.host.max_workgroup_invocations;
+    let slots = if warp && fits && !insts.iter().any(per_workgroup) {
         slots
     } else {
         1

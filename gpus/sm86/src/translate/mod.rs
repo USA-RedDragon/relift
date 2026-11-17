@@ -164,10 +164,12 @@ pub struct Options {
     /// a host with mesh shaders.
     pub mesh_compute: bool,
     /// Compute back end: guest task or mesh workgroups to run in one
-    /// workgroup, each in its own 32 invocations (1, 2 or 4; 0 is 1), so
-    /// that a workgroup fills a host subgroup wider than 32. A program
-    /// that cannot share a workgroup takes 1; [`Interface::mesh_slots`]
-    /// says what the translation took.
+    /// workgroup, each in its own 32 invocations (1, 2 or 4; 0 takes the
+    /// host's [`HostProfile::mesh_slots`]), so that a workgroup fills a host
+    /// subgroup wider than 32. A program that cannot share a workgroup, or
+    /// whose workgroup of `32 * slots` invocations the host's
+    /// `max_workgroup_invocations` does not allow, takes 1;
+    /// [`Interface::mesh_slots`] says what the translation took.
     pub mesh_slots: u32,
 }
 

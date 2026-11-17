@@ -43,7 +43,7 @@ use super::super::super::{Ctx, INPUT, OUTPUT, Res, bad};
 use super::{Component, MeshPipeline, MeshTopology, PrimComponent, WORKGROUP};
 use crate::program::Stage;
 use crate::spirv::{Module, op};
-use crate::translate::GUEST_MEMORY_SET;
+use crate::translate::{GUEST_MEMORY_SET, HostProfile};
 
 /// Binding of the fallback's storage buffer in [`GUEST_MEMORY_SET`].
 pub const BINDING: u32 = 2;
@@ -81,9 +81,20 @@ pub const H_DRAW_INDEXED: u32 = 17;
 pub const HEADER_WORDS: u32 = 32;
 /// The widest x of an indirect dispatch the passes write.
 pub const DISPATCH_X: u32 = 65535;
-/// Invocations of a scan workgroup: the most every host preset's
-/// `maxComputeWorkGroupInvocations` allows (Vulkan only promises 128).
+/// Invocations of a scan workgroup on a host that allows them.
 const SCAN_LANES: u32 = 512;
+
+/// Invocations of the scan pass's one workgroup on `host`: [`SCAN_LANES`],
+/// or the largest power of two below it that the host's
+/// `maxComputeWorkGroupInvocations` and `maxComputeWorkGroupSize` x allow
+/// (Vulkan promises 128).
+pub fn scan_lanes(host: &HostProfile) -> u32 {
+    let most = SCAN_LANES
+        .min(host.max_workgroup_invocations)
+        .min(host.max_workgroup_size[0])
+        .max(1);
+    1 << most.ilog2()
+}
 
 const STORAGE_BUFFER: u32 = 12;
 const B_VERTEX_INDEX: u32 = 42;
@@ -504,16 +515,17 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
     Ok(())
 }
 
-/// The scan pass (one workgroup of 512 invocations) over the mesh counts
-/// of the task records, for a mesh program of `slots` guest workgroups per
-/// workgroup (`Interface::mesh_slots`).
-pub fn scan(slots: u32) -> Vec<u32> {
+/// The scan pass (one workgroup of [`scan_lanes`] invocations) over the
+/// mesh counts of the task records on `host`, for a mesh program of `slots`
+/// guest workgroups per workgroup (`Interface::mesh_slots`).
+pub fn scan(host: &HostProfile, slots: u32) -> Vec<u32> {
+    let n_lanes = scan_lanes(host);
     let mut c = Ctx::bare(Stage::Compute);
     let u = c.u32t();
     let b = c.boolt();
     let buf = c.mesh_buffer();
     let (main, vars) = c.helper_begin(4);
-    let lanes = c.m.c_u32(SCAN_LANES);
+    let lanes = c.m.c_u32(n_lanes);
     let lane = c.local_index_in();
     let zero = c.m.c_u32(0);
     let one = c.m.c_u32(1);
@@ -523,9 +535,9 @@ pub fn scan(slots: u32) -> Vec<u32> {
         let at = add(c, out, i);
         load(c, buf, at)
     };
-    let m1 = c.m.c_u32(SCAN_LANES - 1);
+    let m1 = c.m.c_u32(n_lanes - 1);
     let nn = add(&mut c, n, m1);
-    let chunk = c.lk_shr(nn, SCAN_LANES.trailing_zeros());
+    let chunk = c.lk_shr(nn, n_lanes.trailing_zeros());
     let start = c.m.emit(op::I_MUL, u, &[lane, chunk]);
     let end = add(&mut c, start, chunk);
     let glsl = c.glsl;
@@ -544,7 +556,7 @@ pub fn scan(slots: u32) -> Vec<u32> {
         let s = add(c, s, v);
         c.m.emit_void(op::STORE, &[sum_var, s]);
     });
-    let arr = c.m.t_array(u, SCAN_LANES);
+    let arr = c.m.t_array(u, n_lanes);
     let pa = c.m.t_ptr(WORKGROUP, arr);
     let sh = c.m.global(pa, WORKGROUP);
     c.globals.push(sh);
@@ -552,7 +564,7 @@ pub fn scan(slots: u32) -> Vec<u32> {
     let p_own = c.elem_ptr(sh, WORKGROUP, lane);
     c.m.emit_void(op::STORE, &[p_own, own]);
     c.workgroup_barrier(SEM_WORKGROUP_MEMORY);
-    for d in (0..SCAN_LANES.trailing_zeros()).map(|k| 1u32 << k) {
+    for d in (0..n_lanes.trailing_zeros()).map(|k| 1u32 << k) {
         let dk = c.m.c_u32(d);
         let has = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lane, dk]);
         let from = c.m.emit(op::I_SUB, u, &[lane, dk]);
@@ -605,7 +617,7 @@ pub fn scan(slots: u32) -> Vec<u32> {
     let _ = lanes;
     c.m.emit_void(op::RETURN, &[]);
     c.m.emit_void(op::FUNCTION_END, &[]);
-    c.helper_finish(main, 5, &[SCAN_LANES, 1, 1])
+    c.helper_finish(main, 5, &[n_lanes, 1, 1])
 }
 
 /// The vertex shader of the draw for a mesh program with SPH `sph`: it
