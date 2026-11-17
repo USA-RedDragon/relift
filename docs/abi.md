@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION -->`11u`<!-- /docgen:const -->.
+Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION print=value -->`11`<!-- /docgen:const -->.
 
 ## 0. Runtime layers
 
@@ -499,7 +499,7 @@ has a dispatch slot that is not empty, so no guest jump can miss.
   address that is not a hot entry. A landing pad keeps its `rl_pad_resume`
   entry. Hot shards, their flags and their code do not change. The setting
   `emit.cold` turns the copy off.
-- **Code map.** `rl_code_map` (`RL_CODE_MAP_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_CODE_MAP_VERSION -->`1u`<!-- /docgen:const -->) gives each slot of
+- **Code map.** `rl_code_map` (`RL_CODE_MAP_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_CODE_MAP_VERSION print=value -->`1`<!-- /docgen:const -->) gives each slot of
   the executable pages its class: `RL_CODE_HOT` (an entry of the hot unit:
   function entries, landing pads, overrides), `RL_CODE_COLD` (an
   instruction only the cold unit enters) or `RL_CODE_TRAP` (padding or a
