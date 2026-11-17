@@ -20,9 +20,23 @@ use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
-/// The optimization of lifted code: the bodies are small next to a run's
-/// device and dispatch work, and -O0 keeps the build of a large ROM short.
-const LIFTED_OPT: &str = "-O0";
+/// The optimization of lifted CPU code: -O1 runs a frame about twice as
+/// fast as -O0 and within a few percent of -O2, which builds the most.
+const LIFTED_OPT: &str = "-O1";
+
+/// The optimization of lifted RSP code: its vector instructions are lane
+/// helpers that cost nothing only once inlined, and an RSP task runs them
+/// for every vertex and every audio sample.
+const RSP_OPT: &str = "-O2";
+
+/// Whether the lifted C file at `src` holds RSP code (`c/rsp<k>/...`).
+fn rsp_unit(src: &Path, cdir: &Path) -> bool {
+    src.strip_prefix(cdir)
+        .ok()
+        .and_then(|p| p.components().next())
+        .and_then(|c| c.as_os_str().to_str())
+        .is_some_and(|c| c.starts_with("rsp"))
+}
 
 /// The ROM's file name in the import directory (big-endian).
 const ROM_FILE: &str = "rom.z64";
@@ -459,7 +473,20 @@ fn compile(
         .map(|s| Compile {
             src: s.clone(),
             obj: obj(s, "lifted"),
-            flags: lifted_flags.clone(),
+            flags: if rsp_unit(s, cdir) {
+                lifted_flags
+                    .iter()
+                    .map(|f| {
+                        if f == LIFTED_OPT {
+                            RSP_OPT.into()
+                        } else {
+                            f.clone()
+                        }
+                    })
+                    .collect()
+            } else {
+                lifted_flags.clone()
+            },
             pool: None,
             stage: 0,
         })
