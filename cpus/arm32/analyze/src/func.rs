@@ -864,8 +864,8 @@ impl Run<'_> {
     /// copied to fast memory and run there): each function of the table
     /// becomes a copy at the destination, of `r2` bytes when constant, else
     /// up to the next function of the table or of the image (at most
-    /// [`MAX_TABLE_COPY`]), and short of the functions other copies put in
-    /// that RAM.
+    /// [`MAX_TABLE_COPY`]), and short of the functions other copies (not of
+    /// a table) put in that RAM.
     fn table_copy(&mut self, site: Loc, st: &State) {
         let Some(dst) = st.reg(0).k32().filter(|d| self.env.image.is_ram(*d)) else {
             return;
@@ -897,7 +897,8 @@ impl Run<'_> {
                 .env
                 .entries
                 .iter()
-                .filter(|l| l.copy.is_some() && l.addr > dst && l.addr - dst < len)
+                .filter(|l| l.copy.is_some_and(|c| !self.env.image.is_table(c)))
+                .filter(|l| l.addr > dst && l.addr - dst < len)
                 .map(|l| l.addr - dst)
                 .min()
             {

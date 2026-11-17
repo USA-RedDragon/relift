@@ -105,6 +105,16 @@ impl<'a> Image<'a> {
     }
 
     /// The copy a rewrite `c` was made from, or `c`.
+    /// Whether copy `c` is one function of a table a writer copies
+    /// ([`CopyKind::Table`]): an alternative to the other copies at its
+    /// address, not a rewrite of them.
+    pub(crate) fn is_table(&self, c: u16) -> bool {
+        matches!(
+            self.copies.get(usize::from(c)).map(|c| c.kind),
+            Some(CopyKind::Table(_))
+        )
+    }
+
     pub(crate) fn base(&self, c: u16) -> u16 {
         match self.copies.get(usize::from(c)).map(|c| c.kind) {
             Some(CopyKind::Rewrite(b)) => b,

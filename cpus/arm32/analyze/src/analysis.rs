@@ -618,7 +618,9 @@ impl<'a> Driver<'a> {
         let mut code: BTreeMap<u32, BTreeSet<(bool, u16)>> = BTreeMap::new();
         for r in self.runs.values() {
             for l in r.body.keys() {
-                if let Some(c) = l.copy {
+                if let Some(c) = l.copy
+                    && !self.image.is_table(c)
+                {
                     code.entry(l.addr)
                         .or_default()
                         .insert((l.thumb, self.image.base(c)));
