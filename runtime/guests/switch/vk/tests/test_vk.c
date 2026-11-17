@@ -137,7 +137,10 @@ static uint64_t g64(uint64_t a) { return rl_ld64(g_mem, a); }
 
 static uint32_t g32(uint64_t a) { return rl_ld32(g_mem, a); }
 
-static int g_rc;
+/** @brief The return address a lifted call site passes in x30: a thunk that returns normally returns it. */
+#define CALLER_RET 0x0000000071e7c000ull
+
+static uint64_t g_rc;
 
 /** @brief Calls the guest address fn with args the way a BLR from lifted code does; returns x0. */
 static uint64_t gcall_addr(uint64_t fn, const uint64_t *args, unsigned n)
@@ -151,6 +154,7 @@ static uint64_t gcall_addr(uint64_t fn, const uint64_t *args, unsigned n)
     }
     g_c->sp = sp;
     g_c->x[19] = 0x1919191919191919ull;
+    g_c->x[30] = CALLER_RET;
     g_rc = rl_indirect(g_c, fn)(g_c, g_mem);
     return g_c->x[0];
 }
@@ -162,6 +166,7 @@ static uint64_t gipa(uint64_t inst, const char *name)
     g_c->x[0] = a[0];
     g_c->x[1] = a[1];
     g_c->sp = sp;
+    g_c->x[30] = CALLER_RET;
     rl_fn f = rl_vk_import("vkGetInstanceProcAddr");
     g_rc = f(g_c, g_mem);
     return g_c->x[0];
@@ -335,12 +340,29 @@ TEST(vk_thunk_table)
     CHECK(rl_vk_import("vkGetInstanceProcAddr") != NULL);
     CHECK(rl_vk_import("vkNotACommand") == NULL);
     CHECK_EQ(gipa(0, "vkCreateInstance"), ci);
-    CHECK_EQ(g_rc, RL_OK);
+    CHECK_EQ(g_rc, CALLER_RET);
     CHECK_EQ(gipa(0, "vkCmdDraw"), 0);
     CHECK_EQ(gipa(0, "vkNotACommand"), 0);
     CHECK_EQ(rl_vk_guest_addr("vkGetPhysicalDeviceProperties2KHR"), rl_vk_guest_addr("vkGetPhysicalDeviceProperties2"));
     CHECK_EQ(rl_vk_guest_addr("vkMapMemory2KHR"), 0);
     CHECK(rl_dispatch_find(ci) != NULL);
+}
+
+TEST(vk_thunks_return_to_the_callers_link_register)
+{
+    CHECK_EQ(boot(NULL), 0);
+    gipa(0, "vkCreateInstance");
+    CHECK_EQ(g_rc, CALLER_RET);
+    uint64_t gn = galloc(4);
+    G("vkEnumerateInstanceExtensionProperties", 0, gn, 0);
+    CHECK_EQ(g_rc, CALLER_RET);
+    G("vkEnumerateInstanceVersion", gn);
+    CHECK_EQ(g_rc, CALLER_RET);
+    uint64_t bad[4] = { 0x5600000000000bad, 0, 0, 0 };
+    gcall_addr(rl_vk_guest_addr("vkCmdDraw"), bad, 4);
+    CHECK_EQ(g_rc, CALLER_RET);
+    gcall_addr(rl_vk_guest_addr("vkDestroyDevice"), bad, 2);
+    CHECK_EQ(g_rc, CALLER_RET);
 }
 
 static int g_cap_gate, g_cap_done;
@@ -1017,7 +1039,7 @@ TEST(vk_debug_messenger_calls_guest_code)
     uint64_t before = g_cb_calls;
     G("vkSubmitDebugUtilsMessageEXT", g_inst, VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
       gput(&d, sizeof d));
-    CHECK_EQ(g_rc, RL_OK);
+    CHECK_EQ(g_rc, CALLER_RET);
     CHECK_EQ(g_cb_calls, before + 1);
     CHECK_EQ(g_cb_sev, VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT);
     CHECK_EQ(g_cb_user, 0x1234567);
@@ -1059,7 +1081,7 @@ TEST(vk_debug_message_longer_than_the_guest_stack_reaches_the_guest_cut_short)
     uint64_t before = g_cb_calls;
     G("vkSubmitDebugUtilsMessageEXT", g_inst, VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
       gput(&d, sizeof d));
-    CHECK_EQ(g_rc, RL_OK);
+    CHECK_EQ(g_rc, CALLER_RET);
     CHECK_EQ(g_cb_calls, before + 1);
     fprintf(stderr, "  message of %llu bytes reached the guest as %llu, guest sp %#llx\n", (unsigned long long)n,
             (unsigned long long)g_cb_len, (unsigned long long)g_cb_sp);

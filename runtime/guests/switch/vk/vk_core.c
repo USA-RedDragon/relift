@@ -95,7 +95,7 @@ uint64_t vkf_end(vkf_call *k)
     t_call = k->outer;
     if (k->trace_t0 && vi_trace_now() - k->trace_t0 >= 500000)
         vi_trace('K', k->trace_site, (uint64_t)k->trace_t0, k->c ? k->c->x[30] : 0);
-    return k->rc;
+    return k->rc == RL_OK ? rl_arm64_ret(k->c) : k->rc;
 }
 
 vkf_call *vkf_current(void) { return t_call; }

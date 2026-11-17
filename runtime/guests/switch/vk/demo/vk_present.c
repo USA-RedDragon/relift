@@ -120,10 +120,12 @@ static uint64_t gcall_addr(uint64_t fn, const uint64_t *args, unsigned n)
             rl_st64(g_mem, sp + 8 * (i - 8), args[i]);
     }
     g_c->sp = sp;
-    int rc = rl_indirect(g_c, fn)(g_c, g_mem);
+    uint64_t ret = g_c->x[30];
+    uint64_t rc = rl_indirect(g_c, fn)(g_c, g_mem);
     g_c->sp = sp0;
-    if (rc != RL_OK) {
-        say("FAIL guest call 0x%llx returned %d", (unsigned long long)fn, rc);
+    if (rc != ret) {
+        say("FAIL guest call 0x%llx returned 0x%llx, not its return address", (unsigned long long)fn,
+            (unsigned long long)rc);
         g_failed++;
     }
     return g_c->x[0];
