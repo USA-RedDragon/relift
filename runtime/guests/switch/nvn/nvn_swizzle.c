@@ -5,10 +5,16 @@
  */
 #include "nvn_priv.h"
 
-/** @brief Offset of byte x of row y inside a GOB. */
+/**
+ * @brief Offset of byte x of row y inside a GOB, in the GOB layout of
+ * Turing and later color surfaces: 16-byte lines, four rows of one 16-byte
+ * column per 64 bytes, then the next column, then rows 4 to 7, then the
+ * right 32-byte half (not the Maxwell Tegra layout, which pairs rows into
+ * 32-byte sectors).
+ */
 static uint32_t gob_offset(uint32_t x, uint32_t y)
 {
-    return ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((x % 32) / 16) * 32 + (y % 2) * 16 + (x % 16);
+    return ((x % 64) / 32) * 256 + ((y % 8) / 4) * 128 + ((x % 32) / 16) * 64 + (y % 4) * 16 + (x % 16);
 }
 
 static uint32_t div_up(uint32_t a, uint32_t b) { return (a + b - 1) / b; }

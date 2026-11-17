@@ -110,9 +110,14 @@ TEST(nvn_texels_land_in_gobs)
         in[i] = (uint8_t)(i * 7 + i / 251);
     nvn_region all = { 0, 0, 0, 64, 64, 1 };
     CHECK(nvn_tex_copy(&d, storage, 0, 0, &all, in, true));
-    CHECK_EQ(storage[16], in[16 * 0 + 256 * 1]);
-    CHECK_EQ(storage[64], in[256 * 2]);
+    CHECK_EQ(storage[16], in[256 * 1]);
+    CHECK_EQ(storage[48], in[256 * 3]);
+    CHECK_EQ(storage[64], in[16]);
+    CHECK_EQ(storage[64 + 16], in[256 * 1 + 16]);
+    CHECK_EQ(storage[128], in[256 * 4]);
+    CHECK_EQ(storage[192 + 16 * 3 + 5], in[256 * 7 + 16 + 5]);
     CHECK_EQ(storage[256], in[32]);
+    CHECK_EQ(storage[256 + 64 + 128], in[256 * 4 + 48]);
     CHECK_EQ(storage[512 * 8], in[256 * 64 / 4 * 0 + 64 * 4 * 0 + 64]);
     CHECK(nvn_tex_copy(&d, storage, 0, 0, &all, out, false));
     CHECK(memcmp(in, out, sizeof in) == 0);
