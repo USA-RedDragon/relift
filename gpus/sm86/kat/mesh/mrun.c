@@ -221,7 +221,13 @@ int main(int argc, char **argv) {
     vkGetPhysicalDeviceMemoryProperties(pd, &mp);
     uint32_t ne = 0; vkEnumerateDeviceExtensionProperties(pd, 0, &ne, 0);
     VkExtensionProperties *ep = calloc(ne, sizeof *ep); vkEnumerateDeviceExtensionProperties(pd, 0, &ne, ep);
-    for (uint32_t i = 0; i < ne; i++) if (!strcmp(ep[i].extensionName, "VK_EXT_mesh_shader")) has_mesh = 1;
+    int has_mr = 0, has_ucf = 0;
+    for (uint32_t i = 0; i < ne; i++) {
+        if (!strcmp(ep[i].extensionName, "VK_EXT_mesh_shader")) has_mesh = 1;
+        if (!strcmp(ep[i].extensionName, "VK_KHR_shader_maximal_reconvergence")) has_mr = 1;
+        if (!strcmp(ep[i].extensionName, "VK_KHR_shader_subgroup_uniform_control_flow")) has_ucf = 1;
+    }
+    has_mr &= has_ucf;
     if (getenv("MRUN_NO_MESH")) has_mesh = 0;
     float prio = 1;
     VkDeviceQueueCreateInfo qi = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, 0, 0, 0, 1, &prio };
@@ -237,11 +243,35 @@ int main(int argc, char **argv) {
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f13 };
     f2.features.shaderInt64 = 1; f2.features.fragmentStoresAndAtomics = 1; f2.features.vertexPipelineStoresAndAtomics = 1;
     f2.features.geometryShader = getenv("MRUN_NO_GS") ? 0 : 1; f2.features.shaderClipDistance = 1;
+    /* Ask only for what the device has (Adreno lacks shaderInt64); a shader that needs more fails to build. */
+    VkPhysicalDeviceVulkan12Features h12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    VkPhysicalDeviceVulkan11Features h11 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, &h12 };
+    VkPhysicalDeviceVulkan13Features h13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &h11 };
+    VkPhysicalDeviceFeatures2 h2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &h13 };
+    vkGetPhysicalDeviceFeatures2(pd, &h2);
+    #define HAVE(f, h, m) f.m &= h.m
+    HAVE(f12, h12, bufferDeviceAddress); HAVE(f12, h12, storageBuffer8BitAccess); HAVE(f12, h12, shaderInt8);
+    HAVE(f12, h12, uniformAndStorageBuffer8BitAccess); HAVE(f12, h12, vulkanMemoryModel);
+    HAVE(f12, h12, vulkanMemoryModelDeviceScope); HAVE(f11, h11, shaderDrawParameters);
+    HAVE(f13, h13, shaderDemoteToHelperInvocation); HAVE(f13, h13, subgroupSizeControl);
+    HAVE(f13, h13, computeFullSubgroups); HAVE(f13, h13, maintenance4);
+    HAVE(f2.features, h2.features, shaderInt64); HAVE(f2.features, h2.features, fragmentStoresAndAtomics);
+    HAVE(f2.features, h2.features, vertexPipelineStoresAndAtomics); HAVE(f2.features, h2.features, geometryShader);
+    HAVE(f2.features, h2.features, shaderClipDistance);
     nv = getenv("MRUN_NV") != 0;
     VkPhysicalDeviceMeshShaderFeaturesNV fnv = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV, 0, 1, 1 };
     if (nv) { f12.pNext = &fnv; }
-    const char *ext[] = { "VK_EXT_mesh_shader" }; const char *extnv[] = { "VK_NV_mesh_shader" };
-    VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2, 0, 1, &qi, 0, 0, nv ? 1 : has_mesh, nv ? extnv : ext };
+    const char *ext[3]; uint32_t next = 0;
+    if (nv) ext[next++] = "VK_NV_mesh_shader";
+    else if (has_mesh) ext[next++] = "VK_EXT_mesh_shader";
+    VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR fmr = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR, &f13, 1 };
+    if (has_mr) {
+        ext[next++] = "VK_KHR_shader_subgroup_uniform_control_flow";
+        ext[next++] = "VK_KHR_shader_maximal_reconvergence";
+        f2.pNext = &fmr;
+    }
+    VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2, 0, 1, &qi, 0, 0, next, ext };
     CK(vkCreateDevice(pd, &dci, 0, &dev));
     vkGetDeviceQueue(dev, 0, 0, &q);
     draw_mesh = (PFN_vkCmdDrawMeshTasksEXT)vkGetDeviceProcAddr(dev, "vkCmdDrawMeshTasksEXT");
