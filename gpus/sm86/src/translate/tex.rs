@@ -740,11 +740,21 @@ impl Ctx {
 
     /// The texture at `handle` combined with the sampler it names.
     fn sampled(&mut self, k: Kind, d: Dim, h: u32, nonuniform: bool) -> (u32, u32) {
-        let img = self.texture(k, d, h, nonuniform);
-        let ity = self.texture_type(k, d);
+        let smp = self.sampler(h, nonuniform);
+        self.sampled_with(k, d, h, nonuniform, smp)
+    }
+
+    /// The sampler `handle` names.
+    fn sampler(&mut self, h: u32, nonuniform: bool) -> u32 {
         let st = self.m.t_sampler();
         let sidx = self.tx_opk(op::SHIFT_RIGHT_LOGICAL, h, 20);
-        let smp = self.descriptor(SAMPLER_BINDING, st, sidx, nonuniform);
+        self.descriptor(SAMPLER_BINDING, st, sidx, nonuniform)
+    }
+
+    /// [`Ctx::sampled`] with the sampler already loaded.
+    fn sampled_with(&mut self, k: Kind, d: Dim, h: u32, nonuniform: bool, smp: u32) -> (u32, u32) {
+        let img = self.texture(k, d, h, nonuniform);
+        let ity = self.texture_type(k, d);
         let sit = self.m.t_sampled_image(ity);
         let si = self.m.emit(op::SAMPLED_IMAGE, sit, &[img, smp]);
         if nonuniform {
@@ -1165,47 +1175,51 @@ fn tex(c: &mut Ctx) -> Res<()> {
     } else {
         None
     };
+    let coords = float_coords(c, &s, d)?;
+    let mut mask = 0u32;
+    let mut ops = Vec::new();
+    let lod_v = if implicit {
+        None
+    } else if lod == 3 {
+        let l = s.get(Slot::Lod)?;
+        Some(c.as_float(l))
+    } else {
+        Some(c.m.c_f32(0))
+    };
+    let coord = with_layer(c, &s, d, coords)?;
+    if matches!(lod, 2 | 5) {
+        mask |= 1;
+        let b = s.get(Slot::Lod)?;
+        ops.push(c.as_float(b));
+    }
+    if let Some(l) = lod_v {
+        mask |= 2;
+        ops.push(l);
+    }
+    if let Some(k) = konst {
+        mask |= 8;
+        ops.push(k);
+    }
+    if implicit && lc {
+        c.cap(42);
+        mask |= 0x80;
+        let p = s.get(Slot::Packed)?;
+        ops.push(c.min_lod(p));
+    }
+    let dref = if dc {
+        let r = s.get(Slot::Dc)?;
+        Some(c.as_float(r))
+    } else {
+        None
+    };
+    let smp = c.sampler(h, nu);
     let v = c.by_kind(key, !dc, &mut |c, k| {
-        let (si, _) = c.sampled(k, d, h, nu);
-        let coords = float_coords(c, &s, d)?;
-        let mut mask = 0u32;
-        let mut ops = Vec::new();
-        let lod_v = if implicit {
-            None
-        } else if lod == 3 {
-            let l = s.get(Slot::Lod)?;
-            Some(c.as_float(l))
-        } else {
-            Some(c.m.c_f32(0))
-        };
-        let coord = with_layer(c, &s, d, coords)?;
-        if matches!(lod, 2 | 5) {
-            mask |= 1;
-            let b = s.get(Slot::Lod)?;
-            ops.push(c.as_float(b));
-        }
-        if let Some(l) = lod_v {
-            mask |= 2;
-            ops.push(l);
-        }
-        if let Some(k) = konst {
-            mask |= 8;
-            ops.push(k);
-        }
-        if implicit && lc {
-            c.cap(42);
-            mask |= 0x80;
-            let p = s.get(Slot::Packed)?;
-            ops.push(c.min_lod(p));
-        }
+        let (si, _) = c.sampled_with(k, d, h, nu, smp);
         let mut args = vec![si, coord];
-        if dc {
-            let r = s.get(Slot::Dc)?;
-            args.push(c.as_float(r));
-        }
+        args.extend(dref);
         if mask != 0 {
             args.push(mask);
-            args.extend(ops);
+            args.extend(ops.iter().copied());
         }
         let opc = match (dc, implicit) {
             (false, true) => op::IMAGE_SAMPLE_IMPLICIT_LOD,
@@ -1277,54 +1291,53 @@ fn tld(c: &mut Ctx) -> Res<()> {
     }
     let s = sources(c, &g0, &g1, w.bit(60))?;
     let (h, nu) = handle(c, key, &s)?;
-    let v = c.by_kind(key, true, &mut |c, k| {
-        let img = c.texture(k, d, h, nu);
-        let mut coords = Vec::new();
-        for n in 0..d.coords() as u8 {
-            let x = s.get(Slot::Coord(n))?;
-            coords.push(c.tx_as_i32(x));
-        }
-        let mut konst = None;
-        if aoffi {
-            konst = c.known_offset(s.reg(Slot::Off), d, 4, 0);
-            if konst.is_none() {
-                let o = s.get(Slot::Off)?;
-                let offs = c.dyn_offsets(o, d.offsets(), 4, 0);
-                let i = c.tx_i32();
-                for (n, o) in offs.iter().enumerate() {
-                    coords[n] = c.m.emit(op::I_ADD, i, &[coords[n], *o]);
-                }
+    let mut coords = Vec::new();
+    for n in 0..d.coords() as u8 {
+        let x = s.get(Slot::Coord(n))?;
+        coords.push(c.tx_as_i32(x));
+    }
+    let mut konst = None;
+    if aoffi {
+        konst = c.known_offset(s.reg(Slot::Off), d, 4, 0);
+        if konst.is_none() {
+            let o = s.get(Slot::Off)?;
+            let offs = c.dyn_offsets(o, d.offsets(), 4, 0);
+            let i = c.tx_i32();
+            for (n, o) in offs.iter().enumerate() {
+                coords[n] = c.m.emit(op::I_ADD, i, &[coords[n], *o]);
             }
         }
-        if d.arrayed() {
-            let p = s.get(Slot::Packed)?;
-            let l = c.tx_opk(op::BITWISE_AND, p, 0xffff);
-            coords.push(c.tx_as_i32(l));
-        }
-        let coord = c.tx_ivec(&coords);
-        let mut args = vec![img, coord];
-        let mut mask = 0;
-        let mut ops = Vec::new();
-        if !ms {
-            mask |= 2;
-            ops.push(if lod == 3 {
-                let l = s.get(Slot::Lod)?;
-                c.tx_as_i32(l)
-            } else {
-                c.m.c_i32(0)
-            });
-        }
-        if let Some(k) = konst {
-            mask |= 8;
-            ops.push(k);
-        }
-        if ms {
-            mask |= 0x40;
-            let m = s.get(Slot::Ms)?;
-            ops.push(c.tx_as_i32(m));
-        }
-        args.push(mask);
-        args.extend(ops);
+    }
+    if d.arrayed() {
+        let p = s.get(Slot::Packed)?;
+        let l = c.tx_opk(op::BITWISE_AND, p, 0xffff);
+        coords.push(c.tx_as_i32(l));
+    }
+    let coord = c.tx_ivec(&coords);
+    let mut mask = 0;
+    let mut ops = Vec::new();
+    if !ms {
+        mask |= 2;
+        ops.push(if lod == 3 {
+            let l = s.get(Slot::Lod)?;
+            c.tx_as_i32(l)
+        } else {
+            c.m.c_i32(0)
+        });
+    }
+    if let Some(k) = konst {
+        mask |= 8;
+        ops.push(k);
+    }
+    if ms {
+        mask |= 0x40;
+        let m = s.get(Slot::Ms)?;
+        ops.push(c.tx_as_i32(m));
+    }
+    let v = c.by_kind(key, true, &mut |c, k| {
+        let img = c.texture(k, d, h, nu);
+        let mut args = vec![img, coord, mask];
+        args.extend(ops.iter().copied());
         let st = c.sampled_type(k);
         let t = c.m.t_vec(st, 4);
         let r = c.m.emit(op::IMAGE_FETCH, t, &args);
