@@ -133,6 +133,19 @@ impl<'a> Image<'a> {
         c.bytes.get(off..off + n as usize)
     }
 
+    /// The `n` bytes at `src` that code copies from there: the image, a
+    /// loaded image, or a copy in RAM that holds them (a program that runs
+    /// from a copy and copies its own code on).
+    pub(crate) fn code_bytes(&self, src: u32, n: u32) -> Option<&[u8]> {
+        self.source(src, n).or_else(|| {
+            self.copies_at(src).into_iter().find_map(|i| {
+                let c = self.copies.get(usize::from(i))?;
+                let off = src.checked_sub(c.dst)? as usize;
+                c.bytes.get(off..off.checked_add(n as usize)?)
+            })
+        })
+    }
+
     /// Whether `addr` is in the image or in a loaded image.
     pub(crate) fn is_source(&self, addr: u32) -> bool {
         self.source(addr, 1).is_some()

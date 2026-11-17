@@ -861,7 +861,8 @@ impl Run<'_> {
 
     /// A call at `site` to a writer with a constant RAM destination in `r0`
     /// and a source loaded from a table of code addresses in `r1` (code
-    /// copied to fast memory and run there): each function of the table
+    /// copied to fast memory and run there), in the image or in a copy:
+    /// each function of the table
     /// becomes a copy at the destination, of `r2` bytes when constant, else
     /// up to the next function of the table or of the image (at most
     /// [`MAX_TABLE_COPY`]), and short of the functions other copies (not of
@@ -873,7 +874,7 @@ impl Run<'_> {
         let Abs::Tab { base, stride, n } = st.reg(1) else {
             return;
         };
-        if !self.env.image.in_image(base) {
+        if !self.env.image.in_image(base) && self.env.image.copies_at(base).is_empty() {
             return;
         }
         let es = self.table_entries(base, stride, n, None);
@@ -904,10 +905,15 @@ impl Run<'_> {
             {
                 len = l;
             }
-            while len >= 4 && self.env.image.source(addr, len).is_none() {
+            while len >= 4 && self.env.image.code_bytes(addr, len).is_none() {
                 len -= 4;
             }
-            let Some(bytes) = self.env.image.source(addr, len).filter(|b| b.len() >= 4) else {
+            let Some(bytes) = self
+                .env
+                .image
+                .code_bytes(addr, len)
+                .filter(|b| b.len() >= 4)
+            else {
                 continue;
             };
             self.out.copies.push(RamCopy {

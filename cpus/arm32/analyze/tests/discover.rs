@@ -1035,3 +1035,55 @@ fn table_functions_at_one_address_are_alternatives_not_rewrites() {
         "each table function and its Thumb part, nothing inside them"
     );
 }
+
+#[test]
+fn functions_of_a_table_in_a_copy_that_code_copies_on_are_found() {
+    let mut m = Machine::new(Profile::V4t);
+    let wram = 0x02F0_0000;
+    let slot = 0x02F8_0420;
+    let pool = BASE + 0x40;
+    let src = BASE + 0x100;
+    let copy = BASE + 0x200;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2020,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(pool, &[src, wram]);
+    let mut block = vec![
+        A_PUSH_R4_LR,
+        a_ldr_lit(3, wram + 4, wram + 0x30),
+        0xE793_1104,
+        a_ldr_lit(0, wram + 12, wram + 0x34),
+        0xE3A0_2008,
+        a_bl(wram + 20, copy),
+        a_ldr_lit(4, wram + 24, wram + 0x34),
+        0xE12F_FF34,
+        A_POP_R4_PC,
+    ];
+    block.resize(12, 0);
+    block.extend([wram + 0x40, slot, 0, 0]);
+    block.extend([wram + 0x60, wram + 0x70, 0, 0, 0, 0, 0, 0]);
+    block.extend([A_MOV_R0_1, A_BX_LR, 0, 0, 0xE3A0_0002, A_BX_LR, 0, 0]);
+    m.arm(src, &block);
+    m.arm(
+        copy,
+        &[0xE491_3004, 0xE480_3004, 0xE252_2004, 0x1AFF_FFFB, A_BX_LR],
+    );
+    let r = m.run(all(), arm(BASE));
+    let at: Vec<_> = r.functions.keys().filter(|l| l.addr == slot).collect();
+    assert_eq!(
+        at.len(),
+        2,
+        "one function per table entry at {slot:#x}: {at:?}"
+    );
+}
