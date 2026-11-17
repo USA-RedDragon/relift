@@ -9,6 +9,11 @@ psg.c     the SN76489 (tone and noise channels, the 16-bit shift register,
           the latch), the console's mix and the Game Gear stereo port
                                    component/audio/sn76489/sn76489.cpp,
                                    ms/psg/psg.cpp
+vdp.c     the VDP: ports, registers, VRAM and CRAM, the counters, the line
+          and frame interrupts, mode 4 and the TMS9918 graphics modes 1 and
+          2, sprites, the colour output
+                                   ms/vdp/vdp.cpp, io.cpp, irq.cpp,
+                                   background.cpp, sprite.cpp, dac.cpp
 
 ares license:
 
