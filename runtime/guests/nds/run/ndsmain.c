@@ -40,6 +40,8 @@ typedef struct host {
     uint32_t stop_frames;
     /** @brief Frames the frame hook saw. */
     uint32_t frames;
+    /** @brief --frame-log: one line per frame on stdout (number, ARM9 tick, frame hash, the --peek words). */
+    bool frame_log;
 } host;
 
 static host H;
@@ -137,8 +139,13 @@ static bool listed(uint32_t n)
 static void on_frame(void *user, const uint32_t *pixels, uint64_t when)
 {
     (void)user;
-    (void)when;
     H.frames++;
+    if (H.frame_log) {
+        printf("F %u tick=%llu h=%016llx", H.frames, (unsigned long long)when, (unsigned long long)rl_nds_frame_hash(pixels));
+        for (uint32_t i = 0; i < H.peeks; i++)
+            printf(" %08x", rl_nds_read(H.run.m, RL_NDS_ARM9, H.peek[i], 4));
+        putchar('\n');
+    }
     if ((H.png_every && H.frames % H.png_every == 0) || listed(H.frames)) {
         char path[4096];
         snprintf(path, sizeof path, "%s/frame%06u.png", H.png_dir ? H.png_dir : ".", H.frames);
@@ -284,6 +291,8 @@ static int options(int argc, char **argv, int first, uint64_t *max_ticks)
                 H.peek[H.peeks++] = at;
         } else if (!strcmp(a, "--stats"))
             H.stats = true;
+        else if (!strcmp(a, "--frame-log"))
+            H.frame_log = true;
         else if (!strcmp(a, "--frames"))
             H.stop_frames = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--png"))
@@ -332,7 +341,7 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
         return 1;
     }
     H.run.max_ticks = max_ticks;
-    if (H.png_every || H.png_frame_count || H.stop_frames)
+    if (H.png_every || H.png_frame_count || H.stop_frames || H.frame_log)
         rl_nds_set_frame_hook(H.run.m, on_frame, NULL);
     start_clock(H.run.m);
     if (rl_nds_save_set(H.run.m, rl_setting_str("save.type")) != 0)

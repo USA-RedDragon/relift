@@ -80,8 +80,12 @@ typedef struct rl_nds_program {
  * headless until each has stopped: a halt nothing can end, or the end of the
  * run. Options: --max-ticks N (stop with a report once a CPU passes tick N),
  * --peek ADDR (print the ARM9's word at ADDR at the end; repeatable),
- * --stats (counters on stderr), and the runtime's --relift-set and
- * --relift-settings. Exits 0 when both CPUs stopped by halting.
+ * --stats (counters on stderr), --frames N (stop after N frames),
+ * --frame-log (one line per frame on stdout: "F <n> tick=<ARM9 tick>
+ * h=<frame hash>" and the --peek words in hex), --png FILE (the last frame),
+ * --png-dir DIR with --png-every N or --png-frames LIST, --save FILE,
+ * --no-save, and the runtime's --relift-set and --relift-settings. Exits 0
+ * when both CPUs stopped by halting or the program turned the console off.
  */
 RL_RUNTIME_API int rl_nds_main(const rl_nds_program *p, int argc, char **argv);
 

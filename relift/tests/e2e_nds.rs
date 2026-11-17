@@ -6,7 +6,8 @@
 //! scheduler. The ARM9 starts timer 0, divides with the DIV unit, sends the
 //! quotient over the IPC FIFO, waits for the ARM7's answer (three times the
 //! word plus one, which the ARM7 gets from the BIOS's `Div`), writes it, the timer's progress and a done mark to main
-//! RAM, stops the timer, tells the ARM7 over the FIFO and waits for an
+//! RAM, waits for VBlank (the --frame-log line of the first frame shows the
+//! words), stops the timer, tells the ARM7 over the FIFO and waits for an
 //! interrupt in CP15 with IE clear (it stays halted); the ARM7 then turns the
 //! console off through bit 6 of power management register 0 on the SPI bus,
 //! which ends the run with status 0. The test checks the words, the power-off,
@@ -46,6 +47,8 @@ __attribute__((section(".text.start"), noreturn)) void _start(void)
     R32(0x02100000) = answer;
     R32(0x02100004) = ticks != 0;
     R32(0x02100008) = 0xC0DE;
+    while (R16(0x04000006) != 194)
+        ;
     R16(0x04000102) = 0;
     R32(0x04000188) = 1;
     for (;;)
@@ -228,12 +231,26 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
     );
     let host = root.join("cache/projects/game/build/host");
     let out = relift_proc::command(host.join("game"))
-        .args(["--headless", "--stats", "--max-ticks", "200000000"])
+        .args([
+            "--headless",
+            "--stats",
+            "--frame-log",
+            "--max-ticks",
+            "200000000",
+        ])
         .output()
         .expect("the game runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stdout}{err}");
+    let frame = stdout
+        .lines()
+        .find(|l| l.starts_with("F 1 tick="))
+        .unwrap_or_default();
+    assert!(
+        frame.contains(" h=") && frame.ends_with(" 000001ab 00000001 0000c0de"),
+        "{stdout}{err}"
+    );
     assert!(
         stdout.contains("peek 0x02100000 = 0x000001ab"),
         "{stdout}{err}"
