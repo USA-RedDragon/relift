@@ -87,14 +87,17 @@ typedef struct interp {
     bool linear;
 } interp;
 
-/** @brief Sets up the interpolation at x of len between W values w0 and w1; edge selects the edge variant (9 bits). */
-static void interp_setup(interp *ip, int64_t x, int64_t len, uint32_t w0, uint32_t w1, bool edge)
+/**
+ * @brief Sets up the interpolation at x of len between W values w0 and w1;
+ * edge selects the edge variant (9 bits). linear is the polygon's choice of
+ * the linear path for every edge and span (see setup_poly).
+ */
+static void interp_setup(interp *ip, int64_t x, int64_t len, uint32_t w0, uint32_t w1, bool edge, bool linear)
 {
     ip->x = x;
     ip->len = len;
     ip->bits = edge ? 9 : 8;
-    uint32_t low = edge ? 0x7Eu : 0x7Fu;
-    ip->linear = w0 == w1 && !(w0 & low);
+    ip->linear = linear;
     ip->factor = 0;
     if (ip->linear || len <= 0)
         return;
@@ -236,7 +239,7 @@ static void edge_at(const nds_gx_ram *r, const nds_gx_poly *p, unsigned ia, unsi
         len = dy;
     }
     interp ip;
-    interp_setup(&ip, pos, len, p->wn[ia], p->wn[ib], true);
+    interp_setup(&ip, pos, len, p->wn[ia], p->wn[ib], true, p->linear);
     point_interp(&e->p, &ip, &pa, &pb, pos, len);
 }
 
@@ -626,7 +629,7 @@ static void raster(rl_nds *m, nds_gx *g, const nds_gx_ram *r, const nds_gx_poly 
         bool is_edge = on_left || on_right || top_or_bottom;
         if (wire && !is_edge)
             continue;
-        interp_setup(&ip, x - xl, len, (uint32_t)left.p.wn, (uint32_t)right.p.wn, false);
+        interp_setup(&ip, x - xl, len, (uint32_t)left.p.wn, (uint32_t)right.p.wn, false, p->linear);
         point q;
         point_interp(&q, &ip, &left.p, &right.p, x - xl, len);
         uint32_t c = shade(m, g, p, &q, wire);
@@ -718,7 +721,13 @@ static void finish_line(nds_gx *g, const nds_gx_lbuf *l, const nds_gx_lbuf *abov
     }
 }
 
-/** @brief The polygon's top and bottom lines and its W values normalized to 16 bits. */
+/**
+ * @brief The polygon's top and bottom lines, its W values normalized to 16
+ * bits, and its interpolation path: linear on every edge and span when all
+ * its normalized W values are equal with the low bits clear, perspective
+ * otherwise, also on the edges and spans whose two ends have equal W
+ * (console captures of textured quads).
+ */
 static void setup_poly(nds_gx_ram *r, nds_gx_poly *p)
 {
     int32_t top = 255, bot = 0;
@@ -744,6 +753,9 @@ static void setup_poly(nds_gx_ram *r, nds_gx_poly *p)
         uint32_t w = (uint32_t)r->vtx[p->v[i]].v.c[3];
         p->wn[i] = (uint16_t)(sh >= 0 ? w >> sh : w << -sh);
     }
+    p->linear = !(p->wn[0] & 0x7Eu);
+    for (unsigned i = 1; i < p->n; i++)
+        p->linear &= p->wn[i] == p->wn[0];
 }
 
 /** @brief The sort order: opaque before translucent; by top line then bottom line unless the swap asked for manual order of translucent polygons. */

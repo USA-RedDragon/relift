@@ -67,6 +67,8 @@ typedef struct nds_gx_poly {
     int32_t top, bottom;
     /** @brief The W values of the vertices after normalizing them to 16 bits. */
     uint16_t wn[NDS_GX_PVERTS];
+    /** @brief Every edge and span takes the linear interpolation path. */
+    bool linear;
     /** @brief The sort key of polygon RAM order (see gpu3d_render.c). */
     uint16_t index;
 } nds_gx_poly;
