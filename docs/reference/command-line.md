@@ -4,7 +4,7 @@ The usage of `relift` and of the tools that come with it, as each program prints
 
 ## relift
 
-<!-- docgen:usage crate=relift bin=relift -->
+<!-- docgen:usage crate=relift bin=relift args="--help" -->
 ```text
 relift: recompile console game code to portable C11
 
@@ -25,73 +25,133 @@ Commands:
 
 Options:
   -q, --quiet
-          Print only the final summary and errors
+          Print only the final summary and errors.
+          
+          A flag of its own, not a setting: configulator's boolean flags take an optional value and would swallow the subcommand in `relift -q build`.
+
   -v, --verbose
           Also print each file as it compiles and every instruction that does not lift
+
   -c, --config <config>
-          config file [default: relift.toml]
+          config file
+          
+          [default: relift.toml]
+
       --cache-dir <cache-dir>
           where lifted, emitted and built artifacts are cached (empty: the user cache dir)
+
   -j, --jobs <jobs>
-          worker threads for every parallel stage of a build: analysis, emit and compile (0: one per CPU) [default: 0]
+          worker threads for every parallel stage of a build: analysis, emit and compile (0: one per CPU)
+          
+          [default: 0]
+
       --runtime-dir <runtime-dir>
           the C runtime sources to build against (empty: the ones beside this relift's source)
+
       --color <color>
-          color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never [default: auto]
+          color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never
+          
+          [default: auto]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
+
       --toolchain.zig <toolchain.zig>
           zig, for `zig cc` player builds
+
       --toolchain.ninja <toolchain.ninja>
           the ninja build tool
+
       --toolchain.appimagetool <toolchain.appimagetool>
           appimagetool, which packs the Linux release output
+
       --toolchain.android-sdk <toolchain.android-sdk>
           the Android SDK with build-tools and platforms (empty: ANDROID_HOME, then common places)
+
       --toolchain.android-ndk <toolchain.android-ndk>
           the Android NDK (empty: ANDROID_NDK_HOME, then the SDK's newest)
+
       --toolchain.codesign-identity <toolchain.codesign-identity>
           the identity that signs macOS game builds, such as a Developer ID Application certificate name or its SHA-1 (empty: an ad-hoc signature)
+
       --toolchain.codesign-keychain <toolchain.codesign-keychain>
           the keychain that holds the signing identity (empty: the default keychain search list)
+
       --emit.shard-kib <emit.shard-kib>
-          the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C [default: 4096]
+          the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C
+          
+          [default: 4096]
+
       --emit.piece-kib <emit.piece-kib>
-          the most KiB of C per C function; a larger guest function is split into several [default: 1024]
+          the most KiB of C per C function; a larger guest function is split into several
+          
+          [default: 1024]
+
       --emit.cold [<emit.cold>]
-          also emit a cold copy of every function that dispatch enters at any instruction, so no guest code is missed [default: true]
+          also emit a cold copy of every function that dispatch enters at any instruction, so no guest code is missed
+          
+          [default: true]
+
       --emit.cold-piece-kib <emit.cold-piece-kib>
-          the most KiB of C per C function of the cold copy [default: 4]
+          the most KiB of C per C function of the cold copy
+          
+          [default: 4]
+
       --emit.cold-first [<emit.cold-first>]
-          for tests: run every function from the cold copy, which then calls only itself [default: false]
+          for tests: run every function from the cold copy, which then calls only itself
+          
+          [default: false]
+
       --emit.fpcr-guards [<emit.fpcr-guards>]
-          for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them) [default: false]
+          for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
-          the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built) [default: auto]
+          the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
+          
+          [default: auto]
+
       --package.android-id <package.android-id>
           the application id of the Android APK (empty: dev.relift.game.<project folder>)
+
       --package.android-keystore <package.android-keystore>
           the keystore that signs the APK, with the key alias relift (empty: a debug key in the cache)
+
       --package.android-keystore-pass <package.android-keystore-pass>
           the password of the keystore and its key
+
       --package.notarize [<package.notarize>]
-          notarize a macOS game build with Apple (needs toolchain.codesign-identity and the notarize-* keys) [default: false]
+          notarize a macOS game build with Apple (needs toolchain.codesign-identity and the notarize-* keys)
+          
+          [default: false]
+
       --package.notarize-key <package.notarize-key>
           the App Store Connect API key file (.p8) that notarization signs in with
+
       --package.notarize-key-id <package.notarize-key-id>
           the key ID of the notarization API key
+
       --package.notarize-issuer <package.notarize-issuer>
           the issuer ID of the notarization API key
+
       --package.ios-id <package.ios-id>
           the bundle identifier of the iOS app (empty: dev.relift.game.<project folder>)
+
       --package.ios-identity <package.ios-identity>
           the keychain identity that signs the iOS app for a device (empty: the first Apple Development identity)
+
       --package.ios-data <package.ios-data>
-          where an iOS app finds the game data: bundle (copied into the app, sealed by its signature) or documents (added later to the app's Documents, for example with relift push) [default: bundle]
+          where an iOS app finds the game data: bundle (copied into the app, sealed by its signature) or documents (added later to the app's Documents, for example with relift push)
+          
+          [default: bundle]
+
       --package.ios-profile <package.ios-profile>
           the provisioning profile of the iOS app (empty: one from Xcode's profile folders that covers the bundle identifier)
+
   -h, --help
-          Print help (see more with '--help')
+          Print help (see a summary with '-h')
+
   -V, --version
           Print version
 ```
