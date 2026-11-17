@@ -14,9 +14,10 @@
 //!   the RCP bus at every fetch ([`SP_FETCH`]);
 //! - a fetch that may start an instruction cache line calls
 //!   `rl_mips_icache` with its address: a delay slot that starts a line
-//!   here, and the first instruction of a block the program enters other
-//!   than from the instruction before it, or that starts a line, through
-//!   [`fetch_check`]; loads and stores call `rl_mips_dcache`;
+//!   here, the first instruction of a block the program enters other than
+//!   from the instruction before it, or that starts a line, through
+//!   [`fetch_check`], and the target of a computed jump, after the jump's
+//!   delay slot; loads and stores call `rl_mips_dcache`;
 //! - `JAL` and `JALR` with a link register are calls, which open a host
 //!   frame (`rl_mips_call`); `JR` to the address on top of the frame stack
 //!   returns from it;
@@ -366,6 +367,18 @@ impl N64 {
                 },
             );
         }
+        if let Next::Dynamic(t) = b.exit.next
+            && !shape.eret
+        {
+            let at = b.insts.len() - 1;
+            b.insts.insert(
+                at,
+                Inst {
+                    op: Op::intrinsic(ICACHE, vec![t]),
+                    width: None,
+                },
+            );
+        }
         Ok(b)
     }
 }
@@ -709,6 +722,15 @@ mod tests {
             Some("rl_mips_icache(c, (uint64_t)(p))")
         );
         assert!(intrinsics(&b).contains(&"mips_dcache"));
+        let jr = 0x0140_0008;
+        let b = N64.lift_at(PC, jr, 0).expect("lifts");
+        b.verify().expect("verifies");
+        let o = ops(&b);
+        let fetch = o
+            .iter()
+            .rposition(|o| matches!(o, Op::Intrinsic(c) if c.name == ICACHE))
+            .expect("the target's fetch");
+        assert!(matches!(o.last(), Some(Op::Sync)) && fetch == o.len() - 2);
     }
 
     #[test]
