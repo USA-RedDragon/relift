@@ -598,7 +598,7 @@ fn emit_core(
         window: None,
         last: None,
     };
-    let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
+    let mut flags: Vec<&'static str> = Vec::with_capacity(fns.len());
     let mut inner: BTreeMap<u64, String> = BTreeMap::new();
     let budget = opts.shard_bytes.max(1);
     let mut done = std::collections::VecDeque::new();
@@ -618,7 +618,7 @@ fn emit_core(
         }
         w.window = window;
         undefined += e.undefined;
-        flags.insert(f.entry, e.flags);
+        flags.push(e.flags);
         for (pc, piece) in &e.inner {
             inner.entry(*pc).or_insert_with(|| piece.clone());
         }
@@ -921,7 +921,7 @@ fn unit_table(
     fe: &dyn Frontend,
     fns: &[&Head],
     overrides: &[Override],
-    flags: &BTreeMap<u64, &'static str>,
+    flags: &[&'static str],
     inner: &BTreeMap<u64, String>,
     maps: &[(String, String)],
     opts: &Options,
@@ -952,14 +952,15 @@ fn unit_table(
     }
     let mut entries: Vec<(u64, String)> = fns
         .iter()
-        .map(|f| {
+        .enumerate()
+        .map(|(i, f)| {
             (
                 f.entry,
                 format!(
                     "    {{ UINT64_C({:#x}), {}u, {}, {} }},",
                     f.entry,
                     u32::try_from(f.span).unwrap_or(u32::MAX),
-                    flags.get(&f.entry).copied().unwrap_or("RL_FN_MAY_UNWIND"),
+                    flags.get(i).copied().unwrap_or("RL_FN_MAY_UNWIND"),
                     f.name
                 ),
             )

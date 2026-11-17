@@ -137,12 +137,18 @@ fn cpu_digit(cpu: Cpu) -> char {
     }
 }
 
-/// The host name of the function at `l` in unit `id`.
+/// The host name of the function at `l` in unit `id`: `variant` is its
+/// place among the unit's functions at that address whose bytes differ.
 #[must_use]
-pub fn host_name(id: UnitId, l: Loc) -> String {
+pub fn host_name(id: UnitId, l: Loc, variant: usize) -> String {
     let copy = l.copy.map(|c| format!("_c{c}")).unwrap_or_default();
+    let v = if variant > 0 {
+        format!("_v{variant}")
+    } else {
+        String::new()
+    };
     format!(
-        "nds{}_{}_{}_{:08x}{copy}",
+        "nds{}_{}_{}_{:08x}{copy}{v}",
         cpu_digit(id.cpu()),
         tag(id),
         if l.thumb { 't' } else { 'a' },
@@ -173,6 +179,13 @@ fn head<'a>(images: &Images<'a>, report: &'a Report, l: Loc) -> Option<&'a [u8]>
     let off = l.addr.wrapping_sub(base) as usize;
     let n = entry_span(report.functions.get(&l)?, l) as usize;
     img.get(off..(off + n).min(img.len()))
+}
+
+/// Whether two functions' heads ([`head`]) hold the same code: runs that
+/// found more or less of one function see heads of different lengths.
+fn same_code(a: &[u8], b: &[u8]) -> bool {
+    let n = a.len().min(b.len());
+    a[..n] == b[..n]
 }
 
 /// How many bytes from `entry` the instructions of `f` cover without a
@@ -249,6 +262,7 @@ fn landings(blocks: &Blocks, entry: u32, tables: &BTreeMap<u64, Vec<u64>>) -> Ve
 /// places a suspended thread resumes at inside it.
 struct Lifting {
     entry: Loc,
+    variant: usize,
     insts: Vec<(u64, Result<Block, LiftFailure>, u64)>,
     span: u64,
     tables: BTreeMap<u64, Vec<u64>>,
@@ -341,7 +355,10 @@ pub fn lift(
                 .range((entry.addr, entry.thumb, 0)..=(entry.addr, entry.thumb, usize::MAX))
                 .map(|(_, pf)| (pf.entry, head(&pf.images, pf.report, pf.entry)))
                 .collect();
-            if let Some((had, _)) = same.iter().find(|(_, b)| *b == Some(bytes)) {
+            if let Some((had, _)) = same
+                .iter()
+                .find(|(_, b)| b.is_some_and(|b| same_code(b, bytes)))
+            {
                 if had != entry {
                     shadowed.push((pending[owner].id, *entry));
                 }
@@ -411,7 +428,7 @@ pub fn lift(
         let mut resume_checks = Vec::new();
         let mut resume_blob = Vec::new();
         let resume_base = p.fns.len();
-        for (index, pf) in p.fns.values().enumerate() {
+        for (index, (&(_, _, variant), pf)) in p.fns.iter().enumerate() {
             let (entry, report, images) = (&pf.entry, pf.report, &pf.images);
             let f = &report.functions[entry];
             if cold.is_some() {
@@ -494,7 +511,7 @@ pub fn lift(
                     at: entry.addr | u32::from(entry.thumb),
                     offset: blob.len() as u32,
                     len: n as u32,
-                    name: host_name(p.id, *entry),
+                    name: host_name(p.id, *entry, variant),
                 });
                 blob.extend_from_slice(&img[off..off + n]);
             }
@@ -524,7 +541,7 @@ pub fn lift(
                     at: r.addr | u32::from(r.thumb),
                     offset: resume_blob.len() as u32,
                     len: n as u32,
-                    name: host_name(p.id, *r),
+                    name: host_name(p.id, *r, variant),
                 });
                 resume_blob.extend_from_slice(&img[off..off + n]);
             }
@@ -543,6 +560,7 @@ pub fn lift(
             }
             liftings.push(Lifting {
                 entry: *entry,
+                variant,
                 insts: blocks.into_iter().map(|(pc, (r, w))| (pc, r, w)).collect(),
                 span,
                 tables,
@@ -633,7 +651,7 @@ fn functions(id: UnitId, lifted: &[Lifting]) -> Vec<Function<'_>> {
         .iter()
         .map(|l| Function {
             entry: u64::from(l.entry.addr),
-            name: host_name(id, l.entry),
+            name: host_name(id, l.entry, l.variant),
             guest_name: None,
             span: l.span,
             insts: l
@@ -653,7 +671,7 @@ fn functions(id: UnitId, lifted: &[Lifting]) -> Vec<Function<'_>> {
             entries: l
                 .resumes
                 .iter()
-                .map(|r| (u64::from(r.addr), host_name(id, *r)))
+                .map(|r| (u64::from(r.addr), host_name(id, *r, l.variant)))
                 .collect(),
         })
         .collect()
@@ -880,5 +898,65 @@ mod tests {
         );
         let d = data_c(2);
         assert!(d.contains("#embed \"unit1.bin\" if_empty(0)"), "{d}");
+    }
+
+    #[test]
+    fn functions_at_one_address_whose_bytes_differ_get_names_of_their_own() {
+        let id = UnitId::Static(Cpu::Arm9);
+        let at = Loc {
+            addr: 0x01FF_B2C8,
+            thumb: false,
+            copy: None,
+        };
+        assert_eq!(host_name(id, at, 0), "nds9_static_a_01ffb2c8");
+        assert_eq!(host_name(id, at, 1), "nds9_static_a_01ffb2c8_v1");
+        let copied = Loc {
+            copy: Some(2),
+            ..at
+        };
+        assert_eq!(host_name(id, copied, 1), "nds9_static_a_01ffb2c8_c2_v1");
+    }
+
+    #[test]
+    fn two_runs_that_found_one_function_to_different_lengths_lift_it_once() {
+        let code9 = arm(&[0xE3A0_0001, 0xE3A0_0002, 0xE3A0_0003, 0xEAFF_FFFE]);
+        let code7 = arm(&[0xEF06_0000, 0xEAFF_FFFE]);
+        let r = rom(&code9, &code7);
+        let rom = relift_nds_formats::Rom::parse(&r).expect("parses");
+        let mut units = Units::read(&rom).expect("reads");
+        let mut reports = units.analyze(1, &|_| {});
+        let at = Loc {
+            addr: 0x0200_0000,
+            thumb: false,
+            copy: None,
+        };
+        let mut other = reports[0].clone();
+        other.id = UnitId::Overlay(Cpu::Arm9, 0);
+        other.range = (0x0230_0000, 0x0230_0004);
+        let f = other
+            .report
+            .functions
+            .get_mut(&at)
+            .expect("the entry is a function");
+        f.instructions.retain(|l, _| l.addr < 0x0200_0008);
+        units.units.push(relift_nds_analyze::Unit {
+            id: other.id,
+            base: 0x0230_0000,
+            bytes: vec![0; 4],
+            sha256: Some([1; 32]),
+            roots: Vec::new(),
+        });
+        reports.push(other);
+        let l = lift(&units, &reports, [0; 32], None);
+        let u9 = &l.units[0];
+        let at_entry = u9
+            .functions
+            .iter()
+            .filter(|f| f.name.starts_with("nds9_static_a_02000000"))
+            .count();
+        assert_eq!(at_entry, 1, "one function at the entry");
+        let c: String = u9.output.files.iter().map(|f| f.text.as_str()).collect();
+        let defined = c.matches("RL_LIFTED(nds9_static_a_02000000)\n{").count();
+        assert_eq!(defined, 1, "{c}");
     }
 }
