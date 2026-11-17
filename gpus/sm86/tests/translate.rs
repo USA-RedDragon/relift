@@ -293,13 +293,21 @@ fn bssy_must_reconverge_at_the_merge() {
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("bssy_region", &s.spirv);
     assert!(s.interface.host.max_reconvergence);
-    let p = region_with(2, true, true);
-    let e = translate(&p).err().map(|e| e.0);
-    assert_eq!(
-        e.as_deref(),
-        Some("BSSY at 0x0 reconverges at 0x20, not at a merge, before the warp operation at 0x20")
-    );
     translate(&region(2, false)).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// A BSSY whose target is no merge, with warp operations after it, is
+/// funneled there: the lanes that go to the target and those that branch
+/// past it meet at a new block that switches on which way each came, so the
+/// lanes for the target enter it together, as after the guest's BSYNC.
+#[test]
+fn bssy_off_the_merge_is_funneled_to_its_target() {
+    let p = region_with(2, true, true);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("bssy_funnel", &s.spirv);
+    assert!(s.interface.host.max_reconvergence);
+    assert!(spirv_has(&s.spirv, 251), "no OpSwitch");
+    assert!(s.interface.host.inexact.is_empty());
 }
 
 /// A BSSY whose target is no merge of the structure is harmless when no

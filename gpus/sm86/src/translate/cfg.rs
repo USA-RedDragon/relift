@@ -16,7 +16,13 @@
 //! merge on that chain, no BREAK may let lanes run warp operations before
 //! their BSYNC,
 //! and no BMOV may change a barrier; anything else is rejected. Elsewhere
-//! which lanes run together cannot be observed.
+//! which lanes run together cannot be observed. A BSSY whose target is no
+//! merge, with a warp operation after it, has its region funneled: the
+//! edges from the region into the target's block and the edges that leave
+//! the region for elsewhere (its BREAK paths) all go to one new block
+//! through a selector variable, as with split joins below. That block is
+//! the merge of the region, and the lanes it sends to the target enter it
+//! together, as the guest's do after their BSYNC.
 //!
 //! `CALL.REL` subroutines are inlined at every call site: a block is a pair
 //! of the call stack and its first instruction, and `RET` continues after
@@ -87,6 +93,15 @@ use crate::spirv::op;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) const EXIT: usize = usize::MAX;
+
+/// A BSSY whose target the structure does not reconverge at: the block
+/// that holds the BSSY, the target instruction and the reason to give if
+/// the region cannot be funneled there.
+pub(crate) struct OffMerge {
+    pub(crate) block: usize,
+    pub(crate) target: usize,
+    pub(crate) why: String,
+}
 const MAX_CALL_DEPTH: usize = 8;
 pub(crate) const TOO_MUCH_DUPLICATION: &str = "control flow needs too much duplication";
 const MAX_BLOCKS: usize = 1 << 16;
@@ -1438,7 +1453,7 @@ impl Graph {
 
     /// Checks that the structure reconverges the guest's lanes where its
     /// BSSY/BSYNC regions do (see the module documentation).
-    pub(crate) fn check_reconvergence(&mut self, code: &Code) -> Res<()> {
+    pub(crate) fn check_reconvergence(&mut self, code: &Code) -> Res<Option<OffMerge>> {
         let insts = &code.insts;
         for b in 0..self.blocks.len() {
             let blk = self.blocks[b].clone();
@@ -1459,12 +1474,16 @@ impl Graph {
                         if !self.merges_at(b, t)
                             && let Some(j) = self.unmerged_warp_op(b, t, insts)
                         {
-                            return bad(format!(
-                                "BSSY at {:#x} reconverges at {:#x}, not at a merge, before the warp operation at {:#x}",
-                                16 * k,
-                                16 * t,
-                                16 * j
-                            ));
+                            return Ok(Some(OffMerge {
+                                block: b,
+                                target: t,
+                                why: format!(
+                                    "BSSY at {:#x} reconverges at {:#x}, not at a merge, before the warp operation at {:#x}",
+                                    16 * k,
+                                    16 * t,
+                                    16 * j
+                                ),
+                            }));
                         }
                     }
                     "BREAK" => {
@@ -1502,7 +1521,7 @@ impl Graph {
                 }
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Checks that every BAR runs where all the workgroup's invocations
@@ -1784,13 +1803,24 @@ impl Graph {
     }
 
     /// Instruction `t` lies on the chain of merges that starts at `b`, or
-    /// the lanes of `b` never reach it.
+    /// in a block that only a dispatch on that chain enters (every lane
+    /// that goes there takes the same case together), or the lanes of `b`
+    /// never reach it.
     fn merges_at(&mut self, b: usize, t: usize) -> bool {
         let mut cur = Some(b);
         let mut entering = false;
         for _ in 0..2 * self.blocks.len() + 2 {
             let Some(x) = cur else { break };
             if self.holds(x, t) {
+                return true;
+            }
+            if let Term::Dispatch(_, ts) = &self.blocks[x].term
+                && ts.iter().any(|&j| {
+                    !terminal(j)
+                        && self.holds(j, t)
+                        && (0..self.blocks.len()).all(|u| u == x || !self.succs[u].contains(&j))
+                })
+            {
                 return true;
             }
             cur = self.next_merge(x, entering);
@@ -1853,77 +1883,112 @@ fn reach(succ: &[Vec<usize>], from: usize, stop: &[bool]) -> Vec<bool> {
     seen
 }
 
+/// What splitting a join needs to know about the graph.
+struct Shape {
+    idom: Vec<Option<usize>>,
+    fwd: Vec<Vec<usize>>,
+    pdom: Vec<Option<usize>>,
+    loops: Vec<Vec<usize>>,
+    end: usize,
+}
+
+impl Shape {
+    fn new(blocks: &[Block]) -> Shape {
+        let n = blocks.len();
+        let all: Vec<Vec<usize>> = blocks
+            .iter()
+            .map(|b| {
+                let mut v = b.term.targets();
+                v.retain(|t| !terminal(*t));
+                v
+            })
+            .collect();
+        let idom = idoms(&all, 0);
+        let fwd: Vec<Vec<usize>> = all
+            .iter()
+            .enumerate()
+            .map(|(u, ss)| {
+                ss.iter()
+                    .copied()
+                    .filter(|&v| idom[u].is_none() || !dominates(&idom, v, u))
+                    .collect()
+            })
+            .collect();
+        let end = n;
+        let mut rev = vec![Vec::new(); n + 1];
+        for (u, b) in blocks.iter().enumerate() {
+            let ts = b.term.targets();
+            if ts.iter().any(|t| terminal(*t)) || ts.is_empty() {
+                rev[end].push(u);
+            }
+            for &v in &all[u] {
+                rev[v].push(u);
+            }
+        }
+        let pdom = idoms(&rev, end);
+        let mut preds = vec![Vec::new(); n];
+        for (u, ss) in all.iter().enumerate() {
+            for &v in ss {
+                preds[v].push(u);
+            }
+        }
+        let mut loops: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (u, ss) in all.iter().enumerate() {
+            for &h in ss {
+                if idom[u].is_none() || !dominates(&idom, h, u) {
+                    continue;
+                }
+                let mut body = vec![false; n];
+                body[h] = true;
+                let mut work = vec![u];
+                while let Some(x) = work.pop() {
+                    if !body[x] {
+                        body[x] = true;
+                        work.extend(preds[x].iter().copied());
+                    }
+                }
+                for (x, inl) in body.into_iter().enumerate() {
+                    if inl && !loops[x].contains(&h) {
+                        loops[x].push(h);
+                    }
+                }
+            }
+        }
+        Shape {
+            idom,
+            fwd,
+            pdom,
+            loops,
+            end,
+        }
+    }
+
+    fn within(&self, a: usize, b: usize) -> bool {
+        terminal(a) || self.loops[a].iter().all(|h| self.loops[b].contains(h))
+    }
+
+    /// The blocks from the post-dominator of `b` on.
+    fn beyond(&self, b: usize) -> Vec<bool> {
+        let none = vec![false; self.fwd.len()];
+        match self.pdom[b].filter(|&p| p != self.end) {
+            Some(p) => reach(&self.fwd, p, &none),
+            None => none,
+        }
+    }
+}
+
 /// Splits one shared join (see the module notes); `false` if there is
 /// none left.
 fn split_one(blocks: &mut Vec<Block>, vars: &mut usize) -> bool {
     let n = blocks.len();
-    let all: Vec<Vec<usize>> = blocks
-        .iter()
-        .map(|b| {
-            let mut v = b.term.targets();
-            v.retain(|t| !terminal(*t));
-            v
-        })
-        .collect();
-    let idom = idoms(&all, 0);
-    let fwd: Vec<Vec<usize>> = all
-        .iter()
-        .enumerate()
-        .map(|(u, ss)| {
-            ss.iter()
-                .copied()
-                .filter(|&v| idom[u].is_none() || !dominates(&idom, v, u))
-                .collect()
-        })
-        .collect();
-    let end = n;
-    let mut rev = vec![Vec::new(); n + 1];
-    for (u, b) in blocks.iter().enumerate() {
-        let ts = b.term.targets();
-        if ts.iter().any(|t| terminal(*t)) || ts.is_empty() {
-            rev[end].push(u);
-        }
-        for &v in &all[u] {
-            rev[v].push(u);
-        }
-    }
-    let pdom = idoms(&rev, end);
-    let mut preds = vec![Vec::new(); n];
-    for (u, ss) in all.iter().enumerate() {
-        for &v in ss {
-            preds[v].push(u);
-        }
-    }
-    let mut loops: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for (u, ss) in all.iter().enumerate() {
-        for &h in ss {
-            if idom[u].is_none() || !dominates(&idom, h, u) {
-                continue;
-            }
-            let mut body = vec![false; n];
-            body[h] = true;
-            let mut work = vec![u];
-            while let Some(x) = work.pop() {
-                if !body[x] {
-                    body[x] = true;
-                    work.extend(preds[x].iter().copied());
-                }
-            }
-            for (x, inl) in body.into_iter().enumerate() {
-                if inl && !loops[x].contains(&h) {
-                    loops[x].push(h);
-                }
-            }
-        }
-    }
-    let within = |a: usize, b: usize| terminal(a) || loops[a].iter().all(|h| loops[b].contains(h));
+    let s = Shape::new(blocks);
     let mut order = Vec::new();
     let mut seen = vec![false; n];
     let mut stack = vec![(0usize, 0usize)];
     seen[0] = true;
     while let Some(&mut (u, ref mut k)) = stack.last_mut() {
-        if *k < fwd[u].len() {
-            let v = fwd[u][*k];
+        if *k < s.fwd[u].len() {
+            let v = s.fwd[u][*k];
             *k += 1;
             if !seen[v] {
                 seen[v] = true;
@@ -1939,20 +2004,16 @@ fn split_one(blocks: &mut Vec<Block>, vars: &mut usize) -> bool {
     for (k, &u) in order.iter().enumerate() {
         rpo[u] = k;
     }
-    let none = vec![false; n];
     for &b in &order {
-        let mut arms = fwd[b].clone();
+        let mut arms = s.fwd[b].clone();
         arms.dedup();
         if arms.len() < 2 {
             continue;
         }
-        let beyond = match pdom[b].filter(|&p| p != end) {
-            Some(p) => reach(&fwd, p, &none),
-            None => none.clone(),
-        };
+        let beyond = s.beyond(b);
         let mut hits = vec![0usize; n];
         for &a in &arms {
-            for (u, r) in reach(&fwd, a, &beyond).into_iter().enumerate() {
+            for (u, r) in reach(&s.fwd, a, &beyond).into_iter().enumerate() {
                 hits[u] += usize::from(r);
             }
         }
@@ -1962,99 +2023,149 @@ fn split_one(blocks: &mut Vec<Block>, vars: &mut usize) -> bool {
         else {
             continue;
         };
-        if !dominates(&idom, b, j) {
-            continue;
+        if split_at(blocks, vars, &s, b, j) {
+            return true;
         }
-        let mut stop = beyond.clone();
-        stop[j] = true;
-        let from_b = reach(&fwd, b, &stop);
-        let mut back = vec![Vec::new(); n];
-        for u in (0..n).filter(|&u| from_b[u]) {
-            for &v in &fwd[u] {
-                back[v].push(u);
-            }
-        }
-        let to_j = reach(&back, j, &none);
-        let region: Vec<usize> = (0..n).filter(|&u| from_b[u] && to_j[u]).collect();
-        if region.iter().any(|&u| !dominates(&idom, b, u)) {
-            continue;
-        }
-        let inside = |t: usize| !terminal(t) && t != j && region.contains(&t);
-        let mut escapes: Vec<usize> = Vec::new();
-        let mut back_edge = false;
-        for &u in &region {
-            for t in blocks[u].term.targets() {
-                if inside(t) || t == j {
-                    continue;
-                }
-                if !terminal(t) && dominates(&idom, t, u) {
-                    back_edge = true;
-                }
-                if !escapes.contains(&t) {
-                    escapes.push(t);
-                }
-            }
-        }
-        if back_edge
-            || escapes.is_empty()
-            || region.iter().any(|&u| !within(u, j) || !within(j, u))
-            || escapes.iter().any(|&t| !within(t, j))
-        {
-            continue;
-        }
-        let var = *vars;
-        *vars += 1;
-        let d = n;
-        let mut targets = vec![j];
-        targets.extend(&escapes);
-        blocks.push(Block {
-            first: 0,
-            end: 0,
-            term: Term::Dispatch(var, targets.clone()),
-        });
-        for (k, _) in targets.iter().enumerate() {
-            blocks.push(Block {
-                first: 0,
-                end: 0,
-                term: Term::Set(var, k as u32, d),
-            });
-        }
-        for &u in &region {
-            blocks[u]
-                .term
-                .retarget(|t| match targets.iter().position(|x| *x == t) {
-                    Some(k) if t == j || !inside(t) => d + 1 + k,
-                    _ => t,
-                });
-        }
-        return true;
     }
     false
 }
 
-/// Splits the shared joins, a bounded number of times.
-fn split_joins(blocks: &mut Vec<Block>) {
+/// Sends the lanes of `b` that go to `j`, and those that leave the code
+/// between them for elsewhere, through one new block that dispatches on a
+/// selector variable, so the selection of `b` merges there and its lanes
+/// for `j` enter it together. `false` if the region between them does not
+/// allow it (`b` does not dominate it, a back edge leaves it, or loops
+/// cross its edges).
+fn split_at(blocks: &mut Vec<Block>, vars: &mut usize, s: &Shape, b: usize, j: usize) -> bool {
+    let n = blocks.len();
+    if !dominates(&s.idom, b, j) {
+        return false;
+    }
+    let none = vec![false; n];
+    let mut stop = s.beyond(b);
+    stop[j] = true;
+    let from_b = reach(&s.fwd, b, &stop);
+    let mut back = vec![Vec::new(); n];
+    for u in (0..n).filter(|&u| from_b[u]) {
+        for &v in &s.fwd[u] {
+            back[v].push(u);
+        }
+    }
+    let to_j = reach(&back, j, &none);
+    let region: Vec<usize> = (0..n).filter(|&u| from_b[u] && to_j[u]).collect();
+    if region.iter().any(|&u| !dominates(&s.idom, b, u)) {
+        return false;
+    }
+    let inside = |t: usize| !terminal(t) && t != j && region.contains(&t);
+    let mut escapes: Vec<usize> = Vec::new();
+    let mut back_edge = false;
+    for &u in &region {
+        for t in blocks[u].term.targets() {
+            if inside(t) || t == j {
+                continue;
+            }
+            if !terminal(t) && dominates(&s.idom, t, u) {
+                back_edge = true;
+            }
+            if !escapes.contains(&t) {
+                escapes.push(t);
+            }
+        }
+    }
+    if back_edge
+        || escapes.is_empty()
+        || region.iter().any(|&u| !s.within(u, j) || !s.within(j, u))
+        || escapes.iter().any(|&t| !s.within(t, j))
+    {
+        return false;
+    }
+    let var = *vars;
+    *vars += 1;
+    let d = n;
+    let mut targets = vec![j];
+    targets.extend(&escapes);
+    blocks.push(Block {
+        first: 0,
+        end: 0,
+        term: Term::Dispatch(var, targets.clone()),
+    });
+    for (k, _) in targets.iter().enumerate() {
+        blocks.push(Block {
+            first: 0,
+            end: 0,
+            term: Term::Set(var, k as u32, d),
+        });
+    }
+    for &u in &region {
+        blocks[u]
+            .term
+            .retarget(|t| match targets.iter().position(|x| *x == t) {
+                Some(k) if t == j || !inside(t) => d + 1 + k,
+                _ => t,
+            });
+    }
+    true
+}
+
+/// Splits the shared joins, a bounded number of times; gives the number
+/// of selector variables used.
+fn split_joins(blocks: &mut Vec<Block>) -> usize {
     let mut vars = 0;
     let limit = 2 * blocks.len() + 16;
     for _ in 0..limit {
         if !split_one(blocks, &mut vars) {
-            return;
+            break;
         }
     }
+    vars
+}
+
+/// Funnels the BSSY region of `m` (see [`split_at`]) to the block that
+/// holds its target (the block it ends, if it starts none); `false` if
+/// there is none or it cannot.
+fn funnel(blocks: &mut Vec<Block>, vars: &mut usize, m: &OffMerge) -> bool {
+    let s = Shape::new(blocks);
+    let t = m.target;
+    let ok = |u: usize| u != m.block && dominates(&s.idom, m.block, u);
+    let Some(j) = (0..blocks.len())
+        .find(|&u| ok(u) && blocks[u].first <= t && t < blocks[u].end)
+        .or_else(|| {
+            (0..blocks.len()).find(|&u| ok(u) && blocks[u].first < t && t == blocks[u].end)
+        })
+    else {
+        return false;
+    };
+    split_at(blocks, vars, &s, m.block, j)
+}
+
+/// The program's graph; `split` splits the shared joins first. With
+/// `reconverge` (the structure decides which lanes run together), every
+/// BSSY region must reconverge where the guest's does, and one whose
+/// target is no merge is funneled there (see [`split_at`]).
+pub(crate) fn structure(code: &Code, split: bool, reconverge: bool) -> Res<Graph> {
+    let mut blocks = build(code)?;
+    let mut vars = if split { split_joins(&mut blocks) } else { 0 };
+    let limit = blocks.len() + 16;
+    let mut g = Graph::new(blocks.clone())?;
+    if reconverge {
+        for k in 0.. {
+            let Some(m) = g.check_reconvergence(code)? else {
+                break;
+            };
+            if k == limit || !funnel(&mut blocks, &mut vars, &m) {
+                return bad(m.why);
+            }
+            g = Graph::new(blocks.clone())?;
+        }
+    }
+    Ok(g)
 }
 
 /// Emits the program's body, starting with label `first`; `split` splits
 /// the shared joins first.
 pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()> {
     super::io::prescan(c, &code.insts);
-    let mut blocks = build(code)?;
-    if split {
-        split_joins(&mut blocks);
-    }
-    let mut g = Graph::new(blocks)?;
-    if c.iface.host.max_reconvergence {
-        g.check_reconvergence(code)?;
-    }
+    let mut g = structure(code, split, c.iface.host.max_reconvergence)?;
     if code.insts.iter().any(|i| i.mnemonic == "BAR") {
         g.check_barriers(code, c.stage == crate::program::Stage::Compute)?;
     }

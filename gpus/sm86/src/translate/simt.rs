@@ -566,9 +566,20 @@ struct Emit<'a> {
     g: Graph,
     code: &'a Code,
     emitted: usize,
+    /// Per selector variable and value: the lanes that set it and have
+    /// not reached its dispatch yet.
+    selected: HashMap<(usize, u32), u32>,
 }
 
 impl Emit<'_> {
+    /// The mask of the lanes that set selector variable `var` to `k`.
+    fn selected_lanes(&mut self, c: &mut Ctx, var: usize, k: u32) -> u32 {
+        *self
+            .selected
+            .entry((var, k))
+            .or_insert_with(|| c.mask_var())
+    }
+
     fn resolve(&self, t: usize, follow: Option<(usize, u32)>, lp: Option<&Lp>) -> Res<Dest> {
         if t == EXIT {
             return Ok(Dest::Die);
@@ -866,8 +877,35 @@ impl Emit<'_> {
                         vec![(*t, mt), (*f, mf)]
                     }
                 }
-                Term::Set(..) | Term::Dispatch(..) => {
-                    return bad("shared joins on the software warp path");
+                Term::Set(var, k, d) => {
+                    let mv = self.selected_lanes(c, *var, *k);
+                    let e = c.exec();
+                    c.or_into(mv, e);
+                    match self.resolve(*d, follow, lp)? {
+                        Dest::Inline(t) => {
+                            cur = t;
+                            continue;
+                        }
+                        d => {
+                            Emit::arrive(c, d);
+                            return Ok(());
+                        }
+                    }
+                }
+                Term::Dispatch(var, ts) => {
+                    let e = c.exec();
+                    let z = c.m.c_u32(0);
+                    let mut arms = Vec::new();
+                    for (k, &t) in ts.iter().enumerate() {
+                        let mv = self.selected_lanes(c, *var, k as u32);
+                        let m = c.ld(mv);
+                        c.m.emit_void(op::STORE, &[mv, z]);
+                        let a = c.sb(op::BITWISE_AND, m, e);
+                        let av = c.mask_var();
+                        c.m.emit_void(op::STORE, &[av, a]);
+                        arms.push((t, av));
+                    }
+                    arms
                 }
                 Term::Switch(sel, base, cases) => {
                     let mut targets: Vec<usize> = Vec::new();
@@ -964,8 +1002,9 @@ fn selector(c: &mut Ctx, sel: Sel, base: u32) -> u32 {
 }
 
 /// Emits the program's body for [`WarpPath::Simt`], starting with label
-/// `first`. Shared joins (`split`) are refused; the BSSY regions and BAR
-/// sites are checked as on the other paths.
+/// `first`. Shared joins (`split`) are refused; the BSSY regions (funneled
+/// to their targets where needed) and BAR sites are checked as on the other
+/// paths.
 ///
 /// [`WarpPath::Simt`]: super::WarpPath::Simt
 pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()> {
@@ -973,9 +1012,7 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
         return bad("shared joins on the software warp path");
     }
     super::io::prescan(c, &code.insts);
-    let blocks = super::cfg::build(code)?;
-    let mut g = Graph::new(blocks)?;
-    g.check_reconvergence(code)?;
+    let mut g = super::cfg::structure(code, false, true)?;
     if code.insts.iter().any(|i| i.mnemonic == "BAR") {
         g.check_barriers(code, false)?;
     }
@@ -1006,6 +1043,7 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
         g,
         code,
         emitted: 0,
+        selected: HashMap::new(),
     };
     em.region(c, 0, None, None)?;
     c.m.emit_void(op::RETURN, &[]);
