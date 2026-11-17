@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate the Sail templates in a copy of the tree and check they match
-# the committed ones. The copy keeps a parallel checks.sh from compiling
+# the committed ones. The copy keeps a parallel lint.sh from compiling
 # half-written templates.
 . "$(dirname "$0")/lib.sh"
 

@@ -28,6 +28,6 @@ go run github.com/USA-RedDragon/docgen@v0.0.0-20261109224744-ef1962a8c996 check 
 ```
 <!-- /docgen:text -->
 
-`check` fails and lists each stale marker, each unused region and each broken link of a page under `docs`. The settings table of [Settings](../reference/configuration.md) is not a docgen marker: configulator writes it, and `scripts/ci/checks.sh` checks it.
+`check` fails and lists each stale marker, each unused region and each broken link of a page under `docs`. The settings table of [Settings](../reference/configuration.md) is not a docgen marker: configulator writes it, and `scripts/ci/lint.sh` checks it.
 
 `docs/site/build.sh` builds the pages into a static site with pandoc; `scripts/ci/docs.sh` runs docgen, installs the pinned pandoc and builds. The build fails on a page that is in the outline and not written, a Markdown page under `docs` that is not in the outline, and any link, image or heading anchor of a built page that does not resolve.

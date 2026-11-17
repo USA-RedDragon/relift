@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# fmt, clippy, tests (the Android app's game data import logic too, with javac),
-# charter, generated docs and Vulkan forwarding, deny.
+# fmt, clippy, charter, the Android app's game data import logic (with javac),
+# generated docs and Vulkan forwarding, deny. The tests run in tests-*.sh.
 . "$(dirname "$0")/lib.sh"
 
 cargo fmt --all --check
@@ -12,11 +12,6 @@ cargo clippy --manifest-path check/Cargo.toml --all-targets --all-features --loc
 cargo clippy --manifest-path guests/gb/devices/Cargo.toml --all-targets --all-features --locked -- -D warnings
 
 cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
-# The SPIR-V the GPU translator writes is checked by the pinned spirv-val,
-# never skipped.
-spirv_val=$(spirv_val_dir)
-PATH="$spirv_val:$PATH" RELIFT_SPIRV_VAL_REQUIRE=1 cargo test --workspace --locked
-cargo test --manifest-path guests/gb/devices/Cargo.toml --release --locked
 
 java_work="$CI_WORK/android-java-tests"
 rm -rf "$java_work"
