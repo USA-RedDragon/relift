@@ -1,6 +1,7 @@
 // mrun <script>: runs a small Vulkan script (mesh draws, compute passes, indirect draws) on one device
 // and reads back the color target and buffers, for kat.py. MRUN_DEV picks the device by a part of its
 // name (default NVIDIA), MRUN_NV uses VK_NV_mesh_shader, MRUN_TIME prints each command's GPU time.
+// Commands between "group" and "endgroup" go into one command buffer, timed as one.
 // Blending, when on, is dst = src + 0.5 dst, which depends on the primitive order.
 #include <vulkan/vulkan.h>
 #include <stdio.h>
@@ -107,7 +108,10 @@ static VkImage img; static VkImageView view; static VkDeviceMemory imem; static 
 static uint32_t pushc[32];
 static VkQueryPool qp; static float ts_period; static int timing; static const char *cur = "";
 
+static int grouped;
+
 static void begin(void) {
+    if (grouped) return;
     VkCommandBufferAllocateInfo ai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0, cp, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
     CK(vkAllocateCommandBuffers(dev, &ai, &cb));
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
@@ -119,6 +123,7 @@ static void begin(void) {
 }
 
 static void submit(void) {
+    if (grouped) return;
     if (timing) vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 1);
     CK(vkEndCommandBuffer(cb));
     VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO, 0, 0, 0, 0, 1, &cb };
@@ -305,6 +310,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(a[0], "push")) { for (int i = 1; i < k; i++) pushc[i - 1] = strtoul(a[i], 0, 0); }
         else if (!strcmp(a[0], "pushf")) { size_t sz; void *d = rdfile(a[1], &sz); memcpy(pushc, d, sz > 128 ? 128 : sz); free(d); }
         else if (!strcmp(a[0], "blend")) blend = !strcmp(a[1], "on");
+        else if (!strcmp(a[0], "group")) {
+            if (!have_target) { make_target(); have_target = 1; }
+            begin(); grouped = 1;
+        }
+        else if (!strcmp(a[0], "endgroup")) { grouped = 0; submit(); }
         else if (!strcmp(a[0], "comp") || !strcmp(a[0], "compi")) {
             build_layout();
             VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rss = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO, 0, 32 };
