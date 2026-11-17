@@ -73,6 +73,7 @@ uint64_t rl_mips_eret(rl_ctx *c)
         c->cp0_status &= ~(uint32_t)RL_MIPS_SR_EXL;
     }
     c->cp0_ll_bit = 0;
+    c->time.budget -= 1;
     irq_mask(c);
     return to;
 }
@@ -191,6 +192,7 @@ uint64_t rl_mips_irq_enter(rl_ctx *c, uint64_t next, uint32_t ip)
     timer_check(c);
     if (!rl_mips_irq_pending(c))
         return RL_NO_IRQ;
+    c->time.budget -= 1;
     uint64_t v = rl_mips_exception(c, RL_MIPS_EXC_INT, next, false, 0);
     rl_mips_call(c, irq_frame(next));
     c->irq_open++;

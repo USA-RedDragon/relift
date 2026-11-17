@@ -69,8 +69,9 @@ static int64_t eret_budget[2];
 
 /**
  * @brief Takes the VI interrupt, and the first time raises the SP interrupt
- * while EXL is set. ERET may go anywhere (an OS switching threads), so it
- * must end the budget itself for the line to be taken at the next sync point.
+ * while EXL is set and gives the slice more time. ERET may go anywhere (an
+ * OS switching threads), so it must end the budget itself for the line to be
+ * taken at the next sync point.
  */
 static uint64_t handler2(rl_ctx *c, uint8_t *mem)
 {
@@ -79,8 +80,11 @@ static uint64_t handler2(rl_ctx *c, uint8_t *mem)
     rl_mips_cp0_sync(c);
     rl_n64_write(c->machine, 0x04400010u, 4, 0);
     rl_n64_write(c->machine, 0x04040010u, 4, hs.handlers == 1 ? 0x10u : 0x08u);
-    if (hs.handlers == 1)
+    if (hs.handlers == 1) {
+        c->time.deadline += 100;
+        c->time.budget += 100;
         eret_budget[0] = c->time.budget;
+    }
     uint64_t to = rl_mips_eret(c);
     if (hs.handlers == 1)
         eret_budget[1] = c->time.budget;
