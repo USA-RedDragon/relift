@@ -49,6 +49,8 @@ enum {
     RL_N64_IRQ_VI = 0x08,
     RL_N64_IRQ_PI = 0x10,
     RL_N64_IRQ_DP = 0x20,
+    /** @brief Every source: MI_INTR at power-on, when every source's output is up. */
+    RL_N64_IRQ_ALL = 0x3F,
 };
 
 /** @brief The machine; opaque. */

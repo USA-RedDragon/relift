@@ -57,6 +57,7 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     }
     m->rom = rom;
     m->rom_len = rom_len;
+    m->mi.intr = RL_N64_IRQ_ALL;
     m->pal = rom_len > 0x3E && strchr("DFHILPSUWXYZ", rom[0x3E]) && rom[0x3E];
     rl_n64_sp_init(m);
     rl_n64_pif_init(m);

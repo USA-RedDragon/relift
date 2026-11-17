@@ -7,6 +7,7 @@
 #include "runner.h"
 
 #include "n64.h"
+#include "n64_int.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +45,7 @@ static mach mach_new(size_t rom_len)
     t.k = rl_sched_add_cpu(t.s, 1);
     t.m = rl_n64_create(t.rom, rom_len);
     rl_n64_attach(t.m, t.s, t.k);
+    rl_n64_mi_lower(t.m, RL_N64_IRQ_ALL);
     return t;
 }
 
@@ -59,6 +61,19 @@ static void advance(mach *t, uint64_t n)
 {
     rl_sched_stall(t->k, n);
     rl_sched_run(t->k);
+}
+
+TEST(n64_every_mi_interrupt_is_up_at_power_on)
+{
+    uint8_t rom[0x40] = {0x80, 0x37, 0x12, 0x40};
+    rl_n64 *m = rl_n64_create(rom, sizeof rom);
+    CHECK_EQ(rl_n64_read(m, 0x04300008u, 4), RL_N64_IRQ_ALL);
+    CHECK_EQ(rl_n64_irq_pending(m), 0);
+    rl_n64_write(m, 0x0430000Cu, 4, 0x0080u);
+    CHECK_EQ(rl_n64_irq_pending(m), RL_N64_IRQ_VI);
+    rl_n64_write(m, 0x04400010u, 4, 0);
+    CHECK_EQ(rl_n64_irq_pending(m), 0);
+    rl_n64_destroy(m);
 }
 
 TEST(n64_mi_mask_and_version)
@@ -443,6 +458,7 @@ TEST(n64_pal_roms_scan_out_640_by_576)
     t.k = rl_sched_add_cpu(t.s, 1);
     t.m = rl_n64_create(t.rom, 0x2000);
     rl_n64_attach(t.m, t.s, t.k);
+    rl_n64_mi_lower(t.m, RL_N64_IRQ_ALL);
     static uint8_t rgb[640 * 576 * 3];
     uint32_t w = 0, h = 0;
     vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);

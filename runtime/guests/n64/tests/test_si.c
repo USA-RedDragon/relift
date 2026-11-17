@@ -8,6 +8,7 @@
 #include "runner.h"
 
 #include "n64.h"
+#include "n64_int.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,7 @@ static void mach_new(mach *t)
     t->k = rl_sched_add_cpu(t->s, 1);
     t->m = rl_n64_create(t->rom, sizeof t->rom);
     rl_n64_attach(t->m, t->s, t->k);
+    rl_n64_mi_lower(t->m, RL_N64_IRQ_ALL);
     rl_n64_write(t->m, 0x0430000Cu, 4, 0x8u);
 }
 
