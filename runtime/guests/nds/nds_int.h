@@ -404,6 +404,8 @@ struct rl_nds {
     uint32_t burst7_name;
     uint32_t burst7_next;
     uint64_t burst7_end;
+    /** @brief The tick the ARM7's last write to work RAM ended, while no other access followed (WRAM7_WRITE_N). */
+    uint64_t wram7_write_end;
     rl_nds_costs costs;
 
     nds_dev d_io;

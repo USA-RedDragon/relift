@@ -104,8 +104,11 @@ static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
  * The ARM7's main RAM, from the console's timings (code in its work RAM or
  * in main RAM, data in each). A nonsequential access takes 6 cycles and starts
  * no earlier than 3 cycles after the RAM's last access ended (its
- * precharge); a write lets the CPU go after 4 of its 6. A halfword or byte
- * access takes a cycle less. A code fetch right after the previous one, at
+ * precharge); a write lets the CPU go after 4 of its 6, and each further
+ * word of an STM after its 2, 2 cycles behind the RAM as the first. A
+ * halfword or byte access takes a cycle less, but a byte write lets the CPU
+ * go when a word write would (STRB from work RAM code costs STR's, from main
+ * RAM code STRH's). A code fetch right after the previous one, at
  * the next address in the same 32-byte block, is sequential: 2 cycles, or 1
  * for a Thumb halfword. Any other cycle in between, a data access or an
  * internal cycle, ends the burst, and internal cycles overlap the precharge:
@@ -116,9 +119,12 @@ static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
 #define MAIN7_WRITE 8u
 #define MAIN7_PRECHARGE 6u
 /*
- * A nonsequential ARM7 write to work RAM (shared or its own) takes a cycle
- * more than a read: STR, STM and PUSH there cost 1 more than LDR, LDM and
- * POP on the console; each further word of an STM does not.
+ * An ARM7 write to work RAM (shared or its own) followed by a code fetch
+ * from work RAM costs a cycle more: STR, STM and PUSH there cost 1 more than
+ * LDR, LDM and POP on the console in work RAM code, but no more in main RAM
+ * code, and SWP (whose write an internal cycle follows) costs only its
+ * load's and store's cycles. The store charges it and a main RAM fetch right
+ * after gives it back.
  */
 #define WRAM7_WRITE_N 2u
 
@@ -130,7 +136,9 @@ static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64
         start = now;
     unsigned n = size < 4 ? MAIN7_N - 2u : MAIN7_N;
     *busy = start + n;
-    return start + (write ? n - (MAIN7_N - MAIN7_WRITE) : n);
+    if (!write)
+        return start + n;
+    return start + (size == 2 ? MAIN7_WRITE - 2u : MAIN7_WRITE);
 }
 
 /*
@@ -146,6 +154,12 @@ static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64
 unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 {
     uint64_t now = nds_now(m, RL_NDS_ARM7);
+    unsigned back = 0;
+    if (m->wram7_write_end == now && m->wram7_write_end) {
+        back = WRAM7_WRITE_N / 2u;
+        now -= WRAM7_WRITE_N;
+    }
+    m->wram7_write_end = 0;
     uint64_t from = now < m->burst7_end ? m->burst7_end : now;
     bool goes_on = seq && (addr == m->burst7_name || addr == m->burst7_name + size);
     uint32_t at = goes_on ? m->burst7_next : addr;
@@ -159,7 +173,8 @@ unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
     m->burst7_name = addr;
     m->burst7_next = at + size;
     m->burst7_end = end;
-    return (unsigned)((end - from + 1u) / 2u);
+    unsigned cyc = (unsigned)((end - from + 1u) / 2u);
+    return cyc > back ? cyc - back : 0u;
 }
 
 /** @brief Charges the ARM7 a main RAM data access: nonsequential, or the next word of an LDM or STM. */
@@ -168,8 +183,11 @@ static void data7(rl_nds *m, bool write, bool seq, unsigned size)
     uint64_t now = nds_now(m, RL_NDS_ARM7);
     uint64_t end;
     if (seq) {
-        end = (m->ram_free > now ? m->ram_free : now) + MAIN7_S;
-        m->ram_free = end;
+        uint64_t ram = (m->ram_free > now ? m->ram_free : now) + MAIN7_S;
+        m->ram_free = ram;
+        end = write ? ram - (MAIN7_N - MAIN7_WRITE) : ram;
+        if (end < now)
+            end = now;
     } else {
         end = main7(m, now, write, size, &m->ram_free);
     }
@@ -361,7 +379,10 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     } else if (w.main) {
         data7(m, true, seq, size);
     } else {
-        finish(m, cpu, w.main, cost + (!seq && addr >> 24 == 0x03 ? WRAM7_WRITE_N : 0u));
+        bool first = how == RL_NDS_N && addr >> 24 == 0x03;
+        bool more = how == RL_NDS_S && addr >> 24 == 0x03 && m->wram7_write_end;
+        finish(m, cpu, w.main, cost + (first ? WRAM7_WRITE_N : 0u));
+        m->wram7_write_end = first || more ? nds_now(m, cpu) : 0;
     }
     if (m->halt_req) {
         m->halt_req = false;
