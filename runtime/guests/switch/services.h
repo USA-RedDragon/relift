@@ -69,6 +69,8 @@ rl_result rl_gsv_open_user_session(uint32_t *handle);
 void rl_srv_install_ectx(void);
 /** @brief Registers bsd:u and bsd:s, the socket services, without a network. */
 void rl_srv_install_bsd(void);
+/** @brief Registers bcat:u with an empty delivery cache and, on the Switch 2, stpl:u without stream play. */
+void rl_srv_install_bcat(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
