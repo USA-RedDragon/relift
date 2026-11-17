@@ -102,6 +102,19 @@ static uint32_t g_origin_mode, g_depth_mode;
 uint32_t nvn_device_depth_mode(void) { return __atomic_load_n(&g_depth_mode, __ATOMIC_RELAXED); }
 uint32_t nvn_device_origin_mode(void) { return __atomic_load_n(&g_origin_mode, __ATOMIC_RELAXED); }
 
+void nvn_window_viewport(uint32_t origin, uint32_t height, const float v[4], float out[4])
+{
+    out[0] = v[0];
+    out[1] = origin == NVN_ORIGIN_UPPER_LEFT ? v[1] + v[3] : (float)height - v[1];
+    out[2] = v[2];
+    out[3] = -v[3];
+}
+
+int64_t nvn_window_top(uint32_t origin, uint32_t height, int64_t y, int64_t h)
+{
+    return origin == NVN_ORIGIN_UPPER_LEFT ? y : (int64_t)height - y - h;
+}
+
 /** @brief nvnDeviceSetWindowOriginMode(NVNdevice *, NVNwindowOriginMode). */
 uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)
 {
@@ -109,6 +122,8 @@ uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)
     nvn_device *d = (nvn_device *)nvn_obj_get(c->x[0], NVN_DEVICE);
     if (d)
         d->origin_mode = (uint32_t)c->x[1];
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "window origin mode %u", (uint32_t)c->x[1]);
     __atomic_store_n(&g_origin_mode, (uint32_t)c->x[1], __ATOMIC_RELAXED);
     return nvn_ret(c);
 }
@@ -120,6 +135,8 @@ uint64_t nvnh_nvnDeviceSetDepthMode(rl_ctx *c, uint8_t *mem)
     nvn_device *d = (nvn_device *)nvn_obj_get(c->x[0], NVN_DEVICE);
     if (d)
         d->depth_mode = (uint32_t)c->x[1];
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "depth mode %u", (uint32_t)c->x[1]);
     __atomic_store_n(&g_depth_mode, (uint32_t)c->x[1], __ATOMIC_RELAXED);
     return nvn_ret(c);
 }

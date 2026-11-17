@@ -182,6 +182,22 @@ int nvn_shader_stage(const uint8_t *mem, uint64_t code);
 /** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */
 uint32_t nvn_device_depth_mode(void);
 uint32_t nvn_device_origin_mode(void);
+/** @brief NVNwindowOriginMode: lower left (the default) or upper left. */
+#define NVN_ORIGIN_LOWER_LEFT 0u
+#define NVN_ORIGIN_UPPER_LEFT 1u
+/**
+ * @brief The host viewport (x, y, width, height in out) of NVN viewport v
+ * on a render area height rows tall.
+ *
+ * The driver programs the viewport scale and offset as x + w/2 +- w/2 and
+ * y + h/2 + s h/2 with s = -1 in upper-left origin mode and +1 in
+ * lower-left mode, where the hardware counts rows from the bottom; either
+ * way clip-space +y lands on the image's first row in memory. Vulkan maps
+ * +y to the last row, so the host viewport has a negative height.
+ */
+void nvn_window_viewport(uint32_t origin, uint32_t height, const float v[4], float out[4]);
+/** @brief The first memory row of a window rectangle at y, h rows tall, on a render area height rows tall. */
+int64_t nvn_window_top(uint32_t origin, uint32_t height, int64_t y, int64_t h);
 /** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
 uint32_t *nvn_shader_spirv(const char *key, size_t *words);
 /** @brief An interface record of a translation (relift build's "RLSPI001" table). */

@@ -801,7 +801,9 @@ static VkRect2D clip(const replay *r, VkRect2D area)
 {
     if (!r->st->scissor_set)
         return area;
-    int64_t x0 = r->st->scissor.offset.x, y0 = r->st->scissor.offset.y;
+    int64_t x0 = r->st->scissor.offset.x;
+    int64_t y0 = nvn_window_top(nvn_device_origin_mode(), area.extent.height, r->st->scissor.offset.y,
+                                   r->st->scissor.extent.height);
     int64_t x1 = x0 + r->st->scissor.extent.width, y1 = y0 + r->st->scissor.extent.height;
     x0 = x0 < 0 ? 0 : x0;
     y0 = y0 < 0 ? 0 : y0;

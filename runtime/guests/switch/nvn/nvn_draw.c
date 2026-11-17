@@ -425,7 +425,8 @@ static int fixed_state(replay *r, pipe_key *k)
         if ((uint32_t)mode > 2)
             return nvn_vk_stop(r, "polygon mode %u", (uint32_t)mode);
         k->cull = (uint32_t)cull & 3;
-        k->front = (uint32_t)front & 1 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
+        bool ccw = ((uint32_t)front & 1) != (nvn_device_origin_mode() != NVN_ORIGIN_UPPER_LEFT);
+        k->front = ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
         k->polygon = (uint32_t)mode == 0 ? VK_POLYGON_MODE_POINT
                      : (uint32_t)mode == 1 ? VK_POLYGON_MODE_LINE
                                            : VK_POLYGON_MODE_FILL;
@@ -735,14 +736,17 @@ static int bind_textures(replay *r, uint32_t s, const module *m, pipe_key *k)
 static void dynamic_state(replay *r, VkRect2D area)
 {
     nvn_gfx *st = r->st;
-    VkViewport vp = { st->viewports[0][0], st->viewports[0][1], st->viewports[0][2], st->viewports[0][3],
-                      st->depth_ranges[0][0], st->depth_ranges[0][1] };
-    if (vp.width == 0 || vp.height == 0)
-        vp = (VkViewport){ 0, 0, (float)area.extent.width, (float)area.extent.height, 0, 1 };
+    uint32_t origin = nvn_device_origin_mode();
+    float full[4] = { 0, 0, (float)area.extent.width, (float)area.extent.height };
+    const float *v = st->viewports[0][2] != 0 && st->viewports[0][3] != 0 ? st->viewports[0] : full;
+    float w[4];
+    nvn_window_viewport(origin, area.extent.height, v, w);
+    VkViewport vp = { w[0], w[1], w[2], w[3], v == full ? 0 : st->depth_ranges[0][0], v == full ? 1 : st->depth_ranges[0][1] };
     VK(vkCmdSetViewport)(g.cb, 0, 1, &vp);
     VkRect2D sc = area;
     if (st->scissor_set) {
-        int64_t x0 = st->scissor.offset.x, y0 = st->scissor.offset.y;
+        int64_t x0 = st->scissor.offset.x;
+        int64_t y0 = nvn_window_top(origin, area.extent.height, st->scissor.offset.y, st->scissor.extent.height);
         int64_t x1 = x0 + st->scissor.extent.width, y1 = y0 + st->scissor.extent.height;
         x0 = x0 < 0 ? 0 : x0;
         y0 = y0 < 0 ? 0 : y0;

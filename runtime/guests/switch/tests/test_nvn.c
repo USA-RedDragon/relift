@@ -129,3 +129,32 @@ TEST(nvn_texels_land_in_gobs)
     nvn_region outside = { 60, 0, 0, 8, 1, 1 };
     CHECK(!nvn_tex_copy(&d, storage, 0, 0, &outside, small, false));
 }
+
+/** @brief Where the driver's viewport puts clip-space y, as a memory row: rows counted from the bottom in lower-left mode. */
+static float driver_row(uint32_t origin, float rows, const float v[4], float ndc_y)
+{
+    float scale = origin == NVN_ORIGIN_UPPER_LEFT ? -v[3] / 2 : v[3] / 2;
+    float window = ndc_y * scale + v[1] + v[3] / 2;
+    return origin == NVN_ORIGIN_UPPER_LEFT ? window : rows - window;
+}
+
+/** @brief Where a host viewport (x, y, width, height) puts clip-space y, as a framebuffer row (Vulkan's rule). */
+static float host_row(const float vp[4], float ndc_y) { return ndc_y * vp[3] / 2 + vp[1] + vp[3] / 2; }
+
+TEST(nvn_viewport_matches_driver_rows)
+{
+    static const float views[][4] = { { 0, 0, 1920, 1080 }, { 100, 40, 300, 200 }, { 0, 600, 800, 480 } };
+    for (uint32_t origin = 0; origin < 2; origin++)
+        for (unsigned i = 0; i < 3; i++)
+            for (float y = -1; y <= 1; y += 0.5f) {
+                float vp[4];
+                nvn_window_viewport(origin, 1080, views[i], vp);
+                CHECK_EQ((int64_t)(host_row(vp, y) * 4), (int64_t)(driver_row(origin, 1080, views[i], y) * 4));
+            }
+    float full[4];
+    nvn_window_viewport(NVN_ORIGIN_UPPER_LEFT, 1080, views[0], full);
+    CHECK_EQ((int64_t)host_row(full, 1), 0);
+    CHECK_EQ((int64_t)host_row(full, -1), 1080);
+    CHECK_EQ(nvn_window_top(NVN_ORIGIN_UPPER_LEFT, 1080, 40, 200), 40);
+    CHECK_EQ(nvn_window_top(NVN_ORIGIN_LOWER_LEFT, 1080, 40, 200), 840);
+}
