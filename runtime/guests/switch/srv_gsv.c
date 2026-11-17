@@ -12,6 +12,7 @@
  */
 #include "services.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /** @brief BootWithTransferMemory: transfer memory handle, aruid, size. */
@@ -203,9 +204,26 @@ static rl_result gpu_user_versions(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/** @brief A GpuSession: the event that tells its client the user session is ready. */
+typedef struct gpu_session {
+    hos_revent *ready;
+} gpu_session;
+
+static void gpu_session_destroy(void *state)
+{
+    gpu_session *s = state;
+    if (s->ready)
+        hos_kobj_unref(&s->ready->obj);
+    free(s);
+}
+
 static const rl_ipc_class gpu_user_class = { "nn::gsv::GpuUserSession", NULL, 0, 0, NULL };
 
-/** @brief GpuSession 12 (unnamed): the u32 user version to boot with; a session for that user. */
+/**
+ * @brief GpuSession 12 (unnamed): the u32 user version to boot with; the
+ * readable end of an event (moved), which nn::gpu attaches to a system event
+ * and waits on after command 21.
+ */
 static rl_result gpu_open_user(rl_ipc_req *r)
 {
     uint32_t version;
@@ -213,16 +231,38 @@ static rl_result gpu_open_user(rl_ipc_req *r)
         return SF_RESULT_INVALID_HEADER;
     if (version != GPU_USER_VERSION)
         return SF_RESULT_NOT_SUPPORTED;
-    return push_session(r, &gpu_user_class);
+    gpu_session *s = r->self->state;
+    if (!s->ready && !(s->ready = rl_hos_event_create()))
+        return KR_OUT_OF_RESOURCE;
+    return rl_ipc_push_move(r, &s->ready->obj);
 }
+
+/** @brief GpuSession 21 (unnamed): the u32 user version; asks for its user session and signals the event of command 12 when it is ready. */
+static rl_result gpu_request_user(rl_ipc_req *r)
+{
+    uint32_t version;
+    if (!rl_srv_in(r, &version, 4))
+        return SF_RESULT_INVALID_HEADER;
+    gpu_session *s = r->self->state;
+    if (version != GPU_USER_VERSION || !s->ready)
+        return SF_RESULT_NOT_SUPPORTED;
+    rl_hos_event_signal(s->ready);
+    return KR_SUCCESS;
+}
+
+/** @brief GpuSession 22 (unnamed): no input; the user session command 21 readied. */
+static rl_result gpu_take_user(rl_ipc_req *r) { return push_session(r, &gpu_user_class); }
 
 static const rl_ipc_cmd gpu_session_cmds[] = {
     { 11, "GetUserVersionRange", gpu_user_versions },
     { 12, "OpenUser", gpu_open_user },
+    { 21, "RequestUser", gpu_request_user },
+    { 22, "TakeUser", gpu_take_user },
 };
 
 static const rl_ipc_class gpu_session_class = { "nn::gsv::GpuSession", gpu_session_cmds,
-                                                sizeof gpu_session_cmds / sizeof gpu_session_cmds[0], 0, NULL };
+                                                sizeof gpu_session_cmds / sizeof gpu_session_cmds[0], 0,
+                                                gpu_session_destroy };
 
 /** @brief CreateGpuSessionWithRemoteMemory: u64 version; a GpuSession. */
 static rl_result create_gpu_session(rl_ipc_req *r)
@@ -230,7 +270,20 @@ static rl_result create_gpu_session(rl_ipc_req *r)
     uint64_t version;
     if (!rl_srv_in(r, &version, 8))
         return SF_RESULT_INVALID_HEADER;
-    return push_session(r, &gpu_session_class);
+    gpu_session *s = calloc(1, sizeof *s);
+    if (!s)
+        return KR_OUT_OF_RESOURCE;
+    rl_ipc_object *o = rl_srv_object(&gpu_session_class, s);
+    if (!o) {
+        free(s);
+        return KR_OUT_OF_RESOURCE;
+    }
+    uint32_t h;
+    rl_result rc = rl_ipc_session_open(o, &h);
+    rl_ipc_object_unref(o);
+    if (rc == KR_SUCCESS)
+        r->out_move[r->n_out_move++] = h;
+    return rc;
 }
 
 static const rl_ipc_cmd user_session_cmds[] = {
