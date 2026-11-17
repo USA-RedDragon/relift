@@ -14,7 +14,8 @@
  * edge (sms_next_event).
  *
  * Inputs change at frame edges: the buttons held during frame n (counted
- * from 0 at power on) are the n-th entry of the input script.
+ * from 0 at power on) are the n-th entry of the input script, or, without
+ * one, what the input function gives at the edge before frame n.
  */
 #ifndef RELIFT_SMS_MACHINE_H
 #define RELIFT_SMS_MACHINE_H
@@ -84,6 +85,9 @@ typedef struct sms_pad {
     bool y_hold, x_hold;
 } sms_pad;
 
+/** @brief Gives the buttons held now (SMS_BUTTON_* bits), for a machine without an input script. */
+typedef uint32_t sms_input_fn(void *user);
+
 /** @brief Called at each frame edge with the number of the frame that just completed (0 for the first). */
 typedef void sms_frame_fn(void *user, uint64_t frame);
 
@@ -130,6 +134,9 @@ typedef struct sms {
     /** @brief The input script: the mask of frame n is inputs[n]; frames past the end use the last one. */
     const uint8_t *inputs;
     size_t input_count;
+    /** @brief With no input script: read at power on and at each frame edge. */
+    sms_input_fn *input;
+    void *input_user;
 
     sms_vdp vdp;
     sms_psg psg;

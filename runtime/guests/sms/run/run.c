@@ -68,6 +68,15 @@ static smsrun G;
 
 const rl_sms_stats *rl_sms_stats_get(void) { return &G.st; }
 
+static sms_input_fn *g_input;
+static void *g_input_user;
+
+void rl_sms_input(sms_input_fn *fn, void *user)
+{
+    g_input = fn;
+    g_input_user = user;
+}
+
 static FILE *g_trace;
 static uint64_t g_trace_count;
 
@@ -446,7 +455,9 @@ int rl_sms_run(const rl_sms_program *p, const uint8_t *inputs, size_t input_coun
         return 1;
     G.m.inputs = inputs;
     G.m.input_count = input_count;
-    G.m.buttons = input_count ? inputs[0] : 0;
+    G.m.input = g_input;
+    G.m.input_user = g_input_user;
+    G.m.buttons = input_count ? inputs[0] : g_input ? g_input(g_input_user) : 0;
     G.m.on_frame = on_frame;
     static const rl_guest_desc guest = {.name = "sms", .page_size = 0x400, .address_bits = 18, .tick_hz = 3579545};
     if (rl_core_init(&guest, rl_z80_cpu()) != 0)

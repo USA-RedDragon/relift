@@ -95,7 +95,7 @@ uint64_t sms_cycle_of(sms *m, uint64_t p)
 static uint32_t input_of(const sms *m, uint64_t frame)
 {
     if (!m->input_count)
-        return 0;
+        return m->input ? m->input(m->input_user) : 0;
     return m->inputs[frame < m->input_count ? frame : m->input_count - 1];
 }
 
@@ -141,7 +141,7 @@ static void frame_edge(void *user)
     uint32_t lines = sms_vdp_vlines(&m->vdp);
     memcpy(m->picture, m->vdp.pixels, sizeof m->picture);
     m->picture_lines = lines;
-    uint32_t done = input_of(m, m->frames);
+    uint32_t done = m->input_count ? input_of(m, m->frames) : m->buttons;
     if (is_gg(m)) {
         gg_poll(m, done);
     } else {

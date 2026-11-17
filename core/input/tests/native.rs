@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use relift_input::{Bindings, SwitchLayout, native_c_file, native_ports, switch_player};
+use relift_input::{
+    Bindings, SwitchLayout, native_c_file, native_ports, switch_player, touchpad_port,
+};
 
 fn runtime(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -80,6 +82,12 @@ fn handhelds_have_one_pad() {
         assert_eq!(s.ports()[0].controls.len(), controls, "{platform}");
     }
     assert_eq!(native_ports("nds").unwrap().ports()[1].id, "touch");
+    for (platform, controls) in [("sms", 8), ("gg", 7), ("sg1000", 7)] {
+        let s = native_ports(platform).unwrap();
+        assert_eq!(s.ports().len(), 1, "{platform}");
+        assert_eq!(s.ports()[0].controls.len(), controls, "{platform}");
+        assert!(touchpad_port(platform).is_none(), "{platform}");
+    }
     assert!(native_ports("ps1").is_err());
 }
 
@@ -123,4 +131,19 @@ fn generated_c_files_are_current() {
         "gba/ports_gen.c",
         native_c_file("gba", "rl_gba_ports").unwrap(),
     );
+    let mut sms = String::new();
+    for (platform, symbol) in [
+        ("sms", "rl_sms_ports"),
+        ("gg", "rl_gg_ports"),
+        ("sg1000", "rl_sg1000_ports"),
+    ] {
+        let f = native_c_file(platform, symbol).unwrap();
+        if sms.is_empty() {
+            sms.push_str(&f);
+        } else {
+            sms.push('\n');
+            sms.push_str(f.split_once("#include <relift/ports.h>\n\n").unwrap().1);
+        }
+    }
+    check_file("sms/ports_gen.c", sms);
 }

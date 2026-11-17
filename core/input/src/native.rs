@@ -166,6 +166,35 @@ fn handheld_pad(
     .labeled("Player 1")
 }
 
+/// The pad of a Sega 8-bit console: the directions, buttons 1 and 2, and
+/// `console` (the console's own buttons, such as Pause and Reset, or the
+/// Game Gear's Start).
+fn sega_pad(kind: &str, console: &[(&str, &str, &str)]) -> Port {
+    let mut rows: Vec<(&str, &str, &str)> = vec![
+        ("1", "Button 1", "gamepad:south,key:z"),
+        ("2", "Button 2", "gamepad:east,key:x"),
+    ];
+    rows.extend_from_slice(console);
+    rows.extend_from_slice(&[
+        ("up", "Up", "gamepad:dpad_up,gamepad:left_y+,key:up"),
+        ("down", "Down", "gamepad:dpad_down,gamepad:left_y-,key:down"),
+        ("left", "Left", "gamepad:dpad_left,gamepad:left_x-,key:left"),
+        (
+            "right",
+            "Right",
+            "gamepad:dpad_right,gamepad:left_x+,key:right",
+        ),
+    ]);
+    Port::new(
+        "p1",
+        kind,
+        rows.iter()
+            .map(|(id, label, d)| Control::new(id, B).labeled(label).bound(d))
+            .collect(),
+    )
+    .labeled("Player 1")
+}
+
 const AB: &[(&str, &str, &str)] = &[
     ("a", "A", "gamepad:east,key:x"),
     ("b", "B", "gamepad:south,key:z"),
@@ -206,7 +235,9 @@ const N64_PAD: &[Row] = &[
 
 /// The platform's native ports. Platforms: `switch` (eight players, each a
 /// Pro Controller, plus touch), `gb`, `gbc`, `gba` (one pad), `nds` (one
-/// pad plus touch) and `n64` (one controller).
+/// pad plus touch), `n64` (one controller), and `sms`, `gg` and `sg1000`
+/// (one pad with the console's own buttons: Pause and Reset on a Master
+/// System, Start on a Game Gear, Pause on an SG-1000).
 pub fn native_ports(platform: &str) -> Result<PortSet, Error> {
     let ports = match platform {
         "switch" => {
@@ -220,6 +251,21 @@ pub fn native_ports(platform: &str) -> Result<PortSet, Error> {
         "gbc" => vec![handheld_pad("Game Boy Color pad", AB, false, &[])],
         "gba" => vec![handheld_pad("Game Boy Advance pad", AB, true, &[])],
         "nds" => vec![handheld_pad("Nintendo DS pad", AB, true, XY), touch()],
+        "sms" => vec![sega_pad(
+            "Master System pad",
+            &[
+                ("pause", "Pause", "gamepad:start,key:enter"),
+                ("reset", "Reset", "gamepad:back,key:backspace"),
+            ],
+        )],
+        "gg" => vec![sega_pad(
+            "Game Gear pad",
+            &[("start", "Start", "gamepad:start,key:enter")],
+        )],
+        "sg1000" => vec![sega_pad(
+            "SG-1000 pad",
+            &[("pause", "Pause", "gamepad:start,key:enter")],
+        )],
         "n64" => vec![
             Port::new("p1", "Nintendo 64 controller", controls(&[N64_PAD], true))
                 .labeled("Player 1"),

@@ -10,6 +10,7 @@
 #include "core.h"
 
 #include <relift/audio.h>
+#include <relift/ports.h>
 #include <relift/settings.h>
 #include <relift/window.h>
 
@@ -218,6 +219,37 @@ static void to_rgb(host *H, const sms *m)
 {
     for (uint32_t i = 0; i < H->w * H->h; i++)
         sms_rgb(m, H->px[i], H->rgb + 3 * i);
+}
+
+extern const rl_port_decl rl_sms_ports[];
+extern const uint32_t rl_sms_ports_count;
+extern const rl_port_decl rl_gg_ports[];
+extern const uint32_t rl_gg_ports_count;
+
+/** @brief The controls of p1 in the order of the SMS_BUTTON_* bits; the console's start or pause, and reset. */
+static const char *const button_names[8] = {"up", "down", "left", "right", "1", "2", NULL, "reset"};
+
+typedef struct pad {
+    rl_control_ref ref[8];
+    bool resolved;
+    const char *start;
+} pad;
+
+static uint32_t read_pad(void *user)
+{
+    pad *p = user;
+    if (!p->resolved) {
+        p->resolved = true;
+        for (unsigned i = 0; i < 8; i++) {
+            const char *n = i == 6 ? p->start : button_names[i];
+            p->ref[i] = n ? rl_ports_find("p1", n) : RL_PORT_NONE;
+        }
+    }
+    uint32_t mask = 0;
+    for (unsigned i = 0; i < 8; i++)
+        if (p->ref[i] != RL_PORT_NONE && rl_ports_read(p->ref[i]) >= 0.5f)
+            mask |= 1u << i;
+    return mask;
 }
 
 static int on_frame(void *user, sms *m, uint64_t frame)
@@ -438,6 +470,12 @@ int rl_sms_main(const rl_sms_program *p, int argc, char **argv)
         fprintf(stderr, "relift-sms: cannot write %s\n", log);
         return 2;
     }
+    static pad P;
+    bool gg = p->system == SMS_SYSTEM_GG;
+    P.start = gg ? "start" : "pause";
+    rl_ports_declare(gg ? rl_gg_ports : rl_sms_ports, gg ? rl_gg_ports_count : rl_sms_ports_count);
+    if (!H.inputs)
+        rl_sms_input(read_pad, &P);
     if (H.insn_log)
         rl_sms_trace(H.insn_log, H.insn_count ? H.insn_count : UINT64_MAX);
     if (headless)
