@@ -810,27 +810,11 @@ impl Run<'_> {
         {
             found = w.ranges;
         }
-        let boots: Vec<Loc> = self
-            .env
-            .boot
+        if !found
             .iter()
-            .filter(|(_, o)| **o == Origin::Entry)
-            .map(|(l, _)| *l)
-            .collect();
-        for from in boots {
-            if found
-                .iter()
-                .any(|(dst, bytes)| addr.wrapping_sub(*dst) < bytes.len() as u32)
-            {
-                break;
-            }
-            let cached = self.env.boots.borrow().get(&from).cloned();
-            let run = cached.unwrap_or_else(|| {
-                let r = Rc::new(crate::conc::boot(self.env, from, Mode::Sys));
-                self.env.boots.borrow_mut().insert(from, r.clone());
-                r
-            });
-            found.extend(run.get(&(site.addr, site.thumb)).cloned());
+            .any(|(dst, bytes)| addr.wrapping_sub(*dst) < bytes.len() as u32)
+        {
+            found.extend(self.boot_bytes(site));
         }
         for (dst, bytes) in found {
             if bytes.len() >= 4 && addr.wrapping_sub(dst) < bytes.len() as u32 {
@@ -845,9 +829,67 @@ impl Run<'_> {
         }
     }
 
+    /// What the RAM around the target of the jump at `site` holds when a
+    /// run from a reset entry first makes it ([`crate::conc::boot`]).
+    fn boot_bytes(&self, site: Loc) -> Option<(u32, Vec<u8>)> {
+        let boots: Vec<Loc> = self
+            .env
+            .boot
+            .iter()
+            .filter(|(_, o)| **o == Origin::Entry)
+            .map(|(l, _)| *l)
+            .collect();
+        boots.into_iter().find_map(|from| {
+            let cached = self.env.boots.borrow().get(&from).cloned();
+            let run = cached.unwrap_or_else(|| {
+                let r = Rc::new(crate::conc::boot(self.env, from, Mode::Sys));
+                self.env.boots.borrow_mut().insert(from, r.clone());
+                r
+            });
+            run.get(&(site.addr, site.thumb)).cloned()
+        })
+    }
+
+    /// A jump from the image at `site` into RAM that copies already hold:
+    /// when the boot leaves other bytes at `addr` by the time it makes the
+    /// jump (a boot that stores two instructions over code it copied
+    /// before and runs them), those bytes become a copy too.
+    fn boot_rewrite(&mut self, site: Loc, addr: u32, copies: &[Loc]) {
+        if self.env.depth > 0 || site.copy.is_some() || !self.env.image.is_ram(addr) {
+            return;
+        }
+        let Some((dst, bytes)) = self.boot_bytes(site) else {
+            return;
+        };
+        let off = addr.wrapping_sub(dst) as usize;
+        let Some(want) = bytes.get(off..off + 4) else {
+            return;
+        };
+        let held = copies.iter().any(|l| {
+            l.copy.is_some_and(|c| {
+                self.env
+                    .image
+                    .read(Some(c), addr, 4)
+                    .is_some_and(|w| w.to_le_bytes() == want)
+            })
+        });
+        if !held {
+            self.out.copies.push(RamCopy {
+                site,
+                kind: CopyKind::Run,
+                src: None,
+                dst,
+                bytes: Arc::from(bytes.as_slice()),
+            });
+        }
+    }
+
     fn targets(&mut self, at: Loc, addr: u32, thumb: bool) -> Vec<Loc> {
         match locs(self.env.image, at, addr, thumb) {
-            Ok(v) => v,
+            Ok(v) => {
+                self.boot_rewrite(at, addr, &v);
+                v
+            }
             Err(k) => {
                 if k == UnresolvedKind::RamNoCopy {
                     self.out.outside.push(Loc::rom(addr, thumb));

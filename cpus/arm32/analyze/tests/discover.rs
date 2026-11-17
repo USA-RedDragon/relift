@@ -798,3 +798,57 @@ fn an_image_word_naming_code_in_a_copy_is_a_function_in_that_copy() {
         r.functions.keys().collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn code_a_boot_stores_over_its_own_copy_before_jumping_there_is_found() {
+    let mut m = Machine::new(Profile::V4t);
+    let ram = 0x02F0_0000;
+    let pool = BASE + 0x80;
+    let src = BASE + 0x100;
+    let after = BASE + 0x40;
+    let done = BASE + 0x140;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2004,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(
+        after,
+        &[
+            a_ldr_lit(13, after, pool + 8),
+            a_ldr_lit(5, after + 4, pool + 12),
+            a_ldr_lit(7, after + 8, pool + 16),
+            0xE897_0300,
+            0xE90D_0300,
+            0xE24D_F008,
+        ],
+    );
+    m.arm(
+        pool,
+        &[
+            src,
+            ram,
+            ram + 16,
+            done,
+            pool + 20,
+            0xE3A0_0002,
+            0xE12F_FF15,
+        ],
+    );
+    m.arm(src, &[A_MOV_R0_1, a_b(ram + 4, after), A_MOV_R0_1, A_BX_LR]);
+    m.arm(done, &[A_MOVEQ_R0_1, A_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    assert!(
+        r.instructions().keys().any(|l| l.addr == done),
+        "the code the boot stored runs on to {done:#x}"
+    );
+}
