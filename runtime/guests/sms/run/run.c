@@ -16,7 +16,8 @@
  * to a slot that now shows another bank, or to RAM that now holds other
  * bytes, unwinds to the run loop (RL_PEND_REDIRECT), which goes on at the
  * guest's pc through dispatch. Dispatch picks the function of the bank the
- * slot shows now, or of the RAM group whose bytes the RAM holds now. There
+ * slot shows now, or of the RAM group whose opcode bytes the work RAM or
+ * the cartridge RAM mapped there holds now. There
  * is no interpreter: the first instruction with no lifted body writes the
  * stop report and ends the run.
  */
@@ -34,6 +35,8 @@
 #define SHADOW_MAX 256u
 #define BANKS 256u
 #define SLOT 0x4000u
+/** @brief The lowest address code in RAM can have: cartridge RAM at 0x8000, work RAM at 0xC000. */
+#define RAM_LO 0x8000u
 
 typedef struct ram_index {
     const rl_sms_ram_group *g;
@@ -118,18 +121,20 @@ static bool ram_matches(const rl_sms_ram_group *g, uint16_t pc, uint32_t *at)
 
 static rl_fn find(uint16_t pc)
 {
-    if (pc < 0xC000) {
-        int32_t b = code_bank(pc);
-        if (b < 0 || (uint32_t)b >= BANKS)
+    int32_t b = code_bank(pc);
+    if (b >= 0) {
+        if ((uint32_t)b >= BANKS)
             return NULL;
         unsigned slot = pc < 0x0400 && G.m.mapper == SMS_MAPPER_SEGA ? 0 : pc >> 14;
         rl_fn *t = G.rom[b][slot];
         return t ? t[pc & (SLOT - 1u)] : NULL;
     }
+    if (pc < RAM_LO)
+        return NULL;
     for (uint32_t k = 0; k < G.ram_count; k++) {
         uint32_t at;
-        if (G.ram[k].fns[pc - 0xC000u] && ram_matches(G.ram[k].g, pc, &at))
-            return G.ram[k].fns[pc - 0xC000u];
+        if (G.ram[k].fns[pc - RAM_LO] && ram_matches(G.ram[k].g, pc, &at))
+            return G.ram[k].fns[pc - RAM_LO];
     }
     return NULL;
 }
@@ -142,7 +147,7 @@ static bool tag_ok(uint32_t tag, uint16_t pc)
         return true;
     if (slot == RL_SMS_SLOT_RAM) {
         uint32_t at;
-        return pc < 0xC000 || unit - 1u >= G.ram_count || ram_matches(G.ram[unit - 1u].g, pc, &at);
+        return pc < RAM_LO || unit - 1u >= G.ram_count || ram_matches(G.ram[unit - 1u].g, pc, &at);
     }
     if (pc >= 0xC000)
         return true;
@@ -403,7 +408,7 @@ static int add_rom(const rl_sms_rom_unit *u)
 static int add_ram(ram_index *x, const rl_sms_ram_group *g)
 {
     x->g = g;
-    x->fns = calloc(0x4000, sizeof(rl_fn));
+    x->fns = calloc(0x10000u - RAM_LO, sizeof(rl_fn));
     if (!x->fns)
         return -1;
     for (uint32_t i = 0; i < g->unit->fn_count; i++) {
@@ -411,8 +416,8 @@ static int add_ram(ram_index *x, const rl_sms_ram_group *g)
         uint64_t n = (e->flags & RL_FN_RANGE) ? e->guest_size : 1;
         for (uint64_t j = 0; j < n; j++) {
             uint64_t a = e->guest_addr + j;
-            if (a >= 0xC000 && a <= 0xFFFF && !x->fns[a - 0xC000])
-                x->fns[a - 0xC000] = e->fn;
+            if (a >= RAM_LO && a <= 0xFFFF && !x->fns[a - RAM_LO])
+                x->fns[a - RAM_LO] = e->fn;
         }
     }
     return 0;

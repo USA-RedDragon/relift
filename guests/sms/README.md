@@ -43,5 +43,9 @@ gives the code. Measured on the 26 test and homebrew ROMs of the Sega spike
 (commit 77bc5f0b plus this guest): 23 match ares on all 3000 frames
 (the CRC of every frame's VDP colours, VRAM and CRAM hashes), and their
 per-instruction logs (T-state, pc, registers, every port access) match
-ares for the first 300 frames; the other 3 match up to their stop at RAM
-code whose bytes change while it runs.
+ares for the first 300 frames; zexall and zexdoc match up to their stop at
+RAM code whose opcode bytes change while it runs (the forms come from
+discovery). Code in work RAM or cartridge RAM is lifted with its operands
+read when it runs. On a sample of 60 commercial Master System and Game Gear
+ROMs, 59 match ares on all 3000 frames; the other stops at RAM code whose
+opcode bytes change.

@@ -17,7 +17,7 @@ pub enum CodeSrc {
         /// The bank number, reduced to the ROM's size.
         bank: u32,
     },
-    /// Work RAM holding these instruction bytes.
+    /// Work RAM, or cartridge RAM, holding these instruction bytes.
     Ram {
         /// The instruction's bytes.
         bytes: Vec<u8>,
@@ -77,8 +77,9 @@ impl std::error::Error for TraceError {}
 impl Code {
     /// The executed Z80 instructions of an ares trace (`exec.tsv`: cpu, pc,
     /// region, offset, first frame, count, bytes): a ROM instruction is
-    /// in the bank of its file offset, less `header` copier bytes; a RAM
-    /// instruction has the bytes the trace shows. Every length comes from
+    /// in the bank of its file offset, less `header` copier bytes; an
+    /// instruction in work RAM or cartridge RAM has the bytes the trace
+    /// shows. Every length comes from
     /// the decoder. For development runs only: the build lifts the
     /// discovery report.
     ///
@@ -114,7 +115,7 @@ impl Code {
                         bank: off.saturating_sub(header) / 0x4000,
                     }
                 }
-                "ram" => CodeSrc::Ram {
+                "ram" | "sram" => CodeSrc::Ram {
                     bytes: bytes[..usize::from(len).min(bytes.len())].to_vec(),
                 },
                 _ => continue,
@@ -145,7 +146,8 @@ mod tests {
                    z80\t000000\trom\t200\t0\t1\tc3602cc5\n\
                    z80\t008000\trom\t8200\t3\t2\tcd0040ff\n\
                    z80\t00c100\tram\t100\t5\t9\t2103c034\n\
-                   z80\t00c103\tram\t103\t5\t9\t34c9ffff\n";
+                   z80\t00c103\tram\t103\t5\t9\t34c9ffff\n\
+                   z80\t0095d0\tsram\t15d0\t9\t2\t3a4c9fb7\n";
         let code = Code::from_exec_tsv(tsv, 0x200).expect("parses");
         let got: Vec<(Loc, u8)> = code.instructions.into_iter().collect();
         assert_eq!(
@@ -153,6 +155,15 @@ mod tests {
             vec![
                 (Loc::rom(0x0000, 0), 3),
                 (Loc::rom(0x8000, 2), 3),
+                (
+                    Loc {
+                        addr: 0x95D0,
+                        src: CodeSrc::Ram {
+                            bytes: vec![0x3A, 0x4C, 0x9F]
+                        }
+                    },
+                    3
+                ),
                 (
                     Loc {
                         addr: 0xC100,

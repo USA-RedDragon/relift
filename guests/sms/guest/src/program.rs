@@ -20,7 +20,7 @@ use relift_guest::{Frontend, LiftFailure};
 use relift_ir::{Block, Next};
 
 use crate::code::{Code, CodeSrc, Loc};
-use crate::frontend::{RAM, Sms, UnitTag, device_map};
+use crate::frontend::{CART_RAM, RAM, Sms, UnitTag, device_map};
 
 /// The C symbol of the interrupt entries' unit.
 pub const ENTRIES_SYMBOL: &str = "rl_unit_sms_entries";
@@ -307,7 +307,7 @@ pub fn lift(rom: &[u8], code: &Code, image_id: [u8; 32]) -> Lifted {
                     .or_default()
                     .insert(l.addr, n);
             }
-            CodeSrc::Ram { bytes } if l.addr >= RAM => {
+            CodeSrc::Ram { bytes } if l.addr >= CART_RAM => {
                 let forms = ram_at.entry(l.addr).or_default();
                 if !forms.iter().any(|f| same_opcodes(f, bytes)) {
                     forms.push(bytes.clone());

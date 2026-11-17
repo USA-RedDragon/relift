@@ -34,6 +34,8 @@ pub const SYNC_RET_SHIFT: u32 = 16;
 pub const SLOT_RAM: u8 = 3;
 /// The first address of work RAM.
 pub const RAM: u16 = 0xC000;
+/// The first address cartridge RAM can be mapped at.
+pub const CART_RAM: u16 = 0x8000;
 
 /// The code a unit holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -47,7 +49,7 @@ pub enum UnitTag {
         /// The slot.
         slot: u8,
     },
-    /// A group of code in work RAM.
+    /// A group of code in work RAM or cartridge RAM.
     Ram {
         /// The group's index.
         group: u32,
@@ -73,7 +75,7 @@ impl UnitTag {
         match self {
             UnitTag::Entries => false,
             UnitTag::Rom { slot, .. } => a < u64::from(RAM) && (a >> 14) as u8 == slot,
-            UnitTag::Ram { .. } => (u64::from(RAM)..0x1_0000).contains(&a),
+            UnitTag::Ram { .. } => (u64::from(CART_RAM)..0x1_0000).contains(&a),
         }
     }
 }
