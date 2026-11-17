@@ -33,6 +33,7 @@ typedef struct {
 /* one ARM7 measurement, in main RAM, handed over by address on PXI user channel 0 */
 typedef struct {
     u32 ci;       /* case index into cases7 */
+    u32 slot;     /* unused: kept so the clang build keeps its kernel addresses */
     u32 mainbuf;  /* main RAM data buffer (4 KiB) */
     u32 t16, t48; /* minimum timer ticks of 16 and 48 iterations */
     u32 kaddr;    /* where the kernel ran */
