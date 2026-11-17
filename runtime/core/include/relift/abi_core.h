@@ -200,6 +200,13 @@ RL_RUNTIME_API RL_COLD_CALL void rl_preempt(rl_ctx *c);
 
 /** @brief The interrupt hook's answer when no interrupt is taken. */
 #define RL_NO_IRQ UINT64_MAX
+/**
+ * @brief The interrupt hook's answer when it took the interrupt as a
+ * redirect (RL_PEND_REDIRECT) to its entry instead of a nested call: the
+ * host frames unwind and the run goes on at the entry, for a handler that
+ * does not return to the code it interrupted (it switches threads).
+ */
+#define RL_IRQ_REDIRECT (UINT64_MAX - 1u)
 
 /**
  * @brief Runs devices and events up to the CPU's cycle, sets a new budget

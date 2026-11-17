@@ -131,7 +131,7 @@ struct rl_event {
  * @brief The interrupt hook of a CPU layer or guest layer, called by
  * rl_sync. Returns the guest pc of the interrupt entry after doing the
  * guest-visible entry (saving next, masking, acknowledging, charging the
- * entry cycles to c's rl_time), or RL_NO_IRQ.
+ * entry cycles to c's rl_time), or RL_NO_IRQ, or RL_IRQ_REDIRECT after setting a redirect to the entry.
  */
 typedef uint64_t rl_irq_hook(rl_ctx *c, uint8_t *mem, uint64_t next);
 

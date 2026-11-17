@@ -65,6 +65,8 @@ int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
         if (pc == RL_NO_IRQ)
             return RL_OK;
         k->sched->stats.irqs++;
+        if (pc == RL_IRQ_REDIRECT)
+            return RL_PENDING;
         if (k->irq_depth >= k->sched->cfg.irq_depth)
             return rl_guest_fatal(c, "sched", "%u interrupt entries are open at once; a handler neither returns nor leaves the interrupt state", k->irq_depth);
         rl_fn fn = rl_dispatch_find_ctx(c, pc);

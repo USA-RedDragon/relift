@@ -380,7 +380,9 @@ static uint32_t irq_frame(rl_nds_arm *k, uint32_t next)
 
 /**
  * @brief Takes an interrupt at the sync point before next: through the BIOS's handler with the high vectors, or at the
- * program's own IRQ vector in the instruction TCM with the ARM9's low vectors.
+ * program's own IRQ vector in the instruction TCM with the ARM9's low vectors. The program's handler returns with its
+ * own exception return, often to another thread, so it runs as a redirect: the host frames unwind and the run goes on
+ * at the vector.
  */
 static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
 {
@@ -397,7 +399,8 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
         rl_arm32_exception(c, RL_ARM32_IRQ, (uint32_t)next + 4u);
         k->i = 1;
         c->t = 0;
-        return k->vectors + 0x18u;
+        rl_arm32_redirect(c, k->vectors + 0x18u);
+        return RL_IRQ_REDIRECT;
     }
     uint32_t h = irq_frame(k, (uint32_t)next);
     rl_arm32_call(c, c->r[14]);
