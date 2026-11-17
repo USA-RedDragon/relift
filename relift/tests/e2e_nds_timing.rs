@@ -1,22 +1,19 @@
 //! The Nintendo DS CPU timing against the consoles: the timing test ROM of
-//! `check/nds-timing` (built at test time with clang and ld.lld; every
-//! timing kernel of both CPUs, measured as on the consoles) goes through
-//! `relift import`, `relift build` and a headless run, which prints each
-//! case's cycles per loop iteration through the no$gba debug port, and
+//! `check/nds-timing` goes through `relift import`, `relift build` and a
+//! headless run, which prints each case's cycles per loop iteration, and
 //! `check/nds-timing/compare.py` checks every case against the three
 //! consoles' results in `hw.csv` (and the open ones against `open.csv`).
-//! Skipped with a note when clang, ld.lld, llvm-objcopy or python3 is not
-//! on `PATH`.
+//!
+//! The ROM is the devkitPro build that ran on the consoles (`sdk/`, built
+//! at test time with `DEVKITARM` set). Without devkitPro it is the clang
+//! build (`build.py`, with clang, ld.lld and llvm-objcopy), which runs every
+//! case but the ones whose code is copied to the instruction TCM, and
+//! `compare.py --clang` leaves those out. Skipped with a note when neither
+//! can be built, or python3 is not on `PATH`.
 
 mod tiny;
 
-use std::path::Path;
-
-fn tools() -> bool {
-    ["clang", "ld.lld", "llvm-objcopy", "python3"]
-        .iter()
-        .all(|t| relift_build::find_tool(t).is_some())
-}
+use std::path::{Path, PathBuf};
 
 fn ok(out: &std::process::Output, what: &str) {
     assert!(
@@ -27,14 +24,56 @@ fn ok(out: &std::process::Output, what: &str) {
     );
 }
 
-#[test]
-fn every_timing_case_runs_as_on_the_consoles() {
-    if !tools() {
-        eprintln!("skipped: clang, ld.lld, llvm-objcopy or python3 is not on PATH");
-        return;
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("the copy dir is creatable");
+    for e in std::fs::read_dir(from).expect("the dir is readable") {
+        let e = e.expect("the entry is readable");
+        let dst = to.join(e.file_name());
+        if e.file_type().expect("the entry has a type").is_dir() {
+            copy_dir(&e.path(), &dst);
+        } else {
+            let bytes = std::fs::read(e.path()).expect("the file is readable");
+            relift_cache::write_if_changed(&dst, &bytes).expect("the file is writable");
+        }
     }
-    let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
-    let root = tiny::scratch("e2e-nds-timing");
+}
+
+/// The devkitPro build of the ROM, from a copy of `check` under `root`, or
+/// `None` without devkitPro.
+fn sdk_rom(check: &Path, root: &Path) -> Option<PathBuf> {
+    let arm = PathBuf::from(std::env::var_os("DEVKITARM")?);
+    let pro = std::env::var_os("DEVKITPRO")
+        .map(PathBuf::from)
+        .or_else(|| arm.parent().map(Path::to_path_buf))?;
+    if !arm.join("bin").is_dir() || relift_build::find_tool("make").is_none() {
+        return None;
+    }
+    let src = root.join("src");
+    copy_dir(check, &src);
+    let path = std::env::join_paths([pro.join("tools/bin"), arm.join("bin")].into_iter().chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .expect("PATH joins");
+    let out = relift_proc::command("make")
+        .args(["-C", "sdk", "relift-hwtest-ntr.nds"])
+        .current_dir(&src)
+        .env("DEVKITPRO", &pro)
+        .env("DEVKITARM", &arm)
+        .env("PATH", path)
+        .output()
+        .expect("make runs");
+    ok(&out, "the devkitPro build");
+    Some(src.join("sdk/relift-hwtest-ntr.nds"))
+}
+
+/// The clang build of the ROM, or `None` without its tools.
+fn clang_rom(check: &Path, root: &Path) -> Option<PathBuf> {
+    if !["clang", "ld.lld", "llvm-objcopy"]
+        .iter()
+        .all(|t| relift_build::find_tool(t).is_some())
+    {
+        return None;
+    }
     let rom = root.join("rom/timing.nds");
     std::fs::create_dir_all(root.join("rom")).expect("the ROM dir is creatable");
     let out = relift_proc::command("python3")
@@ -44,6 +83,29 @@ fn every_timing_case_runs_as_on_the_consoles() {
         .output()
         .expect("python3 runs");
     ok(&out, "build.py");
+    Some(rom)
+}
+
+#[test]
+fn every_timing_case_runs_as_on_the_consoles() {
+    if relift_build::find_tool("python3").is_none() {
+        eprintln!("skipped: python3 is not on PATH");
+        return;
+    }
+    let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
+    let root = tiny::scratch("e2e-nds-timing");
+    let (rom, clang) = match sdk_rom(&check, &root) {
+        Some(r) => (r, false),
+        None => match clang_rom(&check, &root) {
+            Some(r) => (r, true),
+            None => {
+                eprintln!(
+                    "skipped: neither devkitPro (DEVKITARM) nor clang, ld.lld and llvm-objcopy"
+                );
+                return;
+            }
+        },
+    };
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let cache = root.join("cache").display().to_string();
@@ -58,7 +120,13 @@ fn every_timing_case_runs_as_on_the_consoles() {
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
     let host = root.join("cache/projects/game/build/host");
     let out = relift_proc::command(host.join("game"))
-        .args(["--headless", "--max-ticks", "20000000000"])
+        .args([
+            "--headless",
+            "--max-ticks",
+            "40000000000",
+            "--until-debug",
+            "# end",
+        ])
         .output()
         .expect("the game runs");
     ok(&out, "the test ROM");
@@ -70,11 +138,11 @@ fn every_timing_case_runs_as_on_the_consoles() {
     assert!(csv.contains("# end"), "the run ends: {csv}");
     let run = root.join("run.csv");
     relift_cache::write_if_changed(&run, csv.as_bytes()).expect("the run is writable");
-    let out = relift_proc::command("python3")
-        .arg("-I")
-        .arg(check.join("compare.py"))
-        .arg(&run)
-        .output()
-        .expect("python3 runs");
+    let mut compare = relift_proc::command("python3");
+    compare.arg("-I").arg(check.join("compare.py")).arg(&run);
+    if clang {
+        compare.arg("--clang");
+    }
+    let out = compare.output().expect("python3 runs");
     ok(&out, "compare.py");
 }
