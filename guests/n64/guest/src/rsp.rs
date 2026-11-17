@@ -702,6 +702,8 @@ struct Timing {
     mid: State,
     after: State,
     cost: u32,
+    /// The cycles of the block's first word: those before its delay slot.
+    first: u32,
 }
 
 /// The pipeline timing of the blocks of an image, for blocks entered in
@@ -752,7 +754,8 @@ fn plan_pipe(blocks: &Blocks, ws: &impl pipe::Words) -> BTreeMap<u64, Timing> {
                 })
         });
         let mut st = entry;
-        let mut cost = st.word(w, ws);
+        let first = st.word(w, ws);
+        let mut cost = first;
         let mid = st;
         if b.len == 8 {
             cost += st.word(pipe::next(w), ws);
@@ -764,6 +767,7 @@ fn plan_pipe(blocks: &Blocks, ws: &impl pipe::Words) -> BTreeMap<u64, Timing> {
                 mid,
                 after: st,
                 cost,
+                first,
             },
         );
     }
@@ -794,6 +798,52 @@ fn static_exits(b: &Block) -> Vec<(u64, bool)> {
     }
 }
 
+/// The first SP or DP register access or BREAK in `b`.
+fn slot_cop0(b: &Block) -> Option<usize> {
+    b.insts.iter().position(|i| {
+        matches!(&i.op, Op::Intrinsic(c) if matches!(c.name, "rsp_mfc0" | "rsp_mtc0" | "rsp_break"))
+    })
+}
+
+/// The SP and DP registers a delay slot reads or writes, and its BREAK,
+/// see the time after the branch's own cycles: ticks `first` of the
+/// block's cycles in front of the first such access in `b`, a block with a
+/// delay slot whose other ticks leave them out.
+fn tick_before_slot_cop0(b: &mut Block, first: u32) {
+    let Some(at) = slot_cop0(b) else {
+        return;
+    };
+    let old = std::mem::take(&mut b.insts);
+    let mut map: Vec<Value> = Vec::with_capacity(old.len());
+    for (i, inst) in old.into_iter().enumerate() {
+        if i == at {
+            b.insts.push(Inst {
+                op: Op::Tick(first),
+                width: None,
+            });
+        }
+        map.push(Value(b.insts.len() as u32));
+        let op = inst.op.map_values(&|v: &Value| map[v.index()]);
+        b.insts.push(Inst {
+            op,
+            width: inst.width,
+        });
+    }
+    b.exit.next = match b.exit.next {
+        Next::Dynamic(v) => Next::Dynamic(map[v.index()]),
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => Next::Select {
+            cond: map[cond.index()],
+            taken,
+            not_taken,
+        },
+        next => next,
+    };
+}
+
 /// `v` as a 64-bit constant of `b`.
 fn konst64(b: &mut Block, v: u64) -> Value {
     push(b, Op::Const(Konst::new(u128::from(v))), Some(Width::W64))
@@ -822,7 +872,8 @@ fn apply_pipe(
         unmet += usize::from(!met);
         Some(d + i64::from(taken))
     };
-    let base = i64::from(t.cost);
+    let slot_tick = b.len == 8 && t.first > 0 && slot_cop0(b).is_some();
+    let base = i64::from(t.cost) - if slot_tick { i64::from(t.first) } else { 0 };
     let mut ticks: Option<(Option<Value>, i64, i64)> = None;
     let mut handoff = false;
     match b.exit.next {
@@ -881,7 +932,7 @@ fn apply_pipe(
             };
             push(b, Op::intrinsic("rsp_tick", vec![n]), None);
         }
-        None => b.insts[tick].op = Op::Tick(t.cost),
+        None => b.insts[tick].op = Op::Tick(base as u32),
     }
     let [a, x, d] = t.after.pack();
     if brk {
@@ -910,6 +961,9 @@ fn apply_pipe(
         };
         let (a, x, d) = (konst64(b, a), konst64(b, x), konst64(b, d));
         push(b, Op::intrinsic("rsp_pipe", vec![target, a, x, d, k]), None);
+    }
+    if slot_tick {
+        tick_before_slot_cop0(b, t.first);
     }
     b.insts.extend(sync.flatten());
     unmet
@@ -1148,6 +1202,19 @@ pub fn images_c(images: &[Image]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_delay_slot_reads_sp_after_the_branch_cycles() {
+        let mut b = Rsp.lift_at(0xfcc, 0x1560_ffff, 0x400b_3000).expect("lifts");
+        tick_before_slot_cop0(&mut b, 2);
+        b.verify().expect("verifies");
+        let t = b
+            .insts
+            .iter()
+            .position(|i| matches!(i.op, Op::Tick(2)))
+            .expect("the branch's tick");
+        assert_eq!(slot_cop0(&b), Some(t + 1));
+    }
     use super::*;
 
     fn ops(b: &Block) -> Vec<&Op> {
