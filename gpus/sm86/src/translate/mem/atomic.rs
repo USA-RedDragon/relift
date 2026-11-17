@@ -1,5 +1,6 @@
 //! Atomics: ATOM and ATOMG (global, through buffer device addresses), RED
-//! (the same without a result) and ATOMS (shared).
+//! (the same without a result) and ATOMS (shared, with its `POPC.INC`
+//! form).
 //!
 //! Operations SPIR-V has no instruction for (INC, DEC, and the float ones)
 //! run as a compare-exchange loop. The generic `ATOM` is treated as global
@@ -148,6 +149,9 @@ fn red(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 fn atoms(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.has("POPC") {
+        return atoms_popc_inc(c, i);
+    }
     let s = spec_of(i)?;
     let cas = s.op == Aop::Cas;
     if s.ty.wide() || s.ty == Ty::F32 {
@@ -172,6 +176,23 @@ fn atoms(c: &mut Ctx, i: &Inst) -> Res<()> {
     let scope = c.m.c_u32(SCOPE_WORKGROUP);
     let old = rmw(c, ptr, scope, &s, u, xv, yv);
     write_old(c, d, &[old])
+}
+
+/// `ATOMS.POPC.INC`: the lanes that name one word add how many they are
+/// to it, which is each adding one (measured on an RTX 3090). What the
+/// destination gets is not known, so only the form without one is taken.
+fn atoms_popc_inc(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if !matches!(i.ops.first(), Some(Operand::Reg(255, _))) || i.ops.len() != 2 {
+        return bad("ATOMS.POPC.INC with a result");
+    }
+    let a = addr_operand(i, 1)?;
+    let addr = c.scratch_address(&a, 4, Space::Shared)?;
+    let ptr = c.scratch_word(Space::Shared, addr, 0);
+    let u = c.u32t();
+    let scope = c.m.c_u32(SCOPE_WORKGROUP);
+    let sem = c.m.c_u32(0);
+    c.m.emit(op::ATOMIC_I_INCREMENT, u, &[ptr, scope, sem]);
+    Ok(())
 }
 
 /// The old value, as words, of the atomic `s` at global address `addr`.

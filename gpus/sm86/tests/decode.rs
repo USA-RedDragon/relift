@@ -1266,3 +1266,30 @@ fn misc_control_and_conversion() {
         .f(84, 3, 2);
     assert_eq!(t.text(0), "F2I.FTZ.U64.TRUNC R4, R4");
 }
+
+/// `ATOMS.POPC.INC.32`, as nvdisasm prints the words a driver compiles a
+/// shared `atomicAdd(x, 1)` with no result to.
+#[test]
+fn atoms_popc_inc() {
+    for (w, text) in [
+        (
+            0x0011_e400_0d00_403f_0000_0000_03ff_7f8cu128,
+            "ATOMS.POPC.INC.32 RZ, [R3.X4+URZ]",
+        ),
+        (
+            0x0011_e200_0d00_c03f_0000_0000_0eff_7f8c,
+            "ATOMS.POPC.INC.32 RZ, [R14.X16+URZ]",
+        ),
+        (
+            0x0005_e200_0d00_003f_0000_0400_0bff_7f8c,
+            "ATOMS.POPC.INC.32 RZ, [R11+URZ+0x4]",
+        ),
+    ] {
+        assert_eq!(B(w).text(0), text);
+    }
+    assert!(
+        B(0x0011_e400_0d00_423f_0000_0000_03ff_7f8c)
+            .text(0)
+            .contains("type")
+    );
+}

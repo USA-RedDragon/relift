@@ -388,6 +388,37 @@ fn atom_global(d: &mut D, name: &'static str, cas: bool) -> Result<()> {
     Ok(())
 }
 
+/// `ATOMS.POPC.INC.32 Rd, [Ra.stride+URb+imm]`: a shared memory increment
+/// with no source register (form 0xf8c).
+fn atoms_popc_inc(d: &mut D) -> Result<()> {
+    if d.get(87, 5) != 0x1a {
+        return d.err("atoms popc op");
+    }
+    if d.get(73, 2) != 0 {
+        return d.err("atoms popc type");
+    }
+    d.i.mnemonic = "ATOMS";
+    d.m("POPC");
+    d.m("INC");
+    d.m("32");
+    let dst = d.dst();
+    d.op(dst);
+    let r = d.get(24, 8);
+    let st = STRIDE[d.get(78, 2) as usize];
+    let mut parts = Vec::new();
+    if r != 255 || !st.is_empty() {
+        parts.push(if st.is_empty() {
+            rn(r)
+        } else {
+            format!("{}.{st}", rn(r))
+        });
+    }
+    parts.push(un(d.get(64, 6)));
+    let s = bracket(&parts, d.get(40, 24), 24);
+    d.sym(s);
+    Ok(())
+}
+
 fn attr_index(d: &D) -> Option<Box<Operand>> {
     if d.get(24, 8) == 255 {
         None
@@ -484,6 +515,10 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
         0x18c | 0x18d => {
             let cas = op == 0x18d;
             let f = d.get(0, 12);
+            if f == 0xf8c {
+                atoms_popc_inc(d)?;
+                return Ok(true);
+            }
             let ur = f == 0x98c;
             if !(ur || f == 0x38c && !cas || f == 0x38d && cas) {
                 return d.err("form");
