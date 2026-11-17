@@ -11,7 +11,8 @@
 //!   header, if any, and its code), named by the hex SHA-256 of those bytes;
 //! * `failed.txt`, written here: one line per program the translator
 //!   refused, the key and the reason;
-//! * `table.rlspv`, written here: the translations (`Table::to_bytes`);
+//! * `table.rlspv`, written here: the translations, each module a zstd frame
+//!   (`Table::to_compressed_bytes` at [`ZSTD_LEVEL`]);
 //! * `table.rlspi`, written here: what the runtime must know of each
 //!   translation beyond its SPIR-V (see [`interfaces`]).
 //!
@@ -27,6 +28,10 @@ use relift_gpu_sm86::translate::build::{Input, Table, translate_set};
 use relift_gpu_sm86::translate::{DeviceCaps, HostProfile, Options};
 
 use crate::import::BoxError;
+
+/// The zstd level of the translation table: near the ratio of the highest
+/// levels on SPIR-V at a fraction of their time.
+const ZSTD_LEVEL: i32 = 9;
 
 /// The folder in the build directory.
 pub const DIR: &str = "shaders";
@@ -168,7 +173,7 @@ pub fn build(out: &Path, cdir: &Path, jobs: usize) -> Result<Built, BoxError> {
         *refused.entry(reason_kind(why)).or_insert(0) += 1;
     }
     relift_cache::write_if_changed(&dir.join("failed.txt"), failed.as_bytes())?;
-    relift_cache::write_if_changed(&dir.join(TABLE), &table.to_bytes())?;
+    relift_cache::write_if_changed(&dir.join(TABLE), &table.to_compressed_bytes(ZSTD_LEVEL)?)?;
     relift_cache::write_if_changed(&dir.join(INTERFACES), &interfaces(&table))?;
     let c_file = cdir.join("shaders.c");
     relift_cache::write_if_changed(&c_file, c_text(&dir).as_bytes())?;

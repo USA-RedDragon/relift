@@ -7,7 +7,10 @@
  * names; its key is the SHA-256 of those bytes. Translations come from the
  * tables relift build wrote to the build's shader folder (table.rlspv, the
  * SPIR-V, read a module at a time; table.rlspi, what each translation's
- * interface needs), both sorted by key. A program the table lacks is written
+ * interface needs), both sorted by key. table.rlspv is "RLSPV002" (each
+ * module a Zstandard frame; entries of the key, the frame's u64 offset, its
+ * u32 length and the module's u32 length in words) or the older uncompressed
+ * "RLSPV001" (entries of the key, a u32 offset and the length in words). A program the table lacks is written
  * to <folder>/programs/<key>.bin when the game sets it, and the host
  * device's capabilities to <folder>/device.json (RELIFT_NVN_SHADERS
  * overrides the folder), so the next relift build translates it for that
@@ -16,6 +19,8 @@
 #include "nvn_priv.h"
 
 #include <relift/datacheck.h>
+
+#include "zstd.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -35,6 +40,7 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #define TABLE_HEAD 12u
 #define TABLE_ENTRY 40u
+#define TABLE_ENTRY_ZSTD 48u
 
 const char *nvn_shader_dir(void)
 {
@@ -49,6 +55,8 @@ static int hexv(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c 
 
 static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 
+static uint64_t le64(const uint8_t *p) { return le32(p) | (uint64_t)le32(p + 4) << 32; }
+
 /** @brief A table file: its head (magic, count, entries) in memory, the file for the rest. */
 typedef struct table {
     bool tried;
@@ -58,6 +66,16 @@ typedef struct table {
     /** @brief For the interface table: all of it (the records follow the entries). */
     uint8_t *all;
     size_t len;
+    /**
+     * @brief For the SPIR-V table: each entry's offset in 64 bits. The file
+     * keeps 32 (relift-gpu-sm86's Table::to_bytes) and lays the modules out
+     * back to back in entry order, so the offsets are the running sum of the
+     * lengths; each stored offset must equal the sum's low 32 bits.
+     */
+    uint64_t *at;
+    /** @brief Bytes per entry: 48 for a compressed table, else 40. */
+    uint32_t entry;
+    bool zstd;
 } table;
 
 static table g_spv, g_iface;
@@ -83,13 +101,17 @@ static table *open_table(table *t, const char *name, const char *magic, bool who
     uint8_t h[TABLE_HEAD];
     if (!f)
         return NULL;
-    if (fread(h, 1, TABLE_HEAD, f) != TABLE_HEAD || memcmp(h, magic, 8)) {
+    bool read = fread(h, 1, TABLE_HEAD, f) == TABLE_HEAD;
+    bool zstd = read && !strcmp(magic, "RLSPV001") && !memcmp(h, "RLSPV002", 8);
+    if (!read || (!zstd && memcmp(h, magic, 8))) {
         rl_log(RL_LOG_ERROR, "nvn", "%s is not a shader table", path);
         fclose(f);
         return NULL;
     }
     uint32_t n = le32(h + 8);
-    size_t hb = TABLE_HEAD + (size_t)n * TABLE_ENTRY;
+    t->zstd = zstd;
+    t->entry = zstd ? TABLE_ENTRY_ZSTD : TABLE_ENTRY;
+    size_t hb = TABLE_HEAD + (size_t)n * t->entry;
     if (whole) {
         if (!seek(f, 0) || fseek(f, 0, SEEK_END) != 0) {
             fclose(f);
@@ -116,6 +138,27 @@ static table *open_table(table *t, const char *name, const char *magic, bool who
             rl_log(RL_LOG_ERROR, "nvn", "cannot read %s", path);
             return NULL;
         }
+        t->at = malloc(((size_t)n + 1) * sizeof *t->at);
+        uint64_t at = hb;
+        for (uint32_t i = 0; t->at && zstd && i < n; i++)
+            t->at[i] = le64(t->head + TABLE_HEAD + (size_t)i * t->entry + 32);
+        for (uint32_t i = 0; t->at && !zstd && i < n; i++) {
+            const uint8_t *e = t->head + TABLE_HEAD + (size_t)i * TABLE_ENTRY;
+            if (le32(e + 32) != (uint32_t)at) {
+                rl_log(RL_LOG_ERROR, "nvn", "%s: entry %u is not where the entries before it end", path, i);
+                free(t->at);
+                t->at = NULL;
+                break;
+            }
+            t->at[i] = at;
+            at += 4ull * le32(e + 36);
+        }
+        if (!t->at) {
+            free(t->head);
+            t->head = NULL;
+            fclose(f);
+            return NULL;
+        }
         t->f = f;
     }
     t->n = n;
@@ -135,7 +178,7 @@ static const uint8_t *table_find(const table *t, const char *key)
     uint32_t lo = 0, hi = t->n;
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2;
-        const uint8_t *e = t->head + TABLE_HEAD + (size_t)mid * TABLE_ENTRY;
+        const uint8_t *e = t->head + TABLE_HEAD + (size_t)mid * t->entry;
         int c = memcmp(e, k, 32);
         if (!c)
             return e;
@@ -253,11 +296,20 @@ uint32_t *nvn_shader_spirv(const char *key, size_t *words)
     *words = 0;
     if (!e)
         return NULL;
-    uint32_t at = le32(e + 32), n = le32(e + 36);
+    uint64_t at = g_spv.at[(size_t)(e - g_spv.head - TABLE_HEAD) / g_spv.entry];
+    uint32_t n = g_spv.zstd ? le32(e + 44) : le32(e + 36);
+    uint32_t stored = g_spv.zstd ? le32(e + 40) : 4 * n;
     uint32_t *w = malloc((size_t)n * 4);
+    uint8_t *frame = g_spv.zstd ? malloc(stored) : (uint8_t *)w;
     pthread_mutex_lock(&g_lock);
-    bool ok = w && seek(g_spv.f, at) && fread(w, 4, n, g_spv.f) == n;
+    bool ok = w && frame && seek(g_spv.f, at) && fread(frame, 1, stored, g_spv.f) == stored;
     pthread_mutex_unlock(&g_lock);
+    if (ok && g_spv.zstd) {
+        size_t got = ZSTD_decompress(w, (size_t)n * 4, frame, stored);
+        ok = !ZSTD_isError(got) && got == (size_t)n * 4;
+    }
+    if (g_spv.zstd)
+        free(frame);
     if (!ok) {
         free(w);
         rl_log(RL_LOG_ERROR, "nvn", "cannot read translation %s from %s/table.rlspv", key, nvn_shader_dir());

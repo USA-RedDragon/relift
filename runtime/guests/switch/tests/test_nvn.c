@@ -6,6 +6,12 @@
 #include "nvn/nvn_priv.h"
 #include "tc.h"
 
+#include <ftw.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 #define RET 0x7000000ull
 
 static uint64_t call(rl_ctx *c, rl_fn_t *fn, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
@@ -157,4 +163,59 @@ TEST(nvn_viewport_matches_driver_rows)
     CHECK_EQ((int64_t)host_row(full, -1), 1080);
     CHECK_EQ(nvn_window_top(NVN_ORIGIN_UPPER_LEFT, 1080, 40, 200), 40);
     CHECK_EQ(nvn_window_top(NVN_ORIGIN_LOWER_LEFT, 1080, 40, 200), 840);
+}
+
+static void put_le(uint8_t *p, uint64_t v, unsigned n)
+{
+    for (unsigned i = 0; i < n; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static int rm_entry(const char *path, const struct stat *st, int flag, struct FTW *ftw)
+{
+    (void)st;
+    (void)flag;
+    (void)ftw;
+    return remove(path);
+}
+
+TEST(nvn_reads_compressed_translation_table)
+{
+    /* One module of three words, stored as a zstd frame with one raw block. */
+    static const uint32_t words[3] = { 0x07230203u, 0x00010600u, 0xdeadbeefu };
+    uint8_t frame[4 + 2 + 3 + sizeof words] = { 0x28, 0xb5, 0x2f, 0xfd, 0x20, sizeof words };
+    put_le(frame + 6, (sizeof words << 3) | 1, 3);
+    memcpy(frame + 9, words, sizeof words);
+    uint8_t table[12 + 48 + sizeof frame + 4];
+    memset(table, 0, sizeof table);
+    memcpy(table, "RLSPV002", 8);
+    put_le(table + 8, 1, 4);
+    for (int i = 0; i < 32; i++)
+        table[12 + i] = (uint8_t)(0xa0 + i);
+    put_le(table + 44, 60, 8);
+    put_le(table + 52, sizeof frame, 4);
+    put_le(table + 56, 3, 4);
+    memcpy(table + 60, frame, sizeof frame);
+    const char *base = getenv("TMPDIR");
+    char dir[PATH_MAX], path[PATH_MAX + 16];
+    snprintf(dir, sizeof dir, "%s/relift-rlspv-XXXXXX", base && *base ? base : "/tmp");
+    CHECK(mkdtemp(dir) != NULL);
+    snprintf(path, sizeof path, "%s/table.rlspv", dir);
+    FILE *f = fopen(path, "wb");
+    CHECK(f != NULL);
+    CHECK_EQ(fwrite(table, 1, sizeof table, f), sizeof table);
+    fclose(f);
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    char key[65];
+    for (int i = 0; i < 32; i++)
+        snprintf(key + 2 * i, 3, "%02x", 0xa0 + i);
+    size_t n = 0;
+    uint32_t *got = nvn_shader_spirv(key, &n);
+    CHECK(got != NULL);
+    CHECK_EQ(n, 3);
+    CHECK(got && memcmp(got, words, sizeof words) == 0);
+    free(got);
+    key[0] = 'b';
+    CHECK(nvn_shader_spirv(key, &n) == NULL);
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
