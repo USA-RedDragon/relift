@@ -244,7 +244,11 @@ impl<'a> Driver<'a> {
     }
 
     fn resolve_irq(&mut self) {
-        let addrs: Vec<u32> = self.irq.iter().copied().collect();
+        let mut addrs: Vec<u32> = self.irq.iter().copied().collect();
+        if let Some((e, m)) = self.image.platform.irq_entry() {
+            self.mirror_vectors(e, m);
+            addrs.push(e);
+        }
         for v in addrs {
             if let Ok(ls) = func::locs(&self.image, Loc::rom(v & !3, false), v & !3, false) {
                 for l in ls {
@@ -436,6 +440,40 @@ impl<'a> Driver<'a> {
             added = true;
         }
         added
+    }
+
+    /// The exception vectors at the platform's IRQ entry `e` that copies
+    /// put at its mirror `m`: each copy that holds `m` gets a twin at
+    /// `e`, from the copy's bytes at `m - e` on, so the vectors are lifted
+    /// where the CPU runs them (a boot stub and the code that replaces it
+    /// each give one).
+    fn mirror_vectors(&mut self, e: u32, m: u32) {
+        let back = m.wrapping_sub(e);
+        let mut twins = Vec::new();
+        for c in self.image.copies_at(m) {
+            let src = &self.image.copies[usize::from(c)];
+            let from = back.max(src.dst);
+            let bytes = &src.bytes[(from - src.dst) as usize..];
+            let dst = from.wrapping_sub(back);
+            if !self
+                .image
+                .copies
+                .iter()
+                .any(|o| o.dst == dst && *o.bytes == *bytes)
+            {
+                twins.push(RamCopy {
+                    site: src.site,
+                    kind: CopyKind::Run,
+                    src: Some(from),
+                    dst,
+                    bytes: Arc::from(bytes),
+                });
+            }
+        }
+        for t in twins {
+            self.image.copies.push(t);
+            self.version += 1;
+        }
     }
 
     /// The words the copies that hold `a` keep there, as their own code

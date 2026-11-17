@@ -12,6 +12,7 @@ struct Machine {
     profile: Profile,
     segments: Vec<(u32, Vec<u8>)>,
     external: Option<(u32, u32)>,
+    irq_entry: Option<(u32, u32)>,
     writable: bool,
 }
 
@@ -21,6 +22,7 @@ impl Machine {
             profile,
             segments: vec![(BASE, vec![0; 0x1000])],
             external: None,
+            irq_entry: None,
             writable: false,
         }
     }
@@ -85,6 +87,10 @@ impl Platform for Machine {
 
     fn code_addr(&self, addr: u32) -> bool {
         self.image(addr, 1).is_some()
+    }
+
+    fn irq_entry(&self) -> Option<(u32, u32)> {
+        self.irq_entry
     }
 
     fn irq_vector(&self, _: u32) -> bool {
@@ -714,6 +720,42 @@ fn a_callback_only_an_earlier_run_of_its_wrapper_called_is_a_function() {
     let r = m.run(all(), arm(BASE));
     assert!(
         r.functions.contains_key(&arm(cb)),
+        "{:?}",
+        r.functions.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn vectors_a_boot_copies_to_a_mirror_of_the_irq_entry_are_an_interrupt_root() {
+    let mut m = Machine::new(Profile::V5te);
+    let ram = 0x02F0_0000;
+    let entry = 0x02E0_0018;
+    let pool = BASE + 0x80;
+    let src = BASE + 0x100;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2008,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(pool, &[src, ram]);
+    m.arm(src, &[A_BX_LR, 0, 0, 0, 0, 0, A_MOV_R0_1, 0xE25E_F004]);
+    let r = m.run(all(), arm(BASE));
+    assert!(!r.functions.keys().any(|l| l.addr == entry));
+    m.irq_entry = Some((entry, ram + 0x18));
+    let r = m.run(all(), arm(BASE));
+    let f = r.functions.iter().find(|(l, _)| l.addr == entry);
+    assert_eq!(
+        f.map(|(_, f)| f.origin),
+        Some(Origin::Irq),
         "{:?}",
         r.functions.keys().collect::<Vec<_>>()
     );

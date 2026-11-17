@@ -64,6 +64,14 @@ pub trait Platform {
     /// handler.
     fn irq_vector(&self, addr: u32) -> bool;
 
+    /// The RAM address the CPU takes an IRQ at when the program puts its
+    /// own exception vectors there (ARM code), and a mirror of it the
+    /// program may copy its vectors to instead; or `None`. Once a copy
+    /// holds either, the entry is an interrupt root.
+    fn irq_entry(&self) -> Option<(u32, u32)> {
+        None
+    }
+
     /// What BIOS call `number` does.
     fn bios_call(&self, number: u8) -> BiosCall;
 

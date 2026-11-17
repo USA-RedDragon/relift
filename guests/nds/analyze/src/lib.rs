@@ -42,6 +42,14 @@ pub use relift_cpu_arm32_analyze::{
 const DTCM: u32 = 0x027E_0000;
 /// The IRQ handler slot at the end of the ARM9's data TCM.
 const DTCM_IRQ: u32 = 0x3FFC;
+/// The ARM9's IRQ vector with the low vectors (CP15 control bit 13 clear),
+/// in the instruction TCM, which mirrors its 32 KiB across the low 32 MiB.
+/// The ARM9's RAM starts there: the reset, undefined, SWI and abort
+/// vectors below it are no code a program calls (a call there is a null
+/// pointer).
+const ARM9_LOW_IRQ: u32 = 0x0000_0018;
+/// The same bytes in the TCM's last mirror, where programs link it.
+const ARM9_LOW_IRQ_MIRROR: u32 = 0x01FF_8018;
 /// The ARM7's IRQ handler slot, at the end of its work RAM mirror.
 const ARM7_IRQ: u32 = 0x0380_FFFC;
 /// Seeding rounds before the runs are taken as they are.
@@ -188,6 +196,7 @@ impl Platform for Nds<'_> {
             return Kind::Image;
         }
         match (self.cpu, addr >> 24) {
+            (Cpu::Arm9, 0x00) if addr >= ARM9_LOW_IRQ => Kind::Ram,
             (Cpu::Arm9, 0x01) | (_, 0x02 | 0x03) => Kind::Ram,
             (Cpu::Arm9, 0xFF) if addr >= 0xFFFF_0000 => Kind::Bios,
             (Cpu::Arm7, 0x00) if addr < 0x4000 => Kind::Bios,
@@ -208,6 +217,10 @@ impl Platform for Nds<'_> {
 
     fn irq_vector(&self, addr: u32) -> bool {
         addr == self.irq_vector
+    }
+
+    fn irq_entry(&self) -> Option<(u32, u32)> {
+        (self.cpu == Cpu::Arm9).then_some((ARM9_LOW_IRQ, ARM9_LOW_IRQ_MIRROR))
     }
 
     fn bios_call(&self, number: u8) -> BiosCall {
