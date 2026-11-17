@@ -431,6 +431,10 @@ static int dispatch(rl_ctx *c, uint32_t imm)
         }
         rl_log(RL_LOG_ERROR, "guest", "svcBreak reason 0x%x (0x%llx, 0x%llx), lr 0x%llx", w0, (unsigned long long)x[1],
                (unsigned long long)x[2], (unsigned long long)x[30]);
+        uint32_t result;
+        if (x[2] == 4 && hos_read_u32(x[1], &result))
+            rl_log(RL_LOG_ERROR, "guest", "svcBreak result 0x%x (module %u, description %u)", result, result & 0x1ffu,
+                   (result >> 9) & 0x1fffu);
         return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
     case 0x27:
         debug_string(x[0], x[1]);
