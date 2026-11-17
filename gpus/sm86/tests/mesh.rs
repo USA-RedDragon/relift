@@ -111,6 +111,16 @@ fn the_cases_have_their_stages() {
     }
 }
 
+/// A program is exact, or on a host without maximal reconvergence inexact
+/// only for warp operations after divergent control flow.
+fn exact_or_unreconverged(host: &HostProfile, inexact: &[String]) -> bool {
+    inexact.is_empty()
+        || (!host.maximal_reconvergence
+            && inexact
+                .iter()
+                .all(|r| r.ends_with(": no maximal reconvergence")))
+}
+
 #[test]
 fn every_case_translates_on_every_host_and_back_end() {
     for c in cases() {
@@ -135,7 +145,7 @@ fn every_case_translates_on_every_host_and_back_end() {
                         c.name, host.name
                     );
                     assert!(
-                        s.interface.host.inexact.is_empty(),
+                        exact_or_unreconverged(&host, &s.interface.host.inexact),
                         "{} {k} on {}: {:?}",
                         c.name,
                         host.name,
@@ -201,7 +211,7 @@ fn the_compute_back_end_packs_guest_workgroups_where_warps_allow() {
                 o.mesh_slots = slots;
                 let s = translate_with(p, &o).unwrap();
                 validate(&s.spirv);
-                assert!(s.interface.host.inexact.is_empty());
+                assert!(exact_or_unreconverged(&host, &s.interface.host.inexact));
                 let tag = format!("{} {k} on {} asking {slots}", c.name, host.name);
                 let lanes = if k == "task" {
                     c.pipe.task_lanes
