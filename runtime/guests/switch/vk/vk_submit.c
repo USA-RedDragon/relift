@@ -236,6 +236,7 @@ uint64_t vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
         }
     }
     vkf_depth_cb_begin(o, bi);
+    vkf_split_reset(o);
     if (bi && bi->pInheritanceInfo)
         vkf_depth_format_list(&k, o->dev, bi->pInheritanceInfo->pNext);
     vkf_decode_cb_reset(k.fns, o->parent->host, o->dev, cb, false);

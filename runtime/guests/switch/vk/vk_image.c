@@ -526,6 +526,7 @@ uint64_t vkh_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
     VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
     if (!cb)
         return vkf_bad_handle(&k, VKG_vkCmdCopyBufferToImage, c->x[0]);
+    vkf_split_out(&k);
     VkImage img = (VkImage)(uintptr_t)c->x[2];
     uint32_t n = (uint32_t)c->x[4];
     const VkBufferImageCopy *rg = vkf_ptr(&k, c->x[5]);
@@ -559,6 +560,7 @@ uint64_t vkh_vkCmdCopyBufferToImage2(rl_ctx *restrict c, uint8_t *mem)
     VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
     if (!cb)
         return vkf_bad_handle(&k, VKG_vkCmdCopyBufferToImage2, c->x[0]);
+    vkf_split_out(&k);
     PFN_vkCmdCopyBufferToImage2 fn = VKF_FN(k.fns, vkCmdCopyBufferToImage2);
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyBufferToImage2);
@@ -664,6 +666,7 @@ uint64_t vkh_vkCmdCopyImage(rl_ctx *restrict c, uint8_t *mem)
     VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
     if (!cb)
         return vkf_bad_handle(&k, VKG_vkCmdCopyImage, c->x[0]);
+    vkf_split_out(&k);
     uint32_t n = (uint32_t)c->x[5];
     const VkImageCopy *rg = vkf_ptr(&k, c->x[6]);
     vkf_image *s = image_of(k.obj->dev, c->x[1]), *t = image_of(k.obj->dev, c->x[3]);
@@ -682,6 +685,7 @@ uint64_t vkh_vkCmdCopyImage2(rl_ctx *restrict c, uint8_t *mem)
     VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
     if (!cb)
         return vkf_bad_handle(&k, VKG_vkCmdCopyImage2, c->x[0]);
+    vkf_split_out(&k);
     PFN_vkCmdCopyImage2 fn = VKF_FN(k.fns, vkCmdCopyImage2);
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyImage2);
@@ -732,6 +736,7 @@ uint64_t vkh_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
     VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
     if (!cb)
         return vkf_bad_handle(&k, VKG_vkCmdCopyImageToBuffer, c->x[0]);
+    vkf_split_out(&k);
     if (image_of(k.obj->dev, c->x[1])) {
         drop_once("vkCmdCopyImageToBuffer", 3, "reading an image in a decoded format back would need an encoder");
         return vkf_end(&k);
@@ -751,6 +756,7 @@ uint64_t vkh_vkCmdCopyImageToBuffer2(rl_ctx *restrict c, uint8_t *mem)
     VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
     if (!cb)
         return vkf_bad_handle(&k, VKG_vkCmdCopyImageToBuffer2, c->x[0]);
+    vkf_split_out(&k);
     PFN_vkCmdCopyImageToBuffer2 fn = VKF_FN(k.fns, vkCmdCopyImageToBuffer2);
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyImageToBuffer2);

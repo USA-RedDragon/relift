@@ -3981,6 +3981,105 @@ TEST(vk_d24_on_a_host_without_it_is_d32)
 }
 
 /**
+ * @brief Transfer commands the guest records inside a render pass run with
+ * the host pass ended around them, and the pass resumes with what was drawn:
+ * a fill inside a pass that cleared its attachment leaves both the fill and
+ * the clear color, and a draw-time command resumes the pass.
+ */
+TEST(vk_transfer_inside_a_render_pass_splits_the_pass)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK(physical_devices(&pd, 1) == 1);
+    uint32_t qf = queue_family(pd, VK_QUEUE_GRAPHICS_BIT);
+    uint64_t dev = make_device(pd, qf, NULL, 0);
+    CHECK(dev != 0);
+    enum { N = 8 };
+    mapped_buf fill, rb;
+    CHECK_EQ(make_mapped(pd, dev, 256, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &fill), 0);
+    CHECK_EQ(make_mapped(pd, dev, N * N * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rb), 0);
+    VkImageCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                              .extent = { N, N, 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+                              .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT };
+    uint64_t gi = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)), VK_SUCCESS);
+    uint64_t img = g64(gi);
+    VkMemoryRequirements req;
+    uint64_t imem = bind_image(pd, dev, img, &req);
+    CHECK(imem != 0);
+    VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = (VkImage)GP(img), .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                  .format = VK_FORMAT_R8G8B8A8_UNORM, .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    uint64_t gv = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gv)), VK_SUCCESS);
+    VkAttachmentDescription a = { .format = VK_FORMAT_R8G8B8A8_UNORM, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                  .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                  .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                  .finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL };
+    VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription sub = { .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .colorAttachmentCount = 1, .pColorAttachments = GP(gput(&ref, sizeof ref)) };
+    VkRenderPassCreateInfo rci = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = 1, .pAttachments = GP(gput(&a, sizeof a)),
+                                   .subpassCount = 1, .pSubpasses = GP(gput(&sub, sizeof sub)) };
+    uint64_t grp = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateRenderPass", dev, gput(&rci, sizeof rci), 0, grp)), VK_SUCCESS);
+    VkFramebufferCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = (VkRenderPass)GP(g64(grp)), .attachmentCount = 1,
+                                    .pAttachments = GP(gv), .width = N, .height = N, .layers = 1 };
+    uint64_t gfb = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFramebuffer", dev, gput(&fci, sizeof fci), 0, gfb)), VK_SUCCESS);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, qf, 0, gq);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = (VkCommandPool)GP(g64(gpool)),
+                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
+    VkCommandBufferBeginInfo cbbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&cbbi, sizeof cbbi))), VK_SUCCESS);
+    VkClearValue cv = { .color = { .float32 = { 1.0f, 0.0f, 0.0f, 1.0f } } };
+    VkRenderPassBeginInfo rbi = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = (VkRenderPass)GP(g64(grp)),
+                                  .framebuffer = (VkFramebuffer)GP(g64(gfb)), .renderArea = { { 0, 0 }, { N, N } }, .clearValueCount = 1,
+                                  .pClearValues = GP(gput(&cv, sizeof cv)) };
+    G("vkCmdBeginRenderPass", cb, gput(&rbi, sizeof rbi), VK_SUBPASS_CONTENTS_INLINE);
+    CHECK(o->split.in_pass && !o->split.ended);
+    G("vkCmdFillBuffer", cb, fill.buf, 0, 256, 0x5a5a5a5au);
+    CHECK(o->split.ended);
+    VkClearAttachment ca = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0, .clearValue = { .color = { .float32 = { 0.0f, 0.0f, 1.0f, 1.0f } } } };
+    VkClearRect cr = { .rect = { { 0, 0 }, { N / 2, N } }, .baseArrayLayer = 0, .layerCount = 1 };
+    G("vkCmdClearAttachments", cb, 1, gput(&ca, sizeof ca), 1, gput(&cr, sizeof cr));
+    CHECK(o->split.in_pass && !o->split.ended);
+    G("vkCmdUpdateBuffer", cb, fill.buf, 8, 4, gput(&(uint32_t){ 0x11223344u }, 4));
+    CHECK(o->split.ended);
+    G("vkCmdEndRenderPass", cb);
+    CHECK(!o->split.in_pass && !o->split.ended);
+    VkBufferImageCopy bic = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { N, N, 1 } };
+    G("vkCmdCopyImageToBuffer", cb, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb.buf, 1, gput(&bic, sizeof bic));
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", g64(gq), 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", g64(gq))), VK_SUCCESS);
+    CHECK_EQ(g32(fill.ptr + 8), 0x11223344u);
+    CHECK_EQ(g32(fill.ptr + 4), 0x5a5a5a5au);
+    CHECK_EQ(g32(rb.ptr), 0xffff0000u);
+    CHECK_EQ(g32(rb.ptr + 4 * (N - 1)), 0xff0000ffu);
+
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyBuffer", dev, fill.buf, 0);
+    G("vkFreeMemory", dev, fill.mem, 0);
+    G("vkDestroyBuffer", dev, rb.buf, 0);
+    G("vkFreeMemory", dev, rb.mem, 0);
+    G("vkDestroyFramebuffer", dev, g64(gfb), 0);
+    G("vkDestroyRenderPass", dev, g64(grp), 0);
+    G("vkDestroyImageView", dev, g64(gv), 0);
+    G("vkDestroyImage", dev, img, 0);
+    G("vkFreeMemory", dev, imem, 0);
+    finish(dev);
+}
+
+/**
  * @brief On a host without 24-bit depth, a buffer-to-image copy of the depth
  * aspect of a D24S8 image (24-bit words, written after the copy is
  * recorded) lands as their D32 float values, and a stencil copy lands as is.

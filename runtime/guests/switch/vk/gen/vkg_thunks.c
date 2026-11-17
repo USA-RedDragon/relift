@@ -83,7 +83,7 @@ static uint64_t vkt_vkCmdBeginRenderPass(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdBeginRenderPass);
     fn(a0, a1, a2);
-    vkf_depth_begin_pass(&k);
+    vkf_pass_begin(&k);
     return vkf_end(&k);
 }
 
@@ -100,7 +100,7 @@ static uint64_t vkt_vkCmdBeginRenderPass2(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdBeginRenderPass2);
     fn(a0, a1, a2);
-    vkf_depth_begin_pass(&k);
+    vkf_pass_begin2(&k);
     return vkf_end(&k);
 }
 
@@ -213,6 +213,7 @@ static uint64_t vkt_vkCmdBlitImage(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdBlitImage fn = (PFN_vkCmdBlitImage)k.fns->f[VKG_vkCmdBlitImage];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdBlitImage);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5, a6, a7);
     return vkf_end(&k);
 }
@@ -228,6 +229,7 @@ static uint64_t vkt_vkCmdBlitImage2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdBlitImage2 fn = (PFN_vkCmdBlitImage2)k.fns->f[VKG_vkCmdBlitImage2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdBlitImage2);
+    vkf_split_out(&k);
     fn(a0, a1);
     return vkf_end(&k);
 }
@@ -246,6 +248,7 @@ static uint64_t vkt_vkCmdClearAttachments(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdClearAttachments fn = (PFN_vkCmdClearAttachments)k.fns->f[VKG_vkCmdClearAttachments];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdClearAttachments);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -265,6 +268,7 @@ static uint64_t vkt_vkCmdClearColorImage(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdClearColorImage fn = (PFN_vkCmdClearColorImage)k.fns->f[VKG_vkCmdClearColorImage];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdClearColorImage);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5);
     return vkf_end(&k);
 }
@@ -284,6 +288,7 @@ static uint64_t vkt_vkCmdClearDepthStencilImage(rl_ctx *restrict c, uint8_t *mem
     PFN_vkCmdClearDepthStencilImage fn = (PFN_vkCmdClearDepthStencilImage)k.fns->f[VKG_vkCmdClearDepthStencilImage];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdClearDepthStencilImage);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5);
     return vkf_end(&k);
 }
@@ -302,6 +307,7 @@ static uint64_t vkt_vkCmdCopyBuffer(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdCopyBuffer fn = (PFN_vkCmdCopyBuffer)k.fns->f[VKG_vkCmdCopyBuffer];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyBuffer);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -317,6 +323,7 @@ static uint64_t vkt_vkCmdCopyBuffer2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdCopyBuffer2 fn = (PFN_vkCmdCopyBuffer2)k.fns->f[VKG_vkCmdCopyBuffer2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyBuffer2);
+    vkf_split_out(&k);
     fn(a0, a1);
     return vkf_end(&k);
 }
@@ -338,6 +345,7 @@ static uint64_t vkt_vkCmdCopyQueryPoolResults(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdCopyQueryPoolResults fn = (PFN_vkCmdCopyQueryPoolResults)k.fns->f[VKG_vkCmdCopyQueryPoolResults];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyQueryPoolResults);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5, a6, a7);
     return vkf_end(&k);
 }
@@ -399,6 +407,7 @@ static uint64_t vkt_vkCmdDispatch(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDispatch fn = (PFN_vkCmdDispatch)k.fns->f[VKG_vkCmdDispatch];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDispatch);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3);
     return vkf_end(&k);
 }
@@ -419,6 +428,7 @@ static uint64_t vkt_vkCmdDispatchBase(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDispatchBase fn = (PFN_vkCmdDispatchBase)k.fns->f[VKG_vkCmdDispatchBase];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDispatchBase);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5, a6);
     return vkf_end(&k);
 }
@@ -435,6 +445,7 @@ static uint64_t vkt_vkCmdDispatchIndirect(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDispatchIndirect fn = (PFN_vkCmdDispatchIndirect)k.fns->f[VKG_vkCmdDispatchIndirect];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDispatchIndirect);
+    vkf_split_out(&k);
     fn(a0, a1, a2);
     return vkf_end(&k);
 }
@@ -453,6 +464,7 @@ static uint64_t vkt_vkCmdDraw(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDraw fn = (PFN_vkCmdDraw)k.fns->f[VKG_vkCmdDraw];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDraw);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -472,6 +484,7 @@ static uint64_t vkt_vkCmdDrawIndexed(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDrawIndexed fn = (PFN_vkCmdDrawIndexed)k.fns->f[VKG_vkCmdDrawIndexed];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDrawIndexed);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4, a5);
     return vkf_end(&k);
 }
@@ -490,6 +503,7 @@ static uint64_t vkt_vkCmdDrawIndexedIndirect(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDrawIndexedIndirect fn = (PFN_vkCmdDrawIndexedIndirect)k.fns->f[VKG_vkCmdDrawIndexedIndirect];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDrawIndexedIndirect);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -510,6 +524,7 @@ static uint64_t vkt_vkCmdDrawIndexedIndirectCount(rl_ctx *restrict c, uint8_t *m
     PFN_vkCmdDrawIndexedIndirectCount fn = (PFN_vkCmdDrawIndexedIndirectCount)k.fns->f[VKG_vkCmdDrawIndexedIndirectCount];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDrawIndexedIndirectCount);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4, a5, a6);
     return vkf_end(&k);
 }
@@ -528,6 +543,7 @@ static uint64_t vkt_vkCmdDrawIndirect(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDrawIndirect fn = (PFN_vkCmdDrawIndirect)k.fns->f[VKG_vkCmdDrawIndirect];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDrawIndirect);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -548,6 +564,7 @@ static uint64_t vkt_vkCmdDrawIndirectCount(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdDrawIndirectCount fn = (PFN_vkCmdDrawIndirectCount)k.fns->f[VKG_vkCmdDrawIndirectCount];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdDrawIndirectCount);
+    vkf_split_in(&k);
     fn(a0, a1, a2, a3, a4, a5, a6);
     return vkf_end(&k);
 }
@@ -592,8 +609,9 @@ static uint64_t vkt_vkCmdEndRenderPass(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdEndRenderPass fn = (PFN_vkCmdEndRenderPass)k.fns->f[VKG_vkCmdEndRenderPass];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdEndRenderPass);
+    vkf_split_in(&k);
     fn(a0);
-    vkf_depth_end_pass(&k);
+    vkf_pass_end(&k);
     return vkf_end(&k);
 }
 
@@ -608,8 +626,9 @@ static uint64_t vkt_vkCmdEndRenderPass2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdEndRenderPass2 fn = (PFN_vkCmdEndRenderPass2)k.fns->f[VKG_vkCmdEndRenderPass2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdEndRenderPass2);
+    vkf_split_in(&k);
     fn(a0, a1);
-    vkf_depth_end_pass(&k);
+    vkf_pass_end(&k);
     return vkf_end(&k);
 }
 
@@ -640,6 +659,7 @@ static uint64_t vkt_vkCmdExecuteCommands(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdExecuteCommands fn = (PFN_vkCmdExecuteCommands)k.fns->f[VKG_vkCmdExecuteCommands];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdExecuteCommands);
+    vkf_split_in(&k);
     fn(a0, a1, a2);
     vkf_note_execute(&k);
     return vkf_end(&k);
@@ -659,6 +679,7 @@ static uint64_t vkt_vkCmdFillBuffer(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdFillBuffer fn = (PFN_vkCmdFillBuffer)k.fns->f[VKG_vkCmdFillBuffer];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdFillBuffer);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -689,6 +710,7 @@ static uint64_t vkt_vkCmdNextSubpass(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdNextSubpass fn = (PFN_vkCmdNextSubpass)k.fns->f[VKG_vkCmdNextSubpass];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdNextSubpass);
+    vkf_split_in(&k);
     fn(a0, a1);
     vkf_depth_next_subpass(&k);
     return vkf_end(&k);
@@ -706,6 +728,7 @@ static uint64_t vkt_vkCmdNextSubpass2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdNextSubpass2 fn = (PFN_vkCmdNextSubpass2)k.fns->f[VKG_vkCmdNextSubpass2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdNextSubpass2);
+    vkf_split_in(&k);
     fn(a0, a1, a2);
     vkf_depth_next_subpass(&k);
     return vkf_end(&k);
@@ -730,6 +753,7 @@ static uint64_t vkt_vkCmdPipelineBarrier(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdPipelineBarrier fn = (PFN_vkCmdPipelineBarrier)k.fns->f[VKG_vkCmdPipelineBarrier];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdPipelineBarrier);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
     return vkf_end(&k);
 }
@@ -745,6 +769,7 @@ static uint64_t vkt_vkCmdPipelineBarrier2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdPipelineBarrier2 fn = (PFN_vkCmdPipelineBarrier2)k.fns->f[VKG_vkCmdPipelineBarrier2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdPipelineBarrier2);
+    vkf_split_out(&k);
     fn(a0, a1);
     return vkf_end(&k);
 }
@@ -817,6 +842,7 @@ static uint64_t vkt_vkCmdResetEvent(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdResetEvent fn = (PFN_vkCmdResetEvent)k.fns->f[VKG_vkCmdResetEvent];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdResetEvent);
+    vkf_split_out(&k);
     fn(a0, a1, a2);
     return vkf_end(&k);
 }
@@ -833,6 +859,7 @@ static uint64_t vkt_vkCmdResetEvent2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdResetEvent2 fn = (PFN_vkCmdResetEvent2)k.fns->f[VKG_vkCmdResetEvent2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdResetEvent2);
+    vkf_split_out(&k);
     fn(a0, a1, a2);
     return vkf_end(&k);
 }
@@ -850,6 +877,7 @@ static uint64_t vkt_vkCmdResetQueryPool(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdResetQueryPool fn = (PFN_vkCmdResetQueryPool)k.fns->f[VKG_vkCmdResetQueryPool];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdResetQueryPool);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3);
     return vkf_end(&k);
 }
@@ -870,6 +898,7 @@ static uint64_t vkt_vkCmdResolveImage(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdResolveImage fn = (PFN_vkCmdResolveImage)k.fns->f[VKG_vkCmdResolveImage];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdResolveImage);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5, a6);
     return vkf_end(&k);
 }
@@ -885,6 +914,7 @@ static uint64_t vkt_vkCmdResolveImage2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdResolveImage2 fn = (PFN_vkCmdResolveImage2)k.fns->f[VKG_vkCmdResolveImage2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdResolveImage2);
+    vkf_split_out(&k);
     fn(a0, a1);
     return vkf_end(&k);
 }
@@ -1084,6 +1114,7 @@ static uint64_t vkt_vkCmdSetEvent(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdSetEvent fn = (PFN_vkCmdSetEvent)k.fns->f[VKG_vkCmdSetEvent];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdSetEvent);
+    vkf_split_out(&k);
     fn(a0, a1, a2);
     return vkf_end(&k);
 }
@@ -1100,6 +1131,7 @@ static uint64_t vkt_vkCmdSetEvent2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdSetEvent2 fn = (PFN_vkCmdSetEvent2)k.fns->f[VKG_vkCmdSetEvent2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdSetEvent2);
+    vkf_split_out(&k);
     fn(a0, a1, a2);
     return vkf_end(&k);
 }
@@ -1386,6 +1418,7 @@ static uint64_t vkt_vkCmdUpdateBuffer(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdUpdateBuffer fn = (PFN_vkCmdUpdateBuffer)k.fns->f[VKG_vkCmdUpdateBuffer];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdUpdateBuffer);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4);
     return vkf_end(&k);
 }
@@ -1410,6 +1443,7 @@ static uint64_t vkt_vkCmdWaitEvents(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdWaitEvents fn = (PFN_vkCmdWaitEvents)k.fns->f[VKG_vkCmdWaitEvents];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdWaitEvents);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
     return vkf_end(&k);
 }
@@ -1427,6 +1461,7 @@ static uint64_t vkt_vkCmdWaitEvents2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdWaitEvents2 fn = (PFN_vkCmdWaitEvents2)k.fns->f[VKG_vkCmdWaitEvents2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdWaitEvents2);
+    vkf_split_out(&k);
     fn(a0, a1, a2, a3);
     return vkf_end(&k);
 }
@@ -2023,7 +2058,7 @@ static uint64_t vkt_vkDestroyRenderPass(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDestroyRenderPass);
     fn(a0, a1, a2);
-    vkf_depth_forget_pass(&k);
+    vkf_pass_forget(&k);
     return vkf_end(&k);
 }
 

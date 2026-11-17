@@ -68,8 +68,10 @@ uint64_t vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
     }
     VkRenderPass *out = vkf_ptr(&k, c->x[3]);
     VkResult r = VKF_FN(k.fns, vkCreateRenderPass)(dev, ci, NULL, out);
-    if (r >= 0 && out)
+    if (r >= 0 && out) {
         vkf_depth_note_pass((uint64_t)(uintptr_t)*out, mask);
+        vkf_split_note_pass(&k, dev, ci, *out);
+    }
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateRenderPass, r);
     return vkf_end(&k);
 }
@@ -98,8 +100,10 @@ uint64_t vkh_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem)
     }
     VkRenderPass *out = vkf_ptr(&k, c->x[3]);
     VkResult r = VKF_FN(k.fns, vkCreateRenderPass2)(dev, ci, NULL, out);
-    if (r >= 0 && out)
+    if (r >= 0 && out) {
         vkf_depth_note_pass((uint64_t)(uintptr_t)*out, mask);
+        vkf_split_note_pass2(&k, dev, ci, *out);
+    }
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateRenderPass2, r);
     return vkf_end(&k);
 }

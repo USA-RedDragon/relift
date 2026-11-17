@@ -30,6 +30,9 @@ typedef struct vkf_fns {
 typedef struct vkf_dev vkf_dev;
 typedef struct vkf_inst vkf_inst;
 
+/** @brief Most imageless framebuffer attachments a resumed render pass keeps. */
+#define VKF_SPLIT_VIEWS 16
+
 /** @brief A guest-visible dispatchable handle. */
 typedef struct vkf_obj {
     /** @brief VKG_KIND_*. */
@@ -65,6 +68,15 @@ typedef struct vkf_obj {
     /** @brief Command buffers on a device with D32 for D24: the render pass and subpass recording, and whether its depth attachment is substituted (vk_format.c). */
     uint64_t pass;
     uint32_t subpass;
+    /** @brief Command buffers: the render pass the guest is in, and whether the host pass is ended for a transfer command (vk_split.c). */
+    struct {
+        bool in_pass, ended;
+        uint64_t pass, framebuffer;
+        VkRect2D area;
+        VkSubpassContents contents;
+        uint32_t nviews;
+        uint64_t views[VKF_SPLIT_VIEWS];
+    } split;
     bool depth_now;
     /** @brief Command buffers: the guest's dynamic depth bias (constant, clamp, slope), whether it set one, and whether the host has it scaled for D32. */
     float bias[3];
@@ -461,6 +473,11 @@ void vkf_depth_attachment(vkf_call *k, vkf_obj *o, bool substituted);
 void vkf_depth_cb_begin(vkf_obj *o, const VkCommandBufferBeginInfo *bi);
 /** @brief Hooks after the render pass begins, subpass steps and ends. */
 void vkf_depth_begin_pass(vkf_call *k);
+/** @brief Makes the resume variant of a single-subpass render pass the guest created (vk_split.c). */
+void vkf_split_note_pass(vkf_call *k, VkDevice dev, const VkRenderPassCreateInfo *ci, VkRenderPass pass);
+void vkf_split_note_pass2(vkf_call *k, VkDevice dev, const VkRenderPassCreateInfo2 *ci, VkRenderPass pass);
+/** @brief Forgets the split state at vkBeginCommandBuffer. */
+void vkf_split_reset(vkf_obj *o);
 void vkf_depth_next_subpass(vkf_call *k);
 void vkf_depth_end_pass(vkf_call *k);
 /** @brief Scales the static constant depth bias of a pipeline that renders to a substituted depth attachment. */
