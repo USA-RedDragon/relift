@@ -1,0 +1,55 @@
+# Cases the consoles agree on that relift does not reproduce yet: the console value, what relift gives
+# (cycles x100, empty when the case does not run) and the open question; compare.py checks relift still gives it
+cpu,idx,name,region,place,mode,attr,hw,relift,note
+9,38,empty,none,itcm,warm,-,5,,not run: the test ROM has no ITCM-code variant yet
+9,39,add,none,itcm,warm,-,5,,not run: the test ROM has no ITCM-code variant yet
+9,40,add_lslr,none,itcm,warm,-,6,,not run: the test ROM has no ITCM-code variant yet
+9,41,mul,none,itcm,warm,-,6,,not run: the test ROM has no ITCM-code variant yet
+9,42,b,none,itcm,warm,-,7,,not run: the test ROM has no ITCM-code variant yet
+9,43,bl,none,itcm,warm,-,15,,not run: the test ROM has no ITCM-code variant yet
+9,44,ldr_pc,none,itcm,warm,-,9,,not run: the test ROM has no ITCM-code variant yet
+9,45,t_alu,none,itcm,warm,-,5,,not run: the test ROM has no ITCM-code variant yet
+9,46,t_b,none,itcm,warm,-,7,,not run: the test ROM has no ITCM-code variant yet
+9,49,add_lslr,none,unc,warm,-,90,9100,ARM9 code fetch from uncached main RAM: Thumb pairs and some loops
+9,50,mul,none,unc,warm,-,90,9100,ARM9 code fetch from uncached main RAM: Thumb pairs and some loops
+9,54,t_alu,none,unc,warm,-,54,4500,ARM9 code fetch from uncached main RAM: Thumb pairs and some loops
+9,55,t_b,none,unc,warm,-,90,6300,ARM9 code fetch from uncached main RAM: Thumb pairs and some loops
+9,110,str_ldr,itcm,main,warm,-,8,900,ARM9 data access after a store or in ITCM
+9,146,str_alu4,main,main,warm,-,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+9,190,ldrd,unc,main,warm,-,40,2600,ARM9 LDRD and SWP on the bus: second access
+9,221,ldrd,io,main,warm,-,16,1400,ARM9 LDRD and SWP on the bus: second access
+9,234,swp,vram,main,warm,-,24,2200,ARM9 LDRD and SWP on the bus: second access
+9,253,ldrd,vram,main,warm,-,20,1800,ARM9 LDRD and SWP on the bus: second access
+9,266,swp,pal,main,warm,-,24,2200,ARM9 LDRD and SWP on the bus: second access
+9,284,stm8,pal,main,warm,-,45.62,4200,ARM9 data access after a store or in ITCM
+9,285,ldrd,pal,main,warm,-,20,1800,ARM9 LDRD and SWP on the bus: second access
+9,298,swp,oam,main,warm,-,20,1800,ARM9 LDRD and SWP on the bus: second access
+9,317,ldrd,oam,main,warm,-,16,1400,ARM9 LDRD and SWP on the bus: second access
+9,339,s_ldm8,main,main,cold,-,50,5200,ARM9 data cache line fill under a following access
+9,343,copy,main,main,cold,-,24,2374,ARM9 data cache line fill under a following access
+9,360,str_alu4,mx,main,warm,cb11,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+9,392,str_alu4,mx,main,warm,cb10,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+9,424,str_alu4,mx,main,warm,cb01,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+7,129,strb,main,wram,warm,-,9,818,ARM7 STM and byte stores to main RAM
+7,142,stm2,main,wram,warm,-,11,1318,ARM7 STM and byte stores to main RAM
+7,144,stm4,main,wram,warm,-,15,1718,ARM7 STM and byte stores to main RAM
+7,146,stm6,main,wram,warm,-,19,2118,ARM7 STM and byte stores to main RAM
+7,148,stm8,main,wram,warm,-,23,2518,ARM7 STM and byte stores to main RAM
+7,162,s_stm8,main,wram,warm,-,23,2518,ARM7 STM and byte stores to main RAM
+7,171,swp,wram7,wram,warm,-,8,918,ARM7 SWP: one cycle more than the load and store
+7,256,b,none,main,warm,-,35,2818,ARM7 branch refill and Thumb fetches in main RAM
+7,258,bx_arm,none,main,warm,-,35,2818,ARM7 branch refill and Thumb fetches in main RAM
+7,259,mov_pc,none,main,warm,-,35,2818,ARM7 branch refill and Thumb fetches in main RAM
+7,263,bx_thumb,none,main,warm,-,58,5118,ARM7 branch refill and Thumb fetches in main RAM
+7,267,t_b,none,main,warm,-,21,1418,ARM7 branch refill and Thumb fetches in main RAM
+7,373,str_alu4,main,main,warm,-,41,4818,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+7,374,str_alu16,main,main,warm,-,65,7918,ARM7 write to main RAM followed by fetches: posting
+7,407,swp,wram7,main,warm,-,24,2518,ARM7 SWP: one cycle more than the load and store
+7,414,str_alu4,wram7,main,warm,-,32,3918,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+7,415,str_alu16,wram7,main,warm,-,56,7018,ARM7 write to main RAM followed by fetches: posting
+7,421,stm4,wram7,main,warm,-,25,2618,ARM7 STM and byte stores to main RAM
+7,423,stm6,wram7,main,warm,-,27,2818,ARM7 STM and byte stores to main RAM
+7,425,stm8,wram7,main,warm,-,29,3018,ARM7 STM and byte stores to main RAM
+7,439,s_stm8,wram7,main,warm,-,29,3018,ARM7 STM and byte stores to main RAM
+7,454,str_alu4,io,main,warm,-,32,3918,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
+7,455,str_alu16,io,main,warm,-,56,7018,ARM7 write to main RAM followed by fetches: posting
