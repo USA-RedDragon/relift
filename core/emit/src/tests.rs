@@ -1172,6 +1172,32 @@ fn more_entries_get_a_function_each_that_enters_the_piece_there() {
     );
 }
 
+/// A function of several pieces with more entries keeps its map entries
+/// sorted: the functions of its entries sit with the stub, before the
+/// pieces.
+#[test]
+fn more_entries_of_a_split_function_keep_the_map_sorted() {
+    let code = [word(0x03, 0, 0); 8];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks);
+    f.entries = BTreeMap::from([(0x118, "F_100_at_118".to_owned())]);
+    let g = function(0x120, &[]);
+    let opts = Options {
+        piece_bytes: 1,
+        ..Options::default()
+    };
+    let out = emit(&Toy, &[f, g], &[], &opts);
+    let s = shard(&out);
+    assert!(s.contains("F_100_part2"), "{s}");
+    let at: Vec<u64> = s
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("{ UINT64_C("))
+        .filter_map(|l| u64::from_str_radix(l.split(')').next()?.trim_start_matches("0x"), 16).ok())
+        .collect();
+    assert!(at.len() > 3, "{s}");
+    assert!(at.windows(2).all(|w| w[0] <= w[1]), "{at:x?}");
+}
+
 #[test]
 fn a_declared_override_is_declared_where_it_is_called() {
     let code = [branch(0x02, 0, 2), word(0x03, 0, 0), word(0x03, 0, 0)];

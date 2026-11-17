@@ -659,8 +659,8 @@ fn emit_core(
         }
         // A split function: its pieces fill shards of their own, and each
         // piece has a map entry over the guest range it holds. The stub
-        // has an empty range at the lowest address, so the table stays
-        // sorted. A function split only to be entered anywhere or at more
+        // and the functions of its other entries have empty ranges at the
+        // lowest address and come first, so the table stays sorted. A function split only to be entered anywhere or at more
         // entries that fits in a shard shares it.
         let entered = e.pieces.iter().filter(|p| p.first_pc.is_none()).count() > 1;
         let shared = (opts.enter_anywhere.is_some() || entered) && e.len() <= budget;
@@ -686,8 +686,10 @@ fn emit_core(
         } else {
             starts
         };
+        let mut pieces = e.pieces;
+        pieces.sort_by_key(|p| p.first_pc.is_some());
         let mut held = 0;
-        for p in e.pieces {
+        for p in pieces {
             if !w.cur.fns.is_empty() && w.cur.body.len() + p.text.len() > budget {
                 w.flush();
             }
