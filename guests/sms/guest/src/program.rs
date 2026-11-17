@@ -5,8 +5,9 @@
 //! which the runtime checks at each such exit; every other transfer goes
 //! through dispatch, which picks the function of the bank the slot shows at
 //! run time. Code in work RAM is lifted from the bytes found there, in
-//! groups that hold one form of the code at each address; dispatch and the
-//! checks compare the bytes in RAM with those of the group. The four
+//! groups that hold one form of the code at each address, with its operand
+//! bytes read when it runs; dispatch and the checks compare the opcode bytes
+//! in RAM with those of the group. The four
 //! interrupt entry blocks are a unit of their own. Every instruction of a
 //! unit is a dispatch entry.
 
@@ -269,6 +270,26 @@ fn entries(image_id: [u8; 32]) -> Unit {
     emit_unit(UnitTag::Entries, &fns, image_id, false)
 }
 
+/// The bytes of `b` that select its template (`opcode_mask`), others zero.
+#[must_use]
+pub fn opcode_bytes(b: &[u8]) -> Vec<u8> {
+    let mask = relift_cpu_z80::opcode_mask(b).unwrap_or(0xFF);
+    b.iter()
+        .enumerate()
+        .map(|(k, &x)| if mask & (1 << k) != 0 { x } else { 0 })
+        .collect()
+}
+
+/// The mask of the bytes of `b` the runtime checks at entry.
+#[must_use]
+pub fn check_mask(b: &[u8]) -> u8 {
+    relift_cpu_z80::opcode_mask(b).unwrap_or(0xFF) & ((1u16 << b.len().min(8)) - 1) as u8
+}
+
+fn same_opcodes(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && opcode_bytes(a) == opcode_bytes(b)
+}
+
 /// Lifts the instructions of `code` (in `rom`, without a copier header)
 /// into units; `image_id` identifies the ROM to the runtime.
 #[must_use]
@@ -287,7 +308,10 @@ pub fn lift(rom: &[u8], code: &Code, image_id: [u8; 32]) -> Lifted {
                     .insert(l.addr, n);
             }
             CodeSrc::Ram { bytes } if l.addr >= RAM => {
-                ram_at.entry(l.addr).or_default().push(bytes.clone());
+                let forms = ram_at.entry(l.addr).or_default();
+                if !forms.iter().any(|f| same_opcodes(f, bytes)) {
+                    forms.push(bytes.clone());
+                }
             }
             _ => {}
         }
@@ -423,8 +447,9 @@ pub fn program_c(p: &Program<'_>, l: &Lifted) -> String {
                 .collect();
             let _ = writeln!(
                 s,
-                "    {{ {a:#06x}u, {}u, {{ {} }} }},",
+                "    {{ {a:#06x}u, {}u, {:#04x}u, {{ {} }} }},",
                 b.len(),
+                check_mask(b),
                 bytes.join(", ")
             );
         }

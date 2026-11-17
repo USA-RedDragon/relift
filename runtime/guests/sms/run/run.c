@@ -110,7 +110,7 @@ static bool ram_matches(const rl_sms_ram_group *g, uint16_t pc, uint32_t *at)
         return false;
     const rl_sms_ram_insn *i = &g->insns[lo];
     for (uint32_t k = 0; k < i->len; k++)
-        if (sms_peek(&G.m, (uint16_t)(pc + k)) != i->bytes[k])
+        if ((i->check >> k & 1u) && sms_peek(&G.m, (uint16_t)(pc + k)) != i->bytes[k])
             return false;
     *at = lo;
     return true;

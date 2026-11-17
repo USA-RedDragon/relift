@@ -15,10 +15,15 @@
 
 #include "sms.h"
 
-/** @brief One instruction of a RAM group: its address and the bytes it was lifted from. */
+/**
+ * @brief One instruction of a RAM group: its address, its length, the mask of
+ * the bytes that must match (bit k for byte k: the opcode and prefix bytes;
+ * the code reads its operands when it runs) and the bytes it was lifted from.
+ */
 typedef struct rl_sms_ram_insn {
     uint16_t addr;
     uint8_t len;
+    uint8_t check;
     uint8_t bytes[4];
 } rl_sms_ram_insn;
 

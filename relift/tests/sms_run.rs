@@ -4,7 +4,10 @@
 //! frame interrupt's handler counts in work RAM (from 0xAB, the byte the
 //! console leaves at 0xC000), calls a routine in two
 //! banks it maps in turn at 0x8000, and calls the routine it copied to work
-//! RAM; after 60 frames every counter holds the number of interrupts, and
+//! RAM after flipping the address operand of that routine's first
+//! instruction, so RAM code lifted once runs with both operands; after 60
+//! frames the counters hold the number of interrupts (the RAM routine's
+//! split between its two targets), and
 //! the run never reaches code with no lifted body. A second build leaves
 //! out the RAM routine's unit and must stop with a stop report at it.
 //! Skipped with a note when neither clang nor zig is on `PATH`.
@@ -30,8 +33,8 @@ const BANK0: &[(usize, &[u8])] = &[
         0x0038,
         &[
             0xF5, 0xDB, 0xBF, 0x3A, 0x00, 0xC0, 0x3C, 0x32, 0x00, 0xC0, 0x3E, 0x02, 0x32, 0xFF,
-            0xFF, 0xCD, 0x00, 0x80, 0x3E, 0x03, 0x32, 0xFF, 0xFF, 0xCD, 0x00, 0x80, 0xCD, 0x00,
-            0xC1, 0xF1, 0xFB, 0xED, 0x4D,
+            0xFF, 0xCD, 0x00, 0x80, 0x3E, 0x03, 0x32, 0xFF, 0xFF, 0xCD, 0x00, 0x80, 0x3A, 0x01,
+            0xC1, 0xEE, 0x07, 0x32, 0x01, 0xC1, 0xCD, 0x00, 0xC1, 0xF1, 0xFB, 0xED, 0x4D,
         ],
     ),
     (0x0066, &[0xED, 0x45]),
@@ -254,7 +257,12 @@ fn banked_and_ram_code_runs_lifted_and_a_miss_stops_with_a_report() {
     let ram = std::fs::read(&ram).expect("the RAM dump");
     let irqs = ram[0].wrapping_sub(0xAB);
     assert!((58..=60).contains(&irqs), "{irqs} frame interrupts");
-    assert_eq!(&ram[1..4], &[irqs, irqs, irqs], "bank 2, bank 3, RAM");
+    assert_eq!(&ram[1..3], &[irqs, irqs], "bank 2, bank 3");
+    assert_eq!(
+        (ram[3], ram[4]),
+        (irqs / 2, irqs - irqs / 2),
+        "the RAM routine with its operand patched before each call"
+    );
 
     let missing = program::lift(&rom, &code(false), [0; 32]);
     let dir2 = scratch("sms-run-miss");

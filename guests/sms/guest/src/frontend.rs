@@ -107,7 +107,9 @@ pub fn sync_info(b: &Block, unit: UnitTag) -> u32 {
     kind | if direct { SYNC_CHECK } else { 0 } | unit.bits()
 }
 
-/// The frontend for the code of one unit.
+/// The frontend for the code of one unit. Code in work RAM is lifted with
+/// its operand bytes read when it runs, so only its opcode bytes need to
+/// match the bytes it was lifted from.
 #[derive(Clone, Debug)]
 pub struct Sms {
     inner: Z80,
@@ -122,6 +124,7 @@ impl Sms {
             inner: Z80 {
                 map: device_map(),
                 sync: SyncPolicy::Every,
+                live_operands: matches!(unit, UnitTag::Ram { .. }),
             },
             unit,
         }
