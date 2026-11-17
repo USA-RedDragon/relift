@@ -417,7 +417,7 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
     if (!v)
         return RL_PENDING;
     if (!nvn_vk_refresh(r, v))
-        return nvn_vk_stop(r, "cannot refill buffer texture id %u", id);
+        return nvn_vk_stop(r, "cannot refill texture id %u from its storage", id);
     if (image)
         nvn_vk_written(v);
     if (t.tex_img[id] == v && t.tex_guest[id] == tex && !memcmp(t.tex_view[id], view, sizeof view)) {

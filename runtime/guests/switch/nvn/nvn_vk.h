@@ -48,6 +48,8 @@ typedef struct vimg {
     VkImageUsageFlags usage;
     /** @brief When the GPU last wrote it (a render target, copy or storage binding), from a running count. */
     uint64_t written;
+    /** @brief The hash of its storage when last filled, and the frame (presents + 1) it was last checked in. */
+    uint64_t hash, hash_frame;
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
@@ -186,7 +188,7 @@ int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const
                   unsigned out_n, uint32_t *out, uint64_t *ret);
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time; NULL after a stop. */
 vimg *nvn_vk_image(replay *r, uint64_t tex);
-/** @brief Refills a buffer texture's image from its storage (the bytes may have changed since); true for other images. */
+/** @brief Refills v from its storage when the CPU may have changed the bytes (nvn_vk.c); false when the refill fails. */
 bool nvn_vk_refresh(replay *r, vimg *v);
 /**
  * @brief A view of v of type t: over all its levels and the layers t takes

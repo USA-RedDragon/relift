@@ -634,6 +634,21 @@ static VkImageSubresourceRange range_of(const vimg *v)
                                       .layerCount = layers };
 }
 
+/** @brief A fast hash of n bytes (whole 8-byte words, then the tail). */
+static uint64_t bytes_hash(const uint8_t *p, uint64_t n)
+{
+    uint64_t h = 0x9e3779b97f4a7c15ull ^ n, w;
+    uint64_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0xff51afd7ed558ccdull;
+        h ^= h >> 32;
+    }
+    for (; i < n; i++)
+        h = (h ^ p[i]) * 0x100000001b3ull;
+    return h;
+}
+
 /** @brief The depth of level l of a 3D texture, 1 for other targets. */
 static uint32_t depth_of(const nvn_tex_desc *d, uint32_t l)
 {
@@ -930,6 +945,8 @@ static vimg *image_of(replay *r, uint64_t tex)
                              NULL, 1, &ib);
     if (!depth && !upload(r, v))
         goto fail;
+    v->hash = bytes_hash(r->mem + storage, d->size);
+    v->hash_frame = g.presents + 1;
     if (depth && !nvn_vk_flush(r))
         goto fail;
     g.images[g.nimages++] = v;
@@ -946,7 +963,25 @@ fail:
 
 vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
 
-bool nvn_vk_refresh(replay *r, vimg *v) { return v->d.target != NVN_TARGET_BUFFER || upload(r, v); }
+/**
+ * @brief Refills v from its storage when the CPU changed the bytes: a
+ * buffer texture at every use, any texture the GPU never wrote (the game
+ * fills it through the CPU, as a glyph cache) when the hash of its storage
+ * differs, checked at most once per presented frame.
+ */
+bool nvn_vk_refresh(replay *r, vimg *v)
+{
+    if (v->d.target == NVN_TARGET_BUFFER)
+        return upload(r, v);
+    if (v->written || v->hash_frame == g.presents + 1)
+        return true;
+    v->hash_frame = g.presents + 1;
+    uint64_t h = bytes_hash(r->mem + v->storage, v->d.size);
+    if (h == v->hash)
+        return true;
+    v->hash = h;
+    return v->aspect != VK_IMAGE_ASPECT_COLOR_BIT || upload(r, v);
+}
 
 VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level)
 {
