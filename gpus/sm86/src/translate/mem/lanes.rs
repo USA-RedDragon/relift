@@ -443,7 +443,7 @@ impl Ctx {
         self.m.emit(op::LOAD, u, &[var])
     }
 
-    fn local_index(&mut self) -> u32 {
+    pub(crate) fn local_index(&mut self) -> u32 {
         let u = self.u32t();
         let var = self.builtin(BUILTIN_LOCAL_INVOCATION_INDEX, INPUT, u);
         self.m.emit(op::LOAD, u, &[var])

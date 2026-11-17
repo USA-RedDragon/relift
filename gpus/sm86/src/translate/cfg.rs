@@ -73,6 +73,17 @@
 //! arrived at every BAR, and an invocation that runs on with no effects
 //! arrives at each with the others.
 //!
+//! A varying exit from a loop with a BAR, to EXIT or to a block that only
+//! exits, is converted alike: an invocation that takes it stops carrying
+//! out the loop and the code after it (its memory and texture accesses are
+//! skipped) but keeps going round with the others, and the loop is left,
+//! to the exit, once no invocation of the workgroup carries it out any
+//! more, which they find out together through a shared word between
+//! workgroup barriers. The loop's other branches, with its skipped
+//! accesses taken as varying, must leave every BAR and the exit itself
+//! where the whole workgroup runs, and the code from the exit's other arm
+//! on must have no warp operation.
+//!
 //! A selection whose arms meet again before its merge (an arm that leaves
 //! early to code the other arm skips) copies the shared code into each arm.
 //! When that copying grows too much, the program is structured again with
@@ -94,6 +105,10 @@ use crate::spirv::op;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) const EXIT: usize = usize::MAX;
+const WORKGROUP: u32 = 4;
+const SCOPE_WORKGROUP: u32 = 2;
+const SEM_ACQUIRE_RELEASE: u32 = 0x8;
+const SEM_WORKGROUP: u32 = 0x100;
 
 /// A BSSY whose target the structure does not reconverge at: the block
 /// that holds the BSSY, the target instruction and the reason to give if
@@ -199,6 +214,12 @@ struct Conv {
     merge: Option<usize>,
     regs: Vec<u8>,
     preds: Vec<u8>,
+    /// For a varying exit from a loop to a block that only ends the
+    /// invocation: that block. The loop is left when no invocation still
+    /// carries it out.
+    stub: Option<usize>,
+    /// The conversion whose region held the branch before this one.
+    outer: Option<usize>,
 }
 
 /// The branch condition: the guard and the predicates the instruction
@@ -881,6 +902,8 @@ struct Emit<'a> {
     /// Per conversion: whether the invocation carries out the region, and
     /// the saved registers and predicates.
     conv_vars: HashMap<usize, ConvVars>,
+    /// The shared word loop exit conversions vote in.
+    any_word: Option<u32>,
 }
 
 struct ConvVars {
@@ -1005,7 +1028,78 @@ impl Emit<'_> {
         let b = c.boolt();
         let x = c.m.emit(op::LOAD, u, &[v]);
         let z = c.m.c_u32(0);
-        c.m.emit(op::I_NOT_EQUAL, b, &[x, z])
+        let on = c.m.emit(op::I_NOT_EQUAL, b, &[x, z]);
+        match (self.g.conv[k].stub, self.g.conv[k].outer) {
+            (Some(_), Some(o)) => {
+                let o = self.on(c, o);
+                c.m.emit(op::LOGICAL_AND, b, &[on, o])
+            }
+            _ => on,
+        }
+    }
+
+    /// Sets each loop exit conversion's invocation as carrying out its
+    /// region, at the start of the program.
+    fn start(&mut self, c: &mut Ctx) {
+        let one = c.m.c_u32(1);
+        for k in 0..self.g.conv.len() {
+            if self.g.conv[k].stub.is_some() {
+                let v = self.vars(c, k).on;
+                c.m.emit_void(op::STORE, &[v, one]);
+            }
+        }
+    }
+
+    /// At the varying exit of loop exit conversion `k`, `stay` saying
+    /// whether this invocation goes on in the loop: notes that, and gives
+    /// whether any invocation of the workgroup still carries out the loop.
+    /// Every invocation runs this together, so its barriers are uniform.
+    fn leave_loop(&mut self, c: &mut Ctx, k: usize, stay: u32) -> u32 {
+        let b = c.boolt();
+        let u = c.u32t();
+        let on = self.on(c, k);
+        let now = c.m.emit(op::LOGICAL_AND, b, &[on, stay]);
+        let one = c.m.c_u32(1);
+        let z = c.m.c_u32(0);
+        let x = c.select(u, now, one, z);
+        let v = self.vars(c, k).on;
+        c.m.emit_void(op::STORE, &[v, x]);
+        let word = match self.any_word {
+            Some(w) => w,
+            None => {
+                let p = c.m.t_ptr(WORKGROUP, u);
+                let w = c.m.global(p, WORKGROUP);
+                c.globals.push(w);
+                self.any_word = Some(w);
+                w
+            }
+        };
+        let exec = c.m.c_u32(SCOPE_WORKGROUP);
+        let sem = c.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_WORKGROUP);
+        let barrier = |c: &mut Ctx| c.m.emit_void(op::CONTROL_BARRIER, &[exec, exec, sem]);
+        let when = |c: &mut Ctx, cond: u32, f: &dyn Fn(&mut Ctx)| {
+            let then = c.m.id();
+            let merge = c.m.id();
+            c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+            c.m.emit_void(op::BRANCH_CONDITIONAL, &[cond, then, merge]);
+            c.m.emit_void(op::LABEL, &[then]);
+            f(c);
+            c.m.emit_void(op::BRANCH, &[merge]);
+            c.m.emit_void(op::LABEL, &[merge]);
+        };
+        barrier(c);
+        let i = c.local_index();
+        let first = c.m.emit(op::I_EQUAL, b, &[i, z]);
+        when(c, first, &|c| c.m.emit_void(op::STORE, &[word, z]));
+        barrier(c);
+        let on = self.on(c, k);
+        when(c, on, &|c| {
+            let u = c.u32t();
+            c.m.emit(op::ATOMIC_OR, u, &[word, exec, z, one]);
+        });
+        barrier(c);
+        let any = c.m.emit(op::LOAD, u, &[word]);
+        c.m.emit(op::I_NOT_EQUAL, b, &[any, z])
     }
 
     /// Enters the region of conversion `k` from its branch, `take` saying
@@ -1301,6 +1395,7 @@ impl Emit<'_> {
             c.m.emit_void(op::LABEL, &[label]);
             self.content(c, cur)?;
             let mut term = self.g.blocks[cur].term.clone();
+            let mut uniform_exit = None;
             if let Some(k) = self.g.conv.iter().position(|x| x.branch == cur)
                 && let Term::Branch(conds, t, _) = &term
             {
@@ -1312,15 +1407,43 @@ impl Emit<'_> {
                     let b = c.boolt();
                     c.m.emit(op::LOGICAL_NOT, b, &[cv])
                 };
-                self.enter(c, k, take);
-                term = Term::Jump(region);
+                match self.g.conv[k].stub {
+                    Some(stub) => {
+                        let any = self.leave_loop(c, k, take);
+                        uniform_exit = Some((Head::Cond(any), vec![region, stub]));
+                    }
+                    None => {
+                        self.enter(c, k, take);
+                        term = Term::Jump(region);
+                    }
+                }
             }
-            let (head, targets) = match term {
-                Term::Set(var, value, t) => {
-                    let v = self.selector_var(c, var);
-                    let k = c.m.c_u32(value);
-                    c.m.emit_void(op::STORE, &[v, k]);
-                    match self.resolve(t, follow, lp)? {
+            let (head, targets) = if let Some(x) = uniform_exit {
+                x
+            } else {
+                match term {
+                    Term::Set(var, value, t) => {
+                        let v = self.selector_var(c, var);
+                        let k = c.m.c_u32(value);
+                        c.m.emit_void(op::STORE, &[v, k]);
+                        match self.resolve(t, follow, lp)? {
+                            Dest::Inline(t) => {
+                                let l = c.m.id();
+                                self.br(c, l);
+                                cur = t;
+                                label = l;
+                                continue;
+                            }
+                            d => return self.leave(c, &d),
+                        }
+                    }
+                    Term::Dispatch(var, ts) => {
+                        let v = self.selector_var(c, var);
+                        let u = c.u32t();
+                        let s = c.m.emit(op::LOAD, u, &[v]);
+                        (Head::Switch(s, (0..ts.len() as u32).collect()), ts)
+                    }
+                    Term::Jump(t) => match self.resolve(t, follow, lp)? {
                         Dest::Inline(t) => {
                             let l = c.m.id();
                             self.br(c, l);
@@ -1329,29 +1452,13 @@ impl Emit<'_> {
                             continue;
                         }
                         d => return self.leave(c, &d),
+                    },
+                    Term::Branch(conds, t, f) => (Head::Cond(self.cond(c, &conds)?), vec![t, f]),
+                    Term::Switch(sel, base, cases) => {
+                        let s = self.selector(c, sel, base);
+                        let lits = cases.iter().map(|x| x.0).collect();
+                        (Head::Cases(s, lits), cases.iter().map(|x| x.1).collect())
                     }
-                }
-                Term::Dispatch(var, ts) => {
-                    let v = self.selector_var(c, var);
-                    let u = c.u32t();
-                    let s = c.m.emit(op::LOAD, u, &[v]);
-                    (Head::Switch(s, (0..ts.len() as u32).collect()), ts)
-                }
-                Term::Jump(t) => match self.resolve(t, follow, lp)? {
-                    Dest::Inline(t) => {
-                        let l = c.m.id();
-                        self.br(c, l);
-                        cur = t;
-                        label = l;
-                        continue;
-                    }
-                    d => return self.leave(c, &d),
-                },
-                Term::Branch(conds, t, f) => (Head::Cond(self.cond(c, &conds)?), vec![t, f]),
-                Term::Switch(sel, base, cases) => {
-                    let s = self.selector(c, sel, base);
-                    let lits = cases.iter().map(|x| x.0).collect();
-                    (Head::Cases(s, lits), cases.iter().map(|x| x.1).collect())
                 }
             };
             let pd = self.g.ipdom(lp.map(|l| l.header), cur);
@@ -1594,6 +1701,15 @@ impl Graph {
     pub(crate) fn check_barriers(&mut self, code: &Code, convert: bool) -> Res<()> {
         let insts = &code.insts;
         let (partial, exited) = self.partial(code, convert);
+        for k in self.conv.iter().filter(|k| k.stub.is_some()) {
+            if partial[k.branch] || exited[k.branch] {
+                let blk = &self.blocks[k.branch];
+                return bad(format!(
+                    "loop exit at {:#x} in non-uniform control flow",
+                    16 * (blk.end - 1)
+                ));
+            }
+        }
         let entry = self.varying(code, &partial);
         for b in 0..self.blocks.len() {
             let Some(mut v) = entry[b] else { continue };
@@ -1662,6 +1778,14 @@ impl Graph {
         let Term::Branch(_, t, f) = self.blocks[b].term.clone() else {
             return false;
         };
+        let done = match (self.exit_stub(code, t), self.exit_stub(code, f)) {
+            (true, false) => self.convert_loop_exit(code, b, f, t),
+            (false, true) => self.convert_loop_exit(code, b, t, f),
+            _ => false,
+        };
+        if done {
+            return true;
+        }
         let merge = if terminal(t) || terminal(f) {
             None
         } else {
@@ -1768,9 +1892,81 @@ impl Graph {
             merge,
             regs,
             preds,
+            stub: None,
+            outer: None,
         });
         for &u in &body {
             if self.gate[u].is_none_or(|j| dominates(&idom, self.conv[j].branch, b)) {
+                self.gate[u] = Some(k);
+            }
+        }
+        true
+    }
+
+    /// Whether `t` ends the invocation: EXIT, or a block that does
+    /// nothing else.
+    fn exit_stub(&self, code: &Code, t: usize) -> bool {
+        if terminal(t) {
+            return true;
+        }
+        let blk = &self.blocks[t];
+        matches!(blk.term, Term::Jump(EXIT))
+            && code.insts[blk.first..blk.end]
+                .iter()
+                .all(|i| i.guard.is_none() && matches!(i.mnemonic, "EXIT" | "NOP" | "BSYNC"))
+    }
+
+    /// Converts the varying branch `b` of a loop from which invocations
+    /// leave to `stub`, a block that only ends them, and otherwise go on at
+    /// `stay` (see the module documentation); gives whether it did.
+    fn convert_loop_exit(&mut self, code: &Code, b: usize, stay: usize, stub: usize) -> bool {
+        let Some(h) = self.innermost(b) else {
+            return false;
+        };
+        let body = &self.headers[&h].0;
+        if terminal(stay) || (!terminal(stub) && body[stub]) || !body[stay] {
+            return false;
+        }
+        let n = self.blocks.len();
+        let mut stop = vec![false; n];
+        if !terminal(stub) {
+            stop[stub] = true;
+        }
+        let inside = reach(&self.succs, stay, &stop);
+        let region: Vec<usize> = (0..n).filter(|&u| inside[u]).collect();
+        let insts = &code.insts;
+        let has = |f: &dyn Fn(&crate::Inst) -> bool| {
+            region.iter().any(|&u| {
+                let blk = &self.blocks[u];
+                insts[blk.first..blk.end].iter().any(f)
+            })
+        };
+        if !has(&|i| i.mnemonic == "BAR")
+            || has(&|i| {
+                super::simt::cross(i)
+                    || i.mnemonic == "R2UR"
+                    || matches!(i.mnemonic, "KILL" | "BRX" | "BRXU" | "JMP" | "JMX" | "BPT")
+            })
+            || region
+                .iter()
+                .any(|&u| !matches!(self.blocks[u].term, Term::Jump(_) | Term::Branch(..)))
+        {
+            return false;
+        }
+        let idom = idoms(&self.succs, 0);
+        let outer = self.gate[b];
+        let k = self.conv.len();
+        self.conv.push(Conv {
+            branch: b,
+            region: stay,
+            merge: None,
+            regs: Vec::new(),
+            preds: Vec::new(),
+            stub: Some(stub),
+            outer,
+        });
+        for &u in &region {
+            if self.gate[u].is_none_or(|j| j != k && dominates(&idom, self.conv[j].branch, b)) {
                 self.gate[u] = Some(k);
             }
         }
@@ -2227,6 +2423,14 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
         emitted: 0,
         selectors: HashMap::new(),
         conv_vars: HashMap::new(),
+        any_word: None,
     };
+    if e.g.conv.iter().any(|k| k.stub.is_some()) {
+        let body = c.m.id();
+        c.m.emit_void(op::LABEL, &[first]);
+        e.start(c);
+        c.m.emit_void(op::BRANCH, &[body]);
+        return e.region(c, 0, body, None, None);
+    }
     e.region(c, 0, first, None, None)
 }

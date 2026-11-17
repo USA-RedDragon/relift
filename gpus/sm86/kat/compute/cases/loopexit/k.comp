@@ -1,0 +1,24 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430) buffer W { uint w[]; };
+layout(push_constant) uniform Bank { W a; W o; };
+shared uint s[64];
+void main() {
+    uint t = gl_LocalInvocationID.x;
+    uint g = gl_GlobalInvocationID.x;
+    uint v = a.w[g];
+    uint n = v & 7u;
+    uint acc = 0u;
+    for (uint i = 0u;; i++) {
+        s[t] = v + i;
+        barrier();
+        acc = acc * 3u + s[(t + 1u) & 63u];
+        o.w[g] = acc;
+        o.w[256u + g] = i;
+        barrier();
+        if (i >= n) {
+            return;
+        }
+    }
+}
