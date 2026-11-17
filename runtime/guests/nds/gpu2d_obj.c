@@ -3,8 +3,13 @@
  * @brief The OBJ layer of a 2D engine: 128 OBJs of 16 or 256 colors (with
  * the OBJ extended palette) and bitmap OBJs, plain or affine, double size,
  * 1D and 2D tile and bitmap mappings with their boundaries, semi-transparent
- * OBJs, the OBJ window and mosaic (vertical per OBJ, horizontal over the
- * whole OBJ line, as on the GBA). A bitmap OBJ of alpha 0 is not drawn
+ * OBJs, the OBJ window and mosaic. Vertical mosaic is per OBJ. Horizontal
+ * mosaic works on the finished OBJ line, as console captures show: a mosaic
+ * OBJ marks every pixel of its span that no OBJ drew yet, its transparent
+ * texels too, any other OBJ clears the mark on the pixels of its span that
+ * are still undrawn or that it draws, and
+ * a marked pixel that does not start a mosaic block takes the pixel to its
+ * left (drawn or transparent) when that one is marked as well. A bitmap OBJ of alpha 0 is not drawn
  * (the oracle's answer). At one pixel the OBJ of the lowest
  * priority value wins, the lower OAM index at equal priority.
  *
@@ -119,8 +124,6 @@ void nds_eng_obj(rl_nds *m, nds_eng *e, unsigned y)
             if (sx < 0 || sx >= (int32_t)NDS_W)
                 continue;
             unsigned col = bx;
-            if (mos && sx - sx % (int32_t)mw >= ox)
-                col = (unsigned)((sx - sx % (int32_t)mw) - ox);
             unsigned tx, ty;
             if (aff) {
                 int32_t dx = (int32_t)col - (int32_t)(bw / 2), dy = (int32_t)oy - (int32_t)(bh / 2);
@@ -136,6 +139,9 @@ void nds_eng_obj(rl_nds *m, nds_eng *e, unsigned y)
                 ty = (a1 & 0x2000) ? h - 1u - oy : oy;
             }
             int32_t c = texel(m, e, a0, a2, w, tx, ty);
+            nds_px *q = &e->obj[sx];
+            if (mode != 2 && !(q->flags & NDS_PX_ON))
+                q->flags = mos ? NDS_PX_MOSAIC : 0;
             if (c < 0)
                 continue;
             if (mode == 2) {
@@ -151,4 +157,7 @@ void nds_eng_obj(rl_nds *m, nds_eng *e, unsigned y)
             p->alpha = (uint8_t)(a2 >> 12);
         }
     }
+    for (unsigned x = 1; x < NDS_W; x++)
+        if ((e->obj[x].flags & NDS_PX_MOSAIC) && x % mw && (e->obj[x - 1].flags & NDS_PX_MOSAIC))
+            e->obj[x] = e->obj[x - 1];
 }
