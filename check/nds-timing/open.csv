@@ -22,10 +22,3 @@ cpu,idx,name,region,place,mode,attr,hw,relift,note
 9,360,str_alu4,mx,main,warm,cb11,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,392,str_alu4,mx,main,warm,cb10,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,424,str_alu4,mx,main,warm,cb01,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-7,263,bx_thumb,none,main,warm,-,58,6518,"ARM7 Thumb BX PC to ARM in main RAM: 7 over, the burst across its 32-byte blocks"
-7,373,str_alu4,main,main,warm,-,41,4818,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-7,374,str_alu16,main,main,warm,-,65,7918,ARM7 write to main RAM followed by fetches: posting
-7,414,str_alu4,wram7,main,warm,-,32,3918,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-7,415,str_alu16,wram7,main,warm,-,56,7018,ARM7 write to main RAM followed by fetches: posting
-7,454,str_alu4,io,main,warm,-,32,3918,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-7,455,str_alu16,io,main,warm,-,56,7018,ARM7 write to main RAM followed by fetches: posting

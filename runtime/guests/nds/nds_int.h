@@ -399,11 +399,12 @@ struct rl_nds {
     bool itcm_multi;
     /**
      * @brief The ARM7's code burst in main RAM: the last fetch's name (rl_nds_code_cost7), the address the burst
-     * fetches next and the tick its last fetch ended.
+     * fetches next, the tick its last fetch ended and its fetches so far (at most 255).
      */
     uint32_t burst7_name;
     uint32_t burst7_next;
     uint64_t burst7_end;
+    uint8_t burst7_len;
     /** @brief The tick the ARM7's last write to work RAM ended, while no other access followed (WRAM7_WRITE_N). */
     uint64_t wram7_write_end;
     rl_nds_costs costs;

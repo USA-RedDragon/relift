@@ -149,7 +149,10 @@ static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64
  * it at its name. The stream's address decides the 32-byte block. A
  * refill's first fetch always starts the stream: a branch to the next
  * instruction costs the console a full refill (B, BX and MOV PC there 18
- * cycles more than a NOP, Thumb B 9).
+ * cycles more than a NOP, Thumb B 9). The fetch right after a stream's
+ * first that reaches a new 32-byte block is nonsequential (a refill whose
+ * second word is the next block's first); later in a stream the blocks
+ * do not matter (16 ADDs in a row cost 2 cycles each, across two blocks).
  */
 unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 {
@@ -164,12 +167,14 @@ unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
     bool goes_on = seq && (addr == m->burst7_name || addr == m->burst7_name + size);
     uint32_t at = goes_on ? m->burst7_next : addr;
     uint64_t end;
-    if (goes_on && from == m->burst7_end && (at & 31u) && m->ram_free <= from) {
+    bool block = (at & 31u) == 0 && m->burst7_len < 2u;
+    if (goes_on && from == m->burst7_end && !block && m->ram_free <= from) {
         end = from + (size < 4 ? MAIN7_S / 2u : MAIN7_S);
         m->ram_free = end;
     } else {
         end = main7(m, from, false, size, &m->ram_free);
     }
+    m->burst7_len = goes_on && m->burst7_len < 255u ? m->burst7_len + 1u : 1u;
     m->burst7_name = addr;
     m->burst7_next = at + size;
     m->burst7_end = end;
