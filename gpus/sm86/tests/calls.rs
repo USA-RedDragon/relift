@@ -287,3 +287,50 @@ fn trap_ends_the_invocation() {
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert!(count_op(&s.spirv, 253) >= 2, "trap does not return");
 }
+
+fn imad_mov(dst: u64, src: u64) -> [u8; 16] {
+    let w = 0x000f_d800_078e_0002_0000_00ff_ff00_7224u128;
+    let w = (w & !(0xff << 16) & !(0xff << 64)) | (u128::from(dst) << 16) | (u128::from(src) << 64);
+    w.to_le_bytes()
+}
+
+/// A call 20 lines after its return address `MOV`, with `fill` between
+/// (four lines each), to a callee that copies the address with `IMAD.MOV`
+/// and returns through the copy.
+fn far_site(fill: &[[u8; 16]]) -> Vec<u8> {
+    let mut b = Vec::new();
+    let at = 16 * (2 + 4 * fill.len() as u32 + 16);
+    b.extend(mov_imm(20, at + 0x10));
+    b.extend(mov_imm(21, 0));
+    for f in fill {
+        for _ in 0..4 {
+            b.extend(f);
+        }
+    }
+    for _ in 0..16 {
+        b.extend(iadd_imm(1, 1, 1));
+    }
+    let f = (b.len() as u64 + 0x30).next_multiple_of(0x80);
+    b.extend(call_abs(f));
+    b.extend(exit());
+    end_function(&mut b);
+    b.extend(imad_mov(4, 20));
+    b.extend(iadd_imm(1, 1, 1));
+    b.extend(ret_abs(4, 0));
+    end_function(&mut b);
+    b
+}
+
+#[test]
+fn return_address_is_followed_through_straight_code_and_copies() {
+    let b = far_site(&[iadd_imm(2, 2, 1)]);
+    let p = Program::parse(&b);
+    assert!(text(&p).iter().any(|t| t == "IMAD.MOV.U32 R4, RZ, RZ, R20"));
+    assert_eq!(err(&b), None);
+    let clobbered = far_site(&[iadd_imm(20, 20, 0x10)]);
+    assert_eq!(
+        err(&clobbered).as_deref(),
+        Some("CALL without its return address"),
+        "a later write of the register replaces the address"
+    );
+}

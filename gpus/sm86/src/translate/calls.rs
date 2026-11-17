@@ -21,6 +21,9 @@
 use super::{Code, Res, bad};
 use crate::Operand;
 
+/// How far before a CALL the return address `MOV` may be.
+const MOVE_WINDOW: usize = 64;
+
 /// Where a CALL goes.
 pub(super) enum Callee {
     /// To this instruction.
@@ -97,7 +100,7 @@ fn raw_offset(w: crate::Word) -> i64 {
 /// its own offset, relative to itself for `RET.REL`), or for `RET.ABS` by
 /// `LEPC` (its own address), optionally plus an `IADD3` immediate. The
 /// register set is the one the RET reads, or one the callee copies into it
-/// with unguarded register MOVs.
+/// with unguarded register moves (`MOV`, `IMAD.MOV`).
 pub(super) fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
     let rw = code.words[ret];
     if rw.bit(91) {
@@ -107,12 +110,22 @@ pub(super) fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
     if let Ok(Callee::To(callee)) = callee(&code.insts[k], code.words[k], code.insts.len()) {
         for j in (callee..ret).rev() {
             let w = code.words[j];
-            if w.opcode() == 0x202
-                && w.get(72, 4) == 0xf
+            let copy = match w.opcode() {
+                0x202 if w.get(72, 4) == 0xf => Some(w.get(32, 8)),
+                0x224
+                    if code.insts[j].has("MOV")
+                        && !code.insts[j].has("X")
+                        && w.get(24, 8) == 255
+                        && w.get(32, 8) == 255 =>
+                {
+                    Some(w.get(64, 8))
+                }
+                _ => None,
+            };
+            if let Some(src) = copy
                 && code.insts[j].guard.is_none()
                 && regs.contains(&w.get(16, 8))
             {
-                let src = w.get(32, 8);
                 regs.retain(|r| *r != w.get(16, 8));
                 regs.push(src);
             }
@@ -126,13 +139,7 @@ pub(super) fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
     };
     let want = 16 * (k as i64 + 1) - off;
     let window = k.saturating_sub(16)..k;
-    let moved = window.clone().rev().any(|j| {
-        let w = code.words[j];
-        w.opcode() == 0x802
-            && regs.contains(&w.get(16, 8))
-            && i64::from(w.get(32, 32)) == want
-            && code.insts[j].guard.is_none()
-    });
+    let moved = moved_before(code, k, &regs, want);
     if moved || !abs {
         return moved;
     }
@@ -159,6 +166,44 @@ pub(super) fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
             .unwrap_or(0);
         16 * j as i64 + add == want
     })
+}
+
+/// Whether one of `regs` holds `want` at the CALL at `k` through an
+/// unguarded `MOV` of it in the straight-line code before the call: no
+/// transfer and no branch target between, and no other write of that
+/// register after it.
+fn moved_before(code: &Code, k: usize, regs: &[u32], want: i64) -> bool {
+    let entered = |j: usize| {
+        code.insts.iter().any(|i| {
+            i.mnemonic == "BRA"
+                && matches!(i.ops.last(), Some(Operand::Target(t)) if *t == 16 * j as i64)
+        })
+    };
+    let mut live = regs.to_vec();
+    for j in (k.saturating_sub(MOVE_WINDOW)..k).rev() {
+        let i = &code.insts[j];
+        let w = code.words[j];
+        if matches!(
+            i.mnemonic,
+            "BRA" | "JMP" | "EXIT" | "CALL" | "RET" | "BRX" | "BRXU"
+        ) || entered(j + 1)
+        {
+            return false;
+        }
+        if w.opcode() == 0x802
+            && i.guard.is_none()
+            && live.contains(&w.get(16, 8))
+            && i64::from(w.get(32, 32)) == want
+        {
+            return true;
+        }
+        let written = super::uniform::written_regs(i);
+        live.retain(|r| !written.iter().any(|x| u32::from(*x) == *r));
+        if live.is_empty() {
+            return false;
+        }
+    }
+    false
 }
 
 /// Whether the line at `k` is `BRA` to itself.
