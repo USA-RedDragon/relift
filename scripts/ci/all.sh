@@ -4,7 +4,7 @@
 #
 # Jobs named mac-* run on the macOS host CI_MAC (default: the ssh host "mac")
 # from a copy of this working tree: the macOS tests, the macOS and iOS cross
-# builds of the Game Boy and Game Boy Advance programs, and relift for both Apple targets (the CI image builds those on
+# builds of the Game Boy, Game Boy Advance and Nintendo 64 programs, and relift for both Apple targets (the CI image builds those on
 # Linux). With CI_MAC empty or the host unreachable they are reported as
 # skipped. A job that takes longer than the timeout-minutes of the workflow
 # job it stands for is killed, with its children, and fails. Jobs named image-* need docker and the pinned
@@ -22,9 +22,11 @@ image_targets=(x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-wind
 if [ "$(uname -s)" = Linux ]; then
   jobs+=(appimage cross-windows-x64 cross-windows-arm64 cross-android-arm64)
   jobs+=(cross-gba-windows-x64 cross-gba-windows-arm64 cross-gba-android-arm64)
+  jobs+=(cross-n64-windows-x64 cross-n64-windows-arm64 cross-n64-android-arm64)
   for t in "${image_targets[@]}"; do jobs+=("image-$t"); done
 fi
 jobs+=(mac-tests mac-cross-macos-x64 mac-cross-ios-arm64 mac-cross-gba-macos-x64 mac-cross-gba-ios-arm64)
+jobs+=(mac-cross-n64-macos-x64 mac-cross-n64-ios-arm64)
 jobs+=(mac-release-aarch64-apple-darwin mac-release-x86_64-apple-darwin)
 
 CI_MAC=${CI_MAC-mac}
@@ -77,6 +79,7 @@ on_mac() {
 job() {
   case $1 in
     cross-gba-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-gba-}" --guest gba --jobs 4 ;;
+    cross-n64-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-n64-}" --guest n64 --jobs 4 ;;
     cross-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-}" --jobs 4 ;;
     image-*)
       [ -z "$image_skip" ] || { echo "$image_skip"; return 77; }
@@ -87,6 +90,7 @@ job() {
       case $1 in
         mac-tests) on_mac scripts/ci/tests.sh ;;
         mac-cross-gba-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-gba-} --guest gba --jobs 4" ;;
+        mac-cross-n64-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
         mac-cross-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-} --jobs 4" ;;
         mac-release-*) on_mac "cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
       esac

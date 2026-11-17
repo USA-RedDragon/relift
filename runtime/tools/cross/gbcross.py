@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Cross-builds the C runtime and a Game Boy or Game Boy Advance test program
-for one host target.
+"""Cross-builds the C runtime and a Game Boy, Game Boy Advance or Nintendo 64
+test program for one host target.
 
-  python3 -I gbcross.py --target windows-x64 --relift BIN --work DIR [--guest gba] [--run]
+  python3 -I gbcross.py --target windows-x64 --relift BIN --work DIR [--guest gba|n64] [--run]
 
 The Game Boy program is lifted from a generated 32 KiB ROM that loads the
 Mooneye pass registers and stops at `ld b,b`; the Game Boy Advance program
 from a generated cartridge that draws a pattern in bitmap mode 3 and loops
-(--rom FILE takes another ROM instead). `relift build` runs on this host and
+(--rom FILE takes another ROM instead); the Nintendo 64 program from a
+generated ROM that draws with the RDP, shows it through VI and loops, with
+parallel-rdp's C++ in the runtime (linked against the target's libc++). `relift build` runs on this host and
 leaves the generated C and its compile commands in its cache; this script
 compiles those sources, the runtime and, for the Game Boy, the Rust device
 library again for TARGET and links them without the SDL3 window, sound,
@@ -16,8 +18,10 @@ RELIFT_SDL3_DIR, RELIFT_OPUS_DIR and RELIFT_MOLTENVK_DIR at nothing, so the
 host's own libraries never reach the cross build. With --run the program
 runs (on this machine for the host target, under wine for Windows on another
 host, through adb for the Android targets): the Game Boy program in the
-mooneye protocol, the Game Boy Advance program for a few frames, whose frame,
-register and memory hashes must equal those of the host build. A missing
+mooneye protocol, the Game Boy Advance and Nintendo 64 programs for a few
+frames, whose frame, register and memory hashes must equal those of the host
+build (the Nintendo 64 runs, here and there, with no Vulkan driver, so both
+take the machine's own scan-out and an RDP that draws nothing). A missing
 tool stops the run with what to install. Standard library only.
 """
 
@@ -171,11 +175,48 @@ def make_gba_rom(path):
 
 
 GBA_ARGS = ["--headless", "--no-save", "--frames", "5"]
+N64_ARGS = ["--headless", "--no-save", "--no-audio", "--frames", "5"]
+NO_VULKAN = {"VK_ICD_FILENAMES": "none.json", "VK_DRIVER_FILES": "none.json"}
+
+
+def mips(op, rs, rt, imm):
+    return op << 26 | rs << 21 | rt << 16 | (imm & 0xFFFF)
+
+
+def make_n64_rom(path):
+    """Writes a ROM whose code at 0x80001000 (the first MiB the boot copies)
+    puts an RDP display list (a 320 by 240 16-bit color image at 0x300000,
+    fill mode, two filled rectangles, a full sync) in RDRAM through KSEG1,
+    runs it, sets VI to show the image and loops."""
+    rom = bytearray(0x102000)
+    rom[0:4] = (0x80371240).to_bytes(4, "big")
+    rom[8:12] = (0x80001000).to_bytes(4, "big")
+    rom[0x20:0x34] = b"RLCROSS".ljust(20, b" ")
+    rom[0x3B:0x40] = b"NXYE\x01"
+    t0, t1 = 8, 9
+    lui = lambda rt, v: mips(0x0F, 0, rt, v)
+    ori = lambda rt, rs, v: mips(0x0D, rs, rt, v)
+    sw = lambda rt, off, base: mips(0x2B, base, rt, off)
+    dl = [0xFF10013F, 0x00300000, 0xED000000, 0x005003C0, 0xEF300000, 0, 0xF7000000, 0x08430843, 0xF64FC3BC, 0,
+          0xF7000000, 0xF801F801, 0xF647C35C, 0x00080060, 0xE9000000, 0]
+    vi = [0x3002, 0x300000, 320, 0x200, 0, 0x03E52239, 0x20D, 0xC15, 0x0C150C15, 0x006C02EC, 0x002501FF, 0x000E0204, 0x200, 0x400]
+    code = [lui(t0, 0xA028)]
+    for k, w in enumerate(dl):
+        code += [lui(t1, w >> 16), ori(t1, t1, w), sw(t1, 4 * k, t0)]
+    end = 0x280000 + 4 * len(dl)
+    code += [lui(t0, 0xA410), ori(t1, 0, 1), sw(t1, 0xC, t0), lui(t1, 0x28), sw(t1, 0, t0), lui(t1, end >> 16), ori(t1, t1, end), sw(t1, 4, t0), lui(t0, 0xA440)]
+    for k, w in enumerate(vi):
+        code += [lui(t1, w >> 16), ori(t1, t1, w), sw(t1, 4 * k, t0)]
+    code += [mips(0x05, 0, t0, -1), 0]
+    for i, w in enumerate(code):
+        rom[0x1000 + 4 * i:0x1004 + 4 * i] = w.to_bytes(4, "big")
+    with open(path, "wb") as f:
+        f.write(rom)
 
 
 def gba_report(text):
-    """The lines of a Game Boy Advance run that must match between hosts."""
-    return [l for l in text.splitlines() if l.startswith(("frames ", "regs ", "io ", "mem"))]
+    """The lines of a Game Boy Advance or Nintendo 64 run that must match between hosts."""
+    return [l for l in text.splitlines() if l.startswith(("frames ", "regs ", "io ", "vi ", "mem"))]
 
 
 def ninja_builds(path):
@@ -193,8 +234,8 @@ def host_build(args, env):
     if args.rom:
         rom = os.path.abspath(args.rom)
     else:
-        rom = os.path.join(args.work, "rlcross." + args.guest)
-        (make_gba_rom if args.guest == "gba" else make_rom)(rom)
+        rom = os.path.join(args.work, "rlcross." + ("z64" if args.guest == "n64" else args.guest))
+        {"gb": make_rom, "gba": make_gba_rom, "n64": make_n64_rom}[args.guest](rom)
     for cmd in ([args.relift, "-q", "import", rom], [args.relift, "-q", "build"]):
         r = run(cmd, cwd=proj, env=env)
         if r.returncode:
@@ -205,7 +246,7 @@ def host_build(args, env):
         raise Missing("ninja, which relift needs to leave its compile commands for this script: apt install ninja-build, or brew install ninja")
     if len(game) != 1:
         sys.exit(f"{cache}: expected one game build.ninja, found {game}")
-    m = re.search(r"(gba?)-runtime/([0-9a-f]+)/runtime\.o", open(game[0]).read())
+    m = re.search(r"(gba?|n64)-runtime/([0-9a-f]+)/runtime\.o", open(game[0]).read())
     runtime = m and os.path.join(cache, m.group(1) + "-runtime", m.group(2), "build.ninja")
     if not runtime or not os.path.isfile(runtime):
         sys.exit(f"{game[0]}: links no runtime build that has a build.ninja")
@@ -246,6 +287,8 @@ def adjust(flags, tool):
         out.append(f)
     if tool.target["arch"] == "x86_64" and "-mcx16" not in out:
         out.append("-mcx16")
+    if "c++" in out and tool.cc[1:2] == ["cc"] and "-lc++" not in out:
+        out.append("-lc++")
     return out + tool.cflags
 
 
@@ -303,7 +346,7 @@ def check_alignment(exe):
     print(f"LOAD alignment {[hex(a) for a in sorted(set(aligns))]}")
 
 
-def adb_run(exe, work, serial, gba=None):
+def adb_run(exe, work, serial, gba=None, prog=GBA_ARGS, extra=None):
     adb = ["adb"] + (["-s", serial] if serial else [])
     d = "/data/local/tmp/relift-hosts-wave0"
     case = os.path.join(work, "case.txt")
@@ -316,7 +359,8 @@ def adb_run(exe, work, serial, gba=None):
             sys.exit(f"{' '.join(s)}: {r.stderr}{r.stdout}")
     try:
         if gba is not None:
-            r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./game {' '.join(GBA_ARGS)}; echo exit=$?"])
+            env = " ".join(f"{k}={v}" for k, v in (extra or {}).items())
+            r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless {env} HOME={d} ./game {' '.join(prog)}; echo exit=$?"])
             print(r.stdout + r.stderr)
             return "exit=0" in r.stdout and gba_report(r.stdout) == gba
         r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./game --case case.txt --model dmg --stats; echo exit=$?"])
@@ -326,13 +370,13 @@ def adb_run(exe, work, serial, gba=None):
         run(adb + ["shell", f"rm -rf {d}"])
 
 
-def wine_run(exe, work, gba=None):
+def wine_run(exe, work, gba=None, prog=GBA_ARGS, extra=None):
     wine = shutil.which("wine") or shutil.which("wine64")
     if not wine:
         raise Missing("wine, to run the Windows program on Linux (apt install wine64)")
     if gba is not None:
-        env = dict(os.environ, RELIFT_VIDEO="headless", WINEDEBUG="-all", WINEPREFIX=os.path.join(work, "wineprefix"))
-        r = run([wine, exe] + GBA_ARGS, env=env)
+        env = dict(os.environ, RELIFT_VIDEO="headless", WINEDEBUG="-all", WINEPREFIX=os.path.join(work, "wineprefix"), **(extra or {}))
+        r = run([wine, exe] + prog, env=env)
         print(r.stdout + r.stderr)
         return r.returncode == 0 and gba_report(r.stdout) == gba
     case = os.path.join(work, "case.txt")
@@ -344,9 +388,9 @@ def wine_run(exe, work, gba=None):
     return r.returncode == 0 and "relift-gb: pass" in r.stdout
 
 
-def host_run(exe, work, gba=None):
+def host_run(exe, work, gba=None, prog=GBA_ARGS, extra=None):
     if gba is not None:
-        r = run([exe] + GBA_ARGS, env=dict(os.environ, RELIFT_VIDEO="headless"))
+        r = run([exe] + prog, env=dict(os.environ, RELIFT_VIDEO="headless", **(extra or {})))
         print(r.stdout + r.stderr)
         return r.returncode == 0 and gba_report(r.stdout) == gba
     case = os.path.join(work, "case.txt")
@@ -355,6 +399,13 @@ def host_run(exe, work, gba=None):
     r = run([exe, "--case", case, "--model", "dmg", "--stats"], env=dict(os.environ, RELIFT_VIDEO="headless"))
     print(r.stdout + r.stderr)
     return r.returncode == 0 and "relift-gb: pass" in r.stdout
+
+
+def cxx_runtime(tool):
+    """The C++ runtime libraries a program with C++ in it links on the target."""
+    if tool.target["kind"] == "android":
+        return ["-static-libstdc++", "-lc++_static", "-lc++abi"]
+    return ["-lc++"]
 
 
 def runtime_libs(args, tool):
@@ -402,7 +453,7 @@ def main():
     ap.add_argument("--target", required=True, choices=sorted(TARGETS))
     ap.add_argument("--relift", required=True)
     ap.add_argument("--work", required=True)
-    ap.add_argument("--guest", choices=["gb", "gba"], default="gb")
+    ap.add_argument("--guest", choices=["gb", "gba", "n64"], default="gb")
     ap.add_argument("--rom", help="build this ROM instead of the generated one")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--serial")
@@ -425,6 +476,8 @@ def main():
         devlib = device_library(args, tool, env) if args.guest == "gb" else None
         objs, n = compile_all(args, tool, [("game", game), ("rt", rt)])
         print(f"{n} files compile")
+        if args.guest == "n64":
+            tool.libs = tool.libs + cxx_runtime(tool)
         exe = link(args, tool, objs, devlib)
         print(f"linked {exe}")
         guard = [sys.executable, "-I", os.path.join(HERE, "release_guard.py"), "--sources", os.path.join(ROOT, "runtime"), "--objects", os.path.join(args.work, "obj", args.target), "--binary", exe, "--no-interpreter"]
@@ -437,19 +490,20 @@ def main():
         if args.run:
             kind = TARGETS[args.target]["kind"]
             gba = None
-            if args.guest == "gba":
+            prog, extra = (N64_ARGS, NO_VULKAN) if args.guest == "n64" else (GBA_ARGS, None)
+            if args.guest in ("gba", "n64"):
                 host_exe = os.path.join(os.path.dirname(game), "game.exe" if platform.system() == "Windows" else "game")
-                r = run([host_exe] + GBA_ARGS, env=dict(os.environ, RELIFT_VIDEO="headless"))
+                r = run([host_exe] + prog, env=dict(os.environ, RELIFT_VIDEO="headless", **(extra or {})))
                 gba = gba_report(r.stdout)
                 if r.returncode or not gba:
                     sys.exit(f"{host_exe}: the host build did not run: exit {r.returncode}\n{r.stdout}{r.stderr}")
                 print("host build:\n" + "\n".join(gba))
             if kind == "android":
-                ok = adb_run(exe, args.work, args.serial, gba)
+                ok = adb_run(exe, args.work, args.serial, gba, prog, extra)
             elif kind == "windows" and platform.system() != "Windows":
-                ok = wine_run(exe, args.work, gba)
+                ok = wine_run(exe, args.work, gba, prog, extra)
             else:
-                ok = host_run(exe, args.work, gba)
+                ok = host_run(exe, args.work, gba, prog, extra)
             if not ok:
                 sys.exit(f"{args.target}: the program did not pass")
             print(f"{args.target}: program passes")
