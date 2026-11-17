@@ -199,6 +199,39 @@ fn offsets_set_in_an_earlier_block_stay_constant() {
     }
 }
 
+/// Instructions between the move and the sample that write the registers
+/// right below the offset register, but not it, keep it constant: a
+/// texture result of three components (Rd, Rd + 1, Rd2, so Rd2 + 1 keeps
+/// its value, as on an RTX 3090), one of four F16 components (Rd and Rd2
+/// only) and a 32-bit constant load.
+#[test]
+fn writes_next_to_the_offset_keep_it_constant() {
+    let t = tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)]);
+    let three = tex(
+        0x160,
+        &[(64, 8, 3), (32, 8, 255), (61, 3, 1), (72, 4, 7), (87, 3, 1)],
+    );
+    let f16 = tex(
+        0x160,
+        &[(64, 8, 3), (32, 8, 255), (61, 3, 1), (79, 2, 1), (87, 3, 1)],
+    );
+    let ldc = word(
+        0x182,
+        5,
+        &[
+            (16, 8, 3),
+            (24, 8, 255),
+            (38, 16, 0x20),
+            (54, 5, 3),
+            (73, 3, 4),
+        ],
+    );
+    for w in [three, f16, ldc] {
+        let s = compute(&[mov(4, 0xf1), w, t]);
+        assert!(insts(&s.spirv, 88).iter().any(|i| i[5] & 8 != 0));
+    }
+}
+
 /// A BRX reaches only the cases the translation gives it, so a later BRX
 /// does not bring another value of the offset register into a block
 /// before it.

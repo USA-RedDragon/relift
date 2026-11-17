@@ -76,6 +76,7 @@
 //! returns for an uncompressed surface.
 
 use super::mem::tuple_reg;
+use super::uniform;
 use super::{Code, Ctx, Res, TEXTURE_SET, bad, cfg};
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
@@ -235,56 +236,13 @@ pub(crate) struct Prep {
     tmml_dims: BTreeMap<(u32, u32), Option<Dim>>,
     starts: Vec<bool>,
     imm: Vec<Option<(u8, u32)>>,
-    writes: Vec<Vec<(u8, u8)>>,
     vars: BTreeMap<u32, u32>,
     /// Instructions that may run just before each instruction; `None` when
     /// the program has control flow this does not follow (indirect
     /// branches, calls, BREAK).
     preds: Option<Vec<Vec<usize>>>,
-    /// The registers each instruction names, each with how many registers
-    /// from it the instruction may write (see [`tuple_width`]).
-    names: Vec<Vec<(u8, u8)>>,
-}
-
-/// The registers an instruction's text names: `R` and digits not after a
-/// letter, digit or underscore (so not `UR4` or `SR_TID`).
-fn named_regs(i: &Inst) -> Vec<u8> {
-    let t = i.to_string();
-    let b = t.as_bytes();
-    let mut v = Vec::new();
-    for k in 0..b.len() {
-        if b[k] != b'R' || (k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_')) {
-            continue;
-        }
-        let digits: String = t[k + 1..]
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect();
-        if let Ok(r) = digits.parse::<u8>() {
-            v.push(r);
-        }
-    }
-    v
-}
-
-/// How many registers from each one it names an instruction may write: four
-/// for anything that may write a register tuple (memory and matrix
-/// operations, 64-bit and wider forms, CS2R), one otherwise.
-fn tuple_width(i: &Inst) -> u8 {
-    let wide = i
-        .mods
-        .iter()
-        .any(|m| m.contains("64") || m.contains("128") || m.contains("WIDE"));
-    let tuples = i.mnemonic.starts_with("LD")
-        || i.mnemonic.starts_with("AT")
-        || i.mnemonic.starts_with('D')
-        || i.mnemonic.starts_with("SU")
-        || i.mnemonic.contains("MMA")
-        || matches!(
-            i.mnemonic,
-            "ALD" | "IPA" | "RED" | "CS2R" | "SHFL" | "MATCH"
-        );
-    if wide || tuples { 4 } else { 1 }
+    /// The registers each instruction writes or may write.
+    writes: Vec<Vec<u8>>,
 }
 
 /// The instructions that may run right after each one, or `None` for
@@ -328,10 +286,6 @@ fn successors(code: &Code) -> Option<Vec<Vec<usize>>> {
     Some(s)
 }
 
-fn is_texture(m: &str) -> bool {
-    matches!(m, "TEX" | "TLD" | "TLD4" | "TMML" | "TXD" | "TXQ")
-}
-
 fn imm_of(o: &Operand) -> Option<u32> {
     match o {
         Operand::Hex(v) => Some(*v as u32),
@@ -347,14 +301,7 @@ impl Prep {
         let mut p = Prep {
             starts: vec![false; n + 1],
             imm: vec![None; n],
-            writes: vec![Vec::new(); n],
-            names: insts
-                .iter()
-                .map(|i| {
-                    let w = tuple_width(i);
-                    named_regs(i).into_iter().map(|r| (r, w)).collect()
-                })
-                .collect(),
+            writes: insts.iter().map(uniform::written_regs).collect(),
             preds: successors(code).map(|s| {
                 let mut p = vec![Vec::new(); n];
                 for (k, ts) in s.iter().enumerate() {
@@ -395,46 +342,6 @@ impl Prep {
                     | "RTT"
             ) {
                 p.starts[k + 1] = true;
-            }
-            let firsts: Vec<u8> = if is_texture(i.mnemonic) || i.mnemonic.starts_with("SU") {
-                i.ops
-                    .iter()
-                    .take(3)
-                    .filter_map(|o| match o {
-                        Operand::Reg(r, _) => Some(*r),
-                        _ => None,
-                    })
-                    .collect()
-            } else {
-                i.ops
-                    .iter()
-                    .find(|o| !matches!(o, Operand::Pred(..) | Operand::UPred(..)))
-                    .and_then(|o| match o {
-                        Operand::Reg(r, _) => Some(*r),
-                        _ => None,
-                    })
-                    .into_iter()
-                    .collect()
-            };
-            p.writes[k] = firsts
-                .into_iter()
-                .filter(|r| *r != 255)
-                .map(|r| (r, 4))
-                .collect();
-            if is_texture(i.mnemonic) || i.mnemonic.starts_with("SU") {
-                // The destinations come first: Rd2 and Rd of a texture
-                // instruction, two registers each at most; Rd of a surface
-                // one, up to four.
-                let (n, w) = if is_texture(i.mnemonic) {
-                    (2, 2)
-                } else {
-                    (1, 4)
-                };
-                let dsts = i.ops.iter().filter_map(|o| match o {
-                    Operand::Reg(r, _) => Some(*r),
-                    _ => None,
-                });
-                p.names[k] = dsts.take(n).filter(|&r| r != 255).map(|r| (r, w)).collect();
             }
             if i.guard.is_none() {
                 let mov = match (i.mnemonic, i.ops.as_slice()) {
@@ -501,18 +408,14 @@ impl Prep {
 
     /// The value register `r` holds before instruction `k`: the immediate
     /// that unpredicated moves leave in it on every path that reaches `k`,
-    /// with no other instruction that names `r` between. The paths follow
+    /// with no other instruction that may write `r` between. The paths follow
     /// the program's branches; without them (see [`successors`]) only the
     /// block of `k` counts.
     fn known(&self, k: usize, r: u8) -> Option<u32> {
         let Some(preds) = &self.preds else {
             return self.known_in_block(k, r);
         };
-        let names = |j: usize| {
-            self.names[j]
-                .iter()
-                .any(|&(q, w)| r >= q && u32::from(r) < u32::from(q) + u32::from(w))
-        };
+        let names = |j: usize| self.writes[j].contains(&r);
         let mut seen = vec![false; preds.len()];
         let mut todo = vec![k];
         let mut value = None;
@@ -552,10 +455,7 @@ impl Prep {
             {
                 return Some(v);
             }
-            if self.writes[j]
-                .iter()
-                .any(|&(lo, n)| r >= lo && u32::from(r) < u32::from(lo) + u32::from(n))
-            {
+            if self.writes[j].contains(&r) {
                 return None;
             }
         }
