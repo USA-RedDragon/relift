@@ -10,7 +10,7 @@
 //! `--prim-id-loc N`, `--frag-per-prim MASK`.
 
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::mesh_fallback::{mesh_record_words, scan, vertex};
+use relift_gpu_sm86::translate::mesh_fallback::{indexed, mesh_record_words, scan, vertex};
 use relift_gpu_sm86::translate::{
     HostProfile, MeshPipeline, MeshTopology, Options, mesh_components, translate_with,
 };
@@ -73,8 +73,9 @@ fn main() {
             &vertex(&p, &sph).expect("vertex shader"),
         );
         println!(
-            "ok {n} components {} record words",
-            mesh_record_words(&p, n)
+            "ok {n} components {} record words {}",
+            mesh_record_words(&p, n),
+            if indexed(&p) { "indexed" } else { "listed" }
         );
         return;
     }

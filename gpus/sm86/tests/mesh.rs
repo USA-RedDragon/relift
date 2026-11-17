@@ -9,7 +9,7 @@ mod common;
 
 use common::{translate_with, validate};
 use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::mesh_fallback::{scan, vertex};
+use relift_gpu_sm86::translate::mesh_fallback::{indexed, scan, vertex};
 use relift_gpu_sm86::translate::{
     HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options,
 };
@@ -155,6 +155,19 @@ fn the_compute_back_end_helpers_validate() {
         validate(&scan());
         validate(&vertex(&c.pipe, &sph).unwrap_or_else(|e| panic!("{}: {e}", c.name)));
     }
+}
+
+/// Only pipelines with per-primitive outputs, which every vertex of a
+/// primitive must carry, draw the compute back end without indices.
+#[test]
+fn pipelines_without_per_primitive_outputs_draw_indexed() {
+    let mut listed: Vec<String> = cases()
+        .into_iter()
+        .filter(|c| !indexed(&c.pipe))
+        .map(|c| c.name)
+        .collect();
+    listed.sort();
+    assert_eq!(listed, ["ext-cull", "nv-prim"]);
 }
 
 #[test]

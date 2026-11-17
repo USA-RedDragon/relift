@@ -22,14 +22,15 @@
 //!    and stores mesh record `g` ([`mesh_record_words`]). A workgroup past
 //!    [`H_MESH_CAP`] records sets [`H_OVERFLOW`] and stores nothing: the
 //!    runtime must grow the buffer and draw again. Workgroup 0 writes the
-//!    non-indexed indirect draw in [`H_DRAW`]: every mesh gets
-//!    `max_primitives` primitive slots;
+//!    indirect draw: every mesh gets `max_primitives` primitive slots;
 //! 4. the draw, with the list topology of the mesh output and the vertex
-//!    shader [`vertex`] builds: vertex `i` is corner `i % k` of slot
-//!    `i / k`, primitive `slot % max_primitives` of mesh
-//!    `slot / max_primitives`, so the primitives come in task, mesh and
-//!    primitive order. A slot past the mesh's primitive count is put
-//!    outside the clip volume and draws nothing.
+//!    shader [`vertex`] builds. Slot `s` is primitive `s % max_primitives`
+//!    of mesh `s / max_primitives`, so the primitives come in task, mesh
+//!    and primitive order, and a slot past the mesh's primitive count is
+//!    put outside the clip volume and draws nothing. Without per-primitive
+//!    outputs the draw is [`indexed`] ([`H_DRAW_INDEXED`], indices in the
+//!    index region the mesh pass writes); otherwise it is not
+//!    ([`H_DRAW`]) and vertex `i` is corner `i % k` of slot `i / k`.
 //!
 //! Without a task program, steps 1 and 2 are skipped and the runtime sets
 //! [`H_MESHES`] and the mesh dispatch itself.
@@ -64,6 +65,14 @@ pub const H_TASK_SCAN: u32 = 14;
 /// Word offset of mesh record 0 (records of [`mesh_record_words`]): set by
 /// the runtime.
 pub const H_MESH_RECS: u32 = 15;
+/// Word offset of the index region (`H_MESH_CAP` meshes of
+/// `MeshPipeline::index_words` indices) of an [`indexed`] draw: set by the
+/// runtime.
+pub const H_INDEXES: u32 = 16;
+/// Indexed indirect draw of an [`indexed`] pipeline (index count, instance
+/// count, first index, vertex offset, first instance), with the storage
+/// buffer bound as the 32-bit index buffer at offset 0.
+pub const H_DRAW_INDEXED: u32 = 17;
 /// Words of the header.
 pub const HEADER_WORDS: u32 = 32;
 /// The widest x of an indirect dispatch the passes write.
@@ -91,6 +100,16 @@ const SEM_WORKGROUP_MEMORY: u32 = 0x100;
 pub fn mesh_record_words(p: &MeshPipeline, components: u32) -> u32 {
     let prims = p.primitive_components().map_or(0, |v| v.len() as u32);
     1 + p.index_words() + p.vertex_words(components) + p.primitive_words(prims)
+}
+
+/// The draw is indexed: without per-primitive outputs, vertices that
+/// primitives share run the vertex shader once. Vertex `v` of mesh `g` is
+/// index `g * (max_vertices + 1) + v`; index `g * (max_vertices + 1) +
+/// max_vertices` is a vertex outside the clip volume, for the slots past
+/// the mesh's primitive count. The largest index, `H_MESH_CAP *
+/// (max_vertices + 1) - 1`, must be within `maxDrawIndexedIndexValue`.
+pub fn indexed(p: &MeshPipeline) -> bool {
+    p.primitive_components().is_ok_and(|v| v.is_empty())
 }
 
 /// Word of component `k` of element `e` in blocks of 32 elements of `n`
@@ -238,12 +257,24 @@ pub(crate) fn enter(c: &mut Ctx, lane: u32, vars: &[u32]) -> Res<()> {
                 let p = c.io.mesh.pipe.clone();
                 let verts = c.lk_mul(m, p.max_primitives * p.topology.vertices());
                 let one = c.m.c_u32(1);
-                for (h, v) in [
-                    (H_DRAW, verts),
-                    (H_DRAW + 1, one),
-                    (H_DRAW + 2, zero),
-                    (H_DRAW + 3, zero),
-                ] {
+                let draw = if indexed(&p) {
+                    let first = header(c, buf, H_INDEXES);
+                    vec![
+                        (H_DRAW_INDEXED, verts),
+                        (H_DRAW_INDEXED + 1, one),
+                        (H_DRAW_INDEXED + 2, first),
+                        (H_DRAW_INDEXED + 3, zero),
+                        (H_DRAW_INDEXED + 4, zero),
+                    ]
+                } else {
+                    vec![
+                        (H_DRAW, verts),
+                        (H_DRAW + 1, one),
+                        (H_DRAW + 2, zero),
+                        (H_DRAW + 3, zero),
+                    ]
+                };
+                for (h, v) in draw {
                     let k = c.m.c_u32(h);
                     store(c, buf, k, v);
                 }
@@ -338,17 +369,42 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
             let ni = c.lk_mul(n, vpp);
             let map = c.map_var();
             let maxv = c.m.c_u32(p.max_vertices - 1);
-            c.counted_loop(i_var, lane, ni, step, |c, i| {
+            let local = |c: &mut Ctx, i: u32| {
                 let u = c.u32t();
                 let at = add(c, i, one);
                 let ptr = c.elem_ptr(map, WORKGROUP, at);
                 let v = c.m.emit(op::LOAD, u, &[ptr]);
                 let glsl = c.glsl;
-                let v =
-                    c.m.emit(op::EXT_INST, u, &[glsl, crate::spirv::glsl::U_MIN, v, maxv]);
-                let at = add(c, ib, i);
-                store(c, buf, at, v);
-            });
+                c.m.emit(op::EXT_INST, u, &[glsl, crate::spirv::glsl::U_MIN, v, maxv])
+            };
+            if indexed(&p) {
+                let iw = p.index_words();
+                let idx = header(c, buf, H_INDEXES);
+                let off = c.lk_mul(lin, iw);
+                let idx = add(c, idx, off);
+                let first = c.lk_mul(lin, p.max_vertices + 1);
+                let dead = c.m.c_u32(p.max_vertices);
+                let dead = add(c, first, dead);
+                let iwc = c.m.c_u32(iw);
+                c.counted_loop(i_var, lane, iwc, step, |c, i| {
+                    let u = c.u32t();
+                    let b = c.boolt();
+                    let live = c.m.emit(op::U_LESS_THAN, b, &[i, ni]);
+                    let k = c.m.c_u32(iw - 1);
+                    let j = c.select(u, live, i, k);
+                    let v = local(c, j);
+                    let v = add(c, first, v);
+                    let v = c.select(u, live, v, dead);
+                    let at = add(c, idx, i);
+                    store(c, buf, at, v);
+                });
+            } else {
+                c.counted_loop(i_var, lane, ni, step, |c, i| {
+                    let v = local(c, i);
+                    let at = add(c, ib, i);
+                    store(c, buf, at, v);
+                });
+            }
             let iw = c.m.c_u32(p.index_words());
             let vb = add(c, ib, iw);
             let np = super::prim_components(c).len() as u32;
@@ -479,30 +535,51 @@ pub fn vertex(p: &MeshPipeline, sph: &[u32; 32]) -> Res<Vec<u32>> {
     let i = c.builtin(B_VERTEX_INDEX, INPUT, i32t);
     let iv = c.m.emit(op::LOAD, i32t, &[i]);
     let iv = c.m.emit(op::BITCAST, u, &[iv]);
-    let vpp = p.topology.vertices();
-    let k = c.m.c_u32(vpp);
-    let q = c.m.emit(op::U_DIV, u, &[iv, k]);
-    let corner = c.m.emit(op::U_MOD, u, &[iv, k]);
-    let maxp = c.m.c_u32(p.max_primitives);
-    let g = c.m.emit(op::U_DIV, u, &[q, maxp]);
-    let prim = c.m.emit(op::U_MOD, u, &[q, maxp]);
     let mr = mesh_record_words(p, nc);
     let recs = header(&mut c, buf, H_MESH_RECS);
-    let off = c.lk_mul(g, mr);
-    let rec = add(&mut c, recs, off);
-    let count = load(&mut c, buf, rec);
     let bt = c.boolt();
-    let live = c.m.emit(op::U_LESS_THAN, bt, &[prim, count]);
+    let one = c.m.c_u32(1);
+    let (g, live, prim) = if indexed(p) {
+        let k = c.m.c_u32(p.max_vertices + 1);
+        let g = c.m.emit(op::U_DIV, u, &[iv, k]);
+        let v = c.m.emit(op::U_MOD, u, &[iv, k]);
+        let maxv = c.m.c_u32(p.max_vertices);
+        let live = c.m.emit(op::U_LESS_THAN, bt, &[v, maxv]);
+        (g, live, None)
+    } else {
+        let vpp = p.topology.vertices();
+        let k = c.m.c_u32(vpp);
+        let q = c.m.emit(op::U_DIV, u, &[iv, k]);
+        let corner = c.m.emit(op::U_MOD, u, &[iv, k]);
+        let maxp = c.m.c_u32(p.max_primitives);
+        let g = c.m.emit(op::U_DIV, u, &[q, maxp]);
+        let prim = c.m.emit(op::U_MOD, u, &[q, maxp]);
+        let off = c.lk_mul(g, mr);
+        let rec = add(&mut c, recs, off);
+        let count = load(&mut c, buf, rec);
+        let live = c.m.emit(op::U_LESS_THAN, bt, &[prim, count]);
+        (g, live, Some((prim, corner)))
+    };
     let (body, dead, merge) = (c.m.id(), c.m.id(), c.m.id());
     c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
     c.m.emit_void(op::BRANCH_CONDITIONAL, &[live, body, dead]);
     c.m.emit_void(op::LABEL, &[body]);
-    let one = c.m.c_u32(1);
+    let off = c.lk_mul(g, mr);
+    let rec = add(&mut c, recs, off);
     let ib = add(&mut c, rec, one);
-    let pi = c.lk_mul(prim, vpp);
-    let pi = add(&mut c, ib, pi);
-    let pi = add(&mut c, pi, corner);
-    let v = load(&mut c, buf, pi);
+    let (v, prim) = match prim {
+        Some((prim, corner)) => {
+            let pi = c.lk_mul(prim, p.topology.vertices());
+            let pi = add(&mut c, ib, pi);
+            let pi = add(&mut c, pi, corner);
+            (load(&mut c, buf, pi), prim)
+        }
+        None => {
+            let k = c.m.c_u32(p.max_vertices + 1);
+            let v = c.m.emit(op::U_MOD, u, &[iv, k]);
+            (v, v)
+        }
+    };
     let iw = c.m.c_u32(p.index_words());
     let vb = add(&mut c, ib, iw);
     let v4 = c.m.t_vec(f, 4);
