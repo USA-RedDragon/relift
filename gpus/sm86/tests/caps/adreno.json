@@ -1,0 +1,142 @@
+{
+ "devices": [
+  {
+   "VK_EXT_descriptor_indexing": {
+    "descriptorIndexingPropertiesEXT": {
+     "maxDescriptorSetUpdateAfterBindSampledImages": 16777216.0,
+     "maxDescriptorSetUpdateAfterBindSamplers": 16777216.0,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 16777216.0
+    }
+   },
+   "VK_EXT_shader_atomic_float": {
+    "shaderAtomicFloatFeaturesEXT": {
+     "shaderBufferFloat32AtomicAdd": 0.0
+    }
+   },
+   "VK_EXT_shader_demote_to_helper_invocation": {
+    "shaderDemoteToHelperInvocationFeaturesEXT": {
+     "shaderDemoteToHelperInvocation": 1.0
+    }
+   },
+   "VK_EXT_subgroup_size_control": {
+    "subgroupSizeControlFeaturesEXT": {
+     "computeFullSubgroups": 1.0,
+     "subgroupSizeControl": 1.0
+    },
+    "subgroupSizeControlPropertiesEXT": {
+     "maxSubgroupSize": 128.0,
+     "minSubgroupSize": 64.0,
+     "requiredSubgroupSizeStages": 32.0
+    }
+   },
+   "VK_KHR_buffer_device_address": {
+    "bufferDeviceAddressFeaturesKHR": {
+     "bufferDeviceAddress": 1.0
+    }
+   },
+   "VK_KHR_driver_properties": {
+    "driverPropertiesKHR": {
+     "driverID": 8.0
+    }
+   },
+   "VK_KHR_shader_float_controls": {
+    "floatControlsPropertiesKHR": {
+     "shaderDenormFlushToZeroFloat32": 1.0,
+     "shaderDenormPreserveFloat32": 0.0,
+     "shaderSignedZeroInfNanPreserveFloat32": 1.0
+    }
+   },
+   "bufferDeviceAddressFeatures": {
+    "bufferDeviceAddress": 1.0
+   },
+   "core11": {
+    "properties": {
+     "subgroupSize": 64.0,
+     "subgroupSupportedOperations": 191.0,
+     "subgroupSupportedStages": 48.0
+    }
+   },
+   "core12": {
+    "features": {
+     "bufferDeviceAddress": 1.0,
+     "shaderBufferInt64Atomics": 0.0,
+     "shaderSharedInt64Atomics": 0.0
+    },
+    "properties": {
+     "driverID": 8.0,
+     "maxDescriptorSetUpdateAfterBindSampledImages": 16777216.0,
+     "maxDescriptorSetUpdateAfterBindSamplers": 16777216.0,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 16777216.0,
+     "shaderDenormFlushToZeroFloat32": 1.0,
+     "shaderDenormPreserveFloat32": 0.0,
+     "shaderSignedZeroInfNanPreserveFloat32": 1.0
+    }
+   },
+   "core13": {
+    "features": {
+     "computeFullSubgroups": 1.0,
+     "shaderDemoteToHelperInvocation": 1.0,
+     "subgroupSizeControl": 1.0
+    },
+    "properties": {
+     "maxSubgroupSize": 128.0,
+     "minSubgroupSize": 64.0,
+     "requiredSubgroupSizeStages": 32.0
+    }
+   },
+   "descriptorIndexingProperties": {
+    "maxDescriptorSetUpdateAfterBindSampledImages": 16777216.0,
+    "maxDescriptorSetUpdateAfterBindSamplers": 16777216.0,
+    "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 16777216.0
+   },
+   "driverProperties": {
+    "driverID": 8.0
+   },
+   "extensions": [
+    {
+     "extensionName": "VK_EXT_shader_atomic_float",
+     "specVersion": 1.0
+    }
+   ],
+   "features": {
+    "shaderInt64": 0.0
+   },
+   "floatControlsProperties": {
+    "shaderDenormFlushToZeroFloat32": 1.0,
+    "shaderDenormPreserveFloat32": 0.0,
+    "shaderSignedZeroInfNanPreserveFloat32": 1.0
+   },
+   "properties": {
+    "deviceID": 1124403713.0,
+    "deviceName": "Adreno (TM) 740",
+    "limits": {
+     "maxComputeSharedMemorySize": 32768.0,
+     "maxStorageBufferRange": 134217728.0
+    },
+    "vendorID": 20803.0
+   },
+   "shaderAtomicInt64Features": {
+    "shaderBufferInt64Atomics": 0.0,
+    "shaderSharedInt64Atomics": 0.0
+   },
+   "shaderDemoteToHelperInvocationFeatures": {
+    "shaderDemoteToHelperInvocation": 1.0
+   },
+   "subgroupProperties": {
+    "subgroupSize": 64.0,
+    "supportedOperations": 191.0,
+    "supportedStages": 48.0
+   },
+   "subgroupSizeControlFeatures": {
+    "computeFullSubgroups": 1.0,
+    "subgroupSizeControl": 1.0
+   },
+   "subgroupSizeControlProperties": {
+    "maxSubgroupSize": 128.0,
+    "minSubgroupSize": 64.0,
+    "requiredSubgroupSizeStages": 32.0
+   }
+  }
+ ],
+ "source": "adb shell cmd gpu vkjson, Adreno (TM) 740, Qualcomm driver 0676.53, Android 17"
+}

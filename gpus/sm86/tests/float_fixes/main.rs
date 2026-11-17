@@ -1122,17 +1122,17 @@ fn ffma_is_exact_without_a_fused_host_fma() {
     }
 }
 
-/// Only presets whose device reports `shaderFmaFloat32` use `OpFmaKHR`, and
-/// the report says so.
+/// Only presets whose device capture reports `shaderFmaFloat32` use
+/// `OpFmaKHR`, and the report says so.
 #[test]
-fn only_measured_presets_count_on_a_fused_fma() {
+fn only_presets_reporting_fma_count_on_a_fused_fma() {
     let fused: Vec<_> = HostProfile::presets()
         .into_iter()
         .chain([HostProfile::minimal()])
         .filter(|h| h.fused_fma)
         .map(|h| h.name)
         .collect();
-    assert_eq!(fused, ["nvidia"]);
+    assert_eq!(fused, ["nvidia", "radv", "amd_pro", "anv", "moltenvk"]);
     for h in HostProfile::presets() {
         let p = program(ffma(RN), 0, 0, 0);
         let s = translate_with(&p, &host(h.clone())).unwrap_or_else(|e| panic!("{e}"));

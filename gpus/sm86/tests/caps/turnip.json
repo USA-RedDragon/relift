@@ -1,0 +1,166 @@
+{
+ "capabilities": {
+  "device": {
+   "extensions": {
+    "VK_EXT_shader_atomic_float": 1,
+    "VK_KHR_shader_clock": 1
+   },
+   "features": {
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesKHR": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceFeatures": {
+     "shaderInt64": true
+    },
+    "VkPhysicalDeviceFeaturesFromReportPage": {
+     "shaderDeviceClock": true,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderAtomicFloatFeaturesEXT": {
+     "shaderBufferFloat32AtomicAdd": false
+    },
+    "VkPhysicalDeviceShaderAtomicInt64FeaturesKHR": {
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": false
+    },
+    "VkPhysicalDeviceShaderClockFeaturesKHR": {
+     "shaderDeviceClock": true,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT": {
+     "shaderDemoteToHelperInvocation": true
+    },
+    "VkPhysicalDeviceSubgroupSizeControlFeaturesEXT": {
+     "computeFullSubgroups": true,
+     "subgroupSizeControl": true
+    },
+    "VkPhysicalDeviceVulkan12Features": {
+     "bufferDeviceAddress": true,
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": false
+    },
+    "VkPhysicalDeviceVulkan13Features": {
+     "computeFullSubgroups": true,
+     "shaderDemoteToHelperInvocation": true,
+     "subgroupSizeControl": true
+    }
+   },
+   "properties": {
+    "VkPhysicalDeviceDescriptorIndexingPropertiesEXT": {
+     "maxDescriptorSetUpdateAfterBindSampledImages": 16777216,
+     "maxDescriptorSetUpdateAfterBindSamplers": 16777216,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 16777216
+    },
+    "VkPhysicalDeviceDriverPropertiesKHR": {
+     "driverID": "VK_DRIVER_ID_MESA_TURNIP"
+    },
+    "VkPhysicalDeviceFloatControlsPropertiesKHR": {
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceProperties": {
+     "limits": {
+      "maxComputeSharedMemorySize": 32768,
+      "maxStorageBufferRange": 134217728
+     },
+     "vendorID": 20803
+    },
+    "VkPhysicalDeviceSubgroupProperties": {
+     "subgroupSize": 128,
+     "supportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "supportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    },
+    "VkPhysicalDeviceSubgroupSizeControlPropertiesEXT": {
+     "maxSubgroupSize": 128,
+     "minSubgroupSize": 64,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT",
+      "VK_SHADER_STAGE_SUBPASS_SHADING_BIT_HUAWEI"
+     ]
+    },
+    "VkPhysicalDeviceVulkan11Properties": {
+     "subgroupSize": 128,
+     "subgroupSupportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "subgroupSupportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan12Properties": {
+     "driverID": "VK_DRIVER_ID_MESA_TURNIP",
+     "maxDescriptorSetUpdateAfterBindSampledImages": 16777216,
+     "maxDescriptorSetUpdateAfterBindSamplers": 16777216,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 16777216,
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceVulkan13Properties": {
+     "maxSubgroupSize": 128,
+     "minSubgroupSize": 64,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT",
+      "VK_SHADER_STAGE_SUBPASS_SHADING_BIT_HUAWEI"
+     ]
+    }
+   }
+  }
+ },
+ "source": "vulkan.gpuinfo.org report 42513 (profile and report page): OPPO PGEM10 driver 25.2.99 on Android 15.0"
+}

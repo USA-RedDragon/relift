@@ -223,7 +223,7 @@ fn scan(p: &Program, t: &mut Tally) {
     }
     if warp_quad + warp_full > 0 {
         for h in HostProfile::presets() {
-            let name = h.name;
+            let name = h.name.clone();
             match translate_with(
                 p,
                 &Options {

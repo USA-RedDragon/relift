@@ -1,0 +1,191 @@
+{
+ "capabilities": {
+  "device": {
+   "extensions": {
+    "VK_EXT_mesh_shader": 1,
+    "VK_EXT_shader_atomic_float": 1,
+    "VK_EXT_shader_image_atomic_int64": 1,
+    "VK_KHR_shader_clock": 1,
+    "VK_KHR_shader_fma": 1,
+    "VK_KHR_shader_maximal_reconvergence": 1
+   },
+   "features": {
+    "VkPhysicalDeviceBufferAddressFeaturesEXT": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesEXT": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesKHR": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceFeatures": {
+     "shaderInt64": true
+    },
+    "VkPhysicalDeviceFeaturesFromReportPage": {
+     "meshShader": true,
+     "shaderBufferFloat32AtomicAdd": true,
+     "shaderDeviceClock": true,
+     "shaderFmaFloat32": true,
+     "shaderImageInt64Atomics": true,
+     "shaderMaximalReconvergence": true,
+     "shaderSubgroupClock": true,
+     "taskShader": true
+    },
+    "VkPhysicalDeviceMeshShaderFeaturesEXT": {
+     "meshShader": true,
+     "taskShader": true
+    },
+    "VkPhysicalDeviceShaderAtomicFloatFeaturesEXT": {
+     "shaderBufferFloat32AtomicAdd": true
+    },
+    "VkPhysicalDeviceShaderAtomicInt64FeaturesKHR": {
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": true
+    },
+    "VkPhysicalDeviceShaderClockFeaturesKHR": {
+     "shaderDeviceClock": true,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT": {
+     "shaderDemoteToHelperInvocation": true
+    },
+    "VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT": {
+     "shaderImageInt64Atomics": true
+    },
+    "VkPhysicalDeviceSubgroupSizeControlFeaturesEXT": {
+     "computeFullSubgroups": true,
+     "subgroupSizeControl": true
+    },
+    "VkPhysicalDeviceVulkan12Features": {
+     "bufferDeviceAddress": true,
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": true
+    },
+    "VkPhysicalDeviceVulkan13Features": {
+     "computeFullSubgroups": true,
+     "shaderDemoteToHelperInvocation": true,
+     "subgroupSizeControl": true
+    }
+   },
+   "properties": {
+    "VkPhysicalDeviceDescriptorIndexingPropertiesEXT": {
+     "maxDescriptorSetUpdateAfterBindSampledImages": 8388606,
+     "maxDescriptorSetUpdateAfterBindSamplers": 8388606,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 8388606
+    },
+    "VkPhysicalDeviceDriverPropertiesKHR": {
+     "driverID": "VK_DRIVER_ID_MESA_RADV"
+    },
+    "VkPhysicalDeviceFloatControlsPropertiesKHR": {
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceMeshShaderPropertiesEXT": {
+     "maxMeshOutputPrimitives": 256,
+     "maxMeshOutputVertices": 256,
+     "maxMeshSharedMemorySize": 28672,
+     "maxMeshWorkGroupInvocations": 256,
+     "maxTaskPayloadSize": 16384,
+     "maxTaskWorkGroupInvocations": 1024
+    },
+    "VkPhysicalDeviceProperties": {
+     "limits": {
+      "maxComputeSharedMemorySize": 65536,
+      "maxStorageBufferRange": 4294967295
+     },
+     "vendorID": 4098
+    },
+    "VkPhysicalDeviceSubgroupProperties": {
+     "subgroupSize": 64,
+     "supportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "supportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceSubgroupSizeControlPropertiesEXT": {
+     "maxSubgroupSize": 64,
+     "minSubgroupSize": 32,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan11Properties": {
+     "subgroupSize": 64,
+     "subgroupSupportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "subgroupSupportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan12Properties": {
+     "driverID": "VK_DRIVER_ID_MESA_RADV",
+     "maxDescriptorSetUpdateAfterBindSampledImages": 8388606,
+     "maxDescriptorSetUpdateAfterBindSamplers": 8388606,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 8388606,
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceVulkan13Properties": {
+     "maxSubgroupSize": 64,
+     "minSubgroupSize": 32,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    }
+   }
+  }
+ },
+ "source": "vulkan.gpuinfo.org report 52458 (profile and report page): AMD Radeon RX 7900 GRE (RADV NAVI31) driver 26.2.99 on Cachyos unknown"
+}

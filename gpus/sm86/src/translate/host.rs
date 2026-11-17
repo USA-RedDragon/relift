@@ -1,13 +1,17 @@
 //! What the target Vulkan device guarantees, and which fallback the
 //! translator took for each guarantee a program needs and the device lacks.
 //!
-//! A [`HostProfile`] describes one device class: the presets are the hosts
-//! relift targets, from the drivers' reported limits. Fields describe what a
-//! translated shader may rely on, so a feature that is present but not
-//! guaranteed by the API (a subgroup size that cannot be required, a denormal
-//! mode that cannot be requested) counts as absent. Every gap has a fallback
-//! that keeps the guest's results bit-exact, or the program is reported as
-//! inexact on that host in [`HostReport::inexact`].
+//! A [`HostProfile`] describes one device: at run time it comes from what
+//! the device reports ([`HostProfile::from_device`] on a [`DeviceCaps`]);
+//! the named presets are the same derivation from a capture of one device
+//! of each class relift targets (`tests/caps`), for offline coverage runs.
+//! Fields describe what a translated shader may rely on, so a feature that
+//! is present but not guaranteed by the API (a subgroup size that cannot be
+//! required, a denormal mode that cannot be requested) counts as absent.
+//! Every gap has a fallback that keeps the guest's results bit-exact, or the
+//! program is reported as inexact on that host in [`HostReport::inexact`].
+
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Behavior of 32-bit float denormals that a shader can count on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,7 +60,7 @@ pub enum Clock {
 /// What a device guarantees to a translated shader.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostProfile {
-    pub name: &'static str,
+    pub name: String,
     /// Subgroups in compute shaders.
     pub warp_compute: Warp,
     /// Subgroups in fragment shaders.
@@ -78,9 +82,13 @@ pub struct HostProfile {
     /// `OpDemoteToHelperInvocation` keeps a demoted invocation running as a
     /// helper (false where it maps to a terminating discard).
     pub demote: bool,
-    /// `bufferDeviceAddress` with `shaderInt64`.
+    /// `bufferDeviceAddress`.
     pub bda: bool,
-    /// 64-bit integer atomics on storage buffers.
+    /// `shaderInt64`: 64-bit integer types in shaders. Without it guest
+    /// addresses are pairs of 32-bit words.
+    pub int64: bool,
+    /// 64-bit integer atomics on storage buffers (`shaderBufferInt64Atomics`
+    /// with `shaderInt64`).
     pub int64_atomics_buffer: bool,
     /// 64-bit integer atomics on workgroup memory.
     pub int64_atomics_shared: bool,
@@ -102,11 +110,11 @@ pub struct HostProfile {
     pub signed_zero_inf_nan_preserve: bool,
     /// `shaderFmaFloat32` (VK_KHR_shader_fma): `OpFmaKHR` is available and
     /// fused. GLSL `Fma` only has to be as precise as a multiply and an add,
-    /// so without this FFMA is built from integer operations. Set in the
-    /// presets only where a device was seen to report it.
+    /// so without this FFMA is built from integer operations.
     pub fused_fma: bool,
     /// A native mesh shader writes `CullPrimitiveEXT` only with constant
-    /// stores under a branch, never from a computed bool.
+    /// stores under a branch, never from a computed bool (see
+    /// [`HostProfile::from_device`]).
     pub constant_cull_stores: bool,
     pub clock: Clock,
     /// `maxComputeSharedMemorySize`.
@@ -119,6 +127,9 @@ pub struct HostProfile {
     pub max_storage_buffers: u32,
     /// `maxStorageBufferRange`.
     pub max_storage_buffer_range: u64,
+    /// The host's transcendental operations give the SM86 MUFU results (see
+    /// [`HostProfile::from_device`]).
+    pub native_mufu: bool,
 }
 
 impl Default for HostProfile {
@@ -128,19 +139,10 @@ impl Default for HostProfile {
 }
 
 impl HostProfile {
-    /// NVIDIA proprietary driver, Ampere and later. The driver reports
-    /// neither `shaderDenormFlushToZeroFloat32` nor
-    /// `shaderDenormPreserveFloat32` (with independence `ALL`), so no
-    /// denormal mode can be requested; without one it flushes as SM86 `.FTZ`
-    /// does, rounding to 24 bits before the tininess check (an exact
-    /// `2^-126 (1 - 2^-46)` from FMUL.FTZ gives `2^-126`, not zero). That was
-    /// measured on an SM86 device for FMUL, FFMA and FADD `.FTZ` in all four
-    /// roundings on 4096 operand pairs around `2^-126`, bit-exact against
-    /// CUDA; the runtime checks it at start-up (`HostReport::check_flush`).
-    /// It reports `shaderFmaFloat32` and `shaderSignedZeroInfNanPreserveFloat32`.
+    /// The RTX 3090 on NVIDIA's proprietary driver (`tests/caps/nvidia.json`).
     pub fn nvidia() -> HostProfile {
         HostProfile {
-            name: "nvidia",
+            name: "nvidia".into(),
             warp_compute: Warp::Fixed32,
             warp_fragment: Warp::Fixed32,
             warp_graphics: Warp::Fixed32,
@@ -150,6 +152,7 @@ impl HostProfile {
             maximal_reconvergence: true,
             demote: true,
             bda: true,
+            int64: true,
             int64_atomics_buffer: true,
             int64_atomics_shared: true,
             int64_atomics_image: true,
@@ -166,175 +169,193 @@ impl HostProfile {
             max_sampled_images: 1 << 20,
             max_storage_buffers: 1 << 20,
             max_storage_buffer_range: u64::from(u32::MAX),
+            native_mufu: true,
         }
     }
 
-    /// RADV on RDNA2/3 (ACO): a required subgroup size of 32 in compute and
-    /// fragment, both denormal modes.
+    /// RADV on RDNA3 (`tests/caps/radv.json`).
     pub fn radv() -> HostProfile {
         HostProfile {
-            name: "radv",
+            name: "radv".into(),
             warp_graphics: Warp::Varies,
-            warp_mesh: Warp::Varies,
-            fused_fma: false,
+            mesh_shader: Some(MeshLimits {
+                max_task_work_group_invocations: 1024,
+                max_mesh_work_group_invocations: 256,
+                ..MeshLimits::NVIDIA
+            }),
             denorm: Denorm::Unknown,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
-            float32_atomic_add: false,
-            max_shared_bytes: 65536,
-            max_samplers: u32::MAX,
-            max_sampled_images: u32::MAX,
-            max_storage_buffers: u32::MAX,
+            max_shared_bytes: 1 << 16,
+            max_samplers: 8_388_606,
+            max_sampled_images: 8_388_606,
+            max_storage_buffers: 8_388_606,
+            native_mufu: false,
             ..HostProfile::nvidia()
         }
     }
 
-    /// AMD proprietary and AMDVLK: size 32 only in compute, 32 KiB shared,
-    /// no float atomic add, and no shader clock assumed (AMDVLK lacks it).
+    /// AMD's proprietary Windows driver on RDNA3 (`tests/caps/amd_pro.json`).
     pub fn amd_pro() -> HostProfile {
         HostProfile {
-            name: "amd_pro",
-            warp_fragment: Warp::Varies,
-            max_shared_bytes: 32768,
-            clock: Clock::None,
-            ..HostProfile::radv()
+            name: "amd_pro".into(),
+            warp_graphics: Warp::Varies,
+            mesh_shader: Some(MeshLimits {
+                max_task_work_group_invocations: 1024,
+                max_mesh_work_group_invocations: 256,
+                max_mesh_shared_memory_size: 32_768,
+                ..MeshLimits::NVIDIA
+            }),
+            denorm: Denorm::Unknown,
+            denorm_preserve_mode: true,
+            denorm_flush_mode: true,
+            max_shared_bytes: 32_768,
+            max_samplers: u32::MAX,
+            max_sampled_images: u32::MAX,
+            max_storage_buffers: u32::MAX,
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
-    /// Intel ANV (Xe, Arc): size 32 only in compute, no shared int64
-    /// atomics, only the subgroup clock.
+    /// Mesa ANV on Arc (DG2) (`tests/caps/anv.json`).
     pub fn anv() -> HostProfile {
         HostProfile {
-            name: "anv",
+            name: "anv".into(),
             warp_fragment: Warp::Varies,
+            warp_graphics: Warp::Varies,
+            mesh_shader: Some(MeshLimits {
+                max_task_payload_size: 65_504,
+                max_task_work_group_invocations: 1024,
+                max_mesh_work_group_invocations: 1024,
+                max_mesh_shared_memory_size: 65_536,
+                ..MeshLimits::NVIDIA
+            }),
             int64_atomics_shared: false,
+            denorm: Denorm::Unknown,
+            denorm_preserve_mode: true,
+            denorm_flush_mode: true,
             clock: Clock::Subgroup,
-            max_shared_bytes: 49152,
             max_samplers: 1 << 26,
             max_sampled_images: 1 << 25,
             max_storage_buffers: 1 << 25,
-            ..HostProfile::radv()
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
-    /// MoltenVK on Apple GPUs (M2, A15): subgroups are natively 32 but
-    /// the size cannot be required, demote is a discard, no float controls,
-    /// no 64-bit atomics, no shader clock, 32 KiB shared, 1024 samplers.
+    /// MoltenVK on an Apple M2 (`tests/caps/moltenvk.json`).
     pub fn moltenvk() -> HostProfile {
         HostProfile {
-            name: "moltenvk",
+            name: "moltenvk".into(),
             warp_compute: Warp::Unchecked32,
             warp_fragment: Warp::Unchecked32,
             warp_graphics: Warp::Absent,
             mesh_shader: None,
             warp_mesh: Warp::Absent,
-            quad_fragment: true,
-            maximal_reconvergence: true,
             demote: false,
-            bda: true,
             int64_atomics_buffer: false,
             int64_atomics_shared: false,
             int64_atomics_image: false,
-            float32_atomic_add: true,
             denorm: Denorm::Unknown,
-            denorm_preserve_mode: false,
-            denorm_flush_mode: false,
-            signed_zero_inf_nan_preserve: true,
-            fused_fma: false,
-            constant_cull_stores: false,
             clock: Clock::None,
-            max_shared_bytes: 32768,
+            max_shared_bytes: 32_768,
             max_samplers: 1024,
             max_sampled_images: 1_000_000,
             max_storage_buffers: 1_000_000,
-            max_storage_buffer_range: 1 << 31,
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
-    /// Qualcomm's Adreno 740 driver: subgroups of 64 or 128, flush-to-zero
-    /// only, no shared int64 or float atomics, 32 KiB shared.
+    /// Qualcomm's driver on an Adreno 740 (`tests/caps/adreno.json`).
     pub fn adreno() -> HostProfile {
         HostProfile {
-            name: "adreno",
+            name: "adreno".into(),
             warp_compute: Warp::Wide,
             warp_fragment: Warp::Wide,
             warp_graphics: Warp::Absent,
             mesh_shader: None,
             warp_mesh: Warp::Absent,
-            quad_fragment: true,
-            maximal_reconvergence: true,
-            demote: true,
-            bda: true,
-            int64_atomics_buffer: true,
+            maximal_reconvergence: false,
+            int64: false,
+            int64_atomics_buffer: false,
             int64_atomics_shared: false,
-            int64_atomics_image: true,
+            int64_atomics_image: false,
             float32_atomic_add: false,
             denorm: Denorm::Unknown,
-            denorm_preserve_mode: false,
             denorm_flush_mode: true,
-            signed_zero_inf_nan_preserve: true,
             fused_fma: false,
-            constant_cull_stores: false,
-            clock: Clock::Device,
-            max_shared_bytes: 32768,
+            clock: Clock::None,
+            max_shared_bytes: 32_768,
             max_samplers: 1 << 24,
             max_sampled_images: 1 << 24,
             max_storage_buffers: 1 << 24,
-            max_storage_buffer_range: 1 << 30,
+            max_storage_buffer_range: 1 << 27,
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
-    /// Turnip (Mesa) on Adreno 7xx. Values from the driver source, not a
-    /// device: buffer int64 atomics are not assumed.
+    /// Mesa Turnip on an Adreno 740 (`tests/caps/turnip.json`).
     pub fn turnip() -> HostProfile {
         HostProfile {
-            name: "turnip",
+            name: "turnip".into(),
+            warp_compute: Warp::Wide,
+            warp_fragment: Warp::Wide,
             warp_graphics: Warp::Wide,
-            int64_atomics_buffer: false,
+            mesh_shader: None,
+            warp_mesh: Warp::Absent,
+            maximal_reconvergence: false,
+            int64_atomics_shared: false,
             int64_atomics_image: false,
-            max_samplers: 1 << 20,
-            max_sampled_images: 1 << 20,
-            max_storage_buffers: 1 << 20,
-            ..HostProfile::adreno()
+            float32_atomic_add: false,
+            denorm: Denorm::Unknown,
+            denorm_preserve_mode: true,
+            denorm_flush_mode: true,
+            fused_fma: false,
+            max_shared_bytes: 32_768,
+            max_samplers: 1 << 24,
+            max_sampled_images: 1 << 24,
+            max_storage_buffers: 1 << 24,
+            max_storage_buffer_range: 1 << 27,
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
-    /// Arm Mali Valhall (G710, G715): subgroups of 16, both denormal modes,
-    /// no shader clock or float atomic add, 32 KiB shared.
+    /// Arm's driver on a Mali-G715 (`tests/caps/mali.json`).
     pub fn mali() -> HostProfile {
         HostProfile {
-            name: "mali",
+            name: "mali".into(),
             warp_compute: Warp::Narrow(16),
             warp_fragment: Warp::Narrow(16),
-            warp_graphics: Warp::Narrow(16),
-            int64_atomics_shared: true,
+            warp_graphics: Warp::Absent,
+            mesh_shader: None,
+            warp_mesh: Warp::Absent,
+            float32_atomic_add: false,
+            denorm: Denorm::Unknown,
             denorm_preserve_mode: true,
-            clock: Clock::None,
+            denorm_flush_mode: true,
+            fused_fma: false,
+            max_shared_bytes: 32_768,
             max_samplers: 1 << 23,
             max_sampled_images: 1 << 23,
             max_storage_buffers: 1 << 23,
             max_storage_buffer_range: 1 << 31,
-            ..HostProfile::adreno()
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
-    /// lavapipe (llvmpipe) as measured here: subgroups of 8, no float
-    /// controls (it flushes, but the API does not promise it), 32 KiB
-    /// shared, 128 MiB storage buffers.
-    ///
-    /// Mesa 26.2.4 and main up to at least 60d7516520 (2026-11-17) abort in
-    /// LLVM ("Cannot emit physreg copy instruction") on a mesh shader that
-    /// stores a computed bool to `CullPrimitiveEXT`: gallivm bitcasts the
-    /// `i1` vector to float. Hence [`HostProfile::constant_cull_stores`];
-    /// drop it once a Mesa release carries the fix that sign-extends 1-bit
-    /// outputs in `emit_store_var` (`lp_bld_nir_soa.c`).
+    /// lavapipe (llvmpipe) (`tests/caps/lavapipe.json`).
     ///
     /// Before 26.2 (seen with 25.2.8 and 26.0.8) lavapipe draws nothing for
     /// the translated native mesh pipelines, without an error; CI builds a
     /// pinned newer release (`scripts/ci/lib.sh`).
     pub fn lavapipe() -> HostProfile {
         HostProfile {
-            name: "lavapipe",
+            name: "lavapipe".into(),
             warp_compute: Warp::Narrow(8),
             warp_fragment: Warp::Narrow(8),
             warp_graphics: Warp::Absent,
@@ -344,26 +365,16 @@ impl HostProfile {
                 ..MeshLimits::NVIDIA
             }),
             warp_mesh: Warp::Narrow(8),
-            quad_fragment: true,
-            maximal_reconvergence: true,
-            demote: true,
-            bda: true,
-            int64_atomics_buffer: true,
-            int64_atomics_shared: true,
-            int64_atomics_image: true,
-            float32_atomic_add: true,
             denorm: Denorm::Unknown,
-            denorm_preserve_mode: false,
-            denorm_flush_mode: false,
-            signed_zero_inf_nan_preserve: true,
             fused_fma: false,
             constant_cull_stores: true,
-            clock: Clock::Device,
-            max_shared_bytes: 32768,
+            max_shared_bytes: 32_768,
             max_samplers: 1_015_808,
             max_sampled_images: 1_015_808,
             max_storage_buffers: 1_015_808,
             max_storage_buffer_range: 1 << 27,
+            native_mufu: false,
+            ..HostProfile::nvidia()
         }
     }
 
@@ -382,13 +393,6 @@ impl HostProfile {
         ]
     }
 
-    /// The host's own transcendental operations give the SM86 MUFU results
-    /// (the NVIDIA driver lowers them to the same unit; see the `mufu`
-    /// module for how that was proven).
-    pub fn native_mufu(&self) -> bool {
-        self.name == "nvidia"
-    }
-
     /// The preset called `name`, [`HostProfile::minimal`] included.
     pub fn preset(name: &str) -> Option<HostProfile> {
         HostProfile::presets()
@@ -400,7 +404,7 @@ impl HostProfile {
     /// The device without any optional feature: every fallback on.
     pub fn minimal() -> HostProfile {
         HostProfile {
-            name: "minimal",
+            name: "minimal".into(),
             warp_compute: Warp::Varies,
             warp_fragment: Warp::Absent,
             warp_graphics: Warp::Absent,
@@ -410,6 +414,7 @@ impl HostProfile {
             maximal_reconvergence: false,
             demote: false,
             bda: false,
+            int64: false,
             int64_atomics_buffer: false,
             int64_atomics_shared: false,
             int64_atomics_image: false,
@@ -426,6 +431,191 @@ impl HostProfile {
             max_sampled_images: 1 << 16,
             max_storage_buffers: 1 << 16,
             max_storage_buffer_range: 1 << 27,
+            native_mufu: false,
+        }
+    }
+
+    /// The profile of the device that reports `caps`, called `name`.
+    ///
+    /// Each field is the Vulkan feature, property or extension its
+    /// documentation names, with these readings:
+    ///
+    /// * subgroups ([`Warp`]): a stage outside `supportedStages` has none;
+    ///   32 is [`Warp::Fixed32`] where it is the only size or can be
+    ///   required in the stage (`requiredSubgroupSizeStages`, and in compute
+    ///   `computeFullSubgroups`), a size range of multiples of 32 from 64 is
+    ///   [`Warp::Wide`], a single size below 32 is [`Warp::Narrow`],
+    ///   anything else [`Warp::Varies`], except that MoltenVK's default
+    ///   size of 32 is [`Warp::Unchecked32`] (Apple GPUs run 32-wide SIMD
+    ///   groups; Metal cannot require it, so the runtime checks it);
+    /// * NVIDIA's proprietary driver flushes denormals as SM86 does
+    ///   ([`Denorm::Flush`], measured on an SM86 device and checked at
+    ///   start-up by the runtime) and, from Ampere (PCI device ids from
+    ///   0x2200) on, lowers transcendentals to the MUFU unit;
+    /// * MoltenVK reports `shaderDemoteToHelperInvocation` but carries a
+    ///   demote out as a terminating discard;
+    /// * task and mesh shaders need `VK_EXT_mesh_shader` with both
+    ///   `taskShader` and `meshShader`;
+    /// * lavapipe (Mesa 26.2.4 and main up to at least 60d7516520,
+    ///   2026-11-17) aborts in LLVM ("Cannot emit physreg copy
+    ///   instruction") on a mesh shader that stores a computed bool to
+    ///   `CullPrimitiveEXT`: gallivm bitcasts the `i1` vector to float.
+    ///   Hence [`HostProfile::constant_cull_stores`]; drop it once a Mesa
+    ///   release carries the fix that sign-extends 1-bit outputs in
+    ///   `emit_store_var` (`lp_bld_nir_soa.c`).
+    pub fn from_device(name: &str, caps: &DeviceCaps) -> HostProfile {
+        let nvidia = caps.get("driverID") == DRIVER_NVIDIA_PROPRIETARY;
+        let int64 = caps.on("shaderInt64");
+        HostProfile {
+            name: name.into(),
+            warp_compute: caps.warp(STAGE_COMPUTE),
+            warp_fragment: caps.warp(STAGE_FRAGMENT),
+            warp_graphics: caps.warp(STAGE_VERTEX),
+            mesh_shader: caps.mesh_limits(),
+            warp_mesh: if caps.mesh_limits().is_some() {
+                caps.warp(STAGE_MESH)
+            } else {
+                Warp::Absent
+            },
+            quad_fragment: caps.stages() & STAGE_FRAGMENT != 0
+                && caps.operations() & SUBGROUP_QUAD != 0,
+            maximal_reconvergence: caps.extension_on(
+                "VK_KHR_shader_maximal_reconvergence",
+                "shaderMaximalReconvergence",
+            ),
+            demote: caps.on("shaderDemoteToHelperInvocation")
+                && caps.get("driverID") != DRIVER_MOLTENVK,
+            bda: caps.on("bufferDeviceAddress"),
+            int64,
+            int64_atomics_buffer: int64 && caps.on("shaderBufferInt64Atomics"),
+            int64_atomics_shared: int64 && caps.on("shaderSharedInt64Atomics"),
+            int64_atomics_image: int64
+                && caps.extension_on(
+                    "VK_EXT_shader_image_atomic_int64",
+                    "shaderImageInt64Atomics",
+                ),
+            float32_atomic_add: caps
+                .extension_on("VK_EXT_shader_atomic_float", "shaderBufferFloat32AtomicAdd"),
+            denorm: if nvidia {
+                Denorm::Flush
+            } else {
+                Denorm::Unknown
+            },
+            denorm_preserve_mode: caps.on("shaderDenormPreserveFloat32"),
+            denorm_flush_mode: caps.on("shaderDenormFlushToZeroFloat32"),
+            signed_zero_inf_nan_preserve: caps.on("shaderSignedZeroInfNanPreserveFloat32"),
+            fused_fma: caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat32"),
+            constant_cull_stores: caps.get("driverID") == DRIVER_MESA_LLVMPIPE,
+            clock: if caps.extension_on("VK_KHR_shader_clock", "shaderDeviceClock") {
+                Clock::Device
+            } else if caps.extension_on("VK_KHR_shader_clock", "shaderSubgroupClock") {
+                Clock::Subgroup
+            } else {
+                Clock::None
+            },
+            max_shared_bytes: caps.get32("maxComputeSharedMemorySize"),
+            max_samplers: caps.get32("maxDescriptorSetUpdateAfterBindSamplers"),
+            max_sampled_images: caps.get32("maxDescriptorSetUpdateAfterBindSampledImages"),
+            max_storage_buffers: caps.get32("maxPerStageDescriptorUpdateAfterBindStorageBuffers"),
+            max_storage_buffer_range: caps.get("maxStorageBufferRange"),
+            native_mufu: nvidia && caps.get("deviceID") >= 0x2200,
+        }
+    }
+}
+
+/// `VK_DRIVER_ID_NVIDIA_PROPRIETARY`.
+pub const DRIVER_NVIDIA_PROPRIETARY: u64 = 4;
+/// `VK_DRIVER_ID_MESA_LLVMPIPE`.
+pub const DRIVER_MESA_LLVMPIPE: u64 = 13;
+/// `VK_DRIVER_ID_MOLTENVK`.
+pub const DRIVER_MOLTENVK: u64 = 14;
+/// `VK_SHADER_STAGE_VERTEX_BIT`.
+pub const STAGE_VERTEX: u64 = 0x1;
+/// `VK_SHADER_STAGE_FRAGMENT_BIT`.
+pub const STAGE_FRAGMENT: u64 = 0x10;
+/// `VK_SHADER_STAGE_COMPUTE_BIT`.
+pub const STAGE_COMPUTE: u64 = 0x20;
+/// `VK_SHADER_STAGE_MESH_BIT_EXT`.
+pub const STAGE_MESH: u64 = 0x80;
+/// `VK_SUBGROUP_FEATURE_QUAD_BIT`.
+pub const SUBGROUP_QUAD: u64 = 0x80;
+
+/// What a Vulkan device reports, for [`HostProfile::from_device`]: its
+/// extensions, and its feature and property members by their Vulkan names
+/// (`shaderInt64`, `maxSubgroupSize`, `driverID`), booleans as 0 or 1 and
+/// flag sets as their bits. The subgroup stages and operations may come
+/// under either of their names (`supportedStages` of
+/// `VkPhysicalDeviceSubgroupProperties` or `subgroupSupportedStages` of
+/// `VkPhysicalDeviceVulkan11Properties`). A feature reads as enabled only
+/// where its extension, if it has one, is listed too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeviceCaps {
+    pub extensions: BTreeSet<String>,
+    pub values: BTreeMap<String, u64>,
+}
+
+impl DeviceCaps {
+    /// The member called `name`, 0 when the device does not report it.
+    pub fn get(&self, name: &str) -> u64 {
+        self.values.get(name).copied().unwrap_or(0)
+    }
+
+    fn get32(&self, name: &str) -> u32 {
+        u32::try_from(self.get(name)).unwrap_or(u32::MAX)
+    }
+
+    fn on(&self, name: &str) -> bool {
+        self.get(name) != 0
+    }
+
+    fn extension_on(&self, extension: &str, feature: &str) -> bool {
+        self.extensions.contains(extension) && self.on(feature)
+    }
+
+    fn mesh_limits(&self) -> Option<MeshLimits> {
+        let on = self.extension_on("VK_EXT_mesh_shader", "taskShader")
+            && self.extension_on("VK_EXT_mesh_shader", "meshShader");
+        on.then(|| MeshLimits {
+            max_mesh_output_vertices: self.get32("maxMeshOutputVertices"),
+            max_mesh_output_primitives: self.get32("maxMeshOutputPrimitives"),
+            max_task_payload_size: self.get32("maxTaskPayloadSize"),
+            max_task_work_group_invocations: self.get32("maxTaskWorkGroupInvocations"),
+            max_mesh_work_group_invocations: self.get32("maxMeshWorkGroupInvocations"),
+            max_mesh_shared_memory_size: self.get32("maxMeshSharedMemorySize"),
+        })
+    }
+
+    fn stages(&self) -> u64 {
+        self.get("supportedStages") | self.get("subgroupSupportedStages")
+    }
+
+    fn operations(&self) -> u64 {
+        self.get("supportedOperations") | self.get("subgroupSupportedOperations")
+    }
+
+    fn warp(&self, stage: u64) -> Warp {
+        if self.stages() & stage == 0 {
+            return Warp::Absent;
+        }
+        let size = self.get("subgroupSize");
+        let control = self.on("subgroupSizeControl")
+            && self.get("requiredSubgroupSizeStages") & stage != 0
+            && (stage != STAGE_COMPUTE || self.on("computeFullSubgroups"));
+        let (min, max) = if self.on("subgroupSizeControl") {
+            (self.get("minSubgroupSize"), self.get("maxSubgroupSize"))
+        } else {
+            (size, size)
+        };
+        if (min == 32 && max == 32) || (control && min <= 32 && 32 <= max) {
+            Warp::Fixed32
+        } else if min >= 64 || (control && min <= 64 && 64 <= max) {
+            Warp::Wide
+        } else if max < 32 && min == max {
+            Warp::Narrow(min as u32)
+        } else if size == 32 && self.get("driverID") == DRIVER_MOLTENVK {
+            Warp::Unchecked32
+        } else {
+            Warp::Varies
         }
     }
 }
@@ -567,8 +757,8 @@ pub const CLOCK_SEED_OFFSET: u32 = 0x1f0;
 /// provide for it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostReport {
-    /// The preset the program was translated for.
-    pub host: &'static str,
+    /// The profile the program was translated for.
+    pub host: String,
     /// The back end of a task or mesh program.
     pub mesh: super::MeshPath,
     pub warp: WarpPath,

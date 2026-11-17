@@ -1,0 +1,135 @@
+{
+ "capabilities": {
+  "device": {
+   "extensions": {
+    "VK_EXT_shader_image_atomic_int64": 1,
+    "VK_KHR_shader_clock": 1,
+    "VK_KHR_shader_maximal_reconvergence": 1
+   },
+   "features": {
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesKHR": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceFeatures": {
+     "shaderInt64": true
+    },
+    "VkPhysicalDeviceFeaturesFromReportPage": {
+     "shaderDeviceClock": true,
+     "shaderImageInt64Atomics": true,
+     "shaderMaximalReconvergence": true,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderAtomicInt64FeaturesKHR": {
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": true
+    },
+    "VkPhysicalDeviceShaderClockFeaturesKHR": {
+     "shaderDeviceClock": true,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT": {
+     "shaderDemoteToHelperInvocation": true
+    },
+    "VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT": {
+     "shaderImageInt64Atomics": true
+    },
+    "VkPhysicalDeviceSubgroupSizeControlFeaturesEXT": {
+     "computeFullSubgroups": true,
+     "subgroupSizeControl": true
+    },
+    "VkPhysicalDeviceVulkan12Features": {
+     "bufferDeviceAddress": true,
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": true
+    },
+    "VkPhysicalDeviceVulkan13Features": {
+     "computeFullSubgroups": true,
+     "shaderDemoteToHelperInvocation": true,
+     "subgroupSizeControl": true
+    }
+   },
+   "properties": {
+    "VkPhysicalDeviceDescriptorIndexingPropertiesEXT": {
+     "maxDescriptorSetUpdateAfterBindSampledImages": 8388608,
+     "maxDescriptorSetUpdateAfterBindSamplers": 8388608,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 8388608
+    },
+    "VkPhysicalDeviceDriverPropertiesKHR": {
+     "driverID": "VK_DRIVER_ID_ARM_PROPRIETARY"
+    },
+    "VkPhysicalDeviceFloatControlsPropertiesKHR": {
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceProperties": {
+     "limits": {
+      "maxComputeSharedMemorySize": 32768,
+      "maxStorageBufferRange": 2147483648
+     },
+     "vendorID": 5045
+    },
+    "VkPhysicalDeviceSubgroupProperties": {
+     "subgroupSize": 16,
+     "supportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "supportedStages": [
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    },
+    "VkPhysicalDeviceSubgroupSizeControlPropertiesEXT": {
+     "maxSubgroupSize": 16,
+     "minSubgroupSize": 16,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan11Properties": {
+     "subgroupSize": 16,
+     "subgroupSupportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "subgroupSupportedStages": [
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan12Properties": {
+     "driverID": "VK_DRIVER_ID_ARM_PROPRIETARY",
+     "maxDescriptorSetUpdateAfterBindSampledImages": 8388608,
+     "maxDescriptorSetUpdateAfterBindSamplers": 8388608,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 8388608,
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceVulkan13Properties": {
+     "maxSubgroupSize": 16,
+     "minSubgroupSize": 16,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    }
+   }
+  }
+ },
+ "source": "vulkan.gpuinfo.org report 52895 (profile and report page): Google Pixel 9a driver 56.0.0 on Android 17.0"
+}

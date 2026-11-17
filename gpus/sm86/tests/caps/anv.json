@@ -1,0 +1,188 @@
+{
+ "capabilities": {
+  "device": {
+   "extensions": {
+    "VK_EXT_mesh_shader": 1,
+    "VK_EXT_shader_atomic_float": 1,
+    "VK_EXT_shader_image_atomic_int64": 1,
+    "VK_KHR_shader_clock": 1,
+    "VK_KHR_shader_fma": 1,
+    "VK_KHR_shader_maximal_reconvergence": 1
+   },
+   "features": {
+    "VkPhysicalDeviceBufferAddressFeaturesEXT": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesEXT": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesKHR": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceFeatures": {
+     "shaderInt64": true
+    },
+    "VkPhysicalDeviceFeaturesFromReportPage": {
+     "meshShader": true,
+     "shaderBufferFloat32AtomicAdd": true,
+     "shaderFmaFloat32": true,
+     "shaderImageInt64Atomics": true,
+     "shaderMaximalReconvergence": true,
+     "shaderSubgroupClock": true,
+     "taskShader": true
+    },
+    "VkPhysicalDeviceMeshShaderFeaturesEXT": {
+     "meshShader": true,
+     "taskShader": true
+    },
+    "VkPhysicalDeviceShaderAtomicFloatFeaturesEXT": {
+     "shaderBufferFloat32AtomicAdd": true
+    },
+    "VkPhysicalDeviceShaderAtomicInt64FeaturesKHR": {
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": false
+    },
+    "VkPhysicalDeviceShaderClockFeaturesKHR": {
+     "shaderDeviceClock": false,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT": {
+     "shaderDemoteToHelperInvocation": true
+    },
+    "VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT": {
+     "shaderImageInt64Atomics": true
+    },
+    "VkPhysicalDeviceSubgroupSizeControlFeaturesEXT": {
+     "computeFullSubgroups": true,
+     "subgroupSizeControl": true
+    },
+    "VkPhysicalDeviceVulkan12Features": {
+     "bufferDeviceAddress": true,
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": false
+    },
+    "VkPhysicalDeviceVulkan13Features": {
+     "computeFullSubgroups": true,
+     "shaderDemoteToHelperInvocation": true,
+     "subgroupSizeControl": true
+    }
+   },
+   "properties": {
+    "VkPhysicalDeviceDescriptorIndexingPropertiesEXT": {
+     "maxDescriptorSetUpdateAfterBindSampledImages": 33554432,
+     "maxDescriptorSetUpdateAfterBindSamplers": 67108864,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 33554432
+    },
+    "VkPhysicalDeviceDriverPropertiesKHR": {
+     "driverID": "VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA"
+    },
+    "VkPhysicalDeviceFloatControlsPropertiesKHR": {
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceMeshShaderPropertiesEXT": {
+     "maxMeshOutputPrimitives": 256,
+     "maxMeshOutputVertices": 256,
+     "maxMeshSharedMemorySize": 65536,
+     "maxMeshWorkGroupInvocations": 1024,
+     "maxTaskPayloadSize": 65504,
+     "maxTaskWorkGroupInvocations": 1024
+    },
+    "VkPhysicalDeviceProperties": {
+     "limits": {
+      "maxComputeSharedMemorySize": 49152,
+      "maxStorageBufferRange": 4294967295
+     },
+     "vendorID": 32902
+    },
+    "VkPhysicalDeviceSubgroupProperties": {
+     "subgroupSize": 32,
+     "supportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "supportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceSubgroupSizeControlPropertiesEXT": {
+     "maxSubgroupSize": 32,
+     "minSubgroupSize": 8,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan11Properties": {
+     "subgroupSize": 32,
+     "subgroupSupportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT"
+     ],
+     "subgroupSupportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan12Properties": {
+     "driverID": "VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA",
+     "maxDescriptorSetUpdateAfterBindSampledImages": 33554432,
+     "maxDescriptorSetUpdateAfterBindSamplers": 67108864,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 33554432,
+     "shaderDenormFlushToZeroFloat32": true,
+     "shaderDenormPreserveFloat32": true,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceVulkan13Properties": {
+     "maxSubgroupSize": 32,
+     "minSubgroupSize": 8,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    }
+   }
+  }
+ },
+ "source": "vulkan.gpuinfo.org report 51399 (profile and report page): Intel(R) Arc(tm) A750 Graphics (DG2) driver 26.2.99 on Arch unknown"
+}

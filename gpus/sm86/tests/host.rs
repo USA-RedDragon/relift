@@ -51,12 +51,12 @@ const EXECUTION_MODE: u32 = 16;
 #[test]
 fn presets_have_distinct_names() {
     let p = HostProfile::presets();
-    let mut names: Vec<_> = p.iter().map(|h| h.name).collect();
+    let mut names: Vec<_> = p.iter().map(|h| h.name.as_str()).collect();
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), p.len());
     for h in &p {
-        assert_eq!(HostProfile::preset(h.name).as_ref(), Some(h));
+        assert_eq!(HostProfile::preset(&h.name).as_ref(), Some(h));
     }
     assert!(HostProfile::preset("minimal").is_some());
 }

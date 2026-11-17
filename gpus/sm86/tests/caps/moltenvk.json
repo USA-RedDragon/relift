@@ -1,0 +1,84 @@
+{
+ "capabilities": {
+  "device": {
+   "extensions": {
+    "VK_EXT_shader_atomic_float": 1,
+    "VK_KHR_shader_fma": 1,
+    "VK_KHR_shader_maximal_reconvergence": 1
+   },
+   "features": {
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesEXT": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceFeatures": {
+     "shaderInt64": true
+    },
+    "VkPhysicalDeviceShaderAtomicFloatFeaturesEXT": {
+     "shaderBufferFloat32AtomicAdd": true
+    },
+    "VkPhysicalDeviceShaderFmaFeaturesKHR": {
+     "shaderFmaFloat32": true
+    },
+    "VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR": {
+     "shaderMaximalReconvergence": true
+    },
+    "VkPhysicalDeviceVulkan12Features": {
+     "bufferDeviceAddress": true,
+     "shaderBufferInt64Atomics": false,
+     "shaderSharedInt64Atomics": false
+    },
+    "VkPhysicalDeviceVulkan13Features": {
+     "computeFullSubgroups": true,
+     "shaderDemoteToHelperInvocation": true,
+     "subgroupSizeControl": true
+    }
+   },
+   "properties": {
+    "VkPhysicalDeviceProperties": {
+     "deviceID": 436470280,
+     "deviceName": "Apple M2",
+     "limits": {
+      "maxComputeSharedMemorySize": 32768,
+      "maxStorageBufferRange": 4294967295
+     },
+     "vendorID": 4203
+    },
+    "VkPhysicalDeviceVulkan11Properties": {
+     "subgroupSize": 32,
+     "subgroupSupportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT",
+      "VK_SUBGROUP_FEATURE_ROTATE_BIT",
+      "VK_SUBGROUP_FEATURE_ROTATE_CLUSTERED_BIT"
+     ],
+     "subgroupSupportedStages": [
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan12Properties": {
+     "driverID": "VK_DRIVER_ID_MOLTENVK",
+     "maxDescriptorSetUpdateAfterBindSampledImages": 1000000,
+     "maxDescriptorSetUpdateAfterBindSamplers": 1024,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 1000000,
+     "shaderDenormFlushToZeroFloat32": false,
+     "shaderDenormPreserveFloat32": false,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceVulkan13Properties": {
+     "maxSubgroupSize": 32,
+     "minSubgroupSize": 4,
+     "requiredSubgroupSizeStages": []
+    }
+   }
+  }
+ },
+ "source": "vulkaninfo --json, Apple M2, MoltenVK 1.4.2, macOS 26.4.1"
+}

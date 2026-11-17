@@ -23,9 +23,10 @@ mod tex;
 mod uniform;
 
 pub use host::{
-    Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, GUEST_MEMORY_SET, GlobalPath,
-    HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, MeshLimits, SEGMENT_COUNT_DEFAULT,
-    SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp, WarpPath,
+    Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, DeviceCaps, GUEST_MEMORY_SET,
+    GlobalPath, HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, MeshLimits,
+    SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp,
+    WarpPath,
 };
 pub use io::mesh::{
     Component, MESH_FIRST_TASK_OFFSET, MeshPath, MeshPipeline, MeshTopology,
@@ -747,7 +748,7 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     let code = decode_all(p)?;
     let mut c = Ctx::new(stage, o, tex::Prep::new(&code));
     c.sph_words = p.sph.as_ref().map_or([0; 32], |s| s.words);
-    c.iface.host.host = o.host.name;
+    c.iface.host.host = o.host.name.clone();
     c.io.color_kinds = o.color_kinds.clone();
     c.io.vtg.pipe = o.pipeline.clone();
     c.io.mesh.pipe = o.pipeline.mesh.clone();
@@ -812,7 +813,7 @@ impl Ctx {
             tex,
             io: io::State::default(),
             locals: Vec::new(),
-            exact_mufu: o.exact_mufu || !o.host.native_mufu(),
+            exact_mufu: o.exact_mufu || !o.host.native_mufu,
             host: o.host.clone(),
             denorm: denorm::State::default(),
             funcs: Vec::new(),

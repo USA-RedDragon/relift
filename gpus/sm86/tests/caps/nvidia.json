@@ -1,0 +1,133 @@
+{
+ "capabilities": {
+  "device": {
+   "extensions": {
+    "VK_EXT_mesh_shader": 1,
+    "VK_EXT_shader_atomic_float": 1,
+    "VK_EXT_shader_image_atomic_int64": 1,
+    "VK_KHR_shader_clock": 1,
+    "VK_KHR_shader_fma": 1,
+    "VK_KHR_shader_maximal_reconvergence": 1
+   },
+   "features": {
+    "VkPhysicalDeviceBufferDeviceAddressFeaturesEXT": {
+     "bufferDeviceAddress": true
+    },
+    "VkPhysicalDeviceFeatures": {
+     "shaderInt64": true
+    },
+    "VkPhysicalDeviceMeshShaderFeaturesEXT": {
+     "meshShader": true,
+     "taskShader": true
+    },
+    "VkPhysicalDeviceShaderAtomicFloatFeaturesEXT": {
+     "shaderBufferFloat32AtomicAdd": true
+    },
+    "VkPhysicalDeviceShaderClockFeaturesKHR": {
+     "shaderDeviceClock": true,
+     "shaderSubgroupClock": true
+    },
+    "VkPhysicalDeviceShaderFmaFeaturesKHR": {
+     "shaderFmaFloat32": true
+    },
+    "VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT": {
+     "shaderImageInt64Atomics": true
+    },
+    "VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR": {
+     "shaderMaximalReconvergence": true
+    },
+    "VkPhysicalDeviceVulkan12Features": {
+     "bufferDeviceAddress": true,
+     "shaderBufferInt64Atomics": true,
+     "shaderSharedInt64Atomics": true
+    },
+    "VkPhysicalDeviceVulkan13Features": {
+     "computeFullSubgroups": true,
+     "shaderDemoteToHelperInvocation": true,
+     "subgroupSizeControl": true
+    }
+   },
+   "properties": {
+    "VkPhysicalDeviceMeshShaderPropertiesEXT": {
+     "maxMeshOutputPrimitives": 256,
+     "maxMeshOutputVertices": 256,
+     "maxMeshSharedMemorySize": 28672,
+     "maxMeshWorkGroupInvocations": 128,
+     "maxTaskPayloadSize": 16384,
+     "maxTaskWorkGroupInvocations": 128
+    },
+    "VkPhysicalDeviceProperties": {
+     "deviceID": 8708,
+     "deviceName": "NVIDIA GeForce RTX 3090",
+     "limits": {
+      "maxComputeSharedMemorySize": 49152,
+      "maxStorageBufferRange": 4294967295
+     },
+     "vendorID": 4318
+    },
+    "VkPhysicalDeviceVulkan11Properties": {
+     "subgroupSize": 32,
+     "subgroupSupportedOperations": [
+      "VK_SUBGROUP_FEATURE_BASIC_BIT",
+      "VK_SUBGROUP_FEATURE_VOTE_BIT",
+      "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+      "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+      "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
+      "VK_SUBGROUP_FEATURE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_QUAD_BIT",
+      "VK_SUBGROUP_FEATURE_ROTATE_BIT",
+      "VK_SUBGROUP_FEATURE_ROTATE_CLUSTERED_BIT",
+      "VK_SUBGROUP_FEATURE_PARTITIONED_BIT_EXT"
+     ],
+     "subgroupSupportedStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    },
+    "VkPhysicalDeviceVulkan12Properties": {
+     "driverID": "VK_DRIVER_ID_NVIDIA_PROPRIETARY",
+     "maxDescriptorSetUpdateAfterBindSampledImages": 1048576,
+     "maxDescriptorSetUpdateAfterBindSamplers": 1048576,
+     "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 1048576,
+     "shaderDenormFlushToZeroFloat32": false,
+     "shaderDenormPreserveFloat32": false,
+     "shaderSignedZeroInfNanPreserveFloat32": true
+    },
+    "VkPhysicalDeviceVulkan13Properties": {
+     "maxSubgroupSize": 32,
+     "minSubgroupSize": 32,
+     "requiredSubgroupSizeStages": [
+      "VK_SHADER_STAGE_VERTEX_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT",
+      "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+      "VK_SHADER_STAGE_GEOMETRY_BIT",
+      "VK_SHADER_STAGE_FRAGMENT_BIT",
+      "VK_SHADER_STAGE_COMPUTE_BIT",
+      "VK_SHADER_STAGE_RAYGEN_BIT_KHR",
+      "VK_SHADER_STAGE_ANY_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR",
+      "VK_SHADER_STAGE_MISS_BIT_KHR",
+      "VK_SHADER_STAGE_INTERSECTION_BIT_KHR",
+      "VK_SHADER_STAGE_CALLABLE_BIT_KHR",
+      "VK_SHADER_STAGE_TASK_BIT_EXT",
+      "VK_SHADER_STAGE_MESH_BIT_EXT"
+     ]
+    }
+   }
+  }
+ },
+ "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux"
+}
