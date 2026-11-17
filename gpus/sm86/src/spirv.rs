@@ -200,6 +200,14 @@ pub struct Vars {
     vals: HashMap<u32, (u32, bool)>,
     order: Vec<u32>,
     memo: HashMap<Vec<u32>, u32>,
+    /// The block being emitted.
+    block: u32,
+    /// The blocks that branch to each label so far.
+    preds: HashMap<u32, Vec<u32>>,
+    /// The current block took its values from its one predecessor and
+    /// nothing has been emitted in it yet: if it turns out to be a loop
+    /// header (an `OpLoopMerge` follows), its values are dropped.
+    carried: bool,
 }
 
 pub fn inst(out: &mut Vec<u32>, opcode: u16, args: &[u32]) {
@@ -400,6 +408,9 @@ impl Module {
     }
 
     pub fn emit(&mut self, opcode: u16, ty: u32, args: &[u32]) -> u32 {
+        if let Some(v) = &mut self.vars {
+            v.carried = false;
+        }
         let i = self.id();
         let mut a = vec![ty, i];
         a.extend_from_slice(args);
@@ -409,25 +420,50 @@ impl Module {
 
     pub fn emit_void(&mut self, opcode: u16, args: &[u32]) {
         if let Some(v) = &mut self.vars {
+            let carried = std::mem::take(&mut v.carried);
             match opcode {
                 op::LABEL => {
-                    v.vals.clear();
+                    let only = v.preds.get(&args[0]).is_some_and(|p| *p == [v.block]);
+                    if only {
+                        v.carried = true;
+                    } else {
+                        v.vals.clear();
+                        v.memo.clear();
+                    }
                     v.order.clear();
+                    v.block = args[0];
+                }
+                op::LOOP_MERGE if carried => {
+                    v.vals.clear();
                     v.memo.clear();
                 }
+                _ => {}
+            }
+            if matches!(
+                opcode,
                 op::SELECTION_MERGE
-                | op::LOOP_MERGE
-                | op::BRANCH
-                | op::BRANCH_CONDITIONAL
-                | op::SWITCH => {
-                    for var in std::mem::take(&mut v.order) {
-                        if let Some((val, true)) = v.vals.get(&var).copied() {
-                            inst(&mut self.body, op::STORE, &[var, val]);
-                            v.vals.insert(var, (val, false));
-                        }
+                    | op::LOOP_MERGE
+                    | op::BRANCH
+                    | op::BRANCH_CONDITIONAL
+                    | op::SWITCH
+            ) {
+                for var in std::mem::take(&mut v.order) {
+                    if let Some((val, true)) = v.vals.get(&var).copied() {
+                        inst(&mut self.body, op::STORE, &[var, val]);
+                        v.vals.insert(var, (val, false));
                     }
                 }
-                _ => {}
+            }
+            let targets: Vec<u32> = match opcode {
+                op::BRANCH => vec![args[0]],
+                op::BRANCH_CONDITIONAL => vec![args[1], args[2]],
+                op::SWITCH => std::iter::once(args[1])
+                    .chain(args[2..].iter().skip(1).step_by(2).copied())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for t in targets {
+                v.preds.entry(t).or_default().push(v.block);
             }
         }
         inst(&mut self.body, opcode, args);
@@ -435,7 +471,9 @@ impl Module {
 
     /// Starts keeping variable values per block: from here, a load of a
     /// variable that [`Module::store_var`] wrote or [`Module::load_var`]
-    /// read in the same block reuses the value, and stores are written once,
+    /// read in the same block, or in the block's one predecessor when that
+    /// was the block emitted just before and the block is no loop header,
+    /// reuses the value, and stores are written once,
     /// before the block's merge or branch (none before a return or a
     /// discard: function variables end there). Only for variables nothing
     /// else reads or writes, in code emitted block by block in order.
@@ -460,10 +498,11 @@ impl Module {
 
     /// The value of function variable `var` of type `ty`.
     pub fn load_var(&mut self, ty: u32, var: u32) -> u32 {
-        if let Some(v) = &self.vars
-            && let Some((val, _)) = v.vals.get(&var)
+        if let Some(v) = &mut self.vars
+            && let Some((val, _)) = v.vals.get(&var).copied()
         {
-            return *val;
+            v.carried = false;
+            return val;
         }
         let val = self.emit(op::LOAD, ty, &[var]);
         if let Some(v) = &mut self.vars {
@@ -474,8 +513,13 @@ impl Module {
 
     /// The value an earlier [`Module::remember`] in the current block gave
     /// `key`.
-    pub fn recall(&self, key: &[u32]) -> Option<u32> {
-        self.vars.as_ref()?.memo.get(key).copied()
+    pub fn recall(&mut self, key: &[u32]) -> Option<u32> {
+        let v = self.vars.as_mut()?;
+        let r = v.memo.get(key).copied();
+        if r.is_some() {
+            v.carried = false;
+        }
+        r
     }
 
     /// Notes `val` for `key` until the block ends (only while
