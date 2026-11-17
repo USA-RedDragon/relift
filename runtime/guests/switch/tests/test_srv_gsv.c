@@ -181,6 +181,12 @@ TEST(gsv_display_session_answers_nn_vi)
     r = tc_send(c, (tc_obj){ .handle = d }, q);
     CHECK_EQ(r.result, 0);
     CHECK_EQ(tc_u64(&r, 0), 0);
+    q = tc_new(31);
+    q.tipc = true;
+    tc_put32(&q, 0);
+    r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
     CHECK_EQ(tipc(c, d, 101, NULL, 0, 3), 0);
     CHECK_EQ(tipc(c, d, 51, NULL, 0, 1), 0);
     CHECK_EQ(tipc(c, d, 999, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);

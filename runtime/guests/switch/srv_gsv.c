@@ -334,6 +334,7 @@ static const rl_ipc_cmd display_session_cmds[] = {
     { 5, "GetTimestampRecorderCount", display_recorder_count },
     { 11, "GetEvent", display_event },
     { 21, "Command21", rl_srv_stub_ok },
+    { 31, "GetEvent2", display_event },
     { 51, "SetTimestampRecorderCount", rl_srv_stub_ok },
     { 101, "OpenDisplay", rl_srv_stub_ok },
     { 102, "CloseDisplay", rl_srv_stub_ok },
