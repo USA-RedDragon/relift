@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION -->`10u`<!-- /docgen:const -->.
+Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION -->`11u`<!-- /docgen:const -->.
 
 ## 0. Runtime layers
 
@@ -2078,6 +2078,11 @@ control; the WebAssembly emitter follows the same rules, checked by
   handler's entry pc, or `RL_NO_IRQ`. A taken interrupt is entered as a
   nested call through dispatch, and when the handler returns `rl_sync`
   asks again, so several pending interrupts are entered one after another.
+  A hook whose handler does not return to the code it interrupted (the
+  program's own vector switches threads with an exception return) may
+  instead set `pend = {RL_PEND_REDIRECT, pc = entry, sp = RL_SP_NONE}` and
+  answer `RL_IRQ_REDIRECT`; `rl_sync` then returns `RL_PENDING` and the run
+  goes on at the entry with the host frames above the thread entry gone.
   `rl_sync` returns `RL_OK`, or `RL_PENDING` to propagate a pending record.
 - **Where a handler returns to.** The CPU layer may set a return hook
   (`rl_irq_return_hook`, `rl_sched_set_irq_return`). After each handler
