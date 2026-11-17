@@ -1,5 +1,13 @@
+//! Translates every program of a `relift-shaders scan` directory and counts
+//! the reasons the rest fail. Task and mesh programs that `meshes.json`
+//! pairs translate with their pipeline.
+//!
+//! `coverage <scan dir> [<spv out dir> | -] [threads] [failures list]`
+
+mod meshes;
+
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate;
+use relift_gpu_sm86::translate::translate_with;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,6 +34,7 @@ fn main() {
         .filter(|p| p.extension().is_some_and(|x| x == "bin"))
         .collect();
     entries.sort();
+    let pipelines = meshes::read(std::path::Path::new(&dir));
     let next = AtomicUsize::new(0);
     let ok = AtomicUsize::new(0);
     let list: Mutex<String> = Mutex::new(String::new());
@@ -37,7 +46,12 @@ fn main() {
                     let k = next.fetch_add(1, Ordering::Relaxed);
                     let Some(p) = entries.get(k) else { break };
                     let Ok(b) = std::fs::read(p) else { continue };
-                    match translate(&Program::parse(&b)) {
+                    let sha = p
+                        .file_stem()
+                        .map(|s| s.to_string_lossy())
+                        .unwrap_or_default();
+                    let o = meshes::options(&pipelines, &sha);
+                    match translate_with(&Program::parse(&b), &o) {
                         Ok(sh) => {
                             ok.fetch_add(1, Ordering::Relaxed);
                             if let (Some(o), Some(stem)) = (&out, p.file_stem()) {
@@ -74,8 +88,9 @@ fn main() {
         println!("{n:8} {k}");
     }
     println!(
-        "translated {} of {}",
+        "translated {} of {} ({} task and mesh programs with their pipeline)",
         ok.load(Ordering::Relaxed),
-        entries.len()
+        entries.len(),
+        pipelines.len()
     );
 }
