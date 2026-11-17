@@ -18,13 +18,13 @@ The pages are Markdown, the README and the `docs` folder and the `README.md` of 
 
 <!-- docgen:text text="go run github.com/USA-RedDragon/docgen@{docgen} update" code=sh -->
 ```sh
-go run github.com/USA-RedDragon/docgen@v0.0.0-20261117162200-2a40d2cdbf28 update
+go run github.com/USA-RedDragon/docgen@v0.0.0-20261117171836-9969cd79f7f3 update
 ```
 <!-- /docgen:text -->
 
 <!-- docgen:text text="go run github.com/USA-RedDragon/docgen@{docgen} check -diff" code=sh -->
 ```sh
-go run github.com/USA-RedDragon/docgen@v0.0.0-20261117162200-2a40d2cdbf28 check -diff
+go run github.com/USA-RedDragon/docgen@v0.0.0-20261117171836-9969cd79f7f3 check -diff
 ```
 <!-- /docgen:text -->
 
