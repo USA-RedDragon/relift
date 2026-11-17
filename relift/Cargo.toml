@@ -42,6 +42,8 @@ relift-n64-formats = { workspace = true }
 relift-patch = { workspace = true }
 relift-proc = { workspace = true }
 relift-progress = { workspace = true }
+relift-sms = { workspace = true }
+relift-sms-formats = { workspace = true }
 relift-switch = { workspace = true }
 relift-switch-formats = { workspace = true }
 relift-switch-names = { workspace = true }
@@ -50,7 +52,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 relift-cpu-z80 = { workspace = true }
-relift-sms = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 uds_windows = { workspace = true }

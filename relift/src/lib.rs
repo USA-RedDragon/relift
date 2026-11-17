@@ -40,6 +40,7 @@ pub mod report;
 pub mod runtime_link;
 pub mod settings;
 pub mod shaders;
+pub mod sms;
 pub mod total;
 pub mod ui;
 pub mod winres;

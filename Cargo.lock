@@ -904,6 +904,7 @@ dependencies = [
  "relift-proc",
  "relift-progress",
  "relift-sms",
+ "relift-sms-formats",
  "relift-switch",
  "relift-switch-formats",
  "relift-switch-names",

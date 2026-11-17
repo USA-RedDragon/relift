@@ -101,6 +101,7 @@ fn lift_trace(
         console,
         region: Region::NtscU,
         mapper: cart.mapper.kind.into(),
+        entry: program::Entry::Main,
     };
     relift_cache::write_if_changed(
         &c.join("program.c"),
@@ -108,6 +109,10 @@ fn lift_trace(
     )?;
     relift_cache::write_if_changed(&c.join("rom.c"), program::rom_c(rom).as_bytes())?;
     relift_cache::write_if_changed(&c.join("rom.bin"), rom)?;
+    relift_cache::write_if_changed(
+        &c.join("relift_info.c"),
+        b"int relift_info_main(void);\nint relift_info_main(void) { return 0; }\n",
+    )?;
     let mut o = std::io::stdout().lock();
     writeln!(
         o,

@@ -2071,6 +2071,8 @@ pub fn run_build(
         Some("Game Boy Advance")
     } else if crate::n64::is_project() {
         Some("Nintendo 64")
+    } else if crate::sms::is_project() {
+        Some("Master System")
     } else {
         None
     };
@@ -2084,6 +2086,11 @@ pub fn run_build(
         };
         let built = if crate::gb::is_project() {
             crate::gb::build(settings, mods, !dev, target, ui)?
+        } else if crate::sms::is_project() {
+            if !mods.is_empty() {
+                return Err("mods are not supported for Master System ROMs yet".into());
+            }
+            crate::sms::build(settings, true, target, ui)?
         } else if crate::gba::is_project() {
             crate::gba::build(settings, mods, true, target, ui)?
         } else {
@@ -2259,6 +2266,12 @@ pub fn run_run(
             return Err("only the host target runs so far".into());
         }
         return crate::gba::run(settings, ui);
+    }
+    if crate::sms::is_project() {
+        if target.is_some_and(|t| t != "host") {
+            return Err("only the host target runs so far".into());
+        }
+        return crate::sms::run(settings, ui);
     }
     if crate::n64::is_project() {
         if target.is_some_and(|t| t != "host") {

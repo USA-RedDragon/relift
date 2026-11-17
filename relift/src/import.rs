@@ -100,6 +100,12 @@ pub fn run(
         }
         return crate::gba::import(settings, dump, ui);
     }
+    if crate::sms::is_rom(dump) {
+        if update.is_some() {
+            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
+        }
+        return crate::sms::import(settings, dump, ui);
+    }
     if crate::n64::is_rom(dump) {
         if update.is_some() {
             return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());

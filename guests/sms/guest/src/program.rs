@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use relift_cpu_z80::{ENTRY, Entry, HALF};
+use relift_cpu_z80::{ENTRY, Entry as Interrupt, HALF};
 use relift_emit::{Function, Insn, Options, Output};
 use relift_guest::{Frontend, LiftFailure};
 use relift_ir::{Block, Next};
@@ -61,6 +61,8 @@ pub struct Lifted {
     /// Instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
 }
+
+pub use relift_guest::Entry;
 
 /// The console the program runs as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +120,8 @@ pub struct Program<'a> {
     pub region: Region,
     /// The mapper.
     pub mapper: Mapper,
+    /// How the program enters.
+    pub entry: Entry,
 }
 
 /// The host name of the function that starts at `addr` in `tag`.
@@ -244,7 +248,12 @@ fn emit_unit(tag: UnitTag, fns: &[Function<'_>], image_id: [u8; 32], anywhere: b
 fn entries(image_id: [u8; 32]) -> Unit {
     let fe = Sms::new(UnitTag::Entries);
     let mut blocks = Blocks::new();
-    for e in [Entry::Nmi, Entry::Im0, Entry::Im1, Entry::Im2] {
+    for e in [
+        Interrupt::Nmi,
+        Interrupt::Im0,
+        Interrupt::Im1,
+        Interrupt::Im2,
+    ] {
         blocks.insert(e.addr(), (fe.lift(&[0; 4], e.addr()), 0));
     }
     let fns: Vec<Function<'_>> = blocks
@@ -482,9 +491,33 @@ pub fn program_c(p: &Program<'_>, l: &Lifted) -> String {
         Mapper::Codemasters => "SMS_MAPPER_CODEMASTERS",
         Mapper::Korea => "SMS_MAPPER_KOREA",
     };
+    s.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
+    let mobile = |s: &mut String, header: &str, sig: &str, init: &str| {
+        let _ = write!(
+            s,
+            "#include <relift/{header}>\n#include <relift/settings.h>\n{sig}\n{{\n    {init}();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n"
+        );
+    };
+    match p.entry {
+        Entry::Android => mobile(
+            &mut s,
+            "android.h",
+            "__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)",
+            "rl_android_init",
+        ),
+        Entry::Ios => mobile(
+            &mut s,
+            "ios.h",
+            "int rl_ios_main(int argc, char **argv)",
+            "rl_ios_init",
+        ),
+        Entry::Main => s.push_str(
+            "int main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
+        ),
+    }
     let _ = write!(
         s,
-        "}};\nint main(int argc, char **argv)\n{{\n    rl_sms_program prog = {{ rl_sms_rom, rl_sms_rom_len, {}, {console}, {region}, {mapper}, &{ENTRIES_SYMBOL}, roms, {roms}u, rams, {}u }};\n    return rl_sms_main(&prog, argc, argv);\n}}\n",
+        "    rl_sms_program prog = {{ rl_sms_rom, rl_sms_rom_len, {}, {console}, {region}, {mapper}, &{ENTRIES_SYMBOL}, roms, {roms}u, rams, {}u }};\n    return rl_sms_main(&prog, argc, argv);\n}}\n",
         c_string(p.title),
         l.ram_groups.len(),
     );

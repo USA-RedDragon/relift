@@ -135,6 +135,7 @@ fn build(dir: &Path, rom: &[u8], lifted: &program::Lifted) -> Option<PathBuf> {
         console: Console::Ms,
         region: Region::NtscU,
         mapper: Mapper::Sega,
+        entry: program::Entry::Main,
     };
     relift_cache::write_if_changed(
         &c.join("program.c"),
@@ -144,6 +145,12 @@ fn build(dir: &Path, rom: &[u8], lifted: &program::Lifted) -> Option<PathBuf> {
     relift_cache::write_if_changed(&c.join("rom.c"), program::rom_c(rom).as_bytes())
         .expect("writes");
     relift_cache::write_if_changed(&c.join("rom.bin"), rom).expect("writes");
+    relift_cache::write_if_changed(
+        &c.join("relift_info.c"),
+        b"int relift_info_main(void);\nint relift_info_main(void) { return 0; }\n",
+    )
+    .expect("writes");
+    sources.push(c.join("relift_info.c"));
     sources.push(c.join("program.c"));
     sources.push(c.join("rom.c"));
     let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");

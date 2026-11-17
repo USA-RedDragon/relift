@@ -1,7 +1,9 @@
 # guests/sms
 
-The Sega Master System, Game Gear and SG-1000 guest. State: pieces only;
-`relift import` does not take a `.sms`, `.gg` or `.sg` file yet.
+The Sega Master System, Game Gear and SG-1000 guest. State: `relift
+import` takes a `.sms` or `.gg` cartridge, and `relift build` lifts it from
+an ares oracle trace until discovery lands (below); the SG-1000 has its
+video chip but no machine yet.
 
 | Crate | Folder | Does |
 |---|---|---|
@@ -22,6 +24,27 @@ only when there is no usable header. The mapper guess is a Codemasters
 checksum match first, then a byte scan for `ld (nn),a` stores to the mapper
 registers; function discovery refines it later. Tests build their input with
 `synth`; no game data is used.
+
+## Building a game
+
+```sh
+relift import game.sms
+RELIFT_SMS_TRACE=exec.tsv relift build
+relift run
+```
+
+`relift import` copies the ROM (less a copier header) into the project and
+writes `game.toml` with `guest = "sms"`, the console (`sms`, `gg`, or
+`gg-ms` for a Master System cartridge on a Game Gear), the region (`ntsc-u`,
+`ntsc-j` with the FM unit, `pal`) and the mapper guess; edit them there.
+Until discovery's report is wired in, `relift build` takes the code from the
+executed instructions of an ares oracle trace (`exec.tsv`, the spike's
+oracle) named by `RELIFT_SMS_TRACE`, and fails without one. The program
+takes `--headless`, `--frames N`, `--input FILE` (an input script per
+frame), `--png`, `--png-dir`, `--wav FILE`, `--no-audio` and `--stats`; in
+a window it reads the pad from the keyboard or a gamepad and plays the PSG
+and FM sound. `relift/tests/e2e_sms.rs` runs the whole path on a synthetic
+cartridge.
 
 ## Lifted code
 

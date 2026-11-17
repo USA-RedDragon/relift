@@ -444,6 +444,8 @@ pub fn platform_name(platform: &str) -> &str {
         "gbc" => "Game Boy Color",
         "gba" => "Game Boy Advance",
         "nds" => "Nintendo DS",
+        "sms" => "Master System",
+        "gg" => "Game Gear",
         other => other,
     }
 }

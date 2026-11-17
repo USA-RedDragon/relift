@@ -382,6 +382,24 @@ pub fn handheld_document(
     Ok(info)
 }
 
+/// The document of a Master System or Game Gear build (`platform` `sms`
+/// or `gg`): the name, the platform and the input section of its ports;
+/// the cartridge has no title or save information in its header.
+#[must_use]
+pub fn sms_document(name: &str, platform: &str, settings: Vec<Setting>, ports: &PortSet) -> Info {
+    let mut info = Info::new(env!("CARGO_PKG_VERSION"));
+    info.identity.platform = platform.into();
+    info.identity.names = std::iter::once(("default".to_string(), name.to_string())).collect();
+    info.identity.default_language = info.identity.first_language();
+    info.save = Save {
+        kind: "none".into(),
+        ..Save::default()
+    };
+    info.settings = game_settings::section(settings);
+    info.input = relift_input::input_section(ports);
+    info
+}
+
 /// The document of a Nintendo 64 build: the identity from the cartridge
 /// header (title, game id, version), the runtime settings with the picture
 /// settings at the developer's `picture` defaults ([`crate::n64_picture`])
