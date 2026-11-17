@@ -115,7 +115,9 @@ constant bank (`put` lines), the offsets are the ones the driver chose for
 
     KAT_DEVS=llvmpipe KAT_HOSTS="lavapipe mali adreno" python3 -I kat/compute/kat.py <absolute work dir> --replay tests/kat/compute.txt
 
-runs the recorded programs instead and needs no NVIDIA device.
+runs the recorded programs instead and needs no NVIDIA device. CI runs
+it on the pinned lavapipe build after the task and mesh replay
+(`scripts/ci/mesh-kat.sh`).
 `tests/compute_kat.rs` checks that every recorded program still translates
 and validates for every host preset.
 

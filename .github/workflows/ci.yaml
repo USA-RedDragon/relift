@@ -182,7 +182,7 @@ jobs:
           retention-days: 14
 
   mesh-kat:
-    name: task and mesh known answers on lavapipe
+    name: task, mesh and compute known answers on lavapipe
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -212,7 +212,7 @@ jobs:
             ${{ runner.temp }}/spirv-tools-*
           key: mesh-kat-${{ hashFiles('scripts/ci/lib.sh') }}
 
-      - name: Draw the recorded programs with both back ends
+      - name: Draw the recorded programs with both back ends, then run the compute ones
         run: scripts/ci/mesh-kat.sh
 
   gb-corpus:
