@@ -67,6 +67,8 @@ rl_result rl_srv_nv2_open(uint32_t *handle);
 rl_result rl_gsv_open_user_session(uint32_t *handle);
 /** @brief Registers ectx:aw, the error context writer, and notif:a, the alarm notifications. */
 void rl_srv_install_ectx(void);
+/** @brief Registers bsd:u and bsd:s, the socket services, without a network. */
+void rl_srv_install_bsd(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
