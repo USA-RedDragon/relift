@@ -422,6 +422,16 @@ impl Ctx {
         }
     }
 
+    /// The host has subgroup operations in this stage.
+    pub(crate) fn host_subgroups(&self) -> bool {
+        let warp = match self.stage {
+            Stage::Compute => self.host.warp_compute,
+            Stage::Fragment => self.host.warp_fragment,
+            _ => self.host.warp_graphics,
+        };
+        warp != Warp::Absent
+    }
+
     fn warp_path(&self) -> WarpPath {
         self.iface.host.warp
     }

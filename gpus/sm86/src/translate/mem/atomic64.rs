@@ -10,10 +10,17 @@
 //! The lock is taken and released in the same loop iteration, with no
 //! branch between, so lanes of one subgroup that contend for a lock never
 //! wait on a lane of their own subgroup that holds it: the holder finishes
-//! in the iteration it won. A subgroup that spins on a lock another
-//! subgroup holds relies on the device to go on running the holder, which
-//! Vulkan does not promise; that is part of what [`Atomic64Path::Locked`]
-//! reports.
+//! in the iteration it won. Where the stage has subgroups the loop also
+//! ends only when every active lane of the subgroup is done
+//! (`OpGroupNonUniformAll`; a lane that is done compares the lock with 2,
+//! a value it never holds, so it does not take it again), so no lane
+//! leaves it while others go on: a
+//! compiler that moves the critical section past a divergent loop exit
+//! (Qualcomm's Adreno driver does, and its lanes then spin forever on a
+//! lock their own subgroup holds) cannot. A subgroup that spins on a lock
+//! another subgroup holds relies on the device to go on running the
+//! holder, which Vulkan does not promise; that is part of what
+//! [`Atomic64Path::Locked`] reports.
 //!
 //! All 64-bit atomics of all programs on the device must go through the
 //! same table for the accesses to be atomic with each other. Weak 64-bit
@@ -32,6 +39,9 @@ use crate::translate::{Atomic64Path, Ctx, GUEST_MEMORY_SET, LOCK_BINDING, LOCK_W
 
 const STORAGE_BUFFER: u32 = 12;
 const SCOPE_DEVICE: u32 = 1;
+const SCOPE_SUBGROUP: u32 = 3;
+const CAP_GROUP_NON_UNIFORM: u32 = 61;
+const CAP_GROUP_NON_UNIFORM_VOTE: u32 = 62;
 const SEM_ACQUIRE: u32 = 0x2;
 const SEM_RELEASE: u32 = 0x4;
 const SEM_ACQUIRE_RELEASE: u32 = 0x8;
@@ -108,12 +118,17 @@ impl Ctx {
         let acq = self.m.c_u32(SEM_ACQUIRE | SEM_UNIFORM);
         let relaxed = self.m.c_u32(0);
         let one = self.m.c_u32(1);
+        let was = self.m.emit(op::LOAD, u, &[done]);
+        let left = self.m.emit(op::I_EQUAL, b, &[was, z]);
+        let never = self.m.c_u32(2);
+        let expect = self.select(u, left, z, never);
         let prev = self.m.emit(
             spv::ATOMIC_COMPARE_EXCHANGE,
             u,
-            &[lock, scope, acq, relaxed, one, z],
+            &[lock, scope, acq, relaxed, one, expect],
         );
-        let got = self.m.emit(op::I_EQUAL, b, &[prev, z]);
+        let free = self.m.emit(op::I_EQUAL, b, &[prev, z]);
+        let got = self.m.emit(op::LOGICAL_AND, b, &[free, left]);
         self.m.emit_void(op::SELECTION_MERGE, &[skip, 0]);
         self.m.emit_void(op::BRANCH_CONDITIONAL, &[got, crit, skip]);
         self.m.emit_void(op::LABEL, &[crit]);
@@ -139,6 +154,14 @@ impl Ctx {
         self.m.emit_void(op::LABEL, &[skip]);
         let d = self.m.emit(op::LOAD, u, &[done]);
         let fin = self.m.emit(op::I_NOT_EQUAL, b, &[d, z]);
+        let fin = if self.host_subgroups() {
+            self.cap(CAP_GROUP_NON_UNIFORM);
+            self.cap(CAP_GROUP_NON_UNIFORM_VOTE);
+            let sg = self.m.c_u32(SCOPE_SUBGROUP);
+            self.m.emit(spv::GROUP_ALL, b, &[sg, fin])
+        } else {
+            fin
+        };
         self.m
             .emit_void(op::BRANCH_CONDITIONAL, &[fin, merge, cont]);
         self.m.emit_void(op::LABEL, &[cont]);

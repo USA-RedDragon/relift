@@ -561,6 +561,27 @@ fn hosts_without_int64_use_word_pairs() {
     assert!(e.is_err_and(|e| e.0.contains("shaderInt64")));
 }
 
+const GROUP_NON_UNIFORM_ALL: u32 = 334;
+
+/// The locked 64-bit atomic loop leaves only when every lane of the
+/// subgroup is done where the stage has subgroups: Qualcomm's Adreno
+/// driver otherwise hangs on it (lanes spin on a lock a lane of their own
+/// subgroup took).
+#[test]
+fn locked_atomics_leave_the_loop_together() {
+    let p = global_program();
+    let s = on(&p, HostProfile::adreno());
+    assert_eq!(s.interface.host.atomics64, Atomic64Path::Locked);
+    assert!(spirv_ops(&s.spirv).contains(&GROUP_NON_UNIFORM_ALL));
+    let none = HostProfile {
+        warp_compute: relift_gpu_sm86::translate::Warp::Absent,
+        ..HostProfile::minimal()
+    };
+    let s = on(&p, none);
+    assert_eq!(s.interface.host.atomics64, Atomic64Path::Locked);
+    assert!(!spirv_ops(&s.spirv).contains(&GROUP_NON_UNIFORM_ALL));
+}
+
 fn text_of(p: &Program) -> Vec<String> {
     p.decode()
         .into_iter()
