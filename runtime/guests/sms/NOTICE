@@ -24,6 +24,12 @@ sms.c     the machine: memory map, the Sega, Codemasters and Korean
                                    ms/controller/gamepad/gamepad.cpp,
                                    ms/system/controls.cpp,
                                    ares/scheduler/thread.cpp
+tms9918.c the TMS9918A of the SG-1000: ports, registers, the frame
+          interrupt, graphics 1 and 2, text and multicolor modes, sprites,
+          the palette
+                                   component/video/tms9918/tms9918.cpp,
+                                   io.cpp, background.cpp, sprite.cpp,
+                                   dac.cpp, sg/vdp/color.cpp
 ym2413.c  the YM2413 (OPLL): operators, envelopes, the LFOs, rhythm mode,
           the register writes; the sine and exponent tables precomputed
                                    component/audio/ym2413/ym2413.cpp,
