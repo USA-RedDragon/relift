@@ -19,5 +19,6 @@ docker run --rm -v "$src:/src" -w /src/sdk -e OWNER "$DEVKITARM_IMAGE" bash -euo
 '
 # The workspace crates optimized as their dependencies are: relift lifts the ROM
 # about twice as fast as at opt-level 0, without the LTO of a release build.
-RELIFT_NDS_TIMING_ROM="$src/sdk/relift-hwtest-ntr.nds" CARGO_PROFILE_DEV_OPT_LEVEL=2 \
-  cargo test -p relift --locked --test e2e_nds_timing -- --nocapture
+RELIFT_NDS_TIMING_ROM="$src/sdk/relift-hwtest-ntr.nds" \
+  CARGO_PROFILE_NDSTIMING_INHERITS=dev CARGO_PROFILE_NDSTIMING_OPT_LEVEL=2 \
+  cargo test -p relift --locked --profile ndstiming --test e2e_nds_timing -- --nocapture
