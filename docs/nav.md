@@ -1,0 +1,34 @@
+# Site outline
+
+This page lists the pages of the docs site in reading order, by section; the site builds its navigation from it.
+
+- [Overview](../README.md)
+- Get started
+  - [Install](start/01-install.md)
+  - [Make your first game](start/02-first-game.md)
+  - [Next steps](start/03-next-steps.md)
+- Guides
+  - [Use relift](guides/usage.md)
+  - [Package a game for each host](guides/packaging.md)
+  - [Nintendo Switch games](../guests/switch/README.md)
+  - [Game Boy and Game Boy Color games](../guests/gb/README.md)
+  - [Game Boy Advance games](../guests/gba/README.md)
+- Concepts
+  - [Architecture](concepts/architecture.md)
+  - [The C runtime](../runtime/README.md)
+  - [The core crates](../core/README.md)
+- Reference
+  - [Settings](reference/configuration.md)
+  - [Input ports and bindings](reference/input.md)
+  - [Runtime ABI contract](abi.md)
+  - [ARM64 CPU](../cpus/arm64/README.md)
+  - [ARMv4T CPU](../cpus/arm32/README.md)
+  - [SM83 CPU](../cpus/sm83/README.md)
+  - [VR4300 CPU](../cpus/mips/README.md)
+  - [SM86 shader translator](../gpus/sm86/README.md)
+  - [The differential checker](../check/README.md)
+- Project
+  - [Tooling and checks](project/tooling.md)
+  - [License](project/license.md)
+
+Each item is a link to a page, or, for a page that is planned and not written, its title and its path in code. A comment `<!-- old: <path> -->` after a link gives the path of the page before it moved; the site uses that file until the new one exists. A link to a file that is not a page, or to another site, shows in the navigation and opens that file or site.
