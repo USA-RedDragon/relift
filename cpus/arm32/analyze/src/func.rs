@@ -60,6 +60,10 @@ pub(crate) struct Summary {
     /// It passes an argument on to a call of such a function: with
     /// constant arguments its run can learn more.
     pub spec: bool,
+    /// It returns through an address it computes from its return address
+    /// (GCC's Thumb switch helpers, which skip a table of offsets after
+    /// the call): a caller resolves where it goes on with its constants.
+    pub ret_lr: bool,
 }
 
 impl Summary {
@@ -79,6 +83,7 @@ impl Summary {
             psr: true,
             writes: false,
             spec: false,
+            ret_lr: false,
         }
     }
 
@@ -966,6 +971,9 @@ impl Run<'_> {
             if cs.spec && !ran {
                 self.special(callee, st);
             }
+            if cs.ret_lr && kind == EdgeKind::Call && self.case_call(site, callee, st) {
+                continue;
+            }
             let effects = cs.effects.clone();
             self.apply(site, &effects, st);
             if let Some(o) = cs.frame_exit {
@@ -1428,6 +1436,18 @@ impl Run<'_> {
 
     fn jump(&mut self, site: Loc, enc: Encoding, bx: bool, t: Abs, out: &Out, link: bool) {
         let st = &out.st;
+        let plain_return = matches!(
+            t,
+            Abs::S(Sym {
+                base: Base::Entry(LR),
+                off: 0,
+                ..
+            })
+        );
+        if !link && !plain_return && self.jumps_through_lr(site) {
+            let own = self.out.summary.get_or_insert(Summary::new(false, 0x7FFF));
+            own.ret_lr = true;
+        }
         if link && !matches!(t, Abs::K(v) if v as u32 == Self::fall_loc(site).addr) {
             self.out.linked.insert(site);
         }
@@ -1536,6 +1556,134 @@ impl Run<'_> {
                 }
             }
         }
+    }
+
+    /// Whether the instruction at `l` is `BX LR` or `MOV PC, LR`.
+    fn jumps_through_lr(&self, l: Loc) -> bool {
+        let Some(w) = self.env.image.fetch(l) else {
+            return false;
+        };
+        if l.thumb {
+            w == 0x4770 || w == 0x46F7
+        } else {
+            w & 0x0FFF_FFFF == 0x012F_FF1E || w & 0x0FFF_FFFF == 0x01A0_F00E
+        }
+    }
+
+    /// A call at `site` to `callee`, which returns through an address it
+    /// computes from its return address, under a compare that bounds an
+    /// index: the callee runs with the caller's constants for every index
+    /// that reaches the call, and where it returns to goes on from the
+    /// call. `false` when there is no such bound or a run fails.
+    fn case_call(&mut self, site: Loc, callee: Loc, st: &State) -> bool {
+        let Some((cmp_at, r, max)) = self.bound(site) else {
+            return false;
+        };
+        let mut to = BTreeSet::new();
+        for i in 0..=max {
+            let Ok(at) = self.walk_to(cmp_at, site, r, i) else {
+                return false;
+            };
+            let Some(at) = at else { continue };
+            let args: Args = std::array::from_fn(|k| match at.reg(k as u8) {
+                a @ Abs::K(_) => a,
+                _ => Abs::Top,
+            });
+            let Some(t) = crate::conc::run_return(self.env, site, callee, args) else {
+                return false;
+            };
+            to.insert(t);
+        }
+        if to.is_empty() {
+            return false;
+        }
+        for t in to {
+            for l in self.targets(site, t.addr, t.thumb) {
+                let mut s = st.clone();
+                s.regs[regs::T.index()] = Abs::K(u128::from(t.thumb));
+                self.succ(site, l, s);
+            }
+        }
+        true
+    }
+
+    /// The compare that bounds an index before `site`: where it is, its
+    /// register and the largest index that passes the conditional
+    /// instruction after it.
+    fn bound(&self, site: Loc) -> Option<(Loc, u8, u32)> {
+        let mut check = None;
+        for k in 0..12u32 {
+            let addr = site.addr.checked_sub(k * site.size())?;
+            let l = Loc { addr, ..site };
+            if !self.merged.contains_key(&l) {
+                break;
+            }
+            if let Some(c) = self.condition(l) {
+                check = Some((l, c));
+                break;
+            }
+        }
+        let (cond_at, cond) = check?;
+        if !matches!(cond, 0 | 1 | 2 | 3 | 8 | 9) {
+            return None;
+        }
+        let mut cmp_at = Loc {
+            addr: cond_at.addr.checked_sub(site.size())?,
+            ..site
+        };
+        let mut cmp = self.compare(cmp_at);
+        if self.env.image.options.switches {
+            for _ in 0..MAX_COMPARE_GAP {
+                if cmp.is_some() || !self.merged.contains_key(&cmp_at) || !self.passes_flags(cmp_at)
+                {
+                    break;
+                }
+                cmp_at = Loc {
+                    addr: cmp_at.addr.checked_sub(site.size())?,
+                    ..site
+                };
+                cmp = self.compare(cmp_at);
+            }
+        }
+        let (r, max) = cmp?;
+        (max <= 1024 && self.merged.contains_key(&cmp_at)).then_some((cmp_at, r, max))
+    }
+
+    /// Runs the code from `from` with register `r` = `i` to `site`: the
+    /// state there, `Ok(None)` when it leaves `from..=site` first.
+    fn walk_to(&self, from: Loc, site: Loc, r: u8, i: u32) -> Result<Option<State>, ()> {
+        let mut st = self.merged.get(&from).ok_or(())?.clone();
+        st.regs[usize::from(r)] = Abs::K(u128::from(i));
+        let mut l = from;
+        for _ in 0..32 {
+            if l == site {
+                return Ok(Some(st));
+            }
+            let w = self.env.image.fetch(l).ok_or(())?;
+            let lifted = self.env.lift(l, w).map_err(|_| ())?;
+            let out = eval::eval(&lifted.1, l, &st, self.env.image, true, None);
+            if out.may_skip && out.may_run {
+                return Err(());
+            }
+            let next = if out.may_run {
+                let [Abs::K(t)] = out.targets[..] else {
+                    return Err(());
+                };
+                st = out.st;
+                Loc {
+                    addr: t as u32,
+                    thumb: st.thumb().ok_or(())?,
+                    copy: l.copy,
+                }
+            } else {
+                Self::fall_loc(l)
+            };
+            if next.thumb != l.thumb || next.addr < from.addr || next.addr > site.addr {
+                return Ok(None);
+            }
+            l = next;
+        }
+        Err(())
     }
 
     /// The register and bound of a compare with an immediate at `l`.

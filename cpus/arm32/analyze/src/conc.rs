@@ -37,11 +37,16 @@ pub(crate) const MAX_STEPS: usize = 1 << 21;
 const MAX_BOOT_STEPS: usize = 1 << 18;
 /// The most paths a run from a reset entry follows at a time.
 const MAX_PATHS: usize = 64;
+/// The bytes after a call a run to its return may read as the caller's.
+const RETURN_DATA: u32 = 256;
 /// The most times a path forks at one address: a loop whose end depends
 /// on an unknown value runs at most this many times.
 const MAX_REVISITS: u32 = 64;
 
 fn fetch(env: &Env<'_>, m: &Scratch, loc: Loc) -> Option<u32> {
+    if loc.copy.is_some() && (0..loc.size()).all(|i| !m.contains_key(&(loc.addr + i))) {
+        return env.image.fetch(loc);
+    }
     if env.image.is_ram(loc.addr) {
         let mut v = 0u32;
         for i in (0..loc.size()).rev() {
@@ -75,6 +80,70 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Written
     st.regs[usize::from(SP)] = Abs::K(u128::from(SCRATCH_STACK - 0x10));
     st.regs[usize::from(LR)] = Abs::K(u128::from(SENTINEL));
     run(env, callee, st, None)
+}
+
+/// Where a call from `site` to `callee` with `r0`-`r12` = `args` goes on:
+/// the target of the first computed jump the callee makes (its return,
+/// maybe past data it reads after the call), or `None` when the run needs
+/// a value it does not know first. The bytes after the call are the ones
+/// the caller's copy holds there.
+pub(crate) fn run_return(env: &Env<'_>, site: Loc, callee: Loc, args: Args) -> Option<Loc> {
+    let lr = site.addr.wrapping_add(site.size()) | u32::from(site.thumb);
+    let mut st = State::entry(callee.thumb);
+    for (i, r) in st.regs.iter_mut().enumerate().take(15) {
+        *r = match args.get(i) {
+            Some(a @ Abs::K(_)) => *a,
+            _ => Abs::Top,
+        };
+    }
+    st.regs[usize::from(SP)] = Abs::K(u128::from(SCRATCH_STACK - 0x10));
+    st.regs[usize::from(LR)] = Abs::K(u128::from(lr));
+    let mut m = Scratch::new();
+    if let Some(c) = site.copy {
+        let after = lr & !1;
+        for a in after..after.wrapping_add(RETURN_DATA) {
+            if let Some(b) = env.image.read(Some(c), a, 1) {
+                m.insert(a, Some(b as u8));
+            }
+        }
+    }
+    let mut loc = callee;
+    for _ in 0..256 {
+        let word = fetch(env, &m, loc)?;
+        let lifted = env.lift(loc, word).ok()?;
+        let (enc, block) = &*lifted;
+        let out = eval::eval(
+            block,
+            loc,
+            &st,
+            env.image,
+            eval::pc_relative(*enc, word, loc.thumb),
+            Some(&mut m),
+        );
+        if out.may_skip && out.may_run {
+            return None;
+        }
+        if !out.may_run {
+            loc.addr = loc.addr.wrapping_add(loc.size());
+            continue;
+        }
+        let [Abs::K(t)] = out.targets[..] else {
+            return None;
+        };
+        st = out.st;
+        let addr = t as u32;
+        let copy = loc.copy.filter(|&c| env.image.holds(c, addr));
+        let next = Loc {
+            addr,
+            thumb: st.thumb()?,
+            copy,
+        };
+        if matches!(block.exit.next, relift_ir::Next::Dynamic(_)) {
+            return Some(next);
+        }
+        loc = next;
+    }
+    None
 }
 
 /// What a function leaves in RAM when it runs from its entry, with no

@@ -889,3 +889,45 @@ fn a_switch_on_a_halfword_offset_table_resolves_on_a_writable_image() {
         );
     }
 }
+
+fn t_bl(at: u32, to: u32) -> [u16; 2] {
+    let off = to.wrapping_sub(at + 4) >> 1;
+    [
+        0xF000 | (off >> 11 & 0x7FF) as u16,
+        0xF800 | (off & 0x7FF) as u16,
+    ]
+}
+
+#[test]
+fn a_thumb_switch_through_a_case_helper_reaches_every_case() {
+    let mut m = Machine::new(Profile::V4t);
+    let f = BASE + 0x40;
+    let helper = BASE + 0x100;
+    m.arm(BASE, &[0xE28F_1039, 0xE12F_FF11]);
+    let call = f + 4;
+    let bl = t_bl(call, helper);
+    m.thumb(
+        f,
+        &[
+            0x2802, 0xD806, bl[0], bl[1], 0x0402, 0x0006, 0x2001, 0x4770, 0x2002, 0x4770, 0x2003,
+            0x4770,
+        ],
+    );
+    m.thumb(
+        helper,
+        &[
+            0xB402, 0x4671, 0x0849, 0x0049, 0x5C09, 0x0049, 0x448E, 0xBC02, 0x4770,
+        ],
+    );
+    let r = m.run(all(), arm(BASE));
+    for case in [f + 16, f + 20, f + 12] {
+        assert!(
+            r.instructions().contains_key(&thumb(case)),
+            "case at {case:#x}: {:?}",
+            r.instructions()
+                .keys()
+                .filter(|l| l.thumb)
+                .collect::<Vec<_>>()
+        );
+    }
+}
