@@ -1,5 +1,6 @@
 //! Finding shader programs in raw bytes: the `BRA self` terminator every
-//! program ends with, a walk back over instructions, and for graphics
+//! program ends with, a walk back over lines that decode as SM86
+//! instructions, and for graphics
 //! programs the 0x80-byte shader program header (SPH) before the code.
 //!
 //! GLSLC writes each program after a header that starts with the magic
@@ -107,6 +108,8 @@ pub fn sph_ok(b: &[u8], q: usize) -> bool {
 enum Line {
     Eof,
     Zero,
+    /// Bytes that are no SM86 instruction.
+    Data,
     Nop,
     End,
     Ins,
@@ -125,7 +128,12 @@ fn line_kind(b: &[u8], p: usize) -> Line {
     if q[..12] == BRA_SELF {
         return Line::End;
     }
-    Line::Ins
+    let mut w = [0u8; LINE];
+    w.copy_from_slice(q);
+    match relift_gpu_sm86::decode(relift_gpu_sm86::Word::from_bytes(&w), 0) {
+        Ok(_) => Line::Ins,
+        Err(_) => Line::Data,
+    }
 }
 
 /// Every offset where `pat` occurs in `b`, overlapping ones included.
@@ -190,8 +198,9 @@ fn past_nops(b: &[u8], p: usize) -> Option<usize> {
 
 /// Every program in `b`: from each terminator, walk back over
 /// instruction lines (and over NOP lines inside a program) to the first
-/// line that is zero, a NOP run after a terminator or an SPH, another
-/// terminator or past the start; look for an SPH within 0x80 to 0x100
+/// line that is zero, no SM86 instruction (data before the code), a NOP
+/// run after a terminator or an SPH, another terminator or past the start;
+/// a terminator with no instruction before it ends no program; look for an SPH within 0x80 to 0x100
 /// bytes before that line; without one the program is compute, starting
 /// where a GLSLC program header before it says its code starts. A walk
 /// that reaches [`MAX_LINES`] marks the find [`Found::cut`].
@@ -212,6 +221,9 @@ pub fn carve(b: &[u8]) -> Vec<Found> {
             steps += 1;
         }
         let first = (p + LINE as isize) as usize;
+        if first == e {
+            continue;
+        }
         let mut found = Found {
             start: first,
             code: first,

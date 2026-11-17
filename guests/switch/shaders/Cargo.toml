@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 clap = { workspace = true }
+relift-gpu-sm86 = { workspace = true }
 relift-cache = { workspace = true }
 relift-proc = { workspace = true }
 relift-switch-formats = { workspace = true }

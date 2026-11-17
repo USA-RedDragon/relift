@@ -1355,6 +1355,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-gpu-sm86",
  "relift-proc",
  "relift-switch-formats",
  "serde_json",

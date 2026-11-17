@@ -284,15 +284,19 @@ fn carve_stops_at_nops_after_an_sph() {
     assert_eq!(f[0].start, 0x100);
 }
 
-/// A GLSLC program header: magic, the code offset at 0x30, and lines that
-/// are not zero up to the code, as the walk back would take for code.
+/// A GLSLC program header: magic, the code offset at 0x30, and lines up
+/// to the code that decode as instructions, as the walk back would take
+/// for code.
 fn with_program_header(c: &[u8], off: usize) -> Vec<u8> {
     let mut h = vec![0u8; off];
-    assert!(off >= 0x40);
+    assert!(off >= 0xa0);
     h[..4].copy_from_slice(&[0x34, 0x12, 0x76, 0x98]);
     h[0x30..0x34].copy_from_slice(&(off as u32).to_le_bytes());
-    for l in (0x90..off - 8).step_by(16) {
-        h[l + 8] = 0xe0;
+    let line = &code(7, 1)[..16];
+    let mut l = off - 16;
+    while l >= 0x90 {
+        h[l..l + 16].copy_from_slice(line);
+        l -= 16;
     }
     h.extend_from_slice(c);
     h
@@ -744,4 +748,23 @@ fn ktgl_through_a_nup_reads_the_same_entries() {
     let root = scratch("ktgl-nup");
     let r = scan(&source, &root.join("out"), &opts(&root.join("cache"))).expect("scans");
     check_ktgl(&r, &expected);
+}
+
+/// Lines that decode as no SM86 instruction (a container's header and
+/// payload before the code) end the walk back, and a terminator with no
+/// instruction before it ends no program.
+#[test]
+fn carve_stops_at_lines_that_are_no_instruction() {
+    let data: Vec<u8> = 0x0100_0000_0000_0000_0000_0000_0000_1058u128
+        .to_le_bytes()
+        .repeat(3);
+    let c = compute(4);
+    let b = blob(&[&data, &c]);
+    let f = carve(&b);
+    assert_eq!(f.len(), 1);
+    assert_eq!(&b[f[0].start..f[0].end], &c[..]);
+    let mut empty = graphics(4, 1)[..0x80].to_vec();
+    empty.extend(vec![0u8; 0x100]);
+    empty.extend(terminator());
+    assert!(carve(&blob(&[&empty])).is_empty());
 }
