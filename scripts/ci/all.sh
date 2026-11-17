@@ -55,7 +55,7 @@ fi
 limit_minutes() {
   local wf=
   case $1 in
-    lint | tests-workspace | tests-gb-devices | tests-relift | tests-relift-e2e | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
+    lint | tests-workspace | tests-gb-devices | tests-relift | tests-relift-e2e | mesh-kat | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
     mac-tests) wf=ci.yaml:macos ;;
     image-*) wf=ci.yaml:cross ;;
     runtime-charter) wf=runtime.yaml:charter ;;
