@@ -190,30 +190,35 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     let mut outs = Vec::new();
     for &k in lanes {
         let pick = |t: (u32, u32)| if k == 0 { t.0 } else { t.1 };
-        let x = c.f16_to_f32(pick(a), md.ftz);
-        let y = c.f16_to_f32(pick(b), md.ftz);
-        let xf = c.as_float(x);
-        let yf = c.as_float(y);
-        let v = match kind {
-            0 => c.nc(op::F_ADD, xf, yf),
-            1 => c.nc(op::F_MUL, xf, yf),
-            _ => {
-                let zz = c.f16_to_f32(pick(z), md.ftz);
-                let zf = c.as_float(zz);
-                let p = c.nc(op::F_MUL, xf, yf);
-                c.sum_odd(p, zf)
+        let (ftz, f32) = (md.ftz, md.f32);
+        let key = format!("{} {kind} {ftz} {f32}", i.mnemonic);
+        let vb = c.shared_pure(key, &[pick(a), pick(b), pick(z)], |c, p| {
+            let x = c.f16_to_f32(p[0], ftz);
+            let y = c.f16_to_f32(p[1], ftz);
+            let xf = c.as_float(x);
+            let yf = c.as_float(y);
+            let v = match kind {
+                0 => c.nc(op::F_ADD, xf, yf),
+                1 => c.nc(op::F_MUL, xf, yf),
+                _ => {
+                    let zz = c.f16_to_f32(p[2], ftz);
+                    let zf = c.as_float(zz);
+                    let p = c.nc(op::F_MUL, xf, yf);
+                    c.sum_odd(p, zf)
+                }
+            };
+            let mut vb = c.as_bits(v);
+            if ftz && !f32 {
+                let ab = c.and_k(vb, 0x7fff_ffff);
+                let tiny = c.cmp_k(op::U_LESS_THAN, ab, 0x3880_0000);
+                let carry = c.cmp_k(op::U_GREATER_THAN_EQUAL, ab, 0x387f_f000);
+                let sign = c.and_k(vb, 0x8000_0000);
+                let min_norm = c.sh(op::BITWISE_OR, sign, 0x3880_0000);
+                let flushed = c.bpick(carry, min_norm, sign);
+                vb = c.bpick(tiny, flushed, vb);
             }
-        };
-        let mut vb = c.as_bits(v);
-        if md.ftz && !md.f32 {
-            let ab = c.and_k(vb, 0x7fff_ffff);
-            let tiny = c.cmp_k(op::U_LESS_THAN, ab, 0x3880_0000);
-            let carry = c.cmp_k(op::U_GREATER_THAN_EQUAL, ab, 0x387f_f000);
-            let sign = c.and_k(vb, 0x8000_0000);
-            let min_norm = c.sh(op::BITWISE_OR, sign, 0x3880_0000);
-            let flushed = c.bpick(carry, min_norm, sign);
-            vb = c.bpick(tiny, flushed, vb);
-        }
+            vb
+        });
         outs.push(vb);
     }
     if md.f32 {
