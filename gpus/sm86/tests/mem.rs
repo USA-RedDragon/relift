@@ -312,17 +312,19 @@ fn tuples_past_rz_are_rejected() {
 }
 
 use common::translate_with;
-use relift_gpu_sm86::translate::{HostProfile, Options};
+use relift_gpu_sm86::translate::{Atomic64Path, HostProfile, Options};
 
 const ORDER_STRONG_SM: u64 = 5;
 const ORDER_STRONG_GPU: u64 = 7;
 const ORDER_STRONG_SYS: u64 = 10;
 const SIZE_32: u64 = 4;
 const SIZE_64: u64 = 5;
+const SIZE_128: u64 = 6;
 
 const OP_LOAD: u32 = 61;
 const OP_ATOMIC_LOAD: u32 = 227;
 const OP_ATOMIC_STORE: u32 = 228;
+const OP_ATOMIC_COMPARE_EXCHANGE: u32 = 230;
 const OP_MEMORY_BARRIER: u32 = 225;
 const OP_CONSTANT: u32 = 43;
 
@@ -412,8 +414,10 @@ fn cta_strong_loads_are_atomic_only_beside_global_writes() {
     assert!(s.interface.host.inexact.is_empty());
 }
 
-/// GPU-strong accesses are device atomics; a strong 64-bit one is one
-/// 64-bit atomic where the host has them, and listed inexact elsewhere.
+/// GPU-strong accesses are device atomics. Each 64-bit element of a strong
+/// 64- or 128-bit one is single-copy atomic: one 64-bit atomic where the
+/// host has them, and a read or write of both words under the lock of the
+/// 64-bit atomics elsewhere.
 #[test]
 fn gpu_strong_accesses_are_device_atomics() {
     let ld = ordered(ldg(SIZE_32, 2, 4, 0), ORDER_STRONG_GPU);
@@ -424,9 +428,23 @@ fn gpu_strong_accesses_are_device_atomics() {
     let s = on(&[ld64], HostProfile::nvidia());
     assert_eq!(insts(&s.spirv, OP_ATOMIC_LOAD).len(), 1);
     assert!(s.interface.host.inexact.is_empty());
-    let s = on(&[ld64], HostProfile::minimal());
+    let ld128 = ordered(ldg(SIZE_128, 4, 8, 0), ORDER_STRONG_GPU);
+    let s = on(&[ld128], HostProfile::nvidia());
     assert_eq!(insts(&s.spirv, OP_ATOMIC_LOAD).len(), 2);
-    assert!(s.interface.host.inexact.iter().any(|l| l.contains(".64")));
+    assert!(s.interface.host.inexact.is_empty());
+    let s = on(&[ld64], HostProfile::minimal());
+    assert_eq!(s.interface.host.atomics64, Atomic64Path::Locked);
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_COMPARE_EXCHANGE).len(), 1);
+    assert!(
+        insts(&s.spirv, OP_ATOMIC_STORE).len() == 1,
+        "a locked load writes only the lock"
+    );
+    assert!(s.interface.host.inexact.is_empty());
+    let st128 = ordered(stg(SIZE_128, 4, 8, 0), ORDER_STRONG_GPU);
+    let s = on(&[st128], HostProfile::minimal());
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_COMPARE_EXCHANGE).len(), 2);
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_STORE).len(), 6);
+    assert!(s.interface.host.inexact.is_empty());
     let sys = ordered(ldg(SIZE_32, 2, 4, 0), ORDER_STRONG_SYS);
     let s = on(&[sys], HostProfile::nvidia());
     assert!(s.interface.host.inexact.iter().any(|l| l.contains("SYS")));

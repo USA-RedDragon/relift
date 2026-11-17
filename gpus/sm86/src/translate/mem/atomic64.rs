@@ -28,10 +28,11 @@
 //! atomic one is a data race with no value guaranteed either. A 32-bit
 //! atomic on one half is not locked: it overlaps the 64-bit atomic only in
 //! part, so the two are not morally strong and the guest guarantees no
-//! atomicity between them. Strong 64-bit loads and stores are single-copy
-//! atomic on the guest but two 32-bit atomics here, which a locked
-//! read-modify-write can split; they are listed inexact (see
-//! [`super::order`]).
+//! atomicity between them. Strong 64-bit loads and stores (and each 64-bit
+//! half of a strong 128-bit one) are single-copy atomic on the guest, so
+//! they take the lock too: a store writes both words under it, a load reads
+//! them under it and writes nothing, so it cannot undo a racing 32-bit
+//! store to one half (see [`super::order`]).
 
 use super::spv;
 use crate::spirv::op;
@@ -82,11 +83,12 @@ impl Ctx {
     }
 
     /// The 64-bit atomic `f(old) -> new` at guest address `addr` under the
-    /// address's lock, on (low, high) word pairs; gives the old value.
+    /// address's lock, on (low, high) word pairs; gives the old value. A
+    /// `None` from `f` writes nothing: a single-copy atomic load.
     pub(crate) fn locked_rmw64(
         &mut self,
         addr: u32,
-        f: impl FnOnce(&mut Ctx, (u32, u32)) -> (u32, u32),
+        f: impl FnOnce(&mut Ctx, (u32, u32)) -> Option<(u32, u32)>,
     ) -> (u32, u32) {
         self.iface.host.atomics64 = Atomic64Path::Locked;
         let u = self.u32t();
@@ -138,11 +140,12 @@ impl Ctx {
         let lo = self.m.emit(spv::ATOMIC_LOAD, u, &[plo, scope, relaxed]);
         let phi = self.global_ptr(hi_addr, u);
         let hi = self.m.emit(spv::ATOMIC_LOAD, u, &[phi, scope, relaxed]);
-        let (nlo, nhi) = f(self, (lo, hi));
-        let plo = self.global_ptr(addr, u);
-        self.m.emit_void(ATOMIC_STORE, &[plo, scope, relaxed, nlo]);
-        let phi = self.global_ptr(hi_addr, u);
-        self.m.emit_void(ATOMIC_STORE, &[phi, scope, relaxed, nhi]);
+        if let Some((nlo, nhi)) = f(self, (lo, hi)) {
+            let plo = self.global_ptr(addr, u);
+            self.m.emit_void(ATOMIC_STORE, &[plo, scope, relaxed, nlo]);
+            let phi = self.global_ptr(hi_addr, u);
+            self.m.emit_void(ATOMIC_STORE, &[phi, scope, relaxed, nhi]);
+        }
         self.m.emit_void(op::MEMORY_BARRIER, &[scope, fence]);
         let rel = self.m.c_u32(SEM_RELEASE | SEM_UNIFORM);
         self.m.emit_void(ATOMIC_STORE, &[lock, scope, rel, z]);

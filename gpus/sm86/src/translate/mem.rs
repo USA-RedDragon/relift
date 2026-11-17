@@ -346,7 +346,7 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     let d = Ctx::dst_reg(&i.ops[0])?;
     let a = addr_operand(i, 1)?;
     let addr = c.global_address(&a)?;
-    let scope = c.access_scope(i, m.order, m.size.words());
+    let scope = c.access_scope(i, m.order);
     let vals = if m.size.sub() {
         let u = c.u32t();
         let wa = c.addr_align(addr, 2);
@@ -415,7 +415,7 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     for k in 0..n {
         parts.push(c.load_reg(tuple_reg(s, k)?));
     }
-    let scope = c.access_scope(i, m.order, n);
+    let scope = c.access_scope(i, m.order);
     if m.size.sub() {
         let u = c.u32t();
         let wa = c.addr_align(addr, 2);
@@ -498,7 +498,7 @@ fn ldgsts(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         None
     };
-    let words = match c.access_scope(i, Order::Weak, n) {
+    let words = match c.access_scope(i, Order::Weak) {
         Some(s) => c.atomic_load_words(ga_addr, n, Order::Weak, s),
         None => {
             let ty = vec_ty(c, n);

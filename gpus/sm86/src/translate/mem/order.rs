@@ -27,9 +27,12 @@
 //! Every other access is plain: nothing it could meet is ordered with it.
 //! PTX treats a vector access as one access per element, so splitting a
 //! 64- or 128-bit weak access into words keeps its meaning. A strong
-//! 64-bit access may be a single-copy atomic `.b64` access, so it is one
-//! 64-bit atomic where the host has them and listed inexact otherwise; a
-//! strong 128-bit access is listed inexact. System scope (`.SYS`) is
+//! 64-bit access may be a single-copy atomic `.b64` access, and a strong
+//! 128-bit one two of them (`.v2.b64`; PTX has no wider scalar), so each
+//! 64-bit element is one 64-bit atomic where the host has them and taken
+//! under the element's lock otherwise (see [`super::atomic64`]); as one
+//! access per 32-bit element (`.v4.b32`) they are then stronger than the
+//! guest asks, which is still one of its outcomes. System scope (`.SYS`) is
 //! carried out at Device scope, the widest Vulkan offers without the Vulkan
 //! memory model, and listed inexact.
 //!
@@ -147,7 +150,7 @@ impl Ctx {
     }
 
     /// The scope at which an access of `order` must be an atomic, if any.
-    pub(crate) fn access_scope(&mut self, i: &Inst, order: Order, words: u32) -> Option<u32> {
+    pub(crate) fn access_scope(&mut self, i: &Inst, order: Order) -> Option<u32> {
         let scope = match order {
             Order::Constant => None,
             Order::Weak => self.mem.weak,
@@ -160,24 +163,13 @@ impl Ctx {
                 i.mnemonic
             ));
         }
-        if order.strong() && words == 4 {
-            self.inexact(format!(
-                "{}.128 strong: four 32-bit atomic accesses",
-                i.mnemonic
-            ));
-        }
-        if order.strong() && words == 2 && !self.host.int64_atomics_buffer {
-            self.inexact(format!(
-                "{}.64 strong: two 32-bit atomic accesses (no 64-bit atomics)",
-                i.mnemonic
-            ));
-        }
         Some(scope)
     }
 
-    /// Whether a strong 64-bit access is one 64-bit atomic.
+    /// Whether a strong access keeps each 64-bit element single-copy
+    /// atomic: one of 64 or 128 bits.
     fn whole64(&self, order: Order, words: u32) -> bool {
-        order.strong() && words == 2 && self.host.int64_atomics_buffer
+        order.strong() && (words == 2 || words == 4)
     }
 
     /// `words` 32-bit words at global address `addr` as relaxed atomics at
@@ -193,15 +185,23 @@ impl Ctx {
         let sc = self.m.c_u32(scope);
         let relaxed = self.m.c_u32(0);
         if self.whole64(order, words) {
-            self.cap(CAP_INT64_ATOMICS);
-            let t = self.addr_t();
-            let p = self.global_ptr(addr, t);
-            let v = self.m.emit(spv::ATOMIC_LOAD, t, &[p, sc, relaxed]);
-            let v2 = self.m.t_vec(u, 2);
-            let pair = self.m.emit(op::BITCAST, v2, &[v]);
-            return (0..2)
-                .map(|k| self.m.emit(op::COMPOSITE_EXTRACT, u, &[pair, k]))
-                .collect();
+            let mut out = Vec::new();
+            for e in 0..words / 2 {
+                let a = self.word_address(addr, 2 * e);
+                if !self.host.int64_atomics_buffer {
+                    let (lo, hi) = self.locked_rmw64(a, |_, _| None);
+                    out.extend([lo, hi]);
+                    continue;
+                }
+                self.cap(CAP_INT64_ATOMICS);
+                let t = self.addr_t();
+                let p = self.global_ptr(a, t);
+                let v = self.m.emit(spv::ATOMIC_LOAD, t, &[p, sc, relaxed]);
+                let v2 = self.m.t_vec(u, 2);
+                let pair = self.m.emit(op::BITCAST, v2, &[v]);
+                out.extend((0..2).map(|k| self.m.emit(op::COMPOSITE_EXTRACT, u, &[pair, k])));
+            }
+            return out;
         }
         (0..words)
             .map(|k| {
@@ -219,13 +219,21 @@ impl Ctx {
         let sc = self.m.c_u32(scope);
         let relaxed = self.m.c_u32(0);
         if self.whole64(order, vals.len() as u32) {
-            self.cap(CAP_INT64_ATOMICS);
-            let t = self.addr_t();
-            let v2 = self.m.t_vec(u, 2);
-            let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, vals);
-            let v = self.m.emit(op::BITCAST, t, &[pair]);
-            let p = self.global_ptr(addr, t);
-            self.m.emit_void(ATOMIC_STORE, &[p, sc, relaxed, v]);
+            for (e, half) in vals.chunks(2).enumerate() {
+                let a = self.word_address(addr, 2 * e as u32);
+                let (lo, hi) = (half[0], half[1]);
+                if !self.host.int64_atomics_buffer {
+                    self.locked_rmw64(a, |_, _| Some((lo, hi)));
+                    continue;
+                }
+                self.cap(CAP_INT64_ATOMICS);
+                let t = self.addr_t();
+                let v2 = self.m.t_vec(u, 2);
+                let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, half);
+                let v = self.m.emit(op::BITCAST, t, &[pair]);
+                let p = self.global_ptr(a, t);
+                self.m.emit_void(ATOMIC_STORE, &[p, sc, relaxed, v]);
+            }
             return;
         }
         for (k, &v) in vals.iter().enumerate() {

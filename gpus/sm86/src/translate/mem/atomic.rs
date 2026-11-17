@@ -193,7 +193,7 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<Vec
     let xv = pair(c, x)?;
     let yv = y.map(|y| pair(c, y)).transpose()?;
     if !c.host.int64_atomics_buffer {
-        let (lo, hi) = c.locked_rmw64(addr, |c, old| apply64(c, s, old, xv, yv));
+        let (lo, hi) = c.locked_rmw64(addr, |c, old| Some(apply64(c, s, old, xv, yv)));
         return Ok(vec![lo, hi]);
     }
     c.cap(12);
