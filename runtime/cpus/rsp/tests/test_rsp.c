@@ -340,7 +340,7 @@ TEST(rsp_a_delay_slot_past_the_end_of_imem_is_checked_at_its_start)
 static const uint8_t g_hold_bytes[4] = {0x00, 0x00, 0x00, 0x4D};
 static const uint16_t g_hold_succ[3] = {RL_RSP_NO_SUCC, RL_RSP_NO_SUCC, 0};
 
-static int hold_fn(rl_ctx *c, uint8_t *mem)
+static uint64_t hold_fn(rl_ctx *c, uint8_t *mem)
 {
     rl_rsp_pipe_hold(c, 1u << 1, 0, 0);
     rl_rsp_break(c, 1);

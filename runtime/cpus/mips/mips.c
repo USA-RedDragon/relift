@@ -252,7 +252,7 @@ static rl_fn eret_next(rl_ctx *c, uint64_t target)
  * target's first instruction, so an interrupt that ERET let in is taken
  * there (EPC := target).
  */
-static int eret_sync(rl_ctx *c, uint8_t *mem)
+static uint64_t eret_sync(rl_ctx *c, uint8_t *mem)
 {
     uint64_t target = c->pc;
     int rc = rl_sync(c, mem, target);
