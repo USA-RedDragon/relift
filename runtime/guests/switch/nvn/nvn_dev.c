@@ -10,6 +10,7 @@
  * Without an import a pool's GPU address is its guest address.
  */
 #include "nvn_priv.h"
+#include "vi.h"
 
 #include <pthread.h>
 #include <stdarg.h>
@@ -185,6 +186,8 @@ int64_t nvn_window_top(uint32_t origin, uint32_t height, int64_t y, int64_t h)
 {
     return origin == NVN_ORIGIN_UPPER_LEFT ? y : (int64_t)height - y - h;
 }
+
+void nvn_frame_presented(void) { vi_guest_frame(); }
 
 /** @brief nvnDeviceSetWindowOriginMode(NVNdevice *, NVNwindowOriginMode). */
 uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)

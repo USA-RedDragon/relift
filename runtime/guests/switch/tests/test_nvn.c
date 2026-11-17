@@ -5,6 +5,9 @@
  */
 #include "nvn/nvn_priv.h"
 #include "tc.h"
+#include "vi.h"
+
+#include <relift/ports.h>
 
 #include <ftw.h>
 #include <limits.h>
@@ -218,4 +221,14 @@ TEST(nvn_reads_compressed_translation_table)
     key[0] = 'b';
     CHECK(nvn_shader_spirv(key, &n) == NULL);
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
+TEST(nvn_presents_step_the_input_script)
+{
+    uint64_t f0 = vi_guest_frames();
+    CHECK(rl_ports_set_script("1:p1.a"));
+    nvn_frame_presented();
+    nvn_frame_presented();
+    CHECK_EQ(vi_guest_frames(), f0 + 2);
+    CHECK(rl_ports_set_script(""));
 }

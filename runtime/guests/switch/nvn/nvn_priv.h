@@ -182,6 +182,12 @@ int nvn_shader_stage(const uint8_t *mem, uint64_t code);
 /** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */
 uint32_t nvn_device_depth_mode(void);
 uint32_t nvn_device_origin_mode(void);
+/**
+ * @brief Counts one guest frame for a texture the game presented through
+ * NVN2, as vi counts a queued buffer: the input script, mods and frame
+ * statistics step on it (nvn_vk.c).
+ */
+void nvn_frame_presented(void);
 /** @brief NVNwindowOriginMode: lower left (the default) or upper left. */
 #define NVN_ORIGIN_LOWER_LEFT 0u
 #define NVN_ORIGIN_UPPER_LEFT 1u

@@ -1633,6 +1633,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture)
     uint64_t frame;
     if (vkf_capture_due(&frame))
         vkf_capture_write(frame, (uint64_t)now_ns(), w, h, px, (size_t)w * 4, false);
+    nvn_frame_presented();
     const rl_window_backend *b = rl_window_backend_current();
     if (b) {
         static rl_window *win;
