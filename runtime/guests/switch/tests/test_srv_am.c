@@ -1040,7 +1040,8 @@ TEST(am_switch2_proxy_and_its_functions)
     CHECK_EQ(get(&e, e.proxy, 60, &scaling), 0);
     tc_res r = tc_send(e.c, scaling, tc_new(10));
     CHECK_EQ(rc_of(r), 0);
-    CHECK_EQ(tc_u32(&r, 0) | tc_u32(&r, 4) | tc_u32(&r, 8), 0);
+    CHECK_EQ(tc_u32(&r, 0), 10);
+    CHECK_EQ(tc_u32(&r, 4) | tc_u32(&r, 8), 0);
     CHECK_EQ(get(&e, e.proxy, 20, &e.af), 0);
     r = tc_send(e.c, e.af, tc_new(320));
     CHECK_EQ(rc_of(r), 0);

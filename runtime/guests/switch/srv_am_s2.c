@@ -37,16 +37,23 @@ static const rl_ipc_class performance_class = {
     "nn::am::service::IPerformanceFunctions", performance_cmds, AM_N(performance_cmds), 0, NULL
 };
 
+/** @brief The scale code nn::oe::GetCurrentGraphicsScale turns into scale 0; it takes 10, 20 and 30 and aborts on any other. */
+#define GRAPHICS_SCALE_CODE_0 10u
+
 /**
- * @brief GetGraphicsScalingParameters: 12 bytes, which nn::oe hands back
- * as they come. All zero says the system sets no scaling parameters.
+ * @brief GetGraphicsScalingParameters: 12 bytes, which nn::oe hands back as
+ * they come. Games read only the first u32, the scale code, through
+ * nn::oe::GetCurrentGraphicsScale; relift reports scale 0 and zero for the
+ * rest.
  */
 static rl_result gs_get_graphics_scaling_parameters(rl_ipc_req *r)
 {
     uint8_t *out = rl_ipc_out(r, 12);
     if (!out)
         return SF_RESULT_INVALID_HEADER;
+    uint32_t code = GRAPHICS_SCALE_CODE_0;
     memset(out, 0, 12);
+    memcpy(out, &code, sizeof code);
     return KR_SUCCESS;
 }
 
