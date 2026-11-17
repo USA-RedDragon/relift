@@ -640,3 +640,81 @@ fn code_a_boot_copies_after_it_waits_on_an_io_register_is_found() {
         "the copied code is lifted where it runs"
     );
 }
+
+#[test]
+fn a_code_address_in_a_copy_s_literal_pool_is_a_function_in_that_copy() {
+    let mut m = Machine::new(Profile::V4t);
+    let ram = 0x02F0_0000;
+    let pool = BASE + 0x80;
+    let src = BASE + 0x100;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2005,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(pool, &[src, ram]);
+    m.arm(
+        src,
+        &[
+            a_ldr_lit(0, ram, ram + 0x10),
+            A_BX_LR,
+            A_MOV_R0_1,
+            A_BX_LR,
+            ram + 8,
+        ],
+    );
+    let r = m.run(all(), arm(BASE));
+    let f = r
+        .functions
+        .iter()
+        .find(|(l, _)| l.addr == ram + 8 && l.copy.is_some());
+    assert_eq!(
+        f.map(|(_, f)| f.origin),
+        Some(Origin::AddressTaken),
+        "{:?}",
+        r.functions.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_callback_only_an_earlier_run_of_its_wrapper_called_is_a_function() {
+    let mut m = Machine::new(Profile::V5te);
+    let wrap = BASE + 0x40;
+    let callee = BASE + 0x80;
+    let cb = BASE + 0xC0;
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            a_bl(BASE + 4, wrap),
+            a_bl(BASE + 8, callee),
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(
+        wrap,
+        &[
+            a_ldr_lit(12, wrap, wrap + 0x20),
+            a_ldr_lit(2, wrap + 4, wrap + 0x24),
+            0xE12F_FF1C,
+        ],
+    );
+    m.arm(wrap + 0x20, &[callee, cb]);
+    m.arm(callee, &[A_PUSH_R4_LR, 0xE12F_FF32, A_POP_R4_PC]);
+    m.arm(cb, &[0xE3A0_0002, A_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    assert!(
+        r.functions.contains_key(&arm(cb)),
+        "{:?}",
+        r.functions.keys().collect::<Vec<_>>()
+    );
+}

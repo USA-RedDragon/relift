@@ -41,13 +41,14 @@ pub fn discover(platform: &dyn Platform, config: &Config) -> Report {
     run(image, &roots, &config.hints)
 }
 
-/// A code address candidate: the address, the state, whether only the
-/// scan of every image word gives it, and whether that word is in another
-/// segment than the address.
+/// A code address candidate: the address, the state, the RAM copy that
+/// holds it, whether only the scan of every image word gives it, and
+/// whether that word is in another segment than the address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Cand {
     addr: u32,
     thumb: bool,
+    copy: Option<u16>,
     scanned: bool,
     far: bool,
 }
@@ -57,8 +58,17 @@ impl Cand {
         Cand {
             addr,
             thumb,
+            copy: None,
             scanned: false,
             far: false,
+        }
+    }
+
+    fn loc(self) -> Loc {
+        Loc {
+            addr: self.addr,
+            thumb: self.thumb,
+            copy: self.copy,
         }
     }
 }
@@ -245,7 +255,8 @@ impl<'a> Driver<'a> {
     }
 
     /// The code addresses discovered code takes: odd words in the image
-    /// that discovered code reads as constants (Thumb functions), and the
+    /// or in a RAM copy (as the copy's own code reads them) that
+    /// discovered code reads as constants (Thumb functions), and the
     /// tables of such words a constant read points at; with
     /// [`crate::Options::arm_pointers`] the even words it reads too (ARM
     /// functions), and with [`crate::Options::scan_words`] every word of
@@ -291,6 +302,18 @@ impl<'a> Driver<'a> {
         let word = |a: u32| self.image.read(None, a, 4);
         let mut scans = Vec::new();
         for &a in &words {
+            for (c, v) in self.copy_words(a) {
+                for (t, thumb) in [(v & !1, v & 1 == 1), (v, false)] {
+                    if !(thumb || opts.arm_pointers && v & 3 == 0) {
+                        continue;
+                    }
+                    if platform.code_addr(t) {
+                        cands.insert(Cand::taken(t, thumb));
+                    } else {
+                        cands.extend(self.copy_cands(c, t, thumb));
+                    }
+                }
+            }
             let Some(v) = word(a) else { continue };
             if v & 1 == 1 && platform.code_addr(v & !1) {
                 cands.insert(Cand::taken(v & !1, true));
@@ -340,6 +363,7 @@ impl<'a> Driver<'a> {
                     cands.insert(Cand {
                         addr: t,
                         thumb,
+                        copy: None,
                         scanned: true,
                         far: segment(a) != segment(t),
                     });
@@ -348,15 +372,22 @@ impl<'a> Driver<'a> {
         }
         self.scans.extend(scans);
         let mut added = false;
-        let mut seen: HashSet<(u32, bool)> = HashSet::new();
+        let mut seen: HashSet<Loc> = HashSet::new();
+        let reached = self.reached();
         for c in cands {
-            if !seen.insert((c.addr, c.thumb)) || !platform.owns(c.addr) {
+            let l = c.loc();
+            if !seen.insert(l) || !platform.owns(c.addr) {
                 continue;
             }
-            let l = Loc::rom(c.addr, c.thumb);
+            if self.entries.contains(&l) && !reached.contains(&l) && self.runs.contains_key(&l) {
+                self.add_root(l, Origin::AddressTaken);
+                added = true;
+                continue;
+            }
             if self.entries.contains(&l)
                 || self.rejected.contains(&l)
-                || code.get(&l.addr) == Some(&(l.addr, c.thumb))
+                || l.copy.is_none() && code.get(&l.addr) == Some(&(l.addr, c.thumb))
+                || l.copy.is_some() && self.runs.values().any(|r| r.body.contains_key(&l))
             {
                 continue;
             }
@@ -405,6 +436,54 @@ impl<'a> Driver<'a> {
             added = true;
         }
         added
+    }
+
+    /// The words the copies that hold `a` keep there, as their own code
+    /// reads them.
+    fn copy_words(&self, a: u32) -> Vec<(u16, u32)> {
+        if !self.image.is_ram(a) {
+            return Vec::new();
+        }
+        self.image
+            .copies_at(a)
+            .into_iter()
+            .filter_map(|c| Some((c, self.image.read(Some(c), a, 4)?)))
+            .collect()
+    }
+
+    /// The candidates for a code address `t` in RAM read from copy `c`:
+    /// in `c` when it holds `t`, else in every copy that does.
+    fn copy_cands(&self, c: u16, t: u32, thumb: bool) -> Vec<Cand> {
+        if !self.image.is_ram(t) {
+            return Vec::new();
+        }
+        let copies = if self.image.holds(c, t) {
+            vec![c]
+        } else {
+            self.image.copies_at(t)
+        };
+        copies
+            .into_iter()
+            .map(|c| Cand {
+                copy: Some(c),
+                ..Cand::taken(t, thumb)
+            })
+            .collect()
+    }
+
+    /// The functions the roots reach through edges: those a report lists.
+    fn reached(&self) -> BTreeSet<Loc> {
+        let mut seen: BTreeSet<Loc> = BTreeSet::new();
+        let mut work: Vec<Loc> = self.roots.keys().copied().collect();
+        while let Some(l) = work.pop() {
+            if !seen.insert(l) {
+                continue;
+            }
+            if let Some(r) = self.runs.get(&l) {
+                work.extend(r.edges.iter().map(|e| e.target));
+            }
+        }
+        seen
     }
 
     fn env(&self) -> Env<'_> {
@@ -873,16 +952,7 @@ impl<'a> Driver<'a> {
     }
 
     fn report(&self) -> Report {
-        let mut seen: BTreeSet<Loc> = BTreeSet::new();
-        let mut work: Vec<Loc> = self.roots.keys().copied().collect();
-        while let Some(l) = work.pop() {
-            if !seen.insert(l) {
-                continue;
-            }
-            if let Some(r) = self.runs.get(&l) {
-                work.extend(r.edges.iter().map(|e| e.target));
-            }
-        }
+        let seen = self.reached();
         let mut rep = Report {
             copies: self.image.copies.clone(),
             ..Report::default()
