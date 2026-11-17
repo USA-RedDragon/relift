@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""build.py OUT.nds: the timing test cartridge, built with clang and ld.lld: h9.c and the ARM9
+"""build.py OUT.nds [--probes]: the timing test cartridge, built with clang and ld.lld: h9.c and the ARM9
 kernels at 0x02000000; h7.c and the ARM7 kernels linked at 0x037F8000 (shared work RAM, where the
 SDK build runs them) and copied there by a boot stub at 0x02380000 with the BIOS's CpuFastSet. The
 kernels and case tables come from gen.py, written next to OUT.nds."""
@@ -54,7 +54,8 @@ def main():
     a7base = 0x037F8000
     work = os.path.join(os.path.dirname(out), "work")
     os.makedirs(work, exist_ok=True)
-    subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen.py"), work], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen.py"), work] + sys.argv[2:3], check=True,
+                   stdout=subprocess.DEVNULL)
     subprocess.run([sys.executable, "-I", os.path.join(HERE, "gencopy.py"), work], check=True)
     a9 = binary("h9", [os.path.join(HERE, "h9.c"), os.path.join(work, "k9.s")], "armv5te-none-eabi",
                 "arm946e-s", 0x02000000, work, ["-DARM9"])

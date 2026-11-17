@@ -7,11 +7,15 @@ k9.s, k7.s: one position-independent ARM function per kernel,
   branch target, r10 = a pointer to two copies of the branch target).
 k9tab.h, k7tab.h: the kernel start and end tables.
 cases.h: the cases of both CPUs (kernel, data region, code placement, cache mode,
-  MPU attribute override, and whether the result may differ on DSi or 3DS in DS mode)."""
+  MPU attribute override, and whether the result may differ on DSi or 3DS in DS mode).
+
+gen.py OUT --probes adds the probes for the next console round after every other case (PROBES
+below); without it the output is that of the ROM the consoles ran."""
 import os
 import sys
 
 OUT = sys.argv[1]
+WITH_PROBES = "--probes" in sys.argv[2:]
 
 # regions (shared/hwtest.h has the same numbering)
 R = {"none": 0, "dtcm": 1, "itcm": 2, "main": 3, "unc": 4, "io": 5, "vram": 6, "pal": 7, "oam": 8,
@@ -62,16 +66,16 @@ class Kernels:
         self.k = []
         self.index = {}
 
-    def add(self, key, body, thumb=False, mulv="0x1", pad=None):
+    def add(self, key, body, thumb=False, mulv="0x1", pad=None, pre=None, post=None):
         if key in self.index:
             return self.index[key]
         self.index[key] = len(self.k)
-        self.k.append((body, thumb, mulv, pad))
+        self.k.append((body, thumb, mulv, pad, pre, post))
         return self.index[key]
 
     def asm(self, prefix):
         L = [".syntax unified", ".text"]
-        for i, (body, thumb, mulv, pad) in enumerate(self.k):
+        for i, (body, thumb, mulv, pad, pre, post) in enumerate(self.k):
             n = f"{prefix}{i}"
             L += [".arm", ".align 5", f".global {n}", f".type {n}, %function", f"{n}:",
                   " push {r4-r11, lr}", " mov r4, r1", " mov r3, r2", " mov r5, #1", " mov r6, #0", " mov r7, #1",
@@ -79,6 +83,8 @@ class Kernels:
             if "2:" in body and not thumb:
                 L += [" adr r9, 2f", " sub sp, sp, #8", " str r9, [sp]", " str r9, [sp, #4]", " mov r10, sp",
                       " adr r11, 7f", " orr r11, r11, #1"]
+            if pre is not None:
+                L += [f" {pre}"]
             if pad is not None:
                 L += [" b 5f", ".align 5", f".space {4 * pad}", "5:"]
             if thumb:
@@ -86,6 +92,8 @@ class Kernels:
                       f"1:\n {body}\n subs r0, r0, #1\n bne 1b", ".align 2", " bx pc", " nop", ".arm"]
             else:
                 L += [f"1:\n {body}\n subs r0, r0, #1\n bne 1b"]
+            if post is not None:
+                L += [f" {post}"]
             if "2:" in body and not thumb:
                 L += [" add sp, sp, #8"]
             L += [" pop {r4-r11, lr}", " bx lr"]
@@ -112,8 +120,10 @@ cases = []  # (cpu, name, kernel, region, place, mode, attr)
 k9, k7 = Kernels(), Kernels()
 
 
-def c9(name, body, region="none", place="main", mode="warm", attr="", thumb=False, mulv="0x1", pad=None):
-    ki = k9.add((body, thumb, mulv, pad), body, thumb, mulv, pad)
+def c9(name, body, region="none", place="main", mode="warm", attr="", thumb=False, mulv="0x1", pad=None, pre=None,
+       post=None):
+    key = (body, thumb, mulv, pad) if pre is None and post is None else (body, thumb, mulv, pad, pre, post)
+    ki = k9.add(key, body, thumb, mulv, pad, pre, post)
     cases.append((9, name, ki, region, place, mode, attr))
 
 
@@ -200,6 +210,31 @@ for place in ("wram", "main"):
         if rg != "io":
             for nm, b in STREAM:
                 c7(nm, b, rg, place=place)
+
+# Probes for the next console round, after every case the consoles ran so those keep their kernels
+# and addresses. Each one splits a case relift does not reproduce yet (open.csv):
+# - p_ldmN (N = 1 to 8), cold: an LDM of N words at the start of a line that just missed, the next
+#   line each iteration, to time when each word of a data cache line fill reaches the CPU (s_ldm8
+#   cold: 50 on the consoles, 52 in relift);
+# - p_ldr0_K (K = 4 to 28), cold: a load of a missed line's first word, then of its word at K, to
+#   time the fill's later words against its first (copy cold: 24, relift 23.74);
+# - p_copy_dtcm, cold: copy with its stores to the data TCM (0x02FF0400 in both builds) instead of
+#   main RAM, which takes the write buffer out of copy cold;
+# - p_stm8_pal_blank: stm8 to palette with the display in forced blank (DISPCNT bit 7, set before
+#   the loop and restored after), to tell display contention from the bus (45.62, relift 42).
+PROBES = []
+for k in range(1, 9):
+    rl = "r5" if k == 1 else f"r5-r{4 + k}"
+    PROBES.append((f"p_ldm{k}", f"ldmia r4, {{{rl}}}\n add r4, r4, #32", "main", "cold", None, None))
+for k in range(4, 32, 4):
+    PROBES.append((f"p_ldr0_{k}", f"ldr r6, [r4]\n ldr r7, [r4, #{k}]\n add r4, r4, #32", "main", "cold", None,
+                   None))
+PROBES.append(("p_copy_dtcm", "ldr r6, [r4], #4\n str r6, [r3], #4", "main", "cold", "ldr r3, =0x02FF0400", None))
+PROBES.append(("p_stm8_pal_blank", "stmia r4, {r5-r12}", "pal", "warm",
+               "ldr r11, =0x04000000\n ldr r10, [r11]\n orr r12, r10, #0x80\n str r12, [r11]", "str r10, [r11]"))
+if WITH_PROBES:
+    for nm, b, rg, md, pre, post in PROBES:
+        c9(nm, b, rg, mode=md, pre=pre, post=post)
 
 open(os.path.join(OUT, "k9.s"), "w").write(k9.asm("k9_"))
 open(os.path.join(OUT, "k7.s"), "w").write(k7.asm("k7_"))

@@ -28,7 +28,7 @@ all: $(TARGET)-ntr.nds $(TARGET)-dsi.nds
 # the kernels and case tables (../gen.py), shared with the clang build (../build.py)
 gen/cases.h: ../gen.py ../gen_swi.py ../svc.s
 	mkdir -p gen
-	python3 -I ../gen.py gen
+	python3 -I ../gen.py gen $(if $(PROBES),--probes)
 	python3 -I ../gen_swi.py gen
 	mkdir -p shared
 	cp ../svc.s shared/svc.s

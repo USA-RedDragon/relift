@@ -36,6 +36,23 @@ iterations, timed by the cascaded timers at 33.513982 MHz.
   cases relift does not reproduce yet, with what it gives and the open
   question.
 
+## Probes for the next console round
+
+`gen.py OUT --probes` (`build.py OUT.nds --probes`, `make PROBES=1` in
+`sdk/`) adds 17 ARM9 cases after all the others (idx 578 to 594). The
+ROM the consoles ran is built without it, and its output is unchanged.
+Each probe splits an open case (see the `PROBES` comment in `gen.py`):
+
+- `p_ldm1` to `p_ldm8`, cold: when each word of a data cache line fill
+  reaches the CPU (s_ldm8 cold);
+- `p_ldr0_4` to `p_ldr0_28`, cold: a missed line's first word, then its
+  word at that offset (copy cold);
+- `p_copy_dtcm`, cold: copy with its stores to the data TCM;
+- `p_stm8_pal_blank`: stm8 to palette in forced blank (stm8 pal).
+
+All 17 run and print in melonDS (clang build); the devkitPro build with
+`PROBES=1` builds in the pinned devkitPro image.
+
 `relift/tests/e2e_nds_timing.rs` builds the devkitPro ROM (with
 `DEVKITARM` set; otherwise the clang one, checked with `compare.py
 --clang`), lifts and runs it, and runs `compare.py`.
