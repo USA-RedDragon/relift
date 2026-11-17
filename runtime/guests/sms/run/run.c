@@ -98,10 +98,29 @@ static uint64_t now_in(const rl_ctx *c) { return G.m.cycles + (uint64_t)-c->time
 
 /* Code lookup. */
 
-/** @brief The ROM bank the bytes at pc come from, or -1 (RAM, cartridge RAM or nothing). */
+/**
+ * @brief Whether a fetch at pc reads the open bus: the memory control port
+ * has unmapped the cartridge (or the Game Gear BIOS window, with no BIOS) or
+ * work RAM there.
+ */
+static bool open_bus(uint16_t pc)
+{
+    const sms *m = &G.m;
+    if (m->system == SMS_SYSTEM_SG)
+        return false;
+    if (pc >= 0xC000 && !m->ram_enable)
+        return true;
+    if (m->system == SMS_SYSTEM_GG || m->system == SMS_SYSTEM_GG_MS)
+        return pc < 0x0400 && m->bios_enable;
+    return pc < 0xC000 && !m->cart_enable;
+}
+
+/** @brief The ROM bank the bytes at pc come from, or -1 (RAM, cartridge RAM, the open bus or nothing). */
 static int32_t code_bank(uint16_t pc)
 {
-    if (pc >= 0xC000)
+    if (pc >= 0xC000 || open_bus(pc))
+        return -1;
+    if (G.m.mapper == SMS_MAPPER_CODEMASTERS && G.m.cm_ram && pc >= 0xA000)
         return -1;
     if (pc < 0x0400 && G.m.mapper == SMS_MAPPER_SEGA && G.m.system != SMS_SYSTEM_SG)
         return 0;
@@ -130,6 +149,8 @@ static bool ram_matches(const rl_sms_ram_group *g, uint16_t pc, uint32_t *at)
 
 static rl_fn find(uint16_t pc)
 {
+    if (open_bus(pc))
+        return NULL;
     int32_t b = code_bank(pc);
     if (b >= 0) {
         if ((uint32_t)b >= BANKS)
@@ -154,6 +175,8 @@ static bool tag_ok(uint32_t tag, uint16_t pc)
     uint32_t unit = tag >> 2, slot = tag & 3u;
     if (!unit)
         return true;
+    if (open_bus(pc))
+        return false;
     if (slot == RL_SMS_SLOT_RAM) {
         uint32_t at;
         return pc < RAM_LO || unit - 1u >= G.ram_count || ram_matches(G.ram[unit - 1u].g, pc, &at);
@@ -182,6 +205,10 @@ static bool report_peek(uint64_t a, void *out, size_t n)
 
 static void report_where(uint64_t a, char *buf, size_t n)
 {
+    if (a <= 0xFFFF && open_bus((uint16_t)a)) {
+        snprintf(buf, n, "the open bus: the memory control port unmapped it");
+        return;
+    }
     if (a >= 0xC000) {
         snprintf(buf, n, "work RAM");
         return;
