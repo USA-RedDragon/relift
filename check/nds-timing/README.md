@@ -64,7 +64,14 @@ Each probe splits an open case (see the `PROBES` comment in `gen.py`):
 - `p_ldr0_4` to `p_ldr0_28`, cold: a missed line's first word, then its
   word at that offset (copy cold);
 - `p_copy_dtcm`, cold: copy with its stores to the data TCM;
-- `p_stm8_pal_blank`: stm8 to palette in forced blank (stm8 pal).
+- `p_stm8_pal_blank`: stm8 to palette in forced blank (stm8 pal);
+- `hold_vs_code`, `hold_vs_poll` (idx 4100 to 4103, region p9 or p7 as
+  the contention rows): the ARM9 times each uncached main RAM load while
+  the ARM7 runs main RAM code (ADDs, or a loop polling IPCFIFOCNT) for
+  about a million ticks: t16 is the loads it got in, t48 the longest time
+  between two. It settles whether a gapless stream of the CPU EXMEMCNT
+  bit 15 favors ever lets the other in (hwtest 3c shows only that it
+  keeps it out for 8000 ticks and more).
 
 All 17 run and print in melonDS (clang build); the devkitPro build with
 `PROBES=1` builds in the pinned devkitPro image.

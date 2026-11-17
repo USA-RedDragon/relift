@@ -206,6 +206,50 @@ static void ct_case(unsigned idx, int meas, unsigned k9, unsigned k7, bool p7, u
         ct_alone7[k7] = per;
 }
 
+#if CT_HOLD_N
+/* probes (gen.py --probes): whether the CPU main RAM does not favor ever gets it during the other's gapless
+   stream. The ARM7 runs main RAM code (ADDs, or a loop polling IPCFIFOCNT) 32768 times, about a million
+   ticks; the ARM9 loads uncached main RAM over and over, timing each load, until the ARM7 is done. Rows from
+   idx 4100: hold_vs_<the ARM7's stream>, region p9 or p7; t16 = the loads the ARM9 completed while the ARM7
+   ran (the least of the runs), t48 = the longest time between two of them in ticks (the most), check = the
+   ARM7's span in ticks (the last run). */
+static void ct_hold(unsigned idx, unsigned h, bool p7, u8 *dmabuf)
+{
+    vu16 *exmem = (vu16 *)0x04000204;
+    u16 exmem_old = *exmem;
+    *exmem = (u16)((exmem_old & 0x7FFF) | (p7 ? 0x8000 : 0));
+    hw_job7 *j = ct_send7(CT7_N + h, 0, 32768u, (u32)dmabuf);
+    ct_prep9(0);
+    u32 ime = *(vu32 *)0x04000208;
+    *(vu32 *)0x04000208 = 0;
+    u32 loads = ~0u, gap = 0, span = 0;
+    for (int r = 0; r < HW_REPS; r++) {
+        ct_wait(CT_READY);
+        ct_out(CT_GO);
+        u32 t0 = hw_now(), prev = t0, n = 0;
+        while (ct_in() != CT_DONE) {
+            (void)*(vu32 *)reg_buf;
+            u32 t = hw_now();
+            if (t - prev > gap)
+                gap = t - prev;
+            prev = t;
+            n++;
+        }
+        span = hw_now() - t0;
+        if (n < loads)
+            loads = n;
+        ct_out(CT_ACK);
+    }
+    ct_unprep9();
+    *(vu32 *)0x04000208 = ime;
+    ct_finish7(j);
+    *exmem = exmem_old;
+    char name[32];
+    ct_name(name, "hold", ct7_name[CT7_N + h]);
+    extra(9, idx, name, p7 ? "p7" : "p9", "main", loads, gap, span, 1);
+}
+#endif
+
 /* every contention case: alone, against each kernel of the other CPU, against its DMA; each priority */
 static void ct_all(u8 *dmabuf)
 {
@@ -226,5 +270,10 @@ static void ct_all(u8 *dmabuf)
             ct_case(idx++, 7, CT_DMA, b, p, dmabuf);
         }
     }
+#if CT_HOLD_N
+    for (int p = 0; p < 2; p++)
+        for (unsigned h = 0; h < CT_HOLD_N; h++)
+            ct_hold(4100 + (unsigned)p * CT_HOLD_N + h, h, p, dmabuf);
+#endif
 }
 #endif

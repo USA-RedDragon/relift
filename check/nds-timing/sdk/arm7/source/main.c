@@ -26,7 +26,7 @@ static u32 mb_slots[4];
 static void ct_prep7(hw_job7 *j)
 {
     unsigned k = j->arg[0];
-    if (k < CT7_N && ct7_code[k]) {
+    if (k < CT7_ALL && ct7_code[k]) {
         kfn *f = k7_fn[ct7_kernel[k]];
         memcpy(main_code + 0x420, (const void *)f, (u32)k7_end[ct7_kernel[k]] - (u32)f);
     }
