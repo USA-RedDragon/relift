@@ -15,6 +15,13 @@
 
 #define REGION_ALIGN 0x200000ull
 #define COMPACT_ALIAS 0x180000000ull
+/**
+ * The console's 39-bit alias region. A process with a system resource size
+ * maps physical memory into the alias region (svcMapPhysicalMemory takes
+ * only alias addresses), and nn::os's virtual address memory reserves its
+ * address regions there, so such a process keeps the console's size.
+ */
+#define CONSOLE_ALIAS_39 0x1000000000ull
 #define COMPACT_TLSIO 0x80000000ull
 #define COMPACT_ROOM_39 (16ull << 30)
 #define COMPACT_REMOTE (4ull << 30)
@@ -140,7 +147,10 @@ static void compact(hos_layout *l)
     if (l->bits == 39) {
         uint64_t heap = hos.cfg.console == RL_CONSOLE_SWITCH2 ? SWITCH2_HEAP : 0x180000000ull;
         l->alias_start = l->code_end;
-        l->alias_end = l->alias_start + (heap > COMPACT_ALIAS ? heap : COMPACT_ALIAS);
+        uint64_t alias = heap > COMPACT_ALIAS ? heap : COMPACT_ALIAS;
+        if (hos.cfg.system_resource_size)
+            alias = CONSOLE_ALIAS_39;
+        l->alias_end = l->alias_start + alias;
         l->heap_start = l->alias_end;
         l->heap_end = l->heap_start + heap;
         l->stack_start = l->heap_end;

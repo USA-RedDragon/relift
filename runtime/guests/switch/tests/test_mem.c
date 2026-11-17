@@ -467,6 +467,26 @@ TEST(compact_layout_39_bit_agrees)
     compact_agrees(3, code_end + 0x180000000ull * 2 + 0x80000000ull * 2 + (16ull << 30));
 }
 
+TEST(compact_layout_keeps_the_console_alias_for_physical_memory)
+{
+    if (rl_cfg()->address_bits == 36)
+        return;
+    rl_switch_declare_settings();
+    CHECK_EQ(rl_settings_set("kernel.layout", "compact"), RL_SETTING_OK);
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    cfg.address_space_type = 3;
+    cfg.system_resource_size = 16u << 20;
+    rl_ctx *c = t_boot(&cfg);
+    CHECK(c && hos.compact);
+    uint64_t alias = info(c, 2), alias_size = info(c, 3);
+    CHECK_EQ(alias_size, 0x1000000000ull);
+    CHECK_EQ(info(c, 4), alias + alias_size);
+    uint64_t at = alias + alias_size - (12ull << 30);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, at, 0x10000, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, at, 0x10000, 0, 0, 0, 0), 0);
+}
+
 TEST(console_layout_keeps_the_console_regions)
 {
     if (rl_cfg()->address_bits == 36)

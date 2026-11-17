@@ -135,8 +135,12 @@ Prototype names used in the tags:
     game's own maps. The console's region is 0xff8000000 long; a game learns
     the size only from GetInfo 13 and QueryMemory, which agree.
   - 39-bit: code where the NPDM puts it, then alias 6 GiB (the console uses
-    64 GiB; the alias region only takes MapMemory copies of heap, whose
-    region is 6 GiB, so 6 GiB covers all a game can map there), heap 6 GiB,
+    64 GiB; without a system resource size the alias region only takes
+    MapMemory copies of heap, whose region is 6 GiB, so 6 GiB covers all a
+    game can map there; a process whose NPDM grants a system resource size
+    keeps the console's 64 GiB, since svcMapPhysicalMemory maps into the
+    alias region and nn::os's virtual address memory reserves its address
+    regions there, 12 GiB at once in one game), heap 6 GiB,
     stack 2 GiB and TLS/IO 2 GiB (the console uses 64 GiB; TLS/IO holds
     thread-local pages and IO mappings, megabytes in practice), then 16 GiB
     of AddressSpace for maps. Base placement is the console's without ASLR;
