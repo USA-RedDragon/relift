@@ -229,7 +229,7 @@ fn bounded_thumb_jump_table_resolves_every_case() {
     }
     a.w32(table + 12, 0x0800_0301);
     let r = a.run(0x0800_0100);
-    let f = r.functions.get(&Loc::rom(BASE, false)).expect("switch");
+    let f = r.functions.get(&Loc::rom(t, true)).expect("switch");
     assert_eq!(f.tables.len(), 1);
     assert_eq!(f.tables[0].max, 2);
     assert_eq!(

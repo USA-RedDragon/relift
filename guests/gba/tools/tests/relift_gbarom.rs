@@ -171,7 +171,7 @@ fn functions_lists_arm_and_thumb_code_as_json() {
         &d,
         &["functions", path(&p), "--json", "--instructions"],
     ));
-    assert_eq!(v["function_count"], 1);
+    assert_eq!(v["function_count"], 2);
     let f = &v["functions"][0];
     assert_eq!(f["entry"]["text"], "A:08000000");
     assert_eq!(f["origin"], "entry");
@@ -187,7 +187,10 @@ fn functions_lists_arm_and_thumb_code_as_json() {
             )
         })
         .collect();
-    assert_eq!(insts, ["8000000A", "80000C0A", "80000C4A", "8000100T"]);
+    assert_eq!(insts, ["8000000A", "80000C0A", "80000C4A"]);
+    let t = &v["functions"][1];
+    assert_eq!(t["entry"]["text"], "T:08000100");
+    assert_eq!(t["origin"], "jumped");
     assert_eq!(v["data"][0], serde_json::json!([0x0800_00C8u32, 4]));
     assert_eq!(v["regions"][0]["region"], "rom");
 }
@@ -199,7 +202,7 @@ fn functions_text_and_strict() {
     let out = gbarom(&d, &["functions", path(&good), "--strict"]);
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("1 functions"), "{text}");
+    assert!(text.contains("2 functions"), "{text}");
     assert!(
         text.contains("rom: 3 ARM and 1 Thumb instructions"),
         "{text}"
