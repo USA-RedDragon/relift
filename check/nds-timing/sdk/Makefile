@@ -26,9 +26,12 @@ include $(DEVKITARM)/ds_rules
 all: $(TARGET)-ntr.nds $(TARGET)-dsi.nds
 
 # the kernels and case tables (../gen.py), shared with the clang build (../build.py)
-gen/cases.h: ../gen.py
+gen/cases.h: ../gen.py ../gen_swi.py ../svc.s
 	mkdir -p gen
 	python3 -I ../gen.py gen
+	python3 -I ../gen_swi.py gen
+	mkdir -p shared
+	cp ../svc.s shared/svc.s
 	cp gen/k9.s arm9/source/k9.s
 	cp gen/k7.s arm7/source/k7.s
 
@@ -52,4 +55,4 @@ $(TARGET)-dsi.nds: checkarm7 arm9-dsi
 clean:
 	$(MAKE) -C arm9 clean
 	$(MAKE) -C arm7 clean
-	rm -rf $(TARGET)-ntr.nds $(TARGET)-dsi.nds gen arm9/source/k9.s arm7/source/k7.s
+	rm -rf $(TARGET)-ntr.nds $(TARGET)-dsi.nds gen shared arm9/source/k9.s arm7/source/k7.s

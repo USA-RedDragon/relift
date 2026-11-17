@@ -17,7 +17,7 @@ include $(DEVKITARM)/ds_rules
 #---------------------------------------------------------------------------------
 VARIANT  ?= ntr
 BUILD    := build-$(VARIANT)
-SOURCES  := source
+SOURCES  := source ../shared
 INCLUDES := include ../.. ../gen
 DATA     := data
 GRAPHICS :=

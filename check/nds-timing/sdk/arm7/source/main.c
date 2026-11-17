@@ -6,6 +6,9 @@
 #include "hwtest.h"
 #include "cases.h"
 #include "k7tab.h"
+#include "swi.c"
+#include "card.c"
+#include "wake.c"
 
 static u8 wram_buf[4096] __attribute__((aligned(32)));
 static Mailbox mb;
@@ -16,7 +19,23 @@ typedef void kfn(unsigned, unsigned, unsigned);
 static void run(hw_job7 *j)
 {
     if (j->ci >= NCASES7) {
-        j->status = 2;
+        unsigned i = j->ci - NCASES7;
+        u32 ime = REG_IME;
+        REG_IME = 0;
+        if (i < NSWI) {
+            sw_measure(i, sw_cases[i].dst ? wram_buf : (u8 *)j->mainbuf, &j->t16, &j->t48, &j->kaddr);
+            j->dbase = sw_units(i);
+        } else if (i - NSWI < NCARD) {
+            card_measure(i - NSWI, &j->t16, &j->t48);
+            j->kaddr = 0;
+            j->dbase = 1;
+        } else if (i - NSWI - NCARD < WK_KINDS) {
+            wake_measure(i - NSWI - NCARD, (vu32 *)0x0380FFFC, (vu32 *)0x0380FFF8, &j->t16, &j->t48);
+            j->kaddr = 0;
+            j->dbase = 0;
+        }
+        REG_IME = ime;
+        j->status = i < NSWI + NCARD + WK_KINDS ? 1 : 2;
         return;
     }
     const hw_case *c = &cases7[j->ci];

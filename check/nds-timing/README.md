@@ -10,6 +10,11 @@ iterations, timed by the cascaded timers at 33.513982 MHz.
 
 - `gen.py OUT` writes the kernels (`k9.s`, `k7.s`), their tables and the
   case list (`cases.h`).
+- `gen_swi.py OUT` writes the BIOS call cases' inputs (LZ77, Huffman and
+  run-length data in the BIOS's formats); `swi.c`, `svc.s`, `card.c` and
+  `wake.c` are the BIOS call, cartridge transfer and interrupt wake cases
+  the SDK build runs after the kernels (CSV rows from idx 1000, 2000 and
+  3000; the header lines say what their columns hold).
 - `sdk/` is the devkitPro build that ran on the consoles (`make` gives
   `relift-hwtest-ntr.nds`, a plain DS cartridge that refuses DSi mode and
   the 133 MHz ARM9 clock, and `relift-hwtest-dsi.nds`). It writes

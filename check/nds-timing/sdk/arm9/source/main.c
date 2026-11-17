@@ -10,8 +10,10 @@
 #include "hwtest.h"
 #include "cases.h"
 #include "k9tab.h"
+#include "swi.c"
+#include "wake.c"
 
-#define VERSION "relift hwtest 1"
+#define VERSION "relift hwtest 3"
 #ifdef HWTEST_DSI
 #define VARIANT "dsi"
 #else
@@ -229,14 +231,31 @@ static bool run9(const hw_case *c, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
     return true;
 }
 
+/* the ARM7 stopped answering (a case that never returns): the rest of its cases are skipped */
+static bool a7_lost;
+
 static bool run7(unsigned ci, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
 {
+    if (a7_lost)
+        return false;
     memset(job, 0, sizeof *job);
     job->ci = ci;
     job->slot = (u32)a7_slot;
     job->mainbuf = (u32)a7_buf;
     armDCacheFlush(job, sizeof *job);
-    pxiSendAndReceive(PxiChannel_User0, (u32)job);
+    pxiBeginReceive(PxiChannel_User0);
+    pxiSend(PxiChannel_User0, (u32)job);
+    for (u32 t0 = hw_now();;) {
+        armDCacheInvalidate(job, sizeof *job);
+        if (job->status)
+            break;
+        if (hw_now() - t0 > 20u * 33513982u) {
+            a7_lost = true;
+            line("# the ARM7 did not finish case %u in 20 s; its later cases are skipped\n", ci);
+            return false;
+        }
+    }
+    pxiEndReceive(PxiChannel_User0);
     armDCacheInvalidate(job, sizeof *job);
     *t16 = job->t16;
     *t48 = job->t48;
@@ -266,6 +285,33 @@ static void result(int cpu, unsigned i, const hw_case *c, bool ok, u32 t16, u32 
          (unsigned long)t16, (unsigned long)t48, (long)bus100, (long)cpu100);
     printf("%d %-12.12s %-4.4s%c%c %3ld.%02ld\n", cpu, c->name, rg_name[c->region], pl_name[c->place][0],
            md_name[c->mode][0], (long)(cpu100 / 100), (long)(cpu100 < 0 ? -cpu100 : cpu100) % 100);
+}
+
+/* the ARM7's cartridge case names, in its card_cases order */
+static const char *const card_names7[] = {"card_cmd", "card_4", "card_512", "card_4k", "card_cmd_slow", "card_4_slow",
+                                          "card_512_slow", "card_cmd_game", "card_4_game", "card_512_game",
+                                          "card_4k_game", "card_512_game_slow"};
+#define NCARD7 (sizeof card_names7 / sizeof card_names7[0])
+
+/* a BIOS call or cartridge row in the cases' CSV format */
+static void extra(int cpu, unsigned idx, const char *name, const char *region, const char *place, u32 t16, u32 t48,
+                  u32 check, u32 units)
+{
+    s32 bus100 = (s32)(t48 - t16) * 100 / (s32)units;
+    s32 cpu100 = cpu == 9 ? bus100 * 2 : bus100;
+    line("%d,%u,%s,%s,%s,warm,-,1,%08lx,%08lx,%lu,%lu,%ld,%ld\n", cpu, idx, name, region, place, (unsigned long)check,
+         (unsigned long)units, (unsigned long)t16, (unsigned long)t48, (long)bus100, (long)cpu100);
+    printf("%d %-16.16s %-5.5s %6ld.%02ld%s\n", cpu, name, region, (long)(cpu100 / 100),
+           (long)(cpu100 < 0 ? -cpu100 : cpu100) % 100, check && (check >> 16) != (check & 0xFFFF) ? " BAD" : "");
+}
+
+/* a wake case row: the least and the most latency in bus ticks */
+static void wake_row(int cpu, unsigned k, const char *place, u32 lo, u32 hi)
+{
+    s32 cpu100 = (s32)lo * (cpu == 9 ? 200 : 100);
+    line("%d,%u,%s,none,%s,warm,-,1,00000000,00000000,%lu,%lu,%ld,%ld\n", cpu, 3000 + k, wk_name[k], place,
+         (unsigned long)lo, (unsigned long)hi, (long)lo * 100, (long)cpu100);
+    printf("%d %-20.20s %5lu..%lu\n", cpu, wk_name[k], (unsigned long)lo, (unsigned long)hi);
 }
 
 /* startup marks without the console: the main engine's backdrop color, so a hang before the console
@@ -371,6 +417,42 @@ int main(void)
         result(7, i, &cases7[i], ok, t16, t48, ka, db);
         if (out && i % 32 == 31)
             fflush(out);
+    }
+    step("BIOS calls");
+    line("# BIOS call and cartridge cases (idx 1000 on: BIOS calls, 2000 on: ROMCTRL transfers on the ARM7, which owns\n");
+    line("# the slot): t16/t48 = minimum of %d runs on the small and the large input (or 16 and 48 calls, or one and two\n", HW_REPS);
+    line("# transfers); kaddr = the result check (CRC16 wanted << 16 | got, 0 without output); dbase = units between\n");
+    line("# them; bus_x100 = (t48-t16)*100/units. Wake cases (idx 3000 on): t16/t48 = the least and the most ticks of\n");
+    line("# %d runs from the interrupt source to the instruction after the call; bus_x100 = t16*100\n", HW_REPS);
+    for (unsigned k = 0; k < WK_KINDS; k++) {
+        u32 dt = CP15_R("c9, c1, 0") & ~0xFFFu;
+        u32 lo, hi;
+        wake_measure(k, (vu32 *)(dt + 0x3FFC), (vu32 *)(dt + 0x3FF8), &lo, &hi);
+        wake_row(9, k, "main", lo, hi);
+    }
+    for (unsigned i = 0; i < NSWI; i++) {
+        u32 ts, tl, chk;
+        u8 *dst = sw_cases[i].dst ? (u8 *)0x06800000 : main_buf;
+        u32 ime = REG_IME;
+        REG_IME = 0;
+        sw_measure(i, dst, &ts, &tl, &chk);
+        REG_IME = ime;
+        armDCacheFlushAll();
+        extra(9, 1000 + i, sw_name[sw_cases[i].kind], sw_cases[i].dst ? "vram" : "main", "main", ts, tl, chk, sw_units(i));
+    }
+    for (unsigned j = 0; j < NSWI + NCARD7 + WK_KINDS; j++) {
+        unsigned i = (j + NSWI) % (NSWI + NCARD7 + WK_KINDS);
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        bool ok = run7(NCASES7 + i, &t16, &t48, &ka, &db);
+        if (!ok)
+            continue;
+        if (i >= NSWI + NCARD7) {
+            wake_row(7, i - NSWI - NCARD7, "wram", t16, t48);
+            continue;
+        }
+        bool card = i >= NSWI;
+        extra(7, card ? 2000 + i - NSWI : 1000 + i, card ? card_names7[i - NSWI] : sw_name[sw_cases[i].kind],
+              card ? "card" : sw_cases[i].dst ? "wram7" : "main", "wram", t16, t48, ka, db);
     }
     line("# end\n");
     if (out)
