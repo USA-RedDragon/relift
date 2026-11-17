@@ -251,6 +251,10 @@ typedef void rl_nds_frame_fn(void *user, const uint32_t *pixels, uint64_t when);
  * good; without one the display draws only when something reads it.
  */
 void rl_nds_set_frame_hook(rl_nds *m, rl_nds_frame_fn *fn, void *user);
+/** @brief A line the program printed through the no$gba debug port (0x04FFFA10). */
+typedef void rl_nds_debug_fn(void *user, const char *line);
+/** @brief Sets the debug port hook (NULL for none); the line also goes to stdout. */
+void rl_nds_set_debug_hook(rl_nds *m, rl_nds_debug_fn *fn, void *user);
 /**
  * @brief Called when the ARM7 sets bit 6 of power management register 0
  * ("DS System Power", 1 = shut down): the program turned the console off.

@@ -364,6 +364,9 @@ struct rl_nds {
     uint16_t rcnt;
     /** @brief The ARM7 wrote HALTCNT: the store ends in a halt. */
     bool halt_req;
+    /** @brief The debug port hook (rl_nds_set_debug_hook) and its argument. */
+    rl_nds_debug_fn *debug_fn;
+    void *debug_user;
     /** @brief The CPU waits in rl_nds_halt. */
     bool halted[2];
     /** @brief A HALTCNT halt of the CPU found nothing that could wake it (rl_nds_halt_lost). */

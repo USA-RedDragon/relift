@@ -38,6 +38,8 @@ typedef struct host {
     uint32_t png_frame_count;
     /** @brief --frames: stop after this many frames (0: never). */
     uint32_t stop_frames;
+    /** @brief --until-debug: the run ends when the debug port prints a line that starts with it. */
+    const char *stop_debug;
     /** @brief Frames the frame hook saw. */
     uint32_t frames;
     /** @brief --frame-log: one line per frame on stdout (number, ARM9 tick, frame hash, the --peek words). */
@@ -154,6 +156,16 @@ static void on_frame(void *user, const uint32_t *pixels, uint64_t when)
     }
     if (H.stop_frames && H.frames >= H.stop_frames)
         rl_process_exit(0);
+}
+
+/** @brief The debug port hook: the --until-debug stop. */
+static void on_debug(void *user, const char *line)
+{
+    (void)user;
+    if (!strncmp(line, H.stop_debug, strlen(H.stop_debug))) {
+        fflush(stdout);
+        rl_process_exit(0);
+    }
 }
 
 /** @brief The end of a run: --png of the last frame. */
@@ -293,6 +305,8 @@ static int options(int argc, char **argv, int first, uint64_t *max_ticks)
             H.stats = true;
         else if (!strcmp(a, "--frame-log"))
             H.frame_log = true;
+        else if (!strcmp(a, "--until-debug"))
+            H.stop_debug = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--frames"))
             H.stop_frames = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--png"))
@@ -343,6 +357,8 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
     H.run.max_ticks = max_ticks;
     if (H.png_every || H.png_frame_count || H.stop_frames || H.frame_log)
         rl_nds_set_frame_hook(H.run.m, on_frame, NULL);
+    if (H.stop_debug)
+        rl_nds_set_debug_hook(H.run.m, on_debug, NULL);
     start_clock(H.run.m);
     if (rl_nds_save_set(H.run.m, rl_setting_str("save.type")) != 0)
         rl_log(RL_LOG_WARN, "nds", "unknown save.type %s; the chip is chosen from the game's commands", rl_setting_str("save.type"));

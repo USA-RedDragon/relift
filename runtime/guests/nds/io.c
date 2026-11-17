@@ -220,6 +220,14 @@ static void debug_string(rl_nds *m, unsigned cpu, uint32_t addr)
     rl_nds_code_read(m, cpu, addr, (uint8_t *)s, sizeof s - 1);
     s[sizeof s - 1] = 0;
     fputs(s, stdout);
+    if (m->debug_fn)
+        m->debug_fn(m->debug_user, s);
+}
+
+void rl_nds_set_debug_hook(rl_nds *m, rl_nds_debug_fn *fn, void *user)
+{
+    m->debug_fn = fn;
+    m->debug_user = user;
 }
 
 void nds_io_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, uint64_t now)
