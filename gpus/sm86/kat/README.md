@@ -84,4 +84,13 @@ Cost on a 3090, for draws of 4000 and 16000 tasks of 1 to 4 meshes of 49
 to 64 triangles (10000 and 40000 meshes), one command buffer, steady state:
 native task and mesh 74 and 248 microseconds; compute back end 133 and 469
 (task pass 9 and 16, task scan 14 and 34, mesh pass 53 and 195, indexed
-draw 67 and 235), 1.8 and 1.9 times the native time.
+draw 67 and 235), 1.8 and 1.9 times the native time; with two mesh
+workgroups per compute workgroup 125 and 444. On an Adreno 740 (subgroups
+of 64 to 128, GPU at 680 MHz) the compute back end takes 5.6 and 22.5
+milliseconds with one guest workgroup per workgroup and 4.0 and 16.1 with
+two in full subgroups of 64 (four in subgroups of 128: 4.2 and 16.9); the
+mesh pass is most of it.
+
+`KAT_SLOTS=<n>` translates the compute back end for `n` guest workgroups per
+workgroup and `KAT_SUBGROUP=<size>` runs its passes in full subgroups of
+that size.
