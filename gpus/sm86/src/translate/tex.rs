@@ -76,7 +76,7 @@
 //! returns for an uncompressed surface.
 
 use super::mem::tuple_reg;
-use super::{Ctx, Res, TEXTURE_SET, bad};
+use super::{Code, Ctx, Res, TEXTURE_SET, bad, cfg};
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
 use crate::{Inst, Operand, Word};
@@ -289,7 +289,9 @@ fn tuple_width(i: &Inst) -> u8 {
 
 /// The instructions that may run right after each one, or `None` for
 /// control flow that is not followed.
-fn successors(insts: &[Inst]) -> Option<Vec<Vec<usize>>> {
+fn successors(code: &Code) -> Option<Vec<Vec<usize>>> {
+    let insts = &code.insts;
+    let brx = cfg::brx_cases(code);
     let n = insts.len();
     let mut s = vec![Vec::new(); n];
     for (k, i) in insts.iter().enumerate() {
@@ -314,18 +316,8 @@ fn successors(insts: &[Inst]) -> Option<Vec<Vec<usize>>> {
                 }
             }
             "EXIT" | "KILL" if !guarded => {}
-            // The translation sends a BRX to the next instruction and to
-            // instructions after a transfer (see `cfg::brx_targets`); every
-            // instruction after a transfer is a superset of those.
-            "BRX" | "BRXU" => {
-                s[k].push(k + 1);
-                s[k].extend((1..n).filter(|&m| {
-                    matches!(
-                        insts[m - 1].mnemonic,
-                        "BRA" | "EXIT" | "KILL" | "BRX" | "BRXU" | "RET"
-                    )
-                }));
-            }
+            // The cases the translation dispatches the BRX to.
+            "BRX" | "BRXU" => s[k].extend(brx.get(&k).into_iter().flatten().copied()),
             "JMP" | "JMX" | "CALL" | "RET" | "BREAK" | "BPT" | "RTT" => {
                 return None;
             }
@@ -349,7 +341,8 @@ fn imm_of(o: &Operand) -> Option<u32> {
 }
 
 impl Prep {
-    pub(crate) fn new(insts: &[Inst], words: &[Word]) -> Prep {
+    pub(crate) fn new(code: &Code) -> Prep {
+        let (insts, words) = (&code.insts, &code.words);
         let n = insts.len();
         let mut p = Prep {
             starts: vec![false; n + 1],
@@ -362,7 +355,7 @@ impl Prep {
                     named_regs(i).into_iter().map(|r| (r, w)).collect()
                 })
                 .collect(),
-            preds: successors(insts).map(|s| {
+            preds: successors(code).map(|s| {
                 let mut p = vec![Vec::new(); n];
                 for (k, ts) in s.iter().enumerate() {
                     for &t in ts {

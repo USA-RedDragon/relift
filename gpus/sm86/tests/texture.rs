@@ -199,6 +199,34 @@ fn offsets_set_in_an_earlier_block_stay_constant() {
     }
 }
 
+/// A BRX reaches only the cases the translation gives it, so a later BRX
+/// does not bring another value of the offset register into a block
+/// before it.
+#[test]
+fn a_later_brx_does_not_reach_an_earlier_sample() {
+    let t = tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)]);
+    let exit = word(0x14d, 4, &[(87, 3, 7)]);
+    let brx = word(
+        0x149,
+        4,
+        &[
+            (24, 8, 2),
+            (34, 48, (-28i64 as u64) & 0xffff_ffff_ffff),
+            (87, 3, 7),
+        ],
+    );
+    let s = compute(&[
+        mov(4, 0xf1),
+        bra_p0(3),
+        t,
+        exit,
+        mov(4, 0x12),
+        mov(2, 0x70),
+        brx,
+    ]);
+    assert!(insts(&s.spirv, 88).iter().any(|i| i[5] & 8 != 0));
+}
+
 #[test]
 fn run_time_sample_offsets_are_rejected() {
     for w in [

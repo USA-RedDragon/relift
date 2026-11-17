@@ -322,9 +322,10 @@ impl Ids {
     }
 }
 
-pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
-    let n = code.insts.len();
-    let mut end = n;
+/// The end of the program's code: the instruction count without the
+/// trailing BRA self loops.
+fn code_end(code: &Code) -> usize {
+    let mut end = code.insts.len();
     while end > 0 && code.insts[end - 1].mnemonic == "BRA" {
         let i = &code.insts[end - 1];
         if !matches!(i.ops.as_slice(), [Operand::Target(t)] if *t == 16 * (end as i64 - 1)) {
@@ -332,6 +333,16 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
         }
         end -= 1;
     }
+    end
+}
+
+/// The cases the translation gives each BRX (see [`brx_targets`]).
+pub(crate) fn brx_cases(code: &Code) -> HashMap<usize, Vec<usize>> {
+    brx_targets(code, code_end(code))
+}
+
+pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
+    let end = code_end(code);
     let mut leaders = vec![false; end + 1];
     leaders[0] = true;
     leaders[end] = true;

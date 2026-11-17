@@ -745,7 +745,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
 fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     let stage = p.stage();
     let code = decode_all(p)?;
-    let mut c = Ctx::new(stage, o, tex::Prep::new(&code.insts, &code.words));
+    let mut c = Ctx::new(stage, o, tex::Prep::new(&code));
     c.sph_words = p.sph.as_ref().map_or([0; 32], |s| s.words);
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();
@@ -827,7 +827,15 @@ impl Ctx {
     /// A context for a module the translator builds without a guest
     /// program (the helper passes of a back end).
     pub(crate) fn bare(stage: Stage) -> Ctx {
-        Ctx::new(stage, &Options::default(), tex::Prep::new(&[], &[]))
+        Ctx::new(
+            stage,
+            &Options::default(),
+            tex::Prep::new(&Code {
+                insts: Vec::new(),
+                words: Vec::new(),
+                fast_paths: 0,
+            }),
+        )
     }
 
     /// Starts `main` of a helper module with `vars` function variables.
