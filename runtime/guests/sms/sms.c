@@ -151,11 +151,9 @@ static void frame_edge(void *user)
     }
     m->picture_lines = lines;
     uint32_t done = m->input_count ? input_of(m, m->frames) : m->buttons;
-    if (is_sg(m)) {
-        pad_latch(&m->pad, done);
-    } else if (is_gg(m)) {
+    if (is_gg(m)) {
         gg_poll(m, done);
-    } else {
+    } else if (!is_sg(m)) {
         bool was = m->start_value;
         m->reset_value = done & SMS_BUTTON_RESET;
         m->start_value = done & SMS_BUTTON_START;
