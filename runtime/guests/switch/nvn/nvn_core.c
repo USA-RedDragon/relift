@@ -37,6 +37,8 @@ static struct {
     bool up;
     uint64_t base;
     uint64_t driver_loader;
+    /** @brief The SDK's NvRmGpu entry points (0 when the program has none) and the device the layer opened. */
+    uint64_t gpu_lib_open, gpu_device_open, gpu_choose_kind, gpu_lib, gpu_device;
     uint64_t driver_addrs[NVN_DRIVER_PROC_COUNT];
     pthread_mutex_t lock;
     uint32_t used;
@@ -171,6 +173,21 @@ static int driver_addr(rl_ctx *c, uint8_t *mem, int k, const char *name, uint64_
     return RL_OK;
 }
 
+int nvn_driver_lookup(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
+{
+    *addr = 0;
+    if (!nvn.driver_loader)
+        return RL_OK;
+    size_t len = strlen(name) + 1;
+    uint64_t sp = c->sp;
+    c->sp = (sp - len) & ~15ull;
+    memcpy(mem + c->sp, name, len);
+    uint64_t arg = c->sp;
+    int rc = nvn_guest_call(c, mem, nvn.driver_loader, &arg, 1, addr);
+    c->sp = sp;
+    return rc;
+}
+
 /** @brief The guest address the game gets for name: the driver's own function for a kept proc, else a slot. */
 static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
 {
@@ -197,6 +214,50 @@ int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *a
     if (!a)
         return rl_guest_fatal(c, "nvn", "the driver has no %s", name);
     return nvn_guest_call(c, mem, a, args, n, ret);
+}
+
+int nvn_gpu_open(rl_ctx *c, uint8_t *mem)
+{
+    pthread_mutex_lock(&nvn.lock);
+    bool done = nvn.gpu_device != 0;
+    pthread_mutex_unlock(&nvn.lock);
+    if (done)
+        return RL_OK;
+    if (!nvn.gpu_lib_open || !nvn.gpu_device_open)
+        return rl_guest_fatal(c, "nvn", "the program has no NvRmGpuLibOpen or NvRmGpuDeviceOpen");
+    uint64_t zero = 0, lib = 0;
+    int rc = nvn_guest_call(c, mem, nvn.gpu_lib_open, &zero, 1, &lib);
+    if (rc != RL_OK)
+        return rc;
+    if (!lib)
+        return rl_guest_fatal(c, "nvn", "NvRmGpuLibOpen failed");
+    uint64_t sp = c->sp;
+    c->sp = (sp - 32) & ~15ull;
+    uint64_t attr = c->sp, out = c->sp + 16;
+    memset(mem + c->sp, 0, 32);
+    uint64_t args[4] = { lib, 0xffffffffull, attr, out }, err = 0;
+    rc = nvn_guest_call(c, mem, nvn.gpu_device_open, args, 4, &err);
+    uint64_t dev = rl_ld64(mem, out);
+    c->sp = sp;
+    if (rc != RL_OK)
+        return rc;
+    if ((uint32_t)err || !dev)
+        return rl_guest_fatal(c, "nvn", "NvRmGpuDeviceOpen failed: NvError 0x%x", (unsigned)err);
+    pthread_mutex_lock(&nvn.lock);
+    nvn.gpu_lib = lib;
+    nvn.gpu_device = dev;
+    pthread_mutex_unlock(&nvn.lock);
+    rl_log(RL_LOG_INFO, "nvn", "NvRmGpuDevice 0x%llx open (library 0x%llx)", (unsigned long long)dev,
+           (unsigned long long)lib);
+    return RL_OK;
+}
+
+uint64_t nvn_gpu_device(void)
+{
+    pthread_mutex_lock(&nvn.lock);
+    uint64_t d = nvn.gpu_device;
+    pthread_mutex_unlock(&nvn.lock);
+    return d;
 }
 
 /** @brief nvnBootstrapLoader(const char *name): the address of any proc, as nvnDeviceGetProcAddress gives it. */
@@ -275,6 +336,12 @@ static void hook_defined(void *user, const char *symbol, uint64_t addr)
     (void)user;
     if (!strcmp(symbol, "nvnBootstrapLoaderInternal"))
         nvn.driver_loader = addr;
+    else if (!strcmp(symbol, "NvRmGpuLibOpen"))
+        nvn.gpu_lib_open = addr;
+    else if (!strcmp(symbol, "NvRmGpuDeviceOpen"))
+        nvn.gpu_device_open = addr;
+    else if (!strcmp(symbol, "NvRmGpuDeviceChooseKind"))
+        nvn.gpu_choose_kind = addr;
 }
 
 static int hook_wants(void *user, const char *symbol)

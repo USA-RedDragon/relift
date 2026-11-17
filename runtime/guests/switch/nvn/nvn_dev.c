@@ -163,6 +163,8 @@ uint64_t nvnh_nvnDeviceInitialize(rl_ctx *c, uint8_t *mem)
     int rc = nvn_driver_call(c, mem, "nvnDeviceBuilderGetFlags", &builder, 1, &flags);
     if (rc != RL_OK)
         return (uint64_t)rc;
+    if ((rc = nvn_gpu_open(c, mem)) != RL_OK)
+        return (uint64_t)rc;
     nvn_device *d = (nvn_device *)nvn_obj_new(dev, NVN_DEVICE, sizeof *d);
     trace("nvnDeviceInitialize(0x%llx, flags 0x%x)", (unsigned long long)dev, (unsigned)flags);
     c->x[0] = d != NULL;

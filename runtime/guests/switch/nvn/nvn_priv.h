@@ -491,6 +491,20 @@ int nvn_driver_index(const char *name);
  */
 int nvn_guest_call(rl_ctx *c, uint8_t *mem, uint64_t fn, const uint64_t *args, unsigned n, uint64_t *ret);
 
+/**
+ * @brief Opens the GPU as the SDK driver does when its device starts: the
+ * program's own NvRmGpuLibOpen, then NvRmGpuDeviceOpen of the default
+ * device, which ask nvdrv about the GPU. Once per process; RL_OK, RL_PENDING,
+ * or a stop when either fails.
+ */
+int nvn_gpu_open(rl_ctx *c, uint8_t *mem);
+
+/** @brief The driver's own function for any proc name, through its loader (0 when it has none); RL_OK or RL_PENDING. */
+int nvn_driver_lookup(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr);
+
+/** @brief The NvRmGpuDevice nvn_gpu_open opened (a guest address), 0 before. */
+uint64_t nvn_gpu_device(void);
+
 /** @brief A normal return from a proc: the guest address the return goes to (docs/abi.md section 5.4). */
 static inline uint64_t nvn_ret(const rl_ctx *c) { return c->x[30]; }
 
