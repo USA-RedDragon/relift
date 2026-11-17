@@ -511,7 +511,9 @@ static uint32_t depth_of(const point *q, bool wbuf)
  * (console captures of long edges). A pixel the middle has left is
  * uncovered. An
  * x-major edge's pixel takes the part of the line inside the polygon at the
- * pixel's middle.
+ * pixel's middle, in 5 bits rounded down, one lower still at a whole step
+ * when the inside is below the edge (console captures of AA triangles and of
+ * AA edges over polygons behind them).
  */
 static uint32_t coverage(const edge *e, int32_t y, int32_t x, bool right)
 {
@@ -544,7 +546,7 @@ static uint32_t coverage(const edge *e, int32_t y, int32_t x, bool right)
         return 0;
     if (c >= den)
         return 31;
-    return (uint32_t)((c * 32 - (right ? 0 : 1)) / den);
+    return (uint32_t)((c * 32 - (below ? 1 : 0)) / den);
 }
 
 /** @brief Twice dy times the x where edge (ia, ib) crosses the middle of line y, over 2 dy: for ordering two edges. */
