@@ -22,5 +22,10 @@ bool rl_mips_fpu_eval(uint32_t insn, uint32_t status, uint32_t *fcr31, uint64_t 
 
 /** @brief Whether insn is a COP1 arithmetic or compare instruction (what rl_mips_fpu_eval runs). */
 bool rl_mips_fpu_is_arith(uint32_t insn);
+/**
+ * @brief The cycles a COP1 arithmetic instruction takes beyond its issue
+ * cycle, as the lifted templates (from the Sail model) charge them.
+ */
+uint32_t rl_mips_fpu_cycles(uint32_t insn);
 
 #endif

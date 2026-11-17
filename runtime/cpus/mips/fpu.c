@@ -211,6 +211,23 @@ static uint32_t result_fmt(uint32_t funct, uint32_t fmt)
 
 bool rl_mips_fpu_is_arith(uint32_t insn) { return insn >> 26 == 0x11 && (insn >> 21 & 31) >= 0x10; }
 
+uint32_t rl_mips_fpu_cycles(uint32_t insn)
+{
+    uint32_t funct = insn & 63, fmt = insn >> 21 & 31;
+    bool dbl = fmt == FMT_D;
+    if (funct <= 1u || funct >= 0x30u)
+        return 2;
+    if (funct == 2u)
+        return dbl ? 7 : 4;
+    if (funct == 3u || funct == 4u)
+        return dbl ? 57 : 28;
+    if ((funct >= 8u && funct <= 0xFu) || funct == 0x24u || funct == 0x25u)
+        return 4;
+    if (funct == 0x20u || funct == 0x21u)
+        return fmt == FMT_W || fmt == FMT_L ? 4 : funct == 0x20u ? 1 : 0;
+    return 0;
+}
+
 /** @brief The rounding mode of a conversion to an integer: ROUND, TRUNC, CEIL, FLOOR, or FCR31's for CVT. */
 static unsigned int_rm(const fpst *s, uint32_t funct)
 {

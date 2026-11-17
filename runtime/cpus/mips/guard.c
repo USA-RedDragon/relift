@@ -7,8 +7,9 @@
  * slot also runs the branch (its link write and target), since the lifted
  * block wrote nothing before the guard. The lifted block ticks nothing
  * either, so each instruction run here takes its fetch and its issue
- * cycle (and an access its data cache cycles), but no multiply, divide or
- * FPU cycles.
+ * cycle (and an access its data cache cycles), and a COP1 operation that
+ * completes its FPU cycles (rl_mips_fpu_cycles); no multiply or divide runs
+ * here.
  */
 #include "mips.h"
 
@@ -290,8 +291,10 @@ static bool run_guarded(rl_ctx *c, uint8_t *mem, uint32_t code, uint64_t pc, uin
 {
     rl_mips_get_stats()->slow++;
     if (code & RL_MIPS_GUARD_FP_SLOW) {
-        if (!rl_mips_fpu(c, insn))
+        if (!rl_mips_fpu(c, insn)) {
+            c->time.budget -= rl_mips_fpu_cycles(insn);
             return false;
+        }
         *vector = rl_mips_exception(c, RL_MIPS_EXC_FPE, pc, in_delay, 0);
         return true;
     }
@@ -314,8 +317,10 @@ static bool run_guarded(rl_ctx *c, uint8_t *mem, uint32_t code, uint64_t pc, uin
     case RL_MIPS_EXC_FPE:
         if (insn >> 26 == 0x11 && (insn >> 21 & 31u) == 6u && (insn >> 11 & 31u) == 31u)
             c->fcr31 = (uint32_t)c->r[insn >> 16 & 31u] & RL_MIPS_FCR_MASK;
-        else if (rl_mips_fpu_is_arith(insn) && !rl_mips_fpu(c, insn))
+        else if (rl_mips_fpu_is_arith(insn) && !rl_mips_fpu(c, insn)) {
+            c->time.budget -= rl_mips_fpu_cycles(insn);
             return false;
+        }
         break;
     default:
         break;

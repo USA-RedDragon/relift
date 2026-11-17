@@ -65,6 +65,23 @@ static res op(uint32_t fmt, uint32_t funct, uint32_t fcr, uint64_t a, uint64_t b
         CHECK_EQ(r_.fcr, (want_fcr));                                                                              \
     } while (0)
 
+/** @brief The COP1 word of funct in format fmt, registers 0. */
+static uint32_t op1(uint32_t fmt, uint32_t funct) { return 0x11u << 26 | fmt << 21 | funct; }
+
+TEST(fpu_cycles_match_the_lifted_templates)
+{
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x11, 0x02)), 7u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x10, 0x02)), 4u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x11, 0x03)), 57u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x10, 0x04)), 28u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x10, 0x00)), 2u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x11, 0x09)), 4u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x11, 0x20)), 1u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x14, 0x21)), 4u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x11, 0x06)), 0u);
+    CHECK_EQ(rl_mips_fpu_cycles(op1(0x11, 0x3C)), 2u);
+}
+
 TEST(fpu_known_answers_add_sqrt_div)
 {
     CHECK_RES(op(S, 0, 0, 0x3F800000, 0x3F800000), 0x40000000, 0);
