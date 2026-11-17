@@ -74,7 +74,8 @@ endif
 
 WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) $(if $(WINDOWS),-DRL_STATIC_RUNTIME,-fPIC) \
-	-fvisibility=hidden -fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME -DRL_CHECKS
+	-fvisibility=hidden -fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME -DRL_CHECKS \
+	-MMD -MP
 LDLIBS := $(if $(or $(WINDOWS),$(ANDROID)),,-lpthread) $(if $(WINDOWS),,-lm)
 HOST_SRCS :=
 ifeq ($(AUDIO),real)
@@ -572,6 +573,10 @@ vk-present: $(VK_PRESENT)
 	@mkdir -p $(BUILD)/vk_present-sdmc
 	RELIFT_SDMC=$(abspath $(BUILD))/vk_present-sdmc $(abspath $(VK_PRESENT)); rc=$$?; \
 		if [ $$rc -eq 77 ]; then echo "vk_present skipped: no host Vulkan"; else exit $$rc; fi
+
+# Each object also depends on every header its compile read (the -MMD lists
+# next to it), so a header outside a rule's *_HDRS still rebuilds it.
+-include $(sort $(patsubst %.o,%.d,$(foreach v,$(filter %_OBJS,$(.VARIABLES)),$(filter %.o,$($(v))))))
 
 charter:
 	$(PYTHON) charter/check.py
