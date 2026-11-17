@@ -236,6 +236,11 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out);
 void nvn_vk_unimport(nvn_import *im);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */
 uint64_t nvn_gpu_guest(uint64_t gpu);
+/**
+ * @brief The imported buffer (*buf, a VkBuffer) and offset (*off) that hold
+ * the size guest bytes at guest; false when no imported pool holds them all.
+ */
+bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off);
 /** @brief A stage's compiler constants (its constant bank c[1]): GPU address and bytes, 0 and 0 for none. */
 typedef struct nvn_consts {
     uint64_t addr;

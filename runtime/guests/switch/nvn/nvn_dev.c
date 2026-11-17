@@ -53,13 +53,14 @@ typedef struct nvn_pool {
 /** @brief Imported pools by GPU address, for nvn_gpu_guest. */
 static struct {
     pthread_rwlock_t lock;
-    struct {
+    struct pool_span {
         uint64_t gpu, size, memory;
+        void *buf;
     } *v;
     uint32_t n, cap;
 } g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0 };
 
-static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory)
+static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf)
 {
     pthread_rwlock_wrlock(&g_pools.lock);
     if (g_pools.n == g_pools.cap) {
@@ -80,6 +81,7 @@ static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory)
     g_pools.v[i].gpu = gpu;
     g_pools.v[i].size = size;
     g_pools.v[i].memory = memory;
+    g_pools.v[i].buf = buf;
     pthread_rwlock_unlock(&g_pools.lock);
 }
 
@@ -111,6 +113,22 @@ uint64_t nvn_gpu_guest(uint64_t gpu)
         out = g_pools.v[lo - 1].memory + (gpu - g_pools.v[lo - 1].gpu);
     pthread_rwlock_unlock(&g_pools.lock);
     return out;
+}
+
+bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off)
+{
+    bool found = false;
+    pthread_rwlock_rdlock(&g_pools.lock);
+    for (uint32_t i = 0; i < g_pools.n && !found; i++) {
+        const struct pool_span *p = &g_pools.v[i];
+        if (p->buf && guest >= p->memory && guest - p->memory + size <= p->size) {
+            *buf = p->buf;
+            *off = guest - p->memory;
+            found = true;
+        }
+    }
+    pthread_rwlock_unlock(&g_pools.lock);
+    return found;
 }
 
 /** @brief The GPU address of a pool's first byte. */
@@ -324,7 +342,7 @@ uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
         p->size = size;
         p->flags = (uint32_t)flags;
         if (nvn_vk_import(memory, size, &p->im))
-            pools_add(p->im.gpu, size, memory);
+            pools_add(p->im.gpu, size, memory, p->im.buf);
         else
             rl_log(RL_LOG_WARN, "nvn", "memory pool 0x%llx (0x%llx bytes at 0x%llx) is not imported into the host device; "
                    "its GPU address is its guest address",

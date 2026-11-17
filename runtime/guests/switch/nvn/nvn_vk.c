@@ -665,15 +665,24 @@ static bool upload(replay *r, vimg *v)
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
         return false;
     if (d->target == NVN_TARGET_BUFFER) {
-        uint64_t off;
-        if (!nvn_vk_upload_bytes(r, r->mem + v->storage, (uint64_t)d->width * bpb, 0, 16, &off))
+        uint64_t off, bytes = (uint64_t)d->width * bpb;
+        void *pool;
+        VkBuffer src = g.arena.buf;
+        bool in_pool = nvn_guest_buffer(v->storage, bytes, &pool, &off) && off % bpb == 0;
+        if (in_pool)
+            src = pool;
+        else if (!nvn_vk_upload_bytes(r, r->mem + v->storage, bytes, 0, 16, &off))
             return false;
         nvn_vk_begin(r);
         nvn_vk_barrier(g.cb);
         VkBufferImageCopy bic = { .bufferOffset = off,
                                   .imageSubresource = { .aspectMask = v->aspect, .layerCount = 1 },
                                   .imageExtent = { d->width, 1, 1 } };
-        VK(vkCmdCopyBufferToImage)(g.cb, g.arena.buf, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
+        if (in_pool && v->written != v->flushed)
+            VK(vkCmdCopyImageToBuffer)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, src, 1, &bic);
+        else
+            VK(vkCmdCopyBufferToImage)(g.cb, src, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
+        v->flushed = v->written;
         nvn_vk_barrier(g.cb);
         return true;
     }
