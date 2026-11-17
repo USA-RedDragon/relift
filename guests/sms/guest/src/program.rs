@@ -208,6 +208,7 @@ fn functions<'a>(tag: UnitTag, blocks: &'a Blocks, lens: &BTreeMap<u16, u8>) -> 
                 tables: BTreeMap::new(),
                 pads: BTreeSet::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
             });
         }
         end = a32 + u32::from(n);
@@ -276,6 +277,7 @@ fn entries(image_id: [u8; 32]) -> Unit {
             tables: BTreeMap::new(),
             pads: BTreeSet::new(),
             guesses: BTreeMap::new(),
+            entries: BTreeMap::new(),
         })
         .collect();
     emit_unit(UnitTag::Entries, &fns, image_id, false)
