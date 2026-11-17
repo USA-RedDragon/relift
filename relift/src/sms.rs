@@ -192,6 +192,7 @@ fn project() -> Result<Project, BoxError> {
     let mapper = match s("mapper").as_deref() {
         Some("codemasters") => program::Mapper::Codemasters,
         Some("korea") => program::Mapper::Korea,
+        Some("bios") => program::Mapper::Bios,
         _ => program::Mapper::Sega,
     };
     Ok(Project {

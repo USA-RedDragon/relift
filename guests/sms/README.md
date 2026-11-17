@@ -19,9 +19,9 @@ relift-smsrom info --json rom.gg
 ```
 
 The system comes from the header's region code; the file extension is used
-only when there is no usable header. The mapper guess is a Codemasters
-checksum match first, then a byte scan for `ld (nn),a` stores to the mapper
-registers; function discovery refines it later. Tests build their input with
+only when there is no usable header. The mapper guess is the Codemasters
+header checksum; otherwise the Sega mapper (or the Korean one when stores
+to its register are found). Tests build their input with
 `synth`; no game data is used.
 
 ## Building a game
@@ -36,6 +36,10 @@ relift run
 writes `game.toml` with `guest = "sms"`, the console (`sms`, `gg`, `gg-ms`
 for a Master System cartridge on a Game Gear, or `sg`), the region (`ntsc-u`,
 `ntsc-j` with the FM unit, `pal`) and the mapper guess; edit them there.
+`mapper = "bios"` builds a Master System BIOS image as the BIOS, with no
+cartridge. Code the Z80 fetches from the open bus, after the memory control
+port unmaps the memory there, is the 0xFF the Master System II and Game
+Gear read (an `RST 38H`), lifted as a unit of its own.
 Until discovery's report is wired in, `relift build` takes the code from the
 executed instructions of an ares oracle trace (`exec.tsv`, the spike's
 oracle) named by `RELIFT_SMS_TRACE`, and fails without one. The program

@@ -97,6 +97,8 @@ pub enum Mapper {
     Codemasters,
     /// The Korean mapper.
     Korea,
+    /// No cartridge: the image is the console's BIOS.
+    Bios,
 }
 
 impl From<relift_sms_formats::MapperKind> for Mapper {
@@ -526,6 +528,7 @@ pub fn program_c(p: &Program<'_>, l: &Lifted) -> String {
         Mapper::Sega => "SMS_MAPPER_SEGA",
         Mapper::Codemasters => "SMS_MAPPER_CODEMASTERS",
         Mapper::Korea => "SMS_MAPPER_KOREA",
+        Mapper::Bios => "SMS_MAPPER_BIOS",
     };
     s.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
     let mobile = |s: &mut String, header: &str, sig: &str, init: &str| {

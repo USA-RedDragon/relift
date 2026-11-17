@@ -42,6 +42,9 @@ enum Command {
         /// The console: ms, gg, gg-ms or sg.
         #[arg(long, default_value = "ms")]
         console: String,
+        /// The image is a Master System BIOS, run with no cartridge.
+        #[arg(long)]
+        bios: bool,
     },
 }
 
@@ -52,7 +55,8 @@ fn main() -> ExitCode {
             exec,
             out,
             console,
-        } => lift_trace(&file, &exec, &out, &console),
+            bios,
+        } => lift_trace(&file, &exec, &out, &console, bios),
         Command::Info { file, json } => {
             let rom = input(&file)?;
             let ext = file.extension().and_then(|e| e.to_str());
@@ -72,8 +76,9 @@ fn lift_trace(
     exec: &std::path::Path,
     out: &std::path::Path,
     console: &str,
+    bios: bool,
 ) -> Result<(), BoxError> {
-    use relift_sms::program::{self, Console, Program, Region};
+    use relift_sms::program::{self, Console, Mapper, Program, Region};
     let image = input(file)?;
     let ext = file.extension().and_then(|e| e.to_str());
     let cart = Cartridge::parse(&image, ext).map_err(|e| format!("{}: {e}", file.display()))?;
@@ -101,7 +106,11 @@ fn lift_trace(
         title: cart.header.as_ref().map_or("", |h| h.product_code.as_str()),
         console,
         region: Region::NtscU,
-        mapper: cart.mapper.kind.into(),
+        mapper: if bios {
+            Mapper::Bios
+        } else {
+            cart.mapper.kind.into()
+        },
         entry: program::Entry::Main,
     };
     relift_cache::write_if_changed(
