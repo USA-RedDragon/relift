@@ -7,7 +7,11 @@
  * Binding 0 holds the sampler pool, binding 1 + 10 kind + dim the textures
  * of numeric kind kind (0 float, 1 signed, 2 unsigned) seen as dimension
  * dim (the translator's Dim), binding 31 a storage buffer with the Dim of
- * each texture id. One set serves every draw; an element is written the
+ * each texture id, and binding 32 + 8 kind + dim the images registered with
+ * nvnTexturePoolRegisterImage as storage images of the translator's
+ * ImageKind kind and ImageDim dim: formatted kinds through a view of the
+ * image's own numeric kind, raw kinds through an unsigned view of the
+ * access size, atomics through R32ui. One set serves every draw; an element is written the
  * first time a draw reads its handle, and written again when the pool
  * entry changed. Elements no draw named are left unwritten (the arrays are
  * partially bound), and the programs only read the ones their handles name.
@@ -21,6 +25,13 @@
 #define KINDS 3u
 #define DIMS 9u
 #define DIMS_BINDING 31u
+#define IMAGES 16384u
+#define IMAGE_KINDS 9u
+#define IMAGE_DIMS 6u
+#define IMAGE_BINDING(k, d) (32u + 8u * (k) + (d))
+
+enum { IK_FLOAT, IK_SINT, IK_UINT, IK_RAW8, IK_RAW16, IK_RAW32, IK_RAW64, IK_RAW128, IK_ATOMIC32 };
+enum { ID_1D, ID_BUFFER, ID_1D_ARRAY, ID_2D, ID_2D_ARRAY, ID_3D };
 
 enum { DIM_1D, DIM_2D, DIM_3D, DIM_CUBE, DIM_1D_ARRAY, DIM_2D_ARRAY, DIM_CUBE_ARRAY, DIM_2D_MS, DIM_2D_MS_ARRAY };
 
@@ -33,8 +44,12 @@ static struct {
     /** @brief The image each texture id's elements hold, the guest texture and view bytes registered then, and the views made for a texture view. */
     vimg **tex_img;
     uint64_t *tex_guest;
+    /** @brief The kind of each texture id's bound view (its format's sampled type). */
+    uint32_t *tex_kind;
     uint8_t (*tex_view)[17];
     VkImageView (*tex_views)[DIMS];
+    /** @brief The storage views written for each image id, by binding (32 onwards). */
+    VkImageView (*img_views)[IMAGE_KINDS * 8u];
     /** @brief The sampler each sampler id's element holds and the builder bytes it was made from. */
     VkSampler *samplers;
     uint64_t (*sampler_bytes)[16];
@@ -45,8 +60,8 @@ static bool make(void)
     if (t.tried)
         return t.ok;
     t.tried = true;
-    VkDescriptorSetLayoutBinding b[2 + KINDS * DIMS];
-    VkDescriptorBindingFlags f[2 + KINDS * DIMS];
+    VkDescriptorSetLayoutBinding b[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
+    VkDescriptorBindingFlags f[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
     const VkDescriptorBindingFlags partial =
         VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
@@ -61,6 +76,12 @@ static bool make(void)
     b[n] = (VkDescriptorSetLayoutBinding){ DIMS_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL,
                                            NULL };
     f[n++] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    for (uint32_t k = 0; k < IMAGE_KINDS; k++)
+        for (uint32_t d = 0; d < IMAGE_DIMS; d++) {
+            b[n] = (VkDescriptorSetLayoutBinding){ IMAGE_BINDING(k, d), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, IMAGES,
+                                                   VK_SHADER_STAGE_ALL, NULL };
+            f[n++] = partial;
+        }
     VkDescriptorSetLayoutBindingFlagsCreateInfo fi = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, .bindingCount = n, .pBindingFlags = f
     };
@@ -71,13 +92,14 @@ static bool make(void)
                                            .pBindings = b };
     if (VK(vkCreateDescriptorSetLayout)(g.dev, &li, NULL, &t.layout) != VK_SUCCESS)
         return false;
-    VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLER, SAMPLERS },
+    VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLER, SAMPLERS },
                                    { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, TEXTURES * KINDS * DIMS },
-                                   { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } };
+                                   { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 },
+                                   { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, IMAGES * IMAGE_KINDS * IMAGE_DIMS } };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                        .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
                                        .maxSets = 1,
-                                       .poolSizeCount = 3,
+                                       .poolSizeCount = 4,
                                        .pPoolSizes = ps };
     if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &t.pool) != VK_SUCCESS)
         return false;
@@ -100,11 +122,13 @@ static bool make(void)
     VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
     t.tex_img = calloc(TEXTURES, sizeof *t.tex_img);
     t.tex_guest = calloc(TEXTURES, sizeof *t.tex_guest);
+    t.tex_kind = calloc(TEXTURES, sizeof *t.tex_kind);
     t.tex_view = calloc(TEXTURES, sizeof *t.tex_view);
     t.tex_views = calloc(TEXTURES, sizeof *t.tex_views);
+    t.img_views = calloc(IMAGES, sizeof *t.img_views);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
-    t.ok = t.tex_img && t.tex_guest && t.tex_view && t.tex_views && t.samplers && t.sampler_bytes;
+    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -132,8 +156,8 @@ static uint32_t kind_of(VkFormat f)
 /** @brief The translator's Dim of an NVNtextureTarget, and the view type of each Dim. */
 static uint32_t dim_of(uint32_t target)
 {
-    static const uint8_t map[] = { DIM_1D,         DIM_2D,          DIM_3D,   DIM_1D_ARRAY, DIM_2D_ARRAY, DIM_2D_MS,
-                                   DIM_2D_MS_ARRAY, DIM_2D,         DIM_CUBE, DIM_CUBE_ARRAY };
+    static const uint8_t map[] = { DIM_1D,          DIM_2D, DIM_3D,   DIM_1D_ARRAY,   DIM_2D_ARRAY, DIM_2D_MS,
+                                   DIM_2D_MS_ARRAY, DIM_2D, DIM_CUBE, DIM_CUBE_ARRAY, DIM_1D };
     return target < sizeof map ? map[target] : DIM_2D;
 }
 
@@ -268,6 +292,87 @@ static int bind_sampler(replay *r, uint32_t id)
     return RL_OK;
 }
 
+/** @brief The view format of storage image kind ik over an image of format f (texel bytes bpb), or UNDEFINED. */
+static VkFormat image_format(uint32_t ik, VkFormat f, uint32_t bpb)
+{
+    switch (ik) {
+    case IK_FLOAT: case IK_SINT: case IK_UINT:
+        if (f == VK_FORMAT_R8G8B8A8_SRGB)
+            f = VK_FORMAT_R8G8B8A8_UNORM;
+        return kind_of(f) == ik - IK_FLOAT ? f : VK_FORMAT_UNDEFINED;
+    case IK_RAW8: return bpb == 1 ? VK_FORMAT_R8_UINT : VK_FORMAT_UNDEFINED;
+    case IK_RAW16: return bpb == 2 ? VK_FORMAT_R16_UINT : VK_FORMAT_UNDEFINED;
+    case IK_RAW32: case IK_ATOMIC32: return bpb == 4 ? VK_FORMAT_R32_UINT : VK_FORMAT_UNDEFINED;
+    case IK_RAW64: return bpb == 8 ? VK_FORMAT_R32G32_UINT : VK_FORMAT_UNDEFINED;
+    case IK_RAW128: return bpb == 16 ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_UNDEFINED;
+    default: return VK_FORMAT_UNDEFINED;
+    }
+}
+
+/** @brief Writes image v (level level) as storage image id into every kind and dimension array it can take. */
+static int bind_image(replay *r, uint32_t id, vimg *v, uint32_t level)
+{
+    if (id >= IMAGES)
+        return nvn_vk_stop(r, "image id %u is past the layer's %u", id, IMAGES);
+    uint32_t bpb, bw, bh;
+    if (!nvn_tex_format(v->d.format, &bpb, &bw, &bh) || bw != 1 || bh != 1 || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
+        return nvn_vk_stop(r, "image id %u has format %u, which is not a storage format", id, v->d.format);
+    uint32_t dims;
+    switch (v->d.target) {
+    case 0: case 3: dims = 1u << ID_1D | 1u << ID_1D_ARRAY; break;
+    case 1: case 4: case 7: dims = 1u << ID_2D | 1u << ID_2D_ARRAY; break;
+    case 2: dims = 1u << ID_3D; break;
+    case NVN_TARGET_CUBEMAP: case NVN_TARGET_CUBEMAP_ARRAY: dims = 1u << ID_2D_ARRAY; break;
+    default: return nvn_vk_stop(r, "image id %u has target %u", id, v->d.target);
+    }
+    static const VkImageViewType types[IMAGE_DIMS] = { VK_IMAGE_VIEW_TYPE_1D,       VK_IMAGE_VIEW_TYPE_1D,
+                                                       VK_IMAGE_VIEW_TYPE_1D_ARRAY, VK_IMAGE_VIEW_TYPE_2D,
+                                                       VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_IMAGE_VIEW_TYPE_3D };
+    VkDescriptorImageInfo ii[IMAGE_KINDS * IMAGE_DIMS];
+    VkWriteDescriptorSet w[IMAGE_KINDS * IMAGE_DIMS];
+    uint32_t n = 0;
+    if (t.tex_img[id] && !nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    for (uint32_t k = 0; k < IMAGE_KINDS; k++) {
+        VkFormat f = image_format(k, v->format, bpb);
+        if (f == VK_FORMAT_UNDEFINED)
+            continue;
+        VkFormatProperties fp;
+        VK(vkGetPhysicalDeviceFormatProperties)(g.phys, f, &fp);
+        VkFormatFeatureFlags need = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
+                                    (k == IK_ATOMIC32 ? VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT : 0);
+        if ((fp.optimalTilingFeatures & need) != need)
+            continue;
+        for (uint32_t d = 0; d < IMAGE_DIMS; d++) {
+            if (!(dims & (1u << d)))
+                continue;
+            uint32_t at = 8u * k + d;
+            if (t.img_views[id][at]) {
+                VK(vkDestroyImageView)(g.dev, t.img_views[id][at], NULL);
+                t.img_views[id][at] = NULL;
+            }
+            VkImageView iv = nvn_vk_storage_view(v, types[d], f, level);
+            if (!iv)
+                return nvn_vk_stop(r, "cannot make a storage view of image id %u", id);
+            t.img_views[id][at] = iv;
+            ii[n] = (VkDescriptorImageInfo){ NULL, iv, VK_IMAGE_LAYOUT_GENERAL };
+            w[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                           .dstSet = t.set,
+                                           .dstBinding = IMAGE_BINDING(k, d),
+                                           .dstArrayElement = id,
+                                           .descriptorCount = 1,
+                                           .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                           .pImageInfo = &ii[n] };
+            n++;
+        }
+    }
+    if (!n)
+        return nvn_vk_stop(r, "image id %u (format %u) has no storage view the host device supports", id,
+                           v->d.format);
+    VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
+    return RL_OK;
+}
+
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
 {
     if (!make())
@@ -284,17 +389,24 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
     vimg *v = nvn_vk_image(r, tex);
     if (!v)
         return RL_PENDING;
+    if (!nvn_vk_refresh(r, v))
+        return nvn_vk_stop(r, "cannot refill buffer texture id %u", id);
+    if (image)
+        nvn_vk_written(v);
     if (t.tex_img[id] == v && t.tex_guest[id] == tex && !memcmp(t.tex_view[id], view, sizeof view)) {
-        *kind = kind_of(v->format);
+        *kind = t.tex_kind[id];
         memcpy(dim, t.dims.map + 4ull * id, 4);
-        return bind_sampler(r, sid);
+        return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
     }
     nvn_view nv;
+    VkFormat vf = v->format;
     if (has_view) {
         int rc = nvn_view_read(r->c, r->mem, view, &nv);
         if (rc != RL_OK)
             return rc;
-        if (nv.has_format && nv.format != v->d.format)
+        VkImageAspectFlags a;
+        if (nv.has_format && nv.format != v->d.format &&
+            (vf = nvn_vk_view_format(v, nv.format, &a)) == VK_FORMAT_UNDEFINED)
             return nvn_vk_stop(r, "texture id %u is registered with a view of format %u over format %u", id, nv.format,
                                v->d.format);
         if ((nv.has_levels && (nv.base_level < 0 || nv.num_levels <= 0)) ||
@@ -302,7 +414,7 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
             return nvn_vk_stop(r, "texture id %u is registered with a view of levels %d+%d, layers %d+%d", id,
                                nv.base_level, nv.num_levels, nv.min_layer, nv.num_layers);
     }
-    *kind = kind_of(v->format);
+    *kind = kind_of(vf);
     *dim = dim_of(has_view && nv.has_target ? nv.target : v->d.target);
     if (t.tex_img[id] && !nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
@@ -333,9 +445,15 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
         n++;
     }
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
+    if (image) {
+        int irc = bind_image(r, id, v, has_view && nv.has_levels ? (uint32_t)nv.base_level : 0);
+        if (irc != RL_OK)
+            return irc;
+    }
     t.tex_img[id] = v;
+    t.tex_kind[id] = *kind;
     t.tex_guest[id] = tex;
     memcpy(t.tex_view[id], view, sizeof view);
     memcpy(t.dims.map + 4ull * id, dim, 4);
-    return bind_sampler(r, sid);
+    return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
 }

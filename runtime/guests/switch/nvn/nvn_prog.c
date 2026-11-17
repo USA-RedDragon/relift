@@ -6,7 +6,7 @@
  * A GLSLC control section (magic 0x98761234) gives the bytes of constant
  * data the compiler placed in the code area (+0x3c) and their offset from
  * the code's start (+0x40); the driver binds them as the stage's constant
- * bank c[1].
+ * bank c[1]; code addresses are kept as guest addresses.
  */
 #include "nvn_priv.h"
 
@@ -24,6 +24,8 @@ typedef struct nvn_program {
     shader_data stages[NVN_PROGRAM_STAGES];
     uint64_t code[NVN_PROGRAM_STAGES];
     nvn_consts consts[NVN_PROGRAM_STAGES];
+    /** @brief Guest address of each stage's GLSLC control section, 0 for none. */
+    uint64_t control[NVN_PROGRAM_STAGES];
     uint32_t n;
     uint64_t sets;
 } nvn_program;
@@ -56,12 +58,14 @@ uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
     p->n = (uint32_t)n;
     for (uint32_t i = 0; i < p->n; i++) {
         char key[65];
-        p->code[i] = p->stages[i].data;
+        uint64_t code = nvn_gpu_guest(p->stages[i].data);
+        p->code[i] = code;
         p->consts[i] = (nvn_consts){ 0, 0 };
         uint64_t ctl = p->stages[i].control;
-        if (ctl && rl_ld32(mem, ctl) == CONTROL_MAGIC && rl_ld32(mem, ctl + 0x3c))
-            p->consts[i] = (nvn_consts){ p->stages[i].data + rl_ld32(mem, ctl + 0x40), rl_ld32(mem, ctl + 0x3c) };
-        if (!nvn_shader_note(mem, p->stages[i].data, key))
+        p->control[i] = ctl && rl_ld32(mem, ctl) == CONTROL_MAGIC ? ctl : 0;
+        if (p->control[i] && rl_ld32(mem, ctl + 0x3c))
+            p->consts[i] = (nvn_consts){ code + rl_ld32(mem, ctl + 0x40), rl_ld32(mem, ctl + 0x3c) };
+        if (!nvn_shader_note(mem, code, key))
             return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx): stage %u at 0x%llx has no end",
                                             (unsigned long long)c->x[0], i, (unsigned long long)p->stages[i].data);
         if (rl_cfg()->trace_os)
@@ -75,12 +79,14 @@ uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts)
+const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts, const uint64_t **control)
 {
     nvn_program *p = (nvn_program *)nvn_obj_get(prog, NVN_PROGRAM);
     *n = p ? p->n : 0;
     if (consts)
         *consts = p ? p->consts : NULL;
+    if (control)
+        *control = p ? p->control : NULL;
     return p ? p->code : NULL;
 }
 

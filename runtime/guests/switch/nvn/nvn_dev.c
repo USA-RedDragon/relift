@@ -2,12 +2,16 @@
  * @file nvn_dev.c
  * @brief NVN2 devices, queues, memory pools, buffers and syncs.
  *
- * GPU addresses are guest addresses: a memory pool's GPU address is the
- * guest address of its storage, so a buffer or texture address names the
- * guest bytes behind it.
+ * A memory pool's storage is guest memory, imported into the host Vulkan
+ * device as a buffer (VK_EXT_external_memory_host); the pool's GPU address
+ * is that buffer's device address, so the translated programs dereference
+ * the addresses the game computes from it, and the layer turns a GPU
+ * address back into the guest address of the same byte (nvn_gpu_guest).
+ * Without an import a pool's GPU address is its guest address.
  */
 #include "nvn_priv.h"
 
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
 
@@ -42,12 +46,79 @@ typedef struct nvn_pool {
     nvn_obj o;
     uint64_t memory, size;
     uint32_t flags;
+    nvn_import im;
 } nvn_pool;
+
+/** @brief Imported pools by GPU address, for nvn_gpu_guest. */
+static struct {
+    pthread_rwlock_t lock;
+    struct {
+        uint64_t gpu, size, memory;
+    } *v;
+    uint32_t n, cap;
+} g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0 };
+
+static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory)
+{
+    pthread_rwlock_wrlock(&g_pools.lock);
+    if (g_pools.n == g_pools.cap) {
+        uint32_t cap = g_pools.cap ? 2 * g_pools.cap : 64;
+        void *v = realloc(g_pools.v, cap * sizeof *g_pools.v);
+        if (!v) {
+            pthread_rwlock_unlock(&g_pools.lock);
+            return;
+        }
+        g_pools.v = v;
+        g_pools.cap = cap;
+    }
+    uint32_t i = g_pools.n++;
+    while (i && g_pools.v[i - 1].gpu > gpu) {
+        g_pools.v[i] = g_pools.v[i - 1];
+        i--;
+    }
+    g_pools.v[i].gpu = gpu;
+    g_pools.v[i].size = size;
+    g_pools.v[i].memory = memory;
+    pthread_rwlock_unlock(&g_pools.lock);
+}
+
+static void pools_remove(uint64_t gpu)
+{
+    pthread_rwlock_wrlock(&g_pools.lock);
+    for (uint32_t i = 0; i < g_pools.n; i++)
+        if (g_pools.v[i].gpu == gpu) {
+            memmove(&g_pools.v[i], &g_pools.v[i + 1], (g_pools.n - i - 1) * sizeof *g_pools.v);
+            g_pools.n--;
+            break;
+        }
+    pthread_rwlock_unlock(&g_pools.lock);
+}
+
+uint64_t nvn_gpu_guest(uint64_t gpu)
+{
+    uint64_t out = gpu;
+    pthread_rwlock_rdlock(&g_pools.lock);
+    uint32_t lo = 0, hi = g_pools.n;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (g_pools.v[mid].gpu <= gpu)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo && gpu - g_pools.v[lo - 1].gpu < g_pools.v[lo - 1].size)
+        out = g_pools.v[lo - 1].memory + (gpu - g_pools.v[lo - 1].gpu);
+    pthread_rwlock_unlock(&g_pools.lock);
+    return out;
+}
+
+/** @brief The GPU address of a pool's first byte. */
+static uint64_t pool_gpu(const nvn_pool *p) { return p->im.gpu ? p->im.gpu : p->memory; }
 
 typedef struct nvn_buffer {
     nvn_obj o;
     uint64_t pool, offset, size;
-    uint64_t memory;
+    uint64_t memory, gpu;
 } nvn_buffer;
 
 typedef struct nvn_sync {
@@ -249,6 +320,12 @@ uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
         p->memory = memory;
         p->size = size;
         p->flags = (uint32_t)flags;
+        if (nvn_vk_import(memory, size, &p->im))
+            pools_add(p->im.gpu, size, memory);
+        else
+            rl_log(RL_LOG_WARN, "nvn", "memory pool 0x%llx (0x%llx bytes at 0x%llx) is not imported into the host device; "
+                   "its GPU address is its guest address",
+                   (unsigned long long)pool, (unsigned long long)size, (unsigned long long)memory);
     }
     trace("nvnMemoryPoolInitialize(0x%llx, memory 0x%llx, size 0x%llx, flags 0x%x)", (unsigned long long)pool,
           (unsigned long long)memory, (unsigned long long)size, (unsigned)flags);
@@ -260,7 +337,12 @@ uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    nvn_obj_free(nvn_obj_get(c->x[0], NVN_POOL));
+    nvn_pool *p = (nvn_pool *)nvn_obj_get(c->x[0], NVN_POOL);
+    if (p && p->im.gpu) {
+        pools_remove(p->im.gpu);
+        nvn_vk_unimport(&p->im);
+    }
+    nvn_obj_free(p ? &p->o : NULL);
     return nvn_ret(c);
 }
 
@@ -289,12 +371,12 @@ uint64_t nvnh_nvnMemoryPoolInvalidateMappedRange(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnMemoryPoolGetBufferAddress(const NVNmemoryPool *): its GPU address, the guest address of its storage. */
+/** @brief nvnMemoryPoolGetBufferAddress(const NVNmemoryPool *): its GPU address. */
 uint64_t nvnh_nvnMemoryPoolGetBufferAddress(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_pool *p = pool_of(c, 0);
-    c->x[0] = p ? p->memory : 0;
+    c->x[0] = p ? pool_gpu(p) : 0;
     return nvn_ret(c);
 }
 
@@ -314,6 +396,12 @@ uint64_t nvnh_nvnMemoryPoolGetSize(rl_ctx *c, uint8_t *mem)
     nvn_pool *p = pool_of(c, 0);
     c->x[0] = p ? p->size : 0;
     return nvn_ret(c);
+}
+
+uint64_t nvn_pool_gpu(uint64_t pool)
+{
+    nvn_pool *p = (nvn_pool *)nvn_obj_get(pool, NVN_POOL);
+    return p ? pool_gpu(p) : 0;
 }
 
 uint64_t nvn_pool_memory(uint64_t pool, uint64_t *size)
@@ -341,6 +429,7 @@ uint64_t nvnh_nvnBufferInitialize(rl_ctx *c, uint8_t *mem)
         b->offset = offset;
         b->size = size;
         b->memory = nvn_pool_memory(pool, NULL) + offset;
+        b->gpu = nvn_pool_gpu(pool) + offset;
     }
     c->x[0] = b != NULL;
     return nvn_ret(c);
@@ -370,7 +459,7 @@ uint64_t nvnh_nvnBufferGetAddress(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_buffer *b = buffer_of(c);
-    c->x[0] = b ? b->memory : 0;
+    c->x[0] = b ? b->gpu : 0;
     return nvn_ret(c);
 }
 

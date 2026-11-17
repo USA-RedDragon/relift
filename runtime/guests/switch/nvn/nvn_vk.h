@@ -23,6 +23,18 @@
 /** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
 #define NVN_BANK2_TEXTURES 0x20u
 #define NVN_VERTEX_BUFFERS 16u
+/** @brief NVNtextureTarget of a buffer texture: a host 1D image the layer refills from its storage at each use. */
+#define NVN_TARGET_BUFFER 10u
+/** @brief NVNtextureTarget of a cubemap (six layers) and a cubemap array (depth layers, six per cube). */
+#define NVN_TARGET_CUBEMAP 8u
+/** @brief NVNtextureTarget of a 3D texture. */
+#define NVN_TARGET_3D 2u
+#define NVN_TARGET_CUBEMAP_ARRAY 9u
+/** @brief The compute stage's NVNshaderStage, and its storage buffer slots. */
+#define NVN_STAGE_COMPUTE 5u
+#define NVN_STORAGE_SLOTS 16u
+/** @brief Image (and compute texture) slots of a stage. */
+#define NVN_IMAGE_SLOTS 32u
 #define NVN_VERTEX_ATTRIBS 16u
 
 /** @brief A texture's host image. */
@@ -31,6 +43,11 @@ typedef struct vimg {
     nvn_tex_desc d;
     VkFormat format;
     VkImageAspectFlags aspect;
+    /** @brief The image was made with storage usage (an uncompressed color format). */
+    bool storage_ok;
+    VkImageUsageFlags usage;
+    /** @brief When the GPU last wrote it (a render target, copy or storage binding), from a running count. */
+    uint64_t written;
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
@@ -65,6 +82,9 @@ typedef struct nvn_vkdev {
     pthread_mutex_t lock;
     bool ok;
     bool depth_clip_control;
+    /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
+    bool host_import;
+    uint64_t import_align;
     vkf_fns fns;
     VkInstance instance;
     VkPhysicalDevice phys;
@@ -78,6 +98,8 @@ typedef struct nvn_vkdev {
     char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     vimg *images[MAX_IMAGES];
     uint32_t nimages;
+    /** @brief The running count vimg.written takes its values from. */
+    uint64_t write_stamp;
     uint64_t presents;
     /** @brief Guest bytes copied for the commands of the batch being recorded: buffers, indices, constants. */
     staging arena;
@@ -95,8 +117,15 @@ typedef struct nvn_gfx {
     bool scissor_set;
     /** @brief GPU code address of the program bound to each stage, 0 for none. */
     uint64_t code[NVN_STAGES];
-    /** @brief The compiler constants of each stage's program (its c[1]). */
+    /** @brief The compiler constants of each stage's program (its c[1]), and its control section's guest address. */
     nvn_consts consts[NVN_STAGES];
+    uint64_t control[NVN_STAGES];
+    /** @brief Compute storage buffers: GPU address and size. */
+    struct {
+        uint64_t addr, size;
+    } storage[NVN_STORAGE_SLOTS];
+    /** @brief Image handles bound per stage and slot. */
+    uint32_t image[NVN_STAGES][NVN_IMAGE_SLOTS];
     /** @brief Each stage's c[2] as the driver fills it. */
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     struct {
@@ -157,6 +186,8 @@ int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const
                   unsigned out_n, uint32_t *out, uint64_t *ret);
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time; NULL after a stop. */
 vimg *nvn_vk_image(replay *r, uint64_t tex);
+/** @brief Refills a buffer texture's image from its storage (the bytes may have changed since); true for other images. */
+bool nvn_vk_refresh(replay *r, vimg *v);
 /**
  * @brief A view of v of type t: over all its levels and the layers t takes
  * with the texture's swizzle (kept with v), or, given nv, with the levels,
@@ -164,6 +195,16 @@ vimg *nvn_vk_image(replay *r, uint64_t tex);
  * to destroy). NULL on failure.
  */
 VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv);
+/** @brief A new storage view of level level of v as type t in format f (the caller destroys it), or NULL. */
+/** @brief Notes that v is written now (it becomes the image the textures sharing its storage copy from). */
+void nvn_vk_written(vimg *v);
+VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level);
+/**
+ * @brief The host format of a view of v as NVNformat format (aspect in
+ * *aspect): a color format with v's texel block size and shape, or
+ * VK_FORMAT_UNDEFINED.
+ */
+VkFormat nvn_vk_view_format(const vimg *v, uint32_t format, VkImageAspectFlags *aspect);
 /** @brief Copies n host bytes into the arena (zero-filled to pad bytes); offset of the copy in *off. */
 bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
 /** @brief The layout of the texture set (set 2); VK_NULL_HANDLE when it cannot be made (nvn_texset.c). */

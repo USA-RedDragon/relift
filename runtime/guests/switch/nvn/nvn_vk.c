@@ -131,7 +131,7 @@ static void bring_up(void)
     ext_features afloat = { .sType = STYPE_ATOMIC_FLOAT }, i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 };
     ext_features recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE }, fma = { .sType = STYPE_SHADER_FMA };
     ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma };
-    const char *ext_names[DEVICE_EXTS];
+    const char *ext_names[DEVICE_EXTS + 1];
     uint32_t next = 0, nnames = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -147,6 +147,11 @@ static void bring_up(void)
                 g.depth_clip_control |= k == 0;
                 break;
             }
+    for (uint32_t i = 0; exts && i < next; i++)
+        if (!strcmp(exts[i].extensionName, "VK_EXT_external_memory_host")) {
+            ext_names[nnames++] = "VK_EXT_external_memory_host";
+            g.host_import = true;
+        }
     free(exts);
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
                                              .pNext = &f13 };
@@ -201,6 +206,14 @@ static void bring_up(void)
     if (VK(vkAllocateCommandBuffers)(g.dev, &cai, &g.cb) != VK_SUCCESS ||
         VK(vkCreateFence)(g.dev, &fci, NULL, &g.fence) != VK_SUCCESS)
         return;
+    if (g.host_import) {
+        VkPhysicalDeviceExternalMemoryHostPropertiesEXT hp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT
+        };
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &hp };
+        VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
+        g.import_align = hp.minImportedHostPointerAlignment ? hp.minImportedHostPointerAlignment : 4096;
+    }
     if (!nvn_vk_staging_new(&g.arena, 64ull << 20)) {
         rl_log(RL_LOG_ERROR, "nvn", "cannot allocate the upload arena");
         return;
@@ -461,6 +474,67 @@ int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want)
     return -1;
 }
 
+bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
+{
+    memset(out, 0, sizeof *out);
+    pthread_once(&g.once, bring_up);
+    if (!g.ok || !g.host_import || !size || guest % g.import_align || size % g.import_align)
+        return false;
+    void *host = rl_mem_base() + guest;
+    VkMemoryHostPointerPropertiesEXT props = { .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT };
+    if (VK(vkGetMemoryHostPointerPropertiesEXT)(g.dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host,
+                                                &props) != VK_SUCCESS)
+        return false;
+    VkExternalMemoryBufferCreateInfo eb = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+                                            .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT };
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .pNext = &eb,
+                               .size = size,
+                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+    VkBuffer buf;
+    VkDeviceMemory dm = NULL;
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &buf) != VK_SUCCESS)
+        return false;
+    out->buf = buf;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, buf, &req);
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits & props.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    VkImportMemoryHostPointerInfoEXT imp = { .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+                                             .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                             .pHostPointer = host };
+    VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                     .pNext = &imp,
+                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .pNext = &fl,
+                                 .allocationSize = size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    bool ok = t >= 0 && VK(vkAllocateMemory)(g.dev, &mai, NULL, &dm) == VK_SUCCESS;
+    out->memory = dm;
+    if (!ok || VK(vkBindBufferMemory)(g.dev, buf, dm, 0) != VK_SUCCESS) {
+        nvn_vk_unimport(out);
+        return false;
+    }
+    VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
+    out->gpu = VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+    return out->gpu != 0;
+}
+
+void nvn_vk_unimport(nvn_import *im)
+{
+    if (im->buf || im->memory)
+        VK(vkDeviceWaitIdle)(g.dev);
+    if (im->buf)
+        VK(vkDestroyBuffer)(g.dev, (VkBuffer)im->buf, NULL);
+    if (im->memory)
+        VK(vkFreeMemory)(g.dev, (VkDeviceMemory)im->memory, NULL);
+    memset(im, 0, sizeof *im);
+}
+
 bool nvn_vk_staging_new(staging *s, uint64_t size)
 {
     memset(s, 0, sizeof *s);
@@ -551,9 +625,21 @@ static void image_free(vimg *v)
 
 static VkImageSubresourceRange range_of(const vimg *v)
 {
+    bool one = v->d.target == 2 || v->d.target == NVN_TARGET_BUFFER;
+    uint32_t layers = one ? 1 : v->d.depth ? v->d.depth : 1;
+    if (v->d.target == NVN_TARGET_CUBEMAP)
+        layers = 6;
     return (VkImageSubresourceRange){ .aspectMask = v->aspect,
-                                      .levelCount = v->d.levels ? v->d.levels : 1,
-                                      .layerCount = v->d.target == 2 ? 1 : (v->d.depth ? v->d.depth : 1) };
+                                      .levelCount = v->d.levels && v->d.target != NVN_TARGET_BUFFER ? v->d.levels : 1,
+                                      .layerCount = layers };
+}
+
+/** @brief The depth of level l of a 3D texture, 1 for other targets. */
+static uint32_t depth_of(const nvn_tex_desc *d, uint32_t l)
+{
+    if (d->target != NVN_TARGET_3D)
+        return 1;
+    return d->depth >> l ? d->depth >> l : 1;
 }
 
 /** @brief Fills v from the guest bytes of its storage, every level of every layer. */
@@ -563,11 +649,24 @@ static bool upload(replay *r, vimg *v)
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
         return false;
+    if (d->target == NVN_TARGET_BUFFER) {
+        uint64_t off;
+        if (!nvn_vk_upload_bytes(r, r->mem + v->storage, (uint64_t)d->width * bpb, 0, 16, &off))
+            return false;
+        nvn_vk_begin(r);
+        nvn_vk_barrier(g.cb);
+        VkBufferImageCopy bic = { .bufferOffset = off,
+                                  .imageSubresource = { .aspectMask = v->aspect, .layerCount = 1 },
+                                  .imageExtent = { d->width, 1, 1 } };
+        VK(vkCmdCopyBufferToImage)(g.cb, g.arena.buf, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
+        nvn_vk_barrier(g.cb);
+        return true;
+    }
     VkImageSubresourceRange rr = range_of(v);
     uint64_t total = 0;
     for (uint32_t l = 0; l < rr.levelCount; l++) {
         uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
-        total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount;
+        total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount * depth_of(d, l);
     }
     staging s;
     if (!nvn_vk_staging_new(&s, total))
@@ -576,8 +675,9 @@ static bool upload(replay *r, vimg *v)
     uint64_t at = 0;
     for (uint32_t l = 0; l < rr.levelCount && l < NVN_TEX_MAX_LEVELS; l++) {
         uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
-        uint64_t layer_bytes = (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb;
-        nvn_region rg = { 0, 0, 0, (int32_t)w, (int32_t)h, 1 };
+        uint32_t dl = depth_of(d, l);
+        uint64_t layer_bytes = (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * dl;
+        nvn_region rg = { 0, 0, 0, (int32_t)w, (int32_t)h, (int32_t)dl };
         for (uint32_t k = 0; k < rr.layerCount; k++)
             if (!nvn_tex_copy(d, r->mem + v->storage, l, k, &rg, s.map + at + layer_bytes * k, false)) {
                 nvn_vk_staging_free(&s);
@@ -587,7 +687,7 @@ static bool upload(replay *r, vimg *v)
                                       .imageSubresource = { .aspectMask = v->aspect,
                                                             .mipLevel = l,
                                                             .layerCount = rr.layerCount },
-                                      .imageExtent = { w, h, 1 } };
+                                      .imageExtent = { w, h, dl } };
         at += layer_bytes * rr.layerCount;
     }
     nvn_vk_begin(r);
@@ -597,6 +697,55 @@ static bool upload(replay *r, vimg *v)
     nvn_vk_staging_free(&s);
     return ok;
 }
+
+/** @brief For views other than storage views: the image's usage without storage (its format may not allow storage). */
+static const void *plain_usage(const vimg *v, VkImageViewUsageCreateInfo *u)
+{
+    *u = (VkImageViewUsageCreateInfo){ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
+                                       .usage = v->usage & ~(VkImageUsageFlags)VK_IMAGE_USAGE_STORAGE_BIT };
+    return v->storage_ok ? u : NULL;
+}
+
+/**
+ * @brief Whether textures a and b on the same storage lay their common rows
+ * out alike: single-level 2D textures of one format, width and block
+ * height, differing only in height (a render target and a smaller texture
+ * over its first rows, as a shadow atlas and one of its pages). Such
+ * textures get one host image each, kept in step by copies (sync_alias).
+ */
+static bool same_rows(const nvn_tex_desc *a, const nvn_tex_desc *b)
+{
+    return a->format == b->format && a->width == b->width && a->target == 1 && b->target == 1 &&
+           (a->levels ? a->levels : 1) == 1 && (b->levels ? b->levels : 1) == 1 && a->samples == b->samples &&
+           a->block_h == b->block_h && a->stride == b->stride;
+}
+
+/**
+ * @brief Returns v after copying into it the common rows of the most
+ * recently written image that shares its storage, when that one was
+ * written after v.
+ */
+static vimg *sync_alias(replay *r, vimg *v)
+{
+    vimg *src = NULL;
+    for (uint32_t i = 0; i < g.nimages; i++) {
+        vimg *u = g.images[i];
+        if (u != v && u->storage == v->storage && u->written > v->written && (!src || u->written > src->written))
+            src = u;
+    }
+    if (!src)
+        return v;
+    uint32_t h = src->d.height < v->d.height ? src->d.height : v->d.height;
+    nvn_vk_begin(r);
+    nvn_vk_barrier(g.cb);
+    VkImageCopy ic = { { src->aspect, 0, 0, 1 }, { 0, 0, 0 }, { v->aspect, 0, 0, 1 }, { 0, 0, 0 }, { v->d.width, h, 1 } };
+    VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
+    nvn_vk_barrier(g.cb);
+    v->written = src->written;
+    return v;
+}
+
+void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
 
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
 static vimg *image_of(replay *r, uint64_t tex)
@@ -613,7 +762,9 @@ static vimg *image_of(replay *r, uint64_t tex)
             continue;
         if (v->d.format == d->format && v->d.width == d->width && v->d.height == d->height &&
             v->d.depth == d->depth && v->d.levels == d->levels && v->d.target == d->target)
-            return v;
+            return sync_alias(r, v);
+        if (same_rows(&v->d, d))
+            continue;
         rl_guest_fatal(r->c, "nvn",
                        "texture 0x%llx (format %u, %ux%u) shares storage 0x%llx with another texture (format %u, "
                        "%ux%u); aliased storage is not handled",
@@ -623,7 +774,10 @@ static vimg *image_of(replay *r, uint64_t tex)
     }
     VkImageAspectFlags aspect;
     VkFormat f = nvn_vk_format(d->format, &aspect);
-    if (f == VK_FORMAT_UNDEFINED || d->samples > 1 || (d->target != 1 && d->target != 4 && d->target != 7)) {
+    bool buffer = d->target == NVN_TARGET_BUFFER;
+    if (f == VK_FORMAT_UNDEFINED || d->samples > 1 ||
+        (d->target != 1 && d->target != 4 && d->target != 7 && d->target != NVN_TARGET_3D && d->target != NVN_TARGET_CUBEMAP &&
+         d->target != NVN_TARGET_CUBEMAP_ARRAY && !buffer)) {
         rl_guest_fatal(r->c, "nvn", "texture 0x%llx: format %u, target %u, %u samples not handled",
                        (unsigned long long)tex, d->format, d->target, d->samples);
         return NULL;
@@ -654,16 +808,25 @@ static vimg *image_of(replay *r, uint64_t tex)
                                             ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
                                             : 0)
                                      : (ff & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0);
+    uint32_t sbpb, sbw, sbh;
+    bool can_store = !depth && !buffer && nvn_tex_format(d->format, &sbpb, &sbw, &sbh) && sbw == 1 && sbh == 1;
+    v->storage_ok = can_store;
     VkImageCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
+        .flags = (depth ? 0 : VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT) |
+                 (can_store ? VK_IMAGE_CREATE_EXTENDED_USAGE_BIT : 0) |
+                 (d->target == NVN_TARGET_CUBEMAP || d->target == NVN_TARGET_CUBEMAP_ARRAY
+                      ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+                      : 0),
+        .imageType = buffer ? VK_IMAGE_TYPE_1D : d->target == NVN_TARGET_3D ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D,
         .format = f,
-        .extent = { d->width, d->height, 1 },
+        .extent = { d->width, buffer ? 1 : d->height, depth_of(d, 0) },
         .mipLevels = rr.levelCount,
         .arrayLayers = rr.layerCount,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | attach,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | attach |
+                 (can_store ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     VkMemoryRequirements req;
@@ -676,9 +839,15 @@ static vimg *image_of(replay *r, uint64_t tex)
     if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &v->memory) != VK_SUCCESS ||
         VK(vkBindImageMemory)(g.dev, v->image, v->memory, 0) != VK_SUCCESS)
         goto fail;
+    v->usage = ci.usage;
+    VkImageViewUsageCreateInfo vu;
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  .pNext = plain_usage(v, &vu),
                                   .image = v->image,
-                                  .viewType = rr.layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
+                                  .viewType = buffer                         ? VK_IMAGE_VIEW_TYPE_1D
+                                              : d->target == NVN_TARGET_3D ? VK_IMAGE_VIEW_TYPE_3D
+                                              : rr.layerCount > 1          ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                                           : VK_IMAGE_VIEW_TYPE_2D,
                                   .format = f,
                                   .subresourceRange = rr };
     if (VK(vkCreateImageView)(g.dev, &vci, NULL, &v->view) != VK_SUCCESS)
@@ -699,6 +868,7 @@ static vimg *image_of(replay *r, uint64_t tex)
     if (depth && !nvn_vk_flush(r))
         goto fail;
     g.images[g.nimages++] = v;
+    sync_alias(r, v);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "host image for texture 0x%llx: storage 0x%llx, format %u (%d), %ux%u",
                (unsigned long long)tex, (unsigned long long)storage, d->format, (int)f, d->width, d->height);
@@ -710,6 +880,41 @@ fail:
 }
 
 vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
+
+bool nvn_vk_refresh(replay *r, vimg *v) { return v->d.target != NVN_TARGET_BUFFER || upload(r, v); }
+
+VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level)
+{
+    if (!v->storage_ok)
+        return NULL;
+    VkImageSubresourceRange rr = range_of(v);
+    rr.baseMipLevel = level;
+    rr.levelCount = 1;
+    if (t == VK_IMAGE_VIEW_TYPE_1D || t == VK_IMAGE_VIEW_TYPE_2D)
+        rr.layerCount = 1;
+    VkImageViewUsageCreateInfo u = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
+                                     .usage = VK_IMAGE_USAGE_STORAGE_BIT };
+    VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  .pNext = &u,
+                                  .image = v->image,
+                                  .viewType = t,
+                                  .format = f,
+                                  .subresourceRange = rr };
+    VkImageView out;
+    return VK(vkCreateImageView)(g.dev, &vci, NULL, &out) == VK_SUCCESS ? out : NULL;
+}
+
+VkFormat nvn_vk_view_format(const vimg *v, uint32_t format, VkImageAspectFlags *aspect)
+{
+    uint32_t b0, w0, h0, b1, w1, h1;
+    *aspect = 0;
+    VkFormat f = nvn_vk_format(format, aspect);
+    if (f == VK_FORMAT_UNDEFINED || *aspect != VK_IMAGE_ASPECT_COLOR_BIT || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT ||
+        !nvn_tex_format(format, &b1, &w1, &h1) || !nvn_tex_format(v->d.format, &b0, &w0, &h0) || b0 != b1 ||
+        w0 != w1 || h0 != h1)
+        return VK_FORMAT_UNDEFINED;
+    return f;
+}
 
 VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
 {
@@ -738,10 +943,19 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
     VkComponentSwizzle sw[4];
     for (int i = 0; i < 4; i++)
         sw[i] = swz[i] <= 5 ? (VkComponentSwizzle)(swz[i] + 1) : VK_COMPONENT_SWIZZLE_IDENTITY;
+    VkFormat f = v->format;
+    if (nv && nv->has_format && nv->format != v->d.format) {
+        VkImageAspectFlags a;
+        f = nvn_vk_view_format(v, nv->format, &a);
+        if (f == VK_FORMAT_UNDEFINED)
+            return NULL;
+    }
+    VkImageViewUsageCreateInfo vu;
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  .pNext = plain_usage(v, &vu),
                                   .image = v->image,
                                   .viewType = t,
-                                  .format = v->format,
+                                  .format = f,
                                   .components = { sw[0], sw[1], sw[2], sw[3] },
                                   .subresourceRange = rr };
     VkImageView out;
@@ -905,7 +1119,9 @@ static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer)
             return v->sub[i].view;
     if (v->nsub == sizeof v->sub / sizeof v->sub[0])
         return NULL;
+    VkImageViewUsageCreateInfo vu;
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  .pNext = plain_usage(v, &vu),
                                   .image = v->image,
                                   .viewType = VK_IMAGE_VIEW_TYPE_2D,
                                   .format = v->format,
@@ -927,6 +1143,7 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
         return RL_OK;
     if (!(t->v = image_of(r, tex)))
         return RL_PENDING;
+    nvn_vk_written(t->v);
     if (view) {
         nvn_view nv;
         int rc = nvn_view_read(r->c, r->mem, view, &nv);
@@ -973,7 +1190,7 @@ static int set_render_targets(replay *r, const nvn_cmd *e)
 
 static int copy_buffer_to_buffer(replay *r, const nvn_cmd *e)
 {
-    uint64_t src = e->x[1], dst = e->x[2], size = e->x[3];
+    uint64_t src = nvn_gpu_guest(e->x[1]), dst = nvn_gpu_guest(e->x[2]), size = e->x[3];
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     memmove(r->mem + dst, r->mem + src, size);
@@ -1052,7 +1269,7 @@ static nvn_gfx *state_of(uint64_t queue)
 
 bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)
 {
-    return nvn_vk_upload_bytes(r, r->mem + addr, n, pad, align, off);
+    return nvn_vk_upload_bytes(r, r->mem + nvn_gpu_guest(addr), n, pad, align, off);
 }
 
 bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)

@@ -218,17 +218,30 @@ typedef struct nvn_iface_rec {
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max);
 /** @brief Shader stages a program holds. */
 #define NVN_PROGRAM_STAGES 6u
+/** @brief Guest memory imported as a host Vulkan buffer (nvn_vk.c); handles kept opaque here. */
+typedef struct nvn_import {
+    void *buf, *memory;
+    /** @brief The buffer's device address: the GPU address the game sees for the memory. */
+    uint64_t gpu;
+} nvn_import;
+/** @brief Imports size guest bytes at guest as a buffer whose device address is the GPU address (host Vulkan up first). */
+bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out);
+/** @brief Frees an import (waits for the device). */
+void nvn_vk_unimport(nvn_import *im);
+/** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */
+uint64_t nvn_gpu_guest(uint64_t gpu);
 /** @brief A stage's compiler constants (its constant bank c[1]): GPU address and bytes, 0 and 0 for none. */
 typedef struct nvn_consts {
     uint64_t addr;
     uint32_t size;
 } nvn_consts;
 /**
- * @brief The GPU code addresses of the stages of the program at guest
- * address prog (count in *n), or NULL; *consts (when consts is not NULL)
- * gets each stage's compiler constants.
+ * @brief The code (guest addresses) of the stages of the program at guest
+ * address prog (count in *n), or NULL; *consts and *control (when not NULL)
+ * get each stage's compiler constants and the guest address of its GLSLC
+ * control section (0 for none).
  */
-const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts);
+const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts, const uint64_t **control);
 
 /** @brief Bytes of an NVNtextureView. */
 #define NVN_VIEW_BYTES 16u
@@ -366,6 +379,8 @@ const nvn_cmdset *nvn_cmdset_of(uint64_t handle);
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle);
 /** @brief The guest address of a memory pool's storage and its size, or 0. */
 uint64_t nvn_pool_memory(uint64_t pool, uint64_t *size);
+/** @brief The GPU address of a memory pool's first byte. */
+uint64_t nvn_pool_gpu(uint64_t pool);
 
 /** @brief Device, queue, memory and object procs (nvn_dev.c). */
 #define NVN_DEVICE_PROCS(X)                                                                                            \
