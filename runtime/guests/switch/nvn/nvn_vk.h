@@ -218,6 +218,13 @@ VkDescriptorSet nvn_texset(void);
  * Returns RL_OK, or RL_PENDING after a stop.
  */
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim);
+/**
+ * @brief Binds the image an image handle names as a storage image: *slot
+ * gets the index the translated program reads it at (what the layer
+ * writes for the handle into the program's bank), *kind and *dim as for
+ * nvn_texset_bind.
+ */
+int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim);
 /** @brief Frees what draws of the batch just finished held (descriptor sets); called after each wait. */
 void nvn_draw_reset(void);
 /** @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one. */

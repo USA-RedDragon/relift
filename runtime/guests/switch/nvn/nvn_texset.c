@@ -50,6 +50,18 @@ static struct {
     VkImageView (*tex_views)[DIMS];
     /** @brief The storage views written for each image id, by binding (32 onwards). */
     VkImageView (*img_views)[IMAGE_KINDS * 8u];
+    /** @brief The level each texture id's view starts at. */
+    uint32_t *tex_level;
+    /**
+     * @brief Storage image slots: the image arrays are indexed by slot, not
+     * by texture id (all 32768 ids in every kind and dimension would pass
+     * the devices' descriptor limits). slot_of maps a texture id to its
+     * slot plus one; slots are handed out in turn, and taking back a slot
+     * waits for the work that may still use it.
+     */
+    uint32_t *slot_of, *id_of_slot;
+    uint64_t *slot_guest;
+    uint32_t next_slot;
     /** @brief The sampler each sampler id's element holds and the builder bytes it was made from. */
     VkSampler *samplers;
     uint64_t (*sampler_bytes)[16];
@@ -126,9 +138,13 @@ static bool make(void)
     t.tex_view = calloc(TEXTURES, sizeof *t.tex_view);
     t.tex_views = calloc(TEXTURES, sizeof *t.tex_views);
     t.img_views = calloc(IMAGES, sizeof *t.img_views);
+    t.tex_level = calloc(TEXTURES, sizeof *t.tex_level);
+    t.slot_of = calloc(TEXTURES, sizeof *t.slot_of);
+    t.id_of_slot = calloc(IMAGES, sizeof *t.id_of_slot);
+    t.slot_guest = calloc(IMAGES, sizeof *t.slot_guest);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
-    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.samplers && t.sampler_bytes;
+    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.slot_of && t.id_of_slot && t.slot_guest && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -310,10 +326,8 @@ static VkFormat image_format(uint32_t ik, VkFormat f, uint32_t bpb)
 }
 
 /** @brief Writes image v (level level) as storage image id into every kind and dimension array it can take. */
-static int bind_image(replay *r, uint32_t id, vimg *v, uint32_t level)
+static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t level)
 {
-    if (id >= IMAGES)
-        return nvn_vk_stop(r, "image id %u is past the layer's %u", id, IMAGES);
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(v->d.format, &bpb, &bw, &bh) || bw != 1 || bh != 1 || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
         return nvn_vk_stop(r, "image id %u has format %u, which is not a storage format", id, v->d.format);
@@ -331,8 +345,6 @@ static int bind_image(replay *r, uint32_t id, vimg *v, uint32_t level)
     VkDescriptorImageInfo ii[IMAGE_KINDS * IMAGE_DIMS];
     VkWriteDescriptorSet w[IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
-    if (t.tex_img[id] && !nvn_vk_flush(r))
-        return nvn_vk_stop(r, "the host device failed a submit");
     for (uint32_t k = 0; k < IMAGE_KINDS; k++) {
         VkFormat f = image_format(k, v->format, bpb);
         if (f == VK_FORMAT_UNDEFINED)
@@ -347,19 +359,19 @@ static int bind_image(replay *r, uint32_t id, vimg *v, uint32_t level)
             if (!(dims & (1u << d)))
                 continue;
             uint32_t at = 8u * k + d;
-            if (t.img_views[id][at]) {
-                VK(vkDestroyImageView)(g.dev, t.img_views[id][at], NULL);
-                t.img_views[id][at] = NULL;
+            if (t.img_views[slot][at]) {
+                VK(vkDestroyImageView)(g.dev, t.img_views[slot][at], NULL);
+                t.img_views[slot][at] = NULL;
             }
             VkImageView iv = nvn_vk_storage_view(v, types[d], f, level);
             if (!iv)
                 return nvn_vk_stop(r, "cannot make a storage view of image id %u", id);
-            t.img_views[id][at] = iv;
+            t.img_views[slot][at] = iv;
             ii[n] = (VkDescriptorImageInfo){ NULL, iv, VK_IMAGE_LAYOUT_GENERAL };
             w[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                            .dstSet = t.set,
                                            .dstBinding = IMAGE_BINDING(k, d),
-                                           .dstArrayElement = id,
+                                           .dstArrayElement = slot,
                                            .descriptorCount = 1,
                                            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                            .pImageInfo = &ii[n] };
@@ -445,15 +457,48 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
         n++;
     }
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
-    if (image) {
-        int irc = bind_image(r, id, v, has_view && nv.has_levels ? (uint32_t)nv.base_level : 0);
-        if (irc != RL_OK)
-            return irc;
-    }
+    t.tex_level[id] = has_view && nv.has_levels ? (uint32_t)nv.base_level : 0;
     t.tex_img[id] = v;
     t.tex_kind[id] = *kind;
     t.tex_guest[id] = tex;
     memcpy(t.tex_view[id], view, sizeof view);
     memcpy(t.dims.map + 4ull * id, dim, 4);
     return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
+}
+
+int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim)
+{
+    int rc = nvn_texset_bind(r, handle, kind, dim);
+    if (rc != RL_OK)
+        return rc;
+    uint32_t id = handle & 0xfffffu;
+    uint8_t view[17];
+    bool has_view = false, image = false;
+    uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
+    if (!image)
+        return nvn_vk_stop(r, "handle 0x%x binds texture id %u as an image, but it is not registered as one", handle,
+                           id);
+    uint32_t s = t.slot_of[id];
+    if (s && t.slot_guest[s - 1] == tex) {
+        *slot = s - 1;
+        return RL_OK;
+    }
+    if (!s) {
+        s = t.next_slot + 1;
+        t.next_slot = (t.next_slot + 1) % IMAGES;
+        if (t.id_of_slot[s - 1]) {
+            if (!nvn_vk_flush(r))
+                return nvn_vk_stop(r, "the host device failed a submit");
+            t.slot_of[t.id_of_slot[s - 1] - 1] = 0;
+        }
+    } else if (!nvn_vk_flush(r)) {
+        return nvn_vk_stop(r, "the host device failed a submit");
+    }
+    if ((rc = bind_image(r, id, s - 1, t.tex_img[id], t.tex_level[id])) != RL_OK)
+        return rc;
+    t.slot_of[id] = s;
+    t.id_of_slot[s - 1] = id + 1;
+    t.slot_guest[s - 1] = tex;
+    *slot = s - 1;
+    return RL_OK;
 }

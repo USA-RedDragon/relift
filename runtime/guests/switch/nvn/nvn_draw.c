@@ -710,10 +710,11 @@ static int bind_constants(replay *r, module *const mods[5])
  * @brief Makes the texture set hold the texture of each handle m reads from
  * driver bank bank_no (whose bytes are bank, len of them), and gives m's
  * kind and dimension constants their values (n of them so far in map and
- * vals).
+ * vals). Handles at offsets img_lo to img_hi are image handles: they are
+ * bound as storage images and replaced in the bank by their slots.
  */
-static int bind_textures(replay *r, const module *m, uint32_t bank_no, const uint8_t *bank, uint32_t len, uint32_t *n,
-                         VkSpecializationMapEntry *map, uint32_t *vals)
+static int bind_textures(replay *r, const module *m, uint32_t bank_no, uint8_t *bank, uint32_t len, uint32_t *n,
+                         VkSpecializationMapEntry *map, uint32_t *vals, uint32_t img_lo, uint32_t img_hi)
 {
     for (uint32_t i = 0; i < m->nrecs; i++) {
         const nvn_iface_rec *h = &m->recs[i];
@@ -723,9 +724,13 @@ static int bind_textures(replay *r, const module *m, uint32_t bank_no, const uin
             return nvn_vk_stop(r, "program %s reads a texture handle at c[%u][0x%x]", m->key, h->bank, h->offset);
         uint32_t handle, kind, dim;
         memcpy(&handle, bank + h->offset, 4);
-        int rc = nvn_texset_bind(r, handle, &kind, &dim);
+        bool image = h->offset >= img_lo && h->offset < img_hi;
+        uint32_t slot;
+        int rc = image ? nvn_texset_image(r, handle, &slot, &kind, &dim) : nvn_texset_bind(r, handle, &kind, &dim);
         if (rc != RL_OK)
             return rc;
+        if (image)
+            memcpy(bank + h->offset, &slot, 4);
         for (uint32_t j = 0; j < m->nrecs; j++) {
             const nvn_iface_rec *c = &m->recs[j];
             if ((c->kind != NVN_IFACE_TEXTURE_KIND && c->kind != NVN_IFACE_TEXTURE_DIM) || c->bank != h->bank ||
@@ -801,7 +806,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             bound |= mods[s]->recs[i].kind == NVN_IFACE_TEXTURE;
         if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound)
             return nvn_vk_stop(r, "program %s samples textures only through register handles", mods[s]->key);
-        int trc = bind_textures(r, mods[s], 2, st->bank2[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s]);
+        int trc = bind_textures(r, mods[s], 2, st->bank2[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s], 0, 0);
         if (trc != RL_OK)
             return trc;
         k.mods[s] = mods[s]->m;
@@ -981,6 +986,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     }
     for (uint32_t i = 0; i < ntex; i++, at += 8)
         memcpy(c0 + at, st->bank2[NVN_STAGE_COMPUTE] + NVN_BANK2_TEXTURES + 8 * i, 4);
+    uint32_t img_lo = at;
     for (uint32_t i = 0; i < nimg; i++, at += 8)
         memcpy(c0 + at, &st->image[NVN_STAGE_COMPUTE][i], 4);
     VkSpecializationMapEntry map[MAX_SPECS];
@@ -989,7 +995,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
         map[i] = (VkSpecializationMapEntry){ i, 4 * i, 4 };
         vals[i] = rl_ld32(r->mem, ctl + 0x58 + 4 * i);
     }
-    int rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals);
+    int rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals, img_lo, at);
     if (rc != RL_OK)
         return rc;
     VkPipeline p = compute_pipeline_of(r, m, n, map, vals);
