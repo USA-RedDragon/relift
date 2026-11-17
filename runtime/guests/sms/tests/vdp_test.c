@@ -172,3 +172,15 @@ TEST(vdp_mode_4_draws_a_tile_with_its_palette)
     CHECK_EQ(v.pixels[0], 0x2A);
     CHECK_EQ(v.pixels[1], 0);
 }
+
+TEST(vdp_lines_below_the_picture_hold_nothing_from_earlier_frames)
+{
+    reset(SMS_VDP_MS);
+    reg(0, 0x06);
+    reg(1, 0x40);
+    v.pixels[200 * SMS_VDP_W + 3] = 0x15;
+    v.pixels[230 * SMS_VDP_W + 3] = 0x15;
+    sms_vdp_run(&v, line_pos(201));
+    CHECK_EQ(v.pixels[200 * SMS_VDP_W + 3], 0);
+    CHECK_EQ(v.pixels[230 * SMS_VDP_W + 3], 0x15);
+}

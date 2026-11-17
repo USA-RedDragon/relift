@@ -398,6 +398,8 @@ void sms_vdp_run(sms_vdp *v, uint64_t last)
         if (v->hcounter == 0) {
             line_start(v);
             v->line_draws = v->vcounter < sms_vdp_vlines(v);
+            if (!v->line_draws && v->vcounter < SMS_VDP_H)
+                memset(&v->pixels[v->vcounter * SMS_VDP_W], 0, SMS_VDP_W * sizeof v->pixels[0]);
         }
         uint64_t left = last - v->pos + 1;
         if (v->line_draws && v->hcounter < PIXELS_END) {
