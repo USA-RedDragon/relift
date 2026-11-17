@@ -220,20 +220,31 @@ fn landings(blocks: &Blocks, entry: u32, tables: &BTreeMap<u64, Vec<u64>>) -> Ve
         .collect()
 }
 
-/// A function to emit: entry, instructions, span and jump tables.
+/// A function to emit: entry, instructions, span, jump tables and the
+/// places a suspended thread resumes at inside it.
 struct Lifting {
     entry: Loc,
     insts: Vec<(u64, Result<Block, LiftFailure>, u64)>,
     span: u64,
     tables: BTreeMap<u64, Vec<u64>>,
+    resumes: Vec<Loc>,
+}
+
+/// A function a unit lifts: its entry, the run that found it, the run's
+/// images, and the places a suspended thread resumes at inside it.
+struct PendingFn<'a> {
+    entry: Loc,
+    report: &'a Report,
+    images: Images<'a>,
+    resumes: BTreeSet<Loc>,
 }
 
 /// What one unit collects before it is emitted.
 struct Pending<'a> {
     id: UnitId,
     hash: [u8; 32],
-    /// The functions: entry, the run that found it and its images.
-    fns: BTreeMap<(u32, bool), (Loc, &'a Report, Images<'a>)>,
+    /// The functions by entry.
+    fns: BTreeMap<(u32, bool), PendingFn<'a>>,
 }
 
 /// Lifts every unit of `units`, as `reports` (its analysis) found them;
@@ -301,13 +312,42 @@ pub fn lift(
             }
             let key = (entry.addr, entry.thumb);
             let slot = &mut pending[owner].fns;
-            if let Some((had, ..)) = slot.get(&key) {
-                if had != entry {
+            if let Some(had) = slot.get(&key) {
+                if had.entry != *entry {
                     shadowed.push((pending[owner].id, *entry));
                 }
                 continue;
             }
-            slot.insert(key, (*entry, &r.report, images.clone()));
+            slot.insert(
+                key,
+                PendingFn {
+                    entry: *entry,
+                    report: &r.report,
+                    images: images.clone(),
+                    resumes: BTreeSet::new(),
+                },
+            );
+        }
+    }
+    let mut placed: Vec<BTreeSet<(u32, bool)>> = vec![BTreeSet::new(); pending.len()];
+    for r in reports {
+        for (at, body) in &r.resumes {
+            for (p, placed) in pending.iter_mut().zip(&mut placed) {
+                let key = (at.addr, at.thumb);
+                if p.id.cpu() != r.id.cpu() || p.fns.contains_key(&key) || placed.contains(&key) {
+                    continue;
+                }
+                if let Some(f) = p.fns.get_mut(&(body.addr, body.thumb))
+                    && f.entry == *body
+                    && f.report
+                        .functions
+                        .get(body)
+                        .is_some_and(|f| f.instructions.contains_key(at))
+                {
+                    f.resumes.insert(*at);
+                    placed.insert(key);
+                }
+            }
         }
     }
     let mut unlifted = Vec::new();
@@ -318,9 +358,10 @@ pub fn lift(
         let calls: BTreeSet<u32> = p
             .fns
             .values()
-            .flat_map(|(e, r, _)| {
-                r.functions
-                    .get(e)
+            .flat_map(|pf| {
+                pf.report
+                    .functions
+                    .get(&pf.entry)
                     .into_iter()
                     .flat_map(|f| f.linked.iter().map(|l| l.addr))
             })
@@ -330,7 +371,11 @@ pub fn lift(
         let mut checks = Vec::new();
         let mut blob = Vec::new();
         let mut runs = Vec::new();
-        for (index, (entry, report, images)) in p.fns.values().enumerate() {
+        let mut resume_checks = Vec::new();
+        let mut resume_blob = Vec::new();
+        let resume_base = p.fns.len();
+        for (index, pf) in p.fns.values().enumerate() {
+            let (entry, report, images) = (&pf.entry, pf.report, &pf.images);
             let f = &report.functions[entry];
             if cold.is_some() {
                 let mut spans: Vec<(&[u8], u32, u32, u32)> = Vec::new();
@@ -368,10 +413,18 @@ pub fn lift(
                     continue;
                 }
                 let at_entry = l.addr == entry.addr && l.thumb == entry.thumb;
-                let check = at_entry.then_some(Entry {
-                    unit: k as u32,
-                    function: index as u32,
-                });
+                let resume = pf.resumes.iter().position(|r| *r == l);
+                let check = if at_entry {
+                    Some(Entry {
+                        unit: k as u32,
+                        function: index as u32,
+                    })
+                } else {
+                    resume.map(|i| Entry {
+                        unit: k as u32,
+                        function: (resume_base + resume_checks.len() + i) as u32,
+                    })
+                };
                 let r = match image(images, report, l) {
                     Some((img, base)) => (
                         fe.lift_at(img, base, l.addr, l.thumb, check),
@@ -425,6 +478,23 @@ pub fn lift(
                         .push(u64::from(e.target.addr));
                 }
             }
+            for r in &pf.resumes {
+                let Some((img, base)) = image(images, report, *r) else {
+                    continue;
+                };
+                let off = (r.addr - base) as usize;
+                let n = (u64::from(entry.addr) + span)
+                    .saturating_sub(u64::from(r.addr))
+                    .max(u64::from(r.size())) as usize;
+                let n = n.min(img.len() - off);
+                resume_checks.push(Checked {
+                    at: r.addr | u32::from(r.thumb),
+                    offset: resume_blob.len() as u32,
+                    len: n as u32,
+                    name: host_name(p.id, *r),
+                });
+                resume_blob.extend_from_slice(&img[off..off + n]);
+            }
             let landing = landings(&blocks, entry.addr, &tables);
             for (&pc, (b, _)) in &blocks {
                 if let Ok(b) = b
@@ -443,8 +513,14 @@ pub fn lift(
                 insts: blocks.into_iter().map(|(pc, (r, w))| (pc, r, w)).collect(),
                 span,
                 tables,
+                resumes: pf.resumes.iter().copied().collect(),
             });
         }
+        for mut c in resume_checks {
+            c.offset += blob.len() as u32;
+            checks.push(c);
+        }
+        blob.extend_from_slice(&resume_blob);
         let dir = format!("{}_{}", tag(p.id), &hex(&p.hash)[..12]);
         let symbol = format!("rl_unit_nds_{dir}");
         let fns = functions(p.id, &liftings);
@@ -500,6 +576,7 @@ fn emit_cold(fe: &Nds, fns: &[Function<'_>], hot: &Options, symbol: String, c: C
         });
         cold.push(Function {
             name: format!("{}_cold", f.name),
+            entries: BTreeMap::new(),
             ..f.clone()
         });
     }
@@ -540,7 +617,11 @@ fn functions(id: UnitId, lifted: &[Lifting]) -> Vec<Function<'_>> {
             tables: l.tables.clone(),
             guesses: BTreeMap::new(),
             pads: BTreeSet::new(),
-            entries: BTreeMap::new(),
+            entries: l
+                .resumes
+                .iter()
+                .map(|r| (u64::from(r.addr), host_name(id, *r)))
+                .collect(),
         })
         .collect()
 }
