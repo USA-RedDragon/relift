@@ -694,6 +694,82 @@ TEST(nv_ctrl_gpu_device)
     CHECK_EQ(wait_event(&t, e1, 0), KR_TIMED_OUT);
 }
 
+TEST(nv_ctrl_gpu_switch2_characteristics)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    nvt t;
+    memset(&t, 0, sizeof t);
+    t.c = t_boot(&cfg);
+    t.heap = t_heap(t.c, HEAP_SIZE);
+    t.o = tc_open_service(t.c, t.heap, "nvdrv");
+    CHECK(t.o.handle != 0);
+    CHECK(nv_init(&t, t.o));
+    int32_t gpu = nv_fd(&t, "/dev/nvhost-ctrl-gpu");
+    CHECK(gpu > 0);
+    uint8_t hdr[0xE0], chars[0xD0];
+    memset(hdr, 0, sizeof hdr);
+    memset(chars, 0xEE, sizeof chars);
+    hdr[0] = 0xD0;
+    CHECK_EQ(nv_ioctl_raw(&t, t.o, 12, gpu, 0xC0E04705u, hdr, 0xE0, 0xE0, chars, sizeof chars), 0);
+    uint64_t size, flags, chip;
+    memcpy(&size, hdr, 8);
+    CHECK_EQ(size, 0xD0);
+    uint32_t v;
+    memcpy(&v, chars + 0x00, 4);
+    CHECK_EQ(v, 0x170);
+    memcpy(&v, chars + 0x04, 4);
+    CHECK_EQ(v, 0xE);
+    memcpy(&flags, chars + 0x50, 8);
+    CHECK_EQ(flags, 0x935FAF1EDC0155ull);
+    memcpy(&v, chars + 0x5C, 4);
+    CHECK_EQ(v, 0xC797);
+    memcpy(&v, chars + 0x6C, 4);
+    CHECK_EQ(v, 0xC7B5);
+    int16_t last;
+    memcpy(&last, chars + 0x7A, 2);
+    CHECK_EQ(last, -1);
+    memcpy(&chip, chars + 0xA4, 8);
+    CHECK_EQ(chip, 0x6761313066ull);
+    memcpy(&v, chars + 0xB0, 4);
+    CHECK_EQ(v, 0x2);
+    memcpy(&v, chars + 0xCC, 4);
+    CHECK_EQ(v, 0);
+
+    uint8_t tpc[0x18];
+    memset(tpc, 0, sizeof tpc);
+    tpc[0] = 4;
+    int32_t mask = 0;
+    CHECK_EQ(nv_ioctl_raw(&t, t.o, 12, gpu, IOWR(0x47, 6, 0x18), tpc, 0x18, 0x18, &mask, 4), 0);
+    CHECK_EQ(mask, 0x3F);
+
+    uint8_t info[16];
+    memset(info, 0, sizeof info);
+    info[1] = 4;
+    uint32_t items[256];
+    memset(items, 0xEE, sizeof items);
+    CHECK_EQ(nv_ioctl_raw(&t, t.o, 12, gpu, 0xC010471Fu, info, 16, 16, items, sizeof items), 0);
+    memcpy(&v, info, 4);
+    CHECK_EQ(v, 32);
+    CHECK_EQ(items[0], 0);
+    CHECK_EQ(items[4], 2);
+    CHECK_EQ(items[6], 1);
+
+    uint8_t vs[8] = { 0 }, sms[24];
+    memset(sms, 0xEE, sizeof sms);
+    CHECK_EQ(nv_ioctl_raw(&t, t.o, 12, gpu, IOWR(0x47, 0x13, 8), vs, 8, 8, sms, sizeof sms), 0);
+    CHECK_EQ(sms[0], 0);
+    CHECK_EQ(sms[1], 0);
+    CHECK_EQ(sms[22], 0);
+    CHECK_EQ(sms[23], 5);
+
+    uint32_t word = 0;
+    nv_ioctl(&t, gpu, IOWR(0x47, 0x7E, 4), &word);
+    CHECK_EQ(t_svc_rc, RL_PENDING);
+    CHECK_EQ(t.c->pend.kind, RL_PEND_EXIT_PROCESS);
+}
+
 TEST(nv_as_gpu_ranges)
 {
     nvt t;

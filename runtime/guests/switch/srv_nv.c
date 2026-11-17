@@ -203,6 +203,10 @@ static rl_result cmd_open(rl_ipc_req *r)
         if (!rl_ipc_buf_read(&b, path, n))
             memset(path, 0, sizeof path);
         err = open_path(s, path, &fd);
+        if (rl_cfg()->trace_os)
+            rl_log(RL_LOG_INFO, "nvdrv", "Open(\"%s\") = fd %d, error %u", path, fd, err);
+        if (err == NVR_FILE_OPERATION_FAILED && hos_switch2())
+            rl_ipc_stop(r, "nvdrv", "Open(\"%s\"): the device is not answered yet", path);
     }
     nv_unlock();
     struct {
@@ -271,9 +275,16 @@ static rl_result ioctl_common(rl_ipc_req *r, uint32_t variant)
         const nv_ioctl_entry *e = find_ioctl(f->dev, in.cmd, variant);
         nv_args a = { data, len, variant == NV_V_IOCTL ? NULL : inl, inl_len, variant, in.cmd };
         int32_t rc = NVE_NOT_IMPLEMENTED;
+        if (!e && hos_switch2())
+            rl_ipc_stop(r, "nvdrv", "%s ioctl 0x%08x (type 0x%02x nr 0x%02x, %u bytes, %s) is not answered yet",
+                        f->dev->path, in.cmd, (in.cmd >> 8) & 0xff, in.cmd & 0xff, arg_size,
+                        variant == NV_V_IOCTL ? "Ioctl" : variant == NV_V_IOCTL2 ? "Ioctl2" : "Ioctl3");
         if (e)
             rc = a.size < e->min_size ? NVE_INVALID_INPUT : e->fn(f, &a);
         err = rc == NVE_NOT_IMPLEMENTED ? NVR_IOCTL_FAILED : convert_error(rc);
+        if (rl_cfg()->trace_os)
+            rl_log(RL_LOG_INFO, "nvdrv", "%s ioctl 0x%08x %s (%u bytes, inline %u) -> error %u", f->dev->path, in.cmd,
+                   e ? e->name : "(unknown)", len, inl_len, err);
         if (rc != NVE_NOT_IMPLEMENTED && is_write) {
             bool ok = rl_ipc_buf_write(&out_buf, data, len);
             if (variant == NV_V_IOCTL3)
