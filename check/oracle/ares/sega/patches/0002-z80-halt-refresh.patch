@@ -1,0 +1,32 @@
+A halted Z80 runs NOPs: each one takes 4 T-states and increments R. ares
+waits 1 T-state per halted step and leaves R alone, which shifts interrupt
+acceptance against the chip and against relift; this follows the chip.
+
+ares (https://github.com/ares-emulator/ares) is ISC licensed:
+
+Copyright (c) 2004-2025 ares team, Near et al
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+--- a/ares/component/processor/z80/instruction.cpp
++++ b/ares/component/processor/z80/instruction.cpp
+@@ -3,7 +3,8 @@
+   P = 0;
+ 
+   if(HALT) {
+-    return wait(1);
++    R.bit(0,6)++;
++    return wait(4);
+   }
+   if(oracleHooks.z80Insn) oracleHooks.z80Insn(this, PC);
+ 

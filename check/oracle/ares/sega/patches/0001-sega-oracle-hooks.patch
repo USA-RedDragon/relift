@@ -1,0 +1,315 @@
+Oracle hooks for the Master System, Game Gear and SG-1000 cores: a hook
+struct (every hook null unless the harness sets it), CPU boundary and
+interrupt hooks, port and memory write hooks, the VDP frame and drawn-line
+hooks, ROM offset queries on the cartridge boards, and access to the
+private state the harness reads.
+
+ares (https://github.com/ares-emulator/ares) is ISC licensed:
+
+Copyright (c) 2004-2025 ares team, Near et al
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+--- a/ares/ares/ares.hpp
++++ b/ares/ares/ares.hpp
+@@ -94,3 +94,18 @@
+ #include <ares/memory/fixed-allocator.hpp>
+ #include <ares/memory/readable.hpp>
+ #include <ares/memory/writable.hpp>
++
++//relift oracle hooks (all null in a normal ares build)
++namespace ares {
++  struct OracleHooks {
++    void (*z80Insn)(void* z80, unsigned pc) = nullptr;
++    void (*irq)(int cpu, const char* kind, unsigned level, unsigned pc) = nullptr;
++    void (*msWrite)(unsigned address, unsigned data) = nullptr;
++    unsigned long long msCycles = 0;
++    void (*msPort)(bool out, unsigned port, unsigned data) = nullptr;
++    void (*frameReady)() = nullptr;
++    void (*cpuBoundary)() = nullptr;
++    void (*lineDrawn)(unsigned line, bool drawn) = nullptr;
++  };
++  inline OracleHooks oracleHooks;
++}
+--- a/ares/component/processor/z80/instruction.cpp
++++ b/ares/component/processor/z80/instruction.cpp
+@@ -5,6 +5,7 @@
+   if(HALT) {
+     return wait(1);
+   }
++  if(oracleHooks.z80Insn) oracleHooks.z80Insn(this, PC);
+ 
+   n8 code;
+   while(true) {
+--- a/ares/component/video/tms9918/tms9918.hpp
++++ b/ares/component/video/tms9918/tms9918.hpp
+@@ -35,7 +35,7 @@
+   //serialization.cpp
+   auto serialize(serializer&) -> void;
+ 
+-protected:
++public: //relift oracle
+   struct Background {
+     TMS9918& self;
+ 
+--- a/ares/ms/cartridge/board/board.hpp
++++ b/ares/ms/cartridge/board/board.hpp
+@@ -13,6 +13,10 @@
+   virtual auto out(n16 address, n8 data) -> void {}
+   virtual auto power() -> void {}
+   virtual auto serialize(serializer&) -> void {}
++  //relift oracle: ROM byte offset of a Z80 address (-1 if not ROM, -2 if the mapper is not modeled), mapper register test, bank state text
++  virtual auto oracleOffset(n16 address) -> s64 { return -2; }
++  virtual auto oracleIsMapperReg(n16 address) -> bool { return false; }
++  virtual auto oracleBanks() -> string { return {}; }
+ 
+   auto load(Memory::Readable<n8>&, string name) -> bool;
+   auto load(Memory::Writable<n8>&, string name) -> bool;
+--- a/ares/ms/cartridge/board/codemasters.cpp
++++ b/ares/ms/cartridge/board/codemasters.cpp
+@@ -50,6 +50,21 @@
+     }
+   }
+ 
++  auto oracleOffset(n16 address) -> s64 override {
++    if(address <= 0x3fff) return (romBank[0] << 14 | (n14)address) & rom.mask();
++    if(address <= 0x7fff) return (romBank[1] << 14 | (n14)address) & rom.mask();
++    if(address <= 0x9fff) return (romBank[2] << 14 | (n14)address) & rom.mask();
++    if(address <= 0xbfff) {
++      if(ram && ramEnable) return -1;
++      return (romBank[2] << 14 | (n14)address) & rom.mask();
++    }
++    return -3;
++  }
++  auto oracleIsMapperReg(n16 address) -> bool override { return address == 0x0000 || address == 0x4000 || address == 0x8000; }
++  auto oracleBanks() -> string override {
++    return {"b0=", hex(romBank[0], 2L), " b1=", hex(romBank[1], 2L), " b2=", hex(romBank[2], 2L), " ram=", ramEnable};
++  }
++
+   auto power() -> void override {
+     romBank[0] = 0;
+     romBank[1] = 1;
+--- a/ares/ms/cartridge/board/korea.cpp
++++ b/ares/ms/cartridge/board/korea.cpp
+@@ -25,6 +25,14 @@
+     }
+   }
+ 
++  auto oracleOffset(n16 address) -> s64 override {
++    if(address <= 0x7fff) return address & rom.mask();
++    if(address <= 0xbfff) return (romBank << 14 | (n14)address) & rom.mask();
++    return -3;
++  }
++  auto oracleIsMapperReg(n16 address) -> bool override { return address >= 0xa000 && address <= 0xbfff; }
++  auto oracleBanks() -> string override { return {"b2=", hex(romBank, 2L)}; }
++
+   auto power() -> void override {
+     romBank = 0;
+   }
+--- a/ares/ms/cartridge/board/sega.cpp
++++ b/ares/ms/cartridge/board/sega.cpp
+@@ -99,6 +99,23 @@
+     }
+   }
+ 
++  auto oracleOffset(n16 address) -> s64 override {
++    if(address <= 0x03ff) return address & rom.mask();
++    if(address <= 0x3fff) return (romBankUpper << 17 | romBank0 << 14 | (n14)address) & rom.mask();
++    if(address <= 0x7fff) return (romBankUpper << 17 | romBank1 << 14 | (n14)address) & rom.mask();
++    if(address <= 0xbfff) {
++      if(ram && ramEnableBank2) return -1;
++      return (romBankUpper << 17 | romBank2 << 14 | (n14)address) & rom.mask();
++    }
++    if(ram && ramEnableBank3) return -1;
++    return -3;
++  }
++  auto oracleIsMapperReg(n16 address) -> bool override { return address >= 0xfffc; }
++  auto oracleBanks() -> string override {
++    return {"b0=", hex(romBank0, 2L), " b1=", hex(romBank1, 2L), " b2=", hex(romBank2, 2L),
++            " upper=", romBankUpper, " ram2=", ramEnableBank2, " ram3=", ramEnableBank3, " ramsel=", ramBank2, " romwr=", romWriteEnable};
++  }
++
+   auto power() -> void override {
+     romBankUpper   = 0;
+     romBankShift   = 0;
+--- a/ares/ms/cpu/cpu.cpp
++++ b/ares/ms/cpu/cpu.cpp
+@@ -22,10 +22,12 @@
+ }
+ 
+ auto CPU::main() -> void {
++  if(oracleHooks.cpuBoundary) oracleHooks.cpuBoundary();
+   if(state.nmiLine) {
+     state.nmiLine = 0;  //edge-sensitive
+     if(nmi()) {
+       debugger.interrupt("NMI");
++      if(oracleHooks.irq) oracleHooks.irq(0, "nmi", 0, PC);
+     }
+   }
+ 
+@@ -33,14 +35,17 @@
+     //level-sensitive
+     if(irq()) {
+       debugger.interrupt("IRQ");
++      if(oracleHooks.irq) oracleHooks.irq(0, "irq", 0, PC);
+     }
+   }
+ 
++  if(oracleHooks.cpuBoundary) oracleHooks.cpuBoundary();
+   debugger.instruction();
+   instruction();
+ }
+ 
+ auto CPU::step(u32 clocks) -> void {
++  oracleHooks.msCycles += clocks;
+   Thread::step(clocks);
+   Thread::synchronize();
+ }
+--- a/ares/ms/cpu/cpu.hpp
++++ b/ares/ms/cpu/cpu.hpp
+@@ -50,7 +50,7 @@
+   //serialization.cpp
+   auto serialize(serializer&) -> void;
+ 
+-private:
++public: //relift oracle
+   struct State {
+     n1 nmiLine;
+     n1 irqLine;
+--- a/ares/ms/cpu/memory.cpp
++++ b/ares/ms/cpu/memory.cpp
+@@ -38,6 +38,7 @@
+   if(Device::GameGear() && bus.biosEnable && address < 0x400) bios.write(address, data);
+   if(Device::MasterSystem() && bus.cartridgeEnable) cartridge.write(address, data);
+   if(Device::GameGear() && (address >= 0x400 || !bus.biosEnable)) cartridge.write(address, data);
++  if(oracleHooks.msWrite) oracleHooks.msWrite(address, data);
+ }
+ 
+ //note: the Japanese Mark III / Master System supposedly decodes a0-a7 fully for I/O.
+@@ -189,11 +190,13 @@
+   }
+ 
+   debugger.in(address, data);
++  if(oracleHooks.msPort) oracleHooks.msPort(false, address, data);
+   return data;
+ }
+ 
+ auto CPU::out(n16 address, n8 data) -> void {
+   if(Model::SystemE()) return SystemE::memory.out(address, data);
++  if(oracleHooks.msPort) oracleHooks.msPort(true, address, data);
+   if(0);
+ 
+   else if((address & 0xff) == 0x00 && Display::LCD()) {
+--- a/ares/ms/vdp/vdp.cpp
++++ b/ares/ms/vdp/vdp.cpp
+@@ -108,6 +108,7 @@
+     if(vdp2.io.vcounter == vdp2.vlines() + 1) vdp2.irq.frame.pending = 1;
+     vdp2.dac.setup(io.vcounter);
+   }
++  if(oracleHooks.lineDrawn) oracleHooks.lineDrawn(io.vcounter, io.vcounter < vlines());
+   if(io.vcounter < vlines()) {
+     u8 y = io.vcounter;
+     background.setup(y);
+@@ -158,6 +159,7 @@
+     if(Mode::GameGear()) {
+       screen->setViewport(61, 51, 160, 144);
+     }
++    if(oracleHooks.frameReady) oracleHooks.frameReady();
+     screen->frame();
+     scheduler.exit(Event::Frame);
+   }
+--- a/ares/ms/vdp/vdp.hpp
++++ b/ares/ms/vdp/vdp.hpp
+@@ -167,7 +167,7 @@
+   //serialization.cpp
+   auto serialize(serializer&) -> void;
+ 
+-private:
++public: //relift oracle
+   struct IRQ {
+     VDP& self;
+ 
+--- a/ares/sg/cpu/cpu.cpp
++++ b/ares/sg/cpu/cpu.cpp
+@@ -24,23 +24,26 @@
+ }
+ 
+ auto CPU::main() -> void {
++  if(oracleHooks.cpuBoundary) oracleHooks.cpuBoundary();
+   if(state.nmiLine) {
+     state.nmiLine = 0;  //edge-sensitive
+     debugger.interrupt("NMI");
+-    nmi();
++    if(nmi() && oracleHooks.irq) oracleHooks.irq(0, "nmi", 0, PC);
+   }
+ 
+   if(state.irqLine) {
+     //level-sensitive
+     debugger.interrupt("IRQ");
+-    irq();
++    if(irq() && oracleHooks.irq) oracleHooks.irq(0, "irq", 0, PC);
+   }
+ 
++  if(oracleHooks.cpuBoundary) oracleHooks.cpuBoundary();
+   debugger.instruction();
+   instruction();
+ }
+ 
+ auto CPU::step(uint clocks) -> void {
++  oracleHooks.msCycles += clocks;
+   Thread::step(clocks);
+   Thread::synchronize();
+ }
+--- a/ares/sg/cpu/cpu.hpp
++++ b/ares/sg/cpu/cpu.hpp
+@@ -39,6 +39,7 @@
+   auto write(n16 address, n8 data) -> void override;
+ 
+   auto in(n16 address) -> n8 override;
++  auto inPort(n16 address) -> n8;
+   auto out(n16 address, n8 data) -> void override;
+   auto cheat(n16 address) -> maybe<n8>;
+   auto readMapped(n16 address) -> n8;
+--- a/ares/sg/cpu/memory.cpp
++++ b/ares/sg/cpu/memory.cpp
+@@ -33,6 +33,12 @@
+ }
+ 
+ auto CPU::in(n16 address) -> n8 {
++  n8 r = inPort(address);
++  if(oracleHooks.msPort) oracleHooks.msPort(false, address, r);
++  return r;
++}
++
++auto CPU::inPort(n16 address) -> n8 {
+   n8 output = 0xff;
+ 
+   switch(address.bit(6,7)) {
+@@ -58,6 +64,7 @@
+ }
+ 
+ auto CPU::out(n16 address, n8 data) -> void {
++  if(oracleHooks.msPort) oracleHooks.msPort(true, address, data);
+   switch(address.bit(6,7)) {
+ 
+   case 1: return psg.write(data);
+--- a/ares/sg/vdp/vdp.cpp
++++ b/ares/sg/vdp/vdp.cpp
+@@ -53,6 +53,7 @@
+     screen->setViewport(x, y, width, height);
+   }
+ 
++  if(oracleHooks.frameReady) oracleHooks.frameReady();
+   screen->frame();
+   scheduler.exit(Event::Frame);
+ }

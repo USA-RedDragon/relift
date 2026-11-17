@@ -1,8 +1,11 @@
 # ares oracles
 
-Two separate builds from the same pinned ares commit: `build.sh` builds the
-Nintendo 64 oracle for the VR4300 lifter, and `build-step.sh` builds the
-steppers for the Z80 templates and the SN76489 device.
+Separate builds from the same pinned ares commit: `build.sh` builds the
+Nintendo 64 oracle for the VR4300 lifter, `build-step.sh` builds the
+steppers for the Z80 templates and the SN76489 and YM2413 devices, and
+`sega/build.sh` builds the Master System, Game Gear and SG-1000 oracle the
+Sega 8-bit guest's frame-by-frame runs compare against (see
+`sega/README.md`).
 
 ## VR4300 oracle (n64-oracle)
 

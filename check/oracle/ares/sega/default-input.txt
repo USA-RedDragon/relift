@@ -1,0 +1,10 @@
+# Scripted input for the corpus runs: buttons 1, 2 and Start (Pause on the
+# Master System) at fixed frames; random buttons from --rand-from on.
+120 1 4
+240 start 4
+360 2 4
+480 1 4
+600 start 4
+900 1 4
+1200 start 4
+1500 2 4
