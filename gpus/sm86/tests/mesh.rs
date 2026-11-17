@@ -9,9 +9,9 @@ mod common;
 
 use common::{translate_with, validate};
 use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::mesh_fallback::{Scan, scan, vertex};
+use relift_gpu_sm86::translate::mesh_fallback::{scan, vertex};
 use relift_gpu_sm86::translate::{
-    HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options, mesh_components,
+    HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options,
 };
 
 struct Case {
@@ -152,9 +152,7 @@ fn the_compute_back_end_helpers_validate() {
     for c in cases() {
         let mesh = &c.programs.iter().find(|(k, _)| k == "mesh").unwrap().1;
         let sph = mesh.sph.as_ref().unwrap().words;
-        let n = mesh_components(&sph).unwrap().len() as u32;
-        validate(&scan(&c.pipe, n, Scan::Tasks));
-        validate(&scan(&c.pipe, n, Scan::Meshes));
+        validate(&scan(&c.pipe));
         validate(&vertex(&c.pipe, &sph).unwrap_or_else(|e| panic!("{}: {e}", c.name)));
     }
 }

@@ -3,14 +3,14 @@
 //!
 //! `mesh <program> <out.spv> [host] [--compute] [pipeline...]`
 //! `mesh helpers <mesh program> <dir> [pipeline...]` writes
-//! `scan-tasks.spv`, `scan-meshes.spv` and `vertex.spv`.
+//! `scan-tasks.spv` and `vertex.spv`.
 //!
 //! Pipeline flags: `--verts N`, `--prims N`, `--topo point|line|tri`,
 //! `--task-lanes N`, `--mesh-lanes N`, `--payload BYTES`, `--prim-sph FILE`,
 //! `--prim-id-loc N`, `--frag-per-prim MASK`.
 
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::mesh_fallback::{Scan, mesh_record_words, scan, vertex};
+use relift_gpu_sm86::translate::mesh_fallback::{mesh_record_words, scan, vertex};
 use relift_gpu_sm86::translate::{
     HostProfile, MeshPipeline, MeshTopology, Options, mesh_components, translate_with,
 };
@@ -67,11 +67,7 @@ fn main() {
         let sph = prog.sph.as_ref().expect("a mesh program has an SPH").words;
         let n = mesh_components(&sph).expect("mesh outputs").len() as u32;
         let dir = &rest[2];
-        write(&format!("{dir}/scan-tasks.spv"), &scan(&p, n, Scan::Tasks));
-        write(
-            &format!("{dir}/scan-meshes.spv"),
-            &scan(&p, n, Scan::Meshes),
-        );
+        write(&format!("{dir}/scan-tasks.spv"), &scan(&p));
         write(
             &format!("{dir}/vertex.spv"),
             &vertex(&p, &sph).expect("vertex shader"),

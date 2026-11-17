@@ -12,24 +12,23 @@
 //!    dispatch whose linear size is at least `n`): workgroup `t` stores its
 //!    stage buffer (`MeshPipeline::payload_words` words, the mesh count in
 //!    word 1) as task record `t`;
-//! 2. [`scan`] with [`Scan::Tasks`], one workgroup: the exclusive prefix
-//!    of the mesh counts in the task scan region (`n + 1` words), their sum
-//!    in [`H_MESHES`] and the indirect dispatch of the mesh pass in
-//!    [`H_DISPATCH`] (x at most 65535, then y);
+//! 2. [`scan`], one workgroup: the exclusive prefix of the mesh counts in
+//!    the task scan region (`n + 1` words), their sum in [`H_MESHES`] and
+//!    the indirect dispatch of the mesh pass in [`H_DISPATCH`] (x at most
+//!    65535, then y);
 //! 3. the mesh program as a compute shader, by that indirect dispatch:
 //!    mesh workgroup `g` finds its task by binary search of the task scan
-//!    and stores mesh record `g`: the primitive count, the flat index array
-//!    (`MeshPipeline::index_words`), then every vertex's components in
-//!    stage buffer order. A workgroup past [`H_MESH_CAP`] records sets
-//!    [`H_OVERFLOW`] and stores nothing: the runtime must grow the buffer
-//!    and draw again;
-//! 4. [`scan`] with [`Scan::Meshes`]: the prefix of the primitive counts in
-//!    the mesh scan region, their sum in [`H_PRIMS`] and a non-indexed
-//!    indirect draw in [`H_DRAW`] (primitives times vertices per primitive);
-//! 5. the draw, with the list topology of the mesh output and the vertex
-//!    shader [`vertex`] builds: vertex `i` is index `i % k` of primitive
-//!    `i / k`, found by binary search of the mesh scan, so the primitives
-//!    come in task, mesh and primitive order.
+//!    and stores mesh record `g` ([`mesh_record_words`]). A workgroup past
+//!    [`H_MESH_CAP`] records sets [`H_OVERFLOW`] and stores nothing: the
+//!    runtime must grow the buffer and draw again. Workgroup 0 writes the
+//!    non-indexed indirect draw in [`H_DRAW`]: every mesh gets
+//!    `max_primitives` primitive slots;
+//! 4. the draw, with the list topology of the mesh output and the vertex
+//!    shader [`vertex`] builds: vertex `i` is corner `i % k` of slot
+//!    `i / k`, primitive `slot % max_primitives` of mesh
+//!    `slot / max_primitives`, so the primitives come in task, mesh and
+//!    primitive order. A slot past the mesh's primitive count is put
+//!    outside the clip volume and draws nothing.
 //!
 //! Without a task program, steps 1 and 2 are skipped and the runtime sets
 //! [`H_MESHES`] and the mesh dispatch itself.
@@ -47,8 +46,6 @@ pub const H_TASKS: u32 = 0;
 /// Mesh workgroups: written by the task scan, or set by the runtime when
 /// no task program runs.
 pub const H_MESHES: u32 = 1;
-/// Primitives of the draw: written by the mesh scan.
-pub const H_PRIMS: u32 = 2;
 /// Set to 1 by a mesh workgroup that found no record.
 pub const H_OVERFLOW: u32 = 3;
 /// Indirect dispatch of the mesh pass (x, y, z).
@@ -66,9 +63,6 @@ pub const H_TASK_SCAN: u32 = 14;
 /// Word offset of mesh record 0 (records of [`mesh_record_words`]): set by
 /// the runtime.
 pub const H_MESH_RECS: u32 = 15;
-/// Word offset of the mesh scan (`H_MESH_CAP + 1` words): set by the
-/// runtime.
-pub const H_MESH_SCAN: u32 = 16;
 /// Words of the header.
 pub const HEADER_WORDS: u32 = 32;
 /// The widest x of an indirect dispatch the passes write.
@@ -215,7 +209,7 @@ fn search(c: &mut Ctx, buf: u32, base: u32, n: u32, key: u32, vars: &[u32]) -> u
 
 /// The set-up of a task or mesh workgroup before the guest runs:
 /// workgroups past the draw return, a mesh workgroup finds its task.
-pub(crate) fn enter(c: &mut Ctx, _lane: u32, vars: &[u32]) -> Res<()> {
+pub(crate) fn enter(c: &mut Ctx, lane: u32, vars: &[u32]) -> Res<()> {
     let buf = c.mesh_buffer();
     let lin = c.linear_workgroup();
     match c.stage {
@@ -230,6 +224,29 @@ pub(crate) fn enter(c: &mut Ctx, _lane: u32, vars: &[u32]) -> Res<()> {
             let b = c.boolt();
             let past = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lin, n]);
             return_if(c, past);
+            let u = c.u32t();
+            let first = c.m.emit(op::BITWISE_OR, u, &[lin, lane]);
+            let zero = c.m.c_u32(0);
+            let first = c.m.emit(op::I_EQUAL, b, &[first, zero]);
+            c.if_then(first, |c| {
+                let cap = header(c, buf, H_MESH_CAP);
+                let u = c.u32t();
+                let glsl = c.glsl;
+                let m =
+                    c.m.emit(op::EXT_INST, u, &[glsl, crate::spirv::glsl::U_MIN, n, cap]);
+                let p = c.io.mesh.pipe.clone();
+                let verts = c.lk_mul(m, p.max_primitives * p.topology.vertices());
+                let one = c.m.c_u32(1);
+                for (h, v) in [
+                    (H_DRAW, verts),
+                    (H_DRAW + 1, one),
+                    (H_DRAW + 2, zero),
+                    (H_DRAW + 3, zero),
+                ] {
+                    let k = c.m.c_u32(h);
+                    store(c, buf, k, v);
+                }
+            });
             let cap = header(c, buf, H_MESH_CAP);
             let full = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lin, cap]);
             let then = c.m.id();
@@ -336,18 +353,9 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
     Ok(())
 }
 
-/// Which counts a scan adds up.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Scan {
-    /// The mesh counts of the task records.
-    Tasks,
-    /// The primitive counts of the mesh records.
-    Meshes,
-}
-
-/// The scan pass (one workgroup of 128 invocations) for a pipeline whose
-/// mesh program has `components` per-vertex components.
-pub fn scan(p: &MeshPipeline, components: u32, which: Scan) -> Vec<u32> {
+/// The scan pass (one workgroup of 128 invocations) over the mesh counts
+/// of the task records.
+pub fn scan(p: &MeshPipeline) -> Vec<u32> {
     let mut c = Ctx::bare(Stage::Compute);
     let u = c.u32t();
     let b = c.boolt();
@@ -357,33 +365,14 @@ pub fn scan(p: &MeshPipeline, components: u32, which: Scan) -> Vec<u32> {
     let lane = c.local_index_in();
     let zero = c.m.c_u32(0);
     let one = c.m.c_u32(1);
-    let (n, recs, stride, at, out) = match which {
-        Scan::Tasks => (
-            header(&mut c, buf, H_TASKS),
-            header(&mut c, buf, H_TASK_RECS),
-            p.payload_words(),
-            1,
-            header(&mut c, buf, H_TASK_SCAN),
-        ),
-        Scan::Meshes => {
-            let m = header(&mut c, buf, H_MESHES);
-            let cap = header(&mut c, buf, H_MESH_CAP);
-            let glsl = c.glsl;
-            let n =
-                c.m.emit(op::EXT_INST, u, &[glsl, crate::spirv::glsl::U_MIN, m, cap]);
-            (
-                n,
-                header(&mut c, buf, H_MESH_RECS),
-                mesh_record_words(p, components),
-                0,
-                header(&mut c, buf, H_MESH_SCAN),
-            )
-        }
-    };
+    let n = header(&mut c, buf, H_TASKS);
+    let recs = header(&mut c, buf, H_TASK_RECS);
+    let stride = p.payload_words();
+    let out = header(&mut c, buf, H_TASK_SCAN);
     let count_of = |c: &mut Ctx, i: u32| {
         let off = c.lk_mul(i, stride);
         let off = add(c, recs, off);
-        let k = c.m.c_u32(at);
+        let k = c.m.c_u32(1);
         let off = add(c, off, k);
         load(c, buf, off)
     };
@@ -442,43 +431,24 @@ pub fn scan(p: &MeshPipeline, components: u32, which: Scan) -> Vec<u32> {
         c.m.emit_void(op::STORE, &[sum_var, s]);
     });
     let last = c.m.emit(op::I_EQUAL, b, &[lane, m1]);
-    let vpp = p.topology.vertices();
     c.if_then(last, |c| {
         let at = add(c, out, n);
         store(c, buf, at, incl);
-        match which {
-            Scan::Tasks => {
-                let k = c.m.c_u32(H_MESHES);
-                store(c, buf, k, incl);
-                let wx = c.m.c_u32(DISPATCH_X);
-                let glsl = c.glsl;
-                let x = c.m.emit(
-                    op::EXT_INST,
-                    u,
-                    &[glsl, crate::spirv::glsl::U_MIN, incl, wx],
-                );
-                let wm = c.m.c_u32(DISPATCH_X - 1);
-                let y = add(c, incl, wm);
-                let y = c.m.emit(op::U_DIV, u, &[y, wx]);
-                for (h, v) in [(H_DISPATCH, x), (H_DISPATCH + 1, y), (H_DISPATCH + 2, one)] {
-                    let k = c.m.c_u32(h);
-                    store(c, buf, k, v);
-                }
-            }
-            Scan::Meshes => {
-                let k = c.m.c_u32(H_PRIMS);
-                store(c, buf, k, incl);
-                let verts = c.lk_mul(incl, vpp);
-                for (h, v) in [
-                    (H_DRAW, verts),
-                    (H_DRAW + 1, one),
-                    (H_DRAW + 2, zero),
-                    (H_DRAW + 3, zero),
-                ] {
-                    let k = c.m.c_u32(h);
-                    store(c, buf, k, v);
-                }
-            }
+        let k = c.m.c_u32(H_MESHES);
+        store(c, buf, k, incl);
+        let wx = c.m.c_u32(DISPATCH_X);
+        let glsl = c.glsl;
+        let x = c.m.emit(
+            op::EXT_INST,
+            u,
+            &[glsl, crate::spirv::glsl::U_MIN, incl, wx],
+        );
+        let wm = c.m.c_u32(DISPATCH_X - 1);
+        let y = add(c, incl, wm);
+        let y = c.m.emit(op::U_DIV, u, &[y, wx]);
+        for (h, v) in [(H_DISPATCH, x), (H_DISPATCH + 1, y), (H_DISPATCH + 2, one)] {
+            let k = c.m.c_u32(h);
+            store(c, buf, k, v);
         }
     });
     let _ = lanes;
@@ -496,7 +466,7 @@ pub fn vertex(p: &MeshPipeline, sph: &[u32; 32]) -> Res<Vec<u32>> {
     let u = c.u32t();
     let f = c.f32t();
     let buf = c.mesh_buffer();
-    let (main, vars) = c.helper_begin(4);
+    let (main, _) = c.helper_begin(0);
     let i32t = c.m.t_i32();
     let i = c.builtin(B_VERTEX_INDEX, INPUT, i32t);
     let iv = c.m.emit(op::LOAD, i32t, &[i]);
@@ -505,20 +475,20 @@ pub fn vertex(p: &MeshPipeline, sph: &[u32; 32]) -> Res<Vec<u32>> {
     let k = c.m.c_u32(vpp);
     let q = c.m.emit(op::U_DIV, u, &[iv, k]);
     let corner = c.m.emit(op::U_MOD, u, &[iv, k]);
-    let m = header(&mut c, buf, H_MESHES);
-    let cap = header(&mut c, buf, H_MESH_CAP);
-    let glsl = c.glsl;
-    let m =
-        c.m.emit(op::EXT_INST, u, &[glsl, crate::spirv::glsl::U_MIN, m, cap]);
-    let scan = header(&mut c, buf, H_MESH_SCAN);
-    let g = search(&mut c, buf, scan, m, q, &vars);
-    let at = add(&mut c, scan, g);
-    let first = load(&mut c, buf, at);
-    let prim = sub(&mut c, q, first);
+    let maxp = c.m.c_u32(p.max_primitives);
+    let g = c.m.emit(op::U_DIV, u, &[q, maxp]);
+    let prim = c.m.emit(op::U_MOD, u, &[q, maxp]);
     let mr = mesh_record_words(p, nc);
     let recs = header(&mut c, buf, H_MESH_RECS);
     let off = c.lk_mul(g, mr);
     let rec = add(&mut c, recs, off);
+    let count = load(&mut c, buf, rec);
+    let bt = c.boolt();
+    let live = c.m.emit(op::U_LESS_THAN, bt, &[prim, count]);
+    let (body, dead, merge) = (c.m.id(), c.m.id(), c.m.id());
+    c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+    c.m.emit_void(op::BRANCH_CONDITIONAL, &[live, body, dead]);
+    c.m.emit_void(op::LABEL, &[body]);
     let one = c.m.c_u32(1);
     let ib = add(&mut c, rec, one);
     let pi = c.lk_mul(prim, vpp);
@@ -636,21 +606,31 @@ pub fn vertex(p: &MeshPipeline, sph: &[u32; 32]) -> Res<Vec<u32>> {
                 let bit0 = c.m.emit(op::BITWISE_AND, u, &[bits, one]);
                 let bt = c.boolt();
                 let culled = c.m.emit(op::I_EQUAL, bt, &[bit0, zero]);
-                c.if_then(culled, |c| {
-                    let var = c.builtin(B_POSITION, OUTPUT, v4);
-                    c.iface.builtins.insert(B_POSITION);
-                    let two = c.m.c_f32(0x4000_0000);
-                    let onef = c.m.c_f32(0x3f80_0000);
-                    let out =
-                        c.m.emit(op::COMPOSITE_CONSTRUCT, v4, &[two, two, two, onef]);
-                    c.m.emit_void(op::STORE, &[var, out]);
-                });
+                c.if_then(culled, culled_position);
             }
         }
     }
+    c.m.emit_void(op::BRANCH, &[merge]);
+    c.m.emit_void(op::LABEL, &[dead]);
+    culled_position(&mut c);
+    c.m.emit_void(op::BRANCH, &[merge]);
+    c.m.emit_void(op::LABEL, &[merge]);
     c.m.emit_void(op::RETURN, &[]);
     c.m.emit_void(op::FUNCTION_END, &[]);
     Ok(c.helper_finish(main, 0, &[]))
+}
+
+/// Puts the vertex outside the clip volume, so its primitive draws nothing.
+fn culled_position(c: &mut Ctx) {
+    let f = c.f32t();
+    let v4 = c.m.t_vec(f, 4);
+    let var = c.builtin(B_POSITION, OUTPUT, v4);
+    c.iface.builtins.insert(B_POSITION);
+    let two = c.m.c_f32(0x4000_0000);
+    let onef = c.m.c_f32(0x3f80_0000);
+    let out =
+        c.m.emit(op::COMPOSITE_CONSTRUCT, v4, &[two, two, two, onef]);
+    c.m.emit_void(op::STORE, &[var, out]);
 }
 
 /// The topology of the fallback's draw.

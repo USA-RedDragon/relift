@@ -148,7 +148,7 @@ def draw(work, o, name, case, progs, prim_sph, tolerate_native):
                 sys.exit('%s %s %s: %s' % (name, k, back, r))
             validate(spv)
     r = run([X, 'helpers', progs['mesh'], o] + pipe + compute).split()
-    for h in ('scan-tasks', 'scan-meshes', 'vertex'):
+    for h in ('scan-tasks', 'vertex'):
         validate(os.path.join(o, h + '.spv'))
     record_words = int(r[3])
     cb = bytearray(65536)
@@ -173,15 +173,14 @@ def draw(work, o, name, case, progs, prim_sph, tolerate_native):
     hdr[0], hdr[12], hdr[13] = count, cap, 32
     hdr[14] = 32 + count * max(p['payload_bytes'] // 4, 2)
     hdr[15] = hdr[14] + count + 1
-    hdr[16] = hdr[15] + cap * record_words
     if not task:
         hdr[1] = count
         hdr[4:7] = [min(count, 65535), (count + 65534) // 65535, 1]
     open(os.path.join(o, 'fb.bin'), 'wb').write(struct.pack('<32I', *hdr))
-    s = common + 'bufi 1 %s/fb.bin %d\nbind 3 2 1 ssbo\n' % (o, (hdr[16] + cap + 1) * 4)
+    s = common + 'bufi 1 %s/fb.bin %d\nbind 3 2 1 ssbo\n' % (o, (hdr[15] + cap * record_words) * 4)
     if task:
         s += 'comp %s/task-compute.spv %d 1 1\ncomp %s/scan-tasks.spv 1 1 1\n' % (o, count, o)
-    s += 'compi %s/mesh-compute.spv 1 16\ncomp %s/scan-meshes.spv 1 1 1\n' % (o, o)
+    s += 'compi %s/mesh-compute.spv 1 16\n' % o
     s += 'blend %s\ndrawi %s/vertex.spv %s/frag-compute.spv %s 1 32\nout %s/fb.raw\n' % (blend, o, o, p['topology'], o)
     open(os.path.join(o, 'fb.s'), 'w').write(s)
     run([mrun, os.path.join(o, 'fb.s')], env=tenv)
