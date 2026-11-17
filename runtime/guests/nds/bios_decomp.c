@@ -135,6 +135,7 @@ void nds_bios_lz77(const nds_bios_env *e, uint32_t r[4], bool cb)
             }
         }
     }
+    nds_bios_work(e, cb ? NDS_W_LZ77_CB : NDS_W_LZ77, len);
     if (cb) {
         int32_t c = close_cb(e, fn, s.src);
         r[0] = c < 0 ? (uint32_t)c : len;
@@ -177,6 +178,7 @@ void nds_bios_rl(const nds_bios_env *e, uint32_t r[4], bool cb)
                 put(&k, get8(&s));
         }
     }
+    nds_bios_work(e, cb ? NDS_W_RL_CB : NDS_W_RL, hdr >> 8);
     if (cb) {
         int32_t c = close_cb(e, fn, s.src);
         r[0] = c < 0 ? (uint32_t)c : hdr >> 8;
@@ -224,6 +226,7 @@ void nds_bios_huff(const nds_bios_env *e, uint32_t r[4])
             }
         }
     }
+    nds_bios_work(e, NDS_W_HUFF, hdr >> 8);
     int32_t c = close_cb(e, fn, s.src);
     r[0] = c < 0 ? (uint32_t)c : hdr >> 8;
 }

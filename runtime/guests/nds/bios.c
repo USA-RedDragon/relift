@@ -43,6 +43,59 @@ void nds_bios_cycles(const nds_bios_env *e, uint64_t cycles)
     }
 }
 
+static bool bios_code_cached(rl_nds *m);
+
+void nds_bios_ins(const nds_bios_env *e, unsigned n)
+{
+    bool slow = e->cpu == RL_NDS_ARM9 && !bios_code_cached(e->m);
+    nds_bios_cycles(e, slow ? 4u * n : n);
+}
+
+void nds_bios_jump(const nds_bios_env *e) { nds_bios_ins(e, 2); }
+
+void nds_bios_ldi(const nds_bios_env *e) { nds_bios_cycles(e, 1); }
+
+/*
+ * The consoles' times of each routine (hwtest 3, DSi and 3DS alike), less
+ * what its bus accesses cost through the machine: a fixed part per call and
+ * a part per unit of output, in hundredths of a cycle, per CPU (ARM9 cycles,
+ * ARM7 cycles). Measured with the ARM7 writing to its own work RAM and the
+ * ARM9 to cached main RAM, on the hwtest's inputs: an average over their mix
+ * of literals, matches and runs. The fixed parts are the ARM7's (and the
+ * ARM9's CRC16); the ARM9's others wait for hwtest 3c's fixed-cost cases.
+ * The ARM9's per-unit parts move by up to a cycle with where the caller's
+ * code and buffers sit in the caches; these are the calls cartridge's.
+ */
+typedef struct work_cost {
+    uint16_t fixed;
+    uint32_t per_x100;
+} work_cost;
+
+static const work_cost work[2][NDS_W_KINDS] = {
+    [RL_NDS_ARM9] = {[NDS_W_LZ77] = {0, 496},
+                     [NDS_W_LZ77_CB] = {0, 3286},
+                     [NDS_W_HUFF] = {0, 10602},
+                     [NDS_W_RL] = {0, 6},
+                     [NDS_W_RL_CB] = {0, 656},
+                     [NDS_W_CRC16] = {26, 5252},
+                     [NDS_W_SQRT] = {0, 119600},
+                     [NDS_W_DIV] = {0, 19600}},
+    [RL_NDS_ARM7] = {[NDS_W_LZ77] = {857, 985},
+                     [NDS_W_LZ77_CB] = {475, 4142},
+                     [NDS_W_HUFF] = {0, 12955},
+                     [NDS_W_RL] = {140, 810},
+                     [NDS_W_RL_CB] = {142, 1628},
+                     [NDS_W_CRC16] = {125, 5800},
+                     [NDS_W_SQRT] = {0, 119803},
+                     [NDS_W_DIV] = {0, 19703}},
+};
+
+void nds_bios_work(const nds_bios_env *e, nds_bios_kind k, uint32_t units)
+{
+    const work_cost *w = &work[e->cpu][k];
+    nds_bios_cycles(e, w->fixed + ((uint64_t)units * w->per_x100 + 50u) / 100u);
+}
+
 /** @brief The quotient and remainder loop of Div and Sqrt (the console's, shared with the GBA's). */
 typedef struct udiv {
     uint32_t q, rem;
@@ -127,6 +180,7 @@ static void swi_crc16(const nds_bios_env *e, uint32_t r[4])
     r[0] = crc;
     if (len)
         r[3] = last;
+    nds_bios_work(e, NDS_W_CRC16, len & ~1u);
 }
 
 /** @brief Cycles of one WaitByLoop iteration on the ARM9 when the BIOS code is cached and when it is not (GBATEK's table). */
@@ -307,6 +361,7 @@ rl_nds_swi_status rl_nds_bios_swi(rl_nds *m, unsigned cpu, unsigned number, uint
     case 0x09:
         if (!swi_div(r))
             return RL_NDS_SWI_HANG;
+        nds_bios_work(&e, NDS_W_DIV, 1);
         break;
     case 0x0B:
         nds_bios_cpu_set(&e, r);
@@ -316,6 +371,7 @@ rl_nds_swi_status rl_nds_bios_swi(rl_nds *m, unsigned cpu, unsigned number, uint
         break;
     case 0x0D:
         swi_sqrt(r);
+        nds_bios_work(&e, NDS_W_SQRT, 1);
         break;
     case 0x0E:
         swi_crc16(&e, r);

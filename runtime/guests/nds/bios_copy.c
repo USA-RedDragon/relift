@@ -29,29 +29,64 @@ static bool source_blocked(const nds_bios_env *e, uint32_t src, uint32_t bytes)
     return (src & 0x0E000000u) == 0 || (end & 0x0E000000u) == 0;
 }
 
+/*
+ * The copy loops as the consoles time them (hwtest 3: work RAM destinations on
+ * the ARM7, VRAM on the ARM9), with the data accesses through the machine:
+ * CpuSet moves a unit per iteration (LDR or LDRH, STR or STRH, the pointer
+ * or index steps, the compare and the branch back; a fill only stores);
+ * CpuFastSet moves 8 words per LDM and STM and then single words, the loop
+ * branch taking the compare's place.
+ */
+
+/** @brief Cycles of each call before its loop: the argument checks and setup (ARM9, ARM7). */
+static const uint8_t set_setup[2] = {12, 40};
+
 void nds_bios_cpu_set(const nds_bios_env *e, uint32_t r[4])
 {
     uint32_t src = r[0], dst = r[1], ctl = r[2];
     uint32_t bytes = (ctl << 11) >> 9;
     bool fill = (ctl >> 24) & 1u;
+    nds_bios_ins(e, set_setup[e->cpu]);
     if (source_blocked(e, src, bytes))
         return;
     if ((ctl >> 26) & 1u) {
         int32_t end = (int32_t)(dst + bytes);
-        uint32_t v = fill ? nds_bios_ld(e, src, 4, false) : 0;
+        uint32_t v = 0;
+        if (fill) {
+            nds_bios_ins(e, 1);
+            v = nds_bios_ld(e, src, 4, false);
+            nds_bios_ldi(e);
+        }
         for (; (int32_t)dst < end; dst += 4, src += 4) {
-            if (!fill)
+            if (!fill) {
+                nds_bios_ins(e, 1);
                 v = nds_bios_ld(e, src, 4, false);
+                nds_bios_ldi(e);
+            }
+            nds_bios_ins(e, 1);
             nds_bios_st(e, dst, 4, v, false);
+            nds_bios_ins(e, 2);
+            nds_bios_jump(e);
         }
         return;
     }
     int32_t len = (int32_t)(bytes >> 1);
-    uint32_t v = fill ? nds_bios_ld(e, src, 2, false) : 0;
+    uint32_t v = 0;
+    if (fill) {
+        nds_bios_ins(e, 1);
+        v = nds_bios_ld(e, src, 2, false);
+        nds_bios_ldi(e);
+    }
     for (int32_t i = 0; i < len; i += 2) {
-        if (!fill)
+        if (!fill) {
+            nds_bios_ins(e, 1);
             v = nds_bios_ld(e, src + (uint32_t)i, 2, false);
+            nds_bios_ldi(e);
+        }
+        nds_bios_ins(e, 1);
         nds_bios_st(e, dst + (uint32_t)i, 2, v, false);
+        nds_bios_ins(e, 3);
+        nds_bios_jump(e);
     }
 }
 
@@ -60,13 +95,41 @@ void nds_bios_cpu_fast_set(const nds_bios_env *e, uint32_t r[4])
     uint32_t src = r[0], dst = r[1], ctl = r[2];
     uint32_t words = ctl & 0x1FFFFFu;
     bool fill = (ctl >> 24) & 1u;
+    nds_bios_ins(e, set_setup[e->cpu]);
     if (source_blocked(e, src, words * 4u))
         return;
-    uint32_t v = fill ? nds_bios_ld(e, src, 4, false) : 0;
-    for (uint32_t i = 0; i < words; i++) {
-        if (!fill)
-            v = nds_bios_ld(e, src + 4u * i, 4, false);
-        nds_bios_st(e, dst + 4u * i, 4, v, false);
+    uint32_t v[8] = {0};
+    if (fill) {
+        nds_bios_ins(e, 1);
+        v[0] = nds_bios_ld(e, src, 4, false);
+        nds_bios_ldi(e);
+        for (unsigned j = 1; j < 8; j++)
+            v[j] = v[0];
+    }
+    uint32_t blocks = words / 32u, i = 0;
+    for (uint32_t b = 0; b < blocks; b++, i += 8) {
+        if (!fill) {
+            nds_bios_ins(e, 1);
+            for (unsigned j = 0; j < 8; j++)
+                v[j] = nds_bios_ld(e, src + 4u * (i + j), 4, j != 0);
+            nds_bios_ldi(e);
+        }
+        nds_bios_ins(e, 1);
+        for (unsigned j = 0; j < 8; j++)
+            nds_bios_st(e, dst + 4u * (i + j), 4, v[j], j != 0);
+        nds_bios_ins(e, 1);
+        nds_bios_jump(e);
+    }
+    for (; i < words; i++) {
+        if (!fill) {
+            nds_bios_ins(e, 1);
+            v[0] = nds_bios_ld(e, src + 4u * i, 4, false);
+            nds_bios_ldi(e);
+        }
+        nds_bios_ins(e, 1);
+        nds_bios_st(e, dst + 4u * i, 4, v[0], false);
+        nds_bios_ins(e, 1);
+        nds_bios_jump(e);
     }
 }
 

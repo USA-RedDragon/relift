@@ -10,8 +10,9 @@
  * documented IntrWait flag protocol (ARM9: DTCM + 0x3FF8, ARM7: 0x0380FFF8).
  * Registers that GBATEK does not give a value for are left as the caller had
  * them. All memory goes through the machine (rl_nds_load, rl_nds_store), so a
- * call costs the bus accesses it makes plus a fixed cost per call; the
- * console's own SWI timings are not measured yet.
+ * call costs the bus accesses it makes, the BIOS code's own cycles as the
+ * consoles time them (check/nds-timing's BIOS call, cartridge and wake cases)
+ * and a fixed cost per call.
  *
  * The caller is the CPU layer at a SWI exit, after the exception entry. The
  * machine layer has no registers or guest code of its own: the CPU layer
