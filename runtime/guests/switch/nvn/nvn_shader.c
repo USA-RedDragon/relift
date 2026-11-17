@@ -22,6 +22,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#endif
 
 #define SPH_BYTES 0x80u
 #define MAX_PROGRAM_BYTES (4u << 20)
@@ -181,6 +184,15 @@ uint64_t nvn_shader_extent(const uint8_t *mem, uint64_t code)
     return 0;
 }
 
+static void make_dir(const char *p)
+{
+#if defined(_WIN32)
+    _mkdir(p);
+#else
+    mkdir(p, 0777);
+#endif
+}
+
 void nvn_mkdirs(const char *dir)
 {
     char p[1024];
@@ -188,10 +200,10 @@ void nvn_mkdirs(const char *dir)
     for (char *s = p + 1; *s; s++)
         if (*s == '/') {
             *s = 0;
-            mkdir(p, 0777);
+            make_dir(p);
             *s = '/';
         }
-    mkdir(p, 0777);
+    make_dir(p);
 }
 
 static bool exists(const char *path)
