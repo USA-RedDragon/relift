@@ -245,7 +245,29 @@ impl Nds {
                 flow: Flow::Trap(number | if thumb { SWI_THUMB } else { 0 }),
             };
         }
-        reshape(&mut b, &l.bus, pc, thumb, swi, entry);
+        let mut internal: u32 = l
+            .bus
+            .iter()
+            .map(|e| match e {
+                Bus::I(n) => *n,
+                _ => 0,
+            })
+            .sum();
+        if self.cpu == Cpu::Arm9 {
+            let falls = match b.exit.next {
+                Next::Const(t) => t == fall,
+                Next::Select {
+                    taken, not_taken, ..
+                } => taken == fall || not_taken == fall,
+                Next::Dynamic(_) => false,
+            } && matches!(b.exit.flow, Flow::Jump);
+            let next = u32::try_from(fall)
+                .ok()
+                .filter(|_| falls)
+                .and_then(|f| unit(image, base, f, thumb));
+            internal = crate::cycles::arm9_internal(word, pc, thumb, next, internal);
+        }
+        reshape(&mut b, &l.bus, internal, pc, thumb, swi, entry);
         Ok(b)
     }
 }
@@ -268,16 +290,17 @@ fn unaligned(b: &Block, k: usize) -> Option<Value> {
 }
 
 /// Puts the entry check and the fetch first, routes memory to the bus,
-/// keeps only the internal cycles as ticks, adds the refill and closes the
-/// block with a sync point.
-fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool, entry: Option<Entry>) {
-    let internal: u32 = bus
-        .iter()
-        .map(|e| match e {
-            Bus::I(n) => *n,
-            _ => 0,
-        })
-        .sum();
+/// charges the `internal` cycles as one tick after the instruction's
+/// accesses, adds the refill and closes the block with a sync point.
+fn reshape(
+    b: &mut Block,
+    bus: &[Bus],
+    internal: u32,
+    pc: u32,
+    thumb: bool,
+    swi: bool,
+    entry: Option<Entry>,
+) {
     let unaligned: Vec<Option<Value>> = (0..b.insts.len()).map(|k| unaligned(b, k)).collect();
     let old = std::mem::take(&mut b.insts);
     if let Some(e) = entry {
@@ -310,11 +333,10 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool, entry: O
                 endian,
                 kind: IoKind::Device,
             },
-            Op::Tick(_) if internal == 0 => {
+            Op::Tick(_) => {
                 map.push(fetch);
                 continue;
             }
-            Op::Tick(_) => Op::Tick(internal),
             op => op.map_values(&m),
         };
         let v = push(b, op, inst.width);
@@ -333,6 +355,9 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool, entry: O
         },
         next => next,
     };
+    if internal > 0 {
+        push(b, Op::Tick(internal), None);
+    }
     let refills = bus.iter().any(|e| matches!(e, Bus::Code(false, _)));
     if refills && !swi {
         let fall = u64::from(pc) + if thumb { 2 } else { 4 };
@@ -598,10 +623,11 @@ mod tests {
     fn only_internal_cycles_stay_ticks() {
         let ldr = lift9(&arm(&[0xE591_0004]), BASE, false);
         assert!(
-            ldr.insts
-                .iter()
-                .any(|i| matches!(i.op, Op::Tick(n) if n > 0))
+            !ldr.insts.iter().any(|i| matches!(i.op, Op::Tick(_))),
+            "an ARM9 load takes its own cycle and its access"
         );
+        let mul = lift9(&arm(&[0xE006_0995]), BASE, false);
+        assert!(mul.insts.iter().any(|i| matches!(i.op, Op::Tick(1))));
         let mov = lift9(&arm(&[0xE3A0_0001]), BASE, false);
         assert!(!mov.insts.iter().any(|i| matches!(i.op, Op::Tick(_))));
     }

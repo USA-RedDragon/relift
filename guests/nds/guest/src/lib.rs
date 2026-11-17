@@ -4,5 +4,6 @@
 //! `relift-nds-analyze`, lifted into C units with the program files that
 //! run them.
 
+pub mod cycles;
 pub mod frontend;
 pub mod program;
