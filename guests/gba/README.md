@@ -42,7 +42,7 @@ runs on the high-level BIOS; no BIOS image is needed. The backup (SRAM,
 Flash or EEPROM) is a `.sav` next to the ROM, or in the `save.dir`
 setting's folder; Android and iOS apps keep it as `battery.sav` in the
 app's own folder. Missed code stops the program with a stop report
-(`docs/usage.md`); hot-loading is not available for this guest yet.
+(`docs/guides/usage.md`); hot-loading is not available for this guest yet.
 
 `relift-gbarom` reads and checks a ROM header and lists the save library
 strings and the multiboot entry of an image that fits work RAM.

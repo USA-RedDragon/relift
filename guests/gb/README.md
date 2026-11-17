@@ -47,7 +47,7 @@ takes every bank.
 
 - A release build (`relift build`) links the device library without its CPU
   interpreter. The first instruction with no lifted code writes a stop
-  report and ends the run (`docs/usage.md`); `relift report` adds its target
+  report and ends the run (`docs/guides/usage.md`); `relift report` adds its target
   to the learned file for dev builds.
 - A development build (`relift build --dev`, and `relift run`) runs code with
   no lifted body on the device library's CPU one instruction at a time until

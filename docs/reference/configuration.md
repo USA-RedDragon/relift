@@ -6,7 +6,7 @@ Per-game data lives in each game project's `game.toml`, not here.
 `relift.example.toml` lists every key. The table below is generated from the
 settings struct (`relift/src/settings.rs`) by configulator; CI fails when it
 is stale. The built program's own run-time settings and environment
-switches are in `runtime/README.md`.
+switches are in [the C runtime](../../runtime/README.md).
 
 <!-- configulator:begin -->
 

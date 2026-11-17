@@ -48,7 +48,7 @@ The newest update (the highest version) is used unless `--update` names
 another; its exefs and romfs replace the base's when it has them. The same
 choice applies to the update packages of a `.nup`. The program ID comes from
 `main.npdm`. Import also writes `control.nacp` and `icon.jpg` when the dump
-has them; they give the game's title and icon (`docs/packaging.md`).
+has them; they give the game's title and icon (`docs/guides/packaging.md`).
 Encrypted dumps are refused: convert them with a separate tool first.
 
 The CPU code is lifted for comes from `main.npdm` as well: a program whose
@@ -65,4 +65,4 @@ write different bytes at one address are refused. Data mods and cheats are
 chosen at run time (`RELIFT_MODS`, `runtime/README.md`).
 
 Missed code, hot-loading, stop reports, `relift coverage` and `relift diff`
-are described in `docs/usage.md`.
+are described in `docs/guides/usage.md`.

@@ -28,8 +28,8 @@ cargo test --workspace
 | `relift-emit` | `emit` | IR to C: shards, listings, memory strategy per host target |
 | `relift-emit-wasm` | `emit-wasm` | IR to WebAssembly; not linked by `relift` yet |
 | `relift-build` | `build` | Toolchain discovery and the Ninja writer |
-| `relift-input` | `input` | Input ports, controls and bindings; the C port tables (`docs/input.md`) |
+| `relift-input` | `input` | Input ports, controls and bindings; the C port tables (`docs/reference/input.md`) |
 | `relift-manifest` | `manifest` | The `game.toml` types |
 
-`ARCHITECTURE.md` lists the bands and the tests that enforce them. The C
+`docs/concepts/architecture.md` lists the bands and the tests that enforce them. The C
 counterpart is `runtime/core`.

@@ -19,7 +19,7 @@
 //! ```
 //!
 //! A key binding's value is a comma separated list of host inputs such as
-//! `"gamepad:south,key:z"` (see docs/input.md). The keys `bind.<port>.<control>`
+//! `"gamepad:south,key:z"` (see docs/reference/input.md). The keys `bind.<port>.<control>`
 //! belong to the runtime, which declares one for every port control.
 
 use std::collections::BTreeSet;

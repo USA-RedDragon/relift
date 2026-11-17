@@ -2,7 +2,7 @@
 
 What `relift build` makes for each host, and where the game's title and icon
 come from. The settings named here (`package.*`, `toolchain.*`) are listed in
-`docs/configuration.md`.
+[Settings](../reference/configuration.md).
 
 | Host | `relift build` output |
 |---|---|
@@ -113,6 +113,6 @@ ios-arm64`.
 
 Android and iOS apps of a Switch game check the game data against the app's
 `data-manifest.txt` at start (sizes, and SHA-256 with
-`RELIFT_DATA_VERIFY=hash`; `runtime/README.md`); a missing or short file
+`RELIFT_DATA_VERIFY=hash`; [the C runtime](../../runtime/README.md)); a missing or short file
 stops the app with a message naming it. `relift push` copies the data and
 checks it the same way.

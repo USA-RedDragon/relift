@@ -37,20 +37,9 @@ CPU (Z80, `cpus/z80`), the Switch 2 shader translator (SM86 to SPIR-V,
 | Android arm64 | All three guests run on an Android handheld as APKs; Game Boy and GBA programs build in CI |
 | iOS arm64 | All three guests run on an iPhone; Game Boy and GBA apps build in CI |
 
-## Requirements
+## Get started
 
-- Decrypted inputs that you dumped yourself from hardware you own: for the
-  Switch a `.nup` or an extracted `exefs`/`romfs` tree, otherwise a
-  cartridge ROM. Encrypted dumps are refused.
-- The Rust toolchain pinned in `rust-toolchain.toml`.
-- clang (or `zig cc`) and ninja.
-- Optional: SDL3 for a window, SDL3 and libopus for sound, a Vulkan loader
-  (MoltenVK on macOS) for Switch games that render. Without SDL3 the program
-  runs headless. Switch games' VP9 movies need the pinned libvpx source
-  (`runtime/tools/libvpx_src.py`). Phone builds need the Android SDK and NDK,
-  or Xcode.
-
-## Quick start
+Build the tools, import a dump that you own and run it:
 
 ```sh
 cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools -p relift-gba-tools
@@ -60,6 +49,8 @@ relift import ~/dumps/game.gbc   # or a .gba ROM, a Switch .nup or dump folder
 relift build      # a shipped, packaged build
 relift run        # a dev build, run on this host
 ```
+
+[Install](docs/start/01-install.md) lists what you need, and [Make your first game](docs/start/02-first-game.md) goes through the commands.
 
 ## Tools
 
@@ -74,26 +65,24 @@ relift run        # a dev build, run on this host
 
 ## Documentation
 
-| Document | Holds |
+The docs are built as a site from these pages, in the order of [the site outline](docs/nav.md).
+
+| Page | Holds |
 |---|---|
-| `docs/usage.md` | projects, commands, missed code and stop reports |
-| `docs/packaging.md` | what `relift build` makes for each host, titles and icons |
-| `docs/configuration.md` | relift's own settings |
-| `guests/switch/README.md`, `guests/gb/README.md`, `guests/gba/README.md` | importing and running each guest's games |
-| `runtime/README.md` | the C runtime: layers, build, tests, run-time settings, environment |
-| `docs/abi.md` | the contract between emitted C and the runtime |
-| `docs/input.md` | input ports, controls and bindings |
-| `ARCHITECTURE.md` | crate graph, rules and the tests that enforce them, CI |
-| `core/README.md`, `cpus/*/README.md`, `gpus/sm86/README.md`, `check/README.md` | one page per folder |
+| [Get started](docs/start/01-install.md) | install, and your first game |
+| [Use relift](docs/guides/usage.md) | projects, commands, missed code and stop reports |
+| [Package a game for each host](docs/guides/packaging.md) | what `relift build` makes for each host, titles and icons |
+| [Settings](docs/reference/configuration.md) | relift's own settings |
+| [Switch](guests/switch/README.md), [Game Boy](guests/gb/README.md), [Game Boy Advance](guests/gba/README.md) | importing and running each guest's games |
+| [The C runtime](runtime/README.md) | layers, build, tests, run-time settings, environment |
+| [Runtime ABI contract](docs/abi.md) | the contract between emitted C and the runtime |
+| [Input ports and bindings](docs/reference/input.md) | input ports, controls and bindings |
+| [Architecture](docs/concepts/architecture.md) | crate graph, rules and the tests that enforce them, CI |
+| [core](core/README.md), [cpus](cpus/arm64/README.md), [gpus/sm86](gpus/sm86/README.md), [check](check/README.md) | one page per folder |
 
 ## Developing
 
-```sh
-pre-commit install --hook-type pre-commit --hook-type pre-push
-```
-
-Before contributing, read `ARCHITECTURE.md`: section 0 lists the hard rules.
-`scripts/ci/all.sh` runs every CI job this machine can run.
+Before contributing, read [Architecture](docs/concepts/architecture.md): section 0 lists the hard rules. [Tooling and checks](docs/project/tooling.md) covers the hooks, `scripts/ci/all.sh` and the docs build.
 
 ## License
 

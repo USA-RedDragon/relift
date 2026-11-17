@@ -5,7 +5,7 @@ repos:
       - id: configulator-sample
         args: [--dir, relift, --type, Settings, --format, toml, --sample-file, relift.example.toml]
       - id: configulator-markdown
-        args: [--dir, relift, --type, Settings, --markdown-file, docs/configuration.md, --env-prefix, RELIFT_, --env-separator, _]
+        args: [--dir, relift, --type, Settings, --markdown-file, docs/reference/configuration.md, --env-prefix, RELIFT_, --env-separator, _]
   - repo: local
     hooks:
       - id: cargo-fmt
