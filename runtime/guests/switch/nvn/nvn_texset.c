@@ -20,7 +20,6 @@
 
 #include <stdlib.h>
 
-#define TEXTURES 32768u
 #define SAMPLERS 4096u
 #define KINDS 3u
 #define DIMS 9u
@@ -37,6 +36,12 @@ enum { DIM_1D, DIM_2D, DIM_3D, DIM_CUBE, DIM_1D_ARRAY, DIM_2D_ARRAY, DIM_CUBE_AR
 
 static struct {
     bool tried, ok;
+    /**
+     * @brief Texture ids the arrays hold: as many as the device's
+     * update-after-bind sampled image budget allows across the kind and
+     * dimension arrays, at most the 2^20 a handle can name.
+     */
+    uint32_t ntex;
     VkDescriptorSetLayout layout;
     VkDescriptorPool pool;
     VkDescriptorSet set;
@@ -72,6 +77,16 @@ static bool make(void)
     if (t.tried)
         return t.ok;
     t.tried = true;
+    VkPhysicalDeviceVulkan12Properties p12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
+    VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &p12 };
+    VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
+    uint32_t budget = p12.maxDescriptorSetUpdateAfterBindSampledImages;
+    if (p12.maxPerStageDescriptorUpdateAfterBindSampledImages < budget)
+        budget = p12.maxPerStageDescriptorUpdateAfterBindSampledImages;
+    t.ntex = budget / (KINDS * DIMS);
+    if (t.ntex > 1u << 20)
+        t.ntex = 1u << 20;
+    rl_log(RL_LOG_INFO, "nvn", "texture set: %u texture ids", t.ntex);
     VkDescriptorSetLayoutBinding b[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     VkDescriptorBindingFlags f[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
@@ -81,7 +96,7 @@ static bool make(void)
     f[n++] = partial;
     for (uint32_t k = 0; k < KINDS; k++)
         for (uint32_t d = 0; d < DIMS; d++) {
-            b[n] = (VkDescriptorSetLayoutBinding){ 1 + 10 * k + d, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, TEXTURES,
+            b[n] = (VkDescriptorSetLayoutBinding){ 1 + 10 * k + d, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, t.ntex,
                                                    VK_SHADER_STAGE_ALL, NULL };
             f[n++] = partial;
         }
@@ -105,7 +120,7 @@ static bool make(void)
     if (VK(vkCreateDescriptorSetLayout)(g.dev, &li, NULL, &t.layout) != VK_SUCCESS)
         return false;
     VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLER, SAMPLERS },
-                                   { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, TEXTURES * KINDS * DIMS },
+                                   { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, t.ntex * KINDS * DIMS },
                                    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 },
                                    { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, IMAGES * IMAGE_KINDS * IMAGE_DIMS } };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -121,9 +136,9 @@ static bool make(void)
                                        .pSetLayouts = &t.layout };
     if (VK(vkAllocateDescriptorSets)(g.dev, &ai, &t.set) != VK_SUCCESS)
         return false;
-    if (!nvn_vk_staging_new(&t.dims, 4ull * TEXTURES))
+    if (!nvn_vk_staging_new(&t.dims, 4ull * t.ntex))
         return false;
-    memset(t.dims.map, 0, 4ull * TEXTURES);
+    memset(t.dims.map, 0, 4ull * t.ntex);
     VkDescriptorBufferInfo bi = { t.dims.buf, 0, VK_WHOLE_SIZE };
     VkWriteDescriptorSet w = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                .dstSet = t.set,
@@ -132,14 +147,14 @@ static bool make(void)
                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                .pBufferInfo = &bi };
     VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
-    t.tex_img = calloc(TEXTURES, sizeof *t.tex_img);
-    t.tex_guest = calloc(TEXTURES, sizeof *t.tex_guest);
-    t.tex_kind = calloc(TEXTURES, sizeof *t.tex_kind);
-    t.tex_view = calloc(TEXTURES, sizeof *t.tex_view);
-    t.tex_views = calloc(TEXTURES, sizeof *t.tex_views);
+    t.tex_img = calloc(t.ntex, sizeof *t.tex_img);
+    t.tex_guest = calloc(t.ntex, sizeof *t.tex_guest);
+    t.tex_kind = calloc(t.ntex, sizeof *t.tex_kind);
+    t.tex_view = calloc(t.ntex, sizeof *t.tex_view);
+    t.tex_views = calloc(t.ntex, sizeof *t.tex_views);
     t.img_views = calloc(IMAGES, sizeof *t.img_views);
-    t.tex_level = calloc(TEXTURES, sizeof *t.tex_level);
-    t.slot_of = calloc(TEXTURES, sizeof *t.slot_of);
+    t.tex_level = calloc(t.ntex, sizeof *t.tex_level);
+    t.slot_of = calloc(t.ntex, sizeof *t.slot_of);
     t.id_of_slot = calloc(IMAGES, sizeof *t.id_of_slot);
     t.slot_guest = calloc(IMAGES, sizeof *t.slot_guest);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
@@ -390,8 +405,8 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
     if (!make())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t id = handle & 0xfffffu, sid = handle >> 20;
-    if (id >= TEXTURES)
-        return nvn_vk_stop(r, "texture id %u is past the layer's %u", id, TEXTURES);
+    if (id >= t.ntex)
+        return nvn_vk_stop(r, "texture id %u is past the layer's %u", id, t.ntex);
     uint8_t view[17] = { 0 };
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);

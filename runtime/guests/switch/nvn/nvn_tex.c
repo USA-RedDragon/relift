@@ -348,6 +348,9 @@ static uint64_t pool_init(rl_ctx *c, uint32_t kind)
         p->pool = c->x[1];
         p->offset = c->x[2];
         p->count = (int32_t)c->x[3];
+        if (rl_cfg()->trace_os)
+            rl_log(RL_LOG_INFO, "nvn", "%s pool 0x%llx: %d descriptors", kind == NVN_TEXTURE_POOL ? "texture" : "sampler",
+                   (unsigned long long)c->x[0], p->count);
     }
     c->x[0] = p != NULL;
     return nvn_ret(c);
