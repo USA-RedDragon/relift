@@ -6,6 +6,7 @@
 
 icd=$(lavapipe_icd)
 spirv_val=$(spirv_val_dir)
+export KAT_VK_INCLUDE=$(vulkan_include_dir)
 cargo build --locked --release -p relift-gpu-sm86 --example mesh --example xlate
 target=${CARGO_TARGET_DIR:-$ROOT/target}
 PATH="$spirv_val:$PATH" VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" CARGO_TARGET_DIR="$target" \

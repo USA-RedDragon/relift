@@ -22,6 +22,8 @@ SPIRV_TOOLS_SHA256=92df4c377603f086c3d2a1eb2bd9b8f883a73ca890fb939d78a0cecdcc016
 # The SPIRV-Headers commit SPIRV-Tools pins in its DEPS file for that release.
 SPIRV_HEADERS_COMMIT=496543121ce6419f23d6fa5d7194ba66c36212d2
 SPIRV_HEADERS_SHA256=a9bb9c48713245eacf97cc539b6f1d45405a92d8813f8b82e635f0a085ee9898
+VULKAN_HEADERS_VERSION=1.4.363
+VULKAN_HEADERS_SHA256=cbaf687d3c59b9666fe080e7f8396b6b4f4d344a768ee6b337c59852f4526b68
 
 # fetch URL SHA256 OUT: download once into the work dir and check the hash.
 fetch() {
@@ -32,6 +34,21 @@ fetch() {
     echo "$sum  $out.part" | sha256sum -c -
     mv "$out.part" "$out"
   fi
+}
+
+# vulkan_include_dir: unpack the pinned Vulkan-Headers once into the work dir
+# and print its include directory, so the known-answer programs do not depend
+# on the distribution's headers.
+vulkan_include_dir() {
+  local dir="$CI_WORK/vulkan-headers-$VULKAN_HEADERS_VERSION"
+  if [ ! -f "$dir/include/vulkan/vulkan.h" ]; then
+    fetch "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v$VULKAN_HEADERS_VERSION.tar.gz" \
+      "$VULKAN_HEADERS_SHA256" "$dir.tgz" >&2
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    tar -xzf "$dir.tgz" -C "$dir" --strip-components=1
+  fi
+  echo "$dir/include"
 }
 
 # spirv_val_dir: build the pinned spirv-val once into the work dir and

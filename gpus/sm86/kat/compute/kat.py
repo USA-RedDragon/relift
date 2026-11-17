@@ -235,7 +235,7 @@ def main():
                 replay_from = args[k + 1]
             del args[k:k + 2]
     os.makedirs(work, exist_ok=True)
-    subprocess.run(['cc', '-O1', '-o', os.path.join(work, 'krun'), os.path.join(HERE, 'krun.c'), '-lvulkan'], check=True)
+    subprocess.run(['cc', '-O1'] + ['-I' + i for i in os.environ.get('KAT_VK_INCLUDE', '').split()] + ['-o', os.path.join(work, 'krun'), os.path.join(HERE, 'krun.c'), '-lvulkan'], check=True)
     names = args or sorted(os.listdir(os.path.join(HERE, 'cases')))
     if replay_from:
         kat = read_kat(replay_from)

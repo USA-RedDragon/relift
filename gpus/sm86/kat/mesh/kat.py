@@ -259,7 +259,7 @@ def main():
     if replay_from and not os.environ.get('KAT_DEV'):
         sys.exit('--replay needs KAT_DEV and KAT_HOST')
     os.makedirs(work, exist_ok=True)
-    subprocess.run(['cc', '-O1', '-o', os.path.join(work, 'mrun'), os.path.join(HERE, 'mrun.c'), '-lvulkan'], check=True)
+    subprocess.run(['cc', '-O1'] + ['-I' + i for i in os.environ.get('KAT_VK_INCLUDE', '').split()] + ['-o', os.path.join(work, 'mrun'), os.path.join(HERE, 'mrun.c'), '-lvulkan'], check=True)
     names = args or sorted(os.listdir(os.path.join(HERE, 'cases')))
     record = [] if record_to else None
     if replay_from:
