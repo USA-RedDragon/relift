@@ -51,9 +51,9 @@ fi
 
 # limit_minutes NAME: the timeout-minutes of the workflow job that runs NAME.
 limit_minutes() {
-  local wf
+  local wf=
   case $1 in
-    checks | gb-corpus | generated | workflows | appimage) wf=ci.yaml:$1 ;;
+    checks | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
     mac-tests) wf=ci.yaml:macos ;;
     image-*) wf=ci.yaml:cross ;;
     runtime-charter) wf=runtime.yaml:charter ;;
@@ -63,6 +63,7 @@ limit_minutes() {
     cross-*) wf=cross.yaml:linux ;;
     mac-release-*) wf=release-mac.yaml:relift ;;
   esac
+  [ -n "$wf" ] || return 0
   awk -v want="${wf#*:}" '
     /^  [A-Za-z0-9_-]+:$/ { in_job = ($1 == want ":") }
     in_job && $1 == "timeout-minutes:" { print $2; exit }
