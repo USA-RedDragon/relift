@@ -312,17 +312,29 @@ static bool defined_elsewhere(const rl_switch_program *p, const rl_switch_module
     return false;
 }
 
+/** @brief True when the program carries the console's dynamic loader, a module named rtld. */
+static bool has_rtld(const rl_switch_program *p)
+{
+    for (uint32_t i = 0; i < p->module_count; i++)
+        if (p->modules[i].name && !strcmp(p->modules[i].name, "rtld"))
+            return true;
+    return false;
+}
+
 /**
  * @brief Writes the module's relocations against undefined symbols the hooks
  * resolve and no other module defines; returns how many. An import another
  * module defines is left to the guest's dynamic loader, which binds it to that
- * module's export (replaced by the hook when the hook replaces it) and which
- * checks that every PLT slot still holds its link-time value before binding.
+ * module's export (replaced by the hook when the hook replaces it). PLT slots
+ * are left to rtld when the program has one: it aborts unless every slot still
+ * holds its link-time value, then writes every slot itself, the bound address
+ * or, for a symbol no module defines, the relocated link-time value.
  */
 static int resolve_imports(const rl_switch_program *p, const rl_switch_module *m, const dyn_info *d)
 {
     uint64_t lo, hi;
     int n = 0;
+    bool rtld_binds_plt = has_rtld(p);
     module_extent(m, &lo, &hi);
     for (int t = 0; t < 2; t++)
         for (uint64_t at = d->rela[t]; d->rela[t] && at + RELA_SIZE <= d->rela[t] + d->relasz[t]; at += RELA_SIZE) {
@@ -331,6 +343,8 @@ static int resolve_imports(const rl_switch_program *p, const rl_switch_module *m
                 break;
             uint32_t type = (uint32_t)info;
             if (type != R_ABS64 && type != R_GLOB_DAT && type != R_JUMP_SLOT)
+                continue;
+            if (type == R_JUMP_SLOT && rtld_binds_plt)
                 continue;
             uint16_t shndx;
             uint64_t value;

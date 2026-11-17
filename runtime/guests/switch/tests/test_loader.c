@@ -73,6 +73,15 @@ static uint64_t left_entry(rl_ctx *restrict c, uint8_t *mem)
     return rl_svc(c, mem, 0x07);
 }
 
+/** @brief Mode 4: rtld is in the program, so the PLT slot keeps its link-time zero and the data slot is bound. */
+static uint64_t plt_left_entry(rl_ctx *restrict c, uint8_t *mem)
+{
+    if (rl_ld64(mem, BASE + 0x2800) == 0 && rl_ld64(mem, BASE + 0x2808) == IMPORTED + 0x10)
+        say(c, mem, BASE + 0x1F00, 9);
+    c->x[0] = 0;
+    return rl_svc(c, mem, 0x07);
+}
+
 static uint64_t fake_entry(rl_ctx *restrict c, uint8_t *mem)
 {
     uint64_t x1 = c->x[1];
@@ -80,6 +89,8 @@ static uint64_t fake_entry(rl_ctx *restrict c, uint8_t *mem)
         return linked_entry(c, mem);
     if (g_mode == 3)
         return left_entry(c, mem);
+    if (g_mode == 4)
+        return plt_left_entry(c, mem);
     if (g_mode == 0) {
         say(c, mem, BASE + 0x1000, sizeof g_msg - 1);
         if (mem[BASE + 0x2000] == 0xAB && mem[BASE + 0x2FFF] == 0x00 && mem[BASE + 0x3000] == 0 &&
@@ -430,6 +441,35 @@ TEST(loader_leaves_imports_another_module_defines)
     CHECK_EQ(WEXITSTATUS(status), 0);
     CHECK_EQ(count_lines(out, "PASS link"), 1);
     CHECK(strstr(out, "module main: hooks replaced functions: 1, resolved imports: 0") != NULL);
+    g_mode = 0;
+    remove_base();
+}
+
+TEST(loader_leaves_plt_slots_to_rtld)
+{
+    char out[8192];
+    int status = 0;
+    static bool added;
+    if (!added) {
+        CHECK_EQ(rl_switch_add_hook(&g_hook), 0);
+        added = true;
+    }
+    fill_linked_image();
+    put_rela(0, 0x2800, 1, 1026, 0);
+    memcpy(g_image2, g_image, sizeof g_image2);
+    rl_switch_module mods[2] = { g_module, g_module };
+    mods[1].name = "rtld";
+    mods[1].base = BASE + 0x10000;
+    mods[1].image = g_image2;
+    rl_switch_program p = g_program;
+    p.modules = mods;
+    p.module_count = 2;
+    g_mode = 4;
+    run_program(&p, out, sizeof out, &status);
+    CHECK(WIFEXITED(status));
+    CHECK_EQ(WEXITSTATUS(status), 0);
+    CHECK_EQ(count_lines(out, "PASS link"), 1);
+    CHECK(strstr(out, "resolved imports: 1") != NULL);
     g_mode = 0;
     remove_base();
 }
