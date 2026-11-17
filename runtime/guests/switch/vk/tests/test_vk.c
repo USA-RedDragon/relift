@@ -1181,6 +1181,60 @@ static bool capture_is_the_clear_color(const char *dir, int format)
     return true;
 }
 
+static int32_t create_instance_with_layer(const char *layer)
+{
+    const char *layers[] = { layer };
+    VkInstanceCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .enabledLayerCount = 1,
+        .ppEnabledLayerNames = GP(gstrv(layers, 1)),
+    };
+    uint64_t out = galloc(8);
+    int32_t r = VKR(G("vkCreateInstance", gput(&ci, sizeof ci), 0, out));
+    g_inst = r == VK_SUCCESS ? g64(out) : 0;
+    return r;
+}
+
+TEST(vk_the_consoles_swapchain_layer_is_the_only_layer)
+{
+    CHECK_EQ(boot(NULL), 0);
+    uint64_t gn = galloc(4);
+    CHECK_EQ(VKR(G("vkEnumerateInstanceLayerProperties", gn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 1);
+    uint64_t lp = galloc(sizeof(VkLayerProperties));
+    CHECK_EQ(VKR(G("vkEnumerateInstanceLayerProperties", gn, lp)), VK_SUCCESS);
+    const VkLayerProperties *l = (const VkLayerProperties *)(g_mem + lp);
+    CHECK(!strcmp(l->layerName, "VK_LAYER_NN_vi_swapchain"));
+    CHECK_EQ(l->specVersion, (1u << 22) | (2u << 12) | 204u);
+    CHECK_EQ(l->implementationVersion, 1);
+    CHECK(!strcmp(l->description, "Nintendo VI Swapchain Layer"));
+
+    uint64_t nn = gstr("VK_LAYER_NN_vi_swapchain"), other = gstr("VK_LAYER_KHRONOS_validation");
+    CHECK_EQ(VKR(G("vkEnumerateInstanceExtensionProperties", nn, gn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 1);
+    uint64_t ep = galloc(sizeof(VkExtensionProperties));
+    CHECK_EQ(VKR(G("vkEnumerateInstanceExtensionProperties", nn, gn, ep)), VK_SUCCESS);
+    CHECK(!strcmp((const char *)g_mem + ep, "VK_KHR_surface"));
+    CHECK_EQ(g32(ep + offsetof(VkExtensionProperties, specVersion)), 25);
+    CHECK_EQ(VKR(G("vkEnumerateInstanceExtensionProperties", other, gn, 0)), VK_ERROR_LAYER_NOT_PRESENT);
+
+    CHECK_EQ(create_instance_with_layer("VK_LAYER_KHRONOS_validation"), VK_ERROR_LAYER_NOT_PRESENT);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    CHECK_EQ(VKR(G("vkEnumerateDeviceLayerProperties", pds[0], gn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 0);
+
+    CHECK_EQ(create_instance_with_layer("VK_LAYER_NN_vi_swapchain"), VK_SUCCESS);
+    CHECK(physical_devices(pds, 8) > 0);
+    CHECK_EQ(VKR(G("vkEnumerateDeviceLayerProperties", pds[0], gn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 1);
+    rl_st32(g_mem, gn, 7);
+    CHECK_EQ(VKR(G("vkEnumerateDeviceExtensionProperties", pds[0], nn, gn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 0);
+    CHECK_EQ(VKR(G("vkEnumerateDeviceExtensionProperties", pds[0], other, gn, 0)), VK_ERROR_LAYER_NOT_PRESENT);
+}
+
 TEST(vk_vi_surface_presents_headless)
 {
     g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;

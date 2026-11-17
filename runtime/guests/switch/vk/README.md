@@ -312,6 +312,19 @@ saves the guest registers, calls the guest function through `rl_indirect` and
 restores them. A callback on a driver thread with no guest call running is
 logged and not delivered.
 
+## Layers
+
+The console's loader has one layer built in, `VK_LAYER_NN_vi_swapchain`
+("Nintendo VI Swapchain Layer"), and no layer manifests, so it offers no
+other. The forwarding layer answers for it with the values read from the
+SDK's `vulkan.nso`: `vkEnumerateInstanceLayerProperties` lists it alone, its
+instance extension list is `VK_KHR_surface` and its device extension list is
+empty, and `vkEnumerateDeviceLayerProperties` lists it when the instance
+enabled it. `vkCreateInstance` takes it out of the list it gives the host
+(its swapchain is the forwarded one) and fails any other layer with
+`VK_ERROR_LAYER_NOT_PRESENT`; `vkCreateDevice` gives the host no layers.
+Host layers are never visible to the guest.
+
 ## `VK_NN_vi_surface`
 
 The host has no `VK_NN_vi_surface`. The layer advertises it when a surface

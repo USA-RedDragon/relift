@@ -752,6 +752,27 @@ static bool provider_ok(const VkExtensionProperties *host, uint32_t n)
     return true;
 }
 
+/**
+ * @brief The layer the console's Vulkan loader has built in, and the only
+ * layer it offers: the console has no layer manifests. Read from the
+ * SDK's vulkan.nso (build 590d76cc419d9397b6859527d4262ce7deaa54e8,
+ * verified): its VkLayerProperties, and the lists its
+ * vkEnumerateInstanceExtensionProperties and
+ * vkEnumerateDeviceExtensionProperties pass to util_GetExtensionProperties
+ * for its own name, VK_KHR_surface for the instance and none for the
+ * device. The layer's code is the forwarded swapchain itself.
+ */
+#define NN_LAYER "VK_LAYER_NN_vi_swapchain"
+
+static const VkLayerProperties nn_layer = {
+    .layerName = NN_LAYER,
+    .specVersion = (1u << 22) | (2u << 12) | 204u,
+    .implementationVersion = 1,
+    .description = "Nintendo VI Swapchain Layer",
+};
+
+static const VkExtensionProperties nn_layer_instance_exts[] = { { "VK_KHR_surface", 25 } };
+
 /** @brief Writes a filtered extension list with the count-and-array protocol. */
 static int32_t answer_exts(vkf_call *k, const VkExtensionProperties *list, uint32_t n, uint64_t gcount, uint64_t garray)
 {
@@ -768,13 +789,58 @@ static int32_t answer_exts(vkf_call *k, const VkExtensionProperties *list, uint3
     return w < n ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
+/** @brief Writes a layer list with the count-and-array protocol. */
+static int32_t answer_layers(vkf_call *k, uint32_t n, uint64_t gcount, uint64_t garray)
+{
+    if (!gcount)
+        return VK_ERROR_INITIALIZATION_FAILED;
+    if (!garray) {
+        rl_st32(k->mem, gcount, n);
+        return VK_SUCCESS;
+    }
+    uint32_t w = vkf_g32(k, gcount) < n ? vkf_g32(k, gcount) : n;
+    for (uint32_t i = 0; i < w; i++)
+        memcpy(k->mem + garray + i * sizeof nn_layer, &nn_layer, sizeof nn_layer);
+    rl_st32(k->mem, gcount, w);
+    return w < n ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+/** @brief True when the guest string at g names the console's layer. */
+static bool is_nn_layer(vkf_call *k, uint64_t g)
+{
+    return !strncmp((const char *)k->mem + g, NN_LAYER, sizeof NN_LAYER);
+}
+
+uint64_t vkh_vkEnumerateInstanceLayerProperties(rl_ctx *restrict c, uint8_t *mem)
+{
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceLayerProperties, answer_layers(&k, 1, c->x[0], c->x[1]));
+    return vkf_end(&k);
+}
+
+uint64_t vkh_vkEnumerateDeviceLayerProperties(rl_ctx *restrict c, uint8_t *mem)
+{
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    if (!vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]))
+        return vkf_bad_handle(&k, VKG_vkEnumerateDeviceLayerProperties, c->x[0]);
+    uint32_t n = k.obj->inst && k.obj->inst->nn_layer ? 1 : 0;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateDeviceLayerProperties, answer_layers(&k, n, c->x[1], c->x[2]));
+    return vkf_end(&k);
+}
+
 uint64_t vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
     vkf_begin(&k, c, mem);
     if (c->x[0]) {
-        rl_st32(mem, c->x[1], 0);
-        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceExtensionProperties, VK_ERROR_LAYER_NOT_PRESENT);
+        int32_t r = VK_ERROR_LAYER_NOT_PRESENT;
+        if (is_nn_layer(&k, c->x[0]))
+            r = answer_exts(&k, nn_layer_instance_exts, 1, c->x[1], c->x[2]);
+        else
+            rl_st32(mem, c->x[1], 0);
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceExtensionProperties, r);
         return vkf_end(&k);
     }
     uint32_t n;
@@ -802,7 +868,9 @@ uint64_t vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *m
     uint32_t n = 0;
     if (c->x[1] || f(pd, NULL, &n, NULL) < 0) {
         rl_st32(mem, c->x[2], 0);
-        c->x[0] = c->x[1] ? (uint32_t)VK_ERROR_LAYER_NOT_PRESENT : (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = !c->x[1]                  ? (uint32_t)VK_ERROR_INITIALIZATION_FAILED
+                  : is_nn_layer(&k, c->x[1]) ? (uint32_t)VK_SUCCESS
+                                             : (uint32_t)VK_ERROR_LAYER_NOT_PRESENT;
         return vkf_end(&k);
     }
     VkExtensionProperties *host = vkf_alloc(&k, (n + 1) * sizeof *host);
@@ -834,6 +902,17 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
         c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
+    bool nn = false;
+    for (uint32_t i = 0; i < ci->enabledLayerCount; i++) {
+        if (strcmp(ci->ppEnabledLayerNames[i], NN_LAYER) != 0) {
+            rl_log(RL_LOG_WARN, "vk", "vkCreateInstance: layer %s is not one the console has", ci->ppEnabledLayerNames[i]);
+            c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, VK_ERROR_LAYER_NOT_PRESENT);
+            return vkf_end(&k);
+        }
+        nn = true;
+    }
+    ci->enabledLayerCount = 0;
+    ci->ppEnabledLayerNames = NULL;
     uint32_t n_host;
     const VkExtensionProperties *host = host_instance_exts(&k, &n_host);
     const rl_vk_surface_provider *sp = vkf.cfg.surfaces;
@@ -902,6 +981,7 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
         abort();
     st->api_version = app->apiVersion;
     st->vi_surface = vi;
+    st->nn_layer = nn;
     vkf_load_instance(&st->fns, inst);
     vkf_obj *o = vkf_obj_add(VKG_KIND_VkInstance, inst, NULL, &st->fns);
     o->inst = st;
@@ -1031,6 +1111,8 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     }
     ci->ppEnabledExtensionNames = exts;
     ci->enabledExtensionCount = n;
+    ci->enabledLayerCount = 0;
+    ci->ppEnabledLayerNames = NULL;
     if (chain) {
         VkBaseOutStructure *last = chain;
         while (last->pNext)

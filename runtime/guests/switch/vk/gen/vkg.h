@@ -1417,6 +1417,8 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem);
 uint64_t vkh_vkDestroyInstance(rl_ctx *restrict c, uint8_t *mem);
 uint64_t vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem);
 uint64_t vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *mem);
+uint64_t vkh_vkEnumerateInstanceLayerProperties(rl_ctx *restrict c, uint8_t *mem);
+uint64_t vkh_vkEnumerateDeviceLayerProperties(rl_ctx *restrict c, uint8_t *mem);
 uint64_t vkh_vkGetPhysicalDeviceQueueFamilyProperties(rl_ctx *restrict c, uint8_t *mem);
 uint64_t vkh_vkGetPhysicalDeviceQueueFamilyProperties2(rl_ctx *restrict c, uint8_t *mem);
 uint64_t vkh_vkGetDeviceQueue(rl_ctx *restrict c, uint8_t *mem);

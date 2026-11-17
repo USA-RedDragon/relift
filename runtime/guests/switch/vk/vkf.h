@@ -122,6 +122,8 @@ struct vkf_inst {
     uint32_t api_version;
     /** @brief The guest enabled VK_NN_vi_surface. */
     bool vi_surface;
+    /** @brief The guest enabled the console's swapchain layer (vkEnumerateDeviceLayerProperties lists it). */
+    bool nn_layer;
     /** @brief The host physical device the guest sees, chosen on first enumeration. */
     void *physical;
 };

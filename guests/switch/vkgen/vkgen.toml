@@ -63,6 +63,8 @@ hand_commands = [
     "vkDestroyInstance",
     "vkEnumerateInstanceExtensionProperties",
     "vkEnumerateDeviceExtensionProperties",
+    "vkEnumerateInstanceLayerProperties",
+    "vkEnumerateDeviceLayerProperties",
     "vkGetPhysicalDeviceQueueFamilyProperties",
     "vkGetPhysicalDeviceQueueFamilyProperties2",
     "vkGetDeviceQueue",

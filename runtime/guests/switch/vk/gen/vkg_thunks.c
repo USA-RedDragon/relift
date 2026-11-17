@@ -2158,38 +2158,6 @@ static uint64_t vkt_vkEndCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static uint64_t vkt_vkEnumerateDeviceLayerProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkEnumerateDeviceLayerProperties, c->x[0]);
-    uint32_t * a1 = (uint32_t *)vkf_ptr(&k, c->x[1]);
-    VkLayerProperties * a2 = (VkLayerProperties *)vkf_ptr(&k, c->x[2]);
-    PFN_vkEnumerateDeviceLayerProperties fn = (PFN_vkEnumerateDeviceLayerProperties)k.fns->f[VKG_vkEnumerateDeviceLayerProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkEnumerateDeviceLayerProperties);
-    VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateDeviceLayerProperties, r);
-    return vkf_end(&k);
-}
-
-static uint64_t vkt_vkEnumerateInstanceLayerProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    uint32_t * a0 = (uint32_t *)vkf_ptr(&k, c->x[0]);
-    VkLayerProperties * a1 = (VkLayerProperties *)vkf_ptr(&k, c->x[1]);
-    vkf_global(&k);
-    PFN_vkEnumerateInstanceLayerProperties fn = (PFN_vkEnumerateInstanceLayerProperties)k.fns->f[VKG_vkEnumerateInstanceLayerProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkEnumerateInstanceLayerProperties);
-    VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceLayerProperties, r);
-    return vkf_end(&k);
-}
-
 static uint64_t vkt_vkGetBufferDeviceAddress(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -3988,9 +3956,9 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkDeviceWaitIdle,
     vkt_vkEndCommandBuffer,
     vkh_vkEnumerateDeviceExtensionProperties,
-    vkt_vkEnumerateDeviceLayerProperties,
+    vkh_vkEnumerateDeviceLayerProperties,
     vkh_vkEnumerateInstanceExtensionProperties,
-    vkt_vkEnumerateInstanceLayerProperties,
+    vkh_vkEnumerateInstanceLayerProperties,
     vkh_vkEnumerateInstanceVersion,
     vkh_vkEnumeratePhysicalDeviceGroups,
     vkh_vkEnumeratePhysicalDevices,
