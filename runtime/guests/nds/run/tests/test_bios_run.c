@@ -66,7 +66,7 @@ static void make_rom(void)
 }
 
 /** @brief The ARM9: idles into a halt nothing ends. */
-static int arm9_main(rl_ctx *c, uint8_t *mem)
+static uint64_t arm9_main(rl_ctx *c, uint8_t *mem)
 {
     if (rl_nds_cpu_enter(c, 0, 0))
         return rl_nds_cpu_variant(c, ENTRY9, 0)(c, mem);
@@ -75,7 +75,7 @@ static int arm9_main(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief The game's IRQ handler: stops the timer, acknowledges IF and ORs the bits into the BIOS flags, then returns through LR. */
-static int handler7(rl_ctx *c, uint8_t *mem)
+static uint64_t handler7(rl_ctx *c, uint8_t *mem)
 {
     T.handler_calls++;
     T.handler_r0 = c->r[0];
@@ -89,7 +89,7 @@ static int handler7(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief The Open callback of the decompression: returns the header word at r0. */
-static int open7(rl_ctx *c, uint8_t *mem)
+static uint64_t open7(rl_ctx *c, uint8_t *mem)
 {
     T.open_calls++;
     c->r[0] = (uint32_t)rl_nds_cpu_read(c, mem, c->r[0], 4);
@@ -97,7 +97,7 @@ static int open7(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief The Get_8bit callback: returns the byte at r0. */
-static int get8_7(rl_ctx *c, uint8_t *mem)
+static uint64_t get8_7(rl_ctx *c, uint8_t *mem)
 {
     T.get8_calls++;
     c->r[0] = (uint32_t)rl_nds_cpu_read(c, mem, c->r[0], 1);
@@ -111,7 +111,7 @@ static int swi(rl_ctx *c, uint8_t *mem, unsigned number, uint32_t next)
     return rl_nds_swi_trap(c, mem, number);
 }
 
-static int arm7_main(rl_ctx *c, uint8_t *mem)
+static uint64_t arm7_main(rl_ctx *c, uint8_t *mem)
 {
     if (rl_nds_cpu_enter(c, 1, 0))
         return rl_nds_cpu_variant(c, ENTRY7, 0)(c, mem);

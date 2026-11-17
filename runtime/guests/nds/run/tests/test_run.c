@@ -66,7 +66,7 @@ static void wait_recv(rl_ctx *c, uint8_t *mem)
         c->time.budget -= 4;
 }
 
-static int arm9_body(rl_ctx *c, uint8_t *mem)
+static uint64_t arm9_body(rl_ctx *c, uint8_t *mem)
 {
     T.boot_sp9 = c->r[13];
     T.boot_mode9 = c->m;
@@ -79,7 +79,7 @@ static int arm9_body(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-static int arm9_main(rl_ctx *c, uint8_t *mem)
+static uint64_t arm9_main(rl_ctx *c, uint8_t *mem)
 {
     if (rl_nds_cpu_enter(c, 0, 0))
         return rl_nds_cpu_variant(c, ENTRY9, 0)(c, mem);
@@ -87,7 +87,7 @@ static int arm9_main(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief The ARM9's function of the second unit at the same entry, lifted from other bytes. */
-static int arm9_other(rl_ctx *c, uint8_t *mem)
+static uint64_t arm9_other(rl_ctx *c, uint8_t *mem)
 {
     if (rl_nds_cpu_enter(c, 2, 0))
         return rl_nds_cpu_variant(c, ENTRY9, 0)(c, mem);
@@ -95,7 +95,7 @@ static int arm9_other(rl_ctx *c, uint8_t *mem)
     return arm9_body(c, mem);
 }
 
-static int arm7_main(rl_ctx *c, uint8_t *mem)
+static uint64_t arm7_main(rl_ctx *c, uint8_t *mem)
 {
     if (rl_nds_cpu_enter(c, 1, 0))
         return rl_nds_cpu_variant(c, ENTRY7, 0)(c, mem);

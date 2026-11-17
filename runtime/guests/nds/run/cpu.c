@@ -202,7 +202,7 @@ static uint64_t irq_return(rl_ctx *c, uint8_t *mem, uint64_t expected);
  * do not pile up host frames. Code no unit was lifted from stops the
  * program with the CPU, the address and the bytes there.
  */
-static int unfound(rl_ctx *c, uint8_t *mem)
+static uint64_t unfound(rl_ctx *c, uint8_t *mem)
 {
     rl_nds_arm *k = cpu_of(c);
     uint32_t pc = c->pc & ~1u;
