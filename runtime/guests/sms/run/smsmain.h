@@ -97,7 +97,10 @@ RL_RUNTIME_API const rl_sms_stats *rl_sms_stats_get(void);
  * VRAM and CRAM hashes and the VDP position), --insn-log FILE with
  * --insn-count N (rl_sms_trace),
  * --png-dir DIR with --png-every N, --raw-dir DIR with --raw-from A and
- * --raw-to B (the VDP colours of frames A to B as fNNNNNN.bin), --stats.
+ * --raw-to B (the VDP colours of frames A to B as fNNNNNN.bin), --wav FILE
+ * (the sound as 44100 Hz stereo WAV), --no-audio, --stats. In a window the
+ * sound goes to the host output and the frames are paced on its queue; with
+ * --frames or --wav the program prints the sound's length, peak and hash.
  */
 RL_RUNTIME_API int rl_sms_main(const rl_sms_program *p, int argc, char **argv);
 
