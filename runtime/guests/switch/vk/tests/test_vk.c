@@ -1219,6 +1219,16 @@ TEST(vk_vi_surface_presents_headless)
         CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", pds[i], surface, gcaps)), VK_SUCCESS);
         VkSurfaceCapabilitiesKHR caps;
         memcpy(&caps, g_mem + gcaps, sizeof caps);
+        CHECK_EQ(caps.minImageCount, 2);
+        CHECK_EQ(caps.maxImageCount, 3);
+        CHECK_EQ(caps.minImageExtent.width, 1);
+        CHECK_EQ(caps.maxImageExtent.width, 4096);
+        CHECK_EQ(caps.maxImageExtent.height, 4096);
+        CHECK_EQ(caps.maxImageArrayLayers, 1);
+        CHECK_EQ(caps.supportedTransforms, VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR);
+        CHECK_EQ(caps.currentTransform, VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR);
+        CHECK_EQ(caps.supportedCompositeAlpha, VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR);
+        CHECK_EQ(caps.supportedUsageFlags, 0x9fu);
         uint64_t gfn = galloc(4);
         CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceFormatsKHR", pds[i], surface, gfn, 0)), VK_SUCCESS);
         CHECK(g32(gfn) > 0);
@@ -1254,7 +1264,7 @@ TEST(vk_vi_surface_presents_headless)
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .preTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = VK_PRESENT_MODE_FIFO_KHR,
             .clipped = VK_TRUE,
@@ -1441,7 +1451,7 @@ TEST(vk_a_lost_host_surface_is_made_again_behind_the_guest)
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .preTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = VK_PRESENT_MODE_FIFO_KHR,
             .clipped = VK_TRUE,
@@ -1539,7 +1549,7 @@ TEST(vk_a_host_swapchain_without_its_semaphores_is_an_error)
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .preTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = VK_PRESENT_MODE_FIFO_KHR,
             .clipped = VK_TRUE,
@@ -1631,7 +1641,7 @@ TEST(vk_a_paused_frame_repaints_through_suboptimal_presents)
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .preTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = VK_PRESENT_MODE_FIFO_KHR,
             .clipped = VK_TRUE,
@@ -2102,7 +2112,7 @@ TEST(vk_vi_surface_works_offscreen_without_headless_surface)
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+        .preTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = VK_PRESENT_MODE_FIFO_KHR,
         .clipped = VK_TRUE,

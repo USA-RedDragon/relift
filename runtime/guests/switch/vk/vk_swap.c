@@ -160,27 +160,36 @@ void vkf_surface_extent(uint64_t surface, uint32_t guest[2], uint32_t host[2], u
     }
 }
 
+/** @brief Largest image side of a vi surface. */
+#define VI_MAX_EXTENT 4096u
+
+/**
+ * @brief The capabilities the console's swapchain layer reports for a vi
+ * surface, read from NvSwapchain::GetPhysicalDeviceSurfaceCapabilitiesKHR in
+ * the SDK's vulkan.nso (build 590d76cc419d9397b6859527d4262ce7deaa54e8,
+ * verified): 2 to 3 images, extents 1x1 to 4096x4096 with the window's size
+ * as the current extent (0xFFFFFFFF when a side is outside that range), one
+ * array layer, INHERIT as the only and current transform, opaque alpha, and
+ * transfer, sampled, storage, color and input attachment usage.
+ */
 void vkf_vi_caps(uint64_t surface, VkSurfaceCapabilitiesKHR *caps)
 {
     uint32_t guest[2], host[2];
     uint64_t gen;
     vkf_surface_extent(surface, guest, host, &gen);
-    caps->currentExtent = (VkExtent2D){ guest[0], guest[1] };
+    bool fits = guest[0] - 1u < VI_MAX_EXTENT && guest[1] - 1u < VI_MAX_EXTENT;
+    caps->currentExtent = fits ? (VkExtent2D){ guest[0], guest[1] } : (VkExtent2D){ UINT32_MAX, UINT32_MAX };
     caps->minImageExtent = (VkExtent2D){ 1, 1 };
-    if (caps->maxImageExtent.width < guest[0])
-        caps->maxImageExtent.width = guest[0];
-    if (caps->maxImageExtent.height < guest[1])
-        caps->maxImageExtent.height = guest[1];
+    caps->maxImageExtent = (VkExtent2D){ VI_MAX_EXTENT, VI_MAX_EXTENT };
     caps->minImageCount = 2;
-    caps->maxImageCount = SWAP_MAX;
-    if (!caps->maxImageArrayLayers)
-        caps->maxImageArrayLayers = 1;
-    caps->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    caps->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    caps->maxImageCount = 3;
+    caps->maxImageArrayLayers = 1;
+    caps->supportedTransforms = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR;
+    caps->currentTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR;
     caps->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    caps->supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    caps->supportedUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+                                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 }
 
 uint64_t vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem)
