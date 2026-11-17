@@ -6,11 +6,12 @@
 //! scheduler. The ARM9 starts timer 0, divides with the DIV unit, sends the
 //! quotient over the IPC FIFO, waits for the ARM7's answer (three times the
 //! word plus one, which the ARM7 gets from the BIOS's `Div`), writes it, the timer's progress and a done mark to main
-//! RAM, stops the timer and waits for an interrupt in CP15; the ARM7
-//! halts. With no event left that could wake either CPU, the run ends. The test checks
-//! the words, that both CPUs halted, and that no code was missed or left
-//! unlifted. Skipped with a note when clang, ld.lld or llvm-objcopy is not
-//! on `PATH`.
+//! RAM, stops the timer, tells the ARM7 over the FIFO and waits for an
+//! interrupt in CP15 with IE clear (it stays halted); the ARM7 then turns the
+//! console off through bit 6 of power management register 0 on the SPI bus,
+//! which ends the run with status 0. The test checks the words, the power-off,
+//! and that no code was missed or left unlifted. Skipped with a note when
+//! clang, ld.lld or llvm-objcopy is not on `PATH`.
 
 mod tiny;
 
@@ -46,6 +47,7 @@ __attribute__((section(".text.start"), noreturn)) void _start(void)
     R32(0x02100004) = ticks != 0;
     R32(0x02100008) = 0xC0DE;
     R16(0x04000102) = 0;
+    R32(0x04000188) = 1;
     for (;;)
         __asm__ volatile("mcr p15, 0, %0, c7, c0, 4" ::"r"(0));
 }
@@ -66,6 +68,15 @@ __attribute__((section(".text.start"), noreturn)) void _start(void)
     register unsigned d __asm__("r1") = 7;
     __asm__ volatile("swi 0x090000" : "+r"(n), "+r"(d)::"r3", "memory");
     R32(0x04000188) = n;
+    while (R16(0x04000184) & 0x100)
+        ;
+    (void)R32(0x04100000);
+    R16(0x040001C0) = 0x8800;
+    R16(0x040001C2) = 0x00;
+    while (R16(0x040001C0) & 0x80)
+        ;
+    R16(0x040001C0) = 0x8000;
+    R16(0x040001C2) = 0x40;
     for (;;)
         R8(0x04000301) = 0x80;
 }
@@ -241,8 +252,7 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
             .find(|l| l.starts_with(&format!("relift-nds: {cpu} ")))
             .unwrap_or_default();
         assert!(
-            line.contains("halted")
-                && line.contains("unfound 0")
+            line.contains("unfound 0")
                 && line.contains(if cpu == "arm7" {
                     "swis 1 (0 unknown)"
                 } else {
@@ -251,5 +261,6 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
             "{cpu}: {err}"
         );
     }
+    assert!(err.contains("turned the console off"), "{err}");
     assert!(err.contains("misses 0"), "{err}");
 }

@@ -2,7 +2,8 @@
  * @file spi.c
  * @brief The ARM7's SPI bus: SPICNT and SPIDATA (baud rates, busy time,
  * chip select hold, the transfer-complete IRQ) and its three devices: the
- * power management device (registers 0 to 4), the firmware flash (read,
+ * power management device (registers 0 to 4; bit 6 of register 0 turns
+ * the console off through a hook), the firmware flash (read,
  * fast read, JEDEC ID, status, write enable and the page and sector
  * commands, over the generated image of firmware.c) and the touch screen
  * controller (12-bit and 8-bit conversions of the pen, with the next
@@ -33,9 +34,13 @@ void nds_spi_reset(rl_nds *m)
 {
     nds_spi *s = &m->spi;
     uint8_t *fw = s->fw;
+    rl_nds_power_off_fn *off_fn = s->off_fn;
+    void *off_user = s->off_user;
     memset(s, 0, sizeof *s);
     s->m = m;
     s->fw = fw;
+    s->off_fn = off_fn;
+    s->off_user = off_user;
     s->pm[4] = 0x40;
     if (!s->fw) {
         s->fw = malloc(NDS_FIRMWARE_SIZE);
@@ -116,7 +121,7 @@ static uint8_t touch_byte(nds_spi *s, uint8_t in)
     return out;
 }
 
-static uint8_t power_byte(nds_spi *s, unsigned pos, uint8_t in)
+static uint8_t power_byte(nds_spi *s, unsigned pos, uint8_t in, uint64_t now)
 {
     if (pos == 0) {
         s->op = in;
@@ -128,8 +133,21 @@ static uint8_t power_byte(nds_spi *s, unsigned pos, uint8_t in)
     static const uint8_t mask[8] = {0x7F, 0, 0x01, 0x03, 0x0F, 0, 0, 0};
     if (pos == 1 && mask[reg])
         s->pm[reg] = (uint8_t)((reg == 4 ? 0x40 : 0) | (in & mask[reg]));
+    if (pos == 1 && reg == 0 && (in & 0x40) && !s->off) {
+        s->off = true;
+        if (s->off_fn)
+            s->off_fn(s->off_user, now);
+    }
     return 0;
 }
+
+void rl_nds_set_power_off_hook(rl_nds *m, rl_nds_power_off_fn *fn, void *user)
+{
+    m->spi.off_fn = fn;
+    m->spi.off_user = user;
+}
+
+bool rl_nds_powered_off(const rl_nds *m) { return m->spi.off; }
 
 static uint8_t flash_byte(nds_spi *s, unsigned pos, uint8_t in)
 {
@@ -210,7 +228,7 @@ void nds_spi_write(rl_nds *m, uint32_t v, uint32_t mask, uint64_t now)
     unsigned pos = s->pos[dev];
     switch (dev) {
     case NDS_SPI_POWER:
-        out = power_byte(s, pos, in);
+        out = power_byte(s, pos, in, now);
         break;
     case NDS_SPI_FIRMWARE:
         out = flash_byte(s, pos, in);

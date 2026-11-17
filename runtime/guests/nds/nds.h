@@ -228,6 +228,15 @@ typedef void rl_nds_frame_fn(void *user, const uint32_t *pixels, uint64_t when);
  * good; without one the display draws only when something reads it.
  */
 void rl_nds_set_frame_hook(rl_nds *m, rl_nds_frame_fn *fn, void *user);
+/**
+ * @brief Called when the ARM7 sets bit 6 of power management register 0
+ * ("DS System Power", 1 = shut down): the program turned the console off.
+ */
+typedef void rl_nds_power_off_fn(void *user, uint64_t when);
+/** @brief Sets the power-off hook (NULL for none). */
+void rl_nds_set_power_off_hook(rl_nds *m, rl_nds_power_off_fn *fn, void *user);
+/** @brief True once the program has turned the console off. */
+bool rl_nds_powered_off(const rl_nds *m);
 /** @brief Frames finished so far (the display caught up to the ARM9's tick). */
 uint64_t rl_nds_frames(rl_nds *m);
 /** @brief The last finished frame (as the frame hook gets it), or NULL before the first. */

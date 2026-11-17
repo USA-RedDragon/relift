@@ -198,7 +198,6 @@ static void save_now(void)
         rl_log(RL_LOG_WARN, "nds", "could not write the save %s", H.save);
 }
 
-/** @brief Once per emulated second: writes a save that has been quiet for a second. */
 /**
  * @brief The --max-ticks bound as an event, so that it ends a run whose
  * CPUs sit in halts and never reach a sync point's tick check.
@@ -211,6 +210,15 @@ static void max_tick(rl_sched *s, rl_event *e, uint64_t when)
     rl_process_exit(RL_EXIT_SOFTWARE);
 }
 
+/** @brief The program turned the console off: the run ends with status 0. */
+static void power_off(void *user, uint64_t when)
+{
+    (void)user;
+    fprintf(stderr, "relift-nds: the program turned the console off at tick %llu\n", (unsigned long long)when);
+    rl_process_exit(0);
+}
+
+/** @brief Once per emulated second: writes a save that has been quiet for a second. */
 static void save_tick(rl_sched *s, rl_event *e, uint64_t when)
 {
     if (H.save[0] && rl_nds_save_poll(H.run.m, H.save, RL_NDS_TICK_HZ) < 0)
@@ -344,6 +352,7 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
         H.max_ev = (rl_event){.fire = max_tick};
         rl_sched_post(H.run.s, &H.max_ev, max_ticks + 1);
     }
+    rl_nds_set_power_off_hook(H.run.m, power_off, NULL);
     rl_set_exit_hook(on_exit_code);
     int r = rl_nds_run_start(&H.run);
     rl_set_exit_hook(NULL);

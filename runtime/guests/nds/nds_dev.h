@@ -106,6 +106,10 @@ typedef struct nds_spi {
     bool open[3];
     unsigned pos[3];
     uint8_t pm[8];
+    /** @brief Set once register 0 bit 6 shut the console down, and the hook told of it. */
+    bool off;
+    rl_nds_power_off_fn *off_fn;
+    void *off_user;
     /** @brief Firmware flash. */
     uint8_t op;
     uint32_t addr;

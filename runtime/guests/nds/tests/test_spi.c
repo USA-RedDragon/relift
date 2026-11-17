@@ -84,6 +84,33 @@ TEST(power_management_registers_start_and_mask_as_the_oracle_shows)
     }
 }
 
+static void count_off(void *user, uint64_t when)
+{
+    (void)when;
+    ++*(unsigned *)user;
+}
+
+TEST(bit_6_of_power_register_0_turns_the_console_off_once)
+{
+    ndst *t = fixture();
+    unsigned offs = 0;
+    rl_nds_set_power_off_hook(t->m, count_off, &offs);
+    spi(t, 0, true, 0x00);
+    spi(t, 0, false, 0x0D);
+    CHECK_EQ(offs, 0);
+    CHECK(!rl_nds_powered_off(t->m));
+    spi(t, 0, true, 0x80);
+    CHECK_EQ(spi(t, 0, false, 0x40), 0x0D);
+    CHECK_EQ(offs, 0);
+    spi(t, 0, true, 0x00);
+    spi(t, 0, false, 0x4D);
+    CHECK_EQ(offs, 1);
+    CHECK(rl_nds_powered_off(t->m));
+    spi(t, 0, true, 0x00);
+    spi(t, 0, false, 0x4D);
+    CHECK_EQ(offs, 1);
+}
+
 TEST(firmware_flash_answers_the_jedec_id_status_and_reads_the_generated_header)
 {
     ndst *t = fixture();
