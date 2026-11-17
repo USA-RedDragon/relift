@@ -112,7 +112,7 @@ static Img mkimage(int type, int w, int h, int d, int levels, const char *fs) {
     ii.extent = (VkExtent3D){ w, r.h, r.d };
     ii.mipLevels = levels; ii.arrayLayers = r.layers;
     ii.samples = 1; ii.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     CK(vkCreateImage(dev, &ii, 0, &r.im));
     VkMemoryRequirements mr; vkGetImageMemoryRequirements(dev, r.im, &mr);
     VkMemoryAllocateInfo ai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0, mr.size, memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
