@@ -1,0 +1,19 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430) buffer Words { uint d[]; };
+layout(push_constant) uniform Bank { Words a; Words o; };
+layout(set = 2, binding = 51, r32ui) uniform uimage2D img[4];
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    uint v = a.d[g];
+    bool p = (v & 1u) != 0u;
+    int x = int(g % 16u), y = int(g / 16u);
+    imageStore(img[0], ivec2(x, y), uvec4(p ? v : v * v));
+    imageAtomicAdd(img[0], ivec2(int(g % 32u), 32 + int(g / 32u)), v >> 8);
+    imageStore(img[0], ivec2(x + 16, y), uvec4(p ? v + 1u : (v + 1u) * (v + 1u)));
+    imageStore(img[0], ivec2(x, y + 16), uvec4(p ? v + 2u : (v + 2u) * (v + 2u)));
+    imageAtomicMax(img[0], ivec2(int(g % 32u), 32 + int(g / 32u)), v);
+    imageStore(img[0], ivec2(x + 16, y + 16), uvec4(p ? v + 3u : (v + 3u) * (v + 3u)));
+    o.d[g] = p ? v ^ 0x55u : v + 7u;
+}

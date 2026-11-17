@@ -1,0 +1,16 @@
+input 0 1024 u32 11
+spv SPV
+local 64 1 1
+groups 4 1 1
+buf IN0
+out OUT 1024
+push 0x0 addr 0
+push 0x8 addr 1
+image 2d 32 48 1 1 r32u
+view 51 0
+view 99 0
+spec 256 2
+put 0 0x20 addr 0
+put 0 0x28 addr 1
+put 2 0x230 u32 0
+dump OUTimg
