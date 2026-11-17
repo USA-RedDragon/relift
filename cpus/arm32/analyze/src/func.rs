@@ -1437,8 +1437,10 @@ impl Run<'_> {
 
     /// A transfer from `site` to `t`; `computed` when the instruction's
     /// target is a register or a load (`enc`'s exit is dynamic): a constant
-    /// target is then a function entry of its own, as the lifted code
-    /// reaches it through dispatch (a veneer's `LDR R12, [PC]; BX R12`).
+    /// target is then also a function entry of its own, as the lifted code
+    /// reaches it through dispatch (a veneer's `LDR R12, [PC]; BX R12`),
+    /// while this run goes on there with what it knows (a boot that jumps
+    /// to code it copied).
     fn jump(
         &mut self,
         site: Loc,
@@ -1492,7 +1494,15 @@ impl Run<'_> {
                     return;
                 }
                 for to in self.targets(site, v, thumb) {
-                    if to != self.entry && (computed || self.env.entries.contains(&to)) {
+                    if computed && to != self.entry && !self.env.entries.contains(&to) {
+                        self.out.edges.push(Edge {
+                            site,
+                            target: to,
+                            kind: EdgeKind::Tail,
+                        });
+                        self.out.edge_psr.push(st.psr());
+                        self.succ(site, to, st.clone());
+                    } else if to != self.entry && self.env.entries.contains(&to) {
                         self.tail(site, to, st);
                     } else {
                         self.succ(site, to, st.clone());
