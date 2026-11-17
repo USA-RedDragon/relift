@@ -94,3 +94,32 @@ mesh pass is most of it.
 `KAT_SLOTS=<n>` translates the compute back end for `n` guest workgroups per
 workgroup and `KAT_SUBGROUP=<size>` runs its passes in full subgroups of
 that size.
+
+## Compute programs from the driver
+
+    CARGO_TARGET_DIR=<dir> python3 -I kat/compute/kat.py <absolute work dir> [--record tests/kat/compute.txt] [case ...]
+
+needs the NVIDIA device, glslangValidator, spirv-val, zstd, the Vulkan
+headers and release builds of `relift-shaders` and the `xlate` and `dis`
+examples. Each case under `kat/compute/cases` (a GLSL compute shader,
+`k.comp`, and a `krun.c` spec with its inputs) runs on the device for the
+reference outputs; `relift-shaders` carves the SASS the driver built from
+its pipeline cache, which is translated for every host preset in
+`KAT_HOSTS`, validated, and run by `krun.c` on every device in `KAT_DEVS`
+(default llvmpipe and the NVIDIA device). Every output must equal the
+reference word for word, except where the translator reports the program
+inexact for that host. `--record` writes the SASS, the inputs and the
+reference outputs.
+
+    KAT_DEVS=llvmpipe KAT_HOSTS="lavapipe mali adreno" python3 -I kat/compute/kat.py <absolute work dir> --replay tests/kat/compute.txt
+
+runs the recorded programs instead and needs no NVIDIA device.
+`tests/compute_kat.rs` checks that every recorded program still translates
+and validates for every host preset.
+
+| case | what it covers |
+|---|---|
+| bssy | a BSSY region the driver leaves through two BREAKs and reconverges after a branch, with ballots, a WARPSYNC of the running lanes and a subgroup reduction after it |
+| i64, i64add | 64-bit global atomics, with and without the lock on hosts without them |
+| membar | MEMBAR.VC between shared memory stores and loads around a BAR |
+| texoff | texel offsets on TEX and TLD, strong 128-bit loads and stores |

@@ -1,0 +1,32 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430) buffer Q { uint64_t q[]; };
+layout(buffer_reference, std430) buffer W { uint w[]; };
+layout(buffer_reference, std430) buffer B8 { uint8_t b[]; };
+layout(push_constant) uniform Bank { W a; Q acc; W o; B8 bytes; };
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    uint x = a.w[g];
+    uint y = a.w[(g * 7u + 3u) & 255u];
+    uint64_t v = (uint64_t(y) << 32) | uint64_t(x);
+    atomicAdd(acc.q[0], v);
+    atomicMin(acc.q[1], v);
+    atomicMax(acc.q[2], v);
+    atomicAnd(acc.q[3], v | 0xffff0000ffff0000ul);
+    atomicOr(acc.q[4], v & 0x0f0f0f0f0f0f0f0ful);
+    atomicXor(acc.q[5], v);
+    int64_t s = int64_t(v);
+    atomicMin(Q(acc).q[6], uint64_t(0));
+    uint64_t prev = atomicCompSwap(acc.q[8 + g], uint64_t(g), v);
+    uint64_t ex = atomicExchange(acc.q[8 + 256 + g], v ^ 0x5555ul);
+    o.w[4u * g] = uint(prev);
+    o.w[4u * g + 1u] = uint(prev >> 32);
+    o.w[4u * g + 2u] = uint(ex);
+    o.w[4u * g + 3u] = uint(ex >> 32);
+    bytes.b[g * 3u + 1u] = uint8_t(x);
+}

@@ -1,0 +1,14 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+layout(local_size_x = 128) in;
+layout(buffer_reference, std430) buffer Words { uint d[]; };
+layout(push_constant) uniform Bank { Words a; Words o; };
+shared uint s[128];
+void main() {
+    uint i = gl_LocalInvocationIndex;
+    uint g = gl_GlobalInvocationID.x;
+    s[i] = a.d[g] * 3u + 1u;
+    groupMemoryBarrier();
+    barrier();
+    o.d[g] = s[(i + 1u) & 127u] ^ s[i];
+}

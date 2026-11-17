@@ -1,0 +1,36 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430) buffer W { uint w[]; };
+layout(push_constant) uniform Bank { W a; W o; };
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    uint v = a.w[g];
+    uint k = v & 0xffu;
+    uint r = 0u;
+    do {
+        if (k >= 0x80u) {
+            if (k != 0xffu && (v & 0x100u) != 0u) {
+                o.w[256u + g] = k;
+                break;
+            }
+        } else if (k != 0u && (v & 0x200u) != 0u) {
+            o.w[256u + g] = k + 1u;
+            break;
+        }
+        if ((v & 0x400u) != 0u) {
+            r = 7u;
+            break;
+        }
+        float d = float(v >> 16) * 0.001;
+        if (d < 3.0) {
+            r = 9u;
+            break;
+        }
+        uvec4 b = subgroupBallot(true);
+        r = subgroupBallotExclusiveBitCount(b) + 100u * subgroupAdd(k);
+    } while (false);
+    o.w[g] = r;
+}
