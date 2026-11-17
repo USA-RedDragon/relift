@@ -1,5 +1,6 @@
 [package]
 name = "relift-build"
+description = "Toolchain discovery and the Ninja writer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

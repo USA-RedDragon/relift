@@ -1,5 +1,6 @@
 [package]
 name = "relift-n64-tools"
+description = "`relift-n64rom`: `info` prints byte order, header, boot variant and checksum check as text or JSON, `streams` lists the compressed streams, `normalize` writes a big-endian image, `functions` runs `relift-n64-analyze`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

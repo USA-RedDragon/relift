@@ -1,5 +1,6 @@
 [package]
 name = "relift-cache"
+description = "Content-addressed store, stage keys, and the one file writer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

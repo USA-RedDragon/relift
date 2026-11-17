@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-arm64"
+description = "ARM64 decoder and lifter to `relift-ir`; not tied to one guest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "relift-switch-tools"
+description = "`relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate; `relift-ir` prints the IR of A64 words or NSO symbols"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

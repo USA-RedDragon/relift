@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-arm32-analyze"
+description = "Function discovery for ARM and Thumb code on a machine a guest describes (`Platform`: CPU profile, memory map, image bytes, BIOS calls, DMA, IRQ vector): runs the lifted IR of each instruction over abstract values, so the state of every instruction comes from the Thumb bit the code sets; follows calls, Thumb `BL` pairs, `BX` with known registers, returns through the saved link register, shared epilogues reached by `BL`, bounded jump tables, tables of code addresses in the image, pointers stored in RAM and the IRQ vector; lifts code copied to work RAM (BIOS copies, DMA, calls run with constant arguments) at its run address; constants read are data, unknown targets are listed"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

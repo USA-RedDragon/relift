@@ -1,5 +1,6 @@
 [package]
 name = "relift-switch-names"
+description = "Switch symbol names as host names: Itanium names remangled into `guest::<module>`, the address fallback, and the reverse map"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

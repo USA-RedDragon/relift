@@ -1,5 +1,6 @@
 [package]
 name = "relift-diff"
+description = "The wire protocol, page cache and comparison of `relift diff`: one guest function run in a reference engine from a live process's state and compared with the lifted code's registers and pages; no CPU"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

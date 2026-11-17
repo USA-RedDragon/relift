@@ -1,5 +1,6 @@
 [package]
 name = "relift-nds-tools"
+description = "`relift-ndsrom`: `header` prints the header as text or JSON with its checks, `units` lists and hashes every decompressed static, autoload and overlay unit, `extract` writes them with a `units.json`, `files` lists the file system, `functions` finds the functions of every unit with `relift-nds-analyze` and writes a report per unit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

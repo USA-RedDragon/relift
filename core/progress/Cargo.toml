@@ -1,5 +1,6 @@
 [package]
 name = "relift-progress"
+description = "Progress output for `build` and `import`: live lines on a terminal, throttled plain lines elsewhere, color rules (`--color`, `NO_COLOR`, `TERM=dumb`), time from an injected clock"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

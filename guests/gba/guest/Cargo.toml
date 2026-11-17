@@ -1,5 +1,6 @@
 [package]
 name = "relift-gba"
+description = "The Game Boy Advance guest: the ARMv4T frontend (every access through the machine's bus, fetch and refill costs, SWI as a trap, a sync point after every instruction), and a ROM, discovered by `relift-gba-analyze`, lifted into one unit with its RAM copies, with `program.c`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

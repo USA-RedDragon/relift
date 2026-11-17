@@ -1,5 +1,6 @@
 [package]
 name = "relift"
+description = "The binary: settings, command dispatch, guest registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

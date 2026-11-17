@@ -1,5 +1,6 @@
 [package]
 name = "relift-analyze"
+description = "Function boundaries, CFG, jump tables, indirect targets, generic over a CPU frontend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

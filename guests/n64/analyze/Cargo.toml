@@ -1,5 +1,6 @@
 [package]
 name = "relift-n64-analyze"
+description = "Code discovery for VR4300 code: runs the lifted IR of each instruction (a branch with its delay slot) over abstract values from the boot code in DMEM and the entry the boot variant computes (or the segments of an ELF image an unknown boot code loads), the exception vectors and trampolines; follows calls, returns through the entry `ra`, tail calls, `ERET` to `EPC`, bounded jump and call tables and stored code addresses; tracks the PI and SP DMA registers along paths and through callee summaries, maps each constant PI DMA's cartridge bytes, and the words a constant copy loop moves, at their RDRAM address and runs again to a fixed point; scans the ROM and its Yay0, Yaz0 and MIO0 streams for dense code regions, links each at the address its own `JAL` targets vote for, roots frame allocations and the words after returns, and sweeps well-supported regions; reports code units keyed by source offset, link address and a hash with relocation fields cleared, function entries, unknown targets and RSP images (SP DMA uploads and RSP code by its vector instructions)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

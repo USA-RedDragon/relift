@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-arm32"
+description = "ARMv4T (Game Boy Advance and NDS ARM7TDMI) and ARMv5TE (NDS ARM946E-S) decoder and lifter to `relift-ir`, with templates generated from sail-arm AArch32 and one overlay per profile, checked against console records and qemu-arm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

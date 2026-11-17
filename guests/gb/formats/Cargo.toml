@@ -1,5 +1,6 @@
 [package]
 name = "relift-gb-formats"
+description = "Game Boy and Game Boy Color cartridge format: header, mapper kinds, ROM and RAM size codes, both checksums, bank layout; no dependencies"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

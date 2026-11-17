@@ -1,5 +1,6 @@
 [package]
 name = "relift-override"
+description = "The Rust override API for game repos"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

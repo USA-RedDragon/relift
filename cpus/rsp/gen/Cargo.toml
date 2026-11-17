@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-rsp-gen"
+description = "Generates the RSP decode table and lifting templates from sail-cheri-mips and `cpus/rsp/gen/rsp.sail`: the RSP cut (lane builtins, DMEM lines, the divider ROMs) and `Form` over `relift-sail`; run by hand, linked by nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

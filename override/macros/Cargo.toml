@@ -1,5 +1,6 @@
 [package]
 name = "relift-override-macros"
+description = "Override attribute macros for game repos"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

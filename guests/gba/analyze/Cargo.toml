@@ -1,5 +1,6 @@
 [package]
 name = "relift-gba-analyze"
+description = "Game Boy Advance function discovery: `relift-cpu-arm32-analyze` with the GBA memory map, cartridge ROM mirrors, IRQ vector, BIOS calls (`CpuSet`, `CpuFastSet`, resets) and DMA, from the reset entry or a multiboot image in work RAM"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

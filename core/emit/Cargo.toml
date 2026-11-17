@@ -1,5 +1,6 @@
 [package]
 name = "relift-emit"
+description = "IR to C, shards, `#line` and listings, memory strategy per host target"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

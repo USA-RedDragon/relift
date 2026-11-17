@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-rsp"
+description = "RSP (Nintendo 64 signal processor) decoder and lifter to `relift-ir`, with templates generated from sail-cheri-mips and an RSP overlay; the vector unit (COP2) is written over the IR's lane operations"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

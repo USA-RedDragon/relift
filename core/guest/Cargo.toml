@@ -1,5 +1,6 @@
 [package]
 name = "relift-guest"
+description = "The guest contract and vocabulary, including the `Naming` trait a guest implements for its symbol scheme"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

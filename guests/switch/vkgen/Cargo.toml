@@ -1,5 +1,6 @@
 [package]
 name = "relift-switch-vkgen"
+description = "`relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; standalone (nothing depends on it)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

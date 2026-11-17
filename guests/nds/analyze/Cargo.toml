@@ -1,5 +1,6 @@
 [package]
 name = "relift-nds-analyze"
+description = "Nintendo DS function discovery: `relift-cpu-arm32-analyze` with the ARM9 (ARMv5TE) and ARM7 (ARMv4T) memory maps, BIOS calls, DMA and IRQ slots; one run per unit (each static binary with its code autoload blocks, each overlay, known by id and content hash, over its processor's static binary), calls into other overlays taken to return, and calls between units fed back as entries until no new one appears"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

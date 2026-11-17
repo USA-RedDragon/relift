@@ -1,5 +1,6 @@
 [package]
 name = "relift-testguest"
+description = "Tiny synthetic guest the core is tested against"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

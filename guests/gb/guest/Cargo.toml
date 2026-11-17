@@ -1,5 +1,6 @@
 [package]
 name = "relift-gb"
+description = "The Game Boy guest: the exact-mode SM83 frontend (every access through the device library, a sync point after every instruction, `EI`, `DI`, `HALT` and `STOP` on the library's CPU) and a ROM lifted into one unit per bank, with `program.c`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

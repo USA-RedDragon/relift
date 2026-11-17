@@ -1,5 +1,6 @@
 [package]
 name = "relift-nds-formats"
+description = "Nintendo DS cartridge format: header with its CRC16s and logo hash, the SDK module parameters (ARM9 footer, marker words, the ARM7 literal-pool search), BLZ compression, static binaries with their autoload blocks, overlay tables and overlay files, file allocation and name tables; decrypted images only, reads bytes only"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

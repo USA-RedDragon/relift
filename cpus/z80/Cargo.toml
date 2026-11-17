@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-z80"
+description = "Z80 (NMOS) decoder, lifter to `relift-ir` over the templates generated from the Z80 Sail model (every page, the interrupt entries, port intrinsics and the T-state of every bus access) and the `Frontend` for the C emitter; no guest uses it yet"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

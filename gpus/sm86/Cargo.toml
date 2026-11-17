@@ -1,5 +1,6 @@
 [package]
 name = "relift-gpu-sm86"
+description = "NVIDIA SM86 (Ampere, Switch 2) SASS decoder with nvdisasm's text form, and a SASS to SPIR-V translator; field positions from Mesa NAK (MIT)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

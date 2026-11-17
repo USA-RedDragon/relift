@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-sm83-gen"
+description = "Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

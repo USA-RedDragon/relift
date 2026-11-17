@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-sm83"
+description = "SM83 (Game Boy and Game Boy Color) decoder, opcode table (length, M-cycles taken and not taken, flags, bus access per cycle) and lifter to `relift-ir`, with templates generated from the SM83 Sail model"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

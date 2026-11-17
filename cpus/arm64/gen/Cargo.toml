@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-arm64-gen"
+description = "Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

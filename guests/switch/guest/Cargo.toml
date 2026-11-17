@@ -1,5 +1,6 @@
 [package]
 name = "relift-switch"
+description = "The Switch guest, over its formats and `relift-cpu-arm64`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

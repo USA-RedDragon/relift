@@ -1,5 +1,6 @@
 [package]
 name = "relift-gb-tools"
+description = "`relift-gbrom`: prints a ROM's header as text or JSON and validates logo, checksums and size; `functions` runs `relift-gb-analyze`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

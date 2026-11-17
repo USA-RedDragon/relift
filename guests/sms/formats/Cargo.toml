@@ -1,5 +1,6 @@
 [package]
 name = "relift-sms-formats"
+description = "Master System, Game Gear and SG-1000 cartridge format: size and bank layout with odd sizes and the copier header, the `TMR SEGA` header and export BIOS checksum, the Codemasters header and checksum, system detection, a static mapper guess; reads bytes only"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

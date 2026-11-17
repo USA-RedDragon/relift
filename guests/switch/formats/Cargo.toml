@@ -1,5 +1,6 @@
 [package]
 name = "relift-switch-formats"
+description = "Decrypted Switch formats (romfs, NSO, NRO, NPDM, NUP) and the import of a `.nup` or an extracted dump tree"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

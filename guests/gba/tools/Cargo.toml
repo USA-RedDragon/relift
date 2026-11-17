@@ -1,5 +1,6 @@
 [package]
 name = "relift-gba-tools"
+description = "`relift-gbarom`: prints a ROM header as text or JSON, validates logo hash, complement and size, lists the save library strings and the multiboot entry; `functions` runs `relift-gba-analyze`, as a cartridge or with `--multiboot` from work RAM"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

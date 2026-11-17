@@ -1,5 +1,6 @@
 [package]
 name = "relift-n64"
+description = "The Nintendo 64 guest: the VR4300 frontend for the runtime's N64 layer (RDRAM as plain memory and every other address through the machine, a conditional device access leaving through its guard, a cycle per instruction and a sync point after every block, calls that open host frames, Count reads, CP0 writes applied at the sync point, `ERET` through the runtime), and a ROM, discovered by `relift-n64-analyze`, lifted into one unit per segment linked in RDRAM with `program.c`, which lists every code run with its source, link address and hash for the runtime to bind"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

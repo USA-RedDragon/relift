@@ -1,5 +1,6 @@
 [package]
 name = "relift-ir"
+description = "Guest-neutral IR: values, ops, explicit flags, memory ops with width, endianness and ordering; cycle ticks, I/O accesses, sync points and code banks for hardware-register guests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

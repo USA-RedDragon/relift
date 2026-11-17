@@ -1,5 +1,6 @@
 [package]
 name = "relift-gba-formats"
+description = "Game Boy Advance cartridge format: header, complement check, logo hash, size and mirror rules with the open-bus read, save library strings, the multiboot entry; reads bytes only"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-mips-gen"
+description = "Generates each MIPS profile's decode table and lifting templates from sail-cheri-mips and the profile's overlay (`vr4300.sail`, `r3000a.sail`): the MIPS cut and `Form` over `relift-sail`; run by hand, linked by nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

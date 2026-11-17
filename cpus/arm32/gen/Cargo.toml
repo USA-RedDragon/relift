@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-arm32-gen"
+description = "Generates the ARMv4T and ARMv5TE decode tables and lifting templates from sail-arm and `cpus/arm32/gen/armv4t.sail` and `armv5te.sail`: the 32-bit Arm cut and `Form` over `relift-sail`; run by hand, linked by nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-z80-gen"
+description = "Generates the Z80 lifting templates (`cpus/z80/src/lift/generated.rs`) from our Sail model `cpus/z80/sail/z80.sail`: the Z80 cut and `Form` over `relift-sail`; run by hand, linked by nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

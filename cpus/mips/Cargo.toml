@@ -1,5 +1,6 @@
 [package]
 name = "relift-cpu-mips"
+description = "MIPS decoders and lifters to `relift-ir`, one profile per CPU (VR4300, the Nintendo 64 CPU; an R3000A stub, the PlayStation CPU), with templates generated from sail-cheri-mips and a per-profile overlay; a branch lifts with its delay slot"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

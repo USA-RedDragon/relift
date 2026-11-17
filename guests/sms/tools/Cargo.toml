@@ -1,5 +1,6 @@
 [package]
 name = "relift-sms-tools"
+description = "`relift-smsrom`: `info` prints a ROM's layout, headers, checksums, system and mapper guess as text or JSON"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

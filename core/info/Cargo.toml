@@ -1,5 +1,6 @@
 [package]
 name = "relift-info"
+description = "The self-description of a built binary: the `--relift-info` JSON document in sections (identity, needs, settings, input, mods, save), its embedding in the binary and its reader; read by `relift info` and by launchers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

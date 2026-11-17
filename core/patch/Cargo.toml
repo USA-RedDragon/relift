@@ -1,5 +1,6 @@
 [package]
 name = "relift-patch"
+description = "Binary patch formats IPS, IPS32, UPS and BPS applied to a byte image, with the ranges each patch wrote"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

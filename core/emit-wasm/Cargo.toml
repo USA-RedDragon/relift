@@ -1,5 +1,6 @@
 [package]
 name = "relift-emit-wasm"
+description = "IR to WebAssembly modules that share one memory and one funcref table (`docs/abi.md` section 15); not linked by `relift` yet; its tests run the modules in wasmtime against the IR interpreter"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
