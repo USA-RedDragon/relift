@@ -6,7 +6,10 @@
 //! standalone tree by commit, with the SHA-256 of its archive, fetches the
 //! archive once into `<cache>/sdk/parallel-rdp/` and unpacks it there. A
 //! build with the tree in the cache needs no network; an archive put at
-//! [`archive`] by hand is unpacked without one.
+//! [`archive`] by hand is unpacked without one. The SPIR-V bank of the
+//! unpacked tree goes through [`spirv::convert_bank`] once.
+
+mod spirv;
 
 use std::path::{Path, PathBuf};
 
@@ -137,9 +140,35 @@ pub fn archive(cache_root: &Path) -> PathBuf {
 
 const DONE: &str = ".relift-unpacked";
 
+/// What the tree's marker holds once it is unpacked and its SPIR-V
+/// converted.
+fn marker() -> String {
+    format!("{SHA256}\nspirv: local access chains\n")
+}
+
 fn complete(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(DONE)).is_ok_and(|s| s == marker())
+        && dir.join("parallel-rdp").join("rdp_device.cpp").is_file()
+}
+
+/// The tree at `dir`, unpacked before relift converted its SPIR-V.
+fn unconverted(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(DONE)).is_ok_and(|s| s.trim() == SHA256)
         && dir.join("parallel-rdp").join("rdp_device.cpp").is_file()
+}
+
+/// Converts the SPIR-V bank of the tree at `dir` and marks it complete.
+fn convert(dir: &Path) -> Result<(), String> {
+    let path = dir
+        .join("parallel-rdp")
+        .join("shaders")
+        .join("slangmosh.hpp");
+    let header = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = spirv::convert_bank(&header).map_err(|e| format!("{}: {e}", path.display()))?;
+    relift_cache::write_if_changed(&path, text.as_bytes()).map_err(|e| e.to_string())?;
+    relift_cache::write_if_changed(&dir.join(DONE), marker().as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// The parallel-rdp tree to build: `RELIFT_PARALLEL_RDP_DIR` when it is
@@ -164,6 +193,10 @@ pub fn ensure(cache_root: &Path) -> Result<PathBuf, BoxError> {
     }
     let dest = tree(cache_root);
     if complete(&dest) {
+        return Ok(dest);
+    }
+    if unconverted(&dest) {
+        convert(&dest).map_err(|e| format!("parallel-rdp: {e}"))?;
         return Ok(dest);
     }
     let tarball = archive(cache_root);
@@ -198,8 +231,7 @@ pub fn ensure(cache_root: &Path) -> Result<PathBuf, BoxError> {
     }
     let work = parent.join(format!(".unpack-{}", unique()));
     let unpacked = unpack(&tarball, &work).and_then(|()| {
-        relift_cache::write_if_changed(&work.join(DONE), SHA256.as_bytes())
-            .map_err(|e| e.to_string())?;
+        convert(&work)?;
         match std::fs::rename(&work, &dest) {
             Ok(()) => Ok(()),
             Err(_) if complete(&dest) => Ok(()),
