@@ -36,5 +36,6 @@ iterations, timed by the cascaded timers at 33.513982 MHz.
   cases relift does not reproduce yet, with what it gives and the open
   question.
 
-`relift/tests/e2e_nds_timing.rs` builds the ROM, lifts and runs it, and
-runs `compare.py`.
+`relift/tests/e2e_nds_timing.rs` builds the devkitPro ROM (with
+`DEVKITARM` set; otherwise the clang one, checked with `compare.py
+--clang`), lifts and runs it, and runs `compare.py`.
