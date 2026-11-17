@@ -57,6 +57,8 @@ typedef struct rl_nds_arm {
     uint32_t vectors;
     /** @brief The I bit as the lifted code last wrote it (the context's copy may sit in a local of the lifted code). */
     uint8_t i;
+    /** @brief 1 when the next data access is the second word of LDRD (rl_nds_cpu_pair). */
+    uint8_t pair;
     /** @brief Cycles of a code fetch (rl_ctx.waits). */
     uint8_t waits[16 * 6];
     /** @brief The dispatch table of the CPU's units. */

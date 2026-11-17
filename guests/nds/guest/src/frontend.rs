@@ -67,6 +67,9 @@ pub const CALL: &str = "arm32.call";
 pub const CP_WRITE: &str = "arm.cp_write";
 /// The lifter's intrinsic of MRC: register key.
 pub const CP_READ: &str = "arm.cp_read";
+/// The intrinsic before the second word of the ARM9's LDRD, which the bus
+/// takes as a new transfer (`RL_NDS_PAIR`).
+pub const PAIR: &str = "nds.pair";
 /// The intrinsic of a write of the I bit: its new value (an interrupt
 /// pending under the mask is taken at the sync point once it clears).
 pub const SET_I: &str = "nds.set_i";
@@ -267,7 +270,9 @@ impl Nds {
                 .and_then(|f| unit(image, base, f, thumb));
             internal = crate::cycles::arm9_internal(word, pc, thumb, next, internal);
         }
-        reshape(&mut b, &l.bus, internal, pc, thumb, swi, entry);
+        let pair =
+            self.cpu == Cpu::Arm9 && !thumb && word >> 28 != 15 && word & 0x0E10_00F0 == 0xD0;
+        reshape(&mut b, &l.bus, internal, (pc, thumb), swi, pair, entry);
         Ok(b)
     }
 }
@@ -291,14 +296,15 @@ fn unaligned(b: &Block, k: usize) -> Option<Value> {
 
 /// Puts the entry check and the fetch first, routes memory to the bus,
 /// charges the `internal` cycles as one tick after the instruction's
-/// accesses, adds the refill and closes the block with a sync point.
+/// accesses, adds the refill and closes the block with a sync point; with
+/// `pair` (LDRD) marks the second load.
 fn reshape(
     b: &mut Block,
     bus: &[Bus],
     internal: u32,
-    pc: u32,
-    thumb: bool,
+    (pc, thumb): (u32, bool),
     swi: bool,
+    pair: bool,
     entry: Option<Entry>,
 ) {
     let unaligned: Vec<Option<Value>> = (0..b.insts.len()).map(|k| unaligned(b, k)).collect();
@@ -313,7 +319,14 @@ fn reshape(
     let name = if thumb { FETCH_THUMB } else { FETCH_ARM };
     let fetch = push(b, Op::intrinsic(name, vec![at]), None);
     let mut map: Vec<Value> = Vec::with_capacity(old.len());
+    let mut loads = 0;
     for inst in old {
+        if matches!(inst.op, Op::Load { .. }) {
+            loads += 1;
+            if pair && loads == 2 {
+                push(b, Op::intrinsic(PAIR, Vec::new()), None);
+            }
+        }
         let m = |v: &Value| map[v.index()];
         let addr_of = |a: Value| m(&unaligned[a.index()].unwrap_or(a));
         let op = match inst.op {
@@ -459,6 +472,7 @@ impl Frontend for Nds {
             }
             (CP_READ, [k]) => format!("rl_nds_cpu_cp_read(c, (uint32_t)({k}))"),
             (SET_I, [v]) => format!("rl_nds_cpu_set_i(c, (uint32_t)({v}))"),
+            (PAIR, []) => "rl_nds_cpu_pair(c)".to_owned(),
             _ => return None,
         })
     }
@@ -560,6 +574,25 @@ mod tests {
         Nds::new(Cpu::Arm9)
             .lift_at(img, BASE, pc, thumb, None)
             .expect("lifts")
+    }
+
+    #[test]
+    fn the_second_word_of_an_arm9_ldrd_is_marked_and_ldm_s_is_not() {
+        let img = arm(&[0xE1C4_60D0, 0xE894_00C0]);
+        let b = lift9(&img, BASE, false);
+        let order: Vec<&str> = b
+            .insts
+            .iter()
+            .filter_map(|i| match &i.op {
+                Op::IoLoad { .. } => Some("load"),
+                Op::Intrinsic(c) if c.name == PAIR => Some(PAIR),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["load", PAIR, "load"]);
+        assert!(!intrinsics(&lift9(&img, BASE + 4, false)).contains(&PAIR));
+        let b7 = Nds::new(Cpu::Arm7).lift_at(&img, BASE, BASE + 4, false, None);
+        assert!(b7.is_ok_and(|b| !intrinsics(&b).contains(&PAIR)));
     }
 
     #[test]

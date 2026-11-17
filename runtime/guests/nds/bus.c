@@ -56,20 +56,36 @@ static void tcm_charge(rl_nds *m, const uint8_t *p, bool seq)
  * back: the next instruction executes beside it (it leaves its execute stage
  * when the access ends), so a load or store and one ALU instruction after it
  * take the access's time (the console: LDR from I/O and ADD 8 cycles, two
- * LDRs 16). A sequential word of the same LDM or STM follows directly.
+ * LDRs 16). A sequential word of the same LDM or STM follows directly; a
+ * nonsequential access after another of the same instruction (SWP's write,
+ * LDRD's second word) starts when that one ends, so SWP takes what LDR and
+ * STR take.
  */
-static void bus9(rl_nds *m, bool main, bool seq, unsigned ticks, unsigned busy)
+static void bus9(rl_nds *m, bool main, unsigned how, unsigned ticks, unsigned busy)
 {
     uint64_t now = nds_now(m, RL_NDS_ARM9);
+    bool seq = how == RL_NDS_S;
     uint64_t start = seq ? now : now & ~(uint64_t)1;
+    if (how >= RL_NDS_AFTER && m->bus9_end > start)
+        start = m->bus9_end;
     if (main && !seq && m->ram_free > start)
         start = m->ram_free;
     uint64_t end = start + ticks;
+    m->bus9_end = end;
     if (main)
         m->ram_free = end + busy;
     uint64_t to = seq ? end : end - 1u;
     if (to > now)
         nds_charge(m, RL_NDS_ARM9, to - now);
+}
+
+/** @brief The ticks of the ARM9's bus data access as how says (RL_NDS_PAIR: a bus cycle over sequential). */
+static unsigned cost9(const rl_nds *m, uint32_t addr, unsigned size, unsigned how, bool main)
+{
+    if (how == RL_NDS_PAIR)
+        return main ? nds_cost(m, RL_NDS_ARM9, RL_NDS_DATA, addr, size, false)
+                    : nds_cost(m, RL_NDS_ARM9, RL_NDS_DATA, addr, size, true) + 2u;
+    return nds_cost(m, RL_NDS_ARM9, RL_NDS_DATA, addr, size, how == RL_NDS_S);
 }
 
 static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
@@ -207,8 +223,9 @@ void nds_bus_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32
     }
 }
 
-static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq, bool code)
+static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, unsigned how, bool code)
 {
+    bool seq = how == RL_NDS_S || how == RL_NDS_PAIR;
     addr &= ~(size - 1);
     if (cpu == RL_NDS_ARM9) {
         uint8_t *p = nds_tcm(m, addr, code, false);
@@ -238,7 +255,7 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
                 nds_order(m, cpu);
             nds_where w = nds_decode(m, cpu, addr, code, false);
             uint32_t v = bus_read(m, cpu, addr, size, w);
-            bus9(m, w.main, seq, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq), 0);
+            bus9(m, w.main, how, cost9(m, addr, size, how, w.main), 0);
             return v;
         }
         if (nds_now(m, cpu) & 1)
@@ -269,16 +286,17 @@ unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size)
 
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq)
 {
-    return timed_read(m, cpu, addr, size, seq, true);
+    return timed_read(m, cpu, addr, size, seq ? RL_NDS_S : RL_NDS_N, true);
 }
 
-uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq)
+uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, unsigned how)
 {
-    return timed_read(m, cpu, addr, size, seq, false);
+    return timed_read(m, cpu, addr, size, how, false);
 }
 
-void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, bool seq)
+void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, unsigned how)
 {
+    bool seq = how == RL_NDS_S;
     addr &= ~(size - 1);
     value &= nds_mask(size);
     if (cpu == RL_NDS_ARM9) {
@@ -336,7 +354,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     unsigned cost = nds_cost(m, cpu, RL_NDS_DATA, addr, size == 1 && w.main ? 4u : size, seq);
     if (cpu == RL_NDS_ARM9) {
         unsigned posted = w.main && !seq ? NDS_MAIN_WRITE_POSTED : 0;
-        bus9(m, w.main, seq, cost - posted, posted);
+        bus9(m, w.main, how, cost - posted, posted);
     } else if (w.main) {
         data7(m, true, seq, size);
     } else {

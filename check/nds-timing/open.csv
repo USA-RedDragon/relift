@@ -16,15 +16,7 @@ cpu,idx,name,region,place,mode,attr,hw,relift,note
 9,55,t_b,none,unc,warm,-,90,6300,ARM9 code fetch from uncached main RAM: Thumb pairs and some loops
 9,110,str_ldr,itcm,main,warm,-,8,900,ARM9 data access after a store or in ITCM
 9,146,str_alu4,main,main,warm,-,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-9,190,ldrd,unc,main,warm,-,40,2600,ARM9 LDRD and SWP on the bus: second access
-9,221,ldrd,io,main,warm,-,16,1400,ARM9 LDRD and SWP on the bus: second access
-9,234,swp,vram,main,warm,-,24,2200,ARM9 LDRD and SWP on the bus: second access
-9,253,ldrd,vram,main,warm,-,20,1800,ARM9 LDRD and SWP on the bus: second access
-9,266,swp,pal,main,warm,-,24,2200,ARM9 LDRD and SWP on the bus: second access
 9,284,stm8,pal,main,warm,-,45.62,4200,ARM9 data access after a store or in ITCM
-9,285,ldrd,pal,main,warm,-,20,1800,ARM9 LDRD and SWP on the bus: second access
-9,298,swp,oam,main,warm,-,20,1800,ARM9 LDRD and SWP on the bus: second access
-9,317,ldrd,oam,main,warm,-,16,1400,ARM9 LDRD and SWP on the bus: second access
 9,339,s_ldm8,main,main,cold,-,50,5200,ARM9 data cache line fill under a following access
 9,343,copy,main,main,cold,-,24,2374,ARM9 data cache line fill under a following access
 9,360,str_alu4,mx,main,warm,cb11,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"

@@ -128,16 +128,32 @@ uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, boo
 unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size);
 /** @brief The ARM7's cycles of a code fetch of size bytes at addr in main RAM, which the fetch does not charge itself. */
 unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size);
+/** @brief How a data access follows the ones before it in its instruction (rl_nds_load). */
+enum {
+    /** @brief The instruction's first access: nonsequential. */
+    RL_NDS_N = 0,
+    /** @brief The next word of an LDM or STM: sequential. */
+    RL_NDS_S = 1,
+    /** @brief Nonsequential after another access of the instruction (SWP's write): it starts when that one ends. */
+    RL_NDS_AFTER = 2,
+    /**
+     * @brief The second word of the ARM9's LDRD: a new transfer when that of the first word ends, a bus cycle more
+     * than a sequential word (a full nonsequential access in main RAM).
+     */
+    RL_NDS_PAIR = 3,
+};
+
 /**
- * @brief A data read of size bytes (1, 2 or 4) at addr, aligned down; seq
- * true for the second and later words of LDM. Waits for the other CPU when
- * the access is ordered (rl_nds_ordered), stalls on a busy main RAM,
- * charges the cost and returns the value, zero-extended. A store to the
- * ARM7's HALTCNT that asks for a halt ends in rl_nds_halt.
+ * @brief A data read of size bytes (1, 2 or 4) at addr, aligned down; how
+ * the access follows the instruction's others (RL_NDS_N and the rest).
+ * Waits for the other CPU when the access is ordered (rl_nds_ordered),
+ * stalls on a busy main RAM, charges the cost and returns the value,
+ * zero-extended. A store to the ARM7's HALTCNT that asks for a halt ends in
+ * rl_nds_halt.
  */
-uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq);
+uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, unsigned how);
 /** @brief The write twin of rl_nds_load. */
-void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, bool seq);
+void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, unsigned how);
 /** @brief ticks internal ticks of cpu (an ARM7 cycle is two). */
 void rl_nds_idle(rl_nds *m, unsigned cpu, unsigned ticks);
 

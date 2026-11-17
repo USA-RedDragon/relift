@@ -40,6 +40,9 @@ RL_RUNTIME_API void rl_nds_cpu_cp_write(rl_ctx *c, uint32_t key, uint32_t value,
 /** @brief MRC from the ARM9's CP15 register at key. */
 RL_RUNTIME_API uint32_t rl_nds_cpu_cp_read(rl_ctx *c, uint32_t key);
 
+/** @brief The next data access is the second word of the ARM9's LDRD (RL_NDS_PAIR). */
+RL_RUNTIME_API void rl_nds_cpu_pair(rl_ctx *c);
+
 /** @brief The block wrote i to the I bit: a clear with an interrupt pending ends the budget, so the sync point takes it. */
 RL_RUNTIME_API void rl_nds_cpu_set_i(rl_ctx *c, uint32_t i);
 

@@ -112,12 +112,25 @@ static void build_waits(rl_nds_arm *k)
     k->c->fast_fetch = 0;
 }
 
+/** @brief How the data access of size bytes at addr follows the instruction's others (RL_NDS_N and the rest). */
+static unsigned how(rl_nds_arm *k, rl_ctx *c, uint32_t addr, uint32_t size)
+{
+    unsigned open = c->data_open;
+    unsigned seq = rl_arm32_data_seq(c, addr, size);
+    unsigned pair = k->pair;
+    k->pair = 0;
+    if (pair)
+        return RL_NDS_PAIR;
+    return seq ? RL_NDS_S : open ? RL_NDS_AFTER : RL_NDS_N;
+}
+
+void rl_nds_cpu_pair(rl_ctx *c) { cpu_of(c)->pair = 1; }
+
 uint64_t rl_nds_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
 {
     (void)mem;
     rl_nds_arm *k = cpu_of(c);
-    unsigned seq = rl_arm32_data_seq(c, (uint32_t)addr & ~(size - 1u), size);
-    uint32_t v = rl_nds_load(k->run->m, k->id, (uint32_t)addr, size, seq);
+    uint32_t v = rl_nds_load(k->run->m, k->id, (uint32_t)addr, size, how(k, c, (uint32_t)addr & ~(size - 1u), size));
     clip(k);
     return v;
 }
@@ -127,8 +140,7 @@ void rl_nds_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
     (void)mem;
     rl_nds_arm *k = cpu_of(c);
     uint32_t a = (uint32_t)addr & ~(size - 1u);
-    unsigned seq = rl_arm32_data_seq(c, a, size);
-    rl_nds_store(k->run->m, k->id, a, size, (uint32_t)value, seq);
+    rl_nds_store(k->run->m, k->id, a, size, (uint32_t)value, how(k, c, a, size));
     if (rl_nds_halt_lost(k->run->m, k->id))
         stop_halted(k);
     if (k->id == RL_NDS_ARM9 && a <= 0x04000249u && a + size > 0x04000240u)

@@ -393,6 +393,8 @@ struct rl_nds {
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
+    /** @brief The tick the ARM9's last bus data access ended. */
+    uint64_t bus9_end;
     /** @brief The ARM9's last instruction TCM data access opened an LDM or STM: its second word costs one more. */
     bool itcm_multi;
     /**
