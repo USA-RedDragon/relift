@@ -389,10 +389,9 @@ fn failed_extract_leaves_no_finished_file() {
     let n = open(bytes).expect("opens");
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("nup-bad-extract");
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(matches!(
-        n.extract_exefs(&t, &dir),
-        Err(Error::Hash(_)) | Err(Error::Format(_))
-    ));
+    let err = n.extract_exefs(&t, &dir).expect_err("a damaged file fails");
+    assert!(matches!(err, Error::Hash(_) | Error::Format(_)));
+    assert!(err.to_string().contains("main: "), "names the file: {err}");
     assert!(!dir.join("main").exists());
 }
 

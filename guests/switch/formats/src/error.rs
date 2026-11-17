@@ -53,6 +53,20 @@ impl From<io::Error> for Error {
     }
 }
 
+impl Error {
+    /// The error with `path` named in its message, for a check that failed
+    /// on one file of a container. I/O and the other kinds keep their own
+    /// message.
+    #[must_use]
+    pub fn in_file(self, path: &str) -> Error {
+        match self {
+            Error::Format(m) => Error::Format(format!("{path}: {m}")),
+            Error::Hash(m) => Error::Hash(format!("{path}: {m}")),
+            e => e,
+        }
+    }
+}
+
 /// Shorthand for a [`Error::Format`].
 pub(crate) fn malformed<T>(msg: impl Into<String>) -> Result<T> {
     Err(Error::Format(msg.into()))

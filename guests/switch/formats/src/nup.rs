@@ -1109,7 +1109,7 @@ impl Nup {
                 inner: relift_cache::StreamWriter::new(&target)?,
                 on: &mut *on,
             };
-            self.copy(e, &mut w)?;
+            self.copy(e, &mut w).map_err(|x| x.in_file(path))?;
             if w.inner.finish()? {
                 written += 1;
             }
