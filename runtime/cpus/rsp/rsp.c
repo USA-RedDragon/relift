@@ -15,6 +15,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief The entries of the pipeline charge memo, a power of two. */
+#define RL_RSP_MEMO 4096u
+
+/** @brief A charge pipe_enter worked out: at word w with pipeline a, b, d (and a taken branch's stall first). */
+typedef struct pipe_memo {
+    const uint64_t *p;
+    uint64_t a, b, d;
+    uint32_t w, taken, gen;
+    int32_t delta;
+    bool met;
+} pipe_memo;
+
 struct rl_rsp {
     rl_ctx c;
     rl_fn disp[RL_RSP_SLOTS_COUNT];
@@ -33,8 +45,13 @@ struct rl_rsp {
     void *user;
     uint64_t until;
     /** A pipeline lifted code gave for a target not bound yet, or at a halt. */
-    rl_rsp_pipe_state hold;
+    /** The pipeline a halt or an unbound target left, packed, and whether a taken branch's stall comes first. */
+    uint64_t hold[3];
+    uint32_t hold_taken;
     bool held;
+    /** What pipe_enter charged for each (word, pipeline) it saw since IMEM last changed. */
+    pipe_memo memo[RL_RSP_MEMO];
+    uint32_t memo_gen;
     bool leave;
     bool running;
     const char *dump;
@@ -202,6 +219,7 @@ void rl_rsp_imem_written(rl_rsp *r, uint32_t offset, uint32_t len)
     if (!len)
         return;
     r->stats.invalidations++;
+    r->memo_gen++;
     reset_slots(r);
     if (r->running) {
         r->leave = true;
@@ -315,20 +333,51 @@ static _Noreturn void missed(rl_rsp *r, const char *why)
     abort();
 }
 
-/** @brief Charges what bound word w costs from pipeline x more than its block assumes. */
-static void pipe_enter(rl_rsp *r, uint32_t w, rl_rsp_pipe_state x)
+/**
+ * @brief What bound word w costs from pipeline a, b, d (after a taken
+ * branch's stall when taken is 1) more than its block assumes.
+ */
+static int64_t pipe_delta(rl_rsp *r, uint32_t w, const uint64_t *p, uint64_t a, uint64_t b, uint64_t d,
+                          uint32_t taken, bool *met)
+{
+    rl_rsp_pipe_state x = rl_rsp_pipe_unpack(a, b, d);
+    int64_t extra = 0;
+    if (taken) {
+        rl_rsp_pipe_taken(&x, w);
+        extra = 1;
+    }
+    return extra + rl_rsp_pipe_delta(x, rl_rsp_pipe_unpack(p[0], p[1], p[2]), w, r->imem, met);
+}
+
+/**
+ * @brief Charges what bound word w costs from the pipeline a, b, d more
+ * than its block assumes. The charge depends only on the pipeline, the word
+ * and the IMEM words after it, so it is worked out once per IMEM contents.
+ */
+static void pipe_enter(rl_rsp *r, uint32_t w, uint64_t a, uint64_t b, uint64_t d, uint32_t taken)
 {
     const rl_rsp_image *im = r->images[r->slot_image[w]];
-    if (!im->pipes || !im->pipe_at)
+    if (!im->pipes || !im->pipe_at) {
+        r->c.time.budget -= taken;
         return;
+    }
     uint32_t o = (w - r->bases[w] / 4u) % RL_RSP_SLOTS_COUNT;
-    if (o >= im->len / 4u || im->pipe_at[o] == RL_RSP_NO_PIPE)
+    if (o >= im->len / 4u || im->pipe_at[o] == RL_RSP_NO_PIPE) {
+        r->c.time.budget -= taken;
         return;
+    }
     const uint64_t *p = im->pipes + 3u * im->pipe_at[o];
-    bool met;
-    int64_t d = rl_rsp_pipe_delta(x, rl_rsp_pipe_unpack(p[0], p[1], p[2]), w, r->imem, &met);
-    r->stats.pipe_unmet += !met;
-    r->c.time.budget -= d;
+    uint64_t h = (a ^ b * 0x9E3779B97F4A7C15ull ^ d * 0xC2B2AE3D27D4EB4Full ^ (uint64_t)w * 0x165667B19E3779F9ull) +
+                 taken;
+    pipe_memo *e = &r->memo[(h ^ h >> 29) & (RL_RSP_MEMO - 1u)];
+    if (e->gen != r->memo_gen + 1u || e->w != w || e->p != p || e->a != a || e->b != b || e->d != d ||
+        e->taken != taken) {
+        bool met;
+        int64_t delta = pipe_delta(r, w, p, a, b, d, taken, &met);
+        *e = (pipe_memo){ p, a, b, d, w, taken, r->memo_gen + 1u, (int32_t)delta, met };
+    }
+    r->stats.pipe_unmet += !e->met;
+    r->c.time.budget -= e->delta;
 }
 
 /** @brief Charges a held pipeline at bound word w. */
@@ -337,19 +386,17 @@ static void take_hold(rl_rsp *r, uint32_t w)
     if (!r->held || r->disp[w] == rl_rsp_enter)
         return;
     r->held = false;
-    pipe_enter(r, w, r->hold);
+    pipe_enter(r, w, r->hold[0], r->hold[1], r->hold[2], r->hold_taken);
 }
 
 void rl_rsp_pipe(rl_ctx *c, uint32_t target, uint64_t a, uint64_t b, uint64_t d, uint32_t taken)
 {
     rl_rsp *r = of(c);
     uint32_t w = abs_of(c, target) >> 2;
-    rl_rsp_pipe_state x = rl_rsp_pipe_unpack(a, b, d);
-    if (taken) {
-        rl_rsp_pipe_taken(&x, w);
-        c->time.budget -= 1;
-    }
-    r->hold = x;
+    r->hold[0] = a;
+    r->hold[1] = b;
+    r->hold[2] = d;
+    r->hold_taken = taken != 0;
     r->held = true;
     take_hold(r, w);
 }
@@ -357,7 +404,10 @@ void rl_rsp_pipe(rl_ctx *c, uint32_t target, uint64_t a, uint64_t b, uint64_t d,
 void rl_rsp_pipe_hold(rl_ctx *c, uint64_t a, uint64_t b, uint64_t d)
 {
     rl_rsp *r = of(c);
-    r->hold = rl_rsp_pipe_unpack(a, b, d);
+    r->hold[0] = a;
+    r->hold[1] = b;
+    r->hold[2] = d;
+    r->hold_taken = 0;
     r->held = true;
 }
 
