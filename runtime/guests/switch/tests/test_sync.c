@@ -377,6 +377,9 @@ TEST(threads_tls_and_registers)
         CHECK(S.tls[i] != c->tpidrro_el0);
         CHECK_EQ(S.tls[i] & 0x1FF, 0);
         CHECK_EQ(S.tpidr[i], 0x1000u + (unsigned)i);
+        uint32_t own = 0;
+        CHECK(hos_read_u32(S.tls[i] + 0x110, &own));
+        CHECK_EQ(own, hs[i]);
         CHECK_EQ(S.fpcr_ctx[i], 1u << 24);
 #if defined(__aarch64__)
         CHECK_EQ(S.fpcr_seen[i], 1u << 24);

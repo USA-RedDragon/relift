@@ -10,6 +10,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * @brief Where the kernel puts a thread's own handle in its TLS slot:
+ * KProcess::Run for the main thread and svcCreateThread for the others
+ * write it since 22.0.0 (switchbrew, 22.0.0 kernel changes), and SDK 22's
+ * nn::os takes every lock owner from it. Older SDKs never read the word.
+ */
+#define TLS_OWN_HANDLE 0x110u
+
 hos_thread *hos_current(void)
 {
     struct rl_thread *rt = rl_thread_current();
@@ -120,6 +128,8 @@ rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_
     rc = hos_handle_add(&t->obj, out);
     if (rc != KR_SUCCESS)
         hos.live_threads--;
+    else
+        (void)hos_write_u32(t->tls + TLS_OWN_HANDLE, *out);
     hos_unlock();
     hos_kobj_unref(&t->obj);
     return rc;
@@ -350,6 +360,7 @@ int rl_hos_run_main(uint64_t entry, uint64_t stack_top)
         return RL_PENDING;
     hos_lock();
     hos_handle_add(&t->obj, &h);
+    (void)hos_write_u32(t->tls + TLS_OWN_HANDLE, h);
     hos_unlock();
     rl_ctx *c = t->rt->ctx;
     c->x[0] = 0;
