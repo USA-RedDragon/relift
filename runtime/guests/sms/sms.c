@@ -306,7 +306,6 @@ static void cart_write(sms *m, uint16_t a, uint8_t data)
             m->ram_bank2_select = (data >> 2) & 1u;
             m->ram_bank2 = (data >> 3) & 1u;
             m->ram_bank3 = (data >> 4) & 1u;
-            m->rom_write = (data >> 7) & 1u;
             break;
         }
         case 0xFFFD:
@@ -318,18 +317,10 @@ static void cart_write(sms *m, uint16_t a, uint8_t data)
         default:
             break;
         }
-        if (a <= 0x03FF) {
-            if (m->rom_write)
-                m->rom[a & m->rom_mask] = data;
-        } else if (a <= 0x7FFF) {
-            if (m->rom_write)
-                m->rom[sega_offset(m, a >> 14, a) & m->rom_mask] = data;
-        } else if (a <= 0xBFFF) {
+        if (a >= 0x8000 && a <= 0xBFFF) {
             if (m->ram_bank2)
                 m->cart_ram[((uint32_t)m->ram_bank2_select << 14 | (a & 0x3FFFu)) & m->cart_ram_mask] = data;
-            else if (m->rom_write)
-                m->rom[sega_offset(m, 2, a) & m->rom_mask] = data;
-        } else if (m->ram_bank3) {
+        } else if (a >= 0xC000 && m->ram_bank3) {
             m->cart_ram[a & 0x3FFFu & m->cart_ram_mask] = data;
         }
         return;
@@ -390,7 +381,7 @@ void sms_write(sms *m, uint16_t a, uint8_t data, uint64_t now)
         cart_write(m, a, data);
 }
 
-int32_t sms_slot_bank(const sms *m, unsigned s)
+static int32_t padded_slot_bank(const sms *m, unsigned s)
 {
     if (is_sg(m))
         return s < 2 || s * 0x4000u < m->rom_size ? (int32_t)(((s * 0x4000u) & m->rom_mask) >> 14) : -1;
@@ -405,6 +396,14 @@ int32_t sms_slot_bank(const sms *m, unsigned s)
         return s < 2 ? (int32_t)s : (int32_t)((((uint32_t)m->bank[2] << 14) & m->rom_mask) >> 14);
     }
     return -1;
+}
+
+int32_t sms_slot_bank(const sms *m, unsigned s)
+{
+    int32_t b = padded_slot_bank(m, s);
+    if (b < 0 || (uint32_t)b << 14 < m->rom_size || !m->rom_size)
+        return b;
+    return (int32_t)(mirror((uint32_t)b << 14, m->rom_size) >> 14);
 }
 
 /* Ports. */

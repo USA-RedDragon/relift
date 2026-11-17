@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 static sms m;
-static uint8_t rom[0x40000];
+static uint8_t rom[0x80000];
 
 static void boot(sms_system system, sms_mapper mapper, size_t len)
 {
@@ -39,6 +39,28 @@ TEST(machine_sega_mapper_switches_the_three_slots_but_not_the_first_kilobyte)
     CHECK_EQ(sms_read(&m, 0x4000, 0), bank_byte(1));
     CHECK_EQ(sms_slot_bank(&m, 1), 1);
     CHECK_EQ(m.ram[0x1FFE], 17);
+}
+
+TEST(machine_sega_mapper_ignores_writes_to_rom_with_the_write_enable_set)
+{
+    boot(SMS_SYSTEM_MS, SMS_MAPPER_SEGA, 0x40000);
+    sms_write(&m, 0xFFFC, 0x80, 0);
+    sms_write(&m, 0x0001, 0x5A, 0);
+    sms_write(&m, 0x4001, 0x5A, 0);
+    sms_write(&m, 0x8001, 0x5A, 0);
+    CHECK_EQ(sms_read(&m, 0x0001, 0), bank_byte(0));
+    CHECK_EQ(sms_read(&m, 0x4001, 0), bank_byte(1));
+    CHECK_EQ(sms_read(&m, 0x8001, 0), bank_byte(2));
+}
+
+TEST(machine_slot_bank_names_the_mirrored_bank_of_a_short_rom)
+{
+    boot(SMS_SYSTEM_MS, SMS_MAPPER_SEGA, 0x6C000);
+    sms_write(&m, 0xFFFF, 31, 0);
+    CHECK_EQ(sms_slot_bank(&m, 2), 26);
+    CHECK_EQ(sms_read(&m, 0x8000, 0), bank_byte(26));
+    sms_write(&m, 0xFFFF, 20, 0);
+    CHECK_EQ(sms_slot_bank(&m, 2), 20);
 }
 
 TEST(machine_sega_mapper_maps_cartridge_ram_at_0x8000)

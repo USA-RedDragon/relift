@@ -117,7 +117,6 @@ typedef struct sms {
     bool ram_bank2_select;
     bool ram_bank2;
     bool ram_bank3;
-    bool rom_write;
     /** @brief Codemasters: cartridge RAM at 0xA000. */
     bool cm_ram;
 
