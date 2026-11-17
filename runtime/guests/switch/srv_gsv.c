@@ -264,6 +264,62 @@ static const rl_ipc_class gpu_session_class = { "nn::gsv::GpuSession", gpu_sessi
                                                 sizeof gpu_session_cmds / sizeof gpu_session_cmds[0], 0,
                                                 gpu_session_destroy };
 
+/** @brief DisplaySession 3 (unnamed): no input; a u32 below 8 (sdk 0x560fe0 aborts otherwise), the display relift has: 0. */
+static rl_result display_first_id(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
+/** @brief DisplaySession 1 (unnamed): no input; a u32 below 0x400 (sdk 0x561288 aborts otherwise): 0. */
+static rl_result display_count(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief DisplaySession 11 (unnamed): a u32; one moved handle (sdk 0x56133c),
+ * which relift makes the readable end of an event it never signals.
+ */
+static rl_result display_event(rl_ipc_req *r)
+{
+    uint32_t id;
+    if (!rl_srv_in(r, &id, 4))
+        return SF_RESULT_INVALID_HEADER;
+    hos_revent *e = rl_hos_event_create();
+    if (!e)
+        return KR_OUT_OF_RESOURCE;
+    rl_result rc = rl_ipc_push_move(r, &e->obj);
+    hos_kobj_unref(&e->obj);
+    return rc;
+}
+
+static const rl_ipc_cmd display_session_cmds[] = {
+    { 1, "GetCount", display_count },
+    { 3, "GetDisplayId", display_first_id },
+    { 11, "GetEvent", display_event },
+};
+
+static const rl_ipc_class display_session_class = { "nn::gsv::DisplaySession", display_session_cmds,
+                                                    sizeof display_session_cmds / sizeof display_session_cmds[0], 0,
+                                                    NULL };
+
+/** @brief InitializeDisplayContext: u64 version (0x300010000 on 19.0.0, per switchbrew); a DisplaySession. */
+static rl_result initialize_display_context(rl_ipc_req *r)
+{
+    uint64_t version;
+    if (!rl_srv_in(r, &version, 8))
+        return SF_RESULT_INVALID_HEADER;
+    return push_session(r, &display_session_class);
+}
+
 /** @brief CreateGpuSessionWithRemoteMemory: u64 version; a GpuSession. */
 static rl_result create_gpu_session(rl_ipc_req *r)
 {
@@ -297,6 +353,7 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 204, "Cmd204", syncpt_cmd_204 },
     { 301, "CreateDisplayContext", rl_srv_stub_ok },
     { 303, "DestroyDisplayContext", rl_srv_stub_ok },
+    { 305, "InitializeDisplayContext", initialize_display_context },
     { 401, "CreateGpuContext", rl_srv_stub_ok },
     { 402, "InitializeGpuContext", rl_srv_stub_ok },
     { 403, "DestroyGpuContext", rl_srv_stub_ok },
