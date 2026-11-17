@@ -267,6 +267,20 @@ RL_RUNTIME_API void rl_n64_declare_picture(const char *const *defaults);
 RL_RUNTIME_API void rl_n64_picture_get(rl_n64_picture *out);
 
 /**
+ * @brief Writes len bytes to path through a temporary file and a rename, so a
+ * reader never sees half a file, making its folders first.
+ */
+RL_RUNTIME_API bool rl_n64_write_file(const char *path, const uint8_t *data, size_t len);
+/**
+ * @brief The path of the cache file name: <user dir>/cache/name when the
+ * program names an app, else name in the folder rl_n64_set_cache_dir gave
+ * (where the saves go); false with neither.
+ */
+RL_RUNTIME_API bool rl_n64_cache_path(char *out, size_t size, const char *name);
+/** @brief The folder for cache files of a program that names no app; NULL or empty for none. */
+RL_RUNTIME_API void rl_n64_set_cache_dir(const char *dir);
+
+/**
  * @brief The picture VI outputs. With a renderer that scans out VI (its
  * vi_picture), the picture of the last frame it scanned out (false before
  * the first), at the size the picture settings give it. Else the picture

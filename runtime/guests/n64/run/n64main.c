@@ -503,6 +503,17 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
         else if (p->rom_path && *p->rom_path && !rl_n64_save_path(H.save, sizeof H.save, p->rom_path))
             H.save[0] = 0;
     }
+    if (H.save[0]) {
+        char dir[sizeof H.save];
+        snprintf(dir, sizeof dir, "%s", H.save);
+        char *slash = strrchr(dir, '/');
+        char *back = strrchr(dir, '\\');
+        if (back && (!slash || back > slash))
+            slash = back;
+        if (slash)
+            *slash = 0;
+        rl_n64_set_cache_dir(slash ? dir : ".");
+    }
     if (H.save[0] && rl_n64_save_load(m, H.save) < 0)
         rl_log(RL_LOG_WARN, "n64", "a save of %s does not fit this cartridge; it is ignored", H.save);
     rl_n64_set_frame_hook(m, on_frame, &H);

@@ -113,7 +113,7 @@ static void make_dirs(const char *path)
     free(p);
 }
 
-static bool write_file(const char *path, const uint8_t *data, size_t len)
+bool rl_n64_write_file(const char *path, const uint8_t *data, size_t len)
 {
     char *tmp = malloc(strlen(path) + 5);
     if (!tmp)
@@ -154,7 +154,7 @@ int rl_n64_save_write(rl_n64 *m, const char *base)
         size_t len;
         const uint8_t *data = data_of(m, stores[i].store, &len);
         snprintf(path, bl + 5, "%s%s", base, stores[i].ext);
-        if (!write_file(path, data, len)) {
+        if (!rl_n64_write_file(path, data, len)) {
             free(path);
             return -1;
         }
@@ -200,6 +200,23 @@ bool rl_n64_save_path(char *out, size_t size, const char *rom_path)
     while (dl > 1 && (dir[dl - 1] == '/' || dir[dl - 1] == '\\'))
         dir[--dl] = 0;
     int n = snprintf(out, size, "%s/%.*s", dir, (int)stem, base);
+    return n > 0 && (size_t)n < size;
+}
+
+static char g_cache_dir[4096];
+
+void rl_n64_set_cache_dir(const char *dir) { snprintf(g_cache_dir, sizeof g_cache_dir, "%s", dir ? dir : ""); }
+
+bool rl_n64_cache_path(char *out, size_t size, const char *name)
+{
+    char dir[4096];
+    int n;
+    if (rl_settings_app() && rl_settings_user_dir(dir, sizeof dir, rl_settings_app()))
+        n = snprintf(out, size, "%s/cache/%s", dir, name);
+    else if (g_cache_dir[0])
+        n = snprintf(out, size, "%s/%s", g_cache_dir, name);
+    else
+        return false;
     return n > 0 && (size_t)n < size;
 }
 

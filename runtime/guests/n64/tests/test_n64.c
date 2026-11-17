@@ -63,6 +63,18 @@ static void advance(mach *t, uint64_t n)
     rl_sched_run(t->k);
 }
 
+TEST(n64_cache_files_go_where_the_saves_go_without_an_app)
+{
+    char path[256];
+    rl_n64_set_cache_dir(NULL);
+    CHECK(!rl_n64_cache_path(path, sizeof path, "x.bin"));
+    rl_n64_set_cache_dir("/saves");
+    CHECK(rl_n64_cache_path(path, sizeof path, "x.bin"));
+    CHECK(strcmp(path, "/saves/x.bin") == 0);
+    CHECK(!rl_n64_cache_path(path, 8, "x.bin"));
+    rl_n64_set_cache_dir(NULL);
+}
+
 TEST(n64_a_field_shows_at_4_3_with_its_lines_doubled)
 {
     uint8_t rom[0x40] = {0x80, 0x37, 0x12, 0x40};
