@@ -139,7 +139,11 @@ TEST(the_chip_id_follows_the_size_and_the_header_clock)
     CHECK(rl_nds_set_cartridge(t->m, hdr, 0x100) != 0);
 }
 
-/** @brief One row of the oracle's transfer times in bus cycles (all with the program's 11 cycles in them). */
+/**
+ * @brief One row of the oracle's transfer times in bus cycles (all with the program's 11 cycles in them). The
+ * consoles take 14 cycles more from the start bit, and a one-word transfer moves its word at the fast clock
+ * whatever the clock bit says (check/nds-timing's cartridge cases); the test adds both to the oracle's times.
+ */
 typedef struct row {
     unsigned clk;
     uint32_t size_code;
@@ -147,7 +151,7 @@ typedef struct row {
     uint32_t cycles;
 } row;
 
-TEST(romctrl_transfer_times_match_the_oracle_within_its_gap_jitter)
+TEST(romctrl_transfer_times_match_the_consoles_within_the_oracles_gap_jitter)
 {
     ndst *t = fixture();
     static const uint32_t sizes[4] = {7, 1, 2, 3};
@@ -171,7 +175,9 @@ TEST(romctrl_transfer_times_match_the_oracle_within_its_gap_jitter)
                     command(t, 0xB7, 0x9000);
                     uint32_t rc = (clk << 27) | (sizes[s] << 24) | g1s[a] | (g2s[b] << 16);
                     uint64_t ticks = transfer(t, rc, NULL, 0, NULL);
-                    int64_t got = (int64_t)(ticks / 2) + 11, want = oracle[clk][s][a][b];
+                    int64_t got = (int64_t)(ticks / 2) + 11, want = oracle[clk][s][a][b] + 14;
+                    if (clk && sizes[s] == 7)
+                        want -= 4 * (8 - 5);
                     if (got < want - 3 || got > want + 3) {
                         fprintf(stderr, "clk %u size %u g1 %x g2 %x: %lld cycles, oracle %lld\n", clk, sizes[s], g1s[a], g2s[b],
                                 (long long)got, (long long)want);
@@ -182,17 +188,17 @@ TEST(romctrl_transfer_times_match_the_oracle_within_its_gap_jitter)
     CHECK_EQ(bad, 0);
 }
 
-TEST(a_command_without_data_ends_after_the_command_and_gap1)
+TEST(a_command_without_data_ends_after_the_start_the_command_and_gap1)
 {
     ndst *t = fixture();
     command(t, 0xB7, 0x9000);
-    CHECK_EQ(transfer(t, 0, NULL, 0, NULL) / 2, 40);
+    CHECK_EQ(transfer(t, 0, NULL, 0, NULL) / 2, 14 + 40);
     command(t, 0xB7, 0x9000);
-    CHECK_EQ(transfer(t, 0x100, NULL, 0, NULL) / 2, 40 + 256 * 5);
+    CHECK_EQ(transfer(t, 0x100, NULL, 0, NULL) / 2, 14 + 40 + 256 * 5);
     command(t, 0xB7, 0x9000);
-    CHECK_EQ(transfer(t, 0x08000000u | 0x100, NULL, 0, NULL) / 2, 64 + 256 * 8);
+    CHECK_EQ(transfer(t, 0x08000000u | 0x100, NULL, 0, NULL) / 2, 14 + 64 + 256 * 8);
     command(t, 0xB7, 0x9000);
-    CHECK_EQ(transfer(t, 0x180000, NULL, 0, NULL) / 2, 40);
+    CHECK_EQ(transfer(t, 0x180000, NULL, 0, NULL) / 2, 14 + 40);
 }
 
 TEST(an_unread_word_stalls_the_transfer_after_two_buffered_words)

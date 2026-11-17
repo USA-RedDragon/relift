@@ -47,9 +47,23 @@ static unsigned owner(const rl_nds *m) { return (m->exmem[RL_NDS_ARM9] & OWNER_B
 
 static unsigned card_timing(unsigned cpu) { return cpu == RL_NDS_ARM9 ? NDS_DMA9_CARD : NDS_DMA7_CARD; }
 
+/*
+ * Ticks from the ROMCTRL write that starts a transfer to its first command
+ * byte on the bus (hwtest 3: every transfer the consoles timed, with and
+ * without data, at both clocks and with the header's gaps, took this much
+ * longer than its bytes and gaps).
+ */
+#define START_TICKS 28u
+
+/*
+ * A one-word transfer's data takes 4 bytes' time at 6.7 MHz whatever the
+ * clock bit says (hwtest 3: 35 ticks more than the command alone at either
+ * clock), the longer blocks run at the chosen clock.
+ */
 static uint64_t step(const nds_cart *c, uint32_t p)
 {
-    return 4 * c->byte_ticks + (p % c->block_words == 0 ? c->gap2_ticks : 0);
+    uint64_t word = c->words == 1 ? 4u * 10u : 4 * c->byte_ticks;
+    return word + (p % c->block_words == 0 ? c->gap2_ticks : 0);
 }
 
 /** @brief The byte at offset o of the image's mirrored address space (zero past the image). */
@@ -149,7 +163,7 @@ static void start(nds_cart *c, uint64_t now)
     c->words = bytes / 4;
     c->block_words = bytes == 4 ? 1 : BLOCK_WORDS;
     c->produced = c->consumed = 0;
-    c->at = now + (8 + (uint64_t)g1) * c->byte_ticks;
+    c->at = now + START_TICKS + (8 + (uint64_t)g1) * c->byte_ticks;
     c->end = c->at;
     c->next = c->words ? c->at + step(c, 0) : NDS_NEVER;
 }
