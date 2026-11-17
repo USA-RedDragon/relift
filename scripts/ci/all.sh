@@ -26,7 +26,7 @@ if [ "$(uname -s)" = Linux ]; then
   jobs+=(cross-sms-windows-x64 cross-sms-windows-arm64 cross-sms-android-arm64)
   for t in "${image_targets[@]}"; do jobs+=("image-$t"); done
 fi
-jobs+=(mac-tests mac-cross-macos-x64 mac-cross-ios-arm64 mac-cross-gba-macos-x64 mac-cross-gba-ios-arm64)
+jobs+=(mac-tests-workspace mac-tests-relift mac-tests-relift-e2e mac-cross-macos-x64 mac-cross-ios-arm64 mac-cross-gba-macos-x64 mac-cross-gba-ios-arm64)
 jobs+=(mac-cross-n64-macos-x64 mac-cross-n64-ios-arm64)
 jobs+=(mac-cross-sms-macos-x64 mac-cross-sms-ios-arm64)
 jobs+=(mac-release-aarch64-apple-darwin mac-release-x86_64-apple-darwin)
@@ -56,7 +56,7 @@ limit_minutes() {
   local wf=
   case $1 in
     lint | tests-workspace | tests-gb-devices | tests-relift | tests-relift-e2e | mesh-kat | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
-    mac-tests) wf=ci.yaml:macos ;;
+    mac-tests-*) wf=ci.yaml:macos-${1#mac-tests-} ;;
     image-*) wf=ci.yaml:cross ;;
     runtime-charter) wf=runtime.yaml:charter ;;
     runtime-tests) wf=runtime.yaml:c-tests ;;
@@ -92,7 +92,9 @@ job() {
     mac-*)
       [ -z "$mac_skip" ] || { echo "$mac_skip"; return 77; }
       case $1 in
-        mac-tests) on_mac scripts/ci/tests.sh ;;
+        mac-tests-workspace) on_mac "scripts/ci/tests.sh workspace" ;;
+        mac-tests-relift) on_mac "scripts/ci/tests.sh relift" ;;
+        mac-tests-relift-e2e) on_mac "scripts/ci/tests.sh e2e" ;;
         mac-cross-gba-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-gba-} --guest gba --jobs 4" ;;
         mac-cross-n64-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
         mac-cross-sms-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-sms-} --guest sms --jobs 4" ;;

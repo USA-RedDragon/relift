@@ -210,6 +210,7 @@ jobs:
           path: |
             ${{ runner.temp }}/lavapipe-*
             ${{ runner.temp }}/spirv-tools-*
+            ${{ runner.temp }}/vulkan-headers-*
           key: mesh-kat-${{ hashFiles('scripts/ci/lib.sh') }}
 
       - name: Draw the recorded programs with both back ends, then run the compute ones
@@ -325,8 +326,8 @@ jobs:
       - name: regenerate the Sail templates and compare
         run: scripts/ci/generated.sh
 
-  macos:
-    name: tests (macOS)
+  macos-workspace:
+    name: tests of every crate but relift (macOS)
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -340,9 +341,59 @@ jobs:
           rustc --version
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: macos-workspace
+          workspaces: |
+            .
 
-      - name: tests
-        run: scripts/ci/tests.sh
+      - name: tests of every crate but relift (macOS)
+        run: scripts/ci/tests.sh workspace
+
+  macos-relift:
+    name: tests of relift, without the end-to-end targets (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: macos-relift
+          workspaces: |
+            .
+
+      - name: tests of relift, without the end-to-end targets (macOS)
+        run: scripts/ci/tests.sh relift
+
+  macos-relift-e2e:
+    name: end-to-end tests of relift (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: macos-relift-e2e
+          workspaces: |
+            .
+
+      - name: end-to-end tests of relift (macOS)
+        run: scripts/ci/tests.sh e2e
 
   cross:
     name: cross ${{ matrix.target }}
