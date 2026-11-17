@@ -162,11 +162,13 @@ void nds_cache_buffer(rl_nds *m, uint32_t addr, unsigned ticks)
     uint64_t start = c->wb_last > now ? c->wb_last : now;
     if (start & 1)
         start++;
-    if (addr >> 24 == 0x02 && m->ram_free > start)
-        start = m->ram_free;
+    if (addr >> 24 == 0x02 && nds_ram_busy(m) > start)
+        start = nds_ram_busy(m);
     uint64_t done = start + ticks;
-    if (addr >> 24 == 0x02)
+    if (addr >> 24 == 0x02) {
         m->ram_free = done;
+        m->ram_side = NDS_RAM_CPU9;
+    }
     c->wb_done[(c->wb_head + c->wb_n) % NDS_WB_ENTRIES] = done;
     c->wb_n++;
     c->wb_last = done;
@@ -194,12 +196,18 @@ void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
         nds_cache_buffer(m, old, burst(m, old));
     }
     drain(m);
+    if (addr >> 24 == 0x02) {
+        nds_order(m, RL_NDS_ARM9);
+        nds_ram_wait(m, RL_NDS_ARM9);
+    }
     uint64_t now = nds_now(m, RL_NDS_ARM9);
     unsigned ticks = burst(m, addr);
     if (addr >> 24 == 0x02) {
         ticks = code ? FILL_CODE_MAIN_TICKS : FILL_DATA_MAIN_TICKS;
-        uint64_t start = now > m->ram_free ? now : m->ram_free;
+        uint64_t busy = nds_ram_busy(m);
+        uint64_t start = now > busy ? now : busy;
         m->ram_free = start + FILL_MAIN_TICKS;
+        m->ram_side = NDS_RAM_CPU9;
         nds_charge(m, RL_NDS_ARM9, start + ticks - now - (code ? 0u : 1u));
     } else {
         nds_charge(m, RL_NDS_ARM9, ticks);

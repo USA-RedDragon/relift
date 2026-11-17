@@ -9,7 +9,7 @@ cpu,idx,name,region,place,mode,attr,hw,relift,rom,note
 9,360,str_alu4,mx,main,warm,cb11,17.42,1800,,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,392,str_alu4,mx,main,warm,cb10,17.42,1800,,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,424,str_alu4,mx,main,warm,cb01,17.42,1800,,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-9,572,big9k,none,main,warm,-,4669.24,471856,sdk,"ARM9 9 KiB straight-line code in main RAM: instruction cache misses of the SDK build's layout"
+9,572,big9k,none,main,warm,-,4669.24,471806,sdk,ARM9 9 KiB straight-line code in main RAM: instruction cache misses of the SDK build's layout
 9,576,big16k,none,main,warm,-,16309.06,1669700,sdk,ARM9 16 KiB straight-line code in main RAM: instruction cache misses of the SDK build's layout
 9,1001,cpuset16,main,main,warm,-,818,942,sdk,relift +1.24: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
 9,1001,cpuset16,main,main,warm,-,818,942,calls,relift +1.24: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
@@ -99,106 +99,43 @@ cpu,idx,name,region,place,mode,attr,hw,relift,rom,note
 7,1039,bitunpack,wram7,wram,warm,-,2516,62,calls,"relift -24.54: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
 7,1040,cpuset16_fill,main,wram,warm,-,500,450,sdk,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
 7,1040,cpuset16_fill,main,wram,warm,-,500,450,calls,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
-9,4008,ldr_vs_ldr,p9,main,warm,-,3668,3762,sdk,relift +0.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4009,ldr_vs_str,p9,main,warm,-,3668,3762,sdk,relift +0.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4009,ldr_vs_str,p9,main,warm,-,3668,3718,calls,relift +0.50: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4010,ldr_vs_code,p9,main,warm,-,3624,1956,sdk,relift -16.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4010,ldr_vs_code,p9,main,warm,-,3624,1836,calls,relift -17.88: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4011,ldr_vs_dma,p9,main,warm,-,3606,12542,sdk,relift +89.36: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4011,ldr_vs_dma,p9,main,warm,-,3606,12374,calls,relift +87.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4012,str_vs_ldr,p9,main,warm,-,1842,3712,sdk,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4012,str_vs_ldr,p9,main,warm,-,1842,3712,calls,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4013,str_vs_str,p9,main,warm,-,1842,3712,sdk,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4013,str_vs_str,p9,main,warm,-,1842,3712,calls,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4014,str_vs_code,p9,main,warm,-,1806,1556,sdk,relift -2.50: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4014,str_vs_code,p9,main,warm,-,1806,1436,calls,relift -3.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4015,str_vs_dma,p9,main,warm,-,1836,12656,sdk,relift +108.20: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4015,str_vs_dma,p9,main,warm,-,1836,12374,calls,relift +105.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4016,ldm8_vs_ldr,p9,main,warm,-,6400,6324,sdk,relift -0.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4016,ldm8_vs_ldr,p9,main,warm,-,6400,6300,calls,relift -1.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4017,ldm8_vs_str,p9,main,warm,-,6400,6324,sdk,relift -0.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4017,ldm8_vs_str,p9,main,warm,-,6400,6324,calls,relift -0.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4018,ldm8_vs_code,p9,main,warm,-,6400,5000,sdk,relift -14.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4018,ldm8_vs_code,p9,main,warm,-,6400,5000,calls,relift -14.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4019,ldm8_vs_dma,p9,main,warm,-,6406,5130,sdk,relift -12.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4019,ldm8_vs_dma,p9,main,warm,-,6406,5000,calls,relift -14.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4021,stm8_vs_str,p9,main,warm,-,4642,5924,sdk,relift +12.82: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4021,stm8_vs_str,p9,main,warm,-,4642,5918,calls,relift +12.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4023,stm8_vs_dma,p9,main,warm,-,4636,9924,sdk,relift +52.88: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4023,stm8_vs_dma,p9,main,warm,-,4636,9756,calls,relift +51.20: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4054,ldr_vs_ldr,p7,main,warm,-,3668,3762,sdk,relift +0.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4055,ldr_vs_str,p7,main,warm,-,2074,3762,sdk,relift +16.88: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4055,ldr_vs_str,p7,main,warm,-,2074,3718,calls,relift +16.44: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4056,ldr_vs_code,p7,main,warm,-,2074,1956,sdk,relift -1.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4056,ldr_vs_code,p7,main,warm,-,2074,1836,calls,relift -2.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4057,ldr_vs_dma,p7,main,warm,-,2074,12542,sdk,relift +104.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4057,ldr_vs_dma,p7,main,warm,-,2074,12374,calls,relift +103.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4059,str_vs_str,p7,main,warm,-,1674,3712,sdk,relift +20.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4059,str_vs_str,p7,main,warm,-,1674,3656,calls,relift +19.82: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4060,str_vs_code,p7,main,warm,-,1674,1556,sdk,relift -1.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4060,str_vs_code,p7,main,warm,-,1674,1436,calls,relift -2.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4061,str_vs_dma,p7,main,warm,-,1674,12656,sdk,relift +109.82: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4061,str_vs_dma,p7,main,warm,-,1674,12486,calls,relift +108.12: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4062,ldm8_vs_ldr,p7,main,warm,-,28806,6306,sdk,relift -225.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4062,ldm8_vs_ldr,p7,main,warm,-,28806,6300,calls,relift -225.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4063,ldm8_vs_str,p7,main,warm,-,5006,6324,sdk,relift +13.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4063,ldm8_vs_str,p7,main,warm,-,5006,6324,calls,relift +13.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4065,ldm8_vs_dma,p7,main,warm,-,5006,5130,sdk,relift +1.24: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4066,stm8_vs_ldr,p7,main,warm,-,28806,4630,sdk,relift -241.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4066,stm8_vs_ldr,p7,main,warm,-,28806,4600,calls,relift -242.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4067,stm8_vs_str,p7,main,warm,-,4606,5924,sdk,relift +13.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4067,stm8_vs_str,p7,main,warm,-,4606,5918,calls,relift +13.12: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4069,stm8_vs_dma,p7,main,warm,-,4606,9862,sdk,relift +52.56: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4069,stm8_vs_dma,p7,main,warm,-,4606,9874,calls,relift +52.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4070,code_vs_ldr,p7,unc,warm,-,18006,9000,sdk,relift -90.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-9,4070,code_vs_ldr,p7,unc,warm,-,18006,9000,calls,relift -90.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4029,ldr_vs_str,p9,wram,warm,-,1206,1800,sdk,relift +5.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4029,ldr_vs_str,p9,wram,warm,-,1206,1800,calls,relift +5.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4030,ldr_vs_ldm8,p9,wram,warm,-,3200,1590,sdk,relift -16.10: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4030,ldr_vs_ldm8,p9,wram,warm,-,3200,1578,calls,relift -16.22: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4031,ldr_vs_stm8,p9,wram,warm,-,1206,2318,sdk,relift +11.12: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4031,ldr_vs_stm8,p9,wram,warm,-,1206,2300,calls,relift +10.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4033,ldr_vs_dma,p9,wram,warm,-,1206,6300,sdk,relift +50.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4033,ldr_vs_dma,p9,wram,warm,-,1206,6300,calls,relift +50.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4035,str_vs_str,p9,wram,warm,-,906,1828,sdk,relift +9.22: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4035,str_vs_str,p9,wram,warm,-,906,1800,calls,relift +8.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4036,str_vs_ldm8,p9,wram,warm,-,3200,1578,sdk,relift -16.22: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4036,str_vs_ldm8,p9,wram,warm,-,3200,1556,calls,relift -16.44: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4037,str_vs_stm8,p9,wram,warm,-,906,1475,sdk,relift +5.69: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4037,str_vs_stm8,p9,wram,warm,-,906,1468,calls,relift +5.62: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4039,str_vs_dma,p9,wram,warm,-,906,6300,sdk,relift +53.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4039,str_vs_dma,p9,wram,warm,-,906,6300,calls,relift +53.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4040,code_vs_ldr,p9,main,warm,-,9000,1734,sdk,relift -72.66: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4040,code_vs_ldr,p9,main,warm,-,9000,1700,calls,relift -73.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4042,code_vs_ldm8,p9,main,warm,-,6903,1693,sdk,relift -52.10: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4042,code_vs_ldm8,p9,main,warm,-,6903,1687,calls,relift -52.16: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4045,code_vs_dma,p9,main,warm,-,1706,11000,sdk,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4045,code_vs_dma,p9,main,warm,-,1706,11000,calls,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4074,ldr_vs_ldr,p7,wram,warm,-,1828,1800,sdk,relift -0.28: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4074,ldr_vs_ldr,p7,wram,warm,-,1828,1800,calls,relift -0.28: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4075,ldr_vs_str,p7,wram,warm,-,1831,1800,sdk,relift -0.31: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4075,ldr_vs_str,p7,wram,warm,-,1831,1800,calls,relift -0.31: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4076,ldr_vs_ldm8,p7,wram,warm,-,1809,1590,sdk,relift -2.19: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4076,ldr_vs_ldm8,p7,wram,warm,-,1809,1581,calls,relift -2.28: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4077,ldr_vs_stm8,p7,wram,warm,-,1815,2318,sdk,relift +5.03: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4077,ldr_vs_stm8,p7,wram,warm,-,1815,2300,calls,relift +4.85: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4078,ldr_vs_code,p7,wram,warm,-,1800,1206,sdk,relift -5.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4078,ldr_vs_code,p7,wram,warm,-,1800,1200,calls,relift -6.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4079,ldr_vs_dma,p7,wram,warm,-,1800,6300,sdk,relift +45.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4079,ldr_vs_dma,p7,wram,warm,-,1800,6300,calls,relift +45.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4080,str_vs_ldr,p7,wram,warm,-,903,1834,sdk,relift +9.31: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4080,str_vs_ldr,p7,wram,warm,-,903,1800,calls,relift +8.97: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4081,str_vs_str,p7,wram,warm,-,915,1800,sdk,relift +8.85: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4081,str_vs_str,p7,wram,warm,-,915,1800,calls,relift +8.85: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4082,str_vs_ldm8,p7,wram,warm,-,900,1578,sdk,relift +6.78: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4082,str_vs_ldm8,p7,wram,warm,-,900,1596,calls,relift +6.96: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4083,str_vs_stm8,p7,wram,warm,-,903,1475,sdk,relift +5.72: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4083,str_vs_stm8,p7,wram,warm,-,903,1478,calls,relift +5.75: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4085,str_vs_dma,p7,wram,warm,-,900,6300,sdk,relift +54.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4085,str_vs_dma,p7,wram,warm,-,900,6300,calls,relift +54.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4086,code_vs_ldr,p7,main,warm,-,1700,1734,sdk,relift +0.34: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4091,code_vs_dma,p7,main,warm,-,1706,11000,sdk,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
-7,4091,code_vs_dma,p7,main,warm,-,1706,11000,calls,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4008,ldr_vs_ldr,p9,main,warm,-,3668,3762,sdk,"relift +0.94: the share of main RAM each CPU's loop gets from the other's (consoles least t16 314, t48 901 bus ticks)"
+9,4010,ldr_vs_code,p9,main,warm,-,3624,3742,sdk,"relift +1.18: the share of main RAM each CPU's loop gets from the other's (consoles least t16 321, t48 901 bus ticks)"
+9,4010,ldr_vs_code,p9,main,warm,-,3624,3736,calls,"relift +1.12: the share of main RAM each CPU's loop gets from the other's (consoles least t16 321, t48 901 bus ticks)"
+9,4011,ldr_vs_dma,p9,main,warm,-,3606,3468,sdk,"relift -1.38: the share of main RAM each CPU's loop gets from the other's (consoles least t16 324, t48 901 bus ticks)"
+9,4012,str_vs_ldr,p9,main,warm,-,1842,1800,calls,"relift -0.42: the share of main RAM each CPU's loop gets from the other's (consoles least t16 184, t48 479 bus ticks)"
+9,4013,str_vs_str,p9,main,warm,-,1842,1806,sdk,"relift -0.36: the share of main RAM each CPU's loop gets from the other's (consoles least t16 184, t48 479 bus ticks)"
+9,4014,str_vs_code,p9,main,warm,-,1806,1862,calls,"relift +0.56: the share of main RAM each CPU's loop gets from the other's (consoles least t16 184, t48 473 bus ticks)"
+9,4015,str_vs_dma,p9,main,warm,-,1836,1800,sdk,"relift -0.36: the share of main RAM each CPU's loop gets from the other's (consoles least t16 184, t48 478 bus ticks)"
+9,4016,ldm8_vs_ldr,p9,main,warm,-,6400,6474,sdk,"relift +0.74: the share of main RAM each CPU's loop gets from the other's (consoles least t16 549, t48 1573 bus ticks)"
+9,4018,ldm8_vs_code,p9,main,warm,-,6400,6542,sdk,"relift +1.42: the share of main RAM each CPU's loop gets from the other's (consoles least t16 549, t48 1573 bus ticks)"
+9,4018,ldm8_vs_code,p9,main,warm,-,6400,6542,calls,"relift +1.42: the share of main RAM each CPU's loop gets from the other's (consoles least t16 549, t48 1573 bus ticks)"
+9,4022,stm8_vs_code,p9,main,warm,-,4606,4662,calls,"relift +0.56: the share of main RAM each CPU's loop gets from the other's (consoles least t16 408, t48 1145 bus ticks)"
+9,4055,ldr_vs_str,p7,main,warm,-,2074,1956,sdk,"relift -1.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4055,ldr_vs_str,p7,main,warm,-,2074,1836,calls,"relift -2.38: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4056,ldr_vs_code,p7,main,warm,-,2074,1956,sdk,"relift -1.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4056,ldr_vs_code,p7,main,warm,-,2074,1836,calls,"relift -2.38: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4057,ldr_vs_dma,p7,main,warm,-,2074,1956,sdk,"relift -1.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4057,ldr_vs_dma,p7,main,warm,-,2074,2200,calls,"relift +1.26: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4058,str_vs_ldr,p7,main,warm,-,3692,3600,calls,"relift -0.92: the share of main RAM each CPU's loop gets from the other's (consoles least t16 310, t48 901 bus ticks)"
+9,4059,str_vs_str,p7,main,warm,-,1674,1556,sdk,"relift -1.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4059,str_vs_str,p7,main,warm,-,1674,1436,calls,"relift -2.38: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4060,str_vs_code,p7,main,warm,-,1674,1556,sdk,"relift -1.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4060,str_vs_code,p7,main,warm,-,1674,1436,calls,"relift -2.38: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4061,str_vs_dma,p7,main,warm,-,1674,1556,sdk,"relift -1.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4061,str_vs_dma,p7,main,warm,-,1674,1800,calls,"relift +1.26: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+9,4073,code_vs_dma,p7,unc,warm,-,9006,18000,calls,"relift +89.94: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+7,4032,ldr_vs_code,p9,wram,warm,-,1206,6256,calls,"relift +50.50: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+7,4038,str_vs_code,p9,wram,warm,-,906,6256,calls,"relift +53.50: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+7,4040,code_vs_ldr,p9,main,warm,-,9000,7400,sdk,"relift -16.00: the share of main RAM each CPU's loop gets from the other's (consoles least t16 1751, t48 4631 bus ticks)"
+7,4040,code_vs_ldr,p9,main,warm,-,9000,7400,calls,"relift -16.00: the share of main RAM each CPU's loop gets from the other's (consoles least t16 1751, t48 4631 bus ticks)"
+7,4042,code_vs_ldm8,p9,main,warm,-,6903,9921,sdk,"relift +30.18: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+7,4042,code_vs_ldm8,p9,main,warm,-,6903,9843,calls,"relift +29.40: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+7,4044,code_vs_code,p9,main,warm,-,1706,25400,calls,"relift +236.94: the other CPU's stream ended inside the consoles' timed runs (they flag all 5): the row times that end, not the contention"
+7,4075,ldr_vs_str,p7,wram,warm,-,1831,1800,sdk,"relift -0.31: the share of main RAM each CPU's loop gets from the other's (consoles least t16 458, t48 1044 bus ticks)"
+7,4075,ldr_vs_str,p7,wram,warm,-,1831,1800,calls,"relift -0.31: the share of main RAM each CPU's loop gets from the other's (consoles least t16 458, t48 1044 bus ticks)"
+7,4084,str_vs_code,p7,wram,warm,-,915,871,calls,"relift -0.44: the share of main RAM each CPU's loop gets from the other's (consoles least t16 328, t48 621 bus ticks)"
+7,4090,code_vs_code,p7,main,warm,-,1700,1634,calls,"relift -0.66: the share of main RAM each CPU's loop gets from the other's (consoles least t16 459, t48 1003 bus ticks)"
 9,6001,waitbyloop_1,none,main,warm,-,7000,2800,sdk,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
 9,6001,waitbyloop_1,none,main,warm,-,7000,2800,calls,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
 9,6002,cpuset16_1,none,main,warm,-,10200,5600,sdk,"relift -46.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"

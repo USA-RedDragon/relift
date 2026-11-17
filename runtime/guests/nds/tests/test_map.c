@@ -261,14 +261,17 @@ TEST(main_ram_serves_one_cpu_at_a_time)
     rl_nds *m = t->m;
     rl_nds_load(m, RL_NDS_ARM9, 0x02000000u, 4, false);
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 18 - 1);
+    ndst_to(t, RL_NDS_ARM9, 40);
     rl_nds_load(m, RL_NDS_ARM7, 0x02000000u, 4, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 18 + 6 + 12);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 18 + 12);
     rl_nds_load(m, RL_NDS_ARM7, 0x03800000u, 4, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 36 + 2);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 30 + 2);
     ndst_to(t, RL_NDS_ARM7, 200);
     ndst_to(t, RL_NDS_ARM9, 100);
-    rl_nds_store(m, RL_NDS_ARM9, 0x02000000u, 2, 1, true);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 102);
+    rl_nds_store(m, RL_NDS_ARM9, 0x02000000u, 2, 1, false);
+    uint64_t next = rl_nds_now(m, RL_NDS_ARM9);
+    rl_nds_store(m, RL_NDS_ARM9, 0x02000002u, 2, 1, true);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), next + 2);
 }
 
 TEST(an_untimed_haltcnt_write_does_not_halt_a_later_store)

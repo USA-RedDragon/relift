@@ -393,6 +393,32 @@ static void s6(core *c)
     logv(c, 6, 0);
 }
 
+/**
+ * @brief The ARM7 (first for main RAM) runs a polling loop from main RAM code, which leaves the RAM no gap, until
+ * tick 30000; the ARM9 loads from main RAM at tick 1000.
+ */
+static void s7(core *c)
+{
+    if (c->id == 0) {
+        st(c, 0x04000204u, 2, 0xE880u);
+        while (now_of(c) < 1000)
+            priv(c, 1);
+        ld(c, 0x02000000u, 4);
+        logv(c, 7, 0);
+        return;
+    }
+    while (now_of(c) < 30000) {
+        if (back(c))
+            return;
+        pre(c);
+        spend(c, rl_nds_code_cost7(Q.m, 0x02380000u, 4, false));
+        spend(c, rl_nds_code_cost7(Q.m, 0x02380004u, 4, true));
+        spend(c, rl_nds_code_cost7(Q.m, 0x02380008u, 4, true));
+        ld(c, SYNC, 2);
+    }
+    logv(c, 7, 0);
+}
+
 static void body(rl_sched_cpu *k, void *arg)
 {
     core *c = arg;
@@ -607,5 +633,15 @@ TEST(q3_s6_exmemcnt_bit_15_decides_who_gets_main_ram_first)
         }
         CHECK(end[1][1] < end[0][1]);
         CHECK(end[1][0] > end[0][0]);
+    }
+}
+
+/* inferred from hwtest 3c's rows 4055 to 4073: a gapless stream of the CPU first for main RAM keeps the other out */
+TEST(q3_s7_a_gapless_stream_of_the_cpu_first_keeps_the_other_out_of_main_ram)
+{
+    for (int md = LOCKSTEP; md <= FUSED; md++) {
+        run((mode)md, s7, s7, &R[0]);
+        CHECK(R[0].nlog[0] == 1 && R[0].nlog[1] == 1);
+        CHECK(R[0].log[0][0].t >= R[0].log[1][0].t);
     }
 }

@@ -1,6 +1,9 @@
 //! End to end for the Nintendo DS guest: a two-CPU cartridge built at test
 //! time with clang and ld.lld (the ARM9 code for ARMv5TE, the ARM7 code for
-//! ARMv4T, a linker script each; no SDK) goes through `relift import`,
+//! ARMv4T, a linker script each; no SDK; the ARM7's in its own work RAM,
+//! where SDK ARM7 code runs its loops: its polling loop in main RAM code
+//! would keep the ARM9, which boot leaves second for main RAM, out of it)
+//! goes through `relift import`,
 //! `relift build` (unit discovery, lifting each unit, the C emitter, clang
 //! and the runtime) and runs headless with both CPUs on the ordered
 //! scheduler. The ARM9 starts timer 0, divides with the DIV unit, sends the
@@ -160,7 +163,7 @@ fn image(arm9: &[u8], arm7: &[u8]) -> Vec<u8> {
     r.resize(r.len().next_multiple_of(0x200), 0);
     for (at, off, ram, len) in [
         (0x20, off9, 0x0200_0000u32, arm9.len()),
-        (0x30, off7, 0x0238_0000, arm7.len()),
+        (0x30, off7, 0x0380_0000, arm7.len()),
     ] {
         put32(&mut r, at, u32::try_from(off).expect("small"));
         put32(&mut r, at + 4, ram);
@@ -203,7 +206,7 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
         ARM7_C,
         "armv4t-none-eabi",
         "arm7tdmi",
-        0x0238_0000,
+        0x0380_0000,
     );
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");

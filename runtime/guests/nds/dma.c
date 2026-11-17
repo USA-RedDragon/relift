@@ -15,6 +15,11 @@
  * sequential accesses when both sides are in main RAM, and one more bus
  * cycle when both sides are in one memory other than main RAM; the numbers
  * agree with the oracle's per-unit costs (tests/test_dma.c).
+ *
+ * In main RAM a transfer takes turns with the other CPU unit by unit, as
+ * that CPU's own accesses would (bus.c): it never runs ahead of the other
+ * CPU, and the other CPU runs it up to its own tick before each main RAM
+ * access (nds_dma_catch_up).
  */
 #include "nds_int.h"
 
@@ -55,7 +60,23 @@ void nds_dma_reset(rl_nds *m)
     }
 }
 
-static void slice(rl_nds *m, nds_dma *d, uint64_t t);
+static void run(rl_nds *m, nds_dma *d, uint64_t t, uint64_t until, uint64_t limit);
+
+/** @brief The tick d's transfers may run up to: the other CPU's, unless it is halted or not there. */
+static uint64_t other_until(const rl_nds *m, const nds_dma *d)
+{
+    unsigned other = d->cpu ^ 1u;
+    if (!m->cpu[other] || m->halted[other])
+        return NDS_NEVER;
+    return nds_ram_pos(m, other);
+}
+
+/** @brief A slice from tick t: steps that start by the other CPU's tick (which is past t), at most SLICE ticks of them. */
+static void slice(rl_nds *m, nds_dma *d, uint64_t t)
+{
+    uint64_t until = other_until(m, d);
+    run(m, d, t, until > t ? until : t, t + SLICE);
+}
 
 static void fire(rl_sched *s, rl_event *e, uint64_t when)
 {
@@ -84,6 +105,8 @@ static void repost(rl_nds *m, nds_dma *d)
         if (!c->active)
             continue;
         uint64_t at = c->ready > d->at ? c->ready : d->at;
+        if (d->retry > at)
+            at = d->retry;
         next = at < next ? at : next;
     }
     if (next == NDS_NEVER)
@@ -97,6 +120,8 @@ static void arm(rl_nds *m, nds_dma *d, unsigned i, uint64_t ready)
     nds_dma_ch *c = &d->ch[i];
     c->active = true;
     c->first = true;
+    c->half = false;
+    d->retry = 0;
     c->ready = ready;
     c->burst = GX_BURST;
     repost(m, d);
@@ -104,6 +129,9 @@ static void arm(rl_nds *m, nds_dma *d, unsigned i, uint64_t ready)
 
 static int pick(const nds_dma *d, uint64_t t)
 {
+    for (int i = 0; i < 4; i++)
+        if (d->ch[i].active && d->ch[i].half)
+            return i;
     for (int i = 0; i < 4; i++)
         if (d->ch[i].active && d->ch[i].ready <= t)
             return i;
@@ -118,8 +146,10 @@ static uint64_t access(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bo
                                     : nds_cost(m, RL_NDS_ARM7, RL_NDS_CODE, addr, size, seq);
     c += extra;
     if (main) {
-        uint64_t start = t > m->ram_free ? t : m->ram_free;
+        uint64_t busy = nds_ram_busy(m);
+        uint64_t start = t > busy ? t : busy;
         m->ram_free = start + c;
+        m->ram_side = (uint8_t)(NDS_RAM_DMA + cpu);
         return m->ram_free;
     }
     return t + c;
@@ -145,24 +175,32 @@ static void finish(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
         nds_cart_poke(m, t);
 }
 
-/** @brief One unit of channel i from tick t; returns the tick it ends. */
+/**
+ * @brief The next step of channel i from tick t, the unit's read or its write (the other CPU may take main RAM
+ * between them); returns the tick it ends.
+ */
 static uint64_t unit(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
 {
     nds_dma_ch *c = &d->ch[i];
     unsigned cpu = d->cpu, size = (c->cnt & 0x04000000u) ? 4 : 2;
     uint32_t s = c->src & ~(size - 1), a = c->dst & ~(size - 1);
-    bool smain, dmain;
-    uint32_t v = nds_bus_load(m, cpu, s, size, t, &smain);
-    nds_bus_store(m, cpu, a, size, v, t, &dmain);
-    uint64_t wait = cpu == RL_NDS_ARM9 ? nds_gx_stall(m) : 0;
+    bool smain = nds_decode_bus(m, cpu, s, false).main, dmain = nds_decode_bus(m, cpu, a, true).main;
     bool seq = !c->first && !(smain && dmain);
-    unsigned rsize = size, rextra = 0;
-    if (smain && !dmain) {
-        rsize = 2;
-        if (seq && c->after_first)
-            rextra = 2;
+    if (!c->half) {
+        bool got;
+        c->latch = nds_bus_load(m, cpu, s, size, t, &got);
+        unsigned rsize = size, rextra = 0;
+        if (smain && !dmain) {
+            rsize = 2;
+            if (seq && c->after_first)
+                rextra = 2;
+        }
+        c->half = true;
+        return access(m, cpu, s, rsize, seq, smain, t, rextra);
     }
-    t = access(m, cpu, s, rsize, seq, smain, t, rextra);
+    c->half = false;
+    nds_bus_store(m, cpu, a, size, c->latch, t, &dmain);
+    uint64_t wait = cpu == RL_NDS_ARM9 ? nds_gx_stall(m) : 0;
     t = access(m, cpu, a, size, seq, dmain, t, 0);
     if ((s >> 24) == (a >> 24) && !smain)
         t += 2;
@@ -199,9 +237,20 @@ static uint64_t unit(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
     return t;
 }
 
-static void slice(rl_nds *m, nds_dma *d, uint64_t t)
+/** @brief True when channel i's next step (its read, or its write) is a main RAM access. */
+static bool step_main(rl_nds *m, const nds_dma *d, unsigned i)
 {
-    uint64_t limit = t + SLICE;
+    const nds_dma_ch *c = &d->ch[i];
+    return c->half ? nds_decode_bus(m, d->cpu, c->dst, true).main : nds_decode_bus(m, d->cpu, c->src, false).main;
+}
+
+/**
+ * @brief Runs d's steps from tick t: each that starts by tick until (the other CPU's), stopping once one ends at or
+ * after limit. A main RAM step the other CPU comes first for also waits while the RAM is busy up to that tick: the
+ * other CPU may yet ask for it there.
+ */
+static void run(rl_nds *m, nds_dma *d, uint64_t t, uint64_t until, uint64_t limit)
+{
     t = (t + 1) & ~(uint64_t)1;
     for (;;) {
         int i = pick(d, t);
@@ -210,17 +259,34 @@ static void slice(rl_nds *m, nds_dma *d, uint64_t t)
             for (unsigned k = 0; k < 4; k++)
                 if (d->ch[k].active && d->ch[k].ready < soon)
                     soon = d->ch[k].ready;
-            if (soon >= limit)
+            if (soon >= limit || soon > until)
                 break;
             t = (soon + 1) & ~(uint64_t)1;
             continue;
         }
+        if (t > until)
+            break;
+        if (!nds_ram_first(m, d->cpu) && step_main(m, d, (unsigned)i)) {
+            uint64_t busy = nds_ram_busy(m);
+            if ((busy > t ? busy : t) >= until) {
+                d->retry = (busy > until ? busy : until) + 1;
+                break;
+            }
+        }
+        d->retry = 0;
         t = unit(m, d, (unsigned)i, t);
         if (t >= limit)
             break;
     }
     d->at = t;
     repost(m, d);
+}
+
+void nds_dma_catch_up(rl_nds *m, unsigned cpu, uint64_t t)
+{
+    nds_dma *d = &m->dma[cpu];
+    if (nds_dma_live(m, cpu) && d->at <= t)
+        run(m, d, d->at, t, NDS_NEVER);
 }
 
 void nds_dma_wait(rl_nds *m, unsigned cpu)
@@ -237,7 +303,13 @@ void nds_dma_wait(rl_nds *m, unsigned cpu)
             nds_charge(m, cpu, d->at - now);
         nds_order(m, cpu);
         now = nds_now(m, cpu);
+        if (d->at > now)
+            continue;
         slice(m, d, now > ready ? now : ready);
+        if (d->retry > nds_now(m, cpu)) {
+            nds_charge(m, cpu, d->retry - nds_now(m, cpu));
+            continue;
+        }
         if (d->at > nds_now(m, cpu))
             nds_charge(m, cpu, d->at - nds_now(m, cpu));
     }
@@ -298,6 +370,7 @@ void nds_dma_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t m
     bool on = (c->cnt & 0x80000000u) != 0;
     if (was && !on) {
         c->active = false;
+        c->half = false;
         repost(m, d);
     } else if (!was && on) {
         c->src = c->sad & src_mask(cpu, i);

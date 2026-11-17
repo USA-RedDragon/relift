@@ -38,6 +38,7 @@ TEST(round_robin_replaces_lines_64_sets_apart_in_cold_loops)
     static const unsigned kib[] = {2, 4, 6, 7, 8, 9, 12, 16};
     for (unsigned i = 0; i < sizeof kib / sizeof kib[0]; i++) {
         ndst *t = cached();
+        ndst_to(t, RL_NDS_ARM7, (uint64_t)1 << 40);
         unsigned lines = kib[i] * 32u;
         rl_nds_cp15_write(t->m, RL_CP15_KEY(0, 7, 5, 0), 0);
         pass(t, 0x02100000u, lines);

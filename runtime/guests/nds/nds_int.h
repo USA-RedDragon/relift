@@ -223,6 +223,9 @@ typedef struct nds_dma_ch {
     bool after_first;
     /** @brief Units left in the GXFIFO channel's current burst. */
     uint8_t burst;
+    /** @brief The unit's read is done and its value latched; its write comes next. */
+    bool half;
+    uint32_t latch;
 } nds_dma_ch;
 
 /** @brief The four DMA channels of one CPU and the engine that runs them one unit at a time. */
@@ -234,6 +237,8 @@ typedef struct nds_dma {
     rl_event ev;
     /** @brief The tick the engine's bus time has reached. */
     uint64_t at;
+    /** @brief A main RAM step waits for the other CPU to pass this tick (0 when none). */
+    uint64_t retry;
     rl_nds *m;
     uint8_t cpu;
 } nds_dma;
@@ -394,8 +399,9 @@ struct rl_nds {
     uint8_t powcnt2;
     uint16_t wifiwait;
 
-    /** @brief The tick from which main RAM is free. */
+    /** @brief The tick from which main RAM is free, and who booked it last (NDS_RAM_...). */
     uint64_t ram_free;
+    uint8_t ram_side;
     /** @brief The tick the ARM9's last bus data access ended. */
     uint64_t bus9_end;
     /**
@@ -550,6 +556,21 @@ bool nds_shared(unsigned cpu, uint32_t addr);
 void nds_order(rl_nds *m, unsigned cpu);
 /** @brief Sets the CPUs' ranks from EXMEMCNT bit 15. */
 void nds_ranks(rl_nds *m);
+
+/** @brief Who booked main RAM last: a CPU, or a CPU's DMA (NDS_RAM_DMA + the CPU). */
+enum { NDS_RAM_CPU9 = RL_NDS_ARM9, NDS_RAM_CPU7 = RL_NDS_ARM7, NDS_RAM_DMA = 2 };
+/** @brief True when EXMEMCNT bit 15 gives cpu (and its DMA) main RAM first. */
+bool nds_ram_first(const rl_nds *m, unsigned cpu);
+/**
+ * @brief Before a main RAM access of cpu at its tick (after nds_order): runs the other CPU's DMA up to that tick,
+ * and, when the other CPU comes first, waits as long as the RAM is busy, letting the other side take it each
+ * time it frees up (bus.c).
+ */
+void nds_ram_wait(rl_nds *m, unsigned cpu);
+/** @brief Where cpu's next main RAM access may start: its tick, for the ARM9 the bus clock edge at or before it. */
+uint64_t nds_ram_pos(const rl_nds *m, unsigned cpu);
+/** @brief The tick from which main RAM takes a new access: ram_free, and after an ARM7 access its precharge. */
+uint64_t nds_ram_busy(const rl_nds *m);
 /** @brief Raises or lowers cpu's wake line after IE & IF changed; a halted CPU's clock moves to the wake tick. */
 void nds_wake_line(rl_nds *m, unsigned cpu);
 /** @brief Routes the wake lines and sets the masks and ranks. */
@@ -643,6 +664,8 @@ void nds_dma_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t m
  * bus access of cpu, with its clock at the access).
  */
 void nds_dma_wait(rl_nds *m, unsigned cpu);
+/** @brief Runs cpu's DMA transfers whose next unit starts by tick t (a main RAM access of the other CPU at t). */
+void nds_dma_catch_up(rl_nds *m, unsigned cpu, uint64_t t);
 /** @brief True when a channel of cpu is armed (the CPU's bus accesses may have to wait). */
 static inline bool nds_dma_live(const rl_nds *m, unsigned cpu)
 {

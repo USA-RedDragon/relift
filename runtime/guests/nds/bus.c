@@ -10,6 +10,18 @@
  * Fresh C from GBATEK ("DS Memory Timings": external accesses of the ARM9
  * are delayed to the bus clock; one CPU at a time is on the main memory
  * bus, EXMEMCNT bit 15 says which one wins a tie).
+ *
+ * Main RAM between the CPUs, from the consoles' timings of each CPU's loads,
+ * stores, LDM and STM, code and DMA against the other's (check/nds-timing,
+ * idx 4000 on): the RAM serves one access at a time. When it frees up, the
+ * CPU EXMEMCNT bit 15 puts first (and its DMA) gets it if it has asked by
+ * then, whoever asked earlier; the other CPU gets it only when the first one
+ * is not asking at that moment, so a stream of the first CPU's stores, code
+ * fetches or DMA units with no gap keeps it out entirely. The first CPU also
+ * takes the RAM between two words of the other's burst (an LDM or STM, a
+ * cache line fill, sequential code, consecutive DMA units), whose next word
+ * then starts over as a nonsequential access: an ARM9 LDM of 8 words under an
+ * ARM7 load loop with the ARM7 first takes 8 times one load of each.
  */
 #include "nds_int.h"
 
@@ -21,6 +33,64 @@ void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks)
         return;
     rl_sched_stall(m->cpu[cpu], cpu == RL_NDS_ARM9 ? ticks : (ticks + 1) / 2);
 }
+
+bool nds_ram_first(const rl_nds *m, unsigned cpu)
+{
+    bool arm7_first = (m->exmem[RL_NDS_ARM9] & 0x8000u) != 0;
+    return (cpu == RL_NDS_ARM7) == arm7_first;
+}
+
+/*
+ * The ARM7's main RAM, from the console's timings (code in its work RAM or
+ * in main RAM, data in each). A nonsequential access takes 6 cycles and
+ * the RAM takes no new access for 3 cycles after it (its precharge, which
+ * keeps the ARM9 out as well); a write lets the CPU go after 4 of its 6, and
+ * each further word of an STM after its 2, 2 cycles behind the RAM as the
+ * first. A halfword or byte access takes a cycle less, but a byte write lets
+ * the CPU go when a word write would (STRB from work RAM code costs STR's,
+ * from main RAM code STRH's). A code fetch right after the previous one, at
+ * the next address in the same 32-byte block, is sequential: 2 cycles, or 1
+ * for a Thumb halfword. Any other cycle in between, a data access or an
+ * internal cycle, ends the burst, and internal cycles overlap the precharge:
+ * MUL, MLA and UMLAL in main RAM code all cost 7 more than an ADD there.
+ */
+#define MAIN7_N 12u
+#define MAIN7_S 4u
+#define MAIN7_WRITE 8u
+#define MAIN7_PRECHARGE 6u
+
+uint64_t nds_ram_pos(const rl_nds *m, unsigned cpu)
+{
+    uint64_t now = nds_now(m, cpu);
+    return cpu == RL_NDS_ARM9 ? now & ~(uint64_t)1 : now;
+}
+
+uint64_t nds_ram_busy(const rl_nds *m) { return m->ram_free + (m->ram_side == NDS_RAM_CPU7 ? MAIN7_PRECHARGE : 0u); }
+
+/*
+ * Main RAM goes to the side EXMEMCNT bit 15 favors whenever it asks, and a
+ * stream of its accesses with no gap keeps the other out for as long as it
+ * runs: on the consoles an ARM7 STR loop, DMA or code in main RAM keeps an
+ * uncached ARM9 kernel from finishing even its 4 warm-up iterations while
+ * it runs (8000 ticks and more in hwtest 3c), and the ARM9's streams do the
+ * same to the ARM7 the other way.
+ */
+void nds_ram_wait(rl_nds *m, unsigned cpu)
+{
+    if (!m->sched)
+        return;
+    nds_dma_catch_up(m, cpu ^ 1u, nds_ram_pos(m, cpu));
+    if (nds_ram_first(m, cpu))
+        return;
+    while (nds_ram_busy(m) > nds_now(m, cpu)) {
+        nds_charge(m, cpu, nds_ram_busy(m) - nds_now(m, cpu));
+        nds_order(m, cpu);
+        nds_dma_catch_up(m, cpu ^ 1u, nds_ram_pos(m, cpu));
+    }
+}
+
+/** @brief True when the other side has had main RAM since cpu's last access: cpu's burst starts over. */
+static bool ram_cut(const rl_nds *m, unsigned cpu) { return m->ram_side != cpu; }
 
 unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq)
 {
@@ -72,17 +142,21 @@ static void tcm_charge(rl_nds *m, const uint8_t *p, bool seq, bool write)
  */
 static void bus9(rl_nds *m, bool main, unsigned how, unsigned ticks, unsigned busy)
 {
-    uint64_t now = nds_now(m, RL_NDS_ARM9);
     bool seq = how == RL_NDS_S;
+    if (main && !seq)
+        nds_ram_wait(m, RL_NDS_ARM9);
+    uint64_t now = nds_now(m, RL_NDS_ARM9);
     uint64_t start = seq ? now : now & ~(uint64_t)1;
     if (how >= RL_NDS_AFTER && m->bus9_end > start)
         start = m->bus9_end;
-    if (main && !seq && m->ram_free > start)
-        start = m->ram_free;
+    if (main && !seq && nds_ram_busy(m) > start)
+        start = nds_ram_busy(m);
     uint64_t end = start + ticks;
     m->bus9_end = end;
-    if (main)
-        m->ram_free = end + busy;
+    if (main) {
+        m->ram_free = (end + busy + 1u) & ~(uint64_t)1;
+        m->ram_side = NDS_RAM_CPU9;
+    }
     uint64_t to = seq ? end : end - 1u;
     if (to > now)
         nds_charge(m, RL_NDS_ARM9, to - now);
@@ -103,30 +177,15 @@ static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
         nds_charge(m, cpu, ticks);
         return;
     }
+    nds_ram_wait(m, cpu);
     uint64_t now = nds_now(m, cpu);
-    uint64_t start = now > m->ram_free ? now : m->ram_free;
+    uint64_t busy = nds_ram_busy(m);
+    uint64_t start = now > busy ? now : busy;
     m->ram_free = start + ticks;
+    m->ram_side = (uint8_t)cpu;
     nds_charge(m, cpu, m->ram_free - now);
 }
 
-/*
- * The ARM7's main RAM, from the console's timings (code in its work RAM or
- * in main RAM, data in each). A nonsequential access takes 6 cycles and starts
- * no earlier than 3 cycles after the RAM's last access ended (its
- * precharge); a write lets the CPU go after 4 of its 6, and each further
- * word of an STM after its 2, 2 cycles behind the RAM as the first. A
- * halfword or byte access takes a cycle less, but a byte write lets the CPU
- * go when a word write would (STRB from work RAM code costs STR's, from main
- * RAM code STRH's). A code fetch right after the previous one, at
- * the next address in the same 32-byte block, is sequential: 2 cycles, or 1
- * for a Thumb halfword. Any other cycle in between, a data access or an
- * internal cycle, ends the burst, and internal cycles overlap the precharge:
- * MUL, MLA and UMLAL in main RAM code all cost 7 more than an ADD there.
- */
-#define MAIN7_N 12u
-#define MAIN7_S 4u
-#define MAIN7_WRITE 8u
-#define MAIN7_PRECHARGE 6u
 /*
  * An ARM7 write to work RAM (shared or its own) followed by a code fetch
  * from work RAM costs a cycle more: STR, STM and PUSH there cost 1 more than
@@ -140,7 +199,7 @@ static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
 /** @brief Ticks until a nonsequential main RAM access of the ARM7 at tick now ends, the RAM's busy end in *busy. */
 static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64_t *busy)
 {
-    uint64_t start = m->ram_free + MAIN7_PRECHARGE;
+    uint64_t start = nds_ram_busy(m);
     if (start < now)
         start = now;
     unsigned n = size < 4 ? MAIN7_N - 2u : MAIN7_N;
@@ -165,6 +224,11 @@ static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64
  */
 unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 {
+    nds_order(m, RL_NDS_ARM7);
+    bool goes_on = seq && (addr == m->burst7_name || addr == m->burst7_name + size);
+    bool uncut = goes_on && !ram_cut(m, RL_NDS_ARM7);
+    if (!uncut)
+        nds_ram_wait(m, RL_NDS_ARM7);
     uint64_t now = nds_now(m, RL_NDS_ARM7);
     unsigned back = 0;
     if (m->wram7_write_end == now && m->wram7_write_end) {
@@ -173,11 +237,10 @@ unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
     }
     m->wram7_write_end = 0;
     uint64_t from = now < m->burst7_end ? m->burst7_end : now;
-    bool goes_on = seq && (addr == m->burst7_name || addr == m->burst7_name + size);
     uint32_t at = goes_on ? m->burst7_next : addr;
     uint64_t end;
     bool block = (at & 31u) == 0 && m->burst7_len < 2u;
-    if (goes_on && from == m->burst7_end && !block && m->ram_free <= from) {
+    if (uncut && from == m->burst7_end && !block && m->ram_free <= from) {
         end = from + (size < 4 ? MAIN7_S / 2u : MAIN7_S);
         m->ram_free = end;
     } else {
@@ -187,6 +250,7 @@ unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
     m->burst7_name = addr;
     m->burst7_next = at + size;
     m->burst7_end = end;
+    m->ram_side = NDS_RAM_CPU7;
     unsigned cyc = (unsigned)((end - from + 1u) / 2u);
     return cyc > back ? cyc - back : 0u;
 }
@@ -194,6 +258,9 @@ unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 /** @brief Charges the ARM7 a main RAM data access: nonsequential, or the next word of an LDM or STM. */
 static void data7(rl_nds *m, bool write, bool seq, unsigned size)
 {
+    seq = seq && !ram_cut(m, RL_NDS_ARM7);
+    if (!seq)
+        nds_ram_wait(m, RL_NDS_ARM7);
     uint64_t now = nds_now(m, RL_NDS_ARM7);
     uint64_t end;
     if (seq) {
@@ -205,6 +272,7 @@ static void data7(rl_nds *m, bool write, bool seq, unsigned size)
     } else {
         end = main7(m, now, write, size, &m->ram_free);
     }
+    m->ram_side = NDS_RAM_CPU7;
     m->burst7_end = 0;
     nds_charge(m, RL_NDS_ARM7, end - now);
 }
@@ -290,6 +358,8 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
                 nds_order(m, cpu);
             nds_where w = nds_decode(m, cpu, addr, code, false);
             uint32_t v = bus_read(m, cpu, addr, size, w);
+            if (w.main && how == RL_NDS_S && ram_cut(m, RL_NDS_ARM9))
+                how = RL_NDS_N;
             bus9(m, w.main, how, cost9(m, addr, size, how, w.main), 0);
             return v;
         }
@@ -344,6 +414,11 @@ unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq)
     uint32_t word = at & ~3u;
     unsigned cost = size == 2 && word == m->fetch9_word ? 0u : nds_cost(m, RL_NDS_ARM9, RL_NDS_CODE, addr, 4, false);
     m->fetch9_word = word;
+    bool main = cost && addr >> 24 == 0x02;
+    if (main) {
+        nds_order(m, RL_NDS_ARM9);
+        nds_ram_wait(m, RL_NDS_ARM9);
+    }
     uint64_t now = nds_now(m, RL_NDS_ARM9);
     unsigned back = 0;
     if (cost && m->fetch9_end && now > m->fetch9_end) {
@@ -352,11 +427,20 @@ unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq)
         if (back > cost)
             back = cost;
     }
+    uint64_t start = (m->fetch9_end > now ? m->fetch9_end : now) - back;
+    unsigned held = 0;
+    if (main && ram_cut(m, RL_NDS_ARM9) && nds_ram_busy(m) > start)
+        held = (unsigned)(nds_ram_busy(m) - start);
     if (cost) {
-        m->fetch9_end = (m->fetch9_end > now ? m->fetch9_end : now) + cost - back;
+        m->fetch9_end = start + held + cost;
         m->fetch9_cost = cost;
     }
-    return cost - back;
+    if (main) {
+        if (m->fetch9_end > m->ram_free)
+            m->ram_free = m->fetch9_end;
+        m->ram_side = NDS_RAM_CPU9;
+    }
+    return held + cost - back;
 }
 
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq)
@@ -430,10 +514,14 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         if (wait > nds_now(m, cpu))
             nds_charge(m, cpu, wait - nds_now(m, cpu));
     }
+    if (cpu == RL_NDS_ARM9 && w.main && seq && ram_cut(m, RL_NDS_ARM9)) {
+        seq = false;
+        how = RL_NDS_N;
+    }
     unsigned cost = nds_cost(m, cpu, RL_NDS_DATA, addr, size == 1 && w.main ? 4u : size, seq);
     if (cpu == RL_NDS_ARM9) {
-        unsigned posted = w.main && !seq ? NDS_MAIN_WRITE_POSTED : 0;
-        bus9(m, w.main, how, cost - posted, posted);
+        unsigned posted = w.main ? NDS_MAIN_WRITE_POSTED : 0;
+        bus9(m, w.main, how, seq ? cost : cost - posted, posted);
     } else if (w.main) {
         data7(m, true, seq, size);
     } else {
