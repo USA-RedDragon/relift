@@ -26,6 +26,6 @@ Both commands keep their artifacts in the cache directory. The cache can be copi
 
 ## If the program stops
 
-Discovery cannot see every code address. A shipped build that reaches code that discovery missed writes a stop report and exits with status 70. `relift report <file>` explains the report and adds the missed target for the next build ([missed code and stop reports](../guides/usage.md#missed-code-and-stop-reports)).
+Discovery cannot see every code address. A shipped build that reaches code that discovery missed writes a stop report and exits with status <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_EXIT_SOFTWARE -->`70`<!-- /docgen:const -->. `relift report <file>` explains the report and adds the missed target for the next build ([missed code and stop reports](../guides/usage.md#missed-code-and-stop-reports)).
 
 Next: [Next steps](03-next-steps.md).

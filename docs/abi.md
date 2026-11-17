@@ -9,13 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version:
-
-<!-- docgen:code file=runtime/core/include/relift/abi_core.h symbol=RL_ABI_VERSION -->
-```c
-#define RL_ABI_VERSION 10u
-```
-<!-- /docgen:code -->
+Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION -->`10u`<!-- /docgen:const -->.
 
 ## 0. Runtime layers
 
@@ -505,7 +499,7 @@ has a dispatch slot that is not empty, so no guest jump can miss.
   address that is not a hot entry. A landing pad keeps its `rl_pad_resume`
   entry. Hot shards, their flags and their code do not change. The setting
   `emit.cold` turns the copy off.
-- **Code map.** `rl_code_map` (`RL_CODE_MAP_VERSION` 1) gives each slot of
+- **Code map.** `rl_code_map` (`RL_CODE_MAP_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_CODE_MAP_VERSION -->`1u`<!-- /docgen:const -->) gives each slot of
   the executable pages its class: `RL_CODE_HOT` (an entry of the hot unit:
   function entries, landing pads, overrides), `RL_CODE_COLD` (an
   instruction only the cold unit enters) or `RL_CODE_TRAP` (padding or a
@@ -838,7 +832,7 @@ inside a unit; Linux run with `-fvisibility=hidden -Wl,--no-undefined`]
 (3, the lift or compile failed). A nonzero status, a missing or unreachable
 socket, a unit that fails the checks in step 5, and a miss in a shipped
 build all report on stderr and end the process with `RL_EXIT_SOFTWARE`
-(70, EX_SOFTWARE). [verified: hot-load prototype, each case]
+(<!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_EXIT_SOFTWARE -->`70`<!-- /docgen:const -->, EX_SOFTWARE). [verified: hot-load prototype, each case]
 
 **Socket path:** it must fit `sun_path` (108 bytes on Linux, 104 on macOS,
 NUL included). relift picks a short path; the runtime reports a longer one
@@ -871,7 +865,7 @@ shared library on every host.
 ### Shipped builds
 
 A miss writes a stop report (section 11, stop reports) and ends the guest
-with `RL_PEND_EXIT_PROCESS` and status `RL_EXIT_SOFTWARE` (70). Shipped
+with `RL_PEND_EXIT_PROCESS` and status `RL_EXIT_SOFTWARE` (<!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_EXIT_SOFTWARE -->`70`<!-- /docgen:const -->). Shipped
 builds never load code at run time. A release Game Boy build stops the
 same way at the first instruction without a lifted body (it has no CPU
 interpreter), and names the transfer site in the bank that was mapped;

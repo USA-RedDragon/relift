@@ -43,7 +43,7 @@ stop with "not implemented".
 Discovery cannot see every code address (a pointer the program computes, a
 jump table it does not recognize). A shipped build that reaches such code,
 or stops on any other fatal guest error, writes a stop report and exits with
-status 70. The report is a plain-text file `relift-stop-<date>-<time>-<pid>.txt`
+status <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_EXIT_SOFTWARE -->`70`<!-- /docgen:const -->. The report is a plain-text file `relift-stop-<date>-<time>-<pid>.txt`
 in `RELIFT_REPORT_DIR` if set, else in `reports` in the app's user folder
 (on Android in the app's files folder, on iOS in its Documents, where the
 Files app shows it). `relift report <file>`, run in the project directory,
