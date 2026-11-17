@@ -257,12 +257,27 @@ pub(crate) struct Prep {
 }
 
 /// The instructions that may run right after each one, or `None` for
-/// control flow that is not followed.
+/// control flow that is not followed. A direct CALL goes on at its callee
+/// and every RET at the instruction after any direct CALL: more paths than
+/// run, which only makes a value known on all of them rarer.
 fn successors(code: &Code) -> Option<Vec<Vec<usize>>> {
     let insts = &code.insts;
     let brx = cfg::brx_cases(code);
     let n = insts.len();
     let mut s = vec![Vec::new(); n];
+    let call_target = |i: &crate::Inst| match i.ops.last() {
+        Some(Operand::Target(t)) if *t > 0 && *t % 16 == 0 => {
+            usize::try_from(*t / 16).ok().filter(|&t| t < n)
+        }
+        _ => None,
+    };
+    let mut returns = Vec::new();
+    for (k, i) in insts.iter().enumerate() {
+        if i.mnemonic == "CALL" {
+            call_target(i)?;
+            returns.push(k + 1);
+        }
+    }
     for (k, i) in insts.iter().enumerate() {
         let guarded = i.guard.is_some()
             || i.ops
@@ -287,7 +302,19 @@ fn successors(code: &Code) -> Option<Vec<Vec<usize>>> {
             "EXIT" | "KILL" if !guarded => {}
             // The cases the translation dispatches the BRX to.
             "BRX" | "BRXU" => s[k].extend(brx.get(&k).into_iter().flatten().copied()),
-            "JMP" | "JMX" | "CALL" | "RET" | "BREAK" | "BPT" | "RTT" => {
+            "CALL" => {
+                s[k].extend(call_target(i));
+                if guarded {
+                    s[k].push(k + 1);
+                }
+            }
+            "RET" => {
+                s[k].extend(returns.iter().copied());
+                if guarded {
+                    s[k].push(k + 1);
+                }
+            }
+            "JMP" | "JMX" | "BPT" | "RTT" => {
                 return None;
             }
             _ => s[k].push(k + 1),

@@ -560,3 +560,75 @@ fn implicit_lods_take_quad_derivatives_in_compute() {
     assert!(!s.interface.compute_derivatives);
     assert!(insts(&s.spirv, 87).is_empty());
 }
+
+/// `CALL.REL.NOINC` at line `at` to line `to`.
+fn call_rel(at: usize, to: usize) -> [u8; 16] {
+    let rel = (to as i64 - at as i64 - 1) * 4;
+    word(
+        0x144,
+        4,
+        &[
+            (34, 48, (rel as u64) & 0xffff_ffff_ffff),
+            (86, 1, 1),
+            (87, 3, 7),
+        ],
+    )
+}
+
+/// `RET.REL.NODEC R20` at line `at`, to the address R20 holds.
+fn ret_rel(at: usize) -> [u8; 16] {
+    let rel = -(16 * (at as i64 + 1)) / 4;
+    word(
+        0x150,
+        4,
+        &[
+            (24, 8, 20),
+            (34, 48, (rel as u64) & 0xffff_ffff_ffff),
+            (86, 1, 1),
+            (87, 3, 7),
+        ],
+    )
+}
+
+/// An offset set before a call to a subroutine that does not write it
+/// stays constant after the call; one the subroutine changes at run time
+/// does not.
+#[test]
+fn offsets_are_followed_through_calls() {
+    let t = tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)]);
+    let exit = word(0x14d, 4, &[(87, 3, 7)]);
+    let iadd = word(
+        0x010,
+        4,
+        &[
+            (16, 8, 4),
+            (24, 8, 4),
+            (32, 32, 1),
+            (64, 8, 255),
+            (81, 3, 7),
+            (84, 3, 7),
+        ],
+    );
+    let program = |sub: [u8; 16]| {
+        let mut b = Vec::new();
+        for w in [
+            mov(4, 0xf1),
+            mov(20, 0x30),
+            call_rel(2, 5),
+            t,
+            exit,
+            sub,
+            ret_rel(6),
+        ] {
+            b.extend(w);
+        }
+        exit_and_halt(&mut b);
+        b
+    };
+    let s = translate(&Program::parse(&program(mov(9, 0)))).unwrap_or_else(|e| panic!("{e}"));
+    assert!(insts(&s.spirv, 88).iter().any(|i| i[5] & 8 != 0));
+    let e = translate(&Program::parse(&program(iadd)))
+        .err()
+        .map(|e| e.to_string());
+    assert!(e.is_some_and(|e| e.contains("offsets")));
+}
