@@ -19,23 +19,25 @@ relift ships no game code, keys or data, and never will.
 | Game Boy and Game Boy Color | SM83 | Test ROMs from public suites pass in CI. Retail games run in test runs. |
 | Game Boy Advance | ARMv4T | Public test ROMs pass and match the NanoBoyAdvance oracle in test runs. Retail games run in test runs; code that discovery misses stops the program with a report. |
 | Nintendo 64 | VR4300 and RSP | Public test ROMs for the CPU, the RSP and VI match the ares oracle in test runs. A retail game reaches its title screen in test runs. |
+| Nintendo DS | ARM946E-S and ARM7TDMI | relift imports and builds decrypted `.nds` dumps. A retail game runs through its boot and into its intro in test runs, compared frame by frame with the melonDS oracle. |
 
-In development, with no runnable guest yet: the Master System and Game Gear
-CPU (Z80, `cpus/z80`), the Switch 2 shader translator (SM86 to SPIR-V,
-`gpus/sm86`) and the Switch 2 runtime.
+In development, with no runnable guest yet: Master System, Game Gear and
+SG-1000 (the Z80 CPU in `cpus/z80` and the ROM formats in `guests/sms`),
+and Switch 2 (the shader translator, SM86 to SPIR-V in `gpus/sm86`, and the
+runtime).
 
 ## Hosts
 
 | Host | State |
 |---|---|
-| Linux x86-64 | All three guests run; CI runs the tests |
+| Linux x86-64 | Switch, Game Boy and GBA games run; CI runs the tests |
 | Linux arm64 | relift builds in CI |
-| macOS arm64 | All three guests run on an Apple M2; CI runs the tests |
+| macOS arm64 | Switch, Game Boy and GBA games run on an Apple M2; CI runs the tests |
 | macOS x86-64 | Game Boy and GBA programs build in CI; a GBA game ran under Rosetta |
 | Windows x86-64 | Game Boy and GBA programs build in CI and run under wine; the runtime tests and the hot-load prototype ran on Windows 11 |
 | Windows arm64 | Game Boy and GBA programs build in CI; not run |
-| Android arm64 | All three guests run on an Android handheld as APKs; Game Boy and GBA programs build in CI |
-| iOS arm64 | All three guests run on an iPhone; Game Boy and GBA apps build in CI |
+| Android arm64 | Switch, Game Boy and GBA games run on an Android handheld as APKs; Game Boy and GBA programs build in CI |
+| iOS arm64 | Switch, Game Boy and GBA games run on an iPhone; Game Boy and GBA apps build in CI |
 
 ## Get started
 
