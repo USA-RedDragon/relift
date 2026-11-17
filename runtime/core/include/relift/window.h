@@ -68,10 +68,12 @@ struct rl_window_backend {
     /** @brief Creates a VkSurfaceKHR for w on host instance; returns a VkResult. */
     int32_t (*vulkan_surface)(rl_window *w, void *instance, uint64_t *surface);
     /**
-     * @brief Optional. Shows a frame of width by height RGB888 pixels (rows packed) in w, scaled to fit with square
-     * pixels; any thread, the pixels are copied before it returns. NULL for a backend that only makes Vulkan surfaces.
+     * @brief Optional. Shows a frame of width by height RGB888 pixels (rows packed) in w, stretched to a picture of
+     * shown_width by shown_height square pixels and scaled to fit; any thread, the pixels are copied before it
+     * returns. NULL for a backend that only makes Vulkan surfaces.
      */
-    void (*present_rgb)(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height);
+    void (*present_rgb)(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_width,
+                        uint32_t shown_height);
 };
 
 /**
@@ -113,6 +115,12 @@ RL_RUNTIME_API int rl_window_main(int (*body)(void *arg), void *arg);
  * overlay and returns only once the game runs again.
  */
 RL_RUNTIME_API bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height);
+/**
+ * @brief rl_window_present_rgb for a frame whose pixels are not square: it shows as shown_width by shown_height
+ * square pixels (a TV picture's 4:3, say), with the window's letterboxing.
+ */
+RL_RUNTIME_API bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height,
+                                                uint32_t shown_width, uint32_t shown_height);
 
 /** @brief The host backend built with VIDEO=sdl3. */
 RL_RUNTIME_API const rl_window_backend *rl_host_window_backend(void);

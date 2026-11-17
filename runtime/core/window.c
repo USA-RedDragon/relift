@@ -35,14 +35,20 @@ void rl_window_set_events(rl_window_event_fn *fn, void *user)
     pthread_mutex_unlock(&g_lock);
 }
 
-bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height)
+bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height,
+                                 uint32_t shown_width, uint32_t shown_height)
 {
     if (!w || !w->b || !w->b->present_rgb)
         return false;
-    w->b->present_rgb(w, rgb, width, height);
+    w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
     while (rl_touchpad_hold(16))
-        w->b->present_rgb(w, rgb, width, height);
+        w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
     return true;
+}
+
+bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height)
+{
+    return rl_window_present_rgb_shown(w, rgb, width, height, width, height);
 }
 
 void rl_window_emit(rl_window *w, int event)

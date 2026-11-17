@@ -386,6 +386,14 @@ static void refresh(rl_n64 *m)
     m->vi.screen_ready = true;
 }
 
+void rl_n64_scanout_shown(const rl_n64 *m, uint32_t width, uint32_t height, uint32_t *shown_width,
+                          uint32_t *shown_height)
+{
+    uint32_t lines = (m->vi.v_total & 0x3FFu) > 0x240u ? 576u : 480u;
+    *shown_width = (uint32_t)((uint64_t)width * (lines * 4u / 3u) / 640u);
+    *shown_height = (m->vi.control & 0x40u) ? height : height * 2u;
+}
+
 bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, size_t cap, uint32_t *width, uint32_t *height)
 {
     if (m->dp.ops && m->dp.ops->vi_picture) {

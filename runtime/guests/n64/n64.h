@@ -281,6 +281,14 @@ RL_RUNTIME_API void rl_n64_picture_get(rl_n64_picture *out);
  */
 RL_RUNTIME_API bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, size_t cap, uint32_t *width, uint32_t *height);
 /**
+ * @brief The size in square pixels a TV shows a scanout picture of width by
+ * height at: the whole 640-column output fills a 4:3 screen of 480 (NTSC) or
+ * 576 (PAL, from VI_V_TOTAL) lines, and a picture of one field (VI_CTRL
+ * without serrate) has each of its lines shown twice.
+ */
+RL_RUNTIME_API void rl_n64_scanout_shown(const rl_n64 *m, uint32_t width, uint32_t height, uint32_t *shown_width,
+                                         uint32_t *shown_height);
+/**
  * @brief The framebuffer VI points at, read raw from RDRAM with its origin,
  * width and the visible size from the video and scale registers, no scaling
  * and no window: writes width * height RGB pixels to rgb (room for 640 * 576

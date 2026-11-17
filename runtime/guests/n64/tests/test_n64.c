@@ -63,6 +63,24 @@ static void advance(mach *t, uint64_t n)
     rl_sched_run(t->k);
 }
 
+TEST(n64_a_field_shows_at_4_3_with_its_lines_doubled)
+{
+    uint8_t rom[0x40] = {0x80, 0x37, 0x12, 0x40};
+    rl_n64 *m = rl_n64_create(rom, sizeof rom);
+    uint32_t w, h;
+    rl_n64_write(m, 0x04400018u, 4, 0x20Du);
+    rl_n64_write(m, 0x04400000u, 4, 0x3002u);
+    rl_n64_scanout_shown(m, 640, 240, &w, &h);
+    CHECK_EQ(w, 640u);
+    CHECK_EQ(h, 480u);
+    rl_n64_write(m, 0x04400018u, 4, 0x271u);
+    rl_n64_write(m, 0x04400000u, 4, 0x3042u);
+    rl_n64_scanout_shown(m, 640, 576, &w, &h);
+    CHECK_EQ(w, 768u);
+    CHECK_EQ(h, 576u);
+    rl_n64_destroy(m);
+}
+
 TEST(n64_every_mi_interrupt_is_up_at_power_on)
 {
     uint8_t rom[0x40] = {0x80, 0x37, 0x12, 0x40};

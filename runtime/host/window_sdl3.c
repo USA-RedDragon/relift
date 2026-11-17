@@ -51,6 +51,7 @@ typedef struct sdl_win {
     SDL_Renderer *r;
     SDL_Texture *t;
     uint32_t tw, th;
+    uint32_t lw, lh;
     SDL_Texture *ov;
     uint32_t ow, oh;
     bool logical;
@@ -569,7 +570,7 @@ static int32_t sdl_vulkan_surface(rl_window *h, void *instance, uint64_t *surfac
 typedef struct present_req {
     sdl_win *w;
     const uint8_t *rgb;
-    uint32_t width, height;
+    uint32_t width, height, shown_w, shown_h;
 } present_req;
 
 static void do_present(void *p)
@@ -600,10 +601,15 @@ static void do_present(void *p)
         w->th = q->height;
         w->logical = false;
     }
+    if (w->lw != q->shown_w || w->lh != q->shown_h) {
+        w->lw = q->shown_w;
+        w->lh = q->shown_h;
+        w->logical = false;
+    }
     SDL_UpdateTexture(w->t, NULL, q->rgb, (int)(q->width * 3));
     bool pad = rl_touchpad_wanted();
     if (w->logical == pad) {
-        SDL_SetRenderLogicalPresentation(w->r, pad ? 0 : (int)q->width, pad ? 0 : (int)q->height,
+        SDL_SetRenderLogicalPresentation(w->r, pad ? 0 : (int)q->shown_w, pad ? 0 : (int)q->shown_h,
                                          pad ? SDL_LOGICAL_PRESENTATION_DISABLED
                                              : SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
         w->logical = !pad;
@@ -644,9 +650,12 @@ static void do_present(void *p)
     SDL_RenderPresent(w->r);
 }
 
-static void sdl_present_rgb(rl_window *h, const uint8_t *rgb, uint32_t width, uint32_t height)
+static void sdl_present_rgb(rl_window *h, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_w,
+                            uint32_t shown_h)
 {
-    present_req q = { .w = (sdl_win *)h, .rgb = rgb, .width = width, .height = height };
+    present_req q = {
+        .w = (sdl_win *)h, .rgb = rgb, .width = width, .height = height, .shown_w = shown_w, .shown_h = shown_h
+    };
     on_loop(do_present, &q);
 }
 

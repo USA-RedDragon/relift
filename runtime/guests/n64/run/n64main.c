@@ -329,8 +329,11 @@ static void on_frame(void *user, rl_n64 *m)
     uint64_t span = (cycles - H->last_cycles) * 1000000000ull / RL_N64_HZ;
     H->last_cycles = cycles;
     if (H->win) {
-        if (H->have)
-            rl_window_present_rgb(H->win, H->rgb, H->w, H->h);
+        if (H->have) {
+            uint32_t sw, sh;
+            rl_n64_scanout_shown(H->run.m, H->w, H->h, &sw, &sh);
+            rl_window_present_rgb_shown(H->win, H->rgb, H->w, H->h, sw, sh);
+        }
         uint64_t t = now_ns();
         if (!H->next_ns || t > H->next_ns + 4 * span)
             H->next_ns = t;
