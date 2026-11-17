@@ -249,6 +249,7 @@ fn zexdoc_passes_as_emitted_c() {
     let opts = Options {
         map: IoMap::memory(),
         sync: SyncPolicy::default(),
+        live_operands: false,
     };
     let external = |a: u64| matches!(a, BDOS | IUT | MASK_AND);
     let started = std::time::Instant::now();

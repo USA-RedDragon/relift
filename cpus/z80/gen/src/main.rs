@@ -26,7 +26,7 @@ use relift_cpu_z80::Group;
 use relift_sail::model::Model;
 use relift_sail::stage::{self, Form};
 
-use cut::{GROUP, Z80};
+use cut::{GROUP, LIVE, Z80};
 
 /// Every group, in the order of their numbers.
 const ALL: [Group; 9] = [
@@ -173,7 +173,26 @@ fn load(lib: &str, path: &str) -> Result<Model, String> {
 
 fn one(m: &Model, o: &Op) -> Result<stage::Template, String> {
     GROUP.with(|g| g.set(o.group));
+    LIVE.with(|l| l.set(false));
     stage::template::<Z80>(m, o)
+}
+
+/// The live form of `o`'s template (operands read when it runs), named
+/// with an `L` suffix; `None` when the template reads no operand.
+fn one_live(m: &Model, o: &Op, fixed: &stage::Template) -> Result<Option<String>, String> {
+    if !fixed.code.contains("st.fetch(") {
+        return Ok(None);
+    }
+    GROUP.with(|g| g.set(o.group));
+    LIVE.with(|l| l.set(true));
+    let t = stage::template::<Z80>(m, o);
+    LIVE.with(|l| l.set(false));
+    let name = o.name();
+    Ok(Some(t?.code.replacen(
+        &format!("fn {name}("),
+        &format!("fn {name}L("),
+        1,
+    )))
 }
 
 const HEADER: &str = "\
@@ -195,11 +214,21 @@ fn generate(m: &Model) -> Result<String, String> {
     let ops = Op::all();
     let mut body = String::new();
     let mut failed = Vec::new();
+    let mut live = Vec::new();
     for o in &ops {
         match one(m, o) {
             Ok(t) => {
                 body.push_str(&t.code);
                 body.push('\n');
+                match one_live(m, o, &t) {
+                    Ok(Some(code)) => {
+                        body.push_str(&code);
+                        body.push('\n');
+                        live.push(*o);
+                    }
+                    Ok(None) => {}
+                    Err(e) => failed.push(format!("{} (live): {e}", o.name())),
+                }
             }
             Err(e) => failed.push(format!("{}: {e}", o.name())),
         }
@@ -209,8 +238,9 @@ fn generate(m: &Model) -> Result<String, String> {
         eprintln!("{}: {n} templates", name(g));
     }
     eprintln!(
-        "{} templates generated, {} failed",
+        "{} templates generated, {} live, {} failed",
         ops.len() - failed.len(),
+        live.len(),
         failed.len()
     );
     if !failed.is_empty() {
@@ -232,6 +262,20 @@ fn generate(m: &Model) -> Result<String, String> {
         let _ = writeln!(
             out,
             "        ({}, {:#04x}) => {},",
+            o.group as u8,
+            o.code,
+            o.name()
+        );
+    }
+    out.push_str("        _ => return None,\n    })\n}\n");
+    out.push_str("/// The live template of `code` in group `group` (operands read when it runs), for the templates that read operands.\n");
+    out.push_str(
+        "pub(super) fn template_live(group: u8, code: u8) -> Option<super::GenFn> {\n    Some(match (group, code) {\n",
+    );
+    for o in &live {
+        let _ = writeln!(
+            out,
+            "        ({}, {:#04x}) => {}L,",
             o.group as u8,
             o.code,
             o.name()

@@ -15,6 +15,11 @@ conditional `CALL` or `RET`, and the per-CPU layer's wait. Their lift-time
 side is `cpus/z80/src/lift/rt.rs`. In an interrupt entry PC is the return
 address, read from the `ret` slot.
 
+Every template that reads an operand byte is generated a second time as
+its live form (the name with an `L` suffix, listed by `template_live`):
+there each `MemFetch` the template reads becomes `st.operand`, a memory
+read in the fetch's machine cycle when the instruction runs.
+
 Regenerate from the repository root, with the Sail library that
 `cpus/arm64/gen/fetch-sail.sh` downloads:
 

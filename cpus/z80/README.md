@@ -14,6 +14,16 @@ interrupt entries (NMI, IM 0 with 0xFF on the bus, IM 1, IM 2) are blocks at
 `ENTRY` plus the entry. `HALT` calls the per-CPU layer through the intrinsic
 `HALT` names.
 
+With `Options::live_operands` (code in RAM whose operands change) an
+instruction lifts from its live template: the opcode and prefix bytes are
+the lifted ones (`opcode_mask` gives their offsets) and every operand byte
+(immediate, address, displacement) is a memory read in its own machine
+cycle when the instruction runs, so a jump to an operand address is
+computed. Every opcode that reads an operand has a live template (718 of
+1786); the test `live_operands_read_the_bytes_in_memory` runs both forms of
+every opcode on the IR interpreter and finds them equal, with the bytes
+lifted and with other operand bytes in memory.
+
 ```sh
 cargo test -p relift-cpu-z80
 ```

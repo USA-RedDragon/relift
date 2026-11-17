@@ -348,6 +348,7 @@ fn sync_policy() {
         let o = Options {
             map: IoMap::memory(),
             sync,
+            live_operands: false,
         };
         lift_bytes(bytes, 0, &o)
             .expect("lifts")
@@ -369,4 +370,94 @@ fn sync_policy() {
         !has_sync(&[0xC8], SyncPolicy::Every),
         "the decision half of RET Z"
     );
+}
+
+/// Runs every opcode of every page once with operands taken from the bytes
+/// lifted and once lifted with live operands, from the same random state
+/// and memory: registers, memory, clock, port accesses and exits agree.
+/// Then the live form of each instruction with operands runs with other
+/// operand bytes in memory and must agree with the fixed form lifted from
+/// those bytes.
+#[test]
+fn live_operands_read_the_bytes_in_memory() {
+    let live = Options {
+        live_operands: true,
+        ..opts()
+    };
+    let mut seed = 0x1234_5678_9ABC_DEF0u64;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let mut forms = Vec::new();
+    for op in 0..=255u8 {
+        forms.push(vec![op]);
+        for p in [0xCB, 0xED, 0xDD, 0xFD] {
+            forms.push(vec![p, op]);
+        }
+        for p in [0xDD, 0xFD] {
+            forms.push(vec![p, 0xCB, 0, op]);
+        }
+    }
+    let pc = 0x8100u16;
+    let mut compared = 0;
+    let mut differs = 0;
+    for form in forms {
+        for round in 0..2 {
+            let mut lifted = [0u8; 4];
+            let mut later = [0u8; 4];
+            for k in 0..4 {
+                lifted[k] = rnd() as u8;
+                later[k] = rnd() as u8;
+            }
+            for (k, b) in form.iter().enumerate() {
+                let at = if form.len() == 4 && k == 3 { 3 } else { k };
+                lifted[at] = *b;
+                later[at] = *b;
+            }
+            let Ok(mask) = relift_cpu_z80::opcode_mask(&lifted) else {
+                continue;
+            };
+            for k in 0..4 {
+                if mask & (1 << k) != 0 {
+                    later[k] = lifted[k];
+                }
+            }
+            let in_mem = if round == 0 { lifted } else { later };
+            let fixed = lift_bytes(&in_mem, u64::from(pc), &opts()).expect("lifts");
+            let l = lift_bytes(&lifted, u64::from(pc), &live).expect("lifts live");
+            if fixed.len != l.len {
+                continue;
+            }
+            let mut regs = vec![0u128; regs::DECLS.len()];
+            for (i, d) in regs::DECLS.iter().enumerate() {
+                regs[i] = u128::from(rnd()) & d.width.mask();
+            }
+            let mut mem = vec![0u8; 0x10000];
+            for b in mem.iter_mut() {
+                *b = rnd() as u8;
+            }
+            mem[usize::from(pc)..usize::from(pc) + 4].copy_from_slice(&in_mem);
+            let run = |l: &Lifted| {
+                let mut c = Cpu::new(&[]);
+                c.st.regs = regs.clone();
+                c.mem.bytes = mem.clone();
+                let next = c.run(l);
+                let ports = c.m.ports.borrow().clone();
+                let clock = c.clock();
+                (next, c.st.regs.clone(), c.mem.bytes, clock, ports)
+            };
+            let a = run(&fixed);
+            let b = run(&l);
+            assert!(a == b, "{in_mem:02x?} lifted from {lifted:02x?}");
+            compared += 1;
+            if in_mem != lifted {
+                differs += 1;
+            }
+        }
+    }
+    assert!(compared > 3000, "{compared}");
+    assert!(differs > 1000, "{differs}");
 }

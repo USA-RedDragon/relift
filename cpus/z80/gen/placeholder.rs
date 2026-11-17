@@ -12,4 +12,9 @@ pub(super) fn template(_group: u8, _code: u8) -> Option<super::GenFn> {
     None
 }
 
+/// No live template.
+pub(super) fn template_live(_group: u8, _code: u8) -> Option<super::GenFn> {
+    None
+}
+
 const _: Option<fn(&mut St)> = None;

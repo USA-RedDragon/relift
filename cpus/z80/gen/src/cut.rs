@@ -9,7 +9,9 @@
 //! - PAGE: the model's `Page`, fixed per template (base, CB, ED, DD, FD,
 //!   DDCB, FDCB; a lone prefix uses the base page's start).
 //! - FETCH: `MemFetch`, the instruction's own bytes, known at lift time,
-//!   with the T-state of their machine cycle recorded.
+//!   with the T-state of their machine cycle recorded; in a live template
+//!   (`LIVE`) a byte the template reads is an operand, read from memory in
+//!   its machine cycle when the instruction runs (`st.operand`).
 //! - BUS: `MemRead`, `MemWrite`, `PortRead` and `PortWrite`, at the T-state
 //!   the model gives.
 //! - CLOCK: `Cycles`, the instruction's total.
@@ -28,6 +30,8 @@ use relift_cpu_z80::Group;
 thread_local! {
     /// The group of the template being generated.
     pub static GROUP: Cell<Group> = const { Cell::new(Group::Base) };
+    /// Whether the template reads its operand bytes when it runs.
+    pub static LIVE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The Z80 layer of the evaluator. `err` keeps a failure of `Begin`.
@@ -158,7 +162,11 @@ fn cut(g: &mut Gen<'_, Z80>, name: &str, a: &[V]) -> R<Option<V>> {
             let t = g.cint(&a[1])?;
             let gd = g.gd();
             g.effect(format!("st.fetched({at}, {t}, {gd});"));
-            g.st(K::Bits(8), format!("st.fetch({at})"), 0)
+            if LIVE.with(Cell::get) {
+                g.dy(K::Bits(8), format!("st.operand(b, {at}, {t}, {gd})"))
+            } else {
+                g.st(K::Bits(8), format!("st.fetch({at})"), 0)
+            }
         }
         "MemRead" => {
             let at = g.dx(&a[0])?;

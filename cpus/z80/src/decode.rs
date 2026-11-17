@@ -70,6 +70,21 @@ pub fn decode(bytes: &[u8]) -> Result<(Group, u8), DecodeError> {
     })
 }
 
+/// The offsets of the opcode and prefix bytes of the instruction at the
+/// start of `bytes`, bit `k` for offset `k`: the bytes that select its
+/// template. The others are operands. A lone prefix has only itself.
+///
+/// # Errors
+///
+/// The bytes end before the opcode byte.
+pub fn opcode_mask(bytes: &[u8]) -> Result<u8, DecodeError> {
+    Ok(match decode(bytes)?.0 {
+        Group::Base | Group::Accept | Group::Lone => 0b1,
+        Group::Cb | Group::Ed | Group::Dd | Group::Fd => 0b11,
+        Group::Ddcb | Group::Fdcb => 0b1011,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,6 +100,15 @@ mod tests {
         assert_eq!(decode(&[0xFD, 0xCB, 0xFF, 0xFE]), Ok((Group::Fdcb, 0xFE)));
         assert_eq!(decode(&[0xDD, 0xFD, 0x21]), Ok((Group::Lone, 0xDD)));
         assert_eq!(decode(&[0xFD, 0xED, 0xB0]), Ok((Group::Lone, 0xFD)));
+    }
+
+    #[test]
+    fn opcode_bytes() {
+        assert_eq!(opcode_mask(&[0x21, 0, 0]), Ok(0b1));
+        assert_eq!(opcode_mask(&[0xED, 0xB0]), Ok(0b11));
+        assert_eq!(opcode_mask(&[0xDD, 0x36, 1, 2]), Ok(0b11));
+        assert_eq!(opcode_mask(&[0xFD, 0xCB, 5, 0x46]), Ok(0b1011));
+        assert_eq!(opcode_mask(&[0xDD, 0xDD, 0x21]), Ok(0b1));
     }
 
     #[test]

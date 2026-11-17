@@ -20,6 +20,9 @@ pub struct Z80 {
     pub map: IoMap,
     /// Where sync points go besides control transfers.
     pub sync: SyncPolicy,
+    /// Whether operand bytes are read when the instruction runs
+    /// ([`Options::live_operands`]).
+    pub live_operands: bool,
 }
 
 impl Z80 {
@@ -28,6 +31,7 @@ impl Z80 {
         Z80 {
             map,
             sync: SyncPolicy::default(),
+            live_operands: false,
         }
     }
 }
@@ -53,6 +57,7 @@ impl Frontend for Z80 {
         let opts = Options {
             map: self.map.clone(),
             sync: self.sync,
+            live_operands: self.live_operands,
         };
         lift_bytes(bytes, pc, &opts)
             .map(|l| l.block)

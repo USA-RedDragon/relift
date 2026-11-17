@@ -52,6 +52,9 @@ pub struct St {
     /// The instruction bytes fetched: offset from PC and T-state.
     pub fetches: Vec<(u16, u32)>,
     len: u16,
+    /// Bit `k` set when the byte at offset `k` is an opcode or prefix byte,
+    /// which a live template takes from the bytes lifted.
+    opcodes: u8,
 }
 
 /// How an instruction left off.
@@ -84,7 +87,14 @@ impl St {
             bad: None,
             fetches: Vec::new(),
             len: 1,
+            opcodes: 0b1,
         }
+    }
+
+    /// Marks the bytes whose offsets have their bit set in `mask` as opcode
+    /// or prefix bytes.
+    pub fn set_opcodes(&mut self, mask: u8) {
+        self.opcodes = mask;
     }
 
     /// The address an interrupt entry returns to.
@@ -105,6 +115,18 @@ impl St {
     pub fn fetch(&self, addr: u128) -> u128 {
         let off = (addr as u16).wrapping_sub(self.pc);
         u128::from(self.bytes.get(usize::from(off)).copied().unwrap_or(0))
+    }
+
+    /// The instruction byte at `addr` in a live template: an opcode or
+    /// prefix byte as lifted, an operand byte read from memory in the
+    /// machine cycle starting at T-state `t` when the instruction runs.
+    pub fn operand(&mut self, b: &mut Builder, addr: u128, t: u32, g: Option<Value>) -> Value {
+        let off = (addr as u16).wrapping_sub(self.pc);
+        if off < 8 && self.opcodes & (1 << off) != 0 {
+            return b.konst(Width::W8, self.fetch(addr));
+        }
+        let a = b.konst(Width::W16, addr & 0xFFFF);
+        self.read(b, a, t, g)
     }
 
     /// Records the fetch of the instruction byte at `addr` in the machine
@@ -299,8 +321,13 @@ impl St {
                 },
                 k,
             ),
+            Some((Target::Dynamic(v), Some(g), Kind::Jump)) => {
+                let w = b.width(v);
+                let n = b.konst(w, u128::from(after));
+                (Next::Dynamic(b.select(g, v, n)), Kind::Jump)
+            }
             Some((Target::Dynamic(_), Some(_), _)) => {
-                return Err("a computed branch under a run-time condition");
+                return Err("a computed call or return under a run-time condition");
             }
         };
         let flow = match kind {

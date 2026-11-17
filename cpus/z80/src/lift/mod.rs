@@ -114,6 +114,12 @@ pub struct Options {
     pub map: IoMap,
     /// Where sync points go.
     pub sync: SyncPolicy,
+    /// Whether operand bytes (immediates, displacements, addresses) are
+    /// read from memory in their machine cycles when the instruction runs,
+    /// rather than taken from the bytes lifted: for code in RAM whose
+    /// operands change. Opcode and prefix bytes are always the lifted ones,
+    /// and transfers to an operand address are computed.
+    pub live_operands: bool,
 }
 
 impl Options {
@@ -122,6 +128,7 @@ impl Options {
         Options {
             map,
             sync: SyncPolicy::default(),
+            live_operands: false,
         }
     }
 }
@@ -172,13 +179,30 @@ pub struct Lifted {
 /// Runs the template of `code` in `group` for the instruction `bytes` at
 /// `pc`; `taken` lifts the taken continuation of a conditional `CALL` or
 /// `RET`.
-fn run(group: Group, code: u8, bytes: [u8; 4], pc: u16, taken: bool) -> Result<Lifted, LiftError> {
-    let template = generated::template(group as u8, code)
+fn run(
+    group: Group,
+    code: u8,
+    bytes: [u8; 4],
+    pc: u16,
+    taken: bool,
+    live: bool,
+) -> Result<Lifted, LiftError> {
+    let template = live
+        .then(|| generated::template_live(group as u8, code))
+        .flatten()
+        .or_else(|| generated::template(group as u8, code))
         .ok_or(LiftError::Unsupported("an opcode without a template"))?;
+    let opcodes = match group {
+        Group::Base | Group::Accept | Group::Lone => 0b1,
+        Group::Cb | Group::Ed | Group::Dd | Group::Fd => 0b11,
+        Group::Ddcb | Group::Fdcb => 0b1011,
+    };
+    debug_assert!(group == Group::Accept || crate::decode::opcode_mask(&bytes) == Ok(opcodes));
     let mut b = Builder::new(regs::regs(), Width::W16, u64::from(pc));
     let elapsed = if taken {
         let mut probe = Builder::new(regs::regs(), Width::W16, u64::from(pc));
         let mut st = St::new(bytes, pc, false, 0);
+        st.set_opcodes(opcodes);
         let Ok(()) = template(u32::from(code), &mut probe, &mut st);
         st.finish(&mut probe)
             .map_err(LiftError::Unsupported)?
@@ -187,6 +211,7 @@ fn run(group: Group, code: u8, bytes: [u8; 4], pc: u16, taken: bool) -> Result<L
         0
     };
     let mut st = St::new(bytes, pc, taken, elapsed);
+    st.set_opcodes(opcodes);
     let Ok(()) = template(u32::from(code), &mut b, &mut st);
     let fetches = st.fetches.clone();
     let fin = st.finish(&mut b).map_err(LiftError::Unsupported)?;
@@ -270,7 +295,7 @@ pub fn lift_bytes(bytes: &[u8], pc: u64, opts: &Options) -> Result<Lifted, LiftE
             .ok()
             .filter(|c| *c < 4)
             .ok_or(LiftError::Address(pc))?;
-        let l = run(Group::Accept, code, [0; 4], 0, false)?;
+        let l = run(Group::Accept, code, [0; 4], 0, false, false)?;
         let mut l = finish(l, opts, false, true);
         l.block.pc = pc;
         return Ok(l);
@@ -286,13 +311,14 @@ pub fn lift_bytes(bytes: &[u8], pc: u64, opts: &Options) -> Result<Lifted, LiftE
     for (w, b) in window.iter_mut().zip(bytes) {
         *w = *b;
     }
-    let plain = run(group, code, window, real, false)?;
+    let live = opts.live_operands;
+    let plain = run(group, code, window, real, false, live)?;
     let is_half = matches!(plain.block.exit.next, relift_ir::Next::Select { taken, .. } if taken == HALF | u64::from(real));
     if taken && !is_half {
         return Err(LiftError::Address(pc));
     }
     let l = if taken {
-        run(group, code, window, real, true)?
+        run(group, code, window, real, true, live)?
     } else {
         plain
     };

@@ -127,6 +127,7 @@ fn irq_halt_and_ei_delay_in_emitted_c() {
     let opts = Options {
         map: IoMap::memory(),
         sync: SyncPolicy::Every,
+        live_operands: false,
     };
     let mut roots = vec![0x38u64, 0x100, 0x200];
     roots.extend([Entry::Nmi, Entry::Im0, Entry::Im1, Entry::Im2].map(Entry::addr));
