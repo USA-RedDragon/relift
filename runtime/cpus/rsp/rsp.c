@@ -9,6 +9,7 @@
 
 #include "core.h"
 #include "crash.h"
+#include "pipe.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,8 @@ struct rl_rsp {
     rl_ctx c;
     rl_fn disp[RL_RSP_SLOTS_COUNT];
     uint16_t bases[RL_RSP_SLOTS_COUNT];
+    /** The image bound at each slot. */
+    uint16_t slot_image[RL_RSP_SLOTS_COUNT];
     uint8_t *dmem;
     const uint8_t *imem;
     const rl_rsp_image *const *images;
@@ -29,6 +32,9 @@ struct rl_rsp {
     const rl_rsp_bus *bus;
     void *user;
     uint64_t until;
+    /** A pipeline lifted code gave for a target not bound yet, or at a halt. */
+    rl_rsp_pipe_state hold;
+    bool held;
     bool leave;
     bool running;
     const char *dump;
@@ -252,6 +258,7 @@ static bool check(rl_rsp *r, uint32_t k, uint32_t o, uint32_t w)
         uint32_t a = (base + todo[j]) % RL_RSP_SLOTS_COUNT;
         r->disp[a] = fm[todo[j]];
         r->bases[a] = (uint16_t)(base * 4u);
+        r->slot_image[a] = (uint16_t)k;
     }
     r->stats.binds++;
     return true;
@@ -308,6 +315,54 @@ static _Noreturn void missed(rl_rsp *r, const char *why)
     abort();
 }
 
+/** @brief Charges what bound word w costs from pipeline x more than its block assumes. */
+static void pipe_enter(rl_rsp *r, uint32_t w, rl_rsp_pipe_state x)
+{
+    const rl_rsp_image *im = r->images[r->slot_image[w]];
+    if (!im->pipes || !im->pipe_at)
+        return;
+    uint32_t o = (w - r->bases[w] / 4u) % RL_RSP_SLOTS_COUNT;
+    if (o >= im->len / 4u || im->pipe_at[o] == RL_RSP_NO_PIPE)
+        return;
+    const uint64_t *p = im->pipes + 3u * im->pipe_at[o];
+    bool met;
+    int64_t d = rl_rsp_pipe_delta(x, rl_rsp_pipe_unpack(p[0], p[1], p[2]), w, r->imem, &met);
+    r->stats.pipe_unmet += !met;
+    r->c.time.budget -= d;
+}
+
+/** @brief Charges a held pipeline at bound word w. */
+static void take_hold(rl_rsp *r, uint32_t w)
+{
+    if (!r->held || r->disp[w] == rl_rsp_enter)
+        return;
+    r->held = false;
+    pipe_enter(r, w, r->hold);
+}
+
+void rl_rsp_pipe(rl_ctx *c, uint32_t target, uint64_t a, uint64_t b, uint64_t d, uint32_t taken)
+{
+    rl_rsp *r = of(c);
+    uint32_t w = abs_of(c, target) >> 2;
+    rl_rsp_pipe_state x = rl_rsp_pipe_unpack(a, b, d);
+    if (taken) {
+        rl_rsp_pipe_taken(&x, w);
+        c->time.budget -= 1;
+    }
+    r->hold = x;
+    r->held = true;
+    take_hold(r, w);
+}
+
+void rl_rsp_pipe_hold(rl_ctx *c, uint64_t a, uint64_t b, uint64_t d)
+{
+    rl_rsp *r = of(c);
+    r->hold = rl_rsp_pipe_unpack(a, b, d);
+    r->held = true;
+}
+
+void rl_rsp_tick(rl_ctx *c, int64_t n) { c->time.budget -= n; }
+
 uint64_t rl_rsp_enter(rl_ctx *c, uint8_t *mem)
 {
     rl_rsp *r = of(c);
@@ -326,8 +381,10 @@ uint64_t rl_rsp_enter(rl_ctx *c, uint8_t *mem)
     }
     for (uint32_t i = lo; i < r->nplaces && r->places[i].word == word; i++) {
         candidates++;
-        if (check(r, r->places[i].image, r->places[i].offset, w))
+        if (check(r, r->places[i].image, r->places[i].offset, w)) {
+            take_hold(r, w);
             RL_MUSTTAIL return rl_indirect(c, w * 4u)(c, mem);
+        }
     }
     char why[160];
     if (candidates)
@@ -397,6 +454,7 @@ uint64_t rl_rsp_run(rl_rsp *r, uint32_t *pc, uint64_t from, uint64_t to)
     c->base = 0;
     c->time.deadline = to;
     c->time.budget = (int64_t)(to - from);
+    take_hold(r, c->pc >> 2);
     for (;;) {
         r->leave = false;
         rl_fn f = rl_indirect(c, c->pc);

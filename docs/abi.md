@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 9.
+Contract version: `RL_ABI_VERSION` 10.
 
 ## 0. Runtime layers
 
@@ -1946,6 +1946,9 @@ is not in.
   lifted A64 code raises `RL_PEND_REDIRECT` records. `RL_PENDING` always
   comes with a pending record, which is how it is told from a RET to
   address 1.
+- Version 10 added the RSP issue pipeline (`relift/rsp/abi.h`): lifted
+  RSP blocks call `rl_rsp_pipe`, `rl_rsp_pipe_hold` and `rl_rsp_tick`, and
+  an RSP image carries the pipeline each bound word is entered with.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a

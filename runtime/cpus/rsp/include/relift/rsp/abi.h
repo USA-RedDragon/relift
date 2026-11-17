@@ -28,7 +28,10 @@
  *   slot per IMEM word; a slot the layer has not checked holds rl_rsp_enter,
  *   which binds the code there or stops the program (missed code).
  * - Time: c->time counts RSP cycles; every block ends in a sync point whose
- *   slow path is rl_rsp_sync.
+ *   slow path is rl_rsp_sync. A block's cycles are those of the RSP's issue
+ *   pipeline from the pipeline its image's code leaves before it; a block
+ *   that leaves through dispatch or halts gives the layer its pipeline
+ *   (rl_rsp_pipe, rl_rsp_pipe_hold).
  *
  * Any change to a type, layout, signature or constant here bumps
  * RL_ABI_VERSION.
@@ -287,6 +290,18 @@ RL_RUNTIME_API uint32_t rl_rsp_mfc0(rl_ctx *c, uint32_t rd);
 RL_RUNTIME_API void rl_rsp_mtc0(rl_ctx *c, uint32_t rd, uint32_t value, uint32_t run);
 /** @brief The intrinsic rsp_break(run): BREAK when run is 1, which halts the RSP at the block's sync point. */
 RL_RUNTIME_API void rl_rsp_break(rl_ctx *c, uint32_t run);
+/**
+ * @brief The intrinsic rsp_pipe(target, a, b, d, taken): the block leaves
+ * through dispatch to offset target with the pipeline a, b, d (packed as
+ * relift_cpu_rsp::pipe::State::pack), after the stall of a taken branch
+ * when taken is 1. Charges what the target's first words cost more (or
+ * less) than its block assumes.
+ */
+RL_RUNTIME_API void rl_rsp_pipe(rl_ctx *c, uint32_t target, uint64_t a, uint64_t b, uint64_t d, uint32_t taken);
+/** @brief The intrinsic rsp_pipe_hold(a, b, d): the pipeline at a halt, which the next start charges against. */
+RL_RUNTIME_API void rl_rsp_pipe_hold(rl_ctx *c, uint64_t a, uint64_t b, uint64_t d);
+/** @brief The intrinsic rsp_tick(n): n cycles, which may be fewer than none. */
+RL_RUNTIME_API void rl_rsp_tick(rl_ctx *c, int64_t n);
 /** @brief The word at offset pc did not lift: stops the program with a report. */
 RL_RUNTIME_API int rl_rsp_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
 

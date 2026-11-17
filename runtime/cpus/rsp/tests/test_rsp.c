@@ -3,8 +3,10 @@
  * @brief The RSP layer over hand-written functions shaped like lifted code:
  * binding an image only where IMEM holds its bytes, the slices and their
  * cycles, BREAK and the bus, IMEM writes that send the next entry back to
- * the check, and one image bound at several places, across the end of IMEM.
+ * the check, one image bound at several places, across the end of IMEM, and
+ * the pipeline a halt holds, charged at the next start.
  */
+#include "pipe.h"
 #include "rsp.h"
 
 #include "runner.h"
@@ -101,7 +103,7 @@ static const rl_unit g_loop_unit = {
     .name = "loop",
 };
 
-static const rl_rsp_image g_loop = {&g_loop_unit, 16, 0x1234, g_loop_bytes, g_loop_succ};
+static const rl_rsp_image g_loop = {&g_loop_unit, 16, 0x1234, g_loop_bytes, g_loop_succ, NULL, NULL};
 
 typedef struct fixture {
     uint8_t dmem[0x1000];
@@ -220,7 +222,7 @@ static const rl_unit g_cop0_unit = {
     .name = "cop0",
 };
 
-static const rl_rsp_image g_cop0 = {&g_cop0_unit, 12, 0x5678, g_cop0_bytes, g_cop0_succ};
+static const rl_rsp_image g_cop0 = {&g_cop0_unit, 12, 0x5678, g_cop0_bytes, g_cop0_succ, NULL, NULL};
 
 TEST(rsp_cop0_goes_to_the_bus_at_the_rsp_cycle)
 {
@@ -303,7 +305,7 @@ static const rl_unit g_wrap_unit = {
     .name = "wrap",
 };
 
-static const rl_rsp_image g_wrap = {&g_wrap_unit, 0x1000, 0x9abc, g_wrap_bytes, g_wrap_succ};
+static const rl_rsp_image g_wrap = {&g_wrap_unit, 0x1000, 0x9abc, g_wrap_bytes, g_wrap_succ, NULL, NULL};
 
 TEST(rsp_a_delay_slot_past_the_end_of_imem_is_checked_at_its_start)
 {
@@ -332,4 +334,66 @@ TEST(rsp_a_delay_slot_past_the_end_of_imem_is_checked_at_its_start)
     CHECK_EQ(rl_rsp_gpr(f.r, 2), 2);
     CHECK_EQ(rl_rsp_get_stats(f.r)->binds, 2);
     rl_rsp_destroy(f.r);
+}
+
+/* A halt that holds a pipeline whose newest group wrote r1: 0x0 break 1. */
+static const uint8_t g_hold_bytes[4] = {0x00, 0x00, 0x00, 0x4D};
+static const uint16_t g_hold_succ[3] = {RL_RSP_NO_SUCC, RL_RSP_NO_SUCC, 0};
+
+static int hold_fn(rl_ctx *c, uint8_t *mem)
+{
+    rl_rsp_pipe_hold(c, 1u << 1, 0, 0);
+    rl_rsp_break(c, 1);
+    c->time.budget -= 1;
+    int rc = rl_rsp_sync(c, mem, 0x4);
+    return rc ? rc : rl_indirect(c, 0x4)(c, mem);
+}
+
+static const rl_fn_entry g_hold_fns[1] = {{0x0, 4, RL_FN_RANGE, hold_fn}};
+
+static const rl_unit g_hold_unit = {
+    .abi_version = RL_ABI_VERSION,
+    .ctx_size = sizeof(rl_ctx),
+    .fn_count = 1,
+    .fns = g_hold_fns,
+    .name = "hold",
+};
+
+static const uint64_t g_empty_pipe[3] = {0, 0, 0};
+static const uint16_t g_loop_pipe_at[4] = {0, 0, 0, 0};
+static const rl_rsp_image g_loop_piped = {&g_loop_unit,  16,           0x1235,        g_loop_bytes,
+                                          g_loop_succ,   g_empty_pipe, g_loop_pipe_at};
+static const rl_rsp_image g_hold = {&g_hold_unit, 4, 0x4321, g_hold_bytes, g_hold_succ, NULL, NULL};
+
+TEST(rsp_a_pipeline_held_at_a_halt_is_charged_at_the_next_start)
+{
+    const rl_rsp_image *imgs[2] = {&g_loop_piped, &g_hold};
+    fixture f;
+    setup(&f, imgs, 2);
+    memcpy(f.imem + 0x200, g_hold_bytes, 4);
+    uint32_t pc = 0x200;
+    uint64_t at = rl_rsp_run(f.r, &pc, 0, 10);
+    CHECK(f.bus.halted);
+    f.bus.halted = false;
+    pc = 0x100;
+    rl_rsp_run(f.r, &pc, at, at + 10);
+    CHECK_EQ(rl_rsp_gpr(f.r, 1), 3);
+    CHECK_EQ(rl_rsp_gpr(f.r, 2), 3);
+    CHECK_EQ(rl_rsp_get_stats(f.r)->pipe_unmet, 0);
+    rl_rsp_destroy(f.r);
+}
+
+TEST(rsp_pipeline_deltas_follow_the_words_until_the_pipelines_meet)
+{
+    static uint8_t imem[0x1000];
+    static const uint8_t lw_then_use[8] = {0x00, 0x08, 0x40, 0x80, 0x00, 0x00, 0x00, 0x00};
+    memcpy(imem, lw_then_use, sizeof lw_then_use);
+    rl_rsp_pipe_state e = rl_rsp_pipe_unpack(0, 0, 0);
+    rl_rsp_pipe_state x = rl_rsp_pipe_unpack(1u << 8, 0, 1ull << 32);
+    bool met = false;
+    CHECK_EQ(rl_rsp_pipe_delta(x, e, 0, imem, &met), 2);
+    CHECK(met);
+    x = rl_rsp_pipe_unpack(0, 0, 0);
+    CHECK_EQ(rl_rsp_pipe_delta(x, e, 0, imem, &met), 0);
+    CHECK(met);
 }

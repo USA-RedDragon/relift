@@ -8,8 +8,11 @@
 //!   targets of `J`, `JAL`, `JR` and `JALR`, which are IMEM addresses,
 //!   become offsets by subtracting the base (`rl_rsp_base`), and the links
 //!   of `JAL`, `JALR`, `BGEZAL` and `BLTZAL` become addresses by adding it;
-//! - every instruction costs one RSP cycle, and every block ends in a sync
-//!   point whose slow path is `rl_rsp_sync`;
+//! - a block costs the cycles of the RSP's issue pipeline
+//!   (`relift_cpu_rsp::pipe`): its groups, their stalls and the stall after
+//!   a taken branch, from the pipeline the code before it leaves (see
+//!   [`plan_pipe`]); every block ends in a sync point whose slow path is
+//!   `rl_rsp_sync`;
 //! - DMEM is the memory of the lifted code, and the lifter masks every
 //!   address to it;
 //! - `MFC0`, `MTC0` and `BREAK` call the layer (`rl_rsp_mfc0`,
@@ -36,12 +39,13 @@ use std::fmt::Write as _;
 
 use relift_cpu_rsp::decode::Encoding;
 use relift_cpu_rsp::lift::{self, LiftError};
+use relift_cpu_rsp::pipe::{self, State};
 use relift_cpu_rsp::regs;
 use relift_emit::{Function, Insn, Options, Output};
 use relift_guest::{Frontend, Home, LiftFailure};
 use relift_ir::{
-    BinOp, Block, CryptoOp, Flow, FpOp, FpRound, Inst, IoMap, Konst, Next, Op, Reg, RegFile, Value,
-    Width,
+    BinOp, Block, CryptoOp, Flow, FpOp, FpRound, Inst, IoMap, Konst, Next, Op, Reg, RegFile, UnOp,
+    Value, Width,
 };
 use relift_n64_analyze::{Report, RspImage, Source};
 
@@ -270,6 +274,13 @@ impl Frontend for Rsp {
             }
             ("rsp_break", [run]) => format!("rl_rsp_break(c, (uint32_t)({run}))"),
             (BASE, []) => "rl_rsp_base(c)".into(),
+            ("rsp_pipe", [t, a, b, d, k]) => format!(
+                "rl_rsp_pipe(c, (uint32_t)({t}), (uint64_t)({a}), (uint64_t)({b}), (uint64_t)({d}), (uint32_t)({k}))"
+            ),
+            ("rsp_pipe_hold", [a, b, d]) => {
+                format!("rl_rsp_pipe_hold(c, (uint64_t)({a}), (uint64_t)({b}), (uint64_t)({d}))")
+            }
+            ("rsp_tick", [n]) => format!("rl_rsp_tick(c, (int64_t)({n}))"),
             _ => return None,
         })
     }
@@ -369,7 +380,16 @@ pub struct Image {
     /// Three entries per word: [`NO_SUCC`] or the words (IMEM address / 4)
     /// its block goes to without a computed jump, then [`SUCC_SLOT`] or 0.
     pub succ: Vec<u16>,
+    /// The pipelines the image's costs assume at its words, each as
+    /// [`State::pack`] gives it.
+    pub pipes: Vec<[u64; 3]>,
+    /// Per word, the index in [`Image::pipes`] of the pipeline its block's
+    /// cost assumes on entry, or [`NO_PIPE`].
+    pub pipe_at: Vec<u16>,
 }
+
+/// [`Image::pipe_at`] of a word that is no block's.
+pub const NO_PIPE: u16 = 0xFFFF;
 
 /// Every RSP image a ROM lifts to.
 #[derive(Clone, Debug, Default)]
@@ -380,6 +400,11 @@ pub struct Images {
     pub instructions: usize,
     /// Instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
+    /// Transfers into a block whose pipeline differs from the one the
+    /// block's cost assumes and does not become it within
+    /// [`pipe::WINDOW`] words or before a branch: their cost is off by the
+    /// rest of the difference.
+    pub unmet: usize,
 }
 
 impl Images {
@@ -669,6 +694,227 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Images {
     out
 }
 
+/// The timing of one block: the pipeline its cost assumes on entry, after
+/// its first word and at its end, and its cycles from that entry.
+#[derive(Clone, Copy, Debug)]
+struct Timing {
+    entry: State,
+    mid: State,
+    after: State,
+    cost: u32,
+}
+
+/// The pipeline timing of the blocks of an image, for blocks entered in
+/// order of address: a block's cost assumes the pipeline the code before
+/// it in the image leaves (its delay slot's, its fall-through's, else the
+/// first transfer's from a lower address, else an empty pipeline after a
+/// taken jump). A transfer that brings another pipeline costs the
+/// difference ([`pipe::delta`]) on its edge: the costs are exact whatever
+/// the path while the pipelines meet in the window. The parity of a word
+/// assumes the image is bound at an 8-byte boundary.
+fn plan_pipe(blocks: &Blocks, ws: &impl pipe::Words) -> BTreeMap<u64, Timing> {
+    let mut preds: BTreeMap<u64, Vec<(u64, bool)>> = BTreeMap::new();
+    for (&pc, b) in blocks {
+        let Ok(b) = b else { continue };
+        for (t, taken) in static_exits(b) {
+            preds.entry(t).or_default().push((pc, taken));
+        }
+    }
+    let mut out: BTreeMap<u64, Timing> = BTreeMap::new();
+    for (&pc, b) in blocks {
+        let Ok(b) = b else { continue };
+        let w = (pc / 4) as u16;
+        let slot_of = pc
+            .checked_sub(4)
+            .filter(|q| matches!(blocks.get(q), Some(Ok(p)) if p.len == 8))
+            .and_then(|q| out.get(&q))
+            .map(|t| t.mid);
+        let seq = slot_of.or_else(|| {
+            [4, 8].iter().find_map(|&k| {
+                let q = pc.checked_sub(k)?;
+                let t = out.get(&q)?;
+                let Some(Ok(p)) = blocks.get(&q) else {
+                    return None;
+                };
+                static_exits(p).contains(&(pc, false)).then_some(t.after)
+            })
+        });
+        let entry = seq.unwrap_or_else(|| {
+            preds
+                .get(&pc)
+                .and_then(|ps| {
+                    ps.iter()
+                        .find_map(|&(p, taken)| out.get(&p).map(|t| edge_state(t.after, pc, taken)))
+                })
+                .unwrap_or(State {
+                    single: w & 1 != 0,
+                    ..State::default()
+                })
+        });
+        let mut st = entry;
+        let mut cost = st.word(w, ws);
+        let mid = st;
+        if b.len == 8 {
+            cost += st.word(pipe::next(w), ws);
+        }
+        out.insert(
+            pc,
+            Timing {
+                entry,
+                mid,
+                after: st,
+                cost,
+            },
+        );
+    }
+    out
+}
+
+/// The pipeline at `t` after a block that ends in `after`, through a taken
+/// branch or not.
+fn edge_state(after: State, t: u64, taken: bool) -> State {
+    let mut s = after;
+    if taken {
+        s.taken(((t / 4) & 0x3FF) as u16);
+    }
+    s
+}
+
+/// The constant targets of `b`'s exit, each with whether it is a taken
+/// branch (a block with a delay slot that does not go on to the next word).
+fn static_exits(b: &Block) -> Vec<(u64, bool)> {
+    let after = b.pc + u64::from(b.len);
+    let slot = b.len == 8;
+    match b.exit.next {
+        Next::Const(t) => vec![(t, slot || t != after)],
+        Next::Select {
+            taken, not_taken, ..
+        } => vec![(taken, slot), (not_taken, slot && not_taken != after)],
+        Next::Dynamic(_) => Vec::new(),
+    }
+}
+
+/// `v` as a 64-bit constant of `b`.
+fn konst64(b: &mut Block, v: u64) -> Value {
+    push(b, Op::Const(Konst::new(u128::from(v))), Some(Width::W64))
+}
+
+/// Puts the pipeline timing `t` into `b` (lifted at `pc`), whose exit
+/// before [`cut_exit`] was `orig`: its cycles and those of its edges to the
+/// blocks of `timing`, or, where it leaves through dispatch or halts, a
+/// call that gives the runtime its pipeline. Returns the edges whose
+/// pipelines did not meet.
+fn apply_pipe(
+    b: &mut Block,
+    orig: Next,
+    t: &Timing,
+    timing: &BTreeMap<u64, Timing>,
+    end: u64,
+    ws: &impl pipe::Words,
+) -> usize {
+    let sync = matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)).then(|| b.insts.pop());
+    let mut unmet = 0;
+    let mut edge = |to: u64, taken: bool| -> Option<i64> {
+        let to = to & 0xFFF;
+        let e = timing.get(&to).filter(|_| to < end)?;
+        let x = edge_state(t.after, to, taken);
+        let (d, met) = pipe::delta(x, e.entry, ((to / 4) & 0x3FF) as u16, ws);
+        unmet += usize::from(!met);
+        Some(d + i64::from(taken))
+    };
+    let base = i64::from(t.cost);
+    let mut ticks: Option<(Option<Value>, i64, i64)> = None;
+    let mut handoff = false;
+    match b.exit.next {
+        Next::Const(to) => match edge(to, static_exits(b).first().is_some_and(|e| e.1)) {
+            Some(d) => ticks = Some((None, base + d, base + d)),
+            None => handoff = true,
+        },
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => {
+            let slot = b.len == 8;
+            match (
+                edge(taken, slot),
+                edge(not_taken, slot && not_taken != b.pc + 8),
+            ) {
+                (Some(dt), Some(dn)) => ticks = Some((Some(cond), base + dt, base + dn)),
+                _ => handoff = true,
+            }
+        }
+        Next::Dynamic(_) => handoff = true,
+    }
+    let tick = b
+        .insts
+        .iter()
+        .position(|i| matches!(i.op, Op::Tick(_)))
+        .expect("every block ticks");
+    let brk = b
+        .insts
+        .iter()
+        .any(|i| matches!(&i.op, Op::Intrinsic(c) if c.name == "rsp_break"));
+    match ticks {
+        Some((cond, yes, no)) if yes.min(no) >= 0 => {
+            let low = yes.min(no);
+            b.insts[tick].op = Op::Tick(low as u32);
+            if let Some(c) = cond {
+                if yes > low {
+                    push(b, Op::TickIf(c, (yes - low) as u32), None);
+                }
+                if no > low {
+                    let n = push(b, Op::Un(UnOp::Not, c), Some(Width::W1));
+                    push(b, Op::TickIf(n, (no - low) as u32), None);
+                }
+            }
+        }
+        Some((cond, yes, no)) => {
+            b.insts[tick].op = Op::Tick(0);
+            let y = konst64(b, yes as u64);
+            let n = match cond {
+                Some(c) => {
+                    let n = konst64(b, no as u64);
+                    push(b, Op::Select(c, y, n), Some(Width::W64))
+                }
+                None => y,
+            };
+            push(b, Op::intrinsic("rsp_tick", vec![n]), None);
+        }
+        None => b.insts[tick].op = Op::Tick(t.cost),
+    }
+    let [a, x, d] = t.after.pack();
+    if brk {
+        let (a, x, d) = (konst64(b, a), konst64(b, x), konst64(b, d));
+        push(b, Op::intrinsic("rsp_pipe_hold", vec![a, x, d]), None);
+    } else if handoff {
+        let target = match b.exit.next {
+            Next::Dynamic(v) => v,
+            Next::Const(to) => konst(b, to),
+            Next::Select {
+                cond,
+                taken,
+                not_taken,
+            } => {
+                let y = konst(b, taken);
+                let n = konst(b, not_taken);
+                push(b, Op::Select(cond, y, n), Some(Width::W32))
+            }
+        };
+        let k = match orig {
+            Next::Select { cond, .. } if b.len == 8 => cond,
+            _ => {
+                let one = u64::from(b.len == 8);
+                push(b, Op::Const(Konst::new(u128::from(one))), Some(Width::W1))
+            }
+        };
+        let (a, x, d) = (konst64(b, a), konst64(b, x), konst64(b, d));
+        push(b, Op::intrinsic("rsp_pipe", vec![target, a, x, d, k]), None);
+    }
+    b.insts.extend(sync.flatten());
+    unmet
+}
+
 /// Lifts `plan` as the next image of `out`.
 fn lift_plan(out: &mut Images, plan: Plan, image_id: [u8; 32]) {
     let fe = Rsp;
@@ -700,17 +946,45 @@ fn lift_plan(out: &mut Images, plan: Plan, image_id: [u8; 32]) {
             (false, true) => be32(&bytes, 0),
             (false, false) => 0,
         };
-        let mut r = fe.lift_at(pc, w, slot);
-        match &mut r {
-            Err(e) => out.unlifted.push(Unlifted {
+        let r = fe.lift_at(pc, w, slot);
+        if let Err(e) = &r {
+            out.unlifted.push(Unlifted {
                 image: k,
                 pc,
                 failure: e.clone(),
-            }),
-            Ok(b) => cut_exit(b, is_cut),
+            });
         }
         raws.insert(pc, u64::from(w) | (u64::from(slot) << 32));
         blocks.insert(pc, r);
+    }
+    let ws = |w: u16| {
+        let mut i = usize::from(w);
+        if whole {
+            i %= words;
+        }
+        known
+            .get(i)
+            .copied()
+            .unwrap_or(false)
+            .then(|| pipe::op(be32(&bytes, 4 * i)))
+    };
+    let timing = plan_pipe(&blocks, &ws);
+    let outside = |t: u64| is_cut(t) || (!whole && t >= end);
+    let mut states: Vec<[u64; 3]> = Vec::new();
+    let mut index: BTreeMap<[u64; 3], u16> = BTreeMap::new();
+    let mut pipe_at = vec![NO_PIPE; words];
+    for (pc, r) in &mut blocks {
+        let Ok(b) = r else { continue };
+        let t = timing[pc];
+        let orig = b.exit.next;
+        cut_exit(b, outside);
+        out.unmet += apply_pipe(b, orig, &t, &timing, end, &ws);
+        let key = t.entry.pack();
+        let n = *index.entry(key).or_insert_with(|| {
+            states.push(key);
+            (states.len() - 1) as u16
+        });
+        pipe_at[(*pc / 4) as usize] = n;
     }
     out.instructions += blocks.len();
     let mut succ = Vec::with_capacity(3 * words);
@@ -802,6 +1076,8 @@ fn lift_plan(out: &mut Images, plan: Plan, image_id: [u8; 32]) {
         functions: nfns,
         bytes,
         succ,
+        pipes: states,
+        pipe_at,
     });
 }
 
@@ -826,9 +1102,26 @@ pub fn images_c(images: &[Image]) -> String {
             }
             let _ = write!(s, " {v:#x},");
         }
+        let _ = write!(s, "\n}};\nstatic const uint64_t pipes{k}[] = {{");
+        for (i, p) in im.pipes.iter().flatten().enumerate() {
+            if i % 3 == 0 {
+                s.push_str("\n   ");
+            }
+            let _ = write!(s, " UINT64_C({p:#x}),");
+        }
+        if im.pipes.is_empty() {
+            s.push_str(" 0");
+        }
+        let _ = write!(s, "\n}};\nstatic const uint16_t pipe_at{k}[] = {{");
+        for (i, v) in im.pipe_at.iter().enumerate() {
+            if i % 12 == 0 {
+                s.push_str("\n   ");
+            }
+            let _ = write!(s, " {v:#x},");
+        }
         let _ = writeln!(
             s,
-            "\n}};\nstatic const rl_rsp_image {} = {{ &{}, {:#x}u, UINT64_C({:#x}), bytes{k}, succ{k} }};",
+            "\n}};\nstatic const rl_rsp_image {} = {{ &{}, {:#x}u, UINT64_C({:#x}), bytes{k}, succ{k}, pipes{k}, pipe_at{k} }};",
             image_symbol(k),
             im.symbol,
             im.bytes.len(),

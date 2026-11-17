@@ -19,6 +19,11 @@
  * the registers, IMEM and DMEM (written to files with a dump prefix), and
  * the program stops.
  *
+ * A block's cost assumes the pipeline (relift_cpu_rsp::pipe) the code
+ * before it in its image leaves. Where lifted code leaves through dispatch
+ * or halts, it gives the layer its pipeline, and the layer charges the
+ * difference the target's first words make (pipe.h).
+ *
  * The layer knows neither the SP interface nor the clock of the machine:
  * COP0 reads and writes and BREAK go to the bus the guest layer gives, with
  * the RSP's cycle, and the guest layer runs the RSP in slices with
@@ -37,6 +42,8 @@
 #define RL_RSP_NO_SUCC 0xFFFFu
 /** @brief Flag of rl_rsp_image.succ entry 2: the block holds a delay slot (two words). */
 #define RL_RSP_SUCC_SLOT 1u
+/** @brief rl_rsp_image.pipe_at of a word that is no block's. */
+#define RL_RSP_NO_PIPE 0xFFFFu
 
 /** @brief One lifted RSP image, as the program lists it. */
 typedef struct rl_rsp_image {
@@ -55,6 +62,16 @@ typedef struct rl_rsp_image {
      * block holds the next word as its delay slot.
      */
     const uint16_t *succ;
+    /**
+     * @brief The pipelines the image's costs assume, three numbers each
+     * (relift_cpu_rsp::pipe::State::pack), or NULL.
+     */
+    const uint64_t *pipes;
+    /**
+     * @brief Per word, the index in pipes of the pipeline the cost of the
+     * word's block assumes on entry (RL_RSP_NO_PIPE for none), or NULL.
+     */
+    const uint16_t *pipe_at;
 } rl_rsp_image;
 
 /** @brief The guest layer's side of COP0 and BREAK; cycle is the RSP cycle of the access. */
@@ -78,6 +95,8 @@ typedef struct rl_rsp_stats {
     uint64_t invalidations;
     /** @brief Words no image's check accepted (each one stops the program). */
     uint64_t misses;
+    /** @brief Entries through dispatch whose pipeline did not become the one the block's cost assumes within the window. */
+    uint64_t pipe_unmet;
 } rl_rsp_stats;
 
 /** @brief An RSP; opaque. */
