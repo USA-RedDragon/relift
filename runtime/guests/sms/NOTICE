@@ -14,6 +14,16 @@ vdp.c     the VDP: ports, registers, VRAM and CRAM, the counters, the line
           2, sprites, the colour output
                                    ms/vdp/vdp.cpp, io.cpp, irq.cpp,
                                    background.cpp, sprite.cpp, dac.cpp
+sms.c     the machine: memory map, the Sega, Codemasters and Korean
+          mappers, the memory control port, the I/O ports, the gamepad and
+          the Game Gear's ports and start button, and the clock steps that
+          place VDP work on the CPU's timeline
+                                   ms/cpu/memory.cpp, ms/cpu/cpu.cpp,
+                                   ms/cartridge/board/sega.cpp,
+                                   codemasters.cpp, korea.cpp,
+                                   ms/controller/gamepad/gamepad.cpp,
+                                   ms/system/controls.cpp,
+                                   ares/scheduler/thread.cpp
 ym2413.c  the YM2413 (OPLL): operators, envelopes, the LFOs, rhythm mode,
           the register writes; the sine and exponent tables precomputed
                                    component/audio/ym2413/ym2413.cpp,
