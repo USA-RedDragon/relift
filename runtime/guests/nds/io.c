@@ -12,6 +12,7 @@
  */
 #include "nds_int.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static uint32_t regs_word(const rl_nds *m, unsigned cpu, uint32_t off)
@@ -212,9 +213,22 @@ uint32_t nds_io_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint
     return (w >> (8 * (off & 3))) & nds_mask(size);
 }
 
+/** @brief The no$gba debug port's string out (0x04FFFA10): the NUL-terminated string at addr goes to stdout. */
+static void debug_string(rl_nds *m, unsigned cpu, uint32_t addr)
+{
+    char s[1024];
+    rl_nds_code_read(m, cpu, addr, (uint8_t *)s, sizeof s - 1);
+    s[sizeof s - 1] = 0;
+    fputs(s, stdout);
+}
+
 void nds_io_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, uint64_t now)
 {
     uint32_t off = addr - 0x04000000u;
+    if (off == 0xFFFA10u && size == 4) {
+        debug_string(m, cpu, value);
+        return;
+    }
     unsigned sh = 8 * (off & 3);
     write32(m, cpu, off & ~3u, (value & nds_mask(size)) << sh, nds_mask(size) << sh, now);
 }
