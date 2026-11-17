@@ -2,12 +2,12 @@
 //! the reasons the rest fail. Task and mesh programs that `meshes.json`
 //! pairs translate with their pipeline.
 //!
-//! `coverage <scan dir> [<spv out dir> | -] [threads] [failures list]`
+//! `coverage <scan dir> [<spv out dir> | -] [threads] [failures list] [host preset]`
 
 mod meshes;
 
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate_with;
+use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,6 +28,13 @@ fn main() {
         }
     };
     let threads: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(4);
+    let base = Options {
+        host: match args.get(5) {
+            Some(n) => HostProfile::preset(n).unwrap_or_else(|| panic!("no host preset {n}")),
+            None => HostProfile::default(),
+        },
+        ..Options::default()
+    };
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{dir}: {e}"))
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -50,7 +57,7 @@ fn main() {
                         .file_stem()
                         .map(|s| s.to_string_lossy())
                         .unwrap_or_default();
-                    let o = meshes::options(&pipelines, &sha);
+                    let o = meshes::options(&base, &pipelines, &sha);
                     match translate_with(&Program::parse(&b), &o) {
                         Ok(sh) => {
                             ok.fetch_add(1, Ordering::Relaxed);

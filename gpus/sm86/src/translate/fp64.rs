@@ -8,7 +8,8 @@
 //! quiet, the second source winning over the third and the third over the
 //! first; an invalid operation gives `0xfff8000000000000`. Negation and
 //! absolute value leave a NaN operand as it is. Denormals are kept as the
-//! hardware keeps them.
+//! hardware keeps them. The model is 64-bit integer code, so a host without
+//! `shaderInt64` rejects these instructions.
 
 use super::{Ctx, Res, bad};
 use crate::spirv::{glsl, op};
@@ -25,6 +26,14 @@ const DEFAULT_NAN: u64 = 0xfff8_0000_0000_0000;
 const NO_EXP: u32 = -100_000i32 as u32;
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
+    let fp64 = matches!(i.mnemonic, "DADD" | "DMUL" | "DFMA" | "DSETP")
+        || (i.mnemonic == "F2F" && i.has("F64"));
+    if fp64 && !c.host.int64 {
+        return Some(bad(format!(
+            "{} on a host without shaderInt64 (the double precision model is 64-bit integer code)",
+            i.mnemonic
+        )));
+    }
     Some(match i.mnemonic {
         "DADD" | "DMUL" | "DFMA" => arith(c, i),
         "DSETP" => dsetp(c, i),

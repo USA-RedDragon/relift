@@ -456,6 +456,10 @@ impl Ex<'_> {
                 124 => {
                     let v = self.val(&locals, w[2]);
                     let r = match (&self.types[&w[0]], v) {
+                        (Ty::Ptr(_), V::C(c)) => match (&c[0], &c[1]) {
+                            (V::S(a), V::S(b)) => V::P(Ptr::Mem(a | (b << 32))),
+                            _ => panic!("bitcast to a pointer"),
+                        },
                         (Ty::Vec(_, 2), V::S(x)) => {
                             V::C(vec![V::S(x & 0xffff_ffff), V::S(x >> 32)])
                         }

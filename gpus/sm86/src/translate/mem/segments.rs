@@ -45,7 +45,7 @@ impl Ctx {
         if ty == u {
             return 4;
         }
-        if ty == self.m.t_u64() {
+        if self.host.int64 && ty == self.addr_t() {
             return 8;
         }
         (2..=4)
@@ -86,25 +86,28 @@ impl Ctx {
         let size = self.access_bytes(ty);
         let var = self.segment_view(ty, size);
         let u = self.u32t();
-        let t = self.m.t_u64();
-        let shift = self.m.spec_u32(SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC);
-        let sh64 = self.m.emit(op::U_CONVERT, t, &[shift]);
-        let seg = self.m.emit(op::SHIFT_RIGHT_LOGICAL, t, &[addr, sh64]);
-        let count = self.m.spec_u32(SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC);
-        let count64 = self.m.emit(op::U_CONVERT, t, &[count]);
         let b = self.boolt();
-        let inside = self.m.emit(op::U_LESS_THAN, b, &[seg, count64]);
-        let seg = self.select(t, inside, seg, count64);
-        let seg = self.m.emit(op::U_CONVERT, u, &[seg]);
+        let shift = self.m.spec_u32(SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC);
+        let count = self.m.spec_u32(SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC);
+        let (lo, hi) = self.addr_words(addr);
+        let k32 = self.m.c_u32(32);
+        let back = self.m.emit(op::I_SUB, u, &[k32, shift]);
+        let seg_lo = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[lo, shift]);
+        let seg_hi = self.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[hi, back]);
+        let seg = self.m.emit(op::BITWISE_OR, u, &[seg_lo, seg_hi]);
+        let above = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[hi, shift]);
+        let z = self.m.c_u32(0);
+        let small = self.m.emit(op::I_EQUAL, b, &[above, z]);
+        let below = self.m.emit(op::U_LESS_THAN, b, &[seg, count]);
+        let inside = self.m.emit(op::LOGICAL_AND, b, &[small, below]);
+        let seg = self.select(u, inside, seg, count);
         self.m.deco(seg, DECO_NON_UNIFORM, &[]);
-        let one = self.m.c_u64(1);
-        let span = self.m.emit(op::SHIFT_LEFT_LOGICAL, t, &[one, sh64]);
-        let mask = self.m.emit(op::I_SUB, t, &[span, one]);
-        let off = self.m.emit(op::BITWISE_AND, t, &[addr, mask]);
-        let off = self.m.emit(op::U_CONVERT, u, &[off]);
+        let one = self.m.c_u32(1);
+        let span = self.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[one, shift]);
+        let mask = self.m.emit(op::I_SUB, u, &[span, one]);
+        let off = self.m.emit(op::BITWISE_AND, u, &[lo, mask]);
         let k = self.m.c_u32(size.trailing_zeros());
         let elem = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[off, k]);
-        let z = self.m.c_u32(0);
         let p = self.m.t_ptr(STORAGE_BUFFER, ty);
         let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, seg, z, elem]);
         self.m.deco(ptr, DECO_NON_UNIFORM, &[]);

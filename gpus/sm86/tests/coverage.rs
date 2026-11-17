@@ -6,7 +6,7 @@
 mod meshes;
 
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{MeshPath, translate_with};
+use relift_gpu_sm86::translate::{MeshPath, Options, translate_with};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -59,7 +59,7 @@ fn paired_task_and_mesh_programs_translate_with_their_pipeline() {
     let (t, m) = programs();
     for (sha, b) in [("t", &t), ("m", &m)] {
         let p = Program::parse(b);
-        let o = meshes::options(&pipelines, sha);
+        let o = meshes::options(&Options::default(), &pipelines, sha);
         assert_eq!(
             (
                 o.pipeline.mesh.task_lanes,
@@ -74,7 +74,11 @@ fn paired_task_and_mesh_programs_translate_with_their_pipeline() {
         );
         let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{sha}: {}", e.0));
         assert_eq!(s.interface.host.mesh, MeshPath::Native);
-        let alone = translate_with(&p, &meshes::options(&pipelines, "other")).unwrap();
+        let alone = translate_with(
+            &p,
+            &meshes::options(&Options::default(), &pipelines, "other"),
+        )
+        .unwrap();
         assert_ne!(
             alone.spirv, s.spirv,
             "{sha} translated the same without its pipeline"

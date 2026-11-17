@@ -771,6 +771,9 @@ impl<'m> Run<'m> {
                 let v = self.val(a[0]);
                 let rt = m.ty(ins.ty).clone();
                 match (&v, rt) {
+                    (V::C(c), Ty::Ptr(pointee)) => {
+                        V::P(Ptr::Mem(c[0].s() | (c[1].s() << 32), pointee))
+                    }
                     (V::S(x), Ty::Vec(e, n)) => {
                         let w = m.width(e);
                         V::C(Rc::new(

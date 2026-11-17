@@ -72,19 +72,19 @@ impl Ctx {
     }
 
     /// The 64-bit atomic `f(old) -> new` at guest address `addr` under the
-    /// address's lock; gives the old value.
-    pub(crate) fn locked_rmw64(&mut self, addr: u32, f: impl FnOnce(&mut Ctx, u32) -> u32) -> u32 {
+    /// address's lock, on (low, high) word pairs; gives the old value.
+    pub(crate) fn locked_rmw64(
+        &mut self,
+        addr: u32,
+        f: impl FnOnce(&mut Ctx, (u32, u32)) -> (u32, u32),
+    ) -> (u32, u32) {
         self.iface.host.atomics64 = Atomic64Path::Locked;
         let u = self.u32t();
-        let t = self.m.t_u64();
         let b = self.boolt();
         let table = self.lock_table();
-        let k3 = self.m.c_u64(3);
-        let k15 = self.m.c_u64(15);
-        let a3 = self.m.emit(op::SHIFT_RIGHT_LOGICAL, t, &[addr, k3]);
-        let a15 = self.m.emit(op::SHIFT_RIGHT_LOGICAL, t, &[addr, k15]);
-        let h = self.m.emit(op::BITWISE_XOR, t, &[a3, a15]);
-        let h = self.m.emit(op::U_CONVERT, u, &[h]);
+        let a3 = self.addr_shr_low(addr, 3);
+        let a15 = self.addr_shr_low(addr, 15);
+        let h = self.m.emit(op::BITWISE_XOR, u, &[a3, a15]);
         let mask = self.m.c_u32(LOCK_WORDS - 1);
         let idx = self.m.emit(op::BITWISE_AND, u, &[h, mask]);
         let z = self.m.c_u32(0);
@@ -92,8 +92,7 @@ impl Ctx {
         let lock = self.m.emit(op::ACCESS_CHAIN, pu, &[table, z, idx]);
         let done = self.lock_done_var();
         self.m.emit_void(op::STORE, &[done, z]);
-        let k4 = self.m.c_u64(4);
-        let hi_addr = self.m.emit(op::I_ADD, t, &[addr, k4]);
+        let hi_addr = self.addr_add_const(addr, 4);
         let header = self.m.id();
         let body = self.m.id();
         let crit = self.m.id();
@@ -124,13 +123,7 @@ impl Ctx {
         let lo = self.m.emit(spv::ATOMIC_LOAD, u, &[plo, scope, relaxed]);
         let phi = self.global_ptr(hi_addr, u);
         let hi = self.m.emit(spv::ATOMIC_LOAD, u, &[phi, scope, relaxed]);
-        let v2 = self.m.t_vec(u, 2);
-        let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, &[lo, hi]);
-        let old = self.m.emit(op::BITCAST, t, &[pair]);
-        let new = f(self, old);
-        let np = self.m.emit(op::BITCAST, v2, &[new]);
-        let nlo = self.m.emit(op::COMPOSITE_EXTRACT, u, &[np, 0]);
-        let nhi = self.m.emit(op::COMPOSITE_EXTRACT, u, &[np, 1]);
+        let (nlo, nhi) = f(self, (lo, hi));
         let plo = self.global_ptr(addr, u);
         self.m.emit_void(ATOMIC_STORE, &[plo, scope, relaxed, nlo]);
         let phi = self.global_ptr(hi_addr, u);
@@ -153,8 +146,7 @@ impl Ctx {
         self.m.emit_void(op::LABEL, &[merge]);
         let lo = self.m.emit(op::LOAD, u, &[oldv.0]);
         let hi = self.m.emit(op::LOAD, u, &[oldv.1]);
-        let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, &[lo, hi]);
-        self.m.emit(op::BITCAST, t, &[pair])
+        (lo, hi)
     }
 
     fn old64_vars(&mut self) -> (u32, u32) {

@@ -14,6 +14,7 @@
 //! memory), [`atomic`] (ATOM, ATOMG, ATOMS, RED) and [`warp`] (SHFL, VOTE,
 //! barriers, special registers).
 
+mod addr;
 mod atomic;
 mod atomic64;
 mod clock;
@@ -169,39 +170,29 @@ impl Ctx {
         ));
     }
 
-    fn u64_of(&mut self, lo: u32, hi: u32) -> u32 {
-        let u = self.u32t();
-        let v2 = self.m.t_vec(u, 2);
-        let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, &[lo, hi]);
-        let t = self.m.t_u64();
-        self.m.emit(op::BITCAST, t, &[pair])
-    }
-
     /// The 64-bit global address of a memory operand.
     pub(crate) fn global_address(&mut self, a: &Addr) -> Res<u32> {
-        self.cap(11);
-        let t = self.m.t_u64();
         let mut parts = Vec::new();
         if let Some(u) = a.ureg {
             let lo = self.load_ureg(u);
             let hi = self.load_ureg(u + 1);
-            parts.push(self.u64_of(lo, hi));
+            parts.push(self.addr_pair(lo, hi));
         }
         if let Some((r, wide)) = a.reg {
             let lo = self.load_reg(r);
             parts.push(if wide {
                 let hi = self.load_reg(r + 1);
-                self.u64_of(lo, hi)
+                self.addr_pair(lo, hi)
             } else {
-                self.m.emit(op::U_CONVERT, t, &[lo])
+                self.addr_zext(lo)
             });
         }
         if a.offset != 0 || parts.is_empty() {
-            parts.push(self.m.c_u64(a.offset as u64));
+            parts.push(self.addr_const(a.offset as u64));
         }
         let mut acc = parts[0];
         for &p in &parts[1..] {
-            acc = self.m.emit(op::I_ADD, t, &[acc, p]);
+            acc = self.addr_add(acc, p);
         }
         Ok(acc)
     }
@@ -216,7 +207,11 @@ impl Ctx {
         self.iface.host.global = super::GlobalPath::Bda;
         self.iface.global_memory = true;
         let p = self.m.t_ptr(PHYSICAL_STORAGE_BUFFER, ty);
-        self.m.emit(op::CONVERT_U_TO_PTR, p, &[addr])
+        if self.host.int64 {
+            self.m.emit(op::CONVERT_U_TO_PTR, p, &[addr])
+        } else {
+            self.m.emit(op::BITCAST, p, &[addr])
+        }
     }
 
     /// Extracts the sub-word `size` at byte address `addr` from the 32-bit
@@ -354,9 +349,7 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     let scope = c.access_scope(i, m.order, m.size.words());
     let vals = if m.size.sub() {
         let u = c.u32t();
-        let t = c.m.t_u64();
-        let mask = c.m.c_u64(!3);
-        let wa = c.m.emit(op::BITWISE_AND, t, &[addr, mask]);
+        let wa = c.addr_align(addr, 2);
         let w = match scope {
             Some(s) => c.atomic_load_words(wa, 1, m.order, s)[0],
             None => {
@@ -364,7 +357,7 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
                 c.m.emit(op::LOAD, u, &[p, ALIGNED, 4])
             }
         };
-        let lo = c.m.emit(op::U_CONVERT, u, &[addr]);
+        let lo = c.addr_low(addr);
         vec![c.extract_sub(w, lo, m.size)]
     } else if let Some(s) = scope {
         c.atomic_load_words(addr, m.size.words(), m.order, s)
@@ -425,10 +418,8 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     let scope = c.access_scope(i, m.order, n);
     if m.size.sub() {
         let u = c.u32t();
-        let t = c.m.t_u64();
-        let mask = c.m.c_u64(!3);
-        let wa = c.m.emit(op::BITWISE_AND, t, &[addr, mask]);
-        let lo = c.m.emit(op::U_CONVERT, u, &[addr]);
+        let wa = c.addr_align(addr, 2);
+        let lo = c.addr_low(addr);
         let (keep, bits) = c.insert_sub(parts[0], lo, m.size);
         let p = c.global_ptr(wa, u);
         c.cas_insert(p, scope.unwrap_or(SCOPE_DEVICE), keep, bits);
@@ -498,13 +489,11 @@ fn ldgsts(c: &mut Ctx, i: &Inst) -> Res<()> {
         merge
     });
     let keep = if zfill {
-        let t = c.m.t_u64();
-        let lo = c.m.emit(op::U_CONVERT, u, &[ga_addr]);
+        let lo = c.addr_low(ga_addr);
         let k15 = c.m.c_u32(15);
         let cut = c.m.emit(op::BITWISE_AND, u, &[lo, k15]);
         let k16 = c.m.c_u32(16);
-        let mask = c.m.c_u64(!15);
-        ga_addr = c.m.emit(op::BITWISE_AND, t, &[ga_addr, mask]);
+        ga_addr = c.addr_align(ga_addr, 4);
         Some(c.m.emit(op::I_SUB, u, &[k16, cut]))
     } else {
         None

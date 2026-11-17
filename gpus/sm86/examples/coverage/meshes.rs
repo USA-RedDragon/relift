@@ -54,10 +54,10 @@ pub fn read(dir: &Path) -> HashMap<String, MeshPipeline> {
     out
 }
 
-/// The translation options for program `sha`: with its pipeline when it is
-/// a task or mesh program.
-pub fn options(pipelines: &HashMap<String, MeshPipeline>, sha: &str) -> Options {
-    let mut o = Options::default();
+/// The translation options for program `sha`: `base`, with its pipeline
+/// when it is a task or mesh program.
+pub fn options(base: &Options, pipelines: &HashMap<String, MeshPipeline>, sha: &str) -> Options {
+    let mut o = base.clone();
     if let Some(p) = pipelines.get(sha) {
         o.pipeline.mesh = p.clone();
     }

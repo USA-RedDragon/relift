@@ -190,11 +190,11 @@ impl Ctx {
         scope: u32,
     ) -> Vec<u32> {
         let u = self.u32t();
-        let t = self.m.t_u64();
         let sc = self.m.c_u32(scope);
         let relaxed = self.m.c_u32(0);
         if self.whole64(order, words) {
             self.cap(CAP_INT64_ATOMICS);
+            let t = self.addr_t();
             let p = self.global_ptr(addr, t);
             let v = self.m.emit(spv::ATOMIC_LOAD, t, &[p, sc, relaxed]);
             let v2 = self.m.t_vec(u, 2);
@@ -216,11 +216,11 @@ impl Ctx {
     /// `scope`.
     pub(crate) fn atomic_store_words(&mut self, addr: u32, vals: &[u32], order: Order, scope: u32) {
         let u = self.u32t();
-        let t = self.m.t_u64();
         let sc = self.m.c_u32(scope);
         let relaxed = self.m.c_u32(0);
         if self.whole64(order, vals.len() as u32) {
             self.cap(CAP_INT64_ATOMICS);
+            let t = self.addr_t();
             let v2 = self.m.t_vec(u, 2);
             let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, vals);
             let v = self.m.emit(op::BITCAST, t, &[pair]);
@@ -236,12 +236,7 @@ impl Ctx {
     }
 
     fn word_address(&mut self, addr: u32, k: u32) -> u32 {
-        if k == 0 {
-            return addr;
-        }
-        let t = self.m.t_u64();
-        let off = self.m.c_u64(4 * u64::from(k));
-        self.m.emit(op::I_ADD, t, &[addr, off])
+        self.addr_add_const(addr, 4 * u64::from(k))
     }
 
     /// Replaces the bits `!keep` of the word at `p` with `bits` in one

@@ -447,6 +447,13 @@ fn clock_without_a_host_clock_counts() {
 }
 
 fn global_program() -> Program {
+    let mut b = global_body();
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+/// LDG.E.64 and ATOMG.E.ADD.64.
+fn global_body() -> Vec<u8> {
     let mut b = Vec::new();
     b.extend(word(
         0x181,
@@ -474,13 +481,13 @@ fn global_program() -> Program {
             (87, 4, 0),
         ],
     ));
-    exit_and_halt(&mut b);
-    Program::parse(&b)
+    b
 }
 
 const ATOMIC_COMPARE_EXCHANGE: u32 = 230;
 const ATOMIC_I_ADD: u32 = 234;
 const CONVERT_U_TO_PTR: u32 = 120;
+const BITCAST: u32 = 124;
 
 #[test]
 fn global_memory_without_device_addresses_uses_segments() {
@@ -505,6 +512,53 @@ fn global_memory_without_device_addresses_uses_segments() {
     assert!(!ops.contains(&CONVERT_U_TO_PTR));
     assert!(!ops.contains(&ATOMIC_I_ADD));
     assert!(ops.contains(&ATOMIC_COMPARE_EXCHANGE));
+}
+
+/// Whether a module declares the Int64 capability or a 64-bit integer.
+fn uses_int64(words: &[u32]) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let op = words[k] & 0xffff;
+        if (op == 17 && words[k + 1] == 11) || (op == 21 && words[k + 2] == 64) {
+            return true;
+        }
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    false
+}
+
+/// Without `shaderInt64` guest addresses are word pairs and 64-bit
+/// atomics and the clock are word arithmetic: global loads, 64-bit
+/// atomics and SR_CLOCK translate with no 64-bit integer type, through
+/// device addresses and through segments; double precision is rejected.
+#[test]
+fn hosts_without_int64_use_word_pairs() {
+    let mut b = global_body();
+    b.extend(word(0x805, 1, &[(16, 8, 10), (72, 8, 0x50)]));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    for host in [HostProfile::adreno(), HostProfile::minimal()] {
+        assert!(!host.int64);
+        let s = on(&p, host.clone());
+        assert!(!uses_int64(&s.spirv), "{}", host.name);
+        assert_eq!(s.interface.host.atomics64, Atomic64Path::Locked);
+    }
+    let s = on(&p, HostProfile::adreno());
+    assert!(spirv_ops(&s.spirv).contains(&BITCAST));
+    assert!(!spirv_ops(&s.spirv).contains(&CONVERT_U_TO_PTR));
+    assert!(uses_int64(&on(&p, HostProfile::nvidia()).spirv));
+    let mut d = word(0x229, 1, &[(16, 8, 2), (24, 8, 4), (32, 8, 6)]).to_vec();
+    exit_and_halt(&mut d);
+    let p = Program::parse(&d);
+    assert!(text_of(&p)[0].starts_with("DADD"), "{:?}", text_of(&p));
+    let e = translate_with(
+        &p,
+        &Options {
+            host: HostProfile::adreno(),
+            ..Options::default()
+        },
+    );
+    assert!(e.is_err_and(|e| e.0.contains("shaderInt64")));
 }
 
 fn text_of(p: &Program) -> Vec<String> {
