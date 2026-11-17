@@ -103,7 +103,7 @@ job() {
         mac-cross-n64-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
         mac-cross-sms-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-sms-} --guest sms --jobs 4" ;;
         mac-cross-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-} --jobs 4" ;;
-        mac-release-*) on_mac "cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
+        mac-release-*) on_mac "CARGO_TARGET_DIR=\$CARGO_TARGET_DIR-${1#mac-release-} cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
       esac
       ;;
     *) "$ROOT/scripts/ci/$1.sh" ;;
