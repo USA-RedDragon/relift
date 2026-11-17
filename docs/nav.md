@@ -19,6 +19,7 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [The core crates](../core/README.md)
 - Reference
   - [Settings](reference/configuration.md)
+  - [Command line](reference/command-line.md)
   - [Input ports and bindings](reference/input.md)
   - [Runtime ABI contract](abi.md)
   - [ARM64 CPU](../cpus/arm64/README.md)
