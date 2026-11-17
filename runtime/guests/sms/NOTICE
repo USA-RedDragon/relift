@@ -14,6 +14,11 @@ vdp.c     the VDP: ports, registers, VRAM and CRAM, the counters, the line
           2, sprites, the colour output
                                    ms/vdp/vdp.cpp, io.cpp, irq.cpp,
                                    background.cpp, sprite.cpp, dac.cpp
+ym2413.c  the YM2413 (OPLL): operators, envelopes, the LFOs, rhythm mode,
+          the register writes; the sine and exponent tables precomputed
+                                   component/audio/ym2413/ym2413.cpp,
+                                   io.cpp, operator.cpp, voice.cpp,
+                                   constants.cpp
 
 ares license:
 

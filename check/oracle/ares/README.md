@@ -134,3 +134,20 @@ must give identical samples. The script format is in the header of
 `psg-step.cpp`. A write at clock t is applied after every sample complete by t;
 the harness fixes that order itself, so the comparison covers the chip and the
 mix, not ares' thread scheduling.
+
+## YM2413 oracle (ym2413-step)
+
+`ym2413-step` drives ares' YM2413 (the FM unit of the Japanese Master
+System) from a script of timed address and data writes and prints every
+sample, one per 72 CPU clocks: the chip's mix, melody plus twice the rhythm,
+as an integer.
+
+    check/oracle/ares/build-step.sh [cache dir]
+    make -C runtime BUILD=<dir> <dir>/sms_ym2413_script
+    python3 -I check/oracle/ares/ym2413-compare.py --ares <cache>/bin/ym2413-step \
+        --relift <dir>/sms_ym2413_script [--scripts N] [--events N] [--seed N]
+
+Random scripts write the custom tone, the rhythm register, the frequency,
+key and tone registers of every voice, and some unused addresses; the
+samples must be identical. 60 scripts of 400 writes, 1,062,001 samples, gave
+0 mismatches.
