@@ -76,6 +76,30 @@ static bool pick_device(void)
 
 static void write_caps(void);
 
+/** @brief Feature structs of extensions the generated headers do not hold. */
+typedef struct ext_features {
+    VkStructureType sType;
+    void *pNext;
+    VkBool32 b[16];
+} ext_features;
+
+#define STYPE_DEPTH_CLIP_CONTROL ((VkStructureType)1000355000)
+#define STYPE_SHADER_CLOCK ((VkStructureType)1000181000)
+#define STYPE_ATOMIC_FLOAT ((VkStructureType)1000260000)
+#define STYPE_IMAGE_ATOMIC_INT64 ((VkStructureType)1000234000)
+#define STYPE_MAXIMAL_RECONVERGENCE ((VkStructureType)1000434000)
+#define STYPE_SHADER_FMA ((VkStructureType)1000579000)
+
+/**
+ * @brief The device extensions relift enables when the device has them, with
+ * all their features: the ones device.json reports (and the translator may
+ * use), plus depth clip control for the NVN depth mode.
+ */
+static const char *const device_exts[] = { "VK_EXT_depth_clip_control",          "VK_KHR_shader_clock",
+                                           "VK_EXT_shader_atomic_float",         "VK_EXT_shader_image_atomic_int64",
+                                           "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma" };
+#define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
+
 static void bring_up(void)
 {
     void *gipa = rl_hostlib_vulkan_gipa();
@@ -103,21 +127,27 @@ static void bring_up(void)
         rl_log(RL_LOG_ERROR, "nvn", "no host Vulkan device with a graphics and compute queue");
         return;
     }
-    struct {
-        VkStructureType sType;
-        void *pNext;
-        VkBool32 depthClipControl;
-    } clip_control = { .sType = (VkStructureType)1000355000, .depthClipControl = VK_TRUE };
-    uint32_t next = 0;
+    ext_features clip_control = { .sType = STYPE_DEPTH_CLIP_CONTROL }, clock = { .sType = STYPE_SHADER_CLOCK };
+    ext_features afloat = { .sType = STYPE_ATOMIC_FLOAT }, i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 };
+    ext_features recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE }, fma = { .sType = STYPE_SHADER_FMA };
+    ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma };
+    const char *ext_names[DEVICE_EXTS];
+    uint32_t next = 0, nnames = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
     if (exts)
         VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, exts);
-    for (uint32_t i = 0; exts && i < next; i++)
-        g.depth_clip_control |= !strcmp(exts[i].extensionName, "VK_EXT_depth_clip_control");
-    free(exts);
-    const char *ext_names[] = { "VK_EXT_depth_clip_control" };
     VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+    for (uint32_t k = 0; k < DEVICE_EXTS; k++)
+        for (uint32_t i = 0; exts && i < next; i++)
+            if (!strcmp(exts[i].extensionName, device_exts[k])) {
+                ext_names[nnames++] = device_exts[k];
+                feats[k]->pNext = f13.pNext;
+                f13.pNext = feats[k];
+                g.depth_clip_control |= k == 0;
+                break;
+            }
+    free(exts);
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
                                              .pNext = &f13 };
     VkPhysicalDeviceVulkan11Features f11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
@@ -132,7 +162,6 @@ static void bring_up(void)
     f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     f12.bufferDeviceAddressMultiDevice = VK_FALSE;
     f13.robustImageAccess = VK_FALSE;
-    f13.pNext = g.depth_clip_control ? &clip_control : NULL;
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qci = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                                     .queueFamilyIndex = g.family,
@@ -142,7 +171,7 @@ static void bring_up(void)
                                .pNext = &f2,
                                .queueCreateInfoCount = 1,
                                .pQueueCreateInfos = &qci,
-                               .enabledExtensionCount = g.depth_clip_control ? 1u : 0u,
+                               .enabledExtensionCount = nnames,
                                .ppEnabledExtensionNames = ext_names };
     if (VK(vkCreateDevice)(g.phys, &dci, NULL, &g.dev) != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "vkCreateDevice failed on %s", g.name);
@@ -181,17 +210,6 @@ static void bring_up(void)
     g.ok = true;
 }
 
-/** @brief Feature structs of extensions the generated headers do not hold. */
-typedef struct ext_features {
-    VkStructureType sType;
-    void *pNext;
-    VkBool32 b[16];
-} ext_features;
-
-#define STYPE_SHADER_CLOCK ((VkStructureType)1000181000)
-#define STYPE_ATOMIC_FLOAT ((VkStructureType)1000260000)
-#define STYPE_IMAGE_ATOMIC_INT64 ((VkStructureType)1000234000)
-#define STYPE_MAXIMAL_RECONVERGENCE ((VkStructureType)1000434000)
 
 static void json_flags(FILE *f, const char *name, uint32_t v, const char *const *names, uint32_t n)
 {
@@ -245,6 +263,7 @@ static void write_caps(void)
 {
     ext_features clock = { .sType = STYPE_SHADER_CLOCK }, afloat = { .sType = STYPE_ATOMIC_FLOAT };
     ext_features i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 }, recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE };
+    ext_features fma = { .sType = STYPE_SHADER_FMA };
     VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13 };
     VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f12 };
@@ -266,8 +285,8 @@ static void write_caps(void)
         for (uint32_t k = 0; k < 5; k++)
             has[k] |= !strcmp(ext[i].extensionName, wanted[k]);
     ext_features *chain[] = { has[2] ? &clock : NULL, has[0] ? &afloat : NULL, has[1] ? &i64 : NULL,
-                              has[4] ? &recon : NULL };
-    for (uint32_t k = 0; k < 4; k++)
+                              has[4] ? &recon : NULL, has[3] ? &fma : NULL };
+    for (uint32_t k = 0; k < 5; k++)
         if (chain[k]) {
             chain[k]->pNext = f13.pNext;
             f13.pNext = chain[k];
@@ -301,6 +320,10 @@ static void write_caps(void)
             B(clock.b[1]), B(clock.b[0]));
     fprintf(f, "    \"VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT\": { \"shaderImageInt64Atomics\": %s },\n",
             B(i64.b[0]));
+    fprintf(f,
+            "    \"VkPhysicalDeviceShaderFmaFeaturesKHR\": { \"shaderFmaFloat16\": %s, \"shaderFmaFloat32\": %s, "
+            "\"shaderFmaFloat64\": %s },\n",
+            B(fma.b[0]), B(fma.b[1]), B(fma.b[2]));
     fprintf(f,
             "    \"VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR\": { \"shaderMaximalReconvergence\": %s },\n",
             B(recon.b[0]));
