@@ -740,6 +740,8 @@ static const rl_ipc_cmd hid_cmds[] = {
     { 1001, "GetNpadCommunicationMode", get_comm_mode },
     RL_SRV_STUB(1002, "SetTouchScreenConfiguration"),
     RL_SRV_STUB(1004, "SetTouchScreenResolution"),
+    RL_SRV_STUB(3110, "InitializeJcms"),
+    RL_SRV_STUB(3138, "SetMergedNmouseSourceTypes"),
     RL_SRV_STUB(3139, "InitializeNmouse"),
 };
 
