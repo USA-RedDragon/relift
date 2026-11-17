@@ -22,23 +22,28 @@ extern char **environ;
 
 #define ONE_ENV "RELIFT_TEST_ONE"
 
-/** @brief Most tests. */
-#define MAX_TESTS 256
-
-static struct {
+static struct test {
     const char *name;
     t_fn *fn;
-} g_tests[MAX_TESTS];
-static int g_count;
+} *g_tests;
+static int g_count, g_cap;
 static int g_failed;
 
 void t_register(const char *name, t_fn *fn)
 {
-    if (g_count < MAX_TESTS) {
-        g_tests[g_count].name = name;
-        g_tests[g_count].fn = fn;
-        g_count++;
+    if (g_count == g_cap) {
+        int cap = g_cap ? 2 * g_cap : 256;
+        struct test *t = realloc(g_tests, (size_t)cap * sizeof *t);
+        if (!t) {
+            fprintf(stderr, "cannot register test %s\n", name);
+            exit(1);
+        }
+        g_tests = t;
+        g_cap = cap;
     }
+    g_tests[g_count].name = name;
+    g_tests[g_count].fn = fn;
+    g_count++;
 }
 
 void t_fail(const char *file, int line, const char *expr, unsigned long long a, unsigned long long b, int has_values)
