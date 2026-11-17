@@ -32,8 +32,9 @@ import java.util.zip.InflaterInputStream;
  * files; everything that decides is here, so it runs in the host's tests.
  *
  * The data in the game is the app's external files folder: the manifest name
- * {@code romfs/<path>} is the file {@code <folder>/romfs/<path>}, and the
- * same for {@code dlc/}. A file is copied under a temporary name, hashed as
+ * {@code romfs.img} (the game's RomFS image) is the file
+ * {@code <folder>/romfs.img}, {@code romfs/<path>} is the file
+ * {@code <folder>/romfs/<path>}, and the same for {@code dlc/}. A file is copied under a temporary name, hashed as
  * it is written, and renamed into place only when its size and SHA-256 match
  * the list, so a file there with the listed size is a finished one.
  */
@@ -44,6 +45,8 @@ final class GameData {
     static final String PART = ".relift-part";
     /** Room kept free beyond the data itself. */
     static final long MARGIN = 64L << 20;
+    /** The manifest name of the game's RomFS as one image file. */
+    static final String IMAGE = "romfs.img";
 
     private GameData() {
     }
@@ -97,8 +100,8 @@ final class GameData {
                     throw new IOException("data manifest line " + no + ": bad size");
                 }
                 String name = l.substring(b + 1);
-                if (!name.startsWith("romfs/") && !name.startsWith("dlc/")) {
-                    throw new IOException("data manifest line " + no + ": not under romfs/ or dlc/");
+                if (!name.equals(IMAGE) && !name.startsWith("romfs/") && !name.startsWith("dlc/")) {
+                    throw new IOException("data manifest line " + no + ": not romfs.img or under romfs/ or dlc/");
                 }
                 m.add(new Entry(name, size, l.substring(a + 1, b).toLowerCase(Locale.US)));
             }
@@ -157,7 +160,7 @@ final class GameData {
         final int kind;
         /** The folder that holds the data (HERE, INSIDE), or the picked one (ABOVE, NONE). */
         final Node root;
-        /** The root holds romfs/ (and dlc/) instead of being the romfs folder itself. */
+        /** The root holds romfs.img or romfs/ (and dlc/) instead of being the romfs folder itself. */
         final boolean wrapped;
 
         Found(int kind, Node root, boolean wrapped) {
@@ -176,7 +179,8 @@ final class GameData {
         Set<String> top = m.under("romfs");
         int n = 0;
         for (Node k : kids) {
-            if (k.dir && (k.name.equals("romfs") || k.name.equals("dlc") && m.hasDlc())) {
+            if (k.dir && (k.name.equals("romfs") || k.name.equals("dlc") && m.hasDlc())
+                    || !k.dir && k.name.equals(IMAGE) && m.byName.containsKey(IMAGE)) {
                 return new int[] { STRONG, 1 };
             }
             if (top.contains(k.name)) {
@@ -255,6 +259,8 @@ final class GameData {
             for (Node k : l.list(root)) {
                 if (k.dir && (k.name.equals("romfs") || k.name.equals("dlc"))) {
                     todo.add(new Object[] { k, k.name });
+                } else if (!k.dir && k.name.equals(IMAGE) && m.byName.containsKey(IMAGE)) {
+                    out.put(IMAGE, k);
                 }
             }
         }
@@ -624,8 +630,9 @@ final class GameData {
         }
     }
 
-    /** Deletes what an interrupted copy left: temporary files under the game's data folders. */
+    /** Deletes what an interrupted copy left: temporary files under the game's data folders and beside the image. */
     static void clean(File root) {
+        new File(root, IMAGE + PART).delete();
         for (String d : new String[] { "romfs", "dlc" }) {
             cleanUnder(new File(root, d));
         }
@@ -645,8 +652,9 @@ final class GameData {
         }
     }
 
-    /** Deletes the game data: the romfs and dlc folders under {@code root}. */
+    /** Deletes the game data: the romfs image and the romfs and dlc folders under {@code root}. */
     static void delete(File root) {
+        new File(root, IMAGE).delete();
         for (String d : new String[] { "romfs", "dlc" }) {
             deleteTree(new File(root, d));
         }

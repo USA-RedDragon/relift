@@ -36,6 +36,7 @@ public final class GameDataTest {
             run("finds the data in the picked folder", GameDataTest::findsHere);
             run("offers the one folder inside", GameDataTest::offersInside);
             run("finds a folder that holds romfs and dlc", GameDataTest::findsWrapped);
+            run("finds a folder that holds romfs.img and dlc", GameDataTest::findsImage);
             run("offers the folder above a top folder of the data", GameDataTest::offersAbove);
             run("two folders inside that both hold data are not guessed", GameDataTest::ambiguousIsNone);
             run("a folder without the data names the first file", GameDataTest::wrongFolder);
@@ -228,6 +229,32 @@ public final class GameDataTest {
         eq(in.kind, GameData.Found.INSIDE, "the folder that holds romfs, one level in");
         eq(in.root.name, "export", "named");
         check(in.wrapped, "and wrapped");
+    }
+
+    private static void findsImage() throws Exception {
+        byte[] img = bytes("a romfs image");
+        byte[] extra = bytes("extra");
+        GameData.Manifest m = GameData.Manifest.parse(img.length + " " + sha(img) + " romfs.img\n" + extra.length + " "
+                + sha(extra) + " dlc/0100/0/romfs.img\n");
+        File d = dir("image/export");
+        put(d, "romfs.img", img);
+        put(d, "dlc/0100/0/romfs.img", extra);
+        put(d, "notes.txt", bytes("x"));
+        Files l = new Files();
+        GameData.Found f = GameData.find(m, l, Files.node(d), false);
+        eq(f.kind, GameData.Found.HERE, "kind");
+        check(f.wrapped, "wrapped");
+        Map<String, GameData.Node> src = GameData.scan(m, l, f.root, true);
+        eq(src.keySet(), m.byName.keySet(), "the image and the dlc image");
+        GameData.Found in = GameData.find(m, l, Files.node(new File(scratch, "image")), false);
+        eq(in.kind, GameData.Found.INSIDE, "one level in");
+        File game = dir("image/game");
+        put(game, "romfs.img", img);
+        put(game, "romfs.img" + GameData.PART, img);
+        GameData.clean(game);
+        check(!new File(game, "romfs.img" + GameData.PART).exists(), "a stopped copy of the image is cleaned");
+        GameData.delete(game);
+        check(!new File(game, "romfs.img").exists(), "the image is deleted");
     }
 
     private static void offersAbove() throws Exception {
