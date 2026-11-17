@@ -22,6 +22,8 @@ pub enum CodeSrc {
         /// The instruction's bytes.
         bytes: Vec<u8>,
     },
+    /// The open bus, which reads 0xFF.
+    OpenBus,
 }
 
 /// A code location: a CPU address and the bytes there.
@@ -79,7 +81,8 @@ impl Code {
     /// region, offset, first frame, count, bytes): a ROM instruction is
     /// in the bank of its file offset, less `header` copier bytes; an
     /// instruction in work RAM or cartridge RAM has the bytes the trace
-    /// shows. Every length comes from
+    /// shows; one fetched from the open bus (`open`) is the 0xFF the bus
+    /// reads. Every length comes from
     /// the decoder. For development runs only: the build lifts the
     /// discovery report.
     ///
@@ -118,6 +121,7 @@ impl Code {
                 "ram" | "sram" => CodeSrc::Ram {
                     bytes: bytes[..usize::from(len).min(bytes.len())].to_vec(),
                 },
+                "open" => CodeSrc::OpenBus,
                 _ => continue,
             };
             out.instructions.insert(Loc { addr: pc, src }, len);
@@ -183,5 +187,34 @@ mod tests {
             ]
         );
         assert!(Code::from_exec_tsv("h\nz80\t0\trom\n", 0).is_err());
+    }
+
+    #[test]
+    fn open_bus_fetches_lift_as_rst_38_in_a_unit_of_their_own() {
+        let tsv = "cpu\tpc\tregion\toffset\tfirst_frame\tcount\tbytes\n\
+                   z80\t000038\topen\t38\t0\t9\tffffffff\n";
+        let code = Code::from_exec_tsv(tsv, 0).expect("parses");
+        let loc = Loc {
+            addr: 0x38,
+            src: CodeSrc::OpenBus,
+        };
+        assert_eq!(code.instructions.get(&loc), Some(&1));
+        let lifted = crate::program::lift(&[0; 0x8000], &code, [0; 32]);
+        assert!(lifted.unlifted.is_empty());
+        let open = lifted
+            .units
+            .iter()
+            .find(|u| u.tag == crate::frontend::UnitTag::OpenBus)
+            .expect("an open-bus unit");
+        assert_eq!(open.instructions, 1);
+        let p = crate::program::Program {
+            title: "t",
+            console: crate::program::Console::Ms,
+            region: crate::program::Region::NtscU,
+            mapper: crate::program::Mapper::Sega,
+            entry: crate::program::Entry::Main,
+        };
+        let c = crate::program::program_c(&p, &lifted);
+        assert!(c.contains("rams, 0u, &rl_unit_sms_open }"), "{c}");
     }
 }

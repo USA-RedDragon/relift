@@ -25,6 +25,8 @@
 /** @brief Bits 3-4: the slot (0 to 2) of a ROM unit, or RL_SMS_SLOT_RAM. */
 #define RL_SMS_SYNC_SLOT_SHIFT 3u
 #define RL_SMS_SLOT_RAM 3u
+/** @brief The unit number (in the RAM slot) of code fetched from the open bus. */
+#define RL_SMS_UNIT_OPEN 0x7FFu
 /** @brief Bits 5-15: the ROM bank of the unit, or the RAM group, plus one. */
 #define RL_SMS_SYNC_UNIT_SHIFT 5u
 /** @brief Bits 16-31: the return address of a call. */

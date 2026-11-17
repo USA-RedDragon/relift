@@ -56,6 +56,8 @@ typedef struct rl_sms_program {
     uint32_t rom_count;
     const rl_sms_ram_group *rams;
     uint32_t ram_count;
+    /** @brief Code fetched from the open bus (0xFF bytes), or NULL. */
+    const rl_unit *open;
 } rl_sms_program;
 
 /** @brief Counters of a run. */

@@ -54,7 +54,14 @@ pub enum UnitTag {
         /// The group's index.
         group: u32,
     },
+    /// Code fetched from the open bus: the memory control port has unmapped
+    /// the memory at its address, and the Master System II and Game Gear
+    /// pull the bus up to 0xFF (`RST 38H`).
+    OpenBus,
 }
+
+/// The unit number, in the RAM slot, of [`UnitTag::OpenBus`].
+pub const UNIT_OPEN: u32 = 0x7FF;
 
 impl UnitTag {
     fn bits(self) -> u32 {
@@ -66,6 +73,9 @@ impl UnitTag {
             UnitTag::Ram { group } => {
                 u32::from(SLOT_RAM) << SYNC_SLOT_SHIFT | ((group + 1) & 0x7FF) << SYNC_UNIT_SHIFT
             }
+            UnitTag::OpenBus => {
+                u32::from(SLOT_RAM) << SYNC_SLOT_SHIFT | UNIT_OPEN << SYNC_UNIT_SHIFT
+            }
         }
     }
 
@@ -73,7 +83,7 @@ impl UnitTag {
     #[must_use]
     pub fn holds(self, a: u64) -> bool {
         match self {
-            UnitTag::Entries => false,
+            UnitTag::Entries | UnitTag::OpenBus => false,
             UnitTag::Rom { slot, .. } => a < u64::from(RAM) && (a >> 14) as u8 == slot,
             UnitTag::Ram { .. } => (u64::from(CART_RAM)..0x1_0000).contains(&a),
         }

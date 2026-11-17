@@ -49,6 +49,7 @@ typedef struct smsrun {
     rl_fn *rom[BANKS][3];
     ram_index *ram;
     uint32_t ram_count;
+    rl_fn *open;
     rl_fn entries[4];
     uint16_t shadow[SHADOW_MAX];
     uint32_t shadow_tag[SHADOW_MAX];
@@ -99,20 +100,21 @@ static uint64_t now_in(const rl_ctx *c) { return G.m.cycles + (uint64_t)-c->time
 /* Code lookup. */
 
 /**
- * @brief Whether a fetch at pc reads the open bus: the memory control port
- * has unmapped the cartridge (or the Game Gear BIOS window, with no BIOS) or
- * work RAM there.
+ * @brief Whether a fetch at pc reads the open bus, which the Master System II
+ * and Game Gear pull up to 0xFF: the memory control port has unmapped the
+ * cartridge (or the BIOS, or mapped the Game Gear BIOS window with no
+ * BIOS) or work RAM there.
  */
 static bool open_bus(uint16_t pc)
 {
     const sms *m = &G.m;
     if (m->system == SMS_SYSTEM_SG)
         return false;
-    if (pc >= 0xC000 && !m->ram_enable)
-        return true;
+    if (pc >= 0xC000)
+        return !m->ram_enable && !(m->cart_enable && m->mapper == SMS_MAPPER_SEGA && m->ram_bank3);
     if (m->system == SMS_SYSTEM_GG || m->system == SMS_SYSTEM_GG_MS)
         return pc < 0x0400 && m->bios_enable;
-    return pc < 0xC000 && !m->cart_enable;
+    return m->mapper == SMS_MAPPER_BIOS ? !m->bios_enable : !m->cart_enable;
 }
 
 /** @brief The ROM bank the bytes at pc come from, or -1 (RAM, cartridge RAM, the open bus or nothing). */
@@ -150,7 +152,7 @@ static bool ram_matches(const rl_sms_ram_group *g, uint16_t pc, uint32_t *at)
 static rl_fn find(uint16_t pc)
 {
     if (open_bus(pc))
-        return NULL;
+        return G.open ? G.open[pc] : NULL;
     int32_t b = code_bank(pc);
     if (b >= 0) {
         if ((uint32_t)b >= BANKS)
@@ -175,6 +177,8 @@ static bool tag_ok(uint32_t tag, uint16_t pc)
     uint32_t unit = tag >> 2, slot = tag & 3u;
     if (!unit)
         return true;
+    if (slot == RL_SMS_SLOT_RAM && unit == RL_SMS_UNIT_OPEN)
+        return open_bus(pc);
     if (open_bus(pc))
         return false;
     if (slot == RL_SMS_SLOT_RAM) {
@@ -459,6 +463,21 @@ static int add_ram(ram_index *x, const rl_sms_ram_group *g)
     return 0;
 }
 
+static int add_open(const rl_unit *u)
+{
+    G.open = calloc(0x10000u, sizeof(rl_fn));
+    if (!G.open)
+        return -1;
+    for (uint32_t i = 0; i < u->fn_count; i++) {
+        const rl_fn_entry *e = &u->fns[i];
+        uint64_t n = (e->flags & RL_FN_RANGE) ? e->guest_size : 1;
+        for (uint64_t j = 0; j < n && e->guest_addr + j <= 0xFFFF; j++)
+            if (!G.open[e->guest_addr + j])
+                G.open[e->guest_addr + j] = e->fn;
+    }
+    return 0;
+}
+
 static void release(void)
 {
     for (uint32_t b = 0; b < BANKS; b++)
@@ -467,6 +486,7 @@ static void release(void)
     for (uint32_t k = 0; k < G.ram_count; k++)
         free(G.ram[k].fns);
     free(G.ram);
+    free(G.open);
     sms_free(&G.m);
 }
 
@@ -512,6 +532,8 @@ int rl_sms_run(const rl_sms_program *p, const uint8_t *inputs, size_t input_coun
     for (uint32_t k = 0; k < p->ram_count; k++)
         if (add_ram(&G.ram[k], &p->rams[k]) != 0)
             return 1;
+    if (p->open && add_open(p->open) != 0)
+        return 1;
     rl_z80_set_miss(miss_fn);
     rl_report_set_guest(&g_report_guest);
     rl_report_info("guest", "sms");

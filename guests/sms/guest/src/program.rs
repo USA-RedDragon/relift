@@ -133,6 +133,7 @@ pub fn host_name(tag: UnitTag, addr: u64) -> String {
         UnitTag::Entries => format!("sms_entry_{}", addr & 0xF),
         UnitTag::Rom { bank, slot } => format!("sms_b{bank:03x}_{slot}_{addr:04x}"),
         UnitTag::Ram { group } => format!("sms_r{group}_{addr:04x}"),
+        UnitTag::OpenBus => format!("sms_open_{addr:04x}"),
     }
 }
 
@@ -143,6 +144,7 @@ pub fn unit_symbol(tag: UnitTag) -> String {
         UnitTag::Entries => ENTRIES_SYMBOL.into(),
         UnitTag::Rom { bank, slot } => format!("rl_unit_sms_b{bank:03x}_{slot}"),
         UnitTag::Ram { group } => format!("rl_unit_sms_r{group}"),
+        UnitTag::OpenBus => "rl_unit_sms_open".into(),
     }
 }
 
@@ -151,6 +153,7 @@ fn unit_dir(tag: UnitTag) -> String {
         UnitTag::Entries => "entries".into(),
         UnitTag::Rom { bank, slot } => format!("b{bank:03x}_{slot}"),
         UnitTag::Ram { group } => format!("r{group}"),
+        UnitTag::OpenBus => "open".into(),
     }
 }
 
@@ -309,6 +312,7 @@ fn same_opcodes(a: &[u8], b: &[u8]) -> bool {
 pub fn lift(rom: &[u8], code: &Code, image_id: [u8; 32]) -> Lifted {
     let mut rom_units: BTreeMap<UnitTag, BTreeMap<u16, u8>> = BTreeMap::new();
     let mut ram_at: BTreeMap<u16, Vec<Vec<u8>>> = BTreeMap::new();
+    let mut open = BTreeSet::new();
     for (l, &n) in &code.instructions {
         match &l.src {
             CodeSrc::Rom { bank } if l.addr < RAM => {
@@ -325,6 +329,9 @@ pub fn lift(rom: &[u8], code: &Code, image_id: [u8; 32]) -> Lifted {
                 if !forms.iter().any(|f| same_opcodes(f, bytes)) {
                     forms.push(bytes.clone());
                 }
+            }
+            CodeSrc::OpenBus => {
+                open.insert(l.addr);
             }
             _ => {}
         }
@@ -387,6 +394,30 @@ pub fn lift(rom: &[u8], code: &Code, image_id: [u8; 32]) -> Lifted {
             true,
         ));
         ram_groups.push(insns.iter().map(|(a, b)| (*a, b.clone())).collect());
+    }
+    if !open.is_empty() {
+        let tag = UnitTag::OpenBus;
+        let fe = Sms::new(tag);
+        let mut blocks = Blocks::new();
+        let mut lens = BTreeMap::new();
+        for &a in &open {
+            lift_one(&fe, &[0xFF; 4], u64::from(a), &mut blocks);
+            lens.insert(a, 1);
+        }
+        collect_failures(
+            &blocks,
+            |pc| Loc {
+                addr: pc,
+                src: CodeSrc::OpenBus,
+            },
+            &mut unlifted,
+        );
+        units.push(emit_unit(
+            tag,
+            &functions(tag, &blocks, &lens),
+            image_id,
+            true,
+        ));
     }
     Lifted {
         entries: entries(image_id),
@@ -520,9 +551,14 @@ pub fn program_c(p: &Program<'_>, l: &Lifted) -> String {
             "int main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
         ),
     }
+    let open = if l.units.iter().any(|u| u.tag == UnitTag::OpenBus) {
+        format!("&{}", unit_symbol(UnitTag::OpenBus))
+    } else {
+        "NULL".into()
+    };
     let _ = write!(
         s,
-        "    rl_sms_program prog = {{ rl_sms_rom, rl_sms_rom_len, {}, {console}, {region}, {mapper}, &{ENTRIES_SYMBOL}, roms, {roms}u, rams, {}u }};\n    return rl_sms_main(&prog, argc, argv);\n}}\n",
+        "    rl_sms_program prog = {{ rl_sms_rom, rl_sms_rom_len, {}, {console}, {region}, {mapper}, &{ENTRIES_SYMBOL}, roms, {roms}u, rams, {}u, {open} }};\n    return rl_sms_main(&prog, argc, argv);\n}}\n",
         c_string(p.title),
         l.ram_groups.len(),
     );
