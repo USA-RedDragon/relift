@@ -54,6 +54,12 @@ TEST(gsv_boots_and_opens_nvdrv2)
     uint32_t proc = CUR_PROCESS_HANDLE;
     CHECK_EQ(tipc(c, h, 4, &proc, 1, 12), 0);
     CHECK_EQ(tipc(c, h, 11, &proc, 1, 0), 0);
+    tc_req b = tc_new(126);
+    b.tipc = true;
+    tc_res br = tc_send(c, (tc_obj){ .handle = h }, b);
+    CHECK_EQ(br.result, 0);
+    CHECK_EQ(tc_u32(&br, 0), 0);
+    CHECK_EQ(tipc(c, h, 120, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
     CHECK_EQ(tipc(c, h, 101, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 201, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 202, NULL, 0, 0), 0);

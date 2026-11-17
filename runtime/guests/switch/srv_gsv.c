@@ -186,6 +186,23 @@ static rl_result boot_native_memory_management(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief UserSession 126 (unnamed): no input, one u32. SDK 22.2.8's
+ * nn::gsv::BootWithRemoteMemory (sdk 0x4915a0) sends it right after command 4,
+ * keeps the u32 only for one compare and sends 120 (no input or output) when it
+ * is 1; it stores the value nowhere, and the boot succeeds either way. Answered
+ * 0, the path without 120 (inferred: the console's value is not known, and no
+ * SDK path reads anything that depends on it). 120 stays unimplemented.
+ */
+static rl_result boot_flag(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
 /** @brief The GpuSession user version the SDKs seen use (nn::gpu::impl::user::UserBootFunction::MyUserVersion). */
 #define GPU_USER_VERSION 4u
 
@@ -421,6 +438,7 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 11, "SetCurrentProcessHandle", set_current_process_handle },
     { 101, "CreateContext", rl_srv_stub_ok },
     { 115, "BootNativeMemoryManagement", boot_native_memory_management },
+    { 126, "Cmd126", boot_flag },
     { 201, "CreateSyncptContext", rl_srv_stub_ok },
     { 202, "InitializeSyncptContext", initialize_syncpt_context },
     { 204, "Cmd204", syncpt_cmd_204 },
