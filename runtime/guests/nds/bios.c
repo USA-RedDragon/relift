@@ -169,14 +169,30 @@ static void swi_sound_bias(const nds_bios_env *e, uint32_t r[4])
     }
 }
 
+/*
+ * Cycles from the interrupt that ends a BIOS wait to the instruction after
+ * the call, besides the bus accesses the call makes (hwtest 3, the same on
+ * the DSi and the 3DS: a timer interrupt or VBlank to the caller's next
+ * instruction). wake_cycles is the halted CPU coming back and the call's
+ * return (ARM9 cycles, ARM7 cycles); an IRQ taken inside IntrWait or
+ * VBlankIntrWait costs the ARM9 RL_NDS_BIOS_WAKE_IRQ9 more (the BIOS's
+ * dispatcher besides the handler's own code; run/cpu.c charges it).
+ */
+static const uint8_t wake_cycles[2] = {50, 42};
+
 /** @brief Halt and IntrWait's wait: the ARM7 writes HALTCNT, the ARM9 waits for interrupt. False when nothing can wake the CPU. */
 static bool cpu_halt(const nds_bios_env *e, uint32_t haltcnt)
 {
+    bool woke;
     if (e->cpu == RL_NDS_ARM7) {
         nds_bios_st(e, 0x04000301u, 1, haltcnt, false);
-        return !rl_nds_halt_lost(e->m, RL_NDS_ARM7);
+        woke = !rl_nds_halt_lost(e->m, RL_NDS_ARM7);
+    } else {
+        woke = rl_nds_halt(e->m, RL_NDS_ARM9);
     }
-    return rl_nds_halt(e->m, RL_NDS_ARM9);
+    if (woke)
+        nds_bios_cycles(e, wake_cycles[e->cpu] - RL_NDS_BIOS_CALL_CYCLES);
+    return woke;
 }
 
 /** @brief IntrWait: waits for one of the interrupts in r1 to set its bit in the BIOS flag word; r0 != 0 discards old flags first. */

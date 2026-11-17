@@ -494,7 +494,7 @@ static bool bios_irq(void *user)
     memcpy(c->r, regs, sizeof regs);
     c->t = thumb;
     k->i = c->i;
-    rl_sched_stall(k->k, BIOS_CYCLES);
+    rl_sched_stall(k->k, k->id == RL_NDS_ARM9 ? BIOS_CYCLES + RL_NDS_BIOS_WAKE_IRQ9 : BIOS_CYCLES);
     return true;
 }
 

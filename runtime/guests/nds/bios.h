@@ -27,6 +27,8 @@
 
 /** @brief Cycles of a call besides its bus accesses and loops (a fixed cost until the console's is measured). */
 #define RL_NDS_BIOS_CALL_CYCLES 16u
+/** @brief What an IRQ taken inside the ARM9's IntrWait costs besides the entry and return (hwtest 3's wake cases). */
+#define RL_NDS_BIOS_WAKE_IRQ9 40u
 
 /** @brief What a call needs from the CPU layer. */
 typedef struct rl_nds_bios_hooks {
