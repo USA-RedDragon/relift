@@ -67,7 +67,8 @@
 use super::super::{Ctx, INPUT, OUTPUT, Res, bad};
 use crate::program::Stage;
 use crate::spirv::op;
-use crate::{Inst, Word};
+use crate::translate::WarpPath;
+use crate::{Inst, Operand, Word};
 
 pub mod fallback;
 
@@ -96,6 +97,10 @@ const B_CLIP_DISTANCE: u32 = 3;
 const B_NUM_WORKGROUPS: u32 = 24;
 const B_WORKGROUP_ID: u32 = 26;
 const B_LOCAL_INVOCATION_INDEX: u32 = 29;
+const B_SUBGROUP_SIZE: u32 = 36;
+const B_SUBGROUP_ID: u32 = 40;
+const B_SUBGROUP_LOCAL_INVOCATION_ID: u32 = 41;
+const CAP_GROUP_NON_UNIFORM: u32 = 61;
 const B_PRIMITIVE_ID: u32 = 7;
 const B_LAYER: u32 = 9;
 const B_VIEWPORT_INDEX: u32 = 10;
@@ -383,6 +388,11 @@ pub(crate) struct State {
     prims: Vec<PrimComponent>,
     /// A mesh program after a task program.
     with_task: bool,
+    /// Compute back end: guest workgroups per workgroup.
+    slots: u32,
+    /// With more than one slot, private variables of this invocation's
+    /// slot and its lane in the slot.
+    slot: Option<(u32, u32)>,
 }
 
 fn addr(c: &mut Ctx, w: Word) -> u32 {
@@ -439,6 +449,11 @@ impl Ctx {
         } else {
             WORKGROUP
         };
+        let n = if class == WORKGROUP {
+            n * self.io.mesh.slots.max(1)
+        } else {
+            n
+        };
         let v = self.u32_array_var(class, n);
         self.io.mesh.payload = Some(v);
         v
@@ -457,7 +472,7 @@ impl Ctx {
         if let Some(v) = self.io.mesh.attr {
             return v;
         }
-        let n = self.attr_words().max(1);
+        let n = self.attr_words().max(1) * self.io.mesh.slots.max(1);
         let v = self.u32_array_var(WORKGROUP, n);
         self.io.mesh.attr = Some(v);
         v
@@ -467,7 +482,7 @@ impl Ctx {
         if let Some(v) = self.io.mesh.map {
             return v;
         }
-        let n = 1 + self.io.mesh.pipe.index_words();
+        let n = (1 + self.io.mesh.pipe.index_words()) * self.io.mesh.slots.max(1);
         let v = self.u32_array_var(WORKGROUP, n);
         self.io.mesh.map = Some(v);
         v
@@ -494,8 +509,51 @@ impl Ctx {
 
     fn elem_ptr(&mut self, var: u32, class: u32, idx: u32) -> u32 {
         let u = self.u32t();
+        let idx = match self.slot_words(var) {
+            Some(n) if class == WORKGROUP => {
+                let (slot, _) = self.slot_and_lane();
+                let base = self.lk_mul(slot, n);
+                self.m.emit(op::I_ADD, u, &[base, idx])
+            }
+            _ => idx,
+        };
         let p = self.m.t_ptr(class, u);
         self.m.emit(op::ACCESS_CHAIN, p, &[var, idx])
+    }
+
+    /// Words of each slot's part of stage buffer variable `var`, when the
+    /// workgroup runs more than one slot.
+    fn slot_words(&self, var: u32) -> Option<u32> {
+        self.io.mesh.slot?;
+        let m = &self.io.mesh;
+        if m.payload == Some(var) {
+            Some(m.pipe.payload_words())
+        } else if m.attr == Some(var) {
+            Some(self.attr_words().max(1))
+        } else if m.map == Some(var) {
+            Some(1 + m.pipe.index_words())
+        } else {
+            None
+        }
+    }
+
+    /// This invocation's slot and its lane in the slot (with one slot, 0
+    /// and the local invocation index).
+    fn slot_and_lane(&mut self) -> (u32, u32) {
+        match self.io.mesh.slot {
+            Some((s, l)) => {
+                let u = self.u32t();
+                let s = self.m.emit(op::LOAD, u, &[s]);
+                let l = self.m.emit(op::LOAD, u, &[l]);
+                (s, l)
+            }
+            None => (self.m.c_u32(0), self.local_index_in()),
+        }
+    }
+
+    /// The guest lane of this invocation in a task or mesh program.
+    pub(crate) fn mesh_guest_lane(&mut self) -> u32 {
+        self.slot_and_lane().1
     }
 
     /// Word `idx` of a stage buffer array of `len` words, 0 past its end.
@@ -588,8 +646,22 @@ impl Ctx {
         self.m.emit(op::LOAD, u, &[ptr])
     }
 
-    /// The linear index of this workgroup in the dispatch.
+    /// The linear index of this guest workgroup in the dispatch.
     fn linear_workgroup(&mut self) -> u32 {
+        let u = self.u32t();
+        let w = self.dispatch_workgroup();
+        match self.io.mesh.slot {
+            Some((s, _)) => {
+                let s = self.m.emit(op::LOAD, u, &[s]);
+                let w = self.lk_mul(w, self.io.mesh.slots);
+                self.m.emit(op::I_ADD, u, &[w, s])
+            }
+            None => w,
+        }
+    }
+
+    /// The linear index of this workgroup in the dispatch.
+    fn dispatch_workgroup(&mut self) -> u32 {
         let u = self.u32t();
         let x = self.uvec3_in(B_WORKGROUP_ID, 0);
         let y = self.uvec3_in(B_WORKGROUP_ID, 1);
@@ -611,8 +683,12 @@ impl Ctx {
     }
 
     fn local_index_in(&mut self) -> u32 {
+        self.builtin_u32(B_LOCAL_INVOCATION_INDEX)
+    }
+
+    fn builtin_u32(&mut self, b: u32) -> u32 {
         let u = self.u32t();
-        let var = self.builtin(B_LOCAL_INVOCATION_INDEX, INPUT, u);
+        let var = self.builtin(b, INPUT, u);
         self.m.emit(op::LOAD, u, &[var])
     }
 
@@ -851,6 +927,81 @@ pub(crate) fn prescan(c: &mut Ctx, mesh_compute: bool) -> Res<()> {
     Ok(())
 }
 
+/// Decides how many guest workgroups a workgroup of the compute back end
+/// runs (see `Options::mesh_slots`): `slots` when the program's warp
+/// operations keep to a guest warp's 32 invocations and nothing in it
+/// depends on a workgroup holding one guest workgroup alone, else 1.
+pub(crate) fn pack_plan(c: &mut Ctx, insts: &[Inst], slots: u32) -> Res<()> {
+    if !c.stage.is_mesh_pipeline() || c.native() {
+        return Ok(());
+    }
+    let slots = slots.max(1);
+    if !matches!(slots, 1 | 2 | 4) {
+        return bad(format!("{slots} guest workgroups per workgroup"));
+    }
+    let warp = matches!(
+        c.iface.host.warp,
+        WarpPath::None | WarpPath::Subgroup | WarpPath::Cluster
+    );
+    let slots = if warp && !insts.iter().any(per_workgroup) {
+        slots
+    } else {
+        1
+    };
+    c.io.mesh.slots = slots;
+    c.iface.mesh_slots = slots;
+    if slots > 1 {
+        let s = c.private_u32();
+        let l = c.private_u32();
+        c.io.mesh.slot = Some((s, l));
+    }
+    Ok(())
+}
+
+/// An instruction that needs a workgroup to itself: a barrier, shared
+/// memory, or a special register other than the lane and its masks, the
+/// clocks and zero.
+fn per_workgroup(i: &Inst) -> bool {
+    match i.mnemonic {
+        "BAR" | "STS" | "LDS" | "LDSM" | "ATOMS" | "LDGSTS" => true,
+        "S2R" | "S2UR" | "CS2R" => !matches!(
+            i.ops.get(1),
+            Some(Operand::Sym(s)) if matches!(
+                s.as_str(),
+                "SRZ" | "SR_LANEID" | "SR_EQMASK" | "SR_LTMASK" | "SR_LEMASK" | "SR_GTMASK"
+                    | "SR_GEMASK" | "SR_CLOCKLO" | "SR_CLOCKHI" | "SR_GLOBALTIMERLO"
+                    | "SR_GLOBALTIMERHI"
+            )
+        ),
+        _ => false,
+    }
+}
+
+/// Stores this invocation's slot and lane in their private variables,
+/// from the subgroup when warp operations need a slot to be 32 aligned
+/// invocations of one subgroup, else from the local invocation index.
+fn store_slot(c: &mut Ctx, slot: u32, lane: u32) {
+    let u = c.u32t();
+    let (s, l) = if matches!(c.iface.host.warp, WarpPath::Subgroup | WarpPath::Cluster) {
+        c.cap(CAP_GROUP_NON_UNIFORM);
+        let id = c.builtin_u32(B_SUBGROUP_LOCAL_INVOCATION_ID);
+        let size = c.builtin_u32(B_SUBGROUP_SIZE);
+        let sub = c.builtin_u32(B_SUBGROUP_ID);
+        let per = c.lk_shr(size, 5);
+        let s = c.m.emit(op::I_MUL, u, &[sub, per]);
+        let hi = c.lk_shr(id, 5);
+        let s = c.m.emit(op::I_ADD, u, &[s, hi]);
+        let k = c.m.c_u32(31);
+        (s, c.m.emit(op::BITWISE_AND, u, &[id, k]))
+    } else {
+        let i = c.local_index_in();
+        let k = c.m.c_u32(31);
+        (c.lk_shr(i, 5), c.m.emit(op::BITWISE_AND, u, &[i, k]))
+    };
+    c.m.emit_void(op::STORE, &[slot, s]);
+    c.m.emit_void(op::STORE, &[lane, l]);
+}
+
 /// The entry point of a task or mesh program: it calls `main` (the
 /// guest's code) between the stage buffer set-up and the hand-over.
 pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
@@ -867,15 +1018,37 @@ pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
         .map(|_| c.m.emit(op::VARIABLE, pu, &[super::super::FUNCTION]))
         .collect();
     let lanes = c.mesh_lanes();
-    let lane = c.local_index_in();
+    let live = match c.io.mesh.slot {
+        Some((s, l)) => {
+            let pb = c.m.t_ptr(super::super::FUNCTION, b);
+            let live = c.m.emit(op::VARIABLE, pb, &[super::super::FUNCTION]);
+            store_slot(c, s, l);
+            Some(live)
+        }
+        None => None,
+    };
+    let lane = c.mesh_guest_lane();
     let zero = c.m.c_u32(0);
     let one = c.m.c_u32(1);
     let lane0 = c.m.emit(op::I_EQUAL, b, &[lane, zero]);
     let compute = !c.native();
-    if compute {
-        fallback::enter(c, lane, &vars)?;
+    if let Some(v) = live {
+        let n = c.m.c_u32(lanes);
+        let on = c.m.emit(op::U_LESS_THAN, b, &[lane, n]);
+        c.m.emit_void(op::STORE, &[v, on]);
     }
-    match c.stage {
+    if compute {
+        fallback::enter(c, lane, &vars, live)?;
+    }
+    let live_then = |c: &mut Ctx, f: &mut dyn FnMut(&mut Ctx)| match live {
+        Some(v) => {
+            let b = c.boolt();
+            let on = c.m.emit(op::LOAD, b, &[v]);
+            c.if_then(on, |c| f(c));
+        }
+        None => f(c),
+    };
+    live_then(c, &mut |c| match c.stage {
         Stage::Task if compute => {
             // Workgroup memory starts undefined and the whole stage buffer
             // goes to the task record: zero it so every host stores the same.
@@ -910,14 +1083,16 @@ pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
                 });
             }
         }
-    }
+    });
     c.workgroup_barrier(SEM_WORKGROUP_MEMORY);
-    if c.iface.host.warp == crate::translate::WarpPath::Simt {
+    if c.iface.host.warp == WarpPath::Simt {
         c.if_then(lane0, |c| {
             c.m.emit(OP_FUNCTION_CALL, void, &[main]);
         });
     } else {
-        c.m.emit(OP_FUNCTION_CALL, void, &[main]);
+        live_then(c, &mut |c| {
+            c.m.emit(OP_FUNCTION_CALL, void, &[main]);
+        });
     }
     c.workgroup_barrier(SEM_WORKGROUP_MEMORY);
     match (c.stage, compute) {
@@ -932,7 +1107,9 @@ pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
             c.m.emit_void(op::RETURN, &[]);
         }
         (_, true) => {
-            fallback::leave(c, lane, lanes, &vars)?;
+            let mut r = Ok(());
+            live_then(c, &mut |c| r = fallback::leave(c, lane, lanes, &vars));
+            r?;
             c.m.emit_void(op::RETURN, &[]);
         }
         _ => unreachable!(),
@@ -1215,7 +1392,10 @@ pub(crate) fn model(c: &mut Ctx) -> u32 {
 }
 
 pub(crate) fn modes(c: &mut Ctx, entry: u32) {
-    let lanes = c.mesh_lanes();
+    let lanes = match c.io.mesh.slots {
+        0 | 1 => c.mesh_lanes(),
+        n => 32 * n,
+    };
     crate::spirv::inst(
         &mut c.m.modes,
         op::EXECUTION_MODE,

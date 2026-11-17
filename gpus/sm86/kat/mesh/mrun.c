@@ -2,7 +2,8 @@
 // and reads back the color target and buffers, for kat.py. MRUN_DEV picks the device by a part of its
 // name (default NVIDIA), MRUN_NV uses VK_NV_mesh_shader, MRUN_TIME prints each command's GPU time.
 // Commands between "group" and "endgroup" go into one command buffer, timed as one.
-// Blending, when on, is dst = src + 0.5 dst, which depends on the primitive order.
+// Blending, when on, is dst = src + 0.5 dst, which depends on the primitive order. "subgroup N" makes
+// the compute passes after it run in full subgroups of N invocations.
 #include <vulkan/vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +12,7 @@
 
 static VkDevice dev; static VkPhysicalDevice pd; static VkQueue q; static VkCommandPool cp;
 static VkPhysicalDeviceMemoryProperties mp; static VkPipelineCache pcache;
-static int W = 64, H = 64, blend = 0, has_mesh = 0, have_target = 0;
+static int W = 64, H = 64, blend = 0, has_mesh = 0, have_target = 0, sgsize = 0;
 static PFN_vkCmdDrawMeshTasksEXT draw_mesh; static PFN_vkCmdDrawMeshTasksNV draw_mesh_nv; static int nv;
 
 static uint32_t memtype(uint32_t bits, VkMemoryPropertyFlags f) {
@@ -310,6 +311,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a[0], "push")) { for (int i = 1; i < k; i++) pushc[i - 1] = strtoul(a[i], 0, 0); }
         else if (!strcmp(a[0], "pushf")) { size_t sz; void *d = rdfile(a[1], &sz); memcpy(pushc, d, sz > 128 ? 128 : sz); free(d); }
         else if (!strcmp(a[0], "blend")) blend = !strcmp(a[1], "on");
+        else if (!strcmp(a[0], "subgroup")) sgsize = atoi(a[1]);
         else if (!strcmp(a[0], "group")) {
             if (!have_target) { make_target(); have_target = 1; }
             begin(); grouped = 1;
@@ -317,8 +319,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(a[0], "endgroup")) { grouped = 0; submit(); }
         else if (!strcmp(a[0], "comp") || !strcmp(a[0], "compi")) {
             build_layout();
-            VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rss = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO, 0, 32 };
-            int full = getenv("MRUN_SG32") != 0;
+            VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rss = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO, 0,
+                sgsize ? sgsize : 32 };
+            int full = sgsize || getenv("MRUN_SG32") != 0;
             VkPipelineShaderStageCreateInfo st = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, full ? &rss : 0,
                 full ? VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT : 0, VK_SHADER_STAGE_COMPUTE_BIT, shader(a[1]), "main" };
             VkComputePipelineCreateInfo ci = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, 0, 0, st, lay };

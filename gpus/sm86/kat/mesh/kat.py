@@ -12,6 +12,8 @@ tests/mesh.rs reads. Needs glslangValidator, spirv-val, zstd, a C compiler with 
 `cargo build --release -p relift-switch-shaders -p relift-gpu-sm86 --example mesh` in CARGO_TARGET_DIR
 (default target/). KAT_DEV=<device name part> and KAT_HOST=<preset> draw the translations on another
 device; its rasterizer may differ from NVIDIA's, so compare the two back ends with each other there.
+KAT_SLOTS=<n> asks for n guest workgroups per compute workgroup, KAT_SUBGROUP=<size> for full subgroups of
+that size in the compute passes.
 
     python3 -I kat/mesh/kat.py <absolute work dir> --replay tests/kat/mesh.txt [case ...]
 
@@ -140,14 +142,18 @@ def draw(work, o, name, case, progs, prim_sph, tolerate_native):
     native = ['--frag-per-prim', str(case['fragment_per_primitive'])] if 'fragment_per_primitive' in case else []
     compute = ['--prim-id-loc', str(case['primitive_id_location'])] if 'primitive_id_location' in case else []
     host = os.environ.get('KAT_HOST', 'nvidia')
+    want = os.environ.get('KAT_SLOTS', '1')
+    slots = {}
     for k, path in progs.items():
-        for back, extra in (('native', native), ('compute', compute + ['--compute'])):
+        for back, extra in (('native', native), ('compute', compute + ['--compute', '--slots', want])):
             spv = os.path.join(o, '%s-%s.spv' % (k, back))
             r = run([X, path, spv, host] + pipe + extra)
             if not r.startswith('ok') or 'inexact []' not in r:
                 sys.exit('%s %s %s: %s' % (name, k, back, r))
+            if back == 'compute':
+                slots[k] = int(r.split()[-1])
             validate(spv)
-    r = run([X, 'helpers', progs['mesh'], o] + pipe + compute).split()
+    r = run([X, 'helpers', progs['mesh'], o, '--slots', str(slots['mesh'])] + pipe + compute).split()
     for h in ('scan-tasks', 'vertex'):
         validate(os.path.join(o, h + '.spv'))
     record_words = int(r[3])
@@ -178,12 +184,15 @@ def draw(work, o, name, case, progs, prim_sph, tolerate_native):
     index_words = p['max_primitives'] * TOPO[p['topology']]
     words = hdr[16] + (cap * index_words if indexed else 0)
     if not task:
+        groups = -(-count // slots['mesh'])
         hdr[1] = count
-        hdr[4:7] = [min(count, 65535), (count + 65534) // 65535, 1]
+        hdr[4:7] = [min(groups, 65535), (groups + 65534) // 65535, 1]
     open(os.path.join(o, 'fb.bin'), 'wb').write(struct.pack('<32I', *hdr))
     s = common + 'bufi 1 %s/fb.bin %d\nbind 3 2 1 ssbo\n' % (o, words * 4)
+    if os.environ.get('KAT_SUBGROUP'):
+        s += 'subgroup %s\n' % os.environ['KAT_SUBGROUP']
     if task:
-        s += 'comp %s/task-compute.spv %d 1 1\ncomp %s/scan-tasks.spv 1 1 1\n' % (o, count, o)
+        s += 'comp %s/task-compute.spv %d 1 1\ncomp %s/scan-tasks.spv 1 1 1\n' % (o, -(-count // slots['task']), o)
     s += 'compi %s/mesh-compute.spv 1 16\n' % o
     draw = 'drawx %s/vertex.spv %s/frag-compute.spv %s 1 68 1' if indexed else 'drawi %s/vertex.spv %s/frag-compute.spv %s 1 32'
     s += 'blend %s\n' % blend + draw % (o, o, p['topology']) + '\nout %s/fb.raw\n' % o

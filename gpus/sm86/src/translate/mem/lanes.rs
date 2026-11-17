@@ -458,7 +458,7 @@ impl Ctx {
     pub(crate) fn lane_id(&mut self) -> u32 {
         match self.warp_path() {
             WarpPath::Simt => self.simt.as_ref().map_or(0, |s| s.lane),
-            _ if self.stage.is_mesh_pipeline() => self.local_index(),
+            _ if self.stage.is_mesh_pipeline() => self.mesh_guest_lane(),
             WarpPath::Shared => {
                 let i = self.local_index();
                 self.lk(op::BITWISE_AND, i, 31)

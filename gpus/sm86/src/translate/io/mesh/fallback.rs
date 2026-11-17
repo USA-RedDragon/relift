@@ -16,7 +16,7 @@
 //! 2. [`scan`], one workgroup: the exclusive prefix of the mesh counts, in
 //!    place in the task scan region, their sum in [`H_MESHES`] and
 //!    the indirect dispatch of the mesh pass in [`H_DISPATCH`] (x at most
-//!    65535, then y);
+//!    65535, then y), of one workgroup per `Interface::mesh_slots` meshes;
 //! 3. the mesh program as a compute shader, by that indirect dispatch:
 //!    mesh workgroup `g` finds its task by binary search of the task scan
 //!    and stores mesh record `g` ([`mesh_record_words`]). A workgroup past
@@ -31,6 +31,10 @@
 //!    outputs the draw is [`indexed`] ([`H_DRAW_INDEXED`], indices in the
 //!    index region the mesh pass writes); otherwise it is not
 //!    ([`H_DRAW`]) and vertex `i` is corner `i % k` of slot `i / k`.
+//!
+//! A workgroup of several slots (`Interface::mesh_slots`) runs guest
+//! workgroup `g` in slot `g % slots` of workgroup `g / slots`, and step 1
+//! runs over `ceil(n / slots)` workgroups.
 //!
 //! Without a task program, steps 1 and 2 are skipped and the runtime sets
 //! [`H_MESHES`] and the mesh dispatch itself.
@@ -270,9 +274,38 @@ fn search(c: &mut Ctx, buf: u32, base: u32, n: u32, key: u32, vars: &[u32]) -> u
     c.m.emit(op::LOAD, u, &[lo])
 }
 
+/// Returns from the entry point when `cond` holds for the whole
+/// workgroup, or, with `live` (a workgroup of several guest workgroups),
+/// clears this invocation's `live`.
+fn leave_if(c: &mut Ctx, cond: u32, live: Option<u32>) {
+    match live {
+        Some(v) => {
+            let b = c.boolt();
+            let on = c.m.emit(op::LOAD, b, &[v]);
+            let not = c.m.emit(op::LOGICAL_NOT, b, &[cond]);
+            let on = c.m.emit(op::LOGICAL_AND, b, &[on, not]);
+            c.m.emit_void(op::STORE, &[v, on]);
+        }
+        None => return_if(c, cond),
+    }
+}
+
+/// `cond`, and with `live` also this invocation's `live`.
+fn and_live(c: &mut Ctx, cond: u32, live: Option<u32>) -> u32 {
+    match live {
+        Some(v) => {
+            let b = c.boolt();
+            let on = c.m.emit(op::LOAD, b, &[v]);
+            c.m.emit(op::LOGICAL_AND, b, &[on, cond])
+        }
+        None => cond,
+    }
+}
+
 /// The set-up of a task or mesh workgroup before the guest runs:
-/// workgroups past the draw return, a mesh workgroup finds its task.
-pub(crate) fn enter(c: &mut Ctx, lane: u32, vars: &[u32]) -> Res<()> {
+/// workgroups past the draw return (or, with `live`, clear it), a mesh
+/// workgroup finds its task.
+pub(crate) fn enter(c: &mut Ctx, lane: u32, vars: &[u32], live: Option<u32>) -> Res<()> {
     let buf = c.mesh_buffer();
     let lin = c.linear_workgroup();
     match c.stage {
@@ -280,17 +313,18 @@ pub(crate) fn enter(c: &mut Ctx, lane: u32, vars: &[u32]) -> Res<()> {
             let n = header(c, buf, H_TASKS);
             let b = c.boolt();
             let past = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lin, n]);
-            return_if(c, past);
+            leave_if(c, past, live);
         }
         Stage::Mesh => {
             let n = header(c, buf, H_MESHES);
             let b = c.boolt();
             let past = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lin, n]);
-            return_if(c, past);
+            leave_if(c, past, live);
             let u = c.u32t();
             let first = c.m.emit(op::BITWISE_OR, u, &[lin, lane]);
             let zero = c.m.c_u32(0);
             let first = c.m.emit(op::I_EQUAL, b, &[first, zero]);
+            let first = and_live(c, first, live);
             c.if_then(first, |c| {
                 let cap = header(c, buf, H_MESH_CAP);
                 let u = c.u32t();
@@ -324,33 +358,39 @@ pub(crate) fn enter(c: &mut Ctx, lane: u32, vars: &[u32]) -> Res<()> {
             });
             let cap = header(c, buf, H_MESH_CAP);
             let full = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[lin, cap]);
-            let then = c.m.id();
-            let merge = c.m.id();
-            c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
-            c.m.emit_void(op::BRANCH_CONDITIONAL, &[full, then, merge]);
-            c.m.emit_void(op::LABEL, &[then]);
-            let one = c.m.c_u32(1);
-            let k = c.m.c_u32(H_OVERFLOW);
-            store(c, buf, k, one);
-            c.m.emit_void(op::RETURN, &[]);
-            c.m.emit_void(op::LABEL, &[merge]);
+            let flag = and_live(c, full, live);
+            c.if_then(flag, |c| {
+                let one = c.m.c_u32(1);
+                let k = c.m.c_u32(H_OVERFLOW);
+                store(c, buf, k, one);
+            });
+            leave_if(c, full, live);
             if c.io.mesh.with_task {
-                let tasks = header(c, buf, H_TASKS);
-                let scan = header(c, buf, H_TASK_SCAN);
-                let t = search(c, buf, scan, tasks, lin, vars);
-                let at = add(c, scan, t);
-                let first = load(c, buf, at);
-                let j = sub(c, lin, first);
-                let recs = header(c, buf, H_TASK_RECS);
-                let pw = c.io.mesh.pipe.payload_words();
-                let off = c.lk_mul(t, pw);
-                let rec = add(c, recs, off);
-                let (rv, jv) = (
-                    c.io.mesh.task_rec.expect("task record variable"),
-                    c.io.mesh.mesh_index.expect("mesh index variable"),
-                );
-                c.m.emit_void(op::STORE, &[rv, rec]);
-                c.m.emit_void(op::STORE, &[jv, j]);
+                let find = |c: &mut Ctx| {
+                    let tasks = header(c, buf, H_TASKS);
+                    let scan = header(c, buf, H_TASK_SCAN);
+                    let t = search(c, buf, scan, tasks, lin, vars);
+                    let at = add(c, scan, t);
+                    let first = load(c, buf, at);
+                    let j = sub(c, lin, first);
+                    let recs = header(c, buf, H_TASK_RECS);
+                    let pw = c.io.mesh.pipe.payload_words();
+                    let off = c.lk_mul(t, pw);
+                    let rec = add(c, recs, off);
+                    let (rv, jv) = (
+                        c.io.mesh.task_rec.expect("task record variable"),
+                        c.io.mesh.mesh_index.expect("mesh index variable"),
+                    );
+                    c.m.emit_void(op::STORE, &[rv, rec]);
+                    c.m.emit_void(op::STORE, &[jv, j]);
+                };
+                match live {
+                    Some(v) => {
+                        let on = c.m.emit(op::LOAD, b, &[v]);
+                        c.if_then(on, find);
+                    }
+                    None => find(c),
+                }
             }
         }
         _ => return bad("compute back end of a stage other than task or mesh"),
@@ -464,8 +504,9 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
 }
 
 /// The scan pass (one workgroup of 128 invocations) over the mesh counts
-/// of the task records.
-pub fn scan() -> Vec<u32> {
+/// of the task records, for a mesh program of `slots` guest workgroups per
+/// workgroup (`Interface::mesh_slots`).
+pub fn scan(slots: u32) -> Vec<u32> {
     let mut c = Ctx::bare(Stage::Compute);
     let u = c.u32t();
     let b = c.boolt();
@@ -543,13 +584,17 @@ pub fn scan() -> Vec<u32> {
         store(c, buf, k, incl);
         let wx = c.m.c_u32(DISPATCH_X);
         let glsl = c.glsl;
+        let sm = c.m.c_u32(slots.max(1) - 1);
+        let groups = add(c, incl, sm);
+        let sk = c.m.c_u32(slots.max(1));
+        let groups = c.m.emit(op::U_DIV, u, &[groups, sk]);
         let x = c.m.emit(
             op::EXT_INST,
             u,
-            &[glsl, crate::spirv::glsl::U_MIN, incl, wx],
+            &[glsl, crate::spirv::glsl::U_MIN, groups, wx],
         );
         let wm = c.m.c_u32(DISPATCH_X - 1);
-        let y = add(c, incl, wm);
+        let y = add(c, groups, wm);
         let y = c.m.emit(op::U_DIV, u, &[y, wx]);
         for (h, v) in [(H_DISPATCH, x), (H_DISPATCH + 1, y), (H_DISPATCH + 2, one)] {
             let k = c.m.c_u32(h);

@@ -152,7 +152,8 @@ fn the_compute_back_end_helpers_validate() {
     for c in cases() {
         let mesh = &c.programs.iter().find(|(k, _)| k == "mesh").unwrap().1;
         let sph = mesh.sph.as_ref().unwrap().words;
-        validate(&scan());
+        validate(&scan(1));
+        validate(&scan(4));
         validate(&vertex(&c.pipe, &sph).unwrap_or_else(|e| panic!("{}: {e}", c.name)));
     }
 }
@@ -168,6 +169,51 @@ fn pipelines_without_per_primitive_outputs_draw_indexed() {
         .collect();
     listed.sort();
     assert_eq!(listed, ["ext-cull", "nv-prim"]);
+}
+
+/// The `LocalSize` x of a module's entry point.
+fn local_size(words: &[u32]) -> u32 {
+    instructions(words)
+        .iter()
+        .find(|(o, w)| *o == 16 && w[2] == 17)
+        .map(|(_, w)| w[3])
+        .expect("a LocalSize execution mode")
+}
+
+/// A host whose warp operations keep to 32-lane clusters of a subgroup
+/// runs two or four guest workgroups per workgroup when asked; a host
+/// that emulates warps in workgroup memory runs one.
+#[test]
+fn the_compute_back_end_packs_guest_workgroups_where_warps_allow() {
+    for c in cases() {
+        for (k, p) in &c.programs {
+            if k == "frag" {
+                continue;
+            }
+            for (host, slots, want) in [
+                (HostProfile::adreno(), 2, 2),
+                (HostProfile::adreno(), 4, 4),
+                (HostProfile::nvidia(), 4, 4),
+                (HostProfile::lavapipe(), 4, 1),
+                (HostProfile::adreno(), 1, 1),
+            ] {
+                let mut o = options(host.clone(), &c.pipe, true);
+                o.mesh_slots = slots;
+                let s = translate_with(p, &o).unwrap();
+                validate(&s.spirv);
+                assert!(s.interface.host.inexact.is_empty());
+                let tag = format!("{} {k} on {} asking {slots}", c.name, host.name);
+                let lanes = if k == "task" {
+                    c.pipe.task_lanes
+                } else {
+                    c.pipe.mesh_lanes
+                };
+                let size = if want == 1 { lanes } else { 32 * want };
+                assert_eq!(s.interface.mesh_slots, want, "{tag}");
+                assert_eq!(local_size(&s.spirv), size, "{tag}");
+            }
+        }
+    }
 }
 
 /// A mesh record holds the declared maximum of vertices and primitives

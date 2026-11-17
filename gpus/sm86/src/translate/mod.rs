@@ -108,6 +108,17 @@ pub struct Interface {
     /// output map names, plus one); the guest's pipeline state says which of
     /// them clip and which cull.
     pub clip_distances: u32,
+    /// Compute back end of a task or mesh program: the guest workgroups
+    /// one workgroup of `32 * mesh_slots` invocations runs (see
+    /// [`Options::mesh_slots`]); 1 when it runs one guest workgroup of the
+    /// guest's size. Guest workgroup `g` is slot `g % mesh_slots` of
+    /// workgroup `g / mesh_slots`, so the runtime dispatches the task pass
+    /// over `ceil(tasks / mesh_slots)` workgroups and the task scan over
+    /// the mesh program's slots. With [`WarpPath::Subgroup`] or
+    /// [`WarpPath::Cluster`] the slots are aligned 32 invocations of a
+    /// subgroup: the runtime must ask for full subgroups of a size that
+    /// divides `32 * mesh_slots`. 0 for other programs.
+    pub mesh_slots: u32,
     /// The fragment shader writes depth (SPH output map).
     pub writes_depth: bool,
     /// The fragment shader writes the sample mask (SPH output map).
@@ -150,6 +161,12 @@ pub struct Options {
     /// Translate task and mesh programs for the compute back end even on
     /// a host with mesh shaders.
     pub mesh_compute: bool,
+    /// Compute back end: guest task or mesh workgroups to run in one
+    /// workgroup, each in its own 32 invocations (1, 2 or 4; 0 is 1), so
+    /// that a workgroup fills a host subgroup wider than 32. A program
+    /// that cannot share a workgroup takes 1; [`Interface::mesh_slots`]
+    /// says what the translation took.
+    pub mesh_slots: u32,
 }
 
 /// A translated program.
@@ -738,6 +755,7 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     io::vtg::prescan(&mut c, &code.insts)?;
     c.denorm_plan(&code.insts);
     c.warp_plan(&code);
+    io::mesh::pack_plan(&mut c, &code.insts, o.mesh_slots)?;
     c.mem_plan(&code.insts);
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);

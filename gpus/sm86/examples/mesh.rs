@@ -1,9 +1,10 @@
 //! Translates a task or mesh program, and writes the compute back end's
 //! helper passes for a mesh program.
 //!
-//! `mesh <program> <out.spv> [host] [--compute] [pipeline...]`
-//! `mesh helpers <mesh program> <dir> [pipeline...]` writes
-//! `scan-tasks.spv` and `vertex.spv`.
+//! `mesh <program> <out.spv> [host] [--compute] [--slots N] [pipeline...]`
+//! prints the guest workgroups per workgroup the translation took last.
+//! `mesh helpers <mesh program> <dir> [--slots N] [pipeline...]` writes
+//! `scan-tasks.spv` (for a mesh program of N slots) and `vertex.spv`.
 //!
 //! Pipeline flags: `--verts N`, `--prims N`, `--topo point|line|tri`,
 //! `--task-lanes N`, `--mesh-lanes N`, `--payload BYTES`, `--prim-sph FILE`,
@@ -24,6 +25,7 @@ fn write(path: &str, words: &[u32]) {
 fn main() {
     let mut p = MeshPipeline::default();
     let mut compute = false;
+    let mut slots = 1;
     let mut rest = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -49,6 +51,7 @@ fn main() {
             "--prim-id-loc" => p.primitive_id_location = Some(num()),
             "--frag-per-prim" => p.fragment_per_primitive = u64::from(num()),
             "--compute" => compute = true,
+            "--slots" => slots = num(),
             "--topo" => {
                 p.topology = match args.next().as_deref() {
                     Some("point") => MeshTopology::Points,
@@ -67,7 +70,7 @@ fn main() {
         let sph = prog.sph.as_ref().expect("a mesh program has an SPH").words;
         let n = mesh_components(&sph).expect("mesh outputs").len() as u32;
         let dir = &rest[2];
-        write(&format!("{dir}/scan-tasks.spv"), &scan());
+        write(&format!("{dir}/scan-tasks.spv"), &scan(slots));
         write(
             &format!("{dir}/vertex.spv"),
             &vertex(&p, &sph).expect("vertex shader"),
@@ -85,12 +88,17 @@ fn main() {
     }
     o.pipeline.mesh = p;
     o.mesh_compute = compute;
+    o.mesh_slots = slots;
     match translate_with(&prog, &o) {
         Ok(s) => {
             write(&rest[1], &s.spirv);
             println!(
-                "ok {:?} {:?} {:?} inexact {:?}",
-                s.stage, s.interface.host.mesh, s.interface.host.warp, s.interface.host.inexact
+                "ok {:?} {:?} {:?} inexact {:?} slots {}",
+                s.stage,
+                s.interface.host.mesh,
+                s.interface.host.warp,
+                s.interface.host.inexact,
+                s.interface.mesh_slots
             );
         }
         Err(e) => println!("unsupported {e}"),
