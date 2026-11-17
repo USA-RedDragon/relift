@@ -9,7 +9,13 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 10.
+Contract version:
+
+<!-- docgen:code file=runtime/core/include/relift/abi_core.h symbol=RL_ABI_VERSION -->
+```c
+#define RL_ABI_VERSION 10u
+```
+<!-- /docgen:code -->
 
 ## 0. Runtime layers
 

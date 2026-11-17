@@ -78,8 +78,8 @@ list of hard rules; read it before changing anything.
 
 ## 1. The crate graph
 
-One Cargo workspace (`Cargo.toml`), `resolver = "2"`, edition 2024,
-toolchain pinned exactly in `rust-toolchain.toml`. Crates are grouped in
+One Cargo workspace (`Cargo.toml`), resolver <!-- docgen:cargo field=workspace.resolver -->`2`<!-- /docgen:cargo -->, edition <!-- docgen:cargo field=workspace.package.edition -->`2024`<!-- /docgen:cargo -->,
+toolchain pinned exactly in `rust-toolchain.toml` (channel <!-- docgen:cargo file=rust-toolchain.toml field=toolchain.channel -->`1.98.1`<!-- /docgen:cargo -->). Crates are grouped in
 folders by kind; package names stay flat (`relift-<area>`). `members` uses
 globs (`core/*`, `cpus/*`, `guests/*/*`, `override/*`) plus `relift` and
 `testguest`. No crate sits at the root of a folder that also holds nested
@@ -243,6 +243,73 @@ The contract between emitted C and that runtime is
 `runtime/cpus/arm64/include/relift/arm64/abi.h`, over the CPU-neutral
 `runtime/core/include/relift/abi_core.h`; `docs/abi.md` gives the reason for
 each choice.
+
+The graph as Cargo reports it, with the workspace crates that each crate
+depends on (normal dependencies):
+
+<!-- docgen:crates -->
+| Crate | Path | Kind | Version | Depends on |
+|---|---|---|---|---|
+| `relift` | `relift` | lib, bin | 0.1.0 | `relift-analyze`, `relift-build`, `relift-cache`, `relift-cpu-arm64`, `relift-cpu-sm83`, `relift-diff`, `relift-emit`, `relift-gb`, `relift-gb-analyze`, `relift-gb-formats`, `relift-gba`, `relift-gba-analyze`, `relift-gba-formats`, `relift-gpu-sm86`, `relift-guest`, `relift-host`, `relift-info`, `relift-input`, `relift-ir`, `relift-manifest`, `relift-n64`, `relift-n64-analyze`, `relift-n64-formats`, `relift-nds`, `relift-nds-analyze`, `relift-nds-formats`, `relift-patch`, `relift-proc`, `relift-progress`, `relift-sms`, `relift-sms-formats`, `relift-switch`, `relift-switch-formats`, `relift-switch-names`, `relift-testguest` |
+| `relift-analyze` | `core/analyze` | lib | 0.1.0 | `relift-guest`, `relift-ir`, `relift-proc` |
+| `relift-build` | `core/build` | lib | 0.1.0 | `relift-cache`, `relift-host`, `relift-proc` |
+| `relift-cache` | `core/cache` | lib | 0.1.0 |  |
+| `relift-cpu-arm32` | `cpus/arm32` | lib | 0.1.0 | `relift-ir` |
+| `relift-cpu-arm32-analyze` | `cpus/arm32/analyze` | lib | 0.1.0 | `relift-cpu-arm32`, `relift-ir` |
+| `relift-cpu-arm32-gen` | `cpus/arm32/gen` | bin | 0.1.0 | `relift-cpu-arm32`, `relift-sail` |
+| `relift-cpu-arm64` | `cpus/arm64` | lib | 0.1.0 | `relift-guest`, `relift-ir` |
+| `relift-cpu-arm64-gen` | `cpus/arm64/gen` | bin | 0.1.0 | `relift-cpu-arm64`, `relift-ir`, `relift-sail` |
+| `relift-cpu-mips` | `cpus/mips` | lib | 0.1.0 | `relift-ir` |
+| `relift-cpu-mips-gen` | `cpus/mips/gen` | bin | 0.1.0 | `relift-cpu-mips`, `relift-sail` |
+| `relift-cpu-rsp` | `cpus/rsp` | lib | 0.1.0 | `relift-ir` |
+| `relift-cpu-rsp-gen` | `cpus/rsp/gen` | bin | 0.1.0 | `relift-cpu-rsp`, `relift-sail` |
+| `relift-cpu-sm83` | `cpus/sm83` | lib | 0.1.0 | `relift-guest`, `relift-ir` |
+| `relift-cpu-sm83-gen` | `cpus/sm83/gen` | bin | 0.1.0 | `relift-cpu-sm83`, `relift-sail` |
+| `relift-cpu-z80` | `cpus/z80` | lib | 0.1.0 | `relift-guest`, `relift-ir` |
+| `relift-cpu-z80-gen` | `cpus/z80/gen` | bin | 0.1.0 | `relift-cpu-z80`, `relift-sail` |
+| `relift-diff` | `core/diff` | lib | 0.1.0 |  |
+| `relift-emit` | `core/emit` | lib | 0.1.0 | `relift-guest`, `relift-host`, `relift-ir`, `relift-proc` |
+| `relift-emit-wasm` | `core/emit-wasm` | lib | 0.1.0 | `relift-guest`, `relift-ir` |
+| `relift-gb` | `guests/gb/guest` | lib | 0.1.0 | `relift-cpu-sm83`, `relift-emit`, `relift-gb-analyze`, `relift-gb-formats`, `relift-guest`, `relift-ir` |
+| `relift-gb-analyze` | `guests/gb/analyze` | lib | 0.1.0 | `relift-cpu-sm83`, `relift-gb-formats`, `relift-proc` |
+| `relift-gb-formats` | `guests/gb/formats` | lib | 0.1.0 |  |
+| `relift-gb-tools` | `guests/gb/tools` | lib, bin | 0.1.0 | `relift-gb-analyze`, `relift-gb-formats` |
+| `relift-gba` | `guests/gba/guest` | lib | 0.1.0 | `relift-cpu-arm32`, `relift-emit`, `relift-gba-analyze`, `relift-guest`, `relift-ir` |
+| `relift-gba-analyze` | `guests/gba/analyze` | lib | 0.1.0 | `relift-cpu-arm32`, `relift-cpu-arm32-analyze`, `relift-gba-formats` |
+| `relift-gba-formats` | `guests/gba/formats` | lib | 0.1.0 |  |
+| `relift-gba-tools` | `guests/gba/tools` | lib, bin | 0.1.0 | `relift-gba-analyze`, `relift-gba-formats` |
+| `relift-gpu-sm86` | `gpus/sm86` | lib | 0.1.0 |  |
+| `relift-guest` | `core/guest` | lib | 0.1.0 | `relift-ir` |
+| `relift-host` | `core/host` | lib | 0.1.0 |  |
+| `relift-info` | `core/info` | lib | 0.1.0 |  |
+| `relift-input` | `core/input` | lib | 0.1.0 | `relift-info` |
+| `relift-ir` | `core/ir` | lib | 0.1.0 |  |
+| `relift-manifest` | `core/manifest` | lib | 0.1.0 | `relift-guest` |
+| `relift-n64` | `guests/n64/guest` | lib | 0.1.0 | `relift-cpu-mips`, `relift-cpu-rsp`, `relift-emit`, `relift-guest`, `relift-ir`, `relift-n64-analyze`, `relift-n64-formats` |
+| `relift-n64-analyze` | `guests/n64/analyze` | lib | 0.1.0 | `relift-cpu-mips`, `relift-cpu-rsp`, `relift-ir`, `relift-n64-formats` |
+| `relift-n64-formats` | `guests/n64/formats` | lib | 0.1.0 |  |
+| `relift-n64-tools` | `guests/n64/tools` | lib, bin | 0.1.0 | `relift-cache`, `relift-n64-analyze`, `relift-n64-formats` |
+| `relift-nds` | `guests/nds/guest` | lib | 0.1.0 | `relift-cpu-arm32`, `relift-emit`, `relift-guest`, `relift-ir`, `relift-nds-analyze`, `relift-nds-formats` |
+| `relift-nds-analyze` | `guests/nds/analyze` | lib | 0.1.0 | `relift-cpu-arm32-analyze`, `relift-nds-formats` |
+| `relift-nds-formats` | `guests/nds/formats` | lib | 0.1.0 |  |
+| `relift-nds-tools` | `guests/nds/tools` | lib, bin | 0.1.0 | `relift-cache`, `relift-nds-analyze`, `relift-nds-formats` |
+| `relift-override` | `override/api` | lib | 0.1.0 | `relift-override-macros` |
+| `relift-override-macros` | `override/macros` | proc-macro | 0.1.0 |  |
+| `relift-patch` | `core/patch` | lib | 0.1.0 |  |
+| `relift-proc` | `core/proc` | lib | 0.1.0 |  |
+| `relift-progress` | `core/progress` | lib | 0.1.0 |  |
+| `relift-sail` | `core/sail` | lib | 0.1.0 |  |
+| `relift-sms` | `guests/sms/guest` | lib | 0.1.0 | `relift-cpu-z80`, `relift-emit`, `relift-guest`, `relift-ir`, `relift-sms-formats` |
+| `relift-sms-formats` | `guests/sms/formats` | lib | 0.1.0 |  |
+| `relift-sms-tools` | `guests/sms/tools` | lib, bin | 0.1.0 | `relift-cache`, `relift-sms`, `relift-sms-formats` |
+| `relift-switch` | `guests/switch/guest` | lib | 0.1.0 | `relift-cpu-arm64`, `relift-guest`, `relift-ir`, `relift-switch-formats`, `relift-switch-names` |
+| `relift-switch-formats` | `guests/switch/formats` | lib | 0.1.0 | `relift-cache` |
+| `relift-switch-names` | `guests/switch/names` | lib | 0.1.0 | `relift-guest` |
+| `relift-switch-shaders` | `guests/switch/shaders` | lib, bin | 0.1.0 | `relift-cache`, `relift-gpu-sm86`, `relift-proc`, `relift-switch-formats` |
+| `relift-switch-tools` | `guests/switch/tools` | lib, bin | 0.1.0 | `relift-cache`, `relift-cpu-arm64`, `relift-ir`, `relift-switch-formats` |
+| `relift-switch-vkgen` | `guests/switch/vkgen` | lib, bin | 0.1.0 | `relift-cache` |
+| `relift-testguest` | `testguest` | lib | 0.1.0 | `relift-guest`, `relift-ir` |
+<!-- /docgen:crates -->
 
 ## 2. Structural rules and the tests that enforce them
 
