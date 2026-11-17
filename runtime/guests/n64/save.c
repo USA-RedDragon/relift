@@ -214,8 +214,9 @@ static const rl_setting_def g_defs[] = {
     },
 };
 
-void rl_n64_declare_settings(void)
+void rl_n64_declare_settings(const char *const *picture)
 {
     rl_settings_declare_runtime();
     rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
+    rl_n64_declare_picture(picture);
 }

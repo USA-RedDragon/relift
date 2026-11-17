@@ -309,10 +309,14 @@ TEST(n64_a_renderer_with_a_vi_side_sees_every_register_and_frame_and_gives_the_p
     CHECK_EQ(v.writes, 13);
     CHECK_EQ(v.regs[1], 0x100000u);
     CHECK_EQ(v.regs[10], 0x002501FFu);
-    CHECK(!rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(!rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     advance(&t, RL_N64_HZ / 30u);
     CHECK(v.frames >= 1);
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    rgb[0] = 0;
+    CHECK(!rl_n64_scanout(t.m, rgb, 1, &w, &h));
+    CHECK_EQ(w * h, 2);
+    CHECK_EQ(rgb[0], 0);
+    CHECK(rl_n64_scanout(t.m, rgb, 2, &w, &h));
     CHECK_EQ(w, 2);
     CHECK_EQ(h, 1);
     CHECK_EQ(rgb[0], 1);
@@ -361,12 +365,12 @@ TEST(n64_scanout_places_the_picture_in_the_ntsc_output)
     mach t = mach_new(0x2000);
     static uint8_t rgb[640 * 576 * 3];
     uint32_t w = 0, h = 0;
-    CHECK(!rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(!rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
     uint8_t *ram = rl_n64_rdram(t.m);
     ram[(0x1008) ^ 3] = 0xF8;
     ram[(0x1009) ^ 3] = 0x01;
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     CHECK_EQ(w, 640);
     CHECK_EQ(h, 480);
     CHECK_EQ(out_px(rgb, w, 8u, 3u), 0xFF0000u);
@@ -390,12 +394,12 @@ TEST(n64_scanout_scales_with_the_scale_registers)
         ram[(0x2000 + i * 4 + 2) ^ 3] = 0;
     }
     rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     CHECK_EQ(out_px(rgb, w, 8u, 3u), 18u << 16);
     CHECK_EQ(out_px(rgb, w, 9u, 3u), 19u << 16);
     CHECK_EQ(out_px(rgb, w, 13u, 3u), 23u << 16);
     rl_n64_write(t.m, 0x04400030u, 4, 0x200u);
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     CHECK_EQ(out_px(rgb, w, 8u, 3u), 14u << 16);
     CHECK_EQ(out_px(rgb, w, 9u, 3u), 14u << 16);
     CHECK_EQ(out_px(rgb, w, 10u, 3u), 15u << 16);
@@ -416,7 +420,7 @@ TEST(n64_scanout_of_an_interlaced_picture_draws_one_field_per_frame)
         ram[(0x2000 + i * 4u + 2u) ^ 3] = 1;
     }
     rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     uint32_t drawn = 0, blank = 0;
     for (uint32_t y = 4; y < 20; y++) {
         if (out_px(rgb, w, 20, y))
@@ -442,7 +446,7 @@ TEST(n64_pal_roms_scan_out_640_by_576)
     static uint8_t rgb[640 * 576 * 3];
     uint32_t w = 0, h = 0;
     vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_scanout(t.m, rgb, 640 * 576, &w, &h));
     CHECK_EQ(w, 640);
     CHECK_EQ(h, 576);
     mach_free(&t);

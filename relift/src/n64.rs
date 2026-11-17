@@ -284,6 +284,10 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         project_title
     };
     let symbols: Vec<String> = lifted.units.iter().map(|u| u.symbol.clone()).collect();
+    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let picture = crate::n64_picture::defaults(
+        &std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?,
+    )?;
     let mut prog = Vec::new();
     for (n, text) in [
         ("rom.c", relift_n64::program::rom_c(&rom.bytes)),
@@ -297,6 +301,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
                 code: &lifted.code,
                 cic: relift_n64::program::cic_number(report.boot),
                 entry: report.entry,
+                picture: &picture,
             }),
         ),
     ] {
@@ -304,9 +309,8 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         relift_cache::write_if_changed(&path, text.as_bytes())?;
         prog.push(path);
     }
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
     let ports = relift_input::native_ports("n64")?;
-    let doc = crate::info::n64_document(&title, &rom, game_settings.clone(), &ports);
+    let doc = crate::info::n64_document(&title, &rom, game_settings.clone(), &picture, &ports);
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);

@@ -456,6 +456,9 @@ pub struct Program<'a> {
     pub cic: u32,
     /// The entry point the boot jumps to.
     pub entry: u32,
+    /// The developer's picture defaults, `name=value` texts for
+    /// `rl_n64_declare_picture` (empty: the console's picture).
+    pub picture: &'a [String],
 }
 
 fn c_string(s: &str) -> String {
@@ -514,9 +517,14 @@ pub fn program_c(p: &Program<'_>) -> String {
     if p.code.is_empty() {
         s.push_str("    { 0u, 0u, 0u, 0u, 0u, 0u },\n");
     }
+    s.push_str("};\nstatic const char *const picture[] = { ");
+    for d in p.picture {
+        let _ = write!(s, "{}, ", c_string(d));
+    }
+    s.push_str("NULL };\n");
     let _ = write!(
         s,
-        "}};\nextern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nextern const rl_n64_renderer rl_n64_prdp;\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u, {}, &rl_n64_prdp }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
+        "extern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nextern const rl_n64_renderer rl_n64_prdp;\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u, {}, &rl_n64_prdp, picture }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
         p.units.len(),
         p.code.len(),
         c_string(p.title),
@@ -640,8 +648,11 @@ mod tests {
             code: &l.code,
             cic: cic_number(report.boot),
             entry: report.entry,
+            picture: &["upscale=2x".into()],
         });
         assert!(p.contains("units[] = { &rl_unit_n64_s0 }"), "{p}");
+        assert!(p.contains("picture[] = { \"upscale=2x\", NULL };"), "{p}");
+        assert!(p.contains("&rl_n64_prdp, picture }"), "{p}");
         assert!(p.contains("\"T\", 6102u, 0x80001000u"), "{p}");
     }
 }

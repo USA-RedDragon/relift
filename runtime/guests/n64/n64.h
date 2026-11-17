@@ -224,22 +224,58 @@ RL_RUNTIME_API bool rl_n64_save_dirty(const rl_n64 *m);
  * program's user folder, else next to the ROM. False when out is too small.
  */
 RL_RUNTIME_API bool rl_n64_save_path(char *out, size_t size, const char *rom_path);
-/** @brief Declares the settings of the machine layer (save.dir). */
-RL_RUNTIME_API void rl_n64_declare_settings(void);
+/**
+ * @brief Declares the settings of the machine layer: save.dir and the
+ * picture settings, whose defaults picture replaces (see
+ * rl_n64_declare_picture; NULL keeps the console's).
+ */
+RL_RUNTIME_API void rl_n64_declare_settings(const char *const *picture);
+
+/** @brief How the renderer draws and scans out: the picture settings as they stand. */
+typedef struct rl_n64_picture {
+    /** @brief The internal resolution: 1, 2, 4 or 8 times the console's. */
+    uint32_t upscale;
+    /** @brief Halvings of an upscaled picture before it is shown. */
+    uint32_t downscale_steps;
+    /** @brief The game reads the upscaled framebuffer averaged to its resolution. */
+    bool super_sampled_readback;
+    /** @brief That average is dithered. */
+    bool readback_dither;
+    /** @brief Texture rectangles are drawn without upscaling. */
+    bool native_tex_rect;
+    /** @brief Texture detail levels are picked as at the console's resolution. */
+    bool native_texture_lod;
+    /** @brief The VI filters the game can ask for, each off when false. */
+    bool vi_aa, vi_resample, vi_serrate, dither_filter, divot, gamma_dither;
+    /** @brief Lines cropped from the top and bottom (and a matching width from the sides). */
+    uint32_t crop_overscan;
+    /** @brief Weave deinterlacing, else bob. */
+    bool weave;
+} rl_n64_picture;
+/**
+ * @brief Declares the picture settings (n64.picture.*), whose declared
+ * defaults are the console's picture; defaults is a NULL-terminated list of
+ * "name=value" texts (name without the n64.picture. prefix) that replace
+ * them, an invalid one warned about and skipped.
+ */
+RL_RUNTIME_API void rl_n64_declare_picture(const char *const *defaults);
+/** @brief The picture settings now; with n64.picture.mode at console, the console's picture. */
+RL_RUNTIME_API void rl_n64_picture_get(rl_n64_picture *out);
 
 /**
  * @brief The picture VI outputs. With a renderer that scans out VI (its
  * vi_picture), the picture of the last frame it scanned out (false before
- * the first, or when it is larger than 640 by 576). Else the picture now, as
- * ares' software path draws it: the lines and columns the video registers
- * give inside the 640 by 480 (NTSC) or 640 by 576 (PAL) output, read from
- * RDRAM through the scale registers (RGBA5551 or RGBA8888, the guard band at
- * the edges, no filters), the lines of the other field kept from the last
- * picture when VI interlaces (false when VI has never been on). Writes
- * width * height RGB pixels to rgb (room for 640 * 576 * 3 bytes) and the
- * size.
+ * the first), at the size the picture settings give it. Else the picture
+ * now, as ares' software path draws it: the lines and columns the video
+ * registers give inside the 640 by 480 (NTSC) or 640 by 576 (PAL) output,
+ * read from RDRAM through the scale registers (RGBA5551 or RGBA8888, the
+ * guard band at the edges, no filters), the lines of the other field kept
+ * from the last picture when VI interlaces (false when VI has never been
+ * on). Writes width * height RGB pixels to rgb, which has room for cap
+ * pixels, and the size; a picture larger than cap is not written: false with
+ * its size in width and height.
  */
-RL_RUNTIME_API bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height);
+RL_RUNTIME_API bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, size_t cap, uint32_t *width, uint32_t *height);
 /**
  * @brief The framebuffer VI points at, read raw from RDRAM with its origin,
  * width and the visible size from the video and scale registers, no scaling

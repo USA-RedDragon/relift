@@ -383,13 +383,16 @@ pub fn handheld_document(
 }
 
 /// The document of a Nintendo 64 build: the identity from the cartridge
-/// header (title, game id, version) and the input section of its ports; the
-/// save kind is not known before the game runs.
+/// header (title, game id, version), the runtime settings with the picture
+/// settings at the developer's `picture` defaults ([`crate::n64_picture`])
+/// and the input section of its ports; the save kind is not known before the
+/// game runs.
 #[must_use]
 pub fn n64_document(
     name: &str,
     rom: &relift_n64_formats::Rom,
     settings: Vec<Setting>,
+    picture: &[String],
     ports: &PortSet,
 ) -> Info {
     let h = rom.header();
@@ -409,6 +412,9 @@ pub fn n64_document(
         ..Save::default()
     };
     info.settings = game_settings::section(settings);
+    info.settings
+        .runtime
+        .extend(crate::n64_picture::with_defaults(picture));
     info.input = relift_input::input_section(ports);
     info
 }

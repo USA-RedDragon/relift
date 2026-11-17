@@ -7,6 +7,9 @@
  * out by its VideoInterface with ares's options: every register write passed
  * on, at each frame edge the field as the current line, then the scan-out
  * and a new frame context. The picture is read back when the host asks.
+ * The picture settings (rl_n64_picture_get) pick the internal resolution,
+ * the read back, the upscaling quirks and the scan-out options; the
+ * console's picture is ares's defaults.
  */
 #include "prdp.h"
 
@@ -109,12 +112,39 @@ void *create(rl_n64 *m, void *gipa, char *why, size_t why_len)
         return fail(r, "no Vulkan device");
     r->device.set_context(r->context);
     r->device.init_frame_contexts(3);
-    r->processor = new RDP::CommandProcessor(r->device, rl_n64_rdram(m), 0, RL_N64_RDRAM_SIZE, RL_N64_RDRAM_SIZE / 2,
-                                             RDP::COMMAND_PROCESSOR_FLAG_HOST_VISIBLE_HIDDEN_RDRAM_BIT);
+    rl_n64_picture pic;
+    rl_n64_picture_get(&pic);
+    RDP::CommandProcessorFlags flags = RDP::COMMAND_PROCESSOR_FLAG_HOST_VISIBLE_HIDDEN_RDRAM_BIT;
+    if (pic.upscale == 2)
+        flags |= RDP::COMMAND_PROCESSOR_FLAG_UPSCALING_2X_BIT;
+    else if (pic.upscale == 4)
+        flags |= RDP::COMMAND_PROCESSOR_FLAG_UPSCALING_4X_BIT;
+    else if (pic.upscale == 8)
+        flags |= RDP::COMMAND_PROCESSOR_FLAG_UPSCALING_8X_BIT;
+    if (pic.upscale > 1 && pic.super_sampled_readback)
+        flags |= RDP::COMMAND_PROCESSOR_FLAG_SUPER_SAMPLED_READ_BACK_BIT;
+    if (pic.upscale > 1 && pic.readback_dither)
+        flags |= RDP::COMMAND_PROCESSOR_FLAG_SUPER_SAMPLED_DITHER_BIT;
+    r->processor =
+        new RDP::CommandProcessor(r->device, rl_n64_rdram(m), 0, RL_N64_RDRAM_SIZE, RL_N64_RDRAM_SIZE / 2, flags);
     if (!r->processor->device_is_supported())
         return fail(r, "the Vulkan device cannot run parallel-rdp");
     r->processor->set_validation_interface(&r->validation);
+    RDP::Quirks quirks;
+    quirks.set_native_resolution_tex_rect(pic.native_tex_rect);
+    quirks.set_native_texture_lod(pic.native_texture_lod);
+    r->processor->set_quirks(quirks);
     r->options.persist_frame_on_invalid_input = true;
+    r->options.downscale_steps = pic.downscale_steps;
+    r->options.crop_overscan_pixels = pic.crop_overscan;
+    r->options.blend_previous_frame = pic.weave;
+    r->options.upscale_deinterlacing = !pic.weave;
+    r->options.vi.aa = pic.vi_aa;
+    r->options.vi.scale = pic.vi_resample;
+    r->options.vi.serrate = pic.vi_serrate;
+    r->options.vi.dither_filter = pic.dither_filter;
+    r->options.vi.divot_filter = pic.divot;
+    r->options.vi.gamma_dither = pic.gamma_dither;
     return r;
 }
 

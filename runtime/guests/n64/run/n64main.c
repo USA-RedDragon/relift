@@ -48,7 +48,8 @@ typedef struct host {
     uint64_t audio_hash;
     uint64_t audio_frames;
     int audio_peak;
-    uint8_t rgb[MAX_W * MAX_H * 3];
+    uint8_t *rgb;
+    size_t cap;
     uint32_t w, h;
     bool have;
     bool framed;
@@ -212,8 +213,20 @@ static bool wav_write(const host *H)
     return ok;
 }
 
-/** @brief Takes the picture VI outputs now. */
-static void scan(host *H) { H->have = rl_n64_scanout(H->run.m, H->rgb, &H->w, &H->h); }
+/** @brief Takes the picture VI outputs now, growing the picture buffer to its size. */
+static void scan(host *H)
+{
+    H->have = rl_n64_scanout(H->run.m, H->rgb, H->cap, &H->w, &H->h);
+    size_t need = (size_t)H->w * H->h;
+    if (H->have || need <= H->cap)
+        return;
+    uint8_t *grown = realloc(H->rgb, need * 3u);
+    if (!grown)
+        return;
+    H->rgb = grown;
+    H->cap = need;
+    H->have = rl_n64_scanout(H->run.m, H->rgb, H->cap, &H->w, &H->h);
+}
 
 /** @brief The picture of the last frame: the one the frame hook took, else the picture now. */
 static void last_picture(host *H)
@@ -417,7 +430,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     H.p = p;
     const char *save = NULL;
     bool no_save = false, headless = false, no_audio = false;
-    rl_n64_declare_settings();
+    rl_n64_declare_settings(p->picture);
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -508,6 +521,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     rl_window_set_events(NULL, NULL);
     rl_n64_run_free(&H.run);
     rl_n64_destroy(m);
+    free(H.rgb);
     if (rdp)
         p->renderer->destroy(rdp);
     return r;

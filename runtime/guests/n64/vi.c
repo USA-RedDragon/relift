@@ -329,17 +329,19 @@ static void refresh(rl_n64 *m)
     m->vi.screen_ready = true;
 }
 
-bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
+bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, size_t cap, uint32_t *width, uint32_t *height)
 {
     if (m->dp.ops && m->dp.ops->vi_picture) {
         uint32_t w = 0, h = 0;
         const uint8_t *rgba = m->dp.ops->vi_picture(m->dp.user, &w, &h);
-        if (!rgba || (size_t)w * h > (size_t)640u * 576u)
+        if (!rgba)
+            return false;
+        *width = w;
+        *height = h;
+        if ((size_t)w * h > cap)
             return false;
         for (size_t i = 0; i < (size_t)w * h; i++)
             memcpy(rgb + i * 3u, rgba + i * 4u, 3);
-        *width = w;
-        *height = h;
         return true;
     }
     if (!m->vi.screen)
@@ -348,8 +350,10 @@ bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
         refresh(m);
     if (!m->vi.screen_ready)
         return false;
-    memcpy(rgb, m->vi.screen, (size_t)m->vi.screen_w * m->vi.screen_h * 3u);
     *width = m->vi.screen_w;
     *height = m->vi.screen_h;
+    if ((size_t)m->vi.screen_w * m->vi.screen_h > cap)
+        return false;
+    memcpy(rgb, m->vi.screen, (size_t)m->vi.screen_w * m->vi.screen_h * 3u);
     return true;
 }

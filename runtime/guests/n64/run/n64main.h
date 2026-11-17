@@ -38,6 +38,8 @@ typedef struct rl_n64_program {
     const char *rom_path;
     /** @brief The renderer the program links (NULL: the RDP draws nothing). */
     const rl_n64_renderer *renderer;
+    /** @brief The developer's picture defaults, as rl_n64_declare_picture takes them (NULL: the console's). */
+    const char *const *picture;
 } rl_n64_program;
 
 /**
