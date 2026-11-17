@@ -49,8 +49,8 @@ use super::mem::lanes::{shfl_is_quad, warp_op};
 use crate::{Inst, Operand};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Loc {
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(super) enum Loc {
     R(u8),
     Ur(u8),
     P(u8),
@@ -489,6 +489,13 @@ fn writes_memory(m: &str) -> bool {
         m,
         "STG" | "ST" | "ATOM" | "ATOMG" | "RED" | "SUST" | "SUATOM" | "SURED" | "CCTL"
     )
+}
+
+/// Every register and predicate an instruction writes or may write (see
+/// [`defs`]).
+pub(super) fn written_locs(i: &Inst) -> Vec<Loc> {
+    let (certain, maybe) = defs(i);
+    certain.into_iter().chain(maybe).collect()
 }
 
 /// The registers an instruction writes or may write (see [`defs`]).

@@ -41,7 +41,7 @@ pub use tex::{
 use crate::program::{Program, Stage};
 use crate::spirv::{Module, op};
 use crate::{CBank, Inst, Operand, RegMods, Word};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 pub(crate) const UNIFORM: u32 = 2;
 pub(crate) const INPUT: u32 = 1;
@@ -240,6 +240,9 @@ pub(crate) struct Ctx {
     /// Per instruction, whether control flow may reach it with only part
     /// of the warp (see `mem::lanes::divergent`).
     pub divergent: Vec<bool>,
+    /// The WARPSYNCs whose lanes the structure brings together (see
+    /// `cfg::Graph::synced_warpsyncs`), by instruction index.
+    pub synced: HashSet<usize>,
     /// Which global accesses must be coherent (see `mem::order`).
     pub mem: mem::order::Plan,
     /// The warp emulation state on [`WarpPath::Simt`].
@@ -822,6 +825,7 @@ impl Ctx {
             mem: mem::order::Plan::default(),
             simt: None,
             warp_idioms: uniform::Plan::default(),
+            synced: HashSet::new(),
         }
     }
 

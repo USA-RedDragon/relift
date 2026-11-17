@@ -1016,6 +1016,9 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
     if code.insts.iter().any(|i| i.mnemonic == "BAR") {
         g.check_barriers(code, false)?;
     }
+    if code.insts.iter().any(|i| i.mnemonic == "WARPSYNC") {
+        c.synced = g.synced_warpsyncs(code);
+    }
     c.m.emit_void(op::LABEL, &[first]);
     let u = c.u32t();
     let idx = c.builtin(BUILTIN_LOCAL_INVOCATION_INDEX, INPUT, u);

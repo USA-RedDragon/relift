@@ -357,7 +357,11 @@ fn bmov(c: &mut Ctx, i: &Inst) -> Res<()> {
 
 /// WARPSYNC waits for the lanes of its mask to reach it and orders their
 /// memory accesses. Where the warp has not diverged the lanes are already
-/// together; in compute a subgroup barrier orders their shared memory. In
+/// together; in compute a subgroup barrier orders their shared memory.
+/// The same holds in divergent flow where the structure brings exactly the
+/// mask's lanes together there (`c.synced`): a subgroup barrier waits for
+/// the invocations running together, the same lanes. On the software warp
+/// path the lanes run in order and nothing needs to wait. Elsewhere in
 /// divergent flow the wait can take lanes from another path, which no host
 /// can do, so it is reported.
 fn warpsync(c: &mut Ctx, i: &Inst) -> Res<()> {
@@ -366,7 +370,10 @@ fn warpsync(c: &mut Ctx, i: &Inst) -> Res<()> {
         i.guard,
         Some(Operand::Pred(p, _)) | Some(Operand::UPred(p, _)) if p != 7
     );
-    if guarded || c.divergent.get(k).copied().unwrap_or(true) {
+    if c.synced.contains(&k) && c.simt.is_some() {
+        return Ok(());
+    }
+    if !c.synced.contains(&k) && (guarded || c.divergent.get(k).copied().unwrap_or(true)) {
         let why = "WARPSYNC in divergent control flow";
         if !c.iface.host.inexact.iter().any(|s| s == why) {
             c.iface.host.inexact.push(why.into());

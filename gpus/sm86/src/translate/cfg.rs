@@ -84,6 +84,7 @@
 //! A graph this cannot express (irreducible, recursive calls) is rejected
 //! with the reason.
 
+mod masks;
 mod uniform;
 
 use super::calls::{self, Callee};
@@ -1524,9 +1525,12 @@ impl Graph {
         Ok(None)
     }
 
-    /// Checks that every BAR runs where all the workgroup's invocations
-    /// run it (see the module documentation).
-    pub(crate) fn check_barriers(&mut self, code: &Code, convert: bool) -> Res<()> {
+    /// The blocks only some invocations of the workgroup run (a branch
+    /// with a condition that may differ between them can make the others
+    /// skip them) and the blocks after an EXIT only some take, with the
+    /// varying branches converted where `convert` allows (see the module
+    /// documentation).
+    fn partial(&mut self, code: &Code, convert: bool) -> (Vec<bool>, Vec<bool>) {
         let insts = &code.insts;
         let n = self.blocks.len();
         let mut partial = vec![false; n];
@@ -1578,34 +1582,78 @@ impl Graph {
                 continue;
             }
             if p == partial && e == exited {
-                for b in 0..n {
-                    let Some(mut v) = entry[b] else { continue };
-                    let blk = &self.blocks[b];
-                    for (k, i) in insts.iter().enumerate().take(blk.end).skip(blk.first) {
-                        if i.mnemonic == "BAR" {
-                            let guard = i.guard.iter().cloned().collect::<Vec<_>>();
-                            if partial[b] || !v.uniform_all(&guard) {
-                                return bad(format!(
-                                    "BAR at {:#x} in non-uniform control flow",
-                                    16 * k
-                                ));
-                            }
-                            if exited[b] {
-                                return bad(format!(
-                                    "BAR at {:#x} after an EXIT only some invocations take",
-                                    16 * k
-                                ));
-                            }
-                        }
-                        let gated = self.gate[b].is_some() && uniform::gated(i);
-                        uniform::step(i, partial[b] || gated, &mut v);
-                    }
-                }
-                return Ok(());
+                return (partial, exited);
             }
             partial = p;
             exited = e;
         }
+    }
+
+    /// Checks that every BAR runs where all the workgroup's invocations
+    /// run it (see the module documentation).
+    pub(crate) fn check_barriers(&mut self, code: &Code, convert: bool) -> Res<()> {
+        let insts = &code.insts;
+        let (partial, exited) = self.partial(code, convert);
+        let entry = self.varying(code, &partial);
+        for b in 0..self.blocks.len() {
+            let Some(mut v) = entry[b] else { continue };
+            let blk = &self.blocks[b];
+            for (k, i) in insts.iter().enumerate().take(blk.end).skip(blk.first) {
+                if i.mnemonic == "BAR" {
+                    let guard = i.guard.iter().cloned().collect::<Vec<_>>();
+                    if partial[b] || !v.uniform_all(&guard) {
+                        return bad(format!("BAR at {:#x} in non-uniform control flow", 16 * k));
+                    }
+                    if exited[b] {
+                        return bad(format!(
+                            "BAR at {:#x} after an EXIT only some invocations take",
+                            16 * k
+                        ));
+                    }
+                }
+                let gated = self.gate[b].is_some() && uniform::gated(i);
+                uniform::step(i, partial[b] || gated, &mut v);
+            }
+        }
+        Ok(())
+    }
+
+    /// The WARPSYNCs that the lanes of their mask reach together on the
+    /// host, by instruction index, where the structure decides which lanes
+    /// run together: an unguarded WARPSYNC of every lane in a block all
+    /// the workgroup's invocations that have not exited run (exited lanes
+    /// count as arrived), or one whose mask holds the lanes running it (see
+    /// the masks module), outside the regions converted for BAR. Such a wait
+    /// holds the same lanes as the host's invocations running together
+    /// there, so a subgroup barrier among those is the guest's.
+    pub(crate) fn synced_warpsyncs(&mut self, code: &Code) -> HashSet<usize> {
+        let insts = &code.insts;
+        let (partial, _) = self.partial(code, false);
+        let active = self.active_mask_warpsyncs(code);
+        let mut out = HashSet::new();
+        let mut not = HashSet::new();
+        for (b, &part) in partial.iter().enumerate() {
+            let blk = &self.blocks[b];
+            for (k, i) in insts.iter().enumerate().take(blk.end).skip(blk.first) {
+                if i.mnemonic != "WARPSYNC" {
+                    continue;
+                }
+                let all = match i.ops.first() {
+                    Some(Operand::Hex(m)) => *m as u32 == u32::MAX,
+                    Some(Operand::Int(m)) => *m as u32 == u32::MAX,
+                    _ => false,
+                };
+                let ok = self.gate[b].is_none()
+                    && ((all && !part && i.guard.is_none()) || active.contains(&k));
+                if ok {
+                    out.insert(k);
+                } else {
+                    not.insert(k);
+                }
+            }
+        }
+        out.retain(|k| !not.contains(k));
+        out
     }
 
     /// Converts the varying branch `b` if it has the shape and the region
@@ -2168,6 +2216,9 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
     let mut g = structure(code, split, c.iface.host.max_reconvergence)?;
     if code.insts.iter().any(|i| i.mnemonic == "BAR") {
         g.check_barriers(code, c.stage == crate::program::Stage::Compute)?;
+    }
+    if c.iface.host.max_reconvergence && code.insts.iter().any(|i| i.mnemonic == "WARPSYNC") {
+        c.synced = g.synced_warpsyncs(code);
     }
     let mut e = Emit {
         g,

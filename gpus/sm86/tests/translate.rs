@@ -452,6 +452,54 @@ fn warpsync_orders_lanes_or_is_reported() {
     );
 }
 
+fn vote_all(dst: u64) -> [u8; 16] {
+    word(
+        0x006,
+        1,
+        &[(16, 8, dst), (72, 2, 0), (81, 3, 7), (87, 3, 7)],
+    )
+}
+
+fn warpsync_reg(r: u64) -> [u8; 16] {
+    word(0x148, 1, &[(32, 8, r), (87, 3, 7)])
+}
+
+/// `@P0 BRA 4` over `VOTE.ALL R2, PT; WARPSYNC R<mask>; VOTE.ANY`: the
+/// branch splits the warp, and the WARPSYNC waits for the lanes the VOTE.ALL
+/// saw (`mask` 2), which run together, or for some other register.
+fn warpsync_after_split(mask: u64) -> Program {
+    let mut b = Vec::new();
+    b.extend(bra(0, 4, Some(0)));
+    b.extend(vote_all(2));
+    b.extend(warpsync_reg(mask));
+    b.extend(vote_any());
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+/// A WARPSYNC of the mask of the lanes running it, in divergent flow,
+/// waits for the lanes that run together: a subgroup barrier where the
+/// host reconverges maximally, nothing on the software warp path.
+#[test]
+fn warpsync_of_the_running_lanes_is_exact() {
+    let p = warpsync_after_split(2);
+    assert_eq!(text(&p)[1], "VOTE.ALL R2, PT, PT");
+    assert_eq!(text(&p)[2], "WARPSYNC R2");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.host.max_reconvergence);
+    assert!(spirv_has(&s.spirv, 224), "no OpControlBarrier");
+    assert!(
+        s.interface.host.inexact.is_empty(),
+        "{:?}",
+        s.interface.host.inexact
+    );
+    let s = translate(&warpsync_after_split(3)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        s.interface.host.inexact,
+        vec!["WARPSYNC in divergent control flow".to_string()]
+    );
+}
+
 #[test]
 fn guarded_exit_returns_in_place() {
     let mut b = Vec::new();
