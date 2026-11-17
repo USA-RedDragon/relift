@@ -111,7 +111,7 @@ pub struct Lifted {
     /// Instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
     /// Entries left out because another function of the unit has the
-    /// address and the same first bytes.
+    /// address and the same bytes.
     pub shadowed: Vec<(UnitId, Loc)>,
 }
 
@@ -165,12 +165,29 @@ fn image<'a>(images: &Images<'a>, report: &'a Report, l: Loc) -> Option<(&'a [u8
     })
 }
 
-/// The first bytes of the function at `l` (up to 32): what tells apart
-/// functions that different copies put at one address.
+/// The bytes the runtime's entry check compares for the function at `l`
+/// ([`entry_span`]): what tells apart functions that different copies put
+/// at one address.
 fn head<'a>(images: &Images<'a>, report: &'a Report, l: Loc) -> Option<&'a [u8]> {
     let (img, base) = image(images, report, l)?;
     let off = l.addr.wrapping_sub(base) as usize;
-    img.get(off..(off + 32).min(img.len()))
+    let n = entry_span(report.functions.get(&l)?, l) as usize;
+    img.get(off..(off + n).min(img.len()))
+}
+
+/// How many bytes from `entry` the instructions of `f` cover without a
+/// gap: what the entry check compares. Code the function reaches past a
+/// gap (a vector's jump to its handler) is not part of it, as the bytes
+/// between can be data.
+fn entry_span(f: &relift_nds_analyze::Function, entry: Loc) -> u32 {
+    let mut end = entry.addr + entry.size();
+    for i in f.instructions.keys().filter(|i| i.addr >= entry.addr) {
+        if i.addr > end {
+            break;
+        }
+        end = end.max(i.addr + i.size());
+    }
+    end - entry.addr
 }
 
 fn raw(img: &[u8], base: u32, l: Loc) -> u64 {
@@ -252,7 +269,7 @@ struct Pending<'a> {
     id: UnitId,
     hash: [u8; 32],
     /// The functions by address, state and variant (its place among the
-    /// functions at that address whose first bytes differ).
+    /// functions at that address whose bytes differ).
     fns: BTreeMap<(u32, bool, usize), PendingFn<'a>>,
 }
 
@@ -426,7 +443,6 @@ pub fn lift(
                 }
             }
             let mut blocks: Blocks = BTreeMap::new();
-            let mut end = u64::from(entry.addr);
             for &l in f.instructions.keys() {
                 let pc = u64::from(l.addr);
                 if blocks.contains_key(&pc) {
@@ -468,12 +484,9 @@ pub fn lift(
                         failure: e.clone(),
                     });
                 }
-                if l.addr >= entry.addr {
-                    end = end.max(pc + u64::from(l.size()));
-                }
                 blocks.insert(pc, r);
             }
-            let span = (end - u64::from(entry.addr)).max(2);
+            let span = u64::from(entry_span(f, *entry));
             if let Some((img, base)) = image(images, report, *entry) {
                 let off = (entry.addr - base) as usize;
                 let n = (span as usize).min(img.len() - off);
@@ -805,6 +818,22 @@ mod tests {
         let units = Units::read(&rom).expect("reads");
         let reports = units.analyze(1, &|_| {});
         lift(&units, &reports, [0; 32], None)
+    }
+
+    #[test]
+    fn an_entry_check_stops_at_the_first_gap_in_the_function_s_code() {
+        let code9 = arm(&[
+            0xE3A0_0001,
+            0xEA00_0001,
+            0x1234_5678,
+            0x9ABC_DEF0,
+            0xE12F_FF1E,
+        ]);
+        let code7 = arm(&[0xEF06_0000, 0xEAFF_FFFE]);
+        let l = lifted(&rom(&code9, &code7));
+        let f = &l.units[0].functions[0];
+        assert_eq!(f.name, "nds9_static_a_02000000");
+        assert_eq!(f.len, 8, "the data the branch skips can change");
     }
 
     #[test]
