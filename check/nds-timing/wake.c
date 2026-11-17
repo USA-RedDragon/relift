@@ -10,6 +10,8 @@ void svc_halt(void);
 void svc_intrwait(u32 discard, u32 mask);
 void svc_vblankintrwait(void);
 u32 cpsr_irq_off(void);
+u32 cp15_set_control(u32 v);
+u32 cp15_control(void);
 void cpsr_restore(u32 cpsr);
 
 #define REG_IE_W (*(vu32 *)0x04000210)
@@ -23,10 +25,11 @@ void cpsr_restore(u32 cpsr);
 /* the BIOS's IntrWait flags word, which wake_irq sets */
 vu32 *wake_flags;
 
-/* the IRQ handler the BIOS calls (r0 = 0x04000000, IRQ mode, ARM state) */
+/* the IRQ handler the BIOS calls (IRQ mode, ARM state) */
 __attribute__((naked, target("arm"))) void wake_irq(void)
 {
-    __asm__ volatile("ldr r1, [r0, #0x210]\n"
+    __asm__ volatile("mov r0, #0x04000000\n"
+                     "ldr r1, [r0, #0x210]\n"
                      "ldr r2, [r0, #0x214]\n"
                      "and r1, r1, r2\n"
                      "str r1, [r0, #0x214]\n"
@@ -89,6 +92,10 @@ static void wake_measure(unsigned k, vu32 *vector, vu32 *flags, u32 *lo, u32 *hi
     u32 ime = REG_IME_W, ie = REG_IE_W, vec = *vector;
     u16 dispstat = DISPSTAT_W;
     REG_IME_W = 0;
+#ifdef ARM9
+    u32 ctl = cp15_control();
+    cp15_set_control(ctl | 1u << 13);
+#endif
     wake_flags = flags;
     *vector = (u32)wake_irq;
     *lo = ~0u;
@@ -103,6 +110,9 @@ static void wake_measure(unsigned k, vu32 *vector, vu32 *flags, u32 *lo, u32 *hi
             *hi = t;
     }
     *vector = vec;
+#ifdef ARM9
+    cp15_set_control(ctl);
+#endif
     DISPSTAT_W = dispstat;
     REG_IE_W = ie;
     REG_IF_W = ~0u;

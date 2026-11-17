@@ -27,6 +27,24 @@ stub svc_intrwait, 0x04
 stub svc_vblankintrwait, 0x05
 stub svc_halt, 0x06
 
+@ cp15_control (ARM9): reads the CP15 control register
+.global cp15_control
+.type cp15_control, %function
+.align 2
+cp15_control:
+    mrc p15, 0, r0, c1, c0, 0
+    bx lr
+
+@ cp15_set_control (ARM9): writes the CP15 control register, returns the old value
+.global cp15_set_control
+.type cp15_set_control, %function
+.align 2
+cp15_set_control:
+    mov r1, r0
+    mrc p15, 0, r0, c1, c0, 0
+    mcr p15, 0, r1, c1, c0, 0
+    bx lr
+
 @ cpsr_irq_off: sets the CPSR's I bit, returns the old CPSR; cpsr_restore: puts it back
 .global cpsr_irq_off
 .type cpsr_irq_off, %function

@@ -12,6 +12,7 @@
 #include "k9tab.h"
 #include "swi.c"
 #include "wake.c"
+#include "guard.c"
 
 #define VERSION "relift hwtest 3"
 #ifdef HWTEST_DSI
@@ -305,6 +306,19 @@ static void extra(int cpu, unsigned idx, const char *name, const char *region, c
            (long)(cpu100 < 0 ? -cpu100 : cpu100) % 100, check && (check >> 16) != (check & 0xFFFF) ? " BAD" : "");
 }
 
+/* an ARM9 BIOS call case for guarded */
+typedef struct {
+    unsigned i;
+    u8 *dst;
+    u32 ts, tl, chk;
+} sw_job9;
+
+static void sw_job9_run(void *p)
+{
+    sw_job9 *j = p;
+    sw_measure(j->i, j->dst, &j->ts, &j->tl, &j->chk);
+}
+
 /* a wake case row: the least and the most latency in bus ticks */
 static void wake_row(int cpu, unsigned k, const char *place, u32 lo, u32 hi)
 {
@@ -431,13 +445,17 @@ int main(void)
         wake_row(9, k, "main", lo, hi);
     }
     for (unsigned i = 0; i < NSWI; i++) {
-        u32 ts, tl, chk;
-        u8 *dst = sw_cases[i].dst ? (u8 *)0x06800000 : main_buf;
-        u32 ime = REG_IME;
-        REG_IME = 0;
-        sw_measure(i, dst, &ts, &tl, &chk);
-        REG_IME = ime;
+        sw_job9 sj = {i, sw_cases[i].dst ? (u8 *)0x06800000 : main_buf, 0, 0, 0};
+        u32 dt = CP15_R("c9, c1, 0") & ~0xFFFu;
+        bool done = guarded(sw_job9_run, &sj, (vu32 *)(dt + 0x3FFC));
         armDCacheFlushAll();
+        if (!done) {
+            line("9,%u,%s,%s,main,warm,-,1,timeout,,,,,\n", 1000 + i, sw_name[sw_cases[i].kind],
+                 sw_cases[i].dst ? "vram" : "main");
+            printf("9 %-16.16s timeout\n", sw_name[sw_cases[i].kind]);
+            continue;
+        }
+        u32 ts = sj.ts, tl = sj.tl, chk = sj.chk;
         extra(9, 1000 + i, sw_name[sw_cases[i].kind], sw_cases[i].dst ? "vram" : "main", "main", ts, tl, chk, sw_units(i));
     }
     for (unsigned j = 0; j < NSWI + NCARD7 + WK_KINDS; j++) {

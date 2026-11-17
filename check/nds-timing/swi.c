@@ -27,6 +27,8 @@ static s32 cb_close(const u8 *p) { (void)p; return 0; }
 static u8 cb_get8(const u8 *p) { return *p; }
 static u16 cb_get16(const u8 *p) { return *(const u16 *)p; }
 static u32 cb_get32(const u8 *p) { return *(const u32 *)p; }
+/* the Huffman call's copy of the tree (the BIOS takes the callback parameter as its buffer) */
+static u32 huff_tmp[0x200 / 4];
 static const void *const swi_cb[5] = {(const void *)cb_open, (const void *)cb_close, (const void *)cb_get8,
                                       (const void *)cb_get16, (const void *)cb_get32};
 
@@ -75,7 +77,7 @@ static void sw_run(const sw_case *c, u8 *dst, u32 size)
     case SW_CRC: svc_crc16(0xFFFF, swi_src, size); break;
     case SW_LZW: svc_lz77wram(size == SWI_SMALL ? lz_256 : lz_4096, dst); break;
     case SW_LZCB: svc_lz77cb(size == SWI_SMALL ? lz_256 : lz_4096, dst, 0, swi_cb); break;
-    case SW_HFCB: svc_huffcb(size == SWI_SMALL ? hf_256 : hf_4096, dst, 0, swi_cb); break;
+    case SW_HFCB: svc_huffcb(size == SWI_SMALL ? hf_256 : hf_4096, dst, (u32)huff_tmp, swi_cb); break;
     case SW_RLW: svc_rlwram(size == SWI_SMALL ? rl_256 : rl_4096, dst); break;
     case SW_RLCB: svc_rlcb(size == SWI_SMALL ? rl_256 : rl_4096, dst, 0, swi_cb); break;
     }
