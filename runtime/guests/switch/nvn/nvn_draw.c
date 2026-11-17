@@ -54,7 +54,14 @@ typedef struct pipe_key {
     uint32_t topology;
     uint32_t nattr, nbind;
     VkVertexInputAttributeDescription attr[NVN_VERTEX_ATTRIBS];
-    VkVertexInputBindingDescription bind[NVN_VERTEX_BUFFERS];
+    VkVertexInputBindingDescription bind[NVN_VERTEX_BUFFERS + NVN_VERTEX_ATTRIBS];
+    /** @brief Integer attributes, fed expanded (see expand_integer): stream, offset in the stream, format. */
+    uint32_t nint;
+    struct {
+        uint32_t stream, offset;
+        VkFormat format;
+        uint32_t stride, per_instance;
+    } ints[NVN_VERTEX_ATTRIBS];
     uint32_t ncolor;
     VkFormat color[MAX_RT], depth, stencil;
     VkPipelineColorBlendAttachmentState blend[MAX_RT];
@@ -308,6 +315,61 @@ static bool integer_format(VkFormat f)
     }
 }
 
+/** @brief Components, bytes per component and signedness of an integer vertex format; false for others. */
+static bool integer_layout(VkFormat f, uint32_t *n, uint32_t *bytes, bool *sign)
+{
+    switch (f) {
+    case VK_FORMAT_R8_UINT: case VK_FORMAT_R8_SINT: *n = 1, *bytes = 1; break;
+    case VK_FORMAT_R8G8_UINT: case VK_FORMAT_R8G8_SINT: *n = 2, *bytes = 1; break;
+    case VK_FORMAT_R8G8B8_UINT: case VK_FORMAT_R8G8B8_SINT: *n = 3, *bytes = 1; break;
+    case VK_FORMAT_R8G8B8A8_UINT: case VK_FORMAT_R8G8B8A8_SINT: *n = 4, *bytes = 1; break;
+    case VK_FORMAT_R16_UINT: case VK_FORMAT_R16_SINT: *n = 1, *bytes = 2; break;
+    case VK_FORMAT_R16G16_UINT: case VK_FORMAT_R16G16_SINT: *n = 2, *bytes = 2; break;
+    case VK_FORMAT_R16G16B16_UINT: case VK_FORMAT_R16G16B16_SINT: *n = 3, *bytes = 2; break;
+    case VK_FORMAT_R16G16B16A16_UINT: case VK_FORMAT_R16G16B16A16_SINT: *n = 4, *bytes = 2; break;
+    case VK_FORMAT_R32_UINT: case VK_FORMAT_R32_SINT: *n = 1, *bytes = 4; break;
+    case VK_FORMAT_R32G32_UINT: case VK_FORMAT_R32G32_SINT: *n = 2, *bytes = 4; break;
+    case VK_FORMAT_R32G32B32_UINT: case VK_FORMAT_R32G32B32_SINT: *n = 3, *bytes = 4; break;
+    case VK_FORMAT_R32G32B32A32_UINT: case VK_FORMAT_R32G32B32A32_SINT: *n = 4, *bytes = 4; break;
+    default: return false;
+    }
+    *sign = f == VK_FORMAT_R8_SINT || f == VK_FORMAT_R8G8_SINT || f == VK_FORMAT_R8G8B8_SINT ||
+            f == VK_FORMAT_R8G8B8A8_SINT || f == VK_FORMAT_R16_SINT || f == VK_FORMAT_R16G16_SINT ||
+            f == VK_FORMAT_R16G16B16_SINT || f == VK_FORMAT_R16G16B16A16_SINT || f == VK_FORMAT_R32_SINT ||
+            f == VK_FORMAT_R32G32_SINT || f == VK_FORMAT_R32G32B32_SINT || f == VK_FORMAT_R32G32B32A32_SINT;
+    return true;
+}
+
+/**
+ * @brief Writes elements 0 to n-1 (vertices, or the one instance a draw
+ * has) of an integer attribute, read from the
+ * stream's guest bytes at src (stride bytes apart), as four 32-bit words
+ * each (missing components 0, 0, 1) into out.
+ *
+ * The translated vertex programs take every attribute as a float vector
+ * and use its bits as the guest's registers do, and a Vulkan integer
+ * format feeds only an integer-typed input; an R32G32B32A32_SFLOAT input
+ * over these words gives the program the integer's bits unchanged.
+ */
+static void expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_t n, uint32_t *out)
+{
+    uint32_t comps, bytes;
+    bool sign;
+    integer_layout(f, &comps, &bytes, &sign);
+    for (uint64_t v = 0; v < n; v++) {
+        const uint8_t *p = src + v * stride;
+        uint32_t w[4] = { 0, 0, 0, 1 };
+        for (uint32_t c = 0; c < comps; c++) {
+            uint32_t x = 0;
+            memcpy(&x, p + c * bytes, bytes);
+            if (sign && bytes < 4 && (x >> (8 * bytes - 1)) & 1)
+                x |= ~0u << (8 * bytes);
+            w[c] = x;
+        }
+        memcpy(out + 4 * v, w, sizeof w);
+    }
+}
+
 /** @brief NVNblendFunc (1 ZERO, 2 ONE, ...) to a blend factor; -1 for one the layer does not map. */
 static int blend_factor(uint32_t f)
 {
@@ -493,6 +555,7 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
     nvn_gfx *st = r->st;
     uint32_t streams = 0;
     bool real15 = false, def = false;
+    uint32_t int_streams = 0;
     int rc;
     for (uint32_t i = 0; i < NVN_VERTEX_ATTRIBS && i < 32; i++) {
         if (!(vs->inputs & (1u << i)))
@@ -517,10 +580,21 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
             continue;
         }
         VkFormat f = vertex_format(fo[0]);
-        if (f == VK_FORMAT_UNDEFINED || integer_format(f))
+        if (f == VK_FORMAT_UNDEFINED || f == VK_FORMAT_A2B10G10R10_UINT_PACK32)
             return nvn_vk_stop(r, "vertex attribute %u has format %u, which the float input cannot take", i, fo[0]);
         if ((uint32_t)stream >= st->nstreams)
             return nvn_vk_stop(r, "vertex attribute %u reads stream %u of %u", i, (uint32_t)stream, st->nstreams);
+        if (integer_format(f)) {
+            uint32_t b = NVN_VERTEX_BUFFERS + k->nint;
+            k->ints[k->nint].stream = (uint32_t)stream;
+            k->ints[k->nint].offset = fo[1];
+            k->ints[k->nint++].format = f;
+            k->bind[k->nbind++] = (VkVertexInputBindingDescription){ b, 16, VK_VERTEX_INPUT_RATE_VERTEX };
+            k->ints[k->nint - 1].per_instance = k->nbind - 1;
+            k->attr[k->nattr++] = (VkVertexInputAttributeDescription){ i, b, VK_FORMAT_R32G32B32A32_SFLOAT, 0 };
+            int_streams |= 1u << stream;
+            continue;
+        }
         if ((uint32_t)stream == DEFAULT_BINDING)
             real15 = true;
         k->attr[k->nattr++] = (VkVertexInputAttributeDescription){ i, (uint32_t)stream, f, fo[1] };
@@ -529,7 +603,7 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
     if (def && real15)
         return nvn_vk_stop(r, "a disabled vertex attribute and stream %u in one draw", DEFAULT_BINDING);
     for (uint32_t s = 0; s < NVN_VERTEX_BUFFERS; s++) {
-        if (!(streams & (1u << s)) || (def && s == DEFAULT_BINDING))
+        if (!((streams | int_streams) & (1u << s)) || (def && s == DEFAULT_BINDING))
             continue;
         uint64_t stride = 0, div = 0;
         if ((rc = nvn_vk_getter(r, "nvnVertexStreamStateGetStride", st->streams[s], 8, NULL, 0, 0, NULL, &stride)) !=
@@ -539,9 +613,18 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
             return rc;
         if ((uint32_t)div > 1)
             return nvn_vk_stop(r, "vertex stream %u with divisor %u", s, (uint32_t)div);
-        k->bind[k->nbind++] = (VkVertexInputBindingDescription){
-            s, (uint32_t)stride, div ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX
-        };
+        for (uint32_t j = 0; j < k->nint; j++)
+            if (k->ints[j].stream == s) {
+                k->ints[j].stride = (uint32_t)stride;
+                uint32_t bi = k->ints[j].per_instance;
+                k->ints[j].per_instance = div != 0;
+                if (div)
+                    k->bind[bi].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+            }
+        if (streams & (1u << s))
+            k->bind[k->nbind++] = (VkVertexInputBindingDescription){
+                s, (uint32_t)stride, div ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX
+            };
     }
     return RL_OK;
 }
@@ -856,6 +939,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     for (uint32_t i = 0; i < k.nbind; i++) {
         uint32_t s = k.bind[i].binding;
         uint64_t off;
+        if (s >= NVN_VERTEX_BUFFERS)
+            continue;
         if (s == DEFAULT_BINDING && k.bind[i].stride == 0 && !st->vb[s].addr) {
             static const float one[4] = { 0, 0, 0, 1 };
             if (!nvn_vk_upload_bytes(r, (const uint8_t *)one, sizeof one, 0, 16, &off))
@@ -885,6 +970,38 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         if (!nvn_vk_upload(r, iaddr, (uint64_t)count * isize[itype], 0, 16, &ioff))
             return nvn_vk_stop(r, "the upload arena is full");
     }
+    VkDeviceSize int_off[NVN_VERTEX_ATTRIBS];
+    if (k.nint) {
+        uint64_t nv = (uint64_t)first + count;
+        if (indexed) {
+            const uint8_t *ip = r->mem + nvn_gpu_guest(iaddr);
+            int64_t hi = -1;
+            for (uint32_t i = 0; i < count; i++) {
+                uint32_t x = itype == 1 ? (uint32_t)ip[2 * i] | (uint32_t)ip[2 * i + 1] << 8 : rl_ld32(ip, 4 * (uint64_t)i);
+                bool restart = k.primitive_restart && x == (itype == 1 ? 0xffffu : 0xffffffffu);
+                if (!restart && (int64_t)x + base > hi)
+                    hi = (int64_t)x + base;
+            }
+            nv = (uint64_t)(hi + 1);
+        }
+        if (nv > (16u << 20))
+            return nvn_vk_stop(r, "a draw reads %llu vertices of an integer attribute", (unsigned long long)nv);
+        for (uint32_t j = 0; j < k.nint; j++) {
+            uint32_t s = k.ints[j].stream;
+            if (!st->vb[s].addr)
+                return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
+            uint64_t n = k.ints[j].per_instance ? 1 : nv;
+            uint32_t *w = malloc(n ? n * 16 : 16);
+            if (!w)
+                return nvn_vk_stop(r, "out of memory expanding an integer vertex attribute");
+            expand_integer(r->mem + nvn_gpu_guest(st->vb[s].addr) + k.ints[j].offset, k.ints[j].stride, k.ints[j].format,
+                           n, w);
+            bool ok = nvn_vk_upload_bytes(r, w, n ? n * 16 : 16, 0, 16, &int_off[j]);
+            free(w);
+            if (!ok)
+                return nvn_vk_stop(r, "the upload arena is full");
+        }
+    }
     VkRect2D area;
     if (!nvn_vk_begin_rendering(r, &area))
         return nvn_vk_stop(r, "draw without render targets");
@@ -896,6 +1013,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdBindVertexBuffers)(g.cb, firstb, nb, bufs, offs);
     if (has_def)
         VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &def_off);
+    for (uint32_t j = 0; j < k.nint; j++)
+        VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &int_off[j]);
     if (indexed) {
         VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, ioff, itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         VK(vkCmdDrawIndexed)(g.cb, count, 1, 0, base, 0);
