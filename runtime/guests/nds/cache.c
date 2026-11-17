@@ -81,17 +81,25 @@ static int find(const nds_cache_side *c, unsigned s, uint32_t t)
     return -1;
 }
 
-/** @brief The way a fill of set s replaces: round robin (control bit 14) or a pseudo-random way. */
+/**
+ * @brief The way a fill of set s replaces. Round robin (control bit 14): one
+ * counter for the whole cache, stepped by every fill, picks the way even when
+ * another way of the set is invalid, so lines 64 sets apart replace each
+ * other in a loop over more than the cache's 64 sets right after an
+ * invalidate. The console's cold loops over 4 to 16 KiB miss every line, every
+ * pass; the TRM leaves the counter's scope open. Otherwise a pseudo-random way,
+ * after any invalid one.
+ */
 static unsigned victim(rl_nds *m, nds_cache_side *c, unsigned s)
 {
+    if (m->cp15.control & RL_CP15_ROUND_ROBIN) {
+        unsigned w = c->next;
+        c->next = (uint8_t)((w + 1) % WAYS);
+        return w;
+    }
     for (unsigned w = 0; w < WAYS; w++)
         if (!(c->valid[s] >> w & 1u))
             return w;
-    if (m->cp15.control & RL_CP15_ROUND_ROBIN) {
-        unsigned w = c->next[s];
-        c->next[s] = (uint8_t)((w + 1) % WAYS);
-        return w;
-    }
     uint32_t x = m->cache.lfsr;
     x ^= x << 13;
     x ^= x >> 17;

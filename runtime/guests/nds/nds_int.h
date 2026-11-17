@@ -306,7 +306,8 @@ typedef struct nds_cache_side {
     uint32_t tag[NDS_ICACHE_SETS][4];
     uint8_t valid[NDS_ICACHE_SETS];
     uint8_t dirty[NDS_ICACHE_SETS];
-    uint8_t next[NDS_ICACHE_SETS];
+    /** @brief The round-robin counter: the way the next fill replaces. */
+    uint8_t next;
 } nds_cache_side;
 
 /** @brief The ARM9's caches, write buffer and region attributes (cache.c). */
