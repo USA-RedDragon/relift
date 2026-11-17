@@ -120,12 +120,14 @@ uint64_t rl_nds_now(const rl_nds *m, unsigned cpu);
  */
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq);
 /**
- * @brief The cost in ticks of an ARM9 code fetch at addr that lifted code
- * makes without reading the bytes: a cached fetch charges the instruction
- * cache's hit or line fill to the clock itself and gives 0, an uncached one
- * waits for the write buffer and gives the region's cost.
+ * @brief The cost in ticks of an ARM9 code fetch of size bytes that lifted
+ * code makes without reading the bytes: an instruction's own fetch named by
+ * its address (seq true), or a refill's two named by the target (seq false,
+ * then true). A cached fetch charges the instruction cache's hit or line
+ * fill to the clock itself and gives 0, an uncached one waits for the write
+ * buffer and gives the region's cost.
  */
-unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size);
+unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq);
 /**
  * @brief The ARM7's cycles of a code fetch of size bytes at addr in main RAM, which the fetch does not charge itself;
  * seq false for the first fetch of a refill.

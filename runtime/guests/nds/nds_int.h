@@ -395,6 +395,15 @@ struct rl_nds {
     uint64_t ram_free;
     /** @brief The tick the ARM9's last bus data access ended. */
     uint64_t bus9_end;
+    /**
+     * @brief The ARM9's uncached code fetches (rl_nds_code_cost): the word read last (1 when none), the target of a
+     * refill whose second fetch comes next (with bit 0 set; 0 when none), and the end and cost of the last fetch
+     * that read a word while no data access followed (end 0 when none).
+     */
+    uint32_t fetch9_word;
+    uint32_t fetch9_refill;
+    uint64_t fetch9_end;
+    unsigned fetch9_cost;
     /** @brief The ARM9's last instruction TCM data access opened an LDM or STM: its second word costs one more. */
     bool itcm_multi;
     /**

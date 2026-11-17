@@ -22,7 +22,7 @@ static uint64_t pass(ndst *t, uint32_t base, unsigned lines)
     rl_sched_cpu *k = t->k[RL_NDS_ARM9];
     uint64_t t0 = rl_sched_now(k);
     for (unsigned l = 0; l < lines; l++)
-        rl_nds_code_cost(t->m, base + 32u * l, 4);
+        rl_nds_code_cost(t->m, base + 32u * l, 4, false);
     return rl_sched_now(k) - t0;
 }
 

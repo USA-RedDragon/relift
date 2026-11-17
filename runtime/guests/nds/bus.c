@@ -300,14 +300,54 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
     return v;
 }
 
-unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size)
+/*
+ * The ARM9's uncached code fetches, from the console's timings: the CPU
+ * reads code from the bus a word at a time, so a Thumb fetch in the word it
+ * read last costs nothing and any other costs a word (Thumb ADDS, SUBS and
+ * BNE in main RAM 54 cycles, 3 words; a Thumb B to the next instruction 90).
+ * An instruction's internal cycles overlap the fetch before them (MUL and an
+ * ADD with a register shift cost what MOV does there, 90 cycles a loop).
+ */
+
+/** @brief The address an ARM9 code fetch reads (rl_nds_code_cost names it by the instruction or the target). */
+static uint32_t fetch9_at(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 {
+    uint32_t mark = addr | 1u;
+    if (!seq) {
+        m->fetch9_refill = mark;
+        return addr;
+    }
+    bool second = m->fetch9_refill == mark;
+    m->fetch9_refill = 0;
+    return addr + (second ? size : 2u * size);
+}
+
+unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq)
+{
+    uint32_t at = fetch9_at(m, addr, size, seq);
     if (nds_cache_attr(m, addr) & NDS_ATTR_IC) {
+        m->fetch9_word = 1;
+        m->fetch9_end = 0;
         nds_cache_read(m, addr, true, false);
         return 0;
     }
     nds_cache_before_bus(m);
-    return nds_cost(m, RL_NDS_ARM9, RL_NDS_CODE, addr, size, false);
+    uint32_t word = at & ~3u;
+    unsigned cost = size == 2 && word == m->fetch9_word ? 0u : nds_cost(m, RL_NDS_ARM9, RL_NDS_CODE, addr, 4, false);
+    m->fetch9_word = word;
+    uint64_t now = nds_now(m, RL_NDS_ARM9);
+    unsigned back = 0;
+    if (cost && m->fetch9_end && now > m->fetch9_end) {
+        uint64_t idle = now - m->fetch9_end;
+        back = (unsigned)(idle < m->fetch9_cost ? idle : m->fetch9_cost);
+        if (back > cost)
+            back = cost;
+    }
+    if (cost) {
+        m->fetch9_end = (m->fetch9_end > now ? m->fetch9_end : now) + cost - back;
+        m->fetch9_cost = cost;
+    }
+    return cost - back;
 }
 
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq)
@@ -317,12 +357,16 @@ uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, boo
 
 uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, unsigned how)
 {
+    if (cpu == RL_NDS_ARM9)
+        m->fetch9_end = 0;
     return timed_read(m, cpu, addr, size, how, false);
 }
 
 void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, unsigned how)
 {
     bool seq = how == RL_NDS_S;
+    if (cpu == RL_NDS_ARM9)
+        m->fetch9_end = 0;
     addr &= ~(size - 1);
     value &= nds_mask(size);
     if (cpu == RL_NDS_ARM9) {
