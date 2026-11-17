@@ -6,6 +6,7 @@
 #define RELIFT_NDS_INT_H
 
 #include "gpu2d.h"
+#include "gpu3d.h"
 #include "nds.h"
 #include "nds_dev.h"
 
@@ -220,6 +221,8 @@ typedef struct nds_dma_ch {
     bool first;
     /** @brief The unit that runs next is the second of the trigger. */
     bool after_first;
+    /** @brief Units left in the GXFIFO channel's current burst. */
+    uint8_t burst;
 } nds_dma_ch;
 
 /** @brief The four DMA channels of one CPU and the engine that runs them one unit at a time. */
@@ -376,6 +379,7 @@ struct rl_nds {
     nds_spi spi;
     nds_rtc rtc;
     nds_sound snd;
+    nds_gx gx;
     /** @brief POWCNT2 (ARM7 0x04000304, bits 0 and 1) and WIFIWAITCNT (0x04000206, all 16 bits). */
     uint8_t powcnt2;
     uint16_t wifiwait;
@@ -544,6 +548,35 @@ uint32_t nds_disp_read(rl_nds *m, uint32_t off);
 void nds_disp_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask);
 /** @brief Sets the 3D engine's line hook (NULL: the 3D layer is transparent). */
 void nds_disp_set_3d(rl_nds *m, nds_line3d_fn *fn, void *user);
+
+/** @brief Power-on state of the 3D engine (gpu3d_fifo.c). */
+void nds_gx_reset(rl_nds *m);
+/** @brief Power-on state of the geometry engine's matrices, viewport and depths (gpu3d_geo.c). */
+void nds_gx_geo_reset(rl_nds *m);
+/** @brief Starts the 3D engine's clock at the ARM9's current tick. */
+void nds_gx_attach(rl_nds *m);
+/** @brief True when the ARM9's I/O word at off belongs to the 3D engine (DISP3DCNT and 0x320 to 0x6A3). */
+bool nds_gx_reg(unsigned cpu, uint32_t off);
+/** @brief A 3D engine register word at tick now. */
+uint32_t nds_gx_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief A write of the mask bits of v to a 3D engine register word at tick now (GXFIFO and the command ports queue commands). */
+void nds_gx_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+/** @brief Runs the geometry engine's queue up to tick to. */
+void nds_gx_run(rl_nds *m, uint64_t to);
+/** @brief The cycles of command cmd from GBATEK's table (0 for an invalid one). */
+unsigned nds_gx_cycles(uint8_t cmd);
+/** @brief Runs command cmd with its parameters p at tick start; returns the cycles it takes (gpu3d_geo.c). */
+unsigned nds_gx_exec(rl_nds *m, uint8_t cmd, const uint32_t *p, uint64_t start);
+/** @brief Starts GXFIFO DMA at tick now when the FIFO is less than half full (after a channel is enabled or ends a burst). */
+void nds_gx_dma_check(rl_nds *m, uint64_t now);
+/** @brief The tick the last store to a full FIFO waits until (0 for none), and clears it. */
+uint64_t nds_gx_stall(rl_nds *m);
+/** @brief The IF bits the 3D engine holds set at tick now (the GXFIFO interrupt while its condition holds). */
+uint32_t nds_gx_irq_hold(rl_nds *m, uint64_t now);
+/** @brief The rendering engine's work at display line `line` (its render tick when): the frame start and one line (gpu3d_render.c). */
+void nds_gx_line(rl_nds *m, unsigned line, uint64_t when);
+/** @brief The display's 3D line hook: line y of the finished 3D layer. */
+bool nds_gx_line3d(void *user, unsigned y, uint32_t *out);
 
 /** @brief Power-on state of the eight timers. */
 void nds_timer_reset(rl_nds *m);

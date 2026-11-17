@@ -54,6 +54,8 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 {
     if (nds_disp_reg(cpu, off))
         return nds_disp_read(m, off);
+    if (nds_gx_reg(cpu, off))
+        return nds_gx_read(m, off, now);
     if (off >= 0x100 && off < 0x110)
         return nds_timer_read(m, cpu, off, now);
     if (dma_reg(cpu, off))
@@ -110,6 +112,10 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
 {
     if (nds_disp_reg(cpu, off)) {
         nds_disp_write(m, off, v, mask);
+        return;
+    }
+    if (nds_gx_reg(cpu, off)) {
+        nds_gx_write(m, off, v, mask, now);
         return;
     }
     if (off >= 0x100 && off < 0x110) {
@@ -235,6 +241,8 @@ void nds_io_reset(rl_nds *m)
     nds_math_reset(m);
     nds_lcd_reset(m);
     nds_disp_reset(m);
+    nds_gx_reset(m);
+    nds_disp_set_3d(m, nds_gx_line3d, m);
 }
 
 static uint64_t io_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)

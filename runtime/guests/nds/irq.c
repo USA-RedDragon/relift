@@ -71,6 +71,8 @@ void nds_irq_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t m
         break;
     case 0x214:
         q->iflag &= ~(v & mask);
+        if (cpu == RL_NDS_ARM9)
+            q->iflag |= nds_gx_irq_hold(m, now);
         break;
     default:
         return;

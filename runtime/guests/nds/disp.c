@@ -166,6 +166,7 @@ static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
     }
     for (unsigned n = 0; n < 2; n++)
         d->fb[n][l] = d->eng[n].dispcnt & 0x80;
+    nds_gx_line(m, l, when);
     if (l < NDS_VISIBLE)
         draw(m, d, l);
     else if (l == NDS_VISIBLE)

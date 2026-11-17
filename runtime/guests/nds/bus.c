@@ -201,6 +201,9 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
             rl_sched_write(m->cpu[cpu], nds_io_key(cpu, addr), size, value);
         else
             nds_io_write(m, cpu, addr, size, value, 0);
+        uint64_t wait = nds_gx_stall(m);
+        if (wait > nds_now(m, cpu))
+            nds_charge(m, cpu, wait - nds_now(m, cpu));
     }
     finish(m, cpu, w.main, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq));
     if (m->halt_req) {

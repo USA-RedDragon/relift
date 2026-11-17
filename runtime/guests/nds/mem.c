@@ -264,6 +264,7 @@ int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7
     nds_lcd_attach(m);
     nds_disp_resync(m, nds_now(m, RL_NDS_ARM9));
     nds_dma_attach(m);
+    nds_gx_attach(m);
     nds_cart_attach(m);
     nds_spi_attach(m);
     return 0;

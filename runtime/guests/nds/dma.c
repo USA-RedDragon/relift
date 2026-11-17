@@ -23,6 +23,8 @@ enum {
     SLICE = 64,
     /** @brief Ticks from the enabling write of an immediate transfer to its first access. */
     START_DELAY = 2,
+    /** @brief Units a GXFIFO start moves (GBATEK \"GXFIFO Access via DMA\"). */
+    GX_BURST = 112,
 };
 
 static const uint32_t len_mask9 = 0x1FFFFFu;
@@ -96,6 +98,7 @@ static void arm(rl_nds *m, nds_dma *d, unsigned i, uint64_t ready)
     c->active = true;
     c->first = true;
     c->ready = ready;
+    c->burst = GX_BURST;
     repost(m, d);
 }
 
@@ -151,6 +154,7 @@ static uint64_t unit(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
     bool smain, dmain;
     uint32_t v = nds_bus_load(m, cpu, s, size, t, &smain);
     nds_bus_store(m, cpu, a, size, v, t, &dmain);
+    uint64_t wait = cpu == RL_NDS_ARM9 ? nds_gx_stall(m) : 0;
     bool seq = !c->first && !(smain && dmain);
     unsigned rsize = size, rextra = 0;
     if (smain && !dmain) {
@@ -162,6 +166,8 @@ static uint64_t unit(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
     t = access(m, cpu, a, size, seq, dmain, t, 0);
     if ((s >> 24) == (a >> 24) && !smain)
         t += 2;
+    if (wait > t)
+        t = wait;
     c->after_first = c->first;
     c->first = false;
     switch ((c->cnt >> 23) & 3u) {
@@ -184,8 +190,12 @@ static uint64_t unit(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
         c->dst += size;
         break;
     }
-    if (--c->len == 0)
+    if (--c->len == 0) {
         finish(m, d, i, t);
+    } else if (cpu == RL_NDS_ARM9 && timing_of(cpu, i, c->cnt) == NDS_DMA9_GXFIFO && --c->burst == 0) {
+        c->active = false;
+        nds_gx_dma_check(m, t);
+    }
     return t;
 }
 
@@ -297,5 +307,7 @@ void nds_dma_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t m
             c->len = len_mask(cpu, i) + 1;
         if (timing_of(cpu, i, c->cnt) == 0)
             arm(m, d, i, now + START_DELAY);
+        else if (cpu == RL_NDS_ARM9 && timing_of(cpu, i, c->cnt) == NDS_DMA9_GXFIFO)
+            nds_gx_dma_check(m, now);
     }
 }
