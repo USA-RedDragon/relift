@@ -201,6 +201,9 @@ pub(crate) struct Graph {
     conv: Vec<Conv>,
     /// The innermost conversion whose region holds each block.
     gate: Vec<Option<usize>>,
+    /// Shared memory loads every invocation reads the same word with (see
+    /// [`Graph::broadcast_loads`]).
+    broadcast: HashSet<usize>,
 }
 
 /// A converted branch.
@@ -813,6 +816,7 @@ impl Graph {
             headers,
             pdoms: HashMap::new(),
             conv: Vec::new(),
+            broadcast: HashSet::new(),
         })
     }
 
@@ -1650,9 +1654,9 @@ impl Graph {
             for b in 0..n {
                 let Some(mut v) = entry[b] else { continue };
                 let blk = &self.blocks[b];
-                for i in &insts[blk.first..blk.end] {
+                for (k, i) in insts.iter().enumerate().take(blk.end).skip(blk.first) {
                     let gated = self.gate[b].is_some() && uniform::gated(i);
-                    uniform::step(i, partial[b] || gated, &mut v);
+                    self.step(k, i, partial[b] || gated, &mut v);
                 }
                 let (uniform, exits) = match &blk.term {
                     Term::Jump(_) | Term::Set(..) => (true, false),
@@ -1700,6 +1704,7 @@ impl Graph {
     /// run it (see the module documentation).
     pub(crate) fn check_barriers(&mut self, code: &Code, convert: bool) -> Res<()> {
         let insts = &code.insts;
+        self.broadcast = broadcast_loads(self, code);
         let (partial, exited) = self.partial(code, convert);
         for k in self.conv.iter().filter(|k| k.stub.is_some()) {
             if partial[k.branch] || exited[k.branch] {
@@ -1728,7 +1733,7 @@ impl Graph {
                     }
                 }
                 let gated = self.gate[b].is_some() && uniform::gated(i);
-                uniform::step(i, partial[b] || gated, &mut v);
+                self.step(k, i, partial[b] || gated, &mut v);
             }
         }
         Ok(())
@@ -1903,6 +1908,16 @@ impl Graph {
         true
     }
 
+    /// One instruction of the uniformity analysis, with the loads in
+    /// `broadcast` uniform where their address is and every invocation
+    /// runs them.
+    fn step(&self, k: usize, i: &crate::Inst, partial: bool, v: &mut uniform::Varying) {
+        if !partial && self.broadcast.contains(&k) && uniform::broadcast(i, v) {
+            return;
+        }
+        uniform::step(i, partial, v);
+    }
+
     /// Whether `t` ends the invocation: EXIT, or a block that does
     /// nothing else.
     fn exit_stub(&self, code: &Code, t: usize) -> bool {
@@ -1987,7 +2002,7 @@ impl Graph {
             for k in blk.first..blk.end {
                 let i = &code.insts[k];
                 let gated = self.gate[b].is_some() && uniform::gated(i);
-                uniform::step(i, partial[b] || gated, &mut v);
+                self.step(k, i, partial[b] || gated, &mut v);
             }
             for &s in &self.succs[b] {
                 let changed = match &mut entry[s] {
@@ -2125,6 +2140,73 @@ fn reach(succ: &[Vec<usize>], from: usize, stop: &[bool]) -> Vec<bool> {
         work.extend(succ[u].iter().copied());
     }
     seen
+}
+
+/// Whether `i` may write shared memory.
+fn writes_shared(i: &crate::Inst) -> bool {
+    matches!(
+        i.mnemonic,
+        "STS" | "ATOMS" | "LDGSTS" | "ST" | "ATOM" | "RED" | "CALL" | "RET"
+    )
+}
+
+/// The unguarded `LDS` instructions that follow a BAR in their block, with
+/// no shared memory write between, and from which no path writes shared
+/// memory before the next BAR: no invocation can write shared memory while
+/// another is between that BAR and the next, so a load of one address
+/// reads the same word in every invocation that runs it.
+fn broadcast_loads(g: &Graph, code: &Code) -> HashSet<usize> {
+    let insts = &code.insts;
+    let bar = |i: &crate::Inst| i.mnemonic == "BAR" && i.guard.is_none();
+    let mut out = HashSet::new();
+    for (b, blk) in g.blocks.iter().enumerate() {
+        for k in blk.first..blk.end {
+            let i = &insts[k];
+            if i.mnemonic != "LDS" || i.guard.is_some() {
+                continue;
+            }
+            let after = insts[blk.first..k]
+                .iter()
+                .rev()
+                .take_while(|j| !writes_shared(j))
+                .any(&bar);
+            if !after {
+                continue;
+            }
+            let quiet = |range: &[crate::Inst]| -> Option<bool> {
+                for j in range {
+                    if bar(j) {
+                        return Some(true);
+                    }
+                    if writes_shared(j) {
+                        return Some(false);
+                    }
+                }
+                None
+            };
+            let mut ok = true;
+            let mut seen = vec![false; g.blocks.len()];
+            let mut work = Vec::new();
+            match quiet(&insts[k + 1..blk.end]) {
+                Some(q) => ok = q,
+                None => work.extend(g.succs[b].iter().copied()),
+            }
+            while ok && let Some(u) = work.pop() {
+                if std::mem::replace(&mut seen[u], true) {
+                    continue;
+                }
+                let ub = &g.blocks[u];
+                match quiet(&insts[ub.first..ub.end]) {
+                    Some(q) => ok = q,
+                    None => work.extend(g.succs[u].iter().copied()),
+                }
+            }
+            if ok {
+                out.insert(k);
+            }
+        }
+    }
+    out
 }
 
 /// What splitting a join needs to know about the graph.

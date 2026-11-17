@@ -5,8 +5,11 @@
 //! the workgroup's ID through arithmetic on uniform values, written where
 //! every invocation runs. Everything else (thread and lane IDs, memory,
 //! warp operations, clocks, instructions this module does not model) is
-//! taken to vary. The answer is conservative: a register said to be
-//! uniform is; one said to vary may not.
+//! taken to vary, except a shared memory load at a uniform address that
+//! every invocation runs between two BARs no shared memory write lies
+//! between (the cfg module finds those): it reads the same word in each.
+//! The answer is conservative: a register said to be uniform is; one said
+//! to vary may not.
 //!
 //! For the arithmetic families the destinations the instruction certainly
 //! writes take the result's uniformity, so a register reused for a uniform
@@ -326,6 +329,28 @@ fn top_level(o: &Operand) -> bool {
             | Operand::UPred(..)
             | Operand::Sym(_)
     )
+}
+
+/// A load `i` that reads the same word in every invocation that runs it
+/// at a uniform address: its destination is uniform if its address is.
+/// Gives whether the address was uniform (and `v` updated).
+pub(super) fn broadcast(i: &Inst, v: &mut Varying) -> bool {
+    let mut read = Vec::new();
+    for o in i.ops.iter().skip(1) {
+        slots(o, 1, &mut read);
+    }
+    let Some(dest) = i.ops.first() else {
+        return false;
+    };
+    if read.iter().any(|s| v.get(*s)) || !matches!(dest, Operand::Reg(..)) {
+        return false;
+    }
+    let mut out = Vec::new();
+    slots(dest, source_width(i), &mut out);
+    for s in out {
+        v.set(s, false);
+    }
+    true
 }
 
 /// Updates `v` for instruction `i`; `partial` when only some invocations
