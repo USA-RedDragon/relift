@@ -55,3 +55,43 @@ spirv_val_dir() {
   fi
   echo "$dir/build/tools"
 }
+
+# Lavapipe from a pinned Mesa release, for the GPU translator's known answers.
+# Distribution packages lag: before 26.2 lavapipe draws nothing for the
+# translated native mesh pipelines.
+MESA_VERSION=26.3.0
+MESA_SHA256=91d729aa68bb89e4ec857841300bbe922bcb3e52b1f97566ca83930d3b28343a
+MESON_VERSION=1.9.1
+MESON_SHA256=f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0
+MESON_URL=https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-$MESON_VERSION-py3-none-any.whl
+
+# lavapipe_icd: build lavapipe once into the work dir and print its ICD
+# manifest. Needs LLVM, ninja, bison, flex, glslang, python3 with mako and
+# pyyaml, and the zlib, expat and zstd headers.
+lavapipe_icd() {
+  local dir="$CI_WORK/lavapipe-$MESA_SHA256"
+  if [ ! -f "$dir/lvp_icd.json" ]; then
+    fetch "https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz" "$MESA_SHA256" "$dir/mesa.tar.xz" >&2
+    fetch "$MESON_URL" "$MESON_SHA256" "$dir/meson.whl" >&2
+    rm -rf "$dir/src" "$dir/build" "$dir/lib"
+    mkdir -p "$dir/src" "$dir/lib"
+    tar -xJf "$dir/mesa.tar.xz" -C "$dir/src" --strip-components=1
+    printf '#!/usr/bin/env python3\nimport sys\nsys.path.insert(0, "%s")\nfrom mesonbuild.mesonmain import main\nsys.exit(main())\n' \
+      "$dir/meson.whl" >"$dir/meson"
+    chmod +x "$dir/meson"
+    if ! (
+      "$dir/meson" setup "$dir/build" "$dir/src" --buildtype=release -Dgallium-drivers=llvmpipe -Dvulkan-drivers=swrast \
+        -Dplatforms= -Dglx=disabled -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false -Dgbm=disabled \
+        -Dllvm=enabled -Dshared-llvm=enabled -Dvideo-codecs= -Dtools= -Dbuild-tests=false -Dvulkan-layers= &&
+        ninja -C "$dir/build" src/gallium/targets/lavapipe/libvulkan_lvp.so
+    ) >"$dir/build.log" 2>&1; then
+      tail -n 40 "$dir/build.log" >&2
+      return 1
+    fi
+    cp "$dir/build/src/gallium/targets/lavapipe/libvulkan_lvp.so" "$dir/lib/"
+    rm -rf "$dir/src" "$dir/build" "$dir/build.log"
+    printf '{"file_format_version": "1.0.1", "ICD": {"library_path": "%s", "api_version": "1.4.0"}}\n' \
+      "$dir/lib/libvulkan_lvp.so" >"$dir/lvp_icd.json"
+  fi
+  echo "$dir/lvp_icd.json"
+}

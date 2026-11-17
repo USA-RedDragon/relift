@@ -328,6 +328,10 @@ impl HostProfile {
     /// `i1` vector to float. Hence [`HostProfile::constant_cull_stores`];
     /// drop it once a Mesa release carries the fix that sign-extends 1-bit
     /// outputs in `emit_store_var` (`lp_bld_nir_soa.c`).
+    ///
+    /// Before 26.2 (seen with 25.2.8 and 26.0.8) lavapipe draws nothing for
+    /// the translated native mesh pipelines, without an error; CI builds a
+    /// pinned newer release (`scripts/ci/lib.sh`).
     pub fn lavapipe() -> HostProfile {
         HostProfile {
             name: "lavapipe",

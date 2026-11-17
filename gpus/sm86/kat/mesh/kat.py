@@ -12,6 +12,11 @@ tests/mesh.rs reads. Needs glslangValidator, spirv-val, zstd, a C compiler with 
 `cargo build --release -p relift-switch-shaders -p relift-gpu-sm86 --example mesh` in CARGO_TARGET_DIR
 (default target/). KAT_DEV=<device name part> and KAT_HOST=<preset> draw the translations on another
 device; its rasterizer may differ from NVIDIA's, so compare the two back ends with each other there.
+
+    python3 -I kat/mesh/kat.py <absolute work dir> --replay tests/kat/mesh.txt [case ...]
+
+with KAT_DEV and KAT_HOST translates the recorded programs instead (no NVIDIA device, glslangValidator
+or zstd needed) and requires the two back ends to draw the same image on that device, word for word.
 """
 import array, hashlib, json, os, struct, subprocess, sys
 
@@ -66,9 +71,9 @@ def one(work, name, record):
     blend = 'on' if case.get('blend') else 'off'
     t_ref = os.path.join(o, 't.spv') if task else '-'
     common = 'buf 0 65536\nbind 1 0 0 ubo\n'
-    draw = '%d %d 1' % (count, first) if not ext else '%d 1 1' % count
+    grid = '%d %d 1' % (count, first) if not ext else '%d 1 1' % count
     open(os.path.join(o, 'ref.s'), 'w').write(common + 'blend %s\nmesh %s %s/m.spv %s/f.spv %s\nout %s/ref.raw\ncache %s/c.bin\n' % (
-        blend, t_ref, o, o, draw, o, o))
+        blend, t_ref, o, o, grid, o, o))
     mrun = os.path.join(work, 'mrun')
     run([mrun, os.path.join(o, 'ref.s')], env=env)
     blob = frames(os.path.join(o, 'c.bin'), os.path.join(o, 'tree/romfs/Lib/c.bin'))
@@ -83,16 +88,55 @@ def one(work, name, record):
             progs['frag'] = path
     if sorted(progs) != sorted((['task'] if task else []) + ['mesh', 'frag']):
         sys.exit('%s: the carve found %s' % (name, sorted(progs)))
-    p = case['pipeline']
-    pipe = ['--verts', str(p['max_vertices']), '--prims', str(p['max_primitives']), '--topo', p['topology'],
-            '--task-lanes', str(p['task_lanes']), '--mesh-lanes', str(p['mesh_lanes']), '--payload', str(p['payload_bytes'])]
     prim_sph = None
     for k in range(0, len(blob) - 128, 4):
         if struct.unpack_from('<I', blob, k)[0] & 0x01003fff == 0x01001081:
             prim_sph = blob[k:k + 128]
-            open(os.path.join(o, 'prim.sph'), 'wb').write(prim_sph)
-            pipe += ['--prim-sph', os.path.join(o, 'prim.sph')]
             break
+    ref = open(os.path.join(o, 'ref.raw'), 'rb').read()
+    nat, fb = draw(work, o, name, case, progs, prim_sph, tolerate_native=True)
+    if not nat:
+        nat = bytes(len(ref))
+    words = [array.array('I', x) for x in (ref, nat, fb)]
+    lit = lit_pixels(words[0])
+    diff = lambda a, b: sum(1 for x, y in zip(a, b) if x != y)
+    dn, df, dnf = diff(words[0], words[1]), diff(words[0], words[2]), diff(words[1], words[2])
+    print('%s: %d pixels lit; native %d, compute %d words differ from the reference, %d from each other' % (name, lit, dn, df, dnf))
+    if record is not None:
+        if dn or df or lit == 0:
+            sys.exit('%s: not recorded: the translations differ from the reference' % name)
+        p = case['pipeline']
+        record.append('case %s' % name)
+        record.append('pipeline ' + ' '.join('%s=%s' % kv for kv in sorted(p.items())) +
+                      ''.join(' %s=%d' % (k, case[k]) for k in ('primitive_id_location', 'fragment_per_primitive') if k in case) +
+                      (' primitive_sph=' + prim_sph.hex() if prim_sph else ''))
+        for k in ('task', 'mesh', 'frag'):
+            if k in progs:
+                record.append('program %s %s' % (k, open(progs[k], 'rb').read().hex()))
+        record.append('answer lit=%d sha256=%s' % (lit, hashlib.sha256(ref).hexdigest()))
+    for f in ('c.bin', 'ref.raw', 'cb0.bin'):
+        os.remove(os.path.join(o, f))
+    subprocess.run(['rm', '-rf', os.path.join(o, 'tree')])
+    return dn == 0 and df == 0 and lit > 0
+
+
+def lit_pixels(words):
+    return sum(1 for i in range(0, len(words), 4) if any(words[i:i + 4]))
+
+
+def draw(work, o, name, case, progs, prim_sph, tolerate_native):
+    """Translates the programs for KAT_HOST, draws the native translation and the compute back end on
+    KAT_DEV, and returns both images (the native one empty when its draw failed and tolerate_native)."""
+    task = 'task' in progs
+    count, first = case['draw']
+    blend = 'on' if case.get('blend') else 'off'
+    mrun = os.path.join(work, 'mrun')
+    p = case['pipeline']
+    pipe = ['--verts', str(p['max_vertices']), '--prims', str(p['max_primitives']), '--topo', p['topology'],
+            '--task-lanes', str(p['task_lanes']), '--mesh-lanes', str(p['mesh_lanes']), '--payload', str(p['payload_bytes'])]
+    if prim_sph:
+        open(os.path.join(o, 'prim.sph'), 'wb').write(prim_sph)
+        pipe += ['--prim-sph', os.path.join(o, 'prim.sph')]
     native = ['--frag-per-prim', str(case['fragment_per_primitive'])] if 'fragment_per_primitive' in case else []
     compute = ['--prim-id-loc', str(case['primitive_id_location'])] if 'primitive_id_location' in case else []
     host = os.environ.get('KAT_HOST', 'nvidia')
@@ -112,7 +156,7 @@ def one(work, name, record):
     struct.pack_into('<3I', cb, 0x20, count, 1, 1)
     open(os.path.join(o, 'cb0.bin'), 'wb').write(cb)
     common = 'bufi 0 %s/cb0.bin\nbind 1 0 0 ubo\n' % o
-    tenv = {k: v for k, v in env.items() if k != 'MRUN_NV'}
+    tenv = {k: v for k, v in os.environ.items() if k != 'MRUN_NV'}
     if os.environ.get('KAT_DEV'):
         tenv['MRUN_DEV'] = os.environ['KAT_DEV']
     t_nat = os.path.join(o, 'task-native.spv') if task else '-'
@@ -120,7 +164,7 @@ def one(work, name, record):
         blend, t_nat, o, o, count, o))
     r = subprocess.run([mrun, os.path.join(o, 'nat.s')], env=tenv, capture_output=True, text=True)
     if r.returncode:
-        if not os.environ.get('KAT_DEV'):
+        if not tolerate_native or not os.environ.get('KAT_DEV'):
             sys.exit('%s: native draw failed: %s' % (name, r.stderr[-500:]))
         print('%s: native draw failed on %s: %s' % (name, os.environ['KAT_DEV'], r.stderr.strip()[-200:]))
         open(os.path.join(o, 'nat.raw'), 'wb').write(b'')
@@ -141,29 +185,47 @@ def one(work, name, record):
     s += 'blend %s\ndrawi %s/vertex.spv %s/frag-compute.spv %s 1 32\nout %s/fb.raw\n' % (blend, o, o, p['topology'], o)
     open(os.path.join(o, 'fb.s'), 'w').write(s)
     run([mrun, os.path.join(o, 'fb.s')], env=tenv)
-    ref, nat, fb = (open(os.path.join(o, f), 'rb').read() for f in ('ref.raw', 'nat.raw', 'fb.raw'))
-    if not nat:
-        nat = bytes(len(ref))
-    words = [array.array('I', x) for x in (ref, nat, fb)]
-    lit = sum(1 for i in range(0, len(words[0]), 4) if any(words[0][i:i + 4]))
-    diff = lambda a, b: sum(1 for x, y in zip(a, b) if x != y)
-    dn, df, dnf = diff(words[0], words[1]), diff(words[0], words[2]), diff(words[1], words[2])
-    print('%s: %d pixels lit; native %d, compute %d words differ from the reference, %d from each other' % (name, lit, dn, df, dnf))
-    if record is not None:
-        if dn or df or lit == 0:
-            sys.exit('%s: not recorded: the translations differ from the reference' % name)
-        record.append('case %s' % name)
-        record.append('pipeline ' + ' '.join('%s=%s' % kv for kv in sorted(p.items())) +
-                      ''.join(' %s=%d' % (k, case[k]) for k in ('primitive_id_location', 'fragment_per_primitive') if k in case) +
-                      (' primitive_sph=' + prim_sph.hex() if prim_sph else ''))
-        for k in ('task', 'mesh', 'frag'):
-            if k in progs:
-                record.append('program %s %s' % (k, open(progs[k], 'rb').read().hex()))
-        record.append('answer lit=%d sha256=%s' % (lit, hashlib.sha256(ref).hexdigest()))
-    for f in ('c.bin', 'ref.raw', 'nat.raw', 'fb.raw', 'cb0.bin'):
+    nat, fb = (open(os.path.join(o, f), 'rb').read() for f in ('nat.raw', 'fb.raw'))
+    for f in ('nat.raw', 'fb.raw'):
         os.remove(os.path.join(o, f))
-    subprocess.run(['rm', '-rf', os.path.join(o, 'tree')])
-    return dn == 0 and df == 0 and lit > 0
+    return nat, fb
+
+
+def replay(work, name, kat):
+    """Draws a recorded case's programs on KAT_DEV: both back ends must give the same image."""
+    case = json.load(open(os.path.join(HERE, 'cases', name, 'case.json')))
+    o = os.path.join(work, name)
+    subprocess.run(['rm', '-rf', o])
+    os.makedirs(o)
+    progs, prim_sph = {}, None
+    for k, h in kat[name]['programs'].items():
+        progs[k] = os.path.join(o, k + '.bin')
+        open(progs[k], 'wb').write(bytes.fromhex(h))
+    if kat[name].get('primitive_sph'):
+        prim_sph = bytes.fromhex(kat[name]['primitive_sph'])
+    nat, fb = draw(work, o, name, case, progs, prim_sph, tolerate_native=False)
+    words = [array.array('I', x) for x in (nat, fb)]
+    lit = lit_pixels(words[0])
+    d = sum(1 for x, y in zip(*words) if x != y)
+    print('%s: %d pixels lit; the back ends differ in %d words' % (name, lit, d))
+    return d == 0 and lit > 0 and len(nat) == len(fb)
+
+
+def read_kat(path):
+    out, cur = {}, None
+    for line in open(path):
+        kind, rest = line.rstrip('\n').split(' ', 1)
+        if kind == 'case':
+            cur = out.setdefault(rest, {'programs': {}})
+        elif kind == 'program':
+            k, h = rest.split(' ')
+            cur['programs'][k] = h
+        elif kind == 'pipeline':
+            for kv in rest.split(' '):
+                k, v = kv.split('=')
+                if k == 'primitive_sph':
+                    cur['primitive_sph'] = v
+    return out
 
 
 def main():
@@ -174,13 +236,26 @@ def main():
         k = args.index('--record')
         record_to = args[k + 1]
         del args[k:k + 2]
+    replay_from = None
+    if '--replay' in args:
+        k = args.index('--replay')
+        replay_from = args[k + 1]
+        del args[k:k + 2]
     if os.environ.get('KAT_DEV') and not os.environ.get('KAT_HOST'):
         sys.exit('KAT_DEV is set without KAT_HOST: name the host preset the translations are for')
+    if replay_from and not os.environ.get('KAT_DEV'):
+        sys.exit('--replay needs KAT_DEV and KAT_HOST')
     os.makedirs(work, exist_ok=True)
     subprocess.run(['cc', '-O1', '-o', os.path.join(work, 'mrun'), os.path.join(HERE, 'mrun.c'), '-lvulkan'], check=True)
     names = args or sorted(os.listdir(os.path.join(HERE, 'cases')))
     record = [] if record_to else None
-    ok = all([one(work, n, record) for n in names])
+    if replay_from:
+        kat = read_kat(replay_from)
+        if sorted(kat) != sorted(names) and not args:
+            sys.exit('%s has %s, the cases are %s' % (replay_from, sorted(kat), names))
+        ok = all([replay(work, n, kat) for n in names])
+    else:
+        ok = all([one(work, n, record) for n in names])
     if record_to:
         open(record_to, 'w').write('\n'.join(record) + '\n')
     sys.exit(0 if ok else 1)

@@ -181,6 +181,40 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  mesh-kat:
+    name: task and mesh known answers on lavapipe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install what the pinned lavapipe build and the known answers need
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends llvm-dev ninja-build bison flex glslang-tools \
+            python3-mako python3-yaml python3-packaging zlib1g-dev libexpat1-dev libzstd-dev libdrm-dev \
+            pkg-config libvulkan-dev cmake
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Cache the pinned lavapipe and spirv-val
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/lavapipe-*
+            ${{ runner.temp }}/spirv-tools-*
+          key: mesh-kat-${{ hashFiles('scripts/ci/lib.sh') }}
+
+      - name: Draw the recorded programs with both back ends
+        run: scripts/ci/mesh-kat.sh
+
   gb-corpus:
     name: Game Boy corpus subset through relift
     runs-on: ubuntu-latest

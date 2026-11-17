@@ -74,6 +74,12 @@ compute back end. All three images must agree word for word (blending makes
 the primitive order visible). `--record` writes the SASS and pipelines that
 `tests/mesh.rs` translates for every host.
 
+    KAT_DEV=llvmpipe KAT_HOST=lavapipe python3 -I kat/mesh/kat.py <absolute work dir> --replay tests/kat/mesh.txt
+
+translates the recorded programs for a host preset and draws both back ends
+on that device, which must agree word for word; it needs no NVIDIA device.
+CI runs it on a pinned lavapipe build (`scripts/ci/mesh-kat.sh`).
+
 Cost on a 3090, for draws of 4000 and 16000 tasks of 2 or 3 meshes of 64
 triangles (culled, so the draw is geometry only): native task and mesh
 76 and 270 microseconds; compute back end task pass 10 and 18, task scan 17
