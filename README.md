@@ -18,10 +18,11 @@ relift ships no game code, keys or data, and never will.
 | Nintendo Switch | ARM64 | Test programs built with libnx run end to end, and CI runs synthetic ones. A commercial game reaches gameplay in test runs; most games are untested and many will fail. |
 | Game Boy and Game Boy Color | SM83 | Test ROMs from public suites pass in CI. Retail games run in test runs. |
 | Game Boy Advance | ARMv4T | Public test ROMs pass and match the NanoBoyAdvance oracle in test runs. Retail games run in test runs; code that discovery misses stops the program with a report. |
+| Nintendo 64 | VR4300 and RSP | Public test ROMs for the CPU, the RSP and VI match the ares oracle in test runs. A retail game reaches its title screen in test runs. |
 
-In development, with no runnable guest yet: the Nintendo 64 CPU (VR4300,
-`cpus/mips`) and a Switch 2 shader translator (SM86 to SPIR-V,
-`gpus/sm86`).
+In development, with no runnable guest yet: the Master System and Game Gear
+CPU (Z80, `cpus/z80`), the Switch 2 shader translator (SM86 to SPIR-V,
+`gpus/sm86`) and the Switch 2 runtime.
 
 ## Hosts
 
