@@ -1048,6 +1048,10 @@ TEST(am_switch2_proxy_and_its_functions)
     CHECK_EQ(u8_out(&e, e.af, 321), 0);
     CHECK_EQ(get(&e, e.proxy, 1, &e.sc), 0);
     CHECK_EQ(set8(&e, e.sc, 2400, 1), 0);
+    CHECK_EQ(get(&e, e.proxy, 0, &e.csg), 0);
+    CHECK_EQ(set32(&e, e.csg, 66, 2), 0);
+    CHECK_EQ(set32(&e, e.csg, 66, 0), 0);
+    CHECK_EQ(set32(&e, e.csg, 66, 1), AM_INVALID_PARAMS);
 }
 
 TEST(am_switch_has_no_switch2_proxy)

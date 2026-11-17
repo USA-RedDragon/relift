@@ -120,10 +120,15 @@ static rl_result csg_get_hdcp_authentication_state(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief ICommonStateGetter 66: the u32 boost mode. The Switch takes 0 (normal)
+ * and 1 (fast load); the Switch 2's SDK sends fast load as 2 and never 1
+ * (nn::oe::SetCpuBoostMode, nn::applet::SetCpuBoostMode).
+ */
 static rl_result csg_set_cpu_boost_mode(rl_ipc_req *r)
 {
     AM_IN(uint32_t, mode);
-    return mode > 1 ? AM_INVALID_PARAMETERS : KR_SUCCESS;
+    return mode == 0 || mode == (hos_switch2() ? 2u : 1u) ? KR_SUCCESS : AM_INVALID_PARAMETERS;
 }
 
 static rl_result csg_get_current_performance_configuration(rl_ipc_req *r)
