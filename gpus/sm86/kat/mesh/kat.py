@@ -174,6 +174,8 @@ def main():
         k = args.index('--record')
         record_to = args[k + 1]
         del args[k:k + 2]
+    if os.environ.get('KAT_DEV') and not os.environ.get('KAT_HOST'):
+        sys.exit('KAT_DEV is set without KAT_HOST: name the host preset the translations are for')
     os.makedirs(work, exist_ok=True)
     subprocess.run(['cc', '-O1', '-o', os.path.join(work, 'mrun'), os.path.join(HERE, 'mrun.c'), '-lvulkan'], check=True)
     names = args or sorted(os.listdir(os.path.join(HERE, 'cases')))
