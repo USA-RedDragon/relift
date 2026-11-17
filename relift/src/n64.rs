@@ -43,6 +43,11 @@ fn rsp_unit(src: &Path, cdir: &Path) -> bool {
         .is_some_and(|c| c.starts_with("rsp"))
 }
 
+/// The parallel-rdp pipeline variants of a project, as a run records them
+/// in its cache folder: copied into the project, a build warms them on the
+/// first launch.
+const RDP_VARIANTS: &str = "rdp-variants.txt";
+
 /// The ROM's file name in the import directory (big-endian).
 const ROM_FILE: &str = "rom.z64";
 
@@ -324,6 +329,11 @@ pub fn build(
     let picture = crate::n64_picture::defaults(
         &std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?,
     )?;
+    let rdp_variants = match std::fs::read_to_string(RDP_VARIANTS) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{RDP_VARIANTS}: {e}").into()),
+    };
     let mut prog = Vec::new();
     for (n, text) in [
         ("rom.c", relift_n64::program::rom_c(&rom.bytes)),
@@ -338,6 +348,7 @@ pub fn build(
                 cic: relift_n64::program::cic_number(report.boot),
                 entry: report.entry,
                 picture: &picture,
+                rdp_variants: &rdp_variants,
                 launch: cross
                     .as_ref()
                     .map_or(relift_guest::Entry::Main, cross::Build::entry),

@@ -460,6 +460,9 @@ pub struct Program<'a> {
     /// The developer's picture defaults, `name=value` texts for
     /// `rl_n64_declare_picture` (empty: the console's picture).
     pub picture: &'a [String],
+    /// The parallel-rdp pipeline variants a run recorded
+    /// (`rdp-variants.txt`), warmed before they are needed; empty for none.
+    pub rdp_variants: &'a str,
     /// How the program starts. An app's saves are named after `game` in
     /// its files folder, not after `rom_path`.
     pub launch: Entry,
@@ -526,6 +529,15 @@ pub fn program_c(p: &Program<'_>) -> String {
         let _ = write!(s, "{}, ", c_string(d));
     }
     s.push_str("NULL };\n");
+    let _ = writeln!(
+        s,
+        "const char *const rl_n64_rdp_variants = {};",
+        if p.rdp_variants.is_empty() {
+            "NULL".to_string()
+        } else {
+            c_string(p.rdp_variants)
+        }
+    );
     s.push_str("extern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nextern const rl_n64_renderer rl_n64_prdp;\n");
     let mobile = |s: &mut String, header: &str, sig: &str, init: &str, dir: &str| {
         let _ = write!(
@@ -690,11 +702,16 @@ mod tests {
             cic: cic_number(report.boot),
             entry: report.entry,
             picture: &["upscale=2x".into()],
+            rdp_variants: "",
             launch: Entry::Main,
         });
         assert!(p.contains("units[] = { &rl_unit_n64_s0 }"), "{p}");
         assert!(p.contains("picture[] = { \"upscale=2x\", NULL };"), "{p}");
         assert!(p.contains("&rl_n64_prdp, picture }"), "{p}");
+        assert!(
+            p.contains("const char *const rl_n64_rdp_variants = NULL;"),
+            "{p}"
+        );
         assert!(p.contains("\"T\", 6102u, 0x80001000u"), "{p}");
         assert!(p.contains("int main(int argc"), "{p}");
         let app = program_c(&Program {
@@ -705,11 +722,16 @@ mod tests {
             cic: cic_number(report.boot),
             entry: report.entry,
             picture: &[],
+            rdp_variants: "0123 0=1\n",
             launch: Entry::Ios,
         });
         assert!(app.contains("int rl_ios_main(int argc"), "{app}");
         assert!(app.contains("rl_ios_documents_dir()"), "{app}");
         assert!(app.contains("0x80001000u, rom_path, &rl_n64_prdp"), "{app}");
+        assert!(
+            app.contains("rl_n64_rdp_variants = \"0123 0=1\\012\";"),
+            "{app}"
+        );
         assert!(app.contains("rl_ios_flush();"), "{app}");
         assert!(
             !app.contains("/home/rom.z64") && !app.contains("int main("),

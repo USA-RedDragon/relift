@@ -11,7 +11,12 @@
  * the read back, the upscaling quirks and the scan-out options; the
  * console's picture is ares's defaults. The device's pipeline cache lives in
  * the per-user cache folder, one file per GPU and driver version, so a later
- * run does not compile the rasterizer variants an earlier one did.
+ * run does not compile the rasterizer variants an earlier one did. Every
+ * compute pipeline parallel-rdp makes is recorded by its shader and its
+ * specialization constants (rdp-variants.txt in that folder); the first
+ * time a later run makes a pipeline of a shader, worker threads build every
+ * recorded variant of that shader into the cache, so the driver has them
+ * before parallel-rdp asks.
  */
 #include "prdp.h"
 
@@ -21,12 +26,233 @@
 
 #include <cstdio>
 #include <cstring>
+#include <mutex>
+#include <set>
+#include <string>
+#include <thread>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
 /** @brief The frames between two saves of a grown pipeline cache. */
 #define RL_PRDP_CACHE_FRAMES 300u
 
 namespace {
+
+/** @brief A compute pipeline's shader (by the FNV-1a hash of its SPIR-V) and specialization constants. */
+struct Variant {
+    uint64_t shader = 0;
+    std::vector<uint32_t> ids, values;
+
+    bool operator<(const Variant &o) const
+    {
+        return std::tie(shader, ids, values) < std::tie(o.shader, o.ids, o.values);
+    }
+};
+
+/** @brief What the pipeline hooks keep: the run's variants, the shaders' hashes, the shaders warmed. */
+struct Warm {
+    std::mutex lock;
+    PFN_vkCreateShaderModule create_module = nullptr;
+    PFN_vkCreateComputePipelines create_pipelines = nullptr;
+    PFN_vkDestroyPipeline destroy_pipeline = nullptr;
+    std::unordered_map<uint64_t, uint64_t> module_hash;
+    std::set<Variant> known, seen;
+    std::set<uint64_t> warmed;
+    std::vector<std::thread> threads;
+    char path[4096] = {};
+    bool dirty = false;
+};
+
+Warm g_warm;
+
+uint64_t fnv(const void *p, size_t n)
+{
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ static_cast<const uint8_t *>(p)[i]) * 0x100000001B3ull;
+    return h;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL hook_module(VkDevice device, const VkShaderModuleCreateInfo *info,
+                                           const VkAllocationCallbacks *alloc, VkShaderModule *module)
+{
+    VkResult vr = g_warm.create_module(device, info, alloc, module);
+    if (vr == VK_SUCCESS) {
+        std::lock_guard<std::mutex> l(g_warm.lock);
+        g_warm.module_hash[uint64_t(*module)] = fnv(info->pCode, info->codeSize);
+    }
+    return vr;
+}
+
+/** @brief Builds each variant into cache with the stage, layout and flags of info, and drops the pipelines. */
+void warm_variants(VkDevice device, VkPipelineCache cache, VkComputePipelineCreateInfo info,
+                   VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup, bool has_subgroup,
+                   std::vector<Variant> todo)
+{
+    if (has_subgroup) {
+        subgroup.pNext = nullptr;
+        info.stage.pNext = &subgroup;
+    } else {
+        info.stage.pNext = nullptr;
+    }
+    info.flags &= ~VkPipelineCreateFlags(VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
+    info.basePipelineHandle = VK_NULL_HANDLE;
+    info.pNext = nullptr;
+    for (const Variant &v : todo) {
+        std::vector<VkSpecializationMapEntry> map(v.ids.size());
+        for (size_t i = 0; i < v.ids.size(); i++)
+            map[i] = { v.ids[i], uint32_t(i * 4u), 4u };
+        VkSpecializationInfo spec = { uint32_t(map.size()), map.data(), v.values.size() * 4u, v.values.data() };
+        info.stage.pSpecializationInfo = map.empty() ? nullptr : &spec;
+        VkPipeline pipe = VK_NULL_HANDLE;
+        if (g_warm.create_pipelines(device, cache, 1, &info, nullptr, &pipe) == VK_SUCCESS && pipe)
+            g_warm.destroy_pipeline(device, pipe, nullptr);
+    }
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL hook_pipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
+                                              const VkComputePipelineCreateInfo *infos,
+                                              const VkAllocationCallbacks *alloc, VkPipeline *pipes)
+{
+    {
+        std::lock_guard<std::mutex> l(g_warm.lock);
+        for (uint32_t k = 0; k < count; k++) {
+            const VkComputePipelineCreateInfo &info = infos[k];
+            auto h = g_warm.module_hash.find(uint64_t(info.stage.module));
+            if (h == g_warm.module_hash.end())
+                continue;
+            Variant v;
+            v.shader = h->second;
+            if (const VkSpecializationInfo *sp = info.stage.pSpecializationInfo) {
+                for (uint32_t i = 0; i < sp->mapEntryCount; i++) {
+                    const VkSpecializationMapEntry &e = sp->pMapEntries[i];
+                    uint32_t value = 0;
+                    if (e.size == 4 && e.offset + 4u <= sp->dataSize)
+                        std::memcpy(&value, static_cast<const uint8_t *>(sp->pData) + e.offset, 4);
+                    v.ids.push_back(e.constantID);
+                    v.values.push_back(value);
+                }
+            }
+            if (g_warm.seen.insert(v).second && !g_warm.known.count(v))
+                g_warm.dirty = true;
+            if (!g_warm.warmed.insert(v.shader).second)
+                continue;
+            std::vector<Variant> todo;
+            for (const Variant &w : g_warm.known)
+                if (w.shader == v.shader && !(w.ids == v.ids && w.values == v.values))
+                    todo.push_back(w);
+            if (todo.empty())
+                continue;
+            VkPipelineShaderStageRequiredSubgroupSizeCreateInfo sub = {};
+            bool has_sub = false;
+            for (auto *n = static_cast<const VkBaseInStructure *>(info.stage.pNext); n; n = n->pNext)
+                if (n->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO) {
+                    sub = *reinterpret_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo *>(n);
+                    has_sub = true;
+                }
+            unsigned workers = std::thread::hardware_concurrency() > 4 ? 2u : 1u;
+            for (unsigned t = 0; t < workers; t++) {
+                std::vector<Variant> part;
+                for (size_t i = t; i < todo.size(); i += workers)
+                    part.push_back(todo[i]);
+                g_warm.threads.emplace_back(warm_variants, device, cache, info, sub, has_sub, std::move(part));
+            }
+        }
+    }
+    return g_warm.create_pipelines(device, cache, count, infos, alloc, pipes);
+}
+
+/** @brief Reads the variants in text (one per line: shader hash, then id=value pairs) into out. */
+void parse_variants(const char *text, std::set<Variant> &out)
+{
+    while (text && *text) {
+        const char *end = std::strchr(text, '\n');
+        std::string line(text, end ? size_t(end - text) : std::strlen(text));
+        text = end ? end + 1 : nullptr;
+        Variant v;
+        const char *p = line.c_str();
+        char *q;
+        v.shader = std::strtoull(p, &q, 16);
+        if (q == p)
+            continue;
+        p = q;
+        bool ok = true;
+        while (*p == ' ') {
+            unsigned long id = std::strtoul(p + 1, &q, 10);
+            if (*q != '=') {
+                ok = false;
+                break;
+            }
+            unsigned long value = std::strtoul(q + 1, &q, 10);
+            v.ids.push_back(uint32_t(id));
+            v.values.push_back(uint32_t(value));
+            p = q;
+        }
+        if (ok)
+            out.insert(v);
+    }
+}
+
+/** @brief Writes the run's variants and the known ones when the run made a new one. */
+void save_variants()
+{
+    std::lock_guard<std::mutex> l(g_warm.lock);
+    if (!g_warm.dirty || !g_warm.path[0])
+        return;
+    std::set<Variant> all = g_warm.known;
+    all.insert(g_warm.seen.begin(), g_warm.seen.end());
+    std::string text;
+    for (const Variant &v : all) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%016llx", (unsigned long long)v.shader);
+        text += buf;
+        for (size_t i = 0; i < v.ids.size(); i++) {
+            std::snprintf(buf, sizeof buf, " %u=%u", v.ids[i], v.values[i]);
+            text += buf;
+        }
+        text += '\n';
+    }
+    if (rl_n64_write_file(g_warm.path, reinterpret_cast<const uint8_t *>(text.data()), text.size())) {
+        g_warm.known = all;
+        g_warm.dirty = false;
+    }
+}
+
+/** @brief Hooks the device's shader module and compute pipeline creation and loads the known variants. */
+void hook_device(Vulkan::Context &context)
+{
+    auto &table = const_cast<VolkDeviceTable &>(context.get_device_table());
+    g_warm.create_module = table.vkCreateShaderModule;
+    g_warm.create_pipelines = table.vkCreateComputePipelines;
+    g_warm.destroy_pipeline = table.vkDestroyPipeline;
+    table.vkCreateShaderModule = hook_module;
+    table.vkCreateComputePipelines = hook_pipelines;
+    parse_variants(rl_n64_rdp_variants, g_warm.known);
+    if (rl_n64_cache_path(g_warm.path, sizeof g_warm.path, "rdp-variants.txt")) {
+        if (FILE *f = std::fopen(g_warm.path, "rb")) {
+            std::string text;
+            char buf[4096];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof buf, f)) > 0)
+                text.append(buf, n);
+            std::fclose(f);
+            parse_variants(text.c_str(), g_warm.known);
+        }
+    }
+}
+
+/** @brief Waits for the warm threads; the device must outlive them. */
+void join_warm()
+{
+    std::vector<std::thread> threads;
+    {
+        std::lock_guard<std::mutex> l(g_warm.lock);
+        threads.swap(g_warm.threads);
+    }
+    for (std::thread &t : threads)
+        t.join();
+}
 
 struct Validation : RDP::ValidationInterface {
     const char *error = nullptr;
@@ -68,8 +294,11 @@ void save_cache(Renderer *r)
 
 Renderer::~Renderer()
 {
-    if (processor)
+    join_warm();
+    if (processor) {
         save_cache(this);
+        save_variants();
+    }
     delete processor;
 }
 
@@ -125,6 +354,7 @@ void vi_frame(void *user, unsigned field)
     if (--r->cache_wait == 0) {
         r->cache_wait = RL_PRDP_CACHE_FRAMES;
         save_cache(r);
+        save_variants();
     }
 }
 
@@ -166,6 +396,7 @@ void *create(rl_n64 *m, void *gipa, char *why, size_t why_len)
     Renderer *r = new Renderer;
     if (!r->context.init_instance_and_device(nullptr, 0, nullptr, 0, 0))
         return fail(r, "no Vulkan device");
+    hook_device(r->context);
     r->device.set_context(r->context);
     load_cache(r);
     r->device.init_frame_contexts(3);

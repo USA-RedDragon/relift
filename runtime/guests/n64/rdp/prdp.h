@@ -21,6 +21,13 @@ extern "C" {
 /** @brief The parallel-rdp renderer. */
 RL_RUNTIME_API extern const rl_n64_renderer rl_n64_prdp;
 
+/**
+ * @brief The rasterizer variants the program's build knew (lines of
+ * rdp-variants.txt), warmed with the ones the per-user cache folder holds;
+ * the program defines it, NULL for none.
+ */
+extern const char *const rl_n64_rdp_variants;
+
 #ifdef __cplusplus
 }
 #endif
