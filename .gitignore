@@ -2,3 +2,4 @@
 .hermes/
 .work/
 __pycache__/
+/artifacts
