@@ -301,6 +301,20 @@ static rl_result display_event(rl_ipc_req *r)
     return rc;
 }
 
+/**
+ * @brief DisplaySession 32 (unnamed): a u32 and a copied handle, the readable
+ * end of a system event the client owns; one handle back, which the client
+ * attaches as a readable system event (SDK 22 sdk 0x5e3af0, called through
+ * slot +72 of the display client table by 0x5eaef0). relift gives the
+ * readable end of an event it never signals, as for 11.
+ */
+static rl_result display_linked_event(rl_ipc_req *r)
+{
+    if (r->n_in_copy < 1)
+        return SF_RESULT_INVALID_HEADER;
+    return display_event(r);
+}
+
 /** @brief DisplaySession 212 (unnamed): a u64; a u64 (sdk 0x5620c4), relift: 0. */
 static rl_result display_u64_zero(rl_ipc_req *r)
 {
@@ -335,6 +349,7 @@ static const rl_ipc_cmd display_session_cmds[] = {
     { 11, "GetEvent", display_event },
     { 21, "Command21", rl_srv_stub_ok },
     { 31, "GetEvent2", display_event },
+    { 32, "Command32", display_linked_event },
     { 51, "SetTimestampRecorderCount", rl_srv_stub_ok },
     { 101, "OpenDisplay", rl_srv_stub_ok },
     { 102, "CloseDisplay", rl_srv_stub_ok },
