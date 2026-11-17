@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use relift_emit::{Function, Insn, Options, Output};
-use relift_guest::LiftFailure;
+use relift_guest::{Entry, LiftFailure};
 use relift_ir::{Block, Flow, Next, Op};
 use relift_n64_analyze::{Boot, Report, Source};
 use relift_n64_formats::Cic;
@@ -459,6 +459,9 @@ pub struct Program<'a> {
     /// The developer's picture defaults, `name=value` texts for
     /// `rl_n64_declare_picture` (empty: the console's picture).
     pub picture: &'a [String],
+    /// How the program starts. An app's saves are named after `game` in
+    /// its files folder, not after `rom_path`.
+    pub launch: Entry,
 }
 
 fn c_string(s: &str) -> String {
@@ -522,15 +525,52 @@ pub fn program_c(p: &Program<'_>) -> String {
         let _ = write!(s, "{}, ", c_string(d));
     }
     s.push_str("NULL };\n");
+    s.push_str("extern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nextern const rl_n64_renderer rl_n64_prdp;\n");
+    let mobile = |s: &mut String, header: &str, sig: &str, init: &str, dir: &str| {
+        let _ = write!(
+            s,
+            "#include <stdio.h>\n#include <relift/{header}>\n#include <relift/settings.h>\n{sig}\n{{\n    {init}();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = {dir}();\n    char rom_path[4096];\n    snprintf(rom_path, sizeof rom_path, \"%s/game\", dir ? dir : \".\");\n"
+        );
+    };
+    let rom_path = match p.launch {
+        Entry::Android => {
+            mobile(
+                &mut s,
+                "android.h",
+                "__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)",
+                "rl_android_init",
+                "rl_android_files_dir",
+            );
+            "rom_path".to_string()
+        }
+        Entry::Ios => {
+            mobile(
+                &mut s,
+                "ios.h",
+                "int rl_ios_main(int argc, char **argv)",
+                "rl_ios_init",
+                "rl_ios_documents_dir",
+            );
+            "rom_path".to_string()
+        }
+        Entry::Main => {
+            s.push_str("int main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n");
+            c_string(p.rom_path)
+        }
+    };
     let _ = write!(
         s,
-        "extern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nextern const rl_n64_renderer rl_n64_prdp;\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u, {}, &rl_n64_prdp, picture }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
+        "    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u, {rom_path}, &rl_n64_prdp, picture }};\n    int status = rl_n64_main(&prog, argc, argv);\n{}    return status;\n}}\n",
         p.units.len(),
         p.code.len(),
         c_string(p.title),
         p.cic,
         p.entry,
-        c_string(p.rom_path)
+        match p.launch {
+            Entry::Android => "    rl_android_flush();\n",
+            Entry::Ios => "    rl_ios_flush();\n",
+            Entry::Main => "",
+        }
     );
     s
 }
@@ -649,10 +689,30 @@ mod tests {
             cic: cic_number(report.boot),
             entry: report.entry,
             picture: &["upscale=2x".into()],
+            launch: Entry::Main,
         });
         assert!(p.contains("units[] = { &rl_unit_n64_s0 }"), "{p}");
         assert!(p.contains("picture[] = { \"upscale=2x\", NULL };"), "{p}");
         assert!(p.contains("&rl_n64_prdp, picture }"), "{p}");
         assert!(p.contains("\"T\", 6102u, 0x80001000u"), "{p}");
+        assert!(p.contains("int main(int argc"), "{p}");
+        let app = program_c(&Program {
+            title: "T",
+            rom_path: "/home/rom.z64",
+            units: &[l.units[0].symbol.clone()],
+            code: &l.code,
+            cic: cic_number(report.boot),
+            entry: report.entry,
+            picture: &[],
+            launch: Entry::Ios,
+        });
+        assert!(app.contains("int rl_ios_main(int argc"), "{app}");
+        assert!(app.contains("rl_ios_documents_dir()"), "{app}");
+        assert!(app.contains("0x80001000u, rom_path, &rl_n64_prdp"), "{app}");
+        assert!(app.contains("rl_ios_flush();"), "{app}");
+        assert!(
+            !app.contains("/home/rom.z64") && !app.contains("int main("),
+            "{app}"
+        );
     }
 }

@@ -2068,6 +2068,8 @@ pub fn run_build(
         Some("Game Boy")
     } else if crate::gba::is_project() {
         Some("Game Boy Advance")
+    } else if crate::n64::is_project() {
+        Some("Nintendo 64")
     } else {
         None
     };
@@ -2081,8 +2083,14 @@ pub fn run_build(
         };
         let built = if crate::gb::is_project() {
             crate::gb::build(settings, mods, !dev, target, ui)?
-        } else {
+        } else if crate::gba::is_project() {
             crate::gba::build(settings, mods, true, target, ui)?
+        } else {
+            let built = crate::n64::build(settings, mods, target, ui)?;
+            if built.cross.is_none() {
+                return Ok(());
+            }
+            built
         };
         let (name, _) = project_out(settings)?;
         let request = PackageRequest {
@@ -2100,12 +2108,6 @@ pub fn run_build(
             },
         };
         return package(settings, &request, ui);
-    }
-    if crate::n64::is_project() {
-        if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-            return Err(format!("target {t}: only the host target builds so far").into());
-        }
-        return crate::n64::build(settings, mods, ui).map(|_| ());
     }
     if crate::nds::is_project() {
         if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {

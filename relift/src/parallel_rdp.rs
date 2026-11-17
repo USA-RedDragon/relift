@@ -78,6 +78,41 @@ pub const INCLUDES: [&str; 5] = [
     "util",
 ];
 
+/// A header that gives every Vulkan function pointer volk declares in the
+/// tree at `dir` a name of relift's own (`vkCreateDevice` becomes
+/// `rl_n64_prdp_vkCreateDevice`). Included first in parallel-rdp's sources,
+/// it keeps volk's globals apart from the functions of a Vulkan loader the
+/// program links (the static MoltenVK of an iOS app), which have the same
+/// names.
+///
+/// # Errors
+///
+/// The tree has no `volk/volk.h`.
+pub fn renames_header(dir: &Path) -> Result<String, BoxError> {
+    let path = dir.join("volk").join("volk.h");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(renames(&text))
+}
+
+fn renames(volk_h: &str) -> String {
+    let mut names: Vec<&str> = volk_h
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("extern PFN_vk"))
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .filter_map(|n| n.strip_suffix(';'))
+        .filter(|n| n.starts_with("vk"))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut out = String::from(
+        "/* Written by relift build from parallel-rdp's volk.h: relift's names for volk's Vulkan function pointers. */\n#pragma once\n",
+    );
+    for n in names {
+        out.push_str(&format!("#define {n} rl_n64_prdp_{n}\n"));
+    }
+    out
+}
+
 /// The URL of the archive.
 #[must_use]
 pub fn url() -> String {
@@ -199,6 +234,23 @@ fn unpack(tarball: &Path, into: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_volk_function_pointer_gets_a_name_of_its_own() {
+        let h = renames(
+            "extern PFN_vkCreateDevice vkCreateDevice;\n  extern PFN_vkCmdDraw vkCmdDraw;\nextern PFN_vkCreateDevice vkCreateDevice;\nPFN_vkQueueSubmit vkQueueSubmit;\n",
+        );
+        assert!(
+            h.contains("#define vkCreateDevice rl_n64_prdp_vkCreateDevice\n"),
+            "{h}"
+        );
+        assert!(
+            h.contains("#define vkCmdDraw rl_n64_prdp_vkCmdDraw\n"),
+            "{h}"
+        );
+        assert_eq!(h.matches("vkCreateDevice rl_").count(), 1, "{h}");
+        assert!(!h.contains("vkQueueSubmit"), "{h}");
+    }
 
     #[test]
     fn the_pin_is_a_commit_and_a_sha256() {
