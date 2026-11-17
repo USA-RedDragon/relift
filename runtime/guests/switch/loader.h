@@ -165,4 +165,15 @@ RL_RUNTIME_API int rl_switch_add_hook(const rl_switch_hook *h);
  */
 RL_RUNTIME_API int rl_switch_main(const rl_switch_program *p, int argc, char **argv);
 
+/**
+ * @brief Names the build's shader folder: where relift build put the GPU
+ * program tables it translated (table.rlspv, table.rlspi) and where the
+ * runtime records programs the tables lack. The build's generated shaders.c
+ * calls it before main.
+ */
+RL_RUNTIME_API void rl_switch_set_shaders(const char *dir);
+
+/** @brief The folder rl_switch_set_shaders named, or NULL. */
+RL_RUNTIME_API const char *rl_switch_shaders_dir(void);
+
 #endif
