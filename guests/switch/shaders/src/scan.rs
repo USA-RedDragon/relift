@@ -27,7 +27,7 @@ use crate::sha256_hex;
 use crate::source::{SNIFF_WHOLE, Source, SourceFile};
 use crate::{cubin, ktgl, sarc, zst};
 
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const GAP: u64 = 256 << 10;
@@ -361,6 +361,9 @@ impl Ctx<'_> {
         out.container("bnsh", bnsh);
         if bnsh > 0 {
             out.meshes.extend(crate::mesh::pipelines(b));
+        }
+        if b.starts_with(b"BAHS") {
+            out.meshes.extend(crate::mesh::bahs_pipelines(b));
         }
         let cubins = cubin::find(b);
         out.container("fatbin", cubins.fatbins);
