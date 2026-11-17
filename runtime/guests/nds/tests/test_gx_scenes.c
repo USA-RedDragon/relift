@@ -3,8 +3,9 @@
  * @brief The 3D engine against the oracle: each scene's op stream (geometry
  * commands through the command ports, rendering registers, texture memory)
  * runs on the machine from the start of VBlank to the given frame, and the
- * frame's hash must be the oracle's. Generated from relift's 3D probe ROMs;
- * the oracle's screens are not kept.
+ * frame's hash must be the oracle's, or relift's where console captures show
+ * the oracle wrong (noted at the scene). Generated from relift's 3D probe
+ * ROMs; the oracle's screens are not kept.
  */
 #include "ndst.h"
 #include "scene.h"
@@ -49,7 +50,11 @@ static const u32 gouraud[] = {
   0x400048c, 0x666099a, OP_W32, 0x400048c, 0x0, OP_W32, 0x4000504, 0x0, OP_W32, 0x4000540, 0x0, OP_END
 };
 
-/** @brief Gradient quads clipped at the left and right sides (clipped colors round up). */
+/**
+ * @brief Gradient quads clipped at the left and right sides. The console
+ * rounds a clipped red down where the oracle rounds it up: the hash is that
+ * of relift's frame, which follows console captures of clipped gradients.
+ */
 static const u32 clip[] = {
   OP_W16, 0x4000304, 0x820f, OP_W32, 0x4000000, 0x10108, OP_W16, 0x4000008, 0x0, OP_W16, 0x4000060, 0x0, OP_W32,
   0x4000350, 0x1f0000, OP_W16, 0x4000354, 0x7fff, OP_W32, 0x4000440, 0x0, OP_W32, 0x4000454, 0x0, OP_W32, 0x4000440,
@@ -329,7 +334,7 @@ typedef struct scene {
 static const scene scenes[] = {
     {"flat", flat, 4, 0x26ee09c216a4a5bfull},
     {"gouraud", gouraud, 4, 0x85f7c9a31541cca5ull},
-    {"clip", clip, 4, 0x51cb8191fcb8fbe5ull},
+    {"clip", clip, 4, 0xccd46172542bca65ull},
     {"tex", tex, 4, 0x8c83dff321d675dcull},
     {"blend", blend, 4, 0x9227a240fed06e6cull},
     {"edgefog", edgefog, 4, 0xad41bd969b58512aull},

@@ -268,9 +268,10 @@ static int64_t ceil_div(int64_t num, int64_t den) { return num >= 0 ? (num + den
 
 /**
  * @brief The vertex where the edge from a (inside) to b (outside) meets the
- * plane. Coordinates and texture coordinates are interpolated exactly; the
- * colors are interpolated as 5-bit values and rounded up (the oracle's clipped
- * colors), then widened like a COLOR command's.
+ * plane. Coordinates and texture coordinates are interpolated exactly. The
+ * colors are interpolated as 5-bit values and widened like a COLOR
+ * command's: green and blue rounded up, red rounded up to a sixteenth and
+ * then down (console captures of 116 clipped gradients per channel).
  */
 static nds_gx_cvtx cut(const nds_gx_cvtx *a, const nds_gx_cvtx *b, unsigned k, bool hi)
 {
@@ -283,7 +284,8 @@ static nds_gx_cvtx cut(const nds_gx_cvtx *a, const nds_gx_cvtx *b, unsigned k, b
     r.c[k] = hi ? r.c[3] : -r.c[3];
     for (unsigned j = 0; j < 3; j++) {
         int64_t ca = a->col[j] >> 4, cb = b->col[j] >> 4;
-        r.col[j] = c9((unsigned)ceil_div(ca * den + (cb - ca) * da, den));
+        int64_t num = ca * den + (cb - ca) * da;
+        r.col[j] = c9((unsigned)(j == 0 ? ceil_div(16 * num, den) >> 4 : ceil_div(num, den)));
     }
     r.s = (int32_t)(a->s + ((int64_t)(b->s - a->s) * da) / den);
     r.t = (int32_t)(a->t + ((int64_t)(b->t - a->t) * da) / den);
