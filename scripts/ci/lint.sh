@@ -26,7 +26,6 @@ cfg_root="$CI_WORK/configulator-$version"
 (
   cd relift
   "$cfg_root/bin/configulator" --type Settings --sample --format toml --sample-file ../relift.example.toml --check
-  "$cfg_root/bin/configulator" --type Settings --markdown --markdown-file ../docs/reference/configuration.md --env-prefix RELIFT_ --env-separator _ --check
 )
 
 cfg=guests/switch/vkgen/vkgen.toml

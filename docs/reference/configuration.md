@@ -4,12 +4,11 @@ relift reads its own settings from `relift.toml` in the working directory (or
 the file given with `-c`), then `RELIFT_*` environment variables, then flags.
 Per-game data lives in each game project's `game.toml`, not here.
 `relift.example.toml` lists every key. The table below is generated from the
-settings struct (`relift/src/settings.rs`) by configulator; CI fails when it
-is stale. The built program's own run-time settings and environment
+settings struct (`relift/src/settings.rs`) by docgen; CI fails when it is
+stale. The built program's own run-time settings and environment
 switches are in [the C runtime](../../runtime/README.md).
 
-<!-- configulator:begin -->
-
+<!-- docgen:configulator crate=relift type=settings::Settings env=RELIFT_ -->
 | Key                             | Type    | Default  | Environment                            | Flag                              | Description                                                                                                                                                                                                                               |
 |---------------------------------|---------|----------|----------------------------------------|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `cache-dir`                     | string  |          | `RELIFT_CACHE_DIR`                     | `--cache-dir`                     | where lifted, emitted and built artifacts are cached (empty: the user cache dir)                                                                                                                                                          |
@@ -42,5 +41,4 @@ switches are in [the C runtime](../../runtime/README.md).
 | `package.ios-identity`          | string  |          | `RELIFT_PACKAGE_IOS_IDENTITY`          | `--package.ios-identity`          | the keychain identity that signs the iOS app for a device (empty: the first Apple Development identity)                                                                                                                                   |
 | `package.ios-data`              | string  | `bundle` | `RELIFT_PACKAGE_IOS_DATA`              | `--package.ios-data`              | where an iOS app finds the game data: bundle (copied into the app, sealed by its signature) or documents (added later to the app's Documents, for example with relift push)                                                               |
 | `package.ios-profile`           | string  |          | `RELIFT_PACKAGE_IOS_PROFILE`           | `--package.ios-profile`           | the provisioning profile of the iOS app (empty: one from Xcode's profile folders that covers the bundle identifier)                                                                                                                       |
-
-<!-- configulator:end -->
+<!-- /docgen:configulator -->
