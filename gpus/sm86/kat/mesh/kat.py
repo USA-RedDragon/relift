@@ -118,7 +118,12 @@ def one(work, name, record):
     t_nat = os.path.join(o, 'task-native.spv') if task else '-'
     open(os.path.join(o, 'nat.s'), 'w').write(common + 'blend %s\nmesh %s %s/mesh-native.spv %s/frag-native.spv %d 1 1\nout %s/nat.raw\n' % (
         blend, t_nat, o, o, count, o))
-    run([mrun, os.path.join(o, 'nat.s')], env=tenv)
+    r = subprocess.run([mrun, os.path.join(o, 'nat.s')], env=tenv, capture_output=True, text=True)
+    if r.returncode:
+        if not os.environ.get('KAT_DEV'):
+            sys.exit('%s: native draw failed: %s' % (name, r.stderr[-500:]))
+        print('%s: native draw failed on %s: %s' % (name, os.environ['KAT_DEV'], r.stderr.strip()[-200:]))
+        open(os.path.join(o, 'nat.raw'), 'wb').write(b'')
     cap = 4096
     hdr = [0] * 32
     hdr[0], hdr[12], hdr[13] = count, cap, 32
@@ -137,6 +142,8 @@ def one(work, name, record):
     open(os.path.join(o, 'fb.s'), 'w').write(s)
     run([mrun, os.path.join(o, 'fb.s')], env=tenv)
     ref, nat, fb = (open(os.path.join(o, f), 'rb').read() for f in ('ref.raw', 'nat.raw', 'fb.raw'))
+    if not nat:
+        nat = bytes(len(ref))
     words = [array.array('I', x) for x in (ref, nat, fb)]
     lit = sum(1 for i in range(0, len(words[0]), 4) if any(words[0][i:i + 4]))
     diff = lambda a, b: sum(1 for x, y in zip(a, b) if x != y)
