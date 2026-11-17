@@ -47,6 +47,26 @@
 //! guard, and not after a varying EXIT. Which values are uniform comes
 //! from the `uniform` module; anything else is rejected with the reason.
 //!
+//! One shape is converted instead: in a compute program, a branch with a
+//! varying condition whose one arm skips straight to its post-dominator
+//! and whose other arm (the region) holds a BAR. Every invocation runs the
+//! region; one that would have skipped it carries out only its arithmetic,
+//! and gets back at the post-dominator the registers and predicates the
+//! region wrote. The region's own branches must then be uniform with its
+//! memory and texture results taken as varying. The guest's skipping
+//! threads arrive at none of the region's BARs and, if no BAR follows the
+//! post-dominator, at no BAR at all, so the region's threads go on once
+//! they have exited; nothing orders the skipping threads' memory accesses
+//! after the post-dominator with the region's then. The conversion keeps
+//! that only where it cannot be seen: the region has no warp operation,
+//! no uniform register write, no EXIT, and reads no global or surface
+//! memory, and the code from the post-dominator on has no BAR and no
+//! shared memory access (and no surface write if the region samples
+//! textures). A varying EXIT before a BAR is converted the same way, its
+//! region the rest of the program: the guest counts an exited thread as
+//! arrived at every BAR, and an invocation that runs on with no effects
+//! arrives at each with the others.
+//!
 //! A selection whose arms meet again before its merge (an arm that leaves
 //! early to code the other arm skips) copies the shared code into each arm.
 //! When that copying grows too much, the program is structured again with
@@ -145,6 +165,24 @@ pub(crate) struct Graph {
     succs: Vec<Vec<usize>>,
     pub headers: HashMap<usize, (Vec<bool>, Vec<usize>)>,
     pdoms: HashMap<Option<usize>, Vec<Option<usize>>>,
+    /// Branches converted so that every invocation runs their region (see
+    /// the module documentation).
+    conv: Vec<Conv>,
+    /// The innermost conversion whose region holds each block.
+    gate: Vec<Option<usize>>,
+}
+
+/// A converted branch.
+#[derive(Clone, Debug)]
+struct Conv {
+    branch: usize,
+    /// The first block of the region.
+    region: usize,
+    /// The post-dominator, where skipping invocations get their values back;
+    /// `None` for a varying EXIT, whose exited invocations stay to the end.
+    merge: Option<usize>,
+    regs: Vec<u8>,
+    preds: Vec<u8>,
 }
 
 /// The branch condition: the guard and the predicates the instruction
@@ -732,10 +770,12 @@ impl Graph {
             headers.insert(h, (body, exits));
         }
         Ok(Graph {
+            gate: vec![None; blocks.len()],
             blocks,
             succs,
             headers,
             pdoms: HashMap::new(),
+            conv: Vec::new(),
         })
     }
 
@@ -822,6 +862,16 @@ struct Emit<'a> {
     used: HashSet<u32>,
     emitted: usize,
     selectors: HashMap<usize, u32>,
+    /// Per conversion: whether the invocation carries out the region, and
+    /// the saved registers and predicates.
+    conv_vars: HashMap<usize, ConvVars>,
+}
+
+struct ConvVars {
+    on: u32,
+    pending: u32,
+    regs: Vec<u32>,
+    preds: Vec<u32>,
 }
 
 impl Emit<'_> {
@@ -885,11 +935,130 @@ impl Emit<'_> {
     }
 
     fn content(&mut self, c: &mut Ctx, b: usize) -> Res<()> {
+        let restores: Vec<usize> = (0..self.g.conv.len())
+            .filter(|&k| self.g.conv[k].merge == Some(b))
+            .collect();
+        for k in restores {
+            self.restore(c, k);
+        }
+        let gate = self.g.gate[b];
         let blk = &self.g.blocks[b];
         for k in blk.first..blk.end {
-            c.guarded(&self.code.insts[k], self.code.words[k], 16 * k as u64)?;
+            let i = &self.code.insts[k];
+            let (w, pc) = (self.code.words[k], 16 * k as u64);
+            match gate {
+                Some(g) if uniform::gated(i) => {
+                    let on = self.on(c, g);
+                    let then = c.m.id();
+                    let merge = c.m.id();
+                    c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+                    c.m.emit_void(op::BRANCH_CONDITIONAL, &[on, then, merge]);
+                    c.m.emit_void(op::LABEL, &[then]);
+                    c.guarded(i, w, pc)?;
+                    c.m.emit_void(op::BRANCH, &[merge]);
+                    c.m.emit_void(op::LABEL, &[merge]);
+                }
+                _ => c.guarded(i, w, pc)?,
+            }
         }
         Ok(())
+    }
+
+    fn vars(&mut self, c: &mut Ctx, k: usize) -> &ConvVars {
+        let conv = &self.g.conv[k];
+        let (nr, np) = (conv.regs.len(), conv.preds.len());
+        self.conv_vars.entry(k).or_insert_with(|| {
+            let mut new = || {
+                let v = c.m.id();
+                c.locals.push(v);
+                v
+            };
+            ConvVars {
+                on: new(),
+                pending: new(),
+                regs: (0..nr).map(|_| new()).collect(),
+                preds: (0..np).map(|_| new()).collect(),
+            }
+        })
+    }
+
+    /// Whether the invocation carries out the region of conversion `k`.
+    fn on(&mut self, c: &mut Ctx, k: usize) -> u32 {
+        let v = self.vars(c, k).on;
+        let u = c.u32t();
+        let b = c.boolt();
+        let x = c.m.emit(op::LOAD, u, &[v]);
+        let z = c.m.c_u32(0);
+        c.m.emit(op::I_NOT_EQUAL, b, &[x, z])
+    }
+
+    /// Enters the region of conversion `k` from its branch, `take` saying
+    /// whether this invocation takes it: notes that and saves what the
+    /// region writes.
+    fn enter(&mut self, c: &mut Ctx, k: usize, take: u32) {
+        let b = c.boolt();
+        let take = match self.g.gate[self.g.conv[k].branch] {
+            Some(outer) => {
+                let o = self.on(c, outer);
+                c.m.emit(op::LOGICAL_AND, b, &[take, o])
+            }
+            None => take,
+        };
+        let u = c.u32t();
+        let one = c.m.c_u32(1);
+        let z = c.m.c_u32(0);
+        let t = c.select(u, take, one, z);
+        let conv = self.g.conv[k].clone();
+        let vars = self.vars(c, k);
+        let (on, pending) = (vars.on, vars.pending);
+        let (rv, pv) = (vars.regs.clone(), vars.preds.clone());
+        c.m.emit_void(op::STORE, &[on, t]);
+        if conv.merge.is_none() {
+            return;
+        }
+        c.m.emit_void(op::STORE, &[pending, one]);
+        for (&r, &v) in conv.regs.iter().zip(&rv) {
+            let x = c.load_reg(r);
+            c.m.emit_void(op::STORE, &[v, x]);
+        }
+        for (&p, &v) in conv.preds.iter().zip(&pv) {
+            let x = c.load_pred(p, false);
+            let x = c.select(u, x, one, z);
+            c.m.emit_void(op::STORE, &[v, x]);
+        }
+    }
+
+    /// At the merge of conversion `k`: an invocation that did not take the
+    /// region gets back what it wrote.
+    fn restore(&mut self, c: &mut Ctx, k: usize) {
+        let conv = self.g.conv[k].clone();
+        let vars = self.vars(c, k);
+        let (pending, rv, pv) = (vars.pending, vars.regs.clone(), vars.preds.clone());
+        let u = c.u32t();
+        let b = c.boolt();
+        let z = c.m.c_u32(0);
+        let p = c.m.emit(op::LOAD, u, &[pending]);
+        let p = c.m.emit(op::I_NOT_EQUAL, b, &[p, z]);
+        let on = self.on(c, k);
+        let off = c.m.emit(op::LOGICAL_NOT, b, &[on]);
+        let back = c.m.emit(op::LOGICAL_AND, b, &[p, off]);
+        let then = c.m.id();
+        let merge = c.m.id();
+        c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        c.m.emit_void(op::BRANCH_CONDITIONAL, &[back, then, merge]);
+        c.m.emit_void(op::LABEL, &[then]);
+        for (&r, &v) in conv.regs.iter().zip(&rv) {
+            let x = c.m.emit(op::LOAD, u, &[v]);
+            c.store_reg(r, x);
+        }
+        for (&pr, &v) in conv.preds.iter().zip(&pv) {
+            let x = c.m.emit(op::LOAD, u, &[v]);
+            let x = c.m.emit(op::I_NOT_EQUAL, b, &[x, z]);
+            c.store_pred(pr, x);
+        }
+        c.m.emit_void(op::BRANCH, &[merge]);
+        c.m.emit_void(op::LABEL, &[merge]);
+        c.m.emit_void(op::STORE, &[pending, z]);
     }
 
     fn cond(&mut self, c: &mut Ctx, conds: &[Operand]) -> Res<u32> {
@@ -1115,7 +1284,21 @@ impl Emit<'_> {
             }
             c.m.emit_void(op::LABEL, &[label]);
             self.content(c, cur)?;
-            let term = self.g.blocks[cur].term.clone();
+            let mut term = self.g.blocks[cur].term.clone();
+            if let Some(k) = self.g.conv.iter().position(|x| x.branch == cur)
+                && let Term::Branch(conds, t, _) = &term
+            {
+                let region = self.g.conv[k].region;
+                let cv = self.cond(c, conds)?;
+                let take = if *t == region {
+                    cv
+                } else {
+                    let b = c.boolt();
+                    c.m.emit(op::LOGICAL_NOT, b, &[cv])
+                };
+                self.enter(c, k, take);
+                term = Term::Jump(region);
+            }
             let (head, targets) = match term {
                 Term::Set(var, value, t) => {
                     let v = self.selector_var(c, var);
@@ -1324,7 +1507,7 @@ impl Graph {
 
     /// Checks that every BAR runs where all the workgroup's invocations
     /// run it (see the module documentation).
-    pub(crate) fn check_barriers(&mut self, code: &Code) -> Res<()> {
+    pub(crate) fn check_barriers(&mut self, code: &Code, convert: bool) -> Res<()> {
         let insts = &code.insts;
         let n = self.blocks.len();
         let mut partial = vec![false; n];
@@ -1333,11 +1516,13 @@ impl Graph {
             let entry = self.varying(code, &partial);
             let mut p = partial.clone();
             let mut e = exited.clone();
+            let mut restart = false;
             for b in 0..n {
                 let Some(mut v) = entry[b] else { continue };
                 let blk = &self.blocks[b];
                 for i in &insts[blk.first..blk.end] {
-                    uniform::step(i, partial[b], &mut v);
+                    let gated = self.gate[b].is_some() && uniform::gated(i);
+                    uniform::step(i, partial[b] || gated, &mut v);
                 }
                 let (uniform, exits) = match &blk.term {
                     Term::Jump(_) | Term::Set(..) => (true, false),
@@ -1348,8 +1533,12 @@ impl Graph {
                     Term::Switch(Sel::Reg(r), ..) => (v.uniform_reg(*r, false), false),
                     Term::Switch(Sel::UReg(r), ..) => (v.uniform_reg(*r, true), false),
                 };
-                if uniform {
+                if uniform || self.conv.iter().any(|k| k.branch == b) {
                     continue;
+                }
+                if convert && self.convert(code, b) {
+                    restart = true;
+                    break;
                 }
                 let stop = if exits { None } else { self.ipdom(None, b) };
                 let mut work = self.succs[b].clone();
@@ -1363,6 +1552,11 @@ impl Graph {
                     marks[u] = true;
                     work.extend(self.succs[u].iter().copied());
                 }
+            }
+            if restart {
+                partial = vec![false; n];
+                exited = vec![false; n];
+                continue;
             }
             if p == partial && e == exited {
                 for b in 0..n {
@@ -1384,7 +1578,8 @@ impl Graph {
                                 ));
                             }
                         }
-                        uniform::step(i, partial[b], &mut v);
+                        let gated = self.gate[b].is_some() && uniform::gated(i);
+                        uniform::step(i, partial[b] || gated, &mut v);
                     }
                 }
                 return Ok(());
@@ -1392,6 +1587,127 @@ impl Graph {
             partial = p;
             exited = e;
         }
+    }
+
+    /// Converts the varying branch `b` if it has the shape and the region
+    /// the module documentation describes; gives whether it did.
+    fn convert(&mut self, code: &Code, b: usize) -> bool {
+        let Term::Branch(_, t, f) = self.blocks[b].term.clone() else {
+            return false;
+        };
+        let merge = if terminal(t) || terminal(f) {
+            None
+        } else {
+            match self.ipdom(None, b) {
+                Some(m) => Some(m),
+                None => return false,
+            }
+        };
+        let region = match (merge, terminal(t), terminal(f)) {
+            (None, true, false) => f,
+            (None, false, true) => t,
+            (Some(m), _, _) if t == m && f != m => f,
+            (Some(m), _, _) if f == m && t != m => t,
+            _ => return false,
+        };
+        let n = self.blocks.len();
+        let mut stop = vec![false; n];
+        if let Some(m) = merge {
+            stop[m] = true;
+        }
+        let inside = reach(&self.succs, region, &stop);
+        let post = match merge {
+            Some(m) => reach(&self.succs, m, &vec![false; n]),
+            None => vec![false; n],
+        };
+        if inside[b] {
+            return false;
+        }
+        let idom = idoms(&self.succs, 0);
+        let insts = &code.insts;
+        let blocks = |m: &[bool]| (0..n).filter(|&u| m[u]).collect::<Vec<_>>();
+        let body = blocks(&inside);
+        let has = |us: &[usize], f: &dyn Fn(&crate::Inst) -> bool| {
+            us.iter().any(|&u| {
+                let blk = &self.blocks[u];
+                insts[blk.first..blk.end].iter().any(f)
+            })
+        };
+        if !has(&body, &|i| i.mnemonic == "BAR") {
+            return false;
+        }
+        for &u in &body {
+            if !dominates(&idom, b, u)
+                || (merge.is_some() && self.exits(u))
+                || !matches!(self.blocks[u].term, Term::Jump(_) | Term::Branch(..))
+            {
+                return false;
+            }
+        }
+        let after = blocks(&post);
+        let unseen = !has(&body, &|i| {
+            super::simt::cross(i)
+                || i.mnemonic == "R2UR"
+                || (merge.is_some() && super::simt::writes_uniform(i))
+                || matches!(
+                    i.mnemonic,
+                    "KILL" | "CALL" | "RET" | "BRX" | "BRXU" | "JMP" | "JMX" | "BPT"
+                )
+                || (merge.is_some()
+                    && matches!(
+                        i.mnemonic,
+                        "LDG"
+                            | "LD"
+                            | "ATOM"
+                            | "ATOMG"
+                            | "RED"
+                            | "SULD"
+                            | "SUST"
+                            | "SUATOM"
+                            | "SURED"
+                            | "LDGSTS"
+                            | "EXIT"
+                    ))
+        }) && !has(&after, &|i| {
+            matches!(
+                i.mnemonic,
+                "BAR" | "LDS" | "STS" | "ATOMS" | "LDSM" | "LDGSTS" | "LD" | "ST" | "ATOM"
+            )
+        }) && (!has(&body, &|i| {
+            matches!(i.mnemonic, "TEX" | "TLD" | "TLD4" | "TXD" | "TMML")
+        }) || !has(&after, &|i| {
+            matches!(i.mnemonic, "SUST" | "SUATOM" | "SURED")
+        }));
+        if !unseen {
+            return false;
+        }
+        let mut regs = Vec::new();
+        let mut preds = Vec::new();
+        for &u in &body {
+            let blk = &self.blocks[u];
+            for i in &insts[blk.first..blk.end] {
+                regs.extend(super::uniform::written_regs(i));
+                preds.extend(super::uniform::written_preds(i));
+            }
+        }
+        regs.sort_unstable();
+        regs.dedup();
+        preds.sort_unstable();
+        preds.dedup();
+        let k = self.conv.len();
+        self.conv.push(Conv {
+            branch: b,
+            region,
+            merge,
+            regs,
+            preds,
+        });
+        for &u in &body {
+            if self.gate[u].is_none_or(|j| dominates(&idom, self.conv[j].branch, b)) {
+                self.gate[u] = Some(k);
+            }
+        }
+        true
     }
 
     /// What may vary between invocations at the start of each block
@@ -1406,7 +1722,9 @@ impl Graph {
             let Some(mut v) = entry[b] else { continue };
             let blk = &self.blocks[b];
             for k in blk.first..blk.end {
-                uniform::step(&code.insts[k], partial[b], &mut v);
+                let i = &code.insts[k];
+                let gated = self.gate[b].is_some() && uniform::gated(i);
+                uniform::step(i, partial[b] || gated, &mut v);
             }
             for &s in &self.succs[b] {
                 let changed = match &mut entry[s] {
@@ -1738,7 +2056,7 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
         g.check_reconvergence(code)?;
     }
     if code.insts.iter().any(|i| i.mnemonic == "BAR") {
-        g.check_barriers(code)?;
+        g.check_barriers(code, c.stage == crate::program::Stage::Compute)?;
     }
     let mut e = Emit {
         g,
@@ -1746,6 +2064,7 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
         used: HashSet::new(),
         emitted: 0,
         selectors: HashMap::new(),
+        conv_vars: HashMap::new(),
     };
     e.region(c, 0, first, None, None)
 }

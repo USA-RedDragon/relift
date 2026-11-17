@@ -504,6 +504,19 @@ pub(super) fn written_regs(i: &Inst) -> Vec<u8> {
         .collect()
 }
 
+/// The predicates an instruction writes or may write (see [`defs`]).
+pub(super) fn written_preds(i: &Inst) -> Vec<u8> {
+    let (certain, maybe) = defs(i);
+    certain
+        .into_iter()
+        .chain(maybe)
+        .filter_map(|l| match l {
+            Loc::P(n) if n != 7 => Some(n),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Operands an instruction writes: `(certain, possible)`. The first
 /// operand is written when it is a register or predicate; predicates right
 /// after it and the rest of a pair or quad may be.

@@ -100,6 +100,29 @@ fn slots(o: &Operand, w: usize, out: &mut Vec<usize>) {
     }
 }
 
+/// Instructions that an invocation running a converted region it skips
+/// (see the cfg module) must not carry out: everything but arithmetic and
+/// the instructions that only order or mark control flow.
+pub(super) fn gated(i: &Inst) -> bool {
+    !arithmetic(i.mnemonic)
+        && !matches!(
+            i.mnemonic,
+            "NOP"
+                | "BAR"
+                | "BRA"
+                | "BSSY"
+                | "BSYNC"
+                | "WARPSYNC"
+                | "DEPBAR"
+                | "ERRBAR"
+                | "CCTL"
+                | "CCTLL"
+                | "NANOSLEEP"
+                | "YIELD"
+                | "LDGDEPBAR"
+        )
+}
+
 /// Instructions that write nothing a later instruction reads.
 fn writes_nothing(m: &str) -> bool {
     matches!(

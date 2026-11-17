@@ -103,14 +103,14 @@ enum Mem {
     Write,
 }
 
-fn cross(i: &Inst) -> bool {
+pub(crate) fn cross(i: &Inst) -> bool {
     matches!(
         i.mnemonic,
         "SHFL" | "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM"
     ) || super::mem::lanes::r2ur_votes(i)
 }
 
-fn writes_uniform(i: &Inst) -> bool {
+pub(crate) fn writes_uniform(i: &Inst) -> bool {
     i.mnemonic.starts_with('U') || matches!(i.mnemonic, "S2UR" | "R2UR" | "VOTEU" | "REDUX")
 }
 
@@ -977,7 +977,7 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
     let mut g = Graph::new(blocks)?;
     g.check_reconvergence(code)?;
     if code.insts.iter().any(|i| i.mnemonic == "BAR") {
-        g.check_barriers(code)?;
+        g.check_barriers(code, false)?;
     }
     c.m.emit_void(op::LABEL, &[first]);
     let u = c.u32t();
