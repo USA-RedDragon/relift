@@ -110,6 +110,52 @@ RL_RUNTIME_API uint64_t rl_audio_clock_played(rl_audio_clock *c, uint64_t consum
 /** @brief Starts or stops the clock at now_ns (playback resumed or paused). */
 RL_RUNTIME_API void rl_audio_clock_run(rl_audio_clock *c, bool running, uint64_t consumed, uint64_t now_ns);
 
+/** @brief Furthest a steered stream's rate moves from its nominal rate (500 ppm, under one cent of pitch). */
+#define RL_AUDIO_DRIFT_BOUND 0.0005
+
+/**
+ * @brief Steers a host stream's playback rate onto the system clock. Guests
+ * make their frames on the system clock, as on the console, where the audio
+ * and the clock share one crystal; a host device runs on its own crystal, a
+ * little fast or slow, and would slowly drain or fill the queue. The frames
+ * the device has asked the stream for (whether or not the queue had them)
+ * are compared with the frames the system clock says it should have asked
+ * for; the smoothed difference, measured from where it settled after the
+ * start, and the rate offset learned from it set the ratio at which the
+ * stream plays its input, bounded by RL_AUDIO_DRIFT_BOUND, so the queue
+ * returns to its level at the start. A device further off than the bound
+ * keeps drifting at the rest.
+ */
+typedef struct rl_audio_drift {
+    uint32_t rate;
+    uint64_t last_ns;
+    /** @brief Playing time counted so far. */
+    uint64_t run_ns;
+    /** @brief Frames the device should have asked for by its request at last_ns. */
+    double expected;
+    /** @brief Frames asked for less expected, smoothed. */
+    double error;
+    /** @brief The smoothed error once settled after the start. */
+    double base;
+    /** @brief The device's rate offset learned so far, as a fraction of the rate. */
+    double learned;
+    double ratio;
+    bool started;
+    bool based;
+    bool paused;
+} rl_audio_drift;
+
+/**
+ * @brief The ratio to play the stream's input at (above 1 plays it faster).
+ * Call it as the device asks for frames, at now_ns, with the input frames it
+ * asked for before this request in all: measured always at a request, the
+ * device's steps do not show as drift. A gap of over 250 ms between requests
+ * (a pause) is left out of the measurement.
+ */
+RL_RUNTIME_API double rl_audio_drift_ratio(rl_audio_drift *d, uint64_t asked, uint64_t now_ns);
+/** @brief Leaves the time until the next request out of the measurement (the stream was paused). */
+RL_RUNTIME_API void rl_audio_drift_pause(rl_audio_drift *d);
+
 /** @brief Records that a caller discarded frames instead of queueing them (shown in the stream's statistics). */
 RL_RUNTIME_API void rl_audio_count_drop(rl_audio_out *o, uint32_t frames);
 

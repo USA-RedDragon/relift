@@ -201,3 +201,83 @@ TEST(audio_clock_plays_between_device_pulls)
     rl_audio_clock_run(&c, true, 6144, 1100000000ull);
     CHECK_EQ(rl_audio_clock_played(&c, 6144, 1100021000ull), 4145);
 }
+
+typedef struct drift_run {
+    uint32_t underruns;
+    double min_held, max_held, ratio;
+} drift_run;
+
+/**
+ * A guest writes 5 ms of frames on the system clock; a device off by ppm takes
+ * device frames a pull at the steered ratio and is seen up to 1 ms late.
+ */
+static drift_run run_drift(double ppm, uint32_t device, uint32_t seconds)
+{
+    rl_audio_drift d = { .rate = 48000 };
+    drift_run r = { 0, 1e18, 0, 1.0 };
+    double held = device + 240, asked = 0, ratio = 1.0, next_pull = 0;
+    double pull_ns = device * 1e9 / (48000.0 * (1.0 + ppm / 1e6));
+    uint64_t end = (uint64_t)seconds * 1000000000ull;
+    uint32_t seed = 12345;
+    for (uint64_t now = 0; now < end;) {
+        if (next_pull <= (double)now) {
+            seed = seed * 1664525u + 1013904223u;
+            ratio = rl_audio_drift_ratio(&d, (uint64_t)asked, (uint64_t)next_pull + (seed >> 12) % 1000000u);
+            double need = device * ratio;
+            asked += need;
+            if (held < need) {
+                r.underruns++;
+                held = 0;
+            } else {
+                held -= need;
+            }
+            if (now >= 60000000000ull && held < r.min_held)
+                r.min_held = held;
+            next_pull += pull_ns;
+            continue;
+        }
+        held += 240;
+        if (now >= 60000000000ull && held > r.max_held)
+            r.max_held = held;
+        now += 5000000;
+    }
+    r.ratio = ratio;
+    return r;
+}
+
+TEST(audio_drift_holds_the_queue_for_an_hour)
+{
+    static const double ppm[] = { 300, -300, 0 };
+    static const uint32_t device[] = { 960, 1024, 2048, 4096 };
+    for (int i = 0; i < 3; i++)
+        for (int k = 0; k < 4; k++) {
+            drift_run r = run_drift(ppm[i], device[k], 3600);
+            CHECK_EQ(r.underruns, 0);
+            CHECK(r.min_held > 60);
+            CHECK(r.max_held < device[k] + 240 + 480);
+            CHECK(r.ratio > 1.0 - ppm[i] / 1e6 - 20e-6 && r.ratio < 1.0 - ppm[i] / 1e6 + 20e-6);
+        }
+}
+
+TEST(audio_drift_leaves_out_a_pause)
+{
+    rl_audio_drift d = { .rate = 48000 };
+    uint64_t asked = 0, now = 0;
+    for (int i = 0; i < 2000; i++, now += 20000000, asked += 960)
+        rl_audio_drift_ratio(&d, asked, now);
+    CHECK_EQ(rl_audio_drift_ratio(&d, asked, now), 1.0);
+    rl_audio_drift_pause(&d);
+    now += 100000000;
+    for (int i = 0; i < 2000; i++, now += 20000000, asked += 960)
+        rl_audio_drift_ratio(&d, asked, now);
+    CHECK_EQ(rl_audio_drift_ratio(&d, asked, now), 1.0);
+}
+
+TEST(audio_drift_stays_within_its_bound)
+{
+    drift_run r = run_drift(16000, 2048, 120);
+    CHECK_EQ(r.ratio, 1.0 - RL_AUDIO_DRIFT_BOUND);
+    CHECK(r.underruns > 0);
+    r = run_drift(-16000, 2048, 120);
+    CHECK_EQ(r.ratio, 1.0 + RL_AUDIO_DRIFT_BOUND);
+}

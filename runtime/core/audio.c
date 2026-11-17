@@ -624,6 +624,48 @@ void rl_audio_clock_run(rl_audio_clock *c, bool running, uint64_t consumed, uint
     c->running = running;
 }
 
+#define DRIFT_SMOOTH_NS 2e9
+#define DRIFT_SETTLE_NS 6000000000ull
+#define DRIFT_STEER_S 5.0
+#define DRIFT_LEARN_S 30.0
+#define DRIFT_GAP_NS 250000000ull
+
+static double drift_clamp(double v)
+{
+    return v > RL_AUDIO_DRIFT_BOUND ? RL_AUDIO_DRIFT_BOUND : v < -RL_AUDIO_DRIFT_BOUND ? -RL_AUDIO_DRIFT_BOUND : v;
+}
+
+double rl_audio_drift_ratio(rl_audio_drift *d, uint64_t asked, uint64_t now_ns)
+{
+    if (!d->started || d->paused || now_ns <= d->last_ns || now_ns - d->last_ns > DRIFT_GAP_NS) {
+        if (!d->started)
+            d->ratio = 1.0;
+        d->started = true;
+        d->paused = false;
+        d->expected = (double)asked - d->error;
+        d->last_ns = now_ns;
+        return d->ratio;
+    }
+    uint64_t dt = now_ns - d->last_ns;
+    d->last_ns = now_ns;
+    d->expected += (double)dt * d->rate / 1e9;
+    double k = (double)dt / DRIFT_SMOOTH_NS;
+    d->error += ((double)asked - d->expected - d->error) * (k < 1.0 ? k : 1.0);
+    d->run_ns += dt;
+    if (!d->based && d->run_ns >= DRIFT_SETTLE_NS) {
+        d->base = d->error;
+        d->based = true;
+    }
+    if (!d->based)
+        return d->ratio;
+    double off = (d->error - d->base) / (d->rate * DRIFT_STEER_S);
+    d->learned = drift_clamp(d->learned + off * (double)dt / 1e9 / DRIFT_LEARN_S);
+    d->ratio = 1.0 - drift_clamp(off + d->learned);
+    return d->ratio;
+}
+
+void rl_audio_drift_pause(rl_audio_drift *d) { d->paused = true; }
+
 void rl_opus_set_backend(const rl_opus_backend *b) { g_opus = b; }
 
 const rl_opus_backend *rl_opus_backend_current(void)
