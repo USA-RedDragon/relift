@@ -1651,7 +1651,10 @@ impl Run<'_> {
     }
 
     /// Runs the code from `from` with register `r` = `i` until it leaves
-    /// `from..=site` (`Ok(None)`) or takes the jump at `site`.
+    /// `from..=site` (`Ok(None)`) or takes the jump at `site`. Loads from
+    /// the image read its bytes even when the image is writable: a switch's
+    /// table of offsets resolves the jump (the compiler's halfword tables
+    /// read with LDRSH).
     fn walk(
         &self,
         from: Loc,
@@ -1666,8 +1669,7 @@ impl Run<'_> {
         for _ in 0..32 {
             let w = self.env.image.fetch(l).ok_or(())?;
             let lifted = self.env.lift(l, w).map_err(|_| ())?;
-            let literal = eval::pc_relative(lifted.0, w, l.thumb);
-            let out = eval::eval(&lifted.1, l, &st, self.env.image, literal, None);
+            let out = eval::eval(&lifted.1, l, &st, self.env.image, true, None);
             if out.may_skip && out.may_run {
                 return Err(());
             }

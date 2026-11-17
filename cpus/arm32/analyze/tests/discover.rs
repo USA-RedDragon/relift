@@ -852,3 +852,40 @@ fn code_a_boot_stores_over_its_own_copy_before_jumping_there_is_found() {
         "the code the boot stored runs on to {done:#x}"
     );
 }
+
+#[test]
+fn a_switch_on_a_halfword_offset_table_resolves_on_a_writable_image() {
+    let mut m = Machine::new(Profile::V5te);
+    m.writable = true;
+    let pool = BASE + 0x80;
+    let tab = BASE + 0x90;
+    let jump = BASE + 20;
+    let case = |k: u32| jump + 8 + 4 * k;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(8, BASE, pool),
+            0xE350_0002,
+            0x8A00_0010,
+            0xE080_1000,
+            0xE198_10F1,
+            0xE08F_F101,
+            A_MOV_R1_R1,
+            A_BX_LR,
+            A_MOV_R0_1,
+            A_BX_LR,
+            0xE3A0_0002,
+            A_BX_LR,
+        ],
+    );
+    m.arm(pool, &[tab]);
+    m.put(tab, &[0, 0, 2, 0, 4, 0]);
+    let r = m.run(all(), arm(BASE));
+    for k in [2, 4] {
+        assert!(
+            r.instructions().contains_key(&arm(case(k))),
+            "case {k} at {:#x}",
+            case(k)
+        );
+    }
+}
