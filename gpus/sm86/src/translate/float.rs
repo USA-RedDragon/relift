@@ -566,30 +566,32 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
     let mode = round_of(i);
     let ftz = i.has("FTZ");
-    let a = c.fsrc_bits(&i.ops[1])?;
-    let b = c.fsrc_bits(&i.ops[2])?;
-    let r = match i.mnemonic {
-        "FADD" => c.fadd_exact(a, b, mode, ftz),
-        "FMUL" => {
-            let scale = [
-                ("D2", -1),
-                ("D4", -2),
-                ("D8", -3),
-                ("M2", 1),
-                ("M4", 2),
-                ("M8", 3),
-            ]
-            .iter()
-            .find(|(m, _)| i.has(m))
-            .map_or(0, |(_, s)| *s);
-            c.fmul_exact(a, b, mode, ftz, scale)
-        }
-        _ => {
-            let cc = c.fsrc_bits(&i.ops[3])?;
-            c.ffma_exact(a, b, cc, mode, ftz)
-        }
-    };
-    let u = c.sat_bits(r, i.has("SAT"));
+    let mut args = vec![c.fsrc_bits(&i.ops[1])?, c.fsrc_bits(&i.ops[2])?];
+    if i.mnemonic == "FFMA" {
+        args.push(c.fsrc_bits(&i.ops[3])?);
+    }
+    let scale = [
+        ("D2", -1),
+        ("D4", -2),
+        ("D8", -3),
+        ("M2", 1),
+        ("M4", 2),
+        ("M8", 3),
+    ]
+    .iter()
+    .find(|(m, _)| i.has(m))
+    .map_or(0, |(_, s)| *s);
+    let sat = i.has("SAT");
+    let name = i.mnemonic;
+    let key = format!("{name} {mode:?} {ftz} {scale} {sat}");
+    let u = c.shared_pure(key, &args, |c, p| {
+        let r = match name {
+            "FADD" => c.fadd_exact(p[0], p[1], mode, ftz),
+            "FMUL" => c.fmul_exact(p[0], p[1], mode, ftz, scale),
+            _ => c.ffma_exact(p[0], p[1], p[2], mode, ftz),
+        };
+        c.sat_bits(r, sat)
+    });
     c.store_dst(&i.ops[0], u)
 }
 
@@ -601,17 +603,27 @@ fn fmnmx(c: &mut Ctx, i: &Inst) -> Res<()> {
     let a = c.fsrc_bits(&i.ops[1])?;
     let b = c.fsrc_bits(&i.ops[2])?;
     let p = c.pred_operand(&i.ops[3])?;
-    let (lo, hi) = c.fminmax(a, b, i.has("FTZ"));
-    let r = c.select(u, p, lo, hi);
-    let r = if i.has("NAN") {
-        let na = c.is_nan_bits(a);
-        let nb = c.is_nan_bits(b);
-        let any = c.or(na, nb);
-        let qnan = c.m.c_u32(0x7fff_ffff);
-        c.select(u, any, qnan, r)
-    } else {
-        r
-    };
+    let (one, zero) = (c.m.c_u32(1), c.m.c_u32(0));
+    let pu = c.select(u, p, one, zero);
+    let (ftz, nan) = (i.has("FTZ"), i.has("NAN"));
+    let r = c.shared_pure(format!("FMNMX {ftz} {nan}"), &[a, b, pu], |c, x| {
+        let u = c.u32t();
+        let (a, b) = (x[0], x[1]);
+        let (lo, hi) = c.fminmax(a, b, ftz);
+        let z = c.m.c_u32(0);
+        let b_ = c.boolt();
+        let p = c.m.emit(op::I_NOT_EQUAL, b_, &[x[2], z]);
+        let r = c.select(u, p, lo, hi);
+        if nan {
+            let na = c.is_nan_bits(a);
+            let nb = c.is_nan_bits(b);
+            let any = c.or(na, nb);
+            let qnan = c.m.c_u32(0x7fff_ffff);
+            c.select(u, any, qnan, r)
+        } else {
+            r
+        }
+    });
     c.store_dst(&i.ops[0], r)
 }
 

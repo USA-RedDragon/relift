@@ -50,7 +50,7 @@ pub(crate) struct State {
     /// Exact-path functions by (operation, rounding, flush).
     funcs: BTreeMap<(u8, u8, bool, i32), u32>,
     /// The function variable that carries a repaired result.
-    var: Option<u32>,
+    pub(crate) var: Option<u32>,
     /// SignedZeroInfNanPreserve can be requested.
     szinp: bool,
 }

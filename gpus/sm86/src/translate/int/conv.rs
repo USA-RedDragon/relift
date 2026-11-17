@@ -65,6 +65,12 @@ impl Ctx {
     /// A NaN becomes the canonical `0x7fffffff`; with `ftz` a subnormal
     /// input reads as a signed zero.
     pub(crate) fn f16_to_f32(&mut self, h: u32, ftz: bool) -> u32 {
+        self.shared_pure(format!("f16_to_f32 {ftz}"), &[h], |c, p| {
+            c.f16_to_f32_body(p[0], ftz)
+        })
+    }
+
+    fn f16_to_f32_body(&mut self, h: u32, ftz: bool) -> u32 {
         let sign = self.and_k(h, 0x8000);
         let sign32 = self.sh(op::SHIFT_LEFT_LOGICAL, sign, 16);
         let e = {
@@ -110,6 +116,12 @@ impl Ctx {
     /// rounding mode; NaN becomes `0x7fff`; with `ftz` a subnormal result
     /// is a signed zero.
     pub(crate) fn f32_to_f16(&mut self, u: u32, mode: u32, ftz: bool) -> u32 {
+        self.shared_pure(format!("f32_to_f16 {mode} {ftz}"), &[u], |c, p| {
+            c.f32_to_f16_body(p[0], mode, ftz)
+        })
+    }
+
+    fn f32_to_f16_body(&mut self, u: u32, mode: u32, ftz: bool) -> u32 {
         let sign = self.sh(op::SHIFT_RIGHT_LOGICAL, u, 31);
         let neg = self.cmp_k(op::I_EQUAL, sign, 1);
         let ab = self.and_k(u, 0x7fff_ffff);
@@ -209,6 +221,14 @@ impl Ctx {
     /// A 64-bit magnitude (low, high) and its sign to float bits with
     /// `mbits` explicit mantissa bits: single (23) or half (10) precision.
     fn int_to_float(&mut self, lo: u32, hi: u32, neg: u32, mode: u32, half: bool) -> u32 {
+        self.shared_pure(
+            format!("int_to_float {mode} {half}"),
+            &[lo, hi, neg],
+            |c, p| c.int_to_float_body(p[0], p[1], p[2], mode, half),
+        )
+    }
+
+    fn int_to_float_body(&mut self, lo: u32, hi: u32, neg: u32, mode: u32, half: bool) -> u32 {
         let mbits: u32 = if half { 10 } else { 23 };
         let zero = self.kc(0);
         let u = self.u32t();

@@ -48,6 +48,9 @@ pub(crate) const UNIFORM: u32 = 2;
 pub(crate) const INPUT: u32 = 1;
 pub(crate) const OUTPUT: u32 = 3;
 pub(crate) const FUNCTION: u32 = 7;
+const FUNCTION_PARAMETER: u16 = 55;
+const FUNCTION_CALL: u16 = 57;
+const RETURN_VALUE: u16 = 254;
 pub(crate) const PHYSICAL_STORAGE_BUFFER: u32 = 5349;
 const CBUF_VEC4S: u32 = 4096;
 const EXECUTION_MODE_MAXIMALLY_RECONVERGES: u32 = 6023;
@@ -238,6 +241,8 @@ pub(crate) struct Ctx {
     pub denorm: denorm::State,
     /// Helper functions, emitted after `main`.
     pub funcs: Vec<u32>,
+    /// Shared functions by key (see [`Ctx::shared`]).
+    pub shared_fns: BTreeMap<String, u32>,
     /// The last clock value read, low and high words.
     pub clock_vars: Option<(u32, u32)>,
     /// Per instruction, whether control flow may reach it with only part
@@ -256,6 +261,85 @@ pub(crate) struct Ctx {
 }
 
 impl Ctx {
+    /// Calls the function `key` names on `args`, emitting it the first time
+    /// with `body` from its parameters: a computation of 32-bit words that
+    /// many instructions share, written once per module (the host's
+    /// compiler inlines it as it likes). `body` sees only its parameters;
+    /// the local variables it asks for become the function's own.
+    pub(crate) fn shared(
+        &mut self,
+        key: String,
+        args: &[u32],
+        body: impl FnOnce(&mut Ctx, &[u32]) -> Res<u32>,
+    ) -> Res<u32> {
+        self.shared_fn(key, args, body)
+    }
+
+    /// [`Ctx::shared`] for a body that cannot fail.
+    pub(crate) fn shared_pure(
+        &mut self,
+        key: String,
+        args: &[u32],
+        body: impl FnOnce(&mut Ctx, &[u32]) -> u32,
+    ) -> u32 {
+        match self.shared_fn::<std::convert::Infallible>(key, args, |c, p| Ok(body(c, p))) {
+            Ok(v) => v,
+            Err(e) => match e {},
+        }
+    }
+
+    fn shared_fn<E>(
+        &mut self,
+        key: String,
+        args: &[u32],
+        body: impl FnOnce(&mut Ctx, &[u32]) -> Result<u32, E>,
+    ) -> Result<u32, E> {
+        let u = self.u32t();
+        let id = match self.shared_fns.get(&key) {
+            Some(&f) => f,
+            None => {
+                let saved = std::mem::take(&mut self.m.body);
+                let saved_var = self.denorm.var.take();
+                let first_local = self.locals.len();
+                let params = vec![u; args.len()];
+                let fnt = self.m.t_fn_args(u, &params);
+                let id = self.m.id();
+                self.m.emit_void(op::FUNCTION, &[u, id, 0, fnt]);
+                let ps: Vec<u32> = params
+                    .iter()
+                    .map(|_| self.m.emit(FUNCTION_PARAMETER, u, &[]))
+                    .collect();
+                let entry = self.m.id();
+                self.m.emit_void(op::LABEL, &[entry]);
+                let at = self.m.body.len();
+                let r = match body(self, &ps) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        self.m.body = saved;
+                        self.denorm.var = saved_var;
+                        return Err(e);
+                    }
+                };
+                self.m.emit_void(RETURN_VALUE, &[r]);
+                self.m.emit_void(op::FUNCTION_END, &[]);
+                let pu = self.m.t_ptr(FUNCTION, u);
+                let mut decls = Vec::new();
+                for v in self.locals.split_off(first_local) {
+                    crate::spirv::inst(&mut decls, op::VARIABLE, &[pu, v, FUNCTION]);
+                }
+                let mut f = std::mem::replace(&mut self.m.body, saved);
+                f.splice(at..at, decls);
+                self.funcs.extend(f);
+                self.denorm.var = saved_var;
+                self.shared_fns.insert(key, id);
+                id
+            }
+        };
+        let mut a = vec![id];
+        a.extend_from_slice(args);
+        Ok(self.m.emit(FUNCTION_CALL, u, &a))
+    }
+
     pub fn u32t(&mut self) -> u32 {
         self.m.t_u32()
     }
@@ -829,6 +913,7 @@ impl Ctx {
             simt: None,
             warp_idioms: uniform::Plan::default(),
             synced: HashSet::new(),
+            shared_fns: BTreeMap::new(),
         }
     }
 

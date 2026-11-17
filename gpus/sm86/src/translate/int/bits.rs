@@ -137,6 +137,14 @@ fn prmt(c: &mut Ctx, i: &Inst) -> Res<()> {
     let a = c.usrc(&i.ops[1])?;
     let s = c.usrc(&i.ops[2])?;
     let b = c.usrc(&i.ops[3])?;
+    let r = c.shared_pure(format!("PRMT {mode}"), &[a, s, b], |c, p| {
+        prmt_body(c, mode, p[0], p[1], p[2])
+    });
+    c.store_dst(&i.ops[0], r)
+}
+
+/// The bytes PRMT selects from `a` and `b` under selector `s` in `mode`.
+fn prmt_body(c: &mut Ctx, mode: &str, a: u32, s: u32, b: u32) -> u32 {
     let u = c.u32t();
     let k3 = c.kc(3);
     let k7 = c.kc(7);
@@ -189,8 +197,7 @@ fn prmt(c: &mut Ctx, i: &Inst) -> Res<()> {
             Some(p) => c.ib(op::BITWISE_OR, p, placed),
         });
     }
-    let r = out.unwrap_or(kff);
-    c.store_dst(&i.ops[0], r)
+    out.unwrap_or(kff)
 }
 
 fn sgxt(c: &mut Ctx, i: &Inst) -> Res<()> {

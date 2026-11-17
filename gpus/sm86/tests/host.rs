@@ -72,10 +72,14 @@ fn fadd_is_native_where_the_host_matches_the_guest() {
     let s = translate_with(&ftz, &nv).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(s.interface.host.denorm_fixups, 0);
     assert!(s.interface.host.check_flush);
-    assert_eq!(count(&s.spirv, FUNCTION_CALL), 0);
+    assert_eq!(count(&s.spirv, FUNCTION_CALL), 1, "only the shared FADD");
     let s = translate_with(&fadd(false), &nv).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(s.interface.host.denorm_fixups, 1);
-    assert_eq!(count(&s.spirv, FUNCTION_CALL), 1);
+    assert_eq!(
+        count(&s.spirv, FUNCTION_CALL),
+        2,
+        "the shared FADD and its exact path"
+    );
 }
 
 #[test]

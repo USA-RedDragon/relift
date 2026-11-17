@@ -158,6 +158,13 @@ fn to_half(c: &mut Ctx, r: u32) -> u32 {
 }
 
 fn func(c: &mut Ctx, kind: &str, x: u32) -> Res<u32> {
+    let owned = kind.to_string();
+    c.shared(format!("MUFU {kind}"), &[x], move |c, p| {
+        func_body(c, &owned, p[0])
+    })
+}
+
+fn func_body(c: &mut Ctx, kind: &str, x: u32) -> Res<u32> {
     let native = !c.exact_mufu;
     Ok(match kind {
         "RCP" if native => native_op(c, x, None),
