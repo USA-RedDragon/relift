@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 serde_json = { workspace = true }
+zstd = { workspace = true }
 
 [lints]
 workspace = true

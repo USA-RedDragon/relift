@@ -267,8 +267,8 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-gpu-sm86",
         band: 2,
-        why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words and the target device's capabilities as JSON",
-        normal: &["serde_json"],
+        why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words and the target device's capabilities as JSON, writes the translation table zstd-compressed",
+        normal: &["serde_json", "zstd"],
         dev: &["relift-cache", "relift-proc"],
         build: NONE,
     },

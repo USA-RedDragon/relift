@@ -39,6 +39,13 @@
 //!   names the program by), the offset of its SPIR-V from the start of the
 //!   table in bytes and its length in 32-bit words (u32 each);
 //! * the SPIR-V words of every entry, each module aligned to 4 bytes.
+//!
+//! [`Table::to_compressed_bytes`] is the same with each module stored as
+//! one zstd frame (SPIR-V shrinks to about a quarter): the magic
+//! `RLSPV002`, the count (u32), then per entry the key, the frame's offset
+//! (u64, so a table may pass 4 GiB), its length in bytes and the module's
+//! length in 32-bit words (u32 each), then the frames, each at a 4-byte
+//! boundary.
 
 use super::{HostProfile, Interface, Options, Shader, Stage, translate_with};
 use crate::program::Program;
@@ -106,6 +113,33 @@ impl Table {
             out.extend(words.iter().flat_map(|w| w.to_le_bytes()));
         }
         out
+    }
+
+    /// The table with each module zstd-compressed at `level` (see the
+    /// module documentation).
+    pub fn to_compressed_bytes(&self, level: i32) -> std::io::Result<Vec<u8>> {
+        let n = self.shaders.len();
+        let mut frames = Vec::with_capacity(n);
+        for (_, words, _) in self.shaders.values() {
+            let raw: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+            frames.push(zstd::bulk::compress(&raw, level)?);
+        }
+        let mut out = Vec::new();
+        out.extend(b"RLSPV002");
+        out.extend((n as u32).to_le_bytes());
+        let mut at = 12 + 48 * n;
+        for ((key, (_, words, _)), f) in self.shaders.iter().zip(&frames) {
+            out.extend(key);
+            out.extend((at as u64).to_le_bytes());
+            out.extend((f.len() as u32).to_le_bytes());
+            out.extend((words.len() as u32).to_le_bytes());
+            at += f.len().next_multiple_of(4);
+        }
+        for f in &frames {
+            out.extend(f);
+            out.resize(out.len().next_multiple_of(4), 0);
+        }
+        Ok(out)
     }
 }
 

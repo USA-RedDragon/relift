@@ -104,4 +104,20 @@ fn a_program_set_translates_into_a_table() {
     assert_eq!(len, words.len());
     assert_eq!(b[at..at + 4], words[0].to_le_bytes());
     assert_eq!(b.len(), 12 + 2 * 40 + 8 * len);
+    let z = t.to_compressed_bytes(19).expect("compresses");
+    assert_eq!(&z[..8], b"RLSPV002");
+    assert_eq!(z[12], 1, "sorted by key");
+    let at = u64::from_le_bytes(z[44..52].try_into().unwrap()) as usize;
+    let size = u32::from_le_bytes(z[52..56].try_into().unwrap()) as usize;
+    let n = u32::from_le_bytes(z[56..60].try_into().unwrap()) as usize;
+    assert_eq!(n, words.len());
+    let raw = zstd::bulk::decompress(&z[at..at + size], 4 * n).expect("one frame");
+    assert_eq!(
+        raw,
+        words
+            .iter()
+            .flat_map(|w| w.to_le_bytes())
+            .collect::<Vec<u8>>()
+    );
+    assert!(z.len() < b.len());
 }
