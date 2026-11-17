@@ -477,11 +477,22 @@ static int fixed_state(replay *r, pipe_key *k)
     return RL_OK;
 }
 
+/**
+ * @brief The binding of attributes whose format is NVN_FORMAT_NONE (the
+ * game disabled them while the program still reads them): a stride-0
+ * buffer of (0, 0, 0, 1). The driver's nvnCommandBufferBindVertexAttribState
+ * programs such an attribute as 0x3a400040, a constant (unfetched) single
+ * 32-bit float, which reads as x = 0 with the missing components filled
+ * as (0, 0, 1).
+ */
+#define DEFAULT_BINDING (NVN_VERTEX_BUFFERS - 1u)
+
 /** @brief Fills the vertex input of k for the attributes vs reads. */
 static int vertex_state(replay *r, const module *vs, pipe_key *k)
 {
     nvn_gfx *st = r->st;
     uint32_t streams = 0;
+    bool real15 = false, def = false;
     int rc;
     for (uint32_t i = 0; i < NVN_VERTEX_ATTRIBS && i < 32; i++) {
         if (!(vs->inputs & (1u << i)))
@@ -495,16 +506,30 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
             (rc = nvn_vk_getter(r, "nvnVertexAttribStateGetStreamIndex", st->attribs[i], 4, NULL, 0, 0, NULL,
                                 &stream)) != RL_OK)
             return rc;
+        if (fo[0] == 0) {
+            def = true;
+            if (!(streams & (1u << DEFAULT_BINDING)))
+                k->bind[k->nbind++] = (VkVertexInputBindingDescription){ DEFAULT_BINDING, 0,
+                                                                         VK_VERTEX_INPUT_RATE_VERTEX };
+            streams |= 1u << DEFAULT_BINDING;
+            k->attr[k->nattr++] = (VkVertexInputAttributeDescription){ i, DEFAULT_BINDING,
+                                                                       VK_FORMAT_R32G32B32A32_SFLOAT, 0 };
+            continue;
+        }
         VkFormat f = vertex_format(fo[0]);
         if (f == VK_FORMAT_UNDEFINED || integer_format(f))
             return nvn_vk_stop(r, "vertex attribute %u has format %u, which the float input cannot take", i, fo[0]);
         if ((uint32_t)stream >= st->nstreams)
             return nvn_vk_stop(r, "vertex attribute %u reads stream %u of %u", i, (uint32_t)stream, st->nstreams);
+        if ((uint32_t)stream == DEFAULT_BINDING)
+            real15 = true;
         k->attr[k->nattr++] = (VkVertexInputAttributeDescription){ i, (uint32_t)stream, f, fo[1] };
         streams |= 1u << stream;
     }
+    if (def && real15)
+        return nvn_vk_stop(r, "a disabled vertex attribute and stream %u in one draw", DEFAULT_BINDING);
     for (uint32_t s = 0; s < NVN_VERTEX_BUFFERS; s++) {
-        if (!(streams & (1u << s)))
+        if (!(streams & (1u << s)) || (def && s == DEFAULT_BINDING))
             continue;
         uint64_t stride = 0, div = 0;
         if ((rc = nvn_vk_getter(r, "nvnVertexStreamStateGetStride", st->streams[s], 8, NULL, 0, 0, NULL, &stride)) !=
@@ -826,9 +851,19 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VkBuffer bufs[NVN_VERTEX_BUFFERS];
     VkDeviceSize offs[NVN_VERTEX_BUFFERS];
     uint32_t nb = 0, firstb = 0;
+    uint64_t def_off = 0;
+    bool has_def = false;
     for (uint32_t i = 0; i < k.nbind; i++) {
         uint32_t s = k.bind[i].binding;
         uint64_t off;
+        if (s == DEFAULT_BINDING && k.bind[i].stride == 0 && !st->vb[s].addr) {
+            static const float one[4] = { 0, 0, 0, 1 };
+            if (!nvn_vk_upload_bytes(r, (const uint8_t *)one, sizeof one, 0, 16, &off))
+                return nvn_vk_stop(r, "the upload arena is full");
+            def_off = off;
+            has_def = true;
+            continue;
+        }
         if (!st->vb[s].addr)
             return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
         if (!nvn_vk_upload(r, st->vb[s].addr, st->vb[s].size, 0, 16, &off))
@@ -859,6 +894,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     dynamic_state(r, area);
     if (nb)
         VK(vkCmdBindVertexBuffers)(g.cb, firstb, nb, bufs, offs);
+    if (has_def)
+        VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &def_off);
     if (indexed) {
         VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, ioff, itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         VK(vkCmdDrawIndexed)(g.cb, count, 1, 0, base, 0);
