@@ -1,5 +1,5 @@
-//! The workspace charter: every crate's band and dependency ceiling, and the
-//! folder cut edges, read from one `cargo metadata`.
+//! The workspace charter: every crate's dependency ceiling, its band read from
+//! its manifest, and the folder cut edges, read from one `cargo metadata`.
 //!
 //! Ceilings are judged on DECLARED dependencies (`packages[].dependencies`),
 //! which are feature- and platform-independent, so no feature selection or
@@ -55,9 +55,6 @@ impl Kind {
 /// rule that is skipped: every declared dependency must be listed here.
 struct Charter {
     member: &'static str,
-    /// The graph band. A crate may declare crates in its own band or a lower
-    /// one, never a higher one.
-    band: u8,
     /// What the crate is, printed when its row breaks.
     why: &'static str,
     normal: &'static [&'static str],
@@ -90,7 +87,6 @@ const STANDALONE: &[&str] = &[
 const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-info",
-        band: 0,
         why: "the self-description types shared by the tool and launchers, a leaf",
         normal: &["serde", "serde_json"],
         dev: NONE,
@@ -98,7 +94,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-ir",
-        band: 0,
         why: "the guest-neutral IR, a leaf",
         normal: NONE,
         dev: NONE,
@@ -106,7 +101,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-patch",
-        band: 0,
         why: "IPS, IPS32, UPS and BPS patches, a leaf",
         normal: NONE,
         dev: NONE,
@@ -114,7 +108,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cache",
-        band: 0,
         why: "the content-addressed store and the one file writer, a leaf",
         normal: NONE,
         dev: NONE,
@@ -122,7 +115,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-host",
-        band: 0,
         why: "the host target list, a leaf",
         normal: NONE,
         dev: NONE,
@@ -130,7 +122,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-proc",
-        band: 0,
         why: "the one subprocess runner and worker count, a leaf",
         normal: NONE,
         dev: NONE,
@@ -138,7 +129,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-progress",
-        band: 0,
         why: "live and plain progress lines, color rules and throttling; writes to a sink it is given, a leaf",
         normal: NONE,
         dev: NONE,
@@ -146,7 +136,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-sail",
-        band: 0,
         why: "the shared Sail frontend (parser, model tables, staged evaluator) for template generators; a leaf that knows no CPU and no guest",
         normal: NONE,
         dev: NONE,
@@ -154,7 +143,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-diff",
-        band: 0,
         why: "the differential check's wire protocol, page cache and comparison; knows no CPU, a leaf",
         normal: NONE,
         dev: NONE,
@@ -162,7 +150,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-guest",
-        band: 1,
         why: "the guest contract and vocabulary, over the IR only",
         normal: &["relift-ir"],
         dev: NONE,
@@ -170,7 +157,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-analyze",
-        band: 2,
         why: "analysis generic over a CPU frontend; knows no CPU and no guest",
         normal: &["relift-guest", "relift-ir", "relift-proc"],
         dev: NONE,
@@ -178,7 +164,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-emit",
-        band: 2,
         why: "IR to C per host target; knows no CPU and no guest",
         normal: &["relift-guest", "relift-host", "relift-ir", "relift-proc"],
         dev: NONE,
@@ -186,7 +171,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-emit-wasm",
-        band: 2,
         why: "IR to WebAssembly modules; knows no CPU and no guest; wasmtime runs its differential tests only",
         normal: &["relift-guest", "relift-ir", "wasm-encoder"],
         dev: &["wasmtime"],
@@ -194,7 +178,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-build",
-        band: 2,
         why: "toolchains and Ninja, running compilers through relift-proc and writing through relift-cache",
         normal: &["relift-cache", "relift-host", "relift-proc"],
         dev: NONE,
@@ -202,7 +185,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-input",
-        band: 2,
         why: "the input model: ports, controls, bindings; reads the runtime's name table and renders the self-description section",
         normal: &["relift-info", "toml"],
         dev: &["relift-cache"],
@@ -210,7 +192,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-manifest",
-        band: 2,
         why: "game.toml types; the guest owns its own section",
         normal: &["relift-guest"],
         dev: NONE,
@@ -218,7 +199,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-arm64",
-        band: 2,
         why: "the ARM64 frontend, over the IR and the guest contract only",
         normal: &["relift-guest", "relift-ir"],
         dev: NONE,
@@ -226,7 +206,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-arm32",
-        band: 2,
         why: "the ARMv4T (GBA ARM7TDMI) decoder and lifter, over the IR only; no guest uses it yet",
         normal: &["relift-ir"],
         dev: NONE,
@@ -234,7 +213,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-mips",
-        band: 2,
         why: "the VR4300 (N64 CPU) decoder and lifter, over the IR only; no guest uses it yet",
         normal: &["relift-ir"],
         dev: NONE,
@@ -242,7 +220,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-rsp",
-        band: 2,
         why: "the RSP (N64 signal processor) decoder and lifter, its vector unit over the IR's lane operations; no guest uses it yet",
         normal: &["relift-ir"],
         dev: NONE,
@@ -250,7 +227,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-arm32-analyze",
-        band: 2,
         why: "function discovery for 32-bit Arm code across ARM and Thumb, over the arm32 lifter; the machine comes from a platform the guest gives",
         normal: &["relift-cpu-arm32", "relift-ir"],
         dev: NONE,
@@ -258,7 +234,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-sm83",
-        band: 2,
         why: "the SM83 decoder, opcode table and frontend, over the IR and the guest contract only",
         normal: &["relift-guest", "relift-ir"],
         dev: NONE,
@@ -266,7 +241,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gpu-sm86",
-        band: 2,
         why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words and the target device's capabilities as JSON, writes the translation table zstd-compressed",
         normal: &["serde_json", "zstd"],
         dev: &["relift-cache", "relift-proc"],
@@ -274,7 +248,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-z80",
-        band: 2,
         why: "the Z80 decoder, lifter and frontend over the templates generated from our Sail model; no guest uses it yet",
         normal: &["relift-guest", "relift-ir"],
         dev: NONE,
@@ -282,7 +255,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gb-formats",
-        band: 2,
         why: "the Game Boy cartridge format: header, mapper kinds, size codes, checksums and bank layout; reads bytes only",
         normal: NONE,
         dev: NONE,
@@ -290,7 +262,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gb-analyze",
-        band: 2,
         why: "Game Boy function discovery across mapper banks, over the SM83 decoder and the cartridge format; decode and control flow only",
         normal: &["relift-cpu-sm83", "relift-gb-formats", "relift-proc"],
         dev: NONE,
@@ -298,7 +269,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gb-tools",
-        band: 2,
         why: "single-purpose tools for Game Boy files, thin wrappers over relift-gb-formats and relift-gb-analyze",
         normal: &[
             "clap",
@@ -316,7 +286,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gba-analyze",
-        band: 2,
         why: "Game Boy Advance function discovery: the GBA memory map, BIOS calls, DMA and roots over the shared arm32 discovery and the cartridge format; analysis only",
         normal: &[
             "relift-cpu-arm32",
@@ -328,7 +297,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gba-formats",
-        band: 2,
         why: "the Game Boy Advance cartridge format: header, complement and logo hash, size and mirror rules, save library strings and multiboot detection; reads bytes only",
         normal: &["sha2"],
         dev: NONE,
@@ -336,7 +304,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gba-tools",
-        band: 2,
         why: "single-purpose tools for Game Boy Advance files, thin wrappers over relift-gba-formats and relift-gba-analyze",
         normal: &[
             "clap",
@@ -354,7 +321,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-sms-formats",
-        band: 2,
         why: "the Master System, Game Gear and SG-1000 cartridge format: size and bank layout, TMR SEGA and Codemasters headers and checksums, system and mapper detection; reads bytes only",
         normal: NONE,
         dev: NONE,
@@ -362,7 +328,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-nds-analyze",
-        band: 2,
         why: "Nintendo DS function discovery: the DS memory map, BIOS calls, DMA and the unit runs (static binaries, overlays, seeds between them) over the shared arm32 discovery and the cartridge format; analysis only",
         normal: &["relift-cpu-arm32-analyze", "relift-nds-formats"],
         dev: NONE,
@@ -370,7 +335,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-nds-formats",
-        band: 2,
         why: "the Nintendo DS cartridge format: header with CRC16 and logo hash, module parameters, BLZ, static binaries with autoload blocks, overlays and file tables; reads bytes only",
         normal: &["sha2"],
         dev: NONE,
@@ -378,7 +342,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-n64-analyze",
-        band: 2,
         why: "Nintendo 64 code discovery: the VR4300 lifter's IR run over abstract values, the PI DMA fixed point, the ROM-wide region scan with the link address vote and the RSP image list, over the cartridge format; analysis only",
         normal: &[
             "relift-cpu-mips",
@@ -391,7 +354,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-n64-formats",
-        band: 2,
         why: "the Nintendo 64 cartridge format: byte orders, header, boot variant by hash, checksum, Yay0, Yaz0 and MIO0 decoders and their scan; reads bytes only",
         normal: NONE,
         dev: NONE,
@@ -399,7 +361,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-sms-tools",
-        band: 2,
         why: "single-purpose tools for Master System, Game Gear and SG-1000 files, thin wrappers over relift-sms-formats and relift-sms",
         normal: &[
             "clap",
@@ -418,7 +379,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-n64-tools",
-        band: 2,
         why: "single-purpose tools for Nintendo 64 files, thin wrappers over relift-n64-formats and relift-n64-analyze",
         normal: &[
             "clap",
@@ -437,7 +397,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-nds-tools",
-        band: 2,
         why: "single-purpose tools for decrypted Nintendo DS files, thin wrappers over relift-nds-formats and relift-nds-analyze",
         normal: &[
             "clap",
@@ -451,7 +410,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch-formats",
-        band: 2,
         why: "decrypted Switch formats and the import; extraction writes through relift-cache",
         normal: &["lz4_flex", "relift-cache", "sha2", "zstd"],
         dev: NONE,
@@ -459,7 +417,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch-tools",
-        band: 2,
         why: "single-purpose tools for decrypted Switch files, thin wrappers over relift-switch-formats, and the IR dump over relift-cpu-arm64",
         normal: &[
             "clap",
@@ -479,7 +436,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch-shaders",
-        band: 2,
         why: "finds the SM86 shader programs of a Switch 2 dump (carving, containers, KTGL entries); reads decrypted dumps through relift-switch-formats, decodes candidate lines with relift-gpu-sm86 and writes through relift-cache",
         normal: &[
             "clap",
@@ -495,7 +451,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch-vkgen",
-        band: 2,
         why: "generates the Switch runtime's Vulkan forwarding C from vk.xml; writes through relift-cache",
         normal: &["clap", "relift-cache", "roxmltree", "sha2", "toml"],
         dev: NONE,
@@ -503,7 +458,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch-names",
-        band: 2,
         why: "Switch symbols as host names, over the guest contract's naming trait only",
         normal: &["relift-guest"],
         dev: &["cpp_demangle"],
@@ -511,7 +465,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch",
-        band: 2,
         why: "the Switch guest over its formats and the ARM64 frontend",
         normal: &[
             "relift-cpu-arm64",
@@ -525,7 +478,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gb",
-        band: 2,
         why: "the Game Boy guest: the exact-mode SM83 frontend and a ROM lifted and emitted one unit per bank, over discovery and the C emitter",
         normal: &[
             "relift-cpu-sm83",
@@ -540,7 +492,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gba",
-        band: 2,
         why: "the Game Boy Advance guest: the ARMv4T frontend for the runtime's GBA layer and a ROM lifted and emitted as one unit, over discovery and the C emitter",
         normal: &[
             "relift-cpu-arm32",
@@ -554,7 +505,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-sms",
-        band: 2,
         why: "the Master System and Game Gear guest: the Z80 frontend for the runtime's SMS run layer and code lifted and emitted one unit per ROM bank and slot and per RAM group, over the C emitter",
         normal: &[
             "relift-cpu-z80",
@@ -568,7 +518,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-n64",
-        band: 2,
         why: "the Nintendo 64 guest: the VR4300 and RSP frontends for the runtime's N64 and RSP layers and a ROM lifted and emitted as one unit per segment and per RSP image, over discovery and the C emitter",
         normal: &[
             "relift-cpu-mips",
@@ -584,7 +533,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-nds",
-        band: 2,
         why: "the Nintendo DS guest: the frontend of both CPUs for the runtime's NDS layer and a cartridge's units lifted and emitted, over discovery and the C emitter",
         normal: &[
             "relift-cpu-arm32",
@@ -599,7 +547,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-testguest",
-        band: 2,
         why: "the synthetic guest the core is tested against",
         normal: &["relift-guest", "relift-ir"],
         dev: NONE,
@@ -607,7 +554,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-arm64-gen",
-        band: 3,
         why: "the Arm64 template generator over the decoder, the IR and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-arm64", "relift-ir", "relift-sail"],
         dev: NONE,
@@ -615,7 +561,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-arm32-gen",
-        band: 3,
         why: "the ARMv4T decode table and template generator over the lifter's register file and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-arm32", "relift-sail"],
         dev: NONE,
@@ -623,7 +568,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-mips-gen",
-        band: 3,
         why: "the VR4300 decode table and template generator over the lifter's register file and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-mips", "relift-sail"],
         dev: NONE,
@@ -631,7 +575,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-rsp-gen",
-        band: 3,
         why: "the RSP decode table and template generator over the lifter's register file and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-rsp", "relift-sail"],
         dev: NONE,
@@ -639,7 +582,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-sm83-gen",
-        band: 3,
         why: "the SM83 template generator over the opcode table and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-sm83", "relift-sail"],
         dev: NONE,
@@ -647,7 +589,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-cpu-z80-gen",
-        band: 3,
         why: "the Z80 template generator over the lifter's template groups and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-z80", "relift-sail"],
         dev: NONE,
@@ -655,7 +596,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift",
-        band: 3,
         why: "the binary: settings, dispatch and the guest registry",
         normal: &[
             "clap",
@@ -707,7 +647,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-override-macros",
-        band: 0,
         why: "override attribute macros for game repos; nothing from the tool",
         normal: NONE,
         dev: NONE,
@@ -715,7 +654,6 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-override",
-        band: 1,
         why: "the Rust override API for game repos; nothing from the tool",
         normal: &["relift-override-macros"],
         dev: NONE,
@@ -768,6 +706,10 @@ impl Folder {
 /// One member as the metadata lists it.
 struct Member {
     name: String,
+    /// The graph band, from `[package.metadata.relift]` of the manifest. A
+    /// crate may declare crates in its own band or a lower one, never a
+    /// higher one.
+    band: u8,
     /// The manifest directory relative to the root, `/`-separated.
     rel: String,
     folder: Folder,
@@ -867,10 +809,16 @@ fn read_workspace(root: &Path) -> Workspace {
                 )
             })
             .collect();
+        let band = p["metadata"]["relift"]["band"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{name} has no [package.metadata.relift] band"))
+            .parse()
+            .unwrap_or_else(|_| panic!("the band of {name} is not a number"));
         members.insert(
             id,
             Member {
                 name,
+                band,
                 folder: Folder::of(&rel),
                 rel,
                 declared,
@@ -1086,16 +1034,21 @@ fn every_declared_ceiling_holds() {
 fn the_band_order_holds() {
     let ws = workspace();
     let names: BTreeSet<&str> = ws.members.values().map(|m| m.name.as_str()).collect();
+    let bands: BTreeMap<&str, u8> = ws
+        .members
+        .values()
+        .map(|m| (m.name.as_str(), m.band))
+        .collect();
     let mut broken = Vec::new();
     let mut edges = 0;
     for m in ws.members.values() {
-        let band = charter(&m.name).band;
+        let band = m.band;
         for (kind, dep) in &m.declared {
             if !names.contains(dep.as_str()) {
                 continue;
             }
             edges += 1;
-            let dep_band = charter(dep).band;
+            let dep_band = bands[dep.as_str()];
             if dep_band > band {
                 broken.push(format!(
                     "{} (band {band}) declares {} dependency {dep} (band {dep_band}); nothing in a lower band may depend on a higher one",
