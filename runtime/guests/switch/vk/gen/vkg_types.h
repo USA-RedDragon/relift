@@ -54,6 +54,8 @@
 #define VK_EXT_DEBUG_UTILS_SPEC_VERSION 2
 #define VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME "VK_EXT_depth_bias_control"
 #define VK_EXT_DEPTH_BIAS_CONTROL_SPEC_VERSION 1
+#define VK_EXT_DEVICE_FAULT_EXTENSION_NAME "VK_EXT_device_fault"
+#define VK_EXT_DEVICE_FAULT_SPEC_VERSION 2
 #define VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME "VK_EXT_discard_rectangles"
 #define VK_EXT_DISCARD_RECTANGLES_SPEC_VERSION 2
 #define VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME "VK_EXT_extended_dynamic_state2"
@@ -505,6 +507,28 @@ typedef enum VkDescriptorUpdateTemplateType {
     VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_PUSH_DESCRIPTORS_KHR = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_PUSH_DESCRIPTORS,
     VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_MAX_ENUM = 0x7FFFFFFF
 } VkDescriptorUpdateTemplateType;
+typedef enum VkDeviceFaultAddressTypeKHR {
+    VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_KHR = 3,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_KHR = 6,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_KHR = 5,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_KHR = 4,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR = 0,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_KHR = 1,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_KHR = 2,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_EXT = VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_KHR,
+    VK_DEVICE_FAULT_ADDRESS_TYPE_K_H_R_MAX_ENUM = 0x7FFFFFFF
+} VkDeviceFaultAddressTypeKHR;
+typedef enum VkDeviceFaultVendorBinaryHeaderVersionKHR {
+    VK_DEVICE_FAULT_VENDOR_BINARY_HEADER_VERSION_ONE_KHR = 1,
+    VK_DEVICE_FAULT_VENDOR_BINARY_HEADER_VERSION_ONE_EXT = VK_DEVICE_FAULT_VENDOR_BINARY_HEADER_VERSION_ONE_KHR,
+    VK_DEVICE_FAULT_VENDOR_BINARY_HEADER_VERSION_K_H_R_MAX_ENUM = 0x7FFFFFFF
+} VkDeviceFaultVendorBinaryHeaderVersionKHR;
 typedef enum VkDeviceGroupPresentModeFlagBitsKHR {
     VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR = 0x00000001,
     VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_MULTI_DEVICE_BIT_KHR = 0x00000008,
@@ -1678,6 +1702,8 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO = 1000085000,
     VK_STRUCTURE_TYPE_DEVICE_BUFFER_MEMORY_REQUIREMENTS = 1000413002,
     VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO = 3,
+    VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT = 1000341001,
+    VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT = 1000341002,
     VK_STRUCTURE_TYPE_DEVICE_GROUP_BIND_SPARSE_INFO = 1000060006,
     VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO = 1000060004,
     VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO = 1000070001,
@@ -1760,6 +1786,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO = 1000071000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT = 1000178002,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO = 1000076000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT = 1000341000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 = 1000059000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES = 1000197000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES = 1000070000,
@@ -2224,6 +2251,11 @@ typedef struct VkDescriptorUpdateTemplateCreateInfo VkDescriptorUpdateTemplateCr
 typedef struct VkDescriptorUpdateTemplateEntry VkDescriptorUpdateTemplateEntry;
 typedef struct VkDeviceBufferMemoryRequirements VkDeviceBufferMemoryRequirements;
 typedef struct VkDeviceCreateInfo VkDeviceCreateInfo;
+typedef struct VkDeviceFaultAddressInfoKHR VkDeviceFaultAddressInfoKHR;
+typedef struct VkDeviceFaultCountsEXT VkDeviceFaultCountsEXT;
+typedef struct VkDeviceFaultInfoEXT VkDeviceFaultInfoEXT;
+typedef struct VkDeviceFaultVendorBinaryHeaderVersionOneKHR VkDeviceFaultVendorBinaryHeaderVersionOneKHR;
+typedef struct VkDeviceFaultVendorInfoKHR VkDeviceFaultVendorInfoKHR;
 typedef struct VkDeviceGroupBindSparseInfo VkDeviceGroupBindSparseInfo;
 typedef struct VkDeviceGroupCommandBufferBeginInfo VkDeviceGroupCommandBufferBeginInfo;
 typedef struct VkDeviceGroupDeviceCreateInfo VkDeviceGroupDeviceCreateInfo;
@@ -2326,6 +2358,7 @@ typedef struct VkPhysicalDeviceExternalFenceInfo VkPhysicalDeviceExternalFenceIn
 typedef struct VkPhysicalDeviceExternalImageFormatInfo VkPhysicalDeviceExternalImageFormatInfo;
 typedef struct VkPhysicalDeviceExternalMemoryHostPropertiesEXT VkPhysicalDeviceExternalMemoryHostPropertiesEXT;
 typedef struct VkPhysicalDeviceExternalSemaphoreInfo VkPhysicalDeviceExternalSemaphoreInfo;
+typedef struct VkPhysicalDeviceFaultFeaturesEXT VkPhysicalDeviceFaultFeaturesEXT;
 typedef struct VkPhysicalDeviceFeatures VkPhysicalDeviceFeatures;
 typedef struct VkPhysicalDeviceFeatures2 VkPhysicalDeviceFeatures2;
 typedef struct VkPhysicalDeviceFloatControlsProperties VkPhysicalDeviceFloatControlsProperties;
@@ -2514,6 +2547,11 @@ typedef VkDescriptorUpdateTemplateCreateInfo VkDescriptorUpdateTemplateCreateInf
 typedef VkDescriptorUpdateTemplateEntry VkDescriptorUpdateTemplateEntryKHR;
 typedef VkDescriptorUpdateTemplate VkDescriptorUpdateTemplateKHR;
 typedef VkDescriptorUpdateTemplateType VkDescriptorUpdateTemplateTypeKHR;
+typedef VkDeviceFaultAddressInfoKHR VkDeviceFaultAddressInfoEXT;
+typedef VkDeviceFaultAddressTypeKHR VkDeviceFaultAddressTypeEXT;
+typedef VkDeviceFaultVendorBinaryHeaderVersionKHR VkDeviceFaultVendorBinaryHeaderVersionEXT;
+typedef VkDeviceFaultVendorBinaryHeaderVersionOneKHR VkDeviceFaultVendorBinaryHeaderVersionOneEXT;
+typedef VkDeviceFaultVendorInfoKHR VkDeviceFaultVendorInfoEXT;
 typedef VkDeviceGroupDeviceCreateInfo VkDeviceGroupDeviceCreateInfoKHR;
 typedef VkExternalBufferProperties VkExternalBufferPropertiesKHR;
 typedef VkExternalFenceFeatureFlagBits VkExternalFenceFeatureFlagBitsKHR;
@@ -3323,6 +3361,49 @@ struct VkDeviceCreateInfo {
     const VkPhysicalDeviceFeatures* pEnabledFeatures;
 };
 
+struct VkDeviceFaultAddressInfoKHR {
+    VkDeviceFaultAddressTypeKHR addressType;
+    VkDeviceAddress reportedAddress;
+    VkDeviceSize addressPrecision;
+};
+
+struct VkDeviceFaultCountsEXT {
+    VkStructureType sType;
+    void* pNext;
+    uint32_t addressInfoCount;
+    uint32_t vendorInfoCount;
+    VkDeviceSize vendorBinarySize;
+};
+
+struct VkDeviceFaultInfoEXT {
+    VkStructureType sType;
+    void* pNext;
+    char description[VK_MAX_DESCRIPTION_SIZE];
+    VkDeviceFaultAddressInfoKHR* pAddressInfos;
+    VkDeviceFaultVendorInfoKHR* pVendorInfos;
+    void* pVendorBinaryData;
+};
+
+struct VkDeviceFaultVendorBinaryHeaderVersionOneKHR {
+    uint32_t headerSize;
+    VkDeviceFaultVendorBinaryHeaderVersionKHR headerVersion;
+    uint32_t vendorID;
+    uint32_t deviceID;
+    uint32_t driverVersion;
+    uint8_t pipelineCacheUUID[VK_UUID_SIZE];
+    uint32_t applicationNameOffset;
+    uint32_t applicationVersion;
+    uint32_t engineNameOffset;
+    uint32_t engineVersion;
+    uint32_t apiVersion;
+};
+
+struct VkDeviceFaultVendorInfoKHR {
+    char description[VK_MAX_DESCRIPTION_SIZE];
+    uint64_t vendorFaultCode;
+    uint64_t vendorFaultData;
+};
+
 struct VkDeviceGroupBindSparseInfo {
     VkStructureType sType;
     const void* pNext;
@@ -4104,6 +4185,13 @@ struct VkPhysicalDeviceExternalSemaphoreInfo {
     VkStructureType sType;
     const void* pNext;
     VkExternalSemaphoreHandleTypeFlagBits handleType;
+};
+
+struct VkPhysicalDeviceFaultFeaturesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 deviceFault;
+    VkBool32 deviceFaultVendorBinary;
 };
 
 struct VkPhysicalDeviceFeatures {
@@ -6175,6 +6263,39 @@ _Static_assert(offsetof(VkDeviceCreateInfo, ppEnabledLayerNames) == 40, "VkDevic
 _Static_assert(offsetof(VkDeviceCreateInfo, enabledExtensionCount) == 48, "VkDeviceCreateInfo.enabledExtensionCount guest offset");
 _Static_assert(offsetof(VkDeviceCreateInfo, ppEnabledExtensionNames) == 56, "VkDeviceCreateInfo.ppEnabledExtensionNames guest offset");
 _Static_assert(offsetof(VkDeviceCreateInfo, pEnabledFeatures) == 64, "VkDeviceCreateInfo.pEnabledFeatures guest offset");
+_Static_assert(sizeof(VkDeviceFaultAddressInfoKHR) == 24 && _Alignof(VkDeviceFaultAddressInfoKHR) == 8, "VkDeviceFaultAddressInfoKHR guest layout");
+_Static_assert(offsetof(VkDeviceFaultAddressInfoKHR, addressType) == 0, "VkDeviceFaultAddressInfoKHR.addressType guest offset");
+_Static_assert(offsetof(VkDeviceFaultAddressInfoKHR, reportedAddress) == 8, "VkDeviceFaultAddressInfoKHR.reportedAddress guest offset");
+_Static_assert(offsetof(VkDeviceFaultAddressInfoKHR, addressPrecision) == 16, "VkDeviceFaultAddressInfoKHR.addressPrecision guest offset");
+_Static_assert(sizeof(VkDeviceFaultCountsEXT) == 32 && _Alignof(VkDeviceFaultCountsEXT) == 8, "VkDeviceFaultCountsEXT guest layout");
+_Static_assert(offsetof(VkDeviceFaultCountsEXT, sType) == 0, "VkDeviceFaultCountsEXT.sType guest offset");
+_Static_assert(offsetof(VkDeviceFaultCountsEXT, pNext) == 8, "VkDeviceFaultCountsEXT.pNext guest offset");
+_Static_assert(offsetof(VkDeviceFaultCountsEXT, addressInfoCount) == 16, "VkDeviceFaultCountsEXT.addressInfoCount guest offset");
+_Static_assert(offsetof(VkDeviceFaultCountsEXT, vendorInfoCount) == 20, "VkDeviceFaultCountsEXT.vendorInfoCount guest offset");
+_Static_assert(offsetof(VkDeviceFaultCountsEXT, vendorBinarySize) == 24, "VkDeviceFaultCountsEXT.vendorBinarySize guest offset");
+_Static_assert(sizeof(VkDeviceFaultInfoEXT) == 296 && _Alignof(VkDeviceFaultInfoEXT) == 8, "VkDeviceFaultInfoEXT guest layout");
+_Static_assert(offsetof(VkDeviceFaultInfoEXT, sType) == 0, "VkDeviceFaultInfoEXT.sType guest offset");
+_Static_assert(offsetof(VkDeviceFaultInfoEXT, pNext) == 8, "VkDeviceFaultInfoEXT.pNext guest offset");
+_Static_assert(offsetof(VkDeviceFaultInfoEXT, description) == 16, "VkDeviceFaultInfoEXT.description guest offset");
+_Static_assert(offsetof(VkDeviceFaultInfoEXT, pAddressInfos) == 272, "VkDeviceFaultInfoEXT.pAddressInfos guest offset");
+_Static_assert(offsetof(VkDeviceFaultInfoEXT, pVendorInfos) == 280, "VkDeviceFaultInfoEXT.pVendorInfos guest offset");
+_Static_assert(offsetof(VkDeviceFaultInfoEXT, pVendorBinaryData) == 288, "VkDeviceFaultInfoEXT.pVendorBinaryData guest offset");
+_Static_assert(sizeof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR) == 56 && _Alignof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR) == 4, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR guest layout");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, headerSize) == 0, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.headerSize guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, headerVersion) == 4, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.headerVersion guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, vendorID) == 8, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.vendorID guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, deviceID) == 12, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.deviceID guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, driverVersion) == 16, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.driverVersion guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, pipelineCacheUUID) == 20, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.pipelineCacheUUID guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, applicationNameOffset) == 36, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.applicationNameOffset guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, applicationVersion) == 40, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.applicationVersion guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, engineNameOffset) == 44, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.engineNameOffset guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, engineVersion) == 48, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.engineVersion guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorBinaryHeaderVersionOneKHR, apiVersion) == 52, "VkDeviceFaultVendorBinaryHeaderVersionOneKHR.apiVersion guest offset");
+_Static_assert(sizeof(VkDeviceFaultVendorInfoKHR) == 272 && _Alignof(VkDeviceFaultVendorInfoKHR) == 8, "VkDeviceFaultVendorInfoKHR guest layout");
+_Static_assert(offsetof(VkDeviceFaultVendorInfoKHR, description) == 0, "VkDeviceFaultVendorInfoKHR.description guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorInfoKHR, vendorFaultCode) == 256, "VkDeviceFaultVendorInfoKHR.vendorFaultCode guest offset");
+_Static_assert(offsetof(VkDeviceFaultVendorInfoKHR, vendorFaultData) == 264, "VkDeviceFaultVendorInfoKHR.vendorFaultData guest offset");
 _Static_assert(sizeof(VkDeviceGroupBindSparseInfo) == 24 && _Alignof(VkDeviceGroupBindSparseInfo) == 8, "VkDeviceGroupBindSparseInfo guest layout");
 _Static_assert(offsetof(VkDeviceGroupBindSparseInfo, sType) == 0, "VkDeviceGroupBindSparseInfo.sType guest offset");
 _Static_assert(offsetof(VkDeviceGroupBindSparseInfo, pNext) == 8, "VkDeviceGroupBindSparseInfo.pNext guest offset");
@@ -6778,6 +6899,11 @@ _Static_assert(sizeof(VkPhysicalDeviceExternalSemaphoreInfo) == 24 && _Alignof(V
 _Static_assert(offsetof(VkPhysicalDeviceExternalSemaphoreInfo, sType) == 0, "VkPhysicalDeviceExternalSemaphoreInfo.sType guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceExternalSemaphoreInfo, pNext) == 8, "VkPhysicalDeviceExternalSemaphoreInfo.pNext guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceExternalSemaphoreInfo, handleType) == 16, "VkPhysicalDeviceExternalSemaphoreInfo.handleType guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceFaultFeaturesEXT) == 24 && _Alignof(VkPhysicalDeviceFaultFeaturesEXT) == 8, "VkPhysicalDeviceFaultFeaturesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceFaultFeaturesEXT, sType) == 0, "VkPhysicalDeviceFaultFeaturesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceFaultFeaturesEXT, pNext) == 8, "VkPhysicalDeviceFaultFeaturesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceFaultFeaturesEXT, deviceFault) == 16, "VkPhysicalDeviceFaultFeaturesEXT.deviceFault guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceFaultFeaturesEXT, deviceFaultVendorBinary) == 20, "VkPhysicalDeviceFaultFeaturesEXT.deviceFaultVendorBinary guest offset");
 _Static_assert(sizeof(VkPhysicalDeviceFeatures) == 220 && _Alignof(VkPhysicalDeviceFeatures) == 4, "VkPhysicalDeviceFeatures guest layout");
 _Static_assert(offsetof(VkPhysicalDeviceFeatures, robustBufferAccess) == 0, "VkPhysicalDeviceFeatures.robustBufferAccess guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceFeatures, fullDrawIndexUint32) == 4, "VkPhysicalDeviceFeatures.fullDrawIndexUint32 guest offset");
@@ -8299,6 +8425,7 @@ typedef uint64_t (VKAPI_PTR *PFN_vkGetBufferOpaqueCaptureAddress)(VkDevice devic
 typedef void (VKAPI_PTR *PFN_vkGetDescriptorSetLayoutSupport)(VkDevice device, const VkDescriptorSetLayoutCreateInfo* pCreateInfo, VkDescriptorSetLayoutSupport* pSupport);
 typedef void (VKAPI_PTR *PFN_vkGetDescriptorSetLayoutSupportKHR)(VkDevice device, const VkDescriptorSetLayoutCreateInfo* pCreateInfo, VkDescriptorSetLayoutSupport* pSupport);
 typedef void (VKAPI_PTR *PFN_vkGetDeviceBufferMemoryRequirements)(VkDevice device, const VkDeviceBufferMemoryRequirements* pInfo, VkMemoryRequirements2* pMemoryRequirements);
+typedef VkResult (VKAPI_PTR *PFN_vkGetDeviceFaultInfoEXT)(VkDevice device, VkDeviceFaultCountsEXT* pFaultCounts, VkDeviceFaultInfoEXT* pFaultInfo);
 typedef void (VKAPI_PTR *PFN_vkGetDeviceGroupPeerMemoryFeatures)(VkDevice device, uint32_t heapIndex, uint32_t localDeviceIndex, uint32_t remoteDeviceIndex, VkPeerMemoryFeatureFlags* pPeerMemoryFeatures);
 typedef VkResult (VKAPI_PTR *PFN_vkGetDeviceGroupPresentCapabilitiesKHR)(VkDevice device, VkDeviceGroupPresentCapabilitiesKHR* pDeviceGroupPresentCapabilities);
 typedef VkResult (VKAPI_PTR *PFN_vkGetDeviceGroupSurfacePresentModesKHR)(VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR* pModes);

@@ -51,6 +51,7 @@ host_extensions = [
     "VK_EXT_external_memory_host",
     "VK_EXT_headless_surface",
     "VK_EXT_depth_bias_control",
+    "VK_EXT_device_fault",
 ]
 
 [thunks]

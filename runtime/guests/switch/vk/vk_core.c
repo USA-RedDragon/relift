@@ -469,11 +469,41 @@ static const char *result_name(VkResult r)
     }
 }
 
+/** @brief Logs what VK_EXT_device_fault tells about a lost device, once per process. */
+static void fault_report(const vkf_dev *d)
+{
+    static int done;
+    if (!d || !d->fault_info || __atomic_exchange_n(&done, 1, __ATOMIC_RELAXED))
+        return;
+    VkDeviceFaultCountsEXT n = { .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
+    if (d->fault_info(d->host_dev, &n, NULL) < 0)
+        return;
+    VkDeviceFaultAddressInfoEXT *a = calloc(n.addressInfoCount + 1, sizeof *a);
+    VkDeviceFaultVendorInfoEXT *v = calloc(n.vendorInfoCount + 1, sizeof *v);
+    if (!a || !v)
+        abort();
+    VkDeviceFaultInfoEXT info = { .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT, .pAddressInfos = a, .pVendorInfos = v };
+    n.vendorBinarySize = 0;
+    if (d->fault_info(d->host_dev, &n, &info) >= 0) {
+        rl_log(RL_LOG_ERROR, "vk", "device fault: %s", info.description);
+        for (uint32_t i = 0; i < n.addressInfoCount; i++)
+            rl_log(RL_LOG_ERROR, "vk", "device fault address: type %d, 0x%llx (precision 0x%llx)", (int)a[i].addressType,
+                   (unsigned long long)a[i].reportedAddress, (unsigned long long)a[i].addressPrecision);
+        for (uint32_t i = 0; i < n.vendorInfoCount; i++)
+            rl_log(RL_LOG_ERROR, "vk", "device fault vendor info: %s (code 0x%llx, data 0x%llx)", v[i].description,
+                   (unsigned long long)v[i].vendorFaultCode, (unsigned long long)v[i].vendorFaultData);
+    }
+    free(a);
+    free(v);
+}
+
 VkResult vkf_result(vkf_call *k, int cmd, VkResult r)
 {
     if (r < 0 && rl_once(0x766b720000000000ull | ((uint64_t)(uint32_t)cmd << 31) | (uint64_t)(uint32_t)-r))
         rl_log(RL_LOG_WARN, "vk", "%s: %s (%d), called from 0x%llx", vkg_cmds[cmd].name, result_name(r), (int)r,
                (unsigned long long)(k->c ? k->c->x[30] : 0));
+    if (r == VK_ERROR_DEVICE_LOST && k->obj)
+        fault_report(k->obj->dev);
     return r;
 }
 
@@ -684,6 +714,7 @@ static bool host_has(const VkExtensionProperties *p, uint32_t n, const char *nam
 
 #define PORTABILITY_ENUMERATION "VK_KHR_portability_enumeration"
 #define PORTABILITY_SUBSET "VK_KHR_portability_subset"
+#define DEVICE_FAULT "VK_EXT_device_fault"
 #define ENUMERATE_PORTABILITY_BIT 0x1u
 
 static bool device_has(vkf_call *k, VkPhysicalDevice pd, const char *name)
@@ -982,6 +1013,15 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         exts[n++] = ci->ppEnabledExtensionNames[i];
     if (device_has(&k, pd, PORTABILITY_SUBSET))
         exts[n++] = PORTABILITY_SUBSET;
+    VkPhysicalDeviceFaultFeaturesEXT *fault = NULL;
+    if (device_has(&k, pd, DEVICE_FAULT)) {
+        exts[n++] = DEVICE_FAULT;
+        fault = vkf_alloc(&k, sizeof *fault);
+        *fault = (VkPhysicalDeviceFaultFeaturesEXT){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT,
+                                                     .pNext = (void *)ci->pNext,
+                                                     .deviceFault = VK_TRUE };
+        ci->pNext = fault;
+    }
     for (uint32_t j = 0; j < n_extra; j++) {
         bool have = false;
         for (uint32_t i = 0; i < n; i++)
@@ -1017,6 +1057,11 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
+    d->host_dev = dev;
+    if (fault) {
+        PFN_vkVoidFunction f = VKF_FN(k.fns, vkGetDeviceProcAddr)(dev, "vkGetDeviceFaultInfoEXT");
+        memcpy(&d->fault_info, &f, sizeof f);
+    }
     vkf_mem_types_device(d, dev);
     vkf_flip_device_ready(d, dev, n_flip != 0);
     VkPhysicalDeviceProperties props = { 0 };

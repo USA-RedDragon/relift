@@ -1931,6 +1931,69 @@ void vkg_aout_VkDeviceCreateInfo(vkf_call *k, uint64_t g, const VkDeviceCreateIn
         vkg_out_VkDeviceCreateInfo(k, g + 72 * i, &h[i]);
 }
 
+void vkg_in_VkDeviceFaultCountsEXT(vkf_call *k, VkDeviceFaultCountsEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkDeviceFaultCountsEXT(vkf_call *k, uint64_t g, const VkDeviceFaultCountsEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 16);
+}
+
+VkDeviceFaultCountsEXT *vkg_ain_VkDeviceFaultCountsEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkDeviceFaultCountsEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkDeviceFaultCountsEXT(k, &h[i], g + 32 * i);
+    return h;
+}
+
+void vkg_aout_VkDeviceFaultCountsEXT(vkf_call *k, uint64_t g, const VkDeviceFaultCountsEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkDeviceFaultCountsEXT(k, g + 32 * i, &h[i]);
+}
+
+void vkg_in_VkDeviceFaultInfoEXT(vkf_call *k, VkDeviceFaultInfoEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+    h->pAddressInfos = (VkDeviceFaultAddressInfoKHR *)vkf_ptr(k, vkf_g64(k, g + 272));
+    h->pVendorInfos = (VkDeviceFaultVendorInfoKHR *)vkf_ptr(k, vkf_g64(k, g + 280));
+    h->pVendorBinaryData = (void *)vkf_ptr(k, vkf_g64(k, g + 288));
+}
+
+void vkg_out_VkDeviceFaultInfoEXT(vkf_call *k, uint64_t g, const VkDeviceFaultInfoEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 256);
+}
+
+VkDeviceFaultInfoEXT *vkg_ain_VkDeviceFaultInfoEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkDeviceFaultInfoEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkDeviceFaultInfoEXT(k, &h[i], g + 296 * i);
+    return h;
+}
+
+void vkg_aout_VkDeviceFaultInfoEXT(vkf_call *k, uint64_t g, const VkDeviceFaultInfoEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkDeviceFaultInfoEXT(k, g + 296 * i, &h[i]);
+}
+
 void vkg_in_VkDeviceGroupBindSparseInfo(vkf_call *k, VkDeviceGroupBindSparseInfo *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -4364,6 +4427,36 @@ void vkg_aout_VkPhysicalDeviceExternalSemaphoreInfo(vkf_call *k, uint64_t g, con
         return;
     for (uint64_t i = 0; i < n; i++)
         vkg_out_VkPhysicalDeviceExternalSemaphoreInfo(k, g + 24 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceFaultFeaturesEXT(vkf_call *k, VkPhysicalDeviceFaultFeaturesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceFaultFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceFaultFeaturesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 8);
+}
+
+VkPhysicalDeviceFaultFeaturesEXT *vkg_ain_VkPhysicalDeviceFaultFeaturesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceFaultFeaturesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceFaultFeaturesEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceFaultFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceFaultFeaturesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceFaultFeaturesEXT(k, g + 24 * i, &h[i]);
 }
 
 void vkg_in_VkPhysicalDeviceFeatures2(vkf_call *k, VkPhysicalDeviceFeatures2 *h, uint64_t g)
@@ -8639,6 +8732,16 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
             vkg_in_VkDeviceCreateInfo(k, h, g);
             return h;
         }
+        case VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT: {
+            VkDeviceFaultCountsEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkDeviceFaultCountsEXT(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT: {
+            VkDeviceFaultInfoEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkDeviceFaultInfoEXT(k, h, g);
+            return h;
+        }
         case VK_STRUCTURE_TYPE_DEVICE_GROUP_BIND_SPARSE_INFO: {
             VkDeviceGroupBindSparseInfo *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkDeviceGroupBindSparseInfo(k, h, g);
@@ -9037,6 +9140,11 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO: {
             VkPhysicalDeviceExternalSemaphoreInfo *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPhysicalDeviceExternalSemaphoreInfo(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT: {
+            VkPhysicalDeviceFaultFeaturesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceFaultFeaturesEXT(k, h, g);
             return h;
         }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
@@ -9825,6 +9933,12 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
         case VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO:
             vkg_out_VkDeviceCreateInfo(k, g, (const VkDeviceCreateInfo *)h);
             return;
+        case VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT:
+            vkg_out_VkDeviceFaultCountsEXT(k, g, (const VkDeviceFaultCountsEXT *)h);
+            return;
+        case VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT:
+            vkg_out_VkDeviceFaultInfoEXT(k, g, (const VkDeviceFaultInfoEXT *)h);
+            return;
         case VK_STRUCTURE_TYPE_DEVICE_GROUP_BIND_SPARSE_INFO:
             vkg_out_VkDeviceGroupBindSparseInfo(k, g, (const VkDeviceGroupBindSparseInfo *)h);
             return;
@@ -10064,6 +10178,9 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO:
             vkg_out_VkPhysicalDeviceExternalSemaphoreInfo(k, g, (const VkPhysicalDeviceExternalSemaphoreInfo *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT:
+            vkg_out_VkPhysicalDeviceFaultFeaturesEXT(k, g, (const VkPhysicalDeviceFaultFeaturesEXT *)h);
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
             vkg_out_VkPhysicalDeviceFeatures2(k, g, (const VkPhysicalDeviceFeatures2 *)h);

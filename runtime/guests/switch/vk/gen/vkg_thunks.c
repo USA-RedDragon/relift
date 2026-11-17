@@ -3205,24 +3205,24 @@ static const char *const vkg_alias_159[] = {"vkDestroySamplerYcbcrConversionKHR"
 static const char *const vkg_alias_171[] = {"vkEnumeratePhysicalDeviceGroupsKHR", NULL};
 static const char *const vkg_alias_179[] = {"vkGetBufferMemoryRequirements2KHR", NULL};
 static const char *const vkg_alias_181[] = {"vkGetDescriptorSetLayoutSupportKHR", NULL};
-static const char *const vkg_alias_196[] = {"vkGetImageMemoryRequirements2KHR", NULL};
-static const char *const vkg_alias_198[] = {"vkGetImageSparseMemoryRequirements2KHR", NULL};
-static const char *const vkg_alias_202[] = {"vkGetPhysicalDeviceExternalBufferPropertiesKHR", NULL};
-static const char *const vkg_alias_203[] = {"vkGetPhysicalDeviceExternalFencePropertiesKHR", NULL};
-static const char *const vkg_alias_204[] = {"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", NULL};
-static const char *const vkg_alias_206[] = {"vkGetPhysicalDeviceFeatures2KHR", NULL};
-static const char *const vkg_alias_208[] = {"vkGetPhysicalDeviceFormatProperties2KHR", NULL};
-static const char *const vkg_alias_210[] = {"vkGetPhysicalDeviceImageFormatProperties2KHR", NULL};
-static const char *const vkg_alias_212[] = {"vkGetPhysicalDeviceMemoryProperties2KHR", NULL};
-static const char *const vkg_alias_216[] = {"vkGetPhysicalDeviceProperties2KHR", NULL};
-static const char *const vkg_alias_218[] = {"vkGetPhysicalDeviceQueueFamilyProperties2KHR", NULL};
-static const char *const vkg_alias_220[] = {"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", NULL};
-static const char *const vkg_alias_232[] = {"vkGetSemaphoreCounterValueKHR", NULL};
-static const char *const vkg_alias_244[] = {"vkQueueSubmit2KHR", NULL};
-static const char *const vkg_alias_257[] = {"vkSignalSemaphoreKHR", NULL};
-static const char *const vkg_alias_259[] = {"vkTrimCommandPoolKHR", NULL};
-static const char *const vkg_alias_262[] = {"vkUpdateDescriptorSetWithTemplateKHR", NULL};
-static const char *const vkg_alias_265[] = {"vkWaitSemaphoresKHR", NULL};
+static const char *const vkg_alias_197[] = {"vkGetImageMemoryRequirements2KHR", NULL};
+static const char *const vkg_alias_199[] = {"vkGetImageSparseMemoryRequirements2KHR", NULL};
+static const char *const vkg_alias_203[] = {"vkGetPhysicalDeviceExternalBufferPropertiesKHR", NULL};
+static const char *const vkg_alias_204[] = {"vkGetPhysicalDeviceExternalFencePropertiesKHR", NULL};
+static const char *const vkg_alias_205[] = {"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", NULL};
+static const char *const vkg_alias_207[] = {"vkGetPhysicalDeviceFeatures2KHR", NULL};
+static const char *const vkg_alias_209[] = {"vkGetPhysicalDeviceFormatProperties2KHR", NULL};
+static const char *const vkg_alias_211[] = {"vkGetPhysicalDeviceImageFormatProperties2KHR", NULL};
+static const char *const vkg_alias_213[] = {"vkGetPhysicalDeviceMemoryProperties2KHR", NULL};
+static const char *const vkg_alias_217[] = {"vkGetPhysicalDeviceProperties2KHR", NULL};
+static const char *const vkg_alias_219[] = {"vkGetPhysicalDeviceQueueFamilyProperties2KHR", NULL};
+static const char *const vkg_alias_221[] = {"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", NULL};
+static const char *const vkg_alias_233[] = {"vkGetSemaphoreCounterValueKHR", NULL};
+static const char *const vkg_alias_245[] = {"vkQueueSubmit2KHR", NULL};
+static const char *const vkg_alias_258[] = {"vkSignalSemaphoreKHR", NULL};
+static const char *const vkg_alias_260[] = {"vkTrimCommandPoolKHR", NULL};
+static const char *const vkg_alias_263[] = {"vkUpdateDescriptorSetWithTemplateKHR", NULL};
+static const char *const vkg_alias_266[] = {"vkWaitSemaphoresKHR", NULL};
 
 const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkAcquireNextImage2KHR", NULL, 2, 1},
@@ -3408,6 +3408,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkGetBufferOpaqueCaptureAddress", NULL, 2, 1},
     {"vkGetDescriptorSetLayoutSupport", vkg_alias_181, 2, 1},
     {"vkGetDeviceBufferMemoryRequirements", NULL, 2, 1},
+    {"vkGetDeviceFaultInfoEXT", NULL, 2, 0},
     {"vkGetDeviceGroupPeerMemoryFeatures", NULL, 2, 1},
     {"vkGetDeviceGroupPresentCapabilitiesKHR", NULL, 2, 1},
     {"vkGetDeviceGroupSurfacePresentModesKHR", NULL, 2, 1},
@@ -3421,31 +3422,31 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkGetEventStatus", NULL, 2, 1},
     {"vkGetFenceStatus", NULL, 2, 1},
     {"vkGetImageMemoryRequirements", NULL, 2, 1},
-    {"vkGetImageMemoryRequirements2", vkg_alias_196, 2, 1},
+    {"vkGetImageMemoryRequirements2", vkg_alias_197, 2, 1},
     {"vkGetImageSparseMemoryRequirements", NULL, 2, 1},
-    {"vkGetImageSparseMemoryRequirements2", vkg_alias_198, 2, 1},
+    {"vkGetImageSparseMemoryRequirements2", vkg_alias_199, 2, 1},
     {"vkGetImageSubresourceLayout", NULL, 2, 1},
     {"vkGetInstanceProcAddr", NULL, 1, 1},
     {"vkGetMemoryHostPointerPropertiesEXT", NULL, 2, 0},
-    {"vkGetPhysicalDeviceExternalBufferProperties", vkg_alias_202, 1, 1},
-    {"vkGetPhysicalDeviceExternalFenceProperties", vkg_alias_203, 1, 1},
-    {"vkGetPhysicalDeviceExternalSemaphoreProperties", vkg_alias_204, 1, 1},
+    {"vkGetPhysicalDeviceExternalBufferProperties", vkg_alias_203, 1, 1},
+    {"vkGetPhysicalDeviceExternalFenceProperties", vkg_alias_204, 1, 1},
+    {"vkGetPhysicalDeviceExternalSemaphoreProperties", vkg_alias_205, 1, 1},
     {"vkGetPhysicalDeviceFeatures", NULL, 1, 1},
-    {"vkGetPhysicalDeviceFeatures2", vkg_alias_206, 1, 1},
+    {"vkGetPhysicalDeviceFeatures2", vkg_alias_207, 1, 1},
     {"vkGetPhysicalDeviceFormatProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceFormatProperties2", vkg_alias_208, 1, 1},
+    {"vkGetPhysicalDeviceFormatProperties2", vkg_alias_209, 1, 1},
     {"vkGetPhysicalDeviceImageFormatProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceImageFormatProperties2", vkg_alias_210, 1, 1},
+    {"vkGetPhysicalDeviceImageFormatProperties2", vkg_alias_211, 1, 1},
     {"vkGetPhysicalDeviceMemoryProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceMemoryProperties2", vkg_alias_212, 1, 1},
+    {"vkGetPhysicalDeviceMemoryProperties2", vkg_alias_213, 1, 1},
     {"vkGetPhysicalDeviceMultisamplePropertiesEXT", NULL, 1, 1},
     {"vkGetPhysicalDevicePresentRectanglesKHR", NULL, 1, 1},
     {"vkGetPhysicalDeviceProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceProperties2", vkg_alias_216, 1, 1},
+    {"vkGetPhysicalDeviceProperties2", vkg_alias_217, 1, 1},
     {"vkGetPhysicalDeviceQueueFamilyProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceQueueFamilyProperties2", vkg_alias_218, 1, 1},
+    {"vkGetPhysicalDeviceQueueFamilyProperties2", vkg_alias_219, 1, 1},
     {"vkGetPhysicalDeviceSparseImageFormatProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceSparseImageFormatProperties2", vkg_alias_220, 1, 1},
+    {"vkGetPhysicalDeviceSparseImageFormatProperties2", vkg_alias_221, 1, 1},
     {"vkGetPhysicalDeviceSurfaceCapabilities2KHR", NULL, 1, 1},
     {"vkGetPhysicalDeviceSurfaceCapabilitiesKHR", NULL, 1, 1},
     {"vkGetPhysicalDeviceSurfaceFormats2KHR", NULL, 1, 1},
@@ -3457,7 +3458,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkGetPrivateData", NULL, 2, 1},
     {"vkGetQueryPoolResults", NULL, 2, 1},
     {"vkGetRenderAreaGranularity", NULL, 2, 1},
-    {"vkGetSemaphoreCounterValue", vkg_alias_232, 2, 1},
+    {"vkGetSemaphoreCounterValue", vkg_alias_233, 2, 1},
     {"vkGetSwapchainImagesKHR", NULL, 2, 1},
     {"vkInvalidateMappedMemoryRanges", NULL, 2, 1},
     {"vkMapMemory", NULL, 2, 1},
@@ -3469,7 +3470,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkQueueInsertDebugUtilsLabelEXT", NULL, 2, 1},
     {"vkQueuePresentKHR", NULL, 2, 1},
     {"vkQueueSubmit", NULL, 2, 1},
-    {"vkQueueSubmit2", vkg_alias_244, 2, 1},
+    {"vkQueueSubmit2", vkg_alias_245, 2, 1},
     {"vkQueueWaitIdle", NULL, 2, 1},
     {"vkResetCommandBuffer", NULL, 2, 1},
     {"vkResetCommandPool", NULL, 2, 1},
@@ -3482,15 +3483,15 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkSetEvent", NULL, 2, 1},
     {"vkSetHdrMetadataEXT", NULL, 2, 1},
     {"vkSetPrivateData", NULL, 2, 1},
-    {"vkSignalSemaphore", vkg_alias_257, 2, 1},
+    {"vkSignalSemaphore", vkg_alias_258, 2, 1},
     {"vkSubmitDebugUtilsMessageEXT", NULL, 1, 1},
-    {"vkTrimCommandPool", vkg_alias_259, 2, 1},
+    {"vkTrimCommandPool", vkg_alias_260, 2, 1},
     {"vkUnmapMemory", NULL, 2, 1},
     {"vkUnmapMemory2KHR", NULL, 2, 0},
-    {"vkUpdateDescriptorSetWithTemplate", vkg_alias_262, 2, 1},
+    {"vkUpdateDescriptorSetWithTemplate", vkg_alias_263, 2, 1},
     {"vkUpdateDescriptorSets", NULL, 2, 1},
     {"vkWaitForFences", NULL, 2, 1},
-    {"vkWaitSemaphores", vkg_alias_265, 2, 1},
+    {"vkWaitSemaphores", vkg_alias_266, 2, 1},
 };
 
 const vkg_name vkg_names[] = {
@@ -4003,6 +4004,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetBufferOpaqueCaptureAddress,
     vkh_vkGetDescriptorSetLayoutSupport,
     vkt_vkGetDeviceBufferMemoryRequirements,
+    NULL,
     vkt_vkGetDeviceGroupPeerMemoryFeatures,
     vkt_vkGetDeviceGroupPresentCapabilitiesKHR,
     vkh_vkGetDeviceGroupSurfacePresentModesKHR,

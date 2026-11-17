@@ -133,6 +133,9 @@ struct vkf_inst {
 struct vkf_dev {
     /** @brief Host device functions. */
     vkf_fns fns;
+    /** @brief The host device, and its vkGetDeviceFaultInfoEXT when the host has VK_EXT_device_fault (else NULL). */
+    VkDevice host_dev;
+    PFN_vkGetDeviceFaultInfoEXT fault_info;
     /** @brief enum rl_vk_map_mode in use (never AUTO). */
     int map_mode;
     /** @brief Placed mapping alignment. */
