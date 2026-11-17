@@ -4,8 +4,10 @@
 //! `check/nds-timing/compare.py` checks every case against the three
 //! consoles' results in `hw.csv` (and the open ones against `open.csv`).
 //!
-//! The ROM is the devkitPro build that ran on the consoles (`sdk/`, built
-//! at test time with `DEVKITARM` set). Without devkitPro it is the clang
+//! The ROM is the devkitPro build that ran on the consoles: the file
+//! `RELIFT_NDS_TIMING_ROM` names (built elsewhere, such as in the devkitPro
+//! image), or `sdk/` built at test time with `DEVKITARM` set. Without either
+//! it is the clang
 //! build (`build.py`, with clang, ld.lld and llvm-objcopy), which runs every
 //! case but the ones whose code is copied to the instruction TCM, and
 //! `compare.py --clang` leaves those out. Skipped with a note when neither
@@ -94,7 +96,8 @@ fn every_timing_case_runs_as_on_the_consoles() {
     }
     let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
     let root = tiny::scratch("e2e-nds-timing");
-    let (rom, clang) = match sdk_rom(&check, &root) {
+    let prebuilt = std::env::var_os("RELIFT_NDS_TIMING_ROM").map(PathBuf::from);
+    let (rom, clang) = match prebuilt.or_else(|| sdk_rom(&check, &root)) {
         Some(r) => (r, false),
         None => match clang_rom(&check, &root) {
             Some(r) => (r, true),
