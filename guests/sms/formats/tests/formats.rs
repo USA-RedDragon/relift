@@ -204,7 +204,7 @@ fn mapper_follows_the_stores() {
         (MapperKind::Sega, 2, 1)
     );
     let m = mk(8 * BANK_SIZE, &[0x8000, 0x4000, 0x1234]);
-    assert_eq!((m.kind, m.codemasters_stores), (MapperKind::Codemasters, 2));
+    assert_eq!((m.kind, m.codemasters_stores), (MapperKind::Sega, 2));
     let m = mk(8 * BANK_SIZE, &[0xA000]);
     assert_eq!((m.kind, m.korea_stores), (MapperKind::Korea, 1));
     let m = mk(8 * BANK_SIZE, &[]);

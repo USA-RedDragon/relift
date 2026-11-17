@@ -64,7 +64,10 @@ pub fn scan_stores(rom: &[u8]) -> (usize, usize, usize) {
 }
 
 /// Choose the mapper of `rom`: Codemasters when its header checksum
-/// matches, else by the stores found.
+/// matches, else by the stores found. Stores to the Codemasters registers
+/// alone never choose it: a Sega-mapper game writes to ROM addresses too
+/// (data that looks like a store, or a harmless write), and every
+/// Codemasters cartridge carries the header.
 #[must_use]
 pub fn detect(rom: &[u8], codemasters: Option<&CodemastersHeader>) -> MapperDecision {
     let (sega_stores, codemasters_stores, korea_stores) = scan_stores(rom);
@@ -77,11 +80,6 @@ pub fn detect(rom: &[u8], codemasters: Option<&CodemastersHeader>) -> MapperDeci
         (
             MapperKind::Sega,
             format!("{sega_stores} stores to $FFFC-$FFFF"),
-        )
-    } else if codemasters_stores > 0 && rom.len() > 0x8000 {
-        (
-            MapperKind::Codemasters,
-            format!("{codemasters_stores} stores to $0000/$4000/$8000 and no Sega stores"),
         )
     } else if korea_stores > 0 && rom.len() > 0x8000 {
         (
