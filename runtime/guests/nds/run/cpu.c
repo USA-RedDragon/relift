@@ -489,6 +489,7 @@ static bool bios_irq(void *user)
     }
     for (unsigned n = 0; n < 6; n++)
         (void)ld32(k, sp + 4u * n);
+    c->r[13] = sp + 24u;
     rl_arm32_set_cpsr(c, cpsr);
     memcpy(c->r, regs, sizeof regs);
     c->t = thumb;
