@@ -1073,6 +1073,18 @@ fn native_primitive_output(c: &mut Ctx, comp: PrimComponent, p: u32, bits: u32, 
             let zero = c.m.c_u32(0);
             let bit0 = c.m.emit(op::BITWISE_AND, u, &[bits, one]);
             let v = c.m.emit(op::I_EQUAL, b, &[bit0, zero]);
+            if c.host.constant_cull_stores {
+                let pt = c.m.t_ptr(OUTPUT, b);
+                let ptr = c.m.emit(op::ACCESS_CHAIN, pt, &[var, p]);
+                let not = c.m.emit(op::LOGICAL_NOT, b, &[v]);
+                for (cond, k) in [(v, true), (not, false)] {
+                    c.if_then(cond, |c| {
+                        let k = c.m.c_bool(k);
+                        c.m.emit_void(op::STORE, &[ptr, k]);
+                    });
+                }
+                return;
+            }
             (var, b, v, None)
         }
         PrimComponent::Generic(loc, k) => {

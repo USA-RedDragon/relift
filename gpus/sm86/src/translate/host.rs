@@ -105,6 +105,9 @@ pub struct HostProfile {
     /// so without this FFMA is built from integer operations. Set in the
     /// presets only where a device was seen to report it.
     pub fused_fma: bool,
+    /// A native mesh shader writes `CullPrimitiveEXT` only with constant
+    /// stores under a branch, never from a computed bool.
+    pub constant_cull_stores: bool,
     pub clock: Clock,
     /// `maxComputeSharedMemorySize`.
     pub max_shared_bytes: u32,
@@ -156,6 +159,7 @@ impl HostProfile {
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: true,
             fused_fma: true,
+            constant_cull_stores: false,
             clock: Clock::Device,
             max_shared_bytes: 49152,
             max_samplers: 1 << 20,
@@ -237,6 +241,7 @@ impl HostProfile {
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: true,
             fused_fma: false,
+            constant_cull_stores: false,
             clock: Clock::None,
             max_shared_bytes: 32768,
             max_samplers: 1024,
@@ -269,6 +274,7 @@ impl HostProfile {
             denorm_flush_mode: true,
             signed_zero_inf_nan_preserve: true,
             fused_fma: false,
+            constant_cull_stores: false,
             clock: Clock::Device,
             max_shared_bytes: 32768,
             max_samplers: 1 << 24,
@@ -315,6 +321,13 @@ impl HostProfile {
     /// lavapipe (llvmpipe) as measured here: subgroups of 8, no float
     /// controls (it flushes, but the API does not promise it), 32 KiB
     /// shared, 128 MiB storage buffers.
+    ///
+    /// Mesa 26.2.4 and main up to at least 60d7516520 (2026-11-17) abort in
+    /// LLVM ("Cannot emit physreg copy instruction") on a mesh shader that
+    /// stores a computed bool to `CullPrimitiveEXT`: gallivm bitcasts the
+    /// `i1` vector to float. Hence [`HostProfile::constant_cull_stores`];
+    /// drop it once a Mesa release carries the fix that sign-extends 1-bit
+    /// outputs in `emit_store_var` (`lp_bld_nir_soa.c`).
     pub fn lavapipe() -> HostProfile {
         HostProfile {
             name: "lavapipe",
@@ -340,6 +353,7 @@ impl HostProfile {
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: true,
             fused_fma: false,
+            constant_cull_stores: true,
             clock: Clock::Device,
             max_shared_bytes: 32768,
             max_samplers: 1_015_808,
@@ -401,6 +415,7 @@ impl HostProfile {
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: false,
             fused_fma: false,
+            constant_cull_stores: false,
             clock: Clock::None,
             max_shared_bytes: 16384,
             max_samplers: 1024,

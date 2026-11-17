@@ -202,3 +202,58 @@ fn the_pipeline_comes_from_the_glslc_headers() {
     task[0x56] = 7;
     assert!(MeshPipeline::from_glslc(Some(&task), &mesh, &code).is_none());
 }
+
+/// The instructions of a SPIR-V module: opcode and words.
+fn instructions(words: &[u32]) -> Vec<(u16, &[u32])> {
+    let mut out = Vec::new();
+    let mut i = 5;
+    while i < words.len() {
+        let n = (words[i] >> 16) as usize;
+        out.push((words[i] as u16, &words[i..i + n]));
+        i += n;
+    }
+    out
+}
+
+/// What each store to `CullPrimitiveEXT` writes: `Some(constant)` for an
+/// `OpConstantTrue` or `OpConstantFalse`, `None` for a computed bool.
+fn cull_stores(words: &[u32]) -> Vec<Option<bool>> {
+    let ins = instructions(words);
+    let consts: std::collections::HashMap<u32, bool> = ins
+        .iter()
+        .filter(|(o, _)| *o == 41 || *o == 42)
+        .map(|(o, w)| (w[2], *o == 41))
+        .collect();
+    let var = ins
+        .iter()
+        .find(|(o, w)| *o == 71 && w[2] == 11 && w[3] == 5299)
+        .map(|(_, w)| w[1])
+        .expect("a CullPrimitiveEXT variable");
+    let ptrs: Vec<u32> = ins
+        .iter()
+        .filter(|(o, w)| *o == 65 && w[3] == var)
+        .map(|(_, w)| w[2])
+        .collect();
+    ins.iter()
+        .filter(|(o, w)| *o == 62 && ptrs.contains(&w[1]))
+        .map(|(_, w)| consts.get(&w[2]).copied())
+        .collect()
+}
+
+/// lavapipe's LLVM back end aborts on a computed `CullPrimitiveEXT`, so its
+/// profile stores constants under a branch; the other mesh hosts store the
+/// bool directly.
+#[test]
+fn lavapipe_writes_the_cull_flag_with_constant_stores() {
+    let c = cases().into_iter().find(|c| c.name == "ext-cull").unwrap();
+    let mesh = &c.programs.iter().find(|(k, _)| k == "mesh").unwrap().1;
+    let stores = |host: HostProfile| {
+        let s = translate_with(mesh, &options(host, &c.pipe, false)).unwrap();
+        assert_eq!(s.interface.host.mesh, MeshPath::Native);
+        cull_stores(&s.spirv)
+    };
+    let lvp = stores(HostProfile::lavapipe());
+    assert_eq!(lvp, [Some(true), Some(false)]);
+    let nv = stores(HostProfile::nvidia());
+    assert_eq!(nv, [None]);
+}
