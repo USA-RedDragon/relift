@@ -1848,7 +1848,9 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
         c.cap(5309);
     }
     let idx = c.tx_opk(op::BITWISE_AND, h, 0xf_ffff);
-    c.no_fault();
+    if !store && !red {
+        c.no_fault();
+    }
     if formatted {
         let n = match w.get(72, 4) {
             1 => 1,

@@ -356,6 +356,35 @@ fn written_storage_images_are_coherent() {
     assert!(!coherent(&compute(&[suld])));
 }
 
+/// SUST has no sparse fault predicate: the bits SULD uses for one hold
+/// something else, and a store must leave P0 as it was. SULD with one
+/// writes it (as resident).
+#[test]
+fn surface_stores_leave_the_predicates_alone() {
+    let (sust, _) = surface_words();
+    let stores_false = |s: &relift_gpu_sm86::translate::Shader| {
+        let fals: Vec<u32> = insts(&s.spirv, 42).iter().map(|i| i[2]).collect();
+        insts(&s.spirv, 62).iter().any(|i| fals.contains(&i[2]))
+    };
+    assert!(!stores_false(&compute(&[sust])));
+    let suld_p0 = word(
+        0xb99,
+        0,
+        &[
+            (16, 8, 0),
+            (24, 8, 8),
+            (40, 14, 0x13),
+            (54, 5, 2),
+            (61, 3, 3),
+            (72, 1, 1),
+            (73, 3, 4),
+            (81, 3, 0),
+            (84, 3, 1),
+        ],
+    );
+    assert!(stores_false(&compute(&[suld_p0])));
+}
+
 #[test]
 fn surfaces_are_storage_images() {
     let sust = word(
