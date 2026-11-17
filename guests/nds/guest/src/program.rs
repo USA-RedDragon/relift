@@ -111,7 +111,7 @@ pub struct Lifted {
     /// Instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
     /// Entries left out because another function of the unit has the
-    /// address.
+    /// address and the same first bytes.
     pub shadowed: Vec<(UnitId, Loc)>,
 }
 
@@ -163,6 +163,14 @@ fn image<'a>(images: &Images<'a>, report: &'a Report, l: Loc) -> Option<(&'a [u8
         let off = l.addr.checked_sub(b)? as usize;
         (off < d.len()).then_some((d, b))
     })
+}
+
+/// The first bytes of the function at `l` (up to 32): what tells apart
+/// functions that different copies put at one address.
+fn head<'a>(images: &Images<'a>, report: &'a Report, l: Loc) -> Option<&'a [u8]> {
+    let (img, base) = image(images, report, l)?;
+    let off = l.addr.wrapping_sub(base) as usize;
+    img.get(off..(off + 32).min(img.len()))
 }
 
 fn raw(img: &[u8], base: u32, l: Loc) -> u64 {
@@ -243,8 +251,9 @@ struct PendingFn<'a> {
 struct Pending<'a> {
     id: UnitId,
     hash: [u8; 32],
-    /// The functions by entry.
-    fns: BTreeMap<(u32, bool), PendingFn<'a>>,
+    /// The functions by address, state and variant (its place among the
+    /// functions at that address whose first bytes differ).
+    fns: BTreeMap<(u32, bool, usize), PendingFn<'a>>,
 }
 
 /// Lifts every unit of `units`, as `reports` (its analysis) found them;
@@ -307,19 +316,22 @@ pub fn lift(
                 },
                 (UnitId::Overlay(..), None) => continue,
             };
-            if image(&images, &r.report, *entry).is_none() {
+            let Some(bytes) = head(&images, &r.report, *entry) else {
                 continue;
-            }
-            let key = (entry.addr, entry.thumb);
+            };
             let slot = &mut pending[owner].fns;
-            if let Some(had) = slot.get(&key) {
-                if had.entry != *entry {
+            let same: Vec<_> = slot
+                .range((entry.addr, entry.thumb, 0)..=(entry.addr, entry.thumb, usize::MAX))
+                .map(|(_, pf)| (pf.entry, head(&pf.images, pf.report, pf.entry)))
+                .collect();
+            if let Some((had, _)) = same.iter().find(|(_, b)| *b == Some(bytes)) {
+                if had != entry {
                     shadowed.push((pending[owner].id, *entry));
                 }
                 continue;
             }
             slot.insert(
-                key,
+                (entry.addr, entry.thumb, same.len()),
                 PendingFn {
                     entry: *entry,
                     report: &r.report,
@@ -334,11 +346,19 @@ pub fn lift(
         for (at, body) in &r.resumes {
             for (p, placed) in pending.iter_mut().zip(&mut placed) {
                 let key = (at.addr, at.thumb);
-                if p.id.cpu() != r.id.cpu() || p.fns.contains_key(&key) || placed.contains(&key) {
+                let starts = p
+                    .fns
+                    .range((at.addr, at.thumb, 0)..=(at.addr, at.thumb, usize::MAX))
+                    .next()
+                    .is_some();
+                if p.id.cpu() != r.id.cpu() || starts || placed.contains(&key) {
                     continue;
                 }
-                if let Some(f) = p.fns.get_mut(&(body.addr, body.thumb))
-                    && f.entry == *body
+                if let Some(f) = p
+                    .fns
+                    .range_mut((body.addr, body.thumb, 0)..=(body.addr, body.thumb, usize::MAX))
+                    .map(|(_, f)| f)
+                    .find(|f| f.entry == *body)
                     && f.report
                         .functions
                         .get(body)
