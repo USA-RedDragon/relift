@@ -11,9 +11,10 @@
 //! 1. the task program as a compute shader over `n` workgroups (any
 //!    dispatch whose linear size is at least `n`): workgroup `t` stores its
 //!    stage buffer (`MeshPipeline::payload_words` words, the mesh count in
-//!    word 1) as task record `t`;
-//! 2. [`scan`], one workgroup: the exclusive prefix of the mesh counts in
-//!    the task scan region (`n + 1` words), their sum in [`H_MESHES`] and
+//!    word 1) as task record `t`, and the mesh count as word `t` of the task
+//!    scan region (`n + 1` words);
+//! 2. [`scan`], one workgroup: the exclusive prefix of the mesh counts, in
+//!    place in the task scan region, their sum in [`H_MESHES`] and
 //!    the indirect dispatch of the mesh pass in [`H_DISPATCH`] (x at most
 //!    65535, then y);
 //! 3. the mesh program as a compute shader, by that indirect dispatch:
@@ -305,6 +306,18 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
                 let at = add(c, rec, i);
                 store(c, buf, at, v);
             });
+            let zero = c.m.c_u32(0);
+            let b = c.boolt();
+            let lane0 = c.m.emit(op::I_EQUAL, b, &[lane, zero]);
+            c.if_then(lane0, |c| {
+                let one = c.m.c_u32(1);
+                let p = c.elem_ptr(var, WORKGROUP, one);
+                let u = c.u32t();
+                let n = c.m.emit(op::LOAD, u, &[p]);
+                let scan = header(c, buf, H_TASK_SCAN);
+                let at = add(c, scan, lin);
+                store(c, buf, at, n);
+            });
         }
         _ => {
             let p = c.io.mesh.pipe.clone();
@@ -355,7 +368,7 @@ pub(crate) fn leave(c: &mut Ctx, lane: u32, lanes: u32, vars: &[u32]) -> Res<()>
 
 /// The scan pass (one workgroup of 128 invocations) over the mesh counts
 /// of the task records.
-pub fn scan(p: &MeshPipeline) -> Vec<u32> {
+pub fn scan() -> Vec<u32> {
     let mut c = Ctx::bare(Stage::Compute);
     let u = c.u32t();
     let b = c.boolt();
@@ -366,15 +379,10 @@ pub fn scan(p: &MeshPipeline) -> Vec<u32> {
     let zero = c.m.c_u32(0);
     let one = c.m.c_u32(1);
     let n = header(&mut c, buf, H_TASKS);
-    let recs = header(&mut c, buf, H_TASK_RECS);
-    let stride = p.payload_words();
     let out = header(&mut c, buf, H_TASK_SCAN);
     let count_of = |c: &mut Ctx, i: u32| {
-        let off = c.lk_mul(i, stride);
-        let off = add(c, recs, off);
-        let k = c.m.c_u32(1);
-        let off = add(c, off, k);
-        load(c, buf, off)
+        let at = add(c, out, i);
+        load(c, buf, at)
     };
     let m1 = c.m.c_u32(SCAN_LANES - 1);
     let nn = add(&mut c, n, m1);
@@ -423,10 +431,10 @@ pub fn scan(p: &MeshPipeline) -> Vec<u32> {
     let excl = sub(&mut c, incl, own);
     c.m.emit_void(op::STORE, &[sum_var, excl]);
     c.counted_loop(i_var, start, end, one, |c, i| {
+        let v = count_of(c, i);
         let s = c.m.emit(op::LOAD, u, &[sum_var]);
         let at = add(c, out, i);
         store(c, buf, at, s);
-        let v = count_of(c, i);
         let s = add(c, s, v);
         c.m.emit_void(op::STORE, &[sum_var, s]);
     });

@@ -67,7 +67,7 @@ fn main() {
         let sph = prog.sph.as_ref().expect("a mesh program has an SPH").words;
         let n = mesh_components(&sph).expect("mesh outputs").len() as u32;
         let dir = &rest[2];
-        write(&format!("{dir}/scan-tasks.spv"), &scan(&p));
+        write(&format!("{dir}/scan-tasks.spv"), &scan());
         write(
             &format!("{dir}/vertex.spv"),
             &vertex(&p, &sph).expect("vertex shader"),

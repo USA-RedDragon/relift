@@ -152,7 +152,7 @@ fn the_compute_back_end_helpers_validate() {
     for c in cases() {
         let mesh = &c.programs.iter().find(|(k, _)| k == "mesh").unwrap().1;
         let sph = mesh.sph.as_ref().unwrap().words;
-        validate(&scan(&c.pipe));
+        validate(&scan());
         validate(&vertex(&c.pipe, &sph).unwrap_or_else(|e| panic!("{}: {e}", c.name)));
     }
 }
