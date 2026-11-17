@@ -90,6 +90,7 @@ fn copy_name(k: CopyKind) -> String {
         CopyKind::Run => "run".to_owned(),
         CopyKind::Load => "load".to_owned(),
         CopyKind::Rewrite(c) => format!("rewrite{c}"),
+        CopyKind::Table(_) => "table".to_owned(),
     }
 }
 

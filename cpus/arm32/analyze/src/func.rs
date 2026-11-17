@@ -323,6 +323,9 @@ const MAX_TABLE: u32 = 4096;
 /// The most instructions that leave the flags between the compare that
 /// bounds a jump table and the conditional instruction on it.
 const MAX_COMPARE_GAP: usize = 8;
+/// The most bytes of one table function a writer call is taken to copy
+/// when its length is not constant.
+const MAX_TABLE_COPY: u32 = 0x1000;
 
 /// Whether `b` takes the state from bit 0 of the address it jumps to
 /// (`BX`; on ARMv5 also `BLX` with a register and the loads of the PC):
@@ -856,6 +859,66 @@ impl Run<'_> {
         })
     }
 
+    /// A call at `site` to a writer with a constant RAM destination in `r0`
+    /// and a source loaded from a table of code addresses in `r1` (code
+    /// copied to fast memory and run there): each function of the table
+    /// becomes a copy at the destination, of `r2` bytes when constant, else
+    /// up to the next function of the table or of the image (at most
+    /// [`MAX_TABLE_COPY`]), and short of the functions other copies put in
+    /// that RAM.
+    fn table_copy(&mut self, site: Loc, st: &State) {
+        let Some(dst) = st.reg(0).k32().filter(|d| self.env.image.is_ram(*d)) else {
+            return;
+        };
+        let Abs::Tab { base, stride, n } = st.reg(1) else {
+            return;
+        };
+        if !self.env.image.in_image(base) {
+            return;
+        }
+        let es = self.table_entries(base, stride, n, None);
+        let mut starts: Vec<u32> = es.iter().map(|e| e.0).collect();
+        starts.sort_unstable();
+        starts.dedup();
+        let known = st.reg(2).k32();
+        for (addr, thumb) in es {
+            let next_fn = self.env.stops.range(addr + 1..).next().copied();
+            let gap = starts
+                .iter()
+                .copied()
+                .find(|s| *s > addr)
+                .into_iter()
+                .chain(next_fn)
+                .min()
+                .map(|s| s - addr);
+            let mut len =
+                known.unwrap_or_else(|| gap.unwrap_or(MAX_TABLE_COPY).min(MAX_TABLE_COPY));
+            if let Some(l) = self
+                .env
+                .entries
+                .iter()
+                .filter(|l| l.copy.is_some() && l.addr > dst && l.addr - dst < len)
+                .map(|l| l.addr - dst)
+                .min()
+            {
+                len = l;
+            }
+            while len >= 4 && self.env.image.source(addr, len).is_none() {
+                len -= 4;
+            }
+            let Some(bytes) = self.env.image.source(addr, len).filter(|b| b.len() >= 4) else {
+                continue;
+            };
+            self.out.copies.push(RamCopy {
+                site,
+                kind: CopyKind::Table(thumb),
+                src: Some(addr),
+                dst,
+                bytes: Arc::from(bytes),
+            });
+        }
+    }
+
     /// A jump from the image at `site` into RAM that copies already hold:
     /// when the boot leaves other bytes at `addr` by the time it makes the
     /// jump (a boot that stores two instructions over code it copied
@@ -957,6 +1020,9 @@ impl Run<'_> {
             self.out.edge_psr.push(st.psr());
             let ran = self.constant_call(site, callee, st);
             let cs = self.env.summary(callee);
+            if cs.writes {
+                self.table_copy(site, st);
+            }
             self.out.writes |= cs.writes;
             let addr = |a: Abs| {
                 is_param(a)

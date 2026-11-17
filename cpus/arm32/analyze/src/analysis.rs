@@ -892,6 +892,7 @@ impl<'a> Driver<'a> {
         }
         let mut new_copy = false;
         let mut new_ranges = Vec::new();
+        let mut table_fns = Vec::new();
         for c in &run.copies {
             if !self
                 .image
@@ -899,6 +900,15 @@ impl<'a> Driver<'a> {
                 .iter()
                 .any(|o| o.dst == c.dst && o.bytes == c.bytes)
             {
+                if let (CopyKind::Table(thumb), Ok(i)) =
+                    (c.kind, u16::try_from(self.image.copies.len()))
+                {
+                    table_fns.push(Loc {
+                        addr: c.dst,
+                        thumb,
+                        copy: Some(i),
+                    });
+                }
                 self.image.copies.push(c.clone());
                 self.version += 1;
                 new_copy = true;
@@ -912,6 +922,9 @@ impl<'a> Driver<'a> {
             }
         }
         self.learn(learned);
+        for l in table_fns {
+            self.add_root(l, Origin::AddressTaken);
+        }
         for &a in &run.ptr_open {
             if self.open.insert(a) {
                 self.version += 1;

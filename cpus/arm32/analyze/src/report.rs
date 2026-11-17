@@ -21,6 +21,10 @@ pub enum CopyKind {
     /// The bytes of this other copy with a constant the program stores into
     /// its code.
     Rewrite(u16),
+    /// One function of a table of code addresses, which a writer call
+    /// copies to a constant address from the table entry it loads; its
+    /// start is code in this state (`true`: Thumb).
+    Table(bool),
 }
 
 impl fmt::Display for CopyKind {
@@ -32,6 +36,7 @@ impl fmt::Display for CopyKind {
             CopyKind::Run => f.write_str("run"),
             CopyKind::Load => f.write_str("load"),
             CopyKind::Rewrite(c) => write!(f, "rewrite of copy {c}"),
+            CopyKind::Table(_) => f.write_str("table function"),
         }
     }
 }

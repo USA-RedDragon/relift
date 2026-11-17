@@ -947,3 +947,43 @@ fn a_veneer_s_constant_target_is_a_function_of_its_own() {
         r.functions.keys().collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn each_function_of_a_table_a_writer_copies_to_fast_ram_is_found_there() {
+    let mut m = Machine::new(Profile::V5te);
+    let fast = 0x02F0_0000;
+    let pool = BASE + 0x80;
+    let table = BASE + 0xA0;
+    let copy = BASE + 0x200;
+    let k = [BASE + 0x100, BASE + 0x140];
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            a_ldr_lit(3, BASE + 4, pool),
+            0xE7931100,
+            a_ldr_lit(0, BASE + 12, pool + 4),
+            0xE3A0_2040,
+            0xE1A0_0000,
+            a_bl(BASE + 24, copy),
+            a_ldr_lit(4, BASE + 28, pool + 4),
+            0xE12F_FF34,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(pool, &[table, fast]);
+    m.arm(table, &[k[0], k[1]]);
+    m.arm(k[0], &[A_MOV_R0_1, A_BX_LR]);
+    m.arm(k[1], &[0xE3A0_0002, A_BX_LR]);
+    m.arm(
+        copy,
+        &[0xE491_3004, 0xE480_3004, 0xE252_2004, 0x1AFF_FFFB, A_BX_LR],
+    );
+    let r = m.run(all(), arm(BASE));
+    let at: Vec<_> = r.functions.keys().filter(|l| l.addr == fast).collect();
+    assert_eq!(
+        at.len(),
+        2,
+        "one function per table entry at {fast:#x}: {at:?}"
+    );
+}
