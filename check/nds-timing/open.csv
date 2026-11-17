@@ -10,7 +10,6 @@ cpu,idx,name,region,place,mode,attr,hw,relift,note
 9,44,ldr_pc,none,itcm,warm,-,9,,not run: the test ROM has no ITCM-code variant yet
 9,45,t_alu,none,itcm,warm,-,5,,not run: the test ROM has no ITCM-code variant yet
 9,46,t_b,none,itcm,warm,-,7,,not run: the test ROM has no ITCM-code variant yet
-9,110,str_ldr,itcm,main,warm,-,8,900,ARM9 data access after a store or in ITCM
 9,146,str_alu4,main,main,warm,-,17.42,1800,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,284,stm8,pal,main,warm,-,45.62,4200,ARM9 data access after a store or in ITCM
 9,339,s_ldm8,main,main,cold,-,50,5200,ARM9 data cache line fill under a following access

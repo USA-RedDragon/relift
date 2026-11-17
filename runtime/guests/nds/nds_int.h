@@ -406,6 +406,9 @@ struct rl_nds {
     unsigned fetch9_cost;
     /** @brief The ARM9's last instruction TCM data access opened an LDM or STM: its second word costs one more. */
     bool itcm_multi;
+    /** @brief The ARM9's last TCM data access was a single-word store to the instruction TCM, ended at itcm_store_end. */
+    bool itcm_store;
+    uint64_t itcm_store_end;
     /**
      * @brief The ARM7's code burst in main RAM: the last fetch's name (rl_nds_code_cost7), the address the burst
      * fetches next, the tick its last fetch ended and its fetches so far (at most 255).

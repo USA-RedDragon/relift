@@ -247,9 +247,12 @@ TEST(tcm_accesses_cost_one_arm9_cycle_off_the_bus)
     rl_nds_store(m, RL_NDS_ARM9, 0x100u, 4, 7, false);
     rl_nds_load(m, RL_NDS_ARM9, 0x100u, 4, false);
     rl_nds_fetch(m, RL_NDS_ARM9, 0x100u, 2, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 3);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 2);
     rl_nds_load(m, RL_NDS_ARM9, 0x02000000u, 2, true);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 3 + 2);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 2 + 2);
+    rl_nds_idle(m, RL_NDS_ARM9, 4);
+    rl_nds_load(m, RL_NDS_ARM9, 0x100u, 4, false);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 8 + 1);
 }
 
 TEST(main_ram_serves_one_cpu_at_a_time)

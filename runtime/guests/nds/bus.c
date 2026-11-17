@@ -33,17 +33,26 @@ unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, u
  * the first word in the data TCM; each further word of an LDM or STM takes a
  * cycle, and an instruction TCM access one more, but for the second word of
  * an LDM or STM (the console: LDR and STR in DTCM 1 cycle, LDMn and STMn
- * max(2, n); LDR in ITCM 2, LDMn there n + 2).
+ * max(2, n); LDR in ITCM 2, LDMn there n + 2). A load right after a
+ * single-word store waits a cycle in the data TCM (the lifted code charges
+ * it with the store) but not in the instruction TCM, whose own extra cycle
+ * covers it: STR then LDR there costs what two LDRs do (PUSH then POP
+ * still waits). Right after is within the store's waiting cycle and the
+ * load's fetch.
  */
-static void tcm_charge(rl_nds *m, const uint8_t *p, bool seq)
+static void tcm_charge(rl_nds *m, const uint8_t *p, bool seq, bool write)
 {
     bool itcm = p >= m->itcm && p < m->itcm + RL_CP15_ITCM_SIZE;
     unsigned ticks = seq ? 1u : 0u;
     if (itcm) {
         ticks += !seq || m->itcm_multi;
         m->itcm_multi = !seq;
+        if (!write && !seq && m->itcm_store && nds_now(m, RL_NDS_ARM9) - m->itcm_store_end <= 2u && ticks)
+            ticks--;
     }
+    m->itcm_store = itcm && write && !seq;
     nds_charge(m, RL_NDS_ARM9, ticks);
+    m->itcm_store_end = nds_now(m, RL_NDS_ARM9);
 }
 
 /**
@@ -259,7 +268,7 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
             if (code)
                 nds_charge(m, cpu, 1);
             else
-                tcm_charge(m, p, seq);
+                tcm_charge(m, p, seq, false);
             return nds_ld(p, size);
         }
         if (nds_cache_attr(m, addr) & (code ? NDS_ATTR_IC : NDS_ATTR_DC)) {
@@ -372,7 +381,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     if (cpu == RL_NDS_ARM9) {
         uint8_t *p = nds_tcm(m, addr, false, true);
         if (p) {
-            tcm_charge(m, p, seq);
+            tcm_charge(m, p, seq, true);
             nds_st(p, size, value);
             nds_watch_store(m, p);
             return;
