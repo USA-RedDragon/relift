@@ -504,7 +504,9 @@ static uint32_t depth_of(const point *q, bool wbuf)
  * line y; right is the side of the span. A y-major edge's pixel takes the
  * fraction of the edge's x at the middle of the line (the left edge the
  * part right of it, the right edge the part left of it), in 5 bits from the
- * edge's 18-bit position; a pixel the middle has left is uncovered. An
+ * edge's 18-bit position; the half step to the middle drops its low 9 bits
+ * (console captures of long edges). A pixel the middle has left is
+ * uncovered. An
  * x-major edge's pixel takes the part of the line inside the polygon at the
  * pixel's middle.
  */
@@ -515,7 +517,7 @@ static uint32_t coverage(const edge *e, int32_t y, int32_t x, bool right)
         return 31;
     if (!e->xmajor) {
         int64_t inc = adx == dy ? 1 << 18 : adx * ((1 << 18) / dy);
-        int64_t dist = inc * k + inc / 2;
+        int64_t dist = inc * k + ((inc / 2) & ~(int64_t)0x1FF);
         int32_t pix = e->positive ? e->ax + (int32_t)(dist >> 18) : e->ax - 1 - (int32_t)(dist >> 18);
         uint32_t f5 = (uint32_t)((dist & 0x3FFFF) >> 13);
         if (pix != e->r0) {
