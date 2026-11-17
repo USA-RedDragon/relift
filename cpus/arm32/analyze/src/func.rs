@@ -139,6 +139,7 @@ pub(crate) type Runs = HashMap<(Loc, Args), Option<Rc<crate::conc::Written>>>;
 pub(crate) struct Special {
     copies: Vec<RamCopy>,
     ptr_stores: Vec<(u32, u32)>,
+    ptr_open: Vec<u32>,
     moves: Vec<(u32, u32)>,
     irq: Vec<u32>,
 }
@@ -155,6 +156,9 @@ pub(crate) struct Env<'a> {
     pub summaries: &'a HashMap<Loc, Summary>,
     pub entries: &'a HashSet<Loc>,
     pub ptrs: &'a HashMap<u32, BTreeSet<u32>>,
+    /// RAM words discovered code also stores values to that are not
+    /// constant: their constant stores are not all they can hold.
+    pub open: &'a HashSet<u32>,
     pub cache: &'a RefCell<HashMap<(Loc, u32), Lifted>>,
     pub runs: &'a RefCell<Runs>,
     /// ROM addresses where a table ends: the bases of the tables
@@ -198,6 +202,8 @@ pub(crate) struct FnRun {
     pub data: Vec<(u32, u8)>,
     /// Constant words stored to constant RAM addresses.
     pub ptr_stores: Vec<(u32, u32)>,
+    /// Constant RAM words stored a value that is not constant.
+    pub ptr_open: Vec<u32>,
     /// Constants stored to constant RAM addresses: the store, address, size
     /// and value.
     pub ram_stores: Vec<(Loc, u32, u8, u32)>,
@@ -680,6 +686,12 @@ impl Run<'_> {
             (a, v) if (is_param(a) || a.k().is_some()) && (is_param(v) || v.k().is_some()) => {
                 self.peffect(PEffect::Store(a, v));
             }
+            (Abs::K(a), _) => {
+                let a = a as u32;
+                if self.env.image.is_ram(a) && a.is_multiple_of(4) {
+                    self.out.ptr_open.push(a);
+                }
+            }
             _ => {}
         }
     }
@@ -1147,6 +1159,7 @@ impl Run<'_> {
                 let sp = Rc::new(Special {
                     copies: r.copies,
                     ptr_stores: r.ptr_stores,
+                    ptr_open: r.ptr_open,
                     moves: r.moves,
                     irq: r.irq,
                 });
@@ -1159,6 +1172,7 @@ impl Run<'_> {
         };
         self.out.copies.extend(sp.copies.iter().cloned());
         self.out.ptr_stores.extend(sp.ptr_stores.iter().copied());
+        self.out.ptr_open.extend(sp.ptr_open.iter().copied());
         self.out.moves.extend(sp.moves.iter().copied());
         self.out.irq.extend(sp.irq.iter().copied());
     }
@@ -1246,7 +1260,9 @@ impl Run<'_> {
     /// A transfer through the RAM word at `a`, or the image variable at
     /// `a` ([`Image::variable`]): to every constant discovered code stores
     /// there and the variable's first value, but zero (a null pointer,
-    /// which a program tests before it calls). `thumb` is the target
+    /// which a program tests before it calls). When code also stores a
+    /// value that is not constant there, the transfer can reach code the
+    /// analysis does not see, and its summary is the opaque one. `thumb` is the target
     /// state, `None` when the transfer interworks.
     fn pointer(
         &mut self,
@@ -1298,7 +1314,7 @@ impl Run<'_> {
                 s.psr &= ts.psr;
             }
         }
-        if !reached {
+        if !reached || self.env.open.contains(&a) {
             s = Summary::opaque();
         }
         if linked {

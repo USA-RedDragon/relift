@@ -552,3 +552,29 @@ fn a_leaf_seed_is_an_entry_when_its_run_checks_out() {
         "an undefined seed is no entry"
     );
 }
+
+#[test]
+fn a_call_through_a_word_that_also_holds_unknown_values_returns() {
+    let mut m = Machine::new(Profile::V5te);
+    let word = 0x02F0_0000;
+    let code = [
+        A_PUSH_R4_LR,
+        a_ldr_lit(0, BASE + 4, BASE + 0x100),
+        a_ldr_lit(1, BASE + 8, BASE + 0x104),
+        0xE580_1000,
+        0xE592_1000,
+        0xE580_1000,
+        0xE590_1000,
+        A_BLX_R1,
+        A_MOV_R0_1,
+        A_POP_R4_PC,
+    ];
+    m.arm(BASE, &code);
+    m.arm(BASE + 0x100, &[word, BASE + 0x200]);
+    m.arm(BASE + 0x200, &[a_b(BASE + 0x200, BASE + 0x200)]);
+    let r = m.run(all(), arm(BASE));
+    assert!(
+        found(&r, arm(BASE + 4 * 8)),
+        "the word's one constant never returns, but its other values may"
+    );
+}

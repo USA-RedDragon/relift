@@ -126,6 +126,8 @@ struct Driver<'a> {
     run_count: HashMap<Loc, usize>,
     summaries: HashMap<Loc, Summary>,
     ptrs: HashMap<u32, BTreeSet<u32>>,
+    /// RAM words code also stores values to that are not constant.
+    open: HashSet<u32>,
     /// RAM words copied to other RAM words: source to destinations.
     moves: HashMap<u32, BTreeSet<u32>>,
     specials: RefCell<func::Specials>,
@@ -167,6 +169,7 @@ impl<'a> Driver<'a> {
             run_count: HashMap::new(),
             summaries: HashMap::new(),
             ptrs: HashMap::new(),
+            open: HashSet::new(),
             moves: HashMap::new(),
             specials: RefCell::new(HashMap::new()),
             version: 0,
@@ -368,6 +371,7 @@ impl<'a> Driver<'a> {
                     summaries: &self.summaries,
                     entries: &self.entries,
                     ptrs: &self.ptrs,
+                    open: &self.open,
                     cache: &self.cache,
                     runs: &self.conc,
                     stops: &self.stops,
@@ -405,6 +409,7 @@ impl<'a> Driver<'a> {
             summaries: &self.summaries,
             entries: &self.entries,
             ptrs: &self.ptrs,
+            open: &self.open,
             cache: &self.cache,
             runs: &self.conc,
             stops: &self.stops,
@@ -674,6 +679,7 @@ impl<'a> Driver<'a> {
                     summaries: &self.summaries,
                     entries: &self.entries,
                     ptrs: &self.ptrs,
+                    open: &self.open,
                     cache: &self.cache,
                     runs: &self.conc,
                     stops: &self.stops,
@@ -774,6 +780,14 @@ impl<'a> Driver<'a> {
             }
         }
         self.learn(learned);
+        for &a in &run.ptr_open {
+            if self.open.insert(a) {
+                self.version += 1;
+                if let Some(rs) = self.readers.get(&a) {
+                    self.queue.extend(rs.iter().copied());
+                }
+            }
+        }
         let mut new_irq = false;
         for &v in &run.irq {
             new_irq |= self.irq.insert(v);
