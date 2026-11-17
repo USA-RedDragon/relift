@@ -2,101 +2,15 @@
 //! captures under `tests/caps` are Vulkan Profiles JSON (`vulkaninfo
 //! --json`, or a vulkan.gpuinfo.org report's profile) or an Android vkjson
 //! (`adb shell cmd gpu vkjson`), trimmed by `tests/caps/trim.py` to the
-//! members `HostProfile::from_device` reads; each names its source.
+//! members `HostProfile::from_device` reads; each names its source. They
+//! load through `DeviceCaps::from_json`, as a build's captures do.
 
 use relift_gpu_sm86::translate::{DeviceCaps, HostProfile};
-use serde_json::Value;
-
-const FLAGS: &[(&str, u64)] = &[
-    ("VK_SHADER_STAGE_VERTEX_BIT", 0x1),
-    ("VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT", 0x2),
-    ("VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT", 0x4),
-    ("VK_SHADER_STAGE_GEOMETRY_BIT", 0x8),
-    ("VK_SHADER_STAGE_FRAGMENT_BIT", 0x10),
-    ("VK_SHADER_STAGE_COMPUTE_BIT", 0x20),
-    ("VK_SHADER_STAGE_TASK_BIT_EXT", 0x40),
-    ("VK_SHADER_STAGE_MESH_BIT_EXT", 0x80),
-    ("VK_SUBGROUP_FEATURE_BASIC_BIT", 0x1),
-    ("VK_SUBGROUP_FEATURE_VOTE_BIT", 0x2),
-    ("VK_SUBGROUP_FEATURE_ARITHMETIC_BIT", 0x4),
-    ("VK_SUBGROUP_FEATURE_BALLOT_BIT", 0x8),
-    ("VK_SUBGROUP_FEATURE_SHUFFLE_BIT", 0x10),
-    ("VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT", 0x20),
-    ("VK_SUBGROUP_FEATURE_CLUSTERED_BIT", 0x40),
-    ("VK_SUBGROUP_FEATURE_QUAD_BIT", 0x80),
-];
-
-const DRIVERS: &[(&str, u64)] = &[
-    ("VK_DRIVER_ID_AMD_PROPRIETARY", 1),
-    ("VK_DRIVER_ID_MESA_RADV", 3),
-    ("VK_DRIVER_ID_NVIDIA_PROPRIETARY", 4),
-    ("VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA", 6),
-    ("VK_DRIVER_ID_QUALCOMM_PROPRIETARY", 8),
-    ("VK_DRIVER_ID_ARM_PROPRIETARY", 9),
-    ("VK_DRIVER_ID_MESA_LLVMPIPE", 13),
-    ("VK_DRIVER_ID_MOLTENVK", 14),
-    ("VK_DRIVER_ID_MESA_TURNIP", 18),
-];
-
-/// The value of one member: booleans as 0 or 1, flag and driver names as
-/// their numbers.
-fn number(v: &Value) -> Option<u64> {
-    match v {
-        Value::Bool(b) => Some(u64::from(*b)),
-        Value::Number(n) => n.as_u64().or_else(|| n.as_f64().map(|f| f as u64)),
-        Value::String(s) => DRIVERS.iter().find(|d| d.0 == s).map(|d| d.1),
-        Value::Array(a) => Some(
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(|f| FLAGS.iter().find(|x| x.0 == f).map_or(0, |x| x.1))
-                .fold(0, |a, b| a | b),
-        ),
-        _ => None,
-    }
-}
-
-/// Every member anywhere under `v`. The same member may appear in more than
-/// one structure (a core one and its extension's); the captures agree on it.
-fn members(v: &Value, caps: &mut DeviceCaps) {
-    if let Value::Object(o) = v {
-        for (k, x) in o {
-            if x.is_object() {
-                members(x, caps);
-            } else if let Some(a) = x.as_array().filter(|a| a.iter().all(Value::is_number)) {
-                for (i, e) in a.iter().enumerate() {
-                    let n = number(e).expect("a number");
-                    let old = caps.values.insert(format!("{k}[{i}]"), n);
-                    assert!(old.is_none_or(|o| o == n), "{k}[{i}]: {old:?} and {n}");
-                }
-            } else if let Some(n) = number(x) {
-                let old = caps.values.insert(k.clone(), n);
-                assert!(old.is_none_or(|o| o == n), "{k}: {old:?} and {n}");
-            }
-        }
-    }
-}
 
 fn load(name: &str) -> DeviceCaps {
     let path = format!("{}/tests/caps/{name}.json", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let v: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let mut caps = DeviceCaps::default();
-    if let Some(dev) = v["capabilities"]["device"].as_object() {
-        if let Some(e) = dev["extensions"].as_object() {
-            caps.extensions.extend(e.keys().cloned());
-        }
-        members(&dev["features"], &mut caps);
-        members(&dev["properties"], &mut caps);
-    } else {
-        let dev = &v["devices"][0];
-        for e in dev["extensions"].as_array().into_iter().flatten() {
-            if let Some(n) = e["extensionName"].as_str() {
-                caps.extensions.insert(n.into());
-            }
-        }
-        members(dev, &mut caps);
-    }
-    caps
+    DeviceCaps::from_json(&text).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 #[test]
@@ -156,4 +70,38 @@ fn workgroup_limits_come_from_the_device() {
     let p = HostProfile::from_device("minimum", &caps);
     assert_eq!(p.compute_subgroup, Some(128));
     assert_eq!(p.mesh_slots, 1);
+}
+
+/// A table holds each translation at its offset, sorted by key, and lists
+/// the programs that did not translate.
+#[test]
+fn a_program_set_translates_into_a_table() {
+    use relift_gpu_sm86::translate::Options;
+    use relift_gpu_sm86::translate::build::{Input, translate_set};
+    let exit = 0x14du128 | (4 << 9) | (7 << 12) | (7 << 87) | (7 << 110) | (7 << 113);
+    let bra = 0x147u128 | (4 << 9) | (7 << 12) | (0xffff_ffff_fffc << 34) | (7 << 87);
+    let good: Vec<u8> = [exit, bra].iter().flat_map(|w| w.to_le_bytes()).collect();
+    let bad: Vec<u8> = [0x1ffu128, exit, bra]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    let input = |k: u8, code: &[u8]| Input {
+        key: [k; 32],
+        code: code.to_vec(),
+        options: Options::default(),
+    };
+    let host = HostProfile::from_device("adreno", &load("adreno"));
+    let t = translate_set(&host, &[input(2, &good), input(1, &good), input(3, &bad)]);
+    assert_eq!(t.shaders.len(), 2);
+    assert!(t.failed.contains_key(&[3; 32]));
+    let b = t.to_bytes();
+    assert_eq!(&b[..8], b"RLSPV001");
+    assert_eq!(u32::from_le_bytes(b[8..12].try_into().unwrap()), 2);
+    assert_eq!(b[12], 1, "sorted by key");
+    let at = u32::from_le_bytes(b[44..48].try_into().unwrap()) as usize;
+    let len = u32::from_le_bytes(b[48..52].try_into().unwrap()) as usize;
+    let words = &t.shaders[&[1; 32]].1;
+    assert_eq!(len, words.len());
+    assert_eq!(b[at..at + 4], words[0].to_le_bytes());
+    assert_eq!(b.len(), 12 + 2 * 40 + 8 * len);
 }

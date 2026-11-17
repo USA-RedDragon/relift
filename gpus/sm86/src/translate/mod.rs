@@ -6,6 +6,7 @@
 //! answers `None` for opcodes it does not know, so [`Ctx::inst`] asks them in
 //! turn.
 
+pub mod build;
 mod calls;
 mod cfg;
 mod denorm;
