@@ -10,7 +10,7 @@ use crate::func::{self, Env, FnRun, Lifted, Summary};
 use crate::image::Image;
 use crate::loc::Loc;
 use crate::platform::Platform;
-use crate::report::{CopyKind, Function, Origin, RamCopy, Report, UnresolvedKind};
+use crate::report::{CopyKind, Function, Limit, Origin, RamCopy, Report, UnresolvedKind};
 use relift_cpu_arm32::regs::{self, Mode};
 
 use crate::val::{self, Abs, State};
@@ -19,6 +19,10 @@ use crate::val::{self, Abs, State};
 const MAX_ROUNDS: usize = 8;
 /// Function runs per function before the fixed point gives up.
 const MAX_RUNS_PER_FUNCTION: usize = 1024;
+/// The most bytes all table copies of a run hold together: tables of
+/// code a writer copies to RAM ([`CopyKind::Table`]) past it are dropped
+/// and the report says so ([`Limit::TableCopies`]).
+const MAX_TABLE_BYTES: u32 = 1 << 20;
 
 /// Finds the functions of the code on `platform` reachable from the
 /// roots of `config`, and from its seeds: entries when they open a stack
@@ -142,6 +146,10 @@ struct Driver<'a> {
     moves: HashMap<u32, BTreeSet<u32>>,
     specials: RefCell<func::Specials>,
     boots: RefCell<func::Boots>,
+    /// The bytes of all table copies so far ([`MAX_TABLE_BYTES`]).
+    table_bytes: u32,
+    /// The bounds the run reached.
+    limits: BTreeSet<Limit>,
     /// Counts the changes of summaries, copies and RAM constants.
     version: u64,
     callers: HashMap<Loc, BTreeSet<Loc>>,
@@ -184,6 +192,8 @@ impl<'a> Driver<'a> {
             moves: HashMap::new(),
             specials: RefCell::new(HashMap::new()),
             boots: RefCell::new(HashMap::new()),
+            table_bytes: 0,
+            limits: BTreeSet::new(),
             version: 0,
             callers: HashMap::new(),
             site_psr: HashMap::new(),
@@ -910,6 +920,13 @@ impl<'a> Driver<'a> {
                 .iter()
                 .any(|o| o.dst == c.dst && o.bytes == c.bytes)
             {
+                if matches!(c.kind, CopyKind::Table(_)) {
+                    if self.table_bytes + c.len() > MAX_TABLE_BYTES {
+                        self.limits.insert(Limit::TableCopies);
+                        continue;
+                    }
+                    self.table_bytes += c.len();
+                }
                 if let (CopyKind::Table(thumb), Ok(i)) =
                     (c.kind, u16::try_from(self.image.copies.len()))
                 {
@@ -1023,6 +1040,7 @@ impl<'a> Driver<'a> {
         let seen = self.reached();
         let mut rep = Report {
             copies: self.image.copies.clone(),
+            limits: self.limits.clone(),
             ..Report::default()
         };
         let mut irq: BTreeSet<Loc> = BTreeSet::new();

@@ -109,6 +109,6 @@ pub use loc::Loc;
 pub use platform::{BiosCall, Dma, Kind, Platform};
 pub use relift_cpu_arm32::decode::Profile;
 pub use report::{
-    CopyKind, Edge, EdgeKind, Function, Origin, RamCopy, RegionCoverage, Report, Swi, Table,
+    CopyKind, Edge, EdgeKind, Function, Limit, Origin, RamCopy, RegionCoverage, Report, Swi, Table,
     Unresolved, UnresolvedKind,
 };

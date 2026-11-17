@@ -2,7 +2,8 @@
 //! machine of image segments in main RAM.
 
 use relift_cpu_arm32_analyze::{
-    BiosCall, Config, Dma, Kind, Loc, Options, Origin, Platform, Profile, Report, discover,
+    BiosCall, Config, CopyKind, Dma, Kind, Limit, Loc, Options, Origin, Platform, Profile, RamCopy,
+    Report, discover,
 };
 
 const BASE: u32 = 0x0200_0000;
@@ -1121,4 +1122,78 @@ fn a_word_in_a_copy_naming_code_of_that_copy_is_a_candidate() {
         "{:?}",
         r.functions.keys().collect::<Vec<_>>()
     );
+}
+
+/// The program of `each_function_of_a_table_a_writer_copies_to_fast_ram_is_found_there`
+/// with the destination `fast`, the length the writer gets in `r2`
+/// (`mov r2, #imm`) and the table of `k`.
+fn table_writer(fast: u32, mov_r2: u32, k: &[u32]) -> Machine {
+    let mut m = Machine::new(Profile::V5te);
+    let pool = BASE + 0x80;
+    let table = BASE + 0xA0;
+    let copy = BASE + 0x200;
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            a_ldr_lit(3, BASE + 4, pool),
+            0xE7931100,
+            a_ldr_lit(0, BASE + 12, pool + 4),
+            mov_r2,
+            0xE1A0_0000,
+            a_bl(BASE + 24, copy),
+            a_ldr_lit(4, BASE + 28, pool + 4),
+            0xE12F_FF34,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(pool, &[table, fast]);
+    m.arm(table, k);
+    m.arm(
+        copy,
+        &[0xE491_3004, 0xE480_3004, 0xE252_2004, 0x1AFF_FFFB, A_BX_LR],
+    );
+    m
+}
+
+#[test]
+fn a_constant_length_past_ram_does_not_size_a_table_copy() {
+    let k = [BASE + 0x100, BASE + 0x140];
+    let mut m = table_writer(0x02FF_FF00, 0xE3A0_2C02, &k);
+    m.arm(k[0], &[A_MOV_R0_1, A_BX_LR]);
+    m.arm(k[1], &[0xE3A0_0002, A_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    let first = r
+        .copies
+        .iter()
+        .find(|c| c.src == Some(k[0]))
+        .expect("a copy of the first function");
+    assert_eq!(first.len(), k[1] - k[0], "up to the next function");
+}
+
+#[test]
+fn table_copies_stop_at_a_total_size() {
+    let n = 3;
+    let step = 0x8_0000;
+    let k: Vec<u32> = (0..n).map(|i| OTHER + i * step).collect();
+    let mut m = table_writer(0x02F0_0000, 0xE3A0_2702, &k);
+    m.segments.push((OTHER, vec![0; (n * step) as usize]));
+    for (i, &f) in k.iter().enumerate() {
+        m.arm(f, &[A_MOV_R0_1 + i as u32, A_BX_LR]);
+    }
+    let r = m.run(
+        Options {
+            scan_words: false,
+            ..all()
+        },
+        arm(BASE),
+    );
+    let total: u32 = r
+        .copies
+        .iter()
+        .filter(|c| matches!(c.kind, CopyKind::Table(_)))
+        .map(RamCopy::len)
+        .sum();
+    assert!(total <= 1 << 20, "{total:#x} bytes of table copies");
+    assert!(r.limits.contains(&Limit::TableCopies));
 }

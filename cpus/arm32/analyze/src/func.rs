@@ -863,7 +863,8 @@ impl Run<'_> {
     /// and a source loaded from a table of code addresses in `r1` (code
     /// copied to fast memory and run there), in the image or in a copy:
     /// each function of the table
-    /// becomes a copy at the destination, of `r2` bytes when constant, else
+    /// becomes a copy at the destination, of `r2` bytes when that is a
+    /// constant that ends the copy in RAM, else
     /// up to the next function of the table or of the image (at most
     /// [`MAX_TABLE_COPY`]), and short of the functions other copies (not of
     /// a table) put in that RAM.
@@ -881,7 +882,10 @@ impl Run<'_> {
         let mut starts: Vec<u32> = es.iter().map(|e| e.0).collect();
         starts.sort_unstable();
         starts.dedup();
-        let known = st.reg(2).k32();
+        let known = st
+            .reg(2)
+            .k32()
+            .filter(|&n| n > 0 && self.env.image.is_ram(dst.wrapping_add(n - 1)));
         for (addr, thumb) in es {
             let next_fn = self.env.stops.range(addr + 1..).next().copied();
             let gap = starts

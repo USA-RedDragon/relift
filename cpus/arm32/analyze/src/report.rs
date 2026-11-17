@@ -226,9 +226,20 @@ pub struct RegionCoverage {
     pub bytes: usize,
 }
 
+/// A bound of discovery's work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Limit {
+    /// The bytes all table copies hold together: the tables of code
+    /// past it are not copied.
+    TableCopies,
+}
+
 /// The analysis of one image.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
+    /// The bounds discovery reached, past which it found less than the
+    /// code may hold.
+    pub limits: BTreeSet<Limit>,
     /// The functions by entry.
     pub functions: BTreeMap<Loc, Function>,
     /// The proven copies to RAM.
