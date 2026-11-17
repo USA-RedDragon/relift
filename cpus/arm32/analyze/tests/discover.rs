@@ -607,3 +607,36 @@ fn code_a_function_copies_with_its_own_loop_and_jumps_to_is_found() {
         "the copied code is lifted where it runs"
     );
 }
+
+#[test]
+fn code_a_boot_copies_after_it_waits_on_an_io_register_is_found() {
+    let mut m = Machine::new(Profile::V4t);
+    let ram = 0x02F0_0000;
+    let pool = BASE + 0x80;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(2, BASE, pool),
+            0xE592_3000,
+            0xE313_0001,
+            0x0AFF_FFFC,
+            a_ldr_lit(0, BASE + 16, pool + 4),
+            a_ldr_lit(1, BASE + 20, pool + 8),
+            0xE3A0_2002,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 44, pool + 8),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(pool, &[0x0400_0180, BASE + 0x100, ram]);
+    m.arm(BASE + 0x100, &[A_MOV_R0_1, A_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    assert!(r.copies.iter().any(|c| c.dst == ram), "{:?}", r.copies);
+    assert!(
+        r.instructions().keys().any(|l| l.addr == ram),
+        "the copied code is lifted where it runs"
+    );
+}

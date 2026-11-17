@@ -362,7 +362,33 @@ fn dma_store(st: &mut State, addr: u32, n: u8, v: Abs, out: &mut Vec<DmaStart>) 
 /// and the run's own stack. A byte the run wrote with a value not known
 /// is `None`; a byte not in the map still holds what it held before the
 /// run.
-pub(crate) type Scratch = std::collections::HashMap<u32, Option<u8>>;
+/// Clones share the bytes until one of them writes.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Scratch(std::rc::Rc<std::collections::HashMap<u32, Option<u8>>>);
+
+impl Scratch {
+    pub(crate) fn new() -> Scratch {
+        Scratch::default()
+    }
+
+    pub(crate) fn get(&self, a: &u32) -> Option<&Option<u8>> {
+        self.0.get(a)
+    }
+
+    pub(crate) fn contains_key(&self, a: &u32) -> bool {
+        self.0.contains_key(a)
+    }
+
+    pub(crate) fn insert(&mut self, a: u32, v: Option<u8>) {
+        if self.0.get(&a) != Some(&v) {
+            std::rc::Rc::make_mut(&mut self.0).insert(a, v);
+        }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&u32, &Option<u8>)> {
+        self.0.iter()
+    }
+}
 
 /// The run's private stack, below this address.
 pub(crate) const SCRATCH_STACK: u32 = 0x0F01_0000;

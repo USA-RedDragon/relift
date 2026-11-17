@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use relift_cpu_arm32::decode::Encoding;
 use relift_cpu_arm32::lift::{self, COND_FAIL, LiftError};
-use relift_cpu_arm32::regs;
+use relift_cpu_arm32::regs::{self, Mode};
 use relift_ir::{Block, Flow, Next, Op, Value};
 
 use crate::eval::{self, DmaStart, Out};
@@ -148,6 +148,9 @@ pub(crate) struct Special {
 
 /// The runs on callers' constants, by callee and arguments, with the
 /// version of the facts they used.
+/// The runs from each reset entry ([`crate::conc::boot`]).
+pub(crate) type Boots = HashMap<Loc, Rc<crate::conc::Boot>>;
+
 pub(crate) type Specials = HashMap<(Loc, Args), (u64, Rc<Special>)>;
 
 /// How deep runs of a function on its caller's constants nest.
@@ -173,6 +176,7 @@ pub(crate) struct Env<'a> {
     /// How many runs on a caller's constants this run is inside.
     pub depth: u8,
     pub specials: &'a RefCell<Specials>,
+    pub boots: &'a RefCell<Boots>,
     /// Changes whenever a summary, a copy or a RAM constant does.
     pub version: u64,
 }
@@ -800,27 +804,36 @@ impl Run<'_> {
         if self.env.depth > 0 || site.copy.is_some() {
             return;
         }
-        let boots = self
+        let mut found: Vec<(u32, Vec<u8>)> = Vec::new();
+        if self.env.boot.get(&self.entry) != Some(&Origin::Entry)
+            && let Some(w) = crate::conc::run_to(self.env, self.entry, site)
+        {
+            found = w.ranges;
+        }
+        let boots: Vec<Loc> = self
             .env
             .boot
             .iter()
-            .filter(|(l, o)| **o == Origin::Entry && **l != self.entry)
-            .map(|(l, _)| *l);
-        for from in std::iter::once(self.entry).chain(boots) {
-            let Some(w) = crate::conc::run_to(self.env, from, site) else {
-                continue;
-            };
-            let held: Vec<_> = w
-                .ranges
-                .into_iter()
-                .filter(|(dst, bytes)| {
-                    bytes.len() >= 4 && addr.wrapping_sub(*dst) < bytes.len() as u32
-                })
-                .collect();
-            if held.is_empty() {
-                continue;
+            .filter(|(_, o)| **o == Origin::Entry)
+            .map(|(l, _)| *l)
+            .collect();
+        for from in boots {
+            if found
+                .iter()
+                .any(|(dst, bytes)| addr.wrapping_sub(*dst) < bytes.len() as u32)
+            {
+                break;
             }
-            for (dst, bytes) in held {
+            let cached = self.env.boots.borrow().get(&from).cloned();
+            let run = cached.unwrap_or_else(|| {
+                let r = Rc::new(crate::conc::boot(self.env, from, Mode::Sys));
+                self.env.boots.borrow_mut().insert(from, r.clone());
+                r
+            });
+            found.extend(run.get(&(site.addr, site.thumb)).cloned());
+        }
+        for (dst, bytes) in found {
+            if bytes.len() >= 4 && addr.wrapping_sub(dst) < bytes.len() as u32 {
                 self.out.copies.push(RamCopy {
                     site,
                     kind: CopyKind::Run,
@@ -829,7 +842,6 @@ impl Run<'_> {
                     bytes: Arc::from(bytes.as_slice()),
                 });
             }
-            return;
         }
     }
 

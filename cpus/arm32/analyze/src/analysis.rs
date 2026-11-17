@@ -131,6 +131,7 @@ struct Driver<'a> {
     /// RAM words copied to other RAM words: source to destinations.
     moves: HashMap<u32, BTreeSet<u32>>,
     specials: RefCell<func::Specials>,
+    boots: RefCell<func::Boots>,
     /// Counts the changes of summaries, copies and RAM constants.
     version: u64,
     callers: HashMap<Loc, BTreeSet<Loc>>,
@@ -172,6 +173,7 @@ impl<'a> Driver<'a> {
             open: HashSet::new(),
             moves: HashMap::new(),
             specials: RefCell::new(HashMap::new()),
+            boots: RefCell::new(HashMap::new()),
             version: 0,
             callers: HashMap::new(),
             site_psr: HashMap::new(),
@@ -378,6 +380,7 @@ impl<'a> Driver<'a> {
                     stops: &self.stops,
                     depth: 0,
                     specials: &self.specials,
+                    boots: &self.boots,
                     version: self.version,
                 };
                 func::run(&env, l, State::entry(c.thumb), &self.no_tables)
@@ -417,6 +420,7 @@ impl<'a> Driver<'a> {
             stops: &self.stops,
             depth: 0,
             specials: &self.specials,
+            boots: &self.boots,
             version: self.version,
         }
     }
@@ -688,6 +692,7 @@ impl<'a> Driver<'a> {
                     stops: &self.stops,
                     depth: 0,
                     specials: &self.specials,
+                    boots: &self.boots,
                     version: self.version,
                 };
                 let mut st = State::entry(f.thumb);
