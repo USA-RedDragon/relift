@@ -900,6 +900,20 @@ pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
                 let p = c.elem_ptr(var, WORKGROUP, zero);
                 c.m.emit_void(op::STORE, &[p, zero]);
             });
+            if compute {
+                // The mesh record takes the outputs a program leaves
+                // unwritten too: zero them so every host stores the same.
+                let p = &c.io.mesh.pipe;
+                let words = p.vertex_words(c.io.mesh.components.len() as u32)
+                    + p.primitive_words(c.io.mesh.prims.len() as u32);
+                let attr = c.attr_var();
+                let n = c.m.c_u32(words);
+                let step = c.m.c_u32(lanes);
+                c.counted_loop(vars[0], lane, n, step, |c, i| {
+                    let p = c.elem_ptr(attr, WORKGROUP, i);
+                    c.m.emit_void(op::STORE, &[p, zero]);
+                });
+            }
         }
     }
     c.workgroup_barrier(SEM_WORKGROUP_MEMORY);

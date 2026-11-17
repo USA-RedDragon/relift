@@ -226,6 +226,95 @@ fn instructions(words: &[u32]) -> Vec<(u16, &[u32])> {
     out
 }
 
+/// The workgroup variables the entry point of a compute back end program
+/// stores zeros into before it calls the guest, and those it copies word
+/// for word into the storage buffer after.
+fn zeroed_and_copied(words: &[u32]) -> (Vec<u32>, Vec<u32>) {
+    let ins = instructions(words);
+    let entry = ins
+        .iter()
+        .find(|(o, _)| *o == 15)
+        .map(|(_, w)| w[2])
+        .unwrap();
+    let zeros: Vec<u32> = ins
+        .iter()
+        .filter(|(o, w)| *o == 43 && w[3] == 0)
+        .map(|(_, w)| w[2])
+        .collect();
+    let class: std::collections::HashMap<u32, u32> = ins
+        .iter()
+        .filter(|(o, _)| *o == 59)
+        .map(|(_, w)| (w[2], w[3]))
+        .collect();
+    let start = ins
+        .iter()
+        .position(|(o, w)| *o == 54 && w[2] == entry)
+        .unwrap();
+    let body = &ins[start..];
+    let end = body.iter().position(|(o, _)| *o == 56).unwrap();
+    let body = &body[..end];
+    let call = body.iter().position(|(o, _)| *o == 57).unwrap();
+    let mut chain = std::collections::HashMap::new();
+    let mut loaded = std::collections::HashMap::new();
+    let (mut zeroed, mut copied) = (Vec::new(), Vec::new());
+    for (k, (o, w)) in body.iter().enumerate() {
+        match *o {
+            65 => {
+                chain.insert(w[2], w[3]);
+            }
+            61 => {
+                if let Some(&v) = chain.get(&w[3]) {
+                    loaded.insert(w[2], v);
+                }
+            }
+            62 => {
+                let Some(&to) = chain.get(&w[1]) else {
+                    continue;
+                };
+                if k < call && class.get(&to) == Some(&4) && zeros.contains(&w[2]) {
+                    zeroed.push(to);
+                }
+                if k > call
+                    && class.get(&to) == Some(&12)
+                    && let Some(&from) = loaded.get(&w[2])
+                    && class.get(&from) == Some(&4)
+                {
+                    copied.push(from);
+                }
+            }
+            _ => {}
+        }
+    }
+    (zeroed, copied)
+}
+
+/// Workgroup memory starts undefined, so the compute back end zeroes the
+/// stage buffers a task or mesh record copies: a program that leaves
+/// outputs unwritten stores the same record on every host.
+#[test]
+fn the_compute_back_end_zeroes_the_stage_buffers_its_records_copy() {
+    for c in cases() {
+        for (k, p) in &c.programs {
+            if k == "frag" {
+                continue;
+            }
+            for host in HostProfile::presets() {
+                let s = translate_with(p, &options(host.clone(), &c.pipe, true)).unwrap();
+                let (zeroed, copied) = zeroed_and_copied(&s.spirv);
+                assert!(!copied.is_empty(), "{} {k} on {}", c.name, host.name);
+                for v in copied {
+                    assert!(
+                        zeroed.contains(&v),
+                        "{} {k} on {}: %{v} is copied but not zeroed",
+                        c.name,
+                        host.name
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// What each store to `CullPrimitiveEXT` writes: `Some(constant)` for an
 /// `OpConstantTrue` or `OpConstantFalse`, `None` for a computed bool.
 fn cull_stores(words: &[u32]) -> Vec<Option<bool>> {
