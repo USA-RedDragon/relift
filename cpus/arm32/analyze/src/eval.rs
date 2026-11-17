@@ -627,6 +627,12 @@ fn load(
                 return Abs::K(v);
             }
             let r = image.kind(a);
+            if r == Kind::Image
+                && scratch.is_some()
+                && let Some(v) = image.read(loc.copy, a, n)
+            {
+                return Abs::K(u128::from(v));
+            }
             if r == Kind::Image && !literal && image.variable(a, n) {
                 out.data.push((a, n as u8));
                 if n == 4 && a.is_multiple_of(4) {

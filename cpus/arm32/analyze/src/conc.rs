@@ -62,11 +62,29 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Written
     }
     st.regs[usize::from(SP)] = Abs::K(u128::from(SCRATCH_STACK - 0x10));
     st.regs[usize::from(LR)] = Abs::K(u128::from(SENTINEL));
+    run(env, callee, st, None)
+}
+
+/// What a function leaves in RAM when it runs from its entry, with no
+/// register known, until it reaches `stop` (a jump into RAM it wrote, such
+/// as a boot stub that copies code with its own loop and runs the copy), or
+/// `None` when the run needs a value it does not know first.
+pub(crate) fn run_to(env: &Env<'_>, entry: Loc, stop: Loc) -> Option<Written> {
+    let mut st = State::entry(entry.thumb);
+    for r in st.regs.iter_mut().take(15) {
+        *r = Abs::Top;
+    }
+    st.regs[usize::from(LR)] = Abs::K(u128::from(SENTINEL));
+    run(env, entry, st, Some(stop))
+}
+
+fn run(env: &Env<'_>, entry: Loc, mut st: State, stop: Option<Loc>) -> Option<Written> {
     let mut m = Scratch::new();
     let mut moves: BTreeMap<u32, u32> = BTreeMap::new();
-    let mut loc = callee;
+    let mut loc = entry;
     for _ in 0..MAX_STEPS {
-        if loc.addr == SENTINEL {
+        let stopped = stop.is_some_and(|s| s.addr == loc.addr && s.thumb == loc.thumb);
+        if loc.addr == SENTINEL || stopped {
             return Some(Written {
                 ranges: ranges(env, &m),
                 moves: moves.into_iter().collect(),

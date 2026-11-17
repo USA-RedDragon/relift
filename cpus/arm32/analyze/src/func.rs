@@ -15,7 +15,9 @@ use crate::eval::{self, DmaStart, Out};
 use crate::image::Image;
 use crate::loc::Loc;
 use crate::platform::{BiosCall, Dma, Kind};
-use crate::report::{CopyKind, Edge, EdgeKind, RamCopy, Swi, Table, Unresolved, UnresolvedKind};
+use crate::report::{
+    CopyKind, Edge, EdgeKind, Origin, RamCopy, Swi, Table, Unresolved, UnresolvedKind,
+};
 use crate::val::{Abs, Base, LR, Psr, SP, State, Sym};
 
 /// Registers a call to code the analysis cannot see is taken to keep:
@@ -159,6 +161,9 @@ pub(crate) struct Env<'a> {
     /// RAM words discovered code also stores values to that are not
     /// constant: their constant stores are not all they can hold.
     pub open: &'a HashSet<u32>,
+    /// The functions the run starts at, with why: the reset entries
+    /// ([`Origin::Entry`]) are where a boot runs from.
+    pub boot: &'a BTreeMap<Loc, Origin>,
     pub cache: &'a RefCell<HashMap<(Loc, u32), Lifted>>,
     pub runs: &'a RefCell<Runs>,
     /// ROM addresses where a table ends: the bases of the tables
@@ -785,12 +790,56 @@ impl Run<'_> {
         }
     }
 
+    /// A transfer from `site` to RAM no copy holds: when this function,
+    /// run from its entry with no register known, or the program, run from
+    /// a reset entry, writes the bytes at `addr` before it reaches `site`
+    /// (a copy loop of its own, or a boot that copies code and then calls
+    /// it, as an SDK's crt0 does), what it wrote becomes a copy, and the
+    /// next run finds the code there.
+    fn inline_copy(&mut self, site: Loc, addr: u32) {
+        if self.env.depth > 0 || site.copy.is_some() {
+            return;
+        }
+        let boots = self
+            .env
+            .boot
+            .iter()
+            .filter(|(l, o)| **o == Origin::Entry && **l != self.entry)
+            .map(|(l, _)| *l);
+        for from in std::iter::once(self.entry).chain(boots) {
+            let Some(w) = crate::conc::run_to(self.env, from, site) else {
+                continue;
+            };
+            let held: Vec<_> = w
+                .ranges
+                .into_iter()
+                .filter(|(dst, bytes)| {
+                    bytes.len() >= 4 && addr.wrapping_sub(*dst) < bytes.len() as u32
+                })
+                .collect();
+            if held.is_empty() {
+                continue;
+            }
+            for (dst, bytes) in held {
+                self.out.copies.push(RamCopy {
+                    site,
+                    kind: CopyKind::Run,
+                    src: None,
+                    dst,
+                    bytes: Arc::from(bytes.as_slice()),
+                });
+            }
+            return;
+        }
+    }
+
     fn targets(&mut self, at: Loc, addr: u32, thumb: bool) -> Vec<Loc> {
         match locs(self.env.image, at, addr, thumb) {
             Ok(v) => v,
             Err(k) => {
                 if k == UnresolvedKind::RamNoCopy {
                     self.out.outside.push(Loc::rom(addr, thumb));
+                    self.inline_copy(at, addr);
                 }
                 self.unresolved(at, k, format!("{addr:#010x}"));
                 Vec::new()

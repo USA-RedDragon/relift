@@ -578,3 +578,32 @@ fn a_call_through_a_word_that_also_holds_unknown_values_returns() {
         "the word's one constant never returns, but its other values may"
     );
 }
+
+#[test]
+fn code_a_function_copies_with_its_own_loop_and_jumps_to_is_found() {
+    let mut m = Machine::new(Profile::V4t);
+    let ram = 0x02F0_0000;
+    let pool = BASE + 0x80;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2002,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(pool, &[BASE + 0x100, ram]);
+    m.arm(BASE + 0x100, &[A_MOV_R0_1, A_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    assert!(r.copies.iter().any(|c| c.dst == ram), "{:?}", r.copies);
+    assert!(
+        r.instructions().keys().any(|l| l.addr == ram),
+        "the copied code is lifted where it runs"
+    );
+}
