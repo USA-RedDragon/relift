@@ -229,7 +229,8 @@ int rl_mips_redirect(rl_ctx *c, uint64_t pc)
     return RL_PENDING;
 }
 
-rl_fn rl_mips_eret_to(rl_ctx *c, uint64_t target)
+/** @brief Where ERET to target goes on, with target's fetch done. */
+static rl_fn eret_next(rl_ctx *c, uint64_t target)
 {
     c->pc = target;
     rl_mips_icache(c, target);
@@ -242,6 +243,29 @@ rl_fn rl_mips_eret_to(rl_ctx *c, uint64_t target)
         return rl_mips_pending;
     }
     return rl_lookup(c, target);
+}
+
+/**
+ * @brief ERET to c->pc with the budget ended: a sync point before the
+ * target's first instruction, so an interrupt that ERET let in is taken
+ * there (EPC := target).
+ */
+static int eret_sync(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t target = c->pc;
+    int rc = rl_sync(c, mem, target);
+    if (rc != RL_OK)
+        return rc;
+    RL_MUSTTAIL return eret_next(c, target)(c, mem);
+}
+
+rl_fn rl_mips_eret_to(rl_ctx *c, uint64_t target)
+{
+    if (c->time.budget <= 0) {
+        c->pc = target;
+        return eret_sync;
+    }
+    return eret_next(c, target);
 }
 
 void rl_mips_cache(rl_ctx *c, uint32_t op, uint64_t vaddr, uint32_t run)
