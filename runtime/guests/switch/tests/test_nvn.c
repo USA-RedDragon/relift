@@ -244,3 +244,12 @@ TEST(nvn_presents_step_the_input_script)
     CHECK_EQ(vi_guest_frames(), f0 + 2);
     CHECK(rl_ports_set_script(""));
 }
+
+TEST(nvn_storage_class_needs_the_drivers_layout)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x10000);
+    rl_nvn_set_layout(NULL);
+    CHECK_EQ(call(c, nvnh_nvnTextureBuilderGetStorageClass, heap, 0, 0, 0), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+}

@@ -35,6 +35,10 @@ static const int32_t device_info[] = {
 typedef struct nvn_device {
     nvn_obj o;
     uint32_t origin_mode, depth_mode;
+    /** @brief The builder's flags (nvnDeviceBuilderGetFlags). */
+    uint32_t flags;
+    /** @brief Whether the driver's fields are written into the guest's device object (see device_fields). */
+    bool fields;
 } nvn_device;
 
 typedef struct nvn_queue {
@@ -166,8 +170,90 @@ uint64_t nvnh_nvnDeviceInitialize(rl_ctx *c, uint8_t *mem)
     if ((rc = nvn_gpu_open(c, mem)) != RL_OK)
         return (uint64_t)rc;
     nvn_device *d = (nvn_device *)nvn_obj_new(dev, NVN_DEVICE, sizeof *d);
+    if (d)
+        d->flags = (uint32_t)flags;
     trace("nvnDeviceInitialize(0x%llx, flags 0x%x)", (unsigned long long)dev, (unsigned)flags);
     c->x[0] = d != NULL;
+    return nvn_ret(c);
+}
+
+static const struct rl_nvn_layout *g_layout;
+
+void rl_nvn_set_layout(const struct rl_nvn_layout *l) { g_layout = l; }
+
+/**
+ * @brief Stops when any setting the driver's device start reads is set: the
+ * driver reads them through the hook its settings word holds, so this asks
+ * the same hook for each one (once per process).
+ */
+static int check_settings(rl_ctx *c, uint8_t *mem)
+{
+    static bool done;
+    if (done || !g_layout->settings_hook)
+        return RL_OK;
+    uint64_t hook = rl_ld64(mem, g_layout->settings_hook);
+    if (!hook)
+        return rl_guest_fatal(c, "nvn", "the NVN2 driver's settings hook (word 0x%llx) is not installed",
+                              (unsigned long long)g_layout->settings_hook);
+    for (uint32_t i = 0; i < g_layout->nsettings; i++) {
+        const char *key = g_layout->settings[i];
+        size_t len = strlen(key) + 1;
+        uint64_t sp = c->sp, found = 0;
+        c->sp = (sp - len) & ~15ull;
+        memcpy(mem + c->sp, key, len);
+        uint64_t arg = c->sp;
+        int rc = nvn_guest_call(c, mem, hook, &arg, 1, &found);
+        c->sp = sp;
+        if (rc != RL_OK)
+            return rc;
+        if (found)
+            return rl_guest_fatal(c, "nvn", "the NVN2 driver setting \"%s\" is set; the device fields read from the "
+                                  "driver assume it is not", key);
+    }
+    done = true;
+    return RL_OK;
+}
+
+/**
+ * @brief Writes into the guest's device object at dev the fields the
+ * driver's nvnTextureBuilderGetStorageClass reads: the flags word, the
+ * NvRmGpuDevice, and the bytes the driver's own nvnDeviceInitialize leaves
+ * in the others (the layer keeps its own device state, so it never reads the
+ * guest's object).
+ */
+static int device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev)
+{
+    nvn_device *d = (nvn_device *)nvn_obj_get(dev, NVN_DEVICE);
+    if (!d)
+        return rl_guest_fatal(c, "nvn", "texture builder of device 0x%llx, which is not initialized",
+                              (unsigned long long)dev);
+    if (d->fields)
+        return RL_OK;
+    int rc = check_settings(c, mem);
+    if (rc != RL_OK)
+        return rc;
+    uint64_t gpu = nvn_gpu_device();
+    if (!gpu)
+        return rl_guest_fatal(c, "nvn", "the GPU is not open");
+    rl_st32(mem, dev + g_layout->flags, d->flags);
+    rl_st64(mem, dev + g_layout->gpu_device, gpu);
+    for (uint32_t i = 0; i < g_layout->nfields; i++)
+        memcpy(mem + dev + g_layout->fields[i].off, g_layout->fields[i].bytes, g_layout->fields[i].len);
+    d->fields = true;
+    return RL_OK;
+}
+
+/** @brief nvnTextureBuilderGetStorageClass(const NVNtextureBuilder *): the driver's own function, on the fields it reads. */
+uint64_t nvnh_nvnTextureBuilderGetStorageClass(rl_ctx *c, uint8_t *mem)
+{
+    if (!g_layout)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnTextureBuilderGetStorageClass: the build read no NVN2 driver layout");
+    uint64_t builder = c->x[0], cls = 0;
+    int rc = device_fields(c, mem, rl_ld64(mem, builder + g_layout->builder_device));
+    if (rc != RL_OK || (rc = nvn_guest_call(c, mem, g_layout->storage_class, &builder, 1, &cls)) != RL_OK)
+        return (uint64_t)rc;
+    trace("nvnTextureBuilderGetStorageClass(0x%llx) = 0x%llx", (unsigned long long)builder, (unsigned long long)cls);
+    c->x[0] = cls;
     return nvn_ret(c);
 }
 

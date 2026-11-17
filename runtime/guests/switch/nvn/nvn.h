@@ -31,4 +31,28 @@ RL_RUNTIME_API uint64_t rl_nvn_proc(const char *name);
 /** @brief The name of the proc at guest address addr, or NULL. */
 RL_RUNTIME_API const char *rl_nvn_proc_name(uint64_t addr);
 
+/** @brief A device field and the bytes the driver's own nvnDeviceInitialize leaves in it. */
+struct rl_nvn_field {
+    uint32_t off, len;
+    const uint8_t *bytes;
+};
+
+/**
+ * @brief What the build read from the program's NVN2 driver: the guest
+ * address of its nvnTextureBuilderGetStorageClass and of the word holding
+ * its settings hook (0 for none), the offsets of a builder's device pointer
+ * and of a device's flags word and NvRmGpuDevice pointer, the other device
+ * fields that function reads, and the settings the driver's device start
+ * reads, which must all be unset for the fields to hold.
+ */
+struct rl_nvn_layout {
+    uint64_t storage_class, settings_hook;
+    uint32_t builder_device, flags, gpu_device, nfields, nsettings;
+    const struct rl_nvn_field *fields;
+    const char *const *settings;
+};
+
+/** @brief Registers the driver layout; the build's generated nvn_driver.c calls it before main. */
+RL_RUNTIME_API void rl_nvn_set_layout(const struct rl_nvn_layout *l);
+
 #endif

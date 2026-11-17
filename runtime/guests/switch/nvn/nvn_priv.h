@@ -99,6 +99,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture);
 /** @brief Texture, sampler and descriptor pool procs (nvn_tex.c). */
 #define NVN_TEXTURE_PROCS(X)                                                                                           \
     X(nvnTextureBuilderGetStorageSize)                                                                                 \
+    X(nvnTextureBuilderGetStorageClass)                                                                                \
     X(nvnTextureBuilderGetStorageAlignment)                                                                            \
     X(nvnTextureInitialize)                                                                                            \
     X(nvnTextureFinalize)                                                                                              \
