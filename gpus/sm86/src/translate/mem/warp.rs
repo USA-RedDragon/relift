@@ -441,18 +441,20 @@ fn bar(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 /// MEMBAR: an acquire-release fence on buffer, workgroup and image memory
-/// at the fence's scope (`.CTA` and `.SM` the workgroup in a compute
-/// program, the device elsewhere; `.GPU` the device). Vulkan has no
-/// sequentially consistent fence and, without its memory model, no scope
-/// wider than the device, so `.SC` (an acquire-release fence then) and
-/// `.SYS` (a device fence then) are listed inexact. `.VC` is rejected.
+/// at the fence's scope (`.CTA`, `.SM` and `.VC` the workgroup in a
+/// compute program, the device elsewhere; `.GPU` the device). NVIDIA's
+/// compiler gives a workgroup-scope fence on all memory (GLSL's
+/// `groupMemoryBarrier`) `.VC` and one on shared memory alone none. Vulkan
+/// has no sequentially consistent fence and, without its memory model, no
+/// scope wider than the device, so `.SC` (an acquire-release fence then)
+/// and `.SYS` (a device fence then) are listed inexact.
 /// The accesses a fence orders are atomics where they must be coherent
 /// (see [`super::order`]).
 fn membar(c: &mut Ctx, i: &Inst) -> Res<()> {
     let mut scope = None;
     for m in &i.mods {
         match *m {
-            "CTA" | "SM" => scope = Some(c.cta_scope()),
+            "CTA" | "SM" | "VC" => scope = Some(c.cta_scope()),
             "GPU" => scope = Some(SCOPE_DEVICE),
             "SYS" => {
                 c.inexact("MEMBAR.SYS: system scope as device scope".into());

@@ -19,10 +19,10 @@
 //! * any other access except `.CONSTANT` loads, in a program with a GPU or
 //!   system fence: at Device scope;
 //! * a strong CTA access, or a weak one in a program with a barrier or a
-//!   CTA fence, in a program that writes global memory (a weak access can
-//!   only meet a write of its own workgroup through those): at Workgroup
-//!   scope in compute, task and mesh programs, Device scope elsewhere
-//!   (Vulkan allows Workgroup scope only in those).
+//!   CTA fence (`.CTA`, `.SM`, `.VC`), in a program that writes global
+//!   memory (a weak access can only meet a write of its own workgroup
+//!   through those): at Workgroup scope in compute, task and mesh programs,
+//!   Device scope elsewhere (Vulkan allows Workgroup scope only in those).
 //!
 //! Every other access is plain: nothing it could meet is ordered with it.
 //! PTX treats a vector access as one access per element, so splitting a
@@ -120,7 +120,7 @@ impl Ctx {
     pub(crate) fn mem_plan(&mut self, insts: &[Inst]) {
         let device_fence = insts
             .iter()
-            .any(|i| i.mnemonic == "MEMBAR" && !i.has("CTA") && !i.has("SM"));
+            .any(|i| i.mnemonic == "MEMBAR" && !i.has("CTA") && !i.has("SM") && !i.has("VC"));
         let local_sync = insts
             .iter()
             .any(|i| i.mnemonic == "BAR" || i.mnemonic == "MEMBAR");

@@ -450,8 +450,7 @@ fn weak_accesses_are_coherent_where_a_fence_orders_them() {
     assert!(s.interface.host.inexact.is_empty());
 }
 
-/// MEMBAR orders image memory too; SC and SYS fences are listed inexact,
-/// VC is rejected.
+/// MEMBAR orders image memory too; SC and SYS fences are listed inexact.
 #[test]
 fn fences_report_what_vulkan_cannot_order() {
     let s = on(&[membar(2, 2)], HostProfile::nvidia());
@@ -477,9 +476,21 @@ fn fences_report_what_vulkan_cannot_order() {
             .iter()
             .any(|l| l.contains("MEMBAR.SYS"))
     );
-    let mut b: Vec<u8> = membar(5, 2).to_vec();
-    finish(&mut b);
-    assert!(translate(&Program::parse(&b)).is_err());
+}
+
+/// NVIDIA's compiler gives GLSL's groupMemoryBarrier `MEMBAR.SC.VC`: a
+/// workgroup fence in a compute program that keeps weak accesses at
+/// workgroup scope, a device fence elsewhere.
+#[test]
+fn vc_fences_are_workgroup_fences() {
+    let ld = ldg(SIZE_32, 2, 4, 0);
+    let st = stg(SIZE_32, 4, 8, 2);
+    let s = on(&[ld, membar(5, 2), st], HostProfile::nvidia());
+    let b = insts(&s.spirv, OP_MEMORY_BARRIER);
+    assert_eq!(b.len(), 1);
+    assert_eq!(constant(&s.spirv, b[0][1]), Some(SCOPE_WORKGROUP));
+    assert_eq!(atomic_scopes(&s.spirv), [SCOPE_WORKGROUP]);
+    assert!(s.interface.host.inexact.is_empty());
 }
 
 /// Generic accesses are global ones, which misses the shared and local
