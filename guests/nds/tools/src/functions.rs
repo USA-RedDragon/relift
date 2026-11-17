@@ -70,14 +70,15 @@ pub fn run(args: &FunctionsArgs) -> Result<(), BoxError> {
         for r in &reports {
             writeln!(
                 out,
-                "{} {:08X}-{:08X}: {} functions, {} instructions, {} runs, {} seeds",
+                "{} {:08X}-{:08X}: {} functions, {} instructions, {} runs, {} seeds, {} resume points",
                 r.id.name(),
                 r.range.0,
                 r.range.1,
                 r.report.functions.len(),
                 r.report.instructions().len(),
                 r.runs,
-                r.seeds.len()
+                r.seeds.len(),
+                r.resumes.len()
             )?;
         }
     }
@@ -86,6 +87,15 @@ pub fn run(args: &FunctionsArgs) -> Result<(), BoxError> {
 
 fn write_unit(dir: &Path, tag: &str, r: &UnitReport) -> Result<(), BoxError> {
     let mut v = report_json(&r.report);
+    if let Value::Object(m) = &mut v {
+        m.insert(
+            "resumes".to_owned(),
+            r.resumes
+                .iter()
+                .map(|(l, f)| json!({"at": loc_json(*l), "function": loc_json(*f)}))
+                .collect(),
+        );
+    }
     if let (Value::Object(m), Value::Object(s)) = (&mut v, summary_json(r)) {
         m.extend(s);
     }
@@ -113,6 +123,7 @@ fn summary_json(r: &UnitReport) -> Value {
         "elapsed_ms": r.elapsed.as_millis(),
         "function_count": r.report.functions.len(),
         "instruction_count": r.report.instructions().len(),
+        "resume_count": r.resumes.len(),
         "unresolved_by_kind": kinds,
     })
 }

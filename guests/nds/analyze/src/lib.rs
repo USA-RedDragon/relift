@@ -17,8 +17,11 @@
 //! from one run into an overlay of the same processor (to RAM no copy
 //! holds there, [`Report::outside`]) seed that overlay's run, and the
 //! runs repeat until no seed is new.
+//!
+//! Each report also lists the places a suspended thread resumes at inside
+//! its functions ([`resume`]), which become entries of their own.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -26,6 +29,8 @@ use std::time::{Duration, Instant};
 use relift_cpu_arm32_analyze::{BiosCall, Config, Dma, Kind, Options, Platform, Profile, discover};
 use relift_nds_formats::checksum::sha256;
 use relift_nds_formats::{Cpu, Rom, StaticUnit};
+
+pub mod resume;
 
 pub use relift_cpu_arm32_analyze::{
     CopyKind, Edge, EdgeKind, Function, Loc, Origin, RamCopy, RegionCoverage, Report, Swi, Table,
@@ -149,6 +154,9 @@ pub struct UnitReport {
     pub elapsed: Duration,
     /// What the last run found.
     pub report: Report,
+    /// The places a suspended thread resumes at that are no function
+    /// entry, each with the entry of the function it is an instruction of.
+    pub resumes: BTreeMap<Loc, Loc>,
 }
 
 /// The Nintendo DS as one run of one unit sees it. The ARM9's instruction
@@ -367,7 +375,39 @@ impl Program {
             }
             todo = grown;
         }
-        done.into_iter().flatten().collect()
+        let mut done: Vec<UnitReport> = done.into_iter().flatten().collect();
+        for cpu in [Cpu::Arm9, Cpu::Arm7] {
+            let idx: Vec<usize> = (0..done.len())
+                .filter(|&i| done[i].id.cpu() == cpu)
+                .collect();
+            let reports: Vec<&Report> = idx.iter().map(|&i| &done[i].report).collect();
+            let ids: Vec<UnitId> = idx.iter().map(|&i| done[i].id).collect();
+            let found = resume::resumes(&reports, &|k, a| self.word(ids[k], a));
+            for (i, r) in idx.into_iter().zip(found) {
+                done[i].resumes = r;
+            }
+        }
+        done
+    }
+
+    /// The ARM word at `addr` in the code of the run of the unit `id`: its
+    /// own bytes, then its processor's static binary and autoload blocks.
+    fn word(&self, id: UnitId, addr: u32) -> Option<u32> {
+        let own = self
+            .units
+            .iter()
+            .filter(|u| u.id == id && matches!(id, UnitId::Overlay(..)))
+            .map(|u| (u.base, u.bytes.as_slice()));
+        let segments = self
+            .processor(id.cpu())?
+            .segments
+            .iter()
+            .map(|(b, d)| (*b, d.as_slice()));
+        own.chain(segments).find_map(|(b, d)| {
+            let off = addr.checked_sub(b)? as usize;
+            let w = d.get(off..off.checked_add(4)?)?;
+            Some(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        })
     }
 
     fn run_all(
@@ -418,6 +458,7 @@ impl Program {
             runs,
             elapsed: start.elapsed(),
             report,
+            resumes: BTreeMap::new(),
         }
     }
 }
