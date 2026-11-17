@@ -243,6 +243,10 @@ pub(crate) struct Ctx {
     pub funcs: Vec<u32>,
     /// Shared functions by key (see [`Ctx::shared`]).
     pub shared_fns: BTreeMap<String, u32>,
+    /// The guard of the instruction being translated when it runs
+    /// unconditionally and each register write keeps the old value where
+    /// the guard is false (see [`Ctx::guarded`]).
+    pub store_guard: Option<u32>,
     /// The last clock value read, low and high words.
     pub clock_vars: Option<(u32, u32)>,
     /// Per instruction, whether control flow may reach it with only part
@@ -299,6 +303,7 @@ impl Ctx {
             Some(&f) => f,
             None => {
                 let saved = std::mem::take(&mut self.m.body);
+                let saved_vars = self.m.suspend_vars();
                 let saved_var = self.denorm.var.take();
                 let first_local = self.locals.len();
                 let params = vec![u; args.len()];
@@ -316,6 +321,7 @@ impl Ctx {
                     Ok(r) => r,
                     Err(e) => {
                         self.m.body = saved;
+                        self.m.restore_vars(saved_vars);
                         self.denorm.var = saved_var;
                         return Err(e);
                     }
@@ -330,6 +336,7 @@ impl Ctx {
                 let mut f = std::mem::replace(&mut self.m.body, saved);
                 f.splice(at..at, decls);
                 self.funcs.extend(f);
+                self.m.restore_vars(saved_vars);
                 self.denorm.var = saved_var;
                 self.shared_fns.insert(key, id);
                 id
@@ -366,8 +373,11 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.regs, &mut self.m, n);
         let t = self.u32t();
-        let v = self.lane_var(v, t);
-        self.m.emit(op::LOAD, t, &[v])
+        if self.simt.is_some() {
+            let v = self.lane_var(v, t);
+            return self.m.emit(op::LOAD, t, &[v]);
+        }
+        self.m.load_var(t, v)
     }
 
     pub fn store_reg(&mut self, n: u8, val: u32) {
@@ -376,8 +386,25 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.regs, &mut self.m, n);
         let t = self.u32t();
-        let v = self.lane_var(v, t);
-        self.m.emit_void(op::STORE, &[v, val]);
+        if self.simt.is_some() {
+            let v = self.lane_var(v, t);
+            self.m.emit_void(op::STORE, &[v, val]);
+            return;
+        }
+        let val = self.kept(t, v, val);
+        self.m.store_var(v, val);
+    }
+
+    /// `val`, or under [`Ctx::store_guard`] the old value of `var` (of
+    /// type `ty`) where the guard is false.
+    fn kept(&mut self, ty: u32, var: u32, val: u32) -> u32 {
+        match self.store_guard {
+            Some(g) => {
+                let old = self.m.load_var(ty, var);
+                self.m.emit(op::SELECT, ty, &[g, val, old])
+            }
+            None => val,
+        }
     }
 
     /// The variable itself, or on [`WarpPath::Simt`] the current lane's
@@ -402,7 +429,7 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.uregs, &mut self.m, n);
         let t = self.u32t();
-        self.m.emit(op::LOAD, t, &[v])
+        self.m.load_var(t, v)
     }
 
     pub fn store_ureg(&mut self, n: u8, val: u32) {
@@ -410,7 +437,9 @@ impl Ctx {
             return;
         }
         let v = Ctx::var_in(&mut self.uregs, &mut self.m, n);
-        self.m.emit_void(op::STORE, &[v, val]);
+        let t = self.u32t();
+        let val = self.kept(t, v, val);
+        self.m.store_var(v, val);
     }
 
     pub fn load_pred(&mut self, n: u8, not: bool) -> u32 {
@@ -419,8 +448,12 @@ impl Ctx {
         } else {
             let var = Ctx::var_in(&mut self.preds, &mut self.m, n);
             let t = self.m.t_bool();
-            let var = self.lane_var(var, t);
-            self.m.emit(op::LOAD, t, &[var])
+            if self.simt.is_some() {
+                let var = self.lane_var(var, t);
+                self.m.emit(op::LOAD, t, &[var])
+            } else {
+                self.m.load_var(t, var)
+            }
         };
         self.not_if(v, not)
     }
@@ -431,8 +464,13 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.preds, &mut self.m, n);
         let t = self.m.t_bool();
-        let v = self.lane_var(v, t);
-        self.m.emit_void(op::STORE, &[v, val]);
+        if self.simt.is_some() {
+            let v = self.lane_var(v, t);
+            self.m.emit_void(op::STORE, &[v, val]);
+            return;
+        }
+        let val = self.kept(t, v, val);
+        self.m.store_var(v, val);
     }
 
     pub fn load_upred(&mut self, n: u8, not: bool) -> u32 {
@@ -441,7 +479,7 @@ impl Ctx {
         } else {
             let var = Ctx::var_in(&mut self.upreds, &mut self.m, n);
             let t = self.m.t_bool();
-            self.m.emit(op::LOAD, t, &[var])
+            self.m.load_var(t, var)
         };
         self.not_if(v, not)
     }
@@ -451,7 +489,9 @@ impl Ctx {
             return;
         }
         let v = Ctx::var_in(&mut self.upreds, &mut self.m, n);
-        self.m.emit_void(op::STORE, &[v, val]);
+        let t = self.m.t_bool();
+        let val = self.kept(t, v, val);
+        self.m.store_var(v, val);
     }
 
     pub fn not_if(&mut self, v: u32, not: bool) -> u32 {
@@ -539,13 +579,19 @@ impl Ctx {
             return bad(format!("cbuf offset {off:#x}"));
         }
         let var = self.cbuf_var(bank)?;
+        let key = vec![var, off as u32];
+        if let Some(v) = self.m.recall(&key) {
+            return Ok(v);
+        }
         let zero = self.m.c_u32(0);
         let vi = self.m.c_u32((off / 16) as u32);
         let ci = self.m.c_u32(((off / 4) % 4) as u32);
         let u = self.u32t();
         let p = self.m.t_ptr(UNIFORM, u);
         let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, zero, vi, ci]);
-        Ok(self.m.emit(op::LOAD, u, &[ptr]))
+        let v = self.m.emit(op::LOAD, u, &[ptr]);
+        self.m.remember(key, v);
+        Ok(v)
     }
 
     /// One 32-bit word of constant bank `bank` at a byte address computed at
@@ -759,6 +805,12 @@ impl Ctx {
             return self.inst(i);
         };
         let c = self.pred_operand(g)?;
+        if self.m.keeps_vars() && cfg::arithmetic(i.mnemonic) {
+            self.store_guard = Some(c);
+            let r = self.inst(i);
+            self.store_guard = None;
+            return r;
+        }
         let then = self.m.id();
         let merge = self.m.id();
         self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
@@ -914,6 +966,7 @@ impl Ctx {
             warp_idioms: uniform::Plan::default(),
             synced: HashSet::new(),
             shared_fns: BTreeMap::new(),
+            store_guard: None,
         }
     }
 

@@ -189,6 +189,17 @@ pub struct Module {
     pub types: Vec<u32>,
     pub body: Vec<u32>,
     cache: HashMap<Vec<u32>, u32>,
+    vars: Option<Vars>,
+}
+
+/// The values of function variables known in the current block, so loads
+/// and stores of them become plain SSA values within a block (see
+/// [`Module::load_var`]).
+#[derive(Default)]
+pub struct Vars {
+    vals: HashMap<u32, (u32, bool)>,
+    order: Vec<u32>,
+    memo: HashMap<Vec<u32>, u32>,
 }
 
 pub fn inst(out: &mut Vec<u32>, opcode: u16, args: &[u32]) {
@@ -397,7 +408,95 @@ impl Module {
     }
 
     pub fn emit_void(&mut self, opcode: u16, args: &[u32]) {
+        if let Some(v) = &mut self.vars {
+            match opcode {
+                op::LABEL => {
+                    v.vals.clear();
+                    v.order.clear();
+                    v.memo.clear();
+                }
+                op::SELECTION_MERGE
+                | op::LOOP_MERGE
+                | op::BRANCH
+                | op::BRANCH_CONDITIONAL
+                | op::SWITCH => {
+                    for var in std::mem::take(&mut v.order) {
+                        if let Some((val, true)) = v.vals.get(&var).copied() {
+                            inst(&mut self.body, op::STORE, &[var, val]);
+                            v.vals.insert(var, (val, false));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         inst(&mut self.body, opcode, args);
+    }
+
+    /// Starts keeping variable values per block: from here, a load of a
+    /// variable that [`Module::store_var`] wrote or [`Module::load_var`]
+    /// read in the same block reuses the value, and stores are written once,
+    /// before the block's merge or branch (none before a return or a
+    /// discard: function variables end there). Only for variables nothing
+    /// else reads or writes, in code emitted block by block in order.
+    pub fn keep_vars(&mut self) {
+        self.vars = Some(Vars::default());
+    }
+
+    /// Takes the per-block state away while code for another function is
+    /// emitted; [`Module::restore_vars`] puts it back.
+    pub fn suspend_vars(&mut self) -> Option<Vars> {
+        self.vars.take()
+    }
+
+    /// Whether [`Module::keep_vars`] is on.
+    pub fn keeps_vars(&self) -> bool {
+        self.vars.is_some()
+    }
+
+    pub fn restore_vars(&mut self, v: Option<Vars>) {
+        self.vars = v;
+    }
+
+    /// The value of function variable `var` of type `ty`.
+    pub fn load_var(&mut self, ty: u32, var: u32) -> u32 {
+        if let Some(v) = &self.vars
+            && let Some((val, _)) = v.vals.get(&var)
+        {
+            return *val;
+        }
+        let val = self.emit(op::LOAD, ty, &[var]);
+        if let Some(v) = &mut self.vars {
+            v.vals.insert(var, (val, false));
+        }
+        val
+    }
+
+    /// The value an earlier [`Module::remember`] in the current block gave
+    /// `key`.
+    pub fn recall(&self, key: &[u32]) -> Option<u32> {
+        self.vars.as_ref()?.memo.get(key).copied()
+    }
+
+    /// Notes `val` for `key` until the block ends (only while
+    /// [`Module::keep_vars`] is on): for values that cannot change within
+    /// a block, such as constant bank words.
+    pub fn remember(&mut self, key: Vec<u32>, val: u32) {
+        if let Some(v) = &mut self.vars {
+            v.memo.insert(key, val);
+        }
+    }
+
+    /// Writes `val` to function variable `var`.
+    pub fn store_var(&mut self, var: u32, val: u32) {
+        match &mut self.vars {
+            Some(v) => {
+                if v.vals.insert(var, (val, true)).is_none_or(|(_, d)| !d) {
+                    v.order.push(var);
+                }
+            }
+            None => inst(&mut self.body, op::STORE, &[var, val]),
+        }
     }
 
     pub fn finish(self) -> Vec<u32> {

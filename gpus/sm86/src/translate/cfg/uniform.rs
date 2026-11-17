@@ -162,7 +162,7 @@ fn writes_nothing(m: &str) -> bool {
 }
 
 /// Pure arithmetic whose destinations come first (see the module notes).
-fn arithmetic(m: &str) -> bool {
+pub(crate) fn arithmetic(m: &str) -> bool {
     matches!(
         m,
         "MOV"

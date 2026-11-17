@@ -99,6 +99,8 @@
 mod masks;
 mod uniform;
 
+pub(crate) use uniform::arithmetic;
+
 use super::calls::{self, Callee};
 use super::{Code, Ctx, Res, bad};
 use crate::Operand;
@@ -2572,12 +2574,16 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()>
         conv_vars: HashMap::new(),
         any_word: None,
     };
-    if e.g.conv.iter().any(|k| k.stub.is_some()) {
+    c.m.keep_vars();
+    let r = if e.g.conv.iter().any(|k| k.stub.is_some()) {
         let body = c.m.id();
         c.m.emit_void(op::LABEL, &[first]);
         e.start(c);
         c.m.emit_void(op::BRANCH, &[body]);
-        return e.region(c, 0, body, None, None);
-    }
-    e.region(c, 0, first, None, None)
+        e.region(c, 0, body, None, None)
+    } else {
+        e.region(c, 0, first, None, None)
+    };
+    c.m.restore_vars(None);
+    r
 }

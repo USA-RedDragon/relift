@@ -1433,3 +1433,68 @@ fn shared_tails_are_dispatched_not_copied() {
     assert!(count_op(&s.spirv, 251) >= 39);
     assert!(s.spirv.len() < 20_000, "{} words", s.spirv.len());
 }
+
+fn spirv_count(words: &[u32], opcode: u32) -> usize {
+    let mut k = 5;
+    let mut n = 0;
+    while k < words.len() {
+        if words[k] & 0xffff == opcode {
+            n += 1;
+        }
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    n
+}
+
+fn iadd_imm(dst: u64, a: u64, v: u32) -> [u8; 16] {
+    word(
+        0x010,
+        4,
+        &[
+            (16, 8, dst),
+            (24, 8, a),
+            (32, 32, u64::from(v)),
+            (64, 8, 255),
+            (81, 3, 7),
+            (84, 3, 7),
+        ],
+    )
+}
+
+/// Within a block, registers are SSA values: a register written and read
+/// again is neither stored nor loaded in between, and a guarded add is a
+/// select, not a branch.
+#[test]
+fn registers_stay_values_within_a_block() {
+    let mut b = Vec::new();
+    b.extend(mov_imm(1, 5));
+    for k in 0..8 {
+        b.extend(iadd_imm(2 + k, 1 + k, 3));
+    }
+    let mut guarded = iadd_imm(1, 9, 1);
+    guarded[1] &= 0x8f;
+    b.extend(guarded);
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[9], "@P0 IADD3 R1, R9, 0x1, RZ");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    let mut vars = 0;
+    let mut k = 5;
+    while k < s.spirv.len() {
+        let n = ((s.spirv[k] >> 16) as usize).max(1);
+        if s.spirv[k] & 0xffff == 59 && s.spirv[k + 3] == 7 {
+            vars += 1;
+        }
+        k += n;
+    }
+    assert_eq!(
+        spirv_count(&s.spirv, 62),
+        vars,
+        "registers are stored only where the entry zeroes them"
+    );
+    assert!(
+        spirv_count(&s.spirv, 61) <= 1,
+        "only the predicate is loaded"
+    );
+    assert_eq!(spirv_count(&s.spirv, 247), 0, "no selection for the guard");
+}

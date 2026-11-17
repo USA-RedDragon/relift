@@ -653,8 +653,14 @@ impl Ctx {
     }
 
     fn tx_op(&mut self, opc: u16, a: u32, b: u32) -> u32 {
+        let key = vec![u32::MAX - 1, u32::from(opc), a, b];
+        if let Some(v) = self.m.recall(&key) {
+            return v;
+        }
         let u = self.u32t();
-        self.m.emit(opc, u, &[a, b])
+        let v = self.m.emit(opc, u, &[a, b]);
+        self.m.remember(key, v);
+        v
     }
 
     fn tx_opk(&mut self, opc: u16, a: u32, k: u32) -> u32 {
@@ -694,11 +700,16 @@ impl Ctx {
     }
 
     fn descriptor(&mut self, binding: u32, ty: u32, index: u32, nonuniform: bool) -> u32 {
+        let key = vec![u32::MAX, binding, ty, index, u32::from(nonuniform)];
+        if let Some(v) = self.m.recall(&key) {
+            return v;
+        }
         let ptr = self.descriptor_ptr(binding, ty, index, nonuniform);
         let v = self.m.emit(op::LOAD, ty, &[ptr]);
         if nonuniform {
             self.m.deco(v, NON_UNIFORM, &[]);
         }
+        self.m.remember(key, v);
         v
     }
 

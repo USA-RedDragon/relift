@@ -141,6 +141,7 @@ impl Ctx {
             return f;
         }
         let saved = std::mem::take(&mut self.m.body);
+        let saved_vars = self.m.suspend_vars();
         let u = self.u32t();
         let fnt = self.m.t_fn_args(u, &[u; 9]);
         let id = self.m.id();
@@ -154,6 +155,7 @@ impl Ctx {
         self.m.emit_void(RETURN_VALUE, &[r]);
         self.m.emit_void(op::FUNCTION_END, &[]);
         let body = std::mem::replace(&mut self.m.body, saved);
+        self.m.restore_vars(saved_vars);
         self.funcs.extend(body);
         self.builtins.insert(DOT8_KEY, id);
         id
