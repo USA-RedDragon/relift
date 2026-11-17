@@ -286,7 +286,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     let symbols: Vec<String> = lifted.units.iter().map(|u| u.symbol.clone()).collect();
     let mut prog = Vec::new();
     for (n, text) in [
-        ("rom.c", relift_n64::program::rom_c()),
+        ("rom.c", relift_n64::program::rom_c(&rom.bytes)),
         ("rsp_images.c", relift_n64::rsp::images_c(&rsp.images)),
         (
             "program.c",
