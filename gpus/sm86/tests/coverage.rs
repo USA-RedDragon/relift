@@ -39,6 +39,7 @@ fn programs() -> (Vec<u8>, Vec<u8>) {
 #[test]
 fn paired_task_and_mesh_programs_translate_with_their_pipeline() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("coverage-meshes");
+    std::fs::create_dir_all(&dir).unwrap();
     let mut mesh = vec![0u8; 0xe0];
     mesh[0x56] = 7;
     mesh[0x58..0x5c].copy_from_slice(&0x0030_0008u32.to_le_bytes());
