@@ -83,6 +83,8 @@ typedef struct nds_gx_lbuf {
     /** @brief The topmost and the second color: 18-bit color with alpha (0 to 31) in bits 24 to 28. */
     uint32_t col[2][256];
     uint32_t depth[256];
+    /** @brief The depth of the second color (where an opaque pixel behind an anti-aliased edge goes). */
+    uint32_t depth2[256];
     uint32_t attr[256];
 } nds_gx_lbuf;
 

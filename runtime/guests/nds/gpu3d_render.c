@@ -412,7 +412,7 @@ static void clear_line(rl_nds *m, nds_gx *g, nds_gx_lbuf *l, unsigned y)
             uint32_t at = (((y + oy) & 0xFFu) * 256u + ((x + ox) & 0xFFu)) * 2u;
             uint32_t c = nds_vram_rd(m, NDS_V_TEX, 0x40000u + at, 2), d = nds_vram_rd(m, NDS_V_TEX, 0x60000u + at, 2);
             l->col[0][x] = l->col[1][x] = rgb18(c & 0x7FFFu) | ((c & 0x8000u) ? 31u << 24 : 0);
-            l->depth[x] = depth24(d & 0x7FFFu);
+            l->depth[x] = l->depth2[x] = depth24(d & 0x7FFFu);
             l->attr[x] = id | ((d & 0x8000u) ? A_FOG : 0);
         }
         return;
@@ -421,12 +421,30 @@ static void clear_line(rl_nds *m, nds_gx *g, nds_gx_lbuf *l, unsigned y)
     uint32_t d = depth24(g->clear_depth), a = id | ((g->clear_color & 0x8000u) ? A_FOG : 0);
     for (unsigned x = 0; x < 256; x++) {
         l->col[0][x] = l->col[1][x] = c;
-        l->depth[x] = d;
+        l->depth[x] = l->depth2[x] = d;
         l->attr[x] = a;
     }
 }
 
-/** @brief Draws one pixel of poly with color c at depth z; edge marks an edge pixel. */
+/** @brief Translucent color c over dst: blended when DISP3DCNT enables it and dst is not transparent, else c. */
+static uint32_t blend(const nds_gx *g, uint32_t c, uint32_t dst)
+{
+    uint32_t a = alpha_of(c), da = alpha_of(dst);
+    if (!(g->disp3dcnt & D_BLEND) || !da)
+        return c;
+    uint32_t r[3];
+    for (unsigned k = 0; k < 3; k++)
+        r[k] = (ch(c, k) * (a + 1) + ch(dst, k) * (31 - a)) / 32;
+    return pack(r[0], r[1], r[2], a > da ? a : da);
+}
+
+/**
+ * @brief Draws one pixel of poly with color c at depth z; edge marks an edge
+ * pixel. A pixel that fails the depth test at a partly covered (anti-aliased)
+ * edge pixel still goes into the second color when it is in front of that
+ * one, and a translucent pixel blends into both colors, so the final
+ * anti-aliasing pass mixes the edge with what ends up behind it.
+ */
 static void plot(nds_gx *g, nds_gx_lbuf *l, const nds_gx_poly *p, unsigned x, uint32_t c, uint32_t z, bool edge, uint32_t cov)
 {
     uint32_t a = alpha_of(c), old_attr = l->attr[x];
@@ -447,27 +465,27 @@ static void plot(nds_gx *g, nds_gx_lbuf *l, const nds_gx_poly *p, unsigned x, ui
             return;
         old_attr &= ~A_STENCIL;
     }
-    if (!depth_ok(p, z, l->depth[x], old_attr))
+    if (!depth_ok(p, z, l->depth[x], old_attr)) {
+        if ((old_attr & A_EDGE) && ((old_attr & A_COVER) >> A_COVER_SHIFT) < 31 && z < l->depth2[x]) {
+            l->col[1][x] = a == 31 ? c : blend(g, c, l->col[1][x]);
+            if (a == 31 || (p->attr & 0x800))
+                l->depth2[x] = z;
+        }
         return;
+    }
     bool fog = (p->attr >> 15) & 1;
     if (a == 31) {
         l->col[1][x] = l->col[0][x];
         l->col[0][x] = c;
+        l->depth2[x] = l->depth[x];
         l->depth[x] = z;
         l->attr[x] = id | (fog ? A_FOG : 0) | (edge ? A_EDGE : 0) | (p->front ? 0 : A_BACK) | cov << A_COVER_SHIFT;
         return;
     }
     if ((old_attr & A_TRANSL) && ((old_attr & A_TRANSL_ID) >> A_TRANSL_ID_SHIFT) == id)
         return;
-    uint32_t dst = l->col[0][x], da = alpha_of(dst);
-    uint32_t out = c;
-    if ((g->disp3dcnt & D_BLEND) && da) {
-        uint32_t r[3];
-        for (unsigned k = 0; k < 3; k++)
-            r[k] = (ch(c, k) * (a + 1) + ch(dst, k) * (31 - a)) / 32;
-        out = pack(r[0], r[1], r[2], a > da ? a : da);
-    }
-    l->col[0][x] = out;
+    l->col[0][x] = blend(g, c, l->col[0][x]);
+    l->col[1][x] = blend(g, c, l->col[1][x]);
     if (p->attr & 0x800)
         l->depth[x] = z;
     uint32_t keep = old_attr & (A_OPAQUE_ID | A_EDGE | A_BACK | A_COVER);
@@ -684,7 +702,7 @@ static void finish_line(nds_gx *g, const nds_gx_lbuf *l, const nds_gx_lbuf *abov
         if (fog)
             c = fogged(g, c, l->depth[x]);
         uint32_t cov = marked ? 16 : (at & A_COVER) >> A_COVER_SHIFT;
-        if ((cnt & D_AA) && cov < 31 && !(at & A_TRANSL)) {
+        if ((cnt & D_AA) && cov < 31) {
             uint32_t b = l->col[1][x];
             if (fog)
                 b = fogged(g, b, l->depth[x]);
