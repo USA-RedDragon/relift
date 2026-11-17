@@ -64,6 +64,30 @@ jobs:
       - name: fmt, clippy, tests, charter, generated docs and Vulkan forwarding, deny
         run: scripts/ci/checks.sh
 
+  docs:
+    name: docs facts are current and the site builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.2"
+
+      - name: Check the generated facts and build the site
+        run: scripts/ci/docs.sh
+
+      - name: Upload the site
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-site
+          path: artifacts/docs-site
+          if-no-files-found: error
+          retention-days: 14
+
   gb-corpus:
     name: Game Boy corpus subset through relift
     runs-on: ubuntu-latest
