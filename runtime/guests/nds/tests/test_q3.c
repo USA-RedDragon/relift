@@ -382,6 +382,17 @@ static void s5(core *c)
     logv(c, 9, 0);
 }
 
+/** @brief Both CPUs store to main RAM at the same tick, the ARM9 having written Q.l to EXMEMCNT. */
+static void s6(core *c)
+{
+    if (c->id == 0)
+        st(c, 0x04000204u, 2, (uint32_t)Q.l);
+    while (now_of(c) < 1000)
+        priv(c, 1);
+    st(c, c->id ? 0x02003000u : 0x02003100u, 4, 1);
+    logv(c, 6, 0);
+}
+
 static void body(rl_sched_cpu *k, void *arg)
 {
     core *c = arg;
@@ -580,5 +591,21 @@ TEST(q3_s5_contention_end_times_match_lockstep)
         char name[32];
         snprintf(name, sizeof name, "S5 K=%d", Q.k);
         CHECK(exact(name, s5, s5));
+    }
+}
+
+TEST(q3_s6_exmemcnt_bit_15_decides_who_gets_main_ram_first)
+{
+    for (int md = LOCKSTEP; md <= FUSED; md++) {
+        uint64_t end[2][2];
+        for (unsigned arm7 = 0; arm7 < 2; arm7++) {
+            Q.l = arm7 ? 0xE880 : 0x6880;
+            run((mode)md, s6, s6, &R[0]);
+            CHECK(R[0].nlog[0] == 1 && R[0].nlog[1] == 1);
+            end[arm7][0] = R[0].log[0][0].t;
+            end[arm7][1] = R[0].log[1][0].t;
+        }
+        CHECK(end[1][1] < end[0][1]);
+        CHECK(end[1][0] > end[0][0]);
     }
 }
