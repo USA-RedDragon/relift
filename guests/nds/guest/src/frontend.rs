@@ -24,7 +24,9 @@
 //!   the bytes the CPU fetches are the ones it was lifted from
 //!   (`rl_nds_cpu_enter`, given the unit and the function); when they are
 //!   not, the function leaves for the lifted function the runtime finds for
-//!   those bytes (`rl_nds_cpu_variant`);
+//!   those bytes in the state the CPU is in (`rl_nds_cpu_variant`): a direct
+//!   call names one of the functions at an address, which can be another
+//!   copy's function in the other state;
 //! - a write of the I bit tells the runtime (`rl_nds_cpu_set_i`), which
 //!   ends the budget when it unmasks a pending interrupt;
 //! - every instruction ends in a sync point.
@@ -523,13 +525,9 @@ impl Frontend for Nds {
         None
     }
 
-    fn guard_exit(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
-        (code == CODE_CHANGED).then(|| {
-            format!(
-                "rl_nds_cpu_variant(c, (uint32_t)UINT32_C({pc:#x}), {}u)",
-                u32::from(insn & RAW_THUMB != 0)
-            )
-        })
+    fn guard_exit(&self, code: u32, pc: u64, _insn: u64) -> Option<String> {
+        (code == CODE_CHANGED)
+            .then(|| format!("rl_nds_cpu_variant(c, (uint32_t)UINT32_C({pc:#x}), c->t)"))
     }
 
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
@@ -645,7 +643,7 @@ mod tests {
         assert_eq!(
             fe.guard_exit(CODE_CHANGED, u64::from(BASE), RAW_THUMB | 0x4770)
                 .as_deref(),
-            Some("rl_nds_cpu_variant(c, (uint32_t)UINT32_C(0x2000000), 1u)")
+            Some("rl_nds_cpu_variant(c, (uint32_t)UINT32_C(0x2000000), c->t)")
         );
         assert_eq!(fe.guard_exit(COND_FAIL, 0, 0), None);
         let inner = lift9(&img, BASE, false);
