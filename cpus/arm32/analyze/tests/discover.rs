@@ -1087,3 +1087,38 @@ fn functions_of_a_table_in_a_copy_that_code_copies_on_are_found() {
         "one function per table entry at {slot:#x}: {at:?}"
     );
 }
+
+#[test]
+fn a_word_in_a_copy_naming_code_of_that_copy_is_a_candidate() {
+    let mut m = Machine::new(Profile::V4t);
+    let wram = 0x02F0_0000;
+    let pool = BASE + 0x40;
+    let src = BASE + 0x100;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2009,
+            0xE8B0_0078,
+            0xE8A1_0078,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF10,
+        ],
+    );
+    m.arm(pool, &[src, wram]);
+    let mut block = vec![A_BX_LR; 0x20];
+    block.extend([(wram + 0x84) | 1, 0x4770_2001]);
+    block.resize(0x24, 0);
+    m.arm(src, &block);
+    let r = m.run(all(), arm(BASE));
+    assert!(
+        r.functions
+            .keys()
+            .any(|l| l.addr == wram + 0x84 && l.thumb && l.copy.is_some()),
+        "{:?}",
+        r.functions.keys().collect::<Vec<_>>()
+    );
+}

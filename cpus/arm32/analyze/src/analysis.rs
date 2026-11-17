@@ -368,7 +368,15 @@ impl<'a> Driver<'a> {
                         0 if opts.arm_pointers => (v, false),
                         _ => continue,
                     };
-                    if !platform.code_addr(t) || cands.contains(&Cand::taken(t, thumb)) {
+                    if !platform.code_addr(t) {
+                        cands.extend(
+                            self.copy_cands(None, t, thumb)
+                                .into_iter()
+                                .map(|c| Cand { scanned: true, ..c }),
+                        );
+                        continue;
+                    }
+                    if cands.contains(&Cand::taken(t, thumb)) {
                         continue;
                     }
                     cands.insert(Cand {
