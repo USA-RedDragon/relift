@@ -209,7 +209,7 @@ TEST(costs_follow_gbatek_and_charge_the_clock)
     ndst *t = ndst_new();
     rl_nds *m = t->m;
     const rl_nds_costs *c = rl_nds_cost_table(m);
-    CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x02][2][0], 20);
+    CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x02][2][0], 18);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x02][1][1], 2);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_CODE][0x02][1][0], 9);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x04][2][0], 8);
@@ -230,11 +230,11 @@ TEST(costs_follow_gbatek_and_charge_the_clock)
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 1002);
     rl_nds_idle(m, RL_NDS_ARM9, 3);
     rl_nds_load(m, RL_NDS_ARM9, 0x04000130u, 2, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 4 + 8);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 2 + 8 - 1);
     rl_nds_store(m, RL_NDS_ARM9, 0x05000000u, 4, 1, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 12 + 10);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 8 + 10 - 1);
     rl_nds_fetch(m, RL_NDS_ARM9, 0x02000000u, 4, true);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 22 + 18);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 18 + 18);
 }
 
 TEST(tcm_accesses_cost_one_arm9_cycle_off_the_bus)
@@ -249,7 +249,7 @@ TEST(tcm_accesses_cost_one_arm9_cycle_off_the_bus)
     rl_nds_fetch(m, RL_NDS_ARM9, 0x100u, 2, false);
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 3);
     rl_nds_load(m, RL_NDS_ARM9, 0x02000000u, 2, true);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 4 + 2);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 3 + 2);
 }
 
 TEST(main_ram_serves_one_cpu_at_a_time)
@@ -257,11 +257,11 @@ TEST(main_ram_serves_one_cpu_at_a_time)
     ndst *t = ndst_new();
     rl_nds *m = t->m;
     rl_nds_load(m, RL_NDS_ARM9, 0x02000000u, 4, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 20);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 18 - 1);
     rl_nds_load(m, RL_NDS_ARM7, 0x02000000u, 4, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 40);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 18 + 6 + 12);
     rl_nds_load(m, RL_NDS_ARM7, 0x03800000u, 4, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 42);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 36 + 2);
     ndst_to(t, RL_NDS_ARM7, 200);
     ndst_to(t, RL_NDS_ARM9, 100);
     rl_nds_store(m, RL_NDS_ARM9, 0x02000000u, 2, 1, true);
@@ -275,6 +275,6 @@ TEST(an_untimed_haltcnt_write_does_not_halt_a_later_store)
     w7(t, 0x04000301u, 1, 0x80);
     ndst_to(t, RL_NDS_ARM9, 1000);
     rl_nds_store(m, RL_NDS_ARM7, 0x03800000u, 4, 1, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 2);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 4);
     CHECK_EQ(r7(t, 0x03800000u, 4), 1);
 }

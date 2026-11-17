@@ -74,15 +74,20 @@ static void stop_halted(rl_nds_arm *k)
 /** @brief The memory map changed under the code without a write: every entry checks its bytes again. */
 static void code_moved(rl_nds_run *r) { memset(r->seen, 0, (size_t)r->fn_total * sizeof r->seen[0]); }
 
-/** @brief The ARM9's fetches from main RAM: through the instruction cache when the protection unit makes them cacheable. */
+/**
+ * @brief Fetches from main RAM: the ARM9's through the instruction cache when the protection unit makes them
+ * cacheable, the ARM7's in bursts (rl_nds_code_cost7).
+ */
 static int64_t fetch9(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
 {
     (void)seq;
     rl_nds_arm *k = cpu_of(c);
+    if (k->id == RL_NDS_ARM7)
+        return rl_nds_code_cost7(k->run->m, addr, 1u << log2);
     return rl_nds_code_cost(k->run->m, addr, 1u << log2);
 }
 
-/** @brief Fills the code fetch table of k from the machine's costs (main RAM on the ARM9 goes to fetch9). */
+/** @brief Fills the code fetch table of k from the machine's costs (main RAM goes to fetch9). */
 static void build_waits(rl_nds_arm *k)
 {
     const rl_nds_costs *t = rl_nds_cost_table(k->run->m);
@@ -97,7 +102,7 @@ static void build_waits(rl_nds_arm *k)
                 unsigned cyc = arm9 ? ticks : (ticks + 1u) / 2u;
                 if (arm9 && tcm.itcm_on && ((uint64_t)r << 24) < tcm.itcm_size)
                     cyc = 1;
-                else if (arm9 && r == 0x02)
+                else if (r == 0x02)
                     cyc = 0;
                 else if (!cyc)
                     cyc = 1;

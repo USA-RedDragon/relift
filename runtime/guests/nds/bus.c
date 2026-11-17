@@ -28,11 +28,48 @@ unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, u
     return m->costs.t[cpu][kind][r > 14 ? 15 : r][size >> 1][seq];
 }
 
-/** @brief Moves the ARM9 to the next bus cycle edge (an even tick). */
-static void edge(rl_nds *m, unsigned cpu)
+/**
+ * @brief The ARM9's data access in a TCM: the instruction's own cycle covers
+ * the first word in the data TCM; each further word of an LDM or STM takes a
+ * cycle, and an instruction TCM access one more, but for the second word of
+ * an LDM or STM (the console: LDR and STR in DTCM 1 cycle, LDMn and STMn
+ * max(2, n); LDR in ITCM 2, LDMn there n + 2).
+ */
+static void tcm_charge(rl_nds *m, const uint8_t *p, bool seq)
 {
-    if (nds_now(m, cpu) & 1)
-        nds_charge(m, cpu, 1);
+    bool itcm = p >= m->itcm && p < m->itcm + RL_CP15_ITCM_SIZE;
+    unsigned ticks = seq ? 1u : 0u;
+    if (itcm) {
+        ticks += !seq || m->itcm_multi;
+        m->itcm_multi = !seq;
+    }
+    nds_charge(m, RL_NDS_ARM9, ticks);
+}
+
+/**
+ * @brief Charges the ARM9 a bus data access that takes ticks; busy holds main
+ * RAM that much longer (a write's last ticks, which the CPU does not wait for).
+ *
+ * The access starts on a bus clock edge (an even tick) no earlier than the
+ * instruction's own cycle, which the code fetch charged, and, nonsequential,
+ * no earlier than main RAM is free. A nonsequential access gives one tick
+ * back: the next instruction executes beside it (it leaves its execute stage
+ * when the access ends), so a load or store and one ALU instruction after it
+ * take the access's time (the console: LDR from I/O and ADD 8 cycles, two
+ * LDRs 16). A sequential word of the same LDM or STM follows directly.
+ */
+static void bus9(rl_nds *m, bool main, bool seq, unsigned ticks, unsigned busy)
+{
+    uint64_t now = nds_now(m, RL_NDS_ARM9);
+    uint64_t start = seq ? now : now & ~(uint64_t)1;
+    if (main && !seq && m->ram_free > start)
+        start = m->ram_free;
+    uint64_t end = start + ticks;
+    if (main)
+        m->ram_free = end + busy;
+    uint64_t to = seq ? end : end - 1u;
+    if (to > now)
+        nds_charge(m, RL_NDS_ARM9, to - now);
 }
 
 static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
@@ -45,6 +82,80 @@ static void finish(rl_nds *m, unsigned cpu, bool main, unsigned ticks)
     uint64_t start = now > m->ram_free ? now : m->ram_free;
     m->ram_free = start + ticks;
     nds_charge(m, cpu, m->ram_free - now);
+}
+
+/*
+ * The ARM7's main RAM, from the console's timings (code in its work RAM or
+ * in main RAM, data in each). A nonsequential access takes 6 cycles and starts
+ * no earlier than 3 cycles after the RAM's last access ended (its
+ * precharge); a write lets the CPU go after 4 of its 6. A halfword or byte
+ * access takes a cycle less. A code fetch right after the previous one, at
+ * the next address in the same 32-byte block, is sequential: 2 cycles, or 1
+ * for a Thumb halfword. Any other cycle in between, a data access or an
+ * internal cycle, ends the burst, and internal cycles overlap the precharge:
+ * MUL, MLA and UMLAL in main RAM code all cost 7 more than an ADD there.
+ */
+#define MAIN7_N 12u
+#define MAIN7_S 4u
+#define MAIN7_WRITE 8u
+#define MAIN7_PRECHARGE 6u
+/*
+ * A nonsequential ARM7 write to work RAM (shared or its own) takes a cycle
+ * more than a read: STR, STM and PUSH there cost 1 more than LDR, LDM and
+ * POP on the console; each further word of an STM does not.
+ */
+#define WRAM7_WRITE_N 2u
+
+/** @brief Ticks until a nonsequential main RAM access of the ARM7 at tick now ends, the RAM's busy end in *busy. */
+static uint64_t main7(rl_nds *m, uint64_t now, bool write, unsigned size, uint64_t *busy)
+{
+    uint64_t start = m->ram_free + MAIN7_PRECHARGE;
+    if (start < now)
+        start = now;
+    unsigned n = size < 4 ? MAIN7_N - 2u : MAIN7_N;
+    *busy = start + n;
+    return start + (write ? n - (MAIN7_N - MAIN7_WRITE) : n);
+}
+
+/*
+ * The lifted code names each fetch by the instruction that makes it: an
+ * instruction's own fetch by its address (the CPU fetches 8 or 4 bytes
+ * further on), a refill's two by the branch target. A fetch whose name is
+ * the last one's or the next after it continues the stream; another starts
+ * it at its name. The stream's address decides the 32-byte block.
+ */
+unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size)
+{
+    uint64_t now = nds_now(m, RL_NDS_ARM7);
+    uint64_t from = now < m->burst7_end ? m->burst7_end : now;
+    bool goes_on = addr == m->burst7_name || addr == m->burst7_name + size;
+    uint32_t at = goes_on ? m->burst7_next : addr;
+    uint64_t end;
+    if (goes_on && from == m->burst7_end && (at & 31u) && m->ram_free <= from) {
+        end = from + (size < 4 ? MAIN7_S / 2u : MAIN7_S);
+        m->ram_free = end;
+    } else {
+        end = main7(m, from, false, size, &m->ram_free);
+    }
+    m->burst7_name = addr;
+    m->burst7_next = at + size;
+    m->burst7_end = end;
+    return (unsigned)((end - from + 1u) / 2u);
+}
+
+/** @brief Charges the ARM7 a main RAM data access: nonsequential, or the next word of an LDM or STM. */
+static void data7(rl_nds *m, bool write, bool seq, unsigned size)
+{
+    uint64_t now = nds_now(m, RL_NDS_ARM7);
+    uint64_t end;
+    if (seq) {
+        end = (m->ram_free > now ? m->ram_free : now) + MAIN7_S;
+        m->ram_free = end;
+    } else {
+        end = main7(m, now, write, size, &m->ram_free);
+    }
+    m->burst7_end = 0;
+    nds_charge(m, RL_NDS_ARM7, end - now);
 }
 
 static uint32_t bus_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, nds_where w)
@@ -102,7 +213,10 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
     if (cpu == RL_NDS_ARM9) {
         uint8_t *p = nds_tcm(m, addr, code, false);
         if (p) {
-            nds_charge(m, cpu, 1);
+            if (code)
+                nds_charge(m, cpu, 1);
+            else
+                tcm_charge(m, p, seq);
             return nds_ld(p, size);
         }
         if (nds_cache_attr(m, addr) & (code ? NDS_ATTR_IC : NDS_ATTR_DC)) {
@@ -112,12 +226,23 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
                     nds_dma_wait(m, cpu);
                 if (nds_shared(cpu, addr))
                     nds_order(m, cpu);
-                nds_cache_read(m, addr, code);
+                nds_cache_read(m, addr, code, seq);
                 return bus_read(m, cpu, addr, size, w);
             }
         }
         nds_cache_before_bus(m);
-        edge(m, cpu);
+        if (!code) {
+            if (nds_dma_live(m, cpu))
+                nds_dma_wait(m, cpu);
+            if (nds_shared(cpu, addr))
+                nds_order(m, cpu);
+            nds_where w = nds_decode(m, cpu, addr, code, false);
+            uint32_t v = bus_read(m, cpu, addr, size, w);
+            bus9(m, w.main, seq, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq), 0);
+            return v;
+        }
+        if (nds_now(m, cpu) & 1)
+            nds_charge(m, cpu, 1);
     }
     if (nds_dma_live(m, cpu))
         nds_dma_wait(m, cpu);
@@ -125,14 +250,17 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
         nds_order(m, cpu);
     nds_where w = nds_decode(m, cpu, addr, code, false);
     uint32_t v = bus_read(m, cpu, addr, size, w);
-    finish(m, cpu, w.main, nds_cost(m, cpu, code ? RL_NDS_CODE : RL_NDS_DATA, addr, size, seq && !(code && cpu == RL_NDS_ARM9)));
+    if (cpu == RL_NDS_ARM7 && w.main && !code)
+        data7(m, false, seq, size);
+    else
+        finish(m, cpu, w.main, nds_cost(m, cpu, code ? RL_NDS_CODE : RL_NDS_DATA, addr, size, seq && !(code && cpu == RL_NDS_ARM9)));
     return v;
 }
 
 unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size)
 {
     if (nds_cache_attr(m, addr) & NDS_ATTR_IC) {
-        nds_cache_read(m, addr, true);
+        nds_cache_read(m, addr, true, false);
         return 0;
     }
     nds_cache_before_bus(m);
@@ -156,7 +284,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     if (cpu == RL_NDS_ARM9) {
         uint8_t *p = nds_tcm(m, addr, false, true);
         if (p) {
-            nds_charge(m, cpu, 1);
+            tcm_charge(m, p, seq);
             nds_st(p, size, value);
             nds_watch_store(m, p);
             return;
@@ -173,14 +301,14 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
             nds_st(w.p, size, value);
             nds_watch_store(m, w.p);
             bool back = (at & NDS_ATTR_DC) && (at & NDS_ATTR_WB);
-            if (!((at & NDS_ATTR_DC) && nds_cache_write_hit(m, addr, back))) {
+            if (!((at & NDS_ATTR_DC) && nds_cache_write_hit(m, addr, back, seq))) {
                 nds_cache_buffer(m, addr, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq));
-                nds_charge(m, cpu, 1);
+                if (seq)
+                    nds_charge(m, cpu, 1);
             }
             return;
         }
         nds_cache_before_bus(m);
-        edge(m, cpu);
     }
     if (nds_dma_live(m, cpu))
         nds_dma_wait(m, cpu);
@@ -205,7 +333,15 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         if (wait > nds_now(m, cpu))
             nds_charge(m, cpu, wait - nds_now(m, cpu));
     }
-    finish(m, cpu, w.main, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq));
+    unsigned cost = nds_cost(m, cpu, RL_NDS_DATA, addr, size == 1 && w.main ? 4u : size, seq);
+    if (cpu == RL_NDS_ARM9) {
+        unsigned posted = w.main && !seq ? NDS_MAIN_WRITE_POSTED : 0;
+        bus9(m, w.main, seq, cost - posted, posted);
+    } else if (w.main) {
+        data7(m, true, seq, size);
+    } else {
+        finish(m, cpu, w.main, cost + (!seq && addr >> 24 == 0x03 ? WRAM7_WRITE_N : 0u));
+    }
     if (m->halt_req) {
         m->halt_req = false;
         if (!rl_nds_halt(m, cpu))

@@ -25,8 +25,17 @@
 #define WAYS 4u
 /** @brief Ticks of a hit (half a bus cycle, GBATEK). */
 #define HIT_TICKS 1u
-/** @brief Ticks of a line fill from main RAM and from the BIOS (GBATEK: 23 and 11 bus cycles). */
+/**
+ * @brief Ticks main RAM is busy with a line fill, and the fill from the BIOS
+ * (GBATEK: 23 and 11 bus cycles). The ARM9 waits 41 ticks after its own cycle
+ * for a load that misses (a loop of one such LDR, SUBS and BNE takes 46, the
+ * access rounded to the bus clock) and 39 for code: straight code takes 38
+ * more per line than when it hits (4 to 16 KiB loops right after an
+ * invalidate).
+ */
 #define FILL_MAIN_TICKS 46u
+#define FILL_DATA_MAIN_TICKS 41u
+#define FILL_CODE_MAIN_TICKS 39u
 #define FILL_BIOS_TICKS 22u
 
 /** @brief The instruction or the data cache. */
@@ -169,13 +178,14 @@ void nds_cache_before_bus(rl_nds *m)
         drain(m);
 }
 
-void nds_cache_read(rl_nds *m, uint32_t addr, bool code)
+void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
 {
     nds_cache_side *c = side(m, code);
     unsigned s = (addr / LINE) % sets_of(code);
     uint32_t t = addr / LINE / sets_of(code);
     if (find(c, s, t) >= 0) {
-        nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
+        if (code || seq)
+            nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
         return;
     }
     unsigned w = victim(m, c, s);
@@ -187,9 +197,10 @@ void nds_cache_read(rl_nds *m, uint32_t addr, bool code)
     uint64_t now = nds_now(m, RL_NDS_ARM9);
     unsigned ticks = burst(m, addr);
     if (addr >> 24 == 0x02) {
+        ticks = code ? FILL_CODE_MAIN_TICKS : FILL_DATA_MAIN_TICKS;
         uint64_t start = now > m->ram_free ? now : m->ram_free;
-        m->ram_free = start + ticks;
-        nds_charge(m, RL_NDS_ARM9, m->ram_free - now);
+        m->ram_free = start + FILL_MAIN_TICKS;
+        nds_charge(m, RL_NDS_ARM9, start + ticks - now - (code ? 0u : 1u));
     } else {
         nds_charge(m, RL_NDS_ARM9, ticks);
     }
@@ -198,7 +209,7 @@ void nds_cache_read(rl_nds *m, uint32_t addr, bool code)
     c->dirty[s] &= (uint8_t)~(1u << w);
 }
 
-bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back)
+bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq)
 {
     nds_cache_side *c = &m->cache.d;
     unsigned s = (addr / LINE) % NDS_DCACHE_SETS;
@@ -208,7 +219,8 @@ bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back)
     if (!write_back)
         return false;
     c->dirty[s] |= (uint8_t)(1u << w);
-    nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
+    if (seq)
+        nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
     return true;
 }
 

@@ -163,11 +163,14 @@ uint32_t nds_slot_read(const rl_nds *m, unsigned cpu, uint32_t addr, unsigned si
     return (w >> (8 * (addr & 3))) & nds_mask(size);
 }
 
-/** @brief Bus cycles of N32, S32, N16, S16 per CPU, kind and region class, doubled (ticks). */
+/**
+ * @brief Bus cycles of N32, S32, N16, S16 per CPU, kind and region class, doubled (ticks). The ARM9's main RAM data
+ * times are the console's uncached reads (LDR 18, LDRH 16), a bus cycle under GBATEK's.
+ */
 enum { C_MAIN, C_FAST, C_VRAM, C_CLASSES };
 static const uint8_t base_costs[2][2][C_CLASSES][4] = {
     [RL_NDS_ARM9][RL_NDS_CODE] = {{18, 18, 9, 9}, {8, 8, 4, 4}, {10, 10, 5, 5}},
-    [RL_NDS_ARM9][RL_NDS_DATA] = {{20, 4, 18, 2}, {8, 2, 8, 2}, {10, 4, 8, 2}},
+    [RL_NDS_ARM9][RL_NDS_DATA] = {{18, 4, 16, 2}, {8, 2, 8, 2}, {10, 4, 8, 2}},
     [RL_NDS_ARM7][RL_NDS_CODE] = {{18, 4, 16, 2}, {2, 2, 2, 2}, {4, 4, 2, 2}},
     [RL_NDS_ARM7][RL_NDS_DATA] = {{20, 4, 18, 2}, {2, 2, 2, 2}, {4, 4, 2, 2}},
 };

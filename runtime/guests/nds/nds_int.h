@@ -295,6 +295,12 @@ typedef struct nds_keypad {
 /** @brief Sets of the ARM9's instruction (8 KiB) and data (4 KiB) caches: four ways of 32-byte lines. */
 #define NDS_ICACHE_SETS 64u
 #define NDS_DCACHE_SETS 32u
+/**
+ * @brief Ticks at the end of an ARM9 write to main RAM that the CPU does not wait for: the console's uncached STR
+ * takes 14 ticks where the RAM is busy 18 (a write buffer drains one STR each 18).
+ */
+#define NDS_MAIN_WRITE_POSTED 4u
+
 /** @brief Entries of the ARM9's write buffer. */
 #define NDS_WB_ENTRIES 8u
 
@@ -387,6 +393,15 @@ struct rl_nds {
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
+    /** @brief The ARM9's last instruction TCM data access opened an LDM or STM: its second word costs one more. */
+    bool itcm_multi;
+    /**
+     * @brief The ARM7's code burst in main RAM: the last fetch's name (rl_nds_code_cost7), the address the burst
+     * fetches next and the tick its last fetch ended.
+     */
+    uint32_t burst7_name;
+    uint32_t burst7_next;
+    uint64_t burst7_end;
     rl_nds_costs costs;
 
     nds_dev d_io;
@@ -666,10 +681,13 @@ void nds_cache_reset(rl_nds *m);
 void nds_cache_mpu(rl_nds *m);
 /** @brief The NDS_ATTR_ bits of addr with the cache enables of the control register. */
 unsigned nds_cache_attr(const rl_nds *m, uint32_t addr);
-/** @brief Charges a cached read of addr: a hit, or a line fill after the write buffer drains (and the write-back of a dirty victim). */
-void nds_cache_read(rl_nds *m, uint32_t addr, bool code);
+/**
+ * @brief Charges a cached read of addr: a hit, or a line fill after the write buffer drains (and the write-back of a
+ * dirty victim). A data hit costs nothing beyond its instruction's cycle but for a further word of an LDM (seq).
+ */
+void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq);
 /** @brief A store hit in a write-back line: marks it dirty and charges the hit; false on a miss or a write-through line. */
-bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back);
+bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq);
 /** @brief Queues a buffered write of ticks bus time to addr, stalling while the buffer is full. */
 void nds_cache_buffer(rl_nds *m, uint32_t addr, unsigned ticks);
 /** @brief Waits until the write buffer is empty (before an access that goes to the bus). */

@@ -126,6 +126,8 @@ uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, boo
  * waits for the write buffer and gives the region's cost.
  */
 unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size);
+/** @brief The ARM7's cycles of a code fetch of size bytes at addr in main RAM, which the fetch does not charge itself. */
+unsigned rl_nds_code_cost7(rl_nds *m, uint32_t addr, unsigned size);
 /**
  * @brief A data read of size bytes (1, 2 or 4) at addr, aligned down; seq
  * true for the second and later words of LDM. Waits for the other CPU when
