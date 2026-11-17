@@ -130,6 +130,7 @@ impl Code {
                 tables: BTreeMap::new(),
                 pads: BTreeSet::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
             })
             .collect()
     }

@@ -293,6 +293,7 @@ impl Server {
                 tables: f.tables.clone(),
                 pads: f.pads.clone(),
                 guesses: Default::default(),
+                entries: BTreeMap::new(),
             })
             .collect();
         let overrides: Vec<relift_emit::Override> = analysis

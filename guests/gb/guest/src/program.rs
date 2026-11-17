@@ -160,6 +160,7 @@ pub fn lift_live(live: &[(Loc, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
                 .collect(),
             tables: BTreeMap::new(),
             guesses: BTreeMap::new(),
+            entries: BTreeMap::new(),
             pads: BTreeSet::new(),
         });
     }
@@ -482,6 +483,7 @@ fn lift_halt_bug(
                     .collect(),
                 tables: BTreeMap::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
                 pads: BTreeSet::new(),
             })
             .collect();
@@ -713,6 +715,7 @@ pub fn lift_superset(
                 tables: BTreeMap::new(),
                 pads: BTreeSet::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
             })
             .collect();
         let (dir, symbol, name) = if key == FIXED {
@@ -963,6 +966,7 @@ fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
                 tables: BTreeMap::new(),
                 pads: BTreeSet::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
             })
             .collect();
         let symbol = format!("rl_unit_gb_ram{i}");

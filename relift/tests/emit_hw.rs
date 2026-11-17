@@ -653,6 +653,7 @@ fn build(cc: &Path, blocks: &[Block], dir: &Path) -> PathBuf {
             tables: BTreeMap::new(),
             pads: Default::default(),
             guesses: Default::default(),
+            entries: Default::default(),
         })
         .collect();
     let out = emit(

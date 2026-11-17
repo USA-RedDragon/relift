@@ -540,6 +540,7 @@ fn functions(id: UnitId, lifted: &[Lifting]) -> Vec<Function<'_>> {
             tables: l.tables.clone(),
             guesses: BTreeMap::new(),
             pads: BTreeSet::new(),
+            entries: BTreeMap::new(),
         })
         .collect()
 }

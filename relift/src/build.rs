@@ -768,6 +768,7 @@ fn emit_function<'a>(
         tables: f.tables.clone(),
         pads: f.pads.clone(),
         guesses: BTreeMap::new(),
+        entries: BTreeMap::new(),
     }
 }
 

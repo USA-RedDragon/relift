@@ -490,7 +490,13 @@ pub(crate) fn emit_function(
         ranges: &opts.guess_ranges,
     };
     let whole = emit_piece(&env, &all, None);
-    if !anywhere && (whole.text.len() <= piece_bytes || all.len() < 2) {
+    let more: Vec<(u64, &String)> = f
+        .entries
+        .iter()
+        .filter(|(pc, _)| **pc != f.entry && blocks.contains_key(pc))
+        .map(|(pc, n)| (*pc, n))
+        .collect();
+    if !anywhere && more.is_empty() && (whole.text.len() <= piece_bytes || all.len() < 2) {
         return Emitted1 {
             pieces: vec![Piece {
                 name: f.name.clone(),
@@ -552,6 +558,16 @@ pub(crate) fn emit_function(
             name: name.clone(),
             text: p.text,
             first_pc: pcs.first().copied(),
+        });
+    }
+    for (pc, name) in &more {
+        pieces.push(Piece {
+            name: (*name).clone(),
+            text: format!(
+                "\nRL_TEXT RL_LIFTED({name})\n{{\n    c->pc = UINT64_C({pc:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
+                split.names[split.piece_of[pc]]
+            ),
+            first_pc: None,
         });
     }
     let inner = if anywhere {
@@ -672,6 +688,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             if anywhere {
                 entries.extend(own.iter().copied());
             }
+            entries.extend(f.entries.keys().filter(|pc| own.contains(pc)));
             entries
         }
     };

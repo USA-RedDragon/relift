@@ -195,6 +195,7 @@ pub fn functions(found: &[Found]) -> Vec<Function<'_>> {
                     .collect(),
                 tables: BTreeMap::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
                 pads: Default::default(),
             }
         })

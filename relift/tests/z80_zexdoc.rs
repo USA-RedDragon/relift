@@ -302,6 +302,7 @@ fn zexdoc_passes_as_emitted_c() {
                 .collect(),
             tables: BTreeMap::new(),
             guesses: BTreeMap::new(),
+            entries: BTreeMap::new(),
             pads: Default::default(),
         });
     }

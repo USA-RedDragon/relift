@@ -29,6 +29,7 @@ fn function(entry: u64, blocks: &[(u64, Block)]) -> Function<'_> {
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
         guesses: BTreeMap::new(),
+        entries: BTreeMap::new(),
     }
 }
 
@@ -366,6 +367,7 @@ fn failures_and_unknown_intrinsics_report_undefined() {
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
         guesses: BTreeMap::new(),
+        entries: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     assert!(shard(&out).contains("return rl_undefined(c, mem, UINT64_C(0x40), 0xdeadu);"));
@@ -462,6 +464,7 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
         guesses: BTreeMap::new(),
+        entries: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -522,6 +525,7 @@ fn guards_share_one_slow_path_that_continues_after_each() {
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
         guesses: BTreeMap::new(),
+        entries: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -636,6 +640,7 @@ fn guards_that_leave_tail_call_the_function_the_frontend_gives() {
         ]),
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
+        entries: BTreeMap::new(),
     };
     let out = emit(&Leaving, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -690,6 +695,7 @@ fn guards_that_leave_store_the_dirty_registers_first() {
         ]),
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
+        entries: BTreeMap::new(),
     };
     let out = emit(&Leaving, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -1141,6 +1147,28 @@ fn landing_pads_are_resume_points_with_a_table_entry_of_their_own() {
             "{ UINT64_C(0x108), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, rl_toy_pad_resume },"
         ),
         "{unit}"
+    );
+}
+
+#[test]
+fn more_entries_get_a_function_each_that_enters_the_piece_there() {
+    let code = [word(0x03, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks);
+    f.entries = BTreeMap::from([(0x108, "F_100_at_108".to_owned())]);
+    let g = function(0x10c, &[]);
+    let out = emit(&Toy, &[f, g], &[], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("RL_LIFTED(F_100_at_108)\n{\n    c->pc = UINT64_C(0x108);\n    RL_MUSTTAIL return F_100_part1(c, mem);"),
+        "{s}"
+    );
+    assert!(s.contains("case UINT64_C(0x108): goto L_108;"), "{s}");
+    assert!(s.contains("case UINT64_C(0x100): goto L_100;"), "{s}");
+    assert_eq!(
+        out.files.len(),
+        3,
+        "the stub, the piece and the entry share one shard"
     );
 }
 

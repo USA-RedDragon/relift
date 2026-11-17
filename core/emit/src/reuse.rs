@@ -122,6 +122,11 @@ pub(crate) fn input(fe: &dyn Frontend, salt: &[u8], f: &Function<'_>, test_fault
         put_uvar(&mut out, *j);
         put_uvar(&mut out, *t);
     }
+    put_uvar(&mut out, f.entries.len() as u64);
+    for (pc, name) in &f.entries {
+        put_uvar(&mut out, *pc);
+        put_str(&mut out, name);
+    }
     out
 }
 

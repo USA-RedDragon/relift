@@ -760,6 +760,7 @@ fn lift_plan(out: &mut Images, plan: Plan, image_id: [u8; 32]) {
                     .collect(),
                 tables: BTreeMap::new(),
                 guesses: BTreeMap::new(),
+                entries: BTreeMap::new(),
                 pads: BTreeSet::new(),
             }
         })
@@ -1065,6 +1066,7 @@ mod tests {
                 .collect(),
             tables: BTreeMap::new(),
             guesses: BTreeMap::new(),
+            entries: BTreeMap::new(),
             pads: BTreeSet::new(),
         };
         let opts = Options {

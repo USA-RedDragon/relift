@@ -558,6 +558,7 @@ fn build(
             insts: BTreeMap::from([(b.pc, Insn::Lifted { block: b, raw: 0 })]),
             tables: BTreeMap::new(),
             guesses: BTreeMap::new(),
+            entries: BTreeMap::new(),
             pads: Default::default(),
         })
         .collect();

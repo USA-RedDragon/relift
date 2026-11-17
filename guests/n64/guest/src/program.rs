@@ -345,6 +345,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
                         .collect(),
                     tables: BTreeMap::new(),
                     guesses: BTreeMap::new(),
+                    entries: BTreeMap::new(),
                     pads: BTreeSet::new(),
                 }
             })

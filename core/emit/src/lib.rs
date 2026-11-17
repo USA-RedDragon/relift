@@ -79,6 +79,11 @@ pub struct Function<'a> {
     /// bound to: the emitter compares the target with it and, when they
     /// are equal, transfers to it by name.
     pub guesses: BTreeMap<u64, u64>,
+    /// Instructions other than the entry that the runtime enters the
+    /// function at, each with the name of a C function of its own that
+    /// runs the function from there. Such a function is written as a stub
+    /// and pieces, and each piece switches to these instructions too.
+    pub entries: BTreeMap<u64, String>,
 }
 
 /// A host function that replaces the guest function at `entry`.
@@ -655,9 +660,10 @@ fn emit_core(
         // A split function: its pieces fill shards of their own, and each
         // piece has a map entry over the guest range it holds. The stub
         // has an empty range at the lowest address, so the table stays
-        // sorted. A function split only to be entered anywhere that fits
-        // in a shard shares it.
-        let shared = opts.enter_anywhere.is_some() && e.len() <= budget;
+        // sorted. A function split only to be entered anywhere or at more
+        // entries that fits in a shard shares it.
+        let entered = e.pieces.iter().filter(|p| p.first_pc.is_none()).count() > 1;
+        let shared = (opts.enter_anywhere.is_some() || entered) && e.len() <= budget;
         if !w.cur.fns.is_empty() && (!shared || w.cur.body.len() + e.len() > budget) {
             w.flush();
             on(k, fns.len());
