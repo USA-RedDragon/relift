@@ -137,6 +137,55 @@ TEST(gsv_syncpt_area_has_the_header_the_sdk_checks)
     CHECK(hdr[4] < 0x1000 && hdr[6] < 0x1000);
 }
 
+TEST(gsv_display_session_answers_nn_vi)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    CHECK_EQ(tipc(c, h, 301, NULL, 0, 0), 0);
+    tc_req q = tc_new(305);
+    q.tipc = true;
+    tc_put64(&q, 0x300010000ull);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    uint32_t d = r.move[0];
+    q = tc_new(3);
+    q.tipc = true;
+    r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK(tc_u32(&r, 0) < 8);
+    q = tc_new(1);
+    q.tipc = true;
+    r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK(tc_u32(&r, 0) < 0x400);
+    q = tc_new(5);
+    q.tipc = true;
+    r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 7);
+    q = tc_new(11);
+    q.tipc = true;
+    tc_put32(&q, 0);
+    r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    q = tc_new(212);
+    q.tipc = true;
+    tc_put64(&q, 1);
+    r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 0);
+    CHECK_EQ(tipc(c, d, 101, NULL, 0, 3), 0);
+    CHECK_EQ(tipc(c, d, 51, NULL, 0, 1), 0);
+    CHECK_EQ(tipc(c, d, 999, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
+}
+
 TEST(gsv_is_not_on_the_switch)
 {
     rl_ctx *c = t_boot(NULL);

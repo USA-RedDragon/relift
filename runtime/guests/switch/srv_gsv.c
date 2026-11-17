@@ -301,10 +301,67 @@ static rl_result display_event(rl_ipc_req *r)
     return rc;
 }
 
+/** @brief DisplaySession 212 (unnamed): a u64; a u64 (sdk 0x5620c4), relift: 0. */
+static rl_result display_u64_zero(rl_ipc_req *r)
+{
+    uint64_t in;
+    if (!rl_srv_in(r, &in, 8))
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t *out = rl_ipc_out(r, 8);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief DisplaySession 5 (unnamed): no input; how many timestamp recorders
+ * nn::vi2 may use, below 8 (sdk 0x562ea0; the pool at 0x5696a0 keeps at most
+ * 7 and reports them all taken when it gets 0). relift: 7.
+ */
+static rl_result display_recorder_count(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 7;
+    return KR_SUCCESS;
+}
+
 static const rl_ipc_cmd display_session_cmds[] = {
     { 1, "GetCount", display_count },
     { 3, "GetDisplayId", display_first_id },
+    { 5, "GetTimestampRecorderCount", display_recorder_count },
     { 11, "GetEvent", display_event },
+    { 21, "Command21", rl_srv_stub_ok },
+    { 51, "SetTimestampRecorderCount", rl_srv_stub_ok },
+    { 101, "OpenDisplay", rl_srv_stub_ok },
+    { 102, "CloseDisplay", rl_srv_stub_ok },
+    { 111, "Command111", rl_srv_stub_ok },
+    { 112, "Command112", rl_srv_stub_ok },
+    { 113, "Command113", rl_srv_stub_ok },
+    { 201, "Command201", rl_srv_stub_ok },
+    { 202, "Command202", rl_srv_stub_ok },
+    { 212, "Command212", display_u64_zero },
+    { 251, "Command251", rl_srv_stub_ok },
+    { 252, "Command252", rl_srv_stub_ok },
+    { 261, "Command261", rl_srv_stub_ok },
+    { 262, "Command262", rl_srv_stub_ok },
+    { 263, "Command263", rl_srv_stub_ok },
+    { 264, "Command264", rl_srv_stub_ok },
+    { 265, "Command265", rl_srv_stub_ok },
+    { 266, "Command266", rl_srv_stub_ok },
+    { 267, "Command267", rl_srv_stub_ok },
+    { 268, "Command268", rl_srv_stub_ok },
+    { 269, "Command269", rl_srv_stub_ok },
+    { 270, "Command270", rl_srv_stub_ok },
+    { 271, "Command271", rl_srv_stub_ok },
+    { 272, "Command272", rl_srv_stub_ok },
+    { 301, "Command301", rl_srv_stub_ok },
+    { 302, "Command302", rl_srv_stub_ok },
+    { 351, "Command351", rl_srv_stub_ok },
+    { 352, "Command352", rl_srv_stub_ok },
+    { 353, "Command353", rl_srv_stub_ok },
 };
 
 static const rl_ipc_class display_session_class = { "nn::gsv::DisplaySession", display_session_cmds,
