@@ -5,9 +5,12 @@
  *
  * Commands and layouts follow Ryujinx (MIT) Ryujinx.Horizon/Sdk/Audio/Detail
  * AudioOutManager and AudioOut, and libnx (ISC) audout.c. A buffer appended
- * while the output is started is copied to the host stream at once; it is
- * released when the host has played past its end. The audio timer checks for
- * that every 5 ms and signals the buffer event.
+ * while the output is started is copied to the host stream at once. The
+ * output plays on the system clock, as on the console: the audio timer
+ * advances the play position 5 ms at a time, up to the frames appended,
+ * releases the buffers it has passed and signals the buffer event. The host
+ * device keeps its own pace (rl_audio_drift steers it onto the same clock),
+ * so a device that runs fast or slow does not change what the guest sees.
  */
 #include "hos_audio.h"
 
@@ -40,20 +43,12 @@ typedef struct audout {
     uint64_t released[OUT_MAX_BUFFERS];
     uint32_t rn;
     uint64_t written_frames;
-    /** @brief Fixed step: frames the output played on the guest clock, 240 per 5 ms tick up to written_frames. */
-    uint64_t fs_played;
+    /** @brief Frames the output played on the system clock, 240 per 5 ms tick up to written_frames. */
+    uint64_t played;
     rl_audio_out *host;
     hos_revent *event;
     void *tick;
 } audout;
-
-static uint64_t played_frames(audout *a)
-{
-    if (hos_fixed())
-        return a->fs_played;
-    uint64_t queued = rl_audio_queued(a->host);
-    return queued > a->written_frames ? 0 : a->written_frames - queued;
-}
 
 static void write_buffer(audout *a, out_buf *b)
 {
@@ -76,8 +71,7 @@ static void write_buffer(audout *a, out_buf *b)
 
 static void release_done(audout *a, bool *signal)
 {
-    uint64_t played = played_frames(a);
-    while (a->qn && a->q[0].written && a->q[0].end_frame <= played) {
+    while (a->qn && a->q[0].written && a->q[0].end_frame <= a->played) {
         if (a->rn < OUT_MAX_BUFFERS)
             a->released[a->rn++] = a->q[0].tag;
         memmove(&a->q[0], &a->q[1], (a->qn - 1) * sizeof a->q[0]);
@@ -91,10 +85,10 @@ static void out_tick(void *ctx)
     audout *a = ctx;
     bool sig = false;
     pthread_mutex_lock(&a->lock);
-    if (a->state == OUT_STATE_STARTED && hos_fixed()) {
-        a->fs_played += OUT_RATE / (1000000000ull / AUDIO_FRAME_NS);
-        if (a->fs_played > a->written_frames)
-            a->fs_played = a->written_frames;
+    if (a->state == OUT_STATE_STARTED) {
+        a->played += OUT_RATE / (1000000000ull / AUDIO_FRAME_NS);
+        if (a->played > a->written_frames)
+            a->played = a->written_frames;
     }
     if (a->state == OUT_STATE_STARTED)
         release_done(a, &sig);
@@ -235,7 +229,7 @@ static rl_result out_played_samples(rl_ipc_req *r)
 {
     audout *a = r->self->state;
     pthread_mutex_lock(&a->lock);
-    put64(rl_ipc_out(r, 8), played_frames(a));
+    put64(rl_ipc_out(r, 8), a->played);
     pthread_mutex_unlock(&a->lock);
     return KR_SUCCESS;
 }

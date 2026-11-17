@@ -231,9 +231,9 @@ TEST(hwopus_decodes_a_packet)
     CHECK_EQ(r.result, CODEC_INVALID_LENGTH);
 }
 
-TEST(audout_releases_buffers_as_they_play)
+static void audout_plays(const rl_audio_backend *b)
 {
-    rl_audio_set_backend(rl_audio_null_backend());
+    rl_audio_set_backend(b);
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
     uint32_t h = open_service(c, heap, "audout:u");
@@ -291,7 +291,7 @@ TEST(audout_releases_buffers_as_they_play)
     CHECK_EQ(le64(t_mem() + heap + 0x3000), 0);
     CHECK_EQ(call(c, out, &(msg){ .cmd = 1 }).result, 0);
     uint64_t t0 = rl_clock_ns();
-    CHECK_EQ(wait_event(c, heap + 0x800, ev, (uint64_t)-1), 0);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
     uint64_t dt = rl_clock_ns() - t0;
     CHECK(dt >= 4800ull * 1000000000ull / 48000 - AUDIO_FRAME_NS);
     q = mk(5);
@@ -306,6 +306,50 @@ TEST(audout_releases_buffers_as_they_play)
     CHECK_EQ(got, tag);
     r = call(c, out, &(msg){ .cmd = 10 });
     CHECK_EQ(le64(r.data), 4800);
+}
+
+TEST(audout_releases_buffers_as_they_play) { audout_plays(rl_audio_null_backend()); }
+
+static rl_audio_out g_stalled_out;
+static uint32_t g_stalled_frames;
+static rl_audio_out *stalled_open(uint32_t rate, uint32_t channels)
+{
+    (void)rate;
+    (void)channels;
+    g_stalled_frames = 0;
+    return &g_stalled_out;
+}
+static void stalled_close(rl_audio_out *o) { (void)o; }
+static void stalled_write(rl_audio_out *o, const int16_t *pcm, uint32_t frames)
+{
+    (void)o;
+    (void)pcm;
+    g_stalled_frames += frames;
+}
+static uint32_t stalled_queued(rl_audio_out *o)
+{
+    (void)o;
+    return g_stalled_frames;
+}
+static void stalled_pause(rl_audio_out *o, bool paused)
+{
+    (void)o;
+    (void)paused;
+}
+
+/** A host device that never takes a frame: the guest still hears its buffers play on the system clock. */
+TEST(audout_plays_on_the_system_clock_whatever_the_device_does)
+{
+    static const rl_audio_backend stalled = {
+        .name = "stalled",
+        .open = stalled_open,
+        .close = stalled_close,
+        .write = stalled_write,
+        .queued = stalled_queued,
+        .pause = stalled_pause,
+    };
+    audout_plays(&stalled);
+    rl_audio_set_backend(rl_audio_null_backend());
 }
 
 typedef struct upd {
@@ -445,7 +489,7 @@ TEST(audren_update_frames_and_mixing)
     CHECK_EQ(le32(o + 4), 0xB0);
     uint64_t t_start = rl_clock_ns();
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 5 }).result, 0);
-    CHECK_EQ(wait_event(c, heap + 0x800, ev, (uint64_t)-1), 0);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
     build_update(u, false, heap + 0x10000, sink, sink_size, false);
     memcpy(t_mem() + heap + 0x30000, u->in, u->size);
     uint64_t t_update;
@@ -539,7 +583,7 @@ TEST(audren_mixes_adpcm_voices)
     CHECK_EQ(call(c, rend, &q).result, 0);
     uint32_t ev = r.copy[0];
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 5 }).result, 0);
-    CHECK_EQ(wait_event(c, heap + 0x800, ev, (uint64_t)-1), 0);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
     const int16_t want[14] = { 1, 2, 3, -1, 7, -2, 0, 0, 5, 7, 6, -6, 2, 1 };
     const int16_t *s = (const int16_t *)(const void *)(t_mem() + sink);
     while (memcmp(s, want, sizeof want) != 0)
