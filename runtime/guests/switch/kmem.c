@@ -540,7 +540,7 @@ rl_result hos_map_physical_memory(uint64_t addr, uint64_t size)
     for (uint64_t at = addr; rc == KR_SUCCESS && at < addr + size;) {
         rl_vm_block b = rl_vm_query(&hos.vm, at);
         uint64_t end = b.addr + b.size < addr + size ? b.addr + b.size : addr + size;
-        if (state_of(&b) == MS_FREE && rl_vm_set(&hos.vm, at, end - at, RL_VM_RW, tag_of(MS_NORMAL, 0), RL_VM_FRESH))
+        if (state_of(&b) == MS_FREE && rl_vm_set(&hos.vm, at, end - at, RL_VM_RW, tag_of(MS_HEAP, 0), RL_VM_FRESH))
             rc = KR_OUT_OF_MEMORY;
         at = end;
     }
@@ -556,7 +556,7 @@ rl_result hos_unmap_physical_memory(uint64_t addr, uint64_t size)
     hos_lock();
     for (uint64_t at = addr; at < addr + size;) {
         rl_vm_block b = rl_vm_query(&hos.vm, at);
-        if (state_of(&b) != MS_FREE && (state_of(&b) != MS_NORMAL || attr_of(&b) != 0)) {
+        if (state_of(&b) != MS_FREE && (state_of(&b) != MS_HEAP || attr_of(&b) != 0)) {
             rc = KR_INVALID_MEM_STATE;
             break;
         }
@@ -565,7 +565,7 @@ rl_result hos_unmap_physical_memory(uint64_t addr, uint64_t size)
     for (uint64_t at = addr; rc == KR_SUCCESS && at < addr + size;) {
         rl_vm_block b = rl_vm_query(&hos.vm, at);
         uint64_t end = b.addr + b.size < addr + size ? b.addr + b.size : addr + size;
-        if (state_of(&b) == MS_NORMAL && rl_vm_set(&hos.vm, at, end - at, RL_VM_NONE, 0, RL_VM_DISCARD))
+        if (state_of(&b) == MS_HEAP && rl_vm_set(&hos.vm, at, end - at, RL_VM_NONE, 0, RL_VM_DISCARD))
             rc = KR_OUT_OF_MEMORY;
         at = end;
     }

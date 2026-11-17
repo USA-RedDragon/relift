@@ -662,7 +662,7 @@ TEST(map_physical_memory_backs_the_alias_region)
     CHECK_EQ(t_mem()[alias + 0x1000], 7);
     CHECK_EQ(t_mem()[alias + 0x3000], 0);
     t_meminfo mi = query(c, info, alias);
-    CHECK_EQ(mi.type, MS_NORMAL & 0xFF);
+    CHECK_EQ(mi.type, MS_HEAP & 0xFF);
     CHECK_EQ(mi.size, 0x4000);
     CHECK_EQ(mi.perm, HOS_PERM_RW);
     CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, alias + 0x2000, 0x4000, 0, 0, 0, 0), 0);
@@ -672,6 +672,21 @@ TEST(map_physical_memory_backs_the_alias_region)
     CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, alias, 0, 0, 0, 0, 0), KR_INVALID_SIZE);
     CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, hos.lay.heap_start, 0x1000, 0, 0, 0, 0), KR_INVALID_MEM_RANGE);
     CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, hos.lay.heap_start, 0x1000, 0, 0, 0, 0), KR_INVALID_MEM_RANGE);
+}
+
+TEST(map_memory_takes_physical_memory_like_heap)
+{
+    rl_ctx *c = boot_system_resource(0x4000000);
+    CHECK(c);
+    uint64_t alias = hos.lay.alias_start, stack = hos.lay.stack_start, info = t_heap(c, 0x200000);
+    CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, alias, 0x40000, 0, 0, 0, 0), 0);
+    t_mem()[alias + 0x10] = 9;
+    CHECK_EQ(t_svc(c, SVC_MAP_MEMORY, stack, alias, 0x40000, 0, 0, 0), 0);
+    CHECK_EQ(t_mem()[stack + 0x10], 9);
+    CHECK_EQ(query(c, info, stack).type, MS_STACK & 0xFF);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, alias, 0x40000, 0, 0, 0, 0), KR_INVALID_MEM_STATE);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_MEMORY, stack, alias, 0x40000, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_PHYSICAL_MEMORY, alias, 0x40000, 0, 0, 0, 0), 0);
 }
 
 TEST(map_physical_memory_needs_a_system_resource)
