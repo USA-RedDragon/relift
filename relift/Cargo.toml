@@ -50,6 +50,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 relift-cpu-z80 = { workspace = true }
+relift-sms = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 uds_windows = { workspace = true }

@@ -81,6 +81,7 @@ const STANDALONE: &[&str] = &[
     "relift-gba-tools",
     "relift-n64-tools",
     "relift-nds-tools",
+    "relift-sms",
     "relift-sms-formats",
     "relift-sms-tools",
     "relift-switch-shaders",
@@ -401,8 +402,14 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-sms-tools",
         band: 2,
-        why: "single-purpose tools for Master System, Game Gear and SG-1000 files, thin wrappers over relift-sms-formats",
-        normal: &["clap", "relift-sms-formats", "serde_json"],
+        why: "single-purpose tools for Master System, Game Gear and SG-1000 files, thin wrappers over relift-sms-formats and relift-sms",
+        normal: &[
+            "clap",
+            "relift-cache",
+            "relift-sms",
+            "relift-sms-formats",
+            "serde_json",
+        ],
         dev: &[
             "relift-cache",
             "relift-proc",
@@ -547,6 +554,20 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-sms",
+        band: 2,
+        why: "the Master System and Game Gear guest: the Z80 frontend for the runtime's SMS run layer and code lifted and emitted one unit per ROM bank and slot and per RAM group, over the C emitter",
+        normal: &[
+            "relift-cpu-z80",
+            "relift-emit",
+            "relift-guest",
+            "relift-ir",
+            "relift-sms-formats",
+        ],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-n64",
         band: 2,
         why: "the Nintendo 64 guest: the VR4300 and RSP frontends for the runtime's N64 and RSP layers and a ROM lifted and emitted as one unit per segment and per RSP image, over discovery and the C emitter",
@@ -680,7 +701,7 @@ const CHARTERS: &[Charter] = &[
             "uds_windows",
             "zstd",
         ],
-        dev: &["relift-cpu-z80"],
+        dev: &["relift-cpu-z80", "relift-sms"],
         build: NONE,
     },
     Charter {

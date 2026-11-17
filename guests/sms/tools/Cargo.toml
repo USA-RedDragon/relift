@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 clap = { workspace = true }
+relift-cache = { workspace = true }
+relift-sms = { workspace = true }
 relift-sms-formats = { workspace = true }
 serde_json = { workspace = true }
 

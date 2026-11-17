@@ -37,6 +37,7 @@ relift-nds = { path = "guests/nds/guest" }
 relift-nds-analyze = { path = "guests/nds/analyze" }
 relift-nds-formats = { path = "guests/nds/formats" }
 relift-nds-tools = { path = "guests/nds/tools" }
+relift-sms = { path = "guests/sms/guest" }
 relift-sms-formats = { path = "guests/sms/formats" }
 relift-sms-tools = { path = "guests/sms/tools" }
 relift-emit = { path = "core/emit" }

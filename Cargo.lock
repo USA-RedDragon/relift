@@ -903,6 +903,7 @@ dependencies = [
  "relift-patch",
  "relift-proc",
  "relift-progress",
+ "relift-sms",
  "relift-switch",
  "relift-switch-formats",
  "relift-switch-names",
@@ -1292,6 +1293,17 @@ name = "relift-sail"
 version = "0.1.0"
 
 [[package]]
+name = "relift-sms"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-z80",
+ "relift-emit",
+ "relift-guest",
+ "relift-ir",
+ "relift-sms-formats",
+]
+
+[[package]]
 name = "relift-sms-formats"
 version = "0.1.0"
 
@@ -1302,6 +1314,7 @@ dependencies = [
  "clap",
  "relift-cache",
  "relift-proc",
+ "relift-sms",
  "relift-sms-formats",
  "serde_json",
 ]

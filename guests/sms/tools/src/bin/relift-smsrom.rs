@@ -28,10 +28,31 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Development: lift the instructions an ares trace executed and write
+    /// the C of the program into a directory.
+    LiftTrace {
+        /// The ROM image.
+        file: PathBuf,
+        /// The trace's exec.tsv.
+        #[arg(long)]
+        exec: PathBuf,
+        /// The output directory (gets c/).
+        #[arg(long)]
+        out: PathBuf,
+        /// The console: ms, gg or gg-ms.
+        #[arg(long, default_value = "ms")]
+        console: String,
+    },
 }
 
 fn main() -> ExitCode {
     run::<Cli>("relift-smsrom", |cli| match cli.command {
+        Command::LiftTrace {
+            file,
+            exec,
+            out,
+            console,
+        } => lift_trace(&file, &exec, &out, &console),
         Command::Info { file, json } => {
             let rom = input(&file)?;
             let ext = file.extension().and_then(|e| e.to_str());
@@ -44,6 +65,62 @@ fn main() -> ExitCode {
             }
         }
     })
+}
+
+fn lift_trace(
+    file: &std::path::Path,
+    exec: &std::path::Path,
+    out: &std::path::Path,
+    console: &str,
+) -> Result<(), BoxError> {
+    use relift_sms::program::{self, Console, Program, Region};
+    let image = input(file)?;
+    let ext = file.extension().and_then(|e| e.to_str());
+    let cart = Cartridge::parse(&image, ext).map_err(|e| format!("{}: {e}", file.display()))?;
+    let start = cart.layout.rom_start();
+    let rom = &image[start..];
+    let text = std::fs::read_to_string(exec)?;
+    let code = relift_sms::code::Code::from_exec_tsv(&text, start as u32)?;
+    let lifted = program::lift(rom, &code, [0; 32]);
+    let console = match console {
+        "gg" => Console::Gg,
+        "gg-ms" => Console::GgMs,
+        _ => Console::Ms,
+    };
+    let c = out.join("c");
+    std::fs::create_dir_all(&c)?;
+    for u in std::iter::once(&lifted.entries).chain(&lifted.units) {
+        let d = c.join(&u.dir);
+        std::fs::create_dir_all(&d)?;
+        for f in &u.output.files {
+            relift_cache::write_if_changed(&d.join(&f.name), f.text.as_bytes())?;
+        }
+    }
+    let p = Program {
+        title: cart.header.as_ref().map_or("", |h| h.product_code.as_str()),
+        console,
+        region: Region::NtscU,
+        mapper: cart.mapper.kind.into(),
+    };
+    relift_cache::write_if_changed(
+        &c.join("program.c"),
+        program::program_c(&p, &lifted).as_bytes(),
+    )?;
+    relift_cache::write_if_changed(&c.join("rom.c"), program::rom_c(rom).as_bytes())?;
+    relift_cache::write_if_changed(&c.join("rom.bin"), rom)?;
+    let mut o = std::io::stdout().lock();
+    writeln!(
+        o,
+        "{} instructions, {} units, {} RAM groups, {} unlifted",
+        code.instructions.len(),
+        lifted.units.len(),
+        lifted.ram_groups.len(),
+        lifted.unlifted.len()
+    )?;
+    for u in &lifted.unlifted {
+        writeln!(o, "  unlifted {:04x}: {}", u.at.addr, u.failure.message)?;
+    }
+    Ok(())
 }
 
 fn hex(b: &[u8]) -> String {
