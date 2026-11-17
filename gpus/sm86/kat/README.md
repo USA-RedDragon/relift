@@ -80,8 +80,8 @@ translates the recorded programs for a host preset and draws both back ends
 on that device, which must agree word for word; it needs no NVIDIA device.
 CI runs it on a pinned lavapipe build (`scripts/ci/mesh-kat.sh`).
 
-Cost on a 3090, for draws of 4000 and 16000 tasks of 2 or 3 meshes of 64
-triangles (culled, so the draw is geometry only): native task and mesh
-76 and 270 microseconds; compute back end task pass 10 and 18, task scan 17
-and 45, mesh pass 51 and 181, mesh scan 36 and 175, draw 90 and 332, in
-all about 2.7 and 2.8 times the native time.
+Cost on a 3090, for draws of 4000 and 16000 tasks of 1 to 4 meshes of 49
+to 64 triangles (10000 and 40000 meshes), one command buffer, steady state:
+native task and mesh 74 and 248 microseconds; compute back end 133 and 469
+(task pass 9 and 16, task scan 14 and 34, mesh pass 53 and 195, indexed
+draw 67 and 235), 1.8 and 1.9 times the native time.
