@@ -1197,6 +1197,82 @@ static int copy_buffer_to_buffer(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+/** @brief The level and first layer a copy names: its view's, or 0, plus the region's z (the layer of an array). */
+static int copy_side(replay *r, uint64_t view, const nvn_region *rg, uint32_t *level, uint32_t *layer)
+{
+    *level = 0;
+    *layer = (uint32_t)rg->z;
+    const uint8_t *vb = nvn_cmd_bytes(r->s, view);
+    if (!vb)
+        return RL_OK;
+    nvn_view nv;
+    int rc = nvn_view_read(r->c, r->mem, vb, &nv);
+    if (rc != RL_OK)
+        return rc;
+    if (nv.has_levels)
+        *level = (uint32_t)nv.base_level;
+    if (nv.has_layers)
+        *layer += (uint32_t)nv.min_layer;
+    return RL_OK;
+}
+
+/**
+ * @brief nvnCommandBufferCopyTextureToTexture(src, srcView, srcRegion, dst,
+ * dstView, dstRegion, flags): a texel copy between same-sized regions of
+ * size-compatible formats, otherwise a blit (nearest, or linear with flag 1).
+ */
+static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
+{
+    const nvn_region *sr = nvn_cmd_bytes(r->s, e->x[3]), *dr = nvn_cmd_bytes(r->s, e->x[6]);
+    uint32_t flags = (uint32_t)e->x[7];
+    if (!sr || !dr)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture without a region");
+    if (flags & ~1u)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture with flags 0x%x", flags);
+    if (sr->depth != 1 || dr->depth != 1 || sr->width <= 0 || sr->height <= 0 || dr->width <= 0 || dr->height <= 0)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture of %dx%dx%d to %dx%dx%d texels", sr->width,
+                           sr->height, sr->depth, dr->width, dr->height, dr->depth);
+    vimg *src = image_of(r, e->x[1]);
+    if (!src)
+        return RL_PENDING;
+    vimg *dst = image_of(r, e->x[4]);
+    if (!dst)
+        return RL_PENDING;
+    nvn_vk_written(dst);
+    uint32_t sl, slayer, dl, dlayer;
+    int rc = copy_side(r, e->x[2], sr, &sl, &slayer);
+    if (rc == RL_OK)
+        rc = copy_side(r, e->x[5], dr, &dl, &dlayer);
+    if (rc != RL_OK)
+        return rc;
+    uint32_t sb, sw, sh, db, dw, dh;
+    if (!nvn_tex_format(src->d.format, &sb, &sw, &sh) || !nvn_tex_format(dst->d.format, &db, &dw, &dh))
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture of formats %u and %u", src->d.format,
+                           dst->d.format);
+    nvn_vk_begin(r);
+    nvn_vk_barrier(g.cb);
+    VkImageSubresourceLayers ss = { src->aspect, sl, slayer, 1 }, ds = { dst->aspect, dl, dlayer, 1 };
+    bool same = sr->width == dr->width && sr->height == dr->height && sb == db && sw == dw && sh == dh &&
+                src->aspect == dst->aspect;
+    if (same) {
+        VkImageCopy ic = { ss, { sr->x, sr->y, 0 }, ds, { dr->x, dr->y, 0 },
+                           { (uint32_t)sr->width, (uint32_t)sr->height, 1 } };
+        VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
+    } else {
+        if (sw != 1 || sh != 1 || dw != 1 || dh != 1 || src->aspect != dst->aspect)
+            return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture scaling format %u to format %u",
+                               src->d.format, dst->d.format);
+        VkImageBlit ib = { ss,
+                           { { sr->x, sr->y, 0 }, { sr->x + sr->width, sr->y + sr->height, 1 } },
+                           ds,
+                           { { dr->x, dr->y, 0 }, { dr->x + dr->width, dr->y + dr->height, 1 } } };
+        VkFilter f = flags & 1 && src->aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+        VK(vkCmdBlitImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ib, f);
+    }
+    nvn_vk_barrier(g.cb);
+    return RL_OK;
+}
+
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
     switch (e->op) {
@@ -1212,6 +1288,8 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     case NVN_CMD_COPY_BUFFER_TO_BUFFER:
         return copy_buffer_to_buffer(r, e);
+    case NVN_CMD_COPY_TEXTURE_TO_TEXTURE:
+        return copy_texture_to_texture(r, e);
     case NVN_CMD_BARRIER:
         if (r->recording)
             nvn_vk_barrier(g.cb);

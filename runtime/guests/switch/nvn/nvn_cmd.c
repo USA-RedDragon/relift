@@ -77,6 +77,10 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_BIND_POLYGON_STATE, 1, ONE, 4 },
     { NVN_CMD_BIND_VERTEX_ATTRIB_STATE, 2, 1, 4 },
     { NVN_CMD_BIND_VERTEX_STREAM_STATE, 2, 1, 8 },
+    { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 2, ONE, NVN_VIEW_BYTES },
+    { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 3, ONE, sizeof(nvn_region) },
+    { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 5, ONE, NVN_VIEW_BYTES },
+    { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 6, ONE, sizeof(nvn_region) },
 };
 #undef ONE
 
