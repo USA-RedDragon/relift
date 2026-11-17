@@ -9,118 +9,243 @@ cpu,idx,name,region,place,mode,attr,hw,relift,rom,note
 9,360,str_alu4,mx,main,warm,cb11,17.42,1800,,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,392,str_alu4,mx,main,warm,cb10,17.42,1800,,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
 9,424,str_alu4,mx,main,warm,cb01,17.42,1800,,"ARM9 write buffer: 17.42 on every console, not a whole cycle"
-9,576,big16k,none,main,warm,-,16309.1,1553262,sdk,ARM9 16 KiB straight-line code in main RAM: instruction cache misses of the SDK build's layout
-7,0,copy_m2w,m2w,wram,warm,-,15,2362,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,1,copy_m2w,m2w,main,warm,-,42,6500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,123,ldr,main,wram,warm,-,12,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,124,ldrh,main,wram,warm,-,11,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,125,ldrb,main,wram,warm,-,11,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,126,ldrsh,main,wram,warm,-,11,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,127,str,main,wram,warm,-,9,1681,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,128,strh,main,wram,warm,-,8,1575,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,129,strb,main,wram,warm,-,9,1646,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,130,swp,main,wram,warm,-,19,3409,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,131,ldr2,main,wram,warm,-,21,4750,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,132,str2,main,wram,warm,-,18,3340,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,133,str_ldr,main,wram,warm,-,21,4750,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,134,ldr_str,main,wram,warm,-,18,3340,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,135,ldr_alu,main,wram,warm,-,13,2390,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,136,str_alu,main,wram,warm,-,10,1753,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,137,str_alu4,main,wram,warm,-,13,2390,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,138,str_alu16,main,wram,warm,-,25,4750,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,139,ldm1,main,wram,warm,-,12,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,140,stm1,main,wram,warm,-,9,1681,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,141,ldm2,main,wram,warm,-,14,2406,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,142,stm2,main,wram,warm,-,11,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,143,ldm4,main,wram,warm,-,18,3237,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,144,stm4,main,wram,warm,-,15,2984,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,145,ldm6,main,wram,warm,-,22,4750,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,146,stm6,main,wram,warm,-,19,3750,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,147,ldm8,main,wram,warm,-,26,4684,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,148,stm8,main,wram,warm,-,23,4746,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,149,ldr_use,main,wram,warm,-,13,2390,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,150,ldr_use2,main,wram,warm,-,14,2381,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,151,ldrb_use,main,wram,warm,-,12,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,152,ldr_mul,main,wram,warm,-,14,2381,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,153,t_ldr,main,wram,warm,-,12,2325,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,154,t_str,main,wram,warm,-,9,1634,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,155,t_ldr_use,main,wram,warm,-,13,2321,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,157,s_ldr4,main,wram,warm,-,12,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,158,s_ldr32,main,wram,warm,-,12,2400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,159,s_str4,main,wram,warm,-,9,1681,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,160,s_str32,main,wram,warm,-,9,1681,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,161,s_ldm8,main,wram,warm,-,26,4684,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,162,s_stm8,main,wram,warm,-,23,4746,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,163,copy,main,wram,warm,-,18,3340,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,359,ldr,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,360,ldrh,main,main,warm,-,32,5500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,361,ldrb,main,main,warm,-,32,5500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,362,ldrsh,main,main,warm,-,32,5500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,363,str,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,364,strh,main,main,warm,-,32,5500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,365,strb,main,main,warm,-,32,5500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,366,swp,main,main,warm,-,42,6500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,367,ldr2,main,main,warm,-,51,7400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,368,str2,main,main,warm,-,51,7400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,369,str_ldr,main,main,warm,-,51,7400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,370,ldr_str,main,main,warm,-,51,7400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,371,ldr_alu,main,main,warm,-,35,5800,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,372,str_alu,main,main,warm,-,35,5800,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,373,str_alu4,main,main,warm,-,41,6400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,374,str_alu16,main,main,warm,-,65,8800,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,375,ldm1,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,376,stm1,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,377,ldm2,main,main,warm,-,35,5800,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,378,stm2,main,main,warm,-,35,5800,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,379,ldm4,main,main,warm,-,39,6200,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,380,stm4,main,main,warm,-,39,6200,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,381,ldm6,main,main,warm,-,43,6600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,382,stm6,main,main,warm,-,43,6600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,383,ldm8,main,main,warm,-,47,7000,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,384,stm8,main,main,warm,-,47,7000,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,385,ldr_use,main,main,warm,-,35,5728,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,386,ldr_use2,main,main,warm,-,37,6000,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,387,ldrb_use,main,main,warm,-,34,5700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,388,ldr_mul,main,main,warm,-,42,6500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,389,t_ldr,main,main,warm,-,28,5100,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,390,t_str,main,main,warm,-,28,5100,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,391,t_ldr_use,main,main,warm,-,29,5200,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,393,s_ldr4,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,394,s_ldr32,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,395,s_str4,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,396,s_str32,main,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,397,s_ldm8,main,main,warm,-,47,7000,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,398,s_stm8,main,main,warm,-,47,7000,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,399,copy,main,main,warm,-,51,7400,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,441,ldr,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,442,ldrh,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,443,ldrb,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,444,ldrsh,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,445,str,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,446,strh,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,447,strb,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,448,ldr2,io,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,449,str2,io,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,450,str_ldr,io,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,451,ldr_str,io,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,452,ldr_alu,io,main,warm,-,26,4900,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,453,str_alu,io,main,warm,-,26,4900,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,454,str_alu4,io,main,warm,-,32,5500,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,455,str_alu16,io,main,warm,-,56,7900,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,456,ldm1,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,457,stm1,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,458,ldm2,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,459,stm2,io,main,warm,-,24,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,460,ldm4,io,main,warm,-,26,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,461,stm4,io,main,warm,-,25,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,462,ldm6,io,main,warm,-,28,4640,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,463,stm6,io,main,warm,-,27,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,464,ldm8,io,main,warm,-,30,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,465,stm8,io,main,warm,-,29,4700,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,466,ldr_use,io,main,warm,-,26,4900,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,467,ldr_use2,io,main,warm,-,28,5100,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,468,ldrb_use,io,main,warm,-,26,4900,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,469,ldr_mul,io,main,warm,-,33,5600,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,470,t_ldr,io,main,warm,-,19,3050,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,471,t_str,io,main,warm,-,19,3050,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
-7,472,t_ldr_use,io,main,warm,-,20,3150,sdk,"the SDK build's ARM9 polls the ARM7's job in main RAM meanwhile: no cost on the consoles (EXMEMCNT bit 15, ARM7 first), relift's main RAM charges the ARM7 for it"
+9,572,big9k,none,main,warm,-,4669.24,471856,sdk,"ARM9 9 KiB straight-line code in main RAM: instruction cache misses of the SDK build's layout"
+9,576,big16k,none,main,warm,-,16309.06,1669700,sdk,ARM9 16 KiB straight-line code in main RAM: instruction cache misses of the SDK build's layout
+9,1001,cpuset16,main,main,warm,-,818,942,sdk,relift +1.24: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1001,cpuset16,main,main,warm,-,818,942,calls,relift +1.24: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1002,cpuset16,vram,main,warm,-,816,772,calls,relift -0.44: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1003,cpuset32,main,main,warm,-,468,592,sdk,relift +1.24: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1004,cpuset32,vram,main,warm,-,466,524,sdk,relift +0.58: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1006,cpuset32_fill,vram,main,warm,-,400,350,sdk,relift -0.50: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1006,cpuset32_fill,vram,main,warm,-,400,350,calls,relift -0.50: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1007,cpufastset,main,main,warm,-,392,518,sdk,relift +1.26: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1008,cpufastset,vram,main,warm,-,354,430,sdk,relift +0.76: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1008,cpufastset,vram,main,warm,-,354,306,calls,relift -0.48: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1010,cpufastset_fill,vram,main,warm,-,294,256,sdk,relift -0.38: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1010,cpufastset_fill,vram,main,warm,-,294,256,calls,relift -0.38: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1012,crc16,main,main,warm,-,5368,5426,sdk,relift +0.58: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1013,lz77_wram,main,main,warm,-,1350,1268,calls,relift -0.82: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1014,lz77_wram,vram,main,warm,-,3226,1722,sdk,relift -15.04: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1014,lz77_wram,vram,main,warm,-,3226,1688,calls,relift -15.38: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1016,lz77_cb,vram,main,warm,-,5042,4894,sdk,relift -1.48: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1016,lz77_cb,vram,main,warm,-,5042,4862,calls,relift -1.80: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1018,huff_cb,vram,main,warm,-,11252,11020,sdk,relift -2.32: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1018,huff_cb,vram,main,warm,-,11252,11020,calls,relift -2.32: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1019,rl_wram,main,main,warm,-,1722,1618,sdk,relift -1.04: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1019,rl_wram,main,main,warm,-,1722,1614,calls,relift -1.08: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1020,rl_wram,vram,main,warm,-,1720,620,sdk,relift -11.00: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1020,rl_wram,vram,main,warm,-,1720,712,calls,relift -10.08: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1021,rl_cb,main,main,warm,-,2694,2740,sdk,relift +0.46: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,1022,rl_cb,vram,main,warm,-,3044,2986,calls,relift -0.58: the ARM9's BIOS loop cost depends on the build's code and buffer layout in the caches
+9,3002,vblankintrwait_wake,none,main,warm,-,13000,13200,sdk,"relift +2.00: the least of 5 runs whose wake spreads over 80 bus ticks (the VBlank start comes from polling VCOUNT a frame earlier); the consoles' least so far is 64, 65, 65 and 69 ticks: the row samples where the poll lands, so a 2-cycle miss is within it"
+9,3002,vblankintrwait_wake,none,main,warm,-,13000,12800,calls,"relift -2.00: the least of 5 runs whose wake spreads over 80 bus ticks (the VBlank start comes from polling VCOUNT a frame earlier); the consoles' least so far is 64, 65, 65 and 69 ticks: the row samples where the poll lands, so a 2-cycle miss is within it"
+7,1001,cpuset16,main,wram,warm,-,650,600,sdk,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1001,cpuset16,main,wram,warm,-,650,600,calls,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1013,lz77_wram,main,wram,warm,-,2111,2575,sdk,relift +4.64: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1013,lz77_wram,main,wram,warm,-,2111,2575,calls,relift +4.64: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1015,lz77_cb,main,wram,warm,-,5657,6088,sdk,relift +4.31: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1015,lz77_cb,main,wram,warm,-,5657,6088,calls,relift +4.31: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1019,rl_wram,main,wram,warm,-,1410,1610,sdk,relift +2.00: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1019,rl_wram,main,wram,warm,-,1410,1610,calls,relift +2.00: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1021,rl_cb,main,wram,warm,-,4246,4196,sdk,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1021,rl_cb,main,wram,warm,-,4246,4196,calls,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+9,1024,lz77_lit,main,main,warm,-,1800,2096,sdk,"relift +2.96: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1024,lz77_lit,main,main,warm,-,1800,2096,calls,"relift +2.96: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1025,lz77_lit,vram,main,warm,-,3300,1096,sdk,"relift -22.04: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1025,lz77_lit,vram,main,warm,-,3300,1096,calls,"relift -22.04: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1026,lz77_rep,main,main,warm,-,936,496,sdk,"relift -4.40: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1026,lz77_rep,main,main,warm,-,936,496,calls,"relift -4.40: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1027,lz77_rep,vram,main,warm,-,2938,1696,sdk,"relift -12.42: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1027,lz77_rep,vram,main,warm,-,2938,1696,calls,"relift -12.42: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1029,rl_lit,vram,main,warm,-,1608,604,sdk,"relift -10.04: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1029,rl_lit,vram,main,warm,-,1608,604,calls,"relift -10.04: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1031,rl_run,vram,main,warm,-,1212,604,sdk,"relift -6.08: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1031,rl_run,vram,main,warm,-,1212,604,calls,"relift -6.08: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1032,huff2_cb,main,main,warm,-,4292,11050,sdk,"relift +67.58: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1032,huff2_cb,main,main,warm,-,4292,11050,calls,"relift +67.58: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1033,huff2_cb,vram,main,warm,-,4492,10864,sdk,"relift +63.72: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1033,huff2_cb,vram,main,warm,-,4492,10864,calls,"relift +63.72: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1035,diff8,vram,main,warm,-,1800,600,sdk,"relift -12.00: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1035,diff8,vram,main,warm,-,1800,600,calls,"relift -12.00: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1037,diff16,vram,main,warm,-,900,300,sdk,"relift -6.00: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1037,diff16,vram,main,warm,-,900,300,calls,"relift -6.00: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1038,bitunpack,main,main,warm,-,2414,450,sdk,"relift -19.64: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1038,bitunpack,main,main,warm,-,2414,450,calls,"relift -19.64: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1039,bitunpack,vram,main,warm,-,2626,200,sdk,"relift -24.26: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1039,bitunpack,vram,main,warm,-,2626,200,calls,"relift -24.26: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1041,cpuset16_fill,vram,main,warm,-,700,600,sdk,"relift -1.00: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+9,1041,cpuset16_fill,vram,main,warm,-,700,600,calls,"relift -1.00: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1024,lz77_lit,main,wram,warm,-,2224,1784,sdk,relift -4.40: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1024,lz77_lit,main,wram,warm,-,2224,1784,calls,relift -4.40: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1025,lz77_lit,wram7,wram,warm,-,1924,1297,sdk,"relift -6.27: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1025,lz77_lit,wram7,wram,warm,-,1924,1297,calls,"relift -6.27: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1026,lz77_rep,main,wram,warm,-,1845,2586,sdk,relift +7.41: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1026,lz77_rep,main,wram,warm,-,1845,2586,calls,relift +7.41: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1027,lz77_rep,wram7,wram,warm,-,1043,1296,sdk,"relift +2.53: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1027,lz77_rep,wram7,wram,warm,-,1043,1296,calls,"relift +2.53: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1028,rl_lit,main,wram,warm,-,1409,1609,sdk,relift +2.00: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1028,rl_lit,main,wram,warm,-,1409,1609,calls,relift +2.00: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1030,rl_run,main,wram,warm,-,1014,1609,sdk,relift +5.95: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1030,rl_run,main,wram,warm,-,1014,1609,calls,relift +5.95: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1031,rl_run,wram7,wram,warm,-,714,1011,sdk,"relift +2.97: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1031,rl_run,wram7,wram,warm,-,714,1011,calls,"relift +2.97: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1032,huff2_cb,main,wram,warm,-,5890,13323,sdk,relift +74.33: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1032,huff2_cb,main,wram,warm,-,5890,13323,calls,relift +74.33: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1033,huff2_cb,wram7,wram,warm,-,5815,13273,sdk,"relift +74.58: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1033,huff2_cb,wram7,wram,warm,-,5815,13273,calls,"relift +74.58: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1038,bitunpack,main,wram,warm,-,2591,225,sdk,relift -23.66: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1038,bitunpack,main,wram,warm,-,2591,225,calls,relift -23.66: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1039,bitunpack,wram7,wram,warm,-,2516,62,sdk,"relift -24.54: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1039,bitunpack,wram7,wram,warm,-,2516,62,calls,"relift -24.54: hwtest 3c's input of one kind (literals, matches, runs, two symbols): relift charges one average per byte for every input"
+7,1040,cpuset16_fill,main,wram,warm,-,500,450,sdk,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+7,1040,cpuset16_fill,main,wram,warm,-,500,450,calls,relift -0.50: the ARM7 BIOS writing main RAM: per-unit cost into main RAM not fitted yet
+9,4008,ldr_vs_ldr,p9,main,warm,-,3668,3762,sdk,relift +0.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4009,ldr_vs_str,p9,main,warm,-,3668,3762,sdk,relift +0.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4009,ldr_vs_str,p9,main,warm,-,3668,3718,calls,relift +0.50: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4010,ldr_vs_code,p9,main,warm,-,3624,1956,sdk,relift -16.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4010,ldr_vs_code,p9,main,warm,-,3624,1836,calls,relift -17.88: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4011,ldr_vs_dma,p9,main,warm,-,3606,12542,sdk,relift +89.36: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4011,ldr_vs_dma,p9,main,warm,-,3606,12374,calls,relift +87.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4012,str_vs_ldr,p9,main,warm,-,1842,3712,sdk,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4012,str_vs_ldr,p9,main,warm,-,1842,3712,calls,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4013,str_vs_str,p9,main,warm,-,1842,3712,sdk,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4013,str_vs_str,p9,main,warm,-,1842,3712,calls,relift +18.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4014,str_vs_code,p9,main,warm,-,1806,1556,sdk,relift -2.50: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4014,str_vs_code,p9,main,warm,-,1806,1436,calls,relift -3.70: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4015,str_vs_dma,p9,main,warm,-,1836,12656,sdk,relift +108.20: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4015,str_vs_dma,p9,main,warm,-,1836,12374,calls,relift +105.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4016,ldm8_vs_ldr,p9,main,warm,-,6400,6324,sdk,relift -0.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4016,ldm8_vs_ldr,p9,main,warm,-,6400,6300,calls,relift -1.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4017,ldm8_vs_str,p9,main,warm,-,6400,6324,sdk,relift -0.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4017,ldm8_vs_str,p9,main,warm,-,6400,6324,calls,relift -0.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4018,ldm8_vs_code,p9,main,warm,-,6400,5000,sdk,relift -14.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4018,ldm8_vs_code,p9,main,warm,-,6400,5000,calls,relift -14.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4019,ldm8_vs_dma,p9,main,warm,-,6406,5130,sdk,relift -12.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4019,ldm8_vs_dma,p9,main,warm,-,6406,5000,calls,relift -14.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4021,stm8_vs_str,p9,main,warm,-,4642,5924,sdk,relift +12.82: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4021,stm8_vs_str,p9,main,warm,-,4642,5918,calls,relift +12.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4023,stm8_vs_dma,p9,main,warm,-,4636,9924,sdk,relift +52.88: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4023,stm8_vs_dma,p9,main,warm,-,4636,9756,calls,relift +51.20: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4054,ldr_vs_ldr,p7,main,warm,-,3668,3762,sdk,relift +0.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4055,ldr_vs_str,p7,main,warm,-,2074,3762,sdk,relift +16.88: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4055,ldr_vs_str,p7,main,warm,-,2074,3718,calls,relift +16.44: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4056,ldr_vs_code,p7,main,warm,-,2074,1956,sdk,relift -1.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4056,ldr_vs_code,p7,main,warm,-,2074,1836,calls,relift -2.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4057,ldr_vs_dma,p7,main,warm,-,2074,12542,sdk,relift +104.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4057,ldr_vs_dma,p7,main,warm,-,2074,12374,calls,relift +103.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4059,str_vs_str,p7,main,warm,-,1674,3712,sdk,relift +20.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4059,str_vs_str,p7,main,warm,-,1674,3656,calls,relift +19.82: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4060,str_vs_code,p7,main,warm,-,1674,1556,sdk,relift -1.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4060,str_vs_code,p7,main,warm,-,1674,1436,calls,relift -2.38: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4061,str_vs_dma,p7,main,warm,-,1674,12656,sdk,relift +109.82: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4061,str_vs_dma,p7,main,warm,-,1674,12486,calls,relift +108.12: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4062,ldm8_vs_ldr,p7,main,warm,-,28806,6306,sdk,relift -225.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4062,ldm8_vs_ldr,p7,main,warm,-,28806,6300,calls,relift -225.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4063,ldm8_vs_str,p7,main,warm,-,5006,6324,sdk,relift +13.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4063,ldm8_vs_str,p7,main,warm,-,5006,6324,calls,relift +13.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4065,ldm8_vs_dma,p7,main,warm,-,5006,5130,sdk,relift +1.24: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4066,stm8_vs_ldr,p7,main,warm,-,28806,4630,sdk,relift -241.76: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4066,stm8_vs_ldr,p7,main,warm,-,28806,4600,calls,relift -242.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4067,stm8_vs_str,p7,main,warm,-,4606,5924,sdk,relift +13.18: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4067,stm8_vs_str,p7,main,warm,-,4606,5918,calls,relift +13.12: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4069,stm8_vs_dma,p7,main,warm,-,4606,9862,sdk,relift +52.56: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4069,stm8_vs_dma,p7,main,warm,-,4606,9874,calls,relift +52.68: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4070,code_vs_ldr,p7,unc,warm,-,18006,9000,sdk,relift -90.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,4070,code_vs_ldr,p7,unc,warm,-,18006,9000,calls,relift -90.06: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4029,ldr_vs_str,p9,wram,warm,-,1206,1800,sdk,relift +5.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4029,ldr_vs_str,p9,wram,warm,-,1206,1800,calls,relift +5.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4030,ldr_vs_ldm8,p9,wram,warm,-,3200,1590,sdk,relift -16.10: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4030,ldr_vs_ldm8,p9,wram,warm,-,3200,1578,calls,relift -16.22: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4031,ldr_vs_stm8,p9,wram,warm,-,1206,2318,sdk,relift +11.12: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4031,ldr_vs_stm8,p9,wram,warm,-,1206,2300,calls,relift +10.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4033,ldr_vs_dma,p9,wram,warm,-,1206,6300,sdk,relift +50.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4033,ldr_vs_dma,p9,wram,warm,-,1206,6300,calls,relift +50.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4035,str_vs_str,p9,wram,warm,-,906,1828,sdk,relift +9.22: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4035,str_vs_str,p9,wram,warm,-,906,1800,calls,relift +8.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4036,str_vs_ldm8,p9,wram,warm,-,3200,1578,sdk,relift -16.22: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4036,str_vs_ldm8,p9,wram,warm,-,3200,1556,calls,relift -16.44: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4037,str_vs_stm8,p9,wram,warm,-,906,1475,sdk,relift +5.69: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4037,str_vs_stm8,p9,wram,warm,-,906,1468,calls,relift +5.62: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4039,str_vs_dma,p9,wram,warm,-,906,6300,sdk,relift +53.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4039,str_vs_dma,p9,wram,warm,-,906,6300,calls,relift +53.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4040,code_vs_ldr,p9,main,warm,-,9000,1734,sdk,relift -72.66: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4040,code_vs_ldr,p9,main,warm,-,9000,1700,calls,relift -73.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4042,code_vs_ldm8,p9,main,warm,-,6903,1693,sdk,relift -52.10: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4042,code_vs_ldm8,p9,main,warm,-,6903,1687,calls,relift -52.16: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4045,code_vs_dma,p9,main,warm,-,1706,11000,sdk,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4045,code_vs_dma,p9,main,warm,-,1706,11000,calls,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4074,ldr_vs_ldr,p7,wram,warm,-,1828,1800,sdk,relift -0.28: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4074,ldr_vs_ldr,p7,wram,warm,-,1828,1800,calls,relift -0.28: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4075,ldr_vs_str,p7,wram,warm,-,1831,1800,sdk,relift -0.31: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4075,ldr_vs_str,p7,wram,warm,-,1831,1800,calls,relift -0.31: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4076,ldr_vs_ldm8,p7,wram,warm,-,1809,1590,sdk,relift -2.19: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4076,ldr_vs_ldm8,p7,wram,warm,-,1809,1581,calls,relift -2.28: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4077,ldr_vs_stm8,p7,wram,warm,-,1815,2318,sdk,relift +5.03: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4077,ldr_vs_stm8,p7,wram,warm,-,1815,2300,calls,relift +4.85: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4078,ldr_vs_code,p7,wram,warm,-,1800,1206,sdk,relift -5.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4078,ldr_vs_code,p7,wram,warm,-,1800,1200,calls,relift -6.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4079,ldr_vs_dma,p7,wram,warm,-,1800,6300,sdk,relift +45.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4079,ldr_vs_dma,p7,wram,warm,-,1800,6300,calls,relift +45.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4080,str_vs_ldr,p7,wram,warm,-,903,1834,sdk,relift +9.31: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4080,str_vs_ldr,p7,wram,warm,-,903,1800,calls,relift +8.97: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4081,str_vs_str,p7,wram,warm,-,915,1800,sdk,relift +8.85: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4081,str_vs_str,p7,wram,warm,-,915,1800,calls,relift +8.85: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4082,str_vs_ldm8,p7,wram,warm,-,900,1578,sdk,relift +6.78: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4082,str_vs_ldm8,p7,wram,warm,-,900,1596,calls,relift +6.96: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4083,str_vs_stm8,p7,wram,warm,-,903,1475,sdk,relift +5.72: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4083,str_vs_stm8,p7,wram,warm,-,903,1478,calls,relift +5.75: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4085,str_vs_dma,p7,wram,warm,-,900,6300,sdk,relift +54.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4085,str_vs_dma,p7,wram,warm,-,900,6300,calls,relift +54.00: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4086,code_vs_ldr,p7,main,warm,-,1700,1734,sdk,relift +0.34: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4091,code_vs_dma,p7,main,warm,-,1706,11000,sdk,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+7,4091,code_vs_dma,p7,main,warm,-,1706,11000,calls,relift +92.94: main RAM arbitration between the CPUs (EXMEMCNT bit 15) is not fitted yet
+9,6001,waitbyloop_1,none,main,warm,-,7000,2800,sdk,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6001,waitbyloop_1,none,main,warm,-,7000,2800,calls,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6002,cpuset16_1,none,main,warm,-,10200,5600,sdk,"relift -46.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6002,cpuset16_1,none,main,warm,-,10200,5600,calls,"relift -46.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6003,cpuset32_1,none,main,warm,-,10000,5800,sdk,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6003,cpuset32_1,none,main,warm,-,10000,5800,calls,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6004,cpufastset_1,none,main,warm,-,10800,5800,sdk,"relift -50.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6004,cpufastset_1,none,main,warm,-,10800,5800,calls,"relift -50.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6005,cpufastset_8,none,main,warm,-,12200,18400,sdk,"relift +62.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6005,cpufastset_8,none,main,warm,-,12200,18400,calls,"relift +62.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6006,div_1_1,none,main,warm,-,8600,22000,sdk,"relift +134.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6006,div_1_1,none,main,warm,-,8600,22000,calls,"relift +134.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6007,div_100000_37,none,main,warm,-,23000,22000,sdk,"relift -10.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6007,div_100000_37,none,main,warm,-,23000,22000,calls,"relift -10.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6008,sqrt_0,none,main,warm,-,11400,122000,sdk,"relift +1106.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6008,sqrt_0,none,main,warm,-,11400,122000,calls,"relift +1106.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6009,sqrt_max,none,main,warm,-,61400,122000,sdk,"relift +606.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6009,sqrt_max,none,main,warm,-,61400,122000,calls,"relift +606.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6010,crc16_2,none,main,warm,-,19600,15600,sdk,"relift -40.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6010,crc16_2,none,main,warm,-,19600,15600,calls,"relift -40.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6011,lz77_1,none,main,warm,-,10600,4000,sdk,"relift -66.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6011,lz77_1,none,main,warm,-,10600,4000,calls,"relift -66.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6012,rl_1,none,main,warm,-,11000,4000,sdk,"relift -70.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6012,rl_1,none,main,warm,-,11000,4000,calls,"relift -70.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6013,bitunpack_1,none,main,warm,-,30400,6200,sdk,"relift -242.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+9,6013,bitunpack_1,none,main,warm,-,30400,6200,calls,"relift -242.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6001,waitbyloop_1,none,wram,warm,-,5700,2400,sdk,"relift -33.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6001,waitbyloop_1,none,wram,warm,-,5700,2400,calls,"relift -33.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6002,cpuset16_1,none,wram,warm,-,11400,7200,sdk,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6002,cpuset16_1,none,wram,warm,-,11400,7200,calls,"relift -42.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6003,cpuset32_1,none,wram,warm,-,11200,7200,sdk,"relift -40.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6003,cpuset32_1,none,wram,warm,-,11200,7200,calls,"relift -40.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6004,cpufastset_1,none,wram,warm,-,11600,7100,sdk,"relift -45.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6004,cpufastset_1,none,wram,warm,-,11600,7100,calls,"relift -45.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6005,cpufastset_8,none,wram,warm,-,13700,14800,sdk,"relift +11.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6005,cpufastset_8,none,wram,warm,-,13700,14800,calls,"relift +11.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6006,div_1_1,none,wram,warm,-,7400,21700,sdk,"relift +143.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6006,div_1_1,none,wram,warm,-,7400,21700,calls,"relift +143.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6008,sqrt_0,none,wram,warm,-,10300,121800,sdk,"relift +1115.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6008,sqrt_0,none,wram,warm,-,10300,121800,calls,"relift +1115.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6009,sqrt_max,none,wram,warm,-,60200,121800,sdk,"relift +616.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6009,sqrt_max,none,wram,warm,-,60200,121800,calls,"relift +616.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6010,crc16_2,none,wram,warm,-,19500,26200,sdk,"relift +67.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6010,crc16_2,none,wram,warm,-,19500,26200,calls,"relift +67.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6011,lz77_1,none,wram,warm,-,11600,89400,sdk,"relift +778.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6011,lz77_1,none,wram,warm,-,11600,89400,calls,"relift +778.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6012,rl_1,none,wram,warm,-,12500,17500,sdk,"relift +50.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6012,rl_1,none,wram,warm,-,12500,17500,calls,"relift +50.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6013,bitunpack_1,none,wram,warm,-,32400,3800,sdk,"relift -286.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"
+7,6013,bitunpack_1,none,wram,warm,-,32400,3800,calls,"relift -286.00: the fixed cost of one call (entry, setup, return) is not fitted to the consoles yet"

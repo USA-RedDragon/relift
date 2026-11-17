@@ -6,9 +6,14 @@
 #include "hwtest.h"
 #include "cases.h"
 #include "k7tab.h"
+#include "ct.h"
 #include "swi.c"
 #include "card.c"
 #include "wake.c"
+#include "fixed.c"
+
+typedef void kfn(unsigned, unsigned, unsigned);
+
 
 static u8 wram_buf[4096] __attribute__((aligned(32)));
 /* Main RAM (calico's ARM7 .sbss is there): the main RAM code kernels run from +0x420, where they ran
@@ -17,14 +22,54 @@ static u8 main_code[0x420 + 4096] __attribute__((section(".sbss.main_code"), ali
 static Mailbox mb;
 static u32 mb_slots[4];
 
-typedef void kfn(unsigned, unsigned, unsigned);
+/* contend.c's hooks: the ARM7's kernel, its code copied to main_code when it runs from there */
+static void ct_prep7(hw_job7 *j)
+{
+    unsigned k = j->arg[0];
+    if (k < CT7_N && ct7_code[k]) {
+        kfn *f = k7_fn[ct7_kernel[k]];
+        memcpy(main_code + 0x420, (const void *)f, (u32)k7_end[ct7_kernel[k]] - (u32)f);
+    }
+}
+static void ct_k7(unsigned k, unsigned n, hw_job7 *j)
+{
+    kfn *f = ct7_code[k] ? (kfn *)(main_code + 0x420) : k7_fn[ct7_kernel[k]];
+    f(n, j->mainbuf, j->mainbuf + 1024);
+}
+#include "contend.c"
 
+static void run_case(hw_job7 *j);
+
+/* a job: quiet ones (hwtest 3c) tell the ARM9 on IPCSYNC that they are done, as it waits off main RAM */
 static void run(hw_job7 *j)
+{
+    if (j->mode == 2) {
+        u32 ime = REG_IME;
+        REG_IME = 0;
+        ct_job7(j);
+        REG_IME = ime;
+        j->status = 1;
+        return;
+    }
+    run_case(j);
+    if (j->mode == 1) {
+        ct_out(CT_QDONE);
+        ct_wait(CT_ACK);
+        ct_out(0);
+    }
+}
+
+static void run_case(hw_job7 *j)
 {
     if (j->ci >= NCASES7) {
         unsigned i = j->ci - NCASES7;
         u32 ime = REG_IME;
         REG_IME = 0;
+        if (i < NSWI && sw_cases[i].only9) {
+            j->status = 2;
+            REG_IME = ime;
+            return;
+        }
         if (i < NSWI) {
             sw_measure(i, sw_cases[i].dst ? wram_buf : (u8 *)j->mainbuf, &j->t16, &j->t48, &j->kaddr);
             j->dbase = sw_units(i);
@@ -36,9 +81,13 @@ static void run(hw_job7 *j)
             wake_measure(i - NSWI - NCARD, (vu32 *)0x0380FFFC, (vu32 *)0x0380FFF8, &j->t16, &j->t48);
             j->kaddr = 0;
             j->dbase = 0;
+        } else if (i - NSWI - NCARD - WK_KINDS < FX_KINDS) {
+            fx_measure(i - NSWI - NCARD - WK_KINDS, (u8 *)j->mainbuf, &j->t16, &j->t48);
+            j->kaddr = 0;
+            j->dbase = 0;
         }
         REG_IME = ime;
-        j->status = i < NSWI + NCARD + WK_KINDS ? 1 : 2;
+        j->status = i < NSWI + NCARD + WK_KINDS + FX_KINDS ? 1 : 2;
         return;
     }
     const hw_case *c = &cases7[j->ci];

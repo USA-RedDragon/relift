@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""compare.py RUN.csv [--clang]: checks a run of the timing test ROM against the consoles (hw.csv).
+"""compare.py RUN.csv [--clang | --calls]: checks a run of the timing test ROM against the consoles (hw.csv).
 
-A case the consoles agree on (all three within 2%) must come out within max(0.26, 1%) cycles of
+A case the consoles agree on (all of them within 2%) must come out within max(0.26, 1%) cycles of
 the first console, unless open.csv lists it: an open case must come out at the value open.csv
 records, so a change to it shows. Cases the consoles disagree on are reported, not checked. Exits 1
-on a mismatch or a missing case. With --clang the run is of the clang build (build.py): it does not
-run the cases whose code is copied to the instruction TCM, and the open cases of the devkitPro build
-only (open.csv's rom column) are checked as the others."""
+on a mismatch or a missing case. A console column may be empty (hwtest 3's cases ran on two
+consoles).
+
+The devkitPro build runs every case. With --clang the run is of the clang build (build.py): it does
+not run the cases whose code is copied to the instruction TCM, nor the BIOS call, cartridge and wake
+cases (idx 1000 on); with --calls it is of the clang calls cartridge (build.py --calls), which runs
+only those. open.csv's rom column says which build an open case applies to: sdk, calls, or empty for
+both the devkitPro and the clang kernel builds."""
 import csv
 import os
 import sys
@@ -23,19 +28,23 @@ def cycles(v):
     return int(v) / 100 if v not in ("", None) else None
 
 
-hw = rows(os.path.join(HERE, "hw.csv"))
 clang = "--clang" in sys.argv[2:]
+calls = "--calls" in sys.argv[2:]
+build = "calls" if calls else "clang" if clang else "sdk"
+hw = rows(os.path.join(HERE, "hw.csv"))
 run = {(r["cpu"], r["idx"]): r for r in rows(sys.argv[1]) if r.get("cpu_x100") not in (None, "")}
-open_cases = {(r["cpu"], r["idx"]): r for r in rows(os.path.join(HERE, "open.csv"))
-              if not (clang and r["rom"] == "sdk")}
+roms = {"sdk": ("", "sdk"), "clang": ("",), "calls": ("calls",)}[build]
+open_cases = {(r["cpu"], r["idx"]): r for r in rows(os.path.join(HERE, "open.csv")) if r["rom"] in roms}
 bad = ok = disagree = known = 0
 for h in hw:
     key = (h["cpu"], h["idx"])
-    want = [cycles(h[c]) for c in ("c3ds", "dsi", "dsi2")]
-    got = cycles(run[key]["cpu_x100"]) if key in run else None
-    label = f"{h['cpu']} {h['idx']:>3} {h['name']:<14} {h['region']:<5} {h['place']:<4} {h['mode']:<9} {h['attr']}"
+    if build != "sdk" and (int(h["idx"]) >= 1000) != calls:
+        continue
     if clang and h["place"] == "itcm":
         continue
+    want = [w for w in (cycles(h[c]) for c in ("c3ds", "dsi", "dsi2")) if w is not None]
+    got = cycles(run[key]["cpu_x100"]) if key in run else None
+    label = f"{h['cpu']} {h['idx']:>3} {h['name']:<14} {h['region']:<5} {h['place']:<4} {h['mode']:<9} {h['attr']}"
     if any(abs(w - want[0]) > 0.02 * max(want[0], 1) for w in want[1:]):
         disagree += 1
         continue

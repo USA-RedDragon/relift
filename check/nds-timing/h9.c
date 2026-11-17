@@ -311,6 +311,256 @@ static void result(int cpu, unsigned i, const hw_case *c, bool ok, u32 t16, u32 
     flush_line();
 }
 
+#ifdef HWTEST_CALLS
+/* the calls build (build.py --calls): the BIOS call, cartridge and wake cases and hwtest 3c's instead of
+   the kernel cases, which the plain build keeps exactly as hwtest 3 had them */
+#include "ct.h"
+#include "swi.c"
+#include "wake.c"
+#include "fixed.c"
+
+static u8 dma_buf[65536] __attribute__((aligned(32)));
+
+/* hands case ci to the ARM7 (mode as hw_job7's); the job's address is at the end of main RAM */
+static hw_job7 *send7(unsigned ci, u32 mode)
+{
+    hw_job7 *job = &job_mem;
+    hw_memset(job, 0, sizeof *job);
+    job->ci = ci;
+    job->slot = 0x023FE000u;
+    job->mainbuf = (u32)a7_buf;
+    job->mode = mode;
+    return job;
+}
+
+/* IPCSYNC 1 starts the job */
+static void go7(void)
+{
+    dcache_flush(&job_mem, sizeof job_mem);
+    __asm__ volatile("mrs r0, cpsr\n orr r0, r0, #0xc0\n msr cpsr_c, r0" ::: "r0", "memory");
+    R32(0x04000210) = 1u << 16;
+    R32(0x04000208) = 1;
+    R16(0x04000180) = 1 << 8 | 1 << 14;
+}
+
+/* waits for the ARM7's IPCSYNC 1 (in wait-for-interrupt when sleep) and ends the handshake */
+static void finish7(bool sleep)
+{
+    while ((R16(0x04000180) & 15) != 1) {
+        if (sleep)
+            CP15_W("c7, c0, 4", 0);
+        R32(0x04000214) = 1u << 16;
+    }
+    R16(0x04000180) = 0;
+    while ((R16(0x04000180) & 15) != 0)
+        ;
+    R32(0x04000214) = 1u << 16;
+    dcache_invalidate(&job_mem, sizeof job_mem);
+}
+
+/* the IRQ handler outside the wake cases: acknowledges what it was called for */
+__attribute__((naked, target("arm"))) static void idle_irq(void)
+{
+    __asm__ volatile("mov r0, #0x04000000\n"
+                     "ldr r1, [r0, #0x210]\n"
+                     "ldr r2, [r0, #0x214]\n"
+                     "and r1, r1, r2\n"
+                     "str r1, [r0, #0x214]\n"
+                     "bx lr\n");
+}
+
+/* a / b by shifts and subtractions (the ARM9 has no divide instruction and no runtime here) */
+static s32 sdiv(s32 a, u32 b)
+{
+    u32 n = a < 0 ? (u32)-a : (u32)a, q = 0, r = 0;
+    for (int i = 31; i >= 0; i--) {
+        r = r << 1 | (n >> i & 1);
+        if (r >= b) {
+            r -= b;
+            q |= 1u << i;
+        }
+    }
+    return a < 0 ? -(s32)q : (s32)q;
+}
+
+/* a BIOS call or cartridge row in the cases' CSV format (sdk/arm9 main.c's extra) */
+static void extra(int cpu, unsigned idx, const char *name, const char *region, const char *place, u32 t16, u32 t48,
+                  u32 check, u32 units)
+{
+    s32 bus100 = sdiv((s32)(t48 - t16) * 100, units);
+    put_u((u32)cpu);
+    put_c(',');
+    put_u(idx);
+    put_c(',');
+    put_s(name);
+    put_c(',');
+    put_s(region);
+    put_c(',');
+    put_s(place);
+    put_s(",warm,-,1,");
+    put_x(check, 8);
+    put_c(',');
+    put_x(units, 8);
+    put_c(',');
+    put_u(t16);
+    put_c(',');
+    put_u(t48);
+    put_c(',');
+    put_d(bus100);
+    put_c(',');
+    put_d(cpu == 9 ? bus100 * 2 : bus100);
+    flush_line();
+}
+
+/* a wake case row: the least and the most latency in bus ticks (sdk/arm9 main.c's wake_row) */
+static void wake_row(int cpu, unsigned k, const char *place, u32 lo, u32 hi)
+{
+    put_u((u32)cpu);
+    put_c(',');
+    put_u(3000 + k);
+    put_c(',');
+    put_s(wk_name[k]);
+    put_s(",none,");
+    put_s(place);
+    put_s(",warm,-,1,00000000,00000000,");
+    put_u(lo);
+    put_c(',');
+    put_u(hi);
+    put_c(',');
+    put_d((s32)lo * 100);
+    put_c(',');
+    put_d((s32)lo * (cpu == 9 ? 200 : 100));
+    flush_line();
+}
+
+static const char *const card_names7[] = {"card_cmd", "card_4", "card_512", "card_4k", "card_cmd_slow", "card_4_slow",
+                                          "card_512_slow", "card_cmd_game", "card_4_game", "card_512_game",
+                                          "card_4k_game", "card_512_game_slow", "card_512_gap2_18",
+                                          "card_4k_gap2_18", "card_512_gap1_18", "card_512_gaps_clk"};
+#define NCARD7 (sizeof card_names7 / sizeof card_names7[0])
+
+/* a row of a time in bus ticks (sdk/arm9 main.c's abs_row) */
+static void abs_row(int cpu, unsigned idx, const char *name, const char *place, u32 lo, u32 hi)
+{
+    put_u((u32)cpu);
+    put_c(',');
+    put_u(idx);
+    put_c(',');
+    put_s(name);
+    put_s(",none,");
+    put_s(place);
+    put_s(",warm,-,1,00000000,00000000,");
+    put_u(lo);
+    put_c(',');
+    put_u(hi);
+    put_c(',');
+    put_d((s32)lo * 100);
+    put_c(',');
+    put_d((s32)lo * (cpu == 9 ? 200 : 100));
+    flush_line();
+}
+
+/* contend.c's hooks (sdk/arm9 main.c's): a code kernel runs in place with the instruction cache off for
+   main RAM, as run9 runs PL_UNC cases */
+static mpu_save ct_mpu;
+static void ct_prep9(unsigned k) { mpu_test_on(&ct_mpu, AT_CB00, ct9_code[k]); }
+static void ct_unprep9(void) { mpu_test_off(&ct_mpu); }
+static void ct_k9(unsigned k, unsigned n)
+{
+    g_kf = (kfn *)((u32)k9_fn[ct9_kernel[k]] ^ g_zero);
+    callk(n, (u32)reg_buf, (u32)reg_buf + 1024);
+}
+static hw_job7 *ct_send7(unsigned k7, int measured, u32 count, u32 dmabuf)
+{
+    hw_job7 *j = send7(0, 2);
+    j->arg[0] = k7;
+    j->arg[1] = (u32)measured;
+    j->arg[2] = count;
+    j->arg[3] = dmabuf;
+    go7();
+    return j;
+}
+static void ct_finish7(hw_job7 *j)
+{
+    (void)j;
+    finish7(false);
+}
+
+#include "contend.c"
+
+/* hwtest 3c's cases, as sdk/arm9 main.c runs them */
+__attribute__((noinline)) static void calls3c(void)
+{
+    for (unsigned i = 0; i < FX_KINDS; i++) {
+        u32 lo, hi;
+        fx_measure(i, main_buf, &lo, &hi);
+        abs_row(9, 6000 + i, fx_name[i], "main", lo, hi);
+    }
+    for (unsigned i = 0; i < FX_KINDS; i++) {
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (!fx_last7(i) && run7(NCASES7 + NSWI + NCARD7 + WK_KINDS + i, &t16, &t48, &ka, &db))
+            abs_row(7, 6000 + i, fx_name[i], "wram", t16, t48);
+    }
+    R32(0x04000208) = 0;
+    ct_all(dma_buf);
+    for (unsigned i = 0; i < FX_KINDS; i++) {
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (fx_last7(i) && run7(NCASES7 + NSWI + NCARD7 + WK_KINDS + i, &t16, &t48, &ka, &db))
+            abs_row(7, 6000 + i, fx_name[i], "wram", t16, t48);
+    }
+    for (unsigned i = 0; i < NSWI; i++) {
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (sw_last7(i) && run7(NCASES7 + i, &t16, &t48, &ka, &db))
+            extra(7, 1000 + i, sw_name[sw_cases[i].kind], "main", "wram", t16, t48, ka, db);
+    }
+}
+
+/* the BIOS call, cartridge and wake cases, as sdk/arm9 main.c runs them after the kernels */
+__attribute__((noinline)) static void calls(void)
+{
+    put_s("# BIOS call and cartridge cases (idx 1000 on), wake cases (idx 3000 on): see sdk/arm9 main.c");
+    flush_line();
+    R32(0x04000208) = 0;
+    u32 dt = CP15_R("c9, c1, 0") & ~0xFFFu;
+    R32(dt + 0x3FFC) = (u32)idle_irq;
+    __asm__ volatile("mrs r0, cpsr\n bic r0, r0, #0x80\n msr cpsr_c, r0" ::: "r0", "memory");
+    for (unsigned k = 0; k < WK_KINDS; k++) {
+        u32 lo, hi;
+        wake_measure(k, (vu32 *)(dt + 0x3FFC), (vu32 *)(dt + 0x3FF8), &lo, &hi);
+        wake_row(9, k, "main", lo, hi);
+    }
+    for (unsigned i = 0; i < NSWI; i++) {
+        u32 ts, tl, chk;
+        sw_measure(i, sw_cases[i].dst ? (u8 *)0x06800000 : main_buf, &ts, &tl, &chk);
+        dcache_flush_all();
+        extra(9, 1000 + i, sw_name[sw_cases[i].kind], sw_cases[i].dst ? "vram" : "main", "main", ts, tl, chk, sw_units(i));
+    }
+    for (unsigned j = 0; j < NSWI + NCARD7 + WK_KINDS; j++) {
+        unsigned i = (j + NSWI) % (NSWI + NCARD7 + WK_KINDS);
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (i < NSWI && sw_last7(i))
+            continue;
+        if (!run7(NCASES7 + i, &t16, &t48, &ka, &db))
+            continue;
+        if (i >= NSWI + NCARD7) {
+            wake_row(7, i - NSWI - NCARD7, "wram", t16, t48);
+            continue;
+        }
+        bool card = i >= NSWI;
+        extra(7, card ? 2000 + i - NSWI : 1000 + i, card ? card_names7[i - NSWI] : sw_name[sw_cases[i].kind],
+              card ? "card" : sw_cases[i].dst ? "wram7" : "main", "wram", t16, t48, ka, db);
+    }
+}
+
+/* everything after the kernel cases: VRAM bank A for the ARM9's VRAM destinations, and the cases */
+__attribute__((noinline)) static void hw_late(void)
+{
+    *(vu8 *)0x04000240 = 0x80;
+    calls();
+    calls3c();
+}
+#endif
+
 __attribute__((naked, section(".text.start"))) void _start(void)
 {
     __asm__ volatile(
@@ -330,6 +580,11 @@ __attribute__((naked, section(".text.start"))) void _start(void)
         "ldr r0, =0x02\n mcr p15, 0, r0, c3, c0, 0\n"
         "ldr r0, =0x33333333\n mcr p15, 0, r0, c5, c0, 3\n mcr p15, 0, r0, c5, c0, 2\n"
         "ldr r0, =0x0005507d\n mcr p15, 0, r0, c1, c0, 0\n"
+#ifdef HWTEST_CALLS
+        "msr cpsr_c, #0xd2\n ldr sp, =0x02ff3fa0\n"
+        "msr cpsr_c, #0xd3\n ldr sp, =0x02ff3fc0\n"
+        "msr cpsr_c, #0xdf\n"
+#endif
         "ldr sp, =0x02ff3f00\n"
         "b main\n");
 }
@@ -359,6 +614,15 @@ int main(void)
     flush_line();
     put_s("cpu,idx,name,region,place,mode,attr,may_differ_dsi_3ds,kaddr,dbase,t16,t48,bus_x100,cpu_x100");
     flush_line();
+#ifdef HWTEST_CALLS
+    R32(0x023FFE00) = (u32)&job_mem;
+    dcache_flush_all();
+    {
+        u32 t16, t48, ka, db;
+        run7(0, &t16, &t48, &ka, &db);
+    }
+    hw_late();
+#else
     for (unsigned i = 0; i < NCASES9; i++) {
         u32 t16 = 0, t48 = 0, ka = 0, db = 0;
         bool ok = run9(&cases9[i], &t16, &t48, &ka, &db);
@@ -371,6 +635,7 @@ int main(void)
         bool ok = run7(i, &t16, &t48, &ka, &db);
         result(7, i, &cases7[i], ok, t16, t48, ka, db);
     }
+#endif
     put_s("# end");
     flush_line();
     R16(0x04000180) = 15 << 8;

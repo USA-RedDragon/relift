@@ -10,11 +10,12 @@
 #include "hwtest.h"
 #include "cases.h"
 #include "k9tab.h"
+#include "ct.h"
 #include "swi.c"
 #include "wake.c"
 #include "guard.c"
 
-#define VERSION "relift hwtest 3"
+#define VERSION "relift hwtest 3c"
 #ifdef HWTEST_DSI
 #define VARIANT "dsi"
 #else
@@ -28,6 +29,7 @@ static u32 itcm_data[512] __attribute__((section(".itcm"), aligned(32)));
  * the consoles ran them (0x02054000), past the loadlist bytes the ARM9 binary carries. */
 static u8 reg_buf[32768] __attribute__((aligned(65536)));
 static u8 *main_buf, *a7_buf;
+static u8 *dma_buf;
 static hw_job7 *job;
 static FILE *out;
 static int test_region = -1;
@@ -238,16 +240,26 @@ static bool run9(const hw_case *c, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
 /* the ARM7 stopped answering (a case that never returns): the rest of its cases are skipped */
 static bool a7_lost;
 
-static bool run7(unsigned ci, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
+/* hands case ci to the ARM7 (mode as hw_job7's) */
+static hw_job7 *send7(unsigned ci, u32 mode)
 {
-    if (a7_lost)
-        return false;
     memset(job, 0, sizeof *job);
     job->ci = ci;
     job->mainbuf = (u32)a7_buf;
+    job->mode = mode;
+    return job;
+}
+
+static void go7(void)
+{
     armDCacheFlush(job, sizeof *job);
     pxiBeginReceive(PxiChannel_User0);
     pxiSend(PxiChannel_User0, (u32)job);
+}
+
+/* waits for the ARM7's answer to the job go7 sent */
+static bool finish7(unsigned ci)
+{
     for (u32 t0 = hw_now();;) {
         armDCacheInvalidate(job, sizeof *job);
         if (job->status)
@@ -260,11 +272,36 @@ static bool run7(unsigned ci, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
     }
     pxiEndReceive(PxiChannel_User0);
     armDCacheInvalidate(job, sizeof *job);
+    return job->status == 1;
+}
+
+/*
+ * Runs case ci on the ARM7. The ARM9 stays off main RAM until the ARM7 is done: it waits on IPCSYNC with
+ * interrupts off. Polling the job in main RAM instead (hwtest 3 and the ROMs before it) costs the ARM7's main
+ * RAM cases a share of the RAM in some of the runs, which the least of 5 runs mostly hides on the consoles
+ * (hwtest 3c timed both: idx 4200 on) but which a deterministic run does not.
+ */
+static bool run7(unsigned ci, u32 *t16, u32 *t48, u32 *kaddr, u32 *dbase)
+{
+    if (a7_lost)
+        return false;
+    send7(ci, 1);
+    u32 ime = REG_IME;
+    REG_IME = 0;
+    go7();
+    while ((*(vu16 *)0x04000180 & 15) != 10)
+        ;
+    *(vu16 *)0x04000180 = (u16)((*(vu16 *)0x04000180 & 0x4000) | 8 << 8);
+    while ((*(vu16 *)0x04000180 & 15) != 0)
+        ;
+    *(vu16 *)0x04000180 = (u16)(*(vu16 *)0x04000180 & 0x4000);
+    REG_IME = ime;
+    bool ok = finish7(ci);
     *t16 = job->t16;
     *t48 = job->t48;
     *kaddr = job->kaddr;
     *dbase = job->dbase;
-    return job->status == 1;
+    return ok;
 }
 
 static const char *const rg_name[] = {"none", "dtcm", "itcm", "main", "unc", "io", "vram", "pal", "oam", "wram7", "mx", "m2w"};
@@ -293,7 +330,8 @@ static void result(int cpu, unsigned i, const hw_case *c, bool ok, u32 t16, u32 
 /* the ARM7's cartridge case names, in its card_cases order */
 static const char *const card_names7[] = {"card_cmd", "card_4", "card_512", "card_4k", "card_cmd_slow", "card_4_slow",
                                           "card_512_slow", "card_cmd_game", "card_4_game", "card_512_game",
-                                          "card_4k_game", "card_512_game_slow"};
+                                          "card_4k_game", "card_512_game_slow", "card_512_gap2_18",
+                                          "card_4k_gap2_18", "card_512_gap1_18", "card_512_gaps_clk"};
 #define NCARD7 (sizeof card_names7 / sizeof card_names7[0])
 
 /* a BIOS call or cartridge row in the cases' CSV format */
@@ -321,14 +359,58 @@ static void sw_job9_run(void *p)
     sw_measure(j->i, j->dst, &j->ts, &j->tl, &j->chk);
 }
 
-/* a wake case row: the least and the most latency in bus ticks */
-static void wake_row(int cpu, unsigned k, const char *place, u32 lo, u32 hi)
+/* a row of a time in bus ticks (the least and the most of the runs): the wake and fixed-cost cases */
+static void abs_row(int cpu, unsigned idx, const char *name, const char *place, u32 lo, u32 hi)
 {
     s32 cpu100 = (s32)lo * (cpu == 9 ? 200 : 100);
-    line("%d,%u,%s,none,%s,warm,-,1,00000000,00000000,%lu,%lu,%ld,%ld\n", cpu, 3000 + k, wk_name[k], place,
+    line("%d,%u,%s,none,%s,warm,-,1,00000000,00000000,%lu,%lu,%ld,%ld\n", cpu, idx, name, place,
          (unsigned long)lo, (unsigned long)hi, (long)lo * 100, (long)cpu100);
-    printf("%d %-20.20s %5lu..%lu\n", cpu, wk_name[k], (unsigned long)lo, (unsigned long)hi);
+    printf("%d %-20.20s %5lu..%lu\n", cpu, name, (unsigned long)lo, (unsigned long)hi);
 }
+
+static void wake_row(int cpu, unsigned k, const char *place, u32 lo, u32 hi)
+{
+    abs_row(cpu, 3000 + k, wk_name[k], place, lo, hi);
+}
+
+/* contend.c's hooks: the ARM9's kernels in the test region (data uncached and unbuffered, or code there
+   uncached), and the ARM7's part handed over by job */
+static mpu_save ct_mpu;
+static void ct_prep9(unsigned k)
+{
+    if (ct9_code[k]) {
+        kfn *f = k9_fn[ct9_kernel[k]];
+        u32 len = (u32)k9_end[ct9_kernel[k]] - (u32)f;
+        memcpy(reg_buf + 16384, (const void *)f, len);
+        armDCacheFlush(reg_buf + 16384, len);
+    }
+    mpu_test_on(&ct_mpu, AT_CB00, ct9_code[k]);
+}
+static void ct_unprep9(void) { mpu_test_off(&ct_mpu); }
+static void ct_k9(unsigned k, unsigned n)
+{
+    kfn *f = ct9_code[k] ? (kfn *)(reg_buf + 16384) : k9_fn[ct9_kernel[k]];
+    f(n, (u32)reg_buf, (u32)reg_buf + 1024);
+}
+static hw_job7 *ct_send7(unsigned k7, int measured, u32 count, u32 dmabuf)
+{
+    hw_job7 *j = send7(0, 2);
+    j->arg[0] = k7;
+    j->arg[1] = (u32)measured;
+    j->arg[2] = count;
+    j->arg[3] = dmabuf;
+    go7();
+    return j;
+}
+static void ct_finish7(hw_job7 *j)
+{
+    (void)j;
+    finish7(0);
+    *(vu16 *)0x04000180 = (u16)(*(vu16 *)0x04000180 & 0x4000);
+}
+
+#include "contend.c"
+#include "fixed.c"
 
 /* startup marks without the console: the main engine's backdrop color, so a hang before the console
    shows a color instead of white (red: runtime started, blue: main entered) */
@@ -340,6 +422,10 @@ static void mark(u16 bgr555)
 }
 
 __attribute__((constructor(101))) static void early_mark(void) { mark(0x001F); }
+
+/* a build that bundles more measurements defines this: it runs after the timing cases, their file
+   closed, and need not return */
+void hw_after(void) __attribute__((weak));
 
 static void step(const char *s)
 {
@@ -374,6 +460,7 @@ int main(void)
     main_buf = memalign(32, 4096);
     a7_buf = memalign(32, 4096);
     job = memalign(32, sizeof *job);
+    dma_buf = memalign(32, 65536);
     memset(main_buf, 0x5A, 4096);
     memset(reg_buf, 0x5A, 32768);
     memset(a7_buf, 0x5A, 4096);
@@ -461,6 +548,8 @@ int main(void)
     for (unsigned j = 0; j < NSWI + NCARD7 + WK_KINDS; j++) {
         unsigned i = (j + NSWI) % (NSWI + NCARD7 + WK_KINDS);
         u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (i < NSWI && sw_last7(i))
+            continue;
         bool ok = run7(NCASES7 + i, &t16, &t48, &ka, &db);
         if (!ok)
             continue;
@@ -472,9 +561,39 @@ int main(void)
         extra(7, card ? 2000 + i - NSWI : 1000 + i, card ? card_names7[i - NSWI] : sw_name[sw_cases[i].kind],
               card ? "card" : sw_cases[i].dst ? "wram7" : "main", "wram", t16, t48, ka, db);
     }
+    step("hwtest 3c");
+    line("# hwtest 3c: fixed costs (idx 6000 on, see fixed.c), contention (4000 on, see contend.c)\n");
+    for (unsigned i = 0; i < FX_KINDS; i++) {
+        u32 lo, hi;
+        fx_measure(i, main_buf, &lo, &hi);
+        abs_row(9, 6000 + i, fx_name[i], "main", lo, hi);
+    }
+    for (unsigned i = 0; i < FX_KINDS; i++) {
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (!fx_last7(i) && run7(NCASES7 + NSWI + NCARD7 + WK_KINDS + i, &t16, &t48, &ka, &db))
+            abs_row(7, 6000 + i, fx_name[i], "wram", t16, t48);
+    }
+    ct_all(dma_buf);
+    for (unsigned i = 0; i < FX_KINDS; i++) {
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (fx_last7(i) && run7(NCASES7 + NSWI + NCARD7 + WK_KINDS + i, &t16, &t48, &ka, &db))
+            abs_row(7, 6000 + i, fx_name[i], "wram", t16, t48);
+    }
+    for (unsigned i = 0; i < NSWI; i++) {
+        u32 t16 = 0, t48 = 0, ka = 0, db = 0;
+        if (!sw_last7(i))
+            continue;
+        if (run7(NCASES7 + i, &t16, &t48, &ka, &db))
+            extra(7, 1000 + i, sw_name[sw_cases[i].kind], "main", "wram", t16, t48, ka, db);
+    }
     line("# end\n");
     if (out)
         fclose(out);
+    if (hw_after) {
+        printf("\nTiming done: %s %s\nNext part starts now.\n", path ? "wrote" : "could not write",
+               path ? path : "the file");
+        hw_after();
+    }
     printf("\nDone: %u ARM9 + %u ARM7 cases.\n%s %s\nPress START to exit.\n", NCASES9, NCASES7,
            path ? "Wrote" : "Could not write", path ? path : "the file");
     while (pmMainLoop()) {

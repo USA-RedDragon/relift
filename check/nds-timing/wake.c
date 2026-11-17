@@ -47,6 +47,33 @@ static const char *const wk_name[WK_KINDS] = {"halt_wake", "intrwait_wake", "vbl
 #define FRAME_TICKS 560190u
 #define WAKE_X 2000u
 
+#ifdef HWTEST_BARE
+/* bare.S: the timed stretch of wake_one as the SDK build compiled it */
+u32 wake_go(unsigned k);
+
+static u32 wake_one(unsigned k)
+{
+    u32 t;
+    if (k == WK_VBLANK) {
+        REG_IME_W = 0;
+        REG_IE_W = 1;
+        DISPSTAT_W |= 1u << 3;
+        t = wake_go(k);
+    } else {
+        REG_IE_W = 1u << 5;
+        TM2_C = 0;
+        TM2_L = (u16)(0x10000u - WAKE_X);
+        REG_IF_W = ~0u;
+        u32 cpsr = k == WK_HALT ? cpsr_irq_off() : 0;
+        t = wake_go(k);
+        if (k == WK_HALT)
+            cpsr_restore(cpsr);
+        TM2_C = 0;
+    }
+    REG_IF_W = ~0u;
+    return t;
+}
+#else
 /* one run of case k with the vector at vec: ticks from the source to the return */
 static u32 wake_one(unsigned k)
 {
@@ -85,6 +112,7 @@ static u32 wake_one(unsigned k)
     REG_IF_W = ~0u;
     return back - due;
 }
+#endif
 
 /* runs case k HW_REPS times: the least and the most latency */
 static void wake_measure(unsigned k, vu32 *vector, vu32 *flags, u32 *lo, u32 *hi)

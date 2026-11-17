@@ -14,7 +14,14 @@ iterations, timed by the cascaded timers at 33.513982 MHz.
   run-length data in the BIOS's formats); `swi.c`, `svc.s`, `card.c` and
   `wake.c` are the BIOS call, cartridge transfer and interrupt wake cases
   the SDK build runs after the kernels (CSV rows from idx 1000, 2000 and
-  3000; the header lines say what their columns hold).
+  3000; the header lines say what their columns hold). Hwtest 3c adds
+  `fixed.c` (the fixed cost of one call, idx 6000), more inputs and calls
+  in `swi.c` (idx 1024 on), the ARM7's BIOS calls and main RAM kernels
+  again with the ARM9 off main RAM (idx 5000 and 4200 on), and
+  `contend.c`: both CPUs on main RAM at once, each pair timed alone and
+  together, with either main RAM priority (idx 4000 on). The SDK build's
+  `hw_after` hook lets a bundling build run more after the timing file is
+  closed.
 - `sdk/` is the devkitPro build that ran on the consoles (`make` gives
   `relift-hwtest-ntr.nds`, a plain DS cartridge that refuses DSi mode and
   the 133 MHz ARM9 clock, and `relift-hwtest-dsi.nds`). It writes
@@ -25,13 +32,22 @@ iterations, timed by the cascaded timers at 33.513982 MHz.
   program in shared work RAM) and prints the CSV through the no$gba debug
   port. In melonDS it gives the SDK build's numbers in every case it runs.
   It does not yet run the 9 ARM9 cases whose code is copied to the
-  instruction TCM.
+  instruction TCM. `build.py OUT.nds --calls` builds the cartridge that
+  runs the BIOS call, cartridge, wake, fixed-cost and contention cases
+  instead of the kernels; `bare.S` holds the SDK build's compiled code of
+  the parts whose instructions are timed (callbacks, call loops, the
+  ARM7's transfer loop, the wake sequences), so both builds time the same
+  instructions.
 - `hw.csv` holds the results of three consoles in DS mode: a 3DS through a
   slot-1 cartridge, and a DSi twice. They agree on all but 11 cases (the
   `may_differ` column marks the cases that depend on main RAM or the MPU).
   Of those 11, 7 are palette accesses that contend with the display, and
   2 are straight-line instruction cache loops whose steady state depends
   on the round-robin counter the code before them leaves.
+- `hw.csv` also holds hwtest 3's BIOS call, cartridge and wake cases (idx
+  1000 on) from a 3DS and a DSi, which agree on all 66; `compare.py RUN.csv
+  --calls` checks a run of the `--calls` cartridge against them (per output
+  unit, transfer or wake, not the calls' fixed parts).
 - `compare.py RUN.csv` checks a run against `hw.csv`. `open.csv` lists the
   cases relift does not reproduce yet, with what it gives and the open
   question.
@@ -55,4 +71,5 @@ All 17 run and print in melonDS (clang build); the devkitPro build with
 
 `relift/tests/e2e_nds_timing.rs` builds the devkitPro ROM (with
 `DEVKITARM` set; otherwise the clang one, checked with `compare.py
---clang`), lifts and runs it, and runs `compare.py`.
+--clang`), lifts and runs it, and runs `compare.py`; a second test does
+the same with the clang calls cartridge (`compare.py --calls`).

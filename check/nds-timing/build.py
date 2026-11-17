@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""build.py OUT.nds [--probes]: the timing test cartridge, built with clang and ld.lld: h9.c and the ARM9
+"""build.py OUT.nds [--probes] [--calls]: the timing test cartridge, built with clang and ld.lld: h9.c and the ARM9
 kernels at 0x02000000; h7.c and the ARM7 kernels linked at 0x037F8000 (shared work RAM, where the
 SDK build runs them) and copied there by a boot stub at 0x02380000 with the BIOS's CpuFastSet. The
-kernels and case tables come from gen.py, written next to OUT.nds."""
+kernels and case tables come from gen.py, written next to OUT.nds. With --calls the cartridge runs the
+BIOS call, cartridge, wake, fixed-cost and contention cases (swi.c, card.c, wake.c, fixed.c, contend.c)
+instead of the kernel cases, whose build stays as it was without them."""
 import os
 import subprocess
 import sys
@@ -51,16 +53,22 @@ def put32(r, at, v):
 
 def main():
     out = os.path.abspath(sys.argv[1])
+    with_calls = "--calls" in sys.argv[2:]
     a7base = 0x037F8000
-    work = os.path.join(os.path.dirname(out), "work")
+    work = os.path.join(os.path.dirname(out), "work-calls" if with_calls else "work")
     os.makedirs(work, exist_ok=True)
     subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen.py"), work] + sys.argv[2:3], check=True,
                    stdout=subprocess.DEVNULL)
     subprocess.run([sys.executable, "-I", os.path.join(HERE, "gencopy.py"), work], check=True)
-    a9 = binary("h9", [os.path.join(HERE, "h9.c"), os.path.join(work, "k9.s")], "armv5te-none-eabi",
-                "arm946e-s", 0x02000000, work, ["-DARM9"])
-    a7 = binary("h7", [os.path.join(HERE, "h7.c"), os.path.join(work, "k7.s")], "armv4t-none-eabi",
-                "arm7tdmi", a7base, work, ["-DARM7"])
+    extra, defs = [], []
+    if with_calls:
+        subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_swi.py"), work], check=True,
+                       stdout=subprocess.DEVNULL)
+        extra, defs = [os.path.join(HERE, "svc.s"), os.path.join(HERE, "bare.S")], ["-DHWTEST_CALLS"]
+    a9 = binary("h9", [os.path.join(HERE, "h9.c"), os.path.join(work, "k9.s"), *extra], "armv5te-none-eabi",
+                "arm946e-s", 0x02000000, work, ["-DARM9", *defs])
+    a7 = binary("h7", [os.path.join(HERE, "h7.c"), os.path.join(work, "k7.s"), *extra], "armv4t-none-eabi",
+                "arm7tdmi", a7base, work, ["-DARM7", *defs])
     # a boot stub in main RAM waits for the ARM9 to give it the shared work RAM, then copies the
     # ARM7 program there with the BIOS's CpuFastSet (constant source, destination and length)
     a7 += bytes(-len(a7) % 32)

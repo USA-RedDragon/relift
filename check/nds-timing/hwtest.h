@@ -39,6 +39,11 @@ typedef struct {
     u32 kaddr;    /* where the kernel ran */
     u32 dbase;    /* data base address */
     u32 status;   /* 1 done, 2 skipped */
+#if defined(HWTEST_CALLS) || !defined(HWTEST_BARE)
+    u32 mode;     /* 0 plain (bare build); 1 the ARM9 waits on IPCSYNC, off main RAM (SDK build); 2 contention */
+    u32 arg[4];   /* contention: the ARM7's kernel or CT_IDLE or CT_DMA, measured (1) or background (0),
+                     the background count, the DMA buffer */
+#endif
 } __attribute__((aligned(32))) hw_job7;
 
 #define HW_N1 16

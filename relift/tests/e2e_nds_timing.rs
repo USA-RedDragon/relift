@@ -11,7 +11,9 @@
 //! build (`build.py`, with clang, ld.lld and llvm-objcopy), which runs every
 //! case but the ones whose code is copied to the instruction TCM, and
 //! `compare.py --clang` leaves those out. Skipped with a note when neither
-//! can be built, or python3 is not on `PATH`.
+//! can be built, or python3 is not on `PATH`. A second test runs the clang
+//! calls cartridge (`build.py --calls`: the BIOS calls, the slot-1
+//! transfers and the BIOS waits' wake latency) and `compare.py --calls`.
 
 mod tiny;
 
@@ -68,8 +70,9 @@ fn sdk_rom(check: &Path, root: &Path) -> Option<PathBuf> {
     Some(src.join("sdk/relift-hwtest-ntr.nds"))
 }
 
-/// The clang build of the ROM, or `None` without its tools.
-fn clang_rom(check: &Path, root: &Path) -> Option<PathBuf> {
+/// The clang build of the ROM (the calls cartridge when `calls`), or `None`
+/// without its tools.
+fn clang_rom(check: &Path, root: &Path, calls: bool) -> Option<PathBuf> {
     if !["clang", "ld.lld", "llvm-objcopy"]
         .iter()
         .all(|t| relift_build::find_tool(t).is_some())
@@ -78,37 +81,19 @@ fn clang_rom(check: &Path, root: &Path) -> Option<PathBuf> {
     }
     let rom = root.join("rom/timing.nds");
     std::fs::create_dir_all(root.join("rom")).expect("the ROM dir is creatable");
-    let out = relift_proc::command("python3")
-        .arg("-I")
-        .arg(check.join("build.py"))
-        .arg(&rom)
-        .output()
-        .expect("python3 runs");
+    let mut build = relift_proc::command("python3");
+    build.arg("-I").arg(check.join("build.py")).arg(&rom);
+    if calls {
+        build.arg("--calls");
+    }
+    let out = build.output().expect("python3 runs");
     ok(&out, "build.py");
     Some(rom)
 }
 
-#[test]
-fn every_timing_case_runs_as_on_the_consoles() {
-    if relift_build::find_tool("python3").is_none() {
-        eprintln!("skipped: python3 is not on PATH");
-        return;
-    }
-    let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
-    let root = tiny::scratch("e2e-nds-timing");
-    let prebuilt = std::env::var_os("RELIFT_NDS_TIMING_ROM").map(PathBuf::from);
-    let (rom, clang) = match prebuilt.or_else(|| sdk_rom(&check, &root)) {
-        Some(r) => (r, false),
-        None => match clang_rom(&check, &root) {
-            Some(r) => (r, true),
-            None => {
-                eprintln!(
-                    "skipped: neither devkitPro (DEVKITARM) nor clang, ld.lld and llvm-objcopy"
-                );
-                return;
-            }
-        },
-    };
+/// Lifts and runs rom under root and checks its cases with `compare.py`
+/// (`flag`: its build, as compare.py names it).
+fn run_and_compare(check: &Path, root: &Path, rom: &Path, flag: Option<&str>) {
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let cache = root.join("cache").display().to_string();
@@ -143,9 +128,48 @@ fn every_timing_case_runs_as_on_the_consoles() {
     relift_cache::write_if_changed(&run, csv.as_bytes()).expect("the run is writable");
     let mut compare = relift_proc::command("python3");
     compare.arg("-I").arg(check.join("compare.py")).arg(&run);
-    if clang {
-        compare.arg("--clang");
+    if let Some(f) = flag {
+        compare.arg(f);
     }
     let out = compare.output().expect("python3 runs");
     ok(&out, "compare.py");
+}
+
+#[test]
+fn every_timing_case_runs_as_on_the_consoles() {
+    if relift_build::find_tool("python3").is_none() {
+        eprintln!("skipped: python3 is not on PATH");
+        return;
+    }
+    let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
+    let root = tiny::scratch("e2e-nds-timing");
+    let prebuilt = std::env::var_os("RELIFT_NDS_TIMING_ROM").map(PathBuf::from);
+    let (rom, flag) = match prebuilt.or_else(|| sdk_rom(&check, &root)) {
+        Some(r) => (r, None),
+        None => match clang_rom(&check, &root, false) {
+            Some(r) => (r, Some("--clang")),
+            None => {
+                eprintln!(
+                    "skipped: neither devkitPro (DEVKITARM) nor clang, ld.lld and llvm-objcopy"
+                );
+                return;
+            }
+        },
+    };
+    run_and_compare(&check, &root, &rom, flag);
+}
+
+#[test]
+fn bios_calls_cartridge_and_wakes_take_the_consoles_time() {
+    if relift_build::find_tool("python3").is_none() {
+        eprintln!("skipped: python3 is not on PATH");
+        return;
+    }
+    let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
+    let root = tiny::scratch("e2e-nds-timing-calls");
+    let Some(rom) = clang_rom(&check, &root, true) else {
+        eprintln!("skipped: clang, ld.lld or llvm-objcopy is not on PATH");
+        return;
+    };
+    run_and_compare(&check, &root, &rom, Some("--calls"));
 }
