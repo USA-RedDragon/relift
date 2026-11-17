@@ -876,11 +876,21 @@ pub(crate) fn entry(c: &mut Ctx, main: u32) -> Res<u32> {
         fallback::enter(c, lane, &vars)?;
     }
     match c.stage {
+        Stage::Task if compute => {
+            // Workgroup memory starts undefined and the whole stage buffer
+            // goes to the task record: zero it so every host stores the same.
+            let var = c.payload_var();
+            let n = c.m.c_u32(c.io.mesh.pipe.payload_words());
+            let step = c.m.c_u32(lanes);
+            c.counted_loop(vars[0], lane, n, step, |c, i| {
+                let p = c.elem_ptr(var, WORKGROUP, i);
+                c.m.emit_void(op::STORE, &[p, zero]);
+            });
+        }
         Stage::Task => {
             let var = c.payload_var();
-            let class = if compute { WORKGROUP } else { TASK_PAYLOAD };
             c.if_then(lane0, |c| {
-                let p = c.elem_ptr(var, class, one);
+                let p = c.elem_ptr(var, TASK_PAYLOAD, one);
                 c.m.emit_void(op::STORE, &[p, zero]);
             });
         }
