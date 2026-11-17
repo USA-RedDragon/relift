@@ -262,7 +262,7 @@ uint64_t rl_nds_irq_at(const rl_nds *m, unsigned cpu);
  * order and the other CPU and the events run until a request wakes it. Its
  * clock then reads the later of its own tick and the request's tick plus
  * the IRQ delay. Returns true when woken, false when nothing could wake it
- * (IE is 0, or the other CPU is gone and no event is queued).
+ * (the other CPU is gone and no event is queued).
  */
 bool rl_nds_halt(rl_nds *m, unsigned cpu);
 /**
