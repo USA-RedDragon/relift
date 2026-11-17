@@ -760,3 +760,41 @@ fn vectors_a_boot_copies_to_a_mirror_of_the_irq_entry_are_an_interrupt_root() {
         r.functions.keys().collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn an_image_word_naming_code_in_a_copy_is_a_function_in_that_copy() {
+    let mut m = Machine::new(Profile::V5te);
+    let ram = 0x02F0_0000;
+    let pool = BASE + 0x80;
+    let src = BASE + 0x100;
+    m.arm(
+        BASE,
+        &[
+            a_ldr_lit(0, BASE, pool),
+            a_ldr_lit(1, BASE + 4, pool + 4),
+            0xE3A0_2004,
+            0xE490_3004,
+            0xE481_3004,
+            0xE252_2001,
+            0x1AFF_FFFB,
+            a_ldr_lit(0, BASE + 28, pool + 4),
+            0xE12F_FF30,
+            a_ldr_lit(0, BASE + 36, pool + 8),
+            0xE580_0000,
+            A_BX_LR,
+        ],
+    );
+    m.arm(pool, &[src, ram, ram + 8]);
+    m.arm(src, &[A_BX_LR, 0, A_MOV_R0_1, A_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    let f = r
+        .functions
+        .iter()
+        .find(|(l, _)| l.addr == ram + 8 && l.copy.is_some());
+    assert_eq!(
+        f.map(|(_, f)| f.origin),
+        Some(Origin::AddressTaken),
+        "{:?}",
+        r.functions.keys().collect::<Vec<_>>()
+    );
+}

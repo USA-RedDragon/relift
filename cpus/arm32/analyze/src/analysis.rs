@@ -260,7 +260,8 @@ impl<'a> Driver<'a> {
 
     /// The code addresses discovered code takes: odd words in the image
     /// or in a RAM copy (as the copy's own code reads them) that
-    /// discovered code reads as constants (Thumb functions), and the
+    /// discovered code reads as constants (Thumb functions, in the image or
+    /// in the copies that hold them), and the
     /// tables of such words a constant read points at; with
     /// [`crate::Options::arm_pointers`] the even words it reads too (ARM
     /// functions), and with [`crate::Options::scan_words`] every word of
@@ -314,11 +315,17 @@ impl<'a> Driver<'a> {
                     if platform.code_addr(t) {
                         cands.insert(Cand::taken(t, thumb));
                     } else {
-                        cands.extend(self.copy_cands(c, t, thumb));
+                        cands.extend(self.copy_cands(Some(c), t, thumb));
                     }
                 }
             }
             let Some(v) = word(a) else { continue };
+            if v & 1 == 1 && !platform.code_addr(v & !1) {
+                cands.extend(self.copy_cands(None, v & !1, true));
+            }
+            if opts.arm_pointers && v & 3 == 0 && !platform.code_addr(v) {
+                cands.extend(self.copy_cands(None, v, false));
+            }
             if v & 1 == 1 && platform.code_addr(v & !1) {
                 cands.insert(Cand::taken(v & !1, true));
             }
@@ -489,16 +496,16 @@ impl<'a> Driver<'a> {
             .collect()
     }
 
-    /// The candidates for a code address `t` in RAM read from copy `c`:
-    /// in `c` when it holds `t`, else in every copy that does.
-    fn copy_cands(&self, c: u16, t: u32, thumb: bool) -> Vec<Cand> {
+    /// The candidates for a code address `t` in RAM read from copy `c` or
+    /// from the image: in `c` when it holds `t`, else in every copy that
+    /// does.
+    fn copy_cands(&self, c: Option<u16>, t: u32, thumb: bool) -> Vec<Cand> {
         if !self.image.is_ram(t) {
             return Vec::new();
         }
-        let copies = if self.image.holds(c, t) {
-            vec![c]
-        } else {
-            self.image.copies_at(t)
+        let copies = match c {
+            Some(c) if self.image.holds(c, t) => vec![c],
+            _ => self.image.copies_at(t),
         };
         copies
             .into_iter()
