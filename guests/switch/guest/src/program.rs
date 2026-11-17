@@ -248,7 +248,7 @@ fn reloc_targets(
     let mut out = Vec::new();
     for r in relocs(img, dynamic) {
         match r {
-            Reloc::Value(v) => out.push(v),
+            Reloc::Value { value, .. } => out.push(value),
             Reloc::Symbol {
                 at,
                 sym,
@@ -275,9 +275,9 @@ fn reloc_targets(
 
 /// One relocation, as image offsets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Reloc {
-    /// A relative relocation storing this value.
-    Value(u64),
+pub(crate) enum Reloc {
+    /// A relative relocation storing `value` at `at`.
+    Value { at: u64, value: u64 },
     /// A symbol's address (plus `addend`) stored at `at`.
     Symbol {
         at: u64,
@@ -289,7 +289,7 @@ enum Reloc {
 
 /// The relocations of the module whose dynamic section is at image offset
 /// `dynamic`.
-fn relocs(img: &[u8], dynamic: usize) -> Vec<Reloc> {
+pub(crate) fn relocs(img: &[u8], dynamic: usize) -> Vec<Reloc> {
     let mut tables = Vec::new();
     let (mut rela, mut relasz, mut jmprel, mut pltsz) = (None, 0, None, 0);
     let (mut relr, mut relrsz) = (None, 0);
@@ -315,7 +315,11 @@ fn relocs(img: &[u8], dynamic: usize) -> Vec<Reloc> {
     }
     let mut out = Vec::new();
     if let Some(r) = relr {
-        out.extend(relr_targets(img, r, relrsz).into_iter().map(Reloc::Value));
+        out.extend(
+            relr_slots(img, r, relrsz)
+                .into_iter()
+                .map(|(at, value)| Reloc::Value { at, value }),
+        );
     }
     for (start, size) in tables {
         for i in 0..size / 24 {
@@ -328,7 +332,10 @@ fn relocs(img: &[u8], dynamic: usize) -> Vec<Reloc> {
             let sym = (info >> 32) as usize;
             let kind = match info as u32 {
                 R_AARCH64_RELATIVE => {
-                    out.push(Reloc::Value(addend));
+                    out.push(Reloc::Value {
+                        at: off,
+                        value: addend,
+                    });
                     continue;
                 }
                 R_AARCH64_ABS64 => SlotKind::Data,
@@ -412,7 +419,7 @@ pub fn linkage(p: &Placed) -> Linkage {
     }
     for r in relocs(&p.nso.image, m.dynamic as usize) {
         match r {
-            Reloc::Value(v) => out.values.push(p.base.wrapping_add(v)),
+            Reloc::Value { value, .. } => out.values.push(p.base.wrapping_add(value)),
             Reloc::Symbol {
                 at,
                 sym,
@@ -461,7 +468,17 @@ pub fn bound_slots(placed: &[Placed]) -> Vec<BTreeMap<u64, u64>> {
 
 /// The values the packed relative relocations (`DT_RELR`) at image offset
 /// `start` adjust: each relocated word holds its target as an image offset.
+#[cfg(test)]
 fn relr_targets(img: &[u8], start: u64, size: u64) -> Vec<u64> {
+    relr_slots(img, start, size)
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect()
+}
+
+/// The words the packed relative relocations at image offset `start`
+/// adjust, as (image offset, the target it holds as an image offset).
+fn relr_slots(img: &[u8], start: u64, size: u64) -> Vec<(u64, u64)> {
     let mut out = Vec::new();
     let mut at: u64 = 0;
     let word = |o: u64| usize::try_from(o).ok().and_then(|o| u64_at(img, o));
@@ -470,12 +487,13 @@ fn relr_targets(img: &[u8], start: u64, size: u64) -> Vec<u64> {
             break;
         };
         if e & 1 == 0 {
-            out.extend(word(e));
+            out.extend(word(e).map(|v| (e, v)));
             at = e + 8;
         } else {
             for bit in 1..64 {
                 if e >> bit & 1 == 1 {
-                    out.extend(word(at + (bit - 1) * 8));
+                    let o = at + (bit - 1) * 8;
+                    out.extend(word(o).map(|v| (o, v)));
                 }
             }
             at += 63 * 8;
