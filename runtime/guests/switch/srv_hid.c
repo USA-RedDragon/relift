@@ -702,6 +702,7 @@ static const rl_ipc_cmd hid_cmds[] = {
     RL_SRV_STUB(209, "BeginPermitVibrationSession"),
     RL_SRV_STUB(210, "EndPermitVibrationSession"),
     STUB_OUT(211, "IsVibrationDeviceMounted", out_true),
+    RL_SRV_STUB(214, "SendVibrationValuesEnqueued"),
     RL_SRV_STUB(300, "ActivateConsoleSixAxisSensor"),
     RL_SRV_STUB(301, "StartConsoleSixAxisSensor"),
     RL_SRV_STUB(302, "StopConsoleSixAxisSensor"),
@@ -739,6 +740,7 @@ static const rl_ipc_cmd hid_cmds[] = {
     { 1001, "GetNpadCommunicationMode", get_comm_mode },
     RL_SRV_STUB(1002, "SetTouchScreenConfiguration"),
     RL_SRV_STUB(1004, "SetTouchScreenResolution"),
+    RL_SRV_STUB(3139, "InitializeNmouse"),
 };
 
 static void hid_destroy(void *state)
