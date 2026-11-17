@@ -1429,6 +1429,9 @@ fn lift_and_emit(
             )));
         }
         prog.push(built.c_file);
+        if let Some(c) = crate::nvndriver::write(&placed, cpu, &cdir)? {
+            prog.push(c);
+        }
     }
     for f in program::program_files(
         &placed,

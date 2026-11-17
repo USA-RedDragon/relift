@@ -33,6 +33,7 @@ pub mod mods;
 pub mod n64;
 pub mod n64_picture;
 pub mod nds;
+pub mod nvndriver;
 pub mod parallel_rdp;
 pub mod paths;
 pub mod push;

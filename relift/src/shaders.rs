@@ -228,7 +228,7 @@ fn c_text(dir: &Path) -> String {
 }
 
 /// `s` as a C string literal.
-fn c_string(s: &str) -> String {
+pub(crate) fn c_string(s: &str) -> String {
     let mut t = String::from("\"");
     for b in s.bytes() {
         match b {
