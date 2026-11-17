@@ -184,10 +184,35 @@ uint32_t nvn_device_depth_mode(void);
 uint32_t nvn_device_origin_mode(void);
 /** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
 uint32_t *nvn_shader_spirv(const char *key, size_t *words);
+/** @brief An interface record of a translation (relift build's "RLSPI001" table). */
+typedef struct nvn_iface_rec {
+    /** @brief NVN_IFACE_*. */
+    uint32_t kind;
+    /** @brief The constant bank and byte offset of the bound texture handle. */
+    uint32_t bank, offset;
+    /** @brief The specialization constant id (kinds and dims). */
+    uint32_t spec;
+} nvn_iface_rec;
+/** @brief Record kinds: a bound handle's numeric kind constant, its dimension constant, guest memory reads, a bound handle. */
+#define NVN_IFACE_TEXTURE_KIND 0u
+#define NVN_IFACE_TEXTURE_DIM 1u
+#define NVN_IFACE_GLOBAL_MEMORY 2u
+#define NVN_IFACE_TEXTURE 3u
+/** @brief Up to max interface records of the translation with key to out; the count (0 without an entry). */
+uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max);
 /** @brief Shader stages a program holds. */
 #define NVN_PROGRAM_STAGES 6u
-/** @brief The GPU code addresses of the stages of the program at guest address prog (count in *n), or NULL. */
-const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n);
+/** @brief A stage's compiler constants (its constant bank c[1]): GPU address and bytes, 0 and 0 for none. */
+typedef struct nvn_consts {
+    uint64_t addr;
+    uint32_t size;
+} nvn_consts;
+/**
+ * @brief The GPU code addresses of the stages of the program at guest
+ * address prog (count in *n), or NULL; *consts (when consts is not NULL)
+ * gets each stage's compiler constants.
+ */
+const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts);
 
 /** @brief Bytes of an NVNtextureView. */
 #define NVN_VIEW_BYTES 16u

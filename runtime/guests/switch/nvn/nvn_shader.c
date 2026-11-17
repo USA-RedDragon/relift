@@ -57,7 +57,7 @@ typedef struct table {
     size_t len;
 } table;
 
-static table g_spv;
+static table g_spv, g_iface;
 
 static bool seek(FILE *f, uint64_t at)
 {
@@ -253,4 +253,23 @@ uint32_t *nvn_shader_spirv(const char *key, size_t *words)
     }
     *words = n;
     return w;
+}
+
+uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
+{
+    pthread_mutex_lock(&g_lock);
+    table *t = open_table(&g_iface, "table.rlspi", "RLSPI001", true);
+    pthread_mutex_unlock(&g_lock);
+    const uint8_t *e = t ? table_find(t, key) : NULL;
+    if (!e)
+        return 0;
+    uint32_t first = le32(e + 32), count = le32(e + 36);
+    size_t recs = TABLE_HEAD + (size_t)t->n * TABLE_ENTRY, room = (t->len - recs) / 16;
+    if (first > room || count > room - first)
+        return 0;
+    for (uint32_t i = 0; i < count && i < max; i++) {
+        const uint8_t *r = t->all + recs + 16 * ((size_t)first + i);
+        out[i] = (nvn_iface_rec){ le32(r), le32(r + 4), le32(r + 8), le32(r + 12) };
+    }
+    return count < max ? count : max;
 }

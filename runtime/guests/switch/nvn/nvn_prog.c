@@ -2,6 +2,11 @@
  * @file nvn_prog.c
  * @brief NVN2 programs: which compiled shader (GPU code address and control
  * section) each program holds, for the pipeline to find its translation by.
+ *
+ * A GLSLC control section (magic 0x98761234) gives the bytes of constant
+ * data the compiler placed in the code area (+0x3c) and their offset from
+ * the code's start (+0x40); the driver binds them as the stage's constant
+ * bank c[1].
  */
 #include "nvn_priv.h"
 
@@ -12,10 +17,13 @@ typedef struct shader_data {
     uint64_t control;
 } shader_data;
 
+#define CONTROL_MAGIC 0x98761234u
+
 typedef struct nvn_program {
     nvn_obj o;
     shader_data stages[NVN_PROGRAM_STAGES];
     uint64_t code[NVN_PROGRAM_STAGES];
+    nvn_consts consts[NVN_PROGRAM_STAGES];
     uint32_t n;
     uint64_t sets;
 } nvn_program;
@@ -49,6 +57,10 @@ uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
     for (uint32_t i = 0; i < p->n; i++) {
         char key[65];
         p->code[i] = p->stages[i].data;
+        p->consts[i] = (nvn_consts){ 0, 0 };
+        uint64_t ctl = p->stages[i].control;
+        if (ctl && rl_ld32(mem, ctl) == CONTROL_MAGIC && rl_ld32(mem, ctl + 0x3c))
+            p->consts[i] = (nvn_consts){ p->stages[i].data + rl_ld32(mem, ctl + 0x40), rl_ld32(mem, ctl + 0x3c) };
         if (!nvn_shader_note(mem, p->stages[i].data, key))
             return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx): stage %u at 0x%llx has no end",
                                             (unsigned long long)c->x[0], i, (unsigned long long)p->stages[i].data);
@@ -63,10 +75,12 @@ uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n)
+const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts)
 {
     nvn_program *p = (nvn_program *)nvn_obj_get(prog, NVN_PROGRAM);
     *n = p ? p->n : 0;
+    if (consts)
+        *consts = p ? p->consts : NULL;
     return p ? p->code : NULL;
 }
 

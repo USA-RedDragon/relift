@@ -18,6 +18,10 @@
 #define NVN_STAGES 6u
 /** @brief Uniform buffer slots of a stage (c[3] to c[16]). */
 #define NVN_UBO_SLOTS 14u
+/** @brief Bytes of a stage's driver bank c[2] the layer keeps: bound texture handles from 0x20, 8 bytes apart. */
+#define NVN_BANK2_BYTES 0x400u
+/** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
+#define NVN_BANK2_TEXTURES 0x20u
 #define NVN_VERTEX_BUFFERS 16u
 #define NVN_VERTEX_ATTRIBS 16u
 
@@ -36,6 +40,8 @@ typedef struct vimg {
         VkImageView view;
     } sub[16];
     uint32_t nsub;
+    /** @brief Sampling views by VkImageViewType (1D to cube array), made when first asked for. */
+    VkImageView views[7];
 } vimg;
 
 /** @brief A render target: one level and layer of an image. */
@@ -89,6 +95,10 @@ typedef struct nvn_gfx {
     bool scissor_set;
     /** @brief GPU code address of the program bound to each stage, 0 for none. */
     uint64_t code[NVN_STAGES];
+    /** @brief The compiler constants of each stage's program (its c[1]). */
+    nvn_consts consts[NVN_STAGES];
+    /** @brief Each stage's c[2] as the driver fills it. */
+    uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     struct {
         uint64_t addr, size;
     } ubo[NVN_STAGES][NVN_UBO_SLOTS], vb[NVN_VERTEX_BUFFERS];
@@ -145,6 +155,28 @@ bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t 
  */
 int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const uint64_t *args, unsigned nargs,
                   unsigned out_n, uint32_t *out, uint64_t *ret);
+/** @brief The host image of the texture at guest address tex, made and filled from its storage the first time; NULL after a stop. */
+vimg *nvn_vk_image(replay *r, uint64_t tex);
+/**
+ * @brief A view of v of type t: over all its levels and the layers t takes
+ * with the texture's swizzle (kept with v), or, given nv, with the levels,
+ * layers, swizzle and depth-stencil mode of that texture view (the caller's
+ * to destroy). NULL on failure.
+ */
+VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv);
+/** @brief Copies n host bytes into the arena (zero-filled to pad bytes); offset of the copy in *off. */
+bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
+/** @brief The layout of the texture set (set 2); VK_NULL_HANDLE when it cannot be made (nvn_texset.c). */
+VkDescriptorSetLayout nvn_texset_layout(void);
+/** @brief The texture set, to bind as set 2. */
+VkDescriptorSet nvn_texset(void);
+/**
+ * @brief Makes the texture set hold texture handle's texture (in each array
+ * its view type fits) and sampler; *kind gets its numeric kind (0 float,
+ * 1 signed, 2 unsigned) and *dim its dimension (the translator's Dim).
+ * Returns RL_OK, or RL_PENDING after a stop.
+ */
+int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim);
 /** @brief Frees what draws of the batch just finished held (descriptor sets); called after each wait. */
 void nvn_draw_reset(void);
 /** @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one. */

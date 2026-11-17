@@ -421,7 +421,35 @@ VkFormat nvn_vk_format(uint32_t f, VkImageAspectFlags *aspect)
     case 62: return VK_FORMAT_A2B10G10R10_UINT_PACK32;
     case 63: return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
     case 64: return VK_FORMAT_E5B9G9R9_UFLOAT_PACK32;
-    default: return VK_FORMAT_UNDEFINED;
+    case 65: return VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+    case 66: return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+    case 67: return VK_FORMAT_BC2_UNORM_BLOCK;
+    case 68: return VK_FORMAT_BC3_UNORM_BLOCK;
+    case 69: return VK_FORMAT_BC1_RGB_SRGB_BLOCK;
+    case 70: return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+    case 71: return VK_FORMAT_BC2_SRGB_BLOCK;
+    case 72: return VK_FORMAT_BC3_SRGB_BLOCK;
+    case 73: return VK_FORMAT_BC4_UNORM_BLOCK;
+    case 74: return VK_FORMAT_BC4_SNORM_BLOCK;
+    case 75: return VK_FORMAT_BC5_UNORM_BLOCK;
+    case 76: return VK_FORMAT_BC5_SNORM_BLOCK;
+    case 77: return VK_FORMAT_BC7_UNORM_BLOCK;
+    case 78: return VK_FORMAT_BC7_SRGB_BLOCK;
+    case 79: return VK_FORMAT_BC6H_SFLOAT_BLOCK;
+    case 80: return VK_FORMAT_BC6H_UFLOAT_BLOCK;
+    default:
+        if (f >= 121 && f < 149) {
+            static const VkFormat astc[] = {
+                VK_FORMAT_ASTC_4x4_UNORM_BLOCK,   VK_FORMAT_ASTC_5x4_UNORM_BLOCK,   VK_FORMAT_ASTC_5x5_UNORM_BLOCK,
+                VK_FORMAT_ASTC_6x5_UNORM_BLOCK,   VK_FORMAT_ASTC_6x6_UNORM_BLOCK,   VK_FORMAT_ASTC_8x5_UNORM_BLOCK,
+                VK_FORMAT_ASTC_8x6_UNORM_BLOCK,   VK_FORMAT_ASTC_8x8_UNORM_BLOCK,   VK_FORMAT_ASTC_10x5_UNORM_BLOCK,
+                VK_FORMAT_ASTC_10x6_UNORM_BLOCK,  VK_FORMAT_ASTC_10x8_UNORM_BLOCK,  VK_FORMAT_ASTC_10x10_UNORM_BLOCK,
+                VK_FORMAT_ASTC_12x10_UNORM_BLOCK, VK_FORMAT_ASTC_12x12_UNORM_BLOCK,
+            };
+            uint32_t i = f - 121;
+            return i < 14 ? astc[i] : (VkFormat)(astc[i - 14] + 1);
+        }
+        return VK_FORMAT_UNDEFINED;
     }
 }
 
@@ -507,6 +535,9 @@ bool nvn_vk_flush(replay *r)
 
 static void image_free(vimg *v)
 {
+    for (uint32_t i = 0; i < 7; i++)
+        if (v->views[i])
+            VK(vkDestroyImageView)(g.dev, v->views[i], NULL);
     for (uint32_t i = 0; i < v->nsub; i++)
         VK(vkDestroyImageView)(g.dev, v->sub[i].view, NULL);
     if (v->view)
@@ -525,28 +556,42 @@ static VkImageSubresourceRange range_of(const vimg *v)
                                       .layerCount = v->d.target == 2 ? 1 : (v->d.depth ? v->d.depth : 1) };
 }
 
-/** @brief Fills v from the guest bytes of its storage, level 0 of every layer. */
+/** @brief Fills v from the guest bytes of its storage, every level of every layer. */
 static bool upload(replay *r, vimg *v)
 {
     const nvn_tex_desc *d = &v->d;
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
         return false;
-    uint32_t layers = range_of(v).layerCount;
-    uint64_t layer_bytes = (uint64_t)((d->width + bw - 1) / bw) * ((d->height + bh - 1) / bh) * bpb;
+    VkImageSubresourceRange rr = range_of(v);
+    uint64_t total = 0;
+    for (uint32_t l = 0; l < rr.levelCount; l++) {
+        uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
+        total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount;
+    }
     staging s;
-    if (!nvn_vk_staging_new(&s, layer_bytes * layers))
+    if (!nvn_vk_staging_new(&s, total))
         return false;
-    nvn_region rg = { 0, 0, 0, (int32_t)d->width, (int32_t)d->height, 1 };
-    for (uint32_t l = 0; l < layers; l++)
-        if (!nvn_tex_copy(d, r->mem + v->storage, 0, l, &rg, s.map + layer_bytes * l, false)) {
-            nvn_vk_staging_free(&s);
-            return false;
-        }
+    VkBufferImageCopy bic[NVN_TEX_MAX_LEVELS];
+    uint64_t at = 0;
+    for (uint32_t l = 0; l < rr.levelCount && l < NVN_TEX_MAX_LEVELS; l++) {
+        uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
+        uint64_t layer_bytes = (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb;
+        nvn_region rg = { 0, 0, 0, (int32_t)w, (int32_t)h, 1 };
+        for (uint32_t k = 0; k < rr.layerCount; k++)
+            if (!nvn_tex_copy(d, r->mem + v->storage, l, k, &rg, s.map + at + layer_bytes * k, false)) {
+                nvn_vk_staging_free(&s);
+                return false;
+            }
+        bic[l] = (VkBufferImageCopy){ .bufferOffset = at,
+                                      .imageSubresource = { .aspectMask = v->aspect,
+                                                            .mipLevel = l,
+                                                            .layerCount = rr.layerCount },
+                                      .imageExtent = { w, h, 1 } };
+        at += layer_bytes * rr.layerCount;
+    }
     nvn_vk_begin(r);
-    VkBufferImageCopy bic = { .imageSubresource = { .aspectMask = v->aspect, .layerCount = layers },
-                              .imageExtent = { d->width, d->height, 1 } };
-    VK(vkCmdCopyBufferToImage)(g.cb, s.buf, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
+    VK(vkCmdCopyBufferToImage)(g.cb, s.buf, v->image, VK_IMAGE_LAYOUT_GENERAL, rr.levelCount, bic);
     nvn_vk_barrier(g.cb);
     bool ok = nvn_vk_flush(r);
     nvn_vk_staging_free(&s);
@@ -596,6 +641,19 @@ static vimg *image_of(replay *r, uint64_t tex)
     v->aspect = aspect;
     VkImageSubresourceRange rr = range_of(v);
     bool depth = aspect != VK_IMAGE_ASPECT_COLOR_BIT;
+    VkFormatProperties fp;
+    VK(vkGetPhysicalDeviceFormatProperties)(g.phys, f, &fp);
+    VkFormatFeatureFlags ff = fp.optimalTilingFeatures;
+    if (!(ff & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
+        free(v);
+        rl_guest_fatal(r->c, "nvn", "texture 0x%llx: the host device cannot sample format %u (Vulkan %d)",
+                       (unsigned long long)tex, d->format, (int)f);
+        return NULL;
+    }
+    VkImageUsageFlags attach = depth ? (ff & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+                                            ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                                            : 0)
+                                     : (ff & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0);
     VkImageCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
@@ -605,8 +663,7 @@ static vimg *image_of(replay *r, uint64_t tex)
         .arrayLayers = rr.layerCount,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                 (depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT),
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | attach,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     VkMemoryRequirements req;
@@ -650,6 +707,49 @@ fail:
     image_free(v);
     rl_guest_fatal(r->c, "nvn", "cannot make a host image for texture 0x%llx", (unsigned long long)tex);
     return NULL;
+}
+
+vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
+
+VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
+{
+    if ((uint32_t)t >= 7)
+        return NULL;
+    if (!nv && v->views[t])
+        return v->views[t];
+    VkImageSubresourceRange rr = range_of(v);
+    bool stencil = nv && nv->has_ds_mode && nv->ds_mode == 1;
+    rr.aspectMask = stencil ? rr.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT : rr.aspectMask & ~VK_IMAGE_ASPECT_STENCIL_BIT;
+    if (!rr.aspectMask)
+        rr.aspectMask = range_of(v).aspectMask;
+    if (nv && nv->has_levels) {
+        rr.baseMipLevel = (uint32_t)nv->base_level;
+        rr.levelCount = (uint32_t)nv->num_levels;
+    }
+    if (nv && nv->has_layers) {
+        rr.baseArrayLayer = (uint32_t)nv->min_layer;
+        rr.layerCount = (uint32_t)nv->num_layers;
+    }
+    if (t == VK_IMAGE_VIEW_TYPE_2D || t == VK_IMAGE_VIEW_TYPE_1D)
+        rr.layerCount = 1;
+    else if (t == VK_IMAGE_VIEW_TYPE_CUBE)
+        rr.layerCount = 6;
+    const uint32_t *swz = nv && nv->has_swizzle ? nv->swizzle : v->d.swizzle;
+    VkComponentSwizzle sw[4];
+    for (int i = 0; i < 4; i++)
+        sw[i] = swz[i] <= 5 ? (VkComponentSwizzle)(swz[i] + 1) : VK_COMPONENT_SWIZZLE_IDENTITY;
+    VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  .image = v->image,
+                                  .viewType = t,
+                                  .format = v->format,
+                                  .components = { sw[0], sw[1], sw[2], sw[3] },
+                                  .subresourceRange = rr };
+    VkImageView out;
+    if (VK(vkCreateImageView)(g.dev, &vci, NULL, &out) != VK_SUCCESS)
+        return NULL;
+    if (!nv)
+        v->views[t] = out;
+    return out;
 }
 
 /** @brief Begins dynamic rendering on r's render targets, limited to their common extent. */
@@ -950,6 +1050,11 @@ static nvn_gfx *state_of(uint64_t queue)
 
 bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)
 {
+    return nvn_vk_upload_bytes(r, r->mem + addr, n, pad, align, off);
+}
+
+bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)
+{
     uint64_t total = n > pad ? n : pad;
     uint64_t at = (g.arena_used + align - 1) / align * align;
     if (at + total > g.arena.size) {
@@ -959,7 +1064,7 @@ bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t 
     }
     if (total > g.arena.size)
         return false;
-    memcpy(g.arena.map + at, r->mem + addr, n);
+    memcpy(g.arena.map + at, src, n);
     if (total > n)
         memset(g.arena.map + at + n, 0, total - n);
     g.arena_used = at + total;
