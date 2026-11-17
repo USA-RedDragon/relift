@@ -51,6 +51,8 @@ typedef struct sms_tms {
     bool overflow;
     bool collision;
     sms_tms_object objects[4];
+    /** @brief The sprite colour of the last pixel the sprite unit drew; text mode keeps it, as the chip does. */
+    uint8_t sprite_out;
     bool external_sync;
     bool display;
     uint8_t background;

@@ -30,7 +30,9 @@
 #define SECOND 0x7FFFFFFFFFFFFFFFull
 #define REBASE (1ull << 20)
 
-static bool is_gg(const sms *m) { return m->system != SMS_SYSTEM_MS; }
+static bool is_gg(const sms *m) { return m->system == SMS_SYSTEM_GG || m->system == SMS_SYSTEM_GG_MS; }
+
+static bool is_sg(const sms *m) { return m->system == SMS_SYSTEM_SG; }
 
 static bool gg_mode(const sms *m) { return m->system == SMS_SYSTEM_GG; }
 
@@ -138,11 +140,20 @@ static void gg_poll(sms *m, uint32_t b)
 static void frame_edge(void *user)
 {
     sms *m = user;
-    uint32_t lines = sms_vdp_vlines(&m->vdp);
-    memcpy(m->picture, m->vdp.pixels, sizeof m->picture);
+    uint32_t lines;
+    if (is_sg(m)) {
+        lines = SMS_TMS_H;
+        for (size_t i = 0; i < (size_t)SMS_TMS_W * SMS_TMS_H; i++)
+            m->picture[i] = m->tms.pixels[i];
+    } else {
+        lines = sms_vdp_vlines(&m->vdp);
+        memcpy(m->picture, m->vdp.pixels, sizeof m->picture);
+    }
     m->picture_lines = lines;
     uint32_t done = m->input_count ? input_of(m, m->frames) : m->buttons;
-    if (is_gg(m)) {
+    if (is_sg(m)) {
+        pad_latch(&m->pad, done);
+    } else if (is_gg(m)) {
         gg_poll(m, done);
     } else {
         bool was = m->start_value;
@@ -159,8 +170,8 @@ static void frame_edge(void *user)
 
 static void plan(sms *m)
 {
-    uint64_t p = sms_vdp_next_irq(&m->vdp);
-    m->frame_pos = sms_vdp_frame_edge(&m->vdp);
+    uint64_t p = is_sg(m) ? sms_tms_next_irq(&m->tms) : sms_vdp_next_irq(&m->vdp);
+    m->frame_pos = is_sg(m) ? sms_tms_frame_edge(&m->tms) : sms_vdp_frame_edge(&m->vdp);
     if (m->frame_pos < p)
         p = m->frame_pos;
     m->event_cycle = sms_cycle_of(m, p);
@@ -169,7 +180,12 @@ static void plan(sms *m)
 void sms_catch_up(sms *m, uint64_t now)
 {
     uint64_t last = sms_vdp_count(m, now);
-    if (last >= m->vdp.pos) {
+    if (is_sg(m)) {
+        if (last >= m->tms.pos) {
+            sms_tms_run(&m->tms, last);
+            plan(m);
+        }
+    } else if (last >= m->vdp.pos) {
         sms_vdp_run(&m->vdp, last);
         plan(m);
     }
@@ -179,7 +195,7 @@ bool sms_int_line(sms *m, uint64_t now)
 {
     if (now >= m->event_cycle)
         sms_catch_up(m, now);
-    return m->vdp.irq_level;
+    return is_sg(m) ? m->tms.irq_level : m->vdp.irq_level;
 }
 
 
@@ -202,12 +218,17 @@ int sms_init(sms *m, const sms_config *cfg, const uint8_t *rom, size_t rom_len)
     for (uint32_t a = (uint32_t)rom_len; a < size; a++)
         m->rom[a] = rom_len ? m->rom[mirror(a, (uint32_t)rom_len)] : 0xFF;
     m->rom_mask = size - 1u;
+    m->rom_size = (uint32_t)rom_len;
     m->cart_ram_mask = m->mapper == SMS_MAPPER_CODEMASTERS ? 0x1FFFu : 0x7FFFu;
     m->bank[0] = 0;
     m->bank[1] = 1;
     m->bank[2] = m->mapper == SMS_MAPPER_CODEMASTERS ? 0 : 2;
-    m->ram[0] = 0xAB;
-    m->ram[0x0700] = 0x9B;
+    if (cfg->system == SMS_SYSTEM_SG) {
+        memset(m->ram, 0xFF, sizeof m->ram);
+    } else {
+        m->ram[0] = 0xAB;
+        m->ram[0x0700] = 0x9B;
+    }
     m->io_enable = m->ram_enable = m->card_enable = m->cart_enable = m->exp_enable = true;
     m->gg_parallel = 0x7F;
     m->gg_direction = 0x7F;
@@ -223,6 +244,9 @@ int sms_init(sms *m, const sms_config *cfg, const uint8_t *rom, size_t rom_len)
     m->vdp.on_frame = frame_edge;
     m->vdp.user = m;
     sms_vdp_reset(&m->vdp, mode, 2, pal);
+    m->tms.on_frame = frame_edge;
+    m->tms.user = m;
+    sms_tms_reset(&m->tms);
     sms_psg_reset(&m->psg, is_gg(m));
     m->fm = m->system == SMS_SYSTEM_MS && m->region == SMS_REGION_NTSC_J;
     m->fm_mute = true;
@@ -335,6 +359,11 @@ static void cart_write(sms *m, uint16_t a, uint8_t data)
 
 uint8_t sms_peek(const sms *m, uint16_t a)
 {
+    if (is_sg(m)) {
+        if (a <= 0x7FFF || a < m->rom_size)
+            return m->rom[a & m->rom_mask];
+        return a >= 0xC000 ? m->ram[a & 0x3FFu] : 0xFF;
+    }
     uint8_t data = m->pullup;
     if (a >= 0xC000 && m->ram_enable)
         data = m->ram[a & 0x1FFFu];
@@ -352,6 +381,11 @@ uint8_t sms_read(sms *m, uint16_t a, uint64_t now)
 void sms_write(sms *m, uint16_t a, uint8_t data, uint64_t now)
 {
     (void)now;
+    if (is_sg(m)) {
+        if (a >= 0xC000 && !(a <= 0x7FFF || a < m->rom_size))
+            m->ram[a & 0x3FFu] = data;
+        return;
+    }
     if (a >= 0xC000 && m->ram_enable)
         m->ram[a & 0x1FFFu] = data;
     if (!is_gg(m) ? m->cart_enable : (a >= 0x400 || !m->bios_enable))
@@ -360,6 +394,8 @@ void sms_write(sms *m, uint16_t a, uint8_t data, uint64_t now)
 
 int32_t sms_slot_bank(const sms *m, unsigned s)
 {
+    if (is_sg(m))
+        return s < 2 || s * 0x4000u < m->rom_size ? (int32_t)(((s * 0x4000u) & m->rom_mask) >> 14) : -1;
     switch (m->mapper) {
     case SMS_MAPPER_SEGA:
         if (s == 2 && m->ram_bank2)
@@ -393,9 +429,49 @@ static uint8_t gg_line(const sms *m, unsigned bit)
     return (m->gg_direction >> bit) & 1u ? 1u : (m->gg_parallel >> bit) & 1u;
 }
 
+static uint8_t sg_in(sms *m, uint8_t p, uint64_t now)
+{
+    switch (p >> 6) {
+    case 2: {
+        sms_catch_up(m, now);
+        uint8_t data = p & 1u ? sms_tms_status(&m->tms) : sms_tms_data_read(&m->tms);
+        plan(m);
+        return data;
+    }
+    case 3:
+        if (p & 1u)
+            return 0xFF;
+        sms_catch_up(m, now);
+        return (uint8_t)(pad_port1(m) | 0xC0u);
+    default:
+        return 0xFF;
+    }
+}
+
+static void sg_out(sms *m, uint8_t p, uint8_t data, uint64_t now)
+{
+    switch (p >> 6) {
+    case 1:
+        sms_psg_write(&m->psg, now, data);
+        return;
+    case 2:
+        sms_catch_up(m, now);
+        if (p & 1u)
+            sms_tms_control(&m->tms, data);
+        else
+            sms_tms_data_write(&m->tms, data);
+        plan(m);
+        return;
+    default:
+        return;
+    }
+}
+
 uint8_t sms_in(sms *m, uint16_t port, uint64_t now)
 {
     uint8_t p = (uint8_t)port;
+    if (is_sg(m))
+        return sg_in(m, p, now);
     uint8_t data = m->pullup;
     bool gg = gg_mode(m);
     if (p <= 0x05 && gg) {
@@ -497,6 +573,10 @@ uint8_t sms_in(sms *m, uint16_t port, uint64_t now)
 void sms_out(sms *m, uint16_t port, uint8_t data, uint64_t now)
 {
     uint8_t p = (uint8_t)port;
+    if (is_sg(m)) {
+        sg_out(m, p, data, now);
+        return;
+    }
     if (p <= 0x06 && is_gg(m)) {
         switch (p) {
         case 0x01:
@@ -602,6 +682,10 @@ void sms_picture(const sms *m, uint16_t *out)
 
 void sms_rgb(const sms *m, uint16_t color, uint8_t rgb[3])
 {
+    if (is_sg(m)) {
+        sms_tms_rgb((uint8_t)color, rgb);
+        return;
+    }
     if (m->system == SMS_SYSTEM_MS) {
         static const uint8_t blue[4] = {0, 104, 170, 255};
         rgb[0] = (uint8_t)((color & 3u) * 0x55u);

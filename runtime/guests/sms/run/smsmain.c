@@ -225,6 +225,8 @@ extern const rl_port_decl rl_sms_ports[];
 extern const uint32_t rl_sms_ports_count;
 extern const rl_port_decl rl_gg_ports[];
 extern const uint32_t rl_gg_ports_count;
+extern const rl_port_decl rl_sg1000_ports[];
+extern const uint32_t rl_sg1000_ports_count;
 
 /** @brief The controls of p1 in the order of the SMS_BUTTON_* bits; the console's start or pause, and reset. */
 static const char *const button_names[8] = {"up", "down", "left", "right", "1", "2", NULL, "reset"};
@@ -269,8 +271,10 @@ static int on_frame(void *user, sms *m, uint64_t frame)
             cram[2 * i] = (uint8_t)m->vdp.cram[i];
             cram[2 * i + 1] = (uint8_t)(m->vdp.cram[i] >> 8);
         }
-        fprintf(H->state_log, "%llu\t%08x\t%08x\t%08x\t%u\t%u\n", (unsigned long long)frame, fnv32(m->ram, sizeof m->ram),
-                fnv32(m->vdp.vram, sizeof m->vdp.vram), fnv32(cram, sizeof cram), m->vdp.vcounter, m->vdp.hcounter);
+        bool sg = m->system == SMS_SYSTEM_SG;
+        fprintf(H->state_log, "%llu\t%08x\t%08x\t%08x\t%u\t%u\n", (unsigned long long)frame,
+                fnv32(m->ram, sg ? 0x400u : sizeof m->ram), fnv32(sg ? m->tms.vram : m->vdp.vram, sizeof m->vdp.vram),
+                fnv32(cram, sg ? 0 : sizeof cram), sg ? m->tms.vcounter : m->vdp.vcounter, sg ? 0u : m->vdp.hcounter);
     }
     if (H->raw_dir && frame >= H->raw_from && frame <= H->raw_to) {
         char path[4096];
@@ -306,7 +310,8 @@ static int on_frame(void *user, sms *m, uint64_t frame)
     if (H->stop_frames && H->frames >= H->stop_frames) {
         to_rgb(H, m);
         printf("frames %llu crc %08x ram %08x vram %08x\n", (unsigned long long)H->frames, H->last_crc,
-               fnv32(m->ram, sizeof m->ram), fnv32(m->vdp.vram, sizeof m->vdp.vram));
+               fnv32(m->ram, m->system == SMS_SYSTEM_SG ? 0x400u : sizeof m->ram),
+               fnv32(m->system == SMS_SYSTEM_SG ? m->tms.vram : m->vdp.vram, sizeof m->vdp.vram));
         fflush(stdout);
         if (H->png && !write_png(H->png, H->rgb, H->w, H->h))
             fprintf(stderr, "relift-sms: could not write %s\n", H->png);
@@ -473,7 +478,10 @@ int rl_sms_main(const rl_sms_program *p, int argc, char **argv)
     static pad P;
     bool gg = p->system == SMS_SYSTEM_GG;
     P.start = gg ? "start" : "pause";
-    rl_ports_declare(gg ? rl_gg_ports : rl_sms_ports, gg ? rl_gg_ports_count : rl_sms_ports_count);
+    if (p->system == SMS_SYSTEM_SG)
+        rl_ports_declare(rl_sg1000_ports, rl_sg1000_ports_count);
+    else
+        rl_ports_declare(gg ? rl_gg_ports : rl_sms_ports, gg ? rl_gg_ports_count : rl_sms_ports_count);
     if (!H.inputs)
         rl_sms_input(read_pad, &P);
     if (H.insn_log)

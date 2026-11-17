@@ -116,7 +116,7 @@ static void sprite_setup(sms_tms *t, unsigned voffset)
 static uint8_t sprite_pixel(sms_tms *t, unsigned x, unsigned y)
 {
     if (t->video_mode == 1)
-        return 0;
+        return t->sprite_out;
     uint8_t color = 0;
     int limit = (int)(((8u << t->sprite_zoom) << t->sprite_size) - 1u) & 31;
     for (unsigned k = 0; k < 4; k++) {
@@ -135,6 +135,7 @@ static uint8_t sprite_pixel(sms_tms *t, unsigned x, unsigned y)
             color = o->color;
         }
     }
+    t->sprite_out = color;
     return color;
 }
 

@@ -103,7 +103,7 @@ static int32_t code_bank(uint16_t pc)
 {
     if (pc >= 0xC000)
         return -1;
-    if (pc < 0x0400 && G.m.mapper == SMS_MAPPER_SEGA)
+    if (pc < 0x0400 && G.m.mapper == SMS_MAPPER_SEGA && G.m.system != SMS_SYSTEM_SG)
         return 0;
     return sms_slot_bank(&G.m, pc >> 14);
 }
@@ -376,7 +376,7 @@ uint8_t rl_sms_halt(rl_ctx *c, uint8_t *mem, uint8_t iff1, uint8_t r)
         uint64_t t = now + 4u * k;
         if (t >= m->event_cycle)
             sms_catch_up(m, t);
-        if (G.stop || m->nmi || (iff1 && m->vdp.irq_level))
+        if (G.stop || m->nmi || (iff1 && (m->system == SMS_SYSTEM_SG ? m->tms.irq_level : m->vdp.irq_level)))
             break;
         uint64_t e = m->event_cycle;
         k = e <= t ? k + 1 : (e - now + 3u) / 4u;
@@ -495,7 +495,7 @@ int rl_sms_run(const rl_sms_program *p, const uint8_t *inputs, size_t input_coun
     rl_thread_bind(t);
     rl_ctx *c = t->ctx;
     G.c = c;
-    c->sp = 0xFFFDu;
+    c->sp = p->system == SMS_SYSTEM_SG ? 0xFFFFu : 0xFFFDu;
     c->time.budget = 0;
     uint16_t pc = 0;
     int r;

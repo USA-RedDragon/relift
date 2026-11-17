@@ -164,3 +164,36 @@ TEST(machine_fm_unit_is_on_japanese_master_systems_only)
     CHECK_EQ(m.fm_chip.s.voice[0].tone, 1);
     CHECK_EQ(m.fm_chip.s.voice[0].level, 5);
 }
+
+TEST(machine_sg1000_maps_a_linear_cartridge_and_1_kib_of_ram)
+{
+    boot(SMS_SYSTEM_SG, SMS_MAPPER_SEGA, 0x8000);
+    CHECK_EQ(sms_read(&m, 0x4000, 0), bank_byte(1));
+    CHECK_EQ(sms_read(&m, 0x8000, 0), 0xFF);
+    CHECK_EQ(sms_read(&m, 0xC123, 0), 0xFF);
+    sms_write(&m, 0xC123, 0x42, 0);
+    CHECK_EQ(sms_read(&m, 0xC523, 0), 0x42);
+    sms_write(&m, 0xFFFF, 5, 0);
+    CHECK_EQ(sms_read(&m, 0x4000, 0), bank_byte(1));
+    CHECK_EQ(sms_slot_bank(&m, 1), 1);
+    CHECK_EQ(sms_slot_bank(&m, 2), -1);
+    boot(SMS_SYSTEM_SG, SMS_MAPPER_SEGA, 0x4000);
+    CHECK_EQ(sms_slot_bank(&m, 1), 0);
+}
+
+TEST(machine_sg1000_ports_reach_the_tms9918_and_the_pad)
+{
+    boot(SMS_SYSTEM_SG, SMS_MAPPER_SEGA, 0x8000);
+    sms_out(&m, 0xBF, 0x20, 0);
+    sms_out(&m, 0xBF, 0x81, 0);
+    CHECK(m.tms.frame_enable);
+    uint64_t edge = sms_cycle_of(&m, 192u * SMS_TMS_LINE);
+    CHECK(!sms_int_line(&m, edge - 1));
+    CHECK(sms_int_line(&m, edge));
+    CHECK_EQ(sms_in(&m, 0xBF, edge) & 0x80, 0x80);
+    CHECK(!sms_int_line(&m, edge));
+    m.buttons = SMS_BUTTON_2 | SMS_BUTTON_LEFT;
+    CHECK_EQ(sms_in(&m, 0xDC, edge), 0xDB);
+    CHECK_EQ(sms_in(&m, 0xDD, edge), 0xFF);
+    CHECK_EQ(sms_in(&m, 0x7E, edge), 0xFF);
+}

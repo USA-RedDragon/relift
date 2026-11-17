@@ -25,6 +25,7 @@
 #include <stdint.h>
 
 #include "psg.h"
+#include "tms9918.h"
 #include "vdp.h"
 #include "ym2413.h"
 
@@ -36,6 +37,8 @@ typedef enum sms_system {
     SMS_SYSTEM_GG = 1,
     /** @brief A Game Gear running a Master System cartridge (the adapter's mode). */
     SMS_SYSTEM_GG_MS = 2,
+    /** @brief An SG-1000: the TMS9918A, 1 KiB of RAM, a linear cartridge. */
+    SMS_SYSTEM_SG = 3,
 } sms_system;
 
 /** @brief The video standard and region of the console. */
@@ -100,6 +103,8 @@ typedef struct sms {
     /** @brief The ROM, padded to a power of two the way ares mirrors it. */
     uint8_t *rom;
     uint32_t rom_mask;
+    /** @brief The ROM's size before mirroring. */
+    uint32_t rom_size;
     uint8_t ram[0x2000];
     /** @brief The cartridge RAM: 32 KiB on the Sega mapper, 8 KiB on the Codemasters one. */
     uint8_t cart_ram[0x8000];
@@ -139,6 +144,8 @@ typedef struct sms {
     void *input_user;
 
     sms_vdp vdp;
+    /** @brief The SG-1000's video chip, in place of vdp. */
+    sms_tms tms;
     sms_psg psg;
     /** @brief The FM unit, present on a Japanese Master System (fm). */
     sms_ym2413 fm_chip;
