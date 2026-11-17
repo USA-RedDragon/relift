@@ -9,6 +9,8 @@
  */
 #include "ipc.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -494,6 +496,32 @@ static rl_result cmif(msg *m, rl_ipc_req *r, const parsed *p, uint32_t *len, boo
     return rc;
 }
 
+static _Thread_local struct {
+    bool set;
+    const char *tag;
+    char what[256];
+} pending_stop;
+
+void rl_ipc_stop(rl_ipc_req *r, const char *tag, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(r->stop_what, sizeof r->stop_what, fmt, ap);
+    va_end(ap);
+    r->stop = true;
+    r->stop_tag = tag;
+}
+
+bool rl_ipc_take_stop(const char **tag, char *what, size_t n)
+{
+    if (!pending_stop.set)
+        return false;
+    pending_stop.set = false;
+    *tag = pending_stop.tag;
+    snprintf(what, n, "%s", pending_stop.what);
+    return true;
+}
+
 rl_result hos_ipc_request(uint32_t handle, uint64_t msg_addr, uint64_t msg_size, bool *stop)
 {
     *stop = false;
@@ -550,6 +578,12 @@ rl_result hos_ipc_request(uint32_t handle, uint64_t msg_addr, uint64_t msg_size,
         hos_lock();
         memcpy(hos.vm.base + msg_addr, m->w, len);
         hos_unlock();
+    }
+    if (r->stop) {
+        pending_stop.set = true;
+        pending_stop.tag = r->stop_tag;
+        snprintf(pending_stop.what, sizeof pending_stop.what, "%s", r->stop_what);
+        *stop = true;
     }
     free(m);
     free(r);

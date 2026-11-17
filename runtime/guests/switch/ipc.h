@@ -176,7 +176,25 @@ struct rl_ipc_req {
     rl_ipc_object *out_objects[RL_IPC_MAX];
     /** @brief Number of output objects. */
     uint32_t n_out_objects;
+    /** @brief Set by rl_ipc_stop: the request ends the process with a named report. */
+    bool stop;
+    /** @brief The report's tag and summary when stop is set. */
+    const char *stop_tag;
+    char stop_what[256];
 };
+
+/**
+ * @brief Ends the process after this request with a stop report naming what
+ * the service could not answer (tag, then printf-style text); the handler
+ * still returns its result.
+ */
+RL_RUNTIME_API void rl_ipc_stop(rl_ipc_req *r, const char *tag, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+/**
+ * @brief The stop a request on this host thread asked for, cleared as it is
+ * taken: true with *tag and what filled (n bytes), false when none.
+ */
+bool rl_ipc_take_stop(const char **tag, char *what, size_t n);
 
 /** @brief Returns a zeroed output area of size bytes (the command's raw output). */
 RL_RUNTIME_API void *rl_ipc_out(rl_ipc_req *r, uint32_t size);

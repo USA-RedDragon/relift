@@ -405,6 +405,10 @@ static int dispatch(rl_ctx *c, uint32_t imm)
             rc = hos_ipc_request(w2, x[0], x[1], &stop);
         hos_sched_return();
         if (stop) {
+            const char *tag;
+            char what[256];
+            if (rl_ipc_take_stop(&tag, what, sizeof what))
+                return rl_guest_fatal(c, tag, "%s", what);
             rl_log(RL_LOG_ERROR, "ipc", "stopping: --strict");
             return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
         }
