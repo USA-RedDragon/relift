@@ -462,6 +462,7 @@ pub(crate) fn emit_function(
         .enter_anywhere
         .filter(|_| f.insts.contains_key(&f.entry));
     let anywhere = mask.is_some();
+    let continuation = mask.map_or(0, |m| !m);
     let resumes = resume_points(f, targets);
     let mut blocks: BTreeMap<u64, Block> = f
         .insts
@@ -485,6 +486,7 @@ pub(crate) fn emit_function(
         resumes: &resumes,
         io,
         anywhere,
+        continuation,
         in_context: opts.regs_in_context,
         shape: &shape,
         ranges: &opts.guess_ranges,
@@ -597,6 +599,8 @@ pub(crate) struct Env<'a> {
     resumes: &'a BTreeSet<u64>,
     io: &'a IoMap,
     anywhere: bool,
+    /// The address bits of continuation blocks, which are never piece entries.
+    continuation: u64,
     in_context: bool,
     pub(crate) shape: &'a Shape,
     ranges: &'a [GuessRange],
@@ -621,6 +625,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         resumes,
         io,
         anywhere,
+        continuation,
         in_context,
         ranges,
         ..
@@ -686,7 +691,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
                 entries.extend(resumes.iter().filter(|r| own.contains(r)));
             }
             if anywhere {
-                entries.extend(own.iter().copied());
+                entries.extend(own.iter().copied().filter(|pc| pc & continuation == 0));
             }
             entries.extend(f.entries.keys().filter(|pc| own.contains(pc)));
             entries

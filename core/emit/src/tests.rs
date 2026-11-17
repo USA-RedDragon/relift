@@ -1449,6 +1449,7 @@ fn a_continuation_stays_in_the_piece_of_its_instruction() {
         .find(|p| p.contains("L_104: {"))
         .expect("the piece of 0x104");
     assert!(piece.contains("L_10104: {"), "{c}");
+    assert!(!c.contains("case UINT64_C(0x10104)"), "{c}");
     let unit = &out
         .files
         .iter()
