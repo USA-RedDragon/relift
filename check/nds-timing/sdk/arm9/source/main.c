@@ -432,6 +432,13 @@ static void step(const char *s)
     printf("[%s]\n", s);
 }
 
+#ifdef HWTEST_ARB
+#define HW_CSV "relift-arb-probe.csv"
+#include "arb.c"
+#else
+#define HW_CSV "relift-hwtest.csv"
+#endif
+
 int main(void)
 {
     mark(0x7C00);
@@ -473,7 +480,7 @@ int main(void)
     printf(skip_fat ? "[FAT skipped: B held]\n" : "[FAT init... (hold B at start to skip)]\n");
     if (!skip_fat && fatInitDefault()) {
         step("FAT ok");
-        static const char *const paths[] = {"sd:/relift-hwtest.csv", "fat:/relift-hwtest.csv", "/relift-hwtest.csv"};
+        static const char *const paths[] = {"sd:/" HW_CSV, "fat:/" HW_CSV, "/" HW_CSV};
         for (unsigned i = 0; i < 3 && !out; i++)
             if ((out = fopen(paths[i], "w")))
                 path = paths[i];
@@ -502,6 +509,9 @@ int main(void)
     line("cpu,idx,name,region,place,mode,attr,may_differ_dsi_3ds,kaddr,dbase,t16,t48,bus_x100,cpu_x100\n");
     printf("test MPU region %d\n", test_region);
 
+#ifdef HWTEST_ARB
+    arb_all(path);
+#else
     for (unsigned i = 0; i < NCASES9; i++) {
         u32 t16 = 0, t48 = 0, ka = 0, db = 0;
         bool ok = run9(&cases9[i], &t16, &t48, &ka, &db);
@@ -587,6 +597,7 @@ int main(void)
             extra(7, 1000 + i, sw_name[sw_cases[i].kind], "main", "wram", t16, t48, ka, db);
     }
     line("# end\n");
+#endif
     if (out)
         fclose(out);
     if (hw_after) {

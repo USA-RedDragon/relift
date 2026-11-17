@@ -26,6 +26,11 @@ ARCH :=	-march=armv4t -mtune=arm7tdmi -mthumb
 
 CFLAGS   := -g -Wall -Os -ffunction-sections -fdata-sections\
             $(ARCH) $(INCLUDE) -DARM7
+# ARB=1: the main RAM arbitration ROM (../arb.c) instead of the timing cases; ARB_SPINS (the ARM7's polls before it
+# gives up) and ARB_WAIT9 (the ARM9's wait in ticks) shorten it for relift's CI
+ifneq ($(ARB),)
+CFLAGS   += -DHWTEST_ARB -DARB_SPINS=$(or $(ARB_SPINS),1048576u) $(if $(ARB_WAIT9),-DARB_WAIT9=$(ARB_WAIT9))
+endif
 CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=ds_arm7.specs -g $(ARCH) -Wl,-Map,$(notdir $*).map

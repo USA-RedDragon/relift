@@ -76,7 +76,22 @@ Each probe splits an open case (see the `PROBES` comment in `gen.py`):
 All 17 run and print in melonDS (clang build); the devkitPro build with
 `PROBES=1` builds in the pinned devkitPro image.
 
+## Main RAM arbitration
+
+`make ARB=1` in `sdk/` builds the arbitration ROM instead (`arb.c`, which
+says what each row does; it writes `relift-arb-probe.csv`): e2e_nds's FIFO
+program with the ARM7 polling from main RAM code, under each EXMEMCNT
+bit 15 setting, with the ARM9's side in main RAM or in ITCM, a single
+ARM9 load during the ARM7's poll, and the hold probes. On both consoles
+(`arb.csv`) a gapless stream of the CPU main RAM favors keeps the other
+out until it ends: at ARM7 priority the ARM9's load waits until the ARM7
+gives up its poll, and e2e_nds's program hangs as written (7001).
+`ARB_SPINS` (the ARM7's polls before it gives up) and `ARB_WAIT9` (the
+ARM9's wait in ticks) shorten it for CI; `compare_arb.py RUN.csv` checks
+a run.
+
 `relift/tests/e2e_nds_timing.rs` builds the devkitPro ROM (with
 `DEVKITARM` set; otherwise the clang one, checked with `compare.py
 --clang`), lifts and runs it, and runs `compare.py`; a second test does
-the same with the clang calls cartridge (`compare.py --calls`).
+the same with the clang calls cartridge (`compare.py --calls`), a third
+with the arbitration ROM (`compare_arb.py`).

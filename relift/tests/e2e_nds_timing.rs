@@ -13,7 +13,11 @@
 //! `compare.py --clang` leaves those out. Skipped with a note when neither
 //! can be built, or python3 is not on `PATH`. A second test runs the clang
 //! calls cartridge (`build.py --calls`: the BIOS calls, the slot-1
-//! transfers and the BIOS waits' wake latency) and `compare.py --calls`.
+//! transfers and the BIOS waits' wake latency) and `compare.py --calls`. A
+//! third runs the main RAM arbitration ROM (`make ARB=1` in `sdk/`, with
+//! short give-ups, or the file `RELIFT_NDS_ARB_ROM` names) and
+//! `compare_arb.py`: when one CPU holds main RAM with a gapless stream, the
+//! other waits until the stream ends, as on the consoles (`arb.csv`).
 
 mod tiny;
 
@@ -45,6 +49,12 @@ fn copy_dir(from: &Path, to: &Path) {
 /// The devkitPro build of the ROM, from a copy of `check` under `root`, or
 /// `None` without devkitPro.
 fn sdk_rom(check: &Path, root: &Path) -> Option<PathBuf> {
+    sdk_build(check, root, &[])
+}
+
+/// The devkitPro build of `sdk/` with the make variables `vars`, as
+/// [`sdk_rom`].
+fn sdk_build(check: &Path, root: &Path, vars: &[&str]) -> Option<PathBuf> {
     let arm = PathBuf::from(std::env::var_os("DEVKITARM")?);
     let pro = std::env::var_os("DEVKITPRO")
         .map(PathBuf::from)
@@ -59,7 +69,9 @@ fn sdk_rom(check: &Path, root: &Path) -> Option<PathBuf> {
     ))
     .expect("PATH joins");
     let out = relift_proc::command("make")
-        .args(["-C", "sdk", "relift-hwtest-ntr.nds"])
+        .args(["-C", "sdk"])
+        .args(vars)
+        .arg("relift-hwtest-ntr.nds")
         .current_dir(&src)
         .env("DEVKITPRO", &pro)
         .env("DEVKITARM", &arm)
@@ -94,6 +106,19 @@ fn clang_rom(check: &Path, root: &Path, calls: bool) -> Option<PathBuf> {
 /// Lifts and runs rom under root and checks its cases with `compare.py`
 /// (`flag`: its build, as compare.py names it).
 fn run_and_compare(check: &Path, root: &Path, rom: &Path, flag: Option<&str>) {
+    let run = lift_and_run(root, rom, "# end");
+    let mut compare = relift_proc::command("python3");
+    compare.arg("-I").arg(check.join("compare.py")).arg(&run);
+    if let Some(f) = flag {
+        compare.arg(f);
+    }
+    let out = compare.output().expect("python3 runs");
+    ok(&out, "compare.py");
+}
+
+/// Lifts and runs rom under root until the debug port prints `end`; returns
+/// the file of its result lines.
+fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let cache = root.join("cache").display().to_string();
@@ -113,7 +138,7 @@ fn run_and_compare(check: &Path, root: &Path, rom: &Path, flag: Option<&str>) {
             "--max-ticks",
             "40000000000",
             "--until-debug",
-            "# end",
+            end,
         ])
         .output()
         .expect("the game runs");
@@ -123,16 +148,10 @@ fn run_and_compare(check: &Path, root: &Path, rom: &Path, flag: Option<&str>) {
         .filter(|l| ["#", "cpu,", "9,", "7,"].iter().any(|p| l.starts_with(p)))
         .map(|l| format!("{l}\n"))
         .collect();
-    assert!(csv.contains("# end"), "the run ends: {csv}");
+    assert!(csv.contains(end), "the run ends: {csv}");
     let run = root.join("run.csv");
     relift_cache::write_if_changed(&run, csv.as_bytes()).expect("the run is writable");
-    let mut compare = relift_proc::command("python3");
-    compare.arg("-I").arg(check.join("compare.py")).arg(&run);
-    if let Some(f) = flag {
-        compare.arg(f);
-    }
-    let out = compare.output().expect("python3 runs");
-    ok(&out, "compare.py");
+    run
 }
 
 #[test]
@@ -172,4 +191,33 @@ fn bios_calls_cartridge_and_wakes_take_the_consoles_time() {
         return;
     };
     run_and_compare(&check, &root, &rom, Some("--calls"));
+}
+
+#[test]
+fn main_ram_waits_for_the_other_cpus_stream_to_end_as_on_the_consoles() {
+    if relift_build::find_tool("python3").is_none() {
+        eprintln!("skipped: python3 is not on PATH");
+        return;
+    }
+    let check = Path::new(env!("CARGO_MANIFEST_DIR")).join("../check/nds-timing");
+    let root = tiny::scratch("e2e-nds-timing-arb");
+    let prebuilt = std::env::var_os("RELIFT_NDS_ARB_ROM").map(PathBuf::from);
+    let Some(rom) = prebuilt.or_else(|| {
+        sdk_build(
+            &check,
+            &root,
+            &["ARB=1", "ARB_SPINS=16384u", "ARB_WAIT9=4194304u"],
+        )
+    }) else {
+        eprintln!("skipped: devkitPro (DEVKITARM) is not set");
+        return;
+    };
+    let run = lift_and_run(&root, &rom, "# end 7001");
+    let out = relift_proc::command("python3")
+        .arg("-I")
+        .arg(check.join("compare_arb.py"))
+        .arg(&run)
+        .output()
+        .expect("python3 runs");
+    ok(&out, "compare_arb.py");
 }

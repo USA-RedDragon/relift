@@ -636,7 +636,8 @@ TEST(q3_s6_exmemcnt_bit_15_decides_who_gets_main_ram_first)
     }
 }
 
-/* inferred from hwtest 3c's rows 4055 to 4073: a gapless stream of the CPU first for main RAM keeps the other out */
+/* the consoles' arbitration rows 4102 and 7013 (check/nds-timing arb.csv): a gapless stream of the CPU first for
+   main RAM keeps the other out until it ends */
 TEST(q3_s7_a_gapless_stream_of_the_cpu_first_keeps_the_other_out_of_main_ram)
 {
     for (int md = LOCKSTEP; md <= FUSED; md++) {

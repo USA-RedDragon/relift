@@ -43,6 +43,33 @@ static void run_case(hw_job7 *j);
 /* a job: quiet ones (hwtest 3c) tell the ARM9 on IPCSYNC that they are done, as it waits off main RAM */
 static void run(hw_job7 *j)
 {
+#ifdef HWTEST_ARB
+    if (j->mode == 4) {
+        /* arb.c's FIFO trade: polls from main RAM code (the wait kernel) for the ARM9's word, at most
+           ARB_SPINS times, answers 3w + 1 and reports on IPCSYNC: 11 gave up, 12 answered */
+        u32 ime = REG_IME;
+        REG_IME = 0;
+        j->arg[0] = CT7_ALL - 1;
+        ct_prep7(j);
+        ct_out(CT_READY);
+        u32 t0 = hw_now();
+        ct_k7(CT7_ALL - 1, ARB_SPINS, j);
+        u32 t = hw_now() - t0;
+        u32 w = ~0u;
+        if (!(*(vu16 *)0x04000184 & 0x100)) {
+            w = *(vu32 *)0x04100000;
+            *(vu32 *)0x04000188 = 3u * w + 1u;
+        }
+        ct_out(w == ~0u ? 11 : 12);
+        ct_wait(CT_ACK);
+        ct_out(0);
+        j->arg[0] = w;
+        j->arg[1] = t;
+        REG_IME = ime;
+        j->status = 1;
+        return;
+    }
+#endif
     if (j->mode == 2) {
         u32 ime = REG_IME;
         REG_IME = 0;

@@ -1,0 +1,15 @@
+# The main RAM arbitration probe (arb.c) on two consoles in DS mode, a 3DS and a DSi, both with the boot EXMEMCNT
+# (0xE880). They ran its first form (relift-arb-probe-2): the ARM7 gave up after 2 s by its timer (ARB_SPINS
+# polls now) and load_itcm loaded without waiting first. kaddr, t16, t48 as arb.c's rows; the consoles agree on
+# every flag, and their ticks within 1% (7000's t16, an IPC handshake, apart).
+cpu,idx,name,region,kaddr,c3ds_t16,c3ds_t48,dsi_t16,dsi_t48
+9,7000,fifo_main,p9,1,1550,35734,1237,35453
+9,7010,fifo_itcm,p9,1,302,234,302,234
+9,7011,fifo_itcm,p7,1,333,234,333,234
+9,7012,load_itcm,p9,1,29,250,30,250
+9,7013,load_itcm,p7,2,67022872,67022896,67036068,67036096
+9,4100,hold_vs_code,p9,0,24577,52,24576,52
+9,4101,hold_vs_poll,p9,0,32769,55,32770,55
+9,4102,hold_vs_code,p7,0,5,557077,5,557077
+9,4103,hold_vs_poll,p7,0,5,786471,5,786471
+9,7001,fifo_main,p7,2,134056610,67028663,134056612,67005952
