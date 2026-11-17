@@ -87,6 +87,12 @@ typedef struct rl_switch_hook {
     /** @brief Host function that replaces a function a module defines, NULL to keep the module's code. */
     rl_fn (*replace)(void *user, const char *symbol);
     /**
+     * @brief Told the name and guest address of every symbol a module
+     * defines, before the entry runs, so the hook can call the module's own
+     * code by name.
+     */
+    void (*defined)(void *user, const char *symbol, uint64_t addr);
+    /**
      * @brief For a hook the loader adds by itself: called with the name of
      * each dynamic symbol a module defines or imports; a non-zero result
      * adds the hook to this run. NULL means the hook only runs when the

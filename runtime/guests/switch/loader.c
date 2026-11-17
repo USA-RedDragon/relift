@@ -235,6 +235,13 @@ static rl_fn hook_replace(const char *name)
     return NULL;
 }
 
+static void hook_defined(const char *name, uint64_t addr)
+{
+    for (uint32_t h = 0; h < g_nhooks; h++)
+        if (g_hooks[h]->defined)
+            g_hooks[h]->defined(g_hooks[h]->user, name, addr);
+}
+
 static uint64_t hook_import(const char *name)
 {
     for (uint32_t h = 0; h < g_nhooks; h++)
@@ -246,7 +253,7 @@ static uint64_t hook_import(const char *name)
     return 0;
 }
 
-/** @brief Replaces the module's definitions the hooks name; returns the number replaced or -1. */
+/** @brief Tells the hooks the module's definitions and replaces those they name; returns the number replaced or -1. */
 static int replace_exports(const rl_switch_module *m, const dyn_info *d)
 {
     rl_fn_entry *e = NULL;
@@ -255,6 +262,8 @@ static int replace_exports(const rl_switch_module *m, const dyn_info *d)
         uint16_t shndx;
         uint64_t value;
         const char *name = sym_of(m, d, i, &shndx, &value);
+        if (name && shndx && value)
+            hook_defined(name, m->base + value);
         rl_fn f = name && shndx && value ? hook_replace(name) : NULL;
         if (!f)
             continue;

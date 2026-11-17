@@ -32,6 +32,7 @@ static void say(rl_ctx *c, uint8_t *mem, uint64_t addr, uint64_t len)
 #define IMPORTED 0x9000000ull
 
 static uint64_t g_code_free;
+static unsigned g_defined;
 
 static uint64_t lifted_export(rl_ctx *restrict c, uint8_t *mem)
 {
@@ -57,6 +58,8 @@ static uint64_t linked_entry(rl_ctx *restrict c, uint8_t *mem)
         say(c, mem, BASE + 0x1F10, 9);
     if (g_code_free == BASE + 0x4000)
         say(c, mem, BASE + 0x1F20, 9);
+    if (g_defined == 3)
+        say(c, mem, BASE + 0x1F30, 9);
     c->x[0] = 0;
     return rl_svc(c, mem, 0x07);
 }
@@ -166,11 +169,23 @@ static rl_fn hook_replace(void *user, const char *symbol)
     return strcmp(symbol, "rl_test_export") ? NULL : host_export;
 }
 
+static void hook_defined(void *user, const char *symbol, uint64_t addr)
+{
+    (void)user;
+    if (!strcmp(symbol, "rl_test_export") && addr == BASE + 0x100)
+        g_defined |= 1;
+    else if (!strcmp(symbol, "other_export") && addr == BASE + 0x200)
+        g_defined |= 2;
+    else
+        g_defined |= 4;
+}
+
 static const rl_switch_hook g_hook = {
     .name = "loader-test",
     .start = hook_start,
     .import = hook_import,
     .replace = hook_replace,
+    .defined = hook_defined,
 };
 
 static void put32(uint32_t off, uint32_t v) { memcpy(g_image + off, &v, 4); }
@@ -219,6 +234,7 @@ static void fill_linked_image(void)
     memcpy(g_image + 0x1F00, "PASS link", 9);
     memcpy(g_image + 0x1F10, "PASS repl", 9);
     memcpy(g_image + 0x1F20, "PASS hook", 9);
+    memcpy(g_image + 0x1F30, "PASS defs", 9);
 }
 
 static char g_base[PATH_MAX];
@@ -416,6 +432,7 @@ TEST(loader_links_hook_symbols)
     CHECK_EQ(count_lines(out, "PASS link"), 1);
     CHECK_EQ(count_lines(out, "PASS repl"), 1);
     CHECK_EQ(count_lines(out, "PASS hook"), 1);
+    CHECK_EQ(count_lines(out, "PASS defs"), 1);
     CHECK(strstr(out, "replaced functions: 1, resolved imports: 2") != NULL);
     remove_base();
     fill_image();
