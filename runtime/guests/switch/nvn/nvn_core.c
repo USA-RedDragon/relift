@@ -1,0 +1,307 @@
+/**
+ * @file nvn_core.c
+ * @brief The NVN2 layer's loader hook, proc slots, nvnBootstrapLoader and
+ * nvnDeviceGetProcAddress.
+ *
+ * Slot i of the thunk page (4 bytes each) is the guest address of one proc
+ * name. The implemented procs take the first slots in name order; a name the
+ * layer does not implement takes the next free slot the first time the game
+ * asks for it, and that slot's function stops the game with the name.
+ */
+#include "nvn_priv.h"
+
+#include <pthread.h>
+#include <stdlib.h>
+
+/**
+ * @brief Command buffer procs relift has no function for are recorded under
+ * their slot's op (NVN_CMD_COUNT + slot); running such a command reports it.
+ */
+#define RECORDED_PREFIX "nvnCommandBuffer"
+
+typedef struct nvn_impl {
+    const char *name;
+    rl_fn fn;
+} nvn_impl;
+
+#define NVN_ENTRY(name) { #name, nvnh_##name },
+#define NVN_ENTRY_RECORDED(op, name) NVN_ENTRY(name)
+#define NVN_ENTRY_ZERO(name) { #name, nvn_zero },
+static const nvn_impl impls[] = { NVN_PROCS(NVN_ENTRY) NVN_RECORDED(NVN_ENTRY_RECORDED) NVN_ZERO_PROCS(NVN_ENTRY_ZERO) };
+#undef NVN_ENTRY_ZERO
+#undef NVN_ENTRY_RECORDED
+#undef NVN_ENTRY
+#define N_IMPLS (sizeof impls / sizeof impls[0])
+
+static struct {
+    bool up;
+    uint64_t base;
+    uint64_t driver_loader;
+    uint64_t driver_addrs[NVN_DRIVER_PROC_COUNT];
+    pthread_mutex_t lock;
+    uint32_t used;
+    const nvn_impl *sorted[N_IMPLS];
+    char *names[RL_NVN_SLOTS];
+    bool recorded[RL_NVN_SLOTS];
+    rl_fn_entry entries[RL_NVN_SLOTS];
+    rl_unit unit;
+} nvn = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+static uint64_t miss(rl_ctx *c, uint8_t *mem, uint32_t slot)
+{
+    if (slot < RL_NVN_SLOTS && nvn.recorded[slot])
+        return nvn_cmd_record(c, mem, NVN_CMD_COUNT + slot);
+    const char *name = slot < RL_NVN_SLOTS && nvn.names[slot] ? nvn.names[slot] : "(unnamed)";
+    return (uint64_t)rl_guest_fatal(c, "nvn", "%s is not implemented (called from 0x%llx)", name,
+                                    (unsigned long long)c->x[30]);
+}
+
+/*
+ * One function per slot: miss_<g><a><b><c><d> is slot (g - 1) * 256 + the
+ * base-4 number abcd, so the list below names them in slot order.
+ */
+#define MISS_SLOT(t)                                                                                                   \
+    (((t) / 10000 - 1) * 256 + ((t) / 1000 % 10) * 64 + ((t) / 100 % 10) * 16 + ((t) / 10 % 10) * 4 + (t) % 10)
+#define MISS1(i)                                                                                                       \
+    static uint64_t miss_##i(rl_ctx *c, uint8_t *mem) { return miss(c, mem, MISS_SLOT(i)); }
+#define MISS4(i) MISS1(i##0) MISS1(i##1) MISS1(i##2) MISS1(i##3)
+#define MISS16(i) MISS4(i##0) MISS4(i##1) MISS4(i##2) MISS4(i##3)
+#define MISS64(i) MISS16(i##0) MISS16(i##1) MISS16(i##2) MISS16(i##3)
+#define MISS256(i) MISS64(i##0) MISS64(i##1) MISS64(i##2) MISS64(i##3)
+MISS256(1) MISS256(2) MISS256(3) MISS256(4)
+
+#define REF1(i) miss_##i,
+#define REF4(i) REF1(i##0) REF1(i##1) REF1(i##2) REF1(i##3)
+#define REF16(i) REF4(i##0) REF4(i##1) REF4(i##2) REF4(i##3)
+#define REF64(i) REF16(i##0) REF16(i##1) REF16(i##2) REF16(i##3)
+#define REF256(i) REF64(i##0) REF64(i##1) REF64(i##2) REF64(i##3)
+static rl_fn const misses[RL_NVN_SLOTS] = { REF256(1) REF256(2) REF256(3) REF256(4) };
+
+static int by_name(const void *a, const void *b)
+{
+    return strcmp((*(const nvn_impl *const *)a)->name, (*(const nvn_impl *const *)b)->name);
+}
+
+static int find_impl(const char *name)
+{
+    uint32_t lo = 0, hi = N_IMPLS;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        int c = strcmp(nvn.sorted[mid]->name, name);
+        if (!c)
+            return (int)mid;
+        if (c < 0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return -1;
+}
+
+/** @brief The slot of name, taking a free one for a name relift does not implement; 0 when none is left. */
+static uint64_t slot_of(const char *name)
+{
+    int k = find_impl(name);
+    if (k >= 0)
+        return nvn.base + 4u * (uint64_t)k;
+    uint64_t addr = 0;
+    pthread_mutex_lock(&nvn.lock);
+    for (uint32_t i = N_IMPLS; i < nvn.used; i++)
+        if (!strcmp(nvn.names[i], name)) {
+            addr = nvn.base + 4u * (uint64_t)i;
+            break;
+        }
+    if (!addr && nvn.used < RL_NVN_SLOTS) {
+        char *copy = strdup(name);
+        if (copy) {
+            nvn.names[nvn.used] = copy;
+            nvn.recorded[nvn.used] = !strncmp(name, RECORDED_PREFIX, sizeof RECORDED_PREFIX - 1);
+            addr = nvn.base + 4u * (uint64_t)nvn.used++;
+        }
+    }
+    pthread_mutex_unlock(&nvn.lock);
+    if (!addr)
+        rl_log(RL_LOG_ERROR, "nvn", "no slot left for %s", name);
+    return addr;
+}
+
+uint64_t rl_nvn_proc(const char *name)
+{
+    if (!nvn.up || !name)
+        return 0;
+    int k = find_impl(name);
+    return k >= 0 ? nvn.base + 4u * (uint64_t)k : 0;
+}
+
+int nvn_guest_call(rl_ctx *c, uint8_t *mem, uint64_t fn, const uint64_t *args, unsigned n, uint64_t *ret)
+{
+    uint64_t lr = c->x[30], pc = c->pc;
+    for (unsigned i = 0; i < n && i < 8; i++)
+        c->x[i] = args[i];
+    c->x[30] = nvn.base;
+    int rc = rl_call_guest(c, mem, fn);
+    if (rc != RL_OK)
+        return rc;
+    c->x[30] = lr;
+    c->pc = pc;
+    if (ret)
+        *ret = c->x[0];
+    return RL_OK;
+}
+
+/** @brief The driver's own function for proc k of nvn_driver.c (0 when it has none), asking its loader once. */
+static int driver_addr(rl_ctx *c, uint8_t *mem, int k, const char *name, uint64_t *addr)
+{
+    uint64_t a = __atomic_load_n(&nvn.driver_addrs[k], __ATOMIC_ACQUIRE);
+    if (a || !nvn.driver_loader) {
+        *addr = a;
+        return RL_OK;
+    }
+    size_t len = strlen(name) + 1;
+    uint64_t sp = c->sp;
+    c->sp = (sp - len) & ~15ull;
+    memcpy(mem + c->sp, name, len);
+    uint64_t arg = c->sp;
+    int rc = nvn_guest_call(c, mem, nvn.driver_loader, &arg, 1, &a);
+    c->sp = sp;
+    if (rc != RL_OK)
+        return rc;
+    __atomic_store_n(&nvn.driver_addrs[k], a, __ATOMIC_RELEASE);
+    *addr = a;
+    return RL_OK;
+}
+
+/** @brief The guest address the game gets for name: the driver's own function for a kept proc, else a slot. */
+static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
+{
+    *addr = 0;
+    if (!name)
+        return RL_OK;
+    int k = nvn_driver_index(name);
+    if (k >= 0) {
+        int rc = driver_addr(c, mem, k, name, addr);
+        if (rc != RL_OK || *addr)
+            return rc;
+    }
+    *addr = slot_of(name);
+    return RL_OK;
+}
+
+int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *args, unsigned n, uint64_t *ret)
+{
+    int k = nvn_driver_index(name);
+    uint64_t a = 0;
+    int rc = k >= 0 ? driver_addr(c, mem, k, name, &a) : RL_OK;
+    if (rc != RL_OK)
+        return rc;
+    if (!a)
+        return rl_guest_fatal(c, "nvn", "the driver has no %s", name);
+    return nvn_guest_call(c, mem, a, args, n, ret);
+}
+
+/** @brief nvnBootstrapLoader(const char *name): the address of any proc, as nvnDeviceGetProcAddress gives it. */
+uint64_t nvnh_nvnBootstrapLoader(rl_ctx *c, uint8_t *mem)
+{
+    const char *name = nvn_str(mem, c->x[0], NVN_NAME_MAX);
+    uint64_t a;
+    int rc = proc_addr(c, mem, name, &a);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = a;
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "nvnBootstrapLoader(%s) = 0x%llx", name ? name : "(null)", (unsigned long long)c->x[0]);
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetProcAddress(const NVNdevice *device, const char *name): the same for every device. */
+uint64_t nvnh_nvnDeviceGetProcAddress(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t a;
+    int rc = proc_addr(c, mem, nvn_str(mem, c->x[1], NVN_NAME_MAX), &a);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = a;
+    return nvn_ret(c);
+}
+
+static int hook_start(void *user, uint64_t *code_free)
+{
+    (void)user;
+    uint64_t bytes = (4u * RL_NVN_SLOTS + HOS_PAGE - 1) & ~(HOS_PAGE - 1);
+    if (rl_hos_reserve_at(*code_free, bytes) != KR_SUCCESS) {
+        rl_log(RL_LOG_ERROR, "nvn", "no guest address space for the NVN2 layer");
+        return -1;
+    }
+    nvn.base = *code_free;
+    *code_free += bytes;
+    for (uint32_t i = 0; i < N_IMPLS; i++)
+        nvn.sorted[i] = &impls[i];
+    qsort(nvn.sorted, N_IMPLS, sizeof nvn.sorted[0], by_name);
+    for (uint32_t i = 0; i < RL_NVN_SLOTS; i++) {
+        rl_fn fn = i < N_IMPLS ? nvn.sorted[i]->fn : misses[i];
+        nvn.entries[i] = (rl_fn_entry){ nvn.base + 4u * (uint64_t)i, 4, RL_FN_OVERRIDE, fn };
+    }
+    nvn.used = N_IMPLS;
+    nvn.unit = (rl_unit){
+        .abi_version = RL_ABI_VERSION,
+        .ctx_size = sizeof(rl_ctx),
+        .fn_count = RL_NVN_SLOTS,
+        .fns = nvn.entries,
+        .name = "nvn",
+    };
+    const rl_unit *u = &nvn.unit;
+    if (rl_units_register(&u, 1) != 0)
+        return -1;
+    nvn.up = true;
+    rl_log(RL_LOG_INFO, "nvn", "NVN2 layer up: %u procs implemented, thunks at 0x%llx", (unsigned)N_IMPLS,
+           (unsigned long long)nvn.base);
+    return 0;
+}
+
+static uint64_t hook_import(void *user, const char *symbol)
+{
+    (void)user;
+    return rl_nvn_proc(symbol);
+}
+
+static rl_fn hook_replace(void *user, const char *symbol)
+{
+    (void)user;
+    return nvn.up && !strcmp(symbol, "nvnBootstrapLoader") ? nvnh_nvnBootstrapLoader : NULL;
+}
+
+static void hook_defined(void *user, const char *symbol, uint64_t addr)
+{
+    (void)user;
+    if (!strcmp(symbol, "nvnBootstrapLoaderInternal"))
+        nvn.driver_loader = addr;
+}
+
+static int hook_wants(void *user, const char *symbol)
+{
+    (void)user;
+    return !strcmp(symbol, "nvnBootstrapLoader");
+}
+
+static const rl_switch_hook g_hook = {
+    .name = "nvn",
+    .start = hook_start,
+    .import = hook_import,
+    .replace = hook_replace,
+    .defined = hook_defined,
+    .wants = hook_wants,
+};
+
+const rl_switch_hook *rl_nvn_switch_hook(void) { return &g_hook; }
+
+__attribute__((constructor)) static void register_hook(void) { (void)rl_switch_register_auto_hook(&g_hook); }
+
+const char *nvn_slot_name(uint32_t slot)
+{
+    if (slot >= RL_NVN_SLOTS)
+        return NULL;
+    pthread_mutex_lock(&nvn.lock);
+    const char *n = slot < nvn.used ? nvn.names[slot] : NULL;
+    pthread_mutex_unlock(&nvn.lock);
+    return n;
+}

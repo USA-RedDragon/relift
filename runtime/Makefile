@@ -119,7 +119,7 @@ ARM32_INC := $(CORE_INC) -Icpus/arm32/include -Icpus/arm32
 MIPS_INC := $(CORE_INC) -Icpus/mips/include -Icpus/mips
 RSP_INC := $(CORE_INC) -Icpus/rsp/include -Icpus/rsp
 NDS_INC := $(ARM32_INC) -Iguests/nds
-VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen
+VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen -Iguests/switch/nvn
 RUNNER_INC := -Icore/tests
 
 CORE_SRCS := $(wildcard core/*.c) $(HOST_SRCS)
@@ -162,8 +162,8 @@ N64R_HDRS := $(MIPS_HDRS) $(RSP_HDRS) $(N64_HDRS) $(wildcard guests/n64/run/*.h 
 NDSR_INC := $(NDS_INC) -Iguests/nds/run -Iguests/nds/run/include
 NDSR_SRCS := $(wildcard guests/nds/run/*.c)
 NDSR_HDRS := $(NDS_HDRS) $(wildcard guests/nds/run/*.h guests/nds/run/include/relift/nds/*.h)
-VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c)
-VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h)
+VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c guests/switch/nvn/*.c)
+VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h guests/switch/nvn/*.h)
 
 FIBER_SRCS := core/fiber.c
 FIBER_ASM := $(CORE_ASM)

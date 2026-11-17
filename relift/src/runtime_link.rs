@@ -292,6 +292,15 @@ pub fn find_moltenvk(cache_root: &Path) -> Option<LinkedVulkan> {
     .or_else(|| moltenvk_in(Path::new("/usr/local/opt/molten-vk"), "Homebrew"))
 }
 
+/// The sources of the Vulkan forwarding layer and of the NVN2 layer over it.
+fn vk_sources(rt: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let switch = rt.join("guests").join("switch");
+    let mut v = c_files(&switch.join("vk"))?;
+    v.extend(c_files(&switch.join("vk").join("gen"))?);
+    v.extend(c_files(&switch.join("nvn"))?);
+    Ok(v)
+}
+
 /// The extra sources of the runtime at `rt`, with SDL3 and MoltenVK looked
 /// up under `cache_root`.
 ///
@@ -299,9 +308,7 @@ pub fn find_moltenvk(cache_root: &Path) -> Option<LinkedVulkan> {
 ///
 /// A source directory of the runtime cannot be read.
 pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
-    let vk_dir = rt.join("guests").join("switch").join("vk");
-    let mut vk = c_files(&vk_dir)?;
-    vk.extend(c_files(&vk_dir.join("gen"))?);
+    let vk = vk_sources(rt)?;
     let window = rt.join("host").join("window_sdl3.c");
     let sdl3 = find_sdl3(cache_root).filter(|_| window.is_file());
     let audio = rt.join("host").join("audio_sdl3.c");
@@ -338,11 +345,9 @@ pub fn android_extras(
     with_vk: bool,
 ) -> std::io::Result<Extras> {
     let host = rt.join("host");
-    let vk_dir = rt.join("guests").join("switch").join("vk");
     let mut vk = Vec::new();
     if with_vk {
-        vk = c_files(&vk_dir)?;
-        vk.extend(c_files(&vk_dir.join("gen"))?);
+        vk = vk_sources(rt)?;
     }
     Ok(Extras {
         vk,
@@ -386,15 +391,13 @@ pub fn android_extras(
 /// MoltenVK in `deps`.
 pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io::Result<Extras> {
     let host = rt.join("host");
-    let vk_dir = rt.join("guests").join("switch").join("vk");
     let mut vk = Vec::new();
     let mut vulkan = None;
     if with_vk {
         let lib = deps.moltenvk.as_ref().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, deps.moltenvk_missing.clone())
         })?;
-        vk = c_files(&vk_dir)?;
-        vk.extend(c_files(&vk_dir.join("gen"))?);
+        vk = vk_sources(rt)?;
         vulkan = Some(LinkedVulkan {
             libs: vec![lib.display().to_string()],
             origin: "iOS static".into(),
@@ -517,8 +520,12 @@ impl Extras {
         rt_flags: &[String],
         obj: &dyn Fn(&Path) -> PathBuf,
     ) -> Vec<Compile> {
-        let vk_inc = ["guests/switch/vk", "guests/switch/vk/gen"]
-            .map(|p| format!("-I{}", rt.join(p).display()));
+        let vk_inc = [
+            "guests/switch/vk",
+            "guests/switch/vk/gen",
+            "guests/switch/nvn",
+        ]
+        .map(|p| format!("-I{}", rt.join(p).display()));
         let mut out: Vec<Compile> = self
             .vk
             .iter()

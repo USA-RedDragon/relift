@@ -1,0 +1,180 @@
+/**
+ * @file nvn_misc.c
+ * @brief NVN2 procs with little state: descriptor handles, timestamps,
+ * events, and the queries of queues, pools and windows.
+ */
+#include "nvn_priv.h"
+
+/** @brief nvnDeviceGetSeparateTextureHandle(const NVNdevice *, int id): the id, as the driver encodes it. */
+uint64_t nvnh_nvnDeviceGetSeparateTextureHandle(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1];
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetSeparateSamplerHandle(const NVNdevice *, int id): id << 20, as the driver encodes it. */
+uint64_t nvnh_nvnDeviceGetSeparateSamplerHandle(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1] << 20;
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetTexelFetchHandle(const NVNdevice *, int id): the id. */
+uint64_t nvnh_nvnDeviceGetTexelFetchHandle(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1];
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetUniformBufferHandle(const NVNdevice *, NVNbufferAddress, size_t): the driver's packing (sdk 0x5f85b0). */
+uint64_t nvnh_nvnDeviceGetUniformBufferHandle(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    uint64_t hi = (0x1e0000000000ull + (c->x[2] << 41)) & 0xffffe00000000000ull;
+    c->x[0] = hi | c->x[1] >> 4;
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetCommandHandleMemorySize(const NVNdevice *, NVNcommandHandle): relift's handles hold no guest memory. */
+uint64_t nvnh_nvnDeviceGetCommandHandleMemorySize(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 0;
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceFinalizeCommandHandle(NVNdevice *, NVNcommandHandle). */
+uint64_t nvnh_nvnDeviceFinalizeCommandHandle(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdset_free(c->x[1]);
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetCurrentTimestampInNanoseconds(const NVNdevice *). */
+uint64_t nvnh_nvnDeviceGetCurrentTimestampInNanoseconds(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = rl_guest_clock_ns();
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetTimestampInNanoseconds(const NVNdevice *, const NVNcounterData *): the counter's timestamp, which relift writes in nanoseconds. */
+uint64_t nvnh_nvnDeviceGetTimestampInNanoseconds(rl_ctx *c, uint8_t *mem)
+{
+    c->x[0] = c->x[1] ? rl_ld64(mem, c->x[1] + 8) : 0;
+    return nvn_ret(c);
+}
+
+typedef struct nvn_event {
+    nvn_obj o;
+    uint64_t pool, offset, addr;
+} nvn_event;
+
+/** @brief nvnEventInitialize(NVNevent *, const NVNeventBuilder *): NVNboolean; the value is the u32 at the builder's pool and offset. */
+uint64_t nvnh_nvnEventInitialize(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t ev = c->x[0], builder = c->x[1], pool = 0, offset = 0;
+    int rc = nvn_driver_call(c, mem, "nvnEventBuilderGetMemoryPool", &builder, 1, &pool);
+    if (rc == RL_OK)
+        rc = nvn_driver_call(c, mem, "nvnEventBuilderGetMemoryOffset", &builder, 1, &offset);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    uint64_t base = nvn_pool_memory(pool, NULL);
+    if (!base)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnEventInitialize: pool 0x%llx is not a memory pool",
+                                        (unsigned long long)pool);
+    nvn_event *e = (nvn_event *)nvn_obj_new(ev, NVN_EVENT, sizeof *e);
+    if (e) {
+        e->pool = pool;
+        e->offset = offset;
+        e->addr = base + offset;
+    }
+    c->x[0] = e != NULL;
+    return nvn_ret(c);
+}
+
+/** @brief nvnEventFinalize(NVNevent *). */
+uint64_t nvnh_nvnEventFinalize(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_obj_free(nvn_obj_get(c->x[0], NVN_EVENT));
+    return nvn_ret(c);
+}
+
+static nvn_event *event_of(rl_ctx *c)
+{
+    nvn_event *e = (nvn_event *)nvn_obj_get(c->x[0], NVN_EVENT);
+    if (!e)
+        rl_guest_fatal(c, "nvn", "event proc on 0x%llx, not an event", (unsigned long long)c->x[0]);
+    return e;
+}
+
+/** @brief nvnEventGetValue(const NVNevent *): uint32_t. */
+uint64_t nvnh_nvnEventGetValue(rl_ctx *c, uint8_t *mem)
+{
+    nvn_event *e = event_of(c);
+    if (!e)
+        return RL_PENDING;
+    c->x[0] = __atomic_load_n((uint32_t *)(void *)(mem + e->addr), __ATOMIC_ACQUIRE);
+    return nvn_ret(c);
+}
+
+/** @brief NVNeventSignalMode: write the value, or add it. */
+enum { EVENT_WRITE = 0, EVENT_ADD = 1 };
+
+/** @brief nvnEventSignal(NVNevent *, NVNeventSignalMode, uint32_t value). */
+uint64_t nvnh_nvnEventSignal(rl_ctx *c, uint8_t *mem)
+{
+    nvn_event *e = event_of(c);
+    if (!e)
+        return RL_PENDING;
+    uint32_t *p = (uint32_t *)(void *)(mem + e->addr);
+    if ((uint32_t)c->x[1] == EVENT_ADD)
+        __atomic_add_fetch(p, (uint32_t)c->x[2], __ATOMIC_RELEASE);
+    else
+        __atomic_store_n(p, (uint32_t)c->x[2], __ATOMIC_RELEASE);
+    return nvn_ret(c);
+}
+
+/** @brief nvnEventGetMemoryPool(const NVNevent *). */
+uint64_t nvnh_nvnEventGetMemoryPool(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_event *e = event_of(c);
+    if (!e)
+        return RL_PENDING;
+    c->x[0] = e->pool;
+    return nvn_ret(c);
+}
+
+/** @brief nvnEventGetMemoryOffset(const NVNevent *). */
+uint64_t nvnh_nvnEventGetMemoryOffset(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_event *e = event_of(c);
+    if (!e)
+        return RL_PENDING;
+    c->x[0] = e->offset;
+    return nvn_ret(c);
+}
+
+/** @brief Procs that answer 0: no queue error, no command memory relift tracks, no attached debugger. */
+uint64_t nvn_zero(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 0;
+    return nvn_ret(c);
+}
+
+/** @brief nvnTextureGetTextureAddress(const NVNtexture *): its GPU address, the guest address of its storage. */
+uint64_t nvnh_nvnTextureGetTextureAddress(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    const nvn_tex_desc *d = nvn_texture_desc(c->x[0]);
+    c->x[0] = d ? nvn_pool_memory(d->pool, NULL) + d->offset : 0;
+    return nvn_ret(c);
+}
