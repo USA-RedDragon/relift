@@ -931,3 +931,19 @@ fn a_thumb_switch_through_a_case_helper_reaches_every_case() {
         );
     }
 }
+
+#[test]
+fn a_veneer_s_constant_target_is_a_function_of_its_own() {
+    let mut m = Machine::new(Profile::V4t);
+    let veneer = BASE + 0x40;
+    let target = BASE + 0x80;
+    m.arm(BASE, &[A_PUSH_R4_LR, a_bl(BASE + 4, veneer), A_POP_R4_PC]);
+    m.arm(veneer, &[0xE59F_C000, 0xE12F_FF1C, target | 1]);
+    m.thumb(target, &[0xDF06, T_BX_LR]);
+    let r = m.run(all(), arm(BASE));
+    assert!(
+        r.functions.contains_key(&thumb(target)),
+        "the lifted veneer reaches {target:#x} through dispatch: {:?}",
+        r.functions.keys().collect::<Vec<_>>()
+    );
+}

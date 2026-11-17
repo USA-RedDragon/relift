@@ -596,8 +596,9 @@ impl Run<'_> {
                 }
             }
             _ => {
+                let computed = matches!(block.exit.next, relift_ir::Next::Dynamic(_));
                 for t in out.targets.clone() {
-                    self.jump(loc, enc, bx, t, &out, link);
+                    self.jump(loc, (enc, computed), bx, t, &out, link);
                 }
             }
         }
@@ -1434,7 +1435,19 @@ impl Run<'_> {
         s
     }
 
-    fn jump(&mut self, site: Loc, enc: Encoding, bx: bool, t: Abs, out: &Out, link: bool) {
+    /// A transfer from `site` to `t`; `computed` when the instruction's
+    /// target is a register or a load (`enc`'s exit is dynamic): a constant
+    /// target is then a function entry of its own, as the lifted code
+    /// reaches it through dispatch (a veneer's `LDR R12, [PC]; BX R12`).
+    fn jump(
+        &mut self,
+        site: Loc,
+        (enc, computed): (Encoding, bool),
+        bx: bool,
+        t: Abs,
+        out: &Out,
+        link: bool,
+    ) {
         let st = &out.st;
         let plain_return = matches!(
             t,
@@ -1479,7 +1492,7 @@ impl Run<'_> {
                     return;
                 }
                 for to in self.targets(site, v, thumb) {
-                    if to != self.entry && self.env.entries.contains(&to) {
+                    if to != self.entry && (computed || self.env.entries.contains(&to)) {
                         self.tail(site, to, st);
                     } else {
                         self.succ(site, to, st.clone());
