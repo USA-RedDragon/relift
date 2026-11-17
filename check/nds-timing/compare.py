@@ -37,7 +37,7 @@ for h in hw:
         rec = cycles(open_cases[key]["relift"])
         if (got is None) != (rec is None) or (got is not None and abs(got - rec) > 0.01):
             bad += 1
-            print(f"open case changed: {label}: hw {want[0]:g}, recorded {rec:g}, now {got}")
+            print(f"open case changed: {label}: hw {want[0]:g}, recorded {rec}, now {got}")
         else:
             known += 1
         continue
