@@ -97,6 +97,22 @@ static uint32_t block_gobs(uint32_t n, uint32_t limit)
     return b;
 }
 
+/**
+ * @brief The driver's block size (in GOBs) for a level 0 of n rows of
+ * blocks (or n slices): the tallest of 1 to 16 whose step t (16 rows, or 2
+ * slices, for a block of one GOB) the count n + n / 2 reaches, as the
+ * driver's layout code chooses it.
+ */
+static uint32_t driver_block(uint32_t n, uint32_t t)
+{
+    uint32_t x = n + n / 2, b = 1;
+    while (b < 16 && x >= t) {
+        b *= 2;
+        t *= 2;
+    }
+    return b;
+}
+
 bool nvn_tex_format(uint32_t format, uint32_t *bpb, uint32_t *bw, uint32_t *bh)
 {
     if (format >= sizeof formats / sizeof formats[0] || !formats[format].bpb)
@@ -145,8 +161,8 @@ bool nvn_tex_layout(nvn_tex_desc *d)
         return true;
     }
     uint32_t hb0 = div_up(h, bh);
-    d->block_h = block_gobs(div_up(hb0, GOB_ROWS), 16);
-    d->block_d = d->target == TARGET_3D ? block_gobs(depth, 16) : 1;
+    d->block_h = d->target == TARGET_3D ? 1 : driver_block(hb0, 16);
+    d->block_d = d->target == TARGET_3D ? driver_block(depth, 2) : 1;
     uint64_t layer = 0;
     for (uint32_t l = 0; l < levels; l++) {
         uint32_t wl = w >> l ? w >> l : 1, hl = h >> l ? h >> l : 1, dl = depth >> l ? depth >> l : 1;
