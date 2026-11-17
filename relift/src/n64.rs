@@ -24,6 +24,11 @@ use crate::ui::Ui;
 /// fast as -O0 and within a few percent of -O2, which builds the most.
 const LIFTED_OPT: &str = "-O1";
 
+/// The largest cartridge image (the cartridge domain's 252 MiB, rounded up):
+/// a larger file is not read to check, so a many-GB game dump is not loaded
+/// into memory.
+const MAX_ROM: u64 = 256 << 20;
+
 /// The optimization of lifted RSP code: its vector instructions are lane
 /// helpers that cost nothing only once inlined, and an RSP task runs them
 /// for every vertex and every audio sample.
@@ -54,7 +59,7 @@ const LAYERS: [&str; 5] = [
 /// orders.
 #[must_use]
 pub fn is_rom(path: &Path) -> bool {
-    if !path.is_file() {
+    if !path.is_file() || std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_ROM) {
         return false;
     }
     std::fs::read(path).is_ok_and(|rom| is_rom_image(&rom))

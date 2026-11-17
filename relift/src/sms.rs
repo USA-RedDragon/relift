@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use relift_progress::{Line, Paint, duration, noun};
 use relift_sms::program::{self, Console, Region};
-use relift_sms_formats::{Cartridge, System};
+use relift_sms_formats::{Cartridge, System, banks};
 
 use crate::cross;
 use crate::gb::Built;
@@ -47,12 +47,17 @@ const SMS_LAYERS: Layers = Layers {
 /// The extensions of the cartridge images the import takes.
 const EXTENSIONS: [&str; 4] = ["sms", "gg", "sg", "sc"];
 
+/// The largest image a cartridge parses from (the ROM and a copier header):
+/// a larger file is not read to check, so a many-GB game dump is not loaded
+/// into memory.
+const MAX_IMAGE: u64 = (banks::MAX_ROM + banks::COPIER_HEADER) as u64;
+
 /// Whether `path` is a Master System, Game Gear or SG-1000 cartridge image:
 /// a `.sms`, `.gg`, `.sg` or `.sc` file whose layout the formats crate
 /// takes, or any file with a `TMR SEGA` header.
 #[must_use]
 pub fn is_rom(path: &Path) -> bool {
-    if !path.is_file() {
+    if !path.is_file() || std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_IMAGE) {
         return false;
     }
     let ext = path

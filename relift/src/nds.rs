@@ -21,6 +21,11 @@ use crate::ui::Ui;
 /// The image's file name in the import directory.
 const ROM_FILE: &str = "rom.nds";
 
+/// The largest cartridge image (the 4 Gbit carts' 512 MiB, with room for
+/// oddities): a larger file is not read to check, so a many-GB game dump is
+/// not loaded into memory.
+const MAX_ROM: u64 = 1 << 30;
+
 /// What the program compiles. Lifted code is built at -O0 as on the GBA:
 /// every access is a bus call.
 const NDS_LAYERS: Layers = Layers {
@@ -48,7 +53,7 @@ const NDS_LAYERS: Layers = Layers {
 /// checks.
 #[must_use]
 pub fn is_rom(path: &Path) -> bool {
-    if !path.is_file() {
+    if !path.is_file() || std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_ROM) {
         return false;
     }
     let named = path
