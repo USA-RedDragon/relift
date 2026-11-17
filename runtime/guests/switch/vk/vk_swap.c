@@ -698,6 +698,28 @@ static void swap_free(vkf_swap *s)
     free(s);
 }
 
+/**
+ * @brief Host usage for a swapchain image beyond what the guest asked: every
+ * usage a vi surface supports that the host format allows. The console's
+ * NvSwapchain::CreateSwapchainKHR (vulkan.nso) creates its images with the
+ * guest's imageUsage alone (verified), and games still sample swapchain
+ * images they created only as color attachments, which the console's
+ * driver accepts (inferred from shipped games doing it).
+ */
+static VkImageUsageFlags console_usage(VkFormatFeatureFlags f)
+{
+    VkImageUsageFlags u = 0;
+    if (f & VK_FORMAT_FEATURE_TRANSFER_DST_BIT)
+        u |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (f & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+        u |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (f & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)
+        u |= VK_IMAGE_USAGE_STORAGE_BIT;
+    if (f & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)
+        u |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    return u;
+}
+
 static VkResult swap_images(vkf_swap *s, const VkSwapchainCreateInfoKHR *ci)
 {
     const vkf_dev *d = s->dobj->dev;
@@ -718,7 +740,7 @@ static VkResult swap_images(vkf_swap *s, const VkSwapchainCreateInfoKHR *ci)
         .arrayLayers = ci->imageArrayLayers ? ci->imageArrayLayers : 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = ci->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .usage = ci->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | console_usage(fp.optimalTilingFeatures),
         .sharingMode = ci->imageSharingMode,
         .queueFamilyIndexCount = ci->imageSharingMode == VK_SHARING_MODE_CONCURRENT ? ci->queueFamilyIndexCount : 0,
         .pQueueFamilyIndices = ci->imageSharingMode == VK_SHARING_MODE_CONCURRENT ? ci->pQueueFamilyIndices : NULL,

@@ -1975,6 +1975,28 @@ static VkResult counting_rects(VkPhysicalDevice pd, VkSurfaceKHR s, uint32_t *n,
     return g_real_rects(pd, s, n, r);
 }
 
+static PFN_vkGetDeviceProcAddr g_real_gdpa;
+static PFN_vkCreateImage g_real_create_image;
+static VkImageUsageFlags g_host_image_usage;
+
+static VkResult recording_create_image(VkDevice d, const VkImageCreateInfo *ci, const VkAllocationCallbacks *a, VkImage *out)
+{
+    if (ci->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+        g_host_image_usage = ci->usage;
+    return g_real_create_image(d, ci, a, out);
+}
+
+static PFN_vkVoidFunction recording_gdpa(VkDevice d, const char *name)
+{
+    PFN_vkVoidFunction r = g_real_gdpa(d, name);
+    if (r && !strcmp(name, "vkCreateImage")) {
+        memcpy(&g_real_create_image, &r, sizeof r);
+        PFN_vkCreateImage f = recording_create_image;
+        memcpy(&r, &f, sizeof r);
+    }
+    return r;
+}
+
 static void *noheadless_gipa(void *inst, const char *name)
 {
     if (!strcmp(name, "vkCreateHeadlessSurfaceEXT"))
@@ -1993,6 +2015,8 @@ static void *noheadless_gipa(void *inst, const char *name)
         memcpy(&g_real_formats2, &r, sizeof r), f = (void (*)(void))counting_formats2;
     else if (!strcmp(name, "vkGetPhysicalDevicePresentRectanglesKHR"))
         memcpy(&g_real_rects, &r, sizeof r), f = (void (*)(void))counting_rects;
+    else if (!strcmp(name, "vkGetDeviceProcAddr"))
+        memcpy(&g_real_gdpa, &r, sizeof r), f = (void (*)(void))recording_gdpa;
     if (f)
         memcpy(&r, &f, sizeof r);
     return r;
@@ -2084,7 +2108,12 @@ TEST(vk_vi_surface_works_offscreen_without_headless_surface)
         .clipped = VK_TRUE,
     };
     uint64_t gsw = galloc(8);
+    g_host_image_usage = 0;
     CHECK_EQ(VKR(G("vkCreateSwapchainKHR", dev, gput(&swci, sizeof swci), 0, gsw)), VK_SUCCESS);
+    VkImageUsageFlags want = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    CHECK_EQ(g_host_image_usage & want, want);
     uint64_t sw = g64(gsw);
     uint64_t gin = galloc(4);
     CHECK_EQ(VKR(G("vkGetSwapchainImagesKHR", dev, sw, gin, 0)), VK_SUCCESS);
