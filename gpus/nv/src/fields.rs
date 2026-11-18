@@ -113,7 +113,8 @@ pub struct Tex {
     pub f16: u8,
     /// `TXQ`'s query; for `SUQUERY` 0 is `COMP_STATUS`.
     pub query: u8,
-    /// The sparse fault predicate destination (7 is `PT`).
+    /// The sparse fault predicate destination (7 is `PT`) of the forms
+    /// that have one.
     pub fault: u8,
     /// The atomic operation of `SUATOM` and `SURED`.
     pub atom: u8,

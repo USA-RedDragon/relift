@@ -1,5 +1,5 @@
-//! Lowering Maxwell instructions onto SM86 for the translator of
-//! `relift-gpu-sm86`.
+//! Lowering Maxwell instructions onto the instructions of
+//! `relift-gpu-nv`'s translator.
 //!
 //! Every Maxwell form has a row in [`table`]: lowered to exactly one SM86
 //! form, a pseudo-instruction the translator handles from its decoded
@@ -11,22 +11,20 @@
 //! pseudo-instruction or a stop. `LOWERING.md` is the table as text.
 //!
 //! Instruction `k` of the Maxwell code (scheduling words skipped) becomes
-//! SM86 word `k`, so branch targets keep their instruction.
+//! instruction `k`, so branch targets keep their instruction.
 
-mod encode;
+mod build;
 pub mod flow;
 pub mod table;
 
-pub use encode::Lowered;
-
-use std::collections::BTreeMap;
+pub use build::Lowered;
 
 use crate::bundle::slots;
 use crate::form::{Op, Src};
 use crate::inst::Inst;
 use crate::program::Program;
+use relift_gpu_nv::Inst as Inst86;
 use relift_gpu_nv::program::{Program as Program86, Sph as Sph86};
-use relift_gpu_sm86::Word;
 use table::Row;
 
 /// What `i` becomes on its own: the stop of its table row, or its
@@ -45,7 +43,7 @@ fn lower_in(i: &Inst, f: Option<&flow::Flow>) -> Lowered {
     if let Row::Stop { reason } = table::row(i.op(), i.enc.src) {
         return Lowered::Stop(reason);
     }
-    encode::lower(i, f).unwrap_or(Lowered::Stop("no lowering for a checked row"))
+    build::lower(i, f).unwrap_or(Lowered::Stop("no lowering for a checked row"))
 }
 
 /// A form a program uses that does not lower: where, which and why.
@@ -57,11 +55,6 @@ pub struct Stop {
     pub src: Src,
     pub reason: &'static str,
 }
-
-/// The SM86 `NOP` word an instruction control never reaches becomes.
-const NOP: Word = Word(0x918 | (7 << 12) | (7 << 110) | (7 << 113));
-/// An unguarded SM86 `EXIT`.
-const EXIT: Word = Word(0x94d | (7 << 12) | (7 << 87) | (7 << 110) | (7 << 113));
 
 /// The SM86 header of a Maxwell SPH: its 20 words, version 4, the rest
 /// zero. The two headers share the layout of those words (Ryujinx's
@@ -81,7 +74,7 @@ fn sph86(p: &Program) -> Result<Option<Sph86>, &'static str> {
     Ok(Some(sph))
 }
 
-/// The program `p` lowered to SM86: one word or pseudo-instruction per
+/// The program `p` lowered: one instruction or pseudo-instruction per
 /// Maxwell instruction control reaches, a `NOP` for each it does not.
 ///
 /// # Errors
@@ -99,8 +92,7 @@ pub fn program(p: &Program) -> Result<Program86, Vec<Stop>> {
         }]
     })?;
     let n = f.reached.len().max(f.kil_exits.last().map_or(0, |k| k + 1));
-    let mut words = vec![NOP; n];
-    let mut pseudo = BTreeMap::new();
+    let mut code = vec![Inst86::new("NOP"); n];
     let mut out: Vec<Stop> = Vec::new();
     for s in slots(&p.code) {
         let k = flow::index(s.at);
@@ -114,10 +106,7 @@ pub fn program(p: &Program) -> Result<Program86, Vec<Stop>> {
             continue;
         }
         match lower_in(&i, Some(&f)) {
-            Lowered::Word(w) => words[k] = w,
-            Lowered::Pseudo(x) => {
-                pseudo.insert(k, x);
-            }
+            Lowered::Exact(x) | Lowered::Pseudo(x) => code[k] = x,
             Lowered::Stop(reason) => {
                 let (op, src) = (i.op(), i.enc.src);
                 if !out
@@ -135,20 +124,15 @@ pub fn program(p: &Program) -> Result<Program86, Vec<Stop>> {
         }
     }
     for &k in &f.kil_exits {
-        words[k] = EXIT;
+        code[k] = Inst86::new("EXIT");
     }
     if !out.is_empty() {
         return Err(out);
     }
-    let code = words
-        .iter()
-        .enumerate()
-        .map(|(k, w)| match pseudo.get(&k) {
-            Some(p) => Ok(p.clone()),
-            None => relift_gpu_sm86::decode(*w, 16 * k as u64).map_err(|e| e.to_string()),
-        })
-        .collect();
-    Ok(Program86 { sph, code })
+    Ok(Program86 {
+        sph,
+        code: code.into_iter().map(Ok).collect(),
+    })
 }
 
 /// The forms of `p` that stop (see [`program`]); empty when the whole

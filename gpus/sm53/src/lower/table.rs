@@ -7,8 +7,8 @@ use crate::form::{ENCODINGS, Op, Src};
 /// How one Maxwell form reaches the translator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
-    /// Lowered to exactly this SM86 form (nvdisasm's mnemonic), equal in
-    /// behavior by the evidence named.
+    /// Lowered to the translator's instruction of exactly this SM86 form
+    /// (nvdisasm's mnemonic), equal in behavior by the evidence named.
     Exact {
         to: &'static str,
         evidence: &'static str,
@@ -122,7 +122,7 @@ pub fn row(op: Op, src: Src) -> Row {
             to: "FMUL",
             evidence: "Ryujinx's Fmul multiplies the same operands (its .NEG negates the \
                        product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and \
-                       scale go to the same SM86 fields, whose behavior the sm86 known \
+                       scale become the same SM86 modifiers, whose behavior the sm86 known \
                        answers pin (fmul: every mode with and without FTZ, SAT, the scales, \
                        negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the \
                        condition code and constant offsets from 0x8000 stop. Operands equal \
@@ -131,8 +131,8 @@ pub fn row(op: Op, src: Src) -> Row {
         },
         (Op::Fadd, _) => Row::Exact {
             to: "FADD",
-            evidence: "Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode \
-                       fields go to SM86's (fadd known answers: every mode, FTZ, SAT, \
+            evidence: "Ryujinx's Fadd adds the operands with their .NEG and .ABS; the modes \
+                       become SM86's modifiers (fadd known answers: every mode, FTZ, SAT, \
                        negation and absolute value); an immediate's .NEG and .ABS fold into \
                        its sign bit as the operand modifiers act. The condition code and \
                        constant offsets from 0x8000 stop. Operands equal envydis on every \
@@ -142,8 +142,8 @@ pub fn row(op: Op, src: Src) -> Row {
             to: "FFMA",
             evidence: "Ryujinx's Ffma is a * b + c with the product's and the addend's \
                        .NEG; FFMA32I adds its destination and the register-constant form \
-                       takes the register as b (SM86 FFMA form 3, constant in c). Modes go \
-                       to SM86's fields (ffma known answers); .FMZ, the condition code and \
+                       takes the register as b (SM86 FFMA form 3, constant in c). Modes \
+                       become SM86's modifiers (ffma known answers); .FMZ, the condition code and \
                        constant offsets from 0x8000 stop. Operands equal envydis on every \
                        census word; game programs as for FMUL",
         },
@@ -179,7 +179,7 @@ pub fn row(op: Op, src: Src) -> Row {
             to: "FMNMX",
             evidence: "Ryujinx's Fmnmx takes the minimum when the predicate holds and the \
                        maximum otherwise, after .NEG and .ABS of both operands; SM86 FMNMX \
-                       has the same fields and predicate meaning (an immediate's .NEG and \
+                       has the same operands and predicate meaning (an immediate's .NEG and \
                        .ABS fold into its sign bit). The SM86 translator returns the other \
                        operand for one NaN and orders -0 below +0, as PTX defines min and \
                        max; Maxwell's own NaN and signed zero results are console-only \
@@ -336,6 +336,17 @@ pub fn markdown() -> String {
          split between the two by case, or a stop. A form is lowered only\n\
          with evidence that both behave the same in every case it lowers;\n\
          the cases the evidence does not cover stop with their own reason.\n\n\
+         The lowering builds the translator's instruction of the SM86 form\n\
+         directly, as the SM86 decoder gives it (no SM86 word is encoded), so\n\
+         an exact row rests on three things: what the Maxwell form does\n\
+         (Ryujinx's emitter, and envydis's operands on every census word);\n\
+         that the built instruction has the same operands and modifiers,\n\
+         which `tests/lowering.rs` pins as text in nvdisasm's spelling of the\n\
+         SM86 form (each text was checked against nvdisasm when the lowering\n\
+         still encoded SM86 words); and what the translator does with that\n\
+         instruction, which the SM86 known answers (`gpus/sm86/kat`, an RTX\n\
+         3090) pin. A pseudo row rests on the first and on the translator's\n\
+         handling in `relift_gpu_nv::translate::pseudo`.\n\n\
          | form | row | to | evidence or reason |\n|---|---|---|---|\n",
     );
     let (mut exact, mut split, mut pseudo, mut stop) = (0, 0, 0, 0);

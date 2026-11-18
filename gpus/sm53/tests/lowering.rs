@@ -82,11 +82,11 @@ fn maxwell(op: Op, src: Src, fields: &[(&str, u64)]) -> Inst {
     Inst::decode(w, 8).expect("decodes")
 }
 
+/// The text of a lowering: an exact row's instruction in nvdisasm's
+/// spelling of its SM86 form.
 fn sm86_text(l: &Lowered) -> String {
     match l {
-        Lowered::Word(w) => relift_gpu_sm86::decode(*w, 0)
-            .map(|i| i.to_string())
-            .unwrap_or_else(|e| format!("?? {e}")),
+        Lowered::Exact(i) => i.to_string(),
         Lowered::Pseudo(i) => format!("pseudo {i}"),
         Lowered::Stop(r) => format!("stop: {r}"),
     }

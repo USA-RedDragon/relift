@@ -248,8 +248,8 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gpu-sm53",
-        why: "the SM53 (Maxwell GM20B) SASS of NVN programs: code header, shader program header, bundles and instruction forms, lowered onto relift-gpu-nv instructions",
-        normal: &["relift-gpu-nv", "relift-gpu-sm86"],
+        why: "the SM53 (Maxwell GM20B) SASS of NVN programs: code header, shader program header, bundles and instruction forms, lowered straight to relift-gpu-nv instructions",
+        normal: &["relift-gpu-nv"],
         dev: &["relift-cache"],
         build: NONE,
     },
