@@ -1,0 +1,19 @@
+#version 450
+/**
+ * @file smaa_blend.comp
+ * @brief SMAA's third pass: neighborhood blending, color_in and blend to
+ * color_out.
+ */
+#include "smaa.glsl"
+
+void main()
+{
+    ivec2 p;
+    if (!this_pixel(p))
+        return;
+    vec2 uv = center_uv(p);
+    vec4 offset;
+    SMAANeighborhoodBlendingVS(uv, offset);
+    vec4 c = SMAANeighborhoodBlendingPS(uv, offset, TEX_COLOR, TEX_BLEND);
+    color_out[p.y * pc.size.x + p.x] = packUnorm4x8(vec4(c.rgb, 1.0));
+}

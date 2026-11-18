@@ -6,7 +6,8 @@
  * a Vulkan instance and device of its own: the frame goes into a host
  * buffer as one RGBA8 word per pixel, is copied to a device buffer, runs
  * through the passes the options ask for and comes back the same way. The
- * passes' SPIR-V is post_data.h (from runtime/core/shaders). An upscaler
+ * passes' SPIR-V and SMAA's textures are post_data.h (from
+ * runtime/core/shaders and runtime/third_party/smaa). An upscaler
  * stage (the place a game's own upscaler or TAA goes) records into the same
  * command buffer ahead of the anti-aliasing pass.
  *
@@ -27,7 +28,7 @@
 #include <string.h>
 
 #define GROUP 8u
-#define NBIND 2u
+#define NBIND 6u
 
 /** @brief VkPhysicalDeviceProperties up to the device name; rest covers the remainder of the real structure. */
 typedef struct rlvk_device_properties {
@@ -54,9 +55,9 @@ typedef struct buf {
     bool coherent;
 } buf;
 
-enum { B_IN, B_OUT, B_STAGE_IN, B_STAGE_OUT, B_COUNT };
+enum { B_IN, B_OUT, B_EDGES, B_BLEND, B_AREA, B_SEARCH, B_STAGE_IN, B_STAGE_OUT, B_COUNT };
 
-enum { P_FXAA, P_COUNT };
+enum { P_FXAA, P_SMAA_EDGES, P_SMAA_WEIGHTS, P_SMAA_WEIGHTS_FAST, P_SMAA_BLEND, P_COUNT };
 
 typedef struct vk {
 #define RLVK_FN_FIELD(name, ret, args) ret(RLVK_CALL *name) args;
@@ -83,6 +84,23 @@ static const struct {
     size_t size;
 } g_spv[P_COUNT] = {
     [P_FXAA] = { rl_post_spv_fxaa, sizeof rl_post_spv_fxaa },
+    [P_SMAA_EDGES] = { rl_post_spv_smaa_edges, sizeof rl_post_spv_smaa_edges },
+    [P_SMAA_WEIGHTS] = { rl_post_spv_smaa_weights, sizeof rl_post_spv_smaa_weights },
+    [P_SMAA_WEIGHTS_FAST] = { rl_post_spv_smaa_weights_fast, sizeof rl_post_spv_smaa_weights_fast },
+    [P_SMAA_BLEND] = { rl_post_spv_smaa_blend, sizeof rl_post_spv_smaa_blend },
+};
+
+/** @brief SMAA's quality presets (SMAA.hlsl SMAA_PRESET_*) by picture.aa_quality; low and medium skip the diagonal and
+ * corner passes. */
+static const struct {
+    float threshold;
+    int32_t steps, diag_steps, corner;
+    bool fast;
+} g_smaa[] = {
+    { 0.15f, 4, 0, 0, true },
+    { 0.1f, 8, 0, 0, true },
+    { 0.1f, 16, 8, 25, false },
+    { 0.05f, 32, 16, 25, false },
 };
 
 static bool fail(const char *what, rlvk_result r)
@@ -379,12 +397,63 @@ static bool make_pipelines(vk *v)
     return true;
 }
 
+/** @brief Copies data (n words) into a new device buffer through a host buffer, and waits. */
+static bool upload(vk *v, buf *dst, const uint32_t *data, size_t n)
+{
+    buf stage = { 0 };
+    rlvk_size bytes = (rlvk_size)n * 4;
+    bool ok = buf_make(v, dst, bytes, RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT | RLVK_BUFFER_USAGE_TRANSFER_DST_BIT, false,
+                       false) &&
+              buf_make(v, &stage, bytes, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false);
+    if (ok) {
+        memcpy(stage.map, data, (size_t)bytes);
+        rlvk_mapped_memory_range range = { .sType = RLVK_ST_MAPPED_MEMORY_RANGE, .memory = stage.memory, .size = ~(rlvk_size)0 };
+        if (!stage.coherent)
+            v->vkFlushMappedMemoryRanges(v->device, 1, &range);
+        rlvk_command_buffer_begin_info bi = {
+            .sType = RLVK_ST_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = RLVK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        };
+        rlvk_buffer_copy copy = { .size = bytes };
+        rlvk_submit_info sub = { .sType = RLVK_ST_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &v->cmd };
+        ok = v->vkBeginCommandBuffer(v->cmd, &bi) == RLVK_SUCCESS;
+        if (ok) {
+            v->vkCmdCopyBuffer(v->cmd, stage.buffer, dst->buffer, 1, &copy);
+            ok = v->vkEndCommandBuffer(v->cmd) == RLVK_SUCCESS &&
+                 v->vkQueueSubmit(v->queue, 1, &sub, v->fence) == RLVK_SUCCESS &&
+                 v->vkWaitForFences(v->device, 1, &v->fence, 1, ~(uint64_t)0) == RLVK_SUCCESS;
+            v->vkResetFences(v->device, 1, &v->fence);
+        }
+        if (!ok)
+            fail("uploading SMAA's textures", 0);
+    }
+    buf_free(v, &stage);
+    return ok;
+}
+
+/** @brief SMAA's area and search textures, one word per texel, in device buffers. */
+static bool upload_luts(vk *v)
+{
+    enum { AREA = sizeof rl_post_smaa_area / 2, SEARCH = sizeof rl_post_smaa_search };
+    uint32_t *words = malloc(AREA * sizeof *words);
+    if (!words)
+        return fail("allocation", 0);
+    for (size_t i = 0; i < AREA; i++)
+        words[i] = (uint32_t)rl_post_smaa_area[2 * i] | (uint32_t)rl_post_smaa_area[2 * i + 1] << 8;
+    bool ok = upload(v, &v->b[B_AREA], words, AREA);
+    for (size_t i = 0; ok && i < SEARCH; i++)
+        words[i] = rl_post_smaa_search[i];
+    ok = ok && upload(v, &v->b[B_SEARCH], words, SEARCH);
+    free(words);
+    return ok;
+}
+
 static bool start(vk *v)
 {
     rlvk_gipa_fn gipa = (rlvk_gipa_fn)rl_hostlib_vulkan_gipa();
     if (!gipa)
         return fail("loading Vulkan", 0);
-    return make_instance(v, gipa) && pick_device(v, gipa) && make_device(v) && make_pipelines(v);
+    return make_instance(v, gipa) && pick_device(v, gipa) && make_device(v) && make_pipelines(v) && upload_luts(v);
 }
 
 /** @brief Buffers for a width by height picture, and the descriptor set that names them. */
@@ -396,10 +465,12 @@ static bool size_buffers(vk *v, uint32_t w, uint32_t h)
     const uint32_t storage = RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     if (!buf_make(v, &v->b[B_IN], bytes, storage | RLVK_BUFFER_USAGE_TRANSFER_DST_BIT, false, false) ||
         !buf_make(v, &v->b[B_OUT], bytes, storage | RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, false) ||
+        !buf_make(v, &v->b[B_EDGES], bytes, storage, false, false) ||
+        !buf_make(v, &v->b[B_BLEND], bytes, storage, false, false) ||
         !buf_make(v, &v->b[B_STAGE_IN], bytes, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false) ||
         !buf_make(v, &v->b[B_STAGE_OUT], bytes, RLVK_BUFFER_USAGE_TRANSFER_DST_BIT, true, true))
         return false;
-    static const int bound[NBIND] = { B_IN, B_OUT };
+    static const int bound[NBIND] = { B_IN, B_OUT, B_EDGES, B_BLEND, B_AREA, B_SEARCH };
     rlvk_descriptor_buffer_info info[NBIND];
     rlvk_write_descriptor_set wr[NBIND];
     for (uint32_t i = 0; i < NBIND; i++) {
@@ -447,6 +518,23 @@ static void unpack(uint8_t *rgb, const uint32_t *src, size_t n)
     }
 }
 
+/** @brief Records SMAA 1x at a quality preset (picture.aa_quality): edges, blending weights, neighborhood blending. */
+static void record_smaa(vk *v, params pc, uint32_t quality)
+{
+    quality = quality < 4 ? quality : 2;
+    pc.threshold = g_smaa[quality].threshold;
+    pc.max_search_steps = g_smaa[quality].steps;
+    pc.max_search_steps_diag = g_smaa[quality].diag_steps;
+    pc.corner_rounding = g_smaa[quality].corner;
+    const uint32_t cs = RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    const uint32_t w = RLVK_ACCESS_SHADER_WRITE_BIT, r = RLVK_ACCESS_SHADER_READ_BIT;
+    dispatch(v, P_SMAA_EDGES, &pc);
+    barrier(v, cs, w, cs, r);
+    dispatch(v, g_smaa[quality].fast ? P_SMAA_WEIGHTS_FAST : P_SMAA_WEIGHTS, &pc);
+    barrier(v, cs, w, cs, r);
+    dispatch(v, P_SMAA_BLEND, &pc);
+}
+
 /** @brief Runs the passes of aa on width by height RGB888 pixels into out. */
 static bool run(vk *v, uint32_t aa, const uint8_t *rgb, uint8_t *out, uint32_t w, uint32_t h)
 {
@@ -474,6 +562,8 @@ static bool run(vk *v, uint32_t aa, const uint8_t *rgb, uint8_t *out, uint32_t w
     params pc = { .width = (int32_t)w, .height = (int32_t)h };
     if (aa == RL_POST_AA_FXAA)
         dispatch(v, P_FXAA, &pc);
+    else
+        record_smaa(v, pc, rl_setting_enum("picture.aa_quality"));
     barrier(v, RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RLVK_ACCESS_SHADER_WRITE_BIT, RLVK_PIPELINE_STAGE_TRANSFER_BIT,
             RLVK_ACCESS_TRANSFER_READ_BIT);
     v->vkCmdCopyBuffer(v->cmd, v->b[B_OUT].buffer, so->buffer, 1, &copy);

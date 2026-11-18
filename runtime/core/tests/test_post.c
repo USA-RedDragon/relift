@@ -2,8 +2,9 @@
  * @file test_post.c
  * @brief The core picture pipeline: its Vulkan declarations match the API's,
  * with every option off a window shows the frame it was given, byte for
- * byte, and the FXAA pass on the host's device keeps flat pictures byte for
- * byte and matches the C reference.
+ * byte, the FXAA pass on the host's device keeps flat pictures byte for
+ * byte and matches the C reference, and SMAA at every preset keeps flat
+ * pictures and softens only the pixels along edges.
  */
 #include "runner.h"
 
@@ -206,5 +207,47 @@ TEST(post_fxaa_matches_the_c_reference)
     printf("    fxaa vs reference: %d of %zu bytes differ, by at most %d\n", off, sizeof in, worst);
     CHECK(worst <= 2);
     CHECK(off * 100 <= (int)sizeof in);
+    rl_settings_reset();
+}
+
+TEST(post_smaa_keeps_flat_pictures_and_softens_only_edges)
+{
+    if (!have_vulkan())
+        return;
+    static const char *const presets[] = { "low", "medium", "high", "ultra" };
+    static uint8_t flat[W * H * 3], in[W * H * 3];
+    for (size_t i = 0; i < sizeof flat; i++)
+        flat[i] = (uint8_t)(i % 3 * 70 + 13);
+    scene(in);
+    for (int q = 0; q < 4; q++) {
+        rl_settings_reset();
+        rl_settings_declare_runtime();
+        CHECK(rl_settings_set("picture.aa", "smaa") == RL_SETTING_OK);
+        CHECK(rl_settings_set("picture.aa_quality", presets[q]) == RL_SETTING_OK);
+        const uint8_t *out = rl_post_apply(flat, W, H);
+        CHECK(out != flat);
+        CHECK(memcmp(out, flat, sizeof flat) == 0);
+        out = rl_post_apply(in, W, H);
+        int changed = 0, far = 0;
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                size_t i = ((size_t)y * W + (size_t)x) * 3;
+                if (!memcmp(out + i, in + i, 3))
+                    continue;
+                changed++;
+                bool edge = false;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int nx = x + dx, ny = y + dy;
+                        if (nx >= 0 && ny >= 0 && nx < W && ny < H &&
+                            memcmp(in + ((size_t)ny * W + (size_t)nx) * 3, in + i, 3))
+                            edge = true;
+                    }
+                far += !edge;
+            }
+        printf("    smaa %s: %d pixels changed, %d away from an edge\n", presets[q], changed, far);
+        CHECK(changed > H);
+        CHECK(far == 0);
+    }
     rl_settings_reset();
 }

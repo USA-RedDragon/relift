@@ -108,10 +108,22 @@ pub fn runtime_settings() -> Vec<Setting> {
             ..s(
                 "picture.aa",
                 "Anti-aliasing",
-                "Smooths the edges of the picture the window shows: fxaa is FXAA 3.11. Anything but off changes the picture from the console's",
+                "Smooths the edges of the picture the window shows: fxaa is FXAA 3.11, smaa is SMAA 1x. Anything but off changes the picture from the console's",
                 Value::String("off".into()),
                 SettingKind::Enum {
-                    choices: ["off", "fxaa"].map(String::from).into(),
+                    choices: ["off", "fxaa", "smaa"].map(String::from).into(),
+                },
+            )
+        },
+        Setting {
+            apply: Apply::Live,
+            ..s(
+                "picture.aa_quality",
+                "Anti-aliasing quality",
+                "SMAA's preset: higher finds longer and diagonal edges and costs more GPU time. With smaa on it changes the picture from the console's",
+                Value::String("high".into()),
+                SettingKind::Enum {
+                    choices: ["low", "medium", "high", "ultra"].map(String::from).into(),
                 },
             )
         },
@@ -878,7 +890,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 19);
+        assert_eq!(section(Vec::new()).runtime.len(), 20);
     }
 
     #[test]

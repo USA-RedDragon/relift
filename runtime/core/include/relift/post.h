@@ -15,7 +15,10 @@
 #include <stdint.h>
 
 /** @brief Choices of the runtime's `picture.aa` setting, as rl_setting_enum returns them. */
-enum { RL_POST_AA_OFF, RL_POST_AA_FXAA };
+enum { RL_POST_AA_OFF, RL_POST_AA_FXAA, RL_POST_AA_SMAA };
+
+/** @brief Choices of `picture.aa_quality` (SMAA's presets). */
+enum { RL_POST_QUALITY_LOW, RL_POST_QUALITY_MEDIUM, RL_POST_QUALITY_HIGH, RL_POST_QUALITY_ULTRA };
 
 /**
  * @brief The frame the window should show for width by height RGB888 pixels (rows packed): rgb itself with every

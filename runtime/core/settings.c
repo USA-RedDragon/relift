@@ -41,7 +41,8 @@ typedef struct slot {
 } slot;
 
 static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
-static const char *const g_aa_choices[] = { "off", "fxaa" };
+static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
+static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 
 static const rl_setting_def g_runtime_defs[] = {
     {
@@ -76,10 +77,21 @@ static const rl_setting_def g_runtime_defs[] = {
         .type = RL_SETTING_ENUM,
         .label = "Anti-aliasing",
         .apply = RL_APPLY_LIVE,
-        .description = "Smooths the edges of the picture the window shows: fxaa is FXAA 3.11. Anything but off changes "
-                       "the picture from the console's",
+        .description = "Smooths the edges of the picture the window shows: fxaa is FXAA 3.11, smaa is SMAA 1x. Anything "
+                       "but off changes the picture from the console's",
         .choices = g_aa_choices,
-        .nchoices = 2,
+        .nchoices = 3,
+    },
+    {
+        .key = "picture.aa_quality",
+        .type = RL_SETTING_ENUM,
+        .label = "Anti-aliasing quality",
+        .apply = RL_APPLY_LIVE,
+        .description = "SMAA's preset: higher finds longer and diagonal edges and costs more GPU time. With smaa on it "
+                       "changes the picture from the console's",
+        .def_int = 2,
+        .choices = g_aa_quality_choices,
+        .nchoices = 4,
     },
 };
 

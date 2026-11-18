@@ -131,7 +131,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
     rust.retain(|s| {
         matches!(
             s.key.as_str(),
-            "video" | "language" | "video.gpu_driver" | "picture.aa"
+            "video" | "language" | "video.gpu_driver" | "picture.aa" | "picture.aa_quality"
         )
     });
     rust.extend(gb_settings());

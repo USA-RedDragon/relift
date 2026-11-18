@@ -1,0 +1,20 @@
+#version 450
+/**
+ * @file smaa_weights.comp
+ * @brief SMAA's second pass: blending weight calculation, edges (with the
+ * area and search textures) to blend.
+ */
+#include "smaa.glsl"
+
+void main()
+{
+    ivec2 p;
+    if (!this_pixel(p))
+        return;
+    vec2 uv = center_uv(p);
+    vec2 pixcoord;
+    vec4 offset[3];
+    SMAABlendingWeightCalculationVS(uv, pixcoord, offset);
+    vec4 w = SMAABlendingWeightCalculationPS(uv, pixcoord, offset, TEX_EDGES, TEX_AREA, TEX_SEARCH, vec4(0.0));
+    blend[p.y * pc.size.x + p.x] = packUnorm4x8(w);
+}
