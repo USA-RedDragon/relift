@@ -35,9 +35,11 @@
 #define FADE_NS 150000000ull
 #define TOAST_NS 3000000000ull
 #define TOAST_FADE_NS 300000000ull
+#define NOTICE_NS 1300000000ull
 #define HOLD_NS 500000000ull
 #define QUIET_NS 1500000000ull
 #define MIN_PRESS_NS 50000000ull
+#define LONG_PRESS_NS 500000000ull
 #define PORTRAIT 0
 #define LANDSCAPE 1
 
@@ -79,6 +81,7 @@ typedef struct finger {
     int hold_item;
     float v0, w0;
     bool pressed;
+    bool fired;
 } finger;
 
 typedef struct group_place {
@@ -182,7 +185,7 @@ static struct {
     bool hidden;
     int ui;
     char toast[192];
-    uint64_t toast_at;
+    uint64_t toast_at, toast_ns;
     layout_state live[2], edit;
     bool loaded[2];
     float values[RL_INPUT_TOUCH_PAD];
@@ -494,17 +497,28 @@ static bool item_visible(const rl_touchpad_item *it)
     return true;
 }
 
+static bool round_shape(const rl_touchpad_item *it) { return it->shape == RL_TOUCHPAD_BUTTON || it->shape == RL_TOUCHPAD_STICK; }
+
+static void hit_size(const rl_touchpad_item *it, const placed *p, float *w, float *h)
+{
+    float min = dp(48.0f);
+    if (round_shape(it)) {
+        *w = *h = fmaxf(p->w * (it->shape == RL_TOUCHPAD_STICK ? 1.2f : 1.15f), min);
+        return;
+    }
+    *w = fmaxf(p->w * 1.15f, min);
+    *h = fmaxf(p->h * 1.15f, min);
+}
+
 static float hit_distance(const rl_touchpad_item *it, const placed *p, float x, float y)
 {
-    float dx = x - p->x, dy = y - p->y;
-    float min = dp(48.0f);
-    if (it->shape == RL_TOUCHPAD_BUTTON || it->shape == RL_TOUCHPAD_STICK) {
-        float r = fmaxf(p->w * (it->shape == RL_TOUCHPAD_STICK ? 1.2f : 1.15f), min) / 2;
+    float dx = x - p->x, dy = y - p->y, w, h;
+    hit_size(it, p, &w, &h);
+    if (round_shape(it)) {
         float d = sqrtf(dx * dx + dy * dy);
-        return d <= r ? d : -1.0f;
+        return d <= w / 2 ? d : -1.0f;
     }
-    float hw = fmaxf(p->w * 1.15f, min) / 2, hh = fmaxf(p->h * 1.15f, min) / 2;
-    if (fabsf(dx) > hw || fabsf(dy) > hh)
+    if (fabsf(dx) > w / 2 || fabsf(dy) > h / 2)
         return -1.0f;
     return sqrtf(dx * dx + dy * dy);
 }
@@ -569,6 +583,11 @@ static void press(int idx)
         g.held_until[idx] = g.now + MIN_PRESS_NS;
 }
 
+static bool has_long(const rl_touchpad_item *it, int item)
+{
+    return it->shape == RL_TOUCHPAD_PILL && it->controls[1] && g.index[orient()][item][1] >= 0;
+}
+
 static void compute_values(void)
 {
     const rl_touchpad_layout *L = lay();
@@ -586,7 +605,12 @@ static void compute_values(void)
         switch (it->shape) {
         case RL_TOUCHPAD_BUTTON:
         case RL_TOUCHPAD_PILL:
-            press(g.index[orient()][f->item][0]);
+            if (has_long(it, f->item)) {
+                if (f->fired)
+                    press(g.index[orient()][f->item][1]);
+            } else {
+                press(g.index[orient()][f->item][0]);
+            }
             g.dirs[f->item] = 1;
             break;
         case RL_TOUCHPAD_DPAD: {
@@ -633,6 +657,7 @@ static void toast(const char *a, const char *b)
         return;
     snprintf(g.toast, sizeof g.toast, "%s%s", a, b);
     g.toast_at = g.now;
+    g.toast_ns = TOAST_NS;
 }
 
 static void open_ui(int ui)
@@ -1342,8 +1367,16 @@ void rl_touchpad_finger(uint64_t id, int phase, float x, float y)
             else if (g.ui != UI_NONE && g.ui != UI_HOST)
                 sheet_up(f);
         }
-        if (f->own == OWN_ITEM)
+        if (f->own == OWN_ITEM) {
+            const rl_touchpad_layout *L = lay();
+            if (phase == RL_TOUCHPAD_UP && L && g.ui == UI_NONE && has_long(&L->items[f->item], f->item) &&
+                !f->fired) {
+                int idx = g.index[orient()][f->item][0];
+                if (idx >= 0)
+                    g.held_until[idx] = g.now + MIN_PRESS_NS;
+            }
             g.dirty = true;
+        }
         f->on = false;
     }
     if (f->own == OWN_GAME) {
@@ -1384,6 +1417,47 @@ void rl_touchpad_back(void)
     after();
 }
 
+uint32_t rl_touchpad_placed(rl_touchpad_rect *out, uint32_t max)
+{
+    pthread_mutex_lock(&g.lock);
+    const rl_touchpad_layout *L = lay();
+    uint32_t n = 0;
+    if (L) {
+        placed p[MAX_ITEMS];
+        place(state(), p);
+        for (uint32_t i = 0; i < L->nitems && i < MAX_ITEMS && n < max; i++) {
+            const rl_touchpad_item *it = &L->items[i];
+            float hw, hh;
+            hit_size(it, &p[i], &hw, &hh);
+            out[n++] = (rl_touchpad_rect){ .shape = it->shape,
+                                           .label = it->label,
+                                           .control = it->controls[0],
+                                           .x0 = p[i].x - p[i].w / 2,
+                                           .y0 = p[i].y - p[i].h / 2,
+                                           .x1 = p[i].x + p[i].w / 2,
+                                           .y1 = p[i].y + p[i].h / 2,
+                                           .hit_x0 = p[i].x - hw / 2,
+                                           .hit_y0 = p[i].y - hh / 2,
+                                           .hit_x1 = p[i].x + hw / 2,
+                                           .hit_y1 = p[i].y + hh / 2 };
+        }
+    }
+    pthread_mutex_unlock(&g.lock);
+    return n;
+}
+
+void rl_touchpad_notice(const char *text)
+{
+    pthread_mutex_lock(&g.lock);
+    if (g.guest && text && *text) {
+        snprintf(g.toast, sizeof g.toast, "%s", text);
+        g.toast_at = rl_clock_ns();
+        g.toast_ns = NOTICE_NS;
+        g.dirty = true;
+    }
+    after();
+}
+
 void rl_touchpad_host_settings_done(int next)
 {
     pthread_mutex_lock(&g.lock);
@@ -1415,20 +1489,32 @@ bool rl_touchpad_tick(uint64_t now_ns)
     }
     bool busy = g.fade != target;
     if (g.toast[0]) {
-        if (now_ns - g.toast_at >= TOAST_NS) {
+        if (now_ns - g.toast_at >= g.toast_ns) {
             g.toast[0] = 0;
             g.dirty = true;
         } else {
             busy = true;
-            if (now_ns - g.toast_at >= TOAST_NS - TOAST_FADE_NS)
+            if (now_ns - g.toast_at >= g.toast_ns - TOAST_FADE_NS)
                 g.dirty = true;
         }
     }
-    for (int i = 0; i < FINGERS; i++)
-        if (g.f[i].on && g.f[i].own == OWN_UI && g.ui == UI_EDIT && g.f[i].hold_item >= 0) {
-            edit_hold(&g.f[i]);
+    const rl_touchpad_layout *L = lay();
+    for (int i = 0; i < FINGERS; i++) {
+        finger *f = &g.f[i];
+        if (f->on && f->own == OWN_UI && g.ui == UI_EDIT && f->hold_item >= 0) {
+            edit_hold(f);
             busy = true;
         }
+        if (f->on && f->own == OWN_ITEM && !f->fired && g.ui == UI_NONE && L && has_long(&L->items[f->item], f->item)) {
+            busy = true;
+            if (now_ns - f->t0 >= LONG_PRESS_NS) {
+                f->fired = true;
+                tick_haptic();
+                compute_values();
+                g.dirty = true;
+            }
+        }
+    }
     bool dirty = g.dirty;
     after();
     return busy || dirty;
@@ -1842,7 +1928,7 @@ static void draw_toast(void)
     if (!g.toast[0])
         return;
     uint64_t age = g.now - g.toast_at;
-    float a = age > TOAST_NS - TOAST_FADE_NS ? (float)(TOAST_NS - age) / (float)TOAST_FADE_NS : 1.0f;
+    float a = age > g.toast_ns - TOAST_FADE_NS ? (float)(g.toast_ns - age) / (float)TOAST_FADE_NS : 1.0f;
     a = a < 0 ? 0 : a;
     float k = ui_scale(1300, 1080);
     float w = rl_tp_text_width(g.toast, 36 * k, false) + 100 * k;

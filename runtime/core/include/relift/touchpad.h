@@ -53,7 +53,11 @@ typedef struct rl_touchpad_item {
     bool slide;
     /** @brief The text drawn on it, or NULL. */
     const char *label;
-    /** @brief The touchpad port controls it drives (see the shape kinds); a button's first is also its id. */
+    /**
+     * @brief The touchpad port controls it drives (see the shape kinds); a button's first is also its id. A pill's
+     * second control, when set, is the one a long press drives: the first then fires on a short tap, when the finger
+     * lifts, and the second fires once the finger has rested for half a second.
+     */
     const char *controls[4];
     /** @brief Center. */
     float x, y;
@@ -166,6 +170,24 @@ enum rl_touchpad_host_next {
     RL_TOUCHPAD_HOST_RESUME = 2
 };
 
+/** @brief Where one control of the layout is drawn and where it takes touches, in view pixels. */
+typedef struct rl_touchpad_rect {
+    /** @brief enum rl_touchpad_shape. */
+    uint8_t shape;
+    /** @brief The item's label and its first control, or NULL. */
+    const char *label, *control;
+    /** @brief The bounds of the drawn shape. */
+    float x0, y0, x1, y1;
+    /** @brief The bounds of the area that takes its touches (a circle's bounds for a round shape). */
+    float hit_x0, hit_y0, hit_x1, hit_y1;
+} rl_touchpad_rect;
+/** @brief Fills out with the controls now in the view (the current orientation's layout); returns how many. */
+RL_RUNTIME_API uint32_t rl_touchpad_placed(rl_touchpad_rect *out, uint32_t max);
+/**
+ * @brief Shows a short label over the picture for about a second (a layout's name after a change); any thread.
+ * Nothing when the guest has no layout.
+ */
+RL_RUNTIME_API void rl_touchpad_notice(const char *text);
 /** @brief The host's settings page closed; next is an rl_touchpad_host_next. */
 RL_RUNTIME_API void rl_touchpad_host_settings_done(int next);
 /** @brief Moves time on (fades, toasts, long presses); returns true while something animates or waits. */
