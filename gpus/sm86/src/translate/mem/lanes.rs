@@ -33,6 +33,7 @@ use crate::program::Stage;
 use crate::spirv::{glsl, op};
 use crate::translate::{Ctx, INPUT, MeshPath, Warp, WarpPath};
 use crate::{Inst, Operand};
+use std::collections::HashSet;
 
 const BUILTIN_LOCAL_INVOCATION_INDEX: u32 = 29;
 const BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID: u32 = 41;
@@ -240,6 +241,64 @@ fn branch_target(i: &Inst) -> Option<usize> {
     })
 }
 
+/// The `BMOV MACTIVE, Bn` (with or without `.PQUAD`) whose Bn holds the
+/// lanes a `BMOV Bn, MACTIVE` saved earlier in the same straight-line
+/// code, where no branch target, Bn write or instruction that can change
+/// the active lanes (other than such a `BMOV.PQUAD MACTIVE`, which the
+/// host does not apply) lies between: the active lanes there are the saved
+/// ones, so a restore changes nothing and `.PQUAD` starts from them.
+pub(crate) fn mactive_from_saved(insts: &[Inst]) -> HashSet<usize> {
+    let targets: HashSet<usize> = insts.iter().filter_map(branch_target).collect();
+    let writes_active = |i: &Inst| {
+        i.mnemonic == "BMOV" && matches!(i.ops.first(), Some(Operand::Sym(s)) if s == "MACTIVE")
+    };
+    let mut out = HashSet::new();
+    for (k, i) in insts.iter().enumerate() {
+        if !writes_active(i) {
+            continue;
+        }
+        let Some(n) = i.ops.get(1).and_then(barrier_name) else {
+            continue;
+        };
+        for j in (0..k).rev() {
+            let x = &insts[j];
+            if targets.contains(&(j + 1)) {
+                break;
+            }
+            let saves = x.mnemonic == "BMOV"
+                && x.ops.first().and_then(barrier_name) == Some(n)
+                && matches!(x.ops.get(1), Some(Operand::Sym(s)) if s == "MACTIVE")
+                && x.guard.is_none();
+            if saves {
+                out.insert(k);
+                break;
+            }
+            let writes_n = (x.mnemonic == "BMOV" || x.mnemonic == "BSSY")
+                && x.ops.first().and_then(barrier_name) == Some(n);
+            let flow = matches!(
+                x.mnemonic,
+                "BRA"
+                    | "BRX"
+                    | "JMX"
+                    | "JMP"
+                    | "CALL"
+                    | "RET"
+                    | "EXIT"
+                    | "KILL"
+                    | "BSYNC"
+                    | "BREAK"
+                    | "WARPSYNC"
+                    | "BPT"
+                    | "YIELD"
+            );
+            if writes_n || flow || (writes_active(x) && !x.has("PQUAD")) {
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// For each instruction, whether control flow may reach it with only part
 /// of the workgroup: inside a BSSY region, after a guarded EXIT, RET or
 /// KILL, or between a guarded branch and its target.
@@ -277,6 +336,7 @@ impl Ctx {
         let insts = &code.insts;
         let fast_paths = code.fast_paths;
         self.divergent = divergent(insts);
+        self.mactive_from_saved = mactive_from_saved(insts);
         let outputs = self.output_registers();
         let plan = crate::translate::uniform::plan(code, &outputs);
         let all: Vec<(usize, bool)> = insts

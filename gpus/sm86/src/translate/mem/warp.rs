@@ -330,9 +330,15 @@ fn match_(c: &mut Ctx, i: &Inst) -> Res<()> {
 /// BMOV. Moves between convergence barriers, and from a register or an
 /// immediate into one, change only where lanes wait at BSYNC; the control
 /// flow module rejects them where that matters. `MACTIVE` reads the active
-/// lanes. Every other thread state (exited and killed lanes, the trap and
-/// at-exit state, the barrier stack) and a barrier read into a register
-/// are not modeled.
+/// lanes. A write of `MACTIVE` from a barrier that holds the lanes saved
+/// from it changes nothing (see `lanes::mactive_from_saved`); with `.PQUAD`
+/// it adds the rest of each active lane's 2x2 quad: where the warp has not diverged
+/// the host's quads are already whole (helper invocations included, see
+/// `HostReport::whole_quads`); in divergent flow the host cannot run lanes
+/// that took another path, so their values in quad operations are not the
+/// guest's stale ones, and that is reported. Every other thread state
+/// (exited and killed lanes, the trap and at-exit state, the barrier stack)
+/// and a barrier read into a register are not modeled.
 fn bmov(c: &mut Ctx, i: &Inst) -> Res<()> {
     use super::lanes::barrier_name;
     let [d, s] = i.ops.as_slice() else {
@@ -350,6 +356,20 @@ fn bmov(c: &mut Ctx, i: &Inst) -> Res<()> {
         Operand::Reg(..) if active => {
             let m = c.active();
             c.store_dst(d, m)
+        }
+        Operand::Sym(x) if x == "MACTIVE" && barrier_name(s).is_some() => {
+            let k = (c.pc / 16) as usize;
+            if !c.mactive_from_saved.contains(&k) {
+                return bad(format!("BMOV {d}, {s}"));
+            }
+            if i.has("PQUAD") && c.divergent.get(k).copied().unwrap_or(true) {
+                let why = "BMOV.PQUAD MACTIVE in divergent control flow: lanes of a partly \
+                           active quad stay inactive";
+                if !c.iface.host.inexact.iter().any(|s| s == why) {
+                    c.iface.host.inexact.push(why.into());
+                }
+            }
+            Ok(())
         }
         _ => bad(format!("BMOV {d}, {s}")),
     }

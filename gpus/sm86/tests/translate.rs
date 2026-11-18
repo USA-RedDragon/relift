@@ -424,6 +424,76 @@ fn bmov_reads_the_active_mask_and_rejects_other_state() {
     );
 }
 
+fn bmov_save(n: u64) -> [u8; 16] {
+    word(0x155, 7, &[(16, 4, n), (24, 6, 26), (87, 3, 7)])
+}
+
+fn bmov_active_from(n: u64, pquad: bool) -> [u8; 16] {
+    word(
+        0x156,
+        7,
+        &[
+            (16, 4, n),
+            (24, 6, 26),
+            (84, 1, u64::from(pquad)),
+            (87, 3, 7),
+        ],
+    )
+}
+
+/// The active mask saved in a barrier, widened to whole quads and given
+/// back around derivative work, as a fragment program does inside a
+/// branch: `BMOV B15, MACTIVE; BMOV.PQUAD MACTIVE, B15; ...; BMOV MACTIVE,
+/// B15`. The restore changes nothing; the widening is exact where the warp
+/// has not diverged and reported where it has. A write of `MACTIVE` from a
+/// barrier that does not hold the saved lanes is rejected.
+#[test]
+fn bmov_mactive_from_a_saved_barrier() {
+    let pair = |b: &mut Vec<u8>| {
+        b.extend(bmov_save(15));
+        b.extend(bmov_active_from(15, true));
+        b.extend(vote_any());
+        b.extend(bmov_active_from(15, false));
+    };
+    let mut b = Vec::new();
+    pair(&mut b);
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    let t = text(&p);
+    assert_eq!(t[0], "BMOV.32 B15, MACTIVE");
+    assert_eq!(t[1], "BMOV.32.PQUAD MACTIVE, B15");
+    assert_eq!(t[3], "BMOV.32 MACTIVE, B15");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        s.interface.host.inexact.is_empty(),
+        "{:?}",
+        s.interface.host.inexact
+    );
+    let mut b = Vec::new();
+    b.extend(bssy(0, 0, 7));
+    b.extend(bra(1, 6, Some(0)));
+    pair(&mut b);
+    b.extend(bsync(0));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        s.interface
+            .host
+            .inexact
+            .iter()
+            .any(|w| w.starts_with("BMOV.PQUAD MACTIVE in divergent")),
+        "{:?}",
+        s.interface.host.inexact
+    );
+    let mut b = Vec::new();
+    b.extend(bmov_save(15));
+    b.extend(bra(1, 2, Some(0)));
+    b.extend(bmov_active_from(15, false));
+    exit_and_halt(&mut b);
+    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    assert_eq!(e.as_deref(), Some("BMOV MACTIVE, B15"));
+}
+
 /// `BMOV.32.CLEAR RZ, B0`, as the compiler puts before a BSSY.
 fn bmov_clear() -> [u8; 16] {
     0x000f_e200_0010_0000_0000_0000_00ff_7355u128.to_le_bytes()

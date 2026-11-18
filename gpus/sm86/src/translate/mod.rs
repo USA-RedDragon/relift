@@ -266,6 +266,10 @@ pub(crate) struct Ctx {
     /// The WARPSYNCs whose lanes the structure brings together (see
     /// `cfg::Graph::synced_warpsyncs`), by instruction index.
     pub synced: HashSet<usize>,
+    /// The `BMOV MACTIVE, Bn` whose Bn holds the lanes saved from
+    /// `MACTIVE` (see `mem::lanes::mactive_from_saved`), by instruction
+    /// index.
+    pub mactive_from_saved: HashSet<usize>,
     /// Which global accesses must be coherent (see `mem::order`).
     pub mem: mem::order::Plan,
     /// The warp emulation state on [`WarpPath::Simt`].
@@ -987,6 +991,7 @@ impl Ctx {
             simt: None,
             warp_idioms: uniform::Plan::default(),
             synced: HashSet::new(),
+            mactive_from_saved: HashSet::new(),
             shared_fns: BTreeMap::new(),
             store_guard: None,
         }

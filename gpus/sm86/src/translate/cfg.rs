@@ -1583,7 +1583,9 @@ impl Graph {
     /// Whether every convergence barrier the BMOV at `k` (in block `b`)
     /// writes is written again, by a BSSY or another BMOV, on every path
     /// before anything reads it: the reset of the barriers at a program's
-    /// start, or a clear right before the BSSY that sets the barrier.
+    /// start, or a clear right before the BSSY that sets the barrier. A
+    /// `BMOV MACTIVE, Bn` is no such read: it is translated only where Bn
+    /// holds the active lanes saved there (see `mem::lanes::mactive_from_saved`).
     fn dead_barrier_writes(&self, code: &Code, b: usize, k: usize) -> bool {
         use super::mem::lanes::barrier_name;
         let insts = &code.insts;
@@ -1601,6 +1603,11 @@ impl Graph {
                     return Some(true);
                 }
                 if j.mnemonic == "BMOV" && j.guard.is_none() {
+                    let to_active =
+                        matches!(j.ops.first(), Some(Operand::Sym(s)) if s == "MACTIVE");
+                    if to_active && names(j, n, 1) {
+                        return None;
+                    }
                     let to_barrier = j.ops.first().and_then(barrier_name).is_some();
                     let discarded = matches!(j.ops.first(), Some(Operand::Reg(255, _)));
                     if names(j, n, 1) && !to_barrier && !discarded {

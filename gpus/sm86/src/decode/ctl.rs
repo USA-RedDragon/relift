@@ -437,7 +437,11 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             d.m("32");
             d.m_if(d.bit(84), "PQUAD");
             d.op(sym(state_name(d.get(24, 6))));
-            let s = d.src(Slot::B, Num::UInt, false)?;
+            let s = if d.form() == 7 {
+                sym(format!("B{}", d.get(16, 4)))
+            } else {
+                d.src(Slot::B, Num::UInt, false)?
+            };
             d.op(s);
         }
         0x005 => {
