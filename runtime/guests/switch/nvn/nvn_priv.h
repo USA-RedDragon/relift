@@ -198,6 +198,8 @@ bool nvn_copy_pitch_of(uint32_t format, const nvn_region *rg, uint32_t row_strid
                        nvn_copy_pitch *out);
 /** @brief Fills d's size, alignment, block and level fields from its target, format, size, levels, samples and flags; false for an unknown format. */
 bool nvn_tex_layout(nvn_tex_desc *d);
+/** @brief nvn_tex_layout with blocks block_h GOBs tall at level 0 (0: the driver's usual choice); 3D textures keep theirs. */
+bool nvn_tex_layout_block(nvn_tex_desc *d, uint32_t block_h);
 /**
  * @brief Whether a texture of d can be rendered to at level and layer: a
  * layer of an array or cube texture, or a depth slice of that level of a 3D

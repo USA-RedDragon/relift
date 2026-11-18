@@ -153,7 +153,9 @@ static void sample_grid(uint32_t samples, uint32_t *sx, uint32_t *sy)
         *sy = 4;
 }
 
-bool nvn_tex_layout(nvn_tex_desc *d)
+bool nvn_tex_layout(nvn_tex_desc *d) { return nvn_tex_layout_block(d, 0); }
+
+bool nvn_tex_layout_block(nvn_tex_desc *d, uint32_t block_h)
 {
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
@@ -180,7 +182,7 @@ bool nvn_tex_layout(nvn_tex_desc *d)
         return true;
     }
     uint32_t hb0 = div_up(h, bh);
-    d->block_h = d->target == TARGET_3D ? 1 : driver_block(hb0, 16);
+    d->block_h = d->target == TARGET_3D ? 1 : block_h ? block_h : driver_block(hb0, 16);
     d->block_d = d->target == TARGET_3D ? driver_block(depth, 2) : 1;
     uint64_t layer = 0;
     for (uint32_t l = 0; l < levels; l++) {
@@ -252,7 +254,11 @@ static int read_builder(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc 
  * off its pool's page. The driver's storage must hold the layer's own layout
  * of the texture (its size at least, its alignment a multiple), or the game
  * stops. d keeps the layer's own layout, which is what the host reads. NVN1
- * textures keep the layer's own size and alignment.
+ * textures keep the layer's own size and alignment. The driver sometimes
+ * takes a shorter block than the usual choice (a 2D array of 64x56 ASTC 5x5
+ * texels, 12 block rows, gets blocks one GOB tall, which changes its layer
+ * stride); when the usual choice does not give the driver's size and a
+ * shorter block gives exactly that size, d takes the shorter block.
  */
 static int read_storage(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc *d, uint64_t *size_out,
                         uint64_t *align_out)
@@ -279,6 +285,11 @@ static int read_storage(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc 
     if (rc != RL_OK)
         return rc;
     uint64_t size = got[0], align = got[1];
+    for (uint32_t b = d->block_h / 2; d->size != size && b; b /= 2) {
+        nvn_tex_desc t = *d;
+        if (nvn_tex_layout_block(&t, b) && t.size == size)
+            *d = t;
+    }
     if (size < d->size || !align || align % d->align)
         return rl_guest_fatal(c, "nvn",
                               "texture builder 0x%llx (target %u, format %u, %ux%ux%u, %u levels, flags 0x%x): the driver's "

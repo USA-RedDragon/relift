@@ -46,6 +46,14 @@ TEST(nvn_block_linear_layout)
     CHECK_EQ(a.block_h, 2);
     CHECK_EQ(a.layer_stride, 1024);
     CHECK_EQ(a.size, 3072);
+    nvn_tex_desc astc = { .target = 4, .format = 123, .width = 64, .height = 56, .depth = 3, .levels = 7, .flags = 4 };
+    CHECK(nvn_tex_layout(&astc));
+    CHECK_EQ(astc.block_h, 2);
+    CHECK_EQ(astc.size, 0x6000);
+    CHECK(nvn_tex_layout_block(&astc, 1));
+    CHECK_EQ(astc.block_h, 1);
+    CHECK_EQ(astc.layer_stride, 0x1e00);
+    CHECK_EQ(astc.size, 0x5a00);
     nvn_tex_desc lut = { .target = 2, .format = 0x25, .width = 32, .height = 32, .depth = 32, .levels = 1 };
     CHECK(nvn_tex_layout(&lut));
     CHECK_EQ(lut.block_h, 1);
