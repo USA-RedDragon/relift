@@ -1047,6 +1047,7 @@ TEST(am_switch2_proxy_and_its_functions)
     CHECK_EQ(rc_of(r), 0);
     CHECK_EQ(r.data[0] | r.data[1], 0);
     CHECK_EQ(u8_out(&e, e.af, 321), 0);
+    CHECK_EQ(u8_out(&e, e.af, 330), 0);
     CHECK_EQ(get(&e, e.proxy, 1, &e.sc), 0);
     CHECK_EQ(set8(&e, e.sc, 2400, 1), 0);
     CHECK_EQ(get(&e, e.proxy, 0, &e.csg), 0);

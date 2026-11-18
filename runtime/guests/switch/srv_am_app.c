@@ -484,6 +484,21 @@ static rl_result af_cmd_321(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief IsLanguageSelectionLimited (330, [20.2.0+], per switchbrew): no input,
+ * one bool (nn::oe::IsLanguageSelectionLimited reads one byte). Answered false
+ * (inferred: Eglantine answers 0; no document gives the console's value, and a
+ * console with every language selectable is the usual case).
+ */
+static rl_result af_is_language_selection_limited(rl_ipc_req *r)
+{
+    uint8_t *out = rl_ipc_out(r, 1);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
 static rl_result af_try_pop_from_friend_invitation_channel(rl_ipc_req *r)
 {
     (void)r;
@@ -529,6 +544,7 @@ static const rl_ipc_cmd af_cmds[] = {
     { 210, "GetUnknownEvent", af_get_unknown_event },
     { 320, "Cmd320", af_cmd_320 },
     { 321, "Cmd321", af_cmd_321 },
+    { 330, "IsLanguageSelectionLimited", af_is_language_selection_limited },
     RL_SRV_STUB(1001, "PrepareForJit"),
 };
 
