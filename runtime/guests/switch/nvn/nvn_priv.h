@@ -484,7 +484,7 @@ int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *a
 
 
 /** @brief Number of procs that stay the SDK driver's own code (nvn_driver.c). */
-#define NVN_DRIVER_PROC_COUNT 297u
+#define NVN_DRIVER_PROC_COUNT 308u
 
 /** @brief The index of a proc that stays the SDK driver's own code (nvn_driver.c), or -1. */
 int nvn_driver_index(const char *name);

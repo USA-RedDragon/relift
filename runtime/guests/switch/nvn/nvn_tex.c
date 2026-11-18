@@ -339,9 +339,23 @@ uint64_t nvnh_nvnTextureGetMemoryOffset(rl_ctx *c, uint8_t *mem) { (void)mem; re
 uint64_t nvnh_nvnTextureGetSamples(rl_ctx *c, uint8_t *mem) { (void)mem; return tex_get(c, 10); }
 uint64_t nvnh_nvnTextureGetStride(rl_ctx *c, uint8_t *mem) { (void)mem; return tex_get(c, 11); }
 
-/** @brief nvnSamplerInitialize(NVNsampler *, const NVNsamplerBuilder *): NVNboolean; keeps the builder's bytes for later reads. */
+/**
+ * @brief nvnSamplerInitialize(NVNsampler *, const NVNsamplerBuilder *):
+ * NVNboolean. The driver's own initialization fills the sampler object (its
+ * getters read it back), and the layer keeps the builder's bytes.
+ */
 uint64_t nvnh_nvnSamplerInitialize(rl_ctx *c, uint8_t *mem)
 {
+    uint64_t args[2] = { c->x[0], c->x[1] }, init = 0, ok = 0;
+    int rc = nvn_driver_lookup(c, mem, "nvnSamplerInitialize", &init);
+    if (rc == RL_OK && !init)
+        rc = rl_guest_fatal(c, "nvn", "the driver has no nvnSamplerInitialize");
+    if (rc == RL_OK)
+        rc = nvn_guest_call(c, mem, init, args, 2, &ok);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = args[0];
+    c->x[1] = args[1];
     nvn_sampler *s = (nvn_sampler *)nvn_obj_new(c->x[0], NVN_SAMPLER, sizeof *s);
     if (s)
         memcpy(s->builder_copy, mem + c->x[1], sizeof s->builder_copy);
