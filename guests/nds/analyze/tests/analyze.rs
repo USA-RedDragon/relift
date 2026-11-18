@@ -31,6 +31,7 @@ fn overlay() -> Vec<u8> {
     d[0x40..0x4C].copy_from_slice(&words(&[A_PUSH_R4_LR, A_MOV_R0_1, A_POP_R4_PC]));
     d[0x100..0x104].copy_from_slice(&words(&[A_BX_LR]));
     d[0x200..0x204].copy_from_slice(&words(&[OVERLAY + 0x100]));
+    d[0x208..0x20C].copy_from_slice(&words(&[ENTRY + 0x200]));
     d
 }
 
@@ -161,4 +162,16 @@ fn an_overlay_function_another_unit_holds_as_a_word_is_found() {
         found(ov, OVERLAY + 0x44),
         "a callback in the static binary's data"
     );
+}
+
+#[test]
+fn a_static_function_an_overlay_holds_as_a_word_is_found() {
+    let mut bytes = cartridge();
+    let at = Rom::parse(&bytes).expect("parses").header.arm9.rom_offset as usize + 0x600;
+    bytes[at..at + 12].copy_from_slice(&words(&[A_PUSH_R4_LR, A_MOV_R0_1, A_POP_R4_PC]));
+    synth::fix_crcs(&mut bytes);
+    let rom = Rom::parse(&bytes).expect("parses");
+    let rs = Program::read(&rom).expect("units read").analyze(1, &|_| {});
+    let st = unit(&rs, UnitId::Static(Cpu::Arm9));
+    assert!(found(st, ENTRY + 0x204), "a callback in an overlay's data");
 }

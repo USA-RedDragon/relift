@@ -405,23 +405,35 @@ impl Program {
         done
     }
 
-    /// The function entries of overlay `i` that the bytes of its
-    /// processor's other units hold as words: a table of callbacks in one
-    /// unit naming code an overlay loaded later holds, which no transfer
-    /// discovery follows reaches. A word counts when the instruction it
+    /// The function entries of unit `i` that the bytes of its processor's
+    /// other units hold as words: a table of callbacks in one unit naming
+    /// code an overlay loaded later holds, or an overlay's callback into
+    /// the static binary or its TCM blocks, which no transfer discovery
+    /// follows reaches. A word counts when the instruction it
     /// names in the overlay opens a stack frame with the return address
     /// (`STMDB SP!,{..,LR}`, or Thumb `PUSH {..,LR}` for an odd word).
     fn stored_entries(&self, i: usize) -> BTreeSet<Loc> {
         let u = &self.units[i];
-        let UnitId::Overlay(cpu, _) = u.id else {
-            return BTreeSet::new();
+        let cpu = u.id.cpu();
+        let code: Vec<(u32, &[u8])> = match u.id {
+            UnitId::Overlay(..) => vec![(u.base, u.bytes.as_slice())],
+            UnitId::Static(_) => self
+                .processor(cpu)
+                .into_iter()
+                .flat_map(|p| p.segments.iter().map(|(b, d)| (*b, d.as_slice())))
+                .collect(),
+        };
+        let at = |l: Loc, n: usize| {
+            code.iter().find_map(|(b, d)| {
+                let off = l.addr.checked_sub(*b)? as usize;
+                d.get(off..off.checked_add(n)?)
+            })
         };
         let opens_frame = |l: Loc| {
-            let off = l.addr.wrapping_sub(u.base) as usize;
             if l.thumb {
-                u.bytes.get(off..off + 2).is_some_and(|b| b[1] == 0xB5)
+                at(l, 2).is_some_and(|b| b[1] == 0xB5)
             } else {
-                u.bytes.get(off..off + 4).is_some_and(|b| {
+                at(l, 4).is_some_and(|b| {
                     u32::from_le_bytes([b[0], b[1], b[2], b[3]]) & 0xFFFF_4000 == 0xE92D_4000
                 })
             }
@@ -430,18 +442,19 @@ impl Program {
             .units
             .iter()
             .enumerate()
-            .filter(|&(j, o)| j != i && o.id.cpu() == cpu)
+            .filter(|&(j, o)| j != i && o.id.cpu() == cpu && matches!(o.id, UnitId::Overlay(..)))
             .map(|(_, o)| o.bytes.as_slice());
         let statics = self
             .processor(cpu)
             .into_iter()
+            .filter(|_| matches!(u.id, UnitId::Overlay(..)))
             .flat_map(|p| p.segments.iter().map(|(_, d)| d.as_slice()));
         let mut out = BTreeSet::new();
         for bytes in others.chain(statics) {
             for w in bytes.as_chunks::<4>().0 {
                 let v = u32::from_le_bytes(*w);
                 let l = Loc::rom(v & !1, v & 1 != 0);
-                if (l.thumb || v & 3 == 0) && u.holds(l.addr) && opens_frame(l) {
+                if (l.thumb || v & 3 == 0) && opens_frame(l) {
                     out.insert(l);
                 }
             }
