@@ -638,7 +638,9 @@ impl<'a> Abstract<'a> {
             Succ::Pcs(t) if t.len() == 1 => t[0],
             Succ::Import(name) => {
                 self.import(&name, &args, s);
-                trace.impure.push(format!("calls {name}"));
+                if !READ_ONLY_IMPORTS.contains(&name.as_str()) {
+                    trace.impure.push(format!("calls {name}"));
+                }
                 trace.imports.push((name.clone(), args));
                 s.clobber_call();
                 s.regs[0] = V::P(Obj::Ret(name), 0);
@@ -676,7 +678,9 @@ impl<'a> Abstract<'a> {
         };
         if let Some(name) = self.stub_import(t) {
             self.import(&name, &args, s);
-            trace.impure.push(format!("calls {name}"));
+            if !READ_ONLY_IMPORTS.contains(&name.as_str()) {
+                trace.impure.push(format!("calls {name}"));
+            }
             trace.imports.push((name.clone(), args));
             s.clobber_call();
             s.regs[0] = V::P(Obj::Ret(name), 0);
@@ -1221,6 +1225,10 @@ pub fn purity(image: &Image, procs: &[(String, u64)]) -> Vec<(String, String)> {
     out
 }
 
+/// The C library functions that only read the memory their arguments
+/// point to: a call to one leaves a proc pure.
+pub const READ_ONLY_IMPORTS: [&str; 5] = ["memcmp", "strcmp", "strlen", "strncmp", "strnlen"];
+
 /// Steps [`purity`] gives each proc: a builder, state or view proc takes a
 /// few hundred.
 pub const PURITY_BUDGET: usize = 20_000;
@@ -1586,6 +1594,8 @@ mod tests {
     const INFO_STUB: u32 = 0x480;
     const MEMCPY_STUB: u32 = 0x4c0;
     const SET_DEVICE: u32 = 0x500;
+    const VIEW_COMPARE: u32 = 0x540;
+    const MEMCMP_STUB: u32 = 0x580;
     const POOL: u32 = 0x1600;
     const OFFS: u32 = 0x1800;
     const SETTING: u32 = 0x1901;
@@ -1597,6 +1607,7 @@ mod tests {
     const HOOK: u32 = 0x2190;
     const INFO_GOT: u32 = 0x21a0;
     const MEMCPY_GOT: u32 = 0x21b0;
+    const MEMCMP_GOT: u32 = 0x21c0;
     const TABLE: u32 = 0x2200;
 
     fn movz_x(rd: u32, imm: u32) -> u32 {
@@ -1768,6 +1779,16 @@ mod tests {
             MEMCPY_STUB,
             &[movz_x(16, MEMCPY_GOT), ldr_x(17, 16, 0), BR_X17],
         );
+        code(
+            &mut text,
+            MEMCMP_STUB,
+            &[movz_x(16, MEMCMP_GOT), ldr_x(17, 16, 0), BR_X17],
+        );
+        code(
+            &mut text,
+            VIEW_COMPARE,
+            &[movz_x(2, 0x20), bl(VIEW_COMPARE + 4, MEMCMP_STUB), RET],
+        );
 
         let mut names: Vec<(String, u32)> =
             (0..16).map(|k| (format!("Aaa{k:02}"), FILLER)).collect();
@@ -1786,6 +1807,7 @@ mod tests {
         if nvn1 {
             names.push(("TextureBuilderSetDevice".to_string(), SET_DEVICE));
         }
+        names.push(("TextureViewCompare".to_string(), VIEW_COMPARE));
         let mut rodata = vec![0u8; 0x1000];
         put(&mut rodata, 0, b"MOD0");
         for (k, v) in [(DATA - RODATA) as i32, 0, 0, 0, 0, 0].iter().enumerate() {
@@ -1803,7 +1825,7 @@ mod tests {
         }
         put(&mut rodata, SETTING as usize - RODATA, b"TestSetting");
         let dynstr =
-            b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0NvRmGpuDeviceGetInfo\0memcpy\0";
+            b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0NvRmGpuDeviceGetInfo\0memcpy\0memcmp\0";
         put(&mut rodata, DYNSTR, dynstr);
         let sym = |name: u32, shndx: u16, value: u64| {
             let mut e = [0u8; 24];
@@ -1817,6 +1839,7 @@ mod tests {
         put(&mut rodata, DYNSYM + 48, &sym(28, 0, 0));
         put(&mut rodata, DYNSYM + 72, &sym(52, 0, 0));
         put(&mut rodata, DYNSYM + 96, &sym(73, 0, 0));
+        put(&mut rodata, DYNSYM + 120, &sym(80, 0, 0));
         let mut rela: Vec<(u64, u64, u64)> = vec![(u64::from(TABLE_WORD), 1027, u64::from(TABLE))];
         for (k, (_, a)) in names.iter().enumerate() {
             rela.push((u64::from(TABLE) + 8 * k as u64, 1027, u64::from(*a)));
@@ -1824,6 +1847,7 @@ mod tests {
         rela.push((u64::from(CHOOSE_GOT), (2 << 32) | 1026, 0));
         rela.push((u64::from(INFO_GOT), (3 << 32) | 1026, 0));
         rela.push((u64::from(MEMCPY_GOT), (4 << 32) | 1026, 0));
+        rela.push((u64::from(MEMCMP_GOT), (5 << 32) | 1026, 0));
         for (k, (o, i, a)) in rela.iter().enumerate() {
             let at = RELA + 24 * k;
             put(&mut rodata, at, &o.to_le_bytes());
@@ -1844,7 +1868,7 @@ mod tests {
             text,
             rodata,
             data,
-            dyn_extents: [(DYNSTR as u32, dynstr.len() as u32), (DYNSYM as u32, 120)],
+            dyn_extents: [(DYNSTR as u32, dynstr.len() as u32), (DYNSYM as u32, 144)],
             ..NsoSpec::default()
         }))
         .expect("the fixture parses");
@@ -1856,7 +1880,7 @@ mod tests {
     fn the_proc_table_comes_from_the_loaders_constants() {
         let img = driver(true);
         let t = proc_table(&img).expect("a table");
-        assert_eq!(t.len(), 22);
+        assert_eq!(t.len(), 23);
         assert_eq!(t[0], ("nvnAaa00".to_string(), u64::from(FILLER)));
         assert!(t.contains(&(
             "nvnTextureBuilderGetStorageClass".to_string(),
@@ -1931,6 +1955,7 @@ mod tests {
         assert_eq!(why("nvnTextureBuilderGetDevice"), None);
         assert_eq!(why("nvnDeviceGetInteger"), None);
         assert_eq!(why("nvnAaa00"), None);
+        assert_eq!(why("nvnTextureViewCompare"), None);
     }
 
     #[test]
