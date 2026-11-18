@@ -21,10 +21,10 @@ and IN<n> (input file n). `input <n> <bytes> <kind> <seed>` lines make input n: 
 random words, f32:<lo>:<hi> for floats drawn between lo and hi, words:<a>,<b>,... for those words
 then zeros, zero for zeros. The translated
 program finds its buffer addresses in constant bank 0, so a spec places them there with `put`
-lines as well as in the push constants the GLSL reads. A run that needs VK_KHR_shader_fma on a
-device without it is skipped, and so is a translation that runs warp operations on 32-wide host
-subgroups anywhere but on the reference device. A translation the translator reports inexact may
-differ; any other difference fails.
+lines as well as in the push constants the GLSL reads. A run that needs VK_KHR_shader_fma or
+VK_KHR_cooperative_matrix on a device without it is skipped, and so is a translation that runs warp
+operations on 32-wide host subgroups (or 32-lane clusters of them) anywhere but on the reference
+device. A translation the translator reports inexact may differ; any other difference fails.
 """
 import os, random, struct, subprocess, sys
 
@@ -145,7 +145,7 @@ def check(work, name, prog, lines, inputs, answers):
             ok = False
             continue
         inexact = x.split('inexact: [', 1)[1].split(']', 1)[0] if 'inexact: [' in x else ''
-        native = 'warp: Subgroup' in x and 'warp_ops: 0,' not in x
+        native = ('warp: Subgroup' in x or 'check_warp32: true' in x) and 'warp_ops: 0,' not in x
         v = subprocess.run(['spirv-val', '--target-env', 'vulkan1.2', spv], capture_output=True, text=True)
         if v.returncode:
             print('%s %s: spirv-val: %s' % (name, host, (v.stdout + v.stderr).strip()[-1500:]))

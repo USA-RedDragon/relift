@@ -25,7 +25,9 @@
  *   texdims <path>                 the texture dimension table (set 2 binding 31) from a file;
  *                                  zeros without one
  * The device is the first whose name holds the given text. KRUN_CACHE=<path> writes the pipeline
- * cache there. Exits with 77 when the module needs VK_KHR_shader_fma and the device lacks it.
+ * cache there. Exits with 77 when the module needs VK_KHR_shader_fma or VK_KHR_cooperative_matrix
+ * and the device lacks it. 16-bit float arithmetic and half fused multiply-adds are enabled where the
+ * device has them.
  */
 #include <vulkan/vulkan.h>
 #include <stdio.h>
@@ -236,6 +238,7 @@ int main(int argc, char **argv) {
     f12.descriptorBindingPartiallyBound = 1;
     f12.shaderBufferInt64Atomics = s12.shaderBufferInt64Atomics;
     f12.shaderSharedInt64Atomics = s12.shaderSharedInt64Atomics;
+    f12.shaderFloat16 = s12.shaderFloat16;
     VkPhysicalDeviceVulkan13Features f13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &f12 };
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f13 };
     f2.features.shaderInt64 = s2.features.shaderInt64;
@@ -244,10 +247,21 @@ int main(int argc, char **argv) {
     f2.features.shaderImageGatherExtended = s2.features.shaderImageGatherExtended;
     f2.features.imageCubeArray = s2.features.imageCubeArray;
     f2.features.shaderResourceMinLod = s2.features.shaderResourceMinLod;
-    const char *exts[3]; uint32_t nexts = 0;
+    const char *exts[4]; uint32_t nexts = 0;
     VkPhysicalDeviceShaderClockFeaturesKHR fck = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR };
     fck.shaderSubgroupClock = 1; fck.shaderDeviceClock = 1;
     VkPhysicalDeviceShaderFmaFeaturesKHR ffma = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR, 0, 0, 1, 0 };
+    if (fma) {
+        VkPhysicalDeviceShaderFmaFeaturesKHR qf = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR };
+        VkPhysicalDeviceFeatures2 q2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &qf };
+        vkGetPhysicalDeviceFeatures2(pd, &q2);
+        ffma.shaderFmaFloat16 = qf.shaderFmaFloat16;
+    }
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR fcm = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, 0, 1, 0 };
+    if (contains(code, cn, "SPV_KHR_cooperative_matrix")) {
+        if (!has_ext("VK_KHR_cooperative_matrix")) { fprintf(stderr, "needs VK_KHR_cooperative_matrix\n"); return 77; }
+        exts[nexts++] = "VK_KHR_cooperative_matrix"; fcm.pNext = f12.pNext; f12.pNext = &fcm;
+    }
     VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR fmr = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR, 0, 1 };
     if (has_ext("VK_KHR_shader_clock")) { exts[nexts++] = "VK_KHR_shader_clock"; fck.pNext = f12.pNext; f12.pNext = &fck; }
     if (fma) { exts[nexts++] = "VK_KHR_shader_fma"; ffma.pNext = f12.pNext; f12.pNext = &ffma; }

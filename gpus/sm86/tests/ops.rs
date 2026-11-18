@@ -153,8 +153,21 @@ fn hmma_f16() {
             "HMMA.1688.F16 R8, R4, R9, R6",
         ],
     );
-    let calls = spirv_ops(&spirv).iter().filter(|&&o| o == 57).count();
-    assert_eq!(calls, 8 + 8 + 4);
+    let calls = |spirv: &[u32]| spirv_ops(spirv).iter().filter(|&&o| o == 57).count();
+    assert!(HostProfile::nvidia().native_f16);
+    assert_eq!(
+        calls(&spirv),
+        8 + 8 + 4 + 1,
+        "steps, and the float step's call of the decoded one"
+    );
+    let mut host = HostProfile::nvidia();
+    host.native_f16 = false;
+    let opts = Options {
+        host,
+        ..Options::default()
+    };
+    let s = translate_with(&program(&words), &opts).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(calls(&s.spirv), 8 + 8 + 4);
     assert_eq!(narrow_warp_path(&words), WarpPath::Shared);
 }
 

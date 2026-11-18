@@ -27,6 +27,11 @@ const FUNCTION_PARAMETER: u16 = 55;
 const FUNCTION_CALL: u16 = 57;
 const RETURN_VALUE: u16 = 254;
 const DOT8_KEY: u32 = 0x4_0000;
+const DOT8_FLOAT_KEY: u32 = 0x4_0001;
+/// The step functions are called, not inlined (`DontInline`): a program
+/// has hundreds of HMMA and eight steps each, and inlined they made
+/// binaries of megabytes and drivers compile for minutes.
+const DOT8_CONTROL: u32 = 2;
 const NO_EXP: u32 = -64i32 as u32;
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
@@ -103,7 +108,11 @@ fn hmma(c: &mut Ctx, i: &Inst) -> Res<()> {
         .iter()
         .map(|&v| col_lanes.iter().map(|ls| c.shuffle_set(v, ls)).collect())
         .collect();
-    let dot = c.dot8_fn();
+    let dot = if c.host.native_f16 {
+        c.dot8_float_fn()
+    } else {
+        c.dot8_fn()
+    };
     let k16c = c.m.c_u32(16);
     let mut out = Vec::new();
     for (half_row, &accw) in acc.iter().enumerate() {
@@ -145,7 +154,7 @@ impl Ctx {
         let u = self.u32t();
         let fnt = self.m.t_fn_args(u, &[u; 9]);
         let id = self.m.id();
-        self.m.emit_void(op::FUNCTION, &[u, id, 0, fnt]);
+        self.m.emit_void(op::FUNCTION, &[u, id, DOT8_CONTROL, fnt]);
         let ps: Vec<u32> = (0..9)
             .map(|_| self.m.emit(FUNCTION_PARAMETER, u, &[]))
             .collect();
@@ -292,6 +301,21 @@ impl Ctx {
             let v = self.msel(sneg, nv, v);
             sum = self.mu(op::I_ADD, sum, v);
         }
+        let r = self.dot8_round(sum, big);
+        let pinf = self.m.c_u32(0x7c00);
+        let ninf = self.m.c_u32(0xfc00);
+        let qnan = self.m.c_u32(0x7fff);
+        let r = self.msel(pos, pinf, r);
+        let r = self.msel(neg, ninf, r);
+        self.msel(nan, qnan, r)
+    }
+
+    /// The exact sum `sum` of a step's terms on the grid of `big` (see the
+    /// module documentation) rounded to half precision to nearest even, a
+    /// zero being `+0`.
+    fn dot8_round(&mut self, sum: u32, big: u32) -> u32 {
+        let u = self.u32t();
+        let z = self.m.c_u32(0);
         let sneg = self.mbk(op::S_LESS_THAN, sum, 0);
         let nsum = self.m.emit(op::S_NEGATE, u, &[sum]);
         let mag = self.msel(sneg, nsum, sum);
@@ -331,12 +355,133 @@ impl Ctx {
         let bits = self.msel(qz, z, bits);
         let sbit = self.mk(op::BITWISE_OR, bits, 0x8000);
         let r = self.msel(sneg, sbit, bits);
-        let r = self.msel(qz, z, r);
-        let pinf = self.m.c_u32(0x7c00);
-        let ninf = self.m.c_u32(0xfc00);
-        let qnan = self.m.c_u32(0x7fff);
-        let r = self.msel(pos, pinf, r);
-        let r = self.msel(neg, ninf, r);
-        self.msel(nan, qnan, r)
+        self.msel(qz, z, r)
+    }
+
+    /// `dot8` as [`Ctx::dot8_fn`] gives it, by single-precision arithmetic
+    /// where no input is an infinity or a NaN (see the module
+    /// documentation); other steps call the decoded function.
+    fn dot8_float_fn(&mut self) -> u32 {
+        if let Some(&f) = self.builtins.get(&DOT8_FLOAT_KEY) {
+            return f;
+        }
+        let exact = self.dot8_fn();
+        self.use_native_f16();
+        let saved = std::mem::take(&mut self.m.body);
+        let saved_vars = self.m.suspend_vars();
+        let u = self.u32t();
+        let fnt = self.m.t_fn_args(u, &[u; 9]);
+        let id = self.m.id();
+        self.m.emit_void(op::FUNCTION, &[u, id, DOT8_CONTROL, fnt]);
+        let ps: Vec<u32> = (0..9)
+            .map(|_| self.m.emit(FUNCTION_PARAMETER, u, &[]))
+            .collect();
+        let entry = self.m.id();
+        self.m.emit_void(op::LABEL, &[entry]);
+        let mut special = self.m.c_bool(false);
+        for (k, &w) in ps.iter().enumerate() {
+            for mask in if k == 0 {
+                &[0x7c00][..]
+            } else {
+                &[0x7c00, 0x7c00_0000][..]
+            } {
+                let e = self.mk(op::BITWISE_AND, w, *mask);
+                let s = self.mbk(op::I_EQUAL, e, *mask);
+                special = self.mlog(op::LOGICAL_OR, special, s);
+            }
+        }
+        let slow = self.m.id();
+        let fast = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[special, slow, fast]);
+        self.m.emit_void(op::LABEL, &[slow]);
+        let mut args = vec![exact];
+        args.extend_from_slice(&ps);
+        let rs = self.m.emit(FUNCTION_CALL, u, &args);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[fast]);
+        let rf = self.dot8_float_body(ps[0], &ps[1..5], &ps[5..9]);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
+        let r = self.m.emit(op::PHI, u, &[rs, slow, rf, fast]);
+        self.m.emit_void(RETURN_VALUE, &[r]);
+        self.m.emit_void(op::FUNCTION_END, &[]);
+        let body = std::mem::replace(&mut self.m.body, saved);
+        self.m.restore_vars(saved_vars);
+        self.funcs.extend(body);
+        self.builtins.insert(DOT8_FLOAT_KEY, id);
+        id
+    }
+
+    /// The exponent field of each half of packed word `w`, 1 for a zero or
+    /// denormal one: low half first.
+    fn half_exps(&mut self, w: u32) -> [u32; 2] {
+        let one = self.m.c_u32(1);
+        let u = self.u32t();
+        [10, 26].map(|sh| {
+            let e = self.mk(op::SHIFT_RIGHT_LOGICAL, w, sh);
+            let e = self.mk(op::BITWISE_AND, e, 31);
+            self.ext(u, glsl::U_MAX, &[e, one])
+        })
+    }
+
+    /// One step of [`Ctx::dot8_fn`] for finite inputs, in single precision.
+    fn dot8_float_body(&mut self, acc: u32, a: &[u32], b: &[u32]) -> u32 {
+        let u = self.u32t();
+        let i = self.i32t();
+        let f = self.f32t();
+        let v2f = self.m.t_vec(f, 2);
+        let hf = self.m.t_f16();
+        let v2h = self.m.t_vec(hf, 2);
+        let widen = |c: &mut Ctx, w: u32| {
+            let h = c.m.emit(op::BITCAST, v2h, &[w]);
+            c.m.emit(op::F_CONVERT, v2f, &[h])
+        };
+        let zero = self.m.c_f32(0);
+        let none = self.m.c_u32(NO_EXP);
+        let mut big = none;
+        let mut prods = Vec::new();
+        for k in 0..4 {
+            let fa = widen(self, a[k]);
+            let fb = widen(self, b[k]);
+            let p = self.m.emit(op::F_MUL, v2f, &[fa, fb]);
+            self.m.deco(p, 42, &[]);
+            let ea = self.half_exps(a[k]);
+            let eb = self.half_exps(b[k]);
+            for l in 0..2 {
+                let pl = self.m.emit(op::COMPOSITE_EXTRACT, f, &[p, l]);
+                let e = self.mu(op::I_ADD, ea[l as usize], eb[l as usize]);
+                let e = self.mk(op::I_SUB, e, 15);
+                let t = self.boolt();
+                let nz = self.m.emit(op::F_UNORD_NOT_EQUAL, t, &[pl, zero]);
+                let ek = self.msel(nz, e, none);
+                big = self.ext(u, glsl::S_MAX, &[big, ek]);
+                prods.push(pl);
+            }
+        }
+        let hc = self.m.emit(op::BITCAST, v2h, &[acc]);
+        let hc = self.m.emit(op::COMPOSITE_EXTRACT, hf, &[hc, 0]);
+        let fc = self.m.emit(op::F_CONVERT, f, &[hc]);
+        let [ec, _] = self.half_exps(acc);
+        let mag = self.mk(op::BITWISE_AND, acc, 0x7fff);
+        let cnz = self.mbk(op::I_NOT_EQUAL, mag, 0);
+        let eck = self.msel(cnz, ec, none);
+        big = self.ext(u, glsl::S_MAX, &[big, eck]);
+        let k = self.m.c_u32(39 + 127);
+        let sexp = self.mu(op::I_SUB, k, big);
+        let sbits = self.mk(op::SHIFT_LEFT_LOGICAL, sexp, 23);
+        let scale = self.m.emit(op::BITCAST, f, &[sbits]);
+        prods.push(fc);
+        let mut sum = self.m.c_u32(0);
+        for t in prods {
+            let v = self.m.emit(op::F_MUL, f, &[t, scale]);
+            self.m.deco(v, 42, &[]);
+            let n = self.m.emit(op::CONVERT_F_TO_S, i, &[v]);
+            let n = self.m.emit(op::BITCAST, u, &[n]);
+            sum = self.mu(op::I_ADD, sum, n);
+        }
+        self.dot8_round(sum, big)
     }
 }
