@@ -289,6 +289,8 @@ void rl_nds_request_irq(rl_nds *m, unsigned cpu, uint32_t sources);
 bool rl_nds_irq_line(const rl_nds *m, unsigned cpu);
 /** @brief The tick from which cpu's IRQ input is asserted, or UINT64_MAX while it is not. */
 uint64_t rl_nds_irq_at(const rl_nds *m, unsigned cpu);
+/** @brief Where the machine keeps rl_nds_irq_at of cpu (0 or 1), for a hot path that reads it after every access. */
+const uint64_t *rl_nds_irq_at_ref(const rl_nds *m, unsigned cpu);
 
 /**
  * @brief HALT of cpu (the ARM7's HALTCNT, the ARM9's wait for interrupt):

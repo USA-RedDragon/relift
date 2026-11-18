@@ -92,3 +92,5 @@ bool rl_nds_irq_line(const rl_nds *m, unsigned cpu)
 }
 
 uint64_t rl_nds_irq_at(const rl_nds *m, unsigned cpu) { return cpu < 2 ? m->irq[cpu].line_at : NDS_NEVER; }
+
+const uint64_t *rl_nds_irq_at_ref(const rl_nds *m, unsigned cpu) { return &m->irq[cpu & 1u].line_at; }

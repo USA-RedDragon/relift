@@ -116,16 +116,6 @@ bool nds_drops_byte(unsigned cpu, uint32_t addr)
     return cpu == RL_NDS_ARM9 && r >= 0x05 && r <= 0x07;
 }
 
-bool nds_shared(unsigned cpu, uint32_t addr)
-{
-    unsigned r = addr >> 24;
-    if (cpu == RL_NDS_ARM9)
-        return (r >= 0x02 && r <= 0x04) || (r >= 0x08 && r <= 0x0A);
-    if (r == 0x03)
-        return addr < 0x03800000u;
-    return r == 0x02 || r == 0x04 || r == 0x06 || (r >= 0x08 && r <= 0x0A);
-}
-
 bool rl_nds_ordered(const rl_nds *m, unsigned cpu, uint32_t addr)
 {
     if (cpu == RL_NDS_ARM9) {

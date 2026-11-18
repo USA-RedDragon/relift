@@ -68,19 +68,6 @@ void nds_cache_mpu(rl_nds *m)
     }
 }
 
-unsigned nds_cache_attr(const rl_nds *m, uint32_t addr)
-{
-    uint32_t c = m->cp15.control;
-    if (!(c & RL_CP15_MPU))
-        return 0;
-    unsigned a = m->cache.attr[addr >> 12];
-    if (!(c & RL_CP15_ICACHE))
-        a &= ~(unsigned)NDS_ATTR_IC;
-    if (!(c & RL_CP15_DCACHE))
-        a &= ~(unsigned)NDS_ATTR_DC;
-    return a;
-}
-
 /** @brief The way of set s that holds tag t, or -1. */
 static int find(const nds_cache_side *c, unsigned s, uint32_t t)
 {

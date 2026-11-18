@@ -51,7 +51,7 @@ static void clip(rl_nds_arm *k)
 {
     if (k->i)
         return;
-    uint64_t at = rl_nds_irq_at(k->run->m, k->id);
+    uint64_t at = *k->irq_at;
     if (at == UINT64_MAX)
         return;
     rl_time *t = &k->c->time;
@@ -702,6 +702,7 @@ int rl_nds_run_init(rl_nds_run *r, const rl_nds_program *p)
         k->run = r;
         k->id = i;
         k->k = rl_sched_add_cpu(r->s, i == RL_NDS_ARM9 ? 1u : 2u);
+        k->irq_at = rl_nds_irq_at_ref(r->m, i);
         k->t = rl_thread_alloc();
         if (!k->k || !k->t)
             goto fail;

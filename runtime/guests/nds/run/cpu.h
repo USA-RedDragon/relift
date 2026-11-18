@@ -49,6 +49,8 @@ typedef struct rl_nds_arm {
     /** @brief RL_NDS_ARM9 or RL_NDS_ARM7. */
     unsigned id;
     rl_sched_cpu *k;
+    /** @brief The machine's rl_nds_irq_at of this CPU. */
+    const uint64_t *irq_at;
     struct rl_thread *t;
     rl_ctx *c;
     /** @brief Where the boot left the CPU. */

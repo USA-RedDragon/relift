@@ -599,7 +599,15 @@ uint32_t nds_ipc_read(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now);
 void nds_ipc_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 
 /** @brief True when cpu's bus access at addr reaches state the other CPU shares (rl_nds_ordered without the TCMs). */
-bool nds_shared(unsigned cpu, uint32_t addr);
+static inline bool nds_shared(unsigned cpu, uint32_t addr)
+{
+    unsigned r = addr >> 24;
+    if (cpu == RL_NDS_ARM9)
+        return (r >= 0x02 && r <= 0x04) || (r >= 0x08 && r <= 0x0A);
+    if (r == 0x03)
+        return addr < 0x03800000u;
+    return r == 0x02 || r == 0x04 || r == 0x06 || (r >= 0x08 && r <= 0x0A);
+}
 /** @brief Waits until the other CPU is past cpu in the order (rl_sched_order); nothing before rl_nds_attach. */
 void nds_order(rl_nds *m, unsigned cpu);
 /** @brief Sets the CPUs' ranks from EXMEMCNT bit 15. */
@@ -786,7 +794,18 @@ void nds_cache_reset(rl_nds *m);
 /** @brief Rebuilds the page attributes after a protection unit change. */
 void nds_cache_mpu(rl_nds *m);
 /** @brief The NDS_ATTR_ bits of addr with the cache enables of the control register. */
-unsigned nds_cache_attr(const rl_nds *m, uint32_t addr);
+static inline unsigned nds_cache_attr(const rl_nds *m, uint32_t addr)
+{
+    uint32_t c = m->cp15.control;
+    if (!(c & RL_CP15_MPU))
+        return 0;
+    unsigned a = m->cache.attr[addr >> 12];
+    if (!(c & RL_CP15_ICACHE))
+        a &= ~(unsigned)NDS_ATTR_IC;
+    if (!(c & RL_CP15_DCACHE))
+        a &= ~(unsigned)NDS_ATTR_DC;
+    return a;
+}
 /**
  * @brief Charges a cached read of addr: a hit, or a line fill after the write buffer drains (and the write-back of a
  * dirty victim). A data hit costs nothing beyond its instruction's cycle but for a further word of an LDM (seq).
