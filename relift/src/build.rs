@@ -1184,6 +1184,47 @@ pub(crate) fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
     }
 }
 
+/// Checks the tools that `toolchain.*` names: a bare name must be on `PATH`,
+/// a path must be a file. A tool named wrongly would otherwise surface as a
+/// shell or OS error from deep in the build.
+///
+/// # Errors
+///
+/// The first configured tool that cannot be found.
+pub fn check_toolchain(settings: &Settings) -> Result<(), BoxError> {
+    let t = &settings.toolchain;
+    for (key, setting) in [
+        ("clang", &t.clang),
+        ("zig", &t.zig),
+        ("ninja", &t.ninja),
+        ("appimagetool", &t.appimagetool),
+    ] {
+        if setting.as_os_str().is_empty() {
+            continue;
+        }
+        let bare = setting.components().count() == 1;
+        let found = if bare {
+            relift_build::find_tool(&setting.to_string_lossy()).is_some()
+        } else {
+            setting.is_file()
+        };
+        if !found {
+            let where_ = if bare {
+                "is not on PATH"
+            } else {
+                "is not a file"
+            };
+            return Err(format!(
+                "toolchain.{key}: {} {where_}; fix the setting (relift.toml, RELIFT_TOOLCHAIN_{}, --toolchain.{key}) or clear it to search PATH",
+                setting.display(),
+                key.to_ascii_uppercase(),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// The environment variable that turns a `relift build` or `relift run`
 /// into the lifting child: it lifts and emits, writes the record of what it
 /// emitted to the named file and exits. Not a setting (no `RELIFT_` prefix).
@@ -2062,6 +2103,7 @@ pub fn run_build(
     dev: bool,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
+    check_toolchain(settings)?;
     if dev && !crate::gb::is_project() {
         return Err(
             "--dev is for a Game Boy project; `relift run` makes the dev build of others".into(),
@@ -2263,6 +2305,7 @@ pub fn run_run(
     trace_os: bool,
     ui: &mut Ui,
 ) -> Result<i32, BoxError> {
+    check_toolchain(settings)?;
     if crate::gb::is_project() {
         if target.is_some_and(|t| t != "host") {
             return Err("only the host target runs so far".into());

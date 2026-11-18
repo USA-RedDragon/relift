@@ -61,6 +61,34 @@ fn every_stub_subcommand_fails_as_not_implemented() {
 }
 
 #[test]
+fn a_toolchain_setting_that_names_no_tool_is_refused_before_the_build() {
+    for (args, name) in [
+        (
+            &["--toolchain.clang", "/nonexistent/clang", "build"][..],
+            "build",
+        ),
+        (&["--toolchain.ninja", "no-such-ninja-9", "run"], "run"),
+    ] {
+        let out = relift(args);
+        assert!(!out.status.success(), "relift {args:?} succeeded");
+        let err = stderr(&out);
+        assert!(
+            err.starts_with(&format!("relift {name}: toolchain.")),
+            "relift {args:?}: {err}"
+        );
+        assert!(err.contains("clear it to search PATH"), "{err}");
+    }
+    let err = stderr(&relift(&[
+        "--toolchain.clang",
+        "/nonexistent/clang",
+        "build",
+    ]));
+    assert!(err.contains("/nonexistent/clang is not a file"), "{err}");
+    let err = stderr(&relift(&["--toolchain.ninja", "no-such-ninja-9", "run"]));
+    assert!(err.contains("no-such-ninja-9 is not on PATH"), "{err}");
+}
+
+#[test]
 fn build_and_run_without_a_project_say_what_is_missing() {
     for (args, name) in [
         (&["build"][..], "build"),
