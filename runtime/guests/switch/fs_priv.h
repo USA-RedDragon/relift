@@ -70,6 +70,7 @@ void rl_fs_romfs_env(void);
 rl_result rl_fs_open_data_storage_current(rl_ipc_req *r);
 /** @brief OpenDataStorageByProgramId (201). */
 rl_result rl_fs_open_data_storage_program(rl_ipc_req *r);
+rl_result rl_fs_open_data_storage_program_index(rl_ipc_req *r);
 /** @brief OpenDataStorageByDataId (202). */
 rl_result rl_fs_open_data_storage_data_id(rl_ipc_req *r);
 /** @brief OpenPatchDataStorageByCurrentProcess (203): there is no separate patch storage. */

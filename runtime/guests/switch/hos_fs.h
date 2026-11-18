@@ -62,6 +62,15 @@ RL_RUNTIME_API void rl_hos_fs_set_romfs_layers(const rl_romfs_layer *layers, siz
 RL_RUNTIME_API void rl_hos_fs_set_addons(const char *dir);
 
 /**
+ * @brief Sets the directory of the romfs of the other programs of a
+ * container holding several, as relift import writes them:
+ * <16 hex digit program id>/romfs.map (or romfs.img or romfs/). The guest
+ * opens one by program index or id. rl_srv_install_fs reads it from
+ * $RELIFT_PROGRAMS.
+ */
+RL_RUNTIME_API void rl_hos_fs_set_programs(const char *dir);
+
+/**
  * @brief Lists the ids of the add-ons in the add-on directory: the names of
  * its sub-directories that are 16 lower-case hex digits and hold index 0's
  * romfs. Writes up to cap ids in ascending order to out (which may be NULL)

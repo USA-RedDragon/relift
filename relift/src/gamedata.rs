@@ -68,6 +68,13 @@ pub fn dlc(import: &Path) -> Option<PathBuf> {
     Some(import.join("dlc")).filter(|d| d.is_dir())
 }
 
+/// The folder of the other programs' romfs of `import`, when the dump held
+/// several programs (`programs/<title id>`).
+#[must_use]
+pub fn programs(import: &Path) -> Option<PathBuf> {
+    Some(import.join("programs")).filter(|d| d.is_dir())
+}
+
 /// Every romfs of `import`: the game's first, then each DLC's sorted by
 /// title id and index.
 ///
@@ -111,8 +118,9 @@ pub fn units(import: &Path) -> std::io::Result<Vec<Unit>> {
 }
 
 /// Point a run of the program at `import`'s data: `RELIFT_ROMFS` at the
-/// romfs as it is, `RELIFT_DLC` at the DLC folder, `RELIFT_FONTS` at the
-/// shared fonts decoded from the player's system data.
+/// romfs as it is, `RELIFT_DLC` at the DLC folder, `RELIFT_PROGRAMS` at the
+/// other programs' romfs, `RELIFT_FONTS` at the shared fonts decoded from
+/// the player's system data.
 pub fn set_env(cmd: &mut std::process::Command, import: &Path) {
     if let Some(f) = crate::fonts::dir(import) {
         cmd.env("RELIFT_FONTS", f);
@@ -122,6 +130,9 @@ pub fn set_env(cmd: &mut std::process::Command, import: &Path) {
     }
     if let Some(d) = dlc(import) {
         cmd.env("RELIFT_DLC", d);
+    }
+    if let Some(p) = programs(import) {
+        cmd.env("RELIFT_PROGRAMS", p);
     }
 }
 
@@ -423,6 +434,20 @@ mod tests {
         let envs: Vec<_> = cmd.get_envs().collect();
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].1, Some(flat.join("romfs.img").as_os_str()));
+        std::fs::create_dir_all(flat.join("programs/0400000000000000/romfs")).expect("mkdir");
+        let mut cmd = relift_proc::command("true");
+        set_env(&mut cmd, &flat);
+        let programs: Vec<_> = cmd
+            .get_envs()
+            .filter(|(k, _)| *k == "RELIFT_PROGRAMS")
+            .collect();
+        assert_eq!(
+            programs,
+            [(
+                "RELIFT_PROGRAMS".as_ref(),
+                Some(flat.join("programs").as_os_str())
+            )]
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 }

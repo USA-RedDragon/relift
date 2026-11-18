@@ -843,6 +843,7 @@ static const rl_ipc_cmd proxy_cmds[] = {
     { 201, "OpenDataStorageByProgramId", rl_fs_open_data_storage_program },
     { 202, "OpenDataStorageByDataId", rl_fs_open_data_storage_data_id },
     { 203, "OpenPatchDataStorageByCurrentProcess", rl_fs_open_patch_data_storage },
+    { 205, "OpenDataStorageWithProgramIndex", rl_fs_open_data_storage_program_index },
     { 1003, "DisableAutoSaveDataCreation", disable_auto_save_data_creation },
     RL_SRV_STUB(1004, "SetGlobalAccessLogMode"),
     { 1005, "GetGlobalAccessLogMode", get_global_access_log_mode },

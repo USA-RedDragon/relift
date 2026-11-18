@@ -47,6 +47,9 @@ static source g_main;
 static char *g_addon_root;
 static source **g_addons;
 static size_t g_naddons;
+static char *g_program_root;
+static source **g_programs;
+static size_t g_nprograms;
 
 static void source_clear(source *s)
 {
@@ -98,6 +101,26 @@ void rl_hos_fs_set_romfs_layers(const rl_romfs_layer *layers, size_t n, rl_romfs
         }
         free(copy);
     }
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void drop_all(source ***set, size_t *n)
+{
+    for (size_t i = 0; i < *n; i++) {
+        source_clear((*set)[i]);
+        free((*set)[i]);
+    }
+    free(*set);
+    *set = NULL;
+    *n = 0;
+}
+
+void rl_hos_fs_set_programs(const char *dir)
+{
+    pthread_mutex_lock(&g_lock);
+    drop_all(&g_programs, &g_nprograms);
+    free(g_program_root);
+    g_program_root = dup_dir(dir);
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -198,6 +221,7 @@ void rl_fs_romfs_env(void)
     const char *dlc = getenv("RELIFT_DLC");
     rl_hos_fs_set_romfs(romfs);
     rl_hos_fs_set_addons(dlc);
+    rl_hos_fs_set_programs(getenv("RELIFT_PROGRAMS"));
 }
 
 static rl_result open_error(int e) { return e == ENOENT || e == ENOTDIR ? FS_TARGET_NOT_FOUND : FS_UNEXPECTED; }
@@ -258,6 +282,40 @@ static source *addon_source(uint64_t id)
     return s;
 }
 
+/** @brief The romfs of the container's program with title id id, from the programs directory; NULL if none. */
+static source *program_source(uint64_t id)
+{
+    static const char *const names[] = { "romfs.map", "romfs.img", "romfs" };
+    char dir[PATH_MAX];
+    struct stat st;
+    if (!g_program_root)
+        return NULL;
+    for (size_t i = 0; i < g_nprograms; i++)
+        if (g_programs[i]->id == id)
+            return g_programs[i];
+    size_t k = 0;
+    for (; k < sizeof names / sizeof names[0]; k++) {
+        if (snprintf(dir, sizeof dir, "%s/%016llx/%s", g_program_root, (unsigned long long)id, names[k]) >=
+                (int)sizeof dir ||
+            stat(dir, &st) != 0)
+            continue;
+        if (k < 2 ? S_ISREG(st.st_mode) : S_ISDIR(st.st_mode))
+            break;
+    }
+    if (k == sizeof names / sizeof names[0])
+        return NULL;
+    source *s = calloc(1, sizeof *s);
+    source **grown = s ? realloc(g_programs, (g_nprograms + 1) * sizeof *grown) : NULL;
+    if (!grown || !(s->dir = strdup(dir))) {
+        free(s);
+        return NULL;
+    }
+    s->id = id;
+    g_programs = grown;
+    g_programs[g_nprograms++] = s;
+    return s;
+}
+
 static rl_result storage_read(rl_ipc_req *r);
 static rl_result storage_write(rl_ipc_req *r);
 static rl_result storage_flush(rl_ipc_req *r);
@@ -303,8 +361,34 @@ rl_result rl_fs_open_data_storage_program(rl_ipc_req *r)
     if (id == hos.cfg.program_id)
         return open_source(r, &g_main);
     pthread_mutex_lock(&g_lock);
-    s = addon_source(id);
+    s = program_source(id);
+    if (!s)
+        s = addon_source(id);
     pthread_mutex_unlock(&g_lock);
+    return open_source(r, s);
+}
+
+/**
+ * @brief OpenDataStorageWithProgramIndex: a u8 program index; the data of
+ * that program of the application. Its program id is the application's id
+ * (the running program's with its low 12 bits cleared) plus the index
+ * (inferred: the ids of multi-program dumps follow it, and switchbrew gives
+ * no other mapping). An index with no imported program is reported by name.
+ */
+rl_result rl_fs_open_data_storage_program_index(rl_ipc_req *r)
+{
+    uint8_t index;
+    if (!rl_ipc_in(r, &index, sizeof index))
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t id = (hos.cfg.program_id & ~0xfffull) + index;
+    if (id == hos.cfg.program_id)
+        return open_source(r, &g_main);
+    pthread_mutex_lock(&g_lock);
+    source *s = program_source(id);
+    pthread_mutex_unlock(&g_lock);
+    if (!s)
+        rl_ipc_stop(r, "fs", "OpenDataStorageWithProgramIndex(%u): program %016llx was not imported", index,
+                    (unsigned long long)id);
     return open_source(r, s);
 }
 

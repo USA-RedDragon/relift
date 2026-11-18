@@ -1074,3 +1074,45 @@ TEST(romfs_addon_from_an_image_file)
     tree_remove(src);
     tree_remove(dlc);
 }
+
+TEST(romfs_of_another_program_by_index_and_id)
+{
+    env e = boot();
+    tc_obj st;
+    image im;
+    char root[512], programs[512], dir[700];
+    const uint64_t other = (hos.cfg.program_id & ~0xfffull) + 2;
+    uint64_t id = other;
+    make_root(root, sizeof root);
+    make_tree(root);
+    make_root(programs, sizeof programs);
+    snprintf(dir, sizeof dir, "%s/%016llx", programs, (unsigned long long)other);
+    mkdir(dir, 0777);
+    strcat(dir, "/romfs");
+    mkdir(dir, 0777);
+    write_file(dir, "data.bin", "the other program", 17);
+    rl_hos_fs_set_romfs(root);
+    rl_hos_fs_set_programs(programs);
+
+    uint8_t index = 2;
+    CHECK_EQ(open_cmd(&e, 205, &index, 1, &st), 0);
+    CHECK(image_open(&im, &e, st));
+    CHECK(image_has(&im, "data.bin", "the other program"));
+    image_close(&im);
+    CHECK_EQ(open_cmd(&e, 201, &id, 8, &st), 0);
+    CHECK(image_open(&im, &e, st));
+    CHECK(image_has(&im, "data.bin", "the other program"));
+    image_close(&im);
+    index = (uint8_t)(hos.cfg.program_id & 0xfff);
+    CHECK_EQ(open_cmd(&e, 205, &index, 1, &st), 0);
+    CHECK(image_open(&im, &e, st));
+    CHECK(same_as_host(&im, root, "a.txt"));
+    image_close(&im);
+    index = 3;
+    CHECK(open_cmd(&e, 205, &index, 1, &st) != 0);
+    CHECK_EQ(e.c->pend.kind, RL_PEND_EXIT_PROCESS);
+
+    rl_hos_fs_set_programs(NULL);
+    tree_remove(root);
+    tree_remove(programs);
+}
