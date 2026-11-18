@@ -23,6 +23,7 @@
     X(nvnWindowInitialize)                                                                                             \
     X(nvnWindowFinalize)                                                                                               \
     X(nvnWindowAcquireTexture)                                                                                         \
+    X(nvnQueueAcquireTexture)                                                                                          \
     X(nvnWindowSetPresentInterval)                                                                                     \
     X(nvnWindowGetPresentInterval)                                                                                     \
     X(nvnWindowSetCrop)                                                                                                \
@@ -85,7 +86,16 @@
     X(nvnTexturePoolSetDebugLabel)                                                                                     \
     X(nvnTextureSetDebugLabel)                                                                                         \
     X(nvnWindowSetDebugLabel)                                                                                          \
-    X(nvnCommandBufferSetDebugLabel)
+    X(nvnCommandBufferSetDebugLabel)                                                                                   \
+    X(nvnCommandBufferInsertDebugMarker)                                                                               \
+    X(nvnCommandBufferPushDebugGroup)                                                                                  \
+    X(nvnCommandBufferPopDebugGroup)                                                                                   \
+    X(nvnCommandBufferInsertDebugMarkerDynamic)                                                                        \
+    X(nvnCommandBufferInsertDebugMarkerStatic)                                                                         \
+    X(nvnCommandBufferPushDebugGroupDynamic)                                                                           \
+    X(nvnCommandBufferPushDebugGroupStatic)                                                                            \
+    X(nvnCommandBufferPopDebugGroupId)                                                                                 \
+    X(nvnDeviceApplyDeferredFinalizes)
 
 /** @brief Returns 0 from a proc of NVN_ZERO_PROCS. */
 uint64_t nvn_zero(rl_ctx *c, uint8_t *mem);

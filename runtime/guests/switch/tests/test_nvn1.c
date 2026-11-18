@@ -170,3 +170,11 @@ TEST(nvn1_hook_serves_both_consoles)
     CHECK(h->wants(h->user, "nvnBootstrapLoader"));
     CHECK(!h->wants(h->user, "vkCreateInstance"));
 }
+
+TEST(nvn1_queue_acquire_texture_needs_a_window)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x10000);
+    CHECK_EQ(call(c, nvnh_nvnQueueAcquireTexture, heap, heap + 0x100, heap + 0x200, 0), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+}

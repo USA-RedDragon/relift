@@ -83,6 +83,23 @@ uint64_t nvnh_nvnWindowAcquireTexture(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/**
+ * @brief nvnQueueAcquireTexture(NVNqueue *, NVNwindow *, int *index):
+ * NVNqueueAcquireTextureResult, the NVN1 form of nvnWindowAcquireTexture
+ * whose wait for the texture goes into the queue; the texture is free at
+ * once here, as for nvnWindowAcquireTexture.
+ */
+uint64_t nvnh_nvnQueueAcquireTexture(rl_ctx *c, uint8_t *mem)
+{
+    nvn_window *w = win_of(c, c->x[1], "nvnQueueAcquireTexture");
+    if (!w)
+        return RL_PENDING;
+    rl_st32(mem, c->x[2], w->next);
+    w->next = (w->next + 1) % w->active;
+    c->x[0] = ACQUIRE_SUCCESS;
+    return nvn_ret(c);
+}
+
 /** @brief nvnWindowSetPresentInterval(NVNwindow *, int). */
 uint64_t nvnh_nvnWindowSetPresentInterval(rl_ctx *c, uint8_t *mem)
 {
