@@ -39,9 +39,13 @@
 #define HOLD_NS 500000000ull
 #define QUIET_NS 1500000000ull
 #define MIN_PRESS_NS 50000000ull
-#define HIT_PAD_DP 4.0f
+#define HIT_PAD_DP 12.0f
+#define HIT_GAP_DP 4.0f
+#define FIT_GAP_DP 8.0f
+#define LABEL_DP 13.0f
 #define FIT_MIN 0.7f
 #define PICTURE_SHARE 0.6f
+#define FIT_PICTURE_MIN 0.85f
 #define GAP_DP 8.0f
 #define LONG_PRESS_NS 500000000ull
 #define PORTRAIT 0
@@ -106,6 +110,8 @@ typedef struct layout_state {
 typedef struct placed {
     float x, y, w, h;
     bool shown;
+    /** Extra margin of the touch area around the drawn shape, and for a slide group the disc its members share. */
+    float pad, gx, gy, gr;
 } placed;
 
 typedef struct rect {
@@ -280,6 +286,14 @@ static void item_size(const rl_touchpad_item *it, float *w, float *h)
                                                                                                          : it->w;
 }
 
+/** The text size of a pill's label: one size in dp for every pill, scaled with the layout; legacy layouts size it by height. */
+static float pill_label_size(const rl_touchpad_item *it, const placed *p)
+{
+    if (!fitted(lay()))
+        return p->h * 0.46f;
+    return lu(LABEL_DP) * p->w / fmaxf(lu(it->w), 1.0f);
+}
+
 static const char *orient_name(int o) { return o == PORTRAIT ? "portrait" : "landscape"; }
 
 static void group_key(char *out, size_t n, int o, const char *group)
@@ -445,12 +459,43 @@ static bool round_shape(const rl_touchpad_item *it)
     return it->shape == RL_TOUCHPAD_BUTTON || it->shape == RL_TOUCHPAD_STICK;
 }
 
-/** The size of the area that takes a shape's touches: the shape and a margin of a few dp on every side. */
+/** A drawn shape for the spacing rules: a circle (w is the diameter) or a box. */
+typedef struct gap_shape {
+    bool round;
+    float x, y, hw, hh;
+} gap_shape;
+
+static bool slide_group(const rl_touchpad_item *it, const placed *p) { return it->slide && p->gr > 0; }
+
+/** The shape an item takes touches as, spacing-wise: its own, or its slide group's disc. */
+static gap_shape gap_shape_of(const rl_touchpad_item *it, const placed *p, bool disc)
+{
+    if (disc && slide_group(it, p))
+        return (gap_shape){ true, p->gx, p->gy, p->gr, p->gr };
+    return (gap_shape){ round_shape(it), p->x, p->y, p->w / 2, (round_shape(it) ? p->w : p->h) / 2 };
+}
+
+/** The distance between two shapes' edges; negative when they overlap. */
+static float shape_gap(const gap_shape *a, const gap_shape *b)
+{
+    if (a->round && b->round)
+        return hypotf(a->x - b->x, a->y - b->y) - a->hw - b->hw;
+    if (!a->round && !b->round) {
+        float dx = fabsf(a->x - b->x) - a->hw - b->hw, dy = fabsf(a->y - b->y) - a->hh - b->hh;
+        return dx > 0 && dy > 0 ? hypotf(dx, dy) : fmaxf(dx, dy);
+    }
+    const gap_shape *c = a->round ? a : b, *r = a->round ? b : a;
+    float dx = fabsf(c->x - r->x) - r->hw, dy = fabsf(c->y - r->y) - r->hh;
+    float outside = hypotf(fmaxf(dx, 0.0f), fmaxf(dy, 0.0f));
+    return (outside > 0 ? outside : fmaxf(dx, dy)) - c->hw;
+}
+
+/** The size of the area that takes a shape's touches: the shape and its margin, or the legacy rule. */
 static void hit_size(const rl_touchpad_item *it, const placed *p, float *w, float *h)
 {
     if (fitted(lay())) {
-        *w = p->w + 2 * dp(HIT_PAD_DP);
-        *h = (round_shape(it) ? p->w : p->h) + 2 * dp(HIT_PAD_DP);
+        *w = p->w + 2 * p->pad;
+        *h = (round_shape(it) ? p->w : p->h) + 2 * p->pad;
         return;
     }
     float min = dp(48.0f);
@@ -460,30 +505,6 @@ static void hit_size(const rl_touchpad_item *it, const placed *p, float *w, floa
     }
     *w = fmaxf(p->w * 1.15f, min);
     *h = fmaxf(p->h * 1.15f, min);
-}
-
-typedef struct hit_shape {
-    bool round;
-    float x, y, w, h;
-} hit_shape;
-
-static hit_shape hit_shape_of(const rl_touchpad_item *it, const placed *p)
-{
-    hit_shape s = { round_shape(it), p->x, p->y, 0, 0 };
-    hit_size(it, p, &s.w, &s.h);
-    return s;
-}
-
-static bool hits_meet(const hit_shape *a, const hit_shape *b)
-{
-    if (a->round && b->round)
-        return hypotf(a->x - b->x, a->y - b->y) < (a->w + b->w) / 2 - 0.01f;
-    if (!a->round && !b->round)
-        return fabsf(a->x - b->x) < (a->w + b->w) / 2 - 0.01f && fabsf(a->y - b->y) < (a->h + b->h) / 2 - 0.01f;
-    const hit_shape *c = a->round ? a : b, *r = a->round ? b : a;
-    float dx = fmaxf(fabsf(c->x - r->x) - r->w / 2, 0.0f), dy = fmaxf(fabsf(c->y - r->y) - r->h / 2, 0.0f);
-    float rad = c->w / 2 - 0.01f;
-    return rad > 0 && dx * dx + dy * dy < rad * rad;
 }
 
 /**
@@ -538,6 +559,61 @@ static void place_group(const rl_touchpad_layout *L, const layout_state *s, uint
         keep_off_picture(p, first, count, skip);
 }
 
+static int pad_group(const rl_touchpad_layout *L, uint32_t i)
+{
+    int gi = group_of(L, i);
+    return gi >= 0 ? gi : 1000 + (int)i;
+}
+
+/**
+ * Sets the slide groups' discs and then every touch area's margin: each control's area grows into the free space,
+ * leaving HIT_GAP_DP between it and its neighbors' areas, up to HIT_PAD_DP.
+ */
+static void fill_pads(const rl_touchpad_layout *L, const layout_state *s, placed *p)
+{
+    for (uint32_t gi = 0; gi < L->ngroups && gi < MAX_GROUPS; gi++) {
+        uint32_t f = L->groups[gi].first, n = L->groups[gi].count;
+        if (!L->items[f].slide || s->g[gi].custom)
+            continue;
+        float cx = 0, cy = 0, r = 0;
+        uint32_t m = 0;
+        for (uint32_t i = f; i < f + n && i < MAX_ITEMS; i++)
+            if (!s->d[i].detached) {
+                cx += p[i].x;
+                cy += p[i].y;
+                m++;
+            }
+        if (m < 3)
+            continue;
+        cx /= (float)m;
+        cy /= (float)m;
+        for (uint32_t i = f; i < f + n && i < MAX_ITEMS; i++)
+            if (!s->d[i].detached)
+                r = fmaxf(r, hypotf(p[i].x - cx, p[i].y - cy) + p[i].w / 2);
+        for (uint32_t i = f; i < f + n && i < MAX_ITEMS; i++)
+            if (!s->d[i].detached) {
+                p[i].gx = cx;
+                p[i].gy = cy;
+                p[i].gr = r;
+            }
+    }
+    gap_shape sh[MAX_ITEMS];
+    for (uint32_t i = 0; i < L->nitems && i < MAX_ITEMS; i++)
+        sh[i] = gap_shape_of(&L->items[i], &p[i], true);
+    float room[4] = { (float)g.safe[0], (float)g.safe[1], (float)g.w - (float)g.safe[2], (float)g.h - (float)g.safe[3] };
+    for (uint32_t i = 0; i < L->nitems && i < MAX_ITEMS; i++) {
+        float pad = dp(HIT_PAD_DP);
+        pad = fminf(pad, sh[i].x - sh[i].hw - room[0]);
+        pad = fminf(pad, sh[i].y - sh[i].hh - room[1]);
+        pad = fminf(pad, room[2] - sh[i].x - sh[i].hw);
+        pad = fminf(pad, room[3] - sh[i].y - sh[i].hh);
+        for (uint32_t j = 0; j < L->nitems && j < MAX_ITEMS; j++)
+            if (j != i && pad_group(L, j) != pad_group(L, i))
+                pad = fminf(pad, (shape_gap(&sh[i], &sh[j]) - dp(HIT_GAP_DP)) / 2);
+        p[i].pad = fmaxf(pad, 0.0f);
+    }
+}
+
 static void place_with_fit(const layout_state *s, placed *p, float fit)
 {
     const rl_touchpad_layout *L = lay();
@@ -563,28 +639,33 @@ static void place_with_fit(const layout_state *s, placed *p, float fit)
             shift_inside(p, i, 1, NULL);
         }
     }
+    if (fitted(L))
+        fill_pads(L, s, p);
 }
 
-/** True when the built-in shapes of a fitted layout, placed at this fit, keep their touch areas apart and in the view. */
+/**
+ * True when the built-in shapes of a fitted layout, placed at this fit, stay FIT_GAP_DP apart (groups apart from one
+ * another; a group's own members are as the layout set them) and inside the view.
+ */
 static bool fit_ok(const rl_touchpad_layout *L, const layout_state *s, float fit)
 {
     placed p[MAX_ITEMS];
     place_with_fit(s, p, fit);
-    hit_shape hs[MAX_ITEMS];
+    gap_shape sh[MAX_ITEMS];
     bool in_play[MAX_ITEMS] = { false };
     rect lim = { (float)g.safe[0], (float)g.safe[1], (float)g.w - (float)g.safe[2], (float)g.h - (float)g.safe[3] };
+    float want = dp(FIT_GAP_DP);
     for (uint32_t i = 0; i < L->nitems && i < MAX_ITEMS; i++) {
         int gi = group_of(L, i);
         in_play[i] = !s->d[i].detached && !(gi >= 0 && s->g[gi].custom);
         if (!in_play[i])
             continue;
-        hs[i] = hit_shape_of(&L->items[i], &p[i]);
-        float hw = hs[i].w / 2, hh = (hs[i].round ? hs[i].w : hs[i].h) / 2;
-        if (hs[i].x - hw < lim.x0 - 0.5f || hs[i].x + hw > lim.x1 + 0.5f || hs[i].y - hh < lim.y0 - 0.5f ||
-            hs[i].y + hh > lim.y1 + 0.5f)
+        sh[i] = gap_shape_of(&L->items[i], &p[i], false);
+        if (sh[i].x - sh[i].hw < lim.x0 - 0.5f || sh[i].x + sh[i].hw > lim.x1 + 0.5f ||
+            sh[i].y - sh[i].hh < lim.y0 - 0.5f || sh[i].y + sh[i].hh > lim.y1 + 0.5f)
             return false;
         for (uint32_t j = 0; j < i; j++)
-            if (in_play[j] && hits_meet(&hs[i], &hs[j]))
+            if (in_play[j] && pad_group(L, i) != pad_group(L, j) && shape_gap(&sh[i], &sh[j]) < want)
                 return false;
     }
     return true;
@@ -593,6 +674,15 @@ static bool fit_ok(const rl_touchpad_layout *L, const layout_state *s, float fit
 static float fit_min(void) { return fminf(1.0f, FIT_MIN / size_factor()); }
 
 static void picture_at(const layout_state *s, float fit, int32_t r[4]);
+
+/** A picture scale, or its whole-multiple floor when the picture is shown that way unless that loses over 15%. */
+static float snap_scale(float sc, bool whole)
+{
+    if (!whole || sc < 1.0f)
+        return sc;
+    float si = floorf(sc);
+    return si >= sc * 0.85f ? si : sc;
+}
 
 /** The share of the picture's size in the whole view that it keeps when the layout is drawn at this fit. */
 static float picture_share(const layout_state *s, float fit)
@@ -604,8 +694,7 @@ static float picture_share(const layout_state *s, float fit)
     if (!pw || !ph || !g.w || !g.h)
         return 1.0f;
     float full = fminf((float)g.w / (float)pw, (float)g.h / (float)ph);
-    if (whole && full >= 1.0f)
-        full = floorf(full);
+    full = snap_scale(full, whole);
     return full > 0 ? ((float)r[2] / (float)pw) / full : 1.0f;
 }
 
@@ -619,28 +708,31 @@ static bool carves_picture(const rl_touchpad_layout *L)
  * no two touch areas meet, and the picture keeps PICTURE_SHARE of the size it would have in the whole view where it
  * can; below that the controls shrink further, to the smallest size.
  */
-static float fit_of(const layout_state *s)
+static float fit_overlap(const layout_state *s)
 {
     const rl_touchpad_layout *L = lay();
     if (!fitted(L))
         return 1.0f;
-    float lo = fit_min(), ok = 1.0f;
+    float ok = 1.0f;
     if (!fit_ok(L, s, 1.0f)) {
-        if (!fit_ok(L, s, lo)) {
-            ok = lo;
-        } else {
-            float a = lo, b = 1.0f;
-            for (int i = 0; i < 14; i++) {
-                float mid = (a + b) / 2;
-                if (fit_ok(L, s, mid))
-                    a = mid;
-                else
-                    b = mid;
-            }
-            ok = a;
+        float a = fit_min(), b = 1.0f;
+        for (int i = 0; i < 16; i++) {
+            float mid = (a + b) / 2;
+            if (fit_ok(L, s, mid))
+                a = mid;
+            else
+                b = mid;
         }
+        ok = a;
     }
-    if (!carves_picture(L) || picture_share(s, ok) >= PICTURE_SHARE)
+    return ok;
+}
+
+static float fit_of(const layout_state *s)
+{
+    const rl_touchpad_layout *L = lay();
+    float ok = fit_overlap(s), lo = fminf(ok, fmaxf(fit_min(), FIT_PICTURE_MIN / size_factor()));
+    if (!fitted(L) || !carves_picture(L) || g.w >= g.h || picture_share(s, ok) >= PICTURE_SHARE)
         return ok;
     if (picture_share(s, lo) < PICTURE_SHARE)
         return lo;
@@ -671,6 +763,8 @@ static bool item_visible(const rl_touchpad_item *it)
 static float hit_distance(const rl_touchpad_item *it, const placed *p, float x, float y)
 {
     float dx = x - p->x, dy = y - p->y, w, h;
+    if (fitted(lay()) && slide_group(it, p))
+        return hypotf(x - p->gx, y - p->gy) <= p->gr + p->pad ? hypotf(dx, dy) : -1.0f;
     hit_size(it, p, &w, &h);
     if (round_shape(it)) {
         float d = sqrtf(dx * dx + dy * dy);
@@ -1587,17 +1681,28 @@ uint32_t rl_touchpad_placed(rl_touchpad_rect *out, uint32_t max)
             const rl_touchpad_item *it = &L->items[i];
             float hw, hh;
             hit_size(it, &p[i], &hw, &hh);
+            float hx = p[i].x, hy = p[i].y;
+            if (fitted(L) && slide_group(it, &p[i])) {
+                hx = p[i].gx;
+                hy = p[i].gy;
+                hw = hh = 2 * (p[i].gr + p[i].pad);
+            }
+            const char *label = it->shape == RL_TOUCHPAD_HIDE ? "Hide" : it->shape == RL_TOUCHPAD_MENU ? "Menu" : it->label;
             out[n++] = (rl_touchpad_rect){ .shape = it->shape,
-                                           .label = it->label,
+                                           .label = label,
                                            .control = it->controls[0],
+                                           .group = group_of(L, i),
+                                           .label_size = label && !round_shape(it) && it->shape != RL_TOUCHPAD_DPAD
+                                                             ? pill_label_size(it, &p[i])
+                                                             : 0.0f,
                                            .x0 = p[i].x - p[i].w / 2,
                                            .y0 = p[i].y - p[i].h / 2,
                                            .x1 = p[i].x + p[i].w / 2,
                                            .y1 = p[i].y + p[i].h / 2,
-                                           .hit_x0 = p[i].x - hw / 2,
-                                           .hit_y0 = p[i].y - hh / 2,
-                                           .hit_x1 = p[i].x + hw / 2,
-                                           .hit_y1 = p[i].y + hh / 2 };
+                                           .hit_x0 = hx - hw / 2,
+                                           .hit_y0 = hy - hh / 2,
+                                           .hit_x1 = hx + hw / 2,
+                                           .hit_y1 = hy + hh / 2 };
         }
     }
     pthread_mutex_unlock(&g.lock);
@@ -1741,15 +1846,19 @@ static rect picture_region(const rl_touchpad_layout *L, const layout_state *s, f
         int gi = group_of(L, i);
         if (s->d[i].detached || (gi >= 0 && s->g[gi].custom))
             continue;
-        float w, h;
-        hit_size(&L->items[i], &p[i], &w, &h);
+        gap_shape sh = gap_shape_of(&L->items[i], &p[i], true);
+        float ext = p[i].pad + gap;
         if (tall) {
-            top = fminf(top, p[i].y - h / 2 - gap);
-        } else if (fabsf(p[i].x - (float)g.w / 2) > (float)g.w * 0.17f) {
-            if (p[i].x < (float)g.w / 2)
-                left = fmaxf(left, p[i].x + w / 2 + gap);
+            top = fminf(top, sh.y - sh.hh - ext);
+        } else if (fabsf(sh.x - (float)g.w / 2) > (float)g.w * 0.17f) {
+            if (sh.x < (float)g.w / 2)
+                left = fmaxf(left, sh.x + sh.hw + ext);
             else
-                right = fminf(right, p[i].x - w / 2 - gap);
+                right = fminf(right, sh.x - sh.hw - ext);
+        } else if (sh.y < (float)g.h / 2) {
+            r.y0 = fmaxf(r.y0, sh.y + sh.hh + ext);
+        } else {
+            r.y1 = fminf(r.y1, sh.y - sh.hh - ext);
         }
     }
     if (tall) {
@@ -1776,7 +1885,7 @@ static void picture_at(const layout_state *s, float fit, int32_t r[4])
     float rw = reg.x1 - reg.x0, rh = reg.y1 - reg.y0;
     float sc = fminf(rw / (float)pw, rh / (float)ph);
     if (whole && sc >= 1.0f)
-        sc = floorf(sc);
+        sc = carve ? snap_scale(sc, true) : floorf(sc);
     int32_t w = (int32_t)((float)pw * sc), h = (int32_t)((float)ph * sc);
     r[0] = (int32_t)(reg.x0 + (rw - (float)w) / 2);
     r[1] = (int32_t)(reg.y0 + (rh - (float)h) / 2);
@@ -1797,6 +1906,21 @@ void rl_touchpad_picture(int32_t r[4])
     pthread_mutex_lock(&g.lock);
     picture(r);
     pthread_mutex_unlock(&g.lock);
+}
+
+bool rl_touchpad_room(uint32_t *width, uint32_t *height)
+{
+    pthread_mutex_lock(&g.lock);
+    const rl_touchpad_layout *L = lay();
+    bool carve = carves_picture(L);
+    if (carve) {
+        const layout_state *s = state();
+        rect r = picture_region(L, s, fit_overlap(s));
+        *width = (uint32_t)fmaxf(r.x1 - r.x0, 0.0f);
+        *height = (uint32_t)fmaxf(r.y1 - r.y0, 0.0f);
+    }
+    pthread_mutex_unlock(&g.lock);
+    return carve;
 }
 
 void rl_touchpad_fill(float *values, uint32_t count)
@@ -1916,7 +2040,7 @@ static void draw_item(const rl_touchpad_item *it, const placed *p, int idx, floa
                             : it->shape == RL_TOUCHPAD_MENU ? "Menu"
                                                             : it->label;
         if (label)
-            draw_label(p->x, p->y, label, p->h * 0.46f, pressed, fade, k);
+            draw_label(p->x, p->y, label, pill_label_size(it, p), pressed, fade, k);
         break;
     }
     case RL_TOUCHPAD_DPAD: {

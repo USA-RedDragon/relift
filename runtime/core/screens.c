@@ -130,11 +130,19 @@ rl_screens_layout rl_screens_resolve(const uint32_t sizes[RL_SCREENS][2], rl_scr
         return layout;
     if (height > width || controller)
         return RL_SCREENS_STACKED;
-    rl_screens_picture a, b;
-    rl_screens_plan(sizes, RL_SCREENS_STACKED, -1, false, &a);
-    rl_screens_plan(sizes, RL_SCREENS_SIDE_BY_SIDE, -1, false, &b);
-    return scale_millis(&b, width, height) > scale_millis(&a, width, height) ? RL_SCREENS_SIDE_BY_SIDE
-                                                                             : RL_SCREENS_STACKED;
+    static const rl_screens_layout candidates[] = {RL_SCREENS_STACKED, RL_SCREENS_SIDE_BY_SIDE, RL_SCREENS_LARGE_TOP};
+    rl_screens_layout best = RL_SCREENS_STACKED;
+    uint64_t best_scale = 0;
+    for (unsigned i = 0; i < sizeof candidates / sizeof candidates[0]; i++) {
+        rl_screens_picture p;
+        rl_screens_plan(sizes, candidates[i], -1, false, &p);
+        uint64_t s = scale_millis(&p, width, height);
+        if (s > best_scale) {
+            best_scale = s;
+            best = candidates[i];
+        }
+    }
+    return best;
 }
 
 int rl_screens_content(rl_screens_displays displays, uint32_t display, uint32_t display_count)
@@ -210,7 +218,11 @@ static void draw(output *o, rl_window *win, const rl_screens_config *cfg, int co
 {
     uint32_t pw, ph;
     rl_window_size(win, &pw, &ph);
-    rl_screens_layout l = rl_screens_resolve(S.sizes, cfg->layout, pw, ph, !win->extra && rl_touchpad_wanted());
+    uint32_t rw = pw, rh = ph;
+    bool controller = !win->extra && rl_touchpad_wanted();
+    if (controller && pw > ph && rl_touchpad_room(&rw, &rh))
+        controller = false;
+    rl_screens_layout l = rl_screens_resolve(S.sizes, cfg->layout, rw, rh, controller);
     if (cfg->swap)
         l = swapped(l);
     bool exchange = cfg->swap && (l == RL_SCREENS_STACKED || l == RL_SCREENS_SIDE_BY_SIDE) && content < 0;

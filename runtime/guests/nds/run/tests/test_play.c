@@ -18,15 +18,15 @@ TEST(the_screens_settings_name_the_layout_displays_and_scaling)
     rl_screens_config c = rl_nds_screens_config(false);
     CHECK_EQ(c.layout, RL_SCREENS_AUTO);
     CHECK_EQ(c.displays, RL_SCREENS_DISPLAYS_AUTO);
-    CHECK(c.integer_scale);
+    CHECK(!c.integer_scale);
     CHECK(!c.swap);
     CHECK_EQ(rl_settings_set("video.nds_layout", "large_bottom"), RL_SETTING_OK);
     CHECK_EQ(rl_settings_set("video.nds_displays", "bottom_both"), RL_SETTING_OK);
-    CHECK_EQ(rl_settings_set("video.nds_integer_scale", "false"), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("video.nds_integer_scale", "true"), RL_SETTING_OK);
     c = rl_nds_screens_config(true);
     CHECK_EQ(c.layout, RL_SCREENS_LARGE_BOTTOM);
     CHECK_EQ(c.displays, RL_SCREENS_DISPLAYS_BOTTOM_BOTH);
-    CHECK(!c.integer_scale);
+    CHECK(c.integer_scale);
     CHECK(c.swap);
     CHECK_EQ(rl_settings_set("video.nds_layout", "bottom_only"), RL_SETTING_OK);
     CHECK_EQ(rl_nds_screens_config(false).layout, RL_SCREENS_BOTTOM_ONLY);

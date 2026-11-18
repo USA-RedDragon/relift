@@ -18,6 +18,11 @@
     { RL_TOUCHPAD_PILL, false, label, { control, long_control }, x, y, w, h }
 #define RL_TP_DPAD(up, right, down, left, x, y, s) { RL_TOUCHPAD_DPAD, false, NULL, { up, right, down, left }, x, y, s, s }
 #define RL_TP_STICK(cx, cy, x, y, r) { RL_TOUCHPAD_STICK, false, NULL, { cx, cy }, x, y, 2 * (r), 2 * (r) }
+/** @brief The fixed sizes in dp of a fitted layout: a side column, a small pill, and a shoulder pill (a column wide). */
+#define RL_TP_COLUMN 148
+#define RL_TP_SMALL_W 68
+#define RL_TP_SMALL_H 32
+#define RL_TP_SHOULDER_H 40
 #define RL_TP_COUNT(a) ((uint32_t)(sizeof(a) / sizeof((a)[0])))
 /** A layout in reference pixels, of w by h pixels, from the arrays of its items and groups. */
 #define RL_TP_LAYOUT(w, h, items, groups) { w, h, items, RL_TP_COUNT(items), groups, RL_TP_COUNT(groups), false, false }

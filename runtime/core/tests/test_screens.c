@@ -135,6 +135,8 @@ TEST(auto_stacks_a_tall_window_and_where_the_controller_is_in_use)
     CHECK_EQ(rl_screens_resolve(g_sizes, RL_SCREENS_AUTO, 2400, 1080, true), RL_SCREENS_STACKED);
     CHECK_EQ(rl_screens_resolve(g_sizes, RL_SCREENS_AUTO, 2400, 1080, false), RL_SCREENS_SIDE_BY_SIDE);
     CHECK_EQ(rl_screens_resolve(g_sizes, RL_SCREENS_AUTO, 1000, 1000, false), RL_SCREENS_STACKED);
+    CHECK_EQ(rl_screens_resolve(g_sizes, RL_SCREENS_AUTO, 1360, 900, false), RL_SCREENS_SIDE_BY_SIDE);
+    CHECK_EQ(rl_screens_resolve(g_sizes, RL_SCREENS_AUTO, 700, 900, false), RL_SCREENS_STACKED);
     CHECK_EQ(rl_screens_resolve(g_sizes, RL_SCREENS_LARGE_TOP, 1000, 1000, false), RL_SCREENS_LARGE_TOP);
 }
 

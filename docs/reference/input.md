@@ -50,11 +50,11 @@ stays open.
 | --- | --- | --- |
 | `video.nds_layout` | `auto`, `stacked`, `side_by_side`, `large_top`, `large_bottom`, `top_only`, `bottom_only` | `auto` |
 | `video.nds_displays` | `auto`, `swapped`, `top_both`, `bottom_both`, `single` | `auto` |
-| `video.nds_integer_scale` | `true`, `false` | `true` |
+| `video.nds_integer_scale` | `true`, `false` | `false` |
 
-`auto` stacks the screens in a tall window or while the on-screen controller
-shows, and otherwise picks stacked or side by side by whichever fills the
-window better. `large_top` and `large_bottom` draw that screen at twice the size
+`auto` stacks the screens in a tall window, and otherwise picks stacked or side
+by side by whichever fills the window better (while the on-screen controller
+shows, the room it leaves: a wide phone gets side by side). `large_top` and `large_bottom` draw that screen at twice the size
 with the other one small beside it (a wide window) or below it (a tall one);
 `top_only` and `bottom_only` show one screen. Swap screens exchanges the
 screens' places: in a single-screen layout it shows the other screen, in a large

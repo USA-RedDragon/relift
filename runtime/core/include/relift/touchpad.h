@@ -161,6 +161,11 @@ RL_RUNTIME_API void rl_touchpad_reset(void);
  * (left, top, right, bottom pixels kept clear of cutouts and gesture edges; NULL for none).
  */
 RL_RUNTIME_API void rl_touchpad_view(uint32_t width, uint32_t height, float px_per_dp, const int32_t safe[4]);
+/**
+ * @brief When the controls take part of the view from the picture (a fitted layout, shown), true, and the size in
+ * pixels of the area left to it at the controls' size; a guest picks its layout (stacked or side by side) for that area.
+ */
+RL_RUNTIME_API bool rl_touchpad_room(uint32_t *width, uint32_t *height);
 /** @brief The view size rl_touchpad_view set; 0 by 0 before it. */
 RL_RUNTIME_API void rl_touchpad_view_size(uint32_t *width, uint32_t *height);
 /** @brief A gamepad connected (true) or disconnected; count is the number connected after it; name is its own. */
@@ -185,9 +190,16 @@ typedef struct rl_touchpad_rect {
     uint8_t shape;
     /** @brief The item's label and its first control, or NULL. */
     const char *label, *control;
+    /** @brief The index of the item's group in the layout, or -1. */
+    int32_t group;
+    /** @brief The text size in pixels of a pill's label, or 0. */
+    float label_size;
     /** @brief The bounds of the drawn shape. */
     float x0, y0, x1, y1;
-    /** @brief The bounds of the area that takes its touches (a circle's bounds for a round shape). */
+    /**
+     * @brief The bounds of the area that takes its touches: the shape and a margin that grows into free space (a
+     * circle's bounds for a round shape, the shared disc's for a slide group's buttons, which split it by nearest center).
+     */
     float hit_x0, hit_y0, hit_x1, hit_y1;
 } rl_touchpad_rect;
 /** @brief Fills out with the controls now in the view (the current orientation's layout); returns how many. */
