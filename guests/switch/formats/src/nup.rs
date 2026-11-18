@@ -570,7 +570,9 @@ fn parse_toc(b: &[u8], sb: &Superblock) -> Result<Toc> {
             first_child: u32_at(r, 8, w)?,
             child_count: u32_at(r, 0xC, w)?,
         };
-        slots += u64::from(d.child_count);
+        if d.child_count > 0 {
+            slots = slots.max(u64::from(d.first_child) + u64::from(d.child_count));
+        }
         toc.dirs.push(d);
     }
     for i in 0..at(file_count)? {
@@ -1202,6 +1204,13 @@ fn align16(v: u64) -> u64 {
 /// writer rules: sorted children, 16-byte-aligned extents, zstd level 3
 /// only when it shrinks the file, equal contents sharing one extent.
 pub fn build(packages: &[BuildPackage<'_>]) -> Vec<u8> {
+    build_spaced(packages, 0)
+}
+
+/// [`build`] with `spare` unused slots in the children array after the
+/// first directory's children, as some packers leave them.
+#[doc(hidden)]
+pub fn build_spaced(packages: &[BuildPackage<'_>], spare: usize) -> Vec<u8> {
     let mut lay = Layout {
         dirs: Vec::new(),
         files: Vec::new(),
@@ -1321,6 +1330,9 @@ pub fn build(packages: &[BuildPackage<'_>]) -> Vec<u8> {
                 Kid::Dir(d) => u32::try_from(*d).unwrap_or(0),
                 Kid::File(f) => u32::try_from(ndirs + f).unwrap_or(0),
             });
+        }
+        if dir_recs.len() == 1 {
+            children.extend(std::iter::repeat_n(0, spare));
         }
     }
 

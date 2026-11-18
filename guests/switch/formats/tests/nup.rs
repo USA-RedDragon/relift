@@ -60,6 +60,10 @@ fn fixture() -> Fixture {
 }
 
 fn container(f: &Fixture) -> Vec<u8> {
+    container_spaced(f, 0)
+}
+
+fn container_spaced(f: &Fixture, spare: usize) -> Vec<u8> {
     let base = BuildPackage {
         title_id: BASE_ID,
         version: 0,
@@ -117,7 +121,7 @@ fn container(f: &Fixture) -> Vec<u8> {
         empty_dirs: vec![],
         meta: vec![],
     };
-    nup::build(&[base, upd1, upd2, dlc])
+    nup::build_spaced(&[base, upd1, upd2, dlc], spare)
 }
 
 fn open(bytes: Vec<u8>) -> Result<Nup, Error> {
@@ -440,4 +444,22 @@ fn a_size_lie_in_a_file_record_is_caught() {
     assert!(n.read(&e).is_err());
     e.size += 2;
     assert!(n.read(&e).is_err());
+}
+
+#[test]
+fn unused_slots_in_the_children_array_are_skipped() {
+    let f = fixture();
+    let plain = open(container(&f)).expect("opens");
+    let n = open(container_spaced(&f, 5)).expect("opens with unused slots");
+    let names = |v: Vec<(String, nup::NupEntry)>| {
+        v.into_iter()
+            .map(|(p, e)| (p, e.sha256))
+            .collect::<Vec<_>>()
+    };
+    for (a, b) in n.packages().iter().zip(plain.packages()) {
+        assert_eq!(names(a.romfs()), names(b.romfs()));
+        assert_eq!(names(a.exefs()), names(b.exefs()));
+    }
+    let romfs = n.packages()[0].romfs();
+    assert_eq!(read_named(&n, &romfs, "data/big.txt"), f.big);
 }
