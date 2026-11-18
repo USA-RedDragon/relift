@@ -1,6 +1,7 @@
-The opcode patterns in src/form.rs come from Ryujinx
-src/Ryujinx.Graphics.Shader/Decoders/InstTable.cs (commit 6af327bd), under
-this license:
+The opcode patterns in src/form.rs and the field positions in src/field.rs
+(both written by gen.py) come from Ryujinx
+src/Ryujinx.Graphics.Shader/Decoders/InstTable.cs and InstDecoders.cs
+(commit 6af327bd), under this license:
 
 MIT License
 
@@ -13,8 +14,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
-The LDG 0xeec8, SURED 0xeb40 and SUATOM 0xea60 encodings in src/form.rs come
-from envytools envydis/gm107.c (commit f102b823), under this license:
+The LDG 0xeec8, SURED 0xeb40 and SUATOM 0xea60 encodings in src/form.rs and
+the instruction spelling in src/text.rs come from envytools envydis/gm107.c
+(commit f102b823), under this license:
 
 Copyright (C) 2013 Marcelina Kościelnicka
 Copyright (C) 2013 Ben Skeggs
