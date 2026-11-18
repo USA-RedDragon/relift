@@ -12,7 +12,7 @@ mod spvi;
 
 use common::translate_with;
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::pseudo::{MUFU_SAT, RRO_EX2, RRO_SINCOS};
+use relift_gpu_sm86::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS};
 use relift_gpu_sm86::translate::{Denorm as HostDenorm, HostProfile, Options};
 use relift_gpu_sm86::{Inst, Operand, RegMods};
 use spvi::{Denorm, Env, Memory, Module, Run};
@@ -358,6 +358,77 @@ fn maxwell_rro_gives_the_mufu_operand() {
             assert!(n > 100, "{name}: {n} rows");
         }
     }
+}
+
+/// Maxwell's `I2F` with an integer `.ABS` or `.NEG`, pseudo-instructions in
+/// place of the `I2F` word of the recorded 32-bit round-to-nearest
+/// variants: the device's results equal Rust's conversion on every row, and
+/// the pseudo-instruction's results equal that conversion of the source's
+/// wrapping absolute value, then its wrapping negation.
+#[test]
+fn maxwell_i2f_converts_the_integer_abs_and_neg() {
+    let host = HostProfile::preset("lavapipe").unwrap();
+    let o = Options {
+        host: host.clone(),
+        ..Options::default()
+    };
+    let f = file::load("i2f");
+    let mut checked = 0;
+    for label in ["I2F.F32.S32.RN", "I2F.F32.U32.RN"] {
+        let signed = label.contains("S32");
+        let cvt = |x: u32| {
+            if signed {
+                (x as i32 as f32).to_bits()
+            } else {
+                (x as f32).to_bits()
+            }
+        };
+        let v = f
+            .variants
+            .iter()
+            .find(|v| v.label == label)
+            .unwrap_or_else(|| panic!("{label} recorded"));
+        for (r, row) in f.rows.iter().enumerate() {
+            assert_eq!(
+                v.expect[r * v.outs],
+                cvt(row[0]),
+                "{label} device {:08x}",
+                row[0]
+            );
+        }
+        let mut p = Program::parse(&v.code);
+        let decoded = p.decode();
+        let k = decoded
+            .iter()
+            .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == "I2F"))
+            .expect("an I2F");
+        let plain = decoded[k].clone().unwrap();
+        for (abs, neg) in [(true, false), (false, true), (true, true)] {
+            let mut i = plain.clone();
+            if abs {
+                i.mods.push(I2F_IABS);
+            }
+            if neg {
+                i.mods.push(I2F_INEG);
+            }
+            p.pseudo.insert(k, i);
+            let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{label}: {e}"));
+            let m = Module::parse(&s.spirv);
+            for row in &f.rows {
+                let mut x = row[0];
+                if abs {
+                    x = (x as i32).wrapping_abs() as u32;
+                }
+                if neg {
+                    x = x.wrapping_neg();
+                }
+                let got = exec(&m, Denorm::Preserve, host.canonical_nan, row, v.outs);
+                assert_eq!(got[0], cvt(x), "{label} |{abs}| -{neg} in {:08x}", row[0]);
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 6);
 }
 
 macro_rules! families {

@@ -713,6 +713,14 @@ fn f2i64(
 }
 
 fn i2f(c: &mut Ctx, i: &Inst) -> Res<()> {
+    i2f_with(c, i, false, false)
+}
+
+/// `I2F` of a 32-bit or smaller source taken as its absolute value
+/// (`abs`, wrapping: the most negative integer stays itself) and then
+/// negated (`neg`, wrapping), as Maxwell's integer `.ABS` and `.NEG` do;
+/// both false is SM86's `I2F`.
+pub(crate) fn i2f_with(c: &mut Ctx, i: &Inst, abs: bool, neg: bool) -> Res<()> {
     let mut half = false;
     let mut signed = true;
     let mut size = 32u32;
@@ -754,8 +762,17 @@ fn i2f(c: &mut Ctx, i: &Inst) -> Res<()> {
         if m.abs || m.neg || m.not {
             return bad("integer conversion source modifiers");
         }
-        let v = pick(c, v, m.swz, size, signed)?;
         let zero = c.kc(0);
+        let v = if abs {
+            let s = c.sh(op::SHIFT_RIGHT_LOGICAL, v, 31);
+            let isn = c.cmp_k(op::I_EQUAL, s, 1);
+            let nv = c.ib(op::I_SUB, zero, v);
+            c.bpick(isn, nv, v)
+        } else {
+            v
+        };
+        let v = if neg { c.ib(op::I_SUB, zero, v) } else { v };
+        let v = pick(c, v, m.swz, size, signed)?;
         if signed {
             let n = c.sh(op::SHIFT_RIGHT_LOGICAL, v, 31);
             let isn = c.cmp_k(op::I_EQUAL, n, 1);

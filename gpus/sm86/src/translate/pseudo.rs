@@ -26,6 +26,14 @@ pub const RRO_SINCOS: &str = "SINCOS";
 /// Maxwell's `RRO.EX2`, the range reduction before `MUFU.EX2`.
 pub const RRO_EX2: &str = "EX2";
 
+/// The modifier of a Maxwell `I2F` that converts the absolute value of its
+/// integer source.
+pub const I2F_IABS: &str = "IABS";
+
+/// The modifier of a Maxwell `I2F` that converts the negation of its
+/// integer source (after `IABS` when both are set).
+pub const I2F_INEG: &str = "INEG";
+
 /// One turn per radian, `1 / (2 pi)` as a single-precision number.
 const TURNS_PER_RADIAN: u32 = 0x3e22_f983;
 
@@ -39,7 +47,20 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     if i.mnemonic == "RRO" {
         return Some(rro(c, i));
     }
+    if i.mnemonic == "I2F" && (i.has(I2F_IABS) || i.has(I2F_INEG)) {
+        return Some(i2f(c, i));
+    }
     None
+}
+
+/// Maxwell `I2F` with an integer `.ABS` or `.NEG` of its source: the SM86
+/// `I2F` of the same types and rounding, converting the source's wrapping
+/// absolute value and then its wrapping negation, as Ryujinx's `I2F`
+/// emitter does.
+fn i2f(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let mut plain = i.clone();
+    plain.mods.retain(|m| *m != I2F_IABS && *m != I2F_INEG);
+    super::int::conv::i2f_with(c, &plain, i.has(I2F_IABS), i.has(I2F_INEG))
 }
 
 /// Maxwell `MUFU` with `.SAT`: the SM86 `MUFU` of the same function, then
