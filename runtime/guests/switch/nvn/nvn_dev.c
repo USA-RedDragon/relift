@@ -61,12 +61,12 @@ typedef struct nvn_pool {
     uint32_t flags;
     nvn_import im;
     /**
-     * @brief For a virtual pool, whether a physical pool is mapped into it and
-     * the GPU address of its first byte; memory then holds the guest address
-     * of its first byte in that pool.
+     * @brief For a virtual pool, whether a physical pool (phys) is mapped
+     * into it; memory then holds the guest address its first byte reaches,
+     * and im its own buffer over that pool's memory.
      */
     bool mapped;
-    uint64_t alias_gpu;
+    uint64_t phys;
 } nvn_pool;
 
 /** @brief Imported pools by GPU address, for nvn_gpu_guest. */
@@ -154,7 +154,7 @@ bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off)
 static uint64_t pool_gpu(const nvn_pool *p)
 {
     if (p->flags & NVN_POOL_VIRTUAL)
-        return p->alias_gpu;
+        return p->im.gpu;
     return p->im.gpu ? p->im.gpu : p->memory;
 }
 
@@ -553,9 +553,11 @@ uint64_t nvnh_nvnMemoryPoolGetSize(rl_ctx *c, uint8_t *mem)
  * @brief nvnMemoryPoolMapVirtual(NVNmemoryPool *, int, const NVNmappingRequest *):
  * NVNboolean. As the driver: the pool must be virtual, and each request's
  * offsets and size must be multiples of the page size (false otherwise); a
- * request without a physical pool unmaps. The host has no GPU page tables of
- * its own, so a virtual pool is an alias of the one physical range mapped
- * into it: every request must map at the same distance into the same pool,
+ * request without a physical pool unmaps. As on the console, the virtual
+ * pool has GPU addresses of its own, which reach the physical pages mapped
+ * into it: a second host import of the physical pool's guest bytes, from the
+ * mapped distance, with its own device address. One import is one linear
+ * map, so every request must map at the same distance into the same pool,
  * and anything else stops. The storage class (the page kind) only chooses
  * how the console's GPU compresses the pages, which the host does not model.
  */
@@ -588,18 +590,32 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
                                             (unsigned long long)pool, i, (unsigned long long)size,
                                             (unsigned long long)phys, (unsigned long long)poff,
                                             (unsigned long long)voff);
-        uint64_t memory = q->memory + poff - voff, gpu = pool_gpu(q) + poff - voff;
-        if (p->mapped && (p->memory != memory || p->alias_gpu != gpu))
+        if (poff < voff || p->size > q->size - (poff - voff))
+            return (uint64_t)rl_guest_fatal(c, "nvn",
+                                            "nvnMemoryPoolMapVirtual(0x%llx): request %d maps the virtual pool past the "
+                                            "ends of pool 0x%llx (not implemented)",
+                                            (unsigned long long)pool, i, (unsigned long long)phys);
+        uint64_t memory = q->memory + poff - voff;
+        if (p->mapped && (p->memory != memory || p->phys != phys))
             return (uint64_t)rl_guest_fatal(c, "nvn",
                                             "nvnMemoryPoolMapVirtual(0x%llx): request %d maps pages from another place "
                                             "than earlier ones (only one linear range per virtual pool is implemented)",
                                             (unsigned long long)pool, i);
+        if (!p->mapped) {
+            if (!q->im.gpu || !nvn_vk_import(memory, p->size, &p->im))
+                return (uint64_t)rl_guest_fatal(c, "nvn",
+                                                "nvnMemoryPoolMapVirtual(0x%llx): pool 0x%llx is not in the host "
+                                                "device, or its bytes from 0x%llx cannot be imported again",
+                                                (unsigned long long)pool, (unsigned long long)phys,
+                                                (unsigned long long)(poff - voff));
+            pools_add(p->im.gpu, p->size, memory, p->im.buf);
+        }
         p->memory = memory;
-        p->alias_gpu = gpu;
+        p->phys = phys;
         p->mapped = true;
     }
-    trace("nvnMemoryPoolMapVirtual(0x%llx, %d requests): alias of guest 0x%llx", (unsigned long long)pool, n,
-          (unsigned long long)p->memory);
+    trace("nvnMemoryPoolMapVirtual(0x%llx, %d requests): GPU 0x%llx over guest 0x%llx", (unsigned long long)pool, n,
+          (unsigned long long)p->im.gpu, (unsigned long long)p->memory);
     c->x[0] = 1;
     return nvn_ret(c);
 }

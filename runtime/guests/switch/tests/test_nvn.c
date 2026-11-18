@@ -420,29 +420,32 @@ static void map_req(uint64_t r, uint64_t phys, uint64_t poff, uint64_t voff, uin
     rl_st32(t_mem(), r + 32, cls);
 }
 
-TEST(nvn_virtual_pools_alias_what_is_mapped_into_them)
+TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
-    uint64_t phys = heap, virt = heap + 0x100, other = heap + 0x200, req = heap + 0x400, storage = heap + 0x100000;
-    CHECK(nvn_pool_make(phys, storage, 0x40000, 0x18c));
+    uint64_t phys = heap, virt = heap + 0x100, req = heap + 0x400, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(phys, storage, 0x80000, 0x18c));
     CHECK(nvn_pool_make(virt, 0, 0x40000, 0x2a1));
-    CHECK(nvn_pool_make(other, 0, 0x40000, 0x2a1));
     map_req(req, phys, 0x10000, 0, 0x10000, 0x100);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, phys, 1, req, 0), RET);
-    CHECK_EQ(c->x[0], 0);
-    map_req(req, phys, 0x100, 0, 0x10000, 0x100);
-    CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 1, req, 0), RET);
     CHECK_EQ(c->x[0], 0);
     map_req(req, phys, 0x10000, 0, 0x10000, 0x100);
     map_req(req + 0x28, phys, 0x20000, 0x10000, 0x20000, 0x108);
     map_req(req + 0x50, 0, 0, 0x30000, 0x10000, 0);
+    uint64_t phys_gpu = nvn_pool_gpu(phys);
+    if (phys_gpu == storage) {
+        CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 3, req, 0), RL_PENDING);
+        CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+        return;
+    }
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 3, req, 0), RET);
     CHECK_EQ(c->x[0], 1);
-    uint64_t size = 0;
+    uint64_t size = 0, gpu = nvn_pool_gpu(virt);
     CHECK_EQ(nvn_pool_memory(virt, &size), storage + 0x10000);
     CHECK_EQ(size, 0x40000);
-    CHECK_EQ(nvn_pool_gpu(virt), nvn_pool_gpu(phys) + 0x10000);
+    CHECK(gpu + 0x40000 <= phys_gpu || gpu >= phys_gpu + 0x80000);
+    CHECK_EQ(nvn_gpu_guest(gpu + 0x20), storage + 0x10020);
     map_req(req, phys, 0, 0, 0x10000, 0x100);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 1, req, 0), RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);

@@ -240,7 +240,11 @@ typedef struct nvn_import {
     /** @brief The buffer's device address: the GPU address the game sees for the memory. */
     uint64_t gpu;
 } nvn_import;
-/** @brief Imports size guest bytes at guest as a buffer whose device address is the GPU address (host Vulkan up first). */
+/**
+ * @brief Imports size guest bytes at guest as a buffer whose device address is
+ * the GPU address (host Vulkan up first). Each import of the same bytes gets
+ * addresses of its own over the same pages.
+ */
 bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out);
 /** @brief Frees an import (waits for the device). */
 void nvn_vk_unimport(nvn_import *im);
