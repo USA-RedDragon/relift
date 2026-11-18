@@ -1,6 +1,7 @@
-//! Discovery of NVIDIA SM86 shader programs in a Switch 2 game: every
-//! program in a NUP or an extracted `exefs`/`romfs` tree, deduplicated by
-//! content, with a manifest and a summary of the containers seen.
+//! Discovery of NVIDIA shader programs in a Switch 2 game (SM86) or a
+//! Switch 1 game (SM53, [`Arch`]): every program in a NUP or an extracted
+//! `exefs`/`romfs` tree, deduplicated by content, with a manifest and a
+//! summary of the containers seen.
 //!
 //! A program is the bytes of its 0x80-byte shader program header (graphics
 //! only) and its code through the `BRA self` terminator ([`carve`]). The
@@ -12,6 +13,10 @@
 //! binaries) give one program per kernel, linked with its callees
 //! ([`cubin`]), and are not carved.
 //!
+//! SM53 programs are found by their NVN code header ([`maxwell`]) in every
+//! file, through zstd, SARC, Yaz0 ([`yaz0`]) and UnityFS bundles
+//! ([`unity`]).
+//!
 //! Work is cached per input file (see [`scan`]), and runs in parallel on
 //! the worker count of `relift-proc`.
 
@@ -20,14 +25,17 @@ pub mod cubin;
 pub mod error;
 pub mod inflate;
 pub mod ktgl;
+pub mod maxwell;
 pub mod mesh;
 pub mod sarc;
 pub mod scan;
 pub mod source;
+pub mod unity;
+pub mod yaz0;
 pub mod zst;
 
 pub use error::{Error, Result};
-pub use scan::{Options, Program, Report, scan};
+pub use scan::{Arch, Options, Program, Report, scan};
 pub use source::{DirSource, NupSource, Source, SourceFile};
 
 pub(crate) fn sha256_hex(b: &[u8]) -> String {

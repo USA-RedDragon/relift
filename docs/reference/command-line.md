@@ -1822,7 +1822,7 @@ Options:
 
 <!-- docgen:usage crate=relift-switch-shaders bin=relift-shaders -->
 ```text
-Find every NVIDIA SM86 shader program of a game
+Find every NVIDIA shader program of a game
 
 Usage: relift-shaders <COMMAND>
 

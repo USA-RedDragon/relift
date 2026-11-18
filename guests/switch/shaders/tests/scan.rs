@@ -227,6 +227,7 @@ fn opts(cache: &Path) -> Options {
         jobs: 2,
         cache: Some(cache.to_path_buf()),
         package: None,
+        ..Options::default()
     }
 }
 

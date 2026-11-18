@@ -1,13 +1,14 @@
 # guests/switch/shaders
 
-Finds every NVIDIA SM86 (Ampere, the Switch 2 GPU) shader program in a game:
+Finds every NVIDIA SM86 (Ampere, the Switch 2 GPU) shader program in a game,
+or with `--sm53` every SM53 (Maxwell, the Switch 1 GPU) program:
 `relift-switch-shaders` is the library and `relift-shaders` the tool. It reads
 a decrypted `.nup`, or an extracted `exefs`/`romfs` tree, and writes each
 unique program once.
 
 ```sh
 cargo build --release -p relift-switch-shaders
-relift-shaders scan game.nup --out shaders/ [--cache cache/] [-j 8] [--package 0]
+relift-shaders scan game.nup --out shaders/ [--cache cache/] [-j 8] [--package 0] [--sm53]
 ```
 
 `--out` gets `<sha256>.bin` per program, `manifest.json` (per program: `kind`
@@ -28,6 +29,16 @@ looks for programs in shader archives (`bfsha`, BNSH, agl `BAHS`), sead `.bin`
 files, effect files with embedded BNSH, the NSOs of `exefs`, and KTGL
 `rdb`/`rdx`/`fdata` entries (whole or in zlib chunks; the zlib decoder is
 this crate's own).
+
+With `--sm53` every file is read (NSOs as their flat image). A program
+starts at an NVN code header (the word 0x12345678 and 44 zero bytes); its
+bytes are the 0x50-byte SPH (graphics only) and the code through the last
+bundle control reaches from the first instruction (branch, call and
+SSY/PBK targets). The scan unwraps zstd frames (also inside archives such
+as BEA, which store files as frames after a table; a frame magic that
+starts no decodable frame is counted as `zstd-embedded-undecodable`),
+SARC archives, Yaz0 streams and UnityFS bundles (stored or LZ4 blocks; an
+LZMA bundle is reported as an error and not read).
 
 CUDA modules are not carved: each ELF cubin (whole, or an entry of a fat
 binary, stored plain, LZ4 or zstd) gives one compute program per sm_86 or

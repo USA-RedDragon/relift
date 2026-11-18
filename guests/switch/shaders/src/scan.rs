@@ -25,14 +25,14 @@ use crate::carve::{self, Kind, find_all};
 use crate::error::{Error, Result};
 use crate::sha256_hex;
 use crate::source::{SNIFF_WHOLE, Source, SourceFile};
-use crate::{cubin, ktgl, sarc, zst};
+use crate::{cubin, ktgl, sarc, unity, yaz0, zst};
 
 const CACHE_VERSION: u32 = 4;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const GAP: u64 = 256 << 10;
 const SPAN: u64 = 32 << 20;
-const CODE: [&str; 8] = [
+const CODE: [&str; 11] = [
     include_str!("scan.rs"),
     include_str!("carve.rs"),
     include_str!("ktgl.rs"),
@@ -41,11 +41,14 @@ const CODE: [&str; 8] = [
     include_str!("zst.rs"),
     include_str!("source.rs"),
     include_str!("error.rs"),
+    include_str!("maxwell.rs"),
+    include_str!("yaz0.rs"),
+    include_str!("unity.rs"),
 ];
 
-fn salt(packages: bool, package: Option<usize>) -> String {
+fn salt(packages: bool, package: Option<usize>, arch: Arch) -> String {
     let mut s = format!(
-        "v{CACHE_VERSION}\u{1}{}\u{1}{packages}\u{1}{package:?}",
+        "v{CACHE_VERSION}\u{1}{}\u{1}{packages}\u{1}{package:?}\u{1}{arch:?}",
         env!("CARGO_PKG_VERSION")
     );
     for c in CODE {
@@ -55,9 +58,22 @@ fn salt(packages: bool, package: Option<usize>) -> String {
     sha256_hex(s.as_bytes())
 }
 
+/// Which GPU's programs a scan looks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Arch {
+    /// SM86 (Ampere, Switch 2): carved by their `BRA self` terminator.
+    #[default]
+    Sm86,
+    /// SM53 (Maxwell, Switch 1): found by their NVN code header, in every
+    /// file of the input (see [`crate::maxwell`]).
+    Sm53,
+}
+
 /// How to run a scan.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    /// The GPU whose programs to find.
+    pub arch: Arch,
     /// Worker threads; 0 for the `relift-proc` setting.
     pub jobs: usize,
     /// Where results are cached; no caching when `None`.
@@ -73,7 +89,8 @@ pub struct Program {
     pub kind: Kind,
     /// The SPH stage (1 VS, 2 TCS, 3 TES, 4 GS, 5 PS), 0 for compute.
     pub stage: u8,
-    /// The SPH size inside the program (0x80 or more for graphics).
+    /// The SPH size inside the program (0x80 or more for SM86 graphics,
+    /// 0x50 for SM53 graphics).
     pub sph: usize,
     /// The size in bytes.
     pub size: usize,
@@ -249,7 +266,7 @@ fn strip_zstd(name: &str) -> (&str, bool) {
     (name, false)
 }
 
-fn classify(path: &str) -> Option<Class> {
+fn classify(path: &str, arch: Arch) -> Option<Class> {
     let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
     let parent = dir.rsplit('/').next().unwrap_or("");
     let lower = name.to_ascii_lowercase();
@@ -262,6 +279,9 @@ fn classify(path: &str) -> Option<Class> {
         ext.is_none() && (matches!(stem, "main" | "rtld" | "sdk") || stem.starts_with("subsdk"));
     if ext == Some("nso") || parent == "exefs" || nso_name {
         return Some(Class::Nso);
+    }
+    if arch == Arch::Sm53 {
+        return Some(Class::Container);
     }
     match ext {
         Some(
@@ -293,6 +313,7 @@ fn sniff(head: &[u8]) -> Option<Class> {
 }
 
 struct Ctx<'a> {
+    arch: Arch,
     source: &'a dyn Source,
     dicts: zst::Dicts,
     out_dir: &'a Path,
@@ -350,6 +371,9 @@ impl Ctx<'_> {
     }
 
     fn leaf(&self, out: &mut Out, name: &str, b: &[u8]) -> Result<()> {
+        if self.arch == Arch::Sm53 {
+            return self.leaf_maxwell(out, name, b, 0);
+        }
         if b.starts_with(b"FSHA") {
             out.container("bfsha", 1);
         } else if b.starts_with(b"BAHS") {
@@ -403,6 +427,33 @@ impl Ctx<'_> {
         Ok(())
     }
 
+    /// The SM53 programs of `b`, and those of every zstd frame inside it:
+    /// archives such as BEA hold their files as frames after a table. A
+    /// frame magic that does not start a frame that decodes is counted as
+    /// `zstd-embedded-undecodable`.
+    fn leaf_maxwell(&self, out: &mut Out, name: &str, b: &[u8], depth: u32) -> Result<()> {
+        for k in find_all(b, &zst::FRAME_MAGIC).filter(|&k| k > 0) {
+            match zst::decode(&b[k..], &self.dicts) {
+                Ok(d) => {
+                    out.container("zstd-embedded", 1);
+                    if depth < MAX_DEPTH {
+                        self.unwrap_plain(out, &format!("{name}@{k:#x}"), &d, depth + 1)?;
+                    }
+                }
+                Err(_) => out.container("zstd-embedded-undecodable", 1),
+            }
+        }
+        let (found, errors) = crate::maxwell::carve(b);
+        for (at, e) in errors {
+            out.error(format!("maxwell: {e}"), &format!("{name}@{at:#x}"));
+        }
+        for f in found {
+            let src = format!("{name}@{:#x}", f.at);
+            self.program(out, &src, &f.bytes, f.kind, f.stage, f.sph)?;
+        }
+        Ok(())
+    }
+
     fn program(
         &self,
         out: &mut Out,
@@ -446,6 +497,26 @@ impl Ctx<'_> {
     }
 
     fn unwrap_plain(&self, out: &mut Out, name: &str, b: &[u8], depth: u32) -> Result<()> {
+        if yaz0::is_yaz0(b) {
+            out.container("yaz0", 1);
+            return match yaz0::decode(b) {
+                Ok(d) => self.unwrap(out, name, &d, depth + 1),
+                Err(e) => {
+                    out.error(e.to_string(), name);
+                    Ok(())
+                }
+            };
+        }
+        if unity::is_bundle(b) {
+            out.container("unityfs", 1);
+            return match unity::data(b) {
+                Ok(d) => self.leaf(out, name, &d),
+                Err(e) => {
+                    out.error(e.to_string(), name);
+                    Ok(())
+                }
+            };
+        }
         if sarc::is_sarc(b) {
             out.container("sarc", 1);
             match sarc::members(b) {
@@ -457,6 +528,9 @@ impl Ctx<'_> {
                 Err(e) => out.error(e.to_string(), name),
             }
             return Ok(());
+        }
+        if self.arch == Arch::Sm53 {
+            return self.leaf_maxwell(out, name, b, depth);
         }
         self.leaf(out, name, b)
     }
@@ -770,6 +844,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
     }
     let dicts = load_dicts(source, &files)?;
     let cx = Ctx {
+        arch: opts.arch,
         source,
         dicts,
         out_dir,
@@ -777,7 +852,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         claimed: Mutex::new(HashSet::new()),
         hits: AtomicU64::new(0),
         packages: source.has_packages(),
-        salt: salt(source.has_packages(), opts.package),
+        salt: salt(source.has_packages(), opts.package, opts.arch),
     };
     let paths = Paths::new(&files);
     let mut jobs: Vec<Job> = Vec::new();
@@ -790,7 +865,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
                 Some(x) => plans.push((f, x)),
                 None => extra.push(("KTGL: an .rdb has no .rdx beside it".into(), f.path.clone())),
             }
-        } else if let Some(c) = classify(&f.path) {
+        } else if let Some(c) = classify(&f.path, opts.arch) {
             jobs.push(Job::File(f.clone(), c));
         }
     }

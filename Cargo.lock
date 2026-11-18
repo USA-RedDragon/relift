@@ -1362,7 +1362,9 @@ name = "relift-switch-shaders"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "lz4_flex",
  "relift-cache",
+ "relift-gpu-sm53",
  "relift-gpu-sm86",
  "relift-proc",
  "relift-switch-formats",

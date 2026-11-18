@@ -1,4 +1,5 @@
-//! `relift-shaders`: find the SM86 shader programs of a Switch 2 game.
+//! `relift-shaders`: find the shader programs of a Switch 2 (SM86) or
+//! Switch 1 (SM53) game.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -6,9 +7,9 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use relift_switch_formats::storage::FileStorage;
-use relift_switch_shaders::{DirSource, NupSource, Options, Source, scan};
+use relift_switch_shaders::{Arch, DirSource, NupSource, Options, Source, scan};
 
-/// Find every NVIDIA SM86 shader program of a game.
+/// Find every NVIDIA shader program of a game.
 #[derive(Parser, Debug)]
 #[command(name = "relift-shaders", version)]
 struct Cli {
@@ -35,6 +36,9 @@ enum Cmd {
         /// Only scan this package of a `.nup`.
         #[arg(long)]
         package: Option<usize>,
+        /// Look for SM53 (Switch 1, Maxwell) programs instead of SM86.
+        #[arg(long)]
+        sm53: bool,
     },
 }
 
@@ -57,6 +61,7 @@ fn body(cli: Cli) -> Result<(), BoxError> {
         cache,
         jobs,
         package,
+        sm53,
     } = cli.command;
     let source: Box<dyn Source> = if input.is_dir() {
         Box::new(DirSource::new(&input))
@@ -64,6 +69,7 @@ fn body(cli: Cli) -> Result<(), BoxError> {
         Box::new(NupSource::new(Arc::new(FileStorage::open(&input)?))?)
     };
     let opts = Options {
+        arch: if sm53 { Arch::Sm53 } else { Arch::Sm86 },
         jobs,
         cache: Some(cache.unwrap_or_else(|| out.join(".cache"))),
         package,

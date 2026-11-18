@@ -443,10 +443,12 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-switch-shaders",
-        why: "finds the SM86 shader programs of a Switch 2 dump (carving, containers, KTGL entries); reads decrypted dumps through relift-switch-formats, decodes candidate lines with relift-gpu-sm86 and writes through relift-cache",
+        why: "finds the SM86 shader programs of a Switch 2 dump and the SM53 programs of a Switch 1 dump (carving, containers, KTGL entries, Yaz0, UnityFS); reads decrypted dumps through relift-switch-formats, decodes candidate lines with relift-gpu-sm86 and relift-gpu-sm53 and writes through relift-cache",
         normal: &[
             "clap",
+            "lz4_flex",
             "relift-cache",
+            "relift-gpu-sm53",
             "relift-gpu-sm86",
             "relift-proc",
             "relift-switch-formats",
