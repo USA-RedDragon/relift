@@ -26,6 +26,7 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [ARMv4T CPU](../cpus/arm32/README.md)
   - [SM83 CPU](../cpus/sm83/README.md)
   - [VR4300 CPU](../cpus/mips/README.md)
+  - [SM53 (Maxwell) shader code](../gpus/sm53/README.md)
   - [SM86 shader translator](../gpus/sm86/README.md)
   - [The differential checker](../check/README.md)
 - Project

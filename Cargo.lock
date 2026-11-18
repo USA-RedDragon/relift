@@ -1141,6 +1141,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gpu-sm53"
+version = "0.1.0"
+dependencies = [
+ "relift-gpu-sm86",
+]
+
+[[package]]
 name = "relift-gpu-sm86"
 version = "0.1.0"
 dependencies = [

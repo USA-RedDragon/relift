@@ -240,6 +240,13 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-gpu-sm53",
+        why: "the SM53 (Maxwell GM20B) SASS of NVN programs: code header, shader program header, bundles and instruction forms; shares the SM86 crate's types and, later, its translator",
+        normal: &["relift-gpu-sm86"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-gpu-sm86",
         why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words and the target device's capabilities as JSON, writes the translation table zstd-compressed",
         normal: &["serde_json", "zstd"],

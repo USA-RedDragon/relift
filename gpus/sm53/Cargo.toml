@@ -1,0 +1,17 @@
+[package]
+name = "relift-gpu-sm53"
+description = "NVIDIA SM53 (Maxwell GM20B, Switch) SASS: NVN programs, bundles and instruction forms; patterns from Ryujinx and envytools (MIT)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.relift]
+band = "2"
+
+[dependencies]
+relift-gpu-sm86 = { workspace = true }
+
+[lints]
+workspace = true

@@ -23,6 +23,7 @@ relift-cpu-arm32-analyze = { path = "cpus/arm32/analyze" }
 relift-cpu-mips = { path = "cpus/mips" }
 relift-cpu-rsp = { path = "cpus/rsp" }
 relift-cpu-sm83 = { path = "cpus/sm83" }
+relift-gpu-sm53 = { path = "gpus/sm53" }
 relift-gpu-sm86 = { path = "gpus/sm86" }
 relift-cpu-z80 = { path = "cpus/z80" }
 relift-gb = { path = "guests/gb/guest" }
