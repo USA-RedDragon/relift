@@ -95,6 +95,8 @@ typedef struct rl_touchpad_guest {
     bool integer_scale;
     /** @brief True when fingers no shape took are the guest's touch screen (rl_touchpad_game_touches). */
     bool game_touch;
+    /** @brief True when the built-in groups keep off the picture where there is room, even with game_touch. */
+    bool keep_clear;
     /** @brief The layouts. */
     rl_touchpad_layout portrait, landscape;
 } rl_touchpad_guest;
@@ -122,6 +124,11 @@ enum rl_touchpad_phase { RL_TOUCHPAD_DOWN = 0, RL_TOUCHPAD_MOVE = 1, RL_TOUCHPAD
  * the guest's layout keys. Call before the settings are read. The guest must outlive the run.
  */
 RL_RUNTIME_API void rl_touchpad_declare(const rl_touchpad_guest *g);
+/**
+ * @brief The guest picture's size now, for a guest whose picture changes with its layout (it overrides
+ * picture_width and picture_height), and whether it is shown at whole multiples (integer_scale). Any thread.
+ */
+RL_RUNTIME_API void rl_touchpad_set_picture(uint32_t width, uint32_t height, bool integer_scale);
 /** @brief The declared guest, or NULL. */
 RL_RUNTIME_API const rl_touchpad_guest *rl_touchpad_current(void);
 /**

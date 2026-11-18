@@ -26,7 +26,15 @@ typedef struct rl_window {
     const rl_window_backend *b;
     /** @brief Bumped by the backend each time the drawable size changes. */
     uint64_t generation;
+    /** @brief True for a window on a display besides the first (rl_window_open_display): no on-screen controller, no pause. */
+    bool extra;
 } rl_window;
+
+/** @brief A finger on a window, at a pixel of the last frame shown there. */
+typedef struct rl_window_touch {
+    uint64_t id;
+    uint32_t x, y;
+} rl_window_touch;
 
 /** @brief Window events (rl_window_event_fn kind). */
 enum rl_window_event {
@@ -83,6 +91,15 @@ struct rl_window_backend {
     bool (*frame_point)(rl_window *w, int32_t x, int32_t y, uint32_t *frame_x, uint32_t *frame_y);
     /** @brief Optional. Scales the frames present_rgb shows to fill w (fit true) instead of by whole multiples. Any thread. */
     void (*set_fit)(rl_window *w, bool fit);
+    /** @brief Optional. The number of displays besides the first that can hold a window now; any thread. */
+    uint32_t (*display_count)(void);
+    /** @brief Optional. Opens a window on display index (0 is the first display besides the main one); any thread. NULL when it cannot. */
+    rl_window *(*open_display)(uint32_t index);
+    /**
+     * @brief Optional. The fingers on w, each at the pixel of the last frame present_rgb showed there (a finger
+     * outside the frame is clamped to its edge); returns the count, at most max. Any thread.
+     */
+    uint32_t (*touches)(rl_window *w, rl_window_touch *out, uint32_t max);
 };
 
 /**
@@ -141,6 +158,17 @@ RL_RUNTIME_API bool rl_window_frame_point(rl_window *w, int32_t x, int32_t y, ui
  * the frame's shape kept (fit true). Nothing on a backend that has only one way.
  */
 RL_RUNTIME_API void rl_window_set_fit(rl_window *w, bool fit);
+
+/** @brief The number of displays besides the first that can hold a window now (0 headless or on a host with one display). */
+RL_RUNTIME_API uint32_t rl_window_display_count(void);
+/** @brief Opens a window on display index (0 is the first display besides the main one); NULL when it cannot. Its extra field is true. */
+RL_RUNTIME_API rl_window *rl_window_open_display(uint32_t index);
+/** @brief Closes a window opened by rl_window_open_display. */
+RL_RUNTIME_API void rl_window_close_display(rl_window *w);
+/** @brief The window's drawable size in pixels (0 when the backend cannot tell). */
+RL_RUNTIME_API void rl_window_size(rl_window *w, uint32_t *width, uint32_t *height);
+/** @brief The fingers on w at pixels of its last frame (rl_window_backend.touches); returns the count. */
+RL_RUNTIME_API uint32_t rl_window_touches(rl_window *w, rl_window_touch *out, uint32_t max);
 
 /** @brief The host backend built with VIDEO=sdl3. */
 RL_RUNTIME_API const rl_window_backend *rl_host_window_backend(void);

@@ -43,7 +43,7 @@ bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t widt
         return false;
     rgb = rl_post_apply(rgb, width, height, &width, &height);
     w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
-    while (rl_touchpad_hold(16))
+    while (!w->extra && rl_touchpad_hold(16))
         w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
     return true;
 }
@@ -64,6 +64,39 @@ void rl_window_set_fit(rl_window *w, bool fit)
 {
     if (w && w->b && w->b->set_fit)
         w->b->set_fit(w, fit);
+}
+
+uint32_t rl_window_display_count(void)
+{
+    const rl_window_backend *b = rl_window_backend_current();
+    return b && b->display_count ? b->display_count() : 0;
+}
+
+rl_window *rl_window_open_display(uint32_t index)
+{
+    const rl_window_backend *b = rl_window_backend_current();
+    rl_window *w = b && b->open_display ? b->open_display(index) : NULL;
+    if (w)
+        w->extra = true;
+    return w;
+}
+
+void rl_window_close_display(rl_window *w)
+{
+    if (w && w->b && w->b->close)
+        w->b->close(w);
+}
+
+void rl_window_size(rl_window *w, uint32_t *width, uint32_t *height)
+{
+    *width = *height = 0;
+    if (w && w->b && w->b->size)
+        w->b->size(w, width, height);
+}
+
+uint32_t rl_window_touches(rl_window *w, rl_window_touch *out, uint32_t max)
+{
+    return w && w->b && w->b->touches ? w->b->touches(w, out, max) : 0;
 }
 
 void rl_window_emit(rl_window *w, int event)

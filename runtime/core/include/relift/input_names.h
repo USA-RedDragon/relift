@@ -139,6 +139,7 @@
     X(TOUCH, "lstick_x", 22) \
     X(TOUCH, "lstick_y", 23) \
     X(TOUCH, "rstick_x", 24) \
-    X(TOUCH, "rstick_y", 25)
+    X(TOUCH, "rstick_y", 25) \
+    X(TOUCH, "swap", 26)
 
 #endif

@@ -162,6 +162,10 @@ static struct {
     pthread_mutex_t lock;
     pthread_cond_t resumed;
     const rl_touchpad_guest *guest;
+    uint32_t pic_w, pic_h;
+    bool pic_integer;
+    uint64_t tap_until;
+    float tap_x, tap_y;
     rl_touchpad_host host;
     key_slot **keys;
     size_t nkeys;
@@ -447,7 +451,8 @@ static void place_group(const rl_touchpad_layout *L, const layout_state *s, uint
         p[i].shown = true;
     }
     shift_inside(p, first, count, skip);
-    if (!(gp && gp->custom) && !g.guest->game_touch && L->items[first].shape != RL_TOUCHPAD_MENU)
+    if (!(gp && gp->custom) && (!g.guest->game_touch || g.guest->keep_clear) &&
+        L->items[first].shape != RL_TOUCHPAD_MENU)
         keep_off_picture(p, first, count, skip);
 }
 
@@ -1341,6 +1346,15 @@ void rl_touchpad_finger(uint64_t id, int phase, float x, float y)
             g.dirty = true;
         f->on = false;
     }
+    if (f->own == OWN_GAME) {
+        float px, py;
+        if (in_picture(f->x, f->y, &px, &py)) {
+            g.tap_x = px;
+            g.tap_y = py;
+        }
+        if (phase == RL_TOUCHPAD_DOWN)
+            g.tap_until = g.now + MIN_PRESS_NS;
+    }
     compute_values();
     after();
 }
@@ -1474,12 +1488,14 @@ void rl_touchpad_picture(int32_t r[4])
 {
     r[0] = r[1] = r[2] = r[3] = 0;
     const rl_touchpad_guest *gu = g.guest;
-    if (!gu || !g.w || !g.h || !gu->picture_width || !gu->picture_height)
+    uint32_t pw = g.pic_w ? g.pic_w : gu ? gu->picture_width : 0, ph = g.pic_h ? g.pic_h : gu ? gu->picture_height : 0;
+    bool whole = g.pic_w ? g.pic_integer : gu && gu->integer_scale;
+    if (!gu || !g.w || !g.h || !pw || !ph)
         return;
-    float s = fminf((float)g.w / (float)gu->picture_width, (float)g.h / (float)gu->picture_height);
-    if (gu->integer_scale && s >= 1.0f)
+    float s = fminf((float)g.w / (float)pw, (float)g.h / (float)ph);
+    if (whole && s >= 1.0f)
         s = floorf(s);
-    int32_t w = (int32_t)((float)gu->picture_width * s), h = (int32_t)((float)gu->picture_height * s);
+    int32_t w = (int32_t)((float)pw * s), h = (int32_t)((float)ph * s);
     r[0] = ((int32_t)g.w - w) / 2;
     r[1] = ((int32_t)g.h - h) / 2;
     if (g.h > g.w && active() && r[1] > g.safe[1])
@@ -1520,6 +1536,12 @@ uint32_t rl_touchpad_game_touches(rl_input_touch *out, uint32_t max)
         out[n].x = (uint16_t)(px * 65535.0f);
         out[n].y = (uint16_t)(py * 65535.0f);
         n++;
+    }
+    if (n == 0 && pad && max > 0 && g.ui == UI_NONE && rl_clock_ns() < g.tap_until) {
+        out[0].id = UINT32_MAX;
+        out[0].x = (uint16_t)(g.tap_x * 65535.0f);
+        out[0].y = (uint16_t)(g.tap_y * 65535.0f);
+        n = 1;
     }
     pthread_mutex_unlock(&g.lock);
     return n;
@@ -1950,6 +1972,18 @@ void rl_touchpad_declare(const rl_touchpad_guest *gu)
         rl_settings_declare(&g.keys[i]->def, 1);
 }
 
+void rl_touchpad_set_picture(uint32_t width, uint32_t height, bool integer_scale)
+{
+    pthread_mutex_lock(&g.lock);
+    if (g.pic_w != width || g.pic_h != height || g.pic_integer != integer_scale) {
+        g.pic_w = width;
+        g.pic_h = height;
+        g.pic_integer = integer_scale;
+        g.dirty = true;
+    }
+    pthread_mutex_unlock(&g.lock);
+}
+
 const rl_touchpad_guest *rl_touchpad_current(void) { return g.guest; }
 
 bool rl_touchpad_wanted(void) { return wanted(); }
@@ -1972,6 +2006,9 @@ void rl_touchpad_reset(void)
     free(g.cv.px);
     memset(&g.cv, 0, sizeof g.cv);
     g.guest = NULL;
+    g.pic_w = g.pic_h = 0;
+    g.pic_integer = false;
+    g.tap_until = 0;
     memset(&g.host, 0, sizeof g.host);
     g.w = g.h = 0;
     g.ppd = 1.0f;
