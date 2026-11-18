@@ -313,13 +313,17 @@ uint32_t nds_bus_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uin
     }
 }
 
-/** @brief True when the display reads what a store to addr changes: palette, VRAM, OAM, its registers and VRAMCNT. */
+/**
+ * @brief True when the display reads what a store to addr changes: palette,
+ * VRAM, OAM, its registers, VRAMCNT and the 3D engine's registers (a command
+ * may swap the buffers the 3D layer's lines come from).
+ */
 static bool display_reads(unsigned cpu, uint32_t addr)
 {
     uint32_t off = addr & 0x00FFFFFCu;
     if (nds_seen_by_display(cpu, addr))
         return true;
-    return cpu == RL_NDS_ARM9 && (addr >> 24) == 0x04 && (nds_disp_reg(cpu, off) || (off >= 0x240 && off < 0x24C));
+    return cpu == RL_NDS_ARM9 && (addr >> 24) == 0x04 && (nds_disp_reg(cpu, off) || nds_gx_reg(cpu, off) || (off >= 0x240 && off < 0x24C));
 }
 
 void nds_bus_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, uint64_t now, bool *main)

@@ -4,7 +4,8 @@
  * time of immediate transfers against the oracle's (an ARM9 and an ARM7
  * program timed a transfer with a bus-clock timer), triggers, repeat,
  * reload, priority and the IRQ, the VBlank and HBlank starts the display
- * timing raises, and a transfer's store seen by the lines drawn before it.
+ * timing raises, and a transfer's store seen by the lines drawn before it
+ * (palette and 3D registers).
  */
 #include "ndst.h"
 
@@ -335,4 +336,43 @@ TEST(a_transfer_to_the_palette_reaches_only_the_lines_after_it)
     CHECK_EQ(px[99 * 256], px[100 * 256]);
     CHECK(px[101 * 256] != px[100 * 256]);
     CHECK_EQ(px[101 * 256], px[191 * 256]);
+}
+
+static uint32_t g_second[2 * 256 * 192];
+static int g_frames;
+
+static void keep_second(void *user, const uint32_t *pixels, uint64_t when)
+{
+    (void)user;
+    (void)when;
+    if (++g_frames == 2)
+        memcpy(g_second, pixels, sizeof g_second);
+}
+
+TEST(a_transfer_to_a_3d_register_reaches_only_the_3d_lines_rendered_after_it)
+{
+    ndst *t = ndst_new();
+    rl_nds_set_frame_hook(t->m, keep_second, NULL);
+    w9(t, 0x04000304u, 2, 0x820F);
+    w9(t, 0x04000060u, 2, 0x0000);
+    w9(t, 0x04000000u, 4, 0x00010108u);
+    w9(t, 0x04000350u, 4, 0x001F001Fu);
+    w9(t, 0x04000540u, 4, 0);
+    w9(t, 0x02100000u, 4, 0x001F7C00u);
+    ndst_both(t, RL_NDS_FRAME_TICKS + 100u * LINE + 100);
+    w9(t, DMA(3), 4, 0x02100000u);
+    w9(t, DMA(3) + 4, 4, 0x04000350u);
+    w9(t, DMA(3) + 8, 4, 0x94000001u);
+    run_to(t, RL_NDS_FRAME_TICKS + 100u * LINE + HBLANK + 400);
+    CHECK_EQ(r9(t, DMA(3) + 8, 4) & 0x80000000u, 0);
+    run_to(t, RL_NDS_FRAME_TICKS + 193u * LINE);
+    CHECK_EQ(g_frames, 2);
+    const uint32_t *px = g_second;
+    unsigned first_new = 0;
+    for (unsigned y = 0; y < 192 && !first_new; y++)
+        if (px[y * 256] != px[0])
+            first_new = y;
+    CHECK_EQ(first_new, 150u);
+    CHECK_EQ(px[149 * 256], px[0]);
+    CHECK_EQ(px[150 * 256], px[191 * 256]);
 }
