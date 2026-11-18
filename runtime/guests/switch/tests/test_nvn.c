@@ -107,6 +107,17 @@ TEST(nvn_pools_report_their_descriptor_count)
     CHECK_EQ(call(c, nvnh_nvnSamplerPoolFinalize, smp, 0, 0, 0), RET);
 }
 
+TEST(nvn_dlss_state_procs_stay_the_drivers_and_work_procs_do_not)
+{
+    CHECK(nvn_driver_index("nvnDlssNetworkBuilderSetDefaults") >= 0);
+    CHECK(nvn_driver_index("nvnDlssParametersSetInputColor") >= 0);
+    CHECK(nvn_driver_index("nvnDlssParametersGetPreExposure") >= 0);
+    CHECK_EQ(nvn_driver_index("nvnCommandBufferEvaluateDlss"), -1);
+    CHECK_EQ(nvn_driver_index("nvnDlssNetworkInitialize"), -1);
+    CHECK_EQ(nvn_driver_index("nvnDlssNetworkBuilderGetStorageSize"), -1);
+    CHECK_EQ(nvn_driver_index("nvnDlssNetworkBuilderGetOptimalSettings"), -1);
+}
+
 TEST(nvn_command_buffer_records_and_submits)
 {
     rl_ctx *c = t_boot(NULL);
