@@ -17,9 +17,11 @@
 #include <stdlib.h>
 
 /**
- * @brief nvnDeviceGetInteger answers by NVNdeviceInfo: the SDK driver's
- * constants, and the Switch's values where the driver reads what its device
- * initialization measured (scratch memory factors, L2 size, texture limits).
+ * @brief nvnDeviceGetInteger answers by NVNdeviceInfo without a driver
+ * layout: one SDK driver's constants, and the Switch's values where the
+ * driver reads what its device initialization measured (scratch memory
+ * factors, L2 size, texture limits). With a layout only those measured
+ * values are taken from here.
  */
 static const int32_t device_info[] = {
     231, 30, 14, 65536, 256, 8, 32, 4, 16, 32, 16, 4, 4, 4, 32, 32, 32, 256, 256, 4, 8, 512, 256, 2, 256, 4096,
@@ -269,8 +271,23 @@ uint64_t nvnh_nvnDeviceFinalize(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnDeviceGetInteger(rl_ctx *c, uint8_t *mem)
 {
     uint32_t info = (uint32_t)c->x[1];
-    if (info >= sizeof device_info / sizeof device_info[0])
+    uint32_t own = sizeof device_info / sizeof device_info[0];
+    const struct rl_nvn_layout *l = g_layout;
+    if (l && l->nints) {
+        if (info >= l->nints)
+            return (uint64_t)rl_guest_fatal(c, "nvn", "nvnDeviceGetInteger: the driver knows no NVNdeviceInfo %u", info);
+        if (!l->int_device[info]) {
+            rl_st32(mem, c->x[2], (uint32_t)l->ints[info]);
+            return nvn_ret(c);
+        }
+        if (info >= own)
+            return (uint64_t)rl_guest_fatal(c, "nvn",
+                                            "nvnDeviceGetInteger: the driver reads NVNdeviceInfo %u from device state "
+                                            "the runtime has no value for",
+                                            info);
+    } else if (info >= own) {
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnDeviceGetInteger: unknown NVNdeviceInfo %u", info);
+    }
     rl_st32(mem, c->x[2], (uint32_t)device_info[info]);
     return nvn_ret(c);
 }

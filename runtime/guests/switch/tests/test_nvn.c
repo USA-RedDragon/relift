@@ -253,3 +253,20 @@ TEST(nvn_storage_class_needs_the_drivers_layout)
     CHECK_EQ(call(c, nvnh_nvnTextureBuilderGetStorageClass, heap, 0, 0, 0), RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
 }
+
+TEST(nvn_device_integers_come_from_the_drivers_table)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    static const int32_t ints[] = { 231, 40, 0, 7 };
+    static const uint8_t device[] = { 0, 0, 1, 0 };
+    static const struct rl_nvn_layout l = { .nints = 4, .ints = ints, .int_device = device };
+    rl_nvn_set_layout(&l);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetInteger, heap, 1, heap + 0x100, 0), RET);
+    CHECK_EQ(rl_ld32(t_mem(), heap + 0x100), 40);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetInteger, heap, 2, heap + 0x100, 0), RET);
+    CHECK_EQ(rl_ld32(t_mem(), heap + 0x100), 14);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetInteger, heap, 4, heap + 0x100, 0), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    rl_nvn_set_layout(NULL);
+}

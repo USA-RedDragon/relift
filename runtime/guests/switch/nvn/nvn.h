@@ -50,6 +50,12 @@ struct rl_nvn_layout {
     uint32_t builder_device, flags, gpu_device, nfields, nsettings;
     const struct rl_nvn_field *fields;
     const char *const *settings;
+    /** @brief Number of NVNdeviceInfo values the driver's nvnDeviceGetInteger knows. */
+    uint32_t nints;
+    /** @brief Its answer for each, where int_device is 0. */
+    const int32_t *ints;
+    /** @brief 1 where the driver reads the answer from device state its initialization measured. */
+    const uint8_t *int_device;
 };
 
 /** @brief Registers the driver layout; the build's generated nvn_driver.c calls it before main. */
