@@ -297,3 +297,40 @@ TEST(nvn_device_integers_come_from_the_drivers_table)
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
     rl_nvn_set_layout(NULL);
 }
+
+static void map_req(uint64_t r, uint64_t phys, uint64_t poff, uint64_t voff, uint64_t size, uint32_t cls)
+{
+    rl_st64(t_mem(), r, phys);
+    rl_st64(t_mem(), r + 8, poff);
+    rl_st64(t_mem(), r + 16, voff);
+    rl_st64(t_mem(), r + 24, size);
+    rl_st32(t_mem(), r + 32, cls);
+}
+
+TEST(nvn_virtual_pools_alias_what_is_mapped_into_them)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t phys = heap, virt = heap + 0x100, other = heap + 0x200, req = heap + 0x400, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(phys, storage, 0x40000, 0x18c));
+    CHECK(nvn_pool_make(virt, 0, 0x40000, 0x2a1));
+    CHECK(nvn_pool_make(other, 0, 0x40000, 0x2a1));
+    map_req(req, phys, 0x10000, 0, 0x10000, 0x100);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, phys, 1, req, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    map_req(req, phys, 0x100, 0, 0x10000, 0x100);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 1, req, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    map_req(req, phys, 0x10000, 0, 0x10000, 0x100);
+    map_req(req + 0x28, phys, 0x20000, 0x10000, 0x20000, 0x108);
+    map_req(req + 0x50, 0, 0, 0x30000, 0x10000, 0);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 3, req, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+    uint64_t size = 0;
+    CHECK_EQ(nvn_pool_memory(virt, &size), storage + 0x10000);
+    CHECK_EQ(size, 0x40000);
+    CHECK_EQ(nvn_pool_gpu(virt), nvn_pool_gpu(phys) + 0x10000);
+    map_req(req, phys, 0, 0, 0x10000, 0x100);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 1, req, 0), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+}
