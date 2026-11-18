@@ -7,12 +7,14 @@ on:
       - runtime/**
       - scripts/ci/lib.sh
       - scripts/ci/runtime-*.sh
+      - scripts/ci/apt-install.sh
       - .github/workflows/runtime.yaml
   pull_request:
     paths:
       - runtime/**
       - scripts/ci/lib.sh
       - scripts/ci/runtime-*.sh
+      - scripts/ci/apt-install.sh
       - .github/workflows/runtime.yaml
 
 permissions:
@@ -48,19 +50,24 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the cached packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/apt-debs
+          key: apt-runtime-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: apt-runtime-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install Mesa's lavapipe for the Vulkan forwarding tests
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y mesa-vulkan-drivers libvulkan1
+          scripts/ci/apt-install.sh mesa-vulkan-drivers libvulkan1
           echo "RELIFT_VK_REQUIRE=1" >> "$GITHUB_ENV"
           echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
 
       - name: Install gdb
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gdb
+        run: scripts/ci/apt-install.sh gdb
 
       - name: Build the runtime and run its tests in every layout
         run: scripts/ci/runtime-tests.sh

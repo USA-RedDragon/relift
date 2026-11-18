@@ -147,10 +147,16 @@ jobs:
           workspaces: |
             .
 
+      - name: Restore the cached packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/apt-debs
+          key: apt-lavapipe-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: apt-lavapipe-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install Mesa's lavapipe for the N64 picture test
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y mesa-vulkan-drivers libvulkan1
+          scripts/ci/apt-install.sh mesa-vulkan-drivers libvulkan1
           echo "RELIFT_VK_REQUIRE=1" >> "$GITHUB_ENV"
           echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
 
@@ -248,10 +254,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the cached packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/apt-debs
+          key: apt-mesa-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: apt-mesa-build-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install what the pinned lavapipe build and the known answers need
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends llvm-dev ninja-build bison flex glslang-tools \
+          scripts/ci/apt-install.sh llvm-dev ninja-build bison flex glslang-tools \
             python3-mako python3-yaml python3-packaging zlib1g-dev libexpat1-dev libzstd-dev libdrm-dev \
             pkg-config libvulkan-dev cmake
 
