@@ -10,7 +10,10 @@
  * depend on the driver's private layout. The DLSS network builder and
  * parameter procs here are plain loads and stores on their object (verified:
  * SDK 22.2.0 driver); creating, resizing and evaluating a network are not.
- * The list is sorted (strcmp order).
+ * Texture getters that read what the driver's own nvnTextureInitialize
+ * stores in a texture also stay: they read the texture and the device fields
+ * the layer writes for that initialization. The list is sorted (strcmp
+ * order).
  */
 #include "nvn_priv.h"
 
@@ -281,6 +284,9 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnTextureBuilderSetSwizzle",
     "nvnTextureBuilderSetTarget",
     "nvnTextureBuilderSetWidth",
+    "nvnTextureGetRawStorageClass",
+    "nvnTextureGetSparseTileLayout",
+    "nvnTextureGetStorageClass",
     "nvnTextureViewCompare",
     "nvnTextureViewGetDepthStencilMode",
     "nvnTextureViewGetFormat",
@@ -339,4 +345,14 @@ int nvn_driver_index(const char *name)
             hi = mid;
     }
     return -1;
+}
+
+bool nvn_driver_reads_texture(const char *name)
+{
+    static const char *const getters[] = { "nvnTextureGetRawStorageClass", "nvnTextureGetSparseTileLayout",
+                                           "nvnTextureGetStorageClass" };
+    for (size_t i = 0; i < sizeof getters / sizeof getters[0]; i++)
+        if (name && !strcmp(name, getters[i]))
+            return true;
+    return false;
 }

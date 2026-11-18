@@ -243,34 +243,129 @@ static int read_builder(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc 
     return RL_OK;
 }
 
-/** @brief nvnTextureBuilderGetStorageSize(const NVNtextureBuilder *): size_t. */
+/**
+ * @brief The texture the builder at builder describes, with the storage size
+ * and alignment the driver's own nvnTextureBuilderGetStorageSize and
+ * nvnTextureBuilderGetStorageAlignment answer (on the device fields
+ * nvn_builder_device_fields writes): the driver's nvnTextureInitialize
+ * refuses storage placed by anything else, such as a compressible texture
+ * off its pool's page. The driver's storage must hold the layer's own layout
+ * of the texture (its size at least, its alignment a multiple), or the game
+ * stops. d keeps the layer's own layout, which is what the host reads. NVN1
+ * textures keep the layer's own size and alignment.
+ */
+static int read_storage(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc *d, uint64_t *size_out,
+                        uint64_t *align_out)
+{
+    static const char *const procs[2] = { "nvnTextureBuilderGetStorageSize", "nvnTextureBuilderGetStorageAlignment" };
+    uint64_t got[2] = { 0, 0 };
+    int rc = read_builder(c, mem, builder, d);
+    if (rc != RL_OK || nvn_generation() == 1) {
+        if (size_out)
+            *size_out = d->size;
+        if (align_out)
+            *align_out = d->align;
+        return rc;
+    }
+    rc = nvn_builder_device_fields(c, mem, builder);
+    for (int i = 0; i < 2 && rc == RL_OK; i++) {
+        uint64_t a = 0;
+        rc = nvn_driver_lookup(c, mem, procs[i], &a);
+        if (rc == RL_OK && !a)
+            rc = rl_guest_fatal(c, "nvn", "the NVN2 driver has no %s", procs[i]);
+        if (rc == RL_OK)
+            rc = nvn_guest_call(c, mem, a, &builder, 1, &got[i]);
+    }
+    if (rc != RL_OK)
+        return rc;
+    uint64_t size = got[0], align = got[1];
+    if (size < d->size || !align || align % d->align)
+        return rl_guest_fatal(c, "nvn",
+                              "texture builder 0x%llx (target %u, format %u, %ux%ux%u, %u levels, flags 0x%x): the driver's "
+                              "storage (0x%llx bytes, aligned to 0x%llx) does not hold relift's layout (0x%llx bytes, "
+                              "aligned to 0x%llx)",
+                              (unsigned long long)builder, d->target, d->format, d->width, d->height, d->depth, d->levels,
+                              d->flags,
+                              (unsigned long long)size, (unsigned long long)align, (unsigned long long)d->size,
+                              (unsigned long long)d->align);
+    if (size_out)
+        *size_out = size;
+    if (align_out)
+        *align_out = align;
+    if (rl_cfg()->trace_os && (size != d->size || align != d->align))
+        rl_log(RL_LOG_INFO, "nvn", "texture builder 0x%llx storage: driver 0x%llx bytes aligned 0x%llx, relift 0x%llx/0x%llx",
+               (unsigned long long)builder, (unsigned long long)size, (unsigned long long)align,
+               (unsigned long long)d->size, (unsigned long long)d->align);
+    return RL_OK;
+}
+
+/** @brief nvnTextureBuilderGetStorageSize(const NVNtextureBuilder *): size_t, the driver's (read_storage). */
 uint64_t nvnh_nvnTextureBuilderGetStorageSize(rl_ctx *c, uint8_t *mem)
 {
     nvn_tex_desc d;
-    int rc = read_builder(c, mem, c->x[0], &d);
+    uint64_t size = 0;
+    int rc = read_storage(c, mem, c->x[0], &d, &size, NULL);
     if (rc != RL_OK)
         return (uint64_t)rc;
-    c->x[0] = d.size;
+    c->x[0] = size;
     return nvn_ret(c);
 }
 
-/** @brief nvnTextureBuilderGetStorageAlignment(const NVNtextureBuilder *): size_t. */
+/** @brief nvnTextureBuilderGetStorageAlignment(const NVNtextureBuilder *): size_t, the driver's (read_storage). */
 uint64_t nvnh_nvnTextureBuilderGetStorageAlignment(rl_ctx *c, uint8_t *mem)
 {
     nvn_tex_desc d;
-    int rc = read_builder(c, mem, c->x[0], &d);
+    uint64_t align = 0;
+    int rc = read_storage(c, mem, c->x[0], &d, NULL, &align);
     if (rc != RL_OK)
         return (uint64_t)rc;
-    c->x[0] = d.align;
+    c->x[0] = align;
     return nvn_ret(c);
 }
 
-/** @brief nvnTextureInitialize(NVNtexture *, const NVNtextureBuilder *): NVNboolean. */
+/**
+ * @brief Runs the NVN2 driver's own nvnTextureInitialize on the texture at
+ * tex: it fills the texture object (its getters that stay driver code, such
+ * as nvnTextureGetSparseTileLayout, read it back) and decides the result, on
+ * the device fields nvn_builder_device_fields writes; *ok tells whether the
+ * driver took the builder. NVN1 textures keep the layer's own
+ * initialization, and their driver getters that read the texture do not stay
+ * driver code (nvn_driver_reads_texture).
+ */
+static int driver_texture_init(rl_ctx *c, uint8_t *mem, uint64_t tex, uint64_t builder, bool *ok)
+{
+    uint64_t args[2] = { tex, builder }, init = 0, ret = 0;
+    int rc = nvn_driver_lookup(c, mem, "nvnTextureInitialize", &init);
+    if (rc == RL_OK && !init)
+        rc = rl_guest_fatal(c, "nvn", "the NVN2 driver has no nvnTextureInitialize");
+    if (rc == RL_OK)
+        rc = nvn_builder_device_fields(c, mem, builder);
+    if (rc == RL_OK)
+        rc = nvn_guest_call(c, mem, init, args, 2, &ret);
+    *ok = ret & 0xff;
+    if (rc == RL_OK && !*ok && rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "nvnTextureInitialize(0x%llx): the driver refused the builder", (unsigned long long)tex);
+    return rc;
+}
+
+/**
+ * @brief nvnTextureInitialize(NVNtexture *, const NVNtextureBuilder *):
+ * NVNboolean. On NVN2 the driver's own initialization runs first and decides
+ * the result (driver_texture_init); the layer then records the texture.
+ */
 uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
 {
-    uint64_t tex = c->x[0];
+    uint64_t tex = c->x[0], builder = c->x[1];
+    bool ok = true;
+    int rc = nvn_generation() == 1 ? RL_OK : driver_texture_init(c, mem, tex, builder, &ok);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    if (!ok) {
+        c->x[0] = 0;
+        return nvn_ret(c);
+    }
     nvn_tex_desc d;
-    int rc = read_builder(c, mem, c->x[1], &d);
+    rc = read_storage(c, mem, builder, &d, NULL, NULL);
     if (rc != RL_OK)
         return (uint64_t)rc;
     nvn_texture *t = (nvn_texture *)nvn_obj_new(tex, NVN_TEXTURE, sizeof *t);

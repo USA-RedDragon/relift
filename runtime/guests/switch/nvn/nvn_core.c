@@ -203,7 +203,7 @@ static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
     if (!name)
         return RL_OK;
     int k = nvn_driver_index(name);
-    if (k >= 0 && !nvn_impure(name)) {
+    if (k >= 0 && !nvn_impure(name) && !(nvn_generation() == 1 && nvn_driver_reads_texture(name))) {
         int rc = driver_addr(c, mem, k, name, addr);
         if (rc != RL_OK || *addr)
             return rc;

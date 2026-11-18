@@ -630,6 +630,13 @@ bool nvn_version_measured(uint32_t info, int32_t *out);
 /** @brief Number of procs that stay the SDK driver's own code (nvn_driver.c). */
 #define NVN_DRIVER_PROC_COUNT 311u
 
+/**
+ * @brief Whether the kept proc name reads what the driver's own
+ * nvnTextureInitialize stores in a texture: only NVN2 textures run it, so on
+ * NVN1 such a proc is a slot like any proc the layer lacks.
+ */
+bool nvn_driver_reads_texture(const char *name);
+
 /** @brief The index of a proc that stays the SDK driver's own code (nvn_driver.c), or -1. */
 int nvn_driver_index(const char *name);
 
