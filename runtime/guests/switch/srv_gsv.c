@@ -410,7 +410,47 @@ static rl_result initialize_display_context(rl_ipc_req *r)
     return push_session(r, &display_session_class);
 }
 
-static const rl_ipc_class chat_session_class = { "nn::gsv::ChatSession", NULL, 0, 0, NULL };
+/**
+ * @brief ChatSession 1: no input; a u32 N, which nn::chat::gsv's session init
+ * (SDK 20.5 sdk 0x639c30) requires to be at most 0x3ff, passes to 11 and
+ * sizes a bitmap of (N + 32) / 32 words with. relift answers 0 (inferred:
+ * Eglantine's nx2_gsv answers 0; no SDK path or document gives the console's
+ * value, and 0 is within the SDK's bound).
+ */
+static rl_result chat_event_id(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief ChatSession 11: the u32 from 1; one handle, which the SDK attaches
+ * as a readable system event (verified: sdk 0x63a100). relift gives an event
+ * it never signals, as GameChat never runs here.
+ */
+static rl_result chat_event(rl_ipc_req *r)
+{
+    uint32_t id;
+    if (!rl_srv_in(r, &id, 4))
+        return SF_RESULT_INVALID_HEADER;
+    hos_revent *e = rl_hos_event_create();
+    if (!e)
+        return KR_OUT_OF_RESOURCE;
+    rl_result rc = rl_ipc_push_move(r, &e->obj);
+    hos_kobj_unref(&e->obj);
+    return rc;
+}
+
+static const rl_ipc_cmd chat_session_cmds[] = {
+    { 1, "GetEventId", chat_event_id },
+    { 11, "GetEvent", chat_event },
+};
+
+static const rl_ipc_class chat_session_class = { "nn::gsv::ChatSession", chat_session_cmds,
+                                                 sizeof chat_session_cmds / sizeof chat_session_cmds[0], 0, NULL };
 
 /**
  * @brief InitializeChatContext (switchbrew's name): no input; one moved
