@@ -237,6 +237,38 @@ pub fn gb_settings() -> Vec<Setting> {
     }]
 }
 
+/// The screen settings of the Nintendo DS layer (`runtime/guests/nds/settings.c`),
+/// which a test keeps equal to their declaration.
+#[must_use]
+pub fn nds_settings() -> Vec<Setting> {
+    let s = |key: &str, label: &str, description: &str, default: Value, kind| Setting {
+        key: key.into(),
+        label: label.into(),
+        description: description.into(),
+        apply: Apply::Start,
+        default,
+        kind,
+    };
+    vec![
+        s(
+            "video.nds_layout",
+            "Screen layout",
+            "stacked: the top screen above the bottom one, as the console holds them; side_by_side: the top screen left of the bottom one",
+            Value::String("stacked".into()),
+            SettingKind::Enum {
+                choices: ["stacked", "side_by_side"].map(String::from).into(),
+            },
+        ),
+        s(
+            "video.nds_integer_scale",
+            "Whole-number scaling",
+            "Scales the screens by the largest whole multiple that fits the window, so every pixel keeps its size. Off: they fill the window with their shape kept",
+            Value::Bool(true),
+            SettingKind::Bool,
+        ),
+    ]
+}
+
 /// The settings of the on-screen controller (`runtime/core/touchpad.c`).
 /// The editor's saved places (`input.touch_pad.layout.*`) are not listed.
 #[must_use]
@@ -309,6 +341,15 @@ pub fn section(game: Vec<Setting>) -> relift_info::Settings {
 pub fn gb_section(game: Vec<Setting>) -> relift_info::Settings {
     let mut s = section(game);
     s.runtime.extend(gb_settings());
+    s
+}
+
+/// [`section`] for a Nintendo DS game, whose runtime also declares
+/// [`nds_settings`].
+#[must_use]
+pub fn nds_section(game: Vec<Setting>) -> relift_info::Settings {
+    let mut s = section(game);
+    s.runtime.extend(nds_settings());
     s
 }
 
@@ -812,6 +853,19 @@ mod tests {
         let last = gb.runtime.last().unwrap();
         assert_eq!(last.key, "video.gb_color_correction");
         assert_eq!(last.default, Value::Bool(true));
+    }
+
+    #[test]
+    fn a_ds_section_adds_the_screen_settings_after_the_runtime_ones() {
+        let nds = nds_section(Vec::new());
+        let plain = section(Vec::new());
+        assert_eq!(nds.runtime.len(), plain.runtime.len() + 2);
+        assert_eq!(nds.runtime[..plain.runtime.len()], plain.runtime[..]);
+        let keys: Vec<&str> = nds.runtime[plain.runtime.len()..]
+            .iter()
+            .map(|s| s.key.as_str())
+            .collect();
+        assert_eq!(keys, ["video.nds_layout", "video.nds_integer_scale"]);
     }
 
     const GOOD: &str = r#"

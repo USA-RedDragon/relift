@@ -450,7 +450,7 @@ pub fn nds_document(name: &str, rom: &[u8], settings: Vec<Setting>) -> Result<In
     info.identity.names = std::iter::once(("default".to_string(), name.to_string())).collect();
     info.identity.default_language = info.identity.first_language();
     info.save = save;
-    info.settings = game_settings::section(settings);
+    info.settings = game_settings::nds_section(settings);
     Ok(info)
 }
 

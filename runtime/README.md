@@ -192,7 +192,9 @@ Run-time settings are typed keys declared with `rl_settings_declare`
 step, enum, string and key binding. The runtime declares `video`; the Switch
 layer declares `save.dir`, `vk.device`, `vk.keep_attachments`, `vk.decode_bc` and
 `kernel.layout`; the Game
-Boy layer declares `video.gb_color_correction`; a game adds its own from the
+Boy layer declares `video.gb_color_correction`; the Nintendo DS layer
+declares `save.dir`, `save.type`, `video.nds_layout` and
+`video.nds_integer_scale`; a game adds its own from the
 `[settings]` tables of game.toml. Precedence, last wins:
 
 1. the declared default;
@@ -202,7 +204,8 @@ Boy layer declares `video.gb_color_correction`; a game adds its own from the
 4. each `--relift-set key=value`, in order, whatever its place among the files;
 5. the key's environment variable, when it has one (`RELIFT_VIDEO`,
    `RELIFT_SAVE`, `RELIFT_VK_DEVICE`, `RELIFT_VK_KEEP_ATTACHMENTS`,
-   `RELIFT_GB_COLOR_CORRECTION`).
+   `RELIFT_GB_COLOR_CORRECTION`, `RELIFT_NDS_LAYOUT`,
+   `RELIFT_NDS_INTEGER_SCALE`).
 
 Unknown keys, values of the wrong type or outside the range, and unreadable
 files warn and are skipped; they never stop a run. The user folder is
@@ -223,6 +226,8 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_VULKAN_LIBRARY=<path>` | Host Vulkan loader to use instead of the system one |
 | `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
 | `RELIFT_GB_COLOR_CORRECTION=on\|off` | The `video.gb_color_correction` setting (Game Boy). On (default): the colours the way the console's LCD shows them. Off: the plain expansion of the 5-bit channels, which is what the reference images of the test ROMs use |
+| `RELIFT_NDS_LAYOUT=stacked\|side_by_side` | The `video.nds_layout` setting (Nintendo DS). `stacked` (default): the top screen above the bottom one, 256 x 384; `side_by_side`: the top screen left of the bottom one, 512 x 192. The mouse touches the bottom screen in either |
+| `RELIFT_NDS_INTEGER_SCALE=on\|off` | The `video.nds_integer_scale` setting (Nintendo DS). On (default): the screens grow by the largest whole multiple that fits the window. Off: they fill the window with their shape kept |
 | `RELIFT_VK_DEVICE=<name part>` | The `vk.device` setting. Host physical device the guest sees (default: the first that has graphics and compute and can present) |
 | `RELIFT_VK_KEEP_ATTACHMENTS=auto\|on\|off` | The `vk.keep_attachments` setting. Pass the guest's DONT_CARE attachment load and store ops as LOAD and STORE (default `auto`: on Apple GPUs only; see `guests/switch/vk/README.md`) |
 | `RELIFT_VK_DECODE_BC=auto\|on\|off` | The `vk.decode_bc` setting. Create BC1 to BC7 images in an uncompressed host format and decode their uploads on the CPU (default `auto`: only for formats the host GPU cannot sample, such as Apple GPUs through MoltenVK; `on` for every BC format; see `guests/switch/vk/README.md`) |

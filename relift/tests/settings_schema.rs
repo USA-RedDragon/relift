@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use relift::game_settings::{gb_settings, runtime_settings, touch_pad_settings};
+use relift::game_settings::{gb_settings, nds_settings, runtime_settings, touch_pad_settings};
 
 const HARNESS: &str = r#"#include <stdio.h>
 #include "core.h"
@@ -136,4 +136,18 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
     });
     rust.extend(gb_settings());
     assert_eq!(c, as_json(&rust));
+}
+
+#[test]
+fn the_ds_screen_settings_in_c_equal_the_list_in_rust() {
+    let Some(mut c) = declared(
+        "settings-schema-nds",
+        "rl_nds_declare_settings",
+        &["cpus/arm32/include", "cpus/arm32", "guests/nds"],
+        &["guests/nds/settings.c"],
+    ) else {
+        return;
+    };
+    c.retain(|s| s["key"].as_str().unwrap().starts_with("video.nds_"));
+    assert_eq!(c, as_json(&nds_settings()));
 }

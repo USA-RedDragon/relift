@@ -1,12 +1,16 @@
 /**
  * @file ndsmain.c
  * @brief The program of a lifted Nintendo DS cartridge: the machine, both
- * CPUs, the headless run, its report, frame hashes and PNG dumps of both
- * screens (the top one above the bottom one, 256 x 384).
+ * CPUs, the window (both screens in the video.nds_layout layout and the
+ * sound controller's output) or the headless run, its report, frame hashes and PNG dumps
+ * of both screens (the top one above the bottom one, 256 x 384).
  */
 #include "cpu.h"
+#include "play.h"
 
+#include <relift/audio.h>
 #include <relift/settings.h>
+#include <relift/window.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +23,11 @@
 /** @brief Width and height of a dumped frame: both screens stacked. */
 #define W RL_NDS_SCREEN_W
 #define H_PX (2u * RL_NDS_SCREEN_H)
+/** @brief A frame's length in nanoseconds (59.8261 Hz), the pace without audio. */
+#define FRAME_NS 16715279ull
+/** @brief Frames of sound queued in the host before a frame waits (three frames' worth). */
+#define AUDIO_AHEAD (3u * RL_NDS_AUDIO_RATE / 60u)
+#define AUDIO_CHUNK 1024u
 
 typedef struct host {
     rl_nds_run run;
@@ -44,6 +53,15 @@ typedef struct host {
     uint32_t frames;
     /** @brief --frame-log: one line per frame on stdout (number, ARM9 tick, frame hash, the --peek words). */
     bool frame_log;
+    /** @brief The window, its layout and picture, the host's audio and the pace without audio. */
+    rl_window *win;
+    rl_nds_layout layout;
+    uint8_t rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
+    rl_audio_out *out;
+    uint64_t next_ns;
+    /** @brief The window was closed. */
+    bool quit;
+    bool headless;
 } host;
 
 static host H;
@@ -137,11 +155,45 @@ static bool listed(uint32_t n)
     return false;
 }
 
-/** @brief The frame hook: PNG dumps and the --frames stop. */
+/** @brief Hands the sound made so far to the host, then waits while three frames of it are queued. */
+static void audio_pace(void)
+{
+    int16_t pcm[AUDIO_CHUNK * 2];
+    uint32_t n;
+    while ((n = rl_nds_audio_take(H.run.m, pcm, AUDIO_CHUNK)) > 0)
+        rl_audio_write(H.out, pcm, n);
+    while (!__atomic_load_n(&H.quit, __ATOMIC_ACQUIRE) && rl_audio_queued(H.out) > AUDIO_AHEAD)
+        rl_sleep_ns(1000000ull);
+}
+
+/** @brief Shows the frame and keeps the run at the console's pace: by the audio queue, else by the clock. */
+static void present(const uint32_t *pixels)
+{
+    uint32_t w, h;
+    rl_nds_layout_size(H.layout, &w, &h);
+    rl_nds_layout_rgb(H.layout, pixels, H.rgb);
+    rl_window_present_rgb(H.win, H.rgb, w, h);
+    if (H.out) {
+        audio_pace();
+        return;
+    }
+    uint64_t t = rl_clock_ns();
+    if (!H.next_ns || t > H.next_ns + 4 * FRAME_NS)
+        H.next_ns = t;
+    H.next_ns += FRAME_NS;
+    if (H.next_ns > t)
+        rl_sleep_ns(H.next_ns - t);
+}
+
+/** @brief The frame hook: the window, PNG dumps and the --frames stop. */
 static void on_frame(void *user, const uint32_t *pixels, uint64_t when)
 {
     (void)user;
     H.frames++;
+    if (H.win)
+        present(pixels);
+    if (__atomic_load_n(&H.quit, __ATOMIC_ACQUIRE))
+        rl_process_exit(0);
     if (H.frame_log) {
         printf("F %u tick=%llu h=%016llx", H.frames, (unsigned long long)when, (unsigned long long)rl_nds_frame_hash(pixels));
         for (uint32_t i = 0; i < H.peeks; i++)
@@ -285,8 +337,10 @@ static int options(int argc, char **argv, int first, uint64_t *max_ticks)
 {
     for (int i = first; i < argc; i++) {
         const char *a = argv[i];
-        if (!strcmp(a, "--headless"))
+        if (!strcmp(a, "--headless")) {
+            H.headless = true;
             continue;
+        }
         if (!strcmp(a, "--no-save")) {
             H.no_save = true;
             continue;
@@ -337,6 +391,41 @@ static int options(int argc, char **argv, int first, uint64_t *max_ticks)
     return 0;
 }
 
+static void on_window(void *user, rl_window *w, int event)
+{
+    (void)user;
+    (void)w;
+    if (event == RL_WINDOW_CLOSE)
+        __atomic_store_n(&H.quit, true, __ATOMIC_RELEASE);
+}
+
+/** @brief The run, on its own thread when a window backend runs the event loop on the caller's. */
+static int run_body(void *arg)
+{
+    const rl_nds_program *p = arg;
+    const rl_window_backend *b = rl_window_backend_current();
+    if (b && b->present_rgb) {
+        uint32_t w, h;
+        rl_nds_layout_size(H.layout, &w, &h);
+        H.win = b->open(p->title && *p->title ? p->title : "relift", w * 2, h * 2);
+    }
+    if (H.win) {
+        rl_window_set_fit(H.win, !rl_setting_bool("video.nds_integer_scale"));
+        H.out = rl_audio_open(RL_NDS_AUDIO_RATE, 2);
+        if (H.out)
+            rl_audio_pause(H.out, false);
+    }
+    if (H.win || H.png_every || H.png_frame_count || H.stop_frames || H.frame_log || getenv("RELIFT_INPUT_SCRIPT"))
+        rl_nds_set_frame_hook(H.run.m, on_frame, NULL);
+    int r = rl_nds_run_start(&H.run);
+    rl_audio_close(H.out);
+    H.out = NULL;
+    if (H.win)
+        b->close(H.win);
+    H.win = NULL;
+    return r;
+}
+
 int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
 {
     memset(&H, 0, sizeof H);
@@ -355,8 +444,7 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
         return 1;
     }
     H.run.max_ticks = max_ticks;
-    if (H.png_every || H.png_frame_count || H.stop_frames || H.frame_log)
-        rl_nds_set_frame_hook(H.run.m, on_frame, NULL);
+    H.layout = rl_nds_layout_setting();
     if (H.stop_debug)
         rl_nds_set_debug_hook(H.run.m, on_debug, NULL);
     start_clock(H.run.m);
@@ -379,7 +467,11 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
     }
     rl_nds_set_power_off_hook(H.run.m, power_off, NULL);
     rl_set_exit_hook(on_exit_code);
-    int r = rl_nds_run_start(&H.run);
+    if (H.headless)
+        rl_settings_set("video", "headless");
+    rl_window_set_events(on_window, NULL);
+    int r = rl_window_main(run_body, (void *)p);
+    rl_window_set_events(NULL, NULL);
     rl_set_exit_hook(NULL);
     save_now();
     report();

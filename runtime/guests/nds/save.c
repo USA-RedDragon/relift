@@ -2,7 +2,7 @@
  * @file save.c
  * @brief The cartridge backup as a file (the raw image emulators and flash
  * carts use: its length names the chip, see backup.c), atomic writes, the
- * save path and the settings, and the memory the boot code leaves behind for
+ * save path and the memory the boot code leaves behind for
  * a cartridge (chip ID, header CRC, the firmware's user settings).
  */
 #include "nds_int.h"
@@ -174,31 +174,6 @@ bool rl_nds_save_path(char *out, size_t size, const char *rom_path)
         dir[--dl] = 0;
     int n = snprintf(out, size, "%s/%.*s.sav", dir, (int)stem, base);
     return n > 0 && (size_t)n < size;
-}
-
-static const rl_setting_def g_defs[] = {
-    {
-        .key = "save.dir",
-        .type = RL_SETTING_STRING,
-        .label = "Save folder",
-        .description = "Where the game's save file is kept. Empty: <user folder>/save when the program names an app, "
-                       "else next to the ROM",
-        .env = "RELIFT_SAVE",
-    },
-    {
-        .key = "save.type",
-        .type = RL_SETTING_STRING,
-        .label = "Backup chip",
-        .description = "The cartridge's backup chip when no save file names it by its length: auto, eeprom512, eeprom8k, "
-                       "eeprom64k, eeprom128k, fram8k, fram32k, flash256k, flash512k or flash1m",
-        .env = "RELIFT_SAVE_TYPE",
-    },
-};
-
-void rl_nds_declare_settings(void)
-{
-    rl_settings_declare_runtime();
-    rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
 }
 
 static void poke(rl_nds *m, uint32_t addr, unsigned size, uint32_t v) { rl_nds_write(m, RL_NDS_ARM9, addr, size, v); }
