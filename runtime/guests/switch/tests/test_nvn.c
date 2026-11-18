@@ -118,6 +118,58 @@ TEST(nvn_pools_report_their_descriptor_count)
     CHECK_EQ(call(c, nvnh_nvnSamplerPoolFinalize, smp, 0, 0, 0), RET);
 }
 
+TEST(nvn_dlss_optimal_settings_are_the_librarys)
+{
+    static const uint32_t rows[][9] = {
+        { 3840, 2160, 0, 2227, 1253, 1920, 1080, 3840, 2160 }, { 3840, 2160, 1, 1280, 720, 1280, 720, 1280, 720 },
+        { 3840, 2160, 2, 3840, 2160, 3802, 2138, 3840, 2160 }, { 3840, 2160, 5, 2227, 1253, 1920, 1080, 3840, 2160 },
+        { 1920, 1080, 0, 1114, 626, 960, 540, 1920, 1080 },    { 1920, 1080, 2, 1920, 1080, 1901, 1069, 1920, 1080 },
+        { 1366, 768, 1, 455, 256, 455, 256, 455, 256 },        { 1921, 1081, 0, 1114, 627, 961, 541, 1921, 1081 },
+        { 25, 176, 0, 15, 102, 13, 88, 25, 176 },              { 232, 1625, 0, 135, 943, 116, 813, 232, 1625 },
+        { 17, 9, 0, 10, 5, 9, 5, 17, 9 },                      { 17, 9, 2, 17, 9, 17, 9, 17, 9 },
+        { 2048, 1152, 1, 683, 384, 683, 384, 683, 384 },
+    };
+    for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) {
+        uint32_t out[6];
+        nvn_dlss_optimal(rows[i][0], rows[i][1], rows[i][2], out);
+        for (int k = 0; k < 6; k++)
+            CHECK_EQ(out[k], rows[i][3 + k]);
+    }
+}
+
+TEST(nvn_dlss_parameters_read_as_the_setters_store_them)
+{
+    uint8_t raw[NVN_DLSS_PARAMS_BYTES] = { 0 };
+    uint64_t color = 0x1000, view = 0x2000, out = 0x3000, expo = 0x4000;
+    float jitter[2] = { 0.25f, -0.5f }, one = 1.0f;
+    uint32_t size[2] = { 1280, 720 }, base[2] = { 8, 4 };
+    memcpy(raw, &color, 8);
+    memcpy(raw + 8, &view, 8);
+    memcpy(raw + 16, &out, 8);
+    memcpy(raw + 104, &expo, 8);
+    memcpy(raw + 80, jitter, 8);
+    memcpy(raw + 88, &one, 4);
+    memcpy(raw + 92, &one, 4);
+    memcpy(raw + 96, &one, 4);
+    raw[120] = 1;
+    memcpy(raw + 128, size, 8);
+    memcpy(raw + 168, base, 8);
+    nvn_dlss_params p;
+    nvn_dlss_params_of(raw, &p);
+    CHECK_EQ(p.color, color);
+    CHECK_EQ(p.color_view, view);
+    CHECK_EQ(p.out, out);
+    CHECK_EQ(p.out_view, 0);
+    CHECK_EQ(p.exposure, expo);
+    CHECK(p.jitter[0] == 0.25f && p.jitter[1] == -0.5f);
+    CHECK(p.motion_scale[0] == 1.0f && p.pre_exposure == 1.0f);
+    CHECK(p.reset);
+    CHECK_EQ(p.in_size[0], 1280);
+    CHECK_EQ(p.in_size[1], 720);
+    CHECK_EQ(p.out_base[0], 8);
+    CHECK_EQ(p.out_base[1], 4);
+}
+
 TEST(nvn_dlss_state_procs_stay_the_drivers_and_work_procs_do_not)
 {
     CHECK(nvn_driver_index("nvnDlssNetworkBuilderSetDefaults") >= 0);

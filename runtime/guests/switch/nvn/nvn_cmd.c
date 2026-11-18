@@ -85,6 +85,7 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_COPY_BUFFER_TO_TEXTURE, 4, ONE, sizeof(nvn_region) },
     { NVN_CMD_COPY_TEXTURE_TO_BUFFER, 2, ONE, NVN_VIEW_BYTES },
     { NVN_CMD_COPY_TEXTURE_TO_BUFFER, 3, ONE, sizeof(nvn_region) },
+    { NVN_CMD_EVALUATE_DLSS, 2, ONE, NVN_DLSS_PARAMS_BYTES },
 };
 #undef ONE
 
@@ -391,6 +392,14 @@ uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
     if (op == NVN_CMD_SET_RENDER_TARGETS && (e->x[3] & NVN_SNAP))
         for (uint32_t i = 0; i < (uint32_t)c->x[1]; i++) {
             uint64_t at = (e->x[3] & ~NVN_SNAP) + 8u * i, view, kept;
+            memcpy(&view, b->bytes + at, 8);
+            if (!snap(b, mem, view, NVN_VIEW_BYTES, &kept))
+                return (uint64_t)rl_guest_fatal(c, "nvn", "%s: cannot keep texture view %u", nvn_cmd_name(op), i);
+            memcpy(b->bytes + at, &kept, 8);
+        }
+    if (op == NVN_CMD_EVALUATE_DLSS && (e->x[2] & NVN_SNAP))
+        for (uint32_t i = 0; i < NVN_DLSS_PARAM_TEXTURES; i++) {
+            uint64_t at = (e->x[2] & ~NVN_SNAP) + nvn_dlss_texture_offsets[i] + 8u, view, kept;
             memcpy(&view, b->bytes + at, 8);
             if (!snap(b, mem, view, NVN_VIEW_BYTES, &kept))
                 return (uint64_t)rl_guest_fatal(c, "nvn", "%s: cannot keep texture view %u", nvn_cmd_name(op), i);

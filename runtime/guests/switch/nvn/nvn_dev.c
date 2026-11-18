@@ -39,7 +39,7 @@ typedef struct nvn_device {
     uint32_t origin_mode, depth_mode;
     /** @brief The builder's flags (nvnDeviceBuilderGetFlags). */
     uint32_t flags;
-    /** @brief Whether the driver's fields are written into the guest's device object (see device_fields). */
+    /** @brief Whether the driver's fields are written into the guest's device object (see nvn_device_fields). */
     bool fields;
 } nvn_device;
 

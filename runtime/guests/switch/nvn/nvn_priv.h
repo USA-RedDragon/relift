@@ -20,6 +20,7 @@
     NVN_DEVICE_PROCS(X)                                                                                                \
     NVN_CMDBUF_PROCS(X)                                                                                                \
     NVN_TEXTURE_PROCS(X)                                                                                               \
+    NVN_DLSS_PROCS(X)                                                                                                  \
     X(nvnWindowInitialize)                                                                                             \
     X(nvnWindowFinalize)                                                                                               \
     X(nvnWindowAcquireTexture)                                                                                         \
@@ -376,6 +377,42 @@ typedef struct nvn_consts {
  */
 const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts, const uint64_t **control);
 
+/** @brief DLSS network procs relift implements (nvn_dlss.c); the builder and parameter procs stay the driver's. */
+#define NVN_DLSS_PROCS(X)                                                                                              \
+    X(nvnDlssNetworkBuilderGetOptimalSettings)                                                                         \
+    X(nvnDlssNetworkBuilderGetStorageSize)                                                                             \
+    X(nvnDlssNetworkFinalize)                                                                                          \
+    X(nvnDlssNetworkInitialize)                                                                                        \
+    X(nvnDlssNetworkResize)
+
+/** @brief Bytes of an NVNdlssParameters, as the driver's setters lay it out (nvnDlssParametersSetDefaults clears them). */
+#define NVN_DLSS_PARAMS_BYTES 192u
+/** @brief Offsets in NVNdlssParameters of the six texture and view pointer pairs the setters store. */
+#define NVN_DLSS_PARAM_TEXTURES 6u
+extern const uint8_t nvn_dlss_texture_offsets[NVN_DLSS_PARAM_TEXTURES];
+
+/** @brief An NVNdlssParameters as the evaluation reads it. */
+typedef struct nvn_dlss_params {
+    /** @brief Guest addresses of the textures and their views (0 for none): input color, output color, motion
+     * vectors, depth, bias current color mask, exposure. */
+    uint64_t color, color_view, out, out_view, motion, motion_view, depth, depth_view, bias, bias_view, exposure,
+        exposure_view;
+    float jitter[2], motion_scale[2], pre_exposure;
+    bool reset;
+    uint32_t evaluation_index;
+    /** @brief The input subrectangle's size, and the bases of each subrectangle (x, y). */
+    uint32_t in_size[2], color_base[2], depth_base[2], motion_base[2], bias_base[2], out_base[2];
+} nvn_dlss_params;
+
+/** @brief Reads raw (NVN_DLSS_PARAMS_BYTES of an NVNdlssParameters) into out. */
+void nvn_dlss_params_of(const uint8_t *raw, nvn_dlss_params *out);
+
+/**
+ * @brief The driver's nvnDlssNetworkBuilderGetOptimalSettings for an output of width by height and a method: out gets
+ * the optimal, smallest and largest render sizes (width, height each).
+ */
+void nvn_dlss_optimal(uint32_t width, uint32_t height, uint32_t method, uint32_t out[6]);
+
 /** @brief Bytes of an NVNtextureView. */
 #define NVN_VIEW_BYTES 16u
 
@@ -447,6 +484,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_DRAW_ELEMENTS, nvnCommandBufferDrawElements) \
     X(NVN_CMD_DRAW_ELEMENTS_BASE_VERTEX, nvnCommandBufferDrawElementsBaseVertex) \
     X(NVN_CMD_END_TRANSFORM_FEEDBACK, nvnCommandBufferEndTransformFeedback) \
+    X(NVN_CMD_EVALUATE_DLSS, nvnCommandBufferEvaluateDlss) \
     X(NVN_CMD_FENCE_SYNC, nvnCommandBufferFenceSync) \
     X(NVN_CMD_REPORT_COUNTER, nvnCommandBufferReportCounter) \
     X(NVN_CMD_RESET_COUNTER, nvnCommandBufferResetCounter) \
@@ -579,7 +617,8 @@ enum nvn_kind {
     NVN_WINDOW,
     NVN_CMDBUF,
     NVN_PROGRAM,
-    NVN_EVENT
+    NVN_EVENT,
+    NVN_DLSS_NETWORK
 };
 
 /** @brief The head of every relift NVN object; a kind's struct starts with it. */

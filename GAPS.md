@@ -394,9 +394,9 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 ### Upscalers: FSR and others (medium)
 
-- Missing: `post.h` defines an upscaler stage (`rl_post_set_upscaler`, `rl_post_stage`); no stage is implemented, and nothing in the tree sets one. The DLSS seam at the Switch 2 boundary is the maintainer's active work (see coordinate first).
+- Missing: the upscaler stage (`runtime/core/upscale.c`, `picture.upscaler`) has relift's spatial choices only (nearest, bilinear, sharp bilinear, Lanczos), in the frame at the Switch 2 driver's DLSS calls and in the window; FSR 1 and 2, the game's own translated DLSS, and the other vendors' upscalers are not wired.
 - Why: lower internal resolutions on weak hosts.
-- Where: `runtime/core/post.c`, `runtime/core/include/relift/post.h`, `runtime/core/shaders`.
+- Where: `runtime/core/upscale.c`, `runtime/core/include/relift/upscale.h`, `runtime/core/shaders`, `runtime/guests/switch/nvn/nvn_dlss.c`.
 - Read first: AMD FSR 1 (MIT) for a spatial upscaler that fits the stage's RGBA8 buffer interface; check the license of any other (XeSS, MetalFX) before you write code.
 - Verify: unit tests for the stage contract in `runtime/core/tests/test_post.c`; golden images; the pipeline never starts with every option off.
 

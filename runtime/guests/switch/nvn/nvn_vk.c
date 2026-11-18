@@ -871,6 +871,7 @@ bool nvn_vk_flush(replay *r)
     g.arena_used = 0;
     g.flushes++;
     nvn_draw_reset();
+    nvn_dlss_reset();
     return ok;
 }
 
@@ -1751,6 +1752,8 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return copy_texture_to_texture(r, e);
     case NVN_CMD_COPY_BUFFER_TO_TEXTURE:
         return copy_buffer_to_texture(r, e);
+    case NVN_CMD_EVALUATE_DLSS:
+        return nvn_dlss_run(r, e);
     case NVN_CMD_BARRIER:
         if (r->recording)
             nvn_vk_barrier(g.cb);

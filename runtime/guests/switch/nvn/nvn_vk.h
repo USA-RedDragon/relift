@@ -253,6 +253,10 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim);
 int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim);
 /** @brief Frees what draws of the batch just finished held (descriptor sets); called after each wait. */
 void nvn_draw_reset(void);
+/** @brief Runs a recorded nvnCommandBufferEvaluateDlss with the player's upscaler (nvn_dlss.c); RL_OK or a pending stop. */
+int nvn_dlss_run(replay *r, const nvn_cmd *e);
+/** @brief Frees what DLSS evaluations held for the batch just finished (called after each wait). */
+void nvn_dlss_reset(void);
 /** @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one. */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
 
