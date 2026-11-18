@@ -127,6 +127,20 @@ pub fn runtime_settings() -> Vec<Setting> {
                 },
             )
         },
+        Setting {
+            apply: Apply::Live,
+            ..s(
+                "picture.filter",
+                "Scaling filter",
+                "How windows scale and sample the picture. default: the window's own scaling (whole multiples, or filling the window where a setting such as video.nds_integer_scale asks), nearest at whole multiples, sharp_bilinear above 2x when the scale is not whole, bilinear below 2x. integer: whole multiples only, sharp. nearest: fill the window, sharp uneven pixels. sharp_bilinear: fill the window with even pixels whose edges blend over one screen pixel. Anything but nearest sampling changes the picture from the console's",
+                Value::String("default".into()),
+                SettingKind::Enum {
+                    choices: ["default", "integer", "nearest", "sharp_bilinear"]
+                        .map(String::from)
+                        .into(),
+                },
+            )
+        },
         s(
             "save.dir",
             "Save folder",
@@ -972,7 +986,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 20);
+        assert_eq!(section(Vec::new()).runtime.len(), 21);
     }
 
     #[test]
