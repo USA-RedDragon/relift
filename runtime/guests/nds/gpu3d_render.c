@@ -88,9 +88,11 @@ typedef struct interp {
 } interp;
 
 /**
- * @brief Sets up the interpolation at x of len between W values w0 and w1;
- * edge selects the edge variant (9 bits). linear is the polygon's choice of
- * the linear path for every edge and span (see setup_poly).
+ * @brief Sets up the interpolation at x of len between W values w0 and w1:
+ * the factor x * w0 / ((len - x) * w1 + x * w0) in 9 bits along an edge
+ * (edge) and 8 bits across a span, rounded down (console captures of
+ * perspective edges and spans). linear is the polygon's choice of the
+ * linear path for every edge and span (see setup_poly).
  */
 static void interp_setup(interp *ip, int64_t x, int64_t len, uint32_t w0, uint32_t w1, bool edge, bool linear)
 {
@@ -101,24 +103,8 @@ static void interp_setup(interp *ip, int64_t x, int64_t len, uint32_t w0, uint32
     ip->factor = 0;
     if (ip->linear || len <= 0)
         return;
-    int64_t num, den;
-    if (edge) {
-        uint32_t w0n, w0d, w1d;
-        if ((w0 & 1) && !(w1 & 1)) {
-            w0n = w0 - 1;
-            w0d = w0 + 1;
-            w1d = w1;
-        } else {
-            w0n = w0 & 0xFFFEu;
-            w0d = w0 & 0xFFFEu;
-            w1d = w1 & 0xFFFEu;
-        }
-        num = (x * (int64_t)(w0n >> 1)) << 9;
-        den = (len - x) * (int64_t)(w1d >> 1) + x * (int64_t)(w0d >> 1);
-    } else {
-        num = (x * (int64_t)w0) << 8;
-        den = (len - x) * (int64_t)w1 + x * (int64_t)w0;
-    }
+    int64_t num = (x * (int64_t)w0) << ip->bits;
+    int64_t den = (len - x) * (int64_t)w1 + x * (int64_t)w0;
     ip->factor = den ? num / den : 0;
 }
 
@@ -724,8 +710,10 @@ static void finish_line(nds_gx *g, const nds_gx_lbuf *l, const nds_gx_lbuf *abov
 }
 
 /**
- * @brief The polygon's top and bottom lines, its W values normalized to 16
- * bits, and its interpolation path: linear on every edge and span when all
+ * @brief The polygon's top and bottom lines, its W values normalized, and
+ * its interpolation path. W values above 16 bits drop 4 bits at a time
+ * until they fit in 16, smaller ones gain 4 bits at a time up to 12 or
+ * more. The path is linear on every edge and span when all
  * its normalized W values are equal with the low bits clear, perspective
  * otherwise, also on the edges and spans whose two ends have equal W
  * (console captures of textured quads).
