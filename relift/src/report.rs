@@ -553,12 +553,19 @@ fn gb_learned(r: &Report, addr: u64) -> Option<String> {
     Some(format!("{bank:03x}:{addr:04x}"))
 }
 
+/// What a Game Boy learned file does, said after each `relift report`:
+/// development builds lift from it and release builds leave it out.
+const LEARNED_NOTE: &str = "a development build (relift build --dev, relift run) lifts it; a release build leaves the learned file out";
+
 /// Adds `line` to the learned file `path` of the Game Boy project, which
-/// the next build lifts from; says what it did.
+/// development builds lift from; says what it did.
 fn learn(path: &Path, line: &str) -> Result<String, BoxError> {
     let old = std::fs::read_to_string(path).unwrap_or_default();
     if old.lines().any(|l| l.trim() == line) {
-        return Ok(format!("{line} is already in {}", path.display()));
+        return Ok(format!(
+            "{line} is already in {}; {LEARNED_NOTE}",
+            path.display()
+        ));
     }
     let mut text = old;
     if !text.is_empty() && !text.ends_with('\n') {
@@ -568,7 +575,7 @@ fn learn(path: &Path, line: &str) -> Result<String, BoxError> {
     text.push('\n');
     relift_cache::write_if_changed(path, text.as_bytes())?;
     Ok(format!(
-        "added {line} to {}; the next relift build lifts it",
+        "added {line} to {}; {LEARNED_NOTE}",
         path.display()
     ))
 }
@@ -945,6 +952,23 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = "relift stop report 1\nkind: missed code\nsummary: no function at guest 0x8000040\nrelift: 0.1.0\nguest: switch\nmodule: main base 0x8000000 size 0x1000 build 00\ncpu: arm64\ntransfer: call\ntarget: 0x8000040 main+0x40\ntarget code: not lifted (in the code of main)\ntarget words 0x8000040: d503201f d65f03c0\nsite: 0x8000010 main+0x10\nsite function: 0x8000000 main+0x0 F_8000000 +0x10\nsite words 0x8000000: d503201f d503201f d503201f d503201f d63f0100\nregisters:\n  x0  0000000000000000\n  cpsr 6000001f (-ZC- --T sys)\nguest backtrace: lifted frames, innermost first; tail calls leave no frame\n  #0 0x8000000 main+0x0 F_8000000\nhost backtrace:\n  #0 0x1 ?\nend of report\n";
+
+    #[test]
+    fn a_learned_line_says_that_only_development_builds_use_it() {
+        let dir = std::env::temp_dir().join(format!("relift-learn-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("the folder is creatable");
+        let file = dir.join("learned.txt");
+        let added = learn(&file, "000:0b8f").expect("learns");
+        assert!(added.starts_with("added 000:0b8f to "), "{added}");
+        assert!(
+            added.contains("a release build leaves the learned file out"),
+            "{added}"
+        );
+        let again = learn(&file, "000:0b8f").expect("learns");
+        assert!(again.contains(" is already in "), "{again}");
+        assert!(again.contains("relift build --dev"), "{again}");
+        std::fs::remove_dir_all(&dir).expect("the folder is removable");
+    }
 
     #[test]
     fn a_report_parses_into_its_fields_and_blocks() {
