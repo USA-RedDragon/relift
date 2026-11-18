@@ -313,10 +313,21 @@ uint32_t nds_bus_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uin
     }
 }
 
+/** @brief True when the display reads what a store to addr changes: palette, VRAM, OAM, its registers and VRAMCNT. */
+static bool display_reads(unsigned cpu, uint32_t addr)
+{
+    uint32_t off = addr & 0x00FFFFFCu;
+    if (nds_seen_by_display(cpu, addr))
+        return true;
+    return cpu == RL_NDS_ARM9 && (addr >> 24) == 0x04 && (nds_disp_reg(cpu, off) || (off >= 0x240 && off < 0x24C));
+}
+
 void nds_bus_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, uint64_t now, bool *main)
 {
     nds_where w = nds_decode_bus(m, cpu, addr, true);
     *main = w.main;
+    if (display_reads(cpu, addr))
+        nds_disp_catch_up(m, now);
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
         nds_watch_store(m, w.p);

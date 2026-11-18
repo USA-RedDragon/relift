@@ -3,12 +3,14 @@
  * @brief The DMA channels of both CPUs: register masks and readback, the
  * time of immediate transfers against the oracle's (an ARM9 and an ARM7
  * program timed a transfer with a bus-clock timer), triggers, repeat,
- * reload, priority and the IRQ, and the VBlank and HBlank starts the
- * display timing raises.
+ * reload, priority and the IRQ, the VBlank and HBlank starts the display
+ * timing raises, and a transfer's store seen by the lines drawn before it.
  */
 #include "ndst.h"
 
 #include "nds_int.h"
+
+#include <string.h>
 
 #define TM0 0x04000100u
 #define IF 0x04000214u
@@ -300,4 +302,37 @@ TEST(an_hblank_transfer_repeats_on_each_visible_line_and_pauses_in_vblank)
     run_to(t, RL_NDS_FRAME_TICKS + HBLANK + 200);
     CHECK_EQ(r9(t, 0x02200300u, 4), 193);
     w9(t, DMA(1) + 8, 4, 0);
+}
+
+static uint32_t g_first[2 * 256 * 192];
+static int g_seen;
+
+static void keep_first(void *user, const uint32_t *pixels, uint64_t when)
+{
+    (void)user;
+    (void)when;
+    if (!g_seen++)
+        memcpy(g_first, pixels, sizeof g_first);
+}
+
+TEST(a_transfer_to_the_palette_reaches_only_the_lines_after_it)
+{
+    ndst *t = ndst_new();
+    rl_nds_set_frame_hook(t->m, keep_first, NULL);
+    w9(t, 0x04000304u, 2, 0x8203);
+    w9(t, 0x04000000u, 4, 0x00010000u);
+    w9(t, 0x05000000u, 2, 0x7C00);
+    w9(t, 0x02100000u, 2, 0x001F);
+    ndst_both(t, 100u * LINE + 100);
+    w9(t, DMA(3), 4, 0x02100000u);
+    w9(t, DMA(3) + 4, 4, 0x05000000u);
+    w9(t, DMA(3) + 8, 4, 0x91000001u);
+    run_to(t, 100u * LINE + HBLANK + 400);
+    CHECK_EQ(r9(t, 0x05000000u, 2), 0x001F);
+    run_to(t, 193u * LINE);
+    CHECK_EQ(g_seen, 1);
+    const uint32_t *px = g_first;
+    CHECK_EQ(px[99 * 256], px[100 * 256]);
+    CHECK(px[101 * 256] != px[100 * 256]);
+    CHECK_EQ(px[101 * 256], px[191 * 256]);
 }
