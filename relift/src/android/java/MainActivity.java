@@ -1,11 +1,11 @@
 package dev.relift.app;
 
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
+import android.view.Surface;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.ViewGroup;
@@ -33,13 +33,19 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
 
     static native String nativeGpuDriverLoaded();
 
+    static native void nativeDisplaySurface(int index, Surface surface, int width, int height);
+
+    static native void nativeDisplayTouch(int index, int id, int action, float x, float y);
+
     private Drivers drivers;
     private Ui ui;
+    private Displays displays;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         drivers = new Drivers(this);
+        displays = new Displays(this);
         ui = new Ui(this, drivers, this, false);
         addContentView(ui.root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
@@ -54,7 +60,6 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
 
     @Override
     public void setOrientationBis(int w, int h, boolean resizable, String hint) {
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
     }
 
     @Override
@@ -197,6 +202,23 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         } catch (UnsatisfiedLinkError e) {
             return null;
         }
+    }
+
+    /** Called by the runtime (any thread): how many displays besides this one can show a presentation. */
+    public int reliftDisplayCount(int unused) {
+        return displays == null ? 0 : displays.count();
+    }
+
+    /** Called by the runtime (any thread): shows the presentation of the index-th other display. */
+    public int reliftDisplayOpen(int index) {
+        displays.open(index);
+        return 0;
+    }
+
+    /** Called by the runtime (any thread): removes the presentation of the index-th other display. */
+    public int reliftDisplayClose(int index) {
+        displays.close(index);
+        return 0;
     }
 
     public void reliftHaptic() {

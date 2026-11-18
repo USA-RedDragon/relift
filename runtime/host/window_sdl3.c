@@ -725,6 +725,12 @@ static void sdl_set_fit(rl_window *h, bool fit)
     on_loop(do_fit, &q);
 }
 
+#ifdef __ANDROID__
+static uint32_t sdl_display_count(void) { return rl_android_display_count(); }
+
+static rl_window *sdl_open_display(uint32_t index) { return rl_android_display_open(index); }
+#endif
+
 static const rl_window_backend g_sdl = {
     .name = "SDL3",
     .init = sdl_init,
@@ -740,6 +746,10 @@ static const rl_window_backend g_sdl = {
     .screen = sdl_screen,
     .frame_point = sdl_frame_point,
     .set_fit = sdl_set_fit,
+#ifdef __ANDROID__
+    .display_count = sdl_display_count,
+    .open_display = sdl_open_display,
+#endif
 };
 
 const rl_window_backend *rl_host_window_backend(void) { return &g_sdl; }

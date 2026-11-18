@@ -34,7 +34,7 @@ const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 /// The Java sources of the app, compiled into `classes.dex` with SDL3's
 /// own classes.
-const JAVA: [(&str, &str); 12] = [
+const JAVA: [(&str, &str); 13] = [
     (
         "MainActivity",
         include_str!("android/java/MainActivity.java"),
@@ -48,6 +48,7 @@ const JAVA: [(&str, &str); 12] = [
     ("Catalog", include_str!("android/java/Catalog.java")),
     ("GpuProbe", include_str!("android/java/GpuProbe.java")),
     ("Restarter", include_str!("android/java/Restarter.java")),
+    ("Displays", include_str!("android/java/Displays.java")),
     ("GameData", include_str!("android/java/GameData.java")),
     ("DataPages", include_str!("android/java/DataPages.java")),
     ("DataImport", include_str!("android/java/DataImport.java")),
@@ -438,6 +439,9 @@ pub struct About {
     pub version: String,
     /// The game draws with Vulkan, so a GPU driver can be chosen for it.
     pub vulkan: bool,
+    /// The game follows the device's rotation (a tall picture); else the
+    /// activity keeps the sensor landscape orientation.
+    pub portrait: bool,
 }
 
 /// The name the settings pages give a guest platform.
@@ -527,7 +531,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
     <meta-data android:name="relift.gpu_driver" android:value="{vulkan}"/>
     <meta-data android:name="relift.platform" android:value="{platform}"/>
     <meta-data android:name="relift.game_version" android:value="{version}"/>
-    <activity android:name="{ACTIVITY}" android:exported="true" android:launchMode="singleInstance" android:screenOrientation="sensorLandscape" android:configChanges="layoutDirection|locale|fontScale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
+    <activity android:name="{ACTIVITY}" android:exported="true" android:launchMode="singleInstance" android:screenOrientation="{orientation}" android:configChanges="layoutDirection|locale|fontScale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
@@ -558,6 +562,11 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
             String::new()
         },
         vulkan = a.about.vulkan,
+        orientation = if a.about.portrait {
+            "fullUser"
+        } else {
+            "sensorLandscape"
+        },
         platform = xml(&a.about.platform),
         version = xml(&a.about.version),
         icon = if a.icons.is_empty() {
@@ -695,6 +704,7 @@ pub fn launcher(exe: &Path, seed: &str, label: &str) -> Result<Launcher, BoxErro
             platform: platform_name(&info.identity.platform).to_string(),
             version: info.identity.version.clone().unwrap_or_default(),
             vulkan: info.identity.platform == "switch",
+            portrait: info.identity.platform == "nds",
         },
     })
 }
@@ -1045,9 +1055,9 @@ mod tests {
     }
 
     #[test]
-    fn the_activity_keeps_the_landscape_orientation() {
+    fn the_manifest_decides_the_orientation() {
         assert!(JAVA[0].1.contains(
-            "public void setOrientationBis(int w, int h, boolean resizable, String hint) {\n        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);"
+            "public void setOrientationBis(int w, int h, boolean resizable, String hint) {\n    }"
         ));
     }
 
@@ -1141,9 +1151,11 @@ mod tests {
                 platform: "Switch".into(),
                 version: "1.0.2".into(),
                 vulkan: true,
+                portrait: false,
             },
         };
         let m = manifest(&a, &sdk, true);
+        assert!(m.contains("android:screenOrientation=\"sensorLandscape\""));
         assert!(m.contains("package=\"dev.relift.game.x\""));
         assert!(m.contains("android:targetSdkVersion=\"36\""));
         assert!(m.contains("android:name=\"dev.relift.app.MainActivity\""));

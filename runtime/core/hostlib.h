@@ -47,6 +47,13 @@ RL_RUNTIME_API const char *rl_hostlib_gpu_driver_loaded(void);
 RL_RUNTIME_API void rl_hostlib_on_gpu_driver_failed(void (*hook)(const char *name));
 
 #if defined(__ANDROID__)
+#include <relift/window.h>
+
+/** @brief The number of displays besides the app's own that can hold a window (host/android_display.c). */
+RL_RUNTIME_API uint32_t rl_android_display_count(void);
+/** @brief Opens a window on display index of those rl_android_display_count counts; NULL when it cannot. */
+RL_RUNTIME_API rl_window *rl_android_display_open(uint32_t index);
+
 /**
  * @brief Loads a driver (dir and library: the package folder and its library file name; dir NULL: the system
  * driver), makes a Vulkan instance and reads its first GPU. True with six lines in out (deviceName, vendorID,

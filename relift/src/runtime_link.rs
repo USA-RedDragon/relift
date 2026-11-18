@@ -370,6 +370,7 @@ pub fn android_extras(
                 deps.sdl3_lib.display().to_string(),
                 deps.opus_lib.display().to_string(),
                 "-llog".into(),
+                "-landroid".into(),
             ],
             origin: "Android prebuilt".into(),
         }),
@@ -378,6 +379,7 @@ pub fn android_extras(
             "audio_sdl3.c",
             "opus_libopus.c",
             "android_sdl3.c",
+            "android_display.c",
             "data_sdl3.c",
         ]
         .iter()

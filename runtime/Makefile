@@ -84,9 +84,9 @@ CFLAGS_BASE += -DRL_HOST_AUDIO -DRL_HOST_OPUS $(shell pkg-config --cflags opus s
 LDLIBS += $(shell pkg-config --libs opus sdl3)
 endif
 ifeq ($(VIDEO),sdl3)
-HOST_SRCS += host/window_sdl3.c $(if $(ANDROID),host/android_sdl3.c)
+HOST_SRCS += host/window_sdl3.c $(if $(ANDROID),host/android_sdl3.c host/android_display.c)
 CFLAGS_BASE += -DRL_HOST_VIDEO $(shell pkg-config --cflags sdl3)
-LDLIBS += $(shell pkg-config --libs sdl3) $(if $(ANDROID),-llog)
+LDLIBS += $(shell pkg-config --libs sdl3) $(if $(ANDROID),-llog -landroid)
 else ifneq ($(VIDEO),none)
 $(error VIDEO must be none or sdl3)
 endif
