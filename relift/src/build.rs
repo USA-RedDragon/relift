@@ -1512,6 +1512,12 @@ fn lift_and_emit(
 /// arguments, [`EMIT_RECORD`] set), so the memory they use is gone before
 /// the compilers start, and reads back what it emitted.
 fn lift_in_child(out: &Path) -> Result<EmitRecord, BoxError> {
+    if !Path::new("game.toml").is_file() {
+        return Err(
+            "game.toml: not found in this folder; run `relift import <dump>` here first, or change to the project folder"
+                .into(),
+        );
+    }
     std::fs::create_dir_all(out)?;
     let rec = out.join("emit.txt");
     let _ = std::fs::remove_file(&rec);

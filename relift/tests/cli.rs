@@ -57,7 +57,6 @@ fn every_stub_subcommand_fails_as_not_implemented() {
         "{}",
         stderr(&out)
     );
-    {}
 }
 
 #[test]
@@ -101,6 +100,11 @@ fn build_and_run_without_a_project_say_what_is_missing() {
             err.starts_with(&format!("relift {name}: game.toml")),
             "relift {args:?} -- {err}"
         );
+        assert!(
+            err.contains("run `relift import <dump>` here first"),
+            "{err}"
+        );
+        assert_eq!(err.lines().count(), 1, "{err}");
     }
     let err = stderr(&relift(&["build", "--target", "a", "--target", "b"]));
     assert!(
