@@ -6,13 +6,20 @@
  * switchbrew lists the command ids without names or layouts. The names and
  * layouts here are verified from a Switch 2 SDK's client: the CmifProxy of
  * IUserSession lists its methods in id order, each detail::*Impl calls one
- * method, and the proxy writes the raw data read here. The devices it
- * reports are inferred from Longshot (host/nn_audio_in.c, a native
- * recompilation of a Switch 2 program, read for behavior only): one virtual
- * input device, "MainAudioIn", as on the console, whose microphone is always
- * there, taking any stream format; Lichii
- * (src/core/hle/service/audio/nx2_audio_device_manager.h) agrees on the
- * command ids. Commands relift does not answer yet stop by name.
+ * method, and the proxy writes the raw data read here. It reports one
+ * virtual input device, as on the console, whose microphone is always there,
+ * taking any stream format (inferred from Longshot, host/nn_audio_in.c, a
+ * native recompilation read for behavior only). Its name, "MainAudioIn", is
+ * the SDK's own name for the main audio input: entry 5 of the stream source
+ * name table at sdk+0xc0ca18 that
+ * nn::audio::capture::detail::SystemAudioCaptureServerImplBase::
+ * ProcessSystemAudioMonitorServiceForInputStream (sdk+0x27ab2c) indexes,
+ * beside "RawAudioIn" and "TrueRawAudioIn" (verified in a Switch 2 SDK;
+ * that the device list carries the same name is inferred, and Longshot
+ * agrees). Lichii (src/core/hle/service/audio/nx2_audio_device_manager.h)
+ * agrees on the command ids; its device name "AudioVirtualInput0" appears
+ * nowhere in the SDK or the program. Commands relift does not answer yet
+ * stop by name.
  */
 #include "hos.h"
 #include "hos_audio.h"
