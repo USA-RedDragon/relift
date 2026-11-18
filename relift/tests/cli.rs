@@ -39,12 +39,25 @@ fn every_stub_subcommand_fails_as_not_implemented() {
     ] {
         let out = relift(args);
         assert!(!out.status.success(), "relift {args:?} succeeded");
-        assert_eq!(
-            stderr(&out).trim(),
-            format!("relift {name}: not implemented"),
-            "relift {args:?}"
+        let err = stderr(&out);
+        assert!(
+            err.starts_with(&format!("relift {name}: not implemented yet; ")),
+            "relift {args:?}: {err}"
         );
     }
+    let out = relift(&["where", "0x7100"]);
+    assert!(
+        stderr(&out).contains("`relift coverage`"),
+        "{}",
+        stderr(&out)
+    );
+    let out = relift(&["check", "0x7100"]);
+    assert!(
+        stderr(&out).contains("`relift diff <function>`"),
+        "{}",
+        stderr(&out)
+    );
+    {}
 }
 
 #[test]
@@ -116,7 +129,11 @@ fn the_example_config_loads() {
         .current_dir(&dir)
         .output()
         .expect("the relift binary runs");
-    assert_eq!(stderr(&out).trim(), "relift check: not implemented");
+    assert!(
+        stderr(&out).starts_with("relift check: not implemented yet; "),
+        "{}",
+        stderr(&out)
+    );
 }
 
 fn import_in(dir: &std::path::Path, args: &[&str]) -> Output {

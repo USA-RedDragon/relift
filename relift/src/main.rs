@@ -111,7 +111,14 @@ fn main() -> ExitCode {
                 relift::report::HintMode::Add
             },
         ),
-        _ => Err("not implemented".into()),
+        Command::Check { .. } => Err(
+            "not implemented yet; `relift diff <function>` compares one function of a Switch project with the reference interpreter, and check/ holds the `relift-check` tool for single instructions"
+                .into(),
+        ),
+        Command::Where { .. } => Err(
+            "not implemented yet; a stop report names the module, the guest address and the offset of a miss, and `relift coverage` lists every address as module+offset"
+                .into(),
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
