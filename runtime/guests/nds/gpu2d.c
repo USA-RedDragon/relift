@@ -290,7 +290,7 @@ void nds_eng_line(rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line3d)
         } else if ((top->flags & NDS_PX_SEMI) && below) {
             c = blend(c, eva, second->c, evb);
         } else if (fx && (e->bldcnt >> tl & 1)) {
-            if (mode == 1 && below)
+            if (mode == 1 && below && !(top->flags & NDS_PX_3D))
                 c = blend(c, eva, second->c, evb);
             else if (mode == 2)
                 c = brighten(c, evy);
