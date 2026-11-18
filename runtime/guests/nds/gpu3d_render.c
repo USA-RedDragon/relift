@@ -711,9 +711,9 @@ static void finish_line(nds_gx *g, const nds_gx_lbuf *l, const nds_gx_lbuf *abov
 
 /**
  * @brief The polygon's top and bottom lines, its W values normalized, and
- * its interpolation path. W values above 16 bits drop 4 bits at a time
- * until they fit in 16, smaller ones gain 4 bits at a time up to 12 or
- * more. The path is linear on every edge and span when all
+ * its interpolation path. W values above 16 bits drop 8 bits at a time
+ * until they fit in 16 (console captures of W up to 19 bits), smaller
+ * ones gain 4 bits at a time up to 12 or more. The path is linear on every edge and span when all
  * its normalized W values are equal with the low bits clear, perspective
  * otherwise, also on the edges and spans whose two ends have equal W
  * (console captures of textured quads).
@@ -734,7 +734,7 @@ static void setup_poly(nds_gx_ram *r, nds_gx_poly *p)
     int sh = 0;
     if (wmax > 0xFFFF) {
         while ((wmax >> sh) > 0xFFFF)
-            sh += 4;
+            sh += 8;
     } else if (wmax) {
         while ((wmax << -sh) < 0x1000)
             sh -= 4;
