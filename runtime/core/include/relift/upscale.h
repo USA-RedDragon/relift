@@ -32,6 +32,7 @@ enum {
     RL_UPSCALE_SHARP_BILINEAR,
     RL_UPSCALE_LANCZOS,
     RL_UPSCALE_FSR1,
+    RL_UPSCALE_FSR2,
     RL_UPSCALE_CHOICES
 };
 
@@ -68,13 +69,17 @@ typedef struct rl_upscale_inputs {
     /** @brief Depth at render size, or none; inverted: 1 is near. */
     rl_upscale_image depth;
     bool depth_inverted;
-    /** @brief Motion vectors, or none; at display size instead of render size; their scale to pixels (x, y). */
+    /** @brief Motion vectors, or none; at display size instead of render size; with the jitter in them; their scale
+     * to pixels (x, y). */
     rl_upscale_image motion;
     bool motion_display_size;
+    bool motion_jittered;
     float motion_scale[2];
     /** @brief A 1x1 exposure image, or none; the pre-exposure the color was multiplied by (1 for none). */
     rl_upscale_image exposure;
     float pre_exposure;
+    /** @brief The stage works the exposure out itself (no exposure image). */
+    bool auto_exposure;
     /** @brief The projection's jitter this frame, in render pixels (x, y). */
     float jitter[2];
     /** @brief The history is not valid this frame (a camera cut). */
@@ -100,6 +105,9 @@ RL_RUNTIME_API const char *rl_upscale_name(uint32_t choice);
  * stage (RL_UPSCALE_OFF) for auto and game.
  */
 RL_RUNTIME_API uint32_t rl_upscale_spatial(uint32_t choice);
+
+/** @brief Whether choice is temporal: it reads depth, motion vectors and the jitter, and keeps a history. */
+RL_RUNTIME_API bool rl_upscale_temporal(uint32_t choice);
 
 /**
  * @brief The choice that runs for choice: in_frame for place 1, where game_ok says whether the game's own upscaler

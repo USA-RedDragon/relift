@@ -30,14 +30,15 @@ pub const INFO_PATH: &str = "usr/share/relift/info.json";
 const LICENSE_RELIFT: &str = include_str!("../../LICENSE");
 /// The license of the Zstandard decoder compiled into Switch programs.
 const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
-/// The licenses of the picture options' FXAA, SMAA and FSR 1 passes, in every runtime.
 /// The notice of the dav1d AV1 decoder the runtime compiles in.
 const LICENSE_DAV1D: &str = include_str!("../../runtime/host/dav1d/NOTICE");
+/// The licenses of the picture options' FXAA, SMAA, FSR 1 and FSR 2 passes, in every runtime.
 const LICENSE_FXAA: &str = include_str!("../../runtime/third_party/fxaa/LICENSE");
 const LICENSE_SMAA: &str = include_str!("../../runtime/third_party/smaa/LICENSE");
 const LICENSE_FSR1: &str = include_str!("../../runtime/third_party/fsr1/LICENSE");
 /// The license of the RenderDoc in-application API header the runtime compiles in.
 const LICENSE_RENDERDOC: &str = include_str!("../../runtime/third_party/renderdoc/LICENSE");
+const LICENSE_FSR2: &str = include_str!("../../runtime/third_party/fsr2/LICENSE");
 
 /// Libraries that always come from the system: the C library family, the
 /// compiler runtimes, the graphics stack and the display servers' clients.
@@ -334,6 +335,7 @@ fn licenses_file(name: &str, bundled: &[Bundled], switch: bool) -> String {
     s.push_str("- SMAA (Jorge Jimenez et al., iryoku/smaa), compiled into the runtime's anti-aliasing option: MIT, https://github.com/iryoku/smaa (the text is in smaa-LICENSE)\n");
     s.push_str("- AMD FidelityFX Super Resolution 1 (GPUOpen-Effects/FidelityFX-FSR), compiled into the runtime's upscaler option: MIT, https://github.com/GPUOpen-Effects/FidelityFX-FSR (the text is in fsr1-LICENSE)\n");
     s.push_str("- RenderDoc in-application API header (Baldur Karlsson), compiled into the runtime's capture trigger: MIT, https://github.com/baldurk/renderdoc (the text is in renderdoc-LICENSE)\n");
+    s.push_str("- AMD FidelityFX Super Resolution 2 (GPUOpen-Effects/FidelityFX-FSR2), compiled into the runtime's upscaler option: MIT, https://github.com/GPUOpen-Effects/FidelityFX-FSR2 (the text is in fsr2-LICENSE)\n");
     if switch {
         s.push_str("- Zstandard decoder (zstd v1.5.7), compiled into the program: BSD-3-Clause, https://github.com/facebook/zstd (the text is in zstd-LICENSE)\n");
         s.push_str("- dav1d AV1 decoder (1.5.3, VideoLAN), compiled into the program when its source was available: BSD-2-Clause, https://code.videolan.org/videolan/dav1d (the text is in dav1d-LICENSE)\n");
@@ -372,6 +374,7 @@ fn write_licenses(
     relift_cache::write_if_changed(&dir.join("smaa-LICENSE"), LICENSE_SMAA.as_bytes())?;
     relift_cache::write_if_changed(&dir.join("fsr1-LICENSE"), LICENSE_FSR1.as_bytes())?;
     relift_cache::write_if_changed(&dir.join("renderdoc-LICENSE"), LICENSE_RENDERDOC.as_bytes())?;
+    relift_cache::write_if_changed(&dir.join("fsr2-LICENSE"), LICENSE_FSR2.as_bytes())?;
     if switch {
         relift_cache::write_if_changed(&dir.join("zstd-LICENSE"), LICENSE_ZSTD.as_bytes())?;
         relift_cache::write_if_changed(&dir.join("dav1d-LICENSE"), LICENSE_DAV1D.as_bytes())?;
@@ -743,6 +746,7 @@ mod tests {
             "usr/share/licenses/my-game/smaa-LICENSE",
             "usr/share/licenses/my-game/fsr1-LICENSE",
             "usr/share/licenses/my-game/renderdoc-LICENSE",
+            "usr/share/licenses/my-game/fsr2-LICENSE",
             INFO_PATH,
         ] {
             assert!(out.join(f).exists(), "{f}");

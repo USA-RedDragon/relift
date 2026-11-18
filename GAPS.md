@@ -466,7 +466,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 ### Upscalers: temporal and vendor (medium, in progress)
 
-- State: the upscaler stage (`runtime/core/upscale.c`, `picture.upscaler`) has relift's spatial choices (nearest, bilinear, sharp bilinear, Lanczos) and AMD FSR 1, in the frame at the Switch 2 driver's DLSS calls and in the window. Temporal upscalers are in progress on a branch: FSR 2 (the default for now), FSR 3.1, Arm ASR, a temporal anti-aliasing choice and MetalFX on Apple hosts. NVIDIA DLSS and Intel XeSS are loaded at run time from the vendor's library on the host only and never shipped. The game's own translated DLSS is under Switch 2.
+- State: the upscaler stage (`runtime/core/upscale.c`, `picture.upscaler`) has relift's spatial choices (nearest, bilinear, sharp bilinear, Lanczos), AMD FSR 1, AMD FSR 2, the FSR 3.1 upscaler, relift's TAA and NVIDIA DLSS (loaded at run time from the user's copy of NVIDIA's library, never shipped), in the frame at the Switch 2 driver's DLSS calls; the window gets the spatial ones. Still missing: Intel XeSS (Windows only), Arm ASR and MetalFX on Apple hosts; the game's own translated DLSS is under Switch 2.
 - Why: lower internal resolutions on weak hosts.
 - Where: `runtime/core/upscale.c`, `runtime/core/include/relift/upscale.h`, `runtime/core/shaders`, `runtime/guests/switch/nvn/nvn_dlss.c`.
 - Read first: AMD FSR 1 and 2 (MIT) for the existing ports; check the license of any other before you write code. The temporal ones need motion vectors, depth and jitter, which only a guest that passes them (Switch 2's DLSS call) provides.

@@ -336,6 +336,32 @@ static int view_of(replay *r, uint64_t v, nvn_view *nv, bool *has)
     return nvn_view_read(r->c, r->mem, bytes, nv);
 }
 
+/**
+ * @brief A sampled host view of the texture at guest address tex through the recorded view pointer v (none when tex is
+ * 0), held until the batch's wait when it is made for this view; RL_OK, RL_PENDING, or a stop.
+ */
+static int side_view(replay *r, uint64_t tex, uint64_t v, uint64_t *out)
+{
+    *out = 0;
+    if (!tex)
+        return RL_OK;
+    nvn_view nv;
+    bool has;
+    int rc = view_of(r, v, &nv, &has);
+    if (rc != RL_OK)
+        return rc;
+    vimg *im = nvn_vk_image(r, tex);
+    if (!im)
+        return RL_PENDING;
+    VkImageView view = nvn_vk_view(im, VK_IMAGE_VIEW_TYPE_2D, has ? &nv : NULL);
+    if (!view)
+        return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss: no host view of texture 0x%llx", (unsigned long long)tex);
+    if (has)
+        hold(view);
+    *out = (uint64_t)(uintptr_t)view;
+    return RL_OK;
+}
+
 int nvn_dlss_run(replay *r, const nvn_cmd *e)
 {
     const uint8_t *raw = nvn_cmd_bytes(r->s, e->x[2]);
@@ -383,6 +409,8 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         .hdr = n && !(n->flags & NVN_DLSS_FLAG_LDR),
         .depth_inverted = n && (n->flags & NVN_DLSS_FLAG_DEPTH_INVERTED),
         .motion_display_size = n && !(n->flags & NVN_DLSS_FLAG_MV_LOW_RES),
+        .motion_jittered = n && (n->flags & NVN_DLSS_FLAG_MV_JITTERED),
+        .auto_exposure = n && (n->flags & NVN_DLSS_FLAG_AUTO_EXPOSURE),
         .motion_scale = { p.motion_scale[0], p.motion_scale[1] },
         .pre_exposure = p.pre_exposure,
         .jitter = { p.jitter[0], p.jitter[1] },
@@ -411,8 +439,19 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
                                "%ux%u output is not a size the upscaler takes",
                                ui.in.width, ui.in.height, ui.in.x, ui.in.y, iw, ih, ui.out_rect.width,
                                ui.out_rect.height, ui.out_rect.x, ui.out_rect.y, ow, oh);
-        if ((pass || st.nheld + 2 > MAX_HELD) && !nvn_vk_flush(r))
+        if ((pass || st.nheld + 6 > MAX_HELD) && !nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed a submit");
+        if (rl_upscale_temporal(choice)) {
+            int vrc = side_view(r, p.depth, p.depth_view, &ui.depth.handle);
+            if (vrc == RL_OK)
+                vrc = side_view(r, p.motion, p.motion_view, &ui.motion.handle);
+            if (vrc == RL_OK)
+                vrc = side_view(r, p.exposure, p.exposure_view, &ui.exposure.handle);
+            if (vrc == RL_OK)
+                vrc = side_view(r, p.bias, p.bias_view, &ui.reactive.handle);
+            if (vrc != RL_OK)
+                return vrc;
+        }
         VkImageView iv = nvn_vk_view(in, VK_IMAGE_VIEW_TYPE_2D, has_cv ? &cv : NULL);
         VkImageView owv = nvn_vk_storage_view(out, VK_IMAGE_VIEW_TYPE_2D, out->format, level, 0, 1);
         if (has_cv && iv)

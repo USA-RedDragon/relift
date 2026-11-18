@@ -44,8 +44,9 @@ static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none
 static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
-static const char *const g_upscaler_choices[] = { "auto",           "game",    "off", "nearest", "bilinear",
-                                                   "sharp_bilinear", "lanczos", "fsr1" };
+static const char *const g_upscaler_choices[] = {
+    "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2",
+};
 
 static const rl_setting_def g_runtime_defs[] = {
     {
@@ -119,11 +120,12 @@ static const rl_setting_def g_runtime_defs[] = {
         .description = "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the "
                        "game's UI: game is the game's own, translated; auto is the game's own where this device "
                        "meets its requirements, else bilinear; off copies the picture at its render size; nearest, "
-                       "bilinear, sharp_bilinear and lanczos are relift's; fsr1 is AMD FSR 1 (EASU and RCAS). "
-                       "Every choice but game changes the picture from the console's",
+                       "bilinear, sharp_bilinear and lanczos are relift's; fsr1 is AMD FSR 1 (EASU and RCAS); fsr2 "
+                       "is AMD FSR 2, temporal, where the game gives depth and motion vectors, else FSR 1. Every "
+                       "choice but game changes the picture from the console's",
         .env = "RELIFT_UPSCALER",
         .choices = g_upscaler_choices,
-        .nchoices = 8,
+        .nchoices = 9,
     },
     {
         .key = "picture.upscale_scale",

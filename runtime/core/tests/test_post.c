@@ -102,6 +102,26 @@ _Static_assert(RLVK_ERROR_OUT_OF_DATE_KHR == VK_ERROR_OUT_OF_DATE_KHR, "result")
 _Static_assert(RLVK_SUBOPTIMAL_KHR == VK_SUBOPTIMAL_KHR, "result");
 _Static_assert(RLVK_ERROR_SURFACE_LOST_KHR == VK_ERROR_SURFACE_LOST_KHR, "result");
 _Static_assert(RLVK_PRESENT_MODE_MAILBOX_KHR == VK_PRESENT_MODE_MAILBOX_KHR, "mode");
+SAME(rlvk_descriptor_image_info, VkDescriptorImageInfo);
+SAME(rlvk_sampler_create_info, VkSamplerCreateInfo);
+AT(rlvk_sampler_create_info, VkSamplerCreateInfo, unnormalizedCoordinates);
+SAME(rlvk_image_subresource_range, VkImageSubresourceRange);
+SAME(rlvk_image_view_create_info, VkImageViewCreateInfo);
+AT(rlvk_image_view_create_info, VkImageViewCreateInfo, subresourceRange);
+SAME(rlvk_subgroup_properties, VkPhysicalDeviceSubgroupProperties);
+_Static_assert(RLVK_ST_IMAGE_VIEW_CREATE_INFO == VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, "sType");
+_Static_assert(RLVK_ST_SAMPLER_CREATE_INFO == VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, "sType");
+_Static_assert(RLVK_ST_PHYSICAL_DEVICE_PROPERTIES_2 == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, "sType");
+_Static_assert(RLVK_ST_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+               "sType");
+_Static_assert(RLVK_FORMAT_R16G16B16A16_SFLOAT == VK_FORMAT_R16G16B16A16_SFLOAT, "format");
+_Static_assert(RLVK_FORMAT_R32G32_SFLOAT == VK_FORMAT_R32G32_SFLOAT, "format");
+_Static_assert(RLVK_FORMAT_R8G8_UNORM == VK_FORMAT_R8G8_UNORM, "format");
+_Static_assert(RLVK_FORMAT_R16G16_SFLOAT == VK_FORMAT_R16G16_SFLOAT, "format");
+_Static_assert(RLVK_FORMAT_R32_UINT == VK_FORMAT_R32_UINT, "format");
+_Static_assert(RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, "descriptor type");
+_Static_assert(RLVK_DESCRIPTOR_TYPE_UNIFORM_BUFFER == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, "descriptor type");
+_Static_assert(RLVK_SUBGROUP_FEATURE_QUAD_BIT == VK_SUBGROUP_FEATURE_QUAD_BIT, "subgroup feature");
 _Static_assert(RLVK_ST_COMPUTE_PIPELINE_CREATE_INFO == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, "sType");
 _Static_assert(RLVK_ST_WRITE_DESCRIPTOR_SET == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, "sType");
 _Static_assert(RLVK_ST_MEMORY_BARRIER == VK_STRUCTURE_TYPE_MEMORY_BARRIER, "sType");

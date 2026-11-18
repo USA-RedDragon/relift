@@ -67,6 +67,9 @@ enum {
     RLVK_ST_IMAGE_MEMORY_BARRIER = 45,
     RLVK_ST_SWAPCHAIN_CREATE_INFO_KHR = 1000001000,
     RLVK_ST_PRESENT_INFO_KHR = 1000001001,
+    RLVK_ST_IMAGE_VIEW_CREATE_INFO = 15,
+    RLVK_ST_PHYSICAL_DEVICE_PROPERTIES_2 = 1000059001,
+    RLVK_ST_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES = 1000094000,
 };
 
 /** @brief Flag and enum values post.c uses. */
@@ -79,7 +82,30 @@ enum {
     RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT = 0x1,
     RLVK_BUFFER_USAGE_TRANSFER_DST_BIT = 0x2,
     RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT = 0x20,
+    RLVK_DESCRIPTOR_TYPE_SAMPLER = 0,
     RLVK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER = 1,
+    RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE = 2,
+    RLVK_DESCRIPTOR_TYPE_UNIFORM_BUFFER = 6,
+    RLVK_BUFFER_USAGE_UNIFORM_BUFFER_BIT = 0x10,
+    RLVK_IMAGE_LAYOUT_UNDEFINED = 0,
+    RLVK_IMAGE_TYPE_2D = 1,
+    RLVK_IMAGE_VIEW_TYPE_2D = 1,
+    RLVK_IMAGE_TILING_OPTIMAL = 0,
+    RLVK_IMAGE_USAGE_TRANSFER_DST_BIT = 0x2,
+    RLVK_IMAGE_USAGE_SAMPLED_BIT = 0x4,
+    RLVK_IMAGE_USAGE_STORAGE_BIT = 0x8,
+    RLVK_IMAGE_ASPECT_COLOR_BIT = 0x1,
+    RLVK_FORMAT_R8_UNORM = 9,
+    RLVK_FORMAT_R8G8_UNORM = 16,
+    RLVK_FORMAT_R8G8B8A8_UNORM = 37,
+    RLVK_FORMAT_R16_SFLOAT = 76,
+    RLVK_FORMAT_R16G16_SFLOAT = 83,
+    RLVK_FORMAT_R16G16B16A16_SFLOAT = 97,
+    RLVK_FORMAT_R32_UINT = 98,
+    RLVK_FORMAT_R32_SFLOAT = 100,
+    RLVK_FORMAT_R32G32_SFLOAT = 103,
+    RLVK_ACCESS_UNIFORM_READ_BIT = 0x8,
+    RLVK_SUBGROUP_FEATURE_QUAD_BIT = 0x80,
     RLVK_DESCRIPTOR_TYPE_STORAGE_IMAGE = 3,
     RLVK_DESCRIPTOR_TYPE_STORAGE_BUFFER = 7,
     RLVK_IMAGE_LAYOUT_GENERAL = 1,
@@ -100,18 +126,12 @@ enum {
     RLVK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR = 0x1,
     RLVK_QUEUE_GRAPHICS_BIT = 0x1,
     RLVK_FENCE_CREATE_SIGNALED_BIT = 0x1,
-    RLVK_FORMAT_R8G8B8A8_UNORM = 37,
     RLVK_FORMAT_R8G8B8A8_SRGB = 43,
     RLVK_FORMAT_B8G8R8A8_UNORM = 44,
     RLVK_FORMAT_B8G8R8A8_SRGB = 50,
     RLVK_COLOR_SPACE_SRGB_NONLINEAR_KHR = 0,
-    RLVK_IMAGE_TYPE_2D = 1,
-    RLVK_IMAGE_TILING_OPTIMAL = 0,
     RLVK_SAMPLE_COUNT_1_BIT = 0x1,
     RLVK_IMAGE_USAGE_TRANSFER_SRC_BIT = 0x1,
-    RLVK_IMAGE_USAGE_TRANSFER_DST_BIT = 0x2,
-    RLVK_IMAGE_ASPECT_COLOR_BIT = 0x1,
-    RLVK_IMAGE_LAYOUT_UNDEFINED = 0,
     RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL = 6,
     RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL = 7,
     RLVK_IMAGE_LAYOUT_PRESENT_SRC_KHR = 1000001002,
@@ -385,6 +405,70 @@ typedef struct rlvk_sampler_create_info {
     uint32_t unnormalizedCoordinates;
 } rlvk_sampler_create_info;
 
+/** @brief VkImageCreateInfo. */
+typedef struct rlvk_image_create_info {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags flags;
+    int32_t imageType;
+    int32_t format;
+    rlvk_extent3d extent;
+    uint32_t mipLevels;
+    uint32_t arrayLayers;
+    int32_t samples;
+    int32_t tiling;
+    rlvk_flags usage;
+    int32_t sharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t *pQueueFamilyIndices;
+    int32_t initialLayout;
+} rlvk_image_create_info;
+
+/** @brief VkImageSubresourceRange. */
+typedef struct rlvk_image_subresource_range {
+    rlvk_flags aspectMask;
+    uint32_t baseMipLevel;
+    uint32_t levelCount;
+    uint32_t baseArrayLayer;
+    uint32_t layerCount;
+} rlvk_image_subresource_range;
+
+/** @brief VkImageViewCreateInfo. */
+typedef struct rlvk_image_view_create_info {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags flags;
+    rlvk_handle image;
+    int32_t viewType;
+    int32_t format;
+    int32_t components[4];
+    rlvk_image_subresource_range subresourceRange;
+} rlvk_image_view_create_info;
+
+/** @brief VkImageMemoryBarrier. */
+typedef struct rlvk_image_memory_barrier {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags srcAccessMask;
+    rlvk_flags dstAccessMask;
+    int32_t oldLayout;
+    int32_t newLayout;
+    uint32_t srcQueueFamilyIndex;
+    uint32_t dstQueueFamilyIndex;
+    rlvk_handle image;
+    rlvk_image_subresource_range subresourceRange;
+} rlvk_image_memory_barrier;
+
+/** @brief VkPhysicalDeviceSubgroupProperties. */
+typedef struct rlvk_subgroup_properties {
+    int32_t sType;
+    void *pNext;
+    uint32_t subgroupSize;
+    rlvk_flags supportedStages;
+    rlvk_flags supportedOperations;
+    uint32_t quadOperationsInAllStages;
+} rlvk_subgroup_properties;
+
 /** @brief VkWriteDescriptorSet. */
 typedef struct rlvk_write_descriptor_set {
     int32_t sType;
@@ -522,48 +606,6 @@ typedef struct rlvk_present_info {
     const uint32_t *pImageIndices;
     rlvk_result *pResults;
 } rlvk_present_info;
-
-/** @brief VkImageCreateInfo. */
-typedef struct rlvk_image_create_info {
-    int32_t sType;
-    const void *pNext;
-    rlvk_flags flags;
-    int32_t imageType;
-    int32_t format;
-    rlvk_extent3d extent;
-    uint32_t mipLevels;
-    uint32_t arrayLayers;
-    rlvk_flags samples;
-    int32_t tiling;
-    rlvk_flags usage;
-    int32_t sharingMode;
-    uint32_t queueFamilyIndexCount;
-    const uint32_t *pQueueFamilyIndices;
-    int32_t initialLayout;
-} rlvk_image_create_info;
-
-/** @brief VkImageSubresourceRange. */
-typedef struct rlvk_image_subresource_range {
-    rlvk_flags aspectMask;
-    uint32_t baseMipLevel;
-    uint32_t levelCount;
-    uint32_t baseArrayLayer;
-    uint32_t layerCount;
-} rlvk_image_subresource_range;
-
-/** @brief VkImageMemoryBarrier. */
-typedef struct rlvk_image_memory_barrier {
-    int32_t sType;
-    const void *pNext;
-    rlvk_flags srcAccessMask;
-    rlvk_flags dstAccessMask;
-    int32_t oldLayout;
-    int32_t newLayout;
-    uint32_t srcQueueFamilyIndex;
-    uint32_t dstQueueFamilyIndex;
-    rlvk_handle image;
-    rlvk_image_subresource_range subresourceRange;
-} rlvk_image_memory_barrier;
 
 /** @brief VkImageSubresourceLayers. */
 typedef struct rlvk_image_subresource_layers {
