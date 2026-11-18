@@ -2123,6 +2123,8 @@ pub fn run_build(
         Some("Nintendo 64")
     } else if crate::sms::is_project() {
         Some("Master System")
+    } else if crate::nds::is_project() {
+        Some("Nintendo DS")
     } else {
         None
     };
@@ -2143,6 +2145,12 @@ pub fn run_build(
             crate::sms::build(settings, true, target, ui)?
         } else if crate::gba::is_project() {
             crate::gba::build(settings, mods, true, target, ui)?
+        } else if crate::nds::is_project() {
+            let built = crate::nds::build(settings, mods, target, ui)?;
+            if built.cross.is_none() {
+                return Ok(());
+            }
+            built
         } else {
             let built = crate::n64::build(settings, mods, target, ui)?;
             if built.cross.is_none() {
@@ -2166,12 +2174,6 @@ pub fn run_build(
             },
         };
         return package(settings, &request, ui);
-    }
-    if crate::nds::is_project() {
-        if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-            return Err(format!("target {t}: only the host target builds so far").into());
-        }
-        return crate::nds::build(settings, mods, ui).map(|_| ());
     }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
     let (name, _) = project_out(settings)?;

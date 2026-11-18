@@ -203,6 +203,7 @@ const XY: &[(&str, &str, &str)] = &[
     ("x", "X", "gamepad:north,key:s"),
     ("y", "Y", "gamepad:west,key:a"),
 ];
+const SWAP: &[(&str, &str, &str)] = &[("swap", "Swap screens", "gamepad:right_stick,key:tab")];
 
 const N64_PAD: &[Row] = &[
     ("a", B, "A", "gamepad:south,key:x"),
@@ -250,7 +251,10 @@ pub fn native_ports(platform: &str) -> Result<PortSet, Error> {
         "gb" => vec![handheld_pad("Game Boy pad", AB, false, &[])],
         "gbc" => vec![handheld_pad("Game Boy Color pad", AB, false, &[])],
         "gba" => vec![handheld_pad("Game Boy Advance pad", AB, true, &[])],
-        "nds" => vec![handheld_pad("Nintendo DS pad", AB, true, XY), touch()],
+        "nds" => vec![
+            handheld_pad("Nintendo DS pad", AB, true, &[XY, SWAP].concat()),
+            touch(),
+        ],
         "sms" => vec![sega_pad(
             "Master System pad",
             &[
@@ -310,14 +314,15 @@ const TOUCHPAD_CONTROLS: &[&str] = &[
     "lstick_y",
     "rstick_x",
     "rstick_y",
+    "swap",
 ];
 
 /// The on-screen controller's port of a platform with a touch layout (`gb`,
-/// `gbc`, `gba`, `switch`): the controls of `p1` it draws, each bound to its
+/// `gbc`, `gba`, `nds`, `switch`): the controls of `p1` it draws, each bound to its
 /// own shape (`touch:<control>`). The runtime merges each into the `p1`
 /// control of the same id. `None` for a platform without a layout.
 pub fn touchpad_port(platform: &str) -> Option<Port> {
-    if !matches!(platform, "gb" | "gbc" | "gba" | "switch") {
+    if !matches!(platform, "gb" | "gbc" | "gba" | "nds" | "switch") {
         return None;
     }
     let set = native_ports(platform).ok()?;

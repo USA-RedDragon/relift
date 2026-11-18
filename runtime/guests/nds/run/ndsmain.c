@@ -1,7 +1,7 @@
 /**
  * @file ndsmain.c
  * @brief The program of a lifted Nintendo DS cartridge: the machine, both
- * CPUs, the window (both screens in the video.nds_layout layout, the sound
+ * CPUs, the windows (both screens laid out by the video.nds_layout and video.nds_displays settings, the sound
  * controller's output, the keys and the touch screen from the native ports
  * once per frame) or the headless run, its report, frame hashes and PNG dumps
  * of both screens (the top one above the bottom one, 256 x 384).
@@ -11,6 +11,7 @@
 
 #include <relift/audio.h>
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 #include <relift/window.h>
 
 #include <stdio.h>
@@ -54,10 +55,12 @@ typedef struct host {
     uint32_t frames;
     /** @brief --frame-log: one line per frame on stdout (number, ARM9 tick, frame hash, the --peek words). */
     bool frame_log;
-    /** @brief The window, its layout and picture, the host's audio and the pace without audio. */
+    /** @brief The window, the host's audio and the pace without audio. */
     rl_window *win;
-    rl_nds_layout layout;
     uint8_t rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
+    /** @brief The player's swap of the screens, and whether the swap control was held at the last poll. */
+    bool swap, swap_held;
+    /** @brief The pen as the last poll saw it, for the frame that follows. */
     rl_audio_out *out;
     uint64_t next_ns;
     /** @brief The controls the input comes from. */
@@ -165,12 +168,24 @@ static void poll_input(void)
     rl_input_sample(&s);
     rl_nds_point point = RL_NDS_POINT_NONE;
     uint8_t tx = 0, ty = 0;
-    uint32_t fx, fy;
-    if (H.win && (s.pointer.buttons & (1u << RL_PTR_LEFT)))
-        point = rl_window_frame_point(H.win, s.pointer.x, s.pointer.y, &fx, &fy) &&
-                        rl_nds_layout_touch(H.layout, fx, fy, &tx, &ty)
-                    ? RL_NDS_POINT_BOTTOM
-                    : RL_NDS_POINT_OFF;
+    if (H.win) {
+        rl_screens_pen pen = rl_screens_touch(H.win, &s);
+        if (pen.down) {
+            point = RL_NDS_POINT_BOTTOM;
+            tx = (uint8_t)pen.x;
+            ty = (uint8_t)pen.y;
+        } else if (pen.active) {
+            point = RL_NDS_POINT_OFF;
+        }
+    }
+    static bool pen_was;
+    if (pen_was != (point == RL_NDS_POINT_BOTTOM))
+        rl_log(RL_LOG_DEBUG, "nds", "pen %s", point == RL_NDS_POINT_BOTTOM ? "down" : "up");
+    pen_was = point == RL_NDS_POINT_BOTTOM;
+    bool swap_now = rl_ports_eval(H.controls.swap, &s) >= 0.5f;
+    if (swap_now && !H.swap_held)
+        H.swap = !H.swap;
+    H.swap_held = swap_now;
     rl_nds_input in;
     rl_nds_input_from(&H.controls, &s, point, tx, ty, &in);
     rl_nds_set_input(H.run.m, &in);
@@ -190,10 +205,10 @@ static void audio_pace(void)
 /** @brief Shows the frame and keeps the run at the console's pace: by the audio queue, else by the clock. */
 static void present(const uint32_t *pixels)
 {
-    uint32_t w, h;
-    rl_nds_layout_size(H.layout, &w, &h);
-    rl_nds_layout_rgb(H.layout, pixels, H.rgb);
-    rl_window_present_rgb(H.win, H.rgb, w, h);
+    rl_screens_frame frames[RL_SCREENS];
+    rl_nds_screens_frames(pixels, H.rgb, frames);
+    rl_screens_config cfg = rl_nds_screens_config(H.swap);
+    rl_screens_present(H.win, &cfg, frames);
     if (H.out) {
         audio_pace();
         return;
@@ -420,6 +435,8 @@ static void on_window(void *user, rl_window *w, int event)
     (void)w;
     if (event == RL_WINDOW_CLOSE)
         __atomic_store_n(&H.quit, true, __ATOMIC_RELEASE);
+    else if (event == RL_WINDOW_BACKGROUND)
+        save_now();
 }
 
 /** @brief The run, on its own thread when a window backend runs the event loop on the caller's. */
@@ -428,12 +445,11 @@ static int run_body(void *arg)
     const rl_nds_program *p = arg;
     const rl_window_backend *b = rl_window_backend_current();
     if (b && b->present_rgb) {
-        uint32_t w, h;
-        rl_nds_layout_size(H.layout, &w, &h);
-        H.win = b->open(p->title && *p->title ? p->title : "relift", w * 2, h * 2);
+        H.win = b->open(p->title && *p->title ? p->title : "relift", RL_NDS_SCREEN_W * 2, RL_NDS_SCREEN_H * 4);
     }
     if (H.win) {
-        rl_window_set_fit(H.win, !rl_setting_bool("video.nds_integer_scale"));
+        static const uint32_t sizes[RL_SCREENS][2] = {{RL_NDS_SCREEN_W, RL_NDS_SCREEN_H}, {RL_NDS_SCREEN_W, RL_NDS_SCREEN_H}};
+        rl_screens_declare(sizes, 1);
         H.out = rl_audio_open(RL_NDS_AUDIO_RATE, 2);
         if (H.out)
             rl_audio_pause(H.out, false);
@@ -443,6 +459,7 @@ static int run_body(void *arg)
     int r = rl_nds_run_start(&H.run);
     rl_audio_close(H.out);
     H.out = NULL;
+    rl_screens_reset();
     if (H.win)
         b->close(H.win);
     H.win = NULL;
@@ -454,6 +471,7 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
     memset(&H, 0, sizeof H);
     uint64_t max_ticks = 0;
     rl_nds_declare_settings();
+    rl_touchpad_declare(rl_nds_touchpad());
     rl_settings_args(argc, argv);
     if (options((int)p->arg_count, (char **)p->args, 0, &max_ticks) != 0 || options(argc, argv, 1, &max_ticks) != 0)
         return 2;
@@ -468,9 +486,10 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
     }
     H.run.max_ticks = max_ticks;
     rl_ports_declare(rl_nds_ports, rl_nds_ports_count);
+    if (rl_touchpad_wanted())
+        rl_ports_declare(rl_nds_ports_touchpad, rl_nds_ports_touchpad_count);
     rl_ports_bind_defaults();
     rl_nds_controls_find(&H.controls);
-    H.layout = rl_nds_layout_setting();
     if (H.stop_debug)
         rl_nds_set_debug_hook(H.run.m, on_debug, NULL);
     start_clock(H.run.m);
@@ -478,7 +497,9 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
         rl_log(RL_LOG_WARN, "nds", "unknown save.type %s; the chip is chosen from the game's commands", rl_setting_str("save.type"));
     if (!H.no_save) {
         const char *name = p->title;
-        if (!H.save[0] && name && *name && !rl_nds_save_path(H.save, sizeof H.save, name))
+        if (!H.save[0] && p->save && *p->save)
+            snprintf(H.save, sizeof H.save, "%s", p->save);
+        else if (!H.save[0] && name && *name && !rl_nds_save_path(H.save, sizeof H.save, name))
             H.save[0] = 0;
         if (H.save[0] && rl_nds_save_read(H.run.m, H.save) < 0)
             rl_log(RL_LOG_WARN, "nds", "the save %s does not fit the backup chip; starting without it", H.save);

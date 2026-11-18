@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use relift_progress::{Line, Paint, duration, noun};
 
+use crate::cross;
+use crate::gb::Built;
 use crate::gba::{Layers, compile_layers};
 use crate::import::BoxError;
 use crate::settings::Settings;
@@ -176,29 +178,44 @@ fn run_args(nds: Option<&toml::Value>) -> Vec<String> {
     args
 }
 
-/// `relift build` of the Nintendo DS project in the working directory.
-/// Returns the program's path.
+/// `relift build` of the Nintendo DS project in the working directory, for
+/// this host or for `target` (a build for another target takes the release
+/// flags and keeps its save in the app's own folder).
 ///
 /// # Errors
 ///
-/// No import, an image whose units do not read, or a failed compile or
-/// link.
-pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathBuf, BoxError> {
+/// No import, a target whose tools are missing, an image whose units do not
+/// read, or a failed compile or link.
+pub fn build(
+    settings: &Settings,
+    mods: &[PathBuf],
+    target: Option<cross::Target>,
+    ui: &mut Ui,
+) -> Result<Built, BoxError> {
     if !mods.is_empty() {
         return Err("mods are not supported for Nintendo DS images yet".into());
     }
     let p = project()?;
     let rom = &p.rom;
-    let (name, out) = crate::build::project_out(settings)?;
+    let (name, host_out) = crate::build::project_out(settings)?;
+    let cross = target
+        .map(|t| cross::Build::prepare(settings, t, &name))
+        .transpose()?;
+    let out = match &cross {
+        Some(c) => host_out.with_file_name(c.name()),
+        None => host_out,
+    };
     let cdir = out.join("c");
     std::fs::create_dir_all(&cdir)?;
     let parsed = relift_nds_formats::Rom::parse(rom).map_err(|e| format!("image: {e}"))?;
     ui.title(&format!(
-        "relift build: {name} ({}, {} KiB, {}-{})",
+        "relift build: {name} ({}, {} KiB, {})",
         parsed.header.title,
         rom.len() / 1024,
-        std::env::consts::OS,
-        std::env::consts::ARCH
+        cross.as_ref().map_or_else(
+            || format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+            |c| c.name().to_string()
+        )
     ));
     let row = ui.row("units");
     ui.begin(row, "analyze");
@@ -303,11 +320,18 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     };
     relift_cache::write_if_changed(&cdir.join("rom.bin"), rom)?;
     let mut prog = Vec::new();
+    let blobs: Vec<&[u8]> = lifted.units.iter().map(|u| u.blob.as_slice()).collect();
+    let host = relift_nds::program::Host {
+        entry: cross
+            .as_ref()
+            .map_or(relift_guest::Entry::Main, cross::Build::entry),
+        save: if cross.is_some() { "battery.sav" } else { "" },
+    };
     for (n, text) in [
-        ("data.c", relift_nds::program::data_c(lifted.units.len())),
+        ("data.c", relift_nds::program::data_c(rom, &blobs)),
         (
             "program.c",
-            relift_nds::program::program_c(&title, &lifted.units, &p.args),
+            relift_nds::program::program_c(&title, &lifted.units, &p.args, host),
         ),
     ] {
         let path = cdir.join(n);
@@ -315,7 +339,13 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         prog.push(path);
     }
     let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
-    let doc = crate::info::nds_document(&title, rom, game_settings.clone())?;
+    let mut ports = relift_input::native_ports("nds")?;
+    if cross.is_some()
+        && let Some(t) = relift_input::touchpad_port("nds")
+    {
+        ports.add_port(t)?;
+    }
+    let doc = crate::info::nds_document(&title, rom, game_settings.clone(), &ports)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
@@ -331,10 +361,13 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         &cdir,
         (&files, &prog),
         &NDS_LAYERS,
-        (false, None),
+        (cross.is_some(), cross.as_ref()),
         ui,
     )?;
-    let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    let exe = match &cross {
+        Some(c) => out.join(c.program()),
+        None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+    };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {} in {}, {} instructions not lifted, {} in all",
         noun(lifted.functions() as u64, "function"),
@@ -343,7 +376,12 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         duration(ui.elapsed())
     )));
     ui.summary(&Line::new().text(format!("  output: {}", exe.display())));
-    Ok(exe)
+    Ok(Built {
+        exe,
+        source: PathBuf::new(),
+        title,
+        cross,
+    })
 }
 
 /// `relift run` of the Nintendo DS project: builds, then runs the program.
@@ -353,8 +391,8 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
 ///
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
-    let exe = build(settings, &[], ui)?;
-    let status = relift_proc::command(&exe).arg("--stats").status()?;
+    let built = build(settings, &[], None, ui)?;
+    let status = relift_proc::command(&built.exe).arg("--stats").status()?;
     Ok(status.code().unwrap_or(128))
 }
 

@@ -73,6 +73,8 @@ typedef struct rl_nds_program {
     /** @brief Options taken before the command line's (game.toml's [nds]). */
     const char *const *args;
     uint32_t arg_count;
+    /** @brief The save file the program uses unless --save names another; NULL or empty for the per-user default. */
+    const char *save;
 } rl_nds_program;
 
 /**

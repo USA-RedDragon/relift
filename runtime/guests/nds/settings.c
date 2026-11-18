@@ -8,7 +8,9 @@
 
 #include <relift/settings.h>
 
-static const char *const g_layouts[] = {"stacked", "side_by_side"};
+static const char *const g_layouts[] = {"auto",       "stacked",  "side_by_side", "large_top",
+                                        "large_bottom", "top_only", "bottom_only"};
+static const char *const g_displays[] = {"auto", "swapped", "top_both", "bottom_both", "single"};
 
 static const rl_setting_def g_defs[] = {
     {
@@ -29,16 +31,35 @@ static const rl_setting_def g_defs[] = {
     },
     {
         .key = "video.nds_layout",
+        .apply = RL_APPLY_LIVE,
         .type = RL_SETTING_ENUM,
         .label = "Screen layout",
-        .description = "stacked: the top screen above the bottom one, as the console holds them; side_by_side: the top "
-                       "screen left of the bottom one",
+        .description = "How the two screens share a window. auto: stacked in a tall window or while the on-screen "
+                       "controller shows, else stacked or side by side, whichever fills the window better; stacked: "
+                       "the top screen above the bottom one, as the console holds them; side_by_side: the top screen "
+                       "left of the bottom one; large_top and large_bottom: that screen at twice the size and the "
+                       "other one small beside or below it; top_only and bottom_only: one screen, swapped with the "
+                       "Swap screens control",
         .env = "RELIFT_NDS_LAYOUT",
         .choices = g_layouts,
-        .nchoices = 2,
+        .nchoices = 7,
+    },
+    {
+        .key = "video.nds_displays",
+        .apply = RL_APPLY_LIVE,
+        .type = RL_SETTING_ENUM,
+        .label = "Displays",
+        .description = "What the displays show when the device has a second one. auto: the top screen on the first "
+                       "display and the bottom screen on the second; swapped: the other way round; top_both and "
+                       "bottom_both: that screen on both displays; single: only the first display, with the screen "
+                       "layout",
+        .env = "RELIFT_NDS_DISPLAYS",
+        .choices = g_displays,
+        .nchoices = 5,
     },
     {
         .key = "video.nds_integer_scale",
+        .apply = RL_APPLY_LIVE,
         .type = RL_SETTING_BOOL,
         .label = "Whole-number scaling",
         .description = "Scales the screens by the largest whole multiple that fits the window, so every pixel keeps "

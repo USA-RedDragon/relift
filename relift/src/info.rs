@@ -443,7 +443,12 @@ pub fn n64_document(
 /// # Errors
 ///
 /// The header is too short.
-pub fn nds_document(name: &str, rom: &[u8], settings: Vec<Setting>) -> Result<Info, BoxError> {
+pub fn nds_document(
+    name: &str,
+    rom: &[u8],
+    settings: Vec<Setting>,
+    ports: &PortSet,
+) -> Result<Info, BoxError> {
     let (id, save) = identity::from_nds(rom)?;
     let mut info = Info::new(env!("CARGO_PKG_VERSION"));
     info.identity = id;
@@ -451,6 +456,7 @@ pub fn nds_document(name: &str, rom: &[u8], settings: Vec<Setting>) -> Result<In
     info.identity.default_language = info.identity.first_language();
     info.save = save;
     info.settings = game_settings::nds_section(settings);
+    info.input = relift_input::input_section(ports);
     Ok(info)
 }
 

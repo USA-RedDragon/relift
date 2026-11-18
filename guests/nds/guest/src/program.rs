@@ -700,26 +700,45 @@ pub fn blob_file(k: usize) -> String {
 }
 
 /// `data.c`, which embeds `rom.bin` (the cartridge) and each unit's blob
-/// (`unit<k>.bin`, [`blob_file`]).
+/// (`unit<k>.bin`, [`blob_file`]); `rom` and `blobs` are the bytes of those
+/// files.
 #[must_use]
-pub fn data_c(units: usize) -> String {
-    let mut s = String::from(
-        "#include <stddef.h>\n#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_nds_rom[];\nconst uint8_t rl_nds_rom[] = {\n#embed \"rom.bin\"\n};\nextern const size_t rl_nds_rom_len;\nconst size_t rl_nds_rom_len = sizeof rl_nds_rom;\n",
-    );
-    for k in 0..units {
-        let _ = write!(
-            s,
-            "extern const uint8_t rl_nds_blob{k}[];\nconst uint8_t rl_nds_blob{k}[] = {{\n#embed \"{}\" if_empty(0)\n}};\n",
-            blob_file(k)
-        );
+pub fn data_c(rom: &[u8], blobs: &[&[u8]]) -> String {
+    let mut s = relift_guest::blob::blob_c("rl_nds_rom", "c/rom.bin", rom);
+    s.push_str("#include <stddef.h>\nextern const size_t rl_nds_rom_len;\n");
+    let _ = writeln!(s, "const size_t rl_nds_rom_len = {}u;", rom.len());
+    for (k, b) in blobs.iter().enumerate() {
+        s.push_str(&relift_guest::blob::blob_c(
+            &format!("rl_nds_blob{k}"),
+            &format!("c/{}", blob_file(k)),
+            b,
+        ));
     }
     s
 }
 
-/// `program.c`: the units with their entry checks and `main`, which runs
-/// with the options `args` before the command line's.
+/// How the program enters and where it keeps its save.
+#[derive(Clone, Copy, Debug)]
+pub struct Host<'a> {
+    /// How the program enters.
+    pub entry: relift_guest::Entry,
+    /// The save file's name in the app's own folder (the entry points other
+    /// than [`relift_guest::Entry::Main`]); empty for none.
+    pub save: &'a str,
+}
+
+impl Host<'_> {
+    /// An executable with `main` that keeps its save by the user's rules.
+    pub const MAIN: Host<'static> = Host {
+        entry: relift_guest::Entry::Main,
+        save: "",
+    };
+}
+
+/// `program.c`: the units with their entry checks and the entry point,
+/// which runs with the options `args` before the command line's.
 #[must_use]
-pub fn program_c(title: &str, units: &[LiftedUnit], args: &[String]) -> String {
+pub fn program_c(title: &str, units: &[LiftedUnit], args: &[String], host: Host<'_>) -> String {
     let mut s = String::from(
         "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"ndsmain.h\"\n",
     );
@@ -786,13 +805,49 @@ pub fn program_c(title: &str, units: &[LiftedUnit], args: &[String]) -> String {
         let _ = writeln!(s, "    {},", c_string(a));
     }
     s.push_str("    NULL,\n};\n");
-    let _ = write!(
-        s,
-        "extern const uint8_t rl_nds_rom[];\nextern const size_t rl_nds_rom_len;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_nds_program prog = {{ rl_nds_rom, rl_nds_rom_len, units, {}u, {}, args, {}u }};\n    return rl_nds_main(&prog, argc, argv);\n}}\n",
+    s.push_str("extern const uint8_t rl_nds_rom[];\nextern const size_t rl_nds_rom_len;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
+    let program = format!(
+        "rl_nds_program prog = {{ rl_nds_rom, rl_nds_rom_len, units, {}u, {}, args, {}u, {} }};",
         units.len(),
         c_string(title),
-        args.len()
+        args.len(),
+        if host.save.is_empty() {
+            "NULL".to_string()
+        } else {
+            "save".to_string()
+        }
     );
+    let mobile = |s: &mut String, header: &str, sig: &str, init: &str, dir: &str, flush: &str| {
+        let _ = write!(
+            s,
+            "#include <stdio.h>\n#include <relift/{header}>\n#include <relift/settings.h>\n{sig}\n{{\n    {init}();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = {dir}();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", {});\n    {program}\n    int status = rl_nds_main(&prog, argc, argv);\n    {flush}();\n    return status;\n}}\n",
+            c_string(host.save)
+        );
+    };
+    match host.entry {
+        relift_guest::Entry::Android => mobile(
+            &mut s,
+            "android.h",
+            "__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)",
+            "rl_android_init",
+            "rl_android_files_dir",
+            "rl_android_flush",
+        ),
+        relift_guest::Entry::Ios => mobile(
+            &mut s,
+            "ios.h",
+            "int rl_ios_main(int argc, char **argv)",
+            "rl_ios_init",
+            "rl_ios_documents_dir",
+            "rl_ios_flush",
+        ),
+        relift_guest::Entry::Main => {
+            let _ = write!(
+                s,
+                "int main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    {program}\n    return rl_nds_main(&prog, argc, argv);\n}}\n"
+            );
+        }
+    }
     s
 }
 
@@ -888,16 +943,42 @@ mod tests {
     fn the_program_lists_each_unit_with_its_checks() {
         let code9 = arm(&[0xEAFF_FFFE]);
         let l = lifted(&rom(&code9, &code9));
-        let c = program_c("T\"", &l.units, &["--peek".into(), "0x10".into()]);
+        let c = program_c(
+            "T\"",
+            &l.units,
+            &["--peek".into(), "0x10".into()],
+            Host::MAIN,
+        );
         assert!(c.contains("static const rl_nds_fn fns0[] = {\n    { 0x2000000u, 0x0u, 0x4u, nds9_static_a_02000000 },"), "{c}");
         assert!(c.contains("{ RL_NDS_ARM7, &rl_unit_nds_arm7_"), "{c}");
-        assert!(c.contains("units, 2u, \"T\\\"\", args, 2u }"), "{c}");
+        assert!(c.contains("units, 2u, \"T\\\"\", args, 2u, NULL }"), "{c}");
         assert!(
             c.contains("    \"--peek\",\n    \"0x10\",\n    NULL,"),
             "{c}"
         );
-        let d = data_c(2);
-        assert!(d.contains("#embed \"unit1.bin\" if_empty(0)"), "{d}");
+        let d = data_c(&[1, 2, 3], &[&[1], &[]]);
+        assert!(d.contains("#embed \"c/unit1.bin\""), "{d}");
+        assert!(d.contains("rl_nds_rom_len = 3u"), "{d}");
+        let android = program_c(
+            "T",
+            &l.units,
+            &[],
+            Host {
+                entry: relift_guest::Entry::Android,
+                save: "battery.sav",
+            },
+        );
+        assert!(
+            android.contains("int SDL_main(int argc, char **argv)"),
+            "{android}"
+        );
+        assert!(
+            android.contains("\"%s/%s\", dir ? dir : \".\", \"battery.sav\")"),
+            "{android}"
+        );
+        assert!(android.contains("args, 0u, save }"), "{android}");
+        assert!(android.contains("rl_android_flush();"), "{android}");
+        assert!(!android.contains("int main("), "{android}");
     }
 
     #[test]

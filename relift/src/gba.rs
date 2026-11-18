@@ -460,7 +460,12 @@ pub(crate) fn compile_layers(
                 f.clone()
             }
         })
-        .chain(["-gline-tables-only", "-fno-omit-frame-pointer"].map(String::from))
+        .chain(
+            ["-fno-omit-frame-pointer"]
+                .into_iter()
+                .chain(cross.is_none().then_some("-gline-tables-only"))
+                .map(String::from),
+        )
         .chain(layers.lifted_inc.iter().map(|p| inc(p)))
         .chain(static_rt.clone())
         .collect();
@@ -474,15 +479,18 @@ pub(crate) fn compile_layers(
         .iter()
         .cloned()
         .chain(
-            [
-                "-g",
-                "-fno-omit-frame-pointer",
-                "-D_GNU_SOURCE",
-                "-D_DARWIN_C_SOURCE",
-                "-DRL_BUILDING_RUNTIME",
-                "-DRL_CHECKS",
-            ]
-            .map(String::from),
+            cross
+                .is_none()
+                .then_some("-g")
+                .into_iter()
+                .chain([
+                    "-fno-omit-frame-pointer",
+                    "-D_GNU_SOURCE",
+                    "-D_DARWIN_C_SOURCE",
+                    "-DRL_BUILDING_RUNTIME",
+                    "-DRL_CHECKS",
+                ])
+                .map(String::from),
         )
         .chain(layers.rt_inc.iter().map(|p| inc(p)))
         .chain(extras.defines())

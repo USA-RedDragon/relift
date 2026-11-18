@@ -10,66 +10,40 @@
 
 #include <string.h>
 
-/** @brief A frame whose pixel i holds the 6-bit channels (i & 63, (i >> 6) & 63, the screen's index). */
-static void test_frame(uint32_t *px)
-{
-    for (uint32_t i = 0; i < 2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H; i++)
-        px[i] = (i & 63u) | ((i >> 6) & 63u) << 6 | (i >= RL_NDS_SCREEN_W * RL_NDS_SCREEN_H ? 1u : 0u) << 12;
-}
-
-static uint32_t g_px[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H];
-static uint8_t g_rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
-static uint8_t g_want[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
-
-TEST(layouts_stack_or_place_the_screens_side_by_side)
-{
-    uint32_t w, h;
-    rl_nds_layout_size(RL_NDS_LAYOUT_STACKED, &w, &h);
-    CHECK_EQ(w, 256);
-    CHECK_EQ(h, 384);
-    rl_nds_layout_size(RL_NDS_LAYOUT_SIDE_BY_SIDE, &w, &h);
-    CHECK_EQ(w, 512);
-    CHECK_EQ(h, 192);
-    test_frame(g_px);
-    rl_nds_frame_rgb(g_px, g_want);
-    rl_nds_layout_rgb(RL_NDS_LAYOUT_STACKED, g_px, g_rgb);
-    CHECK(memcmp(g_rgb, g_want, sizeof g_rgb) == 0);
-    rl_nds_layout_rgb(RL_NDS_LAYOUT_SIDE_BY_SIDE, g_px, g_rgb);
-    for (uint32_t y = 0; y < 192; y += 37)
-        for (uint32_t x = 0; x < 512; x += 41) {
-            uint32_t src = x < 256 ? y * 256 + x : (192 + y) * 256 + (x - 256);
-            CHECK_EQ(memcmp(g_rgb + (y * 512 + x) * 3, g_want + src * 3, 3), 0);
-        }
-}
-
-TEST(only_the_bottom_screen_takes_touches)
-{
-    uint8_t x = 0, y = 0;
-    CHECK(!rl_nds_layout_touch(RL_NDS_LAYOUT_STACKED, 10, 191, &x, &y));
-    CHECK(rl_nds_layout_touch(RL_NDS_LAYOUT_STACKED, 10, 192, &x, &y));
-    CHECK_EQ(x, 10);
-    CHECK_EQ(y, 0);
-    CHECK(rl_nds_layout_touch(RL_NDS_LAYOUT_STACKED, 255, 383, &x, &y));
-    CHECK_EQ(x, 255);
-    CHECK_EQ(y, 191);
-    CHECK(!rl_nds_layout_touch(RL_NDS_LAYOUT_STACKED, 256, 300, &x, &y));
-    CHECK(!rl_nds_layout_touch(RL_NDS_LAYOUT_STACKED, 0, 384, &x, &y));
-    CHECK(!rl_nds_layout_touch(RL_NDS_LAYOUT_SIDE_BY_SIDE, 255, 100, &x, &y));
-    CHECK(rl_nds_layout_touch(RL_NDS_LAYOUT_SIDE_BY_SIDE, 300, 100, &x, &y));
-    CHECK_EQ(x, 44);
-    CHECK_EQ(y, 100);
-    CHECK(!rl_nds_layout_touch(RL_NDS_LAYOUT_SIDE_BY_SIDE, 300, 192, &x, &y));
-}
-
-TEST(the_layout_setting_picks_the_layout)
+TEST(the_screens_settings_name_the_layout_displays_and_scaling)
 {
     rl_nds_declare_settings();
-    CHECK_EQ(rl_nds_layout_setting(), RL_NDS_LAYOUT_STACKED);
-    CHECK(rl_setting_bool("video.nds_integer_scale"));
-    CHECK_EQ(rl_settings_set("video.nds_layout", "side_by_side"), RL_SETTING_OK);
-    CHECK_EQ(rl_nds_layout_setting(), RL_NDS_LAYOUT_SIDE_BY_SIDE);
-    CHECK_EQ(rl_settings_set("video.nds_layout", "stacked"), RL_SETTING_OK);
-    CHECK_EQ(rl_nds_layout_setting(), RL_NDS_LAYOUT_STACKED);
+    rl_screens_config c = rl_nds_screens_config(false);
+    CHECK_EQ(c.layout, RL_SCREENS_AUTO);
+    CHECK_EQ(c.displays, RL_SCREENS_DISPLAYS_AUTO);
+    CHECK(c.integer_scale);
+    CHECK(!c.swap);
+    CHECK_EQ(rl_settings_set("video.nds_layout", "large_bottom"), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("video.nds_displays", "bottom_both"), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("video.nds_integer_scale", "false"), RL_SETTING_OK);
+    c = rl_nds_screens_config(true);
+    CHECK_EQ(c.layout, RL_SCREENS_LARGE_BOTTOM);
+    CHECK_EQ(c.displays, RL_SCREENS_DISPLAYS_BOTTOM_BOTH);
+    CHECK(!c.integer_scale);
+    CHECK(c.swap);
+    CHECK_EQ(rl_settings_set("video.nds_layout", "bottom_only"), RL_SETTING_OK);
+    CHECK_EQ(rl_nds_screens_config(false).layout, RL_SCREENS_BOTTOM_ONLY);
+    CHECK_EQ(rl_settings_set("video.nds_layout", "bogus"), RL_SETTING_INVALID);
+}
+
+TEST(a_frame_splits_into_the_two_screens)
+{
+    static uint32_t px[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H];
+    static uint8_t rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
+    for (uint32_t i = 0; i < sizeof px / sizeof px[0]; i++)
+        px[i] = i >= RL_NDS_SCREEN_W * RL_NDS_SCREEN_H ? 0x3Fu : 0u;
+    rl_screens_frame f[RL_SCREENS];
+    rl_nds_screens_frames(px, rgb, f);
+    CHECK_EQ(f[0].width, 256);
+    CHECK_EQ(f[1].height, 192);
+    CHECK_EQ(f[0].rgb[0], 0);
+    CHECK(f[1].rgb[0] != 0);
+    CHECK(f[1].rgb == f[0].rgb + 256 * 192 * 3);
 }
 
 static void key_down(rl_input_snapshot *s, unsigned usage) { s->keys[usage / 64] |= 1ull << (usage % 64); }
@@ -112,7 +86,7 @@ TEST(keyboard_and_pad_give_the_keys_as_the_gba_guest_binds_them)
     CHECK_EQ(in.keys, RL_NDS_KEY_B | RL_NDS_KEY_SELECT | RL_NDS_KEY_L | RL_NDS_KEY_DOWN | RL_NDS_KEY_LEFT);
 }
 
-TEST(the_mouse_touches_the_bottom_screen_only)
+TEST(the_pen_the_windows_report_is_the_touch)
 {
     rl_nds_controls c;
     CHECK(ports(&c));
@@ -120,17 +94,32 @@ TEST(the_mouse_touches_the_bottom_screen_only)
     memset(&s, 0, sizeof s);
     rl_nds_input in;
     rl_nds_input_from(&c, &s, RL_NDS_POINT_BOTTOM, 120, 90, &in);
-    CHECK(!in.touch);
-    s.pointer.buttons = 1u << RL_PTR_LEFT;
-    rl_nds_input_from(&c, &s, RL_NDS_POINT_BOTTOM, 120, 90, &in);
     CHECK(in.touch);
     CHECK_EQ(in.touch_x, 120);
     CHECK_EQ(in.touch_y, 90);
     rl_nds_input_from(&c, &s, RL_NDS_POINT_OFF, 120, 90, &in);
     CHECK(!in.touch);
-    s.pointer.buttons = 1u << RL_PTR_RIGHT;
-    rl_nds_input_from(&c, &s, RL_NDS_POINT_BOTTOM, 120, 90, &in);
+    s.pointer.buttons = 1u << RL_PTR_LEFT;
+    rl_nds_input_from(&c, &s, RL_NDS_POINT_OFF, 120, 90, &in);
     CHECK(!in.touch);
+}
+
+TEST(the_swap_control_is_bound_to_a_key_and_the_on_screen_button)
+{
+    rl_nds_controls c;
+    CHECK(ports(&c));
+    rl_input_snapshot s;
+    memset(&s, 0, sizeof s);
+    CHECK(rl_ports_eval(c.swap, &s) < 0.5f);
+    key_down(&s, 0x2B);
+    CHECK(rl_ports_eval(c.swap, &s) >= 0.5f);
+    memset(&s, 0, sizeof s);
+    s.touch_pad[26] = 1.0f;
+    CHECK(rl_ports_eval(c.swap, &s) < 0.5f);
+    CHECK(rl_ports_declare(rl_nds_ports_touchpad, rl_nds_ports_touchpad_count));
+    rl_ports_bind_defaults();
+    rl_nds_controls_find(&c);
+    CHECK(rl_ports_eval(c.swap, &s) >= 0.5f);
 }
 
 TEST(an_input_script_touches_at_the_touch_ports_place)

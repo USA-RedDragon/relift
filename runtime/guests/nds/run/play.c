@@ -12,48 +12,22 @@
 #define SW RL_NDS_SCREEN_W
 #define SH RL_NDS_SCREEN_H
 
-rl_nds_layout rl_nds_layout_setting(void)
+rl_screens_config rl_nds_screens_config(bool swap)
 {
-    return rl_setting_enum("video.nds_layout") == 1 ? RL_NDS_LAYOUT_SIDE_BY_SIDE : RL_NDS_LAYOUT_STACKED;
+    rl_screens_config c = {
+        .layout = (rl_screens_layout)rl_setting_enum("video.nds_layout"),
+        .displays = (rl_screens_displays)rl_setting_enum("video.nds_displays"),
+        .integer_scale = rl_setting_bool("video.nds_integer_scale"),
+        .swap = swap,
+    };
+    return c;
 }
 
-void rl_nds_layout_size(rl_nds_layout l, uint32_t *w, uint32_t *h)
+void rl_nds_screens_frames(const uint32_t *pixels, uint8_t *rgb, rl_screens_frame frames[RL_SCREENS])
 {
-    *w = l == RL_NDS_LAYOUT_SIDE_BY_SIDE ? 2 * SW : SW;
-    *h = l == RL_NDS_LAYOUT_SIDE_BY_SIDE ? SH : 2 * SH;
-}
-
-void rl_nds_layout_rgb(rl_nds_layout l, const uint32_t *pixels, uint8_t *rgb)
-{
-    if (l == RL_NDS_LAYOUT_STACKED) {
-        rl_nds_frame_rgb(pixels, rgb);
-        return;
-    }
-    static uint8_t stacked[SW * 2 * SH * 3];
-    rl_nds_frame_rgb(pixels, stacked);
-    for (uint32_t s = 0; s < 2; s++)
-        for (uint32_t y = 0; y < SH; y++)
-            memcpy(rgb + (y * 2 * SW + s * SW) * 3, stacked + ((s * SH + y) * SW) * 3, SW * 3);
-}
-
-bool rl_nds_layout_touch(rl_nds_layout l, uint32_t x, uint32_t y, uint8_t *tx, uint8_t *ty)
-{
-    uint32_t w, h;
-    rl_nds_layout_size(l, &w, &h);
-    if (x >= w || y >= h)
-        return false;
-    if (l == RL_NDS_LAYOUT_SIDE_BY_SIDE) {
-        if (x < SW)
-            return false;
-        x -= SW;
-    } else {
-        if (y < SH)
-            return false;
-        y -= SH;
-    }
-    *tx = (uint8_t)x;
-    *ty = (uint8_t)y;
-    return true;
+    rl_nds_frame_rgb(pixels, rgb);
+    for (uint32_t s = 0; s < RL_SCREENS; s++)
+        frames[s] = (rl_screens_frame){rgb + (size_t)s * SW * SH * 3u, SW, SH};
 }
 
 void rl_nds_controls_find(rl_nds_controls *c)
@@ -65,6 +39,7 @@ void rl_nds_controls_find(rl_nds_controls *c)
     c->press = rl_ports_find("touch", "press");
     c->x = rl_ports_find("touch", "x");
     c->y = rl_ports_find("touch", "y");
+    c->swap = rl_ports_find("p1", "swap");
 }
 
 static uint8_t scaled(float v, uint32_t size)
@@ -85,7 +60,7 @@ void rl_nds_input_from(const rl_nds_controls *c, const rl_input_snapshot *s, rl_
             out->keys |= (uint16_t)(1u << i);
     out->x = rl_ports_eval(c->key[10], s) >= 0.5f;
     out->y = rl_ports_eval(c->key[11], s) >= 0.5f;
-    if (point == RL_NDS_POINT_OFF || rl_ports_eval(c->press, s) < 0.5f)
+    if (point == RL_NDS_POINT_OFF || (point == RL_NDS_POINT_NONE && rl_ports_eval(c->press, s) < 0.5f))
         return;
     out->touch = true;
     if (point == RL_NDS_POINT_BOTTOM) {

@@ -245,7 +245,7 @@ pub fn nds_settings() -> Vec<Setting> {
         key: key.into(),
         label: label.into(),
         description: description.into(),
-        apply: Apply::Start,
+        apply: Apply::Live,
         default,
         kind,
     };
@@ -253,10 +253,31 @@ pub fn nds_settings() -> Vec<Setting> {
         s(
             "video.nds_layout",
             "Screen layout",
-            "stacked: the top screen above the bottom one, as the console holds them; side_by_side: the top screen left of the bottom one",
-            Value::String("stacked".into()),
+            "How the two screens share a window. auto: stacked in a tall window or while the on-screen controller shows, else stacked or side by side, whichever fills the window better; stacked: the top screen above the bottom one, as the console holds them; side_by_side: the top screen left of the bottom one; large_top and large_bottom: that screen at twice the size and the other one small beside or below it; top_only and bottom_only: one screen, swapped with the Swap screens control",
+            Value::String("auto".into()),
             SettingKind::Enum {
-                choices: ["stacked", "side_by_side"].map(String::from).into(),
+                choices: [
+                    "auto",
+                    "stacked",
+                    "side_by_side",
+                    "large_top",
+                    "large_bottom",
+                    "top_only",
+                    "bottom_only",
+                ]
+                .map(String::from)
+                .into(),
+            },
+        ),
+        s(
+            "video.nds_displays",
+            "Displays",
+            "What the displays show when the device has a second one. auto: the top screen on the first display and the bottom screen on the second; swapped: the other way round; top_both and bottom_both: that screen on both displays; single: only the first display, with the screen layout",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: ["auto", "swapped", "top_both", "bottom_both", "single"]
+                    .map(String::from)
+                    .into(),
             },
         ),
         s(
@@ -859,13 +880,20 @@ mod tests {
     fn a_ds_section_adds_the_screen_settings_after_the_runtime_ones() {
         let nds = nds_section(Vec::new());
         let plain = section(Vec::new());
-        assert_eq!(nds.runtime.len(), plain.runtime.len() + 2);
+        assert_eq!(nds.runtime.len(), plain.runtime.len() + 3);
         assert_eq!(nds.runtime[..plain.runtime.len()], plain.runtime[..]);
         let keys: Vec<&str> = nds.runtime[plain.runtime.len()..]
             .iter()
             .map(|s| s.key.as_str())
             .collect();
-        assert_eq!(keys, ["video.nds_layout", "video.nds_integer_scale"]);
+        assert_eq!(
+            keys,
+            [
+                "video.nds_layout",
+                "video.nds_displays",
+                "video.nds_integer_scale"
+            ]
+        );
     }
 
     const GOOD: &str = r#"

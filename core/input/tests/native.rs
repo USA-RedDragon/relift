@@ -75,7 +75,7 @@ fn joy_con_layouts_are_subsets() {
 
 #[test]
 fn handhelds_have_one_pad() {
-    for (platform, controls, ports) in [("gb", 8, 1), ("gbc", 8, 1), ("gba", 10, 1), ("nds", 12, 2)]
+    for (platform, controls, ports) in [("gb", 8, 1), ("gbc", 8, 1), ("gba", 10, 1), ("nds", 13, 2)]
     {
         let s = native_ports(platform).unwrap();
         assert_eq!(s.ports().len(), ports, "{platform}");

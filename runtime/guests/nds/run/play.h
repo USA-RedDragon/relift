@@ -11,26 +11,23 @@
 
 #include <relift/input.h>
 #include <relift/ports.h>
+#include <relift/screens.h>
 
 #include <stdbool.h>
 #include <stdint.h>
 
-/** @brief How the two screens share the picture. */
-typedef enum rl_nds_layout {
-    /** @brief The top screen above the bottom one: 256 x 384, as the console holds them. */
-    RL_NDS_LAYOUT_STACKED = 0,
-    /** @brief The top screen left of the bottom one: 512 x 192. */
-    RL_NDS_LAYOUT_SIDE_BY_SIDE = 1,
-} rl_nds_layout;
+/** @brief The screens' layout, displays and scaling the settings name, with the player's swap. */
+rl_screens_config rl_nds_screens_config(bool swap);
+/** @brief The two screens of a frame (rl_nds_frame_fn) as RGB888 frames: top first; rgb holds RL_NDS_SCREEN_W * 2 * RL_NDS_SCREEN_H * 3 bytes. */
+void rl_nds_screens_frames(const uint32_t *pixels, uint8_t *rgb, rl_screens_frame frames[RL_SCREENS]);
 
-/** @brief The layout the video.nds_layout setting names. */
-rl_nds_layout rl_nds_layout_setting(void);
-/** @brief Width and height of a picture in layout l. */
-void rl_nds_layout_size(rl_nds_layout l, uint32_t *w, uint32_t *h);
-/** @brief Converts a frame (rl_nds_frame_fn) to 8-bit RGB in layout l, the picture rl_nds_layout_size gives. */
-void rl_nds_layout_rgb(rl_nds_layout l, const uint32_t *pixels, uint8_t *rgb);
-/** @brief The bottom screen's pixel at picture pixel (x, y) of layout l; false when that pixel is on the top screen or outside. */
-bool rl_nds_layout_touch(rl_nds_layout l, uint32_t x, uint32_t y, uint8_t *tx, uint8_t *ty);
+struct rl_touchpad_guest;
+/** @brief The on-screen controller's layouts (touchpad.h), declared by the program. */
+const struct rl_touchpad_guest *rl_nds_touchpad(void);
+/** @brief The on-screen controller's port (touchpad.h), declared when the run uses it. */
+extern const rl_port_decl rl_nds_ports_touchpad[];
+/** @brief Number of entries of rl_nds_ports_touchpad. */
+extern const uint32_t rl_nds_ports_touchpad_count;
 
 /** @brief The controls of the native ports that make the DS's input, found once. */
 typedef struct rl_nds_controls {
@@ -38,18 +35,20 @@ typedef struct rl_nds_controls {
     rl_control_ref key[12];
     /** @brief touch.press, touch.x and touch.y. */
     rl_control_ref press, x, y;
+    /** @brief p1's swap control (Swap screens). */
+    rl_control_ref swap;
 } rl_nds_controls;
 
 /** @brief Finds the controls of the ports declared (rl_nds_ports and any a game adds). */
 void rl_nds_controls_find(rl_nds_controls *c);
 
-/** @brief Where a held mouse button points. */
+/** @brief Where the pen is, as the windows show it. */
 typedef enum rl_nds_point {
-    /** @brief No mouse button is held over a window: the touch port's x and y give the place. */
+    /** @brief The windows say nothing: the touch port's x and y give the place. */
     RL_NDS_POINT_NONE = 0,
-    /** @brief On the bottom screen, at the pixel given. */
+    /** @brief The pen is down on the bottom screen at the pixel given, whatever the press control reads. */
     RL_NDS_POINT_BOTTOM = 1,
-    /** @brief Elsewhere (the top screen, the margins): no touch. */
+    /** @brief The pen is up. */
     RL_NDS_POINT_OFF = 2,
 } rl_nds_point;
 
