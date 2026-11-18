@@ -1074,6 +1074,29 @@ mod tests {
     }
 
     #[test]
+    fn a_task_moved_to_another_display_goes_back_to_the_main_one() {
+        let java = JAVA[0].1;
+        assert!(java.contains("private void keepOnMainDisplay()"));
+        assert!(java.contains("setLaunchDisplayId(Display.DEFAULT_DISPLAY)"));
+        assert!(java.contains("if (!resumed || own == null"));
+        assert!(!java.contains("onConfigurationChanged"));
+        let event = java.split("private void displayEvent()").nth(1).unwrap();
+        let event = &event[..event.find("}\n").unwrap()];
+        assert!(!event.contains("keepOnMainDisplay"));
+        assert!(java.contains("protected void onResume()"));
+    }
+
+    #[test]
+    fn presentations_follow_what_the_runtime_asked_for() {
+        let d = JAVA[7].1;
+        assert!(JAVA[7].0 == "Displays");
+        assert!(d.contains("void sync()"));
+        assert!(d.contains("p.displayId() != d.get(i).getDisplayId()"));
+        assert!(d.contains("later.postDelayed(this::sync, RESHOW_MS)"));
+        assert!(d.contains("c.hide(WindowInsets.Type.systemBars())"));
+    }
+
+    #[test]
     fn a_package_comes_from_the_project_name() {
         assert_eq!(default_package("My Game!"), "dev.relift.game.my_game");
         assert_eq!(default_package("2048"), "dev.relift.game.g2048");

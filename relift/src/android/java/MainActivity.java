@@ -1,5 +1,6 @@
 package dev.relift.app;
 
+import android.app.ActivityOptions;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.hardware.display.DisplayManager;
@@ -7,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
+import android.view.Display;
 import android.view.Surface;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
@@ -43,6 +45,7 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
     private Ui ui;
     private Displays displays;
     private DisplayManager.DisplayListener watch;
+    private boolean resumed;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -54,12 +57,12 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         watch = new DisplayManager.DisplayListener() {
             @Override
             public void onDisplayAdded(int id) {
-                applyOrientation();
+                displayEvent();
             }
 
             @Override
             public void onDisplayRemoved(int id) {
-                applyOrientation();
+                displayEvent();
             }
 
             @Override
@@ -76,6 +79,47 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         if ("gpu_driver".equals(page)) {
             ui.open(Ui.Page.DRIVER);
         }
+    }
+
+    private void displayEvent() {
+        displays.sync();
+        applyOrientation();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resumed = true;
+        keepOnMainDisplay();
+        displayEvent();
+    }
+
+    /**
+     * The game's own window belongs on the main display, which the other
+     * display's presentation is the second screen of. A task reopened from the
+     * recents of another display goes back with a launch on the main display.
+     * Only a resumed activity does this, so another app taking the foreground
+     * (pause, focus loss, configuration change) never pulls the task back.
+     */
+    private void keepOnMainDisplay() {
+        Display own = getDisplay();
+        if (!resumed || own == null || own.getDisplayId() == Display.DEFAULT_DISPLAY) {
+            return;
+        }
+        Display main = getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+        if (main == null || !main.isValid()) {
+            return;
+        }
+        ActivityOptions o = ActivityOptions.makeBasic();
+        o.setLaunchDisplayId(Display.DEFAULT_DISPLAY);
+        startActivity(new Intent(getIntent()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                o.toBundle());
+    }
+
+    @Override
+    protected void onPause() {
+        resumed = false;
+        super.onPause();
     }
 
     @Override

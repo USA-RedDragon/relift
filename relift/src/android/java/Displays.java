@@ -3,11 +3,15 @@ package dev.relift.app;
 import android.app.Presentation;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Display;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -25,7 +29,11 @@ final class Displays {
     static final int MAX = 2;
 
     private final MainActivity act;
+    private static final long RESHOW_MS = 300;
+
     private final Pres[] open = new Pres[MAX];
+    private final boolean[] wanted = new boolean[MAX];
+    private final Handler later = new Handler(Looper.getMainLooper());
 
     Displays(MainActivity act) {
         this.act = act;
@@ -53,33 +61,53 @@ final class Displays {
 
     /** Shows the presentation of the index-th other display (on the UI thread); its surface arrives through the native callback. */
     void open(int index) {
-        act.runOnUiThread(() -> {
-            List<Display> d = others();
-            if (index < 0 || index >= d.size() || open[index] != null) {
-                return;
-            }
-            Pres p = new Pres(act, d.get(index), index);
-            open[index] = p;
-            p.setOnDismissListener(x -> {
-                if (open[index] == p) {
-                    open[index] = null;
-                }
-            });
-            try {
-                p.show();
-            } catch (WindowManager.InvalidDisplayException e) {
-                open[index] = null;
-            }
-        });
+        if (index < 0 || index >= MAX) {
+            return;
+        }
+        wanted[index] = true;
+        act.runOnUiThread(this::sync);
     }
 
     void close(int index) {
-        act.runOnUiThread(() -> {
-            if (index >= 0 && index < MAX && open[index] != null) {
-                open[index].dismiss();
-                open[index] = null;
+        if (index < 0 || index >= MAX) {
+            return;
+        }
+        wanted[index] = false;
+        act.runOnUiThread(this::sync);
+    }
+
+    /**
+     * Brings the presentations to what the runtime asked for (UI thread): one
+     * on each wanted other display, none on the game's own display, and a new
+     * one where the system dismissed it or the numbering of the other displays
+     * moved (the game's task changed display).
+     */
+    void sync() {
+        List<Display> d = others();
+        for (int i = 0; i < MAX; i++) {
+            Pres p = open[i];
+            if (p != null && (!wanted[i] || i >= d.size() || p.displayId() != d.get(i).getDisplayId())) {
+                open[i] = null;
+                p.dismiss();
             }
-        });
+            if (!wanted[i] || i >= d.size() || open[i] != null) {
+                continue;
+            }
+            final int index = i;
+            Pres q = new Pres(act, d.get(i), i);
+            open[i] = q;
+            q.setOnDismissListener(x -> {
+                if (open[index] == q) {
+                    open[index] = null;
+                    later.postDelayed(this::sync, RESHOW_MS);
+                }
+            });
+            try {
+                q.show();
+            } catch (WindowManager.InvalidDisplayException e) {
+                open[i] = null;
+            }
+        }
     }
 
     private static final class Pres extends Presentation implements SurfaceHolder.Callback, View.OnTouchListener {
@@ -99,6 +127,15 @@ final class Displays {
             sv.getHolder().addCallback(this);
             sv.setOnTouchListener(this);
             setContentView(sv);
+            WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                c.hide(WindowInsets.Type.systemBars());
+            }
+        }
+
+        int displayId() {
+            return getDisplay().getDisplayId();
         }
 
         @Override
