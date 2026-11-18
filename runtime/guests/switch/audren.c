@@ -44,12 +44,21 @@
 #define REV_BASE 0x30564552u
 #define REV_LAST 15
 
+/**
+ * @brief The number of a renderer revision, or -1 for one the renderer does
+ * not take. Verified from the SDK's nn::audio::common::GetRevisionNumber and
+ * CheckValidRevision: a revision is "REV" or "REv" followed by the byte '0'
+ * plus its number, both spellings number alike, and the newer SDKs' current
+ * revision is "REv?" (15).
+ */
 static int rev_number(int32_t revision)
 {
-    if (((uint32_t)revision & 0x00FFFFFFu) != (REV_BASE & 0x00FFFFFFu))
+    uint32_t low = (uint32_t)revision & 0x00FFFFFFu;
+    uint32_t base = REV_BASE & 0x00FFFFFFu;
+    if (low != base && low != (base | 0x200000u))
         return -1;
-    int n = (int)(((uint32_t)revision - REV_BASE) >> 24);
-    return n >= 0 && n <= REV_LAST ? n : -1;
+    int n = (int)(((uint32_t)revision >> 24) - 0x30u);
+    return n >= 1 && n <= REV_LAST ? n : -1;
 }
 
 /** @brief The renderer configuration (AudioRendererParameterInternal, 0x34 bytes). */
