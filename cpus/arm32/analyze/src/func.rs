@@ -1820,9 +1820,10 @@ impl Run<'_> {
 
     /// The jump at `site` as an index into the code right after the address
     /// it reads as the program counter: that address and how far the
-    /// target moves per index, when the target is that address plus an
-    /// index the run does not bound (`add pc, pc, rX, lsl #n`) and reads
-    /// no memory.
+    /// target moves per index, when the target is that address plus or
+    /// minus an index the run does not bound (`add pc, pc, rX, lsl #n`, or
+    /// `sub pc, pc, rX` with a negative index, an unrolled loop's tail) and
+    /// reads no memory.
     fn index_jump(&self, site: Loc) -> Option<(u32, u32)> {
         let w = self.env.image.fetch(site)?;
         let lifted = self.env.lift(site, w).ok()?;
@@ -1839,7 +1840,7 @@ impl Run<'_> {
         };
         let base = site.addr.wrapping_add(2 * site.size());
         let (t0, t1) = (at(0)?, at(2)?);
-        (t0 == base && t1 > t0).then_some((base, (t1 - t0) / 2))
+        (t0 == base && t1 != t0).then_some((base, t1.abs_diff(t0) / 2))
     }
 
     /// An instruction at `l` that always branches to a constant address

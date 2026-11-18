@@ -349,6 +349,23 @@ fn an_unbounded_add_pc_enters_a_branch_table_or_unrolled_code() {
 }
 
 #[test]
+fn an_unbounded_sub_pc_enters_the_unrolled_code_after_it() {
+    let opts = Options {
+        switches: true,
+        ..Options::default()
+    };
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[0xE04F_F002, A_MOV_R0_1, A_MOV_R0_1, A_MOV_R0_1, A_BX_LR],
+    );
+    let on = m.run(opts, arm(BASE));
+    assert!(found(&on, arm(BASE + 8)));
+    assert!(found(&on, arm(BASE + 0x10)));
+    assert!(!found(&on, arm(BASE + 4)));
+}
+
+#[test]
 fn calls_into_another_unit_seed_its_run() {
     let mut a = Machine::new(Profile::V5te);
     a.arm(
