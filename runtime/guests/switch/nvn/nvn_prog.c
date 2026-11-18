@@ -46,6 +46,8 @@ uint64_t nvnh_nvnProgramFinalize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+static uint64_t set_stages(rl_ctx *c, uint8_t *mem, nvn_program *p, uint64_t prog, int32_t n);
+
 /** @brief Gives program prog the n stages at guest address shaders (NVNshaderData each); sets x0 to true. */
 static uint64_t set_shaders(rl_ctx *c, uint8_t *mem, uint64_t prog, int32_t n, uint64_t shaders)
 {
@@ -53,8 +55,14 @@ static uint64_t set_shaders(rl_ctx *c, uint8_t *mem, uint64_t prog, int32_t n, u
     if (!p || n < 0 || (uint32_t)n > NVN_PROGRAM_STAGES)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx, %d): not a program or too many stages",
                                         (unsigned long long)prog, n);
-    c->x[0] = prog;
     memcpy(p->stages, mem + shaders, (size_t)n * sizeof(shader_data));
+    return set_stages(c, mem, p, prog, n);
+}
+
+/** @brief Notes the n stages already in p->stages; sets x0 to true. */
+static uint64_t set_stages(rl_ctx *c, uint8_t *mem, nvn_program *p, uint64_t prog, int32_t n)
+{
+    c->x[0] = prog;
     p->n = (uint32_t)n;
     for (uint32_t i = 0; i < p->n; i++) {
         char key[65];
@@ -83,6 +91,39 @@ static uint64_t set_shaders(rl_ctx *c, uint8_t *mem, uint64_t prog, int32_t n, u
 uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
 {
     return set_shaders(c, mem, c->x[0], (int32_t)c->x[1], c->x[2]);
+}
+
+/**
+ * @brief nvnProgramSetShadersExt(NVNprogram *, int count, const NVNshaderDataExt *):
+ * NVNboolean. Each entry is NVNshaderData plus a pointer to 24 more bytes
+ * the driver copies into its per-stage state; entries without them are
+ * plain stages, and stages with them are not implemented and stop.
+ */
+uint64_t nvnh_nvnProgramSetShadersExt(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t prog = c->x[0], ext = c->x[2];
+    int32_t n = (int32_t)c->x[1];
+    if (n < 0 || (uint32_t)n > NVN_PROGRAM_STAGES)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShadersExt(0x%llx, %d): too many stages",
+                                        (unsigned long long)prog, n);
+    nvn_program *p = (nvn_program *)nvn_obj_get(prog, NVN_PROGRAM);
+    if (!p)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShadersExt(0x%llx): not a program",
+                                        (unsigned long long)prog);
+    shader_data plain[NVN_PROGRAM_STAGES];
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t e = ext + 24 * (uint64_t)i, more = rl_ld64(mem, e + 16);
+        if (more)
+            return (uint64_t)rl_guest_fatal(c, "nvn",
+                                            "nvnProgramSetShadersExt(0x%llx): stage %d has extended data "
+                                            "%016llx %016llx %016llx (not implemented)",
+                                            (unsigned long long)prog, i, (unsigned long long)rl_ld64(mem, more),
+                                            (unsigned long long)rl_ld64(mem, more + 8),
+                                            (unsigned long long)rl_ld64(mem, more + 16));
+        plain[i] = (shader_data){ rl_ld64(mem, e), rl_ld64(mem, e + 8) };
+    }
+    memcpy(p->stages, plain, (size_t)n * sizeof *plain);
+    return set_stages(c, mem, p, prog, n);
 }
 
 /**

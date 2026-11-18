@@ -36,6 +36,7 @@
     X(nvnProgramFinalize)                                                                                              \
     X(nvnProgramInitializeFromBuilder)                                                                                 \
     X(nvnProgramSetShaders)                                                                                            \
+    X(nvnProgramSetShadersExt)                                                                                         \
     X(nvnProgramSetDebugLabel)                                                                                         \
     X(nvnProgramSetSampleShading)                                                                                      \
     X(nvnDeviceGetSeparateTextureHandle)                                                                               \
