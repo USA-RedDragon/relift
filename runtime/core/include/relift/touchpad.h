@@ -89,9 +89,9 @@ typedef struct rl_touchpad_layout {
     uint32_t ngroups;
     /**
      * @brief True for a layout written in dp (x, y, w and h) that the module fits to the view: each group hangs from
-     * the nearest edge or the middle of the view, the whole layout scales down together until no two touch areas
-     * meet, and the picture takes what the controls leave. False: reference pixels (RL_TOUCHPAD_REF_PX_PER_DP), and
-     * groups beside the picture shrink to keep off it.
+     * the nearest edge or the middle of the view and the whole layout scales down together until no two controls meet.
+     * The controls are an overlay: the picture keeps the size it has without them. False: reference pixels
+     * (RL_TOUCHPAD_REF_PX_PER_DP), and groups beside the picture shrink to keep off it.
      */
     bool fitted;
     /** @brief With fitted: the layout is a panel along the bottom of a tall view, and every group hangs from the bottom edge. */
@@ -161,11 +161,6 @@ RL_RUNTIME_API void rl_touchpad_reset(void);
  * (left, top, right, bottom pixels kept clear of cutouts and gesture edges; NULL for none).
  */
 RL_RUNTIME_API void rl_touchpad_view(uint32_t width, uint32_t height, float px_per_dp, const int32_t safe[4]);
-/**
- * @brief When the controls take part of the view from the picture (a fitted layout, shown), true, and the size in
- * pixels of the area left to it at the controls' size; a guest picks its layout (stacked or side by side) for that area.
- */
-RL_RUNTIME_API bool rl_touchpad_room(uint32_t *width, uint32_t *height);
 /** @brief The view size rl_touchpad_view set; 0 by 0 before it. */
 RL_RUNTIME_API void rl_touchpad_view_size(uint32_t *width, uint32_t *height);
 /** @brief A gamepad connected (true) or disconnected; count is the number connected after it; name is its own. */

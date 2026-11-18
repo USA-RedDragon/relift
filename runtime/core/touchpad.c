@@ -44,9 +44,6 @@
 #define FIT_GAP_DP 8.0f
 #define LABEL_DP 13.0f
 #define FIT_MIN 0.7f
-#define PICTURE_SHARE 0.6f
-#define FIT_PICTURE_MIN 0.85f
-#define GAP_DP 8.0f
 #define LONG_PRESS_NS 500000000ull
 #define PORTRAIT 0
 #define LANDSCAPE 1
@@ -138,7 +135,7 @@ static const rl_setting_def g_defs[] = {
       .label = "Opacity",
       .description = "How see-through the buttons are",
       .apply = RL_APPLY_LIVE,
-      .def_int = 60,
+      .def_int = 45,
       .min_int = 20,
       .max_int = 100,
       .step_int = 1 },
@@ -259,7 +256,7 @@ static float size_factor(void)
 static float opacity(void)
 {
     int64_t o = rl_setting_int("input.touch_pad.opacity");
-    return (float)(o ? o : 60) / 100.0f;
+    return (float)(o ? o : 45) / 100.0f;
 }
 
 static float dp(float v) { return v * g.ppd; }
@@ -673,73 +670,19 @@ static bool fit_ok(const rl_touchpad_layout *L, const layout_state *s, float fit
 
 static float fit_min(void) { return fminf(1.0f, FIT_MIN / size_factor()); }
 
-static void picture_at(const layout_state *s, float fit, int32_t r[4]);
-
-/** A picture scale, or its whole-multiple floor when the picture is shown that way unless that loses over 15%. */
-static float snap_scale(float sc, bool whole)
-{
-    if (!whole || sc < 1.0f)
-        return sc;
-    float si = floorf(sc);
-    return si >= sc * 0.85f ? si : sc;
-}
-
-/** The share of the picture's size in the whole view that it keeps when the layout is drawn at this fit. */
-static float picture_share(const layout_state *s, float fit)
-{
-    int32_t r[4];
-    picture_at(s, fit, r);
-    uint32_t pw = g.pic_w ? g.pic_w : g.guest->picture_width, ph = g.pic_h ? g.pic_h : g.guest->picture_height;
-    bool whole = g.pic_w ? g.pic_integer : g.guest->integer_scale;
-    if (!pw || !ph || !g.w || !g.h)
-        return 1.0f;
-    float full = fminf((float)g.w / (float)pw, (float)g.h / (float)ph);
-    full = snap_scale(full, whole);
-    return full > 0 ? ((float)r[2] / (float)pw) / full : 1.0f;
-}
-
-static bool carves_picture(const rl_touchpad_layout *L)
-{
-    return fitted(L) && active() && g.guest && (!g.guest->game_touch || g.guest->keep_clear);
-}
-
 /**
- * The share of its size a fitted layout is drawn at: the largest fit from 1 down to the smallest allowed size at which
- * no two touch areas meet, and the picture keeps PICTURE_SHARE of the size it would have in the whole view where it
- * can; below that the controls shrink further, to the smallest size.
+ * The share of its size a fitted layout is drawn at: 1, or the largest fit down to the smallest allowed size at
+ * which no two controls meet and every one stays in the safe area.
  */
-static float fit_overlap(const layout_state *s)
-{
-    const rl_touchpad_layout *L = lay();
-    if (!fitted(L))
-        return 1.0f;
-    float ok = 1.0f;
-    if (!fit_ok(L, s, 1.0f)) {
-        float a = fit_min(), b = 1.0f;
-        for (int i = 0; i < 16; i++) {
-            float mid = (a + b) / 2;
-            if (fit_ok(L, s, mid))
-                a = mid;
-            else
-                b = mid;
-        }
-        ok = a;
-    }
-    return ok;
-}
-
 static float fit_of(const layout_state *s)
 {
     const rl_touchpad_layout *L = lay();
-    float ok = fit_overlap(s), lo = fminf(ok, fmaxf(fit_min(), FIT_PICTURE_MIN / size_factor()));
-    if (!fitted(L) || !carves_picture(L) || g.w >= g.h || picture_share(s, ok) >= PICTURE_SHARE)
-        return ok;
-    if (picture_share(s, lo) < PICTURE_SHARE)
-        return lo;
-    float a = lo, b = ok;
-    for (int i = 0; i < 14; i++) {
+    if (!fitted(L) || fit_ok(L, s, 1.0f))
+        return 1.0f;
+    float a = fit_min(), b = 1.0f;
+    for (int i = 0; i < 16; i++) {
         float mid = (a + b) / 2;
-        if (picture_share(s, mid) >= PICTURE_SHARE)
+        if (fit_ok(L, s, mid))
             a = mid;
         else
             b = mid;
@@ -1833,45 +1776,7 @@ void rl_touchpad_view_size(uint32_t *width, uint32_t *height)
     pthread_mutex_unlock(&g.lock);
 }
 
-/** The part of the view a fitted layout leaves to the picture: above the panel, or between the side bars. */
-static rect picture_region(const rl_touchpad_layout *L, const layout_state *s, float fit)
-{
-    rect r = { (float)g.safe[0], (float)g.safe[1], (float)g.w - (float)g.safe[2], (float)g.h - (float)g.safe[3] };
-    placed p[MAX_ITEMS];
-    place_with_fit(s, p, fit);
-    float gap = dp(GAP_DP);
-    bool tall = g.h > g.w;
-    float top = r.y1, left = r.x0, right = r.x1;
-    for (uint32_t i = 0; i < L->nitems && i < MAX_ITEMS; i++) {
-        int gi = group_of(L, i);
-        if (s->d[i].detached || (gi >= 0 && s->g[gi].custom))
-            continue;
-        gap_shape sh = gap_shape_of(&L->items[i], &p[i], true);
-        float ext = p[i].pad + gap;
-        if (tall) {
-            top = fminf(top, sh.y - sh.hh - ext);
-        } else if (fabsf(sh.x - (float)g.w / 2) > (float)g.w * 0.17f) {
-            if (sh.x < (float)g.w / 2)
-                left = fmaxf(left, sh.x + sh.hw + ext);
-            else
-                right = fminf(right, sh.x - sh.hw - ext);
-        } else if (sh.y < (float)g.h / 2) {
-            r.y0 = fmaxf(r.y0, sh.y + sh.hh + ext);
-        } else {
-            r.y1 = fminf(r.y1, sh.y - sh.hh - ext);
-        }
-    }
-    if (tall) {
-        r.y1 = fmaxf(top, r.y0 + 1.0f);
-    } else {
-        float pad = fmaxf(left - (float)g.safe[0], (float)g.w - (float)g.safe[2] - right);
-        r.x0 = fminf((float)g.safe[0] + pad, (float)g.w / 2 - 1.0f);
-        r.x1 = fmaxf((float)g.w - (float)g.safe[2] - pad, (float)g.w / 2 + 1.0f);
-    }
-    return r;
-}
-
-static void picture_at(const layout_state *s, float fit, int32_t r[4])
+static void picture(int32_t r[4])
 {
     r[0] = r[1] = r[2] = r[3] = 0;
     const rl_touchpad_guest *gu = g.guest;
@@ -1879,26 +1784,16 @@ static void picture_at(const layout_state *s, float fit, int32_t r[4])
     bool whole = g.pic_w ? g.pic_integer : gu && gu->integer_scale;
     if (!gu || !g.w || !g.h || !pw || !ph)
         return;
-    const rl_touchpad_layout *L = lay();
-    bool carve = carves_picture(L);
-    rect reg = carve ? picture_region(L, s, fit) : (rect){ 0, 0, (float)g.w, (float)g.h };
-    float rw = reg.x1 - reg.x0, rh = reg.y1 - reg.y0;
-    float sc = fminf(rw / (float)pw, rh / (float)ph);
-    if (whole && sc >= 1.0f)
-        sc = carve ? snap_scale(sc, true) : floorf(sc);
-    int32_t w = (int32_t)((float)pw * sc), h = (int32_t)((float)ph * sc);
-    r[0] = (int32_t)(reg.x0 + (rw - (float)w) / 2);
-    r[1] = (int32_t)(reg.y0 + (rh - (float)h) / 2);
-    if (!carve && g.h > g.w && active() && r[1] > g.safe[1])
+    float s = fminf((float)g.w / (float)pw, (float)g.h / (float)ph);
+    if (whole && s >= 1.0f)
+        s = floorf(s);
+    int32_t w = (int32_t)((float)pw * s), h = (int32_t)((float)ph * s);
+    r[0] = ((int32_t)g.w - w) / 2;
+    r[1] = ((int32_t)g.h - h) / 2;
+    if (g.h > g.w && active() && r[1] > g.safe[1])
         r[1] = g.safe[1];
     r[2] = w;
     r[3] = h;
-}
-
-static void picture(int32_t r[4])
-{
-    const layout_state *s = state();
-    picture_at(s, fit_of(s), r);
 }
 
 void rl_touchpad_picture(int32_t r[4])
@@ -1906,21 +1801,6 @@ void rl_touchpad_picture(int32_t r[4])
     pthread_mutex_lock(&g.lock);
     picture(r);
     pthread_mutex_unlock(&g.lock);
-}
-
-bool rl_touchpad_room(uint32_t *width, uint32_t *height)
-{
-    pthread_mutex_lock(&g.lock);
-    const rl_touchpad_layout *L = lay();
-    bool carve = carves_picture(L);
-    if (carve) {
-        const layout_state *s = state();
-        rect r = picture_region(L, s, fit_overlap(s));
-        *width = (uint32_t)fmaxf(r.x1 - r.x0, 0.0f);
-        *height = (uint32_t)fmaxf(r.y1 - r.y0, 0.0f);
-    }
-    pthread_mutex_unlock(&g.lock);
-    return carve;
 }
 
 void rl_touchpad_fill(float *values, uint32_t count)
@@ -2129,7 +2009,7 @@ static void draw_pause(void)
                 1.0f);
     rl_tp_text(&g.cv, (s.card.x0 + s.card.x1) / 2, s.title_y, "Paused", 52 * k, true, RL_TP_CENTER, C(0xffffff, 1),
                C(0, 0), 0);
-    static const char *const names[4] = { "Resume", "Edit controller layout", "Settings", "Leave game" };
+    static const char *const names[4] = { "Resume", "Edit controls", "Settings", "Leave game" };
     for (int i = 0; i < 4; i++)
         button(s.rows[i], names[i], k * 40.0f / 36.0f, false, finger_on(s.targets[i], i));
 }
@@ -2204,6 +2084,33 @@ static void draw_settings(void)
     }
 }
 
+/** Soft guides while editing: a red dashed box around controls that meet, or that leave the safe area. */
+static void draw_edit_warnings(const rl_touchpad_layout *L)
+{
+    placed p[MAX_ITEMS];
+    place(&g.edit, p);
+    gap_shape sh[MAX_ITEMS];
+    bool warn[MAX_ITEMS] = { false };
+    uint32_t n = L->nitems < MAX_ITEMS ? L->nitems : MAX_ITEMS;
+    float lw = fmaxf(2.0f, dp(2.0f));
+    for (uint32_t i = 0; i < n; i++) {
+        sh[i] = gap_shape_of(&L->items[i], &p[i], false);
+        if (sh[i].x - sh[i].hw < (float)g.safe[0] || sh[i].y - sh[i].hh < (float)g.safe[1] ||
+            sh[i].x + sh[i].hw > (float)g.w - (float)g.safe[2] || sh[i].y + sh[i].hh > (float)g.h - (float)g.safe[3])
+            warn[i] = true;
+        for (uint32_t j = 0; j < i; j++)
+            if (pad_group(L, i) != pad_group(L, j) && item_visible(&L->items[i]) && item_visible(&L->items[j]) &&
+                shape_gap(&sh[i], &sh[j]) < 0) {
+                warn[i] = true;
+                warn[j] = true;
+            }
+    }
+    for (uint32_t i = 0; i < n; i++)
+        if (warn[i] && item_visible(&L->items[i]))
+            rl_tp_dashed_rect(&g.cv, sh[i].x - sh[i].hw, sh[i].y - sh[i].hh, sh[i].x + sh[i].hw, sh[i].y + sh[i].hh,
+                              lw, dp(5.0f), dp(4.0f), C(0xff5a5a, 1));
+}
+
 static void draw_edit(void)
 {
     const rl_touchpad_layout *L = lay();
@@ -2212,6 +2119,7 @@ static void draw_edit(void)
     float k = v.k;
     rl_tp_rrect(&g.cv, 0, 0, (float)g.w, (float)g.h, 0, C(0, 0.25f), C(0, 0), 0, 1.0f);
     draw_pad(true);
+    draw_edit_warnings(L);
     rl_tp_color amber = C(0xffc233, 1), teal = C(0x5eead4, 1);
     float lw = fmaxf(2.0f, dp(2.0f)), dot = dp(6.0f);
     for (uint32_t i = 0; i < L->ngroups && i < MAX_GROUPS; i++) {

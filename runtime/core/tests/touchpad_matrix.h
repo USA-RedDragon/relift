@@ -192,6 +192,55 @@ static void tpm_frame(uint8_t *rgb, uint32_t w, uint32_t h, int32_t x0, int32_t 
     tpm_fill(rgb, w, h, x1 - 1, y0, x1, y1, r, g, b);
 }
 
+/**
+ * Draws a screen of the sample picture (RL_TOUCHPAD_PICTURE: 256 by 384 raw RGB, the top screen over the bottom one)
+ * into a rectangle by nearest sampling, cropped to the rectangle's shape; flat blue and green without the file.
+ */
+static void tpm_blit(uint8_t *rgb, uint32_t w, uint32_t h, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int which)
+{
+    static uint8_t *sample;
+    static bool tried;
+    if (!tried) {
+        tried = true;
+        const char *path = getenv("RL_TOUCHPAD_PICTURE");
+        FILE *f = path ? fopen(path, "rb") : NULL;
+        if (f) {
+            sample = malloc(256u * 384u * 3u);
+            if (sample && fread(sample, 1, 256u * 384u * 3u, f) != 256u * 384u * 3u) {
+                free(sample);
+                sample = NULL;
+            }
+            fclose(f);
+        }
+    }
+    if (!sample) {
+        tpm_fill(rgb, w, h, x0, y0, x1, y1, which ? 50 : 40, which ? 130 : 90, which ? 80 : 140);
+        return;
+    }
+    int32_t dw = x1 - x0, dh = y1 - y0;
+    if (dw <= 0 || dh <= 0)
+        return;
+    float sw = 256.0f, sh = 192.0f;
+    float want = (float)dw / (float)dh;
+    if (want > sw / sh)
+        sh = sw / want;
+    else
+        sw = sh * want;
+    float ox = (256.0f - sw) / 2, oy = (192.0f - sh) / 2;
+    for (int32_t y = 0; y < dh; y++)
+        for (int32_t x = 0; x < dw; x++) {
+            int32_t px = x0 + x, py = y0 + y;
+            if (px < 0 || py < 0 || px >= (int32_t)w || py >= (int32_t)h)
+                continue;
+            uint32_t sx = (uint32_t)(ox + (float)x * sw / (float)dw), sy = (uint32_t)(oy + (float)y * sh / (float)dh);
+            const uint8_t *src = sample + ((size_t)(which ? 192 + sy : sy) * 256u + sx) * 3u;
+            uint8_t *d = rgb + ((size_t)py * w + (size_t)px) * 3u;
+            d[0] = src[0];
+            d[1] = src[1];
+            d[2] = src[2];
+        }
+}
+
 /** Draws the view: the picture as flat screens, the overlay over it, the touch areas and the safe area outlined. */
 static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, const tpm_picture *pic, const char *tag,
                      const rl_screens_picture *plan)
@@ -206,7 +255,6 @@ static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, cons
         return;
     int32_t r[4];
     rl_touchpad_picture(r);
-    bool stacked = pic->w * 3 == pic->h * 2;
     if (plan) {
         for (uint32_t s = 0; s < RL_SCREENS; s++) {
             const rl_screens_place *q = &plan->place[s];
@@ -216,18 +264,13 @@ static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, cons
             int32_t y0 = r[1] + (int32_t)((uint64_t)q->y * (uint32_t)r[3] / plan->height);
             int32_t x1 = r[0] + (int32_t)((uint64_t)(q->x + q->w) * (uint32_t)r[2] / plan->width);
             int32_t y1 = r[1] + (int32_t)((uint64_t)(q->y + q->h) * (uint32_t)r[3] / plan->height);
-            if (s == 0)
-                tpm_fill(rgb, v->w, v->h, x0, y0, x1, y1, 40, 90, 140);
-            else
-                tpm_fill(rgb, v->w, v->h, x0, y0, x1, y1, 50, 130, 80);
+            tpm_blit(rgb, v->w, v->h, x0, y0, x1, y1, (int)s);
         }
-    } else if (stacked) {
-        tpm_fill(rgb, v->w, v->h, r[0], r[1], r[0] + r[2], r[1] + r[3] / 2, 40, 90, 140);
-        tpm_fill(rgb, v->w, v->h, r[0], r[1] + r[3] / 2, r[0] + r[2], r[1] + r[3], 50, 130, 80);
+    } else if (pic->w * 3 == pic->h * 2) {
+        tpm_blit(rgb, v->w, v->h, r[0], r[1], r[0] + r[2], r[1] + r[3] / 2, 0);
+        tpm_blit(rgb, v->w, v->h, r[0], r[1] + r[3] / 2, r[0] + r[2], r[1] + r[3], 1);
     } else {
-        tpm_fill(rgb, v->w, v->h, r[0], r[1], r[0] + r[2], r[1] + r[3], 40, 90, 140);
-        if (pic->w > pic->h * 3 / 2 && !strcmp(guest, "nds"))
-            tpm_fill(rgb, v->w, v->h, r[0] + r[2] / 2, r[1], r[0] + r[2], r[1] + r[3], 50, 130, 80);
+        tpm_blit(rgb, v->w, v->h, r[0], r[1], r[0] + r[2], r[1] + r[3], 0);
     }
     for (size_t i = 0; i < (size_t)v->w * v->h; i++) {
         const uint8_t *p = ov + i * 4;
@@ -256,7 +299,7 @@ static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, cons
 }
 
 /** Why the controls of the current view are wrong, or NULL. */
-static const char *tpm_problem(const tpm_view *v, float full_scale, float picture_scale, bool whole, bool sizes, const int32_t pic[4])
+static const char *tpm_problem(const tpm_view *v, bool sizes)
 {
     static char why[200];
     rl_touchpad_rect rc[32];
@@ -293,18 +336,6 @@ static const char *tpm_problem(const tpm_view *v, float full_scale, float pictur
                 snprintf(why, sizeof why, "touch areas of %s and %s meet", name, other);
                 return why;
             }
-        tpm_shape p = { false, (float)pic[0], (float)pic[1], (float)(pic[0] + pic[2]), (float)(pic[1] + pic[3]) };
-        if (pic[2] > 0 && tpm_meet(&hs[i], &p)) {
-            snprintf(why, sizeof why, "%s meets the picture", name);
-            return why;
-        }
-    }
-    float aspect = (float)v->w / (float)v->h, least = whole ? 0.3f : 0.45f;
-    if (aspect > 0.77f && aspect < 1.3f)
-        least = 0.25f;
-    if (sizes && picture_scale < full_scale * least) {
-        snprintf(why, sizeof why, "the picture shrinks to %.2f of its full size", picture_scale / full_scale);
-        return why;
     }
     return NULL;
 }
@@ -337,13 +368,7 @@ static int tpm_run(const rl_touchpad_guest *guest, const tpm_picture *pics, size
                 const tpm_view *v = &g_tpm_views[vi];
                 tpm_setup(guest, v, &pics[pi]);
                 rl_settings_set("input.touch_pad.size", sizes[z]);
-                int32_t pic[4];
-                rl_touchpad_picture(pic);
-                float full = fminf((float)v->w / (float)pics[pi].w, (float)v->h / (float)pics[pi].h);
-                if (pics[pi].whole && full >= 1.0f)
-                    full = floorf(full);
-                float got = pics[pi].w ? (float)pic[2] / (float)pics[pi].w : 0.0f;
-                const char *why = tpm_problem(v, full, got, pics[pi].whole, z == 0, pic);
+                const char *why = tpm_problem(v, z == 0);
                 if (why) {
                     fprintf(stderr, "  %s %s picture %ux%u size %s%%: %s\n", guest->name, v->name, pics[pi].w,
                             pics[pi].h, sizes[z], why);

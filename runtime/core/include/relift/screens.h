@@ -112,8 +112,9 @@ RL_RUNTIME_API void rl_screens_plan(const uint32_t sizes[RL_SCREENS][2], rl_scre
 /**
  * @brief The layout rl_screens_present draws in a window of width by height when the setting says
  * RL_SCREENS_AUTO (one of the explicit layouts; any other layout comes back unchanged): in a window taller than
- * wide, or with the controller in use (controller), stacked; else whichever of stacked, side by side and large top
- * gives the larger picture (by the smaller screen's scale), ties to the first.
+ * wide, stacked; else whichever of stacked, side by side and large top shows the screens over the most pixels, among
+ * those that give the touch screen at least twice its native size (all, when none does). controller is unused: the
+ * on-screen controller is an overlay and takes no room.
  */
 RL_RUNTIME_API rl_screens_layout rl_screens_resolve(const uint32_t sizes[RL_SCREENS][2], rl_screens_layout layout,
                                                     uint32_t width, uint32_t height, bool controller);

@@ -54,9 +54,9 @@ stays open.
 
 `auto` stacks the screens in a tall window, and otherwise picks stacked or side
 by side by whichever fills the window better (while the on-screen controller
-shows, the room it leaves: a wide phone gets side by side). `large_top` and `large_bottom` draw that screen at twice the size
-with the other one small beside it (a wide window) or below it (a tall one);
-`top_only` and `bottom_only` show one screen. Swap screens exchanges the
+shows, the room it leaves: a wide phone gets side by side). `large_top` and
+`large_bottom` draw that screen at twice the size with the other one small
+beside it (a wide window) or below it (a tall one); `top_only` and `bottom_only` show one screen. Swap screens exchanges the
 screens' places: in a single-screen layout it shows the other screen, in a large
 and small layout it makes the large one small, and with two displays it
 exchanges the displays' screens. The layout follows the window's size, so
@@ -140,7 +140,7 @@ show.
 | Setting | Values | Default |
 | --- | --- | --- |
 | `input.touch_pad.show` | `auto` (only while no gamepad is connected; keyboard and mouse do not count), `always`, `never` | `auto` |
-| `input.touch_pad.opacity` | 20 to 100 (percent) | 60 |
+| `input.touch_pad.opacity` | 20 to 100 (percent) | 45 |
 | `input.touch_pad.size` | 70 to 150 (percent) | 100 |
 | `input.touch_pad.haptics` | `true`, `false`: a short tick on a press or a d-pad direction change | `true` |
 
@@ -148,21 +148,46 @@ When a gamepad connects the controller releases what it holds, fades out in
 150 ms and a toast says so; it fades back in when the last one disconnects.
 Up to 10 fingers: a finger belongs to the first shape it lands on until it
 lifts. The d-pad has eight zones and follows a sliding finger; a finger slides
-between face buttons; sticks are fixed with a 10% dead zone; hit areas are
-about 15% larger than drawn and at least 48 dp. On Switch the landscape
-picture keeps its full size with the controller over its corners, and a
-finger no shape takes is the `touch` port's.
+between face buttons; sticks are fixed with a 10% dead zone. On Switch the
+landscape picture keeps its full size with the controller over its corners, and
+a finger no shape takes is the `touch` port's.
+
+The controller is a translucent overlay (`input.touch_pad.opacity`, 45% by
+default): it never changes the picture's size or place, which are as if it
+were not there (the largest that fits the view, a whole multiple only where the
+guest's setting says so, and in a tall view at the top, so the controls take
+the empty space below it). The Game Boy, Game Boy Color, Game Boy Advance and
+DS layouts are written in dp and fitted to the view. Every orientation has a
+left column (L, the d-pad, Select) and a right column (R, the face buttons,
+Start) of one width on one center line each. Menu, Screens (DS) and Hide are a
+column between the d-pad and the face buttons in portrait and a row at the top
+center in landscape. One factor shrinks the whole layout, to at most 70%,
+until every two controls are 8 dp apart and inside the safe area; the size
+setting scales it as a whole. Each control's touch area is its shape grown by
+up to 12 dp into free space, keeping 4 dp to its neighbors, so areas never
+overlap; the four face buttons share one disc split by the nearest button, and
+the d-pad keeps its square. A touch inside a control's area is the control; a
+touch elsewhere is the game's (on the DS, the pen when it is on the bottom
+screen's image). Hide leaves a clean picture with all of it open to the pen.
+Labels share one size.
+
+On the DS the Screens button swaps the two screens on a tap and, held for half
+a second, steps `video.nds_layout` through stacked, side by side, large top,
+large bottom, top only and bottom only, saving the choice and naming it over
+the picture for about a second.
 
 The Hide button hides every other control and stays faintly visible as Show;
 the hidden state is not saved. The Menu tab and the system back gesture open
-the pause sheet: Resume, Edit controller layout, Settings (the settings above)
+the pause sheet: Resume, Edit controls, Settings (the settings above)
 and Leave game. While a sheet or the editor is open the game is paused.
 
 The editor moves and resizes each group and changes the spacing between a
 group's buttons (0.60 to 1.80 times the distance between centers). Holding a
 button detaches it to move and resize it alone; Attach puts it back. D-pads
 and stick bases are not detachable. Reset returns the guest and orientation to
-the built-in layout. Places are saved, per guest and orientation, as:
+the built-in layout. Controls that meet or leave the safe area get a red
+dashed box while editing; nothing is blocked. Places are saved, per guest and
+orientation, as:
 
 ```
 input.touch_pad.layout.<guest>.<orientation>.<group> = "x,y,scale,spacing"

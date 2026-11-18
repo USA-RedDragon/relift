@@ -14,18 +14,18 @@
 #define DPAD(x, y, s) RL_TP_DPAD("up", "right", "down", "left", x, y, s)
 
 static const rl_touchpad_item g_portrait[] = {
-    RL_TP_MENU(127.5, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL2("Screens", "swap", "layout", 205.5, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_HIDE(283.5, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL("L", "l", 90, 78, RL_TP_COLUMN, RL_TP_SHOULDER_H),
-    RL_TP_PILL("R", "r", 321, 78, RL_TP_COLUMN, RL_TP_SHOULDER_H),
-    DPAD(90, 182, RL_TP_COLUMN),
-    RL_TP_FACE("A", "a", 369, 182, 26),
-    RL_TP_FACE("B", "b", 321, 230, 26),
-    RL_TP_FACE("X", "x", 321, 134, 26),
-    RL_TP_FACE("Y", "y", 273, 182, 26),
-    RL_TP_PILL("Select", "select", 90, 284, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL("Start", "start", 321, 284, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_MENU(205.5, 96, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL2("Screens", "swap", "layout", 205.5, 138, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_HIDE(205.5, 180, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL("L", "l", 88, 36, RL_TP_COLUMN, RL_TP_SHOULDER_H),
+    RL_TP_PILL("R", "r", 323, 36, RL_TP_COLUMN, RL_TP_SHOULDER_H),
+    DPAD(88, 138, RL_TP_COLUMN),
+    RL_TP_FACE("A", "a", 369, 138, 26),
+    RL_TP_FACE("B", "b", 323, 184, 26),
+    RL_TP_FACE("X", "x", 323, 92, 26),
+    RL_TP_FACE("Y", "y", 277, 138, 26),
+    RL_TP_PILL("Select", "select", 88, 238, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL("Start", "start", 323, 238, RL_TP_SMALL_W, RL_TP_SMALL_H),
 };
 
 static const rl_touchpad_group g_portrait_groups[] = {
@@ -40,18 +40,18 @@ static const rl_touchpad_group g_portrait_groups[] = {
 };
 
 static const rl_touchpad_item g_landscape[] = {
-    RL_TP_MENU(322, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL2("Screens", "swap", "layout", 400, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_HIDE(478, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL("L", "l", 90, 36, RL_TP_COLUMN, RL_TP_SHOULDER_H),
-    RL_TP_PILL("R", "r", 710, 36, RL_TP_COLUMN, RL_TP_SHOULDER_H),
-    DPAD(90, 168, RL_TP_COLUMN),
+    RL_TP_MENU(322, 36, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL2("Screens", "swap", "layout", 400, 36, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_HIDE(478, 36, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL("L", "l", 88, 36, RL_TP_COLUMN, RL_TP_SHOULDER_H),
+    RL_TP_PILL("R", "r", 712, 36, RL_TP_COLUMN, RL_TP_SHOULDER_H),
+    DPAD(88, 168, RL_TP_COLUMN),
     RL_TP_FACE("A", "a", 758, 168, 26),
-    RL_TP_FACE("B", "b", 710, 216, 26),
-    RL_TP_FACE("X", "x", 710, 120, 26),
-    RL_TP_FACE("Y", "y", 662, 168, 26),
-    RL_TP_PILL("Select", "select", 90, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL("Start", "start", 710, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_FACE("B", "b", 712, 214, 26),
+    RL_TP_FACE("X", "x", 712, 122, 26),
+    RL_TP_FACE("Y", "y", 666, 168, 26),
+    RL_TP_PILL("Select", "select", 88, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL("Start", "start", 712, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
 };
 
 static const rl_touchpad_group g_landscape_groups[] = {
@@ -72,7 +72,7 @@ static const rl_touchpad_guest g_nds = {
     .integer_scale = false,
     .game_touch = true,
     .keep_clear = true,
-    .portrait = RL_TP_FITTED(411, 316, g_portrait, g_portrait_groups, true),
+    .portrait = RL_TP_FITTED(411, 270, g_portrait, g_portrait_groups, true),
     .landscape = RL_TP_FITTED(800, 336, g_landscape, g_landscape_groups, false),
 };
 

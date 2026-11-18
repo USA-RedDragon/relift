@@ -22,10 +22,8 @@ static void preview(const char *dir, const tpm_view *v, rl_screens_layout layout
     static const uint32_t sizes[RL_SCREENS][2] = { { 256, 192 }, { 256, 192 } };
     tpm_picture pic = { 256, 384, false };
     tpm_setup(rl_nds_touchpad(), v, &pic);
-    uint32_t rw = v->w, rh = v->h;
-    bool room = v->w > v->h && rl_touchpad_room(&rw, &rh);
     rl_screens_picture plan;
-    rl_screens_layout l = rl_screens_resolve(sizes, layout, rw, rh, !room);
+    rl_screens_layout l = rl_screens_resolve(sizes, layout, v->w, v->h, true);
     rl_screens_plan(sizes, l, -1, v->h > v->w, &plan);
     rl_touchpad_set_picture(plan.width, plan.height, false);
     rl_touchpad_view(v->w, v->h, v->ppd, v->safe);

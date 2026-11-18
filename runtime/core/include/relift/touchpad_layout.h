@@ -19,7 +19,7 @@
 #define RL_TP_DPAD(up, right, down, left, x, y, s) { RL_TOUCHPAD_DPAD, false, NULL, { up, right, down, left }, x, y, s, s }
 #define RL_TP_STICK(cx, cy, x, y, r) { RL_TOUCHPAD_STICK, false, NULL, { cx, cy }, x, y, 2 * (r), 2 * (r) }
 /** @brief The fixed sizes in dp of a fitted layout: a side column, a small pill, and a shoulder pill (a column wide). */
-#define RL_TP_COLUMN 148
+#define RL_TP_COLUMN 144
 #define RL_TP_SMALL_W 68
 #define RL_TP_SMALL_H 32
 #define RL_TP_SHOULDER_H 40

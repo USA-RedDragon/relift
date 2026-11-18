@@ -11,13 +11,13 @@
 #define DPAD(x, y, s) RL_TP_DPAD("up", "right", "down", "left", x, y, s)
 
 static const rl_touchpad_item g_portrait[] = {
-    RL_TP_MENU(166.5, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_HIDE(244.5, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    DPAD(90, 132, RL_TP_COLUMN),
-    RL_TP_FACE("A", "a", 363, 108, 32),
-    RL_TP_FACE("B", "b", 279, 156, 32),
-    RL_TP_PILL("Select", "select", 90, 234, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL("Start", "start", 321, 234, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_MENU(205.5, 67, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_HIDE(205.5, 109, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    DPAD(88, 88, RL_TP_COLUMN),
+    RL_TP_FACE("A", "a", 363, 64, 32),
+    RL_TP_FACE("B", "b", 283, 112, 32),
+    RL_TP_PILL("Select", "select", 88, 188, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL("Start", "start", 323, 188, RL_TP_SMALL_W, RL_TP_SMALL_H),
 };
 
 static const rl_touchpad_group g_portrait_groups[] = {
@@ -29,13 +29,13 @@ static const rl_touchpad_group g_portrait_groups[] = {
 };
 
 static const rl_touchpad_item g_landscape[] = {
-    RL_TP_MENU(361, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_HIDE(439, 32, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    DPAD(90, 168, RL_TP_COLUMN),
+    RL_TP_MENU(361, 36, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_HIDE(439, 36, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    DPAD(88, 168, RL_TP_COLUMN),
     RL_TP_FACE("A", "a", 752, 144, 32),
-    RL_TP_FACE("B", "b", 668, 192, 32),
-    RL_TP_PILL("Select", "select", 90, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
-    RL_TP_PILL("Start", "start", 710, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_FACE("B", "b", 672, 192, 32),
+    RL_TP_PILL("Select", "select", 88, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
+    RL_TP_PILL("Start", "start", 712, 304, RL_TP_SMALL_W, RL_TP_SMALL_H),
 };
 
 static const rl_touchpad_group g_landscape_groups[] = {
@@ -51,7 +51,7 @@ static const rl_touchpad_guest g_gb = {
     .picture_width = 160,
     .picture_height = 144,
     .integer_scale = true,
-    .portrait = RL_TP_FITTED(411, 266, g_portrait, g_portrait_groups, true),
+    .portrait = RL_TP_FITTED(411, 220, g_portrait, g_portrait_groups, true),
     .landscape = RL_TP_FITTED(800, 336, g_landscape, g_landscape_groups, false),
 };
 
