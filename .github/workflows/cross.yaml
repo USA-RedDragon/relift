@@ -75,23 +75,28 @@ jobs:
           tar -xJf "$dir/zig.tar.xz" -C "$dir"
           echo "$dir/zig-x86_64-linux-$ZIG_VERSION" >> "$GITHUB_PATH"
 
-      - name: Name the wine package cache after the runner image
-        id: wine-key
-        if: matrix.target == 'windows-x64'
-        run: echo "key=wine-debs-${ImageOS:-local}-${ImageVersion:-local}-1" >> "$GITHUB_OUTPUT"
-
       - name: Restore the wine packages
+        id: wine-cache
         if: matrix.target == 'windows-x64'
         timeout-minutes: 5
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/wine-debs
-          key: ${{ steps.wine-key.outputs.key }}
+          key: wine-debs-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: wine-debs-${{ runner.os }}-
 
       - name: Install wine to run the Windows program
+        id: wine
         if: matrix.target == 'windows-x64'
         timeout-minutes: 5
         run: scripts/ci/wine.sh "$RUNNER_TEMP/wine-debs"
+
+      - name: Save the wine packages it downloaded
+        if: matrix.target == 'windows-x64' && steps.wine.outputs.downloaded == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/wine-debs
+          key: wine-debs-${{ runner.os }}-${{ github.run_id }}-${{ matrix.guest }}
 
       - name: Show the Android NDK
         if: matrix.target == 'android-arm64'
