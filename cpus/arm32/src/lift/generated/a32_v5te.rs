@@ -20539,299 +20539,299 @@ pub(super) fn LDM_uw_A1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), L
     let v135 = b.konst(Width::new(32), 0x4);
     let v136 = b.bin(BinOp::Add, v133, v135);
     let v138 = if s134 { v136 } else { v133 };
-    let s139: bool = s2 == 0x1u128;
-    let s140: i128 = (4i128).wrapping_mul(s119);
-    let s141: u128 = ((s140 >> 0) as u128) & 0xffffffff;
-    let v142 = b.konst(Width::new(32), s141);
-    let v143 = b.bin(BinOp::Add, v126, v142);
-    let s145: i128 = (4i128).wrapping_mul(s119);
-    let s146: u128 = ((s145 >> 0) as u128) & 0xffffffff;
-    let v147 = b.konst(Width::new(32), s146);
-    let v148 = b.bin(BinOp::Sub, v126, v147);
-    let v149 = if s139 { v143 } else { v148 };
-    st.r_set(b, s5 as u32, v149, None);
-    let s150: u128 = (s4 >> 0) & 0x1;
-    let s151: bool = s150 == 0x1u128;
-    let v152 = b.extract(v138, 2, Width::new(30));
-    let v153 = b.konst(Width::new(2), 0x0);
-    let v154 = b.concat(v152, v153);
-    if s151 {
+    let s139: u128 = (s4 >> 0) & 0x1;
+    let s140: bool = s139 == 0x1u128;
+    let v141 = b.extract(v138, 2, Width::new(30));
+    let v142 = b.konst(Width::new(2), 0x0);
+    let v143 = b.concat(v141, v142);
+    if s140 {
         st.data(false, 4);
     }
-    let v155 = if s151 {
-        b.load(v154, Width::new(32), Endian::Little, Order::Plain)
+    let v144 = if s140 {
+        b.load(v143, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s151 {
-        st.user_set(b, 0, v155, None);
+    if s140 {
+        st.user_set(b, 0, v144, None);
     }
-    let v156 = b.konst(Width::new(32), 0x4);
-    let v157 = b.bin(BinOp::Add, v138, v156);
-    let v159 = if s151 { v157 } else { v138 };
-    let s160: u128 = (s4 >> 1) & 0x1;
-    let s161: bool = s160 == 0x1u128;
-    let v162 = b.extract(v159, 2, Width::new(30));
-    let v163 = b.konst(Width::new(2), 0x0);
-    let v164 = b.concat(v162, v163);
-    if s161 {
+    let v145 = b.konst(Width::new(32), 0x4);
+    let v146 = b.bin(BinOp::Add, v138, v145);
+    let v148 = if s140 { v146 } else { v138 };
+    let s149: u128 = (s4 >> 1) & 0x1;
+    let s150: bool = s149 == 0x1u128;
+    let v151 = b.extract(v148, 2, Width::new(30));
+    let v152 = b.konst(Width::new(2), 0x0);
+    let v153 = b.concat(v151, v152);
+    if s150 {
         st.data(false, 4);
     }
-    let v165 = if s161 {
-        b.load(v164, Width::new(32), Endian::Little, Order::Plain)
+    let v154 = if s150 {
+        b.load(v153, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s161 {
-        st.user_set(b, 1, v165, None);
+    if s150 {
+        st.user_set(b, 1, v154, None);
     }
-    let v166 = b.konst(Width::new(32), 0x4);
-    let v167 = b.bin(BinOp::Add, v159, v166);
-    let v169 = if s161 { v167 } else { v159 };
-    let s170: u128 = (s4 >> 2) & 0x1;
-    let s171: bool = s170 == 0x1u128;
-    let v172 = b.extract(v169, 2, Width::new(30));
-    let v173 = b.konst(Width::new(2), 0x0);
-    let v174 = b.concat(v172, v173);
-    if s171 {
+    let v155 = b.konst(Width::new(32), 0x4);
+    let v156 = b.bin(BinOp::Add, v148, v155);
+    let v158 = if s150 { v156 } else { v148 };
+    let s159: u128 = (s4 >> 2) & 0x1;
+    let s160: bool = s159 == 0x1u128;
+    let v161 = b.extract(v158, 2, Width::new(30));
+    let v162 = b.konst(Width::new(2), 0x0);
+    let v163 = b.concat(v161, v162);
+    if s160 {
         st.data(false, 4);
     }
-    let v175 = if s171 {
-        b.load(v174, Width::new(32), Endian::Little, Order::Plain)
+    let v164 = if s160 {
+        b.load(v163, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s171 {
-        st.user_set(b, 2, v175, None);
+    if s160 {
+        st.user_set(b, 2, v164, None);
     }
-    let v176 = b.konst(Width::new(32), 0x4);
-    let v177 = b.bin(BinOp::Add, v169, v176);
-    let v179 = if s171 { v177 } else { v169 };
-    let s180: u128 = (s4 >> 3) & 0x1;
-    let s181: bool = s180 == 0x1u128;
-    let v182 = b.extract(v179, 2, Width::new(30));
-    let v183 = b.konst(Width::new(2), 0x0);
-    let v184 = b.concat(v182, v183);
-    if s181 {
+    let v165 = b.konst(Width::new(32), 0x4);
+    let v166 = b.bin(BinOp::Add, v158, v165);
+    let v168 = if s160 { v166 } else { v158 };
+    let s169: u128 = (s4 >> 3) & 0x1;
+    let s170: bool = s169 == 0x1u128;
+    let v171 = b.extract(v168, 2, Width::new(30));
+    let v172 = b.konst(Width::new(2), 0x0);
+    let v173 = b.concat(v171, v172);
+    if s170 {
         st.data(false, 4);
     }
-    let v185 = if s181 {
-        b.load(v184, Width::new(32), Endian::Little, Order::Plain)
+    let v174 = if s170 {
+        b.load(v173, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s181 {
-        st.user_set(b, 3, v185, None);
+    if s170 {
+        st.user_set(b, 3, v174, None);
     }
-    let v186 = b.konst(Width::new(32), 0x4);
-    let v187 = b.bin(BinOp::Add, v179, v186);
-    let v189 = if s181 { v187 } else { v179 };
-    let s190: u128 = (s4 >> 4) & 0x1;
-    let s191: bool = s190 == 0x1u128;
-    let v192 = b.extract(v189, 2, Width::new(30));
-    let v193 = b.konst(Width::new(2), 0x0);
-    let v194 = b.concat(v192, v193);
-    if s191 {
+    let v175 = b.konst(Width::new(32), 0x4);
+    let v176 = b.bin(BinOp::Add, v168, v175);
+    let v178 = if s170 { v176 } else { v168 };
+    let s179: u128 = (s4 >> 4) & 0x1;
+    let s180: bool = s179 == 0x1u128;
+    let v181 = b.extract(v178, 2, Width::new(30));
+    let v182 = b.konst(Width::new(2), 0x0);
+    let v183 = b.concat(v181, v182);
+    if s180 {
         st.data(false, 4);
     }
-    let v195 = if s191 {
-        b.load(v194, Width::new(32), Endian::Little, Order::Plain)
+    let v184 = if s180 {
+        b.load(v183, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s191 {
-        st.user_set(b, 4, v195, None);
+    if s180 {
+        st.user_set(b, 4, v184, None);
     }
-    let v196 = b.konst(Width::new(32), 0x4);
-    let v197 = b.bin(BinOp::Add, v189, v196);
-    let v199 = if s191 { v197 } else { v189 };
-    let s200: u128 = (s4 >> 5) & 0x1;
-    let s201: bool = s200 == 0x1u128;
-    let v202 = b.extract(v199, 2, Width::new(30));
-    let v203 = b.konst(Width::new(2), 0x0);
-    let v204 = b.concat(v202, v203);
-    if s201 {
+    let v185 = b.konst(Width::new(32), 0x4);
+    let v186 = b.bin(BinOp::Add, v178, v185);
+    let v188 = if s180 { v186 } else { v178 };
+    let s189: u128 = (s4 >> 5) & 0x1;
+    let s190: bool = s189 == 0x1u128;
+    let v191 = b.extract(v188, 2, Width::new(30));
+    let v192 = b.konst(Width::new(2), 0x0);
+    let v193 = b.concat(v191, v192);
+    if s190 {
         st.data(false, 4);
     }
-    let v205 = if s201 {
-        b.load(v204, Width::new(32), Endian::Little, Order::Plain)
+    let v194 = if s190 {
+        b.load(v193, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s201 {
-        st.user_set(b, 5, v205, None);
+    if s190 {
+        st.user_set(b, 5, v194, None);
     }
-    let v206 = b.konst(Width::new(32), 0x4);
-    let v207 = b.bin(BinOp::Add, v199, v206);
-    let v209 = if s201 { v207 } else { v199 };
-    let s210: u128 = (s4 >> 6) & 0x1;
-    let s211: bool = s210 == 0x1u128;
-    let v212 = b.extract(v209, 2, Width::new(30));
-    let v213 = b.konst(Width::new(2), 0x0);
-    let v214 = b.concat(v212, v213);
-    if s211 {
+    let v195 = b.konst(Width::new(32), 0x4);
+    let v196 = b.bin(BinOp::Add, v188, v195);
+    let v198 = if s190 { v196 } else { v188 };
+    let s199: u128 = (s4 >> 6) & 0x1;
+    let s200: bool = s199 == 0x1u128;
+    let v201 = b.extract(v198, 2, Width::new(30));
+    let v202 = b.konst(Width::new(2), 0x0);
+    let v203 = b.concat(v201, v202);
+    if s200 {
         st.data(false, 4);
     }
-    let v215 = if s211 {
-        b.load(v214, Width::new(32), Endian::Little, Order::Plain)
+    let v204 = if s200 {
+        b.load(v203, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s211 {
-        st.user_set(b, 6, v215, None);
+    if s200 {
+        st.user_set(b, 6, v204, None);
     }
-    let v216 = b.konst(Width::new(32), 0x4);
-    let v217 = b.bin(BinOp::Add, v209, v216);
-    let v219 = if s211 { v217 } else { v209 };
-    let s220: u128 = (s4 >> 7) & 0x1;
-    let s221: bool = s220 == 0x1u128;
-    let v222 = b.extract(v219, 2, Width::new(30));
-    let v223 = b.konst(Width::new(2), 0x0);
-    let v224 = b.concat(v222, v223);
-    if s221 {
+    let v205 = b.konst(Width::new(32), 0x4);
+    let v206 = b.bin(BinOp::Add, v198, v205);
+    let v208 = if s200 { v206 } else { v198 };
+    let s209: u128 = (s4 >> 7) & 0x1;
+    let s210: bool = s209 == 0x1u128;
+    let v211 = b.extract(v208, 2, Width::new(30));
+    let v212 = b.konst(Width::new(2), 0x0);
+    let v213 = b.concat(v211, v212);
+    if s210 {
         st.data(false, 4);
     }
-    let v225 = if s221 {
-        b.load(v224, Width::new(32), Endian::Little, Order::Plain)
+    let v214 = if s210 {
+        b.load(v213, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s221 {
-        st.user_set(b, 7, v225, None);
+    if s210 {
+        st.user_set(b, 7, v214, None);
     }
-    let v226 = b.konst(Width::new(32), 0x4);
-    let v227 = b.bin(BinOp::Add, v219, v226);
-    let v229 = if s221 { v227 } else { v219 };
-    let s230: u128 = (s4 >> 8) & 0x1;
-    let s231: bool = s230 == 0x1u128;
-    let v232 = b.extract(v229, 2, Width::new(30));
-    let v233 = b.konst(Width::new(2), 0x0);
-    let v234 = b.concat(v232, v233);
-    if s231 {
+    let v215 = b.konst(Width::new(32), 0x4);
+    let v216 = b.bin(BinOp::Add, v208, v215);
+    let v218 = if s210 { v216 } else { v208 };
+    let s219: u128 = (s4 >> 8) & 0x1;
+    let s220: bool = s219 == 0x1u128;
+    let v221 = b.extract(v218, 2, Width::new(30));
+    let v222 = b.konst(Width::new(2), 0x0);
+    let v223 = b.concat(v221, v222);
+    if s220 {
         st.data(false, 4);
     }
-    let v235 = if s231 {
-        b.load(v234, Width::new(32), Endian::Little, Order::Plain)
+    let v224 = if s220 {
+        b.load(v223, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s231 {
-        st.user_set(b, 8, v235, None);
+    if s220 {
+        st.user_set(b, 8, v224, None);
     }
-    let v236 = b.konst(Width::new(32), 0x4);
-    let v237 = b.bin(BinOp::Add, v229, v236);
-    let v239 = if s231 { v237 } else { v229 };
-    let s240: u128 = (s4 >> 9) & 0x1;
-    let s241: bool = s240 == 0x1u128;
-    let v242 = b.extract(v239, 2, Width::new(30));
-    let v243 = b.konst(Width::new(2), 0x0);
-    let v244 = b.concat(v242, v243);
-    if s241 {
+    let v225 = b.konst(Width::new(32), 0x4);
+    let v226 = b.bin(BinOp::Add, v218, v225);
+    let v228 = if s220 { v226 } else { v218 };
+    let s229: u128 = (s4 >> 9) & 0x1;
+    let s230: bool = s229 == 0x1u128;
+    let v231 = b.extract(v228, 2, Width::new(30));
+    let v232 = b.konst(Width::new(2), 0x0);
+    let v233 = b.concat(v231, v232);
+    if s230 {
         st.data(false, 4);
     }
-    let v245 = if s241 {
-        b.load(v244, Width::new(32), Endian::Little, Order::Plain)
+    let v234 = if s230 {
+        b.load(v233, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s241 {
-        st.user_set(b, 9, v245, None);
+    if s230 {
+        st.user_set(b, 9, v234, None);
     }
-    let v246 = b.konst(Width::new(32), 0x4);
-    let v247 = b.bin(BinOp::Add, v239, v246);
-    let v249 = if s241 { v247 } else { v239 };
-    let s250: u128 = (s4 >> 10) & 0x1;
-    let s251: bool = s250 == 0x1u128;
-    let v252 = b.extract(v249, 2, Width::new(30));
-    let v253 = b.konst(Width::new(2), 0x0);
-    let v254 = b.concat(v252, v253);
-    if s251 {
+    let v235 = b.konst(Width::new(32), 0x4);
+    let v236 = b.bin(BinOp::Add, v228, v235);
+    let v238 = if s230 { v236 } else { v228 };
+    let s239: u128 = (s4 >> 10) & 0x1;
+    let s240: bool = s239 == 0x1u128;
+    let v241 = b.extract(v238, 2, Width::new(30));
+    let v242 = b.konst(Width::new(2), 0x0);
+    let v243 = b.concat(v241, v242);
+    if s240 {
         st.data(false, 4);
     }
-    let v255 = if s251 {
-        b.load(v254, Width::new(32), Endian::Little, Order::Plain)
+    let v244 = if s240 {
+        b.load(v243, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s251 {
-        st.user_set(b, 10, v255, None);
+    if s240 {
+        st.user_set(b, 10, v244, None);
     }
-    let v256 = b.konst(Width::new(32), 0x4);
-    let v257 = b.bin(BinOp::Add, v249, v256);
-    let v259 = if s251 { v257 } else { v249 };
-    let s260: u128 = (s4 >> 11) & 0x1;
-    let s261: bool = s260 == 0x1u128;
-    let v262 = b.extract(v259, 2, Width::new(30));
-    let v263 = b.konst(Width::new(2), 0x0);
-    let v264 = b.concat(v262, v263);
-    if s261 {
+    let v245 = b.konst(Width::new(32), 0x4);
+    let v246 = b.bin(BinOp::Add, v238, v245);
+    let v248 = if s240 { v246 } else { v238 };
+    let s249: u128 = (s4 >> 11) & 0x1;
+    let s250: bool = s249 == 0x1u128;
+    let v251 = b.extract(v248, 2, Width::new(30));
+    let v252 = b.konst(Width::new(2), 0x0);
+    let v253 = b.concat(v251, v252);
+    if s250 {
         st.data(false, 4);
     }
-    let v265 = if s261 {
-        b.load(v264, Width::new(32), Endian::Little, Order::Plain)
+    let v254 = if s250 {
+        b.load(v253, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s261 {
-        st.user_set(b, 11, v265, None);
+    if s250 {
+        st.user_set(b, 11, v254, None);
     }
-    let v266 = b.konst(Width::new(32), 0x4);
-    let v267 = b.bin(BinOp::Add, v259, v266);
-    let v269 = if s261 { v267 } else { v259 };
-    let s270: u128 = (s4 >> 12) & 0x1;
-    let s271: bool = s270 == 0x1u128;
-    let v272 = b.extract(v269, 2, Width::new(30));
-    let v273 = b.konst(Width::new(2), 0x0);
-    let v274 = b.concat(v272, v273);
-    if s271 {
+    let v255 = b.konst(Width::new(32), 0x4);
+    let v256 = b.bin(BinOp::Add, v248, v255);
+    let v258 = if s250 { v256 } else { v248 };
+    let s259: u128 = (s4 >> 12) & 0x1;
+    let s260: bool = s259 == 0x1u128;
+    let v261 = b.extract(v258, 2, Width::new(30));
+    let v262 = b.konst(Width::new(2), 0x0);
+    let v263 = b.concat(v261, v262);
+    if s260 {
         st.data(false, 4);
     }
-    let v275 = if s271 {
-        b.load(v274, Width::new(32), Endian::Little, Order::Plain)
+    let v264 = if s260 {
+        b.load(v263, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s271 {
-        st.user_set(b, 12, v275, None);
+    if s260 {
+        st.user_set(b, 12, v264, None);
     }
-    let v276 = b.konst(Width::new(32), 0x4);
-    let v277 = b.bin(BinOp::Add, v269, v276);
-    let v279 = if s271 { v277 } else { v269 };
-    let s280: u128 = (s4 >> 13) & 0x1;
-    let s281: bool = s280 == 0x1u128;
-    let v282 = b.extract(v279, 2, Width::new(30));
-    let v283 = b.konst(Width::new(2), 0x0);
-    let v284 = b.concat(v282, v283);
-    if s281 {
+    let v265 = b.konst(Width::new(32), 0x4);
+    let v266 = b.bin(BinOp::Add, v258, v265);
+    let v268 = if s260 { v266 } else { v258 };
+    let s269: u128 = (s4 >> 13) & 0x1;
+    let s270: bool = s269 == 0x1u128;
+    let v271 = b.extract(v268, 2, Width::new(30));
+    let v272 = b.konst(Width::new(2), 0x0);
+    let v273 = b.concat(v271, v272);
+    if s270 {
         st.data(false, 4);
     }
-    let v285 = if s281 {
-        b.load(v284, Width::new(32), Endian::Little, Order::Plain)
+    let v274 = if s270 {
+        b.load(v273, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s281 {
-        st.user_set(b, 13, v285, None);
+    if s270 {
+        st.user_set(b, 13, v274, None);
     }
-    let v286 = b.konst(Width::new(32), 0x4);
-    let v287 = b.bin(BinOp::Add, v279, v286);
-    let v289 = if s281 { v287 } else { v279 };
-    let s290: u128 = (s4 >> 14) & 0x1;
-    let s291: bool = s290 == 0x1u128;
-    let v292 = b.extract(v289, 2, Width::new(30));
-    let v293 = b.konst(Width::new(2), 0x0);
-    let v294 = b.concat(v292, v293);
-    if s291 {
+    let v275 = b.konst(Width::new(32), 0x4);
+    let v276 = b.bin(BinOp::Add, v268, v275);
+    let v278 = if s270 { v276 } else { v268 };
+    let s279: u128 = (s4 >> 14) & 0x1;
+    let s280: bool = s279 == 0x1u128;
+    let v281 = b.extract(v278, 2, Width::new(30));
+    let v282 = b.konst(Width::new(2), 0x0);
+    let v283 = b.concat(v281, v282);
+    if s280 {
         st.data(false, 4);
     }
-    let v295 = if s291 {
-        b.load(v294, Width::new(32), Endian::Little, Order::Plain)
+    let v284 = if s280 {
+        b.load(v283, Width::new(32), Endian::Little, Order::Plain)
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s291 {
-        st.user_set(b, 14, v295, None);
+    if s280 {
+        st.user_set(b, 14, v284, None);
     }
+    let s289: bool = s2 == 0x1u128;
+    let s290: i128 = (4i128).wrapping_mul(s119);
+    let s291: u128 = ((s290 >> 0) as u128) & 0xffffffff;
+    let v292 = b.konst(Width::new(32), s291);
+    let v293 = b.bin(BinOp::Add, v126, v292);
+    let s295: i128 = (4i128).wrapping_mul(s119);
+    let s296: u128 = ((s295 >> 0) as u128) & 0xffffffff;
+    let v297 = b.konst(Width::new(32), s296);
+    let v298 = b.bin(BinOp::Sub, v126, v297);
+    let v299 = if s289 { v293 } else { v298 };
+    st.r_set(b, s5 as u32, v299, None);
     st.internal(1);
     Ok(())
 }

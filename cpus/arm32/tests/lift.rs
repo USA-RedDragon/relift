@@ -156,6 +156,28 @@ fn ldm_with_the_s_bit_and_writeback_loads_the_user_bank() {
     assert_eq!(c.get(regs::r(1)), 0x0200_0014);
 }
 
+/// Console results of the ldm2 probe (ARM7TDMI, IRQ mode): a base in the
+/// list of `LDMIA Rn!,{..}^` keeps the loaded word.
+#[test]
+fn ldm_with_the_s_bit_and_writeback_keeps_a_loaded_base() {
+    let mut c = Cpu::new(Mode::Irq);
+    for (k, b) in c.mem.bytes[0x10..0x4c].iter_mut().enumerate() {
+        *b = if k % 4 == 3 {
+            0xc0
+        } else if k % 4 == 0 {
+            (k / 4) as u8
+        } else {
+            0
+        };
+    }
+    c.put(regs::r(1), 0x0200_0010);
+    c.put(regs::r(13), 0xb000_000d);
+    c.run(0xe8f1_7fff, false);
+    assert_eq!(c.get(regs::r(1)), 0xc000_0001);
+    assert_eq!(c.get(regs::r(13)), 0xb000_000d);
+    assert_eq!(c.get(Bank::Usr.slot(13).expect("usr r13")), 0xc000_000d);
+}
+
 #[test]
 fn swi_enters_supervisor_mode() {
     let mut c = Cpu::new(Mode::Sys);

@@ -524,9 +524,10 @@ function clause __DecodeA32_BranchBlock ((pc, ([_, _, _, _, bitone, bitzero, bit
 /* LDM with the S bit, base writeback and no R15 in the list: the base of
  * the current mode is written back, then the user bank's registers are
  * loaded, so a loaded base wins. Unpredictable (ARM ARM); the DS SDK's IRQ
- * thread switch loads a thread's context with it. Provisional: the
- * writeback's bank and order follow the ARM7TDMI and ARM946E-S manuals'
- * LDM order until console results (the ldm2 probe) settle them. */
+ * thread switch loads a thread's context with it. Console results on the
+ * ARM7TDMI (DS, in IRQ, SVC and system mode): the base of the current mode
+ * takes the writeback, a banked R13 base included, and a base in the list
+ * keeps the loaded word. */
 val decode_aarch32_instrs_LDM_uw_A1enc_AS_txt : (bits(4), bits(1), bits(1), bits(4), bits(16)) -> unit
 function decode_aarch32_instrs_LDM_uw_A1enc_AS_txt (cond, P, U, Rn, register_list) = {
     if ConditionPassed() then {

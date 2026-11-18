@@ -547,11 +547,13 @@ function clause __DecodeA32_BranchBlock ((pc, ([_, _, _, _, bitone, bitzero, bit
 }
 
 /* LDM with the S bit, base writeback and no R15 in the list: the base of
- * the current mode is written back, then the user bank's registers are
- * loaded, so a loaded base wins. Unpredictable (ARM ARM); the DS SDK's IRQ
- * thread switch loads a thread's context with it. Provisional: the
- * writeback's bank and order follow the ARM7TDMI and ARM946E-S manuals'
- * LDM order until console results (the ldm2 probe) settle them. */
+ * the current mode is written back after the user bank's registers are
+ * loaded, so the writeback wins over a loaded base. Unpredictable (ARM
+ * ARM); the DS SDK's IRQ thread switch loads a thread's context with it.
+ * Console results on the ARM946E-S (DS, in IRQ, SVC and system mode): the
+ * base of the current mode takes the writeback, a banked R13 base
+ * included, and a base in the list ends with the written-back address,
+ * where the ARM7TDMI keeps the loaded word. */
 val decode_aarch32_instrs_LDM_uw_A1enc_AS_txt : (bits(4), bits(1), bits(1), bits(4), bits(16)) -> unit
 function decode_aarch32_instrs_LDM_uw_A1enc_AS_txt (cond, P, U, Rn, register_list) = {
     if ConditionPassed() then {
@@ -560,7 +562,6 @@ function decode_aarch32_instrs_LDM_uw_A1enc_AS_txt (cond, P, U, Rn, register_lis
         let base : bits(32) = R_read(n);
         let low : bits(32) = if U == 0b1 then base else base - 4 * c;
         address : bits(32) = if P == U then low + 4 else low;
-        R_set(n) = if U == 0b1 then base + 4 * c else base - 4 * c;
         foreach (i from 0 to 14 by 1 in inc) {
             if [register_list[i]] == 0b1 then {
                 Rmode_set(i, M32_User) = __v4t_read(address[31 .. 2] @ 0b00, 4);
@@ -568,6 +569,7 @@ function decode_aarch32_instrs_LDM_uw_A1enc_AS_txt (cond, P, U, Rn, register_lis
             };
             ()
         };
+        R_set(n) = if U == 0b1 then base + 4 * c else base - 4 * c;
         __v4t_internal(1)
     };
     ()

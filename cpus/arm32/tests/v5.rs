@@ -3,7 +3,7 @@
 
 use relift_cpu_arm32::decode::Profile;
 use relift_cpu_arm32::lift::{self, COND_FAIL};
-use relift_cpu_arm32::regs::{self, Mode};
+use relift_cpu_arm32::regs::{self, Bank, Mode};
 use relift_ir::interp::{self, Error, FlatMemory, Intrinsics, State};
 use relift_ir::{Flow, Op, Reg};
 
@@ -214,4 +214,30 @@ fn qadd_keeps_q_and_msr_spsr_writes_it() {
     c.put(regs::r(3), 0x0800_0000);
     c.run(0xe168_f003, false); // MSR SPSR_f, r3
     assert_eq!(c.get(Mode::Svc.spsr().unwrap()), 0x0800_0000);
+}
+
+/// Console results of the ldm2 probe (ARM946E-S, IRQ mode): the writeback
+/// of `LDMIA Rn!,{..}^` lands after the user bank's loads, in the current
+/// mode's register, so a base in the list ends with the written-back address.
+#[test]
+fn ldm_with_the_s_bit_and_writeback_writes_the_base_back_last() {
+    let mut c = Cpu::new(Mode::Irq);
+    for i in 0..15 {
+        c.word(0x0200_0010 + 4 * i, 0xc000_0000 | i);
+    }
+    c.put(regs::r(1), 0x0200_0010);
+    c.put(regs::r(13), 0xb000_000d);
+    c.run(0xe8f1_7fff, false);
+    assert_eq!(c.get(regs::r(1)), 0x0200_004c);
+    assert_eq!(c.get(regs::r(0)), 0xc000_0000);
+    assert_eq!(c.get(regs::r(13)), 0xb000_000d);
+    assert_eq!(c.get(Bank::Usr.slot(13).expect("usr r13")), 0xc000_000d);
+    let mut c = Cpu::new(Mode::Irq);
+    for i in 0..15 {
+        c.word(0x0200_0010 + 4 * i, 0xc000_0000 | i);
+    }
+    c.put(regs::r(13), 0x0200_0010);
+    c.run(0xe8fd_7fff, false);
+    assert_eq!(c.get(regs::r(13)), 0x0200_004c);
+    assert_eq!(c.get(Bank::Usr.slot(13).expect("usr r13")), 0xc000_000d);
 }
