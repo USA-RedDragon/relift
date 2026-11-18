@@ -1,23 +1,32 @@
 /**
  * @file android_display.c
  * @brief Windows on the displays besides the app's own, for guests with more than one screen (a dual-screen
- * handheld, a foldable, a phone with a connected display). SDL3 on Android supports one window, so the app's
- * Java side (MainActivity, Displays) puts a Presentation with a SurfaceView on the display and hands its surface
- * and touches to these functions; frames are scaled in software into the surface's buffer.
+ * handheld, a foldable, a phone with a connected display). An Android window lives on one display, and SDL3 on
+ * Android has one window, so the app's Java side (MainActivity, Displays) puts a Presentation with a SurfaceView on
+ * each other display and hands its surface and touches to these functions. Frames go to the GPU: each window has a
+ * Vulkan swapchain of its own on the core's device, drawn by a presenter thread (core/present.h), scaled and
+ * filtered the way the app's main window is.
+ *
+ * The surface's life comes from the Java UI thread: a new or resized surface tells the presenter to make its
+ * swapchain again, and a surface going away returns only after the presenter has let go of it, as Android requires
+ * before surfaceDestroyed returns.
  */
 #ifdef __ANDROID__
 
 #include "core.h"
 #include "hostlib.h"
+#include "present.h"
 
 #include <relift/window.h>
 
 #include <SDL3/SDL.h>
 
+#define VK_USE_PLATFORM_ANDROID_KHR
+#include <vulkan/vulkan.h>
+
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <jni.h>
-#include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,17 +49,37 @@ typedef struct xdisplay {
     ANativeWindow *nw;
     uint32_t width, height;
     uint32_t frame_w, frame_h;
-    uint32_t rx, ry, rw, rh;
+    rl_present_rect place;
     bool fit;
     finger fingers[MAX_FINGERS];
-    uint32_t *xmap;
-    size_t xmap_cap;
+    rl_present *pres;
 } xdisplay;
 
 static const rl_window_backend g_extra;
 static xdisplay g_disp[MAX_DISPLAYS];
+/** @brief Guards the fields of g_disp. */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+/** @brief Held while a presenter is made, closed or told about its surface, so none of them races another. */
+static pthread_mutex_t g_pres_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int32_t rl_android_vulkan_surface(void *native_window, void *instance, uint64_t *surface)
+{
+    *surface = 0;
+    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)(uintptr_t)rl_hostlib_vulkan_gipa();
+    PFN_vkCreateAndroidSurfaceKHR create =
+        gipa ? (PFN_vkCreateAndroidSurfaceKHR)gipa((VkInstance)instance, "vkCreateAndroidSurfaceKHR") : NULL;
+    if (!create || !native_window)
+        return VK_ERROR_INITIALIZATION_FAILED;
+    VkAndroidSurfaceCreateInfoKHR info = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
+        .window = native_window,
+    };
+    VkSurfaceKHR s = VK_NULL_HANDLE;
+    VkResult r = create((VkInstance)instance, &info, NULL, &s);
+    memcpy(surface, &s, sizeof *surface);
+    return r;
+}
 
 typedef struct call_req {
     const char *method, *sig;
@@ -132,8 +161,14 @@ rl_window *rl_android_display_open(uint32_t index)
     d->head.extra = true;
     d->fit = true;
     pthread_mutex_unlock(&g_lock);
-    if (!call_int("reliftDisplayOpen", "(I)I", (int)index, NULL)) {
-        d->used = false;
+    pthread_mutex_lock(&g_pres_lock);
+    rl_present *pres = rl_present_open(&d->head);
+    pthread_mutex_lock(&g_lock);
+    d->pres = pres;
+    pthread_mutex_unlock(&g_lock);
+    pthread_mutex_unlock(&g_pres_lock);
+    if (!pres || !call_int("reliftDisplayOpen", "(I)I", (int)index, NULL)) {
+        x_close(&d->head);
         return NULL;
     }
     struct timespec t;
@@ -157,16 +192,21 @@ static void x_close(rl_window *h)
     xdisplay *d = (xdisplay *)h;
     int index = (int)(d - g_disp);
     call_int("reliftDisplayClose", "(I)I", index, NULL);
+    pthread_mutex_lock(&g_pres_lock);
+    pthread_mutex_lock(&g_lock);
+    rl_present *pres = d->pres;
+    d->pres = NULL;
+    pthread_mutex_unlock(&g_lock);
+    rl_present_close(pres);
     pthread_mutex_lock(&g_lock);
     if (d->nw)
         ANativeWindow_release(d->nw);
     d->nw = NULL;
     memset(d->fingers, 0, sizeof d->fingers);
-    free(d->xmap);
-    d->xmap = NULL;
-    d->xmap_cap = 0;
+    memset(&d->place, 0, sizeof d->place);
     d->used = false;
     pthread_mutex_unlock(&g_lock);
+    pthread_mutex_unlock(&g_pres_lock);
 }
 
 static void x_size(rl_window *h, uint32_t *width, uint32_t *height)
@@ -186,73 +226,31 @@ static void x_set_fit(rl_window *h, bool fit)
     pthread_mutex_unlock(&g_lock);
 }
 
+static int32_t x_vulkan_surface(rl_window *h, void *instance, uint64_t *surface)
+{
+    xdisplay *d = (xdisplay *)h;
+    pthread_mutex_lock(&g_lock);
+    int32_t r = d->nw ? rl_android_vulkan_surface(d->nw, instance, surface) : VK_ERROR_INITIALIZATION_FAILED;
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
 static void x_present(rl_window *h, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_width,
                       uint32_t shown_height)
 {
     xdisplay *d = (xdisplay *)h;
-    (void)shown_width;
-    (void)shown_height;
     pthread_mutex_lock(&g_lock);
-    ANativeWindow *nw = d->nw;
-    if (!nw || !width || !height) {
-        pthread_mutex_unlock(&g_lock);
-        return;
-    }
-    ANativeWindow_acquire(nw);
+    rl_present *pres = d->pres;
     bool fit = d->fit;
+    uint32_t ww = d->width, wh = d->height;
     pthread_mutex_unlock(&g_lock);
-
-    ANativeWindow_Buffer buf;
-    if (ANativeWindow_lock(nw, &buf, NULL) == 0) {
-        uint32_t bw = (uint32_t)buf.width, bh = (uint32_t)buf.height;
-        float s = fminf((float)bw / (float)width, (float)bh / (float)height);
-        if (!fit && s >= 1.0f)
-            s = floorf(s);
-        uint32_t rw = (uint32_t)((float)width * s), rh = (uint32_t)((float)height * s);
-        if (rw > bw)
-            rw = bw;
-        if (rh > bh)
-            rh = bh;
-        uint32_t rx = (bw - rw) / 2, ry = (bh - rh) / 2;
-        if (buf.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM || buf.format == AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM) {
-            if (d->xmap_cap < rw) {
-                free(d->xmap);
-                d->xmap = malloc(rw * sizeof *d->xmap);
-                d->xmap_cap = d->xmap ? rw : 0;
-            }
-            uint32_t *xm = d->xmap;
-            if (xm) {
-                for (uint32_t x = 0; x < rw; x++)
-                    xm[x] = (uint32_t)((uint64_t)x * width / rw);
-                uint32_t *base = buf.bits;
-                for (uint32_t y = 0; y < bh; y++) {
-                    uint32_t *row = base + (size_t)y * (uint32_t)buf.stride;
-                    if (y < ry || y >= ry + rh) {
-                        memset(row, 0, (size_t)bw * 4u);
-                        continue;
-                    }
-                    memset(row, 0, (size_t)rx * 4u);
-                    memset(row + rx + rw, 0, (size_t)(bw - rx - rw) * 4u);
-                    const uint8_t *src = rgb + (size_t)((uint64_t)(y - ry) * height / rh) * width * 3u;
-                    uint32_t *dst = row + rx;
-                    for (uint32_t x = 0; x < rw; x++) {
-                        const uint8_t *p = src + (size_t)xm[x] * 3u;
-                        dst[x] = 0xFF000000u | (uint32_t)p[2] << 16 | (uint32_t)p[1] << 8 | p[0];
-                    }
-                }
-            }
-        }
-        ANativeWindow_unlockAndPost(nw);
-        pthread_mutex_lock(&g_lock);
-        d->frame_w = width;
-        d->frame_h = height;
-        d->rx = rx;
-        d->ry = ry;
-        d->rw = rw;
-        d->rh = rh;
-        pthread_mutex_unlock(&g_lock);
-    }
-    ANativeWindow_release(nw);
+    rl_present_rect place;
+    rl_present_frame(pres, rgb, width, height, shown_width, shown_height, fit, ww, wh, &place);
+    pthread_mutex_lock(&g_lock);
+    d->frame_w = width;
+    d->frame_h = height;
+    d->place = place;
+    pthread_mutex_unlock(&g_lock);
 }
 
 static uint32_t x_touches(rl_window *h, rl_window_touch *out, uint32_t max)
@@ -260,11 +258,12 @@ static uint32_t x_touches(rl_window *h, rl_window_touch *out, uint32_t max)
     xdisplay *d = (xdisplay *)h;
     uint32_t n = 0;
     pthread_mutex_lock(&g_lock);
-    if (d->rw && d->rh) {
+    rl_present_rect r = d->place;
+    if (r.w && r.h) {
         for (int i = 0; i < MAX_FINGERS && n < max; i++) {
             if (!d->fingers[i].on)
                 continue;
-            float fx = (d->fingers[i].x - (float)d->rx) / (float)d->rw, fy = (d->fingers[i].y - (float)d->ry) / (float)d->rh;
+            float fx = (d->fingers[i].x - (float)r.x) / (float)r.w, fy = (d->fingers[i].y - (float)r.y) / (float)r.h;
             out[n].id = (uint64_t)(uint32_t)d->fingers[i].id;
             out[n].x = fx <= 0.0f ? 0 : fx >= 1.0f ? d->frame_w - 1 : (uint32_t)(fx * (float)d->frame_w);
             out[n].y = fy <= 0.0f ? 0 : fy >= 1.0f ? d->frame_h - 1 : (uint32_t)(fy * (float)d->frame_h);
@@ -279,6 +278,7 @@ static const rl_window_backend g_extra = {
     .name = "Android display",
     .close = x_close,
     .size = x_size,
+    .vulkan_surface = x_vulkan_surface,
     .present_rgb = x_present,
     .set_fit = x_set_fit,
     .touches = x_touches,
@@ -289,6 +289,10 @@ JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeDisplaySurface(JNI
 JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeDisplayTouch(JNIEnv *env, jclass cls, jint index,
                                                                            jint id, jint action, jfloat x, jfloat y);
 
+/**
+ * The UI thread's surfaceChanged (surface set) and surfaceDestroyed (surface NULL). A different or no surface first
+ * makes the presenter let go of the old one; the old ANativeWindow is released only after that.
+ */
 JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeDisplaySurface(JNIEnv *env, jclass cls, jint index,
                                                                              jobject surface, jint w, jint h)
 {
@@ -297,18 +301,29 @@ JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeDisplaySurface(JNI
         return;
     xdisplay *d = &g_disp[index];
     ANativeWindow *nw = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
-    if (nw)
-        ANativeWindow_setBuffersGeometry(nw, 0, 0, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
+    pthread_mutex_lock(&g_pres_lock);
     pthread_mutex_lock(&g_lock);
-    if (d->nw && d->nw != nw)
-        ANativeWindow_release(d->nw);
+    rl_present *pres = d->pres;
+    ANativeWindow *old = d->nw;
+    pthread_mutex_unlock(&g_lock);
+    if (old && old != nw)
+        rl_present_surface(pres, false);
+    pthread_mutex_lock(&g_lock);
     d->nw = nw;
     d->width = (uint32_t)(w > 0 ? w : 0);
     d->height = (uint32_t)(h > 0 ? h : 0);
-    d->head.generation++;
+    __atomic_add_fetch(&d->head.generation, 1, __ATOMIC_RELEASE);
     memset(d->fingers, 0, sizeof d->fingers);
     pthread_cond_broadcast(&g_cond);
     pthread_mutex_unlock(&g_lock);
+    if (old && old != nw)
+        ANativeWindow_release(old);
+    else if (old)
+        ANativeWindow_release(nw);
+    if (nw)
+        rl_present_surface(pres, true);
+    pthread_mutex_unlock(&g_pres_lock);
+    rl_log(RL_LOG_INFO, "window", "display %d: surface %s %dx%d", (int)index, nw ? "set" : "gone", (int)w, (int)h);
 }
 
 JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeDisplayTouch(JNIEnv *env, jclass cls, jint index,

@@ -105,7 +105,12 @@ and scaled. A device with a second display (a dual-screen handheld, a
 foldable, a phone with a connected display) shows the top screen on the first
 display and the bottom screen on the second through an Android Presentation,
 by the `video.nds_displays` setting, with touches on the second display as the
-pen ([input reference](../reference/input.md#nintendo-ds)). A Switch game's data is not in the APK: `relift push
+pen ([input reference](../reference/input.md#nintendo-ds)). Every display is
+drawn by the GPU: the second one gets a Vulkan swapchain of its own on the
+same device, with the same picture options and scaling (`picture.aa`,
+`picture.filter`) as the first, presented from a thread of its own so the
+game never waits on it. When that display is unplugged the game falls back
+to the one-display layout, and it takes the display again when it comes back. A Switch game's data is not in the APK: `relift push
 --target android-arm64` copies it to the device.
 
 ## iOS: app

@@ -188,16 +188,23 @@ static void fake_size(rl_window *w, uint32_t *width, uint32_t *height)
     *height = ((fake_window *)w)->height;
 }
 
+static int g_opens, g_closes;
+
 static uint32_t fake_count(void) { return g_displays; }
 
 static rl_window *fake_open(uint32_t index)
 {
     (void)index;
+    g_opens++;
     g_second_w.head.b = &g_back;
     return &g_second_w.head;
 }
 
-static void fake_close(rl_window *w) { (void)w; }
+static void fake_close(rl_window *w)
+{
+    (void)w;
+    g_closes++;
+}
 
 static uint32_t fake_touches(rl_window *w, rl_window_touch *out, uint32_t max)
 {
@@ -224,6 +231,7 @@ typedef struct snap {
     uint32_t swapped_main_first, swapped_second_first;
     uint32_t single_h, single_swapped_first, single_swapped_h;
     rl_screens_pen single_swapped_pen;
+    uint32_t unplugged_h, unplugged_presents, unplugged_closes, back_h, back_presents, back_opens;
 } snap;
 
 static snap g_snap;
@@ -283,11 +291,25 @@ static int present_body(void *arg)
     s.pointer.x = 10;
     s.pointer.y = 20;
     g_snap.single_swapped_pen = rl_screens_touch(&g_main_w.head, &s);
+    cfg.swap = false;
+    cfg.displays = RL_SCREENS_DISPLAYS_AUTO;
+    rl_screens_present(&g_main_w.head, &cfg, f);
+    int before = g_second_w.presents;
+    g_displays = 0;
+    rl_screens_present(&g_main_w.head, &cfg, f);
+    g_snap.unplugged_h = g_main_w.shown_h;
+    g_snap.unplugged_presents = (uint32_t)(g_second_w.presents - before);
+    g_snap.unplugged_closes = (uint32_t)g_closes;
+    g_displays = 1;
+    rl_screens_present(&g_main_w.head, &cfg, f);
+    g_snap.back_h = g_main_w.shown_h;
+    g_snap.back_presents = (uint32_t)(g_second_w.presents - before);
+    g_snap.back_opens = (uint32_t)g_opens;
     rl_screens_reset();
     return 0;
 }
 
-TEST(two_displays_each_show_a_screen_and_touches_on_the_second_reach_the_pen)
+TEST(two_displays_each_show_a_screen_touches_on_the_second_reach_the_pen_and_unplugging_falls_back)
 {
     memset(&g_back, 0, sizeof g_back);
     g_back.name = "fake";
@@ -325,4 +347,10 @@ TEST(two_displays_each_show_a_screen_and_touches_on_the_second_reach_the_pen)
     CHECK_EQ(g_snap.single_swapped_h, 384);
     CHECK(g_snap.single_swapped_pen.down);
     CHECK_EQ(g_snap.single_swapped_pen.y, 20);
+    CHECK_EQ(g_snap.unplugged_h, 384);
+    CHECK_EQ(g_snap.unplugged_presents, 0);
+    CHECK_EQ(g_snap.unplugged_closes, 2);
+    CHECK_EQ(g_snap.back_h, 192);
+    CHECK_EQ(g_snap.back_presents, 1);
+    CHECK_EQ(g_snap.back_opens, 3);
 }

@@ -561,18 +561,13 @@ static void do_surface(void *p)
     surface_req *r = p;
     VkSurfaceKHR s = 0;
 #ifdef __ANDROID__
-    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)(uintptr_t)rl_hostlib_vulkan_gipa();
-    PFN_vkCreateAndroidSurfaceKHR create =
-        gipa ? (PFN_vkCreateAndroidSurfaceKHR)gipa((VkInstance)r->instance, "vkCreateAndroidSurfaceKHR") : NULL;
-    VkAndroidSurfaceCreateInfoKHR info = {
-        .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
-        .window = SDL_GetPointerProperty(SDL_GetWindowProperties(r->w->w), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER,
-                                         NULL),
-    };
-    r->ok = create && info.window && create((VkInstance)r->instance, &info, NULL, &s) == VK_SUCCESS;
+    void *nw = SDL_GetPointerProperty(SDL_GetWindowProperties(r->w->w), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
+    uint64_t made = 0;
+    r->ok = nw && rl_android_vulkan_surface(nw, r->instance, &made) == VK_SUCCESS;
+    memcpy(&s, &made, sizeof s);
     if (!r->ok)
         SDL_SetError("vkCreateAndroidSurfaceKHR failed");
-    if (!info.window)
+    if (!nw)
         r->later = true;
 #else
     r->ok = SDL_Vulkan_CreateSurface(r->w->w, (VkInstance)r->instance, NULL, &s);

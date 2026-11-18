@@ -17,6 +17,9 @@ import java.util.List;
  * The displays besides the one the game's activity is on: a Presentation with
  * a SurfaceView on each, whose surface and touches go to the runtime
  * (host/android_display.c), for guests that show a screen on each display.
+ * The runtime draws into each surface with a Vulkan swapchain of its own. A
+ * presentation the system dismisses (its display was unplugged) is
+ * forgotten, so the display can be opened again when it comes back.
  */
 final class Displays {
     static final int MAX = 2;
@@ -57,6 +60,11 @@ final class Displays {
             }
             Pres p = new Pres(act, d.get(index), index);
             open[index] = p;
+            p.setOnDismissListener(x -> {
+                if (open[index] == p) {
+                    open[index] = null;
+                }
+            });
             try {
                 p.show();
             } catch (WindowManager.InvalidDisplayException e) {
@@ -102,6 +110,7 @@ final class Displays {
             MainActivity.nativeDisplaySurface(index, holder.getSurface(), w, h);
         }
 
+        /** Returns only once the runtime's presenter has let go of the surface. */
         @Override
         public void surfaceDestroyed(SurfaceHolder holder) {
             MainActivity.nativeDisplaySurface(index, null, 0, 0);

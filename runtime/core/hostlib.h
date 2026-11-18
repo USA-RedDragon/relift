@@ -53,6 +53,11 @@ RL_RUNTIME_API void rl_hostlib_on_gpu_driver_failed(void (*hook)(const char *nam
 RL_RUNTIME_API uint32_t rl_android_display_count(void);
 /** @brief Opens a window on display index of those rl_android_display_count counts; NULL when it cannot. */
 RL_RUNTIME_API rl_window *rl_android_display_open(uint32_t index);
+/**
+ * @brief Makes a VkSurfaceKHR on host Vulkan instance for an ANativeWindow (vkCreateAndroidSurfaceKHR); returns a
+ * VkResult, VK_ERROR_INITIALIZATION_FAILED without a window or the function.
+ */
+RL_RUNTIME_API int32_t rl_android_vulkan_surface(void *native_window, void *instance, uint64_t *surface);
 
 /**
  * @brief Loads a driver (dir and library: the package folder and its library file name; dir NULL: the system
