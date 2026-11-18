@@ -348,7 +348,8 @@ impl AtomicOp {
 
 /// Fixed table-driven steps of standard ciphers, kept whole so an emitter
 /// can map each to a table or a host instruction instead of the gate-level
-/// circuit the tables stand for. Each is pure and has one meaning.
+/// circuit the tables stand for. Each is pure, has one meaning and works on
+/// 128 bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CryptoOp {
     /// AES `SubBytes` (FIPS-197 5.1.1) on each byte of a 128-bit value.
@@ -360,18 +361,6 @@ pub enum CryptoOp {
     AesMixColumns,
     /// AES `InvMixColumns` (FIPS-197 5.3.3), same layout.
     AesInvMixColumns,
-    /// The SM4 S-box (GB/T 32907) on one byte.
-    Sm4Sbox,
-}
-
-impl CryptoOp {
-    /// The operand and result width.
-    pub fn width(self) -> Width {
-        match self {
-            CryptoOp::Sm4Sbox => Width::W8,
-            _ => Width::W128,
-        }
-    }
 }
 
 /// A 128-bit constant kept as two 64-bit halves, so that it does not raise
@@ -643,7 +632,7 @@ pub enum Op {
     /// the sync has no guest-visible effect besides device time. At most one
     /// per block, and it is the block's last instruction.
     Sync,
-    /// A cipher step of the width [`CryptoOp::width`].
+    /// A cipher step on a 128-bit value, giving 128 bits.
     Crypto(CryptoOp, Value),
     /// The 64-bit pointer authentication code of `data` under the 64-bit
     /// `modifier` and the key `key0:key1` (Arm `ComputePAC` with QARMA5,

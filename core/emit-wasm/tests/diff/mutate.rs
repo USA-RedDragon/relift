@@ -179,8 +179,7 @@ fn swap_fp(f: FpOp, args: &[Value]) -> Op {
 
 /// Breaks the first live atomic, cipher or binary16 operation of `block`:
 /// an atomic update becomes another, a compare-and-swap swaps its expected
-/// and new values, an AES step becomes its inverse and the SM4 S-box a
-/// complement, a binary16 operation another of the same widths. A block
+/// and new values, an AES step becomes its inverse, a binary16 operation another of the same widths. A block
 /// without one is broken by [`mutate`]. Returns what it changed.
 pub fn mutate_newer(block: &mut Block) -> String {
     let live = live(block);
@@ -225,7 +224,6 @@ pub fn mutate_newer(block: &mut Block) -> String {
                 CryptoOp::AesInvSubBytes => Op::Crypto(CryptoOp::AesSubBytes, *x),
                 CryptoOp::AesMixColumns => Op::Crypto(CryptoOp::AesInvMixColumns, *x),
                 CryptoOp::AesInvMixColumns => Op::Crypto(CryptoOp::AesMixColumns, *x),
-                CryptoOp::Sm4Sbox => Op::Un(relift_ir::UnOp::Not, *x),
             },
             Op::Fp(f, args) if widths[i] == 16 || widths[args[0].index()] == 16 => {
                 swap_fp(*f, args)

@@ -61,7 +61,7 @@
 //! | `load.excl.E.O addr` / `store.excl.E.O addr, value` | exclusive memory |
 //! | `atomic.U.E.O addr, value` | [`Op::AtomicRmw`], `U` is `add clr eor set smax smin umax umin swp` |
 //! | `cas.E.O addr, expected, value` | [`Op::CompareSwap`] |
-//! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns sm4.sbox` |
+//! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns` |
 //! | `pac data, modifier, key0, key1` | [`Op::Pac`] |
 //! | `lane.K.W args` | [`Op::Lane`]: `K` is a [`LaneKind`] mnemonic (`add qadds mulhs shli widenlos narrow mulwloss bcast extract insert splat` and so on, see `LANE` in this file), `W` the lane width 8, 16, 32 or 64 (omitted for the bitwise kinds `and or xor andn not select`); shift, broadcast, extract and insert end in `, N`, a decimal immediate |\n//! | `lane.perm v, PAT` / `lane.perm2 a, b, PAT` | [`Op::Permute`]; `PAT` is the 16 byte indices as a 128-bit hex value, byte `i` of the value giving result byte `i` |\n//! | `fence.O` / `clear.excl` | fence, clear the monitor |
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
@@ -176,12 +176,11 @@ const ATOMIC: [(AtomicOp, &str); 9] = [
     (AtomicOp::Swap, "swp"),
 ];
 
-const CRYPTO: [(CryptoOp, &str); 5] = [
+const CRYPTO: [(CryptoOp, &str); 4] = [
     (CryptoOp::AesSubBytes, "aes.subbytes"),
     (CryptoOp::AesInvSubBytes, "aes.invsubbytes"),
     (CryptoOp::AesMixColumns, "aes.mixcolumns"),
     (CryptoOp::AesInvMixColumns, "aes.invmixcolumns"),
-    (CryptoOp::Sm4Sbox, "sm4.sbox"),
 ];
 
 const LANE: [(LaneKind, &str); 52] = [

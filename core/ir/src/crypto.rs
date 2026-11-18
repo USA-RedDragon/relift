@@ -34,7 +34,6 @@ const fn gf_inv(a: u8, p: u16) -> u8 {
 }
 
 const AES_POLY: u16 = 0x11b;
-const SM4_POLY: u16 = 0x1f5;
 
 const fn aes_sbox() -> [u8; 256] {
     let mut t = [0u8; 256];
@@ -57,32 +56,8 @@ const fn invert(t: &[u8; 256]) -> [u8; 256] {
     out
 }
 
-/// The SM4 affine map: output bit `7 - i` is the parity of `x` and `0xd3`
-/// rotated right by `i`, plus the constant `0xd3`.
-const fn sm4_affine(x: u8) -> u8 {
-    let mut o = 0u8;
-    let mut i = 0;
-    while i < 8 {
-        let row = 0xd3u8.rotate_right(i);
-        o |= (((row & x).count_ones() & 1) as u8) << (7 - i);
-        i += 1;
-    }
-    o ^ 0xd3
-}
-
-const fn sm4_sbox() -> [u8; 256] {
-    let mut t = [0u8; 256];
-    let mut x = 0;
-    while x < 256 {
-        t[x] = sm4_affine(gf_inv(sm4_affine(x as u8), SM4_POLY));
-        x += 1;
-    }
-    t
-}
-
 static AES_SBOX: [u8; 256] = aes_sbox();
 static AES_INV_SBOX: [u8; 256] = invert(&AES_SBOX);
-static SM4_SBOX: [u8; 256] = sm4_sbox();
 
 fn bytes(x: u128, t: &[u8; 256]) -> u128 {
     let mut b = x.to_le_bytes();
@@ -114,7 +89,6 @@ pub fn eval(op: CryptoOp, x: u128) -> u128 {
         CryptoOp::AesInvSubBytes => bytes(x, &AES_INV_SBOX),
         CryptoOp::AesMixColumns => mix(x, [2, 3, 1, 1]),
         CryptoOp::AesInvMixColumns => mix(x, [14, 11, 13, 9]),
-        CryptoOp::Sm4Sbox => u128::from(SM4_SBOX[(x & 0xff) as usize]),
     }
 }
 
@@ -127,8 +101,6 @@ mod tests {
         assert_eq!(AES_SBOX[0x00], 0x63);
         assert_eq!(AES_SBOX[0x53], 0xed);
         assert_eq!(AES_INV_SBOX[0x63], 0x00);
-        assert_eq!(SM4_SBOX[..4], [0xd6, 0x90, 0xe9, 0xfe]);
-        assert_eq!(SM4_SBOX[0xff], 0x48);
         let col = u128::from(u32::from_le_bytes([0xdb, 0x13, 0x53, 0x45]));
         let out = eval(CryptoOp::AesMixColumns, col) as u32;
         assert_eq!(out.to_le_bytes(), [0x8e, 0x4d, 0xa1, 0xbc]);

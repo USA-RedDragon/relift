@@ -11,6 +11,7 @@ mod branch;
 mod mem;
 pub mod native;
 pub mod sail;
+pub mod sm4;
 pub mod system;
 
 use std::fmt;

@@ -496,7 +496,7 @@ pub enum Op {
     /// the sync has no guest-visible effect besides device time. At most one
     /// per block, and it is the block's last instruction.
     Sync,
-    /// A cipher step of the width [`CryptoOp::width`].
+    /// A cipher step on a 128-bit value, giving 128 bits.
     Crypto(CryptoOp, Value),
     /// The 64-bit pointer authentication code of `data` under the 64-bit
     /// `modifier` and the key `key0:key1` (Arm `ComputePAC` with QARMA5,
@@ -1120,7 +1120,8 @@ standards define (no copied tables).
 ```rust
 /// Fixed table-driven steps of standard ciphers, kept whole so an emitter
 /// can map each to a table or a host instruction instead of the gate-level
-/// circuit the tables stand for. Each is pure and has one meaning.
+/// circuit the tables stand for. Each is pure, has one meaning and works on
+/// 128 bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CryptoOp {
     /// AES `SubBytes` (FIPS-197 5.1.1) on each byte of a 128-bit value.
@@ -1132,8 +1133,6 @@ pub enum CryptoOp {
     AesMixColumns,
     /// AES `InvMixColumns` (FIPS-197 5.3.3), same layout.
     AesInvMixColumns,
-    /// The SM4 S-box (GB/T 32907) on one byte.
-    Sm4Sbox,
 }
 ```
 <!-- /docgen:code -->
@@ -1245,7 +1244,7 @@ The listings on this page are in this form; [the first one](#an-example) is two 
 //! | `load.excl.E.O addr` / `store.excl.E.O addr, value` | exclusive memory |
 //! | `atomic.U.E.O addr, value` | [`Op::AtomicRmw`], `U` is `add clr eor set smax smin umax umin swp` |
 //! | `cas.E.O addr, expected, value` | [`Op::CompareSwap`] |
-//! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns sm4.sbox` |
+//! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns` |
 //! | `pac data, modifier, key0, key1` | [`Op::Pac`] |
 //! | `lane.K.W args` | [`Op::Lane`]: `K` is a [`LaneKind`] mnemonic (`add qadds mulhs shli widenlos narrow mulwloss bcast extract insert splat` and so on, see `LANE` in this file), `W` the lane width 8, 16, 32 or 64 (omitted for the bitwise kinds `and or xor andn not select`); shift, broadcast, extract and insert end in `, N`, a decimal immediate |\n//! | `lane.perm v, PAT` / `lane.perm2 a, b, PAT` | [`Op::Permute`]; `PAT` is the 16 byte indices as a 128-bit hex value, byte `i` of the value giving result byte `i` |\n//! | `fence.O` / `clear.excl` | fence, clear the monitor |
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
@@ -1281,7 +1280,7 @@ The layout is private to a version of the crate, and `BIN_FORMAT` is the version
 
 <!-- docgen:code file=core/ir/src/bin.rs symbol=FORMAT -->
 ```rust
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 ```
 <!-- /docgen:code -->
 

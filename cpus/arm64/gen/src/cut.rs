@@ -19,7 +19,8 @@
 //! - FP: arithmetic, compares, min/max, conversions, rounding to integral
 //!   values and the reciprocal and square-root estimates and steps, built by
 //!   `rt::Fp` for FPCR zero; each use marks the template as assuming it.
-//! - CRYPTO: the table-driven AES and SM4 steps, as `relift_ir::CryptoOp`;
+//! - CRYPTO: the table-driven AES steps, as `relift_ir::CryptoOp`, and the
+//!   SM4 S-box, as the A64 intrinsic `relift_cpu_arm64::lift::sm4::SBOX`;
 //!   `verify_crypto` checks them against the Sail tables while generating.
 //! - Also `DecodeBitMasks`, `ConstrainUnpredictable` (refused at lift time),
 //!   the integer quotient of SDIV and UDIV, and the unsigned estimates of
@@ -398,22 +399,25 @@ pub const CUT: &[&str] = &[
 /// absent feature a template reads makes it refuse CPUs that have it.
 const NO_EL0_EFFECT: &[&str] = &["FEAT_SME", "FEAT_LSE2", "FEAT_GCS", "FEAT_SPE", "FEAT_XS"];
 
-/// The table-driven cipher functions, cut whole to `relift_ir::CryptoOp`.
+/// The Sail function cut whole to the SM4 S-box intrinsic of
+/// `relift_cpu_arm64::lift::sm4`.
+pub const SM4_CUT: &str = "Sbox";
+
+/// The table-driven AES functions, cut whole to `relift_ir::CryptoOp`.
 pub const CRYPTO_CUT: &[(&str, relift_ir::CryptoOp)] = &[
     ("AESSubBytes", relift_ir::CryptoOp::AesSubBytes),
     ("AESInvSubBytes", relift_ir::CryptoOp::AesInvSubBytes),
     ("AESMixColumns", relift_ir::CryptoOp::AesMixColumns),
     ("AESInvMixColumns", relift_ir::CryptoOp::AesInvMixColumns),
-    ("Sbox", relift_ir::CryptoOp::Sm4Sbox),
 ];
 
-/// Checks each cipher cut against the Sail function it replaces, run on
+/// Checks each cipher cut and the SM4 S-box against the Sail function it replaces, run on
 /// concrete values: every byte value in every position (the functions
 /// work bytewise or, for MixColumns, are linear over GF(2), so the basis
 /// vectors decide them). Fails with the first difference.
 pub fn verify_crypto(m: &relift_sail::model::Model) -> Result<(), String> {
     for (name, op) in CRYPTO_CUT {
-        let w = op.width().bits();
+        let w: u32 = 128;
         let mut inputs: Vec<u128> = Vec::new();
         if name.contains("MixColumns") {
             inputs.extend((0..128).map(|i| 1u128 << i));
@@ -436,6 +440,17 @@ pub fn verify_crypto(m: &relift_sail::model::Model) -> Result<(), String> {
             if got != V::Bits(w, want) {
                 return Err(format!("{name}({x:#x}): Sail {got:?}, cut {want:#x}"));
             }
+        }
+    }
+    for x in 0..=255u8 {
+        let mut g: Gen<'_, Arm64> = Gen::new(m, 0, 0);
+        g.cpu.no_cut = true;
+        let got = g
+            .call(SM4_CUT, vec![V::Bits(8, u128::from(x))], None)
+            .map_err(|e| format!("{SM4_CUT}({x:#x}) does not evaluate: {e:?}"))?;
+        let want = relift_cpu_arm64::lift::sm4::sbox(x);
+        if got != V::Bits(8, u128::from(want)) {
+            return Err(format!("{SM4_CUT}({x:#x}): Sail {got:?}, cut {want:#x}"));
         }
     }
     Ok(())
@@ -899,7 +914,9 @@ impl Arm64Cut for Gen<'_, Arm64> {
     /// Runs the cut function `name`, or gives `None` when `name` is not cut.
     fn arm64_cut(&mut self, name: &str, a: &[V], _hint: Option<u32>) -> R<Option<V>> {
         if self.cpu.no_cut
-            && (CRYPTO_CUT.iter().any(|(n, _)| *n == name) || name == "ComputePACQARMA")
+            && (CRYPTO_CUT.iter().any(|(n, _)| *n == name)
+                || name == SM4_CUT
+                || name == "ComputePACQARMA")
         {
             return Ok(None);
         }
@@ -1229,13 +1246,21 @@ impl Arm64Cut for Gen<'_, Arm64> {
             n if CRYPTO_CUT.iter().any(|(c, _)| *c == n) => {
                 let op = CRYPTO_CUT.iter().find(|(c, _)| *c == n).expect("listed").1;
                 let x = self.bitify(&a[0])?;
-                if x.width() != Some(op.width().bits()) {
+                if x.width() != Some(128) {
+                    return fail(format!("{name} on {:?} bits", x.width()));
+                }
+                let xs = self.dx(&x)?;
+                self.dy(K::Bits(128), format!("b.crypto(CryptoOp::{op:?}, {xs})"))
+            }
+            SM4_CUT => {
+                let x = self.bitify(&a[0])?;
+                if x.width() != Some(8) {
                     return fail(format!("{name} on {:?} bits", x.width()));
                 }
                 let xs = self.dx(&x)?;
                 self.dy(
-                    K::Bits(op.width().bits()),
-                    format!("b.crypto(CryptoOp::{op:?}, {xs})"),
+                    K::Bits(8),
+                    format!("b.intrinsic(crate::lift::sm4::SBOX, &[{xs}], Some(Width::W8))"),
                 )
             }
             "ComputePACQARMA" => {

@@ -417,9 +417,8 @@ impl Gen<'_> {
             CryptoOp::AesInvSubBytes,
             CryptoOp::AesMixColumns,
             CryptoOp::AesInvMixColumns,
-            CryptoOp::Sm4Sbox,
         ]);
-        let x = self.of(op.width());
+        let x = self.of(Width::W128);
         let v = self.b.crypto(op, x);
         self.keep(v);
     }
@@ -961,7 +960,6 @@ fn wanted_shapes() -> Vec<String> {
         CryptoOp::AesInvSubBytes,
         CryptoOp::AesMixColumns,
         CryptoOp::AesInvMixColumns,
-        CryptoOp::Sm4Sbox,
     ] {
         want.push(format!("{c:?}"));
     }

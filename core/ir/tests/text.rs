@@ -145,8 +145,6 @@ fn everything(exit: Exit, addr: Width) -> Block {
     ] {
         b.crypto(op, q);
     }
-    let byte = b.trunc(x0, Width::W8);
-    b.crypto(CryptoOp::Sm4Sbox, byte);
     let f = b.trunc(x0, Width::W32);
     for op in [FpOp::Add, FpOp::Sub, FpOp::Mul, FpOp::Div] {
         b.fp(op, &[f, w2], Width::W32);

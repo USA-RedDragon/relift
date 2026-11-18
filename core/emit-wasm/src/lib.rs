@@ -336,12 +336,11 @@ pub(crate) enum Helper {
     InvMixColumns64,
     SboxAes,
     SboxAesInv,
-    SboxSm4,
     SubBytesAes64,
     SubBytesAesInv64,
 }
 
-pub(crate) const HELPERS: [Helper; 18] = [
+pub(crate) const HELPERS: [Helper; 17] = [
     Helper::MulHi,
     Helper::Shl128,
     Helper::LShr128,
@@ -357,7 +356,6 @@ pub(crate) const HELPERS: [Helper; 18] = [
     Helper::InvMixColumns64,
     Helper::SboxAes,
     Helper::SboxAesInv,
-    Helper::SboxSm4,
     Helper::SubBytesAes64,
     Helper::SubBytesAesInv64,
 ];

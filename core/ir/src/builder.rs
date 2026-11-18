@@ -369,7 +369,7 @@ impl Builder {
 
     /// A cipher step.
     pub fn crypto(&mut self, op: CryptoOp, x: Value) -> Value {
-        self.val(Op::Crypto(op, x), op.width())
+        self.val(Op::Crypto(op, x), Width::W128)
     }
 
     /// A per-lane operation; `args` are its operands in order.

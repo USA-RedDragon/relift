@@ -2939,13 +2939,13 @@ Every module imports these from `rt`, in this order (`RUNTIME_IMPORTS`):
   no cipher code: AES `MixColumns` and `InvMixColumns` work on each
   64-bit half (two columns) with byte-parallel doubling in GF(2^8), the
   inverse as `MixColumns` after `x ^= 4 (x ^ (x rotated by two rows))`.
-  The AES S-box, its inverse and the SM4 S-box are 256-byte tables held
+  The AES S-box and its inverse are 256-byte tables held
   in code: each is a helper that picks one of 32 `i64` constants with a
   `br_table` on the byte's top five bits and shifts by the low three. The
   tables are computed at emit time from `relift_ir`'s definition and
   live in code, not in a data segment, so the module still writes
   nothing into the shared memory. Every module carries the cipher and
-  binary16 helpers, used or not: an empty module grows from 953 to 3,791
+  binary16 helpers, used or not: an empty module grows from 953 to 3,157
   bytes.
 - **Atomics** (`Op::AtomicRmw`, `Op::CompareSwap`) are plain
   load-update-store sequences of 1 to 16 bytes in either byte order, with
@@ -2976,9 +2976,10 @@ Every module imports these from `rt`, in this order (`RUNTIME_IMPORTS`):
   (`Frontend::wasm_intrinsic`, `relift_guest::WasmIntrinsic`): `Import`
   becomes `intrinsic.<name>` with `(c, mem)` and the operands, one `i64`
   per operand up to 64 bits and two above, returning nothing, one `i64` or
-  two; `Nop`, `Const` and `ZeroBlock` are inline. A64 carries `CNTPCT` and
-  `WFE` as imports, `CNTFRQ`, `CTR_EL0` and `DCZID_EL0` as the constants
-  of `arm64/abi.h`, `DC ZVA` as a 64-byte zeroing, and cache maintenance and
+  two; `Nop`, `Const` and `ZeroBlock` are inline. A64 carries `CNTPCT`, `WFE`
+  and the SM4 S-box (`arm64.sm4_sbox`, one byte in and out; the host
+  supplies the table) as imports, `CNTFRQ`, `CTR_EL0` and `DCZID_EL0` as the
+  constants of `arm64/abi.h`, `DC ZVA` as a 64-byte zeroing, and cache maintenance and
   `SEV` as no-ops (one thread per memory, no instruction cache to keep
   coherent); `cpus/arm64` checks the constants against the header.
 - **Exclusives** use the monitor fields of the context: a load-exclusive

@@ -714,19 +714,11 @@ impl Em<'_> {
         out
     }
 
-    /// Cipher step `c` on `x` into `dst`: the AES byte substitutions and the
-    /// SM4 S-box through the module's table helpers, the column mixes by
+    /// Cipher step `c` on `x` into `dst`: the AES byte substitutions through
+    /// the module's table helpers, the column mixes by
     /// their helpers on each 64-bit half (two columns each).
     fn crypto(&mut self, c: CryptoOp, x: V, dst: V) {
         let h = match c {
-            CryptoOp::Sm4Sbox => {
-                self.push_lo(x);
-                self.i(I::I32WrapI64);
-                self.i(I::Call(self.cx.helper(Helper::SboxSm4)));
-                self.i(I::I64ExtendI32U);
-                self.set(dst.lo());
-                return;
-            }
             CryptoOp::AesSubBytes => Helper::SubBytesAes64,
             CryptoOp::AesInvSubBytes => Helper::SubBytesAesInv64,
             CryptoOp::AesMixColumns => Helper::MixColumns64,

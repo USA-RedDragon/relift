@@ -105,6 +105,7 @@ impl Frontend for Arm64 {
             system::MRS_FPSR => format!("rl_mrs_fpsr_flags({})", arg(0)),
             system::MSR_FPSR => "rl_msr_fpsr_flags()".into(),
             system::FP_RAISE => format!("rl_fp_raise({})", arg(0)),
+            lift::sm4::SBOX => format!("rl_sm4_sbox((uint8_t)({}))", arg(0)),
             _ => return lift::native::c_call(name, args),
         })
     }
@@ -117,6 +118,7 @@ impl Frontend for Arm64 {
             system::DCZID => WasmIntrinsic::Const(DCZID_EL0),
             system::DC_ZVA => WasmIntrinsic::ZeroBlock(DC_ZVA_BYTES),
             system::CACHE_MAINT | system::SEV => WasmIntrinsic::Nop,
+            lift::sm4::SBOX => WasmIntrinsic::Import,
             _ => return None,
         })
     }
@@ -222,7 +224,6 @@ impl Frontend for Arm64 {
             CryptoOp::AesInvSubBytes => format!("rl_aes_invsubbytes({arg})"),
             CryptoOp::AesMixColumns => format!("rl_aesmc({arg})"),
             CryptoOp::AesInvMixColumns => format!("rl_aesimc({arg})"),
-            CryptoOp::Sm4Sbox => format!("rl_sm4_sbox((uint8_t)({arg}))"),
         })
     }
 
@@ -356,6 +357,7 @@ mod tests {
             system::CACHE_MAINT,
             system::WFE,
             system::SEV,
+            lift::sm4::SBOX,
         ] {
             assert!(f.intrinsic(name, &["a".into()]).is_some(), "{name} in C");
             assert!(f.wasm_intrinsic(name).is_some(), "{name} in wasm");

@@ -43,8 +43,9 @@ of a pair reads as one access, and the model's own alignment abort of LDXP
 becomes the `SLOW_ALIGN` guard) and the LSE atomics,
 checks that are no-ops at EL0, `IsFeatureImplemented` (a lift-time
 `St::has` test for the extensions in `LIFT_TIME_FEATURES` of `src/cut.rs`), the AES
-and SM4 table steps (`relift_ir::CryptoOp`, checked against the Sail tables
-on every run), the floating-point primitives, `DecodeBitMasks`, and the
+table steps (`relift_ir::CryptoOp`) and the SM4 S-box (the intrinsic of
+`src/lift/sm4.rs`), both checked against the Sail tables
+on every run, the floating-point primitives, `DecodeBitMasks`, and the
 integer quotient of `SDIV` and `UDIV`. Their lift-time side is
 `cpus/arm64/src/lift/sail/rt.rs`, `half.rs` and `align.rs`. A run-time index into a
 value wider than 128 bits (TBL, TBX) becomes shifts of its 128-bit parts.

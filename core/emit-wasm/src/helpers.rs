@@ -27,7 +27,7 @@ pub(crate) fn type_of(h: Helper) -> u32 {
         Helper::Run => T_RUN,
         Helper::F16ToF64 => T_H2D,
         Helper::F64ToF16 => T_D2H,
-        Helper::SboxAes | Helper::SboxAesInv | Helper::SboxSm4 => T_BYTE,
+        Helper::SboxAes | Helper::SboxAesInv => T_BYTE,
     }
 }
 
@@ -73,7 +73,6 @@ pub(crate) fn body(h: Helper, cx: &ModuleCx<'_>) -> Function {
         Helper::InvMixColumns64 => mix_columns(true),
         Helper::SboxAes => sbox(CryptoOp::AesSubBytes),
         Helper::SboxAesInv => sbox(CryptoOp::AesInvSubBytes),
-        Helper::SboxSm4 => sbox(CryptoOp::Sm4Sbox),
         Helper::SubBytesAes64 => sub_bytes(cx.helper(Helper::SboxAes)),
         Helper::SubBytesAesInv64 => sub_bytes(cx.helper(Helper::SboxAesInv)),
         Helper::MulHi => mulhi(),

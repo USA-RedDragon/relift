@@ -42,8 +42,8 @@ pub const SEV: &str = "arm64.sev";
 
 /// The `relift-ir` interpreter's view of the intrinsics that have no effect
 /// a single-threaded interpreter can see: `WFE` and `SEV` (an event wait
-/// that may return at once, and its signal) and cache maintenance. Every
-/// other intrinsic needs runtime state and stays unknown.
+/// that may return at once, and its signal), cache maintenance and the SM4
+/// S-box. Every other intrinsic needs runtime state and stays unknown.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InterpIntrinsics;
 
@@ -51,10 +51,11 @@ impl relift_ir::interp::Intrinsics for InterpIntrinsics {
     fn call(
         &mut self,
         name: &'static str,
-        _args: &[u128],
+        args: &[u128],
     ) -> Result<u128, relift_ir::interp::Error> {
         match name {
             WFE | SEV | CACHE_MAINT => Ok(0),
+            super::sm4::SBOX => Ok(u128::from(super::sm4::sbox(args[0] as u8))),
             _ => Err(relift_ir::interp::Error::UnknownIntrinsic(name)),
         }
     }

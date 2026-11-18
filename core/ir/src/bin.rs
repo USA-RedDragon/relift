@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// The version of the byte layout of [`write_block`] and [`Reader`].
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 
 /// A byte string that [`Reader`] could not take.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -178,7 +178,7 @@ coded! {
     AtomicOp: Add, Clear, Xor, Or, SMax, SMin, UMax, UMin, Swap;
     LaneWidth: L8, L16, L32, L64;
     LaneKind: Add, Sub, AddSatS, AddSatU, SubSatS, SubSatU, MulLo, MulHiS, MulHiU, MulHiSU, And, Or, Xor, AndNot, Not, MinS, MinU, MaxS, MaxU, Abs, Neg, Eq, Ne, Slt, Sle, Ult, Ule, ShlImm, LShrImm, AShrImm, Shl, LShr, AShr, Select, WidenLoS, WidenLoU, WidenHiS, WidenHiU, NarrowTrunc, NarrowSS, NarrowUU, NarrowSU, MulWideLoSS, MulWideLoUU, MulWideLoSU, MulWideHiSS, MulWideHiUU, MulWideHiSU, Broadcast, Extract, Insert, Splat;
-    CryptoOp: AesSubBytes, AesInvSubBytes, AesMixColumns, AesInvMixColumns, Sm4Sbox;
+    CryptoOp: AesSubBytes, AesInvSubBytes, AesMixColumns, AesInvMixColumns;
 }
 
 fn put_val(out: &mut Vec<u8>, v: Value) {
