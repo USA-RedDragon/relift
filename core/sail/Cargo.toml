@@ -1,6 +1,6 @@
 [package]
 name = "relift-sail"
-description = "The shared Sail frontend of the template generators: parser, model tables and the staged evaluator that turns the semantics of one encoding into a lifting template body. A CPU implements `eval::Cpu` (the cut line, register setup) and `stage::Form` (its encodings and decode groups) in its generator crate; knows no CPU and no guest"
+description = "The shared Sail frontend of the template generators: parser, model tables and the staged evaluator that turns the semantics of one encoding into a lifting template body. A CPU implements `eval::Cpu` (the cut line, register setup) and `stage::Form` (its encodings and decode groups) in its generator crate; names no CPU and no guest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

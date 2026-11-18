@@ -43,7 +43,7 @@ relift lifts each guest instruction to this IR and emits C from it. The reasons 
 
 ### When an op belongs in the IR
 
-An operation is added to `Op` only when at least two CPUs need it, or when the optimizer, discovery or the emitter gains from seeing inside it. Anything that computes an address or a branch target counts under the second test. `Pac` is an op for that reason: pointer authentication produces values that are later used as addresses and branch targets, and discovery must see an authenticated pointer as the pointer. The operation is pure, so the interpreter and the emitter (`core/emit/src/value.rs`) both evaluate it.
+An operation is added to `Op` only when at least two CPUs need it, or when the optimizer, discovery or the emitter gains from seeing inside it. Anything that computes an address or a branch target counts under the second test. `Pac` is an op for that reason: pointer authentication produces values that are later used as addresses and branch targets, and as a pure op its result stays visible to the passes after it, where an intrinsic's result would be opaque. The operation is pure, so the interpreter and the emitter (`core/emit/src/value.rs`) both evaluate it.
 
 Otherwise the operation is an `Op::Intrinsic`: a named call that the CPU crate and the runtime define (`Frontend::intrinsic`). The IR cannot see into an intrinsic, so every intrinsic counts as an effect, but the interpreter still runs it through the `Intrinsics` trait (`core/ir/src/interp.rs`), so an instruction lifted to an intrinsic stays checkable against an oracle.
 

@@ -144,7 +144,7 @@ the forms the checker was brought up on, kept as a cross-check:
 runs both in the interpreter.
 
 `relift-emit-wasm` is the second emitter, for WebAssembly hosts. Like
-`relift-emit` it knows no CPU: the frontend says how each intrinsic is
+`relift-emit` it names no CPU: the frontend says how each intrinsic is
 carried (`relift_guest::Frontend::wasm_intrinsic`). Its differential test
 (`core/emit-wasm/tests/diff/`) emits random blocks over every IR operation,
 section 13 blocks over a Game Boy-like I/O map, and random multi-function
@@ -177,7 +177,7 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 
 | Layer | Folder | Owns |
 |---|---|---|
-| core | `runtime/core` | Guest memory with its own permission flags, faults at guest addresses, host threads with an opaque CPU context, the clock, dispatch, logging and configuration; knows no guest OS and no guest CPU |
+| core | `runtime/core` | Guest memory with its own permission flags, faults at guest addresses, host threads with an opaque CPU context, the clock, dispatch, logging and configuration; names no guest OS and no guest CPU |
 | CPU | `runtime/cpus/arm64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
 | guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:` and the services, the scheduler, the NPDM layout, Horizon's page, clock and permission encodings; `switch/vk` forwards Vulkan to the host |
 | CPU | `runtime/cpus/sm83` | The SM83 lifted-code ABI and `rl_ctx`, interrupts, HALT and STOP, over a callback table |
@@ -253,7 +253,7 @@ each choice.
 | `relift-patch` | `core/patch` | lib | 0.1.0 |  | Binary patch formats IPS, IPS32, UPS and BPS applied to a byte image, with the ranges each patch wrote | 0 |
 | `relift-proc` | `core/proc` | lib | 0.1.0 |  | The one subprocess runner | 0 |
 | `relift-progress` | `core/progress` | lib | 0.1.0 |  | Progress output for `build` and `import`: live lines on a terminal, throttled plain lines elsewhere, color rules (`--color`, `NO_COLOR`, `TERM=dumb`), time from an injected clock | 0 |
-| `relift-sail` | `core/sail` | lib | 0.1.0 |  | The shared Sail frontend of the template generators: parser, model tables and the staged evaluator that turns the semantics of one encoding into a lifting template body. A CPU implements `eval::Cpu` (the cut line, register setup) and `stage::Form` (its encodings and decode groups) in its generator crate; knows no CPU and no guest | 0 |
+| `relift-sail` | `core/sail` | lib | 0.1.0 |  | The shared Sail frontend of the template generators: parser, model tables and the staged evaluator that turns the semantics of one encoding into a lifting template body. A CPU implements `eval::Cpu` (the cut line, register setup) and `stage::Form` (its encodings and decode groups) in its generator crate; names no CPU and no guest | 0 |
 | `relift-sms` | `guests/sms/guest` | lib | 0.1.0 | `relift-cpu-z80`, `relift-emit`, `relift-guest`, `relift-ir`, `relift-sms-formats` | The Master System and Game Gear guest: the Z80 frontend for the | 2 |
 | `relift-sms-formats` | `guests/sms/formats` | lib | 0.1.0 |  | Master System, Game Gear and SG-1000 cartridge format: size and bank layout with odd sizes and the copier header, the `TMR SEGA` header and export BIOS checksum, the Codemasters header and checksum, system detection, a static mapper guess; reads bytes only | 2 |
 | `relift-sms-tools` | `guests/sms/tools` | lib, bin | 0.1.0 | `relift-cache`, `relift-sms`, `relift-sms-formats` | `relift-smsrom`: `info` prints a ROM's layout, headers, checksums, system and mapper guess as text or JSON | 2 |
