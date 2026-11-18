@@ -150,6 +150,12 @@ typedef struct nvn_tex_desc {
 bool nvn_tex_format(uint32_t format, uint32_t *bpb, uint32_t *bw, uint32_t *bh);
 /** @brief Fills d's size, alignment, block and level fields from its target, format, size, levels, samples and flags; false for an unknown format. */
 bool nvn_tex_layout(nvn_tex_desc *d);
+/**
+ * @brief Whether a texture of d can be rendered to at level and layer: a
+ * layer of an array or cube texture, or a depth slice of that level of a 3D
+ * texture.
+ */
+bool nvn_vk_rt_inside(const nvn_tex_desc *d, uint32_t level, uint32_t layer);
 /** @brief NVNcopyRegion: a box of texels. */
 typedef struct nvn_region {
     int32_t x, y, z, width, height, depth;

@@ -55,12 +55,12 @@ typedef struct vimg {
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
-    /** @brief Views of single levels and layers, for render targets. */
-    struct {
+    /** @brief Views of single levels and layers (depth slices of a 3D image), for render targets. */
+    struct vsub {
         uint32_t level, layer;
         VkImageView view;
-    } sub[16];
-    uint32_t nsub;
+    } *sub;
+    uint32_t nsub, capsub;
     /** @brief Sampling views by VkImageViewType (1D to cube array), made when first asked for. */
     VkImageView views[7];
 } vimg;

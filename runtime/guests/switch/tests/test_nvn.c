@@ -456,3 +456,18 @@ TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
     rl_nvn_set_layout(NULL);
 }
+
+TEST(nvn_render_targets_reach_every_level_layer_and_slice)
+{
+    nvn_tex_desc arr = { .target = 4, .format = 0x25, .width = 64, .height = 64, .depth = 24, .levels = 7 };
+    CHECK(nvn_vk_rt_inside(&arr, 6, 23));
+    CHECK(!nvn_vk_rt_inside(&arr, 7, 0));
+    CHECK(!nvn_vk_rt_inside(&arr, 0, 24));
+    nvn_tex_desc vol = { .target = 2, .format = 0x25, .width = 32, .height = 32, .depth = 16, .levels = 3 };
+    CHECK(nvn_vk_rt_inside(&vol, 0, 15));
+    CHECK(nvn_vk_rt_inside(&vol, 2, 3));
+    CHECK(!nvn_vk_rt_inside(&vol, 2, 4));
+    nvn_tex_desc cube = { .target = 8, .format = 0x25, .width = 16, .height = 16, .levels = 5 };
+    CHECK(nvn_vk_rt_inside(&cube, 4, 5));
+    CHECK(!nvn_vk_rt_inside(&cube, 0, 6));
+}

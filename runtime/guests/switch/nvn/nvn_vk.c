@@ -614,6 +614,7 @@ static void image_free(vimg *v)
             VK(vkDestroyImageView)(g.dev, v->views[i], NULL);
     for (uint32_t i = 0; i < v->nsub; i++)
         VK(vkDestroyImageView)(g.dev, v->sub[i].view, NULL);
+    free(v->sub);
     if (v->view)
         VK(vkDestroyImageView)(g.dev, v->view, NULL);
     if (v->image)
@@ -906,7 +907,8 @@ static vimg *image_of(replay *r, uint64_t tex)
                  (can_store ? VK_IMAGE_CREATE_EXTENDED_USAGE_BIT : 0) |
                  (d->target == NVN_TARGET_CUBEMAP || d->target == NVN_TARGET_CUBEMAP_ARRAY
                       ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-                      : 0),
+                      : 0) |
+                 (d->target == NVN_TARGET_3D && !buffer ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0),
         .imageType = buffer ? VK_IMAGE_TYPE_1D : d->target == NVN_TARGET_3D ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D,
         .format = f,
         .extent = { d->width, buffer ? 1 : d->height, depth_of(d, 0) },
@@ -1220,14 +1222,32 @@ static int clear_depth_stencil(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
-/** @brief The view of level and layer of v, made the first time. */
+bool nvn_vk_rt_inside(const nvn_tex_desc *d, uint32_t level, uint32_t layer)
+{
+    vimg v = { .d = *d };
+    VkImageSubresourceRange rr = range_of(&v);
+    if (level >= rr.levelCount)
+        return false;
+    return layer < (d->target == NVN_TARGET_3D ? depth_of(d, level) : rr.layerCount);
+}
+
+/**
+ * @brief The view of level and layer of v (a depth slice of a 3D image, which
+ * is made 2D array compatible), made the first time.
+ */
 static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer)
 {
     for (uint32_t i = 0; i < v->nsub; i++)
         if (v->sub[i].level == level && v->sub[i].layer == layer)
             return v->sub[i].view;
-    if (v->nsub == sizeof v->sub / sizeof v->sub[0])
-        return NULL;
+    if (v->nsub == v->capsub) {
+        uint32_t cap = v->capsub ? 2 * v->capsub : 8;
+        struct vsub *n = realloc(v->sub, cap * sizeof *n);
+        if (!n)
+            return NULL;
+        v->sub = n;
+        v->capsub = cap;
+    }
     VkImageViewUsageCreateInfo vu;
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                   .pNext = plain_usage(v, &vu),
@@ -1238,9 +1258,7 @@ static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer)
     VkImageView view;
     if (VK(vkCreateImageView)(g.dev, &vci, NULL, &view) != VK_SUCCESS)
         return NULL;
-    v->sub[v->nsub].level = level;
-    v->sub[v->nsub].layer = layer;
-    v->sub[v->nsub++].view = view;
+    v->sub[v->nsub++] = (struct vsub){ level, layer, view };
     return view;
 }
 
@@ -1272,10 +1290,11 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
         t->layer = nv.has_layers ? (uint32_t)nv.min_layer : 0;
     }
     VkImageSubresourceRange rr = range_of(t->v);
-    if (t->level >= rr.levelCount || t->layer >= rr.layerCount)
+    if (!nvn_vk_rt_inside(&t->v->d, t->level, t->layer))
         return nvn_vk_stop(r, "render target 0x%llx at level %u layer %u, outside it", (unsigned long long)tex, t->level,
                     t->layer);
-    t->view = rr.levelCount == 1 && rr.layerCount == 1 ? t->v->view : sub_view(t->v, t->level, t->layer);
+    bool whole = rr.levelCount == 1 && rr.layerCount == 1 && t->v->d.target != NVN_TARGET_3D;
+    t->view = whole ? t->v->view : sub_view(t->v, t->level, t->layer);
     if (!t->view)
         return nvn_vk_stop(r, "no host view of render target 0x%llx", (unsigned long long)tex);
     return RL_OK;
