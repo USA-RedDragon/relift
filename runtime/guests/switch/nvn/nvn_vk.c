@@ -1401,6 +1401,59 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+/**
+ * @brief nvnCommandBufferCopyBufferToTexture(buffer, dst, dstView,
+ * dstRegion, flags): the region's texels from the buffer, laid out with the
+ * copy strides the command buffer had when it was recorded.
+ */
+static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
+{
+    const nvn_region *rg = nvn_cmd_bytes(r->s, e->x[4]);
+    uint32_t flags = (uint32_t)e->x[5];
+    if (!rg)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyBufferToTexture without a region");
+    if (flags)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyBufferToTexture with flags 0x%x", flags);
+    vimg *dst = image_of(r, e->x[2]);
+    if (!dst)
+        return RL_PENDING;
+    nvn_copy_pitch p;
+    if (!nvn_copy_pitch_of(dst->d.format, rg, (uint32_t)e->x[NVN_COPY_ROW_STRIDE_ARG],
+                           (uint32_t)e->x[NVN_COPY_IMAGE_STRIDE_ARG], &p))
+        return nvn_vk_stop(r,
+                           "nvnCommandBufferCopyBufferToTexture of %dx%dx%d texels of format %u with row stride %u "
+                           "and image stride %u",
+                           rg->width, rg->height, rg->depth, dst->d.format, (uint32_t)e->x[NVN_COPY_ROW_STRIDE_ARG],
+                           (uint32_t)e->x[NVN_COPY_IMAGE_STRIDE_ARG]);
+    uint32_t level, layer;
+    int rc = copy_side(r, e->x[3], rg, &level, &layer);
+    if (rc != RL_OK)
+        return rc;
+    bool is3d = dst->d.target == NVN_TARGET_3D;
+    if (is3d)
+        layer -= (uint32_t)rg->z;
+    if (!nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    uint64_t off;
+    if (!nvn_vk_upload_bytes(r, r->mem + nvn_gpu_guest(e->x[1]), p.span, 0, 16, &off))
+        return nvn_vk_stop(r, "nvnCommandBufferCopyBufferToTexture of %llu bytes, more than the upload arena holds",
+                           (unsigned long long)p.span);
+    nvn_vk_written(dst);
+    nvn_vk_begin(r);
+    nvn_vk_barrier(g.cb);
+    VkBufferImageCopy bic = {
+        .bufferOffset = off,
+        .bufferRowLength = p.row_texels,
+        .bufferImageHeight = p.image_rows,
+        .imageSubresource = { dst->aspect, level, layer, is3d ? 1u : (uint32_t)rg->depth },
+        .imageOffset = { rg->x, rg->y, is3d ? rg->z : 0 },
+        .imageExtent = { (uint32_t)rg->width, (uint32_t)rg->height, is3d ? (uint32_t)rg->depth : 1u },
+    };
+    VK(vkCmdCopyBufferToImage)(g.cb, g.arena.buf, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
+    nvn_vk_barrier(g.cb);
+    return RL_OK;
+}
+
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
     switch (e->op) {
@@ -1418,6 +1471,8 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return copy_buffer_to_buffer(r, e);
     case NVN_CMD_COPY_TEXTURE_TO_TEXTURE:
         return copy_texture_to_texture(r, e);
+    case NVN_CMD_COPY_BUFFER_TO_TEXTURE:
+        return copy_buffer_to_texture(r, e);
     case NVN_CMD_BARRIER:
         if (r->recording)
             nvn_vk_barrier(g.cb);
