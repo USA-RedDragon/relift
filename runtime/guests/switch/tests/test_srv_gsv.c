@@ -236,6 +236,9 @@ TEST(chat_u_gives_its_shim_and_event)
     *(uint32_t *)(void *)(t_mem() + heap + 0x800) = r.copy[0];
     CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
     CHECK_EQ(tc_cmd(c, shim, 2), SF_RESULT_UNKNOWN_COMMAND);
+    tc_req q = tc_new(23);
+    tc_put32(&q, 1);
+    CHECK_EQ(tc_send(c, svc, q).result, 0);
 }
 
 TEST(gsv_is_not_on_the_switch)

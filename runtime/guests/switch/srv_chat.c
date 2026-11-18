@@ -37,8 +37,20 @@ static rl_result create_shim(rl_ipc_req *r)
     return o ? rl_ipc_push_object(r, o) : KR_OUT_OF_RESOURCE;
 }
 
+/**
+ * @brief SetScreenSharingMode (cmd 23, per switchbrew): a u32 mode, the result
+ * only (verified: nn::chat::SetScreenSharingMode, SDK 20.5 sdk 0x633fd0, sends
+ * its ScreenSharingMode argument). With no chat there is no sharing to change.
+ */
+static rl_result set_screen_sharing_mode(rl_ipc_req *r)
+{
+    uint32_t mode;
+    return rl_srv_in(r, &mode, 4) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
+}
+
 static const rl_ipc_cmd user_cmds[] = {
     { 0, "CreateUserShimScopedObject", create_shim },
+    { 23, "SetScreenSharingMode", set_screen_sharing_mode },
 };
 
 static const rl_ipc_class user_class = { "chat:u", user_cmds, sizeof user_cmds / sizeof user_cmds[0], 0, NULL };
