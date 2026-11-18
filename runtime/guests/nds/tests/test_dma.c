@@ -3,7 +3,8 @@
  * @brief The DMA channels of both CPUs: register masks and readback, the
  * time of immediate transfers against the oracle's (an ARM9 and an ARM7
  * program timed a transfer with a bus-clock timer), triggers, repeat,
- * reload, priority and the IRQ.
+ * reload, priority and the IRQ, and the VBlank and HBlank starts the
+ * display timing raises.
  */
 #include "ndst.h"
 
@@ -256,4 +257,47 @@ TEST(arm7_start_modes_come_from_bits_28_and_29)
     ndst_to(t, RL_NDS_ARM7, 8000);
     (void)r7(t, 0x04000214u, 4);
     CHECK_EQ(r7(t, 0x02200000u, 4), 0x13572468u);
+}
+
+#define LINE RL_NDS_LINE_TICKS
+#define HBLANK 3168u
+
+TEST(a_vblank_transfer_starts_at_line_192)
+{
+    ndst *t = ndst_new();
+    far7(t);
+    w9(t, 0x02100000u, 4, 0x12345678u);
+    w9(t, DMA(2), 4, 0x02100000u);
+    w9(t, DMA(2) + 4, 4, 0x02200000u);
+    w9(t, DMA(2) + 8, 4, 0x8C000001u);
+    run_to(t, 192u * LINE - 2);
+    CHECK_EQ(r9(t, 0x02200000u, 4), 0);
+    CHECK(r9(t, DMA(2) + 8, 4) & 0x80000000u);
+    run_to(t, 192u * LINE + 200);
+    CHECK_EQ(r9(t, 0x02200000u, 4), 0x12345678u);
+    CHECK_EQ(r9(t, DMA(2) + 8, 4) & 0x80000000u, 0);
+}
+
+TEST(an_hblank_transfer_repeats_on_each_visible_line_and_pauses_in_vblank)
+{
+    ndst *t = ndst_new();
+    far7(t);
+    for (unsigned i = 0; i < 263; i++)
+        w9(t, 0x02100000u + 4 * i, 4, i + 1);
+    w9(t, DMA(1), 4, 0x02100000u);
+    w9(t, DMA(1) + 4, 4, 0x02200000u);
+    w9(t, DMA(1) + 8, 4, 0x96000001u);
+    run_to(t, HBLANK - 2);
+    CHECK_EQ(r9(t, 0x02200000u, 4), 0);
+    run_to(t, HBLANK + 200);
+    CHECK_EQ(r9(t, 0x02200000u, 4), 1);
+    run_to(t, 2u * LINE + HBLANK + 200);
+    CHECK_EQ(r9(t, 0x02200008u, 4), 3);
+    CHECK_EQ(r9(t, 0x0220000Cu, 4), 0);
+    run_to(t, 262u * LINE + HBLANK + 200);
+    CHECK_EQ(r9(t, 0x022002FCu, 4), 192);
+    CHECK_EQ(r9(t, 0x02200300u, 4), 0);
+    run_to(t, RL_NDS_FRAME_TICKS + HBLANK + 200);
+    CHECK_EQ(r9(t, 0x02200300u, 4), 193);
+    w9(t, DMA(1) + 8, 4, 0);
 }

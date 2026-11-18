@@ -315,6 +315,15 @@ void nds_dma_wait(rl_nds *m, unsigned cpu)
     }
 }
 
+bool nds_dma_waits(const rl_nds *m, unsigned cpu, unsigned timing)
+{
+    const nds_dma *d = &m->dma[cpu];
+    for (unsigned i = 0; i < 4; i++)
+        if ((d->ch[i].cnt & 0x80000000u) && timing_of(cpu, i, d->ch[i].cnt) == timing)
+            return true;
+    return false;
+}
+
 void nds_dma_start(rl_nds *m, unsigned cpu, unsigned timing, uint64_t tick)
 {
     nds_dma *d = &m->dma[cpu];
@@ -383,4 +392,6 @@ void nds_dma_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t m
         else if (cpu == RL_NDS_ARM9 && timing_of(cpu, i, c->cnt) == NDS_DMA9_GXFIFO)
             nds_gx_dma_check(m, now);
     }
+    if (was != on || on)
+        nds_lcd_dma_changed(m, now);
 }

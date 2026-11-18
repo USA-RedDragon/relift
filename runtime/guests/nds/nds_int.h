@@ -627,6 +627,8 @@ uint64_t nds_lcd_pos(const rl_nds *m, uint64_t t);
 uint32_t nds_lcd_read(const rl_nds *m, unsigned cpu, uint64_t now);
 /** @brief A write of the mask bits of v to cpu's DISPSTAT and VCOUNT word at tick now. */
 void nds_lcd_write(rl_nds *m, unsigned cpu, uint32_t v, uint32_t mask, uint64_t now);
+/** @brief A DMA channel's start timing changed at tick now: posts the line edges the VBlank and HBlank starts need. */
+void nds_lcd_dma_changed(rl_nds *m, uint64_t now);
 
 /** @brief Power-on state of the display. */
 void nds_disp_reset(rl_nds *m);
@@ -742,6 +744,8 @@ enum {
  * that is still running ignores the trigger.
  */
 void nds_dma_start(rl_nds *m, unsigned cpu, unsigned timing, uint64_t tick);
+/** @brief True when an enabled channel of cpu starts on timing (it may be running now). */
+bool nds_dma_waits(const rl_nds *m, unsigned cpu, unsigned timing);
 
 /** @brief KEYINPUT with KEYCNT (word offset 0x130) of cpu, or EXTKEYIN with its neighbor RCNT (0x134, ARM7). */
 uint32_t nds_keypad_read(rl_nds *m, unsigned cpu, uint32_t off);

@@ -3,8 +3,9 @@
  * @brief The display timing of both CPUs: VCOUNT and each CPU's DISPSTAT
  * flags as functions of the tick (355 dots of 12 ticks per line, 263 lines),
  * and the line edges as one scheduler event: the VBlank, HBlank and VCOUNT
- * match interrupts of each CPU. Only edges that request an interrupt are
- * posted.
+ * match interrupts of each CPU and the VBlank and HBlank DMA starts (HBlank
+ * starts only on the 192 visible lines). Only edges that request an
+ * interrupt or start a DMA are posted.
  *
  * Fresh C from GBATEK ("DS Video Stuff", DISPSTAT/VCOUNT), shaped like the
  * GBA layer's lcd.c. Measured on the oracle with relift's timing ROM: the
@@ -25,6 +26,15 @@ uint64_t nds_lcd_pos(const rl_nds *m, uint64_t t)
 
 /** @brief The 9-bit LYC of cpu's DISPSTAT. */
 static unsigned lyc(const nds_lcd *l, unsigned cpu) { return (unsigned)(l->stat[cpu] >> 8) | (unsigned)(l->stat[cpu] & 0x80) << 1; }
+
+/** @brief True when a DMA channel starts at the edge (line, dot): VBlank at line 192, HBlank on lines 0 to 191 (ARM9 only). */
+static bool dma_edge(const rl_nds *m, unsigned line, unsigned dot)
+{
+    if (dot == E_LINE)
+        return line == NDS_VISIBLE &&
+               (nds_dma_waits(m, RL_NDS_ARM9, NDS_DMA9_VBLANK) || nds_dma_waits(m, RL_NDS_ARM7, NDS_DMA7_VBLANK));
+    return line < NDS_VISIBLE && nds_dma_waits(m, RL_NDS_ARM9, NDS_DMA9_HBLANK);
+}
 
 /** @brief The interrupts cpu's edge (line, dot) requests. */
 static uint32_t requests(const rl_nds *m, unsigned cpu, unsigned line, unsigned dot)
@@ -55,7 +65,8 @@ static void repost_from(rl_nds *m, uint64_t now)
         for (unsigned e = 0; e < 2; e++) {
             if (k == 0 && edges[e] <= dot)
                 continue;
-            if (requests(m, RL_NDS_ARM9, ln, edges[e]) || requests(m, RL_NDS_ARM7, ln, edges[e])) {
+            if (requests(m, RL_NDS_ARM9, ln, edges[e]) || requests(m, RL_NDS_ARM7, ln, edges[e]) ||
+                dma_edge(m, ln, edges[e])) {
                 uint64_t when = now + (uint64_t)k * RL_NDS_LINE_TICKS + edges[e] - dot;
                 if (!rl_event_queued(&m->lcd.ev) || m->lcd.ev.when != when)
                     rl_sched_post(m->sched, &m->lcd.ev, when);
@@ -77,8 +88,16 @@ static void fire(rl_sched *s, rl_event *e, uint64_t when)
         if (r)
             nds_irq_set(m, cpu, r, when);
     }
+    if (dot == E_LINE && line == NDS_VISIBLE) {
+        nds_dma_start(m, RL_NDS_ARM9, NDS_DMA9_VBLANK, when);
+        nds_dma_start(m, RL_NDS_ARM7, NDS_DMA7_VBLANK, when);
+    } else if (dot == E_HBLANK && line < NDS_VISIBLE) {
+        nds_dma_start(m, RL_NDS_ARM9, NDS_DMA9_HBLANK, when);
+    }
     repost_from(m, when);
 }
+
+void nds_lcd_dma_changed(rl_nds *m, uint64_t now) { repost_from(m, now); }
 
 void nds_lcd_reset(rl_nds *m)
 {
