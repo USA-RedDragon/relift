@@ -76,6 +76,13 @@ struct rl_window_backend {
                         uint32_t shown_height);
     /** @brief Optional. The size in pixels of the screen w is on; any thread. Zeros when unknown. */
     void (*screen)(rl_window *w, uint32_t *width, uint32_t *height);
+    /**
+     * @brief Optional. Maps a pointer position in w (rl_input_pointer's x and y) to a pixel of the last frame
+     * present_rgb showed there; false when the position lies outside that frame or no frame was shown. Any thread.
+     */
+    bool (*frame_point)(rl_window *w, int32_t x, int32_t y, uint32_t *frame_x, uint32_t *frame_y);
+    /** @brief Optional. Scales the frames present_rgb shows to fill w (fit true) instead of by whole multiples. Any thread. */
+    void (*set_fit)(rl_window *w, bool fit);
 };
 
 /**
@@ -123,6 +130,17 @@ RL_RUNTIME_API bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint
  */
 RL_RUNTIME_API bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height,
                                                 uint32_t shown_width, uint32_t shown_height);
+
+/**
+ * @brief The pixel of the last frame shown in w under the pointer position (x, y) of rl_input_pointer; false when
+ * the position lies outside it, nothing was shown, or the backend cannot tell.
+ */
+RL_RUNTIME_API bool rl_window_frame_point(rl_window *w, int32_t x, int32_t y, uint32_t *frame_x, uint32_t *frame_y);
+/**
+ * @brief How w scales frames: by the largest whole multiple that fits (fit false, the default) or to fill it with
+ * the frame's shape kept (fit true). Nothing on a backend that has only one way.
+ */
+RL_RUNTIME_API void rl_window_set_fit(rl_window *w, bool fit);
 
 /** @brief The host backend built with VIDEO=sdl3. */
 RL_RUNTIME_API const rl_window_backend *rl_host_window_backend(void);

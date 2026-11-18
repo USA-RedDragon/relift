@@ -56,6 +56,7 @@ typedef struct sdl_win {
     SDL_Texture *ov;
     uint32_t ow, oh;
     bool logical;
+    bool fit;
     bool no_renderer;
     struct sdl_win *next;
 } sdl_win;
@@ -622,8 +623,9 @@ static void do_present(void *p)
     bool pad = rl_touchpad_wanted();
     if (w->logical == pad) {
         SDL_SetRenderLogicalPresentation(w->r, pad ? 0 : (int)q->shown_w, pad ? 0 : (int)q->shown_h,
-                                         pad ? SDL_LOGICAL_PRESENTATION_DISABLED
-                                             : SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+                                         pad     ? SDL_LOGICAL_PRESENTATION_DISABLED
+                                         : w->fit ? SDL_LOGICAL_PRESENTATION_LETTERBOX
+                                                  : SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
         w->logical = !pad;
     }
     SDL_SetRenderDrawColor(w->r, 0, 0, 0, 255);
@@ -671,6 +673,58 @@ static void sdl_present_rgb(rl_window *h, const uint8_t *rgb, uint32_t width, ui
     on_loop(do_present, &q);
 }
 
+typedef struct point_req {
+    sdl_win *w;
+    float x, y;
+    uint32_t fx, fy;
+    bool ok;
+} point_req;
+
+static void do_point(void *p)
+{
+    point_req *q = p;
+    sdl_win *w = q->w;
+    float lx = 0, ly = 0;
+    if (!w->r || !w->logical || !w->lw || !w->lh || !SDL_RenderCoordinatesFromWindow(w->r, q->x, q->y, &lx, &ly))
+        return;
+    if (lx < 0 || ly < 0 || lx >= (float)w->lw || ly >= (float)w->lh)
+        return;
+    q->fx = (uint32_t)(lx * (float)w->tw / (float)w->lw);
+    q->fy = (uint32_t)(ly * (float)w->th / (float)w->lh);
+    q->ok = q->fx < w->tw && q->fy < w->th;
+}
+
+static bool sdl_frame_point(rl_window *h, int32_t x, int32_t y, uint32_t *fx, uint32_t *fy)
+{
+    point_req q = { .w = (sdl_win *)h, .x = (float)x + 0.5f, .y = (float)y + 0.5f };
+    on_loop(do_point, &q);
+    if (q.ok) {
+        *fx = q.fx;
+        *fy = q.fy;
+    }
+    return q.ok;
+}
+
+typedef struct fit_req {
+    sdl_win *w;
+    bool fit;
+} fit_req;
+
+static void do_fit(void *p)
+{
+    fit_req *q = p;
+    if (q->w->fit != q->fit) {
+        q->w->fit = q->fit;
+        q->w->logical = false;
+    }
+}
+
+static void sdl_set_fit(rl_window *h, bool fit)
+{
+    fit_req q = { .w = (sdl_win *)h, .fit = fit };
+    on_loop(do_fit, &q);
+}
+
 static const rl_window_backend g_sdl = {
     .name = "SDL3",
     .init = sdl_init,
@@ -684,6 +738,8 @@ static const rl_window_backend g_sdl = {
     .vulkan_surface = sdl_vulkan_surface,
     .present_rgb = sdl_present_rgb,
     .screen = sdl_screen,
+    .frame_point = sdl_frame_point,
+    .set_fit = sdl_set_fit,
 };
 
 const rl_window_backend *rl_host_window_backend(void) { return &g_sdl; }

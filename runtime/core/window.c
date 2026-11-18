@@ -53,6 +53,19 @@ bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uin
     return rl_window_present_rgb_shown(w, rgb, width, height, width, height);
 }
 
+bool rl_window_frame_point(rl_window *w, int32_t x, int32_t y, uint32_t *frame_x, uint32_t *frame_y)
+{
+    if (!w || !w->b || !w->b->frame_point)
+        return false;
+    return w->b->frame_point(w, x, y, frame_x, frame_y);
+}
+
+void rl_window_set_fit(rl_window *w, bool fit)
+{
+    if (w && w->b && w->b->set_fit)
+        w->b->set_fit(w, fit);
+}
+
 void rl_window_emit(rl_window *w, int event)
 {
     pthread_mutex_lock(&g_lock);

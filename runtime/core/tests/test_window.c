@@ -2,7 +2,8 @@
  * @file test_window.c
  * @brief rl_window_main: headless runs call the body inline; with a backend
  * the body runs on another thread while the caller runs the event loop, and
- * events reach the listener.
+ * events reach the listener; pointer mapping and scaling pass through to
+ * the backend when it has them.
  */
 #include "runner.h"
 
@@ -175,3 +176,47 @@ TEST(window_env_sdl3_without_the_backend_is_headless)
     reset();
 }
 #endif
+
+static bool g_fit;
+
+static bool fake_point(rl_window *w, int32_t x, int32_t y, uint32_t *fx, uint32_t *fy)
+{
+    (void)w;
+    if (x < 0 || y < 0)
+        return false;
+    *fx = (uint32_t)x / 2;
+    *fy = (uint32_t)y / 2;
+    return true;
+}
+
+static void fake_fit(rl_window *w, bool fit)
+{
+    (void)w;
+    g_fit = fit;
+}
+
+static const rl_window_backend g_pointing = {
+    .name = "pointing",
+    .frame_point = fake_point,
+    .set_fit = fake_fit,
+};
+
+TEST(window_frame_point_and_fit_reach_a_backend_that_has_them)
+{
+    rl_window plain = { .b = &g_fake }, pointing = { .b = &g_pointing };
+    uint32_t x = 7, y = 7;
+    CHECK(!rl_window_frame_point(&plain, 10, 10, &x, &y));
+    CHECK(!rl_window_frame_point(NULL, 10, 10, &x, &y));
+    CHECK_EQ(x, 7);
+    rl_window_set_fit(&plain, true);
+    rl_window_set_fit(NULL, true);
+    CHECK(!g_fit);
+    CHECK(rl_window_frame_point(&pointing, 10, 21, &x, &y));
+    CHECK_EQ(x, 5);
+    CHECK_EQ(y, 10);
+    CHECK(!rl_window_frame_point(&pointing, -1, 0, &x, &y));
+    rl_window_set_fit(&pointing, true);
+    CHECK(g_fit);
+    rl_window_set_fit(&pointing, false);
+    CHECK(!g_fit);
+}
