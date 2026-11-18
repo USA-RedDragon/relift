@@ -2,14 +2,15 @@
 
 Written by `RELIFT_BLESS=1 cargo test -p relift-gpu-sm53 --test lowering`
 from `src/lower/table.rs`; do not edit by hand. Each Maxwell form is
-lowered to exactly one SM86 form, handled as a pseudo-instruction, or
-a stop. A form is lowered only with evidence that both behave the same
-in every case.
+lowered to exactly one SM86 form, handled as a pseudo-instruction,
+split between the two by case, or a stop. A form is lowered only
+with evidence that both behave the same in every case it lowers;
+the cases the evidence does not cover stop with their own reason.
 
 | form | row | to | evidence or reason |
 |---|---|---|---|
 | AL2P | stop | | no semantic check yet |
-| ALD | stop | | no semantic check yet |
+| ALD | exact | ALD | same fields (offset, vertex register, size, .P, .O); Ryujinx's Ald and the SM86 translator read the same attribute map (generic 0x80 to 0x27c, position 0x70, vertex id 0x2fc as VertexIndex, instance id 0x2f8 as InstanceIndex - BaseInstance); a register in the address stops; operands equal envydis on every census word |
 | AST | stop | | no semantic check yet |
 | ATOM | stop | | no semantic check yet |
 | ATOM_CAS | stop | | no semantic check yet |
@@ -153,7 +154,7 @@ in every case.
 | IMUL I | stop | | no semantic check yet |
 | IMUL C | stop | | no semantic check yet |
 | IMUL 32I | stop | | no semantic check yet |
-| IPA | stop | | no semantic check yet |
+| IPA | exact and pseudo | IPA; IPA.MUL, IPA.SAT | Ryujinx's Ipa and the SM86 translator's IPA both give a perspective input times FragCoord.w and take the mode from the SPH input map (words 6 to 13 in both headers); .CONSTANT of a non-flat input stops in the translator. .MUL (times SrcB) and .SAT (clamp, NaN to 0) have no SM86 IPA form: pseudo, as Ryujinx (round to nearest, denormals kept, inferred). Indexed, offset, sample and .SC forms and a source predicate other than PT stop; operands equal envydis on every census word |
 | ISBERD | stop | | no semantic check yet |
 | ISCADD R | stop | | no semantic check yet |
 | ISCADD I | stop | | no semantic check yet |
@@ -191,8 +192,8 @@ in every case.
 | MEMBAR | stop | | no semantic check yet |
 | MOV R | stop | | no semantic check yet |
 | MOV I | stop | | no semantic check yet |
-| MOV C | stop | | no semantic check yet |
-| MOV 32I | stop | | no semantic check yet |
+| MOV C | exact | MOV | Ryujinx's MovC copies c[CbufSlot][4 * CbufOffset] and the SM86 translator's MOV reads the same bank and byte offset; lane mask 0xf only, and offsets of 0x8000 and up stop (SM86 reads them as negative); operands equal envydis on every census word |
+| MOV 32I | exact | MOV | Ryujinx's Mov32i copies Imm32 to Dest and the SM86 translator's MOV copies its immediate; lane mask 0xf only (every census word), other masks stop; operands equal envydis on every census word |
 | MUFU | stop | | no semantic check yet |
 | NOP | stop | | no semantic check yet |
 | OUT R | stop | | no semantic check yet |
@@ -302,4 +303,4 @@ in every case.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 0 exact, 0 pseudo, 293 stop.
+293 forms: 3 exact, 1 exact and pseudo, 0 pseudo, 289 stop.

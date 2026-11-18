@@ -16,10 +16,12 @@ word for word; envydis is a local tool and its output is never committed.
 See NOTICE.
 
 [LOWERING.md](LOWERING.md) lists how each Maxwell form reaches the SM86
-translator: lowered to exactly one SM86 form, a pseudo-instruction, or a
-stop, each with its evidence. It is written from `src/lower/table.rs` by
-`RELIFT_BLESS=1 cargo test -p relift-gpu-sm53 --test lowering`; the test
-fails while it is stale.
+translator: lowered to exactly one SM86 form, a pseudo-instruction, both
+by case, or a stop, each with its evidence. It is written from
+`src/lower/table.rs` by `RELIFT_BLESS=1 cargo test -p relift-gpu-sm53 --test
+lowering`; the test fails while it is stale. `lower::lower` turns one
+instruction into its SM86 word, its pseudo-instruction (which the SM86
+translator takes from `Program::pseudo`) or a named stop.
 
 ```sh
 cargo test -p relift-gpu-sm53

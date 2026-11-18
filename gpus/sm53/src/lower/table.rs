@@ -20,6 +20,13 @@ pub enum Row {
         name: &'static str,
         evidence: &'static str,
     },
+    /// Lowered to the SM86 form `to` in the cases the evidence covers and
+    /// the pseudo-instruction `pseudo` in the rest.
+    Split {
+        to: &'static str,
+        pseudo: &'static str,
+        evidence: &'static str,
+    },
     /// Not translated: a program that uses the form stops with this reason.
     Stop { reason: &'static str },
 }
@@ -31,8 +38,42 @@ pub const UNCHECKED: Row = Row::Stop {
 
 /// The row of `op` in the form `src`.
 pub fn row(op: Op, src: Src) -> Row {
-    let _ = (op, src);
-    UNCHECKED
+    match (op, src) {
+        (Op::Mov, Src::Imm32) => Row::Exact {
+            to: "MOV",
+            evidence: "Ryujinx's Mov32i copies Imm32 to Dest and the SM86 translator's MOV \
+                       copies its immediate; lane mask 0xf only (every census word), other \
+                       masks stop; operands equal envydis on every census word",
+        },
+        (Op::Mov, Src::CBuf) => Row::Exact {
+            to: "MOV",
+            evidence: "Ryujinx's MovC copies c[CbufSlot][4 * CbufOffset] and the SM86 \
+                       translator's MOV reads the same bank and byte offset; lane mask 0xf \
+                       only, and offsets of 0x8000 and up stop (SM86 reads them as \
+                       negative); operands equal envydis on every census word",
+        },
+        (Op::Ald, _) => Row::Exact {
+            to: "ALD",
+            evidence: "same fields (offset, vertex register, size, .P, .O); Ryujinx's Ald and \
+                       the SM86 translator read the same attribute map (generic 0x80 to \
+                       0x27c, position 0x70, vertex id 0x2fc as VertexIndex, instance id \
+                       0x2f8 as InstanceIndex - BaseInstance); a register in the address \
+                       stops; operands equal envydis on every census word",
+        },
+        (Op::Ipa, _) => Row::Split {
+            to: "IPA",
+            pseudo: "IPA.MUL, IPA.SAT",
+            evidence: "Ryujinx's Ipa and the SM86 translator's IPA both give a perspective \
+                       input times FragCoord.w and take the mode from the SPH input map \
+                       (words 6 to 13 in both headers); .CONSTANT of a non-flat input stops \
+                       in the translator. .MUL (times SrcB) and .SAT (clamp, NaN to 0) have no \
+                       SM86 IPA form: pseudo, as Ryujinx (round to nearest, denormals kept, \
+                       inferred). Indexed, offset, sample and .SC forms and a source \
+                       predicate other than PT stop; operands equal envydis on every census \
+                       word",
+        },
+        _ => UNCHECKED,
+    }
 }
 
 /// Every form once, in the order of [`ENCODINGS`].
@@ -63,12 +104,13 @@ pub fn markdown() -> String {
         "# Maxwell lowering table\n\n\
          Written by `RELIFT_BLESS=1 cargo test -p relift-gpu-sm53 --test lowering`\n\
          from `src/lower/table.rs`; do not edit by hand. Each Maxwell form is\n\
-         lowered to exactly one SM86 form, handled as a pseudo-instruction, or\n\
-         a stop. A form is lowered only with evidence that both behave the same\n\
-         in every case.\n\n\
+         lowered to exactly one SM86 form, handled as a pseudo-instruction,\n\
+         split between the two by case, or a stop. A form is lowered only\n\
+         with evidence that both behave the same in every case it lowers;\n\
+         the cases the evidence does not cover stop with their own reason.\n\n\
          | form | row | to | evidence or reason |\n|---|---|---|---|\n",
     );
-    let (mut exact, mut pseudo, mut stop) = (0, 0, 0);
+    let (mut exact, mut split, mut pseudo, mut stop) = (0, 0, 0, 0);
     for (op, src) in forms() {
         let name = match src_name(src) {
             "" => op.name().to_string(),
@@ -78,6 +120,14 @@ pub fn markdown() -> String {
             Row::Exact { to, evidence } => {
                 exact += 1;
                 format!("| {name} | exact | {to} | {evidence} |")
+            }
+            Row::Split {
+                to,
+                pseudo: p,
+                evidence,
+            } => {
+                split += 1;
+                format!("| {name} | exact and pseudo | {to}; {p} | {evidence} |")
             }
             Row::Pseudo { name: p, evidence } => {
                 pseudo += 1;
@@ -92,8 +142,8 @@ pub fn markdown() -> String {
     }
     let _ = write!(
         s,
-        "\n{} forms: {exact} exact, {pseudo} pseudo, {stop} stop.\n",
-        exact + pseudo + stop
+        "\n{} forms: {exact} exact, {split} exact and pseudo, {pseudo} pseudo, {stop} stop.\n",
+        exact + split + pseudo + stop
     );
     s
 }
