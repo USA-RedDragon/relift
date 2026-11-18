@@ -144,7 +144,11 @@ impl Device for Ios {
 
     fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError> {
         let mut out = BTreeMap::new();
-        for (root, sub) in [("", "Documents"), ("dlc", "Documents/dlc")] {
+        for (root, sub) in [
+            ("", "Documents"),
+            ("dlc", "Documents/dlc"),
+            ("shaders", "Documents/shaders"),
+        ] {
             let json = self.work.join(format!(
                 "push-{}.json",
                 if root.is_empty() { "top" } else { root }
@@ -247,15 +251,15 @@ fn android_names(text: &str, dir: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether `name` (relative to the data folder) is game data a manifest
-/// lists: the game's image or a file under `dlc/`.
+/// Whether `name` (relative to the data folder) is game data a push checks:
+/// the game's image, a file under `dlc/` or a shader table under `shaders/`.
 fn is_data_name(name: &str) -> bool {
-    name == IMAGE_NAME || name.starts_with("dlc/")
+    name == IMAGE_NAME || name.starts_with("dlc/") || name.starts_with("shaders/")
 }
 
 /// The data under `dir`, for a device shell `for` list.
 fn android_roots(dir: &str) -> String {
-    format!("'{dir}'/{IMAGE_NAME} '{dir}'/dlc")
+    format!("'{dir}'/{IMAGE_NAME} '{dir}'/dlc '{dir}'/shaders")
 }
 
 /// The device command that prints `<size> <path>` for every data file: one
@@ -338,6 +342,29 @@ fn local_images(
     Ok(out)
 }
 
+/// Adds the build's shader tables to what a push copies, as
+/// `shaders/<file>`; the app reads them from there. Their hash is left empty:
+/// a push compares sizes only, and the app's manifest does not list them.
+fn add_shader_tables(
+    out: &Path,
+    entries: &mut Vec<Entry>,
+    local: &mut BTreeMap<String, PathBuf>,
+) -> Result<(), BoxError> {
+    for f in crate::shaders::tables(out) {
+        let Some(file) = f.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let name = format!("shaders/{file}");
+        entries.push(Entry {
+            name: name.clone(),
+            size: std::fs::metadata(&f)?.len(),
+            sha256: String::new(),
+        });
+        local.insert(name, f);
+    }
+    Ok(())
+}
+
 fn push_to(
     dev: &dyn Device,
     local: &BTreeMap<String, PathBuf>,
@@ -400,7 +427,9 @@ pub fn run_push(
     if entries.is_empty() {
         return Err(format!("{}: no romfs or dlc to push", import.display()).into());
     }
-    let local = local_images(&import, &work, ui)?;
+    let mut entries = entries;
+    let mut local = local_images(&import, &work, ui)?;
+    add_shader_tables(&out, &mut entries, &mut local)?;
     let bytes: u64 = entries.iter().map(|e| e.size).sum();
     let what = match crate::cross::target(target)? {
         Some(crate::cross::Target::Ios(_)) => {
@@ -515,6 +544,7 @@ mod tests {
             {"relativePath":"romfs.img","resources":{"isDirectory":false},"metadata":{"size":7}}]}}"#;
         assert_eq!(ios_listing(top, "").unwrap()["romfs.img"], 7);
         assert!(is_data_name("romfs.img") && is_data_name("dlc/01/0/romfs.img"));
+        assert!(is_data_name("shaders/table.rlspv"));
         assert!(!is_data_name("save/x"));
     }
 

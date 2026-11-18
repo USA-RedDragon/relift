@@ -17,11 +17,15 @@
 //!   translation beyond its SPIR-V (see [`interfaces`]).
 //!
 //! The tables stay files the runtime reads a module at a time (one
-//! program's translation runs to megabytes, a game's to gigabytes); the
-//! build's `c/shaders.c` gives the runtime the folder's path before `main`.
+//! program's translation runs to megabytes, a game's to gigabytes). The
+//! program does not name the folder: the runtime looks in `shaders/` beside
+//! its executable, which is this folder for the program `relift build` leaves
+//! in the build directory, and a package carries [`tables`] with the program
+//! and points the runtime at them (see [`env`]).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use relift_gpu_sm86::translate::build::{Input, Table, translate_set};
@@ -53,10 +57,16 @@ pub const RECORD_GLOBAL_MEMORY: u32 = 2;
 /// An interface record: the program reads a bound texture handle.
 pub const RECORD_TEXTURE: u32 = 3;
 
+/// The environment variable that names the folder the runtime reads the
+/// tables from.
+pub const TABLES_ENV: &str = "RELIFT_NVN_TABLES";
+
+/// The environment variable that names the folder the runtime records the
+/// programs the tables lack and the device capabilities in.
+pub const SHADERS_ENV: &str = "RELIFT_NVN_SHADERS";
+
 /// What a build's shader table holds.
 pub struct Built {
-    /// The C file that names the folder to the runtime.
-    pub c_file: PathBuf,
     /// Programs recorded.
     pub programs: usize,
     /// Programs translated.
@@ -146,13 +156,13 @@ fn translate_all(host: &HostProfile, inputs: &[Input], jobs: usize) -> Table {
 }
 
 /// Translates the programs recorded in `out`/shaders for the device of its
-/// `device.json` and writes the table and its C file into `cdir`. Without a
+/// `device.json` and writes the tables beside them. Without a
 /// device file the table is empty: the game has not run on a device yet.
 ///
 /// # Errors
 ///
 /// A file cannot be read or written, or `device.json` is not capabilities.
-pub fn build(out: &Path, cdir: &Path, jobs: usize) -> Result<Built, BoxError> {
+pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
     let dir = out.join(DIR);
     std::fs::create_dir_all(dir.join("programs"))?;
     let inputs = programs(&dir)?;
@@ -175,10 +185,7 @@ pub fn build(out: &Path, cdir: &Path, jobs: usize) -> Result<Built, BoxError> {
     relift_cache::write_if_changed(&dir.join("failed.txt"), failed.as_bytes())?;
     relift_cache::write_if_changed(&dir.join(TABLE), &table.to_compressed_bytes(ZSTD_LEVEL)?)?;
     relift_cache::write_if_changed(&dir.join(INTERFACES), &interfaces(&table))?;
-    let c_file = cdir.join("shaders.c");
-    relift_cache::write_if_changed(&c_file, c_text(&dir).as_bytes())?;
     Ok(Built {
-        c_file,
         programs: inputs.len(),
         translated: table.shaders.len(),
         refused,
@@ -218,13 +225,56 @@ pub fn interfaces(t: &Table) -> Vec<u8> {
     head
 }
 
-fn c_text(dir: &Path) -> String {
-    format!(
-        "void rl_switch_set_shaders(const char *dir);\n\
-         __attribute__((constructor)) static void rl_shaders_init(void)\n\
-         {{\n    rl_switch_set_shaders({});\n}}\n",
-        c_string(&dir.display().to_string())
-    )
+/// The table files of the build in `out` that a package carries: both when
+/// the build translated at least one program, else none.
+#[must_use]
+pub fn tables(out: &Path) -> Vec<PathBuf> {
+    let dir = out.join(DIR);
+    let files = [dir.join(TABLE), dir.join(INTERFACES)];
+    let head = std::fs::metadata(&files[0]).map_or(0, |m| m.len());
+    if head > TABLE_HEAD_BYTES && files[1].is_file() {
+        files.into()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The length of a table with no module: its magic and its count.
+const TABLE_HEAD_BYTES: u64 = 12;
+
+/// Copies the table `files` into `dir`, which is made, streaming them (a
+/// table runs to gigabytes) and leaving a file that already holds the same
+/// bytes alone.
+///
+/// # Errors
+///
+/// A folder cannot be made or a file cannot be copied.
+pub fn install(files: &[PathBuf], dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    for f in files {
+        let Some(name) = f.file_name() else {
+            continue;
+        };
+        let mut from = std::fs::File::open(f)?;
+        let mut to = relift_cache::StreamWriter::new(&dir.join(name))?;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = from.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            to.write_all(&buf[..n])?;
+        }
+        to.finish()?;
+    }
+    Ok(())
+}
+
+/// Points a run of the program built in `out` at the build's shader folder,
+/// the one the next build reads, where the program built elsewhere (the dev
+/// build, whose folder is below `out`) would not look.
+pub fn set_env(cmd: &mut std::process::Command, out: &Path) {
+    cmd.env(SHADERS_ENV, out.join(DIR));
 }
 
 /// `s` as a C string literal.
@@ -269,6 +319,55 @@ mod tests {
         assert_eq!(k, [0xab; 32]);
         assert_eq!(hex(&k), "ab".repeat(32));
         assert!(hex_key("ab.bin").is_none());
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("relift-shaders-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join(DIR)).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_package_carries_the_tables_only_when_something_was_translated() {
+        let out = scratch("tables");
+        assert!(tables(&out).is_empty());
+        let head = b"RLSPV002\0\0\0\0";
+        relift_cache::write_if_changed(&out.join(DIR).join(TABLE), head).unwrap();
+        relift_cache::write_if_changed(&out.join(DIR).join(INTERFACES), b"RLSPI001").unwrap();
+        assert!(tables(&out).is_empty());
+        relift_cache::write_if_changed(
+            &out.join(DIR).join(TABLE),
+            &[head.as_slice(), b"x"].concat(),
+        )
+        .unwrap();
+        let t = tables(&out);
+        assert_eq!(
+            t,
+            [out.join(DIR).join(TABLE), out.join(DIR).join(INTERFACES)]
+        );
+        let dest = out.join("pkg").join("shaders");
+        install(&t, &dest).unwrap();
+        assert_eq!(std::fs::read(dest.join(TABLE)).unwrap().len(), 13);
+        assert!(dest.join(INTERFACES).is_file());
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn a_run_is_pointed_at_the_build_folder() {
+        let mut cmd = relift_proc::command("true");
+        set_env(&mut cmd, Path::new("/b/host"));
+        let env: Vec<_> = cmd.get_envs().collect();
+        assert_eq!(
+            env,
+            [(
+                std::ffi::OsStr::new(SHADERS_ENV),
+                Some(Path::new("/b/host/shaders").as_os_str())
+            )]
+        );
     }
 
     #[test]

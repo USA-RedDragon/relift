@@ -5,16 +5,23 @@
  * A program is its shader program header (when it has one) and its code
  * through the first BRA to itself, read at the GPU address nvnProgramSetShaders
  * names; its key is the SHA-256 of those bytes. Translations come from the
- * tables relift build wrote to the build's shader folder (table.rlspv, the
- * SPIR-V, read a module at a time; table.rlspi, what each translation's
- * interface needs), both sorted by key. table.rlspv is "RLSPV002" (each
- * module a Zstandard frame; entries of the key, the frame's u64 offset, its
- * u32 length and the module's u32 length in words) or the older uncompressed
- * "RLSPV001" (entries of the key, a u32 offset and the length in words). A program the table lacks is written
- * to <folder>/programs/<key>.bin when the game sets it, and the host
- * device's capabilities to <folder>/device.json (RELIFT_NVN_SHADERS
- * overrides the folder), so the next relift build translates it for that
- * device; a draw that needs it stops the game.
+ * tables relift build wrote, table.rlspv (the SPIR-V, read a module at a
+ * time) and table.rlspi (what each translation's interface needs), both sorted
+ * by key, in the table folder. table.rlspv is "RLSPV002" (each module a
+ * Zstandard frame; entries of the key, the frame's u64 offset, its u32 length
+ * and the module's u32 length in words) or the older uncompressed "RLSPV001"
+ * (entries of the key, a u32 offset and the length in words).
+ *
+ * Nothing in the program names the build machine's folders. The table folder
+ * is $RELIFT_NVN_TABLES when set (what the launchers of a packaged app and
+ * the mobile entries set), else the shader folder. The shader folder is
+ * $RELIFT_NVN_SHADERS when set (the launchers and mobile entries point it at
+ * the user's own data folder), else "shaders" beside the executable, which is
+ * where relift build puts it next to the program. A program the table lacks
+ * is written to <shader folder>/programs/<key>.bin when the game sets it, and
+ * the host device's capabilities to <shader folder>/device.json, so the next
+ * relift build translates it for that device once the folder is back in that
+ * build's shaders folder; a draw that needs it stops the game.
  */
 #include "nvn_priv.h"
 
@@ -42,13 +49,31 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 #define TABLE_ENTRY 40u
 #define TABLE_ENTRY_ZSTD 48u
 
+static char g_default_dir[1100];
+static pthread_once_t g_default_once = PTHREAD_ONCE_INIT;
+
+static void default_dir(void)
+{
+    char exe[1024];
+    if (rl_exe_dir(exe, sizeof exe))
+        snprintf(g_default_dir, sizeof g_default_dir, "%s/shaders", exe);
+    else
+        snprintf(g_default_dir, sizeof g_default_dir, "shaders");
+}
+
 const char *nvn_shader_dir(void)
 {
     const char *d = getenv("RELIFT_NVN_SHADERS");
     if (d && *d)
         return d;
-    d = rl_switch_shaders_dir();
-    return d && *d ? d : "shaders";
+    pthread_once(&g_default_once, default_dir);
+    return g_default_dir;
+}
+
+const char *nvn_shader_table_dir(void)
+{
+    const char *d = getenv("RELIFT_NVN_TABLES");
+    return d && *d ? d : nvn_shader_dir();
 }
 
 static int hexv(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; }
@@ -96,7 +121,7 @@ static table *open_table(table *t, const char *name, const char *magic, bool who
         return t->head ? t : NULL;
     t->tried = true;
     char path[1100];
-    snprintf(path, sizeof path, "%s/%s", nvn_shader_dir(), name);
+    snprintf(path, sizeof path, "%s/%s", nvn_shader_table_dir(), name);
     FILE *f = fopen(path, "rb");
     uint8_t h[TABLE_HEAD];
     if (!f)
@@ -312,7 +337,7 @@ uint32_t *nvn_shader_spirv(const char *key, size_t *words)
         free(frame);
     if (!ok) {
         free(w);
-        rl_log(RL_LOG_ERROR, "nvn", "cannot read translation %s from %s/table.rlspv", key, nvn_shader_dir());
+        rl_log(RL_LOG_ERROR, "nvn", "cannot read translation %s from %s/table.rlspv", key, nvn_shader_table_dir());
         return NULL;
     }
     *words = n;

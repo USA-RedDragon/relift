@@ -13,6 +13,8 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define RET 0x7000000ull
@@ -221,13 +223,21 @@ static int rm_entry(const char *path, const struct stat *st, int flag, struct FT
     return remove(path);
 }
 
-TEST(nvn_reads_compressed_translation_table)
+/** One module of three words, stored as a zstd frame with one raw block. */
+static const uint32_t table_words[3] = { 0x07230203u, 0x00010600u, 0xdeadbeefu };
+
+static void table_key(char key[65])
 {
-    /* One module of three words, stored as a zstd frame with one raw block. */
-    static const uint32_t words[3] = { 0x07230203u, 0x00010600u, 0xdeadbeefu };
-    uint8_t frame[4 + 2 + 3 + sizeof words] = { 0x28, 0xb5, 0x2f, 0xfd, 0x20, sizeof words };
-    put_le(frame + 6, (sizeof words << 3) | 1, 3);
-    memcpy(frame + 9, words, sizeof words);
+    for (int i = 0; i < 32; i++)
+        snprintf(key + 2 * i, 3, "%02x", 0xa0 + i);
+}
+
+/** Writes dir/table.rlspv with one translation, keyed by table_key. */
+static bool write_table(const char *dir)
+{
+    uint8_t frame[4 + 2 + 3 + sizeof table_words] = { 0x28, 0xb5, 0x2f, 0xfd, 0x20, sizeof table_words };
+    put_le(frame + 6, (sizeof table_words << 3) | 1, 3);
+    memcpy(frame + 9, table_words, sizeof table_words);
     uint8_t table[12 + 48 + sizeof frame + 4];
     memset(table, 0, sizeof table);
     memcpy(table, "RLSPV002", 8);
@@ -238,28 +248,131 @@ TEST(nvn_reads_compressed_translation_table)
     put_le(table + 52, sizeof frame, 4);
     put_le(table + 56, 3, 4);
     memcpy(table + 60, frame, sizeof frame);
-    const char *base = getenv("TMPDIR");
-    char dir[PATH_MAX], path[PATH_MAX + 16];
-    snprintf(dir, sizeof dir, "%s/relift-rlspv-XXXXXX", base && *base ? base : "/tmp");
-    CHECK(mkdtemp(dir) != NULL);
+    char path[PATH_MAX + 16];
     snprintf(path, sizeof path, "%s/table.rlspv", dir);
     FILE *f = fopen(path, "wb");
-    CHECK(f != NULL);
-    CHECK_EQ(fwrite(table, 1, sizeof table, f), sizeof table);
-    fclose(f);
+    if (!f)
+        return false;
+    bool ok = fwrite(table, 1, sizeof table, f) == sizeof table;
+    return fclose(f) == 0 && ok;
+}
+
+static bool make_scratch(char dir[PATH_MAX])
+{
+    const char *base = getenv("TMPDIR");
+    snprintf(dir, PATH_MAX, "%s/relift-rlspv-XXXXXX", base && *base ? base : "/tmp");
+    return mkdtemp(dir) != NULL;
+}
+
+TEST(nvn_reads_compressed_translation_table)
+{
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_table(dir));
     setenv("RELIFT_NVN_SHADERS", dir, 1);
     char key[65];
-    for (int i = 0; i < 32; i++)
-        snprintf(key + 2 * i, 3, "%02x", 0xa0 + i);
+    table_key(key);
     size_t n = 0;
     uint32_t *got = nvn_shader_spirv(key, &n);
     CHECK(got != NULL);
     CHECK_EQ(n, 3);
-    CHECK(got && memcmp(got, words, sizeof words) == 0);
+    CHECK(got && memcmp(got, table_words, sizeof table_words) == 0);
     free(got);
     key[0] = 'b';
     CHECK(nvn_shader_spirv(key, &n) == NULL);
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
+/**
+ * The child of nvn_shader_tables_follow_the_executable: it runs from a copy of the test program and says whether
+ * the table beside that copy is found (RL_SHADER_EXPECT=found) or not (missing). Without the variable it is a test
+ * that passes.
+ */
+TEST(nvn_shader_tables_child)
+{
+    const char *want = getenv("RL_SHADER_EXPECT");
+    if (!want)
+        return;
+    CHECK(!getenv("RELIFT_NVN_SHADERS") && !getenv("RELIFT_NVN_TABLES"));
+    char key[65];
+    table_key(key);
+    size_t n = 0;
+    uint32_t *got = nvn_shader_spirv(key, &n);
+    if (!strcmp(want, "found")) {
+        CHECK(got != NULL);
+        CHECK_EQ(n, 3);
+        CHECK(got && memcmp(got, table_words, sizeof table_words) == 0);
+    } else {
+        CHECK(got == NULL);
+    }
+    free(got);
+}
+
+static bool copy_file(const char *from, const char *to)
+{
+    FILE *in = fopen(from, "rb"), *out = fopen(to, "wb");
+    bool ok = in && out;
+    char buf[1 << 16];
+    size_t got;
+    while (ok && (got = fread(buf, 1, sizeof buf, in)) > 0)
+        ok = fwrite(buf, 1, got, out) == got;
+    if (in)
+        fclose(in);
+    if (out)
+        ok = fclose(out) == 0 && ok;
+    return ok && chmod(to, 0755) == 0;
+}
+
+/** Runs the copy of the test program at exe from the folder cwd and tells whether its child test passed. */
+static bool run_copy(const char *exe, const char *cwd, const char *expect)
+{
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    if (pid < 0)
+        return false;
+    if (pid == 0) {
+        unsetenv("RELIFT_NVN_SHADERS");
+        unsetenv("RELIFT_NVN_TABLES");
+        setenv("RELIFT_TEST_ONE", "nvn_shader_tables_child", 1);
+        setenv("RL_SHADER_EXPECT", expect, 1);
+        if (chdir(cwd) != 0)
+            _exit(125);
+        char *argv[] = { (char *)exe, NULL };
+        execv(exe, argv);
+        _exit(126);
+    }
+    int st = 0;
+    return waitpid(pid, &st, 0) == pid && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
+TEST(nvn_shader_tables_follow_the_executable)
+{
+    char root[PATH_MAX], built[PATH_MAX + 32], moved[PATH_MAX + 32], elsewhere[PATH_MAX + 32], from[PATH_MAX], exe[PATH_MAX + 64];
+    char shaders[PATH_MAX + 64], bare[PATH_MAX + 32];
+    CHECK(make_scratch(root));
+    CHECK(rl_exe_path(from, sizeof from));
+    snprintf(built, sizeof built, "%s/built", root);
+    snprintf(moved, sizeof moved, "%s/moved", root);
+    snprintf(elsewhere, sizeof elsewhere, "%s/elsewhere", root);
+    snprintf(bare, sizeof bare, "%s/bare", root);
+    snprintf(shaders, sizeof shaders, "%s/shaders", built);
+    CHECK(mkdir(built, 0755) == 0 && mkdir(shaders, 0755) == 0 && mkdir(elsewhere, 0755) == 0 && mkdir(bare, 0755) == 0);
+    CHECK(write_table(shaders));
+    snprintf(exe, sizeof exe, "%s/game", built);
+    CHECK(copy_file(from, exe));
+    CHECK(run_copy(exe, elsewhere, "found"));
+    CHECK(rename(built, moved) == 0);
+    snprintf(exe, sizeof exe, "%s/game", moved);
+    {
+        struct stat st;
+        CHECK(stat(built, &st) != 0);
+    }
+    CHECK(run_copy(exe, elsewhere, "found"));
+    snprintf(exe, sizeof exe, "%s/game", bare);
+    CHECK(copy_file(from, exe));
+    CHECK(run_copy(exe, moved, "missing"));
+    nftw(root, rm_entry, 8, FTW_DEPTH | FTW_PHYS);
 }
 
 TEST(nvn_presents_step_the_input_script)

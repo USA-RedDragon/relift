@@ -184,6 +184,16 @@ RL_RUNTIME_API uint64_t rl_ns_to_ticks(uint64_t ns);
 RL_RUNTIME_API uint64_t rl_ticks_to_ns(uint64_t ticks);
 /** @brief Real host page size from the OS. */
 RL_RUNTIME_API uint32_t rl_os_page_size(void);
+/**
+ * @brief The path of the running program's executable, with '/' separators, written to buf (n bytes). Returns false
+ * when the OS does not say or buf is too small.
+ */
+RL_RUNTIME_API bool rl_exe_path(char *buf, size_t n);
+/**
+ * @brief The folder of the running program's executable, with '/' separators and no trailing separator, written to
+ * buf (n bytes). Returns false when the OS does not say or buf is too small.
+ */
+RL_RUNTIME_API bool rl_exe_dir(char *buf, size_t n);
 /** @brief The process's memory: the physical footprint on Apple hosts, the resident set on Linux and Android, private bytes on Windows; 0 when unknown. */
 RL_RUNTIME_API uint64_t rl_os_memory_bytes(void);
 

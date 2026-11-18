@@ -174,8 +174,13 @@ const uint8_t *nvn_sampler_registered(uint32_t id);
 
 /** @brief Makes folder dir and the folders above it. */
 void nvn_mkdirs(const char *dir);
-/** @brief The build's shader folder, where programs the table lacks and device.json are written (nvn_shader.c). */
+/**
+ * @brief The shader folder, where programs the table lacks and device.json are written: $RELIFT_NVN_SHADERS, else
+ * "shaders" beside the executable (nvn_shader.c).
+ */
 const char *nvn_shader_dir(void);
+/** @brief The folder the translation tables are read from: $RELIFT_NVN_TABLES, else the shader folder. */
+const char *nvn_shader_table_dir(void);
 /** @brief Bytes of the program at guest address code: its header if it has one and its code through the first BRA to itself; 0 when none ends within 4 MiB. */
 uint64_t nvn_shader_extent(const uint8_t *mem, uint64_t code);
 /** @brief The key (SHA-256 hex) of the program at code and its length; false when it has no end. */

@@ -693,6 +693,9 @@ pub struct Contents<'a> {
     /// images (a plain image is cloned on APFS), or `None` when the data
     /// goes to Documents later.
     pub data: Option<&'a Path>,
+    /// The build's shader tables (crate::shaders::tables), which go into the
+    /// bundle's `shaders/` folder.
+    pub shaders: &'a [PathBuf],
 }
 
 /// The packaging step of an iOS build: `<name>.app` beside the program
@@ -708,6 +711,7 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
         home,
         data_manifest,
         data,
+        shaders,
     } = *c;
     let dir = exe.parent().ok_or("the program has no folder")?;
     let row = ui.row("");
@@ -731,6 +735,9 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
     }
     if let Some(d) = data {
         crate::gamedata::write_images(d, &app, true)?;
+    }
+    if !shaders.is_empty() {
+        crate::shaders::install(shaders, &app.join("shaders"))?;
     }
     for (n, png) in &home.icons {
         relift_cache::write_if_changed(&app.join(n), png)?;

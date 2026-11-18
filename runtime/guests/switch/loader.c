@@ -400,11 +400,6 @@ static void attach_mods(const rl_switch_program *p)
 }
 
 static const rl_switch_program *g_program;
-static const char *g_shaders;
-
-void rl_switch_set_shaders(const char *dir) { g_shaders = dir; }
-
-const char *rl_switch_shaders_dir(void) { return g_shaders; }
 
 /** @brief Report peek: bytes of a module's image (text, rodata, data as loaded), never bss or other memory. */
 static bool report_peek(uint64_t a, void *out, size_t n)

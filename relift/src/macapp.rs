@@ -143,7 +143,13 @@ fn quote(s: &str) -> String {
 
 /// The script that starts the program: per-user folders, the bundled data
 /// and the save file, as the AppImage's `AppRun` does on Linux.
-pub fn launcher(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> String {
+pub fn launcher(
+    slug: &str,
+    platform: &str,
+    has_romfs: bool,
+    has_dlc: bool,
+    has_shaders: bool,
+) -> String {
     let q = quote(slug);
     let real = quote(&format!("{slug}.bin"));
     let mut s = String::from("#!/bin/sh\nHERE=$(cd \"$(dirname \"$0\")\" && pwd)\n");
@@ -158,6 +164,7 @@ pub fn launcher(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> S
         "switch" => {
             s.push_str("mkdir -p \"$DATA/save\" \"$DATA/sdmc\"\n");
             s.push_str(": \"${RELIFT_SAVE:=$DATA/save}\"\n: \"${RELIFT_SDMC:=$DATA/sdmc}\"\nexport RELIFT_SAVE RELIFT_SDMC\n");
+            s.push_str(": \"${RELIFT_NVN_SHADERS:=$DATA/shaders}\"\nexport RELIFT_NVN_SHADERS\n");
         }
         "gba" => {
             s.push_str(
@@ -175,6 +182,11 @@ pub fn launcher(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> S
     }
     if has_dlc {
         s.push_str(": \"${RELIFT_DLC:=$HERE/../Resources/dlc}\"\nexport RELIFT_DLC\n");
+    }
+    if has_shaders {
+        s.push_str(
+            ": \"${RELIFT_NVN_TABLES:=$HERE/../Resources/shaders}\"\nexport RELIFT_NVN_TABLES\n",
+        );
     }
     s.push_str(&format!("exec \"$HERE\"/{real}{args} \"$@\"\n"));
     s
@@ -456,10 +468,18 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
         Some(i) => crate::gamedata::write_images(i, &resources, true)?,
         None => (false, false),
     };
+    crate::shaders::install(req.shaders, &resources.join("shaders"))?;
     let script = macos.join(slug);
     relift_cache::write_if_changed(
         &script,
-        launcher(slug, info.identity.platform.as_str(), romfs, dlc).as_bytes(),
+        launcher(
+            slug,
+            info.identity.platform.as_str(),
+            romfs,
+            dlc,
+            !req.shaders.is_empty(),
+        )
+        .as_bytes(),
     )?;
     crate::appimage::set_mode(&script, 0o755)?;
     relift_cache::write_if_changed(
@@ -576,11 +596,13 @@ mod tests {
 
     #[test]
     fn the_launcher_keeps_saves_per_user() {
-        let gb = launcher("g", "gbc", false, false);
+        let gb = launcher("g", "gbc", false, false, false);
         assert!(gb.contains("Library/Application Support/"));
         assert!(gb.contains("--save \"$DATA/\"'g'\".sav\""));
         assert!(gb.ends_with("\"$@\"\n"));
-        let sw = launcher("g", "switch", true, true);
+        let sw = launcher("g", "switch", true, true, true);
+        assert!(sw.contains("RELIFT_NVN_SHADERS:=$DATA/shaders"));
+        assert!(sw.contains("RELIFT_NVN_TABLES:=$HERE/../Resources/shaders"));
         assert!(sw.contains("RELIFT_ROMFS:=$HERE/../Resources/romfs.img"));
         assert!(sw.contains("RELIFT_DLC"));
     }

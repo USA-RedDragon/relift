@@ -115,6 +115,9 @@ pub struct Request<'a> {
     /// The import directory of a Switch game, whose romfs and DLC go into
     /// the AppImage as plain images (crate::gamedata).
     pub import: Option<&'a Path>,
+    /// The build's shader tables (crate::shaders::tables), which go into the
+    /// AppImage beside the data.
+    pub shaders: &'a [PathBuf],
 }
 
 /// When to build the AppImage.
@@ -250,7 +253,13 @@ fn shell_quote(s: &str) -> String {
 /// points the program at the per-user folder for saves and at the shipped
 /// data, and starts it with the user's arguments.
 #[must_use]
-pub fn app_run(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> String {
+pub fn app_run(
+    slug: &str,
+    platform: &str,
+    has_romfs: bool,
+    has_dlc: bool,
+    has_shaders: bool,
+) -> String {
     let q = shell_quote(slug);
     let mut s = String::from("#!/bin/sh\n");
     s.push_str("HERE=$(dirname \"$(readlink -f \"$0\")\")\n");
@@ -268,6 +277,7 @@ pub fn app_run(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> St
             s.push_str(": \"${RELIFT_SAVE:=$DATA/save}\"\n");
             s.push_str(": \"${RELIFT_SDMC:=$DATA/sdmc}\"\n");
             s.push_str("export RELIFT_SAVE RELIFT_SDMC\n");
+            s.push_str(": \"${RELIFT_NVN_SHADERS:=$DATA/shaders}\"\nexport RELIFT_NVN_SHADERS\n");
         }
         "gba" => {
             s.push_str("mkdir -p \"$DATA/save\"\n");
@@ -287,6 +297,11 @@ pub fn app_run(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> St
     }
     if has_dlc {
         s.push_str(": \"${RELIFT_DLC:=$HERE/usr/share/relift/dlc}\"\nexport RELIFT_DLC\n");
+    }
+    if has_shaders {
+        s.push_str(
+            ": \"${RELIFT_NVN_TABLES:=$HERE/usr/share/relift/shaders}\"\nexport RELIFT_NVN_TABLES\n",
+        );
     }
     s.push_str(&format!("exec \"$HERE/usr/bin/\"{q}{args} \"$@\"\n"));
     s
@@ -424,10 +439,15 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
         Some(i) => crate::gamedata::write_images(i, &share, false)?,
         None => (false, false),
     };
+    let has_shaders = !req.shaders.is_empty();
+    crate::shaders::install(req.shaders, &share.join("shaders"))?;
     relift_cache::write_if_changed(&dir.join(INFO_PATH), &info.to_bytes())?;
     write_licenses(dir, &slug, &name, &bundled, platform == "switch")?;
     let run = dir.join("AppRun");
-    relift_cache::write_if_changed(&run, app_run(&slug, platform, romfs, dlc).as_bytes())?;
+    relift_cache::write_if_changed(
+        &run,
+        app_run(&slug, platform, romfs, dlc, has_shaders).as_bytes(),
+    )?;
     set_mode(&run, 0o755)?;
     set_mode(&exe_dest, 0o755)?;
     relift_cache::write_if_changed(
@@ -630,15 +650,19 @@ mod tests {
 
     #[test]
     fn app_run_sets_the_per_user_folder_by_platform() {
-        let sw = app_run("g", "switch", true, false);
+        let sw = app_run("g", "switch", true, false, false);
         assert!(sw.contains("RELIFT_SAVE:=$DATA/save"));
         assert!(sw.contains("RELIFT_ROMFS:=$HERE/usr/share/relift/romfs.img"));
         assert!(!sw.contains("RELIFT_DLC"));
-        let gb = app_run("g", "gbc", false, false);
+        assert!(sw.contains("RELIFT_NVN_SHADERS:=$DATA/shaders"));
+        assert!(!sw.contains("RELIFT_NVN_TABLES"));
+        let tables = app_run("g", "switch", true, false, true);
+        assert!(tables.contains("RELIFT_NVN_TABLES:=$HERE/usr/share/relift/shaders"));
+        let gb = app_run("g", "gbc", false, false, false);
         assert!(gb.contains("--save \"$DATA/\"'g'\".sav\""));
         assert!(gb.ends_with("\"$@\"\n"));
         assert!(gb.contains("--relift-info) exec"));
-        let odd = app_run("it's", "gba", false, false);
+        let odd = app_run("it's", "gba", false, false, false);
         assert!(odd.contains("'it'\\''s'"));
     }
 
@@ -680,11 +704,15 @@ mod tests {
         info.identity
             .names
             .insert("default".into(), "My Game".into());
+        let table = root.join("table.rlspv");
+        relift_cache::write_if_changed(&table, b"RLSPV002\0\0\0\x01x").unwrap();
+        let shaders = [table];
         let exe = std::env::current_exe().unwrap();
         let req = Request {
             name: "my game",
             exe: &exe,
             import: Some(&data),
+            shaders: &shaders,
         };
         let out = root.join("AppDir");
         let p = layout(&req, &info, &out).unwrap();
@@ -696,6 +724,7 @@ mod tests {
             ".DirIcon",
             "usr/bin/my-game",
             "usr/share/relift/romfs.img",
+            "usr/share/relift/shaders/table.rlspv",
             "usr/share/licenses/my-game/BUNDLED.txt",
             "usr/share/licenses/my-game/relift-LICENSE",
             "usr/share/licenses/my-game/type2-runtime-LICENSE",
@@ -703,6 +732,11 @@ mod tests {
         ] {
             assert!(out.join(f).exists(), "{f}");
         }
+        assert!(
+            std::fs::read_to_string(out.join("AppRun"))
+                .unwrap()
+                .contains("RELIFT_NVN_TABLES:=$HERE/usr/share/relift/shaders")
+        );
         assert_eq!(std::fs::read(out.join(INFO_PATH)).unwrap(), info.to_bytes());
         let d = std::fs::read_to_string(out.join("my-game.desktop")).unwrap();
         assert!(d.contains("Name=My Game"));

@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #if defined(__APPLE__)
+#include <mach-o/dyld.h>
 #include <mach/mach.h>
 #endif
 #endif
@@ -194,4 +195,45 @@ uint32_t rl_os_page_size(void)
     long p = sysconf(_SC_PAGESIZE);
     return p > 0 ? (uint32_t)p : 4096u;
 #endif
+}
+
+bool rl_exe_path(char *buf, size_t n)
+{
+    char path[4096];
+#if defined(_WIN32)
+    DWORD len = GetModuleFileNameA(NULL, path, sizeof path);
+    if (!len || len >= sizeof path)
+        return false;
+    for (DWORD i = 0; i < len; i++)
+        if (path[i] == '\\')
+            path[i] = '/';
+#elif defined(__APPLE__)
+    char raw[4096];
+    uint32_t size = sizeof raw;
+    if (_NSGetExecutablePath(raw, &size) != 0 || !realpath(raw, path))
+        return false;
+#else
+    ssize_t len = readlink("/proc/self/exe", path, sizeof path - 1);
+    if (len <= 0)
+        return false;
+    path[len] = 0;
+#endif
+    size_t m = strlen(path);
+    if (m >= n)
+        return false;
+    memcpy(buf, path, m + 1);
+    return true;
+}
+
+bool rl_exe_dir(char *buf, size_t n)
+{
+    if (!rl_exe_path(buf, n))
+        return false;
+    char *slash = strrchr(buf, '/');
+    if (!slash)
+        return false;
+    if (slash == buf)
+        slash++;
+    *slash = 0;
+    return true;
 }

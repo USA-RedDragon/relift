@@ -1410,7 +1410,7 @@ fn lift_and_emit(
     let console = program_console(npdm.as_ref(), &game)?;
     if console == relift_switch::cpu::Console::Switch2 {
         let jobs = relift_proc::workers::jobs().max(1);
-        let built = crate::shaders::build(out, &cdir, jobs as usize)?;
+        let built = crate::shaders::build(out, jobs as usize)?;
         if built.programs > 0 {
             let refused: Vec<String> = built
                 .refused
@@ -1428,7 +1428,6 @@ fn lift_and_emit(
                 }
             )));
         }
-        prog.push(built.c_file);
         if let Some(c) = crate::nvndriver::write(&placed, cpu, &cdir)? {
             prog.push(c);
         }
@@ -2169,6 +2168,10 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     } else {
         req.label
     };
+    let shaders = match (req.import, project_out(settings)) {
+        (Some(_), Ok((_, out))) => crate::shaders::tables(&out),
+        _ => Vec::new(),
+    };
     let data_manifest = match (req.import, req.ios.is_some() || req.android.is_some()) {
         (Some(import), true) => {
             let work = req.exe.parent().ok_or("the program has no folder")?;
@@ -2188,6 +2191,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
                 home: &home,
                 data_manifest: data_manifest.as_deref(),
                 data,
+                shaders: &shaders,
             },
             ui,
         )?;
@@ -2210,6 +2214,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         name: req.name,
         exe: req.exe,
         import: req.import,
+        shaders: &shaders,
     };
     if let Some(p) = crate::macapp::package(settings, &request, ui)? {
         ui.summary(&Line::new().text(format!("  app: {}", p.path.display())));
@@ -2318,6 +2323,7 @@ pub fn run_run(
     let mut cmd = relift_proc::command(&built.exe);
     cmd.env(crate::dev::SOCKET_ENV, &sock);
     crate::gamedata::set_env(&mut cmd, &import);
+    crate::shaders::set_env(&mut cmd, &built.out);
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }
