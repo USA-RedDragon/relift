@@ -60,6 +60,18 @@ TEST(auddmg_reports_one_input_device)
     CHECK_EQ(r.result, 0);
     CHECK_EQ(r.data[0], 1);
 
+    q = tc_new(401);
+    tc_put32(&q, 2);
+    q.na = 1;
+    q.a_addr[0] = names;
+    q.a_size[0] = 0x100;
+    q.nb = 1;
+    q.b_addr[0] = names + 0x400;
+    q.b_size[0] = 0x228;
+    CHECK_EQ(tc_send(c, s, q).result, 0);
+    CHECK_EQ(rl_ld64(t_mem(), names + 0x400 + 0x218), 10000000);
+    CHECK_EQ(rl_ld32(t_mem(), names + 0x400 + 0x220), 2);
+
     q = tc_new(700);
     tc_send(c, s, q);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);

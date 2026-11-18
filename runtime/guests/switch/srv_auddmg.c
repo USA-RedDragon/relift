@@ -108,6 +108,41 @@ static rl_result is_virtual_device_stream_format_supported(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief 401 GetVirtualDeviceProfile: the device's name in a type-5 buffer
+ * and a DeviceFunctionality in; a 0x228-byte VirtualDeviceProfile into a
+ * type-6 buffer. Verified from the SDK's InputStreamImpl::Open, which reads
+ * two fields: the u64 at 0x218, a latency in nanoseconds the stream's frame
+ * count must cover at its rate, and the u32 at 0x220, the device value it
+ * passes to sysmix CreateStream (2 for input, which audsmx:u takes). The
+ * values, and the rest of the block (0x100: 3, 0x104: 2, 0x108: channels,
+ * 0x10c: rate, 0x110: the physical device's name), follow Lichii
+ * (src/core/hle/service/audio/nx2_audio_device_manager.h): 10 ms latency,
+ * 2 channels, 48000 Hz, "AudioBuiltInMicrophone" (inferred).
+ */
+static rl_result get_virtual_device_profile(rl_ipc_req *r)
+{
+    uint32_t f;
+    if (!rl_srv_in(r, &f, 4))
+        return SF_RESULT_INVALID_HEADER;
+    if (!input_only(r, "GetVirtualDeviceProfile", f))
+        return AUDIO_OPERATION_FAILED;
+    uint8_t block[0x228] = { 0 };
+    static const char physical[] = "AudioBuiltInMicrophone";
+    const uint32_t words[4] = { 3, 2, 2, 48000 };
+    const uint64_t latency_ns = 10000000;
+    const uint32_t device = 2;
+    memcpy(block, main_input, sizeof main_input - 1);
+    memcpy(block + 0x100, words, sizeof words);
+    memcpy(block + 0x110, physical, sizeof physical - 1);
+    memcpy(block + 0x218, &latency_ns, 8);
+    memcpy(block + 0x220, &device, 4);
+    rl_ipc_buf out = rl_ipc_auto_out(r, 0);
+    if (out.size < sizeof block || !rl_ipc_buf_write(&out, block, sizeof block))
+        return SF_RESULT_INVALID_HEADER;
+    return KR_SUCCESS;
+}
+
 /** @brief A command of IUserSession relift does not answer yet: stops by name. */
 static rl_result not_answered(rl_ipc_req *r)
 {
@@ -116,7 +151,6 @@ static rl_result not_answered(rl_ipc_req *r)
         const char *name;
     } names[] = {
         { 200, "IsVirtualDeviceAvailable" },
-        { 401, "GetVirtualDeviceProfile" },
         { 500, "AcquireVirtualDeviceStateChangeEvent" },
         { 600, "ReleaseVirtualDeviceStateChangeEvent" },
         { 700, "AttachStream" },
@@ -144,7 +178,7 @@ static const rl_ipc_cmd session_cmds[] = {
     { 100, "GetDefaultVirtualDeviceName", get_default_virtual_device_name },
     { 200, "IsVirtualDeviceAvailable", not_answered },
     { 300, "IsVirtualDeviceStreamFormatSupported", is_virtual_device_stream_format_supported },
-    { 401, "GetVirtualDeviceProfile", not_answered },
+    { 401, "GetVirtualDeviceProfile", get_virtual_device_profile },
     { 500, "AcquireVirtualDeviceStateChangeEvent", not_answered },
     { 600, "ReleaseVirtualDeviceStateChangeEvent", not_answered },
     { 700, "AttachStream", not_answered },
