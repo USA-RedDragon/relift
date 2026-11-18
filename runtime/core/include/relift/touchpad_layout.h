@@ -2,7 +2,7 @@
  * @file touchpad_layout.h
  * @brief Shorthands for writing a guest's on-screen controller layout
  * (touchpad.h) as a table: positions and sizes in the reference screen's
- * pixels, buttons by radius.
+ * pixels (or in dp for a fitted layout), buttons by radius.
  */
 #ifndef RELIFT_TOUCHPAD_LAYOUT_H
 #define RELIFT_TOUCHPAD_LAYOUT_H
@@ -19,5 +19,9 @@
 #define RL_TP_DPAD(up, right, down, left, x, y, s) { RL_TOUCHPAD_DPAD, false, NULL, { up, right, down, left }, x, y, s, s }
 #define RL_TP_STICK(cx, cy, x, y, r) { RL_TOUCHPAD_STICK, false, NULL, { cx, cy }, x, y, 2 * (r), 2 * (r) }
 #define RL_TP_COUNT(a) ((uint32_t)(sizeof(a) / sizeof((a)[0])))
+/** A layout in reference pixels, of w by h pixels, from the arrays of its items and groups. */
+#define RL_TP_LAYOUT(w, h, items, groups) { w, h, items, RL_TP_COUNT(items), groups, RL_TP_COUNT(groups), false, false }
+/** A fitted layout in dp (see rl_touchpad_layout), of w by h dp; panel: it is a panel along the bottom of a tall view. */
+#define RL_TP_FITTED(w, h, items, groups, panel) { w, h, items, RL_TP_COUNT(items), groups, RL_TP_COUNT(groups), true, panel }
 
 #endif

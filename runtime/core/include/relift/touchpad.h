@@ -26,7 +26,7 @@
 /** @brief The id of the on-screen controller's input port. */
 #define RL_TOUCHPAD_PORT "touchpad"
 
-/** @brief Pixels per dp of the reference screen layouts are written in (2400 by 1080, 411 by 914 dp). */
+/** @brief Pixels per dp of the reference screen layouts are written in (2400 by 1080, 411 by 914 dp), unless fitted. */
 #define RL_TOUCHPAD_REF_PX_PER_DP 2.625f
 
 /** @brief Kinds of shape. */
@@ -87,6 +87,15 @@ typedef struct rl_touchpad_layout {
     const rl_touchpad_group *groups;
     /** @brief Number of groups. */
     uint32_t ngroups;
+    /**
+     * @brief True for a layout written in dp (x, y, w and h) that the module fits to the view: each group hangs from
+     * the nearest edge or the middle of the view, the whole layout scales down together until no two touch areas
+     * meet, and the picture takes what the controls leave. False: reference pixels (RL_TOUCHPAD_REF_PX_PER_DP), and
+     * groups beside the picture shrink to keep off it.
+     */
+    bool fitted;
+    /** @brief With fitted: the layout is a panel along the bottom of a tall view, and every group hangs from the bottom edge. */
+    bool panel;
 } rl_touchpad_layout;
 
 /** @brief What a guest layer declares. */

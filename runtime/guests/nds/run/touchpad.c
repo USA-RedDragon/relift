@@ -1,9 +1,12 @@
 /**
  * @file touchpad.c
  * @brief The DS on-screen controller: the d-pad, A B X Y, L and R, Start and
- * Select, the Hide button and the Menu tab. Below the picture in portrait;
- * in landscape the picture is a column in the middle and the controls sit
- * in the side bars. Fingers no shape takes are the bottom screen's pen.
+ * Select, and the small Screens, Hide and Menu buttons, written in dp and
+ * fitted to the view. A panel below the picture in portrait (L, Menu and R
+ * on top, the d-pad and the face buttons under them, Screens, Select, Start
+ * and Hide along the bottom); in landscape the picture is a column in the
+ * middle and the controls sit in the side bars. Fingers no shape takes are
+ * the bottom screen's pen.
  */
 #include "play.h"
 
@@ -12,33 +15,33 @@
 #define DPAD(x, y, s) RL_TP_DPAD("up", "right", "down", "left", x, y, s)
 
 static const rl_touchpad_item g_portrait[] = {
-    RL_TP_MENU(540, 1790, 230, 78),
-    DPAD(290, 2060, 380),
-    RL_TP_FACE("A", "a", 940, 2060, 75),
-    RL_TP_FACE("B", "b", 820, 2180, 75),
-    RL_TP_FACE("X", "x", 820, 1940, 75),
-    RL_TP_FACE("Y", "y", 700, 2060, 75),
-    RL_TP_PILL("L", "l", 190, 1790, 340, 96),
-    RL_TP_PILL("R", "r", 890, 1790, 340, 96),
-    RL_TP_PILL("Select", "select", 255, 2330, 230, 84),
-    RL_TP_PILL("Start", "start", 785, 2330, 230, 84),
-    RL_TP_HIDE(975, 2330, 120, 56),
-    RL_TP_PILL2("Screens", "swap", "layout", 520, 2330, 230, 84),
+    RL_TP_MENU(205.5f, 26, 76, 36),
+    DPAD(86, 140, 140),
+    RL_TP_FACE("A", "a", 367, 140, 28),
+    RL_TP_FACE("B", "b", 319, 188, 28),
+    RL_TP_FACE("X", "x", 319, 92, 28),
+    RL_TP_FACE("Y", "y", 271, 140, 28),
+    RL_TP_PILL("L", "l", 68, 26, 104, 44),
+    RL_TP_PILL("R", "r", 343, 26, 104, 44),
+    RL_TP_PILL("Select", "select", 155.5f, 252, 88, 40),
+    RL_TP_PILL("Start", "start", 255.5f, 252, 88, 40),
+    RL_TP_HIDE(365, 252, 60, 36),
+    RL_TP_PILL2("Screens", "swap", "layout", 58, 252, 84, 36),
 };
 
 static const rl_touchpad_item g_landscape[] = {
-    RL_TP_MENU(1200, 50, 230, 70),
-    DPAD(220, 560, 360),
-    RL_TP_FACE("A", "a", 2295, 560, 78),
-    RL_TP_FACE("B", "b", 2170, 685, 78),
-    RL_TP_FACE("X", "x", 2170, 435, 78),
-    RL_TP_FACE("Y", "y", 2045, 560, 78),
-    RL_TP_PILL("L", "l", 190, 120, 300, 100),
-    RL_TP_PILL("R", "r", 2210, 120, 300, 100),
-    RL_TP_PILL("Select", "select", 200, 930, 230, 88),
-    RL_TP_PILL("Start", "start", 2200, 930, 230, 88),
-    RL_TP_HIDE(120, 1026, 130, 56),
-    RL_TP_PILL2("Screens", "swap", "layout", 200, 820, 230, 80),
+    RL_TP_MENU(54, 88, 76, 36),
+    DPAD(86, 192, 140),
+    RL_TP_FACE("A", "a", 756, 192, 28),
+    RL_TP_FACE("B", "b", 708, 240, 28),
+    RL_TP_FACE("X", "x", 708, 144, 28),
+    RL_TP_FACE("Y", "y", 660, 192, 28),
+    RL_TP_PILL("L", "l", 68, 34, 104, 44),
+    RL_TP_PILL("R", "r", 732, 34, 104, 44),
+    RL_TP_PILL("Select", "select", 60, 304, 88, 40),
+    RL_TP_PILL("Start", "start", 740, 304, 88, 40),
+    RL_TP_HIDE(756, 88, 56, 36),
+    RL_TP_PILL2("Screens", "swap", "layout", 668, 88, 84, 36),
 };
 
 static const rl_touchpad_group g_groups[] = {
@@ -52,8 +55,8 @@ static const rl_touchpad_guest g_nds = {
     .integer_scale = false,
     .game_touch = true,
     .keep_clear = true,
-    .portrait = {1080, 2400, g_portrait, RL_TP_COUNT(g_portrait), g_groups, RL_TP_COUNT(g_groups)},
-    .landscape = {2400, 1080, g_landscape, RL_TP_COUNT(g_landscape), g_groups, RL_TP_COUNT(g_groups)},
+    .portrait = RL_TP_FITTED(411, 288, g_portrait, g_groups, true),
+    .landscape = RL_TP_FITTED(800, 336, g_landscape, g_groups, false),
 };
 
 const struct rl_touchpad_guest *rl_nds_touchpad(void) { return &g_nds; }

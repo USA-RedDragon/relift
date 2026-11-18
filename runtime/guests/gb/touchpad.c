@@ -1,8 +1,8 @@
 /**
  * @file touchpad.c
  * @brief The GB and GBC on-screen controller: d-pad, A and B, Select and
- * Start, the Hide button and the Menu tab, beside the picture in landscape
- * and below it in portrait.
+ * Start, and the small Hide and Menu buttons, written in dp and fitted to the
+ * view: a panel below the picture in portrait, the side bars in landscape.
  */
 #include "gb.h"
 
@@ -11,23 +11,23 @@
 #define DPAD(x, y, s) RL_TP_DPAD("up", "right", "down", "left", x, y, s)
 
 static const rl_touchpad_item g_portrait[] = {
-    RL_TP_MENU(540, 1262, 230, 78),
-    DPAD(280, 1800, 440),
-    RL_TP_FACE("A", "a", 900, 1790, 100),
-    RL_TP_FACE("B", "b", 690, 1930, 100),
-    RL_TP_PILL("Select", "select", 400, 2190, 230, 84),
-    RL_TP_PILL("Start", "start", 680, 2190, 230, 84),
-    RL_TP_HIDE(960, 2200, 130, 56),
+    RL_TP_MENU(205.5f, 26, 76, 36),
+    DPAD(86, 140, 140),
+    RL_TP_FACE("A", "a", 363, 118, 32),
+    RL_TP_FACE("B", "b", 291, 162, 32),
+    RL_TP_PILL("Select", "select", 155.5f, 252, 88, 40),
+    RL_TP_PILL("Start", "start", 255.5f, 252, 88, 40),
+    RL_TP_HIDE(365, 252, 60, 36),
 };
 
 static const rl_touchpad_item g_landscape[] = {
-    RL_TP_MENU(1200, 50, 230, 70),
-    DPAD(300, 520, 420),
-    RL_TP_FACE("A", "a", 2230, 520, 105),
-    RL_TP_FACE("B", "b", 2010, 650, 105),
-    RL_TP_PILL("Select", "select", 300, 890, 230, 88),
-    RL_TP_PILL("Start", "start", 2100, 890, 230, 88),
-    RL_TP_HIDE(120, 1026, 130, 56),
+    RL_TP_MENU(54, 34, 76, 36),
+    DPAD(86, 192, 140),
+    RL_TP_FACE("A", "a", 752, 170, 32),
+    RL_TP_FACE("B", "b", 680, 214, 32),
+    RL_TP_PILL("Select", "select", 60, 304, 88, 40),
+    RL_TP_PILL("Start", "start", 740, 304, 88, 40),
+    RL_TP_HIDE(754, 34, 60, 36),
 };
 
 static const rl_touchpad_group g_groups[] = {
@@ -39,8 +39,8 @@ static const rl_touchpad_guest g_gb = {
     .picture_width = 160,
     .picture_height = 144,
     .integer_scale = true,
-    .portrait = { 1080, 2400, g_portrait, RL_TP_COUNT(g_portrait), g_groups, RL_TP_COUNT(g_groups) },
-    .landscape = { 2400, 1080, g_landscape, RL_TP_COUNT(g_landscape), g_groups, RL_TP_COUNT(g_groups) },
+    .portrait = RL_TP_FITTED(411, 288, g_portrait, g_groups, true),
+    .landscape = RL_TP_FITTED(800, 336, g_landscape, g_groups, false),
 };
 
 const struct rl_touchpad_guest *rl_gb_touchpad(void) { return &g_gb; }

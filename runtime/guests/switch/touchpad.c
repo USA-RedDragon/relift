@@ -63,8 +63,8 @@ static const rl_touchpad_guest g_switch = {
     .picture_width = 1280,
     .picture_height = 720,
     .game_touch = true,
-    .portrait = { 1080, 2400, g_portrait, RL_TP_COUNT(g_portrait), g_groups, RL_TP_COUNT(g_groups) },
-    .landscape = { 2400, 1080, g_landscape, RL_TP_COUNT(g_landscape), g_groups, RL_TP_COUNT(g_groups) },
+    .portrait = RL_TP_LAYOUT(1080, 2400, g_portrait, g_groups),
+    .landscape = RL_TP_LAYOUT(2400, 1080, g_landscape, g_groups),
 };
 
 const struct rl_touchpad_guest *rl_switch_touchpad(void) { return &g_switch; }

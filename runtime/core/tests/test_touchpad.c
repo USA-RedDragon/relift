@@ -40,8 +40,8 @@ static const rl_touchpad_guest g_guest = {
     .picture_width = 160,
     .picture_height = 144,
     .game_touch = true,
-    .portrait = { 2400, 1080, g_items, RL_TP_COUNT(g_items), g_groups, RL_TP_COUNT(g_groups) },
-    .landscape = { 2400, 1080, g_items, RL_TP_COUNT(g_items), g_groups, RL_TP_COUNT(g_groups) },
+    .portrait = RL_TP_LAYOUT(2400, 1080, g_items, g_groups),
+    .landscape = RL_TP_LAYOUT(2400, 1080, g_items, g_groups),
 };
 
 static const rl_control_decl g_p1_controls[] = {
