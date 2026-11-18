@@ -127,8 +127,11 @@ fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
         &["--cache-dir", &cache, "import", &rom.display().to_string()],
     );
     ok(&out, "relift import");
-    let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
-    ok(&out, "relift build");
+    let out = tiny::relift(
+        &project,
+        &["--cache-dir", &cache, "-j", "4", "build", "--dev"],
+    );
+    ok(&out, "relift build --dev");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
     let host = root.join("cache/projects/game/build/host");
