@@ -73,6 +73,10 @@ void rl_srv_install_bsd(void);
 void rl_srv_install_bcat(void);
 void rl_srv_install_chat(void);
 void rl_srv_install_pl(void);
+/** @brief Registers friend:u (srv_friend.c). */
+void rl_srv_install_friend(void);
+/** @brief Registers nifm:u (srv_nifm.c). */
+void rl_srv_install_nifm(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
