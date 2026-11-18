@@ -876,6 +876,11 @@ impl<'a> Driver<'a> {
             if let Some(cs) = self.callers.get(&f) {
                 self.queue.extend(cs.iter().copied());
             }
+            // A function that calls itself is one of its callers before
+            // the edges below record it.
+            if run.edges.iter().any(|e| e.target == f) {
+                self.queue.insert(f);
+            }
         }
         for (e, p) in run.edges.iter().zip(&run.edge_psr) {
             let site_psr = self.site_psr.entry(e.target).or_default();

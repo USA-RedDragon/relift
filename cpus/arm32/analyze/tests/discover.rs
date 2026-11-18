@@ -366,6 +366,29 @@ fn an_unbounded_sub_pc_enters_the_unrolled_code_after_it() {
 }
 
 #[test]
+fn the_return_of_a_function_s_call_to_itself_is_found() {
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            A_CMP_R0_2,
+            0x18BD_8010,
+            a_bl(BASE + 0xC, BASE),
+            A_MOV_R0_1,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(
+        BASE + 0x100,
+        &[A_PUSH_R4_LR, a_bl(BASE + 0x104, BASE), A_POP_R4_PC],
+    );
+    let r = m.run(Options::default(), arm(BASE + 0x100));
+    assert!(found(&r, arm(BASE + 0x10)));
+    assert!(found(&r, arm(BASE + 0x14)));
+}
+
+#[test]
 fn calls_into_another_unit_seed_its_run() {
     let mut a = Machine::new(Profile::V5te);
     a.arm(
