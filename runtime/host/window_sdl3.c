@@ -48,6 +48,7 @@ typedef struct sdl_win {
     SDL_Window *w;
     SDL_WindowID id;
     uint32_t width, height;
+    uint32_t screen_w, screen_h;
     SDL_Renderer *r;
     SDL_Texture *t;
     uint32_t tw, th;
@@ -159,6 +160,10 @@ static void pixel_size(sdl_win *w)
         in[3] = (int32_t)((float)(wh - safe.y - safe.h) * density);
     }
     rl_touchpad_view((uint32_t)(pw > 0 ? pw : 0), (uint32_t)(ph > 0 ? ph : 0), scale, in);
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(w->w));
+    float md = mode && mode->pixel_density > 0 ? mode->pixel_density : 1;
+    __atomic_store_n(&w->screen_w, mode && mode->w > 0 ? (uint32_t)((float)mode->w * md) : 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&w->screen_h, mode && mode->h > 0 ? (uint32_t)((float)mode->h * md) : 0, __ATOMIC_RELAXED);
 }
 
 static uint32_t pad_count(void)
@@ -510,6 +515,13 @@ static void sdl_size(rl_window *h, uint32_t *width, uint32_t *height)
     *height = __atomic_load_n(&w->height, __ATOMIC_RELAXED);
 }
 
+static void sdl_screen(rl_window *h, uint32_t *width, uint32_t *height)
+{
+    sdl_win *w = (sdl_win *)h;
+    *width = __atomic_load_n(&w->screen_w, __ATOMIC_RELAXED);
+    *height = __atomic_load_n(&w->screen_h, __ATOMIC_RELAXED);
+}
+
 static const char *const *sdl_vulkan_extensions(void) { return g_exts; }
 
 static void *sdl_vulkan_gipa(void)
@@ -671,6 +683,7 @@ static const rl_window_backend g_sdl = {
     .vulkan_gipa = sdl_vulkan_gipa,
     .vulkan_surface = sdl_vulkan_surface,
     .present_rgb = sdl_present_rgb,
+    .screen = sdl_screen,
 };
 
 const rl_window_backend *rl_host_window_backend(void) { return &g_sdl; }

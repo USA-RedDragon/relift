@@ -74,6 +74,8 @@ struct rl_window_backend {
      */
     void (*present_rgb)(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_width,
                         uint32_t shown_height);
+    /** @brief Optional. The size in pixels of the screen w is on; any thread. Zeros when unknown. */
+    void (*screen)(rl_window *w, uint32_t *width, uint32_t *height);
 };
 
 /**
