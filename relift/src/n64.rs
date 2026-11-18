@@ -20,8 +20,10 @@ use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
-/// The optimization of lifted CPU code: -O1 runs a frame about twice as
-/// fast as -O0 and within a few percent of -O2, which builds the most.
+/// The optimization of lifted CPU code in a dev build (`relift run`): -O1
+/// runs a frame about twice as fast as -O0 and within a few percent of -O2,
+/// which builds the most. A release build uses
+/// [`crate::build::RELEASE_LIFTED_OPT`].
 const LIFTED_OPT: &str = "-O1";
 
 /// The largest cartridge image (the cartridge domain's 252 MiB, rounded up):
@@ -181,7 +183,8 @@ fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
 }
 
 /// `relift build` of the Nintendo 64 project in the working directory, for
-/// this host or for `target`.
+/// this host or for `target`; a `release` build compiles lifted CPU code at
+/// [`crate::build::RELEASE_LIFTED_OPT`], a dev build at [`LIFTED_OPT`].
 ///
 /// # Errors
 ///
@@ -190,6 +193,7 @@ fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
 pub fn build(
     settings: &Settings,
     mods: &[PathBuf],
+    release: bool,
     target: Option<cross::Target>,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
@@ -370,7 +374,15 @@ pub fn build(
         crate::game_settings::generate_c(&game_settings).as_bytes(),
     )?;
     prog.push(settings_c);
-    compile(settings, &out, &cdir, &files, &prog, cross.as_ref(), ui)?;
+    compile(
+        settings,
+        &out,
+        &cdir,
+        &files,
+        &prog,
+        (release, cross.as_ref()),
+        ui,
+    )?;
     let notice = crate::build::runtime_dir(settings).join("guests/n64/rdp/NOTICE");
     std::fs::create_dir_all(out.join("licenses"))?;
     relift_cache::write_if_changed(
@@ -402,7 +414,7 @@ fn compile(
     cdir: &Path,
     lifted: &[PathBuf],
     prog: &[PathBuf],
-    cross: Option<&cross::Build>,
+    (release, cross): (bool, Option<&cross::Build>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt = crate::build::runtime_dir(settings);
@@ -423,15 +435,10 @@ fn compile(
     let trace = std::env::var_os("RELIFT_N64_TRACE")
         .is_some_and(|v| !v.is_empty() && v != "0")
         .then(|| "-DRL_N64_TRACE".to_string());
+    let opt = crate::build::lifted_opt(release, LIFTED_OPT);
     let lifted_flags: Vec<String> = base
         .iter()
-        .map(|f| {
-            if f == "-O2" {
-                LIFTED_OPT.into()
-            } else {
-                f.clone()
-            }
-        })
+        .map(|f| if f == "-O2" { opt.into() } else { f.clone() })
         .chain(["-gline-tables-only", "-fno-omit-frame-pointer"].map(String::from))
         .chain([
             inc("core/include"),
@@ -492,13 +499,7 @@ fn compile(
             flags: if rsp_unit(s, cdir) {
                 lifted_flags
                     .iter()
-                    .map(|f| {
-                        if f == LIFTED_OPT {
-                            RSP_OPT.into()
-                        } else {
-                            f.clone()
-                        }
-                    })
+                    .map(|f| if f == opt { RSP_OPT.into() } else { f.clone() })
                     .collect()
             } else {
                 lifted_flags.clone()
@@ -711,7 +712,7 @@ fn compile(
 ///
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
-    let built = build(settings, &[], None, ui)?;
+    let built = build(settings, &[], false, None, ui)?;
     let status = relift_proc::command(&built.exe).status()?;
     Ok(status.code().unwrap_or(128))
 }

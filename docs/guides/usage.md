@@ -40,6 +40,75 @@ hard-linked cache must copy those two.
 `relift check` and `relift where` are parsed but not implemented yet; they
 stop with "not implemented yet" and say which command to use instead.
 
+## Optimization of lifted code
+
+A release build compiles lifted C at <!-- docgen:const crate=relift name=build::RELEASE_LIFTED_OPT -->`-O2`<!-- /docgen:const -->:
+
+<!-- docgen:doc crate=relift name=build::RELEASE_LIFTED_OPT -->
+The optimization of lifted C in a release build: `relift build` for this
+host or for any `--target`, and the packages made from it (AppImage,
+macOS app, APK, iOS app, Windows program). A release build is made
+rarely and kept, so it pays for the smaller, faster code: a Nintendo DS
+game's 650 lifted files hold 469 MB of x86-64 code at -O2 against 898 MB
+at -O0, and run 3000 frames in 21.2 s against 27.4 s, for 4660 CPU
+seconds of compiling against 1040 at -O0 and 4150 at -O1. A dev build
+(`relift run`, `relift build --dev`) compiles lifted C at its guest's
+own choice, the `LIFTED_OPT` of each guest module, which favors compile
+time.
+<!-- /docgen:doc -->
+
+The dev build of each guest:
+
+**Game Boy**: <!-- docgen:const crate=relift name=gb::LIFTED_OPT -->`-O0`<!-- /docgen:const -->.
+
+<!-- docgen:doc crate=relift name=gb::LIFTED_OPT -->
+The optimization of lifted code in a dev build (`relift build --dev`,
+`relift run`). In the exact mode the device library runs at every access
+and boundary, so the lifted bodies are a small part of the run: a Game
+Boy Color game with 256 MBC5 banks runs 2400 frames in 8.1 s with its
+lifted code at -O0, -O1 or -O2 alike, while -O0 compiles in a quarter of
+the time of -O2 (1.7 s against 6.8 s on 8 jobs). A release build still
+uses `crate::build::RELEASE_LIFTED_OPT`, for the smaller program.
+<!-- /docgen:doc -->
+
+**Game Boy Advance**: <!-- docgen:const crate=relift name=gba::LIFTED_OPT -->`-O0`<!-- /docgen:const -->.
+
+<!-- docgen:doc crate=relift name=gba::LIFTED_OPT -->
+The optimization of lifted code in a dev build (`relift run`); a release
+build uses `crate::build::RELEASE_LIFTED_OPT`. Every access is a bus
+call, so the lifted bodies are a small part of a run, and -O0 compiles
+fastest.
+<!-- /docgen:doc -->
+
+**Nintendo DS**: <!-- docgen:const crate=relift name=nds::LIFTED_OPT -->`-O0`<!-- /docgen:const -->.
+
+<!-- docgen:doc crate=relift name=nds::LIFTED_OPT -->
+The optimization of lifted code in a dev build (`relift run`), as on the
+GBA: every access is a bus call, and -O0 compiles fastest. A release
+build uses `crate::build::RELEASE_LIFTED_OPT`.
+<!-- /docgen:doc -->
+
+**Master System**: <!-- docgen:const crate=relift name=sms::LIFTED_OPT -->`-O0`<!-- /docgen:const -->.
+
+<!-- docgen:doc crate=relift name=sms::LIFTED_OPT -->
+The optimization of lifted code in a dev build (`relift run`), as on the
+GBA: -O0 compiles fastest. A release build uses
+`crate::build::RELEASE_LIFTED_OPT`.
+<!-- /docgen:doc -->
+
+**Nintendo 64**: <!-- docgen:const crate=relift name=n64::LIFTED_OPT -->`-O1`<!-- /docgen:const -->.
+
+<!-- docgen:doc crate=relift name=n64::LIFTED_OPT -->
+The optimization of lifted CPU code in a dev build (`relift run`): -O1
+runs a frame about twice as fast as -O0 and within a few percent of -O2,
+which builds the most. A release build uses
+`crate::build::RELEASE_LIFTED_OPT`.
+<!-- /docgen:doc -->
+
+Lifted RSP code of a Nintendo 64 program is always built at
+<!-- docgen:const crate=relift name=n64::RSP_OPT -->`-O2`<!-- /docgen:const -->. A Switch program's lifted code is
+built at -O2 in both builds, and its cold copy at -Os.
+
 ## Missed code and stop reports
 
 Discovery cannot see every code address (a pointer the program computes, a

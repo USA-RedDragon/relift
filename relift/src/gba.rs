@@ -20,10 +20,10 @@ use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
-/// The optimization of lifted code. Every access is a bus call, so the
-/// lifted bodies are a small part of a run, while clang at -O1 takes a
-/// minute on the one large function of jsmolka's arm.gba that -O0 compiles
-/// in four seconds.
+/// The optimization of lifted code in a dev build (`relift run`); a release
+/// build uses [`crate::build::RELEASE_LIFTED_OPT`]. Every access is a bus
+/// call, so the lifted bodies are a small part of a run, and -O0 compiles
+/// fastest.
 const LIFTED_OPT: &str = "-O0";
 
 /// The ROM's file name in the import directory.
@@ -374,7 +374,8 @@ pub fn build(
 
 /// What a handheld guest's program compiles: the runtime directories, the
 /// include directories of lifted code and of the runtime and program files
-/// (below the runtime root), the optimization of lifted code and the name
+/// (below the runtime root), the optimization of lifted code in a dev build
+/// (a release build uses [`crate::build::RELEASE_LIFTED_OPT`]) and the name
 /// of the shared runtime object's cache.
 pub(crate) struct Layers {
     pub(crate) dirs: &'static [&'static str],
@@ -455,7 +456,7 @@ pub(crate) fn compile_layers(
         .iter()
         .map(|f| {
             if f == "-O2" {
-                layers.lifted_opt.into()
+                crate::build::lifted_opt(release, layers.lifted_opt).into()
             } else {
                 f.clone()
             }

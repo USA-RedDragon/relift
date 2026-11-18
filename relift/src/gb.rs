@@ -20,11 +20,13 @@ use crate::import::{BoxError, cache_root, import_dir_value};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
-/// The optimization of lifted code. In the exact mode the device library
-/// runs at every access and boundary, so the lifted bodies are a small part
-/// of the run: a Game Boy Color game with 256 MBC5 banks runs 2400 frames in
-/// 8.1 s with its lifted code at -O0, -O1 or -O2 alike, while -O0 compiles
-/// in a quarter of the time of -O2 (1.7 s against 6.8 s on 8 jobs).
+/// The optimization of lifted code in a dev build (`relift build --dev`,
+/// `relift run`). In the exact mode the device library runs at every access
+/// and boundary, so the lifted bodies are a small part of the run: a Game
+/// Boy Color game with 256 MBC5 banks runs 2400 frames in 8.1 s with its
+/// lifted code at -O0, -O1 or -O2 alike, while -O0 compiles in a quarter of
+/// the time of -O2 (1.7 s against 6.8 s on 8 jobs). A release build still
+/// uses [`crate::build::RELEASE_LIFTED_OPT`], for the smaller program.
 const LIFTED_OPT: &str = "-O0";
 
 /// The ROM's file name in the import directory.
@@ -673,7 +675,7 @@ fn compile(
         .iter()
         .map(|f| {
             if f == "-O2" {
-                LIFTED_OPT.into()
+                crate::build::lifted_opt(release, LIFTED_OPT).into()
             } else {
                 f.clone()
             }

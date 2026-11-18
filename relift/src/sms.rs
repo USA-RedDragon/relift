@@ -28,6 +28,11 @@ const ROM_FILE: &str = "rom.bin";
 /// The runtime directories the program compiles, below the runtime root.
 const LAYERS: [&str; 4] = ["core", "cpus/z80", "guests/sms", "guests/sms/run"];
 
+/// The optimization of lifted code in a dev build (`relift run`), as on the
+/// GBA: -O0 compiles fastest. A release build uses
+/// [`crate::build::RELEASE_LIFTED_OPT`].
+const LIFTED_OPT: &str = "-O0";
+
 const SMS_LAYERS: Layers = Layers {
     dirs: &LAYERS,
     lifted_inc: &["core/include", "cpus/z80/include", "guests/sms/run/include"],
@@ -40,7 +45,7 @@ const SMS_LAYERS: Layers = Layers {
         "guests/sms/run",
         "guests/sms/run/include",
     ],
-    lifted_opt: "-O0",
+    lifted_opt: LIFTED_OPT,
     cache: "sms-runtime",
 };
 

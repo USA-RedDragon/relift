@@ -73,7 +73,9 @@ Prototype names used in the tags:
   64-bit little-endian, and the helpers use `__atomic_*`, `__int128` and
   `musttail`. [verified: header compiles for x86_64-linux-gnu,
   aarch64-linux-gnu, x86_64-pc-windows-gnu, Apple clang on arm64]
-- Lifted C is built with `-std=c11 -O2 -ffp-contract=off`. Without
+- Lifted C is built with `-std=c11 -O2 -ffp-contract=off` (the dev builds of
+  the cartridge guests use a lower level, [Optimization of lifted
+  code](guides/usage.md#optimization-of-lifted-code)). Without
   `-ffp-contract=off` arm64 hosts fuse `a * b + c` and diverge from x86.
   [verified: memory prototype]
 - x86-64 builds pass `-mcx16`, and the header refuses to compile without it.

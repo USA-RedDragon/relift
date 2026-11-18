@@ -28,8 +28,12 @@ const ROM_FILE: &str = "rom.nds";
 /// not loaded into memory.
 const MAX_ROM: u64 = 1 << 30;
 
-/// What the program compiles. Lifted code is built at -O0 as on the GBA:
-/// every access is a bus call.
+/// The optimization of lifted code in a dev build (`relift run`), as on the
+/// GBA: every access is a bus call, and -O0 compiles fastest. A release
+/// build uses [`crate::build::RELEASE_LIFTED_OPT`].
+const LIFTED_OPT: &str = "-O0";
+
+/// What the program compiles.
 const NDS_LAYERS: Layers = Layers {
     dirs: &["core", "cpus/arm32", "guests/nds", "guests/nds/run"],
     lifted_inc: &[
@@ -46,7 +50,7 @@ const NDS_LAYERS: Layers = Layers {
         "guests/nds/run",
         "guests/nds/run/include",
     ],
-    lifted_opt: "-O0",
+    lifted_opt: LIFTED_OPT,
     cache: "nds-runtime",
 };
 
@@ -179,8 +183,11 @@ fn run_args(nds: Option<&toml::Value>) -> Vec<String> {
 }
 
 /// `relift build` of the Nintendo DS project in the working directory, for
-/// this host or for `target` (a build for another target takes the release
-/// flags and keeps its save in the app's own folder).
+/// this host or for `target`. A `release` build compiles lifted code at
+/// [`crate::build::RELEASE_LIFTED_OPT`] and writes stop reports to the
+/// user's folder, a dev build (`relift run`) compiles at -O0; a build for
+/// another target is a release build and keeps its save in the app's own
+/// folder.
 ///
 /// # Errors
 ///
@@ -189,6 +196,7 @@ fn run_args(nds: Option<&toml::Value>) -> Vec<String> {
 pub fn build(
     settings: &Settings,
     mods: &[PathBuf],
+    release: bool,
     target: Option<cross::Target>,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
@@ -361,7 +369,7 @@ pub fn build(
         &cdir,
         (&files, &prog),
         &NDS_LAYERS,
-        (cross.is_some(), cross.as_ref()),
+        (release, cross.as_ref()),
         ui,
     )?;
     let exe = match &cross {
@@ -391,7 +399,7 @@ pub fn build(
 ///
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
-    let built = build(settings, &[], None, ui)?;
+    let built = build(settings, &[], false, None, ui)?;
     let status = relift_proc::command(&built.exe).arg("--stats").status()?;
     Ok(status.code().unwrap_or(128))
 }

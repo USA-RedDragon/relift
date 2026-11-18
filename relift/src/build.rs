@@ -1143,6 +1143,24 @@ pub(crate) fn pinned_glibc(cache_root: &Path) -> Option<String> {
     (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.')).then(|| v.to_string())
 }
 
+/// The optimization of lifted C in a release build: `relift build` for this
+/// host or for any `--target`, and the packages made from it (AppImage,
+/// macOS app, APK, iOS app, Windows program). A release build is made
+/// rarely and kept, so it pays for the smaller, faster code: a Nintendo DS
+/// game's 650 lifted files hold 469 MB of x86-64 code at -O2 against 898 MB
+/// at -O0, and run 3000 frames in 21.2 s against 27.4 s, for 4660 CPU
+/// seconds of compiling against 1040 at -O0 and 4150 at -O1. A dev build
+/// (`relift run`, `relift build --dev`) compiles lifted C at its guest's
+/// own choice, the `LIFTED_OPT` of each guest module, which favors compile
+/// time.
+pub(crate) const RELEASE_LIFTED_OPT: &str = "-O2";
+
+/// The optimization of a guest's lifted C: [`RELEASE_LIFTED_OPT`] in a
+/// release build, else the guest's dev choice `dev`.
+pub(crate) fn lifted_opt(release: bool, dev: &'static str) -> &'static str {
+    if release { RELEASE_LIFTED_OPT } else { dev }
+}
+
 /// The compiler of a release build. On Linux, with the pinned SDK in the
 /// cache and zig on `PATH`, `zig cc` targeting that SDK's glibc, so the
 /// program asks no newer glibc than the libraries it ships with (a host
@@ -2146,13 +2164,13 @@ pub fn run_build(
         } else if crate::gba::is_project() {
             crate::gba::build(settings, mods, true, target, ui)?
         } else if crate::nds::is_project() {
-            let built = crate::nds::build(settings, mods, target, ui)?;
+            let built = crate::nds::build(settings, mods, true, target, ui)?;
             if built.cross.is_none() {
                 return Ok(());
             }
             built
         } else {
-            let built = crate::n64::build(settings, mods, target, ui)?;
+            let built = crate::n64::build(settings, mods, true, target, ui)?;
             if built.cross.is_none() {
                 return Ok(());
             }
