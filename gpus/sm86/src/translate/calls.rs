@@ -20,6 +20,7 @@
 
 use super::{Code, Res, bad};
 use crate::Operand;
+use std::collections::{BTreeMap, HashMap};
 
 /// How far before a CALL the return address `MOV` may be.
 const MOVE_WINDOW: usize = 64;
@@ -237,4 +238,141 @@ pub(super) fn functions(code: &Code, end: usize, returns: impl Fn(usize) -> bool
     v.dedup();
     v.retain(|&t| returns(t));
     v
+}
+
+/// How far before a CALL the load of its target may be.
+const EXTERN_WINDOW: usize = 64;
+
+/// The constant bank word an indirect `CALL.ABS` takes its target from,
+/// when the word names a symbol of `externs`: the register comes from an
+/// unguarded `LDC.64` of `c[bank][index + offset]` whose index register is
+/// a constant (`RZ` or an immediate move) in straight code before the call.
+fn extern_target(code: &Code, k: usize, externs: &BTreeMap<(u32, u32), String>) -> Option<String> {
+    let i = &code.insts[k];
+    if i.mnemonic != "CALL" || !i.has("ABS") {
+        return None;
+    }
+    let Some(Operand::Reg(r, _)) = i.ops.last() else {
+        return None;
+    };
+    let lo = k.saturating_sub(EXTERN_WINDOW);
+    let writer = (lo..k).rev().find(|&j| writes(code, j, *r))?;
+    let l = &code.insts[writer];
+    let lw = code.words[writer];
+    if l.mnemonic != "LDC" || !l.has("64") || l.guard.is_some() || lw.bit(91) || lw.get(78, 2) != 0
+    {
+        return None;
+    }
+    let bank = lw.get(54, 5);
+    let offset = i64::from(lw.get(38, 16) as u16 as i16);
+    let base = match lw.get(24, 8) as u8 {
+        255 => 0,
+        x => constant_reg(code, lo, writer, x)?,
+    };
+    let at = u32::try_from(offset + base).ok()?;
+    externs.get(&(bank, at)).cloned()
+}
+
+/// Whether instruction `j` ends straight code or writes register `r`.
+fn writes(code: &Code, j: usize, r: u8) -> bool {
+    let i = &code.insts[j];
+    super::cfg::ends_straight(i)
+        || matches!(i.ops.first(), Some(Operand::Reg(d, _)) if *d == r || (i.has("64") && d + 1 == r))
+}
+
+/// The value an unguarded immediate move gives register `x` before `at`.
+fn constant_reg(code: &Code, lo: usize, at: usize, x: u8) -> Option<i64> {
+    let j = (lo..at).rev().find(|&j| writes(code, j, x))?;
+    let i = &code.insts[j];
+    if i.guard.is_some() || !matches!(i.ops.first(), Some(Operand::Reg(d, _)) if *d == x) {
+        return None;
+    }
+    let imm = match i.ops.last() {
+        Some(Operand::Int(v)) => *v,
+        Some(Operand::Hex(v)) => i64::try_from(*v).ok()?,
+        Some(Operand::Reg(255, _)) => 0,
+        _ => return None,
+    };
+    let plain_move = i.mnemonic == "MOV"
+        || (i.mnemonic == "IMAD"
+            && i.has("MOV")
+            && matches!(i.ops.get(1), Some(Operand::Reg(255, _)))
+            && matches!(i.ops.get(2), Some(Operand::Reg(255, _))));
+    plain_move.then_some(imm)
+}
+
+/// The calls of a program to driver functions named by `externs`, by
+/// instruction index.
+pub(super) fn extern_calls(
+    code: &Code,
+    externs: &BTreeMap<(u32, u32), String>,
+) -> HashMap<usize, String> {
+    if externs.is_empty() {
+        return HashMap::new();
+    }
+    (0..code.insts.len())
+        .filter_map(|k| extern_target(code, k, externs).map(|n| (k, n)))
+        .collect()
+}
+
+/// Binding (in [`GUEST_MEMORY_SET`](super::GUEST_MEMORY_SET)) of the
+/// assert record: a storage buffer of four words the runtime zeroes before
+/// a dispatch and reads after it: the number of invocations that called
+/// `__assertfail`, then the line (`R8` of the CUDA call), the call's byte
+/// address in the program and the low word of the message address (`R4`)
+/// of one of them.
+pub const ASSERT_BINDING: u32 = 2;
+
+const STORAGE_BUFFER: u32 = 12;
+const SCOPE_DEVICE: u32 = 1;
+const ASSERT_KEY: u32 = 0x5_0000;
+
+impl super::Ctx {
+    fn assert_record_var(&mut self) -> u32 {
+        if let Some(&v) = self.builtins.get(&ASSERT_KEY) {
+            return v;
+        }
+        let u = self.u32t();
+        let arr = self.m.id();
+        crate::spirv::inst(
+            &mut self.m.types,
+            crate::spirv::op::TYPE_RUNTIME_ARRAY,
+            &[arr, u],
+        );
+        self.m.deco(arr, 6, &[4]);
+        let st = self.m.t_struct_unique(&[arr]);
+        self.m.deco(st, 2, &[]);
+        self.m.member_deco(st, 0, 35, &[0]);
+        let p = self.m.t_ptr(STORAGE_BUFFER, st);
+        let var = self.m.global(p, STORAGE_BUFFER);
+        self.m.deco(var, 34, &[super::GUEST_MEMORY_SET]);
+        self.m.deco(var, 33, &[ASSERT_BINDING]);
+        self.builtins.insert(ASSERT_KEY, var);
+        self.globals.push(var);
+        var
+    }
+
+    /// What a call to `__assertfail` at instruction `k` does before the
+    /// invocation ends: count it and keep its line, address and message.
+    pub(super) fn assert_record(&mut self, k: usize) {
+        use crate::spirv::op;
+        let var = self.assert_record_var();
+        self.iface.asserts.push(16 * k as u64);
+        let u = self.u32t();
+        let pu = self.m.t_ptr(STORAGE_BUFFER, u);
+        let z = self.m.c_u32(0);
+        let scope = self.m.c_u32(SCOPE_DEVICE);
+        let sem = self.m.c_u32(0);
+        let one = self.m.c_u32(1);
+        let count = self.m.emit(op::ACCESS_CHAIN, pu, &[var, z, z]);
+        self.m.emit(op::ATOMIC_I_ADD, u, &[count, scope, sem, one]);
+        let line = self.load_reg(8);
+        let msg = self.load_reg(4);
+        let at = self.m.c_u32(16 * k as u32);
+        for (n, v) in [(1, line), (2, at), (3, msg)] {
+            let idx = self.m.c_u32(n);
+            let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, z, idx]);
+            self.m.emit_void(op::STORE, &[p, v]);
+        }
+    }
 }

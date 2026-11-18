@@ -23,6 +23,7 @@ mod simt;
 mod tex;
 mod uniform;
 
+pub use calls::ASSERT_BINDING;
 pub use host::{
     Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, DeviceCaps, GUEST_MEMORY_SET,
     GlobalPath, HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, MeshLimits,
@@ -90,6 +91,9 @@ pub struct Interface {
     /// Constant banks read, by bank number (see [`cbuf_binding`]).
     pub cbufs: BTreeSet<u32>,
     pub color_targets: BTreeSet<u32>,
+    /// Byte addresses of the calls to `__assertfail`; the program uses the
+    /// assert record (see [`ASSERT_BINDING`]) when there is one.
+    pub asserts: Vec<u64>,
     /// The program dereferences 64-bit global addresses (buffer device
     /// addresses).
     pub global_memory: bool,
@@ -157,6 +161,11 @@ pub struct Options {
     /// lowers to the same results (see the `mufu` module). Hosts other
     /// than NVIDIA always use the model.
     pub exact_mufu: bool,
+    /// Constant bank words that hold the address of a driver function, by
+    /// (bank, byte offset): a CUDA program calls `__assertfail` through
+    /// one. Such a call ends the invocation and is recorded (see
+    /// [`ASSERT_BINDING`]); a call to any other named function is rejected.
+    pub externs: BTreeMap<(u32, u32), String>,
     /// Numeric kind of the format of each fragment render target the
     /// pipeline binds (a target not named is float); the output variable of
     /// a target has that type (see the `io` module).
@@ -207,6 +216,8 @@ pub fn cbuf_binding(bank: u32) -> (u32, u32) {
 pub(crate) struct Code {
     pub insts: Vec<Inst>,
     pub words: Vec<Word>,
+    /// Calls to `__assertfail`, made `BPT.TRAP` (see [`Options::externs`]).
+    pub asserts: HashSet<usize>,
     /// BRA.DIV and BRA.CONV folded to their fast paths.
     pub fast_paths: usize,
 }
@@ -852,7 +863,7 @@ fn converged(mut i: Inst) -> Inst {
     i
 }
 
-fn decode_all(p: &Program) -> Res<Code> {
+fn decode_all(p: &Program, o: &Options) -> Res<Code> {
     let mut insts = Vec::new();
     let mut fast_paths = 0;
     for (n, d) in p.decode().into_iter().enumerate() {
@@ -862,11 +873,22 @@ fn decode_all(p: &Program) -> Res<Code> {
         }
         insts.push(converged(i));
     }
-    Ok(Code {
+    let mut code = Code {
         insts,
         words: p.words.clone(),
+        asserts: HashSet::new(),
         fast_paths,
-    })
+    };
+    for (k, name) in calls::extern_calls(&code, &o.externs) {
+        if name != "__assertfail" {
+            return bad(format!("CALL to the driver's {name}"));
+        }
+        let mut trap = Inst::new("BPT");
+        trap.mods.push("TRAP");
+        code.insts[k] = trap;
+        code.asserts.insert(k);
+    }
+    Ok(code)
 }
 
 /// Translates one program to a SPIR-V module with one entry point `main`,
@@ -887,7 +909,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
 /// copying them (see [`cfg`]).
 fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     let stage = p.stage();
-    let code = decode_all(p)?;
+    let code = decode_all(p, o)?;
     let mut c = Ctx::new(stage, o, tex::Prep::new(&code));
     c.sph_words = p.sph.as_ref().map_or([0; 32], |s| s.words);
     c.iface.host.host = o.host.name.clone();
@@ -979,6 +1001,7 @@ impl Ctx {
             tex::Prep::new(&Code {
                 insts: Vec::new(),
                 words: Vec::new(),
+                asserts: HashSet::new(),
                 fast_paths: 0,
             }),
         )

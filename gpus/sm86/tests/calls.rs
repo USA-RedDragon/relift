@@ -334,3 +334,41 @@ fn return_address_is_followed_through_straight_code_and_copies() {
         "a later write of the register replaces the address"
     );
 }
+
+fn raw(lo: u64, hi: u64) -> [u8; 16] {
+    (u128::from(lo) | (u128::from(hi) << 64)).to_le_bytes()
+}
+
+/// A CUDA kernel's `assert`: `LDC.64 R2, c[0x4][R0]` with R0 = 0, then
+/// `CALL.ABS.NOINC R2` (words from nvcc's code for `__assertfail`).
+fn assert_kernel() -> Program {
+    let words = [
+        mov_imm(0, 0),
+        raw(0x0100_0000_0002_7b82, 0x0000_6200_0000_0a00),
+        raw(0x0000_0000_0200_7343, 0x022f_ea00_03c0_0000),
+        raw(0x0000_0000_0000_794d, 0x000f_ea00_0380_0000),
+    ];
+    Program::parse(&words.concat())
+}
+
+#[test]
+fn assertfail_ends_the_invocation_and_is_recorded() {
+    use relift_gpu_sm86::translate::{ASSERT_BINDING, Options, translate_with};
+    let p = assert_kernel();
+    assert!(translate(&p).is_err());
+    let mut o = Options::default();
+    o.externs.insert((4, 0), "__assertfail".into());
+    let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(s.interface.asserts, [0x20]);
+    let w = &s.spirv;
+    let binding = (5..w.len()).any(|k| {
+        w[k] & 0xffff == 71 && w.get(k + 2) == Some(&33) && w.get(k + 3) == Some(&ASSERT_BINDING)
+    });
+    assert!(binding, "no assert record binding");
+    o.externs.insert((4, 0), "vprintf".into());
+    let e = translate_with(&p, &o)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(e.contains("vprintf"), "{e}");
+}

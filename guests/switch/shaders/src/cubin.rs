@@ -56,6 +56,21 @@ pub struct Kernel {
     pub code: Vec<u8>,
     /// Symbols the code refers to that are not in the layout.
     pub unresolved: Vec<String>,
+    /// Constant bank words the loader fills with the address of a symbol
+    /// the module does not define (a function of the CUDA driver, such as
+    /// `__assertfail`).
+    pub externs: Vec<Extern>,
+}
+
+/// A constant bank word that holds the address of an undefined symbol.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Extern {
+    /// The bank (`.nv.constant<bank>`).
+    pub bank: u32,
+    /// The byte offset of the 64-bit address in the bank.
+    pub offset: u32,
+    /// The symbol.
+    pub name: String,
 }
 
 /// One cubin.
@@ -378,7 +393,39 @@ fn link(
         name: sym_name(elf, symtab, k),
         code,
         unresolved: unresolved.into_iter().collect(),
+        externs: Vec::new(),
     }
+}
+
+/// The undefined symbols relocated into constant banks through `symtab`.
+fn bank_externs(
+    elf: &Elf,
+    rels: &[Vec<(usize, Reloc)>],
+    symtab: usize,
+    syms: &[Sym],
+) -> Vec<Extern> {
+    let mut v = Vec::new();
+    for (sec, rs) in rels.iter().enumerate() {
+        let name = elf.cstr(elf.shstr + elf.sections[sec].name as usize);
+        let Some(bank) = name
+            .strip_prefix(".nv.constant")
+            .and_then(|b| b.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        for (tab, r) in rs {
+            let Some(s) = syms.get(r.sym).filter(|s| *tab == symtab && s.shndx == 0) else {
+                continue;
+            };
+            v.push(Extern {
+                bank,
+                offset: r.off as u32,
+                name: sym_name(elf, symtab, s),
+            });
+        }
+    }
+    v.sort_by_key(|e| (e.bank, e.offset));
+    v
 }
 
 /// A symbol's name, or for a section symbol its section's name.
@@ -417,12 +464,15 @@ pub fn cubin(b: &[u8]) -> Option<(u32, Vec<Kernel>, usize)> {
         let mut taken: Vec<usize> = code_refs(&elf, &rels, t, &syms, data).collect();
         taken.sort_unstable();
         taken.dedup();
+        let externs = bank_externs(&elf, &rels, t, &syms);
         for k in &syms {
             if k.info & 0xF == STT_FUNC
                 && k.other & STO_CUDA_ENTRY != 0
                 && elf.is_code(k.shndx as usize)
             {
-                kernels.push(link(&elf, &rels, &taken, t, &syms, k));
+                let mut kernel = link(&elf, &rels, &taken, t, &syms, k);
+                kernel.externs.clone_from(&externs);
+                kernels.push(kernel);
             }
         }
     }

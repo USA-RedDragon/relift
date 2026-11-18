@@ -199,6 +199,9 @@ pub(crate) struct Graph {
     succs: Vec<Vec<usize>>,
     pub headers: HashMap<usize, (Vec<bool>, Vec<usize>)>,
     pdoms: HashMap<Option<usize>, Vec<Option<usize>>>,
+    /// Blocks on a path to `__assertfail` (see `asserts_on_branch`), left
+    /// out of post-dominance: the guest's grid stops there.
+    asserting: Vec<bool>,
     /// Branches converted so that every invocation runs their region (see
     /// the module documentation).
     conv: Vec<Conv>,
@@ -255,6 +258,12 @@ fn conditions(i: &crate::Inst, w: crate::Word) -> Res<Vec<Operand>> {
 /// Signed 48-bit branch offset of a control word, in bytes.
 fn raw_target(w: crate::Word) -> i64 {
     ((w.get64(34, 48) as i64) << 16 >> 16) * 4
+}
+
+/// Whether `i` ends a run of straight code (a transfer or a label target
+/// is not known here, so every control instruction counts).
+pub(super) fn ends_straight(i: &crate::Inst) -> bool {
+    is_transfer(i) || matches!(i.mnemonic, "BSSY" | "BSYNC" | "WARPSYNC" | "BAR")
 }
 
 fn is_transfer(i: &crate::Inst) -> bool {
@@ -818,6 +827,7 @@ impl Graph {
             succs,
             headers,
             pdoms: HashMap::new(),
+            asserting: Vec::new(),
             conv: Vec::new(),
             broadcast: HashSet::new(),
         })
@@ -840,12 +850,13 @@ impl Graph {
             let end = n;
             let mut rev = vec![Vec::new(); n + 1];
             let body = ctx.map(|h| self.headers[&h].0.clone());
+            let gone = |u: usize| self.asserting.get(u).copied().unwrap_or(false);
             for u in 0..n {
-                if body.as_ref().is_some_and(|bd| !bd[u]) {
+                if body.as_ref().is_some_and(|bd| !bd[u]) || gone(u) {
                     continue;
                 }
                 let mut any = false;
-                for &s in &self.succs[u] {
+                for &s in self.succs[u].iter().filter(|&&s| !gone(s)) {
                     let sink = Some(s) == ctx || body.as_ref().is_some_and(|bd| !bd[s]);
                     any = true;
                     if sink {
@@ -988,8 +999,8 @@ impl Emit<'_> {
             self.restore(c, k);
         }
         let gate = self.g.gate[b];
-        let blk = &self.g.blocks[b];
-        for k in blk.first..blk.end {
+        let (first, end) = (self.g.blocks[b].first, self.g.blocks[b].end);
+        for k in first..end {
             let i = &self.code.insts[k];
             let (w, pc) = (self.code.words[k], 16 * k as u64);
             match gate {
@@ -1006,6 +1017,9 @@ impl Emit<'_> {
                 }
                 _ => c.guarded(i, w, pc)?,
             }
+        }
+        if self.code.asserts.contains(&end) {
+            c.assert_record(end);
         }
         Ok(())
     }
@@ -1727,6 +1741,7 @@ impl Graph {
                 }
                 let (uniform, exits) = match &blk.term {
                     Term::Jump(_) | Term::Set(..) => (true, false),
+                    _ if self.asserts_on_branch(code, b) => (true, false),
                     Term::Dispatch(_, ts) => (false, ts.iter().any(|t| terminal(*t))),
                     Term::Branch(conds, t, f) => {
                         (v.uniform_all(conds), terminal(*t) || terminal(*f))
@@ -1772,6 +1787,13 @@ impl Graph {
     pub(crate) fn check_barriers(&mut self, code: &Code, convert: bool) -> Res<()> {
         let insts = &code.insts;
         self.broadcast = broadcast_loads(self, code);
+        let asserting: Vec<bool> = (0..self.blocks.len())
+            .map(|u| self.asserting_block(code, u))
+            .collect();
+        if asserting.iter().any(|&a| a) {
+            self.asserting = asserting;
+            self.pdoms.clear();
+        }
         let (partial, exited) = self.partial(code, convert);
         for k in self.conv.iter().filter(|k| k.stub.is_some()) {
             if partial[k.branch] || exited[k.branch] {
@@ -1983,6 +2005,42 @@ impl Graph {
             return;
         }
         uniform::step(i, partial, v);
+    }
+
+    /// Whether one side of branch `b` is a call to `__assertfail`: it stops
+    /// the whole dispatch on the guest (the grid traps), so what the other
+    /// invocations do after it does not matter and the branch counts as
+    /// uniform.
+    fn asserts_on_branch(&self, code: &Code, b: usize) -> bool {
+        let targets = match &self.blocks[b].term {
+            Term::Branch(_, t, f) => vec![*t, *f],
+            Term::Dispatch(_, ts) => ts.clone(),
+            _ => return false,
+        };
+        let (fail, rest): (Vec<usize>, Vec<usize>) = targets
+            .into_iter()
+            .partition(|&u| self.asserting_block(code, u));
+        !fail.is_empty() && rest.len() <= 1
+    }
+
+    /// Whether block `start` only leads (through empty blocks) to a call
+    /// to `__assertfail`.
+    fn asserting_block(&self, code: &Code, start: usize) -> bool {
+        {
+            let mut u = start;
+            for _ in 0..4 {
+                if terminal(u) {
+                    return false;
+                }
+                let blk = &self.blocks[u];
+                match blk.term {
+                    Term::Jump(EXIT) => return code.asserts.contains(&blk.end),
+                    Term::Jump(n) | Term::Set(_, _, n) if blk.first == blk.end => u = n,
+                    _ => return false,
+                }
+            }
+            false
+        }
     }
 
     /// Whether `t` ends the invocation: EXIT, or a block that does
