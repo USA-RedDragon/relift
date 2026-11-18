@@ -39,6 +39,7 @@ void rl_srv_install_all(void)
     rl_srv_install_bcat();
     rl_srv_install_chat();
     rl_srv_install_pl();
+    rl_srv_install_auddmg();
     rl_srv_install_friend();
     rl_srv_install_nifm();
     rl_hos_audio_register();
