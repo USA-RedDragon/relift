@@ -133,6 +133,13 @@ static int32_t gpu_zcull_ctx_size(nv_file *f, nv_args *a)
     return NVE_OK;
 }
 
+/**
+ * @brief ZCULL_GET_INFO. Inferred: the Switch 1 values (Ryujinx's, for the
+ * Tegra X1), which Eglantine also answers on the Switch 2; nouveau notes the
+ * structure has not changed since Fermi, but the values are read from the
+ * GPU, so the Switch 2's may differ and no capture of them exists. The NVN2
+ * driver copies them into its device through NvRmGpuDeviceGetInfo.
+ */
 static int32_t gpu_zcull_info(nv_file *f, nv_args *a)
 {
     (void)f;

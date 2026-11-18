@@ -38,7 +38,7 @@ static struct {
     uint64_t base;
     uint64_t driver_loader;
     /** @brief The SDK's NvRmGpu entry points (0 when the program has none) and the device the layer opened. */
-    uint64_t gpu_lib_open, gpu_device_open, gpu_choose_kind, gpu_lib, gpu_device;
+    uint64_t gpu_lib_open, gpu_device_open, gpu_choose_kind, gpu_get_info, gpu_lib, gpu_device;
     uint64_t driver_addrs[NVN_DRIVER_PROC_COUNT];
     pthread_mutex_t lock;
     uint32_t used;
@@ -252,6 +252,23 @@ int nvn_gpu_open(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
+int nvn_gpu_info_u32(rl_ctx *c, uint8_t *mem, int64_t off, uint32_t *out)
+{
+    int rc = nvn_gpu_open(c, mem);
+    if (rc != RL_OK)
+        return rc;
+    if (!nvn.gpu_get_info)
+        return rl_guest_fatal(c, "nvn", "the program has no NvRmGpuDeviceGetInfo");
+    uint64_t dev = nvn_gpu_device(), info = 0;
+    rc = nvn_guest_call(c, mem, nvn.gpu_get_info, &dev, 1, &info);
+    if (rc != RL_OK)
+        return rc;
+    if (!info)
+        return rl_guest_fatal(c, "nvn", "NvRmGpuDeviceGetInfo returned no information");
+    *out = rl_ld32(mem, info + (uint64_t)off);
+    return RL_OK;
+}
+
 uint64_t nvn_gpu_device(void)
 {
     pthread_mutex_lock(&nvn.lock);
@@ -342,6 +359,8 @@ static void hook_defined(void *user, const char *symbol, uint64_t addr)
         nvn.gpu_device_open = addr;
     else if (!strcmp(symbol, "NvRmGpuDeviceChooseKind"))
         nvn.gpu_choose_kind = addr;
+    else if (!strcmp(symbol, "NvRmGpuDeviceGetInfo"))
+        nvn.gpu_get_info = addr;
 }
 
 static int hook_wants(void *user, const char *symbol)

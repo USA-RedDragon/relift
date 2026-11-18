@@ -424,6 +424,10 @@ TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
+    static const int32_t ints[] = { 7, 0x10000 };
+    static const uint8_t device[] = { 0, 0 };
+    static const struct rl_nvn_layout l = { .nints = 2, .ints = ints, .int_device = device, .pool_page_info = 1 };
+    rl_nvn_set_layout(&l);
     uint64_t phys = heap, virt = heap + 0x100, req = heap + 0x400, storage = heap + 0x100000;
     CHECK(nvn_pool_make(phys, storage, 0x80000, 0x18c));
     CHECK(nvn_pool_make(virt, 0, 0x40000, 0x2a1));
@@ -437,6 +441,7 @@ TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
     if (phys_gpu == storage) {
         CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 3, req, 0), RL_PENDING);
         CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+        rl_nvn_set_layout(NULL);
         return;
     }
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 3, req, 0), RET);
@@ -449,4 +454,5 @@ TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
     map_req(req, phys, 0, 0, 0x10000, 0x100);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 1, req, 0), RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    rl_nvn_set_layout(NULL);
 }

@@ -23,9 +23,6 @@
  * factors, L2 size, texture limits). With a layout only those measured
  * values are taken from here.
  */
-/** @brief The NVNdeviceInfo whose answer is the memory pool page size (the driver keeps it at device +216). */
-#define NVN_INFO_POOL_PAGE 58
-
 static const int32_t device_info[] = {
     231, 30, 14, 65536, 256, 8, 32, 4, 16, 32, 16, 4, 4, 4, 32, 32, 32, 256, 256, 4, 8, 512, 256, 2, 256, 4096,
     16384, 16, 1024, 1024, 64, 1024, 2147483647, 65535, 65535, 8, 1048576, 4096, 16, 4096, 1, 1, 1, 262144, 16,
@@ -286,27 +283,49 @@ uint64_t nvnh_nvnDeviceFinalize(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief nvnDeviceGetInteger(const NVNdevice *, NVNdeviceInfo, int *). */
-uint64_t nvnh_nvnDeviceGetInteger(rl_ctx *c, uint8_t *mem)
+/**
+ * @brief The driver's answer for NVNdeviceInfo info into *out, from the
+ * build's layout (or the runtime's own table without one). Returns RL_OK or
+ * a pending stop.
+ */
+static int device_integer(rl_ctx *c, uint8_t *mem, uint32_t info, int32_t *out)
 {
-    uint32_t info = (uint32_t)c->x[1];
     uint32_t own = sizeof device_info / sizeof device_info[0];
     const struct rl_nvn_layout *l = g_layout;
     if (l && l->nints) {
         if (info >= l->nints)
-            return (uint64_t)rl_guest_fatal(c, "nvn", "nvnDeviceGetInteger: the driver knows no NVNdeviceInfo %u", info);
-        if (!l->int_device[info]) {
-            rl_st32(mem, c->x[2], (uint32_t)l->ints[info]);
-            return nvn_ret(c);
+            return rl_guest_fatal(c, "nvn", "nvnDeviceGetInteger: the driver knows no NVNdeviceInfo %u", info);
+        if (l->int_device[info] == 0) {
+            *out = l->ints[info];
+            return RL_OK;
+        }
+        if (l->int_device[info] == 2) {
+            uint32_t v = 0;
+            int rc = nvn_gpu_info_u32(c, mem, l->ints[info], &v);
+            *out = (int32_t)v;
+            return rc;
         }
         if (info >= own)
-            return (uint64_t)rl_guest_fatal(c, "nvn",
-                                            "nvnDeviceGetInteger: the driver reads NVNdeviceInfo %u from device state "
-                                            "the runtime has no value for",
-                                            info);
+            return rl_guest_fatal(c, "nvn",
+                                  "nvnDeviceGetInteger: the driver reads NVNdeviceInfo %u from device state the "
+                                  "runtime has no value for",
+                                  info);
     } else if (info >= own) {
-        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnDeviceGetInteger: unknown NVNdeviceInfo %u", info);
+        return rl_guest_fatal(c, "nvn", "nvnDeviceGetInteger: unknown NVNdeviceInfo %u", info);
     }
-    rl_st32(mem, c->x[2], (uint32_t)device_info[info]);
+    *out = device_info[info];
+    return RL_OK;
+}
+
+/** @brief nvnDeviceGetInteger(const NVNdevice *, NVNdeviceInfo, int *). */
+uint64_t nvnh_nvnDeviceGetInteger(rl_ctx *c, uint8_t *mem)
+{
+    int32_t v = 0;
+    uint64_t dst = c->x[2];
+    int rc = device_integer(c, mem, (uint32_t)c->x[1], &v);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    rl_st32(mem, dst, (uint32_t)v);
     return nvn_ret(c);
 }
 
@@ -552,7 +571,8 @@ uint64_t nvnh_nvnMemoryPoolGetSize(rl_ctx *c, uint8_t *mem)
 /**
  * @brief nvnMemoryPoolMapVirtual(NVNmemoryPool *, int, const NVNmappingRequest *):
  * NVNboolean. As the driver: the pool must be virtual, and each request's
- * offsets and size must be multiples of the page size (false otherwise); a
+ * offsets and size must be multiples of the page size, the device's answer
+ * for the info the build found the driver's mapping reads (false otherwise); a
  * request without a physical pool unmaps. As on the console, the virtual
  * pool has GPU addresses of its own, which reach the physical pages mapped
  * into it: a second host import of the physical pool's guest bytes, from the
@@ -570,7 +590,16 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
         c->x[0] = 0;
         return nvn_ret(c);
     }
-    const uint64_t page = (uint64_t)device_info[NVN_INFO_POOL_PAGE];
+    if (!g_layout || !g_layout->nints)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnMemoryPoolMapVirtual: the build read no NVN2 driver layout");
+    int32_t page_size = 0;
+    int rc = device_integer(c, mem, g_layout->pool_page_info, &page_size);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    if (page_size <= 0 || (page_size & (page_size - 1)))
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnMemoryPoolMapVirtual: the driver's page size %d is no power of two",
+                                        page_size);
+    const uint64_t page = (uint64_t)page_size;
     for (int32_t i = 0; i < n; i++) {
         uint64_t r = req + 0x28 * (uint64_t)i;
         uint64_t phys = rl_ld64(mem, r), poff = rl_ld64(mem, r + 8), voff = rl_ld64(mem, r + 16);

@@ -521,6 +521,11 @@ int nvn_driver_lookup(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
 
 /** @brief The NvRmGpuDevice nvn_gpu_open opened (a guest address), 0 before. */
 uint64_t nvn_gpu_device(void);
+/**
+ * @brief The u32 at byte off of what the program's NvRmGpuDeviceGetInfo
+ * returns for the GPU (opened first). Returns RL_OK or a pending stop.
+ */
+int nvn_gpu_info_u32(rl_ctx *c, uint8_t *mem, int64_t off, uint32_t *out);
 
 /** @brief A normal return from a proc: the guest address the return goes to (docs/abi.md section 5.4). */
 static inline uint64_t nvn_ret(const rl_ctx *c) { return c->x[30]; }

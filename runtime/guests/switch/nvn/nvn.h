@@ -54,8 +54,15 @@ struct rl_nvn_layout {
     uint32_t nints;
     /** @brief Its answer for each, where int_device is 0. */
     const int32_t *ints;
-    /** @brief 1 where the driver reads the answer from device state its initialization measured. */
+    /**
+     * @brief Where each answer comes from: 0 the constant in ints, 1 device
+     * state the driver's initialization measured (the runtime's own value), 2
+     * the u32 at byte ints[i] of what NvRmGpuDeviceGetInfo returns for the
+     * opened GPU (the driver's initialization copies it into the device).
+     */
     const uint8_t *int_device;
+    /** @brief The NVNdeviceInfo whose answer is the page size nvnMemoryPoolMapVirtual checks against. */
+    uint32_t pool_page_info;
 };
 
 /** @brief Registers the driver layout; the build's generated nvn_driver.c calls it before main. */

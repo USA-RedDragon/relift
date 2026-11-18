@@ -32,6 +32,15 @@ pub fn write(placed: &[Placed], cpu: Arm64, cdir: &Path) -> Result<Option<PathBu
     };
     let image = Image::new(&sdk.nso, cpu)?;
     let layout = device_layout(&image)?;
+    if let Some(n) = layout.integers.iter().find_map(|i| match i {
+        Integer::Import { name, .. } if name != "NvRmGpuDeviceGetInfo" => Some(name),
+        _ => None,
+    }) {
+        return Err(format!(
+            "nvn driver: nvnDeviceGetInteger answers what {n} returns; the runtime follows only NvRmGpuDeviceGetInfo"
+        )
+        .into());
+    }
     let path = cdir.join("nvn_driver.c");
     relift_cache::write_if_changed(&path, c_text(&layout, sdk.base).as_bytes())?;
     Ok(Some(path))
@@ -45,7 +54,8 @@ pub fn c_text(l: &DeviceLayout, base: u64) -> String {
          struct rl_nvn_layout {\n    uint64_t storage_class, settings_hook;\n    \
          uint32_t builder_device, flags, gpu_device, nfields, nsettings;\n    \
          const struct rl_nvn_field *fields;\n    const char *const *settings;\n    \
-         uint32_t nints;\n    const int32_t *ints;\n    const uint8_t *int_device;\n};\n\
+         uint32_t nints;\n    const int32_t *ints;\n    const uint8_t *int_device;\n    \
+         uint32_t pool_page_info;\n};\n\
          void rl_nvn_set_layout(const struct rl_nvn_layout *l);\n",
     );
     for (i, f) in l.fields.iter().enumerate() {
@@ -70,23 +80,22 @@ pub fn c_text(l: &DeviceLayout, base: u64) -> String {
         .map(|i| match i {
             Integer::Const(v) => v.to_string(),
             Integer::Device(_) => "0".into(),
+            Integer::Import { off, .. } => off.to_string(),
         })
         .collect();
     let device: Vec<&str> = l
         .integers
         .iter()
-        .map(|i| {
-            if matches!(i, Integer::Device(_)) {
-                "1"
-            } else {
-                "0"
-            }
+        .map(|i| match i {
+            Integer::Const(_) => "0",
+            Integer::Device(_) => "1",
+            Integer::Import { .. } => "2",
         })
         .collect();
     let _ = write!(
         s,
         "    0,\n}};\nstatic const int32_t ints[] = {{ {}, 0 }};\nstatic const uint8_t int_device[] = {{ {}, 0 }};\n\
-         static const struct rl_nvn_layout layout = {{ 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, {}, {}, fields, settings, {}, ints, int_device }};\n\
+         static const struct rl_nvn_layout layout = {{ 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, {}, {}, fields, settings, {}, ints, int_device, {} }};\n\
          __attribute__((constructor)) static void rl_nvn_layout_init(void) {{ rl_nvn_set_layout(&layout); }}\n",
         ints.join(", "),
         device.join(", "),
@@ -98,6 +107,7 @@ pub fn c_text(l: &DeviceLayout, base: u64) -> String {
         l.fields.len(),
         l.settings.len(),
         l.integers.len(),
+        l.pool_page_info,
     );
     s
 }

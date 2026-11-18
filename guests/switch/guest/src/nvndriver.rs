@@ -170,6 +170,8 @@ pub enum Obj {
     Stack,
     /// What the pointer at byte `off` of an object pointed to.
     At(Box<Obj>, i64),
+    /// What the imported function of this name returned.
+    Ret(String),
 }
 
 /// An abstract value.
@@ -624,8 +626,9 @@ impl<'a> Abstract<'a> {
             Succ::Pcs(t) if t.len() == 1 => t[0],
             Succ::Import(name) => {
                 self.import(&name, &args, s);
-                trace.imports.push((name, args));
+                trace.imports.push((name.clone(), args));
                 s.clobber_call();
+                s.regs[0] = V::P(Obj::Ret(name), 0);
                 return Ok(Vec::new());
             }
             Succ::Slot(slot) => {
@@ -654,8 +657,9 @@ impl<'a> Abstract<'a> {
         };
         if let Some(name) = self.stub_import(t) {
             self.import(&name, &args, s);
-            trace.imports.push((name, args));
+            trace.imports.push((name.clone(), args));
             s.clobber_call();
+            s.regs[0] = V::P(Obj::Ret(name), 0);
             return Ok(Vec::new());
         }
         if depth >= DEPTH {
@@ -773,6 +777,12 @@ impl<'a> Abstract<'a> {
                                             b[(lo - k) as usize..(hi - k) as usize].to_vec(),
                                         ),
                                     ))
+                                }
+                                Cell::Val(v, len)
+                                    if *k >= *soff
+                                        && k + i64::from(*len) <= soff + i64::from(n) =>
+                                {
+                                    Some((k - soff, Cell::Val(v.clone(), *len)))
                                 }
                                 Cell::Val(..) => None,
                             })
@@ -1174,6 +1184,10 @@ pub struct DeviceLayout {
     pub settings: Vec<String>,
     /// The driver's `nvnDeviceGetInteger` answers by `NVNdeviceInfo`.
     pub integers: Vec<Integer>,
+    /// The `NVNdeviceInfo` whose answer is the page size the driver's
+    /// `nvnMemoryPoolMapVirtual` checks offsets and sizes against: the one
+    /// that reads the device field the mapping reads.
+    pub pool_page_info: u32,
 }
 
 fn proc_addr(procs: &[(String, u64)], name: &str) -> Result<u64, String> {
@@ -1246,6 +1260,16 @@ pub enum Integer {
     /// A value it reads from device fields (at these offsets) that
     /// `nvnDeviceInitialize` fills from what it measures.
     Device(Vec<u32>),
+    /// The 4 bytes at `off` of what the imported function `name` returns,
+    /// which `nvnDeviceInitialize` copies into device field `field`.
+    Import {
+        /// The import.
+        name: String,
+        /// The offset in what it returns.
+        off: i64,
+        /// The device field.
+        field: u32,
+    },
 }
 
 /// The answers of the driver's `nvnDeviceGetInteger` by `NVNdeviceInfo`,
@@ -1282,19 +1306,25 @@ fn integers(
             .next()
             .ok_or_else(|| format!("nvn driver: nvnDeviceGetInteger({info}) never returns"))?;
         let end = exits.fold(first, |x, y| x.merge(&y));
+        let mut offs: Vec<u32> = t
+            .loads
+            .iter()
+            .filter(|l| l.obj == dev)
+            .map(|l| l.off as u32)
+            .collect();
+        offs.sort_unstable();
+        offs.dedup();
         out.push(match end.load(&Obj::Arg(2), 0, 4) {
             V::K(k) => Integer::Const(k as u32 as i32),
-            _ => {
-                let mut offs: Vec<u32> = t
-                    .loads
-                    .iter()
-                    .filter(|l| l.obj == dev)
-                    .map(|l| l.off as u32)
-                    .collect();
-                offs.sort_unstable();
-                offs.dedup();
-                Integer::Device(offs)
-            }
+            V::P(Obj::At(o, off), 0) => match (*o, offs.as_slice()) {
+                (Obj::Ret(name), [field]) => Integer::Import {
+                    name,
+                    off,
+                    field: *field,
+                },
+                _ => Integer::Device(offs),
+            },
+            _ => Integer::Device(offs),
         });
     }
     let unknown = out.last().cloned();
@@ -1302,6 +1332,43 @@ fn integers(
         out.pop();
     }
     Ok(out)
+}
+
+/// The info whose device field the driver's `nvnMemoryPoolMapVirtual` reads
+/// through its pool's device pointer: the page size it checks requests
+/// against.
+fn pool_page_info(
+    a: &Abstract<'_>,
+    procs: &[(String, u64)],
+    integers: &[Integer],
+) -> Result<u32, String> {
+    let map = proc_addr(procs, "nvnMemoryPoolMapVirtual")?;
+    let mut t = Trace::default();
+    a.run(map, a.entry(), &mut t)?;
+    let read: Vec<u32> = t
+        .loads
+        .iter()
+        .filter(|l| l.len == 4 && matches!(&l.obj, Obj::At(o, _) if **o == Obj::Arg(0)))
+        .map(|l| l.off as u32)
+        .collect();
+    let hits: Vec<u32> = integers
+        .iter()
+        .zip(0u32..)
+        .filter(|(i, _)| match i {
+            Integer::Import { field, .. } => read.contains(field),
+            Integer::Device(fields) => fields.iter().any(|f| read.contains(f)),
+            Integer::Const(_) => false,
+        })
+        .map(|(_, n)| n)
+        .collect();
+    match hits.as_slice() {
+        [n] => Ok(*n),
+        _ => Err(format!(
+            "nvn driver: nvnMemoryPoolMapVirtual reads device fields {read:x?}, which {} nvnDeviceGetInteger \
+             infos report ({hits:?}); its page size is not one of them",
+            hits.len()
+        )),
+    }
 }
 
 /// Reads the device layout of the driver in `image`.
@@ -1379,8 +1446,10 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
     settings.sort();
     settings.dedup();
     let integers = integers(&a, &done, &procs)?;
+    let pool_page_info = pool_page_info(&a, &procs, &integers)?;
     Ok(DeviceLayout {
         integers,
+        pool_page_info,
         storage_class,
         settings_hook,
         settings,
@@ -1406,6 +1475,10 @@ mod tests {
     const INIT: u32 = 0x280;
     const STUB: u32 = 0x300;
     const GET_INT: u32 = 0x340;
+    const FILL: u32 = 0x400;
+    const MAP: u32 = 0x440;
+    const INFO_STUB: u32 = 0x480;
+    const MEMCPY_STUB: u32 = 0x4c0;
     const POOL: u32 = 0x1600;
     const OFFS: u32 = 0x1800;
     const SETTING: u32 = 0x1901;
@@ -1415,6 +1488,8 @@ mod tests {
     const TABLE_WORD: u32 = 0x2100;
     const CHOOSE_GOT: u32 = 0x2180;
     const HOOK: u32 = 0x2190;
+    const INFO_GOT: u32 = 0x21a0;
+    const MEMCPY_GOT: u32 = 0x21b0;
     const TABLE: u32 = 0x2200;
 
     fn movz_x(rd: u32, imm: u32) -> u32 {
@@ -1452,6 +1527,12 @@ mod tests {
     }
     const RET: u32 = 0xd65f_03c0;
     const MOV_X19_X0: u32 = 0xaa00_03f3;
+    const MOV_X0_X1: u32 = 0xaa01_03e0;
+    const MOV_X19_X8: u32 = 0xaa08_03f3;
+    const ADD_X8_SP_40: u32 = 0x9101_03e8;
+    const ADD_X1_SP_40: u32 = 0x9101_03e1;
+    const ADD_X0_X19_2F0: u32 = 0x910b_c260;
+    const PACIBSP: u32 = 0xd503_237f;
     const BLR_X8: u32 = 0xd63f_0100;
     const BR_X17: u32 = 0xd61f_0220;
 
@@ -1498,6 +1579,12 @@ mod tests {
         );
         let mut init = vec![
             MOV_X19_X0,
+            ADD_X8_SP_40,
+            bl(INIT + 8, FILL),
+            ADD_X0_X19_2F0,
+            ADD_X1_SP_40,
+            movz_x(2, 0x20),
+            bl(INIT + 24, MEMCPY_STUB),
             movz_x(0, SETTING),
             movz_x(8, HOOK),
             ldr_x(8, 8, 0),
@@ -1539,6 +1626,30 @@ mod tests {
                 RET,
             ],
         );
+        code(
+            &mut text,
+            FILL,
+            &[
+                PACIBSP,
+                MOV_X19_X8,
+                MOV_X0_X1,
+                bl(FILL + 12, INFO_STUB),
+                ldr_w(9, 0, 708),
+                str_w(9, 19, 0x10),
+                RET,
+            ],
+        );
+        code(&mut text, MAP, &[ldr_x(9, 0, 8), ldr_w(10, 9, 0x300), RET]);
+        code(
+            &mut text,
+            INFO_STUB,
+            &[movz_x(16, INFO_GOT), ldr_x(17, 16, 0), BR_X17],
+        );
+        code(
+            &mut text,
+            MEMCPY_STUB,
+            &[movz_x(16, MEMCPY_GOT), ldr_x(17, 16, 0), BR_X17],
+        );
 
         let mut names: Vec<(String, u32)> =
             (0..16).map(|k| (format!("Aaa{k:02}"), FILLER)).collect();
@@ -1546,6 +1657,7 @@ mod tests {
             ("DeviceGetFlags".to_string(), GET_FLAGS),
             ("DeviceGetInteger".to_string(), GET_INT),
             ("DeviceInitialize".to_string(), INIT),
+            ("MemoryPoolMapVirtual".to_string(), MAP),
             ("TextureBuilderGetDevice".to_string(), GET_DEVICE),
             ("TextureBuilderGetStorageClass".to_string(), STORAGE_CLASS),
         ]);
@@ -1565,7 +1677,8 @@ mod tests {
             pool += n.len() + 1;
         }
         put(&mut rodata, SETTING as usize - RODATA, b"TestSetting");
-        let dynstr = b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0";
+        let dynstr =
+            b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0NvRmGpuDeviceGetInfo\0memcpy\0";
         put(&mut rodata, DYNSTR, dynstr);
         let sym = |name: u32, shndx: u16, value: u64| {
             let mut e = [0u8; 24];
@@ -1577,11 +1690,15 @@ mod tests {
         };
         put(&mut rodata, DYNSYM + 24, &sym(1, 1, u64::from(LOADER)));
         put(&mut rodata, DYNSYM + 48, &sym(28, 0, 0));
+        put(&mut rodata, DYNSYM + 72, &sym(52, 0, 0));
+        put(&mut rodata, DYNSYM + 96, &sym(73, 0, 0));
         let mut rela: Vec<(u64, u64, u64)> = vec![(u64::from(TABLE_WORD), 1027, u64::from(TABLE))];
         for (k, (_, a)) in names.iter().enumerate() {
             rela.push((u64::from(TABLE) + 8 * k as u64, 1027, u64::from(*a)));
         }
         rela.push((u64::from(CHOOSE_GOT), (2 << 32) | 1026, 0));
+        rela.push((u64::from(INFO_GOT), (3 << 32) | 1026, 0));
+        rela.push((u64::from(MEMCPY_GOT), (4 << 32) | 1026, 0));
         for (k, (o, i, a)) in rela.iter().enumerate() {
             let at = RELA + 24 * k;
             put(&mut rodata, at, &o.to_le_bytes());
@@ -1602,7 +1719,7 @@ mod tests {
             text,
             rodata,
             data,
-            dyn_extents: [(DYNSTR as u32, dynstr.len() as u32), (DYNSYM as u32, 72)],
+            dyn_extents: [(DYNSTR as u32, dynstr.len() as u32), (DYNSYM as u32, 120)],
             ..NsoSpec::default()
         }))
         .expect("the fixture parses");
@@ -1614,7 +1731,7 @@ mod tests {
     fn the_proc_table_comes_from_the_loaders_constants() {
         let img = driver(true);
         let t = proc_table(&img).expect("a table");
-        assert_eq!(t.len(), 21);
+        assert_eq!(t.len(), 22);
         assert_eq!(t[0], ("nvnAaa00".to_string(), u64::from(FILLER)));
         assert!(t.contains(&(
             "nvnTextureBuilderGetStorageClass".to_string(),
@@ -1645,16 +1762,21 @@ mod tests {
     }
 
     #[test]
-    fn integers_are_constants_unless_they_read_what_the_init_measures() {
+    fn integers_are_constants_or_what_the_driver_copies_from_the_gpu_info() {
         let l = device_layout(&driver(true)).expect("a layout");
         assert_eq!(
             l.integers,
             [
                 Integer::Const(231),
                 Integer::Const(6),
-                Integer::Device(vec![0x300]),
+                Integer::Import {
+                    name: "NvRmGpuDeviceGetInfo".into(),
+                    off: 708,
+                    field: 0x300,
+                },
             ]
         );
+        assert_eq!(l.pool_page_info, 2);
     }
 
     #[test]
