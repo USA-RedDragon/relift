@@ -95,7 +95,17 @@ needs Android 11 (API 30) or newer. It is signed with
 application id `package.android-id`. The app has settings pages, including
 the choice of a custom Vulkan driver package. Game Boy and GBA apps keep the
 battery save in the app's own folder and show the on-screen controller on
-the touch screen. A Switch game's data is not in the APK: `relift push
+the touch screen. A Nintendo DS app holds the whole cartridge image in
+`libmain.so` (stored uncompressed and page aligned in the APK, so one file is
+the game), keeps its save in the app's own folder (`battery.sav`, also written
+when the app goes to the background), turns with the device (portrait and
+landscape, live), draws the two screens by the `video.nds_layout` setting and
+takes touches on the bottom screen's picture as the pen, wherever it is drawn
+and scaled. A device with a second display (a dual-screen handheld, a
+foldable, a phone with a connected display) shows the top screen on the first
+display and the bottom screen on the second through an Android Presentation,
+by the `video.nds_displays` setting, with touches on the second display as the
+pen ([input reference](../reference/input.md#nintendo-ds)). A Switch game's data is not in the APK: `relift push
 --target android-arm64` copies it to the device.
 
 ## iOS: app

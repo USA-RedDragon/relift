@@ -26,14 +26,46 @@ Motion is not declared yet.
 ## Nintendo DS
 
 `p1` holds the DS's buttons with the GBA pad's bindings plus X (`gamepad:north`,
-`key:s`) and Y (`gamepad:west`, `key:a`). The program reads the ports once per
-frame. `touch.press` (`mouse:left`) puts the pen down: with the button held over
-the window, at the bottom screen's pixel under the pointer, in either screen
-layout (`video.nds_layout`); a press over the top screen or the margins touches
-nothing. Without a held mouse button, the pen goes to `touch.x` and `touch.y`
-(0 to 1 across the bottom screen), which an input script can hold, for example
+`key:s`) and Y (`gamepad:west`, `key:a`), and Swap screens (`gamepad:right_stick`,
+`key:tab`; the controller's Screens button). The program reads the ports once per
+frame. The pen is down while a pointer or finger rests on the bottom screen's
+image, wherever the picture draws it, rotated or scaled, in any screen layout
+(`video.nds_layout`) and on either display (`video.nds_displays`): the program
+maps the point back to the screen's pixel. A press over the top screen or the
+margins touches nothing. With the on-screen controller (below) in use, fingers
+no shape took touch the screen and a finger on a button never does. Without a
+pointer or finger over a window, the pen goes to `touch.x` and `touch.y`
+(0 to 1 across the bottom screen) while `touch.press` holds, which an input
+script can hold, for example
 `RELIFT_INPUT_SCRIPT=120:touch.press,120:touch.x=0.5,120:touch.y=0.5`. The lid
 stays open.
+
+### Screens
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| `video.nds_layout` | `auto`, `stacked`, `side_by_side`, `large_top`, `large_bottom`, `top_only`, `bottom_only` | `auto` |
+| `video.nds_displays` | `auto`, `swapped`, `top_both`, `bottom_both`, `single` | `auto` |
+| `video.nds_integer_scale` | `true`, `false` | `true` |
+
+`auto` stacks the screens in a tall window or while the on-screen controller
+shows, and otherwise picks stacked or side by side by whichever fills the
+window better. `large_top` and `large_bottom` draw that screen at twice the size
+with the other one small beside it (a wide window) or below it (a tall one);
+`top_only` and `bottom_only` show one screen. Swap screens exchanges the
+screens' places: in a single-screen layout it shows the other screen, in a large
+and small layout it makes the large one small, and with two displays it
+exchanges the displays' screens. The layout follows the window's size, so
+rotating the device redraws it at once.
+
+On a device with a second display (a dual-screen handheld, a foldable, a phone
+with a connected display), `auto` shows the top screen on the first display and
+the bottom screen on the second. `swapped` reverses them, `top_both` and
+`bottom_both` show one screen on both, and `single` uses only the first
+display with `video.nds_layout`. Each display keeps its own size, orientation
+and scaling; a touch on the second display's image is the pen. On Android the
+second display is a Presentation of the app's activity; no setting of the
+device changes.
 
 ## Switch keyboard defaults
 
