@@ -495,16 +495,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # The image is about 4.3 GiB compressed and 16 GB unpacked, more than a
-      # hosted runner has free. A job-level `container:` is pulled before any
-      # step runs, so the image is run with `docker run` after this step.
+      # The image is 4.3 GiB compressed and 14.8 GiB unpacked, and the build
+      # in it adds under 1 GiB: 25 GiB with the margin for the pull's
+      # compressed layers. The runner image has 88 GiB free, so the step
+      # normally does nothing; on a runner with less it deletes the
+      # preinstalled toolchains in parallel. A job-level `container:` is
+      # pulled before any step runs, so the image is run with `docker run`.
       - name: Free disk for the cross image
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
-          sudo docker image prune --all --force
-          df -h /
+        run: scripts/ci/free-disk.sh 25
 
       - name: Build relift for ${{ matrix.target }}
         run: scripts/ci/cross-image.sh "${{ matrix.target }}"
