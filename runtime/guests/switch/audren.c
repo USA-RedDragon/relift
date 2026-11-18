@@ -42,14 +42,17 @@
 #define RENDER_INFO_OUT 0x10u
 #define WAVE_IN 0x38u
 #define REV_BASE 0x30564552u
-#define REV_LAST 15
+#define REV_LAST 16
 
 /**
  * @brief The number of a renderer revision, or -1 for one the renderer does
  * not take. Verified from the SDK's nn::audio::common::GetRevisionNumber and
  * CheckValidRevision: a revision is "REV" or "REv" followed by the byte '0'
- * plus its number, both spellings number alike, and the newer SDKs' current
- * revision is "REv?" (15).
+ * plus its number, both spellings number alike, and the newest SDK read
+ * (a Switch 2 program's) takes 1 to 16 with "REv@" (16) its current. That 16
+ * changes no parameter or update layout of 15 is inferred (open
+ * implementations list no feature past 15); the update's exact section sizes
+ * would refuse one that did.
  */
 static int rev_number(int32_t revision)
 {
@@ -700,8 +703,10 @@ static rl_result m_open(rl_ipc_req *r)
         return SF_RESULT_INVALID_HEADER;
     read_config(in, &c);
     uint64_t wb_size = le64(in + 0x38);
-    if (rev_number(c.revision) < 0)
+    if (rev_number(c.revision) < 0) {
+        rl_ipc_stop(r, "audren", "audio renderer revision 0x%08x is not taken yet", (uint32_t)c.revision);
         return AUDIO_OPERATION_FAILED;
+    }
     if ((c.rate != 32000 && c.rate != 48000) || c.sample_count == 0 || c.sample_count > 960 || c.mix_bufs == 0 ||
         c.mix_bufs > 256 || c.voices > 1024 || c.sinks > 256 || c.effects > 1024 || c.submix > 256)
         return AUDIO_OPERATION_FAILED;
@@ -727,8 +732,10 @@ static rl_result m_work_size(rl_ipc_req *r)
     if (!rl_ipc_in(r, in, sizeof in))
         return SF_RESULT_INVALID_HEADER;
     read_config(in, &c);
-    if (rev_number(c.revision) < 0)
+    if (rev_number(c.revision) < 0) {
+        rl_ipc_stop(r, "audren", "audio renderer revision 0x%08x is not taken yet", (uint32_t)c.revision);
         return RL_MAKE_RESULT(153, 2);
+    }
     put64(rl_ipc_out(r, 8), work_buffer_size(&c));
     return KR_SUCCESS;
 }

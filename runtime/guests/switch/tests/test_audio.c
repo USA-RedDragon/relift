@@ -521,25 +521,28 @@ TEST(audren_update_frames_and_mixing)
     free(u);
 }
 
-TEST(audren_sizes_both_revision_spellings_alike)
+TEST(audren_sizes_revisions_up_to_16_alike_and_stops_past_them)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x400000);
     uint32_t h = open_service(c, heap, "audren:u");
     uint32_t cfg[13] = { 48000, 240, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0 };
-    uint64_t size[3];
-    const uint32_t revs[3] = { 0x3f564552u, 0x3f764552u, 0x40764552u };
-    for (int i = 0; i < 3; i++) {
+    uint64_t size[4];
+    const uint32_t revs[4] = { 0x3f564552u, 0x3f764552u, 0x40764552u, 0x41764552u };
+    for (int i = 0; i < 4; i++) {
         cfg[12] = revs[i];
         msg q = mk(1);
         memcpy(q.data, cfg, 0x34);
         q.data_size = 0x34;
         reply r = call(c, h, &q);
-        CHECK_EQ(r.result, i < 2 ? 0 : AUDIO_RESULT(2));
+        if (i < 3)
+            CHECK_EQ(r.result, 0);
         size[i] = le64(r.data);
     }
     CHECK(size[0] > 0);
     CHECK_EQ(size[1], size[0]);
+    CHECK_EQ(size[2], size[0]);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
 }
 
 TEST(audren_rejects_bad_updates)
