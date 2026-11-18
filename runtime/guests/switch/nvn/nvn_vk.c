@@ -1888,7 +1888,7 @@ static uint8_t *read_back(replay *r, vimg *v)
     return px;
 }
 
-int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture)
+int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4])
 {
     (void)queue;
     if (!up(c))
@@ -1906,6 +1906,18 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture)
     if (!px)
         return rl_guest_fatal(c, "nvn", "cannot read back texture 0x%llx (format %u) to present it",
                               (unsigned long long)texture, v->d.format);
+    uint32_t rect[4];
+    if (!nvn_crop_rect(crop, w, h, rect)) {
+        free(px);
+        return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
+                              crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
+    }
+    if (rect[2] != w || rect[3] != h) {
+        for (uint32_t y = 0; y < rect[3]; y++)
+            memmove(px + (size_t)y * rect[2] * 4, px + ((size_t)(rect[1] + y) * w + rect[0]) * 4, (size_t)rect[2] * 4);
+        w = rect[2];
+        h = rect[3];
+    }
     uint64_t frame;
     if (vkf_capture_due(&frame))
         vkf_capture_write(frame, (uint64_t)now_ns(), w, h, px, (size_t)w * 4, false);

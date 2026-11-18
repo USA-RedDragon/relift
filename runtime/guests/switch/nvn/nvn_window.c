@@ -162,7 +162,32 @@ uint64_t nvnh_nvnWindowGetCrop(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnQueuePresentTexture(NVNqueue *, NVNwindow *, int index). */
+bool nvn_crop_rect(const int32_t crop[4], uint32_t width, uint32_t height, uint32_t out[4])
+{
+    if (crop[2] == 0 || crop[3] == 0) {
+        out[0] = out[1] = 0;
+        out[2] = width;
+        out[3] = height;
+        return width && height;
+    }
+    int64_t x0 = crop[0] < 0 ? 0 : crop[0], y0 = crop[1] < 0 ? 0 : crop[1];
+    int64_t x1 = (int64_t)crop[0] + crop[2], y1 = (int64_t)crop[1] + crop[3];
+    x1 = x1 > (int64_t)width ? (int64_t)width : x1;
+    y1 = y1 > (int64_t)height ? (int64_t)height : y1;
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+    out[0] = (uint32_t)x0;
+    out[1] = (uint32_t)y0;
+    out[2] = (uint32_t)(x1 - x0);
+    out[3] = (uint32_t)(y1 - y0);
+    return true;
+}
+
+/**
+ * @brief nvnQueuePresentTexture(NVNqueue *, NVNwindow *, int index): shows
+ * the window's crop rectangle of the texture, as the console's display does
+ * (a game may render a 1920x1080 picture into larger window textures).
+ */
 uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
 {
     nvn_window *w = win_of(c, c->x[1], "nvnQueuePresentTexture");
@@ -171,7 +196,7 @@ uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
     uint32_t idx = (uint32_t)c->x[2];
     if (idx >= w->n)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueuePresentTexture of texture %u of %u", idx, w->n);
-    int rc = nvn_present(c, mem, c->x[0], w->textures[idx]);
+    int rc = nvn_present(c, mem, c->x[0], w->textures[idx], w->crop);
     if (rc != RL_OK)
         return (uint64_t)rc;
     if (w->presents++ == 0)

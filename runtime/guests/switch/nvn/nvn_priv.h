@@ -95,8 +95,20 @@ void nvn_cmdset_free(uint64_t handle);
 
 /** @brief Marks the sync at guest address sync signaled; 0 does nothing. */
 void nvn_sync_signal(uint64_t sync);
-/** @brief Shows texture (an NVNtexture the game rendered) as the next frame, after the work queue submitted. Returns RL_OK or RL_PENDING. */
-int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture);
+/**
+ * @brief Shows the crop rectangle crop (x, y, width, height, as
+ * nvnWindowSetCrop takes it) of texture (an NVNtexture the game rendered) as
+ * the next frame, after the work queue submitted. Returns RL_OK or
+ * RL_PENDING.
+ */
+int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4]);
+/**
+ * @brief The part of a width x height texture that crop (x, y, width,
+ * height) shows, into out (x, y, width, height): the whole texture when
+ * crop's width or height is 0, else crop clipped to the texture. False when
+ * nothing of the texture is left.
+ */
+bool nvn_crop_rect(const int32_t crop[4], uint32_t width, uint32_t height, uint32_t out[4]);
 
 /** @brief Texture, sampler and descriptor pool procs (nvn_tex.c). */
 #define NVN_TEXTURE_PROCS(X)                                                                                           \

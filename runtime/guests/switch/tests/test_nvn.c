@@ -416,6 +416,22 @@ TEST(nvn_presents_step_the_input_script)
     CHECK(rl_ports_set_script(""));
 }
 
+TEST(nvn_presents_show_the_window_crop)
+{
+    uint32_t r[4];
+    static const int32_t none[4] = { 0, 0, 0, 0 };
+    CHECK(nvn_crop_rect(none, 3840, 2160, r));
+    CHECK(r[0] == 0 && r[1] == 0 && r[2] == 3840 && r[3] == 2160);
+    static const int32_t hd[4] = { 0, 0, 1920, 1080 };
+    CHECK(nvn_crop_rect(hd, 3840, 2160, r));
+    CHECK(r[0] == 0 && r[1] == 0 && r[2] == 1920 && r[3] == 1080);
+    static const int32_t past[4] = { -8, 100, 4000, 3000 };
+    CHECK(nvn_crop_rect(past, 3840, 2160, r));
+    CHECK(r[0] == 0 && r[1] == 100 && r[2] == 3840 && r[3] == 2060);
+    static const int32_t outside[4] = { 3840, 0, 16, 16 };
+    CHECK(!nvn_crop_rect(outside, 3840, 2160, r));
+}
+
 TEST(nvn_storage_class_needs_the_drivers_layout)
 {
     rl_ctx *c = t_boot(NULL);
