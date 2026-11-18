@@ -769,8 +769,13 @@ bool nvn_vk_begin(replay *r)
 /** @brief Submits what r recorded and waits for it. */
 bool nvn_vk_flush(replay *r)
 {
-    if (!r->recording)
+    if (!r->recording) {
+        if (g.arena_used) {
+            g.arena_used = 0;
+            g.flushes++;
+        }
         return true;
+    }
     r->recording = false;
     if (VK(vkEndCommandBuffer)(g.cb) != VK_SUCCESS)
         return false;
@@ -779,8 +784,20 @@ bool nvn_vk_flush(replay *r)
         return false;
     bool ok = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
     g.arena_used = 0;
+    g.flushes++;
     nvn_draw_reset();
     return ok;
+}
+
+int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        uint64_t before = g.flushes;
+        int rc = stage(r, arg);
+        if (rc != RL_OK || g.flushes == before)
+            return rc;
+    }
+    return nvn_vk_stop(r, "the data of %s does not fit one batch of the upload arena and descriptor pool", what);
 }
 
 static void image_free(vimg *v)

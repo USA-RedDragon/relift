@@ -110,6 +110,11 @@ typedef struct nvn_vkdev {
     uint64_t arena_used;
     /** @brief The device probes' results, as device.json reports them. */
     nvn_probes probes;
+    /**
+     * @brief Batches submitted so far. A submit empties the arena and the
+     * descriptor pool, so what a command put there before it is gone.
+     */
+    uint64_t flushes;
 } nvn_vkdev;
 
 extern nvn_vkdev g;
@@ -174,8 +179,21 @@ bool nvn_vk_staging_new(staging *s, uint64_t size);
 void nvn_vk_staging_free(staging *s);
 void nvn_vk_barrier(VkCommandBuffer cb);
 bool nvn_vk_begin(replay *r);
-/** @brief Submits what r recorded and waits for it; the arena is free again after. */
+/**
+ * @brief Submits what r recorded and waits for it; the arena is free again
+ * after. With nothing recorded, it frees what a command put in the arena
+ * before recording (that counts as a submit for nvn_vk_stage).
+ */
 bool nvn_vk_flush(replay *r);
+/**
+ * @brief Runs stage(r, arg), which puts one command's data into the batch
+ * being recorded (uploads, descriptor sets), before the command records
+ * anything. When the batch had to be submitted partway, which drops what
+ * stage put before, it runs stage again on the empty batch; when that
+ * submits too, the data of what (a draw, a dispatch) does not fit one batch
+ * and it stops. Returns RL_OK or a pending stop.
+ */
+int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what);
 /** @brief Stops the game with a report (after flushing what r recorded). Returns RL_PENDING. */
 int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
 /** @brief The host format of an NVNformat; VK_FORMAT_UNDEFINED for one the layer does not map. */

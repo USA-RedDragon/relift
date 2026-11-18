@@ -748,10 +748,12 @@ static int bank_of(replay *r, const void *src, uint64_t n, VkDescriptorBufferInf
     return RL_OK;
 }
 
-/** @brief Writes the constant banks the bound modules read into new descriptor sets and binds them with the texture set. */
-static int bind_constants(replay *r, module *const mods[5])
+/**
+ * @brief Writes the constant banks the bound modules read into new
+ * descriptor sets, sets[0] and sets[1], with the texture set in sets[2].
+ */
+static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[3])
 {
-    VkDescriptorSet sets[3];
     VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                        .descriptorPool = d.pool,
                                        .descriptorSetCount = 2,
@@ -810,7 +812,6 @@ static int bind_constants(replay *r, module *const mods[5])
     }
     if (n)
         VK(vkUpdateDescriptorSets)(g.dev, n, wr, 0, NULL);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, sets, 0, NULL);
     return RL_OK;
 }
 
@@ -887,6 +888,95 @@ static void dynamic_state(replay *r, VkRect2D area)
     VK(vkCmdSetLineWidth)(g.cb, st->line_width);
 }
 
+/** @brief What a draw puts into the batch being recorded, and where. */
+typedef struct draw_data {
+    const pipe_key *k;
+    module *const *mods;
+    bool indexed, has_def;
+    uint32_t itype, first, count, nb, firstb;
+    int32_t base;
+    uint64_t iaddr, def_off, ioff;
+    VkDeviceSize offs[NVN_VERTEX_BUFFERS], int_off[NVN_VERTEX_ATTRIBS];
+    VkDescriptorSet sets[3];
+} draw_data;
+
+/** @brief Puts a draw's vertices, indices and constant banks into the batch being recorded (an nvn_vk_stage step). */
+static int stage_draw(replay *r, void *arg)
+{
+    draw_data *dd = arg;
+    const pipe_key *kp = dd->k;
+    const nvn_gfx *st = r->st;
+    bool indexed = dd->indexed;
+    uint32_t itype = dd->itype, first = dd->first, count = dd->count;
+    int32_t base = dd->base;
+    dd->nb = dd->firstb = 0;
+    dd->has_def = false;
+    for (uint32_t i = 0; i < kp->nbind; i++) {
+        uint32_t s = kp->bind[i].binding;
+        uint64_t off;
+        if (s >= NVN_VERTEX_BUFFERS)
+            continue;
+        if (s == DEFAULT_BINDING && kp->bind[i].stride == 0 && !st->vb[s].addr) {
+            static const float one[4] = { 0, 0, 0, 1 };
+            if (!nvn_vk_upload_bytes(r, (const uint8_t *)one, sizeof one, 0, 16, &off))
+                return nvn_vk_stop(r, "the upload arena is full");
+            dd->def_off = off;
+            dd->has_def = true;
+            continue;
+        }
+        if (!st->vb[s].addr)
+            return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
+        if (!nvn_vk_upload(r, st->vb[s].addr, st->vb[s].size, 0, 16, &off))
+            return nvn_vk_stop(r, "the upload arena is full");
+        if (dd->nb == 0)
+            dd->firstb = s;
+        if (s != dd->firstb + dd->nb)
+            return nvn_vk_stop(r, "vertex streams that are not contiguous");
+        dd->offs[dd->nb++] = off;
+    }
+    static const uint32_t isize[] = { 1, 2, 4 };
+    if (indexed) {
+        if (itype > 2)
+            return nvn_vk_stop(r, "index type %u", itype);
+        if (itype == 0)
+            return nvn_vk_stop(r, "8-bit indices");
+        if (!nvn_vk_upload(r, dd->iaddr, (uint64_t)count * isize[itype], 0, 16, &dd->ioff))
+            return nvn_vk_stop(r, "the upload arena is full");
+    }
+    if (kp->nint) {
+        uint64_t nv = (uint64_t)first + count;
+        if (indexed) {
+            const uint8_t *ip = r->mem + nvn_gpu_guest(dd->iaddr);
+            int64_t hi = -1;
+            for (uint32_t i = 0; i < count; i++) {
+                uint32_t x = itype == 1 ? (uint32_t)ip[2 * i] | (uint32_t)ip[2 * i + 1] << 8 : rl_ld32(ip, 4 * (uint64_t)i);
+                bool restart = kp->primitive_restart && x == (itype == 1 ? 0xffffu : 0xffffffffu);
+                if (!restart && (int64_t)x + base > hi)
+                    hi = (int64_t)x + base;
+            }
+            nv = (uint64_t)(hi + 1);
+        }
+        if (nv > (16u << 20))
+            return nvn_vk_stop(r, "a draw reads %llu vertices of an integer attribute", (unsigned long long)nv);
+        for (uint32_t j = 0; j < kp->nint; j++) {
+            uint32_t s = kp->ints[j].stream;
+            if (!st->vb[s].addr)
+                return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
+            uint64_t n = kp->ints[j].per_instance ? 1 : nv;
+            uint32_t *w = malloc(n ? n * 16 : 16);
+            if (!w)
+                return nvn_vk_stop(r, "out of memory expanding an integer vertex attribute");
+            expand_integer(r->mem + nvn_gpu_guest(st->vb[s].addr) + kp->ints[j].offset, kp->ints[j].stride, kp->ints[j].format,
+                           n, w);
+            bool ok = nvn_vk_upload_bytes(r, w, n ? n * 16 : 16, 0, 16, &dd->int_off[j]);
+            free(w);
+            if (!ok)
+                return nvn_vk_stop(r, "the upload arena is full");
+        }
+    }
+    return write_constants(r, dd->mods, dd->sets);
+}
+
 /** @brief A draw: mode, then indexed (index type, index address, base vertex) or not (first vertex), and count. */
 static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t iaddr, int32_t base, uint32_t first,
                 uint32_t count)
@@ -931,92 +1021,27 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VkPipeline p = pipeline_of(r, &k);
     if (!p)
         return RL_PENDING;
-    VkBuffer bufs[NVN_VERTEX_BUFFERS];
-    VkDeviceSize offs[NVN_VERTEX_BUFFERS];
-    uint32_t nb = 0, firstb = 0;
-    uint64_t def_off = 0;
-    bool has_def = false;
-    for (uint32_t i = 0; i < k.nbind; i++) {
-        uint32_t s = k.bind[i].binding;
-        uint64_t off;
-        if (s >= NVN_VERTEX_BUFFERS)
-            continue;
-        if (s == DEFAULT_BINDING && k.bind[i].stride == 0 && !st->vb[s].addr) {
-            static const float one[4] = { 0, 0, 0, 1 };
-            if (!nvn_vk_upload_bytes(r, (const uint8_t *)one, sizeof one, 0, 16, &off))
-                return nvn_vk_stop(r, "the upload arena is full");
-            def_off = off;
-            has_def = true;
-            continue;
-        }
-        if (!st->vb[s].addr)
-            return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
-        if (!nvn_vk_upload(r, st->vb[s].addr, st->vb[s].size, 0, 16, &off))
-            return nvn_vk_stop(r, "the upload arena is full");
-        if (nb == 0)
-            firstb = s;
-        if (s != firstb + nb)
-            return nvn_vk_stop(r, "vertex streams that are not contiguous");
-        bufs[nb] = g.arena.buf;
-        offs[nb++] = off;
-    }
-    uint64_t ioff = 0;
-    static const uint32_t isize[] = { 1, 2, 4 };
-    if (indexed) {
-        if (itype > 2)
-            return nvn_vk_stop(r, "index type %u", itype);
-        if (itype == 0)
-            return nvn_vk_stop(r, "8-bit indices");
-        if (!nvn_vk_upload(r, iaddr, (uint64_t)count * isize[itype], 0, 16, &ioff))
-            return nvn_vk_stop(r, "the upload arena is full");
-    }
-    VkDeviceSize int_off[NVN_VERTEX_ATTRIBS];
-    if (k.nint) {
-        uint64_t nv = (uint64_t)first + count;
-        if (indexed) {
-            const uint8_t *ip = r->mem + nvn_gpu_guest(iaddr);
-            int64_t hi = -1;
-            for (uint32_t i = 0; i < count; i++) {
-                uint32_t x = itype == 1 ? (uint32_t)ip[2 * i] | (uint32_t)ip[2 * i + 1] << 8 : rl_ld32(ip, 4 * (uint64_t)i);
-                bool restart = k.primitive_restart && x == (itype == 1 ? 0xffffu : 0xffffffffu);
-                if (!restart && (int64_t)x + base > hi)
-                    hi = (int64_t)x + base;
-            }
-            nv = (uint64_t)(hi + 1);
-        }
-        if (nv > (16u << 20))
-            return nvn_vk_stop(r, "a draw reads %llu vertices of an integer attribute", (unsigned long long)nv);
-        for (uint32_t j = 0; j < k.nint; j++) {
-            uint32_t s = k.ints[j].stream;
-            if (!st->vb[s].addr)
-                return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
-            uint64_t n = k.ints[j].per_instance ? 1 : nv;
-            uint32_t *w = malloc(n ? n * 16 : 16);
-            if (!w)
-                return nvn_vk_stop(r, "out of memory expanding an integer vertex attribute");
-            expand_integer(r->mem + nvn_gpu_guest(st->vb[s].addr) + k.ints[j].offset, k.ints[j].stride, k.ints[j].format,
-                           n, w);
-            bool ok = nvn_vk_upload_bytes(r, w, n ? n * 16 : 16, 0, 16, &int_off[j]);
-            free(w);
-            if (!ok)
-                return nvn_vk_stop(r, "the upload arena is full");
-        }
-    }
+    draw_data dd = { .k = &k, .mods = mods, .indexed = indexed, .itype = itype, .first = first, .count = count,
+                     .base = base, .iaddr = iaddr };
+    if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
+        return rc;
     VkRect2D area;
     if (!nvn_vk_begin_rendering(r, &area))
         return nvn_vk_stop(r, "draw without render targets");
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
-    if ((rc = bind_constants(r, mods)) != RL_OK)
-        return rc;
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
     dynamic_state(r, area);
-    if (nb)
-        VK(vkCmdBindVertexBuffers)(g.cb, firstb, nb, bufs, offs);
-    if (has_def)
-        VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &def_off);
+    VkBuffer bufs[NVN_VERTEX_BUFFERS];
+    for (uint32_t i = 0; i < dd.nb; i++)
+        bufs[i] = g.arena.buf;
+    if (dd.nb)
+        VK(vkCmdBindVertexBuffers)(g.cb, dd.firstb, dd.nb, bufs, dd.offs);
+    if (dd.has_def)
+        VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &dd.def_off);
     for (uint32_t j = 0; j < k.nint; j++)
-        VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &int_off[j]);
+        VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &dd.int_off[j]);
     if (indexed) {
-        VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, ioff, itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+        VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, dd.ioff, itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         VK(vkCmdDrawIndexed)(g.cb, count, 1, 0, base, 0);
     } else {
         VK(vkCmdDraw)(g.cb, count, 1, first, 0);
@@ -1096,6 +1121,74 @@ static VkPipeline compute_pipeline_of(replay *r, const module *m, uint32_t n, co
     return p;
 }
 
+/** @brief What a dispatch puts into the batch being recorded. */
+typedef struct dispatch_data {
+    const module *m;
+    const uint8_t *c0;
+    VkDescriptorSet sets[3];
+} dispatch_data;
+
+/** @brief Puts a dispatch's constant banks into the batch being recorded (an nvn_vk_stage step). */
+static int stage_dispatch(replay *r, void *arg)
+{
+    dispatch_data *dd = arg;
+    const nvn_gfx *st = r->st;
+    const module *m = dd->m;
+    VkDescriptorSet *sets = dd->sets;
+    int rc = RL_OK;
+    VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                       .descriptorPool = d.pool,
+                                       .descriptorSetCount = 2,
+                                       .pSetLayouts = d.cset_layout };
+    if (VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS) {
+        if (!nvn_vk_flush(r) || VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS)
+            return nvn_vk_stop(r, "cannot allocate descriptor sets");
+    }
+    sets[2] = nvn_texset();
+    VkDescriptorBufferInfo bi[USER_BINDINGS + DRIVER_BINDINGS];
+    VkWriteDescriptorSet wr[USER_BINDINGS + DRIVER_BINDINGS];
+    uint32_t nw = 0;
+    for (uint32_t b = 0; b < DRIVER_BINDINGS; b++) {
+        if (!(m->driver & (1u << b)))
+            continue;
+        const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];
+        if (b == 0)
+            rc = bank_of(r, dd->c0, NVN_BANK2_BYTES, &bi[nw]);
+        else if (b == 1)
+            rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[nw]);
+        else
+            rc = nvn_vk_stop(r, "compute program %s reads driver constant bank c[%u]", m->key, b);
+        if (rc != RL_OK)
+            return rc;
+        wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                         .dstSet = sets[1],
+                                         .dstBinding = DRIVER_BINDINGS * NVN_STAGE_COMPUTE + b,
+                                         .descriptorCount = 1,
+                                         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                         .pBufferInfo = &bi[nw] };
+        nw++;
+    }
+    for (uint32_t b = 0; b < USER_BINDINGS; b++) {
+        if (!(m->user & (1u << b)))
+            continue;
+        if (b >= NVN_UBO_SLOTS)
+            return nvn_vk_stop(r, "compute program %s reads constant bank c[%u]", m->key, b + 3);
+        uint64_t addr = st->ubo[NVN_STAGE_COMPUTE][b].addr, size = st->ubo[NVN_STAGE_COMPUTE][b].size;
+        if ((rc = bank_of(r, addr ? r->mem + nvn_gpu_guest(addr) : NULL, addr ? size : 0, &bi[nw])) != RL_OK)
+            return rc;
+        wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                         .dstSet = sets[0],
+                                         .dstBinding = USER_BINDINGS * NVN_STAGE_COMPUTE + b,
+                                         .descriptorCount = 1,
+                                         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                         .pBufferInfo = &bi[nw] };
+        nw++;
+    }
+    if (nw)
+        VK(vkUpdateDescriptorSets)(g.dev, nw, wr, 0, NULL);
+    return RL_OK;
+}
+
 /**
  * @brief nvnCommandBufferDispatchCompute: the bound compute program's bank
  * c[0] is the driver's per-dispatch table as the compiled code reads it:
@@ -1157,60 +1250,12 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     VkPipeline p = compute_pipeline_of(r, m, n, map, vals);
     if (!p)
         return RL_PENDING;
-    VkDescriptorSet sets[3];
-    VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                                       .descriptorPool = d.pool,
-                                       .descriptorSetCount = 2,
-                                       .pSetLayouts = d.cset_layout };
-    if (VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS) {
-        if (!nvn_vk_flush(r) || VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS)
-            return nvn_vk_stop(r, "cannot allocate descriptor sets");
-    }
-    sets[2] = nvn_texset();
-    VkDescriptorBufferInfo bi[USER_BINDINGS + DRIVER_BINDINGS];
-    VkWriteDescriptorSet wr[USER_BINDINGS + DRIVER_BINDINGS];
-    uint32_t nw = 0;
-    for (uint32_t b = 0; b < DRIVER_BINDINGS; b++) {
-        if (!(m->driver & (1u << b)))
-            continue;
-        const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];
-        if (b == 0)
-            rc = bank_of(r, c0, sizeof c0, &bi[nw]);
-        else if (b == 1)
-            rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[nw]);
-        else
-            rc = nvn_vk_stop(r, "compute program %s reads driver constant bank c[%u]", m->key, b);
-        if (rc != RL_OK)
-            return rc;
-        wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                         .dstSet = sets[1],
-                                         .dstBinding = DRIVER_BINDINGS * NVN_STAGE_COMPUTE + b,
-                                         .descriptorCount = 1,
-                                         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                         .pBufferInfo = &bi[nw] };
-        nw++;
-    }
-    for (uint32_t b = 0; b < USER_BINDINGS; b++) {
-        if (!(m->user & (1u << b)))
-            continue;
-        if (b >= NVN_UBO_SLOTS)
-            return nvn_vk_stop(r, "compute program %s reads constant bank c[%u]", m->key, b + 3);
-        uint64_t addr = st->ubo[NVN_STAGE_COMPUTE][b].addr, size = st->ubo[NVN_STAGE_COMPUTE][b].size;
-        if ((rc = bank_of(r, addr ? r->mem + nvn_gpu_guest(addr) : NULL, addr ? size : 0, &bi[nw])) != RL_OK)
-            return rc;
-        wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                         .dstSet = sets[0],
-                                         .dstBinding = USER_BINDINGS * NVN_STAGE_COMPUTE + b,
-                                         .descriptorCount = 1,
-                                         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                         .pBufferInfo = &bi[nw] };
-        nw++;
-    }
-    if (nw)
-        VK(vkUpdateDescriptorSets)(g.dev, nw, wr, 0, NULL);
+    dispatch_data dd = { .m = m, .c0 = c0 };
+    if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
+        return rc;
     nvn_vk_begin(r);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
-    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, sets, 0, NULL);
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
     VK(vkCmdDispatch)(g.cb, x, y, z);
     nvn_vk_barrier(g.cb);
     return RL_OK;
