@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{DecodeError, Inst, Word, decode};
 
 pub const SPH_SIZE: usize = 0x80;
@@ -119,6 +121,10 @@ fn writes_mesh_output(w: Word) -> bool {
 pub struct Program {
     pub sph: Option<Sph>,
     pub words: Vec<Word>,
+    /// Pseudo-instructions by word index, in place of the word there: an
+    /// instruction of another GPU that no SM86 form matches (see
+    /// `translate::pseudo`). Their words are never decoded.
+    pub pseudo: BTreeMap<usize, Inst>,
 }
 
 impl Program {
@@ -133,7 +139,11 @@ impl Program {
             .rposition(|c| c[..12] == BRA_SELF)
             .map_or(lines.len(), |k| k + 1);
         let words = lines[..n].iter().map(Word::from_bytes).collect();
-        Program { sph, words }
+        Program {
+            sph,
+            words,
+            pseudo: BTreeMap::new(),
+        }
     }
 
     /// The stage. A task program and a mesh program without one share an
@@ -157,7 +167,10 @@ impl Program {
         self.words
             .iter()
             .enumerate()
-            .map(|(i, w)| decode(*w, 16 * i as u64))
+            .map(|(i, w)| match self.pseudo.get(&i) {
+                Some(p) => Ok(p.clone()),
+                None => decode(*w, 16 * i as u64),
+            })
             .collect()
     }
 }

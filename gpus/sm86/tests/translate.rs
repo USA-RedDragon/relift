@@ -2,7 +2,9 @@ mod common;
 
 use common::{translate, translate_with};
 use relift_gpu_sm86::program::{Program, Stage};
+use relift_gpu_sm86::translate::pseudo::{IPA_MUL, IPA_SAT};
 use relift_gpu_sm86::translate::{Interp, Kind, Options};
+use relift_gpu_sm86::{Inst, Operand, RegMods};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -816,6 +818,55 @@ fn fragment_inputs_follow_the_sph() {
     assert!(decorated(&s.spirv, 13), "no NoPerspective");
     assert!(spirv_has(&s.spirv, 12), "no InterpolateAtCentroid");
     assert!(builtin_used(&s.spirv, 17), "no FrontFacing");
+}
+
+/// Maxwell's `IPA.MUL` and `IPA` with `.SAT` reach the translator as
+/// pseudo-instructions in place of a word; the multiplier may be the
+/// destination.
+#[test]
+fn maxwell_ipa_pseudo_instructions() {
+    let mut b = sph(2, 5, &[(6, 0xaa), (18, 0xf)]);
+    b.extend(ipa(0, 0x7c, 0, 0));
+    for _ in 0..3 {
+        b.extend(word(0x118, 4, &[]));
+    }
+    exit_and_halt(&mut b);
+    let mut p = Program::parse(&b);
+    let reg = |n| Operand::Reg(n, RegMods::default());
+    let attr = |offset| Operand::Attr {
+        index: None,
+        offset,
+        patch: false,
+    };
+    let pseudo = |mods: &[&'static str], ops: Vec<Operand>| {
+        let mut i = Inst::new("IPA");
+        i.mods = mods.to_vec();
+        i.ops = ops;
+        i
+    };
+    p.pseudo.insert(
+        1,
+        pseudo(&["PASS", IPA_MUL], vec![reg(1), attr(0x80), reg(0)]),
+    );
+    p.pseudo.insert(
+        2,
+        pseudo(
+            &["PASS", IPA_MUL, IPA_SAT],
+            vec![reg(0), attr(0x84), reg(0)],
+        ),
+    );
+    p.pseudo
+        .insert(3, pseudo(&["PASS", IPA_SAT], vec![reg(2), attr(0x88)]));
+    let t = text(&p);
+    assert_eq!(t[1], "IPA.PASS.MUL R1, a[0x80], R0");
+    assert_eq!(t[2], "IPA.PASS.MUL.SAT R0, a[0x84], R0");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("maxwell_ipa", &s.spirv);
+    assert_eq!(s.interface.inputs.get(&0), Some(&Some(Interp::Perspective)));
+    p.pseudo
+        .insert(1, pseudo(&["PASS", IPA_MUL], vec![reg(1), attr(0x80)]));
+    let e = translate(&p).err().expect("a MUL without its multiplier");
+    assert!(e.0.contains("pseudo IPA form"), "{}", e.0);
 }
 
 #[test]

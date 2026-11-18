@@ -28,5 +28,9 @@ plus an indirect draw elsewhere (`translate::mesh_fallback`).
 compilation, both translations of its SASS, and compares the images word
 for word; `tests/mesh.rs` translates the recorded programs for every host.
 
+`Program::pseudo` holds pseudo-instructions in place of words: instructions
+of another GPU (Maxwell's `IPA.MUL`, for one) that no SM86 form matches,
+which `translate::pseudo` handles from their operands.
+
 `examples/check.rs` compares the decoder with nvdisasm output on a list of
 words; nvdisasm is a local tool and its output is never committed.

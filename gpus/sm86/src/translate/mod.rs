@@ -19,6 +19,7 @@ mod io;
 mod mem;
 mod mma;
 mod mufu;
+pub mod pseudo;
 mod simt;
 mod tex;
 mod uniform;
@@ -785,6 +786,7 @@ impl Ctx {
             _ => {}
         }
         for f in [
+            pseudo::inst,
             mem::inst,
             fp64::inst,
             float::inst,
