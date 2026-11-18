@@ -301,6 +301,74 @@ impl Ctx {
             return self.soft_fma(xs[0], xs[1], Some(xs[2]), mode, ftz, 0);
         }
         let dm = self.dn_dmode();
+        if !ftz && dm != Denorm::Preserve && scale == 0 && mode == Round::Nearest {
+            return self.arith_guarded(k, xs);
+        }
+        self.arith_checked(k, xs, mode, ftz, scale)
+    }
+
+    /// A round-to-nearest add, multiply or fused multiply-add without
+    /// `.FTZ` on a host that may flush: the host's result on the operands
+    /// as they are, unless an operand is a denormal or the result is tiny
+    /// and not a sum or product of zeros, the only cases where a flushing
+    /// host can differ; those branch to [`Ctx::arith_checked`], which gives
+    /// the same result as this one everywhere else.
+    fn arith_guarded(&mut self, k: Arith, xs: &[u32]) -> u32 {
+        let fs: Vec<u32> = xs.iter().map(|&x| self.as_float(x)).collect();
+        let r = match k {
+            Arith::Add => self.fadd_round(fs[0], fs[1], Round::Nearest, false),
+            Arith::Mul => self.fmul_round(fs[0], fs[1], Round::Nearest, false),
+            Arith::Fma => self.ffma_round(fs[0], fs[1], fs[2], Round::Nearest, false),
+        };
+        let bits = self.as_bits(r);
+        let b2 = self.dn_shl1(bits);
+        let lim = self.dn_ku(0x0200_0000);
+        let tiny = self.dn_bc(op::U_LESS_THAN, b2, lim);
+        let trivial = self.zero_operands(k, xs);
+        let nt = self.not(trivial);
+        let mut pre = self.and(tiny, nt);
+        for &x in xs {
+            let d = self.is_denormal(x);
+            pre = self.or(pre, d);
+        }
+        let check = self.m.id();
+        let plain = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[pre, check, plain]);
+        self.m.emit_void(op::LABEL, &[check]);
+        let rc = self.arith_checked(k, xs, Round::Nearest, false, 0);
+        let check_end = self.m.id();
+        self.m.emit_void(op::BRANCH, &[check_end]);
+        self.m.emit_void(op::LABEL, &[check_end]);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[plain]);
+        let rp = self.canonical_nan(bits, xs);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
+        let u = self.u32t();
+        self.m.emit(op::PHI, u, &[rc, check_end, rp, plain])
+    }
+
+    /// Whether the result is a sum or product of zeros (`0 + 0`, `0 * x`,
+    /// `0 * x + 0`), whose sign no denormal handling changes.
+    fn zero_operands(&mut self, k: Arith, xs: &[u32]) -> u32 {
+        let z: Vec<u32> = xs.iter().map(|&x| self.is_zero_bits(x)).collect();
+        match k {
+            Arith::Add => self.and(z[0], z[1]),
+            Arith::Mul => self.or(z[0], z[1]),
+            Arith::Fma => {
+                let p = self.or(z[0], z[1]);
+                self.and(p, z[2])
+            }
+        }
+    }
+
+    /// [`Ctx::arith_exact`] with every check: denormal operands and tiny
+    /// results take the exact integer function.
+    fn arith_checked(&mut self, k: Arith, xs: &[u32], mode: Round, ftz: bool, scale: i32) -> u32 {
+        let dm = self.dn_dmode();
         let ins = self.arith_inputs(xs, ftz);
         let mut unscaled = None;
         let fast = match k {
@@ -358,15 +426,7 @@ impl Ctx {
             slow = self.and(slow, fin);
         }
         let zero = self.dn_ku(0);
-        let z: Vec<u32> = xs.iter().map(|&x| self.is_zero_bits(x)).collect();
-        let trivial = match k {
-            Arith::Add => self.and(z[0], z[1]),
-            Arith::Mul => self.or(z[0], z[1]),
-            Arith::Fma => {
-                let p = self.or(z[0], z[1]);
-                self.and(p, z[2])
-            }
-        };
+        let trivial = self.zero_operands(k, &xs);
         let nt = self.not(trivial);
         slow = self.and(slow, nt);
         let func = self.exact_fn(k, mode, ftz, scale);
