@@ -462,6 +462,20 @@ TEST(wait_for_address)
     CHECK_EQ(t_svc(c, SVC_WAIT_FOR_ADDRESS, hos.lay.heap_start + 0x400000, 0, 1, 0, 0, 0), KR_INVALID_MEM_STATE);
 }
 
+TEST(wait_for_address_64bit_on_the_switch2)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000), w = heap + 0x500;
+    rl_st64(t_mem(), w, 0x1234567800000007ull);
+    CHECK_EQ(t_svc(c, SVC_WAIT_FOR_ADDRESS, w, 3, 0x1234567800000007ull, 1000000, 0, 0), KR_TIMED_OUT);
+    CHECK_EQ(t_svc(c, SVC_WAIT_FOR_ADDRESS, w, 3, 7, 1000000, 0, 0), KR_INVALID_STATE);
+    CHECK_EQ(t_svc(c, SVC_WAIT_FOR_ADDRESS, w + 4, 3, 7, 0, 0, 0), KR_INVALID_ADDRESS);
+    CHECK_EQ(t_svc(c, SVC_WAIT_FOR_ADDRESS, w, 4, 7, 0, 0, 0), KR_INVALID_ENUM_VALUE);
+}
+
 TEST(system_tick_and_debug)
 {
     rl_ctx *c = t_boot(NULL);

@@ -737,11 +737,13 @@ rl_result hos_arbitrate_lock(uint32_t owner, uint64_t addr, uint32_t tag);
 rl_result hos_arbitrate_unlock(uint64_t addr);
 rl_result hos_wait_process_wide_key(uint64_t mutex, uint64_t key, uint32_t tag, int64_t timeout);
 void hos_signal_process_wide_key(uint64_t key, int32_t count);
-rl_result hos_wait_for_address(uint64_t addr, uint32_t type, int32_t value, int64_t timeout);
+rl_result hos_wait_for_address(uint64_t addr, uint32_t type, int64_t value, int64_t timeout);
 rl_result hos_signal_to_address(uint64_t addr, uint32_t type, int32_t value, int32_t count);
 
 /** @brief Guest memory word helpers for the kernel: atomic on the host, with a mapped check. */
 bool hos_read_u32(uint64_t addr, uint32_t *v);
+/** @brief As hos_read_u32, an aligned 64-bit word read at once. */
+bool hos_read_u64(uint64_t addr, uint64_t *v);
 /** @brief True when the guest word at addr is mapped and user-writable. */
 bool hos_writable_u32(uint64_t addr);
 /** @brief Atomic 32-bit store into guest memory. */

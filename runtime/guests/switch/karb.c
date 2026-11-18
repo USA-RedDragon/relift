@@ -279,16 +279,26 @@ static void wake_arbiter(uint64_t addr, int32_t count)
     }
 }
 
-rl_result hos_wait_for_address(uint64_t addr, uint32_t type, int32_t value, int64_t timeout)
+/**
+ * @brief Type 3, a Switch 2 kernel's: wait while the 64-bit word at addr
+ * equals value. Verified from a Switch 2 SDK's nn::os::WaitForAddress(const
+ * long *, long), which passes type 3 with the whole value in X2 and takes
+ * InvalidState as a changed word; the 8-byte alignment is inferred.
+ */
+#define ARB_WAIT_IF_EQUAL64 3u
+
+rl_result hos_wait_for_address(uint64_t addr, uint32_t type, int64_t value, int64_t timeout)
 {
-    if (addr & 3)
+    bool wide = type == ARB_WAIT_IF_EQUAL64 && hos_switch2();
+    if (addr & (wide ? 7u : 3u))
         return KR_INVALID_ADDRESS;
-    if (type > 2)
+    if (type > 2 && !wide)
         return KR_INVALID_ENUM_VALUE;
     hos_thread *t = hos_current();
-    uint32_t cur;
+    uint32_t cur = 0;
+    uint64_t cur64 = 0;
     hos_lock();
-    if (!hos_read_u32(addr, &cur)) {
+    if (wide ? !hos_read_u64(addr, &cur64) : !hos_read_u32(addr, &cur)) {
         hos_unlock();
         return KR_INVALID_MEM_STATE;
     }
@@ -306,7 +316,9 @@ rl_result hos_wait_for_address(uint64_t addr, uint32_t type, int32_t value, int6
             }
         }
     }
-    bool wait = type == 2 ? (int32_t)cur == value : (int32_t)cur < value;
+    bool wait = wide        ? cur64 == (uint64_t)value
+                : type == 2 ? (int32_t)cur == (int32_t)value
+                            : (int32_t)cur < (int32_t)value;
     rl_result rc;
     if (!wait) {
         rc = KR_INVALID_STATE;

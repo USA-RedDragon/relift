@@ -381,6 +381,17 @@ bool hos_read_u32(uint64_t addr, uint32_t *v)
     return true;
 }
 
+bool hos_read_u64(uint64_t addr, uint64_t *v)
+{
+    if ((addr & 7) || !rl_vm_contains(&hos.vm, addr, 8))
+        return false;
+    rl_vm_block b = rl_vm_query(&hos.vm, addr);
+    if (!((uint32_t)b.tag & MS_MAPPED) || !(b.perm & RL_VM_R))
+        return false;
+    *v = __atomic_load_n((uint64_t *)(void *)(hos.vm.base + addr), __ATOMIC_SEQ_CST);
+    return true;
+}
+
 bool hos_writable_u32(uint64_t addr)
 {
     if ((addr & 3) || !rl_vm_contains(&hos.vm, addr, 4))

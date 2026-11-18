@@ -467,7 +467,7 @@ static int dispatch(rl_ctx *c, uint32_t imm)
         x[1] = v;
         break;
     }
-    case 0x34: rc = hos_wait_for_address(x[0], w1, (int32_t)w2, (int64_t)x[3]); break;
+    case 0x34: rc = hos_wait_for_address(x[0], w1, (int64_t)x[2], (int64_t)x[3]); break;
     case 0x35: rc = hos_signal_to_address(x[0], w1, (int32_t)w2, (int32_t)w3); break;
     case 0x36: rc = KR_SUCCESS; break;
     case 0x45: {
