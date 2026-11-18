@@ -495,6 +495,49 @@ static rl_result create_gpu_session(rl_ipc_req *r)
     return rc;
 }
 
+/**
+ * @brief UserSession 1510 CalculateRequirements: a 0x40-byte inter-module
+ * image preference and a u32 in; the image's u64 size and u64 alignment out.
+ * The NVN2 driver's own nvnTextureBuilderGetStorageSize and
+ * nvnTextureBuilderGetStorageAlignment ask it for display textures; the
+ * client raises the alignment to at least 4 KiB and rounds the size up to it.
+ * A block-linear preference holds (width - 1) | (height - 1) << 16 at word 2,
+ * the log2 of a block's rows at word 4 and the row pitch in 64-byte GOB
+ * columns at word 5. The size is the pitch times the height rounded up to
+ * whole blocks, the layout every block-linear surface has. The alignment is
+ * one block, at least 4 KiB (inferred: Eglantine, Lichii and Orchid all
+ * answer it; the console's value is not known). A preference outside that
+ * shape stops.
+ */
+static rl_result calculate_requirements(rl_ipc_req *r)
+{
+    uint32_t pref[16], count;
+    if (!rl_srv_in(r, pref, sizeof pref) || !rl_srv_in(r, &count, 4))
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t width = (pref[2] & 0xffffu) + 1, height = (pref[2] >> 16) + 1, rows_log2 = pref[4];
+    uint64_t pitch = (uint64_t)pref[5] * 64;
+    if (rows_log2 < 3 || rows_log2 > 8 || !pitch || pitch > 4096 * 64) {
+        rl_ipc_stop(r, "gsv",
+                    "UserSession 1510 CalculateRequirements for a %llux%llu image with block rows log2 %llu and pitch "
+                    "0x%llx is not answered yet",
+                    (unsigned long long)width, (unsigned long long)height, (unsigned long long)rows_log2,
+                    (unsigned long long)pitch);
+        return KR_SUCCESS;
+    }
+    uint64_t rows = (uint64_t)1 << rows_log2;
+    uint64_t *out = rl_ipc_out(r, 16);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    out[0] = pitch * ((height + rows - 1) / rows * rows);
+    out[1] = 64 * rows > 0x1000 ? 64 * rows : 0x1000;
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "gsv", "CalculateRequirements kind %u %llux%llu rows %llu pitch 0x%llx format %u count %u: "
+               "size 0x%llx alignment 0x%llx", pref[1], (unsigned long long)width, (unsigned long long)height,
+               (unsigned long long)rows, (unsigned long long)pitch, pref[6], count, (unsigned long long)out[0],
+               (unsigned long long)out[1]);
+    return KR_SUCCESS;
+}
+
 static const rl_ipc_cmd user_session_cmds[] = {
     { 1, "BootWithTransferMemory", boot_with_transfer_memory },
     { 4, "BootWithRemoteMemory", boot_with_remote_memory },
@@ -531,6 +574,7 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 1402, "CreateNvDrv2UserSessionWithRemoteMemory", create_nvdrv2_user_session },
     { 1501, "CreateInterModuleImageContext", rl_srv_stub_ok },
     { 1502, "InitializeInterModuleImageContext", rl_srv_stub_ok },
+    { 1510, "CalculateRequirements", calculate_requirements },
 };
 
 static const rl_ipc_class user_session_class = { "nn::gsv::UserSession", user_session_cmds,
