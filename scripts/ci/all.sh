@@ -55,6 +55,7 @@ main() {
     jobs+=(cross-gba-windows-x64 cross-gba-windows-arm64 cross-gba-android-arm64)
     jobs+=(cross-n64-windows-x64 cross-n64-windows-arm64 cross-n64-android-arm64)
     jobs+=(cross-sms-windows-x64 cross-sms-windows-arm64 cross-sms-android-arm64)
+    jobs+=(cross-nds-windows-x64 cross-nds-windows-arm64 cross-nds-android-arm64)
     for t in "${image_targets[@]}"; do jobs+=("image-$t"); done
   fi
   jobs+=(mac-tests-workspace mac-release-aarch64-apple-darwin mac-release-x86_64-apple-darwin mac-tests-relift)
@@ -172,6 +173,7 @@ main() {
       cross-gba-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-gba-}" --guest gba --jobs 4 ;;
       cross-n64-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-n64-}" --guest n64 --jobs 4 ;;
       cross-sms-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-sms-}" --guest sms --jobs 4 ;;
+      cross-nds-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-nds-}" --guest nds --jobs 4 ;;
       cross-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-}" --jobs 4 ;;
       image-*)
         [ -z "$image_skip" ] || { echo "$image_skip"; return 77; }

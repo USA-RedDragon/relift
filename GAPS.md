@@ -366,9 +366,9 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 - Verify: the new matrix rows pass under 15 minutes.
 - **Good first issue.**
 
-### Cross builds for the Nintendo DS and Switch (small)
+### Cross builds for the Switch (small)
 
-- Missing: the cross matrix covers `gb`, `gba`, `n64` and `sms` only; the DS and Switch runtimes are not built for Windows, Android or iOS in CI.
+- Missing: the cross matrix covers `gb`, `gba`, `n64`, `nds` and `sms`; the Switch runtime is not built for Windows, Android or iOS in CI.
 - Where: `.github/workflows/cross.yaml`, `scripts/ci/all.sh`, `runtime/tools/cross/gbcross.py`.
 - Verify: new `cross-nds-*` jobs; the release guard (`scripts/ci/release-guard.sh`) on each.
 
