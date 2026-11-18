@@ -253,3 +253,68 @@ fn unresolved_control_stops_with_its_reason() {
         ["indirect jump (its targets are in a constant bank)"]
     );
 }
+
+#[test]
+fn a_float_program_translates_whole() {
+    let f = |op: Op, src: Src, fields: &[(&'static str, u64)]| I {
+        src,
+        ..i(op, fields)
+    };
+    let p = fragment(&[
+        mov(0, 0x3f00_0000),
+        f(Op::Rro, Src::Reg, &[("Dest", 1), ("SrcB", 0)]),
+        f(
+            Op::Mufu,
+            Src::None,
+            &[("Dest", 1), ("SrcA", 1), ("MufuOp", 1)],
+        ),
+        f(
+            Op::Fmul,
+            Src::Reg,
+            &[
+                ("Dest", 2),
+                ("SrcA", 1),
+                ("SrcB", 0),
+                ("Fmz", 1),
+                ("Scale", 6),
+            ],
+        ),
+        f(
+            Op::Ffma,
+            Src::Reg,
+            &[
+                ("Dest", 3),
+                ("SrcA", 2),
+                ("SrcB", 2),
+                ("SrcC", 1),
+                ("Sat", 1),
+            ],
+        ),
+        f(
+            Op::Fadd,
+            Src::Reg,
+            &[
+                ("Dest", 0),
+                ("SrcA", 3),
+                ("SrcB", 1),
+                ("NegB", 1),
+                ("Ftz", 1),
+            ],
+        ),
+        f(
+            Op::Mufu,
+            Src::None,
+            &[("Dest", 1), ("SrcA", 0), ("MufuOp", 2), ("Sat", 1)],
+        ),
+        i(Op::Exit, &[T]),
+    ]);
+    let t = lowered(&p);
+    assert_eq!(t[2], "MUFU.SIN R1, R1");
+    assert_eq!(t[3], "FMUL.FTZ.M2 R2, R1, R0");
+    assert_eq!(t[4], "FFMA.SAT R3, R2, R2, R1");
+    assert_eq!(t[5], "FADD.FTZ R0, R3, -R1");
+    let l = program(&p).expect("lowers");
+    assert_eq!(l.pseudo[&1].to_string(), "RRO.SINCOS R1, R0");
+    assert_eq!(l.pseudo[&6].to_string(), "MUFU.EX2.SAT R1, R0");
+    translates(&p);
+}

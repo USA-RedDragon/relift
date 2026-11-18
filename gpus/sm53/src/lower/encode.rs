@@ -2,8 +2,8 @@
 //! word of an exact row, the pseudo-instruction of a pseudo row, or the
 //! named stop of a case the evidence does not cover.
 
-use relift_gpu_sm86::translate::pseudo::{IPA_MUL, IPA_SAT};
-use relift_gpu_sm86::{Inst as Inst86, Operand, RegMods, Word};
+use relift_gpu_sm86::translate::pseudo::{IPA_MUL, IPA_SAT, MUFU_SAT, RRO_EX2, RRO_SINCOS};
+use relift_gpu_sm86::{CBank, Inst as Inst86, Operand, RegMods, Word};
 
 use super::flow::{self, Flow};
 use crate::form::{Op, Src};
@@ -62,6 +62,11 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::Kil, _) => kil(i),
         (Op::Ssy | Op::Pbk, _) => push(i, f),
         (Op::Sync | Op::Brk, _) => pop(i, f),
+        (Op::Fmul, _) => fmul(i),
+        (Op::Fadd, _) => fadd(i),
+        (Op::Ffma, _) => ffma(i),
+        (Op::Mufu, _) => mufu(i),
+        (Op::Rro, _) => rro(i),
         (Op::Mov, Src::Imm32) => mov32i(i),
         (Op::Mov, Src::CBuf) => mov_c(i),
         (Op::Ald, _) => ald(i),
@@ -125,6 +130,261 @@ fn pop(i: &Inst, f: Option<&Flow>) -> Lowered {
         return Lowered::Stop("pop outside the control-flow pass");
     };
     Lowered::Word(word(i, 0x947, &[NO_PRED, rel(k, t)]))
+}
+
+/// Fields of an SM86 word: (low bit, length, value).
+type Fields = Vec<(u32, u32, u64)>;
+
+/// The second source of an SM86 ALU word in the form of `src`: the
+/// fields of a register (bits 32 to 39), a 32-bit immediate (32 to 63), or
+/// a constant (offset in bytes 38 to 53, bank 54 to 58), the 9-bit opcode
+/// `op` given its form (1, 4 or 5) and the negation and absolute value
+/// bits 63 and 62 (folded into an immediate).
+fn src_b(i: &Inst, neg: bool, abs: bool) -> Result<(u32, Fields), &'static str> {
+    let flags = |v: &mut Fields| {
+        v.push((63, 1, u64::from(neg)));
+        v.push((62, 1, u64::from(abs)));
+    };
+    Ok(match i.enc.src {
+        Src::Reg => {
+            let mut v = vec![(32, 8, f(i, "SrcB"))];
+            flags(&mut v);
+            (1, v)
+        }
+        Src::Imm | Src::Imm32 => {
+            let mut bits = if i.enc.src == Src::Imm {
+                f(i, "Imm20") << 12
+            } else {
+                f(i, "Imm32")
+            };
+            if abs {
+                bits &= 0x7fff_ffff;
+            }
+            if neg {
+                bits ^= 0x8000_0000;
+            }
+            (4, vec![(32, 32, bits)])
+        }
+        Src::CBuf => {
+            let off = f(i, "CbufOffset") << 2;
+            if off >= 0x8000 {
+                return Err("constant offset at or above 0x8000 (SM86 reads it as negative)");
+            }
+            let mut v = vec![(38, 16, off), (54, 5, f(i, "CbufSlot"))];
+            flags(&mut v);
+            (5, v)
+        }
+        _ => return Err("no SM86 operand form"),
+    })
+}
+
+/// The SM86 opcode of the 9-bit operation `op` in form `form`.
+fn opc(op: u32, form: u32) -> u32 {
+    op | (form << 9)
+}
+
+/// The SM86 scale of `FMUL` (bits 84 to 86) for Maxwell's: none, D2, D4,
+/// D8, M8, M4, M2 there are 4, 3, 2, 1, 7, 6, 5 on SM86.
+fn fmul_scale(s: u64) -> Option<u64> {
+    [4, 3, 2, 1, 7, 6, 5].get(s as usize).copied()
+}
+
+/// The flush and rounding fields shared by FMUL, FADD and FFMA: `.FTZ`
+/// (bit 80), the rounding mode (78, the same four values) and `.SAT`
+/// (77). Maxwell's `.FMZ` stops: the SM86 translator does not model it.
+fn modes(i: &Inst, ftz_field: &str) -> Result<Fields, &'static str> {
+    if f(i, "WriteCC") != 0 {
+        return Err("float arithmetic that writes the condition code");
+    }
+    let ftz = match f(i, ftz_field) {
+        0 => 0,
+        1 => 1,
+        _ => return Err("float arithmetic with .FMZ"),
+    };
+    Ok(vec![
+        (80, 1, ftz),
+        (78, 2, f(i, "RoundMode")),
+        (77, 1, f(i, "Sat")),
+    ])
+}
+
+/// `FMUL`: SM86 `FMUL` (0x20) with the same rounding, flush, saturation and
+/// scale; Maxwell's `.NEG` negates the product, here on the first source.
+fn fmul(i: &Inst) -> Lowered {
+    let mut v = match modes(i, "Fmz") {
+        Ok(v) => v,
+        Err(r) => return Lowered::Stop(r),
+    };
+    let Some(scale) = fmul_scale(f(i, "Scale")) else {
+        return Lowered::Stop("FMUL with an invalid scale");
+    };
+    let (form, b) = match src_b(i, false, false) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    v.extend(b);
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (24, 8, f(i, "SrcA")),
+        (72, 1, f(i, "NegA")),
+        (84, 3, scale),
+    ]);
+    Lowered::Word(word(i, opc(0x020, form), &v))
+}
+
+/// `FADD`: SM86 `FADD` (0x21) with the same modes and operand negation
+/// and absolute values; its forms put the second source in slot C (reg 1,
+/// immediate 2, constant 3) at the same bits as slot B.
+fn fadd(i: &Inst) -> Lowered {
+    let mut v = match modes(i, "Ftz") {
+        Ok(v) => v,
+        Err(r) => return Lowered::Stop(r),
+    };
+    let (form, b) = match src_b(i, f(i, "NegB") != 0, f(i, "AbsB") != 0) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    v.extend(b);
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (24, 8, f(i, "SrcA")),
+        (72, 1, f(i, "NegA")),
+        (73, 1, f(i, "AbsA")),
+    ]);
+    let form = match form {
+        1 => 1,
+        4 => 2,
+        _ => 3,
+    };
+    Lowered::Word(word(i, opc(0x021, form), &v))
+}
+
+/// `FFMA`: SM86 `FFMA` (0x23), `a * b + c` with the same modes; Maxwell's
+/// `.NEG` of the product goes on the first source, `.NEG` of the addend on
+/// the third. `FFMA32I` adds its destination; the register-constant form
+/// takes the register as `b` and the constant as `c` (SM86 form 3).
+fn ffma(i: &Inst) -> Lowered {
+    let mut v = match modes(i, "Fmz") {
+        Ok(v) => v,
+        Err(r) => return Lowered::Stop(r),
+    };
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (24, 8, f(i, "SrcA")),
+        (72, 1, f(i, "NegA")),
+    ]);
+    let neg_c = f(i, "NegC");
+    let form = if i.enc.src == Src::RegCBuf {
+        let off = f(i, "CbufOffset") << 2;
+        if off >= 0x8000 {
+            return Lowered::Stop("constant offset at or above 0x8000 (SM86 reads it as negative)");
+        }
+        v.extend([
+            (64, 8, f(i, "SrcC")),
+            (38, 16, off),
+            (54, 5, f(i, "CbufSlot")),
+            (63, 1, neg_c),
+        ]);
+        3
+    } else {
+        let (form, b) = match src_b(i, false, false) {
+            Ok(x) => x,
+            Err(r) => return Lowered::Stop(r),
+        };
+        v.extend(b);
+        let c = if i.enc.src == Src::Imm32 {
+            f(i, "Dest")
+        } else {
+            f(i, "SrcC")
+        };
+        v.extend([(64, 8, c), (75, 1, neg_c)]);
+        form
+    };
+    Lowered::Word(word(i, opc(0x023, form), &v))
+}
+
+/// `MUFU`: SM86 `MUFU` (0x308) of the same function with the operand's
+/// negation and absolute value; `.SAT`, which SM86 lacks, is the
+/// pseudo-instruction `MUFU.SAT`. The 64-bit forms stop.
+fn mufu(i: &Inst) -> Lowered {
+    let kind = f(i, "MufuOp");
+    if kind > 8 || kind == 6 || kind == 7 {
+        return Lowered::Stop("MUFU.RCP64H, MUFU.RSQ64H or an invalid function");
+    }
+    let w = word(
+        i,
+        0x308,
+        &[
+            (16, 8, f(i, "Dest")),
+            (32, 8, f(i, "SrcA")),
+            (63, 1, f(i, "NegA")),
+            (62, 1, f(i, "AbsA")),
+            (74, 6, kind),
+        ],
+    );
+    if f(i, "Sat") == 0 {
+        return Lowered::Word(w);
+    }
+    let Ok(mut p) = relift_gpu_sm86::decode(w, 0) else {
+        return Lowered::Stop("MUFU that SM86 does not decode");
+    };
+    p.mods.push(MUFU_SAT);
+    Lowered::Pseudo(p)
+}
+
+/// `RRO`: the pseudo-instruction `RRO.SINCOS` or `RRO.EX2` of the operand
+/// with its negation and absolute value.
+fn rro(i: &Inst) -> Lowered {
+    let neg = f(i, "NegB") != 0;
+    let abs = f(i, "AbsB") != 0;
+    let mods = RegMods {
+        neg,
+        abs,
+        ..RegMods::default()
+    };
+    let src = match i.enc.src {
+        Src::Reg => Operand::Reg(f(i, "SrcB") as u8, mods),
+        Src::Imm => {
+            let mut bits = f(i, "Imm20") << 12;
+            if abs {
+                bits &= 0x7fff_ffff;
+            }
+            if neg {
+                bits ^= 0x8000_0000;
+            }
+            Operand::F32(bits as u32, false)
+        }
+        Src::CBuf => {
+            let off = f(i, "CbufOffset") << 2;
+            if off >= 0x8000 {
+                return Lowered::Stop(
+                    "constant offset at or above 0x8000 (SM86 reads it as negative)",
+                );
+            }
+            Operand::CBuf {
+                bank: CBank::Imm(f(i, "CbufSlot") as u32),
+                index: None,
+                offset: off as i64,
+                mods,
+                space: false,
+            }
+        }
+        _ => return Lowered::Stop("RRO form"),
+    };
+    let mut p = Inst86::new("RRO");
+    p.guard = match i.guard() {
+        Some((7, false)) | None => None,
+        Some((n, not)) => Some(Operand::Pred(n, not)),
+    };
+    p.mods.push(if f(i, "RroOp") != 0 {
+        RRO_EX2
+    } else {
+        RRO_SINCOS
+    });
+    p.ops
+        .push(Operand::Reg(f(i, "Dest") as u8, RegMods::default()));
+    p.ops.push(src);
+    Lowered::Pseudo(p)
 }
 
 /// `MOV32I Rd, imm`: SM86 `MOV Rd, imm` (form 0x802) with the full lane

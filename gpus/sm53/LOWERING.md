@@ -64,10 +64,10 @@ the cases the evidence does not cover stop with their own reason.
 | F2I R | stop | | no semantic check yet |
 | F2I I | stop | | no semantic check yet |
 | F2I C | stop | | no semantic check yet |
-| FADD R | stop | | no semantic check yet |
-| FADD I | stop | | no semantic check yet |
-| FADD C | stop | | no semantic check yet |
-| FADD 32I | stop | | no semantic check yet |
+| FADD R | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FADD I | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FADD C | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FADD 32I | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
 | FCHK R | stop | | no semantic check yet |
 | FCHK I | stop | | no semantic check yet |
 | FCHK C | stop | | no semantic check yet |
@@ -75,21 +75,21 @@ the cases the evidence does not cover stop with their own reason.
 | FCMP I | stop | | no semantic check yet |
 | FCMP C | stop | | no semantic check yet |
 | FCMP RC | stop | | no semantic check yet |
-| FFMA R | stop | | no semantic check yet |
-| FFMA I | stop | | no semantic check yet |
-| FFMA C | stop | | no semantic check yet |
-| FFMA RC | stop | | no semantic check yet |
-| FFMA 32I | stop | | no semantic check yet |
+| FFMA R | exact | FFMA | Ryujinx's Ffma is a * b + c with the product's and the addend's .NEG; FFMA32I adds its destination and the register-constant form takes the register as b (SM86 FFMA form 3, constant in c). Modes go to SM86's fields (ffma known answers); .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FFMA I | exact | FFMA | Ryujinx's Ffma is a * b + c with the product's and the addend's .NEG; FFMA32I adds its destination and the register-constant form takes the register as b (SM86 FFMA form 3, constant in c). Modes go to SM86's fields (ffma known answers); .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FFMA C | exact | FFMA | Ryujinx's Ffma is a * b + c with the product's and the addend's .NEG; FFMA32I adds its destination and the register-constant form takes the register as b (SM86 FFMA form 3, constant in c). Modes go to SM86's fields (ffma known answers); .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FFMA RC | exact | FFMA | Ryujinx's Ffma is a * b + c with the product's and the addend's .NEG; FFMA32I adds its destination and the register-constant form takes the register as b (SM86 FFMA form 3, constant in c). Modes go to SM86's fields (ffma known answers); .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
+| FFMA 32I | exact | FFMA | Ryujinx's Ffma is a * b + c with the product's and the addend's .NEG; FFMA32I adds its destination and the register-constant form takes the register as b (SM86 FFMA form 3, constant in c). Modes go to SM86's fields (ffma known answers); .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
 | FLO R | stop | | no semantic check yet |
 | FLO I | stop | | no semantic check yet |
 | FLO C | stop | | no semantic check yet |
 | FMNMX R | stop | | no semantic check yet |
 | FMNMX I | stop | | no semantic check yet |
 | FMNMX C | stop | | no semantic check yet |
-| FMUL R | stop | | no semantic check yet |
-| FMUL I | stop | | no semantic check yet |
-| FMUL C | stop | | no semantic check yet |
-| FMUL 32I | stop | | no semantic check yet |
+| FMUL R | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
+| FMUL I | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
+| FMUL C | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
+| FMUL 32I | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
 | FSET R | stop | | no semantic check yet |
 | FSET I | stop | | no semantic check yet |
 | FSET C | stop | | no semantic check yet |
@@ -194,7 +194,7 @@ the cases the evidence does not cover stop with their own reason.
 | MOV I | stop | | no semantic check yet |
 | MOV C | exact | MOV | Ryujinx's MovC copies c[CbufSlot][4 * CbufOffset] and the SM86 translator's MOV reads the same bank and byte offset; lane mask 0xf only, and offsets of 0x8000 and up stop (SM86 reads them as negative); operands equal envydis on every census word |
 | MOV 32I | exact | MOV | Ryujinx's Mov32i copies Imm32 to Dest and the SM86 translator's MOV copies its immediate; lane mask 0xf only (every census word), other masks stop; operands equal envydis on every census word |
-| MUFU | stop | | no semantic check yet |
+| MUFU | exact and pseudo | MUFU; MUFU.SAT | same function numbers (COS, SIN, EX2, LG2, RCP, RSQ, SQRT) and operand .NEG and .ABS; the SM86 translator's MUFU reproduces the SM86 unit bit for bit (mufu known answers). Maxwell's unit precision is console-only: the SM86 model is the pick (inferred, s2-console-questions; Ryujinx uses the host's functions). .SAT has no SM86 form: pseudo, the clamp of every saturating float result, checked on the mufu known answers. RCP64H and RSQ64H stop (no program of the census uses them). Operands equal envydis on every census word |
 | NOP | exact | NOP | Ryujinx's Nop emits nothing and the SM86 translator's NOP emits nothing |
 | OUT R | stop | | no semantic check yet |
 | OUT I | stop | | no semantic check yet |
@@ -224,9 +224,9 @@ the cases the evidence does not cover stop with their own reason.
 | RAM | stop | | no semantic check yet |
 | RED | stop | | no semantic check yet |
 | RET | stop | | subroutine call or return: the SM86 translator inlines CALL.REL through a return address register Maxwell does not have |
-| RRO R | stop | | no semantic check yet |
-| RRO I | stop | | no semantic check yet |
-| RRO C | stop | | no semantic check yet |
+| RRO R | pseudo | RRO.SINCOS, RRO.EX2 | SM86 has no range reduction: MUFU.SIN and MUFU.COS take turns and MUFU.EX2 converts its operand itself. RRO.SINCOS is the operand times 1 / (2 pi) rounded toward zero, as NVIDIA's compiler emits for SM70 and later in its place, and RRO.EX2 the operand; with the MUFU after it this is Ryujinx's meaning (sine and cosine of radians, 2^x). The Maxwell format itself is console-only (inferred, s2-console-questions). Operands equal envydis on every census word |
+| RRO I | pseudo | RRO.SINCOS, RRO.EX2 | SM86 has no range reduction: MUFU.SIN and MUFU.COS take turns and MUFU.EX2 converts its operand itself. RRO.SINCOS is the operand times 1 / (2 pi) rounded toward zero, as NVIDIA's compiler emits for SM70 and later in its place, and RRO.EX2 the operand; with the MUFU after it this is Ryujinx's meaning (sine and cosine of radians, 2^x). The Maxwell format itself is console-only (inferred, s2-console-questions). Operands equal envydis on every census word |
+| RRO C | pseudo | RRO.SINCOS, RRO.EX2 | SM86 has no range reduction: MUFU.SIN and MUFU.COS take turns and MUFU.EX2 converts its operand itself. RRO.SINCOS is the operand times 1 / (2 pi) rounded toward zero, as NVIDIA's compiler emits for SM70 and later in its place, and RRO.EX2 the operand; with the MUFU after it this is Ryujinx's meaning (sine and cosine of radians, 2^x). The Maxwell format itself is console-only (inferred, s2-console-questions). Operands equal envydis on every census word |
 | RTT | stop | | no semantic check yet |
 | S2R | stop | | no semantic check yet |
 | SAM | stop | | no semantic check yet |
@@ -303,4 +303,4 @@ the cases the evidence does not cover stop with their own reason.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 12 exact, 1 exact and pseudo, 0 pseudo, 280 stop.
+293 forms: 25 exact, 2 exact and pseudo, 3 pseudo, 263 stop.

@@ -70,15 +70,14 @@ fn maxwell(op: Op, src: Src, fields: &[(&str, u64)]) -> Inst {
     let mut w = e.bits;
     for &(name, v) in fields.iter().chain(&[("Pred", 7)]) {
         let f = e.form.field(name).expect("a field");
-        let &[(shift, mask)] = f.parts else {
-            panic!("{name} has several parts");
-        };
-        let v = if f.kind == Kind::Bool && v != 0 {
-            mask
-        } else {
-            v & mask
-        };
-        w = (w & !(mask << shift)) | (v << shift);
+        for &(shift, mask) in f.parts {
+            let v = if f.kind == Kind::Bool && v != 0 {
+                mask
+            } else {
+                v & mask
+            };
+            w = (w & !(mask << shift)) | (v << shift);
+        }
     }
     Inst::decode(w, 8).expect("decodes")
 }
@@ -228,5 +227,158 @@ fn every_checked_row_lowers_its_encodings() {
             "{}",
             e.op.name()
         );
+    }
+}
+
+#[test]
+fn float_forms_lower_by_their_fields() {
+    let r = |d, a, b| [("Dest", d), ("SrcA", a), ("SrcB", b)];
+    let cases: &[(Inst, &str)] = &[
+        (
+            maxwell(
+                Op::Fmul,
+                Src::Reg,
+                &[r(1, 2, 3).as_slice(), &[("Fmz", 1)]].concat(),
+            ),
+            "FMUL.FTZ R1, R2, R3",
+        ),
+        (
+            maxwell(
+                Op::Fmul,
+                Src::Reg,
+                &[
+                    r(1, 2, 3).as_slice(),
+                    &[("Scale", 5), ("RoundMode", 3), ("NegA", 1), ("Sat", 1)],
+                ]
+                .concat(),
+            ),
+            "FMUL.M4.RZ.SAT R1, -R2, R3",
+        ),
+        (
+            maxwell(
+                Op::Fmul,
+                Src::CBuf,
+                &[
+                    ("Dest", 1),
+                    ("SrcA", 2),
+                    ("CbufSlot", 3),
+                    ("CbufOffset", 5),
+                    ("Scale", 1),
+                ],
+            ),
+            "FMUL.D2 R1, R2, c[0x3][0x14]",
+        ),
+        (
+            maxwell(
+                Op::Fmul,
+                Src::Imm32,
+                &[("Dest", 1), ("SrcA", 2), ("Imm32", 0x3f00_0000), ("Fmz", 1)],
+            ),
+            "FMUL.FTZ R1, R2, 0.5",
+        ),
+        (
+            maxwell(
+                Op::Fmul,
+                Src::Reg,
+                &[r(1, 2, 3).as_slice(), &[("Fmz", 2)]].concat(),
+            ),
+            "stop: float arithmetic with .FMZ",
+        ),
+        (
+            maxwell(
+                Op::Fadd,
+                Src::Reg,
+                &[
+                    r(1, 2, 3).as_slice(),
+                    &[("Ftz", 1), ("NegB", 1), ("AbsA", 1), ("Sat", 1)],
+                ]
+                .concat(),
+            ),
+            "FADD.FTZ.SAT R1, |R2|, -R3",
+        ),
+        (
+            maxwell(
+                Op::Fadd,
+                Src::Imm,
+                &[("Dest", 1), ("SrcA", 2), ("Imm20", 0xbf800), ("NegB", 1)],
+            ),
+            "FADD R1, R2, 1",
+        ),
+        (
+            maxwell(
+                Op::Fadd,
+                Src::CBuf,
+                &[
+                    ("Dest", 1),
+                    ("SrcA", 2),
+                    ("CbufSlot", 3),
+                    ("CbufOffset", 1),
+                    ("AbsB", 1),
+                ],
+            ),
+            "FADD R1, R2, |c[0x3][0x4]|",
+        ),
+        (
+            maxwell(
+                Op::Ffma,
+                Src::Reg,
+                &[
+                    r(1, 2, 3).as_slice(),
+                    &[("SrcC", 4), ("NegA", 1), ("NegC", 1)],
+                ]
+                .concat(),
+            ),
+            "FFMA R1, -R2, R3, -R4",
+        ),
+        (
+            maxwell(
+                Op::Ffma,
+                Src::RegCBuf,
+                &[
+                    ("Dest", 1),
+                    ("SrcA", 2),
+                    ("SrcC", 4),
+                    ("CbufSlot", 3),
+                    ("CbufOffset", 2),
+                    ("NegC", 1),
+                ],
+            ),
+            "FFMA R1, R2, R4, -c[0x3][0x8]",
+        ),
+        (
+            maxwell(
+                Op::Ffma,
+                Src::Imm32,
+                &[("Dest", 5), ("SrcA", 2), ("Imm32", 0x4000_0000), ("Fmz", 1)],
+            ),
+            "FFMA.FTZ R5, R2, 2, R5",
+        ),
+        (
+            maxwell(
+                Op::Mufu,
+                Src::None,
+                &[("Dest", 1), ("SrcA", 2), ("MufuOp", 5), ("AbsA", 1)],
+            ),
+            "MUFU.RSQ R1, |R2|",
+        ),
+        (
+            maxwell(
+                Op::Mufu,
+                Src::None,
+                &[("Dest", 1), ("SrcA", 2), ("MufuOp", 2), ("Sat", 1)],
+            ),
+            "pseudo MUFU.EX2.SAT R1, R2",
+        ),
+        (
+            maxwell(Op::Rro, Src::Reg, &[("Dest", 1), ("SrcB", 2), ("NegB", 1)]),
+            "pseudo RRO.SINCOS R1, -R2",
+        ),
+        (
+            maxwell(Op::Rro, Src::Reg, &[("Dest", 1), ("SrcB", 2), ("RroOp", 1)]),
+            "pseudo RRO.EX2 R1, R2",
+        ),
+    ];
+    for (i, want) in cases {
+        assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
     }
 }

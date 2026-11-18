@@ -118,6 +118,57 @@ pub fn row(op: Op, src: Src) -> Row {
                        only those, under the same guard. A pop with more than one target or \
                        none and a condition code test stop (tests/flow.rs)",
         },
+        (Op::Fmul, _) => Row::Exact {
+            to: "FMUL",
+            evidence: "Ryujinx's Fmul multiplies the same operands (its .NEG negates the \
+                       product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and \
+                       scale go to the same SM86 fields, whose behavior the sm86 known \
+                       answers pin (fmul: every mode with and without FTZ, SAT, the scales, \
+                       negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the \
+                       condition code and constant offsets from 0x8000 stop. Operands equal \
+                       envydis on every census word; whole game programs without MUFU draw \
+                       the same bits as ShaderTools' on lavapipe",
+        },
+        (Op::Fadd, _) => Row::Exact {
+            to: "FADD",
+            evidence: "Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode \
+                       fields go to SM86's (fadd known answers: every mode, FTZ, SAT, \
+                       negation and absolute value); an immediate's .NEG and .ABS fold into \
+                       its sign bit as the operand modifiers act. The condition code and \
+                       constant offsets from 0x8000 stop. Operands equal envydis on every \
+                       census word; game programs as for FMUL",
+        },
+        (Op::Ffma, _) => Row::Exact {
+            to: "FFMA",
+            evidence: "Ryujinx's Ffma is a * b + c with the product's and the addend's \
+                       .NEG; FFMA32I adds its destination and the register-constant form \
+                       takes the register as b (SM86 FFMA form 3, constant in c). Modes go \
+                       to SM86's fields (ffma known answers); .FMZ, the condition code and \
+                       constant offsets from 0x8000 stop. Operands equal envydis on every \
+                       census word; game programs as for FMUL",
+        },
+        (Op::Mufu, _) => Row::Split {
+            to: "MUFU",
+            pseudo: "MUFU.SAT",
+            evidence: "same function numbers (COS, SIN, EX2, LG2, RCP, RSQ, SQRT) and \
+                       operand .NEG and .ABS; the SM86 translator's MUFU reproduces the SM86 \
+                       unit bit for bit (mufu known answers). Maxwell's unit precision is \
+                       console-only: the SM86 model is the pick (inferred, \
+                       s2-console-questions; Ryujinx uses the host's functions). .SAT has no \
+                       SM86 form: pseudo, the clamp of every saturating float result, \
+                       checked on the mufu known answers. RCP64H and RSQ64H stop (no program \
+                       of the census uses them). Operands equal envydis on every census word",
+        },
+        (Op::Rro, _) => Row::Pseudo {
+            name: "RRO.SINCOS, RRO.EX2",
+            evidence: "SM86 has no range reduction: MUFU.SIN and MUFU.COS take turns and \
+                       MUFU.EX2 converts its operand itself. RRO.SINCOS is the operand times \
+                       1 / (2 pi) rounded toward zero, as NVIDIA's compiler emits for SM70 \
+                       and later in its place, and RRO.EX2 the operand; with the MUFU after \
+                       it this is Ryujinx's meaning (sine and cosine of radians, 2^x). The \
+                       Maxwell format itself is console-only (inferred, s2-console-questions). \
+                       Operands equal envydis on every census word",
+        },
         (Op::Pcnt | Op::Cont, _) => Row::Stop {
             reason: "PCNT and CONT: no program of the census uses them",
         },
