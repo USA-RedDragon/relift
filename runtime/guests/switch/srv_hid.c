@@ -500,6 +500,30 @@ static rl_result send_vibration_value(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief SendVibrationValueInMode (213, [17.0.0+], per switchbrew): u32 mode,
+ * the handle, the value and the ARUID; the result only. The layout is verified
+ * (SDK 20.5 nn::hid::detail::SendVibrationValue, sdk 0x64c0e0, passes mode 2
+ * besides 201's arguments, and the request carries it ahead of the handle).
+ * relift plays the value as 201 does (inferred: what the mode changes is not
+ * documented).
+ */
+static rl_result send_vibration_value_in_mode(rl_ipc_req *r)
+{
+    struct {
+        uint32_t mode;
+        vib_handle handle;
+        float value[4];
+        uint64_t aruid;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t slot;
+    if (hid_slot_from_id(in.handle.player_id, &slot))
+        hid_core_set_vibration(slot, in.handle.position, in.value);
+    return KR_SUCCESS;
+}
+
 static rl_result get_actual_vibration_value(rl_ipc_req *r)
 {
     NEED(r, in_u32_aruid, in);
@@ -702,6 +726,7 @@ static const rl_ipc_cmd hid_cmds[] = {
     RL_SRV_STUB(209, "BeginPermitVibrationSession"),
     RL_SRV_STUB(210, "EndPermitVibrationSession"),
     STUB_OUT(211, "IsVibrationDeviceMounted", out_true),
+    { 213, "SendVibrationValueInMode", send_vibration_value_in_mode },
     RL_SRV_STUB(214, "SendVibrationValuesEnqueued"),
     RL_SRV_STUB(300, "ActivateConsoleSixAxisSensor"),
     RL_SRV_STUB(301, "StartConsoleSixAxisSensor"),

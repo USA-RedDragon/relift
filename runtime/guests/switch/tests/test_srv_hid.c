@@ -798,6 +798,21 @@ TEST(hid_vibration_commands)
     memcpy(v, r.data, 16);
     CHECK(v[0] == 0.5f && v[1] == 100.0f && v[2] == 0.75f && v[3] == 200.0f);
 
+    float val2[4] = { 0.25f, 120.0f, 0.5f, 240.0f };
+    q = hreq(213);
+    tc_put32(&q, 2);
+    tc_put32(&q, vib_handle(3, 0, 1));
+    tc_put(&q, val2, 16);
+    tc_put64(&q, 0x1234);
+    CHECK_EQ(rc_of(tc_send(e.c, e.hid, q)), 0);
+    q = hreq(202);
+    tc_put32(&q, vib_handle(3, 0, 1));
+    tc_put32(&q, 0);
+    tc_put64(&q, 0x1234);
+    r = tc_send(e.c, e.hid, q);
+    memcpy(v, r.data, 16);
+    CHECK(v[0] == 0.25f && v[1] == 120.0f && v[2] == 0.5f && v[3] == 240.0f);
+
     uint32_t hs[2] = { vib_handle(3, 1, 0), vib_handle(3, 1, 1) };
     float vs[2][4] = { { 0.1f, 150.0f, 0.2f, 300.0f }, { 0.3f, 170.0f, 0.4f, 310.0f } };
     memcpy(t_mem() + e.heap + 0x2000, hs, sizeof hs);
