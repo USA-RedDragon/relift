@@ -34,6 +34,7 @@
     X(nvnQueuePresentTexture)                                                                                          \
     X(nvnProgramInitialize)                                                                                            \
     X(nvnProgramFinalize)                                                                                              \
+    X(nvnProgramInitializeFromBuilder)                                                                                 \
     X(nvnProgramSetShaders)                                                                                            \
     X(nvnProgramSetDebugLabel)                                                                                         \
     X(nvnProgramSetSampleShading)                                                                                      \

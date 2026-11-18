@@ -46,15 +46,15 @@ uint64_t nvnh_nvnProgramFinalize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnProgramSetShaders(NVNprogram *, int count, const NVNshaderData *): NVNboolean. */
-uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
+/** @brief Gives program prog the n stages at guest address shaders (NVNshaderData each); sets x0 to true. */
+static uint64_t set_shaders(rl_ctx *c, uint8_t *mem, uint64_t prog, int32_t n, uint64_t shaders)
 {
-    nvn_program *p = (nvn_program *)nvn_obj_get(c->x[0], NVN_PROGRAM);
-    int32_t n = (int32_t)c->x[1];
+    nvn_program *p = (nvn_program *)nvn_obj_get(prog, NVN_PROGRAM);
     if (!p || n < 0 || (uint32_t)n > NVN_PROGRAM_STAGES)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx, %d): not a program or too many stages",
-                                        (unsigned long long)c->x[0], n);
-    memcpy(p->stages, mem + c->x[2], (size_t)n * sizeof(shader_data));
+                                        (unsigned long long)prog, n);
+    c->x[0] = prog;
+    memcpy(p->stages, mem + shaders, (size_t)n * sizeof(shader_data));
     p->n = (uint32_t)n;
     for (uint32_t i = 0; i < p->n; i++) {
         char key[65];
@@ -77,6 +77,46 @@ uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
                (unsigned long long)p->stages[0].control);
     c->x[0] = 1;
     return nvn_ret(c);
+}
+
+/** @brief nvnProgramSetShaders(NVNprogram *, int count, const NVNshaderData *): NVNboolean. */
+uint64_t nvnh_nvnProgramSetShaders(rl_ctx *c, uint8_t *mem)
+{
+    return set_shaders(c, mem, c->x[0], (int32_t)c->x[1], c->x[2]);
+}
+
+/**
+ * @brief nvnProgramInitializeFromBuilder(NVNprogram *, const NVNprogramBuilder *):
+ * NVNboolean. As the driver: an initialized program given the builder's
+ * shaders. Ray tracing modules (asked of drivers that have their count
+ * getter; older ones have none) and subroutine linkage are not implemented
+ * and stop.
+ */
+uint64_t nvnh_nvnProgramInitializeFromBuilder(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t prog = c->x[0], builder = c->x[1], count = 0, shaders = 0, modules = 0, links = 0;
+    int rc = nvn_driver_call(c, mem, "nvnProgramBuilderGetShaderCount", &builder, 1, &count);
+    if (rc == RL_OK)
+        rc = nvn_driver_call(c, mem, "nvnProgramBuilderGetShaders", &builder, 1, &shaders);
+    if (rc == RL_OK)
+        rc = nvn_driver_call(c, mem, "nvnProgramBuilderGetSubroutineLinkageCount", &builder, 1, &links);
+    uint64_t get_modules = 0;
+    if (rc == RL_OK)
+        rc = nvn_driver_lookup(c, mem, "nvnProgramBuilderGetRayTracingModuleCount", &get_modules);
+    if (rc == RL_OK && get_modules)
+        rc = nvn_guest_call(c, mem, get_modules, &builder, 1, &modules);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    if ((int32_t)modules || (int32_t)links)
+        return (uint64_t)rl_guest_fatal(c, "nvn",
+                                        "nvnProgramInitializeFromBuilder(0x%llx): %d ray tracing modules and %d "
+                                        "subroutine linkages are not implemented",
+                                        (unsigned long long)prog, (int32_t)modules, (int32_t)links);
+    if (!nvn_obj_new(prog, NVN_PROGRAM, sizeof(nvn_program))) {
+        c->x[0] = 0;
+        return nvn_ret(c);
+    }
+    return set_shaders(c, mem, prog, (int32_t)count, shaders);
 }
 
 const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **consts, const uint64_t **control)
