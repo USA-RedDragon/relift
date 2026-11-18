@@ -299,13 +299,30 @@ fn definite(i: &Inst) -> Vec<usize> {
 
 /// How many registers from each operand an instruction this module does
 /// not model may write: loads and warp operations name their width, the
-/// rest (textures, surfaces, matrix operations) are taken as quads.
+/// rest (surfaces, matrix operations) are taken as quads. Textures name
+/// their destinations ([`texture_dests`]).
 fn unknown_width(i: &Inst) -> usize {
     match i.mnemonic {
         "LDG" | "LDS" | "LDL" | "LD" | "ATOM" | "ATOMS" | "ATOMG" | "SHFL" | "VOTE" | "VOTEU"
         | "MATCH" | "REDUX" | "BMOV" | "S2UR" => source_width(i),
         _ => 4,
     }
+}
+
+/// The operands a texture instruction writes and their widths: its sparse
+/// fault predicate, if named, and Rd2 and Rd, each up to a pair (the
+/// components the mask selects go to Rd, Rd+1, Rd2, Rd2+1). Its other
+/// operands are only read.
+fn texture_dests(i: &Inst) -> Option<Vec<(usize, usize)>> {
+    if !matches!(i.mnemonic, "TEX" | "TLD" | "TLD4" | "TMML" | "TXD" | "TXQ") {
+        return None;
+    }
+    let p = usize::from(matches!(i.ops.first(), Some(Operand::Pred(..))));
+    let mut v = vec![(p, 2), (p + 1, 2)];
+    if p == 1 {
+        v.push((0, 1));
+    }
+    Some(v)
 }
 
 fn special_varies(i: &Inst) -> bool {
@@ -365,6 +382,7 @@ pub(super) fn step(i: &Inst, partial: bool, v: &mut Varying) {
     }
     let known = arithmetic(i.mnemonic);
     let defs = if known { definite(i) } else { Vec::new() };
+    let tex = texture_dests(i);
     let sw = source_width(i);
     let dw = dest_width(i);
     let mut read = Vec::new();
@@ -381,7 +399,11 @@ pub(super) fn step(i: &Inst, partial: bool, v: &mut Varying) {
             }
         } else {
             slots(o, sw, &mut read);
-            if !known && top_level(o) {
+            if let Some(t) = &tex {
+                if let Some(&(_, w)) = t.iter().find(|d| d.0 == k) {
+                    slots(o, w, &mut maybe);
+                }
+            } else if !known && top_level(o) {
                 // Anything else may write any register or predicate it
                 // names; addresses are only read.
                 slots(o, unknown_width(i), &mut maybe);

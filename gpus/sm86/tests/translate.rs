@@ -1394,6 +1394,25 @@ fn bar_runs_only_where_the_whole_workgroup_does() {
     }
 }
 
+/// UNIFORM_LOOP with its loop's first LDS made a texture load from R1 and
+/// R9 into R6, R7 and R10: the load writes its destinations (Rd = R6 and
+/// Rd2 = R10, pairs), not the registers after its sources, so the counter
+/// in R4 stays uniform and the BAR still runs where the whole workgroup
+/// does.
+#[test]
+fn texture_sources_leave_a_uniform_loop_counter_uniform() {
+    let mut words = UNIFORM_LOOP;
+    words[13] = 0x000f_c200_009e_070a_3000_1e09_0106_7b66;
+    let p = cuda(&words);
+    let t = text(&p);
+    assert!(
+        t.iter().any(|l| l.contains("TLD.SCR.LZ R10, R6, R1, R9")),
+        "{t:?}"
+    );
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(spirv_has(&s.spirv, 224), "no OpControlBarrier");
+}
+
 fn bra_not(at: usize, to: usize, p: u64) -> [u8; 16] {
     let mut w = bra(at, to, Some(p));
     w[1] |= 0x80;
