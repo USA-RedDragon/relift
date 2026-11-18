@@ -10,7 +10,7 @@ Read [Architecture](../concepts/architecture.md): section 0 lists the hard rules
 pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-`scripts/ci/all.sh` runs every CI job that this computer can run, in parallel, with the scripts that the workflows call.
+`scripts/ci/all.sh` runs every CI job that this computer can run, in parallel, with the scripts that the workflows call. Stopping it (Ctrl-C, or TERM or HUP) stops every job it started, on the Mac too.
 
 ## The docs
 

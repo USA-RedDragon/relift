@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Lint every workflow file.
+# Lint every workflow file, and check that all.sh stops its jobs when it is
+# signaled (all-stops.sh).
 . "$(dirname "$0")/lib.sh"
 
 dir="$CI_WORK/actionlint-$ACTIONLINT_VERSION"
@@ -7,3 +8,5 @@ fetch "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSIO
   "$ACTIONLINT_SHA256" "$dir/actionlint.tgz"
 [ -x "$dir/actionlint" ] || tar -xzf "$dir/actionlint.tgz" -C "$dir" actionlint
 "$dir/actionlint" -shellcheck= -color
+
+scripts/ci/all-stops.sh
