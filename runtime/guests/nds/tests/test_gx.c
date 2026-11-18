@@ -4,9 +4,12 @@
  * Matrix Stack", "DS 3D Status", "DS 3D Tests"): packed commands, the
  * matrix stacks and their error flag, the test commands and their results,
  * polygon and vertex RAM counts with strip sharing and culling, the swap at
- * VBlank, and the GXFIFO interrupt.
+ * VBlank (the 3D lines drawn before it still come from the old lists), and
+ * the GXFIFO interrupt.
  */
 #include "ndst.h"
+
+#include <string.h>
 
 #define POWCNT1 0x04000304u
 #define GXFIFO 0x04000400u
@@ -170,4 +173,50 @@ TEST(gx_fifo_interrupt_holds_while_the_fifo_is_empty)
     w9(t, GXSTAT, 4, 0);
     w9(t, IF9, 4, RL_NDS_IRQ_GXFIFO);
     CHECK_EQ(r9(t, IF9, 4) & RL_NDS_IRQ_GXFIFO, 0);
+}
+
+static uint32_t g_frame[2 * 256 * 192];
+static int g_frames;
+
+static void keep_second(void *user, const uint32_t *pixels, uint64_t when)
+{
+    (void)user;
+    (void)when;
+    if (++g_frames == 2)
+        memcpy(g_frame, pixels, sizeof g_frame);
+}
+
+TEST(gx_lines_drawn_before_a_swap_come_from_the_old_lists)
+{
+    ndst *t = gx_new();
+    rl_nds_set_frame_hook(t->m, keep_second, NULL);
+    w9(t, 0x04000000u, 4, 0x00010108u);
+    w9(t, 0x04000008u, 2, 0);
+    w9(t, 0x04000060u, 2, 0);
+    w9(t, 0x04000350u, 4, 0);
+    w9(t, 0x04000580u, 4, 0xBFFF0000u);
+    w9(t, GXSTAT, 4, 1u << 30);
+    cmd(t, MTX_MODE, 0);
+    cmd(t, MTX_IDENTITY, 0);
+    cmd(t, MTX_MODE, 2);
+    cmd(t, MTX_IDENTITY, 0);
+    cmd(t, POLYGON_ATTR, 0x001F00C0);
+    cmd(t, BEGIN_VTXS, 1);
+    cmd(t, COLOR, 0x001F);
+    vtx(t, -0x1000, 0x1000, 0);
+    vtx(t, -0x1000, -0x1000, 0);
+    vtx(t, 0x1000, -0x1000, 0);
+    vtx(t, 0x1000, 0x1000, 0);
+    cmd(t, END_VTXS, 0);
+    cmd(t, SWAP_BUFFERS, 0);
+    ndst_both(t, RL_NDS_FRAME_TICKS + 10u * RL_NDS_LINE_TICKS);
+    cmd(t, SWAP_BUFFERS, 0);
+    ndst_both(t, RL_NDS_FRAME_TICKS + 200u * RL_NDS_LINE_TICKS);
+    (void)r9(t, IF9, 4);
+    CHECK_EQ(g_frames, 2);
+    unsigned red = 0;
+    for (unsigned y = 0; y < 192; y++)
+        red += g_frame[y * 256 + 128] == g_frame[128];
+    CHECK(g_frame[128] != 0);
+    CHECK_EQ(red, 192u);
 }

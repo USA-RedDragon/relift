@@ -11,7 +11,9 @@
  * The engine is lazy: it runs its queue up to a tick when something may see
  * it (a register access, the rendering engine's frame start) or when its
  * event fires, which is queued only while an interrupt or a DMA waits for
- * the FIFO to drain. A command runs once all its parameters are in the queue
+ * the FIFO to drain. The event is the display's, so the display draws its
+ * lines up to the event's tick before a swap changes the lists the 3D lines
+ * come from. A command runs once all its parameters are in the queue
  * and the one before it is done; its effect lands at its start and it holds
  * the engine for its cycle count (GBATEK's table, two ticks a cycle).
  *
@@ -405,7 +407,7 @@ void nds_gx_reset(rl_nds *m)
 {
     nds_gx *g = &m->gx;
     memset(g, 0, sizeof *g);
-    g->ev = (rl_event){.fire = fire, .opaque = m};
+    g->ev = (rl_event){.fire = fire, .dev = &m->d_disp.dev, .opaque = m};
     nds_gx_geo_reset(m);
 }
 
