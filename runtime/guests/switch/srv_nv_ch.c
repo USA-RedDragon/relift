@@ -298,10 +298,24 @@ static int32_t ch_set_timeout(nv_file *f, nv_args *a)
     return NVE_OK;
 }
 
-static int32_t gpfifo_submit(ch_priv *c, submit_gpfifo *h, uint64_t entry_bytes)
+/**
+ * @brief The words of GPFIFO entry e: bits 42 to 62 (the GP_ENTRY1 LENGTH
+ * field as envytools documents it). An entry of no words fetches nothing.
+ */
+static uint32_t gp_entry_words(uint64_t e) { return (uint32_t)(e >> 42) & 0x1FFFFF; }
+
+static int32_t gpfifo_submit(ch_priv *c, nv_args *a, submit_gpfifo *h, const uint8_t *entries, uint64_t entry_bytes)
 {
     if (h->num_entries < 0 || (uint64_t)h->num_entries * 8 > entry_bytes)
         return NVE_INVALID_INPUT;
+    for (int32_t i = 0; i < h->num_entries; i++) {
+        uint64_t e;
+        memcpy(&e, entries + (size_t)i * 8, 8);
+        if (gp_entry_words(e)) {
+            a->stop = "Maxwell pushbuffer execution is not implemented: the program uses NVN1";
+            return NVE_NOT_SUPPORTED;
+        }
+    }
     if ((h->flags & GPFIFO_FENCE_WAIT) && (h->flags & GPFIFO_INCREMENT_WITH_VALUE))
         return NVE_INVALID_INPUT;
     h->fence.id = c->syncpt;
@@ -320,12 +334,13 @@ static int32_t gpfifo_submit(ch_priv *c, submit_gpfifo *h, uint64_t entry_bytes)
 
 static int32_t ch_submit_gpfifo(nv_file *f, nv_args *a)
 {
-    return gpfifo_submit(priv_of(f), (submit_gpfifo *)(void *)a->data, a->size - sizeof(submit_gpfifo));
+    return gpfifo_submit(priv_of(f), a, (submit_gpfifo *)(void *)a->data, a->data + sizeof(submit_gpfifo),
+                         a->size - sizeof(submit_gpfifo));
 }
 
 static int32_t ch_submit_gpfifo_ex(nv_file *f, nv_args *a)
 {
-    return gpfifo_submit(priv_of(f), (submit_gpfifo *)(void *)a->data, a->inl_size);
+    return gpfifo_submit(priv_of(f), a, (submit_gpfifo *)(void *)a->data, a->inl, a->inl_size);
 }
 
 static int32_t ch_alloc_obj_ctx(nv_file *f, nv_args *a)

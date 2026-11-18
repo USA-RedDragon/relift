@@ -1086,6 +1086,12 @@ TEST(nv_channels)
     CHECK_EQ(nv_ioctl(&t, gpu2, IOWR(0x48, 0x1A, 32), &gf), 0);
     CHECK_EQ(gf.fence_id, gpu_sync);
     CHECK_EQ(gf.fence_value, 10);
+
+    sg.entries = 2;
+    sg.flags = 0;
+    sg.list[1] = 1ull << 42 | 0x1000;
+    CHECK(nv_ioctl(&t, gpu2, IOWR(0x48, 8, 40), &sg) != 0);
+    CHECK_EQ(t.c->pend.kind, RL_PEND_EXIT_PROCESS);
 }
 
 TEST(nv_ioctl_argument_checks)

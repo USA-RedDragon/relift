@@ -273,7 +273,7 @@ static rl_result ioctl_common(rl_ipc_req *r, uint32_t variant)
         err = file_lookup(s, in.fd, &f);
     if (err == NVR_SUCCESS) {
         const nv_ioctl_entry *e = find_ioctl(f->dev, in.cmd, variant);
-        nv_args a = { data, len, variant == NV_V_IOCTL ? NULL : inl, inl_len, variant, in.cmd };
+        nv_args a = { data, len, variant == NV_V_IOCTL ? NULL : inl, inl_len, variant, in.cmd, NULL };
         int32_t rc = NVE_NOT_IMPLEMENTED;
         if (!e && hos_switch2())
             rl_ipc_stop(r, "nvdrv", "%s ioctl 0x%08x (type 0x%02x nr 0x%02x, %u bytes, %s) is not answered yet",
@@ -281,6 +281,8 @@ static rl_result ioctl_common(rl_ipc_req *r, uint32_t variant)
                         variant == NV_V_IOCTL ? "Ioctl" : variant == NV_V_IOCTL2 ? "Ioctl2" : "Ioctl3");
         if (e)
             rc = a.size < e->min_size ? NVE_INVALID_INPUT : e->fn(f, &a);
+        if (a.stop)
+            rl_ipc_stop(r, "nvdrv", "%s", a.stop);
         err = rc == NVE_NOT_IMPLEMENTED ? NVR_IOCTL_FAILED : convert_error(rc);
         if (rl_cfg()->trace_os)
             rl_log(RL_LOG_INFO, "nvdrv", "%s ioctl 0x%08x %s (%u bytes, inline %u) -> error %u", f->dev->path, in.cmd,

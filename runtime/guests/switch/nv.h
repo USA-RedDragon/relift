@@ -150,6 +150,8 @@ typedef struct nv_args {
     uint32_t variant;
     /** @brief The ioctl command word. */
     uint32_t cmd;
+    /** @brief Set by a handler for a request relift cannot serve: the guest stops with this summary. */
+    const char *stop;
 } nv_args;
 
 /** @brief An ioctl handler; returns an NVE_* result. */
