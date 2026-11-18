@@ -111,8 +111,12 @@ pub fn units(import: &Path) -> std::io::Result<Vec<Unit>> {
 }
 
 /// Point a run of the program at `import`'s data: `RELIFT_ROMFS` at the
-/// romfs as it is, `RELIFT_DLC` at the DLC folder.
+/// romfs as it is, `RELIFT_DLC` at the DLC folder, `RELIFT_FONTS` at the
+/// shared fonts decoded from the player's system data.
 pub fn set_env(cmd: &mut std::process::Command, import: &Path) {
+    if let Some(f) = crate::fonts::dir(import) {
+        cmd.env("RELIFT_FONTS", f);
+    }
     if let Some(r) = romfs(import) {
         cmd.env("RELIFT_ROMFS", r.path());
     }

@@ -44,6 +44,12 @@ pub enum Command {
         /// (default: the newest update).
         #[arg(long, value_name = "VERSION|base")]
         update: Option<String>,
+        /// A folder of the player's own decrypted system data, exported
+        /// with switch-tools from their console: the shared font titles
+        /// (0100000000000810 to 0100000000000814), one folder per title id.
+        /// Its fonts are decoded into the import for pl:u.
+        #[arg(long, value_name = "DIR")]
+        system_data: Option<PathBuf>,
     },
     /// Lift, emit and compile the project.
     Build {

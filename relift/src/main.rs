@@ -46,9 +46,17 @@ fn main() -> ExitCode {
     relift_proc::workers::set_jobs(settings.jobs);
     let mut ui = relift::ui::open(&settings, &cli);
     let result = match &cli.command {
-        Command::Import { dump, update } => {
-            relift::import::run(&settings, dump, update.as_deref(), &mut ui)
-        }
+        Command::Import {
+            dump,
+            update,
+            system_data,
+        } => relift::import::run(
+            &settings,
+            dump,
+            update.as_deref(),
+            system_data.as_deref(),
+            &mut ui,
+        ),
         Command::Build { target, mods, dev } => {
             relift::build::run_build(&settings, target, mods, *dev, &mut ui)
         }

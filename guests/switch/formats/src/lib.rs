@@ -12,6 +12,7 @@
 
 mod bytes;
 
+pub mod bfttf;
 pub mod error;
 pub mod import;
 pub mod npdm;

@@ -80,33 +80,45 @@ pub fn run(
     settings: &Settings,
     dump: &Path,
     update: Option<&str>,
+    system_data: Option<&Path>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
+    let switch_only = |what: &str| -> Result<(), BoxError> {
+        if system_data.is_some() {
+            return Err(format!("--system-data is for Switch dumps; {what}").into());
+        }
+        Ok(())
+    };
     if crate::gb::is_rom(dump) {
+        switch_only("a cartridge has no system fonts")?;
         if update.is_some() {
             return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
         }
         return crate::gb::import(settings, dump, ui);
     }
     if crate::nds::is_rom(dump) {
+        switch_only("a cartridge has no system fonts")?;
         if update.is_some() {
             return Err("--update is for Switch dumps; a cartridge image has no updates".into());
         }
         return crate::nds::import(settings, dump, ui);
     }
     if crate::gba::is_rom(dump) {
+        switch_only("a cartridge has no system fonts")?;
         if update.is_some() {
             return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
         }
         return crate::gba::import(settings, dump, ui);
     }
     if crate::sms::is_rom(dump) {
+        switch_only("a cartridge has no system fonts")?;
         if update.is_some() {
             return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
         }
         return crate::sms::import(settings, dump, ui);
     }
     if crate::n64::is_rom(dump) {
+        switch_only("a cartridge has no system fonts")?;
         if update.is_some() {
             return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
         }
@@ -179,6 +191,23 @@ pub fn run(
             })
             .collect(),
     };
+    let fonts = match system_data {
+        Some(sd) => {
+            let (found, missing) = crate::fonts::import(sd, &out.join(crate::fonts::DIR))?;
+            let names = |v: &[relift_switch_formats::bfttf::FontType]| {
+                v.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
+            };
+            if !missing.is_empty() {
+                ui.note(&Line::new().paint(Paint::Yellow, "warning").text(format!(
+                    ": --system-data: no {} font in {}",
+                    names(&missing),
+                    sd.display()
+                )));
+            }
+            format!(", {} system font(s) ({})", found.len(), names(&found))
+        }
+        None => String::new(),
+    };
     let manifest = project.join("game.toml");
     let wrote_manifest = if manifest.exists() {
         false
@@ -186,12 +215,13 @@ pub fn run(
         relift_cache::write_if_changed(&manifest, game.to_toml().as_bytes())?
     };
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
-        " title {:016x} v{}, {}, {}, {} DLC, {} written into {}{}, {}",
+        " title {:016x} v{}, {}, {}, {} DLC{}, {} written into {}{}, {}",
         report.program_id,
         report.version,
         noun(report.modules.len() as u64, "module"),
         noun(report.romfs_files as u64, "romfs file"),
         report.dlc.len(),
+        fonts,
         noun(report.written as u64, "file"),
         out.display(),
         if wrote_manifest {
