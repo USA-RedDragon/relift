@@ -384,6 +384,26 @@ const uint8_t *vi_picture(void *user, uint32_t *width, uint32_t *height)
 
 const rl_n64_rdp_ops g_ops = {command, sync_full, crashed, vi_register, vi_frame, vi_picture};
 
+/**
+ * @brief The largest upscale up to want the device can hold: parallel-rdp keeps RDRAM upscale squared times over
+ * in one storage buffer, and that and the hidden RDRAM beside it should take at most a quarter of the largest
+ * device-local heap.
+ */
+uint32_t fitting_upscale(const Vulkan::Context &ctx, uint32_t want)
+{
+    const VkPhysicalDeviceMemoryProperties &mem = ctx.get_mem_props();
+    VkDeviceSize heap = 0;
+    for (uint32_t i = 0; i < mem.memoryHeapCount; i++)
+        if ((mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) && mem.memoryHeaps[i].size > heap)
+            heap = mem.memoryHeaps[i].size;
+    uint64_t range = ctx.get_gpu_props().limits.maxStorageBufferRange;
+    uint32_t s = want;
+    while (s > 1 && (uint64_t(RL_N64_RDRAM_SIZE) * s * s > range ||
+                     uint64_t(RL_N64_RDRAM_SIZE) * 3 / 2 * s * s > heap / 4))
+        s /= 2;
+    return s;
+}
+
 void *create(rl_n64 *m, void *gipa, char *why, size_t why_len)
 {
     auto fail = [&](Renderer *r, const char *msg) -> void * {
@@ -402,6 +422,9 @@ void *create(rl_n64 *m, void *gipa, char *why, size_t why_len)
     r->device.init_frame_contexts(3);
     rl_n64_picture pic;
     rl_n64_picture_get(&pic);
+    uint32_t fit = fitting_upscale(r->context, pic.upscale);
+    rl_n64_picture_upscaled(pic.upscale, fit);
+    pic.upscale = fit;
     RDP::CommandProcessorFlags flags = RDP::COMMAND_PROCESSOR_FLAG_HOST_VISIBLE_HIDDEN_RDRAM_BIT;
     if (pic.upscale == 2)
         flags |= RDP::COMMAND_PROCESSOR_FLAG_UPSCALING_2X_BIT;

@@ -54,6 +54,7 @@ typedef struct host {
     bool have;
     bool framed;
     char save[4096];
+    void *rdp;
 } host;
 
 static uint64_t now_ns(void)
@@ -403,6 +404,19 @@ static int run_body(void *arg)
     const rl_window_backend *b = rl_window_backend_current();
     if (b && b->present_rgb)
         H->win = b->open(H->p->title && *H->p->title ? H->p->title : "relift", 640, 480);
+    if (H->win && b->screen) {
+        uint32_t sw = 0, sh = 0;
+        b->screen(H->win, &sw, &sh);
+        rl_n64_picture_set_screen(sh);
+    }
+    if (H->p->renderer) {
+        char why[160];
+        H->rdp = H->p->renderer->create(H->run.m, rl_hostlib_vulkan_gipa(), why, sizeof why);
+        if (H->rdp)
+            rl_n64_set_rdp(H->run.m, H->p->renderer->ops, H->rdp);
+        else
+            rl_log(RL_LOG_WARN, "n64", "the RDP draws nothing: %s", why);
+    }
     if (H->audio && H->win) {
         H->out = rl_audio_open(RL_N64_AUDIO_RATE, 2);
         if (H->out)
@@ -517,15 +531,6 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     if (H.save[0] && rl_n64_save_load(m, H.save) < 0)
         rl_log(RL_LOG_WARN, "n64", "a save of %s does not fit this cartridge; it is ignored", H.save);
     rl_n64_set_frame_hook(m, on_frame, &H);
-    void *rdp = NULL;
-    if (p->renderer) {
-        char rdp_why[160];
-        rdp = p->renderer->create(m, rl_hostlib_vulkan_gipa(), rdp_why, sizeof rdp_why);
-        if (rdp)
-            rl_n64_set_rdp(m, p->renderer->ops, rdp);
-        else
-            rl_log(RL_LOG_WARN, "n64", "the RDP draws nothing: %s", rdp_why);
-    }
     H.run.check = on_check;
     H.run.check_user = &H;
     if (headless)
@@ -536,7 +541,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     rl_n64_run_free(&H.run);
     rl_n64_destroy(m);
     free(H.rgb);
-    if (rdp)
-        p->renderer->destroy(rdp);
+    if (H.rdp)
+        p->renderer->destroy(H.rdp);
     return r;
 }

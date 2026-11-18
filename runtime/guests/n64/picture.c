@@ -15,7 +15,7 @@
 #include <string.h>
 
 static const char *const g_modes[] = {"console", "custom"};
-static const char *const g_upscales[] = {"1x", "2x", "4x", "8x"};
+static const char *const g_upscales[] = {"1x", "2x", "4x", "8x", "auto"};
 static const char *const g_deinterlace[] = {"bob", "weave"};
 
 #define BOOL_DEF(k, l, d, v) {.key = "n64.picture." k, .type = RL_SETTING_BOOL, .label = l, .description = d, .def_int = v}
@@ -34,10 +34,10 @@ static const rl_setting_def g_console[] = {
         .key = "n64.picture.upscale",
         .type = RL_SETTING_ENUM,
         .label = "Internal resolution",
-        .description = "The RDP draws at this multiple of the console's resolution. Above 1x it changes the picture "
-                       "from the console's",
+        .description = "The RDP draws at this multiple of the console's resolution; auto picks the one whose picture "
+                       "is nearest the screen's height. Above 1x it changes the picture from the console's",
         .choices = g_upscales,
-        .nchoices = 4,
+        .nchoices = 5,
     },
     {
         .key = "n64.picture.downscale_steps",
@@ -110,6 +110,25 @@ static const rl_setting_def g_console[] = {
 #define NDEFS (sizeof g_console / sizeof g_console[0])
 
 static rl_setting_def g_defs[NDEFS];
+static uint32_t g_screen_h;
+
+void rl_n64_picture_set_screen(uint32_t height) { __atomic_store_n(&g_screen_h, height, __ATOMIC_RELAXED); }
+
+uint32_t rl_n64_auto_upscale(uint32_t screen_height)
+{
+    uint32_t s = 1;
+    while (s < 8 && (uint64_t)screen_height * screen_height * 2 > (uint64_t)240 * s * 240 * s * 4)
+        s *= 2;
+    return s;
+}
+
+void rl_n64_picture_upscaled(uint32_t want, uint32_t got)
+{
+    if (got != want)
+        rl_log(RL_LOG_WARN, "n64", "the Vulkan device cannot hold the RDP at %ux; it draws at %ux", want, got);
+    if (got > 1)
+        rl_log(RL_LOG_INFO, "n64", "the RDP draws at %ux the console's resolution", got);
+}
 
 static bool parse_int(const char *t, int64_t *out)
 {
@@ -183,8 +202,9 @@ void rl_n64_picture_get(rl_n64_picture *out)
         };
         return;
     }
+    uint32_t upscale = rl_setting_enum("n64.picture.upscale");
     *out = (rl_n64_picture){
-        .upscale = 1u << rl_setting_enum("n64.picture.upscale"),
+        .upscale = upscale == 4 ? rl_n64_auto_upscale(__atomic_load_n(&g_screen_h, __ATOMIC_RELAXED)) : 1u << upscale,
         .downscale_steps = (uint32_t)rl_setting_int("n64.picture.downscale_steps"),
         .super_sampled_readback = rl_setting_bool("n64.picture.super_sampled_readback"),
         .readback_dither = rl_setting_bool("n64.picture.readback_dither"),

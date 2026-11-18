@@ -56,9 +56,9 @@ pub fn settings() -> Vec<Setting> {
         s(
             "upscale",
             "Internal resolution",
-            "The RDP draws at this multiple of the console's resolution. Above 1x it changes the picture from the console's",
+            "The RDP draws at this multiple of the console's resolution; auto picks the one whose picture is nearest the screen's height. Above 1x it changes the picture from the console's",
             Value::String("1x".into()),
-            choices(&["1x", "2x", "4x", "8x"]),
+            choices(&["1x", "2x", "4x", "8x", "auto"]),
         ),
         s(
             "downscale_steps",

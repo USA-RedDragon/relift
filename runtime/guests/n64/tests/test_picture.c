@@ -25,8 +25,30 @@ TEST(n64_the_picture_is_the_consoles_unless_the_program_or_the_run_picks_another
     rl_n64_picture_get(&p);
     CHECK(p.upscale == 8 && p.weave);
 
+    CHECK(rl_settings_set("n64.picture.upscale", "auto") == RL_SETTING_OK);
+    rl_n64_picture_set_screen(1080);
+    rl_n64_picture_get(&p);
+    CHECK(p.upscale == 4);
+    rl_n64_picture_set_screen(0);
+    rl_n64_picture_get(&p);
+    CHECK(p.upscale == 1);
+
     CHECK(rl_settings_set("n64.picture.mode", "console") == RL_SETTING_OK);
     rl_n64_picture_get(&p);
     CHECK(p.upscale == 1 && p.divot && !p.weave && p.crop_overscan == 0);
     rl_settings_reset();
+}
+
+TEST(n64_auto_upscale_is_the_power_of_two_nearest_the_screens_lines)
+{
+    CHECK(rl_n64_auto_upscale(0) == 1);
+    CHECK(rl_n64_auto_upscale(240) == 1);
+    CHECK(rl_n64_auto_upscale(339) == 1);
+    CHECK(rl_n64_auto_upscale(340) == 2);
+    CHECK(rl_n64_auto_upscale(480) == 2);
+    CHECK(rl_n64_auto_upscale(720) == 4);
+    CHECK(rl_n64_auto_upscale(1080) == 4);
+    CHECK(rl_n64_auto_upscale(1440) == 8);
+    CHECK(rl_n64_auto_upscale(2160) == 8);
+    CHECK(rl_n64_auto_upscale(100000) == 8);
 }

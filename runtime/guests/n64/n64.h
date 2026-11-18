@@ -263,8 +263,20 @@ typedef struct rl_n64_picture {
  * them, an invalid one warned about and skipped.
  */
 RL_RUNTIME_API void rl_n64_declare_picture(const char *const *defaults);
-/** @brief The picture settings now; with n64.picture.mode at console, the console's picture. */
+/**
+ * @brief The picture settings now; with n64.picture.mode at console, the console's picture. An upscale of auto
+ * is resolved with rl_n64_auto_upscale from the screen rl_n64_picture_set_screen gave.
+ */
 RL_RUNTIME_API void rl_n64_picture_get(rl_n64_picture *out);
+/** @brief Sets the height in pixels of the screen the picture is shown on (0 when there is none) for auto. */
+RL_RUNTIME_API void rl_n64_picture_set_screen(uint32_t height);
+/**
+ * @brief The upscale auto picks for a screen of that height: the power of two from 1 to 8 nearest (by ratio) the
+ * screen's height over the console's 240 lines; 1 for no screen.
+ */
+RL_RUNTIME_API uint32_t rl_n64_auto_upscale(uint32_t screen_height);
+/** @brief Logs the upscale a renderer draws at, got, and a warning when it is lower than the settings' want. */
+RL_RUNTIME_API void rl_n64_picture_upscaled(uint32_t want, uint32_t got);
 
 /**
  * @brief Writes len bytes to path through a temporary file and a rename, so a
