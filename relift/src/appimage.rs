@@ -30,9 +30,10 @@ pub const INFO_PATH: &str = "usr/share/relift/info.json";
 const LICENSE_RELIFT: &str = include_str!("../../LICENSE");
 /// The license of the Zstandard decoder compiled into Switch programs.
 const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
-/// The licenses of the picture options' FXAA and SMAA passes, in every runtime.
+/// The licenses of the picture options' FXAA, SMAA and FSR 1 passes, in every runtime.
 const LICENSE_FXAA: &str = include_str!("../../runtime/third_party/fxaa/LICENSE");
 const LICENSE_SMAA: &str = include_str!("../../runtime/third_party/smaa/LICENSE");
+const LICENSE_FSR1: &str = include_str!("../../runtime/third_party/fsr1/LICENSE");
 
 /// Libraries that always come from the system: the C library family, the
 /// compiler runtimes, the graphics stack and the display servers' clients.
@@ -336,6 +337,7 @@ fn licenses_file(name: &str, bundled: &[Bundled], switch: bool) -> String {
     );
     s.push_str("- FXAA 3.11 (NVIDIA, Timothy Lottes), ported into the runtime's anti-aliasing option: BSD-3-Clause (the text is in fxaa-LICENSE)\n");
     s.push_str("- SMAA (Jorge Jimenez et al., iryoku/smaa), compiled into the runtime's anti-aliasing option: MIT, https://github.com/iryoku/smaa (the text is in smaa-LICENSE)\n");
+    s.push_str("- AMD FidelityFX Super Resolution 1 (GPUOpen-Effects/FidelityFX-FSR), compiled into the runtime's upscaler option: MIT, https://github.com/GPUOpen-Effects/FidelityFX-FSR (the text is in fsr1-LICENSE)\n");
     if switch {
         s.push_str("- Zstandard decoder (zstd v1.5.7), compiled into the program: BSD-3-Clause, https://github.com/facebook/zstd (the text is in zstd-LICENSE)\n");
     }
@@ -371,6 +373,7 @@ fn write_licenses(
     )?;
     relift_cache::write_if_changed(&dir.join("fxaa-LICENSE"), LICENSE_FXAA.as_bytes())?;
     relift_cache::write_if_changed(&dir.join("smaa-LICENSE"), LICENSE_SMAA.as_bytes())?;
+    relift_cache::write_if_changed(&dir.join("fsr1-LICENSE"), LICENSE_FSR1.as_bytes())?;
     if switch {
         relift_cache::write_if_changed(&dir.join("zstd-LICENSE"), LICENSE_ZSTD.as_bytes())?;
     }
@@ -737,6 +740,7 @@ mod tests {
             "usr/share/licenses/my-game/type2-runtime-LICENSE",
             "usr/share/licenses/my-game/fxaa-LICENSE",
             "usr/share/licenses/my-game/smaa-LICENSE",
+            "usr/share/licenses/my-game/fsr1-LICENSE",
             INFO_PATH,
         ] {
             assert!(out.join(f).exists(), "{f}");

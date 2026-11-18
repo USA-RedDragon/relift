@@ -27,9 +27,10 @@ pub const MIN_API: u32 = 30;
 /// upright).
 /// The license of the Zstandard decoder the Switch runtime compiles in.
 const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
-/// The licenses of the picture options' FXAA and SMAA passes, in every runtime.
+/// The licenses of the picture options' FXAA, SMAA and FSR 1 passes, in every runtime.
 const LICENSE_FXAA: &str = include_str!("../../runtime/third_party/fxaa/LICENSE");
 const LICENSE_SMAA: &str = include_str!("../../runtime/third_party/smaa/LICENSE");
+const LICENSE_FSR1: &str = include_str!("../../runtime/third_party/fsr1/LICENSE");
 const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 /// The Java sources of the app, compiled into `classes.dex` with SDL3's
@@ -997,6 +998,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
     }
     z.add("assets/licenses/fxaa.txt", LICENSE_FXAA.as_bytes().to_vec());
     z.add("assets/licenses/smaa.txt", LICENSE_SMAA.as_bytes().to_vec());
+    z.add("assets/licenses/fsr1.txt", LICENSE_FSR1.as_bytes().to_vec());
     if a.about.vulkan {
         z.add("assets/licenses/zstd.txt", LICENSE_ZSTD.as_bytes().to_vec());
     }

@@ -1,8 +1,8 @@
 """gen_post_data.py: write runtime/core/post_data.h, the data of the core
 picture pipeline: the SPIR-V of every pass in this folder (compiled with
-glslc from shaderc) and SMAA's area and search textures, read from
-runtime/third_party/smaa. Run it from any folder after changing a shader or
-the SMAA files; it needs glslc on PATH.
+glslc from shaderc, FSR 1's with runtime/third_party/fsr1) and SMAA's area
+and search textures, read from runtime/third_party/smaa. Run it from any
+folder after changing a shader or the vendored files; it needs glslc on PATH.
 """
 
 import os
@@ -15,6 +15,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORE = os.path.dirname(HERE)
 SMAA = os.path.join(CORE, "..", "third_party", "smaa")
+FSR1 = os.path.join(CORE, "..", "third_party", "fsr1")
 OUT = os.path.join(CORE, "post_data.h")
 
 PASSES = [
@@ -25,12 +26,14 @@ PASSES = [
     ("smaa_blend", "smaa_blend.comp", []),
     ("upscale", "upscale.comp", []),
     ("upscale_buffers", "upscale.comp", ["-DRL_BUFFERS"]),
+    ("fsr1", "fsr1.comp", []),
+    ("fsr1_buffers", "fsr1.comp", ["-DRL_BUFFERS"]),
 ]
 
 
 def spirv(src, defines, work):
     out = os.path.join(work, "pass.spv")
-    cmd = ["glslc", "--target-env=vulkan1.0", "-O", "-I", HERE, "-I", SMAA, *defines, os.path.join(HERE, src), "-o", out]
+    cmd = ["glslc", "--target-env=vulkan1.0", "-O", "-I", HERE, "-I", SMAA, "-I", FSR1, *defines, os.path.join(HERE, src), "-o", out]
     subprocess.run(cmd, check=True)
     with open(out, "rb") as f:
         data = f.read()

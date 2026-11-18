@@ -1,0 +1,101 @@
+#version 450
+/**
+ * @file fsr1.comp
+ * @brief AMD FidelityFX Super Resolution 1 (MIT; provenance in
+ * runtime/third_party/fsr1) for the upscaler stage (upscale.c): its EASU
+ * upscale and RCAS sharpening passes from ffx_fsr1.h, unchanged, in 32-bit
+ * floats. EASU reads the input rectangle and writes the output rectangle's
+ * pixels as halves into a work buffer; RCAS reads that buffer and writes the
+ * output. EASU's four-texel gathers are texel fetches clamped to the input
+ * rectangle, in textureGather's order. Built twice by gen_post_data.py: with
+ * RL_BUFFERS the input and output are buffers of RGBA8 words, without it a
+ * sampled image in and a storage image out.
+ */
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#define A_GPU 1
+#define A_GLSL 1
+#include "ffx_a.h"
+
+/** @brief The rectangles (x, y, width, height), row pitches in pixels, the pass and RCAS's sharpness in stops. */
+layout(push_constant) uniform Params {
+    ivec4 src;
+    ivec4 dst;
+    ivec2 src_pitch;
+    ivec2 dst_pitch;
+    int pass;
+    float stops;
+} pc;
+
+layout(std430, binding = 1) buffer Work { uvec2 px[]; } work;
+
+#ifdef RL_BUFFERS
+layout(std430, binding = 0) readonly buffer In { uint px[]; } src_buf;
+layout(std430, binding = 2) writeonly buffer Out { uint px[]; } dst_buf;
+vec4 fetch_raw(ivec2 p) { return unpackUnorm4x8(src_buf.px[p.y * pc.src_pitch.x + p.x]); }
+void store(ivec2 p, vec4 c) { dst_buf.px[p.y * pc.dst_pitch.x + p.x] = packUnorm4x8(c); }
+#else
+layout(binding = 0) uniform sampler2D src_img;
+layout(binding = 2) uniform writeonly image2D dst_img;
+vec4 fetch_raw(ivec2 p) { return texelFetch(src_img, p, 0); }
+void store(ivec2 p, vec4 c) { imageStore(dst_img, p, c); }
+#endif
+
+/** @brief The input pixel at p (relative to the input rectangle), clamped to the rectangle. */
+vec4 fetch(ivec2 p) { return fetch_raw(clamp(p, ivec2(0), pc.src.zw - 1) + pc.src.xy); }
+
+/** @brief The four pixels textureGather reads at p (normalized over the input rectangle), as x, y, z, w. */
+mat4 gather(vec2 p)
+{
+    ivec2 b = ivec2(floor(p * vec2(pc.src.zw) - 0.5));
+    return mat4(fetch(b + ivec2(0, 1)), fetch(b + ivec2(1, 1)), fetch(b + ivec2(1, 0)), fetch(b));
+}
+
+#define FSR_EASU_F 1
+AF4 FsrEasuRF(AF2 p)
+{
+    mat4 g = gather(p);
+    return AF4(g[0].r, g[1].r, g[2].r, g[3].r);
+}
+AF4 FsrEasuGF(AF2 p)
+{
+    mat4 g = gather(p);
+    return AF4(g[0].g, g[1].g, g[2].g, g[3].g);
+}
+AF4 FsrEasuBF(AF2 p)
+{
+    mat4 g = gather(p);
+    return AF4(g[0].b, g[1].b, g[2].b, g[3].b);
+}
+
+#define FSR_RCAS_F 1
+AF4 FsrRcasLoadF(ASU2 p)
+{
+    ivec2 q = clamp(p, ivec2(0), pc.dst.zw - 1);
+    uvec2 w = work.px[q.y * pc.dst.z + q.x];
+    return AF4(unpackHalf2x16(w.x), unpackHalf2x16(w.y));
+}
+void FsrRcasInputF(inout AF1 r, inout AF1 g, inout AF1 b) {}
+
+#include "ffx_fsr1.h"
+
+void main()
+{
+    ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+    if (o.x >= pc.dst.z || o.y >= pc.dst.w)
+        return;
+    if (pc.pass == 0) {
+        AU4 con0, con1, con2, con3;
+        vec2 size = vec2(pc.src.zw);
+        FsrEasuCon(con0, con1, con2, con3, size.x, size.y, size.x, size.y, float(pc.dst.z), float(pc.dst.w));
+        AF3 c;
+        FsrEasuF(c, AU2(o), con0, con1, con2, con3);
+        work.px[o.y * pc.dst.z + o.x] = uvec2(packHalf2x16(c.rg), packHalf2x16(vec2(c.b, 1.0)));
+    } else {
+        AU4 con;
+        FsrRcasCon(con, pc.stops);
+        AF1 r, g, b;
+        FsrRcasF(r, g, b, AU2(o), con);
+        store(o + pc.dst.xy, vec4(r, g, b, 1.0));
+    }
+}

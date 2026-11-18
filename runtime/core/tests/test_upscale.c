@@ -2,11 +2,15 @@
  * @file test_upscale.c
  * @brief relift's spatial upscaler choices (upscale.h) as the window pipeline's upscaler stage: every choice keeps a
  * picture at its own size byte for byte, bilinear and nearest give the known values of a two-pixel ramp, and every
- * choice matches the C reference (upscale_ref.c) when it enlarges and when it shrinks, over subrectangles too.
+ * choice matches the C reference (upscale_ref.c) when it enlarges and when it shrinks, over subrectangles too, and
+ * FSR 1 keeps flat pictures flat and matches a C port of its EASU and RCAS (fsr1_ref.c): exactly on lavapipe; on
+ * devices that fuse multiplies and adds a few edge pixels differ, where EASU's weights nearly cancel, so up to 2% of
+ * the channels may differ by more than 2, within the clamp to the four nearest pixels.
  */
 #include "runner.h"
 
 #include "hostlib.h"
+#include "fsr1_ref.h"
 #include "upscale_ref.h"
 
 #include <relift/post.h>
@@ -134,7 +138,7 @@ TEST(upscale_every_choice_keeps_a_picture_at_its_own_size)
     enum { W = 29, H = 17 };
     static uint8_t in[W * H * 3], out[W * H * 3];
     scene(in, W, H);
-    for (uint32_t c = RL_UPSCALE_OFF; c < RL_UPSCALE_CHOICES; c++) {
+    for (uint32_t c = RL_UPSCALE_OFF; c <= RL_UPSCALE_LANCZOS; c++) {
         CHECK(run(c, in, W, H, W, H, out));
         CHECK(memcmp(in, out, sizeof in) == 0);
     }
@@ -173,7 +177,7 @@ TEST(upscale_every_choice_matches_the_c_reference)
             return;
         scene(in, w, h);
         words_of(in, src, (size_t)w * h);
-        for (uint32_t c = RL_UPSCALE_NEAREST; c < RL_UPSCALE_CHOICES; c++) {
+        for (uint32_t c = RL_UPSCALE_NEAREST; c <= RL_UPSCALE_LANCZOS; c++) {
             rl_upscale_rect ir = { 0, 0, w, h }, orc = { 0, 0, ow, oh };
             upscale_ref(c, src, w, &ir, want, ow, &orc);
             CHECK(run(c, in, w, h, ow, oh, got));
@@ -229,4 +233,49 @@ TEST(upscale_window_runs_relifts_choice_at_the_scale_setting)
     CHECK_EQ(w, 6);
     CHECK(out != ramp && out[15] == 255);
     rl_settings_reset();
+}
+
+TEST(upscale_fsr1_keeps_flat_pictures_and_matches_its_c_port)
+{
+    if (!have_vulkan())
+        return;
+    enum { W = 40, H = 24 };
+    static uint8_t flat[W * H * 3], out[2 * W * 2 * H * 3];
+    for (size_t i = 0; i < sizeof flat; i++)
+        flat[i] = (uint8_t)(i % 3 == 0 ? 200 : i % 3 == 1 ? 90 : 30);
+    CHECK(run(RL_UPSCALE_FSR1, flat, W, H, 2 * W, 2 * H, out));
+    bool same = true;
+    for (size_t i = 0; i < sizeof out; i++)
+        same = same && out[i] == flat[i % 3];
+    CHECK(same);
+    static const uint32_t sizes[][4] = { { 37, 23, 64, 41 }, { 40, 30, 60, 45 }, { 32, 18, 32, 18 } };
+    for (size_t s = 0; s < sizeof sizes / sizeof sizes[0]; s++) {
+        uint32_t w = sizes[s][0], h = sizes[s][1], ow = sizes[s][2], oh = sizes[s][3];
+        uint8_t *in = malloc((size_t)w * h * 3), *got = malloc((size_t)ow * oh * 3);
+        uint32_t *src = malloc((size_t)w * h * 4), *want = malloc((size_t)ow * oh * 4);
+        CHECK(in && got && src && want);
+        if (!in || !got || !src || !want)
+            return;
+        scene(in, w, h);
+        words_of(in, src, (size_t)w * h);
+        rl_upscale_rect ir = { 0, 0, w, h }, orc = { 0, 0, ow, oh };
+        fsr1_ref(src, w, &ir, want, ow, &orc, 0.25f);
+        CHECK(run(RL_UPSCALE_FSR1, in, w, h, ow, oh, got));
+        int worst = 0;
+        size_t off = 0, over = 0;
+        for (size_t i = 0; i < (size_t)ow * oh * 3; i++) {
+            int d = abs((int)got[i] - (int)((want[i / 3] >> (8 * (i % 3))) & 0xff));
+            over += d > 2;
+            if (d > worst)
+                worst = d, off = i;
+        }
+        printf("    fsr1 %ux%u -> %ux%u: worst difference %d at pixel %zu, %zu channels over 2\n", w, h, ow, oh, worst,
+               off / 3, over);
+        CHECK(over * 50 <= (size_t)ow * oh * 3);
+        CHECK(worst <= 48);
+        free(in);
+        free(got);
+        free(src);
+        free(want);
+    }
 }

@@ -146,7 +146,7 @@ pub fn runtime_settings() -> Vec<Setting> {
             ..s(
                 "picture.upscaler",
                 "Upscaler",
-                "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the game's UI: game is the game's own, translated; auto is the game's own where this device meets its requirements, else bilinear; off copies the picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are relift's. Every choice but game changes the picture from the console's",
+                "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the game's UI: game is the game's own, translated; auto is the game's own where this device meets its requirements, else bilinear; off copies the picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are relift's; fsr1 is AMD FSR 1 (EASU and RCAS). Every choice but game changes the picture from the console's",
                 Value::String("auto".into()),
                 SettingKind::Enum {
                     choices: [
@@ -157,6 +157,7 @@ pub fn runtime_settings() -> Vec<Setting> {
                         "bilinear",
                         "sharp_bilinear",
                         "lanczos",
+                        "fsr1",
                     ]
                     .map(String::from)
                     .into(),

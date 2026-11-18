@@ -1,0 +1,15 @@
+Provenance of the FSR 1 passes (runtime/core/shaders/fsr1.comp)
+
+ffx_a.h, ffx_fsr1.h (ffx-fsr/ upstream) and LICENSE (license.txt upstream)
+are the files of https://github.com/GPUOpen-Effects/FidelityFX-FSR at commit
+a21ffb8f6c13233ba336352bdff293894c706575, unchanged (SHA-256:
+ffx_a.h f60e2722fcd13989523b9164d776ab382b3692791767f3bf8bb19967f763f3fb,
+ffx_fsr1.h 93c3922362ea7fc99cbcc698ca30c98de4f8c246d1fbb0b09e015ddef38ce3a5,
+license.txt db089274ce766da70f5b7d791029c3486f9f9e27c8c79c652689603d3192e802).
+The compute passes include both headers through their A_GPU and A_GLSL
+paths (EASU and RCAS in 32-bit floats); runtime/core/shaders/gen_post_data.py
+compiles them to SPIR-V into runtime/core/post_data.h. The C reference of the
+tests (runtime/core/tests/fsr1_ref.c) ports the same two functions.
+
+AMD FidelityFX Super Resolution 1 is offered under the MIT license, whose
+text is in LICENSE beside this file.
