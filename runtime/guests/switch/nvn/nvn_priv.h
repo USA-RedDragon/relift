@@ -200,6 +200,34 @@ uint64_t nvn_tex_registered(uint32_t id, uint8_t view[16], bool *has_view, bool 
 /** @brief The builder bytes of the sampler registered as id (128 bytes), or NULL. */
 const uint8_t *nvn_sampler_registered(uint32_t id);
 
+/** @brief What the device probes measured (nvn_probe.c, run by the Vulkan layer before it writes device.json). */
+typedef struct nvn_probes {
+    /** @brief Every single-precision NaN of add, multiply, fused multiply-add, NMin and NMax is 0x7fffffff. */
+    bool canonical_nan32;
+    /** @brief Half-precision add, multiply, fused multiply-add and conversions are exact binary16, NaNs aside. */
+    bool exact_f16;
+} nvn_probes;
+/** @brief Brings the host device up and gives its probe results; false without a host Vulkan device. */
+bool nvn_vk_probes(nvn_probes *out);
+/** @brief Rows of the single-precision NaN probe (three input words and five output words each). */
+uint32_t nvn_probe_nan_rows(void);
+/** @brief Writes the NaN probe's inputs to w[0 .. 3 * rows). */
+void nvn_probe_nan_input(uint32_t *w);
+/** @brief Whether the NaN probe's outputs (after its inputs in w) are all the guest's canonical NaN where NaN. */
+bool nvn_probe_nan_check(const uint32_t *w);
+/** @brief Half-precision probe sizes: arithmetic rows (two lanes each), conversions to half, words in all. */
+uint32_t nvn_probe_f16_rows(void);
+uint32_t nvn_probe_f16_convs(void);
+uint32_t nvn_probe_f16_words(void);
+/** @brief Writes the half-precision probe's inputs to w (nvn_probe_f16_words words). */
+void nvn_probe_f16_input(uint32_t *w);
+/** @brief The half-precision probe's results in w that are not exact binary16 (0 for an exact device). */
+uint32_t nvn_probe_f16_check(const uint32_t *w);
+/** @brief The value of half-precision bits h. */
+double nvn_half_value(uint16_t h);
+/** @brief x rounded to half precision, to nearest even, with subnormals and infinities. */
+uint16_t nvn_half_of(double x);
+
 /** @brief Makes folder dir and the folders above it. */
 void nvn_mkdirs(const char *dir);
 /**

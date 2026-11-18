@@ -1,0 +1,220 @@
+/**
+ * @file nvn_probe.c
+ * @brief The inputs and checks of the device probes (probe.comp) that the
+ * runtime runs before it writes device.json: whether the device's
+ * single-precision NaNs are the SM86 canonical NaN, and whether its
+ * half-precision arithmetic and conversions are exact binary16. The
+ * Vulkan side is in nvn_vk.c; these parts need no device.
+ */
+#include "nvn_priv.h"
+
+#include <math.h>
+
+/** @brief Single-precision inputs of the NaN probe: payloads, signaling NaNs, infinities, zeros and denormals. */
+static const uint32_t nan_vals[] = { 0x7fc00000, 0xffc00000, 0x7f800001, 0x7fbfffff, 0x7fc12345, 0xffd00001,
+                                     0xff800001, 0x7fffffff, 0x7f800000, 0xff800000, 0x00000000, 0x80000000,
+                                     0x3f800000, 0xbf800000, 0x00000001, 0x80000001, 0x7f7fffff };
+#define NAN_VALS (uint32_t)(sizeof nan_vals / sizeof nan_vals[0])
+
+uint32_t nvn_probe_nan_rows(void) { return NAN_VALS * NAN_VALS * 2; }
+
+void nvn_probe_nan_input(uint32_t *w)
+{
+    uint32_t rows = nvn_probe_nan_rows();
+    for (uint32_t i = 0; i < rows; i++) {
+        uint32_t k = i % (NAN_VALS * NAN_VALS);
+        w[3 * i] = nan_vals[k / NAN_VALS];
+        w[3 * i + 1] = nan_vals[k % NAN_VALS];
+        w[3 * i + 2] = i < NAN_VALS * NAN_VALS ? 0x00000000u : nan_vals[(k * 7 + 3) % NAN_VALS];
+    }
+}
+
+static bool is_nan32(uint32_t v) { return (v & 0x7fffffffu) > 0x7f800000u; }
+
+bool nvn_probe_nan_check(const uint32_t *w)
+{
+    uint32_t rows = nvn_probe_nan_rows(), nans = 0;
+    for (uint32_t i = 0; i < rows; i++) {
+        const uint32_t *in = w + 3 * i, *out = w + 3 * rows + 5 * i;
+        bool any = is_nan32(in[0]) || is_nan32(in[1]);
+        for (uint32_t k = 0; k < 5; k++) {
+            uint32_t v = out[k];
+            if (is_nan32(v)) {
+                nans++;
+                if (v != 0x7fffffffu)
+                    return false;
+            } else if (k < 3 && any) {
+                return false;
+            }
+        }
+    }
+    return nans > 0;
+}
+
+double nvn_half_value(uint16_t h)
+{
+    int e = h >> 10 & 31, m = h & 0x3ff;
+    double v = e ? ldexp(1024 + m, e - 25) : ldexp(m, -24);
+    if (e == 31)
+        v = m ? NAN : INFINITY;
+    return h & 0x8000 ? -v : v;
+}
+
+uint16_t nvn_half_of(double x)
+{
+    uint16_t s = signbit(x) ? 0x8000 : 0;
+    double a = fabs(x);
+    if (isnan(x))
+        return 0x7e00;
+    if (a >= 65520.0)
+        return s | 0x7c00;
+    if (a < ldexp(1.0, -14))
+        return s | (uint16_t)nearbyint(ldexp(a, 24));
+    int e;
+    double f = frexp(a, &e);
+    double m = nearbyint(ldexp(f, 11));
+    if (m == 2048.0) {
+        m = 1024.0;
+        e++;
+    }
+    if (e + 14 >= 31)
+        return s | 0x7c00;
+    return s | (uint16_t)((e + 14) << 10 | ((uint32_t)m - 1024));
+}
+
+/** @brief Half-precision inputs: zeros, the smallest and largest subnormals and normals, ties and infinities. */
+static const uint16_t half_vals[] = { 0x0000, 0x8000, 0x0001, 0x8001, 0x03ff, 0x0400, 0x0401, 0x3c00, 0xbc00,
+                                      0x3c01, 0x3555, 0x1400, 0x0200, 0x7bff, 0xfbff, 0x5bff, 0x7c00, 0xfc00,
+                                      0x3e00, 0x4248, 0x2e66, 0x8401, 0x1001, 0x6800 };
+#define HALF_VALS (uint32_t)(sizeof half_vals / sizeof half_vals[0])
+#define HALF_RANDOM 4096u
+
+static uint32_t mix(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    return x ^ x >> 16;
+}
+
+static uint16_t half_random(uint32_t i)
+{
+    uint16_t h = (uint16_t)mix(i);
+    return (h & 0x7c00) == 0x7c00 ? (uint16_t)(h ^ 0x4000) : h;
+}
+
+uint32_t nvn_probe_f16_rows(void) { return (HALF_VALS * HALF_VALS + HALF_RANDOM + 1) / 2; }
+
+uint32_t nvn_probe_f16_convs(void) { return 4096; }
+
+uint32_t nvn_probe_f16_words(void) { return 6 * nvn_probe_f16_rows() + 2 * nvn_probe_f16_convs() + 3 * 32768; }
+
+/** @brief Lane j of the half arithmetic probe: a, b and c. */
+static void half_lane(uint32_t j, uint16_t *a, uint16_t *b, uint16_t *c)
+{
+    if (j < HALF_VALS * HALF_VALS) {
+        *a = half_vals[j / HALF_VALS];
+        *b = half_vals[j % HALF_VALS];
+        *c = half_vals[(j * 5 + 1) % HALF_VALS];
+    } else {
+        *a = half_random(3 * j);
+        *b = half_random(3 * j + 1);
+        *c = half_random(3 * j + 2);
+    }
+}
+
+/** @brief Single-precision inputs of the conversion to half: around the subnormal, rounding and overflow edges. */
+static uint32_t conv_input(uint32_t i)
+{
+    static const uint32_t edge[] = { 0x00000000, 0x80000000, 0x00000001, 0x807fffff, 0x33000000, 0x33000001,
+                                     0x337fffff, 0x33800000, 0x33c00000, 0x387fc000, 0x387fe000, 0x38800000,
+                                     0x3f801000, 0x3f802000, 0x3f803000, 0x477fefff, 0x477ff000, 0x477fe000,
+                                     0x47800000, 0x7f800000, 0xff800000, 0x7f7fffff, 0x3eaaaaab, 0xc2f6e979 };
+    enum { EDGES = sizeof edge / sizeof edge[0] };
+    if (i < EDGES)
+        return edge[i];
+    uint32_t r = mix(i * 0x9e3779b9u);
+    uint32_t e = 102 + (r >> 24) % 42;
+    return (r & 0x80000000u) | e << 23 | (r & 0x7fffffu);
+}
+
+void nvn_probe_f16_input(uint32_t *w)
+{
+    uint32_t n = nvn_probe_f16_rows(), m = nvn_probe_f16_convs();
+    for (uint32_t i = 0; i < n; i++) {
+        uint16_t a[2], b[2], c[2];
+        half_lane(2 * i, &a[0], &b[0], &c[0]);
+        half_lane(2 * i + 1, &a[1], &b[1], &c[1]);
+        w[3 * i] = a[0] | (uint32_t)a[1] << 16;
+        w[3 * i + 1] = b[0] | (uint32_t)b[1] << 16;
+        w[3 * i + 2] = c[0] | (uint32_t)c[1] << 16;
+    }
+    for (uint32_t i = 0; i < m; i++)
+        w[6 * n + i] = conv_input(i);
+    for (uint32_t i = 0; i < 32768; i++)
+        w[6 * n + 2 * m + i] = 2 * i | (2 * i + 1) << 16;
+}
+
+static bool is_nan16(uint16_t h) { return (h & 0x7fff) > 0x7c00; }
+
+/**
+ * @brief Whether the device half `got` is the binary16 rounding of the
+ * exact `x`; when x is a NaN, any NaN (the translator writes the guest's
+ * NaN itself).
+ */
+static bool half_ok(uint16_t got, double x)
+{
+    if (isnan(x))
+        return is_nan16(got);
+    return got == nvn_half_of(x);
+}
+
+/** @brief a * b + c exactly in a double, or false when it does not fit one (the lane is skipped). */
+static bool fma_exact(double a, double b, double c, double *r)
+{
+    double p = a * b, s = p + c;
+    if (!isfinite(p) || !isfinite(c)) {
+        *r = s;
+        return true;
+    }
+    double bp = s - c, bc = s - bp;
+    *r = s;
+    return (p - bp) + (c - bc) == 0.0;
+}
+
+uint32_t nvn_probe_f16_check(const uint32_t *w)
+{
+    uint32_t n = nvn_probe_f16_rows(), m = nvn_probe_f16_convs(), bad = 0;
+    const uint32_t *out = w + 3 * n;
+    for (uint32_t i = 0; i < 2 * n; i++) {
+        uint16_t a, b, c;
+        half_lane(i, &a, &b, &c);
+        double x = nvn_half_value(a), y = nvn_half_value(b), z = nvn_half_value(c), f;
+        unsigned sh = (i & 1) * 16;
+        const uint32_t *o = out + 3 * (i / 2);
+        bad += !half_ok((uint16_t)(o[0] >> sh), x + y);
+        bad += !half_ok((uint16_t)(o[1] >> sh), x * y);
+        if (fma_exact(x, y, z, &f))
+            bad += !half_ok((uint16_t)(o[2] >> sh), f);
+    }
+    for (uint32_t i = 0; i < m; i++) {
+        uint32_t v = w[6 * n + i];
+        float x;
+        memcpy(&x, &v, sizeof x);
+        bad += !half_ok((uint16_t)w[6 * n + m + i], (double)x);
+    }
+    for (uint32_t h = 0; h < 65536; h++) {
+        uint32_t got = w[6 * n + 2 * m + 32768 + h];
+        double want = nvn_half_value((uint16_t)h);
+        if (isnan(want)) {
+            bad += !is_nan32(got);
+            continue;
+        }
+        float wf = (float)want;
+        uint32_t wb;
+        memcpy(&wb, &wf, sizeof wb);
+        bad += got != wb;
+    }
+    return bad;
+}

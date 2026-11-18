@@ -1,0 +1,77 @@
+#version 450
+// The device probes of nvn_vk.c and nvn_probe.c, with the execution modes and
+// operations the SM86 translator emits. NAN32: row i reads a, b and c from
+// w[3i..3i+2] and writes the bits of a + b, a * b, fma(a, b, c) (OpFmaKHR
+// with FMA32, a * b otherwise), NMin(a, b) and NMax(a, b) to w[3n + 5i..],
+// with DenormPreserve under DP32. F16: row i reads three packed half pairs
+// from w[3i..3i+2] and writes the packed a + b, a * b and fused a * b + c to
+// w[3n + 3i..]; word j < m of w[6n..] is converted to a half at
+// w[6n + m + j]; word j < 32768 of w[6n + 2m..] holds two halves, converted
+// to single precision at w[6n + 2m + 32768 + 2j..].
+#extension GL_EXT_spirv_intrinsics : require
+#ifdef F16
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#endif
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) buffer B { uint w[]; };
+layout(push_constant) uniform P { uint n; uint m; };
+spirv_execution_mode(capabilities = [4466], 4461, 32);
+#ifdef DP32
+spirv_execution_mode(capabilities = [4464], 4459, 32);
+#endif
+#ifdef F16
+spirv_execution_mode(capabilities = [4464], 4459, 16);
+spirv_execution_mode(capabilities = [4467], 4462, 16);
+spirv_execution_mode(4461, 16);
+spirv_instruction(extensions = ["SPV_KHR_fma"], capabilities = [6030], id = 4427)
+f16vec2 fma_khr(f16vec2 a, f16vec2 b, f16vec2 c);
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i < n) {
+        f16vec2 a = unpackFloat2x16(w[3 * i]);
+        f16vec2 b = unpackFloat2x16(w[3 * i + 1]);
+        f16vec2 c = unpackFloat2x16(w[3 * i + 2]);
+        precise f16vec2 s = a + b;
+        precise f16vec2 p = a * b;
+        f16vec2 f = fma_khr(a, b, c);
+        w[3 * n + 3 * i] = packFloat2x16(s);
+        w[3 * n + 3 * i + 1] = packFloat2x16(p);
+        w[3 * n + 3 * i + 2] = packFloat2x16(f);
+    }
+    if (i < m)
+        w[6 * n + m + i] = packFloat2x16(f16vec2(float16_t(uintBitsToFloat(w[6 * n + i])), float16_t(0.0)));
+    if (i < 32768) {
+        f16vec2 h = unpackFloat2x16(w[6 * n + 2 * m + i]);
+        w[6 * n + 2 * m + 32768 + 2 * i] = floatBitsToUint(float(h.x));
+        w[6 * n + 2 * m + 32768 + 2 * i + 1] = floatBitsToUint(float(h.y));
+    }
+}
+#else
+#ifdef FMA32
+spirv_instruction(extensions = ["SPV_KHR_fma"], capabilities = [6030], id = 4427)
+float fma_khr(float a, float b, float c);
+#endif
+spirv_instruction(set = "GLSL.std.450", id = 79) float nmin(float a, float b);
+spirv_instruction(set = "GLSL.std.450", id = 80) float nmax(float a, float b);
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= n)
+        return;
+    float a = uintBitsToFloat(w[3 * i]);
+    float b = uintBitsToFloat(w[3 * i + 1]);
+    float c = uintBitsToFloat(w[3 * i + 2]);
+    precise float s = a + b;
+    precise float p = a * b;
+#ifdef FMA32
+    float f = fma_khr(a, b, c);
+#else
+    float f = p;
+#endif
+    uint o = 3 * n + 5 * i;
+    w[o] = floatBitsToUint(s);
+    w[o + 1] = floatBitsToUint(p);
+    w[o + 2] = floatBitsToUint(f);
+    w[o + 3] = floatBitsToUint(nmin(a, b));
+    w[o + 4] = floatBitsToUint(nmax(a, b));
+}
+#endif

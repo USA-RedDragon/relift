@@ -11,6 +11,7 @@
 
 #include <ftw.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -505,4 +506,144 @@ TEST(nvn_render_targets_reach_every_level_layer_and_slice)
     nvn_tex_desc cube = { .target = 8, .format = 0x25, .width = 16, .height = 16, .levels = 5 };
     CHECK(nvn_vk_rt_inside(&cube, 4, 5));
     CHECK(!nvn_vk_rt_inside(&cube, 0, 6));
+}
+
+static uint32_t f32_bits(float x)
+{
+    uint32_t v;
+    memcpy(&v, &x, sizeof v);
+    return v;
+}
+
+static float f32_of(uint32_t v)
+{
+    float x;
+    memcpy(&x, &v, sizeof x);
+    return x;
+}
+
+/** @brief Writes the NaN probe's outputs as a device would whose NaNs are canonical when canon, kept payloads otherwise. */
+static void nan_device(uint32_t *w, bool canon)
+{
+    uint32_t rows = nvn_probe_nan_rows();
+    for (uint32_t i = 0; i < rows; i++) {
+        float a = f32_of(w[3 * i]), b = f32_of(w[3 * i + 1]), c = f32_of(w[3 * i + 2]);
+        uint32_t r[5] = { f32_bits(a + b), f32_bits(a * b), f32_bits(fmaf(a, b, c)), f32_bits(fminf(a, b)),
+                          f32_bits(fmaxf(a, b)) };
+        for (int k = 0; k < 5; k++) {
+            if (isnan(f32_of(r[k])) && canon)
+                r[k] = 0x7fffffffu;
+            w[3 * rows + 5 * i + k] = r[k];
+        }
+    }
+}
+
+TEST(nvn_probe_checks_nan_results)
+{
+    uint32_t rows = nvn_probe_nan_rows();
+    uint32_t *w = calloc(8 * rows, sizeof *w);
+    CHECK(w != NULL);
+    nvn_probe_nan_input(w);
+    nan_device(w, true);
+    CHECK(nvn_probe_nan_check(w));
+    nan_device(w, false);
+    CHECK(!nvn_probe_nan_check(w));
+    nan_device(w, true);
+    for (uint32_t i = 0; i < rows; i++)
+        if (w[3 * i] == 0x7fc00000u && w[3 * i + 1] == 0x00000000u)
+            w[3 * rows + 5 * i] = 0x00000000u;
+    CHECK(!nvn_probe_nan_check(w));
+    memset(w + 3 * rows, 0, 5 * rows * sizeof *w);
+    CHECK(!nvn_probe_nan_check(w));
+    free(w);
+}
+
+TEST(nvn_half_rounding_reference)
+{
+    CHECK_EQ(nvn_half_of(1.0), 0x3c00);
+    CHECK_EQ(nvn_half_of(-2.0), 0xc000);
+    CHECK_EQ(nvn_half_of(65504.0), 0x7bff);
+    CHECK_EQ(nvn_half_of(65519.99), 0x7bff);
+    CHECK_EQ(nvn_half_of(65520.0), 0x7c00);
+    CHECK_EQ(nvn_half_of(ldexp(1.0, -25)), 0x0000);
+    CHECK_EQ(nvn_half_of(ldexp(3.0, -26)), 0x0001);
+    CHECK_EQ(nvn_half_of(ldexp(3.0, -25)), 0x0002);
+    CHECK_EQ(nvn_half_of(ldexp(1023.5, -24)), 0x0400);
+    CHECK_EQ(nvn_half_of(1.0 + ldexp(1.0, -11)), 0x3c00);
+    CHECK_EQ(nvn_half_of(1.0 + ldexp(3.0, -11)), 0x3c02);
+    CHECK_EQ(nvn_half_of(-0.0), 0x8000);
+    CHECK(nvn_half_value(0x0001) == ldexp(1.0, -24));
+    CHECK(nvn_half_value(0x7bff) == 65504.0);
+    CHECK(isinf(nvn_half_value(0xfc00)) && nvn_half_value(0xfc00) < 0);
+    CHECK(isnan(nvn_half_value(0x7c01)));
+    for (uint32_t h = 0; h < 0x10000; h++)
+        if ((h & 0x7fff) <= 0x7c00)
+            CHECK_EQ(nvn_half_of(nvn_half_value((uint16_t)h)), h);
+}
+
+/** @brief Writes the half probe's outputs as an exact binary16 device would, or one that flushes subnormal results. */
+static void half_device(uint32_t *w, bool flush)
+{
+    uint32_t n = nvn_probe_f16_rows(), m = nvn_probe_f16_convs();
+    for (uint32_t i = 0; i < 2 * n; i++) {
+        unsigned sh = (i & 1) * 16;
+        double x = nvn_half_value((uint16_t)(w[3 * (i / 2)] >> sh));
+        double y = nvn_half_value((uint16_t)(w[3 * (i / 2) + 1] >> sh));
+        double z = nvn_half_value((uint16_t)(w[3 * (i / 2) + 2] >> sh));
+        double r[3] = { x + y, x * y, fma(x, y, z) };
+        for (int k = 0; k < 3; k++) {
+            uint16_t h = nvn_half_of(r[k]);
+            if (flush && (h & 0x7c00) == 0)
+                h &= 0x8000;
+            uint32_t *o = &w[3 * n + 3 * (i / 2) + k];
+            *o = (*o & ~(0xffffu << sh)) | (uint32_t)h << sh;
+        }
+    }
+    for (uint32_t i = 0; i < m; i++)
+        w[6 * n + m + i] = nvn_half_of((double)f32_of(w[6 * n + i]));
+    for (uint32_t h = 0; h < 65536; h++) {
+        double v = nvn_half_value((uint16_t)h);
+        w[6 * n + 2 * m + 32768 + h] = isnan(v) ? 0x7fc00000u : f32_bits((float)v);
+    }
+}
+
+TEST(nvn_probe_checks_half_results)
+{
+    uint32_t *w = calloc(nvn_probe_f16_words(), sizeof *w);
+    CHECK(w != NULL);
+    nvn_probe_f16_input(w);
+    half_device(w, false);
+    CHECK_EQ(nvn_probe_f16_check(w), 0);
+    half_device(w, true);
+    CHECK(nvn_probe_f16_check(w) > 0);
+    half_device(w, false);
+    uint32_t n = nvn_probe_f16_rows(), m = nvn_probe_f16_convs();
+    w[6 * n + 2 * m + 32768 + 1] = 0;
+    CHECK_EQ(nvn_probe_f16_check(w), 1);
+    free(w);
+}
+
+TEST(nvn_probes_reach_device_json)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_probes_reach_device_json: no host Vulkan device, skipped\n");
+        return;
+    }
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s/device.json", nvn_shader_dir());
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "nvn_probes_reach_device_json: %s was written elsewhere, skipped\n", path);
+        return;
+    }
+    static char text[1 << 16];
+    size_t len = fread(text, 1, sizeof text - 1, f);
+    fclose(f);
+    text[len] = 0;
+    char want[128];
+    snprintf(want, sizeof want, "\"canonicalNan32\": %s, \"exactFloat16\": %s", p.canonical_nan32 ? "true" : "false",
+             p.exact_f16 ? "true" : "false");
+    CHECK(strstr(text, want) != NULL);
+    fprintf(stderr, "nvn_probes_reach_device_json: %s\n", want);
 }

@@ -108,6 +108,8 @@ typedef struct nvn_vkdev {
     /** @brief Guest bytes copied for the commands of the batch being recorded: buffers, indices, constants. */
     staging arena;
     uint64_t arena_used;
+    /** @brief The device probes' results, as device.json reports them. */
+    nvn_probes probes;
 } nvn_vkdev;
 
 extern nvn_vkdev g;

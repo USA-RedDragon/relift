@@ -16,6 +16,7 @@
  */
 #include "nvn_vk.h"
 #include "hostlib.h"
+#include "nvn_probe_spv.h"
 
 #include <relift/window.h>
 
@@ -269,6 +270,159 @@ static const char *driver_name(uint32_t id)
 #define B(v) ((v) ? "true" : "false")
 
 /**
+ * @brief Runs one variant of probe.comp over the n32 words at w (a staging
+ * buffer the probe reads and writes) with push constants n and m, as
+ * groups of 64 invocations. False when the device cannot run it.
+ */
+static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t n, uint32_t m, uint32_t groups)
+{
+    bool ok = false;
+    VkShaderModule sm = 0;
+    VkDescriptorSetLayout dsl = 0;
+    VkPipelineLayout pl = 0;
+    VkPipeline pipe = 0;
+    VkDescriptorPool dp = 0;
+    VkShaderModuleCreateInfo smi = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                     .codeSize = size,
+                                     .pCode = code };
+    VkDescriptorSetLayoutBinding b = { .binding = 0,
+                                       .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                       .descriptorCount = 1,
+                                       .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT };
+    VkDescriptorSetLayoutCreateInfo dli = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                            .bindingCount = 1,
+                                            .pBindings = &b };
+    VkPushConstantRange pcr = { .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 2 * sizeof(uint32_t) };
+    VkDescriptorPoolSize ps = { .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1 };
+    VkDescriptorPoolCreateInfo dpi = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                       .maxSets = 1,
+                                       .poolSizeCount = 1,
+                                       .pPoolSizes = &ps };
+    if (VK(vkCreateShaderModule)(g.dev, &smi, NULL, &sm) != VK_SUCCESS ||
+        VK(vkCreateDescriptorSetLayout)(g.dev, &dli, NULL, &dsl) != VK_SUCCESS)
+        goto out;
+    VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                       .setLayoutCount = 1,
+                                       .pSetLayouts = &dsl,
+                                       .pushConstantRangeCount = 1,
+                                       .pPushConstantRanges = &pcr };
+    if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &pl) != VK_SUCCESS)
+        goto out;
+    VkComputePipelineCreateInfo cpi = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                        .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                                                   .module = sm,
+                                                   .pName = "main" },
+                                        .layout = pl };
+    if (VK(vkCreateComputePipelines)(g.dev, 0, 1, &cpi, NULL, &pipe) != VK_SUCCESS ||
+        VK(vkCreateDescriptorPool)(g.dev, &dpi, NULL, &dp) != VK_SUCCESS)
+        goto out;
+    VkDescriptorSet set;
+    VkDescriptorSetAllocateInfo dai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                        .descriptorPool = dp,
+                                        .descriptorSetCount = 1,
+                                        .pSetLayouts = &dsl };
+    if (VK(vkAllocateDescriptorSets)(g.dev, &dai, &set) != VK_SUCCESS)
+        goto out;
+    VkDescriptorBufferInfo bi = { .buffer = buf->buf, .range = VK_WHOLE_SIZE };
+    VkWriteDescriptorSet wd = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                .dstSet = set,
+                                .descriptorCount = 1,
+                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                .pBufferInfo = &bi };
+    VK(vkUpdateDescriptorSets)(g.dev, 1, &wd, 0, NULL);
+    VkCommandBufferBeginInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &cbi) != VK_SUCCESS)
+        goto out;
+    uint32_t pc[2] = { n, m };
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pl, 0, 1, &set, 0, NULL);
+    VK(vkCmdPushConstants)(g.cb, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
+    VK(vkCmdDispatch)(g.cb, groups, 1, 1);
+    nvn_vk_barrier(g.cb);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
+    ok = VK(vkEndCommandBuffer)(g.cb) == VK_SUCCESS && VK(vkResetFences)(g.dev, 1, &g.fence) == VK_SUCCESS &&
+         VK(vkQueueSubmit)(g.queue, 1, &si, g.fence) == VK_SUCCESS &&
+         VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
+out:
+    if (dp)
+        VK(vkDestroyDescriptorPool)(g.dev, dp, NULL);
+    if (pipe)
+        VK(vkDestroyPipeline)(g.dev, pipe, NULL);
+    if (pl)
+        VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
+    if (dsl)
+        VK(vkDestroyDescriptorSetLayout)(g.dev, dsl, NULL);
+    if (sm)
+        VK(vkDestroyShaderModule)(g.dev, sm, NULL);
+    return ok;
+}
+
+/**
+ * @brief Whether every NaN the device's single-precision add, multiply,
+ * fused multiply-add, NMin and NMax produce is 0x7fffffff, the SM86 result,
+ * under each set of execution modes the translator may emit on this device
+ * (SignedZeroInfNanPreserve, with and without DenormPreserve, OpFmaKHR when
+ * it has it): runs probe.comp over NaN payloads, signaling NaNs, infinity
+ * times zero and opposite infinities (nvn_probe_nan_check). False when the
+ * device lacks SignedZeroInfNanPreserve or a probe cannot run.
+ */
+static bool probe_canonical_nan(bool szinp, bool dp32, bool fma32)
+{
+    if (!szinp)
+        return false;
+    uint32_t rows = nvn_probe_nan_rows();
+    staging buf;
+    if (!nvn_vk_staging_new(&buf, 8ull * rows * sizeof(uint32_t)))
+        return false;
+    uint32_t *w = (uint32_t *)(void *)buf.map;
+    struct { const uint32_t *code; size_t size; bool on; } v[] = {
+        { nvn_probe_nan, sizeof nvn_probe_nan, true },
+        { nvn_probe_nan_dp, sizeof nvn_probe_nan_dp, dp32 },
+        { nvn_probe_nan_fma, sizeof nvn_probe_nan_fma, fma32 },
+        { nvn_probe_nan_dp_fma, sizeof nvn_probe_nan_dp_fma, dp32 && fma32 },
+    };
+    bool ok = true;
+    for (size_t k = 0; ok && k < sizeof v / sizeof v[0]; k++) {
+        if (!v[k].on)
+            continue;
+        memset(w, 0, 8ull * rows * sizeof(uint32_t));
+        nvn_probe_nan_input(w);
+        ok = run_probe(v[k].code, v[k].size, &buf, rows, 0, (rows + 63) / 64) && nvn_probe_nan_check(w);
+    }
+    nvn_vk_staging_free(&buf);
+    return ok;
+}
+
+/**
+ * @brief Whether the device's half-precision add, multiply, OpFmaKHR and
+ * conversions, under the execution modes of the translator's native halves,
+ * give exact binary16 results with denormals and round to nearest even
+ * (NaN payloads aside): runs the F16 variant of probe.comp and checks every
+ * result (nvn_probe_f16_check). Only asked when the device reports every
+ * feature and property those halves need, since a driver may report them
+ * and still flush or round otherwise.
+ */
+static bool probe_exact_f16(void)
+{
+    uint32_t words = nvn_probe_f16_words();
+    staging buf;
+    if (!nvn_vk_staging_new(&buf, (uint64_t)words * sizeof(uint32_t)))
+        return false;
+    uint32_t *w = (uint32_t *)(void *)buf.map;
+    memset(w, 0, (uint64_t)words * sizeof(uint32_t));
+    nvn_probe_f16_input(w);
+    uint32_t bad = UINT32_MAX;
+    if (run_probe(nvn_probe_f16, sizeof nvn_probe_f16, &buf, nvn_probe_f16_rows(), nvn_probe_f16_convs(), 32768 / 64))
+        bad = nvn_probe_f16_check(w);
+    if (bad)
+        rl_log(RL_LOG_INFO, "nvn", "%s: half-precision probe off in %u results; halves stay integer code", g.name, bad);
+    nvn_vk_staging_free(&buf);
+    return bad == 0;
+}
+
+/**
  * @brief Writes what the host device reports that the SM86 translator reads, as the trimmed Vulkan profiles JSON
  * its host capabilities use, to <shader folder>/device.json.
  */
@@ -279,7 +433,8 @@ static void write_caps(void)
     ext_features fma = { .sType = STYPE_SHADER_FMA };
     VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13 };
-    VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f12 };
+    VkPhysicalDeviceVulkan11Features f11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &f12 };
+    VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11 };
     VkPhysicalDeviceVulkan13Properties p13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES };
     VkPhysicalDeviceVulkan12Properties p12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES, .pNext = &p13 };
     VkPhysicalDeviceVulkan11Properties p11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES, .pNext = &p12 };
@@ -342,8 +497,11 @@ static void write_caps(void)
             B(recon.b[0]));
     fprintf(f,
             "    \"VkPhysicalDeviceVulkan12Features\": { \"bufferDeviceAddress\": %s, \"shaderBufferInt64Atomics\": %s, "
-            "\"shaderSharedInt64Atomics\": %s },\n",
-            B(f12.bufferDeviceAddress), B(f12.shaderBufferInt64Atomics), B(f12.shaderSharedInt64Atomics));
+            "\"shaderSharedInt64Atomics\": %s, \"shaderFloat16\": %s, \"storageBuffer8BitAccess\": %s },\n",
+            B(f12.bufferDeviceAddress), B(f12.shaderBufferInt64Atomics), B(f12.shaderSharedInt64Atomics),
+            B(f12.shaderFloat16), B(f12.storageBuffer8BitAccess));
+    fprintf(f, "    \"VkPhysicalDeviceVulkan11Features\": { \"storageBuffer16BitAccess\": %s },\n",
+            B(f11.storageBuffer16BitAccess));
     fprintf(f,
             "    \"VkPhysicalDeviceVulkan13Features\": { \"computeFullSubgroups\": %s, \"shaderDemoteToHelperInvocation\": "
             "%s, \"subgroupSizeControl\": %s }\n   },\n   \"properties\": {\n",
@@ -363,17 +521,35 @@ static void write_caps(void)
             " },\n    \"VkPhysicalDeviceVulkan12Properties\": { \"driverID\": \"%s\", "
             "\"maxDescriptorSetUpdateAfterBindSampledImages\": %u, \"maxDescriptorSetUpdateAfterBindSamplers\": %u, "
             "\"maxPerStageDescriptorUpdateAfterBindStorageBuffers\": %u, \"shaderDenormFlushToZeroFloat32\": %s, "
-            "\"shaderDenormPreserveFloat32\": %s, \"shaderSignedZeroInfNanPreserveFloat32\": %s },\n",
+            "\"shaderDenormPreserveFloat32\": %s, \"shaderSignedZeroInfNanPreserveFloat32\": %s, "
+            "\"shaderDenormPreserveFloat16\": %s, \"shaderRoundingModeRTEFloat16\": %s, "
+            "\"shaderSignedZeroInfNanPreserveFloat16\": %s },\n",
             driver_name(p12.driverID), p12.maxDescriptorSetUpdateAfterBindSampledImages,
             p12.maxDescriptorSetUpdateAfterBindSamplers, p12.maxPerStageDescriptorUpdateAfterBindStorageBuffers,
             B(p12.shaderDenormFlushToZeroFloat32), B(p12.shaderDenormPreserveFloat32),
-            B(p12.shaderSignedZeroInfNanPreserveFloat32));
+            B(p12.shaderSignedZeroInfNanPreserveFloat32), B(p12.shaderDenormPreserveFloat16),
+            B(p12.shaderRoundingModeRTEFloat16), B(p12.shaderSignedZeroInfNanPreserveFloat16));
+    bool half = f12.shaderFloat16 && p12.shaderDenormPreserveFloat16 && p12.shaderRoundingModeRTEFloat16 &&
+                p12.shaderSignedZeroInfNanPreserveFloat16 && p12.shaderSignedZeroInfNanPreserveFloat32 && has[3] &&
+                fma.b[0];
+    g.probes.canonical_nan32 = probe_canonical_nan(p12.shaderSignedZeroInfNanPreserveFloat32,
+                                                   p12.shaderDenormPreserveFloat32, has[3] && fma.b[1]);
+    g.probes.exact_f16 = half && probe_exact_f16();
+    fprintf(f, "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s },\n",
+            B(g.probes.canonical_nan32), B(g.probes.exact_f16));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);
     fprintf(f, " }\n   }\n  }\n },\n \"source\": \"relift runtime, %s\"\n}\n", g.name);
     fclose(f);
     free(ext);
+}
+
+bool nvn_vk_probes(nvn_probes *out)
+{
+    pthread_once(&g.once, bring_up);
+    *out = g.probes;
+    return g.ok;
 }
 
 static bool up(rl_ctx *c)
