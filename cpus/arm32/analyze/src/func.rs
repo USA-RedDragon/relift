@@ -1570,7 +1570,20 @@ impl Run<'_> {
                     self.call(site, t, st, EdgeKind::LinkedJump);
                     return;
                 }
-                for to in self.targets(site, v, thumb) {
+                let tos = self.targets(site, v, thumb);
+                if tos.is_empty() {
+                    // A jump to code the run cannot reach (another unit's
+                    // RAM) leaves for a function that returns to the caller.
+                    let cs = if self.env.image.platform.external(v) {
+                        Summary::new(true, AAPCS_KEEP)
+                    } else {
+                        Summary::opaque()
+                    };
+                    let mut after = st.clone();
+                    after.clobber(cs.keep, cs.psr);
+                    self.rets.push(after);
+                }
+                for to in tos {
                     if computed && to != self.entry && !self.env.entries.contains(&to) {
                         self.out.edges.push(Edge {
                             site,

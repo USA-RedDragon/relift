@@ -484,6 +484,33 @@ fn a_call_is_noreturn_only_when_its_callee_is() {
 }
 
 #[test]
+fn a_call_to_a_veneer_into_ram_no_copy_holds_returns() {
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            a_bl(BASE + 4, BASE + 0x40),
+            A_MOV_R0_1,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(
+        BASE + 0x40,
+        &[
+            a_ldr_lit(12, BASE + 0x40, BASE + 0x48),
+            0xE12F_FF1C,
+            0x0230_0000,
+        ],
+    );
+    let r = m.run(Options::default(), arm(BASE));
+    assert!(
+        found(&r, arm(BASE + 8)),
+        "a jump to code another unit holds returns to the veneer's caller"
+    );
+}
+
+#[test]
 fn an_image_word_code_stores_to_is_a_variable() {
     let flag = BASE + 0x800;
     let mut m = Machine::new(Profile::V5te);
