@@ -2128,11 +2128,6 @@ pub fn run_build(
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     check_toolchain(settings)?;
-    if dev && !crate::gb::is_project() {
-        return Err(
-            "--dev is for a Game Boy project; `relift run` makes the dev build of others".into(),
-        );
-    }
     let handheld = if crate::gb::is_project() {
         Some("Game Boy")
     } else if crate::gba::is_project() {
@@ -2146,6 +2141,12 @@ pub fn run_build(
     } else {
         None
     };
+    if dev && handheld.is_none() {
+        return Err(
+            "--dev is for a cartridge ROM project; `relift run` makes the dev build of others"
+                .into(),
+        );
+    }
     if let Some(what) = handheld {
         if targets.len() > 1 {
             return Err(format!("one target at a time for a {what} build").into());
@@ -2160,17 +2161,17 @@ pub fn run_build(
             if !mods.is_empty() {
                 return Err("mods are not supported for Sega 8-bit ROMs yet".into());
             }
-            crate::sms::build(settings, true, target, ui)?
+            crate::sms::build(settings, !dev, target, ui)?
         } else if crate::gba::is_project() {
-            crate::gba::build(settings, mods, true, target, ui)?
+            crate::gba::build(settings, mods, !dev, target, ui)?
         } else if crate::nds::is_project() {
-            let built = crate::nds::build(settings, mods, true, target, ui)?;
+            let built = crate::nds::build(settings, mods, !dev, target, ui)?;
             if built.cross.is_none() {
                 return Ok(());
             }
             built
         } else {
-            let built = crate::n64::build(settings, mods, true, target, ui)?;
+            let built = crate::n64::build(settings, mods, !dev, target, ui)?;
             if built.cross.is_none() {
                 return Ok(());
             }

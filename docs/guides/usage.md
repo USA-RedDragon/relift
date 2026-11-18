@@ -29,7 +29,7 @@ hard-linked cache must copy those two.
 | Command | Does |
 |---|---|
 | `relift import <dump>` | Makes a project from a decrypted Switch dump (`.nup` or extracted tree) or a cartridge ROM (`.gb`, `.gbc`, `.gba`) |
-| `relift build` | A shipped build: the runtime linked in, no code loaded at run time, packaged for the host ([Package a game for each host](packaging.md)). `--target android-arm64`, `android-x64`, `ios-arm64` or `ios-sim-arm64` builds a phone app; `--mods` builds code mods or ROM patches in; `--dev` makes a Game Boy development build ([Game Boy](../../guests/gb/README.md)) |
+| `relift build` | A shipped build: the runtime linked in, no code loaded at run time, packaged for the host ([Package a game for each host](packaging.md)). `--target android-arm64`, `android-x64`, `ios-arm64` or `ios-sim-arm64` builds a phone app; `--mods` builds code mods or ROM patches in; `--dev` makes a development build of a cartridge ROM project, at the guest's dev optimization of lifted code (below; for a Game Boy project it also runs unlifted code on the device library's CPU, see [Game Boy](../../guests/gb/README.md)) |
 | `relift run` | Builds a dev build if needed and runs it |
 | `relift push --target <t>` | Copies the project's game data (romfs, DLC) onto a phone for the app `relift build --target` made and checks every file against the app's data manifest |
 | `relift report <file>` | Explains a stop report and adds the missed target as a root for the next build |

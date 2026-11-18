@@ -67,9 +67,11 @@ pub enum Command {
         /// Boy ROM, IPS, UPS or BPS ROM-hack patches, applied in order.
         #[arg(long, value_delimiter = ',', value_name = "MOD")]
         mods: Vec<PathBuf>,
-        /// A development build of a Game Boy project: code without a
-        /// lifted body runs on the device library's CPU and `--check`
-        /// works, where a release build stops at it.
+        /// A development build of a cartridge ROM project, as `relift run`
+        /// makes: lifted C compiles at the guest's dev optimization, for
+        /// compile time. For a Game Boy project, code without a lifted body
+        /// also runs on the device library's CPU and `--check` works, where
+        /// a release build stops at it.
         #[arg(long)]
         dev: bool,
     },
