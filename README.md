@@ -16,7 +16,7 @@ relift ships no game code, keys or data, and never will.
 | Guest | CPU | State |
 |---|---|---|
 | Nintendo Switch | ARM64 | Test programs built with libnx run end to end, and CI runs synthetic ones. A commercial game reaches gameplay in test runs; most games are untested and many will fail. |
-| Nintendo Switch 2 | ARM64 | Shaders are translated from SM86 to SPIR-V at build time (`gpus/sm86`), and the NVN2 graphics API runs over Vulkan. A retail game reaches its menus in test runs; most games stop early in their boot. |
+| Nintendo Switch 2 | ARM64 | Shaders are translated from SM86 to SPIR-V at build time (`gpus/sm86`, `gpus/nv`), and the NVN2 graphics API runs over Vulkan. A retail game reaches its menus in test runs; most games stop early in their boot. |
 | Game Boy and Game Boy Color | SM83 | Test ROMs from public suites pass in CI. Retail games run in test runs. |
 | Game Boy Advance | ARMv4T | Public test ROMs pass and match the NanoBoyAdvance oracle in test runs. Retail games run in test runs; code that discovery misses stops the program with a report. |
 | Nintendo 64 | VR4300 and RSP | Public test ROMs for the CPU, the RSP and VI match the ares oracle in test runs. A retail game reaches gameplay in test runs and matches ares frame for frame through its intro. |
@@ -81,7 +81,7 @@ The docs are built as a site from these pages, in the order of [the site outline
 | [Runtime ABI contract](docs/abi.md) | the contract between emitted C and the runtime |
 | [Input ports and bindings](docs/reference/input.md) | input ports, controls and bindings |
 | [Architecture](docs/concepts/architecture.md) | crate graph, rules and the tests that enforce them, CI |
-| [core](core/README.md), [cpus](cpus/arm64/README.md), [gpus/sm86](gpus/sm86/README.md), [check](check/README.md) | one page per folder |
+| [core](core/README.md), [cpus](cpus/arm64/README.md), [gpus/sm86](gpus/sm86/README.md), [gpus/nv](gpus/nv/README.md), [check](check/README.md) | one page per folder |
 
 ## Developing
 

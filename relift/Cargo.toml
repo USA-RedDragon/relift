@@ -27,6 +27,7 @@ relift-emit = { workspace = true }
 relift-gb = { workspace = true }
 relift-gb-analyze = { workspace = true }
 relift-gb-formats = { workspace = true }
+relift-gpu-nv = { workspace = true }
 relift-gpu-sm86 = { workspace = true }
 relift-gba = { workspace = true }
 relift-gba-analyze = { workspace = true }

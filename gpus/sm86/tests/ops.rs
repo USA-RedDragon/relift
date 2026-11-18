@@ -1,8 +1,8 @@
 //! Instructions added for full corpus coverage: each synthetic word decodes
 //! to the expected text and its program translates.
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options, WarpPath, translate, translate_with};
+use relift_gpu_nv::program::Program;
+use relift_gpu_nv::translate::{HostProfile, Options, WarpPath, translate, translate_with};
 
 const EXIT: u128 = 0x000f_ea00_0380_0000_0000_0000_0000_794d;
 const BRA_SELF: u128 = 0x000f_c000_0383_ffff_ffff_fff0_0000_7947;
@@ -12,7 +12,7 @@ fn program(body: &[u128]) -> Program {
     for w in body.iter().chain(&[EXIT, BRA_SELF]) {
         b.extend(w.to_le_bytes());
     }
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 /// A word from its two halves, without operand reuse flags.
@@ -23,7 +23,8 @@ fn w(hi: u64, lo: u64) -> u128 {
 fn check(words: &[u128], text: &[&str]) -> Vec<u32> {
     let p = program(words);
     let shown: Vec<String> = p
-        .decode()
+        .code
+        .clone()
         .into_iter()
         .map(|d| d.map(|i| i.to_string()).unwrap_or_default())
         .collect();
@@ -184,7 +185,7 @@ fn spirv_ops(words: &[u32]) -> Vec<u32> {
 #[test]
 fn ldc_segmented_reads_the_next_bank() {
     let p = program(&[w(0x000e_2200_0000_8800, 0x0080_0000_0607_7b82)]);
-    let shown = p.decode()[0].as_ref().map(|i| i.to_string()).unwrap();
+    let shown = p.code[0].as_ref().map(|i| i.to_string()).unwrap();
     assert!(shown.starts_with("LDC.IS R7, c[0x2][R6]"), "{shown}");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert!(s.interface.cbufs.contains(&2) && s.interface.cbufs.contains(&3));

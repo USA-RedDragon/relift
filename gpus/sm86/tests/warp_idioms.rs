@@ -1,5 +1,5 @@
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options, WarpPath, translate_with};
+use relift_gpu_nv::program::Program;
+use relift_gpu_nv::translate::{HostProfile, Options, WarpPath, translate_with};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -126,10 +126,10 @@ fn aggregated(value: u64) -> Program {
     b.extend(isetp_eq(0, 1, 3));
     b.extend(red_add(6, value));
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
-fn on(p: &Program, host: HostProfile) -> relift_gpu_sm86::translate::Shader {
+fn on(p: &Program, host: HostProfile) -> relift_gpu_nv::translate::Shader {
     translate_with(
         p,
         &Options {
@@ -141,7 +141,8 @@ fn on(p: &Program, host: HostProfile) -> relift_gpu_sm86::translate::Shader {
 }
 
 fn text_of(p: &Program) -> Vec<String> {
-    p.decode()
+    p.code
+        .clone()
         .into_iter()
         .map(|d| d.map(|i| i.to_string()).unwrap_or_else(|e| e.to_string()))
         .collect()
@@ -208,7 +209,7 @@ fn votes_on_draw_uniform_predicates_run_per_lane() {
     b.extend(isetp_cbuf());
     b.extend(vote_any_pred());
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let t = text_of(&p);
     assert_eq!(t[1], "ISETP.NE.U32.AND P1, PT, R5, c[0x3][0x10], PT");
     assert_eq!(t[2], "VOTE.ANY P2, P1");
@@ -255,7 +256,7 @@ fn a_texel_written_over_a_uniform_register_is_not_uniform() {
     b.extend(isetp_cbuf());
     b.extend(vote_any_pred());
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert!(
         text_of(&p)[1].starts_with("TEX.SCR.LZ R2, R5,"),
         "{:?}",
@@ -316,7 +317,7 @@ fn vote_copies() -> Program {
     ));
     b.extend(isetp_eq(0, 2, 3));
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 #[test]

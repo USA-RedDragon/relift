@@ -182,7 +182,7 @@ fn is_uni(i: &Inst) -> bool {
 
 fn iadd3(c: &mut Ctx, i: &Inst) -> Res<()> {
     let uni = is_uni(i);
-    let w = c.word;
+    let f = c.fields;
     let x = i.has("X");
     for m in &i.mods {
         if *m != "X" {
@@ -214,7 +214,7 @@ fn iadd3(c: &mut Ctx, i: &Inst) -> Res<()> {
             terms.push(c.b2u(p));
         }
     }
-    let (p0, p1) = (w.get(81, 3), w.get(84, 3));
+    let (p0, p1) = (u32::from(f.pd), u32::from(f.pd2));
     let carries = p0 != 7 || p1 != 7;
     let (sum, wraps) = c.wrapping_sum(&terms, carries);
     if let Some(wr) = wraps {
@@ -225,7 +225,7 @@ fn iadd3(c: &mut Ctx, i: &Inst) -> Res<()> {
 
 fn imad(c: &mut Ctx, i: &Inst) -> Res<()> {
     let uni = is_uni(i);
-    let w = c.word;
+    let f = c.fields;
     let signed = !i.has("U32");
     let x = i.has("X");
     let wide = i.has("WIDE");
@@ -274,7 +274,7 @@ fn imad(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
     let (plo, phi) = c.mul_wide(a, b, signed);
     let (lo, hi_w, carry) = c.add64((plo, phi), (clo, chi), cin);
-    let p0 = w.get(81, 3);
+    let p0 = u32::from(f.pd);
     if p0 != 7 {
         let zero = c.kc(0);
         let b = c.icmp_op(op::I_NOT_EQUAL, carry, zero);
@@ -350,7 +350,7 @@ impl Ctx {
 
 fn lea(c: &mut Ctx, i: &Inst) -> Res<()> {
     let uni = is_uni(i);
-    let w = c.word;
+    let f = c.fields;
     let hi = i.has("HI");
     let x = i.has("X");
     let sx = i.has("SX32");
@@ -404,7 +404,7 @@ fn lea(c: &mut Ctx, i: &Inst) -> Res<()> {
         let p = c.pred_operand(&i.ops[n - 1])?;
         terms.push(c.b2u(p));
     }
-    let p0 = w.get(81, 3);
+    let p0 = u32::from(f.pd);
     let (sum, wraps) = c.wrapping_sum(&terms, p0 != 7);
     if let Some(wr) = wraps {
         c.store_wraps(uni, p0, 7, wr);

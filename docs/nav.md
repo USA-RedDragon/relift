@@ -32,7 +32,8 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [VR4300 CPU](../cpus/mips/README.md)
   - [SM53 (Maxwell) shader code](../gpus/sm53/README.md)
   - [SM53 lowering table](../gpus/sm53/LOWERING.md)
-  - [SM86 shader translator](../gpus/sm86/README.md)
+  - [SM86 shader code](../gpus/sm86/README.md)
+  - [NVIDIA shader translator](../gpus/nv/README.md)
   - [The differential checker](../check/README.md)
 - Project
   - [Contributing](../CONTRIBUTING.md)

@@ -2,8 +2,7 @@
 //! code after them is emitted once and not once per path (twelve in a row
 //! would otherwise need 4096 copies of the loop).
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate;
+use relift_gpu_nv::translate::translate;
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -70,5 +69,5 @@ fn selections_before_a_loop_left_only_through_exit_merge() {
     b.extend(bra(top + 3, top, None));
     let end = b.len() / 16;
     b.extend(bra(end, end, None));
-    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
 }

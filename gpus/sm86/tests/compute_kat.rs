@@ -7,8 +7,7 @@
 mod common;
 
 use common::translate_with;
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options};
+use relift_gpu_nv::translate::{HostProfile, Options};
 
 /// The programs of the record, by case name.
 fn programs() -> Vec<(String, Vec<u8>)> {
@@ -37,7 +36,7 @@ fn recorded_programs_translate_for_every_host() {
     let progs = programs();
     assert!(progs.len() >= 5, "{} programs", progs.len());
     for (name, bytes) in &progs {
-        let p = Program::parse(bytes);
+        let p = relift_gpu_sm86::program::parse(bytes);
         for host in HostProfile::presets() {
             let o = Options {
                 host: host.clone(),

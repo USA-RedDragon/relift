@@ -54,9 +54,9 @@ use std::collections::BTreeMap;
 
 use super::DeviceCaps;
 
-/// A program the runtime recorded: its key and the bytes
-/// [`Program::parse`] reads (the SPH, if any, then the code), with the
-/// options its pipeline gives (the `host` field is replaced).
+/// A program the runtime recorded: its key and its bytes (the SPH, if any,
+/// then the code, which the front end's parse reads), with the options its
+/// pipeline gives (the `host` field is replaced).
 pub struct Input {
     pub key: [u8; 32],
     pub code: Vec<u8>,
@@ -71,15 +71,15 @@ pub struct Table {
     pub failed: BTreeMap<[u8; 32], String>,
 }
 
-/// Translates every program of `inputs` for `host`.
-pub fn translate_set(host: &HostProfile, inputs: &[Input]) -> Table {
+/// Translates every program of `inputs` for `host`, each read by `parse`.
+pub fn translate_set(host: &HostProfile, inputs: &[Input], parse: fn(&[u8]) -> Program) -> Table {
     let mut t = Table::default();
     for i in inputs {
         let o = Options {
             host: host.clone(),
             ..i.options.clone()
         };
-        match translate_with(&Program::parse(&i.code), &o) {
+        match translate_with(&parse(&i.code), &o) {
             Ok(Shader {
                 stage,
                 spirv,

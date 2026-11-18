@@ -767,7 +767,7 @@ fn fswzadd(c: &mut Ctx, i: &Inst) -> Res<()> {
     let ftz = i.has("FTZ");
     let a = c.fsrc_bits(&i.ops[1])?;
     let b = c.fsrc_bits(&i.ops[2])?;
-    let ctl = c.word.get(32, 8);
+    let ctl = u32::from(c.fields.swizzle);
     let lane = quad_lane(c);
     let u = c.u32t();
     let two = c.m.c_u32(2);

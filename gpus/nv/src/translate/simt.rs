@@ -516,7 +516,7 @@ impl Ctx {
 
     /// A warp operation: records over all lanes, then results for the lanes
     /// that executed it.
-    fn cross_inst(&mut self, i: &Inst, w: crate::Word, pc: u64, uniform: bool) -> Res<()> {
+    fn cross_inst(&mut self, i: &Inst, pc: u64, uniform: bool) -> Res<()> {
         let gact = self.sv().gact;
         let z = self.m.c_u32(0);
         self.m.emit_void(op::STORE, &[gact, z]);
@@ -524,7 +524,7 @@ impl Ctx {
         let at = self.m.body.len();
         self.set_pass(Pass::Collect);
         let e = self.exec();
-        self.lanes_of(e, |c| c.guarded(i, w, pc))?;
+        self.lanes_of(e, |c| c.guarded(i, pc))?;
         let mut words = Vec::new();
         for (var, init) in std::mem::take(&mut self.st().inits) {
             crate::spirv::inst(&mut words, op::STORE, &[var, init]);
@@ -533,9 +533,9 @@ impl Ctx {
         self.set_pass(Pass::Replay);
         let g = self.ld(gact);
         if uniform {
-            self.first_of(g, |c| c.guarded(i, w, pc))?;
+            self.first_of(g, |c| c.guarded(i, pc))?;
         } else {
-            self.lanes_of(g, |c| c.guarded(i, w, pc))?;
+            self.lanes_of(g, |c| c.guarded(i, pc))?;
         }
         self.set_pass(Pass::Lane);
         Ok(())
@@ -634,7 +634,7 @@ impl Emit<'_> {
             let e = c.exec();
             c.lanes_of(e, |c| {
                 for k in ks {
-                    c.guarded(&code.insts[k], code.words[k], 16 * k as u64)?;
+                    c.guarded(&code.insts[k], 16 * k as u64)?;
                 }
                 match tail {
                     Some(t) => t(c),
@@ -644,7 +644,7 @@ impl Emit<'_> {
         };
         for k in blk.first..blk.end {
             let i = &code.insts[k];
-            let (w, pc) = (code.words[k], 16 * k as u64);
+            let pc = 16 * k as u64;
             let kind = if c.warp_idioms.per_lane.contains(&k) {
                 Kind::Lane(Mem::None)
             } else {
@@ -668,14 +668,14 @@ impl Emit<'_> {
                     match k2 {
                         Kind::Once => {
                             let e = c.exec();
-                            c.first_of(e, |c| c.guarded(i, w, pc))?;
+                            c.first_of(e, |c| c.guarded(i, pc))?;
                         }
-                        Kind::Cross { uniform } => c.cross_inst(i, w, pc, uniform)?,
+                        Kind::Cross { uniform } => c.cross_inst(i, pc, uniform)?,
                         _ if i.guard.is_some() => {
                             let e = c.exec();
-                            c.first_of(e, |c| c.guarded(i, w, pc))?;
+                            c.first_of(e, |c| c.guarded(i, pc))?;
                         }
-                        _ => c.guarded(i, w, pc)?,
+                        _ => c.guarded(i, pc)?,
                     }
                 }
             }

@@ -1,10 +1,10 @@
 mod common;
 
 use common::{translate, translate_with};
-use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::pseudo::{IPA_MUL, IPA_SAT};
-use relift_gpu_sm86::translate::{Interp, Kind, Options};
-use relift_gpu_sm86::{Inst, Operand, RegMods};
+use relift_gpu_nv::program::{Program, Stage};
+use relift_gpu_nv::translate::pseudo::{IPA_MUL, IPA_SAT};
+use relift_gpu_nv::translate::{Interp, Kind, Options};
+use relift_gpu_nv::{Inst, Operand, RegMods};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -75,7 +75,7 @@ fn vertex_transform() {
     ));
     b.extend(word(0x122, 1, &[(24, 8, 255), (32, 8, 8), (40, 11, 0x90)]));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(p.stage(), Stage::Vertex);
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     header_ok(&s.spirv);
@@ -123,7 +123,7 @@ fn fragment_perspective_color() {
         ));
     }
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     header_ok(&s.spirv);
     assert_eq!(s.interface.inputs.get(&0), Some(&Some(Interp::Perspective)));
     assert!(s.interface.color_targets.contains(&0));
@@ -134,7 +134,7 @@ fn rejects_what_it_cannot_translate() {
     let mut b = Vec::new();
     b.extend(word(0x150, 4, &[(24, 8, 4), (86, 1, 1), (87, 3, 7)]));
     exit_and_halt(&mut b);
-    assert!(translate(&Program::parse(&b)).is_err());
+    assert!(translate(&relift_gpu_sm86::program::parse(&b)).is_err());
 }
 
 fn bra(at: usize, to: usize, pred: Option<u64>) -> [u8; 16] {
@@ -171,7 +171,7 @@ fn divergent_branch_never_leaves_the_fast_path() {
     b.extend(word(0x14d, 4, &[(87, 3, 7)]));
     b.extend(unsupported());
     exit_and_halt(&mut b);
-    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn converged_branch_always_leaves_the_slow_path() {
     b.extend(unsupported());
     b.extend(word(0x14d, 4, &[(87, 3, 7)]));
     exit_and_halt(&mut b);
-    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
@@ -190,13 +190,13 @@ fn exclusive_warpsync_is_rejected() {
     let mut b = Vec::new();
     b.extend(sync(0));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "WARPSYNC R14");
     translate(&p).unwrap_or_else(|e| panic!("{e}"));
     let mut b = Vec::new();
     b.extend(sync(1));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "WARPSYNC.EXCLUSIVE R14");
     let e = translate(&p).err().map(|e| e.0);
     assert_eq!(e.as_deref(), Some("WARPSYNC.EXCLUSIVE"));
@@ -246,7 +246,7 @@ fn compute_loop_is_structured() {
     ));
     b.extend(bra(4, 2, Some(0)));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(p.stage(), Stage::Compute);
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     header_ok(&s.spirv);
@@ -281,7 +281,7 @@ fn region_with(to: usize, inside: bool, warp: bool) -> Program {
         b.extend(vote_any());
     }
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 fn region(to: usize, warp: bool) -> Program {
@@ -337,7 +337,7 @@ fn break_loop(early: bool) -> Program {
         b.extend(vote_any());
     }
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 #[test]
@@ -368,7 +368,7 @@ fn break_to_outer(out: usize) -> Program {
     b.extend(bsync(1));
     b.extend(vote_any());
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 /// Lanes that break out of an inner region and wait at the BSYNC of the
@@ -395,7 +395,7 @@ fn bmov_reads_the_active_mask_and_rejects_other_state() {
     let mut b = Vec::new();
     b.extend(bmov_from(2, 26));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "BMOV.32 R2, MACTIVE");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("bmov_active", &s.spirv);
@@ -405,7 +405,9 @@ fn bmov_reads_the_active_mask_and_rejects_other_state() {
         let mut b = Vec::new();
         b.extend(bmov_from(2, state));
         exit_and_halt(&mut b);
-        let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+        let e = translate(&relift_gpu_sm86::program::parse(&b))
+            .err()
+            .map(|e| e.0);
         assert_eq!(e, Some(format!("BMOV R2, {name}")));
     }
     let mut b = Vec::new();
@@ -417,7 +419,7 @@ fn bmov_reads_the_active_mask_and_rejects_other_state() {
     ));
     b.extend(bsync(1));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "BMOV.32 B1, R2");
     let e = translate(&p).err().map(|e| e.0);
     assert_eq!(
@@ -460,7 +462,7 @@ fn bmov_mactive_from_a_saved_barrier() {
     let mut b = Vec::new();
     pair(&mut b);
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let t = text(&p);
     assert_eq!(t[0], "BMOV.32 B15, MACTIVE");
     assert_eq!(t[1], "BMOV.32.PQUAD MACTIVE, B15");
@@ -477,7 +479,7 @@ fn bmov_mactive_from_a_saved_barrier() {
     pair(&mut b);
     b.extend(bsync(0));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     assert!(
         s.interface
             .host
@@ -492,7 +494,9 @@ fn bmov_mactive_from_a_saved_barrier() {
     b.extend(bra(1, 2, Some(0)));
     b.extend(bmov_active_from(15, false));
     exit_and_halt(&mut b);
-    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    let e = translate(&relift_gpu_sm86::program::parse(&b))
+        .err()
+        .map(|e| e.0);
     assert_eq!(e.as_deref(), Some("BMOV MACTIVE, B15"));
 }
 
@@ -511,7 +515,7 @@ fn barrier_writes_set_again_before_a_read_are_harmless() {
     b.extend(bsync(0));
     b.extend(vote_any());
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "BMOV.32.CLEAR RZ, B0");
     translate(&p).unwrap_or_else(|e| panic!("{e}"));
     let mut b = Vec::new();
@@ -521,7 +525,9 @@ fn barrier_writes_set_again_before_a_read_are_harmless() {
     b.extend(bsync(0));
     b.extend(vote_any());
     exit_and_halt(&mut b);
-    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    let e = translate(&relift_gpu_sm86::program::parse(&b))
+        .err()
+        .map(|e| e.0);
     assert_eq!(
         e.as_deref(),
         Some("BMOV changes a convergence barrier at 0x20"),
@@ -541,7 +547,7 @@ fn warpsync_orders_lanes_or_is_reported() {
     let mut b = Vec::new();
     b.extend(sync(7));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "WARPSYNC 0xffffffff");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("warpsync", &s.spirv);
@@ -550,7 +556,7 @@ fn warpsync_orders_lanes_or_is_reported() {
     let mut b = Vec::new();
     b.extend(sync(0));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     assert!(!spirv_has(&s.spirv, 224));
     assert_eq!(
         s.interface.host.inexact,
@@ -580,7 +586,7 @@ fn warpsync_after_split(mask: u64) -> Program {
     b.extend(warpsync_reg(mask));
     b.extend(vote_any());
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 /// A WARPSYNC of the mask of the lanes running it, in divergent flow,
@@ -624,7 +630,7 @@ fn guarded_exit_returns_in_place() {
     b.extend(word(0x14d, 4, &[(12, 3, 0), (87, 3, 7)]));
     b.extend(word(0x002, 4, &[(16, 8, 1), (32, 32, 7), (72, 4, 0xf)]));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     assert!(spirv_has(&s.spirv, 247), "no OpSelectionMerge");
 }
 
@@ -643,9 +649,10 @@ fn directed_rounding_translates() {
             b.extend(word(op, 1, &f));
         }
         exit_and_halt(&mut b);
-        let p = Program::parse(&b);
+        let p = relift_gpu_sm86::program::parse(&b);
         let text: Vec<String> = p
-            .decode()
+            .code
+            .clone()
             .into_iter()
             .map(|d| d.map(|i| i.to_string()).unwrap_or_default())
             .collect();
@@ -677,7 +684,7 @@ fn mufu_forms_translate_with_and_without_the_model() {
                 ],
             ));
             exit_and_halt(&mut b);
-            let p = Program::parse(&b);
+            let p = relift_gpu_sm86::program::parse(&b);
             let shown = text(&p)[0].clone();
             let want = format!("MUFU.{name}{}", if half { ".F16" } else { "" });
             assert!(shown.starts_with(&want), "{shown}");
@@ -707,7 +714,8 @@ fn mufu_forms_translate_with_and_without_the_model() {
 }
 
 fn text(p: &Program) -> Vec<String> {
-    p.decode()
+    p.code
+        .clone()
         .into_iter()
         .map(|d| {
             d.map(|i| i.to_string())
@@ -804,7 +812,7 @@ fn fragment_inputs_follow_the_sph() {
     b.extend(ipa(5, 0xa0, 0, 1));
     b.extend(ipa(6, 0x3fc, 0, 1));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let t = text(&p);
     assert_eq!(t[0], "IPA.PASS.CENTROID R0, a[0x80]");
     assert_eq!(t[5], "IPA.CONSTANT R5, a[0xa0]");
@@ -831,7 +839,7 @@ fn maxwell_ipa_pseudo_instructions() {
         b.extend(word(0x118, 4, &[]));
     }
     exit_and_halt(&mut b);
-    let mut p = Program::parse(&b);
+    let mut p = relift_gpu_sm86::program::parse(&b);
     let reg = |n| Operand::Reg(n, RegMods::default());
     let attr = |offset| Operand::Attr {
         index: None,
@@ -844,27 +852,19 @@ fn maxwell_ipa_pseudo_instructions() {
         i.ops = ops;
         i
     };
-    p.pseudo.insert(
-        1,
-        pseudo(&["PASS", IPA_MUL], vec![reg(1), attr(0x80), reg(0)]),
-    );
-    p.pseudo.insert(
-        2,
-        pseudo(
-            &["PASS", IPA_MUL, IPA_SAT],
-            vec![reg(0), attr(0x84), reg(0)],
-        ),
-    );
-    p.pseudo
-        .insert(3, pseudo(&["PASS", IPA_SAT], vec![reg(2), attr(0x88)]));
+    p.code[1] = Ok(pseudo(&["PASS", IPA_MUL], vec![reg(1), attr(0x80), reg(0)]));
+    p.code[2] = Ok(pseudo(
+        &["PASS", IPA_MUL, IPA_SAT],
+        vec![reg(0), attr(0x84), reg(0)],
+    ));
+    p.code[3] = Ok(pseudo(&["PASS", IPA_SAT], vec![reg(2), attr(0x88)]));
     let t = text(&p);
     assert_eq!(t[1], "IPA.PASS.MUL R1, a[0x80], R0");
     assert_eq!(t[2], "IPA.PASS.MUL.SAT R0, a[0x84], R0");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("maxwell_ipa", &s.spirv);
     assert_eq!(s.interface.inputs.get(&0), Some(&Some(Interp::Perspective)));
-    p.pseudo
-        .insert(1, pseudo(&["PASS", IPA_MUL], vec![reg(1), attr(0x80)]));
+    p.code[1] = Ok(pseudo(&["PASS", IPA_MUL], vec![reg(1), attr(0x80)]));
     let e = translate(&p).err().expect("a MUL without its multiplier");
     assert!(e.0.contains("pseudo IPA form"), "{}", e.0);
 }
@@ -873,7 +873,7 @@ fn maxwell_ipa_pseudo_instructions() {
 fn fragment_outputs_take_four_registers_per_target() {
     let mut b = sph(2, 5, &[(18, 0x31), (19, 3)]);
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     dump("fragment_outputs", &s.spirv);
     assert_eq!(
         s.interface
@@ -908,7 +908,7 @@ fn vertex_system_values() {
         ));
     }
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[2], "AST a[0x5c], R0");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("vertex_system_values", &s.spirv);
@@ -930,7 +930,7 @@ fn instance_id_leaves_out_the_base_instance() {
         &[(16, 8, 1), (24, 8, 255), (32, 8, 255), (40, 11, 0x2f8)],
     ));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     dump("instance_id", &s.spirv);
     assert!(builtin_used(&s.spirv, 43) && builtin_used(&s.spirv, 4425));
     assert!(s.interface.builtins.contains(&4425));
@@ -947,7 +947,7 @@ fn instance_id_leaves_out_the_base_instance() {
 fn integer_render_targets_get_integer_outputs() {
     let mut b = sph(2, 5, &[(18, 0x111)]);
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let o = Options {
         color_kinds: [(1, Kind::Uint), (2, Kind::Sint)].into(),
         ..Options::default()
@@ -1055,8 +1055,9 @@ fn calls(sites: usize) -> Vec<u8> {
 
 #[test]
 fn call_is_inlined_at_each_site() {
-    let one = translate(&Program::parse(&calls(1))).unwrap_or_else(|e| panic!("{e}"));
-    let p = Program::parse(&calls(2));
+    let one =
+        translate(&relift_gpu_sm86::program::parse(&calls(1))).unwrap_or_else(|e| panic!("{e}"));
+    let p = relift_gpu_sm86::program::parse(&calls(2));
     let t = text(&p);
     assert_eq!(t[1], "CALL.REL.NOINC 0x50");
     assert_eq!(t[6], "RET.REL.NODEC R4 0x0");
@@ -1076,7 +1077,9 @@ fn call_without_return_address_is_rejected() {
     b.extend(exit());
     b.extend(ret(2, 4));
     b.extend(halt(3));
-    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    let e = translate(&relift_gpu_sm86::program::parse(&b))
+        .err()
+        .map(|e| e.0);
     assert_eq!(e.as_deref(), Some("CALL without its return address"));
 }
 
@@ -1084,18 +1087,20 @@ fn call_without_return_address_is_rejected() {
 fn return_address_must_be_in_the_register_ret_reads() {
     let mut b = calls(1);
     b[..16].copy_from_slice(&mov_imm(5, 0x20));
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "MOV R5, 0x20");
     let e = translate(&p).err().map(|e| e.0);
     assert_eq!(e.as_deref(), Some("CALL without its return address"));
     let mut b = calls(1);
     b[5 * 16..6 * 16].copy_from_slice(&word(0x002, 1, &[(16, 8, 6), (32, 8, 4), (72, 4, 0xf)]));
     b[6 * 16..7 * 16].copy_from_slice(&ret(6, 6));
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[5], "MOV R6, R4");
     translate(&p).unwrap_or_else(|e| panic!("{e}"));
     b[..16].copy_from_slice(&mov_imm(5, 0x20));
-    let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+    let e = translate(&relift_gpu_sm86::program::parse(&b))
+        .err()
+        .map(|e| e.0);
     assert_eq!(e.as_deref(), Some("CALL without its return address"));
 }
 
@@ -1115,7 +1120,7 @@ fn brx_becomes_a_switch() {
     b.extend(bra(6, 7, None));
     b.extend(word(0x141, 4, &[(16, 4, 0), (87, 3, 7)]));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let t = text(&p);
     assert!(t[2].starts_with("BRX R2 -0x30"), "{}", t[2]);
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
@@ -1168,7 +1173,7 @@ fn loop_with_two_exits_dispatches_after_it() {
     b.extend(bra(9, 11, None));
     b.extend(mov_imm(1, 2));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("loop_two_exits", &s.spirv);
     assert!(spirv_has(&s.spirv, 246), "no OpLoopMerge");
@@ -1184,7 +1189,7 @@ fn kill_demotes_and_goes_on() {
     b.extend(word(0x15b, 4, &[(12, 3, 0), (87, 3, 7)]));
     b.extend(ipa(1, 0x80, 0, 0));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[3], "@P0 KILL");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("kill", &s.spirv);
@@ -1209,7 +1214,7 @@ fn indexed_ipa_selects_among_the_sph_inputs() {
         ],
     ));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "IPA.PASS R0, a[UR4+0x84]");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("indexed_ipa", &s.spirv);
@@ -1237,12 +1242,8 @@ fn quad_swizzle_add_translates_in_both_stages() {
             ],
         ));
         exit_and_halt(&mut b);
-        let p = Program::parse(&b);
-        assert!(
-            p.decode()[0]
-                .as_ref()
-                .is_ok_and(|i| i.mnemonic == "FSWZADD")
-        );
+        let p = relift_gpu_sm86::program::parse(&b);
+        assert!(p.code[0].as_ref().is_ok_and(|i| i.mnemonic == "FSWZADD"));
         translate(&p).unwrap_or_else(|e| panic!("{e}"));
     }
 }
@@ -1479,7 +1480,7 @@ const SKIPPED_BARS: [u128; 81] = [
 
 fn cuda(words: &[u128]) -> Program {
     let b: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 #[test]
@@ -1563,11 +1564,11 @@ fn early_exit_chain(sections: usize) -> Vec<u8> {
 
 #[test]
 fn shared_tails_are_dispatched_not_copied() {
-    let p = Program::parse(&early_exit_chain(2));
+    let p = relift_gpu_sm86::program::parse(&early_exit_chain(2));
     assert_eq!(text(&p)[2], "@!P0 BRA 0x40");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(count_op(&s.spirv, 251), 0, "small chains are copied");
-    let p = Program::parse(&early_exit_chain(40));
+    let p = relift_gpu_sm86::program::parse(&early_exit_chain(40));
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("early_exit_chain", &s.spirv);
     assert!(count_op(&s.spirv, 251) >= 39);
@@ -1615,7 +1616,7 @@ fn registers_stay_values_within_a_block() {
     guarded[1] &= 0x8f;
     b.extend(guarded);
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[9], "@P0 IADD3 R1, R9, 0x1, RZ");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     let mut vars = 0;

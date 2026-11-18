@@ -6,8 +6,7 @@
 
 mod meshes;
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
+use relift_gpu_nv::translate::{HostProfile, Options, translate_with};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -58,7 +57,7 @@ fn main() {
                         .map(|s| s.to_string_lossy())
                         .unwrap_or_default();
                     let o = meshes::options(&base, &pipelines, &sha);
-                    match translate_with(&Program::parse(&b), &o) {
+                    match translate_with(&relift_gpu_sm86::program::parse(&b), &o) {
                         Ok(sh) => {
                             ok.fetch_add(1, Ordering::Relaxed);
                             if let (Some(o), Some(stem)) = (&out, p.file_stem()) {

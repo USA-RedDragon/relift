@@ -18,7 +18,7 @@ These areas have active work. Do not start in them without an issue and an answe
 |---|---|
 | The Switch 2 NVN2 graphics layer and its services | `runtime/guests/switch/nvn`, `runtime/guests/switch/srv_*.c` |
 | The Maxwell (SM53) shader translator and the Switch 1 NVN path | `gpus/sm53`, `guests/switch/guest/src/nvndriver.rs` |
-| The SM86 translator and DLSS | `gpus/sm86`, the upscaler seam in `runtime/core/post.c` |
+| The SM86 translator and DLSS | `gpus/nv`, `gpus/sm86`, the upscaler seam in `runtime/core/post.c` |
 | Nintendo DS discovery and 3D | `guests/nds/analyze`, `runtime/guests/nds/gpu3d*.c` |
 | Nintendo 64 RSP timing (and RDP timing) | `runtime/cpus/rsp`, `runtime/guests/n64`, `guests/n64` |
 
@@ -288,7 +288,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 ### SM86 translator (large; coordinate)
 
-- Missing: what the translator cannot reproduce on a host is rejected or listed in `HostReport::inexact` (`gpus/sm86/README.md`); check the open cases there before you start.
+- Missing: what the translator cannot reproduce on a host is rejected or listed in `HostReport::inexact` (`gpus/nv/README.md`); check the open cases there before you start.
 - Verify: `kat/` known-answer programs on a real GPU and on lavapipe (`scripts/ci/mesh-kat.sh`), `spirv-val`.
 
 ### Shader scan: more containers (medium)

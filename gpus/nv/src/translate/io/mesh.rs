@@ -68,7 +68,7 @@ use super::super::{Ctx, INPUT, OUTPUT, Res, bad};
 use crate::program::Stage;
 use crate::spirv::op;
 use crate::translate::WarpPath;
-use crate::{Inst, Operand, Word};
+use crate::{Fields, Inst, Operand};
 
 pub mod fallback;
 
@@ -395,16 +395,16 @@ pub(crate) struct State {
     slot: Option<(u32, u32)>,
 }
 
-fn addr(c: &mut Ctx, w: Word) -> u32 {
-    let r = c.load_reg(w.get(24, 8) as u8);
-    let k = c.m.c_u32(w.get(40, 16));
+fn addr(c: &mut Ctx, f: Fields) -> u32 {
+    let r = c.load_reg(f.ra);
+    let k = c.m.c_u32(f.isbe.offset);
     let u = c.u32t();
     c.m.emit(op::I_ADD, u, &[r, k])
 }
 
 /// Bits of an access: 8, 16 or 32.
-fn size(w: Word) -> Res<u32> {
-    match w.get(74, 2) {
+fn size(f: Fields) -> Res<u32> {
+    match f.isbe.size {
         0 => Ok(8),
         1 => Ok(16),
         2 => Ok(32),
@@ -710,13 +710,13 @@ impl Ctx {
 
 /// ISBERD in a task or mesh program.
 pub(crate) fn isberd(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
     let d = Ctx::dst_reg(&i.ops[0])?;
-    let (out, skew, class) = (w.bit(79), w.bit(78), w.get(76, 2));
+    let (out, skew, class) = (w.isbe.out, w.isbe.skew, w.isbe.class);
     let bits = size(w)?;
     let v = match (c.stage, out, class, skew) {
         (Stage::Task, false, 3, true) | (Stage::Mesh, false, 3, true) if !c.io.mesh.with_task => {
-            if w.get(24, 8) != 255 || w.get(40, 16) != 0 || bits != 32 {
+            if w.ra != 255 || w.isbe.offset != 0 || bits != 32 {
                 return bad(format!("{} of a root stage's input", name(i)));
             }
             let lin = c.linear_workgroup();
@@ -826,15 +826,15 @@ fn mesh_input_word(c: &mut Ctx, wi: u32) -> Res<u32> {
 
 /// ISBEWR in a task or mesh program.
 pub(crate) fn isbewr(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let w = c.word;
-    let (out, class) = (w.bit(79), w.get(76, 2));
+    let w = c.fields;
+    let (out, class) = (w.isbe.out, w.isbe.class);
     let bits = size(w)?;
     if !out {
         return bad(format!("stage buffer {}", name(i)));
     }
-    let v = c.load_reg(w.get(32, 8) as u8);
+    let v = c.load_reg(w.rb);
     match (c.stage, class) {
-        (Stage::Task, 3) if bits == 32 && !w.bit(78) => {
+        (Stage::Task, 3) if bits == 32 && !w.isbe.skew => {
             let a = addr(c, w);
             let wi = c.lk_shr(a, 2);
             let var = c.payload_var();
@@ -849,7 +849,7 @@ pub(crate) fn isbewr(c: &mut Ctx, i: &Inst) -> Res<()> {
             let n = c.attr_words();
             c.write_word(var, WORKGROUP, wi, n, v);
         }
-        (Stage::Mesh, 3) if !w.bit(78) => {
+        (Stage::Mesh, 3) if !w.isbe.skew => {
             let a = addr(c, w);
             let wi = c.lk_shr(a, 2);
             let var = c.attr_var();
@@ -857,7 +857,7 @@ pub(crate) fn isbewr(c: &mut Ctx, i: &Inst) -> Res<()> {
             write_sub_word(c, var, wi, n, a, bits, v);
         }
         (Stage::Mesh, 0) if bits == 32 => {
-            if w.get(24, 8) != 255 || w.get(40, 16) != 3 {
+            if w.ra != 255 || w.isbe.offset != 3 {
                 return bad(format!("{} other than the primitive count", name(i)));
             }
             let var = c.map_var();
@@ -866,7 +866,7 @@ pub(crate) fn isbewr(c: &mut Ctx, i: &Inst) -> Res<()> {
             c.m.emit_void(op::STORE, &[p, v]);
         }
         (Stage::Mesh, 0) if bits == 8 => {
-            if w.get(40, 16) < 4 {
+            if w.isbe.offset < 4 {
                 return bad(format!("{} below the index array", name(i)));
             }
             let a = addr(c, w);

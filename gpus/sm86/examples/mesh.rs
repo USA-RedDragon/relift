@@ -12,9 +12,8 @@
 //! `--task-lanes N`, `--mesh-lanes N`, `--payload BYTES`, `--prim-sph FILE`,
 //! `--prim-id-loc N`, `--frag-per-prim MASK`.
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::mesh_fallback::{indexed, mesh_record_words, scan, vertex};
-use relift_gpu_sm86::translate::{
+use relift_gpu_nv::translate::mesh_fallback::{indexed, mesh_record_words, scan, vertex};
+use relift_gpu_nv::translate::{
     HostProfile, MeshPipeline, MeshTopology, Options, mesh_components, translate_with,
 };
 
@@ -67,7 +66,7 @@ fn main() {
     let helpers = rest[0] == "helpers";
     let src = &rest[usize::from(helpers)];
     let b = std::fs::read(src).unwrap_or_else(|e| panic!("{src}: {e}"));
-    let prog = Program::parse(&b);
+    let prog = relift_gpu_sm86::program::parse(&b);
     let host = match rest.get(2 + usize::from(helpers)) {
         Some(n) => HostProfile::preset(n).unwrap_or_else(|| panic!("no host preset {n}")),
         None => HostProfile::default(),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes ../src/translate/mufu/tables.rs from a CUDA device.
+"""Writes ../../nv/src/translate/mufu/tables.rs from a CUDA device.
 
     mufu_tables.py <work dir> <tables.rs> [function ...]
 
@@ -7,7 +7,7 @@ Needs nvcc, an SM86 device (an RTX 3090 for the committed table), numpy
 and scipy. For each function it runs MUFU on every input of the range its
 table covers (one binade, or two for RSQ and SQRT, or a quarter turn for
 SIN), keeps the outputs in the work dir, and solves each table row: the
-integers A, B, C for which the interpolator (see ../src/translate/mufu.rs)
+integers A, B, C for which the interpolator (see ../../nv/src/translate/mufu.rs)
 gives the device's output for every input of the row's segment. A row is
 the integer point of a linear feasibility problem; the solver bounds B and
 C by linear programs over the segment, then scans them and takes the

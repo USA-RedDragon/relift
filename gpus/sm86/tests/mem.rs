@@ -1,7 +1,7 @@
 mod common;
 
 use common::translate;
-use relift_gpu_sm86::program::Program;
+use relift_gpu_nv::program::Program;
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -29,16 +29,17 @@ fn spirv_ops(words: &[u32]) -> Vec<u32> {
 }
 
 fn text(p: &Program) -> Vec<String> {
-    p.decode()
+    p.code
+        .clone()
         .into_iter()
         .map(|d| d.map(|i| i.to_string()).unwrap_or_default())
         .collect()
 }
 
-fn run(words: &[[u8; 16]], expect: &[&str]) -> relift_gpu_sm86::translate::Shader {
+fn run(words: &[[u8; 16]], expect: &[&str]) -> relift_gpu_nv::translate::Shader {
     let mut b: Vec<u8> = words.iter().flatten().copied().collect();
     finish(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let t = text(&p);
     for (n, e) in expect.iter().enumerate() {
         assert!(t[n].contains(e), "{} lacks {e}", t[n]);
@@ -305,14 +306,14 @@ fn tuples_past_rz_are_rejected() {
     for (d, ok) in [(252, true), (253, false)] {
         let mut b: Vec<u8> = ldg(6, d, 4, 0).to_vec();
         finish(&mut b);
-        let p = Program::parse(&b);
+        let p = relift_gpu_sm86::program::parse(&b);
         assert!(text(&p)[0].ends_with(&format!(".128 R{d}, [R4]")));
         assert_eq!(translate(&p).is_ok(), ok, "R{d}");
     }
 }
 
 use common::translate_with;
-use relift_gpu_sm86::translate::{Atomic64Path, HostProfile, Options};
+use relift_gpu_nv::translate::{Atomic64Path, HostProfile, Options};
 
 const ORDER_STRONG_SM: u64 = 5;
 const ORDER_STRONG_GPU: u64 = 7;
@@ -342,14 +343,14 @@ fn bar() -> [u8; 16] {
     word(0x11d, 5, &[(77, 3, 0), (54, 4, 0)])
 }
 
-fn on(words: &[[u8; 16]], host: HostProfile) -> relift_gpu_sm86::translate::Shader {
+fn on(words: &[[u8; 16]], host: HostProfile) -> relift_gpu_nv::translate::Shader {
     let mut b: Vec<u8> = words.iter().flatten().copied().collect();
     finish(&mut b);
     let o = Options {
         host,
         ..Options::default()
     };
-    translate_with(&Program::parse(&b), &o).unwrap_or_else(|e| panic!("{e}"))
+    translate_with(&relift_gpu_sm86::program::parse(&b), &o).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// The instructions with `opcode`, as whole words.

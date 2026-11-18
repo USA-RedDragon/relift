@@ -10,7 +10,7 @@
 
 use crate::bundle::{BUNDLE, slots};
 use crate::form::{Op, classify};
-use relift_gpu_sm86::program::Stage;
+use relift_gpu_nv::program::Stage;
 
 /// The first word of a code header.
 pub const CODE_MAGIC: u32 = 0x1234_5678;

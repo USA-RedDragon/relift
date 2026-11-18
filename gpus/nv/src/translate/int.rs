@@ -2,6 +2,7 @@
 //! instructions.
 
 use super::{INPUT, Res, bad};
+use crate::fields::CbufIndex;
 use crate::spirv::op;
 use crate::{Inst, Operand};
 
@@ -187,29 +188,21 @@ fn cbuf_words(i: &Inst) -> Res<(u32, Option<(u32, bool)>)> {
     Ok((n, sub))
 }
 
-/// ULDC and LDC: the bank, index register and offset come from the word.
+/// ULDC and LDC: the bank, index register and offset come from
+/// [`Fields::cbuf`](crate::Fields::cbuf).
 fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let w = c.word;
+    let cb = c.fields.cbuf;
     let (n, sub) = cbuf_words(i)?;
-    let op9 = w.get(0, 9);
-    let ur_bank = match i.mnemonic {
-        "ULDC" => op9 == 0xb9 && w.bit(91),
-        _ => w.bit(91),
-    };
-    if ur_bank {
+    if cb.bank_ureg {
         return bad(format!("{} with a bank in a uniform register", i.mnemonic));
     }
-    let bank = w.get(54, 5);
-    let off = i64::from(w.get(38, 16) as u16 as i16);
-    let index = match (i.mnemonic, op9) {
-        ("ULDC", 0xb9) => None,
-        ("ULDC", _) => Some(c.load_ureg(w.get(24, 6) as u8)),
-        _ => {
-            let r = w.get(24, 8) as u8;
-            if r == 255 { None } else { Some(c.load_reg(r)) }
-        }
+    let (bank, off) = (cb.bank, cb.offset);
+    let index = match cb.index {
+        CbufIndex::None => None,
+        CbufIndex::Reg(r) => Some(c.load_reg(r)),
+        CbufIndex::UReg(r) => Some(c.load_ureg(r)),
     };
-    let segmented = match (i.mnemonic, w.get(78, 2)) {
+    let segmented = match (i.mnemonic, cb.mode) {
         ("ULDC", _) | (_, 0) => false,
         (_, 2) => true,
         _ => return bad("LDC indexed-bank mode"),

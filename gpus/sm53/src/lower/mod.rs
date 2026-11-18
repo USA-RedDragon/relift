@@ -25,8 +25,8 @@ use crate::bundle::slots;
 use crate::form::{Op, Src};
 use crate::inst::Inst;
 use crate::program::Program;
+use relift_gpu_nv::program::{Program as Program86, Sph as Sph86};
 use relift_gpu_sm86::Word;
-use relift_gpu_sm86::program::{Program as Program86, Sph as Sph86};
 use table::Row;
 
 /// What `i` becomes on its own: the stop of its table row, or its
@@ -140,7 +140,15 @@ pub fn program(p: &Program) -> Result<Program86, Vec<Stop>> {
     if !out.is_empty() {
         return Err(out);
     }
-    Ok(Program86 { sph, words, pseudo })
+    let code = words
+        .iter()
+        .enumerate()
+        .map(|(k, w)| match pseudo.get(&k) {
+            Some(p) => Ok(p.clone()),
+            None => relift_gpu_sm86::decode(*w, 16 * k as u64).map_err(|e| e.to_string()),
+        })
+        .collect();
+    Ok(Program86 { sph, code })
 }
 
 /// The forms of `p` that stop (see [`program`]); empty when the whole

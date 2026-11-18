@@ -1,8 +1,8 @@
 mod common;
 
 use common::translate_with;
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{
+use relift_gpu_nv::program::Program;
+use relift_gpu_nv::translate::{
     Atomic64Path, ClockPath, Denorm, GlobalPath, HostProfile, Options, WarpPath,
 };
 
@@ -29,7 +29,7 @@ fn fadd(ftz: bool) -> Program {
         &[(16, 8, 2), (24, 8, 0), (32, 8, 1), (80, 1, u64::from(ftz))],
     ));
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 fn count(words: &[u32], opcode: u32) -> usize {
@@ -64,7 +64,7 @@ fn presets_have_distinct_names() {
 #[test]
 fn fadd_is_native_where_the_host_matches_the_guest() {
     let ftz = fadd(true);
-    assert!(ftz.decode()[0].as_ref().is_ok_and(|i| i.has("FTZ")));
+    assert!(ftz.code[0].as_ref().is_ok_and(|i| i.has("FTZ")));
     let nv = Options {
         host: HostProfile::nvidia(),
         ..Options::default()
@@ -144,10 +144,10 @@ fn warp_program(guarded_exit: bool) -> Program {
     ));
     b.extend(word(0x3c4, 1, &[(16, 8, 7), (24, 8, 2), (78, 3, 4)]));
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
-fn on(p: &Program, host: HostProfile) -> relift_gpu_sm86::translate::Shader {
+fn on(p: &Program, host: HostProfile) -> relift_gpu_nv::translate::Shader {
     translate_with(
         p,
         &Options {
@@ -198,7 +198,7 @@ fn r2ur_with_a_predicate_plans_a_warp_path() {
     let mut b = Vec::new();
     b.extend(word(0x1c2, 1, &[(16, 6, 4), (24, 8, 5), (81, 3, 0)]));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text_of(&p)[0], "R2UR P0, UR4, R5");
     let s = on(&p, HostProfile::nvidia());
     assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
@@ -223,7 +223,7 @@ fn ldsm_alone_plans_a_warp_path() {
         ],
     ));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert!(text_of(&p)[0].starts_with("LDSM"), "{:?}", text_of(&p));
     let s = on(&p, HostProfile::nvidia());
     assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
@@ -266,7 +266,7 @@ fn workgroup_size_id(words: &[u32]) -> Option<u32> {
 #[test]
 fn divergent_warp_operations_run_in_software() {
     let p = warp_program(true);
-    assert!(p.decode()[0].as_ref().is_ok_and(|i| i.guard.is_some()));
+    assert!(p.code[0].as_ref().is_ok_and(|i| i.guard.is_some()));
     for h in [
         HostProfile::lavapipe(),
         HostProfile::mali(),
@@ -315,7 +315,7 @@ fn divergent_loop() -> Program {
         &[(12, 3, 1), (34, 48, 0xffff_ffff_fff0), (87, 3, 7)],
     ));
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 #[test]
@@ -368,7 +368,7 @@ fn fast_path_program() -> Program {
         &[(16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)],
     ));
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 #[test]
@@ -415,7 +415,7 @@ fn subgroup_capabilities_follow_the_operations_emitted() {
     let mut b = Vec::new();
     b.extend(word(0x119, 1, &[(16, 8, 2), (72, 8, 0x21)]));
     exit_and_halt(&mut b);
-    let s = on(&Program::parse(&b), HostProfile::nvidia());
+    let s = on(&relift_gpu_sm86::program::parse(&b), HostProfile::nvidia());
     let caps = capabilities(&s.spirv);
     assert!(
         !caps.iter().any(|c| GROUP_NON_UNIFORM_CAPS.contains(c)),
@@ -440,7 +440,7 @@ fn clock_without_a_host_clock_counts() {
     let mut b = Vec::new();
     b.extend(word(0x805, 1, &[(16, 8, 2), (72, 8, 0x50)]));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let s = on(&p, HostProfile::nvidia());
     assert_eq!(s.interface.host.clock, ClockPath::Device);
     assert!(spirv_ops(&s.spirv).contains(&READ_CLOCK));
@@ -453,7 +453,7 @@ fn clock_without_a_host_clock_counts() {
 fn global_program() -> Program {
     let mut b = global_body();
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 /// LDG.E.64 and ATOMG.E.ADD.64.
@@ -540,7 +540,7 @@ fn hosts_without_int64_use_word_pairs() {
     let mut b = global_body();
     b.extend(word(0x805, 1, &[(16, 8, 10), (72, 8, 0x50)]));
     exit_and_halt(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     for host in [HostProfile::adreno(), HostProfile::minimal()] {
         assert!(!host.int64);
         let s = on(&p, host.clone());
@@ -553,7 +553,7 @@ fn hosts_without_int64_use_word_pairs() {
     assert!(uses_int64(&on(&p, HostProfile::nvidia()).spirv));
     let mut d = word(0x229, 1, &[(16, 8, 2), (24, 8, 4), (32, 8, 6)]).to_vec();
     exit_and_halt(&mut d);
-    let p = Program::parse(&d);
+    let p = relift_gpu_sm86::program::parse(&d);
     assert!(text_of(&p)[0].starts_with("DADD"), "{:?}", text_of(&p));
     let e = translate_with(
         &p,
@@ -578,7 +578,7 @@ fn locked_atomics_leave_the_loop_together() {
     assert_eq!(s.interface.host.atomics64, Atomic64Path::Locked);
     assert!(spirv_ops(&s.spirv).contains(&GROUP_NON_UNIFORM_ALL));
     let none = HostProfile {
-        warp_compute: relift_gpu_sm86::translate::Warp::Absent,
+        warp_compute: relift_gpu_nv::translate::Warp::Absent,
         ..HostProfile::minimal()
     };
     let s = on(&p, none);
@@ -587,7 +587,8 @@ fn locked_atomics_leave_the_loop_together() {
 }
 
 fn text_of(p: &Program) -> Vec<String> {
-    p.decode()
+    p.code
+        .clone()
         .into_iter()
         .map(|d| d.map(|i| i.to_string()).unwrap_or_default())
         .collect()

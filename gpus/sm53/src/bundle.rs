@@ -2,7 +2,7 @@
 //! instructions. A code offset counts bytes from the start of the code,
 //! scheduling words included, as the branch targets do.
 
-use relift_gpu_sm86::Sched;
+use relift_gpu_nv::Sched;
 
 /// Bytes in one bundle.
 pub const BUNDLE: usize = 32;

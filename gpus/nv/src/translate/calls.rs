@@ -20,6 +20,7 @@
 
 use super::{Code, Res, bad};
 use crate::Operand;
+use crate::fields::CbufIndex;
 use std::collections::{BTreeMap, HashMap};
 
 /// How far before a CALL the return address `MOV` may be.
@@ -47,14 +48,12 @@ fn target_of(i: &crate::Inst, end: usize) -> Res<usize> {
 }
 
 /// The callee of `CALL` `i` in a program of `end` instructions.
-pub(super) fn callee(i: &crate::Inst, w: crate::Word, end: usize) -> Res<Callee> {
+pub(super) fn callee(i: &crate::Inst, end: usize) -> Res<Callee> {
     match i.ops.last() {
         Some(Operand::Target(_)) if i.has("REL") || i.has("ABS") => {
             target_of(i, end).map(Callee::To)
         }
-        Some(Operand::Reg(..)) if i.has("ABS") && w.get(24, 8) != 255 => {
-            Ok(Callee::Reg(w.get(24, 8) as u8))
-        }
+        Some(Operand::Reg(r, _)) if i.has("ABS") && *r != 255 => Ok(Callee::Reg(*r)),
         _ => bad(format!("CALL form {i}")),
     }
 }
@@ -91,11 +90,6 @@ pub(super) fn check(i: &crate::Inst) -> Res<()> {
     }
 }
 
-/// Signed 48-bit offset field of a control word, in bytes.
-fn raw_offset(w: crate::Word) -> i64 {
-    ((w.get64(34, 48) as i64) << 16 >> 16) * 4
-}
-
 /// Whether the return address of the CALL at `k` is set for the RET at
 /// `ret`, shortly before the call: by a `MOV` of the address (the RET adds
 /// its own offset, relative to itself for `RET.REL`), or for `RET.ABS` by
@@ -103,40 +97,26 @@ fn raw_offset(w: crate::Word) -> i64 {
 /// register set is the one the RET reads, or one the callee copies into it
 /// with unguarded register moves (`MOV`, `IMAD.MOV`).
 pub(super) fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
-    let rw = code.words[ret];
-    if rw.bit(91) {
+    let rf = code.insts[ret].fields;
+    if rf.uniform {
         return false;
     }
-    let mut regs = vec![rw.get(24, 8)];
-    if let Ok(Callee::To(callee)) = callee(&code.insts[k], code.words[k], code.insts.len()) {
+    let mut regs = vec![u32::from(rf.ra)];
+    if let Ok(Callee::To(callee)) = callee(&code.insts[k], code.insts.len()) {
         for j in (callee..ret).rev() {
-            let w = code.words[j];
-            let copy = match w.opcode() {
-                0x202 if w.get(72, 4) == 0xf => Some(w.get(32, 8)),
-                0x224
-                    if code.insts[j].has("MOV")
-                        && !code.insts[j].has("X")
-                        && w.get(24, 8) == 255
-                        && w.get(32, 8) == 255 =>
-                {
-                    Some(w.get(64, 8))
-                }
-                _ => None,
-            };
-            if let Some(src) = copy
-                && code.insts[j].guard.is_none()
-                && regs.contains(&w.get(16, 8))
+            if let Some((dst, src)) = register_copy(&code.insts[j])
+                && regs.contains(&dst)
             {
-                regs.retain(|r| *r != w.get(16, 8));
+                regs.retain(|r| *r != dst);
                 regs.push(src);
             }
         }
     }
-    let abs = rw.bit(85);
+    let abs = code.insts[ret].has("ABS");
     let off = if abs {
-        raw_offset(rw)
+        rf.offset
     } else {
-        16 * (ret as i64 + 1) + raw_offset(rw)
+        16 * (ret as i64 + 1) + rf.offset
     };
     let want = 16 * (k as i64 + 1) - off;
     let window = k.saturating_sub(16)..k;
@@ -149,24 +129,51 @@ pub(super) fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
         if i.mnemonic != "LEPC" || i.guard.is_some() {
             return false;
         }
-        let r = code.words[j].get(16, 8);
+        let Some(Operand::Reg(r, _)) = i.ops.first() else {
+            return false;
+        };
+        let r = u32::from(*r);
         if !regs.contains(&r) {
             return false;
         }
         let add = (j + 1..k)
-            .filter(|&m| {
-                let w = code.words[m];
-                w.opcode() == 0x810
-                    && w.get(16, 8) == r
-                    && w.get(24, 8) == r
-                    && w.get(64, 8) == 255
-                    && code.insts[m].guard.is_none()
+            .filter_map(|m| {
+                let a = &code.insts[m];
+                let f = a.fields;
+                (a.mnemonic == "IADD3"
+                    && u32::from(f.rd) == r
+                    && u32::from(f.ra) == r
+                    && f.rc == 255
+                    && a.guard.is_none())
+                .then_some(f.imm)
+                .flatten()
             })
-            .map(|m| i64::from(code.words[m].get(32, 32) as i32))
+            .map(|v| i64::from(v as i32))
             .next_back()
             .unwrap_or(0);
         16 * j as i64 + add == want
     })
+}
+
+/// The destination and source of an unguarded register copy: `MOV` of a
+/// register with every lane, or `IMAD.MOV` of `RZ * RZ` plus a register.
+fn register_copy(i: &crate::Inst) -> Option<(u32, u32)> {
+    if i.guard.is_some() {
+        return None;
+    }
+    match (i.mnemonic, i.ops.as_slice()) {
+        ("MOV", [Operand::Reg(d, _), Operand::Reg(s, _)]) => Some((u32::from(*d), u32::from(*s))),
+        (
+            "IMAD",
+            [
+                Operand::Reg(d, _),
+                Operand::Reg(255, _),
+                Operand::Reg(255, _),
+                Operand::Reg(s, _),
+            ],
+        ) if i.has("MOV") && !i.has("X") => Some((u32::from(*d), u32::from(*s))),
+        _ => None,
+    }
 }
 
 /// Whether one of `regs` holds `want` at the CALL at `k` through an
@@ -183,7 +190,6 @@ fn moved_before(code: &Code, k: usize, regs: &[u32], want: i64) -> bool {
     let mut live = regs.to_vec();
     for j in (k.saturating_sub(MOVE_WINDOW)..k).rev() {
         let i = &code.insts[j];
-        let w = code.words[j];
         if matches!(
             i.mnemonic,
             "BRA" | "JMP" | "EXIT" | "CALL" | "RET" | "BRX" | "BRXU"
@@ -191,10 +197,10 @@ fn moved_before(code: &Code, k: usize, regs: &[u32], want: i64) -> bool {
         {
             return false;
         }
-        if w.opcode() == 0x802
+        if let ("MOV", [Operand::Reg(d, _), Operand::Hex(v), ..]) = (i.mnemonic, i.ops.as_slice())
             && i.guard.is_none()
-            && live.contains(&w.get(16, 8))
-            && i64::from(w.get(32, 32)) == want
+            && live.contains(&u32::from(*d))
+            && i64::try_from(*v).is_ok_and(|v| v == want)
         {
             return true;
         }
@@ -218,9 +224,9 @@ fn bra_self(code: &Code, k: usize) -> bool {
 /// that `returns` says reaches a RET.
 pub(super) fn functions(code: &Code, end: usize, returns: impl Fn(usize) -> bool) -> Vec<usize> {
     let mut v: Vec<usize> = Vec::new();
-    for (k, i) in code.insts[..end].iter().enumerate() {
+    for i in &code.insts[..end] {
         if i.mnemonic == "CALL"
-            && let Ok(Callee::To(t)) = callee(i, code.words[k], end)
+            && let Ok(Callee::To(t)) = callee(i, end)
         {
             v.push(t);
         }
@@ -258,16 +264,14 @@ fn extern_target(code: &Code, k: usize, externs: &BTreeMap<(u32, u32), String>) 
     let lo = k.saturating_sub(EXTERN_WINDOW);
     let writer = (lo..k).rev().find(|&j| writes(code, j, *r))?;
     let l = &code.insts[writer];
-    let lw = code.words[writer];
-    if l.mnemonic != "LDC" || !l.has("64") || l.guard.is_some() || lw.bit(91) || lw.get(78, 2) != 0
-    {
+    let cb = l.fields.cbuf;
+    if l.mnemonic != "LDC" || !l.has("64") || l.guard.is_some() || cb.bank_ureg || cb.mode != 0 {
         return None;
     }
-    let bank = lw.get(54, 5);
-    let offset = i64::from(lw.get(38, 16) as u16 as i16);
-    let base = match lw.get(24, 8) as u8 {
-        255 => 0,
-        x => constant_reg(code, lo, writer, x)?,
+    let (bank, offset) = (cb.bank, cb.offset);
+    let base = match cb.index {
+        CbufIndex::Reg(x) => constant_reg(code, lo, writer, x)?,
+        _ => 0,
     };
     let at = u32::try_from(offset + base).ok()?;
     externs.get(&(bank, at)).cloned()

@@ -28,8 +28,8 @@ use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use relift_gpu_sm86::translate::build::{Input, Table, translate_set};
-use relift_gpu_sm86::translate::{DeviceCaps, HostProfile, Options};
+use relift_gpu_nv::translate::build::{Input, Table, translate_set};
+use relift_gpu_nv::translate::{DeviceCaps, HostProfile, Options};
 
 use crate::import::BoxError;
 
@@ -141,7 +141,7 @@ fn translate_all(host: &HostProfile, inputs: &[Input], jobs: usize) -> Table {
     let parts: Vec<Table> = std::thread::scope(|s| {
         let hs: Vec<_> = inputs
             .chunks(chunk)
-            .map(|c| s.spawn(move || translate_set(host, c)))
+            .map(|c| s.spawn(move || translate_set(host, c, relift_gpu_sm86::program::parse)))
             .collect();
         hs.into_iter()
             .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))

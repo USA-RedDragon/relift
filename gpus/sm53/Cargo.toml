@@ -11,6 +11,7 @@ publish.workspace = true
 band = "2"
 
 [dependencies]
+relift-gpu-nv = { workspace = true }
 relift-gpu-sm86 = { workspace = true }
 
 [lints]

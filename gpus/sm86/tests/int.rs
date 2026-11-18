@@ -1,7 +1,7 @@
 mod common;
 
 use common::translate;
-use relift_gpu_sm86::program::Program;
+use relift_gpu_nv::program::Program;
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -20,12 +20,12 @@ fn program(body: &[[u8; 16]]) -> Program {
     }
     b.extend(word(0x14d, 4, &[(87, 3, 7)]));
     b.extend(word(0x147, 4, &[(34, 48, 0xffff_ffff_fffc), (87, 3, 7)]));
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 fn check(name: &str, w: [u8; 16], text: &str) {
     let p = program(&[w]);
-    let first = p.decode().into_iter().next().and_then(Result::ok);
+    let first = p.code.clone().into_iter().next().and_then(Result::ok);
     let shown = first.map(|i| i.to_string()).unwrap_or_default();
     assert!(
         shown.starts_with(text),

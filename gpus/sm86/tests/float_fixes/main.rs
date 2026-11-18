@@ -8,8 +8,8 @@ mod eval;
 
 use common::translate_with;
 use eval::{Device, FLUSH, PRESERVE};
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{self, HostProfile, Options};
+use relift_gpu_nv::program::Program;
+use relift_gpu_nv::translate::{self, HostProfile, Options};
 use std::collections::HashSet;
 
 const OUT: u64 = 0x1000;
@@ -143,7 +143,7 @@ fn program(inst: u128, a: u32, b: u32, c: u32) -> Program {
         word(0x147, 4, &[(34, 48, 0xffff_ffff_fffc), (87, 3, 7)]),
     ];
     let bytes: Vec<u8> = body.iter().flat_map(|w| w.to_le_bytes()).collect();
-    Program::parse(&bytes)
+    relift_gpu_sm86::program::parse(&bytes)
 }
 
 fn host(h: HostProfile) -> Options {
@@ -204,7 +204,7 @@ fn check(name: &str, o: &Options, devs: &[Device], inst: u128, cases: &[(u32, u3
 /// translator asks for DenormPreserve, or anything for a host that promises
 /// no denormal mode; all with a GLSL `Fma` that rounds twice.
 fn devices(h: &HostProfile) -> Vec<Device> {
-    use relift_gpu_sm86::translate::Denorm;
+    use relift_gpu_nv::translate::Denorm;
     let unfused = |d: Device| Device { fused: false, ..d };
     let flush: Vec<Device> = (0..4)
         .map(|k| Device {
@@ -1478,7 +1478,7 @@ fn mufu(func: u64) -> u128 {
 fn mufu_tanh_is_reported_inexact() {
     let tanh = program(mufu(9), 0, 0, 0);
     assert!(
-        tanh.decode()[5]
+        tanh.code[5]
             .as_ref()
             .is_ok_and(|i| i.to_string().starts_with("MUFU.TANH"))
     );

@@ -1,5 +1,5 @@
 use super::{D, Result};
-use crate::inst::{Operand, RegMods, fmt_hex};
+use relift_gpu_nv::{Operand, RegMods, fmt_hex};
 
 const ASIZE: [&str; 4] = ["", "64", "96", "128"];
 const EVICT: [&str; 6] = ["EF", "", "EL", "LU", "EU", "NA"];

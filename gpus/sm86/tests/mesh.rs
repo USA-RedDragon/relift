@@ -8,11 +8,11 @@
 mod common;
 
 use common::{translate_with, validate};
-use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::mesh_fallback::{
+use relift_gpu_nv::program::{Program, Stage};
+use relift_gpu_nv::translate::mesh_fallback::{
     indexed, mesh_record_words, scan, scan_lanes, vertex,
 };
-use relift_gpu_sm86::translate::{
+use relift_gpu_nv::translate::{
     HostProfile, MeshLimits, MeshPath, MeshPipeline, MeshTopology, Options, mesh_components,
 };
 
@@ -75,7 +75,8 @@ fn cases() -> Vec<Case> {
             "program" => {
                 let (k, h) = rest.split_once(' ').expect("program kind");
                 let c = out.last_mut().expect("case");
-                c.programs.push((k.into(), Program::parse(&hex(h))));
+                c.programs
+                    .push((k.into(), relift_gpu_sm86::program::parse(&hex(h))));
             }
             "answer" => {}
             _ => panic!("kat line {kind}"),

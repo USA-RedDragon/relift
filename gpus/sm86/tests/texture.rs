@@ -1,8 +1,8 @@
 mod common;
 
 use common::translate;
-use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::{
+use relift_gpu_nv::program::{Program, Stage};
+use relift_gpu_nv::translate::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING,
     TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
@@ -65,13 +65,13 @@ fn insts(words: &[u32], opcode: u32) -> Vec<Vec<u32>> {
     out
 }
 
-fn compute(body: &[[u8; 16]]) -> relift_gpu_sm86::translate::Shader {
+fn compute(body: &[[u8; 16]]) -> relift_gpu_nv::translate::Shader {
     let mut b = Vec::new();
     for w in body {
         b.extend(w);
     }
     exit_and_halt(&mut b);
-    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"))
+    translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"))
 }
 
 #[test]
@@ -194,7 +194,9 @@ fn offsets_set_in_an_earlier_block_stay_constant() {
     ] {
         let mut b: Vec<u8> = body.iter().flatten().copied().collect();
         exit_and_halt(&mut b);
-        let e = translate(&Program::parse(&b)).err().map(|e| e.to_string());
+        let e = translate(&relift_gpu_sm86::program::parse(&b))
+            .err()
+            .map(|e| e.to_string());
         assert!(e.is_some_and(|e| e.contains("offsets")), "{body:?}");
     }
 }
@@ -268,7 +270,9 @@ fn run_time_sample_offsets_are_rejected() {
     ] {
         let mut b = w.to_vec();
         exit_and_halt(&mut b);
-        let e = translate(&Program::parse(&b)).err().map(|e| e.to_string());
+        let e = translate(&relift_gpu_sm86::program::parse(&b))
+            .err()
+            .map(|e| e.to_string());
         assert!(e.is_some_and(|e| e.contains("offsets")));
     }
 }
@@ -295,7 +299,7 @@ fn fragment_queries_the_lod() {
     b.extend(tex(0x169, &[(61, 3, 3), (72, 4, 3)]));
     b.extend(tex(0x160, &[(61, 3, 1), (87, 3, 2)]));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(insts(&s.spirv, 105).len(), 1);
     let implicit = insts(&s.spirv, 87);
     assert_eq!(implicit.len(), 3);
@@ -349,9 +353,8 @@ fn surface_words() -> ([u8; 16], [u8; 16]) {
 fn written_storage_images_are_coherent() {
     const COHERENT: u32 = 23;
     let (sust, suld) = surface_words();
-    let coherent = |s: &relift_gpu_sm86::translate::Shader| {
-        insts(&s.spirv, 71).iter().any(|d| d[2] == COHERENT)
-    };
+    let coherent =
+        |s: &relift_gpu_nv::translate::Shader| insts(&s.spirv, 71).iter().any(|d| d[2] == COHERENT);
     assert!(coherent(&compute(&[sust, suld])));
     assert!(!coherent(&compute(&[suld])));
 }
@@ -362,7 +365,7 @@ fn written_storage_images_are_coherent() {
 #[test]
 fn surface_stores_leave_the_predicates_alone() {
     let (sust, _) = surface_words();
-    let stores_false = |s: &relift_gpu_sm86::translate::Shader| {
+    let stores_false = |s: &relift_gpu_nv::translate::Shader| {
         let fals: Vec<u32> = insts(&s.spirv, 42).iter().map(|i| i[2]).collect();
         insts(&s.spirv, 62).iter().any(|i| fals.contains(&i[2]))
     };
@@ -468,7 +471,7 @@ fn rejects_texture_forms_it_cannot_translate() {
     ] {
         let mut b = w.to_vec();
         exit_and_halt(&mut b);
-        assert!(translate(&Program::parse(&b)).is_err());
+        assert!(translate(&relift_gpu_sm86::program::parse(&b)).is_err());
     }
 }
 
@@ -484,7 +487,7 @@ fn program(head: Vec<u8>, body: &[[u8; 16]]) -> Program {
         b.extend(w);
     }
     exit_and_halt(&mut b);
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 #[test]
@@ -541,7 +544,7 @@ fn tmml_takes_the_array_view_the_handle_is_sampled_with() {
     b.extend(tex(0x160, &[(61, 3, 5), (87, 3, 2)]));
     b.extend(tex(0x16f, &[(62, 2, 0)]));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(insts(&s.spirv, 105).len(), 1);
     assert!(!insts(&s.spirv, 103).is_empty());
     let float = &s.interface.texture_bindings;
@@ -552,7 +555,7 @@ fn tmml_takes_the_array_view_the_handle_is_sampled_with() {
     b.extend(tex(0x160, &[(61, 3, 5), (87, 3, 2)]));
     b.extend(tex(0x16f, &[(62, 2, 0)]));
     exit_and_halt(&mut b);
-    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
     assert!(
         s.interface.texture_dims.contains_key(&(3, 16)),
         "a 3D TMML on a 2D array leaves the dimension to the runtime"
@@ -654,9 +657,10 @@ fn offsets_are_followed_through_calls() {
         exit_and_halt(&mut b);
         b
     };
-    let s = translate(&Program::parse(&program(mov(9, 0)))).unwrap_or_else(|e| panic!("{e}"));
+    let s = translate(&relift_gpu_sm86::program::parse(&program(mov(9, 0))))
+        .unwrap_or_else(|e| panic!("{e}"));
     assert!(insts(&s.spirv, 88).iter().any(|i| i[5] & 8 != 0));
-    let e = translate(&Program::parse(&program(iadd)))
+    let e = translate(&relift_gpu_sm86::program::parse(&program(iadd)))
         .err()
         .map(|e| e.to_string());
     assert!(e.is_some_and(|e| e.contains("offsets")));

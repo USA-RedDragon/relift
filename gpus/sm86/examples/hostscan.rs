@@ -7,9 +7,9 @@
 //!
 //! `hostscan <dir> [threads]`
 
-use relift_gpu_sm86::Operand;
-use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::{HostProfile, Options, translate, translate_with};
+use relift_gpu_nv::Operand;
+use relift_gpu_nv::program::{Program, Stage};
+use relift_gpu_nv::translate::{HostProfile, Options, translate, translate_with};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,7 +48,7 @@ fn imm(o: Option<&Operand>) -> Option<u64> {
 
 /// `Some(true)` for a warp operation that only reads its own 2x2 quad,
 /// `Some(false)` for one that reads the whole warp, `None` otherwise.
-fn warp_kind(i: &relift_gpu_sm86::Inst) -> Option<bool> {
+fn warp_kind(i: &relift_gpu_nv::Inst) -> Option<bool> {
     match i.mnemonic {
         "FSWZADD" => Some(true),
         "SHFL" => {
@@ -89,11 +89,11 @@ fn warp_kind(i: &relift_gpu_sm86::Inst) -> Option<bool> {
     }
 }
 
-fn divergent_guard(i: &relift_gpu_sm86::Inst) -> bool {
+fn divergent_guard(i: &relift_gpu_nv::Inst) -> bool {
     matches!(i.guard, Some(Operand::Pred(n, _)) if n != 7)
 }
 
-fn target(i: &relift_gpu_sm86::Inst) -> Option<i64> {
+fn target(i: &relift_gpu_nv::Inst) -> Option<i64> {
     i.ops.iter().find_map(|o| match o {
         Operand::Target(t) => Some(*t),
         _ => None,
@@ -104,7 +104,7 @@ fn scan(p: &Program, t: &mut Tally) {
     let stage = p.stage();
     let sn = stage_name(stage);
     t.add(format!("programs {sn}"), 1);
-    let insts: Vec<_> = p.decode().into_iter().map(|d| d.ok()).collect();
+    let insts: Vec<_> = p.code.clone().into_iter().map(|d| d.ok()).collect();
     let n = insts.len();
     let mut div = vec![false; n];
     let mut div_exit = vec![false; n];
@@ -277,7 +277,7 @@ fn main() {
                     let k = next.fetch_add(1, Ordering::Relaxed);
                     let Some(p) = entries.get(k) else { break };
                     let Ok(b) = std::fs::read(p) else { continue };
-                    scan(&Program::parse(&b), &mut t);
+                    scan(&relift_gpu_sm86::program::parse(&b), &mut t);
                 }
                 if let Ok(mut a) = all.lock() {
                     for (k, v) in t.n {

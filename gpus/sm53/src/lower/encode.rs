@@ -2,10 +2,11 @@
 //! word of an exact row, the pseudo-instruction of a pseudo row, or the
 //! named stop of a case the evidence does not cover.
 
-use relift_gpu_sm86::translate::pseudo::{
+use relift_gpu_nv::translate::pseudo::{
     I2F_IABS, I2F_INEG, IPA_MUL, IPA_SAT, MUFU_SAT, RRO_EX2, RRO_SINCOS,
 };
-use relift_gpu_sm86::{CBank, Inst as Inst86, Operand, RegMods, Word};
+use relift_gpu_nv::{CBank, Inst as Inst86, Operand, RegMods};
+use relift_gpu_sm86::Word;
 
 use super::flow::{self, Flow};
 use crate::form::{Op, Src};
@@ -17,7 +18,7 @@ pub enum Lowered {
     /// One SM86 word that behaves the same.
     Word(Word),
     /// A pseudo-instruction for the SM86 translator (see
-    /// `relift_gpu_sm86::translate::pseudo`).
+    /// `relift_gpu_nv::translate::pseudo`).
     Pseudo(Inst86),
     /// Not translated, and why.
     Stop(&'static str),

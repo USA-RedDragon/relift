@@ -5,7 +5,7 @@
 //! members `HostProfile::from_device` reads; each names its source. They
 //! load through `DeviceCaps::from_json`, as a build's captures do.
 
-use relift_gpu_sm86::translate::{DeviceCaps, HostProfile};
+use relift_gpu_nv::translate::{DeviceCaps, HostProfile};
 
 fn load(name: &str) -> DeviceCaps {
     let path = format!("{}/tests/caps/{name}.json", env!("CARGO_MANIFEST_DIR"));
@@ -29,7 +29,7 @@ fn adreno_reports_what_it_lacks() {
     assert!(!p.maximal_reconvergence);
     assert!(!p.int64 && !p.int64_atomics_buffer && !p.int64_atomics_image);
     assert!(!p.float32_atomic_add);
-    assert_eq!(p.clock, relift_gpu_sm86::translate::Clock::None);
+    assert_eq!(p.clock, relift_gpu_nv::translate::Clock::None);
 }
 
 /// Thor's Adreno 740 can require 64-wide full subgroups in compute: the
@@ -107,8 +107,8 @@ fn workgroup_limits_come_from_the_device() {
 /// the programs that did not translate.
 #[test]
 fn a_program_set_translates_into_a_table() {
-    use relift_gpu_sm86::translate::Options;
-    use relift_gpu_sm86::translate::build::{Input, translate_set};
+    use relift_gpu_nv::translate::Options;
+    use relift_gpu_nv::translate::build::{Input, translate_set};
     let exit = 0x14du128 | (4 << 9) | (7 << 12) | (7 << 87) | (7 << 110) | (7 << 113);
     let bra = 0x147u128 | (4 << 9) | (7 << 12) | (0xffff_ffff_fffc << 34) | (7 << 87);
     let good: Vec<u8> = [exit, bra].iter().flat_map(|w| w.to_le_bytes()).collect();
@@ -122,7 +122,11 @@ fn a_program_set_translates_into_a_table() {
         options: Options::default(),
     };
     let host = HostProfile::from_device("adreno", &load("adreno"));
-    let t = translate_set(&host, &[input(2, &good), input(1, &good), input(3, &bad)]);
+    let t = translate_set(
+        &host,
+        &[input(2, &good), input(1, &good), input(3, &bad)],
+        relift_gpu_sm86::program::parse,
+    );
     assert_eq!(t.shaders.len(), 2);
     assert!(t.failed.contains_key(&[3; 32]));
     let b = t.to_bytes();

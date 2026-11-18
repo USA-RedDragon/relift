@@ -1,6 +1,6 @@
+use relift_gpu_nv::program::Stage;
 use relift_gpu_sm53::program::{CODE_HEADER_LEN, CODE_MAGIC, SPH_LEN};
 use relift_gpu_sm53::{ParseError, Program};
-use relift_gpu_sm86::program::Stage;
 
 const EXIT: u64 = 0xe300_0000_0007_000f;
 const NOP: u64 = 0x50b0_0000_0007_0f00;

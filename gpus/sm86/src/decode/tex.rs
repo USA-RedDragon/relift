@@ -1,5 +1,5 @@
 use super::{D, Result};
-use crate::inst::Operand;
+use relift_gpu_nv::Operand;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {

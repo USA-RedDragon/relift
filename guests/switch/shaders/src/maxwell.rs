@@ -4,9 +4,9 @@
 //! are its 0x50-byte SPH (graphics) and its code through the last bundle
 //! control reaches.
 
+use relift_gpu_nv::program::Stage;
 use relift_gpu_sm53::program::{CODE_HEADER_LEN, CODE_MAGIC, SPH_LEN};
 use relift_gpu_sm53::{ParseError, Program};
-use relift_gpu_sm86::program::Stage;
 
 use crate::carve::{Kind, find_all};
 

@@ -80,9 +80,10 @@
 use super::mem::tuple_reg;
 use super::uniform;
 use super::{Code, Ctx, Res, TEXTURE_SET, bad, cfg};
+use crate::fields::Handle;
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
-use crate::{Inst, Operand, Word};
+use crate::{Fields, Inst, Operand};
 use std::collections::BTreeMap;
 
 const UNIFORM_CONSTANT: u32 = 0;
@@ -334,7 +335,7 @@ fn imm_of(o: &Operand) -> Option<u32> {
 
 impl Prep {
     pub(crate) fn new(code: &Code) -> Prep {
-        let (insts, words) = (&code.insts, &code.words);
+        let insts = &code.insts;
         let n = insts.len();
         let mut p = Prep {
             starts: vec![false; n + 1],
@@ -352,7 +353,7 @@ impl Prep {
             ..Prep::default()
         };
         p.starts[0] = true;
-        for (k, (i, w)) in insts.iter().zip(words).enumerate() {
+        for (k, i) in insts.iter().enumerate() {
             for o in &i.ops {
                 if let Operand::Target(t) = o
                     && let Ok(t) = usize::try_from(*t / 16)
@@ -400,21 +401,23 @@ impl Prep {
                 };
                 p.imm[k] = mov.filter(|(d, _)| *d != 255);
             }
-            let opc = w.get(0, 9);
-            if w.get(9, 3) == 5 && matches!(opc, 0x160 | 0x163 | 0x166 | 0x169 | 0x16c) {
-                let key = (w.get(54, 5), 4 * w.get(40, 14));
-                let map = if opc == 0x169 {
+            let tx = i.fields.tex;
+            if let Handle::Bound { bank, offset } = tx.handle
+                && matches!(i.mnemonic, "TEX" | "TLD4" | "TLD" | "TMML" | "TXD")
+            {
+                let key = (bank, offset);
+                let map = if i.mnemonic == "TMML" {
                     &mut p.tmml_dims
                 } else {
                     &mut p.dims
                 };
-                let dim = match opc {
-                    0x166 if w.bit(78) => match w.get(61, 3) {
+                let dim = match i.mnemonic {
+                    "TLD" if tx.ms => match tx.dim {
                         1 => Some(Dim::Ms2),
                         5 => Some(Dim::ArrayMs2),
                         _ => None,
                     },
-                    _ => TEX_DIMS[w.get(61, 3) as usize],
+                    _ => TEX_DIMS[usize::from(tx.dim)],
                 };
                 if let Some(d) = dim {
                     let e = map.entry(key).or_insert(Some(d));
@@ -532,8 +535,7 @@ impl Srcs {
 /// Loads the source words named by `g0` (from Ra) and `g1` (from Rb), or
 /// with `scr` the scalar split of both lists.
 fn sources(c: &mut Ctx, g0: &[Slot], g1: &[Slot], scr: bool) -> Res<Srcs> {
-    let ra = c.word.get(24, 8) as u8;
-    let rb = c.word.get(32, 8) as u8;
+    let (ra, rb) = (c.fields.ra, c.fields.rb);
     let mut place: Vec<(Slot, u8, u8)> = Vec::new();
     if scr {
         let all: Vec<Slot> = g0.iter().chain(g1).copied().collect();
@@ -575,7 +577,7 @@ fn sources(c: &mut Ctx, g0: &[Slot], g1: &[Slot], scr: bool) -> Res<Srcs> {
 /// The handle word of a bound (`Some((bank, byte offset))`) or bindless
 /// texture, and whether its index may diverge.
 fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
-    if key.is_none() && c.word.get(9, 3) == 7 {
+    if key.is_none() && matches!(c.fields.tex.handle, Handle::UReg { .. }) {
         return Ok((ur_handle(c)?, false));
     }
     match key {
@@ -589,20 +591,21 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
 
 /// Whether the handle of a texture instruction is a register source.
 fn reg_handle(c: &Ctx, key: Option<(u32, u32)>) -> bool {
-    key.is_none() && c.word.get(9, 3) != 7
+    key.is_none() && !matches!(c.fields.tex.handle, Handle::UReg { .. })
 }
 
 /// The handle of a texture instruction that names a uniform register
 /// pair: the texture index in the first register and the sampler index in
 /// the second, repacked into the combined handle word.
 fn ur_handle(c: &mut Ctx) -> Res<u32> {
-    let w = c.word;
-    let n = w.get(40, 6);
-    if w.get(46, 8) != 0 || w.get(54, 5) != 0 || n >= 62 {
+    let Handle::UReg { n, plain } = c.fields.tex.handle else {
+        return bad("texture handle in a uniform register with an offset");
+    };
+    if !plain || n >= 62 {
         return bad("texture handle in a uniform register with an offset");
     }
-    let t = c.load_ureg(n as u8);
-    let sm = c.load_ureg(n as u8 + 1);
+    let t = c.load_ureg(n);
+    let sm = c.load_ureg(n + 1);
     let t = c.and_k(t, 0xfffff);
     let sm = c.sh(op::SHIFT_LEFT_LOGICAL, sm, 20);
     Ok(c.ib(op::BITWISE_OR, t, sm))
@@ -610,9 +613,9 @@ fn ur_handle(c: &mut Ctx) -> Res<u32> {
 
 /// The bound handle of a texture instruction, `None` for `.B`.
 fn texref(c: &Ctx) -> Res<Option<(u32, u32)>> {
-    match c.word.get(9, 3) {
-        5 => Ok(Some((c.word.get(54, 5), 4 * c.word.get(40, 14)))),
-        1 | 7 => Ok(None),
+    match c.fields.tex.handle {
+        Handle::Bound { bank, offset } => Ok(Some((bank, offset))),
+        Handle::Reg | Handle::UReg { .. } => Ok(None),
         _ => bad("texture handle form"),
     }
 }
@@ -1012,8 +1015,7 @@ impl Ctx {
     /// Writes the components of `v` (four words) that the mask selects to
     /// Rd, Rd+1, Rd2, Rd2+1, or as half pairs to Rd and Rd2.
     fn tex_result(&mut self, v: u32, mask: u32, f16: u32) {
-        let rd = self.word.get(16, 8) as u8;
-        let rd2 = self.word.get(64, 8) as u8;
+        let (rd, rd2) = (self.fields.rd, self.fields.rc);
         let u = self.u32t();
         let comps: Vec<u32> = (0..4)
             .filter(|k| mask >> k & 1 != 0)
@@ -1045,7 +1047,7 @@ impl Ctx {
 
     /// Clears the sparse fault predicate at bits 81..84, if any.
     fn no_fault(&mut self) {
-        let p = self.word.get(81, 3) as u8;
+        let p = self.fields.tex.fault;
         if p != 7 {
             let f = self.m.c_bool(false);
             self.store_pred(p, f);
@@ -1081,16 +1083,16 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
 }
 
 fn suquery(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let w = c.word;
-    if w.bit(87) || w.get(81, 3) != 7 {
+    let tx = c.fields.tex;
+    if tx.query != 0 || tx.fault != 7 {
         return bad("SUQUERY form");
     }
     let z = c.m.c_u32(0);
     c.store_dst(&i.ops[0], z)
 }
 
-fn dim_at(w: Word, table: &[Option<Dim>; 8]) -> Res<Dim> {
-    match table[w.get(61, 3) as usize] {
+fn dim_at(w: Fields, table: &[Option<Dim>; 8]) -> Res<Dim> {
+    match table[usize::from(w.tex.dim)] {
         Some(d) => Ok(d),
         None => bad("texture dimension"),
     }
@@ -1140,13 +1142,14 @@ fn with_layer(c: &mut Ctx, s: &Srcs, d: Dim, mut coords: Vec<u32>) -> Res<u32> {
 }
 
 fn tex(c: &mut Ctx) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
+    let tx = w.tex;
     let key = texref(c)?;
     let d = dim_at(w, &TEX_DIMS)?;
-    let scr = w.bit(60);
-    let lod = w.get(87, 3);
-    let aoffi = w.bit(76);
-    let dc = w.bit(78);
+    let scr = tx.scr;
+    let lod = tx.lod;
+    let aoffi = tx.aoffi;
+    let dc = tx.dc;
     if lod >= 6 {
         return bad("TEX.LC.FDV");
     }
@@ -1251,8 +1254,8 @@ fn tex(c: &mut Ctx) -> Res<()> {
         }
     })?;
     c.no_fault();
-    let mask = w.get(72, 4);
-    let f16 = w.get(79, 2);
+    let mask = u32::from(w.mask);
+    let f16 = u32::from(tx.f16);
     if f16 == 3 {
         return bad("TEX.F16 mode");
     }
@@ -1261,18 +1264,19 @@ fn tex(c: &mut Ctx) -> Res<()> {
 }
 
 fn tld(c: &mut Ctx) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
+    let tx = w.tex;
     let key = texref(c)?;
-    let ms = w.bit(78);
-    if w.bit(77) {
+    let ms = tx.ms;
+    if tx.cl {
         return bad("TLD.CL");
     }
-    let lod = w.get(87, 3);
+    let lod = tx.lod;
     if lod != 1 && lod != 3 {
         return bad("TLD LOD mode");
     }
-    let aoffi = w.bit(76);
-    let d = match (w.get(61, 3), ms) {
+    let aoffi = tx.aoffi;
+    let d = match (tx.dim, ms) {
         (0, false) => Dim::D1,
         (1, false) => Dim::D2,
         (2, false) => Dim::D3,
@@ -1300,7 +1304,7 @@ fn tld(c: &mut Ctx) -> Res<()> {
     if ms {
         g1.push(Slot::Ms);
     }
-    let s = sources(c, &g0, &g1, w.bit(60))?;
+    let s = sources(c, &g0, &g1, tx.scr)?;
     let (h, nu) = handle(c, key, &s)?;
     let mut coords = Vec::new();
     for n in 0..d.coords() as u8 {
@@ -1355,27 +1359,28 @@ fn tld(c: &mut Ctx) -> Res<()> {
         Ok(c.texel_bits(r, k))
     })?;
     c.no_fault();
-    let f16 = w.get(79, 2);
+    let f16 = u32::from(tx.f16);
     if f16 == 3 {
         return bad("TLD.F16 mode");
     }
-    c.tex_result(v, w.get(72, 4), f16);
+    c.tex_result(v, u32::from(w.mask), f16);
     Ok(())
 }
 
 fn tld4(c: &mut Ctx) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
+    let tx = w.tex;
     let key = texref(c)?;
-    let d = match w.get(61, 3) {
+    let d = match tx.dim {
         1 => Dim::D2,
         3 => Dim::Cube,
         5 => Dim::Array2,
         7 => Dim::ArrayCube,
         _ => return bad("TLD4 dimension"),
     };
-    let comp = w.get(87, 2);
-    let offmode = w.get(76, 2);
-    let dc = w.bit(78);
+    let comp = u32::from(tx.component);
+    let offmode = tx.offsets;
+    let dc = tx.dc;
     if offmode == 3 || (offmode != 0 && d.cube()) {
         return bad("TLD4 offsets");
     }
@@ -1396,7 +1401,7 @@ fn tld4(c: &mut Ctx) -> Res<()> {
     if dc {
         g1.push(Slot::Dc);
     }
-    let s = sources(c, &g0, &g1, w.bit(60))?;
+    let s = sources(c, &g0, &g1, tx.scr)?;
     let (h, nu) = handle(c, key, &s)?;
     let k_at = (c.pc / 16) as usize;
     let v = c.by_kind(key, !dc, &mut |c, k| {
@@ -1477,16 +1482,16 @@ fn tld4(c: &mut Ctx) -> Res<()> {
         Ok(c.texel_bits(r, k))
     })?;
     c.no_fault();
-    let f16 = w.get(79, 2);
+    let f16 = u32::from(tx.f16);
     if f16 == 3 {
         return bad("TLD4.F16 mode");
     }
-    c.tex_result(v, w.get(72, 4), f16);
+    c.tex_result(v, u32::from(w.mask), f16);
     Ok(())
 }
 
 fn tmml(c: &mut Ctx) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
     let key = texref(c)?;
     let d = dim_at(w, &TEX_DIMS)?;
     let mut g0 = Vec::new();
@@ -1502,7 +1507,7 @@ fn tmml(c: &mut Ctx) -> Res<()> {
     let s = sources(c, &g0, &g1, false)?;
     let (h, nu) = handle(c, key, &s)?;
     let zero = c.m.c_u32(0);
-    if w.get(72, 4) & 4 != 0 {
+    if w.mask & 4 != 0 {
         return bad("TMML third component");
     }
     c.quad_derivatives("TMML")?;
@@ -1534,24 +1539,25 @@ fn tmml(c: &mut Ctx) -> Res<()> {
         let abs = c.tx_opk(op::BITWISE_AND, xu, 0xffff);
         c.tx_uvec4_of([rel, abs, zero, zero])
     };
-    c.tex_result(v, w.get(72, 4), 0);
+    c.tex_result(v, u32::from(w.mask), 0);
     Ok(())
 }
 
 fn txd(c: &mut Ctx) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
+    let tx = w.tex;
     let key = texref(c)?;
-    let d = match w.get(61, 3) {
+    let d = match tx.dim {
         0 => Dim::D1,
         1 => Dim::D2,
         4 => Dim::Array1,
         5 => Dim::Array2,
         _ => return bad("TXD dimension"),
     };
-    if w.bit(87) {
+    if tx.lc {
         return bad("TXD.LC");
     }
-    let aoffi = w.bit(76);
+    let aoffi = tx.aoffi;
     let mut g0 = Vec::new();
     if reg_handle(c, key) {
         g0.push(Slot::Handle);
@@ -1596,18 +1602,18 @@ fn txd(c: &mut Ctx) -> Res<()> {
         Ok(c.texel_bits(r, k))
     })?;
     c.no_fault();
-    let f16 = w.get(79, 2);
+    let f16 = u32::from(tx.f16);
     if f16 == 3 {
         return bad("TXD.F16 mode");
     }
-    c.tex_result(v, w.get(72, 4), f16);
+    c.tex_result(v, u32::from(w.mask), f16);
     Ok(())
 }
 
 fn txq(c: &mut Ctx) -> Res<()> {
-    let w = c.word;
+    let w = c.fields;
     let key = texref(c)?;
-    let query = w.get(62, 2);
+    let query = u32::from(w.tex.query);
     if query >= 2 {
         return bad("TXQ query");
     }
@@ -1639,7 +1645,7 @@ fn txq(c: &mut Ctx) -> Res<()> {
             txq_by_dim(c, sel, h, nu, lod)
         }
     };
-    c.tex_result(v, w.get(72, 4), 0);
+    c.tex_result(v, u32::from(w.mask), 0);
     Ok(())
 }
 
@@ -1773,36 +1779,30 @@ fn image_type(c: &mut Ctx, k: ImageKind, d: ImageDim) -> u32 {
 }
 
 fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let w = c.word;
-    let opc = w.get(0, 12);
-    let (bound, kind_bits) = match opc {
-        0x998 | 0x99a | 0x99c | 0x99e | 0x394 | 0x3a0 => (false, opc),
-        0xb97 | 0xb99 | 0xb9b | 0xb9d | 0x593 | 0x59f => (true, opc),
+    let w = c.fields;
+    let tx = w.tex;
+    let key = match tx.handle {
+        _ if i.has("CAS") => return bad(format!("{} handle form", i.mnemonic)),
+        Handle::Reg => None,
+        Handle::Bound { bank, offset } => Some((bank, offset)),
         _ => return bad(format!("{} handle form", i.mnemonic)),
     };
-    let formatted = matches!(kind_bits, 0x998 | 0x99c | 0xb97 | 0xb9b);
-    let load = matches!(kind_bits, 0x998 | 0x99a | 0xb97 | 0xb99);
-    let store = matches!(kind_bits, 0x99c | 0x99e | 0xb9b | 0xb9d);
-    let red = matches!(kind_bits, 0x3a0 | 0x59f);
-    let d = match SURF_DIMS.get(w.get(61, 3) as usize) {
+    let formatted = matches!(i.mnemonic, "SULD" | "SUST") && i.has("P");
+    let load = i.mnemonic == "SULD";
+    let store = i.mnemonic == "SUST";
+    let red = i.mnemonic == "SURED";
+    let d = match SURF_DIMS.get(usize::from(tx.dim)) {
         Some(d) => *d,
         None => return bad("surface dimension"),
     };
-    let key = if bound {
-        Some((w.get(54, 5), 4 * w.get(40, 14)))
-    } else {
-        None
-    };
-    let ra = w.get(24, 8) as u8;
-    let rb = w.get(32, 8) as u8;
-    let rd = w.get(16, 8) as u8;
+    let (ra, rb, rd) = (w.ra, w.rb, w.rd);
     let h = match key {
         Some((bank, off)) => {
             c.iface.textures.insert((bank, off));
             c.load_cbuf(bank, i64::from(off))?
         }
         None => {
-            let r = w.get(64, 8) as u8;
+            let r = w.rc;
             if r == 255 {
                 return bad("surface handle RZ");
             }
@@ -1825,12 +1825,12 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
         let x = reg_at(c, ra, k)?;
         coords.push(x);
     }
-    let size = if formatted || !w.bit(72) {
+    let size = if formatted || !tx.ba {
         1
     } else if !(load || store) {
         4
     } else {
-        match w.get(73, 3) {
+        match tx.ty {
             0 | 1 => 1,
             2 | 3 => 2,
             5 => 8,
@@ -1852,7 +1852,7 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
         c.no_fault();
     }
     if formatted {
-        let n = match w.get(72, 4) {
+        let n = match w.mask {
             1 => 1,
             3 => 2,
             15 => 4,
@@ -1906,7 +1906,7 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
         return Ok(());
     }
     if load || store {
-        let t = w.get(73, 3);
+        let t = tx.ty;
         let (ik, n) = match t {
             0 | 1 => (ImageKind::Raw8, 1),
             2 | 3 => (ImageKind::Raw16, 1),
@@ -1949,8 +1949,8 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
         }
         return Ok(());
     }
-    let aop = w.get(87, if red { 3 } else { 4 });
-    let ty = w.get(73, 3);
+    let aop = tx.atom;
+    let ty = tx.ty;
     if !matches!(ty, 0 | 1) {
         return bad("SUATOM type");
     }

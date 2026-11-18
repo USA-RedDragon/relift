@@ -3,8 +3,8 @@
 //! Without `spirv-val` on the path the validation is skipped, with one
 //! message; set `RELIFT_SPIRV_VAL_REQUIRE` to make that a failure instead.
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{self, Options, Shader, Unsupported};
+use relift_gpu_nv::program::Program;
+use relift_gpu_nv::translate::{self, Options, Shader, Unsupported};
 use std::io::Write;
 use std::process::Stdio;
 use std::sync::Once;
@@ -63,7 +63,7 @@ fn an_empty_compute_program_validates() {
     let bra = 0x147u128 | (4 << 9) | (7 << 12) | (0xffff_ffff_fffc << 34) | (7 << 87);
     code.extend(exit.to_le_bytes());
     code.extend(bra.to_le_bytes());
-    let p = Program::parse(&code);
+    let p = relift_gpu_sm86::program::parse(&code);
     translate(&p).unwrap_or_else(|e| panic!("{e}"));
     translate_with(&p, &Options::default()).unwrap_or_else(|e| panic!("{e}"));
 }

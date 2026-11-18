@@ -1,5 +1,5 @@
-use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::{
+use relift_gpu_nv::program::{Program, Stage};
+use relift_gpu_nv::translate::{
     GsInput, Options, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing, translate,
     translate_with,
 };
@@ -171,7 +171,7 @@ fn program(stage: u32, extra: &[(usize, u32)], code: &[[u8; 16]]) -> Program {
     }
     b.extend(exit());
     b.extend(halt());
-    Program::parse(&b)
+    relift_gpu_sm86::program::parse(&b)
 }
 
 fn dump(name: &str, words: &[u32]) {
@@ -535,7 +535,7 @@ fn other_stage_buffer_accesses_are_refused() {
         translate(&p).err().map(|e| e.0),
         Some("stage buffer ISBEWR".into())
     );
-    let p = Program::parse(&[isberd(0, 1, 0, 0), exit(), halt()].concat());
+    let p = relift_gpu_sm86::program::parse(&[isberd(0, 1, 0, 0), exit(), halt()].concat());
     assert_eq!(
         translate(&p).err().map(|e| e.0),
         Some("ISBERD outside a tessellation or geometry stage".into())

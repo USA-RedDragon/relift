@@ -1,7 +1,9 @@
-use crate::inst::{CBank, Inst, Operand, RegMods, Swz, Word};
+use crate::Word;
+use relift_gpu_nv::{CBank, Inst, Operand, RegMods, Swz};
 
 mod alu;
 mod ctl;
+mod fields;
 mod mem;
 mod tex;
 
@@ -354,5 +356,6 @@ pub fn decode(w: Word, pc: u64) -> Result<Inst> {
         return d.err(format!("opcode {:#05x}", d.get(0, 12)));
     }
     d.i.guard = guard;
+    fields::fill(w, &mut d.i);
     Ok(d.i)
 }

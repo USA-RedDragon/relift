@@ -1,6 +1,6 @@
 [package]
 name = "relift-gpu-sm86"
-description = "NVIDIA SM86 (Ampere, Switch 2) SASS decoder with nvdisasm's text form, and a SASS to SPIR-V translator; field positions from Mesa NAK (MIT)"
+description = "NVIDIA SM86 (Ampere, Switch 2) SASS decoder into relift-gpu-nv instructions with nvdisasm's text form; field positions from Mesa NAK (MIT)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,8 +11,7 @@ publish.workspace = true
 band = "2"
 
 [dependencies]
-serde_json = { workspace = true }
-zstd = { workspace = true }
+relift-gpu-nv = { workspace = true }
 
 [lints]
 workspace = true
@@ -20,3 +19,5 @@ workspace = true
 [dev-dependencies]
 relift-cache = { workspace = true }
 relift-proc = { workspace = true }
+serde_json = { workspace = true }
+zstd = { workspace = true }

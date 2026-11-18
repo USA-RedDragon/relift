@@ -1,14 +1,13 @@
-//! NVIDIA SM86 (Ampere) SASS: decoder and text form.
+//! NVIDIA SM86 (Ampere) SASS: the decoder into `relift-gpu-nv`
+//! instructions, whose text form matches nvdisasm's spelling so the decoder
+//! can be checked against it, and the parse of program bytes ([`program`]).
 //!
 //! Instruction field positions follow Mesa NAK's SM70+ encoder
-//! (src/nouveau/compiler/nak/sm70_encode.rs, MIT). The text form matches
-//! nvdisasm's spelling so the decoder can be checked against it.
+//! (src/nouveau/compiler/nak/sm70_encode.rs, MIT).
 
 mod decode;
-mod inst;
 pub mod program;
-pub mod spirv;
-pub mod translate;
+mod word;
 
 pub use decode::{DecodeError, decode};
-pub use inst::{CBank, Inst, Operand, RegMods, Sched, Swz, Word, f16_to_f64, fmt_f64, fmt_hex};
+pub use word::Word;

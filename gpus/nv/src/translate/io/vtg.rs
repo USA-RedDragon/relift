@@ -607,8 +607,9 @@ pub(super) fn ast(c: &mut Ctx, i: &Inst) -> Res<()> {
 
 /// ISBERD with map access: the vertex handle of primitive vertex `idx`.
 pub(super) fn isberd(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let w = c.word;
-    if w.get(74, 6) != 0 {
+    let w = c.fields;
+    let b = w.isbe;
+    if b.size != 0 || b.class != 0 || b.skew || b.out {
         let mut name = vec![i.mnemonic];
         name.extend(&i.mods);
         return bad(format!("stage buffer {}", name.join(".")));
@@ -617,9 +618,9 @@ pub(super) fn isberd(c: &mut Ctx, i: &Inst) -> Res<()> {
         return bad("ISBERD outside a tessellation or geometry stage");
     }
     let d = Ctx::dst_reg(&i.ops[0])?;
-    let r = c.load_reg(w.get(24, 8) as u8);
+    let r = c.load_reg(w.ra);
     let u = c.u32t();
-    let k = c.m.c_u32(w.get(40, 16));
+    let k = c.m.c_u32(b.offset);
     let v = c.m.emit(op::I_ADD, u, &[r, k]);
     c.store_reg(d, v);
     Ok(())

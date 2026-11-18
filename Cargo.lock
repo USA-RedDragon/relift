@@ -1032,6 +1032,7 @@ dependencies = [
  "relift-gba",
  "relift-gba-analyze",
  "relift-gba-formats",
+ "relift-gpu-nv",
  "relift-gpu-sm86",
  "relift-guest",
  "relift-host",
@@ -1291,10 +1292,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gpu-nv"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "zstd",
+]
+
+[[package]]
 name = "relift-gpu-sm53"
 version = "0.1.0"
 dependencies = [
  "relift-cache",
+ "relift-gpu-nv",
  "relift-gpu-sm86",
 ]
 
@@ -1303,6 +1313,7 @@ name = "relift-gpu-sm86"
 version = "0.1.0"
 dependencies = [
  "relift-cache",
+ "relift-gpu-nv",
  "relift-proc",
  "serde_json",
  "zstd",
@@ -1530,6 +1541,7 @@ dependencies = [
  "lz4_flex",
  "lzma-rs",
  "relift-cache",
+ "relift-gpu-nv",
  "relift-gpu-sm53",
  "relift-gpu-sm86",
  "relift-proc",

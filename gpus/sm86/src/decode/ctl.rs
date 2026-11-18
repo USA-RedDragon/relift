@@ -1,5 +1,5 @@
 use super::{D, Num, Result, Slot};
-use crate::inst::{Operand, RegMods};
+use relift_gpu_nv::{Operand, RegMods};
 
 fn rel_target(d: &D) -> i64 {
     d.pc as i64 + 16 + raw_target(d)
@@ -185,7 +185,7 @@ fn reg_or_ureg_then_target(d: &D, t: i64) -> Operand {
     } else {
         d.reg_plain(24)
     };
-    sym(format!("{r} {}", crate::inst::fmt_hex(t)))
+    sym(format!("{r} {}", relift_gpu_nv::fmt_hex(t)))
 }
 
 fn call_like(d: &mut D, name: &'static str) {
@@ -311,7 +311,10 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             }
             push_guard_pred(d);
             let r = d.ureg_at(24);
-            d.op(sym(format!("{r} {}", crate::inst::fmt_hex(raw_target(d)))));
+            d.op(sym(format!(
+                "{r} {}",
+                relift_gpu_nv::fmt_hex(raw_target(d))
+            )));
         }
         0x142 => {
             d.i.mnemonic = "BREAK";
@@ -487,11 +490,11 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
                 if t == 0 {
                     d.op(r);
                 } else {
-                    d.op(sym(format!("{r} {}", crate::inst::fmt_hex(t))));
+                    d.op(sym(format!("{r} {}", relift_gpu_nv::fmt_hex(t))));
                 }
             } else if d.bit(91) {
                 let r = d.ureg_at(24);
-                d.op(sym(format!("{r} {}", crate::inst::fmt_hex(t))));
+                d.op(sym(format!("{r} {}", relift_gpu_nv::fmt_hex(t))));
             } else {
                 d.op(Operand::Target(t));
             }
@@ -521,7 +524,7 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
                 d.op(sym(format!(
                     "c[{:#x}][{}]",
                     d.get(54, 5),
-                    crate::inst::fmt_hex(off)
+                    relift_gpu_nv::fmt_hex(off)
                 )));
             } else {
                 d.op(Operand::Target(d.w.get64(34, 47) as i64 * 4));
@@ -771,7 +774,7 @@ fn ldsm(d: &mut D) -> Result<()> {
         s.push_str(&format!("+{}", d.ureg_at(32)));
     }
     if off != 0 {
-        s.push_str(&format!("+{}", crate::inst::fmt_hex(off)));
+        s.push_str(&format!("+{}", relift_gpu_nv::fmt_hex(off)));
     }
     s.push(']');
     d.op(sym(s));

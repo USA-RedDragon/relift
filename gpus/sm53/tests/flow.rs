@@ -100,20 +100,18 @@ fn fragment(code: &[I]) -> Program {
 /// The SM86 text of each lowered word.
 fn lowered(p: &Program) -> Vec<String> {
     let l = program(p).expect("lowers");
-    l.words
+    l.code
         .iter()
-        .enumerate()
-        .map(|(k, w)| {
-            relift_gpu_sm86::decode(*w, 16 * k as u64)
-                .map(|i| i.to_string())
-                .unwrap_or_else(|e| format!("?? {e}"))
+        .map(|d| match d {
+            Ok(i) => i.to_string(),
+            Err(e) => format!("?? {e}"),
         })
         .collect()
 }
 
 fn translates(p: &Program) {
     let l = program(p).expect("lowers");
-    if let Err(e) = relift_gpu_sm86::translate::translate(&l) {
+    if let Err(e) = relift_gpu_nv::translate::translate(&l) {
         panic!("translate: {e:?}");
     }
 }
@@ -314,7 +312,19 @@ fn a_float_program_translates_whole() {
     assert_eq!(t[4], "FFMA.SAT R3, R2, R2, R1");
     assert_eq!(t[5], "FADD.FTZ R0, R3, -R1");
     let l = program(&p).expect("lowers");
-    assert_eq!(l.pseudo[&1].to_string(), "RRO.SINCOS R1, R0");
-    assert_eq!(l.pseudo[&6].to_string(), "MUFU.EX2.SAT R1, R0");
+    assert_eq!(
+        l.code[1]
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        "RRO.SINCOS R1, R0"
+    );
+    assert_eq!(
+        l.code[6]
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        "MUFU.EX2.SAT R1, R0"
+    );
     translates(&p);
 }

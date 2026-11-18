@@ -1,5 +1,5 @@
 use super::{D, Num, Phys, Result, Slot};
-use crate::inst::{Operand, RegMods, Swz};
+use relift_gpu_nv::{Operand, RegMods, Swz};
 
 const RND: [&str; 4] = ["", "RM", "RP", "RZ"];
 const FMUL_SCALE: [&str; 8] = ["?", "D8", "D4", "D2", "", "M2", "M4", "M8"];

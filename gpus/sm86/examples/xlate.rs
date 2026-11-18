@@ -1,5 +1,4 @@
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
+use relift_gpu_nv::translate::{HostProfile, Options, translate_with};
 
 fn main() {
     let mut o = Options::default();
@@ -14,7 +13,7 @@ fn main() {
         })
         .collect();
     let b = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("{}: {e}", args[1]));
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let host = match args.get(3) {
         Some(n) => HostProfile::preset(n).unwrap_or_else(|| panic!("no host preset {n}")),
         None => HostProfile::default(),

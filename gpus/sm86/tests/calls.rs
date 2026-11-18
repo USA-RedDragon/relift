@@ -2,8 +2,8 @@
 //! programs laid out the way discovery links a CUDA kernel: the kernel at
 //! 0, each callee after the previous function's `BRA self`.
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate;
+use relift_gpu_nv::program::Program;
+use relift_gpu_nv::translate::translate;
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -114,7 +114,8 @@ fn end_function(b: &mut Vec<u8>) {
 }
 
 fn text(p: &Program) -> Vec<String> {
-    p.decode()
+    p.code
+        .clone()
         .into_iter()
         .map(|d| {
             d.map(|i| i.to_string())
@@ -136,7 +137,9 @@ fn count_op(words: &[u32], opcode: u32) -> usize {
 }
 
 fn err(b: &[u8]) -> Option<String> {
-    translate(&Program::parse(b)).err().map(|e| e.0)
+    translate(&relift_gpu_sm86::program::parse(b))
+        .err()
+        .map(|e| e.0)
 }
 
 /// The callee at 0x80: R1 += 1, then `RET.ABS.NODEC R20`.
@@ -152,8 +155,8 @@ fn program_keeps_every_function() {
     b.extend(exit());
     end_function(&mut b);
     callee(&mut b);
-    let p = Program::parse(&b);
-    assert_eq!(p.words.len(), 0x80 / 16 + 3);
+    let p = relift_gpu_sm86::program::parse(&b);
+    assert_eq!(p.code.len(), 0x80 / 16 + 3);
 }
 
 fn sites(n: usize) -> Vec<u8> {
@@ -173,13 +176,14 @@ fn sites(n: usize) -> Vec<u8> {
 
 #[test]
 fn absolute_call_returns_through_the_moved_address() {
-    let p = Program::parse(&sites(2));
+    let p = relift_gpu_sm86::program::parse(&sites(2));
     let t = text(&p);
     assert_eq!(t[2], "CALL.ABS.NOINC 0x80");
     assert_eq!(t[9], "RET.ABS.NODEC R20 0x0");
     let n: Vec<usize> = (1..=3)
         .map(|k| {
-            let s = translate(&Program::parse(&sites(k))).unwrap_or_else(|e| panic!("{e}"));
+            let s = translate(&relift_gpu_sm86::program::parse(&sites(k)))
+                .unwrap_or_else(|e| panic!("{e}"));
             count_op(&s.spirv, 128)
         })
         .collect();
@@ -199,7 +203,7 @@ fn lepc_sets_the_return_address() {
     b.extend(iadd_imm(1, 1, 1));
     b.extend(ret_abs(12, 0x20));
     end_function(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     let t = text(&p);
     assert_eq!(t[0], "LEPC R12");
     assert_eq!(t[1], "CALL.ABS 0x80");
@@ -230,7 +234,7 @@ fn indirect_call_switches_over_the_functions() {
     b.extend(iadd_imm(1, 1, 2));
     b.extend(ret_abs(20, 0));
     end_function(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[3], "CALL.ABS.NOINC R8");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(count_op(&s.spirv, 251), 1, "no OpSwitch");
@@ -269,7 +273,7 @@ fn jmp_is_a_jump() {
     b.extend(iadd_imm(1, 1, 1));
     b.extend(exit());
     end_function(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[0], "JMP 0x20");
     assert_eq!(err(&b), None);
 }
@@ -282,7 +286,7 @@ fn trap_ends_the_invocation() {
     b.extend(iadd_imm(1, 1, 1));
     b.extend(exit());
     end_function(&mut b);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert_eq!(text(&p)[1], "@P0 BPT.TRAP 0x1");
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert!(count_op(&s.spirv, 253) >= 2, "trap does not return");
@@ -324,7 +328,7 @@ fn far_site(fill: &[[u8; 16]]) -> Vec<u8> {
 #[test]
 fn return_address_is_followed_through_straight_code_and_copies() {
     let b = far_site(&[iadd_imm(2, 2, 1)]);
-    let p = Program::parse(&b);
+    let p = relift_gpu_sm86::program::parse(&b);
     assert!(text(&p).iter().any(|t| t == "IMAD.MOV.U32 R4, RZ, RZ, R20"));
     assert_eq!(err(&b), None);
     let clobbered = far_site(&[iadd_imm(20, 20, 0x10)]);
@@ -348,12 +352,12 @@ fn assert_kernel() -> Program {
         raw(0x0000_0000_0200_7343, 0x022f_ea00_03c0_0000),
         raw(0x0000_0000_0000_794d, 0x000f_ea00_0380_0000),
     ];
-    Program::parse(&words.concat())
+    relift_gpu_sm86::program::parse(&words.concat())
 }
 
 #[test]
 fn assertfail_ends_the_invocation_and_is_recorded() {
-    use relift_gpu_sm86::translate::{ASSERT_BINDING, Options, translate_with};
+    use relift_gpu_nv::translate::{ASSERT_BINDING, Options, translate_with};
     let p = assert_kernel();
     assert!(translate(&p).is_err());
     let mut o = Options::default();

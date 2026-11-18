@@ -1,10 +1,10 @@
 //! Pseudo-instructions: instructions of another GPU that no SM86 form
-//! matches, which a front end puts in [`Program::pseudo`] in place of a
-//! word (see `relift-gpu-sm53`'s lowering table). Each reads only its
-//! decoded operands and is told apart from every SM86 instruction by a
-//! modifier no SM86 form has.
+//! matches, which a front end puts in [`Program::code`] (see
+//! `relift-gpu-sm53`'s lowering table). Each reads only its decoded
+//! operands and is told apart from every SM86 instruction by a modifier no
+//! SM86 form has.
 //!
-//! [`Program::pseudo`]: crate::program::Program::pseudo
+//! [`Program::code`]: crate::program::Program::code
 
 use super::float::Round;
 use super::{Ctx, Res, bad};

@@ -233,7 +233,7 @@ struct Conv {
 
 /// The branch condition: the guard and the predicates the instruction
 /// itself names, all of which must hold.
-fn conditions(i: &crate::Inst, w: crate::Word) -> Res<Vec<Operand>> {
+fn conditions(i: &crate::Inst) -> Res<Vec<Operand>> {
     let mut c = Vec::new();
     if let Some(g) = &i.guard {
         c.push(g.clone());
@@ -242,9 +242,8 @@ fn conditions(i: &crate::Inst, w: crate::Word) -> Res<Vec<Operand>> {
         for o in &i.ops {
             match o {
                 Operand::Pred(n, not) => c.push(Operand::Pred(*n, *not)),
-                Operand::UReg(_, m) if i.mnemonic == "BRA" && w.bit(91) => {
-                    let n = w.get(24, 3) as u8;
-                    c.push(Operand::UPred(n, m.not));
+                Operand::UReg(n, m) if i.mnemonic == "BRA" => {
+                    c.push(Operand::UPred(n & 7, m.not));
                 }
                 Operand::Target(_) => {}
                 o => return bad(format!("{} operand {o}", i.mnemonic)),
@@ -253,11 +252,6 @@ fn conditions(i: &crate::Inst, w: crate::Word) -> Res<Vec<Operand>> {
     }
     c.retain(|p| !matches!(p, Operand::Pred(7, false) | Operand::UPred(7, false)));
     Ok(c)
-}
-
-/// Signed 48-bit branch offset of a control word, in bytes.
-fn raw_target(w: crate::Word) -> i64 {
-    ((w.get64(34, 48) as i64) << 16 >> 16) * 4
 }
 
 /// Whether `i` ends a run of straight code (a transfer or a label target
@@ -275,9 +269,9 @@ fn is_transfer(i: &crate::Inst) -> bool {
 
 /// Ends a block with no fall-through: an unguarded BRA, JMP, EXIT, BRX,
 /// RET or BPT.TRAP.
-fn no_fall(i: &crate::Inst, w: crate::Word) -> bool {
+fn no_fall(i: &crate::Inst) -> bool {
     (matches!(i.mnemonic, "BRA" | "JMP" | "EXIT" | "BRX" | "BRXU" | "RET") || calls::is_trap(i))
-        && conditions(i, w).is_ok_and(|c| c.is_empty())
+        && conditions(i).is_ok_and(|c| c.is_empty())
 }
 
 fn bra_target(i: &crate::Inst, end: usize) -> Res<usize> {
@@ -291,8 +285,8 @@ fn bra_target(i: &crate::Inst, end: usize) -> Res<usize> {
 }
 
 /// The instruction a direct CALL goes to.
-fn callee_of(i: &crate::Inst, w: crate::Word, end: usize) -> Res<usize> {
-    match calls::callee(i, w, end)? {
+fn callee_of(i: &crate::Inst, end: usize) -> Res<usize> {
+    match calls::callee(i, end)? {
         Callee::To(t) => Ok(t),
         Callee::Reg(_) => bad("indirect CALL"),
     }
@@ -302,19 +296,18 @@ fn callee_of(i: &crate::Inst, w: crate::Word, end: usize) -> Res<usize> {
 /// instruction after it and each CALL to its target and its return point.
 fn plain_succs(code: &Code, end: usize, k: usize) -> Vec<usize> {
     let i = &code.insts[k];
-    let w = code.words[k];
     let mut v = Vec::new();
     let t = match i.mnemonic {
         "BRA" => bra_target(i, end).ok(),
         "JMP" => calls::jmp_target(i, end).ok(),
-        "CALL" => match calls::callee(i, w, end) {
+        "CALL" => match calls::callee(i, end) {
             Ok(Callee::To(t)) => Some(t),
             _ => None,
         },
         _ => None,
     };
     v.extend(t);
-    if i.mnemonic == "BRX" || !no_fall(i, w) {
+    if i.mnemonic == "BRX" || !no_fall(i) {
         v.push(k + 1);
     }
     v.retain(|t| *t < end);
@@ -346,7 +339,7 @@ fn brx_targets(code: &Code, end: usize) -> HashMap<usize, Vec<usize>> {
             }
         }
         let head = (1..end).find_map(|m| {
-            if seen[m] || !no_fall(&code.insts[m - 1], code.words[m - 1]) || returns(code, end, m) {
+            if seen[m] || !no_fall(&code.insts[m - 1]) || returns(code, end, m) {
                 return None;
             }
             brxs.iter()
@@ -447,7 +440,7 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
                 leaders[k + 1] = true;
             }
             "CALL" => {
-                if let Callee::To(t) = calls::callee(i, code.words[k], end)? {
+                if let Callee::To(t) = calls::callee(i, end)? {
                     leaders[t] = true;
                 }
                 leaders[k + 1] = true;
@@ -492,14 +485,14 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
         }
         let stop = next[s];
         let last = &code.insts[stop - 1];
-        let w = code.words[stop - 1];
+        let lf = last.fields;
         let fall = (stop < end).then(|| (stack.clone(), stop));
         let term_inst = is_transfer(last);
         let to = |stack: &[usize], t: usize| (stack.to_vec(), t);
         let target: Option<(Vec<usize>, usize)>;
         let mut term = None;
         let indirect = match last.mnemonic {
-            "CALL" => match calls::callee(last, w, end)? {
+            "CALL" => match calls::callee(last, end)? {
                 Callee::Reg(r) => Some(r),
                 Callee::To(_) => None,
             },
@@ -536,17 +529,17 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
             }
             "CALL"
                 if !*calls.entry(stop - 1).or_insert_with(|| {
-                    callee_of(last, w, end).is_ok_and(|t| returns(code, end, t))
+                    callee_of(last, end).is_ok_and(|t| returns(code, end, t))
                 }) =>
             {
-                target = Some(to(&stack, callee_of(last, w, end)?));
+                target = Some(to(&stack, callee_of(last, end)?));
             }
             "CALL" => {
-                let t = callee_of(last, w, end)?;
+                let t = callee_of(last, end)?;
                 if stack.len() >= MAX_CALL_DEPTH
-                    || stack.iter().any(|&c| {
-                        callee_of(&code.insts[c], code.words[c], end).is_ok_and(|x| x == t)
-                    })
+                    || stack
+                        .iter()
+                        .any(|&c| callee_of(&code.insts[c], end).is_ok_and(|x| x == t))
                 {
                     return bad("recursive CALL");
                 }
@@ -564,12 +557,12 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
                 target = Some(to(rest, site + 1));
             }
             "BRX" | "BRXU" => {
-                let sel = if w.bit(91) || last.mnemonic == "BRXU" {
-                    Sel::UReg(w.get(24, 6) as u8)
+                let sel = if lf.uniform || last.mnemonic == "BRXU" {
+                    Sel::UReg(lf.ura)
                 } else {
-                    Sel::Reg(w.get(24, 8) as u8)
+                    Sel::Reg(lf.ra)
                 };
-                let base = (16 * stop as i64 + raw_target(w)) as u32;
+                let base = (16 * stop as i64 + lf.offset) as u32;
                 let mut cases = Vec::new();
                 for &t in &brx[&(stop - 1)] {
                     let b = ids.get(to(&stack, t), &mut blocks);
@@ -583,7 +576,7 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
         let term = match term {
             Some(t) => t,
             None if term_inst => {
-                let conds = conditions(last, w)?;
+                let conds = conditions(last)?;
                 let to = match last.mnemonic {
                     "EXIT" | "BPT" => EXIT,
                     _ => match target {
@@ -1002,7 +995,7 @@ impl Emit<'_> {
         let (first, end) = (self.g.blocks[b].first, self.g.blocks[b].end);
         for k in first..end {
             let i = &self.code.insts[k];
-            let (w, pc) = (self.code.words[k], 16 * k as u64);
+            let pc = 16 * k as u64;
             match gate {
                 Some(g) if uniform::gated(i) => {
                     let on = self.on(c, g);
@@ -1011,11 +1004,11 @@ impl Emit<'_> {
                     c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
                     c.m.emit_void(op::BRANCH_CONDITIONAL, &[on, then, merge]);
                     c.m.emit_void(op::LABEL, &[then]);
-                    c.guarded(i, w, pc)?;
+                    c.guarded(i, pc)?;
                     c.m.emit_void(op::BRANCH, &[merge]);
                     c.m.emit_void(op::LABEL, &[merge]);
                 }
-                _ => c.guarded(i, w, pc)?,
+                _ => c.guarded(i, pc)?,
             }
         }
         if self.code.asserts.contains(&end) {

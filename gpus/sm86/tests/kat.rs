@@ -11,10 +11,9 @@ mod file;
 mod spvi;
 
 use common::translate_with;
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS};
-use relift_gpu_sm86::translate::{Denorm as HostDenorm, HostProfile, Options};
-use relift_gpu_sm86::{Inst, Operand, RegMods};
+use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS};
+use relift_gpu_nv::translate::{Denorm as HostDenorm, HostProfile, Options};
+use relift_gpu_nv::{Inst, Operand, RegMods};
 use spvi::{Denorm, Env, Memory, Module, Run};
 use std::collections::{HashMap, HashSet};
 
@@ -139,7 +138,7 @@ fn check_family(name: &str) {
     let f = file::load(name);
     let mut failures = Vec::new();
     for v in &f.variants {
-        let p = Program::parse(&v.code);
+        let p = relift_gpu_sm86::program::parse(&v.code);
         let mut seen = HashSet::new();
         let mut rejected = None;
         let known = known(name, &v.label);
@@ -255,8 +254,8 @@ fn maxwell_mufu_sat_clamps_the_device_result() {
     ] {
         let f = file::load(name);
         for v in f.variants.iter().filter(|v| !v.label.contains("F16")) {
-            let mut p = Program::parse(&v.code);
-            let decoded = p.decode();
+            let mut p = relift_gpu_sm86::program::parse(&v.code);
+            let decoded = p.code.clone();
             let Some(k) = decoded
                 .iter()
                 .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == "MUFU"))
@@ -265,7 +264,7 @@ fn maxwell_mufu_sat_clamps_the_device_result() {
             };
             let mut i = decoded[k].clone().unwrap();
             i.mods.push(MUFU_SAT);
-            p.pseudo.insert(k, i);
+            p.code[k] = Ok(i);
             let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{name} {}: {e}", v.label));
             let m = Module::parse(&s.spirv);
             for d in behaviors(&m, &host) {
@@ -311,8 +310,8 @@ fn maxwell_rro_gives_the_mufu_operand() {
             .iter()
             .find(|v| !v.label.contains("F16"))
             .expect("a variant");
-        let mut p = Program::parse(&v.code);
-        let decoded = p.decode();
+        let mut p = relift_gpu_sm86::program::parse(&v.code);
+        let decoded = p.code.clone();
         let k = decoded
             .iter()
             .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == "MUFU"))
@@ -334,7 +333,7 @@ fn maxwell_rro_gives_the_mufu_operand() {
                     ..RegMods::default()
                 },
             ));
-            p.pseudo.insert(k, i);
+            p.code[k] = Ok(i);
             let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{name}: {e}"));
             let m = Module::parse(&s.spirv);
             let mut n = 0;
@@ -396,8 +395,8 @@ fn maxwell_i2f_converts_the_integer_abs_and_neg() {
                 row[0]
             );
         }
-        let mut p = Program::parse(&v.code);
-        let decoded = p.decode();
+        let mut p = relift_gpu_sm86::program::parse(&v.code);
+        let decoded = p.code.clone();
         let k = decoded
             .iter()
             .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == "I2F"))
@@ -411,7 +410,7 @@ fn maxwell_i2f_converts_the_integer_abs_and_neg() {
             if neg {
                 i.mods.push(I2F_INEG);
             }
-            p.pseudo.insert(k, i);
+            p.code[k] = Ok(i);
             let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{label}: {e}"));
             let m = Module::parse(&s.spirv);
             for row in &f.rows {

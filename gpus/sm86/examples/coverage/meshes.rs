@@ -2,7 +2,7 @@
 //! (`meshes.json`), so that task and mesh programs translate with their
 //! pipeline as relift translates them.
 
-use relift_gpu_sm86::translate::{MeshPipeline, Options};
+use relift_gpu_nv::translate::{MeshPipeline, Options};
 use std::collections::HashMap;
 use std::path::Path;
 

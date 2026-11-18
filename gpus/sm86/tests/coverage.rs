@@ -5,8 +5,7 @@
 #[path = "../examples/coverage/meshes.rs"]
 mod meshes;
 
-use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{MeshPath, Options, translate_with};
+use relift_gpu_nv::translate::{MeshPath, Options, translate_with};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -58,7 +57,7 @@ fn paired_task_and_mesh_programs_translate_with_their_pipeline() {
     assert_eq!(pipelines.len(), 2);
     let (t, m) = programs();
     for (sha, b) in [("t", &t), ("m", &m)] {
-        let p = Program::parse(b);
+        let p = relift_gpu_sm86::program::parse(b);
         let o = meshes::options(&Options::default(), &pipelines, sha);
         assert_eq!(
             (

@@ -43,7 +43,7 @@ pub use tex::{
 
 use crate::program::{Program, Stage};
 use crate::spirv::{Module, op};
-use crate::{CBank, Inst, Operand, RegMods, Word};
+use crate::{CBank, Fields, Inst, Operand, RegMods};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 pub(crate) const UNIFORM: u32 = 2;
@@ -213,10 +213,9 @@ pub fn cbuf_binding(bank: u32) -> (u32, u32) {
     }
 }
 
-/// The program after decoding: instructions with their words.
+/// The program after decoding.
 pub(crate) struct Code {
     pub insts: Vec<Inst>,
-    pub words: Vec<Word>,
     /// Calls to `__assertfail`, made `BPT.TRAP` (see [`Options::externs`]).
     pub asserts: HashSet<usize>,
     /// BRA.DIV and BRA.CONV folded to their fast paths.
@@ -241,7 +240,8 @@ pub(crate) struct Ctx {
     pub caps: BTreeSet<u32>,
     pub exts: BTreeSet<&'static str>,
     pub iface: Interface,
-    pub word: Word,
+    /// The named values of the instruction being translated.
+    pub fields: Fields,
     pub pc: u64,
     pub sph_words: [u32; 32],
     pub tex: tex::Prep,
@@ -803,8 +803,8 @@ impl Ctx {
     }
 
     /// One instruction under its guard predicate.
-    pub(crate) fn guarded(&mut self, i: &Inst, w: Word, pc: u64) -> Res<()> {
-        self.word = w;
+    pub(crate) fn guarded(&mut self, i: &Inst, pc: u64) -> Res<()> {
+        self.fields = i.fields;
         self.pc = pc;
         match self.simt_pass() {
             Some(simt::Pass::Collect) => {
@@ -872,8 +872,10 @@ fn converged(mut i: Inst) -> Inst {
 fn decode_all(p: &Program, o: &Options) -> Res<Code> {
     let mut insts = Vec::new();
     let mut fast_paths = 0;
-    for (n, d) in p.decode().into_iter().enumerate() {
-        let i = d.map_err(|e| Unsupported(format!("decode at {:#x}: {e}", 16 * n)))?;
+    for (n, d) in p.code.iter().enumerate() {
+        let i = d
+            .clone()
+            .map_err(|e| Unsupported(format!("decode at {:#x}: {e}", 16 * n)))?;
         if i.mnemonic == "BRA" && (i.has("DIV") || i.has("CONV")) {
             fast_paths += 1;
         }
@@ -881,7 +883,6 @@ fn decode_all(p: &Program, o: &Options) -> Res<Code> {
     }
     let mut code = Code {
         insts,
-        words: p.words.clone(),
         asserts: HashSet::new(),
         fast_paths,
     };
@@ -977,7 +978,7 @@ impl Ctx {
             caps: BTreeSet::from([1]),
             exts: BTreeSet::new(),
             iface: Interface::default(),
-            word: Word(0),
+            fields: Fields::default(),
             pc: 0,
             sph_words: [0; 32],
             tex,
@@ -1007,7 +1008,6 @@ impl Ctx {
             &Options::default(),
             tex::Prep::new(&Code {
                 insts: Vec::new(),
-                words: Vec::new(),
                 asserts: HashSet::new(),
                 fast_paths: 0,
             }),
