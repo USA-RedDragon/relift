@@ -58,8 +58,12 @@ fn forbidden_identifiers() -> Vec<String> {
 }
 
 /// Entries of the scan that are allowed to hold a forbidden word, as
-/// `(path suffix, word)`. Empty today; an entry needs a written reason here.
-const ALLOWED: &[(&str, &str)] = &[];
+/// `(path from the workspace root, word)`; each needs a written reason here.
+///
+/// - `gpus/sm53/src/field.rs`, the word in tickets: the Maxwell special
+///   register `SR_ORDERING_TICKET`, a GPU register name in the generated
+///   operand table, which has nothing to do with Switch tickets.
+const ALLOWED: &[(&str, &str)] = &[("gpus/sm53/src/field.rs", "ticket")];
 
 fn is_allowed(path: &Path, word: &str) -> bool {
     let shown = path.to_string_lossy().replace('\\', "/");
@@ -162,14 +166,16 @@ fn the_scan_finds_planted_words() {
     assert_eq!((n, found.len()), (1, 0), "{found:?}");
 }
 
-/// The allow list is empty today; a row must name a file that exists.
+/// Every row of the allow list names a file that exists.
 #[test]
-fn the_allow_list_is_empty_or_names_real_files() {
+fn the_allow_list_names_real_files() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     for (suffix, _) in ALLOWED {
         assert!(
-            members()
-                .iter()
-                .any(|m| m.dir.join(suffix).exists() || Path::new(suffix).exists()),
+            root.join(suffix).exists()
+                || members()
+                    .iter()
+                    .any(|m| m.dir.join(suffix).exists() || Path::new(suffix).exists()),
             "ALLOWED names {suffix}, which does not exist; strike the row"
         );
     }
