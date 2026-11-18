@@ -131,9 +131,12 @@
       "VK_SHADER_STAGE_TASK_BIT_EXT",
       "VK_SHADER_STAGE_MESH_BIT_EXT"
      ]
+    },
+    "ReliftDeviceProbes": {
+     "canonicalNan32": true
     }
    }
   }
  },
- "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux"
+ "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux; ReliftDeviceProbes from the relift runtime probe on the same device"
 }

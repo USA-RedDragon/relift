@@ -398,6 +398,9 @@ impl Memory {
 /// One invocation's inputs.
 pub struct Env {
     pub denorm: Denorm,
+    /// Single-precision arithmetic writes `0x7fffffff` for every NaN result
+    /// (a host with `HostProfile::canonical_nan`), not [`ODD_NAN`].
+    pub canonical_nan: bool,
     /// Contents of uniform blocks by (set, binding), placed in memory.
     pub uniforms: HashMap<(u32, u32), u64>,
     pub local_id: [u32; 3],
@@ -992,7 +995,7 @@ impl<'m> Run<'m> {
                     131 => two_sum(f64::from(p), -f64::from(q)),
                     _ => (f64::from(p) * f64::from(q), 0.0),
                 };
-                u64::from(self.round(s, e))
+                u64::from(self.round_arith(s, e))
             }
             4427 => {
                 let (p, q, r) = (
@@ -1001,7 +1004,7 @@ impl<'m> Run<'m> {
                     f(self.flush_in(x[2])),
                 );
                 let (s, e) = two_sum(f64::from(p) * f64::from(q), f64::from(r));
-                u64::from(self.round(s, e))
+                u64::from(self.round_arith(s, e))
             }
             // comparisons
             180..=191 => {
@@ -1036,6 +1039,14 @@ impl<'m> Run<'m> {
         } else {
             v
         }
+    }
+
+    /// [`Run::round`] of an arithmetic result, with the host's NaN.
+    fn round_arith(&self, s: f64, e: f64) -> u32 {
+        if s.is_nan() && self.env.canonical_nan {
+            return 0x7fff_ffff;
+        }
+        self.round(s, e)
     }
 
     /// The exact value `s + e` (an unevaluated f64 sum) rounded to single
@@ -1079,7 +1090,7 @@ impl<'m> Run<'m> {
                 // Fma, fused
                 let (p, q, r) = (fi(self, x[0]), fi(self, x[1]), fi(self, x[2]));
                 let (s, e) = two_sum(f64::from(p) * f64::from(q), f64::from(r));
-                u64::from(self.round(s, e))
+                u64::from(self.round_arith(s, e))
             }
             53 => {
                 // Ldexp

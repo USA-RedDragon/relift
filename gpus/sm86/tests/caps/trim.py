@@ -33,6 +33,7 @@ MEMBERS = {
     'shaderBufferFloat32AtomicAdd',
     'shaderDenormPreserveFloat32', 'shaderDenormFlushToZeroFloat32', 'shaderSignedZeroInfNanPreserveFloat32',
     'shaderFmaFloat32', 'shaderDeviceClock', 'shaderSubgroupClock',
+    'canonicalNan32',
     'maxComputeSharedMemorySize', 'maxDescriptorSetUpdateAfterBindSamplers',
     'maxDescriptorSetUpdateAfterBindSampledImages', 'maxPerStageDescriptorUpdateAfterBindStorageBuffers',
     'maxStorageBufferRange', 'maxComputeWorkGroupInvocations', 'maxComputeWorkGroupSize',

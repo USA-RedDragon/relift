@@ -21,6 +21,9 @@ pub struct Device {
     /// A NaN result is `0x7fc00000` whatever the inputs; otherwise the CPU's
     /// own (a quieted input NaN, or the negative default NaN).
     pub canonical_nan: bool,
+    /// A NaN result is `0x7fffffff` whatever the inputs: a host with
+    /// `HostProfile::canonical_nan`.
+    pub sm86_nan: bool,
 }
 
 pub const PRESERVE: Device = Device {
@@ -29,6 +32,7 @@ pub const PRESERVE: Device = Device {
     flush_cmp: false,
     fused: true,
     canonical_nan: false,
+    sm86_nan: false,
 };
 
 pub const FLUSH: Device = Device {
@@ -37,6 +41,7 @@ pub const FLUSH: Device = Device {
     flush_cmp: true,
     fused: true,
     canonical_nan: false,
+    sm86_nan: false,
 };
 
 #[derive(Clone, Debug)]
@@ -118,7 +123,9 @@ impl Ex<'_> {
 
     fn fout(&self, x: f32) -> u64 {
         let x = self.fin(x);
-        if x.is_nan() && self.dev.canonical_nan {
+        if x.is_nan() && self.dev.sm86_nan {
+            0x7fff_ffff
+        } else if x.is_nan() && self.dev.canonical_nan {
             0x7fc0_0000
         } else {
             fb(x)

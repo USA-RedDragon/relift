@@ -213,12 +213,18 @@ fn devices(h: &HostProfile) -> Vec<Device> {
             ..unfused(FLUSH)
         })
         .collect();
-    match h.denorm {
+    let devs = match h.denorm {
         Denorm::Flush => flush,
         Denorm::Unknown if h.denorm_preserve_mode => vec![unfused(PRESERVE)],
         Denorm::Preserve => vec![unfused(PRESERVE)],
         Denorm::Unknown => [&flush[..], &[unfused(PRESERVE)]].concat(),
-    }
+    };
+    devs.into_iter()
+        .map(|d| Device {
+            sm86_nan: h.canonical_nan,
+            ..d
+        })
+        .collect()
 }
 
 #[test]

@@ -388,6 +388,9 @@ impl Ctx {
     /// `r`, or the guest's NaN `0x7fffffff` when `r` or an input is a NaN
     /// (the host may keep or make another payload).
     fn canonical_nan(&mut self, r: u32, xs: &[u32]) -> u32 {
+        if self.host.canonical_nan {
+            return r;
+        }
         let mut nan = self.is_nan_bits(r);
         for &x in xs {
             let n = self.is_nan_bits(x);

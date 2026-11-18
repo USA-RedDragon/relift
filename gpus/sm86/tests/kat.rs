@@ -73,10 +73,15 @@ const OUT: u64 = 0x3_0000_0000;
 /// (the interpreter has no segment table). NVIDIA uses the MUFU model too:
 /// its native path relies on the driver, which an interpreter cannot check.
 fn hosts() -> Vec<HostProfile> {
-    ["nvidia", "radv", "lavapipe", "adreno", "moltenvk"]
+    let mut v: Vec<HostProfile> = ["nvidia", "radv", "lavapipe", "adreno", "moltenvk"]
         .iter()
         .map(|n| HostProfile::preset(n).unwrap())
-        .collect()
+        .collect();
+    let mut h = HostProfile::nvidia();
+    h.name = "nvidia without canonical NaNs".into();
+    h.canonical_nan = false;
+    v.push(h);
+    v
 }
 
 /// The denormal behaviors a host may show for a module.
@@ -100,7 +105,7 @@ fn spirv_bytes(w: &[u32]) -> Vec<u8> {
 
 /// Runs one program on one row: the wrapper reads the row from `c[0][0x160]`
 /// and writes its outputs to `c[0][0x168]`, both for thread 0.
-fn exec(m: &Module, denorm: Denorm, row: &[u32; 4], outs: usize) -> Vec<u32> {
+fn exec(m: &Module, denorm: Denorm, canonical_nan: bool, row: &[u32; 4], outs: usize) -> Vec<u32> {
     let mut cb = vec![0u8; 0x10000];
     for k in 0..3 {
         cb[4 * k..4 * k + 4].copy_from_slice(&1u32.to_le_bytes());
@@ -113,6 +118,7 @@ fn exec(m: &Module, denorm: Denorm, row: &[u32; 4], outs: usize) -> Vec<u32> {
     };
     let env = Env {
         denorm,
+        canonical_nan,
         uniforms: HashMap::from([((1, 0), CBUF)]),
         local_id: [0; 3],
         group_id: [0; 3],
@@ -153,7 +159,7 @@ fn check_family(name: &str) {
                 }
                 let mut bad = 0;
                 for (i, row) in f.rows.iter().enumerate() {
-                    let got = exec(&m, d, row, v.outs);
+                    let got = exec(&m, d, host.canonical_nan, row, v.outs);
                     let want = &v.expect[i * v.outs..(i + 1) * v.outs];
                     if got == want {
                         continue;

@@ -46,6 +46,20 @@ fn mesh_slots_fill_a_required_wide_subgroup() {
     assert_eq!(HostProfile::nvidia().compute_subgroup, Some(32));
 }
 
+/// Dropped NaN selects are a probe result, not a promise: the NVIDIA
+/// capture's probe turns them on, and a capture whose probe failed or never
+/// ran (no `ReliftDeviceProbes` member) keeps the selects.
+#[test]
+fn nan_selects_need_the_device_probe() {
+    let caps = load("nvidia");
+    assert!(HostProfile::from_device("nvidia", &caps).canonical_nan);
+    let mut c = caps.clone();
+    c.values.insert("canonicalNan32".into(), 0);
+    assert!(!HostProfile::from_device("nvidia", &c).canonical_nan);
+    c.values.remove("canonicalNan32");
+    assert!(!HostProfile::from_device("nvidia", &c).canonical_nan);
+}
+
 /// A device at Vulkan's minimum limits: no capture has fewer than 1024
 /// invocations per workgroup, so this one is built from the minimum values
 /// the specification requires, with a wide subgroup the device could
