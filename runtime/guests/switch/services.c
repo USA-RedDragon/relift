@@ -37,5 +37,6 @@ void rl_srv_install_all(void)
     rl_srv_install_ectx();
     rl_srv_install_bsd();
     rl_srv_install_bcat();
+    rl_srv_install_chat();
     rl_hos_audio_register();
 }

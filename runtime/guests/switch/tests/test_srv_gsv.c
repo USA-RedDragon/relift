@@ -60,6 +60,12 @@ TEST(gsv_boots_and_opens_nvdrv2)
     CHECK_EQ(br.result, 0);
     CHECK_EQ(tc_u32(&br, 0), 0);
     CHECK_EQ(tipc(c, h, 120, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
+    b = tc_new(1202);
+    b.tipc = true;
+    br = tc_send(c, (tc_obj){ .handle = h }, b);
+    CHECK_EQ(br.result, 0);
+    CHECK_EQ(br.nmove, 1);
+    CHECK_EQ(tipc(c, br.move[0], 1, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
     CHECK_EQ(tipc(c, h, 101, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 201, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 202, NULL, 0, 0), 0);
@@ -198,9 +204,30 @@ TEST(gsv_display_session_answers_nn_vi)
     CHECK_EQ(tipc(c, d, 999, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
 }
 
+TEST(chat_u_gives_its_shim_and_event)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    tc_obj svc = tc_open_service(c, heap, "chat:u");
+    CHECK(svc.handle != 0);
+    CHECK_EQ(tc_to_domain(c, &svc), 0);
+    tc_obj shim;
+    CHECK_EQ(tc_sub(c, svc, tc_new(0), &shim), 0);
+    tc_res r = tc_send(c, shim, tc_new(1));
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy, 1);
+    *(uint32_t *)(void *)(t_mem() + heap + 0x800) = r.copy[0];
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
+    CHECK_EQ(tc_cmd(c, shim, 2), SF_RESULT_UNKNOWN_COMMAND);
+}
+
 TEST(gsv_is_not_on_the_switch)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
     CHECK_EQ(supervisor(c, heap), 0);
+    CHECK_EQ(tc_open_service_result(c, heap, "chat:u"), SM_RESULT_NOT_REGISTERED);
 }

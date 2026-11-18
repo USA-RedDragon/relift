@@ -71,6 +71,7 @@ void rl_srv_install_ectx(void);
 void rl_srv_install_bsd(void);
 /** @brief Registers bcat:u with an empty delivery cache and, on the Switch 2, stpl:u without stream play. */
 void rl_srv_install_bcat(void);
+void rl_srv_install_chat(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);

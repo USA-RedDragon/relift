@@ -410,6 +410,15 @@ static rl_result initialize_display_context(rl_ipc_req *r)
     return push_session(r, &display_session_class);
 }
 
+static const rl_ipc_class chat_session_class = { "nn::gsv::ChatSession", NULL, 0, 0, NULL };
+
+/**
+ * @brief InitializeChatContext (switchbrew's name): no input; one moved
+ * session handle (verified: SDK 20.5 sdk 0x63a03c sends 1202 with no data
+ * and keeps the handle at TLS+12 as the session it sends 11 and on to).
+ */
+static rl_result initialize_chat_context(rl_ipc_req *r) { return push_session(r, &chat_session_class); }
+
 /** @brief CreateGpuSessionWithRemoteMemory: u64 version; a GpuSession. */
 static rl_result create_gpu_session(rl_ipc_req *r)
 {
@@ -461,6 +470,7 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 1112, "SetGraphicsFrameRestartMode", rl_srv_stub_ok },
     { 1113, "SetGraphicsFrameGpuTimesliceMode", rl_srv_stub_ok },
     { 1201, "CreateChatContext", rl_srv_stub_ok },
+    { 1202, "InitializeChatContext", initialize_chat_context },
     { 1203, "DestroyChatContext", rl_srv_stub_ok },
     { 1301, "CreateAdrawContext", rl_srv_stub_ok },
     { 1302, "InitializeAdrawContext", rl_srv_stub_ok },
