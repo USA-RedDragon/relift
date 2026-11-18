@@ -232,3 +232,31 @@ TEST(holding_the_screens_button_cycles_the_layouts_and_saves_the_choice)
     }
     rl_touchpad_reset();
 }
+
+TEST(a_touch_on_a_control_over_the_picture_is_the_control_and_the_rest_is_the_pen)
+{
+    rl_nds_controls c;
+    touch_up_front(&c);
+    rl_touchpad_view(2520, 1080, 2.625f, NULL);
+    rl_touchpad_set_picture(512, 192, false);
+    int32_t pic[4];
+    rl_touchpad_picture(pic);
+    CHECK_EQ(pic[2], 2520);
+    rl_touchpad_rect r[16];
+    uint32_t n = rl_touchpad_placed(r, 16);
+    float sx = 0, sy = 0;
+    for (uint32_t i = 0; i < n; i++)
+        if (r[i].label && !strcmp(r[i].label, "Select")) {
+            sx = (r[i].x0 + r[i].x1) / 2;
+            sy = (r[i].y0 + r[i].y1) / 2;
+        }
+    CHECK(sx > 0 && sy > (float)pic[1] && sy < (float)(pic[1] + pic[3]));
+    rl_input_touch t[4];
+    rl_touchpad_finger(1, RL_TOUCHPAD_DOWN, sx, sy);
+    CHECK_EQ(rl_touchpad_game_touches(t, 4), 0);
+    rl_touchpad_finger(1, RL_TOUCHPAD_UP, sx, sy);
+    rl_touchpad_finger(2, RL_TOUCHPAD_DOWN, 1260, (float)pic[1] + 100);
+    CHECK_EQ(rl_touchpad_game_touches(t, 4), 1);
+    rl_touchpad_finger(2, RL_TOUCHPAD_UP, 1260, (float)pic[1] + 100);
+    rl_touchpad_reset();
+}
