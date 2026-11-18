@@ -8,9 +8,11 @@
  */
 #include "t.h"
 
+#include "am.h"
 #include "hos_audio.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define REV7 0x37564552u
@@ -660,4 +662,32 @@ TEST(audio_device_volume_auto_tune_is_off_until_enabled)
     r = call(c, dev, &(msg){ .cmd = 21 });
     CHECK_EQ(r.result, 0);
     CHECK_EQ(r.data[0], 0);
+}
+
+TEST(audio_device_names_the_switch2_outputs_the_program_knows)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x400000), name = heap + 0x20000;
+    uint32_t aud = open_service(c, heap, "aud:u");
+    reply r = call(c, aud, &(msg){ .cmd = 2 });
+    CHECK_EQ(r.result, 0);
+    uint32_t h = r.move[0];
+    msg q = mk(2);
+    q.data_size = 8;
+    r = call(c, h, &q);
+    CHECK_EQ(r.result, 0);
+    uint32_t dev = r.move[0];
+    for (int docked = 0; docked < 2; docked++) {
+        rl_am_set_operation_mode(docked);
+        q = mk(3);
+        q.nb = 1;
+        q.b_addr[0] = name;
+        q.b_size[0] = 0x100;
+        CHECK_EQ(call(c, dev, &q).result, 0);
+        CHECK(strcmp((const char *)t_mem() + name, docked ? "AudioTvOutput" : "AudioBuiltInSpeakerOutput") == 0);
+    }
+    rl_am_set_operation_mode(false);
 }

@@ -21,6 +21,7 @@
  * size is this runtime's own estimate; wave buffers are read from guest memory
  * directly instead of through the attached memory pools.
  */
+#include "am.h"
 #include "audren_priv.h"
 
 #include <stdlib.h>
@@ -743,6 +744,42 @@ static rl_result m_work_size(rl_ipc_req *r)
 #define DEVICE_NAME_SIZE 0x100
 #define DEVICE_NAME "AudioStereoJackOutput"
 
+/**
+ * @brief The output device a Switch 2 program sees active: the TV docked, the
+ * built-in speaker handheld, nothing plugged in (inferred). The names are a
+ * Switch 2 SDK's (nn::audio::capture GetAudioDeviceFromName at sdk+0x27b800
+ * compares AudioTvOutput, AudioBuiltInSpeakerOutput, AudioExternalOutput,
+ * AudioStereoJackOutput and AudioUsbDeviceOutput); a Switch 2 program
+ * compares the names it lists with AudioTvOutput, AudioExternalOutput and
+ * AudioBuiltInSpeakerOutput, so the Switch 1 name AudioStereoJackOutput
+ * would match none (verified).
+ */
+static const char *device_name(void)
+{
+    if (!hos_switch2())
+        return DEVICE_NAME;
+    return rl_am_is_docked() ? "AudioTvOutput" : "AudioBuiltInSpeakerOutput";
+}
+
+/**
+ * @brief The Switch 2 output devices ListAudioOutputDeviceName lists: the
+ * three a Switch 2 program compares, which it keeps one slot each for, in
+ * Eglantine's order (src/audio_core/renderer/audio_device.cpp, inferred).
+ */
+static const char *const switch2_outputs[] = {
+    "AudioBuiltInSpeakerOutput",
+    "AudioTvOutput",
+    "AudioExternalOutput",
+};
+
+static void put_name(uint8_t name[DEVICE_NAME_SIZE], const char *n)
+{
+    memset(name, 0, DEVICE_NAME_SIZE);
+    memcpy(name, n, strlen(n));
+}
+
+static void put_device_name(uint8_t name[DEVICE_NAME_SIZE]) { put_name(name, device_name()); }
+
 typedef struct audio_device {
     float volume;
     bool auto_tune;
@@ -761,10 +798,32 @@ static void device_destroy(void *p)
 static rl_result dev_list(rl_ipc_req *r)
 {
     rl_ipc_buf out = rl_ipc_auto_out(r, 0);
-    uint8_t name[DEVICE_NAME_SIZE] = DEVICE_NAME;
+    uint8_t name[DEVICE_NAME_SIZE];
+    put_device_name(name);
     uint32_t n = 0;
     if (out.size >= DEVICE_NAME_SIZE && rl_ipc_buf_write(&out, name, sizeof name))
         n = 1;
+    put32(rl_ipc_out(r, 4), n);
+    return KR_SUCCESS;
+}
+
+/** @brief 14 ListAudioOutputDeviceName: every output device on Switch 2, the active one on Switch 1. */
+static rl_result dev_list_outputs(rl_ipc_req *r)
+{
+    if (!hos_switch2())
+        return dev_list(r);
+    rl_ipc_buf out = rl_ipc_auto_out(r, 0);
+    uint32_t n = 0;
+    for (size_t i = 0; i < sizeof switch2_outputs / sizeof switch2_outputs[0]; i++) {
+        uint8_t name[DEVICE_NAME_SIZE];
+        put_name(name, switch2_outputs[i]);
+        rl_ipc_buf slot = out;
+        slot.addr += (uint64_t)n * DEVICE_NAME_SIZE;
+        slot.size = out.size >= (n + 1) * DEVICE_NAME_SIZE ? DEVICE_NAME_SIZE : 0;
+        if (!rl_ipc_buf_write(&slot, name, sizeof name))
+            break;
+        n++;
+    }
     put32(rl_ipc_out(r, 4), n);
     return KR_SUCCESS;
 }
@@ -789,7 +848,8 @@ static rl_result dev_get_volume(rl_ipc_req *r)
 static rl_result dev_active_name(rl_ipc_req *r)
 {
     rl_ipc_buf out = rl_ipc_auto_out(r, 0);
-    uint8_t name[DEVICE_NAME_SIZE] = DEVICE_NAME;
+    uint8_t name[DEVICE_NAME_SIZE];
+    put_device_name(name);
     if (out.size >= DEVICE_NAME_SIZE)
         rl_ipc_buf_write(&out, name, sizeof name);
     return KR_SUCCESS;
@@ -867,7 +927,7 @@ static const rl_ipc_cmd device_cmds[] = {
     { 11, "QueryAudioDeviceInputEvent", dev_input_event },
     { 12, "QueryAudioDeviceOutputEvent", dev_output_event },
     { 13, "GetActiveAudioOutputDeviceName", dev_active_name },
-    { 14, "ListAudioOutputDeviceName", dev_list },
+    { 14, "ListAudioOutputDeviceName", dev_list_outputs },
     { 19, "SetAudioDeviceOutputVolumeAutoTuneEnabled", dev_set_auto_tune },
     { 20, "IsAudioDeviceOutputVolumeAutoTuneEnabled", dev_auto_tune },
     { 21, "IsActiveOutputDeviceEstimatedLowLatency", dev_low_latency },
