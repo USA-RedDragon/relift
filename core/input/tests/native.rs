@@ -131,6 +131,10 @@ fn generated_c_files_are_current() {
         "gba/ports_gen.c",
         native_c_file("gba", "rl_gba_ports").unwrap(),
     );
+    check_file(
+        "nds/run/ports_gen.c",
+        native_c_file("nds", "rl_nds_ports").unwrap(),
+    );
     let mut sms = String::new();
     for (platform, symbol) in [
         ("sms", "rl_sms_ports"),

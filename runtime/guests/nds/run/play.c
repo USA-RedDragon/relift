@@ -1,6 +1,7 @@
 /**
  * @file play.c
- * @brief The screens' layout in the window.
+ * @brief The screens' layout in the window and the host's input as the
+ * DS's keys and touch screen.
  */
 #include "play.h"
 
@@ -53,4 +54,45 @@ bool rl_nds_layout_touch(rl_nds_layout l, uint32_t x, uint32_t y, uint8_t *tx, u
     *tx = (uint8_t)x;
     *ty = (uint8_t)y;
     return true;
+}
+
+void rl_nds_controls_find(rl_nds_controls *c)
+{
+    static const char *const names[12] = {"a",  "b",    "select", "start", "right", "left",
+                                          "up", "down", "r",      "l",     "x",     "y"};
+    for (unsigned i = 0; i < 12; i++)
+        c->key[i] = rl_ports_find("p1", names[i]);
+    c->press = rl_ports_find("touch", "press");
+    c->x = rl_ports_find("touch", "x");
+    c->y = rl_ports_find("touch", "y");
+}
+
+static uint8_t scaled(float v, uint32_t size)
+{
+    if (!(v > 0.0f))
+        return 0;
+    if (v >= 1.0f)
+        return (uint8_t)(size - 1);
+    return (uint8_t)(v * (float)size);
+}
+
+void rl_nds_input_from(const rl_nds_controls *c, const rl_input_snapshot *s, rl_nds_point point, uint8_t px,
+                       uint8_t py, rl_nds_input *out)
+{
+    memset(out, 0, sizeof *out);
+    for (unsigned i = 0; i < 10; i++)
+        if (rl_ports_eval(c->key[i], s) >= 0.5f)
+            out->keys |= (uint16_t)(1u << i);
+    out->x = rl_ports_eval(c->key[10], s) >= 0.5f;
+    out->y = rl_ports_eval(c->key[11], s) >= 0.5f;
+    if (point == RL_NDS_POINT_OFF || rl_ports_eval(c->press, s) < 0.5f)
+        return;
+    out->touch = true;
+    if (point == RL_NDS_POINT_BOTTOM) {
+        out->touch_x = px;
+        out->touch_y = py;
+    } else {
+        out->touch_x = scaled(rl_ports_eval(c->x, s), SW);
+        out->touch_y = scaled(rl_ports_eval(c->y, s), SH);
+    }
 }

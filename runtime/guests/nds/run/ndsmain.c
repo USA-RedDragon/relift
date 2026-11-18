@@ -1,8 +1,9 @@
 /**
  * @file ndsmain.c
  * @brief The program of a lifted Nintendo DS cartridge: the machine, both
- * CPUs, the window (both screens in the video.nds_layout layout and the
- * sound controller's output) or the headless run, its report, frame hashes and PNG dumps
+ * CPUs, the window (both screens in the video.nds_layout layout, the sound
+ * controller's output, the keys and the touch screen from the native ports
+ * once per frame) or the headless run, its report, frame hashes and PNG dumps
  * of both screens (the top one above the bottom one, 256 x 384).
  */
 #include "cpu.h"
@@ -59,6 +60,8 @@ typedef struct host {
     uint8_t rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
     rl_audio_out *out;
     uint64_t next_ns;
+    /** @brief The controls the input comes from. */
+    rl_nds_controls controls;
     /** @brief The window was closed. */
     bool quit;
     bool headless;
@@ -155,6 +158,24 @@ static bool listed(uint32_t n)
     return false;
 }
 
+/** @brief The input for the next frame: the native ports, with the pointer mapped onto the window's picture. */
+static void poll_input(void)
+{
+    rl_input_snapshot s;
+    rl_input_sample(&s);
+    rl_nds_point point = RL_NDS_POINT_NONE;
+    uint8_t tx = 0, ty = 0;
+    uint32_t fx, fy;
+    if (H.win && (s.pointer.buttons & (1u << RL_PTR_LEFT)))
+        point = rl_window_frame_point(H.win, s.pointer.x, s.pointer.y, &fx, &fy) &&
+                        rl_nds_layout_touch(H.layout, fx, fy, &tx, &ty)
+                    ? RL_NDS_POINT_BOTTOM
+                    : RL_NDS_POINT_OFF;
+    rl_nds_input in;
+    rl_nds_input_from(&H.controls, &s, point, tx, ty, &in);
+    rl_nds_set_input(H.run.m, &in);
+}
+
 /** @brief Hands the sound made so far to the host, then waits while three frames of it are queued. */
 static void audio_pace(void)
 {
@@ -185,13 +206,15 @@ static void present(const uint32_t *pixels)
         rl_sleep_ns(H.next_ns - t);
 }
 
-/** @brief The frame hook: the window, PNG dumps and the --frames stop. */
+/** @brief The frame hook: the window, the input for the next frame, PNG dumps and the --frames stop. */
 static void on_frame(void *user, const uint32_t *pixels, uint64_t when)
 {
     (void)user;
     H.frames++;
+    rl_ports_script_frame(H.frames);
     if (H.win)
         present(pixels);
+    poll_input();
     if (__atomic_load_n(&H.quit, __ATOMIC_ACQUIRE))
         rl_process_exit(0);
     if (H.frame_log) {
@@ -444,6 +467,9 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
         return 1;
     }
     H.run.max_ticks = max_ticks;
+    rl_ports_declare(rl_nds_ports, rl_nds_ports_count);
+    rl_ports_bind_defaults();
+    rl_nds_controls_find(&H.controls);
     H.layout = rl_nds_layout_setting();
     if (H.stop_debug)
         rl_nds_set_debug_hook(H.run.m, on_debug, NULL);

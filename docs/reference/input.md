@@ -11,17 +11,29 @@ and default bindings.
 | --- | --- |
 | Switch | `p1` to `p8` (Pro Controller layout) and `touch` |
 | GB, GBC, GBA | `p1` |
-| NDS | `p1` and `touch` (declared) |
+| NDS | `p1` and `touch` |
 
 Android builds of Switch, GB, GBC and GBA games also have the port
 `touchpad`, the on-screen controller (below).
 
 The tables live in `core/input/src/native.rs`. The C tables the runtime reads
 are generated from them (`runtime/guests/switch/ports_gen.c`,
-`runtime/guests/gb/ports_gen.c`); a test fails when they are stale, and
+`runtime/guests/gb/ports_gen.c`, `runtime/guests/nds/run/ports_gen.c`); a test fails when they are stale, and
 `RELIFT_BLESS=1 cargo test -p relift-input` rewrites them. Joy-Con layouts
 (pair, left and right sideways) are subsets of the Pro Controller controls.
 Motion is not declared yet.
+
+## Nintendo DS
+
+`p1` holds the DS's buttons with the GBA pad's bindings plus X (`gamepad:north`,
+`key:s`) and Y (`gamepad:west`, `key:a`). The program reads the ports once per
+frame. `touch.press` (`mouse:left`) puts the pen down: with the button held over
+the window, at the bottom screen's pixel under the pointer, in either screen
+layout (`video.nds_layout`); a press over the top screen or the margins touches
+nothing. Without a held mouse button, the pen goes to `touch.x` and `touch.y`
+(0 to 1 across the bottom screen), which an input script can hold, for example
+`RELIFT_INPUT_SCRIPT=120:touch.press,120:touch.x=0.5,120:touch.y=0.5`. The lid
+stays open.
 
 ## Switch keyboard defaults
 
