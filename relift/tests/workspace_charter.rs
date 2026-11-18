@@ -423,6 +423,19 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-switch-fonts",
+        why: "the open fallback for the shared fonts: Noto variable fonts subset with the fontations subsetter and instanced with skrifa and write-fonts; national character sets from encoding_rs",
+        normal: &[
+            "encoding_rs",
+            "read-fonts",
+            "skera",
+            "skrifa",
+            "write-fonts",
+        ],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-switch-formats",
         why: "decrypted Switch formats and the import; extraction writes through relift-cache",
         normal: &["lz4_flex", "relift-cache", "sha2", "zstd"],
@@ -650,6 +663,7 @@ const CHARTERS: &[Charter] = &[
             "relift-sms",
             "relift-sms-formats",
             "relift-switch",
+            "relift-switch-fonts",
             "relift-switch-formats",
             "relift-switch-names",
             "relift-testguest",

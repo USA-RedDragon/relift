@@ -5,6 +5,7 @@ The Nintendo Switch guest. It reads decrypted dumps only and has no keys.
 | Crate | Folder | Does |
 |---|---|---|
 | `relift-switch-formats` | `formats` | romfs, NSO, NRO, NPDM, NUP and IPSwitch `.pchtxt` readers, and the import of a `.nup` or an extracted tree |
+| `relift-switch-fonts` | `fonts` | The open fallback for the shared fonts: Noto Sans CJK variable fonts subset to each font type's standard character set and instanced at regular weight |
 | `relift-switch-names` | `names` | Itanium names as host names, the address fallback and the reverse map |
 | `relift-switch` | `guest` | The guest over the formats and `relift-cpu-arm64`: the CPU feature set, module loading, exception-handling tables, the program description |
 | `relift-switch-tools` | `tools` | `relift-nup`, `relift-romfs`, `relift-nso`, `relift-nro`, `relift-npdm` and `relift-ir` |

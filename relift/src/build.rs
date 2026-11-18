@@ -1350,6 +1350,61 @@ pub(crate) fn project_out(settings: &Settings) -> Result<(String, PathBuf), BoxE
     Ok((name, out))
 }
 
+/// Whether `nso` names the shared font service pl:u in its read-only data,
+/// as nn::pl does when it is linked in; a program without it never asks for a
+/// shared font, so its build needs no fallback.
+fn uses_shared_fonts(nso: &Nso) -> bool {
+    let ro = nso.segments[1];
+    let start = ro.memory_offset as usize;
+    nso.image
+        .get(start..start.saturating_add(ro.size as usize))
+        .is_some_and(|b| b.windows(5).any(|w| w == b"pl:u\0"))
+}
+
+/// Makes the open fallback for each shared font the player has not imported
+/// (`relift import --system-data`), and says which fonts a run gets from where.
+/// A fallback that cannot be made is a warning: the run stops by name only if
+/// the game asks for that font.
+fn fallback_fonts(
+    settings: &Settings,
+    import: &Path,
+    out: &Path,
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
+    use relift_switch_formats::bfttf::FontType;
+    let own = crate::fonts::dir(import);
+    let missing: Vec<FontType> = FontType::ALL
+        .into_iter()
+        .filter(|t| {
+            own.as_ref()
+                .is_none_or(|d| !d.join(format!("{}.ttf", t.index())).is_file())
+        })
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let names = |v: &[FontType]| v.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ");
+    match crate::fonts::fallback(&cache_root(settings)?, &out.join(crate::fonts::DIR), &missing) {
+        Ok(made) => {
+            let none: Vec<FontType> = missing.iter().copied().filter(|t| !made.contains(t)).collect();
+            ui.note(&Line::new().text(format!(
+                "fonts: open fallback (Noto Sans CJK) for {}{}",
+                names(&made),
+                if none.is_empty() {
+                    String::new()
+                } else {
+                    format!("; none yet for {}", names(&none))
+                }
+            )));
+        }
+        Err(e) => ui.note(&Line::new().paint(Paint::Yellow, "warning").text(format!(
+            ": fonts: no open fallback for {} ({e}); import the console's fonts with relift import --system-data",
+            names(&missing)
+        ))),
+    }
+    Ok(())
+}
+
 /// Lifts and emits the project (the lifting child's whole job): the C of
 /// every module, the unlifted list and the program files.
 fn lift_and_emit(
@@ -1467,6 +1522,9 @@ fn lift_and_emit(
     relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("game.toml"))?.as_bytes())?;
     prog.push(ports_c);
     let console = program_console(npdm.as_ref(), &game)?;
+    if placed.iter().any(|m| uses_shared_fonts(&m.nso)) {
+        fallback_fonts(settings, &import, out, ui)?;
+    }
     if console == relift_switch::cpu::Console::Switch2 {
         let jobs = relift_proc::workers::jobs().max(1);
         let built = crate::shaders::build(out, jobs as usize)?;
@@ -2405,6 +2463,7 @@ pub fn run_run(
     cmd.env(crate::dev::SOCKET_ENV, &sock);
     crate::gamedata::set_env(&mut cmd, &import);
     crate::shaders::set_env(&mut cmd, &built.out);
+    crate::fonts::set_env(&mut cmd, &built.out);
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }
@@ -2495,5 +2554,31 @@ mod ports_tests {
         assert!(c.contains("\"turbo\""));
         assert!(!c.contains("\"lstick_x\""));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+    use relift_switch_formats::nso::{NsoSpec, build};
+
+    fn module(rodata: &[u8], data: &[u8]) -> Nso {
+        Nso::parse(&build(&NsoSpec {
+            text: vec![0; 4],
+            rodata: rodata.to_vec(),
+            data: data.to_vec(),
+            bss: 0,
+            build_id: [0; 32],
+            dyn_extents: [(0, 0), (0, 0)],
+            compress: false,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn only_a_program_naming_pl_u_in_its_read_only_data_uses_shared_fonts() {
+        assert!(uses_shared_fonts(&module(b"sm:\0pl:u\0fsp-srv\0", b"")));
+        assert!(!uses_shared_fonts(&module(b"pl:user\0", b"")));
+        assert!(!uses_shared_fonts(&module(b"fsp-srv\0", b"pl:u\0")));
     }
 }

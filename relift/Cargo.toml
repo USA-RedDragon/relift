@@ -49,6 +49,7 @@ relift-progress = { workspace = true }
 relift-sms = { workspace = true }
 relift-sms-formats = { workspace = true }
 relift-switch = { workspace = true }
+relift-switch-fonts = { workspace = true }
 relift-switch-formats = { workspace = true }
 relift-switch-names = { workspace = true }
 relift-testguest = { workspace = true }
