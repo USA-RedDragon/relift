@@ -771,6 +771,8 @@ static const rl_ipc_cmd hid_cmds[] = {
     RL_SRV_STUB(3137, "SetNmouseButtonConfigJoyRightJcms"),
     RL_SRV_STUB(3138, "SetMergedNmouseSourceTypes"),
     RL_SRV_STUB(3139, "InitializeNmouse2"),
+    /* 21.0.0+, an ARUID in and nothing out (switchbrew; inferred to only record the version). */
+    RL_SRV_STUB(3150, "SetMouseLibraryVersion"),
 };
 
 static void hid_destroy(void *state)

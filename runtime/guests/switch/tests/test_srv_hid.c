@@ -611,6 +611,7 @@ TEST(hid_mouse)
     CHECK_EQ(st[0].buttons, HID_MOUSE_LEFT | HID_MOUSE_FORWARD | HID_MOUSE_BACK | HID_MOUSE_MIDDLE);
     CHECK_EQ(st[0].attributes, HID_MOUSE_CONNECTED);
     CHECK_EQ(cmd_aruid(&e, 26), 0);
+    CHECK_EQ(cmd_aruid(&e, 3150), 0);
     CHECK_EQ(cmd_aruid(&e, 1), 0);
     CHECK_EQ(e.mem->debug_mouse.header.count, 16);
     CHECK_EQ(e.mem->debug_pad.header.count, 16);
