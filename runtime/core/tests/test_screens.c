@@ -219,7 +219,8 @@ typedef struct snap {
     bool idle_active;
     rl_screens_pen touch_pen, mouse_pen;
     uint32_t swapped_main_first, swapped_second_first;
-    uint32_t single_h;
+    uint32_t single_h, single_swapped_first, single_swapped_h;
+    rl_screens_pen single_swapped_pen;
 } snap;
 
 static snap g_snap;
@@ -272,6 +273,13 @@ static int present_body(void *arg)
     cfg.displays = RL_SCREENS_DISPLAYS_SINGLE;
     rl_screens_present(&g_main_w.head, &cfg, f);
     g_snap.single_h = g_main_w.shown_h;
+    cfg.swap = true;
+    rl_screens_present(&g_main_w.head, &cfg, f);
+    g_snap.single_swapped_first = g_main_w.first[0];
+    g_snap.single_swapped_h = g_main_w.shown_h;
+    s.pointer.x = 10;
+    s.pointer.y = 20;
+    g_snap.single_swapped_pen = rl_screens_touch(&g_main_w.head, &s);
     rl_screens_reset();
     return 0;
 }
@@ -310,4 +318,8 @@ TEST(two_displays_each_show_a_screen_and_touches_on_the_second_reach_the_pen)
     CHECK_EQ(g_snap.swapped_main_first, 2);
     CHECK_EQ(g_snap.swapped_second_first, 1);
     CHECK_EQ(g_snap.single_h, 384);
+    CHECK_EQ(g_snap.single_swapped_first, 2);
+    CHECK_EQ(g_snap.single_swapped_h, 384);
+    CHECK(g_snap.single_swapped_pen.down);
+    CHECK_EQ(g_snap.single_swapped_pen.y, 20);
 }

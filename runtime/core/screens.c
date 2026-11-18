@@ -213,15 +213,15 @@ static void draw(output *o, rl_window *win, const rl_screens_config *cfg, int co
     rl_screens_layout l = rl_screens_resolve(S.sizes, cfg->layout, pw, ph, !win->extra && rl_touchpad_wanted());
     if (cfg->swap)
         l = swapped(l);
-    rl_screens_plan(S.sizes, l, content, ph > pw, &o->plan);
-    if (cfg->swap && (l == RL_SCREENS_STACKED || l == RL_SCREENS_SIDE_BY_SIDE) && content < 0) {
+    bool exchange = cfg->swap && (l == RL_SCREENS_STACKED || l == RL_SCREENS_SIDE_BY_SIDE) && content < 0;
+    if (exchange) {
+        const uint32_t flipped[RL_SCREENS][2] = {{S.sizes[1][0], S.sizes[1][1]}, {S.sizes[0][0], S.sizes[0][1]}};
+        rl_screens_plan(flipped, l, content, ph > pw, &o->plan);
         rl_screens_place t = o->plan.place[0];
         o->plan.place[0] = o->plan.place[1];
         o->plan.place[1] = t;
-        if (l == RL_SCREENS_STACKED)
-            o->plan.place[0].y = 0, o->plan.place[1].y = o->plan.place[0].h;
-        else
-            o->plan.place[0].x = 0, o->plan.place[1].x = o->plan.place[0].w;
+    } else {
+        rl_screens_plan(S.sizes, l, content, ph > pw, &o->plan);
     }
     size_t need = (size_t)o->plan.width * o->plan.height * 3u;
     if (need > o->cap) {
