@@ -60,6 +60,20 @@ fn every_stub_subcommand_fails_as_not_implemented() {
 }
 
 #[test]
+fn report_on_a_binary_file_says_it_is_not_a_stop_report() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cli-report-binary");
+    std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
+    let file = dir.join("junk.bin");
+    relift_cache::write_if_changed(&file, &[0xff, 0xfe, 0x00, 0x80, 0x81])
+        .expect("the file writes");
+    let out = relift(&["report", &file.display().to_string()]);
+    assert!(!out.status.success(), "relift report succeeded");
+    let err = stderr(&out);
+    assert!(err.contains("not a stop report"), "{err}");
+    assert!(!err.contains("UTF-8"), "{err}");
+}
+
+#[test]
 fn a_toolchain_setting_that_names_no_tool_is_refused_before_the_build() {
     for (args, name) in [
         (

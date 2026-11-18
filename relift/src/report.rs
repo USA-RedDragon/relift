@@ -68,8 +68,9 @@ impl Report {
         let mut lines = text.lines();
         let first = lines.next().unwrap_or_default().trim_end();
         if first != FORMAT {
+            let shown: String = first.chars().take(60).collect();
             return Err(format!(
-                "not a stop report (the first line is {first:?}, want {FORMAT:?})"
+                "not a stop report (the first line is {shown:?}, want {FORMAT:?})"
             )
             .into());
         }
@@ -912,7 +913,13 @@ pub fn run(
     build_dir: Option<&Path>,
     hint: HintMode,
 ) -> Result<(), BoxError> {
-    let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let bytes = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        format!(
+            "{}: not a stop report (the file is not text)",
+            file.display()
+        )
+    })?;
     let r = Report::parse(&text).map_err(|e| format!("{}: {e}", file.display()))?;
     let project = Path::new("game.toml").is_file();
     let out = match build_dir {
