@@ -355,7 +355,9 @@ impl Program {
     /// seeding rounds; `progress` hears of each finished run.
     #[must_use]
     pub fn analyze(&self, jobs: usize, progress: &(dyn Fn(&UnitReport) + Sync)) -> Vec<UnitReport> {
-        let mut seeds: Vec<BTreeSet<Loc>> = vec![BTreeSet::new(); self.units.len()];
+        let mut seeds: Vec<BTreeSet<Loc>> = (0..self.units.len())
+            .map(|i| self.stored_entries(i))
+            .collect();
         let mut done: Vec<Option<UnitReport>> = vec![None; self.units.len()];
         let mut todo: Vec<usize> = (0..self.units.len()).collect();
         for _ in 0..MAX_ROUNDS {
@@ -401,6 +403,50 @@ impl Program {
             }
         }
         done
+    }
+
+    /// The function entries of overlay `i` that the bytes of its
+    /// processor's other units hold as words: a table of callbacks in one
+    /// unit naming code an overlay loaded later holds, which no transfer
+    /// discovery follows reaches. A word counts when the instruction it
+    /// names in the overlay opens a stack frame with the return address
+    /// (`STMDB SP!,{..,LR}`, or Thumb `PUSH {..,LR}` for an odd word).
+    fn stored_entries(&self, i: usize) -> BTreeSet<Loc> {
+        let u = &self.units[i];
+        let UnitId::Overlay(cpu, _) = u.id else {
+            return BTreeSet::new();
+        };
+        let opens_frame = |l: Loc| {
+            let off = l.addr.wrapping_sub(u.base) as usize;
+            if l.thumb {
+                u.bytes.get(off..off + 2).is_some_and(|b| b[1] == 0xB5)
+            } else {
+                u.bytes.get(off..off + 4).is_some_and(|b| {
+                    u32::from_le_bytes([b[0], b[1], b[2], b[3]]) & 0xFFFF_4000 == 0xE92D_4000
+                })
+            }
+        };
+        let others = self
+            .units
+            .iter()
+            .enumerate()
+            .filter(|&(j, o)| j != i && o.id.cpu() == cpu)
+            .map(|(_, o)| o.bytes.as_slice());
+        let statics = self
+            .processor(cpu)
+            .into_iter()
+            .flat_map(|p| p.segments.iter().map(|(_, d)| d.as_slice()));
+        let mut out = BTreeSet::new();
+        for bytes in others.chain(statics) {
+            for w in bytes.as_chunks::<4>().0 {
+                let v = u32::from_le_bytes(*w);
+                let l = Loc::rom(v & !1, v & 1 != 0);
+                if (l.thumb || v & 3 == 0) && u.holds(l.addr) && opens_frame(l) {
+                    out.insert(l);
+                }
+            }
+        }
+        out
     }
 
     /// The ARM word at `addr` in the code of the run of the unit `id`: its

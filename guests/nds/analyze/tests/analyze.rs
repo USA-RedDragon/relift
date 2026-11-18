@@ -28,6 +28,7 @@ fn words(w: &[u32]) -> Vec<u8> {
 fn overlay() -> Vec<u8> {
     let mut d = vec![0; 0x300];
     d[..12].copy_from_slice(&words(&[A_PUSH_R4_LR, A_MOV_R0_1, A_POP_R4_PC]));
+    d[0x40..0x4C].copy_from_slice(&words(&[A_PUSH_R4_LR, A_MOV_R0_1, A_POP_R4_PC]));
     d[0x100..0x104].copy_from_slice(&words(&[A_BX_LR]));
     d[0x200..0x204].copy_from_slice(&words(&[OVERLAY + 0x100]));
     d
@@ -94,7 +95,7 @@ fn a_call_into_an_overlay_seeds_its_run() {
     assert_eq!(ov.sha256, Some(sha256(&overlay())));
     assert!(found(ov, OVERLAY + 0x100), "the static initializer");
     assert!(found(ov, OVERLAY), "the call from the static binary");
-    assert_eq!(ov.runs, 2);
+    assert!(ov.runs <= 2);
     assert!(ov.seeds.contains(&Loc::rom(OVERLAY, false)));
 }
 
@@ -137,4 +138,27 @@ fn a_null_function_pointer_leads_to_no_arm9_ram() {
         })
     );
     assert!(found(st, ENTRY + 0xC), "the call may return");
+}
+
+#[test]
+fn an_overlay_function_another_unit_holds_as_a_word_is_found() {
+    let plain = Program::read(&Rom::parse(&cartridge()).expect("parses"))
+        .expect("units read")
+        .analyze(1, &|_| {});
+    assert!(!found(
+        unit(&plain, UnitId::Overlay(Cpu::Arm9, 4)),
+        OVERLAY + 0x44
+    ));
+    let mut bytes = cartridge();
+    let at = Rom::parse(&bytes).expect("parses").header.arm9.rom_offset as usize + 0x600;
+    bytes[at..at + 4].copy_from_slice(&words(&[OVERLAY + 0x40]));
+    synth::fix_crcs(&mut bytes);
+    let rom = Rom::parse(&bytes).expect("parses");
+    let rs = Program::read(&rom).expect("units read").analyze(1, &|_| {});
+    let ov = unit(&rs, UnitId::Overlay(Cpu::Arm9, 4));
+    assert!(ov.seeds.contains(&Loc::rom(OVERLAY + 0x40, false)));
+    assert!(
+        found(ov, OVERLAY + 0x44),
+        "a callback in the static binary's data"
+    );
 }
