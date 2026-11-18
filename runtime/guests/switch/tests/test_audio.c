@@ -634,3 +634,27 @@ TEST(aud_u_gives_the_switch2_audio_managers)
     CHECK_EQ(r.result, 0);
     CHECK_EQ(r.nmove, 1);
 }
+
+TEST(audio_device_volume_auto_tune_is_off_until_enabled)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint32_t h = open_service(c, heap, "audren:u");
+    msg q = mk(2);
+    q.data_size = 8;
+    reply r = call(c, h, &q);
+    CHECK_EQ(r.result, 0);
+    uint32_t dev = r.move[0];
+    r = call(c, dev, &(msg){ .cmd = 20 });
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.data[0], 0);
+    q = mk(19);
+    q.data[0] = 1;
+    q.data_size = 1;
+    CHECK_EQ(call(c, dev, &q).result, 0);
+    r = call(c, dev, &(msg){ .cmd = 20 });
+    CHECK_EQ(r.data[0], 1);
+    r = call(c, dev, &(msg){ .cmd = 21 });
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.data[0], 0);
+}

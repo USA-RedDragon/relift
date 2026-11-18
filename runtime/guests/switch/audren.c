@@ -738,6 +738,7 @@ static rl_result m_work_size(rl_ipc_req *r)
 
 typedef struct audio_device {
     float volume;
+    bool auto_tune;
     hos_revent *events[3];
 } audio_device;
 
@@ -805,6 +806,46 @@ static rl_result dev_channel_count(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/** @brief IAudioDevice 19 SetAudioDeviceOutputVolumeAutoTuneEnabled(bool) (switchbrew). */
+static rl_result dev_set_auto_tune(rl_ipc_req *r)
+{
+    audio_device *d = r->self->state;
+    uint8_t on;
+    if (!rl_ipc_in(r, &on, 1))
+        return SF_RESULT_INVALID_HEADER;
+    d->auto_tune = on & 1;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief IAudioDevice 20 IsAudioDeviceOutputVolumeAutoTuneEnabled: a bool
+ * (switchbrew). Inferred: false until 19 enables it, as Eglantine answers;
+ * the setting is the console's, off unless the game turns it on.
+ */
+static rl_result dev_auto_tune(rl_ipc_req *r)
+{
+    audio_device *d = r->self->state;
+    uint8_t *o = rl_ipc_out(r, 1);
+    if (!o)
+        return KR_OUT_OF_RESOURCE;
+    *o = d->auto_tune;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief IAudioDevice 21 IsActiveOutputDeviceEstimatedLowLatency: a bool
+ * (switchbrew). Inferred: false, as Eglantine answers; relift's output is
+ * the host's audio device, whose latency the guest cannot rely on.
+ */
+static rl_result dev_low_latency(rl_ipc_req *r)
+{
+    uint8_t *o = rl_ipc_out(r, 1);
+    if (!o)
+        return KR_OUT_OF_RESOURCE;
+    *o = 0;
+    return KR_SUCCESS;
+}
+
 static const rl_ipc_cmd device_cmds[] = {
     { 0, "ListAudioDeviceName", dev_list },
     { 1, "SetAudioDeviceOutputVolume", dev_set_volume },
@@ -820,6 +861,9 @@ static const rl_ipc_cmd device_cmds[] = {
     { 12, "QueryAudioDeviceOutputEvent", dev_output_event },
     { 13, "GetActiveAudioOutputDeviceName", dev_active_name },
     { 14, "ListAudioOutputDeviceName", dev_list },
+    { 19, "SetAudioDeviceOutputVolumeAutoTuneEnabled", dev_set_auto_tune },
+    { 20, "IsAudioDeviceOutputVolumeAutoTuneEnabled", dev_auto_tune },
+    { 21, "IsActiveOutputDeviceEstimatedLowLatency", dev_low_latency },
 };
 
 static const rl_ipc_class device_class = {
