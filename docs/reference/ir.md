@@ -1,6 +1,55 @@
 # The IR
 
-`relift-ir` (`core/ir`) is the intermediate representation that every CPU frontend lifts to and that the C emitter reads. It names no guest CPU. This page describes the model, the device extensions, the operations, the two serial formats and the checks. The doc comments in `core/ir/src` are the source of truth; the excerpts below come from them.
+`relift-ir` (`core/ir`) is the intermediate representation that every CPU frontend lifts to and that the C emitter reads. It names no guest CPU. This page describes the model, the device extensions, the operations, the text and binary forms and the checks. The doc comments in `core/ir/src` are the source of truth; the excerpts below come from them.
+
+The IR lives in memory between lifting and emitting: a frontend lifts guest instructions to blocks, the passes in `core/ir/src/opt.rs` rewrite them, and the emitter reads them. No file holds IR. The human-readable form is the text form (`core/ir/src/text.rs`), a printer and a parser that round-trip exactly; `relift-ir` and the tests use it. Every listing on this page is real output of `relift-ir` (A64), `relift-gbrom ir` (Game Boy SM83) or `relift-n64rom ir` (MIPS and RSP), embedded by docgen, so it follows the lifters. In a listing, `vN:iW` is value `N` of `W` bits, `get` and `set` read and write register slots, and the `;` lines are the tools' own headers: address, instruction word and, for A64, the encoding.
+
+## An example
+
+Two A64 instructions, `ldr x0, [x1, #16]` and `cbz x0, #8`, one block each:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0xf9400820 0xb4000040" -->
+```text
+; 0x1000 f9400820 LDR_64_ldst_pos
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = const 0x10
+  v2:i64 = add v0, v1
+  v3:i64 = load.le.plain v2
+  set x0, v3
+  exit jump 0x1004
+; 0x1004 b4000040 CBZ_64_compbranch
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x0
+  v1:i64 = const 0x0
+  v2:i1 = cmp.eq v0, v1
+  v3:i1 = const 0x1
+  v4:i1 = cmp.eq v2, v3
+  exit jump select v4, 0x100c, 0x1008
+```
+<!-- /docgen:output -->
+
+The first block reads `x1`, adds 16, loads 8 bytes little-endian with plain ordering and writes `x0`. The second compares `x0` to zero and exits through a select between the taken and the fall-through address. Each block ends in an exit that names where control goes next.
+
+## Why an IR
+
+relift lifts each guest instruction to this IR and emits C from it. The reasons for the extra layer, each checked against the code:
+
+1. **N CPUs plus M outputs, not N times M.** `cpus/` holds six frontends (`arm32`, `arm64`, `mips`, `rsp`, `sm83`, `z80`). The outputs are C (`core/emit`) and WebAssembly (`core/emit-wasm`, which `relift` does not link yet). Each output reads blocks and a register file and names no CPU. The semantics of most instructions come from Sail models, lowered to IR once: each CPU's generator (`cpus/*/gen`) runs the shared Sail frontend in `core/sail`, which turns the semantics of one encoding into the body of a lifting template that builds IR. No CPU has a C generator of its own.
+2. **The same lift drives discovery.** The shared Arm analyzer (`cpus/arm32/analyze`, under the GBA and NDS analyzers in `guests/gba/analyze` and `guests/nds/analyze`) and the Nintendo 64 analyzer (`guests/n64/analyze`) lift each instruction and run the lifted IR over abstract values: constants, partly known bits, a register plus an offset, table indexes. Discovery and emission therefore agree on what each instruction does, with no second CPU model and no byte patterns. Code that discovery misses stops the program with a named report (`CONTRIBUTING.md`), so the goal of zero interpreted guest instructions at run time depends on that agreement. The Game Boy analyzer (`guests/gb/analyze`) works from decoded SM83 instructions and does not use the IR.
+3. **Per-instruction checking without a C compiler.** `interp::run` executes a block directly. `relift-check insn` and `relift-check forms <name>|all` run lifted A64 words on it against an oracle (Unicorn, QEMU user mode, QEMU `max`, or an Apple M2 over ssh) on random states, and `--mutate` breaks the first live operation of each block and expects a mismatch. For the pointer authentication forms the Sail model, evaluated concretely, is an oracle too. `relift-diff` (`core/diff`) compares a whole function in a live run with a reference engine.
+4. **Optimizations on values the IR makes explicit.** The emitter drops a register write that no later instruction of the function can see, by backward liveness over the function (`core/emit/src/func.rs`; every register counts as live where the C stores the context: calls, traps, returns, indirect jumps, guards and sync points). Flags are 1-bit slots, so this removes dead flags without the C compiler having to prove a store to the context dead. `classify_io` turns an I/O access at a constant address into a plain load or store, or a device access with no range check; the SM83 and Z80 lifters apply it. `Tick` and `Sync` put cycle accounting in the IR, so the emitter charges the clock one way for every guest (`core/emit/src/time.rs`).
+5. **The costs.** The IR is an extra layer of about 6,500 lines (`core/ir/src`). Some operations exist for one CPU's features: lanes (the RSP's vector unit; the A64 lifter writes NEON with extracts and concats), crypto and pointer authentication (A64) and half-precision floating point. The emitted C maps less directly onto each guest instruction than C written for one CPU would. A recompiler with one CPU and one output is simpler when it lifts straight to C; relift's case rests on points 1 to 4.
+
+### When an op belongs in the IR
+
+An operation is added to `Op` only when at least two CPUs need it, or when the optimizer, discovery or the emitter gains from seeing inside it. Anything that computes an address or a branch target counts under the second test. `Pac` is an op for that reason: pointer authentication produces values that are later used as addresses and branch targets, and discovery must see an authenticated pointer as the pointer. The operation is pure, so the interpreter and the emitter (`core/emit/src/value.rs`) both evaluate it.
+
+Otherwise the operation is an `Op::Intrinsic`: a named call that the CPU crate and the runtime define (`Frontend::intrinsic`). The IR cannot see into an intrinsic, so every intrinsic counts as an effect, but the interpreter still runs it through the `Intrinsics` trait (`core/ir/src/interp.rs`), so an instruction lifted to an intrinsic stays checkable against an oracle.
+
+Where an operation is needed, it models the primitive under the instruction, not the instruction. AES is the example. `CryptoOp` has the steps (`AesSubBytes`, `AesMixColumns` and their inverses), and A64 `AESE` is an `xor`, a byte permutation and `AesSubBytes` (see the crypto listing below, which keeps only the last), while `AESMC` is one `AesMixColumns` (`crypto.aes.mixcolumns` in the `relift-ir` lift of `aesmc`). An x86 `AESENC` is the same steps in another order, with a round-key `xor`, so it would reuse them and add no operation.
+
+The known case the policy will be tested on is x87: 80-bit floating-point values and a register stack. `Fp` works on 16, 32 and 64 bits, and `Get` and `Set` name a slot by a constant index, so a stack addressed relative to a top-of-stack register needs indexed register access that the IR does not have.
 
 ## The model
 
@@ -13,6 +62,208 @@
 - **Verification.** `Block::verify` checks every width and operand reference and the exit. `Builder` checks each operation as it adds it and panics on a width error. A guard must come before every operation with an effect (a load is the one exception), and a sync must be the last instruction.
 - **Guards.** `Guard(cond, code)` leaves the block before it has any effect when `cond` is 1, and the runtime runs the instruction on its slow path. Frontends use it for assumptions such as the floating-point control register being zero.
 
+### The model, printed
+
+Each concept above as relift prints it, in A64.
+
+**Flags.** `adds w0, w1, #1` computes the sum, then builds `n`, `z`, `c` and `v` from ordinary operations on 1-bit values; the four `set` lines write the four 1-bit slots:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0x31000420" -->
+```text
+; 0x1000 31000420 ADDS_32S_addsub_imm
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i32 = extract v0, 0
+  v2:i128 = zext v1
+  v3:i128 = const 0x1
+  v4:i128 = add v2, v3
+  v5:i128 = const 0x0
+  v6:i128 = add v4, v5
+  v7:i128 = sext v1
+  v8:i128 = const 0x1
+  v9:i128 = add v7, v8
+  v10:i128 = const 0x0
+  v11:i128 = add v9, v10
+  v12:i32 = extract v6, 0
+  v13:i1 = extract v12, 31
+  v14:i32 = const 0x0
+  v15:i1 = cmp.eq v12, v14
+  v16:i1 = const 0x1
+  v17:i1 = const 0x0
+  v18:i1 = select v15, v16, v17
+  v19:i128 = zext v12
+  v20:i1 = cmp.eq v19, v6
+  v21:i1 = const 0x0
+  v22:i1 = const 0x1
+  v23:i1 = select v20, v21, v22
+  v24:i128 = sext v12
+  v25:i1 = cmp.eq v24, v11
+  v26:i1 = const 0x0
+  v27:i1 = const 0x1
+  v28:i1 = select v25, v26, v27
+  v29:i2 = concat v13, v18
+  v30:i3 = concat v29, v23
+  v31:i4 = concat v30, v28
+  v32:i1 = extract v31, 3
+  v33:i1 = extract v31, 2
+  v34:i1 = extract v31, 1
+  v35:i1 = extract v31, 0
+  v36:i64 = zext v12
+  set x0, v36
+  set n, v32
+  set z, v33
+  set c, v34
+  set v, v35
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
+
+**Memory ordering.** `ldar` and `stlr` put `acquire` and `release` in the `load` and `store`; the check before each is a guard on the low address bits (the code is the ASCII bytes `ALNG`):
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0xc8dffc20 0xc89ffc20" -->
+```text
+; 0x1000 c8dffc20 LDAR_LR64_ldstord
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = const 0x0
+  v2:i64 = const 0x7
+  v3:i64 = and v0, v2
+  v4:i1 = cmp.ne v3, v1
+  guard v4, 0x414c4e47
+  v6:i64 = load.le.acquire v0
+  set x0, v6
+  exit jump 0x1004
+; 0x1004 c89ffc20 STLR_SL64_ldstord
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = const 0x0
+  v2:i64 = add v0, v1
+  v3:i64 = get x0
+  v4:i64 = const 0x0
+  v5:i64 = const 0x7
+  v6:i64 = and v2, v5
+  v7:i1 = cmp.ne v6, v4
+  guard v7, 0x414c4e47
+  store.le.release v2, v3
+  exit jump 0x1008
+```
+<!-- /docgen:output -->
+
+**Exclusive pairs.** `ldaxr` is `load.excl` and arms the monitor. `stxr` is `store.excl`, which gives a bit; the lifter turns it into the status register, 0 when it stored and 1 when it did not:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0xc85ffc20 0xc8027c20" -->
+```text
+; 0x1000 c85ffc20 LDAXR_LR64_ldstexclr
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = const 0x0
+  v2:i64 = const 0x7
+  v3:i64 = and v0, v2
+  v4:i1 = cmp.ne v3, v1
+  guard v4, 0x414c4e47
+  v6:i64 = load.excl.le.acquire v0
+  set x0, v6
+  exit jump 0x1004
+; 0x1004 c8027c20 STXR_SR64_ldstexclr
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = get x0
+  v2:i64 = const 0x0
+  v3:i64 = const 0x7
+  v4:i64 = and v0, v3
+  v5:i1 = cmp.ne v4, v2
+  guard v5, 0x414c4e47
+  v7:i1 = store.excl.le.plain v0, v1
+  v8:i1 = const 0x0
+  v9:i1 = const 0x1
+  v10:i1 = select v7, v8, v9
+  v11:i32 = zext v10
+  v12:i64 = zext v11
+  set x2, v12
+  exit jump 0x1008
+```
+<!-- /docgen:output -->
+
+**Atomics.** With `FEAT_LSE`, `ldadd` is one `atomic.add` that gives the old value, and `cas` is one `cas`:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--features cortex-a57,FEAT_LSE --dce 0xf8200041 0xc8a07c41" -->
+```text
+; 0x1000 f8200041 LDADD_64_memop
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x0
+  v1:i64 = get x2
+  v2:i64 = const 0x0
+  v3:i64 = const 0x7
+  v4:i64 = and v1, v3
+  v5:i1 = cmp.ne v4, v2
+  guard v5, 0x414c4e47
+  v7:i64 = atomic.add.le.plain v1, v0
+  set x1, v7
+  exit jump 0x1004
+; 0x1004 c8a07c41 CAS_C64_comswap
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x0
+  v1:i64 = get x1
+  v2:i64 = get x2
+  v3:i64 = const 0x0
+  v4:i64 = const 0x7
+  v5:i64 = and v2, v4
+  v6:i1 = cmp.ne v5, v3
+  guard v6, 0x414c4e47
+  v8:i64 = cas.le.plain v2, v0, v1
+  set x0, v8
+  exit jump 0x1008
+```
+<!-- /docgen:output -->
+
+**Computed exits.** `br` ends in `jump dynamic` on a value and `ret` in `return dynamic`. The interpreter treats both as jumps; analysis uses the kind:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0xd61f0200 0xd65f03c0" -->
+```text
+; 0x1000 d61f0200 BR_64_branch_reg
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x16
+  exit jump dynamic v0
+; 0x1004 d65f03c0 RET_64R_branch_reg
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x30
+  exit return dynamic v0
+```
+<!-- /docgen:output -->
+
+**Call exits and traps.** `bl` writes the return address to `x30` and exits with `call`, which names the return address and the target. `svc` exits with `trap`, whose code is the immediate and whose `next` is where execution resumes:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0x94000010 0xd4001001" -->
+```text
+; 0x1000 94000010 BL_only_branch_imm
+block 0x1000 len 4 regs arm64
+  v0:i64 = const 0x1004
+  set x30, v0
+  exit call 0x1004 0x1040
+; 0x1004 d4001001 SVC_EX_exception
+block 0x1004 len 4 regs arm64
+  exit trap 0x80 0x1008
+```
+<!-- /docgen:output -->
+
+**Guards.** The A64 floating-point templates assume `fpcr` is zero. `fcvtzs x0, d1` starts with a guard on `fpcr != 0` that leaves the block before any effect, so the runtime runs the instruction on its slow path (the code is the ASCII bytes `FPCR`):
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0x9e780020" -->
+```text
+; 0x1000 9e780020 FCVTZS_64D_float2int
+block 0x1000 len 4 regs arm64
+  v0:i32 = get fpcr
+  v1:i32 = const 0x0
+  v2:i1 = cmp.ne v0, v1
+  guard v2, 0x46504352
+  v4:i128 = get v1
+  v5:i64 = extract v4, 0
+  v6:i64 = fp.tosint.z v5
+  set x0, v6
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
+
 ## The device extensions
 
 Guests that drive devices through memory-mapped registers add four things. Guests without devices never emit them. The emitter and runtime contract is `docs/abi.md` section 13.
@@ -22,6 +273,93 @@ Guests that drive devices through memory-mapped registers add four things. Guest
 - **`classify_io`.** The pass `classify_io(block, map)` rewrites an `Any` access at a constant address: to a plain `Load` or `Store` when every byte is memory, and to kind `Device` otherwise, so the emitter needs no range check for it.
 - **Sync points.** `Sync` makes the exit a sync point. After the exit's register writes are committed and its target is known, the runtime may run the devices up to the current cycle and deliver an interrupt. A taken interrupt continues at the handler entry, and the exit's target becomes the pc the handler returns to. A block has at most one `Sync`, and it is the last instruction.
 - **Code banks.** `Block::bank` names which mapping of the guest bytes at `pc` was lifted, for code that changes at one address (a cartridge ROM bank, an overlay, code copied to RAM). `(pc, bank)` is the block's identity. It is `None` for guests without banking. Exit targets are plain addresses; the mapping at run time, or an analysis that tracks bank-switch writes, decides which bank one reaches.
+
+### The device extensions, printed
+
+These come from the Game Boy (SM83), through its frontend and its real address map, where every address reaches the device library. `relift-gbrom ir` takes instruction bytes in hex. The first line of each block names the register file and, when it is not 64 bits, the address width (`addr i16`).
+
+**Ticks, I/O loads and sync points.** `ldh a, (0x40)` loads from the I/O page and `ldh (0x41), a` stores to it. The clock moves at the position of the `tick`: the cycles before the access come before it and the rest after. The accesses have kind `dev` because the addresses are constants. Each block ends with `sync`:
+
+<!-- docgen:output crate=relift-gb-tools bin=relift-gbrom args="ir f0 40 e0 41" -->
+```text
+; 0x150 f040 Ld
+block 0x150 len 2 regs sm83 addr i16
+  v0:i16 = const 0xff40
+  tick 8
+  v2:i8 = io.load.le.dev v0
+  set a, v2
+  tick 4
+  sync
+  exit jump 0x152
+; 0x152 e041 Ld
+block 0x152 len 2 regs sm83 addr i16
+  v0:i8 = get a
+  v1:i16 = const 0xff41
+  tick 8
+  io.store.le.dev v1, v0
+  tick 4
+  sync
+  exit jump 0x154
+```
+<!-- /docgen:output -->
+
+**Accesses of kind `any`.** When the address is computed, as in `ld a, (hl)`, the access has kind `any` and the guest's map decides at run time:
+
+<!-- docgen:output crate=relift-gb-tools bin=relift-gbrom args="ir 7e" -->
+```text
+; 0x150 7e Ld
+block 0x150 len 1 regs sm83 addr i16
+  v0:i8 = get h
+  v1:i8 = get l
+  v2:i16 = concat v0, v1
+  tick 4
+  v4:i8 = io.load.le.any v2
+  set a, v4
+  tick 4
+  sync
+  exit jump 0x151
+```
+<!-- /docgen:output -->
+
+**Conditional ticks.** `jr nz, +5` costs 8 cycles, and 4 more only when the branch is taken, so the extra cost is a `tick.if` on the branch condition, which the exit's select also uses:
+
+<!-- docgen:output crate=relift-gb-tools bin=relift-gbrom args="ir 20 05" -->
+```text
+; 0x150 2005 Jr
+block 0x150 len 2 regs sm83 addr i16
+  tick 8
+  v1:i1 = get fz
+  v2:i1 = not v1
+  tick.if v2, 4
+  sync
+  exit jump select v2, 0x157, 0x152
+```
+<!-- /docgen:output -->
+
+**Interrupt enable and halt.** The Game Boy guest runs `ei` and `halt` (and `di` and `stop`) on the device library's own CPU, so they lift to an empty block that exits with a `trap`; the code is the opcode above the resume address:
+
+<!-- docgen:output crate=relift-gb-tools bin=relift-gbrom args="ir fb 76" -->
+```text
+; 0x150 fb Ei
+block 0x150 len 1 regs sm83 addr i16
+  exit trap 0xfb0151 0x151
+; 0x151 76 Halt
+block 0x151 len 1 regs sm83 addr i16
+  exit trap 0x760152 0x152
+```
+<!-- /docgen:output -->
+
+**Code banks.** A block of code in a switchable ROM bank carries its bank in the header, and `(pc, bank)` is its identity. This is `jp 0x4010` at `0x4000` in bank 3:
+
+<!-- docgen:output crate=relift-gb-tools bin=relift-gbrom args="ir --bank 3 --pc 0x4000 c3 10 40" -->
+```text
+; 0x4000 c31040 Jp bank 3
+block 0x4000 len 3 regs sm83 addr i16 bank 0x3
+  tick 16
+  sync
+  exit jump 0x4010
+```
+<!-- /docgen:output -->
 
 ## Operations
 
@@ -307,9 +645,120 @@ pub enum CmpOp {
 
 `Const`, `Select`, `Ext` (zero or sign, to the instruction's width), `Extract` (the instruction's width of bits from bit `lo`) and `Concat` (high above low, the width is the sum) complete the integer family.
 
+**Integer arithmetic and shifts.** `mul` is a 128-bit multiply of zero-extended operands whose low 64 bits an `extract` takes. `udiv` zero-extends both operands to 128 bits so that one signed `sdiv` gives the unsigned quotient, and a select on a zero divisor gives 0 (division by zero is defined). `lsl` masks the amount to 6 bits and shifts:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0x9b027c20 0x9ac20820 0x9ac22020" -->
+```text
+; 0x1000 9b027c20 MADD_64A_dp_3src
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = get x2
+  v2:i64 = const 0x0
+  v3:i128 = zext v2
+  v4:i128 = zext v0
+  v5:i128 = zext v1
+  v6:i128 = mul v4, v5
+  v7:i128 = add v3, v6
+  v8:i64 = extract v7, 0
+  set x0, v8
+  exit jump 0x1004
+; 0x1004 9ac20820 UDIV_64_dp_2src
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = get x2
+  v2:i64 = const 0x0
+  v3:i1 = cmp.eq v1, v2
+  v4:i128 = zext v0
+  v5:i128 = zext v1
+  v6:i128 = sdiv v4, v5
+  v7:i128 = const 0x0
+  v8:i128 = select v3, v7, v6
+  v9:i64 = extract v8, 0
+  set x0, v9
+  exit jump 0x1008
+; 0x1008 9ac22020 LSLV_64_dp_2src
+block 0x1008 len 4 regs arm64
+  v0:i64 = get x2
+  v1:i128 = zext v0
+  v2:i128 = const 0x3f
+  v3:i128 = and v1, v2
+  v4:i64 = get x1
+  v5:i64 = shl v4, v3
+  set x0, v5
+  exit jump 0x100c
+```
+<!-- /docgen:output -->
+
+**Compare and select.** `csel x0, x1, x2, eq` compares the `z` flag with 1 and selects between two registers:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0x9a820020" -->
+```text
+; 0x1000 9a820020 CSEL_64_condsel
+block 0x1000 len 4 regs arm64
+  v0:i1 = get z
+  v1:i1 = const 0x1
+  v2:i1 = cmp.eq v0, v1
+  v3:i64 = get x1
+  v4:i64 = get x2
+  v5:i64 = select v2, v3, v4
+  set x0, v5
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
+
+**Extend, extract and concat.** `uxth w0, w1` extracts the low 16 bits and zero-extends them. `ubfx x0, x1, #4, #8` is built from shifts, masks and `or`. `extr x0, x1, x1, #8` (a rotate right) concatenates two values and shifts the pair:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0x53003c20 0xd3442c20 0x93c12020" -->
+```text
+; 0x1000 53003c20 UBFM_32M_bitfield
+block 0x1000 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i32 = extract v0, 0
+  v2:i32 = const 0xffff
+  v3:i32 = and v1, v2
+  v4:i32 = const 0x0
+  v5:i32 = or v4, v3
+  v6:i32 = const 0xffff
+  v7:i32 = and v5, v6
+  v8:i32 = const 0x0
+  v9:i32 = or v8, v7
+  v10:i64 = zext v9
+  set x0, v10
+  exit jump 0x1004
+; 0x1004 d3442c20 UBFM_64M_bitfield
+block 0x1004 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i128 = const 0x4
+  v2:i64 = lshr v0, v1
+  v3:i128 = const 0x3c
+  v4:i64 = shl v0, v3
+  v5:i64 = or v2, v4
+  v6:i64 = const 0xf0000000000000ff
+  v7:i64 = and v5, v6
+  v8:i64 = const 0x0
+  v9:i64 = or v8, v7
+  v10:i64 = const 0xff
+  v11:i64 = and v9, v10
+  v12:i64 = const 0x0
+  v13:i64 = or v12, v11
+  set x0, v13
+  exit jump 0x1008
+; 0x1008 93c12020 EXTR_64_extract
+block 0x1008 len 4 regs arm64
+  v0:i64 = get x1
+  v1:i64 = get x1
+  v2:i128 = concat v0, v1
+  v3:i128 = const 0x8
+  v4:i128 = lshr v2, v3
+  v5:i64 = extract v4, 0
+  set x0, v5
+  exit jump 0x100c
+```
+<!-- /docgen:output -->
+
 ### Memory, atomics and exclusives
 
-`Load`, `Store`, `LoadExclusive`, `StoreExclusive` (gives 1 when it stored; the monitor is cleared either way), `ClearExclusive`, `Fence`, `AtomicRmw` and `CompareSwap` (gives the old value either way).
+`Load`, `Store`, `LoadExclusive`, `StoreExclusive` (gives 1 when it stored; the monitor is cleared either way), `ClearExclusive`, `Fence`, `AtomicRmw` and `CompareSwap` (gives the old value either way). Printed examples of each are under [The model, printed](#the-model-printed).
 
 <!-- docgen:code file=core/ir/src/ops.rs symbol=AtomicOp raw=true -->
 ```rust
@@ -422,6 +871,49 @@ pub enum FpRound {
 ```
 <!-- /docgen:code -->
 
+**Floating point.** `fadd d0, d1, d2` is one `fp.add`; the lifter builds the Arm NaN rules around it from selects and masks, which `--grep` leaves out here. `fcvtzu w0, s1` is one `fp.touint.z`; the saturation and the 0 for a NaN are in the meaning of the operation, so nothing more is printed:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce --grep fp. 0x1e622820 0x1e390020" -->
+```text
+; 0x1000 1e622820 FADD_D_floatdp2
+block 0x1000 len 4 regs arm64
+  v8:i64 = fp.add v5, v7
+  exit jump 0x1004
+; 0x1004 1e390020 FCVTZU_32S_float2int
+block 0x1004 len 4 regs arm64
+  v6:i32 = fp.touint.z v5
+  exit jump 0x1008
+```
+<!-- /docgen:output -->
+
+**Half precision.** With `FEAT_FP16`, `fadd h0, h1, h2` is an `fp.add` on 16-bit values (again only that line). `fneg h0, h1` flips the sign bit with an extract and a concat:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--features cortex-a57,FEAT_FP16 --dce --grep fp. 0x1ee22820" -->
+```text
+; 0x1000 1ee22820 FADD_H_floatdp2
+block 0x1000 len 4 regs arm64
+  v10:i16 = fp.add v7, v9
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--features cortex-a57,FEAT_FP16 --dce 0x1ee14020" -->
+```text
+; 0x1000 1ee14020 FNEG_H_floatdp1
+block 0x1000 len 4 regs arm64
+  v0:i128 = get v1
+  v1:i16 = extract v0, 0
+  v2:i1 = extract v1, 15
+  v3:i1 = not v2
+  v4:i15 = extract v1, 0
+  v5:i16 = concat v3, v4
+  v6:i112 = const 0x0
+  v7:i128 = concat v6, v5
+  set v0, v7
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
+
 ### Lanes and permutes
 
 `Lane` runs a `LaneOp` (a kind, a lane width of 8, 16, 32 or 64 bits, and an immediate) on 128-bit values. Lane 0 holds the least significant bits. The verifier rejects a lane width a kind does not support. The module doc of `core/ir/src/lane.rs` holds the semantics of each kind and the contract an emitter follows on each host:
@@ -530,6 +1022,91 @@ of `a`, index 16 to 31 a byte of `b` when there is one, and any other
 index (including 16 to 31 with a single source) gives 0.
 <!-- /docgen:doc --> `Permute` is a constant byte permutation of one or two 128-bit values: result byte `i` is source byte `pattern[i]`, and an index outside the sources gives 0.
 
+**Lanes and permutes, printed.** Only the RSP lifter emits these operations; the A64 lifter writes NEON with extracts and concats. `vadd` on the RSP is built from `lane.add.16`, `lane.sub.16` and the saturating kinds, with the carry in the `VCOL` slot:
+
+<!-- docgen:output crate=relift-n64-tools bin=relift-n64rom args="ir --rsp --dce 0x4a031050" -->
+```text
+; 0x80001000 4a031050
+block 0x0 len 4 regs rsp addr i32
+  v0:i128 = get v2
+  v1:i128 = get v3
+  v2:i128 = get VCOL
+  v3:i128 = lane.add.16 v0, v1
+  v4:i128 = lane.sub.16 v3, v2
+  v5:i128 = const 0x0
+  v6:i128 = const 0x0
+  v7:i128 = lane.mins.16 v0, v1
+  v8:i128 = lane.qsubs.16 v7, v2
+  v9:i128 = lane.maxs.16 v0, v1
+  v10:i128 = lane.qadds.16 v8, v9
+  set v1, v10
+  set ACCL, v4
+  set VCOL, v5
+  set VCOH, v6
+  tick 1
+  sync
+  exit jump 0x4
+```
+<!-- /docgen:output -->
+
+`vmudh` with element selector 8 (one element broadcast) first builds that operand with `lane.perm`, a permutation of one source whose pattern is a 128-bit hex value of 16 byte indexes. It then forms the accumulator with `lane.mul.16` and `lane.mulhs.16` and the result with `lane.perm2` (two sources) and `lane.narrowss.32`:
+
+<!-- docgen:output crate=relift-n64-tools bin=relift-n64rom args="ir --rsp --dce 0x4b031047" -->
+```text
+; 0x80001000 4b031047
+block 0x0 len 4 regs rsp addr i32
+  v0:i128 = get v2
+  v1:i128 = get v3
+  v2:i128 = lane.perm v1, 0xf0e0f0e0f0e0f0e0f0e0f0e0f0e0f0e
+  v3:i128 = lane.mul.16 v0, v2
+  v4:i128 = lane.mulhs.16 v0, v2
+  v5:i128 = const 0x0
+  v6:i128 = lane.perm2 v3, v4, 0x17160706151405041312030211100100
+  v7:i128 = lane.perm2 v3, v4, 0x1f1e0f0e1d1c0d0c1b1a0b0a19180908
+  v8:i128 = lane.narrowss.32 v6, v7
+  set v1, v8
+  set ACCH, v4
+  set ACCM, v3
+  set ACCL, v5
+  tick 1
+  sync
+  exit jump 0x4
+```
+<!-- /docgen:output -->
+
+The VR4300 lifter (`lw t0, 4(a0)`) shows a big-endian `io.load.be.any`, two guards on the address (alignment, and a check of its top bits) and an `intrinsic` call, `mips_dcache`:
+
+<!-- docgen:output crate=relift-n64-tools bin=relift-n64rom args="ir --dce 0x8c880004" -->
+```text
+; 0x80001000 8c880004
+block 0x80001000 len 4 regs vr4300
+  v0:i64 = get r4
+  v1:i64 = const 0x4
+  v2:i64 = add v1, v0
+  v3:i2 = extract v2, 0
+  v4:i2 = const 0x0
+  v5:i1 = cmp.eq v3, v4
+  v6:i1 = not v5
+  guard v6, 0x1004
+  v8:i34 = extract v2, 30
+  v9:i34 = const 0x3fffffffe
+  v10:i1 = cmp.eq v8, v9
+  v11:i1 = not v10
+  guard v11, 0x1002
+  v13:i64 = const 0x1fffffff
+  v14:i64 = and v2, v13
+  v15:i32 = io.load.be.any v14
+  v16:i32 = const 0x0
+  v17:i1 = const 0x1
+  intrinsic "mips_dcache" v2, v16, v17
+  v19:i64 = sext v15
+  tick 1
+  set r8, v19
+  sync
+  exit jump 0x80001004
+```
+<!-- /docgen:output -->
+
 ### Crypto and pointer authentication
 
 `Crypto` is one table-driven cipher step, kept whole so an emitter can use a table or a host instruction. The tables are computed from the field arithmetic the standards define:
@@ -561,6 +1138,17 @@ pub enum CryptoOp {
 ```
 <!-- /docgen:code -->
 
+**Crypto, printed.** `aese v0.16b, v1.16b` is an `xor` of the two registers, a byte shuffle built from extracts and concats (ShiftRows), and one `crypto.aes.subbytes`; `--grep` keeps only the crypto line. (The emitter lifts these instructions to one intrinsic each, so the host's AES instructions can run them; `relift-ir` prints the portable lift.)
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce --grep crypto 0x4e284820" -->
+```text
+; 0x1000 4e284820 AESE_B_cryptoaes
+block 0x1000 len 4 regs arm64
+  v34:i128 = crypto.aes.subbytes v33
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
+
 `Pac` is the 64-bit pointer authentication code of `data` under the 64-bit `modifier` and the key `key0:key1`: QARMA5, as the Arm `ComputePAC` pseudocode defines it. It is pure. The cipher:
 
 <!-- docgen:doc crate=relift-ir name=pac -->
@@ -568,6 +1156,17 @@ The meaning of [`crate::Op::Pac`]: QARMA5 (QARMA-64 with five rounds,
 S-box σ2), the cipher of the Arm architecture's `ComputePACQARMA`, from
 the round structure the QARMA paper and the Arm pseudocode define.
 <!-- /docgen:doc -->
+
+**Pointer authentication, printed.** With `FEAT_PAuth`, `pacia x0, x1` signs `x0` with modifier `x1` and the `apiakey` pair. The lift is about 100 lines, mostly the concats that build the pointer's sign extension, so `--grep` keeps the one `pac` line. Its operands are the pointer with its extension bits, the modifier and the two key halves:
+
+<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--features cortex-a57,FEAT_PAuth --dce --grep pac 0xdac10020" -->
+```text
+; 0x1000 dac10020 PACIA_64P_dp_1src
+block 0x1000 len 4 regs arm64
+  v74:i64 = pac v71, v1, v72, v73
+  exit jump 0x1004
+```
+<!-- /docgen:output -->
 
 The interpreter evaluates a binary16 operation in binary64 and rounds once more, which is correctly rounded for sums, products, quotients and square roots; a fused multiply-add is computed exactly in integers (`core/ir/src/half.rs`).
 
@@ -579,30 +1178,7 @@ The interpreter evaluates a binary16 operation in binary64 and rounds once more,
 
 `Display` for `Block` prints a block as text, and `text::parse` reads it back; the two round-trip exactly. Each line is one instruction, written `vN:iW = op operands`, with the result prefix left out for an operation that gives no value. The first line names the pc, the lifted length, the register file and, when they are not the defaults, the address width and the bank. The last line is the exit.
 
-This is the output of `relift-ir --dce` on two A64 words, `ldr x0, [x1, #16]` and `cbz x0, #8`. It is generated, so it follows the lifter:
-
-<!-- docgen:output crate=relift-switch-tools bin=relift-ir args="--dce 0xf9400820 0xb4000040" -->
-```text
-; 0x1000 f9400820 LDR_64_ldst_pos
-block 0x1000 len 4 regs arm64
-  v0:i64 = get x1
-  v1:i64 = const 0x10
-  v2:i64 = add v0, v1
-  v3:i64 = load.le.plain v2
-  set x0, v3
-  exit jump 0x1004
-; 0x1004 b4000040 CBZ_64_compbranch
-block 0x1004 len 4 regs arm64
-  v0:i64 = get x0
-  v1:i64 = const 0x0
-  v2:i1 = cmp.eq v0, v1
-  v3:i1 = const 0x1
-  v4:i1 = cmp.eq v2, v3
-  exit jump select v4, 0x100c, 0x1008
-```
-<!-- /docgen:output -->
-
-The first block reads `x1`, adds 16, loads 8 bytes little-endian with plain ordering and writes `x0`. The second compares `x0` to zero and exits through a select between the taken and the fall-through address. The grammar and the mnemonic of every operation are in the module doc of `core/ir/src/text.rs`:
+The listings on this page are in this form; [the first one](#an-example) is two A64 words. The grammar and the mnemonic of every operation are in the module doc of `core/ir/src/text.rs`:
 
 <!-- docgen:code file=core/ir/src/text.rs symbol=crate raw=true -->
 ````rust
@@ -693,7 +1269,7 @@ The first block reads `x1`, adds 16, loads 8 bytes little-endian with plain orde
 
 ## Binary format
 
-`write_block` and `read_block` give a compact byte form for caches that read many blocks back quickly. Integers are LEB128. A block is written as:
+`write_block` and `read_block` give a compact byte form of one block. The IR is never written to disk as IR. The one user of `write_block` is the emitter's reuse code (`core/emit/src/reuse.rs`), which serializes a function's blocks, with the rest of what the emitter reads about it, only as the input that is hashed into the function's emit-cache key (`store.key(&reuse::input(...))` in `core/emit/src/lib.rs`; the key also covers a hash of the running `relift`). The store keeps the emitted C of each function under that key, not the IR, and nothing reads the bytes back into blocks outside the tests of `core/ir`. Integers are LEB128. A block is written as:
 
 1. The index of the register file in the list the caller passes (`files`).
 2. One byte for the address width in bits.
@@ -701,7 +1277,7 @@ The first block reads `x1`, adds 16, loads 8 bytes little-endian with plain orde
 4. The number of instructions, then for each one a byte for its result width (0 for no result), a tag byte for the operation and its operands. An operand is an instruction index.
 5. The exit: a tag for the next address (constant, select or dynamic) with its operands, then a tag for the flow.
 
-The layout is private to a version of the crate. Callers that keep bytes between runs key them by `BIN_FORMAT`, which is:
+The layout is private to a version of the crate, and `BIN_FORMAT` is the version of the layout:
 
 <!-- docgen:code file=core/ir/src/bin.rs symbol=FORMAT -->
 ```rust

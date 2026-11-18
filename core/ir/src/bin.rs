@@ -1,7 +1,7 @@
-//! A compact binary form of a [`Block`], for caches that read many blocks
-//! back quickly. Integers are LEB128; the layout is private to this crate's
-//! version: callers that keep bytes between runs must key them by it
-//! ([`FORMAT`]).
+//! A compact binary form of a [`Block`]. The emitter's reuse code
+//! (`core/emit/src/reuse.rs`) writes it as part of the input it hashes into a
+//! function's emit-cache key; no IR is stored. Integers are LEB128; the
+//! layout is private to this crate's version ([`FORMAT`]).
 
 use crate::{
     AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpArgs, FpOp, FpRound,

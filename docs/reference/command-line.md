@@ -1797,6 +1797,7 @@ Options:
       --count <COUNT>        With `--addr`, or a symbol of unknown size: how many instructions [default: 16]
       --features <FEATURES>  The CPU's architecture features: a base (`cortex-a57`, `armv8.0`, `all`) and features such as `FEAT_LSE`, comma-separated [default: cortex-a57]
       --dce                  Remove dead values before printing
+      --grep <GREP>          Print only the instruction lines that contain this text, with each block's header and exit line
       --json                 Print JSON
   -h, --help                 Print help
   -V, --version              Print version
@@ -1850,6 +1851,7 @@ Usage: relift-gbrom [OPTIONS] <ROM>
 
 Commands:
   functions  Find the functions of a ROM across its mapper banks: per bank, with the transfers that cannot be resolved and the code run from RAM
+  ir         Print the IR of SM83 instructions given as hex bytes, as the Game Boy guest lifts them
   help       Print this message or the help of the given subcommand(s)
 
 Arguments:
@@ -1900,6 +1902,7 @@ Commands:
   info       Show the byte order, header, boot variant and checksum check
   streams    List the Yay0, Yaz0 and MIO0 streams that decode completely
   functions  Find the code: function entries, code units by source and link address, RSP images and what stays unknown
+  ir         Print the IR of MIPS or RSP instruction words, as the Nintendo 64 guest lifts them
   normalize  Write the image as big-endian (`.z64`)
   help       Print this message or the help of the given subcommand(s)
 
