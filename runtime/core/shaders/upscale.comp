@@ -1,0 +1,135 @@
+#version 450
+/**
+ * @file upscale.comp
+ * @brief relift's spatial upscaler choices (upscale.c), written for relift:
+ * a copy at the picture's own size, nearest, bilinear, sharp bilinear and
+ * Lanczos with clamping to the four nearest pixels against ringing. One
+ * invocation writes one pixel of the output rectangle from the input
+ * rectangle; reads outside the input rectangle clamp to its edge. Built
+ * twice by gen_post_data.py: with RL_BUFFERS the pictures are buffers of
+ * RGBA8 words (the window pipeline's), without it a sampled image in and a
+ * storage image out. The C reference is runtime/core/tests/upscale_ref.c.
+ */
+layout(local_size_x = 8, local_size_y = 8) in;
+
+/**
+ * @brief Rectangles (x, y, width, height), row pitches in pixels, the mode, Lanczos's lobes, and the input pixels per
+ * output pixel and output pixels per input pixel (x, y), divided on the CPU so every device maps alike.
+ */
+layout(push_constant) uniform Params {
+    ivec4 src;
+    ivec4 dst;
+    ivec2 src_pitch;
+    ivec2 dst_pitch;
+    int mode;
+    int lobes;
+    vec2 step;
+    vec2 ratio;
+} pc;
+
+#ifdef RL_BUFFERS
+layout(std430, binding = 0) readonly buffer In { uint px[]; } src_buf;
+layout(std430, binding = 1) writeonly buffer Out { uint px[]; } dst_buf;
+vec4 fetch_raw(ivec2 p) { return unpackUnorm4x8(src_buf.px[p.y * pc.src_pitch.x + p.x]); }
+void store(ivec2 p, vec4 c) { dst_buf.px[p.y * pc.dst_pitch.x + p.x] = packUnorm4x8(c); }
+#else
+layout(binding = 0) uniform sampler2D src_img;
+layout(binding = 1) uniform writeonly image2D dst_img;
+vec4 fetch_raw(ivec2 p) { return texelFetch(src_img, p, 0); }
+void store(ivec2 p, vec4 c) { imageStore(dst_img, p, c); }
+#endif
+
+const int MODE_COPY = 0;
+const int MODE_NEAREST = 1;
+const int MODE_BILINEAR = 2;
+const int MODE_SHARP_BILINEAR = 3;
+const int MODE_LANCZOS = 4;
+const float PI = 3.14159265358979;
+const int MAX_TAPS = 16;
+
+/** @brief The input pixel at p, clamped to the input rectangle. */
+vec4 fetch(ivec2 p)
+{
+    return fetch_raw(clamp(p, pc.src.xy, pc.src.xy + pc.src.zw - 1));
+}
+
+/** @brief The bilinear blend of the four pixels around s (input pixels, centers at .5). */
+vec4 bilinear(vec2 s)
+{
+    vec2 t = s - 0.5;
+    vec2 b = floor(t);
+    vec2 f = t - b;
+    ivec2 i = ivec2(b);
+    vec4 top = mix(fetch(i), fetch(i + ivec2(1, 0)), f.x);
+    vec4 bottom = mix(fetch(i + ivec2(0, 1)), fetch(i + ivec2(1, 1)), f.x);
+    return mix(top, bottom, f.y);
+}
+
+/** @brief Bilinear after a nearest prescale by the whole part of ratio: only pixel edges blend. */
+vec4 sharp_bilinear(vec2 s, vec2 ratio)
+{
+    vec2 scale = max(floor(ratio), vec2(1.0));
+    vec2 base = floor(s);
+    vec2 d = s - base - 0.5;
+    vec2 range = 0.5 - 0.5 / scale;
+    vec2 f = (d - clamp(d, -range, range)) * scale + 0.5;
+    return bilinear(base + f);
+}
+
+/** @brief The Lanczos kernel with a lobes at distance x. */
+float lanczos_weight(float x, float a)
+{
+    x = abs(x);
+    if (x < 1e-5)
+        return 1.0;
+    if (x >= a)
+        return 0.0;
+    float p = PI * x;
+    return a * sin(p) * sin(p / a) / (p * p);
+}
+
+/** @brief Lanczos at s, the kernel widened by the downscale ratio, clamped to the four nearest pixels. */
+vec4 lanczos(vec2 s)
+{
+    float a = float(pc.lobes);
+    vec2 widen = max(pc.step, vec2(1.0));
+    precise vec2 t = s - 0.5;
+    ivec2 c = ivec2(floor(t));
+    ivec2 r = min(ivec2(ceil(a * widen)), ivec2(MAX_TAPS / 2));
+    vec4 sum = vec4(0.0);
+    float wsum = 0.0;
+    for (int dy = 1 - r.y; dy <= r.y; dy++) {
+        float wy = lanczos_weight((t.y - float(c.y + dy)) / widen.y, a);
+        if (wy == 0.0)
+            continue;
+        for (int dx = 1 - r.x; dx <= r.x; dx++) {
+            float w = wy * lanczos_weight((t.x - float(c.x + dx)) / widen.x, a);
+            sum += w * fetch(c + ivec2(dx, dy));
+            wsum += w;
+        }
+    }
+    vec4 v = sum / wsum;
+    vec4 n0 = fetch(c), n1 = fetch(c + ivec2(1, 0)), n2 = fetch(c + ivec2(0, 1)), n3 = fetch(c + ivec2(1, 1));
+    return clamp(v, min(min(n0, n1), min(n2, n3)), max(max(n0, n1), max(n2, n3)));
+}
+
+void main()
+{
+    ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+    if (o.x >= pc.dst.z || o.y >= pc.dst.w)
+        return;
+    vec2 ratio = pc.ratio;
+    precise vec2 s = (vec2(o) + 0.5) * pc.step + vec2(pc.src.xy);
+    vec4 v;
+    if (pc.mode == MODE_COPY)
+        v = fetch(o + pc.src.xy);
+    else if (pc.mode == MODE_NEAREST)
+        v = fetch(ivec2(floor(s)));
+    else if (pc.mode == MODE_BILINEAR)
+        v = bilinear(s);
+    else if (pc.mode == MODE_SHARP_BILINEAR)
+        v = sharp_bilinear(s, ratio);
+    else
+        v = lanczos(s);
+    store(o + pc.dst.xy, v);
+}

@@ -23,6 +23,8 @@ PASSES = [
     ("smaa_weights", "smaa_weights.comp", []),
     ("smaa_weights_fast", "smaa_weights.comp", ["-DSMAA_DISABLE_DIAG_DETECTION", "-DSMAA_DISABLE_CORNER_DETECTION"]),
     ("smaa_blend", "smaa_blend.comp", []),
+    ("upscale", "upscale.comp", []),
+    ("upscale_buffers", "upscale.comp", ["-DRL_BUFFERS"]),
 ]
 
 

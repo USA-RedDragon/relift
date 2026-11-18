@@ -53,6 +53,7 @@ enum {
     RLVK_ST_PIPELINE_SHADER_STAGE_CREATE_INFO = 18,
     RLVK_ST_COMPUTE_PIPELINE_CREATE_INFO = 29,
     RLVK_ST_PIPELINE_LAYOUT_CREATE_INFO = 30,
+    RLVK_ST_SAMPLER_CREATE_INFO = 31,
     RLVK_ST_DESCRIPTOR_SET_LAYOUT_CREATE_INFO = 32,
     RLVK_ST_DESCRIPTOR_POOL_CREATE_INFO = 33,
     RLVK_ST_DESCRIPTOR_SET_ALLOCATE_INFO = 34,
@@ -78,7 +79,11 @@ enum {
     RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT = 0x1,
     RLVK_BUFFER_USAGE_TRANSFER_DST_BIT = 0x2,
     RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT = 0x20,
+    RLVK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER = 1,
+    RLVK_DESCRIPTOR_TYPE_STORAGE_IMAGE = 3,
     RLVK_DESCRIPTOR_TYPE_STORAGE_BUFFER = 7,
+    RLVK_IMAGE_LAYOUT_GENERAL = 1,
+    RLVK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE = 2,
     RLVK_SHADER_STAGE_COMPUTE_BIT = 0x20,
     RLVK_PIPELINE_BIND_POINT_COMPUTE = 1,
     RLVK_COMMAND_BUFFER_LEVEL_PRIMARY = 0,
@@ -350,6 +355,35 @@ typedef struct rlvk_descriptor_buffer_info {
     rlvk_size offset;
     rlvk_size range;
 } rlvk_descriptor_buffer_info;
+
+/** @brief VkDescriptorImageInfo. */
+typedef struct rlvk_descriptor_image_info {
+    rlvk_handle sampler;
+    rlvk_handle imageView;
+    int32_t imageLayout;
+} rlvk_descriptor_image_info;
+
+/** @brief VkSamplerCreateInfo. */
+typedef struct rlvk_sampler_create_info {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags flags;
+    int32_t magFilter;
+    int32_t minFilter;
+    int32_t mipmapMode;
+    int32_t addressModeU;
+    int32_t addressModeV;
+    int32_t addressModeW;
+    float mipLodBias;
+    uint32_t anisotropyEnable;
+    float maxAnisotropy;
+    uint32_t compareEnable;
+    int32_t compareOp;
+    float minLod;
+    float maxLod;
+    int32_t borderColor;
+    uint32_t unnormalizedCoordinates;
+} rlvk_sampler_create_info;
 
 /** @brief VkWriteDescriptorSet. */
 typedef struct rlvk_write_descriptor_set {

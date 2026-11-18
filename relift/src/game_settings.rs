@@ -141,6 +141,42 @@ pub fn runtime_settings() -> Vec<Setting> {
                 },
             )
         },
+        Setting {
+            apply: Apply::Live,
+            ..s(
+                "picture.upscaler",
+                "Upscaler",
+                "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the game's UI: game is the game's own, translated; auto is the game's own where this device meets its requirements, else bilinear; off copies the picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are relift's. Every choice but game changes the picture from the console's",
+                Value::String("auto".into()),
+                SettingKind::Enum {
+                    choices: [
+                        "auto",
+                        "game",
+                        "off",
+                        "nearest",
+                        "bilinear",
+                        "sharp_bilinear",
+                        "lanczos",
+                    ]
+                    .map(String::from)
+                    .into(),
+                },
+            )
+        },
+        Setting {
+            apply: Apply::Live,
+            ..s(
+                "picture.upscale_scale",
+                "Window upscale factor",
+                "For guests that do not upscale inside their frame: with picture.upscaler set to one of relift's upscalers, the window's picture is upscaled to this many times its size ahead of anti-aliasing and the window's own scaling",
+                Value::from(2),
+                SettingKind::Int {
+                    min: 1,
+                    max: 8,
+                    step: 0,
+                },
+            )
+        },
         s(
             "save.dir",
             "Save folder",
@@ -986,7 +1022,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 21);
+        assert_eq!(section(Vec::new()).runtime.len(), 23);
     }
 
     #[test]

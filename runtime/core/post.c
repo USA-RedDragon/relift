@@ -17,6 +17,7 @@
  */
 #include <relift/post.h>
 #include <relift/settings.h>
+#include <relift/upscale.h>
 
 #include "core.h"
 #include "post_data.h"
@@ -54,7 +55,67 @@ static vk g_vk;
 static bool g_tried, g_ok;
 static const rl_post_stage *g_up;
 static void *g_up_user;
+static const rl_post_stage *g_cur;
+static void *g_cur_user;
 static bool g_up_started, g_up_ok;
+
+/** @brief relift's own window stage (upscale.h): the `picture.upscaler` choice at `picture.upscale_scale` times. */
+static struct {
+    rl_post_device device;
+    rl_upscaler *u;
+    uint32_t choice;
+} g_own;
+
+static bool own_start(void *user, const rl_post_device *device)
+{
+    (void)user;
+    g_own.device = *device;
+    return true;
+}
+
+static bool own_plan(void *user, uint32_t width, uint32_t height, uint32_t *out_width, uint32_t *out_height)
+{
+    (void)user;
+    uint32_t choice = rl_upscale_spatial(rl_setting_enum("picture.upscaler"));
+    if (choice != g_own.choice || !g_own.u) {
+        rl_upscaler_free(g_own.u);
+        g_own.u = choice == RL_UPSCALE_OFF ? NULL : rl_upscaler_new(&g_own.device, choice, RL_UPSCALE_BUFFERS);
+        g_own.choice = choice;
+    }
+    int64_t scale = rl_setting_int("picture.upscale_scale");
+    *out_width = width * (uint32_t)scale;
+    *out_height = height * (uint32_t)scale;
+    return g_own.u != NULL;
+}
+
+static void own_record(void *user, uint64_t cmd, uint64_t in, uint64_t out, uint32_t width, uint32_t height,
+                       uint32_t out_width, uint32_t out_height)
+{
+    (void)user;
+    rl_upscaler_retire(g_own.u);
+    rl_upscale_inputs ui = {
+        .color = { in, width, height },
+        .in = { 0, 0, width, height },
+        .out = { out, out_width, out_height },
+        .out_rect = { 0, 0, out_width, out_height },
+        .pre_exposure = 1.0f,
+    };
+    rl_upscaler_record(g_own.u, cmd, &ui);
+}
+
+static const rl_post_stage g_own_stage = { "relift", own_start, own_plan, own_record };
+
+/** @brief The stage the window runs this frame: the guest's, else relift's own for a spatial `picture.upscaler`. */
+static const rl_post_stage *stage_now(void **user)
+{
+    const rl_post_stage *s = __atomic_load_n(&g_up, __ATOMIC_ACQUIRE);
+    *user = g_up_user;
+    if (!s && !rl_upscale_window_off() && rl_upscale_spatial(rl_setting_enum("picture.upscaler")) != RL_UPSCALE_OFF) {
+        s = &g_own_stage;
+        *user = NULL;
+    }
+    return s;
+}
 static uint8_t *g_out;
 static size_t g_out_cap;
 
@@ -339,9 +400,14 @@ static void record_smaa(vk *v, params pc, uint32_t quality)
 }
 
 /** @brief Starts the upscaler on the pipeline's device the first time it is needed; false when it is off. */
-static bool upscaler_ready(vk *v)
+static bool upscaler_ready(vk *v, const rl_post_stage *stage, void *user)
 {
-    if (!g_up)
+    if (stage != g_cur || user != g_cur_user) {
+        g_cur = stage;
+        g_cur_user = user;
+        g_up_started = g_up_ok = false;
+    }
+    if (!g_cur)
         return false;
     if (!g_up_started) {
         g_up_started = true;
@@ -353,9 +419,10 @@ static bool upscaler_ready(vk *v)
             .queue_family = v->d->family,
             .get_device_proc_addr = (void *)(uintptr_t)v->d->vkGetDeviceProcAddr,
         };
-        g_up_ok = g_up->start(g_up_user, &d);
+        g_up_ok = g_cur->start(g_cur_user, &d);
         if (!g_up_ok)
-            rl_log(RL_LOG_WARN, "post", "the upscaler %s did not start; the picture is shown at its own size", g_up->name);
+            rl_log(RL_LOG_WARN, "post", "the upscaler %s did not start; the picture is shown at its own size",
+                   g_cur->name);
     }
     return g_up_ok;
 }
@@ -388,7 +455,7 @@ static bool run(vk *v, bool up, uint32_t aa, const uint8_t *rgb, uint8_t *out, u
     v->d->vkCmdCopyBuffer(v->cmd, si->buffer, v->b[up ? B_SRC : B_IN].buffer, 1, &in_copy);
     barrier(v, xfer, RLVK_ACCESS_TRANSFER_WRITE_BIT, xfer | cs, any_read);
     if (up) {
-        g_up->record(g_up_user, v->cmd, v->b[B_SRC].buffer, v->b[B_IN].buffer, sw, sh, w, h);
+        g_cur->record(g_cur_user, v->cmd, v->b[B_SRC].buffer, v->b[B_IN].buffer, sw, sh, w, h);
         barrier(v, xfer | cs, any_write, xfer | cs, any_read);
     }
     if (aa != RL_POST_AA_OFF) {
@@ -445,6 +512,8 @@ void rl_post_set_upscaler(const rl_post_stage *stage, void *user)
     pthread_mutex_lock(&g_lock);
     __atomic_store_n(&g_up, stage, __ATOMIC_RELEASE);
     g_up_user = user;
+    g_cur = NULL;
+    g_cur_user = NULL;
     g_up_started = g_up_ok = false;
     pthread_mutex_unlock(&g_lock);
 }
@@ -456,7 +525,9 @@ const uint8_t *rl_post_apply(const uint8_t *rgb, uint32_t width, uint32_t height
     *out_width = width;
     *out_height = height;
     uint32_t aa = rl_setting_enum("picture.aa");
-    if ((aa == RL_POST_AA_OFF && !__atomic_load_n(&g_up, __ATOMIC_ACQUIRE)) || !width || !height)
+    void *user = NULL;
+    const rl_post_stage *stage = stage_now(&user);
+    if ((aa == RL_POST_AA_OFF && !stage) || !width || !height)
         return rgb;
     const uint8_t *shown = rgb;
     pthread_mutex_lock(&g_lock);
@@ -465,7 +536,8 @@ const uint8_t *rl_post_apply(const uint8_t *rgb, uint32_t width, uint32_t height
         g_ok = start(&g_vk);
     }
     uint32_t w = width, h = height;
-    bool up = g_ok && upscaler_ready(&g_vk) && g_up->plan(g_up_user, width, height, &w, &h) && w && h;
+    bool up =
+        g_ok && upscaler_ready(&g_vk, stage, user) && g_cur->plan(g_cur_user, width, height, &w, &h) && w && h;
     if (!up) {
         w = width;
         h = height;

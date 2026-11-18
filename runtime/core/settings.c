@@ -44,6 +44,8 @@ static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none
 static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
+static const char *const g_upscaler_choices[] = { "auto",     "game",           "off",    "nearest",
+                                                   "bilinear", "sharp_bilinear", "lanczos" };
 
 static const rl_setting_def g_runtime_defs[] = {
     {
@@ -108,6 +110,32 @@ static const rl_setting_def g_runtime_defs[] = {
         .env = "RELIFT_PICTURE_FILTER",
         .choices = g_filter_choices,
         .nchoices = 4,
+    },
+    {
+        .key = "picture.upscaler",
+        .type = RL_SETTING_ENUM,
+        .label = "Upscaler",
+        .apply = RL_APPLY_LIVE,
+        .description = "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the "
+                       "game's UI: game is the game's own, translated; auto is the game's own where this device "
+                       "meets its requirements, else bilinear; off copies the picture at its render size; nearest, "
+                       "bilinear, sharp_bilinear and lanczos are relift's. Every choice but game changes the picture "
+                       "from the console's",
+        .env = "RELIFT_UPSCALER",
+        .choices = g_upscaler_choices,
+        .nchoices = 7,
+    },
+    {
+        .key = "picture.upscale_scale",
+        .type = RL_SETTING_INT,
+        .label = "Window upscale factor",
+        .apply = RL_APPLY_LIVE,
+        .description = "For guests that do not upscale inside their frame: with picture.upscaler set to one of "
+                       "relift's upscalers, the window's picture is upscaled to this many times its size ahead of "
+                       "anti-aliasing and the window's own scaling",
+        .def_int = 2,
+        .min_int = 1,
+        .max_int = 8,
     },
 };
 
