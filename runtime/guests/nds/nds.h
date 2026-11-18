@@ -404,7 +404,7 @@ int rl_nds_save_write(rl_nds *m, const char *path);
 int rl_nds_save_poll(rl_nds *m, const char *path, uint64_t quiet);
 /** @brief The default save path of a ROM path (the save.dir setting, the user folder or the ROM's folder). */
 bool rl_nds_save_path(char *out, size_t size, const char *rom_path);
-/** @brief Declares the runtime's settings and the DS layer's (save.dir, save.type, video.nds_layout, video.nds_integer_scale). */
+/** @brief Declares the runtime's settings and the DS layer's (save.dir, save.type, video.nds_layout, video.nds_displays, video.nds_integer_scale, video.nds_lcd_response). */
 void rl_nds_declare_settings(void);
 
 /** @brief The 0x70 bytes of the newest user settings in the firmware image. */

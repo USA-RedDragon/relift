@@ -21,6 +21,27 @@ rl_screens_config rl_nds_screens_config(bool swap);
 /** @brief The two screens of a frame (rl_nds_frame_fn) as RGB888 frames: top first; rgb holds RL_NDS_SCREEN_W * 2 * RL_NDS_SCREEN_H * 3 bytes. */
 void rl_nds_screens_frames(const uint32_t *pixels, uint8_t *rgb, rl_screens_frame frames[RL_SCREENS]);
 
+/** @brief Bytes of a frame of both screens as RGB888. */
+#define RL_NDS_RGB_BYTES (2u * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3u)
+
+/** @brief What the panel remembers: the last two frames as the game drew them (the older one's slot is last[older]), and how many it has seen (up to 2). */
+typedef struct rl_nds_lcd {
+    uint8_t last[2][RL_NDS_RGB_BYTES];
+    uint32_t older;
+    uint32_t seen;
+} rl_nds_lcd;
+
+/**
+ * @brief The console's LCD answers slowly: a pixel that goes to another color
+ * and back on every frame shows as the mean of the two, steady, which is how
+ * games make flicker transparency. rgb (a frame as rl_nds_screens_frames made
+ * it) is changed in place: a pixel whose color is within a quarter of its last
+ * change of the color it had two frames ago (it came back, perhaps on a
+ * background that is fading) becomes the mean of itself and the last frame's;
+ * every other pixel stays as drawn.
+ */
+void rl_nds_lcd_response(rl_nds_lcd *l, uint8_t *rgb);
+
 struct rl_touchpad_guest;
 /** @brief The on-screen controller's layouts (touchpad.h), declared by the program. */
 const struct rl_touchpad_guest *rl_nds_touchpad(void);

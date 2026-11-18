@@ -20,6 +20,7 @@ TEST(the_screens_settings_name_the_layout_displays_and_scaling)
     CHECK_EQ(c.displays, RL_SCREENS_DISPLAYS_AUTO);
     CHECK(!c.integer_scale);
     CHECK(!c.swap);
+    CHECK(rl_setting_bool("video.nds_lcd_response"));
     CHECK_EQ(rl_settings_set("video.nds_layout", "large_bottom"), RL_SETTING_OK);
     CHECK_EQ(rl_settings_set("video.nds_displays", "bottom_both"), RL_SETTING_OK);
     CHECK_EQ(rl_settings_set("video.nds_integer_scale", "true"), RL_SETTING_OK);
@@ -46,6 +47,46 @@ TEST(a_frame_splits_into_the_two_screens)
     CHECK_EQ(f[0].rgb[0], 0);
     CHECK(f[1].rgb[0] != 0);
     CHECK(f[1].rgb == f[0].rgb + 256 * 192 * 3);
+}
+
+TEST(the_lcd_shows_a_pixel_that_flickers_every_frame_as_the_mean)
+{
+    static rl_nds_lcd lcd;
+    static uint8_t rgb[RL_NDS_RGB_BYTES];
+    const uint8_t a[3] = {200, 100, 50}, b[3] = {100, 50, 25}, mean[3] = {150, 75, 38}, c[3] = {10, 20, 30};
+    for (unsigned f = 0; f < 8; f++) {
+        const uint8_t *flick = f % 2 ? b : a, *step = f < 5 ? a : c, *still = c;
+        memset(rgb, 0, sizeof rgb);
+        memcpy(rgb + 5 * 3, flick, 3);
+        memcpy(rgb + 9 * 3, step, 3);
+        memcpy(rgb + 11 * 3, still, 3);
+        rl_nds_lcd_response(&lcd, rgb);
+        CHECK_EQ(memcmp(rgb + 5 * 3, f < 2 ? flick : mean, 3), 0);
+        CHECK_EQ(memcmp(rgb + 9 * 3, step, 3), 0);
+        CHECK_EQ(memcmp(rgb + 11 * 3, still, 3), 0);
+        CHECK_EQ(rgb[0], 0);
+    }
+}
+
+TEST(the_lcd_means_a_flicker_over_a_fading_background_but_not_a_moving_edge)
+{
+    static rl_nds_lcd lcd;
+    static uint8_t rgb[RL_NDS_RGB_BYTES];
+    const uint8_t seq[4][3] = {{100, 100, 100}, {200, 200, 200}, {104, 104, 104}, {204, 204, 204}};
+    const uint8_t edge[4][3] = {{0, 0, 0}, {100, 100, 100}, {200, 200, 200}, {250, 250, 250}};
+    for (unsigned f = 0; f < 4; f++) {
+        memset(rgb, 0, sizeof rgb);
+        memcpy(rgb + 5 * 3, seq[f], 3);
+        memcpy(rgb + 9 * 3, edge[f], 3);
+        rl_nds_lcd_response(&lcd, rgb);
+        CHECK_EQ(memcmp(rgb + 9 * 3, edge[f], 3), 0);
+        if (f == 2)
+            CHECK_EQ(rgb[5 * 3], 152);
+        else if (f == 3)
+            CHECK_EQ(rgb[5 * 3], 154);
+        else
+            CHECK_EQ(rgb[5 * 3], seq[f][0]);
+    }
 }
 
 static void key_down(rl_input_snapshot *s, unsigned usage) { s->keys[usage / 64] |= 1ull << (usage % 64); }

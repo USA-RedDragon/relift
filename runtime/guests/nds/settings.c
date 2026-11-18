@@ -2,7 +2,7 @@
  * @file settings.c
  * @brief The settings of the DS layer: where the save is kept, the backup
  * chip when the save does not name it, and how the two screens are laid out
- * and scaled in the window.
+ * and scaled in the window, and the LCD's response.
  */
 #include "nds.h"
 
@@ -67,6 +67,17 @@ static const rl_setting_def g_defs[] = {
                        "its size. Off: they fill the window with their shape kept",
         .env = "RELIFT_NDS_INTEGER_SCALE",
         .def_int = 0,
+    },
+    {
+        .key = "video.nds_lcd_response",
+        .apply = RL_APPLY_LIVE,
+        .type = RL_SETTING_BOOL,
+        .label = "LCD response",
+        .description = "Shows a pixel that alternates between two colors on every frame as their mean, the way the "
+                       "console's slow LCD does, so a game's flicker transparency looks steady. A pixel that moves or "
+                       "changes for good is not touched. Off: every frame is shown as drawn",
+        .env = "RELIFT_NDS_LCD_RESPONSE",
+        .def_int = 1,
     },
 };
 

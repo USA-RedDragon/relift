@@ -338,6 +338,13 @@ pub fn nds_settings() -> Vec<Setting> {
             Value::Bool(false),
             SettingKind::Bool,
         ),
+        s(
+            "video.nds_lcd_response",
+            "LCD response",
+            "Shows a pixel that alternates between two colors on every frame as their mean, the way the console's slow LCD does, so a game's flicker transparency looks steady. A pixel that moves or changes for good is not touched. Off: every frame is shown as drawn",
+            Value::Bool(true),
+            SettingKind::Bool,
+        ),
     ]
 }
 
@@ -931,7 +938,7 @@ mod tests {
     fn a_ds_section_adds_the_screen_settings_after_the_runtime_ones() {
         let nds = nds_section(Vec::new());
         let plain = section(Vec::new());
-        assert_eq!(nds.runtime.len(), plain.runtime.len() + 3);
+        assert_eq!(nds.runtime.len(), plain.runtime.len() + 4);
         assert_eq!(nds.runtime[..plain.runtime.len()], plain.runtime[..]);
         let keys: Vec<&str> = nds.runtime[plain.runtime.len()..]
             .iter()
@@ -942,7 +949,8 @@ mod tests {
             [
                 "video.nds_layout",
                 "video.nds_displays",
-                "video.nds_integer_scale"
+                "video.nds_integer_scale",
+                "video.nds_lcd_response"
             ]
         );
     }

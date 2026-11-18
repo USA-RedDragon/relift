@@ -55,9 +55,12 @@ typedef struct host {
     uint32_t frames;
     /** @brief --frame-log: one line per frame on stdout (number, ARM9 tick, frame hash, the --peek words). */
     bool frame_log;
+    /** @brief --png-shown: the PNG dumps hold what the window shows (after the LCD's response) instead of the frame as drawn. */
+    bool png_shown;
     /** @brief The window, the host's audio and the pace without audio. */
     rl_window *win;
-    uint8_t rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
+    uint8_t rgb[RL_NDS_RGB_BYTES];
+    rl_nds_lcd lcd;
     /** @brief The player's swap of the screens and the controls of their arrangement held at the last poll. */
     rl_nds_arrangement arrange;
     /** @brief The pen as the last poll saw it, for the frame that follows. */
@@ -102,13 +105,11 @@ static bool chunk(FILE *f, const char *type, const uint8_t *data, uint32_t n)
     return fwrite(h, 1, 8, f) == 8 && (n == 0 || fwrite(data, 1, n, f) == n) && fwrite(t, 1, 4, f) == 4;
 }
 
-/** @brief Writes a frame (rl_nds_frame) as an RGB PNG with stored (uncompressed) deflate blocks. */
-static bool write_png(const char *path, const uint32_t *pixels)
+/** @brief Writes a frame as RGB888 (both screens stacked) as an RGB PNG with stored (uncompressed) deflate blocks. */
+static bool write_rgb_png(const char *path, const uint8_t *rgb)
 {
     enum { ROW = 1 + W * 3, RAW = ROW * H_PX };
     static uint8_t raw[RAW];
-    static uint8_t rgb[W * H_PX * 3];
-    rl_nds_frame_rgb(pixels, rgb);
     for (uint32_t y = 0; y < H_PX; y++) {
         raw[y * ROW] = 0;
         memcpy(raw + y * ROW + 1, rgb + y * W * 3, W * 3);
@@ -150,6 +151,14 @@ static bool write_png(const char *path, const uint32_t *pixels)
         ok = false;
     free(z);
     return ok;
+}
+
+/** @brief Writes a frame (rl_nds_frame) as an RGB PNG. */
+static bool write_png(const char *path, const uint32_t *pixels)
+{
+    static uint8_t rgb[W * H_PX * 3];
+    rl_nds_frame_rgb(pixels, rgb);
+    return write_rgb_png(path, rgb);
 }
 
 /** @brief True when frame n is in --png-frames. */
@@ -199,11 +208,17 @@ static void audio_pace(void)
         rl_sleep_ns(1000000ull);
 }
 
-/** @brief Shows the frame and keeps the run at the console's pace: by the audio queue, else by the clock. */
-static void present(const uint32_t *pixels)
+/** @brief The frame as the window shows it, in H.rgb: both screens, through the LCD's response when the setting is on. */
+static void shown(const uint32_t *pixels, rl_screens_frame frames[RL_SCREENS])
 {
-    rl_screens_frame frames[RL_SCREENS];
     rl_nds_screens_frames(pixels, H.rgb, frames);
+    if (rl_setting_bool("video.nds_lcd_response"))
+        rl_nds_lcd_response(&H.lcd, H.rgb);
+}
+
+/** @brief Shows the frame and keeps the run at the console's pace: by the audio queue, else by the clock. */
+static void present(const rl_screens_frame frames[RL_SCREENS])
+{
     rl_screens_config cfg = rl_nds_screens_config(H.arrange.swap);
     rl_screens_present(H.win, &cfg, frames);
     if (H.out) {
@@ -224,8 +239,11 @@ static void on_frame(void *user, const uint32_t *pixels, uint64_t when)
     (void)user;
     H.frames++;
     rl_ports_script_frame(H.frames);
+    rl_screens_frame frames[RL_SCREENS];
+    if (H.win || H.png_shown)
+        shown(pixels, frames);
     if (H.win)
-        present(pixels);
+        present(frames);
     poll_input();
     if (__atomic_load_n(&H.quit, __ATOMIC_ACQUIRE))
         rl_process_exit(0);
@@ -238,7 +256,7 @@ static void on_frame(void *user, const uint32_t *pixels, uint64_t when)
     if ((H.png_every && H.frames % H.png_every == 0) || listed(H.frames)) {
         char path[4096];
         snprintf(path, sizeof path, "%s/frame%06u.png", H.png_dir ? H.png_dir : ".", H.frames);
-        if (!write_png(path, pixels))
+        if (!(H.png_shown ? write_rgb_png(path, H.rgb) : write_png(path, pixels)))
             fprintf(stderr, "relift-nds: could not write %s\n", path);
     }
     if (H.stop_frames && H.frames >= H.stop_frames)
@@ -400,6 +418,8 @@ static int options(int argc, char **argv, int first, uint64_t *max_ticks)
             H.stop_frames = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--png"))
             H.png = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--png-shown"))
+            H.png_shown = true;
         else if (!strcmp(a, "--png-dir"))
             H.png_dir = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png-every"))

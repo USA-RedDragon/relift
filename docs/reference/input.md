@@ -51,6 +51,7 @@ stays open.
 | `video.nds_layout` | `auto`, `stacked`, `side_by_side`, `large_top`, `large_bottom`, `top_only`, `bottom_only` | `auto` |
 | `video.nds_displays` | `auto`, `swapped`, `top_both`, `bottom_both`, `single` | `auto` |
 | `video.nds_integer_scale` | `true`, `false` | `false` |
+| `video.nds_lcd_response` | `true`, `false` | `true` |
 
 `auto` stacks the screens in a tall window, and otherwise picks stacked or side
 by side by whichever fills the window better (while the on-screen controller
@@ -70,6 +71,13 @@ display with `video.nds_layout`. Each display keeps its own size, orientation
 and scaling; a touch on the second display's image is the pen. On Android the
 second display is a Presentation of the app's activity; no setting of the
 device changes.
+
+Some games draw a shape on every other frame to make it look half transparent;
+the console's slow LCD blends the two frames, so it looks steady there but
+flickers on a fast panel. `video.nds_lcd_response` does that blending: a pixel
+that returns to the color it had two frames ago, after a frame of another color,
+shows as the mean of the two. A pixel that moves or changes for good is shown as
+drawn, so motion does not smear. Off: every frame is shown as drawn.
 
 ## Switch keyboard defaults
 

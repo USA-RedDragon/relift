@@ -31,6 +31,34 @@ void rl_nds_screens_frames(const uint32_t *pixels, uint8_t *rgb, rl_screens_fram
         frames[s] = (rl_screens_frame){rgb + (size_t)s * SW * SH * 3u, SW, SH};
 }
 
+/** @brief The largest difference of one channel between two pixels. */
+static unsigned spread(const uint8_t *a, const uint8_t *b)
+{
+    unsigned m = 0;
+    for (unsigned c = 0; c < 3; c++) {
+        unsigned d = a[c] > b[c] ? (unsigned)(a[c] - b[c]) : (unsigned)(b[c] - a[c]);
+        m = d > m ? d : m;
+    }
+    return m;
+}
+
+void rl_nds_lcd_response(rl_nds_lcd *l, uint8_t *rgb)
+{
+    uint8_t *older = l->last[l->older], *prev = l->last[l->older ^ 1u];
+    bool ready = l->seen >= 2;
+    for (size_t i = 0; i < RL_NDS_RGB_BYTES; i += 3) {
+        uint8_t *p = rgb + i;
+        uint8_t raw[3] = {p[0], p[1], p[2]};
+        if (ready && 4u * spread(raw, older + i) <= spread(raw, prev + i) && memcmp(raw, prev + i, 3))
+            for (unsigned c = 0; c < 3; c++)
+                p[c] = (uint8_t)((raw[c] + prev[i + c] + 1u) >> 1);
+        memcpy(older + i, raw, 3);
+    }
+    l->older ^= 1u;
+    if (l->seen < 2)
+        l->seen++;
+}
+
 void rl_nds_controls_find(rl_nds_controls *c)
 {
     static const char *const names[12] = {"a",  "b",    "select", "start", "right", "left",
