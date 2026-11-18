@@ -14,6 +14,8 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [Nintendo Switch games](../guests/switch/README.md)
   - [Game Boy and Game Boy Color games](../guests/gb/README.md)
   - [Game Boy Advance games](../guests/gba/README.md)
+  - [Nintendo 64 games](../guests/n64/README.md)
+  - [Master System, Game Gear and SG-1000 games](../guests/sms/README.md)
 - Concepts
   - [Architecture](concepts/architecture.md)
   - [The C runtime](../runtime/README.md)
