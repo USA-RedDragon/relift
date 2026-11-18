@@ -95,8 +95,8 @@ pub(crate) struct Plan {
     kept: Vec<Option<(u64, Regs)>>,
     lp_reg: Option<Reg>,
     empty: Regs,
-    /// Whether the guards share one slow path, and what it stores and
-    /// reloads.
+    /// Whether the guards share slow paths (each of at most
+    /// `SHARED_GUARDS` guards), and what each stores and reloads.
     shared: Option<(Regs, Regs)>,
 }
 
@@ -145,8 +145,8 @@ impl Plan {
         &self.empty
     }
 
-    /// The stores and reloads of the slow path the piece's guards share,
-    /// when they share one.
+    /// The stores and reloads of the slow paths the piece's guards share,
+    /// when they share them.
     pub(crate) fn shared(&self) -> Option<&(Regs, Regs)> {
         self.shared.as_ref()
     }

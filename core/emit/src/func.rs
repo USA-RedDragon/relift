@@ -70,6 +70,17 @@ struct Split {
 /// an unknown site.
 const SITE_NONE: u64 = u64::MAX;
 
+/// The most guards that share one slow path. Each shared path picks its
+/// handler and its way back with a switch over the guard's number, which
+/// clang's jump threading takes apart guard by guard at a cost that grows
+/// with the square of the guards behind one path. A file whose largest
+/// function has 2009 guards took 87 s at -O2 with clang 18 for arm64 and 58
+/// s with clang 23 for x86-64, nearly all of it in jump threading; with
+/// paths of 64 guards it takes 4.7 s and 4.0 s, and its code is a quarter
+/// smaller. Paths of 32 to 128 guards measured about the same, and 64 gave
+/// the smallest code.
+const SHARED_GUARDS: usize = 64;
+
 struct Ctx<'a> {
     fe: &'a dyn Frontend,
     f: &'a Function<'a>,
@@ -815,25 +826,30 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         let slow = std::mem::take(&mut cx.slow);
         let st = cx.store(store);
         let rl = cx.reload(reload);
-        let _ = writeln!(
-            t,
-            "rl_slow:\n{}    switch (rl_k) {{",
-            Ctx::line(&st, "    ")
-        );
-        for (k, (call, _, _)) in slow.iter().enumerate() {
-            let _ = writeln!(t, "    case {k}: rc = {call}; break;");
-        }
-        let _ = writeln!(
-            t,
-            "    default: __builtin_unreachable();\n    }}\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n{}    switch (rl_k) {{",
-            Ctx::line(&rl, "    ")
-        );
+        let groups = slow.len().div_ceil(SHARED_GUARDS).max(1);
         cx.dirty = Regs::new(regs.len());
-        for (k, (_, to, at)) in slow.iter().enumerate() {
-            cx.site = *at;
-            let _ = writeln!(t, "    case {k}: {}", cx.jump(*to));
+        for g in 0..groups {
+            let ks = g * SHARED_GUARDS..((g + 1) * SHARED_GUARDS).min(slow.len());
+            let _ = writeln!(
+                t,
+                "rl_slow{g}:\n{}    switch (rl_k) {{",
+                Ctx::line(&st, "    ")
+            );
+            for k in ks.clone() {
+                let _ = writeln!(t, "    case {k}: rc = {}; break;", slow[k].0);
+            }
+            let _ = writeln!(
+                t,
+                "    default: __builtin_unreachable();\n    }}\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n{}    switch (rl_k) {{",
+                Ctx::line(&rl, "    ")
+            );
+            for k in ks {
+                let (_, to, at) = &slow[k];
+                cx.site = *at;
+                let _ = writeln!(t, "    case {k}: {}", cx.jump(*to));
+            }
+            t.push_str("    default: __builtin_unreachable();\n    }\n");
         }
-        t.push_str("    default: __builtin_unreachable();\n    }\n");
     }
     if lp_reg.is_some() {
         t.push_str("lp_dispatch:\n    switch (c->pend.pc) {\n");
@@ -1086,7 +1102,8 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     cx.slow.push((slow, to, b.pc));
                     let _ = writeln!(
                         s,
-                        "    if (RL_UNLIKELY({cond})) {{ rl_k = {k}; goto rl_slow; }}"
+                        "    if (RL_UNLIKELY({cond})) {{ rl_k = {k}; goto rl_slow{}; }}",
+                        k / SHARED_GUARDS
                     );
                     continue;
                 }

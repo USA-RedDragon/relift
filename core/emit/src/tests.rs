@@ -530,19 +530,78 @@ fn guards_share_one_slow_path_that_continues_after_each() {
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("if (RL_UNLIKELY(v2)) { rl_k = 0; goto rl_slow; }"),
+        s.contains("if (RL_UNLIKELY(v2)) { rl_k = 0; goto rl_slow0; }"),
         "{s}"
     );
     assert!(
-        s.contains("if (RL_UNLIKELY(v2)) { rl_k = 1; goto rl_slow; }"),
+        s.contains("if (RL_UNLIKELY(v2)) { rl_k = 1; goto rl_slow0; }"),
         "{s}"
     );
     assert!(
-        s.contains("rl_slow:\n    c->x[2] = r2;\n    switch (rl_k) {\n    case 0: rc = toy_slow(c, mem, UINT64_C(0x200), 0x55u); break;\n    case 1: rc = toy_slow(c, mem, UINT64_C(0x204), 0x66u); break;"),
+        s.contains("rl_slow0:\n    c->x[2] = r2;\n    switch (rl_k) {\n    case 0: rc = toy_slow(c, mem, UINT64_C(0x200), 0x55u); break;\n    case 1: rc = toy_slow(c, mem, UINT64_C(0x204), 0x66u); break;"),
         "{s}"
     );
     assert!(
         s.contains("    case 0: goto L_204;\n    case 1: goto L_208;"),
+        "{s}"
+    );
+}
+
+#[test]
+fn many_guards_share_slow_paths_of_at_most_64() {
+    let n = 130u64;
+    let blocks: Vec<_> = (0..n)
+        .map(|i| {
+            let pc = 0x200 + 4 * i;
+            let mut b = relift_ir::Builder::new(Toy.regs(), relift_ir::Width::W64, pc);
+            let x = b.get(relift_ir::Reg(1));
+            let z = b.konst(relift_ir::Width::W64, 0);
+            let ne = b.cmp(relift_ir::CmpOp::Ne, x, z);
+            b.guard(ne, 7);
+            let one = b.konst(relift_ir::Width::W64, 1);
+            b.set(relift_ir::Reg(2), one);
+            b.jump(4, pc + 4)
+        })
+        .collect();
+    let ret = Toy.lift(&word(0x03, 0, 0), 0x200 + 4 * n).expect("lifts");
+    let mut insts: BTreeMap<u64, Insn<'_>> = blocks
+        .iter()
+        .enumerate()
+        .map(|(i, block)| (0x200 + 4 * i as u64, Insn::Lifted { block, raw: 0x55 }))
+        .collect();
+    insts.insert(
+        0x200 + 4 * n,
+        Insn::Lifted {
+            block: &ret,
+            raw: 0,
+        },
+    );
+    let f = Function {
+        entry: 0x200,
+        name: "F_200".into(),
+        guest_name: None,
+        span: 4 * n + 4,
+        insts,
+        tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
+        guesses: BTreeMap::new(),
+        entries: BTreeMap::new(),
+    };
+    let out = emit(&Toy, &[f], &[], &Options::default());
+    let s = shard(&out);
+    for (k, g) in [(0, 0), (63, 0), (64, 1), (127, 1), (128, 2), (129, 2)] {
+        assert!(
+            s.contains(&format!("{{ rl_k = {k}; goto rl_slow{g}; }}")),
+            "{s}"
+        );
+    }
+    assert_eq!(s.matches("switch (rl_k) {").count(), 6, "{s}");
+    assert!(!s.contains("rl_slow3"), "{s}");
+    let path1 = &s[s.find("rl_slow1:").expect("path 1")..s.find("rl_slow2:").expect("path 2")];
+    assert!(path1.contains("case 64: rc = "), "{s}");
+    assert!(path1.contains("case 127: goto L_400;"), "{s}");
+    assert!(
+        !path1.contains("case 63:") && !path1.contains("case 128:"),
         "{s}"
     );
 }
