@@ -180,6 +180,9 @@ Options:
       --update <VERSION|base>
           The update version to apply, or `base` for the base alone (default: the newest update)
 
+      --system-data <DIR>
+          A folder of the player's own decrypted system data, exported with switch-tools from their console: the shared font titles (0100000000000810 to 0100000000000814), one folder per title id. Its fonts are decoded into the import for pl:u
+
   -v, --verbose
           Also print each file as it compiles and every instruction that does not lift
 
