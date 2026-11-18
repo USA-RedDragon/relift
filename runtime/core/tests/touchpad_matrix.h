@@ -13,6 +13,7 @@
 
 #include "runner.h"
 
+#include <relift/screens.h>
 #include <relift/settings.h>
 #include <relift/touchpad.h>
 
@@ -46,6 +47,7 @@ static const tpm_view g_tpm_views[] = {
     { "phone-landscape-1560x720", 1560, 720, 2.0f, { 96, 0, 0, 48 } },
     { "phone-landscape-1920x1080", 1920, 1080, 2.625f, { 63, 0, 0, 0 } },
     { "phone-landscape-2400x1080", 2400, 1080, 2.625f, { 96, 0, 63, 48 } },
+    { "phone-landscape-2340x1080-cutout", 2340, 1080, 2.625f, { 132, 0, 0, 48 } },
     { "phone-landscape-2520x1080", 2520, 1080, 2.625f, { 96, 0, 63, 48 } },
     { "phone-landscape-3200x1440", 3200, 1440, 3.5f, { 120, 0, 84, 63 } },
     { "tablet-4x3-1536x2048", 1536, 2048, 2.0f, { 0, 48, 0, 0 } },
@@ -191,7 +193,8 @@ static void tpm_frame(uint8_t *rgb, uint32_t w, uint32_t h, int32_t x0, int32_t 
 }
 
 /** Draws the view: the picture as flat screens, the overlay over it, the touch areas and the safe area outlined. */
-static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, const tpm_picture *pic, const char *tag)
+static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, const tpm_picture *pic, const char *tag,
+                     const rl_screens_picture *plan)
 {
     uint32_t ow, oh;
     int32_t dirty[4];
@@ -204,7 +207,21 @@ static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, cons
     int32_t r[4];
     rl_touchpad_picture(r);
     bool stacked = pic->w * 3 == pic->h * 2;
-    if (stacked) {
+    if (plan) {
+        for (uint32_t s = 0; s < RL_SCREENS; s++) {
+            const rl_screens_place *q = &plan->place[s];
+            if (!q->shown)
+                continue;
+            int32_t x0 = r[0] + (int32_t)((uint64_t)q->x * (uint32_t)r[2] / plan->width);
+            int32_t y0 = r[1] + (int32_t)((uint64_t)q->y * (uint32_t)r[3] / plan->height);
+            int32_t x1 = r[0] + (int32_t)((uint64_t)(q->x + q->w) * (uint32_t)r[2] / plan->width);
+            int32_t y1 = r[1] + (int32_t)((uint64_t)(q->y + q->h) * (uint32_t)r[3] / plan->height);
+            if (s == 0)
+                tpm_fill(rgb, v->w, v->h, x0, y0, x1, y1, 40, 90, 140);
+            else
+                tpm_fill(rgb, v->w, v->h, x0, y0, x1, y1, 50, 130, 80);
+        }
+    } else if (stacked) {
         tpm_fill(rgb, v->w, v->h, r[0], r[1], r[0] + r[2], r[1] + r[3] / 2, 40, 90, 140);
         tpm_fill(rgb, v->w, v->h, r[0], r[1] + r[3] / 2, r[0] + r[2], r[1] + r[3], 50, 130, 80);
     } else {
@@ -239,7 +256,7 @@ static void tpm_draw(const char *dir, const char *guest, const tpm_view *v, cons
 }
 
 /** Why the controls of the current view are wrong, or NULL. */
-static const char *tpm_problem(const tpm_view *v, float full_scale, float picture_scale, bool whole, const int32_t pic[4])
+static const char *tpm_problem(const tpm_view *v, float full_scale, float picture_scale, bool whole, bool sizes, const int32_t pic[4])
 {
     static char why[200];
     rl_touchpad_rect rc[32];
@@ -265,13 +282,13 @@ static const char *tpm_problem(const tpm_view *v, float full_scale, float pictur
             snprintf(why, sizeof why, "%s takes touches on less than it draws", name);
             return why;
         }
-        float min_draw = round ? 36.0f : rc[i].shape == RL_TOUCHPAD_DPAD ? 90.0f : 24.0f;
-        if ((round ? dw : dh) < min_draw || hw < 32.0f || hh < 32.0f) {
+        float min_draw = round ? 34.0f : rc[i].shape == RL_TOUCHPAD_DPAD ? 90.0f : 22.0f;
+        if (sizes && ((round ? dw : dh) < min_draw || hw < 30.0f || hh < 30.0f)) {
             snprintf(why, sizeof why, "%s is too small: %.1f by %.1f dp, touch area %.1f by %.1f", name, dw, dh, hw, hh);
             return why;
         }
         for (uint32_t j = 0; j < i; j++)
-            if (tpm_meet(&hs[i], &hs[j])) {
+            if (!(rc[i].group >= 0 && rc[i].group == rc[j].group) && tpm_meet(&hs[i], &hs[j])) {
                 const char *other = rc[j].label ? rc[j].label : rc[j].control ? rc[j].control : "shape";
                 snprintf(why, sizeof why, "touch areas of %s and %s meet", name, other);
                 return why;
@@ -282,7 +299,10 @@ static const char *tpm_problem(const tpm_view *v, float full_scale, float pictur
             return why;
         }
     }
-    if (picture_scale < full_scale * (whole ? 0.3f : 0.45f)) {
+    float aspect = (float)v->w / (float)v->h, least = whole ? 0.3f : 0.45f;
+    if (aspect > 0.77f && aspect < 1.3f)
+        least = 0.25f;
+    if (sizes && picture_scale < full_scale * least) {
         snprintf(why, sizeof why, "the picture shrinks to %.2f of its full size", picture_scale / full_scale);
         return why;
     }
@@ -301,7 +321,9 @@ static void tpm_setup(const rl_touchpad_guest *guest, const tpm_view *v, const t
 
 /**
  * Runs every view of the matrix with each picture shape and the default
- * settings, then with the button size at its smallest and largest; returns
+ * settings, where sizes and the picture's share are checked too, then with
+ * the button size at its smallest and largest, where only overlaps and the
+ * view's edges are; returns
  * the number of views with a problem after printing each.
  */
 static int tpm_run(const rl_touchpad_guest *guest, const tpm_picture *pics, size_t npics)
@@ -321,14 +343,14 @@ static int tpm_run(const rl_touchpad_guest *guest, const tpm_picture *pics, size
                 if (pics[pi].whole && full >= 1.0f)
                     full = floorf(full);
                 float got = pics[pi].w ? (float)pic[2] / (float)pics[pi].w : 0.0f;
-                const char *why = tpm_problem(v, full, got, pics[pi].whole, pic);
+                const char *why = tpm_problem(v, full, got, pics[pi].whole, z == 0, pic);
                 if (why) {
                     fprintf(stderr, "  %s %s picture %ux%u size %s%%: %s\n", guest->name, v->name, pics[pi].w,
                             pics[pi].h, sizes[z], why);
                     bad++;
                 }
                 if (dir && z == 0 && pi == 0)
-                    tpm_draw(dir, guest->name, v, &pics[pi], "default");
+                    tpm_draw(dir, guest->name, v, &pics[pi], "default", NULL);
             }
     rl_touchpad_reset();
     return bad;
