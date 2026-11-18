@@ -37,6 +37,8 @@ static void log_unlock(void) { pthread_mutex_unlock(&g_log_lock); }
 static uint64_t g_once[ONCE_SLOTS];
 static bool g_once_used[ONCE_SLOTS];
 
+static bool g_level_read;
+
 rl_config *rl_cfg(void) { return &g_cfg; }
 
 static bool env_flag(const char *name)
@@ -45,13 +47,11 @@ static bool env_flag(const char *name)
     return v && *v && strcmp(v, "0") != 0 && strcmp(v, "false") != 0;
 }
 
-void rl_config_load(void)
+/** @brief Sets the log level from `RELIFT_LOG`. */
+static void read_log_level(void)
 {
-    const char *v;
-    g_cfg.strict = env_flag("RELIFT_STRICT");
-    g_cfg.trace_os = env_flag("RELIFT_TRACE_OS");
+    const char *v = getenv("RELIFT_LOG");
     g_cfg.log_level = RL_LOG_INFO;
-    v = getenv("RELIFT_LOG");
     if (v) {
         if (!strcmp(v, "debug"))
             g_cfg.log_level = RL_LOG_DEBUG;
@@ -60,6 +60,15 @@ void rl_config_load(void)
         else if (!strcmp(v, "error"))
             g_cfg.log_level = RL_LOG_ERROR;
     }
+    __atomic_store_n(&g_level_read, true, __ATOMIC_RELEASE);
+}
+
+void rl_config_load(void)
+{
+    const char *v;
+    g_cfg.strict = env_flag("RELIFT_STRICT");
+    g_cfg.trace_os = env_flag("RELIFT_TRACE_OS");
+    read_log_level();
     v = getenv("RELIFT_HOST_PAGE");
     g_cfg.host_page = v ? (uint32_t)strtoul(v, NULL, 0) : 0;
     v = getenv("RELIFT_ADDRESS_BITS");
@@ -70,6 +79,12 @@ void rl_config_load(void)
 void rl_vlog(int level, const char *tag, const char *fmt, va_list ap)
 {
     static const char *const names[] = { "debug", "info", "warn", "error" };
+    if (!__atomic_load_n(&g_level_read, __ATOMIC_ACQUIRE)) {
+        log_lock();
+        if (!g_level_read)
+            read_log_level();
+        log_unlock();
+    }
     if (level < g_cfg.log_level)
         return;
     log_lock();
