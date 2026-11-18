@@ -77,6 +77,8 @@ TEST(gsv_boots_and_opens_nvdrv2)
     br = tc_send(c, (tc_obj){ .handle = chat }, b);
     CHECK_EQ(br.result, 0);
     CHECK_EQ(br.nmove, 1);
+    CHECK_EQ(tipc(c, chat, 103, NULL, 0, 3), 0);
+    CHECK_EQ(tipc(c, chat, 103, NULL, 0, 1), SF_RESULT_INVALID_HEADER);
     CHECK_EQ(tipc(c, chat, 2, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
     CHECK_EQ(tipc(c, h, 101, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 201, NULL, 0, 0), 0);

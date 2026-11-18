@@ -444,9 +444,23 @@ static rl_result chat_event(rl_ipc_req *r)
     return rc;
 }
 
+/**
+ * @brief ChatSession 103: a u64 (the first eight bytes of the display name)
+ * and a u32 slot; the result only (verified: nn::chat::gsv::OpenVirtualDisplay,
+ * SDK 20.5 sdk 0x638380 into 0x63a604). A console not in a chat has no chat
+ * displays to feed, so relift accepts it (inferred: nothing comes back to
+ * the game; Eglantine accepts it the same way).
+ */
+static rl_result chat_open_virtual_display(rl_ipc_req *r)
+{
+    uint8_t in[12];
+    return rl_srv_in(r, in, sizeof in) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
+}
+
 static const rl_ipc_cmd chat_session_cmds[] = {
     { 1, "GetEventId", chat_event_id },
     { 11, "GetEvent", chat_event },
+    { 103, "OpenVirtualDisplay", chat_open_virtual_display },
 };
 
 static const rl_ipc_class chat_session_class = { "nn::gsv::ChatSession", chat_session_cmds,
