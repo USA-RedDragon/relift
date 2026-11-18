@@ -136,8 +136,9 @@ static void draw(rl_nds *m, nds_disp *d, unsigned y)
                 c = nds_c18(bank16(m, (e->dispcnt >> 18) & 3, (y * NDS_W + x) * 2u) & 0x7FFFu);
             else
                 c = nds_c18(fifo_line[x] & 0x7FFFu);
-            o[x] = nds_eng_bright(e, c);
+            o[x] = c;
         }
+        nds_eng_bright_line(e, o, NDS_W);
         nds_eng_line_end(e, y);
     }
 }

@@ -250,6 +250,15 @@ uint32_t nds_eng_bright(const nds_eng *e, uint32_t c)
     return r;
 }
 
+void nds_eng_bright_line(const nds_eng *e, uint32_t *line, unsigned n)
+{
+    unsigned f = min_u(16, e->bright & 31u), mode = e->bright >> 14;
+    if (!f || mode == 0 || mode == 3)
+        return;
+    for (unsigned x = 0; x < n; x++)
+        line[x] = nds_eng_bright(e, line[x]);
+}
+
 void nds_eng_line(rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line3d)
 {
     for (unsigned n = 0; n < 4; n++)

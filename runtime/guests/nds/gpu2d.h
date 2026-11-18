@@ -95,6 +95,8 @@ void nds_eng_line(struct rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line
 void nds_eng_line_end(nds_eng *e, unsigned y);
 /** @brief Master brightness of the engine on an 18-bit color. */
 uint32_t nds_eng_bright(const nds_eng *e, uint32_t c);
+/** @brief Master brightness over the n colors of line in place, as nds_eng_bright on each. */
+void nds_eng_bright_line(const nds_eng *e, uint32_t *line, unsigned n);
 
 /**
  * @brief The 18-bit color of a 16-bit one: each 5-bit channel doubled, and
