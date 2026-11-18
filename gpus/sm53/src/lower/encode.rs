@@ -2,7 +2,9 @@
 //! word of an exact row, the pseudo-instruction of a pseudo row, or the
 //! named stop of a case the evidence does not cover.
 
-use relift_gpu_sm86::translate::pseudo::{IPA_MUL, IPA_SAT, MUFU_SAT, RRO_EX2, RRO_SINCOS};
+use relift_gpu_sm86::translate::pseudo::{
+    I2F_IABS, I2F_INEG, IPA_MUL, IPA_SAT, MUFU_SAT, RRO_EX2, RRO_SINCOS,
+};
 use relift_gpu_sm86::{CBank, Inst as Inst86, Operand, RegMods, Word};
 
 use super::flow::{self, Flow};
@@ -69,6 +71,13 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::Rro, _) => rro(i),
         (Op::Mov, Src::Imm32) => mov32i(i),
         (Op::Mov, Src::CBuf) => mov_c(i),
+        (Op::Mov, Src::Reg) => mov_r(i),
+        (Op::Fmnmx, _) => fmnmx(i),
+        (Op::Fsetp, _) => fsetp(i),
+        (Op::I2f, _) => i2f(i),
+        (Op::F2i, _) => f2i(i),
+        (Op::F2f, _) => f2f(i),
+        (Op::Ast, _) => ast(i),
         (Op::Ald, _) => ald(i),
         (Op::Ipa, _) => ipa(i),
         _ => return None,
@@ -418,6 +427,239 @@ fn mov_c(i: &Inst) -> Lowered {
             (38, 16, off),
             (54, 5, f(i, "CbufSlot")),
             (72, 4, 0xf),
+        ],
+    ))
+}
+
+/// `MOV Rd, Rs`: SM86 `MOV Rd, Rs` (form 0x202) with the full lane mask.
+fn mov_r(i: &Inst) -> Lowered {
+    if f(i, "QuadMask") != 0xf {
+        return Lowered::Stop("MOV with a lane mask other than 0xf");
+    }
+    Lowered::Word(word(
+        i,
+        0x202,
+        &[(16, 8, f(i, "Dest")), (32, 8, f(i, "SrcA")), (72, 4, 0xf)],
+    ))
+}
+
+/// The SM86 fields of a source predicate (bits 87 to 89, negation 90).
+fn src_pred(i: &Inst) -> [(u32, u32, u64); 2] {
+    [(87, 3, f(i, "SrcPred")), (90, 1, f(i, "SrcPredInv"))]
+}
+
+/// `FMNMX`: SM86 `FMNMX` (0x09) with the same operands, their negation and
+/// absolute values, `.FTZ` and the predicate that picks the minimum.
+fn fmnmx(i: &Inst) -> Lowered {
+    if f(i, "WriteCC") != 0 {
+        return Lowered::Stop("FMNMX that writes the condition code");
+    }
+    let (form, b) = match src_b(i, f(i, "NegB") != 0, f(i, "AbsB") != 0) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    let mut v = b;
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (24, 8, f(i, "SrcA")),
+        (72, 1, f(i, "NegA")),
+        (73, 1, f(i, "AbsA")),
+        (80, 1, f(i, "Ftz")),
+    ]);
+    v.extend(src_pred(i));
+    Lowered::Word(word(i, opc(0x009, form), &v))
+}
+
+/// `FSETP`: SM86 `FSETP` (0x0b) with the same comparison, `.FTZ`, boolean
+/// operation, both destinations and operand modifiers. Maxwell's bit 47 is
+/// `.FTZ` (envydis); Ryujinx's form also names it the condition code bit,
+/// which FSETP does not write.
+fn fsetp(i: &Inst) -> Lowered {
+    let bop = f(i, "Bop");
+    if bop == 3 {
+        return Lowered::Stop("FSETP with an invalid boolean operation");
+    }
+    let (form, b) = match src_b(i, f(i, "NegB") != 0, f(i, "AbsB") != 0) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    let mut v = b;
+    v.extend([
+        (81, 3, f(i, "DestPred")),
+        (84, 3, f(i, "DestPredInv")),
+        (24, 8, f(i, "SrcA")),
+        (72, 1, f(i, "NegA")),
+        (73, 1, f(i, "AbsA")),
+        (76, 4, f(i, "FComp")),
+        (80, 1, f(i, "Ftz")),
+        (74, 2, bop),
+    ]);
+    v.extend(src_pred(i));
+    Lowered::Word(word(i, opc(0x00b, form), &v))
+}
+
+/// The source of a conversion in the SM86 field layout (bits 32 to 63 for
+/// a register or constant, with negation 63 and absolute value 62) and
+/// its form; an integer immediate is Maxwell's 20 bits sign-extended, a
+/// float immediate the top 20 bits of the float.
+fn cvt_src(i: &Inst, neg: bool, abs: bool, float: bool) -> Result<(u32, Fields), &'static str> {
+    if i.enc.src == Src::Imm && !float {
+        if neg || abs {
+            return Err("integer immediate with a modifier");
+        }
+        let v = f(i, "Imm20");
+        let v = if v & 0x8_0000 != 0 {
+            v | 0xfff0_0000
+        } else {
+            v
+        };
+        return Ok((4, vec![(32, 32, v)]));
+    }
+    src_b(i, neg, abs)
+}
+
+/// The pseudo-instruction of the SM86 word `w` with the modifiers
+/// `extra`.
+fn pseudo_of(w: Word, extra: &[&'static str]) -> Lowered {
+    let Ok(mut p) = relift_gpu_sm86::decode(w, 0) else {
+        return Lowered::Stop("a lowered word SM86 does not decode");
+    };
+    p.mods.extend(extra);
+    Lowered::Pseudo(p)
+}
+
+/// `I2F`: SM86 `I2F` (0x106) to F32 with the same source size, signedness,
+/// byte or half selection and rounding mode. Maxwell's integer `.ABS` and
+/// `.NEG` of the source have no SM86 form: the pseudo-instruction
+/// `I2F.IABS` or `I2F.INEG`.
+fn i2f(i: &Inst) -> Lowered {
+    if f(i, "WriteCC") != 0 {
+        return Lowered::Stop("I2F that writes the condition code");
+    }
+    if f(i, "DstFmt") != 2 {
+        return Lowered::Stop("I2F to F16 or F64");
+    }
+    let src = f(i, "ISrcFmt");
+    let (size, signed) = (src & 3, src >> 2);
+    if size == 3 {
+        return Lowered::Stop("I2F from a 64-bit integer");
+    }
+    let sel = f(i, "ByteSel");
+    let sel = match (size, sel) {
+        (_, 0) => 0,
+        (0, s) => s,
+        (1, 2) => 1,
+        _ => return Lowered::Stop("I2F with a byte selection its source size does not have"),
+    };
+    let (neg, abs) = (f(i, "NegB") != 0, f(i, "AbsB") != 0);
+    if (neg || abs) && size != 2 {
+        return Lowered::Stop("I2F of an 8 or 16-bit integer with .ABS or .NEG");
+    }
+    let (form, mut v) = match cvt_src(i, false, false, false) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    if (neg || abs) && form != 1 {
+        return Lowered::Stop("I2F of a constant with .ABS or .NEG");
+    }
+    v.retain(|x| x.0 != 62 && x.0 != 63);
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (60, 2, sel),
+        (74, 1, signed),
+        (75, 3, 2),
+        (78, 2, f(i, "RoundMode")),
+        (84, 2, size),
+    ]);
+    let w = word(i, opc(0x106, form), &v);
+    if !neg && !abs {
+        return Lowered::Word(w);
+    }
+    let mut extra = Vec::new();
+    if abs {
+        extra.push(I2F_IABS);
+    }
+    if neg {
+        extra.push(I2F_INEG);
+    }
+    pseudo_of(w, &extra)
+}
+
+/// `F2I`: SM86 `F2I.NTZ` (0x105) from F32 with the same destination size
+/// and signedness, rounding, `.FTZ` and the operand's negation and
+/// absolute value. `.NTZ` makes a NaN zero, as Maxwell's F2I gives it
+/// (inferred, s2-console-questions).
+fn f2i(i: &Inst) -> Lowered {
+    if f(i, "WriteCC") != 0 {
+        return Lowered::Stop("F2I that writes the condition code");
+    }
+    if f(i, "SrcFmt") != 2 || f(i, "Sh") != 0 {
+        return Lowered::Stop("F2I from F16 or F64");
+    }
+    let dst = f(i, "IDstFmt");
+    let (form, mut v) = match cvt_src(i, f(i, "NegB") != 0, f(i, "AbsB") != 0, true) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (72, 1, dst >> 2),
+        (75, 2, dst & 3),
+        (77, 1, 1),
+        (78, 2, f(i, "RoundMode")),
+        (80, 1, f(i, "Ftz")),
+        (84, 3, 2),
+    ]);
+    Lowered::Word(word(i, opc(0x105, form), &v))
+}
+
+/// `F2F` from F32 to F32 with an integer rounding: SM86 `FRND` (0x107)
+/// with the same rounding, `.FTZ` and operand modifiers. Other F2F forms
+/// stop.
+fn f2f(i: &Inst) -> Lowered {
+    if f(i, "WriteCC") != 0 {
+        return Lowered::Stop("F2F that writes the condition code");
+    }
+    if f(i, "SrcFmt") != 2 || f(i, "DstFmt") != 2 || f(i, "Sh") != 0 {
+        return Lowered::Stop("F2F between formats");
+    }
+    let mode = f(i, "RoundMode");
+    if mode < 4 {
+        return Lowered::Stop("F2F from F32 to F32 without an integer rounding");
+    }
+    if f(i, "Sat") != 0 {
+        return Lowered::Stop("F2F with .SAT");
+    }
+    let (form, mut v) = match cvt_src(i, f(i, "NegB") != 0, f(i, "AbsB") != 0, true) {
+        Ok(x) => x,
+        Err(r) => return Lowered::Stop(r),
+    };
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (75, 3, 2),
+        (78, 2, mode & 3),
+        (80, 1, f(i, "Ftz")),
+        (84, 3, 2),
+    ]);
+    Lowered::Word(word(i, opc(0x107, form), &v))
+}
+
+/// `AST a[imm], Rs, Rv`: SM86 `AST` (0x322) with the same offset, data and
+/// vertex registers, size and `.P`.
+fn ast(i: &Inst) -> Lowered {
+    if f(i, "SrcA") != RZ {
+        return Lowered::Stop("AST with a register in the attribute address");
+    }
+    Lowered::Word(word(
+        i,
+        0x322,
+        &[
+            (24, 8, RZ),
+            (32, 8, f(i, "SrcB")),
+            (40, 11, f(i, "Imm11")),
+            (64, 8, f(i, "SrcC")),
+            (74, 2, f(i, "AlSize")),
+            (76, 1, f(i, "P")),
         ],
     ))
 }

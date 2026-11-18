@@ -382,3 +382,191 @@ fn float_forms_lower_by_their_fields() {
         assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
     }
 }
+
+#[test]
+fn compare_and_conversion_forms_lower_by_their_fields() {
+    let cases: &[(Inst, &str)] = &[
+        (
+            maxwell(
+                Op::Mov,
+                Src::Reg,
+                &[("Dest", 1), ("SrcA", 2), ("QuadMask", 0xf)],
+            ),
+            "MOV R1, R2",
+        ),
+        (
+            maxwell(
+                Op::Mov,
+                Src::Reg,
+                &[("Dest", 1), ("SrcA", 2), ("QuadMask", 1)],
+            ),
+            "stop: MOV with a lane mask other than 0xf",
+        ),
+        (
+            maxwell(
+                Op::Fmnmx,
+                Src::Reg,
+                &[
+                    ("Dest", 1),
+                    ("SrcA", 2),
+                    ("SrcB", 3),
+                    ("NegA", 1),
+                    ("AbsB", 1),
+                    ("Ftz", 1),
+                    ("SrcPred", 7),
+                ],
+            ),
+            "FMNMX.FTZ R1, -R2, |R3|, PT",
+        ),
+        (
+            maxwell(
+                Op::Fmnmx,
+                Src::Reg,
+                &[("Dest", 1), ("SrcA", 2), ("SrcB", 3), ("WriteCC", 1)],
+            ),
+            "stop: FMNMX that writes the condition code",
+        ),
+        (
+            maxwell(
+                Op::Fsetp,
+                Src::Reg,
+                &[
+                    ("DestPred", 0),
+                    ("DestPredInv", 7),
+                    ("SrcA", 2),
+                    ("SrcB", 3),
+                    ("FComp", 1),
+                    ("Bop", 1),
+                    ("SrcPred", 1),
+                    ("SrcPredInv", 1),
+                    ("Ftz", 1),
+                ],
+            ),
+            "FSETP.LT.FTZ.OR P0, PT, R2, R3, !P1",
+        ),
+        (
+            maxwell(
+                Op::Fsetp,
+                Src::Reg,
+                &[("DestPred", 0), ("DestPredInv", 7), ("Bop", 3)],
+            ),
+            "stop: FSETP with an invalid boolean operation",
+        ),
+        (
+            maxwell(
+                Op::I2f,
+                Src::Reg,
+                &[("Dest", 1), ("SrcB", 2), ("ISrcFmt", 6), ("DstFmt", 2)],
+            ),
+            "I2F R1, R2",
+        ),
+        (
+            maxwell(
+                Op::I2f,
+                Src::Reg,
+                &[
+                    ("Dest", 1),
+                    ("SrcB", 2),
+                    ("ISrcFmt", 0),
+                    ("DstFmt", 2),
+                    ("ByteSel", 3),
+                    ("RoundMode", 3),
+                ],
+            ),
+            "I2F.U8.RZ R1, R2.B3",
+        ),
+        (
+            maxwell(
+                Op::I2f,
+                Src::Reg,
+                &[
+                    ("Dest", 1),
+                    ("SrcB", 2),
+                    ("ISrcFmt", 6),
+                    ("DstFmt", 2),
+                    ("NegB", 1),
+                    ("AbsB", 1),
+                ],
+            ),
+            "pseudo I2F.IABS.INEG R1, R2",
+        ),
+        (
+            maxwell(
+                Op::I2f,
+                Src::Reg,
+                &[
+                    ("Dest", 1),
+                    ("SrcB", 2),
+                    ("ISrcFmt", 5),
+                    ("DstFmt", 2),
+                    ("NegB", 1),
+                ],
+            ),
+            "stop: I2F of an 8 or 16-bit integer with .ABS or .NEG",
+        ),
+        (
+            maxwell(
+                Op::F2i,
+                Src::Reg,
+                &[
+                    ("Dest", 1),
+                    ("SrcB", 2),
+                    ("SrcFmt", 2),
+                    ("IDstFmt", 6),
+                    ("RoundMode", 1),
+                    ("Ftz", 1),
+                    ("AbsB", 1),
+                ],
+            ),
+            "F2I.FTZ.FLOOR.NTZ R1, |R2|",
+        ),
+        (
+            maxwell(
+                Op::F2i,
+                Src::Reg,
+                &[("Dest", 1), ("SrcB", 2), ("SrcFmt", 3), ("IDstFmt", 6)],
+            ),
+            "stop: F2I from F16 or F64",
+        ),
+        (
+            maxwell(
+                Op::F2f,
+                Src::Reg,
+                &[
+                    ("Dest", 1),
+                    ("SrcB", 2),
+                    ("SrcFmt", 2),
+                    ("DstFmt", 2),
+                    ("RoundMode", 6),
+                    ("NegB", 1),
+                ],
+            ),
+            "FRND.CEIL R1, -R2",
+        ),
+        (
+            maxwell(
+                Op::F2f,
+                Src::Reg,
+                &[("Dest", 1), ("SrcB", 2), ("SrcFmt", 1), ("DstFmt", 2)],
+            ),
+            "stop: F2F between formats",
+        ),
+        (
+            maxwell(
+                Op::Ast,
+                Src::None,
+                &[
+                    ("SrcA", 255),
+                    ("SrcB", 4),
+                    ("SrcC", 255),
+                    ("Imm11", 0x70),
+                    ("AlSize", 3),
+                ],
+            ),
+            "AST.128 a[0x70], R4",
+        ),
+    ];
+    for (i, want) in cases {
+        assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
+    }
+}

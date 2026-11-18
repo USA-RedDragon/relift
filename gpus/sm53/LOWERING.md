@@ -11,7 +11,7 @@ the cases the evidence does not cover stop with their own reason.
 |---|---|---|---|
 | AL2P | stop | | no semantic check yet |
 | ALD | exact | ALD | same fields (offset, vertex register, size, .P, .O); Ryujinx's Ald and the SM86 translator read the same attribute map (generic 0x80 to 0x27c, position 0x70, vertex id 0x2fc as VertexIndex, instance id 0x2f8 as InstanceIndex - BaseInstance); a register in the address stops; operands equal envydis on every census word |
-| AST | stop | | no semantic check yet |
+| AST | exact | AST | same fields (offset, data register, vertex register, size, .P); Ryujinx's Ast and the SM86 translator write the same attribute map as for ALD; a register in the address stops. Operands equal envydis on every census word |
 | ATOM | stop | | no semantic check yet |
 | ATOM_CAS | stop | | no semantic check yet |
 | ATOMS | stop | | no semantic check yet |
@@ -58,12 +58,12 @@ the cases the evidence does not cover stop with their own reason.
 | DSETP I | stop | | no semantic check yet |
 | DSETP C | stop | | no semantic check yet |
 | EXIT | exact | EXIT | Ryujinx's Exit returns under the guard and the SM86 translator's EXIT writes the fragment outputs of the SPH and returns (Ryujinx does the same at its return); a condition code test and .KEEPREFCOUNT stop |
-| F2F R | stop | | no semantic check yet |
-| F2F I | stop | | no semantic check yet |
-| F2F C | stop | | no semantic check yet |
-| F2I R | stop | | no semantic check yet |
-| F2I I | stop | | no semantic check yet |
-| F2I C | stop | | no semantic check yet |
+| F2F R | exact | FRND | F2F.F32.F32 with an integer rounding (nearest even, floor, ceiling, toward zero) is SM86 FRND with the same rounding, .FTZ and operand .NEG and .ABS (frnd known answers); Ryujinx's F2f rounds the same way. Conversions between formats, F32 to F32 without an integer rounding, .SAT and the condition code stop. Operands equal envydis on every census word |
+| F2F I | exact | FRND | F2F.F32.F32 with an integer rounding (nearest even, floor, ceiling, toward zero) is SM86 FRND with the same rounding, .FTZ and operand .NEG and .ABS (frnd known answers); Ryujinx's F2f rounds the same way. Conversions between formats, F32 to F32 without an integer rounding, .SAT and the condition code stop. Operands equal envydis on every census word |
+| F2F C | exact | FRND | F2F.F32.F32 with an integer rounding (nearest even, floor, ceiling, toward zero) is SM86 FRND with the same rounding, .FTZ and operand .NEG and .ABS (frnd known answers); Ryujinx's F2f rounds the same way. Conversions between formats, F32 to F32 without an integer rounding, .SAT and the condition code stop. Operands equal envydis on every census word |
+| F2I R | exact | F2I | same destination sizes and signedness, rounding (nearest even, floor, ceiling, toward zero), .FTZ and operand .NEG and .ABS; out of range values saturate on both (f2i known answers). A NaN gives 0: the SM86 word sets .NTZ, which ptxas adds for PTX's cvt (NaN to 0) on SM70 and later, while Maxwell's F2I has no such bit (envydis, Mesa NAK's SM50 encoder) and is taken to give 0 itself (inferred, s2-console-questions). F16 and F64 sources and the condition code stop. Operands equal envydis on every census word |
+| F2I I | exact | F2I | same destination sizes and signedness, rounding (nearest even, floor, ceiling, toward zero), .FTZ and operand .NEG and .ABS; out of range values saturate on both (f2i known answers). A NaN gives 0: the SM86 word sets .NTZ, which ptxas adds for PTX's cvt (NaN to 0) on SM70 and later, while Maxwell's F2I has no such bit (envydis, Mesa NAK's SM50 encoder) and is taken to give 0 itself (inferred, s2-console-questions). F16 and F64 sources and the condition code stop. Operands equal envydis on every census word |
+| F2I C | exact | F2I | same destination sizes and signedness, rounding (nearest even, floor, ceiling, toward zero), .FTZ and operand .NEG and .ABS; out of range values saturate on both (f2i known answers). A NaN gives 0: the SM86 word sets .NTZ, which ptxas adds for PTX's cvt (NaN to 0) on SM70 and later, while Maxwell's F2I has no such bit (envydis, Mesa NAK's SM50 encoder) and is taken to give 0 itself (inferred, s2-console-questions). F16 and F64 sources and the condition code stop. Operands equal envydis on every census word |
 | FADD R | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
 | FADD I | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
 | FADD C | exact | FADD | Ryujinx's Fadd adds the operands with their .NEG and .ABS; the mode fields go to SM86's (fadd known answers: every mode, FTZ, SAT, negation and absolute value); an immediate's .NEG and .ABS fold into its sign bit as the operand modifiers act. The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; game programs as for FMUL |
@@ -83,9 +83,9 @@ the cases the evidence does not cover stop with their own reason.
 | FLO R | stop | | no semantic check yet |
 | FLO I | stop | | no semantic check yet |
 | FLO C | stop | | no semantic check yet |
-| FMNMX R | stop | | no semantic check yet |
-| FMNMX I | stop | | no semantic check yet |
-| FMNMX C | stop | | no semantic check yet |
+| FMNMX R | exact | FMNMX | Ryujinx's Fmnmx takes the minimum when the predicate holds and the maximum otherwise, after .NEG and .ABS of both operands; SM86 FMNMX has the same fields and predicate meaning (an immediate's .NEG and .ABS fold into its sign bit). The SM86 translator returns the other operand for one NaN and orders -0 below +0, as PTX defines min and max; Maxwell's own NaN and signed zero results are console-only (inferred, s2-console-questions). The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word |
+| FMNMX I | exact | FMNMX | Ryujinx's Fmnmx takes the minimum when the predicate holds and the maximum otherwise, after .NEG and .ABS of both operands; SM86 FMNMX has the same fields and predicate meaning (an immediate's .NEG and .ABS fold into its sign bit). The SM86 translator returns the other operand for one NaN and orders -0 below +0, as PTX defines min and max; Maxwell's own NaN and signed zero results are console-only (inferred, s2-console-questions). The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word |
+| FMNMX C | exact | FMNMX | Ryujinx's Fmnmx takes the minimum when the predicate holds and the maximum otherwise, after .NEG and .ABS of both operands; SM86 FMNMX has the same fields and predicate meaning (an immediate's .NEG and .ABS fold into its sign bit). The SM86 translator returns the other operand for one NaN and orders -0 below +0, as PTX defines min and max; Maxwell's own NaN and signed zero results are console-only (inferred, s2-console-questions). The condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word |
 | FMUL R | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
 | FMUL I | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
 | FMUL C | exact | FMUL | Ryujinx's Fmul multiplies the same operands (its .NEG negates the product) and scales by D2 to M8; the rounding mode, .FTZ, .SAT and scale go to the same SM86 fields, whose behavior the sm86 known answers pin (fmul: every mode with and without FTZ, SAT, the scales, negation). FMUL32I has no mode bits but .FTZ and .SAT. .FMZ, the condition code and constant offsets from 0x8000 stop. Operands equal envydis on every census word; whole game programs without MUFU draw the same bits as ShaderTools' on lavapipe |
@@ -93,9 +93,9 @@ the cases the evidence does not cover stop with their own reason.
 | FSET R | stop | | no semantic check yet |
 | FSET I | stop | | no semantic check yet |
 | FSET C | stop | | no semantic check yet |
-| FSETP R | stop | | no semantic check yet |
-| FSETP I | stop | | no semantic check yet |
-| FSETP C | stop | | no semantic check yet |
+| FSETP R | exact | FSETP | Ryujinx's Fsetp compares the operands after .NEG and .ABS with the same sixteen tests (ordered and unordered), combines the result and its negation with the source predicate by AND, OR or XOR and writes both destinations, as the SM86 translator's FSETP does; bit 47 is .FTZ (envydis; Ryujinx's form also calls it the condition code bit, which FSETP never writes). An invalid boolean operation and constant offsets from 0x8000 stop. Operands equal envydis on every census word |
+| FSETP I | exact | FSETP | Ryujinx's Fsetp compares the operands after .NEG and .ABS with the same sixteen tests (ordered and unordered), combines the result and its negation with the source predicate by AND, OR or XOR and writes both destinations, as the SM86 translator's FSETP does; bit 47 is .FTZ (envydis; Ryujinx's form also calls it the condition code bit, which FSETP never writes). An invalid boolean operation and constant offsets from 0x8000 stop. Operands equal envydis on every census word |
+| FSETP C | exact | FSETP | Ryujinx's Fsetp compares the operands after .NEG and .ABS with the same sixteen tests (ordered and unordered), combines the result and its negation with the source predicate by AND, OR or XOR and writes both destinations, as the SM86 translator's FSETP does; bit 47 is .FTZ (envydis; Ryujinx's form also calls it the condition code bit, which FSETP never writes). An invalid boolean operation and constant offsets from 0x8000 stop. Operands equal envydis on every census word |
 | FSWZADD | stop | | no semantic check yet |
 | GETCRSPTR | stop | | no semantic check yet |
 | GETLMEMBASE | stop | | no semantic check yet |
@@ -118,9 +118,9 @@ the cases the evidence does not cover stop with their own reason.
 | HSETP2 R | stop | | no semantic check yet |
 | HSETP2 I | stop | | no semantic check yet |
 | HSETP2 C | stop | | no semantic check yet |
-| I2F R | stop | | no semantic check yet |
-| I2F I | stop | | no semantic check yet |
-| I2F C | stop | | no semantic check yet |
+| I2F R | exact and pseudo | I2F; I2F.IABS, I2F.INEG | same source sizes, signedness, byte or half selection and rounding modes (i2f known answers); Ryujinx's I2F extracts the selected byte or half and converts with the mode. Maxwell's integer .ABS and .NEG of a 32-bit source have no SM86 form: pseudo, wrapping absolute value then negation before the conversion, as Ryujinx. F16 and F64 results, 64-bit sources, .ABS or .NEG of smaller sources and the condition code stop. Operands equal envydis on every census word |
+| I2F I | exact and pseudo | I2F; I2F.IABS, I2F.INEG | same source sizes, signedness, byte or half selection and rounding modes (i2f known answers); Ryujinx's I2F extracts the selected byte or half and converts with the mode. Maxwell's integer .ABS and .NEG of a 32-bit source have no SM86 form: pseudo, wrapping absolute value then negation before the conversion, as Ryujinx. F16 and F64 results, 64-bit sources, .ABS or .NEG of smaller sources and the condition code stop. Operands equal envydis on every census word |
+| I2F C | exact and pseudo | I2F; I2F.IABS, I2F.INEG | same source sizes, signedness, byte or half selection and rounding modes (i2f known answers); Ryujinx's I2F extracts the selected byte or half and converts with the mode. Maxwell's integer .ABS and .NEG of a 32-bit source have no SM86 form: pseudo, wrapping absolute value then negation before the conversion, as Ryujinx. F16 and F64 results, 64-bit sources, .ABS or .NEG of smaller sources and the condition code stop. Operands equal envydis on every census word |
 | I2I R | stop | | no semantic check yet |
 | I2I I | stop | | no semantic check yet |
 | I2I C | stop | | no semantic check yet |
@@ -190,7 +190,7 @@ the cases the evidence does not cover stop with their own reason.
 | LOP3 C | stop | | no semantic check yet |
 | LOP 32I | stop | | no semantic check yet |
 | MEMBAR | stop | | no semantic check yet |
-| MOV R | stop | | no semantic check yet |
+| MOV R | exact | MOV | Ryujinx's MovR copies SrcA (bits 20 to 27) to Dest and the SM86 translator's MOV copies its register; lane mask 0xf only (every census word), other masks stop; operands equal envydis on every census word |
 | MOV I | stop | | no semantic check yet |
 | MOV C | exact | MOV | Ryujinx's MovC copies c[CbufSlot][4 * CbufOffset] and the SM86 translator's MOV reads the same bank and byte offset; lane mask 0xf only, and offsets of 0x8000 and up stop (SM86 reads them as negative); operands equal envydis on every census word |
 | MOV 32I | exact | MOV | Ryujinx's Mov32i copies Imm32 to Dest and the SM86 translator's MOV copies its immediate; lane mask 0xf only (every census word), other masks stop; operands equal envydis on every census word |
@@ -303,4 +303,4 @@ the cases the evidence does not cover stop with their own reason.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 25 exact, 2 exact and pseudo, 3 pseudo, 263 stop.
+293 forms: 39 exact, 5 exact and pseudo, 3 pseudo, 246 stop.

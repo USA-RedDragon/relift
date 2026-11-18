@@ -169,6 +169,71 @@ pub fn row(op: Op, src: Src) -> Row {
                        Maxwell format itself is console-only (inferred, s2-console-questions). \
                        Operands equal envydis on every census word",
         },
+        (Op::Mov, Src::Reg) => Row::Exact {
+            to: "MOV",
+            evidence: "Ryujinx's MovR copies SrcA (bits 20 to 27) to Dest and the SM86 \
+                       translator's MOV copies its register; lane mask 0xf only (every census \
+                       word), other masks stop; operands equal envydis on every census word",
+        },
+        (Op::Fmnmx, _) => Row::Exact {
+            to: "FMNMX",
+            evidence: "Ryujinx's Fmnmx takes the minimum when the predicate holds and the \
+                       maximum otherwise, after .NEG and .ABS of both operands; SM86 FMNMX \
+                       has the same fields and predicate meaning (an immediate's .NEG and \
+                       .ABS fold into its sign bit). The SM86 translator returns the other \
+                       operand for one NaN and orders -0 below +0, as PTX defines min and \
+                       max; Maxwell's own NaN and signed zero results are console-only \
+                       (inferred, s2-console-questions). The condition code and constant \
+                       offsets from 0x8000 stop. Operands equal envydis on every census word",
+        },
+        (Op::Fsetp, _) => Row::Exact {
+            to: "FSETP",
+            evidence: "Ryujinx's Fsetp compares the operands after .NEG and .ABS with the \
+                       same sixteen tests (ordered and unordered), combines the result and \
+                       its negation with the source predicate by AND, OR or XOR and writes \
+                       both destinations, as the SM86 translator's FSETP does; bit 47 is \
+                       .FTZ (envydis; Ryujinx's form also calls it the condition code bit, \
+                       which FSETP never writes). An invalid boolean operation and constant \
+                       offsets from 0x8000 stop. Operands equal envydis on every census word",
+        },
+        (Op::I2f, _) => Row::Split {
+            to: "I2F",
+            pseudo: "I2F.IABS, I2F.INEG",
+            evidence: "same source sizes, signedness, byte or half selection and rounding \
+                       modes (i2f known answers); Ryujinx's I2F extracts the selected byte or \
+                       half and converts with the mode. Maxwell's integer .ABS and .NEG of a \
+                       32-bit source have no SM86 form: pseudo, wrapping absolute value then \
+                       negation before the conversion, as Ryujinx. F16 and F64 results, 64-bit \
+                       sources, .ABS or .NEG of smaller sources and the condition code stop. \
+                       Operands equal envydis on every census word",
+        },
+        (Op::F2i, _) => Row::Exact {
+            to: "F2I",
+            evidence: "same destination sizes and signedness, rounding (nearest even, floor, \
+                       ceiling, toward zero), .FTZ and operand .NEG and .ABS; out of range \
+                       values saturate on both (f2i known answers). A NaN gives 0: the SM86 \
+                       word sets .NTZ, which ptxas adds for PTX's cvt (NaN to 0) on SM70 and \
+                       later, while Maxwell's F2I has no such bit (envydis, Mesa NAK's SM50 \
+                       encoder) and is taken to give 0 itself (inferred, \
+                       s2-console-questions). F16 and F64 sources and the condition code \
+                       stop. Operands equal envydis on every census word",
+        },
+        (Op::F2f, _) => Row::Exact {
+            to: "FRND",
+            evidence: "F2F.F32.F32 with an integer rounding (nearest even, floor, ceiling, \
+                       toward zero) is SM86 FRND with the same rounding, .FTZ and operand \
+                       .NEG and .ABS (frnd known answers); Ryujinx's F2f rounds the same way. \
+                       Conversions between formats, F32 to F32 without an integer rounding, \
+                       .SAT and the condition code stop. Operands equal envydis on every \
+                       census word",
+        },
+        (Op::Ast, _) => Row::Exact {
+            to: "AST",
+            evidence: "same fields (offset, data register, vertex register, size, .P); \
+                       Ryujinx's Ast and the SM86 translator write the same attribute map as \
+                       for ALD; a register in the address stops. Operands equal envydis on \
+                       every census word",
+        },
         (Op::Pcnt | Op::Cont, _) => Row::Stop {
             reason: "PCNT and CONT: no program of the census uses them",
         },
