@@ -109,6 +109,35 @@ Lifted RSP code of a Nintendo 64 program is always built at
 <!-- docgen:const crate=relift name=n64::RSP_OPT -->`-O2`<!-- /docgen:const -->. A Switch program's lifted code is
 built at -O2 in both builds, and its cold copy at -Os.
 
+## Picture scaling
+
+A built program scales each window's picture by the `picture.filter` setting
+(`RELIFT_PICTURE_FILTER`), the same way for the main window and for windows on
+other displays, on the GPU. With `default`, a whole multiple of the picture is
+drawn nearest, a scale above 2x that is not whole is drawn sharp bilinear (nearest
+to the largest whole multiple, then bilinear, so pixels stay even and only their
+edges blend), and a scale up to 2x that is not whole is drawn bilinear. `integer`
+draws whole multiples only, `nearest` fills the window with uneven pixels, and
+`sharp_bilinear` fills it the sharp bilinear way. The choice for `default` is this
+function:
+
+<!-- docgen:code file=runtime/core/post.c symbol=rl_post_sampling -->
+```c
+int rl_post_sampling(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t dst_h)
+{
+    if (!src_w || !src_h || (dst_w % src_w == 0 && dst_h % src_h == 0))
+        return RL_POST_SAMPLE_NEAREST;
+    rl_settings_declare_runtime();
+    uint32_t f = rl_setting_enum("picture.filter");
+    if (f == RL_POST_FILTER_SHARP_BILINEAR)
+        return RL_POST_SAMPLE_SHARP;
+    if (f != RL_POST_FILTER_DEFAULT)
+        return RL_POST_SAMPLE_NEAREST;
+    return dst_w > 2 * src_w && dst_h > 2 * src_h ? RL_POST_SAMPLE_SHARP : RL_POST_SAMPLE_LINEAR;
+}
+```
+<!-- /docgen:code -->
+
 ## Missed code and stop reports
 
 Discovery cannot see every code address (a pointer the program computes, a

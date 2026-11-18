@@ -437,7 +437,7 @@ int rl_post_sampling(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t ds
         return RL_POST_SAMPLE_SHARP;
     if (f != RL_POST_FILTER_DEFAULT)
         return RL_POST_SAMPLE_NEAREST;
-    return dst_w >= 2 * src_w && dst_h >= 2 * src_h ? RL_POST_SAMPLE_SHARP : RL_POST_SAMPLE_LINEAR;
+    return dst_w > 2 * src_w && dst_h > 2 * src_h ? RL_POST_SAMPLE_SHARP : RL_POST_SAMPLE_LINEAR;
 }
 
 void rl_post_set_upscaler(const rl_post_stage *stage, void *user)

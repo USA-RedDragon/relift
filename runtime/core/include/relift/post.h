@@ -36,8 +36,8 @@ RL_RUNTIME_API bool rl_post_integer(bool fit);
 /**
  * @brief How a window samples a src_w by src_h picture drawn at dst_w by dst_h, after picture.filter: nearest at
  * whole multiples whatever the setting; else nearest for nearest and integer, sharp bilinear (bilinear from a
- * whole-multiple nearest prescale) for sharp_bilinear, and for default sharp bilinear at 2x and up and plain
- * bilinear below.
+ * whole-multiple nearest prescale) for sharp_bilinear, and for default sharp bilinear above 2x and plain
+ * bilinear up to 2x.
  */
 RL_RUNTIME_API int rl_post_sampling(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t dst_h);
 

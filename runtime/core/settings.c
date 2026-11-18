@@ -101,7 +101,7 @@ static const rl_setting_def g_runtime_defs[] = {
         .apply = RL_APPLY_LIVE,
         .description = "How windows scale and sample the picture. default: the window's own scaling (whole "
                        "multiples, or filling the window where a setting such as video.nds_integer_scale asks), "
-                       "sharp at whole multiples, sharp_bilinear at 2x and up, bilinear below 2x. integer: whole "
+                       "nearest at whole multiples, sharp_bilinear above 2x when the scale is not whole, bilinear below 2x. integer: whole "
                        "multiples only, sharp. nearest: fill the window, sharp uneven pixels. sharp_bilinear: fill "
                        "the window with even pixels whose edges blend over one screen pixel. Anything but nearest "
                        "sampling changes the picture from the console's",

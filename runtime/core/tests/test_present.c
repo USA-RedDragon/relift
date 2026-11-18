@@ -72,6 +72,8 @@ TEST(present_filter_setting_picks_the_scaling)
     CHECK_EQ(rl_post_sampling(256, 192, 1240, 930), RL_POST_SAMPLE_SHARP);
     CHECK_EQ(rl_post_sampling(256, 192, 512, 384), RL_POST_SAMPLE_NEAREST);
     CHECK_EQ(rl_post_sampling(256, 192, 400, 300), RL_POST_SAMPLE_LINEAR);
+    CHECK_EQ(rl_post_sampling(256, 192, 512, 400), RL_POST_SAMPLE_LINEAR);
+    CHECK_EQ(rl_post_sampling(256, 192, 520, 390), RL_POST_SAMPLE_SHARP);
     CHECK_EQ(rl_post_sampling(256, 192, 200, 150), RL_POST_SAMPLE_LINEAR);
     CHECK(rl_settings_set("picture.filter", "integer") == RL_SETTING_OK);
     CHECK(rl_post_integer(true));
