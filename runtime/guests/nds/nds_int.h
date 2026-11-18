@@ -373,6 +373,8 @@ typedef struct nds_cache_state {
     uint64_t wb_last;
     /** @brief NDS_ATTR_ bits per 4 KiB page from the protection regions (the highest region wins). */
     uint8_t attr[1u << 20];
+    /** @brief The instruction cache line the last code fill replaced, with bit 0 set (0 when it replaced none). */
+    uint32_t i_evicted;
 } nds_cache_state;
 
 /** @brief The machine. */
@@ -454,8 +456,9 @@ struct rl_nds {
     uint32_t fetch9_refill;
     uint64_t fetch9_end;
     unsigned fetch9_cost;
-    /** @brief The last rl_nds_code_cost was a sequential fetch that hit in the instruction cache. */
-    bool fetch9_hit;
+    /** @brief What the last rl_nds_code_cost tells the hot lines (rl_nds_code_lines). */
+    uint32_t fetch9_add, fetch9_drop;
+    bool fetch9_flush;
     /** @brief The ARM9's last instruction TCM data access opened an LDM or STM: its second word costs one more. */
     bool itcm_multi;
     /** @brief The ARM9's last TCM data access was a single-word store to the instruction TCM, ended at itcm_store_end. */

@@ -178,6 +178,8 @@ bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
         return true;
     }
     unsigned w = victim(m, c, s);
+    if (code)
+        m->cache.i_evicted = c->valid[s] >> w & 1u ? (c->tag[s][w] * sets_of(code) + s) * LINE | 1u : 0u;
     if (!code && c->dirty[s] >> w & 1u) {
         uint32_t old = (c->tag[s][w] * sets_of(code) + s) * LINE;
         nds_cache_buffer(m, old, burst(m, old));

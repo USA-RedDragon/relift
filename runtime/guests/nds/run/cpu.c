@@ -78,14 +78,33 @@ static void code_moved(rl_nds_run *r) { memset(r->seen, 0, (size_t)r->fn_total *
  * @brief Fetches from main RAM: the ARM9's through the instruction cache when the protection unit makes them
  * cacheable, the ARM7's in bursts (rl_nds_code_cost7).
  */
+/** @brief Empties the context's hot code lines (rl_ctx.hot). */
+static void forget_lines(rl_nds_arm *k)
+{
+    if (!k->hot_any)
+        return;
+    memset(k->c->hot, 0, sizeof k->c->hot);
+    k->hot_any = 0;
+}
+
 static int64_t fetch9(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
 {
     rl_nds_arm *k = cpu_of(c);
     if (k->id == RL_NDS_ARM7)
         return rl_nds_code_cost7(k->run->m, addr, 1u << log2, seq);
     unsigned n = rl_nds_code_cost(k->run->m, addr, 1u << log2, seq);
-    c->hot_line = rl_nds_code_hit(k->run->m) ? (addr & ~31u) | 1u : 0u;
-    c->hot_cost = 1;
+    uint32_t add, drop;
+    bool flush;
+    rl_nds_code_lines(k->run->m, &add, &drop, &flush);
+    if (flush)
+        forget_lines(k);
+    if (drop && c->hot[(drop >> 5) % RL_ARM32_HOT_LINES] == drop)
+        c->hot[(drop >> 5) % RL_ARM32_HOT_LINES] = 0;
+    if (add) {
+        c->hot[(add >> 5) % RL_ARM32_HOT_LINES] = add;
+        c->hot_cost = 1;
+        k->hot_any = 1;
+    }
     return n;
 }
 
@@ -301,7 +320,7 @@ void rl_nds_cpu_cp_write(rl_ctx *c, uint32_t key, uint32_t value, unsigned cond)
     if (!cond || k->id != RL_NDS_ARM9)
         return;
     rl_nds *m = k->run->m;
-    c->hot_line = 0;
+    forget_lines(k);
     unsigned what = rl_nds_cp15_write(m, key, value);
     if (what & RL_CP15_CHANGED_TCM) {
         build_waits(k);

@@ -61,6 +61,8 @@ typedef struct rl_nds_arm {
     uint8_t i;
     /** @brief 1 when the next data access is the second word of LDRD (rl_nds_cpu_pair). */
     uint8_t pair;
+    /** @brief 1 when rl_ctx.hot may hold a line. */
+    uint8_t hot_any;
     /** @brief Cycles of a code fetch (rl_ctx.waits). */
     uint8_t waits[16 * 6];
     /** @brief The dispatch table of the CPU's units. */
