@@ -270,12 +270,44 @@ impl Ctx {
 
     /// A 64-bit magnitude (low, high) and its sign to float bits with
     /// `mbits` explicit mantissa bits: single (23) or half (10) precision.
+    /// A single-precision result of magnitude up to `2^24` is exact, so in
+    /// any rounding mode it is the host's own conversion; other magnitudes
+    /// branch to the integer rounding.
     fn int_to_float(&mut self, lo: u32, hi: u32, neg: u32, mode: u32, half: bool) -> u32 {
-        self.shared_pure(
+        if half {
+            return self.shared_pure(
+                format!("int_to_float {mode} {half}"),
+                &[lo, hi, neg],
+                |c, p| c.int_to_float_body(p[0], p[1], p[2], mode, half),
+            );
+        }
+        let hi_z = self.cmp_k(op::I_EQUAL, hi, 0);
+        let lim = self.kc(1 << 24);
+        let small = self.icmp_op(op::U_LESS_THAN_EQUAL, lo, lim);
+        let direct = self.land(hi_z, small);
+        let fast = self.m.id();
+        let slow = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[direct, fast, slow]);
+        self.m.emit_void(op::LABEL, &[fast]);
+        let f = self.f32t();
+        let u = self.u32t();
+        let v = self.m.emit(op::CONVERT_U_TO_F, f, &[lo]);
+        let v = self.m.emit(op::BITCAST, u, &[v]);
+        let sign = self.sh(op::SHIFT_LEFT_LOGICAL, neg, 31);
+        let rf = self.ib(op::BITWISE_OR, v, sign);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[slow]);
+        let rs = self.shared_pure(
             format!("int_to_float {mode} {half}"),
             &[lo, hi, neg],
             |c, p| c.int_to_float_body(p[0], p[1], p[2], mode, half),
-        )
+        );
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
+        self.m.emit(op::PHI, u, &[rf, fast, rs, slow])
     }
 
     fn int_to_float_body(&mut self, lo: u32, hi: u32, neg: u32, mode: u32, half: bool) -> u32 {
