@@ -90,6 +90,20 @@ typedef struct ext_features {
 #define STYPE_IMAGE_ATOMIC_INT64 ((VkStructureType)1000234000)
 #define STYPE_MAXIMAL_RECONVERGENCE ((VkStructureType)1000434000)
 #define STYPE_SHADER_FMA ((VkStructureType)1000579000)
+#define STYPE_COOPERATIVE_MATRIX ((VkStructureType)1000506000)
+#define STYPE_COOPERATIVE_MATRIX_PROPS ((VkStructureType)1000506001)
+
+/** @brief VkCooperativeMatrixPropertiesKHR, which the generated headers do not hold. */
+typedef struct coop_props {
+    VkStructureType sType;
+    void *pNext;
+    uint32_t m, n, k, a_type, b_type, c_type, result_type;
+    VkBool32 saturating;
+    uint32_t scope;
+} coop_props;
+
+/** @brief vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, when the instance has it. */
+static VkResult (*coop_props_fn)(VkPhysicalDevice, uint32_t *, coop_props *);
 
 /**
  * @brief The device extensions relift enables when the device has them, with
@@ -98,7 +112,8 @@ typedef struct ext_features {
  */
 static const char *const device_exts[] = { "VK_EXT_depth_clip_control",          "VK_KHR_shader_clock",
                                            "VK_EXT_shader_atomic_float",         "VK_EXT_shader_image_atomic_int64",
-                                           "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma" };
+                                           "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma",
+                                           "VK_KHR_cooperative_matrix" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 static void bring_up(void)
@@ -124,6 +139,8 @@ static void bring_up(void)
     for (int i = 0; i < VKG_COUNT; i++)
         if (vkg_cmds[i].level != 0)
             g.fns.f[i] = load(get, g.instance, i);
+    void *coop_fn = get(g.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
+    memcpy(&coop_props_fn, &coop_fn, sizeof coop_props_fn);
     if (!pick_device()) {
         rl_log(RL_LOG_ERROR, "nvn", "no host Vulkan device with a graphics and compute queue");
         return;
@@ -131,7 +148,8 @@ static void bring_up(void)
     ext_features clip_control = { .sType = STYPE_DEPTH_CLIP_CONTROL }, clock = { .sType = STYPE_SHADER_CLOCK };
     ext_features afloat = { .sType = STYPE_ATOMIC_FLOAT }, i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 };
     ext_features recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE }, fma = { .sType = STYPE_SHADER_FMA };
-    ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma };
+    ext_features coop = { .sType = STYPE_COOPERATIVE_MATRIX };
+    ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma, &coop };
     const char *ext_names[DEVICE_EXTS + 1];
     uint32_t next = 0, nnames = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
@@ -272,9 +290,11 @@ static const char *driver_name(uint32_t id)
 /**
  * @brief Runs one variant of probe.comp over the n32 words at w (a staging
  * buffer the probe reads and writes) with push constants n and m, as
- * groups of 64 invocations. False when the device cannot run it.
+ * `groups` workgroups, with full subgroups of `subgroup` invocations
+ * required when it is not 0. False when the device cannot run it.
  */
-static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t n, uint32_t m, uint32_t groups)
+static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t n, uint32_t m, uint32_t groups,
+                      uint32_t subgroup)
 {
     bool ok = false;
     VkShaderModule sm = 0;
@@ -314,6 +334,14 @@ static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t 
                                                    .module = sm,
                                                    .pName = "main" },
                                         .layout = pl };
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rs = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO,
+        .requiredSubgroupSize = subgroup
+    };
+    if (subgroup) {
+        cpi.stage.pNext = &rs;
+        cpi.stage.flags = VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+    }
     if (VK(vkCreateComputePipelines)(g.dev, 0, 1, &cpi, NULL, &pipe) != VK_SUCCESS ||
         VK(vkCreateDescriptorPool)(g.dev, &dpi, NULL, &dp) != VK_SUCCESS)
         goto out;
@@ -389,7 +417,7 @@ static bool probe_canonical_nan(bool szinp, bool dp32, bool fma32)
             continue;
         memset(w, 0, 8ull * rows * sizeof(uint32_t));
         nvn_probe_nan_input(w);
-        ok = run_probe(v[k].code, v[k].size, &buf, rows, 0, (rows + 63) / 64) && nvn_probe_nan_check(w);
+        ok = run_probe(v[k].code, v[k].size, &buf, rows, 0, (rows + 63) / 64, 0) && nvn_probe_nan_check(w);
     }
     nvn_vk_staging_free(&buf);
     return ok;
@@ -414,10 +442,61 @@ static bool probe_exact_f16(void)
     memset(w, 0, (uint64_t)words * sizeof(uint32_t));
     nvn_probe_f16_input(w);
     uint32_t bad = UINT32_MAX;
-    if (run_probe(nvn_probe_f16, sizeof nvn_probe_f16, &buf, nvn_probe_f16_rows(), nvn_probe_f16_convs(), 32768 / 64))
+    if (run_probe(nvn_probe_f16, sizeof nvn_probe_f16, &buf, nvn_probe_f16_rows(), nvn_probe_f16_convs(), 32768 / 64, 0))
         bad = nvn_probe_f16_check(w);
     if (bad)
         rl_log(RL_LOG_INFO, "nvn", "%s: half-precision probe off in %u results; halves stay integer code", g.name, bad);
+    nvn_vk_staging_free(&buf);
+    return bad == 0;
+}
+
+/** @brief Whether the device lists a half-precision subgroup cooperative matrix multiply-add of shape m x n x k. */
+static bool has_coop_shape(const coop_props *p, uint32_t count, uint32_t m, uint32_t n, uint32_t k)
+{
+    for (uint32_t i = 0; i < count; i++)
+        if (p[i].m == m && p[i].n == n && p[i].k == k && !p[i].a_type && !p[i].b_type && !p[i].c_type &&
+            !p[i].result_type && !p[i].saturating && p[i].scope == 3)
+            return true;
+    return false;
+}
+
+/**
+ * @brief Whether VK_KHR_cooperative_matrix gives the SM86 HMMA.F16 results
+ * when the translator builds its matrices from the guest's registers: runs
+ * the HMMA variant of probe.comp on full 32-wide subgroups and checks every
+ * output word against the HMMA model (nvn_probe_hmma_check), so that both
+ * the arithmetic and the lane layout are measured. Only asked when the
+ * device has the extension, the Vulkan memory model at device scope, native
+ * halves and 32-wide compute subgroups, and lists both shapes.
+ */
+static bool probe_hmma_coop(bool usable)
+{
+    uint32_t count = 0;
+    if (!usable || !coop_props_fn || coop_props_fn(g.phys, &count, NULL) != VK_SUCCESS || !count)
+        return false;
+    coop_props *p = calloc(count, sizeof *p);
+    if (!p)
+        return false;
+    for (uint32_t i = 0; i < count; i++)
+        p[i].sType = STYPE_COOPERATIVE_MATRIX_PROPS;
+    bool shapes = coop_props_fn(g.phys, &count, p) == VK_SUCCESS && has_coop_shape(p, count, 16, 8, 16) &&
+                  has_coop_shape(p, count, 16, 8, 8);
+    free(p);
+    if (!shapes)
+        return false;
+    uint32_t words = nvn_probe_hmma_words(), tiles = nvn_probe_hmma_tiles();
+    staging buf;
+    if (!nvn_vk_staging_new(&buf, (uint64_t)words * sizeof(uint32_t)))
+        return false;
+    uint32_t *w = (uint32_t *)(void *)buf.map;
+    memset(w, 0, (uint64_t)words * sizeof(uint32_t));
+    nvn_probe_hmma_input(w);
+    uint32_t bad = UINT32_MAX;
+    if (run_probe(nvn_probe_hmma, sizeof nvn_probe_hmma, &buf, tiles, tiles, 2 * tiles, 32))
+        bad = nvn_probe_hmma_check(w);
+    if (bad)
+        rl_log(RL_LOG_INFO, "nvn", "%s: cooperative matrix HMMA probe off in %u words; HMMA stays exact code", g.name,
+               bad);
     nvn_vk_staging_free(&buf);
     return bad == 0;
 }
@@ -430,7 +509,7 @@ static void write_caps(void)
 {
     ext_features clock = { .sType = STYPE_SHADER_CLOCK }, afloat = { .sType = STYPE_ATOMIC_FLOAT };
     ext_features i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 }, recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE };
-    ext_features fma = { .sType = STYPE_SHADER_FMA };
+    ext_features fma = { .sType = STYPE_SHADER_FMA }, coop = { .sType = STYPE_COOPERATIVE_MATRIX };
     VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13 };
     VkPhysicalDeviceVulkan11Features f11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &f12 };
@@ -447,14 +526,14 @@ static void write_caps(void)
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &n, ext);
     static const char *const wanted[] = { "VK_EXT_shader_atomic_float", "VK_EXT_shader_image_atomic_int64",
                                           "VK_KHR_shader_clock", "VK_KHR_shader_fma",
-                                          "VK_KHR_shader_maximal_reconvergence" };
-    bool has[5] = { false };
+                                          "VK_KHR_shader_maximal_reconvergence", "VK_KHR_cooperative_matrix" };
+    bool has[6] = { false };
     for (uint32_t i = 0; i < n; i++)
-        for (uint32_t k = 0; k < 5; k++)
+        for (uint32_t k = 0; k < 6; k++)
             has[k] |= !strcmp(ext[i].extensionName, wanted[k]);
     ext_features *chain[] = { has[2] ? &clock : NULL, has[0] ? &afloat : NULL, has[1] ? &i64 : NULL,
-                              has[4] ? &recon : NULL, has[3] ? &fma : NULL };
-    for (uint32_t k = 0; k < 5; k++)
+                              has[4] ? &recon : NULL, has[3] ? &fma : NULL, has[5] ? &coop : NULL };
+    for (uint32_t k = 0; k < 6; k++)
         if (chain[k]) {
             chain[k]->pNext = f13.pNext;
             f13.pNext = chain[k];
@@ -473,7 +552,7 @@ static void write_caps(void)
     const VkPhysicalDeviceLimits *l = &p2.properties.limits;
     fprintf(f, "{\n \"capabilities\": {\n  \"device\": {\n   \"extensions\": {");
     bool first = true;
-    for (uint32_t k = 0; k < 5; k++)
+    for (uint32_t k = 0; k < 6; k++)
         for (uint32_t i = 0; i < n; i++)
             if (has[k] && !strcmp(ext[i].extensionName, wanted[k])) {
                 fprintf(f, "%s\n    \"%s\": %u", first ? "" : ",", wanted[k], ext[i].specVersion);
@@ -535,8 +614,14 @@ static void write_caps(void)
     g.probes.canonical_nan32 = probe_canonical_nan(p12.shaderSignedZeroInfNanPreserveFloat32,
                                                    p12.shaderDenormPreserveFloat32, has[3] && fma.b[1]);
     g.probes.exact_f16 = half && probe_exact_f16();
-    fprintf(f, "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s },\n",
-            B(g.probes.canonical_nan32), B(g.probes.exact_f16));
+    bool sub32 = f13.subgroupSizeControl && f13.computeFullSubgroups && p13.minSubgroupSize <= 32 &&
+                 p13.maxSubgroupSize >= 32 && (p13.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT);
+    g.probes.hmma_coop = probe_hmma_coop(has[5] && coop.b[0] && f12.vulkanMemoryModel &&
+                                         f12.vulkanMemoryModelDeviceScope && f12.shaderFloat16 && sub32);
+    fprintf(f,
+            "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": "
+            "%s },\n",
+            B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);

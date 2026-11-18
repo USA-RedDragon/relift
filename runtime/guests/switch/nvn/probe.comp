@@ -7,14 +7,75 @@
 // from w[3i..3i+2] and writes the packed a + b, a * b and fused a * b + c to
 // w[3n + 3i..]; word j < m of w[6n..] is converted to a half at
 // w[6n + m + j]; word j < 32768 of w[6n + 2m..] holds two halves, converted
-// to single precision at w[6n + 2m + 32768 + 2j..].
+// to single precision at w[6n + 2m + 32768 + 2j..]. HMMA: workgroup t < n
+// multiplies a 16x16 by 16x8 tile, t >= n a 16x8 by 8x8 one, with
+// VK_KHR_cooperative_matrix (half A, B and accumulator), each lane's
+// components set and read in the order the translator gives the guest's
+// registers. For K = 16 lane l reads A registers 0 to 3, B 0, 1 and C 0, 1
+// from w[256t + 8l..], the A components taking registers 0, 2, 1, 3; for
+// K = 8 it reads A 0, 1, B 0 and C 0, 1 from w[256n + 160(t - n) + 5l..]; its
+// two D words go to w[256n + 160m + 64t + 2l..].
 #extension GL_EXT_spirv_intrinsics : require
-#ifdef F16
+#if defined(F16) || defined(HMMA)
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
 #endif
+#ifdef HMMA
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+#endif
+#ifdef HMMA
+layout(local_size_x = 32) in;
+#else
 layout(local_size_x = 64) in;
+#endif
 layout(set = 0, binding = 0, std430) buffer B { uint w[]; };
 layout(push_constant) uniform P { uint n; uint m; };
+#ifdef HMMA
+void set2(inout coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> x, int k, uint v)
+{
+    f16vec2 h = unpackFloat2x16(v);
+    x[2 * k] = h.x;
+    x[2 * k + 1] = h.y;
+}
+void main() {
+    uint t = gl_WorkGroupID.x, l = gl_LocalInvocationID.x, o = 256 * n + 160 * m + 64 * t + 2 * l;
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 8, gl_MatrixUseAccumulator> c;
+    uint i = t < n ? 256 * t + 8 * l : 256 * n + 160 * (t - n) + 5 * l;
+    uint ci = t < n ? i + 6 : i + 3;
+    f16vec2 c0 = unpackFloat2x16(w[ci]), c1 = unpackFloat2x16(w[ci + 1]);
+    c[0] = c0.x;
+    c[1] = c0.y;
+    c[2] = c1.x;
+    c[3] = c1.y;
+    if (t < n) {
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> a;
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 8, gl_MatrixUseB> b;
+        set2(a, 0, w[i]);
+        set2(a, 1, w[i + 2]);
+        set2(a, 2, w[i + 1]);
+        set2(a, 3, w[i + 3]);
+        f16vec2 b0 = unpackFloat2x16(w[i + 4]), b1 = unpackFloat2x16(w[i + 5]);
+        b[0] = b0.x;
+        b[1] = b0.y;
+        b[2] = b1.x;
+        b[3] = b1.y;
+        c = coopMatMulAdd(a, b, c);
+    } else {
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 8, gl_MatrixUseA> a;
+        coopmat<float16_t, gl_ScopeSubgroup, 8, 8, gl_MatrixUseB> b;
+        f16vec2 a0 = unpackFloat2x16(w[i]), a1 = unpackFloat2x16(w[i + 1]), b0 = unpackFloat2x16(w[i + 2]);
+        a[0] = a0.x;
+        a[1] = a0.y;
+        a[2] = a1.x;
+        a[3] = a1.y;
+        b[0] = b0.x;
+        b[1] = b0.y;
+        c = coopMatMulAdd(a, b, c);
+    }
+    w[o] = packFloat2x16(f16vec2(c[0], c[1]));
+    w[o + 1] = packFloat2x16(f16vec2(c[2], c[3]));
+}
+#else
 spirv_execution_mode(capabilities = [4466], 4461, 32);
 #ifdef DP32
 spirv_execution_mode(capabilities = [4464], 4459, 32);
@@ -74,4 +135,5 @@ void main() {
     w[o + 3] = floatBitsToUint(nmin(a, b));
     w[o + 4] = floatBitsToUint(nmax(a, b));
 }
+#endif
 #endif

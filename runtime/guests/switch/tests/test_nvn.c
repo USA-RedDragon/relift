@@ -639,6 +639,159 @@ TEST(nvn_probe_checks_half_results)
     free(w);
 }
 
+/**
+ * @brief One workgroup of the hmma case of gpus/sm86/tests/kat/compute.txt: a 16x16 A, 16x8 B and 16x8 C, row-major
+ * packed halves, as the NVIDIA device read them.
+ */
+static const uint32_t hmma_kat_in[256] = {
+    0x2a3a2107, 0x6b01a1c1, 0xb09490b8, 0x6b0404f2, 0xa28f5b37, 0x48007596, 0x7aa6540d, 0xd7e11b1b,
+    0x374cb756, 0xfd5e5ee3, 0xcaea0518, 0x79827b7a, 0xcecf8a17, 0xf69542b8, 0x8330550f, 0x2eff2f12,
+    0x814d31e8, 0x870d6796, 0x3c6e3096, 0xc9d4d020, 0x00d0722d, 0x039d74ed, 0x5efcea76, 0xeeca8c28,
+    0x95da5109, 0x6d9deeee, 0x11bb55f8, 0x25199d60, 0xcb33444b, 0xc056855f, 0x3b74e9fb, 0xebe718df,
+    0x3b91e572, 0xb1a4a4f9, 0x0ad67e72, 0x6fd5ca04, 0xff602bda, 0xfed0c435, 0xbd1aa3f1, 0xc54cb0e4,
+    0xe0029715, 0x682204bb, 0x9daaf919, 0x711c718a, 0x08b8d0a0, 0xf4ee9a03, 0x5434b6b5, 0x8a473a6a,
+    0x7f5f96b6, 0xb1a470b6, 0x1da5b627, 0xa618d143, 0xf3b3eb97, 0xf01aea92, 0x5e5284e4, 0x05f204ab,
+    0x27a1d402, 0xbdb39a62, 0xd1484c93, 0x16a591f4, 0x1ff7f212, 0xcf014130, 0xed8dbab6, 0x05013278,
+    0x74002b8e, 0x293dc206, 0x8d500f76, 0xba7c3a75, 0x57c9b2c0, 0x66be6e54, 0x7c1589b4, 0x26ae54ee,
+    0x2fd940bb, 0xaa448655, 0x0981fa59, 0x784e1ea4, 0xddaaad70, 0xd1f4fb87, 0x3c202fb0, 0x131a83dc,
+    0xc7bf13aa, 0x3287533d, 0x35645553, 0xac7dc96b, 0xf8013ebb, 0xcd8bbe9c, 0xe4daf1c3, 0xa87266a2,
+    0xc13a13f3, 0xf305be92, 0xc34660fc, 0xe5bb876a, 0x94ad0fa3, 0xfd234065, 0xbad1612a, 0x122842b4,
+    0x1f5ab5ad, 0x8f643855, 0x79f075e6, 0x8f16dc8b, 0xd3b7750f, 0x6354951f, 0x3379f0ee, 0x575aec6a,
+    0xec54b3b3, 0x256a28b4, 0xe3371d01, 0x892bb303, 0x68dba816, 0x4abfadfd, 0x5d7f17ea, 0xf45aa8b6,
+    0x7389d071, 0x805e5007, 0x62c25387, 0x51654acd, 0xfeae0341, 0x7c0513a4, 0x62f7c6f9, 0x44053836,
+    0x06deb3b1, 0xd588ee38, 0x17e00db8, 0x28b08946, 0xb7d4ea02, 0xb74ba47d, 0xfe29acbe, 0xfb7e0776,
+    0x7efa8fd2, 0x00b998ee, 0x7dd58a3f, 0x11f329f0, 0x8ce90a07, 0x9970d71d, 0xbf8876b4, 0x85ad1e9f,
+    0x38d727ff, 0x924f0814, 0x9be0f62c, 0x51927773, 0x8e75ee98, 0xfae0f5e0, 0x9f6433ff, 0x1cda89e2,
+    0x2e40df04, 0xab6fe701, 0x2b8b23a4, 0xa0621cba, 0x59241c90, 0xd56aa653, 0xed54b226, 0x5516bcc2,
+    0x58bba837, 0xc308bd98, 0x98e47ee9, 0xee010ee0, 0x4e7e4092, 0x3eea7b74, 0x1a701d5a, 0x2b2f6d0a,
+    0x10ce0a84, 0xec523b81, 0xd04e5ef4, 0x2c8c7375, 0xc6eab0aa, 0x6dc04993, 0x5ff7d829, 0x28ee3a6d,
+    0xaef024b2, 0x0964ffa7, 0xad07e625, 0x85089ee2, 0xe6110c52, 0xa8716492, 0xf551d892, 0x3dd66ac8,
+    0x68321cc1, 0xeaf3e110, 0xfd3649f4, 0x29c0047c, 0xf62042d7, 0xbdea967e, 0x972c3d70, 0x03a6b983,
+    0xe2176811, 0x58bb65bb, 0x7dac664c, 0x8191fdec, 0x6024b5b0, 0xaabc5427, 0x3f49026e, 0xefb088c3,
+    0xe04b034c, 0x3ef177ca, 0x298c0166, 0x8fd338ea, 0x11bff2d9, 0x707198b5, 0xce26f256, 0x684f8cd3,
+    0xc61f665b, 0xbdcd3cdc, 0x7bb1388a, 0x0eb3cb7b, 0xd6458ddb, 0x49b91be1, 0x0d5b4027, 0xda7256f3,
+    0x420ac140, 0xa88e9f61, 0x4a3539c7, 0x08e6209d, 0x6b67b77c, 0x3fa3e42d, 0x2bae62e1, 0x64ff9bd8,
+    0x11c78edf, 0xded197d4, 0x568c912d, 0xa53b4250, 0xe62e615a, 0x2567c523, 0xfbc32fdb, 0x26b4f734,
+    0xbeefe067, 0xba7d1aab, 0x7a9dfcc1, 0x0ca59ddf, 0x40912637, 0x23bc15b4, 0xf578ff92, 0xa676ce40,
+    0x868f8b23, 0xe95478a4, 0xba861635, 0x7aa41c0e, 0x073ea193, 0xf3ec9c22, 0x364ba0c0, 0xe641a0d0,
+    0xd69874da, 0x5da0239a, 0xcb936d5a, 0x276229bc, 0xe1a6e407, 0x5e66f3ce, 0x99f273db, 0xc5d3d13c,
+    0x6d13be18, 0x7c05794b, 0x94c58f0a, 0xe7100e9c, 0xd96e7b10, 0x7a12c8e3, 0x4ed7994c, 0x23881349,
+};
+/** @brief The 16x8 D that device's HMMA gave for hmma_kat_in, then for it with every word ANDed with 0xbfffbfff. */
+static const uint32_t hmma_kat_out[128] = {
+    0x7ffffc00, 0xfc007fff, 0x7fff7fff, 0x7c007fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff,
+    0x7fff6dd1, 0xfc007fff, 0x7fff7fff, 0x7c007fff, 0x7ffffc00, 0xfc007fff, 0x7fff7fff, 0xfc007fff,
+    0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7c00, 0xfc007fff, 0x7fff7fff, 0xfc007fff,
+    0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7ffff422, 0x7c007fff, 0x7fff7fff, 0xec427fff,
+    0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7c00, 0x7c007fff, 0x7fff7fff, 0x687d7fff,
+    0x7fff7c00, 0xfc007fff, 0x7fff7fff, 0x7c007fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff,
+    0x7ffffc00, 0xfc007fff, 0x7fff7fff, 0x7c007fff, 0x7fff6dc8, 0x7c007fff, 0x7fff7fff, 0xfc007fff,
+    0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff, 0x7fff7fff,
+    0xb5ac1932, 0x386db0a3, 0xaa8c3cc0, 0x19f3323b, 0xba43b086, 0x40fab1c1, 0xbc1b3d1c, 0xb915b0ad,
+    0x35172ca9, 0xbde63a35, 0x3bf43590, 0x2666bd06, 0xb6cb20be, 0xbda69ad8, 0xa9e43d48, 0x1c40b98c,
+    0x391c3452, 0x400330db, 0xbd6eb8fc, 0xc11fb6e1, 0xa5e2b72f, 0x4075ad43, 0x3f48354d, 0xb735bcc4,
+    0x2b0e2b9b, 0x2e512db2, 0xc2e53961, 0xb309b0b9, 0xa6223113, 0x3dbe35c4, 0x35cdb55d, 0xa816b9d3,
+    0xc010aa07, 0xc37dc092, 0x377f3ecd, 0xae6bba88, 0xb5dc24b6, 0xb7e34080, 0xb999b6d8, 0x209eb984,
+    0x31e2288e, 0xb753452c, 0xb8162300, 0x3b64b6d1, 0xb912a921, 0x3cd4285d, 0x3a8eb8b0, 0xbf9bb420,
+    0xb5933516, 0xb60734ad, 0xb78f2a80, 0x2c0db8af, 0xb66f2d0a, 0x90c53283, 0xba23b118, 0x2abc2e26,
+    0x2990bd0d, 0x3a693983, 0xa9f9301c, 0x3d7fc02e, 0x2f243d22, 0x424224ca, 0xbf3ac01d, 0xb87e38a0,
+};
+
+/** @brief Half `col` of row-major packed halves with `stride` words a row. */
+static uint32_t kat_half(const uint32_t *s, int stride, int row, int col)
+{
+    return s[stride * row + col / 2] >> (16 * (col & 1)) & 0xffff;
+}
+
+TEST(nvn_hmma_model_matches_the_recorded_device)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        uint32_t s[256], a[128], b[64], c[64], d[64];
+        for (int k = 0; k < 256; k++)
+            s[k] = pass ? hmma_kat_in[k] & 0xbfffbfffu : hmma_kat_in[k];
+        for (int l = 0; l < 32; l++) {
+            int g = l >> 2, q = l & 3;
+            a[4 * l] = s[8 * g + q];
+            a[4 * l + 1] = s[8 * (g + 8) + q];
+            a[4 * l + 2] = s[8 * g + q + 4];
+            a[4 * l + 3] = s[8 * (g + 8) + q + 4];
+            for (int r = 0; r < 2; r++)
+                b[2 * l + r] = kat_half(s + 128, 4, 2 * q + 8 * r, g) | kat_half(s + 128, 4, 2 * q + 8 * r + 1, g) << 16;
+            c[2 * l] = s[192 + 4 * g + q];
+            c[2 * l + 1] = s[192 + 4 * (g + 8) + q];
+        }
+        nvn_hmma_warp(true, a, b, c, d);
+        const uint32_t *o = hmma_kat_out + 64 * pass;
+        for (int l = 0; l < 32; l++) {
+            int g = l >> 2, q = l & 3;
+            CHECK_EQ(d[2 * l], o[4 * g + q]);
+            CHECK_EQ(d[2 * l + 1], o[4 * (g + 8) + q]);
+        }
+    }
+}
+
+TEST(nvn_hmma_step_specials)
+{
+    uint16_t one[8] = { 0x3c00, 0, 0, 0, 0, 0, 0, 0 }, inf[8] = { 0x7c00, 0, 0, 0, 0, 0, 0, 0 };
+    uint16_t zero[8] = { 0 }, nan[8] = { 0x7e01, 0, 0, 0, 0, 0, 0, 0 }, two[8] = { 0x4000, 0, 0, 0, 0, 0, 0, 0 };
+    CHECK_EQ(nvn_hmma_step(0x3c00, one, two), 0x4200);
+    CHECK_EQ(nvn_hmma_step(0x8000, zero, zero), 0x0000);
+    CHECK_EQ(nvn_hmma_step(0x0000, inf, two), 0x7c00);
+    CHECK_EQ(nvn_hmma_step(0xfc00, inf, two), 0x7fff);
+    CHECK_EQ(nvn_hmma_step(0x0000, inf, zero), 0x7fff);
+    CHECK_EQ(nvn_hmma_step(0x3c00, nan, one), 0x7fff);
+    uint16_t sixteen[8] = { 0x4c00, 0, 0, 0, 0, 0, 0, 0 };
+    CHECK_EQ(nvn_hmma_step(0x7bff, one, one), 0x7bff);
+    CHECK_EQ(nvn_hmma_step(0x7bff, one, sixteen), 0x7c00);
+}
+
+/** @brief Writes the HMMA probe's outputs as nvn_hmma_warp gives them. */
+static void hmma_probe_answer(uint32_t *w)
+{
+    uint32_t tiles = nvn_probe_hmma_tiles();
+    for (uint32_t t = 0; t < 2 * tiles; t++) {
+        bool k16 = t < tiles;
+        uint32_t per = k16 ? 8 : 5;
+        const uint32_t *in = w + (k16 ? 256 * t : 256 * tiles + 160 * (t - tiles));
+        uint32_t a[128] = { 0 }, b[64], c[64];
+        for (int l = 0; l < 32; l++) {
+            const uint32_t *x = in + per * l;
+            for (int r = 0; r < (k16 ? 4 : 2); r++)
+                a[4 * l + r] = x[r];
+            b[2 * l] = x[k16 ? 4 : 2];
+            b[2 * l + 1] = k16 ? x[5] : 0;
+            c[2 * l] = x[k16 ? 6 : 3];
+            c[2 * l + 1] = x[k16 ? 7 : 4];
+        }
+        nvn_hmma_warp(k16, a, b, c, w + 256 * tiles + 160 * tiles + 64 * t);
+    }
+}
+
+TEST(nvn_probe_checks_hmma_results)
+{
+    uint32_t words = nvn_probe_hmma_words(), tiles = nvn_probe_hmma_tiles();
+    uint32_t *w = calloc(words, sizeof *w);
+    CHECK(w != NULL);
+    nvn_probe_hmma_input(w);
+    hmma_probe_answer(w);
+    CHECK_EQ(nvn_probe_hmma_check(w), 0);
+    w[256 * tiles + 160 * tiles + 5] ^= 1;
+    CHECK_EQ(nvn_probe_hmma_check(w), 1);
+    for (uint32_t l = 0; l < 32; l++) {
+        uint32_t t = w[8 * l + 1];
+        w[8 * l + 1] = w[8 * l + 2];
+        w[8 * l + 2] = t;
+    }
+    hmma_probe_answer(w);
+    for (uint32_t l = 0; l < 32; l++) {
+        uint32_t t = w[8 * l + 1];
+        w[8 * l + 1] = w[8 * l + 2];
+        w[8 * l + 2] = t;
+    }
+    CHECK(nvn_probe_hmma_check(w) >= 60);
+    free(w);
+}
+
 TEST(nvn_probes_reach_device_json)
 {
     nvn_probes p;
@@ -657,9 +810,9 @@ TEST(nvn_probes_reach_device_json)
     size_t len = fread(text, 1, sizeof text - 1, f);
     fclose(f);
     text[len] = 0;
-    char want[128];
-    snprintf(want, sizeof want, "\"canonicalNan32\": %s, \"exactFloat16\": %s", p.canonical_nan32 ? "true" : "false",
-             p.exact_f16 ? "true" : "false");
+    char want[160];
+    snprintf(want, sizeof want, "\"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": %s",
+             p.canonical_nan32 ? "true" : "false", p.exact_f16 ? "true" : "false", p.hmma_coop ? "true" : "false");
     CHECK(strstr(text, want) != NULL);
     fprintf(stderr, "nvn_probes_reach_device_json: %s\n", want);
 }

@@ -218,3 +218,185 @@ uint32_t nvn_probe_f16_check(const uint32_t *w)
     }
     return bad;
 }
+
+/** @brief Exponent the HMMA model gives a step without a nonzero term. */
+#define HMMA_NO_EXP (-64)
+
+/** @brief Sign, biased exponent (1 for zeros and denormals) and significand with the implicit bit of a half. */
+typedef struct hmma_half {
+    uint32_t sign, sig;
+    int32_t exp;
+    bool nan, inf, zero;
+} hmma_half;
+
+static hmma_half hmma_parts(uint32_t h)
+{
+    uint32_t e = h >> 10 & 31, m = h & 1023;
+    return (hmma_half){ .sign = h >> 15 & 1,
+                        .sig = e ? m | 1024 : m,
+                        .exp = e ? (int32_t)e : 1,
+                        .nan = e == 31 && m,
+                        .inf = e == 31 && !m,
+                        .zero = !(h & 0x7fff) };
+}
+
+static uint32_t umin32(uint32_t a, uint32_t b) { return a < b ? a : b; }
+
+static int32_t msb32(uint32_t v)
+{
+    int32_t l = -1;
+    for (; v; v >>= 1)
+        l++;
+    return l;
+}
+
+/**
+ * @brief The exact sum `sum` (two's complement) of a step's terms on the
+ * grid 24 bits below exponent `big`, rounded to half precision to nearest
+ * even, a zero being +0: the translator's dot8_round, shift clamps included.
+ */
+static uint32_t hmma_round(uint32_t sum, int32_t big)
+{
+    bool neg = (int32_t)sum < 0;
+    uint32_t mag = neg ? 0u - sum : sum, q;
+    int32_t ev = msb32(mag) + big - 24, eq = ev > 1 ? ev : 1, sh = eq - big + 14;
+    if (sh > 0) {
+        uint32_t rs = umin32((uint32_t)sh, 31), one = 1u << rs, rem = mag & (one - 1), qd = mag >> rs;
+        q = qd + (rem > one >> 1 || (rem == one >> 1 && (qd & 1)));
+    } else {
+        q = mag << umin32(0u - (uint32_t)sh, 31);
+    }
+    if (!q)
+        return 0;
+    uint32_t bits = umin32(((uint32_t)(eq - 1) << 10) + q, 0x7c00);
+    return neg ? bits | 0x8000 : bits;
+}
+
+uint32_t nvn_hmma_step(uint32_t acc, const uint16_t a[8], const uint16_t b[8])
+{
+    bool nan = false, pos = false, neg = false;
+    int32_t big = HMMA_NO_EXP, exp[9], lead[9];
+    uint32_t sign[9], sig[9];
+    for (int k = 0; k < 8; k++) {
+        hmma_half x = hmma_parts(a[k]), y = hmma_parts(b[k]);
+        bool pn = x.nan || y.nan || (x.inf && y.zero) || (x.zero && y.inf);
+        bool pi = (x.inf || y.inf) && !pn;
+        sign[k] = x.sign ^ y.sign;
+        exp[k] = x.exp + y.exp - 15;
+        sig[k] = x.sig * y.sig;
+        lead[k] = 4;
+        nan |= pn;
+        pos |= pi && !sign[k];
+        neg |= pi && sign[k];
+        if (sig[k] && exp[k] > big)
+            big = exp[k];
+    }
+    hmma_half c = hmma_parts(acc);
+    nan |= c.nan;
+    pos |= c.inf && !c.sign;
+    neg |= c.inf && c.sign;
+    nan |= pos && neg;
+    if (c.sig && c.exp > big)
+        big = c.exp;
+    sign[8] = c.sign, exp[8] = c.exp, sig[8] = c.sig, lead[8] = 14;
+    uint32_t sum = 0;
+    for (int k = 0; k < 9; k++) {
+        int32_t left = lead[k] - (big - exp[k]);
+        uint32_t right = 0u - (uint32_t)left, v;
+        if (left > 0)
+            v = sig[k] << umin32((uint32_t)left, 31);
+        else
+            v = right >= 32 ? 0 : sig[k] >> right;
+        sum += sign[k] ? 0u - v : v;
+    }
+    uint32_t r = hmma_round(sum, big);
+    if (pos)
+        r = 0x7c00;
+    if (neg)
+        r = 0xfc00;
+    return nan ? 0x7fff : r;
+}
+
+void nvn_hmma_warp(bool k16, const uint32_t *a, const uint32_t *b, const uint32_t *c, uint32_t *d)
+{
+    for (int l = 0; l < 32; l++) {
+        int g = l >> 2, q = l & 3;
+        for (int row = 0; row < 2; row++) {
+            uint32_t out = 0;
+            for (int h = 0; h < 2; h++) {
+                int col = 2 * q + h;
+                uint32_t r = c[2 * l + row] >> (16 * h) & 0xffff;
+                for (int s = 0; s < (k16 ? 2 : 1); s++) {
+                    uint16_t av[8], bv[8];
+                    for (int j = 0; j < 4; j++) {
+                        uint32_t aw = a[4 * (4 * g + j) + row + 2 * s], bw = b[2 * (4 * col + j) + s];
+                        av[2 * j] = (uint16_t)aw;
+                        av[2 * j + 1] = (uint16_t)(aw >> 16);
+                        bv[2 * j] = (uint16_t)bw;
+                        bv[2 * j + 1] = (uint16_t)(bw >> 16);
+                    }
+                    r = nvn_hmma_step(r, av, bv);
+                }
+                out |= r << (16 * h);
+            }
+            d[2 * l + row] = out;
+        }
+    }
+}
+
+/** @brief Tiles of each shape in the HMMA probe. */
+#define HMMA_TILES 64u
+
+uint32_t nvn_probe_hmma_tiles(void) { return HMMA_TILES; }
+
+uint32_t nvn_probe_hmma_words(void) { return 256 * HMMA_TILES + 160 * HMMA_TILES + 64 * 2 * HMMA_TILES; }
+
+/**
+ * @brief Half k of the HMMA probe's inputs: normal halves between 2^-14
+ * and 2^8 (even tiles) or 2^-4 and 2^6 (odd tiles), so that cancellation,
+ * the grid cut and denormal results all show, with about one in 97 a
+ * zero, a denormal, an infinity, a NaN or the largest half.
+ */
+static uint16_t hmma_input(uint32_t tile, uint32_t k)
+{
+    static const uint16_t special[] = { 0x0000, 0x8000, 0x0001, 0x83ff, 0x7c00, 0xfc00, 0x7e00, 0x7bff };
+    uint32_t r = mix(tile * 0x10001u + k * 0x9e3779b9u + 0x1234567u);
+    if (r % 97 == 0)
+        return special[r >> 8 & 7];
+    uint32_t e = tile & 1 ? 11 + (r >> 24) % 10 : 1 + (r >> 24) % 22;
+    return (uint16_t)((r >> 8 & 0x83ff) | e << 10);
+}
+
+void nvn_probe_hmma_input(uint32_t *w)
+{
+    for (uint32_t t = 0; t < 2 * HMMA_TILES; t++) {
+        uint32_t per = t < HMMA_TILES ? 8 : 5, base = t < HMMA_TILES ? 256 * t : 256 * HMMA_TILES + 160 * (t - HMMA_TILES);
+        for (uint32_t k = 0; k < 32 * per; k++)
+            w[base + k] = hmma_input(t, 2 * k) | (uint32_t)hmma_input(t, 2 * k + 1) << 16;
+    }
+}
+
+uint32_t nvn_probe_hmma_check(const uint32_t *w)
+{
+    uint32_t bad = 0;
+    const uint32_t *out = w + 256 * HMMA_TILES + 160 * HMMA_TILES;
+    for (uint32_t t = 0; t < 2 * HMMA_TILES; t++) {
+        bool k16 = t < HMMA_TILES;
+        uint32_t per = k16 ? 8 : 5;
+        const uint32_t *in = w + (k16 ? 256 * t : 256 * HMMA_TILES + 160 * (t - HMMA_TILES));
+        uint32_t a[128] = { 0 }, b[64], c[64], d[64];
+        for (int l = 0; l < 32; l++) {
+            const uint32_t *x = in + per * l;
+            for (int r = 0; r < (k16 ? 4 : 2); r++)
+                a[4 * l + r] = x[r];
+            b[2 * l] = x[k16 ? 4 : 2];
+            b[2 * l + 1] = k16 ? x[5] : 0;
+            c[2 * l] = x[k16 ? 6 : 3];
+            c[2 * l + 1] = x[k16 ? 7 : 4];
+        }
+        nvn_hmma_warp(k16, a, b, c, d);
+        for (int k = 0; k < 64; k++)
+            bad += out[64 * t + k] != d[k];
+    }
+    return bad;
+}

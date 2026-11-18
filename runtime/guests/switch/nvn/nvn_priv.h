@@ -228,6 +228,11 @@ typedef struct nvn_probes {
     bool canonical_nan32;
     /** @brief Half-precision add, multiply, fused multiply-add and conversions are exact binary16, NaNs aside. */
     bool exact_f16;
+    /**
+     * @brief VK_KHR_cooperative_matrix half 16x8x16 and 16x8x8 multiply-adds, built from and read into each lane's
+     * components in the translator's register order, give the SM86 HMMA.F16 results.
+     */
+    bool hmma_coop;
 } nvn_probes;
 /** @brief Brings the host device up and gives its probe results; false without a host Vulkan device. */
 bool nvn_vk_probes(nvn_probes *out);
@@ -245,6 +250,20 @@ uint32_t nvn_probe_f16_words(void);
 void nvn_probe_f16_input(uint32_t *w);
 /** @brief The half-precision probe's results in w that are not exact binary16 (0 for an exact device). */
 uint32_t nvn_probe_f16_check(const uint32_t *w);
+/** @brief One fused step of the SM86 HMMA model: eight half products added to the half acc (see gpus/sm86 mma.rs). */
+uint32_t nvn_hmma_step(uint32_t acc, const uint16_t a[8], const uint16_t b[8]);
+/**
+ * @brief HMMA.16816.F16 (k16) or HMMA.1688.F16 over a warp: lane l's A registers at a[4l..], B at b[2l..], C at
+ * c[2l..], D written to d[2l..] (the HMMA.1688 A takes a[4l], a[4l + 1] and B b[2l]).
+ */
+void nvn_hmma_warp(bool k16, const uint32_t *a, const uint32_t *b, const uint32_t *c, uint32_t *d);
+/** @brief HMMA probe sizes: tiles of each shape, words in all (inputs, then two output words a lane). */
+uint32_t nvn_probe_hmma_tiles(void);
+uint32_t nvn_probe_hmma_words(void);
+/** @brief Writes the HMMA probe's inputs to w (nvn_probe_hmma_words words). */
+void nvn_probe_hmma_input(uint32_t *w);
+/** @brief The HMMA probe's output words in w that differ from nvn_hmma_warp (0 for a device that matches). */
+uint32_t nvn_probe_hmma_check(const uint32_t *w);
 /** @brief The value of half-precision bits h. */
 double nvn_half_value(uint16_t h);
 /** @brief x rounded to half precision, to nearest even, with subnormals and infinities. */
