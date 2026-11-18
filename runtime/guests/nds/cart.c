@@ -66,11 +66,15 @@ static uint64_t step(const nds_cart *c, uint32_t p)
     return word + (p % c->block_words == 0 ? c->gap2_ticks : 0);
 }
 
-/** @brief The byte at offset o of the image's mirrored address space (zero past the image). */
+/**
+ * @brief The byte at offset o of the image's mirrored address space. Past
+ * the image the chip holds 0xFF: a mask ROM is a power of two in size and
+ * cartridges pad their image with 0xFF, which a trimmed dump leaves out.
+ */
 static uint8_t rom_byte(const nds_cart *c, uint32_t o)
 {
     o &= (uint32_t)(c->cap - 1);
-    return o < c->rom_len ? c->rom[o] : 0;
+    return o < c->rom_len ? c->rom[o] : 0xFF;
 }
 
 /** @brief Word i of the data stream of the open command. */

@@ -104,6 +104,22 @@ TEST(b7_returns_the_image_with_the_secure_area_rule_mirrors_and_4k_wrap)
     CHECK_EQ(w[2], le32(&rom[0x9004]));
 }
 
+TEST(a_trimmed_image_reads_as_0xff_up_to_the_chip_size)
+{
+    ndst *t = fixture();
+    if (rl_nds_set_cartridge(t->m, rom, ROM_LEN - 0x1000) != 0)
+        abort();
+    uint32_t w[4];
+    unsigned n;
+    command(t, 0xB7, ROM_LEN - 0x1000 - 8);
+    transfer(t, 7u << 24, w, 4, &n);
+    CHECK_EQ(n, 1);
+    CHECK_EQ(w[0], le32(&rom[ROM_LEN - 0x1000 - 8]));
+    command(t, 0xB7, ROM_LEN - 0x1000);
+    transfer(t, 7u << 24, w, 4, &n);
+    CHECK_EQ(w[0], 0xFFFFFFFFu);
+}
+
 TEST(other_commands_return_zero_and_b8_the_chip_id)
 {
     ndst *t = fixture();
