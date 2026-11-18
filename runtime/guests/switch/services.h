@@ -74,6 +74,7 @@ void rl_srv_install_bcat(void);
 void rl_srv_install_chat(void);
 void rl_srv_install_pl(void);
 void rl_srv_install_auddmg(void);
+void rl_srv_install_audsmx(void);
 /** @brief Registers friend:u (srv_friend.c). */
 void rl_srv_install_friend(void);
 /** @brief Registers nifm:u (srv_nifm.c). */
