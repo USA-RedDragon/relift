@@ -38,6 +38,8 @@ relift ships no game code, keys or data, and never will.
 
 ## Get started
 
+**Have a game and want to recompile it? Read [Recompile a game](docs/guides/workflow.md).** It answers whether your console is supported, what file to bring, what each command prints, and what to do when the program stops.
+
 Build the tools, import a dump that you own and run it:
 
 ```sh
@@ -69,6 +71,7 @@ The docs are built as a site from these pages, in the order of [the site outline
 | Page | Holds |
 |---|---|
 | [Get started](docs/start/01-install.md) | install, and your first game |
+| [Recompile a game](docs/guides/workflow.md) | the end-to-end answer: support, inputs, real output, stops, reports, packaging, when things go wrong |
 | [Use relift](docs/guides/usage.md) | projects, commands, missed code and stop reports |
 | [Package a game for each host](docs/guides/packaging.md) | what `relift build` makes for each host, titles and icons |
 | [Settings](docs/reference/configuration.md) | relift's own settings |

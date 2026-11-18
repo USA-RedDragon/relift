@@ -9,6 +9,7 @@ This page lists where to go after the first two steps.
 
 ## Do a task
 
+- [Recompile a game](../guides/workflow.md): the whole path with real output, what to do when the program stops, and how to report it.
 - [Use relift](../guides/usage.md): every command, the cache, stop reports, coverage and diff.
 - [Package a game for each host](../guides/packaging.md): the AppImage, app, APK and iOS outputs, titles and icons.
 - The guest pages: [Nintendo Switch](../../guests/switch/README.md), [Game Boy and Game Boy Color](../../guests/gb/README.md) and [Game Boy Advance](../../guests/gba/README.md).

@@ -1,6 +1,8 @@
 # Using relift
 
-How a game project is built and run with `relift`, for every guest. The
+The commands of `relift`, for every guest. For the whole path from a dump to a
+running game, with real output and what to do when the program stops, read
+[Recompile a game](workflow.md) first. The
 per-guest details (import layouts, the built program's flags) are in
 [Switch](../../guests/switch/README.md), [Game Boy](../../guests/gb/README.md) and
 [Game Boy Advance](../../guests/gba/README.md); packaging for each host is in
@@ -36,7 +38,7 @@ hard-linked cache must copy those two.
 | `relift diff <function>` | Switch projects: one lifted function against the reference interpreter in a live run |
 
 `relift check` and `relift where` are parsed but not implemented yet; they
-stop with "not implemented".
+stop with "not implemented yet" and say which command to use instead.
 
 ## Missed code and stop reports
 
@@ -49,7 +51,8 @@ in `RELIFT_REPORT_DIR` if set, else in `reports` in the app's user folder
 Files app shows it). `relift report <file>`, run in the project directory,
 prints the transfer site and target with the guest instructions around them
 and what the build knew about the target, and adds the target as a root: a
-hint in `game.toml` (Switch, GBA) or a line in the learned file (Game Boy).
+hint in `game.toml` (Switch, GBA) or a line in the learned file (Game Boy;
+only development builds read it).
 `--no-hint` only prints. The format and the folder rules are in
 [the ABI contract](../abi.md#stop-reports), section 11, "Stop reports".
 

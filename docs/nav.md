@@ -8,6 +8,7 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [Make your first game](start/02-first-game.md)
   - [Next steps](start/03-next-steps.md)
 - Guides
+  - [Recompile a game](guides/workflow.md)
   - [Use relift](guides/usage.md)
   - [Package a game for each host](guides/packaging.md)
   - [Nintendo Switch games](../guests/switch/README.md)
