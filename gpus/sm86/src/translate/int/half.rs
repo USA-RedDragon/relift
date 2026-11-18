@@ -107,6 +107,38 @@ impl Ctx {
         self.bpick(z, zero, cl)
     }
 
+    /// The packed result of a native half `a + b` (kind 0), `a * b` (1) or
+    /// fused `a * b + z` (2) on lanes (low, high), as a 32-bit word.
+    fn native_half(&mut self, kind: u8, a: (u32, u32), b: (u32, u32), z: (u32, u32)) -> u32 {
+        self.use_native_f16();
+        let u = self.u32t();
+        let h = self.m.t_f16();
+        let v2 = self.m.t_vec(h, 2);
+        let pack = |c: &mut Ctx, t: (u32, u32)| {
+            let hi = c.sh(op::SHIFT_LEFT_LOGICAL, t.1, 16);
+            let w = c.ib(op::BITWISE_OR, hi, t.0);
+            c.m.emit(op::BITCAST, v2, &[w])
+        };
+        let x = pack(self, a);
+        let y = pack(self, b);
+        let r = match kind {
+            0 | 1 => {
+                let opc = if kind == 0 { op::F_ADD } else { op::F_MUL };
+                let r = self.m.emit(opc, v2, &[x, y]);
+                self.m.deco(r, NO_CONTRACTION, &[]);
+                r
+            }
+            _ => {
+                let w = pack(self, z);
+                self.cap(6030);
+                self.exts.insert("SPV_KHR_fma");
+                self.iface.host.fma_khr = true;
+                self.m.emit(4427, v2, &[x, y, w])
+            }
+        };
+        self.m.emit(op::BITCAST, u, &[r])
+    }
+
     /// `p + z` in single precision with a sticky low bit: the result is the
     /// round-to-odd sum.
     fn sum_odd(&mut self, p: u32, z: u32) -> u32 {
@@ -186,6 +218,29 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
         Some(o) if md.relu => Some(c.pred_operand(o)?),
         _ => None,
     };
+    if c.host.native_f16 && !md.ftz && !md.f32 {
+        let v = c.native_half(kind, a, b, z);
+        let mut halves = [c.and_k(v, 0xffff), c.sh(op::SHIFT_RIGHT_LOGICAL, v, 16)];
+        for h in &mut halves {
+            let ab = c.and_k(*h, 0x7fff);
+            let nan = c.cmp_k(op::U_GREATER_THAN, ab, 0x7c00);
+            let canon = c.kc(0x7fff);
+            *h = c.bpick(nan, canon, *h);
+            if md.relu {
+                let r = c.h_relu(*h);
+                *h = match relu_pred {
+                    Some(p) => c.bpick(p, r, *h),
+                    None => r,
+                };
+            }
+            if md.sat {
+                *h = c.h_sat(*h);
+            }
+        }
+        let hi = c.sh(op::SHIFT_LEFT_LOGICAL, halves[1], 16);
+        let r = c.ib(op::BITWISE_OR, hi, halves[0]);
+        return c.store_dst(&i.ops[0], r);
+    }
     let lanes: &[usize] = if md.f32 { &[0] } else { &[0, 1] };
     let mut outs = Vec::new();
     for &k in lanes {

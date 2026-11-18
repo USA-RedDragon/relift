@@ -65,9 +65,56 @@ impl Ctx {
     /// A NaN becomes the canonical `0x7fffffff`; with `ftz` a subnormal
     /// input reads as a signed zero.
     pub(crate) fn f16_to_f32(&mut self, h: u32, ftz: bool) -> u32 {
+        if self.host.native_f16 && !ftz {
+            return self.native_f16_to_f32(h);
+        }
         self.shared_pure(format!("f16_to_f32 {ftz}"), &[h], |c, p| {
             c.f16_to_f32_body(p[0], ftz)
         })
+    }
+
+    /// [`Ctx::f16_to_f32`] by the host's conversion, which is exact.
+    fn native_f16_to_f32(&mut self, h: u32) -> u32 {
+        self.use_native_f16();
+        let u = self.u32t();
+        let f = self.f32t();
+        let hf = self.m.t_f16();
+        let v2 = self.m.t_vec(hf, 2);
+        let pair = self.m.emit(op::BITCAST, v2, &[h]);
+        let lo = self.m.emit(op::COMPOSITE_EXTRACT, hf, &[pair, 0]);
+        let w = self.m.emit(op::F_CONVERT, f, &[lo]);
+        let bits = self.m.emit(op::BITCAST, u, &[w]);
+        let ab = self.and_k(h, 0x7fff);
+        let nan = self.cmp_k(op::U_GREATER_THAN, ab, 0x7c00);
+        let canon = self.kc(0x7fff_ffff);
+        self.bpick(nan, canon, bits)
+    }
+
+    /// [`Ctx::f32_to_f16`] to nearest even by the host's conversion.
+    fn native_f32_to_f16(&mut self, x: u32) -> u32 {
+        self.use_native_f16();
+        let u = self.u32t();
+        let f = self.f32t();
+        let hf = self.m.t_f16();
+        let v2 = self.m.t_vec(hf, 2);
+        let xf = self.m.emit(op::BITCAST, f, &[x]);
+        let r = self.m.emit(op::F_CONVERT, hf, &[xf]);
+        let z = self.m.c_f16(0);
+        let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, &[r, z]);
+        let bits = self.m.emit(op::BITCAST, u, &[pair]);
+        let ab = self.and_k(x, 0x7fff_ffff);
+        let nan = self.cmp_k(op::U_GREATER_THAN, ab, 0x7f80_0000);
+        let canon = self.kc(0x7fff);
+        self.bpick(nan, canon, bits)
+    }
+
+    /// Declares what native half-precision arithmetic needs (see
+    /// [`HostProfile::native_f16`](crate::translate::HostProfile::native_f16)).
+    pub(crate) fn use_native_f16(&mut self) {
+        for cap in [9, 4464, 4467, 4466] {
+            self.cap(cap);
+        }
+        self.denorm.f16 = true;
     }
 
     fn f16_to_f32_body(&mut self, h: u32, ftz: bool) -> u32 {
@@ -116,6 +163,9 @@ impl Ctx {
     /// rounding mode; NaN becomes `0x7fff`; with `ftz` a subnormal result
     /// is a signed zero.
     pub(crate) fn f32_to_f16(&mut self, u: u32, mode: u32, ftz: bool) -> u32 {
+        if self.host.native_f16 && mode == 0 && !ftz {
+            return self.native_f32_to_f16(u);
+        }
         self.shared_pure(format!("f32_to_f16 {mode} {ftz}"), &[u], |c, p| {
             c.f32_to_f16_body(p[0], mode, ftz)
         })

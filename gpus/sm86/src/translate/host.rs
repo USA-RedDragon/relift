@@ -130,6 +130,16 @@ pub struct HostProfile {
     /// The host's transcendental operations give the SM86 MUFU results (see
     /// [`HostProfile::from_device`]).
     pub native_mufu: bool,
+    /// Half-precision arithmetic as IEEE 754 binary16 with round to nearest
+    /// even and denormals kept (`shaderFloat16`, `shaderDenormPreserveFloat16`,
+    /// `shaderRoundingModeRTEFloat16`, `shaderSignedZeroInfNanPreserveFloat16`
+    /// and a fused `OpFmaKHR` on halves): the SM86 HADD2, HMUL2, HFMA2 and
+    /// half conversions without `.FTZ` give the same bits, NaNs aside, so
+    /// they run natively instead of being built from integer operations.
+    /// Since a driver may report all of these and still flush or round
+    /// otherwise, the runtime's probe must also have measured it
+    /// (`exactFloat16` in `ReliftDeviceProbes`).
+    pub native_f16: bool,
     /// Every single-precision NaN the host's add, multiply, fused
     /// multiply-add, min and max produce is `0x7fffffff`, the SM86 result,
     /// whatever the input payloads, so results need no NaN check. Measured
@@ -195,6 +205,7 @@ impl HostProfile {
             max_storage_buffers: 1 << 20,
             max_storage_buffer_range: u64::from(u32::MAX),
             native_mufu: true,
+            native_f16: true,
             canonical_nan: true,
             max_workgroup_invocations: 1024,
             max_workgroup_size: [1024, 1024, 64],
@@ -222,6 +233,7 @@ impl HostProfile {
             max_sampled_images: 8_388_606,
             max_storage_buffers: 8_388_606,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (32, 64),
@@ -248,6 +260,7 @@ impl HostProfile {
             max_sampled_images: u32::MAX,
             max_storage_buffers: u32::MAX,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (32, 64),
@@ -277,6 +290,7 @@ impl HostProfile {
             max_sampled_images: 1 << 25,
             max_storage_buffers: 1 << 25,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (8, 32),
@@ -304,6 +318,7 @@ impl HostProfile {
             max_sampled_images: 1_000_000,
             max_storage_buffers: 1_000_000,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (4, 32),
@@ -337,6 +352,7 @@ impl HostProfile {
             max_storage_buffers: 1 << 24,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (64, 128),
@@ -369,6 +385,7 @@ impl HostProfile {
             max_storage_buffers: 1 << 24,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_invocations: 2048,
             max_workgroup_size: [1024, 1024, 1024],
@@ -399,6 +416,7 @@ impl HostProfile {
             max_storage_buffers: 1 << 23,
             max_storage_buffer_range: 1 << 31,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (16, 16),
@@ -433,6 +451,7 @@ impl HostProfile {
             max_storage_buffers: 1_015_808,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (8, 8),
@@ -495,6 +514,7 @@ impl HostProfile {
             max_storage_buffers: 1 << 16,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
+            native_f16: false,
             canonical_nan: false,
             max_workgroup_invocations: 128,
             max_workgroup_size: [128, 128, 64],
@@ -588,6 +608,12 @@ impl HostProfile {
             max_storage_buffers: caps.get32("maxPerStageDescriptorUpdateAfterBindStorageBuffers"),
             max_storage_buffer_range: caps.get("maxStorageBufferRange"),
             native_mufu: nvidia && caps.get("deviceID") >= 0x2200,
+            native_f16: caps.on("shaderFloat16")
+                && caps.on("shaderDenormPreserveFloat16")
+                && caps.on("shaderRoundingModeRTEFloat16")
+                && caps.on("shaderSignedZeroInfNanPreserveFloat16")
+                && caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat16")
+                && caps.on("exactFloat16"),
             canonical_nan: caps.on("canonicalNan32"),
             max_workgroup_invocations: caps.get32("maxComputeWorkGroupInvocations"),
             max_workgroup_size: [0, 1, 2]

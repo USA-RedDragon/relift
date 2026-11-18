@@ -53,6 +53,8 @@ pub(crate) struct State {
     pub(crate) var: Option<u32>,
     /// SignedZeroInfNanPreserve can be requested.
     szinp: bool,
+    /// Native half arithmetic is used: declare the 16-bit modes.
+    pub(crate) f16: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -112,6 +114,11 @@ impl Ctx {
     /// declares 32-bit floats. A program with floats on a host that cannot
     /// preserve them is reported inexact.
     pub(crate) fn denorm_mode(&mut self, main: u32) {
+        if self.denorm.f16 {
+            for mode in [MODE_DENORM_PRESERVE, 4462, MODE_SZINP] {
+                crate::spirv::inst(&mut self.m.modes, op::EXECUTION_MODE, &[main, mode, 16]);
+            }
+        }
         if self.iface.host.denorm_mode == Some(Denorm::Preserve) {
             crate::spirv::inst(
                 &mut self.m.modes,

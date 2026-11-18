@@ -77,10 +77,13 @@ fn hosts() -> Vec<HostProfile> {
         .iter()
         .map(|n| HostProfile::preset(n).unwrap())
         .collect();
-    let mut h = HostProfile::nvidia();
-    h.name = "nvidia without canonical NaNs".into();
-    h.canonical_nan = false;
-    v.push(h);
+    for (f16, nan) in [(false, false), (true, false), (false, true)] {
+        let mut h = HostProfile::nvidia();
+        h.name = format!("nvidia, native halves {f16}, canonical NaNs {nan}");
+        h.native_f16 = f16;
+        h.canonical_nan = nan;
+        v.push(h);
+    }
     v
 }
 

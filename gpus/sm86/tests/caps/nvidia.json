@@ -28,7 +28,8 @@
      "shaderSubgroupClock": true
     },
     "VkPhysicalDeviceShaderFmaFeaturesKHR": {
-     "shaderFmaFloat32": true
+     "shaderFmaFloat32": true,
+     "shaderFmaFloat16": true
     },
     "VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT": {
      "shaderImageInt64Atomics": true
@@ -39,7 +40,8 @@
     "VkPhysicalDeviceVulkan12Features": {
      "bufferDeviceAddress": true,
      "shaderBufferInt64Atomics": true,
-     "shaderSharedInt64Atomics": true
+     "shaderSharedInt64Atomics": true,
+     "shaderFloat16": true
     },
     "VkPhysicalDeviceVulkan13Features": {
      "computeFullSubgroups": true,
@@ -110,7 +112,10 @@
      "maxPerStageDescriptorUpdateAfterBindStorageBuffers": 1048576,
      "shaderDenormFlushToZeroFloat32": false,
      "shaderDenormPreserveFloat32": false,
-     "shaderSignedZeroInfNanPreserveFloat32": true
+     "shaderSignedZeroInfNanPreserveFloat32": true,
+     "shaderDenormPreserveFloat16": true,
+     "shaderRoundingModeRTEFloat16": true,
+     "shaderSignedZeroInfNanPreserveFloat16": true
     },
     "VkPhysicalDeviceVulkan13Properties": {
      "maxSubgroupSize": 32,
@@ -133,10 +138,11 @@
      ]
     },
     "ReliftDeviceProbes": {
-     "canonicalNan32": true
+     "canonicalNan32": true,
+     "exactFloat16": true
     }
    }
   }
  },
- "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux; ReliftDeviceProbes from the relift runtime probe on the same device"
+ "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux; float16 members from vulkaninfo, driver 615.312.512; ReliftDeviceProbes from the relift runtime probe on the same device"
 }

@@ -986,6 +986,20 @@ impl<'m> Run<'m> {
                 };
                 u64::from(int_to_f32(neg, mag))
             }
+            // half-precision arithmetic: binary16, nearest even, denormals kept
+            129 | 131 | 133 | 4427 if w == 16 => {
+                let h = |v: u64| f16_to_f64(v as u16);
+                let (s, e) = match op {
+                    129 => two_sum(h(x[0]), h(x[1])),
+                    131 => two_sum(h(x[0]), -h(x[1])),
+                    133 => (h(x[0]) * h(x[1]), 0.0),
+                    _ => two_sum(h(x[0]) * h(x[1]), h(x[2])),
+                };
+                u64::from(round_f16(s, e))
+            }
+            // FConvert
+            115 if w == 16 => u64::from(round_f16(f64::from(f(x[0])), 0.0)),
+            115 if w == 32 => u64::from((f16_to_f64(x[0] as u16) as f32).to_bits()),
             // float arithmetic
             127 => x[0] ^ 0x8000_0000, // FNegate
             129 | 131 | 133 => {
@@ -1238,6 +1252,63 @@ pub fn round_f32(s: f64, e: f64, denorm: Denorm) -> u32 {
             }
         }
     }
+}
+
+/// The value of binary16 bits `h`.
+pub fn f16_to_f64(h: u16) -> f64 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let e = i32::from((h >> 10) & 31);
+    let m = f64::from(h & 0x3ff);
+    match e {
+        0 => sign * m * 2f64.powi(-24),
+        31 if m == 0.0 => sign * f64::INFINITY,
+        31 => f64::NAN,
+        _ => sign * (1024.0 + m) * 2f64.powi(e - 25),
+    }
+}
+
+/// `s + e` (exact, `|e|` below half an ulp of `s`) rounded to binary16,
+/// nearest even, denormals kept; a NaN is [`ODD_NAN`]'s half `0xfd5a`.
+pub fn round_f16(s: f64, e: f64) -> u16 {
+    if s.is_nan() {
+        return 0xfd5a;
+    }
+    let sign = if s.is_sign_negative() { 0x8000 } else { 0 };
+    let a = s.abs();
+    if a.is_infinite() {
+        return sign | 0x7c00;
+    }
+    let ea = if (e < 0.0) == (s < 0.0) {
+        e.abs()
+    } else {
+        -e.abs()
+    };
+    let exp = if a == 0.0 {
+        -24
+    } else {
+        a.log2().floor() as i32
+    };
+    let q = 2f64.powi(exp.max(-14) - 10);
+    let units = a / q;
+    let fl = units.floor();
+    let rest = (units - fl) + ea / q;
+    let mut n = fl as u64;
+    if rest > 0.5 || (rest == 0.5 && n & 1 == 1) {
+        n += 1;
+    }
+    let v = n as f64 * q;
+    if v >= 65520.0 {
+        return sign | 0x7c00;
+    }
+    if v == 0.0 {
+        return sign;
+    }
+    let ve = v.log2().floor() as i32;
+    if ve < -14 {
+        return sign | (v / 2f64.powi(-24)) as u16;
+    }
+    let mant = (v / 2f64.powi(ve - 10)) as u16 - 1024;
+    sign | (((ve + 15) as u16) << 10) | mant
 }
 
 fn int_to_f32(neg: bool, mag: u64) -> u32 {

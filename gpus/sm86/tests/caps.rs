@@ -46,18 +46,35 @@ fn mesh_slots_fill_a_required_wide_subgroup() {
     assert_eq!(HostProfile::nvidia().compute_subgroup, Some(32));
 }
 
-/// Dropped NaN selects are a probe result, not a promise: the NVIDIA
-/// capture's probe turns them on, and a capture whose probe failed or never
-/// ran (no `ReliftDeviceProbes` member) keeps the selects.
+/// Native halves and dropped NaN selects are probe results, not promises:
+/// the NVIDIA capture's bits and probes turn them on, and a capture whose
+/// probe failed or never ran (no `ReliftDeviceProbes` member) keeps the
+/// exact integer and NaN-select paths even with every feature bit on.
 #[test]
-fn nan_selects_need_the_device_probe() {
+fn half_and_nan_paths_need_the_device_probes() {
     let caps = load("nvidia");
-    assert!(HostProfile::from_device("nvidia", &caps).canonical_nan);
+    let p = HostProfile::from_device("nvidia", &caps);
+    assert!(p.native_f16 && p.canonical_nan);
+    for (probe, f16, nan) in [
+        ("exactFloat16", false, true),
+        ("canonicalNan32", true, false),
+    ] {
+        let mut c = caps.clone();
+        c.values.insert(probe.into(), 0);
+        let p = HostProfile::from_device("nvidia", &c);
+        assert_eq!((p.native_f16, p.canonical_nan), (f16, nan), "{probe} false");
+        let mut c = caps.clone();
+        c.values.remove(probe);
+        let p = HostProfile::from_device("nvidia", &c);
+        assert_eq!(
+            (p.native_f16, p.canonical_nan),
+            (f16, nan),
+            "{probe} missing"
+        );
+    }
     let mut c = caps.clone();
-    c.values.insert("canonicalNan32".into(), 0);
-    assert!(!HostProfile::from_device("nvidia", &c).canonical_nan);
-    c.values.remove("canonicalNan32");
-    assert!(!HostProfile::from_device("nvidia", &c).canonical_nan);
+    c.values.insert("shaderDenormPreserveFloat16".into(), 0);
+    assert!(!HostProfile::from_device("nvidia", &c).native_f16);
 }
 
 /// A device at Vulkan's minimum limits: no capture has fewer than 1024

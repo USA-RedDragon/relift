@@ -280,6 +280,9 @@ impl Module {
     pub fn t_i32(&mut self) -> u32 {
         self.ty(op::TYPE_INT, &[32, 1])
     }
+    pub fn t_f16(&mut self) -> u32 {
+        self.ty(op::TYPE_FLOAT, &[16])
+    }
     pub fn t_f32(&mut self) -> u32 {
         self.ty(op::TYPE_FLOAT, &[32])
     }
@@ -355,6 +358,10 @@ impl Module {
     pub fn c_i32(&mut self, v: i32) -> u32 {
         let t = self.t_i32();
         self.konst(op::CONSTANT, t, &[v as u32])
+    }
+    pub fn c_f16(&mut self, bits: u16) -> u32 {
+        let t = self.t_f16();
+        self.konst(op::CONSTANT, t, &[u32::from(bits)])
     }
     pub fn c_f32(&mut self, v: u32) -> u32 {
         let t = self.t_f32();
