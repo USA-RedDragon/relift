@@ -1519,9 +1519,17 @@ fn integers(
     Ok(out)
 }
 
+/// `NVNmemoryPoolFlags` of a virtual pool: VIRTUAL, GPU_CACHED and
+/// CPU_NO_ACCESS.
+const VIRTUAL_POOL_FLAGS: u128 = 0x221;
+
 /// The info whose device field the driver's `nvnMemoryPoolMapVirtual` reads
 /// through its pool's device pointer: the page size it checks requests
-/// against.
+/// against. An NVN1 driver reads no device field there: its
+/// `nvnMemoryPoolInitialize`, run on a builder of a virtual pool, reads the
+/// page size from the device the builder names (into the pool, or in the
+/// initializer of the pool class the flags choose), and that device field
+/// is the one taken.
 fn pool_page_info(
     a: &Abstract<'_>,
     procs: &[(String, u64)],
@@ -1530,12 +1538,40 @@ fn pool_page_info(
     let map = proc_addr(procs, "nvnMemoryPoolMapVirtual")?;
     let mut t = Trace::default();
     a.run(map, a.entry(), &mut t)?;
-    let read: Vec<u32> = t
+    let mut read: Vec<u32> = t
         .loads
         .iter()
         .filter(|l| l.len == 4 && matches!(&l.obj, Obj::At(o, _) if **o == Obj::Arg(0)))
         .map(|l| l.off as u32)
         .collect();
+    if read.is_empty()
+        && let Ok(init) = proc_addr(procs, "nvnMemoryPoolInitialize")
+    {
+        let device = match proc_addr(procs, "nvnMemoryPoolBuilderGetDevice") {
+            Ok(pc) => getter_offset(a, pc, "nvnMemoryPoolBuilderGetDevice")?,
+            Err(_) => setter_offset(
+                a,
+                proc_addr(procs, "nvnMemoryPoolBuilderSetDevice")?,
+                "nvnMemoryPoolBuilderSetDevice",
+            )?,
+        };
+        let device = Obj::At(Box::new(Obj::Arg(1)), device);
+        let flags = getter_offset(
+            a,
+            proc_addr(procs, "nvnMemoryPoolBuilderGetFlags")?,
+            "nvnMemoryPoolBuilderGetFlags",
+        )?;
+        let mut st = a.entry();
+        st.store(&Obj::Arg(1), flags, 4, &V::K(VIRTUAL_POOL_FLAGS));
+        let mut ti = Trace::default();
+        a.run(init, st, &mut ti)?;
+        read = ti
+            .loads
+            .iter()
+            .filter(|l| l.len == 4 && l.obj == device)
+            .map(|l| l.off as u32)
+            .collect();
+    }
     let hits: Vec<u32> = integers
         .iter()
         .zip(0u32..)
@@ -2053,7 +2089,11 @@ mod tests {
                 RET,
             ],
         );
-        code(&mut text, MAP, &[ldr_x(9, 0, 8), ldr_w(10, 9, 0x300), RET]);
+        if nvn1 {
+            code(&mut text, MAP, &[ldr_w(10, 0, 0x6c), RET]);
+        } else {
+            code(&mut text, MAP, &[ldr_x(9, 0, 8), ldr_w(10, 9, 0x300), RET]);
+        }
         code(
             &mut text,
             INFO_STUB,
@@ -2094,28 +2134,27 @@ mod tests {
         code(&mut text, POOL_BUILDER_DEVICE, &[ldr_x(0, 0, 8), RET]);
         code(&mut text, POOL_BUILDER_FLAGS, &[ldr_w(0, 0, 4), RET]);
         let i = POOL_INIT;
-        code(
-            &mut text,
-            i,
-            &[
-                ldr_x(9, 1, 8),
-                str_x(9, 0, 8),
-                ldr_w(8, 1, 4),
-                str_w(8, 0, 16),
-                cmp_w(8, 0x221),
-                b_eq(i + 20, i + 40),
-                movz_w(10, 0),
-                str_w(10, 0, 0),
-                movz_w(0, 1),
-                RET,
-                movz_w(10, 1),
-                str_w(10, 0, 0),
-                movz_w(11, 0),
-                str_w(11, 0, 0x20),
-                movz_w(0, 1),
-                RET,
-            ],
-        );
+        let mut init = vec![
+            ldr_x(9, 1, 8),
+            str_x(9, 0, 8),
+            ldr_w(8, 1, 4),
+            str_w(8, 0, 16),
+            cmp_w(8, 0x221),
+            b_eq(i + 20, i + 40),
+            movz_w(10, 0),
+            str_w(10, 0, 0),
+            movz_w(0, 1),
+            RET,
+            movz_w(10, 1),
+            str_w(10, 0, 0),
+            movz_w(11, 0),
+            str_w(11, 0, 0x20),
+        ];
+        if nvn1 {
+            init.extend([ldr_w(12, 9, 0x300), str_w(12, 0, 0x6c)]);
+        }
+        init.extend([movz_w(0, 1), RET]);
+        code(&mut text, i, &init);
         let f = POOL_FINALIZE;
         code(
             &mut text,
@@ -2332,6 +2371,7 @@ mod tests {
             (8, None, Some(0x200))
         );
         assert_eq!(l.fields.len(), 2);
+        assert_eq!(l.pool_page_info, Some(2));
     }
 
     #[test]
