@@ -582,6 +582,8 @@ const char *nvn_layout_error(void);
 const char *nvn_version_name(void);
 /** @brief The bit the driver sets in texture, separate texture and texel fetch handles (bit 32 in NVN1, none in NVN2). */
 uint64_t nvn_sampled_handle_mark(void);
+/** @brief Offset of byte x of row y inside a 512-byte GOB, in the layout of the program's GPU (nvn_swizzle.c). */
+uint32_t nvn_gob_offset(uint32_t x, uint32_t y);
 /** @brief Number of NVNformat values the driver knows. */
 uint32_t nvn_format_count(void);
 /** @brief The NVN1 answer for an NVNdeviceInfo the driver measures at device start; false for NVN2 or another info. */

@@ -1,20 +1,38 @@
 /**
  * @file nvn_swizzle.c
  * @brief Copies between packed texels and a texture's storage: block-linear
- * (GOBs of 64 bytes by 8 rows, stacked in blocks) or linear.
+ * (GOBs of 64 bytes by 8 rows, stacked in blocks; the bytes inside a GOB
+ * follow the GPU of the program's NVN generation) or linear.
  */
 #include "nvn_priv.h"
 
 /**
  * @brief Offset of byte x of row y inside a GOB, in the GOB layout of
- * Turing and later color surfaces: 16-byte lines, four rows of one 16-byte
- * column per 64 bytes, then the next column, then rows 4 to 7, then the
- * right 32-byte half (not the Maxwell Tegra layout, which pairs rows into
- * 32-byte sectors).
+ * Turing and later color surfaces (NVN2): 16-byte lines, four rows of one
+ * 16-byte column per 64 bytes, then the next column, then rows 4 to 7, then
+ * the right 32-byte half.
  */
-static uint32_t gob_offset(uint32_t x, uint32_t y)
+static uint32_t gob_offset_turing(uint32_t x, uint32_t y)
 {
     return ((x % 64) / 32) * 256 + ((y % 8) / 4) * 128 + ((x % 32) / 16) * 64 + (y % 4) * 16 + (x % 16);
+}
+
+/**
+ * @brief Offset of byte x of row y inside a GOB, in the Maxwell Tegra layout
+ * (NVN1, the Switch's GM20B): rows are paired into 32-byte sectors, two
+ * 16-byte lines of one 16-byte column, the second column's pair next, four
+ * such pairs down the GOB, then the right 32-byte half. This is the layout
+ * the Tegra X1 reference manual gives for block-linear surfaces, which
+ * yuzu's and Ryujinx's texture decoders follow (values only).
+ */
+static uint32_t gob_offset_maxwell(uint32_t x, uint32_t y)
+{
+    return ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((x % 32) / 16) * 32 + (y % 2) * 16 + (x % 16);
+}
+
+uint32_t nvn_gob_offset(uint32_t x, uint32_t y)
+{
+    return nvn_generation() == 1 ? gob_offset_maxwell(x, y) : gob_offset_turing(x, y);
 }
 
 static uint32_t div_up(uint32_t a, uint32_t b) { return (a + b - 1) / b; }
@@ -64,6 +82,7 @@ bool nvn_tex_copy(const nvn_tex_desc *d, uint8_t *storage, uint32_t level, uint3
             }
         return true;
     }
+    uint32_t (*gob_offset)(uint32_t, uint32_t) = nvn_generation() == 1 ? gob_offset_maxwell : gob_offset_turing;
     uint32_t gbh = level_block_h(d, hb), gbd = d->target == 2 ? level_block_d(d, depth) : 1;
     uint32_t gobs_w = div_up(wb * bpb, 64);
     uint32_t block_rows = div_up(hb, 8 * gbh);

@@ -1,7 +1,7 @@
 /**
  * @file test_nvn1.c
  * @brief The NVN layer serving an NVN1 (Switch) driver: the version record,
- * the per-version handles, device infos and formats, and the hook.
+ * the per-version handles, device infos and formats, the Maxwell GOB layout and the hook.
  */
 #include "nvn/nvn_priv.h"
 #include "tc.h"
@@ -82,6 +82,31 @@ TEST(nvn1_device_infos_and_formats_follow_the_version)
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, heap + 0x1000, 0, 0, 0), RL_PENDING);
     rl_nvn_set_driver(NULL);
     CHECK(nvn_tex_format(161, &bpb, &bw, &bh));
+}
+
+TEST(nvn1_texels_land_in_maxwell_gobs)
+{
+    rl_nvn_set_driver(&nvn1);
+    CHECK_EQ(nvn_gob_offset(0, 1), 16);
+    CHECK_EQ(nvn_gob_offset(16, 0), 32);
+    CHECK_EQ(nvn_gob_offset(0, 2), 64);
+    CHECK_EQ(nvn_gob_offset(32, 0), 256);
+    CHECK_EQ(nvn_gob_offset(63, 7), 511);
+    nvn_tex_desc d = { .target = 1, .format = 0x25, .width = 16, .height = 8, .levels = 1 };
+    CHECK(nvn_tex_layout(&d));
+    static uint8_t storage[512], in[512], out[512];
+    for (unsigned i = 0; i < sizeof in; i++)
+        in[i] = (uint8_t)(i * 7 + i / 251);
+    nvn_region all = { 0, 0, 0, 16, 8, 1 };
+    CHECK(nvn_tex_copy(&d, storage, 0, 0, &all, in, true));
+    CHECK_EQ(storage[16], in[64]);
+    CHECK_EQ(storage[32], in[16]);
+    CHECK_EQ(storage[64], in[128]);
+    CHECK(nvn_tex_copy(&d, storage, 0, 0, &all, out, false));
+    CHECK(memcmp(in, out, sizeof in) == 0);
+    rl_nvn_set_driver(NULL);
+    CHECK_EQ(nvn_gob_offset(0, 1), 16);
+    CHECK_EQ(nvn_gob_offset(16, 0), 64);
 }
 
 TEST(nvn1_hook_serves_both_consoles)
