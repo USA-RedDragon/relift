@@ -225,6 +225,49 @@ fn nv(s: &str) -> String {
     s.replace('$', "$$")
 }
 
+/// Whether the link of `cc` writes a Mach-O file (macOS or iOS): by the
+/// triple the compiler is given with `-target` or `--target=`, else by one
+/// in the compiler's own name (an NDK `<triple>-clang`), else by the host.
+fn links_mach_o(cc: &[String]) -> bool {
+    let apple = |t: &str| {
+        ["apple", "macos", "ios", "darwin"]
+            .iter()
+            .any(|k| t.contains(k))
+    };
+    let mut target = None;
+    for (i, a) in cc.iter().enumerate() {
+        if let Some(t) = a.strip_prefix("--target=") {
+            target = Some(t);
+        } else if a == "-target" {
+            target = cc.get(i + 1).map(String::as_str);
+        }
+    }
+    if let Some(t) = target {
+        return apple(t);
+    }
+    let name = cc
+        .first()
+        .and_then(|c| Path::new(c).file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if ["linux", "android", "windows", "mingw"]
+        .iter()
+        .any(|k| name.contains(k))
+    {
+        return false;
+    }
+    cfg!(target_vendor = "apple")
+}
+
+/// The link flag that keeps the build directory out of a Mach-O program:
+/// the linker records every object's absolute path in the program's debug
+/// map (`N_OSO`), and `-oso_prefix` takes `prefix` off them, leaving paths
+/// relative to the build directory. None for other formats and for a plan
+/// without a root, whose paths are absolute as given.
+fn debug_map_flag(plan: &Plan, prefix: &str) -> Option<String> {
+    (plan.root.is_some() && links_mach_o(&plan.cc)).then(|| format!("-Wl,-oso_prefix,{prefix}"))
+}
+
 /// The text of `build.ninja` for `plan` as run in `dir`. The link reads its objects from a
 /// response file: ninja runs each command as one `sh -c` string, which
 /// Linux caps at 128 KiB, and a game's thousands of shard objects pass it.
@@ -239,9 +282,10 @@ pub fn ninja_file(plan: &Plan, dir: &Path) -> String {
     } else {
         ""
     };
+    let oso = debug_map_flag(plan, ".").map_or(String::new(), |f| format!(" {}", sh(&f)));
     let cc: Vec<String> = plan.cc.iter().map(|s| sh(s)).collect();
     let mut t = format!(
-        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags{debug_dir} -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
+        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags{debug_dir} -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp{oso} -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
         cc.join(" ")
     );
     // Stage `k` waits (order-only) on the phony `stage<k-1>`, which stands
@@ -577,7 +621,8 @@ pub fn build_with(
             .args(plan.compiles.iter().map(|c| &c.obj))
             .arg("-o")
             .arg(&plan.output)
-            .args(&plan.link_flags);
+            .args(&plan.link_flags)
+            .args(debug_map_flag(plan, &dir.display().to_string()));
         run(&mut cmd, "link", on, |_, _| false)?;
         on(Event::Step {
             done: total,
@@ -664,6 +709,52 @@ mod tests {
             root: Some(root.into()),
         };
         (plan, dir)
+    }
+
+    #[test]
+    fn mach_o_links_keep_the_build_directory_out_of_the_debug_map() {
+        let cc = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(links_mach_o(&cc(&[
+            "xcrun",
+            "-target",
+            "arm64-apple-ios17.0"
+        ])));
+        assert!(links_mach_o(&cc(&[
+            "clang",
+            "--target=x86_64-apple-macos13"
+        ])));
+        assert!(!links_mach_o(&cc(&[
+            "zig",
+            "cc",
+            "-target",
+            "x86_64-windows-gnu"
+        ])));
+        assert!(!links_mach_o(&cc(&[
+            "zig",
+            "cc",
+            "-target",
+            "aarch64-linux-gnu.2.31"
+        ])));
+        assert!(!links_mach_o(&cc(&[
+            "/ndk/bin/aarch64-linux-android24-clang"
+        ])));
+        assert_eq!(links_mach_o(&cc(&["clang"])), cfg!(target_vendor = "apple"));
+        let (mut p, d) = moved("/c");
+        p.cc = cc(&["clang", "-target", "arm64-apple-ios17.0"]);
+        let t = ninja_file(&p, &d);
+        assert!(
+            t.contains("command = $cc @$out.rsp -Wl,-oso_prefix,. -o $out $libs"),
+            "{t}"
+        );
+        assert_eq!(
+            debug_map_flag(&p, "/c/b").as_deref(),
+            Some("-Wl,-oso_prefix,/c/b")
+        );
+        p.root = None;
+        assert!(!ninja_file(&p, &d).contains("oso_prefix"));
+        let (mut p, d) = moved("/c");
+        p.cc = cc(&["zig", "cc", "-target", "x86_64-linux-gnu"]);
+        assert!(!ninja_file(&p, &d).contains("oso_prefix"));
     }
 
     #[test]
