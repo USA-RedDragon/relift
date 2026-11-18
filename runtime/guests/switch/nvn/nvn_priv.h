@@ -121,6 +121,8 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture);
     X(nvnTexturePoolFinalize)                                                                                          \
     X(nvnSamplerPoolInitialize)                                                                                        \
     X(nvnSamplerPoolFinalize)                                                                                          \
+    X(nvnTexturePoolGetSize)                                                                                           \
+    X(nvnSamplerPoolGetSize)                                                                                           \
     X(nvnTexturePoolRegisterTexture)                                                                                   \
     X(nvnTexturePoolRegisterImage)                                                                                     \
     X(nvnSamplerPoolRegisterSampler)

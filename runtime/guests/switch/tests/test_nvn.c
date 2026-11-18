@@ -91,6 +91,22 @@ TEST(nvn_device_queries_and_syncs)
     CHECK_EQ(c->x[0], 3);
 }
 
+TEST(nvn_pools_report_their_descriptor_count)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t tex = heap + 0x300, smp = heap + 0x380;
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolInitialize, tex, heap, 0x1000, 0x8000), RET);
+    CHECK_EQ(c->x[0], 1);
+    CHECK_EQ(call(c, nvnh_nvnSamplerPoolInitialize, smp, heap, 0x2000, 2048), RET);
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolGetSize, tex, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x8000);
+    CHECK_EQ(call(c, nvnh_nvnSamplerPoolGetSize, smp, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 2048);
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolFinalize, tex, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnSamplerPoolFinalize, smp, 0, 0, 0), RET);
+}
+
 TEST(nvn_command_buffer_records_and_submits)
 {
     rl_ctx *c = t_boot(NULL);

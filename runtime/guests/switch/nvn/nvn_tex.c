@@ -402,6 +402,33 @@ uint64_t nvnh_nvnSamplerPoolFinalize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/**
+ * @brief The descriptor count a pool was initialized with, or 0 for a pool
+ * relift does not know. The driver keeps that count at +16 of the pool and
+ * returns it (verified: SDK 22.2.0 nvnTexturePoolGetSize and
+ * nvnSamplerPoolGetSize are both ldr w0, [x0, #16]; ret).
+ */
+static uint64_t pool_size(rl_ctx *c, uint32_t kind)
+{
+    nvn_desc_pool *p = (nvn_desc_pool *)nvn_obj_get(c->x[0], kind);
+    c->x[0] = p ? (uint32_t)p->count : 0;
+    return nvn_ret(c);
+}
+
+/** @brief nvnTexturePoolGetSize(const NVNtexturePool *): int, the descriptor count. */
+uint64_t nvnh_nvnTexturePoolGetSize(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return pool_size(c, NVN_TEXTURE_POOL);
+}
+
+/** @brief nvnSamplerPoolGetSize(const NVNsamplerPool *): int, the descriptor count. */
+uint64_t nvnh_nvnSamplerPoolGetSize(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return pool_size(c, NVN_SAMPLER_POOL);
+}
+
 /** @brief Registrations by descriptor id (relift keeps one table for all texture pools and one for all sampler pools). */
 static struct {
     uint64_t *tex, *sampler;
