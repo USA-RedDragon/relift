@@ -74,6 +74,7 @@ The docs are built as a site from these pages, in the order of [the site outline
 | [Settings](docs/reference/configuration.md) | relift's own settings |
 | [Switch](guests/switch/README.md), [Game Boy](guests/gb/README.md), [Game Boy Advance](guests/gba/README.md) | importing and running each guest's games |
 | [The C runtime](runtime/README.md) | layers, build, tests, run-time settings, environment |
+| [The IR](docs/reference/ir.md) | blocks, operations, device extensions, text and binary formats, checks |
 | [Runtime ABI contract](docs/abi.md) | the contract between emitted C and the runtime |
 | [Input ports and bindings](docs/reference/input.md) | input ports, controls and bindings |
 | [Architecture](docs/concepts/architecture.md) | crate graph, rules and the tests that enforce them, CI |

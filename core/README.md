@@ -14,7 +14,7 @@ cargo test --workspace
 
 | Crate | Folder | Does |
 |---|---|---|
-| `relift-ir` | `ir` | The IR (values, ops, explicit flags, memory ops, ticks, I/O accesses, sync points, code banks) and an interpreter |
+| `relift-ir` | `ir` | The IR (values, ops, explicit flags, memory ops, ticks, I/O accesses, sync points, code banks) and an interpreter; see [the IR reference](../docs/reference/ir.md) |
 | `relift-sail` | `sail` | The Sail frontend the template generators share: parser, model tables, staged evaluator |
 | `relift-cache` | `cache` | Content-addressed store, stage keys and the one file writer |
 | `relift-host` | `host` | The host target list that emit and build share |

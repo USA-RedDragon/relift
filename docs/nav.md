@@ -22,6 +22,7 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [Command line](reference/command-line.md)
   - [Input ports and bindings](reference/input.md)
   - [Runtime ABI contract](abi.md)
+  - [The IR](reference/ir.md)
   - [ARM64 CPU](../cpus/arm64/README.md)
   - [ARMv4T CPU](../cpus/arm32/README.md)
   - [SM83 CPU](../cpus/sm83/README.md)
