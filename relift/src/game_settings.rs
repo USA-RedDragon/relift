@@ -103,6 +103,18 @@ pub fn runtime_settings() -> Vec<Setting> {
             Value::String("system".into()),
             SettingKind::String,
         ),
+        Setting {
+            apply: Apply::Live,
+            ..s(
+                "picture.aa",
+                "Anti-aliasing",
+                "Smooths the edges of the picture the window shows: fxaa is FXAA 3.11. Anything but off changes the picture from the console's",
+                Value::String("off".into()),
+                SettingKind::Enum {
+                    choices: ["off", "fxaa"].map(String::from).into(),
+                },
+            )
+        },
         s(
             "save.dir",
             "Save folder",
@@ -866,7 +878,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 18);
+        assert_eq!(section(Vec::new()).runtime.len(), 19);
     }
 
     #[test]

@@ -17,3 +17,4 @@ runtime/guests/gba/tests/vectors_io.h linguist-generated=true
 gpus/sm86/src/translate/mufu/tables.rs linguist-generated=true
 gpus/sm53/src/form.rs linguist-generated=true
 gpus/sm53/src/field.rs linguist-generated=true
+runtime/core/post_data.h linguist-generated=true

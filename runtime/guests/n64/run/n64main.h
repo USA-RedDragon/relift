@@ -47,7 +47,8 @@ typedef struct rl_n64_program {
  * exists) or headless. Options: --headless, --frames N (stop at the start of
  * the Nth VI frame and print the frame count, the hash of the scanned-out
  * framebuffer, its size, the registers and hashes of RDRAM, DMEM and IMEM), --png FILE (the VI picture at exit; --raw-png FILE the raw
- * framebuffer at exit), --png-dir DIR with --png-every N (every Nth frame),
+ * framebuffer at exit; --shown-png FILE the picture at exit as the window shows it, after the picture
+ * options of post.h), --png-dir DIR with --png-every N (every Nth frame),
  * --wav FILE (the sound as 16-bit stereo at RL_N64_AUDIO_RATE, written at the
  * stop; the sound's hash, peak and frame count are on stderr with --frames),
  * --no-audio (open no sound output), --dump PREFIX (PREFIX.rdram as the CPU sees it, .dmem and .imem at the stop; RDRAM when CPU

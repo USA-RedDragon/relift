@@ -86,7 +86,9 @@ The picture is what VI scans out (ares' software path: 640 by 480, or 576
 for a PAL cartridge, scaled and window-clipped by the video registers, one
 field per frame when interlaced; no anti-aliasing, dither, divot or gamma)
 and is presented at the guest's own frame rate. `--png FILE` writes the last
-frame's picture, `--raw-png FILE` the raw framebuffer. The sound is AI's DMA
+frame's picture, `--raw-png FILE` the raw framebuffer, `--shown-png FILE`
+the last picture as the window shows it (after the player's picture
+options, such as `picture.aa`). The sound is AI's DMA
 read at the DAC's rate and resampled to 44100 Hz: it plays through the
 audio output in a window, `--wav FILE` captures it (also headless) and
 `--no-audio` opens no output.

@@ -1,0 +1,15 @@
+Provenance of the FXAA pass (runtime/core/shaders/fxaa.comp and its C
+reference runtime/core/tests/fxaa_ref.c)
+
+Both port the FXAA 3.11 Quality pixel shader (the FXAA_PC path, preset 39)
+of FXAA3_11.h, "NVIDIA FXAA 3.11 by TIMOTHY LOTTES", as NVIDIA published it
+in its GameWorks graphics samples (samples/es3-kepler/FXAA/FXAA3_11.h, SDK
+version 3.00; SHA-256 of the file
+ad82e2c292fa9ad91b8ad89dd5407f626766bcf3647b93556940353524b198c6): the
+compute pass to GLSL for the core picture pipeline, the reference to C on
+the CPU. The arithmetic and the preset's search steps are the shader's; the
+files' headers say what differs (pixel units, luma from the color, the
+search as one loop).
+
+FXAA3_11.h is offered under the BSD 3-clause license, whose text is in
+LICENSE beside this file.

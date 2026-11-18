@@ -2542,7 +2542,8 @@ and audio layers through `runtime/guests/n64/run`.
   frame, paced to the guest's own clock (the CPU cycles between frames at
   93.75 MHz), so a 59.83 Hz picture is presented at 59.83 Hz and a headless
   run does not sleep. `--png FILE` is the picture of the last frame; `--raw-png
-  FILE` the raw framebuffer.
+  FILE` the raw framebuffer; `--shown-png FILE` the last picture after the
+  player's picture options (`picture.aa`), as the window shows it.
 - AI: `AI_DRAM_ADDR` and `AI_LEN` fill a two-entry FIFO (a write with it
   full is ignored; a length is a multiple of 8 below 256 KiB), `AI_CONTROL`
   enables the DMA, a write of `AI_STATUS` clears the interrupt, and a read

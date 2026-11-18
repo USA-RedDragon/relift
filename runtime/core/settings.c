@@ -41,6 +41,7 @@ typedef struct slot {
 } slot;
 
 static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
+static const char *const g_aa_choices[] = { "off", "fxaa" };
 
 static const rl_setting_def g_runtime_defs[] = {
     {
@@ -69,6 +70,16 @@ static const rl_setting_def g_runtime_defs[] = {
                        "(a meta.json and its library under the app's gpu_drivers folder) loads that driver instead",
         .env = "RELIFT_GPU_DRIVER",
         .def_str = "system",
+    },
+    {
+        .key = "picture.aa",
+        .type = RL_SETTING_ENUM,
+        .label = "Anti-aliasing",
+        .apply = RL_APPLY_LIVE,
+        .description = "Smooths the edges of the picture the window shows: fxaa is FXAA 3.11. Anything but off changes "
+                       "the picture from the console's",
+        .choices = g_aa_choices,
+        .nchoices = 2,
     },
 };
 

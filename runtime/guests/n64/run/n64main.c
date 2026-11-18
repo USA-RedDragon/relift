@@ -11,6 +11,7 @@
 
 #include <relift/audio.h>
 #include <relift/ports.h>
+#include <relift/post.h>
 #include <relift/settings.h>
 #include <relift/window.h>
 
@@ -34,6 +35,7 @@ typedef struct host {
     rl_window *win;
     const char *png;
     const char *raw_png;
+    const char *shown_png;
     const char *png_dir;
     uint32_t png_every;
     const char *dump;
@@ -355,6 +357,11 @@ static void finish(host *H)
         if (H->have && !write_png(H->png, H->rgb, H->w, H->h))
             fprintf(stderr, "relift-n64: could not write %s\n", H->png);
     }
+    if (H->shown_png) {
+        last_picture(H);
+        if (H->have && !write_png(H->shown_png, rl_post_apply(H->rgb, H->w, H->h), H->w, H->h))
+            fprintf(stderr, "relift-n64: could not write %s\n", H->shown_png);
+    }
     if (H->raw_png) {
         static uint8_t raw[MAX_W * MAX_H * 3];
         uint32_t w = 0, h = 0;
@@ -459,6 +466,8 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
             H.png = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--raw-png"))
             H.raw_png = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--shown-png"))
+            H.shown_png = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--wav"))
             H.wav = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--no-audio"))

@@ -1,0 +1,136 @@
+#version 450
+/**
+ * @file fxaa.comp
+ * @brief FXAA 3.11 Quality, PC version, at its extreme preset (39), from
+ * NVIDIA's FXAA3_11.h by Timothy Lottes (BSD-3-Clause; provenance in
+ * runtime/third_party/fxaa), as a compute pass in pixel units: luma is the
+ * Rec. 601 weighting of the color (the shader's FXAA_GREEN_AS_LUMA 0 path
+ * reads it from alpha), and the preset's nested search steps are one loop
+ * over its step table. color_in to color_out.
+ */
+#include "post.glsl"
+
+const float SUBPIX = 0.75;
+const float EDGE_THRESHOLD = 0.166;
+const float EDGE_THRESHOLD_MIN = 0.0833;
+const int NSTEPS = 12;
+const float STEPS[NSTEPS] = float[](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
+
+float luma_of(vec4 c) { return dot(c.rgb, vec3(0.299, 0.587, 0.114)); }
+
+/** @brief The luma of the pixel at p, clamped to the edges. */
+float luma_at(ivec2 p) { return luma_of(tex_fetch(TEX_COLOR, p)); }
+
+/** @brief The luma of a bilinear sample at q in pixel units. */
+float luma_lerp(vec2 q) { return luma_of(tex_linear(TEX_COLOR, q / vec2(pc.size))); }
+
+void main()
+{
+    ivec2 px;
+    if (!this_pixel(px))
+        return;
+    int idx = px.y * pc.size.x + px.x;
+    float mx = float(px.x) + 0.5, my = float(px.y) + 0.5;
+    float lumaM = luma_at(px);
+    float lumaS = luma_at(px + ivec2(0, 1)), lumaE = luma_at(px + ivec2(1, 0));
+    float lumaN = luma_at(px + ivec2(0, -1)), lumaW = luma_at(px + ivec2(-1, 0));
+    float rangeMax = max(max(lumaN, lumaW), max(lumaE, max(lumaS, lumaM)));
+    float rangeMin = min(min(lumaN, lumaW), min(lumaE, min(lumaS, lumaM)));
+    float range = rangeMax - rangeMin;
+    if (range < max(EDGE_THRESHOLD_MIN, rangeMax * EDGE_THRESHOLD)) {
+        color_out[idx] = color_in[idx];
+        return;
+    }
+    float lumaNW = luma_at(px + ivec2(-1, -1)), lumaSE = luma_at(px + ivec2(1, 1));
+    float lumaNE = luma_at(px + ivec2(1, -1)), lumaSW = luma_at(px + ivec2(-1, 1));
+
+    float lumaNS = lumaN + lumaS, lumaWE = lumaW + lumaE;
+    float subpixRcpRange = 1.0 / range;
+    float subpixNSWE = lumaNS + lumaWE;
+    float edgeHorz1 = -2.0 * lumaM + lumaNS, edgeVert1 = -2.0 * lumaM + lumaWE;
+    float lumaNESE = lumaNE + lumaSE, lumaNWNE = lumaNW + lumaNE;
+    float edgeHorz2 = -2.0 * lumaE + lumaNESE, edgeVert2 = -2.0 * lumaN + lumaNWNE;
+    float lumaNWSW = lumaNW + lumaSW, lumaSWSE = lumaSW + lumaSE;
+    float edgeHorz4 = abs(edgeHorz1) * 2.0 + abs(edgeHorz2);
+    float edgeVert4 = abs(edgeVert1) * 2.0 + abs(edgeVert2);
+    float edgeHorz3 = -2.0 * lumaW + lumaNWSW, edgeVert3 = -2.0 * lumaS + lumaSWSE;
+    float edgeHorz = abs(edgeHorz3) + edgeHorz4, edgeVert = abs(edgeVert3) + edgeVert4;
+
+    float subpixNWSWNESE = lumaNWSW + lumaNESE;
+    float lengthSign = 1.0;
+    bool horzSpan = edgeHorz >= edgeVert;
+    float subpixA = subpixNSWE * 2.0 + subpixNWSWNESE;
+    if (!horzSpan) {
+        lumaN = lumaW;
+        lumaS = lumaE;
+    }
+    float subpixB = subpixA * (1.0 / 12.0) - lumaM;
+    float gradientN = lumaN - lumaM, gradientS = lumaS - lumaM;
+    float lumaNN = lumaN + lumaM, lumaSS = lumaS + lumaM;
+    bool pairN = abs(gradientN) >= abs(gradientS);
+    float gradient = max(abs(gradientN), abs(gradientS));
+    if (pairN)
+        lengthSign = -lengthSign;
+    float subpixC = clamp(abs(subpixB) * subpixRcpRange, 0.0, 1.0);
+
+    float bx = mx, by = my;
+    float ox = horzSpan ? 1.0 : 0.0, oy = horzSpan ? 0.0 : 1.0;
+    if (!horzSpan)
+        bx += lengthSign * 0.5;
+    else
+        by += lengthSign * 0.5;
+    float nx = bx - ox * STEPS[0], ny = by - oy * STEPS[0];
+    float qx = bx + ox * STEPS[0], qy = by + oy * STEPS[0];
+    float subpixD = -2.0 * subpixC + 3.0;
+    float lumaEndN = luma_lerp(vec2(nx, ny));
+    float subpixE = subpixC * subpixC;
+    float lumaEndP = luma_lerp(vec2(qx, qy));
+    if (!pairN)
+        lumaNN = lumaSS;
+    float gradientScaled = gradient * 1.0 / 4.0;
+    float lumaMM = lumaM - lumaNN * 0.5;
+    float subpixF = subpixD * subpixE;
+    bool lumaMLTZero = lumaMM < 0.0;
+    lumaEndN -= lumaNN * 0.5;
+    lumaEndP -= lumaNN * 0.5;
+    bool doneN = abs(lumaEndN) >= gradientScaled, doneP = abs(lumaEndP) >= gradientScaled;
+    if (!doneN) {
+        nx -= ox * STEPS[1];
+        ny -= oy * STEPS[1];
+    }
+    if (!doneP) {
+        qx += ox * STEPS[1];
+        qy += oy * STEPS[1];
+    }
+    for (int i = 2; i < NSTEPS && (!doneN || !doneP); i++) {
+        if (!doneN)
+            lumaEndN = luma_lerp(vec2(nx, ny)) - lumaNN * 0.5;
+        if (!doneP)
+            lumaEndP = luma_lerp(vec2(qx, qy)) - lumaNN * 0.5;
+        doneN = abs(lumaEndN) >= gradientScaled;
+        doneP = abs(lumaEndP) >= gradientScaled;
+        if (!doneN) {
+            nx -= ox * STEPS[i];
+            ny -= oy * STEPS[i];
+        }
+        if (!doneP) {
+            qx += ox * STEPS[i];
+            qy += oy * STEPS[i];
+        }
+    }
+    float dstN = horzSpan ? mx - nx : my - ny;
+    float dstP = horzSpan ? qx - mx : qy - my;
+    bool goodSpanN = (lumaEndN < 0.0) != lumaMLTZero;
+    bool goodSpanP = (lumaEndP < 0.0) != lumaMLTZero;
+    float spanLengthRcp = 1.0 / (dstP + dstN);
+    bool goodSpan = dstN < dstP ? goodSpanN : goodSpanP;
+    float pixelOffset = min(dstN, dstP) * -spanLengthRcp + 0.5;
+    float subpixH = subpixF * subpixF * SUBPIX;
+    float off = max(goodSpan ? pixelOffset : 0.0, subpixH);
+    if (!horzSpan)
+        mx += off * lengthSign;
+    else
+        my += off * lengthSign;
+    vec4 c = tex_linear(TEX_COLOR, vec2(mx, my) / vec2(pc.size));
+    color_out[idx] = packUnorm4x8(vec4(c.rgb, 1.0));
+}
