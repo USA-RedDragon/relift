@@ -253,7 +253,7 @@ pub fn nds_settings() -> Vec<Setting> {
         s(
             "video.nds_layout",
             "Screen layout",
-            "How the two screens share a window. auto: stacked in a tall window, else stacked or side by side, whichever fills the window (or the room the on-screen controller leaves) better; stacked: the top screen above the bottom one, as the console holds them; side_by_side: the top screen left of the bottom one; large_top and large_bottom: that screen at twice the size and the other one small beside or below it; top_only and bottom_only: one screen, swapped with the Swap screens control",
+            "How the two screens share a window. auto: stacked in a tall window, else whichever of stacked, side by side and large top shows the most picture, with the bottom screen at least twice its size where that is possible; stacked: the top screen above the bottom one, as the console holds them; side_by_side: the top screen left of the bottom one; large_top and large_bottom: that screen at twice the size and the other one small beside or below it; top_only and bottom_only: one screen, swapped with the Swap screens control",
             Value::String("auto".into()),
             SettingKind::Enum {
                 choices: [
@@ -283,7 +283,7 @@ pub fn nds_settings() -> Vec<Setting> {
         s(
             "video.nds_integer_scale",
             "Whole-number scaling",
-            "Scales the screens by the largest whole multiple that fits the window, so every pixel keeps its size. Off: they fill the window with their shape kept (with the on-screen controller, a whole multiple is used while it loses less than 15% of the room)",
+            "Scales the screens by the largest whole multiple that fits the window, so every pixel keeps its size. Off: they fill the window with their shape kept",
             Value::Bool(false),
             SettingKind::Bool,
         ),
@@ -316,7 +316,7 @@ pub fn touch_pad_settings() -> Vec<Setting> {
             "input.touch_pad.opacity",
             "Opacity",
             "How see-through the buttons are",
-            Value::from(60),
+            Value::from(45),
             SettingKind::Int {
                 min: 20,
                 max: 100,

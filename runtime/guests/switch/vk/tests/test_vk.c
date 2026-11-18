@@ -1589,8 +1589,8 @@ static const rl_touchpad_guest g_pause_guest = {
     .name = "vktest",
     .picture_width = 64,
     .picture_height = 64,
-    .portrait = { 64, 64, g_pause_items, 1, NULL, 0 },
-    .landscape = { 64, 64, g_pause_items, 1, NULL, 0 },
+    .portrait = { 64, 64, g_pause_items, 1, NULL, 0, false, false },
+    .landscape = { 64, 64, g_pause_items, 1, NULL, 0, false, false },
 };
 
 TEST(vk_a_paused_frame_repaints_through_suboptimal_presents)
