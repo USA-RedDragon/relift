@@ -1,10 +1,12 @@
 /**
  * @file nvn_shader.c
- * @brief The game's SM86 programs and their SPIR-V translations.
+ * @brief The game's SM86 (NVN2) and SM53 (NVN1) programs and their SPIR-V
+ * translations.
  *
- * A program is its shader program header (when it has one) and its code
- * through the first BRA to itself, read at the GPU address nvnProgramSetShaders
- * names; its key is the SHA-256 of those bytes. Translations come from the
+ * An NVN2 program is its shader program header (when it has one) and its
+ * code through the first BRA to itself, read at the GPU address
+ * nvnProgramSetShaders names; an NVN1 program is what follows its code
+ * header there (nvn_v1_program); its key is the SHA-256 of those bytes. Translations come from the
  * tables relift build wrote, table.rlspv (the SPIR-V, read a module at a
  * time) and table.rlspi (what each translation's interface needs), both sorted
  * by key, in the table folder. table.rlspv is "RLSPV002" (each module a
@@ -233,6 +235,13 @@ static bool has_sph(const uint8_t *b)
 
 int nvn_shader_stage(const uint8_t *mem, uint64_t code)
 {
+    if (nvn_generation() == 1) {
+        int stage = 5;
+        uint64_t start, len;
+        if (nvn_v1_program(mem, code, &start, &len))
+            nvn_v1_sph(mem + start, &stage);
+        return stage;
+    }
     const uint8_t *b = mem + code;
     if (!has_sph(b))
         return 5;
@@ -280,20 +289,31 @@ static bool exists(const char *path)
     return stat(path, &st) == 0;
 }
 
+/** @brief Where the bytes of the program at code start and how many there are; false when it has no end. */
+static bool program_span(const uint8_t *mem, uint64_t code, uint64_t *start, uint64_t *len)
+{
+    if (nvn_generation() == 1)
+        return nvn_v1_program(mem, code, start, len);
+    *start = code;
+    *len = nvn_shader_extent(mem, code);
+    return *len != 0;
+}
+
 bool nvn_shader_key(const uint8_t *mem, uint64_t code, char key[65], uint64_t *len)
 {
-    *len = nvn_shader_extent(mem, code);
-    if (!*len)
+    uint64_t start;
+    if (!program_span(mem, code, &start, len))
         return false;
-    rl_data_sha256(mem + code, (size_t)*len, key);
+    rl_data_sha256(mem + start, (size_t)*len, key);
     return true;
 }
 
 bool nvn_shader_note(const uint8_t *mem, uint64_t code, char key[65])
 {
-    uint64_t len;
-    if (!nvn_shader_key(mem, code, key, &len))
+    uint64_t start, len;
+    if (!program_span(mem, code, &start, &len))
         return false;
+    rl_data_sha256(mem + start, (size_t)len, key);
     if (spirv_entry(key))
         return true;
     const char *dir = nvn_shader_dir();
@@ -305,7 +325,7 @@ bool nvn_shader_note(const uint8_t *mem, uint64_t code, char key[65])
         nvn_mkdirs(sub);
         FILE *f = fopen(bin, "wb");
         if (f) {
-            fwrite(mem + code, 1, (size_t)len, f);
+            fwrite(mem + start, 1, (size_t)len, f);
             fclose(f);
         } else {
             rl_log(RL_LOG_ERROR, "nvn", "cannot write %s: %s", bin, strerror(errno));

@@ -255,6 +255,15 @@ uint64_t nvn_shader_extent(const uint8_t *mem, uint64_t code);
 bool nvn_shader_key(const uint8_t *mem, uint64_t code, char key[65], uint64_t *len);
 /** @brief Records the program at code in the shader folder unless the table has it; its key goes to key. False when it has no end. */
 bool nvn_shader_note(const uint8_t *mem, uint64_t code, char key[65]);
+/**
+ * @brief For an NVN1 program at guest address code (nvn_prog.c): where its
+ * bytes after the code header start and how many there are (the SPH if it
+ * has one and the code through the last bundle control reaches). False when
+ * code holds no NVN1 code header or control leaves the code.
+ */
+bool nvn_v1_program(const uint8_t *mem, uint64_t code, uint64_t *start, uint64_t *len);
+/** @brief Whether b is an NVN1 (version 3) SPH; its NVNshaderStage to *stage when stage is not NULL. */
+bool nvn_v1_sph(const uint8_t *b, int *stage);
 /** @brief The NVNshaderStage of the program at code (vertex 0, fragment 1, geometry 2, tessellation control 3 and evaluation 4, compute 5). */
 int nvn_shader_stage(const uint8_t *mem, uint64_t code);
 /** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */

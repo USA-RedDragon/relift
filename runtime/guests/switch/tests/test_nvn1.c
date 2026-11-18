@@ -1,7 +1,8 @@
 /**
  * @file test_nvn1.c
  * @brief The NVN layer serving an NVN1 (Switch) driver: the version record,
- * the per-version handles, device infos and formats, the Maxwell GOB layout and the hook.
+ * the per-version handles, device infos and formats, the Maxwell GOB layout
+ * and the NVN1 program format.
  */
 #include "nvn/nvn_priv.h"
 #include "tc.h"
@@ -107,6 +108,58 @@ TEST(nvn1_texels_land_in_maxwell_gobs)
     rl_nvn_set_driver(NULL);
     CHECK_EQ(nvn_gob_offset(0, 1), 16);
     CHECK_EQ(nvn_gob_offset(16, 0), 64);
+}
+
+/** @brief A Maxwell instruction of opcode bits op (top 12), predicate PT and condition T, with a branch offset. */
+static uint64_t maxwell(uint64_t op, int32_t offset)
+{
+    return op << 52 | ((uint64_t)(uint32_t)offset & 0xffffff) << 20 | 7ull << 16 | 0xf;
+}
+
+TEST(nvn1_programs_are_their_sph_and_reachable_code)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t p = t_heap(c, 0x200000);
+    uint8_t *m = t_mem();
+    memset(m + p, 0, 0x1000);
+    rl_st32(m, p, 0x12345678);
+    rl_st32(m, p + 0x30, 1 | 3 << 5 | 5 << 10);
+    uint64_t code = p + 0x30 + 0x50;
+    rl_st64(m, code + 8, maxwell(0xe24, 24));
+    rl_st64(m, code + 40, maxwell(0xe30, 0));
+    rl_st64(m, code + 48, maxwell(0xe24, -8));
+    uint64_t start = 0, len = 0;
+    CHECK(nvn_v1_program(m, p, &start, &len));
+    CHECK_EQ(start, p + 0x30);
+    CHECK_EQ(len, 0x50 + 64);
+    int stage = -1;
+    CHECK(nvn_v1_sph(m + start, &stage));
+    CHECK_EQ(stage, 1);
+    rl_st32(m, p + 0x30, 1 | 4 << 5 | 5 << 10);
+    CHECK(!nvn_v1_sph(m + start, NULL));
+    CHECK(nvn_v1_program(m, p, &start, &len));
+    rl_st32(m, p, 0);
+    CHECK(!nvn_v1_program(m, p, &start, &len));
+}
+
+TEST(nvn1_programs_follow_pushes_and_conditional_ends)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t p = t_heap(c, 0x200000);
+    uint8_t *m = t_mem();
+    memset(m + p, 0, 0x1000);
+    rl_st32(m, p, 0x12345678);
+    uint64_t code = p + 0x30;
+    rl_st64(m, code + 8, maxwell(0xe29, 88));
+    rl_st64(m, code + 16, maxwell(0xe30, 0) & ~0xfull);
+    rl_st64(m, code + 24, maxwell(0xe30, 0));
+    rl_st64(m, code + 104, maxwell(0xe30, 0));
+    uint64_t start = 0, len = 0;
+    CHECK(nvn_v1_program(m, p, &start, &len));
+    CHECK_EQ(start, p + 0x30);
+    CHECK_EQ(len, 128);
+    rl_st64(m, code + 8, maxwell(0xe24, 1));
+    CHECK(!nvn_v1_program(m, p, &start, &len));
 }
 
 TEST(nvn1_hook_serves_both_consoles)
