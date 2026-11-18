@@ -13,8 +13,8 @@ int rl_sched_attach(rl_sched_cpu *c, struct rl_thread *t)
     rl_time *tm = t && t->ctx ? rl_ctx_time(t->ctx) : NULL;
     if (!tm)
         return -1;
-    *tm = *c->time;
-    c->time = tm;
+    *tm = *c->clock.time;
+    c->clock.time = tm;
     c->thread = t;
     c->sched->bind = rl_thread_bind;
     t->clock = c;
@@ -59,7 +59,7 @@ int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
     if (!k)
         return rl_guest_fatal(c, "sched", "sync point reached on a thread without a scheduler clock");
     for (;;) {
-        if (k->time->budget <= 0)
+        if (k->clock.time->budget <= 0)
             rl_sched_run(k);
         uint64_t pc = k->irq ? k->irq(c, mem, next) : RL_NO_IRQ;
         if (pc == RL_NO_IRQ)

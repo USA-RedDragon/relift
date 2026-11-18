@@ -55,7 +55,7 @@ static void clip(rl_nds_arm *k)
     if (at == UINT64_MAX)
         return;
     rl_time *t = &k->c->time;
-    uint64_t now = rl_sched_now(k->k);
+    uint64_t now = rl_sched_now_inline(k->k);
     uint64_t ratio = k->id == RL_NDS_ARM9 ? 1u : 2u;
     int64_t left = at <= now ? 0 : (int64_t)((at - now + ratio - 1u) / ratio);
     if (left < t->budget) {

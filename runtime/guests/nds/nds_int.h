@@ -497,9 +497,14 @@ static inline void nds_st(uint8_t *p, unsigned size, uint32_t v)
 }
 
 /** @brief The tick of cpu now (0 before rl_nds_attach). */
-static inline uint64_t nds_now(const rl_nds *m, unsigned cpu) { return m->cpu[cpu] ? rl_sched_now(m->cpu[cpu]) : 0; }
+static inline uint64_t nds_now(const rl_nds *m, unsigned cpu) { return m->cpu[cpu] ? rl_sched_now_inline(m->cpu[cpu]) : 0; }
 /** @brief Charges ticks to cpu (an ARM7 charge is rounded up to whole cycles). */
-void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks);
+static inline void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks)
+{
+    if (!m->cpu[cpu] || ticks == 0)
+        return;
+    rl_sched_stall_inline(m->cpu[cpu], cpu == RL_NDS_ARM9 ? ticks : (ticks + 1) / 2);
+}
 
 /** @brief The ARM9's TCM byte at addr for this kind of access, or NULL when the access goes to the bus (ITCM over DTCM; load mode sends reads to the bus). */
 static inline uint8_t *nds_tcm(rl_nds *m, uint32_t addr, bool code, bool write)

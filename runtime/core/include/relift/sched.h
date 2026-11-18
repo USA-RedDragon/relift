@@ -70,6 +70,18 @@
 typedef struct rl_sched rl_sched;
 /** @brief The scheduler's record of one guest CPU; opaque. */
 typedef struct rl_sched_cpu rl_sched_cpu;
+/**
+ * @brief The clock of a scheduler CPU, the first member of its record: the
+ * cycle clock it runs on (its own, or the one of the lifted-code thread
+ * rl_sched_attach bound it to), the tick and cycle its count starts from,
+ * and its ticks per cycle. Read only through the functions below.
+ */
+typedef struct rl_sched_clock_state {
+    rl_time *time;
+    uint64_t origin_tick;
+    uint64_t origin_cycle;
+    uint32_t ratio;
+} rl_sched_clock_state;
 /** @brief A device. */
 typedef struct rl_device rl_device;
 /** @brief A timed event. */
@@ -245,6 +257,27 @@ RL_RUNTIME_API void rl_sched_set_ratio(rl_sched_cpu *c, uint32_t ratio);
 RL_RUNTIME_API uint64_t rl_sched_cycles(const rl_sched_cpu *c);
 /** @brief The tick c is at. */
 RL_RUNTIME_API uint64_t rl_sched_now(const rl_sched_cpu *c);
+
+/** @brief rl_sched_cycles without a call, for the hot paths of a guest layer. */
+static inline uint64_t rl_sched_cycles_inline(const rl_sched_cpu *c)
+{
+    const rl_sched_clock_state *k = (const rl_sched_clock_state *)(const void *)c;
+    return k->time->deadline - (uint64_t)k->time->budget;
+}
+
+/** @brief rl_sched_now without a call. */
+static inline uint64_t rl_sched_now_inline(const rl_sched_cpu *c)
+{
+    const rl_sched_clock_state *k = (const rl_sched_clock_state *)(const void *)c;
+    return k->origin_tick + (rl_sched_cycles_inline(c) - k->origin_cycle) * k->ratio;
+}
+
+/** @brief rl_sched_stall without a call. */
+static inline void rl_sched_stall_inline(rl_sched_cpu *c, uint64_t cycles)
+{
+    const rl_sched_clock_state *k = (const rl_sched_clock_state *)(const void *)c;
+    k->time->budget -= (int64_t)cycles;
+}
 /** @brief The tick up to which events have run: every active CPU has reached it. */
 RL_RUNTIME_API uint64_t rl_sched_time(const rl_sched *s);
 

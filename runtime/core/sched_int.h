@@ -30,11 +30,8 @@ typedef struct sched_range {
 typedef void rl_sched_bind_fn(struct rl_thread *t);
 
 struct rl_sched_cpu {
-    rl_time *time;
+    rl_sched_clock_state clock;
     rl_time own;
-    uint64_t origin_tick;
-    uint64_t origin_cycle;
-    uint32_t ratio;
     uint32_t index;
     uint32_t rank;
     uint64_t lines;

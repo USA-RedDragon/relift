@@ -8,11 +8,14 @@
  */
 #include "sched_int.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define NO_HOLDER RL_SCHED_NO_HOLDER
+
+_Static_assert(offsetof(rl_sched_cpu, clock) == 0, "the clock is the first member");
 
 rl_sched *rl_sched_create(const rl_sched_config *cfg)
 {
@@ -52,7 +55,7 @@ void rl_sched_destroy(rl_sched *s)
 
 const rl_sched_stats *rl_sched_get_stats(const rl_sched *s) { return &s->stats; }
 uint64_t rl_sched_time(const rl_sched *s) { return s->time; }
-rl_time *rl_sched_clock(rl_sched_cpu *c) { return c->time; }
+rl_time *rl_sched_clock(rl_sched_cpu *c) { return c->clock.time; }
 void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook) { c->irq = hook; }
 void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook *hook) { c->irq_ret = hook; }
 rl_sched *rl_sched_of(const rl_sched_cpu *c) { return c->sched; }
@@ -62,9 +65,9 @@ uint64_t rl_sched_pending(const rl_sched_cpu *c) { return c->lines & c->mask; }
 
 rl_sched_cpu *rl_sched_current(rl_sched *s) { return s->holder == NO_HOLDER ? NULL : &s->cpus[s->holder]; }
 
-uint64_t rl_sched_cycles(const rl_sched_cpu *c) { return c->time->deadline - (uint64_t)c->time->budget; }
+uint64_t rl_sched_cycles(const rl_sched_cpu *c) { return rl_sched_cycles_inline(c); }
 
-uint64_t rl_sched_now(const rl_sched_cpu *c) { return c->origin_tick + (rl_sched_cycles(c) - c->origin_cycle) * c->ratio; }
+uint64_t rl_sched_now(const rl_sched_cpu *c) { return rl_sched_now_inline(c); }
 
 static bool ev_before(const rl_event *a, const rl_event *b)
 {
@@ -122,24 +125,24 @@ static void heap_remove(rl_sched *s, rl_event *e)
 
 static uint64_t end_tick(const rl_sched_cpu *c)
 {
-    return c->origin_tick + (c->time->deadline - c->origin_cycle) * c->ratio;
+    return c->clock.origin_tick + (c->clock.time->deadline - c->clock.origin_cycle) * c->clock.ratio;
 }
 
 static void set_budget(rl_sched_cpu *c, uint64_t now, uint64_t limit)
 {
     uint64_t cyc = rl_sched_cycles(c);
-    uint64_t n = limit > now ? (limit - now + c->ratio - 1) / c->ratio : 0;
-    c->time->budget = (int64_t)n;
-    c->time->deadline = cyc + n;
+    uint64_t n = limit > now ? (limit - now + c->clock.ratio - 1) / c->clock.ratio : 0;
+    c->clock.time->budget = (int64_t)n;
+    c->clock.time->deadline = cyc + n;
 }
 
 void rl_sched_break(rl_sched_cpu *c)
 {
-    c->time->deadline = rl_sched_cycles(c);
-    c->time->budget = 0;
+    c->clock.time->deadline = rl_sched_cycles(c);
+    c->clock.time->budget = 0;
 }
 
-void rl_sched_stall(rl_sched_cpu *c, uint64_t cycles) { c->time->budget -= (int64_t)cycles; }
+void rl_sched_stall(rl_sched_cpu *c, uint64_t cycles) { rl_sched_stall_inline(c, cycles); }
 
 static void cut(rl_sched *s, uint64_t when)
 {
@@ -329,12 +332,12 @@ rl_sched_cpu *rl_sched_add_cpu(rl_sched *s, uint32_t ratio)
         return NULL;
     rl_sched_cpu *c = &s->cpus[s->ncpu];
     memset(c, 0, sizeof *c);
-    c->time = &c->own;
-    c->ratio = ratio;
+    c->clock.time = &c->own;
+    c->clock.ratio = ratio;
     c->index = s->ncpu++;
     c->sched = s;
     c->active = true;
-    c->origin_tick = s->time;
+    c->clock.origin_tick = s->time;
     if (s->holder == NO_HOLDER)
         s->holder = c->index;
     return c;
@@ -411,9 +414,9 @@ void rl_sched_set_ratio(rl_sched_cpu *c, uint32_t ratio)
 {
     if (ratio == 0)
         return;
-    c->origin_tick = rl_sched_now(c);
-    c->origin_cycle = rl_sched_cycles(c);
-    c->ratio = ratio;
+    c->clock.origin_tick = rl_sched_now(c);
+    c->clock.origin_cycle = rl_sched_cycles(c);
+    c->clock.ratio = ratio;
     rl_sched_break(c);
 }
 
@@ -471,7 +474,7 @@ static int halt_ordered(rl_sched_cpu *c)
             break;
         uint64_t now = rl_sched_now(c), when = s->heap[0]->when;
         if (when > now)
-            rl_sched_stall(c, (when - now + c->ratio - 1) / c->ratio);
+            rl_sched_stall(c, (when - now + c->clock.ratio - 1) / c->clock.ratio);
         fire_due(s, rl_sched_now(c));
     }
     c->halted = false;
@@ -539,7 +542,7 @@ int rl_sched_halt(rl_sched_cpu *c)
                 others = true;
         if (!s->qn && !others)
             break;
-        c->time->budget = 0;
+        c->clock.time->budget = 0;
         if (rl_sched_run(c)) {
             got = 1;
             break;

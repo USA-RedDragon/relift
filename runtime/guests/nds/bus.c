@@ -27,13 +27,6 @@
 
 #include "bios.h"
 
-void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks)
-{
-    if (!m->cpu[cpu] || ticks == 0)
-        return;
-    rl_sched_stall(m->cpu[cpu], cpu == RL_NDS_ARM9 ? ticks : (ticks + 1) / 2);
-}
-
 bool nds_ram_first(const rl_nds *m, unsigned cpu)
 {
     bool arm7_first = (m->exmem[RL_NDS_ARM9] & 0x8000u) != 0;
