@@ -81,7 +81,7 @@ The docs are built as a site from these pages, in the order of [the site outline
 
 ## Developing
 
-Before contributing, read [Architecture](docs/concepts/architecture.md): section 0 lists the hard rules. [Tooling and checks](docs/project/tooling.md) covers the hooks, `scripts/ci/all.sh` and the docs build.
+Before contributing, read [Contributing](CONTRIBUTING.md) and [Architecture](docs/concepts/architecture.md): section 0 lists the hard rules. [Open work](GAPS.md) lists what to pick up. [Tooling and checks](docs/project/tooling.md) covers the hooks, `scripts/ci/all.sh` and the docs build. AI coding agents read `AGENTS.md`.
 
 ## License
 

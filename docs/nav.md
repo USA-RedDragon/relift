@@ -31,6 +31,8 @@ This page lists the pages of the docs site in reading order, by section; the sit
   - [SM86 shader translator](../gpus/sm86/README.md)
   - [The differential checker](../check/README.md)
 - Project
+  - [Contributing](../CONTRIBUTING.md)
+  - [Open work](../GAPS.md)
   - [Tooling and checks](project/tooling.md)
   - [License](project/license.md)
 
