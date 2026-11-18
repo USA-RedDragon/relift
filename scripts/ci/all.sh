@@ -1,16 +1,41 @@
 #!/usr/bin/env bash
 # Run every CI job this host can run, in parallel, the same scripts the
 # workflows call. Prints each job's wall time and exits nonzero if any failed.
+# Usage: all.sh [--help | JOB...]
+# With --help, prints this text and runs nothing. With names, runs only those
+# jobs; a name may be a shell pattern, such as "mac-*", and one that matches no
+# job fails and lists the valid names.
 #
 # Jobs named mac-* run on the macOS host CI_MAC (default: the ssh host "mac")
 # from a copy of this working tree: the macOS tests, the macOS and iOS cross
-# builds of the Game Boy, Game Boy Advance, Nintendo 64 and Master System programs, and relift for both Apple targets (the CI image builds those on
+# builds of the Game Boy, Game Boy Advance, Nintendo 64 and Master System
+# programs, and relift for both Apple targets (the CI image builds those on
 # Linux). With CI_MAC empty or the host unreachable they are reported as
-# skipped. A job that takes longer than the timeout-minutes of the workflow
-# job it stands for is killed, with its children, and fails. Jobs named image-* need docker and the pinned
-# rust-cross image (about 16 GB unpacked); without docker, or without the
-# image and room to pull it, they are reported as skipped. A skip never
-# fails the run but is always printed with its reason.
+# skipped. At most CI_MAC_JOBS of them run at once (default: a share of the
+# Mac's cores and memory), the way each runs alone on a CI runner; a job's time
+# starts when it does, and the wait is printed apart. Each has its own cargo
+# target directory under ~/relift-ci/cache on the Mac, kept between runs like
+# rust-cache, and wiped when it grows past CI_MAC_CACHE_GB (default 5)
+# gigabytes. One lock, CI_MAC_LOCK (default ~/.cache/relift/mac.lock), is held
+# for the whole mac phase, so two runs of this script never share the Mac and
+# the second waits for the first.
+#
+# A job that takes longer than the timeout-minutes of the workflow job it
+# stands for is killed, with its children, and fails. Jobs named image-* need
+# docker and the pinned rust-cross image (about 16 GB unpacked); without
+# docker, or without the image and room to pull it, they are reported as
+# skipped. A skip never fails the run but is always printed with its reason.
+case ${1:-} in
+  -h | --help)
+    sed -n '2,/^[^#]/{/^#/s/^# \{0,1\}//p}' "$0"
+    exit 0
+    ;;
+  -*)
+    echo "all.sh: unknown option $1 (see all.sh --help)" >&2
+    exit 2
+    ;;
+esac
+
 . "$(dirname "$0")/lib.sh"
 
 logs="$CI_WORK/logs"
@@ -26,15 +51,40 @@ if [ "$(uname -s)" = Linux ]; then
   jobs+=(cross-sms-windows-x64 cross-sms-windows-arm64 cross-sms-android-arm64)
   for t in "${image_targets[@]}"; do jobs+=("image-$t"); done
 fi
-jobs+=(mac-tests-workspace mac-tests-relift mac-tests-relift-e2e mac-cross-macos-x64 mac-cross-ios-arm64 mac-cross-gba-macos-x64 mac-cross-gba-ios-arm64)
-jobs+=(mac-cross-n64-macos-x64 mac-cross-n64-ios-arm64)
-jobs+=(mac-cross-sms-macos-x64 mac-cross-sms-ios-arm64)
-jobs+=(mac-release-aarch64-apple-darwin mac-release-x86_64-apple-darwin)
+jobs+=(mac-tests-workspace mac-release-aarch64-apple-darwin mac-release-x86_64-apple-darwin mac-tests-relift)
+jobs+=(mac-tests-relift-e2e-slow mac-tests-relift-e2e-rest mac-cross-ios-arm64 mac-cross-gba-ios-arm64)
+jobs+=(mac-cross-n64-ios-arm64 mac-cross-sms-ios-arm64 mac-cross-macos-x64 mac-cross-gba-macos-x64)
+jobs+=(mac-cross-n64-macos-x64 mac-cross-sms-macos-x64)
+
+if [ $# -gt 0 ]; then
+  picked=()
+  for pat in "$@"; do
+    found=
+    for j in "${jobs[@]}"; do
+      case $j in $pat) found=1 ;; *) continue ;; esac
+      case " ${picked[*]-} " in *" $j "*) ;; *) picked+=("$j") ;; esac
+    done
+    [ -n "$found" ] || { echo "no job matches $pat; the jobs are: ${jobs[*]}" >&2; exit 2; }
+  done
+  want=("${jobs[@]}")
+  jobs=()
+  for j in "${want[@]}"; do
+    case " ${picked[*]} " in *" $j "*) jobs+=("$j") ;; esac
+  done
+fi
+
+has_mac=
+for j in "${jobs[@]}"; do
+  case $j in mac-*) has_mac=1 ;; esac
+done
 
 CI_MAC=${CI_MAC-mac}
 mac_dir="relift-ci/$(basename "$ROOT")-$(printf %s "$ROOT" | sha256sum | cut -c1-8)"
 mac_skip=
-if [ -z "$CI_MAC" ]; then
+mac_cap=1
+if [ -z "$has_mac" ]; then
+  :
+elif [ -z "$CI_MAC" ]; then
   mac_skip="CI_MAC is empty"
 elif ! ssh -o BatchMode=yes -o ConnectTimeout=8 "$CI_MAC" true 2>/dev/null; then
   mac_skip="ssh $CI_MAC is unreachable"
@@ -50,6 +100,17 @@ elif ! docker image inspect "$image" >/dev/null 2>&1; then
   free=$(df -Pk "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /)" 2>/dev/null | awk 'NR==2 {print int($4 / 1048576)}')
   [ "${free:-0}" -ge 24 ] || image_skip="the rust-cross image is not pulled and only ${free:-0} GB are free (it needs about 16 GB)"
 fi
+
+# mac_default_cap: how many mac jobs to run at once, from the Mac's cores and
+# memory: one per three cores (the size of a hosted macOS runner) and one per
+# 2.5 GB, at least one.
+mac_default_cap() {
+  local cpus mem
+  read -r cpus mem < <(ssh -o BatchMode=yes "$CI_MAC" 'sysctl -n hw.ncpu hw.memsize' | tr '\n' ' ')
+  local by_cpu=$(((cpus + 2) / 3)) by_mem=$((mem / 2684354560))
+  local cap=$((by_cpu < by_mem ? by_cpu : by_mem))
+  echo $((cap < 1 ? 1 : cap))
+}
 
 # limit_minutes NAME: the timeout-minutes of the workflow job that runs NAME.
 limit_minutes() {
@@ -72,10 +133,11 @@ limit_minutes() {
   ' "$ROOT/.github/workflows/${wf%%:*}"
 }
 
-# on_mac CMD: run CMD on the mac in the copied tree, with its own work dirs.
+# on_mac JOB CMD: run CMD on the mac in the copied tree (see mac-run.sh), with
+# the target cache of JOB.
 on_mac() {
   ssh -tt -o BatchMode=yes "$CI_MAC" "eval \"\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || true)\"
-    cd \"\$HOME/$mac_dir/src\" && export CI_WORK=\"\$HOME/$mac_dir/work\" CARGO_TARGET_DIR=\"\$HOME/$mac_dir/target\" CARGO_BUILD_JOBS=4 && $1"
+    cd \"\$HOME/$mac_dir/src\" && CI_MAC_WORK=\"\$HOME/$mac_dir/work\" CI_MAC_CACHE_GB=${CI_MAC_CACHE_GB:-5} scripts/ci/mac-run.sh $1 $1 $2"
 }
 
 # job NAME: run one job; exit 77 means skipped, with the reason on stdout.
@@ -96,22 +158,53 @@ job() {
     mac-*)
       [ -z "$mac_skip" ] || { echo "$mac_skip"; return 77; }
       case $1 in
-        mac-tests-workspace) on_mac "scripts/ci/tests.sh workspace" ;;
-        mac-tests-relift) on_mac "scripts/ci/tests.sh relift" ;;
-        mac-tests-relift-e2e) on_mac "scripts/ci/tests.sh e2e" ;;
-        mac-cross-gba-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-gba-} --guest gba --jobs 4" ;;
-        mac-cross-n64-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
-        mac-cross-sms-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-sms-} --guest sms --jobs 4" ;;
-        mac-cross-*) on_mac "scripts/ci/gbcross.sh ${1#mac-cross-} --jobs 4" ;;
-        mac-release-*) on_mac "CARGO_TARGET_DIR=\$CARGO_TARGET_DIR-${1#mac-release-} cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
+        mac-tests-workspace) on_mac "$1" "scripts/ci/tests.sh workspace" ;;
+        mac-tests-relift) on_mac "$1" "scripts/ci/tests.sh relift" ;;
+        mac-tests-relift-e2e-slow) on_mac "$1" "scripts/ci/tests.sh e2e-slow" ;;
+        mac-tests-relift-e2e-rest) on_mac "$1" "scripts/ci/tests.sh e2e-rest" ;;
+        mac-cross-gba-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-gba-} --guest gba --jobs 4" ;;
+        mac-cross-n64-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
+        mac-cross-sms-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-sms-} --guest sms --jobs 4" ;;
+        mac-cross-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-} --jobs 4" ;;
+        mac-release-*) on_mac "$1" "cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
       esac
       ;;
     *) "$ROOT/scripts/ci/$1.sh" ;;
   esac
 }
 
+[ -z "$has_mac" ] || [ -n "$mac_skip" ] || mac_cap=${CI_MAC_JOBS:-$(mac_default_cap)}
+mac_lock=${CI_MAC_LOCK:-$HOME/.cache/relift/mac.lock}
+tokens="$logs/mac.tokens"
+rm -f "$tokens"
+mkfifo "$tokens"
+exec 8<>"$tokens"
+if [ -n "$has_mac" ] && [ -z "$mac_skip" ]; then
+  mac_total=0
+  for j in "${jobs[@]}"; do
+    case $j in mac-*) mac_total=$((mac_total + 1)) ;; esac
+  done
+  (
+    mkdir -p "$(dirname "$mac_lock")"
+    exec 7>"$mac_lock"
+    flock 7
+    for ((i = 0; i < mac_cap; i++)); do echo >&8; done
+    while kill -0 "$$" 2>/dev/null && [ "$(find "$logs" -name 'mac-*.status' | wc -l)" -lt "$mac_total" ]; do
+      sleep 1
+    done
+  ) &
+fi
+
 for j in "${jobs[@]}"; do
   (
+    queued=0
+    held=
+    if [ "${j#mac-}" != "$j" ] && [ -z "$mac_skip" ]; then
+      q=$(date +%s)
+      read -r -u 8
+      held=1
+      queued=$(($(date +%s) - q))
+    fi
     s=$(date +%s)
     set +e
     limit=$(limit_minutes "$j")
@@ -133,6 +226,7 @@ for j in "${jobs[@]}"; do
     rc=$?
     set +m
     set -e
+    [ -z "$held" ] || echo >&8
     if [ -n "$killed" ]; then
       echo "killed after $limit minutes (the workflow's timeout-minutes)" >>"$logs/$j.log"
       rc=1
@@ -144,6 +238,7 @@ for j in "${jobs[@]}"; do
     esac
     note="$logs/$j.log"
     [ "$r" = SKIP ] && note="skipped: $(tail -n 1 "$logs/$j.log")"
+    [ "$queued" -eq 0 ] || note="$note (queued ${queued}s)"
     printf '%-40s %-4s %5ss  %s\n' "$j" "$r" "$(($(date +%s) - s))" "$note" >"$logs/$j.status"
   ) &
 done
