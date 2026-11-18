@@ -26,21 +26,21 @@ the cases the evidence does not cover stop with their own reason.
 | BFI C | stop | | no semantic check yet |
 | BFI RC | stop | | no semantic check yet |
 | BPT | stop | | no semantic check yet |
-| BRA | stop | | no semantic check yet |
-| BRK | stop | | no semantic check yet |
-| BRX | stop | | no semantic check yet |
-| CAL | stop | | no semantic check yet |
+| BRA | exact | BRA | Ryujinx's Bra branches to the same instruction under the guard; the target keeps its instruction (word k is Maxwell instruction k); a condition code test and .CA, .LMT, .U stop; synthetic programs translate whole (tests/flow.rs) |
+| BRK | exact | BRA | for one thread a pop is a jump to the entry it pops (a BRK unwinds the SSY entries above its PBK, as Ryujinx's decoder does); Ryujinx emits a branch when the pop has one target, and the control-flow pass lowers only those, under the same guard. A pop with more than one target or none and a condition code test stop (tests/flow.rs) |
+| BRX | stop | | indirect jump: its targets are in the program's constant bank 1, which the scan does not carry |
+| CAL | stop | | subroutine call or return: the SM86 translator inlines CALL.REL through a return address register Maxwell does not have |
 | CCTL | stop | | no semantic check yet |
 | CCTLL | stop | | no semantic check yet |
 | CCTLT | stop | | no semantic check yet |
-| CONT | stop | | no semantic check yet |
+| CONT | stop | | PCNT and CONT: no program of the census uses them |
 | CSET | stop | | no semantic check yet |
 | CSETP | stop | | no semantic check yet |
 | CS2R | stop | | no semantic check yet |
 | DADD R | stop | | no semantic check yet |
 | DADD I | stop | | no semantic check yet |
 | DADD C | stop | | no semantic check yet |
-| DEPBAR | stop | | no semantic check yet |
+| DEPBAR | exact | NOP | a scoreboard wait orders nothing a SPIR-V invocation can see: Ryujinx's Depbar emits nothing, as the SM86 translator does for DEPBAR |
 | DFMA R | stop | | no semantic check yet |
 | DFMA I | stop | | no semantic check yet |
 | DFMA C | stop | | no semantic check yet |
@@ -57,7 +57,7 @@ the cases the evidence does not cover stop with their own reason.
 | DSETP R | stop | | no semantic check yet |
 | DSETP I | stop | | no semantic check yet |
 | DSETP C | stop | | no semantic check yet |
-| EXIT | stop | | no semantic check yet |
+| EXIT | exact | EXIT | Ryujinx's Exit returns under the guard and the SM86 translator's EXIT writes the fragment outputs of the SPH and returns (Ryujinx does the same at its return); a condition code test and .KEEPREFCOUNT stop |
 | F2F R | stop | | no semantic check yet |
 | F2F I | stop | | no semantic check yet |
 | F2F C | stop | | no semantic check yet |
@@ -166,10 +166,10 @@ the cases the evidence does not cover stop with their own reason.
 | ISETP R | stop | | no semantic check yet |
 | ISETP I | stop | | no semantic check yet |
 | ISETP C | stop | | no semantic check yet |
-| JCAL | stop | | no semantic check yet |
-| JMP | stop | | no semantic check yet |
-| JMX | stop | | no semantic check yet |
-| KIL | stop | | no semantic check yet |
+| JCAL | stop | | subroutine call or return: the SM86 translator inlines CALL.REL through a return address register Maxwell does not have |
+| JMP | stop | | indirect jump: its targets are in the program's constant bank 1, which the scan does not carry |
+| JMX | stop | | indirect jump: its targets are in the program's constant bank 1, which the scan does not carry |
+| KIL | exact | KILL | the same kill-thread instruction (envydis's kil, nvdisasm's KILL); the SM86 translator demotes, as for every KILL, and Ryujinx terminates (OpKill), which differs only in the quad's derivatives after the kill, undefined under OpKill. An unguarded KIL ends its path: the control-flow pass ends the invocation after it where nothing else reaches. A condition code test stops (tests/flow.rs) |
 | LD | stop | | no semantic check yet |
 | LDC | stop | | no semantic check yet |
 | LDG | stop | | no semantic check yet |
@@ -195,22 +195,22 @@ the cases the evidence does not cover stop with their own reason.
 | MOV C | exact | MOV | Ryujinx's MovC copies c[CbufSlot][4 * CbufOffset] and the SM86 translator's MOV reads the same bank and byte offset; lane mask 0xf only, and offsets of 0x8000 and up stop (SM86 reads them as negative); operands equal envydis on every census word |
 | MOV 32I | exact | MOV | Ryujinx's Mov32i copies Imm32 to Dest and the SM86 translator's MOV copies its immediate; lane mask 0xf only (every census word), other masks stop; operands equal envydis on every census word |
 | MUFU | stop | | no semantic check yet |
-| NOP | stop | | no semantic check yet |
+| NOP | exact | NOP | Ryujinx's Nop emits nothing and the SM86 translator's NOP emits nothing |
 | OUT R | stop | | no semantic check yet |
 | OUT I | stop | | no semantic check yet |
 | OUT C | stop | | no semantic check yet |
 | P2R R | stop | | no semantic check yet |
 | P2R I | stop | | no semantic check yet |
 | P2R C | stop | | no semantic check yet |
-| PBK | stop | | no semantic check yet |
-| PCNT | stop | | no semantic check yet |
+| PBK | exact | BSSY | the control-flow pass resolves the reconvergence stack as Ryujinx's decoder does (pushes propagated into their pops); the push becomes a BSSY on the barrier of its stack depth with the same target, where the guest's lanes meet again. A push at two depths stops (tests/flow.rs) |
+| PCNT | stop | | PCNT and CONT: no program of the census uses them |
 | PEXIT | stop | | no semantic check yet |
 | PIXLD | stop | | no semantic check yet |
 | PLONGJMP | stop | | no semantic check yet |
 | POPC R | stop | | no semantic check yet |
 | POPC I | stop | | no semantic check yet |
 | POPC C | stop | | no semantic check yet |
-| PRET | stop | | no semantic check yet |
+| PRET | stop | | subroutine call or return: the SM86 translator inlines CALL.REL through a return address register Maxwell does not have |
 | PRMT R | stop | | no semantic check yet |
 | PRMT I | stop | | no semantic check yet |
 | PRMT C | stop | | no semantic check yet |
@@ -223,7 +223,7 @@ the cases the evidence does not cover stop with their own reason.
 | R2P C | stop | | no semantic check yet |
 | RAM | stop | | no semantic check yet |
 | RED | stop | | no semantic check yet |
-| RET | stop | | no semantic check yet |
+| RET | stop | | subroutine call or return: the SM86 translator inlines CALL.REL through a return address register Maxwell does not have |
 | RRO R | stop | | no semantic check yet |
 | RRO I | stop | | no semantic check yet |
 | RRO C | stop | | no semantic check yet |
@@ -246,7 +246,7 @@ the cases the evidence does not cover stop with their own reason.
 | SHR R | stop | | no semantic check yet |
 | SHR I | stop | | no semantic check yet |
 | SHR C | stop | | no semantic check yet |
-| SSY | stop | | no semantic check yet |
+| SSY | exact | BSSY | the control-flow pass resolves the reconvergence stack as Ryujinx's decoder does (pushes propagated into their pops); the push becomes a BSSY on the barrier of its stack depth with the same target, where the guest's lanes meet again. A push at two depths stops (tests/flow.rs) |
 | ST | stop | | no semantic check yet |
 | STG | stop | | no semantic check yet |
 | STL | stop | | no semantic check yet |
@@ -267,7 +267,7 @@ the cases the evidence does not cover stop with their own reason.
 | SUST_D | stop | | no semantic check yet |
 | SUST_B | stop | | no semantic check yet |
 | SUST | stop | | no semantic check yet |
-| SYNC | stop | | no semantic check yet |
+| SYNC | exact | BRA | for one thread a pop is a jump to the entry it pops (a BRK unwinds the SSY entries above its PBK, as Ryujinx's decoder does); Ryujinx emits a branch when the pop has one target, and the control-flow pass lowers only those, under the same guard. A pop with more than one target or none and a condition code test stop (tests/flow.rs) |
 | TEX | stop | | no semantic check yet |
 | TEX_B | stop | | no semantic check yet |
 | TEXS | stop | | no semantic check yet |
@@ -303,4 +303,4 @@ the cases the evidence does not cover stop with their own reason.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 3 exact, 1 exact and pseudo, 0 pseudo, 289 stop.
+293 forms: 12 exact, 1 exact and pseudo, 0 pseudo, 280 stop.

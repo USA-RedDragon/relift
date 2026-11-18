@@ -21,7 +21,10 @@ by case, or a stop, each with its evidence. It is written from
 `src/lower/table.rs` by `RELIFT_BLESS=1 cargo test -p relift-gpu-sm53 --test
 lowering`; the test fails while it is stale. `lower::lower` turns one
 instruction into its SM86 word, its pseudo-instruction (which the SM86
-translator takes from `Program::pseudo`) or a named stop.
+translator takes from `Program::pseudo`) or a named stop, and
+`lower::program` a whole program into an SM86 `Program` the translator
+runs unchanged, after the control-flow pass (`lower::flow`) has resolved
+the SSY/SYNC and PBK/BRK reconvergence stack into BSSY and branches.
 
 ```sh
 cargo test -p relift-gpu-sm53

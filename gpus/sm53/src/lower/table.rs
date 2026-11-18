@@ -72,6 +72,63 @@ pub fn row(op: Op, src: Src) -> Row {
                        predicate other than PT stop; operands equal envydis on every census \
                        word",
         },
+        (Op::Nop, _) => Row::Exact {
+            to: "NOP",
+            evidence: "Ryujinx's Nop emits nothing and the SM86 translator's NOP emits nothing",
+        },
+        (Op::Depbar, _) => Row::Exact {
+            to: "NOP",
+            evidence: "a scoreboard wait orders nothing a SPIR-V invocation can see: Ryujinx's \
+                       Depbar emits nothing, as the SM86 translator does for DEPBAR",
+        },
+        (Op::Bra, _) => Row::Exact {
+            to: "BRA",
+            evidence: "Ryujinx's Bra branches to the same instruction under the guard; the \
+                       target keeps its instruction (word k is Maxwell instruction k); a \
+                       condition code test and .CA, .LMT, .U stop; synthetic programs \
+                       translate whole (tests/flow.rs)",
+        },
+        (Op::Exit, _) => Row::Exact {
+            to: "EXIT",
+            evidence: "Ryujinx's Exit returns under the guard and the SM86 translator's EXIT \
+                       writes the fragment outputs of the SPH and returns (Ryujinx does the \
+                       same at its return); a condition code test and .KEEPREFCOUNT stop",
+        },
+        (Op::Kil, _) => Row::Exact {
+            to: "KILL",
+            evidence: "the same kill-thread instruction (envydis's kil, nvdisasm's KILL); the \
+                       SM86 translator demotes, as for every KILL, and Ryujinx terminates \
+                       (OpKill), which differs only in the quad's derivatives after the \
+                       kill, undefined under OpKill. An unguarded KIL ends its path: the \
+                       control-flow pass ends the invocation after it where nothing else \
+                       reaches. A condition code test stops (tests/flow.rs)",
+        },
+        (Op::Ssy | Op::Pbk, _) => Row::Exact {
+            to: "BSSY",
+            evidence: "the control-flow pass resolves the reconvergence stack as Ryujinx's \
+                       decoder does (pushes propagated into their pops); the push becomes a \
+                       BSSY on the barrier of its stack depth with the same target, where the \
+                       guest's lanes meet again. A push at two depths stops (tests/flow.rs)",
+        },
+        (Op::Sync | Op::Brk, _) => Row::Exact {
+            to: "BRA",
+            evidence: "for one thread a pop is a jump to the entry it pops (a BRK unwinds the \
+                       SSY entries above its PBK, as Ryujinx's decoder does); Ryujinx emits a \
+                       branch when the pop has one target, and the control-flow pass lowers \
+                       only those, under the same guard. A pop with more than one target or \
+                       none and a condition code test stop (tests/flow.rs)",
+        },
+        (Op::Pcnt | Op::Cont, _) => Row::Stop {
+            reason: "PCNT and CONT: no program of the census uses them",
+        },
+        (Op::Cal | Op::Ret | Op::Pret | Op::Jcal, _) => Row::Stop {
+            reason: "subroutine call or return: the SM86 translator inlines CALL.REL through a \
+                     return address register Maxwell does not have",
+        },
+        (Op::Brx | Op::Jmx | Op::Jmp, _) => Row::Stop {
+            reason: "indirect jump: its targets are in the program's constant bank 1, which the \
+                     scan does not carry",
+        },
         _ => UNCHECKED,
     }
 }

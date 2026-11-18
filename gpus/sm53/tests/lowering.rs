@@ -44,7 +44,8 @@ fn a_program_names_each_form_that_stops_once() {
     let masked = 0x0100_0000_0007_0000u64;
     let mov = masked | 0xf000;
     let exit = 0xe300_0000_0007_000fu64;
-    for w in [0u64, masked, mov, masked, 0, exit, exit, exit] {
+    let unchecked = maxwell(Op::Xmad, Src::Reg, &[]).word;
+    for w in [0u64, masked, mov, masked, unchecked, unchecked, exit, exit] {
         b.extend(w.to_le_bytes());
     }
     let p = relift_gpu_sm53::Program::parse(&b).expect("parses");
@@ -54,7 +55,7 @@ fn a_program_names_each_form_that_stops_once() {
         names,
         [
             ("MOV", 8, "MOV32I with a lane mask other than 0xf"),
-            ("EXIT", 40, "no semantic check yet")
+            ("XMAD", 40, "no semantic check yet")
         ]
     );
 }
@@ -79,7 +80,7 @@ fn maxwell(op: Op, src: Src, fields: &[(&str, u64)]) -> Inst {
         };
         w = (w & !(mask << shift)) | (v << shift);
     }
-    Inst::decode(w, 0).expect("decodes")
+    Inst::decode(w, 8).expect("decodes")
 }
 
 fn sm86_text(l: &Lowered) -> String {
@@ -220,7 +221,7 @@ fn every_checked_row_lowers_its_encodings() {
         if matches!(row(e.op, e.src), Row::Stop { .. }) {
             continue;
         }
-        let i = Inst::decode(e.bits, 0).expect("decodes");
+        let i = Inst::decode(e.bits, 8).expect("decodes");
         assert_ne!(
             lower(&i),
             Lowered::Stop("no lowering for a checked row"),

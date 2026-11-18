@@ -5,6 +5,7 @@
 use relift_gpu_sm86::translate::pseudo::{IPA_MUL, IPA_SAT};
 use relift_gpu_sm86::{Inst as Inst86, Operand, RegMods, Word};
 
+use super::flow::{self, Flow};
 use crate::form::{Op, Src};
 use crate::inst::Inst;
 
@@ -44,16 +45,86 @@ fn f(i: &Inst, name: &str) -> u64 {
     i.get(name).unwrap_or(0)
 }
 
+/// A relative SM86 branch field: the offset in bytes from the instruction
+/// after index `from` to index `to` (bits 34 to 81, in words of 4 bytes).
+fn rel(from: usize, to: usize) -> (u32, u32, u64) {
+    let off = 16 * (to as i64 - from as i64 - 1);
+    (34, 48, ((off / 4) as u64) & ((1 << 48) - 1))
+}
+
 /// The lowering of `i`, if its form has one; `None` for a form the table
-/// stops.
-pub fn lower(i: &Inst) -> Option<Lowered> {
+/// stops. The control forms need the program's control-flow pass `f`.
+pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
     Some(match (i.op(), i.enc.src) {
+        (Op::Nop | Op::Depbar, _) => Lowered::Word(word(i, 0x918, &[])),
+        (Op::Bra, _) => bra(i),
+        (Op::Exit, _) => exit(i),
+        (Op::Kil, _) => kil(i),
+        (Op::Ssy | Op::Pbk, _) => push(i, f),
+        (Op::Sync | Op::Brk, _) => pop(i, f),
         (Op::Mov, Src::Imm32) => mov32i(i),
         (Op::Mov, Src::CBuf) => mov_c(i),
         (Op::Ald, _) => ald(i),
         (Op::Ipa, _) => ipa(i),
         _ => return None,
     })
+}
+
+/// The guard of a control word: its own predicate field (bits 87 to 90)
+/// holds PT, the guard sits where every SM86 instruction has it.
+const NO_PRED: (u32, u32, u64) = (87, 4, 7);
+
+/// `BRA` with the condition code test T: SM86 `BRA` (0x947) to the same
+/// instruction under the same guard.
+fn bra(i: &Inst) -> Lowered {
+    if f(i, "Ccc") != 15 {
+        return Lowered::Stop("branch on a condition code test");
+    }
+    if f(i, "Ca") != 0 || f(i, "Lmt") != 0 || f(i, "U") != 0 {
+        return Lowered::Stop("BRA with .CA, .LMT or .U");
+    }
+    let Some(t) = flow::branch_target(i.at, i.word) else {
+        return Lowered::Stop("branch target outside the code");
+    };
+    Lowered::Word(word(i, 0x947, &[NO_PRED, rel(flow::index(i.at), t)]))
+}
+
+/// `EXIT` with the condition code test T: SM86 `EXIT` (0x94d).
+fn exit(i: &Inst) -> Lowered {
+    if f(i, "Ccc") != 15 {
+        return Lowered::Stop("EXIT on a condition code test");
+    }
+    if f(i, "KeepRefCnt") != 0 {
+        return Lowered::Stop("EXIT.KEEPREFCOUNT");
+    }
+    Lowered::Word(word(i, 0x94d, &[NO_PRED]))
+}
+
+/// `KIL` with the condition code test T: SM86 `KILL` (0x95b).
+fn kil(i: &Inst) -> Lowered {
+    if f(i, "Ccc") != 15 {
+        return Lowered::Stop("KIL on a condition code test");
+    }
+    Lowered::Word(word(i, 0x95b, &[NO_PRED]))
+}
+
+/// `SSY` and `PBK`: SM86 `BSSY` (0x945) on the barrier of the push's stack
+/// depth, to the same target.
+fn push(i: &Inst, f: Option<&Flow>) -> Lowered {
+    let k = flow::index(i.at);
+    let Some(&(b, t)) = f.and_then(|f| f.pushes.get(&k)) else {
+        return Lowered::Stop("push outside the control-flow pass");
+    };
+    Lowered::Word(word(i, 0x945, &[NO_PRED, (16, 4, u64::from(b)), rel(k, t)]))
+}
+
+/// `SYNC` and `BRK`: SM86 `BRA` to the one target the pass found.
+fn pop(i: &Inst, f: Option<&Flow>) -> Lowered {
+    let k = flow::index(i.at);
+    let Some(&t) = f.and_then(|f| f.pops.get(&k)) else {
+        return Lowered::Stop("pop outside the control-flow pass");
+    };
+    Lowered::Word(word(i, 0x947, &[NO_PRED, rel(k, t)]))
 }
 
 /// `MOV32I Rd, imm`: SM86 `MOV Rd, imm` (form 0x802) with the full lane

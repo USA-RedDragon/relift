@@ -5,8 +5,8 @@
 //! instructions ([`Inst`]) with a text form in envydis's spelling.
 //!
 //! `form.rs` and `field.rs` are written by `gen.py` from Ryujinx's decoder
-//! tables. The lowering to the translator of `relift-gpu-sm86` comes next
-//! (see the NVN1 plan). Shared types (`Sched`, `Stage`) are that crate's.
+//! tables. [`lower`] lowers programs onto the translator of
+//! `relift-gpu-sm86`. Shared types (`Sched`, `Stage`) are that crate's.
 
 pub mod bundle;
 pub mod field;
