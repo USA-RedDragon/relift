@@ -128,9 +128,13 @@ jobs:
         run: scripts/ci/tests-relift.sh
 
   tests-relift-e2e:
-    name: end-to-end tests of relift
+    name: end-to-end tests of relift (${{ matrix.part }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [slow, rest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,7 +147,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: tests-relift-e2e
+          key: tests-relift-e2e-${{ matrix.part }}
           workspaces: |
             .
 
@@ -151,7 +155,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apt-debs
-          key: apt-lavapipe-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          key: apt-lavapipe-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
           restore-keys: apt-lavapipe-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Mesa's lavapipe for the N64 picture test
@@ -161,7 +165,7 @@ jobs:
           echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
 
       - name: end-to-end tests of relift
-        run: scripts/ci/tests-relift-e2e.sh
+        run: scripts/ci/tests-relift-e2e.sh ${{ matrix.part }}
 
   nds-timing-sdk:
     name: Nintendo DS timing test ROM, devkitPro build
