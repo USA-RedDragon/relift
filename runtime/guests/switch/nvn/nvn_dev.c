@@ -244,19 +244,13 @@ static int check_settings(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-/**
- * @brief Writes into the guest's device object at dev the fields the
- * driver's nvnTextureBuilderGetStorageClass reads: the flags word, the
- * NvRmGpuDevice, and the bytes the driver's own nvnDeviceInitialize leaves
- * in the others (the layer keeps its own device state, so it never reads the
- * guest's object).
- */
-static int device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev)
+int nvn_device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev)
 {
+    if (!g_layout)
+        return rl_guest_fatal(c, "nvn", "the build read no NVN2 driver layout");
     nvn_device *d = (nvn_device *)nvn_obj_get(dev, NVN_DEVICE);
     if (!d)
-        return rl_guest_fatal(c, "nvn", "texture builder of device 0x%llx, which is not initialized",
-                              (unsigned long long)dev);
+        return rl_guest_fatal(c, "nvn", "device 0x%llx is not initialized", (unsigned long long)dev);
     if (d->fields)
         return RL_OK;
     int rc = check_settings(c, mem);
@@ -269,10 +263,26 @@ static int device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev)
         rl_st32(mem, dev + g_layout->flags, d->flags);
     if (g_layout->gpu_device != RL_NVN_NONE)
         rl_st64(mem, dev + g_layout->gpu_device, gpu);
-    for (uint32_t i = 0; i < g_layout->nfields; i++)
-        memcpy(mem + dev + g_layout->fields[i].off, g_layout->fields[i].bytes, g_layout->fields[i].len);
+    for (uint32_t i = 0; i < g_layout->nfields; i++) {
+        const struct rl_nvn_field *f = &g_layout->fields[i];
+        if (f->info < 0) {
+            memcpy(mem + dev + f->off, f->bytes, f->len);
+            continue;
+        }
+        uint32_t v = 0;
+        if ((rc = nvn_gpu_info_u32(c, mem, f->info, &v)) != RL_OK)
+            return rc;
+        rl_st32(mem, dev + f->off, v);
+    }
     d->fields = true;
     return RL_OK;
+}
+
+int nvn_builder_device_fields(rl_ctx *c, uint8_t *mem, uint64_t builder)
+{
+    if (!g_layout)
+        return rl_guest_fatal(c, "nvn", "the build read no NVN2 driver layout");
+    return nvn_device_fields(c, mem, rl_ld64(mem, builder + g_layout->builder_device));
 }
 
 /** @brief nvnTextureBuilderGetStorageClass(const NVNtextureBuilder *): the driver's own function, on the fields it reads. */
@@ -283,7 +293,7 @@ uint64_t nvnh_nvnTextureBuilderGetStorageClass(rl_ctx *c, uint8_t *mem)
                                         nvn_version_name(), nvn_layout_error() ? ": " : "",
                                         nvn_layout_error() ? nvn_layout_error() : "");
     uint64_t builder = c->x[0], cls = 0;
-    int rc = device_fields(c, mem, rl_ld64(mem, builder + g_layout->builder_device));
+    int rc = nvn_builder_device_fields(c, mem, builder);
     if (rc != RL_OK || (rc = nvn_guest_call(c, mem, g_layout->storage_class, &builder, 1, &cls)) != RL_OK)
         return (uint64_t)rc;
     trace("nvnTextureBuilderGetStorageClass(0x%llx) = 0x%llx", (unsigned long long)builder, (unsigned long long)cls);
@@ -512,6 +522,54 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
     return p != NULL;
 }
 
+/**
+ * @brief Writes gpu into every field where the driver keeps a GPU address of
+ * the guest's pool object at pool: the layer maps a pool once, so each kind of
+ * mapping the console makes of it is that one range.
+ */
+static void pool_ranges(uint8_t *mem, uint64_t pool, uint64_t gpu)
+{
+    rl_st64(mem, pool + g_layout->pool_gpu, gpu);
+    for (uint32_t i = 0; i < g_layout->npool_ranges; i++)
+        rl_st64(mem, pool + g_layout->pool_ranges[i], gpu);
+}
+
+/**
+ * @brief Writes into the guest's pool object at pool, made from builder, the
+ * fields the driver's own texture code reads from a pool: what the driver's
+ * own nvnMemoryPoolInitialize leaves constant, then the device, flags, GPU
+ * addresses, mapping handles (the pool's own address, see
+ * nvnh_NvRmGpuMappingModify), storage and size (nothing when the build read
+ * no pool layout).
+ */
+static int pool_fields(rl_ctx *c, uint8_t *mem, uint64_t pool, uint64_t builder)
+{
+    const struct rl_nvn_layout *l = g_layout;
+    nvn_pool *p = (nvn_pool *)nvn_obj_get(pool, NVN_POOL);
+    if (!l || !l->pool_fields || !p)
+        return RL_OK;
+    uint64_t dev = 0;
+    int rc = nvn_driver_call(c, mem, "nvnMemoryPoolBuilderGetDevice", &builder, 1, &dev);
+    if (rc != RL_OK)
+        return rc;
+    bool virt = p->flags & NVN_POOL_VIRTUAL;
+    const struct rl_nvn_field *f = virt ? l->pool_virtual : l->pool_fields;
+    uint32_t n = virt ? l->npool_virtual : l->npool_fields;
+    for (uint32_t i = 0; i < n; i++) {
+        if (f[i].info >= 0)
+            return rl_guest_fatal(c, "nvn", "the driver's pool field 0x%x comes from the GPU information", f[i].off);
+        memcpy(mem + pool + f[i].off, f[i].bytes, f[i].len);
+    }
+    rl_st64(mem, pool + l->pool_device, dev);
+    rl_st32(mem, pool + l->pool_flags, p->flags);
+    pool_ranges(mem, pool, pool_gpu(p));
+    for (uint32_t i = 0; i < l->npool_mappings; i++)
+        rl_st64(mem, pool + l->pool_mappings[i], pool);
+    rl_st64(mem, pool + l->pool_memory, p->memory);
+    rl_st64(mem, pool + l->pool_size, p->size);
+    return RL_OK;
+}
+
 /** @brief nvnMemoryPoolInitialize(NVNmemoryPool *, const NVNmemoryPoolBuilder *): NVNboolean. */
 uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
 {
@@ -524,6 +582,8 @@ uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
     if (rc != RL_OK)
         return (uint64_t)rc;
     bool ok = nvn_pool_make(pool, memory, size, (uint32_t)flags);
+    if (ok && (rc = pool_fields(c, mem, pool, builder)) != RL_OK)
+        return (uint64_t)rc;
     trace("nvnMemoryPoolInitialize(0x%llx, memory 0x%llx, size 0x%llx, flags 0x%x)", (unsigned long long)pool,
           (unsigned long long)memory, (unsigned long long)size, (unsigned)flags);
     c->x[0] = ok;
@@ -679,9 +739,46 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
         p->phys = phys;
         p->mapped = true;
     }
+    if (g_layout->pool_fields)
+        pool_ranges(mem, pool, p->im.gpu);
     trace("nvnMemoryPoolMapVirtual(0x%llx, %d requests): GPU 0x%llx over guest 0x%llx", (unsigned long long)pool, n,
           (unsigned long long)p->im.gpu, (unsigned long long)p->memory);
     c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief NvRmGpuMappingModify(NvRmGpuMapping *, uint64_t offset, uint64_t
+ * size, const params *): NvError. The layer owns every pool's GPU mapping and
+ * leaves the pool's own address where the driver keeps its mapping handles,
+ * so the only handles the driver's kept code passes are pools. The driver's
+ * own nvnTextureInitialize calls it to give a compressible pool's pages
+ * under a texture the texture's page kind (the u32 at params); kinds only
+ * choose how the console's GPU compresses the pages, which the host does
+ * not model, so it checks the range (within the pool rounded up to the 64
+ * KiB big page the driver aligns to) and succeeds. A NULL params is the SDK's
+ * own NvError 4 (bad parameter); a handle that is no pool stops.
+ */
+uint64_t nvnh_NvRmGpuMappingModify(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t h = c->x[0], off = c->x[1], size = c->x[2], params = c->x[3];
+    nvn_pool *p = (nvn_pool *)nvn_obj_get(h, NVN_POOL);
+    if (!p)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "NvRmGpuMappingModify on 0x%llx, which is no memory pool mapping of the NVN2 layer",
+                                        (unsigned long long)h);
+    if (!params) {
+        c->x[0] = 4;
+        return nvn_ret(c);
+    }
+    uint64_t end = (p->size + 0xffffu) & ~(uint64_t)0xffff;
+    if (off >= p->size || size > end - off)
+        return (uint64_t)rl_guest_fatal(c, "nvn",
+                                        "NvRmGpuMappingModify(pool 0x%llx): 0x%llx bytes at 0x%llx, outside its 0x%llx bytes",
+                                        (unsigned long long)h, (unsigned long long)size, (unsigned long long)off,
+                                        (unsigned long long)p->size);
+    trace("NvRmGpuMappingModify(pool 0x%llx, 0x%llx bytes at 0x%llx, kind 0x%x)", (unsigned long long)h,
+          (unsigned long long)size, (unsigned long long)off, (unsigned)rl_ld32(mem, params));
+    c->x[0] = 0;
     return nvn_ret(c);
 }
 

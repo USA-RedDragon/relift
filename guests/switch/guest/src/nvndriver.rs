@@ -1,10 +1,11 @@
 //! What the runtime must know of a Switch 2 program's NVN2 driver (its SDK
-//! module) to run the driver's own code for a texture's storage class.
+//! module) to run the driver's own texture code: storage classes, texture
+//! initialization and the getters that read a texture back.
 //!
 //! The runtime keeps its own device state and never runs the driver's
 //! `nvnDeviceInitialize`, so the driver's device object holds none of the
-//! fields `nvnTextureBuilderGetStorageClass` reads. This reads the driver
-//! itself, without running it:
+//! fields that code reads. This reads the driver itself, without running
+//! it:
 //!
 //! * [`proc_table`] finds the driver's proc table (sorted names, their
 //!   offsets into a string pool, and a pointer array) from the constants
@@ -12,9 +13,11 @@
 //! * [`device_layout`] runs the lifted code of the procs it needs over
 //!   abstract values ([`Abstract`]): the device offsets the storage class
 //!   getter reads, the one it hands `NvRmGpuDeviceChooseKind`, the flags
-//!   word `nvnDeviceGetFlags` returns, and the constant the driver's
-//!   `nvnDeviceInitialize` leaves in each other field it reads on the paths
-//!   that return true.
+//!   word `nvnDeviceGetFlags` returns, and every device field the driver's
+//!   `nvnDeviceInitialize` leaves a known value in on the paths that return
+//!   true: a constant, or a word it copies from what
+//!   `NvRmGpuDeviceGetInfo` returns. Each field the storage class getter
+//!   reads must be one of them.
 //!
 //! The abstract run assumes calls it cannot follow (through a register the
 //! run does not know) write no memory it tracks; a field such a call could
@@ -1233,18 +1236,86 @@ pub const READ_ONLY_IMPORTS: [&str; 5] = ["memcmp", "strcmp", "strlen", "strncmp
 /// few hundred.
 pub const PURITY_BUDGET: usize = 20_000;
 
-/// A device field and the bytes the driver's `nvnDeviceInitialize` leaves
-/// in it.
+/// What the driver's `nvnDeviceInitialize` leaves in a device field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Fill {
+    /// These bytes.
+    Bytes(Vec<u8>),
+    /// The 4 bytes at this offset of what `NvRmGpuDeviceGetInfo` returns
+    /// for the device's GPU.
+    Info(u32),
+}
+
+/// A device field and what the driver's `nvnDeviceInitialize` leaves in
+/// it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Field {
     /// Its offset in the device object.
     pub off: u32,
-    /// The bytes.
-    pub bytes: Vec<u8>,
+    /// Its value.
+    pub fill: Fill,
+}
+
+/// The fields `nvnDeviceInitialize` leaves a known value in, in `done`,
+/// leaving out the bytes in `skip` (offset and length): runs of constant
+/// bytes, and words copied from what `NvRmGpuDeviceGetInfo` returns.
+fn known_fields(done: &State, skip: &[(i64, i64)]) -> Vec<Field> {
+    let mut out: Vec<Field> = Vec::new();
+    let Some(m) = done.mem.get(&Obj::Arg(0)) else {
+        return out;
+    };
+    let skipped = |at: i64| skip.iter().any(|(o, n)| at >= *o && at < o + n);
+    for (k, c) in m {
+        match c {
+            Cell::Bytes(b) => {
+                for (i, x) in b.iter().enumerate() {
+                    let at = k + i as i64;
+                    if skipped(at) {
+                        continue;
+                    }
+                    match out.last_mut() {
+                        Some(Field {
+                            off,
+                            fill: Fill::Bytes(run),
+                        }) if i64::from(*off) + run.len() as i64 == at => run.push(*x),
+                        _ => out.push(Field {
+                            off: at as u32,
+                            fill: Fill::Bytes(vec![*x]),
+                        }),
+                    }
+                }
+            }
+            Cell::Val(V::P(Obj::At(o, info), 0), 4)
+                if matches!(&**o, Obj::Ret(n) if n == "NvRmGpuDeviceGetInfo")
+                    && !skipped(*k)
+                    && u32::try_from(*info).is_ok() =>
+            {
+                out.push(Field {
+                    off: *k as u32,
+                    fill: Fill::Info(*info as u32),
+                });
+            }
+            Cell::Val(..) => {}
+        }
+    }
+    out
+}
+
+/// Whether `fields` set every byte of `len` at `off`.
+fn covered(fields: &[Field], off: i64, len: u32) -> bool {
+    (off..off + i64::from(len)).all(|at| {
+        fields.iter().any(|f| {
+            let n = match &f.fill {
+                Fill::Bytes(b) => b.len() as i64,
+                Fill::Info(_) => 4,
+            };
+            at >= i64::from(f.off) && at < i64::from(f.off) + n
+        })
+    })
 }
 
 /// What the runtime writes into a device object before it runs the
-/// driver's `nvnTextureBuilderGetStorageClass` on a builder of it.
+/// driver's own texture code on a builder or texture of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceLayout {
     /// The image offset of `nvnTextureBuilderGetStorageClass`.
@@ -1258,7 +1329,7 @@ pub struct DeviceLayout {
     /// `NvRmGpuDeviceChooseKind`; none when it calls no such import (NVN1
     /// chooses the kind from device fields).
     pub gpu_device: Option<u32>,
-    /// The other fields the getter reads, with their values.
+    /// Every other field `nvnDeviceInitialize` leaves a known value in.
     pub fields: Vec<Field>,
     /// The image offset of the word holding the hook `nvnDeviceInitialize`
     /// reads its settings through (a function of the setting's name that
@@ -1275,6 +1346,10 @@ pub struct DeviceLayout {
     /// reads no device field directly (NVN1 drivers check through helpers
     /// behind a lock).
     pub pool_page_info: Option<u32>,
+    /// Where the driver keeps a memory pool's state, or why it could not be
+    /// read (older NVN1 drivers keep a pool's buffer address behind helpers,
+    /// not in a field their getter returns).
+    pub pool: Result<PoolLayout, String>,
 }
 
 fn proc_addr(procs: &[(String, u64)], name: &str) -> Result<u64, String> {
@@ -1482,6 +1557,207 @@ fn pool_page_info(
     }
 }
 
+/// `NVNmemoryPoolFlags` of a pool with no CPU access, cached GPU access
+/// and virtual pages (`nvnMemoryPoolInitialize` takes the virtual path).
+const POOL_VIRTUAL: u128 = 0x221;
+/// `NVNmemoryPoolFlags` of a pool with cached CPU access, no GPU access and
+/// physical pages (the path that maps no GPU range).
+const POOL_PHYSICAL: u128 = 0x10c;
+
+/// Where the driver keeps a memory pool's state, and what its
+/// `nvnMemoryPoolInitialize` leaves in the rest of the object. The runtime
+/// keeps its own pools; it writes these fields so the driver's own texture
+/// code, which reads a texture's pool, runs on its pools.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PoolLayout {
+    /// The offset of the device pointer.
+    pub device: u32,
+    /// The offset of the flags word (`nvnMemoryPoolGetFlags`).
+    pub flags: u32,
+    /// The offset of the GPU address (`nvnMemoryPoolGetBufferAddress`).
+    pub gpu: u32,
+    /// The offsets of every GPU address the driver keeps for the pool (one
+    /// per kind of mapping it makes of the storage, `gpu` among them): the
+    /// 8-byte fields `nvnMemoryPoolFinalize` clears without handing them to
+    /// an import (the mapping handles it hands the unmap). The runtime keeps
+    /// one range per pool and writes its address into each.
+    pub ranges: Vec<u32>,
+    /// The offsets of the pool's GPU mapping handles: the fields
+    /// `nvnMemoryPoolFinalize` hands `NvRmGpuMappingClose`. The runtime
+    /// owns the pool's GPU mapping; it writes a handle of its own into each,
+    /// which its `NvRmGpuMappingModify` answers.
+    pub mappings: Vec<u32>,
+    /// The offset of the storage pointer (`nvnMemoryPoolMap`).
+    pub memory: u32,
+    /// The offset of the size (`nvnMemoryPoolGetSize`).
+    pub size: u32,
+    /// The constant bytes the init leaves in a virtual pool.
+    pub virtual_fields: Vec<Field>,
+    /// The constant bytes the init leaves in any other pool (what it leaves
+    /// in a physical one: the paths that map GPU ranges leave the range
+    /// fields unknown, and the runtime writes its own range).
+    pub fields: Vec<Field>,
+}
+
+/// The offset of the one field a getter of one pointer argument loads
+/// `len` bytes from, ignoring paths that return constants.
+fn loaded_field(
+    a: &Abstract<'_>,
+    procs: &[(String, u64)],
+    name: &str,
+    len: u32,
+) -> Result<i64, String> {
+    let mut t = Trace::default();
+    let exits = a.run(proc_addr(procs, name)?, a.entry(), &mut t)?;
+    let offs: Vec<i64> = exits
+        .iter()
+        .filter_map(|s| match s.reg(0) {
+            V::K(_) => None,
+            V::P(Obj::At(o, off), 0) if **o == Obj::Arg(0) => Some(Some(*off)),
+            V::U => Some(
+                match t
+                    .loads
+                    .iter()
+                    .filter(|l| l.obj == Obj::Arg(0) && l.len == len)
+                    .collect::<Vec<_>>()[..]
+                {
+                    [l] => Some(l.off),
+                    _ => None,
+                },
+            ),
+            _ => Some(None),
+        })
+        .collect::<Option<Vec<i64>>>()
+        .ok_or_else(|| format!("nvn driver: {name} does not return a field of its argument"))?;
+    match offs.as_slice() {
+        [first, rest @ ..] if rest.iter().all(|o| o == first) => Ok(*first),
+        _ => Err(format!("nvn driver: {name} returns no single field")),
+    }
+}
+
+/// The merge of the states `nvnMemoryPoolInitialize` returns true with on a
+/// builder whose flags word holds `flags`.
+fn pool_initialized(
+    a: &Abstract<'_>,
+    init: u64,
+    builder_flags: i64,
+    flags: u128,
+) -> Result<State, String> {
+    let mut s = a.entry();
+    s.store(&Obj::Arg(1), builder_flags, 4, &V::K(flags));
+    let mut t = Trace::default();
+    let mut ok = a
+        .run(init, s, &mut t)?
+        .into_iter()
+        .filter(|s| !matches!(s.reg(0), V::K(k) if k & 0xff == 0));
+    let first = ok.next().ok_or_else(|| {
+        format!("nvn driver: no path of nvnMemoryPoolInitialize returns true for flags 0x{flags:x}")
+    })?;
+    Ok(ok.fold(first, |x, y| x.merge(&y)))
+}
+
+/// The 8-byte pool fields `nvnMemoryPoolFinalize` writes and hands no
+/// import, and the fields it hands `NvRmGpuMappingClose`.
+fn pool_ranges(a: &Abstract<'_>, procs: &[(String, u64)]) -> Result<(Vec<i64>, Vec<i64>), String> {
+    let mut t = Trace::default();
+    let exits = a.run(
+        proc_addr(procs, "nvnMemoryPoolFinalize")?,
+        a.entry(),
+        &mut t,
+    )?;
+    let pool_field = |v: &V| match v {
+        V::P(Obj::At(o, off), _) if **o == Obj::Arg(0) => Some(*off),
+        _ => None,
+    };
+    let handed: Vec<i64> = t
+        .imports
+        .iter()
+        .flat_map(|(_, args)| args.iter())
+        .filter_map(pool_field)
+        .collect();
+    let mut mappings: Vec<i64> = t
+        .imports
+        .iter()
+        .filter(|(n, _)| n == "NvRmGpuMappingClose")
+        .filter_map(|(_, args)| args.first().and_then(pool_field))
+        .collect();
+    mappings.sort_unstable();
+    mappings.dedup();
+    let mut out: Vec<i64> = exits
+        .iter()
+        .filter_map(|s| s.mem.get(&Obj::Arg(0)))
+        .flat_map(|m| m.iter().filter(|(_, c)| c.len() == 8).map(|(k, _)| *k))
+        .filter(|k| !handed.contains(k))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    Ok((out, mappings))
+}
+
+/// Reads where the driver keeps a memory pool's state.
+fn pool_layout(a: &Abstract<'_>, procs: &[(String, u64)]) -> Result<PoolLayout, String> {
+    let gpu = getter_offset(
+        a,
+        proc_addr(procs, "nvnMemoryPoolGetBufferAddress")?,
+        "nvnMemoryPoolGetBufferAddress",
+    )?;
+    let size = getter_offset(
+        a,
+        proc_addr(procs, "nvnMemoryPoolGetSize")?,
+        "nvnMemoryPoolGetSize",
+    )?;
+    let memory = loaded_field(a, procs, "nvnMemoryPoolMap", 8)?;
+    let flags = loaded_field(a, procs, "nvnMemoryPoolGetFlags", 4)?;
+    let builder_device = getter_offset(
+        a,
+        proc_addr(procs, "nvnMemoryPoolBuilderGetDevice")?,
+        "nvnMemoryPoolBuilderGetDevice",
+    )?;
+    let builder_flags = loaded_field(a, procs, "nvnMemoryPoolBuilderGetFlags", 4)?;
+    let init = proc_addr(procs, "nvnMemoryPoolInitialize")?;
+    let virt = pool_initialized(a, init, builder_flags, POOL_VIRTUAL)?;
+    let phys = pool_initialized(a, init, builder_flags, POOL_PHYSICAL)?;
+    let dev = V::P(Obj::At(Box::new(Obj::Arg(1)), builder_device), 0);
+    let device: Vec<i64> = virt
+        .mem
+        .get(&Obj::Arg(0))
+        .map(|m| {
+            m.iter()
+                .filter(|(_, c)| **c == Cell::Val(dev.clone(), 8))
+                .map(|(k, _)| *k)
+                .collect()
+        })
+        .unwrap_or_default();
+    let device = match device.as_slice() {
+        [d] => *d,
+        _ => {
+            return Err(format!(
+                "nvn driver: nvnMemoryPoolInitialize stores the builder's device in {} pool fields",
+                device.len()
+            ));
+        }
+    };
+    let (ranges, mappings) = pool_ranges(a, procs)?;
+    if !ranges.contains(&gpu) {
+        return Err(format!(
+            "nvn driver: nvnMemoryPoolFinalize does not clear the GPU address at 0x{gpu:x} (it clears {ranges:x?})"
+        ));
+    }
+    let mut skip = vec![(device, 8), (flags, 4), (memory, 8), (size, 8)];
+    skip.extend(ranges.iter().chain(&mappings).map(|r| (*r, 8)));
+    Ok(PoolLayout {
+        device: device as u32,
+        flags: flags as u32,
+        gpu: gpu as u32,
+        ranges: ranges.iter().map(|r| *r as u32).collect(),
+        mappings: mappings.iter().map(|r| *r as u32).collect(),
+        memory: memory as u32,
+        size: size as u32,
+        virtual_fields: known_fields(&virt, &skip),
+        fields: known_fields(&phys, &skip),
+    })
+}
+
 /// Reads the device layout of the driver in `image`.
 ///
 /// # Errors
@@ -1539,21 +1815,18 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
 
     let (a, done, ti) = initialized(&a, &procs)?;
     let settings_hook = a.settings_hook.filter(|h| *h != u64::MAX);
-    let dev = Obj::Arg(0);
-    let mut fields = Vec::new();
+    let skip: Vec<(i64, i64)> = [(flags, 4), (gpu_device, 8)]
+        .into_iter()
+        .filter_map(|(o, n)| o.map(|o| (o, n)))
+        .collect();
+    let fields = known_fields(&done, &skip);
     for (off, len) in wanted {
-        match done.load(&dev, off, len) {
-            V::K(k) => fields.push(Field {
-                off: off as u32,
-                bytes: (0..len).map(|i| (k >> (8 * i)) as u8).collect(),
-            }),
-            _ => {
-                return Err(format!(
-                    "nvn driver: nvnTextureBuilderGetStorageClass reads device field 0x{off:x} ({len} bytes), \
-                     which nvnDeviceInitialize leaves no constant in ({} calls it could not follow)",
-                    ti.unknown_targets
-                ));
-            }
+        if !covered(&fields, off, len) {
+            return Err(format!(
+                "nvn driver: nvnTextureBuilderGetStorageClass reads device field 0x{off:x} ({len} bytes), \
+                     which nvnDeviceInitialize leaves no known value in ({} calls it could not follow)",
+                ti.unknown_targets
+            ));
         }
     }
     let mut settings: Vec<String> = ti.settings.iter().map(|(_, k)| k.clone()).collect();
@@ -1561,7 +1834,9 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
     settings.dedup();
     let integers = integers(&a, &done, &procs)?;
     let pool_page_info = pool_page_info(&a, &procs, &integers)?;
+    let pool = pool_layout(&a, &procs);
     Ok(DeviceLayout {
+        pool,
         integers,
         pool_page_info,
         storage_class,
@@ -1596,6 +1871,15 @@ mod tests {
     const SET_DEVICE: u32 = 0x500;
     const VIEW_COMPARE: u32 = 0x540;
     const MEMCMP_STUB: u32 = 0x580;
+    const POOL_BUF: u32 = 0x600;
+    const POOL_SIZE: u32 = 0x608;
+    const POOL_FLAGS: u32 = 0x610;
+    const POOL_MAP: u32 = 0x618;
+    const POOL_BUILDER_DEVICE: u32 = 0x630;
+    const POOL_BUILDER_FLAGS: u32 = 0x638;
+    const POOL_INIT: u32 = 0x640;
+    const POOL_FINALIZE: u32 = 0x680;
+    const CLOSE_STUB: u32 = 0x6c0;
     const POOL: u32 = 0x1600;
     const OFFS: u32 = 0x1800;
     const SETTING: u32 = 0x1901;
@@ -1608,6 +1892,7 @@ mod tests {
     const INFO_GOT: u32 = 0x21a0;
     const MEMCPY_GOT: u32 = 0x21b0;
     const MEMCMP_GOT: u32 = 0x21c0;
+    const CLOSE_GOT: u32 = 0x21d0;
     const TABLE: u32 = 0x2200;
 
     fn movz_x(rd: u32, imm: u32) -> u32 {
@@ -1790,6 +2075,67 @@ mod tests {
             &[movz_x(2, 0x20), bl(VIEW_COMPARE + 4, MEMCMP_STUB), RET],
         );
 
+        code(&mut text, POOL_BUF, &[ldr_x(0, 0, 24), RET]);
+        code(&mut text, POOL_SIZE, &[ldr_x(0, 0, 56), RET]);
+        code(&mut text, POOL_FLAGS, &[ldr_w(0, 0, 16), RET]);
+        let m = POOL_MAP;
+        code(
+            &mut text,
+            m,
+            &[
+                ldrb(8, 0, 16),
+                cbz_w(8, m + 4, m + 16),
+                movz_x(0, 0),
+                RET,
+                ldr_x(0, 0, 48),
+                RET,
+            ],
+        );
+        code(&mut text, POOL_BUILDER_DEVICE, &[ldr_x(0, 0, 8), RET]);
+        code(&mut text, POOL_BUILDER_FLAGS, &[ldr_w(0, 0, 4), RET]);
+        let i = POOL_INIT;
+        code(
+            &mut text,
+            i,
+            &[
+                ldr_x(9, 1, 8),
+                str_x(9, 0, 8),
+                ldr_w(8, 1, 4),
+                str_w(8, 0, 16),
+                cmp_w(8, 0x221),
+                b_eq(i + 20, i + 40),
+                movz_w(10, 0),
+                str_w(10, 0, 0),
+                movz_w(0, 1),
+                RET,
+                movz_w(10, 1),
+                str_w(10, 0, 0),
+                movz_w(11, 0),
+                str_w(11, 0, 0x20),
+                movz_w(0, 1),
+                RET,
+            ],
+        );
+        let f = POOL_FINALIZE;
+        code(
+            &mut text,
+            f,
+            &[
+                MOV_X19_X0,
+                ldr_x(0, 19, 112),
+                bl(f + 8, CLOSE_STUB),
+                movz_x(9, 0),
+                str_x(9, 19, 112),
+                str_x(9, 19, 24),
+                str_x(9, 19, 40),
+                RET,
+            ],
+        );
+        code(
+            &mut text,
+            CLOSE_STUB,
+            &[movz_x(16, CLOSE_GOT), ldr_x(17, 16, 0), BR_X17],
+        );
         let mut names: Vec<(String, u32)> =
             (0..16).map(|k| (format!("Aaa{k:02}"), FILLER)).collect();
         if !nvn1 {
@@ -1798,6 +2144,17 @@ mod tests {
         names.extend([
             ("DeviceGetInteger".to_string(), GET_INT),
             ("DeviceInitialize".to_string(), INIT),
+            (
+                "MemoryPoolBuilderGetDevice".to_string(),
+                POOL_BUILDER_DEVICE,
+            ),
+            ("MemoryPoolBuilderGetFlags".to_string(), POOL_BUILDER_FLAGS),
+            ("MemoryPoolFinalize".to_string(), POOL_FINALIZE),
+            ("MemoryPoolGetBufferAddress".to_string(), POOL_BUF),
+            ("MemoryPoolGetFlags".to_string(), POOL_FLAGS),
+            ("MemoryPoolGetSize".to_string(), POOL_SIZE),
+            ("MemoryPoolInitialize".to_string(), POOL_INIT),
+            ("MemoryPoolMap".to_string(), POOL_MAP),
             ("MemoryPoolMapVirtual".to_string(), MAP),
         ]);
         if !nvn1 {
@@ -1825,7 +2182,7 @@ mod tests {
         }
         put(&mut rodata, SETTING as usize - RODATA, b"TestSetting");
         let dynstr =
-            b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0NvRmGpuDeviceGetInfo\0memcpy\0memcmp\0";
+            b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0NvRmGpuDeviceGetInfo\0memcpy\0memcmp\0NvRmGpuMappingClose\0";
         put(&mut rodata, DYNSTR, dynstr);
         let sym = |name: u32, shndx: u16, value: u64| {
             let mut e = [0u8; 24];
@@ -1840,6 +2197,7 @@ mod tests {
         put(&mut rodata, DYNSYM + 72, &sym(52, 0, 0));
         put(&mut rodata, DYNSYM + 96, &sym(73, 0, 0));
         put(&mut rodata, DYNSYM + 120, &sym(80, 0, 0));
+        put(&mut rodata, DYNSYM + 144, &sym(87, 0, 0));
         let mut rela: Vec<(u64, u64, u64)> = vec![(u64::from(TABLE_WORD), 1027, u64::from(TABLE))];
         for (k, (_, a)) in names.iter().enumerate() {
             rela.push((u64::from(TABLE) + 8 * k as u64, 1027, u64::from(*a)));
@@ -1848,6 +2206,7 @@ mod tests {
         rela.push((u64::from(INFO_GOT), (3 << 32) | 1026, 0));
         rela.push((u64::from(MEMCPY_GOT), (4 << 32) | 1026, 0));
         rela.push((u64::from(MEMCMP_GOT), (5 << 32) | 1026, 0));
+        rela.push((u64::from(CLOSE_GOT), (6 << 32) | 1026, 0));
         for (k, (o, i, a)) in rela.iter().enumerate() {
             let at = RELA + 24 * k;
             put(&mut rodata, at, &o.to_le_bytes());
@@ -1868,7 +2227,7 @@ mod tests {
             text,
             rodata,
             data,
-            dyn_extents: [(DYNSTR as u32, dynstr.len() as u32), (DYNSYM as u32, 144)],
+            dyn_extents: [(DYNSTR as u32, dynstr.len() as u32), (DYNSYM as u32, 168)],
             ..NsoSpec::default()
         }))
         .expect("the fixture parses");
@@ -1880,7 +2239,7 @@ mod tests {
     fn the_proc_table_comes_from_the_loaders_constants() {
         let img = driver(true);
         let t = proc_table(&img).expect("a table");
-        assert_eq!(t.len(), 23);
+        assert_eq!(t.len(), 31);
         assert_eq!(t[0], ("nvnAaa00".to_string(), u64::from(FILLER)));
         assert!(t.contains(&(
             "nvnTextureBuilderGetStorageClass".to_string(),
@@ -1889,7 +2248,7 @@ mod tests {
     }
 
     #[test]
-    fn the_layout_names_the_fields_the_getter_reads_with_the_inits_values() {
+    fn the_layout_carries_every_field_the_init_leaves_known() {
         let l = device_layout(&driver(true)).expect("a layout");
         assert_eq!(l.storage_class, u64::from(STORAGE_CLASS));
         assert_eq!(
@@ -1901,16 +2260,50 @@ mod tests {
             [
                 Field {
                     off: 0x100,
-                    bytes: vec![6, 0, 0, 0]
+                    fill: Fill::Bytes(vec![6, 0, 0, 0, 1])
                 },
                 Field {
-                    off: 0x104,
-                    bytes: vec![1]
+                    off: 0x300,
+                    fill: Fill::Info(708)
                 },
             ]
         );
         assert_eq!(l.settings_hook, Some(u64::from(HOOK)));
         assert_eq!(l.settings, ["TestSetting"]);
+    }
+
+    #[test]
+    fn the_pool_layout_comes_from_the_getters_and_the_pool_init() {
+        let p = device_layout(&driver(true))
+            .expect("a layout")
+            .pool
+            .expect("a pool layout");
+        assert_eq!(
+            (p.device, p.flags, p.gpu, p.memory, p.size),
+            (8, 16, 24, 48, 56)
+        );
+        assert_eq!(p.ranges, [24, 40]);
+        assert_eq!(p.mappings, [112]);
+        assert_eq!(
+            p.virtual_fields,
+            [
+                Field {
+                    off: 0,
+                    fill: Fill::Bytes(vec![1, 0, 0, 0])
+                },
+                Field {
+                    off: 0x20,
+                    fill: Fill::Bytes(vec![0, 0, 0, 0])
+                },
+            ]
+        );
+        assert_eq!(
+            p.fields,
+            [Field {
+                off: 0,
+                fill: Fill::Bytes(vec![0, 0, 0, 0])
+            }]
+        );
     }
 
     #[test]

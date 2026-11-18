@@ -1,16 +1,17 @@
 //! The NVN driver facts a Switch or Switch 2 build hands the runtime (see
 //! `relift_switch::nvndriver`): the driver's version, which of its procs
 //! are pure enough to run as the game's own lifted code, and what to write
-//! into a device object before the runtime runs the driver's own
-//! `nvnTextureBuilderGetStorageClass`. The build writes them to
-//! `c/nvn_driver.c`, which registers them before `main`.
+//! into device and memory pool objects before the runtime runs the driver's
+//! own texture code. The build writes them to `c/nvn_driver.c`, which
+//! registers them before `main`.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use relift_cpu_arm64::frontend::Arm64;
 use relift_switch::nvndriver::{
-    DeviceLayout, Image, Integer, device_integers, device_layout, proc_table, purity,
+    DeviceLayout, Field, Fill, Image, Integer, PoolLayout, device_integers, device_layout,
+    proc_table, purity,
 };
 use relift_switch::program::Placed;
 
@@ -97,6 +98,10 @@ pub fn read(image: &Image, img: &[u8]) -> Result<Driver, String> {
             api.0, api.1
         )
     })?;
+    let layout = match layout {
+        Ok(DeviceLayout { pool: Err(e), .. }) if generation == Generation::Nvn2 => Err(e),
+        l => l,
+    };
     Ok(Driver {
         generation,
         api,
@@ -154,12 +159,15 @@ fn or_none(v: Option<u32>) -> String {
 pub fn c_text(d: &Driver, base: u64) -> String {
     let mut s = String::from(
         "#include <stdint.h>\n\
-         struct rl_nvn_field { uint32_t off, len; const uint8_t *bytes; };\n\
+         struct rl_nvn_field { uint32_t off, len; const uint8_t *bytes; int32_t info; };\n\
          struct rl_nvn_layout {\n    uint64_t storage_class, settings_hook;\n    \
          uint32_t builder_device, flags, gpu_device, nfields, nsettings;\n    \
          const struct rl_nvn_field *fields;\n    const char *const *settings;\n    \
          uint32_t nints;\n    const int32_t *ints;\n    const uint8_t *int_device;\n    \
-         uint32_t pool_page_info;\n};\n\
+         uint32_t pool_page_info;\n    \
+         uint32_t pool_device, pool_flags, pool_gpu, pool_memory, pool_size, npool_virtual, npool_fields;\n    \
+         const struct rl_nvn_field *pool_virtual, *pool_fields;\n    \
+         uint32_t npool_ranges, npool_mappings;\n    const uint32_t *pool_ranges, *pool_mappings;\n};\n\
          struct rl_nvn_driver {\n    uint32_t generation;\n    int32_t api_major, api_minor;\n    \
          const char *sdk;\n    const struct rl_nvn_layout *layout;\n    const char *layout_error;\n    \
          uint32_t nimpure;\n    const char *const *impure;\n};\n\
@@ -199,19 +207,14 @@ pub fn c_text(d: &Driver, base: u64) -> String {
 }
 
 fn layout_text(s: &mut String, l: &DeviceLayout, base: u64) {
-    for (i, f) in l.fields.iter().enumerate() {
-        let bytes: Vec<String> = f.bytes.iter().map(|b| format!("0x{b:02x}")).collect();
-        let _ = writeln!(
-            s,
-            "static const uint8_t field{i}[] = {{ {} }};",
-            bytes.join(", ")
-        );
-    }
-    s.push_str("static const struct rl_nvn_field fields[] = {\n");
-    for (i, f) in l.fields.iter().enumerate() {
-        let _ = writeln!(s, "    {{ 0x{:x}, {}, field{i} }},", f.off, f.bytes.len());
-    }
-    s.push_str("    { 0, 0, 0 },\n};\nstatic const char *const settings[] = {\n");
+    c_fields(s, "fields", &l.fields);
+    let empty = PoolLayout::default();
+    let pool = l.pool.as_ref().unwrap_or(&empty);
+    c_fields(s, "pool_virtual", &pool.virtual_fields);
+    c_fields(s, "pool_fields", &pool.fields);
+    c_offsets(s, "pool_ranges", &pool.ranges);
+    c_offsets(s, "pool_mappings", &pool.mappings);
+    s.push_str("static const char *const settings[] = {\n");
     for k in &l.settings {
         let _ = writeln!(s, "    {},", crate::shaders::c_string(k));
     }
@@ -236,7 +239,8 @@ fn layout_text(s: &mut String, l: &DeviceLayout, base: u64) {
     let _ = write!(
         s,
         "    0,\n}};\nstatic const int32_t ints[] = {{ {}, 0 }};\nstatic const uint8_t int_device[] = {{ {}, 0 }};\n\
-         static const struct rl_nvn_layout layout = {{ 0x{:x}, 0x{:x}, 0x{:x}, {}, {}, {}, {}, fields, settings, {}, ints, int_device, {} }};\n",
+         static const struct rl_nvn_layout layout = {{ 0x{:x}, 0x{:x}, 0x{:x}, {}, {}, {}, {}, fields, settings, {}, ints, int_device, {}, \
+         0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, {}, {}, {}, {}, {}, {}, pool_ranges, pool_mappings }};\n",
         ints.join(", "),
         device.join(", "),
         base + l.storage_class,
@@ -248,7 +252,48 @@ fn layout_text(s: &mut String, l: &DeviceLayout, base: u64) {
         l.settings.len(),
         l.integers.len(),
         or_none(l.pool_page_info),
+        pool.device,
+        pool.flags,
+        pool.gpu,
+        pool.memory,
+        pool.size,
+        pool.virtual_fields.len(),
+        pool.fields.len(),
+        if l.pool.is_ok() { "pool_virtual" } else { "0" },
+        if l.pool.is_ok() { "pool_fields" } else { "0" },
+        pool.ranges.len(),
+        pool.mappings.len(),
     );
+}
+
+/// Writes the table `name` of the field offsets `offs`, ending in a 0 that
+/// keeps it non-empty.
+fn c_offsets(s: &mut String, name: &str, offs: &[u32]) {
+    let o: Vec<String> = offs.iter().map(|o| format!("0x{o:x}, ")).collect();
+    let _ = writeln!(s, "static const uint32_t {name}[] = {{ {}0 }};", o.concat());
+}
+
+/// Writes the table `name` of `fields`, ending in an empty entry, and the
+/// byte arrays its entries point to.
+fn c_fields(s: &mut String, name: &str, fields: &[Field]) {
+    for (i, f) in fields.iter().enumerate() {
+        if let Fill::Bytes(b) = &f.fill {
+            let bytes: Vec<String> = b.iter().map(|b| format!("0x{b:02x}")).collect();
+            let _ = writeln!(
+                s,
+                "static const uint8_t {name}{i}[] = {{ {} }};",
+                bytes.join(", ")
+            );
+        }
+    }
+    let _ = writeln!(s, "static const struct rl_nvn_field {name}[] = {{");
+    for (i, f) in fields.iter().enumerate() {
+        let _ = match &f.fill {
+            Fill::Bytes(b) => writeln!(s, "    {{ 0x{:x}, {}, {name}{i}, -1 }},", f.off, b.len()),
+            Fill::Info(at) => writeln!(s, "    {{ 0x{:x}, 4, 0, {at} }},", f.off),
+        };
+    }
+    s.push_str("    { 0, 0, 0, -1 },\n};\n");
 }
 
 #[cfg(test)]

@@ -509,6 +509,24 @@ TEST(nvn_virtual_pools_reach_the_mapped_pages_through_an_import_of_their_own)
     rl_nvn_set_layout(NULL);
 }
 
+TEST(nvn_pool_mappings_take_a_textures_page_kind)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t pool = heap, params = heap + 0x200, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(pool, storage, 0x38000, 0xa2));
+    rl_st32(t_mem(), params, 0xdb);
+    CHECK_EQ(call(c, nvnh_NvRmGpuMappingModify, pool, 0x10000, 0x30000, params), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_NvRmGpuMappingModify, pool, 0, 0x10000, 0), RET);
+    CHECK_EQ(c->x[0], 4);
+    CHECK_EQ(call(c, nvnh_NvRmGpuMappingModify, pool, 0x10000, 0x40000, params), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK_EQ(call(c, nvnh_NvRmGpuMappingModify, params, 0, 0x10000, params), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+}
+
 TEST(nvn_render_targets_reach_every_level_layer_and_slice)
 {
     nvn_tex_desc arr = { .target = 4, .format = 0x25, .width = 64, .height = 64, .depth = 24, .levels = 7 };

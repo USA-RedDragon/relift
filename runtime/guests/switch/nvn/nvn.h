@@ -34,10 +34,15 @@ RL_RUNTIME_API uint64_t rl_nvn_proc(const char *name);
 /** @brief The name of the proc at guest address addr, or NULL. */
 RL_RUNTIME_API const char *rl_nvn_proc_name(uint64_t addr);
 
-/** @brief A device field and the bytes the driver's own nvnDeviceInitialize leaves in it. */
+/**
+ * @brief A device field and what the driver's own nvnDeviceInitialize leaves
+ * in it: the len bytes at bytes, or, when info is not -1, the u32 at byte
+ * info of what NvRmGpuDeviceGetInfo returns for the opened GPU.
+ */
 struct rl_nvn_field {
     uint32_t off, len;
     const uint8_t *bytes;
+    int32_t info;
 };
 
 /** @brief A layout offset or info the driver has none of (RL_NVN_NONE). */
@@ -48,8 +53,9 @@ struct rl_nvn_field {
  * address of its nvnTextureBuilderGetStorageClass and of the word holding
  * its settings hook (0 for none), the offsets of a builder's device pointer
  * and of a device's flags word and NvRmGpuDevice pointer (RL_NVN_NONE when
- * the driver has none: NVN1 has no device flags word), the other device
- * fields that function reads, and the settings the driver's device start
+ * the driver has none: NVN1 has no device flags word), every other device
+ * field the driver's device start leaves a known value in (the driver's
+ * texture code reads them), and the settings the driver's device start
  * reads, which must all be unset for the fields to hold.
  */
 struct rl_nvn_layout {
@@ -74,6 +80,28 @@ struct rl_nvn_layout {
      * found none.
      */
     uint32_t pool_page_info;
+    /**
+     * @brief Where the driver keeps a memory pool's device pointer, flags
+     * word, GPU address, storage and size; the layer writes them into each
+     * pool it initializes, so the driver's own texture code reads its pools.
+     */
+    uint32_t pool_device, pool_flags, pool_gpu, pool_memory, pool_size;
+    /** @brief Number of entries in pool_virtual and in pool_fields. */
+    uint32_t npool_virtual, npool_fields;
+    /**
+     * @brief The constant bytes the driver's own nvnMemoryPoolInitialize
+     * leaves in a virtual pool, and in any other pool.
+     */
+    const struct rl_nvn_field *pool_virtual, *pool_fields;
+    /** @brief Number of entries in pool_ranges and in pool_mappings. */
+    uint32_t npool_ranges, npool_mappings;
+    /**
+     * @brief Where the driver keeps every GPU address of a pool (one per
+     * mapping it makes of the storage; the layer writes its one range into
+     * each) and the pool's GPU mapping handles (the layer writes the pool's
+     * address, which its NvRmGpuMappingModify answers).
+     */
+    const uint32_t *pool_ranges, *pool_mappings;
 };
 
 /** @brief Registers the driver layout (rl_nvn_set_driver does for a build). */

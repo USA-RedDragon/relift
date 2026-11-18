@@ -628,7 +628,7 @@ uint32_t nvn_format_count(void);
 bool nvn_version_measured(uint32_t info, int32_t *out);
 
 /** @brief Number of procs that stay the SDK driver's own code (nvn_driver.c). */
-#define NVN_DRIVER_PROC_COUNT 308u
+#define NVN_DRIVER_PROC_COUNT 311u
 
 /** @brief The index of a proc that stays the SDK driver's own code (nvn_driver.c), or -1. */
 int nvn_driver_index(const char *name);
@@ -651,6 +651,22 @@ int nvn_gpu_open(rl_ctx *c, uint8_t *mem);
 
 /** @brief The driver's own function for any proc name, through its loader (0 when it has none); RL_OK or RL_PENDING. */
 int nvn_driver_lookup(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr);
+
+/**
+ * @brief Writes into the guest's device object at dev, once, the fields the
+ * driver's own code reads: the flags word, the NvRmGpuDevice, and what the
+ * driver's own nvnDeviceInitialize leaves in the others (constants, and
+ * words it copies from NvRmGpuDeviceGetInfo); the layer keeps its own device
+ * state, so it never reads the guest's object. Returns RL_OK or a pending
+ * stop.
+ */
+int nvn_device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev);
+
+/** @brief nvn_device_fields on the device of the texture builder at builder. */
+int nvn_builder_device_fields(rl_ctx *c, uint8_t *mem, uint64_t builder);
+
+/** @brief The SDK's NvRmGpuMappingModify, on the pool mappings the layer owns (nvn_dev.c). */
+uint64_t nvnh_NvRmGpuMappingModify(rl_ctx *c, uint8_t *mem);
 
 /** @brief The NvRmGpuDevice nvn_gpu_open opened (a guest address), 0 before. */
 uint64_t nvn_gpu_device(void);

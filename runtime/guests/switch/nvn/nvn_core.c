@@ -356,7 +356,11 @@ static uint64_t hook_import(void *user, const char *symbol)
 static rl_fn hook_replace(void *user, const char *symbol)
 {
     (void)user;
-    return nvn.up && !strcmp(symbol, "nvnBootstrapLoader") ? nvnh_nvnBootstrapLoader : NULL;
+    if (!nvn.up)
+        return NULL;
+    if (!strcmp(symbol, "nvnBootstrapLoader"))
+        return nvnh_nvnBootstrapLoader;
+    return !strcmp(symbol, "NvRmGpuMappingModify") ? nvnh_NvRmGpuMappingModify : NULL;
 }
 
 static void hook_defined(void *user, const char *symbol, uint64_t addr)
