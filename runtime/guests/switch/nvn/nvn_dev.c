@@ -66,7 +66,13 @@ typedef struct nvn_pool {
     uint64_t phys;
 } nvn_pool;
 
-/** @brief Imported pools by GPU address, for nvn_gpu_guest. */
+/**
+ * @brief Imported pools by GPU address, for nvn_gpu_guest. Spans may
+ * overlap: a host whose device addresses are the host pointers of imported
+ * memory (llvmpipe) gives a virtual pool's import the addresses of the
+ * physical pool's bytes it reaches, so the same address names the same byte
+ * in both. max is the largest span size, which bounds the search back.
+ */
 static struct {
     pthread_rwlock_t lock;
     struct pool_span {
@@ -74,7 +80,8 @@ static struct {
         void *buf;
     } *v;
     uint32_t n, cap;
-} g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0 };
+    uint64_t max;
+} g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0, 0 };
 
 static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf)
 {
@@ -98,14 +105,17 @@ static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf)
     g_pools.v[i].size = size;
     g_pools.v[i].memory = memory;
     g_pools.v[i].buf = buf;
+    if (size > g_pools.max)
+        g_pools.max = size;
     pthread_rwlock_unlock(&g_pools.lock);
 }
 
-static void pools_remove(uint64_t gpu)
+/** @brief Drops the span of the import whose buffer is buf (spans of two imports may start at one address). */
+static void pools_remove(void *buf)
 {
     pthread_rwlock_wrlock(&g_pools.lock);
     for (uint32_t i = 0; i < g_pools.n; i++)
-        if (g_pools.v[i].gpu == gpu) {
+        if (g_pools.v[i].buf == buf) {
             memmove(&g_pools.v[i], &g_pools.v[i + 1], (g_pools.n - i - 1) * sizeof *g_pools.v);
             g_pools.n--;
             break;
@@ -125,8 +135,11 @@ uint64_t nvn_gpu_guest(uint64_t gpu)
         else
             hi = mid;
     }
-    if (lo && gpu - g_pools.v[lo - 1].gpu < g_pools.v[lo - 1].size)
-        out = g_pools.v[lo - 1].memory + (gpu - g_pools.v[lo - 1].gpu);
+    for (uint32_t i = lo; i-- > 0 && gpu - g_pools.v[i].gpu < g_pools.max;)
+        if (gpu - g_pools.v[i].gpu < g_pools.v[i].size) {
+            out = g_pools.v[i].memory + (gpu - g_pools.v[i].gpu);
+            break;
+        }
     pthread_rwlock_unlock(&g_pools.lock);
     return out;
 }
@@ -509,7 +522,7 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
     (void)mem;
     nvn_pool *p = (nvn_pool *)nvn_obj_get(c->x[0], NVN_POOL);
     if (p && p->im.gpu) {
-        pools_remove(p->im.gpu);
+        pools_remove(p->im.buf);
         nvn_vk_unimport(&p->im);
     }
     nvn_obj_free(p ? &p->o : NULL);
@@ -573,10 +586,13 @@ uint64_t nvnh_nvnMemoryPoolGetSize(rl_ctx *c, uint8_t *mem)
  * NVNboolean. As the driver: the pool must be virtual, and each request's
  * offsets and size must be multiples of the page size, the device's answer
  * for the info the build found the driver's mapping reads (false otherwise); a
- * request without a physical pool unmaps. As on the console, the virtual
- * pool has GPU addresses of its own, which reach the physical pages mapped
- * into it: a second host import of the physical pool's guest bytes, from the
- * mapped distance, with its own device address. One import is one linear
+ * request without a physical pool unmaps. The virtual pool's GPU addresses
+ * reach the physical pages mapped into it: a second host import of the
+ * physical pool's guest bytes, from the mapped distance, with the device
+ * address the host gives it. As on the console, that range is the virtual
+ * pool's own on hosts that address each allocation apart; a host whose
+ * device addresses are the host pointers (llvmpipe) gives it the physical
+ * pool's addresses of the same bytes instead, which reach the same bytes. One import is one linear
  * map, so every request must map at the same distance into the same pool,
  * and anything else stops. The storage class (the page kind) only chooses
  * how the console's GPU compresses the pages, which the host does not model.

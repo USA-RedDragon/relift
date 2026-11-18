@@ -420,7 +420,7 @@ static void map_req(uint64_t r, uint64_t phys, uint64_t poff, uint64_t voff, uin
     rl_st32(t_mem(), r + 32, cls);
 }
 
-TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
+TEST(nvn_virtual_pools_reach_the_mapped_pages_through_an_import_of_their_own)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
@@ -449,11 +449,16 @@ TEST(nvn_virtual_pools_have_their_own_addresses_over_the_mapped_pages)
     uint64_t size = 0, gpu = nvn_pool_gpu(virt);
     CHECK_EQ(nvn_pool_memory(virt, &size), storage + 0x10000);
     CHECK_EQ(size, 0x40000);
-    CHECK(gpu + 0x40000 <= phys_gpu || gpu >= phys_gpu + 0x80000);
+    CHECK(gpu + 0x40000 <= phys_gpu || gpu >= phys_gpu + 0x80000 || gpu == phys_gpu + 0x10000);
     CHECK_EQ(nvn_gpu_guest(gpu + 0x20), storage + 0x10020);
+    CHECK_EQ(nvn_gpu_guest(gpu + 0x3fff0), storage + 0x4fff0);
+    CHECK_EQ(nvn_gpu_guest(phys_gpu + 0x8), storage + 0x8);
+    CHECK_EQ(nvn_gpu_guest(phys_gpu + 0x60000), storage + 0x60000);
     map_req(req, phys, 0, 0, 0x10000, 0x100);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolMapVirtual, virt, 1, req, 0), RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, virt, 0, 0, 0), RET);
+    CHECK_EQ(nvn_gpu_guest(phys_gpu + 0x20020), storage + 0x20020);
     rl_nvn_set_layout(NULL);
 }
 
