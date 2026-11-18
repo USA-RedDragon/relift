@@ -90,6 +90,51 @@ static uint32_t screen_base(const nds_eng *e, uint16_t cnt)
 /** @brief The horizontal mosaic: the pixel x shows, for a layer with mosaic on. */
 static unsigned mos_x(const nds_eng *e, unsigned x) { return x - x % ((e->mosaic & 15u) + 1u); }
 
+/**
+ * @brief A text BG line without mosaic, a tile row at a time: one map entry
+ * and one read of the tile row's 4 or 8 bytes per tile the line crosses,
+ * the same bytes the per-pixel reads take (a read of several bytes ORs the
+ * banks as single bytes do).
+ */
+static void text_spans(const rl_nds *m, nds_eng *e, unsigned n, unsigned view, uint32_t cb, uint32_t sb, unsigned yy, unsigned w, nds_px *out)
+{
+    uint16_t cnt = e->bgcnt[n];
+    unsigned prio = cnt & 3u;
+    bool c256 = cnt & 0x80;
+    const uint8_t *pr = pal_of(m, e, false);
+    for (unsigned x = 0; x < NDS_W;) {
+        unsigned xx = (x + e->hofs[n]) & (w - 1u);
+        uint32_t me = nds_vram_rd(m, view, sb + (xx >> 8) * 0x800u + ((xx >> 3) & 31u) * 2u, 2);
+        unsigned ty = yy & 7u, flip = (me & 0x400) ? 7u : 0u;
+        if (me & 0x800)
+            ty ^= 7;
+        unsigned tile = me & 0x3FFu, pal = me >> 12, from = xx & 7u, count = 8u - from;
+        if (count > NDS_W - x)
+            count = NDS_W - x;
+        if (c256) {
+            uint32_t a = cb + tile * 64u + ty * 8u;
+            uint64_t row = (uint64_t)nds_vram_rd(m, view, a, 4) | (uint64_t)nds_vram_rd(m, view, a + 4u, 4) << 32;
+            if (row)
+                for (unsigned i = 0; i < count; i++) {
+                    unsigned tx = (from + i) ^ flip;
+                    put256(m, e, &out[x + i], n, (unsigned)(row >> (8u * tx)) & 0xFFu, pal, true, prio);
+                }
+        } else {
+            uint32_t row = nds_vram_rd(m, view, cb + tile * 32u + ty * 4u, 4);
+            if (row)
+                for (unsigned i = 0; i < count; i++) {
+                    unsigned tx = (from + i) ^ flip;
+                    unsigned idx = (row >> (4u * tx)) & 15u;
+                    if (idx) {
+                        unsigned c = pal * 16u + idx;
+                        put(&out[x + i], (uint32_t)(pr[c * 2] | pr[c * 2 + 1] << 8), prio);
+                    }
+                }
+        }
+        x += count;
+    }
+}
+
 static void text(const rl_nds *m, nds_eng *e, unsigned n, unsigned y)
 {
     uint16_t cnt = e->bgcnt[n];
@@ -100,6 +145,10 @@ static void text(const rl_nds *m, nds_eng *e, unsigned n, unsigned y)
     uint32_t cb = char_base(e, cnt), sb = screen_base(e, cnt) + ((yy >> 8) * (w >> 8)) * 0x800u + ((yy >> 3) & 31u) * 64u;
     const uint8_t *pr = pal_of(m, e, false);
     nds_px *out = e->bg[n];
+    if (!mos) {
+        text_spans(m, e, n, view, cb, sb, yy, w, out);
+        return;
+    }
     for (unsigned x = 0; x < NDS_W; x++) {
         unsigned xx = ((mos ? mos_x(e, x) : x) + e->hofs[n]) & (w - 1u);
         uint32_t me = nds_vram_rd(m, view, sb + (xx >> 8) * 0x800u + ((xx >> 3) & 31u) * 2u, 2);
