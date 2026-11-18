@@ -420,6 +420,26 @@ static bool run(vk *v, bool up, uint32_t aa, const uint8_t *rgb, uint8_t *out, u
     return true;
 }
 
+bool rl_post_integer(bool fit)
+{
+    rl_settings_declare_runtime();
+    uint32_t f = rl_setting_enum("picture.filter");
+    return f == RL_POST_FILTER_INTEGER || (f == RL_POST_FILTER_DEFAULT && !fit);
+}
+
+int rl_post_sampling(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t dst_h)
+{
+    if (!src_w || !src_h || (dst_w % src_w == 0 && dst_h % src_h == 0))
+        return RL_POST_SAMPLE_NEAREST;
+    rl_settings_declare_runtime();
+    uint32_t f = rl_setting_enum("picture.filter");
+    if (f == RL_POST_FILTER_SHARP_BILINEAR)
+        return RL_POST_SAMPLE_SHARP;
+    if (f != RL_POST_FILTER_DEFAULT)
+        return RL_POST_SAMPLE_NEAREST;
+    return dst_w >= 2 * src_w && dst_h >= 2 * src_h ? RL_POST_SAMPLE_SHARP : RL_POST_SAMPLE_LINEAR;
+}
+
 void rl_post_set_upscaler(const rl_post_stage *stage, void *user)
 {
     pthread_mutex_lock(&g_lock);

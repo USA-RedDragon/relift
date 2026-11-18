@@ -3,6 +3,7 @@
  * @brief The layouts of a two-screen guest's pictures, their composition,
  * the split over displays and the mapping of touches back to guest pixels.
  */
+#include <relift/post.h>
 #include <relift/screens.h>
 #include <relift/touchpad.h>
 
@@ -282,7 +283,7 @@ void rl_screens_present(rl_window *main, const rl_screens_config *cfg, const rl_
     }
     output *o0 = &S.out[0];
     draw(o0, main, cfg, rl_screens_content(dsp, 0, count), frames);
-    rl_touchpad_set_picture(o0->plan.width, o0->plan.height, cfg->integer_scale);
+    rl_touchpad_set_picture(o0->plan.width, o0->plan.height, rl_post_integer(!cfg->integer_scale));
     rl_window_present_rgb(main, o0->rgb, o0->plan.width, o0->plan.height);
 }
 

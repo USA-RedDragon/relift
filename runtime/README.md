@@ -189,7 +189,8 @@ rule must match its own sample, and the denylist must hit files there.
 
 Run-time settings are typed keys declared with `rl_settings_declare`
 (`core/include/relift/settings.h`): bool, int and float with a range and a
-step, enum, string and key binding. The runtime declares `video`; the Switch
+step, enum, string and key binding. The runtime declares `video`, `language`,
+`video.gpu_driver`, `picture.aa`, `picture.aa_quality` and `picture.filter`; the Switch
 layer declares `save.dir`, `vk.device`, `vk.keep_attachments`, `vk.decode_bc` and
 `kernel.layout`; the Game
 Boy layer declares `video.gb_color_correction`; the Nintendo DS layer
@@ -203,7 +204,7 @@ declares `save.dir`, `save.type`, `video.nds_layout`, `video.nds_displays` and
 3. each `--relift-settings <file>` (a flat JSON object), in order;
 4. each `--relift-set key=value`, in order, whatever its place among the files;
 5. the key's environment variable, when it has one (`RELIFT_VIDEO`,
-   `RELIFT_SAVE`, `RELIFT_VK_DEVICE`, `RELIFT_VK_KEEP_ATTACHMENTS`,
+   `RELIFT_PICTURE_FILTER`, `RELIFT_SAVE`, `RELIFT_VK_DEVICE`, `RELIFT_VK_KEEP_ATTACHMENTS`,
    `RELIFT_GB_COLOR_CORRECTION`, `RELIFT_NDS_LAYOUT`, `RELIFT_NDS_DISPLAYS`,
    `RELIFT_NDS_INTEGER_SCALE`).
 
@@ -223,6 +224,7 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_AUDIO=null` | In an `AUDIO=real` build, play through the null output (drains in real time, no sound) |
 | `RELIFT_LANGUAGE=<name or locale>` | The `language` setting: the language of the game's window title, a Switch language name (`French`) or a locale (`ja`, `fr_CA`). Unset: the host's language list. The title and the window icon come from the identity the program registers (`relift/appinfo.h`); a program that registers none keeps the title its code passes and has no icon |
 | `RELIFT_VIDEO=headless\|sdl3` | The `video` setting (an environment variable beats the flags). Window backend. Unset: SDL3 when the runtime was built with `VIDEO=sdl3` and a display exists (`WAYLAND_DISPLAY` or `DISPLAY` on Linux, always on macOS and Windows), headless otherwise. `headless` (or `none`) opens no window. `sdl3` skips the display check; it still falls back to headless when SDL cannot start, or when the runtime has no SDL3. A program without Vulkan symbols opens no backend whatever this says |
+| `RELIFT_PICTURE_FILTER=default\|integer\|nearest\|sharp_bilinear` | The `picture.filter` setting: how every window (the main one and those on other displays) scales and samples the picture, on the GPU. `default`: the window's own scaling (whole multiples, or filling the window where a guest setting such as `video.nds_integer_scale` asks), sampled nearest at whole multiples, sharp bilinear at 2x and up and bilinear below 2x; `integer`: whole multiples only, nearest; `nearest`: fill the window, nearest (uneven pixels); `sharp_bilinear`: fill the window from a nearest prescale by the largest whole multiple, then bilinear, so pixels stay even and only their edges blend |
 | `RELIFT_VULKAN_LIBRARY=<path>` | Host Vulkan loader to use instead of the system one |
 | `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
 | `RELIFT_GB_COLOR_CORRECTION=on\|off` | The `video.gb_color_correction` setting (Game Boy). On (default): the colours the way the console's LCD shows them. Off: the plain expansion of the 5-bit channels, which is what the reference images of the test ROMs use |

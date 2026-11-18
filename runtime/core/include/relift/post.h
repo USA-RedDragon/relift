@@ -21,6 +21,26 @@ enum { RL_POST_AA_OFF, RL_POST_AA_FXAA, RL_POST_AA_SMAA };
 /** @brief Choices of `picture.aa_quality` (SMAA's presets). */
 enum { RL_POST_QUALITY_LOW, RL_POST_QUALITY_MEDIUM, RL_POST_QUALITY_HIGH, RL_POST_QUALITY_ULTRA };
 
+/** @brief Choices of `picture.filter`: how windows scale the picture. */
+enum { RL_POST_FILTER_DEFAULT, RL_POST_FILTER_INTEGER, RL_POST_FILTER_NEAREST, RL_POST_FILTER_SHARP_BILINEAR };
+
+/** @brief How a window samples the picture it scales (rl_post_sampling). */
+enum { RL_POST_SAMPLE_NEAREST, RL_POST_SAMPLE_LINEAR, RL_POST_SAMPLE_SHARP };
+
+/**
+ * @brief Whether a window scales pictures by whole multiples only, after picture.filter, for a window whose own way
+ * is fit (rl_window_set_fit) or whole multiples (not fit).
+ */
+RL_RUNTIME_API bool rl_post_integer(bool fit);
+
+/**
+ * @brief How a window samples a src_w by src_h picture drawn at dst_w by dst_h, after picture.filter: nearest at
+ * whole multiples whatever the setting; else nearest for nearest and integer, sharp bilinear (bilinear from a
+ * whole-multiple nearest prescale) for sharp_bilinear, and for default sharp bilinear at 2x and up and plain
+ * bilinear below.
+ */
+RL_RUNTIME_API int rl_post_sampling(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t dst_h);
+
 /** @brief The pipeline's Vulkan objects, for a stage that records into it; handles are the API's, as 64-bit values. */
 typedef struct rl_post_device {
     /** @brief VkInstance. */

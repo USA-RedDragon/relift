@@ -43,6 +43,7 @@ typedef struct slot {
 static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
 static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
+static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
 
 static const rl_setting_def g_runtime_defs[] = {
     {
@@ -91,6 +92,21 @@ static const rl_setting_def g_runtime_defs[] = {
                        "changes the picture from the console's",
         .def_int = 2,
         .choices = g_aa_quality_choices,
+        .nchoices = 4,
+    },
+    {
+        .key = "picture.filter",
+        .type = RL_SETTING_ENUM,
+        .label = "Scaling filter",
+        .apply = RL_APPLY_LIVE,
+        .description = "How windows scale and sample the picture. default: the window's own scaling (whole "
+                       "multiples, or filling the window where a setting such as video.nds_integer_scale asks), "
+                       "sharp at whole multiples, sharp_bilinear at 2x and up, bilinear below 2x. integer: whole "
+                       "multiples only, sharp. nearest: fill the window, sharp uneven pixels. sharp_bilinear: fill "
+                       "the window with even pixels whose edges blend over one screen pixel. Anything but nearest "
+                       "sampling changes the picture from the console's",
+        .env = "RELIFT_PICTURE_FILTER",
+        .choices = g_filter_choices,
         .nchoices = 4,
     },
 };

@@ -13,6 +13,7 @@
  */
 #include <relift/appinfo.h>
 #include <relift/input.h>
+#include <relift/post.h>
 #include <relift/settings.h>
 #include <relift/touchpad.h>
 #include <relift/window.h>
@@ -43,6 +44,13 @@
 #define RL_MOBILE 1
 #endif
 
+/** @brief SDL's sharp bilinear sampling: PIXELART from SDL 3.4 (blends only at texel edges), else linear. */
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+#define SHARP_SCALE SDL_SCALEMODE_PIXELART
+#else
+#define SHARP_SCALE SDL_SCALEMODE_LINEAR
+#endif
+
 typedef struct sdl_win {
     rl_window head;
     SDL_Window *w;
@@ -57,6 +65,8 @@ typedef struct sdl_win {
     uint32_t ow, oh;
     bool logical;
     bool fit;
+    bool integer;
+    int sampling;
     bool no_renderer;
     struct sdl_win *next;
 } sdl_win;
@@ -586,6 +596,18 @@ typedef struct present_req {
     uint32_t width, height, shown_w, shown_h;
 } present_req;
 
+/** @brief Sets the texture's sampling by rl_post_sampling for a w by h texture drawn at dw by dh (float pixels). */
+static void sample(sdl_win *w, uint32_t tw, uint32_t th, float dw, float dh)
+{
+    int m = rl_post_sampling(tw, th, dw > 0 ? (uint32_t)(dw + 0.5f) : 0, dh > 0 ? (uint32_t)(dh + 0.5f) : 0);
+    if (m == w->sampling)
+        return;
+    w->sampling = m;
+    SDL_SetTextureScaleMode(w->t, m == RL_POST_SAMPLE_SHARP    ? SHARP_SCALE
+                                  : m == RL_POST_SAMPLE_LINEAR ? SDL_SCALEMODE_LINEAR
+                                                               : SDL_SCALEMODE_NEAREST);
+}
+
 static void do_present(void *p)
 {
     present_req *q = p;
@@ -610,6 +632,7 @@ static void do_present(void *p)
             return;
         }
         SDL_SetTextureScaleMode(w->t, SDL_SCALEMODE_NEAREST);
+        w->sampling = RL_POST_SAMPLE_NEAREST;
         w->tw = q->width;
         w->th = q->height;
         w->logical = false;
@@ -619,15 +642,30 @@ static void do_present(void *p)
         w->lh = q->shown_h;
         w->logical = false;
     }
+    bool integer = rl_post_integer(w->fit);
+    if (integer != w->integer) {
+        w->integer = integer;
+        w->logical = false;
+    }
     SDL_UpdateTexture(w->t, NULL, q->rgb, (int)(q->width * 3));
     bool pad = rl_touchpad_wanted();
     if (w->logical == pad) {
         SDL_SetRenderLogicalPresentation(w->r, pad ? 0 : (int)q->shown_w, pad ? 0 : (int)q->shown_h,
                                          pad     ? SDL_LOGICAL_PRESENTATION_DISABLED
-                                         : w->fit ? SDL_LOGICAL_PRESENTATION_LETTERBOX
-                                                  : SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+                                         : w->integer ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE
+                                                      : SDL_LOGICAL_PRESENTATION_LETTERBOX);
         w->logical = !pad;
     }
+    SDL_FRect at = { 0 };
+    if (pad) {
+        int32_t pic[4];
+        rl_touchpad_picture(pic);
+        at.w = (float)pic[2];
+        at.h = (float)pic[3];
+    } else {
+        SDL_GetRenderLogicalPresentationRect(w->r, &at);
+    }
+    sample(w, q->width, q->height, at.w, at.h);
     SDL_SetRenderDrawColor(w->r, 0, 0, 0, 255);
     SDL_RenderClear(w->r);
     if (!pad) {
