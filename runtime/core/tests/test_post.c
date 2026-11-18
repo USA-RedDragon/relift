@@ -1,6 +1,7 @@
 /**
  * @file test_post.c
- * @brief The core picture pipeline: its Vulkan declarations match the API's,
+ * @brief The core picture pipeline: its Vulkan declarations (vkmin.h, with the
+ * presenter's) match the API's,
  * with every option off a window shows the frame it was given, byte for
  * byte, the FXAA pass on the host's device keeps flat pictures byte for
  * byte and matches the C reference, and SMAA at every preset keeps flat
@@ -70,6 +71,37 @@ SAME(rlvk_buffer_copy, VkBufferCopy);
 SAME(rlvk_submit_info, VkSubmitInfo);
 AT(rlvk_submit_info, VkSubmitInfo, pSignalSemaphores);
 SAME(rlvk_fence_create_info, VkFenceCreateInfo);
+SAME(rlvk_surface_capabilities, VkSurfaceCapabilitiesKHR);
+AT(rlvk_surface_capabilities, VkSurfaceCapabilitiesKHR, supportedUsageFlags);
+SAME(rlvk_surface_format, VkSurfaceFormatKHR);
+SAME(rlvk_swapchain_create_info, VkSwapchainCreateInfoKHR);
+AT(rlvk_swapchain_create_info, VkSwapchainCreateInfoKHR, imageExtent);
+AT(rlvk_swapchain_create_info, VkSwapchainCreateInfoKHR, oldSwapchain);
+SAME(rlvk_present_info, VkPresentInfoKHR);
+AT(rlvk_present_info, VkPresentInfoKHR, pResults);
+SAME(rlvk_image_create_info, VkImageCreateInfo);
+AT(rlvk_image_create_info, VkImageCreateInfo, initialLayout);
+SAME(rlvk_image_memory_barrier, VkImageMemoryBarrier);
+AT(rlvk_image_memory_barrier, VkImageMemoryBarrier, subresourceRange);
+SAME(rlvk_buffer_image_copy, VkBufferImageCopy);
+AT(rlvk_buffer_image_copy, VkBufferImageCopy, imageExtent);
+SAME(rlvk_image_blit, VkImageBlit);
+AT(rlvk_image_blit, VkImageBlit, dstOffsets);
+SAME(rlvk_clear_color, VkClearColorValue);
+SAME(rlvk_semaphore_create_info, VkSemaphoreCreateInfo);
+_Static_assert(RLVK_ST_SWAPCHAIN_CREATE_INFO_KHR == VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, "sType");
+_Static_assert(RLVK_ST_PRESENT_INFO_KHR == VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, "sType");
+_Static_assert(RLVK_ST_IMAGE_MEMORY_BARRIER == VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, "sType");
+_Static_assert(RLVK_ST_IMAGE_CREATE_INFO == VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, "sType");
+_Static_assert(RLVK_ST_SEMAPHORE_CREATE_INFO == VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, "sType");
+_Static_assert(RLVK_IMAGE_LAYOUT_PRESENT_SRC_KHR == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, "layout");
+_Static_assert(RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, "layout");
+_Static_assert(RLVK_FORMAT_B8G8R8A8_SRGB == VK_FORMAT_B8G8R8A8_SRGB, "format");
+_Static_assert(RLVK_FORMAT_R8G8B8A8_UNORM == VK_FORMAT_R8G8B8A8_UNORM, "format");
+_Static_assert(RLVK_ERROR_OUT_OF_DATE_KHR == VK_ERROR_OUT_OF_DATE_KHR, "result");
+_Static_assert(RLVK_SUBOPTIMAL_KHR == VK_SUBOPTIMAL_KHR, "result");
+_Static_assert(RLVK_ERROR_SURFACE_LOST_KHR == VK_ERROR_SURFACE_LOST_KHR, "result");
+_Static_assert(RLVK_PRESENT_MODE_MAILBOX_KHR == VK_PRESENT_MODE_MAILBOX_KHR, "mode");
 _Static_assert(RLVK_ST_COMPUTE_PIPELINE_CREATE_INFO == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, "sType");
 _Static_assert(RLVK_ST_WRITE_DESCRIPTOR_SET == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, "sType");
 _Static_assert(RLVK_ST_MEMORY_BARRIER == VK_STRUCTURE_TYPE_MEMORY_BARRIER, "sType");

@@ -1,7 +1,8 @@
 /**
  * @file vkmin.h
- * @brief The part of the Vulkan 1.0 API the core's picture pipeline (post.c)
- * uses, declared here so the core builds on every host without Vulkan
+ * @brief The part of the Vulkan 1.0 API, VK_KHR_surface and VK_KHR_swapchain
+ * the core's Vulkan device (vkdev.c), picture pipeline (post.c) and window
+ * presenter (present.c) use, declared here so the core builds on every host without Vulkan
  * headers. Names are the API's with an rlvk_ prefix; layouts and values are
  * the API's (test_post.c checks them against <vulkan/vulkan.h> where the
  * build has it). Every handle is a 64-bit value: a pointer for the
@@ -26,7 +27,16 @@ typedef uint32_t rlvk_flags;
 typedef uint64_t rlvk_size;
 
 /** @brief VkResult values post.c tells apart. */
-enum { RLVK_SUCCESS = 0, RLVK_INCOMPLETE = 5, RLVK_ERROR_EXTENSION_NOT_PRESENT = -7 };
+enum {
+    RLVK_SUCCESS = 0,
+    RLVK_NOT_READY = 1,
+    RLVK_TIMEOUT = 2,
+    RLVK_INCOMPLETE = 5,
+    RLVK_ERROR_EXTENSION_NOT_PRESENT = -7,
+    RLVK_ERROR_SURFACE_LOST_KHR = -1000000000,
+    RLVK_SUBOPTIMAL_KHR = 1000001003,
+    RLVK_ERROR_OUT_OF_DATE_KHR = -1000001004
+};
 
 /** @brief VkStructureType values of the structures below. */
 enum {
@@ -51,6 +61,11 @@ enum {
     RLVK_ST_COMMAND_BUFFER_ALLOCATE_INFO = 40,
     RLVK_ST_COMMAND_BUFFER_BEGIN_INFO = 42,
     RLVK_ST_MEMORY_BARRIER = 46,
+    RLVK_ST_SEMAPHORE_CREATE_INFO = 9,
+    RLVK_ST_IMAGE_CREATE_INFO = 14,
+    RLVK_ST_IMAGE_MEMORY_BARRIER = 45,
+    RLVK_ST_SWAPCHAIN_CREATE_INFO_KHR = 1000001000,
+    RLVK_ST_PRESENT_INFO_KHR = 1000001001,
 };
 
 /** @brief Flag and enum values post.c uses. */
@@ -78,6 +93,38 @@ enum {
     RLVK_PIPELINE_STAGE_TRANSFER_BIT = 0x1000,
     RLVK_PIPELINE_STAGE_HOST_BIT = 0x4000,
     RLVK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR = 0x1,
+    RLVK_QUEUE_GRAPHICS_BIT = 0x1,
+    RLVK_FENCE_CREATE_SIGNALED_BIT = 0x1,
+    RLVK_FORMAT_R8G8B8A8_UNORM = 37,
+    RLVK_FORMAT_R8G8B8A8_SRGB = 43,
+    RLVK_FORMAT_B8G8R8A8_UNORM = 44,
+    RLVK_FORMAT_B8G8R8A8_SRGB = 50,
+    RLVK_COLOR_SPACE_SRGB_NONLINEAR_KHR = 0,
+    RLVK_IMAGE_TYPE_2D = 1,
+    RLVK_IMAGE_TILING_OPTIMAL = 0,
+    RLVK_SAMPLE_COUNT_1_BIT = 0x1,
+    RLVK_IMAGE_USAGE_TRANSFER_SRC_BIT = 0x1,
+    RLVK_IMAGE_USAGE_TRANSFER_DST_BIT = 0x2,
+    RLVK_IMAGE_ASPECT_COLOR_BIT = 0x1,
+    RLVK_IMAGE_LAYOUT_UNDEFINED = 0,
+    RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL = 6,
+    RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL = 7,
+    RLVK_IMAGE_LAYOUT_PRESENT_SRC_KHR = 1000001002,
+    RLVK_FILTER_NEAREST = 0,
+    RLVK_FILTER_LINEAR = 1,
+    RLVK_QUEUE_FAMILY_IGNORED = ~0u,
+    RLVK_ACCESS_MEMORY_READ_BIT = 0x8000,
+    RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT = 0x1,
+    RLVK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT = 0x2000,
+    RLVK_PRESENT_MODE_IMMEDIATE_KHR = 0,
+    RLVK_PRESENT_MODE_MAILBOX_KHR = 1,
+    RLVK_PRESENT_MODE_FIFO_KHR = 2,
+    RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR = 0x1,
+    RLVK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR = 0x2,
+    RLVK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR = 0x4,
+    RLVK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR = 0x8,
+    RLVK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR = 0x1,
+    RLVK_COMPOSITE_ALPHA_INHERIT_BIT_KHR = 0x8,
 };
 
 /** @brief VK_API_VERSION_1_0. */
@@ -378,7 +425,153 @@ typedef struct rlvk_fence_create_info {
     rlvk_flags flags;
 } rlvk_fence_create_info;
 
-/** @brief Every function post.c calls, as X(name, return type, parameters); the first group from the instance. */
+/** @brief VkExtent2D. */
+typedef struct rlvk_extent2d {
+    uint32_t width, height;
+} rlvk_extent2d;
+
+/** @brief VkOffset3D. */
+typedef struct rlvk_offset3d {
+    int32_t x, y, z;
+} rlvk_offset3d;
+
+/** @brief VkSurfaceCapabilitiesKHR. */
+typedef struct rlvk_surface_capabilities {
+    uint32_t minImageCount;
+    uint32_t maxImageCount;
+    rlvk_extent2d currentExtent;
+    rlvk_extent2d minImageExtent;
+    rlvk_extent2d maxImageExtent;
+    uint32_t maxImageArrayLayers;
+    rlvk_flags supportedTransforms;
+    rlvk_flags currentTransform;
+    rlvk_flags supportedCompositeAlpha;
+    rlvk_flags supportedUsageFlags;
+} rlvk_surface_capabilities;
+
+/** @brief VkSurfaceFormatKHR. */
+typedef struct rlvk_surface_format {
+    int32_t format;
+    int32_t colorSpace;
+} rlvk_surface_format;
+
+/** @brief VkSwapchainCreateInfoKHR. */
+typedef struct rlvk_swapchain_create_info {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags flags;
+    rlvk_handle surface;
+    uint32_t minImageCount;
+    int32_t imageFormat;
+    int32_t imageColorSpace;
+    rlvk_extent2d imageExtent;
+    uint32_t imageArrayLayers;
+    rlvk_flags imageUsage;
+    int32_t imageSharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t *pQueueFamilyIndices;
+    rlvk_flags preTransform;
+    rlvk_flags compositeAlpha;
+    int32_t presentMode;
+    uint32_t clipped;
+    rlvk_handle oldSwapchain;
+} rlvk_swapchain_create_info;
+
+/** @brief VkPresentInfoKHR. */
+typedef struct rlvk_present_info {
+    int32_t sType;
+    const void *pNext;
+    uint32_t waitSemaphoreCount;
+    const rlvk_handle *pWaitSemaphores;
+    uint32_t swapchainCount;
+    const rlvk_handle *pSwapchains;
+    const uint32_t *pImageIndices;
+    rlvk_result *pResults;
+} rlvk_present_info;
+
+/** @brief VkImageCreateInfo. */
+typedef struct rlvk_image_create_info {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags flags;
+    int32_t imageType;
+    int32_t format;
+    rlvk_extent3d extent;
+    uint32_t mipLevels;
+    uint32_t arrayLayers;
+    rlvk_flags samples;
+    int32_t tiling;
+    rlvk_flags usage;
+    int32_t sharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t *pQueueFamilyIndices;
+    int32_t initialLayout;
+} rlvk_image_create_info;
+
+/** @brief VkImageSubresourceRange. */
+typedef struct rlvk_image_subresource_range {
+    rlvk_flags aspectMask;
+    uint32_t baseMipLevel;
+    uint32_t levelCount;
+    uint32_t baseArrayLayer;
+    uint32_t layerCount;
+} rlvk_image_subresource_range;
+
+/** @brief VkImageMemoryBarrier. */
+typedef struct rlvk_image_memory_barrier {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags srcAccessMask;
+    rlvk_flags dstAccessMask;
+    int32_t oldLayout;
+    int32_t newLayout;
+    uint32_t srcQueueFamilyIndex;
+    uint32_t dstQueueFamilyIndex;
+    rlvk_handle image;
+    rlvk_image_subresource_range subresourceRange;
+} rlvk_image_memory_barrier;
+
+/** @brief VkImageSubresourceLayers. */
+typedef struct rlvk_image_subresource_layers {
+    rlvk_flags aspectMask;
+    uint32_t mipLevel;
+    uint32_t baseArrayLayer;
+    uint32_t layerCount;
+} rlvk_image_subresource_layers;
+
+/** @brief VkBufferImageCopy. */
+typedef struct rlvk_buffer_image_copy {
+    rlvk_size bufferOffset;
+    uint32_t bufferRowLength;
+    uint32_t bufferImageHeight;
+    rlvk_image_subresource_layers imageSubresource;
+    rlvk_offset3d imageOffset;
+    rlvk_extent3d imageExtent;
+} rlvk_buffer_image_copy;
+
+/** @brief VkImageBlit. */
+typedef struct rlvk_image_blit {
+    rlvk_image_subresource_layers srcSubresource;
+    rlvk_offset3d srcOffsets[2];
+    rlvk_image_subresource_layers dstSubresource;
+    rlvk_offset3d dstOffsets[2];
+} rlvk_image_blit;
+
+/** @brief VkClearColorValue. */
+typedef union rlvk_clear_color {
+    float float32[4];
+    int32_t int32[4];
+    uint32_t uint32[4];
+} rlvk_clear_color;
+
+/** @brief VkSemaphoreCreateInfo. */
+typedef struct rlvk_semaphore_create_info {
+    int32_t sType;
+    const void *pNext;
+    rlvk_flags flags;
+} rlvk_semaphore_create_info;
+
+/** @brief Every Vulkan 1.0 function the core calls, as X(name, return type, parameters); the first group from the instance. */
 #define RLVK_INSTANCE_FNS(X)                                                                                         \
     X(vkDestroyInstance, void, (rlvk_handle, const void *))                                                         \
     X(vkEnumeratePhysicalDevices, rlvk_result, (rlvk_handle, uint32_t *, rlvk_handle *))                            \
@@ -389,7 +582,7 @@ typedef struct rlvk_fence_create_info {
     X(vkCreateDevice, rlvk_result, (rlvk_handle, const rlvk_device_create_info *, const void *, rlvk_handle *))     \
     X(vkGetDeviceProcAddr, void *, (rlvk_handle, const char *))
 
-/** @brief The functions post.c loads from the device. */
+/** @brief The Vulkan 1.0 functions the core loads from the device. */
 #define RLVK_DEVICE_FNS(X)                                                                                           \
     X(vkDestroyDevice, void, (rlvk_handle, const void *))                                                           \
     X(vkGetDeviceQueue, void, (rlvk_handle, uint32_t, uint32_t, rlvk_handle *))                                     \
@@ -441,11 +634,44 @@ typedef struct rlvk_fence_create_info {
     X(vkCreateFence, rlvk_result, (rlvk_handle, const rlvk_fence_create_info *, const void *, rlvk_handle *))       \
     X(vkDestroyFence, void, (rlvk_handle, rlvk_handle, const void *))                                               \
     X(vkWaitForFences, rlvk_result, (rlvk_handle, uint32_t, const rlvk_handle *, uint32_t, uint64_t))               \
-    X(vkResetFences, rlvk_result, (rlvk_handle, uint32_t, const rlvk_handle *))
+    X(vkResetFences, rlvk_result, (rlvk_handle, uint32_t, const rlvk_handle *))                                   \
+    X(vkDeviceWaitIdle, rlvk_result, (rlvk_handle))                                                                 \
+    X(vkCreateImage, rlvk_result, (rlvk_handle, const rlvk_image_create_info *, const void *, rlvk_handle *))       \
+    X(vkDestroyImage, void, (rlvk_handle, rlvk_handle, const void *))                                               \
+    X(vkGetImageMemoryRequirements, void, (rlvk_handle, rlvk_handle, rlvk_memory_requirements *))                   \
+    X(vkBindImageMemory, rlvk_result, (rlvk_handle, rlvk_handle, rlvk_handle, rlvk_size))                           \
+    X(vkCmdCopyBufferToImage, void,                                                                                 \
+      (rlvk_handle, rlvk_handle, rlvk_handle, int32_t, uint32_t, const rlvk_buffer_image_copy *))                   \
+    X(vkCmdCopyImageToBuffer, void,                                                                                 \
+      (rlvk_handle, rlvk_handle, int32_t, rlvk_handle, uint32_t, const rlvk_buffer_image_copy *))                   \
+    X(vkCmdBlitImage, void,                                                                                         \
+      (rlvk_handle, rlvk_handle, int32_t, rlvk_handle, int32_t, uint32_t, const rlvk_image_blit *, int32_t))        \
+    X(vkCmdClearColorImage, void,                                                                                   \
+      (rlvk_handle, rlvk_handle, int32_t, const rlvk_clear_color *, uint32_t, const rlvk_image_subresource_range *)) \
+    X(vkCreateSemaphore, rlvk_result, (rlvk_handle, const rlvk_semaphore_create_info *, const void *, rlvk_handle *)) \
+    X(vkDestroySemaphore, void, (rlvk_handle, rlvk_handle, const void *))
+
+/** @brief VK_KHR_surface's functions, loaded from an instance made with it. */
+#define RLVK_SURFACE_FNS(X)                                                                                          \
+    X(vkDestroySurfaceKHR, void, (rlvk_handle, rlvk_handle, const void *))                                          \
+    X(vkGetPhysicalDeviceSurfaceSupportKHR, rlvk_result, (rlvk_handle, uint32_t, rlvk_handle, uint32_t *))          \
+    X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR, rlvk_result, (rlvk_handle, rlvk_handle, rlvk_surface_capabilities *)) \
+    X(vkGetPhysicalDeviceSurfaceFormatsKHR, rlvk_result, (rlvk_handle, rlvk_handle, uint32_t *, rlvk_surface_format *)) \
+    X(vkGetPhysicalDeviceSurfacePresentModesKHR, rlvk_result, (rlvk_handle, rlvk_handle, uint32_t *, int32_t *))
+
+/** @brief VK_KHR_swapchain's functions, loaded from a device made with it. */
+#define RLVK_SWAPCHAIN_FNS(X)                                                                                        \
+    X(vkCreateSwapchainKHR, rlvk_result, (rlvk_handle, const rlvk_swapchain_create_info *, const void *, rlvk_handle *)) \
+    X(vkDestroySwapchainKHR, void, (rlvk_handle, rlvk_handle, const void *))                                        \
+    X(vkGetSwapchainImagesKHR, rlvk_result, (rlvk_handle, rlvk_handle, uint32_t *, rlvk_handle *))                  \
+    X(vkAcquireNextImageKHR, rlvk_result, (rlvk_handle, rlvk_handle, uint64_t, rlvk_handle, rlvk_handle, uint32_t *)) \
+    X(vkQueuePresentKHR, rlvk_result, (rlvk_handle, const rlvk_present_info *))
 
 /** @brief vkGetInstanceProcAddr and vkCreateInstance, which the loader gives before an instance exists. */
 typedef void *(RLVK_CALL *rlvk_gipa_fn)(rlvk_handle instance, const char *name);
 typedef rlvk_result(RLVK_CALL *rlvk_create_instance_fn)(const rlvk_instance_create_info *, const void *,
                                                          rlvk_handle *);
+/** @brief vkEnumerateInstanceExtensionProperties. */
+typedef rlvk_result(RLVK_CALL *rlvk_instance_extensions_fn)(const char *, uint32_t *, rlvk_extension_properties *);
 
 #endif

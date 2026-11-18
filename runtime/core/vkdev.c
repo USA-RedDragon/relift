@@ -1,0 +1,321 @@
+/**
+ * @file vkdev.c
+ * @brief The core's shared Vulkan device (vkdev.h).
+ */
+#include "vkdev.h"
+
+#include <relift/window.h>
+
+#include "core.h"
+#include "hostlib.h"
+
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_INSTANCE_EXTS 16
+
+/** @brief VkPhysicalDeviceProperties up to the device name; rest covers the remainder of the real structure. */
+typedef struct rlvk_device_properties {
+    uint32_t apiVersion, driverVersion, vendorID, deviceID;
+    int32_t deviceType;
+    char deviceName[256];
+    uint8_t pipelineCacheUUID[16];
+    uint64_t rest[128];
+} rlvk_device_properties;
+
+typedef void(RLVK_CALL *rlvk_props_fn)(rlvk_handle, rlvk_device_properties *);
+
+static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_queue = PTHREAD_MUTEX_INITIALIZER;
+static rlvk_dev g_dev;
+static bool g_tried, g_ok;
+
+static bool fail(const char *what, rlvk_result r)
+{
+    rl_log(RL_LOG_WARN, "vulkan", "the core's Vulkan device is off: %s failed (VkResult %d)", what, (int)r);
+    return false;
+}
+
+static int device_rank(int32_t type)
+{
+    static const int rank[] = { 4, 1, 0, 2, 3 };
+    return type >= 0 && type <= 4 ? rank[type] : 5;
+}
+
+static bool has_device_ext(rlvk_dev *d, rlvk_handle phys, const char *name)
+{
+    uint32_t n = 0;
+    if (d->vkEnumerateDeviceExtensionProperties(phys, NULL, &n, NULL) != RLVK_SUCCESS || !n)
+        return false;
+    rlvk_extension_properties *e = calloc(n, sizeof *e);
+    if (!e)
+        return false;
+    bool found = false;
+    if (d->vkEnumerateDeviceExtensionProperties(phys, NULL, &n, e) >= RLVK_SUCCESS)
+        for (uint32_t i = 0; i < n && !found; i++)
+            found = !strcmp(e[i].extensionName, name);
+    free(e);
+    return found;
+}
+
+static bool listed(const rlvk_extension_properties *e, uint32_t n, const char *name)
+{
+    for (uint32_t i = 0; i < n; i++)
+        if (!strcmp(e[i].extensionName, name))
+            return true;
+    return false;
+}
+
+/**
+ * @brief The instance extensions to ask for: portability enumeration when the loader has it, and the window
+ * backend's surface extensions when every one of them is there.
+ */
+static uint32_t instance_exts(rlvk_gipa_fn gipa, const char *out[MAX_INSTANCE_EXTS], bool *surfaces)
+{
+    uint32_t count = 0, n = 0;
+    *surfaces = false;
+    rlvk_instance_extensions_fn list = (rlvk_instance_extensions_fn)gipa(0, "vkEnumerateInstanceExtensionProperties");
+    rlvk_extension_properties *e = NULL;
+    if (list && list(NULL, &n, NULL) == RLVK_SUCCESS && n) {
+        e = calloc(n, sizeof *e);
+        if (!e || list(NULL, &n, e) < RLVK_SUCCESS)
+            n = 0;
+    }
+    if (listed(e, n, "VK_KHR_portability_enumeration"))
+        out[count++] = "VK_KHR_portability_enumeration";
+    const rl_window_backend *b = rl_window_backend_current();
+    const char *const *want = b && b->vulkan_extensions && b->vulkan_surface ? b->vulkan_extensions() : NULL;
+    if (want && want[0]) {
+        uint32_t first = count;
+        bool all = true;
+        for (size_t i = 0; want[i] && all; i++) {
+            all = listed(e, n, want[i]) && count < MAX_INSTANCE_EXTS;
+            if (all)
+                out[count++] = want[i];
+        }
+        if (!all)
+            count = first;
+        *surfaces = all;
+    }
+    free(e);
+    return count;
+}
+
+static bool make_instance(rlvk_dev *d)
+{
+    rlvk_create_instance_fn create = (rlvk_create_instance_fn)d->gipa(0, "vkCreateInstance");
+    if (!create)
+        return fail("vkCreateInstance lookup", 0);
+    rlvk_application_info app = {
+        .sType = RLVK_ST_APPLICATION_INFO,
+        .pApplicationName = "relift",
+        .pEngineName = "relift",
+        .apiVersion = RLVK_API_VERSION_1_0,
+    };
+    const char *exts[MAX_INSTANCE_EXTS];
+    uint32_t n = instance_exts(d->gipa, exts, &d->surfaces);
+    bool portability = n && !strcmp(exts[0], "VK_KHR_portability_enumeration");
+    rlvk_instance_create_info ci = {
+        .sType = RLVK_ST_INSTANCE_CREATE_INFO,
+        .flags = portability ? RLVK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0,
+        .pApplicationInfo = &app,
+        .enabledExtensionCount = n,
+        .ppEnabledExtensionNames = exts,
+    };
+    rlvk_result r = create(&ci, NULL, &d->instance);
+    if (r != RLVK_SUCCESS)
+        return fail("vkCreateInstance", r);
+#define RLVK_LOAD_I(name, ret, args)                                                                                 \
+    d->name = (ret(RLVK_CALL *) args)d->gipa(d->instance, #name);                                                    \
+    if (!d->name)                                                                                                    \
+        return fail(#name " lookup", 0);
+    RLVK_INSTANCE_FNS(RLVK_LOAD_I)
+#undef RLVK_LOAD_I
+#define RLVK_LOAD_S(name, ret, args)                                                                                 \
+    d->name = (ret(RLVK_CALL *) args)d->gipa(d->instance, #name);                                                    \
+    d->surfaces = d->surfaces && d->name;
+    if (d->surfaces) {
+        RLVK_SURFACE_FNS(RLVK_LOAD_S)
+    }
+#undef RLVK_LOAD_S
+    return true;
+}
+
+static bool pick_device(rlvk_dev *d)
+{
+    rlvk_props_fn props = (rlvk_props_fn)d->gipa(d->instance, "vkGetPhysicalDeviceProperties");
+    uint32_t n = 0;
+    rlvk_result r = d->vkEnumeratePhysicalDevices(d->instance, &n, NULL);
+    if (r != RLVK_SUCCESS || !n)
+        return fail("vkEnumeratePhysicalDevices", r);
+    rlvk_handle *devs = calloc(n, sizeof *devs);
+    if (!devs)
+        return fail("allocation", 0);
+    r = d->vkEnumeratePhysicalDevices(d->instance, &n, devs);
+    int best = 12;
+    for (uint32_t i = 0; r >= RLVK_SUCCESS && i < n; i++) {
+        uint32_t nf = 0;
+        d->vkGetPhysicalDeviceQueueFamilyProperties(devs[i], &nf, NULL);
+        rlvk_queue_family_properties fam[16];
+        nf = nf > 16 ? 16 : nf;
+        d->vkGetPhysicalDeviceQueueFamilyProperties(devs[i], &nf, fam);
+        rlvk_device_properties p = { 0 };
+        if (props)
+            props(devs[i], &p);
+        for (uint32_t f = 0; f < nf; f++) {
+            if (!(fam[f].queueFlags & RLVK_QUEUE_COMPUTE_BIT) || !fam[f].queueCount)
+                continue;
+            int rank = device_rank(p.deviceType) * 2 + !(fam[f].queueFlags & RLVK_QUEUE_GRAPHICS_BIT);
+            if (rank < best) {
+                best = rank;
+                d->phys = devs[i];
+                d->family = f;
+            }
+        }
+    }
+    free(devs);
+    if (!d->phys)
+        return fail("finding a device with a compute queue", r);
+    d->vkGetPhysicalDeviceMemoryProperties(d->phys, &d->mem);
+    return true;
+}
+
+static bool make_device(rlvk_dev *d)
+{
+    float prio = 1.0f;
+    rlvk_device_queue_create_info q = {
+        .sType = RLVK_ST_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = d->family,
+        .queueCount = 1,
+        .pQueuePriorities = &prio,
+    };
+    const char *exts[2];
+    uint32_t n = 0;
+    if (has_device_ext(d, d->phys, "VK_KHR_portability_subset"))
+        exts[n++] = "VK_KHR_portability_subset";
+    d->surfaces = d->surfaces && has_device_ext(d, d->phys, "VK_KHR_swapchain");
+    if (d->surfaces)
+        exts[n++] = "VK_KHR_swapchain";
+    rlvk_device_create_info ci = {
+        .sType = RLVK_ST_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &q,
+        .enabledExtensionCount = n,
+        .ppEnabledExtensionNames = exts,
+    };
+    rlvk_result r = d->vkCreateDevice(d->phys, &ci, NULL, &d->device);
+    if (r != RLVK_SUCCESS)
+        return fail("vkCreateDevice", r);
+#define RLVK_LOAD_D(name, ret, args)                                                                                 \
+    d->name = (ret(RLVK_CALL *) args)d->vkGetDeviceProcAddr(d->device, #name);                                       \
+    if (!d->name)                                                                                                    \
+        return fail(#name " lookup", 0);
+    RLVK_DEVICE_FNS(RLVK_LOAD_D)
+#undef RLVK_LOAD_D
+#define RLVK_LOAD_W(name, ret, args)                                                                                 \
+    d->name = (ret(RLVK_CALL *) args)d->vkGetDeviceProcAddr(d->device, #name);                                       \
+    d->surfaces = d->surfaces && d->name;
+    if (d->surfaces) {
+        RLVK_SWAPCHAIN_FNS(RLVK_LOAD_W)
+    }
+#undef RLVK_LOAD_W
+    d->vkGetDeviceQueue(d->device, d->family, 0, &d->queue);
+    return true;
+}
+
+const rlvk_dev *rl_vkdev(void)
+{
+    pthread_mutex_lock(&g_lock);
+    if (!g_tried) {
+        g_tried = true;
+        g_dev.gipa = (rlvk_gipa_fn)rl_hostlib_vulkan_gipa();
+        g_ok = g_dev.gipa ? make_instance(&g_dev) && pick_device(&g_dev) && make_device(&g_dev) : fail("loading Vulkan", 0);
+        if (g_ok)
+            rl_log(RL_LOG_INFO, "vulkan", "core device up, queue family %u, %s", g_dev.family,
+                   g_dev.surfaces ? "with swapchains" : "without swapchains");
+    }
+    const rlvk_dev *d = g_ok ? &g_dev : NULL;
+    pthread_mutex_unlock(&g_lock);
+    return d;
+}
+
+void rl_vkdev_queue_lock(void) { pthread_mutex_lock(&g_queue); }
+
+void rl_vkdev_queue_unlock(void) { pthread_mutex_unlock(&g_queue); }
+
+int rl_vkdev_memory_type(const rlvk_dev *d, uint32_t bits, uint32_t want, uint32_t nice)
+{
+    int found = -1;
+    for (uint32_t i = 0; i < d->mem.memoryTypeCount; i++) {
+        uint32_t f = d->mem.memoryTypes[i].propertyFlags;
+        if (!(bits & (1u << i)) || (f & want) != want)
+            continue;
+        if ((f & nice) == nice)
+            return (int)i;
+        if (found < 0)
+            found = (int)i;
+    }
+    return found;
+}
+
+void rl_vkdev_buf_free(const rlvk_dev *d, rlvk_buf *b)
+{
+    if (b->map)
+        d->vkUnmapMemory(d->device, b->memory);
+    if (b->buffer)
+        d->vkDestroyBuffer(d->device, b->buffer, NULL);
+    if (b->memory)
+        d->vkFreeMemory(d->device, b->memory, NULL);
+    memset(b, 0, sizeof *b);
+}
+
+bool rl_vkdev_buf_make(const rlvk_dev *d, rlvk_buf *b, rlvk_size size, uint32_t usage, bool host, bool cached)
+{
+    rl_vkdev_buf_free(d, b);
+    rlvk_buffer_create_info ci = { .sType = RLVK_ST_BUFFER_CREATE_INFO, .size = size, .usage = usage };
+    rlvk_result r = d->vkCreateBuffer(d->device, &ci, NULL, &b->buffer);
+    if (r != RLVK_SUCCESS)
+        return fail("vkCreateBuffer", r);
+    rlvk_memory_requirements req;
+    d->vkGetBufferMemoryRequirements(d->device, b->buffer, &req);
+    uint32_t want = host ? RLVK_MEMORY_PROPERTY_HOST_VISIBLE_BIT : 0;
+    uint32_t nice = host ? RLVK_MEMORY_PROPERTY_HOST_COHERENT_BIT | (cached ? RLVK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0)
+                         : RLVK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    int type = rl_vkdev_memory_type(d, req.memoryTypeBits, want, nice);
+    if (type < 0)
+        return fail("finding a memory type", 0);
+    rlvk_memory_allocate_info ai = {
+        .sType = RLVK_ST_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = (uint32_t)type,
+    };
+    r = d->vkAllocateMemory(d->device, &ai, NULL, &b->memory);
+    if (r != RLVK_SUCCESS)
+        return fail("vkAllocateMemory", r);
+    r = d->vkBindBufferMemory(d->device, b->buffer, b->memory, 0);
+    if (r != RLVK_SUCCESS)
+        return fail("vkBindBufferMemory", r);
+    b->size = size;
+    b->coherent = (d->mem.memoryTypes[type].propertyFlags & RLVK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+    if (host) {
+        r = d->vkMapMemory(d->device, b->memory, 0, ~(rlvk_size)0, 0, &b->map);
+        if (r != RLVK_SUCCESS)
+            return fail("vkMapMemory", r);
+    }
+    return true;
+}
+
+void rl_vkdev_buf_flush(const rlvk_dev *d, const rlvk_buf *b)
+{
+    rlvk_mapped_memory_range range = { .sType = RLVK_ST_MAPPED_MEMORY_RANGE, .memory = b->memory, .size = ~(rlvk_size)0 };
+    if (!b->coherent)
+        d->vkFlushMappedMemoryRanges(d->device, 1, &range);
+}
+
+void rl_vkdev_buf_invalidate(const rlvk_dev *d, const rlvk_buf *b)
+{
+    rlvk_mapped_memory_range range = { .sType = RLVK_ST_MAPPED_MEMORY_RANGE, .memory = b->memory, .size = ~(rlvk_size)0 };
+    if (!b->coherent)
+        d->vkInvalidateMappedMemoryRanges(d->device, 1, &range);
+}
