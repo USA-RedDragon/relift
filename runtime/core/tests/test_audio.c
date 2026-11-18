@@ -100,7 +100,16 @@ TEST(audio_open_survives_a_backend_that_never_returns)
     rl_audio_close(o);
 }
 
-static uint64_t g_fake_frames, g_fake_pauses, g_fake_closed;
+static _Atomic uint64_t g_fake_frames, g_fake_pauses, g_fake_closed;
+
+/** Waits up to 10 s for a counter the open helper thread sets; the helper's
+ * wake-up after the backend's 500 ms open has no bound on a loaded host. */
+static uint64_t wait_for(_Atomic uint64_t *counter, uint64_t want)
+{
+    for (int i = 0; i < 1000 && *counter < want; i++)
+        sleep_ms(10);
+    return *counter;
+}
 
 static rl_audio_out *slow_open(uint32_t rate, uint32_t channels)
 {
@@ -157,8 +166,7 @@ TEST(audio_late_open_switches_the_stream_to_the_host_backend)
     rl_audio_write(o, pcm, 480);
     CHECK_EQ(g_fake_frames, 0);
     CHECK_EQ(rl_audio_queued(o) > 0, 1);
-    sleep_ms(600);
-    CHECK_EQ(g_fake_pauses, 1);
+    CHECK_EQ(wait_for(&g_fake_pauses, 1), 1);
     rl_audio_write(o, pcm, 480);
     CHECK_EQ(g_fake_frames, 480);
     CHECK_EQ(rl_audio_queued(o) > 0 && rl_audio_queued(o) <= 480, 1);
@@ -173,8 +181,7 @@ TEST(audio_late_open_after_close_is_closed_by_the_helper)
     rl_audio_out *o = rl_audio_open(48000, 2);
     CHECK(o != NULL);
     rl_audio_close(o);
-    sleep_ms(600);
-    CHECK_EQ(g_fake_closed, 1);
+    CHECK_EQ(wait_for(&g_fake_closed, 1), 1);
     CHECK_EQ(g_fake_frames, 0);
 }
 
