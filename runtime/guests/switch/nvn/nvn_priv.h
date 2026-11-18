@@ -146,8 +146,34 @@ typedef struct nvn_tex_desc {
     uint64_t level_offset[NVN_TEX_MAX_LEVELS];
 } nvn_tex_desc;
 
+/** @brief NVNcopyRegion: a box of texels. */
+typedef struct nvn_region {
+    int32_t x, y, z, width, height, depth;
+} nvn_region;
+
 /** @brief Bytes per block and block size of an NVNformat; false for a format relift does not know. */
 bool nvn_tex_format(uint32_t format, uint32_t *bpb, uint32_t *bw, uint32_t *bh);
+
+/** @brief The buffer side of a copy between a buffer and a texture region. */
+typedef struct nvn_copy_pitch {
+    /** @brief Bytes from one row of blocks to the next, and from one layer or slice to the next. */
+    uint64_t row_bytes, image_bytes;
+    /** @brief The same as Vulkan counts them: texels per row, rows of texels per image. */
+    uint32_t row_texels, image_rows;
+    /** @brief Bytes the copy reads or writes, from the first block to the last. */
+    uint64_t span;
+} nvn_copy_pitch;
+
+/**
+ * @brief The buffer layout of a copy of region rg of a texture of NVNformat
+ * format with the command buffer's copy strides, as the driver computes it:
+ * a stride of 0 packs rows (blocks per row times bytes per block) or images
+ * (row bytes times block rows). False when the format is unknown, the region
+ * is empty, or a stride is not a whole number of blocks or rows (no Vulkan
+ * copy can express it).
+ */
+bool nvn_copy_pitch_of(uint32_t format, const nvn_region *rg, uint32_t row_stride, uint32_t image_stride,
+                       nvn_copy_pitch *out);
 /** @brief Fills d's size, alignment, block and level fields from its target, format, size, levels, samples and flags; false for an unknown format. */
 bool nvn_tex_layout(nvn_tex_desc *d);
 /**
@@ -156,10 +182,6 @@ bool nvn_tex_layout(nvn_tex_desc *d);
  * texture.
  */
 bool nvn_vk_rt_inside(const nvn_tex_desc *d, uint32_t level, uint32_t layer);
-/** @brief NVNcopyRegion: a box of texels. */
-typedef struct nvn_region {
-    int32_t x, y, z, width, height, depth;
-} nvn_region;
 
 /**
  * @brief Copies region r of level and layer of a texture laid out as d with
@@ -306,7 +328,11 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(nvnCommandBufferSetMemoryCallbackData)                                                                           \
     X(nvnCommandBufferSetRecordingMode)                                                                                \
     X(nvnCommandBufferBeginRecording)                                                                                  \
-    X(nvnCommandBufferEndRecording)
+    X(nvnCommandBufferEndRecording)                                                                                    \
+    X(nvnCommandBufferSetCopyRowStride)                                                                                \
+    X(nvnCommandBufferSetCopyImageStride)                                                                              \
+    X(nvnCommandBufferGetCopyRowStride)                                                                                \
+    X(nvnCommandBufferGetCopyImageStride)
 
 /** @brief Command buffer procs recorded as commands (nvn_cmd.c), as X(op, proc). */
 #define NVN_RECORDED(X) \
@@ -344,8 +370,6 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_FENCE_SYNC, nvnCommandBufferFenceSync) \
     X(NVN_CMD_REPORT_COUNTER, nvnCommandBufferReportCounter) \
     X(NVN_CMD_RESET_COUNTER, nvnCommandBufferResetCounter) \
-    X(NVN_CMD_SET_COPY_IMAGE_STRIDE, nvnCommandBufferSetCopyImageStride) \
-    X(NVN_CMD_SET_COPY_ROW_STRIDE, nvnCommandBufferSetCopyRowStride) \
     X(NVN_CMD_SET_DEPTH_BOUNDS, nvnCommandBufferSetDepthBounds) \
     X(NVN_CMD_SET_DEPTH_RANGES, nvnCommandBufferSetDepthRanges) \
     X(NVN_CMD_SET_PATCH_SIZE, nvnCommandBufferSetPatchSize) \
@@ -376,6 +400,14 @@ enum nvn_cmd_op {
 };
 
 /** @brief One recorded command: its op and argument registers. */
+/**
+ * @brief The arguments of a recorded CopyBufferToTexture or
+ * CopyTextureToBuffer that hold the command buffer's copy row and image
+ * strides when it was recorded (the procs take six).
+ */
+#define NVN_COPY_ROW_STRIDE_ARG 6
+#define NVN_COPY_IMAGE_STRIDE_ARG 7
+
 typedef struct nvn_cmd {
     uint32_t op;
     uint64_t x[8];

@@ -32,3 +32,28 @@ TEST(nvn_replay_reset_counter_is_kept_in_the_state)
     CHECK_EQ(replay_one(&st, &e), RL_OK);
     CHECK_EQ(st.counters_reset, 1u | 1u << 3 | 1u << 15);
 }
+
+TEST(nvn_copy_pitch_follows_the_drivers_strides)
+{
+    nvn_copy_pitch p;
+    nvn_region rg = { 0, 0, 0, 10, 3, 2 };
+    CHECK(nvn_copy_pitch_of(37, &rg, 0, 0, &p));
+    CHECK_EQ(p.row_bytes, 40);
+    CHECK_EQ(p.image_bytes, 120);
+    CHECK_EQ(p.row_texels, 10);
+    CHECK_EQ(p.image_rows, 3);
+    CHECK_EQ(p.span, 120 + 80 + 40);
+    CHECK(nvn_copy_pitch_of(37, &rg, 64, 256, &p));
+    CHECK_EQ(p.row_texels, 16);
+    CHECK_EQ(p.image_rows, 4);
+    CHECK_EQ(p.span, 256 + 128 + 40);
+    CHECK(!nvn_copy_pitch_of(37, &rg, 42, 0, &p));
+    CHECK(!nvn_copy_pitch_of(37, &rg, 36, 0, &p));
+    CHECK(!nvn_copy_pitch_of(37, &rg, 64, 100, &p));
+    nvn_region bc = { 0, 0, 0, 10, 6, 1 };
+    CHECK(nvn_copy_pitch_of(65, &bc, 0, 0, &p));
+    CHECK_EQ(p.row_bytes, 24);
+    CHECK_EQ(p.row_texels, 12);
+    CHECK_EQ(p.image_rows, 8);
+    CHECK_EQ(p.span, 48);
+}

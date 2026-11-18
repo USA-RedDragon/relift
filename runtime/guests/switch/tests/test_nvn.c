@@ -151,6 +151,36 @@ TEST(nvn_command_buffer_records_and_submits)
     CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RL_PENDING);
 }
 
+TEST(nvn_copy_strides_are_command_buffer_state_each_copy_keeps)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400, region = heap + 0x600;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, cb, heap, 0, 0x4000), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCopyRowStride, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetCopyRowStride, cb, 256, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    c->x[4] = region;
+    c->x[5] = 0;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferCopyBufferToTexture, cb, 0x1000, heap + 0x800, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetCopyImageStride, cb, 0x4000, 0, 0), RET);
+    c->x[4] = region;
+    c->x[5] = 0;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferCopyBufferToTexture, cb, 0x1000, heap + 0x800, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
+    const nvn_cmdset *s = nvn_cmdset_of(c->x[0]);
+    CHECK(s != NULL);
+    CHECK_EQ(s->n, 2);
+    CHECK_EQ(s->cmds[0].x[NVN_COPY_ROW_STRIDE_ARG], 256);
+    CHECK_EQ(s->cmds[0].x[NVN_COPY_IMAGE_STRIDE_ARG], 0);
+    CHECK_EQ(s->cmds[1].x[NVN_COPY_IMAGE_STRIDE_ARG], 0x4000);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCopyImageStride, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x4000);
+}
+
 TEST(nvn_texels_land_in_gobs)
 {
     nvn_tex_desc d = { .target = 1, .format = 0x25, .width = 64, .height = 64, .levels = 1 };

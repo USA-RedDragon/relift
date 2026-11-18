@@ -81,6 +81,10 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 3, ONE, sizeof(nvn_region) },
     { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 5, ONE, NVN_VIEW_BYTES },
     { NVN_CMD_COPY_TEXTURE_TO_TEXTURE, 6, ONE, sizeof(nvn_region) },
+    { NVN_CMD_COPY_BUFFER_TO_TEXTURE, 3, ONE, NVN_VIEW_BYTES },
+    { NVN_CMD_COPY_BUFFER_TO_TEXTURE, 4, ONE, sizeof(nvn_region) },
+    { NVN_CMD_COPY_TEXTURE_TO_BUFFER, 2, ONE, NVN_VIEW_BYTES },
+    { NVN_CMD_COPY_TEXTURE_TO_BUFFER, 3, ONE, sizeof(nvn_region) },
 };
 #undef ONE
 
@@ -237,6 +241,57 @@ uint64_t nvnh_nvnCommandBufferSetMemoryCallbackData(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/**
+ * @brief nvnCommandBufferSetCopyRowStride(NVNcommandBuffer *, ptrdiff_t):
+ * the bytes between rows of the buffer side of later buffer and texture
+ * copies, 0 for rows packed tight. As in the driver, where it is one store
+ * into the command buffer object that BeginRecording leaves alone, it is
+ * state of the command buffer, not a command: each copy takes the value
+ * current when it is recorded.
+ */
+uint64_t nvnh_nvnCommandBufferSetCopyRowStride(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferSetCopyRowStride");
+    b->row_stride = (uint32_t)c->x[1];
+    return nvn_ret(c);
+}
+
+/** @brief nvnCommandBufferSetCopyImageStride(NVNcommandBuffer *, ptrdiff_t): as SetCopyRowStride, between layers. */
+uint64_t nvnh_nvnCommandBufferSetCopyImageStride(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferSetCopyImageStride");
+    b->image_stride = (uint32_t)c->x[1];
+    return nvn_ret(c);
+}
+
+/** @brief nvnCommandBufferGetCopyRowStride(const NVNcommandBuffer *). */
+uint64_t nvnh_nvnCommandBufferGetCopyRowStride(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferGetCopyRowStride");
+    c->x[0] = (uint64_t)(int64_t)(int32_t)b->row_stride;
+    return nvn_ret(c);
+}
+
+/** @brief nvnCommandBufferGetCopyImageStride(const NVNcommandBuffer *). */
+uint64_t nvnh_nvnCommandBufferGetCopyImageStride(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferGetCopyImageStride");
+    c->x[0] = (uint64_t)(int64_t)(int32_t)b->image_stride;
+    return nvn_ret(c);
+}
+
 /** @brief nvnCommandBufferSetRecordingMode(NVNcommandBuffer *, mode). */
 uint64_t nvnh_nvnCommandBufferSetRecordingMode(rl_ctx *c, uint8_t *mem)
 {
@@ -328,6 +383,10 @@ uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
         if (!snap(b, mem, c->x[r->reg], count * r->elem, &e->x[r->reg]))
             return (uint64_t)rl_guest_fatal(c, "nvn", "%s: cannot keep %llu bytes of argument %u", nvn_cmd_name(op),
                                             (unsigned long long)(count * r->elem), r->reg);
+    }
+    if (op == NVN_CMD_COPY_BUFFER_TO_TEXTURE || op == NVN_CMD_COPY_TEXTURE_TO_BUFFER) {
+        e->x[NVN_COPY_ROW_STRIDE_ARG] = b->row_stride;
+        e->x[NVN_COPY_IMAGE_STRIDE_ARG] = b->image_stride;
     }
     if (op == NVN_CMD_SET_RENDER_TARGETS && (e->x[3] & NVN_SNAP))
         for (uint32_t i = 0; i < (uint32_t)c->x[1]; i++) {

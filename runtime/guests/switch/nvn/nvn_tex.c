@@ -113,6 +113,25 @@ static uint32_t driver_block(uint32_t n, uint32_t t)
     return b;
 }
 
+bool nvn_copy_pitch_of(uint32_t format, const nvn_region *rg, uint32_t row_stride, uint32_t image_stride,
+                       nvn_copy_pitch *out)
+{
+    uint32_t bpb, bw, bh;
+    if (!nvn_tex_format(format, &bpb, &bw, &bh) || rg->width <= 0 || rg->height <= 0 || rg->depth <= 0)
+        return false;
+    uint64_t blocks_w = ((uint64_t)rg->width + bw - 1) / bw, blocks_h = ((uint64_t)rg->height + bh - 1) / bh;
+    uint64_t row = row_stride ? row_stride : blocks_w * bpb;
+    uint64_t image = image_stride ? image_stride : row * blocks_h;
+    if (row % bpb || row < blocks_w * bpb || image % row || image < row * blocks_h)
+        return false;
+    *out = (nvn_copy_pitch){ row,
+                             image,
+                             (uint32_t)(row / bpb * bw),
+                             (uint32_t)(image / row * bh),
+                             image * ((uint64_t)rg->depth - 1) + row * (blocks_h - 1) + blocks_w * bpb };
+    return true;
+}
+
 bool nvn_tex_format(uint32_t format, uint32_t *bpb, uint32_t *bw, uint32_t *bh)
 {
     if (format >= sizeof formats / sizeof formats[0] || !formats[format].bpb)
