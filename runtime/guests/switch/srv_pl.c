@@ -7,7 +7,9 @@
  * plain TrueType font at the offset GetSharedMemoryAddressOffset gives.
  * The fonts are the player's own, decoded from their console's system data
  * by relift import into the folder RELIFT_FONTS names (`<type>.ttf`,
- * `<type>` the SharedFontType). Each font is placed as the console's pl
+ * `<type>` the SharedFontType); a type the player has not imported comes from
+ * the open fallback relift build makes into the folder RELIFT_FONTS_FALLBACK
+ * names (Noto Sans CJK cut to the type's standard character set). Each font is placed as the console's pl
  * service places it (inferred from Ryujinx and yuzu, which load the same
  * files): one after another in SharedFontType order, each behind an 8-byte
  * header (the .bfttf magic, and the size big-endian XOR the key), the offset naming the
@@ -48,29 +50,34 @@ static bool pl_load(void)
     if (!g_pl.shm)
         return false;
     uint8_t *base = rl_hos_shmem_ptr(g_pl.shm);
-    const char *dir = getenv("RELIFT_FONTS");
+    const char *dirs[2] = { getenv("RELIFT_FONTS"), getenv("RELIFT_FONTS_FALLBACK") };
+    static const char *const from[2] = { "the player's system data", "the open fallback (Noto Sans CJK)" };
     uint32_t at = 0;
-    for (uint32_t t = 0; t < PL_TYPES && dir && *dir; t++) {
-        char path[4096];
-        snprintf(path, sizeof path, "%s/%u.ttf", dir, t);
-        FILE *f = fopen(path, "rb");
-        if (!f)
-            continue;
-        long n = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
-        rewind(f);
-        if (n > 0 && (uint64_t)at + 8 + (uint64_t)n <= PL_SHMEM_SIZE &&
-            fread(base + at + 8, 1, (size_t)n, f) == (size_t)n) {
-            uint32_t hdr[2] = { PL_BFTTF_MAGIC, __builtin_bswap32((uint32_t)n) ^ PL_BFTTF_KEY };
-            memcpy(base + at, hdr, sizeof hdr);
-            g_pl.offset[t] = at + 8;
-            g_pl.size[t] = (uint32_t)n;
-            g_pl.present[t] = true;
-            at += 8 + (uint32_t)n;
-            rl_log(RL_LOG_INFO, "pl", "%s font: the player's system data (%u bytes)", type_names[t], (uint32_t)n);
-        } else {
-            rl_log(RL_LOG_ERROR, "pl", "%s font: %s does not fit or cannot be read", type_names[t], path);
+    for (uint32_t t = 0; t < PL_TYPES; t++) {
+        for (int d = 0; d < 2 && !g_pl.present[t]; d++) {
+            if (!dirs[d] || !*dirs[d])
+                continue;
+            char path[4096];
+            snprintf(path, sizeof path, "%s/%u.ttf", dirs[d], t);
+            FILE *f = fopen(path, "rb");
+            if (!f)
+                continue;
+            long n = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+            rewind(f);
+            if (n > 0 && (uint64_t)at + 8 + (uint64_t)n <= PL_SHMEM_SIZE &&
+                fread(base + at + 8, 1, (size_t)n, f) == (size_t)n) {
+                uint32_t hdr[2] = { PL_BFTTF_MAGIC, __builtin_bswap32((uint32_t)n) ^ PL_BFTTF_KEY };
+                memcpy(base + at, hdr, sizeof hdr);
+                g_pl.offset[t] = at + 8;
+                g_pl.size[t] = (uint32_t)n;
+                g_pl.present[t] = true;
+                at += 8 + (uint32_t)n;
+                rl_log(RL_LOG_INFO, "pl", "%s font: %s (%u bytes)", type_names[t], from[d], (uint32_t)n);
+            } else {
+                rl_log(RL_LOG_ERROR, "pl", "%s font: %s does not fit or cannot be read", type_names[t], path);
+            }
+            fclose(f);
         }
-        fclose(f);
     }
     return true;
 }
@@ -90,8 +97,8 @@ static rl_result font_type(rl_ipc_req *r, uint32_t *t)
     }
     if (!g_pl.present[*t]) {
         (void)rl_report_unknown(0x504C00ull ^ *t, "pl",
-                                "the game needs the %s shared font, and no system data with it was imported "
-                                "(relift import --system-data <dir>)",
+                                "the game needs the %s shared font, and neither the player's system data "
+                                "(relift import --system-data <dir>) nor relift's open fallback has it",
                                 type_names[*t]);
         return SF_RESULT_NOT_SUPPORTED;
     }

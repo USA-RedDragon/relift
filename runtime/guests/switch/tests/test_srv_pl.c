@@ -86,3 +86,38 @@ TEST(pl_serves_the_imported_fonts_in_shared_memory)
     CHECK_EQ(rc, SF_RESULT_NOT_SUPPORTED);
     unsetenv("RELIFT_FONTS");
 }
+
+static void write_font(const char *dir, uint32_t type, const char *text)
+{
+    char path[4200];
+    mkdir(dir, 0755);
+    snprintf(path, sizeof path, "%s/%u.ttf", dir, type);
+    FILE *f = fopen(path, "wb");
+    fwrite(text, 1, strlen(text), f);
+    fclose(f);
+}
+
+TEST(pl_takes_the_fallback_only_for_fonts_the_player_lacks)
+{
+    char own[4096], fallback[4096];
+    snprintf(own, sizeof own, "%s/own-fonts", getenv("RELIFT_SDMC"));
+    snprintf(fallback, sizeof fallback, "%s/fallback-fonts", getenv("RELIFT_SDMC"));
+    write_font(own, 1, "own Chinese Simplified");
+    write_font(fallback, 1, "fallback Chinese Simplified");
+    write_font(fallback, 4, "fallback Korean");
+    setenv("RELIFT_FONTS", own, 1);
+    setenv("RELIFT_FONTS_FALLBACK", fallback, 1);
+
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    tc_obj pl = tc_open_service(c, heap, "pl:u");
+    uint32_t rc;
+    CHECK_EQ(u32_of(c, pl, 2, 1, &rc), strlen("own Chinese Simplified"));
+    CHECK_EQ(rc, 0);
+    CHECK_EQ(u32_of(c, pl, 2, 4, &rc), strlen("fallback Korean"));
+    CHECK_EQ(rc, 0);
+    (void)u32_of(c, pl, 2, 0, &rc);
+    CHECK_EQ(rc, SF_RESULT_NOT_SUPPORTED);
+    unsetenv("RELIFT_FONTS");
+    unsetenv("RELIFT_FONTS_FALLBACK");
+}
