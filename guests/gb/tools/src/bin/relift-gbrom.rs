@@ -1,5 +1,6 @@
 //! `relift-gbrom`: print the header of a Game Boy or Game Boy Color ROM and
-//! validate its checksums, or list its functions per bank.
+//! validate its checksums, list its functions per bank, or print the IR of
+//! SM83 instructions.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -8,6 +9,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use relift_gb_formats::Cartridge;
 use relift_gb_tools::functions::{self, FunctionsArgs};
+use relift_gb_tools::ir::{self, IrArgs};
 use relift_gb_tools::{BoxError, input, print_json, run};
 use serde_json::{Value, json};
 
@@ -33,12 +35,16 @@ enum Command {
     /// Find the functions of a ROM across its mapper banks: per bank, with
     /// the transfers that cannot be resolved and the code run from RAM.
     Functions(FunctionsArgs),
+    /// Print the IR of SM83 instructions given as hex bytes, as the Game Boy
+    /// guest lifts them.
+    Ir(IrArgs),
 }
 
 fn main() -> ExitCode {
     run::<Cli>("relift-gbrom", |cli| {
         let rom_path = match (cli.command, cli.rom) {
             (Some(Command::Functions(a)), _) => return functions::run(&a),
+            (Some(Command::Ir(a)), _) => return ir::run(&a),
             (None, Some(p)) => p,
             (None, None) => return Err("a ROM path is required".into()),
         };

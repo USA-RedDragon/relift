@@ -3,6 +3,7 @@
 //! error exit. All format logic lives in `relift-gb-formats`.
 
 pub mod functions;
+pub mod ir;
 
 use std::io::{Read, Write};
 use std::path::Path;

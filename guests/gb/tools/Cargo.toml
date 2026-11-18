@@ -1,6 +1,6 @@
 [package]
 name = "relift-gb-tools"
-description = "`relift-gbrom`: prints a ROM's header as text or JSON and validates logo, checksums and size; `functions` runs `relift-gb-analyze`"
+description = "`relift-gbrom`: prints a ROM's header as text or JSON and validates logo, checksums and size; `functions` runs `relift-gb-analyze`; `ir` prints the IR of SM83 instructions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,8 +12,12 @@ band = "2"
 
 [dependencies]
 clap = { workspace = true }
+relift-cpu-sm83 = { workspace = true }
+relift-gb = { workspace = true }
 relift-gb-analyze = { workspace = true }
 relift-gb-formats = { workspace = true }
+relift-guest = { workspace = true }
+relift-ir = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

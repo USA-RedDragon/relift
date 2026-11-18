@@ -276,11 +276,15 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gb-tools",
-        why: "single-purpose tools for Game Boy files, thin wrappers over relift-gb-formats and relift-gb-analyze",
+        why: "single-purpose tools for Game Boy files, thin wrappers over relift-gb-formats and relift-gb-analyze, and `ir`, which prints blocks lifted by the guest's frontend",
         normal: &[
             "clap",
+            "relift-cpu-sm83",
+            "relift-gb",
             "relift-gb-analyze",
             "relift-gb-formats",
+            "relift-guest",
+            "relift-ir",
             "serde_json",
         ],
         dev: &[

@@ -191,3 +191,28 @@ fn functions_json_lists_tables_ram_pointers_and_instructions() {
     assert!(f.iter().any(|f| f["entry"]["text"] == "00:0300"), "{v}");
     assert_eq!(f[0]["instructions"][0], serde_json::json!([0, 256, 1]));
 }
+
+#[test]
+fn ir_prints_the_blocks_the_guest_lifts() {
+    let d = dir("gbrom-ir");
+    let out = gbrom(&d, &["ir", "--bank", "3", "f0", "40", "fb"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("block 0x150 len 2 regs sm83 addr i16 bank 0x3"));
+    assert!(text.contains("io.load.le.dev v0"));
+    assert!(text.contains("exit trap 0xfb0153 0x153"));
+}
+
+#[test]
+fn ir_rejects_odd_hex_and_a_cut_instruction() {
+    let d = dir("gbrom-ir-bad");
+    for args in [&["ir", "f"][..], &["ir", "cd", "00"][..]] {
+        let out = gbrom(&d, args);
+        assert!(!out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stderr).lines().count(), 1);
+    }
+}

@@ -1126,8 +1126,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-cpu-sm83",
+ "relift-gb",
  "relift-gb-analyze",
  "relift-gb-formats",
+ "relift-guest",
+ "relift-ir",
  "relift-proc",
  "serde_json",
 ]
