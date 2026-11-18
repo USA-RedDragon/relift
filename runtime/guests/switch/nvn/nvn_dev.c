@@ -265,8 +265,10 @@ static int device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev)
     uint64_t gpu = nvn_gpu_device();
     if (!gpu)
         return rl_guest_fatal(c, "nvn", "the GPU is not open");
-    rl_st32(mem, dev + g_layout->flags, d->flags);
-    rl_st64(mem, dev + g_layout->gpu_device, gpu);
+    if (g_layout->flags != RL_NVN_NONE)
+        rl_st32(mem, dev + g_layout->flags, d->flags);
+    if (g_layout->gpu_device != RL_NVN_NONE)
+        rl_st64(mem, dev + g_layout->gpu_device, gpu);
     for (uint32_t i = 0; i < g_layout->nfields; i++)
         memcpy(mem + dev + g_layout->fields[i].off, g_layout->fields[i].bytes, g_layout->fields[i].len);
     d->fields = true;
@@ -277,7 +279,9 @@ static int device_fields(rl_ctx *c, uint8_t *mem, uint64_t dev)
 uint64_t nvnh_nvnTextureBuilderGetStorageClass(rl_ctx *c, uint8_t *mem)
 {
     if (!g_layout)
-        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnTextureBuilderGetStorageClass: the build read no NVN2 driver layout");
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnTextureBuilderGetStorageClass: the build read no %s driver layout%s%s",
+                                        nvn_version_name(), nvn_layout_error() ? ": " : "",
+                                        nvn_layout_error() ? nvn_layout_error() : "");
     uint64_t builder = c->x[0], cls = 0;
     int rc = device_fields(c, mem, rl_ld64(mem, builder + g_layout->builder_device));
     if (rc != RL_OK || (rc = nvn_guest_call(c, mem, g_layout->storage_class, &builder, 1, &cls)) != RL_OK)
@@ -318,7 +322,9 @@ static int device_integer(rl_ctx *c, uint8_t *mem, uint32_t info, int32_t *out)
             *out = (int32_t)v;
             return rc;
         }
-        if (info >= own)
+        if (nvn_version_measured(info, out))
+            return RL_OK;
+        if (info >= own || nvn_generation() == 1)
             return rl_guest_fatal(c, "nvn",
                                   "nvnDeviceGetInteger: the driver reads NVNdeviceInfo %u from device state the "
                                   "runtime has no value for",
@@ -396,11 +402,19 @@ uint64_t nvnh_nvnDeviceGetImageHandle(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnDeviceGetTextureHandle(const NVNdevice *, int texture, int sampler): texture | sampler << 20, as the driver encodes it. */
+/**
+ * @brief nvnDeviceGetTextureHandle(const NVNdevice *, int texture, int
+ * sampler): texture | sampler << 20, as the driver encodes it; NVN1 ORs the
+ * two as 32-bit words, sign-extends and adds its mark (16.2.0 0x44d970,
+ * nvn_sampled_handle_mark).
+ */
 uint64_t nvnh_nvnDeviceGetTextureHandle(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1] | (uint64_t)(int64_t)(int32_t)c->x[2] << 20;
+    if (nvn_generation() == 1)
+        c->x[0] = (uint64_t)(int64_t)(int32_t)((uint32_t)c->x[1] | (uint32_t)c->x[2] << 20) | nvn_sampled_handle_mark();
+    else
+        c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1] | (uint64_t)(int64_t)(int32_t)c->x[2] << 20;
     return nvn_ret(c);
 }
 
@@ -607,7 +621,13 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
         return nvn_ret(c);
     }
     if (!g_layout || !g_layout->nints)
-        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnMemoryPoolMapVirtual: the build read no NVN2 driver layout");
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnMemoryPoolMapVirtual: the build read no %s driver layout",
+                                        nvn_version_name());
+    if (g_layout->pool_page_info == RL_NVN_NONE)
+        return (uint64_t)rl_guest_fatal(c, "nvn",
+                                        "nvnMemoryPoolMapVirtual: the build found no page size the %s driver checks "
+                                        "mappings against",
+                                        nvn_version_name());
     int32_t page_size = 0;
     int rc = device_integer(c, mem, g_layout->pool_page_info, &page_size);
     if (rc != RL_OK)

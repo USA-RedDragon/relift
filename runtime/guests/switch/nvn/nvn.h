@@ -1,12 +1,15 @@
 /**
  * @file nvn.h
- * @brief NVN2 (the Switch 2's graphics API) replaced by name.
+ * @brief NVN (the Switch's NVN1 and the Switch 2's NVN2 graphics APIs)
+ * replaced by name.
  *
- * Every Switch 2 game reaches NVN2 through nvnBootstrapLoader, which the
- * SDK's sdk module defines and the game's modules import. The loader hook of
+ * Every game reaches NVN through nvnBootstrapLoader, which the SDK's sdk
+ * module defines and the game's modules import. The loader hook of
  * this layer replaces nvnBootstrapLoader in every module, so the game gets
  * relift's nvnDeviceGetProcAddress and, from it, relift's function for every
- * proc name; the SDK's own NVN2 driver never runs. Each name gets a guest
+ * proc name; the SDK driver's own device, queue and command buffer code
+ * never runs. One layer serves both generations; what differs is data
+ * chosen by the driver record the build writes (nvn_version.c). Each name gets a guest
  * address in a page of thunks next to the lifted code. A name relift does
  * not implement yet still gets an address, and a call to it stops the game
  * with a report that names the proc.
@@ -37,11 +40,15 @@ struct rl_nvn_field {
     const uint8_t *bytes;
 };
 
+/** @brief A layout offset or info the driver has none of (RL_NVN_NONE). */
+#define RL_NVN_NONE 0xffffffffu
+
 /**
- * @brief What the build read from the program's NVN2 driver: the guest
+ * @brief What the build read from the program's NVN driver: the guest
  * address of its nvnTextureBuilderGetStorageClass and of the word holding
  * its settings hook (0 for none), the offsets of a builder's device pointer
- * and of a device's flags word and NvRmGpuDevice pointer, the other device
+ * and of a device's flags word and NvRmGpuDevice pointer (RL_NVN_NONE when
+ * the driver has none: NVN1 has no device flags word), the other device
  * fields that function reads, and the settings the driver's device start
  * reads, which must all be unset for the fields to hold.
  */
@@ -61,11 +68,36 @@ struct rl_nvn_layout {
      * opened GPU (the driver's initialization copies it into the device).
      */
     const uint8_t *int_device;
-    /** @brief The NVNdeviceInfo whose answer is the page size nvnMemoryPoolMapVirtual checks against. */
+    /**
+     * @brief The NVNdeviceInfo whose answer is the page size
+     * nvnMemoryPoolMapVirtual checks against, RL_NVN_NONE when the build
+     * found none.
+     */
     uint32_t pool_page_info;
 };
 
-/** @brief Registers the driver layout; the build's generated nvn_driver.c calls it before main. */
+/** @brief Registers the driver layout (rl_nvn_set_driver does for a build). */
 RL_RUNTIME_API void rl_nvn_set_layout(const struct rl_nvn_layout *l);
+
+/**
+ * @brief What the build read from the program's NVN driver: its API
+ * generation (1 for NVN1, the Switch's; 2 for NVN2, the Switch 2's), its
+ * NVN_DEVICE_INFO_API_MAJOR_VERSION and _MINOR_VERSION, the NVN SDK version
+ * its middleware string names (NULL for none), the device layout (NULL with
+ * layout_error saying why it could not be read), and the procs whose own
+ * code is not pure, as nimpure pairs of name and reason in impure.
+ */
+struct rl_nvn_driver {
+    uint32_t generation;
+    int32_t api_major, api_minor;
+    const char *sdk;
+    const struct rl_nvn_layout *layout;
+    const char *layout_error;
+    uint32_t nimpure;
+    const char *const *impure;
+};
+
+/** @brief Registers the driver record and its layout; the build's generated nvn_driver.c calls it before main. */
+RL_RUNTIME_API void rl_nvn_set_driver(const struct rl_nvn_driver *d);
 
 #endif

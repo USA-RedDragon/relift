@@ -572,6 +572,21 @@ void nvn_obj_free(nvn_obj *o);
 int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *args, unsigned n, uint64_t *ret);
 
 
+/** @brief The NVN generation of the program's driver (nvn_version.c): 1 or 2 (also without a build record). */
+uint32_t nvn_generation(void);
+/** @brief Why the build found the driver's own code for proc name impure, or NULL when it is pure or unread. */
+const char *nvn_impure(const char *name);
+/** @brief Why the build could not read the driver's device layout, or NULL. */
+const char *nvn_layout_error(void);
+/** @brief The driver's generation and versions, for messages. */
+const char *nvn_version_name(void);
+/** @brief The bit the driver sets in texture, separate texture and texel fetch handles (bit 32 in NVN1, none in NVN2). */
+uint64_t nvn_sampled_handle_mark(void);
+/** @brief Number of NVNformat values the driver knows. */
+uint32_t nvn_format_count(void);
+/** @brief The NVN1 answer for an NVNdeviceInfo the driver measures at device start; false for NVN2 or another info. */
+bool nvn_version_measured(uint32_t info, int32_t *out);
+
 /** @brief Number of procs that stay the SDK driver's own code (nvn_driver.c). */
 #define NVN_DRIVER_PROC_COUNT 308u
 

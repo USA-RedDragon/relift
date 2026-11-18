@@ -1,15 +1,15 @@
 /**
  * @file nvn_misc.c
- * @brief NVN2 procs with little state: descriptor handles, timestamps,
+ * @brief NVN procs with little state: descriptor handles, timestamps,
  * events, and the queries of queues, pools and windows.
  */
 #include "nvn_priv.h"
 
-/** @brief nvnDeviceGetSeparateTextureHandle(const NVNdevice *, int id): the id, as the driver encodes it. */
+/** @brief nvnDeviceGetSeparateTextureHandle(const NVNdevice *, int id): the id with the NVN1 mark, as the driver encodes it. */
 uint64_t nvnh_nvnDeviceGetSeparateTextureHandle(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1];
+    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1] | nvn_sampled_handle_mark();
     return nvn_ret(c);
 }
 
@@ -21,11 +21,11 @@ uint64_t nvnh_nvnDeviceGetSeparateSamplerHandle(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnDeviceGetTexelFetchHandle(const NVNdevice *, int id): the id. */
+/** @brief nvnDeviceGetTexelFetchHandle(const NVNdevice *, int id): the id with the NVN1 mark. */
 uint64_t nvnh_nvnDeviceGetTexelFetchHandle(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1];
+    c->x[0] = (uint64_t)(int64_t)(int32_t)c->x[1] | nvn_sampled_handle_mark();
     return nvn_ret(c);
 }
 

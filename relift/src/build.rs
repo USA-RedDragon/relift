@@ -1487,9 +1487,20 @@ fn lift_and_emit(
                 }
             )));
         }
-        if let Some(c) = crate::nvndriver::write(&placed, cpu, &cdir)? {
-            prog.push(c);
+    }
+    if let Some((c, d)) = crate::nvndriver::write(&placed, cpu, &cdir)? {
+        if let Err(e) = &d.layout {
+            ui.note(&Line::new().text(format!(
+                "nvn driver: NVN{} {}, no device layout ({e})",
+                if d.generation == crate::nvndriver::Generation::Nvn1 {
+                    1
+                } else {
+                    2
+                },
+                d.sdk.as_deref().unwrap_or("of unknown SDK"),
+            )));
         }
+        prog.push(c);
     }
     for f in program::program_files(
         &placed,

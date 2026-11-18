@@ -1,7 +1,9 @@
 /**
  * @file nvn_core.c
- * @brief The NVN2 layer's loader hook, proc slots, nvnBootstrapLoader and
- * nvnDeviceGetProcAddress.
+ * @brief The NVN layer's loader hook, proc slots, nvnBootstrapLoader and
+ * nvnDeviceGetProcAddress. The hook serves Switch and Switch 2 programs
+ * alike: it answers nvnBootstrapLoader only, so a program that draws through
+ * Vulkan never reaches it.
  *
  * Slot i of the thunk page (4 bytes each) is the guest address of one proc
  * name. The implemented procs take the first slots in name order; a name the
@@ -54,8 +56,14 @@ static uint64_t miss(rl_ctx *c, uint8_t *mem, uint32_t slot)
     if (slot < RL_NVN_SLOTS && nvn.recorded[slot])
         return nvn_cmd_record(c, mem, NVN_CMD_COUNT + slot);
     const char *name = slot < RL_NVN_SLOTS && nvn.names[slot] ? nvn.names[slot] : "(unnamed)";
-    return (uint64_t)rl_guest_fatal(c, "nvn", "%s is not implemented (called from 0x%llx)", name,
-                                    (unsigned long long)c->x[30]);
+    const char *impure = nvn_driver_index(name) >= 0 ? nvn_impure(name) : NULL;
+    if (impure)
+        return (uint64_t)rl_guest_fatal(c, "nvn",
+                                        "%s is not implemented, and the %s driver's own code for it is not pure: it "
+                                        "%s (called from 0x%llx)",
+                                        name, nvn_version_name(), impure, (unsigned long long)c->x[30]);
+    return (uint64_t)rl_guest_fatal(c, "nvn", "%s is not implemented for %s (called from 0x%llx)", name,
+                                    nvn_version_name(), (unsigned long long)c->x[30]);
 }
 
 /*
@@ -195,7 +203,7 @@ static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
     if (!name)
         return RL_OK;
     int k = nvn_driver_index(name);
-    if (k >= 0) {
+    if (k >= 0 && !nvn_impure(name)) {
         int rc = driver_addr(c, mem, k, name, addr);
         if (rc != RL_OK || *addr)
             return rc;
@@ -207,6 +215,9 @@ static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
 int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *args, unsigned n, uint64_t *ret)
 {
     int k = nvn_driver_index(name);
+    const char *impure = nvn_impure(name);
+    if (impure)
+        return rl_guest_fatal(c, "nvn", "the %s driver's own %s is not pure: it %s", nvn_version_name(), name, impure);
     uint64_t a = 0;
     int rc = k >= 0 ? driver_addr(c, mem, k, name, &a) : RL_OK;
     if (rc != RL_OK)
@@ -307,7 +318,7 @@ static int hook_start(void *user, uint64_t *code_free)
     (void)user;
     uint64_t bytes = (4u * RL_NVN_SLOTS + HOS_PAGE - 1) & ~(HOS_PAGE - 1);
     if (rl_hos_reserve_at(*code_free, bytes) != KR_SUCCESS) {
-        rl_log(RL_LOG_ERROR, "nvn", "no guest address space for the NVN2 layer");
+        rl_log(RL_LOG_ERROR, "nvn", "no guest address space for the NVN layer");
         return -1;
     }
     nvn.base = *code_free;
@@ -331,8 +342,8 @@ static int hook_start(void *user, uint64_t *code_free)
     if (rl_units_register(&u, 1) != 0)
         return -1;
     nvn.up = true;
-    rl_log(RL_LOG_INFO, "nvn", "NVN2 layer up: %u procs implemented, thunks at 0x%llx", (unsigned)N_IMPLS,
-           (unsigned long long)nvn.base);
+    rl_log(RL_LOG_INFO, "nvn", "NVN layer up for %s: %u procs implemented, thunks at 0x%llx", nvn_version_name(),
+           (unsigned)N_IMPLS, (unsigned long long)nvn.base);
     return 0;
 }
 
@@ -376,7 +387,7 @@ static const rl_switch_hook g_hook = {
     .replace = hook_replace,
     .defined = hook_defined,
     .wants = hook_wants,
-    .consoles = 1u << RL_CONSOLE_SWITCH2,
+    .consoles = 1u << RL_CONSOLE_SWITCH | 1u << RL_CONSOLE_SWITCH2,
 };
 
 const rl_switch_hook *rl_nvn_switch_hook(void) { return &g_hook; }

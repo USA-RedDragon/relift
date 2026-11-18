@@ -134,7 +134,7 @@ bool nvn_copy_pitch_of(uint32_t format, const nvn_region *rg, uint32_t row_strid
 
 bool nvn_tex_format(uint32_t format, uint32_t *bpb, uint32_t *bw, uint32_t *bh)
 {
-    if (format >= sizeof formats / sizeof formats[0] || !formats[format].bpb)
+    if (format >= sizeof formats / sizeof formats[0] || format >= nvn_format_count() || !formats[format].bpb)
         return false;
     *bpb = formats[format].bpb;
     *bw = formats[format].bw;

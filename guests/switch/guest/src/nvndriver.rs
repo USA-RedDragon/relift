@@ -444,6 +444,14 @@ pub struct Trace {
     /// Hook calls given a C string (the hook's word and the string): the
     /// driver's settings lookups, which the run takes to find nothing.
     pub settings: Vec<(u64, String)>,
+    /// What the run did beyond reading and writing the objects it was
+    /// given and the driver's read-only tables: calls out of the driver,
+    /// calls it could not follow, accesses to the driver's writable data,
+    /// stores through pointers it does not know, atomics and system
+    /// instructions (see [`purity`]).
+    pub impure: Vec<String>,
+    /// Steps the run may take; none takes the default budget.
+    pub budget: Option<usize>,
     steps: usize,
 }
 
@@ -527,9 +535,10 @@ impl<'a> Abstract<'a> {
             let mut pc = start;
             loop {
                 trace.steps += 1;
-                if trace.steps > BUDGET {
+                let budget = trace.budget.unwrap_or(BUDGET);
+                if trace.steps > budget {
                     return Err(format!(
-                        "the abstract run from 0x{entry:x} took more than {BUDGET} steps"
+                        "the abstract run from 0x{entry:x} took more than {budget} steps"
                     ));
                 }
                 let Some(b) = self.image.block(pc) else {
@@ -559,6 +568,9 @@ impl<'a> Abstract<'a> {
                             exits.push(s.clone());
                             exits.extend(more);
                         } else {
+                            trace
+                                .impure
+                                .push(format!("jumps to a target it does not know at 0x{pc:x}"));
                             trace.unknown_targets += 1;
                             trace.lost.push(pc);
                         }
@@ -626,6 +638,7 @@ impl<'a> Abstract<'a> {
             Succ::Pcs(t) if t.len() == 1 => t[0],
             Succ::Import(name) => {
                 self.import(&name, &args, s);
+                trace.impure.push(format!("calls {name}"));
                 trace.imports.push((name.clone(), args));
                 s.clobber_call();
                 s.regs[0] = V::P(Obj::Ret(name), 0);
@@ -639,6 +652,9 @@ impl<'a> Abstract<'a> {
                     _ => None,
                 };
                 s.clobber_call();
+                trace
+                    .impure
+                    .push(format!("calls the function at driver data 0x{slot:x}"));
                 if let Some(key) = key
                     && self.settings_hook.is_none_or(|h| h == slot)
                 {
@@ -650,6 +666,9 @@ impl<'a> Abstract<'a> {
                 return Ok(Vec::new());
             }
             _ => {
+                trace
+                    .impure
+                    .push("calls through a register it does not know".into());
                 trace.unknown_targets += 1;
                 s.clobber_call();
                 return Ok(Vec::new());
@@ -657,12 +676,16 @@ impl<'a> Abstract<'a> {
         };
         if let Some(name) = self.stub_import(t) {
             self.import(&name, &args, s);
+            trace.impure.push(format!("calls {name}"));
             trace.imports.push((name.clone(), args));
             s.clobber_call();
             s.regs[0] = V::P(Obj::Ret(name), 0);
             return Ok(Vec::new());
         }
         if depth >= DEPTH {
+            trace
+                .impure
+                .push(format!("nests calls deeper than {DEPTH} (at 0x{t:x})"));
             s.clobber_call();
             return Ok(Vec::new());
         }
@@ -993,9 +1016,13 @@ impl<'a> Abstract<'a> {
                                 v
                             }
                             None if len == 8 && a >= u128::from(self.image.read_only) => {
+                                trace.impure.push(format!("reads driver data at 0x{a:x}"));
                                 V::Slot(a as u64)
                             }
-                            None => V::U,
+                            None => {
+                                trace.impure.push(format!("reads driver data at 0x{a:x}"));
+                                V::U
+                            }
                         },
                         V::Idx(tab) if len <= 4 => V::Tab {
                             tab,
@@ -1017,18 +1044,33 @@ impl<'a> Abstract<'a> {
                 }
                 Op::Store { addr, value, .. } => {
                     let len = width_of(b, *value).bytes().unwrap_or(8);
-                    if let V::P(obj, off) = get(*addr, &vals) {
-                        let v = get(*value, &vals);
-                        s.store(&obj, off, len, &v);
+                    match get(*addr, &vals) {
+                        V::P(obj, off) => {
+                            let v = get(*value, &vals);
+                            s.store(&obj, off, len, &v);
+                        }
+                        V::K(a) => trace
+                            .impure
+                            .push(format!("stores to driver data at 0x{a:x}")),
+                        _ => trace
+                            .impure
+                            .push("stores through a pointer it does not know".into()),
                     }
                     V::U
                 }
                 Op::StoreExclusive { addr, .. }
                 | Op::AtomicRmw { addr, .. }
                 | Op::CompareSwap { addr, .. } => {
+                    trace.impure.push("makes an atomic access".into());
                     if let V::P(obj, off) = get(*addr, &vals) {
                         s.store(&obj, off, w.bytes().unwrap_or(8), &V::U);
                     }
+                    V::U
+                }
+                Op::Intrinsic(call) if call.name != relift_cpu_arm64::lift::system::FP_RAISE => {
+                    trace
+                        .impure
+                        .push(format!("runs the system instruction {}", call.name));
                     V::U
                 }
                 _ => V::U,
@@ -1150,6 +1192,39 @@ fn table_names(image: &Image, offs: u64, pool: u64) -> Vec<String> {
     out
 }
 
+/// Why the driver's own code for each proc in `procs` (name and image
+/// offset, as [`proc_table`] gives them) is not pure: a function the
+/// runtime may run as the game's lifted code in place of an NVN layer proc
+/// only reads and writes the objects it is given and the driver's read-only
+/// tables. Its calls into the driver are followed (up to 4 deep); calls out
+/// of the driver or through registers it does not know, accesses to the
+/// driver's writable data, stores through pointers it does not know,
+/// atomics and system instructions each make it impure, and so does a run
+/// longer than [`PURITY_BUDGET`] steps. The result holds the impure procs
+/// only, each with its first reason, in `procs` order.
+pub fn purity(image: &Image, procs: &[(String, u64)]) -> Vec<(String, String)> {
+    let a = Abstract::new(image);
+    let mut out = Vec::new();
+    for (name, pc) in procs {
+        let mut t = Trace {
+            budget: Some(PURITY_BUDGET),
+            ..Trace::default()
+        };
+        let why = match a.run(*pc, a.entry(), &mut t) {
+            Ok(_) => t.impure.into_iter().next(),
+            Err(e) => Some(e),
+        };
+        if let Some(why) = why {
+            out.push((name.clone(), why));
+        }
+    }
+    out
+}
+
+/// Steps [`purity`] gives each proc: a builder, state or view proc takes a
+/// few hundred.
+pub const PURITY_BUDGET: usize = 20_000;
+
 /// A device field and the bytes the driver's `nvnDeviceInitialize` leaves
 /// in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1168,11 +1243,13 @@ pub struct DeviceLayout {
     pub storage_class: u64,
     /// The offset of the device pointer in a texture builder.
     pub builder_device: u32,
-    /// The offset of the device's flags word (`nvnDeviceGetFlags`).
-    pub flags: u32,
+    /// The offset of the device's flags word (`nvnDeviceGetFlags`); none
+    /// in drivers without that getter (NVN1).
+    pub flags: Option<u32>,
     /// The offset of the `NvRmGpuDevice` pointer the getter hands
-    /// `NvRmGpuDeviceChooseKind`.
-    pub gpu_device: u32,
+    /// `NvRmGpuDeviceChooseKind`; none when it calls no such import (NVN1
+    /// chooses the kind from device fields).
+    pub gpu_device: Option<u32>,
     /// The other fields the getter reads, with their values.
     pub fields: Vec<Field>,
     /// The image offset of the word holding the hook `nvnDeviceInitialize`
@@ -1186,8 +1263,10 @@ pub struct DeviceLayout {
     pub integers: Vec<Integer>,
     /// The `NVNdeviceInfo` whose answer is the page size the driver's
     /// `nvnMemoryPoolMapVirtual` checks offsets and sizes against: the one
-    /// that reads the device field the mapping reads.
-    pub pool_page_info: u32,
+    /// that reads the device field the mapping reads. None when the mapping
+    /// reads no device field directly (NVN1 drivers check through helpers
+    /// behind a lock).
+    pub pool_page_info: Option<u32>,
 }
 
 fn proc_addr(procs: &[(String, u64)], name: &str) -> Result<u64, String> {
@@ -1214,6 +1293,29 @@ fn getter_offset(a: &Abstract<'_>, pc: u64, name: &str) -> Result<i64, String> {
     match offs.as_slice() {
         [first, rest @ ..] if rest.iter().all(|o| o == first) => Ok(*first),
         _ => Err(format!("nvn driver: {name} returns no single field")),
+    }
+}
+
+/// The offset of the object field a setter of one pointer argument stores
+/// that pointer to (for drivers without the getter: NVN1 before SDK 5).
+fn setter_offset(a: &Abstract<'_>, pc: u64, name: &str) -> Result<i64, String> {
+    let mut t = Trace::default();
+    let exits = a.run(pc, a.entry(), &mut t)?;
+    let stored = V::P(Obj::Arg(1), 0);
+    let offs: Vec<i64> = exits
+        .iter()
+        .map(|s| {
+            s.mem.get(&Obj::Arg(0)).and_then(|m| {
+                m.iter()
+                    .find(|(_, c)| matches!(c, Cell::Val(v, 8) if *v == stored))
+                    .map(|(off, _)| *off)
+            })
+        })
+        .collect::<Option<Vec<i64>>>()
+        .ok_or_else(|| format!("nvn driver: {name} does not store its argument in its object"))?;
+    match offs.as_slice() {
+        [first, rest @ ..] if rest.iter().all(|o| o == first) => Ok(*first),
+        _ => Err(format!("nvn driver: {name} stores to no single field")),
     }
 }
 
@@ -1341,7 +1443,7 @@ fn pool_page_info(
     a: &Abstract<'_>,
     procs: &[(String, u64)],
     integers: &[Integer],
-) -> Result<u32, String> {
+) -> Result<Option<u32>, String> {
     let map = proc_addr(procs, "nvnMemoryPoolMapVirtual")?;
     let mut t = Trace::default();
     a.run(map, a.entry(), &mut t)?;
@@ -1362,7 +1464,8 @@ fn pool_page_info(
         .map(|(_, n)| n)
         .collect();
     match hits.as_slice() {
-        [n] => Ok(*n),
+        [n] => Ok(Some(*n)),
+        [] if read.is_empty() => Ok(None),
         _ => Err(format!(
             "nvn driver: nvnMemoryPoolMapVirtual reads device fields {read:x?}, which {} nvnDeviceGetInteger \
              infos report ({hits:?}); its page size is not one of them",
@@ -1381,16 +1484,19 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
     let procs = proc_table(image)?;
     let a = Abstract::new(image);
     let storage_class = proc_addr(&procs, "nvnTextureBuilderGetStorageClass")?;
-    let builder_device = getter_offset(
-        &a,
-        proc_addr(&procs, "nvnTextureBuilderGetDevice")?,
-        "nvnTextureBuilderGetDevice",
-    )?;
-    let flags = getter_offset(
-        &a,
-        proc_addr(&procs, "nvnDeviceGetFlags")?,
-        "nvnDeviceGetFlags",
-    )?;
+    let builder_device = match proc_addr(&procs, "nvnTextureBuilderGetDevice") {
+        Ok(pc) => getter_offset(&a, pc, "nvnTextureBuilderGetDevice")?,
+        Err(_) => setter_offset(
+            &a,
+            proc_addr(&procs, "nvnTextureBuilderSetDevice")?,
+            "nvnTextureBuilderSetDevice",
+        )?,
+    };
+    let flags = procs
+        .iter()
+        .find(|(n, _)| n == "nvnDeviceGetFlags")
+        .map(|(_, pc)| getter_offset(&a, *pc, "nvnDeviceGetFlags"))
+        .transpose()?;
     let device = Obj::At(Box::new(Obj::Arg(0)), builder_device);
 
     let mut t = Trace::default();
@@ -1406,8 +1512,8 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
         .collect::<Option<Vec<i64>>>()
         .ok_or("nvn driver: nvnTextureBuilderGetStorageClass hands NvRmGpuDeviceChooseKind no device field")?;
     let gpu_device = match gpu.as_slice() {
-        [first, rest @ ..] if rest.iter().all(|o| o == first) => *first,
-        [] => return Err("nvn driver: nvnTextureBuilderGetStorageClass never calls NvRmGpuDeviceChooseKind".into()),
+        [] => None,
+        [first, rest @ ..] if rest.iter().all(|o| o == first) => Some(*first),
         _ => return Err("nvn driver: nvnTextureBuilderGetStorageClass hands NvRmGpuDeviceChooseKind several fields".into()),
     };
     let mut wanted: BTreeMap<i64, u32> = BTreeMap::new();
@@ -1415,8 +1521,8 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
         if l.obj != device {
             continue;
         }
-        let in_flags = l.off >= flags && l.off + i64::from(l.len) <= flags + 4;
-        if in_flags || l.off == gpu_device {
+        let in_flags = flags.is_some_and(|f| l.off >= f && l.off + i64::from(l.len) <= f + 4);
+        if in_flags || Some(l.off) == gpu_device {
             continue;
         }
         let e = wanted.entry(l.off).or_insert(0);
@@ -1454,8 +1560,8 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
         settings_hook,
         settings,
         builder_device: builder_device as u32,
-        flags: flags as u32,
-        gpu_device: gpu_device as u32,
+        flags: flags.map(|f| f as u32),
+        gpu_device: gpu_device.map(|g| g as u32),
         fields,
     })
 }
@@ -1479,6 +1585,7 @@ mod tests {
     const MAP: u32 = 0x440;
     const INFO_STUB: u32 = 0x480;
     const MEMCPY_STUB: u32 = 0x4c0;
+    const SET_DEVICE: u32 = 0x500;
     const POOL: u32 = 0x1600;
     const OFFS: u32 = 0x1800;
     const SETTING: u32 = 0x1901;
@@ -1506,6 +1613,9 @@ mod tests {
     }
     fn ldrb(rt: u32, rn: u32, off: u32) -> u32 {
         0x3940_0000 | (off << 10) | (rn << 5) | rt
+    }
+    fn str_x(rt: u32, rn: u32, off: u32) -> u32 {
+        0xf900_0000 | ((off / 8) << 10) | (rn << 5) | rt
     }
     fn str_w(rt: u32, rn: u32, off: u32) -> u32 {
         0xb900_0000 | ((off / 4) << 10) | (rn << 5) | rt
@@ -1548,6 +1658,13 @@ mod tests {
     /// A driver whose nvnDeviceInitialize stores the byte at 0x104 only
     /// when `stores_flag`.
     fn driver(stores_flag: bool) -> Image {
+        driver_of(stores_flag, false)
+    }
+
+    /// As [`driver`]; with `nvn1`, shaped as an NVN1 driver of SDK 4.5: no
+    /// nvnDeviceGetFlags and a texture builder device setter in place of
+    /// the getter.
+    fn driver_of(stores_flag: bool, nvn1: bool) -> Image {
         let mut text = vec![0u8; 0x1000];
         code(&mut text, 0, &[RET]);
         put(&mut text, 4, &(RODATA as u32).to_le_bytes());
@@ -1565,6 +1682,7 @@ mod tests {
         code(&mut text, FILLER, &[RET]);
         code(&mut text, GET_DEVICE, &[ldr_x(0, 0, 8), RET]);
         code(&mut text, GET_FLAGS, &[ldr_w(0, 0, 8), RET]);
+        code(&mut text, SET_DEVICE, &[str_x(1, 0, 8), RET]);
         code(
             &mut text,
             STORAGE_CLASS,
@@ -1653,14 +1771,21 @@ mod tests {
 
         let mut names: Vec<(String, u32)> =
             (0..16).map(|k| (format!("Aaa{k:02}"), FILLER)).collect();
+        if !nvn1 {
+            names.push(("DeviceGetFlags".to_string(), GET_FLAGS));
+        }
         names.extend([
-            ("DeviceGetFlags".to_string(), GET_FLAGS),
             ("DeviceGetInteger".to_string(), GET_INT),
             ("DeviceInitialize".to_string(), INIT),
             ("MemoryPoolMapVirtual".to_string(), MAP),
-            ("TextureBuilderGetDevice".to_string(), GET_DEVICE),
-            ("TextureBuilderGetStorageClass".to_string(), STORAGE_CLASS),
         ]);
+        if !nvn1 {
+            names.push(("TextureBuilderGetDevice".to_string(), GET_DEVICE));
+        }
+        names.push(("TextureBuilderGetStorageClass".to_string(), STORAGE_CLASS));
+        if nvn1 {
+            names.push(("TextureBuilderSetDevice".to_string(), SET_DEVICE));
+        }
         let mut rodata = vec![0u8; 0x1000];
         put(&mut rodata, 0, b"MOD0");
         for (k, v) in [(DATA - RODATA) as i32, 0, 0, 0, 0, 0].iter().enumerate() {
@@ -1743,7 +1868,10 @@ mod tests {
     fn the_layout_names_the_fields_the_getter_reads_with_the_inits_values() {
         let l = device_layout(&driver(true)).expect("a layout");
         assert_eq!(l.storage_class, u64::from(STORAGE_CLASS));
-        assert_eq!((l.builder_device, l.flags, l.gpu_device), (8, 8, 0x200));
+        assert_eq!(
+            (l.builder_device, l.flags, l.gpu_device),
+            (8, Some(8), Some(0x200))
+        );
         assert_eq!(
             l.fields,
             [
@@ -1776,7 +1904,33 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(l.pool_page_info, 2);
+        assert_eq!(l.pool_page_info, Some(2));
+    }
+
+    #[test]
+    fn an_nvn1_driver_has_no_flags_word_and_a_device_setter() {
+        let l = device_layout(&driver_of(true, true)).expect("a layout");
+        assert_eq!(
+            (l.builder_device, l.flags, l.gpu_device),
+            (8, None, Some(0x200))
+        );
+        assert_eq!(l.fields.len(), 2);
+    }
+
+    #[test]
+    fn purity_names_the_procs_that_reach_outside_their_objects() {
+        let img = driver(true);
+        let t = proc_table(&img).expect("a table");
+        let impure = purity(&img, &t);
+        let why = |n: &str| impure.iter().find(|(k, _)| k == n).map(|(_, w)| w.as_str());
+        assert_eq!(
+            why("nvnTextureBuilderGetStorageClass"),
+            Some("calls NvRmGpuDeviceChooseKind")
+        );
+        assert!(why("nvnDeviceInitialize").is_some());
+        assert_eq!(why("nvnTextureBuilderGetDevice"), None);
+        assert_eq!(why("nvnDeviceGetInteger"), None);
+        assert_eq!(why("nvnAaa00"), None);
     }
 
     #[test]
