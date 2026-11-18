@@ -261,23 +261,38 @@ void nds_eng_line(rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line3d)
     nds_px bd = {.c = nds_c18((uint32_t)(pr[0] | pr[1] << 8)), .prio = 4, .flags = NDS_PX_ON};
     unsigned mode = (e->bldcnt >> 6) & 3u, eva = min_u(16, e->bldalpha & 31u), evb = min_u(16, (e->bldalpha >> 8) & 31u);
     unsigned evy = min_u(16, e->bldy & 31u);
+    unsigned order[4], nbg = 0;
+    for (unsigned p = 0; p < 4; p++)
+        for (unsigned k = 0; k < 4; k++)
+            if ((e->dispcnt & (0x100u << k)) && (e->bgcnt[k] & 3u) == p)
+                order[nbg++] = k;
     for (unsigned x = 0; x < NDS_W; x++) {
         const nds_px *top = &bd, *second = &bd;
         unsigned tl = 5, sl = 5;
-        for (unsigned p = 0; p < 4 && sl == 5; p++) {
-            for (unsigned l = 0; l < 5; l++) {
-                unsigned k = l == 0 ? 4 : l - 1;
-                const nds_px *px = k == 4 ? &e->obj[x] : &e->bg[k][x];
-                if (!(px->flags & NDS_PX_ON) || px->prio != p || !(ctl[x] >> k & 1))
+        const nds_px *obj = &e->obj[x];
+        bool obj_in = (obj->flags & NDS_PX_ON) && obj->prio < 4 && (ctl[x] >> 4 & 1);
+        unsigned i = 0;
+        while (sl == 5) {
+            const nds_px *px;
+            unsigned k;
+            if (obj_in && (i == nbg || obj->prio <= (e->bgcnt[order[i]] & 3u))) {
+                px = obj;
+                k = 4;
+                obj_in = false;
+            } else if (i < nbg) {
+                k = order[i++];
+                px = &e->bg[k][x];
+                if (!(px->flags & NDS_PX_ON) || !(ctl[x] >> k & 1))
                     continue;
-                if (tl == 5) {
-                    top = px;
-                    tl = k;
-                } else {
-                    second = px;
-                    sl = k;
-                    break;
-                }
+            } else {
+                break;
+            }
+            if (tl == 5) {
+                top = px;
+                tl = k;
+            } else {
+                second = px;
+                sl = k;
             }
         }
         uint32_t c = top->c;
