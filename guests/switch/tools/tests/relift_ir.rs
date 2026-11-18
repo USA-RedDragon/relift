@@ -24,6 +24,17 @@ fn hex_words_print_one_block_each() {
 }
 
 #[test]
+fn grep_keeps_matching_lines_with_header_and_exit() {
+    let f = fixture("ir-grep");
+    let out = run("relift-ir", &f.dir, &["ab020020", "--grep", "set n"]);
+    let text = String::from_utf8_lossy(&ok(&out).stdout).into_owned();
+    assert!(text.contains("block 0x1000 len 4 regs arm64"), "{text}");
+    assert!(text.contains("set n, "), "{text}");
+    assert!(!text.contains("set z, "), "{text}");
+    assert!(text.contains("exit jump 0x1004"), "{text}");
+}
+
+#[test]
 fn dce_and_json_report_ir_and_errors() {
     let f = fixture("ir-json");
     let v = json(&run(

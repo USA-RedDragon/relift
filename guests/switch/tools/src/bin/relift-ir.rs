@@ -43,6 +43,10 @@ struct Cli {
     /// Remove dead values before printing.
     #[arg(long)]
     dce: bool,
+    /// Print only the instruction lines that contain this text, with each
+    /// block's header and exit line.
+    #[arg(long)]
+    grep: Option<String>,
     /// Print JSON.
     #[arg(long)]
     json: bool,
@@ -50,6 +54,22 @@ struct Cli {
 
 fn hex(s: &str) -> Result<u64, String> {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|e| e.to_string())
+}
+
+/// `text` with only the instruction lines containing `grep`, when given.
+fn filter(text: &str, grep: Option<&str>) -> String {
+    let Some(grep) = grep else {
+        return text.to_owned();
+    };
+    let mut out = String::new();
+    for line in text.lines() {
+        let inner = line.starts_with("  ") && !line.starts_with("  exit ");
+        if !inner || line.contains(grep) {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn main() -> ExitCode {
@@ -65,7 +85,7 @@ fn body(cli: Cli) -> Result<(), BoxError> {
         let (ir, error) = match lift(word, pc, &cpu) {
             Ok(b) => {
                 let b = if cli.dce { dce(&b) } else { b };
-                (Some(b.to_string()), None)
+                (Some(filter(&b.to_string(), cli.grep.as_deref())), None)
             }
             Err(e) => (None, Some(e.to_string())),
         };
