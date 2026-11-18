@@ -1172,6 +1172,8 @@ pub struct DeviceLayout {
     /// The names of those settings; the values above hold only when none is
     /// set.
     pub settings: Vec<String>,
+    /// The driver's `nvnDeviceGetInteger` answers by `NVNdeviceInfo`.
+    pub integers: Vec<Integer>,
 }
 
 fn proc_addr(procs: &[(String, u64)], name: &str) -> Result<u64, String> {
@@ -1199,6 +1201,107 @@ fn getter_offset(a: &Abstract<'_>, pc: u64, name: &str) -> Result<i64, String> {
         [first, rest @ ..] if rest.iter().all(|o| o == first) => Ok(*first),
         _ => Err(format!("nvn driver: {name} returns no single field")),
     }
+}
+
+/// The interpreter that takes the hook `nvnDeviceInitialize` reads its
+/// settings through as finding none, the merge of the states its paths
+/// that return true leave, and the trace of that run.
+fn initialized<'a>(
+    a: &Abstract<'a>,
+    procs: &[(String, u64)],
+) -> Result<(Abstract<'a>, State, Trace), String> {
+    let init = proc_addr(procs, "nvnDeviceInitialize")?;
+    let mut probe = Trace::default();
+    a.run(init, a.entry(), &mut probe)?;
+    let mut count: BTreeMap<u64, std::collections::BTreeSet<String>> = BTreeMap::new();
+    for (h, k) in probe.settings {
+        count.entry(h).or_default().insert(k);
+    }
+    let settings_hook = count
+        .iter()
+        .max_by_key(|(_, keys)| keys.len())
+        .map(|(h, _)| *h);
+    let a = Abstract {
+        image: a.image,
+        nregs: a.nregs,
+        settings_hook: settings_hook.or(Some(u64::MAX)),
+    };
+    let mut ti = Trace::default();
+    let exits = a.run(init, a.entry(), &mut ti)?;
+    let mut ok = exits
+        .into_iter()
+        .filter(|s| !matches!(s.reg(0), V::K(k) if k & 0xff == 0));
+    let first = ok
+        .next()
+        .ok_or("nvn driver: no path of nvnDeviceInitialize returns true")?;
+    let done = ok.fold(first, |x, y| x.merge(&y));
+    Ok((a, done, ti))
+}
+
+/// What the driver's `nvnDeviceGetInteger` answers for one `NVNdeviceInfo`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Integer {
+    /// The same value on every device.
+    Const(i32),
+    /// A value it reads from device fields (at these offsets) that
+    /// `nvnDeviceInitialize` fills from what it measures.
+    Device(Vec<u32>),
+}
+
+/// The answers of the driver's `nvnDeviceGetInteger` by `NVNdeviceInfo`,
+/// up to the last one it knows: the device it reads holds what the
+/// driver's `nvnDeviceInitialize` leaves on its paths that return true.
+///
+/// # Errors
+///
+/// A proc missing from the table, or code of a shape this does not read.
+pub fn device_integers(image: &Image) -> Result<Vec<Integer>, String> {
+    let procs = proc_table(image)?;
+    let a = Abstract::new(image);
+    let (a, done, _) = initialized(&a, &procs)?;
+    integers(&a, &done, &procs)
+}
+
+fn integers(
+    a: &Abstract<'_>,
+    done: &State,
+    procs: &[(String, u64)],
+) -> Result<Vec<Integer>, String> {
+    let get = proc_addr(procs, "nvnDeviceGetInteger")?;
+    let dev = Obj::Arg(0);
+    let mut out = Vec::new();
+    for info in 0..=u8::MAX {
+        let mut st = a.entry();
+        if let Some(m) = done.mem.get(&dev) {
+            st.mem.insert(dev.clone(), m.clone());
+        }
+        st.regs[1] = V::K(u128::from(info));
+        let mut t = Trace::default();
+        let mut exits = a.run(get, st, &mut t)?.into_iter();
+        let first = exits
+            .next()
+            .ok_or_else(|| format!("nvn driver: nvnDeviceGetInteger({info}) never returns"))?;
+        let end = exits.fold(first, |x, y| x.merge(&y));
+        out.push(match end.load(&Obj::Arg(2), 0, 4) {
+            V::K(k) => Integer::Const(k as u32 as i32),
+            _ => {
+                let mut offs: Vec<u32> = t
+                    .loads
+                    .iter()
+                    .filter(|l| l.obj == dev)
+                    .map(|l| l.off as u32)
+                    .collect();
+                offs.sort_unstable();
+                offs.dedup();
+                Integer::Device(offs)
+            }
+        });
+    }
+    let unknown = out.last().cloned();
+    while out.last() == unknown.as_ref() {
+        out.pop();
+    }
+    Ok(out)
 }
 
 /// Reads the device layout of the driver in `image`.
@@ -1253,32 +1356,8 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
         *e = (*e).max(l.len);
     }
 
-    let init = proc_addr(&procs, "nvnDeviceInitialize")?;
-    let mut probe = Trace::default();
-    a.run(init, a.entry(), &mut probe)?;
-    let mut count: BTreeMap<u64, std::collections::BTreeSet<String>> = BTreeMap::new();
-    for (h, k) in probe.settings {
-        count.entry(h).or_default().insert(k);
-    }
-    let settings_hook = count
-        .iter()
-        .max_by_key(|(_, keys)| keys.len())
-        .map(|(h, _)| *h);
-    let a = Abstract {
-        settings_hook: settings_hook.or(Some(u64::MAX)),
-        ..a
-    };
-    let mut ti = Trace::default();
-    let exits = a.run(init, a.entry(), &mut ti)?;
-    let ok: Vec<State> = exits
-        .into_iter()
-        .filter(|s| !matches!(s.reg(0), V::K(k) if k & 0xff == 0))
-        .collect();
-    let mut it = ok.into_iter();
-    let first = it
-        .next()
-        .ok_or("nvn driver: no path of nvnDeviceInitialize returns true")?;
-    let done = it.fold(first, |x, y| x.merge(&y));
+    let (a, done, ti) = initialized(&a, &procs)?;
+    let settings_hook = a.settings_hook.filter(|h| *h != u64::MAX);
     let dev = Obj::Arg(0);
     let mut fields = Vec::new();
     for (off, len) in wanted {
@@ -1299,7 +1378,9 @@ pub fn device_layout(image: &Image) -> Result<DeviceLayout, String> {
     let mut settings: Vec<String> = ti.settings.iter().map(|(_, k)| k.clone()).collect();
     settings.sort();
     settings.dedup();
+    let integers = integers(&a, &done, &procs)?;
     Ok(DeviceLayout {
+        integers,
         storage_class,
         settings_hook,
         settings,
@@ -1324,6 +1405,7 @@ mod tests {
     const STORAGE_CLASS: u32 = 0x200;
     const INIT: u32 = 0x280;
     const STUB: u32 = 0x300;
+    const GET_INT: u32 = 0x340;
     const POOL: u32 = 0x1600;
     const OFFS: u32 = 0x1800;
     const SETTING: u32 = 0x1901;
@@ -1355,6 +1437,15 @@ mod tests {
     }
     fn strb(rt: u32, rn: u32, off: u32) -> u32 {
         0x3900_0000 | (off << 10) | (rn << 5) | rt
+    }
+    fn cbz_w(rt: u32, from: u32, to: u32) -> u32 {
+        0x3400_0000 | (((to.wrapping_sub(from) / 4) & 0x7_ffff) << 5) | rt
+    }
+    fn cmp_w(rn: u32, imm: u32) -> u32 {
+        0x7100_001f | (imm << 10) | (rn << 5)
+    }
+    fn b_eq(from: u32, to: u32) -> u32 {
+        0x5400_0000 | (((to.wrapping_sub(from) / 4) & 0x7_ffff) << 5)
     }
     fn bl(from: u32, to: u32) -> u32 {
         0x9400_0000 | ((to.wrapping_sub(from) / 4) & 0x3ff_ffff)
@@ -1424,11 +1515,36 @@ mod tests {
             STUB,
             &[movz_x(16, CHOOSE_GOT), ldr_x(17, 16, 0), BR_X17],
         );
+        let g = GET_INT;
+        code(
+            &mut text,
+            g,
+            &[
+                cbz_w(1, g, g + 32),
+                cmp_w(1, 1),
+                b_eq(g + 8, g + 44),
+                cmp_w(1, 2),
+                b_eq(g + 16, g + 56),
+                movz_w(9, 0),
+                str_w(9, 2, 0),
+                RET,
+                movz_w(9, 231),
+                str_w(9, 2, 0),
+                RET,
+                ldr_w(9, 0, 0x100),
+                str_w(9, 2, 0),
+                RET,
+                ldr_w(9, 0, 0x300),
+                str_w(9, 2, 0),
+                RET,
+            ],
+        );
 
         let mut names: Vec<(String, u32)> =
             (0..16).map(|k| (format!("Aaa{k:02}"), FILLER)).collect();
         names.extend([
             ("DeviceGetFlags".to_string(), GET_FLAGS),
+            ("DeviceGetInteger".to_string(), GET_INT),
             ("DeviceInitialize".to_string(), INIT),
             ("TextureBuilderGetDevice".to_string(), GET_DEVICE),
             ("TextureBuilderGetStorageClass".to_string(), STORAGE_CLASS),
@@ -1498,7 +1614,7 @@ mod tests {
     fn the_proc_table_comes_from_the_loaders_constants() {
         let img = driver(true);
         let t = proc_table(&img).expect("a table");
-        assert_eq!(t.len(), 20);
+        assert_eq!(t.len(), 21);
         assert_eq!(t[0], ("nvnAaa00".to_string(), u64::from(FILLER)));
         assert!(t.contains(&(
             "nvnTextureBuilderGetStorageClass".to_string(),
@@ -1526,6 +1642,19 @@ mod tests {
         );
         assert_eq!(l.settings_hook, Some(u64::from(HOOK)));
         assert_eq!(l.settings, ["TestSetting"]);
+    }
+
+    #[test]
+    fn integers_are_constants_unless_they_read_what_the_init_measures() {
+        let l = device_layout(&driver(true)).expect("a layout");
+        assert_eq!(
+            l.integers,
+            [
+                Integer::Const(231),
+                Integer::Const(6),
+                Integer::Device(vec![0x300]),
+            ]
+        );
     }
 
     #[test]
