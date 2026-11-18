@@ -134,12 +134,15 @@ pub enum Event<'a> {
 pub struct Options {
     /// Which update to layer over the base: the newest by default.
     pub update: UpdateSelect,
+    /// Which program (its base's title id) of a container holding several.
+    pub program: Option<u64>,
 }
 
 impl Default for Options {
     fn default() -> Options {
         Options {
             update: UpdateSelect::Newest,
+            program: None,
         }
     }
 }
@@ -263,7 +266,7 @@ fn import_nup(
     opts: &Options,
     on: &mut dyn FnMut(Event),
 ) -> Result<Report> {
-    let t = nup.effective_title(opts.update)?;
+    let t = nup.program_title(opts.program, opts.update)?;
     if t.exefs.is_empty() {
         return malformed("NUP: the selected update and the base have no exefs");
     }
@@ -453,6 +456,11 @@ fn import_tree(
     opts: &Options,
     on: &mut dyn FnMut(Event),
 ) -> Result<Report> {
+    if opts.program.is_some() {
+        return Err(Error::Format(
+            "a program choice is for containers holding several; a folder dump holds one".into(),
+        ));
+    }
     let tree = read_tree(root)?;
     let versions = || {
         let v: Vec<String> = tree.updates.iter().map(|(v, _)| v.to_string()).collect();

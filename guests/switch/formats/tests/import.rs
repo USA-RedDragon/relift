@@ -36,7 +36,10 @@ fn tree(name: &str) -> (PathBuf, synth::Game) {
 }
 
 fn select(update: UpdateSelect) -> Options {
-    Options { update }
+    Options {
+        update,
+        program: None,
+    }
 }
 
 fn read(p: PathBuf) -> Vec<u8> {

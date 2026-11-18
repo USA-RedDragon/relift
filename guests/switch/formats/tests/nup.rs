@@ -463,3 +463,61 @@ fn unused_slots_in_the_children_array_are_skipped() {
     let romfs = n.packages()[0].romfs();
     assert_eq!(read_named(&n, &romfs, "data/big.txt"), f.big);
 }
+
+fn program(id: u64, main: &[u8], kind: PackageKind) -> BuildPackage<'_> {
+    BuildPackage {
+        title_id: id,
+        version: if kind == PackageKind::Update {
+            0x10000
+        } else {
+            0
+        },
+        kind,
+        standalone: false,
+        files: vec![("exefs/main", main), ("romfs/data.bin", main)],
+        empty_dirs: vec![],
+        meta: vec![],
+    }
+}
+
+#[test]
+fn several_programs_are_each_readable_by_choice() {
+    const OTHER_ID: u64 = BASE_ID + 1;
+    let (a, b, a1) = (text(300), text(310), text(320));
+    let n = open(nup::build(&[
+        program(BASE_ID, &a, PackageKind::Base),
+        program(OTHER_ID, &b, PackageKind::Base),
+        program(BASE_ID, &a1, PackageKind::Update),
+    ]))
+    .expect("opens");
+    assert_eq!(n.bases(), vec![0, 1]);
+    let e = n
+        .effective_title(UpdateSelect::Newest)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("0100000000002000") && e.contains("0100000000002001"),
+        "{e}"
+    );
+    let first = n
+        .program_title(Some(BASE_ID), UpdateSelect::Newest)
+        .expect("first");
+    assert_eq!((first.base, first.update), (Some(0), Some(2)));
+    assert_eq!(read_named(&n, &first.exefs, "main"), a1);
+    let other = n
+        .program_title(Some(OTHER_ID), UpdateSelect::Newest)
+        .expect("other");
+    assert_eq!((other.base, other.update), (Some(1), None));
+    assert_eq!(read_named(&n, &other.romfs, "data.bin"), b);
+    assert!(
+        n.program_title(Some(OTHER_ID + 1), UpdateSelect::Newest)
+            .is_err()
+    );
+    assert!(
+        open(nup::build(&[
+            program(BASE_ID, &a, PackageKind::Base),
+            program(BASE_ID, &b, PackageKind::Base),
+        ]))
+        .is_err()
+    );
+}

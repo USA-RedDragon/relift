@@ -819,9 +819,14 @@ impl Nup {
             p.meta = read_meta(&*storage, &sb, r)?;
             packages.push(p);
         }
-        let kinds = |k| packages.iter().filter(|p| p.record.kind == k).count();
-        if kinds(PackageKind::Base) > 1 {
-            return malformed("NUP: more than one base package");
+        let mut base_ids: Vec<u64> = packages
+            .iter()
+            .filter(|p| p.record.kind == PackageKind::Base)
+            .map(|p| p.record.title_id)
+            .collect();
+        base_ids.sort_unstable();
+        if base_ids.windows(2).any(|w| w[0] == w[1]) {
+            return malformed("NUP: two base packages of one title");
         }
         Ok(Nup {
             storage,
@@ -851,17 +856,63 @@ impl Nup {
         uuid_of(&self.toc.packages) == self.superblock.uuid
     }
 
+    /// The indices of the base packages: one per program the container
+    /// holds (a container may carry several programs of one application,
+    /// each its own base).
+    pub fn bases(&self) -> Vec<usize> {
+        (0..self.packages.len())
+            .filter(|&i| self.packages[i].record.kind == PackageKind::Base)
+            .collect()
+    }
+
+    /// The base package of `program` (its title id), or the only base.
+    ///
+    /// # Errors
+    ///
+    /// `program` names no base, or there are several bases and no choice.
+    pub fn select_base(&self, program: Option<u64>) -> Result<Option<usize>> {
+        let bases = self.bases();
+        let id = |i: usize| self.packages[i].record.title_id;
+        match program {
+            Some(want) => bases
+                .into_iter()
+                .find(|&i| id(i) == want)
+                .map(Some)
+                .ok_or_else(|| Error::Format(format!("NUP: no base program {want:016x}"))),
+            None if bases.len() > 1 => Err(Error::Format(format!(
+                "NUP: {} base programs ({}); choose one",
+                bases.len(),
+                bases
+                    .iter()
+                    .map(|&i| format!("{:016x}", id(i)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+            None => Ok(bases.first().copied()),
+        }
+    }
+
     /// The index of the update `sel` names, if any.
     ///
     /// # Errors
     ///
     /// [`UpdateSelect::Version`] names no update.
     pub fn select_update(&self, sel: UpdateSelect) -> Result<Option<usize>> {
+        self.select_update_of(None, sel)
+    }
+
+    /// [`Nup::select_update`] among the updates of base `base` alone when
+    /// the container holds several programs: those with its title id.
+    fn select_update_of(&self, base: Option<usize>, sel: UpdateSelect) -> Result<Option<usize>> {
+        let several = self.bases().len() > 1;
+        let of_base = |p: &Package| {
+            !several || base.is_none_or(|b| p.record.title_id == self.packages[b].record.title_id)
+        };
         let updates = self
             .packages
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.record.kind == PackageKind::Update);
+            .filter(|(_, p)| p.record.kind == PackageKind::Update && of_base(p));
         match sel {
             UpdateSelect::None => Ok(None),
             UpdateSelect::Newest => Ok(updates
@@ -899,14 +950,23 @@ impl Nup {
     ///
     /// # Errors
     ///
-    /// A requested update version does not exist, or there is neither a base
-    /// nor an update to build from.
+    /// A requested update version does not exist, there is neither a base
+    /// nor an update to build from, or there are several base programs
+    /// ([`Nup::program_title`] chooses one).
     pub fn effective_title(&self, sel: UpdateSelect) -> Result<NupTitle> {
-        let base = self
-            .packages
-            .iter()
-            .position(|p| p.record.kind == PackageKind::Base);
-        let update = self.select_update(sel)?;
+        self.program_title(None, sel)
+    }
+
+    /// [`Nup::effective_title`] of one program, `program` its base's
+    /// title id; `None` when the container holds one.
+    ///
+    /// # Errors
+    ///
+    /// As [`Nup::effective_title`], and when `program` names no base or the
+    /// container holds several and `program` is `None`.
+    pub fn program_title(&self, program: Option<u64>, sel: UpdateSelect) -> Result<NupTitle> {
+        let base = self.select_base(program)?;
+        let update = self.select_update_of(base, sel)?;
         let Some(top) = update.or(base) else {
             return malformed("NUP: no base or update package to build a title from");
         };

@@ -49,11 +49,13 @@ fn main() -> ExitCode {
         Command::Import {
             dump,
             update,
+            program,
             system_data,
         } => relift::import::run(
             &settings,
             dump,
             update.as_deref(),
+            program.as_deref(),
             system_data.as_deref(),
             &mut ui,
         ),

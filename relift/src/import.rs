@@ -80,12 +80,13 @@ pub fn run(
     settings: &Settings,
     dump: &Path,
     update: Option<&str>,
+    program: Option<&str>,
     system_data: Option<&Path>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let switch_only = |what: &str| -> Result<(), BoxError> {
-        if system_data.is_some() {
-            return Err(format!("--system-data is for Switch dumps; {what}").into());
+        if system_data.is_some() || program.is_some() {
+            return Err(format!("--system-data and --program are for Switch dumps; {what}").into());
         }
         Ok(())
     };
@@ -129,6 +130,10 @@ pub fn run(
             Some(u) => UpdateSelect::parse(u)?,
             None => UpdateSelect::Newest,
         },
+        program: program
+            .map(|p| u64::from_str_radix(p.trim_start_matches("0x"), 16))
+            .transpose()
+            .map_err(|e| format!("--program: not a hex title id ({e})"))?,
     };
     let project = Path::new(".");
     let out = import_dir(settings, project)?;

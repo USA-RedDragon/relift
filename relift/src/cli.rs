@@ -44,6 +44,10 @@ pub enum Command {
         /// (default: the newest update).
         #[arg(long, value_name = "VERSION|base")]
         update: Option<String>,
+        /// Which program to import from a container holding several (its
+        /// title id in hex); the import lists them when it must choose.
+        #[arg(long, value_name = "TITLE_ID")]
+        program: Option<String>,
         /// A folder of the player's own decrypted system data, exported
         /// with switch-tools from their console: the shared font titles
         /// (0100000000000810 to 0100000000000814), one folder per title id.

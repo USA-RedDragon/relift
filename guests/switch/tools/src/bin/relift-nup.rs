@@ -49,6 +49,10 @@ enum Command {
         /// `base` for the base alone. The newest update is used by default.
         #[arg(long)]
         update: Option<String>,
+        /// For `title`: which program, by its base's title id in hex, when
+        /// the container holds several.
+        #[arg(long)]
+        program: Option<String>,
     },
     /// Write the RomFS map of the effective title's romfs (or one DLC's)
     /// into a directory: `romfs.map`, which reads the files in place in the
@@ -67,6 +71,10 @@ enum Command {
         /// For `title`: the update version to use, or `base`.
         #[arg(long)]
         update: Option<String>,
+        /// For `title`: which program, by its base's title id in hex, when
+        /// the container holds several.
+        #[arg(long)]
+        program: Option<String>,
     },
 }
 
@@ -167,22 +175,29 @@ fn ls(n: &Nup, json: bool) -> Result<(), BoxError> {
     Ok(())
 }
 
+fn program_id(s: Option<&str>) -> Result<Option<u64>, BoxError> {
+    s.map(|p| u64::from_str_radix(p.trim_start_matches("0x"), 16))
+        .transpose()
+        .map_err(|e| format!("--program: not a hex title id ({e})").into())
+}
+
 fn extract(
     n: &Nup,
     out: &std::path::Path,
     package: &str,
     update: Option<&str>,
+    program: Option<&str>,
 ) -> Result<(), BoxError> {
     let written = if package == "title" {
         let sel = match update {
             None => UpdateSelect::Newest,
             Some(v) => UpdateSelect::parse(v)?,
         };
-        let t = n.effective_title(sel)?;
+        let t = n.program_title(program_id(program)?, sel)?;
         n.extract_exefs(&t, &out.join("exefs"))? + n.extract_romfs(&t, &out.join("romfs"))?
     } else {
-        if update.is_some() {
-            return Err("--update only applies to --package title".into());
+        if update.is_some() || program.is_some() {
+            return Err("--update and --program only apply to --package title".into());
         }
         n.extract_package(find_package(n, package)?, out)?
     };
@@ -190,13 +205,22 @@ fn extract(
     Ok(())
 }
 
-fn romfs(path: &Path, out: &Path, package: &str, update: Option<&str>) -> Result<(), BoxError> {
+fn romfs(
+    path: &Path,
+    out: &Path,
+    package: &str,
+    update: Option<&str>,
+    program: Option<&str>,
+) -> Result<(), BoxError> {
     let n = Nup::open(Arc::new(FileStorage::open(path)?))?;
     let t = if package == "title" {
-        n.effective_title(match update {
-            None => UpdateSelect::Newest,
-            Some(v) => UpdateSelect::parse(v)?,
-        })?
+        n.program_title(
+            program_id(program)?,
+            match update {
+                None => UpdateSelect::Newest,
+                Some(v) => UpdateSelect::parse(v)?,
+            },
+        )?
     } else if package.starts_with("dlc:") {
         if update.is_some() {
             return Err("--update only applies to --package title".into());
@@ -227,17 +251,26 @@ fn main() -> ExitCode {
             output,
             package,
             update,
+            program,
         } => extract(
             &Nup::open(input(&path)?)?,
             &output,
             &package,
             update.as_deref(),
+            program.as_deref(),
         ),
         Command::Romfs {
             input: path,
             output,
             package,
             update,
-        } => romfs(&path, &output, &package, update.as_deref()),
+            program,
+        } => romfs(
+            &path,
+            &output,
+            &package,
+            update.as_deref(),
+            program.as_deref(),
+        ),
     })
 }
