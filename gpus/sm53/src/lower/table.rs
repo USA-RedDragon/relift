@@ -247,6 +247,48 @@ pub fn row(op: Op, src: Src) -> Row {
                        depth compare (Ryujinx reads the reference before the LOD; no census word) \
                        and an empty write mask stop",
         },
+        (Op::Tex | Op::TexB, _) => Row::Exact {
+            to: "TEX",
+            evidence: "SM86 TEX on the bound handle c[2][TidB * 4] (TEX) or a register handle \
+                       (TEX.B), same dimension, LOD mode (none, LZ, LB, LL), offsets, depth \
+                       compare and component mask. Ryujinx's TEX takes the array index and \
+                       coordinates from Ra on and the handle, LOD or bias, offsets and depth \
+                       reference from Rb on, the order the SM86 translator reads; Maxwell \
+                       writes the components to Rd on, SM86 to Rd, Rd + 1, Rd2 = Rd + 2, \
+                       Rd + 3. Operands equal envydis on every census word. .LC, the array LOD \
+                       modes, .NDV, a sparse predicate and the 3D array stop",
+        },
+        (Op::Tld4s, _) => Row::Exact {
+            to: "TLD4",
+            evidence: "TLD4.SCR of a 2D texture on c[2][TidB * 4] with the same component, \
+                       offsets (six bits per coordinate in both) and depth compare; Ryujinx's \
+                       TLD4S reads coordinates, offsets and reference from Ra, Ra + 1, Rb, \
+                       Rb + 1 in the order .SCR splits them and writes four components (two \
+                       with Rd2 RZ). Operands equal envydis on every census word",
+        },
+        (Op::Tlds, _) => Row::Exact {
+            to: "TLD",
+            evidence: "TLD.SCR on c[2][TidB * 4] with each target's dimension, LOD mode, \
+                       offsets and sample; Ryujinx's TLDS reads each target's sources from Ra, \
+                       Ra + 1, Rb, Rb + 1 in the order .SCR splits them, except the 2D array \
+                       target (layer in Ra after the coordinates in Rb), which stops. \
+                       Operands equal envydis on every census word",
+        },
+        (Op::TldB, _) => Row::Exact {
+            to: "TLD",
+            evidence: "TLD.B with the same dimension, LOD mode (LZ, LL), offsets and sample; \
+                       Ryujinx's TLD reads the layer and coordinates from Ra on and the \
+                       handle, LOD, offsets and sample from Rb on, as the SM86 translator. \
+                       Operands equal envydis on every census word. .CL, a sparse predicate \
+                       and the 3D array stop",
+        },
+        (Op::Txq | Op::TxqB, _) => Row::Exact {
+            to: "TXQ",
+            evidence: "TXQ TEX_HEADER_DIMENSION on c[2][TidB * 4] or a register handle with \
+                       the same component mask; Ryujinx's TXQ reads the handle (bindless) and \
+                       the level from Ra on, as the SM86 translator. Operands equal envydis on \
+                       every census word. Other queries stop",
+        },
         (Op::Pcnt | Op::Cont, _) => Row::Stop {
             reason: "PCNT and CONT: no program of the census uses them",
         },

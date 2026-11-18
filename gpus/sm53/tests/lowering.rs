@@ -623,3 +623,140 @@ fn texs_lowers_to_tex_scr_by_target() {
         assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
     }
 }
+
+#[test]
+fn texture_forms_lower_by_their_fields() {
+    let cases: &[(Inst, &str)] = &[
+        (
+            maxwell(
+                Op::Tex,
+                Src::None,
+                &[
+                    ("Dest", 4),
+                    ("SrcA", 2),
+                    ("SrcB", 8),
+                    ("TidB", 0xc),
+                    ("Dim", 3),
+                    ("Dc", 1),
+                    ("Lod", 3),
+                    ("WMask", 1),
+                    ("DestPred", 7),
+                ],
+            ),
+            "TEX.LL.DC R6, R4, R2, R8, 0x2, 0xc, ARRAY_2D, 0x1",
+        ),
+        (
+            maxwell(
+                Op::TexB,
+                Src::None,
+                &[
+                    ("Dest", 4),
+                    ("SrcA", 2),
+                    ("SrcB", 8),
+                    ("Dim", 6),
+                    ("Lodb", 1),
+                    ("WMask", 7),
+                    ("DestPred", 7),
+                ],
+            ),
+            "TEX.B.LZ R6, R4, R2, R8, CUBE, 0x7",
+        ),
+        (
+            maxwell(
+                Op::Tex,
+                Src::None,
+                &[("Dest", 4), ("Dim", 5), ("WMask", 1), ("DestPred", 7)],
+            ),
+            "stop: TEX of a 3D array",
+        ),
+        (
+            maxwell(
+                Op::Tex,
+                Src::None,
+                &[("Dest", 4), ("Dim", 2), ("Lc", 1), ("DestPred", 7)],
+            ),
+            "stop: TEX with .LC or an array LOD mode",
+        ),
+        (
+            maxwell(
+                Op::Tld4s,
+                Src::None,
+                &[
+                    ("Dest", 1),
+                    ("Dest2", 3),
+                    ("SrcA", 2),
+                    ("SrcB", 4),
+                    ("TidB", 0x8),
+                    ("TexComp", 2),
+                    ("Dc", 1),
+                ],
+            ),
+            "TLD4.SCR.B.DC R3, R1, R2, R4, 0x2, 0x8, 2D",
+        ),
+        (
+            maxwell(
+                Op::Tlds,
+                Src::None,
+                &[
+                    ("Dest", 1),
+                    ("Dest2", 255),
+                    ("SrcA", 2),
+                    ("SrcB", 4),
+                    ("TidB", 0x8),
+                    ("Target", 12),
+                    ("WMask", 4),
+                ],
+            ),
+            "TLD.SCR.LL.AOFFI RZ, R1, R2, R4, 0x2, 0x8, 2D, 0x3",
+        ),
+        (
+            maxwell(
+                Op::Tlds,
+                Src::None,
+                &[("Dest", 1), ("Dest2", 255), ("Target", 8)],
+            ),
+            "stop: TLDS of a 2D array",
+        ),
+        (
+            maxwell(
+                Op::TldB,
+                Src::None,
+                &[
+                    ("Dest", 1),
+                    ("SrcA", 2),
+                    ("SrcB", 4),
+                    ("Dim", 2),
+                    ("Ms", 1),
+                    ("WMask", 1),
+                    ("DestPred", 7),
+                ],
+            ),
+            "TLD.B.LZ.MS R3, R1, R2, R4, 2D, 0x1",
+        ),
+        (
+            maxwell(
+                Op::Txq,
+                Src::None,
+                &[
+                    ("Dest", 1),
+                    ("SrcA", 2),
+                    ("TidB", 0x8),
+                    ("TexQuery", 1),
+                    ("WMask", 3),
+                ],
+            ),
+            "TXQ R3, R1, R2, TEX_HEADER_DIMENSION, 0x2, 0x8, 0x3",
+        ),
+        (
+            maxwell(
+                Op::TxqB,
+                Src::None,
+                &[("Dest", 1), ("SrcA", 2), ("TexQuery", 2), ("WMask", 3)],
+            ),
+            "stop: TXQ other than the dimensions",
+        ),
+    ];
+    for (i, want) in cases {
+        assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
+    }
+}

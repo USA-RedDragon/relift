@@ -79,6 +79,13 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::F2f, _) => f2f(i),
         (Op::Ast, _) => ast(i),
         (Op::Texs, _) => texs(i),
+        (Op::Tex, _) => tex(i, false),
+        (Op::TexB, _) => tex(i, true),
+        (Op::Tld4s, _) => tld4s(i),
+        (Op::Tlds, _) => tlds(i),
+        (Op::TldB, _) => tld_b(i),
+        (Op::Txq, _) => txq(i, false),
+        (Op::TxqB, _) => txq(i, true),
         (Op::Ald, _) => ald(i),
         (Op::Ipa, _) => ipa(i),
         _ => return None,
@@ -728,6 +735,213 @@ fn texs(i: &Inst) -> Lowered {
             (90, 1, f(i, "Nodep")),
         ],
     ))
+}
+
+/// The SM86 texture dimension (bits 61 to 63) of Maxwell's `TexDim`: 1D,
+/// 1D array, 2D, 2D array, 3D, (3D array), cube and cube array are 0, 4,
+/// 1, 5, 2, (none), 3 and 7 there.
+fn tex_dim(d: u64) -> Option<u64> {
+    [
+        Some(0),
+        Some(4),
+        Some(1),
+        Some(5),
+        Some(2),
+        None,
+        Some(3),
+        Some(7),
+    ][d as usize & 7]
+}
+
+/// The texture handle fields of an SM86 texture word: the bound handle
+/// `c[2][TidB * 4]` (form 5) or, with `bindless`, a register handle
+/// (form 1, the opcode one above the bound one, with `.B`, bit 59).
+fn tex_handle(i: &Inst, op: u32, bindless: bool) -> (u32, Fields) {
+    if bindless {
+        (opc(op + 1, 1), vec![(59, 1, 1)])
+    } else {
+        (
+            opc(op, 5),
+            vec![(40, 14, f(i, "TidB")), (54, 5, TEXTURE_BANK)],
+        )
+    }
+}
+
+/// The second destination of an SM86 texture word that writes Maxwell's
+/// four consecutive registers from `Rd`: `Rd + 2`, or RZ with `Rd`.
+fn rd2_of(rd: u64) -> Option<u64> {
+    match rd {
+        RZ => Some(RZ),
+        r if r + 3 < RZ => Some(r + 2),
+        _ => None,
+    }
+}
+
+/// `TEX` and `TEX.B`: SM86 `TEX` (0xb60, or 0x361 with a register handle)
+/// with the same dimension, LOD mode (none, LZ, LB, LL), offsets, depth
+/// compare and component mask. Both read the array index and coordinates
+/// from `Ra` on and the handle, LOD or bias, offsets and reference from
+/// `Rb` on, in the same order; Maxwell writes the components to `Rd` on,
+/// which SM86 writes to `Rd`, `Rd + 1` and its `Rd2`, `Rd2 + 1`.
+fn tex(i: &Inst, bindless: bool) -> Lowered {
+    let (lod, aoffi, lc) = if bindless {
+        (f(i, "Lodb"), f(i, "Aoffib"), f(i, "Lcb"))
+    } else {
+        (f(i, "Lod"), f(i, "Aoffi"), f(i, "Lc"))
+    };
+    if lod > 3 || lc != 0 {
+        return Lowered::Stop("TEX with .LC or an array LOD mode");
+    }
+    if f(i, "Ndv") != 0 || f(i, "DestPred") != PT {
+        return Lowered::Stop("TEX with .NDV or a sparse predicate");
+    }
+    let Some(dim) = tex_dim(f(i, "Dim")) else {
+        return Lowered::Stop("TEX of a 3D array");
+    };
+    let rd = f(i, "Dest");
+    let Some(rd2) = rd2_of(rd) else {
+        return Lowered::Stop("TEX writing past R254");
+    };
+    let (op, mut v) = tex_handle(i, 0x160, bindless);
+    v.extend([
+        (16, 8, rd),
+        (24, 8, f(i, "SrcA")),
+        (32, 8, f(i, "SrcB")),
+        (61, 3, dim),
+        (64, 8, rd2),
+        (72, 4, f(i, "WMask")),
+        (76, 1, aoffi),
+        (78, 1, f(i, "Dc")),
+        (81, 3, PT),
+        (84, 3, 1),
+        (87, 3, lod),
+        (90, 1, f(i, "Nodep")),
+    ]);
+    Lowered::Word(word(i, op, &v))
+}
+
+/// `TLD4S`: SM86 `TLD4.SCR` (0xb63) of a 2D texture on the bound handle
+/// with the same component, offsets (six bits per coordinate) and depth
+/// compare; its sources are those `.SCR` splits over `Ra`, `Ra + 1`, `Rb`
+/// and `Rb + 1` (coordinates, offsets, reference), as Ryujinx's TLD4S reads
+/// them. It writes four components (two with `Rd2` RZ), as TEXS's mask 4.
+fn tld4s(i: &Inst) -> Lowered {
+    let rd2 = f(i, "Dest2");
+    let (op, mut v) = tex_handle(i, 0x163, false);
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (24, 8, f(i, "SrcA")),
+        (32, 8, f(i, "SrcB")),
+        (60, 1, 1),
+        (61, 3, 1),
+        (64, 8, rd2),
+        (72, 4, TEXS_MASKS[usize::from(rd2 != RZ)][4]),
+        (76, 2, f(i, "Aoffi")),
+        (78, 1, f(i, "Dc")),
+        (81, 3, PT),
+        (84, 3, 1),
+        (87, 2, f(i, "TexComp")),
+        (90, 1, f(i, "Nodep")),
+    ]);
+    Lowered::Word(word(i, op, &v))
+}
+
+/// `TLDS`: SM86 `TLD.SCR` (0xb66) on the bound handle with the target's
+/// dimension, LOD mode, offsets and sample; each target's sources are
+/// those `.SCR` splits over `Ra`, `Ra + 1`, `Rb`, `Rb + 1` in Ryujinx's
+/// order. The 2D array target, whose layer Ryujinx reads from `Ra` after
+/// the coordinates in `Rb`, stops.
+fn tlds(i: &Inst) -> Lowered {
+    let (dim, lod, aoffi, ms) = match f(i, "Target") {
+        0 => (0, 1, 0, 0),
+        1 => (0, 3, 0, 0),
+        2 => (1, 1, 0, 0),
+        4 => (1, 1, 1, 0),
+        5 => (1, 3, 0, 0),
+        6 => (1, 1, 0, 1),
+        7 => (2, 1, 0, 0),
+        12 => (1, 3, 1, 0),
+        _ => return Lowered::Stop("TLDS of a 2D array"),
+    };
+    let rd2 = f(i, "Dest2");
+    let mask = TEXS_MASKS[usize::from(rd2 != RZ)][f(i, "WMask") as usize];
+    if mask == 0 {
+        return Lowered::Stop("TLDS with an empty write mask");
+    }
+    let (op, mut v) = tex_handle(i, 0x166, false);
+    v.extend([
+        (16, 8, f(i, "Dest")),
+        (24, 8, f(i, "SrcA")),
+        (32, 8, f(i, "SrcB")),
+        (60, 1, 1),
+        (61, 3, dim),
+        (64, 8, rd2),
+        (72, 4, mask),
+        (76, 1, aoffi),
+        (78, 1, ms),
+        (81, 3, PT),
+        (84, 3, 1),
+        (87, 3, lod),
+        (90, 1, f(i, "Nodep")),
+    ]);
+    Lowered::Word(word(i, op, &v))
+}
+
+/// `TLD.B`: SM86 `TLD.B` (0x367) with the same dimension, LOD mode (LZ or
+/// LL), offsets and sample; both read the layer and coordinates from `Ra`
+/// on and the handle, LOD, offsets and sample from `Rb` on. `.CL` stops.
+fn tld_b(i: &Inst) -> Lowered {
+    if f(i, "Cl") != 0 || f(i, "DestPred") != PT {
+        return Lowered::Stop("TLD with .CL or a sparse predicate");
+    }
+    let Some(dim) = tex_dim(f(i, "Dim")) else {
+        return Lowered::Stop("TLD of a 3D array");
+    };
+    let rd = f(i, "Dest");
+    let Some(rd2) = rd2_of(rd) else {
+        return Lowered::Stop("TLD writing past R254");
+    };
+    let (op, mut v) = tex_handle(i, 0x166, true);
+    v.extend([
+        (16, 8, rd),
+        (24, 8, f(i, "SrcA")),
+        (32, 8, f(i, "SrcB")),
+        (61, 3, dim),
+        (64, 8, rd2),
+        (72, 4, f(i, "WMask")),
+        (76, 1, f(i, "Toff")),
+        (78, 1, f(i, "Ms")),
+        (81, 3, PT),
+        (84, 3, 1),
+        (87, 3, if f(i, "Lod") != 0 { 3 } else { 1 }),
+        (90, 1, f(i, "Nodep")),
+    ]);
+    Lowered::Word(word(i, op, &v))
+}
+
+/// `TXQ` and `TXQ.B` of the dimensions: SM86 `TXQ` (0xb6f, or 0x370 with a
+/// register handle) `TEX_HEADER_DIMENSION` with the same component mask;
+/// both read the handle (bindless) and then the level from `Ra` on. Other
+/// queries stop.
+fn txq(i: &Inst, bindless: bool) -> Lowered {
+    if f(i, "TexQuery") != 1 {
+        return Lowered::Stop("TXQ other than the dimensions");
+    }
+    let rd = f(i, "Dest");
+    let Some(rd2) = rd2_of(rd) else {
+        return Lowered::Stop("TXQ writing past R254");
+    };
+    let (op, mut v) = tex_handle(i, 0x16f, bindless);
+    v.extend([
+        (16, 8, rd),
+        (24, 8, f(i, "SrcA")),
+        (32, 8, RZ),
+        (62, 2, 0),
+        (64, 8, rd2),
+        (72, 4, f(i, "WMask")),
+        (90, 1, f(i, "Nodep")),
+    ]);
+    Lowered::Word(word(i, op, &v))
 }
 
 /// `ALD Rd, a[imm], Rv`: SM86 `ALD` (0x321) with the same offset, vertex

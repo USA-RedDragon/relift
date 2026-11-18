@@ -268,25 +268,25 @@ the cases the evidence does not cover stop with their own reason.
 | SUST_B | stop | | no semantic check yet |
 | SUST | stop | | no semantic check yet |
 | SYNC | exact | BRA | for one thread a pop is a jump to the entry it pops (a BRK unwinds the SSY entries above its PBK, as Ryujinx's decoder does); Ryujinx emits a branch when the pop has one target, and the control-flow pass lowers only those, under the same guard. A pop with more than one target or none and a condition code test stop (tests/flow.rs) |
-| TEX | stop | | no semantic check yet |
-| TEX_B | stop | | no semantic check yet |
+| TEX | exact | TEX | SM86 TEX on the bound handle c[2][TidB * 4] (TEX) or a register handle (TEX.B), same dimension, LOD mode (none, LZ, LB, LL), offsets, depth compare and component mask. Ryujinx's TEX takes the array index and coordinates from Ra on and the handle, LOD or bias, offsets and depth reference from Rb on, the order the SM86 translator reads; Maxwell writes the components to Rd on, SM86 to Rd, Rd + 1, Rd2 = Rd + 2, Rd + 3. Operands equal envydis on every census word. .LC, the array LOD modes, .NDV, a sparse predicate and the 3D array stop |
+| TEX_B | exact | TEX | SM86 TEX on the bound handle c[2][TidB * 4] (TEX) or a register handle (TEX.B), same dimension, LOD mode (none, LZ, LB, LL), offsets, depth compare and component mask. Ryujinx's TEX takes the array index and coordinates from Ra on and the handle, LOD or bias, offsets and depth reference from Rb on, the order the SM86 translator reads; Maxwell writes the components to Rd on, SM86 to Rd, Rd + 1, Rd2 = Rd + 2, Rd + 3. Operands equal envydis on every census word. .LC, the array LOD modes, .NDV, a sparse predicate and the 3D array stop |
 | TEXS | exact | TEX | TEX.SCR on the bound handle c[2][TidB * 4] (every NVN1 driver writes 2 to the texture constant buffer index, 3D method 0x982; census TidB values are the even words from 0x20, the low words of NVN's 64-bit handles). Ryujinx's TEXS reads each target's sources from Ra, Ra + 1, Rb, Rb + 1 in the order the SM86 translator's .SCR split takes them (array index, coordinates, LOD, depth reference) and writes the components of its write-mask table to Rd, Rd + 1, Rd2, Rd2 + 1 as SM86 TEX does. Target and components equal envydis on every census word. An explicit LOD with a depth compare and the array depth compare (Ryujinx reads the reference before the LOD; no census word) and an empty write mask stop |
 | TEXS_F16 | stop | | no semantic check yet |
 | TLD | stop | | no semantic check yet |
-| TLD_B | stop | | no semantic check yet |
-| TLDS | stop | | no semantic check yet |
+| TLD_B | exact | TLD | TLD.B with the same dimension, LOD mode (LZ, LL), offsets and sample; Ryujinx's TLD reads the layer and coordinates from Ra on and the handle, LOD, offsets and sample from Rb on, as the SM86 translator. Operands equal envydis on every census word. .CL, a sparse predicate and the 3D array stop |
+| TLDS | exact | TLD | TLD.SCR on c[2][TidB * 4] with each target's dimension, LOD mode, offsets and sample; Ryujinx's TLDS reads each target's sources from Ra, Ra + 1, Rb, Rb + 1 in the order .SCR splits them, except the 2D array target (layer in Ra after the coordinates in Rb), which stops. Operands equal envydis on every census word |
 | TLDS_F16 | stop | | no semantic check yet |
 | TLD4 | stop | | no semantic check yet |
 | TLD4_B | stop | | no semantic check yet |
-| TLD4S | stop | | no semantic check yet |
+| TLD4S | exact | TLD4 | TLD4.SCR of a 2D texture on c[2][TidB * 4] with the same component, offsets (six bits per coordinate in both) and depth compare; Ryujinx's TLD4S reads coordinates, offsets and reference from Ra, Ra + 1, Rb, Rb + 1 in the order .SCR splits them and writes four components (two with Rd2 RZ). Operands equal envydis on every census word |
 | TLD4S_F16 | stop | | no semantic check yet |
 | TMML | stop | | no semantic check yet |
 | TMML_B | stop | | no semantic check yet |
 | TXA | stop | | no semantic check yet |
 | TXD | stop | | no semantic check yet |
 | TXD_B | stop | | no semantic check yet |
-| TXQ | stop | | no semantic check yet |
-| TXQ_B | stop | | no semantic check yet |
+| TXQ | exact | TXQ | TXQ TEX_HEADER_DIMENSION on c[2][TidB * 4] or a register handle with the same component mask; Ryujinx's TXQ reads the handle (bindless) and the level from Ra on, as the SM86 translator. Operands equal envydis on every census word. Other queries stop |
+| TXQ_B | exact | TXQ | TXQ TEX_HEADER_DIMENSION on c[2][TidB * 4] or a register handle with the same component mask; Ryujinx's TXQ reads the handle (bindless) and the level from Ra on, as the SM86 translator. Operands equal envydis on every census word. Other queries stop |
 | VABSDIFF | stop | | no semantic check yet |
 | VABSDIFF4 | stop | | no semantic check yet |
 | VADD | stop | | no semantic check yet |
@@ -303,4 +303,4 @@ the cases the evidence does not cover stop with their own reason.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 40 exact, 5 exact and pseudo, 3 pseudo, 245 stop.
+293 forms: 47 exact, 5 exact and pseudo, 3 pseudo, 238 stop.
