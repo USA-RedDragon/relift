@@ -129,7 +129,7 @@ static size_t get_states(const hid_lifo_header *h, const void *in_states, size_t
         memcpy(&cur, out_state + sampling_number_offset, 8);
         if (i > 0)
             memcpy(&prev, out_state_prev + sampling_number_offset, 8);
-        if (s0 != s1 || (i > 0 && cur - prev != 1))
+        if (s0 != s1 || (s0 & 1) || (i > 0 && cur - prev != 1))
             return 0;
     }
     return (size_t)total_entries;
@@ -340,7 +340,7 @@ TEST(hid_ring_advances_and_wraps)
     CHECK(start(&e));
     CHECK_EQ(cmd_aruid(&e, 103), 0);
     const hid_lifo_header *h = &e.mem->npads[0].state.full_key.header;
-    uint64_t start_n = h->count == 0 ? 0 : e.mem->npads[0].state.full_key.entries[h->tail].sampling_number;
+    uint64_t start_n = h->count == 0 ? 0 : e.mem->npads[0].state.full_key.entries[h->tail].state.sampling_number;
     CHECK_EQ(h->count, 16);
     uint64_t last = 0;
     for (int i = 1; i <= 40; i++) {
@@ -348,8 +348,13 @@ TEST(hid_ring_advances_and_wraps)
         s.pads[0].lx = (int16_t)i;
         publish(&s);
         rl_hid_update_now();
-        last = e.mem->npads[0].state.full_key.entries[h->tail].sampling_number;
+        last = e.mem->npads[0].state.full_key.entries[h->tail].state.sampling_number;
         CHECK_EQ(last, start_n + (uint64_t)i);
+        CHECK_EQ(e.mem->npads[0].state.full_key.entries[h->tail].seq, 2 * last);
+    }
+    for (uint32_t i = 0; i < HID_LIFO_ENTRIES; i++) {
+        const hid_npad_lifo_entry *en = &e.mem->npads[0].state.full_key.entries[i];
+        CHECK_EQ(en->seq, 2 * en->state.sampling_number);
     }
     CHECK_EQ(h->count, 16);
     hid_npad_state st[17];
@@ -381,9 +386,9 @@ TEST(hid_disconnected_pad)
         CHECK_EQ(st[i].attributes, 0);
         CHECK_EQ(st[i].l.x, 0);
     }
-    uint64_t before = n->full_key.entries[n->full_key.header.tail].sampling_number;
+    uint64_t before = n->full_key.entries[n->full_key.header.tail].state.sampling_number;
     rl_hid_update_now();
-    CHECK_EQ(n->full_key.entries[n->full_key.header.tail].sampling_number, before + 1);
+    CHECK_EQ(n->full_key.entries[n->full_key.header.tail].state.sampling_number, before + 1);
     CHECK_EQ(n->device_type, 0);
     CHECK_EQ(n->system_properties, 0);
     rl_hid_stop();
@@ -974,10 +979,10 @@ TEST(hid_update_thread_runs_and_stops)
     CHECK(start_with(&e, false));
     CHECK(rl_hid_is_active());
     const hid_lifo_header *h = &e.mem->debug_pad.header;
-    uint64_t n0 = h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0;
-    while ((h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0) < n0 + 5)
+    uint64_t n0 = h->count ? e.mem->debug_pad.entries[h->tail].state.sampling_number : 0;
+    while ((h->count ? e.mem->debug_pad.entries[h->tail].state.sampling_number : 0) < n0 + 5)
         usleep(10000);
-    uint64_t n1 = h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0;
+    uint64_t n1 = h->count ? e.mem->debug_pad.entries[h->tail].state.sampling_number : 0;
     CHECK(n1 >= n0 + 5);
     CHECK(h->timestamp != 0);
     CHECK_EQ(t_svc(e.c, SVC_UNMAP_SHARED_MEMORY, e.shm, e.at, HID_SHMEM_SIZE, 0, 0, 0), 0);

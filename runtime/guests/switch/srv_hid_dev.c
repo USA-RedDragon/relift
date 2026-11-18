@@ -124,14 +124,15 @@ static void lifo_push(hid_lifo_header *h, uint8_t *entries, size_t esz, void *st
     uint64_t tail = __atomic_load_n(&h->tail, __ATOMIC_ACQUIRE);
     uint64_t prev = 0;
     if (count)
-        memcpy(&prev, entries + tail * esz, 8);
+        memcpy(&prev, entries + tail * esz + 8 + samp_off, 8);
     uint64_t n = prev + 1;
     memcpy((uint8_t *)state + samp_off, &n, 8);
     uint64_t target = (tail + 1) % HID_LIFO_ENTRIES;
     uint8_t *e = entries + target * esz;
-    __atomic_store_n((uint64_t *)(void *)e, n, __ATOMIC_RELEASE);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    __atomic_store_n((uint64_t *)(void *)e, 2 * n - 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
     memcpy(e + 8, state, ssz);
+    __atomic_store_n((uint64_t *)(void *)e, 2 * n, __ATOMIC_RELEASE);
     h->timestamp = g.ts;
     __atomic_store_n(&h->tail, target, __ATOMIC_RELEASE);
     if (count < HID_LIFO_ENTRIES - 1)

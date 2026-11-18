@@ -113,9 +113,14 @@ typedef struct hid_gc_trigger_state {
     uint32_t trigger_l, trigger_r;
 } hid_gc_trigger_state;
 
+/**
+ * @brief Declares a ring of T. Each entry's seq is twice the state's sampling
+ * number, and odd while the state is written: readers retry on an odd seq or
+ * on a seq that changed during the copy.
+ */
 #define HID_LIFO_TYPE(name, T)                       \
     typedef struct name##_entry {                    \
-        uint64_t sampling_number;                    \
+        uint64_t seq;                                \
         T state;                                     \
     } name##_entry;                                  \
     typedef struct name {                            \
