@@ -56,15 +56,31 @@ fn yaz0_of(b: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `data` LZMA-compressed as a UnityFS block holds it: the property bytes
+/// and the stream, no size field.
+fn lzma(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let opts = lzma_rs::compress::Options {
+        unpacked_size: lzma_rs::compress::UnpackedSize::SkipWritingToHeader,
+    };
+    lzma_rs::lzma_compress_with_options(&mut &data[..], &mut out, &opts).expect("compresses");
+    out
+}
+
 /// A UnityFS bundle (format 6, block table after the header) of one LZ4
 /// block holding `data`.
 fn unityfs(data: &[u8]) -> Vec<u8> {
-    let block = lz4_flex::block::compress(data);
+    bundle(data, 2, lz4_flex::block::compress(data))
+}
+
+/// A UnityFS bundle of one block of compression `kind` with the bytes
+/// `block` that decompress to `data`.
+fn bundle(data: &[u8], kind: u16, block: Vec<u8>) -> Vec<u8> {
     let mut table = vec![0u8; 16];
     table.extend(1u32.to_be_bytes());
     table.extend((data.len() as u32).to_be_bytes());
     table.extend((block.len() as u32).to_be_bytes());
-    table.extend(2u16.to_be_bytes());
+    table.extend(kind.to_be_bytes());
     let mut b = b"UnityFS\0".to_vec();
     b.extend(6u32.to_be_bytes());
     b.extend(b"5.x.x\0");
@@ -135,14 +151,73 @@ fn yaz0_decodes_literals_and_back_references() {
 fn unityfs_joins_its_blocks() {
     let data: Vec<u8> = (0..5000u32).map(|i| (i % 7) as u8).collect();
     assert_eq!(unity::data(&unityfs(&data)).expect("reads"), data);
-    let mut lzma = unityfs(&data);
-    let at = lzma.len() - lz4_flex::block::compress(&data).len() - 1;
-    lzma[at] = 1;
+    let packed = bundle(&data, 1, lzma(&data));
+    assert_eq!(unity::data(&packed).expect("reads LZMA"), data);
+    let mut cut = bundle(&data, 1, lzma(&data));
+    cut.truncate(cut.len() - 8);
+    assert!(unity::data(&cut).is_err());
+}
+
+/// The Shader object fields that hold `segs` (one platform per segment
+/// list): the platform list, offsets, compressed and decompressed lengths
+/// (`nested` as from Unity 2021, else one value per platform) and the
+/// blob.
+fn shader_fields(segs: &[Vec<Vec<u8>>], nested: bool) -> Vec<u8> {
+    let n = segs.len() as u32;
+    let mut blob = Vec::new();
+    let (mut offs, mut clens, mut dlens) = (Vec::new(), Vec::new(), Vec::new());
+    for platform in segs {
+        let (mut o, mut c, mut d) = (Vec::new(), Vec::new(), Vec::new());
+        for s in platform {
+            let z = lz4_flex::block::compress(s);
+            o.push(blob.len() as u32);
+            c.push(z.len() as u32);
+            d.push(s.len() as u32);
+            blob.extend(z);
+        }
+        offs.push(o);
+        clens.push(c);
+        dlens.push(d);
+    }
+    let mut b = n.to_le_bytes().to_vec();
+    for k in 0..n {
+        b.extend((19 + k).to_le_bytes());
+    }
+    for arr in [&offs, &clens, &dlens] {
+        b.extend(n.to_le_bytes());
+        for v in arr.iter() {
+            if nested {
+                b.extend((v.len() as u32).to_le_bytes());
+                for x in v {
+                    b.extend(x.to_le_bytes());
+                }
+            } else {
+                b.extend(v[0].to_le_bytes());
+            }
+        }
+    }
+    b.extend((blob.len() as u32).to_le_bytes());
+    b.extend(blob);
+    b
+}
+
+#[test]
+fn shader_blobs_are_found_by_their_fields() {
+    let (a, b2, c) = (program(1, 11, 2), program(5, 12, 1), program(5, 13, 3));
+    let mut file = vec![0x5a; 37];
+    file.extend(shader_fields(&[vec![a.clone()], vec![b2.clone()]], false));
+    file.extend([1, 0, 0, 0, 9, 9]);
+    file.extend(shader_fields(&[vec![c.clone(), b2.clone()]], true));
+    let got: Vec<Vec<u8>> = unity::shader_blobs(&file)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(got, vec![a, b2.clone(), c, b2]);
+    let mut wrong = shader_fields(&[vec![program(1, 14, 1)]], false);
+    wrong[28] += 1;
     assert!(
-        unity::data(&lzma)
-            .expect_err("LZMA is not read")
-            .to_string()
-            .contains("LZMA")
+        unity::shader_blobs(&wrong).is_empty(),
+        "a segment that decompresses to another length is not a blob"
     );
 }
 
@@ -190,6 +265,8 @@ fn an_sm53_scan_finds_programs_in_every_container() {
         program(0, 6, 2),
     );
     let p7 = program(1, 7, 4);
+    let p8 = program(5, 8, 2);
+    let p9 = program(1, 9, 3);
     let mut raw = vec![0x11; 100];
     raw.extend(&p1);
     let mut bea = b"SCNE".to_vec();
@@ -209,6 +286,14 @@ fn an_sm53_scan_finds_programs_in_every_container() {
                 "romfs/Data/bundle",
                 unityfs(&[vec![0; 33], p5.clone()].concat()),
             ),
+            (
+                "romfs/Data/shaders.assets",
+                shader_fields(&[vec![p9.clone()]], true),
+            ),
+            ("romfs/Data/lzma", {
+                let d = [vec![7; 20], p8.clone()].concat();
+                bundle(&d, 1, lzma(&d))
+            }),
         ],
     );
     let opts = Options {
@@ -223,7 +308,7 @@ fn an_sm53_scan_finds_programs_in_every_container() {
         &opts,
     )
     .expect("scans");
-    let want: BTreeSet<String> = [&p1, &p2, &p3, &p4, &p5, &p6, &p7]
+    let want: BTreeSet<String> = [&p1, &p2, &p3, &p4, &p5, &p6, &p7, &p8, &p9]
         .iter()
         .map(|p| sha(&stored(p)))
         .collect();
@@ -234,7 +319,8 @@ fn an_sm53_scan_finds_programs_in_every_container() {
         ("yaz0", 3),
         ("sarc", 1),
         ("zstd", 1),
-        ("unityfs", 1),
+        ("unityfs", 2),
+        ("unity-shader-blob", 1),
         ("zstd-embedded", 1),
         ("zstd-embedded-undecodable", 1),
     ] {

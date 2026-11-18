@@ -447,6 +447,7 @@ const CHARTERS: &[Charter] = &[
         normal: &[
             "clap",
             "lz4_flex",
+            "lzma-rs",
             "relift-cache",
             "relift-gpu-sm53",
             "relift-gpu-sm86",

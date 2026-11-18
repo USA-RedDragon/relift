@@ -37,8 +37,12 @@ bundle control reaches from the first instruction (branch, call and
 SSY/PBK targets). The scan unwraps zstd frames (also inside archives such
 as BEA, which store files as frames after a table; a frame magic that
 starts no decodable frame is counted as `zstd-embedded-undecodable`),
-SARC archives, Yaz0 streams and UnityFS bundles (stored or LZ4 blocks; an
-LZMA bundle is reported as an error and not read).
+SARC archives, Yaz0 streams, UnityFS bundles (stored, LZMA or LZ4 blocks)
+and the compressed blobs of Unity Shader objects. Switch builds strip the
+type tree, so a Shader's blob is found by the shape of its fields: the
+platform list, the offsets, compressed and decompressed lengths (one per
+platform, or a list per platform from Unity 2021), then the blob, with
+every segment inside it LZ4-decompressing to exactly its length.
 
 CUDA modules are not carved: each ELF cubin (whole, or an entry of a fat
 binary, stored plain, LZ4 or zstd) gives one compute program per sm_86 or

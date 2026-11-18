@@ -8,8 +8,8 @@
 //! and compressed sizes (u32 big endian) and flags; blocks follow each
 //! other from the data start.
 //!
-//! Blocks are stored (0) or LZ4 (2, 3); a bundle with an LZMA (1) block or
-//! table is reported and not read.
+//! Blocks are stored (0), LZMA (1: the five property bytes, then the
+//! stream, with no size field; decoded with `lzma-rs`) or LZ4 (2, 3).
 
 use crate::error::{Error, Result};
 
@@ -43,7 +43,18 @@ fn block(src: &[u8], kind: u32, size: usize) -> Result<Vec<u8>> {
             Ok(_) => bad("an LZ4 block decompresses to another size"),
             Err(e) => Err(Error::Format(format!("unityfs: LZ4: {e}"))),
         },
-        1 => bad("LZMA compression is not read"),
+        1 => {
+            let opts = lzma_rs::decompress::Options {
+                unpacked_size: lzma_rs::decompress::UnpackedSize::UseProvided(Some(size as u64)),
+                ..Default::default()
+            };
+            let mut out = Vec::with_capacity(size);
+            match lzma_rs::lzma_decompress_with_options(&mut &src[..], &mut out, &opts) {
+                Ok(()) if out.len() == size => Ok(out),
+                Ok(()) => bad("an LZMA block decompresses to another size"),
+                Err(e) => Err(Error::Format(format!("unityfs: LZMA: {e}"))),
+            }
+        }
         k => Err(Error::Format(format!("unityfs: compression {k}"))),
     }
 }
@@ -52,7 +63,7 @@ fn block(src: &[u8], kind: u32, size: usize) -> Result<Vec<u8>> {
 ///
 /// # Errors
 ///
-/// A truncated or malformed bundle, LZMA compression, or data past 4 GiB.
+/// A truncated or malformed bundle, or data past 4 GiB.
 pub fn data(b: &[u8]) -> Result<Vec<u8>> {
     if !is_bundle(b) {
         return bad("no signature");
@@ -111,4 +122,117 @@ pub fn data(b: &[u8]) -> Result<Vec<u8>> {
         at += c;
     }
     Ok(out)
+}
+
+/// The most platforms a Shader object lists.
+const MAX_PLATFORMS: u32 = 32;
+/// The most segments one platform's blob is split into.
+const MAX_SEGMENTS: u32 = 64;
+/// The largest decompressed segment accepted.
+const MAX_SEGMENT: u32 = 1 << 28;
+
+fn le32(b: &[u8], at: usize) -> Option<u32> {
+    let s = b.get(at..at.checked_add(4)?)?;
+    Some(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+}
+
+/// A list of `n` u32 at `at`; the position after it.
+fn list(b: &[u8], at: usize, n: u32) -> Option<(Vec<u32>, usize)> {
+    let v = (0..n as usize)
+        .map(|k| le32(b, at + 4 * k))
+        .collect::<Option<Vec<_>>>()?;
+    Some((v, at + 4 * n as usize))
+}
+
+/// One length array of a Shader object: a count of `n` and per platform
+/// either one value (`nested` false) or a counted list of values.
+fn lengths(b: &[u8], at: usize, n: u32, nested: bool) -> Option<(Vec<Vec<u32>>, usize)> {
+    if le32(b, at)? != n {
+        return None;
+    }
+    let mut at = at + 4;
+    let mut out = Vec::new();
+    for _ in 0..n {
+        if nested {
+            let k = le32(b, at)?;
+            if k == 0 || k > MAX_SEGMENTS {
+                return None;
+            }
+            let (v, next) = list(b, at + 4, k)?;
+            out.push(v);
+            at = next;
+        } else {
+            out.push(vec![le32(b, at)?]);
+            at += 4;
+        }
+    }
+    Some((out, at))
+}
+
+/// The decompressed segments of the Shader object fields that start at
+/// `at`, when they are some: the platform list, then the offsets,
+/// compressed lengths and decompressed lengths (one value per platform, or
+/// from Unity 2021 a list per platform), then the compressed blob (a
+/// counted byte array). Every segment must lie inside the blob and
+/// LZ4-decompress to exactly its decompressed length, so other data is not
+/// taken for one.
+fn blob_at(b: &[u8], at: usize) -> Option<Vec<Vec<u8>>> {
+    let n = le32(b, at)?;
+    if n == 0 || n > MAX_PLATFORMS {
+        return None;
+    }
+    let (_, at) = list(b, at + 4, n)?;
+    for nested in [false, true] {
+        let Some((offs, a)) = lengths(b, at, n, nested) else {
+            continue;
+        };
+        let Some((clens, a)) = lengths(b, a, n, nested) else {
+            continue;
+        };
+        let Some((dlens, a)) = lengths(b, a, n, nested) else {
+            continue;
+        };
+        let size = le32(b, a)? as usize;
+        let blob = b.get(a + 4..(a + 4).checked_add(size)?)?;
+        let mut out = Vec::new();
+        for ((o, c), d) in offs.iter().zip(&clens).zip(&dlens) {
+            if o.len() != c.len() || o.len() != d.len() {
+                return None;
+            }
+            for ((&o, &c), &d) in o.iter().zip(c).zip(d) {
+                if c == 0 || d == 0 || d > MAX_SEGMENT {
+                    return None;
+                }
+                let src = blob.get(o as usize..(o as usize).checked_add(c as usize)?)?;
+                let seg = lz4_flex::block::decompress(src, d as usize).ok()?;
+                if seg.len() != d as usize {
+                    return None;
+                }
+                out.push(seg);
+            }
+        }
+        return Some(out);
+    }
+    None
+}
+
+/// Every Unity Shader object's compressed blob in `b` (a serialized file,
+/// or a bundle's data), as its decompressed segments with the offset of
+/// the fields they were found at. The fields are found by their shape (see
+/// [`blob_at`]), not by the file's type tree, which Switch builds strip.
+pub fn shader_blobs(b: &[u8]) -> Vec<(usize, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at + 8 <= b.len() {
+        let n = le32(b, at).unwrap_or(0);
+        if (1..=MAX_PLATFORMS).contains(&n)
+            && let Some(segs) = blob_at(b, at)
+        {
+            out.extend(segs.into_iter().map(|s| (at, s)));
+            at += 4;
+            continue;
+        }
+        at += 1;
+    }
+    out
 }

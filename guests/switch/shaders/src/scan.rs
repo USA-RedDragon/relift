@@ -427,10 +427,11 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    /// The SM53 programs of `b`, and those of every zstd frame inside it:
-    /// archives such as BEA hold their files as frames after a table. A
+    /// The SM53 programs of `b`, and those of every zstd frame inside it
+    /// (archives such as BEA hold their files as frames after a table; a
     /// frame magic that does not start a frame that decodes is counted as
-    /// `zstd-embedded-undecodable`.
+    /// `zstd-embedded-undecodable`) and of every Unity Shader object's
+    /// compressed blob ([`unity::shader_blobs`]).
     fn leaf_maxwell(&self, out: &mut Out, name: &str, b: &[u8], depth: u32) -> Result<()> {
         for k in find_all(b, &zst::FRAME_MAGIC).filter(|&k| k > 0) {
             match zst::decode(&b[k..], &self.dicts) {
@@ -441,6 +442,12 @@ impl Ctx<'_> {
                     }
                 }
                 Err(_) => out.container("zstd-embedded-undecodable", 1),
+            }
+        }
+        for (at, seg) in unity::shader_blobs(b) {
+            out.container("unity-shader-blob", 1);
+            if depth < MAX_DEPTH {
+                self.unwrap_plain(out, &format!("{name}@{at:#x}"), &seg, depth + 1)?;
             }
         }
         let (found, errors) = crate::maxwell::carve(b);
