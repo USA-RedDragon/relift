@@ -364,23 +364,14 @@ impl Ctx {
         self.select(f, hit, v, out)
     }
 
-    /// `a + b` rounded by `mode`. The error is found on copies scaled to the
-    /// larger operand's binade, so it never lands in the subnormal range.
+    /// `a + b` rounded by `mode`, from the nearest-rounded sum and the
+    /// sign of its error (see [`Ctx::add_error`]).
     pub(crate) fn fadd_round(&mut self, a: u32, b: u32, mode: Round, ftz: bool) -> u32 {
         let s = self.exact(op::F_ADD, a, b);
         if mode == Round::Nearest {
             return s;
         }
-        let i = self.i32t();
-        let ea = self.fexp(a);
-        let eb = self.fexp(b);
-        let m = self.ext(i, glsl::S_MAX, &[ea, eb]);
-        let nm = self.ineg(m);
-        let a1 = self.ldexp(a, nm);
-        let b1 = self.ldexp(b, nm);
-        let a1 = self.keep_tiny(a1, a, ftz);
-        let b1 = self.keep_tiny(b1, b, ftz);
-        let (s1, e) = self.two_sum(a1, b1);
+        let (s1, e) = self.add_error(a, b, ftz);
         let fin = self.all_finite(&[a, b]);
         let (up, down) = self.error_sides(s, e, fin);
         let r = self.directed(s, up, down, mode, ftz);
@@ -393,6 +384,59 @@ impl Ctx {
         let pb = self.is_pos_zero(b);
         let plus = self.and(pa, pb);
         self.rm_zero(r, ez, plus)
+    }
+
+    /// The nearest-rounded sum `a + b`, or a copy of it scaled by a power of
+    /// two, and the exact error of that sum (TwoSum). When each operand is
+    /// zero or between `2^-103` and `2^126` in magnitude, every step of
+    /// TwoSum on the operands themselves is a multiple of `2^-126` below
+    /// `2^128`: zero or a normal value, so a flushing host gets the exact
+    /// error too and nothing overflows. Otherwise the error is found on
+    /// copies scaled to the larger operand's binade, so it never lands in the
+    /// subnormal range; that path is a branch, taken only by such operands.
+    pub(crate) fn add_error(&mut self, a: u32, b: u32, ftz: bool) -> (u32, u32) {
+        let u = self.u32t();
+        let bt = self.boolt();
+        let mag_mask = self.m.c_u32(0x7fff_ffff);
+        let low = self.m.c_u32(24 << 23);
+        let span = self.m.c_u32((253 - 24) << 23);
+        let zero = self.m.c_u32(0);
+        let mut direct = self.m.c_bool(true);
+        for x in [a, b] {
+            let bits = self.as_bits(x);
+            let mag = self.m.emit(op::BITWISE_AND, u, &[bits, mag_mask]);
+            let off = self.m.emit(op::I_SUB, u, &[mag, low]);
+            let mid = self.m.emit(op::U_LESS_THAN, bt, &[off, span]);
+            let z = self.m.emit(op::I_EQUAL, bt, &[mag, zero]);
+            let ok = self.or(mid, z);
+            direct = self.and(direct, ok);
+        }
+        let fast = self.m.id();
+        let slow = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[direct, fast, slow]);
+        self.m.emit_void(op::LABEL, &[fast]);
+        let (sf, ef) = self.two_sum(a, b);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[slow]);
+        let i = self.i32t();
+        let ea = self.fexp(a);
+        let eb = self.fexp(b);
+        let m = self.ext(i, glsl::S_MAX, &[ea, eb]);
+        let nm = self.ineg(m);
+        let a1 = self.ldexp(a, nm);
+        let b1 = self.ldexp(b, nm);
+        let a1 = self.keep_tiny(a1, a, ftz);
+        let b1 = self.keep_tiny(b1, b, ftz);
+        let (ss, es) = self.two_sum(a1, b1);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
+        let f = self.f32t();
+        let s1 = self.m.emit(op::PHI, f, &[sf, fast, ss, slow]);
+        let e = self.m.emit(op::PHI, f, &[ef, fast, es, slow]);
+        (s1, e)
     }
 
     /// `a * b` rounded by `mode`, its error found on the significands.

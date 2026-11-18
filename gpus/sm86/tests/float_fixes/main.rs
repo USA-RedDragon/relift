@@ -316,6 +316,87 @@ fn directed_fadd_keeps_a_far_smaller_operand() {
     }
 }
 
+/// Directed FADD on both sides of the operand range whose error the
+/// translation takes from the operands themselves (zero, or `2^-103` up to
+/// `2^126`): just inside, at, and just outside each end, with the other
+/// operand near or far, and an operand just below the range whose error is
+/// subnormal unscaled. Every result is normal, so the expected bits are the
+/// IEEE 754 roundings, `.FTZ` or not.
+#[test]
+fn directed_fadd_at_the_ends_of_the_direct_error_range() {
+    let rows: [(u32, u32, [u32; 4]); 12] = [
+        (
+            0x0c80_0000,
+            0x0080_0001,
+            [0x0c80_0001, 0x0c80_0000, 0x0c80_0001, 0x0c80_0000],
+        ),
+        (
+            0x0c80_0000,
+            0x8080_0001,
+            [0x0c7f_ffff, 0x0c7f_fffe, 0x0c7f_ffff, 0x0c7f_fffe],
+        ),
+        (
+            0x0c00_0000,
+            0x0c00_0001,
+            [0x0c80_0000, 0x0c80_0000, 0x0c80_0001, 0x0c80_0000],
+        ),
+        (
+            0x0bff_ffff,
+            0x3f80_0000,
+            [0x3f80_0000, 0x3f80_0000, 0x3f80_0001, 0x3f80_0000],
+        ),
+        (
+            0x0bff_ffff,
+            0xbf80_0000,
+            [0xbf80_0000, 0xbf80_0000, 0xbf7f_ffff, 0xbf7f_ffff],
+        ),
+        (
+            0x0c00_0000,
+            0x3f80_0000,
+            [0x3f80_0000, 0x3f80_0000, 0x3f80_0001, 0x3f80_0000],
+        ),
+        (
+            0x8c00_0000,
+            0x3f80_0000,
+            [0x3f80_0000, 0x3f7f_ffff, 0x3f80_0000, 0x3f7f_ffff],
+        ),
+        (
+            0x7e7f_ffff,
+            0x7280_0001,
+            [0x7e80_0000, 0x7e80_0000, 0x7e80_0001, 0x7e80_0000],
+        ),
+        (
+            0x7e7f_ffff,
+            0xf280_0001,
+            [0x7e7f_fffe, 0x7e7f_fffd, 0x7e7f_fffe, 0x7e7f_fffd],
+        ),
+        (
+            0x7e80_0000,
+            0x3f80_0000,
+            [0x7e80_0000, 0x7e80_0000, 0x7e80_0001, 0x7e80_0000],
+        ),
+        (0x0c12_3456, 0x8c00_0001, [0x0a91_a2a8; 4]),
+        (
+            0x7e7f_ffff,
+            0x7e7f_fffe,
+            [0x7eff_fffe, 0x7eff_fffe, 0x7eff_ffff, 0x7eff_fffe],
+        ),
+    ];
+    for h in HostProfile::presets() {
+        let o = host(h.clone());
+        for ftz in [false, true] {
+            for rnd in 0..4 {
+                let m = if ftz { RN.rnd(rnd).ftz() } else { RN.rnd(rnd) };
+                let cases: Vec<_> = rows
+                    .iter()
+                    .flat_map(|&(a, b, w)| [(a, b, 0, w[rnd as usize]), (b, a, 0, w[rnd as usize])])
+                    .collect();
+                check("FADD", &o, &devices(&h), fadd(m), &cases);
+            }
+        }
+    }
+}
+
 /// Every rounding mode, with and without `.FTZ`, with and without `.SAT`.
 fn modes() -> Vec<M> {
     let mut v = Vec::new();
