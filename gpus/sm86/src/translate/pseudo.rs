@@ -16,11 +16,72 @@ pub const IPA_MUL: &str = "MUL";
 /// The modifier of a Maxwell `IPA` that saturates its result.
 pub const IPA_SAT: &str = "SAT";
 
+/// The modifier of a Maxwell `MUFU` that saturates its result.
+pub const MUFU_SAT: &str = "SAT";
+
+/// Maxwell's `RRO.SINCOS`, the range reduction before `MUFU.SIN` and
+/// `MUFU.COS`.
+pub const RRO_SINCOS: &str = "SINCOS";
+
+/// Maxwell's `RRO.EX2`, the range reduction before `MUFU.EX2`.
+pub const RRO_EX2: &str = "EX2";
+
+/// One turn per radian, `1 / (2 pi)` as a single-precision number.
+const TURNS_PER_RADIAN: u32 = 0x3e22_f983;
+
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     if i.mnemonic == "IPA" && (i.has(IPA_MUL) || i.has(IPA_SAT)) {
         return Some(ipa(c, i));
     }
+    if i.mnemonic == "MUFU" && i.has(MUFU_SAT) {
+        return Some(mufu_sat(c, i));
+    }
+    if i.mnemonic == "RRO" {
+        return Some(rro(c, i));
+    }
     None
+}
+
+/// Maxwell `MUFU` with `.SAT`: the SM86 `MUFU` of the same function, then
+/// the clamp to [0, 1] with NaN to 0 of every saturating float result.
+/// The operand is read before the result is written, so it may be the
+/// destination.
+fn mufu_sat(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let d = Ctx::dst_reg(&i.ops[0])?;
+    let mut plain = i.clone();
+    plain.mods.retain(|m| *m != MUFU_SAT);
+    super::mufu::mufu(c, &plain)?;
+    if d == 255 {
+        return Ok(());
+    }
+    let v = c.load_reg(d);
+    let v = c.sat_bits(v, true);
+    c.store_reg(d, v);
+    Ok(())
+}
+
+/// Maxwell `RRO`: the operand (negated or absolute as asked) in the form
+/// the SM86 `MUFU` takes. For `.SINCOS` that is turns, the operand times
+/// `1 / (2 pi)` rounded toward zero, as NVIDIA's compiler multiplies
+/// before `MUFU.SIN` and `MUFU.COS` on SM70 and later where Maxwell code
+/// has `RRO.SINCOS`; for `.EX2` the operand itself, which the SM86
+/// `MUFU.EX2` converts to fixed point as Maxwell's `RRO.EX2` does
+/// (inferred: the Maxwell format is console-only; Ryujinx copies the
+/// operand for both and takes radians in its sine and cosine).
+fn rro(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.ops.len() != 2 || i.mods.len() != 1 {
+        return bad(format!("pseudo RRO form {i}"));
+    }
+    let v = c.fsrc_bits(&i.ops[1])?;
+    let r = if i.has(RRO_SINCOS) {
+        let k = c.m.c_u32(TURNS_PER_RADIAN);
+        c.fmul_exact(v, k, Round::Zero, false, 0)
+    } else if i.has(RRO_EX2) {
+        v
+    } else {
+        return bad(format!("pseudo RRO form {i}"));
+    };
+    c.store_dst(&i.ops[0], r)
 }
 
 /// Maxwell `IPA` with a multiplier or saturation: the SM86 `IPA` of the

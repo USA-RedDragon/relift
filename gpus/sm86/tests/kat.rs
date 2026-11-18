@@ -12,7 +12,9 @@ mod spvi;
 
 use common::translate_with;
 use relift_gpu_sm86::program::Program;
+use relift_gpu_sm86::translate::pseudo::{MUFU_SAT, RRO_EX2, RRO_SINCOS};
 use relift_gpu_sm86::translate::{Denorm as HostDenorm, HostProfile, Options};
+use relift_gpu_sm86::{Inst, Operand, RegMods};
 use spvi::{Denorm, Env, Memory, Module, Run};
 use std::collections::{HashMap, HashSet};
 
@@ -218,6 +220,144 @@ fn check_family(name: &str) {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Maxwell's `MUFU` with `.SAT`, a pseudo-instruction in place of the
+/// `MUFU` word of each recorded single-precision variant: every output
+/// must be the device's result clamped to [0, 1] with NaN and the negative
+/// sign to +0, the saturation of every float result.
+#[test]
+fn maxwell_mufu_sat_clamps_the_device_result() {
+    let sat = |x: u32| {
+        if is_nan(x) || x & 0x8000_0000 != 0 {
+            0
+        } else if x >= 0x3f80_0000 {
+            0x3f80_0000
+        } else {
+            x
+        }
+    };
+    let host = HostProfile::preset("lavapipe").unwrap();
+    let o = Options {
+        host: host.clone(),
+        exact_mufu: true,
+        ..Options::default()
+    };
+    let mut checked = 0;
+    for name in [
+        "mufu_rcp",
+        "mufu_rsq",
+        "mufu_sqrt",
+        "mufu_ex2",
+        "mufu_lg2",
+        "mufu_sin",
+        "mufu_cos",
+    ] {
+        let f = file::load(name);
+        for v in f.variants.iter().filter(|v| !v.label.contains("F16")) {
+            let mut p = Program::parse(&v.code);
+            let decoded = p.decode();
+            let Some(k) = decoded
+                .iter()
+                .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == "MUFU"))
+            else {
+                continue;
+            };
+            let mut i = decoded[k].clone().unwrap();
+            i.mods.push(MUFU_SAT);
+            p.pseudo.insert(k, i);
+            let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{name} {}: {e}", v.label));
+            let m = Module::parse(&s.spirv);
+            for d in behaviors(&m, &host) {
+                for (r, row) in f.rows.iter().enumerate() {
+                    let got = exec(&m, d, host.canonical_nan, row, v.outs);
+                    let want: Vec<u32> = v.expect[r * v.outs..(r + 1) * v.outs]
+                        .iter()
+                        .map(|x| sat(*x))
+                        .collect();
+                    assert_eq!(got, want, "{name} {} row {row:08x?}", v.label);
+                }
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked >= 7, "{checked} variants");
+}
+
+/// Maxwell's `RRO.SINCOS` and `RRO.EX2`, pseudo-instructions in place of
+/// the `MUFU` word of the recorded `MUFU.SIN` and `MUFU.EX2` programs, on
+/// their input rows: `.SINCOS` gives the operand in turns (times
+/// `1 / (2 pi)`, rounded toward zero, denormals kept) and `.EX2` the
+/// operand itself, with the operand's negation and absolute value.
+#[test]
+fn maxwell_rro_gives_the_mufu_operand() {
+    let rz = |x: u32| {
+        let p = f64::from(f32::from_bits(x)) * f64::from(f32::from_bits(0x3e22_f983));
+        let mut r = p as f32;
+        if f64::from(r).abs() > p.abs() {
+            r = f32::from_bits(r.to_bits() - 1);
+        }
+        r.to_bits()
+    };
+    let host = HostProfile::preset("lavapipe").unwrap();
+    let o = Options {
+        host: host.clone(),
+        ..Options::default()
+    };
+    for (name, kind) in [("mufu_sin", RRO_SINCOS), ("mufu_ex2", RRO_EX2)] {
+        let f = file::load(name);
+        let v = f
+            .variants
+            .iter()
+            .find(|v| !v.label.contains("F16"))
+            .expect("a variant");
+        let mut p = Program::parse(&v.code);
+        let decoded = p.decode();
+        let k = decoded
+            .iter()
+            .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == "MUFU"))
+            .expect("a MUFU");
+        let mufu = decoded[k].clone().unwrap();
+        let src = match &mufu.ops[1] {
+            Operand::Reg(n, _) => *n,
+            o => panic!("MUFU operand {o}"),
+        };
+        for (neg, abs) in [(false, false), (true, false), (false, true)] {
+            let mut i = Inst::new("RRO");
+            i.mods.push(kind);
+            i.ops.push(mufu.ops[0].clone());
+            i.ops.push(Operand::Reg(
+                src,
+                RegMods {
+                    neg,
+                    abs,
+                    ..RegMods::default()
+                },
+            ));
+            p.pseudo.insert(k, i);
+            let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let m = Module::parse(&s.spirv);
+            let mut n = 0;
+            for row in f.rows.iter().filter(|r| !is_nan(r[0])) {
+                let mut x = row[0];
+                if abs {
+                    x &= 0x7fff_ffff;
+                }
+                if neg {
+                    x ^= 0x8000_0000;
+                }
+                let want = if kind == RRO_SINCOS { rz(x) } else { x };
+                let got = exec(&m, Denorm::Preserve, host.canonical_nan, row, v.outs);
+                assert_eq!(
+                    got[0], want,
+                    "{name} {kind} -{neg} |{abs}| in {:08x}",
+                    row[0]
+                );
+                n += 1;
+            }
+            assert!(n > 100, "{name}: {n} rows");
+        }
+    }
 }
 
 macro_rules! families {
