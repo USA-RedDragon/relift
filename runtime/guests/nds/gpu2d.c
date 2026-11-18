@@ -270,40 +270,38 @@ void nds_eng_line(rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line3d)
     nds_px bd = {.c = nds_c18((uint32_t)(pr[0] | pr[1] << 8)), .prio = 4, .flags = NDS_PX_ON};
     unsigned mode = (e->bldcnt >> 6) & 3u, eva = min_u(16, e->bldalpha & 31u), evb = min_u(16, (e->bldalpha >> 8) & 31u);
     unsigned evy = min_u(16, e->bldy & 31u);
-    unsigned order[4], nbg = 0;
-    for (unsigned p = 0; p < 4; p++)
-        for (unsigned k = 0; k < 4; k++)
-            if ((e->dispcnt & (0x100u << k)) && (e->bgcnt[k] & 3u) == p)
-                order[nbg++] = k;
+    const nds_px *tops[NDS_W], *seconds[NDS_W];
+    uint8_t tls[NDS_W], sls[NDS_W];
     for (unsigned x = 0; x < NDS_W; x++) {
-        const nds_px *top = &bd, *second = &bd;
-        unsigned tl = 5, sl = 5;
-        const nds_px *obj = &e->obj[x];
-        bool obj_in = (obj->flags & NDS_PX_ON) && obj->prio < 4 && (ctl[x] >> 4 & 1);
-        unsigned i = 0;
-        while (sl == 5) {
-            const nds_px *px;
-            unsigned k;
-            if (obj_in && (i == nbg || obj->prio <= (e->bgcnt[order[i]] & 3u))) {
-                px = obj;
-                k = 4;
-                obj_in = false;
-            } else if (i < nbg) {
-                k = order[i++];
-                px = &e->bg[k][x];
-                if (!(px->flags & NDS_PX_ON) || !(ctl[x] >> k & 1))
-                    continue;
-            } else {
-                break;
-            }
-            if (tl == 5) {
-                top = px;
-                tl = k;
-            } else {
-                second = px;
-                sl = k;
+        tops[x] = seconds[x] = &bd;
+        tls[x] = sls[x] = 5;
+    }
+    for (int p = 3; p >= 0; p--) {
+        for (int k = 3; k >= 0; k--) {
+            if (!(e->dispcnt & (0x100u << k)) || (e->bgcnt[k] & 3u) != (unsigned)p)
+                continue;
+            const nds_px *row = e->bg[k];
+            for (unsigned x = 0; x < NDS_W; x++)
+                if ((row[x].flags & NDS_PX_ON) && (ctl[x] >> k & 1)) {
+                    seconds[x] = tops[x];
+                    sls[x] = tls[x];
+                    tops[x] = &row[x];
+                    tls[x] = (uint8_t)k;
+                }
+        }
+        for (unsigned x = 0; x < NDS_W; x++) {
+            const nds_px *o = &e->obj[x];
+            if ((o->flags & NDS_PX_ON) && o->prio == (unsigned)p && (ctl[x] >> 4 & 1)) {
+                seconds[x] = tops[x];
+                sls[x] = tls[x];
+                tops[x] = o;
+                tls[x] = 4;
             }
         }
+    }
+    for (unsigned x = 0; x < NDS_W; x++) {
+        const nds_px *top = tops[x], *second = seconds[x];
+        unsigned tl = tls[x], sl = sls[x];
         uint32_t c = top->c;
         bool fx = ctl[x] & 0x20, below = e->bldcnt >> (8 + sl) & 1;
         if ((top->flags & NDS_PX_3D) && top->alpha < 31 && below) {
