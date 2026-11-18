@@ -390,10 +390,13 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-n64-tools",
-        why: "single-purpose tools for Nintendo 64 files, thin wrappers over relift-n64-formats and relift-n64-analyze",
+        why: "single-purpose tools for Nintendo 64 files, thin wrappers over relift-n64-formats and relift-n64-analyze, and `ir`, which prints blocks lifted by the guest's frontends",
         normal: &[
             "clap",
             "relift-cache",
+            "relift-guest",
+            "relift-ir",
+            "relift-n64",
             "relift-n64-analyze",
             "relift-n64-formats",
             "serde_json",

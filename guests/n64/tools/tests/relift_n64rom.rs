@@ -182,3 +182,26 @@ fn functions_lists_the_code_reached_from_the_entry() {
     let out = n64rom(&d, &["functions", path(&f), "--cic", "1234"]);
     assert!(!out.status.success());
 }
+
+#[test]
+fn ir_prints_vr4300_and_rsp_blocks() {
+    let d = dir("n64rom-ir");
+    let out = n64rom(&d, &["ir", "--dce", "0x8c880004"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("regs vr4300"), "{text}");
+    assert!(text.contains("io.load.be.any"), "{text}");
+    let out = n64rom(&d, &["ir", "--rsp", "--dce", "0x4a031050"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("regs rsp"), "{text}");
+    assert!(text.contains("lane.add.16"), "{text}");
+}
+
+#[test]
+fn ir_rejects_a_word_that_is_not_hex() {
+    let d = dir("n64rom-ir-bad");
+    let out = n64rom(&d, &["ir", "zz"]);
+    assert!(!out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stderr).lines().count(), 1);
+}

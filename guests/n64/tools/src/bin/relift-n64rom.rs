@@ -1,7 +1,7 @@
 //! `relift-n64rom`: print the header of a Nintendo 64 ROM with its byte
 //! order, boot variant and checksum check, list its Yay0, Yaz0 and MIO0
 //! streams, list the code static discovery finds, or write it back as
-//! big-endian.
+//! big-endian, or print the IR of instruction words.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 use relift_n64_analyze::{Boot, Report, RspOrigin, Segment, SegmentOrigin, Source, analyze_with};
 use relift_n64_formats::{Cic, CrcCheck, Rom};
+use relift_n64_tools::ir::{self, IrArgs};
 use relift_n64_tools::{BoxError, input, output, print_json, run};
 use serde_json::{Value, json};
 
@@ -59,6 +60,9 @@ enum Command {
         #[arg(long, value_name = "CIC")]
         cic: Option<String>,
     },
+    /// Print the IR of MIPS or RSP instruction words, as the Nintendo 64
+    /// guest lifts them.
+    Ir(IrArgs),
     /// Write the image as big-endian (`.z64`).
     Normalize {
         /// The ROM image in any byte order, or - for stdin.
@@ -406,6 +410,7 @@ fn main() -> ExitCode {
         Command::Info { common, cic, check } => info(&common, cic.as_deref(), check),
         Command::Streams { common } => streams(&common),
         Command::Functions { common, cic } => functions(&common, cic.as_deref()),
+        Command::Ir(a) => ir::run(&a),
         Command::Normalize { rom, out } => {
             let rom = open(&rom)?;
             output(&out, &rom.bytes)

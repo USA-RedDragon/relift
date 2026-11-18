@@ -3,6 +3,8 @@
 //! cache writer and the one-line error exit. All format logic lives in
 //! `relift-n64-formats`.
 
+pub mod ir;
+
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;

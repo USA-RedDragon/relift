@@ -1265,6 +1265,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-guest",
+ "relift-ir",
+ "relift-n64",
  "relift-n64-analyze",
  "relift-n64-formats",
  "relift-proc",
