@@ -150,6 +150,8 @@ typedef struct nvn_gfx {
     float polygon_offset[3];
     float blend_color[4];
     float line_width;
+    /** @brief Counter types a ResetCounter named, each replayed as nothing (bit n: type n). */
+    uint32_t counters_reset;
 } nvn_gfx;
 
 /** @brief One command set being replayed. */

@@ -1392,11 +1392,24 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     case NVN_CMD_REPORT_COUNTER:
         if ((uint32_t)e->x[1] != 0)
-            return nvn_vk_stop(r, "nvnCommandBufferReportCounter of counter type %u", (uint32_t)e->x[1]);
+            return nvn_vk_stop(r, "nvnCommandBufferReportCounter of counter type %u%s", (uint32_t)e->x[1],
+                               (uint32_t)e->x[1] < 32 && st->counters_reset & 1u << (uint32_t)e->x[1]
+                                   ? " (after a ResetCounter of it, which relift replayed as nothing)"
+                                   : "");
         if (!nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed a submit");
         rl_st64(r->mem, nvn_gpu_guest(e->x[2]), 0);
         rl_st64(r->mem, nvn_gpu_guest(e->x[2]) + 8, rl_guest_clock_ns());
+        return RL_OK;
+    case NVN_CMD_RESET_COUNTER:
+        /*
+         * The driver writes only a CLEAR_REPORT_VALUE method (SDK 20.5
+         * nvnCommandBufferResetCounter): the GPU's counter is zeroed and no
+         * memory changes. Only the timestamp is reported, which no reset
+         * touches; any other type is kept so its ReportCounter names it.
+         */
+        if ((uint32_t)e->x[1] < 32)
+            st->counters_reset |= 1u << (uint32_t)e->x[1];
         return RL_OK;
     case NVN_CMD_DRAW_ARRAYS:
         return draw(r, (uint32_t)e->x[1], false, 0, 0, 0, (uint32_t)e->x[2], (uint32_t)e->x[3]);
