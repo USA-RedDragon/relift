@@ -1,6 +1,8 @@
 package dev.relift.app;
 
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.hardware.display.DisplayManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
@@ -40,6 +42,7 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
     private Drivers drivers;
     private Ui ui;
     private Displays displays;
+    private DisplayManager.DisplayListener watch;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -47,6 +50,23 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         drivers = new Drivers(this);
         displays = new Displays(this);
         ui = new Ui(this, drivers, this, false);
+        applyOrientation();
+        watch = new DisplayManager.DisplayListener() {
+            @Override
+            public void onDisplayAdded(int id) {
+                applyOrientation();
+            }
+
+            @Override
+            public void onDisplayRemoved(int id) {
+                applyOrientation();
+            }
+
+            @Override
+            public void onDisplayChanged(int id) {
+            }
+        };
+        getSystemService(DisplayManager.class).registerDisplayListener(watch, null);
         addContentView(ui.root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         if (Build.VERSION.SDK_INT >= 33) {
@@ -55,6 +75,46 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         String page = getIntent().getStringExtra("relift_open");
         if ("gpu_driver".equals(page)) {
             ui.open(Ui.Page.DRIVER);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (watch != null) {
+            getSystemService(DisplayManager.class).unregisterDisplayListener(watch);
+        }
+        super.onDestroy();
+    }
+
+    /**
+     * Keeps the sensor landscape orientation while another display can show a
+     * screen of the game, so each display keeps its own panel's landscape
+     * picture; a manifest that allows portrait only applies on a device with
+     * one display. The test extra relift_orientation (portrait, landscape,
+     * manifest) forces a request.
+     */
+    void applyOrientation() {
+        String force = getIntent().getStringExtra("relift_orientation");
+        int want;
+        if ("portrait".equals(force)) {
+            want = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+        } else if ("manifest".equals(force)) {
+            want = manifestOrientation();
+        } else if ("landscape".equals(force) || displays.count() > 0) {
+            want = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+        } else {
+            want = manifestOrientation();
+        }
+        if (getRequestedOrientation() != want) {
+            setRequestedOrientation(want);
+        }
+    }
+
+    private int manifestOrientation() {
+        try {
+            return getPackageManager().getActivityInfo(getComponentName(), 0).screenOrientation;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
         }
     }
 

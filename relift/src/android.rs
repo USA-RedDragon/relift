@@ -21,10 +21,10 @@ pub const MIN_API: u32 = 30;
 /// The activity class of the APK: SDL's activity plus launch arguments and
 /// environment variables from the intent, the haptic tick of the on-screen
 /// controller, the game's settings pages, the game data import when the
-/// start-up check fails, and the manifest's landscape
-/// orientation kept (SDL asks for any orientation the user allows when its
-/// window is resizable, which put the game in portrait on a device held
-/// upright).
+/// start-up check fails, and the manifest's orientation kept (SDL asks for any
+/// orientation the user allows when its window is resizable, which put the
+/// game in portrait on a device held upright), narrowed to the sensor
+/// landscape while another display shows a screen of the game.
 /// The license of the Zstandard decoder the Switch runtime compiles in.
 const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
 /// The licenses of the picture options' FXAA, SMAA and FSR 1 passes, in every runtime.
@@ -1061,6 +1061,16 @@ mod tests {
         assert!(JAVA[0].1.contains(
             "public void setOrientationBis(int w, int h, boolean resizable, String hint) {\n    }"
         ));
+    }
+
+    #[test]
+    fn displays_besides_the_game_keep_the_panel_landscape() {
+        let java = JAVA[0].1;
+        assert!(java.contains("void applyOrientation()"));
+        assert!(java.contains("displays.count() > 0"));
+        assert!(java.contains("SCREEN_ORIENTATION_SENSOR_LANDSCAPE"));
+        assert!(java.contains("registerDisplayListener(watch, null)"));
+        assert!(java.contains("unregisterDisplayListener(watch)"));
     }
 
     #[test]
