@@ -102,7 +102,7 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
         return m->postflg[cpu];
     default:
         if (cpu == RL_NDS_ARM7 && nds_sys_has(off))
-            return nds_sys_read(m, off);
+            return nds_sys_read(m, off, now);
         if (off < NDS_REGS)
             return regs_word(m, cpu, off);
         return 0;
@@ -199,7 +199,7 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
         return;
     default:
         if (cpu == RL_NDS_ARM7 && nds_sys_has(off))
-            nds_sys_write(m, off, v, mask);
+            nds_sys_write(m, off, v, mask, now);
         else if (off < NDS_REGS)
             regs_put(m, cpu, off, v, mask);
         return;
@@ -257,6 +257,7 @@ void nds_io_reset(rl_nds *m)
     nds_timer_reset(m);
     nds_dma_reset(m);
     nds_sys_reset(m);
+    nds_snd_reset(m);
     nds_cart_reset(m);
     nds_spi_reset(m);
     nds_rtc_reset(m);

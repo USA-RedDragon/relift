@@ -277,18 +277,59 @@ typedef struct nds_dev {
     rl_nds *m;
 } nds_dev;
 
-/** @brief One of the sound controller's 16 channels (stored as written; no audio is made yet). */
+/** @brief One of the sound controller's 16 channels: its registers and its playback (sound.c). */
 typedef struct nds_snd_ch {
+    /** @brief The registers as written (cnt bit 31 is the busy bit the channel clears). */
     uint32_t cnt, sad, len;
     uint16_t tmr, pnt;
+    /** @brief The tick of the timer's next overflow, NDS_NEVER while the timer is stopped. */
+    uint64_t next;
+    /** @brief The sample the next overflow plays: negative during the start delay. */
+    int32_t pos;
+    /** @brief Latched at the start: the source address, the sample count and the loop start sample. */
+    uint32_t src, total, loop;
+    /** @brief The sample the channel puts out now (PCM16 scale), and whether it puts one out at all. */
+    int16_t out;
+    bool sounding;
+    /** @brief The last sample of a one-shot sound plays: the next overflow ends it. */
+    bool last;
+    /** @brief The start's first period keeps the old sample (the Hold flag). */
+    bool held;
+    /** @brief The IMA-ADPCM decoder, its state at the loop start, and whether that was saved. */
+    int16_t pcm, loop_pcm;
+    uint8_t index, loop_index;
+    bool loop_saved;
+    /** @brief The noise generator of channels 14 and 15. */
+    uint16_t lfsr;
 } nds_snd_ch;
 
-/** @brief The ARM7's sound registers (0x04000400 to 0x0400051F) and the power registers beside them. */
+/** @brief One capture unit: its registers and its progress. */
+typedef struct nds_snd_cap {
+    uint8_t cnt;
+    uint32_t dad, len;
+    /** @brief The tick of its timer's next overflow (NDS_NEVER while stopped), the byte offset and the word being filled. */
+    uint64_t next;
+    uint32_t off, word;
+    uint8_t fill;
+} nds_snd_cap;
+
+/** @brief Stereo frames the host's sample buffer holds. */
+#define NDS_SND_RING 16384u
+
+/** @brief The ARM7's sound controller (0x04000400 to 0x0400051F, sound.c). */
 typedef struct nds_sound {
     nds_snd_ch ch[16];
     uint16_t soundcnt, bias;
-    uint8_t capcnt[2];
-    uint32_t capdad[2], caplen[2];
+    nds_snd_cap cap[2];
+    /** @brief The tick the unit has reached and the tick of the next output sample. */
+    uint64_t at, out_next;
+    /** @brief The output samples for the host (interleaved left and right), a ring read by rl_nds_audio_take. */
+    int16_t ring[NDS_SND_RING * 2];
+    uint32_t rd, n;
+    /** @brief Output samples made in all and dropped because the ring was full. */
+    uint64_t made, dropped;
+    /** @brief Catches up every few milliseconds. */
+    rl_event ev;
 } nds_sound;
 
 /** @brief KEYCNT of each CPU and the host's input. */
@@ -713,10 +754,21 @@ uint16_t nds_extkeyin(const rl_nds *m);
 void nds_sys_reset(rl_nds *m);
 /** @brief True when the ARM7 register at word offset off is one of nds_sys_*. */
 bool nds_sys_has(uint32_t off);
-/** @brief POWCNT2, BIOSPROT, WIFIWAITCNT (half of word 0x204) or a sound register at word offset off. */
-uint32_t nds_sys_read(rl_nds *m, uint32_t off);
-/** @brief A write of the mask bits of v to one of them. */
-void nds_sys_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask);
+/** @brief POWCNT2, BIOSPROT, WIFIWAITCNT (half of word 0x204) or a sound register at word offset off, at tick now. */
+uint32_t nds_sys_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief A write of the mask bits of v to one of them at tick now. */
+void nds_sys_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+
+/** @brief Power-on state of the sound controller. */
+void nds_snd_reset(rl_nds *m);
+/** @brief Starts the sound controller's clock at the ARM7's current tick and posts its catch-up. */
+void nds_snd_attach(rl_nds *m);
+/** @brief Runs the channels, the captures and the mixer up to tick to. */
+void nds_snd_run(rl_nds *m, uint64_t to);
+/** @brief A sound register (word offset 0x400 to 0x51C) at tick now. */
+uint32_t nds_snd_read(rl_nds *m, uint32_t off, uint64_t now);
+/** @brief A write of the mask bits of v to a sound register at tick now (a start bit that goes from 0 to 1 starts). */
+void nds_snd_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 
 /** @brief Empties the caches and the write buffer and reads the regions. */
 void nds_cache_reset(rl_nds *m);

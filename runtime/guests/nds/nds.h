@@ -335,6 +335,22 @@ typedef struct rl_nds_input {
  */
 void rl_nds_set_input(rl_nds *m, const rl_nds_input *in);
 
+/** @brief Ticks between two samples of the sound mixer's output (1024 ARM7 cycles). */
+#define RL_NDS_AUDIO_TICKS 2048u
+/** @brief The mixer's output rate in Hz, RL_NDS_TICK_HZ / RL_NDS_AUDIO_TICKS rounded (GBATEK's nominal 32.768 kHz). */
+#define RL_NDS_AUDIO_RATE 32728u
+
+/**
+ * @brief Takes up to max stereo frames (interleaved left and right, signed
+ * 16-bit) of the sound controller's output, oldest first; returns how many.
+ * The controller holds half a second of frames and drops new ones while
+ * nobody takes them. Each frame is the speakers' 10-bit level less
+ * SOUNDBIAS, times 64; silence while POWCNT2 turns the speakers off.
+ */
+uint32_t rl_nds_audio_take(rl_nds *m, int16_t *pcm, uint32_t max);
+/** @brief Frames the sound controller dropped because rl_nds_audio_take did not keep up. */
+uint64_t rl_nds_audio_dropped(const rl_nds *m);
+
 /** @brief A date and time for the clock. */
 typedef struct rl_nds_time {
     /** @brief 2000 to 2099. */
