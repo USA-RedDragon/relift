@@ -12,6 +12,7 @@ pub mod bundle;
 pub mod field;
 pub mod form;
 pub mod inst;
+pub mod lower;
 pub mod program;
 mod text;
 

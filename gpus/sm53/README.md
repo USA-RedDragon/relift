@@ -15,6 +15,12 @@ envytools' `envydis -m gm107 -V sm52` so the decoder can be compared with it
 word for word; envydis is a local tool and its output is never committed.
 See NOTICE.
 
+[LOWERING.md](LOWERING.md) lists how each Maxwell form reaches the SM86
+translator: lowered to exactly one SM86 form, a pseudo-instruction, or a
+stop, each with its evidence. It is written from `src/lower/table.rs` by
+`RELIFT_BLESS=1 cargo test -p relift-gpu-sm53 --test lowering`; the test
+fails while it is stale.
+
 ```sh
 cargo test -p relift-gpu-sm53
 ```

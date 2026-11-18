@@ -1175,6 +1175,7 @@ dependencies = [
 name = "relift-gpu-sm53"
 version = "0.1.0"
 dependencies = [
+ "relift-cache",
  "relift-gpu-sm86",
 ]
 
