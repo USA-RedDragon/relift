@@ -7,12 +7,12 @@
  * buffer as one RGBA8 word per pixel, is copied to a device buffer, runs
  * through the passes the options ask for and comes back the same way. The
  * passes' SPIR-V and SMAA's textures are post_data.h (from
- * runtime/core/shaders and runtime/third_party/smaa). An upscaler
- * stage (the place a game's own upscaler or TAA goes) records into the same
- * command buffer ahead of the anti-aliasing pass.
+ * runtime/core/shaders and runtime/third_party/smaa). The upscaler stage
+ * (rl_post_set_upscaler) records into the same command buffer ahead of the
+ * anti-aliasing passes, which then run at its output size.
  *
- * With every option off rl_post_apply returns the frame it was given and
- * nothing here starts. When Vulkan cannot start or a frame fails, the
+ * With every option off and no upscaler rl_post_apply returns the frame it
+ * was given and nothing here starts. When Vulkan cannot start or a frame fails, the
  * options are off for the rest of the run and the log says why.
  */
 #include <relift/post.h>
@@ -55,7 +55,7 @@ typedef struct buf {
     bool coherent;
 } buf;
 
-enum { B_IN, B_OUT, B_EDGES, B_BLEND, B_AREA, B_SEARCH, B_STAGE_IN, B_STAGE_OUT, B_COUNT };
+enum { B_SRC, B_IN, B_OUT, B_EDGES, B_BLEND, B_AREA, B_SEARCH, B_STAGE_IN, B_STAGE_OUT, B_COUNT };
 
 enum { P_FXAA, P_SMAA_EDGES, P_SMAA_WEIGHTS, P_SMAA_WEIGHTS_FAST, P_SMAA_BLEND, P_COUNT };
 
@@ -70,12 +70,15 @@ typedef struct vk {
     uint32_t family;
     rlvk_memory_properties mem;
     buf b[B_COUNT];
-    uint32_t w, h;
+    uint32_t sw, sh, w, h;
 } vk;
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static vk g_vk;
 static bool g_tried, g_ok;
+static const rl_post_stage *g_up;
+static void *g_up_user;
+static bool g_up_started, g_up_ok;
 static uint8_t *g_out;
 static size_t g_out_cap;
 
@@ -456,18 +459,24 @@ static bool start(vk *v)
     return make_instance(v, gipa) && pick_device(v, gipa) && make_device(v) && make_pipelines(v) && upload_luts(v);
 }
 
-/** @brief Buffers for a width by height picture, and the descriptor set that names them. */
-static bool size_buffers(vk *v, uint32_t w, uint32_t h)
+/**
+ * @brief Buffers for a sw by sh picture in and a w by h picture after the upscaler (the anti-aliasing size), and the
+ * descriptor set that names them.
+ */
+static bool size_buffers(vk *v, uint32_t sw, uint32_t sh, uint32_t w, uint32_t h)
 {
-    if (v->w == w && v->h == h)
+    if (v->sw == sw && v->sh == sh && v->w == w && v->h == h)
         return true;
-    rlvk_size bytes = (rlvk_size)w * h * 4;
+    v->sw = v->sh = v->w = v->h = 0;
+    rlvk_size src = (rlvk_size)sw * sh * 4, bytes = (rlvk_size)w * h * 4;
     const uint32_t storage = RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    if (!buf_make(v, &v->b[B_IN], bytes, storage | RLVK_BUFFER_USAGE_TRANSFER_DST_BIT, false, false) ||
+    const uint32_t both = RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT | RLVK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (!buf_make(v, &v->b[B_SRC], src, storage | both, false, false) ||
+        !buf_make(v, &v->b[B_IN], bytes, storage | both, false, false) ||
         !buf_make(v, &v->b[B_OUT], bytes, storage | RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, false) ||
         !buf_make(v, &v->b[B_EDGES], bytes, storage, false, false) ||
         !buf_make(v, &v->b[B_BLEND], bytes, storage, false, false) ||
-        !buf_make(v, &v->b[B_STAGE_IN], bytes, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false) ||
+        !buf_make(v, &v->b[B_STAGE_IN], src, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false) ||
         !buf_make(v, &v->b[B_STAGE_OUT], bytes, RLVK_BUFFER_USAGE_TRANSFER_DST_BIT, true, true))
         return false;
     static const int bound[NBIND] = { B_IN, B_OUT, B_EDGES, B_BLEND, B_AREA, B_SEARCH };
@@ -485,6 +494,8 @@ static bool size_buffers(vk *v, uint32_t w, uint32_t h)
         };
     }
     v->vkUpdateDescriptorSets(v->device, NBIND, wr, 0, NULL);
+    v->sw = sw;
+    v->sh = sh;
     v->w = w;
     v->h = h;
     return true;
@@ -535,14 +546,40 @@ static void record_smaa(vk *v, params pc, uint32_t quality)
     dispatch(v, P_SMAA_BLEND, &pc);
 }
 
-/** @brief Runs the passes of aa on width by height RGB888 pixels into out. */
-static bool run(vk *v, uint32_t aa, const uint8_t *rgb, uint8_t *out, uint32_t w, uint32_t h)
+/** @brief Starts the upscaler on the pipeline's device the first time it is needed; false when it is off. */
+static bool upscaler_ready(vk *v)
 {
-    if (!size_buffers(v, w, h))
+    if (!g_up)
+        return false;
+    if (!g_up_started) {
+        g_up_started = true;
+        rl_post_device d = {
+            .instance = v->instance,
+            .physical_device = v->phys,
+            .device = v->device,
+            .queue = v->queue,
+            .queue_family = v->family,
+            .get_device_proc_addr = (void *)(uintptr_t)v->vkGetDeviceProcAddr,
+        };
+        g_up_ok = g_up->start(g_up_user, &d);
+        if (!g_up_ok)
+            rl_log(RL_LOG_WARN, "post", "the upscaler %s did not start; the picture is shown at its own size", g_up->name);
+    }
+    return g_up_ok;
+}
+
+/**
+ * @brief Runs the upscaler (when up) and the passes of aa on sw by sh RGB888 pixels into out, which is w by h (the
+ * upscaler's output size).
+ */
+static bool run(vk *v, bool up, uint32_t aa, const uint8_t *rgb, uint8_t *out, uint32_t sw, uint32_t sh, uint32_t w,
+                uint32_t h)
+{
+    if (!size_buffers(v, sw, sh, w, h))
         return false;
     size_t n = (size_t)w * h;
     buf *si = &v->b[B_STAGE_IN], *so = &v->b[B_STAGE_OUT];
-    pack(si->map, rgb, n);
+    pack(si->map, rgb, (size_t)sw * sh);
     rlvk_mapped_memory_range in_range = { .sType = RLVK_ST_MAPPED_MEMORY_RANGE, .memory = si->memory, .size = ~(rlvk_size)0 };
     if (!si->coherent)
         v->vkFlushMappedMemoryRanges(v->device, 1, &in_range);
@@ -554,19 +591,26 @@ static bool run(vk *v, uint32_t aa, const uint8_t *rgb, uint8_t *out, uint32_t w
     rlvk_result r = v->vkBeginCommandBuffer(v->cmd, &bi);
     if (r != RLVK_SUCCESS)
         return fail("vkBeginCommandBuffer", r);
-    rlvk_buffer_copy copy = { .size = (rlvk_size)n * 4 };
-    v->vkCmdCopyBuffer(v->cmd, si->buffer, v->b[B_IN].buffer, 1, &copy);
-    barrier(v, RLVK_PIPELINE_STAGE_TRANSFER_BIT, RLVK_ACCESS_TRANSFER_WRITE_BIT, RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            RLVK_ACCESS_SHADER_READ_BIT);
-    v->vkCmdBindDescriptorSets(v->cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, v->layout, 0, 1, &v->set, 0, NULL);
-    params pc = { .width = (int32_t)w, .height = (int32_t)h };
-    if (aa == RL_POST_AA_FXAA)
-        dispatch(v, P_FXAA, &pc);
-    else
-        record_smaa(v, pc, rl_setting_enum("picture.aa_quality"));
-    barrier(v, RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RLVK_ACCESS_SHADER_WRITE_BIT, RLVK_PIPELINE_STAGE_TRANSFER_BIT,
-            RLVK_ACCESS_TRANSFER_READ_BIT);
-    v->vkCmdCopyBuffer(v->cmd, v->b[B_OUT].buffer, so->buffer, 1, &copy);
+    const uint32_t xfer = RLVK_PIPELINE_STAGE_TRANSFER_BIT, cs = RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    const uint32_t any_read = RLVK_ACCESS_SHADER_READ_BIT | RLVK_ACCESS_TRANSFER_READ_BIT;
+    const uint32_t any_write = RLVK_ACCESS_SHADER_WRITE_BIT | RLVK_ACCESS_TRANSFER_WRITE_BIT;
+    rlvk_buffer_copy in_copy = { .size = (rlvk_size)sw * sh * 4 }, copy = { .size = (rlvk_size)n * 4 };
+    v->vkCmdCopyBuffer(v->cmd, si->buffer, v->b[up ? B_SRC : B_IN].buffer, 1, &in_copy);
+    barrier(v, xfer, RLVK_ACCESS_TRANSFER_WRITE_BIT, xfer | cs, any_read);
+    if (up) {
+        g_up->record(g_up_user, v->cmd, v->b[B_SRC].buffer, v->b[B_IN].buffer, sw, sh, w, h);
+        barrier(v, xfer | cs, any_write, xfer | cs, any_read);
+    }
+    if (aa != RL_POST_AA_OFF) {
+        v->vkCmdBindDescriptorSets(v->cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, v->layout, 0, 1, &v->set, 0, NULL);
+        params pc = { .width = (int32_t)w, .height = (int32_t)h };
+        if (aa == RL_POST_AA_FXAA)
+            dispatch(v, P_FXAA, &pc);
+        else
+            record_smaa(v, pc, rl_setting_enum("picture.aa_quality"));
+        barrier(v, cs, RLVK_ACCESS_SHADER_WRITE_BIT, xfer, RLVK_ACCESS_TRANSFER_READ_BIT);
+    }
+    v->vkCmdCopyBuffer(v->cmd, v->b[aa != RL_POST_AA_OFF ? B_OUT : B_IN].buffer, so->buffer, 1, &copy);
     barrier(v, RLVK_PIPELINE_STAGE_TRANSFER_BIT, RLVK_ACCESS_TRANSFER_WRITE_BIT, RLVK_PIPELINE_STAGE_HOST_BIT,
             RLVK_ACCESS_HOST_READ_BIT);
     r = v->vkEndCommandBuffer(v->cmd);
@@ -588,11 +632,23 @@ static bool run(vk *v, uint32_t aa, const uint8_t *rgb, uint8_t *out, uint32_t w
     return true;
 }
 
-const uint8_t *rl_post_apply(const uint8_t *rgb, uint32_t width, uint32_t height)
+void rl_post_set_upscaler(const rl_post_stage *stage, void *user)
+{
+    pthread_mutex_lock(&g_lock);
+    __atomic_store_n(&g_up, stage, __ATOMIC_RELEASE);
+    g_up_user = user;
+    g_up_started = g_up_ok = false;
+    pthread_mutex_unlock(&g_lock);
+}
+
+const uint8_t *rl_post_apply(const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t *out_width,
+                             uint32_t *out_height)
 {
     rl_settings_declare_runtime();
+    *out_width = width;
+    *out_height = height;
     uint32_t aa = rl_setting_enum("picture.aa");
-    if (aa == RL_POST_AA_OFF || !width || !height)
+    if ((aa == RL_POST_AA_OFF && !__atomic_load_n(&g_up, __ATOMIC_ACQUIRE)) || !width || !height)
         return rgb;
     const uint8_t *shown = rgb;
     pthread_mutex_lock(&g_lock);
@@ -600,7 +656,17 @@ const uint8_t *rl_post_apply(const uint8_t *rgb, uint32_t width, uint32_t height
         g_tried = true;
         g_ok = start(&g_vk);
     }
-    size_t bytes = (size_t)width * height * 3;
+    uint32_t w = width, h = height;
+    bool up = g_ok && upscaler_ready(&g_vk) && g_up->plan(g_up_user, width, height, &w, &h) && w && h;
+    if (!up) {
+        w = width;
+        h = height;
+    }
+    if (!up && aa == RL_POST_AA_OFF) {
+        pthread_mutex_unlock(&g_lock);
+        return rgb;
+    }
+    size_t bytes = (size_t)w * h * 3;
     if (g_ok && bytes > g_out_cap) {
         uint8_t *p = realloc(g_out, bytes);
         if (p) {
@@ -611,9 +677,12 @@ const uint8_t *rl_post_apply(const uint8_t *rgb, uint32_t width, uint32_t height
         }
     }
     if (g_ok)
-        g_ok = run(&g_vk, aa, rgb, g_out, width, height);
-    if (g_ok)
+        g_ok = run(&g_vk, up, aa, rgb, g_out, width, height, w, h);
+    if (g_ok) {
         shown = g_out;
+        *out_width = w;
+        *out_height = h;
+    }
     pthread_mutex_unlock(&g_lock);
     return shown;
 }

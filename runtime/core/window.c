@@ -41,7 +41,7 @@ bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t widt
 {
     if (!w || !w->b || !w->b->present_rgb)
         return false;
-    rgb = rl_post_apply(rgb, width, height);
+    rgb = rl_post_apply(rgb, width, height, &width, &height);
     w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
     while (rl_touchpad_hold(16))
         w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);

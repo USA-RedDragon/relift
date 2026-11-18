@@ -359,7 +359,9 @@ static void finish(host *H)
     }
     if (H->shown_png) {
         last_picture(H);
-        if (H->have && !write_png(H->shown_png, rl_post_apply(H->rgb, H->w, H->h), H->w, H->h))
+        uint32_t w = 0, h = 0;
+        const uint8_t *shown = H->have ? rl_post_apply(H->rgb, H->w, H->h, &w, &h) : NULL;
+        if (shown && !write_png(H->shown_png, shown, w, h))
             fprintf(stderr, "relift-n64: could not write %s\n", H->shown_png);
     }
     if (H->raw_png) {

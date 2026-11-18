@@ -4,7 +4,8 @@
  * with every option off a window shows the frame it was given, byte for
  * byte, the FXAA pass on the host's device keeps flat pictures byte for
  * byte and matches the C reference, and SMAA at every preset keeps flat
- * pictures and softens only the pixels along edges.
+ * pictures and softens only the pixels along edges, and an upscaler stage
+ * runs first and sets the size the anti-aliasing passes and the window get.
  */
 #include "runner.h"
 
@@ -105,6 +106,14 @@ static void scene(uint8_t *rgb)
         }
 }
 
+/** @brief rl_post_apply on a W by H picture, which must come back W by H. */
+static const uint8_t *apply(const uint8_t *rgb)
+{
+    uint32_t w = 0, h = 0;
+    const uint8_t *out = rl_post_apply(rgb, W, H, &w, &h);
+    return w == W && h == H ? out : NULL;
+}
+
 /** @brief Whether the pipeline runs on this host (a Vulkan loader and a device with a compute queue); else only the off
  * path is tested. */
 static bool have_vulkan(void)
@@ -113,7 +122,8 @@ static bool have_vulkan(void)
     rl_settings_reset();
     rl_settings_declare_runtime();
     bool ok = rl_hostlib_vulkan_gipa() && rl_settings_set("picture.aa", "fxaa") == RL_SETTING_OK;
-    ok = ok && rl_post_apply(tiny, 4, 4) != tiny;
+    uint32_t w = 0, h = 0;
+    ok = ok && rl_post_apply(tiny, 4, 4, &w, &h) != tiny;
     rl_settings_reset();
     rl_settings_declare_runtime();
     if (!ok)
@@ -162,10 +172,10 @@ TEST(post_with_every_option_off_gives_the_frame_itself)
     rl_settings_declare_runtime();
     static uint8_t rgb[W * H * 3];
     scene(rgb);
-    CHECK(rl_post_apply(rgb, W, H) == rgb);
+    CHECK(apply(rgb) == rgb);
     CHECK(rl_settings_set("picture.aa", "fxaa") == RL_SETTING_OK);
     CHECK(rl_settings_set("picture.aa", "off") == RL_SETTING_OK);
-    CHECK(rl_post_apply(rgb, W, H) == rgb);
+    CHECK(apply(rgb) == rgb);
     rl_settings_reset();
 }
 
@@ -179,7 +189,7 @@ TEST(post_fxaa_keeps_a_flat_picture_byte_for_byte)
     for (size_t i = 0; i < sizeof rgb; i++)
         rgb[i] = (uint8_t)(i % 3 * 70 + 13);
     CHECK(rl_settings_set("picture.aa", "fxaa") == RL_SETTING_OK);
-    const uint8_t *out = rl_post_apply(rgb, W, H);
+    const uint8_t *out = apply(rgb);
     CHECK(out != rgb);
     CHECK(memcmp(out, rgb, sizeof rgb) == 0);
     rl_settings_reset();
@@ -196,7 +206,7 @@ TEST(post_fxaa_matches_the_c_reference)
     CHECK(fxaa_ref(in, want, W, H));
     CHECK(memcmp(in, want, sizeof in) != 0);
     CHECK(rl_settings_set("picture.aa", "fxaa") == RL_SETTING_OK);
-    const uint8_t *got = rl_post_apply(in, W, H);
+    const uint8_t *got = apply(in);
     CHECK(got != in);
     int worst = 0, off = 0;
     for (size_t i = 0; i < sizeof in; i++) {
@@ -224,10 +234,10 @@ TEST(post_smaa_keeps_flat_pictures_and_softens_only_edges)
         rl_settings_declare_runtime();
         CHECK(rl_settings_set("picture.aa", "smaa") == RL_SETTING_OK);
         CHECK(rl_settings_set("picture.aa_quality", presets[q]) == RL_SETTING_OK);
-        const uint8_t *out = rl_post_apply(flat, W, H);
+        const uint8_t *out = apply(flat);
         CHECK(out != flat);
         CHECK(memcmp(out, flat, sizeof flat) == 0);
-        out = rl_post_apply(in, W, H);
+        out = apply(in);
         int changed = 0, far = 0;
         for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++) {
@@ -249,5 +259,79 @@ TEST(post_smaa_keeps_flat_pictures_and_softens_only_edges)
         CHECK(changed > H);
         CHECK(far == 0);
     }
+    rl_settings_reset();
+}
+
+typedef struct fake_stage {
+    int starts, plans, records;
+    uint32_t in_w, in_h;
+    void(RLVK_CALL *fill)(rlvk_handle cmd, rlvk_handle buffer, rlvk_size offset, rlvk_size size, uint32_t data);
+} fake_stage;
+
+#define FILL 0xff336699u
+
+static bool fake_start(void *user, const rl_post_device *d)
+{
+    fake_stage *f = user;
+    f->starts++;
+    void *(RLVK_CALL *gdpa)(rlvk_handle, const char *) = (void *(RLVK_CALL *)(rlvk_handle, const char *))d->get_device_proc_addr;
+    f->fill = (void(RLVK_CALL *)(rlvk_handle, rlvk_handle, rlvk_size, rlvk_size, uint32_t))gdpa(d->device, "vkCmdFillBuffer");
+    return f->fill != NULL && d->device && d->queue;
+}
+
+static bool fake_plan(void *user, uint32_t w, uint32_t h, uint32_t *ow, uint32_t *oh)
+{
+    fake_stage *f = user;
+    f->plans++;
+    *ow = w * 2;
+    *oh = h * 2;
+    return true;
+}
+
+static void fake_record(void *user, uint64_t cmd, uint64_t in, uint64_t out, uint32_t w, uint32_t h, uint32_t ow,
+                        uint32_t oh)
+{
+    fake_stage *f = user;
+    (void)in;
+    f->records++;
+    f->in_w = w;
+    f->in_h = h;
+    f->fill(cmd, out, 0, (rlvk_size)ow * oh * 4, FILL);
+}
+
+static const rl_post_stage g_fake_stage = { "fake", fake_start, fake_plan, fake_record };
+
+TEST(post_an_upscaler_runs_first_and_sets_the_size)
+{
+    if (!have_vulkan())
+        return;
+    rl_settings_reset();
+    rl_settings_declare_runtime();
+    static uint8_t rgb[W * H * 3];
+    scene(rgb);
+    fake_stage f = { 0 };
+    rl_post_set_upscaler(&g_fake_stage, &f);
+    for (int aa = 0; aa < 3; aa++) {
+        CHECK(rl_settings_set("picture.aa", aa == 0 ? "off" : aa == 1 ? "fxaa" : "smaa") == RL_SETTING_OK);
+        uint32_t w = 0, h = 0;
+        const uint8_t *out = rl_post_apply(rgb, W, H, &w, &h);
+        CHECK(out != rgb);
+        CHECK_EQ(w, 2 * W);
+        CHECK_EQ(h, 2 * H);
+        CHECK_EQ(f.in_w, W);
+        CHECK_EQ(f.in_h, H);
+        bool flat = true;
+        for (uint32_t i = 0; out && i < w * h; i++)
+            flat = flat && out[3 * i] == 0x99 && out[3 * i + 1] == 0x66 && out[3 * i + 2] == 0x33;
+        CHECK(flat);
+    }
+    CHECK_EQ(f.starts, 1);
+    CHECK_EQ(f.records, 3);
+    rl_post_set_upscaler(NULL, NULL);
+    CHECK(rl_settings_set("picture.aa", "off") == RL_SETTING_OK);
+    uint32_t w = 0, h = 0;
+    CHECK(rl_post_apply(rgb, W, H, &w, &h) == rgb);
+    CHECK_EQ(w, W);
+    CHECK_EQ(h, H);
     rl_settings_reset();
 }
