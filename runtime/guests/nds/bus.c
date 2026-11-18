@@ -419,10 +419,11 @@ static uint32_t fetch9_at(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq)
 {
     uint32_t at = fetch9_at(m, addr, size, seq);
+    m->fetch9_hit = false;
     if (nds_cache_attr(m, addr) & NDS_ATTR_IC) {
         m->fetch9_word = 1;
         m->fetch9_end = 0;
-        nds_cache_read(m, addr, true, false);
+        m->fetch9_hit = nds_cache_read(m, addr, true, false) && seq;
         return 0;
     }
     nds_cache_before_bus(m);
@@ -457,6 +458,8 @@ unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq)
     }
     return held + cost - back;
 }
+
+bool rl_nds_code_hit(const rl_nds *m) { return m->fetch9_hit; }
 
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq)
 {

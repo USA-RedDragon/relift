@@ -180,7 +180,7 @@ void nds_cache_before_bus(rl_nds *m)
         drain(m);
 }
 
-void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
+bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
 {
     nds_cache_side *c = side(m, code);
     unsigned s = (addr / LINE) % sets_of(code);
@@ -188,7 +188,7 @@ void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
     if (find(c, s, t) >= 0) {
         if (code || seq)
             nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
-        return;
+        return true;
     }
     unsigned w = victim(m, c, s);
     if (!code && c->dirty[s] >> w & 1u) {
@@ -215,6 +215,7 @@ void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
     c->tag[s][w] = t;
     c->valid[s] |= (uint8_t)(1u << w);
     c->dirty[s] &= (uint8_t)~(1u << w);
+    return false;
 }
 
 bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq)

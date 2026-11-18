@@ -83,7 +83,10 @@ static int64_t fetch9(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
     rl_nds_arm *k = cpu_of(c);
     if (k->id == RL_NDS_ARM7)
         return rl_nds_code_cost7(k->run->m, addr, 1u << log2, seq);
-    return rl_nds_code_cost(k->run->m, addr, 1u << log2, seq);
+    unsigned n = rl_nds_code_cost(k->run->m, addr, 1u << log2, seq);
+    c->hot_line = rl_nds_code_hit(k->run->m) ? (addr & ~31u) | 1u : 0u;
+    c->hot_cost = 1;
+    return n;
 }
 
 /** @brief Fills the code fetch table of k from the machine's costs (main RAM goes to fetch9). */
@@ -298,6 +301,7 @@ void rl_nds_cpu_cp_write(rl_ctx *c, uint32_t key, uint32_t value, unsigned cond)
     if (!cond || k->id != RL_NDS_ARM9)
         return;
     rl_nds *m = k->run->m;
+    c->hot_line = 0;
     unsigned what = rl_nds_cp15_write(m, key, value);
     if (what & RL_CP15_CHANGED_TCM) {
         build_waits(k);

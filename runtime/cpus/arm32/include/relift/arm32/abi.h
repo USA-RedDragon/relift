@@ -122,6 +122,14 @@ struct rl_ctx {
     uint32_t depth;
     /** @brief Return addresses of the open host frames of lifted calls, innermost last. */
     uint32_t shadow[RL_ARM32_SHADOW];
+    /**
+     * @brief A 32-byte code line (its address with bit 0 set; 0 for none) whose sequential fetches in a
+     * region whose waits entry is 0 cost hot_cost cycles and change nothing else, so they skip the
+     * fetch hook. The guest layer's fetch hook sets it and clears it whenever that stops holding.
+     */
+    uint32_t hot_line;
+    /** @brief The cycles of a sequential fetch in hot_line. */
+    uint32_t hot_cost;
 };
 
 _Static_assert(offsetof(rl_ctx, r) == 0, "r");
@@ -145,6 +153,7 @@ _Static_assert(offsetof(rl_ctx, waits) == 272, "waits");
 _Static_assert(offsetof(rl_ctx, fast_fetch) == 280, "fast_fetch");
 _Static_assert(offsetof(rl_ctx, depth) == 284, "depth");
 _Static_assert(offsetof(rl_ctx, shadow) == 288, "shadow");
+_Static_assert(offsetof(rl_ctx, hot_line) == 288 + 4 * RL_ARM32_SHADOW, "hot_line");
 _Static_assert(_Alignof(rl_ctx) == 8, "rl_ctx alignment");
 
 /** @brief Offset of the core's block (rl_ctx_common) in rl_ctx: pend to disp_count. */
@@ -247,7 +256,11 @@ static inline int64_t rl_arm32_wait(rl_ctx *c, uint32_t addr, unsigned log2, uns
     if (seq && (c->fast_fetch >> (addr >> 24) & 1u))
         return 1;
     uint8_t w = c->waits[(addr >> 24) * 6u + log2 * 2u + seq];
-    return w ? w : rl_arm32_fetch_slow(c, addr, log2, seq);
+    if (w)
+        return w;
+    if (seq && ((addr & ~31u) | 1u) == c->hot_line)
+        return c->hot_cost;
+    return rl_arm32_fetch_slow(c, addr, log2, seq);
 }
 
 /**

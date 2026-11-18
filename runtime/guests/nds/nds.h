@@ -129,6 +129,13 @@ uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, boo
  */
 unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size, bool seq);
 /**
+ * @brief True when the last rl_nds_code_cost was a sequential fetch that hit
+ * in the instruction cache: until the next fill, CP15 write or
+ * nonsequential fetch, another such fetch in the same line costs the hit's
+ * tick and changes nothing else.
+ */
+bool rl_nds_code_hit(const rl_nds *m);
+/**
  * @brief The ARM7's cycles of a code fetch of size bytes at addr in main RAM, which the fetch does not charge itself;
  * seq false for the first fetch of a refill.
  */

@@ -454,6 +454,8 @@ struct rl_nds {
     uint32_t fetch9_refill;
     uint64_t fetch9_end;
     unsigned fetch9_cost;
+    /** @brief The last rl_nds_code_cost was a sequential fetch that hit in the instruction cache. */
+    bool fetch9_hit;
     /** @brief The ARM9's last instruction TCM data access opened an LDM or STM: its second word costs one more. */
     bool itcm_multi;
     /** @brief The ARM9's last TCM data access was a single-word store to the instruction TCM, ended at itcm_store_end. */
@@ -783,8 +785,9 @@ unsigned nds_cache_attr(const rl_nds *m, uint32_t addr);
 /**
  * @brief Charges a cached read of addr: a hit, or a line fill after the write buffer drains (and the write-back of a
  * dirty victim). A data hit costs nothing beyond its instruction's cycle but for a further word of an LDM (seq).
+ * Returns true for a hit.
  */
-void nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq);
+bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq);
 /** @brief A store hit in a write-back line: marks it dirty and charges the hit; false on a miss or a write-through line. */
 bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq);
 /** @brief Queues a buffered write of ticks bus time to addr, stalling while the buffer is full. */
