@@ -78,6 +78,7 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::F2i, _) => f2i(i),
         (Op::F2f, _) => f2f(i),
         (Op::Ast, _) => ast(i),
+        (Op::Texs, _) => texs(i),
         (Op::Ald, _) => ald(i),
         (Op::Ipa, _) => ipa(i),
         _ => return None,
@@ -660,6 +661,71 @@ fn ast(i: &Inst) -> Lowered {
             (64, 8, f(i, "SrcC")),
             (74, 2, f(i, "AlSize")),
             (76, 1, f(i, "P")),
+        ],
+    ))
+}
+
+/// The constant bank of bound texture handles: every NVN1 driver sets
+/// Maxwell's texture constant buffer index (3D method 0x982) to 2.
+const TEXTURE_BANK: u64 = 2;
+
+/// The components each `TEXS` write mask selects, by whether `Rd2` is a
+/// register (Ryujinx's TEXS table, envydis's component names).
+const TEXS_MASKS: [[u64; 8]; 2] = [
+    [
+        0b0001, 0b0010, 0b0100, 0b1000, 0b0011, 0b1001, 0b1010, 0b1100,
+    ],
+    [0b0111, 0b1011, 0b1101, 0b1110, 0b1111, 0, 0, 0],
+];
+
+/// `TEXS`: SM86 `TEX.SCR` (0xb60) on the bound handle `c[2][TidB * 4]`
+/// with the target's dimension, LOD mode and depth compare, the component
+/// mask of the write mask, and the same `Rd`, `Rd2`, `Ra` and `Rb`: each
+/// target's sources are those `.SCR` splits over `Ra`, `Ra + 1`, `Rb` and
+/// `Rb + 1` in the same order.
+fn texs(i: &Inst) -> Lowered {
+    let (dim, lod, dc) = match f(i, "Target") {
+        0 => (0, 1, 0),
+        1 => (1, 0, 0),
+        2 => (1, 1, 0),
+        3 => (1, 3, 0),
+        4 => (1, 0, 1),
+        6 => (1, 1, 1),
+        7 => (5, 0, 0),
+        8 => (5, 1, 0),
+        10 => (2, 0, 0),
+        11 => (2, 1, 0),
+        12 => (3, 0, 0),
+        13 => (3, 3, 0),
+        _ => {
+            return Lowered::Stop(
+                "TEXS with an explicit LOD and a depth compare or an array depth compare",
+            );
+        }
+    };
+    let rd2 = f(i, "Dest2");
+    let mask = TEXS_MASKS[usize::from(rd2 != RZ)][f(i, "WMask") as usize];
+    if mask == 0 {
+        return Lowered::Stop("TEXS with an empty write mask");
+    }
+    Lowered::Word(word(
+        i,
+        opc(0x160, 5),
+        &[
+            (16, 8, f(i, "Dest")),
+            (24, 8, f(i, "SrcA")),
+            (32, 8, f(i, "SrcB")),
+            (40, 14, f(i, "TidB")),
+            (54, 5, TEXTURE_BANK),
+            (60, 1, 1),
+            (61, 3, dim),
+            (64, 8, rd2),
+            (72, 4, mask),
+            (78, 1, dc),
+            (81, 3, PT),
+            (84, 3, 1),
+            (87, 3, lod),
+            (90, 1, f(i, "Nodep")),
         ],
     ))
 }

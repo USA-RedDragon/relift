@@ -270,7 +270,7 @@ the cases the evidence does not cover stop with their own reason.
 | SYNC | exact | BRA | for one thread a pop is a jump to the entry it pops (a BRK unwinds the SSY entries above its PBK, as Ryujinx's decoder does); Ryujinx emits a branch when the pop has one target, and the control-flow pass lowers only those, under the same guard. A pop with more than one target or none and a condition code test stop (tests/flow.rs) |
 | TEX | stop | | no semantic check yet |
 | TEX_B | stop | | no semantic check yet |
-| TEXS | stop | | no semantic check yet |
+| TEXS | exact | TEX | TEX.SCR on the bound handle c[2][TidB * 4] (every NVN1 driver writes 2 to the texture constant buffer index, 3D method 0x982; census TidB values are the even words from 0x20, the low words of NVN's 64-bit handles). Ryujinx's TEXS reads each target's sources from Ra, Ra + 1, Rb, Rb + 1 in the order the SM86 translator's .SCR split takes them (array index, coordinates, LOD, depth reference) and writes the components of its write-mask table to Rd, Rd + 1, Rd2, Rd2 + 1 as SM86 TEX does. Target and components equal envydis on every census word. An explicit LOD with a depth compare and the array depth compare (Ryujinx reads the reference before the LOD; no census word) and an empty write mask stop |
 | TEXS_F16 | stop | | no semantic check yet |
 | TLD | stop | | no semantic check yet |
 | TLD_B | stop | | no semantic check yet |
@@ -303,4 +303,4 @@ the cases the evidence does not cover stop with their own reason.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 39 exact, 5 exact and pseudo, 3 pseudo, 246 stop.
+293 forms: 40 exact, 5 exact and pseudo, 3 pseudo, 245 stop.

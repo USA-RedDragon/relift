@@ -570,3 +570,56 @@ fn compare_and_conversion_forms_lower_by_their_fields() {
         assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
     }
 }
+
+#[test]
+fn texs_lowers_to_tex_scr_by_target() {
+    let texs = |target, wmask, rd2| {
+        maxwell(
+            Op::Texs,
+            Src::None,
+            &[
+                ("Dest", 1),
+                ("Dest2", rd2),
+                ("SrcA", 2),
+                ("SrcB", 4),
+                ("TidB", 0xa),
+                ("Target", target),
+                ("WMask", wmask),
+            ],
+        )
+    };
+    let cases: &[(Inst, &str)] = &[
+        (texs(1, 4, 255), "TEX.SCR RZ, R1, R2, R4, 0x2, 0xa, 2D, 0x3"),
+        (texs(1, 4, 6), "TEX.SCR R6, R1, R2, R4, 0x2, 0xa, 2D"),
+        (texs(1, 0, 6), "TEX.SCR R6, R1, R2, R4, 0x2, 0xa, 2D, 0x7"),
+        (
+            texs(0, 0, 255),
+            "TEX.SCR.LZ RZ, R1, R2, R4, 0x2, 0xa, 1D, 0x1",
+        ),
+        (
+            texs(3, 5, 255),
+            "TEX.SCR.LL RZ, R1, R2, R4, 0x2, 0xa, 2D, 0x9",
+        ),
+        (
+            texs(6, 3, 255),
+            "TEX.SCR.LZ.DC RZ, R1, R2, R4, 0x2, 0xa, 2D, 0x8",
+        ),
+        (
+            texs(8, 1, 255),
+            "TEX.SCR.LZ RZ, R1, R2, R4, 0x2, 0xa, ARRAY_2D, 0x2",
+        ),
+        (texs(10, 4, 6), "TEX.SCR R6, R1, R2, R4, 0x2, 0xa, 3D"),
+        (
+            texs(13, 2, 6),
+            "TEX.SCR.LL R6, R1, R2, R4, 0x2, 0xa, CUBE, 0xd",
+        ),
+        (
+            texs(5, 0, 255),
+            "stop: TEXS with an explicit LOD and a depth compare or an array depth compare",
+        ),
+        (texs(1, 5, 6), "stop: TEXS with an empty write mask"),
+    ];
+    for (i, want) in cases {
+        assert_eq!(sm86_text(&lower(i)), *want, "{:016x}", i.word);
+    }
+}

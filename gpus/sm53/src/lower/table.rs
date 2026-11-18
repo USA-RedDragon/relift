@@ -234,6 +234,19 @@ pub fn row(op: Op, src: Src) -> Row {
                        for ALD; a register in the address stops. Operands equal envydis on \
                        every census word",
         },
+        (Op::Texs, _) => Row::Exact {
+            to: "TEX",
+            evidence: "TEX.SCR on the bound handle c[2][TidB * 4] (every NVN1 driver writes 2 to the \
+                       texture constant buffer index, 3D method 0x982; census TidB values are the \
+                       even words from 0x20, the low words of NVN's 64-bit handles). Ryujinx's \
+                       TEXS reads each target's sources from Ra, Ra + 1, Rb, Rb + 1 in the order \
+                       the SM86 translator's .SCR split takes them (array index, coordinates, LOD, \
+                       depth reference) and writes the components of its write-mask table to Rd, \
+                       Rd + 1, Rd2, Rd2 + 1 as SM86 TEX does. Target and components equal envydis \
+                       on every census word. An explicit LOD with a depth compare and the array \
+                       depth compare (Ryujinx reads the reference before the LOD; no census word) \
+                       and an empty write mask stop",
+        },
         (Op::Pcnt | Op::Cont, _) => Row::Stop {
             reason: "PCNT and CONT: no program of the census uses them",
         },
