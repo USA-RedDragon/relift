@@ -23,7 +23,7 @@ static const rl_touchpad_item g_portrait[] = {
     RL_TP_PILL("Select", "select", 255, 2330, 230, 84),
     RL_TP_PILL("Start", "start", 785, 2330, 230, 84),
     RL_TP_HIDE(975, 2330, 120, 56),
-    RL_TP_PILL("Screens", "swap", 520, 2330, 230, 84),
+    RL_TP_PILL2("Screens", "swap", "layout", 520, 2330, 230, 84),
 };
 
 static const rl_touchpad_item g_landscape[] = {
@@ -38,7 +38,7 @@ static const rl_touchpad_item g_landscape[] = {
     RL_TP_PILL("Select", "select", 200, 930, 230, 88),
     RL_TP_PILL("Start", "start", 2200, 930, 230, 88),
     RL_TP_HIDE(120, 1026, 130, 56),
-    RL_TP_PILL("Screens", "swap", 200, 820, 230, 80),
+    RL_TP_PILL2("Screens", "swap", "layout", 200, 820, 230, 80),
 };
 
 static const rl_touchpad_group g_groups[] = {

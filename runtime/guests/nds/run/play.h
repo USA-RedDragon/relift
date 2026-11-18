@@ -35,9 +35,21 @@ typedef struct rl_nds_controls {
     rl_control_ref key[12];
     /** @brief touch.press, touch.x and touch.y. */
     rl_control_ref press, x, y;
-    /** @brief p1's swap control (Swap screens). */
-    rl_control_ref swap;
+    /** @brief p1's swap control (Swap screens) and layout control (Cycle screen layout). */
+    rl_control_ref swap, layout;
 } rl_nds_controls;
+
+/** @brief What the player did to the screens' arrangement: the swap, and which controls were held at the last poll. */
+typedef struct rl_nds_arrangement {
+    bool swap, swap_held, layout_held;
+} rl_nds_arrangement;
+
+/**
+ * @brief Reads the swap and layout controls from snapshot s. A press of swap toggles a->swap; a press of layout moves
+ * `video.nds_layout` on to the next of stacked, side by side, large top, large bottom, top only and bottom only (auto
+ * counts as stacked) and saves it. Either names the result on the on-screen controller for about a second.
+ */
+void rl_nds_arrange(const rl_nds_controls *c, const rl_input_snapshot *s, rl_nds_arrangement *a);
 
 /** @brief Finds the controls of the ports declared (rl_nds_ports and any a game adds). */
 void rl_nds_controls_find(rl_nds_controls *c);

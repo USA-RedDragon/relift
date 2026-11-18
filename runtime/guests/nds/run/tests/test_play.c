@@ -7,8 +7,10 @@
 #include "runner.h"
 
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 
 #include <string.h>
+#include <unistd.h>
 
 TEST(the_screens_settings_name_the_layout_displays_and_scaling)
 {
@@ -141,4 +143,92 @@ TEST(an_input_script_touches_at_the_touch_ports_place)
     CHECK(!in.touch);
     CHECK_EQ(in.keys, 0);
     rl_ports_script_reset();
+}
+
+static bool find_screens_button(float *x, float *y)
+{
+    rl_touchpad_rect r[16];
+    uint32_t n = rl_touchpad_placed(r, 16);
+    for (uint32_t i = 0; i < n; i++)
+        if (r[i].label && !strcmp(r[i].label, "Screens")) {
+            *x = (r[i].x0 + r[i].x1) / 2;
+            *y = (r[i].y0 + r[i].y1) / 2;
+            return true;
+        }
+    return false;
+}
+
+static void touch_up_front(rl_nds_controls *c)
+{
+    rl_touchpad_reset();
+    rl_settings_reset();
+    rl_nds_declare_settings();
+    CHECK(ports(c));
+    rl_touchpad_declare(rl_nds_touchpad());
+    CHECK(rl_ports_declare(rl_nds_ports_touchpad, rl_nds_ports_touchpad_count));
+    rl_ports_bind_defaults();
+    rl_nds_controls_find(c);
+    CHECK_EQ(rl_settings_set("input.touch_pad.show", "always"), RL_SETTING_OK);
+    rl_touchpad_view(1080, 2520, 2.625f, NULL);
+}
+
+static void poll(const rl_nds_controls *c, rl_nds_arrangement *a)
+{
+    rl_input_snapshot s;
+    memset(&s, 0, sizeof s);
+    rl_touchpad_fill(s.touch_pad, RL_INPUT_TOUCH_PAD);
+    rl_nds_arrange(c, &s, a);
+}
+
+TEST(a_tap_on_the_screens_button_swaps_the_screens)
+{
+    rl_nds_controls c;
+    touch_up_front(&c);
+    rl_nds_arrangement a;
+    memset(&a, 0, sizeof a);
+    float x, y;
+    CHECK(find_screens_button(&x, &y));
+    rl_touchpad_finger(1, RL_TOUCHPAD_DOWN, x, y);
+    poll(&c, &a);
+    CHECK(!a.swap);
+    rl_touchpad_finger(1, RL_TOUCHPAD_UP, x, y);
+    poll(&c, &a);
+    CHECK(a.swap);
+    usleep(80000);
+    poll(&c, &a);
+    rl_touchpad_finger(2, RL_TOUCHPAD_DOWN, x, y);
+    rl_touchpad_finger(2, RL_TOUCHPAD_UP, x, y);
+    poll(&c, &a);
+    CHECK(!a.swap);
+    CHECK_EQ(rl_nds_screens_config(false).layout, RL_SCREENS_AUTO);
+    rl_touchpad_reset();
+}
+
+TEST(holding_the_screens_button_cycles_the_layouts_and_saves_the_choice)
+{
+    static const rl_screens_layout order[] = {RL_SCREENS_SIDE_BY_SIDE, RL_SCREENS_LARGE_TOP,   RL_SCREENS_LARGE_BOTTOM,
+                                              RL_SCREENS_TOP_ONLY,     RL_SCREENS_BOTTOM_ONLY, RL_SCREENS_STACKED};
+    rl_nds_controls c;
+    touch_up_front(&c);
+    rl_nds_arrangement a;
+    memset(&a, 0, sizeof a);
+    float x, y;
+    CHECK(find_screens_button(&x, &y));
+    for (unsigned i = 0; i < sizeof order / sizeof order[0]; i++) {
+        rl_touchpad_finger(1, RL_TOUCHPAD_DOWN, x, y);
+        rl_touchpad_tick(rl_clock_ns());
+        poll(&c, &a);
+        CHECK_EQ(rl_nds_screens_config(false).layout, i == 0 ? RL_SCREENS_AUTO : order[i - 1]);
+        usleep(520000);
+        rl_touchpad_tick(rl_clock_ns());
+        poll(&c, &a);
+        CHECK_EQ(rl_nds_screens_config(false).layout, order[i]);
+        CHECK(!a.swap);
+        rl_touchpad_finger(1, RL_TOUCHPAD_UP, x, y);
+        usleep(80000);
+        poll(&c, &a);
+        CHECK(!a.swap);
+        CHECK_EQ(rl_nds_screens_config(false).layout, order[i]);
+    }
+    rl_touchpad_reset();
 }

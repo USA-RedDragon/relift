@@ -26,8 +26,12 @@ Motion is not declared yet.
 ## Nintendo DS
 
 `p1` holds the DS's buttons with the GBA pad's bindings plus X (`gamepad:north`,
-`key:s`) and Y (`gamepad:west`, `key:a`), and Swap screens (`gamepad:right_stick`,
-`key:tab`; the controller's Screens button). The program reads the ports once per
+`key:s`) and Y (`gamepad:west`, `key:a`), Swap screens (`gamepad:right_stick`,
+`key:tab`; a tap of the controller's Screens button) and Cycle screen layout
+(`gamepad:left_stick`, `key:grave`; a long press of the Screens button). Cycling
+steps `video.nds_layout` through stacked, side by side, large top, large bottom,
+top only and bottom only (auto counts as stacked), saves the choice as the
+setting, and names the new layout over the picture for about a second. The program reads the ports once per
 frame. The pen is down while a pointer or finger rests on the bottom screen's
 image, wherever the picture draws it, rotated or scaled, in any screen layout
 (`video.nds_layout`) and on either display (`video.nds_displays`): the program

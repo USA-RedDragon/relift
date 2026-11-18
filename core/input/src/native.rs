@@ -203,7 +203,14 @@ const XY: &[(&str, &str, &str)] = &[
     ("x", "X", "gamepad:north,key:s"),
     ("y", "Y", "gamepad:west,key:a"),
 ];
-const SWAP: &[(&str, &str, &str)] = &[("swap", "Swap screens", "gamepad:right_stick,key:tab")];
+const SWAP: &[(&str, &str, &str)] = &[
+    ("swap", "Swap screens", "gamepad:right_stick,key:tab"),
+    (
+        "layout",
+        "Cycle screen layout",
+        "gamepad:left_stick,key:grave",
+    ),
+];
 
 const N64_PAD: &[Row] = &[
     ("a", B, "A", "gamepad:south,key:x"),
@@ -315,6 +322,7 @@ const TOUCHPAD_CONTROLS: &[&str] = &[
     "rstick_x",
     "rstick_y",
     "swap",
+    "layout",
 ];
 
 /// The on-screen controller's port of a platform with a touch layout (`gb`,

@@ -6,6 +6,7 @@
 #include "play.h"
 
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 
 #include <string.h>
 
@@ -40,6 +41,31 @@ void rl_nds_controls_find(rl_nds_controls *c)
     c->x = rl_ports_find("touch", "x");
     c->y = rl_ports_find("touch", "y");
     c->swap = rl_ports_find("p1", "swap");
+    c->layout = rl_ports_find("p1", "layout");
+}
+
+static const char *const g_cycle[] = {"stacked", "side_by_side", "large_top", "large_bottom", "top_only", "bottom_only"};
+static const char *const g_names[] = {"Stacked", "Side by side", "Large top", "Large bottom", "Top only", "Bottom only"};
+
+static void cycle_layout(void)
+{
+    uint32_t now = rl_setting_enum("video.nds_layout");
+    unsigned count = sizeof g_cycle / sizeof g_cycle[0], next = now == 0 || now > count ? 1 : now % count;
+    rl_settings_save("video.nds_layout", g_cycle[next]);
+    rl_touchpad_notice(g_names[next]);
+}
+
+void rl_nds_arrange(const rl_nds_controls *c, const rl_input_snapshot *s, rl_nds_arrangement *a)
+{
+    bool swap_now = rl_ports_eval(c->swap, s) >= 0.5f, layout_now = rl_ports_eval(c->layout, s) >= 0.5f;
+    if (swap_now && !a->swap_held) {
+        a->swap = !a->swap;
+        rl_touchpad_notice("Screens swapped");
+    }
+    if (layout_now && !a->layout_held)
+        cycle_layout();
+    a->swap_held = swap_now;
+    a->layout_held = layout_now;
 }
 
 static uint8_t scaled(float v, uint32_t size)

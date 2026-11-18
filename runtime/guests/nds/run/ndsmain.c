@@ -58,8 +58,8 @@ typedef struct host {
     /** @brief The window, the host's audio and the pace without audio. */
     rl_window *win;
     uint8_t rgb[2 * RL_NDS_SCREEN_W * RL_NDS_SCREEN_H * 3];
-    /** @brief The player's swap of the screens, and whether the swap control was held at the last poll. */
-    bool swap, swap_held;
+    /** @brief The player's swap of the screens and the controls of their arrangement held at the last poll. */
+    rl_nds_arrangement arrange;
     /** @brief The pen as the last poll saw it, for the frame that follows. */
     rl_audio_out *out;
     uint64_t next_ns;
@@ -182,10 +182,7 @@ static void poll_input(void)
     if (pen_was != (point == RL_NDS_POINT_BOTTOM))
         rl_log(RL_LOG_DEBUG, "nds", "pen %s", point == RL_NDS_POINT_BOTTOM ? "down" : "up");
     pen_was = point == RL_NDS_POINT_BOTTOM;
-    bool swap_now = rl_ports_eval(H.controls.swap, &s) >= 0.5f;
-    if (swap_now && !H.swap_held)
-        H.swap = !H.swap;
-    H.swap_held = swap_now;
+    rl_nds_arrange(&H.controls, &s, &H.arrange);
     rl_nds_input in;
     rl_nds_input_from(&H.controls, &s, point, tx, ty, &in);
     rl_nds_set_input(H.run.m, &in);
@@ -207,7 +204,7 @@ static void present(const uint32_t *pixels)
 {
     rl_screens_frame frames[RL_SCREENS];
     rl_nds_screens_frames(pixels, H.rgb, frames);
-    rl_screens_config cfg = rl_nds_screens_config(H.swap);
+    rl_screens_config cfg = rl_nds_screens_config(H.arrange.swap);
     rl_screens_present(H.win, &cfg, frames);
     if (H.out) {
         audio_pace();

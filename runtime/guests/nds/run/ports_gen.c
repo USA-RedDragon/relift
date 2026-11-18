@@ -12,6 +12,7 @@ static const rl_control_decl rl_nds_ports_0[] = {
     { "x", 0, "gamepad:north,key:s" },
     { "y", 0, "gamepad:west,key:a" },
     { "swap", 0, "gamepad:right_stick,key:tab" },
+    { "layout", 0, "gamepad:left_stick,key:grave" },
     { "l", 0, "gamepad:left_shoulder,key:q" },
     { "r", 0, "gamepad:right_shoulder,key:w" },
     { "start", 0, "gamepad:start,key:enter" },
@@ -29,7 +30,7 @@ static const rl_control_decl rl_nds_ports_1[] = {
 };
 
 const rl_port_decl rl_nds_ports[] = {
-    { "p1", "Nintendo DS pad", 13, rl_nds_ports_0 },
+    { "p1", "Nintendo DS pad", 14, rl_nds_ports_0 },
     { "touch", "Touch screen", 3, rl_nds_ports_1 },
 };
 const uint32_t rl_nds_ports_count = 2;
@@ -40,6 +41,7 @@ static const rl_control_decl rl_nds_ports_touchpad_0[] = {
     { "x", 0, "touch:x" },
     { "y", 0, "touch:y" },
     { "swap", 0, "touch:swap" },
+    { "layout", 0, "touch:layout" },
     { "l", 0, "touch:l" },
     { "r", 0, "touch:r" },
     { "start", 0, "touch:start" },
@@ -51,6 +53,6 @@ static const rl_control_decl rl_nds_ports_touchpad_0[] = {
 };
 
 const rl_port_decl rl_nds_ports_touchpad[] = {
-    { "touchpad", "On-screen controller", 13, rl_nds_ports_touchpad_0 },
+    { "touchpad", "On-screen controller", 14, rl_nds_ports_touchpad_0 },
 };
 const uint32_t rl_nds_ports_touchpad_count = 1;
