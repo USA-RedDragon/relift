@@ -16,9 +16,7 @@ use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::Features;
 use relift_switch_formats::npdm::{AddressSpace, Npdm};
 
-/// The lowest SVC number the Switch's kernel does not define and the
-/// Switch 2's grants to its programs.
-pub const FIRST_SWITCH2_SVC: u32 = 0x80;
+pub use relift_switch_formats::npdm::FIRST_SWITCH2_SVC;
 
 /// The console a program is built for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,7 +59,7 @@ impl Console {
     /// The console the NPDM `npdm` was built for: the Switch 2 when it
     /// grants an SVC at or above [`FIRST_SWITCH2_SVC`].
     pub fn of(npdm: &Npdm) -> Console {
-        if npdm.svcs.iter().any(|n| n >= FIRST_SWITCH2_SVC) {
+        if npdm.for_switch2() {
             Console::Switch2
         } else {
             Console::Switch

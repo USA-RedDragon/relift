@@ -38,6 +38,10 @@ pub struct Service {
     pub is_server: bool,
 }
 
+/// The lowest SVC number the Switch's kernel does not define and the
+/// Switch 2's grants to its programs.
+pub const FIRST_SWITCH2_SVC: u32 = 0x80;
+
 /// A parsed NPDM.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Npdm {
@@ -133,6 +137,11 @@ fn text(b: &[u8]) -> String {
 }
 
 impl Npdm {
+    /// Whether the program was built for the Switch 2: it is granted an SVC
+    /// at or above [`FIRST_SWITCH2_SVC`].
+    pub fn for_switch2(&self) -> bool {
+        self.svcs.iter().any(|n| n >= FIRST_SWITCH2_SVC)
+    }
     /// Parse an NPDM.
     ///
     /// # Errors

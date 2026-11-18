@@ -71,6 +71,10 @@ pub struct Report {
     /// The DLC directories written, relative to the output directory
     /// (`dlc/<title id>/<index>`).
     pub dlc: Vec<String>,
+    /// The romfs directories of the container's other programs, relative
+    /// to the output directory (`programs/<base title id>`), which the
+    /// imported program may open by program index.
+    pub programs: Vec<String>,
     /// How many files (romfs and others) were rewritten.
     pub written: usize,
 }
@@ -138,6 +142,17 @@ pub struct Options {
     pub program: Option<u64>,
 }
 
+impl Options {
+    /// The update for the container's other programs: the newest, or none
+    /// when the base alone was asked for (a version names one program's).
+    fn update_of_other(&self) -> UpdateSelect {
+        match self.update {
+            UpdateSelect::None => UpdateSelect::None,
+            _ => UpdateSelect::Newest,
+        }
+    }
+}
+
 impl Default for Options {
     fn default() -> Options {
         Options {
@@ -174,8 +189,10 @@ fn open(path: &Path) -> Result<Shared> {
 
 /// Import the dump at `input` (a `.nup` file or an extracted tree) into
 /// `out`: `exefs/<slot>`, `modules/<module name>.nso` (uncompressed),
-/// `modules.toml`, the romfs (`romfs.map` or `romfs.img`) and
-/// `dlc/<title id>/<index>/` holding each DLC's romfs the same way.
+/// `modules.toml`, the romfs (`romfs.map` or `romfs.img`),
+/// `dlc/<title id>/<index>/` holding each DLC's romfs the same way, and for
+/// a container holding several programs `programs/<title id>/` holding
+/// each other program's romfs.
 ///
 /// # Errors
 ///
@@ -227,6 +244,7 @@ fn new_report(version: u32) -> Report {
         npdm: None,
         romfs_files: 0,
         dlc: Vec::new(),
+        programs: Vec::new(),
         written: 0,
     }
 }
@@ -332,6 +350,29 @@ fn import_nup(
         )?;
         on(Event::End);
         report.dlc.push(rel);
+    }
+    for i in nup.bases() {
+        if Some(i) == t.base {
+            continue;
+        }
+        let id = nup.packages()[i].record.title_id;
+        let other = nup.program_title(Some(id), opts.update_of_other())?;
+        let rel = format!("programs/{id:016x}");
+        on(Event::Begin {
+            stage: &rel,
+            files: Some(other.romfs.len() as u64),
+            bytes: Some(other.romfs.iter().map(|(_, e)| e.size).sum()),
+        });
+        report.written += nup_romfs(
+            nup,
+            input,
+            &other.romfs,
+            &other.romfs_dirs,
+            &out.join(&rel),
+            on,
+        )?;
+        on(Event::End);
+        report.programs.push(rel);
     }
     finish(out, &mut report)?;
     Ok(report)

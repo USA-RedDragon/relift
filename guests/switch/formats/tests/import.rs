@@ -388,3 +388,70 @@ fn control_data_reaches_the_import_directory() {
     assert_eq!(read(out.join("control.nacp")), nacp);
     assert!(!out.join("icon.jpg").exists());
 }
+
+fn two_program<'a>(
+    id: u64,
+    npdm: &'a [u8],
+    main: &'a [u8],
+    data: &'a [u8],
+) -> relift_switch_formats::nup::BuildPackage<'a> {
+    use relift_switch_formats::nup::{BuildPackage, PackageKind, TLV_NPDM};
+    BuildPackage {
+        title_id: id,
+        version: 0,
+        kind: PackageKind::Base,
+        standalone: false,
+        files: vec![
+            ("exefs/main", main),
+            ("exefs/main.npdm", npdm),
+            ("romfs/data.bin", data),
+        ],
+        empty_dirs: vec![],
+        meta: vec![(TLV_NPDM, npdm.to_vec())],
+    }
+}
+
+#[test]
+fn a_container_of_two_programs_imports_the_switch2_one_and_the_others_romfs() {
+    use relift_switch_formats::npdm;
+    use relift_switch_formats::nup;
+    const S1_ID: u64 = 0x0400_0000_0000_a000;
+    const S2_ID: u64 = 0x0400_0000_0000_a001;
+    let d = scratch("import-two-programs");
+    let s1_npdm = npdm::build_with("s1", S1_ID, 0x10000, &[], Some((&[0x01], &[0x01])));
+    let s2_npdm = npdm::build_with(
+        "s2",
+        S2_ID,
+        0x10000,
+        &[],
+        Some((&[0x01, 0x80], &[0x01, 0x80])),
+    );
+    let (s1_main, s2_main) = (synth::nso("s1-main", 0xA1), synth::nso("s2-main", 0xA2));
+    let file = put(
+        &d,
+        "two.nup",
+        &nup::build(&[
+            two_program(S2_ID, &s2_npdm, &s2_main, b"dummy"),
+            two_program(S1_ID, &s1_npdm, &s1_main, b"the full data"),
+        ]),
+    );
+    let out = d.join("out");
+    let r = import(&file, &out, &Options::default()).expect("import");
+    assert_eq!(r.program_id, S2_ID);
+    assert_eq!(main_build_id(&out, &r), [0xA2; 32]);
+    assert_eq!(romfs_files(&out)["data.bin"], b"dummy");
+    assert_eq!(r.programs, ["programs/040000000000a000"]);
+    assert_eq!(
+        romfs_files(&out.join("programs/040000000000a000"))["data.bin"],
+        b"the full data"
+    );
+    let chosen = Options {
+        program: Some(S1_ID),
+        ..Options::default()
+    };
+    let r = import(&file, &d.join("s1"), &chosen).expect("chosen");
+    assert_eq!(
+        (r.program_id, r.programs.clone()),
+        (S1_ID, vec!["programs/040000000000a001".to_string()])
+    );
+}

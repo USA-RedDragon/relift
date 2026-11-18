@@ -355,6 +355,11 @@ impl Package {
         self.tlv(TLV_BUILD_ID).and_then(|b| b.try_into().ok())
     }
 
+    /// The NPDM in the meta block, if it parses.
+    pub fn npdm(&self) -> Option<Npdm> {
+        self.tlv(TLV_NPDM).and_then(|b| Npdm::parse(b).ok())
+    }
+
     /// The program id of the NPDM in the meta block, if it parses.
     pub fn npdm_program_id(&self) -> Option<u64> {
         self.tlv(TLV_NPDM)
@@ -865,11 +870,13 @@ impl Nup {
             .collect()
     }
 
-    /// The base package of `program` (its title id), or the only base.
+    /// The base package of `program` (its title id); without a choice the
+    /// only base, or of several the one program built for the Switch 2
+    /// (the console relift runs a container for).
     ///
     /// # Errors
     ///
-    /// `program` names no base, or there are several bases and no choice.
+    /// `program` names no base, or several bases remain and no choice.
     pub fn select_base(&self, program: Option<u64>) -> Result<Option<usize>> {
         let bases = self.bases();
         let id = |i: usize| self.packages[i].record.title_id;
@@ -879,15 +886,25 @@ impl Nup {
                 .find(|&i| id(i) == want)
                 .map(Some)
                 .ok_or_else(|| Error::Format(format!("NUP: no base program {want:016x}"))),
-            None if bases.len() > 1 => Err(Error::Format(format!(
-                "NUP: {} base programs ({}); choose one",
-                bases.len(),
-                bases
+            None if bases.len() > 1 => {
+                let s2: Vec<usize> = bases
                     .iter()
-                    .map(|&i| format!("{:016x}", id(i)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))),
+                    .copied()
+                    .filter(|&i| self.packages[i].npdm().is_some_and(|n| n.for_switch2()))
+                    .collect();
+                if let [one] = s2[..] {
+                    return Ok(Some(one));
+                }
+                Err(Error::Format(format!(
+                    "NUP: {} base programs ({}); choose one",
+                    bases.len(),
+                    bases
+                        .iter()
+                        .map(|&i| format!("{:016x}", id(i)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )))
+            }
             None => Ok(bases.first().copied()),
         }
     }
@@ -902,11 +919,14 @@ impl Nup {
     }
 
     /// [`Nup::select_update`] among the updates of base `base` alone when
-    /// the container holds several programs: those with its title id.
+    /// the container holds several programs: those with its title id or its update id (bit 0x800 set).
     fn select_update_of(&self, base: Option<usize>, sel: UpdateSelect) -> Result<Option<usize>> {
         let several = self.bases().len() > 1;
         let of_base = |p: &Package| {
-            !several || base.is_none_or(|b| p.record.title_id == self.packages[b].record.title_id)
+            !several
+                || base.is_none_or(|b| {
+                    (p.record.title_id & !0x800) == self.packages[b].record.title_id
+                })
         };
         let updates = self
             .packages
