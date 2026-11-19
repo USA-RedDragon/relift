@@ -181,6 +181,12 @@ TEST(nvn_dlss_state_procs_stay_the_drivers_and_work_procs_do_not)
     CHECK_EQ(nvn_driver_index("nvnDlssNetworkBuilderGetOptimalSettings"), -1);
 }
 
+TEST(nvn_sampler_compare_stays_the_drivers)
+{
+    CHECK(nvn_driver_index("nvnSamplerCompare") >= 0);
+    CHECK(nvn_driver_index("nvnTextureViewCompare") >= 0);
+}
+
 TEST(nvn_command_buffer_records_and_submits)
 {
     rl_ctx *c = t_boot(NULL);
