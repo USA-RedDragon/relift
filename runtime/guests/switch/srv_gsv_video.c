@@ -6,6 +6,7 @@
  * Command ids and layouts follow the SDK's lifted nn::codec video code and Eglantine's description of the
  * service (values only).
  */
+#include "host1x.h"
 #include "services.h"
 
 #include <relift/video.h>
@@ -24,6 +25,9 @@ typedef struct image {
     uint32_t pref[16];
     uint32_t memory;
     uint64_t offset;
+    /** @brief The client reads the image on the GPU (queried with 428 or 426): it is written as block-linear RGBA. */
+    bool gpu_read;
+    uint32_t gpu_maps;
 } image;
 
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -368,7 +372,32 @@ static rl_result video_input_event(rl_ipc_req *r)
     return rl_ipc_push_copy(r, &e->obj);
 }
 
-static bool put_nv12(const video_session *v, uint32_t image_id, const frame *f)
+static uint8_t clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v; }
+
+/** @brief Converts the NV12 frame to RGBA with the BT.709 limited-range matrix (inferred: the movie's colorimetry is not in the stream the service sees). */
+static void nv12_to_rgba(const frame *f, uint32_t w, uint32_t h, uint8_t *out, uint64_t pitch, bool bgra)
+{
+    const uint8_t *luma = f->data, *chroma = f->data + (uint64_t)f->width * f->height;
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++) {
+            int Y = luma[(uint64_t)y * f->width + x] - 16;
+            const uint8_t *c = chroma + (uint64_t)(y / 2) * f->width + (x / 2) * 2;
+            int U = c[0] - 128, V = c[1] - 128;
+            int yy = 1192 * (Y < 0 ? 0 : Y);
+            uint8_t r = clamp8((yy + 1836 * V) >> 10), g = clamp8((yy - 218 * U - 546 * V) >> 10),
+                    b = clamp8((yy + 2163 * U) >> 10);
+            uint8_t *p = out + (uint64_t)y * pitch + (uint64_t)x * 4;
+            p[0] = bgra ? b : r;
+            p[1] = g;
+            p[2] = bgra ? r : b;
+            p[3] = 255;
+        }
+}
+
+/** @brief Block height, in GOBs (log2), of a decoder image the GPU reads (inferred: Eglantine writes 16-GOB blocks). */
+#define GPU_READ_BLOCK_LOG2 4u
+
+static bool put_frame(const video_session *v, uint32_t image_id, const frame *f)
 {
     pthread_mutex_lock(&g_mu);
     image m = image_id < IMAGES_MAX ? g_images[image_id] : (image){ 0 };
@@ -378,16 +407,99 @@ static bool put_nv12(const video_session *v, uint32_t image_id, const frame *f)
     if (!m.used || !mem.addr || !f->data)
         return false;
     layout l = image_layout(m.pref);
-    if (!l.nv12)
-        return false;
     uint32_t w = f->width < l.width ? f->width : l.width, h = f->height < l.height ? f->height : l.height;
     uint64_t base = mem.addr + m.offset;
-    for (uint32_t y = 0; y < h; y++)
-        rl_vm_kernel_write(&hos.vm, base + y * l.pitch, f->data + (uint64_t)y * f->width, w);
-    const uint8_t *chroma = f->data + (uint64_t)f->width * f->height;
-    for (uint32_t y = 0; y < (h + 1) / 2; y++)
-        rl_vm_kernel_write(&hos.vm, base + l.chroma_offset + y * l.pitch, chroma + (uint64_t)y * f->width, w);
+    if (l.nv12 && !m.gpu_read) {
+        for (uint32_t y = 0; y < h; y++)
+            rl_vm_kernel_write(&hos.vm, base + y * l.pitch, f->data + (uint64_t)y * f->width, w);
+        const uint8_t *chroma = f->data + (uint64_t)f->width * f->height;
+        for (uint32_t y = 0; y < (h + 1) / 2; y++)
+            rl_vm_kernel_write(&hos.vm, base + l.chroma_offset + y * l.pitch, chroma + (uint64_t)y * f->width, w);
+        return true;
+    }
+    uint64_t rows = l.chroma_offset / l.pitch;
+    uint64_t bytes = m.gpu_read ? h1x_bl_size((uint32_t)l.pitch, (uint32_t)rows, GPU_READ_BLOCK_LOG2) : l.pitch * rows;
+    uint8_t *linear = calloc(1, l.pitch * rows), *tiled = m.gpu_read ? calloc(1, bytes) : NULL;
+    if (!linear || (m.gpu_read && !tiled)) {
+        free(linear);
+        free(tiled);
+        return false;
+    }
+    nv12_to_rgba(f, w, h, linear, l.pitch, l.code == 2 || l.code == 5);
+    if (m.gpu_read) {
+        h1x_bl s = { tiled, (uint32_t)l.pitch, (uint32_t)rows, GPU_READ_BLOCK_LOG2 };
+        for (uint32_t y = 0; y < rows; y++)
+            h1x_bl_write_row(&s, 0, y, linear + (uint64_t)y * l.pitch, (uint32_t)l.pitch);
+        rl_vm_kernel_write(&hos.vm, base, tiled, bytes);
+    } else {
+        rl_vm_kernel_write(&hos.vm, base, linear, l.pitch * rows);
+    }
+    free(linear);
+    free(tiled);
     return true;
+}
+
+/**
+ * @brief UserSession 428 (nn::gpu::sdk::QueryNativeImage) and 426 (MapNativeImage, with u32 handle, u32, u32 address
+ * space and u8 permission) of a decoder output image: the title's movie player blits each image as block-linear
+ * RGBA, so the image is marked to be written that way. 148 bytes back: for 426 the image's GPU address and last byte
+ * (the GPU address space is the process's: GPU == CPU address), then a 33-word descriptor {1, 0, (width - 1) |
+ * (height - 1) << 16, ..., 0x01000001 at word 8, 1 at word 9, the offset in the memory at word 10 (0 once mapped),
+ * the size at word 11}. Inferred: Eglantine's reply for the same title; the console's descriptor was not captured.
+ */
+rl_result rl_gsv_native_image_query(rl_ipc_req *r)
+{
+    uint32_t handle;
+    if (!rl_srv_in(r, &handle, 4))
+        return SF_RESULT_INVALID_HEADER;
+    bool map = r->cmd == 426;
+    pthread_mutex_lock(&g_mu);
+    image *m = handle < IMAGES_MAX && g_images[handle].used ? &g_images[handle] : NULL;
+    memory mem = m && m->memory < MEMORIES_MAX ? g_memories[m->memory] : (memory){ 0 };
+    if (m && mem.addr) {
+        m->gpu_read = true;
+        if (map)
+            m->gpu_maps++;
+    }
+    image copy = m ? *m : (image){ 0 };
+    pthread_mutex_unlock(&g_mu);
+    if (!m || !mem.addr) {
+        rl_ipc_stop(r, "gsv", "UserSession %u of native image %u: only decoder images bound to memory are known",
+                    r->cmd, handle);
+        return KR_NOT_IMPLEMENTED;
+    }
+    layout l = image_layout(copy.pref);
+    uint32_t *out = rl_ipc_out(r, 148);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t address = mem.addr + copy.offset, last = address + l.size - 1;
+    if (map) {
+        out[0] = (uint32_t)address;
+        out[1] = (uint32_t)(address >> 32);
+        out[2] = (uint32_t)last;
+        out[3] = (uint32_t)(last >> 32);
+    }
+    uint32_t *d = out + 4;
+    d[0] = 1;
+    d[2] = copy.pref[2];
+    d[8] = 0x01000001;
+    d[9] = 1;
+    d[10] = map ? 0 : (uint32_t)copy.offset;
+    d[11] = (uint32_t)l.size;
+    return KR_SUCCESS;
+}
+
+/** @brief UserSession 427 (UnmapNativeImage): a u32 handle, a u32 address space and the mapped range; the map count falls. */
+rl_result rl_gsv_native_image_unmap(rl_ipc_req *r)
+{
+    uint32_t handle;
+    if (!rl_srv_in(r, &handle, 4))
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&g_mu);
+    if (handle < IMAGES_MAX && g_images[handle].gpu_maps)
+        g_images[handle].gpu_maps--;
+    pthread_mutex_unlock(&g_mu);
+    return KR_SUCCESS;
 }
 
 /** @brief Moves decoded frames into the registered images in order and signals each image's counter value. mu held. */
@@ -401,7 +513,7 @@ static void fill_images(video_session *v)
         memmove(&v->free[0], &v->free[1], (v->nfree - 1) * sizeof v->free[0]);
         v->nfree--;
         if (!f.end)
-            put_nv12(v, h.image, &f);
+            put_frame(v, h.image, &f);
         frame_free(&f);
         if (v->ndone < RING)
             v->done[v->ndone++] = (finished){ h.image, f.width, f.height, f.pts, f.end };

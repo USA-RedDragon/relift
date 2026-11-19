@@ -70,6 +70,8 @@ rl_result rl_gsv_open_video_session(rl_ipc_req *r);
 rl_result rl_gsv_native_memory_create(rl_ipc_req *r);
 rl_result rl_gsv_native_memory_destroy(rl_ipc_req *r);
 rl_result rl_gsv_native_memory_bind(rl_ipc_req *r);
+rl_result rl_gsv_native_image_query(rl_ipc_req *r);
+rl_result rl_gsv_native_image_unmap(rl_ipc_req *r);
 rl_result rl_gsv_decoder_pool_size(rl_ipc_req *r);
 rl_result rl_gsv_decoder_pool_init(rl_ipc_req *r);
 rl_result rl_gsv_decoder_image_descriptor(rl_ipc_req *r);

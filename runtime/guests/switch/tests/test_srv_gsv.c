@@ -396,6 +396,64 @@ TEST(gsv_decoder_image_pool_layout_is_nv12_in_128_row_planes)
     CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, SF_RESULT_INVALID_HEADER);
 }
 
+TEST(gsv_decoder_images_the_gpu_reads_are_described_by_428_and_426)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    tc_req q = tc_new(111);
+    q.tipc = true;
+    tc_put32(&q, 0);
+    tc_put64(&q, 0x100000);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    uint32_t mem = tc_u32(&r, 0);
+    CHECK(mem != 0);
+    q = tc_new(114);
+    q.tipc = true;
+    tc_put32(&q, mem);
+    tc_put64(&q, heap + 0x10000);
+    tc_put64(&q, 0x100000);
+    tc_put64(&q, 0);
+    tc_put64(&q, 0);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
+    uint32_t pref[16] = { 0, 0, 255u | (127u << 16) };
+    q = tc_new(911);
+    q.tipc = true;
+    for (int i = 0; i < 16; i++)
+        tc_put32(&q, pref[i]);
+    tc_put32(&q, 2);
+    tc_put32(&q, mem);
+    r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    uint32_t first = tc_u32(&r, 0);
+    q = tc_new(426);
+    q.tipc = true;
+    tc_put32(&q, first + 1);
+    r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    uint64_t size = 256ull * 4 * 128;
+    CHECK_EQ(tc_u64(&r, 0), heap + 0x10000 + size);
+    CHECK_EQ(tc_u64(&r, 8), heap + 0x10000 + 2 * size - 1);
+    CHECK_EQ(tc_u32(&r, 16), 1);
+    CHECK_EQ(tc_u32(&r, 24), 255u | (127u << 16));
+    CHECK_EQ(tc_u32(&r, 48), 0x01000001);
+    CHECK_EQ(tc_u32(&r, 52), 1);
+    CHECK_EQ(tc_u32(&r, 56), 0);
+    CHECK_EQ(tc_u32(&r, 60), size);
+    q = tc_new(428);
+    q.tipc = true;
+    tc_put32(&q, first + 1);
+    r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 0);
+    CHECK_EQ(tc_u32(&r, 56), size);
+}
+
 TEST(chat_u_gives_its_shim_and_event)
 {
     rl_hos_config cfg;

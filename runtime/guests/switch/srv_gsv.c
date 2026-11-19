@@ -229,11 +229,57 @@ static rl_result gpu_request_user(rl_ipc_req *r)
 /** @brief GpuSession 22 (unnamed): no input; the user session command 21 readied. */
 static rl_result gpu_take_user(rl_ipc_req *r) { return push_session(r, &gpu_user_class); }
 
+#define GRAPHICS_DEVICES 64u
+
+static bool g_graphics_device[GRAPHICS_DEVICES];
+
+/**
+ * @brief GpuSession 41 (nn::gpu::sdk CreateGraphicsDevice): a u64 name, a u64 flags and a u64 debug label; a u32
+ * device id that later NvRm calls name, 0 being invalid. Only flags 0 has been seen.
+ */
+static rl_result gpu_create_graphics_device(rl_ipc_req *r)
+{
+    uint64_t in[3];
+    if (!rl_srv_in(r, in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t id = 0;
+    hos_lock();
+    for (uint32_t i = 1; i < GRAPHICS_DEVICES; i++)
+        if (!g_graphics_device[i]) {
+            g_graphics_device[i] = true;
+            id = i;
+            break;
+        }
+    hos_unlock();
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!id || !out)
+        return id ? SF_RESULT_INVALID_HEADER : KR_OUT_OF_RESOURCE;
+    *out = id;
+    return KR_SUCCESS;
+}
+
+/** @brief GpuSession 42 (DestroyGraphicsDevice): a u32 device id, in its low byte. */
+static rl_result gpu_destroy_graphics_device(rl_ipc_req *r)
+{
+    uint32_t id;
+    if (!rl_srv_in(r, &id, 4))
+        return SF_RESULT_INVALID_HEADER;
+    id &= 0xff;
+    hos_lock();
+    bool existed = id < GRAPHICS_DEVICES && g_graphics_device[id];
+    if (existed)
+        g_graphics_device[id] = false;
+    hos_unlock();
+    return existed ? KR_SUCCESS : KR_NOT_FOUND;
+}
+
 static const rl_ipc_cmd gpu_session_cmds[] = {
     { 11, "GetUserVersionRange", gpu_user_versions },
     { 12, "OpenUser", gpu_open_user },
     { 21, "RequestUser", gpu_request_user },
     { 22, "TakeUser", gpu_take_user },
+    { 41, "CreateGraphicsDevice", gpu_create_graphics_device },
+    { 42, "DestroyGraphicsDevice", gpu_destroy_graphics_device },
 };
 
 static const rl_ipc_class gpu_session_class = { "nn::gsv::GpuSession", gpu_session_cmds,
@@ -700,6 +746,9 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 4, "BootWithRemoteMemory", boot_with_remote_memory },
     { 11, "SetCurrentProcessHandle", set_current_process_handle },
     { 101, "CreateContext", rl_srv_stub_ok },
+    { 426, "MapNativeImage", rl_gsv_native_image_query },
+    { 427, "UnmapNativeImage", rl_gsv_native_image_unmap },
+    { 428, "QueryNativeImage", rl_gsv_native_image_query },
     { 111, "CreateNativeMemory", rl_gsv_native_memory_create },
     { 112, "DestroyNativeMemory", rl_gsv_native_memory_destroy },
     { 114, "BindNativeMemory", rl_gsv_native_memory_bind },
