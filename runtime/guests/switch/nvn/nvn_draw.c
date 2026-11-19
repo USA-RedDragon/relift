@@ -753,6 +753,26 @@ static int bank_of(replay *r, const void *src, uint64_t n, VkDescriptorBufferInf
 static const void *user_bank(replay *r, uint32_t s, uint32_t b, uint64_t addr);
 
 /**
+ * @brief The driver bank c[0] of graphics stage s: each storage buffer slot k of the stage is 16 bytes
+ * {GPU address, u32 size} at 16 * (first[s] + k), where first is the driver's per-stage table (sdk 0xbb0570,
+ * read by nvnCommandBufferBindStorageBuffer, sdk 0x67be50: vertex 0x11, fragment 0x51, geometry 0x41, tessellation
+ * control 0x21, tessellation evaluation 0x31); vertex programs read their slots at 0x110 and up. Every other word
+ * is 0 (the layer does not know the driver's other c[0] fields yet).
+ */
+static void graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYTES])
+{
+    static const uint32_t first[5] = { 0x11, 0x51, 0x41, 0x21, 0x31 };
+    memset(c0, 0, NVN_GFX_C0_BYTES);
+    for (uint32_t k = 0; k < NVN_STORAGE_SLOTS && s < 5; k++) {
+        uint32_t at = 16 * (first[s] + k), size = (uint32_t)st->gstorage[s][k].size;
+        if (at + 16 > NVN_GFX_C0_BYTES)
+            break;
+        memcpy(c0 + at, &st->gstorage[s][k].addr, 8);
+        memcpy(c0 + at + 8, &size, 4);
+    }
+}
+
+/**
  * @brief Writes the constant banks the bound modules read into new
  * descriptor sets, sets[0] and sets[1], with the texture set in sets[2].
  */
@@ -782,6 +802,10 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
                 rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[n]);
             } else if (b == 2) {
                 rc = bank_of(r, r->st->bank2_host[s], NVN_BANK2_BYTES, &bi[n]);
+            } else if (b == 0) {
+                uint8_t c0[NVN_GFX_C0_BYTES];
+                graphics_table(r->st, s, c0);
+                rc = bank_of(r, c0, sizeof c0, &bi[n]);
             } else {
                 rc = nvn_vk_stop(r, "program %s reads driver constant bank c[%u], which the layer does not fill yet",
                                  mods[s]->key, b);
@@ -1424,12 +1448,17 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     }
     case NVN_CMD_BIND_STORAGE_BUFFER: {
         uint32_t s = (uint32_t)e->x[1], slot = (uint32_t)e->x[2];
-        if (s != NVN_STAGE_COMPUTE)
-            return nvn_vk_stop(r, "storage buffer of graphics stage %u, which the layer does not bind yet", s);
+        if (s >= NVN_STAGES)
+            return nvn_vk_stop(r, "storage buffer of stage %u", s);
         if (slot >= NVN_STORAGE_SLOTS)
             return nvn_vk_stop(r, "storage buffer slot %u", slot);
-        st->storage[slot].addr = e->x[3];
-        st->storage[slot].size = e->x[4];
+        if (s == NVN_STAGE_COMPUTE) {
+            st->storage[slot].addr = e->x[3];
+            st->storage[slot].size = e->x[4];
+        } else {
+            st->gstorage[s][slot].addr = e->x[3];
+            st->gstorage[s][slot].size = e->x[4];
+        }
         return RL_OK;
     }
     case NVN_CMD_BIND_IMAGE: {

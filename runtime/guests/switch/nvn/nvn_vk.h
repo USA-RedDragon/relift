@@ -21,6 +21,8 @@
 /** @brief Bytes of a stage's driver bank c[2] the layer keeps: bound texture handles from 0x20, 8 bytes apart. */
 #define NVN_BANK2_BYTES 0x400u
 /** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
+/** @brief Bytes of a graphics stage's driver bank c[0] the layer fills. */
+#define NVN_GFX_C0_BYTES 0x1000u
 #define NVN_BANK2_TEXTURES 0x20u
 /** @brief Offset in c[2] of the handle bound to image slot 0 of a graphics stage (nvnCommandBufferBindImage, sdk 0x67ea20: method 0x8e3 at 0x120 + 8 * slot). */
 #define NVN_BANK2_IMAGES 0x120u
@@ -142,6 +144,10 @@ typedef struct nvn_gfx {
     /** @brief The compiler constants of each stage's program (its c[1]), and its control section's guest address. */
     nvn_consts consts[NVN_STAGES];
     uint64_t control[NVN_STAGES];
+    /** @brief Storage buffers of the graphics stages, by stage and slot. */
+    struct {
+        uint64_t addr, size;
+    } gstorage[NVN_STAGES][NVN_STORAGE_SLOTS];
     /** @brief Compute storage buffers: GPU address and size. */
     struct {
         uint64_t addr, size;
