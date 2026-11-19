@@ -664,6 +664,34 @@ TEST(audio_device_volume_auto_tune_is_off_until_enabled)
     CHECK_EQ(r.data[0], 0);
 }
 
+TEST(audio_device_notification_events_are_copy_handles_that_stay_unsignaled)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint32_t h = open_service(c, heap, "audren:u");
+    msg q = mk(2);
+    q.data_size = 8;
+    reply r = call(c, h, &q);
+    CHECK_EQ(r.result, 0);
+    uint32_t dev = r.move[0];
+    uint32_t first = 0;
+    for (uint32_t cmd = 15; cmd <= 18; cmd++) {
+        q = mk(cmd);
+        q.data_size = 8;
+        r = call(c, dev, &q);
+        CHECK_EQ(r.result, 0);
+        if (!(cmd & 1)) {
+            CHECK_EQ(r.ncopy, 0);
+            continue;
+        }
+        CHECK_EQ(r.ncopy, 1);
+        if (!first)
+            first = r.copy[0];
+        CHECK_EQ(wait_event(c, heap + 0x800, r.copy[0], 1000000ull), KR_TIMED_OUT);
+    }
+    CHECK(first);
+}
+
 TEST(audio_device_names_the_switch2_outputs_the_program_knows)
 {
     rl_hos_config cfg;

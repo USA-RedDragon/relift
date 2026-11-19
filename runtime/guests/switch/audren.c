@@ -783,13 +783,13 @@ static void put_device_name(uint8_t name[DEVICE_NAME_SIZE]) { put_name(name, dev
 typedef struct audio_device {
     float volume;
     bool auto_tune;
-    hos_revent *events[3];
+    hos_revent *events[5];
 } audio_device;
 
 static void device_destroy(void *p)
 {
     audio_device *d = p;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 5; i++)
         if (d->events[i])
             hos_kobj_unref(&d->events[i]->obj);
     free(d);
@@ -867,6 +867,30 @@ static rl_result dev_system_event(rl_ipc_req *r) { return dev_event(r, 0); }
 static rl_result dev_input_event(rl_ipc_req *r) { return dev_event(r, 1); }
 static rl_result dev_output_event(rl_ipc_req *r) { return dev_event(r, 2); }
 
+/**
+ * @brief IAudioDevice 15 and 17 AcquireAudioInputDeviceNotification and
+ * AcquireAudioOutputDeviceNotification (u64): an event for the device set
+ * changing, which never fires here. Inferred: Eglantine and Lichii answer
+ * with a copy handle of an event they never signal; the u64 is not read.
+ */
+static rl_result dev_acquire_notification(rl_ipc_req *r, int i)
+{
+    uint64_t token;
+    if (!rl_ipc_in(r, &token, sizeof token))
+        return SF_RESULT_INVALID_HEADER;
+    return dev_event(r, i);
+}
+
+static rl_result dev_acquire_input(rl_ipc_req *r) { return dev_acquire_notification(r, 3); }
+static rl_result dev_acquire_output(rl_ipc_req *r) { return dev_acquire_notification(r, 4); }
+
+/** @brief IAudioDevice 16 and 18 ReleaseAudio{Input,Output}DeviceNotification (u64): nothing to give back. */
+static rl_result dev_release_notification(rl_ipc_req *r)
+{
+    uint64_t token;
+    return rl_ipc_in(r, &token, sizeof token) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
+}
+
 static rl_result dev_channel_count(rl_ipc_req *r)
 {
     put32(rl_ipc_out(r, 4), 2);
@@ -928,6 +952,10 @@ static const rl_ipc_cmd device_cmds[] = {
     { 12, "QueryAudioDeviceOutputEvent", dev_output_event },
     { 13, "GetActiveAudioOutputDeviceName", dev_active_name },
     { 14, "ListAudioOutputDeviceName", dev_list_outputs },
+    { 15, "AcquireAudioInputDeviceNotification", dev_acquire_input },
+    { 16, "ReleaseAudioInputDeviceNotification", dev_release_notification },
+    { 17, "AcquireAudioOutputDeviceNotification", dev_acquire_output },
+    { 18, "ReleaseAudioOutputDeviceNotification", dev_release_notification },
     { 19, "SetAudioDeviceOutputVolumeAutoTuneEnabled", dev_set_auto_tune },
     { 20, "IsAudioDeviceOutputVolumeAutoTuneEnabled", dev_auto_tune },
     { 21, "IsActiveOutputDeviceEstimatedLowLatency", dev_low_latency },
