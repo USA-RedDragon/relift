@@ -26,7 +26,11 @@
 #define MAX_MODULES 4096u
 #define UBO_BYTES 65536u
 #define SET_POOL_SETS 4096u
-#define USER_BINDINGS 16u
+#define USER_BINDINGS 22u
+/** @brief The user binding (constant bank c[24]) a fragment program reads the stage's storage buffer table from. */
+#define STORAGE_TABLE_BINDING 21u
+/** @brief Storage buffer entries of the table in c[24]: each is {GPU address, u32 size, u32 0}, 16 bytes. */
+#define STORAGE_TABLE_ENTRIES 5u
 #define DRIVER_BINDINGS 4u
 #define MAX_RECS 48u
 #define MAX_SPECS 32u
@@ -834,6 +838,25 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
         for (uint32_t b = 0; b < USER_BINDINGS; b++) {
             if (!(mods[s]->user & (1u << b)))
                 continue;
+            if (b == STORAGE_TABLE_BINDING && s == 1u) {
+                uint8_t table[16 * STORAGE_TABLE_ENTRIES] = { 0 };
+                for (uint32_t k = 0; k < STORAGE_TABLE_ENTRIES; k++) {
+                    uint32_t sz = (uint32_t)r->st->gstorage[s][k].size;
+                    memcpy(table + 16 * k, &r->st->gstorage[s][k].addr, 8);
+                    memcpy(table + 16 * k + 8, &sz, 4);
+                }
+                int trc = bank_of(r, table, sizeof table, &bi[n]);
+                if (trc != RL_OK)
+                    return trc;
+                wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                                .dstSet = sets[0],
+                                                .dstBinding = USER_BINDINGS * s + b,
+                                                .descriptorCount = 1,
+                                                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                                .pBufferInfo = &bi[n] };
+                n++;
+                continue;
+            }
             if (b >= NVN_UBO_SLOTS)
                 return nvn_vk_stop(r, "program %s reads constant bank c[%u]", mods[s]->key, b + 3);
             uint64_t addr = r->st->ubo[s][b].addr, size = r->st->ubo[s][b].size;
