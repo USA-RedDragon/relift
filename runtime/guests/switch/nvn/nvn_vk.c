@@ -1768,7 +1768,9 @@ static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
  * writes one command word (method 0x23, one flag bit) and Save/RestoreZCullData
  * copy the culling memory to and from the game's buffer, an opaque blob the
  * game only hands back to the restore. The host device has neither, so these
- * three do nothing.
+ * three do nothing. The overlap mode, the two workload priorities and the resource occupancy are scheduling hints
+ * for the GPU (how compute overlaps graphics, which queue work runs first, how much of the GPU a launch may take):
+ * they change no result, only timing, and the host device schedules its own work, so they do nothing as well.
  */
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
@@ -1800,6 +1802,10 @@ static int run_cmd(replay *r, const nvn_cmd *e)
             return nvn_vk_stop(r, "more than %u fence syncs in one command set", r->nsyncs);
         r->syncs[r->nsyncs++] = e->x[1];
         return RL_OK;
+    case NVN_CMD_SET_COMPUTE_OVERLAP_MODE:
+    case NVN_CMD_SET_COMPUTE_WORKLOAD_PRIORITY:
+    case NVN_CMD_SET_GRAPHICS_WORKLOAD_PRIORITY:
+    case NVN_CMD_SET_RESOURCE_OCCUPANCY:
     case NVN_CMD_SET_ZCULL_ZF32_COMPRESSION_ENABLE:
     case NVN_CMD_SAVE_ZCULL_DATA:
     case NVN_CMD_RESTORE_ZCULL_DATA:
