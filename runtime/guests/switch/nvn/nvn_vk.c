@@ -14,6 +14,7 @@
  * the host image holds its contents: the guest bytes are not written back.
  * A command or format the layer does not handle stops the game with its name.
  */
+#include "nvn_astc.h"
 #include "nvn_vk.h"
 #include "hostlib.h"
 #include "nvn_probe_spv.h"
@@ -961,6 +962,37 @@ static uint32_t depth_of(const nvn_tex_desc *d, uint32_t l)
 }
 
 /** @brief Fills v from the guest bytes of its storage, every level of every layer. */
+/** @brief For an ASTC format: 1 when it is the sRGB variant, 0 when UNORM; -1 for any other format. */
+static int astc_srgb(uint32_t format)
+{
+    if (format < 121 || format >= 149)
+        return -1;
+    return format >= 135;
+}
+
+/**
+ * @brief Fills out with the RGBA8 texels of layer layer, level level of the ASTC texture v (w x h x depth of rg
+ * texels): the blocks come out of the guest's storage and nvn_astc_image decodes them. This is the one place a
+ * different way of serving ASTC (a decode on the GPU, a transcode to a block format) would replace.
+ */
+static bool upload_decoded(replay *r, const vimg *v, uint32_t level, uint32_t layer, const nvn_region *rg, uint8_t *out)
+{
+    const nvn_tex_desc *d = &v->d;
+    uint32_t bpb, bw, bh;
+    if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
+        return false;
+    uint32_t w = (uint32_t)rg->width, h = (uint32_t)rg->height, depth = (uint32_t)rg->depth;
+    uint64_t block_bytes = (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * depth;
+    uint8_t *blocks = malloc(block_bytes ? block_bytes : 1);
+    if (!blocks)
+        return false;
+    bool ok = nvn_tex_copy(d, r->mem + v->storage, level, layer, rg, blocks, false);
+    for (uint32_t z = 0; ok && z < depth; z++)
+        nvn_astc_image(bw, bh, astc_srgb(d->format) == 1, w, h, blocks + z * (block_bytes / depth), out + (uint64_t)z * w * h * 4);
+    free(blocks);
+    return ok;
+}
+
 static bool upload(replay *r, vimg *v)
 {
     const nvn_tex_desc *d = &v->d;
@@ -993,7 +1025,8 @@ static bool upload(replay *r, vimg *v)
     uint64_t total = 0;
     for (uint32_t l = 0; l < rr.levelCount; l++) {
         uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
-        total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount * depth_of(d, l);
+        total += v->decoded ? (uint64_t)w * h * 4 * rr.layerCount * depth_of(d, l)
+                            : (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount * depth_of(d, l);
     }
     staging s;
     if (!nvn_vk_staging_new(&s, total))
@@ -1003,13 +1036,20 @@ static bool upload(replay *r, vimg *v)
     for (uint32_t l = 0; l < rr.levelCount && l < NVN_TEX_MAX_LEVELS; l++) {
         uint32_t w = d->width >> l ? d->width >> l : 1, h = d->height >> l ? d->height >> l : 1;
         uint32_t dl = depth_of(d, l);
-        uint64_t layer_bytes = (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * dl;
+        uint64_t layer_bytes = v->decoded ? (uint64_t)w * h * 4 * dl
+                                          : (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * dl;
         nvn_region rg = { 0, 0, 0, (int32_t)w, (int32_t)h, (int32_t)dl };
-        for (uint32_t k = 0; k < rr.layerCount; k++)
-            if (!nvn_tex_copy(d, r->mem + v->storage, l, k, &rg, s.map + at + layer_bytes * k, false)) {
+        for (uint32_t k = 0; k < rr.layerCount; k++) {
+            if (v->decoded) {
+                if (!upload_decoded(r, v, l, k, &rg, s.map + at + layer_bytes * k)) {
+                    nvn_vk_staging_free(&s);
+                    return false;
+                }
+            } else if (!nvn_tex_copy(d, r->mem + v->storage, l, k, &rg, s.map + at + layer_bytes * k, false)) {
                 nvn_vk_staging_free(&s);
                 return false;
             }
+        }
         bic[l] = (VkBufferImageCopy){ .bufferOffset = at,
                                       .imageSubresource = { .aspectMask = v->aspect,
                                                             .mipLevel = l,
@@ -1185,10 +1225,15 @@ static vimg *image_of(replay *r, uint64_t tex)
     v->d = *d;
     v->format = f;
     v->aspect = aspect;
-    VkImageSubresourceRange rr = range_of(v);
-    bool depth = aspect != VK_IMAGE_ASPECT_COLOR_BIT;
     VkFormatProperties fp;
     VK(vkGetPhysicalDeviceFormatProperties)(g.phys, f, &fp);
+    if (astc_srgb(d->format) >= 0 && !(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
+        v->decoded = true;
+        v->format = f = astc_srgb(d->format) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        VK(vkGetPhysicalDeviceFormatProperties)(g.phys, f, &fp);
+    }
+    VkImageSubresourceRange rr = range_of(v);
+    bool depth = aspect != VK_IMAGE_ASPECT_COLOR_BIT;
     VkFormatFeatureFlags ff = fp.optimalTilingFeatures;
     if (!(ff & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
         free(v);
@@ -1328,7 +1373,7 @@ VkFormat nvn_vk_view_format(const vimg *v, uint32_t format, VkImageAspectFlags *
     uint32_t b0, w0, h0, b1, w1, h1;
     *aspect = 0;
     VkFormat f = nvn_vk_format(format, aspect);
-    if (f == VK_FORMAT_UNDEFINED || *aspect != VK_IMAGE_ASPECT_COLOR_BIT || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT ||
+    if (f == VK_FORMAT_UNDEFINED || v->decoded || *aspect != VK_IMAGE_ASPECT_COLOR_BIT || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT ||
         !nvn_tex_format(format, &b1, &w1, &h1) || !nvn_tex_format(v->d.format, &b0, &w0, &h0) || b0 != b1 ||
         w0 != w1 || h0 != h1)
         return VK_FORMAT_UNDEFINED;

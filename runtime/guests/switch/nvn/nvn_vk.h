@@ -52,6 +52,8 @@ typedef struct vimg {
     nvn_tex_desc d;
     VkFormat format;
     VkImageAspectFlags aspect;
+    /** @brief An ASTC texture the host device cannot sample: the image holds its decoded RGBA8 texels. */
+    bool decoded;
     /** @brief The image was made with storage usage (an uncompressed color format). */
     bool storage_ok;
     VkImageUsageFlags usage;
