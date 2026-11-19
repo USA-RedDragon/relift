@@ -482,6 +482,11 @@ static int dispatch(rl_ctx *c, uint32_t imm)
     case 0x5F:
         rc = !x[2] ? KR_INVALID_SIZE : w0 != HOS_CUR_PROCESS ? KR_INVALID_HANDLE : hos_cache_range(x[1], x[2]);
         break;
+    case 0x80:
+        if (!hos_switch2())
+            return unknown_svc(c, imm);
+        rc = hos_set_gpu_memory_attribute(x[0], x[1], w2, w3);
+        break;
     default:
         return unknown_svc(c, imm);
     }

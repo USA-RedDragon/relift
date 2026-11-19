@@ -437,6 +437,35 @@ rl_result hos_set_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, 
     return rc;
 }
 
+/**
+ * @brief svcSetGpuMemoryAttribute (Switch 2, 0x80): address, size, mask and value over the one new attribute bit,
+ * which nn::gpu::sdk and nn::gs set before they register memory with the GPU and clear on destruction. Checked as
+ * svcSetMemoryAttribute is, for that bit alone (inferred: Eglantine).
+ */
+rl_result hos_set_gpu_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, uint32_t value)
+{
+    if (!aligned(addr))
+        return KR_INVALID_ADDRESS;
+    if (!aligned(size) || size == 0)
+        return KR_INVALID_SIZE;
+    if ((value & ~mask) != 0 || ((mask | value) & ~(uint32_t)MA_GPU_ACCESSIBLE) != 0)
+        return KR_INVALID_COMBINATION;
+    rl_result rc = KR_SUCCESS;
+    rl_vm_block b;
+    hos_lock();
+    if (addr + size <= addr || !rl_vm_contains(&hos.vm, addr, size) ||
+        !check(addr, size, MS_ATTRIBUTE_CHANGE_ALLOWED, MS_ATTRIBUTE_CHANGE_ALLOWED, 0, 0, MA_BORROWED | MA_IPC_MAPPED, 0,
+               &b))
+        rc = KR_INVALID_MEM_STATE;
+    else {
+        uint32_t attr = (attr_of(&b) & ~mask) | (mask & value);
+        if (rl_vm_set(&hos.vm, addr, size, b.perm, tag_of(state_of(&b), attr), RL_VM_KEEP))
+            rc = KR_OUT_OF_MEMORY;
+    }
+    hos_unlock();
+    return rc;
+}
+
 rl_result hos_cache_range(uint64_t addr, uint64_t size)
 {
     rl_result rc = KR_SUCCESS;

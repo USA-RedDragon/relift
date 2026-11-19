@@ -75,3 +75,28 @@ TEST(switch_refuses_the_switch2_info_ids)
     for (uint32_t id = 29; id <= 33; id++)
         CHECK_EQ(t_svc(c, SVC_GET_INFO, 0, id, HOS_CUR_PROCESS, 0, 0, 0), KR_INVALID_ENUM_VALUE);
 }
+
+TEST(switch2_svc_0x80_sets_the_gpu_accessible_attribute)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap, 0x4000, MA_GPU_ACCESSIBLE, MA_GPU_ACCESSIBLE, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap, 0x4000, MA_GPU_ACCESSIBLE, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap + 1, 0x1000, MA_GPU_ACCESSIBLE, 0, 0, 0), KR_INVALID_ADDRESS);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap, 0, MA_GPU_ACCESSIBLE, 0, 0, 0), KR_INVALID_SIZE);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap, 0x1000, 0, MA_GPU_ACCESSIBLE, 0, 0), KR_INVALID_COMBINATION);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap, 0x1000, MA_UNCACHED, MA_UNCACHED, 0, 0), KR_INVALID_COMBINATION);
+}
+
+TEST(svc_0x80_is_not_on_the_switch)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap);
+    CHECK_EQ(t_svc(c, SVC_SET_GPU_MEMORY_ATTRIBUTE, heap, 0x1000, MA_GPU_ACCESSIBLE, MA_GPU_ACCESSIBLE, 0, 0),
+             KR_NOT_IMPLEMENTED);
+}

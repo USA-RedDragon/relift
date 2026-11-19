@@ -135,7 +135,9 @@ enum {
     MA_IPC_MAPPED = 1u << 1,
     MA_DEVICE_MAPPED = 1u << 2,
     MA_UNCACHED = 1u << 3,
-    MA_PERMISSION_LOCKED = 1u << 4
+    MA_PERMISSION_LOCKED = 1u << 4,
+    /** @brief Switch 2: the memory is registered with the GPU (svc 0x80). */
+    MA_GPU_ACCESSIBLE = 1u << 5
 };
 
 /** @brief Pseudo handle for the current thread. */
@@ -677,6 +679,8 @@ void hos_update_inheritance(hos_thread *t);
 rl_result hos_set_heap_size(uint64_t size, uint64_t *out);
 rl_result hos_set_memory_permission(uint64_t addr, uint64_t size, uint32_t perm);
 rl_result hos_set_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, uint32_t value);
+/** @brief Switch 2 svcSetGpuMemoryAttribute (0x80): as hos_set_memory_attribute, for the GPU-accessible bit only. */
+rl_result hos_set_gpu_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, uint32_t value);
 rl_result hos_map_memory(uint64_t dst, uint64_t src, uint64_t size);
 /** @brief svcMapPhysicalMemory: backs the free pages of [addr, addr + size) in the alias region with new memory. */
 rl_result hos_map_physical_memory(uint64_t addr, uint64_t size);
