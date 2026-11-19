@@ -87,7 +87,7 @@ skera = { version = "=0.10.0", default-features = false }
 skrifa = "=0.50.0"
 toml = "=1.2.1"
 wasm-encoder = { version = "=0.263.0", default-features = false }
-wasmtime = { version = "=50.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std"] }
 write-fonts = "=0.56.0"
 zstd = { version = "=0.14.4", default-features = false }
 
