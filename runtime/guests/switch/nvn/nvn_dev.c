@@ -144,6 +144,17 @@ uint64_t nvn_gpu_guest(uint64_t gpu)
     return out;
 }
 
+bool nvn_gpu_mapped(uint64_t gpu, uint64_t size)
+{
+    bool ok = false;
+    pthread_rwlock_rdlock(&g_pools.lock);
+    for (uint32_t i = 0; i < g_pools.n && !ok; i++)
+        ok = gpu >= g_pools.v[i].gpu && gpu - g_pools.v[i].gpu < g_pools.v[i].size &&
+             size <= g_pools.v[i].size - (gpu - g_pools.v[i].gpu);
+    pthread_rwlock_unlock(&g_pools.lock);
+    return ok;
+}
+
 bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off)
 {
     bool found = false;

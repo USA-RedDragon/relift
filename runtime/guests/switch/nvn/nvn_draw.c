@@ -1246,6 +1246,9 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     }
     for (uint32_t i = 0; i < nssbo; i++, at += 16) {
         uint32_t size = (uint32_t)st->storage[i].size;
+        if (!nvn_gpu_mapped(st->storage[i].addr, size))
+            return nvn_vk_stop(r, "compute program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool",
+                               m->key, i, (unsigned long long)st->storage[i].addr, size);
         memcpy(c0 + at, &st->storage[i].addr, 8);
         memcpy(c0 + at + 8, &size, 4);
     }

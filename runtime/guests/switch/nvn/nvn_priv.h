@@ -359,6 +359,8 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out);
 void nvn_vk_unimport(nvn_import *im);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */
 uint64_t nvn_gpu_guest(uint64_t gpu);
+/** @brief Whether the size bytes at GPU address gpu lie in one imported pool (a program that reads others loses the device). */
+bool nvn_gpu_mapped(uint64_t gpu, uint64_t size);
 /**
  * @brief The imported buffer (*buf, a VkBuffer) and offset (*off) that hold
  * the size guest bytes at guest; false when no imported pool holds them all.
