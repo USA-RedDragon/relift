@@ -31,6 +31,10 @@ pub trait Naming {
     fn host_name(&self, module: &str, symbol: &str) -> Option<String>;
 }
 
+/// The C local of a lifted function that holds the budget of its clock
+/// ([`Frontend::clock`]) between runtime calls.
+pub const BUDGET: &str = "budget";
+
 /// Why a frontend could not lift the code at an address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiftFailure {
@@ -192,6 +196,24 @@ pub trait Frontend {
     /// blocks hold no tick, I/O access or sync point (the emitter reports
     /// each as an error).
     fn clock(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Whether intrinsic `name` charges the clock through the function's
+    /// budget local ([`BUDGET`]) itself and stores and reloads it around
+    /// any runtime call of its own, so the emitter neither stores nor
+    /// reloads the budget around it.
+    fn clocked_intrinsic(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
+
+    /// The locals that [`Frontend::clocked_intrinsic`] expressions keep
+    /// beside the budget, as their C declarations with initial values and
+    /// the statements that reset them: the function declares them with the
+    /// budget and resets them wherever it reloads the budget from the
+    /// context, after any runtime call. `None` when there are none.
+    fn clock_locals(&self) -> Option<(&'static str, &'static str)> {
         None
     }
 

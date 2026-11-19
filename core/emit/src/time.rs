@@ -9,8 +9,16 @@ use relift_ir::{Block, Endian, IoKind, IoMap, Op, Value, Width};
 
 use crate::value::Emitted;
 
-/// The C local that holds the clock's budget.
-pub(crate) const BUDGET: &str = "budget";
+pub(crate) use relift_guest::BUDGET;
+
+/// The statement that reloads the budget from the clock `clk` after a
+/// runtime call, with the resets of the frontend's clock locals.
+pub(crate) fn reload_budget(fe: &dyn Frontend, clk: &str) -> String {
+    match fe.clock_locals() {
+        Some((_, reset)) => format!("{BUDGET} = {clk}.{BUDGET}; {reset}"),
+        None => format!("{BUDGET} = {clk}.{BUDGET};"),
+    }
+}
 
 /// Whether `b` uses the clock, an I/O access or a sync point.
 pub(crate) fn uses_clock(b: &Block) -> bool {
@@ -194,7 +202,7 @@ pub(crate) fn emit(
                             format!("{read_call}(c, mem, a_ + {off}, {size}) & {}", mask(size));
                         s.push_str(&format!(" r_ |= (({t})({call})) << {};", 8 * off));
                     }
-                    s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                    s.push_str(&format!(" {}", reload_budget(fe, clk)));
                     if words {
                         s.push_str(&format!(" r_ = ({t})({});", bswap("r_", n)));
                     }
@@ -208,7 +216,7 @@ pub(crate) fn emit(
                             format!("{read_call}(c, mem, a_ + {off}, {size}) & {}", mask(size));
                         s.push_str(&format!(" r_ |= (({t})({call})) << {};", 8 * off));
                     }
-                    s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                    s.push_str(&format!(" {}", reload_budget(fe, clk)));
                     if words {
                         s.push_str(&format!(" r_ = ({t})({});", bswap("r_", n)));
                     }
@@ -261,7 +269,7 @@ pub(crate) fn emit(
                             mask(size)
                         ));
                     }
-                    s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                    s.push_str(&format!(" {}", reload_budget(fe, clk)));
                 }
                 Some(cond) => {
                     s.push_str(&format!(" if ({cond}) {{ {clk}.{BUDGET} = {BUDGET};"));
@@ -273,7 +281,8 @@ pub(crate) fn emit(
                         ));
                     }
                     s.push_str(&format!(
-                        " {BUDGET} = {clk}.{BUDGET}; }} else {{ {plain} }}"
+                        " {} }} else {{ {plain} }}",
+                        reload_budget(fe, clk)
                     ));
                 }
             }

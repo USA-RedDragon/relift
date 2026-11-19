@@ -748,6 +748,9 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     }
     if let Some(clk) = clock {
         let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
+        if let Some((decl, _)) = fe.clock_locals() {
+            let _ = writeln!(t, "    {decl}");
+        }
     }
     t.push_str("    uint64_t rc;\n    (void)rc;\n");
     if plan.shared().is_some() {
@@ -1047,7 +1050,10 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         if inl[i].is_some() {
             continue;
         }
-        let call = cx.clock.filter(|_| matches!(inst.op, Op::Intrinsic(..)));
+        let call = cx.clock.filter(|_| match &inst.op {
+            Op::Intrinsic(i) => !cx.fe.clocked_intrinsic(i.name),
+            _ => false,
+        });
         if let Some(clk) = call {
             let _ = writeln!(s, "    {clk}.budget = {};", time::BUDGET);
         }
@@ -1121,7 +1127,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             }
         }
         if let Some(clk) = call {
-            let _ = writeln!(s, "    {} = {clk}.budget;", time::BUDGET);
+            let _ = writeln!(s, "    {}", time::reload_budget(cx.fe, clk));
         }
     }
     for (r, e) in sets {
@@ -1302,7 +1308,7 @@ fn reload(
     let regs = fe.regs();
     let mut t = String::new();
     if let Some(clk) = clock {
-        let _ = write!(t, "{} = {clk}.budget; ", time::BUDGET);
+        let _ = write!(t, "{} ", time::reload_budget(fe, clk));
     }
     for &r in used.iter().filter(|r| set.contains(**r)) {
         let ty = cty(regs.width(r));
