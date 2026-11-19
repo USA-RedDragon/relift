@@ -314,6 +314,8 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e);
  * storage buffers, texture handles and image handles, and the end byte of its table. *img_lo is where the image
  * handles start and *table_end where the table ends; false when the counts do not fit the end byte.
  */
+/** @brief The driver bank c[0] of graphics stage s (see nvn_draw.c): its storage buffers where the driver's per-stage table puts them. */
+void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYTES]);
 bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nubo, uint32_t nssbo, uint32_t ntex,
                        uint32_t nimg, uint32_t end, uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo,
                        uint32_t *table_end);

@@ -759,7 +759,7 @@ static const void *user_bank(replay *r, uint32_t s, uint32_t b, uint64_t addr);
  * control 0x21, tessellation evaluation 0x31); vertex programs read their slots at 0x110 and up. Every other word
  * is 0 (the layer does not know the driver's other c[0] fields yet).
  */
-static void graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYTES])
+void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYTES])
 {
     static const uint32_t first[5] = { 0x11, 0x51, 0x41, 0x21, 0x31 };
     memset(c0, 0, NVN_GFX_C0_BYTES);
@@ -804,7 +804,7 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
                 rc = bank_of(r, r->st->bank2_host[s], NVN_BANK2_BYTES, &bi[n]);
             } else if (b == 0) {
                 uint8_t c0[NVN_GFX_C0_BYTES];
-                graphics_table(r->st, s, c0);
+                nvn_graphics_table(r->st, s, c0);
                 rc = bank_of(r, c0, sizeof c0, &bi[n]);
             } else {
                 rc = nvn_vk_stop(r, "program %s reads driver constant bank c[%u], which the layer does not fill yet",

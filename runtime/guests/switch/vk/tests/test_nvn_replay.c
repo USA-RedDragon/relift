@@ -93,6 +93,35 @@ TEST(nvn_compute_table_puts_pushes_then_buffers_then_handles)
     CHECK(!nvn_compute_table(&st, groups, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
 }
 
+TEST(nvn_graphics_table_puts_storage_buffers_where_the_drivers_table_does)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    st.gstorage[0][0].addr = 0x1111;
+    st.gstorage[0][0].size = 0x10;
+    st.gstorage[0][3].addr = 0x2222;
+    st.gstorage[0][3].size = 0x30;
+    st.gstorage[1][1].addr = 0x3333;
+    st.gstorage[1][1].size = 0x40;
+    uint8_t c0[NVN_GFX_C0_BYTES];
+    uint64_t a;
+    uint32_t sz;
+    nvn_graphics_table(&st, 0, c0);
+    memcpy(&a, c0 + 0x110, 8);
+    memcpy(&sz, c0 + 0x118, 4);
+    CHECK_EQ(a, 0x1111);
+    CHECK_EQ(sz, 0x10);
+    memcpy(&a, c0 + 0x140, 8);
+    CHECK_EQ(a, 0x2222);
+    nvn_graphics_table(&st, 1, c0);
+    memcpy(&a, c0 + 0x520, 8);
+    memcpy(&sz, c0 + 0x528, 4);
+    CHECK_EQ(a, 0x3333);
+    CHECK_EQ(sz, 0x40);
+    memcpy(&a, c0 + 0x110, 8);
+    CHECK_EQ(a, 0);
+}
+
 TEST(nvn_copy_pitch_follows_the_drivers_strides)
 {
     nvn_copy_pitch p;
