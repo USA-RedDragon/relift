@@ -1762,6 +1762,64 @@ static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
 }
 
 /**
+ * @brief nvnCommandBufferClearTexture, Texturei and Textureui(texture, view, region, color, mask): the region's
+ * texels of each layer it covers set to color (four floats, signed or unsigned integers, the same 16 bytes), through
+ * a one-layer render target of the texture in turn.
+ */
+static int clear_texture(replay *r, const nvn_cmd *e)
+{
+    const nvn_region *rg = nvn_cmd_bytes(r->s, e->x[3]);
+    const uint8_t *val = nvn_cmd_bytes(r->s, e->x[4]);
+    uint32_t mask = (uint32_t)e->x[5];
+    if (!rg || !val)
+        return nvn_vk_stop(r, "%s without a region or a color", nvn_cmd_name(e->op));
+    if (mask == 0)
+        return RL_OK;
+    if (mask != 0xf)
+        return nvn_vk_stop(r, "%s with channel mask 0x%x", nvn_cmd_name(e->op), mask);
+    vimg *v = image_of(r, e->x[1]);
+    if (!v)
+        return RL_PENDING;
+    if (v->d.target == NVN_TARGET_3D || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
+        return nvn_vk_stop(r, "%s of a texture of target %u", nvn_cmd_name(e->op), v->d.target);
+    uint32_t level, layer;
+    int rc = copy_side(r, e->x[2], rg, &level, &layer);
+    if (rc != RL_OK)
+        return rc;
+    nvn_vk_written(v);
+    rt saved_color = r->st->color[0], saved_depth = r->st->depth;
+    uint32_t saved_n = r->st->ncolor;
+    VkRect2D clear = { { rg->x, rg->y }, { (uint32_t)rg->width, (uint32_t)rg->height } };
+    uint32_t layers = rg->depth > 1 ? (uint32_t)rg->depth : 1;
+    for (uint32_t i = 0; i < layers; i++) {
+        rt t = { .v = v, .level = level, .layer = layer + i };
+        VkImageSubresourceRange rr = range_of(v);
+        t.view = rr.levelCount == 1 && rr.layerCount == 1 ? v->view : sub_view(v, level, layer + i);
+        if (!t.view)
+            return nvn_vk_stop(r, "no host view of the texture %s clears", nvn_cmd_name(e->op));
+        r->st->ncolor = 1;
+        r->st->color[0] = t;
+        r->st->depth = (rt){ 0 };
+        VkRect2D area;
+        if (!nvn_vk_begin_rendering(r, &area))
+            return nvn_vk_stop(r, "%s without a target", nvn_cmd_name(e->op));
+        VkClearAttachment ca = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0 };
+        memcpy(&ca.clearValue.color, val, 16);
+        VkClearRect cr = { .rect = clear, .layerCount = 1 };
+        if (cr.rect.offset.x < 0 || cr.rect.offset.y < 0 || cr.rect.extent.width > area.extent.width ||
+            cr.rect.extent.height > area.extent.height)
+            cr.rect = area;
+        VK(vkCmdClearAttachments)(g.cb, 1, &ca, 1, &cr);
+        VK(vkCmdEndRendering)(g.cb);
+        nvn_vk_barrier(g.cb);
+    }
+    r->st->ncolor = saved_n;
+    r->st->color[0] = saved_color;
+    r->st->depth = saved_depth;
+    return RL_OK;
+}
+
+/**
  * @brief Runs one recorded command on the host device. ZCull is the GPU's
  * coarse depth-culling memory and ZF32 compression its lossless storage of
  * 32-bit float depth: both only speed up depth tests and leave every depth
@@ -1778,6 +1836,10 @@ static int run_cmd(replay *r, const nvn_cmd *e)
     switch (e->op) {
     case NVN_CMD_CLEAR_COLOR:
         return clear_color(r, e);
+    case NVN_CMD_CLEAR_TEXTURE:
+    case NVN_CMD_CLEAR_TEXTUREI:
+    case NVN_CMD_CLEAR_TEXTUREUI:
+        return clear_texture(r, e);
     case NVN_CMD_CLEAR_DEPTH_STENCIL:
         return clear_depth_stencil(r, e);
     case NVN_CMD_SET_RENDER_TARGETS:
