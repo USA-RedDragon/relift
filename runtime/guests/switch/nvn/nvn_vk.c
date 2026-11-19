@@ -1733,6 +1733,16 @@ static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+/**
+ * @brief Runs one recorded command on the host device. ZCull is the GPU's
+ * coarse depth-culling memory and ZF32 compression its lossless storage of
+ * 32-bit float depth: both only speed up depth tests and leave every depth
+ * value and test result as it is. The driver's SetZCullZF32CompressionEnable
+ * writes one command word (method 0x23, one flag bit) and Save/RestoreZCullData
+ * copy the culling memory to and from the game's buffer, an opaque blob the
+ * game only hands back to the restore. The host device has neither, so these
+ * three do nothing.
+ */
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
     switch (e->op) {
@@ -1763,6 +1773,9 @@ static int run_cmd(replay *r, const nvn_cmd *e)
             return nvn_vk_stop(r, "more than %u fence syncs in one command set", r->nsyncs);
         r->syncs[r->nsyncs++] = e->x[1];
         return RL_OK;
+    case NVN_CMD_SET_ZCULL_ZF32_COMPRESSION_ENABLE:
+    case NVN_CMD_SAVE_ZCULL_DATA:
+    case NVN_CMD_RESTORE_ZCULL_DATA:
     case NVN_CMD_WAIT_SYNC:
     case NVN_CMD_SET_SHADER_SCRATCH_MEMORY:
     case NVN_CMD_SET_TEXTURE_POOL:
