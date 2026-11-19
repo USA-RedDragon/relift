@@ -65,6 +65,14 @@ void rl_srv_install_csrng(void);
 rl_result rl_srv_nv2_open(uint32_t *handle);
 /** @brief Opens a session to a new gsv UserSession (Switch 2), for am's GetGraphicsSupervisor. */
 rl_result rl_gsv_open_user_session(uint32_t *handle);
+/** @brief Opens a video decoder session (gsv 902, 905, 906, 1002): one moved session handle in r. */
+rl_result rl_gsv_open_video_session(rl_ipc_req *r);
+rl_result rl_gsv_native_memory_create(rl_ipc_req *r);
+rl_result rl_gsv_native_memory_destroy(rl_ipc_req *r);
+rl_result rl_gsv_native_memory_bind(rl_ipc_req *r);
+rl_result rl_gsv_decoder_pool_size(rl_ipc_req *r);
+rl_result rl_gsv_decoder_pool_init(rl_ipc_req *r);
+rl_result rl_gsv_decoder_image_descriptor(rl_ipc_req *r);
 /** @brief Signals e on every vsync while on (a display session slot bound to vsync); starts the vsync source. e must outlive the listening: remove it before it is freed. */
 void rl_vi_vsync_listen(hos_revent *e, bool on);
 /** @brief Opens a syncpt session (gsv 202): one moved session handle in r. */

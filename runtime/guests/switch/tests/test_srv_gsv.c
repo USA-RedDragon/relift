@@ -352,6 +352,50 @@ TEST(gsv_syncpt_slot_events_fire_when_a_counter_reaches_the_value)
     CHECK_EQ(tc_send(c, sp, q).result, 0);
 }
 
+TEST(gsv_decoder_image_pool_layout_is_nv12_in_128_row_planes)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    uint32_t pref[16] = { 0, 1, 1919u | (1079u << 16) };
+    tc_req q = tc_new(991);
+    q.tipc = true;
+    for (int i = 0; i < 16; i++)
+        tc_put32(&q, pref[i]);
+    tc_put32(&q, 2);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 2ull * (1920ull * 1152 + 1920ull * 640));
+    CHECK_EQ(tc_u64(&r, 8), 8192);
+    q = tc_new(911);
+    q.tipc = true;
+    for (int i = 0; i < 16; i++)
+        tc_put32(&q, pref[i]);
+    tc_put32(&q, 2);
+    tc_put32(&q, 1);
+    r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    uint32_t first = tc_u32(&r, 0);
+    CHECK(first != 0);
+    q = tc_new(961);
+    q.tipc = true;
+    tc_put32(&q, first + 1);
+    r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.data[0], 10);
+    CHECK_EQ(tc_u32(&r, 8), 1920u * 1152 + 1920u * 640);
+    CHECK_EQ(tc_u64(&r, 0x10), 1920);
+    CHECK_EQ(tc_u64(&r, 0x18), 1920ull * 1152 + 1920ull * 1152 + 1920ull * 640);
+    q = tc_new(961);
+    q.tipc = true;
+    tc_put32(&q, 9999);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, SF_RESULT_INVALID_HEADER);
+}
+
 TEST(chat_u_gives_its_shim_and_event)
 {
     rl_hos_config cfg;

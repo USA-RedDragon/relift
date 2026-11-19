@@ -1,0 +1,627 @@
+/**
+ * @file srv_gsv_video.c
+ * @brief The Switch 2 video decoder sessions the graphics supervisor hands out (gsv 902, 905, 906 and 1002) and
+ * the decoder service each creates (nn::codec::video::detail::ipc).
+ *
+ * Command ids and layouts follow the SDK's lifted nn::codec video code and Eglantine's description of the
+ * service (values only).
+ */
+#include "services.h"
+
+#include <relift/video.h>
+
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+
+/** @brief Decoder output images the supervisor tracks (ids are handed out from 1). */
+#define IMAGES_MAX 256u
+#define ROW_ALIGN 64u
+#define PLANE_ROWS 128u
+
+typedef struct image {
+    bool used;
+    uint32_t pref[16];
+    uint32_t memory;
+    uint64_t offset;
+} image;
+
+static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
+static image g_images[IMAGES_MAX];
+static uint32_t g_next_image = 1;
+
+typedef struct layout {
+    uint32_t code, width, height;
+    bool nv12;
+    uint64_t pitch, chroma_offset, size;
+} layout;
+
+static uint64_t align_up(uint64_t v, uint64_t a) { return (v + a - 1) / a * a; }
+
+/**
+ * @brief The layout the supervisor gives a decoder output image for a preference (MakeDecodeImagePreference):
+ * word 1 is the output layout code (1 and 4 NV12, 2 and 5 BGRA, the rest RGBA) and word 2 holds (width - 1) |
+ * (height - 1) << 16. Pitch-linear rows of 64-byte multiples, NV12's half-height chroma plane below the luma
+ * plane, each plane padded to 128 rows (inferred: Eglantine; the console's layout was never captured).
+ */
+static layout image_layout(const uint32_t *pref)
+{
+    layout l = { 0 };
+    l.code = pref[1];
+    l.width = (pref[2] & 0xffff) + 1;
+    l.height = (pref[2] >> 16) + 1;
+    l.nv12 = l.code == 1 || l.code == 4;
+    l.pitch = align_up((uint64_t)l.width * (l.nv12 ? 1 : 4), ROW_ALIGN);
+    l.chroma_offset = l.pitch * align_up(l.height, PLANE_ROWS);
+    l.size = l.chroma_offset + (l.nv12 ? l.pitch * align_up((l.height + 1) / 2, PLANE_ROWS) : 0);
+    return l;
+}
+
+/** @brief UserSession 991 (nn::codec::CalculateDecoderImagePoolBuffer): preference[16] and a u32 count; a u64 size and a u64 alignment. */
+rl_result rl_gsv_decoder_pool_size(rl_ipc_req *r)
+{
+    struct {
+        uint32_t pref[16];
+        uint32_t count;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t *out = rl_ipc_out(r, 16);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    layout l = image_layout(in.pref);
+    out[0] = l.size * (in.count ? in.count : 1);
+    out[1] = (uint64_t)ROW_ALIGN * PLANE_ROWS;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief UserSession 911 (nn::codec::InitializeDecoderImagePool): preference[16], a u32 count and a u32 memory id;
+ * a u32, the id of the first of count images (image i of the pool is that id plus i), one image size apart in the
+ * pool's memory.
+ */
+rl_result rl_gsv_decoder_pool_init(rl_ipc_req *r)
+{
+    struct {
+        uint32_t pref[16];
+        uint32_t count, memory;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t count = in.count ? in.count : 1;
+    layout l = image_layout(in.pref);
+    pthread_mutex_lock(&g_mu);
+    uint32_t first = g_next_image;
+    if (first + count > IMAGES_MAX) {
+        pthread_mutex_unlock(&g_mu);
+        return KR_OUT_OF_RESOURCE;
+    }
+    g_next_image += count;
+    for (uint32_t i = 0; i < count; i++) {
+        image *m = &g_images[first + i];
+        m->used = true;
+        memcpy(m->pref, in.pref, sizeof m->pref);
+        m->memory = in.memory;
+        m->offset = l.size * i;
+    }
+    pthread_mutex_unlock(&g_mu);
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = first;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief UserSession 961 (GetCpuUserImageDescriptor): a u32 image id; the 128-byte nn::gsv::CpuUserImageDescriptor
+ * nn::gs::sdk::ReadUserImage* copy an image out with: u8 kind at 0 (8 RGBA, 9 BGRA, 10 NV12), the plane's offset in
+ * the pool memory (u32 at 8) and row pitch (u64 at 0x10), NV12's chroma plane at 0x18 and 0x20.
+ */
+rl_result rl_gsv_decoder_image_descriptor(rl_ipc_req *r)
+{
+    uint32_t id;
+    if (!rl_srv_in(r, &id, 4))
+        return SF_RESULT_INVALID_HEADER;
+    uint8_t *out = rl_ipc_out(r, 128);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&g_mu);
+    image m = id < IMAGES_MAX ? g_images[id] : (image){ 0 };
+    pthread_mutex_unlock(&g_mu);
+    if (!m.used)
+        return SF_RESULT_INVALID_HEADER;
+    layout l = image_layout(m.pref);
+    out[0] = l.nv12 ? 10 : l.code == 2 || l.code == 5 ? 9 : 8;
+    uint32_t off = (uint32_t)m.offset;
+    memcpy(out + 8, &off, 4);
+    memcpy(out + 0x10, &l.pitch, 8);
+    if (l.nv12) {
+        uint64_t c = m.offset + l.chroma_offset;
+        memcpy(out + 0x18, &c, 8);
+        memcpy(out + 0x20, &l.pitch, 8);
+    }
+    return KR_SUCCESS;
+}
+
+
+/** @brief Native memory blocks (gsv 111, 112, 114): the process memory each is bound to. */
+#define MEMORIES_MAX 64u
+
+typedef struct memory {
+    bool used;
+    uint64_t size, addr;
+} memory;
+
+static memory g_memories[MEMORIES_MAX];
+static uint32_t g_next_memory = 1;
+
+/** @brief UserSession 111 (CreateNativeMemory): a u32 mode and a u64 size; a u32 memory id. */
+rl_result rl_gsv_native_memory_create(rl_ipc_req *r)
+{
+    struct __attribute__((packed)) {
+        uint32_t mode;
+        uint64_t size;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&g_mu);
+    uint32_t id = g_next_memory < MEMORIES_MAX ? g_next_memory++ : 0;
+    if (id) {
+        g_memories[id].used = true;
+        g_memories[id].size = in.size;
+        g_memories[id].addr = 0;
+    }
+    pthread_mutex_unlock(&g_mu);
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!id || !out)
+        return id ? SF_RESULT_INVALID_HEADER : KR_OUT_OF_RESOURCE;
+    *out = id;
+    return KR_SUCCESS;
+}
+
+/** @brief UserSession 112 (DestroyNativeMemory): a u32 memory id. */
+rl_result rl_gsv_native_memory_destroy(rl_ipc_req *r)
+{
+    uint32_t id;
+    if (!rl_srv_in(r, &id, 4) || id >= MEMORIES_MAX)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&g_mu);
+    memset(&g_memories[id], 0, sizeof g_memories[id]);
+    pthread_mutex_unlock(&g_mu);
+    return KR_SUCCESS;
+}
+
+/** @brief UserSession 114 (BindNativeMemory): a u32 memory id, then u64 address, size, flags and offset: backs the memory with process memory. */
+rl_result rl_gsv_native_memory_bind(rl_ipc_req *r)
+{
+    struct __attribute__((packed)) {
+        uint32_t id;
+        uint64_t addr, size, flags, offset;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in) || in.id >= MEMORIES_MAX)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&g_mu);
+    g_memories[in.id].addr = in.addr;
+    pthread_mutex_unlock(&g_mu);
+    return KR_SUCCESS;
+}
+
+/** @brief A frame decoded but not yet in an output image (NV12 planes, tightly packed). */
+typedef struct frame {
+    uint32_t width, height;
+    uint64_t pts;
+    bool end;
+    uint8_t *data;
+} frame;
+
+#define RING 16u
+
+typedef struct handed {
+    uint32_t image;
+    uint64_t value;
+} handed;
+
+typedef struct finished {
+    uint32_t image, width, height;
+    uint64_t pts;
+    bool end;
+} finished;
+
+/** @brief State of a decoder session: its configuration and, once configured, the stream. */
+typedef struct video_session {
+    pthread_mutex_t mu;
+    uint32_t width, height, rate;
+    char codec[32];
+    hos_revent *input_event;
+    const rl_vp9_stream_backend *vp9;
+    void *dec;
+    uint32_t counter;
+    uint64_t handed_total;
+    uint64_t submitted;
+    handed free[RING];
+    uint32_t nfree;
+    frame pending[RING];
+    uint32_t npending;
+    finished done[RING];
+    uint32_t ndone;
+} video_session;
+
+static void frame_free(frame *f)
+{
+    free(f->data);
+    f->data = NULL;
+}
+
+static void video_destroy(void *state)
+{
+    video_session *v = state;
+    if (v->input_event)
+        hos_kobj_unref(&v->input_event->obj);
+    for (uint32_t i = 0; i < v->npending; i++)
+        frame_free(&v->pending[i]);
+    if (v->dec)
+        v->vp9->close(v->dec);
+    pthread_mutex_destroy(&v->mu);
+    free(v);
+}
+
+static const rl_ipc_class video_class;
+
+static video_session *video_new(void)
+{
+    video_session *v = calloc(1, sizeof *v);
+    if (!v)
+        return NULL;
+    pthread_mutex_init(&v->mu, NULL);
+    v->counter = rl_gsv_counter_new();
+    return v;
+}
+
+static rl_result video_push_session(rl_ipc_req *r)
+{
+    video_session *v = video_new();
+    if (!v)
+        return KR_OUT_OF_RESOURCE;
+    rl_ipc_object *o = rl_srv_object(&video_class, v);
+    if (!o) {
+        video_destroy(v);
+        return KR_OUT_OF_RESOURCE;
+    }
+    uint32_t h;
+    rl_result rc = rl_ipc_session_open(o, &h);
+    rl_ipc_object_unref(o);
+    if (rc == KR_SUCCESS)
+        r->out_move[r->n_out_move++] = h;
+    return rc;
+}
+
+/** @brief Command 1 (CreateVideoDecoderService): no input; one moved handle, another session of this class. */
+static rl_result video_create_service(rl_ipc_req *r) { return video_push_session(r); }
+
+/** @brief Commands that take their input and answer with the result only (initialize, start, finalize). */
+static rl_result video_accept(rl_ipc_req *r)
+{
+    (void)r;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief Command 101 (Configure): a buffer with the codec name ("video/vp9"), then u32 width, height and rate.
+ * Opens the stream decoder for the codec.
+ */
+static rl_result video_configure(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    struct {
+        uint32_t width, height, rate;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    const rl_ipc_buf *b = r->na ? &r->a[0] : r->nx ? &r->x[0] : NULL;
+    if (!b)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&v->mu);
+    memset(v->codec, 0, sizeof v->codec);
+    rl_ipc_buf_read(b, v->codec, b->size < sizeof v->codec - 1 ? b->size : sizeof v->codec - 1);
+    v->width = in.width;
+    v->height = in.height;
+    v->rate = in.rate;
+    rl_result rc = KR_SUCCESS;
+    if (!strcmp(v->codec, "video/vp9")) {
+        if (!v->dec) {
+            v->vp9 = rl_vp9_stream_backend_current();
+            v->dec = v->vp9->open();
+            if (!v->dec) {
+                rl_ipc_stop(r, "gsv", "video decoder Configure for %s %ux%u: the build has no VP9 decoder (needs libvpx)",
+                            v->codec, in.width, in.height);
+                rc = KR_NOT_IMPLEMENTED;
+            }
+        }
+    } else {
+        rl_ipc_stop(r, "gsv", "video decoder Configure for codec \"%s\" is not implemented (only video/vp9)", v->codec);
+        rc = KR_NOT_IMPLEMENTED;
+    }
+    pthread_mutex_unlock(&v->mu);
+    return rc;
+}
+
+/** @brief Command 3 (GetInputEvent): a copied handle; the decoder always has room for input, so the event is signaled. */
+static rl_result video_input_event(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    pthread_mutex_lock(&v->mu);
+    if (!v->input_event)
+        v->input_event = rl_hos_event_create();
+    hos_revent *e = v->input_event;
+    pthread_mutex_unlock(&v->mu);
+    if (!e)
+        return KR_OUT_OF_RESOURCE;
+    rl_hos_event_signal(e);
+    return rl_ipc_push_copy(r, &e->obj);
+}
+
+static bool put_nv12(const video_session *v, uint32_t image_id, const frame *f)
+{
+    pthread_mutex_lock(&g_mu);
+    image m = image_id < IMAGES_MAX ? g_images[image_id] : (image){ 0 };
+    memory mem = m.used && m.memory < MEMORIES_MAX ? g_memories[m.memory] : (memory){ 0 };
+    pthread_mutex_unlock(&g_mu);
+    (void)v;
+    if (!m.used || !mem.addr || !f->data)
+        return false;
+    layout l = image_layout(m.pref);
+    if (!l.nv12)
+        return false;
+    uint32_t w = f->width < l.width ? f->width : l.width, h = f->height < l.height ? f->height : l.height;
+    uint64_t base = mem.addr + m.offset;
+    for (uint32_t y = 0; y < h; y++)
+        rl_vm_kernel_write(&hos.vm, base + y * l.pitch, f->data + (uint64_t)y * f->width, w);
+    const uint8_t *chroma = f->data + (uint64_t)f->width * f->height;
+    for (uint32_t y = 0; y < (h + 1) / 2; y++)
+        rl_vm_kernel_write(&hos.vm, base + l.chroma_offset + y * l.pitch, chroma + (uint64_t)y * f->width, w);
+    return true;
+}
+
+/** @brief Moves decoded frames into the registered images in order and signals each image's counter value. mu held. */
+static void fill_images(video_session *v)
+{
+    while (v->npending && v->nfree) {
+        frame f = v->pending[0];
+        memmove(&v->pending[0], &v->pending[1], (v->npending - 1) * sizeof v->pending[0]);
+        v->npending--;
+        handed h = v->free[0];
+        memmove(&v->free[0], &v->free[1], (v->nfree - 1) * sizeof v->free[0]);
+        v->nfree--;
+        if (!f.end)
+            put_nv12(v, h.image, &f);
+        frame_free(&f);
+        if (v->ndone < RING)
+            v->done[v->ndone++] = (finished){ h.image, f.width, f.height, f.pts, f.end };
+        rl_gsv_counter_signal(v->counter, h.value);
+    }
+}
+
+static void queue_frame(video_session *v, const rl_vp9_image *im, uint64_t pts, bool end)
+{
+    if (v->npending >= RING)
+        return;
+    frame *f = &v->pending[v->npending];
+    memset(f, 0, sizeof *f);
+    f->pts = pts;
+    f->end = end;
+    if (im) {
+        f->width = im->width;
+        f->height = im->height;
+        size_t luma = (size_t)im->width * im->height, cw = (im->width + 1) / 2, ch = (im->height + 1) / 2;
+        f->data = malloc(luma + cw * ch * 2);
+        if (!f->data)
+            return;
+        for (uint32_t y = 0; y < im->height; y++)
+            memcpy(f->data + (size_t)y * im->width, im->y + (size_t)y * im->y_stride, im->width);
+        uint8_t *uv = f->data + luma;
+        for (size_t y = 0; y < ch; y++)
+            for (size_t x = 0; x < cw; x++) {
+                uv[(y * cw + x) * 2] = im->u[y * im->uv_stride + x];
+                uv[(y * cw + x) * 2 + 1] = im->v[y * im->uv_stride + x];
+            }
+    }
+    v->npending++;
+}
+
+/**
+ * @brief Commands 109 and 400 (submit input): the compressed frame in the first send buffer (400 adds a second
+ * buffer with a frame information block, which is not needed), a u64 presentation time in microseconds and a u8
+ * end-of-stream flag; a u64 submission id. The frame is decoded at once.
+ */
+static rl_result video_submit(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    struct __attribute__((packed)) {
+        uint64_t pts;
+        uint8_t end;
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in) || !r->na)
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t *out = rl_ipc_out(r, 8);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&v->mu);
+    rl_result rc = KR_SUCCESS;
+    if (!v->dec) {
+        rc = SF_RESULT_INVALID_HEADER;
+    } else {
+        uint8_t *data = malloc(r->a[0].size ? r->a[0].size : 1);
+        if (!data) {
+            rc = KR_OUT_OF_RESOURCE;
+        } else {
+            rl_ipc_buf_read(&r->a[0], data, r->a[0].size);
+            rl_vp9_image im;
+            int shown = v->vp9->decode(v->dec, data, r->a[0].size, &im);
+            free(data);
+            if (shown < 0) {
+                rl_ipc_stop(r, "gsv", "video decoder: a %llu byte VP9 frame did not decode",
+                            (unsigned long long)r->a[0].size);
+                rc = KR_NOT_IMPLEMENTED;
+            } else {
+                if (shown)
+                    queue_frame(v, &im, in.pts, false);
+                if (in.end)
+                    queue_frame(v, NULL, in.pts, true);
+                fill_images(v);
+                *out = ++v->submitted;
+            }
+        }
+    }
+    hos_revent *e = v->input_event;
+    pthread_mutex_unlock(&v->mu);
+    if (e)
+        rl_hos_event_signal(e);
+    return rc;
+}
+
+/** @brief Hands an output image to the stream: queues it for the next frame and returns its counter value. mu held. */
+static void hand_out(video_session *v, uint32_t image, uint8_t *out16)
+{
+    uint64_t value = ++v->handed_total;
+    if (v->nfree < RING)
+        v->free[v->nfree++] = (handed){ image, value };
+    uint32_t counter = ~v->counter;
+    memset(out16, 0, 16);
+    memcpy(out16, &counter, 4);
+    memcpy(out16 + 8, &value, 8);
+    fill_images(v);
+}
+
+/** @brief Command 311 (register an output image): a u32 image id; its NativeSyncHandle, signaled once a frame is in the image. */
+static rl_result video_register(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    uint32_t image;
+    if (!rl_srv_in(r, &image, 4))
+        return SF_RESULT_INVALID_HEADER;
+    uint8_t *out = rl_ipc_out(r, 16);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&v->mu);
+    hand_out(v, image, out);
+    pthread_mutex_unlock(&v->mu);
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief Command 314 (give an output image back): a u32 image id, a u32, and the NativeSyncHandle of the client's
+ * reads; the image's next NativeSyncHandle. relift does not wait for the reads before it rewrites the image.
+ */
+static rl_result video_release(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    struct {
+        uint32_t image, unused;
+        uint8_t handle[16];
+    } in;
+    if (!rl_srv_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    uint8_t *out = rl_ipc_out(r, 16);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&v->mu);
+    hand_out(v, in.image, out);
+    pthread_mutex_unlock(&v->mu);
+    return KR_SUCCESS;
+}
+
+/** @brief Command 212 (unregister an output image): a u32 image id; the image leaves the free list. */
+static rl_result video_unregister(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    uint32_t image;
+    if (!rl_srv_in(r, &image, 4))
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&v->mu);
+    for (uint32_t i = 0; i < v->nfree; i++)
+        if (v->free[i].image == image) {
+            memmove(&v->free[i], &v->free[i + 1], (v->nfree - i - 1) * sizeof v->free[0]);
+            v->nfree--;
+            break;
+        }
+    pthread_mutex_unlock(&v->mu);
+    return KR_SUCCESS;
+}
+
+#define RESULT_NO_FRAME RL_MAKE_RESULT(111, 3604)
+
+/**
+ * @brief Command 213 (get the next finished frame): 64 bytes: u32 image id, width, height, width, height, a u32
+ * zero, a u64 presentation time in nanoseconds and a u32 end-of-stream flag. With nothing finished, the result the
+ * client's own acquire uses for an empty ring (inferred: Eglantine).
+ */
+static rl_result video_get_frame(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    pthread_mutex_lock(&v->mu);
+    if (!v->ndone) {
+        pthread_mutex_unlock(&v->mu);
+        return RESULT_NO_FRAME;
+    }
+    finished f = v->done[0];
+    memmove(&v->done[0], &v->done[1], (v->ndone - 1) * sizeof v->done[0]);
+    v->ndone--;
+    pthread_mutex_unlock(&v->mu);
+    uint8_t *out = rl_ipc_out(r, 64);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t w[6] = { f.image, f.width, f.height, f.width, f.height, 0 };
+    uint64_t ns = f.pts * 1000;
+    uint32_t end = f.end ? 1 : 0;
+    memcpy(out, w, 24);
+    memcpy(out + 24, &ns, 8);
+    memcpy(out + 32, &end, 4);
+    return KR_SUCCESS;
+}
+
+/** @brief Commands 8 and 207 (flush, stop): the queued frames are dropped; images already handed out keep their place. */
+static rl_result video_flush(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    pthread_mutex_lock(&v->mu);
+    for (uint32_t i = 0; i < v->npending; i++)
+        frame_free(&v->pending[i]);
+    v->npending = 0;
+    pthread_mutex_unlock(&v->mu);
+    return KR_SUCCESS;
+}
+
+/** @brief Command 115 (finalize): every counter value handed out is reached, so the client's waits end. */
+static rl_result video_finalize(rl_ipc_req *r)
+{
+    video_session *v = r->self->state;
+    pthread_mutex_lock(&v->mu);
+    rl_gsv_counter_signal(v->counter, v->handed_total);
+    pthread_mutex_unlock(&v->mu);
+    return KR_SUCCESS;
+}
+
+static const rl_ipc_cmd video_cmds[] = {
+    { 1, "CreateVideoDecoderService", video_create_service },
+    { 3, "GetInputEvent", video_input_event },
+    { 6, "Start", video_accept },
+    { 8, "Flush", video_flush },
+    { 101, "Configure", video_configure },
+    { 109, "Decode", video_submit },
+    { 115, "Finalize", video_finalize },
+    { 200, "InitializeWithTransferMemory", video_accept },
+    { 201, "InitializeWithTransferMemoryAndFlag", video_accept },
+    { 202, "InitializeWithTransferMemoryFlagAndValue", video_accept },
+    { 207, "Stop", video_flush },
+    { 210, "InitializeWithRemoteMemory", video_accept },
+    { 212, "UnbindFrame", video_unregister },
+    { 213, "GetFrame", video_get_frame },
+    { 311, "BindFrame", video_register },
+    { 314, "ReleaseFrame", video_release },
+    { 400, "DecodeWithInformation", video_submit },
+};
+
+static const rl_ipc_class video_class = { "nn::gsv::VideoSession", video_cmds,
+                                          sizeof video_cmds / sizeof video_cmds[0], 0, video_destroy };
+
+rl_result rl_gsv_open_video_session(rl_ipc_req *r) { return video_push_session(r); }
