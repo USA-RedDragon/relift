@@ -32,3 +32,28 @@ const rl_vp9_backend *rl_vp9_backend_current(void)
     return &g_stub_vp9;
 #endif
 }
+
+static int stub_stream_decode(void *d, const uint8_t *data, size_t size, rl_vp9_image *out)
+{
+    (void)d;
+    (void)data;
+    (void)size;
+    (void)out;
+    return -1;
+}
+
+static const rl_vp9_stream_backend g_stub_stream = {
+    .name = "none",
+    .open = stub_open,
+    .close = stub_close,
+    .decode = stub_stream_decode,
+};
+
+const rl_vp9_stream_backend *rl_vp9_stream_backend_current(void)
+{
+#ifdef RL_HOST_VP9
+    return rl_host_vp9_stream_backend();
+#else
+    return &g_stub_stream;
+#endif
+}

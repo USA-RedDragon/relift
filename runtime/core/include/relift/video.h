@@ -158,6 +158,29 @@ typedef struct rl_vp9_backend {
     bool (*decode)(void *d, const rl_vp9_frame *f);
 } rl_vp9_backend;
 
+/**
+ * @brief A VP9 decoder that takes whole compressed frames, headers included (a service that receives the stream
+ * rather than a hardware decoder's tile data).
+ */
+typedef struct rl_vp9_stream_backend {
+    /** @brief Short name for logs. */
+    const char *name;
+    /** @brief A decoder instance, NULL when there is none. */
+    void *(*open)(void);
+    void (*close)(void *d);
+    /**
+     * @brief Decodes one compressed frame or superframe. Returns 1 when a frame is to be shown (out then points
+     * at the decoder's own planes, valid until the next call), 0 when the data held none, -1 when it is corrupt
+     * or there is no decoder.
+     */
+    int (*decode)(void *d, const uint8_t *data, size_t size, rl_vp9_image *out);
+} rl_vp9_stream_backend;
+
+/** @brief The whole-frame VP9 backend: the host's when built in, else a stub that decodes nothing. */
+RL_RUNTIME_API const rl_vp9_stream_backend *rl_vp9_stream_backend_current(void);
+/** @brief The host's whole-frame VP9 backend (runtime/host, only with RL_HOST_VP9). */
+RL_RUNTIME_API const rl_vp9_stream_backend *rl_host_vp9_stream_backend(void);
+
 /** @brief The VP9 backend: the host's when built in, else the stub. */
 RL_RUNTIME_API const rl_vp9_backend *rl_vp9_backend_current(void);
 /** @brief The host's VP9 backend (runtime/host, only with RL_HOST_VP9). */

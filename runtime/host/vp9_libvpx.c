@@ -345,3 +345,69 @@ static const rl_vp9_backend g_lv = {
 };
 
 const rl_vp9_backend *rl_host_vp9_backend(void) { return &g_lv; }
+
+/** @brief The frame sizes of a superframe (the index at the end of the data, vp9 spec annex B), or the one frame. */
+static size_t split_frames(const uint8_t *data, size_t size, size_t *sizes, size_t max)
+{
+    if (size == 0)
+        return 0;
+    uint8_t marker = data[size - 1];
+    if ((marker & 0xe0) == 0xc0) {
+        size_t frames = (size_t)(marker & 7) + 1, mag = (size_t)((marker >> 3) & 3) + 1;
+        size_t index = 2 + mag * frames;
+        if (frames <= max && size >= index && data[size - index] == marker) {
+            const uint8_t *x = data + size - index + 1;
+            for (size_t i = 0; i < frames; i++) {
+                size_t v = 0;
+                for (size_t b = 0; b < mag; b++)
+                    v |= (size_t)*x++ << (8 * b);
+                sizes[i] = v;
+            }
+            return frames;
+        }
+    }
+    sizes[0] = size;
+    return 1;
+}
+
+static int lv_stream_decode(void *h, const uint8_t *data, size_t size, rl_vp9_image *out)
+{
+    lv_dec *d = h;
+    if (!d || !data)
+        return -1;
+    size_t sizes[8];
+    size_t n = split_frames(data, size, sizes, 8);
+    int shown = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (sizes[i] == 0 || sizes[i] > size)
+            continue;
+        const uint8_t *p = data;
+        if (vp9_receive_compressed_data(d->pbi, sizes[i], &p) != 0)
+            return -1;
+        YV12_BUFFER_CONFIG sd;
+        vp9_ppflags_t flags;
+        memset(&flags, 0, sizeof flags);
+        if (vp9_get_raw_frame(d->pbi, &sd, &flags) == 0) {
+            out->width = (uint32_t)sd.y_crop_width;
+            out->height = (uint32_t)sd.y_crop_height;
+            out->y = sd.y_buffer;
+            out->u = sd.u_buffer;
+            out->v = sd.v_buffer;
+            out->y_stride = (uint32_t)sd.y_stride;
+            out->uv_stride = (uint32_t)sd.uv_stride;
+            shown = 1;
+        }
+        data += sizes[i];
+        size -= sizes[i];
+    }
+    return shown;
+}
+
+static const rl_vp9_stream_backend g_lv_stream = {
+    .name = "libvpx",
+    .open = lv_open,
+    .close = lv_close,
+    .decode = lv_stream_decode,
+};
+
+const rl_vp9_stream_backend *rl_host_vp9_stream_backend(void) { return &g_lv_stream; }
