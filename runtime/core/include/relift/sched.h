@@ -81,6 +81,8 @@ typedef struct rl_sched_clock_state {
     uint64_t origin_tick;
     uint64_t origin_cycle;
     uint32_t ratio;
+    /** @brief 1 while the CPU bounds no other's order: inactive, or halted with no raised line in its mask. */
+    uint8_t idle;
 } rl_sched_clock_state;
 /** @brief A device. */
 typedef struct rl_device rl_device;
@@ -225,6 +227,8 @@ RL_RUNTIME_API void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook 
 RL_RUNTIME_API rl_sched *rl_sched_of(const rl_sched_cpu *c);
 /** @brief The index of c: the order it was added in, from 0 (rl_sched_route takes it). */
 RL_RUNTIME_API uint32_t rl_sched_index(const rl_sched_cpu *c);
+/** @brief The number of CPUs s has. */
+RL_RUNTIME_API uint32_t rl_sched_cpu_count(const rl_sched *s);
 /** @brief The CPU that holds the run (the one whose access or sync is being served), or NULL. */
 RL_RUNTIME_API rl_sched_cpu *rl_sched_current(rl_sched *s);
 /** @brief The code a spawned CPU runs: body(c, arg) on c's fiber. */
@@ -270,6 +274,17 @@ static inline uint64_t rl_sched_now_inline(const rl_sched_cpu *c)
 {
     const rl_sched_clock_state *k = (const rl_sched_clock_state *)(const void *)c;
     return k->origin_tick + (rl_sched_cycles_inline(c) - k->origin_cycle) * k->ratio;
+}
+
+/**
+ * @brief True when rl_sched_order of c cannot wait for o: o is idle (left,
+ * or halted with no raised line in its mask) or its tick is past c's. A
+ * guest layer that knows its other CPUs may skip the call then.
+ */
+static inline bool rl_sched_order_free(const rl_sched_cpu *o, const rl_sched_cpu *c)
+{
+    const rl_sched_clock_state *k = (const rl_sched_clock_state *)(const void *)o;
+    return k->idle || rl_sched_now_inline(o) > rl_sched_now_inline(c);
 }
 
 /** @brief rl_sched_stall without a call. */

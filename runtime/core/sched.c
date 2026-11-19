@@ -60,6 +60,7 @@ void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook) { c->irq = hook; }
 void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook *hook) { c->irq_ret = hook; }
 rl_sched *rl_sched_of(const rl_sched_cpu *c) { return c->sched; }
 uint32_t rl_sched_index(const rl_sched_cpu *c) { return c->index; }
+uint32_t rl_sched_cpu_count(const rl_sched *s) { return s->ncpu; }
 void rl_sched_set_rank(rl_sched_cpu *c, uint32_t rank) { c->rank = rank; }
 uint64_t rl_sched_pending(const rl_sched_cpu *c) { return c->lines & c->mask; }
 
@@ -218,6 +219,9 @@ static void fire_due(rl_sched *s, uint64_t upto)
 /** @brief A halted CPU no raised line wakes: in ordered mode it bounds no one. */
 static bool blocked(const rl_sched_cpu *o) { return o->halted && !(o->lines & o->mask); }
 
+/** @brief Updates c's idle flag (rl_sched_clock_state.idle) after a change of its activity, halt, lines or mask. */
+static void restate(rl_sched_cpu *c) { c->clock.idle = !c->active || blocked(c); }
+
 /** @brief Whether o's clock bounds the others: active, and in ordered mode not blocked. */
 static bool counts(const rl_sched *s, const rl_sched_cpu *o) { return o->active && !(s->cfg.ordered && blocked(o)); }
 
@@ -338,6 +342,7 @@ rl_sched_cpu *rl_sched_add_cpu(rl_sched *s, uint32_t ratio)
     c->sched = s;
     c->active = true;
     c->clock.origin_tick = s->time;
+    restate(c);
     if (s->holder == NO_HOLDER)
         s->holder = c->index;
     return c;
@@ -402,6 +407,7 @@ void rl_sched_leave(rl_sched_cpu *c)
 {
     rl_sched *s = c->sched;
     c->active = false;
+    restate(c);
     if (s->holder == c->index) {
         uint32_t next = slowest_other(s, c);
         if (next == NO_HOLDER && s->cfg.ordered)
@@ -460,6 +466,7 @@ static int halt_ordered(rl_sched_cpu *c)
     rl_sched *s = c->sched;
     int got = 0;
     c->halted = true;
+    restate(c);
     for (;;) {
         if (rl_sched_pending(c)) {
             got = 1;
@@ -478,6 +485,7 @@ static int halt_ordered(rl_sched_cpu *c)
         fire_due(s, rl_sched_now(c));
     }
     c->halted = false;
+    restate(c);
     refresh(s, c);
     return got;
 }
@@ -531,6 +539,7 @@ int rl_sched_halt(rl_sched_cpu *c)
     if (s->cfg.ordered)
         return halt_ordered(c);
     c->halted = true;
+    restate(c);
     for (;;) {
         if (rl_sched_pending(c)) {
             got = 1;
@@ -549,6 +558,7 @@ int rl_sched_halt(rl_sched_cpu *c)
         }
     }
     c->halted = false;
+    restate(c);
     return got;
 }
 
@@ -684,14 +694,18 @@ void rl_sched_raise(rl_sched *s, uint32_t line)
     rl_sched_cpu *c = &s->cpus[s->route[line]];
     uint64_t bit = 1ull << line;
     c->lines |= bit;
+    restate(c);
     if (c->mask & bit)
         rl_sched_break(c);
 }
 
 void rl_sched_lower(rl_sched *s, uint32_t line)
 {
-    if (line < RL_SCHED_LINES && s->ncpu)
-        s->cpus[s->route[line]].lines &= ~(1ull << line);
+    if (line < RL_SCHED_LINES && s->ncpu) {
+        rl_sched_cpu *c = &s->cpus[s->route[line]];
+        c->lines &= ~(1ull << line);
+        restate(c);
+    }
 }
 
 void rl_device_raise(rl_device *d)
@@ -703,6 +717,7 @@ void rl_device_raise(rl_device *d)
 void rl_sched_set_mask(rl_sched_cpu *c, uint64_t mask)
 {
     c->mask = mask;
+    restate(c);
     if (c->lines & mask)
         rl_sched_break(c);
 }

@@ -11,8 +11,9 @@
 
 void nds_order(rl_nds *m, unsigned cpu)
 {
-    if (m->sched)
-        rl_sched_order(m->cpu[cpu]);
+    if (!m->sched || (m->pair && rl_sched_order_free(m->cpu[cpu ^ 1u], m->cpu[cpu])))
+        return;
+    rl_sched_order(m->cpu[cpu]);
 }
 
 void nds_ranks(rl_nds *m)
@@ -54,6 +55,7 @@ int nds_order_attach(rl_nds *m)
     rl_sched_set_mask(m->cpu[RL_NDS_ARM9], 1ull << RL_NDS_LINE_WAKE9);
     rl_sched_set_mask(m->cpu[RL_NDS_ARM7], 1ull << RL_NDS_LINE_WAKE7);
     nds_ranks(m);
+    m->pair = rl_sched_cpu_count(m->sched) == 2;
     return 0;
 }
 

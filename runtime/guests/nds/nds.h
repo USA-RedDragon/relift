@@ -103,7 +103,9 @@ void rl_nds_destroy(rl_nds *m);
  * spawned on fibers (rl_sched_spawn) when they run timed code. s must be
  * created with rl_sched_config.ordered set, so that the CPUs agree on the
  * order of their shared accesses (rl_sched_order). Routes the wake lines,
- * sets the CPUs' masks to them and their ranks from EXMEMCNT. Returns 0, or
+ * sets the CPUs' masks to them and their ranks from EXMEMCNT. A scheduler
+ * with no other CPU lets an access skip rl_sched_order while the other CPU
+ * is ahead or idle; add no CPU to s after this call. Returns 0, or
  * -1 when m is attached already, a CPU is missing or s cannot take the
  * devices.
  */

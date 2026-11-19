@@ -391,6 +391,8 @@ struct rl_nds {
     uint8_t regs[2][NDS_REGS];
 
     rl_sched *sched;
+    /** @brief The scheduler has these two CPUs only (nds_order may skip a call while the other is ahead). */
+    bool pair;
     rl_sched_cpu *cpu[2];
 
     rl_arm32_cp15 cp15;
