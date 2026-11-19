@@ -374,23 +374,28 @@ static rl_result video_input_event(rl_ipc_req *r)
 
 static uint8_t clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v; }
 
-/** @brief Converts the NV12 frame to RGBA with the BT.709 limited-range matrix (inferred: the movie's colorimetry is not in the stream the service sees). */
+void rl_gsv_yuv_to_rgba(uint8_t y, uint8_t u, uint8_t v, bool bgra, uint8_t out[4])
+{
+    int yy = 1192 * (y < 16 ? 0 : y - 16), cu = u - 128, cv = v - 128;
+    uint8_t r = clamp8((yy + 1836 * cv) >> 10), g = clamp8((yy - 218 * cu - 546 * cv) >> 10),
+            b = clamp8((yy + 2163 * cu) >> 10);
+    out[0] = bgra ? b : r;
+    out[1] = g;
+    out[2] = bgra ? r : b;
+    out[3] = 255;
+}
+
+/**
+ * @brief Converts the NV12 frame to 8-bit RGBA, or BGRA when bgra, with the BT.709 limited-range matrix (inferred:
+ * the movie's colorimetry is not in the stream the service sees).
+ */
 static void nv12_to_rgba(const frame *f, uint32_t w, uint32_t h, uint8_t *out, uint64_t pitch, bool bgra)
 {
     const uint8_t *luma = f->data, *chroma = f->data + (uint64_t)f->width * f->height;
     for (uint32_t y = 0; y < h; y++)
         for (uint32_t x = 0; x < w; x++) {
-            int Y = luma[(uint64_t)y * f->width + x] - 16;
             const uint8_t *c = chroma + (uint64_t)(y / 2) * f->width + (x / 2) * 2;
-            int U = c[0] - 128, V = c[1] - 128;
-            int yy = 1192 * (Y < 0 ? 0 : Y);
-            uint8_t r = clamp8((yy + 1836 * V) >> 10), g = clamp8((yy - 218 * U - 546 * V) >> 10),
-                    b = clamp8((yy + 2163 * U) >> 10);
-            uint8_t *p = out + (uint64_t)y * pitch + (uint64_t)x * 4;
-            p[0] = bgra ? b : r;
-            p[1] = g;
-            p[2] = bgra ? r : b;
-            p[3] = 255;
+            rl_gsv_yuv_to_rgba(luma[(uint64_t)y * f->width + x], c[0], c[1], bgra, out + (uint64_t)y * pitch + (uint64_t)x * 4);
         }
 }
 
@@ -426,7 +431,9 @@ static bool put_frame(const video_session *v, uint32_t image_id, const frame *f)
         free(tiled);
         return false;
     }
-    nv12_to_rgba(f, w, h, linear, l.pitch, l.code == 2 || l.code == 5);
+    /* An image the GPU reads is sampled through the movie player's view of the native image, an RGBA8 texture (NVN format
+     * 0x38), so its bytes are R, G, B, A whatever the pool's layout code is. */
+    nv12_to_rgba(f, w, h, linear, l.pitch, !m.gpu_read && (l.code == 2 || l.code == 5));
     if (m.gpu_read) {
         for (uint64_t y = 0; y < rows; y++) {
             uint64_t block_row = y / (8 * block_gobs), gob_in_block = (y / 8) % block_gobs;

@@ -464,6 +464,21 @@ TEST(gsv_decoder_images_the_gpu_reads_are_described_by_428_and_426)
     CHECK(!rl_gsv_native_image_region(first + 1, &addr, &len));
 }
 
+TEST(gsv_decoded_pixels_convert_with_bt709_limited_range_in_the_requested_order)
+{
+    uint8_t px[4];
+    rl_gsv_yuv_to_rgba(63, 102, 240, false, px);
+    CHECK(px[0] >= 253 && px[1] <= 2 && px[2] <= 2 && px[3] == 255);
+    rl_gsv_yuv_to_rgba(63, 102, 240, true, px);
+    CHECK(px[2] >= 253 && px[1] <= 2 && px[0] <= 2 && px[3] == 255);
+    rl_gsv_yuv_to_rgba(16, 128, 128, false, px);
+    CHECK(px[0] == 0 && px[1] == 0 && px[2] == 0);
+    rl_gsv_yuv_to_rgba(235, 128, 128, false, px);
+    CHECK(px[0] >= 254 && px[1] >= 254 && px[2] >= 254);
+    rl_gsv_yuv_to_rgba(32, 240, 118, false, px);
+    CHECK(px[2] > px[0] && px[2] > px[1]);
+}
+
 TEST(chat_u_gives_its_shim_and_event)
 {
     rl_hos_config cfg;
