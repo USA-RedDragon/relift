@@ -1322,7 +1322,8 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
  * buffers and its storage buffers, 16 bytes each ({GPU address, u32 size}),
  * then its texture handles and its image handles, 8 bytes each; the counts
  * are bytes 0xb1, 0xb2, 0xb3 and 0xb6 of the program's control section and
- * the table ends at its byte 0xba, so the pushed constants fill what lies
+ * the table ends at its 16-bit word at 0xba (a program with 9 uniform buffers, 8 storage buffers and 6
+ * handles ends at 0x150, past a byte), so the pushed constants fill what lies
  * before the buffers: a program with 2 uniform and 5 storage buffers and one
  * handle that ends at 0xf8 has 0x70 bytes of them at 0x10, its buffers at
  * 0x80 and its handle at 0xf0 (the offsets its translation reads them at).
@@ -1345,7 +1346,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     if (m->other_sets)
         return nvn_vk_stop(r, "compute program %s uses a guest memory set, which the layer does not bind yet", m->key);
     uint32_t nubo = r->mem[ctl + 0xb1], nssbo = r->mem[ctl + 0xb2], ntex = r->mem[ctl + 0xb3];
-    uint32_t nimg = r->mem[ctl + 0xb6], end = r->mem[ctl + 0xba];
+    uint32_t nimg = r->mem[ctl + 0xb6], end = r->mem[ctl + 0xba] | r->mem[ctl + 0xbb] << 8;
     uint8_t c0[NVN_BANK2_BYTES];
     uint32_t img_lo, at;
     if (!nvn_compute_table(st, (uint32_t[3]){ x, y, z }, nubo, nssbo, ntex, nimg, end, c0, &img_lo, &at))
