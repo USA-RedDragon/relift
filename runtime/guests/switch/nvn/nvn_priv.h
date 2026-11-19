@@ -487,6 +487,8 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_EVALUATE_DLSS, nvnCommandBufferEvaluateDlss) \
     X(NVN_CMD_FENCE_SYNC, nvnCommandBufferFenceSync) \
     X(NVN_CMD_REPORT_COUNTER, nvnCommandBufferReportCounter) \
+    X(NVN_CMD_PUSH_COMPUTE_CONSTANTS, nvnCommandBufferPushComputeConstants) \
+    X(NVN_CMD_PUSH_GRAPHICS_CONSTANTS, nvnCommandBufferPushGraphicsConstants) \
     X(NVN_CMD_RESET_COUNTER, nvnCommandBufferResetCounter) \
     X(NVN_CMD_RESTORE_ZCULL_DATA, nvnCommandBufferRestoreZCullData) \
     X(NVN_CMD_SAVE_ZCULL_DATA, nvnCommandBufferSaveZCullData) \

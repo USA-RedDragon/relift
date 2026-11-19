@@ -64,6 +64,8 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_CLEAR_COLORI, 2, ONE, 16 },
     { NVN_CMD_CLEAR_COLORUI, 2, ONE, 16 },
     { NVN_CMD_SET_VIEWPORTS, 3, 2, 16 },
+    { NVN_CMD_PUSH_COMPUTE_CONSTANTS, 4, 3, 1 },
+    { NVN_CMD_PUSH_GRAPHICS_CONSTANTS, 4, 3, 1 },
     { NVN_CMD_SET_SCISSORS, 3, 2, 16 },
     { NVN_CMD_SET_DEPTH_RANGES, 3, 2, 8 },
     { NVN_CMD_SET_RENDER_TARGETS, 2, 1, 8 },

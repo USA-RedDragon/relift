@@ -30,6 +30,9 @@
 /** @brief NVNtextureTarget of a 3D texture. */
 #define NVN_TARGET_3D 2u
 #define NVN_TARGET_CUBEMAP_ARRAY 9u
+/** @brief Pushed constant slots of a stage and bytes of each (the driver clamps a push to 0x100 bytes). */
+#define NVN_PUSH_SLOTS 4u
+#define NVN_PUSH_BYTES 0x100u
 /** @brief The compute stage's NVNshaderStage, and its storage buffer slots. */
 #define NVN_STAGE_COMPUTE 5u
 #define NVN_STORAGE_SLOTS 16u
@@ -137,6 +140,12 @@ typedef struct nvn_gfx {
     } storage[NVN_STORAGE_SLOTS];
     /** @brief Image handles bound per stage and slot. */
     uint32_t image[NVN_STAGES][NVN_IMAGE_SLOTS];
+    /**
+     * @brief Constants pushed with nvnCommandBufferPushGraphicsConstants (slot
+     * 0 of the stage) and PushComputeConstants (the slot the program names):
+     * NVN_PUSH_BYTES bytes each, the most the driver writes at once.
+     */
+    uint8_t push[NVN_STAGES][NVN_PUSH_SLOTS][NVN_PUSH_BYTES];
     /** @brief Each stage's c[2] as the driver fills it. */
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     struct {

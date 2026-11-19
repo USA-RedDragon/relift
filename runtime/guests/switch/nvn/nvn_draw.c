@@ -1392,6 +1392,22 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
             memcpy(st->viewports[first + i], v + 4 * i, 16);
         return RL_OK;
     }
+    case NVN_CMD_PUSH_COMPUTE_CONSTANTS:
+    case NVN_CMD_PUSH_GRAPHICS_CONSTANTS: {
+        bool compute = e->op == NVN_CMD_PUSH_COMPUTE_CONSTANTS;
+        uint32_t stage = compute ? NVN_STAGE_COMPUTE : (uint32_t)e->x[1] & 7u;
+        uint32_t slot = compute ? (uint32_t)e->x[1] : 0, off = (uint32_t)e->x[2];
+        uint32_t size = (uint32_t)e->x[3] < NVN_PUSH_BYTES ? (uint32_t)e->x[3] & ~3u : NVN_PUSH_BYTES;
+        const uint8_t *data = nvn_cmd_bytes(r->s, e->x[4]);
+        if (stage >= NVN_STAGES || slot >= NVN_PUSH_SLOTS || off % 4 || off + size > NVN_PUSH_BYTES)
+            return nvn_vk_stop(r, "%s of %u bytes at offset %u into slot %u of stage %u", nvn_cmd_name(e->op), size,
+                               off, slot, stage);
+        if (size && !data)
+            return nvn_vk_stop(r, "%s without its data", nvn_cmd_name(e->op));
+        if (size)
+            memcpy(st->push[stage][slot] + off, data, size);
+        return RL_OK;
+    }
     case NVN_CMD_SET_VIEWPORT:
         for (int i = 0; i < 4; i++)
             st->viewports[0][i] = (float)(int32_t)e->x[1 + i];
