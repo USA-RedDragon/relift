@@ -20,7 +20,6 @@
  */
 #include "nvn_vk.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 
 #define MAX_PIPELINES 1024u
@@ -1087,6 +1086,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             continue;
         if (!(mods[s] = module_of(r, st->code[s])))
             return RL_PENDING;
+        if (mods[s]->user >> USER_BINDINGS)
+            return nvn_vk_stop(r, "program %s reads constant bank c[%d], past the %u user banks the layer binds", mods[s]->key,
+                               3 + __builtin_ctz(mods[s]->user >> USER_BINDINGS) + (int)USER_BINDINGS, USER_BINDINGS);
         if (mods[s]->other_sets)
             return nvn_vk_stop(r, "program %s uses a guest memory set, which draws do not bind yet",
                                mods[s]->key);
