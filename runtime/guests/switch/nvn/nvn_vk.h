@@ -22,6 +22,8 @@
 #define NVN_BANK2_BYTES 0x400u
 /** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
 #define NVN_BANK2_TEXTURES 0x20u
+/** @brief Offset in c[2] of the handle bound to image slot 0 of a graphics stage (nvnCommandBufferBindImage, sdk 0x67ea20: method 0x8e3 at 0x120 + 8 * slot). */
+#define NVN_BANK2_IMAGES 0x120u
 #define NVN_VERTEX_BUFFERS 16u
 /** @brief NVNtextureTarget of a buffer texture: a host 1D image the layer refills from its storage at each use. */
 #define NVN_TARGET_BUFFER 10u
@@ -157,6 +159,9 @@ typedef struct nvn_gfx {
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     /** @brief bank2 as the bound programs read it: each texture handle names the layer's slot, not the texture id (nvn_texset_bind). */
     uint8_t bank2_host[NVN_STAGES][NVN_BANK2_BYTES];
+    /** @brief Host copies of user banks whose texture handles carry slots (bind_user_textures), and which are in use by this draw. */
+    uint8_t *ubo_host[NVN_STAGES][NVN_UBO_SLOTS];
+    uint32_t ubo_patched[NVN_STAGES];
     struct {
         uint64_t addr, size;
     } ubo[NVN_STAGES][NVN_UBO_SLOTS], vb[NVN_VERTEX_BUFFERS];

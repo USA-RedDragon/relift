@@ -750,6 +750,8 @@ static int bank_of(replay *r, const void *src, uint64_t n, VkDescriptorBufferInf
     return RL_OK;
 }
 
+static const void *user_bank(replay *r, uint32_t s, uint32_t b, uint64_t addr);
+
 /**
  * @brief Writes the constant banks the bound modules read into new
  * descriptor sets, sets[0] and sets[1], with the texture set in sets[2].
@@ -800,7 +802,7 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
             if (b >= NVN_UBO_SLOTS)
                 return nvn_vk_stop(r, "program %s reads constant bank c[%u]", mods[s]->key, b + 3);
             uint64_t addr = r->st->ubo[s][b].addr, size = r->st->ubo[s][b].size;
-            int rc = bank_of(r, addr ? r->mem + nvn_gpu_guest(addr) : NULL, addr ? size : 0, &bi[n]);
+            int rc = bank_of(r, user_bank(r, s, b, addr), addr ? size : 0, &bi[n]);
             if (rc != RL_OK)
                 return rc;
             wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -831,8 +833,11 @@ static int bind_textures(replay *r, const module *m, uint32_t bank_no, uint8_t *
         const nvn_iface_rec *h = &m->recs[i];
         if (h->kind != NVN_IFACE_TEXTURE)
             continue;
-        if (h->bank != bank_no || h->offset + 4 > len)
-            return nvn_vk_stop(r, "program %s reads a texture handle at c[%u][0x%x]", m->key, h->bank, h->offset);
+        if (h->bank != bank_no)
+            continue;
+        if (h->offset + 4 > len)
+            return nvn_vk_stop(r, "program %s reads a texture handle at c[%u][0x%x], past the %u bytes bound", m->key,
+                               h->bank, h->offset, len);
         uint32_t handle, kind, dim;
         memcpy(&handle, bank + h->offset, 4);
         bool image = h->offset >= img_lo && h->offset < img_hi;
@@ -853,6 +858,52 @@ static int bind_textures(replay *r, const module *m, uint32_t bank_no, uint8_t *
             map[*n] = (VkSpecializationMapEntry){ c->spec, 4 * *n, 4 };
             vals[(*n)++] = c->kind == NVN_IFACE_TEXTURE_KIND ? kind : dim;
         }
+    }
+    return RL_OK;
+}
+
+/**
+ * @brief The bytes of user bank b of stage s as the program reads them: the guest's uniform buffer, or when a
+ * texture handle in it was given a slot (bind_user_textures), the host copy with the slot in place of the id.
+ */
+static const void *user_bank(replay *r, uint32_t s, uint32_t b, uint64_t addr)
+{
+    if (!addr)
+        return NULL;
+    if (r->st->ubo_patched[s] & 1u << b)
+        return r->st->ubo_host[s][b];
+    return r->mem + nvn_gpu_guest(addr);
+}
+
+/**
+ * @brief Gives the texture handles module m reads from user banks (c[3] and up: handles the game keeps in its own
+ * uniform buffers) their slots in the texture set, in a host copy of each bank.
+ */
+static int bind_user_textures(replay *r, const module *m, uint32_t s, uint32_t *n, VkSpecializationMapEntry *map,
+                              uint32_t *vals)
+{
+    nvn_gfx *st = r->st;
+    for (uint32_t i = 0; i < m->nrecs; i++) {
+        const nvn_iface_rec *h = &m->recs[i];
+        if (h->kind == NVN_IFACE_TEXTURE && (h->bank == 1 || h->bank > 2 + NVN_UBO_SLOTS))
+            return nvn_vk_stop(r, "program %s reads a texture handle at c[%u][0x%x]", m->key, h->bank, h->offset);
+        if (h->kind != NVN_IFACE_TEXTURE || h->bank < 3 || st->ubo_patched[s] & 1u << (h->bank - 3))
+            continue;
+        uint32_t b = h->bank - 3;
+        uint64_t addr = st->ubo[s][b].addr, size = st->ubo[s][b].size;
+        if (!addr)
+            return nvn_vk_stop(r, "program %s reads a texture handle from unbound uniform buffer c[%u]", m->key,
+                               h->bank);
+        if (size > UBO_BYTES)
+            size = UBO_BYTES;
+        if (!st->ubo_host[s][b] && !(st->ubo_host[s][b] = malloc(UBO_BYTES)))
+            return nvn_vk_stop(r, "out of memory");
+        memcpy(st->ubo_host[s][b], r->mem + nvn_gpu_guest(addr), size);
+        memset(st->ubo_host[s][b] + size, 0, UBO_BYTES - size);
+        int rc = bind_textures(r, m, h->bank, st->ubo_host[s][b], (uint32_t)size, n, map, vals, 0, 0);
+        if (rc != RL_OK)
+            return rc;
+        st->ubo_patched[s] |= 1u << b;
     }
     return RL_OK;
 }
@@ -985,6 +1036,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                 uint32_t count)
 {
     nvn_gfx *st = r->st;
+    memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!layouts())
         return nvn_vk_stop(r, "cannot make the pipeline layout");
     pipe_key k;
@@ -999,8 +1051,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             continue;
         if (!(mods[s] = module_of(r, st->code[s])))
             return RL_PENDING;
-        if (mods[s]->images || mods[s]->other_sets)
-            return nvn_vk_stop(r, "program %s uses images or a guest memory set, which draws do not bind yet",
+        if (mods[s]->other_sets)
+            return nvn_vk_stop(r, "program %s uses a guest memory set, which draws do not bind yet",
                                mods[s]->key);
         bool bound = false;
         for (uint32_t i = 0; i < mods[s]->nrecs; i++)
@@ -1008,7 +1060,11 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound)
             return nvn_vk_stop(r, "program %s samples textures only through register handles", mods[s]->key);
         memcpy(st->bank2_host[s], st->bank2[s], NVN_BANK2_BYTES);
-        int trc = bind_textures(r, mods[s], 2, st->bank2_host[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s], 0, 0);
+        int trc = bind_textures(r, mods[s], 2, st->bank2_host[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s],
+                           NVN_BANK2_IMAGES, NVN_BANK2_IMAGES + 8u * NVN_IMAGE_SLOTS);
+        if (trc != RL_OK)
+            return trc;
+        trc = bind_user_textures(r, mods[s], s, &k.nspec[s], k.spec_map[s], k.spec[s]);
         if (trc != RL_OK)
             return trc;
         k.mods[s] = mods[s]->m;
@@ -1033,7 +1089,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
     if (!nvn_vk_begin_rendering(r, &area))
-        return nvn_vk_stop(r, "draw without render targets");
+        return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
+                           st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
     uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
@@ -1182,7 +1239,7 @@ static int stage_dispatch(replay *r, void *arg)
         if (b >= NVN_UBO_SLOTS)
             return nvn_vk_stop(r, "compute program %s reads constant bank c[%u]", m->key, b + 3);
         uint64_t addr = st->ubo[NVN_STAGE_COMPUTE][b].addr, size = st->ubo[NVN_STAGE_COMPUTE][b].size;
-        if ((rc = bank_of(r, addr ? r->mem + nvn_gpu_guest(addr) : NULL, addr ? size : 0, &bi[nw])) != RL_OK)
+        if ((rc = bank_of(r, user_bank(r, NVN_STAGE_COMPUTE, b, addr), addr ? size : 0, &bi[nw])) != RL_OK)
             return rc;
         wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                          .dstSet = sets[0],
@@ -1250,6 +1307,7 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
 static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
 {
     nvn_gfx *st = r->st;
+    memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!compute_layouts())
         return nvn_vk_stop(r, "cannot make the compute pipeline layout");
     uint64_t code = st->code[NVN_STAGE_COMPUTE], ctl = st->control[NVN_STAGE_COMPUTE];
@@ -1283,6 +1341,8 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     }
     int rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals, img_lo, at);
     if (rc != RL_OK)
+        return rc;
+    if ((rc = bind_user_textures(r, m, NVN_STAGE_COMPUTE, &n, map, vals)) != RL_OK)
         return rc;
     VkPipeline p = compute_pipeline_of(r, m, n, map, vals);
     if (!p)
@@ -1374,11 +1434,16 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     }
     case NVN_CMD_BIND_IMAGE: {
         uint32_t s = (uint32_t)e->x[1], slot = (uint32_t)e->x[2];
-        if (s != NVN_STAGE_COMPUTE)
-            return nvn_vk_stop(r, "image of graphics stage %u, which the layer does not bind yet", s);
+        if (s >= NVN_STAGES)
+            return nvn_vk_stop(r, "image of stage %u", s);
         if (slot >= NVN_IMAGE_SLOTS)
             return nvn_vk_stop(r, "image slot %u", slot);
-        st->image[s][slot] = (uint32_t)e->x[3];
+        if (s == NVN_STAGE_COMPUTE) {
+            st->image[s][slot] = (uint32_t)e->x[3];
+        } else {
+            uint32_t h = (uint32_t)e->x[3];
+            memcpy(st->bank2[s] + NVN_BANK2_IMAGES + 8u * slot, &h, 4);
+        }
         return RL_OK;
     }
     case NVN_CMD_DISPATCH_COMPUTE:
