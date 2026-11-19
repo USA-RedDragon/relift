@@ -190,6 +190,8 @@ typedef struct nds_disp {
     nds_line3d_fn *line3d_fn;
     void *line3d_user;
     bool l3d_on;
+    /** @brief The mirror's capture wrote video RAM on the line drawn last. */
+    bool cap_wrote;
     /** @brief Forced blank of each engine at each line's render tick (a line shows white two lines on as well). */
     bool fb[2][RL_NDS_LINES];
     /** @brief The next line to process and the tick it starts at. */
@@ -389,6 +391,9 @@ struct rl_nds {
     uint8_t pal[RL_NDS_PAL_SIZE];
     uint8_t oam[RL_NDS_OAM_SIZE];
     uint8_t vram[RL_NDS_VRAM_SIZE];
+    /** @brief The renderer: its log and its mirror, a machine of which only the display's state is used (disp.c). */
+    struct rl_render *render;
+    rl_nds *vid;
     /** @brief Register file stubs of the registers no device models yet, per CPU. */
     uint8_t regs[2][NDS_REGS];
 
@@ -537,10 +542,28 @@ static inline uint8_t *nds_tcm(rl_nds *m, uint32_t addr, bool code, bool write)
 
 /** @brief The watch line of the code memory byte p, or -1 when p is not in code memory. */
 int nds_watch_line(const rl_nds *m, const uint8_t *p);
-/** @brief A store to the bytes at p: moves the code epoch when they are in a watched line. */
-static inline void nds_watch_store(rl_nds *m, const uint8_t *p)
+/** @brief Bytes from rl_nds.pal to the end of rl_nds.vram: what the display reads of memory. */
+#define NDS_VID_SPAN (RL_NDS_PAL_SIZE + RL_NDS_OAM_SIZE + RL_NDS_VRAM_SIZE)
+/** @brief Puts a store of size bytes at offset off of the display's memory in the render log (disp.c). */
+void nds_disp_log_store(rl_nds *m, uint32_t off, unsigned size);
+/** @brief Puts a write of VRAMCNT of bank b in the render log. */
+void nds_disp_log_vramcnt(rl_nds *m, unsigned b, uint8_t v);
+/** @brief Starts the renderer of m on mirror, a machine as rl_nds_create leaves it. 0 or -1. */
+int nds_disp_open(rl_nds *m, rl_nds *mirror);
+/** @brief Applies what the render log holds and stops the renderer. */
+void nds_disp_close(rl_nds *m);
+/**
+ * @brief A store of size bytes at p: moves the code epoch when they are in a watched line, and puts a store to
+ * palette, OAM or video RAM in the render log.
+ */
+static inline void nds_watch_store(rl_nds *m, const uint8_t *p, unsigned size)
 {
     uintptr_t in = (uintptr_t)p - (uintptr_t)m->main;
+    if (in >= RL_NDS_MAIN_SIZE) {
+        uintptr_t vid = (uintptr_t)p - (uintptr_t)m->pal;
+        if (vid < NDS_VID_SPAN && m->render)
+            nds_disp_log_store(m, (uint32_t)vid, size);
+    }
     int l = in < RL_NDS_MAIN_SIZE ? NDS_WATCH_MAIN + (int)(in / NDS_LINE) : nds_watch_line(m, p);
     if (l >= 0 && (m->watch[l >> 3] >> (l & 7) & 1u))
         m->code_epoch++;

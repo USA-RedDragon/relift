@@ -218,7 +218,7 @@ void nds_costs_rebuild(rl_nds *m)
 
 const rl_nds_costs *rl_nds_cost_table(const rl_nds *m) { return &m->costs; }
 
-rl_nds *rl_nds_create(void)
+static rl_nds *create(void)
 {
     rl_nds *m = calloc(1, sizeof *m);
     if (!m)
@@ -232,10 +232,24 @@ rl_nds *rl_nds_create(void)
     return m;
 }
 
+rl_nds *rl_nds_create(void)
+{
+    rl_nds *m = create();
+    rl_nds *mirror = m ? create() : NULL;
+    if (!mirror || nds_disp_open(m, mirror) != 0) {
+        rl_nds_destroy(mirror);
+        rl_nds_destroy(m);
+        return NULL;
+    }
+    return m;
+}
+
 void rl_nds_destroy(rl_nds *m)
 {
     if (!m)
         return;
+    nds_disp_close(m);
+    rl_nds_destroy(m->vid);
     nds_bk_free(&m->cart.bk);
     nds_spi_free(m);
     free(m);
@@ -311,7 +325,7 @@ void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     nds_where w = nds_decode(m, cpu, addr, false, true);
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
-        nds_watch_store(m, w.p);
+        nds_watch_store(m, w.p, size);
     } else if (w.kind == NDS_K_VRAM) {
         nds_vram_write_slow(m, nds_vram_cpu_view(cpu, addr), addr, size, value);
     } else if (w.kind == NDS_K_IO) {

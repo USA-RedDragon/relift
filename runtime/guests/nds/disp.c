@@ -21,7 +21,36 @@
  */
 #include "nds_int.h"
 
+#include <relift/render.h>
+
+#include <stdlib.h>
 #include <string.h>
+
+/*
+ * The run thread keeps the display's timing and registers; the drawing runs
+ * on the mirror (rl_nds.vid) from records in the render log: every store to
+ * palette, OAM and video RAM, every display register and VRAMCNT write, and
+ * each line at its render tick with the 3D layer the run thread drew for it.
+ */
+enum { R_STORE = 1, R_REG, R_VRAMCNT, R_LINE, R_DARK, R_HOOK };
+
+typedef struct r_store {
+    uint32_t off, size, value;
+} r_store;
+
+typedef struct r_reg {
+    uint32_t off, v, mask;
+} r_reg;
+
+typedef struct r_line {
+    uint64_t when;
+    uint32_t line, on3d;
+} r_line;
+
+typedef struct r_hook {
+    rl_nds_frame_fn *fn;
+    void *user;
+} r_hook;
 
 /** @brief White, in 18 bits. */
 #define WHITE 0x3FFFFu
@@ -87,10 +116,11 @@ static void capture(rl_nds *m, nds_disp *d, unsigned y, const uint32_t *a2d, con
             out |= (uint32_t)((aa && eva) || (ab && evb)) << 15;
         }
         if (lcdc(m, wb)) {
+            d->cap_wrote = true;
             uint8_t *p = nds_vram_bank(m, wb) + ((wofs + x * 2u) & 0x1FFFEu);
             p[0] = (uint8_t)out;
             p[1] = (uint8_t)(out >> 8);
-            nds_watch_store(m, p);
+            nds_watch_store(m, p, 2);
         }
     }
 }
@@ -101,7 +131,6 @@ static void draw(rl_nds *m, nds_disp *d, unsigned y)
     uint32_t *top = d->frame + y * NDS_W, *bot = d->frame + (NDS_H + y) * NDS_W;
     bool a_top = d->powcnt & 0x8000;
     uint32_t *dst[2] = {a_top ? top : bot, a_top ? bot : top};
-    d->l3d_on = d->line3d_fn && (d->eng[0].dispcnt & 8) && d->line3d_fn(d->line3d_user, y, d->l3d);
     uint16_t fifo_line[NDS_W];
     bool fifo_used = ((d->eng[0].dispcnt >> 16) & 3) == 3 || ((d->capcnt & 0x82000000u) == 0x82000000u && d->capturing);
     for (unsigned x = 0; x < NDS_W; x++)
@@ -157,23 +186,6 @@ static void finish(nds_disp *d, uint64_t when)
         d->frame_fn(d->frame_user, d->last, when);
 }
 
-/** @brief The work of line l at its render tick when. */
-static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
-{
-    if (l == 0) {
-        nds_eng_frame(&d->eng[0]);
-        nds_eng_frame(&d->eng[1]);
-        d->capturing = d->capcnt & 0x80000000u;
-    }
-    for (unsigned n = 0; n < 2; n++)
-        d->fb[n][l] = d->eng[n].dispcnt & 0x80;
-    nds_gx_line(m, l, when);
-    if (l < NDS_VISIBLE)
-        draw(m, d, l);
-    else if (l == NDS_VISIBLE)
-        finish(d, when);
-}
-
 /**
  * @brief Whether a frame from line 0 leaves nothing but black frames: the
  * LCDs are off, no capture is armed, the main memory FIFO is not read and
@@ -205,6 +217,141 @@ static void skip_dark(nds_disp *d, uint64_t n)
     d->t0 += n * RL_NDS_FRAME_TICKS;
 }
 
+/** @brief The drawing of line l at its render tick when, on the mirror (its 3D layer is in d->l3d). */
+static void draw_line(rl_nds *v, nds_disp *d, unsigned l, uint64_t when)
+{
+    if (l == 0) {
+        nds_eng_frame(&d->eng[0]);
+        nds_eng_frame(&d->eng[1]);
+        d->capturing = d->capcnt & 0x80000000u;
+    }
+    for (unsigned n = 0; n < 2; n++)
+        d->fb[n][l] = d->eng[n].dispcnt & 0x80;
+    if (l < NDS_VISIBLE)
+        draw(v, d, l);
+    else if (l == NDS_VISIBLE)
+        finish(d, when);
+}
+
+static void apply(void *user, uint32_t kind, const void *data, uint32_t len)
+{
+    rl_nds *v = user;
+    (void)len;
+    switch (kind) {
+    case R_STORE: {
+        const r_store *r = data;
+        nds_st(v->pal + r->off, r->size, r->value);
+        return;
+    }
+    case R_REG: {
+        const r_reg *r = data;
+        nds_disp_write(v, r->off, r->v, r->mask);
+        return;
+    }
+    case R_VRAMCNT: {
+        const uint32_t *r = data;
+        nds_vram_write_cnt(v, r[0], (uint8_t)r[1]);
+        return;
+    }
+    case R_LINE: {
+        const r_line *r = data;
+        nds_disp *d = &v->disp;
+        d->l3d_on = r->on3d;
+        if (r->on3d)
+            memcpy(d->l3d, r + 1, sizeof d->l3d);
+        d->cap_wrote = false;
+        draw_line(v, d, r->line, r->when);
+        return;
+    }
+    case R_DARK: {
+        const uint64_t *n = data;
+        skip_dark(&v->disp, *n);
+        return;
+    }
+    case R_HOOK: {
+        const r_hook *r = data;
+        v->disp.frame_fn = r->fn;
+        v->disp.frame_user = r->user;
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+void nds_disp_log_store(rl_nds *m, uint32_t off, unsigned size)
+{
+    r_store *r = rl_render_begin(m->render, R_STORE, sizeof *r);
+    *r = (r_store){off, size, nds_ld(m->pal + off, size)};
+    rl_render_commit(m->render);
+}
+
+void nds_disp_log_vramcnt(rl_nds *m, unsigned b, uint8_t v)
+{
+    if (m->render)
+        rl_render_put(m->render, R_VRAMCNT, (const uint32_t[2]){b, v}, 2 * sizeof(uint32_t));
+}
+
+int nds_disp_open(rl_nds *m, rl_nds *mirror)
+{
+    m->render = rl_render_create(&(rl_render_config){.apply = apply, .user = mirror, .sync = true});
+    if (!m->render)
+        return -1;
+    m->vid = mirror;
+    return 0;
+}
+
+void nds_disp_close(rl_nds *m)
+{
+    rl_render_free(m->render);
+    m->render = NULL;
+}
+
+/** @brief After line y's capture on the mirror: the bytes it wrote, into the run thread's video RAM. */
+static void capture_back(rl_nds *m, const nds_disp *d, unsigned y)
+{
+    static const uint16_t widths[4] = {128, 256, 256, 256};
+    rl_render_drain(m->render);
+    if (!m->vid->disp.cap_wrote)
+        return;
+    uint32_t c = d->capcnt;
+    unsigned w = widths[(c >> 20) & 3], wb = (c >> 16) & 3;
+    uint32_t wofs = ((c >> 18) & 3) * 0x8000u + y * w * 2u;
+    for (unsigned x = 0; x < w; x++) {
+        uint32_t off = (wofs + x * 2u) & 0x1FFFEu;
+        uint8_t *p = nds_vram_bank(m, wb) + off;
+        const uint8_t *q = nds_vram_bank(m->vid, wb) + off;
+        p[0] = q[0];
+        p[1] = q[1];
+        nds_watch_store(m, p, 2);
+    }
+}
+
+/** @brief The run thread's part of line l at its render tick when: the 3D line, the capture flag, the frame count. */
+static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
+{
+    if (l == 0)
+        d->capturing = d->capcnt & 0x80000000u;
+    nds_gx_line(m, l, when);
+    struct {
+        r_line r;
+        uint32_t l3d[NDS_W];
+    } rec;
+    rec.r = (r_line){.when = when, .line = l};
+    rec.r.on3d = l < NDS_VISIBLE && d->line3d_fn && (d->eng[0].dispcnt & 8) && d->line3d_fn(d->line3d_user, l, rec.l3d);
+    rl_render_put(m->render, R_LINE, &rec, (uint32_t)(sizeof rec.r + (rec.r.on3d ? sizeof rec.l3d : 0)));
+    if (l < NDS_VISIBLE && d->capturing && (d->powcnt & 3) == 3) {
+        capture_back(m, d, l);
+    } else if (l == NDS_VISIBLE) {
+        if (d->capturing) {
+            d->capcnt &= 0x7FFFFFFFu;
+            d->capturing = false;
+        }
+        d->frames++;
+        d->have = true;
+    }
+}
+
 void nds_disp_catch_up(rl_nds *m, uint64_t to)
 {
     nds_disp *d = &m->disp;
@@ -215,7 +362,9 @@ void nds_disp_catch_up(rl_nds *m, uint64_t to)
         if (d->line == 0 && dark(d)) {
             uint64_t n = (to - due_of(d)) / RL_NDS_FRAME_TICKS;
             if (n > 1) {
-                skip_dark(d, n - 1);
+                uint64_t k = n - 1;
+                skip_dark(d, k);
+                rl_render_put(m->render, R_DARK, &k, sizeof k);
                 continue;
             }
         }
@@ -313,6 +462,8 @@ uint32_t nds_disp_read(rl_nds *m, uint32_t off)
 void nds_disp_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask)
 {
     nds_disp *d = &m->disp;
+    if (m->render)
+        rl_render_put(m->render, R_REG, &(r_reg){off, v, mask}, sizeof(r_reg));
     if (off == 0x304) {
         d->powcnt = (uint16_t)((d->powcnt & ~mask) | (v & mask & 0x820Fu));
         return;
@@ -346,6 +497,8 @@ void rl_nds_set_frame_hook(rl_nds *m, rl_nds_frame_fn *fn, void *user)
     nds_disp *d = &m->disp;
     d->frame_fn = fn;
     d->frame_user = user;
+    if (m->render)
+        rl_render_put(m->render, R_HOOK, &(r_hook){fn, user}, sizeof(r_hook));
     if (!m->sched)
         return;
     if (fn)
@@ -366,7 +519,11 @@ uint64_t rl_nds_frames(rl_nds *m) { return caught_up(m)->frames; }
 
 const uint32_t *rl_nds_frame(rl_nds *m)
 {
-    const nds_disp *d = caught_up(m);
+    caught_up(m);
+    if (!m->render)
+        return m->disp.have ? m->disp.last : NULL;
+    rl_render_drain(m->render);
+    const nds_disp *d = &m->vid->disp;
     return d->have ? d->last : NULL;
 }
 

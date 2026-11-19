@@ -327,7 +327,7 @@ void nds_bus_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32
         nds_disp_catch_up(m, now);
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
-        nds_watch_store(m, w.p);
+        nds_watch_store(m, w.p, size);
     } else if (w.kind == NDS_K_IO) {
         nds_io_write(m, cpu, addr, size, value, now);
         m->halt_req = false;
@@ -516,7 +516,7 @@ bool rl_nds_store9_near(rl_nds *m, uint32_t addr, unsigned size, uint32_t value,
         m->fetch9_end = 0;
         tcm_charge(m, p, seq, true);
         nds_st(p, size, value);
-        nds_watch_store(m, p);
+        nds_watch_store(m, p, size);
         return true;
     }
     unsigned at = nds_cache_attr(m, addr);
@@ -524,7 +524,7 @@ bool rl_nds_store9_near(rl_nds *m, uint32_t addr, unsigned size, uint32_t value,
         return false;
     m->fetch9_end = 0;
     nds_st(p, size, value);
-    nds_watch_store(m, p);
+    nds_watch_store(m, p, size);
     bool back = (at & NDS_ATTR_DC) && (at & NDS_ATTR_WB);
     if (!((at & NDS_ATTR_DC) && nds_cache_write_hit(m, addr, back, seq))) {
         nds_cache_buffer(m, addr, nds_cost(m, RL_NDS_ARM9, RL_NDS_DATA, addr, size, seq));
@@ -553,7 +553,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         if (p) {
             tcm_charge(m, p, seq, true);
             nds_st(p, size, value);
-            nds_watch_store(m, p);
+            nds_watch_store(m, p, size);
             return;
         }
         unsigned at = nds_cache_attr(m, addr);
@@ -566,7 +566,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
             if (nds_seen_by_display(cpu, addr))
                 nds_disp_sync(m, nds_now(m, cpu));
             nds_st(w.p, size, value);
-            nds_watch_store(m, w.p);
+            nds_watch_store(m, w.p, size);
             bool back = (at & NDS_ATTR_DC) && (at & NDS_ATTR_WB);
             if (!((at & NDS_ATTR_DC) && nds_cache_write_hit(m, addr, back, seq))) {
                 nds_cache_buffer(m, addr, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq));
@@ -588,7 +588,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         nds_disp_sync(m, nds_now(m, cpu));
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
-        nds_watch_store(m, w.p);
+        nds_watch_store(m, w.p, size);
     } else if (w.kind == NDS_K_VRAM) {
         nds_vram_write_slow(m, nds_vram_cpu_view(cpu, addr), addr, size, value);
     } else if (w.kind == NDS_K_IO) {

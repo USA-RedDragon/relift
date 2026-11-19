@@ -156,6 +156,7 @@ void nds_vram_write_cnt(rl_nds *m, unsigned b, uint8_t v)
         return;
     m->vramcnt[b] = v & 0x9F;
     nds_vram_rebuild(m);
+    nds_disp_log_vramcnt(m, b, v);
 }
 
 uint32_t nds_vram_read_slow(const rl_nds *m, unsigned view, uint32_t addr, unsigned size)
@@ -176,7 +177,7 @@ void nds_vram_write_slow(rl_nds *m, unsigned view, uint32_t addr, unsigned size,
         if (pg->banks >> b & 1) {
             uint8_t *p = &m->vram[pg->at[b] + in];
             nds_st(p, size, value);
-            nds_watch_store(m, p);
+            nds_watch_store(m, p, size);
         }
 }
 

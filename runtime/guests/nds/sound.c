@@ -79,7 +79,7 @@ static void store(rl_nds *m, uint32_t addr, uint32_t v)
     nds_where w = nds_decode_bus(m, RL_NDS_ARM7, addr & ~3u, true);
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, 4, v);
-        nds_watch_store(m, w.p);
+        nds_watch_store(m, w.p, 4);
     }
 }
 
