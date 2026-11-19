@@ -770,6 +770,7 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 905, "InitializeVideoDecoderContext2", rl_gsv_open_video_session },
     { 906, "OpenVideoDecoderSessionWithVersion", rl_gsv_open_video_session },
     { 911, "InitializeDecoderImagePool", rl_gsv_decoder_pool_init },
+    { 912, "FinalizeDecoderImagePool", rl_gsv_decoder_image_free },
     { 961, "GetCpuUserImageDescriptor", rl_gsv_decoder_image_descriptor },
     { 991, "CalculateDecoderImagePoolBuffer", rl_gsv_decoder_pool_size },
     { 903, "DestroyVideoDecoderContext", rl_srv_stub_ok },

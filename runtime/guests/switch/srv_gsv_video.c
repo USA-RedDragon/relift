@@ -6,7 +6,7 @@
  * Command ids and layouts follow the SDK's lifted nn::codec video code and Eglantine's description of the
  * service (values only).
  */
-#include "host1x.h"
+#include "nvn/nvn_priv.h"
 #include "services.h"
 
 #include <relift/video.h>
@@ -418,7 +418,8 @@ static bool put_frame(const video_session *v, uint32_t image_id, const frame *f)
         return true;
     }
     uint64_t rows = l.chroma_offset / l.pitch;
-    uint64_t bytes = m.gpu_read ? h1x_bl_size((uint32_t)l.pitch, (uint32_t)rows, GPU_READ_BLOCK_LOG2) : l.pitch * rows;
+    uint64_t gobs_wide = l.pitch / 64, gob_rows = (rows + 7) / 8, block_gobs = 1u << GPU_READ_BLOCK_LOG2;
+    uint64_t bytes = (gob_rows + block_gobs - 1) / block_gobs * block_gobs * gobs_wide * 512;
     uint8_t *linear = calloc(1, l.pitch * rows), *tiled = m.gpu_read ? calloc(1, bytes) : NULL;
     if (!linear || (m.gpu_read && !tiled)) {
         free(linear);
@@ -427,9 +428,13 @@ static bool put_frame(const video_session *v, uint32_t image_id, const frame *f)
     }
     nv12_to_rgba(f, w, h, linear, l.pitch, l.code == 2 || l.code == 5);
     if (m.gpu_read) {
-        h1x_bl s = { tiled, (uint32_t)l.pitch, (uint32_t)rows, GPU_READ_BLOCK_LOG2 };
-        for (uint32_t y = 0; y < rows; y++)
-            h1x_bl_write_row(&s, 0, y, linear + (uint64_t)y * l.pitch, (uint32_t)l.pitch);
+        for (uint64_t y = 0; y < rows; y++) {
+            uint64_t block_row = y / (8 * block_gobs), gob_in_block = (y / 8) % block_gobs;
+            for (uint64_t x = 0; x < l.pitch; x++) {
+                uint64_t gob = (block_row * gobs_wide + x / 64) * block_gobs + gob_in_block;
+                tiled[gob * 512 + nvn_gob_offset((uint32_t)x, (uint32_t)y)] = linear[y * l.pitch + x];
+            }
+        }
         rl_vm_kernel_write(&hos.vm, base, tiled, bytes);
     } else {
         rl_vm_kernel_write(&hos.vm, base, linear, l.pitch * rows);
@@ -469,6 +474,10 @@ rl_result rl_gsv_native_image_query(rl_ipc_req *r)
         return KR_NOT_IMPLEMENTED;
     }
     layout l = image_layout(copy.pref);
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "gsv", "native image %u (%s): memory 0x%llx offset 0x%llx size 0x%llx", handle,
+               map ? "map" : "query", (unsigned long long)mem.addr, (unsigned long long)copy.offset,
+               (unsigned long long)l.size);
     uint32_t *out = rl_ipc_out(r, 148);
     if (!out)
         return SF_RESULT_INVALID_HEADER;
@@ -486,6 +495,34 @@ rl_result rl_gsv_native_image_query(rl_ipc_req *r)
     d[9] = 1;
     d[10] = map ? 0 : (uint32_t)copy.offset;
     d[11] = (uint32_t)l.size;
+    return KR_SUCCESS;
+}
+
+bool rl_gsv_native_image_region(uint32_t handle, uint64_t *addr, uint64_t *size)
+{
+    bool ok = false;
+    pthread_mutex_lock(&g_mu);
+    image *m = handle < IMAGES_MAX && g_images[handle].used ? &g_images[handle] : NULL;
+    if (m && m->memory < MEMORIES_MAX && g_memories[m->memory].addr) {
+        m->gpu_read = true;
+        *addr = g_memories[m->memory].addr + m->offset;
+        *size = image_layout(m->pref).size;
+        ok = true;
+    }
+    pthread_mutex_unlock(&g_mu);
+    return ok;
+}
+
+/** @brief UserSession 912 (nn::codec FinalizeDecoderImagePool, once per image): a u32 image id; the image is freed, and nothing is written to it again. */
+rl_result rl_gsv_decoder_image_free(rl_ipc_req *r)
+{
+    uint32_t id;
+    if (!rl_srv_in(r, &id, 4))
+        return SF_RESULT_INVALID_HEADER;
+    pthread_mutex_lock(&g_mu);
+    if (id < IMAGES_MAX)
+        memset(&g_images[id], 0, sizeof g_images[id]);
+    pthread_mutex_unlock(&g_mu);
     return KR_SUCCESS;
 }
 

@@ -452,6 +452,16 @@ TEST(gsv_decoder_images_the_gpu_reads_are_described_by_428_and_426)
     CHECK_EQ(r.result, 0);
     CHECK_EQ(tc_u32(&r, 0), 0);
     CHECK_EQ(tc_u32(&r, 56), size);
+    uint64_t addr, len;
+    CHECK(rl_gsv_native_image_region(first + 1, &addr, &len));
+    CHECK_EQ(addr, heap + 0x10000 + size);
+    CHECK_EQ(len, size);
+    CHECK(!rl_gsv_native_image_region(9999, &addr, &len));
+    q = tc_new(912);
+    q.tipc = true;
+    tc_put32(&q, first + 1);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
+    CHECK(!rl_gsv_native_image_region(first + 1, &addr, &len));
 }
 
 TEST(chat_u_gives_its_shim_and_event)
