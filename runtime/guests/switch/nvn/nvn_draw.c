@@ -1197,19 +1197,50 @@ static int stage_dispatch(replay *r, void *arg)
     return RL_OK;
 }
 
+bool nvn_compute_table(const nvn_gfx *st, uint32_t nubo, uint32_t nssbo, uint32_t ntex, uint32_t nimg, uint32_t end,
+                       uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo, uint32_t *table_end)
+{
+    memset(c0, 0, NVN_BANK2_BYTES);
+    uint32_t at = 0x10, handles = 8 * (ntex + nimg), buffers = 16 * (nubo + nssbo);
+    if (nubo > NVN_UBO_SLOTS || nssbo > NVN_STORAGE_SLOTS || ntex > NVN_IMAGE_SLOTS || nimg > NVN_IMAGE_SLOTS ||
+        at + buffers + handles > end || end - at - buffers - handles > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
+        (end > at + buffers + handles && st->push_used[NVN_STAGE_COMPUTE] & ~1u))
+        return false;
+    uint32_t pushed = end - at - buffers - handles;
+    memcpy(c0 + at, st->push[NVN_STAGE_COMPUTE][0], pushed);
+    at += pushed;
+    for (uint32_t i = 0; i < nubo; i++, at += 16) {
+        uint32_t size = (uint32_t)st->ubo[NVN_STAGE_COMPUTE][i].size;
+        memcpy(c0 + at, &st->ubo[NVN_STAGE_COMPUTE][i].addr, 8);
+        memcpy(c0 + at + 8, &size, 4);
+    }
+    for (uint32_t i = 0; i < nssbo; i++, at += 16) {
+        uint32_t size = (uint32_t)st->storage[i].size;
+        memcpy(c0 + at, &st->storage[i].addr, 8);
+        memcpy(c0 + at + 8, &size, 4);
+    }
+    for (uint32_t i = 0; i < ntex; i++, at += 8)
+        memcpy(c0 + at, st->bank2[NVN_STAGE_COMPUTE] + NVN_BANK2_TEXTURES + 8 * i, 4);
+    *img_lo = at;
+    for (uint32_t i = 0; i < nimg; i++, at += 8)
+        memcpy(c0 + at, &st->image[NVN_STAGE_COMPUTE][i], 4);
+    *table_end = at;
+    return true;
+}
+
 /**
  * @brief nvnCommandBufferDispatchCompute: the bound compute program's bank
  * c[0] is the driver's per-dispatch table as the compiled code reads it:
- * from 0x10, the program's uniform buffers and then its storage buffers,
- * 16 bytes each ({GPU address, u32 size}), then the constants the game
- * pushed (nvnCommandBufferPushComputeConstants, slot 0), then its texture
- * handles and then its image handles, 8 bytes each; the counts are bytes
- * 0xb1, 0xb2, 0xb3 and 0xb6 of the program's control section and the table
- * ends at its byte 0xba. The pushed constants fill what lies between the
- * buffers and the handles: a program with 3 uniform buffers and 8 handle
- * entries that ends at 0xf0 has 0x70 bytes of them at 0x40, and its handles
- * start at 0xb0 (the offsets its translation reads them at). The workgroup
- * size comes from the control section (0x58, 0x5c, 0x60).
+ * from 0x10, the constants the game pushed
+ * (nvnCommandBufferPushComputeConstants, slot 0), then the program's uniform
+ * buffers and its storage buffers, 16 bytes each ({GPU address, u32 size}),
+ * then its texture handles and its image handles, 8 bytes each; the counts
+ * are bytes 0xb1, 0xb2, 0xb3 and 0xb6 of the program's control section and
+ * the table ends at its byte 0xba, so the pushed constants fill what lies
+ * before the buffers: a program with 2 uniform and 5 storage buffers and one
+ * handle that ends at 0xf8 has 0x70 bytes of them at 0x10, its buffers at
+ * 0x80 and its handle at 0xf0 (the offsets its translation reads them at).
+ * The workgroup size comes from the control section (0x58, 0x5c, 0x60).
  */
 static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
 {
@@ -1228,37 +1259,17 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
         return nvn_vk_stop(r, "compute program %s uses a guest memory set, which the layer does not bind yet", m->key);
     uint32_t nubo = r->mem[ctl + 0xb1], nssbo = r->mem[ctl + 0xb2], ntex = r->mem[ctl + 0xb3];
     uint32_t nimg = r->mem[ctl + 0xb6], end = r->mem[ctl + 0xba];
-    uint32_t at = 0x10;
     uint8_t c0[NVN_BANK2_BYTES];
-    memset(c0, 0, sizeof c0);
-    uint32_t push_at = at + 16 * (nubo + nssbo), handles = 8 * (ntex + nimg);
-    if (nubo > NVN_UBO_SLOTS || nssbo > NVN_STORAGE_SLOTS || ntex > NVN_IMAGE_SLOTS || nimg > NVN_IMAGE_SLOTS ||
-        push_at + handles > end || end - push_at - handles > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
-        (end > push_at + handles && st->push_used[NVN_STAGE_COMPUTE] & ~1u))
+    uint32_t img_lo, at;
+    if (!nvn_compute_table(st, nubo, nssbo, ntex, nimg, end, c0, &img_lo, &at))
         return nvn_vk_stop(r,
                            "compute program %s has a driver table of %u, %u, %u and %u entries ending at 0x%x, with "
                            "constants pushed in slots 0x%x",
                            m->key, nubo, nssbo, ntex, nimg, end, st->push_used[NVN_STAGE_COMPUTE]);
-    for (uint32_t i = 0; i < nubo; i++, at += 16) {
-        uint32_t size = (uint32_t)st->ubo[NVN_STAGE_COMPUTE][i].size;
-        memcpy(c0 + at, &st->ubo[NVN_STAGE_COMPUTE][i].addr, 8);
-        memcpy(c0 + at + 8, &size, 4);
-    }
-    for (uint32_t i = 0; i < nssbo; i++, at += 16) {
-        uint32_t size = (uint32_t)st->storage[i].size;
-        if (!nvn_gpu_mapped(st->storage[i].addr, size))
+    for (uint32_t i = 0; i < nssbo; i++)
+        if (!nvn_gpu_mapped(st->storage[i].addr, (uint32_t)st->storage[i].size))
             return nvn_vk_stop(r, "compute program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool",
-                               m->key, i, (unsigned long long)st->storage[i].addr, size);
-        memcpy(c0 + at, &st->storage[i].addr, 8);
-        memcpy(c0 + at + 8, &size, 4);
-    }
-    memcpy(c0 + at, st->push[NVN_STAGE_COMPUTE][0], end - push_at - handles);
-    at = end - handles;
-    for (uint32_t i = 0; i < ntex; i++, at += 8)
-        memcpy(c0 + at, st->bank2[NVN_STAGE_COMPUTE] + NVN_BANK2_TEXTURES + 8 * i, 4);
-    uint32_t img_lo = at;
-    for (uint32_t i = 0; i < nimg; i++, at += 8)
-        memcpy(c0 + at, &st->image[NVN_STAGE_COMPUTE][i], 4);
+                               m->key, i, (unsigned long long)st->storage[i].addr, (uint32_t)st->storage[i].size);
     VkSpecializationMapEntry map[MAX_SPECS];
     uint32_t vals[MAX_SPECS], n = 3;
     for (uint32_t i = 0; i < 3; i++) {

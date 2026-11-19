@@ -47,6 +47,48 @@ TEST(nvn_replay_depth_clamp_is_kept_in_the_state)
     CHECK(!st.depth_clamp);
 }
 
+TEST(nvn_compute_table_puts_pushes_then_buffers_then_handles)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    for (uint32_t i = 0; i < 0x70; i++)
+        st.push[NVN_STAGE_COMPUTE][0][i] = (uint8_t)(0x80 + i);
+    st.push_used[NVN_STAGE_COMPUTE] = 1;
+    for (uint32_t i = 0; i < 2; i++) {
+        st.ubo[NVN_STAGE_COMPUTE][i].addr = 0x1000 + i;
+        st.ubo[NVN_STAGE_COMPUTE][i].size = 0x100 + i;
+    }
+    for (uint32_t i = 0; i < 5; i++) {
+        st.storage[i].addr = 0x2000 + i;
+        st.storage[i].size = 0x200 + i;
+    }
+    st.image[NVN_STAGE_COMPUTE][0] = 0x443;
+    uint8_t c0[NVN_BANK2_BYTES];
+    uint32_t img_lo = 0, end = 0;
+    CHECK(nvn_compute_table(&st, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
+    CHECK_EQ(img_lo, 0xf0);
+    CHECK_EQ(end, 0xf8);
+    CHECK_EQ(c0[0x10], 0x80);
+    CHECK_EQ(c0[0x7f], 0x80 + 0x6f);
+    uint64_t a;
+    uint32_t sz;
+    memcpy(&a, c0 + 0x80, 8);
+    memcpy(&sz, c0 + 0x88, 4);
+    CHECK_EQ(a, 0x1000);
+    CHECK_EQ(sz, 0x100);
+    memcpy(&a, c0 + 0xa0, 8);
+    memcpy(&sz, c0 + 0xa8, 4);
+    CHECK_EQ(a, 0x2000);
+    CHECK_EQ(sz, 0x200);
+    memcpy(&a, c0 + 0xe0, 8);
+    CHECK_EQ(a, 0x2004);
+    memcpy(&sz, c0 + 0xf0, 4);
+    CHECK_EQ(sz, 0x443);
+    CHECK(!nvn_compute_table(&st, 2, 5, 0, 1, 0x80, c0, &img_lo, &end));
+    st.push_used[NVN_STAGE_COMPUTE] = 3;
+    CHECK(!nvn_compute_table(&st, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
+}
+
 TEST(nvn_copy_pitch_follows_the_drivers_strides)
 {
     nvn_copy_pitch p;
