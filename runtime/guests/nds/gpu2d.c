@@ -276,11 +276,20 @@ void nds_eng_line(rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line3d)
         tops[x] = seconds[x] = &bd;
         tls[x] = sls[x] = 5;
     }
+    unsigned obj_on = 0;
+    for (unsigned x = 0; x < NDS_W; x++)
+        obj_on |= e->obj[x].flags;
+    obj_on &= NDS_PX_ON;
     for (int p = 3; p >= 0; p--) {
         for (int k = 3; k >= 0; k--) {
             if (!(e->dispcnt & (0x100u << k)) || (e->bgcnt[k] & 3u) != (unsigned)p)
                 continue;
             const nds_px *row = e->bg[k];
+            unsigned any = 0;
+            for (unsigned x = 0; x < NDS_W; x++)
+                any |= row[x].flags;
+            if (!(any & NDS_PX_ON))
+                continue;
             for (unsigned x = 0; x < NDS_W; x++)
                 if ((row[x].flags & NDS_PX_ON) && (ctl[x] >> k & 1)) {
                     seconds[x] = tops[x];
@@ -289,7 +298,7 @@ void nds_eng_line(rl_nds *m, nds_eng *e, unsigned y, const uint32_t *line3d)
                     tls[x] = (uint8_t)k;
                 }
         }
-        for (unsigned x = 0; x < NDS_W; x++) {
+        for (unsigned x = 0; obj_on && x < NDS_W; x++) {
             const nds_px *o = &e->obj[x];
             if ((o->flags & NDS_PX_ON) && o->prio == (unsigned)p && (ctl[x] >> 4 & 1)) {
                 seconds[x] = tops[x];
