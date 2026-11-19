@@ -234,6 +234,7 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnSamplerBuilderSetMinMagFilter",
     "nvnSamplerBuilderSetReductionFilter",
     "nvnSamplerBuilderSetWrapMode",
+    "nvnSamplerCompare",
     "nvnSamplerGetBorderColor",
     "nvnSamplerGetBorderColori",
     "nvnSamplerGetBorderColorui",
