@@ -68,7 +68,7 @@ typedef struct pipe_key {
     uint32_t cull, front, polygon, bias_enable;
     uint32_t depth_test, depth_write, depth_func, stencil_test;
     VkStencilOpState front_ops, back_ops;
-    uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp;
+    uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp, rasterizer_discard;
     /** @brief Specialization constants of each stage: id and value. */
     uint32_t nspec[5];
     VkSpecializationMapEntry spec_map[5][MAX_SPECS];
@@ -535,6 +535,7 @@ static int fixed_state(replay *r, pipe_key *k)
                                (uint32_t)(a2c & 0xff));
     }
     k->primitive_restart = st->primitive_restart;
+    k->rasterizer_discard = st->rasterizer_discard;
     k->depth_clamp = st->depth_clamp;
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
     return RL_OK;
@@ -680,6 +681,7 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                                   .frontFace = (VkFrontFace)k->front,
                                                   .depthClampEnable = k->depth_clamp,
                                                   .depthBiasEnable = k->bias_enable,
+                                                  .rasterizerDiscardEnable = k->rasterizer_discard,
                                                   .lineWidth = 1.0f };
     VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                 .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
@@ -1594,6 +1596,9 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         st->restart_index = (uint32_t)e->x[2];
         if (st->primitive_restart && st->restart_index != 0xffffffffu && st->restart_index != 0xffffu)
             return nvn_vk_stop(r, "primitive restart index 0x%x", st->restart_index);
+        return RL_OK;
+    case NVN_CMD_SET_RASTERIZER_DISCARD:
+        st->rasterizer_discard = (e->x[1] & 0xff) != 0;
         return RL_OK;
     case NVN_CMD_SET_PATCH_SIZE:
         return RL_OK;

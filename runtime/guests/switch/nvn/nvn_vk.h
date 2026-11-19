@@ -184,6 +184,7 @@ typedef struct nvn_gfx {
     VkRect2D scissors[16];
     uint32_t stencil_value_mask[2], stencil_mask[2], stencil_ref[2];
     bool primitive_restart;
+    bool rasterizer_discard;
     uint32_t restart_index;
     float polygon_offset[3];
     float blend_color[4];
