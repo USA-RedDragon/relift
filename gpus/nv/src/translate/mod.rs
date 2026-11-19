@@ -937,6 +937,7 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     c.m.emit_void(op::LABEL, &[entry]);
     let var_at = c.m.body.len();
     c.tcs_prologue()?;
+    c.position_defaults();
     let body = c.m.id();
     c.m.emit_void(op::BRANCH, &[body]);
     if c.iface.host.warp == WarpPath::Simt {
@@ -1100,6 +1101,15 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
     }
     for &(_, v, z) in &vars {
         crate::spirv::inst(&mut decls, op::STORE, &[v, z]);
+    }
+    if stage == Stage::Vertex {
+        let f = c.f32t();
+        let v4 = c.m.t_vec(f, 4);
+        let (z, o) = (c.m.c_f32(0), c.m.c_f32(0x3f80_0000));
+        let k = c.m.c_composite(v4, &[z, z, z, o]);
+        for &v in c.outputs.values() {
+            crate::spirv::inst(&mut decls, op::STORE, &[v, k]);
+        }
     }
     c.m.body.splice(var_at..var_at, decls);
     io::finish(&mut c, entry);

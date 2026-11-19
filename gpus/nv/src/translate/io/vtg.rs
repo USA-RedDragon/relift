@@ -473,6 +473,24 @@ impl Ctx {
         })
     }
 
+    /// What a vertex program's position holds before it stores any component: (0, 0, 0, 1). A program that
+    /// stores only x and y, as a full-screen triangle does, relies on it; Vulkan leaves unwritten components
+    /// undefined and a host that zeroes them clips the primitive away. Every generic output starts at the same
+    /// value (see `finish`): a fragment program reads (0, 0, 0, 1) for the components its vertex program never
+    /// wrote (inferred: Ryujinx's translator initializes the outputs the next stage reads to this value).
+    pub(crate) fn position_defaults(&mut self) {
+        if self.stage != Stage::Vertex {
+            return;
+        }
+        let f = self.f32t();
+        let v4 = self.m.t_vec(f, 4);
+        let zero = self.m.c_f32(0);
+        let one = self.m.c_f32(0x3f80_0000);
+        let k = self.m.c_composite(v4, &[zero, zero, zero, one]);
+        let var = self.vec_builtin(B_POSITION, OUTPUT, 4);
+        self.m.emit_void(op::STORE, &[var, k]);
+    }
+
     /// The pass-through work of a tessellation control program that
     /// declares no output vertices.
     pub(crate) fn tcs_prologue(&mut self) -> Res<()> {

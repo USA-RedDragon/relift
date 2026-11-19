@@ -541,3 +541,65 @@ fn other_stage_buffer_accesses_are_refused() {
         Some("ISBERD outside a tessellation or geometry stage".into())
     );
 }
+
+/// The id of the `vec4` constant (0, 0, 0, 1), if the module declares one.
+fn zero_zero_zero_one(words: &[u32]) -> Option<u32> {
+    let all = insts(words);
+    let value = |id: u32| {
+        all.iter()
+            .find(|(o, a)| *o == 43 && a[1] == id)
+            .map(|(_, a)| a[2])
+    };
+    all.iter().find_map(|(o, a)| {
+        let parts: Vec<_> = a.get(2..)?.iter().map(|&p| value(p)).collect();
+        (*o == 44 && parts == [Some(0), Some(0), Some(0), Some(0x3f80_0000)]).then_some(a[1])
+    })
+}
+
+/// The id the first store into each output variable in `vars` writes.
+fn first_stores(words: &[u32], vars: &[u32]) -> Vec<Option<u32>> {
+    let all = insts(words);
+    vars.iter()
+        .map(|&v| {
+            all.iter()
+                .find(|(o, a)| *o == 62 && a[0] == v)
+                .map(|(_, a)| a[1])
+        })
+        .collect()
+}
+
+#[test]
+fn a_vertex_program_that_writes_only_x_and_y_leaves_w_at_one() {
+    let code = vec![
+        mov_imm(4, 0),
+        ast(0x70, 4, RZ, 2, false),
+        ast(0x80, 4, RZ, 2, false),
+    ];
+    let p = program(1, &[], &code);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    let k = zero_zero_zero_one(&s.spirv).expect("a (0, 0, 0, 1) constant");
+    let all = insts(&s.spirv);
+    let position: Vec<u32> = all
+        .iter()
+        .filter(|(o, a)| *o == 71 && a.get(1) == Some(&11) && a.get(2) == Some(&0))
+        .map(|(_, a)| a[0])
+        .collect();
+    let generic: Vec<u32> = all
+        .iter()
+        .filter(|(o, a)| *o == 71 && a.get(1) == Some(&30))
+        .map(|(_, a)| a[0])
+        .collect();
+    assert_eq!(position.len(), 1);
+    assert!(!generic.is_empty());
+    assert_eq!(first_stores(&s.spirv, &position), [Some(k)]);
+    for first in first_stores(&s.spirv, &generic) {
+        assert_eq!(first, Some(k));
+    }
+}
+
+#[test]
+fn a_fragment_program_does_not_get_the_vertex_defaults() {
+    let p = program(5, &[], &[]);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(zero_zero_zero_one(&s.spirv), None);
+}
