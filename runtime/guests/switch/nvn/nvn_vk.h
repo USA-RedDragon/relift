@@ -157,8 +157,8 @@ typedef struct nvn_gfx {
     float polygon_offset[3];
     float blend_color[4];
     float line_width;
-    /** @brief Counter types a ResetCounter named, each replayed as nothing (bit n: type n). */
-    uint32_t counters_reset;
+    /** @brief Counter types a ResetCounter zeroed that no draw has run since (bit n: type n). */
+    uint32_t counters_zero;
 } nvn_gfx;
 
 /** @brief One command set being replayed. */
@@ -257,7 +257,13 @@ void nvn_draw_reset(void);
 int nvn_dlss_run(replay *r, const nvn_cmd *e);
 /** @brief Frees what DLSS evaluations held for the batch just finished (called after each wait). */
 void nvn_dlss_reset(void);
-/** @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one. */
+/**
+ * @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one.
+ * GPU counters: the driver's ResetCounter writes only a CLEAR_REPORT_VALUE
+ * method, so a counter reported before any draw ran since its reset reads 0
+ * (the report is the value then the timestamp); a counter no reset covers or
+ * a draw has run on stops, since the host device does not count.
+ */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
 
 #endif
