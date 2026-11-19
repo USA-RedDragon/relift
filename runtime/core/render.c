@@ -82,10 +82,29 @@ static void wait_for(rl_render *r, bool *flag, bool (*ready)(rl_render *))
 
 static bool has_records(rl_render *r) { return load(&r->head) != r->tail || __atomic_load_n(&r->stop, __ATOMIC_ACQUIRE); }
 
+/** @brief How long the render thread looks for records before it sleeps: longer than a line takes to come. */
+#define SPIN_NS 200000u
+
+/** @brief Looks for records for up to SPIN_NS, so that a putter seldom has to wake a sleeping thread. */
+static void spin_for_records(rl_render *r)
+{
+    uint64_t until = 0;
+    for (unsigned i = 0; !has_records(r); i++) {
+        if (i % 64u)
+            continue;
+        uint64_t now = rl_clock_ns();
+        if (!until)
+            until = now + SPIN_NS;
+        else if (now >= until)
+            return;
+    }
+}
+
 static void *thread_main(void *arg)
 {
     rl_render *r = arg;
     for (;;) {
+        spin_for_records(r);
         wait_for(r, &r->apply_waits, has_records);
         size_t head = load(&r->head);
         if (head == r->tail)
