@@ -65,6 +65,16 @@ void rl_srv_install_csrng(void);
 rl_result rl_srv_nv2_open(uint32_t *handle);
 /** @brief Opens a session to a new gsv UserSession (Switch 2), for am's GetGraphicsSupervisor. */
 rl_result rl_gsv_open_user_session(uint32_t *handle);
+/** @brief Opens a syncpt session (gsv 202): one moved session handle in r. */
+rl_result rl_gsv_open_syncpt_session(rl_ipc_req *r);
+/** @brief Called with the nv lock held after a sync point advanced: fires the slot events waiting on it. */
+void rl_gsv_syncpt_changed(void);
+/** @brief A new counter of the supervisor's sync points: its id (the SyncCounterId is its bitwise NOT), starting at 0. */
+uint32_t rl_gsv_counter_new(void);
+/** @brief The value of counter id. */
+uint64_t rl_gsv_counter_get(uint32_t id);
+/** @brief Raises counter id to at least value and signals the waits it reaches. */
+void rl_gsv_counter_signal(uint32_t id, uint64_t value);
 /** @brief Registers ectx:aw, the error context writer, and notif:a, the alarm notifications. */
 void rl_srv_install_ectx(void);
 /** @brief Registers bsd:u and bsd:s, the socket services, without a network. */

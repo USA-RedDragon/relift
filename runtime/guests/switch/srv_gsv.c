@@ -49,48 +49,6 @@ static rl_result create_nvdrv2_user_session(rl_ipc_req *r)
     return rc;
 }
 
-/** @brief SyncptSession Ping: answers the u64 it gets (the SDK sends the system tick). */
-static rl_result syncpt_ping(rl_ipc_req *r)
-{
-    uint64_t v;
-    if (!rl_srv_in(r, &v, 8))
-        return SF_RESULT_INVALID_HEADER;
-    uint64_t *out = rl_ipc_out(r, 8);
-    if (!out)
-        return SF_RESULT_INVALID_HEADER;
-    *out = v;
-    return KR_SUCCESS;
-}
-
-/**
- * @brief SyncptSession 1 (unnamed): a u32 below 0x400 that the SDK passes
- * back, capped at 63, to command 21. Its meaning is not known; 0 here.
- */
-static rl_result syncpt_cmd_1(rl_ipc_req *r)
-{
-    uint32_t *out = rl_ipc_out(r, 4);
-    if (!out)
-        return SF_RESULT_INVALID_HEADER;
-    *out = 0;
-    return KR_SUCCESS;
-}
-
-/** @brief SyncptSession 21 (unnamed): takes the u32 from command 1. */
-static rl_result syncpt_cmd_21(rl_ipc_req *r)
-{
-    uint32_t v;
-    return rl_srv_in(r, &v, 4) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
-}
-
-static const rl_ipc_cmd syncpt_cmds[] = {
-    { 0, "Ping", syncpt_ping },
-    { 1, "Cmd1", syncpt_cmd_1 },
-    { 21, "Cmd21", syncpt_cmd_21 },
-};
-
-static const rl_ipc_class syncpt_class = { "nn::gsv::SyncptSession", syncpt_cmds,
-                                           sizeof syncpt_cmds / sizeof syncpt_cmds[0], 0, NULL };
-
 static rl_result push_session(rl_ipc_req *r, const rl_ipc_class *cls)
 {
     rl_ipc_object *o = rl_srv_object(cls, NULL);
@@ -105,7 +63,7 @@ static rl_result push_session(rl_ipc_req *r, const rl_ipc_class *cls)
 }
 
 /** @brief InitializeSyncptContext: no input, a SyncptSession. */
-static rl_result initialize_syncpt_context(rl_ipc_req *r) { return push_session(r, &syncpt_class); }
+static rl_result initialize_syncpt_context(rl_ipc_req *r) { return rl_gsv_open_syncpt_session(r); }
 
 /** @brief Header of the sync point area gsv 204 lays out in the second (read-only) transfer memory. */
 typedef struct syncpt_header {

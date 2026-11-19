@@ -10,6 +10,7 @@
  * work submitted to a channel is marked complete.
  */
 #include "nv.h"
+#include "services.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -124,6 +125,7 @@ static void ctrl_wake(uint32_t id)
             }
         }
     }
+    rl_gsv_syncpt_changed();
 }
 
 void nv_sync_complete(uint32_t id)

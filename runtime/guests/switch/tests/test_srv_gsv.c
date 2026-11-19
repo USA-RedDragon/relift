@@ -6,6 +6,7 @@
  */
 #include "am.h"
 #include "tc.h"
+#include "services.h"
 
 #define CUR_PROCESS_HANDLE 0xFFFF8001u
 
@@ -296,6 +297,54 @@ TEST(gsv_display_buffer_max_resolution_follows_the_operation_mode)
     CHECK_EQ(r.result, 0);
     CHECK_EQ(tc_u64(&r, 0), 4);
     CHECK_EQ(display_query(c, d, 106, 0x6e69617274ull).result, SF_RESULT_NOT_SUPPORTED);
+}
+
+TEST(gsv_syncpt_slot_events_fire_when_a_counter_reaches_the_value)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    tc_req q = tc_new(202);
+    q.tipc = true;
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    tc_obj sp = { .handle = r.move[0] };
+    uint32_t id = rl_gsv_counter_new();
+    CHECK(id >= 192);
+    q = tc_new(22);
+    q.tipc = true;
+    tc_put32(&q, 3);
+    r = tc_send(c, sp, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy + r.nmove, 1);
+    *(uint32_t *)(void *)(t_mem() + heap + 0x800) = r.ncopy ? r.copy[0] : r.move[0];
+    q = tc_new(201);
+    q.tipc = true;
+    tc_put32(&q, 3);
+    tc_put32(&q, ~id);
+    tc_put64(&q, 2);
+    tc_put32(&q, 1);
+    CHECK_EQ(tc_send(c, sp, q).result, 0);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
+    rl_gsv_counter_signal(id, 1);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
+    rl_gsv_counter_signal(id, 2);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    q = tc_new(103);
+    q.tipc = true;
+    tc_put32(&q, ~id);
+    r = tc_send(c, sp, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 2);
+    q = tc_new(202);
+    q.tipc = true;
+    tc_put32(&q, 3);
+    CHECK_EQ(tc_send(c, sp, q).result, 0);
 }
 
 TEST(chat_u_gives_its_shim_and_event)
