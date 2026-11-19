@@ -73,6 +73,8 @@ static void run(rl_render *r, toy *primary, unsigned frames, bool switch_modes)
                 rl_render_put(r, K_FILL, &primary->scroll, sizeof primary->scroll);
             }
             rl_render_put(r, K_LINE, &y, sizeof y);
+            if (y % 8 == 0)
+                rl_render_flush(r);
         }
         rl_render_put(r, K_FRAME, NULL, 0);
     }

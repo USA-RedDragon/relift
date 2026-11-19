@@ -166,6 +166,7 @@ static size_t reserve(rl_render *r, size_t n)
     size_t at = r->head % r->size;
     if (r->size - at < n) {
         r->need = r->size - at;
+        wake(r, &r->apply_waits);
         wait_for(r, &r->put_waits, has_room);
         rec *pad = (rec *)(r->ring + at);
         pad->kind = PAD;
@@ -175,6 +176,8 @@ static size_t reserve(rl_render *r, size_t n)
         at = 0;
     }
     r->need = n;
+    if (!has_room(r))
+        wake(r, &r->apply_waits);
     wait_for(r, &r->put_waits, has_room);
     return at;
 }
@@ -200,7 +203,14 @@ void rl_render_commit(rl_render *r)
         return;
     }
     store(&r->head, r->head + r->open_size);
-    wake(r, &r->apply_waits);
+    if (r->head - load(&r->tail) >= r->size / 8u)
+        wake(r, &r->apply_waits);
+}
+
+void rl_render_flush(rl_render *r)
+{
+    if (!r->sync)
+        wake(r, &r->apply_waits);
 }
 
 void rl_render_put(rl_render *r, uint32_t kind, const void *data, uint32_t len)
@@ -219,8 +229,10 @@ static bool drained(rl_render *r) { return load(&r->tail) == r->head; }
 
 void rl_render_drain(rl_render *r)
 {
-    if (!r->sync)
-        wait_for(r, &r->put_waits, drained);
+    if (r->sync)
+        return;
+    wake(r, &r->apply_waits);
+    wait_for(r, &r->put_waits, drained);
 }
 
 void rl_render_set_sync(rl_render *r, bool sync)

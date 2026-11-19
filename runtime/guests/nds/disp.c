@@ -334,6 +334,7 @@ static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
     rec.r = (r_line){.when = when, .line = l};
     rec.r.on3d = l < NDS_VISIBLE && d->line3d_fn && (d->eng[0].dispcnt & 8) && d->line3d_fn(d->line3d_user, l, rec.l3d);
     rl_render_put(m->render, R_LINE, &rec, (uint32_t)(sizeof rec.r + (rec.r.on3d ? sizeof rec.l3d : 0)));
+    rl_render_flush(m->render);
     if (l < NDS_VISIBLE && d->capturing && (d->powcnt & 3) == 3) {
         capture_back(m, d, l);
     } else if (l == NDS_VISIBLE) {

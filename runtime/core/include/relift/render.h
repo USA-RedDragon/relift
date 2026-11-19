@@ -57,6 +57,11 @@ RL_RUNTIME_API void rl_render_put(rl_render *r, uint32_t kind, const void *data,
 RL_RUNTIME_API void *rl_render_begin(rl_render *r, uint32_t kind, uint32_t len);
 /** @brief Puts the record rl_render_begin made room for. */
 RL_RUNTIME_API void rl_render_commit(rl_render *r);
+/**
+ * @brief Lets the render thread start on the records put so far. A put alone wakes it only once the log is an
+ * eighth full, so a guest flushes where a batch ends (a line): a wake costs a system call when the thread sleeps.
+ */
+RL_RUNTIME_API void rl_render_flush(rl_render *r);
 /** @brief Returns once every record put so far has been applied. */
 RL_RUNTIME_API void rl_render_drain(rl_render *r);
 /** @brief Drains, then applies later records at once on the putter's thread (true) or on the render thread. */
