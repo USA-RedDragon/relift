@@ -1202,7 +1202,11 @@ static int stage_dispatch(replay *r, void *arg)
  * 16 bytes each ({GPU address, u32 size}), then its texture handles and
  * then its image handles, 8 bytes each; the counts are bytes 0xb1, 0xb2,
  * 0xb3 and 0xb6 of the program's control section and the table ends at its
- * byte 0xba. The workgroup size comes from the control section (0x58, 0x5c,
+ * byte 0xba. Constants the game pushed (nvnCommandBufferPushComputeConstants,
+ * slot 0) follow the table's entries up to that end byte: a program that
+ * takes them has an end byte past its entries by the size it is pushed, as
+ * one with 0x70 bytes of push constants ends at 0xf0 behind entries ending
+ * at 0x80. The workgroup size comes from the control section (0x58, 0x5c,
  * 0x60).
  */
 static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
@@ -1225,10 +1229,14 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     uint32_t at = 0x10;
     uint8_t c0[NVN_BANK2_BYTES];
     memset(c0, 0, sizeof c0);
+    uint32_t entries_end = at + 16 * (nubo + nssbo) + 8 * (ntex + nimg);
     if (nubo > NVN_UBO_SLOTS || nssbo > NVN_STORAGE_SLOTS || ntex > NVN_IMAGE_SLOTS || nimg > NVN_IMAGE_SLOTS ||
-        at + 16 * (nubo + nssbo) + 8 * (ntex + nimg) != end)
-        return nvn_vk_stop(r, "compute program %s has a driver table of %u, %u, %u and %u entries ending at 0x%x",
-                           m->key, nubo, nssbo, ntex, nimg, end);
+        entries_end > end || end - entries_end > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
+        (end > entries_end && st->push_used[NVN_STAGE_COMPUTE] & ~1u))
+        return nvn_vk_stop(r,
+                           "compute program %s has a driver table of %u, %u, %u and %u entries ending at 0x%x, with "
+                           "constants pushed in slots 0x%x",
+                           m->key, nubo, nssbo, ntex, nimg, end, st->push_used[NVN_STAGE_COMPUTE]);
     for (uint32_t i = 0; i < nubo; i++, at += 16) {
         uint32_t size = (uint32_t)st->ubo[NVN_STAGE_COMPUTE][i].size;
         memcpy(c0 + at, &st->ubo[NVN_STAGE_COMPUTE][i].addr, 8);
@@ -1244,6 +1252,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     uint32_t img_lo = at;
     for (uint32_t i = 0; i < nimg; i++, at += 8)
         memcpy(c0 + at, &st->image[NVN_STAGE_COMPUTE][i], 4);
+    memcpy(c0 + entries_end, st->push[NVN_STAGE_COMPUTE][0], end - entries_end);
     VkSpecializationMapEntry map[MAX_SPECS];
     uint32_t vals[MAX_SPECS], n = 3;
     for (uint32_t i = 0; i < 3; i++) {
@@ -1411,6 +1420,7 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
             return nvn_vk_stop(r, "%s without its data", nvn_cmd_name(e->op));
         if (size)
             memcpy(st->push[stage][slot] + off, data, size);
+        st->push_used[stage] |= 1u << slot;
         return RL_OK;
     }
     case NVN_CMD_SET_DEPTH_CLAMP:

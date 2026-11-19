@@ -152,6 +152,7 @@ typedef struct nvn_gfx {
      * NVN_PUSH_BYTES bytes each, the most the driver writes at once.
      */
     uint8_t push[NVN_STAGES][NVN_PUSH_SLOTS][NVN_PUSH_BYTES];
+    uint32_t push_used[NVN_STAGES];
     /** @brief Each stage's c[2] as the driver fills it. */
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     struct {
