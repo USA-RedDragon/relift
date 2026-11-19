@@ -1201,15 +1201,15 @@ static int stage_dispatch(replay *r, void *arg)
  * @brief nvnCommandBufferDispatchCompute: the bound compute program's bank
  * c[0] is the driver's per-dispatch table as the compiled code reads it:
  * from 0x10, the program's uniform buffers and then its storage buffers,
- * 16 bytes each ({GPU address, u32 size}), then its texture handles and
- * then its image handles, 8 bytes each; the counts are bytes 0xb1, 0xb2,
- * 0xb3 and 0xb6 of the program's control section and the table ends at its
- * byte 0xba. Constants the game pushed (nvnCommandBufferPushComputeConstants,
- * slot 0) follow the table's entries up to that end byte: a program that
- * takes them has an end byte past its entries by the size it is pushed, as
- * one with 0x70 bytes of push constants ends at 0xf0 behind entries ending
- * at 0x80. The workgroup size comes from the control section (0x58, 0x5c,
- * 0x60).
+ * 16 bytes each ({GPU address, u32 size}), then the constants the game
+ * pushed (nvnCommandBufferPushComputeConstants, slot 0), then its texture
+ * handles and then its image handles, 8 bytes each; the counts are bytes
+ * 0xb1, 0xb2, 0xb3 and 0xb6 of the program's control section and the table
+ * ends at its byte 0xba. The pushed constants fill what lies between the
+ * buffers and the handles: a program with 3 uniform buffers and 8 handle
+ * entries that ends at 0xf0 has 0x70 bytes of them at 0x40, and its handles
+ * start at 0xb0 (the offsets its translation reads them at). The workgroup
+ * size comes from the control section (0x58, 0x5c, 0x60).
  */
 static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
 {
@@ -1231,10 +1231,10 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     uint32_t at = 0x10;
     uint8_t c0[NVN_BANK2_BYTES];
     memset(c0, 0, sizeof c0);
-    uint32_t entries_end = at + 16 * (nubo + nssbo) + 8 * (ntex + nimg);
+    uint32_t push_at = at + 16 * (nubo + nssbo), handles = 8 * (ntex + nimg);
     if (nubo > NVN_UBO_SLOTS || nssbo > NVN_STORAGE_SLOTS || ntex > NVN_IMAGE_SLOTS || nimg > NVN_IMAGE_SLOTS ||
-        entries_end > end || end - entries_end > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
-        (end > entries_end && st->push_used[NVN_STAGE_COMPUTE] & ~1u))
+        push_at + handles > end || end - push_at - handles > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
+        (end > push_at + handles && st->push_used[NVN_STAGE_COMPUTE] & ~1u))
         return nvn_vk_stop(r,
                            "compute program %s has a driver table of %u, %u, %u and %u entries ending at 0x%x, with "
                            "constants pushed in slots 0x%x",
@@ -1249,12 +1249,13 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
         memcpy(c0 + at, &st->storage[i].addr, 8);
         memcpy(c0 + at + 8, &size, 4);
     }
+    memcpy(c0 + at, st->push[NVN_STAGE_COMPUTE][0], end - push_at - handles);
+    at = end - handles;
     for (uint32_t i = 0; i < ntex; i++, at += 8)
         memcpy(c0 + at, st->bank2[NVN_STAGE_COMPUTE] + NVN_BANK2_TEXTURES + 8 * i, 4);
     uint32_t img_lo = at;
     for (uint32_t i = 0; i < nimg; i++, at += 8)
         memcpy(c0 + at, &st->image[NVN_STAGE_COMPUTE][i], 4);
-    memcpy(c0 + entries_end, st->push[NVN_STAGE_COMPUTE][0], end - entries_end);
     VkSpecializationMapEntry map[MAX_SPECS];
     uint32_t vals[MAX_SPECS], n = 3;
     for (uint32_t i = 0; i < 3; i++) {
