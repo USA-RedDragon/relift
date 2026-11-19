@@ -28,6 +28,8 @@ static uint32_t res_w = 1280, res_h = 720;
 
 static pthread_mutex_t vsync_lock = PTHREAD_MUTEX_INITIALIZER;
 static hos_revent *vsync_ev;
+#define VSYNC_LISTENERS 32u
+static hos_revent *vsync_listener[VSYNC_LISTENERS];
 static pthread_t vsync_thread;
 static pthread_mutex_t clock_lock = PTHREAD_MUTEX_INITIALIZER;
 static vi_clock vsync_clock;
@@ -97,6 +99,15 @@ void vi_host_flip(int64_t t)
     vi_trace('F', (uint64_t)phase, (uint64_t)shift, locked);
 }
 
+static void vsync_signal_listeners(void)
+{
+    pthread_mutex_lock(&vsync_lock);
+    for (uint32_t i = 0; i < VSYNC_LISTENERS; i++)
+        if (vsync_listener[i])
+            rl_hos_event_signal(vsync_listener[i]);
+    pthread_mutex_unlock(&vsync_lock);
+}
+
 static void *vsync_main(void *arg)
 {
     (void)arg;
@@ -120,6 +131,7 @@ static void *vsync_main(void *arg)
             rl_hos_event_signal(e);
             hos_kobj_unref(&e->obj);
         }
+        vsync_signal_listeners();
         int64_t done = mono_ns();
         if (woke)
             vi_trace('V', (uint64_t)next, (uint64_t)woke, (uint64_t)done);
@@ -139,6 +151,29 @@ static void vsync_timer(void *ctx)
         rl_hos_event_signal(e);
         hos_kobj_unref(&e->obj);
     }
+    vsync_signal_listeners();
+}
+
+void rl_vi_vsync_listen(hos_revent *e, bool on)
+{
+    if (on)
+        vi_vsync_event(true);
+    pthread_mutex_lock(&vsync_lock);
+    for (uint32_t i = 0; i < VSYNC_LISTENERS; i++) {
+        if (vsync_listener[i] == e) {
+            if (!on)
+                vsync_listener[i] = NULL;
+            e = NULL;
+            break;
+        }
+    }
+    if (on && e)
+        for (uint32_t i = 0; i < VSYNC_LISTENERS; i++)
+            if (!vsync_listener[i]) {
+                vsync_listener[i] = e;
+                break;
+            }
+    pthread_mutex_unlock(&vsync_lock);
 }
 
 hos_revent *vi_vsync_event(bool start)

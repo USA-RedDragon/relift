@@ -278,17 +278,22 @@ static rl_result display_event(rl_ipc_req *r)
 }
 
 /**
- * @brief DisplaySession 32 (unnamed): a u32 and a copied handle, the readable
- * end of a system event the client owns; one handle back, which the client
- * attaches as a readable system event (SDK 22 sdk 0x5e3af0, called through
- * slot +72 of the display client table by 0x5eaef0). relift gives the
- * readable end of an event it never signals, as for 11.
+ * @brief DisplaySession 32 (unnamed): a copied handle (the client's handle of an acquired slot) and a u32 slot
+ * index; one handle back, the slot's event again, which the client attaches as a readable system event (SDK 22 sdk
+ * 0x5e3af0, called through slot +72 of the display client table by 0x5eaef0). Eglantine hands out the slot's own
+ * event, which fires on vsync until the slot is bound to another source; a title waits on it before its first GPU
+ * work.
  */
+static hos_revent *display_slot(rl_ipc_req *r, uint32_t index);
 static rl_result display_linked_event(rl_ipc_req *r)
 {
-    if (r->n_in_copy < 1)
+    uint32_t index;
+    if (r->n_in_copy < 1 || !rl_srv_in(r, &index, 4))
         return SF_RESULT_INVALID_HEADER;
-    return display_event(r);
+    hos_revent *e = display_slot(r, index);
+    if (!e)
+        return SF_RESULT_INVALID_HEADER;
+    return rl_ipc_push_move(r, &e->obj);
 }
 
 /** @brief DisplaySession 212 (unnamed): a u64; a u64 (sdk 0x5620c4), relift: 0. */
@@ -324,14 +329,17 @@ static rl_result display_recorder_count(rl_ipc_req *r)
 /** @brief State of a DisplaySession: the events of its native event slots. */
 typedef struct display_session {
     hos_revent *slot[DISPLAY_EVENT_SLOTS];
+    bool vsync[DISPLAY_EVENT_SLOTS];
 } display_session;
 
 static void display_session_destroy(void *state)
 {
     display_session *s = state;
     for (uint32_t i = 0; i < DISPLAY_EVENT_SLOTS; i++)
-        if (s->slot[i])
+        if (s->slot[i]) {
+            rl_vi_vsync_listen(s->slot[i], false);
             hos_kobj_unref(&s->slot[i]->obj);
+        }
     free(s);
 }
 
@@ -341,8 +349,13 @@ static hos_revent *display_slot(rl_ipc_req *r, uint32_t index)
     display_session *s = r->self->state;
     if (index >= DISPLAY_EVENT_SLOTS)
         return NULL;
-    if (!s->slot[index])
+    if (!s->slot[index]) {
         s->slot[index] = rl_hos_event_create();
+        if (s->slot[index]) {
+            s->vsync[index] = true;
+            rl_vi_vsync_listen(s->slot[index], true);
+        }
+    }
     return s->slot[index];
 }
 
@@ -378,7 +391,46 @@ static rl_result display_bind_change(rl_ipc_req *r)
     hos_revent *e = display_slot(r, in.index);
     if (!e)
         return SF_RESULT_INVALID_HEADER;
+    rl_vi_vsync_listen(e, false);
+    ((display_session *)r->self->state)->vsync[in.index] = false;
     rl_hos_event_signal(e);
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief DisplaySession 261 (nn::vi BindDisplayVsyncEvent): a u64 display name and a u32 slot index: the slot's event
+ * is signaled on every vsync.
+ */
+static rl_result display_bind_vsync(rl_ipc_req *r)
+{
+    struct {
+        uint64_t name;
+        uint32_t index;
+    } in;
+    if (!rl_srv_in(r, &in, 12))
+        return SF_RESULT_INVALID_HEADER;
+    hos_revent *e = display_slot(r, in.index);
+    if (!e)
+        return SF_RESULT_INVALID_HEADER;
+    ((display_session *)r->self->state)->vsync[in.index] = true;
+    rl_vi_vsync_listen(e, true);
+    return KR_SUCCESS;
+}
+
+/** @brief DisplaySession 262, 264, 266, 268, 270 and 272 (the Unbind commands): a u64 display name and a u32 slot index; the slot stops firing. */
+static rl_result display_unbind(rl_ipc_req *r)
+{
+    struct {
+        uint64_t name;
+        uint32_t index;
+    } in;
+    if (!rl_srv_in(r, &in, 12))
+        return SF_RESULT_INVALID_HEADER;
+    hos_revent *e = display_slot(r, in.index);
+    if (!e)
+        return SF_RESULT_INVALID_HEADER;
+    rl_vi_vsync_listen(e, false);
+    ((display_session *)r->self->state)->vsync[in.index] = false;
     return KR_SUCCESS;
 }
 
@@ -470,18 +522,18 @@ static const rl_ipc_cmd display_session_cmds[] = {
     { 212, "Command212", display_u64_zero },
     { 251, "Command251", rl_srv_stub_ok },
     { 252, "Command252", rl_srv_stub_ok },
-    { 261, "Command261", rl_srv_stub_ok },
-    { 262, "Command262", rl_srv_stub_ok },
+    { 261, "BindDisplayVsyncEvent", display_bind_vsync },
+    { 262, "UnbindDisplayEvent262", display_unbind },
     { 263, "BindDisplayRefreshRateEvent", display_bind_change },
-    { 264, "Command264", rl_srv_stub_ok },
+    { 264, "UnbindDisplayEvent264", display_unbind },
     { 265, "BindDisplayHdrStatusEvent", display_bind_change },
-    { 266, "Command266", rl_srv_stub_ok },
+    { 266, "UnbindDisplayEvent266", display_unbind },
     { 267, "BindDisplayHdrPaperWhiteEvent", display_bind_change },
-    { 268, "Command268", rl_srv_stub_ok },
+    { 268, "UnbindDisplayEvent268", display_unbind },
     { 269, "BindDisplayBufferMaxResolutionEvent", display_bind_change },
-    { 270, "Command270", rl_srv_stub_ok },
+    { 270, "UnbindDisplayEvent270", display_unbind },
     { 271, "BindDisplayModeCapabilityEvent", display_bind_change },
-    { 272, "Command272", rl_srv_stub_ok },
+    { 272, "UnbindDisplayEvent272", display_unbind },
     { 301, "Command301", rl_srv_stub_ok },
     { 302, "Command302", rl_srv_stub_ok },
     { 351, "Command351", rl_srv_stub_ok },

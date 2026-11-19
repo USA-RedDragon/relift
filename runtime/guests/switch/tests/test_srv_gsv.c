@@ -255,6 +255,11 @@ TEST(gsv_display_change_events_fire_when_bound_and_the_queries_answer)
     CHECK_EQ(r.result, 0);
     CHECK_EQ(r.nmove, 1);
     *(uint32_t *)(void *)(t_mem() + heap + 0x800) = r.move[0];
+    q = tc_new(262);
+    q.tipc = true;
+    tc_put64(&q, 0x00746c7561666564ull);
+    tc_put32(&q, 5);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = d }, q).result, 0);
     CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
     q = tc_new(265);
     q.tipc = true;
