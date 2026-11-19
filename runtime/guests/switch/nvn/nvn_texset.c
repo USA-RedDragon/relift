@@ -17,6 +17,7 @@
  * partially bound), and the programs only read the ones their handles name.
  */
 #include "nvn_vk.h"
+#include "nvn_slots.h"
 
 #include <stdlib.h>
 
@@ -42,6 +43,13 @@ static struct {
      * dimension arrays, at most the 2^20 a handle can name.
      */
     uint32_t ntex;
+    /**
+     * @brief Texture ids and slots. A handle names one of 2^20 texture ids, the arrays hold ntex slots: id_slot
+     * maps an id to its slot plus one and slot_id a slot to its id plus one (0: free). Slots are handed out from
+     * the free stack, then in turn; taking one that holds a texture waits for the work that may still use it.
+     * Everything below is indexed by slot, and the handle a program reads has its id replaced by the slot.
+     */
+    nvn_slots slots;
     VkDescriptorSetLayout layout;
     VkDescriptorPool pool;
     VkDescriptorSet set;
@@ -155,11 +163,12 @@ static bool make(void)
     t.img_views = calloc(IMAGES, sizeof *t.img_views);
     t.tex_level = calloc(t.ntex, sizeof *t.tex_level);
     t.slot_of = calloc(t.ntex, sizeof *t.slot_of);
+    bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20);
     t.id_of_slot = calloc(IMAGES, sizeof *t.id_of_slot);
     t.slot_guest = calloc(IMAGES, sizeof *t.slot_guest);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
-    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.slot_of && t.id_of_slot && t.slot_guest && t.samplers && t.sampler_bytes;
+    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.slot_of && slots_ok && t.id_of_slot && t.slot_guest && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -400,13 +409,52 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
     return RL_OK;
 }
 
-int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
+/**
+ * @brief The slot of texture id: the one it holds, or a free one, or the
+ * next in turn after the work that may use it has run. A slot another id
+ * held is cleared (its image slot too).
+ */
+static int slot_for(replay *r, uint32_t id, uint32_t *slot)
+{
+    uint32_t evicted;
+    *slot = nvn_slots_take(&t.slots, id, &evicted);
+    if (*slot == UINT32_MAX)
+        return nvn_vk_stop(r, "texture id %u is past the 2^20 a handle names", id);
+    if (!evicted)
+        return RL_OK;
+    if (!nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    t.tex_img[*slot] = NULL;
+    t.tex_guest[*slot] = 0;
+    if (t.slot_of[*slot]) {
+        t.id_of_slot[t.slot_of[*slot] - 1] = 0;
+        t.slot_of[*slot] = 0;
+    }
+    return RL_OK;
+}
+
+void nvn_texset_texture_gone(uint64_t tex)
+{
+    if (!t.ok)
+        return;
+    pthread_mutex_lock(&g.lock);
+    for (uint32_t ts = 0; ts < t.ntex; ts++)
+        if (t.slots.slot_id[ts] && t.tex_guest[ts] == tex) {
+            t.tex_guest[ts] = 0;
+            nvn_slots_free(&t.slots, ts);
+        }
+    pthread_mutex_unlock(&g.lock);
+}
+
+int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)
 {
     if (!make())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t id = handle & 0xfffffu, sid = handle >> 20;
-    if (id >= t.ntex)
-        return nvn_vk_stop(r, "texture id %u is past the layer's %u", id, t.ntex);
+    int src = slot_for(r, id, slot);
+    if (src != RL_OK)
+        return src;
+    uint32_t sl = *slot;
     uint8_t view[17] = { 0 };
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
@@ -420,9 +468,9 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
         return nvn_vk_stop(r, "cannot refill texture id %u from its storage", id);
     if (image)
         nvn_vk_written(v);
-    if (t.tex_img[id] == v && t.tex_guest[id] == tex && !memcmp(t.tex_view[id], view, sizeof view)) {
-        *kind = t.tex_kind[id];
-        memcpy(dim, t.dims.map + 4ull * id, 4);
+    if (t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
+        *kind = t.tex_kind[sl];
+        memcpy(dim, t.dims.map + 4ull * sl, 4);
         return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
     }
     nvn_view nv;
@@ -443,12 +491,12 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
     }
     *kind = kind_of(vf);
     *dim = dim_of(has_view && nv.has_target ? nv.target : v->d.target);
-    if (t.tex_img[id] && !nvn_vk_flush(r))
+    if (t.tex_img[sl] && !nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     for (uint32_t d = 0; d < DIMS; d++)
-        if (t.tex_views[id][d]) {
-            VK(vkDestroyImageView)(g.dev, t.tex_views[id][d], NULL);
-            t.tex_views[id][d] = NULL;
+        if (t.tex_views[sl][d]) {
+            VK(vkDestroyImageView)(g.dev, t.tex_views[sl][d], NULL);
+            t.tex_views[sl][d] = NULL;
         }
     VkDescriptorImageInfo ii[DIMS];
     VkWriteDescriptorSet w[DIMS];
@@ -460,30 +508,31 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
         if (!iv)
             return nvn_vk_stop(r, "cannot make a view of texture id %u as dimension %u", id, d);
         if (has_view)
-            t.tex_views[id][d] = iv;
+            t.tex_views[sl][d] = iv;
         ii[n] = (VkDescriptorImageInfo){ NULL, iv, VK_IMAGE_LAYOUT_GENERAL };
         w[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                        .dstSet = t.set,
                                        .dstBinding = 1 + 10 * *kind + d,
-                                       .dstArrayElement = id,
+                                       .dstArrayElement = sl,
                                        .descriptorCount = 1,
                                        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                                        .pImageInfo = &ii[n] };
         n++;
     }
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
-    t.tex_level[id] = has_view && nv.has_levels ? (uint32_t)nv.base_level : 0;
-    t.tex_img[id] = v;
-    t.tex_kind[id] = *kind;
-    t.tex_guest[id] = tex;
-    memcpy(t.tex_view[id], view, sizeof view);
-    memcpy(t.dims.map + 4ull * id, dim, 4);
+    t.tex_level[sl] = has_view && nv.has_levels ? (uint32_t)nv.base_level : 0;
+    t.tex_img[sl] = v;
+    t.tex_kind[sl] = *kind;
+    t.tex_guest[sl] = tex;
+    memcpy(t.tex_view[sl], view, sizeof view);
+    memcpy(t.dims.map + 4ull * sl, dim, 4);
     return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
 }
 
 int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim)
 {
-    int rc = nvn_texset_bind(r, handle, kind, dim);
+    uint32_t ts;
+    int rc = nvn_texset_bind(r, handle, kind, dim, &ts);
     if (rc != RL_OK)
         return rc;
     uint32_t id = handle & 0xfffffu;
@@ -493,7 +542,7 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
     if (!image)
         return nvn_vk_stop(r, "handle 0x%x binds texture id %u as an image, but it is not registered as one", handle,
                            id);
-    uint32_t s = t.slot_of[id];
+    uint32_t s = t.slot_of[ts];
     if (s && t.slot_guest[s - 1] == tex) {
         *slot = s - 1;
         return RL_OK;
@@ -509,10 +558,10 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
     } else if (!nvn_vk_flush(r)) {
         return nvn_vk_stop(r, "the host device failed a submit");
     }
-    if ((rc = bind_image(r, id, s - 1, t.tex_img[id], t.tex_level[id])) != RL_OK)
+    if ((rc = bind_image(r, id, s - 1, t.tex_img[ts], t.tex_level[ts])) != RL_OK)
         return rc;
-    t.slot_of[id] = s;
-    t.id_of_slot[s - 1] = id + 1;
+    t.slot_of[ts] = s;
+    t.id_of_slot[s - 1] = ts + 1;
     t.slot_guest[s - 1] = tex;
     *slot = s - 1;
     return RL_OK;

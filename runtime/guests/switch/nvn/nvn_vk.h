@@ -155,6 +155,8 @@ typedef struct nvn_gfx {
     uint32_t push_used[NVN_STAGES];
     /** @brief Each stage's c[2] as the driver fills it. */
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
+    /** @brief bank2 as the bound programs read it: each texture handle names the layer's slot, not the texture id (nvn_texset_bind). */
+    uint8_t bank2_host[NVN_STAGES][NVN_BANK2_BYTES];
     struct {
         uint64_t addr, size;
     } ubo[NVN_STAGES][NVN_UBO_SLOTS], vb[NVN_VERTEX_BUFFERS];
@@ -264,9 +266,12 @@ VkDescriptorSet nvn_texset(void);
  * @brief Makes the texture set hold texture handle's texture (in each array
  * its view type fits) and sampler; *kind gets its numeric kind (0 float,
  * 1 signed, 2 unsigned) and *dim its dimension (the translator's Dim).
- * Returns RL_OK, or RL_PENDING after a stop.
+ * *slot gets the slot the texture holds in the set: the arrays have room for
+ * fewer ids than a handle can name, so the handle a program reads must carry
+ * the slot in place of the id. A re-bound id keeps its slot. Returns RL_OK,
+ * or RL_PENDING after a stop.
  */
-int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim);
+int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot);
 /**
  * @brief Binds the image an image handle names as a storage image: *slot
  * gets the index the translated program reads it at (what the layer

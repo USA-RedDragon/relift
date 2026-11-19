@@ -779,7 +779,7 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
                 const nvn_consts *k = &r->st->consts[s];
                 rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[n]);
             } else if (b == 2) {
-                rc = bank_of(r, r->st->bank2[s], NVN_BANK2_BYTES, &bi[n]);
+                rc = bank_of(r, r->st->bank2_host[s], NVN_BANK2_BYTES, &bi[n]);
             } else {
                 rc = nvn_vk_stop(r, "program %s reads driver constant bank c[%u], which the layer does not fill yet",
                                  mods[s]->key, b);
@@ -837,11 +837,12 @@ static int bind_textures(replay *r, const module *m, uint32_t bank_no, uint8_t *
         memcpy(&handle, bank + h->offset, 4);
         bool image = h->offset >= img_lo && h->offset < img_hi;
         uint32_t slot;
-        int rc = image ? nvn_texset_image(r, handle, &slot, &kind, &dim) : nvn_texset_bind(r, handle, &kind, &dim);
+        int rc = image ? nvn_texset_image(r, handle, &slot, &kind, &dim) : nvn_texset_bind(r, handle, &kind, &dim, &slot);
         if (rc != RL_OK)
             return rc;
-        if (image)
-            memcpy(bank + h->offset, &slot, 4);
+        if (!image)
+            slot = (handle & 0xfff00000u) | slot;
+        memcpy(bank + h->offset, &slot, 4);
         for (uint32_t j = 0; j < m->nrecs; j++) {
             const nvn_iface_rec *c = &m->recs[j];
             if ((c->kind != NVN_IFACE_TEXTURE_KIND && c->kind != NVN_IFACE_TEXTURE_DIM) || c->bank != h->bank ||
@@ -1006,7 +1007,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             bound |= mods[s]->recs[i].kind == NVN_IFACE_TEXTURE;
         if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound)
             return nvn_vk_stop(r, "program %s samples textures only through register handles", mods[s]->key);
-        int trc = bind_textures(r, mods[s], 2, st->bank2[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s], 0, 0);
+        memcpy(st->bank2_host[s], st->bank2[s], NVN_BANK2_BYTES);
+        int trc = bind_textures(r, mods[s], 2, st->bank2_host[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s], 0, 0);
         if (trc != RL_OK)
             return trc;
         k.mods[s] = mods[s]->m;

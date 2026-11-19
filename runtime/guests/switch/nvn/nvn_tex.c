@@ -394,6 +394,7 @@ uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnTextureFinalize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
+    nvn_texset_texture_gone(c->x[0]);
     nvn_obj_free(nvn_obj_get(c->x[0], NVN_TEXTURE));
     return nvn_ret(c);
 }

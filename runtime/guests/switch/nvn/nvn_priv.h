@@ -687,6 +687,8 @@ bool nvn_version_measured(uint32_t info, int32_t *out);
 bool nvn_driver_reads_texture(const char *name);
 
 /** @brief The index of a proc that stays the SDK driver's own code (nvn_driver.c), or -1. */
+/** @brief Frees the slots that hold texture tex (an NVNtexture's guest address), at its finalize. */
+void nvn_texset_texture_gone(uint64_t tex);
 int nvn_driver_index(const char *name);
 
 /**

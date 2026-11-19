@@ -4,6 +4,7 @@
  * layout, device queries, syncs and command recording.
  */
 #include "nvn/nvn_priv.h"
+#include "nvn/nvn_slots.h"
 #include "tc.h"
 #include "vi.h"
 
@@ -185,6 +186,46 @@ TEST(nvn_sampler_compare_stays_the_drivers)
 {
     CHECK(nvn_driver_index("nvnSamplerCompare") >= 0);
     CHECK(nvn_driver_index("nvnTextureViewCompare") >= 0);
+}
+
+TEST(nvn_slots_hold_ids_past_the_device_limit)
+{
+    nvn_slots s;
+    CHECK(nvn_slots_init(&s, 4, 1u << 20));
+    uint32_t ev;
+    uint32_t a = nvn_slots_take(&s, 426141, &ev);
+    CHECK(a < 4);
+    CHECK_EQ(ev, 0);
+    CHECK_EQ(nvn_slots_take(&s, 426141, &ev), a);
+    CHECK_EQ(ev, 0);
+    CHECK_EQ(nvn_slots_take(&s, 1u << 20, &ev), UINT32_MAX);
+    uint32_t b = nvn_slots_take(&s, 7, &ev), c = nvn_slots_take(&s, 1048575, &ev);
+    CHECK(b != a && c != a && b != c);
+    nvn_slots_free(&s, b);
+    CHECK_EQ(nvn_slots_take(&s, 99, &ev), b);
+    CHECK_EQ(ev, 0);
+    CHECK_EQ(nvn_slots_take(&s, 7, &ev) < 4, true);
+    free(s.id_slot);
+    free(s.slot_id);
+    free(s.free_stack);
+}
+
+TEST(nvn_slots_evict_the_oldest_when_full)
+{
+    nvn_slots s;
+    CHECK(nvn_slots_init(&s, 2, 1u << 20));
+    uint32_t ev;
+    uint32_t a = nvn_slots_take(&s, 500000, &ev);
+    uint32_t b = nvn_slots_take(&s, 600000, &ev);
+    CHECK(a != b);
+    uint32_t c = nvn_slots_take(&s, 700000, &ev);
+    CHECK_EQ(c, a);
+    CHECK_EQ(ev, 500001);
+    CHECK_EQ(s.id_slot[500000], 0);
+    CHECK_EQ(nvn_slots_take(&s, 600000, &ev), b);
+    free(s.id_slot);
+    free(s.slot_id);
+    free(s.free_stack);
 }
 
 TEST(nvn_command_buffer_records_and_submits)
