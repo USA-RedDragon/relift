@@ -285,6 +285,35 @@ static inline void rl_arm32_fetch(rl_ctx *c, uint32_t pc, unsigned thumb)
     c->data_open = 0;
 }
 
+/**
+ * @brief rl_arm32_fetch for lifted code that keeps the budget in its local *budget. *line is the hot line
+ * the function found last and *cost its cycles, kept in locals that every runtime call resets to 0: only
+ * a runtime call changes rl_ctx.hot, so a fetch in that line, or in another line of hot, costs its cycles
+ * without a call. data is 1 when the instruction makes data accesses, which are the only readers of
+ * rl_ctx.data_open: only their instructions need the fetch's reset of it.
+ */
+static inline __attribute__((always_inline)) void rl_arm32_fetch_line(rl_ctx *c, int64_t *budget, uint32_t *line, int64_t *cost,
+                                                                      uint32_t pc, unsigned thumb, unsigned data)
+{
+    uint32_t l = (pc & ~31u) | 1u;
+    if (data)
+        c->data_open = 0;
+    if (RL_LIKELY(*line == l)) {
+        *budget -= *cost;
+        return;
+    }
+    if (RL_LIKELY(c->hot[(pc >> 5) % RL_ARM32_HOT_LINES] == l)) {
+        *line = l;
+        *cost = c->hot_cost;
+        *budget -= *cost;
+        return;
+    }
+    c->time.budget = *budget;
+    rl_arm32_fetch(c, pc, thumb);
+    *budget = c->time.budget;
+    *line = 0;
+}
+
 /** @brief A taken branch to target refills the pipeline: a nonsequential and a sequential code access there. */
 static inline void rl_arm32_refill(rl_ctx *c, uint32_t target, unsigned thumb, unsigned taken)
 {
@@ -294,6 +323,29 @@ static inline void rl_arm32_refill(rl_ctx *c, uint32_t target, unsigned thumb, u
     int64_t n = rl_arm32_wait(c, target, w, 0u);
     n += rl_arm32_wait(c, target, w, 1u);
     c->time.budget -= n;
+}
+
+/** @brief rl_arm32_refill for lifted code that keeps the budget in a local, with the locals of rl_arm32_fetch_line. */
+static inline __attribute__((always_inline)) void rl_arm32_refill_line(rl_ctx *c, int64_t *budget, uint32_t *line, int64_t *cost,
+                                                                       uint32_t target, unsigned thumb, unsigned taken)
+{
+    if (!taken)
+        return;
+    uint32_t l = (target & ~31u) | 1u;
+    if (RL_LIKELY(*line == l)) {
+        *budget -= 2 * *cost;
+        return;
+    }
+    if (RL_LIKELY(c->hot[(target >> 5) % RL_ARM32_HOT_LINES] == l)) {
+        *line = l;
+        *cost = c->hot_cost;
+        *budget -= 2 * *cost;
+        return;
+    }
+    c->time.budget = *budget;
+    rl_arm32_refill(c, target, thumb, 1u);
+    *budget = c->time.budget;
+    *line = 0;
 }
 
 /**

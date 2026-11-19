@@ -36,7 +36,7 @@ use std::collections::BTreeSet;
 use relift_cpu_arm32::decode::Profile;
 use relift_cpu_arm32::lift::{self, Bus, COND_FAIL, LiftError};
 use relift_cpu_arm32::regs;
-use relift_guest::{Frontend, Home, LiftFailure};
+use relift_guest::{BUDGET, Frontend, Home, LiftFailure};
 use relift_ir::{
     AddrClass, Block, CryptoOp, Exit, Flow, FpOp, Inst, IoKind, IoMap, Konst, Next, Op, Reg,
     RegFile, Value, Width,
@@ -318,8 +318,12 @@ fn reshape(
         push(b, Op::Guard(changed, CODE_CHANGED), None);
     }
     let at = konst(b, Width::W32, u64::from(pc));
+    let data = old
+        .iter()
+        .any(|i| matches!(i.op, Op::Load { .. } | Op::Store { .. }));
+    let data = konst(b, Width::W1, u64::from(data));
     let name = if thumb { FETCH_THUMB } else { FETCH_ARM };
-    let fetch = push(b, Op::intrinsic(name, vec![at]), None);
+    let fetch = push(b, Op::intrinsic(name, vec![at, data]), None);
     let mut map: Vec<Value> = Vec::with_capacity(old.len());
     let mut loads = 0;
     for inst in old {
@@ -462,11 +466,15 @@ impl Frontend for Nds {
 
     fn intrinsic(&self, name: &str, args: &[String]) -> Option<String> {
         Some(match (name, args) {
-            (FETCH_ARM, [pc]) => format!("rl_arm32_fetch(c, (uint32_t)({pc}), 0u)"),
-            (FETCH_THUMB, [pc]) => format!("rl_arm32_fetch(c, (uint32_t)({pc}), 1u)"),
+            (FETCH_ARM, [pc, data]) => format!(
+                "rl_arm32_fetch_line(c, &{BUDGET}, &rl_hl, &rl_hc, (uint32_t)({pc}), 0u, (unsigned)({data}))"
+            ),
+            (FETCH_THUMB, [pc, data]) => format!(
+                "rl_arm32_fetch_line(c, &{BUDGET}, &rl_hl, &rl_hc, (uint32_t)({pc}), 1u, (unsigned)({data}))"
+            ),
             (ENTER, [u, f]) => format!("rl_nds_cpu_enter(c, (uint32_t)({u}), (uint32_t)({f}))"),
             (REFILL, [t, thumb, taken]) => format!(
-                "rl_arm32_refill(c, (uint32_t)({t}), (unsigned)({thumb}), (unsigned)({taken}))"
+                "rl_arm32_refill_line(c, &{BUDGET}, &rl_hl, &rl_hc, (uint32_t)({t}), (unsigned)({thumb}), (unsigned)({taken}))"
             ),
             (CALL, [r]) => format!("rl_arm32_call(c, (uint32_t)({r}))"),
             (CP_WRITE, [k, v, g]) => {
@@ -511,6 +519,17 @@ impl Frontend for Nds {
 
     fn clock(&self) -> Option<&'static str> {
         Some("c->time")
+    }
+
+    fn clocked_intrinsic(&self, name: &str) -> bool {
+        matches!(name, FETCH_ARM | FETCH_THUMB | REFILL)
+    }
+
+    fn clock_locals(&self) -> Option<(&'static str, &'static str)> {
+        Some((
+            "uint32_t rl_hl = 0; int64_t rl_hc = 0; (void)rl_hl; (void)rl_hc;",
+            "rl_hl = 0;",
+        ))
     }
 
     fn io_calls(&self) -> (&'static str, &'static str) {
