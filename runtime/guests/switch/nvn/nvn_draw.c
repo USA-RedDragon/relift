@@ -20,6 +20,7 @@
  */
 #include "nvn_vk.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 #define MAX_PIPELINES 1024u
@@ -68,7 +69,7 @@ typedef struct pipe_key {
     uint32_t cull, front, polygon, bias_enable;
     uint32_t depth_test, depth_write, depth_func, stencil_test;
     VkStencilOpState front_ops, back_ops;
-    uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp, rasterizer_discard;
+    uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp, rasterizer_discard, conservative_raster;
     /** @brief Specialization constants of each stage: id and value. */
     uint32_t nspec[5];
     VkSpecializationMapEntry spec_map[5][MAX_SPECS];
@@ -536,6 +537,7 @@ static int fixed_state(replay *r, pipe_key *k)
     }
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
+    k->conservative_raster = st->conservative_raster && g.conservative_raster;
     k->depth_clamp = st->depth_clamp;
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
     return RL_OK;
@@ -675,7 +677,15 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                              .pNext = k->negative_one_to_one ? &clip : NULL,
                                              .viewportCount = 1,
                                              .scissorCount = 1 };
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        VkFlags flags;
+        int conservativeRasterizationMode;
+        float extraPrimitiveOverestimationSize;
+    } conservative = { (VkStructureType)1000101001, NULL, 0, 1, 0.0f };
     VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                  .pNext = k->conservative_raster ? &conservative : NULL,
                                                   .polygonMode = (VkPolygonMode)k->polygon,
                                                   .cullMode = k->cull,
                                                   .frontFace = (VkFrontFace)k->front,
@@ -1599,6 +1609,14 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     case NVN_CMD_SET_RASTERIZER_DISCARD:
         st->rasterizer_discard = (e->x[1] & 0xff) != 0;
+        return RL_OK;
+    case NVN_CMD_SET_CONSERVATIVE_RASTER_ENABLE:
+        st->conservative_raster = (e->x[1] & 0xff) != 0;
+        if (st->conservative_raster && !g.conservative_raster && !g.conservative_warned) {
+            g.conservative_warned = true;
+            rl_log(RL_LOG_WARN, "nvn", "conservative rasterization is requested and the host device has no VK_EXT_conservative_rasterization: "
+                   "primitives are rasterized normally");
+        }
         return RL_OK;
     case NVN_CMD_SET_PATCH_SIZE:
         return RL_OK;

@@ -150,7 +150,7 @@ static void bring_up(void)
     ext_features recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE }, fma = { .sType = STYPE_SHADER_FMA };
     ext_features coop = { .sType = STYPE_COOPERATIVE_MATRIX };
     ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma, &coop };
-    const char *ext_names[DEVICE_EXTS + 1];
+    const char *ext_names[DEVICE_EXTS + 2];
     uint32_t next = 0, nnames = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -170,6 +170,9 @@ static void bring_up(void)
         if (!strcmp(exts[i].extensionName, "VK_EXT_external_memory_host")) {
             ext_names[nnames++] = "VK_EXT_external_memory_host";
             g.host_import = true;
+        } else if (!strcmp(exts[i].extensionName, "VK_EXT_conservative_rasterization")) {
+            ext_names[nnames++] = "VK_EXT_conservative_rasterization";
+            g.conservative_raster = true;
         }
     free(exts);
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,

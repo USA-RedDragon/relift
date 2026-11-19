@@ -99,6 +99,8 @@ typedef struct nvn_vkdev {
     bool depth_clamp;
     /** @brief Line widths other than 1 are allowed (wideLines). */
     bool wide_lines;
+    /** @brief VK_EXT_conservative_rasterization is on: nvnCommandBufferSetConservativeRasterEnable is honored. */
+    bool conservative_raster, conservative_warned;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
@@ -185,6 +187,7 @@ typedef struct nvn_gfx {
     uint32_t stencil_value_mask[2], stencil_mask[2], stencil_ref[2];
     bool primitive_restart;
     bool rasterizer_discard;
+    bool conservative_raster;
     uint32_t restart_index;
     float polygon_offset[3];
     float blend_color[4];

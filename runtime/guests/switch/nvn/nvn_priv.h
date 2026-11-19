@@ -505,6 +505,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_DEPTH_BOUNDS, nvnCommandBufferSetDepthBounds) \
     X(NVN_CMD_SET_GRAPHICS_WORKLOAD_PRIORITY, nvnCommandBufferSetGraphicsWorkloadPriority) \
     X(NVN_CMD_SET_RESOURCE_OCCUPANCY, nvnCommandBufferSetResourceOccupancy) \
+    X(NVN_CMD_SET_CONSERVATIVE_RASTER_ENABLE, nvnCommandBufferSetConservativeRasterEnable) \
     X(NVN_CMD_SET_DEPTH_CLAMP, nvnCommandBufferSetDepthClamp) \
     X(NVN_CMD_SET_DEPTH_RANGE, nvnCommandBufferSetDepthRange) \
     X(NVN_CMD_SET_DEPTH_RANGES, nvnCommandBufferSetDepthRanges) \
