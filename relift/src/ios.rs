@@ -120,6 +120,8 @@ pub struct Deps {
     pub moltenvk_missing: String,
     /// The libvpx source tree, when unpacked.
     pub vpx: Option<crate::runtime_link::Vpx>,
+    /// The dav1d source tree, when unpacked.
+    pub dav1d: Option<crate::runtime_link::Dav1d>,
 }
 
 impl Deps {
@@ -151,6 +153,7 @@ impl Deps {
             ),
             moltenvk: mvk.is_file().then_some(mvk),
             vpx: crate::runtime_link::find_vpx(cache_root),
+            dav1d: crate::runtime_link::find_dav1d(cache_root),
         };
         for p in [&d.sdl3_lib, &d.opus_lib] {
             if !p.is_file() {

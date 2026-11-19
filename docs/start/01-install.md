@@ -15,7 +15,7 @@ components = ["clippy", "rustfmt"]
 <!-- /docgen:code -->
 
 - clang or `zig cc`, to build the C that relift writes, and ninja.
-- Optional: SDL3 for a window, SDL3 and libopus for sound, and a Vulkan loader (MoltenVK on macOS) for Switch games that render. Without SDL3 a program runs headless. Switch games' VP9 movies need the pinned libvpx source (`runtime/tools/libvpx_src.py`). Phone builds need the Android SDK and NDK, or Xcode.
+- Optional: SDL3 for a window, SDL3 and libopus for sound, and a Vulkan loader (MoltenVK on macOS) for Switch games that render. Without SDL3 a program runs headless. Switch games' VP9 movies need the pinned libvpx source (`runtime/tools/libvpx_src.py`) and Switch 2 games' AV1 movies the pinned dav1d source (`runtime/tools/dav1d_src.py`). Phone builds need the Android SDK and NDK, or Xcode.
 - A decrypted dump of a game that you own, to use in [the next step](02-first-game.md): for the Switch a `.nup` or an extracted `exefs` and `romfs` tree, otherwise a cartridge ROM (`.gb`, `.gbc` or `.gba`). relift refuses encrypted dumps and ships no game data.
 
 ## Build the tools

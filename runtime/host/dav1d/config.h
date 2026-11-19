@@ -1,0 +1,26 @@
+#ifndef RELIFT_DAV1D_CONFIG_H
+#define RELIFT_DAV1D_CONFIG_H
+
+#define ARCH_AARCH64 0
+#define ARCH_ARM 0
+#define ARCH_LOONGARCH 0
+#define ARCH_LOONGARCH32 0
+#define ARCH_LOONGARCH64 0
+#define ARCH_PPC64LE 0
+#define ARCH_RISCV 0
+#define ARCH_X86 0
+#define ARCH_X86_32 0
+#define ARCH_X86_64 0
+
+#define CONFIG_8BPC 1
+#define CONFIG_16BPC 1
+#define CONFIG_LOG 0
+#define HAVE_ASM 0
+#define TRIM_DSP_FUNCTIONS 0
+
+#ifndef _WIN32
+#define HAVE_POSIX_MEMALIGN 1
+#define HAVE_UNISTD_H 1
+#endif
+
+#endif

@@ -30,6 +30,13 @@
 //! `runtime/tools/libvpx_src.py`), plain C only, with the generic
 //! configuration in `runtime/host/vpx`. Without it the pictures stay
 //! undecoded.
+//!
+//! dav1d's AV1 decoder, which decodes the movies of Switch 2 games, is
+//! compiled the same way: `RELIFT_DAV1D_DIR` or
+//! `<cache>/sdk/dav1d/<version>/` (unpacked by
+//! `runtime/tools/dav1d_src.py`), plain C only, with the generic
+//! configuration in `runtime/host/dav1d`. Without it AV1 movies stay
+//! undecoded.
 
 use std::path::{Path, PathBuf};
 
@@ -107,6 +114,81 @@ const LIBVPX_SOURCES: [&str; 40] = [
     "vpx_util/vpx_thread.c",
 ];
 
+/// The pinned dav1d release whose AV1 decoder the runtime compiles in.
+pub const DAV1D_VERSION: &str = "1.5.3";
+
+/// The dav1d files that do not depend on the bit depth.
+const DAV1D_SOURCES: [&str; 26] = [
+    "src/cdf.c",
+    "src/cpu.c",
+    "src/ctx.c",
+    "src/data.c",
+    "src/decode.c",
+    "src/dequant_tables.c",
+    "src/getbits.c",
+    "src/intra_edge.c",
+    "src/itx_1d.c",
+    "src/lf_mask.c",
+    "src/lib.c",
+    "src/log.c",
+    "src/mem.c",
+    "src/msac.c",
+    "src/obu.c",
+    "src/pal.c",
+    "src/picture.c",
+    "src/qm.c",
+    "src/ref.c",
+    "src/refmvs.c",
+    "src/scan.c",
+    "src/tables.c",
+    "src/thread_task.c",
+    "src/warpmv.c",
+    "src/wedge.c",
+    "src/win32/thread.c",
+];
+
+/// The dav1d files compiled once per bit depth (8 and 16).
+const DAV1D_BITDEPTH_SOURCES: [&str; 13] = [
+    "src/cdef_apply_tmpl.c",
+    "src/cdef_tmpl.c",
+    "src/fg_apply_tmpl.c",
+    "src/filmgrain_tmpl.c",
+    "src/ipred_prepare_tmpl.c",
+    "src/ipred_tmpl.c",
+    "src/itx_tmpl.c",
+    "src/lf_apply_tmpl.c",
+    "src/loopfilter_tmpl.c",
+    "src/looprestoration_tmpl.c",
+    "src/lr_apply_tmpl.c",
+    "src/mc_tmpl.c",
+    "src/recon_tmpl.c",
+];
+
+/// A dav1d source tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dav1d {
+    pub src: PathBuf,
+    pub origin: String,
+}
+
+fn dav1d_in(dir: &Path, origin: String) -> Option<Dav1d> {
+    dir.join("src").join("lib.c").is_file().then(|| Dav1d {
+        src: dir.to_path_buf(),
+        origin,
+    })
+}
+
+/// The dav1d source tree, or `None`.
+pub fn find_dav1d(cache_root: &Path) -> Option<Dav1d> {
+    if let Some(d) = std::env::var_os("RELIFT_DAV1D_DIR").filter(|v| !v.is_empty()) {
+        return dav1d_in(Path::new(&d), "RELIFT_DAV1D_DIR".into());
+    }
+    dav1d_in(
+        &cache_root.join("sdk").join("dav1d").join(DAV1D_VERSION),
+        format!("{DAV1D_VERSION}, pinned source"),
+    )
+}
+
 /// A libvpx source tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Vpx {
@@ -153,6 +235,8 @@ pub struct Extras {
     pub adrenotools: Option<crate::android::Adrenotools>,
     /// libvpx, compiled in for VP9 decoding.
     pub vpx: Option<Vpx>,
+    /// dav1d, compiled in for AV1 decoding.
+    pub dav1d: Option<Dav1d>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -324,6 +408,7 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
     let opus_src = rt.join("host").join("opus_libopus.c");
     let opus = find_opus().filter(|_| opus_src.is_file());
     let vpx = find_vpx(cache_root).filter(|_| has_vpx_glue(rt));
+    let dav1d = find_dav1d(cache_root).filter(|_| has_dav1d_glue(rt));
     Ok(Extras {
         vk,
         window: sdl3.as_ref().map(|_| window),
@@ -339,7 +424,12 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         vulkan: find_moltenvk(cache_root),
         adrenotools: None,
         vpx,
+        dav1d,
     })
+}
+
+fn has_dav1d_glue(rt: &Path) -> bool {
+    rt.join("host").join("av1_dav1d.c").is_file()
 }
 
 fn has_vpx_glue(rt: &Path) -> bool {
@@ -389,6 +479,7 @@ pub fn android_extras(
         opus: None,
         adrenotools: deps.adrenotools.clone(),
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
+        dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
     })
 }
 
@@ -442,6 +533,7 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
         opus: None,
         adrenotools: None,
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
+        dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
     })
 }
 
@@ -465,10 +557,16 @@ impl Extras {
                 "{window}; opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR)"
             ),
         };
-        match &self.vpx {
+        let video = match &self.vpx {
             Some(v) => format!("{audio}; vp9: libvpx ({})", v.origin),
             None => format!(
                 "{audio}; vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py)"
+            ),
+        };
+        match &self.dav1d {
+            Some(v) => format!("{video}; av1: dav1d ({})", v.origin),
+            None => format!(
+                "{video}; av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)"
             ),
         }
     }
@@ -496,6 +594,9 @@ impl Extras {
         }
         if self.vpx.is_some() {
             d.push("-DRL_HOST_VP9".into());
+        }
+        if self.dav1d.is_some() {
+            d.push("-DRL_HOST_AV1".into());
         }
         if let Some(a) = &self.adrenotools {
             d.push("-DRL_ADRENOTOOLS".into());
@@ -583,8 +684,85 @@ impl Extras {
         if let Some(v) = &self.vpx {
             out.extend(vpx_compiles(rt, v, rt_flags, obj));
         }
+        if let Some(v) = &self.dav1d {
+            out.extend(dav1d_compiles(rt, v, rt_flags, obj));
+        }
         out
     }
+}
+
+/// The dav1d sources (the bit depth files twice), with the generic
+/// configuration and without the runtime's include paths and defines, and
+/// the glue.
+fn dav1d_compiles(
+    rt: &Path,
+    v: &Dav1d,
+    rt_flags: &[String],
+    obj: &dyn Fn(&Path) -> PathBuf,
+) -> Vec<Compile> {
+    let config = rt.join("host").join("dav1d");
+    let own: Vec<String> = rt_flags
+        .iter()
+        .filter(|f| !f.starts_with("-I") && !f.starts_with("-D"))
+        .cloned()
+        .collect();
+    let flags = |extra: Option<u32>| -> Vec<String> {
+        [
+            format!("-I{}", config.display()),
+            format!("-I{}", v.src.display()),
+            format!("-I{}", v.src.join("include").display()),
+            format!("-I{}", v.src.join("include").join("dav1d").display()),
+            "-D_GNU_SOURCE".into(),
+        ]
+        .into_iter()
+        .chain(extra.map(|b| format!("-DBITDEPTH={b}")))
+        .chain(own.iter().cloned())
+        .collect()
+    };
+    let mut out: Vec<Compile> = DAV1D_SOURCES
+        .iter()
+        .map(|s| Compile {
+            src: v.src.join(s),
+            obj: obj(&rt.join("host").join("dav1d").join(s)),
+            flags: flags(None),
+            pool: None,
+            stage: 0,
+        })
+        .collect();
+    for s in DAV1D_BITDEPTH_SOURCES {
+        for bits in [8u32, 16] {
+            out.push(Compile {
+                src: v.src.join(s),
+                obj: obj(&rt
+                    .join("host")
+                    .join("dav1d")
+                    .join(s.replace("_tmpl.c", &format!("_{bits}bpc.c")))),
+                flags: flags(Some(bits)),
+                pool: None,
+                stage: 0,
+            });
+        }
+    }
+    let glue = rt.join("host").join("av1_dav1d.c");
+    out.push(Compile {
+        obj: obj(&glue),
+        src: glue,
+        flags: rt_flags
+            .iter()
+            .cloned()
+            .chain([
+                "-isystem".into(),
+                config.display().to_string(),
+                "-isystem".into(),
+                v.src.join("include").display().to_string(),
+                "-isystem".into(),
+                v.src.join("include").join("dav1d").display().to_string(),
+            ])
+            .collect(),
+        pool: None,
+        stage: 0,
+    });
+    out
 }
 
 /// The libvpx sources, with the generic configuration and without the
@@ -688,6 +866,7 @@ mod tests {
             opus: None,
             adrenotools: None,
             vpx: None,
+            dav1d: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
@@ -711,6 +890,7 @@ mod tests {
                 licenses: Vec::new(),
             }),
             vpx: None,
+            dav1d: None,
         };
         assert_eq!(e.defines(), ["-DRL_ADRENOTOOLS", "-I/a/include"]);
         assert_eq!(e.libs(), ["/a/lib/libadrenotools.so"]);
@@ -731,6 +911,7 @@ mod tests {
                 src: PathBuf::from("/v"),
                 origin: "t".into(),
             }),
+            dav1d: None,
         };
         assert!(e.note().contains("vp9: libvpx (t)"));
         assert_eq!(e.defines(), ["-DRL_HOST_VP9"]);
@@ -748,6 +929,52 @@ mod tests {
         let glue = c.last().unwrap();
         assert_eq!(glue.src, Path::new("/rt/host/vp9_libvpx.c"));
         assert!(glue.flags.contains(&"-DY".to_string()));
+    }
+
+    #[test]
+    fn dav1d_compiles_both_bit_depths_and_the_glue() {
+        let e = Extras {
+            vk: Vec::new(),
+            window: None,
+            sdl3: None,
+            vulkan: None,
+            host: Vec::new(),
+            opus_src: None,
+            opus: None,
+            adrenotools: None,
+            vpx: None,
+            dav1d: Some(Dav1d {
+                src: PathBuf::from("/d"),
+                origin: "t".into(),
+            }),
+        };
+        assert!(e.note().contains("av1: dav1d (t)"));
+        assert_eq!(e.defines(), ["-DRL_HOST_AV1"]);
+        let rt = Path::new("/rt");
+        let flags = ["-O2".to_string(), "-Ix".into(), "-DY".into()];
+        let c = e.compiles(rt, &flags, &|s| s.with_extension("o"));
+        assert_eq!(
+            c.len(),
+            DAV1D_SOURCES.len() + 2 * DAV1D_BITDEPTH_SOURCES.len() + 1
+        );
+        assert_eq!(c[0].src, Path::new("/d/src/cdf.c"));
+        let cdef: Vec<_> = c
+            .iter()
+            .filter(|x| x.src == Path::new("/d/src/cdef_tmpl.c"))
+            .collect();
+        assert_eq!(cdef.len(), 2);
+        assert_eq!(cdef[0].obj, Path::new("/rt/host/dav1d/src/cdef_8bpc.o"));
+        assert!(cdef[0].flags.contains(&"-DBITDEPTH=8".to_string()));
+        assert!(cdef[1].flags.contains(&"-DBITDEPTH=16".to_string()));
+        assert!(!cdef[0].flags.contains(&"-Ix".to_string()));
+        let glue = c.last().unwrap();
+        assert_eq!(glue.src, Path::new("/rt/host/av1_dav1d.c"));
+        assert!(glue.flags.contains(&"-DY".to_string()));
+    }
+
+    #[test]
+    fn missing_dav1d_dir_is_not_found() {
+        assert_eq!(dav1d_in(Path::new("/nonexistent"), "x".into()), None);
     }
 
     #[test]
@@ -778,6 +1005,7 @@ mod tests {
             opus: None,
             adrenotools: None,
             vpx: None,
+            dav1d: None,
         };
         std::fs::remove_dir_all(&m).unwrap();
         assert!(e.note().contains("MoltenVK linked (t)"));

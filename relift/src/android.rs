@@ -133,6 +133,8 @@ pub struct Deps {
     pub adrenotools: Option<Adrenotools>,
     /// The libvpx source tree, when unpacked.
     pub vpx: Option<crate::runtime_link::Vpx>,
+    /// The dav1d source tree, when unpacked.
+    pub dav1d: Option<crate::runtime_link::Dav1d>,
 }
 
 /// The libadrenotools build of one target.
@@ -333,6 +335,7 @@ impl Deps {
             opus_lib: opus.join("lib").join("libopus.a"),
             adrenotools,
             vpx: crate::runtime_link::find_vpx(cache_root),
+            dav1d: crate::runtime_link::find_dav1d(cache_root),
         };
         let at_files = d.adrenotools.iter().flat_map(|a| {
             std::iter::once(&a.lib)
@@ -999,6 +1002,12 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
     z.add("assets/licenses/fxaa.txt", LICENSE_FXAA.as_bytes().to_vec());
     z.add("assets/licenses/smaa.txt", LICENSE_SMAA.as_bytes().to_vec());
     z.add("assets/licenses/fsr1.txt", LICENSE_FSR1.as_bytes().to_vec());
+    if a.deps.dav1d.is_some() {
+        z.add(
+            "assets/licenses/dav1d.txt",
+            include_bytes!("../../runtime/host/dav1d/NOTICE").to_vec(),
+        );
+    }
     if a.about.vulkan {
         z.add("assets/licenses/zstd.txt", LICENSE_ZSTD.as_bytes().to_vec());
     }
@@ -1178,6 +1187,7 @@ mod tests {
             opus_lib: PathBuf::new(),
             adrenotools: None,
             vpx: None,
+            dav1d: None,
         };
         let a = Apk {
             package: "dev.relift.game.x",

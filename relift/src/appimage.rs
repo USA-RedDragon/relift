@@ -31,6 +31,8 @@ const LICENSE_RELIFT: &str = include_str!("../../LICENSE");
 /// The license of the Zstandard decoder compiled into Switch programs.
 const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
 /// The licenses of the picture options' FXAA, SMAA and FSR 1 passes, in every runtime.
+/// The notice of the dav1d AV1 decoder the runtime compiles in.
+const LICENSE_DAV1D: &str = include_str!("../../runtime/host/dav1d/NOTICE");
 const LICENSE_FXAA: &str = include_str!("../../runtime/third_party/fxaa/LICENSE");
 const LICENSE_SMAA: &str = include_str!("../../runtime/third_party/smaa/LICENSE");
 const LICENSE_FSR1: &str = include_str!("../../runtime/third_party/fsr1/LICENSE");
@@ -340,6 +342,7 @@ fn licenses_file(name: &str, bundled: &[Bundled], switch: bool) -> String {
     s.push_str("- AMD FidelityFX Super Resolution 1 (GPUOpen-Effects/FidelityFX-FSR), compiled into the runtime's upscaler option: MIT, https://github.com/GPUOpen-Effects/FidelityFX-FSR (the text is in fsr1-LICENSE)\n");
     if switch {
         s.push_str("- Zstandard decoder (zstd v1.5.7), compiled into the program: BSD-3-Clause, https://github.com/facebook/zstd (the text is in zstd-LICENSE)\n");
+        s.push_str("- dav1d AV1 decoder (1.5.3, VideoLAN), compiled into the program when its source was available: BSD-2-Clause, https://code.videolan.org/videolan/dav1d (the text is in dav1d-LICENSE)\n");
     }
     for b in bundled {
         match KNOWN.iter().find(|k| b.soname.starts_with(k.prefix)) {
@@ -376,6 +379,7 @@ fn write_licenses(
     relift_cache::write_if_changed(&dir.join("fsr1-LICENSE"), LICENSE_FSR1.as_bytes())?;
     if switch {
         relift_cache::write_if_changed(&dir.join("zstd-LICENSE"), LICENSE_ZSTD.as_bytes())?;
+        relift_cache::write_if_changed(&dir.join("dav1d-LICENSE"), LICENSE_DAV1D.as_bytes())?;
     }
     relift_cache::write_if_changed(&dir.join("relift-LICENSE"), LICENSE_RELIFT.as_bytes())?;
     relift_cache::write_if_changed(

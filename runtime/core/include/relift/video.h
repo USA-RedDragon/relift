@@ -176,6 +176,28 @@ typedef struct rl_vp9_stream_backend {
     int (*decode)(void *d, const uint8_t *data, size_t size, rl_vp9_image *out);
 } rl_vp9_stream_backend;
 
+/** @brief The picture every whole-frame backend returns: 8-bit 4:2:0 in three planes. */
+typedef rl_vp9_image rl_video_image;
+
+/**
+ * @brief An AV1 decoder that takes the stream's temporal units (OBUs). Pictures of other bit depths or chroma
+ * layouts come back converted to 8-bit 4:2:0.
+ */
+typedef struct rl_av1_stream_backend {
+    /** @brief Short name for logs. */
+    const char *name;
+    /** @brief A decoder instance, NULL when there is none. */
+    void *(*open)(void);
+    void (*close)(void *d);
+    /** @brief As rl_vp9_stream_backend::decode, for one temporal unit. */
+    int (*decode)(void *d, const uint8_t *data, size_t size, rl_video_image *out);
+} rl_av1_stream_backend;
+
+/** @brief The AV1 backend: the host's when built in, else a stub that decodes nothing. */
+RL_RUNTIME_API const rl_av1_stream_backend *rl_av1_stream_backend_current(void);
+/** @brief The host's AV1 backend (runtime/host, only with RL_HOST_AV1). */
+RL_RUNTIME_API const rl_av1_stream_backend *rl_host_av1_stream_backend(void);
+
 /** @brief The whole-frame VP9 backend: the host's when built in, else a stub that decodes nothing. */
 RL_RUNTIME_API const rl_vp9_stream_backend *rl_vp9_stream_backend_current(void);
 /** @brief The host's whole-frame VP9 backend (runtime/host, only with RL_HOST_VP9). */
