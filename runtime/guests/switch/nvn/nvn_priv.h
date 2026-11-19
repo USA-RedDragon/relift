@@ -494,6 +494,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_RESET_COUNTER, nvnCommandBufferResetCounter) \
     X(NVN_CMD_RESTORE_ZCULL_DATA, nvnCommandBufferRestoreZCullData) \
     X(NVN_CMD_SAVE_ZCULL_DATA, nvnCommandBufferSaveZCullData) \
+    X(NVN_CMD_SET_BLEND_COLOR, nvnCommandBufferSetBlendColor) \
     X(NVN_CMD_SET_COMPUTE_OVERLAP_MODE, nvnCommandBufferSetComputeOverlapMode) \
     X(NVN_CMD_SET_COMPUTE_WORKLOAD_PRIORITY, nvnCommandBufferSetComputeWorkloadPriority) \
     X(NVN_CMD_SET_DEPTH_BOUNDS, nvnCommandBufferSetDepthBounds) \
@@ -502,6 +503,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_DEPTH_CLAMP, nvnCommandBufferSetDepthClamp) \
     X(NVN_CMD_SET_DEPTH_RANGE, nvnCommandBufferSetDepthRange) \
     X(NVN_CMD_SET_DEPTH_RANGES, nvnCommandBufferSetDepthRanges) \
+    X(NVN_CMD_SET_LINE_WIDTH, nvnCommandBufferSetLineWidth) \
     X(NVN_CMD_SET_PATCH_SIZE, nvnCommandBufferSetPatchSize) \
     X(NVN_CMD_SET_POLYGON_OFFSET_CLAMP, nvnCommandBufferSetPolygonOffsetClamp) \
     X(NVN_CMD_SET_PRIMITIVE_RESTART, nvnCommandBufferSetPrimitiveRestart) \

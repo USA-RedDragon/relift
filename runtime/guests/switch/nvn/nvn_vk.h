@@ -97,6 +97,8 @@ typedef struct nvn_vkdev {
     bool depth_clip_control;
     /** @brief The device can clamp fragment depth to the viewport range instead of clipping it (depthClamp). */
     bool depth_clamp;
+    /** @brief Line widths other than 1 are allowed (wideLines). */
+    bool wide_lines;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */

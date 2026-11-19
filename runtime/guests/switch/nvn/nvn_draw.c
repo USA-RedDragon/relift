@@ -963,7 +963,7 @@ static void dynamic_state(replay *r, VkRect2D area)
     VK(vkCmdSetStencilReference)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_ref[1]);
     VK(vkCmdSetDepthBias)(g.cb, st->polygon_offset[1], st->polygon_offset[2], st->polygon_offset[0]);
     VK(vkCmdSetBlendConstants)(g.cb, st->blend_color);
-    VK(vkCmdSetLineWidth)(g.cb, st->line_width);
+    VK(vkCmdSetLineWidth)(g.cb, g.wide_lines ? st->line_width : 1.0f);
 }
 
 /** @brief What a draw puts into the batch being recorded, and where. */
@@ -1595,6 +1595,13 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
             return nvn_vk_stop(r, "primitive restart index 0x%x", st->restart_index);
         return RL_OK;
     case NVN_CMD_SET_PATCH_SIZE:
+        return RL_OK;
+    case NVN_CMD_SET_LINE_WIDTH:
+        memcpy(&st->line_width, &e->d[0], 4);
+        return RL_OK;
+    case NVN_CMD_SET_BLEND_COLOR:
+        for (int i = 0; i < 4; i++)
+            memcpy(&st->blend_color[i], &e->d[i], 4);
         return RL_OK;
     case NVN_CMD_REPORT_COUNTER:
         return nvn_counters_report(r, (uint32_t)e->x[1], e->x[2]);
