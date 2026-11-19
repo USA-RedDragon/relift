@@ -68,7 +68,7 @@ typedef struct pipe_key {
     uint32_t cull, front, polygon, bias_enable;
     uint32_t depth_test, depth_write, depth_func, stencil_test;
     VkStencilOpState front_ops, back_ops;
-    uint32_t primitive_restart, negative_one_to_one, patch_points;
+    uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp;
     /** @brief Specialization constants of each stage: id and value. */
     uint32_t nspec[5];
     VkSpecializationMapEntry spec_map[5][MAX_SPECS];
@@ -535,6 +535,7 @@ static int fixed_state(replay *r, pipe_key *k)
                                (uint32_t)(a2c & 0xff));
     }
     k->primitive_restart = st->primitive_restart;
+    k->depth_clamp = st->depth_clamp;
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
     return RL_OK;
 }
@@ -677,6 +678,7 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                                   .polygonMode = (VkPolygonMode)k->polygon,
                                                   .cullMode = k->cull,
                                                   .frontFace = (VkFrontFace)k->front,
+                                                  .depthClampEnable = k->depth_clamp,
                                                   .depthBiasEnable = k->bias_enable,
                                                   .lineWidth = 1.0f };
     VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -1408,6 +1410,11 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
             memcpy(st->push[stage][slot] + off, data, size);
         return RL_OK;
     }
+    case NVN_CMD_SET_DEPTH_CLAMP:
+        if ((e->x[1] & 0xff) && !g.depth_clamp)
+            return nvn_vk_stop(r, "depth clamp, which the host device does not have");
+        st->depth_clamp = (e->x[1] & 0xff) != 0;
+        return RL_OK;
     case NVN_CMD_SET_VIEWPORT:
         for (int i = 0; i < 4; i++)
             st->viewports[0][i] = (float)(int32_t)e->x[1 + i];

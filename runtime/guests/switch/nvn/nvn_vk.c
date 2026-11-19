@@ -182,6 +182,7 @@ static void bring_up(void)
         rl_log(RL_LOG_ERROR, "nvn", "%s has no dynamic rendering", g.name);
         return;
     }
+    g.depth_clamp = f2.features.depthClamp;
     f2.features.robustBufferAccess = VK_FALSE;
     f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     f12.bufferDeviceAddressMultiDevice = VK_FALSE;

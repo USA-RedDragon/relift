@@ -89,6 +89,8 @@ typedef struct nvn_vkdev {
     pthread_mutex_t lock;
     bool ok;
     bool depth_clip_control;
+    /** @brief The device can clamp fragment depth to the viewport range instead of clipping it (depthClamp). */
+    bool depth_clamp;
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
     bool host_import;
     uint64_t import_align;
@@ -168,6 +170,7 @@ typedef struct nvn_gfx {
     float line_width;
     /** @brief Counter types a ResetCounter zeroed that no draw has run since (bit n: type n). */
     uint32_t counters_zero;
+    bool depth_clamp;
 } nvn_gfx;
 
 /** @brief One command set being replayed. */
