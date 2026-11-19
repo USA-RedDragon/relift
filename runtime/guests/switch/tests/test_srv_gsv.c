@@ -218,6 +218,86 @@ TEST(gsv_display_session_answers_nn_vi)
     CHECK_EQ(tipc(c, d, 999, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
 }
 
+static uint32_t display_session(rl_ctx *c, uint64_t heap)
+{
+    uint32_t h = supervisor(c, heap);
+    if (!h || tipc(c, h, 301, NULL, 0, 0) != 0)
+        return 0;
+    tc_req q = tc_new(305);
+    q.tipc = true;
+    tc_put64(&q, 0x300010000ull);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    return r.result || r.nmove != 1 ? 0 : r.move[0];
+}
+
+static tc_res display_query(rl_ctx *c, uint32_t d, uint32_t cmd, uint64_t name)
+{
+    tc_req q = tc_new(cmd);
+    q.tipc = true;
+    tc_put64(&q, name);
+    return tc_send(c, (tc_obj){ .handle = d }, q);
+}
+
+TEST(gsv_display_change_events_fire_when_bound_and_the_queries_answer)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t d = display_session(c, heap);
+    CHECK(d != 0);
+    tc_req q = tc_new(31);
+    q.tipc = true;
+    tc_put32(&q, 5);
+    tc_res r = tc_send(c, (tc_obj){ .handle = d }, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    *(uint32_t *)(void *)(t_mem() + heap + 0x800) = r.move[0];
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
+    q = tc_new(265);
+    q.tipc = true;
+    tc_put64(&q, 0x00746c7561666564ull);
+    tc_put32(&q, 5);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = d }, q).result, 0);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    q = tc_new(31);
+    q.tipc = true;
+    tc_put32(&q, 16);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = d }, q).result, SF_RESULT_INVALID_HEADER);
+
+    r = display_query(c, d, 103, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 60);
+    CHECK_EQ(tc_u32(&r, 4), 0);
+    r = display_query(c, d, 104, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 1);
+    CHECK_EQ(tc_u32(&r, 8), 400);
+    r = display_query(c, d, 105, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 203);
+}
+
+TEST(gsv_display_buffer_max_resolution_follows_the_operation_mode)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t d = display_session(c, heap);
+    CHECK(d != 0);
+    tc_res r = display_query(c, d, 106, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 2);
+    rl_am_set_operation_mode(true);
+    r = display_query(c, d, 106, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 4);
+    CHECK_EQ(display_query(c, d, 106, 0x6e69617274ull).result, SF_RESULT_NOT_SUPPORTED);
+}
+
 TEST(chat_u_gives_its_shim_and_event)
 {
     rl_hos_config cfg;

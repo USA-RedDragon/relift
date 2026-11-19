@@ -10,6 +10,7 @@
  * supervisor's GPU sessions, so the supervisor only has to boot and accept
  * the contexts its clients create.
  */
+#include "am.h"
 #include "services.h"
 
 #include <stdlib.h>
@@ -359,17 +360,150 @@ static rl_result display_recorder_count(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/** @brief Native event slots a DisplaySession hands out (the client's slot index is below this; sdk 0x56133c). */
+#define DISPLAY_EVENT_SLOTS 16
+
+/** @brief State of a DisplaySession: the events of its native event slots. */
+typedef struct display_session {
+    hos_revent *slot[DISPLAY_EVENT_SLOTS];
+} display_session;
+
+static void display_session_destroy(void *state)
+{
+    display_session *s = state;
+    for (uint32_t i = 0; i < DISPLAY_EVENT_SLOTS; i++)
+        if (s->slot[i])
+            hos_kobj_unref(&s->slot[i]->obj);
+    free(s);
+}
+
+/** @brief The event of slot index of a DisplaySession, made on first use; NULL for an index past the slots. */
+static hos_revent *display_slot(rl_ipc_req *r, uint32_t index)
+{
+    display_session *s = r->self->state;
+    if (index >= DISPLAY_EVENT_SLOTS)
+        return NULL;
+    if (!s->slot[index])
+        s->slot[index] = rl_hos_event_create();
+    return s->slot[index];
+}
+
+/**
+ * @brief DisplaySession 31 (unnamed): a u32 slot index; one moved handle, the readable end of the slot's event. The
+ * slot is later bound to a display change by 263 to 271 (nn::vi's Create*Event).
+ */
+static rl_result display_acquire_slot(rl_ipc_req *r)
+{
+    uint32_t index;
+    if (!rl_srv_in(r, &index, 4))
+        return SF_RESULT_INVALID_HEADER;
+    hos_revent *e = display_slot(r, index);
+    if (!e)
+        return SF_RESULT_INVALID_HEADER;
+    return rl_ipc_push_move(r, &e->obj);
+}
+
+/**
+ * @brief DisplaySession 263, 265, 267, 269 and 271 (nn::vi Create*Event for the refresh rate, HDR status, HDR paper
+ * white, buffer max resolution and mode capability): a u64 display name and a u32 slot index. None of these change on
+ * the host display, so the slot's event is signaled once, when it is bound, so the client reads the current value.
+ * Inferred: Eglantine does the same; the console signals only on a change.
+ */
+static rl_result display_bind_change(rl_ipc_req *r)
+{
+    struct {
+        uint64_t name;
+        uint32_t index;
+    } in;
+    if (!rl_srv_in(r, &in, 12))
+        return SF_RESULT_INVALID_HEADER;
+    hos_revent *e = display_slot(r, in.index);
+    if (!e)
+        return SF_RESULT_INVALID_HEADER;
+    rl_hos_event_signal(e);
+    return KR_SUCCESS;
+}
+
+/** @brief DisplaySession 103 (nn::vi2::QueryDisplayRefreshRate): a u64 display name; a u32 rate in Hz and a bool. */
+static rl_result display_query_refresh_rate(rl_ipc_req *r)
+{
+    uint64_t name;
+    if (!rl_srv_in(r, &name, 8))
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t *out = rl_ipc_out(r, 8);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    out[0] = 60;
+    out[1] = 0;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief DisplaySession 104 (nn::vi2::QueryDisplayHdrStatus): a u64 display name; a u64 output format (the SDK takes 1
+ * as SDR and 2 as HDR and fails the query on any other value) and a u16 peak luminance in nits. relift reports SDR
+ * with a typical SDR panel's peak (inferred: Eglantine).
+ */
+static rl_result display_query_hdr_status(rl_ipc_req *r)
+{
+    uint64_t name;
+    if (!rl_srv_in(r, &name, 8))
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t *out = rl_ipc_out(r, 12);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 400;
+    return KR_SUCCESS;
+}
+
+/** @brief DisplaySession 105 (nn::vi2::QueryDisplayHdrPaperWhite): a u64 display name; a u16 paper white in nits, the BT.2408 reference white (inferred: Eglantine). */
+static rl_result display_query_paper_white(rl_ipc_req *r)
+{
+    uint64_t name;
+    if (!rl_srv_in(r, &name, 8))
+        return SF_RESULT_INVALID_HEADER;
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 203;
+    return KR_SUCCESS;
+}
+
+/**
+ * @brief DisplaySession 106 (nn::vi2::QueryDisplayBufferMaxResolution): a u64 display name; a u64 mode of the
+ * highest buffer resolution (1 is 1280x720, 2 is 1920x1080, 4 is 2560x1440), 4 docked and 2 handheld (inferred:
+ * Eglantine). The name must be "default".
+ */
+static rl_result display_query_buffer_max_resolution(rl_ipc_req *r)
+{
+    uint64_t name;
+    if (!rl_srv_in(r, &name, 8))
+        return SF_RESULT_INVALID_HEADER;
+    if (name != UINT64_C(0x00746c7561666564))
+        return SF_RESULT_NOT_SUPPORTED;
+    uint64_t *out = rl_ipc_out(r, 8);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = rl_am_is_docked() ? 4 : 2;
+    return KR_SUCCESS;
+}
+
 static const rl_ipc_cmd display_session_cmds[] = {
     { 1, "GetCount", display_count },
     { 3, "GetDisplayId", display_first_id },
     { 5, "GetTimestampRecorderCount", display_recorder_count },
     { 11, "GetEvent", display_event },
     { 21, "Command21", rl_srv_stub_ok },
-    { 31, "GetEvent2", display_event },
+    { 31, "GetEvent2", display_acquire_slot },
     { 32, "Command32", display_linked_event },
     { 51, "SetTimestampRecorderCount", rl_srv_stub_ok },
     { 101, "OpenDisplay", rl_srv_stub_ok },
     { 102, "CloseDisplay", rl_srv_stub_ok },
+    { 103, "QueryDisplayRefreshRate", display_query_refresh_rate },
+    { 104, "QueryDisplayHdrStatus", display_query_hdr_status },
+    { 105, "QueryDisplayHdrPaperWhite", display_query_paper_white },
+    { 106, "QueryDisplayBufferMaxResolution", display_query_buffer_max_resolution },
     { 111, "Command111", rl_srv_stub_ok },
     { 112, "Command112", rl_srv_stub_ok },
     { 113, "Command113", rl_srv_stub_ok },
@@ -380,15 +514,15 @@ static const rl_ipc_cmd display_session_cmds[] = {
     { 252, "Command252", rl_srv_stub_ok },
     { 261, "Command261", rl_srv_stub_ok },
     { 262, "Command262", rl_srv_stub_ok },
-    { 263, "Command263", rl_srv_stub_ok },
+    { 263, "BindDisplayRefreshRateEvent", display_bind_change },
     { 264, "Command264", rl_srv_stub_ok },
-    { 265, "Command265", rl_srv_stub_ok },
+    { 265, "BindDisplayHdrStatusEvent", display_bind_change },
     { 266, "Command266", rl_srv_stub_ok },
-    { 267, "Command267", rl_srv_stub_ok },
+    { 267, "BindDisplayHdrPaperWhiteEvent", display_bind_change },
     { 268, "Command268", rl_srv_stub_ok },
-    { 269, "Command269", rl_srv_stub_ok },
+    { 269, "BindDisplayBufferMaxResolutionEvent", display_bind_change },
     { 270, "Command270", rl_srv_stub_ok },
-    { 271, "Command271", rl_srv_stub_ok },
+    { 271, "BindDisplayModeCapabilityEvent", display_bind_change },
     { 272, "Command272", rl_srv_stub_ok },
     { 301, "Command301", rl_srv_stub_ok },
     { 302, "Command302", rl_srv_stub_ok },
@@ -399,7 +533,7 @@ static const rl_ipc_cmd display_session_cmds[] = {
 
 static const rl_ipc_class display_session_class = { "nn::gsv::DisplaySession", display_session_cmds,
                                                     sizeof display_session_cmds / sizeof display_session_cmds[0], 0,
-                                                    NULL };
+                                                    display_session_destroy };
 
 /** @brief InitializeDisplayContext: u64 version (0x300010000 on 19.0.0, per switchbrew); a DisplaySession. */
 static rl_result initialize_display_context(rl_ipc_req *r)
@@ -407,7 +541,20 @@ static rl_result initialize_display_context(rl_ipc_req *r)
     uint64_t version;
     if (!rl_srv_in(r, &version, 8))
         return SF_RESULT_INVALID_HEADER;
-    return push_session(r, &display_session_class);
+    display_session *s = calloc(1, sizeof *s);
+    if (!s)
+        return KR_OUT_OF_RESOURCE;
+    rl_ipc_object *o = rl_srv_object(&display_session_class, s);
+    if (!o) {
+        free(s);
+        return KR_OUT_OF_RESOURCE;
+    }
+    uint32_t h;
+    rl_result rc = rl_ipc_session_open(o, &h);
+    rl_ipc_object_unref(o);
+    if (rc == KR_SUCCESS)
+        r->out_move[r->n_out_move++] = h;
+    return rc;
 }
 
 /**
