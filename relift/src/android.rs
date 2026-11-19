@@ -1094,6 +1094,13 @@ mod tests {
         assert!(d.contains("p.displayId() != d.get(i).getDisplayId()"));
         assert!(d.contains("later.postDelayed(this::sync, RESHOW_MS)"));
         assert!(d.contains("c.hide(WindowInsets.Type.systemBars())"));
+        assert!(d.contains("SYSTEM_UI_FLAG_IMMERSIVE_STICKY"));
+        assert!(d.contains("public void onBackPressed() {\n        }"));
+        assert!(
+            d.contains("registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT")
+        );
+        assert!(d.contains("retry(i);"));
+        assert!(d.contains("RETRY_MAX_MS"));
     }
 
     #[test]

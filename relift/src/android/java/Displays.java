@@ -12,6 +12,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.window.OnBackInvokedDispatcher;
 import android.view.WindowManager;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,9 +31,11 @@ final class Displays {
 
     private final MainActivity act;
     private static final long RESHOW_MS = 300;
+    private static final long RETRY_MAX_MS = 3000;
 
     private final Pres[] open = new Pres[MAX];
     private final boolean[] wanted = new boolean[MAX];
+    private final int[] tries = new int[MAX];
     private final Handler later = new Handler(Looper.getMainLooper());
 
     Displays(MainActivity act) {
@@ -104,10 +107,18 @@ final class Displays {
             });
             try {
                 q.show();
+                tries[i] = 0;
             } catch (WindowManager.InvalidDisplayException e) {
                 open[i] = null;
+                retry(i);
             }
         }
+    }
+
+    /** Tries the index-th presentation again later, backing off to a few seconds, for as long as the runtime wants it. */
+    private void retry(int index) {
+        long wait = Math.min(RESHOW_MS << Math.min(tries[index]++, 4), RETRY_MAX_MS);
+        later.postDelayed(this::sync, wait);
     }
 
     private static final class Pres extends Presentation implements SurfaceHolder.Callback, View.OnTouchListener {
@@ -127,10 +138,29 @@ final class Displays {
             sv.getHolder().addCallback(this);
             sv.setOnTouchListener(this);
             setContentView(sv);
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, () -> {
+            });
             WindowInsetsController c = getWindow().getInsetsController();
             if (c != null) {
                 c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
                 c.hide(WindowInsets.Type.systemBars());
+            }
+        }
+
+        /** The DS has no back button: back on the other display leaves the game's screen where it is. */
+        @Override
+        public void onBackPressed() {
+        }
+
+        @Override
+        public void onWindowFocusChanged(boolean focus) {
+            super.onWindowFocusChanged(focus);
+            if (focus) {
+                getWindow().getDecorView().setSystemUiVisibility(getWindow().getDecorView().getSystemUiVisibility());
             }
         }
 
