@@ -65,16 +65,17 @@ static struct {
     VkImageView (*img_views)[IMAGE_KINDS * 8u];
     /** @brief The level each texture id's view starts at. */
     uint32_t *tex_level;
+    /** @brief The target and layers (first, count: 0 for the rest) of each slot's view, which storage images follow. */
+    uint32_t *tex_target, *tex_layer, *tex_layers;
     /**
-     * @brief Storage image slots: the image arrays are indexed by slot, not
-     * by texture id (all 32768 ids in every kind and dimension would pass
-     * the devices' descriptor limits). slot_of maps a texture id to its
-     * slot plus one; slots are handed out in turn, and taking back a slot
-     * waits for the work that may still use it.
+     * @brief Storage images are indexed by the same slot as the sampled arrays: a program reads one handle word
+     * both ways. The first reserve slots belong to textures registered as images (islots, which the storage image
+     * arrays have room for), the rest to the others (slots, counted from reserve). img_done[slot]: the storage
+     * descriptors of the slot are written for what the sampled ones hold.
      */
-    uint32_t *slot_of, *id_of_slot;
-    uint64_t *slot_guest;
-    uint32_t next_slot;
+    nvn_slots islots;
+    uint32_t reserve;
+    bool *img_done;
     /** @brief The sampler each sampler id's element holds and the builder bytes it was made from. */
     VkSampler *samplers;
     uint64_t (*sampler_bytes)[16];
@@ -162,13 +163,16 @@ static bool make(void)
     t.tex_views = calloc(t.ntex, sizeof *t.tex_views);
     t.img_views = calloc(IMAGES, sizeof *t.img_views);
     t.tex_level = calloc(t.ntex, sizeof *t.tex_level);
-    t.slot_of = calloc(t.ntex, sizeof *t.slot_of);
-    bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20);
-    t.id_of_slot = calloc(IMAGES, sizeof *t.id_of_slot);
-    t.slot_guest = calloc(IMAGES, sizeof *t.slot_guest);
+    t.tex_target = calloc(t.ntex, sizeof *t.tex_target);
+    t.tex_layer = calloc(t.ntex, sizeof *t.tex_layer);
+    t.tex_layers = calloc(t.ntex, sizeof *t.tex_layers);
+    t.reserve = t.ntex / 4 < IMAGES ? t.ntex / 4 : IMAGES;
+    bool slots_ok = t.reserve && nvn_slots_init(&t.slots, t.ntex - t.reserve, 1u << 20) &&
+                    nvn_slots_init(&t.islots, t.reserve, 1u << 20);
+    t.img_done = calloc(t.ntex, sizeof *t.img_done);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
-    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.slot_of && slots_ok && t.id_of_slot && t.slot_guest && t.samplers && t.sampler_bytes;
+    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -350,18 +354,19 @@ static VkFormat image_format(uint32_t ik, VkFormat f, uint32_t bpb)
 }
 
 /** @brief Writes image v (level level) as storage image id into every kind and dimension array it can take. */
-static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t level)
+static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t level, uint32_t target, uint32_t layer,
+                      uint32_t layers)
 {
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(v->d.format, &bpb, &bw, &bh) || bw != 1 || bh != 1 || v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
         return nvn_vk_stop(r, "image id %u has format %u, which is not a storage format", id, v->d.format);
     uint32_t dims;
-    switch (v->d.target) {
+    switch (target) {
     case 0: case 3: dims = 1u << ID_1D | 1u << ID_1D_ARRAY; break;
     case 1: case 4: case 7: dims = 1u << ID_2D | 1u << ID_2D_ARRAY; break;
     case 2: dims = 1u << ID_3D; break;
     case NVN_TARGET_CUBEMAP: case NVN_TARGET_CUBEMAP_ARRAY: dims = 1u << ID_2D_ARRAY; break;
-    default: return nvn_vk_stop(r, "image id %u has target %u", id, v->d.target);
+    default: return nvn_vk_stop(r, "image id %u has target %u", id, target);
     }
     static const VkImageViewType types[IMAGE_DIMS] = { VK_IMAGE_VIEW_TYPE_1D,       VK_IMAGE_VIEW_TYPE_1D,
                                                        VK_IMAGE_VIEW_TYPE_1D_ARRAY, VK_IMAGE_VIEW_TYPE_2D,
@@ -387,7 +392,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
                 VK(vkDestroyImageView)(g.dev, t.img_views[slot][at], NULL);
                 t.img_views[slot][at] = NULL;
             }
-            VkImageView iv = nvn_vk_storage_view(v, types[d], f, level);
+            VkImageView iv = nvn_vk_storage_view(v, types[d], f, level, layer, layers);
             if (!iv)
                 return nvn_vk_stop(r, "cannot make a storage view of image id %u", id);
             t.img_views[slot][at] = iv;
@@ -410,26 +415,24 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
 }
 
 /**
- * @brief The slot of texture id: the one it holds, or a free one, or the
- * next in turn after the work that may use it has run. A slot another id
- * held is cleared (its image slot too).
+ * @brief The slot of texture id (of the image slots when image): the one it
+ * holds, or a free one, or the next in turn after the work that may use it
+ * has run.
  */
-static int slot_for(replay *r, uint32_t id, uint32_t *slot)
+static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
 {
     uint32_t evicted;
-    *slot = nvn_slots_take(&t.slots, id, &evicted);
-    if (*slot == UINT32_MAX)
+    uint32_t local = nvn_slots_take(image ? &t.islots : &t.slots, id, &evicted);
+    if (local == UINT32_MAX)
         return nvn_vk_stop(r, "texture id %u is past the 2^20 a handle names", id);
+    *slot = image ? local : t.reserve + local;
     if (!evicted)
         return RL_OK;
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     t.tex_img[*slot] = NULL;
     t.tex_guest[*slot] = 0;
-    if (t.slot_of[*slot]) {
-        t.id_of_slot[t.slot_of[*slot] - 1] = 0;
-        t.slot_of[*slot] = 0;
-    }
+    t.img_done[*slot] = false;
     return RL_OK;
 }
 
@@ -438,11 +441,15 @@ void nvn_texset_texture_gone(uint64_t tex)
     if (!t.ok)
         return;
     pthread_mutex_lock(&g.lock);
-    for (uint32_t ts = 0; ts < t.ntex; ts++)
-        if (t.slots.slot_id[ts] && t.tex_guest[ts] == tex) {
+    for (uint32_t ts = 0; ts < t.ntex; ts++) {
+        nvn_slots *tb = ts < t.reserve ? &t.islots : &t.slots;
+        uint32_t local = ts < t.reserve ? ts : ts - t.reserve;
+        if (tb->slot_id[local] && t.tex_guest[ts] == tex) {
             t.tex_guest[ts] = 0;
-            nvn_slots_free(&t.slots, ts);
+            t.img_done[ts] = false;
+            nvn_slots_free(tb, local);
         }
+    }
     pthread_mutex_unlock(&g.lock);
 }
 
@@ -451,15 +458,15 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
     if (!make())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t id = handle & 0xfffffu, sid = handle >> 20;
-    int src = slot_for(r, id, slot);
-    if (src != RL_OK)
-        return src;
-    uint32_t sl = *slot;
     uint8_t view[17] = { 0 };
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
     if (!tex)
         return nvn_vk_stop(r, "texture id %u (handle 0x%x) is not registered", id, handle);
+    int src = slot_for(r, id, image, slot);
+    if (src != RL_OK)
+        return src;
+    uint32_t sl = *slot;
     view[16] = has_view;
     vimg *v = nvn_vk_image(r, tex);
     if (!v)
@@ -521,6 +528,10 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
     }
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
     t.tex_level[sl] = has_view && nv.has_levels ? (uint32_t)nv.base_level : 0;
+    t.img_done[sl] = false;
+    t.tex_target[sl] = has_view && nv.has_target ? nv.target : v->d.target;
+    t.tex_layer[sl] = has_view && nv.has_layers ? (uint32_t)nv.min_layer : 0;
+    t.tex_layers[sl] = has_view && nv.has_layers ? (uint32_t)nv.num_layers : 0;
     t.tex_img[sl] = v;
     t.tex_kind[sl] = *kind;
     t.tex_guest[sl] = tex;
@@ -538,31 +549,20 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
     uint32_t id = handle & 0xfffffu;
     uint8_t view[17];
     bool has_view = false, image = false;
-    uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
+    nvn_tex_registered(id, view, &has_view, &image);
     if (!image)
         return nvn_vk_stop(r, "handle 0x%x binds texture id %u as an image, but it is not registered as one", handle,
                            id);
-    uint32_t s = t.slot_of[ts];
-    if (s && t.slot_guest[s - 1] == tex) {
-        *slot = s - 1;
+    if (t.img_done[ts]) {
+        *slot = ts;
         return RL_OK;
     }
-    if (!s) {
-        s = t.next_slot + 1;
-        t.next_slot = (t.next_slot + 1) % IMAGES;
-        if (t.id_of_slot[s - 1]) {
-            if (!nvn_vk_flush(r))
-                return nvn_vk_stop(r, "the host device failed a submit");
-            t.slot_of[t.id_of_slot[s - 1] - 1] = 0;
-        }
-    } else if (!nvn_vk_flush(r)) {
+    if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
-    }
-    if ((rc = bind_image(r, id, s - 1, t.tex_img[ts], t.tex_level[ts])) != RL_OK)
+    if ((rc = bind_image(r, id, ts, t.tex_img[ts], t.tex_level[ts], t.tex_target[ts], t.tex_layer[ts],
+                         t.tex_layers[ts])) != RL_OK)
         return rc;
-    t.slot_of[ts] = s;
-    t.id_of_slot[s - 1] = ts + 1;
-    t.slot_guest[s - 1] = tex;
-    *slot = s - 1;
+    t.img_done[ts] = true;
+    *slot = ts;
     return RL_OK;
 }

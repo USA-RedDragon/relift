@@ -383,7 +383,7 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         if ((pass || st.nheld + 2 > MAX_HELD) && !nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed a submit");
         VkImageView iv = nvn_vk_view(in, VK_IMAGE_VIEW_TYPE_2D, has_cv ? &cv : NULL);
-        VkImageView owv = nvn_vk_storage_view(out, VK_IMAGE_VIEW_TYPE_2D, out->format, level);
+        VkImageView owv = nvn_vk_storage_view(out, VK_IMAGE_VIEW_TYPE_2D, out->format, level, 0, 1);
         if (has_cv && iv)
             hold(iv);
         if (owv)

@@ -1197,7 +1197,8 @@ static vimg *image_of(replay *r, uint64_t tex)
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .flags = (depth ? 0 : VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT) |
                  (can_store ? VK_IMAGE_CREATE_EXTENDED_USAGE_BIT : 0) |
-                 (d->target == NVN_TARGET_CUBEMAP || d->target == NVN_TARGET_CUBEMAP_ARRAY
+                 (d->target == NVN_TARGET_CUBEMAP || d->target == NVN_TARGET_CUBEMAP_ARRAY ||
+                          (d->target == 4 && d->width == d->height && rr.layerCount >= 6)
                       ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
                       : 0) |
                  (d->target == NVN_TARGET_3D && !buffer ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0),
@@ -1286,13 +1287,18 @@ bool nvn_vk_refresh(replay *r, vimg *v)
     return v->aspect != VK_IMAGE_ASPECT_COLOR_BIT || upload(r, v);
 }
 
-VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level)
+VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level, uint32_t layer,
+                                uint32_t layers)
 {
     if (!v->storage_ok)
         return NULL;
     VkImageSubresourceRange rr = range_of(v);
     rr.baseMipLevel = level;
     rr.levelCount = 1;
+    if (layer >= rr.layerCount)
+        return NULL;
+    rr.baseArrayLayer = layer;
+    rr.layerCount = layers && layers < rr.layerCount - layer ? layers : rr.layerCount - layer;
     if (t == VK_IMAGE_VIEW_TYPE_1D || t == VK_IMAGE_VIEW_TYPE_2D)
         rr.layerCount = 1;
     VkImageViewUsageCreateInfo u = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
@@ -1896,8 +1902,14 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         return rl_guest_fatal(c, "nvn", "more than %u queues", MAX_QUEUES);
     }
     int rc = RL_OK;
-    for (uint32_t i = 0; i < s->n && rc == RL_OK; i++)
+    static int sync_each = -1;
+    if (sync_each < 0)
+        sync_each = getenv("RELIFT_NVN_SYNC") != NULL;
+    for (uint32_t i = 0; i < s->n && rc == RL_OK; i++) {
         rc = run_cmd(&r, &s->cmds[i]);
+        if (rc == RL_OK && sync_each && !nvn_vk_flush(&r))
+            rc = nvn_vk_stop(&r, "the host device failed after %s (command %u of %u)", nvn_cmd_name(s->cmds[i].op), i, s->n);
+    }
     if (rc == RL_OK && !nvn_vk_flush(&r))
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
     pthread_mutex_unlock(&g.lock);

@@ -249,7 +249,8 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv);
 /** @brief A new storage view of level level of v as type t in format f (the caller destroys it), or NULL. */
 /** @brief Notes that v is written now (it becomes the image the textures sharing its storage copy from). */
 void nvn_vk_written(vimg *v);
-VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level);
+VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level, uint32_t layer,
+                                uint32_t layers);
 /**
  * @brief The host format of a view of v as NVNformat format (aspect in
  * *aspect): a color format with v's texel block size and shape, or
