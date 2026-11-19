@@ -1320,11 +1320,11 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
         rr.aspectMask = range_of(v).aspectMask;
     if (nv && nv->has_levels) {
         rr.baseMipLevel = (uint32_t)nv->base_level;
-        rr.levelCount = (uint32_t)nv->num_levels;
+        rr.levelCount = nv->num_levels ? (uint32_t)nv->num_levels : VK_REMAINING_MIP_LEVELS;
     }
     if (nv && nv->has_layers) {
         rr.baseArrayLayer = (uint32_t)nv->min_layer;
-        rr.layerCount = (uint32_t)nv->num_layers;
+        rr.layerCount = nv->num_layers ? (uint32_t)nv->num_layers : VK_REMAINING_ARRAY_LAYERS;
     }
     if (t == VK_IMAGE_VIEW_TYPE_2D || t == VK_IMAGE_VIEW_TYPE_1D)
         rr.layerCount = 1;

@@ -230,7 +230,10 @@ bool nvn_vk_refresh(replay *r, vimg *v);
  * @brief A view of v of type t: over all its levels and the layers t takes
  * with the texture's swizzle (kept with v), or, given nv, with the levels,
  * layers, swizzle and depth-stencil mode of that texture view (the caller's
- * to destroy). NULL on failure.
+ * to destroy). A level or layer count of 0 in nv takes every level or layer
+ * from its base on: the SDK driver's texture descriptor code (SDK 22.2.0,
+ * NVN2) reads a view's level count of 0 as the texture's last level. NULL on
+ * failure.
  */
 VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv);
 /** @brief A new storage view of level level of v as type t in format f (the caller destroys it), or NULL. */

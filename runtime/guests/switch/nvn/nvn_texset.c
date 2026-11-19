@@ -436,8 +436,8 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim)
             (vf = nvn_vk_view_format(v, nv.format, &a)) == VK_FORMAT_UNDEFINED)
             return nvn_vk_stop(r, "texture id %u is registered with a view of format %u over format %u", id, nv.format,
                                v->d.format);
-        if ((nv.has_levels && (nv.base_level < 0 || nv.num_levels <= 0)) ||
-            (nv.has_layers && (nv.min_layer < 0 || nv.num_layers <= 0)))
+        if ((nv.has_levels && (nv.base_level < 0 || nv.num_levels < 0)) ||
+            (nv.has_layers && (nv.min_layer < 0 || nv.num_layers < 0)))
             return nvn_vk_stop(r, "texture id %u is registered with a view of levels %d+%d, layers %d+%d", id,
                                nv.base_level, nv.num_levels, nv.min_layer, nv.num_layers);
     }
