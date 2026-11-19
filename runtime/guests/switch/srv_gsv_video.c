@@ -234,6 +234,7 @@ typedef struct video_session {
     char codec[32];
     hos_revent *input_event;
     const rl_vp9_stream_backend *vp9;
+    const rl_av1_stream_backend *av1;
     void *dec;
     uint32_t counter;
     uint64_t handed_total;
@@ -260,7 +261,7 @@ static void video_destroy(void *state)
     for (uint32_t i = 0; i < v->npending; i++)
         frame_free(&v->pending[i]);
     if (v->dec)
-        v->vp9->close(v->dec);
+        v->vp9 ? v->vp9->close(v->dec) : v->av1->close(v->dec);
     pthread_mutex_destroy(&v->mu);
     free(v);
 }
@@ -327,18 +328,25 @@ static rl_result video_configure(rl_ipc_req *r)
     v->height = in.height;
     v->rate = in.rate;
     rl_result rc = KR_SUCCESS;
-    if (!strcmp(v->codec, "video/vp9")) {
+    bool vp9 = !strcmp(v->codec, "video/vp9"), av1 = !strcmp(v->codec, "video/av1");
+    if (vp9 || av1) {
         if (!v->dec) {
-            v->vp9 = rl_vp9_stream_backend_current();
-            v->dec = v->vp9->open();
+            if (vp9) {
+                v->vp9 = rl_vp9_stream_backend_current();
+                v->dec = v->vp9->open();
+            } else {
+                v->av1 = rl_av1_stream_backend_current();
+                v->dec = v->av1->open();
+            }
             if (!v->dec) {
-                rl_ipc_stop(r, "gsv", "video decoder Configure for %s %ux%u: the build has no VP9 decoder (needs libvpx)",
-                            v->codec, in.width, in.height);
+                rl_ipc_stop(r, "gsv", "video decoder Configure for %s %ux%u: the build has no %s decoder (needs %s)",
+                            v->codec, in.width, in.height, vp9 ? "VP9" : "AV1", vp9 ? "libvpx" : "dav1d");
                 rc = KR_NOT_IMPLEMENTED;
             }
         }
     } else {
-        rl_ipc_stop(r, "gsv", "video decoder Configure for codec \"%s\" is not implemented (only video/vp9)", v->codec);
+        rl_ipc_stop(r, "gsv", "video decoder Configure for codec \"%s\" is not implemented (video/vp9 and video/av1)",
+                    v->codec);
         rc = KR_NOT_IMPLEMENTED;
     }
     pthread_mutex_unlock(&v->mu);
@@ -456,10 +464,11 @@ static rl_result video_submit(rl_ipc_req *r)
         } else {
             rl_ipc_buf_read(&r->a[0], data, r->a[0].size);
             rl_vp9_image im;
-            int shown = v->vp9->decode(v->dec, data, r->a[0].size, &im);
+            int shown = v->vp9 ? v->vp9->decode(v->dec, data, r->a[0].size, &im)
+                               : v->av1->decode(v->dec, data, r->a[0].size, &im);
             free(data);
             if (shown < 0) {
-                rl_ipc_stop(r, "gsv", "video decoder: a %llu byte VP9 frame did not decode",
+                rl_ipc_stop(r, "gsv", "video decoder: a %llu byte frame did not decode",
                             (unsigned long long)r->a[0].size);
                 rc = KR_NOT_IMPLEMENTED;
             } else {
