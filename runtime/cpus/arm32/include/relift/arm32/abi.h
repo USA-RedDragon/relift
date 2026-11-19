@@ -252,9 +252,17 @@ static inline void rl_arm32_call(rl_ctx *c, uint32_t ret)
  */
 RL_RUNTIME_API int64_t rl_arm32_fetch_slow(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq);
 
-/** @brief Cycles of an access of 1 << log2 bytes at addr. */
+/**
+ * @brief Cycles of an access of 1 << log2 bytes at addr. A line of hot is
+ * checked first: the guest layer fills it only for a region whose waits entry
+ * is 0 and whose fast_fetch bit is clear, and empties it before either
+ * changes, so the answer is the one the table would lead to, with one compare
+ * against a constant line in lifted code.
+ */
 static inline int64_t rl_arm32_wait(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
 {
+    if (c->hot[(addr >> 5) % RL_ARM32_HOT_LINES] == ((addr & ~31u) | 1u))
+        return c->hot_cost;
     if (!c->waits || addr >= 0x10000000u)
         return 1;
     if (seq && (c->fast_fetch >> (addr >> 24) & 1u))
@@ -262,8 +270,6 @@ static inline int64_t rl_arm32_wait(rl_ctx *c, uint32_t addr, unsigned log2, uns
     uint8_t w = c->waits[(addr >> 24) * 6u + log2 * 2u + seq];
     if (w)
         return w;
-    if (c->hot[(addr >> 5) % RL_ARM32_HOT_LINES] == ((addr & ~31u) | 1u))
-        return c->hot_cost;
     return rl_arm32_fetch_slow(c, addr, log2, seq);
 }
 
