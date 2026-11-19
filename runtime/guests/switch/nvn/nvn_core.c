@@ -360,7 +360,9 @@ static rl_fn hook_replace(void *user, const char *symbol)
         return NULL;
     if (!strcmp(symbol, "nvnBootstrapLoader"))
         return nvnh_nvnBootstrapLoader;
-    return !strcmp(symbol, "NvRmGpuMappingModify") ? nvnh_NvRmGpuMappingModify : NULL;
+    if (!strcmp(symbol, "NvRmGpuMappingModify"))
+        return nvnh_NvRmGpuMappingModify;
+    return !strcmp(symbol, "NvRmMemHandleAllocNativeImage") ? nvnh_NvRmMemHandleAllocNativeImage : NULL;
 }
 
 static void hook_defined(void *user, const char *symbol, uint64_t addr)

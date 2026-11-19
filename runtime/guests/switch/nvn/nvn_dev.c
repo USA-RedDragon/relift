@@ -10,6 +10,7 @@
  * Without an import a pool's GPU address is its guest address.
  */
 #include "nvn_priv.h"
+#include "services.h"
 #include "vi.h"
 
 #include <pthread.h>
@@ -581,6 +582,85 @@ static int pool_fields(rl_ctx *c, uint8_t *mem, uint64_t pool, uint64_t builder)
     return RL_OK;
 }
 
+#define NATIVE_IMAGES 64u
+
+/** @brief The first handle NvRmMemHandleAllocNativeImage hands out; the SDK's own NvRm handles count from 1. */
+#define NATIVE_HANDLE_BASE 0x40000000u
+
+static struct {
+    bool used;
+    uint32_t image;
+} g_native_image[NATIVE_IMAGES];
+
+/**
+ * @brief NvRmMemHandleAllocNativeImage(NvRmDevice *, uint32_t native image, uint64_t, uint32_t *handle): NvError.
+ * The SDK's own makes an NvRm object that remembers the native image in guest memory the layer cannot read back by
+ * its handle, so the layer hands out its own handles and remembers which native image each names.
+ */
+uint64_t nvnh_NvRmMemHandleAllocNativeImage(rl_ctx *c, uint8_t *mem)
+{
+    uint32_t image = (uint32_t)c->x[1];
+    uint64_t out = c->x[3];
+    uint32_t slot = NATIVE_IMAGES;
+    for (uint32_t i = 0; i < NATIVE_IMAGES && slot == NATIVE_IMAGES; i++)
+        if (!g_native_image[i].used)
+            slot = i;
+    if (slot == NATIVE_IMAGES || !out)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "NvRmMemHandleAllocNativeImage: %s",
+                                        out ? "more than 64 native images are open" : "no place for the handle");
+    g_native_image[slot].used = true;
+    g_native_image[slot].image = image;
+    rl_st32(mem, out, NATIVE_HANDLE_BASE + slot);
+    trace("NvRmMemHandleAllocNativeImage(native image %u) = handle 0x%x", image, NATIVE_HANDLE_BASE + slot);
+    c->x[0] = 0;
+    return nvn_ret(c);
+}
+
+#define NATIVE_BUILDERS 32u
+
+static struct {
+    uint64_t builder;
+    uint32_t handle;
+} g_native_builder[NATIVE_BUILDERS];
+
+/**
+ * @brief nvnMemoryPoolBuilderSetNativeHandleNVX(NVNmemoryPoolBuilder *, uint32_t): the graphics device handle of a
+ * native image (nn::gs), whose memory the pool is then made of by nvnMemoryPoolInitialize. Kept beside the builder
+ * rather than in it, as no getter of the driver reads it back.
+ */
+uint64_t nvnh_nvnMemoryPoolBuilderSetNativeHandleNVX(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    uint64_t builder = c->x[0];
+    uint32_t handle = (uint32_t)c->x[1], slot = NATIVE_BUILDERS;
+    for (uint32_t i = 0; i < NATIVE_BUILDERS; i++) {
+        if (g_native_builder[i].builder == builder) {
+            slot = i;
+            break;
+        }
+        if (slot == NATIVE_BUILDERS && !g_native_builder[i].builder)
+            slot = i;
+    }
+    if (slot == NATIVE_BUILDERS)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "more than %u native image pool builders are open", NATIVE_BUILDERS);
+    g_native_builder[slot].builder = builder;
+    g_native_builder[slot].handle = handle;
+    trace("nvnMemoryPoolBuilderSetNativeHandleNVX(0x%llx, %u)", (unsigned long long)builder, handle);
+    return nvn_ret(c);
+}
+
+/** @brief The native handle set on builder, taken out of the table; false when none. */
+static bool native_handle_take(uint64_t builder, uint32_t *handle)
+{
+    for (uint32_t i = 0; i < NATIVE_BUILDERS; i++)
+        if (g_native_builder[i].builder == builder) {
+            *handle = g_native_builder[i].handle;
+            g_native_builder[i].builder = 0;
+            return true;
+        }
+    return false;
+}
+
 /** @brief nvnMemoryPoolInitialize(NVNmemoryPool *, const NVNmemoryPoolBuilder *): NVNboolean. */
 uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
 {
@@ -592,6 +672,14 @@ uint64_t nvnh_nvnMemoryPoolInitialize(rl_ctx *c, uint8_t *mem)
         rc = nvn_driver_call(c, mem, "nvnMemoryPoolBuilderGetFlags", &builder, 1, &flags);
     if (rc != RL_OK)
         return (uint64_t)rc;
+    uint32_t native;
+    if (native_handle_take(builder, &native)) {
+        uint32_t slot = native - NATIVE_HANDLE_BASE;
+        if (native < NATIVE_HANDLE_BASE || slot >= NATIVE_IMAGES || !g_native_image[slot].used ||
+            !rl_gsv_native_image_region(g_native_image[slot].image, &memory, &size))
+            return (uint64_t)rl_guest_fatal(c, "nvn", "nvnMemoryPoolInitialize from native handle 0x%x, which names no native image bound to memory",
+                                            native);
+    }
     bool ok = nvn_pool_make(pool, memory, size, (uint32_t)flags);
     if (ok && (rc = pool_fields(c, mem, pool, builder)) != RL_OK)
         return (uint64_t)rc;

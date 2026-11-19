@@ -602,6 +602,7 @@ uint64_t nvn_pool_gpu(uint64_t pool);
     X(nvnQueueSubmitCommands)                                                                                          \
     X(nvnQueueFenceSync)                                                                                               \
     X(nvnQueueWaitSync)                                                                                                \
+    X(nvnMemoryPoolBuilderSetNativeHandleNVX)                                                                          \
     X(nvnMemoryPoolInitialize)                                                                                         \
     X(nvnMemoryPoolFinalize)                                                                                           \
     X(nvnMemoryPoolMap)                                                                                                \
@@ -738,6 +739,7 @@ int nvn_builder_device_fields(rl_ctx *c, uint8_t *mem, uint64_t builder);
 
 /** @brief The SDK's NvRmGpuMappingModify, on the pool mappings the layer owns (nvn_dev.c). */
 uint64_t nvnh_NvRmGpuMappingModify(rl_ctx *c, uint8_t *mem);
+uint64_t nvnh_NvRmMemHandleAllocNativeImage(rl_ctx *c, uint8_t *mem);
 
 /** @brief The NvRmGpuDevice nvn_gpu_open opened (a guest address), 0 before. */
 uint64_t nvn_gpu_device(void);
