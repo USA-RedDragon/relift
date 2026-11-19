@@ -469,6 +469,71 @@ uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, boo
     return timed_read(m, cpu, addr, size, seq ? RL_NDS_S : RL_NDS_N, true);
 }
 
+/** @brief True when the ARM9's ordered access to main RAM needs no wait for the ARM7 (nds_order would return at once). */
+static inline bool order_free9(const rl_nds *m)
+{
+    return !m->sched || (m->pair && rl_sched_order_free(m->cpu[RL_NDS_ARM7], m->cpu[RL_NDS_ARM9]));
+}
+
+/** @brief The main RAM byte of addr when the ARM9's data access there goes through the data cache (attr is nds_cache_attr). */
+static inline uint8_t *main9(rl_nds *m, uint32_t addr, unsigned attr)
+{
+    if (addr >> 24 != 0x02 || !(attr & (NDS_ATTR_DC | NDS_ATTR_WB)) || nds_dma_live(m, RL_NDS_ARM9) || !order_free9(m))
+        return NULL;
+    return &m->main[addr & (RL_NDS_MAIN_SIZE - 1)];
+}
+
+bool rl_nds_load9_near(rl_nds *m, uint32_t addr, unsigned size, unsigned how, uint32_t *v)
+{
+    bool seq = how == RL_NDS_S || how == RL_NDS_PAIR;
+    addr &= ~(size - 1);
+    uint8_t *p = nds_tcm(m, addr, false, false);
+    if (p) {
+        m->fetch9_end = 0;
+        tcm_charge(m, p, seq, false);
+        *v = nds_ld(p, size);
+        return true;
+    }
+    unsigned attr = nds_cache_attr(m, addr);
+    if (!(attr & NDS_ATTR_DC) || !(p = main9(m, addr, attr)))
+        return false;
+    if (nds_cache_find(&m->cache.d, (addr / 32u) % NDS_DCACHE_SETS, addr / 32u / NDS_DCACHE_SETS) < 0)
+        return false;
+    m->fetch9_end = 0;
+    if (seq)
+        nds_charge(m, RL_NDS_ARM9, NDS_CACHE_HIT_TICKS);
+    *v = nds_ld(p, size);
+    return true;
+}
+
+bool rl_nds_store9_near(rl_nds *m, uint32_t addr, unsigned size, uint32_t value, unsigned how)
+{
+    bool seq = how == RL_NDS_S;
+    addr &= ~(size - 1);
+    value &= nds_mask(size);
+    uint8_t *p = nds_tcm(m, addr, false, true);
+    if (p) {
+        m->fetch9_end = 0;
+        tcm_charge(m, p, seq, true);
+        nds_st(p, size, value);
+        nds_watch_store(m, p);
+        return true;
+    }
+    unsigned at = nds_cache_attr(m, addr);
+    if (!(p = main9(m, addr, at)))
+        return false;
+    m->fetch9_end = 0;
+    nds_st(p, size, value);
+    nds_watch_store(m, p);
+    bool back = (at & NDS_ATTR_DC) && (at & NDS_ATTR_WB);
+    if (!((at & NDS_ATTR_DC) && nds_cache_write_hit(m, addr, back, seq))) {
+        nds_cache_buffer(m, addr, nds_cost(m, RL_NDS_ARM9, RL_NDS_DATA, addr, size, seq));
+        if (seq)
+            nds_charge(m, RL_NDS_ARM9, 1);
+    }
+    return true;
+}
+
 uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, unsigned how)
 {
     if (cpu == RL_NDS_ARM9)

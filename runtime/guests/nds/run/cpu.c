@@ -151,7 +151,10 @@ uint64_t rl_nds_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
 {
     (void)mem;
     rl_nds_arm *k = cpu_of(c);
-    uint32_t v = rl_nds_load(k->run->m, k->id, (uint32_t)addr, size, how(k, c, (uint32_t)addr & ~(size - 1u), size));
+    unsigned h = how(k, c, (uint32_t)addr & ~(size - 1u), size);
+    uint32_t v;
+    if (k->id != RL_NDS_ARM9 || !rl_nds_load9_near(k->run->m, (uint32_t)addr, size, h, &v))
+        v = rl_nds_load(k->run->m, k->id, (uint32_t)addr, size, h);
     clip(k);
     return v;
 }
@@ -161,9 +164,12 @@ void rl_nds_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
     (void)mem;
     rl_nds_arm *k = cpu_of(c);
     uint32_t a = (uint32_t)addr & ~(size - 1u);
-    rl_nds_store(k->run->m, k->id, a, size, (uint32_t)value, how(k, c, a, size));
-    if (rl_nds_halt_lost(k->run->m, k->id))
-        stop_halted(k);
+    unsigned h = how(k, c, a, size);
+    if (k->id != RL_NDS_ARM9 || !rl_nds_store9_near(k->run->m, a, size, (uint32_t)value, h)) {
+        rl_nds_store(k->run->m, k->id, a, size, (uint32_t)value, h);
+        if (rl_nds_halt_lost(k->run->m, k->id))
+            stop_halted(k);
+    }
     if (k->id == RL_NDS_ARM9 && a <= 0x04000249u && a + size > 0x04000240u)
         code_moved(k->run);
     clip(k);

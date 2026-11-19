@@ -170,6 +170,14 @@ enum {
 uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, unsigned how);
 /** @brief The write twin of rl_nds_load. */
 void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, unsigned how);
+/**
+ * @brief rl_nds_load of the ARM9 for the accesses that need neither the bus nor the other CPU: a TCM read, or a
+ * data cache hit in main RAM while the ARM7 is past the ARM9 in the order and no DMA of the ARM9 is armed. Puts the
+ * value in *v and returns true; returns false, with nothing done, for any other access (rl_nds_load takes it).
+ */
+bool rl_nds_load9_near(rl_nds *m, uint32_t addr, unsigned size, unsigned how, uint32_t *v);
+/** @brief The write twin of rl_nds_load9_near: a TCM store, or a cached or buffered store to main RAM. */
+bool rl_nds_store9_near(rl_nds *m, uint32_t addr, unsigned size, uint32_t value, unsigned how);
 /** @brief ticks internal ticks of cpu (an ARM7 cycle is two). */
 void rl_nds_idle(rl_nds *m, unsigned cpu, unsigned ticks);
 
