@@ -748,6 +748,7 @@ int rl_nds_run_init(rl_nds_run *r, const rl_nds_program *p)
             goto fail;
         k->c = k->t->ctx;
         k->c->machine = k;
+        k->view = (rl_nds_enter_view){.first = r->first, .seen = r->seen, .epoch = rl_nds_code_epoch_ref(r->m)};
         if (build_dispatch(r, k) != 0)
             goto fail;
         build_waits(k);

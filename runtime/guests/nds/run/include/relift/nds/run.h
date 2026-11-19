@@ -23,6 +23,26 @@ RL_RUNTIME_API void rl_nds_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uin
  * from, 1 when it fetches others (and nothing was done).
  */
 RL_RUNTIME_API int rl_nds_cpu_enter(rl_ctx *c, uint32_t unit, uint32_t fn);
+
+/**
+ * @brief What the entry checks of lifted code read; rl_ctx.machine points at it. seen holds per function
+ * (first[unit] + fn) the code epoch plus one at its last good entry check, 0 for none.
+ */
+typedef struct rl_nds_enter_view {
+    /** @brief Per unit, the index of its first function in seen. */
+    const uint32_t *first;
+    /** @brief Per function, the code epoch plus one at its last good entry check. */
+    const uint64_t *seen;
+    /** @brief The machine's code epoch. */
+    const uint64_t *epoch;
+} rl_nds_enter_view;
+
+/** @brief The fast half of rl_nds_cpu_enter: 1 when function fn of unit passed its check since memory last changed. */
+static inline int rl_nds_cpu_entered(const rl_ctx *c, uint32_t unit, uint32_t fn)
+{
+    const rl_nds_enter_view *v = (const rl_nds_enter_view *)c->machine;
+    return v->seen[v->first[unit] + fn] == *v->epoch + 1u;
+}
 /**
  * @brief After rl_nds_cpu_enter returned 1 at pc: the lifted function of
  * another unit whose entry is pc in that state and whose bytes the CPU

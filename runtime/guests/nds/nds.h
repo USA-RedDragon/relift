@@ -209,6 +209,8 @@ bool rl_nds_halt_lost(rl_nds *m, unsigned cpu);
 void rl_nds_code_watch(rl_nds *m, unsigned cpu, uint32_t addr, uint32_t len);
 /** @brief The number of writes to watched code memory so far. */
 uint64_t rl_nds_code_epoch(const rl_nds *m);
+/** @brief Where the machine keeps its code epoch (rl_nds_code_epoch), for the entry checks of lifted code. */
+const uint64_t *rl_nds_code_epoch_ref(const rl_nds *m);
 /** @brief True when the len bytes cpu fetches as code at addr now are want (an address no memory answers never matches). */
 bool rl_nds_code_equal(rl_nds *m, unsigned cpu, uint32_t addr, const uint8_t *want, uint32_t len);
 /** @brief Copies the len bytes cpu fetches as code at addr into out, zero where no memory answers. */

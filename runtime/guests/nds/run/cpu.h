@@ -45,6 +45,8 @@ typedef struct nds_entry {
 
 /** @brief One CPU. */
 typedef struct rl_nds_arm {
+    /** @brief What the entry checks of lifted code read (rl_ctx.machine points here). */
+    rl_nds_enter_view view;
     rl_nds_run *run;
     /** @brief RL_NDS_ARM9 or RL_NDS_ARM7. */
     unsigned id;

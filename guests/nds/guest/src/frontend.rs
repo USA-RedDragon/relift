@@ -76,6 +76,10 @@ pub const PAIR: &str = "nds.pair";
 /// pending under the mask is taken at the sync point once it clears).
 pub const SET_I: &str = "nds.set_i";
 
+/// The statement that forgets the hot code line lifted code knows, after a
+/// runtime call (`rl_arm32_fetch_line`).
+const FORGET_LINE: &str = "rl_hl = 0;";
+
 /// The function a lifted entry instruction belongs to: the program's unit
 /// index and the function's index in that unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -472,7 +476,9 @@ impl Frontend for Nds {
             (FETCH_THUMB, [pc, data]) => format!(
                 "rl_arm32_fetch_line(c, &{BUDGET}, &rl_hl, &rl_hc, (uint32_t)({pc}), 1u, (unsigned)({data}))"
             ),
-            (ENTER, [u, f]) => format!("rl_nds_cpu_enter(c, (uint32_t)({u}), (uint32_t)({f}))"),
+            (ENTER, [u, f]) => format!(
+                "({{ int e_ = 0; if (RL_UNLIKELY(!rl_nds_cpu_entered(c, (uint32_t)({u}), (uint32_t)({f})))) {{ c->time.{BUDGET} = {BUDGET}; e_ = rl_nds_cpu_enter(c, (uint32_t)({u}), (uint32_t)({f})); {BUDGET} = c->time.{BUDGET}; {FORGET_LINE} }} e_; }})"
+            ),
             (REFILL, [t, thumb, taken]) => format!(
                 "rl_arm32_refill_line(c, &{BUDGET}, &rl_hl, &rl_hc, (uint32_t)({t}), (unsigned)({thumb}), (unsigned)({taken}))"
             ),
@@ -522,13 +528,13 @@ impl Frontend for Nds {
     }
 
     fn clocked_intrinsic(&self, name: &str) -> bool {
-        matches!(name, FETCH_ARM | FETCH_THUMB | REFILL)
+        matches!(name, FETCH_ARM | FETCH_THUMB | REFILL | ENTER)
     }
 
     fn clock_locals(&self) -> Option<(&'static str, &'static str)> {
         Some((
             "uint32_t rl_hl = 0; int64_t rl_hc = 0; (void)rl_hl; (void)rl_hc;",
-            "rl_hl = 0;",
+            FORGET_LINE,
         ))
     }
 

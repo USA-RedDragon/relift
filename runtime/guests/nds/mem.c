@@ -405,6 +405,8 @@ void rl_nds_code_watch(rl_nds *m, unsigned cpu, uint32_t addr, uint32_t len)
 
 uint64_t rl_nds_code_epoch(const rl_nds *m) { return m->code_epoch; }
 
+const uint64_t *rl_nds_code_epoch_ref(const rl_nds *m) { return &m->code_epoch; }
+
 const rl_arm32_cp15 *rl_nds_cp15(const rl_nds *m) { return &m->cp15; }
 
 unsigned rl_nds_cp15_write(rl_nds *m, uint32_t key, uint32_t value)
