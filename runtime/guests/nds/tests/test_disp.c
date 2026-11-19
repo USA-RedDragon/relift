@@ -2860,10 +2860,14 @@ static const scene scenes[] = {
     {"power_lcd_off", s_power_lcd_off, 6, 0xa971c9681b3c2325ull},
 };
 
+/** @brief Whether run draws on the run thread rather than the render thread. */
+static bool g_inline;
+
 /** @brief Runs scene s as the test ROM does and returns the hash of its frame. */
 static uint64_t run(const scene *s)
 {
     ndst *t = ndst_new();
+    rl_nds_render_sync(t->m, g_inline);
     while (rl_nds_vcount(t->m) != 192) {
         uint64_t now = rl_sched_now(t->k[RL_NDS_ARM9]);
         ndst_both(t, now - now % RL_NDS_LINE_TICKS + RL_NDS_LINE_TICKS);
@@ -2884,5 +2888,16 @@ TEST(display_scenes_match_the_oracle_frames)
             fprintf(stderr, "scene %s: frame hash %016llx, the oracle's %016llx\n", scenes[i].name, (unsigned long long)h,
                     (unsigned long long)scenes[i].hash);
         CHECK_EQ(h, scenes[i].hash);
+    }
+}
+
+TEST(display_draws_the_same_on_the_render_thread_as_inline)
+{
+    for (size_t i = 0; i < sizeof scenes / sizeof scenes[0]; i++) {
+        g_inline = true;
+        uint64_t sync = run(&scenes[i]);
+        g_inline = false;
+        uint64_t async = run(&scenes[i]);
+        CHECK_EQ(async, sync);
     }
 }

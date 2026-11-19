@@ -552,6 +552,7 @@ void nds_disp_log_vramcnt(rl_nds *m, unsigned b, uint8_t v);
 int nds_disp_open(rl_nds *m, rl_nds *mirror);
 /** @brief Applies what the render log holds and stops the renderer. */
 void nds_disp_close(rl_nds *m);
+
 /**
  * @brief A store of size bytes at p: moves the code epoch when they are in a watched line, and puts a store to
  * palette, OAM or video RAM in the render log.

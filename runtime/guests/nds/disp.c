@@ -26,13 +26,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * The run thread keeps the display's timing and registers; the drawing runs
- * on the mirror (rl_nds.vid) from records in the render log: every store to
- * palette, OAM and video RAM, every display register and VRAMCNT write, and
- * each line at its render tick with the 3D layer the run thread drew for it.
+/**
+ * @brief The records of the render log. The run thread keeps the display's
+ * timing and registers; the drawing runs on the mirror (rl_nds.vid), on the
+ * render thread, from every store to palette, OAM and video RAM, every display
+ * register and VRAMCNT write, and each line at its render tick with the 3D
+ * layer the run thread drew for it. The run thread waits for the mirror at
+ * each frame's end (the frame hook gets its pixels) and after each line of a
+ * capture (whose video RAM writes it copies back).
  */
-enum { R_STORE = 1, R_REG, R_VRAMCNT, R_LINE, R_DARK, R_HOOK };
+enum { R_STORE = 1, R_REG, R_VRAMCNT, R_LINE, R_DARK };
 
 typedef struct r_store {
     uint32_t off, size, value;
@@ -46,11 +49,6 @@ typedef struct r_line {
     uint64_t when;
     uint32_t line, on3d;
 } r_line;
-
-typedef struct r_hook {
-    rl_nds_frame_fn *fn;
-    void *user;
-} r_hook;
 
 /** @brief White, in 18 bits. */
 #define WHITE 0x3FFFFu
@@ -268,12 +266,6 @@ static void apply(void *user, uint32_t kind, const void *data, uint32_t len)
         skip_dark(&v->disp, *n);
         return;
     }
-    case R_HOOK: {
-        const r_hook *r = data;
-        v->disp.frame_fn = r->fn;
-        v->disp.frame_user = r->user;
-        return;
-    }
     default:
         return;
     }
@@ -294,12 +286,14 @@ void nds_disp_log_vramcnt(rl_nds *m, unsigned b, uint8_t v)
 
 int nds_disp_open(rl_nds *m, rl_nds *mirror)
 {
-    m->render = rl_render_create(&(rl_render_config){.apply = apply, .user = mirror, .sync = true});
+    m->render = rl_render_create(&(rl_render_config){.apply = apply, .user = mirror});
     if (!m->render)
         return -1;
     m->vid = mirror;
     return 0;
 }
+
+void rl_nds_render_sync(rl_nds *m, bool sync) { rl_render_set_sync(m->render, sync); }
 
 void nds_disp_close(rl_nds *m)
 {
@@ -343,12 +337,15 @@ static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
     if (l < NDS_VISIBLE && d->capturing && (d->powcnt & 3) == 3) {
         capture_back(m, d, l);
     } else if (l == NDS_VISIBLE) {
+        rl_render_drain(m->render);
         if (d->capturing) {
             d->capcnt &= 0x7FFFFFFFu;
             d->capturing = false;
         }
         d->frames++;
         d->have = true;
+        if (d->frame_fn)
+            d->frame_fn(d->frame_user, m->vid->disp.last, when);
     }
 }
 
@@ -497,8 +494,6 @@ void rl_nds_set_frame_hook(rl_nds *m, rl_nds_frame_fn *fn, void *user)
     nds_disp *d = &m->disp;
     d->frame_fn = fn;
     d->frame_user = user;
-    if (m->render)
-        rl_render_put(m->render, R_HOOK, &(r_hook){fn, user}, sizeof(r_hook));
     if (!m->sched)
         return;
     if (fn)
