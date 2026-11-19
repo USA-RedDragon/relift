@@ -295,12 +295,13 @@ void nvn_dlss_reset(void);
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
 /**
- * @brief The compute program's driver bank c[0] for a dispatch (see nvn_draw.c): its counts of uniform buffers,
+ * @brief The compute program's driver bank c[0] for a dispatch of groups (see nvn_draw.c): its counts of uniform buffers,
  * storage buffers, texture handles and image handles, and the end byte of its table. *img_lo is where the image
  * handles start and *table_end where the table ends; false when the counts do not fit the end byte.
  */
-bool nvn_compute_table(const nvn_gfx *st, uint32_t nubo, uint32_t nssbo, uint32_t ntex, uint32_t nimg, uint32_t end,
-                       uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo, uint32_t *table_end);
+bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nubo, uint32_t nssbo, uint32_t ntex,
+                       uint32_t nimg, uint32_t end, uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo,
+                       uint32_t *table_end);
 
 /**
  * @brief GPU counters (nvnCommandBufferResetCounter and ReportCounter, nvn_counters.c). The timestamp is the guest

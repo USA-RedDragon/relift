@@ -1197,10 +1197,12 @@ static int stage_dispatch(replay *r, void *arg)
     return RL_OK;
 }
 
-bool nvn_compute_table(const nvn_gfx *st, uint32_t nubo, uint32_t nssbo, uint32_t ntex, uint32_t nimg, uint32_t end,
-                       uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo, uint32_t *table_end)
+bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nubo, uint32_t nssbo, uint32_t ntex,
+                       uint32_t nimg, uint32_t end, uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo,
+                       uint32_t *table_end)
 {
     memset(c0, 0, NVN_BANK2_BYTES);
+    memcpy(c0, groups, 12);
     uint32_t at = 0x10, handles = 8 * (ntex + nimg), buffers = 16 * (nubo + nssbo);
     if (nubo > NVN_UBO_SLOTS || nssbo > NVN_STORAGE_SLOTS || ntex > NVN_IMAGE_SLOTS || nimg > NVN_IMAGE_SLOTS ||
         at + buffers + handles > end || end - at - buffers - handles > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
@@ -1231,8 +1233,11 @@ bool nvn_compute_table(const nvn_gfx *st, uint32_t nubo, uint32_t nssbo, uint32_
 /**
  * @brief nvnCommandBufferDispatchCompute: the bound compute program's bank
  * c[0] is the driver's per-dispatch table as the compiled code reads it:
- * from 0x10, the constants the game pushed
- * (nvnCommandBufferPushComputeConstants, slot 0), then the program's uniform
+ * its first 12 bytes hold the dispatch's group counts x, y and z (the only
+ * per-dispatch values in the driver's dispatch record; how the hardware
+ * expands that record into c[0][0..0xc] is not visible in the driver, and 140
+ * of the FE compute programs read these words); from 0x10 come the constants
+ * the game pushed (nvnCommandBufferPushComputeConstants, slot 0), then the program's uniform
  * buffers and its storage buffers, 16 bytes each ({GPU address, u32 size}),
  * then its texture handles and its image handles, 8 bytes each; the counts
  * are bytes 0xb1, 0xb2, 0xb3 and 0xb6 of the program's control section and
@@ -1261,7 +1266,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     uint32_t nimg = r->mem[ctl + 0xb6], end = r->mem[ctl + 0xba];
     uint8_t c0[NVN_BANK2_BYTES];
     uint32_t img_lo, at;
-    if (!nvn_compute_table(st, nubo, nssbo, ntex, nimg, end, c0, &img_lo, &at))
+    if (!nvn_compute_table(st, (uint32_t[3]){ x, y, z }, nubo, nssbo, ntex, nimg, end, c0, &img_lo, &at))
         return nvn_vk_stop(r,
                            "compute program %s has a driver table of %u, %u, %u and %u entries ending at 0x%x, with "
                            "constants pushed in slots 0x%x",

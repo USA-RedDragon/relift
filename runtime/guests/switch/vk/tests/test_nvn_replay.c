@@ -63,11 +63,15 @@ TEST(nvn_compute_table_puts_pushes_then_buffers_then_handles)
         st.storage[i].size = 0x200 + i;
     }
     st.image[NVN_STAGE_COMPUTE][0] = 0x443;
+    const uint32_t groups[3] = { 20, 12, 16 };
     uint8_t c0[NVN_BANK2_BYTES];
     uint32_t img_lo = 0, end = 0;
-    CHECK(nvn_compute_table(&st, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
+    CHECK(nvn_compute_table(&st, groups, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
     CHECK_EQ(img_lo, 0xf0);
     CHECK_EQ(end, 0xf8);
+    CHECK_EQ(c0[0], 20);
+    CHECK_EQ(c0[4], 12);
+    CHECK_EQ(c0[8], 16);
     CHECK_EQ(c0[0x10], 0x80);
     CHECK_EQ(c0[0x7f], 0x80 + 0x6f);
     uint64_t a;
@@ -84,9 +88,9 @@ TEST(nvn_compute_table_puts_pushes_then_buffers_then_handles)
     CHECK_EQ(a, 0x2004);
     memcpy(&sz, c0 + 0xf0, 4);
     CHECK_EQ(sz, 0x443);
-    CHECK(!nvn_compute_table(&st, 2, 5, 0, 1, 0x80, c0, &img_lo, &end));
+    CHECK(!nvn_compute_table(&st, groups, 2, 5, 0, 1, 0x80, c0, &img_lo, &end));
     st.push_used[NVN_STAGE_COMPUTE] = 3;
-    CHECK(!nvn_compute_table(&st, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
+    CHECK(!nvn_compute_table(&st, groups, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
 }
 
 TEST(nvn_copy_pitch_follows_the_drivers_strides)
