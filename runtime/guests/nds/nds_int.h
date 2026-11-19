@@ -490,6 +490,10 @@ static inline uint32_t nds_mask(unsigned size) { return size >= 4 ? UINT32_MAX :
 /** @brief A little-endian load of size bytes at p. */
 static inline uint32_t nds_ld(const uint8_t *p, unsigned size)
 {
+    if (size == 4)
+        return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+    if (size == 2)
+        return (uint32_t)p[0] | (uint32_t)p[1] << 8;
     uint32_t v = 0;
     for (unsigned i = 0; i < size; i++)
         v |= (uint32_t)p[i] << (8 * i);
@@ -499,6 +503,13 @@ static inline uint32_t nds_ld(const uint8_t *p, unsigned size)
 /** @brief A little-endian store of size bytes of v at p. */
 static inline void nds_st(uint8_t *p, unsigned size, uint32_t v)
 {
+    if (size == 4) {
+        p[0] = (uint8_t)v;
+        p[1] = (uint8_t)(v >> 8);
+        p[2] = (uint8_t)(v >> 16);
+        p[3] = (uint8_t)(v >> 24);
+        return;
+    }
     for (unsigned i = 0; i < size; i++)
         p[i] = (uint8_t)(v >> (8 * i));
 }
