@@ -1375,7 +1375,10 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
     return out;
 }
 
-/** @brief Begins dynamic rendering on r's render targets, limited to their common extent. */
+/**
+ * @brief Begins dynamic rendering on r's render targets, limited to their common extent; with none (a draw that
+ * only writes storage images) over the first viewport's size.
+ */
 bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
 {
     VkRenderingAttachmentInfo ca[MAX_RT], da = { 0 };
@@ -1403,8 +1406,13 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
         w = (lw ? lw : 1) < w ? (lw ? lw : 1) : w;
         h = (lh ? lh : 1) < h ? (lh ? lh : 1) : h;
     }
-    if (w == UINT32_MAX)
-        return false;
+    if (w == UINT32_MAX) {
+        const float *v = r->st->viewports[0];
+        if (r->st->ncolor || r->st->depth.v || v[2] < 1 || v[3] < 1)
+            return false;
+        w = (uint32_t)v[2];
+        h = (uint32_t)v[3];
+    }
     bool stencil = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
     *area = (VkRect2D){ { 0, 0 }, { w, h } };
     VkRenderingInfo ri = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
