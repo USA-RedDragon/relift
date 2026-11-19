@@ -1842,9 +1842,64 @@ static int clear_texture(replay *r, const nvn_cmd *e)
  * for the GPU (how compute overlaps graphics, which queue work runs first, how much of the GPU a launch may take):
  * they change no result, only timing, and the host device schedules its own work, so they do nothing as well.
  */
+static int run_cmd(replay *r, const nvn_cmd *e);
+
+/** @brief Runs every command of set s in order, as the commands of the set being replayed (sync_each: wait for the device after each). */
+static int run_set(replay *r, const nvn_cmdset *s, bool sync_each)
+{
+    const nvn_cmdset *outer = r->s;
+    r->s = s;
+    int rc = RL_OK;
+    for (uint32_t i = 0; i < s->n && rc == RL_OK; i++) {
+        rc = run_cmd(r, &s->cmds[i]);
+        if (rc == RL_OK && sync_each && !nvn_vk_flush(r))
+            rc = nvn_vk_stop(r, "the host device failed after %s (command %u of %u)", nvn_cmd_name(s->cmds[i].op), i, s->n);
+    }
+    r->s = outer;
+    return rc;
+}
+
+static bool sync_each_command(void)
+{
+    static int sync_each = -1;
+    if (sync_each < 0)
+        sync_each = getenv("RELIFT_NVN_SYNC") != NULL;
+    return sync_each;
+}
+
+/**
+ * @brief nvnCommandBufferCallCommand(cb, handle) and nvnCommandBufferCallCommands(cb, n, handles): the commands
+ * of each command handle (a set the game ended recording) run here, in order, as if recorded in this place.
+ */
+static int call_commands(replay *r, const nvn_cmd *e)
+{
+    uint32_t n = 1;
+    uint64_t one = e->x[1];
+    const uint64_t *handles = &one;
+    if (e->op == NVN_CMD_CALL_COMMANDS) {
+        n = (uint32_t)e->x[1];
+        handles = nvn_cmd_bytes(r->s, e->x[2]);
+        if (n && !handles)
+            return nvn_vk_stop(r, "%s without its handles", nvn_cmd_name(e->op));
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        const nvn_cmdset *s = nvn_cmdset_of(handles[i]);
+        if (!s)
+            return nvn_vk_stop(r, "%s: 0x%llx is not a command handle relift made", nvn_cmd_name(e->op),
+                               (unsigned long long)handles[i]);
+        int rc = run_set(r, s, sync_each_command());
+        if (rc != RL_OK)
+            return rc;
+    }
+    return RL_OK;
+}
+
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
     switch (e->op) {
+    case NVN_CMD_CALL_COMMAND:
+    case NVN_CMD_CALL_COMMANDS:
+        return call_commands(r, e);
     case NVN_CMD_CLEAR_COLOR:
         return clear_color(r, e);
     case NVN_CMD_CLEAR_TEXTURE:
@@ -1989,15 +2044,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         pthread_mutex_unlock(&g.lock);
         return rl_guest_fatal(c, "nvn", "more than %u queues", MAX_QUEUES);
     }
-    int rc = RL_OK;
-    static int sync_each = -1;
-    if (sync_each < 0)
-        sync_each = getenv("RELIFT_NVN_SYNC") != NULL;
-    for (uint32_t i = 0; i < s->n && rc == RL_OK; i++) {
-        rc = run_cmd(&r, &s->cmds[i]);
-        if (rc == RL_OK && sync_each && !nvn_vk_flush(&r))
-            rc = nvn_vk_stop(&r, "the host device failed after %s (command %u of %u)", nvn_cmd_name(s->cmds[i].op), i, s->n);
-    }
+    int rc = run_set(&r, s, sync_each_command());
     if (rc == RL_OK && !nvn_vk_flush(&r))
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
     pthread_mutex_unlock(&g.lock);

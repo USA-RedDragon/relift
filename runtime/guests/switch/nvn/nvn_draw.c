@@ -1463,10 +1463,50 @@ static void faces(uint32_t face, uint32_t v, uint32_t out[2])
         out[1] = v;
 }
 
+/**
+ * @brief The bulk binds (nvnCommandBufferBindUniformBuffers, BindStorageBuffers, BindVertexBuffers, BindTextures
+ * and BindImages: a stage, a first slot, a count and an array of 16 byte buffer ranges or 8 byte handles) as the
+ * single binds of each slot in turn.
+ */
+static int bind_many(replay *r, const nvn_cmd *e)
+{
+    bool vertex = e->op == NVN_CMD_BIND_VERTEX_BUFFERS, handles = e->op == NVN_CMD_BIND_TEXTURES || e->op == NVN_CMD_BIND_IMAGES;
+    uint32_t reg = vertex ? 1 : 2, count = (uint32_t)e->x[reg + 1];
+    uint64_t first = e->x[reg];
+    const uint64_t *v = nvn_cmd_bytes(r->s, e->x[reg + 2]);
+    if (count && !v)
+        return nvn_vk_stop(r, "%s without its array", nvn_cmd_name(e->op));
+    for (uint32_t i = 0; i < count; i++) {
+        nvn_cmd one = { .x = { e->x[0], vertex ? first + i : e->x[1], vertex ? 0 : first + i } };
+        if (vertex) {
+            one.op = NVN_CMD_BIND_VERTEX_BUFFER;
+            one.x[2] = v[2 * i];
+            one.x[3] = v[2 * i + 1];
+        } else if (handles) {
+            one.op = e->op == NVN_CMD_BIND_TEXTURES ? NVN_CMD_BIND_TEXTURE : NVN_CMD_BIND_IMAGE;
+            one.x[3] = v[i];
+        } else {
+            one.op = e->op == NVN_CMD_BIND_UNIFORM_BUFFERS ? NVN_CMD_BIND_UNIFORM_BUFFER : NVN_CMD_BIND_STORAGE_BUFFER;
+            one.x[3] = v[2 * i];
+            one.x[4] = v[2 * i + 1];
+        }
+        int rc = nvn_draw_cmd(r, &one);
+        if (rc != RL_OK)
+            return rc;
+    }
+    return RL_OK;
+}
+
 int nvn_draw_cmd(replay *r, const nvn_cmd *e)
 {
     nvn_gfx *st = r->st;
     switch (e->op) {
+    case NVN_CMD_BIND_UNIFORM_BUFFERS:
+    case NVN_CMD_BIND_STORAGE_BUFFERS:
+    case NVN_CMD_BIND_VERTEX_BUFFERS:
+    case NVN_CMD_BIND_TEXTURES:
+    case NVN_CMD_BIND_IMAGES:
+        return bind_many(r, e);
     case NVN_CMD_BIND_PROGRAM:
         return bind_program(r, e);
     case NVN_CMD_BIND_UNIFORM_BUFFER: {

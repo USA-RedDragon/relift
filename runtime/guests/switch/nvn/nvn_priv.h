@@ -472,7 +472,13 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_BIND_UNIFORM_BUFFERS, nvnCommandBufferBindUniformBuffers) \
     X(NVN_CMD_BIND_VERTEX_ATTRIB_STATE, nvnCommandBufferBindVertexAttribState) \
     X(NVN_CMD_BIND_VERTEX_BUFFER, nvnCommandBufferBindVertexBuffer) \
+    X(NVN_CMD_BIND_VERTEX_BUFFERS, nvnCommandBufferBindVertexBuffers) \
+    X(NVN_CMD_BIND_STORAGE_BUFFERS, nvnCommandBufferBindStorageBuffers) \
+    X(NVN_CMD_BIND_TEXTURES, nvnCommandBufferBindTextures) \
+    X(NVN_CMD_BIND_IMAGES, nvnCommandBufferBindImages) \
     X(NVN_CMD_BIND_VERTEX_STREAM_STATE, nvnCommandBufferBindVertexStreamState) \
+    X(NVN_CMD_CALL_COMMAND, nvnCommandBufferCallCommand) \
+    X(NVN_CMD_CALL_COMMANDS, nvnCommandBufferCallCommands) \
     X(NVN_CMD_CLEAR_COLOR, nvnCommandBufferClearColor) \
     X(NVN_CMD_CLEAR_COLORI, nvnCommandBufferClearColori) \
     X(NVN_CMD_CLEAR_COLORUI, nvnCommandBufferClearColorui) \
