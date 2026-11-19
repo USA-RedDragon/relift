@@ -491,6 +491,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_RESTORE_ZCULL_DATA, nvnCommandBufferRestoreZCullData) \
     X(NVN_CMD_SAVE_ZCULL_DATA, nvnCommandBufferSaveZCullData) \
     X(NVN_CMD_SET_DEPTH_BOUNDS, nvnCommandBufferSetDepthBounds) \
+    X(NVN_CMD_SET_DEPTH_RANGE, nvnCommandBufferSetDepthRange) \
     X(NVN_CMD_SET_DEPTH_RANGES, nvnCommandBufferSetDepthRanges) \
     X(NVN_CMD_SET_PATCH_SIZE, nvnCommandBufferSetPatchSize) \
     X(NVN_CMD_SET_POLYGON_OFFSET_CLAMP, nvnCommandBufferSetPolygonOffsetClamp) \
@@ -507,6 +508,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_TILED_CACHE_ACTION, nvnCommandBufferSetTiledCacheAction) \
     X(NVN_CMD_SET_TEXTURE_POOL, nvnCommandBufferSetTexturePool) \
     X(NVN_CMD_SET_TILED_CACHE_TILE_SIZE, nvnCommandBufferSetTiledCacheTileSize) \
+    X(NVN_CMD_SET_VIEWPORT, nvnCommandBufferSetViewport) \
     X(NVN_CMD_SET_VIEWPORTS, nvnCommandBufferSetViewports) \
     X(NVN_CMD_SET_ZCULL_ZF32_COMPRESSION_ENABLE, nvnCommandBufferSetZCullZF32CompressionEnable) \
     X(NVN_CMD_WAIT_SYNC, nvnCommandBufferWaitSync)

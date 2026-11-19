@@ -1391,6 +1391,14 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
             memcpy(st->viewports[first + i], v + 4 * i, 16);
         return RL_OK;
     }
+    case NVN_CMD_SET_VIEWPORT:
+        for (int i = 0; i < 4; i++)
+            st->viewports[0][i] = (float)(int32_t)e->x[1 + i];
+        return RL_OK;
+    case NVN_CMD_SET_DEPTH_RANGE:
+        for (int i = 0; i < 2; i++)
+            memcpy(&st->depth_ranges[0][i], &e->d[i], 4);
+        return RL_OK;
     case NVN_CMD_SET_DEPTH_RANGES: {
         uint32_t first = (uint32_t)e->x[1], n = (uint32_t)e->x[2];
         const float *v = nvn_cmd_bytes(r->s, e->x[3]);
