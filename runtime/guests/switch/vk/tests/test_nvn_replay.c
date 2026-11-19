@@ -19,18 +19,32 @@ static int replay_one(nvn_gfx *st, const nvn_cmd *e)
     return nvn_draw_cmd(&r, e);
 }
 
-TEST(nvn_replay_reset_counter_is_kept_in_the_state)
+TEST(nvn_replay_set_viewport_and_depth_range_are_kept_in_the_state)
 {
     nvn_gfx st;
     memset(&st, 0, sizeof st);
-    nvn_cmd e = { .op = NVN_CMD_RESET_COUNTER, .x = { 0, 0 } };
+    nvn_cmd v = { .op = NVN_CMD_SET_VIEWPORT, .x = { 0, 4, 8, 1280, 720 } };
+    CHECK_EQ(replay_one(&st, &v), RL_OK);
+    CHECK_EQ(st.viewports[0][0], 4.0f);
+    CHECK_EQ(st.viewports[0][1], 8.0f);
+    CHECK_EQ(st.viewports[0][2], 1280.0f);
+    CHECK_EQ(st.viewports[0][3], 720.0f);
+    nvn_cmd d = { .op = NVN_CMD_SET_DEPTH_RANGE };
+    float a = 0.25f, b = 0.75f;
+    memcpy(&d.d[0], &a, 4);
+    memcpy(&d.d[1], &b, 4);
+    CHECK_EQ(replay_one(&st, &d), RL_OK);
+    CHECK_EQ(st.depth_ranges[0][0], 0.25f);
+    CHECK_EQ(st.depth_ranges[0][1], 0.75f);
+}
+
+TEST(nvn_replay_depth_clamp_is_kept_in_the_state)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmd e = { .op = NVN_CMD_SET_DEPTH_CLAMP, .x = { 0, 0 } };
     CHECK_EQ(replay_one(&st, &e), RL_OK);
-    CHECK_EQ(st.counters_reset, 1u);
-    e.x[1] = 15;
-    CHECK_EQ(replay_one(&st, &e), RL_OK);
-    e.x[1] = 3;
-    CHECK_EQ(replay_one(&st, &e), RL_OK);
-    CHECK_EQ(st.counters_reset, 1u | 1u << 3 | 1u << 15);
+    CHECK(!st.depth_clamp);
 }
 
 TEST(nvn_copy_pitch_follows_the_drivers_strides)

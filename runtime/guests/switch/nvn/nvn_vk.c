@@ -183,6 +183,9 @@ static void bring_up(void)
         return;
     }
     g.depth_clamp = f2.features.depthClamp;
+    g.query_ok = f2.features.pipelineStatisticsQuery && f2.features.geometryShader && f2.features.tessellationShader &&
+                 f12.hostQueryReset;
+    g.occlusion_precise = f2.features.occlusionQueryPrecise;
     f2.features.robustBufferAccess = VK_FALSE;
     f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     f12.bufferDeviceAddressMultiDevice = VK_FALSE;

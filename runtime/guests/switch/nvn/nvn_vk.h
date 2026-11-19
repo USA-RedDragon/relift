@@ -33,6 +33,8 @@
 /** @brief Pushed constant slots of a stage and bytes of each (the driver clamps a push to 0x100 bytes). */
 #define NVN_PUSH_SLOTS 4u
 #define NVN_PUSH_BYTES 0x100u
+/** @brief GPU counter types 0 (timestamp) to 14 (transform feedback primitives written); 15 (ZCull statistics) is not counted. */
+#define NVN_COUNTERS 15u
 /** @brief The compute stage's NVNshaderStage, and its storage buffer slots. */
 #define NVN_STAGE_COMPUTE 5u
 #define NVN_STORAGE_SLOTS 16u
@@ -91,6 +93,8 @@ typedef struct nvn_vkdev {
     bool depth_clip_control;
     /** @brief The device can clamp fragment depth to the viewport range instead of clipping it (depthClamp). */
     bool depth_clamp;
+    /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
+    bool query_ok, occlusion_precise;
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
     bool host_import;
     uint64_t import_align;
@@ -168,8 +172,11 @@ typedef struct nvn_gfx {
     float polygon_offset[3];
     float blend_color[4];
     float line_width;
-    /** @brief Counter types a ResetCounter zeroed that no draw has run since (bit n: type n). */
-    uint32_t counters_zero;
+    /** @brief GPU counters (nvn_counters.c): what each has counted since its reset, the types reset (bit n: type n), and the types a draw counted that the host cannot. */
+    uint64_t counter_acc[NVN_COUNTERS];
+    uint32_t counter_valid, counter_inexact;
+    /** @brief Draws are counted (a counter was reset), and a draw ran that was not. */
+    bool counting, drew_uncounted;
     bool depth_clamp;
 } nvn_gfx;
 
@@ -280,5 +287,19 @@ void nvn_dlss_reset(void);
  * a draw has run on stops, since the host device does not count.
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
+
+/**
+ * @brief GPU counters (nvnCommandBufferResetCounter and ReportCounter, nvn_counters.c). The timestamp is the guest
+ * clock. The others count on the host device: each draw of a counting queue runs inside an occlusion and a pipeline
+ * statistics query, and a counter is the sum of its statistic over the draws since its reset. A counter the host has
+ * no statistic for, on a draw that feeds it, stops when it is reported.
+ */
+int nvn_counters_reset(replay *r, uint32_t type);
+int nvn_counters_report(replay *r, uint32_t type, uint64_t addr);
+/** @brief Before a draw's rendering opens: makes room for its queries (submits and reads back a full batch). */
+int nvn_counters_prepare(replay *r);
+/** @brief Inside the draw's rendering, before the draw: starts its queries; the slot to hand to nvn_counters_end, or UINT32_MAX when the queue is not counting. */
+uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellation);
+void nvn_counters_end(uint32_t slot);
 
 #endif

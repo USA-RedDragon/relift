@@ -984,7 +984,6 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                 uint32_t count)
 {
     nvn_gfx *st = r->st;
-    st->counters_zero = 0;
     if (!layouts())
         return nvn_vk_stop(r, "cannot make the pipeline layout");
     pipe_key k;
@@ -1029,8 +1028,11 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
         return rc;
     VkRect2D area;
+    if ((rc = nvn_counters_prepare(r)) != RL_OK)
+        return rc;
     if (!nvn_vk_begin_rendering(r, &area))
         return nvn_vk_stop(r, "draw without render targets");
+    uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
     dynamic_state(r, area);
@@ -1049,6 +1051,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     } else {
         VK(vkCmdDraw)(g.cb, count, 1, first, 0);
     }
+    nvn_counters_end(counted);
     VK(vkCmdEndRendering)(g.cb);
     nvn_vk_barrier(g.cb);
     return RL_OK;
@@ -1468,19 +1471,9 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_SET_PATCH_SIZE:
         return RL_OK;
     case NVN_CMD_REPORT_COUNTER:
-        if ((uint32_t)e->x[1] != 0 && !((uint32_t)e->x[1] < 32 && st->counters_zero & 1u << (uint32_t)e->x[1]))
-            return nvn_vk_stop(r, "nvnCommandBufferReportCounter of counter type %u, which a draw or the start of the "
-                                  "queue left counting",
-                               (uint32_t)e->x[1]);
-        if (!nvn_vk_flush(r))
-            return nvn_vk_stop(r, "the host device failed a submit");
-        rl_st64(r->mem, nvn_gpu_guest(e->x[2]), 0);
-        rl_st64(r->mem, nvn_gpu_guest(e->x[2]) + 8, rl_guest_clock_ns());
-        return RL_OK;
+        return nvn_counters_report(r, (uint32_t)e->x[1], e->x[2]);
     case NVN_CMD_RESET_COUNTER:
-        if ((uint32_t)e->x[1] < 32)
-            st->counters_zero |= 1u << (uint32_t)e->x[1];
-        return RL_OK;
+        return nvn_counters_reset(r, (uint32_t)e->x[1]);
     case NVN_CMD_DRAW_ARRAYS:
         return draw(r, (uint32_t)e->x[1], false, 0, 0, 0, (uint32_t)e->x[2], (uint32_t)e->x[3]);
     case NVN_CMD_DRAW_ELEMENTS:
