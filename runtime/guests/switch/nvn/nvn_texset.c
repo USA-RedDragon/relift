@@ -78,6 +78,12 @@ static struct {
     bool *img_done;
     /** @brief The sampler each sampler id's element holds and the builder bytes it was made from. */
     VkSampler *samplers;
+    /**
+     * @brief The sampler an id with no registered sampler reads: nearest, repeating, base level only (inferred: the
+     * all-zero descriptor a pool entry that was never written holds; a handle without a sampler, such as a texel
+     * fetch handle, names sampler id 0).
+     */
+    VkSampler fallback;
     uint64_t (*sampler_bytes)[16];
 } t;
 
@@ -309,18 +315,35 @@ static int bind_sampler(replay *r, uint32_t id)
     if (id >= SAMPLERS)
         return nvn_vk_stop(r, "sampler id %u is past the layer's %u", id, SAMPLERS);
     const uint8_t *bytes = nvn_sampler_registered(id);
-    if (!bytes)
-        return nvn_vk_stop(r, "sampler id %u is not registered", id);
-    if (t.samplers[id] && !memcmp(t.sampler_bytes[id], bytes, 128))
+    static const uint8_t zero[128];
+    bool none = !bytes;
+    if (none)
+        bytes = zero;
+    if (t.samplers[id] && !memcmp(t.sampler_bytes[id], bytes, 128) && (!none || t.samplers[id] == t.fallback))
         return RL_OK;
     VkSampler s;
-    int rc = make_sampler(r, (const uint64_t *)bytes, &s);
+    int rc = RL_OK;
+    if (none) {
+        if (!t.fallback) {
+            VkSamplerCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                       .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                                       .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                                       .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                                       .maxLod = 0.25f };
+            if (VK(vkCreateSampler)(g.dev, &ci, NULL, &t.fallback) != VK_SUCCESS)
+                return nvn_vk_stop(r, "cannot make the sampler for unregistered sampler ids");
+        }
+        s = t.fallback;
+    } else {
+        rc = make_sampler(r, (const uint64_t *)bytes, &s);
+    }
     if (rc != RL_OK)
         return rc;
     if (t.samplers[id]) {
         if (!nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed a submit");
-        VK(vkDestroySampler)(g.dev, t.samplers[id], NULL);
+        if (t.samplers[id] != t.fallback)
+            VK(vkDestroySampler)(g.dev, t.samplers[id], NULL);
     }
     t.samplers[id] = s;
     memcpy(t.sampler_bytes[id], bytes, 128);
