@@ -288,7 +288,11 @@ static bool topology(uint32_t mode, VkPrimitiveTopology *t)
     return true;
 }
 
-/** @brief A vertex format: the color formats, plus the three-component ones. */
+/**
+ * @brief A vertex format: the color formats, the three-component ones, and the formats that convert integers to
+ * floats (NVN_FORMAT_*_UI2F and *_I2F, 0x51 to 0x68 and 0x6b, 0x6c) and the signed normalized 10-bit packed one (0x69),
+ * which only vertex attributes take. The 32-bit component conversions and the signed integer 10-bit one have no host vertex format.
+ */
 static VkFormat vertex_format(uint32_t f)
 {
     static const VkFormat three[] = {
@@ -298,6 +302,20 @@ static VkFormat vertex_format(uint32_t f)
     };
     if (f >= 25 && f <= 36)
         return three[f - 25];
+    static const VkFormat converted[] = {
+        VK_FORMAT_R8_USCALED,           VK_FORMAT_R8_SSCALED,           VK_FORMAT_R16_USCALED,
+        VK_FORMAT_R16_SSCALED,          VK_FORMAT_UNDEFINED,            VK_FORMAT_UNDEFINED,
+        VK_FORMAT_R8G8_USCALED,         VK_FORMAT_R8G8_SSCALED,         VK_FORMAT_R16G16_USCALED,
+        VK_FORMAT_R16G16_SSCALED,       VK_FORMAT_UNDEFINED,            VK_FORMAT_UNDEFINED,
+        VK_FORMAT_R8G8B8_USCALED,       VK_FORMAT_R8G8B8_SSCALED,       VK_FORMAT_R16G16B16_USCALED,
+        VK_FORMAT_R16G16B16_SSCALED,    VK_FORMAT_UNDEFINED,            VK_FORMAT_UNDEFINED,
+        VK_FORMAT_R8G8B8A8_USCALED,     VK_FORMAT_R8G8B8A8_SSCALED,     VK_FORMAT_R16G16B16A16_USCALED,
+        VK_FORMAT_R16G16B16A16_SSCALED, VK_FORMAT_UNDEFINED,            VK_FORMAT_UNDEFINED,
+        VK_FORMAT_A2B10G10R10_SNORM_PACK32, VK_FORMAT_UNDEFINED, VK_FORMAT_A2B10G10R10_USCALED_PACK32,
+        VK_FORMAT_A2B10G10R10_SSCALED_PACK32,
+    };
+    if (f >= 0x51 && f <= 0x6C)
+        return converted[f - 0x51];
     VkImageAspectFlags a;
     return nvn_vk_format(f, &a);
 }
