@@ -527,13 +527,21 @@ int nds_watch_line(const rl_nds *m, const uint8_t *p);
 /** @brief A store to the bytes at p: moves the code epoch when they are in a watched line. */
 static inline void nds_watch_store(rl_nds *m, const uint8_t *p)
 {
-    int l = nds_watch_line(m, p);
+    uintptr_t in = (uintptr_t)p - (uintptr_t)m->main;
+    int l = in < RL_NDS_MAIN_SIZE ? NDS_WATCH_MAIN + (int)(in / NDS_LINE) : nds_watch_line(m, p);
     if (l >= 0 && (m->watch[l >> 3] >> (l & 7) & 1u))
         m->code_epoch++;
 }
 
+/** @brief nds_decode of every address but main RAM's. */
+nds_where nds_decode_other(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write);
 /** @brief Decodes addr (aligned) for cpu; code true for an instruction fetch, write for a store. */
-nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write);
+static inline nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write)
+{
+    if (addr >> 24 == 0x02 && (cpu != RL_NDS_ARM9 || !nds_tcm(m, addr, code, write)))
+        return (nds_where){.p = &m->main[addr & (RL_NDS_MAIN_SIZE - 1)], .kind = NDS_K_MEM, .main = true};
+    return nds_decode_other(m, cpu, addr, code, write);
+}
 /** @brief True when a byte store of cpu at addr is dropped (the ARM9's palette, video RAM and OAM take halfwords and words only). */
 bool nds_drops_byte(unsigned cpu, uint32_t addr);
 /** @brief True when the display can see a store of cpu at addr (the ARM9's palette, video RAM and OAM). */

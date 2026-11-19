@@ -100,7 +100,7 @@ static nds_where decode7(rl_nds *m, uint32_t addr)
     }
 }
 
-nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write)
+nds_where nds_decode_other(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write)
 {
     return cpu == RL_NDS_ARM9 ? decode9(m, addr, code, write, true) : decode7(m, addr);
 }
