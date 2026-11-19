@@ -193,6 +193,8 @@ typedef struct nvn_gfx {
     uint32_t counter_valid, counter_inexact;
     /** @brief Draws are counted (a counter was reset), and a draw ran that was not. */
     bool counting, drew_uncounted;
+    /** @brief The instances of the draw being replayed: the first and how many. */
+    uint32_t inst_base, inst_count;
     bool depth_clamp;
 } nvn_gfx;
 

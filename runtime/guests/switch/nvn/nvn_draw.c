@@ -1040,7 +1040,7 @@ static int stage_draw(replay *r, void *arg)
             uint32_t s = kp->ints[j].stream;
             if (!st->vb[s].addr)
                 return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
-            uint64_t n = kp->ints[j].per_instance ? 1 : nv;
+            uint64_t n = kp->ints[j].per_instance ? (uint64_t)st->inst_base + st->inst_count : nv;
             uint32_t *w = malloc(n ? n * 16 : 16);
             if (!w)
                 return nvn_vk_stop(r, "out of memory expanding an integer vertex attribute");
@@ -1130,9 +1130,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &dd.int_off[j]);
     if (indexed) {
         VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, dd.ioff, itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
-        VK(vkCmdDrawIndexed)(g.cb, count, 1, 0, base, 0);
+        VK(vkCmdDrawIndexed)(g.cb, count, st->inst_count, 0, base, st->inst_base);
     } else {
-        VK(vkCmdDraw)(g.cb, count, 1, first, 0);
+        VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
     nvn_counters_end(counted);
     VK(vkCmdEndRendering)(g.cb);
@@ -1608,11 +1608,27 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_RESET_COUNTER:
         return nvn_counters_reset(r, (uint32_t)e->x[1]);
     case NVN_CMD_DRAW_ARRAYS:
+        st->inst_base = 0;
+        st->inst_count = 1;
         return draw(r, (uint32_t)e->x[1], false, 0, 0, 0, (uint32_t)e->x[2], (uint32_t)e->x[3]);
+    case NVN_CMD_DRAW_ARRAYS_INSTANCED:
+        st->inst_base = (uint32_t)e->x[4];
+        st->inst_count = (uint32_t)e->x[5];
+        return st->inst_count ? draw(r, (uint32_t)e->x[1], false, 0, 0, 0, (uint32_t)e->x[2], (uint32_t)e->x[3]) : RL_OK;
     case NVN_CMD_DRAW_ELEMENTS:
+        st->inst_base = 0;
+        st->inst_count = 1;
         return draw(r, (uint32_t)e->x[1], true, (uint32_t)e->x[2], e->x[4], 0, 0, (uint32_t)e->x[3]);
     case NVN_CMD_DRAW_ELEMENTS_BASE_VERTEX:
+        st->inst_base = 0;
+        st->inst_count = 1;
         return draw(r, (uint32_t)e->x[1], true, (uint32_t)e->x[2], e->x[4], (int32_t)e->x[5], 0, (uint32_t)e->x[3]);
+    case NVN_CMD_DRAW_ELEMENTS_INSTANCED:
+        st->inst_base = (uint32_t)e->x[6];
+        st->inst_count = (uint32_t)e->x[7];
+        return st->inst_count ? draw(r, (uint32_t)e->x[1], true, (uint32_t)e->x[2], e->x[4], (int32_t)e->x[5], 0,
+                                     (uint32_t)e->x[3])
+                              : RL_OK;
     default:
         return 1;
     }

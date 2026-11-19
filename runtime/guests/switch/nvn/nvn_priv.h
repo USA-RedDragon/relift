@@ -486,6 +486,8 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_COPY_TEXTURE_TO_TEXTURE, nvnCommandBufferCopyTextureToTexture) \
     X(NVN_CMD_DISPATCH_COMPUTE, nvnCommandBufferDispatchCompute) \
     X(NVN_CMD_DRAW_ARRAYS, nvnCommandBufferDrawArrays) \
+    X(NVN_CMD_DRAW_ARRAYS_INSTANCED, nvnCommandBufferDrawArraysInstanced) \
+    X(NVN_CMD_DRAW_ELEMENTS_INSTANCED, nvnCommandBufferDrawElementsInstanced) \
     X(NVN_CMD_DRAW_ELEMENTS, nvnCommandBufferDrawElements) \
     X(NVN_CMD_DRAW_ELEMENTS_BASE_VERTEX, nvnCommandBufferDrawElementsBaseVertex) \
     X(NVN_CMD_END_TRANSFORM_FEEDBACK, nvnCommandBufferEndTransformFeedback) \
