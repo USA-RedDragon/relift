@@ -1673,6 +1673,8 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
     vimg *dst = image_of(r, e->x[4]);
     if (!dst)
         return RL_PENDING;
+    if (!nvn_vk_refresh(r, src))
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture: the source texture's bytes could not be uploaded");
     nvn_vk_written(dst);
     uint32_t sl, slayer, dl, dlayer;
     int rc = copy_side(r, e->x[2], sr, &sl, &slayer);
