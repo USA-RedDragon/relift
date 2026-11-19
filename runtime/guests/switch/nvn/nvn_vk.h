@@ -101,6 +101,8 @@ typedef struct nvn_vkdev {
     bool wide_lines;
     /** @brief VK_EXT_conservative_rasterization is on: nvnCommandBufferSetConservativeRasterEnable is honored. */
     bool conservative_raster, conservative_warned;
+    /** @brief VK_EXT_robustness2 nullDescriptor is on: a descriptor can be written with no image view. */
+    bool null_descriptor;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */

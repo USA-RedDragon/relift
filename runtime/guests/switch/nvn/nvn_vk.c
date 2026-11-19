@@ -91,6 +91,7 @@ typedef struct ext_features {
 #define STYPE_MAXIMAL_RECONVERGENCE ((VkStructureType)1000434000)
 #define STYPE_SHADER_FMA ((VkStructureType)1000579000)
 #define STYPE_COOPERATIVE_MATRIX ((VkStructureType)1000506000)
+#define STYPE_ROBUSTNESS2 ((VkStructureType)1000286000)
 #define STYPE_COOPERATIVE_MATRIX_PROPS ((VkStructureType)1000506001)
 
 /** @brief VkCooperativeMatrixPropertiesKHR, which the generated headers do not hold. */
@@ -113,7 +114,8 @@ static VkResult (*coop_props_fn)(VkPhysicalDevice, uint32_t *, coop_props *);
 static const char *const device_exts[] = { "VK_EXT_depth_clip_control",          "VK_KHR_shader_clock",
                                            "VK_EXT_shader_atomic_float",         "VK_EXT_shader_image_atomic_int64",
                                            "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma",
-                                           "VK_KHR_cooperative_matrix" };
+                                           "VK_KHR_cooperative_matrix",
+                                           "VK_EXT_robustness2" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 static void bring_up(void)
@@ -148,8 +150,8 @@ static void bring_up(void)
     ext_features clip_control = { .sType = STYPE_DEPTH_CLIP_CONTROL }, clock = { .sType = STYPE_SHADER_CLOCK };
     ext_features afloat = { .sType = STYPE_ATOMIC_FLOAT }, i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 };
     ext_features recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE }, fma = { .sType = STYPE_SHADER_FMA };
-    ext_features coop = { .sType = STYPE_COOPERATIVE_MATRIX };
-    ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma, &coop };
+    ext_features coop = { .sType = STYPE_COOPERATIVE_MATRIX }, rob2 = { .sType = STYPE_ROBUSTNESS2 };
+    ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma, &coop, &rob2 };
     const char *ext_names[DEVICE_EXTS + 2];
     uint32_t next = 0, nnames = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
@@ -157,6 +159,7 @@ static void bring_up(void)
     if (exts)
         VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, exts);
     VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+    bool rob2_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
@@ -164,6 +167,7 @@ static void bring_up(void)
                 feats[k]->pNext = f13.pNext;
                 f13.pNext = feats[k];
                 g.depth_clip_control |= k == 0;
+                rob2_on |= feats[k] == &rob2;
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)
@@ -191,6 +195,8 @@ static void bring_up(void)
                  f12.hostQueryReset;
     g.occlusion_precise = f2.features.occlusionQueryPrecise;
     f2.features.robustBufferAccess = VK_FALSE;
+    g.null_descriptor = rob2_on && rob2.b[2];
+    rob2.b[0] = rob2.b[1] = VK_FALSE;
     f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     f12.bufferDeviceAddressMultiDevice = VK_FALSE;
     f13.robustImageAccess = VK_FALSE;

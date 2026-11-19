@@ -376,6 +376,38 @@ static VkFormat image_format(uint32_t ik, VkFormat f, uint32_t bpb)
     }
 }
 
+/**
+ * @brief Gives every element of slot that the arrays of the sampled kind (when kind is below KINDS, the dimensions in
+ * fit) or the storage image arrays (when image, the entries in fit, bit kind * IMAGE_DIMS + dim) leave unwritten a null
+ * descriptor, so that a program reading the slot through a dimension or kind its texture has no view of reads
+ * the all-zero result of VK_EXT_robustness2 nullDescriptor and never a stale or missing element (inferred: the
+ * hardware reads such a handle through the texture header's own type and faults on nothing).
+ */
+static void null_rest(uint32_t slot, bool image, uint32_t kind, uint64_t fit)
+{
+    if (!g.null_descriptor)
+        return;
+    uint32_t count = image ? IMAGE_KINDS * IMAGE_DIMS : KINDS * DIMS;
+    VkDescriptorImageInfo ii = { NULL, NULL, VK_IMAGE_LAYOUT_GENERAL };
+    VkWriteDescriptorSet w[IMAGE_KINDS * IMAGE_DIMS];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t k = image ? i / IMAGE_DIMS : i / DIMS, d = image ? i % IMAGE_DIMS : i % DIMS;
+        if ((image ? fit >> i & 1u : k == kind && fit >> d & 1u) != 0)
+            continue;
+        w[n++] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                         .dstSet = t.set,
+                                         .dstBinding = image ? IMAGE_BINDING(k, d) : 1 + 10 * k + d,
+                                         .dstArrayElement = slot,
+                                         .descriptorCount = 1,
+                                         .descriptorType = image ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                                                 : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                         .pImageInfo = &ii };
+    }
+    if (n)
+        VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
+}
+
 /** @brief Writes image v (level level) as storage image id into every kind and dimension array it can take. */
 static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t level, uint32_t target, uint32_t layer,
                       uint32_t layers)
@@ -397,6 +429,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
     VkDescriptorImageInfo ii[IMAGE_KINDS * IMAGE_DIMS];
     VkWriteDescriptorSet w[IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
+    uint64_t wrote = 0;
     for (uint32_t k = 0; k < IMAGE_KINDS; k++) {
         VkFormat f = image_format(k, v->format, bpb);
         if (f == VK_FORMAT_UNDEFINED)
@@ -427,6 +460,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
                                            .descriptorCount = 1,
                                            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                            .pImageInfo = &ii[n] };
+            wrote |= 1ull << (k * IMAGE_DIMS + d);
             n++;
         }
     }
@@ -434,6 +468,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
         return nvn_vk_stop(r, "image id %u (format %u) has no storage view the host device supports", id,
                            v->d.format);
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
+    null_rest(slot, true, 0, wrote);
     return RL_OK;
 }
 
@@ -550,6 +585,7 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
         n++;
     }
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
+    null_rest(sl, false, *kind, fit);
     t.tex_level[sl] = has_view && nv.has_levels ? (uint32_t)nv.base_level : 0;
     t.img_done[sl] = false;
     t.tex_target[sl] = has_view && nv.has_target ? nv.target : v->d.target;
