@@ -866,12 +866,21 @@ bool nvn_vk_flush(replay *r)
         return true;
     }
     r->recording = false;
-    if (VK(vkEndCommandBuffer)(g.cb) != VK_SUCCESS)
+    VkResult vr = VK(vkEndCommandBuffer)(g.cb);
+    if (vr != VK_SUCCESS) {
+        rl_log(RL_LOG_ERROR, "nvn", "vkEndCommandBuffer failed (%d)", (int)vr);
         return false;
+    }
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
-    if (VK(vkResetFences)(g.dev, 1, &g.fence) != VK_SUCCESS || VK(vkQueueSubmit)(g.queue, 1, &si, g.fence) != VK_SUCCESS)
+    if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS ||
+        (vr = VK(vkQueueSubmit)(g.queue, 1, &si, g.fence)) != VK_SUCCESS) {
+        rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
         return false;
-    bool ok = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
+    }
+    vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
+    bool ok = vr == VK_SUCCESS;
+    if (!ok)
+        rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     g.arena_used = 0;
     g.flushes++;
     nvn_draw_reset();
