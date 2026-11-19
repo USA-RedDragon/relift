@@ -695,7 +695,7 @@ static void finish_line(nds_gx *g, const nds_gx_lbuf *l, const nds_gx_lbuf *abov
         if (fog)
             c = fogged(g, c, l->depth[x]);
         uint32_t cov = marked ? 16 : (at & A_COVER) >> A_COVER_SHIFT;
-        if ((cnt & D_AA) && cov < 31) {
+        if ((cnt & D_AA) && cov < 31 && (marked || l->col[1][x] != l->col[0][x])) {
             uint32_t b = l->col[1][x];
             if (fog)
                 b = fogged(g, b, l->depth[x]);
