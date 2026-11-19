@@ -414,7 +414,7 @@ TEST(sm_tipc)
     uint32_t *tls = (uint32_t *)(void *)(t_mem() + c->tpidrro_el0);
     memset(tls, 0, RL_IPC_MSG);
     tls[0] = TIPC_CLOSE;
-    CHECK_EQ(t_svc(c, SVC_SEND_SYNC_REQUEST, h, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SEND_SYNC_REQUEST, h, 0, 0, 0, 0, 0), KR_PORT_REMOTE_CLOSED);
     CHECK_EQ(t_svc(c, SVC_SEND_SYNC_REQUEST, h, 0, 0, 0, 0, 0), KR_PORT_REMOTE_CLOSED);
 }
 
@@ -647,7 +647,7 @@ TEST(ipc_errors)
     uint32_t *tls = (uint32_t *)(void *)(t_mem() + c->tpidrro_el0);
     memset(tls, 0, RL_IPC_MSG);
     tls[0] = HIPC_CLOSE;
-    CHECK_EQ(t_svc(c, SVC_SEND_SYNC_REQUEST, h, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SEND_SYNC_REQUEST, h, 0, 0, 0, 0, 0), KR_PORT_REMOTE_CLOSED);
     CHECK_EQ(add(c, h, 0, 1, 1, &v), KR_PORT_REMOTE_CLOSED);
     CHECK_EQ(t_svc(c, SVC_CLOSE_HANDLE, h, 0, 0, 0, 0, 0), 0);
 }

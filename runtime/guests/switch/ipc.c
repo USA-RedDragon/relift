@@ -558,6 +558,7 @@ rl_result hos_ipc_request(uint32_t handle, uint64_t msg_addr, uint64_t msg_size,
         rc = SF_RESULT_INVALID_HEADER;
     } else if (p.type == HIPC_CLOSE || p.type == TIPC_CLOSE) {
         s->closed = true;
+        rc = KR_PORT_REMOTE_CLOSED;
     } else if (p.type == HIPC_REQUEST || p.type == HIPC_REQUEST_CTX || p.type == HIPC_CONTROL ||
                p.type == HIPC_CONTROL_CTX) {
         rc = cmif(m, r, &p, &len, stop);
