@@ -23,8 +23,6 @@
 /** @brief Bytes per line, and the line of an address. */
 #define LINE 32u
 #define WAYS 4u
-/** @brief Ticks of a hit (half a bus cycle, GBATEK). */
-#define HIT_TICKS 1u
 /**
  * @brief Ticks main RAM is busy with a line fill, and the fill from the BIOS
  * (GBATEK: 23 and 11 bus cycles). The ARM9 waits 41 ticks after its own cycle
@@ -69,13 +67,7 @@ void nds_cache_mpu(rl_nds *m)
 }
 
 /** @brief The way of set s that holds tag t, or -1. */
-static int find(const nds_cache_side *c, unsigned s, uint32_t t)
-{
-    for (unsigned w = 0; w < WAYS; w++)
-        if (c->valid[s] >> w & 1u && c->tag[s][w] == t)
-            return (int)w;
-    return -1;
-}
+static int find(const nds_cache_side *c, unsigned s, uint32_t t) { return nds_cache_find(c, s, t); }
 
 /**
  * @brief The way a fill of set s replaces. Round robin (control bit 14): one
@@ -167,16 +159,11 @@ void nds_cache_before_bus(rl_nds *m)
         drain(m);
 }
 
-bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
+bool nds_cache_fill(rl_nds *m, uint32_t addr, bool code)
 {
     nds_cache_side *c = side(m, code);
     unsigned s = (addr / LINE) % sets_of(code);
     uint32_t t = addr / LINE / sets_of(code);
-    if (find(c, s, t) >= 0) {
-        if (code || seq)
-            nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
-        return true;
-    }
     unsigned w = victim(m, c, s);
     if (code)
         m->cache.i_evicted = c->valid[s] >> w & 1u ? (c->tag[s][w] * sets_of(code) + s) * LINE | 1u : 0u;
@@ -205,21 +192,6 @@ bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
     c->valid[s] |= (uint8_t)(1u << w);
     c->dirty[s] &= (uint8_t)~(1u << w);
     return false;
-}
-
-bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq)
-{
-    nds_cache_side *c = &m->cache.d;
-    unsigned s = (addr / LINE) % NDS_DCACHE_SETS;
-    int w = find(c, s, addr / LINE / NDS_DCACHE_SETS);
-    if (w < 0)
-        return false;
-    if (!write_back)
-        return false;
-    c->dirty[s] |= (uint8_t)(1u << w);
-    if (seq)
-        nds_charge(m, RL_NDS_ARM9, HIT_TICKS);
-    return true;
 }
 
 /** @brief Drops the line of addr from cache side c, writing it back first when clean is set and it is dirty. */

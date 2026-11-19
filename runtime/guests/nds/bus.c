@@ -355,7 +355,7 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
                 if (nds_shared(cpu, addr))
                     nds_order(m, cpu);
                 nds_cache_read(m, addr, code, seq);
-                return bus_read(m, cpu, addr, size, w);
+                return w.kind == NDS_K_MEM ? nds_ld(w.p, size) : bus_read(m, cpu, addr, size, w);
             }
         }
         nds_cache_before_bus(m);

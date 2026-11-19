@@ -341,6 +341,8 @@ typedef struct nds_keypad {
 /** @brief Sets of the ARM9's instruction (8 KiB) and data (4 KiB) caches: four ways of 32-byte lines. */
 #define NDS_ICACHE_SETS 64u
 #define NDS_DCACHE_SETS 32u
+/** @brief Ticks of a cache hit (half a bus cycle, GBATEK). */
+#define NDS_CACHE_HIT_TICKS 1u
 /**
  * @brief Ticks at the end of an ARM9 write to main RAM that the CPU does not wait for: the console's uncached STR
  * takes 14 ticks where the RAM is busy 18 (a write buffer drains one STR each 18).
@@ -819,14 +821,46 @@ static inline unsigned nds_cache_attr(const rl_nds *m, uint32_t addr)
         a &= ~(unsigned)NDS_ATTR_DC;
     return a;
 }
+/** @brief The way of cache side c whose set s holds tag t, or -1. */
+static inline int nds_cache_find(const nds_cache_side *c, unsigned s, uint32_t t)
+{
+    for (unsigned w = 0; w < 4u; w++)
+        if (c->valid[s] >> w & 1u && c->tag[s][w] == t)
+            return (int)w;
+    return -1;
+}
+/** @brief The miss of nds_cache_read: a line fill after the write buffer drains (and the write-back of a dirty victim). Returns false. */
+bool nds_cache_fill(rl_nds *m, uint32_t addr, bool code);
 /**
  * @brief Charges a cached read of addr: a hit, or a line fill after the write buffer drains (and the write-back of a
  * dirty victim). A data hit costs nothing beyond its instruction's cycle but for a further word of an LDM (seq).
  * Returns true for a hit.
  */
-bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq);
-/** @brief A store hit in a write-back line: marks it dirty and charges the hit; false on a miss or a write-through line. */
-bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq);
+static inline bool nds_cache_read(rl_nds *m, uint32_t addr, bool code, bool seq)
+{
+    unsigned sets = code ? NDS_ICACHE_SETS : NDS_DCACHE_SETS;
+    if (nds_cache_find(code ? &m->cache.i : &m->cache.d, (addr / 32u) % sets, addr / 32u / sets) < 0)
+        return nds_cache_fill(m, addr, code);
+    if (code || seq)
+        nds_charge(m, RL_NDS_ARM9, NDS_CACHE_HIT_TICKS);
+    return true;
+}
+/**
+ * @brief A store hit of addr in the data cache: true when the line is there and write_back is set (it becomes
+ * dirty; seq charges a further word's tick), false when the store goes to the write buffer.
+ */
+static inline bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back, bool seq)
+{
+    nds_cache_side *c = &m->cache.d;
+    unsigned s = (addr / 32u) % NDS_DCACHE_SETS;
+    int w = nds_cache_find(c, s, addr / 32u / NDS_DCACHE_SETS);
+    if (w < 0 || !write_back)
+        return false;
+    c->dirty[s] |= (uint8_t)(1u << w);
+    if (seq)
+        nds_charge(m, RL_NDS_ARM9, NDS_CACHE_HIT_TICKS);
+    return true;
+}
 /** @brief Queues a buffered write of ticks bus time to addr, stalling while the buffer is full. */
 void nds_cache_buffer(rl_nds *m, uint32_t addr, unsigned ticks);
 /** @brief Waits until the write buffer is empty (before an access that goes to the bus). */
