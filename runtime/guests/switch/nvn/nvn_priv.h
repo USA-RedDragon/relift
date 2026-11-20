@@ -551,6 +551,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_CLEAR_TEXTUREUI, nvnCommandBufferClearTextureui) \
     X(NVN_CMD_CLEAR_DEPTH_STENCIL, nvnCommandBufferClearDepthStencil) \
     X(NVN_CMD_COPY_BUFFER_TO_BUFFER, nvnCommandBufferCopyBufferToBuffer) \
+    X(NVN_CMD_UPDATE_UNIFORM_BUFFER, nvnCommandBufferUpdateUniformBuffer) \
     X(NVN_CMD_COPY_BUFFER_TO_TEXTURE, nvnCommandBufferCopyBufferToTexture) \
     X(NVN_CMD_COPY_TEXTURE_TO_BUFFER, nvnCommandBufferCopyTextureToBuffer) \
     X(NVN_CMD_COPY_TEXTURE_TO_TEXTURE, nvnCommandBufferCopyTextureToTexture) \

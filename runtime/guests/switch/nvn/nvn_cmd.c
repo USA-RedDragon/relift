@@ -81,6 +81,7 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_BIND_SEPARATE_SAMPLERS, 4, 3, 8 },
     { NVN_CMD_BIND_IMAGES, 4, 3, 8 },
     { NVN_CMD_SET_VIEWPORTS, 3, 2, 16 },
+    { NVN_CMD_UPDATE_UNIFORM_BUFFER, 5, 4, 1 },
     { NVN_CMD_PUSH_COMPUTE_CONSTANTS, 4, 3, 1 },
     { NVN_CMD_PUSH_GRAPHICS_CONSTANTS, 4, 3, 1 },
     { NVN_CMD_SET_SCISSORS, 3, 2, 16 },

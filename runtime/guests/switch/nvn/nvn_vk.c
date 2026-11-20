@@ -1799,6 +1799,23 @@ static int copy_buffer_to_buffer(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+/**
+ * @brief nvnCommandBufferUpdateUniformBuffer(buffer address, buffer size, offset, size, data): the data, copied when
+ * the command was recorded, lands at the buffer's offset in the order the commands replay, so draws before it read
+ * the old bytes and draws after it the new ones (a draw stages its uniform data from guest memory when it replays).
+ */
+static int update_uniform_buffer(replay *r, const nvn_cmd *e)
+{
+    uint64_t size = e->x[4];
+    const void *data = nvn_cmd_bytes(r->s, e->x[5]);
+    if (!size)
+        return RL_OK;
+    if (!data)
+        return nvn_vk_stop(r, "%s without its data", nvn_cmd_name(e->op));
+    memcpy(r->mem + nvn_gpu_guest(e->x[1]) + e->x[3], data, size);
+    return RL_OK;
+}
+
 /** @brief The level and first layer a copy names: its view's, or 0, plus the region's z (the layer of an array). */
 static int copy_side(replay *r, uint64_t view, const nvn_region *rg, uint32_t *level, uint32_t *layer)
 {
@@ -2031,6 +2048,8 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         r->st->scissor = (VkRect2D){ { (int32_t)e->x[1], (int32_t)e->x[2] }, { (uint32_t)e->x[3], (uint32_t)e->x[4] } };
         r->st->scissor_set = true;
         return RL_OK;
+    case NVN_CMD_UPDATE_UNIFORM_BUFFER:
+        return update_uniform_buffer(r, e);
     case NVN_CMD_COPY_BUFFER_TO_BUFFER:
         return copy_buffer_to_buffer(r, e);
     case NVN_CMD_COPY_TEXTURE_TO_TEXTURE:

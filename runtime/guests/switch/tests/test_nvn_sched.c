@@ -244,3 +244,48 @@ TEST(nvn_calls_flatten_into_the_run_in_place)
     CHECK(items[3].s == nvn_cmdset_of(handles[1]));
     free(items);
 }
+
+TEST(nvn_update_uniform_buffer_keeps_the_data_it_was_recorded_with)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400, data = heap + 0x1000;
+    c->x[0] = cb;
+    c->x[1] = heap;
+    c->x[2] = 0;
+    c->x[3] = 0;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnCommandBufferInitialize(c, t_mem()), RET);
+    c->x[0] = cb;
+    c->x[1] = heap;
+    c->x[3] = 0x4000;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnCommandBufferAddCommandMemory(c, t_mem()), RET);
+    c->x[0] = cb;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnCommandBufferBeginRecording(c, t_mem()), RET);
+    for (unsigned i = 0; i < 16; i++)
+        t_mem()[data + i] = (uint8_t)(0x10 + i);
+    c->x[0] = cb;
+    c->x[1] = 0x1000;
+    c->x[2] = 0x100;
+    c->x[3] = 0x20;
+    c->x[4] = 16;
+    c->x[5] = data;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnCommandBufferUpdateUniformBuffer(c, t_mem()), RET);
+    for (unsigned i = 0; i < 16; i++)
+        t_mem()[data + i] = 0;
+    c->x[0] = cb;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnCommandBufferEndRecording(c, t_mem()), RET);
+    const nvn_cmdset *s = nvn_cmdset_of(c->x[0]);
+    CHECK(s != NULL);
+    CHECK_EQ(s->n, 1);
+    CHECK_EQ(s->cmds[0].op, NVN_CMD_UPDATE_UNIFORM_BUFFER);
+    CHECK_EQ(s->cmds[0].x[3], 0x20);
+    const uint8_t *kept = nvn_cmd_bytes(s, s->cmds[0].x[5]);
+    CHECK(kept != NULL);
+    CHECK_EQ(kept[0], 0x10);
+    CHECK_EQ(kept[15], 0x1f);
+}
