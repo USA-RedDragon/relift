@@ -1,0 +1,16 @@
+lib: enter 2
+lib: enter 1
+lib: enter 0
+lib: leave 0
+lib: leave 1
+lib: leave 2
+main: Local destroyed
+main: caught LibError 99
+main: caught lib says hello
+lib: enter 1
+lib: enter 0
+lib: leave 0
+lib: leave 1
+lib: caught 99 inside
+inside: 100
+main: caught from main

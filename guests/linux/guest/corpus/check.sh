@@ -6,24 +6,28 @@
 #
 # OUT_DIR holds the programs build.sh made; WORK_DIR gets one project per
 # program. RELIFT names the relift binary. Every program is built and run in
-# each mode of RELIFT_CHECK_MODES (default: auto trampoline): auto lets the
+# each mode of RELIFT_CHECK_MODES (default: auto trampoline cold): auto lets the
 # build pick direct returns when it proves them safe, trampoline forces
-# every return through dispatch (emit.trampoline). The output must be the
-# same in both. Every program needs a bit of time to compile, so a name list
-# picks some. Exit status 1 when any differs.
+# every return through dispatch (emit.trampoline); cold adds the cold copy
+# (emit.cold). The output must be the same in all. Every program needs a
+# bit of time to compile, so a name list picks some. A `.dyn` program
+# imports with SYSROOT, the arm64 root file system or toolchain sysroot that
+# holds its libraries (default: the sysroot of AARCH64_GCC,
+# aarch64-linux-gnu-gcc). Exit status 1 when any differs.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: check.sh OUT_DIR WORK_DIR [NAME[.VARIANT]...]}
 work=${2:?usage: check.sh OUT_DIR WORK_DIR [NAME[.VARIANT]...]}
 shift 2
 relift=${RELIFT:-relift}
+sysroot=${SYSROOT:-$("${AARCH64_GCC:-aarch64-linux-gnu-gcc}" -print-sysroot 2>/dev/null || true)}
 mkdir -p "$work"
 if [ $# -eq 0 ]; then
-    list=$(ls "$out" | grep -E '\.(static|pie|gnu)$')
+    list=$(ls "$out" | grep -E '\.(static|pie|gnu|dyn)$')
 else
     list=$*
 fi
-modes=${RELIFT_CHECK_MODES:-auto trampoline}
+modes=${RELIFT_CHECK_MODES:-auto trampoline cold}
 failed=0
 for mode in $modes; do
 for b in $list; do
@@ -32,13 +36,19 @@ for b in $list; do
     proj=$work/$b
     tag=$b
     forced=false
-    if [ "$mode" = trampoline ]; then
-        proj=$work/$b.trampoline
-        tag="$b (trampoline)"
-        forced=true
+    cold=false
+    case $mode in
+    trampoline) forced=true ;;
+    cold) cold=true ;;
+    esac
+    if [ "$mode" != auto ]; then
+        proj=$work/$b.$mode
+        tag="$b ($mode)"
     fi
     mkdir -p "$proj"
-    if ! (cd "$proj" && rm -f game.toml && "$relift" import "$out/$b" >import.log 2>&1 && RELIFT_EMIT_TRAMPOLINE=$forced "$relift" build ${RELIFT_BUILD_FLAGS:-} >build.log 2>&1); then
+    flags=
+    case $b in *.dyn) flags="--sysroot $sysroot" ;; esac
+    if ! (cd "$proj" && rm -f game.toml && "$relift" import $flags "$out/$b" >import.log 2>&1 && RELIFT_EMIT_TRAMPOLINE=$forced RELIFT_EMIT_COLD=$cold "$relift" build ${RELIFT_BUILD_FLAGS:-} >build.log 2>&1); then
         echo "FAIL $tag: build (see $proj/build.log)"
         failed=1
         continue

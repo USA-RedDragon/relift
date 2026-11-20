@@ -1,0 +1,11 @@
+shared_lib: constructor
+constructor ran: 1
+name shared
+add 5
+add with global 8
+apply 20
+counter 1 2 3
+main tls 101
+thread tls 101 102
+main tls again 102
+shared_lib: destructor

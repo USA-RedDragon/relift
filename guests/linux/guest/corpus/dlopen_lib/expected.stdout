@@ -1,0 +1,7 @@
+plugin: constructor
+plugin squarer
+compute 37 51
+puts found through RTLD_DEFAULT
+missing symbol: not found
+plugin: destructor
+closed

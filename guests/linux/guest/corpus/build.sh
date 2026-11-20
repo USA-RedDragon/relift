@@ -11,6 +11,7 @@ for dir in "$here"/*/; do
         (cd "$dir" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GO111MODULE=off go build -trimpath -o "$out/$name.static" main.go)
         continue
     fi
+    [ -f "$dir/dynamic_only" ] && continue
     if [ -f "$dir/main.cpp" ]; then
         cc="zig c++"
         src="$dir/main.cpp"
@@ -32,13 +33,36 @@ done
 
 gcc=${AARCH64_GCC:-}
 if [ -n "$gcc" ]; then
+    gxx="${gcc%gcc}g++"
     for dir in "$here"/*/; do
         name=$(basename "$dir")
         [ -f "$dir/main.go" ] && continue
         if [ -f "$dir/main.cpp" ]; then
-            "${gcc%gcc}g++" -static -O2 -o "$out/$name.gnu" "$dir/main.cpp"
+            cc=$gxx
+            src="$dir/main.cpp"
+            libsrc="$dir/lib.cpp"
         else
-            "$gcc" -static -O2 -o "$out/$name.gnu" "$dir/main.c" -lm
+            cc=$gcc
+            src="$dir/main.c"
+            libsrc="$dir/lib.c"
+        fi
+        flags="-O2 -I$dir"
+        if [ -f "$libsrc" ]; then
+            $cc $flags -shared -fPIC -o "$out/lib$name.so" "$libsrc"
+            if [ -f "$dir/dlopen" ]; then
+                link="-ldl"
+            else
+                link="-L$out -l$name"
+            fi
+            $cc $flags -o "$out/$name.dyn" "$src" $link "-Wl,-rpath,\$ORIGIN" -lm
+        else
+            $cc $flags -o "$out/$name.dyn" "$src" -lm
+        fi
+        [ -f "$dir/dynamic_only" ] && continue
+        if [ -f "$dir/main.cpp" ]; then
+            $gxx -static -O2 -o "$out/$name.gnu" "$dir/main.cpp"
+        else
+            $gcc -static -O2 -o "$out/$name.gnu" "$dir/main.c" -lm
         fi
     done
 fi
