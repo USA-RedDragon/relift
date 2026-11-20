@@ -14,6 +14,7 @@
 #include <relift/post.h>
 
 #include "core.h"
+#include "postgpu.h"
 #include "vkdev.h"
 
 #include <pthread.h>
@@ -22,7 +23,9 @@
 #include <time.h>
 
 #define MAX_IMAGES 8
+#define SLOTS 3
 #define IDLE_WAIT_MS 250
+#define SLOT_WAIT_MS 1000
 #define STATS_EVERY_NS 10000000000ull
 #define QUARTER_TURNS (RLVK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | RLVK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
 #define ROTATIONS                                                                                                    \
@@ -34,12 +37,27 @@ typedef struct image {
     int32_t format;
 } image;
 
+enum { SLOT_FREE, SLOT_FILLING, SLOT_READY, SLOT_SHOWN };
+
+typedef struct slot {
+    image im;
+    int state;
+} slot;
+
 struct rl_present {
     rl_window *win;
     const rlvk_dev *d;
     pthread_t thread;
     pthread_mutex_t lock;
     pthread_cond_t cond;
+
+    slot slots[SLOTS];
+    int next_slot, cur_slot;
+    uint32_t release_mask;
+    bool gpu_frames;
+    rl_post_gpu *post;
+    bool post_failed;
+    image pic;
 
     uint8_t *next;
     size_t next_cap;
@@ -290,6 +308,8 @@ static bool make_swapchain(rl_present *p)
         return fail("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", r);
     uint32_t w = caps.currentExtent.width, h = caps.currentExtent.height;
     uint32_t transform = caps.currentTransform;
+    if (p->gpu_frames && (caps.supportedTransforms & RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR))
+        transform = RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     if (!(transform & ROTATIONS) || !(caps.supportedTransforms & transform))
         transform = (caps.supportedTransforms & RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
                         ? RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
@@ -301,7 +321,7 @@ static bool make_swapchain(rl_present *p)
         rl_window_size(p->win, &w, &h);
         w = w < caps.minImageExtent.width ? caps.minImageExtent.width : w > caps.maxImageExtent.width ? caps.maxImageExtent.width : w;
         h = h < caps.minImageExtent.height ? caps.minImageExtent.height : h > caps.maxImageExtent.height ? caps.maxImageExtent.height : h;
-    } else if (caps.currentTransform & QUARTER_TURNS) {
+    } else if ((caps.currentTransform & QUARTER_TURNS) && (transform & QUARTER_TURNS)) {
         uint32_t t = w;
         w = h;
         h = t;
@@ -427,33 +447,71 @@ static void pack_turned(uint32_t *dst, const uint8_t *rgb, uint32_t w, uint32_t 
         }
 }
 
-/** @brief Records the frame into swapchain image index: upload, clear, scale. */
+static void copy_whole(rl_present *p, rlvk_handle from, rlvk_handle to, uint32_t w, uint32_t h)
+{
+    rlvk_image_copy c = {
+        .srcSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .extent = { w, h, 1 },
+    };
+    p->d->vkCmdCopyImage(p->cmd, from, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to,
+                         RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+}
+
+/** @brief The format of the images the frame is scaled from: the swapchain's own encoding, so the blit passes bytes. */
+static int32_t source_format(const rl_present *p)
+{
+    return is_srgb(__atomic_load_n(&p->sc_format, __ATOMIC_RELAXED)) ? RLVK_FORMAT_R8G8B8A8_SRGB
+                                                                      : RLVK_FORMAT_R8G8B8A8_UNORM;
+}
+
+/** @brief Records the frame into swapchain image index: upload, post passes, clear, scale. */
 static bool record(rl_present *p, uint32_t index, bool capture)
 {
     const rlvk_dev *d = p->d;
     const uint32_t xfer = RLVK_PIPELINE_STAGE_TRANSFER_BIT;
     const uint32_t wr = RLVK_ACCESS_TRANSFER_WRITE_BIT, rd = RLVK_ACCESS_TRANSFER_READ_BIT;
-    uint32_t t = p->sc_transform;
+    bool gpu = p->cur_slot >= 0;
+    uint32_t t = gpu ? RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : p->sc_transform;
     bool quarter = (t & QUARTER_TURNS) != 0;
     uint32_t lw = quarter ? p->sc_h : p->sc_w, lh = quarter ? p->sc_w : p->sc_h;
     uint32_t fw = quarter ? p->work_h : p->work_w, fh = quarter ? p->work_w : p->work_h;
-    int32_t src_format = is_srgb(p->sc_format) ? RLVK_FORMAT_R8G8B8A8_SRGB : RLVK_FORMAT_R8G8B8A8_UNORM;
+    int32_t src_format = source_format(p);
+    rlvk_handle img = 0;
+    uint32_t cw = fw, ch = fh;
+    bool post = false;
+    if (!p->post_failed && rl_post_gpu_wanted()) {
+        if (!p->post && !(p->post = rl_post_gpu_new()))
+            p->post_failed = true;
+        post = p->post && rl_post_gpu_plan(p->post, fw, fh, &cw, &ch);
+    }
+    if (!post) {
+        cw = fw;
+        ch = fh;
+    }
     rl_present_rect logical, at;
     rl_present_place(p->work_sw, p->work_sh, lw, lh, rl_post_integer(p->work_fit), &logical);
     rl_present_turn(&logical, lw, lh, t, &at);
-    int sampling = rl_post_sampling(fw, fh, at.w, at.h);
+    int sampling = rl_post_sampling(cw, ch, at.w, at.h);
     bool sharp = sampling == RL_POST_SAMPLE_SHARP;
-    uint32_t kx = at.w / fw, ky = at.h / fh;
+    uint32_t kx = at.w / cw, ky = at.h / ch;
     kx = kx ? kx : 1;
     ky = ky ? ky : 1;
-    if (!image_make(p, &p->src, fw, fh, src_format) || (sharp && !image_make(p, &p->pre, fw * kx, fh * ky, src_format)))
+    image *slot_im = gpu ? &p->slots[p->cur_slot].im : NULL;
+    bool copy_slot = gpu && slot_im->format != src_format;
+    if ((!gpu || copy_slot) && !image_make(p, &p->src, fw, fh, src_format))
         return false;
-    rlvk_size bytes = (rlvk_size)fw * fh * 4;
-    if (p->stage.size < bytes &&
-        !rl_vkdev_buf_make(d, &p->stage, bytes, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false))
+    if ((sharp && !image_make(p, &p->pre, cw * kx, ch * ky, src_format)) ||
+        (post && !image_make(p, &p->pic, cw, ch, src_format)))
         return false;
-    pack_turned(p->stage.map, p->work, p->work_w, p->work_h, t);
-    rl_vkdev_buf_flush(d, &p->stage);
+    if (!gpu) {
+        rlvk_size bytes = (rlvk_size)fw * fh * 4;
+        if (p->stage.size < bytes &&
+            !rl_vkdev_buf_make(d, &p->stage, bytes, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false))
+            return false;
+        pack_turned(p->stage.map, p->work, p->work_w, p->work_h, t);
+        rl_vkdev_buf_flush(d, &p->stage);
+    }
     rlvk_size cap_bytes = (rlvk_size)p->sc_w * p->sc_h * 4;
     if (capture && p->readback.size < cap_bytes &&
         !rl_vkdev_buf_make(d, &p->readback, cap_bytes, RLVK_BUFFER_USAGE_TRANSFER_DST_BIT, true, true))
@@ -467,29 +525,55 @@ static bool record(rl_present *p, uint32_t index, bool capture)
     if (r != RLVK_SUCCESS)
         return fail("vkBeginCommandBuffer", r);
     rlvk_handle sc = p->images[index];
-    layout(p, p->src.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
+    if (!gpu) {
+        layout(p, p->src.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
+               RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, xfer);
+        rlvk_buffer_image_copy copy = {
+            .imageSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .imageExtent = { fw, fh, 1 },
+        };
+        d->vkCmdCopyBufferToImage(p->cmd, p->stage.buffer, p->src.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                  &copy);
+        layout(p, p->src.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd,
+               xfer, xfer);
+        img = p->src.image;
+    } else if (copy_slot) {
+        layout(p, p->src.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
+               RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, xfer);
+        copy_whole(p, slot_im->image, p->src.image, fw, fh);
+        layout(p, p->src.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd,
+               xfer, xfer);
+        img = p->src.image;
+    } else {
+        img = slot_im->image;
+    }
+    if (post) {
+        layout(p, p->pic.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
+               RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, xfer);
+        if (!rl_post_gpu_record(p->post, (uint64_t)p->cmd, (uint64_t)img, fw, fh, (uint64_t)p->pic.image, cw, ch)) {
+            d->vkEndCommandBuffer(p->cmd);
+            return false;
+        }
+        layout(p, p->pic.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd,
+               xfer, xfer);
+        img = p->pic.image;
+    }
+    layout(p, sc, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
            RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, xfer);
-    rlvk_buffer_image_copy copy = {
-        .imageSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .imageExtent = { fw, fh, 1 },
-    };
-    d->vkCmdCopyBufferToImage(p->cmd, p->stage.buffer, p->src.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    layout(p, p->src.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd, xfer,
-           xfer);
-    layout(p, sc, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer, xfer);
     rlvk_clear_color black = { .float32 = { 0, 0, 0, 1 } };
     rlvk_image_subresource_range all = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     d->vkCmdClearColorImage(p->cmd, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &all);
     layout(p, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, wr, wr, xfer, xfer);
     if (at.w && at.h) {
         if (sharp) {
-            layout(p, p->pre.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer, xfer);
-            blit(p, p->src.image, fw, fh, p->pre.image, 0, 0, p->pre.w, p->pre.h, RLVK_FILTER_NEAREST);
-            layout(p, p->pre.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd,
-                   xfer, xfer);
+            layout(p, p->pre.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer,
+                   xfer);
+            blit(p, img, cw, ch, p->pre.image, 0, 0, p->pre.w, p->pre.h, RLVK_FILTER_NEAREST);
+            layout(p, p->pre.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr,
+                   rd, xfer, xfer);
             blit(p, p->pre.image, p->pre.w, p->pre.h, sc, at.x, at.y, at.w, at.h, RLVK_FILTER_LINEAR);
         } else {
-            blit(p, p->src.image, fw, fh, sc, at.x, at.y, at.w, at.h,
+            blit(p, img, cw, ch, sc, at.x, at.y, at.w, at.h,
                  sampling == RL_POST_SAMPLE_LINEAR ? RLVK_FILTER_LINEAR : RLVK_FILTER_NEAREST);
         }
     }
@@ -578,6 +662,18 @@ static bool caps_moved(rl_present *p)
 }
 
 /** @brief Shows the work frame; false when it could not and should be tried again once something changes. */
+/** @brief Gives back the slots the presenter no longer shows; its fence has passed, so the GPU is done with them. */
+static void release_slots(rl_present *p)
+{
+    pthread_mutex_lock(&p->lock);
+    for (uint32_t i = 0; i < SLOTS; i++)
+        if (p->release_mask & (1u << i))
+            p->slots[i].state = SLOT_FREE;
+    p->release_mask = 0;
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
 static bool draw(rl_present *p, bool capture)
 {
     const rlvk_dev *d = p->d;
@@ -602,6 +698,7 @@ static bool draw(rl_present *p, bool capture)
         capture = false;
     }
     d->vkWaitForFences(d->device, 1, &p->fence, 1, ~(uint64_t)0);
+    release_slots(p);
     uint32_t index = 0;
     rlvk_result r = d->vkAcquireNextImageKHR(d->device, p->swapchain, ~(uint64_t)0, p->acquired, 0, &index);
     if (r == RLVK_ERROR_OUT_OF_DATE_KHR) {
@@ -703,14 +800,25 @@ static void *thread_main(void *arg)
         bool redo = p->have_frame && (p->stale || moved);
         if (p->surface_ok && !p->create_failed && (p->fresh || p->capture_want || redo) && (p->fresh || p->have_frame)) {
             if (p->fresh) {
-                uint8_t *t = p->work;
-                size_t c = p->work_cap;
-                p->work = p->next;
-                p->work_cap = p->next_cap;
-                p->next = t;
-                p->next_cap = c;
-                p->work_w = p->next_w;
-                p->work_h = p->next_h;
+                if (p->cur_slot >= 0)
+                    p->release_mask |= 1u << p->cur_slot;
+                if (p->next_slot >= 0) {
+                    p->cur_slot = p->next_slot;
+                    p->slots[p->cur_slot].state = SLOT_SHOWN;
+                    p->work_w = p->next_w;
+                    p->work_h = p->next_h;
+                } else {
+                    uint8_t *t = p->work;
+                    size_t c = p->work_cap;
+                    p->work = p->next;
+                    p->work_cap = p->next_cap;
+                    p->next = t;
+                    p->next_cap = c;
+                    p->work_w = p->next_w;
+                    p->work_h = p->next_h;
+                    p->cur_slot = -1;
+                }
+                p->next_slot = -1;
                 p->work_sw = p->next_sw;
                 p->work_sh = p->next_sh;
                 p->work_fit = p->next_fit;
@@ -753,6 +861,7 @@ rl_present *rl_present_open(rl_window *w)
     p->win = w;
     p->d = d;
     p->surface_ok = true;
+    p->next_slot = p->cur_slot = -1;
     p->stats.mode = -1;
     pthread_mutex_init(&p->lock, NULL);
     pthread_cond_init(&p->cond, NULL);
@@ -770,6 +879,10 @@ static void free_objects(rl_present *p)
     idle(p);
     image_free(p, &p->src);
     image_free(p, &p->pre);
+    image_free(p, &p->pic);
+    for (uint32_t i = 0; i < SLOTS; i++)
+        image_free(p, &p->slots[i].im);
+    rl_post_gpu_free(p->post);
     rl_vkdev_buf_free(d, &p->stage);
     rl_vkdev_buf_free(d, &p->readback);
     if (p->acquired)
@@ -823,10 +936,82 @@ void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_
     memcpy(p->next, rgb, bytes);
     if (p->fresh)
         p->stats.replaced++;
+    if (p->next_slot >= 0)
+        p->slots[p->next_slot].state = SLOT_FREE;
+    p->next_slot = -1;
     p->next_w = width;
     p->next_h = height;
     p->next_sw = shown_w ? shown_w : width;
     p->next_sh = shown_h ? shown_h : height;
+    p->next_fit = fit;
+    p->fresh = true;
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
+bool rl_present_slot_begin(rl_present *p, uint32_t w, uint32_t h, rl_present_slot *out)
+{
+    if (!p || !w || !h)
+        return false;
+    pthread_mutex_lock(&p->lock);
+    if (!p->gpu_frames) {
+        p->gpu_frames = true;
+        p->stale = true;
+    }
+    struct timespec t;
+    deadline(&t, SLOT_WAIT_MS);
+    int found = -1;
+    for (;;) {
+        for (int i = 0; i < SLOTS && found < 0; i++)
+            if (p->slots[i].state == SLOT_FREE)
+                found = i;
+        if (found >= 0 || p->quit || pthread_cond_timedwait(&p->cond, &p->lock, &t) != 0)
+            break;
+    }
+    if (found < 0) {
+        pthread_mutex_unlock(&p->lock);
+        return false;
+    }
+    p->slots[found].state = SLOT_FILLING;
+    pthread_mutex_unlock(&p->lock);
+    int32_t format = source_format(p);
+    if (!image_make(p, &p->slots[found].im, w, h, format)) {
+        pthread_mutex_lock(&p->lock);
+        p->slots[found].state = SLOT_FREE;
+        pthread_mutex_unlock(&p->lock);
+        return false;
+    }
+    out->image = p->slots[found].im.image;
+    out->format = format;
+    out->index = (uint32_t)found;
+    return true;
+}
+
+void rl_present_slot_abort(rl_present *p, const rl_present_slot *s)
+{
+    pthread_mutex_lock(&p->lock);
+    p->slots[s->index].state = SLOT_FREE;
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
+void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h, bool fit,
+                         uint32_t win_w, uint32_t win_h, rl_present_rect *place)
+{
+    if (place)
+        rl_present_place(shown_w, shown_h, win_w, win_h, rl_post_integer(fit), place);
+    pthread_mutex_lock(&p->lock);
+    slot *sl = &p->slots[s->index];
+    if (p->fresh)
+        p->stats.replaced++;
+    if (p->next_slot >= 0)
+        p->slots[p->next_slot].state = SLOT_FREE;
+    sl->state = SLOT_READY;
+    p->next_slot = (int)s->index;
+    p->next_w = sl->im.w;
+    p->next_h = sl->im.h;
+    p->next_sw = shown_w ? shown_w : sl->im.w;
+    p->next_sh = shown_h ? shown_h : sl->im.h;
     p->next_fit = fit;
     p->fresh = true;
     pthread_cond_broadcast(&p->cond);

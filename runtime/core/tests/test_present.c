@@ -12,6 +12,7 @@
 
 #include "hostlib.h"
 #include "present.h"
+#include "vkdev.h"
 #include "vkmin.h"
 
 #include <relift/post.h>
@@ -155,6 +156,91 @@ static uint8_t *capture(rl_present *p, uint32_t *w, uint32_t *h)
     return rl_present_capture(p, 5000, w, h);
 }
 
+/** @brief Plays a guest GPU layer: copies a w by h RGBA8 picture into the slot's image and waits for the GPU. */
+static bool fill_slot(const rl_present_slot *s, const uint8_t *rgba, uint32_t w, uint32_t h)
+{
+    const rlvk_dev *d = rl_vkdev();
+    rlvk_buf stage = { 0 };
+    if (!d || !rl_vkdev_buf_make(d, &stage, (rlvk_size)w * h * 4, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false))
+        return false;
+    memcpy(stage.map, rgba, (size_t)w * h * 4);
+    rl_vkdev_buf_flush(d, &stage);
+    rlvk_handle pool = 0, cmd = 0, fence = 0;
+    rlvk_command_pool_create_info pi = { .sType = RLVK_ST_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = d->family };
+    d->vkCreateCommandPool(d->device, &pi, NULL, &pool);
+    rlvk_command_buffer_allocate_info ai = {
+        .sType = RLVK_ST_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = pool, .commandBufferCount = 1
+    };
+    d->vkAllocateCommandBuffers(d->device, &ai, &cmd);
+    rlvk_fence_create_info fi = { .sType = RLVK_ST_FENCE_CREATE_INFO };
+    d->vkCreateFence(d->device, &fi, NULL, &fence);
+    rlvk_command_buffer_begin_info bi = { .sType = RLVK_ST_COMMAND_BUFFER_BEGIN_INFO };
+    d->vkBeginCommandBuffer(cmd, &bi);
+    rlvk_image_memory_barrier b = {
+        .sType = RLVK_ST_IMAGE_MEMORY_BARRIER,
+        .dstAccessMask = RLVK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout = RLVK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = RLVK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = RLVK_QUEUE_FAMILY_IGNORED,
+        .image = s->image,
+        .subresourceRange = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    d->vkCmdPipelineBarrier(cmd, RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RLVK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0,
+                            NULL, 1, &b);
+    rlvk_buffer_image_copy c = { .imageSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { w, h, 1 } };
+    d->vkCmdCopyBufferToImage(cmd, stage.buffer, s->image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+    b.srcAccessMask = RLVK_ACCESS_TRANSFER_WRITE_BIT;
+    b.dstAccessMask = RLVK_ACCESS_TRANSFER_READ_BIT;
+    b.oldLayout = RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b.newLayout = RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    d->vkCmdPipelineBarrier(cmd, RLVK_PIPELINE_STAGE_TRANSFER_BIT, RLVK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL,
+                            1, &b);
+    d->vkEndCommandBuffer(cmd);
+    rlvk_submit_info si = { .sType = RLVK_ST_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
+    rl_vkdev_guest_queue_lock();
+    bool ok = d->vkQueueSubmit(d->guest_queue, 1, &si, fence) == RLVK_SUCCESS;
+    rl_vkdev_guest_queue_unlock();
+    ok = ok && d->vkWaitForFences(d->device, 1, &fence, 1, ~(uint64_t)0) == RLVK_SUCCESS;
+    d->vkDestroyFence(d->device, fence, NULL);
+    d->vkDestroyCommandPool(d->device, pool, NULL);
+    rl_vkdev_buf_free(d, &stage);
+    return ok;
+}
+
+/** @brief Shows a w by h RGB picture through a slot, as a GPU guest layer would, and captures the window. */
+static uint8_t *capture_slot(rl_present *p, const uint8_t *rgb, uint32_t w, uint32_t h, uint32_t *cw, uint32_t *ch)
+{
+    uint8_t *rgba = malloc((size_t)w * h * 4);
+    rl_present_slot s;
+    if (!rgba || !rl_present_slot_begin(p, w, h, &s)) {
+        free(rgba);
+        return NULL;
+    }
+    for (size_t i = 0; i < (size_t)w * h; i++) {
+        memcpy(rgba + i * 4, rgb + i * 3, 3);
+        rgba[i * 4 + 3] = 255;
+    }
+    if (!fill_slot(&s, rgba, w, h)) {
+        rl_present_slot_abort(p, &s);
+        free(rgba);
+        return NULL;
+    }
+    free(rgba);
+    rl_present_slot_end(p, &s, w, h, true, g_w, g_h, NULL);
+    return rl_present_capture(p, 5000, cw, ch);
+}
+
+/** @brief A w by h picture with a diagonal edge, to give the anti-aliasing passes something to change. */
+static uint8_t *diagonal(uint32_t w, uint32_t h)
+{
+    uint8_t *rgb = malloc((size_t)w * h * 3);
+    for (uint32_t y = 0; rgb && y < h; y++)
+        for (uint32_t x = 0; x < w; x++)
+            memset(rgb + ((size_t)y * w + x) * 3, x * h > y * w ? 255 : 0, 3);
+    return rgb;
+}
+
 static int body(void *arg)
 {
     int *failures = arg;
@@ -214,6 +300,56 @@ static int body(void *arg)
         rl_present_frame(p, g_frame, 4, 2, 4, 2, true, g_w, g_h, NULL);
     rl_present_stats_get(p, &st);
     EXPECT(st.replaced > 0);
+
+    rl_settings_set("picture.filter", "integer");
+    uint32_t sw = 0, sh = 0;
+    uint8_t *cpu = capture(p, &w, &h);
+    uint8_t *gpu = capture_slot(p, g_frame, 4, 2, &sw, &sh);
+    EXPECT(cpu && gpu && w == sw && h == sh);
+    EXPECT(cpu && gpu && w == sw && h == sh && !memcmp(cpu, gpu, (size_t)w * h * 4));
+    free(cpu);
+    free(gpu);
+
+    uint8_t *edge = diagonal(48, 32);
+    rl_settings_set("picture.aa", "off");
+    uint8_t *plain = NULL, *aa_cpu = NULL, *aa_gpu = NULL;
+    rl_present_frame(p, edge, 48, 32, 48, 32, true, g_w, g_h, NULL);
+    plain = rl_present_capture(p, 5000, &w, &h);
+    EXPECT(rl_settings_set("picture.aa", "fxaa") == RL_SETTING_OK);
+    rl_present_frame(p, edge, 48, 32, 48, 32, true, g_w, g_h, NULL);
+    aa_cpu = rl_present_capture(p, 5000, &w, &h);
+    aa_gpu = capture_slot(p, edge, 48, 32, &sw, &sh);
+    EXPECT(plain && aa_cpu && aa_gpu && sw == w && sh == h);
+    if (plain && aa_cpu && aa_gpu && sw == w && sh == h) {
+        EXPECT(memcmp(plain, aa_cpu, (size_t)w * h * 4) != 0);
+        EXPECT(!memcmp(aa_cpu, aa_gpu, (size_t)w * h * 4));
+    }
+    rl_settings_set("picture.aa", "off");
+    EXPECT(rl_settings_set("picture.upscaler", "bilinear") == RL_SETTING_OK);
+    EXPECT(rl_settings_set("picture.upscale_scale", "2") == RL_SETTING_OK);
+    rl_present_frame(p, edge, 48, 32, 48, 32, true, g_w, g_h, NULL);
+    uint8_t *up_cpu = rl_present_capture(p, 5000, &w, &h);
+    uint8_t *up_gpu = capture_slot(p, edge, 48, 32, &sw, &sh);
+    EXPECT(up_cpu && up_gpu && sw == w && sh == h);
+    if (up_cpu && up_gpu && sw == w && sh == h)
+        EXPECT(!memcmp(up_cpu, up_gpu, (size_t)w * h * 4));
+    if (up_cpu && plain)
+        EXPECT(memcmp(up_cpu, plain, (size_t)w * h * 4) != 0);
+    free(up_cpu);
+    free(up_gpu);
+    rl_settings_set("picture.upscaler", "off");
+    free(edge);
+    free(plain);
+    free(aa_cpu);
+    free(aa_gpu);
+
+    rl_present_slot s[4];
+    uint32_t got = 0;
+    for (; got < 4 && rl_present_slot_begin(p, 4, 2, &s[got]); got++)
+        ;
+    EXPECT(got == 2);
+    for (uint32_t i = 0; i < got; i++)
+        rl_present_slot_abort(p, &s[i]);
     rl_present_close(p);
     return 0;
 }

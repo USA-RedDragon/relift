@@ -73,6 +73,29 @@ void rl_present_close(rl_present *p);
  */
 void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_w,
                       uint32_t shown_h, bool fit, uint32_t win_w, uint32_t win_h, rl_present_rect *place);
+/** @brief A presenter-owned image a GPU guest layer fills with its picture (rl_present_slot_begin). */
+typedef struct rl_present_slot {
+    /** @brief VkImage: RGBA8, TRANSFER_SRC and TRANSFER_DST usage, same device and queue family as the core's. */
+    uint64_t image;
+    /** @brief Its VkFormat (R8G8B8A8_UNORM or _SRGB, as the swapchain is encoded): copy the guest picture's bytes into it. */
+    int32_t format;
+    uint32_t index;
+} rl_present_slot;
+
+/**
+ * @brief Takes a free slot image of width by height for a picture that stays on the GPU. The caller records and runs
+ * its copy into slot->image (from UNDEFINED, through TRANSFER_DST, ending in TRANSFER_SRC_OPTIMAL), waits until the
+ * GPU has finished it, then calls rl_present_slot_end; rl_present_slot_abort gives the slot back unused. False when
+ * the presenter has no free slot within a second or cannot make the image. The guest's thread never waits on the
+ * swapchain: the newest ready slot replaces an older one the presenter has not taken yet.
+ */
+bool rl_present_slot_begin(rl_present *p, uint32_t width, uint32_t height, rl_present_slot *out);
+/** @brief Hands the filled slot to the presenter, with the picture's shown size as rl_present_frame takes it. */
+void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h, bool fit,
+                         uint32_t win_w, uint32_t win_h, rl_present_rect *place);
+/** @brief Gives a slot back that was not filled. */
+void rl_present_slot_abort(rl_present *p, const rl_present_slot *s);
+
 /**
  * @brief Tells the presenter whether the window has a surface to draw in. false (the host is taking the surface
  * away) returns only once the thread has destroyed its swapchain and Vulkan surface; true (a new surface, or the
