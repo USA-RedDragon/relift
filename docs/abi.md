@@ -2819,6 +2819,26 @@ broken down.
 The loop fence alone (section 9), measured the same way, changes the
 instruction counts by under 1% (math_int -0.8%, malloc_stress +0.15%).
 
+## 14.2 Linux threads
+
+A Linux guest thread is a host thread with a context of its own over the
+one guest address space (`runtime/guests/linux/thread.c`). Lifted code
+records the address of each `svc` in the context's pc before it traps
+(`rl_svc_site`, the `arm64.svc_site` intrinsic), so the system call handler
+knows the call site. `clone` with the flags of a thread starts the child
+at the instruction after the `svc`, which is in the middle of the function
+that made the call: the Linux guest makes the address after every `svc #0`
+whose system call number is the constant 220 (set by the straight-line code
+before it) a function entry, found structurally in `lift.rs`
+(`clone_continuations`), never by library or symbol name [checked: musl and
+glibc `pthread_create` in the corpus]. The child gets the parent's
+registers with x0 = 0, the stack and the thread pointer `clone` named. The
+futex is a wait queue over a host mutex and condition variable
+(`lxsync.h`); the address map and the descriptor table take one lock around
+the calls that change them. A signal sent to a thread by `tgkill` is
+delivered when that thread next returns from a system call. A `clone`
+without the thread flags (a fork) returns `ENOSYS`.
+
 ## 15. WebAssembly modules
 
 `relift-emit-wasm` (`core/emit-wasm`) emits lifted functions as
