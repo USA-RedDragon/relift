@@ -2,7 +2,17 @@
 //! `.eh_frame_hdr` search table lists, and the call-site tables of the
 //! `.gcc_except_table` data they point at (the Itanium C++ ABI's LSDA).
 
-use relift_guest::Pad;
+/// A landing pad of an unwind table: where the unwinder resumes a function
+/// when an exception passes through a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LandingPad {
+    /// The first address of the call-site range the pad serves.
+    pub site: u64,
+    /// The length of the call-site range in bytes.
+    pub len: u64,
+    /// The landing pad.
+    pub addr: u64,
+}
 
 struct Reader<'a> {
     img: &'a [u8],
@@ -144,8 +154,8 @@ fn parse_cie(img: &[u8], at: usize, data_base: usize) -> Option<Cie> {
 /// (version 1, with an `.eh_frame` pointer of `DW_EH_PE_pcrel |
 /// DW_EH_PE_sdata4`); the records are walked to their zero terminator. A
 /// malformed entry gives no pads.
-pub(crate) fn landing_pads(img: &[u8], start: usize, base: u64) -> Vec<Pad> {
-    let mut out: Vec<Pad> = fdes(img, start)
+pub fn landing_pads(img: &[u8], start: usize, base: u64) -> Vec<LandingPad> {
+    let mut out: Vec<LandingPad> = fdes(img, start)
         .into_iter()
         .flat_map(|at| fde_pads(img, at, start, base))
         .collect();
@@ -156,7 +166,7 @@ pub(crate) fn landing_pads(img: &[u8], start: usize, base: u64) -> Vec<Pad> {
 
 /// The function starts of the FDEs of the unwind table at image offset
 /// `start` (laid out as for [`landing_pads`]), as image offsets.
-pub(crate) fn fde_starts(img: &[u8], start: usize) -> Vec<u64> {
+pub fn fde_starts(img: &[u8], start: usize) -> Vec<u64> {
     fdes(img, start)
         .into_iter()
         .filter_map(|at| fde_start(img, at, start))
@@ -207,7 +217,7 @@ fn fde_start(img: &[u8], at: usize, data_base: usize) -> Option<u64> {
     r.encoded(cie.fde_enc, data_base)
 }
 
-fn fde_pads(img: &[u8], at: usize, data_base: usize, base: u64) -> Vec<Pad> {
+fn fde_pads(img: &[u8], at: usize, data_base: usize, base: u64) -> Vec<LandingPad> {
     let mut r = Reader { img, at };
     let Some(len) = r.fixed(4) else {
         return Vec::new();
@@ -246,7 +256,7 @@ fn fde_pads(img: &[u8], at: usize, data_base: usize, base: u64) -> Vec<Pad> {
     call_sites(img, lsda as usize, start, data_base)
         .unwrap_or_default()
         .into_iter()
-        .map(|(site, len, pad)| Pad {
+        .map(|(site, len, pad)| LandingPad {
             site: base.wrapping_add(site),
             len,
             addr: base.wrapping_add(pad),
@@ -343,12 +353,12 @@ mod tests {
         assert_eq!(
             pads,
             [
-                Pad {
+                LandingPad {
                     site: 0x8000_1010,
                     len: 4,
                     addr: 0x8000_1030
                 },
-                Pad {
+                LandingPad {
                     site: 0x8000_1024,
                     len: 4,
                     addr: 0x8000_1034

@@ -14,6 +14,7 @@ band = "2"
 relift-cpu-arm64 = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }
+relift-objfile = { workspace = true }
 relift-switch-formats = { workspace = true }
 relift-switch-names = { workspace = true }
 

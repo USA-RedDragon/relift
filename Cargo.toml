@@ -50,6 +50,7 @@ relift-info = { path = "core/info" }
 relift-input = { path = "core/input" }
 relift-ir = { path = "core/ir" }
 relift-manifest = { path = "core/manifest" }
+relift-linux = { path = "guests/linux/guest" }
 relift-n64 = { path = "guests/n64/guest" }
 relift-n64-analyze = { path = "guests/n64/analyze" }
 relift-n64-formats = { path = "guests/n64/formats" }
@@ -58,6 +59,7 @@ relift-override = { path = "override/api" }
 relift-override-macros = { path = "override/macros" }
 relift-proc = { path = "core/proc" }
 relift-diff = { path = "core/diff" }
+relift-objfile = { path = "core/objfile" }
 relift-patch = { path = "core/patch" }
 relift-progress = { path = "core/progress" }
 relift-sail = { path = "core/sail" }

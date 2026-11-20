@@ -23,6 +23,7 @@ cargo test --workspace
 | `relift-progress` | `progress` | Progress output for `import` and `build` |
 | `relift-info` | `info` | The `--relift-info` document: types, embedding and reader (`relift info`) |
 | `relift-patch` | `patch` | IPS, IPS32, UPS and BPS patches |
+| `relift-objfile` | `objfile` | Executable and library file formats (ELF now): segments, symbols, relocations, dynamic tags, unwind tables, discovery seeds |
 | `relift-guest` | `guest` | The guest contract: frontends, naming, program description |
 | `relift-analyze` | `analyze` | Function boundaries, control flow, jump tables, indirect targets |
 | `relift-emit` | `emit` | IR to C: shards, listings, memory strategy per host target |

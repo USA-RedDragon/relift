@@ -156,6 +156,13 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-objfile",
+        why: "executable and library file formats (ELF now): segments, sections, symbols, relocations, dynamic tags, unwind tables and seeds; reads bytes only, no OS and no CPU",
+        normal: NONE,
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-analyze",
         why: "analysis generic over a CPU frontend; knows no CPU and no guest",
         normal: &["relift-guest", "relift-ir", "relift-proc"],
@@ -508,6 +515,7 @@ const CHARTERS: &[Charter] = &[
             "relift-cpu-arm64",
             "relift-guest",
             "relift-ir",
+            "relift-objfile",
             "relift-switch-formats",
             "relift-switch-names",
         ],

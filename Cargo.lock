@@ -1351,6 +1351,16 @@ name = "relift-ir"
 version = "0.1.0"
 
 [[package]]
+name = "relift-linux"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-arm64",
+ "relift-guest",
+ "relift-ir",
+ "relift-objfile",
+]
+
+[[package]]
 name = "relift-manifest"
 version = "0.1.0"
 dependencies = [
@@ -1439,6 +1449,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-objfile"
+version = "0.1.0"
+
+[[package]]
 name = "relift-override"
 version = "0.1.0"
 dependencies = [
@@ -1499,6 +1513,7 @@ dependencies = [
  "relift-cpu-arm64",
  "relift-guest",
  "relift-ir",
+ "relift-objfile",
  "relift-switch-formats",
  "relift-switch-names",
 ]

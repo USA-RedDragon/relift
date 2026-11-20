@@ -115,7 +115,14 @@ pub fn module(p: &Placed) -> Module {
     let img = &nso.image;
     let mut pads = Vec::new();
     if let Ok(Some(m)) = nso.mod0() {
-        pads = crate::eh::landing_pads(img, m.eh_frame_hdr_start as usize, p.base);
+        pads = relift_objfile::unwind::landing_pads(img, m.eh_frame_hdr_start as usize, p.base)
+            .into_iter()
+            .map(|l| relift_guest::Pad {
+                site: l.site,
+                len: l.len,
+                addr: l.addr,
+            })
+            .collect();
         for a in unwind_starts(img, m.eh_frame_hdr_start as usize) {
             roots.push(Root {
                 addr: p.base.wrapping_add(a),
@@ -194,7 +201,7 @@ fn unwind_starts(img: &[u8], hdr: usize) -> Vec<u64> {
             })
             .collect::<Option<Vec<u64>>>()
     })();
-    table.unwrap_or_else(|| crate::eh::fde_starts(img, hdr))
+    table.unwrap_or_else(|| relift_objfile::unwind::fde_starts(img, hdr))
 }
 
 /// The code addresses position-independent start-up code computes with an
