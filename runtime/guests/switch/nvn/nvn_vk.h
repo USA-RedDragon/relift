@@ -275,6 +275,8 @@ typedef struct replay {
 
 /** @brief The linear or sRGB twin of an 8-bit color format, which a texture view may name for a render target of the other; VK_FORMAT_UNDEFINED for any other format. */
 VkFormat nvn_vk_color_twin(VkFormat f);
+/** @brief Widens n 8-bit indices to 16 bits for the host device, which has no 8-bit index type; with restart, the 8-bit restart index 0xff becomes the 16-bit one, 0xffff. */
+void nvn_widen_indices(const uint8_t *src, uint32_t n, bool restart, uint16_t *dst);
 int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want);
 bool nvn_vk_staging_new(staging *s, uint64_t size);
 void nvn_vk_staging_free(staging *s);

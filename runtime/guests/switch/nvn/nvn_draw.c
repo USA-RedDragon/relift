@@ -1269,12 +1269,20 @@ static void dynamic_state(replay *r, VkRect2D area)
     VK(vkCmdSetLineWidth)(g.cb, g.wide_lines ? st->line_width : 1.0f);
 }
 
+void nvn_widen_indices(const uint8_t *src, uint32_t n, bool restart, uint16_t *dst)
+{
+    for (uint32_t i = 0; i < n; i++)
+        dst[i] = restart && src[i] == 0xffu ? 0xffffu : src[i];
+}
+
 /** @brief What a draw puts into the batch being recorded, and where. */
 typedef struct draw_data {
     const pipe_key *k;
     module *const *mods;
     bool indexed, has_def;
     uint32_t itype, first, count, nb, firstb;
+    /** @brief The Vulkan index type the uploaded indices have (8-bit indices are widened to 16 bits). */
+    VkIndexType ivk;
     int32_t base;
     uint64_t iaddr, def_off, ioff;
     VkDeviceSize offs[NVN_VERTEX_BUFFERS], int_off[NVN_VERTEX_ATTRIBS];
@@ -1319,10 +1327,22 @@ static int stage_draw(replay *r, void *arg)
     if (indexed) {
         if (itype > 2)
             return nvn_vk_stop(r, "index type %u", itype);
-        if (itype == 0)
-            return nvn_vk_stop(r, "8-bit indices");
-        if (!nvn_vk_upload(r, dd->iaddr, (uint64_t)count * isize[itype], 0, 16, &dd->ioff))
-            return nvn_vk_stop(r, "the upload arena is full");
+        if (itype == 0) {
+            uint16_t *wide = malloc(count ? (size_t)count * 2 : 2);
+            if (!wide)
+                return nvn_vk_stop(r, "out of memory widening %u 8-bit indices", count);
+            const uint8_t *narrow = r->mem + nvn_gpu_guest(dd->iaddr);
+            nvn_widen_indices(narrow, count, kp->primitive_restart, wide);
+            bool ok = nvn_vk_upload_bytes(r, wide, (uint64_t)count * 2, 0, 16, &dd->ioff);
+            free(wide);
+            if (!ok)
+                return nvn_vk_stop(r, "the upload arena is full");
+            dd->ivk = VK_INDEX_TYPE_UINT16;
+        } else {
+            if (!nvn_vk_upload(r, dd->iaddr, (uint64_t)count * isize[itype], 0, 16, &dd->ioff))
+                return nvn_vk_stop(r, "the upload arena is full");
+            dd->ivk = itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+        }
     }
     if (kp->nint) {
         uint64_t nv = (uint64_t)first + count;
@@ -1330,8 +1350,11 @@ static int stage_draw(replay *r, void *arg)
             const uint8_t *ip = r->mem + nvn_gpu_guest(dd->iaddr);
             int64_t hi = -1;
             for (uint32_t i = 0; i < count; i++) {
-                uint32_t x = itype == 1 ? (uint32_t)ip[2 * i] | (uint32_t)ip[2 * i + 1] << 8 : rl_ld32(ip, 4 * (uint64_t)i);
-                bool restart = kp->primitive_restart && x == (itype == 1 ? 0xffffu : 0xffffffffu);
+                uint32_t x = itype == 0   ? ip[i]
+                             : itype == 1 ? (uint32_t)ip[2 * i] | (uint32_t)ip[2 * i + 1] << 8
+                                          : rl_ld32(ip, 4 * (uint64_t)i);
+                uint32_t last = itype == 0 ? 0xffu : itype == 1 ? 0xffffu : 0xffffffffu;
+                bool restart = kp->primitive_restart && x == last;
                 if (!restart && (int64_t)x + base > hi)
                     hi = (int64_t)x + base;
             }
@@ -1485,7 +1508,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     for (uint32_t j = 0; j < k.nint; j++)
         VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &dd.int_off[j]);
     if (indexed) {
-        VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, dd.ioff, itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+        VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, dd.ioff, dd.ivk);
         VK(vkCmdDrawIndexed)(g.cb, count, st->inst_count, 0, base, st->inst_base);
     } else {
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);

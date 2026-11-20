@@ -37,3 +37,15 @@ TEST(nvn_render_target_views_may_name_the_srgb_or_linear_twin)
     CHECK_EQ(nvn_vk_color_twin(VK_FORMAT_B8G8R8A8_UNORM), VK_FORMAT_B8G8R8A8_SRGB);
     CHECK_EQ(nvn_vk_color_twin(VK_FORMAT_R16G16B16A16_SFLOAT), VK_FORMAT_UNDEFINED);
 }
+
+TEST(nvn_eight_bit_indices_widen_and_keep_their_restart)
+{
+    const uint8_t src[4] = { 0, 7, 0xff, 200 };
+    uint16_t dst[4];
+    nvn_widen_indices(src, 4, true, dst);
+    CHECK_EQ(dst[1], 7);
+    CHECK_EQ(dst[2], 0xffff);
+    CHECK_EQ(dst[3], 200);
+    nvn_widen_indices(src, 4, false, dst);
+    CHECK_EQ(dst[2], 0xff);
+}
