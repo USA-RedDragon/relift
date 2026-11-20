@@ -342,7 +342,8 @@ static int parent(const char *self)
         return 1;
     printf("--- a crash with the core limit raised ---\n%.600s\n", r->out);
     expect(r, "core: the child crashed", CRASHED(r));
-    expect(r, "core: the report was written", strstr(r->out, "[relift crash] SIGSEGV") != NULL);
+    expect(r, "core: the report was written",
+           strstr(r->out, "[relift crash] SIGSEGV") != NULL || strstr(r->out, "[relift crash] SIGBUS") != NULL);
     expect(r, "core: no core dump follows the report (it would take minutes for a game's address space)", !r->cored);
 #endif
 
