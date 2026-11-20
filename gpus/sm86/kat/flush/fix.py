@@ -4,20 +4,23 @@
     python3 -I kat/flush/fix.py <absolute work dir> prepare
     python3 -I kat/flush/fix.py <absolute work dir> compare <host> <fix>
 
-A program that multiplies and adds two floats per invocation with FMUL.FTZ and FADD.FTZ reads its
-operands from two buffers and writes both results. It is translated for the hosts the device
+A program that multiplies and adds two floats per invocation with FMUL.FTZ and FADD.FTZ, and
+fuses a multiply and an add of three with FFMA (no .FTZ), reads its operands from three buffers and
+writes the three results. It is translated for the hosts the device
 probes can produce (a flushing host with no correction, the Apple and Adreno presets as probed,
 and lavapipe, Apple and Adreno with each correction of `HostProfile::flush_fix` forced on with
 xlate's --flush-fix) and run on 20,000 rows at the edge of
 the normal range (zeros, denormals, the smallest normals, products just below the smallest normal
-number, random bits). Every result must equal what SM86 gives: the operands' denormals read as
+number, random bits; for FFMA also addends that cancel the product to within a few ulps). Every
+result must equal what SM86 gives: the operands' denormals read as
 zero, the exact result rounded to 24 bits with an unbounded exponent, and a result below the
-normal range a zero of its sign (any NaN equals any NaN). `run` does that on the devices of
+normal range a zero of its sign (any NaN equals any NaN); for FFMA, which keeps denormals, the
+exact value rounded to nearest even on the denormal grid. `run` does that on the devices of
 KAT_DEVS (default "llvmpipe") with krun from kat/compute; `prepare` writes each host's module, the
 inputs, the spec and the expected words under <work dir>/prepared for a device that is run by hand
 (krun on the device, then `compare` with its output files). Needs spirv-val, a C compiler with the
 Vulkan headers, and `cargo build --release -p relift-gpu-sm86 --example xlate` in CARGO_TARGET_DIR
-(default target/).
+(default target/). KAT_ROWS sets the row count and KAT_ONLY the hosts to run.
 """
 import os, struct, subprocess, sys
 from fractions import Fraction
@@ -27,7 +30,8 @@ ROOT = os.path.abspath(os.path.join(HERE, '../../../..'))
 TARGET = os.environ.get('CARGO_TARGET_DIR', os.path.join(ROOT, 'target'))
 XLATE = os.path.join(TARGET, 'release/examples/xlate')
 DEVS = os.environ.get('KAT_DEVS', 'llvmpipe').split()
-ROWS = 20000
+ROWS = int(os.environ.get('KAT_ROWS', 20000))
+ONLY = os.environ.get('KAT_ONLY', '').split()
 HOSTS = [('nvidia', None), ('moltenvk', None), ('adreno', None)] + [
     (h, f) for h in ('lavapipe', 'moltenvk', 'adreno') for f in range(4)]
 
@@ -61,14 +65,25 @@ def program():
     out = [s2r_t, uldc, s2r_c, imad, shl, ldg]
     out.append(put(put(uldc, 16, 8, 6), 38, 10, 0x28))
     out.append(put(put(ldg, 16, 8, 2), 32, 8, 6))
+    out.append(put(put(uldc, 16, 8, 8), 38, 10, 0x30))
+    out.append(put(put(ldg, 16, 8, 6), 32, 8, 8))
     out.append(alu(0x020, 3, 0, 2))
     out.append(alu(0x021, 4, 0, 2))
-    out.append(put(put(uldc, 16, 8, 8), 38, 10, 0x30))
-    out.append(put(put(stg, 32, 8, 3), 64, 8, 8))
-    out.append(put(put(uldc, 16, 8, 10), 38, 10, 0x38))
-    out.append(put(put(stg, 32, 8, 4), 64, 8, 10))
+    out.append(ffma(7, 0, 2, 6))
+    for k, (reg, off) in enumerate(((3, 0x38), (4, 0x40), (7, 0x48))):
+        ur = 10 + 2 * k
+        out.append(put(put(uldc, 16, 8, ur), 38, 10, off))
+        out.append(put(put(stg, 32, 8, reg), 64, 8, ur))
     out.append(exit_)
     return b''.join(x.to_bytes(16, 'little') for x in out)
+
+
+def ffma(d, a, b, c):
+    """FFMA R<d> = R<a> * R<b> + R<c>, without .FTZ."""
+    w = 0x023 | (1 << 9) | (7 << 12) | (7 << 110) | (7 << 113)
+    for lo, n, v in [(16, 8, d), (24, 8, a), (32, 8, b), (64, 8, c)]:
+        w = put(w, lo, n, v)
+    return w
 
 
 def xorshift(x):
@@ -78,17 +93,28 @@ def xorshift(x):
     return x
 
 
+def f32_bits(v):
+    """The nearest binary32 bits of the double v (a denormal result stays denormal)."""
+    try:
+        return struct.unpack('<I', struct.pack('<f', v))[0]
+    except OverflowError:
+        return 0xff800000 if v < 0 else 0x7f800000
+
+
 def rows():
-    """Operand pairs: the fixed edge cases, then random ones at the edge of the normal range."""
-    r = [(0x00ffffff, 0x3f000000), (0x3f000000, 0x00ffffff), (0, 0xbf800000), (0x80000000, 0x3f800000),
-         (1, 0xbf800000), (0x00800000, 0xbf000000)]
+    """Operand triples (a, b, c): the fixed edge cases, then random ones at the edge of the normal
+    range; c is random, zero, a denormal, or a few ulps from cancelling a * b."""
+    r = [(0x00ffffff, 0x3f000000, 0), (0x3f000000, 0x00ffffff, 0), (0, 0xbf800000, 0x00000001),
+         (0x80000000, 0x3f800000, 0), (1, 0xbf800000, 0x80000000), (0x00800000, 0xbf000000, 0),
+         (1, 0x3f000000, 0x00000001), (1, 0x3f000000, 0x80000001), (0x00000003, 0x3f000000, 0),
+         (0x00000005, 0x3f000000, 0), (0x00000001, 0x3f400000, 0)]
     x = 0x2545f491
-    for _ in range(ROWS - len(r)):
+    while len(r) < ROWS:
         v = []
-        for _ in range(4):
+        for _ in range(6):
             x = xorshift(x)
             v.append(x)
-        kind, a, b, r3 = v[0] % 4, v[1], v[2], v[3]
+        kind, a, b, r3, r4, r5 = v[0] % 4, v[1], v[2], v[3], v[4], v[5]
         if kind == 1:
             a = (a & 0x807fffff) | (r3 % 4) << 23
             b = (b & 0x807fffff) | ((r3 >> 4) % 4) << 23
@@ -102,8 +128,23 @@ def rows():
                 b &= 0xff800000
             if (r3 >> 12) & 1:
                 a, b = b, a
-        r.append((a, b))
-    return r + [(0, 0)] * (-len(r) % 64)
+        ck = r4 % 6
+        if ck == 0:
+            c = r5
+        elif ck == 1:
+            c = 0 if r5 & 1 else 0x80000000
+        elif ck == 2:
+            c = (r5 & 0x807fffff) | ((r5 >> 24) % 3) << 23
+        else:
+            fa, fb = flt(a), flt(b)
+            if fa != fa or fb != fb or abs(fa) == float('inf') or abs(fb) == float('inf'):
+                c = r5
+            else:
+                c = f32_bits(-(fa * fb))
+                if ck >= 4:
+                    c = (c + (r5 % 9) - 4) & 0xffffffff
+        r.append((a, b, c))
+    return r + [(0, 0, 0)] * (-len(r) % 64)
 
 
 def flt(bits):
@@ -155,6 +196,37 @@ def expect(op, a, b):
     return struct.unpack('<I', struct.pack('<f', float(r)))[0]
 
 
+def expect_fma(a, b, c):
+    """SM86's FFMA result bits without .FTZ: the exact a * b + c rounded to nearest even, denormals kept."""
+    fa, fb, fc = flt(a), flt(b), flt(c)
+    inf = float('inf')
+    if fa != fa or fb != fb or fc != fc:
+        return 0x7fffffff
+    if abs(fa) == inf or abs(fb) == inf or abs(fc) == inf:
+        p = fa * fb
+        r = p + fc
+        return 0x7fffffff if p != p or r != r else struct.unpack('<I', struct.pack('<f', r))[0]
+    exact = Fraction(fa) * Fraction(fb) + Fraction(fc)
+    if exact == 0:
+        if (a & 0x7fffffff == 0 or b & 0x7fffffff == 0) and c & 0x7fffffff == 0:
+            ps = (a ^ b) & 0x80000000
+            return ps if ps == c & 0x80000000 else 0
+        return 0
+    s = 0x80000000 if exact < 0 else 0
+    ab = abs(exact)
+    if ab < Fraction(1, 2 ** 126):
+        n = ab * 2 ** 149
+        q = n.numerator // n.denominator
+        rem = n - q
+        if rem > Fraction(1, 2) or (rem == Fraction(1, 2) and q % 2):
+            q += 1
+        return s | q
+    r = r24(ab)
+    if r >= Fraction(2) ** 128:
+        return s | 0x7f800000
+    return s | struct.unpack('<I', struct.pack('<f', float(r)))[0]
+
+
 def same(g, w):
     nan = lambda v: v & 0x7fffffff > 0x7f800000
     return g == w or (nan(g) and nan(w))
@@ -173,15 +245,20 @@ def prepare(work):
     open(os.path.join(d, 'k.bin'), 'wb').write(program())
     rs = rows()
     n = len(rs)
-    open(os.path.join(d, 'a.bin'), 'wb').write(struct.pack('<%dI' % n, *[a for a, _ in rs]))
-    open(os.path.join(d, 'b.bin'), 'wb').write(struct.pack('<%dI' % n, *[b for _, b in rs]))
+    open(os.path.join(d, 'a.bin'), 'wb').write(struct.pack('<%dI' % n, *[a for a, _, _ in rs]))
+    open(os.path.join(d, 'b.bin'), 'wb').write(struct.pack('<%dI' % n, *[b for _, b, _ in rs]))
+    open(os.path.join(d, 'c.bin'), 'wb').write(struct.pack('<%dI' % n, *[c for _, _, c in rs]))
     open(os.path.join(d, 'want.bin'), 'wb').write(struct.pack(
-        '<%dI' % (2 * n), *([expect('mul', a, b) for a, b in rs] + [expect('add', a, b) for a, b in rs])))
-    spec = ['local 64 1 1', 'groups %d 1 1' % (n // 64), 'buf a.bin', 'buf b.bin', 'out m.out %d' % (4 * n),
-            'out s.out %d' % (4 * n), 'put 0 0x20 addr 0', 'put 0 0x28 addr 1', 'put 0 0x30 addr 2',
-            'put 0 0x38 addr 3', 'push 0x0 addr 0', 'push 0x8 addr 1', 'push 0x10 addr 2', 'push 0x18 addr 3']
+        '<%dI' % (3 * n), *([expect('mul', a, b) for a, b, _ in rs] + [expect('add', a, b) for a, b, _ in rs]
+                            + [expect_fma(a, b, c) for a, b, c in rs])))
+    spec = ['local 64 1 1', 'groups %d 1 1' % (n // 64), 'buf a.bin', 'buf b.bin', 'buf c.bin',
+            'out m.out %d' % (4 * n), 'out s.out %d' % (4 * n), 'out f.out %d' % (4 * n)]
+    for k, off in enumerate(range(0x20, 0x50, 8)):
+        spec += ['put 0 0x%x addr %d' % (off, k), 'push 0x%x addr %d' % (8 * k, k)]
     for host, fix in HOSTS:
         name = '%s%s' % (host, '' if fix is None else '-fix%d' % fix)
+        if ONLY and name not in ONLY:
+            continue
         spv = os.path.join(d, name + '.spv')
         args = [XLATE, os.path.join(d, 'k.bin'), spv, host] + ([] if fix is None else ['--flush-fix', str(fix)])
         x = run(args)
@@ -192,21 +269,22 @@ def prepare(work):
     return d, n
 
 
-def compare(d, n, name, m_out, s_out):
-    want = struct.unpack('<%dI' % (2 * n), open(os.path.join(d, 'want.bin'), 'rb').read())
-    ms = struct.unpack('<%dI' % n, open(m_out, 'rb').read()[:4 * n])
-    ss = struct.unpack('<%dI' % n, open(s_out, 'rb').read()[:4 * n])
+def compare(d, n, name, outs):
+    want = struct.unpack('<%dI' % (3 * n), open(os.path.join(d, 'want.bin'), 'rb').read())
+    got = [struct.unpack('<%dI' % n, open(f, 'rb').read()[:4 * n]) for f in outs]
     rs = rows()
-    bad = 0
-    for i in range(n):
-        for k, g in (('mul', ms[i]), ('add', ss[i])):
-            w = want[i] if k == 'mul' else want[n + i]
+    bad = {'mul': 0, 'add': 0, 'fma': 0}
+    for k, kind in enumerate(('mul', 'add', 'fma')):
+        for i in range(n):
+            g, w = got[k][i], want[k * n + i]
             if not same(g, w):
-                bad += 1
-                if bad <= 5:
-                    print('  %s %s: %08x %08x got %08x want %08x' % (name, k, rs[i][0], rs[i][1], g, w))
-    print('%-16s %s' % (name, 'exact on %d rows' % n if not bad else '%d results differ' % bad))
-    return not bad
+                bad[kind] += 1
+                if bad[kind] <= 3:
+                    print('  %s %s: %08x %08x %08x got %08x want %08x' % (name, kind, *rs[i], g, w))
+    total = sum(bad.values())
+    print('%-16s %s' % (name, 'exact on %d rows' % n if not total else
+                        'differs: %s' % ', '.join('%d %s' % (v, k) for k, v in bad.items() if v)))
+    return not total
 
 
 def main():
@@ -214,7 +292,7 @@ def main():
     if mode == 'compare':
         d = os.path.join(work, 'prepared')
         n = ROWS + (-ROWS % 64)
-        ok = compare(d, n, sys.argv[3], os.path.join(work, 'm.out'), os.path.join(work, 's.out'))
+        ok = compare(d, n, sys.argv[3], [os.path.join(work, x) for x in ('m.out', 's.out', 'f.out')])
         sys.exit(0 if ok else 1)
     d, n = prepare(work)
     if mode == 'prepare':
@@ -226,6 +304,8 @@ def main():
     for dev in DEVS:
         for host, fix in HOSTS:
             name = '%s%s' % (host, '' if fix is None else '-fix%d' % fix)
+            if ONLY and name not in ONLY:
+                continue
             r = subprocess.run([krun, name + '.spec', dev], capture_output=True, text=True, cwd=d, timeout=300)
             if r.returncode == 77:
                 print('%-16s %-8s skipped: %s' % (name, dev, r.stderr.strip().splitlines()[-1]))
@@ -235,7 +315,7 @@ def main():
                 ok = False
                 continue
             print('%-8s ' % dev, end='')
-            ok &= compare(d, n, name, os.path.join(d, 'm.out'), os.path.join(d, 's.out'))
+            ok &= compare(d, n, name, [os.path.join(d, x) for x in ('m.out', 's.out', 'f.out')])
     print('PASS' if ok else 'FAIL')
     sys.exit(0 if ok else 1)
 
