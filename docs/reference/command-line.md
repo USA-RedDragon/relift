@@ -1835,7 +1835,7 @@ Find every NVIDIA shader program of a game
 Usage: relift-shaders <COMMAND>
 
 Commands:
-  scan  Scan a `.nup`, or an extracted `exefs`/`romfs` tree
+  scan  Scan a `.nup`, an extracted `exefs`/`romfs` tree or an import folder
   help  Print this message or the help of the given subcommand(s)
 
 Options:
