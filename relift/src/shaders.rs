@@ -23,13 +23,15 @@
 //! in the build directory, and a package carries [`tables`] with the program
 //! and points the runtime at them (see [`env`]).
 
+mod mesh;
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
-use relift_gpu_nv::translate::{DeviceCaps, HostProfile, Interface, Options};
+use relift_gpu_nv::translate::{DeviceCaps, HostProfile, Interface, MeshPath};
 use relift_switch_shaders::{ImportSource, Options as ScanOptions, scan};
 
 use crate::import::BoxError;
@@ -148,6 +150,10 @@ pub fn discover(import: &Path, out: &Path) -> Result<Discovered, BoxError> {
             ..ScanOptions::default()
         },
     )?;
+    relift_cache::write_if_changed(
+        &dir.join(mesh::FILE),
+        &serde_json::to_vec(&report.meshes_json())?,
+    )?;
     Ok(Discovered {
         programs: report.programs.len(),
         errors: report
@@ -181,10 +187,18 @@ enum Item {
         frame: Vec<u8>,
         words: u32,
         records: Vec<[u32; 4]>,
+        /// The helper modules of a mesh program's compute back end, with
+        /// their frames and lengths in words.
+        helpers: Vec<([u8; 32], Vec<u8>, u32)>,
     },
 }
 
-fn translate_one(host: &HostProfile, dir: &Path, key: [u8; 32]) -> Result<Item, BoxError> {
+fn translate_one(
+    host: &HostProfile,
+    dir: &Path,
+    key: [u8; 32],
+    pipes: &mesh::Pipelines,
+) -> Result<Item, BoxError> {
     let code = std::fs::read(dir.join("programs").join(format!("{}.bin", hex(&key))))?;
     if relift_switch_formats::sha256(&code) != key {
         return Ok(Item::Skipped);
@@ -194,7 +208,7 @@ fn translate_one(host: &HostProfile, dir: &Path, key: [u8; 32]) -> Result<Item, 
         &[Input {
             key,
             code,
-            options: Options::default(),
+            options: pipes.options(&key),
         }],
         relift_gpu_sm86::program::parse,
     );
@@ -205,10 +219,27 @@ fn translate_one(host: &HostProfile, dir: &Path, key: [u8; 32]) -> Result<Item, 
         return Ok(Item::Skipped);
     };
     let raw: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    let mut records = records(interface);
+    let mut helpers = Vec::new();
+    if let Some(m) = pipes.member(&key) {
+        records.extend(mesh::records(m, interface.host.mesh, interface.mesh_slots));
+        if m.role == mesh::Role::Mesh && interface.host.mesh == MeshPath::Compute {
+            match mesh::helpers(&key, m, host, interface.mesh_slots) {
+                Ok(list) => {
+                    for (k, w) in list {
+                        let raw: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
+                        helpers.push((k, zstd::bulk::compress(&raw, ZSTD_LEVEL)?, w.len() as u32));
+                    }
+                }
+                Err(why) => return Ok(Item::Failed(why)),
+            }
+        }
+    }
     Ok(Item::Done {
         frame: zstd::bulk::compress(&raw, ZSTD_LEVEL)?,
         words: words.len() as u32,
-        records: records(interface),
+        records,
+        helpers,
     })
 }
 
@@ -230,16 +261,18 @@ pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
     let mut refused = BTreeMap::new();
     let mut index: Vec<Frame> = Vec::new();
     let mut interface: Vec<([u8; 32], Vec<[u32; 4]>)> = Vec::new();
+    let mut extras: BTreeMap<[u8; 32], (Vec<u8>, u32)> = BTreeMap::new();
     let spool = dir.join(SPOOL);
     if !keys.is_empty() && device.is_file() {
         let text = std::fs::read_to_string(&device)?;
         let caps =
             DeviceCaps::from_json(&text).map_err(|e| format!("{}: {e}", device.display()))?;
         let host = HostProfile::from_device("device", &caps);
+        let pipes = mesh::Pipelines::read(&dir, &host)?;
         let mut spool_file = relift_cache::StreamWriter::new(&spool)?;
         for batch in keys.chunks(jobs.max(1) * 4) {
             let items = relift_proc::workers::parallel_with(jobs, batch, |&k| {
-                translate_one(&host, &dir, k).map_err(|e| e.to_string())
+                translate_one(&host, &dir, k, &pipes).map_err(|e| e.to_string())
             });
             for (&key, item) in batch.iter().zip(items) {
                 match item? {
@@ -252,7 +285,11 @@ pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
                         frame,
                         words,
                         records,
+                        helpers,
                     } => {
+                        for (k, f, w) in helpers {
+                            extras.insert(k, (f, w));
+                        }
                         index.push(Frame {
                             key,
                             frame_len: frame.len() as u32,
@@ -268,27 +305,78 @@ pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
         spool_file.finish()?;
     }
     relift_cache::write_if_changed(&dir.join("failed.txt"), failed.as_bytes())?;
-    let mut table = relift_cache::StreamWriter::new(&dir.join(TABLE))?;
-    table.write_all(&compressed_head(&index))?;
-    if spool.is_file() {
-        let mut from = std::fs::File::open(&spool)?;
-        let mut buf = vec![0u8; 1 << 20];
-        loop {
-            let n = from.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            table.write_all(&buf[..n])?;
-        }
-    }
-    table.finish()?;
+    let translated = index.len();
+    write_table(&dir.join(TABLE), &spool, &index, &extras)?;
     let _ = std::fs::remove_file(&spool);
     relift_cache::write_if_changed(&dir.join(INTERFACES), &interface_table(&interface))?;
     Ok(Built {
         programs: keys.len(),
-        translated: index.len(),
+        translated,
         refused,
     })
+}
+
+/// Writes the table at `path`: the frames of `index` that `spool` holds,
+/// in order, with the helper modules `extras` (frame and length in words,
+/// by key) among them in key order.
+fn write_table(
+    path: &Path,
+    spool: &Path,
+    index: &[Frame],
+    extras: &BTreeMap<[u8; 32], (Vec<u8>, u32)>,
+) -> Result<(), BoxError> {
+    enum Source<'a> {
+        Spool(u64),
+        Extra(&'a [u8]),
+    }
+    let mut all: Vec<(Frame, Source)> = Vec::with_capacity(index.len() + extras.len());
+    for f in index {
+        all.push((
+            *f,
+            Source::Spool(u64::from(f.frame_len).next_multiple_of(4)),
+        ));
+    }
+    for (key, (frame, words)) in extras {
+        all.push((
+            Frame {
+                key: *key,
+                frame_len: frame.len() as u32,
+                words: *words,
+            },
+            Source::Extra(frame),
+        ));
+    }
+    all.sort_by_key(|(f, _)| f.key);
+    let heads: Vec<Frame> = all.iter().map(|(f, _)| *f).collect();
+    let mut table = relift_cache::StreamWriter::new(path)?;
+    table.write_all(&compressed_head(&heads))?;
+    let mut from = spool
+        .is_file()
+        .then(|| std::fs::File::open(spool))
+        .transpose()?;
+    let mut buf = vec![0u8; 1 << 20];
+    for (_, source) in &all {
+        match source {
+            Source::Spool(len) => {
+                let Some(f) = from.as_mut() else {
+                    continue;
+                };
+                let mut left = *len;
+                while left > 0 {
+                    let n = (left as usize).min(buf.len());
+                    f.read_exact(&mut buf[..n])?;
+                    table.write_all(&buf[..n])?;
+                    left -= n as u64;
+                }
+            }
+            Source::Extra(frame) => {
+                table.write_all(frame)?;
+                table.write_all(&[0u8; 3][..frame.len().wrapping_neg() % 4])?;
+            }
+        }
+    }
+    table.finish()?;
+    Ok(())
 }
 
 /// `relift shaders`: translates the programs recorded in `out`/shaders again
@@ -426,6 +514,7 @@ pub(crate) fn c_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use relift_gpu_nv::translate::Options;
 
     #[test]
     fn a_reason_kind_drops_its_details() {
