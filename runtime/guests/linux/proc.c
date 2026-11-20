@@ -366,6 +366,7 @@ static int64_t sys_prctl(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 
 static int64_t sys_futex(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
+    (void)mem;
     uint32_t op = (uint32_t)a[1];
     uint32_t cmd = op & (uint32_t)L_FUTEX_CMD_MASK;
     switch (cmd) {

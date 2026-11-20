@@ -237,7 +237,7 @@ static int finish(rl_ctx *c, int rc)
     }
 }
 
-int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
+int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
 {
     memset(&lx, 0, sizeof lx);
     lx.prog = p;
@@ -283,6 +283,15 @@ int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
         argv = self;
     }
     if (build_stack(c, p, argc, argv) != 0)
+        return 1;
+    *out = c;
+    return 0;
+}
+
+int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
+{
+    rl_ctx *c;
+    if (lx_start(p, argc, argv, &c) != 0)
         return 1;
     int status = finish(c, rl_call_guest(c, rl_mem_base(), p->entry));
     lx_fs_shutdown();

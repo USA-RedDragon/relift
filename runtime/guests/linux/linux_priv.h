@@ -123,6 +123,14 @@ int lx_errno(int e);
 /** @brief -lx_errno(errno). */
 int64_t lx_fail(void);
 
+/**
+ * @brief Everything rl_linux_main does before the program's first
+ * instruction: the address space, the image, the descriptors, the main
+ * thread and the initial stack. 0 and the main thread's context in *out, or
+ * 1 after logging why not.
+ */
+int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out);
+
 /** @brief Maps the pages of [addr, addr + size) with the guest permission perm (L_PROT_*), zero filled. */
 int lx_map(uint64_t addr, uint64_t size, uint32_t prot);
 /** @brief Whether every page of the range is mapped. */

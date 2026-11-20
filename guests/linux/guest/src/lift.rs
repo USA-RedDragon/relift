@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use relift_analyze::{Insn, discover};
 use relift_cpu_arm64::frontend::Arm64;
 use relift_emit::{Options, Output};
-use relift_guest::{Frontend, LiftFailure};
+use relift_guest::{Frontend, LiftFailure, Root, RootKind};
 
 use crate::cpu;
 use crate::program::{self, Placed};
@@ -44,8 +44,21 @@ pub fn frontend() -> Arm64 {
 /// `image_id` identifies the program to the runtime.
 pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
     let fe = frontend();
-    let module = program::module(p);
-    let analysis = discover(&fe, &module);
+    let mut module = program::module(p);
+    let mut analysis = discover(&fe, &module);
+    let found = relift_analyze::escape::return_escapes(&fe, &analysis);
+    if !found.continuations.is_empty() {
+        module
+            .roots
+            .extend(found.continuations.iter().map(|&addr| Root {
+                addr,
+                kind: RootKind::Pointer,
+                name: None,
+            }));
+        analysis = discover(&fe, &module);
+    }
+    let found = relift_analyze::escape::return_escapes(&fe, &analysis);
+    relift_analyze::escape::apply(&mut analysis, &found);
     let granule = fe.granule();
     let raw = |pc: u64| {
         module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {

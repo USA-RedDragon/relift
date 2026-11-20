@@ -67,6 +67,8 @@ static int next_pending(void)
     return 0;
 }
 
+static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c);
+
 static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p)
 {
     lx_sigaction act = lx.sig[sig];
@@ -118,7 +120,20 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     c->x[2] = frame + FRAME_UC;
     c->x[30] = (act.flags & L_SA_RESTORER) ? act.restorer : 0;
     c->sp = frame;
-    int rc = rl_call_guest(c, mem, act.handler);
+    int rc = RL_OK;
+    for (int more = next_pending(); more; more = next_pending()) {
+        lx_pending_sig q;
+        bool ignored;
+        if (take(more, &q, &ignored, c) == RL_PENDING)
+            return RL_PENDING;
+        if (ignored)
+            continue;
+        rc = run_handler(c, mem, more, &q);
+        break;
+    }
+    if (rc != RL_OK)
+        return rc;
+    rc = rl_call_guest(c, mem, act.handler);
     if (rc != RL_OK)
         return rc;
 
@@ -137,21 +152,44 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     return RL_OK;
 }
 
+/**
+ * @brief Takes signal sig off the queue. Sets *ignored when its disposition
+ * discards it; returns RL_PENDING when the default action ends the process.
+ */
+static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c)
+{
+    *p = lx.pending[sig];
+    lx.pending[sig].queued = false;
+    *ignored = false;
+    lx_sigaction act = lx.sig[sig];
+    if (act.handler == L_SIG_IGN || (act.handler == L_SIG_DFL && default_ignores(sig))) {
+        if (act.handler == L_SIG_DFL && (sig == L_SIGSTOP || sig == L_SIGTSTP || sig == L_SIGTTIN || sig == L_SIGTTOU))
+            rl_report_unknown(0x4c58535400ull | (uint64_t)sig, "linux", "signal %d would stop the process; it keeps running", sig);
+        *ignored = true;
+        return RL_OK;
+    }
+    if (act.handler == L_SIG_DFL) {
+        rl_pend_exit_process(c, 128u + (uint32_t)sig);
+        return RL_PENDING;
+    }
+    return RL_OK;
+}
+
+/**
+ * @brief Delivers the queued signals. As the kernel does, the frame of the
+ * next deliverable signal is built before the handler of the one before it
+ * has run its first instruction, so with two pending the handler of the
+ * second runs first (run_handler nests).
+ */
 int lx_signal_deliver(rl_ctx *c, uint8_t *mem)
 {
     for (int sig = next_pending(); sig; sig = next_pending()) {
-        lx_pending_sig p = lx.pending[sig];
-        lx.pending[sig].queued = false;
-        lx_sigaction act = lx.sig[sig];
-        if (act.handler == L_SIG_IGN || (act.handler == L_SIG_DFL && default_ignores(sig))) {
-            if (act.handler == L_SIG_DFL && (sig == L_SIGSTOP || sig == L_SIGTSTP || sig == L_SIGTTIN || sig == L_SIGTTOU))
-                rl_report_unknown(0x4c58535400ull | (uint64_t)sig, "linux", "signal %d would stop the process; it keeps running", sig);
-            continue;
-        }
-        if (act.handler == L_SIG_DFL) {
-            rl_pend_exit_process(c, 128u + (uint32_t)sig);
+        lx_pending_sig p;
+        bool ignored;
+        if (take(sig, &p, &ignored, c) == RL_PENDING)
             return RL_PENDING;
-        }
+        if (ignored)
+            continue;
         int rc = run_handler(c, mem, sig, &p);
         if (rc != RL_OK)
             return rc;

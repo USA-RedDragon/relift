@@ -9,7 +9,6 @@
 
 #include <errno.h>
 #include <string.h>
-#include <unistd.h>
 
 enum { TAG_FREE = 0, TAG_MAPPED = 1 };
 
