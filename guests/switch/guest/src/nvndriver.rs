@@ -1178,17 +1178,20 @@ pub fn proc_table(image: &Image) -> Result<Vec<(String, u64)>, String> {
 }
 
 /// The names a table of u32 offsets at `offs` into a string pool at `pool`
-/// gives, as long as they stay sorted, distinct and non-empty.
+/// gives, as long as they stay sorted, distinct and non-empty, and each
+/// offset is where a string starts: what follows the table may look like an
+/// offset into the middle of the last name.
 fn table_names(image: &Image, offs: u64, pool: u64) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for k in 0.. {
         let Some(o) = image.u32_at(offs + 4 * k) else {
             break;
         };
-        let Some(name) = image
-            .cstr(pool + u64::from(o))
-            .filter(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_'))
-        else {
+        let at = pool + u64::from(o);
+        let starts = o == 0 || image.u32_at(at - 1).is_some_and(|w| w & 0xff == 0);
+        let Some(name) = image.cstr(at).filter(|n| {
+            starts && !n.is_empty() && n.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        }) else {
             break;
         };
         if out.last().is_some_and(|l| l.as_str() >= name) {
@@ -2219,6 +2222,11 @@ mod tests {
             );
             pool += n.len() + 1;
         }
+        put(
+            &mut rodata,
+            OFFS as usize - RODATA + 4 * names.len(),
+            &(pool as u32 - 18).to_le_bytes(),
+        );
         put(&mut rodata, SETTING as usize - RODATA, b"TestSetting");
         let dynstr =
             b"\0nvnBootstrapLoaderInternal\0NvRmGpuDeviceChooseKind\0NvRmGpuDeviceGetInfo\0memcpy\0memcmp\0NvRmGpuMappingClose\0";
@@ -2272,6 +2280,17 @@ mod tests {
         .expect("the fixture parses");
         let cpu = crate::cpu::cpu(None, Some(crate::cpu::Console::Switch2)).expect("a CPU");
         Image::new(&nso, Arm64 { cpu }).expect("the fixture has a MOD0")
+    }
+
+    #[test]
+    fn an_offset_into_the_middle_of_a_name_after_the_table_is_not_a_proc() {
+        let img = driver(true);
+        let t = proc_table(&img).expect("a table");
+        assert_eq!(
+            t.last().map(|(n, _)| n.as_str()),
+            Some("nvnTextureViewCompare")
+        );
+        assert!(t.iter().all(|(n, _)| n != "nvnextureViewCompare"));
     }
 
     #[test]
