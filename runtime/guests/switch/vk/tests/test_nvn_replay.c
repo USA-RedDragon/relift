@@ -301,3 +301,43 @@ TEST(nvn_separate_handles_of_unregistered_textures_read_a_null_texture)
     memcpy(&w, st.bank2_host[4] + NVN_BANK2_SEPARATE_SAMPLERS, 4);
     CHECK_EQ(w, smp);
 }
+
+TEST(nvn_replay_binds_reach_the_task_and_mesh_stages)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmd t = { .op = NVN_CMD_BIND_TEXTURE, .x = { 0, NVN_STAGE_MESH, 6, 0x777 } };
+    CHECK_EQ(replay_one(&st, &t), RL_OK);
+    CHECK_EQ(word_at(&st, NVN_STAGE_MESH, 0x20 + 8 * 6), 0x777u);
+    CHECK_EQ(word_at(&st, NVN_STAGE_TASK, 0x20 + 8 * 6), 0u);
+    nvn_cmd s = { .op = NVN_CMD_BIND_STORAGE_BUFFER, .x = { 0, NVN_STAGE_TASK, 0, 0x4000, 0x80 } };
+    CHECK_EQ(replay_one(&st, &s), RL_OK);
+    nvn_cmd u = { .op = NVN_CMD_BIND_UNIFORM_BUFFER, .x = { 0, NVN_STAGE_MESH, 2, 0x5000, 0x40 } };
+    CHECK_EQ(replay_one(&st, &u), RL_OK);
+    CHECK_EQ(st.ubo[NVN_STAGE_MESH][2].addr, 0x5000u);
+    uint8_t c0[NVN_GFX_C0_BYTES];
+    uint64_t a;
+    uint32_t sz;
+    nvn_graphics_table(&st, NVN_STAGE_TASK, c0);
+    memcpy(&a, c0 + 0x670, 8);
+    memcpy(&sz, c0 + 0x678, 4);
+    CHECK_EQ(a, 0x4000u);
+    CHECK_EQ(sz, 0x80u);
+}
+
+TEST(nvn_a_mesh_pipeline_reads_back_from_its_interface_records)
+{
+    nvn_iface_rec recs[] = {
+        { NVN_IFACE_TEXTURE, 2, 0x20, 0 },
+        { NVN_IFACE_MESH, 7 | 1u << 8 | 1u << 9, 2, 3 },
+        { NVN_IFACE_MESH_LIMITS, 64, 126, 36 },
+        { NVN_IFACE_MESH_RECORD, 500, 378, 32 | 32u << 16 },
+    };
+    nvn_mesh_info m;
+    CHECK(nvn_mesh_info_of(recs, 4, &m));
+    CHECK(m.stage == 7 && m.native && m.indexed);
+    CHECK(m.slots == 2 && m.topology == 3);
+    CHECK(m.max_vertices == 64 && m.max_primitives == 126 && m.payload_words == 36);
+    CHECK(m.record_words == 500 && m.index_words == 378 && m.task_lanes == 32 && m.mesh_lanes == 32);
+    CHECK(!nvn_mesh_info_of(recs, 1, &m));
+}
