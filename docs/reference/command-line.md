@@ -195,6 +195,9 @@ Options:
       --system-data <DIR>
           A folder of the player's own decrypted system data, exported with switch-tools from their console: the shared font titles (0100000000000810 to 0100000000000814), one folder per title id. Its fonts are decoded into the import for pl:u
 
+      --sysroot <DIR>
+          For a dynamically linked Linux program: the arm64 Linux root file system, or a cross toolchain's sysroot, that holds its program interpreter and libraries. They are found the way the interpreter searches (run paths, the sysroot's ld.so.conf, the default directories) and copied into the import
+
   -c, --config <config>
           config file
           
