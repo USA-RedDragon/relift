@@ -15,6 +15,7 @@ static int g_exact = -1;
 static int g_fpcr_const;
 static unsigned g_va_bits = 39;
 int rl_arm64_fp_flags_on;
+int rl_arm64_trampoline_on;
 
 int rl_arm64_exact_flags(void)
 {
@@ -26,6 +27,10 @@ int rl_arm64_exact_flags(void)
 }
 
 int rl_arm64_fp_flags(void) { return rl_arm64_fp_flags_on; }
+
+void rl_arm64_set_trampoline(int on) { rl_arm64_trampoline_on = on != 0; }
+
+int rl_arm64_trampoline(void) { return rl_arm64_trampoline_on; }
 
 void rl_arm64_set_fp_flags(int on) { rl_arm64_fp_flags_on = on != 0; }
 
@@ -118,36 +123,52 @@ void rl_arm64_set_va_bits(unsigned bits) { g_va_bits = bits < 64 ? bits : 64; }
 
 static int canonical(uint64_t a) { return g_va_bits >= 64 || a >> g_va_bits == 0; }
 
-static int abort_report(rl_ctx *c, uint64_t to, uint64_t from, int call)
+static int abort_report(rl_ctx *c, uint64_t to, uint64_t from, int how)
 {
+    static const char *const kind[] = { "from the function entered at", "from the call at", "from the return or jump at" };
     return rl_guest_fatal(c, "guest",
                           "instruction abort: return to 0x%llx %s guest pc 0x%llx, outside the %u-bit address space (a "
                           "failed pointer authentication of a return address gives such an address)",
-                          (unsigned long long)to, call ? "from the call at" : "from the function entered at",
-                          (unsigned long long)from, g_va_bits);
+                          (unsigned long long)to, kind[how], (unsigned long long)from, g_va_bits);
 }
 
 int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry)
 {
     uint64_t ra = c->x[30];
     uint64_t pc = entry;
+    uint64_t outer_ra = c->entry_ra;
+    uint32_t outer_set = c->entry_set;
+    c->entry_ra = ra;
+    c->entry_set = 1;
+    int result = RL_OK;
     for (;;) {
         c->pc = pc;
         uint64_t to = rl_lookup(c, pc)(c, mem);
         int call = 0;
         if (to == RL_PENDING && c->pend.kind != RL_PEND_NONE) {
-            if (c->pend.kind != RL_PEND_REDIRECT)
-                return RL_PENDING;
+            if (c->pend.kind == RL_PEND_RETURN) {
+                c->pend.kind = RL_PEND_NONE;
+                break;
+            }
+            if (c->pend.kind != RL_PEND_REDIRECT) {
+                result = RL_PENDING;
+                break;
+            }
             to = c->pend.pc;
             c->pend.kind = RL_PEND_NONE;
             call = 1;
         }
         if (to == ra)
-            return RL_OK;
-        if (!canonical(to))
-            return abort_report(c, to, call ? c->pc : pc, call);
+            break;
+        if (!canonical(to)) {
+            result = abort_report(c, to, call ? c->pc : pc, call ? 1 : 0);
+            break;
+        }
         pc = to;
     }
+    c->entry_ra = outer_ra;
+    c->entry_set = outer_set;
+    return result;
 }
 
 uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc)
@@ -183,6 +204,12 @@ uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 
 uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
+    if (c->entry_set && c->pc == c->entry_ra)
+        return c->pc;
+    if (!canonical(c->pc)) {
+        abort_report(c, c->pc, c->pend.pc, 2);
+        return RL_PENDING;
+    }
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
     c->pend.pc = 0;
     rl_fn f = rl_core_miss_load(c, &m, c->fpcr);
@@ -207,8 +234,8 @@ int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r)
     for (int i = 0; i < 8; i++)
         c->v[8 + i].d[0] = r->d8_15[i];
     c->pend.pc = r->pc;
-    c->pend.sp = r->sp;
-    c->pend.kind = RL_PEND_UNWIND;
+    c->pend.sp = rl_arm64_trampoline_on ? RL_SP_NONE : r->sp;
+    c->pend.kind = rl_arm64_trampoline_on ? RL_PEND_REDIRECT : RL_PEND_UNWIND;
     c->pend.code = 0;
     return RL_PENDING;
 }

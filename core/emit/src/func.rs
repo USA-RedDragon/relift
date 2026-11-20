@@ -115,6 +115,8 @@ struct Ctx<'a> {
     link: Option<ReturnLink>,
     /// Where guesses may go.
     ranges: &'a [GuessRange],
+    /// Trampoline mode: calls and returns leave by tail calls.
+    trampoline: bool,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -205,7 +207,14 @@ impl Ctx<'_> {
         }
         if let Some(target) = self.targets.get(&t) {
             self.callees.insert(t);
-            return self.tail(&target.name.clone());
+            let name = target.name.clone();
+            if self.trampoline {
+                return format!(
+                    "{}c->pc = UINT64_C({t:#x}); RL_MUSTTAIL return {name}(c, mem);",
+                    self.lead()
+                );
+            }
+            return self.tail(&name);
         }
         format!(
             "{}RL_JUMP(UINT64_C({t:#x}), UINT64_C({:#x}));",
@@ -474,7 +483,11 @@ pub(crate) fn emit_function(
         .filter(|_| f.insts.contains_key(&f.entry));
     let anywhere = mask.is_some();
     let continuation = mask.map_or(0, |m| !m);
-    let resumes = resume_points(f, targets);
+    let resumes = if opts.trampoline {
+        BTreeSet::new()
+    } else {
+        resume_points(f, targets)
+    };
     let mut blocks: BTreeMap<u64, Block> = f
         .insts
         .iter()
@@ -489,6 +502,11 @@ pub(crate) fn emit_function(
     let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
     let shape = Shape::of(fe);
+    let extras = if opts.trampoline {
+        trampoline_entries(f, &blocks)
+    } else {
+        BTreeSet::new()
+    };
     let env = Env {
         fe,
         f,
@@ -501,6 +519,8 @@ pub(crate) fn emit_function(
         in_context: opts.regs_in_context,
         shape: &shape,
         ranges: &opts.guess_ranges,
+        trampoline: opts.trampoline,
+        extras: &extras,
     };
     let whole = emit_piece(&env, &all, None);
     let more: Vec<(u64, &String)> = f
@@ -519,7 +539,7 @@ pub(crate) fn emit_function(
             callees: whole.callees,
             undefined: whole.undefined,
             flags: whole.flags,
-            inner: Vec::new(),
+            inner: extras.iter().map(|&pc| (pc, f.name.clone())).collect(),
         };
     }
     // Divide in address order at instruction boundaries, by the size each
@@ -583,14 +603,18 @@ pub(crate) fn emit_function(
             first_pc: None,
         });
     }
-    let inner = if anywhere {
-        all.iter()
-            .filter(|&&pc| pc != f.entry && base(pc) == pc)
-            .map(|pc| (*pc, split.names[split.piece_of[pc]].clone()))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let mut inner: BTreeMap<u64, String> = extras
+        .iter()
+        .map(|pc| (*pc, split.names[split.piece_of[pc]].clone()))
+        .collect();
+    if anywhere {
+        inner.extend(
+            all.iter()
+                .filter(|&&pc| pc != f.entry && base(pc) == pc)
+                .map(|pc| (*pc, split.names[split.piece_of[pc]].clone())),
+        );
+    }
+    let inner: Vec<(u64, String)> = inner.into_iter().collect();
     Emitted1 {
         pieces,
         callees,
@@ -615,6 +639,11 @@ pub(crate) struct Env<'a> {
     in_context: bool,
     pub(crate) shape: &'a Shape,
     ranges: &'a [GuessRange],
+    /// Trampoline mode.
+    pub(crate) trampoline: bool,
+    /// The entries a trampoline-mode function has besides its first: the
+    /// instructions the table enters at with the context up to date.
+    extras: &'a BTreeSet<u64>,
 }
 
 /// One emitted C function over the instructions `pcs` of `f`.
@@ -639,6 +668,8 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         continuation,
         in_context,
         ranges,
+        trampoline,
+        extras,
         ..
     } = *env;
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
@@ -756,22 +787,6 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if plan.shared().is_some() {
         t.push_str("    unsigned rl_k = 0;\n");
     }
-    match split {
-        None => {
-            let _ = writeln!(t, "    goto {};", label(f.entry));
-        }
-        Some(_) => {
-            let first = entries.first().copied().or(pcs.first().copied());
-            t.push_str("    switch (c->pc) {\n");
-            for e in &entries {
-                let _ = writeln!(t, "    case UINT64_C({e:#x}): goto {};", label(*e));
-            }
-            if let Some(e) = first {
-                let _ = writeln!(t, "    default: goto {};", label(e));
-            }
-            t.push_str("    }\n");
-        }
-    }
     let mut cx = Ctx {
         fe,
         f,
@@ -791,7 +806,38 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         site: 0,
         link: fe.return_link(),
         ranges,
+        trampoline,
     };
+    let own: BTreeSet<u64> = pcs.iter().copied().collect();
+    let more: Vec<u64> = extras
+        .iter()
+        .copied()
+        .filter(|e| own.contains(e) && !entries.contains(e))
+        .collect();
+    match split {
+        None if more.is_empty() => {
+            let _ = writeln!(t, "    goto {};", label(f.entry));
+        }
+        _ => {
+            let first = entries.first().copied().or(pcs.first().copied());
+            t.push_str("    switch (c->pc) {\n");
+            for e in &entries {
+                let _ = writeln!(t, "    case UINT64_C({e:#x}): goto {};", label(*e));
+            }
+            for e in &more {
+                let _ = writeln!(
+                    t,
+                    "    case UINT64_C({e:#x}):\n{}        goto {};",
+                    Ctx::line(&cx.reload(plan.live_at(*e)), "        "),
+                    label(*e)
+                );
+            }
+            if let Some(e) = first {
+                let _ = writeln!(t, "    default: goto {};", label(e));
+            }
+            t.push_str("    }\n");
+        }
+    }
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
     for (k, &pc) in pcs.iter().enumerate() {
@@ -1182,7 +1228,11 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     // A guessed computed jump leaves before the preemption check when a
     // direct jump to the guess would have none.
     let mut guessed = false;
-    if let (Flow::Jump, Next::Dynamic(v)) = (b.exit.flow, b.exit.next)
+    let flow = match b.exit.flow {
+        Flow::Call { .. } | Flow::Return if cx.trampoline => Flow::Jump,
+        f => f,
+    };
+    if let (Flow::Jump, Next::Dynamic(v)) = (flow, b.exit.next)
         && let Some((t, _, cond)) = cx.guess(b.pc)
         && (t > b.pc || cx.leaf(t))
     {
@@ -1197,7 +1247,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     if loops_back(cx, b) {
         s.push_str("    RL_LOOP_FENCE();\n");
     }
-    match b.exit.flow {
+    match flow {
         Flow::Return => {
             s.push_str(&Ctx::line(&out_store, "    "));
             let _ = match cx.link {
@@ -1327,4 +1377,25 @@ fn reload(
         let _ = write!(t, "{} = {}; ", flag(r), fe.guard_flag(r, &reg(r)));
     }
     t.trim_end().to_string()
+}
+
+/// The entries a trampoline-mode function has besides its first: the
+/// address after each call (what a return goes to), each landing pad, and
+/// the address after each trap (where a signal delivered at the system call
+/// resumes). Only addresses of instructions of the function count.
+fn trampoline_entries(f: &Function<'_>, blocks: &BTreeMap<u64, Block>) -> BTreeSet<u64> {
+    let mut out: BTreeSet<u64> = f.pads.iter().copied().collect();
+    for b in blocks.values() {
+        match (b.exit.flow, b.exit.next) {
+            (Flow::Call { ret }, _) => {
+                out.insert(ret);
+            }
+            (Flow::Trap(_), Next::Const(t)) => {
+                out.insert(t);
+            }
+            _ => {}
+        }
+    }
+    out.retain(|pc| *pc != f.entry && f.insts.contains_key(pc));
+    out
 }

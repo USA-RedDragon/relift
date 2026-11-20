@@ -51,7 +51,8 @@ fn run(name: &str, llvm: bool, cold_first: bool) {
             })
             .map(|p| std::fs::read_to_string(p).expect("a cold shard"))
             .collect();
-        assert!(cold.contains("lp_dispatch:"), "{cold}");
+        let trampoline = std::env::var("RELIFT_EMIT_TRAMPOLINE").is_ok_and(|v| v == "true");
+        assert_eq!(cold.contains("lp_dispatch:"), !trampoline, "{cold}");
         for line in cold
             .lines()
             .filter(|l| l.contains("rc = ") && l.contains("(c, mem)"))

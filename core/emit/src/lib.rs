@@ -185,6 +185,11 @@ pub struct Options {
     /// C declarations every shard needs for the conditions of
     /// [`Options::guess_ranges`].
     pub guess_decl: String,
+    /// Trampoline mode (`docs/abi.md` section 5.5): a call and a return
+    /// leave the C function by a tail call, so the host stack never mirrors
+    /// the guest stack. The address after every call, every landing pad
+    /// and the address after every trap are entries of their function.
+    pub trampoline: bool,
 }
 
 /// Guest addresses a guess may name ([`Options::guess_ranges`]).
@@ -219,6 +224,7 @@ impl Default for Options {
             piece_syms: true,
             guess_ranges: Vec::new(),
             guess_decl: String::new(),
+            trampoline: false,
         }
     }
 }
@@ -230,8 +236,10 @@ pub struct File {
     pub name: String,
     /// The C source.
     pub text: String,
-    /// The functions a shard defines, by entry and host name; empty for
-    /// other files.
+    /// The functions a shard defines, by entry and host name; for the unit
+    /// table, the entries inside functions that the table lists
+    /// (trampoline-mode return targets and the like) by address and
+    /// the host function that holds each; empty for other files.
     pub fns: Vec<(u64, String)>,
 }
 
@@ -568,7 +576,7 @@ fn emit_core(
         }
     }
     let shape = callee::Shape::of(fe);
-    if shape.any() {
+    if shape.any() && !opts.trampoline {
         let progs: BTreeMap<u64, callee::Prog> = programs(&kept, &targets).into_iter().collect();
         for (e, k) in callee::solve(&shape, &progs) {
             if let Some(t) = targets.get_mut(&e).filter(|t| t.lifted) {
@@ -737,7 +745,7 @@ fn emit_core(
     (w.sink)(File {
         name: "unit.c".into(),
         text: unit_table(fe, &fns, overrides, &flags, &inner, &maps, opts),
-        fns: Vec::new(),
+        fns: inner.iter().map(|(pc, f)| (*pc, f.clone())).collect(),
     });
     undefined
 }
@@ -967,7 +975,7 @@ fn unit_table(
         })
         .collect();
     let entry_of: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
-    let pads_of: BTreeSet<u64> = if fe.pad_resume().is_some() {
+    let pads_of: BTreeSet<u64> = if fe.pad_resume().is_some() && !opts.trampoline {
         fns.iter().flat_map(|f| f.pads.iter().copied()).collect()
     } else {
         BTreeSet::new()
@@ -1006,7 +1014,7 @@ fn unit_table(
         }
     }
     close(run.take(), &mut entries);
-    if let Some(resume) = fe.pad_resume() {
+    if let Some(resume) = fe.pad_resume().filter(|_| !opts.trampoline) {
         let taken: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
         let mut pads: BTreeSet<u64> = fns.iter().flat_map(|f| f.pads.iter().copied()).collect();
         pads.retain(|p| !taken.contains(p) && !overrides.iter().any(|o| o.entry == *p));

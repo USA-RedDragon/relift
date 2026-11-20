@@ -58,7 +58,8 @@ fn a_return_to_a_non_canonical_address_is_an_instruction_abort() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "", "{stderr}");
     assert!(
         stderr.contains("instruction abort: return to 0x20")
-            && stderr.contains("from the call at guest pc 0x")
+            && (stderr.contains("from the call at guest pc 0x")
+                || stderr.contains("from the return or jump at guest pc 0x"))
             && stderr.contains("outside the 39-bit address space"),
         "{stderr}"
     );

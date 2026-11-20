@@ -171,6 +171,13 @@ pub struct Emit {
         description = "for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)"
     )]
     pub fpcr_guards: bool,
+
+    #[configulator(
+        name = "trampoline",
+        default = "false",
+        description = "make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)"
+    )]
+    pub trampoline: bool,
 }
 
 /// Host tools relift drives. An empty path means look it up on `PATH`.

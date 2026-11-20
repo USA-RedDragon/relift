@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION print=value -->`11`<!-- /docgen:const -->.
+Contract version: `RL_ABI_VERSION` <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_ABI_VERSION print=value -->`12`<!-- /docgen:const -->.
 
 ## 0. Runtime layers
 
@@ -210,7 +210,7 @@ their offsets to it, and the A64 descriptor gives the core offset 840.
 | 776 | `nzcv[4]` | N, Z, C, V: one byte each, 0 or 1 |
 | 780 | `fpcr` | |
 | 784 | `fpsr` | |
-| 788 | reserved | |
+| 788 | `entry_set` | nonzero while a host entry runs on the context (section 5.5) |
 | 792 | `tpidr_el0` | |
 | 800 | `tpidrro_el0` | |
 | 808 | `excl` | exclusive monitor, 32 bytes |
@@ -218,7 +218,7 @@ their offsets to it, and the A64 descriptor gives the core offset 840.
 | 864 | `thread` | runtime thread object |
 | 872 | `disp_table`, `disp_lo`, `disp_count` | dispatch table view |
 | 896 | `time` | preemption clock, an `rl_time` (section 14.1) |
-| 912 | `ra` | expected return address of a split function (section 5.4) |
+| 912 | `entry_ra` | the return address of the innermost host entry (section 5.5) |
 | 960 | | size |
 
 `_Static_assert`s in the header pin every offset, the size and the alignment.
@@ -270,10 +270,11 @@ Reasons:
   after the core's block, in a cache line of its own that only the
   scheduler writes, so the check of a running thread reads a line it
   keeps. [inferred]
-- **ra** carries a split function's expected return address from its stub
-  to its pieces (section 5.4). It took padding at the end of the struct, so
-  the size did not change. It shares the clock's cache line; only the
-  running thread writes it, and only in split functions. [inferred]
+- **entry_set, entry_ra** record the return address the innermost host
+  entry (`rl_call_guest`) was given, so that in trampoline mode a guest
+  return to it ends the entry (section 5.5). They are written only by
+  `rl_call_guest`, and sit in the reserved word and in the padding at the
+  end of the struct, so the size did not change. [inferred]
 - **64-byte alignment** keeps two threads' contexts off one cache line.
   [inferred]
 
@@ -713,6 +714,86 @@ whichever RET form it is (RET, RET Xn, RETAA, RETAB, AUTIBSP then RET).
   without any check the inlined callee returned the constant `RL_OK` and
   the pending checks folded away. [open: a whole game on AArch64; the M2 numbers are from a host whose disk was full, so only the
   two builds above were remade]
+
+## 5.5 Trampoline mode
+
+Direct returns (section 5.4) make the host stack mirror the guest stack: a
+guest call is a host call and a guest return is a host return. Guest code
+that manages its own stacks breaks that: Go's goroutine switches (`gogo`,
+`mcall`, `systemstack`), its stack copies (`copystack` moves a goroutine's
+frames and rewrites the saved stack pointer), a signal handler that sets the
+resume pc (`asyncPreempt`), coroutine libraries and green threads. Trampoline
+mode removes the mirror. It needs no knowledge of any runtime and no JIT, no
+writable and executable memory and no `dlopen`, so it works on every host.
+
+- **Entries.** In trampoline mode a guest `bl`, `blr`, `br` and `ret` leave
+  the C function by a tail call: nothing stays on the host stack. The target
+  of a `ret` is a guest address, so every address a return can go to is an
+  entry of a lifted function: the address after each call, the address after
+  each `svc` (where a signal delivered at the system call resumes), every
+  landing pad of the unwind tables, and the exit targets of preemption
+  checks. The C function has `switch (c->pc)` at its start over the entries
+  it holds; each case reloads the registers live there from the context and
+  jumps to the instruction's label, and the default is the function's own
+  entry. Every transfer into a function therefore sets `c->pc` to the
+  address it enters: `RL_JUMP` already did, and a direct tail call by name
+  now stores the constant first. The unit table lists each extra entry as a
+  fragment entry (`RL_FN_FRAGMENT`) whose function is the one holding it, as
+  for the entries of `enter_anywhere` (section 6).
+- **Calls and returns.** `bl` to a lifted function stores the dirty
+  registers, sets `c->pc` and tail calls the callee by name; a call to an
+  address inside the same C function is a `goto`. `blr`, `br` and `ret` are
+  `RL_JUMP(target, site)`: the flat table lookup of section 6 and a tail
+  call. A call to a host override is a tail call too: the override returns
+  x30, and the entry loop (`rl_call_guest`) dispatches what a function
+  returns that is not `RL_PENDING`. There is no return check
+  (`rl_arm64_ret_elsewhere`), no `lp_dispatch`, no pad entry
+  (`rl_pad_resume`) and no `RL_PEND_UNWIND`. The callee-register analysis
+  (section 5.3) is not run, since no register stays in a host local across a
+  call. A landing pad is an ordinary entry, so `rl_resume` (an unwinder's
+  or `longjmp`'s install of registers) records `RL_PEND_REDIRECT` to the
+  pad's address instead of an unwind.
+- **Host entry and exit.** `rl_call_guest(c, mem, entry)` stores the return
+  address it was given in `c->entry_ra` (and sets `c->entry_set`; nested
+  entries save and restore both) and runs the dispatch loop. A guest `ret`
+  to that address is a table miss, and the jump-miss path returns the
+  address (`rl_dispatch_jump_miss` checks `c->pc == c->entry_ra` first), so
+  the loop ends and `rl_call_guest` returns `RL_OK`. `RL_PEND_RETURN` ends
+  the loop the same way: the Linux layer raises it from `rt_sigreturn`.
+  The address must not be a table entry (the Switch layer's NVN stubs are:
+  `nvn_guest_call` gives a return address outside the table).
+- **Signals.** A handler runs nested inside `rl_svc`, after the system call
+  (section 14.2). The frame's saved pc is the address after the `svc`.
+  When the handler returns the frame's pc is read back, and a pc other than
+  that continues there, through `RL_PEND_REDIRECT`: Go's `asyncPreempt`
+  and `sigpanic` work this way. The new pc must be an entry; any other
+  address is a table miss and stops with the usual report. A build with
+  direct returns stops with a report instead of redirecting, since the host
+  frames the redirect would drop are the ones the interrupted code returns
+  through.
+- **Preemption checks.** A check that may deliver a signal has to leave the
+  registers in the context. In trampoline mode (Linux guest) it stores them,
+  sets `c->pc` to the exit's target and tail calls the runtime, which runs
+  the scheduler and the signal delivery and dispatches `c->pc`; the exit's
+  target is an entry for that reason. The Switch layer's checks keep the
+  form of section 14.1: its hook only waits.
+- **The mode choice.** `emit.trampoline = true` forces the mode for the
+  whole program. Without it a Linux program takes direct returns only when
+  `relift_analyze::stack::stack_writes` proves every write of the stack
+  pointer in every function is the function's entry stack pointer plus a
+  constant (a loop of constant steps and an alignment mask included) or a
+  register holding such a value, none of its segments is writable and
+  executable, and no `svc` with a constant number maps or protects memory
+  with a constant `PROT_EXEC`. A write of a value loaded from memory (a
+  `longjmp`, a context switch, an unwinder's install), an argument, or a
+  sum with an unknown amount (`alloca`, a variable length array) is not
+  proven: the build takes trampoline mode for the program. There is no
+  per-function mixing. A build with direct returns that finds the program
+  asking for executable memory at run time stops with a report that names
+  the setting. The build prints which mode it took and why.
+- **Cost.** Every call and return stores the registers it changed and
+  reloads the live ones at the entry, and a return pays a table lookup; the
+  numbers are in `.work/stack-switch/NOTES.md`.
 
 ## 6. Missed code
 
@@ -1979,6 +2060,9 @@ is not in.
 - Version 10 added the RSP issue pipeline (`relift/rsp/abi.h`): lifted
   RSP blocks call `rl_rsp_pipe`, `rl_rsp_pipe_hold` and `rl_rsp_tick`, and
   an RSP image carries the pipeline each bound word is entered with.
+- Version 12 added trampoline mode (section 5.5): `RL_PEND_RETURN`,
+  `entry_set` and `entry_ra` in the context, the entry switch of lifted
+  functions and `rl_arm64_set_trampoline`.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a

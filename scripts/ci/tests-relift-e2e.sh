@@ -3,6 +3,7 @@
 # argument slow, only the targets listed below; with rest, every other one, so
 # a new target lands in exactly one of the two; with none, all of them.
 # Usage: tests-relift-e2e.sh [slow|rest]
+# The targets that build Switch programs run a second time with emit.trampoline.
 . "$(dirname "$0")/lib.sh"
 
 slow=(e2e_gb e2e_hotload e2e_n64)
@@ -36,3 +37,18 @@ done
 [ ${#args[@]} -gt 0 ] || { echo "no e2e targets selected" >&2; exit 1; }
 
 cargo test -p relift --locked "${args[@]}"
+
+# The programs of these targets are built a second time with every return
+# going through dispatch (emit.trampoline); the output must not change.
+both=()
+for name in "${all[@]}"; do
+  case " e2e e2e_eh e2e_ret e2e_hotload " in
+    *" $name "*)
+      for a in "${args[@]}"; do
+        [ "$a" != "$name" ] || both+=(--test "$name")
+      done ;;
+  esac
+done
+if [ ${#both[@]} -gt 0 ]; then
+  RELIFT_EMIT_TRAMPOLINE=true cargo test -p relift --locked "${both[@]}"
+fi

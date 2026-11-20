@@ -177,6 +177,8 @@ pub struct Server {
     dir: PathBuf,
     game_toml: PathBuf,
     seq: u32,
+    /// Whether hot-loaded code is emitted in trampoline mode, as the build was.
+    pub trampoline: bool,
     /// Every load so far.
     pub loads: Vec<Loaded>,
 }
@@ -206,6 +208,7 @@ impl Server {
             dir,
             game_toml,
             seq: 0,
+            trampoline: false,
             loads: Vec::new(),
         }
     }
@@ -322,6 +325,7 @@ impl Server {
                 unit_symbol: symbol.clone(),
                 module_base: p.base,
                 image_id: self.image_id,
+                trampoline: self.trampoline,
                 ..relift_emit::Options::default()
             },
         );

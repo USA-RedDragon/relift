@@ -313,6 +313,7 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
 fn targets(env: &Env<'_>, b: &Block) -> Vec<u64> {
     match (b.exit.flow, b.exit.next) {
         (Flow::Jump, Next::Const(t)) => vec![t],
+        (Flow::Call { .. }, Next::Const(t)) if env.trampoline => vec![t],
         (
             Flow::Jump,
             Next::Select {
@@ -340,6 +341,7 @@ fn exit_live(env: &Env<'_>, p: &Plan, b: &Block, out: &Regs) -> Regs {
     };
     match (b.exit.flow, b.exit.next) {
         (Flow::Return, _) => out.clone(),
+        (Flow::Call { .. }, Next::Const(t)) if env.trampoline => side(t),
         (Flow::Call { .. } | Flow::Trap(_), _) => {
             let mut s = out.clone();
             if let Some(r) = p.lp_reg {

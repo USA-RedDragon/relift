@@ -140,8 +140,8 @@ struct rl_ctx {
     uint32_t fpcr;
     /** @brief FPSR. */
     uint32_t fpsr;
-    /** @brief Reserved, zero. */
-    uint32_t reserved0;
+    /** @brief Nonzero while a host entry (rl_call_guest) is running on this context; entry_ra is then its return address. */
+    uint32_t entry_set;
     /** @brief TPIDR_EL0 (guest read-write thread pointer). */
     uint64_t tpidr_el0;
     /** @brief TPIDRRO_EL0 (guest address of this thread's 0x200-byte TLS slot). */
@@ -160,6 +160,8 @@ struct rl_ctx {
     uint64_t disp_count;
     /** @brief Preemption clock: its budget stays positive while the thread may run on; the guest layer ends it to preempt the thread. */
     rl_time time;
+    /** @brief The return address the innermost host entry (rl_call_guest) was given: in trampoline mode a guest return to it ends the entry. */
+    uint64_t entry_ra;
 } __attribute__((aligned(64)));
 
 _Static_assert(sizeof(rl_v128) == 16, "rl_v128 size");
@@ -181,6 +183,7 @@ _Static_assert(offsetof(rl_ctx, disp_table) == 872, "disp_table");
 _Static_assert(offsetof(rl_ctx, disp_lo) == 880, "disp_lo");
 _Static_assert(offsetof(rl_ctx, disp_count) == 888, "disp_count");
 _Static_assert(offsetof(rl_ctx, time) == 896, "time");
+_Static_assert(offsetof(rl_ctx, entry_ra) == 912, "entry_ra");
 _Static_assert(sizeof(rl_ctx) == 960, "rl_ctx size");
 _Static_assert(_Alignof(rl_ctx) == 64, "rl_ctx alignment");
 

@@ -107,6 +107,11 @@ Options:
           
           [default: false]
 
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -264,6 +269,11 @@ Options:
           
           [default: false]
 
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -415,6 +425,11 @@ Options:
           
           [default: false]
 
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -560,6 +575,11 @@ Options:
 
       --emit.fpcr-guards [<emit.fpcr-guards>]
           for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)
+          
+          [default: false]
+
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
 
@@ -721,6 +741,11 @@ Options:
           
           [default: false]
 
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -864,6 +889,11 @@ Options:
 
       --emit.fpcr-guards [<emit.fpcr-guards>]
           for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)
+          
+          [default: false]
+
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
 
@@ -1038,6 +1068,11 @@ Options:
           
           [default: false]
 
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -1181,6 +1216,11 @@ Options:
 
       --emit.fpcr-guards [<emit.fpcr-guards>]
           for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)
+          
+          [default: false]
+
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
 
@@ -1330,6 +1370,11 @@ Options:
           
           [default: false]
 
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
+          
+          [default: false]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -1475,6 +1520,11 @@ Options:
 
       --emit.fpcr-guards [<emit.fpcr-guards>]
           for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)
+          
+          [default: false]
+
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
 
@@ -1629,6 +1679,11 @@ Options:
 
       --emit.fpcr-guards [<emit.fpcr-guards>]
           for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)
+          
+          [default: false]
+
+      --emit.trampoline [<emit.trampoline>]
+          make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
 

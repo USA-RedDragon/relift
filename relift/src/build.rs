@@ -570,6 +570,7 @@ fn emit_modules(
                     calls: calls.clone(),
                     guess_ranges: guess_ranges.clone(),
                     guess_decl: GUESS_DECL.into(),
+                    trampoline: settings.emit.trampoline,
                     ..relift_emit::Options::default()
                 },
                 &mut |d, total| {
@@ -595,6 +596,11 @@ fn emit_modules(
             )
         });
         written?;
+        let inner: BTreeSet<u64> = files
+            .iter()
+            .filter(|f| f.name == "unit.c")
+            .flat_map(|f| f.fns.iter().map(|(pc, _)| *pc))
+            .collect();
         let counts = store.finish()?;
         remove_stale_shards(&dir, &files)?;
         let mut summaries = summaries
@@ -658,6 +664,8 @@ fn emit_modules(
                 shard_bytes: kib(settings.emit.shard_kib),
                 piece_bytes: kib(settings.emit.cold_piece_kib),
                 first: settings.emit.cold_first,
+                trampoline: settings.emit.trampoline,
+                inner: &inner,
             };
             let made = emit_cold(&cold, stage, ui, row)?;
             census.add(&made.census);
@@ -803,6 +811,10 @@ struct ColdModule<'a> {
     piece_bytes: usize,
     /// The cold copy runs every function: it calls only itself.
     first: bool,
+    /// Whether the cold copy is emitted in trampoline mode, as the hot code is.
+    trampoline: bool,
+    /// The entries inside the hot functions that the hot unit lists.
+    inner: &'a BTreeSet<u64>,
 }
 
 /// What [`emit_cold`] made of one module.
@@ -828,6 +840,7 @@ fn emit_cold(
     ui.begin(row, "cold");
     let (sup, cached) = stage.superset(cpu, i, module, m.layout)?;
     let mut hot: BTreeSet<u64> = m.overrides.iter().map(|o| o.entry).collect();
+    hot.extend(m.inner.iter().copied());
     for h in m.heads.values() {
         hot.insert(h.entry);
         hot.extend(h.pads.iter().copied());
@@ -917,6 +930,7 @@ fn emit_cold(
                 calls: calls.clone(),
                 entry_ranges: true,
                 piece_syms: false,
+                trampoline: m.trampoline,
                 ..relift_emit::Options::default()
             },
             &mut |d, total| {
@@ -1589,6 +1603,7 @@ fn lift_and_emit(
         program::Fp {
             flags: fp_flags,
             fpcr_const,
+            trampoline: settings.emit.trampoline,
         },
         mods_c.as_ref().map(|_| crate::mods::bundled::SYMBOL),
         true,
@@ -2495,6 +2510,7 @@ pub fn run_run(
         hot,
         crate::paths::canonical("game.toml")?,
     );
+    server.trampoline = settings.emit.trampoline;
     let sock = crate::dev::socket_path(&built.out);
     let _ = std::fs::remove_file(&sock);
     let listener =

@@ -64,6 +64,7 @@ pub(crate) fn salt(fe: &dyn Frontend, opts: &Options) -> Vec<u8> {
     put_uvar(&mut out, opts.piece_bytes.max(1) as u64);
     put_str(&mut out, &format!("{:?}", opts.io_map));
     out.push(u8::from(opts.regs_in_context));
+    out.push(u8::from(opts.trampoline));
     match opts.enter_anywhere {
         None => out.push(0),
         Some(m) => {

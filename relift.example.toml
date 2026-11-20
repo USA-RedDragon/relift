@@ -20,6 +20,7 @@ cold = true
 cold-piece-kib = 4
 cold-first = false
 fpcr-guards = false
+trampoline = false
 
 [package]
 appimage = "auto"

@@ -755,6 +755,8 @@ pub struct Fp {
     /// Lifted code has no FPCR guards (the build proved every FPCR write
     /// keeps the default mode).
     pub fpcr_const: bool,
+    /// The program was emitted in trampoline mode (`docs/abi.md` section 5.5).
+    pub trampoline: bool,
 }
 
 /// What the runtime's loader is told about the process: the NPDM's
@@ -989,7 +991,7 @@ fn program_c(
         }
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
-    if fp.flags || fp.fpcr_const {
+    if fp.flags || fp.fpcr_const || fp.trampoline {
         t.push_str("#include \"arm64.h\"\n");
     }
     t.push_str("#include <string.h>\nextern int relift_info_main(void);\n");
@@ -1003,6 +1005,9 @@ fn program_c(
     }
     if fp.fpcr_const {
         t.push_str("    rl_arm64_set_fpcr_const(1);\n");
+    }
+    if fp.trampoline {
+        t.push_str("    rl_arm64_set_trampoline(1);\n");
     }
     t.push_str("    int status = rl_switch_main(&rl_program, argc, argv);\n#ifdef RL_APP_FLUSH\n    RL_APP_FLUSH();\n#endif\n    return status;\n}\n");
     t
@@ -1269,11 +1274,13 @@ mod tests {
             Fp {
                 flags: false,
                 fpcr_const: true,
+                trampoline: true,
             },
             None,
             true,
         );
         let c = String::from_utf8_lossy(&files[2].bytes);
+        assert!(c.contains("rl_arm64_set_trampoline(1);"), "{c}");
         assert!(c.contains("{ &rl_unit_main, &rl_cold_main, };"), "{c}");
         assert!(c.contains("rl_arm64_set_fpcr_const(1);"), "{c}");
         assert!(!c.contains("rl_arm64_set_fp_flags"), "{c}");

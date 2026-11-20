@@ -35,6 +35,12 @@ RL_RUNTIME_API void rl_arm64_set_fp_flags(int on);
 RL_RUNTIME_API void rl_arm64_set_fpcr_const(int on);
 /** @brief Whether lifted code was built without FPCR guards. */
 RL_RUNTIME_API int rl_arm64_fpcr_const(void);
+/** @brief Whether the program was built in trampoline mode (docs/abi.md section 5.5). */
+extern int rl_arm64_trampoline_on;
+/** @brief Records that the program was built in trampoline mode; program.c calls it before the program starts. */
+RL_RUNTIME_API void rl_arm64_set_trampoline(int on);
+/** @brief Whether the program was built in trampoline mode. */
+RL_RUNTIME_API int rl_arm64_trampoline(void);
 /** @brief Saves and clears the host FP flags at a runtime entry that may do host FP work, in flag mode. */
 static inline uint32_t rl_arm64_flags_enter(void)
 {

@@ -404,6 +404,7 @@ fn shards_declare_their_foreign_callees() {
             piece_syms: true,
             guess_ranges: Vec::new(),
             guess_decl: String::new(),
+            trampoline: false,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -886,6 +887,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         piece_syms: true,
         guess_ranges: Vec::new(),
         guess_decl: String::new(),
+        trampoline: false,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -1923,6 +1925,7 @@ fn a_guessed_computed_jump_goes_to_its_guess_by_name_under_the_condition() {
             cond: "!hooked".into(),
         }],
         guess_decl: "extern int hooked;\n".into(),
+        trampoline: false,
         ..Options::default()
     };
     let s = shard(&emit(&PREEMPT, &fns, &[], &opts)).to_string();
@@ -1972,4 +1975,82 @@ fn a_call_or_jump_back_to_a_leaf_is_no_preemption_point() {
     assert!(!at(0x104).contains("rl_time_spent"), "{s}");
     assert!(!at(0x108).contains("rl_time_spent"), "{s}");
     assert!(at(0x10c).contains("rl_time_spent"), "{s}");
+}
+
+fn trampoline_emit(code: &[[u8; 4]], fns: &[(u64, std::ops::Range<usize>)]) -> (String, String) {
+    let blocks = lift_all(code, 0x100);
+    let fns: Vec<_> = fns
+        .iter()
+        .map(|(pc, r)| function(*pc, &blocks[r.clone()]))
+        .collect();
+    let out = emit(
+        &Toy,
+        &fns,
+        &[],
+        &Options {
+            trampoline: true,
+            ..Options::default()
+        },
+    );
+    let unit = out.files.last().expect("unit").text.clone();
+    (shard(&out).to_string(), unit)
+}
+
+#[test]
+fn in_trampoline_mode_a_call_and_a_return_leave_by_tail_calls() {
+    let code = [
+        branch(0x02, 0, 3),
+        word(0x04, 1, 7),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+    ];
+    let (s, _) = trampoline_emit(&code, &[(0x100, 0..3), (0x10c, 3..4)]);
+    let body = &s[s.find("RL_LIFTED(F_100)\n{").expect("F_100")..];
+    let body = &body[..body.find("RL_LIFTED(F_10c)\n{").unwrap_or(body.len())];
+    assert!(
+        body.contains("c->pc = UINT64_C(0x10c); RL_MUSTTAIL return F_10c(c, mem);"),
+        "{body}"
+    );
+    assert!(body.contains("RL_JUMP("), "{body}");
+    assert!(!body.contains("rc = "), "{body}");
+    assert!(!body.contains("lp_dispatch"), "{body}");
+    assert!(
+        body.contains("switch (c->pc)") && body.contains("case UINT64_C(0x104):"),
+        "{body}"
+    );
+}
+
+#[test]
+fn in_trampoline_mode_the_address_after_a_call_is_an_entry_of_its_function() {
+    let code = [
+        branch(0x02, 0, 3),
+        word(0x04, 1, 7),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+    ];
+    let (_, unit) = trampoline_emit(&code, &[(0x100, 0..3), (0x10c, 3..4)]);
+    assert!(
+        unit.contains("{ UINT64_C(0x104), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, F_100 },"),
+        "{unit}"
+    );
+}
+
+#[test]
+fn in_trampoline_mode_a_landing_pad_is_an_entry_and_no_pad_resume_is_listed() {
+    let code = [branch(0x02, 0, 1), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks[0..2]);
+    f.pads = BTreeSet::from([0x108]);
+    let out = emit(
+        &Toy,
+        &[f, function(0x108, &blocks[2..3])],
+        &[],
+        &Options {
+            trampoline: true,
+            ..Options::default()
+        },
+    );
+    let all: String = out.files.iter().map(|f| f.text.as_str()).collect();
+    assert!(!all.contains("rl_toy_pad_resume"), "{all}");
+    assert!(!all.contains("lp_dispatch"), "{all}");
 }

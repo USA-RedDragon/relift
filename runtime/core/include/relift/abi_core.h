@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 11u
+#define RL_ABI_VERSION 12u
 
 /** @brief Lifted function return on a CPU without a link register: normal return to the caller. A CPU with one returns where its return went instead (docs/abi.md section 5.4). */
 #define RL_OK 0
@@ -82,7 +82,13 @@ enum rl_pending_kind {
      * @brief Control goes to pend.pc with every host frame gone: frames pass the record up
      * (pend.sp is RL_SP_NONE) to the thread entry, which restarts at pend.pc (rl_run_from).
      */
-    RL_PEND_REDIRECT = 4
+    RL_PEND_REDIRECT = 4,
+    /**
+     * @brief The host entry that called into guest code (rl_call_guest) is done: the guest
+     * reached the return address the entry was given, by a system call that ends it (a signal
+     * handler's return). The thread entry returns RL_OK to its caller.
+     */
+    RL_PEND_RETURN = 5
 };
 
 /** @brief pend.sp value that no guest frame can match (the CPU layers keep guest stack pointers aligned). */
