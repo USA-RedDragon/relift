@@ -77,6 +77,8 @@ static const nvn_snap_rule snap_rules[] = {
     { NVN_CMD_BIND_STORAGE_BUFFERS, 4, 3, 16 },
     { NVN_CMD_BIND_VERTEX_BUFFERS, 3, 2, 16 },
     { NVN_CMD_BIND_TEXTURES, 4, 3, 8 },
+    { NVN_CMD_BIND_SEPARATE_TEXTURES, 4, 3, 8 },
+    { NVN_CMD_BIND_SEPARATE_SAMPLERS, 4, 3, 8 },
     { NVN_CMD_BIND_IMAGES, 4, 3, 8 },
     { NVN_CMD_SET_VIEWPORTS, 3, 2, 16 },
     { NVN_CMD_PUSH_COMPUTE_CONSTANTS, 4, 3, 1 },

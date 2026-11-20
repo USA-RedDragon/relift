@@ -1304,6 +1304,10 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                            NVN_BANK2_IMAGES, NVN_BANK2_IMAGES + 8u * NVN_IMAGE_SLOTS);
         if (trc != RL_OK)
             return trc;
+        if (mods[s]->driver & 1u << 2)
+            trc = nvn_separate_handles(r, s);
+        if (trc != RL_OK)
+            return trc;
         trc = bind_user_textures(r, mods[s], s, &k.nspec[s], k.spec_map[s], k.spec[s]);
         if (trc != RL_OK)
             return trc;
@@ -1645,36 +1649,112 @@ static void faces(uint32_t face, uint32_t v, uint32_t out[2])
         out[1] = v;
 }
 
-/**
- * @brief The bulk binds (nvnCommandBufferBindUniformBuffers, BindStorageBuffers, BindVertexBuffers, BindTextures
- * and BindImages: a stage, a first slot, a count and an array of 16 byte buffer ranges or 8 byte handles) as the
- * single binds of each slot in turn.
- */
-static int bind_many(replay *r, const nvn_cmd *e)
+/** @brief The single bind a bulk bind (BindUniformBuffers, BindTextures and so on) makes of each slot, or NVN_CMD_NONE. */
+static uint32_t single_of(uint32_t op)
 {
-    bool vertex = e->op == NVN_CMD_BIND_VERTEX_BUFFERS, handles = e->op == NVN_CMD_BIND_TEXTURES || e->op == NVN_CMD_BIND_IMAGES;
-    uint32_t reg = vertex ? 1 : 2, count = (uint32_t)e->x[reg + 1];
-    uint64_t first = e->x[reg];
-    const uint64_t *v = nvn_cmd_bytes(r->s, e->x[reg + 2]);
-    if (count && !v)
-        return nvn_vk_stop(r, "%s without its array", nvn_cmd_name(e->op));
+    switch (op) {
+    case NVN_CMD_BIND_UNIFORM_BUFFERS:
+        return NVN_CMD_BIND_UNIFORM_BUFFER;
+    case NVN_CMD_BIND_STORAGE_BUFFERS:
+        return NVN_CMD_BIND_STORAGE_BUFFER;
+    case NVN_CMD_BIND_VERTEX_BUFFERS:
+        return NVN_CMD_BIND_VERTEX_BUFFER;
+    case NVN_CMD_BIND_TEXTURES:
+        return NVN_CMD_BIND_TEXTURE;
+    case NVN_CMD_BIND_IMAGES:
+        return NVN_CMD_BIND_IMAGE;
+    case NVN_CMD_BIND_SEPARATE_TEXTURES:
+        return NVN_CMD_BIND_SEPARATE_TEXTURE;
+    case NVN_CMD_BIND_SEPARATE_SAMPLERS:
+        return NVN_CMD_BIND_SEPARATE_SAMPLER;
+    default:
+        return NVN_CMD_NONE;
+    }
+}
+
+/**
+ * @brief The single binds of count slots from first, element i taken from v (16 bytes of buffer address and size, or
+ * 8 bytes of handle, or for vertex buffers 16 bytes of address and size at stream first + i), as the e->x[0] command
+ * buffer's binds of each slot in turn.
+ */
+static int bind_slots(replay *r, const nvn_cmd *e, uint32_t single, uint64_t first, uint32_t count, const uint8_t *v)
+{
+    bool vertex = single == NVN_CMD_BIND_VERTEX_BUFFER,
+         buffers = single == NVN_CMD_BIND_UNIFORM_BUFFER || single == NVN_CMD_BIND_STORAGE_BUFFER;
     for (uint32_t i = 0; i < count; i++) {
-        nvn_cmd one = { .x = { e->x[0], vertex ? first + i : e->x[1], vertex ? 0 : first + i } };
+        nvn_cmd one = { .op = single, .x = { e->x[0], vertex ? first + i : e->x[1], vertex ? 0 : first + i } };
         if (vertex) {
-            one.op = NVN_CMD_BIND_VERTEX_BUFFER;
-            one.x[2] = v[2 * i];
-            one.x[3] = v[2 * i + 1];
-        } else if (handles) {
-            one.op = e->op == NVN_CMD_BIND_TEXTURES ? NVN_CMD_BIND_TEXTURE : NVN_CMD_BIND_IMAGE;
-            one.x[3] = v[i];
+            memcpy(&one.x[2], v + 16u * i, 16);
+        } else if (buffers) {
+            memcpy(&one.x[3], v + 16u * i, 16);
         } else {
-            one.op = e->op == NVN_CMD_BIND_UNIFORM_BUFFERS ? NVN_CMD_BIND_UNIFORM_BUFFER : NVN_CMD_BIND_STORAGE_BUFFER;
-            one.x[3] = v[2 * i];
-            one.x[4] = v[2 * i + 1];
+            memcpy(&one.x[3], v + 8u * i, 8);
         }
         int rc = nvn_draw_cmd(r, &one);
         if (rc != RL_OK)
             return rc;
+    }
+    return RL_OK;
+}
+
+/**
+ * @brief The bulk binds (nvnCommandBufferBindUniformBuffers, BindStorageBuffers, BindVertexBuffers, BindTextures,
+ * BindImages, BindSeparateTextures and BindSeparateSamplers: a stage, a first slot, a count and an array of 16 byte
+ * buffer ranges or 8 byte handles) as the single binds of each slot in turn.
+ */
+static int bind_many(replay *r, const nvn_cmd *e)
+{
+    uint32_t single = single_of(e->op);
+    unsigned reg = single == NVN_CMD_BIND_VERTEX_BUFFER ? 1 : 2;
+    uint32_t count = (uint32_t)e->x[reg + 1];
+    const uint8_t *v = nvn_cmd_bytes(r->s, e->x[reg + 2]);
+    if (count && !v)
+        return nvn_vk_stop(r, "%s without its array", nvn_cmd_name(e->op));
+    return bind_slots(r, e, single, e->x[reg], count, v);
+}
+
+/**
+ * @brief The separate texture or separate sampler (the e->op) of stage x1, slot x2: the handle x3 goes where the
+ * driver writes it in the stage's c[2] and the slot is marked bound. A compute stage's separate handles go to a
+ * place of the driver's dispatch table the layer does not know, so they stop.
+ */
+static int bind_separate(replay *r, const nvn_cmd *e)
+{
+    bool sampler = e->op == NVN_CMD_BIND_SEPARATE_SAMPLER;
+    uint32_t s = (uint32_t)e->x[1], slot = (uint32_t)e->x[2], h = (uint32_t)e->x[3];
+    if (s >= NVN_STAGES || slot >= NVN_SEPARATE_SLOTS)
+        return nvn_vk_stop(r, "separate %s of stage %u slot %u", sampler ? "sampler" : "texture", s, slot);
+    if (s == NVN_STAGE_COMPUTE)
+        return nvn_vk_stop(r, "separate %s bound for the compute stage, whose dispatch table the layer knows no place for them in",
+                           sampler ? "sampler" : "texture");
+    uint32_t at = (sampler ? NVN_BANK2_SEPARATE_SAMPLERS : NVN_BANK2_SEPARATE_TEXTURES) + 8u * slot;
+    memcpy(r->st->bank2[s] + at, &h, 4);
+    r->st->separate_bound[s][sampler][slot / 32] |= 1u << (slot % 32);
+    return RL_OK;
+}
+
+/** @brief nvn_separate_handles: the bound separate texture words get their slots, the bound sampler ids their sampler. */
+int nvn_separate_handles(replay *r, uint32_t s)
+{
+    nvn_gfx *st = r->st;
+    for (uint32_t i = 0; i < NVN_SEPARATE_SLOTS; i++) {
+        uint8_t *word = st->bank2_host[s] + NVN_BANK2_SEPARATE_TEXTURES + 8u * i;
+        if (st->separate_bound[s][0][i / 32] & 1u << (i % 32)) {
+            uint32_t handle, slot;
+            memcpy(&handle, word, 4);
+            int rc = nvn_texset_separate_texture(r, handle, &slot);
+            if (rc != RL_OK)
+                return rc;
+            slot = slot == UINT32_MAX ? 0 : (handle & 0xfff00000u) | slot;
+            memcpy(word, &slot, 4);
+        }
+        if (st->separate_bound[s][1][i / 32] & 1u << (i % 32)) {
+            uint32_t handle;
+            memcpy(&handle, st->bank2_host[s] + NVN_BANK2_SEPARATE_SAMPLERS + 8u * i, 4);
+            int rc = nvn_texset_sampler(r, handle >> 20);
+            if (rc != RL_OK)
+                return rc;
+        }
     }
     return RL_OK;
 }
@@ -1688,7 +1768,12 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_BIND_VERTEX_BUFFERS:
     case NVN_CMD_BIND_TEXTURES:
     case NVN_CMD_BIND_IMAGES:
+    case NVN_CMD_BIND_SEPARATE_TEXTURES:
+    case NVN_CMD_BIND_SEPARATE_SAMPLERS:
         return bind_many(r, e);
+    case NVN_CMD_BIND_SEPARATE_TEXTURE:
+    case NVN_CMD_BIND_SEPARATE_SAMPLER:
+        return bind_separate(r, e);
     case NVN_CMD_BIND_PROGRAM:
         return bind_program(r, e);
     case NVN_CMD_BIND_UNIFORM_BUFFER: {

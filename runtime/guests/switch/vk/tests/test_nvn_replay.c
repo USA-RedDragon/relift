@@ -8,6 +8,7 @@
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /** @brief Replays e against a zeroed replay and state; returns its result. */
@@ -145,4 +146,97 @@ TEST(nvn_copy_pitch_follows_the_drivers_strides)
     CHECK_EQ(p.row_texels, 12);
     CHECK_EQ(p.image_rows, 8);
     CHECK_EQ(p.span, 48);
+}
+
+/** @brief The command set of one 8 byte handle array, for the bulk binds that snapshot their array. */
+static nvn_cmdset *handle_set(const uint64_t *v, uint32_t n)
+{
+    nvn_cmdset *s = calloc(1, sizeof *s);
+    s->bytes = malloc(8u * n);
+    memcpy(s->bytes, v, 8u * n);
+    s->nbytes = 8u * n;
+    return s;
+}
+
+static uint32_t word_at(const nvn_gfx *st, uint32_t stage, uint32_t at)
+{
+    uint32_t w;
+    memcpy(&w, st->bank2[stage] + at, 4);
+    return w;
+}
+
+TEST(nvn_replay_separate_binds_land_where_the_driver_writes_them)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmd t = { .op = NVN_CMD_BIND_SEPARATE_TEXTURE, .x = { 0, 4, 3, 0x1234 } };
+    CHECK_EQ(replay_one(&st, &t), RL_OK);
+    nvn_cmd m = { .op = NVN_CMD_BIND_SEPARATE_SAMPLER, .x = { 0, 4, 5, 7u << 20 } };
+    CHECK_EQ(replay_one(&st, &m), RL_OK);
+    CHECK_EQ(word_at(&st, 4, 0x168 + 8 * 3), 0x1234u);
+    CHECK_EQ(word_at(&st, 4, 0x568 + 8 * 5), 7u << 20);
+    CHECK_EQ(word_at(&st, 4, 0x20 + 8 * 3), 0u);
+    CHECK_EQ(word_at(&st, 4, 0x120), 0u);
+    CHECK_EQ(st.separate_bound[4][0][0], 1u << 3);
+    CHECK_EQ(st.separate_bound[4][1][0], 1u << 5);
+    CHECK_EQ(st.separate_bound[0][0][0], 0u);
+    nvn_cmd last = { .op = NVN_CMD_BIND_SEPARATE_TEXTURE, .x = { 0, 0, 127, 9 } };
+    CHECK_EQ(replay_one(&st, &last), RL_OK);
+    CHECK_EQ(word_at(&st, 0, 0x168 + 8 * 127), 9u);
+    CHECK_EQ(st.separate_bound[0][0][3], 1u << 31);
+    CHECK(0x168 + 8 * 127 + 4 <= NVN_BANK2_BYTES);
+    CHECK(0x568 + 8 * 127 + 4 <= NVN_BANK2_BYTES);
+}
+
+TEST(nvn_replay_bulk_separate_binds_bind_each_slot)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    const uint64_t textures[3] = { 11, 12, 13 }, samplers[2] = { 3u << 20, 4u << 20 };
+    nvn_cmdset *ts = handle_set(textures, 3), *ss = handle_set(samplers, 2);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.st = &st;
+    r.s = ts;
+    nvn_cmd t = { .op = NVN_CMD_BIND_SEPARATE_TEXTURES, .x = { 0, 1, 2, 3, NVN_SNAP } };
+    CHECK_EQ(nvn_draw_cmd(&r, &t), RL_OK);
+    r.s = ss;
+    nvn_cmd m = { .op = NVN_CMD_BIND_SEPARATE_SAMPLERS, .x = { 0, 1, 9, 2, NVN_SNAP } };
+    CHECK_EQ(nvn_draw_cmd(&r, &m), RL_OK);
+    for (uint32_t i = 0; i < 3; i++)
+        CHECK_EQ(word_at(&st, 1, 0x168 + 8 * (2 + i)), 11 + i);
+    CHECK_EQ(word_at(&st, 1, 0x168 + 8 * 1), 0u);
+    CHECK_EQ(word_at(&st, 1, 0x168 + 8 * 5), 0u);
+    CHECK_EQ(word_at(&st, 1, 0x568 + 8 * 9), 3u << 20);
+    CHECK_EQ(word_at(&st, 1, 0x568 + 8 * 10), 4u << 20);
+    CHECK_EQ(st.separate_bound[1][0][0], 0x1cu);
+    CHECK_EQ(st.separate_bound[1][1][0], 0x600u);
+    free(ts->bytes);
+    free(ts);
+    free(ss->bytes);
+    free(ss);
+}
+
+TEST(nvn_separate_handles_of_unregistered_textures_read_a_null_texture)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    uint32_t tex = 9, smp = 3u << 20;
+    memcpy(st.bank2_host[4] + NVN_BANK2_SEPARATE_TEXTURES + 8, &tex, 4);
+    memcpy(st.bank2_host[4] + NVN_BANK2_SEPARATE_SAMPLERS, &smp, 4);
+    st.separate_bound[4][0][0] = 1u << 1;
+    st.separate_bound[4][1][0] = 1u;
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.st = &st;
+    CHECK_EQ(nvn_separate_handles(&r, 4), RL_OK);
+    uint32_t w;
+    memcpy(&w, st.bank2_host[4] + NVN_BANK2_SEPARATE_TEXTURES + 8, 4);
+    CHECK_EQ(w, 0u);
+    memcpy(&w, st.bank2_host[4] + NVN_BANK2_SEPARATE_SAMPLERS, 4);
+    CHECK_EQ(w, smp);
 }

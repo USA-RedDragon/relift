@@ -575,7 +575,8 @@ void nvn_texset_texture_gone(uint64_t tex)
     pthread_mutex_unlock(&g.lock);
 }
 
-int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)
+/** @brief nvn_texset_bind; with_sampler false leaves the handle's sampler id alone (a separate texture handle names none). */
+static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
 {
     if (!make())
         return nvn_vk_stop(r, "cannot make the texture set");
@@ -600,7 +601,7 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
     if (t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
         *kind = t.tex_kind[sl];
         memcpy(dim, t.dims.map + 4ull * sl, 4);
-        return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
+        return !with_sampler || (image && !nvn_sampler_registered(sid)) ? RL_OK : bind_sampler(r, sid);
     }
     nvn_view nv;
     VkFormat vf = v->format;
@@ -660,7 +661,31 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
     t.tex_guest[sl] = tex;
     memcpy(t.tex_view[sl], view, sizeof view);
     memcpy(t.dims.map + 4ull * sl, dim, 4);
-    return image && !nvn_sampler_registered(sid) ? RL_OK : bind_sampler(r, sid);
+    return !with_sampler || (image && !nvn_sampler_registered(sid)) ? RL_OK : bind_sampler(r, sid);
+}
+
+int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)
+{
+    return bind_texture(r, handle, kind, dim, slot, true);
+}
+
+int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
+{
+    uint8_t view[17];
+    bool has_view = false, image = false;
+    if (!nvn_tex_registered(handle & 0xfffffu, view, &has_view, &image)) {
+        *slot = UINT32_MAX;
+        return RL_OK;
+    }
+    uint32_t kind, dim;
+    return bind_texture(r, handle, &kind, &dim, slot, false);
+}
+
+int nvn_texset_sampler(replay *r, uint32_t id)
+{
+    if (!make())
+        return nvn_vk_stop(r, "cannot make the texture set");
+    return bind_sampler(r, id);
 }
 
 int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim)

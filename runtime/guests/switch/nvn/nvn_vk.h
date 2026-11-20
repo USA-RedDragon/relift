@@ -19,11 +19,19 @@
 /** @brief Uniform buffer slots of a stage (c[3] to c[16]). */
 #define NVN_UBO_SLOTS 14u
 /** @brief Bytes of a stage's driver bank c[2] the layer keeps: bound texture handles from 0x20, 8 bytes apart. */
-#define NVN_BANK2_BYTES 0x400u
+#define NVN_BANK2_BYTES 0x968u
 /** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
 /** @brief Bytes of a graphics stage's driver bank c[0] the layer fills. */
 #define NVN_GFX_C0_BYTES 0x1000u
 #define NVN_BANK2_TEXTURES 0x20u
+/**
+ * @brief Offsets in c[2] of the handle bound to separate texture slot 0 and to separate sampler slot 0, and the
+ * slots of each (nvnCommandBufferBindSeparateTexture and BindSeparateSampler write method 0x8e3 at 0x168 + 8 * slot
+ * and 0x568 + 8 * slot in both NVN1 16.2.0 and NVN2 22.2.0 drivers).
+ */
+#define NVN_BANK2_SEPARATE_TEXTURES 0x168u
+#define NVN_BANK2_SEPARATE_SAMPLERS 0x568u
+#define NVN_SEPARATE_SLOTS 128u
 /** @brief Offset in c[2] of the handle bound to image slot 0 of a graphics stage (nvnCommandBufferBindImage, sdk 0x67ea20: method 0x8e3 at 0x120 + 8 * slot). */
 #define NVN_BANK2_IMAGES 0x120u
 #define NVN_VERTEX_BUFFERS 16u
@@ -173,6 +181,8 @@ typedef struct nvn_gfx {
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     /** @brief bank2 as the bound programs read it: each texture handle names the layer's slot, not the texture id (nvn_texset_bind). */
     uint8_t bank2_host[NVN_STAGES][NVN_BANK2_BYTES];
+    /** @brief The separate texture (0) and separate sampler (1) slots of each stage something was bound to, a bit each. */
+    uint32_t separate_bound[NVN_STAGES][2][NVN_SEPARATE_SLOTS / 32];
     /** @brief Host copies of user banks whose texture handles carry slots (bind_user_textures), and which are in use by this draw. */
     uint8_t *ubo_host[NVN_STAGES][NVN_UBO_SLOTS];
     uint32_t ubo_patched[NVN_STAGES];
@@ -297,12 +307,28 @@ VkDescriptorSet nvn_texset(void);
  */
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot);
 /**
+ * @brief nvn_texset_bind for a separate texture handle: the texture only, no sampler, whose id the handle leaves 0.
+ * *slot gets UINT32_MAX when no texture is registered under the handle's id (the program then reads a null
+ * descriptor instead of the draw stopping on a stale binding).
+ */
+int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot);
+/** @brief Makes the texture set's sampler id hold the sampler registered under it (a default sampler when none is). */
+int nvn_texset_sampler(replay *r, uint32_t id);
+/**
  * @brief Binds the image an image handle names as a storage image: *slot
  * gets the index the translated program reads it at (what the layer
  * writes for the handle into the program's bank), *kind and *dim as for
  * nvn_texset_bind.
  */
 int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim);
+/**
+ * @brief Makes the texture set hold what stage s's separate handles (nvnCommandBufferBindSeparateTexture and
+ * BindSeparateSampler) name, and puts the slot of each separate texture in place of its id in the stage's host copy of
+ * c[2], bank2_host (the program combines the texture word and the sampler word into the handle it samples with, so
+ * the combined word carries the slot and the sampler id). A texture that is no longer registered reads as 0. Returns
+ * RL_OK, or RL_PENDING after a stop.
+ */
+int nvn_separate_handles(replay *r, uint32_t s);
 /** @brief Frees what draws of the batch just finished held (descriptor sets); called after each wait. */
 void nvn_draw_reset(void);
 /** @brief Runs a recorded nvnCommandBufferEvaluateDlss with the player's upscaler (nvn_dlss.c); RL_OK or a pending stop. */
