@@ -5,6 +5,7 @@
  */
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_slots.h"
+#include "nvn/nvn_watch.h"
 #include "tc.h"
 #include "vi.h"
 
@@ -76,6 +77,36 @@ TEST(nvn_block_linear_layout)
     CHECK_EQ(lin.size, 416ull * 10);
     nvn_tex_desc bad = { .target = 1, .format = 0x7fff, .width = 1, .height = 1 };
     CHECK(!nvn_tex_layout(&bad));
+}
+
+TEST(nvn_watch_sees_writes_to_watched_pages_only)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp;
+    uint64_t size = 40 * hp;
+    uint8_t *m = t_mem();
+    m[at + 5] = 1;
+    nvn_watch w;
+    CHECK(nvn_watch_start(&w, at + 7, size));
+    CHECK(!nvn_watch_changed(&w));
+    m[at + size + 3 * hp] = 9;
+    CHECK(!nvn_watch_changed(&w));
+    CHECK(!t_write(at + 21 * hp + 1, 7).faulted);
+    CHECK_EQ(m[at + 21 * hp + 1], 7);
+    CHECK(nvn_watch_changed(&w));
+    nvn_watch w2;
+    CHECK(nvn_watch_start(&w2, at + 7, size));
+    CHECK(!nvn_watch_changed(&w2));
+    CHECK(!t_write(at + 22 * hp, 3).faulted);
+    CHECK(nvn_watch_changed(&w2));
+    nvn_watch w3;
+    CHECK(nvn_watch_start(&w3, at + 7, size));
+    CHECK(!nvn_watch_changed(&w3));
+    uint64_t faults, starts;
+    nvn_watch_stats(&faults, &starts);
+    CHECK(faults >= 2 && starts >= 3);
 }
 
 TEST(nvn_device_queries_and_syncs)
