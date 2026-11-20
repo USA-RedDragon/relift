@@ -33,25 +33,19 @@
  * logs one warning and draws without the effect, except a swizzle that is not
  * the identity, which stops.
  */
-#include "nvn_vk.h"
+#include "nvn_module.h"
 
 #include <math.h>
 #include <stdlib.h>
 
 #define MAX_PIPELINES 1024u
-#define MAX_MODULES 4096u
 #define UBO_BYTES 65536u
 #define SET_POOL_SETS 4096u
-#define USER_BINDINGS 22u
 /** @brief The user binding (constant bank c[24]) a fragment program reads the stage's storage buffer table from. */
 #define STORAGE_TABLE_BINDING 21u
 /** @brief Storage buffer entries of the table in c[24]: each is {GPU address, u32 size, u32 0}, 16 bytes. */
 #define STORAGE_TABLE_ENTRIES 5u
-#define DRIVER_BINDINGS 4u
-#define MAX_RECS 48u
 #define MAX_SPECS 32u
-/** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
-#define ALPHA_FUNC_SPEC 0x300u
 /** @brief The graphics stages that read the fixed-state push constants: the point size and the alpha reference. */
 #define FIXED_STAGES (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
 /** @brief The fixed-state push constant block (the translator's: point size, then alpha reference). */
@@ -59,32 +53,7 @@ typedef struct fixed_push {
     float point_size, alpha_ref;
 } fixed_push;
 
-/** @brief A translated program as a shader module, with what its interface uses. */
-typedef struct module {
-    char key[65];
-    int stage;
-    VkShaderModule m;
-    /** @brief User banks (bit n: c[3 + n]) and driver banks (bit n: c[n]) the program reads. */
-    uint32_t user, driver;
-    /** @brief Input locations (vertex attributes) the program reads. */
-    uint32_t inputs;
-    /** @brief Bindings of set 2 the program declares (bit n: binding n, for n < 32), and whether it has others. */
-    uint32_t texture_bindings;
-    bool images, other_sets;
-    /** @brief Output locations the program declares (a vertex program's varyings). */
-    uint32_t outputs;
-    /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
-    bool alpha_test, fixed_push;
-    /** @brief Its interface records (nvn_shader_iface). */
-    nvn_iface_rec recs[MAX_RECS];
-    uint32_t nrecs;
-    /** @brief Fragment variants with some inputs demoted to zero constants (see demote_inputs), by the mask of those inputs. */
-    struct {
-        uint32_t mask;
-        VkShaderModule m;
-    } variants[8];
-    uint32_t nvariants;
-} module;
+typedef nvn_module module;
 
 /** @brief Everything a pipeline is made from. */
 typedef struct pipe_key {
@@ -116,8 +85,6 @@ typedef struct pipe_key {
 } pipe_key;
 
 static struct {
-    module *mods[MAX_MODULES];
-    uint32_t nmods;
     struct {
         pipe_key k;
         VkPipeline p;
@@ -136,222 +103,15 @@ static struct {
     bool ready;
 } d;
 
-/** @brief What patch_spirv learns of one id: its decorations and, plus one, its storage class. */
-typedef struct spv_var {
-    uint32_t set, binding, location, storage;
-    bool has_set, has_binding, has_location;
-} spv_var;
-
-/** @brief Reads which banks, inputs and sets words (n of them) uses, and moves its bindings for stage. */
-static bool patch_spirv(uint32_t *w, size_t n, int stage, module *m)
+/** @brief Runs a driver call that compiles and adds its time to the running total. */
+static void note_compile(const char *what, uint64_t t0, uint32_t n)
 {
-    if (n < 5 || w[0] != 0x07230203)
-        return false;
-    uint32_t bound = w[3];
-    spv_var *v = calloc(bound, sizeof *v);
-    if (!v)
-        return false;
-    for (size_t i = 5; i < n;) {
-        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
-        if (!len || i + len > n)
-            break;
-        if (op == 71 && len >= 4 && w[i + 1] < bound) {
-            spv_var *x = &v[w[i + 1]];
-            if (w[i + 2] == 34)
-                x->set = w[i + 3], x->has_set = true;
-            else if (w[i + 2] == 33)
-                x->binding = w[i + 3], x->has_binding = true;
-            else if (w[i + 2] == 30)
-                x->location = w[i + 3], x->has_location = true;
-            else if (w[i + 2] == 1 && w[i + 3] == ALPHA_FUNC_SPEC)
-                m->alpha_test = true;
-        } else if (op == 59 && len >= 4 && w[i + 2] < bound) {
-            v[w[i + 2]].storage = w[i + 3] + 1u;
-            m->fixed_push |= w[i + 3] == 9;
-        }
-        i += len;
-    }
-    for (size_t i = 5; i < n;) {
-        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
-        if (!len || i + len > n)
-            break;
-        if (op == 71 && len >= 4 && w[i + 2] == 33 && w[i + 1] < bound) {
-            spv_var *x = &v[w[i + 1]];
-            if (x->set == 0) {
-                m->user |= 1u << (x->binding & 31);
-                w[i + 3] = USER_BINDINGS * (uint32_t)stage + x->binding;
-            } else if (x->set == 1) {
-                m->driver |= 1u << (x->binding & 31);
-                w[i + 3] = DRIVER_BINDINGS * (uint32_t)stage + x->binding;
-            } else if (x->set == 2) {
-                if (x->binding < 32)
-                    m->texture_bindings |= 1u << x->binding;
-                else
-                    m->images = true;
-            } else {
-                m->other_sets = true;
-            }
-        }
-        i += len;
-    }
-    for (uint32_t id = 0; id < bound; id++) {
-        if (v[id].storage == 2 && v[id].has_location && v[id].location < 32)
-            m->inputs |= 1u << v[id].location;
-        if (v[id].storage == 4 && v[id].has_location && v[id].location < 32)
-            m->outputs |= 1u << v[id].location;
-    }
-    free(v);
-    return true;
-}
-
-/**
- * @brief A copy of the SPIR-V w (n words) in which every Input variable at a location in mask is a Private variable
- * initialized to UNWRITTEN_VARYING (see nvn_priv.h), with no location. The host driver needs every fragment input
- * matched by an output of the vertex program; an input the vertex program does not declare reads what the vertex
- * stage leaves in its output buffer, the value the translator gives every generic output component before the
- * program stores it. Only 32-bit float scalars and vectors take it; any other type reads zero. Returns NULL when
- * memory runs out; *out_n is the new length.
- */
-static uint32_t *demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n)
-{
-    uint32_t bound = w[3];
-    uint32_t *loc = calloc(bound, sizeof *loc), *pointee = calloc(bound, sizeof *pointee);
-    uint32_t *tcomp = calloc(bound, sizeof *tcomp), *tcount = calloc(bound, sizeof *tcount);
-    uint8_t *tfloat = calloc(bound, 1);
-    uint8_t *hasloc = calloc(bound, 1), *demote = calloc(bound, 1);
-    uint32_t *o = malloc((n + 16 * 32 + 16) * sizeof *o);
-    if (!loc || !pointee || !tcomp || !tcount || !tfloat || !hasloc || !demote || !o) {
-        free(tcomp);
-        free(tcount);
-        free(tfloat);
-        free(loc);
-        free(pointee);
-        free(hasloc);
-        free(demote);
-        free(o);
-        return NULL;
-    }
-    for (size_t i = 5; i < n;) {
-        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
-        if (!len || i + len > n)
-            break;
-        if (op == 71 && len >= 4 && w[i + 2] == 30 && w[i + 1] < bound)
-            loc[w[i + 1]] = w[i + 3], hasloc[w[i + 1]] = 1;
-        i += len;
-    }
-    for (size_t i = 5; i < n;) {
-        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
-        if (!len || i + len > n)
-            break;
-        if (op == 59 && len >= 4 && w[i + 3] == 1 && w[i + 2] < bound && hasloc[w[i + 2]] && loc[w[i + 2]] < 32 &&
-            (mask >> loc[w[i + 2]] & 1))
-            demote[w[i + 2]] = 1;
-        i += len;
-    }
-    memcpy(o, w, 5 * sizeof *o);
-    size_t at = 5;
-    uint32_t next = bound;
-    for (size_t i = 5; i < n;) {
-        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
-        if (!len || i + len > n)
-            break;
-        if (op == 32 && len >= 4 && w[i + 1] < bound)
-            pointee[w[i + 1]] = w[i + 3];
-        if (op == 22 && len >= 3 && w[i + 1] < bound && w[i + 2] == 32)
-            tfloat[w[i + 1]] = 1;
-        if (op == 23 && len >= 4 && w[i + 1] < bound && w[i + 2] < bound && tfloat[w[i + 2]])
-            tcomp[w[i + 1]] = w[i + 2], tcount[w[i + 1]] = w[i + 3];
-        if (op == 71 && len >= 3 && w[i + 1] < bound && demote[w[i + 1]]) {
-            for (uint32_t k = 0; k < len; k++)
-                o[at++] = 1u << 16;
-        } else if (op == 59 && len >= 4 && w[i + 2] < bound && demote[w[i + 2]]) {
-            uint32_t ptr = next++, init = next++, ty = pointee[w[i + 1]];
-            o[at++] = 4u << 16 | 32;
-            o[at++] = ptr;
-            o[at++] = 6;
-            o[at++] = ty;
-            if (ty < bound && tfloat[ty]) {
-                o[at++] = 4u << 16 | 43;
-                o[at++] = ty;
-                o[at++] = init;
-                o[at++] = UNWRITTEN_VARYING[0];
-            } else if (ty < bound && tcount[ty] >= 2 && tcount[ty] <= 4) {
-                uint32_t comps[4], ct = tcomp[ty];
-                for (uint32_t k = 0; k < tcount[ty]; k++) {
-                    comps[k] = next++;
-                    o[at++] = 4u << 16 | 43;
-                    o[at++] = ct;
-                    o[at++] = comps[k];
-                    o[at++] = UNWRITTEN_VARYING[k];
-                }
-                o[at++] = (3u + tcount[ty]) << 16 | 44;
-                o[at++] = ty;
-                o[at++] = init;
-                for (uint32_t k = 0; k < tcount[ty]; k++)
-                    o[at++] = comps[k];
-            } else {
-                o[at++] = 3u << 16 | 46;
-                o[at++] = ty;
-                o[at++] = init;
-            }
-            o[at++] = 5u << 16 | 59;
-            o[at++] = ptr;
-            o[at++] = w[i + 2];
-            o[at++] = 6;
-            o[at++] = init;
-        } else {
-            memcpy(o + at, w + i, len * sizeof *o);
-            at += len;
-        }
-        i += len;
-    }
-    o[3] = next;
-    *out_n = at;
-    free(tcomp);
-    free(tcount);
-    free(tfloat);
-    free(loc);
-    free(pointee);
-    free(hasloc);
-    free(demote);
-    return o;
-}
-
-/**
- * @brief The fragment module of frag to draw with after vertex program vert: frag itself when the vertex program writes
- * every location frag reads, else a variant of frag with the unwritten inputs demoted (demote_inputs). 0 when it
- * cannot be made.
- */
-static VkShaderModule fragment_for(const module *vert, module *frag)
-{
-    uint32_t missing = frag->inputs & ~vert->outputs;
-    if (!missing)
-        return frag->m;
-    for (uint32_t i = 0; i < frag->nvariants; i++)
-        if (frag->variants[i].mask == missing)
-            return frag->variants[i].m;
-    size_t n, dn;
-    uint32_t *w = nvn_shader_spirv(frag->key, &n);
-    if (!w || frag->nvariants == 8)
-        return NULL;
-    module scratch;
-    memset(&scratch, 0, sizeof scratch);
-    uint32_t *dw = patch_spirv(w, n, frag->stage, &scratch) ? demote_inputs(w, n, missing, &dn) : NULL;
-    free(w);
-    if (!dw)
-        return NULL;
-    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                    .codeSize = dn * 4,
-                                    .pCode = dw };
-    VkShaderModule m = NULL;
-    if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
-        m = NULL;
-    free(dw);
-    if (m) {
-        frag->variants[frag->nvariants].mask = missing;
-        frag->variants[frag->nvariants++].m = m;
-    }
-    return m;
+    uint64_t dt = rl_clock_ns() - t0;
+    d.made++;
+    d.made_ns += dt;
+    if (rl_cfg()->trace_os || dt > 20000000u)
+        rl_log(RL_LOG_INFO, "nvn", "%s %u created in %.1f ms (%llu created, %.0f ms in all)", what, n, dt / 1e6,
+               (unsigned long long)d.made, d.made_ns / 1e6);
 }
 
 static module *module_of(replay *r, uint64_t code)
@@ -362,46 +122,15 @@ static module *module_of(replay *r, uint64_t code)
         nvn_vk_stop(r, "the program at 0x%llx has no end", (unsigned long long)code);
         return NULL;
     }
-    for (uint32_t i = 0; i < d.nmods; i++)
-        if (!strcmp(d.mods[i]->key, key))
-            return d.mods[i];
-    nvn_shader_note(r->mem, code, key);
-    size_t n;
-    uint32_t *w = nvn_shader_spirv(key, &n);
-    if (!w) {
+    char why[200];
+    module *m = nvn_module_get(key, nvn_shader_stage(r->mem, code), why, sizeof why);
+    if (!m) {
+        nvn_shader_note(r->mem, code, key);
         nvn_vk_stop(r,
-                    "program %s (at 0x%llx) is not in the build's shader table: the build's scan of the game's files "
-                    "did not find it, or the translator refused it (%s/failed.txt names those)",
-                    key, (unsigned long long)code, nvn_shader_dir());
-        return NULL;
+                    "program %s (at 0x%llx): %s; a program missing from the table is recorded in %s/programs for the next "
+                    "relift build (%s/failed.txt names programs the translator refused)",
+                    key, (unsigned long long)code, why, nvn_shader_dir(), nvn_shader_dir());
     }
-    module *m = calloc(1, sizeof *m);
-    if (!m || d.nmods == MAX_MODULES) {
-        free(w);
-        free(m);
-        nvn_vk_stop(r, "out of shader module slots");
-        return NULL;
-    }
-    memcpy(m->key, key, sizeof m->key);
-    m->stage = nvn_shader_stage(r->mem, code);
-    m->nrecs = nvn_shader_iface(key, m->recs, MAX_RECS);
-    if (!patch_spirv(w, n, m->stage, m)) {
-        free(w);
-        free(m);
-        nvn_vk_stop(r, "translation %s is not SPIR-V", key);
-        return NULL;
-    }
-    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                    .codeSize = n * 4,
-                                    .pCode = w };
-    VkResult vr = VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m->m);
-    free(w);
-    if (vr != VK_SUCCESS) {
-        free(m);
-        nvn_vk_stop(r, "vkCreateShaderModule failed for %s (%d)", key, (int)vr);
-        return NULL;
-    }
-    d.mods[d.nmods++] = m;
     return m;
 }
 
@@ -1481,7 +1210,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         return nvn_vk_stop(r, "draw without a vertex program");
     if (mods[3] || mods[4] || mods[2])
         return nvn_vk_stop(r, "draw with tessellation or geometry programs");
-    if (mods[1] && !(k.mods[1] = fragment_for(mods[0], mods[1])))
+    if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(mods[0], mods[1])))
         return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the vertex program writes",
                            mods[1]->key);
     rc = fixed_state(r, &k);

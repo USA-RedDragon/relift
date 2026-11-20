@@ -56,6 +56,10 @@
 /** @brief Image (and compute texture) slots of a stage. */
 #define NVN_IMAGE_SLOTS 32u
 #define NVN_VERTEX_ATTRIBS 16u
+/** @brief Bindings of set 0 (user banks) each stage owns: stage s's bank c[3 + n] is binding 22 s + n. */
+#define USER_BINDINGS 22u
+/** @brief Bindings of set 1 (driver banks) each stage owns: stage s's bank c[n] is binding 4 s + n. */
+#define DRIVER_BINDINGS 4u
 
 /** @brief A texture's host image. */
 typedef struct vimg {
