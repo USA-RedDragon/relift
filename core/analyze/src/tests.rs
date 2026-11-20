@@ -900,3 +900,69 @@ fn an_indirect_call_is_a_resume_point_when_an_escapers_address_is_taken() {
     let e = escapes_of(&code(0x1100), &[BASE, BASE + 16]);
     assert_eq!(e, escape::Escapes::default());
 }
+
+fn stack_writes_of(code: &[[u8; 4]]) -> stack::StackWrites {
+    let m = module(code, &[], &[BASE]);
+    stack::stack_writes(&Toy, &discover(&Toy, &m))
+}
+
+#[test]
+fn adding_a_constant_to_the_stack_pointer_is_relative() {
+    let w = stack_writes_of(&[word(0x09, 2, 0xfff0), word(0x09, 2, 16), word(0x03, 0, 0)]);
+    assert_eq!(w.writes, 2);
+    assert!(w.proven());
+}
+
+#[test]
+fn a_stack_pointer_loaded_from_memory_is_not_proven() {
+    let w = stack_writes_of(&[word(0x0a, 2, 1), word(0x03, 0, 0)]);
+    assert_eq!(
+        w.unproven,
+        [stack::Unproven {
+            function: BASE,
+            at: BASE
+        }]
+    );
+}
+
+#[test]
+fn adding_a_register_to_the_stack_pointer_is_not_proven() {
+    let w = stack_writes_of(&[word(0x05, 2, 1), word(0x03, 0, 0)]);
+    assert_eq!(w.unproven.len(), 1);
+}
+
+#[test]
+fn a_constant_stack_pointer_is_not_proven() {
+    let w = stack_writes_of(&[word(0x04, 2, 0x100), word(0x03, 0, 0)]);
+    assert_eq!(w.unproven.len(), 1);
+}
+
+#[test]
+fn a_loop_of_constant_steps_stays_relative() {
+    let w = stack_writes_of(&[
+        word(0x09, 2, 0xff00),
+        word(0x0d, 1, 0),
+        branch(0x0e, 0, -2),
+        word(0x03, 0, 0),
+    ]);
+    assert!(w.proven());
+}
+
+#[test]
+fn a_call_keeps_the_stack_pointer_and_a_callee_is_checked_on_its_own() {
+    let w = stack_writes_of(&[
+        word(0x09, 2, 0xfff0),
+        branch(0x02, 0, 3),
+        word(0x09, 2, 16),
+        word(0x03, 0, 0),
+        word(0x0a, 2, 1),
+        word(0x03, 0, 0),
+    ]);
+    assert_eq!(
+        w.unproven,
+        [stack::Unproven {
+            function: BASE + 16,
+            at: BASE + 16
+        }]
+    );
+}

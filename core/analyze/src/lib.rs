@@ -21,6 +21,7 @@ pub mod escape;
 mod incremental;
 mod inline;
 mod slots;
+pub mod stack;
 mod tables;
 mod transfers;
 
