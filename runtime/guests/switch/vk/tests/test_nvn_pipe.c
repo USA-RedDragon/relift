@@ -253,3 +253,55 @@ TEST(nvn_pipe_without_libraries_warms_each_stage_as_a_pipeline_of_its_own)
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
+
+TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    char dir[] = "nvn_pipe_keys_XXXXXX";
+    CHECK(mkdtemp(dir) != NULL);
+    setenv("RELIFT_PIPELINE_MODE", "monolithic", 1);
+    setenv("RELIFT_PIPELINE_CACHE", dir, 1);
+    nvn_pipe_init();
+    CHECK(nvn_draw_layouts());
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_key k;
+    make_key(&k, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
+    k.mods[0] = k.mods[1] = NULL;
+    const char *keys[5] = { "vertex-program", "fragment-program", NULL, NULL, NULL };
+    nvn_pipe_record_graphics(keys, &k);
+    nvn_pipe_record_graphics(keys, &k);
+    VkSpecializationMapEntry map[1] = { { 3, 0, 4 } };
+    uint32_t vals[1] = { 7 };
+    nvn_pipe_record_compute("compute-program", 1, map, vals);
+    nvn_pipe_save();
+    nvn_pipe_init();
+    CHECK_EQ(nvn_pipe_recorded(), 2u);
+    const nvn_pipe_rec *a = nvn_pipe_recorded_at(0), *b = nvn_pipe_recorded_at(1);
+    CHECK(a && b);
+    if (a && b) {
+        CHECK_EQ(a->kind, NVN_REC_GRAPHICS);
+        CHECK(!strcmp(a->keys[0], "vertex-program") && !strcmp(a->keys[1], "fragment-program"));
+        CHECK_EQ(a->k.nattr, 1u);
+        CHECK(a->k.mods[0] == NULL && a->k.mods[1] == NULL);
+        CHECK_EQ(b->kind, NVN_REC_COMPUTE);
+        CHECK(!strcmp(b->keys[5], "compute-program"));
+        CHECK_EQ(b->k.spec[0][0], 7u);
+    }
+    char path[300];
+    snprintf(path, sizeof path, "%s/pipeline-keys.bin", dir);
+    flip_byte(path, 8 + 3);
+    nvn_pipe_init();
+    CHECK_EQ(nvn_pipe_recorded(), 0u);
+    unsetenv("RELIFT_PIPELINE_MODE");
+    unsetenv("RELIFT_PIPELINE_CACHE");
+    nvn_pipe_init();
+    remove(path);
+    snprintf(path, sizeof path, "%s/pipeline-cache.bin", dir);
+    remove(path);
+    rmdir(dir);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+}

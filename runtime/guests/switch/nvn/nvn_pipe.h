@@ -94,6 +94,34 @@ void nvn_pipe_warming(bool on);
 /** @brief Marks the calling thread as a warm-up worker, which compiles even while warming. */
 void nvn_pipe_worker(void);
 
+/**
+ * @brief One pipeline the game made, kept so that a later launch can make it
+ * ahead of the draw: the programs by key (the base program of each stage; a
+ * fragment program's demoted variant is worked out again) and the key with its
+ * module handles cleared. A compute pipeline has only keys[5] and its
+ * specialization constants.
+ */
+typedef struct nvn_pipe_rec {
+    uint32_t kind;
+    char keys[6][65];
+    nvn_pipe_key k;
+} nvn_pipe_rec;
+
+#define NVN_REC_GRAPHICS 1u
+#define NVN_REC_COMPUTE 2u
+
+/** @brief Remembers a graphics pipeline the game made (on a device that links libraries it adds nothing the libraries do not already hold, so it is kept only without them). */
+void nvn_pipe_record_graphics(const char *const keys[5], const nvn_pipe_key *k);
+
+/** @brief Remembers a compute pipeline the game made: its program, and n specialization constants sorted by id. */
+void nvn_pipe_record_compute(const char *key, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
+
+/** @brief The number of pipelines the previous launches recorded (read from the keys file at nvn_pipe_init). */
+uint32_t nvn_pipe_recorded(void);
+
+/** @brief Pipeline i of the previous launches' records. */
+const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i);
+
 /** @brief Tells the machinery that every pipeline the game will start with exists: a compile after this is late, and logged. */
 void nvn_pipe_warmed(void);
 

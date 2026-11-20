@@ -1029,6 +1029,10 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VkPipeline p = nvn_pipe_graphics(&k);
     if (!p)
         return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw");
+    const char *program_keys[5];
+    for (uint32_t s = 0; s < 5; s++)
+        program_keys[s] = mods[s] ? mods[s]->key : NULL;
+    nvn_pipe_record_graphics(program_keys, &k);
     draw_data dd = { .k = &k, .mods = mods, .indexed = indexed, .itype = itype, .first = first, .count = count,
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
@@ -1266,6 +1270,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
     if (!p)
         return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s", m->key);
+    nvn_pipe_record_compute(m->key, n, map, vals);
     dispatch_data dd = { .m = m, .c0 = c0 };
     if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
         return rc;

@@ -37,23 +37,57 @@ typedef struct compute_job {
 
 static struct {
     pthread_mutex_t lock;
-    compute_job *compute;
-    uint32_t ncompute, capcompute;
+    compute_job *compute, *late;
+    pthread_cond_t late_cv;
+    bool late_started;
+    uint32_t ncompute, capcompute, nlate, caplate;
     bool launched;
-    uint32_t total, next, done, nvertex, nfragment, ncompute_done, failed;
+    uint32_t total, next, done, nvertex, nfragment, ncompute_done, nreplayed, failed;
+    uint32_t nrecorded, ncompute0;
     uint64_t t0, last_log;
-} W = { .lock = PTHREAD_MUTEX_INITIALIZER };
+} W = { .lock = PTHREAD_MUTEX_INITIALIZER, .late_cv = PTHREAD_COND_INITIALIZER };
 
-static uint32_t cpu_count(void)
+/** @brief Physical memory one compile may take, as measured on a large translated program: about 1.2 GiB. */
+#define COMPILE_MEMORY (2ull << 30)
+
+/**
+ * @brief The workers to start: one per processor, and no more than the
+ * memory available (Linux) or installed (elsewhere) holds at COMPILE_MEMORY each (a driver's compile of a large
+ * program takes over a gigabyte, so a worker per processor of a big machine
+ * runs it out of memory).
+ */
+static uint32_t worker_count(void)
 {
+    uint64_t ram = 0;
 #if defined(_WIN32)
     SYSTEM_INFO si;
     GetSystemInfo(&si);
-    return si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1u;
+    uint32_t cpus = si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1u;
+    MEMORYSTATUSEX ms = { .dwLength = sizeof ms };
+    if (GlobalMemoryStatusEx(&ms))
+        ram = ms.ullTotalPhys;
 #else
     long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return n > 0 ? (uint32_t)n : 1u;
+    uint32_t cpus = n > 0 ? (uint32_t)n : 1u;
+    long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGESIZE);
+    if (pages > 0 && size > 0)
+        ram = (uint64_t)pages * (uint64_t)size;
+    FILE *f = fopen("/proc/meminfo", "r");
+    char line[128];
+    while (f && fgets(line, sizeof line, f)) {
+        unsigned long long kib;
+        if (sscanf(line, "MemAvailable: %llu kB", &kib) == 1) {
+            ram = kib << 10;
+            break;
+        }
+    }
+    if (f)
+        fclose(f);
 #endif
+    uint64_t by_memory = ram / COMPILE_MEMORY;
+    if (by_memory && by_memory < cpus)
+        cpus = (uint32_t)by_memory;
+    return cpus ? cpus : 1u;
 }
 
 /** @brief The key of a draw that uses module m alone in its stage with the specialization constants it starts with. */
@@ -105,6 +139,34 @@ static bool warm_key(const char *key, const uint32_t *wg, uint32_t *kind)
     return true;
 }
 
+/** @brief Makes the pipeline of a record the earlier launches kept. */
+static bool make_recorded(const nvn_pipe_rec *rec)
+{
+    char why[200];
+    if (rec->kind == NVN_REC_COMPUTE) {
+        nvn_module *m = nvn_module_get(rec->keys[5], (int)NVN_STAGE_COMPUTE, why, sizeof why);
+        if (!m)
+            return false;
+        VkSpecializationMapEntry map[NVN_MAX_SPECS];
+        uint32_t vals[NVN_MAX_SPECS], n = rec->k.nspec[0];
+        memcpy(map, rec->k.spec_map[0], n * sizeof map[0]);
+        memcpy(vals, rec->k.spec[0], n * sizeof vals[0]);
+        return nvn_pipe_compute(m->m, n, map, vals) != NULL;
+    }
+    nvn_pipe_key k = rec->k;
+    nvn_module *mods[5] = { NULL };
+    for (uint32_t s = 0; s < 5; s++) {
+        if (!rec->keys[s][0])
+            continue;
+        if (!(mods[s] = nvn_module_get(rec->keys[s], (int)s, why, sizeof why)))
+            return false;
+        k.mods[s] = mods[s]->m;
+    }
+    if (mods[1] && mods[0] && !(k.mods[1] = nvn_module_fragment_for(mods[0], mods[1])))
+        return false;
+    return nvn_pipe_graphics(&k) != NULL;
+}
+
 static void progress(bool force)
 {
     uint64_t now = rl_clock_ns();
@@ -121,26 +183,32 @@ static void *worker(void *arg)
     for (;;) {
         pthread_mutex_lock(&W.lock);
         uint32_t i = W.next++;
-        uint32_t n = W.total - W.ncompute;
+        uint32_t nshader = W.total - W.ncompute0 - W.nrecorded;
         compute_job cj;
-        bool is_compute = i >= n && i < W.total;
+        bool is_compute = i >= nshader && i < nshader + W.ncompute0;
+        bool is_replay = i >= nshader + W.ncompute0 && i < W.total;
         if (is_compute)
-            cj = W.compute[i - n];
+            cj = W.compute[i - nshader];
         pthread_mutex_unlock(&W.lock);
         if (i >= W.total)
             return NULL;
         char key[65];
         uint32_t kind = 0;
         bool ok = true;
-        if (is_compute)
+        if (is_replay) {
+            ok = make_recorded(nvn_pipe_recorded_at(i - nshader - W.ncompute0));
+            kind = 4;
+        } else if (is_compute) {
             ok = warm_key(cj.key, cj.wg, &kind);
-        else if (nvn_shader_key_at(i, key))
+        } else if (nvn_shader_key_at(i, key)) {
             ok = warm_key(key, NULL, &kind);
+        }
         pthread_mutex_lock(&W.lock);
         W.done++;
         W.nvertex += kind == 1;
         W.nfragment += kind == 2;
         W.ncompute_done += kind == 3;
+        W.nreplayed += kind == 4;
         W.failed += !ok;
         progress(false);
         pthread_mutex_unlock(&W.lock);
@@ -154,6 +222,23 @@ static void *background_main(void *arg)
     return NULL;
 }
 
+/** @brief Makes the compute pipelines of programs the game registered after the launch warm-up began, in the order it registered them. */
+static void *late_worker(void *arg)
+{
+    (void)arg;
+    nvn_pipe_worker();
+    for (;;) {
+        pthread_mutex_lock(&W.lock);
+        while (!W.nlate)
+            pthread_cond_wait(&W.late_cv, &W.lock);
+        compute_job j = W.late[0];
+        memmove(W.late, W.late + 1, --W.nlate * sizeof *W.late);
+        pthread_mutex_unlock(&W.lock);
+        uint32_t kind;
+        warm_key(j.key, j.wg, &kind);
+    }
+}
+
 static void launch(void)
 {
     W.launched = true;
@@ -164,11 +249,13 @@ static void launch(void)
         return;
     }
     pthread_mutex_lock(&W.lock);
-    W.total = nvn_shader_count() + W.ncompute;
+    W.nrecorded = nvn_pipe_recorded();
+    W.ncompute0 = W.ncompute;
+    W.total = nvn_shader_count() + W.ncompute + W.nrecorded;
     W.t0 = W.last_log = rl_clock_ns();
     uint32_t total = W.total;
     pthread_mutex_unlock(&W.lock);
-    uint32_t nthreads = cpu_count();
+    uint32_t nthreads = worker_count();
     const char *want = getenv("RELIFT_WARM_THREADS");
     if (want && atoi(want) > 0)
         nthreads = (uint32_t)atoi(want);
@@ -199,9 +286,9 @@ static void launch(void)
     nvn_pipe_stats(&made, &made_ns, &late, &late_ns);
     progress(true);
     rl_log(RL_LOG_INFO, "nvn",
-           "shader warm-up done in %.1f s: %u vertex and %u fragment libraries, %u compute pipelines, %u refused; the driver "
-           "compiled %llu in %.1f s of thread time",
-           (rl_clock_ns() - W.t0) / 1e9, W.nvertex, W.nfragment, W.ncompute_done, W.failed, (unsigned long long)made,
+           "shader warm-up done in %.1f s: %u vertex and %u fragment programs, %u compute pipelines, %u recorded pipelines, %u "
+           "refused; the driver compiled %llu in %.1f s of thread time",
+           (rl_clock_ns() - W.t0) / 1e9, W.nvertex, W.nfragment, W.ncompute_done, W.nreplayed, W.failed, (unsigned long long)made,
            made_ns / 1e9);
     nvn_pipe_warming(false);
     nvn_pipe_warmed();
@@ -241,9 +328,28 @@ void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control)
     }
     W.compute[W.ncompute++] = j;
     bool after = W.launched;
-    pthread_mutex_unlock(&W.lock);
     if (after) {
-        uint32_t kind;
-        warm_key(j.key, j.wg, &kind);
+        if (W.nlate == W.caplate) {
+            uint32_t cap = W.caplate ? W.caplate * 2 : 64;
+            compute_job *q = realloc(W.late, cap * sizeof *q);
+            if (!q) {
+                pthread_mutex_unlock(&W.lock);
+                return;
+            }
+            W.late = q;
+            W.caplate = cap;
+        }
+        W.late[W.nlate++] = j;
+        if (!W.late_started) {
+            W.late_started = true;
+            uint32_t n = worker_count();
+            for (uint32_t i = 0; i < n && i < 8; i++) {
+                pthread_t t;
+                if (pthread_create(&t, NULL, late_worker, NULL) == 0)
+                    pthread_detach(t);
+            }
+        }
+        pthread_cond_signal(&W.late_cv);
     }
+    pthread_mutex_unlock(&W.lock);
 }

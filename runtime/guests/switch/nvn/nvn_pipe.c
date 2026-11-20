@@ -47,6 +47,9 @@ static struct {
     pthread_cond_t cv;
     table vi, pr, fs, fo, full, comp;
     uint64_t made, made_ns, late, late_ns, saved_ns, loaded;
+    nvn_pipe_rec *old, *fresh;
+    uint32_t nold, nfresh, capfresh;
+    table seen;
     uint8_t identity[CACHE_IDENTITY];
 } P = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
 
@@ -138,12 +141,12 @@ static bool add_locked(table *t, entry *e)
  * one claims it (*mine) and must call finish; when another is making it,
  * waits until that one has finished. NULL when memory runs out.
  */
-static entry *claim(table *t, const void *key, size_t len, bool *mine)
+static entry *claim_ex(table *t, const void *key, size_t len, bool *mine, bool wait_warm)
 {
     uint32_t h = hash_bytes(key, len);
     pthread_mutex_lock(&P.lock);
     entry *e = find_locked(t, key, len, h);
-    while (!e && P.warming && !t_worker) {
+    while (!e && wait_warm && P.warming && !t_worker) {
         pthread_cond_wait(&P.cv, &P.lock);
         e = find_locked(t, key, len, h);
     }
@@ -171,6 +174,8 @@ static entry *claim(table *t, const void *key, size_t len, bool *mine)
     pthread_mutex_unlock(&P.lock);
     return e;
 }
+
+static entry *claim(table *t, const void *key, size_t len, bool *mine) { return claim_ex(t, key, len, mine, true); }
 
 static void finish(entry *e, VkPipeline p)
 {
@@ -716,6 +721,63 @@ VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecialization
     return p;
 }
 
+/** @brief Adds rec to the records of this launch unless one with the same bytes is there. */
+static void record(const nvn_pipe_rec *rec)
+{
+    bool mine;
+    entry *e = claim_ex(&P.seen, rec, sizeof *rec, &mine, false);
+    if (!e)
+        return;
+    if (!mine)
+        return;
+    finish(e, NULL);
+    pthread_mutex_lock(&P.lock);
+    if (P.nfresh == P.capfresh) {
+        uint32_t cap = P.capfresh ? P.capfresh * 2 : 256;
+        nvn_pipe_rec *r = realloc(P.fresh, cap * sizeof *r);
+        if (!r) {
+            pthread_mutex_unlock(&P.lock);
+            return;
+        }
+        P.fresh = r;
+        P.capfresh = cap;
+    }
+    P.fresh[P.nfresh++] = *rec;
+    P.dirty = true;
+    pthread_mutex_unlock(&P.lock);
+}
+
+void nvn_pipe_record_graphics(const char *const keys[5], const nvn_pipe_key *k)
+{
+    if (P.gpl)
+        return;
+    nvn_pipe_rec rec;
+    memset(&rec, 0, sizeof rec);
+    rec.kind = NVN_REC_GRAPHICS;
+    for (uint32_t i = 0; i < 5; i++)
+        if (keys[i])
+            memcpy(rec.keys[i], keys[i], 65);
+    rec.k = *k;
+    memset(rec.k.mods, 0, sizeof rec.k.mods);
+    record(&rec);
+}
+
+void nvn_pipe_record_compute(const char *key, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
+{
+    nvn_pipe_rec rec;
+    memset(&rec, 0, sizeof rec);
+    rec.kind = NVN_REC_COMPUTE;
+    memcpy(rec.keys[5], key, 65);
+    rec.k.nspec[0] = n;
+    memcpy(rec.k.spec_map[0], map, n * sizeof map[0]);
+    memcpy(rec.k.spec[0], vals, n * sizeof vals[0]);
+    record(&rec);
+}
+
+uint32_t nvn_pipe_recorded(void) { return P.nold; }
+
+const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i) { return i < P.nold ? &P.old[i] : NULL; }
+
 void nvn_pipe_warming(bool on)
 {
     pthread_mutex_lock(&P.lock);
@@ -790,6 +852,8 @@ static bool make_identity(void)
     return true;
 }
 
+static void keys_load(void);
+
 static void cache_load(void **data, size_t *len)
 {
     *data = NULL;
@@ -844,6 +908,7 @@ void nvn_pipe_init(void)
     }
     free(data);
     P.loaded = len;
+    keys_load();
     VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f13 };
     VK(vkGetPhysicalDeviceFeatures2)(g.phys, &f2);
@@ -852,6 +917,94 @@ void nvn_pipe_init(void)
     P.gpl = g.gpl && !(mode && !strcmp(mode, "monolithic"));
     rl_log(RL_LOG_INFO, "nvn", "pipelines: %s, cache %s (%.1f MiB read)", P.gpl ? "linked from libraries" : "monolithic",
            P.cache ? "on" : "off", len / 1048576.0);
+}
+
+#define KEYS_MAGIC "RLPLK001"
+#define KEYS_HEAD (8u + CACHE_IDENTITY + 8u)
+
+/** @brief The keys file's path, beside the cache file. */
+static bool keys_path(char *out, size_t n)
+{
+    char cache[1100];
+    if (!cache_path(cache, sizeof cache))
+        return false;
+    char *slash = strrchr(cache, '/');
+    if (!slash)
+        return false;
+    *slash = 0;
+    return snprintf(out, n, "%s/pipeline-keys.bin", cache) < (int)n;
+}
+
+/** @brief Reads the pipelines the earlier launches recorded into P.old, and into this launch's records, when the file was made for this device, driver, shader table and layout of a record. */
+static void keys_load(void)
+{
+    free(P.old);
+    P.old = NULL;
+    P.nold = 0;
+    char path[1100];
+    if (!keys_path(path, sizeof path))
+        return;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return;
+    uint8_t head[KEYS_HEAD];
+    uint32_t count = 0, size = 0;
+    bool ok = fread(head, 1, sizeof head, f) == sizeof head && !memcmp(head, KEYS_MAGIC, 8) &&
+              !memcmp(head + 8, P.identity, sizeof P.identity);
+    if (ok) {
+        size = (uint32_t)head[8 + CACHE_IDENTITY] | (uint32_t)head[9 + CACHE_IDENTITY] << 8 |
+               (uint32_t)head[10 + CACHE_IDENTITY] << 16 | (uint32_t)head[11 + CACHE_IDENTITY] << 24;
+        count = (uint32_t)head[12 + CACHE_IDENTITY] | (uint32_t)head[13 + CACHE_IDENTITY] << 8 |
+                (uint32_t)head[14 + CACHE_IDENTITY] << 16 | (uint32_t)head[15 + CACHE_IDENTITY] << 24;
+        ok = size == sizeof(nvn_pipe_rec) && count < (1u << 20);
+    }
+    nvn_pipe_rec *r = ok && count ? malloc((size_t)count * sizeof *r) : NULL;
+    if (r && fread(r, sizeof *r, count, f) == count) {
+        P.old = r;
+        P.nold = count;
+        r = NULL;
+    }
+    free(r);
+    fclose(f);
+    for (uint32_t i = 0; i < P.nold; i++)
+        record(&P.old[i]);
+    P.dirty = false;
+}
+
+/** @brief Writes this launch's records (those read and those new) to the keys file. */
+static void keys_save(void)
+{
+    pthread_mutex_lock(&P.lock);
+    uint32_t count = P.nfresh;
+    nvn_pipe_rec *copy = count ? malloc((size_t)count * sizeof *copy) : NULL;
+    if (copy)
+        memcpy(copy, P.fresh, (size_t)count * sizeof *copy);
+    pthread_mutex_unlock(&P.lock);
+    char path[1100], tmp[1120];
+    if (!copy || !keys_path(path, sizeof path)) {
+        free(copy);
+        return;
+    }
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    uint8_t head[KEYS_HEAD];
+    memset(head, 0, sizeof head);
+    memcpy(head, KEYS_MAGIC, 8);
+    memcpy(head + 8, P.identity, sizeof P.identity);
+    le32w(head + 8 + CACHE_IDENTITY, (uint32_t)sizeof(nvn_pipe_rec));
+    le32w(head + 12 + CACHE_IDENTITY, count);
+    FILE *f = fopen(tmp, "wb");
+    bool ok = f && fwrite(head, 1, sizeof head, f) == sizeof head && fwrite(copy, sizeof *copy, count, f) == count;
+    if (f && fclose(f) != 0)
+        ok = false;
+    free(copy);
+    if (ok) {
+#if defined(_WIN32)
+        remove(path);
+#endif
+        ok = rename(tmp, path) == 0;
+    }
+    if (!ok)
+        remove(tmp);
 }
 
 void nvn_pipe_save(void)
@@ -865,6 +1018,7 @@ void nvn_pipe_save(void)
     pthread_mutex_unlock(&P.lock);
     if (!dirty && P.loaded)
         return;
+    keys_save();
     size_t n = 0;
     if (VK(vkGetPipelineCacheData)(g.dev, P.cache, &n, NULL) != VK_SUCCESS || !n)
         return;
