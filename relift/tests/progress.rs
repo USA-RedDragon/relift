@@ -117,6 +117,8 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         ("RELIFT_SDL3_DIR", no_sdl3.as_str()),
         ("RELIFT_MOLTENVK_DIR", no_moltenvk.as_str()),
         ("RELIFT_OPUS_DIR", no_opus.as_str()),
+        ("RELIFT_LIBVPX_DIR", "off"),
+        ("RELIFT_DAV1D_DIR", "off"),
     ];
     let out = run(&project, &env, &["--cache-dir", &cache, "-j", "4", "build"]);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -131,8 +133,8 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         main: 1024 words: 2 hot entries, 8 cold entries, 1014 traps (1014 zero, 0 padding, 0 undecodable)\n\
         window: SDL3 not found, building headless and silent (set RELIFT_SDL3_DIR); \
         opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR); \
-        vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); \
-        av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)\n\
+        vp9: libvpx off (RELIFT_LIBVPX_DIR=off), VP9 video stays undecoded; \
+        av1: dav1d off (RELIFT_DAV1D_DIR=off), AV1 video stays undecoded\n\
         \x20      compile  <n> files, clang -O2, -j4  <time>\n\
         built 2 functions, 0 instructions not lifted, <time> in all\n\
         \x20 output: <root>/cache/projects/tiny/build/host/game\n",

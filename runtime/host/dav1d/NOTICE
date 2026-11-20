@@ -1,5 +1,5 @@
 The dav1d AV1 decoder (https://code.videolan.org/videolan/dav1d), version 1.5.3, is compiled into
-programs that need it by `relift build` from the pinned source tarball (runtime/tools/dav1d_src.py).
+programs that need it by `relift build` from the pinned source tarball, which it fetches into its cache.
 Its license, reproduced as the license requires:
 
 Copyright © 2018-2025, VideoLAN and dav1d authors

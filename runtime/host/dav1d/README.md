@@ -15,5 +15,5 @@ the running CPU at run time and one binary is right on every x86-64 CPU. A
 host without NASM, and every other host, builds the plain C; the pictures
 are identical, the decode is several times slower. dav1d is BSD-2-Clause licensed; its
 license is in `NOTICE`. `relift build` passes this directory and the dav1d
-source tree (`runtime/tools/dav1d_src.py`) as include paths, and compiles
+source tree (fetched into the cache by the first Switch build) as include paths, and compiles
 the files that depend on the bit depth once for 8 and once for 16 bits.

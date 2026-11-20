@@ -136,7 +136,7 @@ $ relift build
 relift build: acid (DMG-ACID2, 32 KiB, linux-x86_64)
   rom analyze  21 functions, 1 unresolved  0.0 s
   rom lift     85 functions in 6 units, 0 not lifted, 17 left to dispatch, 41 nop sleds  0.0 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  60 files  1.4 s
 built 85 functions, 0 instructions not lifted, 8.9 s in all
   output: ~/.cache/relift/projects/acid/build/host/game
@@ -152,7 +152,7 @@ $ relift build
 relift build: acid (DMG-ACID2, 32 KiB, linux-x86_64)
   rom analyze  21 functions, 1 unresolved  0.0 s
   rom lift     85 functions in 6 units, 0 not lifted, 17 left to dispatch, 41 nop sleds  0.0 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  0 files  0.0 s
 built 85 functions, 0 instructions not lifted, 0.1 s in all
   output: ~/.cache/relift/projects/acid/build/host/game
@@ -196,7 +196,7 @@ $ relift build
 relift build: stop (CPU_INSTRS, 64 KiB, linux-x86_64)
   rom analyze  45 functions, 1 unresolved  1.0 s
   rom lift     5,143 functions in 2,046 units, 0 not lifted, 0 left to dispatch, 1 nop sled  0.2 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  2,605 files  3.2 s
 built 5,143 functions, 0 instructions not lifted, 4.5 s in all
   output: ~/.cache/relift/projects/stop/build/host/game
@@ -306,7 +306,7 @@ $ relift build
 relift build: stop (CPU_INSTRS, 64 KiB, linux-x86_64)
   rom analyze  45 functions, 1 unresolved  1.0 s
   rom lift     5,143 functions in 2,046 units, 0 not lifted, 0 left to dispatch, 1 nop sled  0.1 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  0 files  0.0 s
 built 5,143 functions, 0 instructions not lifted, 1.3 s in all
   output: ~/.cache/relift/projects/stop/build/host/game
@@ -337,7 +337,7 @@ $ relift build --dev
 relift build: stop (CPU_INSTRS, 64 KiB, linux-x86_64)
   rom analyze  47 functions, 1 unresolved, 1 seen at run time  1.0 s
   rom lift     5,145 functions in 2,046 units, 0 not lifted, 0 left to dispatch, 1 nop sled  0.1 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  50 files  1.1 s
 built 5,145 functions, 0 instructions not lifted, 10.5 s in all
   output: ~/.cache/relift/projects/stop/build/host/game
@@ -390,7 +390,7 @@ relift build: tiny (1 module, linux-x86_64)
   main discover 0 functions  0.0 s
   main lift     1 function, 0 unlifted  0.0 s
   main emit     1 shard, 0 overrides, 1 of 1 reused  0.0 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
        compile  2 files, clang -O2, -j4  0.1 s
 built 1 function, 0 instructions not lifted, 0.2 s in all
   output: ~/.cache/relift/projects/tiny/build/host/game
@@ -500,7 +500,7 @@ relift build: tiny (1 module, linux-x86_64)
   main discover 1 function  0.0 s
   main lift     1 function, 0 unlifted  0.0 s
   main emit     1 shard, 0 overrides, 1 of 1 reused  0.0 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
        compile  7 files, clang -O2, -j4  0.2 s
 built 1 function, 0 instructions not lifted, 0.2 s in all
   output: ~/.cache/relift/projects/tiny/build/host/dev/game
@@ -523,7 +523,7 @@ relift build: tiny (1 module, linux-x86_64)
   main lift     1/2 functions (50%)  0 unlifted  0.0 s
   main lift     2 functions, 0 unlifted  0.0 s
   main emit     1 shard, 0 overrides, 1 of 2 reused  0.0 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
        compile  3 files, clang -O2, -j4  0.1 s
 built 2 functions, 0 instructions not lifted, 0.2 s in all
   output: ~/.cache/relift/projects/tiny/build/host/game
@@ -729,7 +729,7 @@ $ PATH=<clang, ninja, pkg-config, cargo only> relift build
 relift build: acid (DMG-ACID2, 32 KiB, linux-x86_64)
   rom analyze  21 functions, 1 unresolved  0.0 s
   rom lift     85 functions in 6 units, 0 not lifted, 17 left to dispatch, 41 nop sleds  0.0 s
-window and audio: SDL3 (pkg-config); opus: libopus (pkg-config); vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py); av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)
+window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  60 files  1.5 s
 built 85 functions, 0 instructions not lifted, 1.6 s in all
   output: ~/.cache/relift/projects/acid/build/host/game

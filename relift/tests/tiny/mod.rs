@@ -220,6 +220,8 @@ pub fn relift_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> std::proce
             .args(args)
             .env_remove("RELIFT_JOBS")
             .env("RELIFT_PACKAGE_APPIMAGE", "never")
+            .env("RELIFT_LIBVPX_DIR", "off")
+            .env("RELIFT_DAV1D_DIR", "off")
             .envs(env.iter().copied())
             .current_dir(dir)
             .output()

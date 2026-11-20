@@ -26,20 +26,20 @@
 //!
 //! libvpx's VP9 decoder, which decodes the pictures a Switch game's NVDEC
 //! work submits, is compiled from source: `RELIFT_LIBVPX_DIR` or
-//! `<cache>/sdk/libvpx/<version>/` (unpacked by
-//! `runtime/tools/libvpx_src.py`), plain C only, with the generic
-//! configuration in `runtime/host/vpx`. Without it the pictures stay
-//! undecoded.
+//! `<cache>/sdk/libvpx/<version>/`, which a Switch build fills from the
+//! pinned release the first time (`ensure_video_sources`), plain C only,
+//! with the generic configuration in `runtime/host/vpx`. With
+//! `RELIFT_LIBVPX_DIR=off` the pictures stay undecoded.
 //!
 //! dav1d's AV1 decoder, which decodes the movies of Switch 2 games, is
 //! compiled the same way: `RELIFT_DAV1D_DIR` or
-//! `<cache>/sdk/dav1d/<version>/` (unpacked by
-//! `runtime/tools/dav1d_src.py`), plain C only, with the generic
-//! configuration in `runtime/host/dav1d`. Without it AV1 movies stay
-//! undecoded.
+//! `<cache>/sdk/dav1d/<version>/`, filled the same way, plain C only,
+//! with the generic configuration in `runtime/host/dav1d`. With
+//! `RELIFT_DAV1D_DIR=off` AV1 movies stay undecoded.
 
 use std::path::{Path, PathBuf};
 
+use crate::import::BoxError;
 use relift_build::Compile;
 
 /// Where SDL3 was found and how to compile and link against it.
@@ -271,11 +271,11 @@ fn dav1d_in(dir: &Path, origin: String) -> Option<Dav1d> {
 
 /// The dav1d source tree, or `None`.
 pub fn find_dav1d(cache_root: &Path) -> Option<Dav1d> {
-    if let Some(d) = std::env::var_os("RELIFT_DAV1D_DIR").filter(|v| !v.is_empty()) {
-        return dav1d_in(Path::new(&d), "RELIFT_DAV1D_DIR".into());
+    if let Some(d) = std::env::var_os(DAV1D_PIN.env).filter(|v| !v.is_empty()) {
+        return dav1d_in(Path::new(&d), DAV1D_PIN.env.into());
     }
     dav1d_in(
-        &cache_root.join("sdk").join("dav1d").join(DAV1D_VERSION),
+        &pinned_dir(cache_root, &DAV1D_PIN),
         format!("{DAV1D_VERSION}, pinned source"),
     )
 }
@@ -300,13 +300,159 @@ fn vpx_in(dir: &Path, origin: String) -> Option<Vpx> {
 
 /// The libvpx source tree, or `None`.
 pub fn find_vpx(cache_root: &Path) -> Option<Vpx> {
-    if let Some(d) = std::env::var_os("RELIFT_LIBVPX_DIR").filter(|v| !v.is_empty()) {
-        return vpx_in(Path::new(&d), "RELIFT_LIBVPX_DIR".into());
+    if let Some(d) = std::env::var_os(LIBVPX_PIN.env).filter(|v| !v.is_empty()) {
+        return vpx_in(Path::new(&d), LIBVPX_PIN.env.into());
     }
     vpx_in(
-        &cache_root.join("sdk").join("libvpx").join(LIBVPX_VERSION),
+        &pinned_dir(cache_root, &LIBVPX_PIN),
         format!("{LIBVPX_VERSION}, pinned source"),
     )
+}
+
+/// A source release that `relift build` fetches into the cache by itself.
+pub struct Pinned {
+    /// The library's name, for messages.
+    pub name: &'static str,
+    /// The variable that names another source tree, or `off`.
+    pub env: &'static str,
+    pub version: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    /// The folder the release tarball holds everything in.
+    pub top: &'static str,
+}
+
+/// The pinned libvpx release.
+pub const LIBVPX_PIN: Pinned = Pinned {
+    name: "libvpx",
+    env: "RELIFT_LIBVPX_DIR",
+    version: LIBVPX_VERSION,
+    url: "https://github.com/webmproject/libvpx/archive/refs/tags/v1.17.0.tar.gz",
+    sha256: "1020f184046187baa2985dbde38e0691f49c44088bca7a1842b0236c6081dc0a",
+    top: "libvpx-1.17.0",
+};
+
+/// The pinned dav1d release.
+pub const DAV1D_PIN: Pinned = Pinned {
+    name: "dav1d",
+    env: "RELIFT_DAV1D_DIR",
+    version: DAV1D_VERSION,
+    url: "https://download.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.xz",
+    sha256: "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011",
+    top: "dav1d-1.5.3",
+};
+
+/// Where `p`'s source tree is kept in the cache.
+#[must_use]
+pub fn pinned_dir(cache_root: &Path, p: &Pinned) -> PathBuf {
+    cache_root.join("sdk").join(p.name).join(p.version)
+}
+
+/// Makes sure a Switch build has the video decoders' sources: the pinned
+/// libvpx (VP9) and dav1d (AV1) releases, fetched into the cache the first
+/// time, checked against their SHA-256 and unpacked into place in one
+/// rename, so builds running at once never see a part. A decoder whose
+/// variable names a tree of its own, or `off`, is left to that.
+///
+/// # Errors
+///
+/// A source is not in the cache and cannot be fetched, does not match its
+/// hash, or does not unpack.
+pub fn ensure_video_sources(cache_root: &Path) -> Result<(), BoxError> {
+    ensure_pinned(cache_root, &LIBVPX_PIN, |r| find_vpx(r).is_some())?;
+    ensure_dav1d_source(cache_root)
+}
+
+/// The dav1d part of [`ensure_video_sources`].
+///
+/// # Errors
+///
+/// As [`ensure_video_sources`].
+pub fn ensure_dav1d_source(cache_root: &Path) -> Result<(), BoxError> {
+    ensure_pinned(cache_root, &DAV1D_PIN, |r| find_dav1d(r).is_some())
+}
+
+fn ensure_pinned(
+    cache_root: &Path,
+    p: &Pinned,
+    found: impl Fn(&Path) -> bool,
+) -> Result<(), BoxError> {
+    if std::env::var_os(p.env).is_some_and(|v| !v.is_empty()) || found(cache_root) {
+        return Ok(());
+    }
+    let dest = pinned_dir(cache_root, p);
+    let got = fetch_pinned(p, &dest);
+    if got.is_err() && found(cache_root) {
+        return Ok(());
+    }
+    got.map_err(|e| {
+        format!(
+            "the {} {} source is not in the cache and could not be fetched from {}: {e}\n\
+             Download it on a machine with network access, unpack it so that {} holds the \
+             release's {} folder's contents (SHA-256 of the tarball {}), or set {}=off to \
+             build without it",
+            p.name,
+            p.version,
+            p.url,
+            dest.display(),
+            p.top,
+            p.sha256,
+            p.env
+        )
+        .into()
+    })
+}
+
+fn fetch_pinned(p: &Pinned, dest: &Path) -> Result<(), String> {
+    let dir = dest.parent().ok_or("the source has no folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let part = dir.join(format!(".part-{}", crate::appimage_runtime::unique()));
+    let tarball = part.with_extension("tar");
+    let got = (|| {
+        crate::appimage_runtime::download(p.url, &tarball)?;
+        if !crate::appimage_runtime::matches(&tarball, p.sha256) {
+            return Err(format!(
+                "the download does not have the pinned SHA-256 {}; it was not used",
+                p.sha256
+            ));
+        }
+        unpack(&tarball, &part)?;
+        std::fs::rename(part.join(p.top), dest).map_err(|e| format!("{}: {e}", dest.display()))
+    })();
+    let _ = std::fs::remove_file(&tarball);
+    let _ = std::fs::remove_dir_all(&part);
+    got
+}
+
+/// Why `p`'s source is not in a build: turned off, or not where its
+/// variable or the cache says.
+fn missing(p: &Pinned) -> String {
+    match std::env::var(p.env) {
+        Ok(v) if v == "off" => format!("off ({}=off)", p.env),
+        Ok(v) if !v.is_empty() => format!("not found in {v} ({})", p.env),
+        _ => "not in the cache".into(),
+    }
+}
+
+/// Unpacks the tarball `file` into a new folder `into`, with the system's
+/// `tar`, which reads gzip and xz on every host relift builds on.
+fn unpack(file: &Path, into: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(into).map_err(|e| format!("{}: {e}", into.display()))?;
+    let out = relift_proc::command("tar")
+        .arg("-xf")
+        .arg(file)
+        .arg("-C")
+        .arg(into)
+        .output()
+        .map_err(|e| format!("tar: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "tar: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
 }
 
 /// The extra runtime sources, flags and libraries of one build.
@@ -330,6 +476,9 @@ pub struct Extras {
     pub dav1d: Option<Dav1d>,
     /// The assembly dav1d is built with on this host, or `None` for its plain C.
     pub dav1d_asm: Option<Dav1dAsm>,
+    /// Whether the runtime has video decoders at all (a Switch runtime), so
+    /// the note says what became of them.
+    pub video: bool,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -518,12 +667,17 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         adrenotools: None,
         vpx,
         dav1d_asm: dav1d.as_ref().and_then(|_| native_dav1d_asm()),
+        video: has_video(rt),
         dav1d,
     })
 }
 
 fn has_dav1d_glue(rt: &Path) -> bool {
     rt.join("host").join("av1_dav1d.c").is_file()
+}
+
+fn has_video(rt: &Path) -> bool {
+    rt.join("guests").join("switch").is_dir()
 }
 
 fn has_vpx_glue(rt: &Path) -> bool {
@@ -575,6 +729,7 @@ pub fn android_extras(
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
         dav1d_asm: None,
+        video: has_video(rt),
     })
 }
 
@@ -630,6 +785,7 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
         dav1d_asm: None,
+        video: has_video(rt),
     })
 }
 
@@ -658,16 +814,21 @@ impl Extras {
                 "{window}; opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR)"
             ),
         };
+        if !self.video {
+            return audio;
+        }
         let video = match &self.vpx {
             Some(v) => format!("{audio}; vp9: libvpx ({})", v.origin),
             None => format!(
-                "{audio}; vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py)"
+                "{audio}; vp9: libvpx {}, VP9 video stays undecoded",
+                missing(&LIBVPX_PIN)
             ),
         };
         match &self.dav1d {
             Some(v) => format!("{video}; av1: dav1d ({})", v.origin),
             None => format!(
-                "{video}; av1: dav1d not found, AV1 video stays undecoded (run runtime/tools/dav1d_src.py)"
+                "{video}; av1: dav1d {}, AV1 video stays undecoded",
+                missing(&DAV1D_PIN)
             ),
         }
     }
@@ -964,6 +1125,79 @@ fn vpx_compiles(
 mod tests {
     use super::*;
 
+    fn scratch(name: &str) -> PathBuf {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/tmp")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn pinned_tarball(root: &Path) -> (Pinned, PathBuf) {
+        use sha2::{Digest, Sha256};
+        let src = root.join("src").join("lib-1.0");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        relift_cache::write_if_changed(&src.join("sub").join("a.c"), b"int a;\n").unwrap();
+        let tarball = root.join("lib-1.0.tar.gz");
+        let ok = relift_proc::command("tar")
+            .arg("-czf")
+            .arg(&tarball)
+            .arg("-C")
+            .arg(root.join("src"))
+            .arg("lib-1.0")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "tar makes the test tarball");
+        let sha: String = Sha256::digest(std::fs::read(&tarball).unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let url = format!("file://{}", tarball.display());
+        let p = Pinned {
+            name: "lib",
+            env: "RELIFT_TEST_LIB_DIR",
+            version: "1.0",
+            url: Box::leak(url.into_boxed_str()),
+            sha256: Box::leak(sha.into_boxed_str()),
+            top: "lib-1.0",
+        };
+        (p, tarball)
+    }
+
+    #[test]
+    fn a_pinned_source_is_fetched_checked_and_unpacked_into_the_cache() {
+        let root = scratch("pinned-fetch");
+        let (p, _) = pinned_tarball(&root);
+        let cache = root.join("cache");
+        let a = pinned_dir(&cache, &p).join("sub").join("a.c");
+        ensure_pinned(&cache, &p, |r| pinned_dir(r, &p).join("sub/a.c").is_file()).unwrap();
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "int a;\n");
+        let left: Vec<_> = std::fs::read_dir(pinned_dir(&cache, &p).parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            left,
+            vec![std::ffi::OsString::from("1.0")],
+            "no part is left"
+        );
+    }
+
+    #[test]
+    fn a_pinned_source_with_another_hash_is_refused_and_not_kept() {
+        let root = scratch("pinned-hash");
+        let (mut p, _) = pinned_tarball(&root);
+        p.sha256 = "00";
+        let cache = root.join("cache");
+        let err = ensure_pinned(&cache, &p, |r| pinned_dir(r, &p).is_dir())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not have the pinned SHA-256 00"), "{err}");
+        assert!(err.contains("RELIFT_TEST_LIB_DIR=off"), "{err}");
+        assert!(!pinned_dir(&cache, &p).exists());
+    }
+
     #[test]
     fn missing_sdl3_dir_is_not_found() {
         assert_eq!(from_dir(Path::new("/nonexistent"), "x".into()), None);
@@ -1011,6 +1245,7 @@ mod tests {
             vpx: None,
             dav1d: None,
             dav1d_asm: None,
+            video: true,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
@@ -1036,6 +1271,7 @@ mod tests {
             vpx: None,
             dav1d: None,
             dav1d_asm: None,
+            video: true,
         };
         assert_eq!(e.defines(), ["-DRL_ADRENOTOOLS", "-I/a/include"]);
         assert_eq!(e.libs(), ["/a/lib/libadrenotools.so"]);
@@ -1058,6 +1294,7 @@ mod tests {
             }),
             dav1d: None,
             dav1d_asm: None,
+            video: true,
         };
         assert!(e.note().contains("vp9: libvpx (t)"));
         assert_eq!(e.defines(), ["-DRL_HOST_VP9"]);
@@ -1094,6 +1331,7 @@ mod tests {
                 origin: "t".into(),
             }),
             dav1d_asm: None,
+            video: true,
         };
         assert!(e.note().contains("av1: dav1d (t)"));
         assert_eq!(e.assembler(), None);
@@ -1141,6 +1379,7 @@ mod tests {
                 format: "elf64",
                 config: "x86_64",
             }),
+            video: true,
         };
         assert_eq!(e.assembler(), Some(vec!["/bin/nasm".to_string()]));
         let rt = Path::new("/rt");
@@ -1202,6 +1441,7 @@ mod tests {
             vpx: None,
             dav1d: None,
             dav1d_asm: None,
+            video: true,
         };
         std::fs::remove_dir_all(&m).unwrap();
         assert!(e.note().contains("MoltenVK linked (t)"));

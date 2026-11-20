@@ -3,11 +3,11 @@
 //! frames the dav1d command line tool, built with its assembly, writes for it. The stream's temporal units start
 //! at the offsets below; the hashes are FNV-1a 64 over each frame's planes.
 //!
-//! The dav1d source comes from `RELIFT_DAV1D_DIR`, the test's cache or, failing both, `runtime/tools/dav1d_src.py`
-//! (a download checked against its sha256). With no source and no network the test is skipped, or fails when
+//! The dav1d source comes from `RELIFT_DAV1D_DIR`, the test's cache or, failing both, the download `relift build`
+//! makes (checked against its sha256). With no source and no network the test is skipped, or fails when
 //! `RELIFT_DAV1D_REQUIRE` is set.
 
-use relift::runtime_link::{Dav1d, Extras, find_dav1d};
+use relift::runtime_link::{Dav1d, Extras, ensure_dav1d_source, find_dav1d};
 use relift_build::Compile;
 use std::path::{Path, PathBuf};
 
@@ -21,19 +21,9 @@ const FRAME_HASHES: [&str; 6] = [
     "99c23845a2d76b8f",
 ];
 
-fn dav1d_source(workspace: &Path, cache: &Path) -> Option<Dav1d> {
-    if let Some(d) = find_dav1d(cache) {
-        return Some(d);
-    }
-    let tool = workspace.join("runtime/tools/dav1d_src.py");
-    let ok = relift_proc::command("python3")
-        .arg("-I")
-        .arg(&tool)
-        .arg("--cache")
-        .arg(cache)
-        .status()
-        .is_ok_and(|s| s.success());
-    ok.then(|| find_dav1d(cache)).flatten()
+fn dav1d_source(cache: &Path) -> Option<Dav1d> {
+    ensure_dav1d_source(cache).ok()?;
+    find_dav1d(cache)
 }
 
 fn compile_all(units: Vec<Compile>) {
@@ -73,7 +63,7 @@ fn the_av1_backend_decodes_a_generated_stream_to_the_reference_frames() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest.parent().unwrap().to_path_buf();
     let work = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("av1-known-answer");
-    let Some(dav1d) = dav1d_source(&workspace, &work.join("cache")) else {
+    let Some(dav1d) = dav1d_source(&work.join("cache")) else {
         assert!(
             std::env::var_os("RELIFT_DAV1D_REQUIRE").is_none(),
             "no dav1d source and RELIFT_DAV1D_REQUIRE is set"
@@ -94,6 +84,7 @@ fn the_av1_backend_decodes_a_generated_stream_to_the_reference_frames() {
         vpx: None,
         dav1d: Some(dav1d),
         dav1d_asm: None,
+        video: true,
     };
     let own = vec![
         "-std=c11".to_string(),

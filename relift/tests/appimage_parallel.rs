@@ -23,6 +23,8 @@ fn build(project: &Path, cache: &str) -> std::process::Output {
         .args(["--cache-dir", cache, "-j", "2", "build"])
         .env_remove("RELIFT_JOBS")
         .env("RELIFT_PACKAGE_APPIMAGE", "always")
+        .env("RELIFT_LIBVPX_DIR", "off")
+        .env("RELIFT_DAV1D_DIR", "off")
         .current_dir(project)
         .output()
         .expect("the relift binary runs")

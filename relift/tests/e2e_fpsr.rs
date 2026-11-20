@@ -71,6 +71,8 @@ fn relift(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Outp
             .args(args)
             .env_remove("RELIFT_JOBS")
             .env_remove("RELIFT_FP_EXACT")
+            .env("RELIFT_LIBVPX_DIR", "off")
+            .env("RELIFT_DAV1D_DIR", "off")
             .envs(env.iter().copied())
             .current_dir(dir)
             .output()

@@ -11,4 +11,4 @@ no threads. The output does not depend on the host (VP9 decoding is exact
 integer arithmetic), and the same files serve every host relift targets,
 iOS included. libvpx is BSD-3-Clause licensed; these files carry its
 notice. `relift build` passes this directory and the libvpx source tree
-(`runtime/tools/libvpx_src.py`) as include paths.
+(fetched into the cache by the first Switch build) as include paths.

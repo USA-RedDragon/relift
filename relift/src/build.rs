@@ -1819,6 +1819,7 @@ pub(crate) fn build_project(
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
     let (name, out) = project_out(settings)?;
+    crate::runtime_link::ensure_video_sources(&cache_root(settings)?)?;
     let cross = match targets {
         [] => None,
         [t] => match crate::cross::target(t)? {
