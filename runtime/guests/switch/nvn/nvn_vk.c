@@ -933,6 +933,7 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
                (unsigned long long)guest, (unsigned long long)size, g.ok, g.host_import, (unsigned long long)g.import_align);
         return false;
     }
+    nvn_watch_release(guest, size);
     void *host = rl_mem_base() + guest;
     VkMemoryHostPointerPropertiesEXT props = { .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT };
     if (VK(vkGetMemoryHostPointerPropertiesEXT)(g.dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host,
@@ -968,11 +969,24 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
                                  .pNext = &fl,
                                  .allocationSize = size,
                                  .memoryTypeIndex = (uint32_t)t };
-    bool ok = t >= 0 && VK(vkAllocateMemory)(g.dev, &mai, NULL, &dm) == VK_SUCCESS;
+    VkResult ar = t >= 0 ? VK(vkAllocateMemory)(g.dev, &mai, NULL, &dm) : VK_ERROR_FEATURE_NOT_PRESENT;
+    for (uint32_t alt = 0; ar != VK_SUCCESS && alt < g.memprops.memoryTypeCount; alt++) {
+        if (!((req.memoryTypeBits & props.memoryTypeBits) >> alt & 1u) || (int32_t)alt == t)
+            continue;
+        mai.memoryTypeIndex = alt;
+        ar = VK(vkAllocateMemory)(g.dev, &mai, NULL, &dm);
+        if (ar == VK_SUCCESS)
+            rl_log(RL_LOG_INFO, "nvn", "import of 0x%llx taken by memory type %u after type %d failed",
+                   (unsigned long long)guest, alt, t);
+    }
+    bool ok = ar == VK_SUCCESS;
     out->memory = dm;
-    if (!ok || VK(vkBindBufferMemory)(g.dev, buf, dm, 0) != VK_SUCCESS) {
-        rl_log(RL_LOG_WARN, "nvn", "import of 0x%llx (0x%llx bytes) failed: memory type %d (req bits 0x%x, host bits 0x%x)",
-               (unsigned long long)guest, (unsigned long long)size, t, req.memoryTypeBits, props.memoryTypeBits);
+    VkResult br = ok ? VK(vkBindBufferMemory)(g.dev, buf, dm, 0) : VK_SUCCESS;
+    if (!ok || br != VK_SUCCESS) {
+        rl_log(RL_LOG_WARN, "nvn",
+               "import of 0x%llx (0x%llx bytes) failed: allocate %d, bind %d, memory type %d (req bits 0x%x, host bits 0x%x)",
+               (unsigned long long)guest, (unsigned long long)size, (int)ar, (int)br, t, req.memoryTypeBits,
+               props.memoryTypeBits);
         nvn_vk_unimport(out);
         return false;
     }

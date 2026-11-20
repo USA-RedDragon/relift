@@ -140,6 +140,24 @@ bool nvn_watch_start(nvn_watch *w, uint64_t addr, uint64_t size)
     return true;
 }
 
+void nvn_watch_release(uint64_t addr, uint64_t size)
+{
+    if (!g_ready || !size)
+        return;
+    rl_vm *vm = &hos.vm;
+    uint64_t hp = vm->host_page, first = addr / hp, end = (addr + size + hp - 1) / hp;
+    uint64_t stamp = __atomic_add_fetch(&g_stamp, 1, __ATOMIC_ACQ_REL);
+    for (uint64_t p = first; p < end && p / CHUNK_PAGES < g_nchunks; p++) {
+        chunk *ck = __atomic_load_n(&g_chunks[p / CHUNK_PAGES], __ATOMIC_ACQUIRE);
+        uint32_t i = (uint32_t)(p % CHUNK_PAGES);
+        if (!ck || !(__atomic_load_n(&ck->flags[i], __ATOMIC_ACQUIRE) & F_ON))
+            continue;
+        __atomic_store_n(&ck->stamp[i], stamp, __ATOMIC_RELEASE);
+        __atomic_and_fetch(&ck->flags[i], (uint8_t)~F_ON, __ATOMIC_RELEASE);
+        rl_vm_host_access(vm, p * hp, hp, true);
+    }
+}
+
 bool nvn_watch_changed(const nvn_watch *w)
 {
     if (!w->on)

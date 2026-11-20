@@ -29,6 +29,12 @@ typedef struct nvn_watch {
  * last whole page are not watched (the caller compares those by their bytes: w->addr and w->size say what is).
  */
 bool nvn_watch_start(nvn_watch *w, uint64_t addr, uint64_t size);
+/**
+ * @brief Opens every watched page of [addr, addr + size) for writing and stamps it as written, so the watches on it
+ * read their ranges again. Importing the range into the host device as a buffer needs it: the host driver pins the
+ * pages for writing and refuses a range with a read-only page.
+ */
+void nvn_watch_release(uint64_t addr, uint64_t size);
 /** @brief True when a watched page was written since the watch began, or the guest map changed. */
 bool nvn_watch_changed(const nvn_watch *w);
 /** @brief Number of faults the hook turned into stamps, and watches started, for the layer's stats. */
