@@ -87,6 +87,67 @@ static struct {
     uint64_t (*sampler_bytes)[16];
 } t;
 
+/**
+ * @brief Gives every sampler id the sampler of a pool entry that was never written: nearest, repeating, base level
+ * only (inferred: the all-zero descriptor), and every element of every sampled image and storage image array a null
+ * descriptor (VK_EXT_robustness2: reads give zeros, stores are dropped). A host driver dereferences a descriptor
+ * nothing was written to, and a program may pick any id out of a handle, so no element is left empty; a handle
+ * whose texture was never bound reads zeros, as a never written pool entry does (inferred).
+ */
+static bool fill_samplers(void)
+{
+    VkSamplerCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                               .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                               .maxLod = 0.25f };
+    if (!t.fallback && VK(vkCreateSampler)(g.dev, &ci, NULL, &t.fallback) != VK_SUCCESS)
+        return false;
+    VkDescriptorImageInfo *ii = malloc(SAMPLERS * sizeof *ii);
+    if (!ii)
+        return false;
+    for (uint32_t i = 0; i < SAMPLERS; i++)
+        ii[i] = (VkDescriptorImageInfo){ t.fallback, NULL, VK_IMAGE_LAYOUT_UNDEFINED };
+    VkWriteDescriptorSet w = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                               .dstSet = t.set,
+                               .dstBinding = 0,
+                               .descriptorCount = SAMPLERS,
+                               .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+                               .pImageInfo = ii };
+    VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
+    free(ii);
+    if (!g.null_descriptor)
+        return true;
+    uint32_t most = t.ntex > IMAGES ? t.ntex : IMAGES;
+    VkDescriptorImageInfo *nul = calloc(most, sizeof *nul);
+    if (!nul)
+        return false;
+    for (uint32_t i = 0; i < most; i++)
+        nul[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    for (uint32_t k = 0; k < KINDS; k++)
+        for (uint32_t dd = 0; dd < DIMS; dd++) {
+            w = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                        .dstSet = t.set,
+                                        .dstBinding = 1 + 10 * k + dd,
+                                        .descriptorCount = t.ntex,
+                                        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                        .pImageInfo = nul };
+            VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
+        }
+    for (uint32_t k = 0; k < IMAGE_KINDS; k++)
+        for (uint32_t dd = 0; dd < IMAGE_DIMS; dd++) {
+            w = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                        .dstSet = t.set,
+                                        .dstBinding = IMAGE_BINDING(k, dd),
+                                        .descriptorCount = IMAGES,
+                                        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                        .pImageInfo = nul };
+            VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
+        }
+    free(nul);
+    return true;
+}
+
 static bool make(void)
 {
     if (t.tried)
@@ -178,7 +239,8 @@ static bool make(void)
     t.img_done = calloc(t.ntex, sizeof *t.img_done);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
-    t.ok = t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && slots_ok && t.samplers && t.sampler_bytes;
+    bool filled = fill_samplers();
+    t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -377,11 +439,13 @@ static VkFormat image_format(uint32_t ik, VkFormat f, uint32_t bpb)
 }
 
 /**
- * @brief Gives every element of slot that the arrays of the sampled kind (when kind is below KINDS, the dimensions in
- * fit) or the storage image arrays (when image, the entries in fit, bit kind * IMAGE_DIMS + dim) leave unwritten a null
- * descriptor, so that a program reading the slot through a dimension or kind its texture has no view of reads
- * the all-zero result of VK_EXT_robustness2 nullDescriptor and never a stale or missing element (inferred: the
- * hardware reads such a handle through the texture header's own type and faults on nothing).
+ * @brief The second half of one rule: an element of a sampled or storage image array holds its texture's view or
+ * a null descriptor (fill_samplers writes the null to every element at creation). When slot is rebound, the
+ * elements of the arrays its new texture has no view for (the sampled kind kind with the dimensions in fit, or the
+ * storage image entries in fit, bit kind * IMAGE_DIMS + dim) go back to a null descriptor, so a program that reads
+ * the slot through a dimension or kind the texture has no view of reads zeros (VK_EXT_robustness2 nullDescriptor)
+ * and never a stale element of the texture the slot held before (inferred: the hardware reads such a handle
+ * through the texture header's own type and faults on nothing).
  */
 static void null_rest(uint32_t slot, bool image, uint32_t kind, uint64_t fit)
 {
