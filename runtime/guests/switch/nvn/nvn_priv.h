@@ -61,7 +61,14 @@
     X(nvnWindowGetNumActiveTextures)                                                                                   \
     X(nvnWindowSetNumActiveTextures)                                                                                   \
     X(nvnDeviceRegisterFastClearColor)                                                                                 \
-    X(nvnDeviceRegisterFastClearDepth)
+    X(nvnDeviceRegisterFastClearDepth)                                                                                 \
+    X(nvnCommandBufferSetColorReductionEnable)                                                                         \
+    X(nvnCommandBufferSetColorReductionThresholds)                                                                     \
+    X(nvnCommandBufferSetStencilCullCriteria)                                                                          \
+    X(nvnCommandBufferOverrideSubtileSize)                                                                             \
+    X(nvnCommandBufferSetSubpixelPrecisionBias)                                                                        \
+    X(nvnCommandBufferDiscardColor)                                                                                    \
+    X(nvnCommandBufferDiscardDepthStencil)
 
 /** @brief Procs that do nothing relift needs and return 0 (nvn_zero). */
 #define NVN_ZERO_PROCS(X)                                                                                              \

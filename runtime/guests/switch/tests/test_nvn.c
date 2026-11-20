@@ -176,6 +176,27 @@ TEST(nvn_fast_clear_depth_is_accepted_like_the_drivers_while_its_table_has_room)
     CHECK_EQ(c->x[0], 1);
 }
 
+TEST(nvn_command_buffer_settings_relift_has_no_use_for_return_and_record_nothing)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    uint64_t (*const procs[])(rl_ctx *, uint8_t *) = {
+        nvnh_nvnCommandBufferSetColorReductionEnable,  nvnh_nvnCommandBufferSetColorReductionThresholds,
+        nvnh_nvnCommandBufferSetStencilCullCriteria,   nvnh_nvnCommandBufferOverrideSubtileSize,
+        nvnh_nvnCommandBufferSetSubpixelPrecisionBias, nvnh_nvnCommandBufferDiscardColor,
+        nvnh_nvnCommandBufferDiscardDepthStencil,
+    };
+    for (size_t i = 0; i < sizeof procs / sizeof procs[0]; i++)
+        CHECK_EQ(call(c, procs[i], cb, 1, 2, 3), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
+    const nvn_cmdset *set = nvn_cmdset_of(c->x[0]);
+    CHECK(set != NULL);
+    CHECK_EQ(set->n, 0);
+}
+
 TEST(nvn_dlss_optimal_settings_are_the_librarys)
 {
     static const uint32_t rows[][9] = {

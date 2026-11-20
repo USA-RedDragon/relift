@@ -191,6 +191,79 @@ uint64_t nvnh_nvnDeviceRegisterFastClearDepth(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/** @brief Returns from a proc that has no effect in relift's layer (void: x0 is not read). */
+static uint64_t noop(const rl_ctx *c) { return nvn_ret(c); }
+
+/**
+ * @brief nvnCommandBufferSetColorReductionEnable(NVNcommandBuffer *, NVNboolean). Does nothing:
+ * the driver only appends one GPU method word to the command memory, which relift never writes, and color reduction is a GPU bandwidth optimization of render target writes that a host render target does not have; a full-precision target is within what the optimization may produce (inferred, see .work/s2-console-questions.md).
+ */
+uint64_t nvnh_nvnCommandBufferSetColorReductionEnable(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
+/**
+ * @brief nvnCommandBufferSetColorReductionThresholds(NVNcommandBuffer *, ...). Does nothing:
+ * the driver only appends two GPU method words to the command memory, which relift never writes: the thresholds of the color reduction that nvnCommandBufferSetColorReductionEnable switches, which a host render target does not have.
+ */
+uint64_t nvnh_nvnCommandBufferSetColorReductionThresholds(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
+/**
+ * @brief nvnCommandBufferSetStencilCullCriteria(NVNcommandBuffer *, ...). Does nothing:
+ * the driver only appends one GPU method pair to the command memory, which relift never writes: it sets when the GPU may cull a tile early on the stencil value, which is an optimization of the order work is done in that the host's own early tests also take.
+ */
+uint64_t nvnh_nvnCommandBufferSetStencilCullCriteria(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
+/**
+ * @brief nvnCommandBufferOverrideSubtileSize(NVNcommandBuffer *, ...). Does nothing:
+ * the driver only appends one GPU method word to the command memory, which relift never writes: it sets the size of the GPU's binning subtiles, a layout the host GPU chooses for itself.
+ */
+uint64_t nvnh_nvnCommandBufferOverrideSubtileSize(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
+/**
+ * @brief nvnCommandBufferSetSubpixelPrecisionBias(NVNcommandBuffer *, int, int). Does nothing:
+ * the driver only appends sixteen GPU method words to the command memory, which relift never writes: they bias the sub-pixel grid the GPU snaps vertices to, which a host rasterizer fixes for itself (a vertex may land one sub-pixel step away from the console's).
+ */
+uint64_t nvnh_nvnCommandBufferSetSubpixelPrecisionBias(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
+/**
+ * @brief nvnCommandBufferDiscardColor(NVNcommandBuffer *, int). Does nothing:
+ * the driver appends one GPU method word to the command memory, which relift never writes, unless its device flags it off (a byte of the device record); the call says the render target's contents are not needed afterward, so leaving them as they are is one of the values left undefined.
+ */
+uint64_t nvnh_nvnCommandBufferDiscardColor(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
+/**
+ * @brief nvnCommandBufferDiscardDepthStencil(NVNcommandBuffer *). Does nothing:
+ * the driver appends one GPU method word to the command memory, which relift never writes, unless its device flags it off (a byte of the device record); the call says the depth and stencil contents are not needed afterward, so leaving them as they are is one of the values left undefined.
+ */
+uint64_t nvnh_nvnCommandBufferDiscardDepthStencil(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return noop(c);
+}
+
 /** @brief Procs that answer 0: no queue error, no command memory relift tracks, no attached debugger. */
 uint64_t nvn_zero(rl_ctx *c, uint8_t *mem)
 {
