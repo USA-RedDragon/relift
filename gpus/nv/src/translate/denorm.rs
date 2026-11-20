@@ -652,6 +652,9 @@ impl Ctx {
     /// value rounded to nearest at 24 bits and `e` a value with the sign of
     /// the exact residual `E`.
     fn exact_body(&mut self, k: Arith, ps: &[u32], mode: Round, ftz: bool, scale: i32) -> u32 {
+        if k == Arith::Fma && mode == Round::Nearest && !ftz && scale == 0 {
+            return self.exact_fma_nearest(ps);
+        }
         let (r1, e, r) = match k {
             Arith::Add => {
                 let (sa, ea) = self.dn_decompose(ps[0]);
@@ -706,6 +709,161 @@ impl Ctx {
             }
         };
         self.round_scaled(r1, e, r, mode, ftz)
+    }
+
+    /// `x = f * 2^e` for the bits `x` of a finite float: `f` in `[1, 2)` with
+    /// the sign of `x` (a denormal is normalized through the exact
+    /// conversion of its mantissa), or zero with `e` far below any other.
+    fn dn_norm(&mut self, x: u32) -> (u32, u32) {
+        let u = self.u32t();
+        let i = self.i32t();
+        let fl = self.f32t();
+        let (k23, ff, mm, sm, one) = (
+            self.dn_ku(23),
+            self.dn_ku(0xff),
+            self.dn_ku(0x7f_ffff),
+            self.dn_ku(0x8000_0000),
+            self.dn_ku(0x3f80_0000),
+        );
+        let sign = self.dn_ub(op::BITWISE_AND, x, sm);
+        let mant = self.dn_ub(op::BITWISE_AND, x, mm);
+        let sh = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, x, k23);
+        let field = self.dn_ub(op::BITWISE_AND, sh, ff);
+        let z = self.dn_ku(0);
+        let den = self.dn_bc(op::I_EQUAL, field, z);
+        let sone = self.dn_ub(op::BITWISE_OR, sign, one);
+        let nf = self.dn_ub(op::BITWISE_OR, sone, mant);
+        let fi = self.m.emit(op::BITCAST, i, &[field]);
+        let c127 = self.dn_ki(127);
+        let ne = self.dn_ib(op::I_SUB, fi, c127);
+        let md = self.m.emit(op::CONVERT_U_TO_F, fl, &[mant]);
+        let fb = self.m.emit(op::BITCAST, u, &[md]);
+        let dm = self.dn_ub(op::BITWISE_AND, fb, mm);
+        let df = self.dn_ub(op::BITWISE_OR, sone, dm);
+        let fsh = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, fb, k23);
+        let dfield = self.dn_ub(op::BITWISE_AND, fsh, ff);
+        let dfi = self.m.emit(op::BITCAST, i, &[dfield]);
+        let c276 = self.dn_ki(276);
+        let de = self.dn_ib(op::I_SUB, dfi, c276);
+        let fbits = self.select(u, den, df, nf);
+        let e = self.select(i, den, de, ne);
+        let zero = self.is_zero_bits(x);
+        let zf = self.dn_ku(0);
+        let fbits = self.select(u, zero, zf, fbits);
+        let ze = self.dn_ki(ZERO_EXP);
+        let e = self.select(i, zero, ze, e);
+        (self.as_float(fbits), e)
+    }
+
+    /// `2^d` for an `i32` `d` from `-126` to `127`.
+    fn dn_pow2(&mut self, d: u32) -> u32 {
+        let u = self.u32t();
+        let bias = self.dn_ki(127);
+        let e = self.dn_ib(op::I_ADD, d, bias);
+        let eu = self.m.emit(op::BITCAST, u, &[e]);
+        let k23 = self.dn_ku(23);
+        let b = self.dn_ub(op::SHIFT_LEFT_LOGICAL, eu, k23);
+        self.as_float(b)
+    }
+
+    /// A round-to-nearest fused multiply-add of finite operands, one of
+    /// which is denormal or whose result is tiny, with denormals kept, from
+    /// a host that flushes them. The operands are normalized and scaled so
+    /// that every float step is in the normal range: `r1`, the fused result
+    /// of the scaled operands, is the correct 24-bit rounding of the scaled
+    /// exact value; a result that stays normal is `r1` with its exponent
+    /// moved back, and one that falls below the normal range is rounded to
+    /// the denormal grid from `r1`'s bits, where only a `r1` exactly
+    /// halfway between two grid values can have been rounded the wrong
+    /// way, and the sign of the exact error of the fused result (Boldo and
+    /// Muller's error of the FMA) says which way.
+    fn exact_fma_nearest(&mut self, ps: &[u32]) -> u32 {
+        let u = self.u32t();
+        let i = self.i32t();
+        let (fa, ea) = self.dn_norm(ps[0]);
+        let (fb, eb) = self.dn_norm(ps[1]);
+        let (fc, ec) = self.dn_norm(ps[2]);
+        let ep = self.dn_ib(op::I_ADD, ea, eb);
+        let r = self.dn_imax(ep, ec);
+        let dp = self.dn_ib(op::I_SUB, ep, r);
+        let st = self.dn_ki(STICKY);
+        let dp = self.dn_imax(dp, st);
+        let dc = self.dn_ib(op::I_SUB, ec, r);
+        let dc = self.dn_imax(dc, st);
+        let sp = self.dn_pow2(dp);
+        let sc = self.dn_pow2(dc);
+        let b1 = self.exact(op::F_MUL, fb, sp);
+        let c1 = self.exact(op::F_MUL, fc, sc);
+        let r1 = self.fma(fa, b1, c1);
+        let u1 = self.exact(op::F_MUL, fa, b1);
+        let nu1 = self.fneg(u1);
+        let u2 = self.fma(fa, b1, nu1);
+        let (al1, al2) = self.two_sum(c1, u2);
+        let (be1, be2) = self.two_sum(u1, al1);
+        let d = self.exact(op::F_SUB, be1, r1);
+        let g = self.exact(op::F_ADD, d, be2);
+        let (r2, _) = self.two_sum(g, al2);
+        let (sm, mm, mag_mask) = (
+            self.dn_ku(0x8000_0000),
+            self.dn_ku(0x7f_ffff),
+            self.dn_ku(0x7fff_ffff),
+        );
+        let r1b = self.as_bits(r1);
+        let sign = self.dn_ub(op::BITWISE_AND, r1b, sm);
+        let mag = self.dn_ub(op::BITWISE_AND, r1b, mag_mask);
+        let k23 = self.dn_ku(23);
+        let efield = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, mag, k23);
+        let ef = self.m.emit(op::BITCAST, i, &[efield]);
+        let total = self.dn_ib(op::I_ADD, ef, r);
+        let c1m = self.dn_ki(1);
+        let sh = self.dn_ib(op::I_SUB, c1m, total);
+        let ru = self.m.emit(op::BITCAST, u, &[r]);
+        let radd = self.dn_ub(op::SHIFT_LEFT_LOGICAL, ru, k23);
+        let normal = self.dn_ub(op::I_ADD, r1b, radd);
+        let one_u = self.dn_ku(1);
+        let shc = self.dn_iclamp(sh, 1, 31);
+        let shu = self.m.emit(op::BITCAST, u, &[shc]);
+        let hid = self.dn_ku(0x80_0000);
+        let m24 = {
+            let lo = self.dn_ub(op::BITWISE_AND, mag, mm);
+            self.dn_ub(op::BITWISE_OR, lo, hid)
+        };
+        let q = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, m24, shu);
+        let bit = self.dn_ub(op::SHIFT_LEFT_LOGICAL, one_u, shu);
+        let mask = self.dn_ub(op::I_SUB, bit, one_u);
+        let dd = self.dn_ub(op::BITWISE_AND, m24, mask);
+        let shm1 = self.dn_ub(op::I_SUB, shu, one_u);
+        let half = self.dn_ub(op::SHIFT_LEFT_LOGICAL, one_u, shm1);
+        let gt = self.dn_bc(op::U_GREATER_THAN, dd, half);
+        let eq = self.dn_bc(op::I_EQUAL, dd, half);
+        let zf = self.m.c_f32(0);
+        let rpos = self.fcmp(op::F_ORD_GREATER_THAN, r2, zf);
+        let rneg = self.fcmp(op::F_ORD_LESS_THAN, r2, zf);
+        let z = self.dn_ku(0);
+        let r1neg = self.dn_bc(op::I_NOT_EQUAL, sign, z);
+        let bt = self.boolt();
+        let toward = self.select(bt, r1neg, rneg, rpos);
+        let away = self.select(bt, r1neg, rpos, rneg);
+        let qb = self.dn_ub(op::BITWISE_AND, q, one_u);
+        let odd = self.dn_bc(op::I_NOT_EQUAL, qb, z);
+        let na = self.not(away);
+        let evenup = self.and(na, odd);
+        let tie_up = self.or(toward, evenup);
+        let tie = self.and(eq, tie_up);
+        let up = self.or(gt, tie);
+        let inc = self.select(u, up, one_u, z);
+        let n = self.dn_ub(op::I_ADD, q, inc);
+        let dbits = self.dn_ub(op::BITWISE_OR, sign, n);
+        let one_i = self.dn_ki(1);
+        let grid = self.dn_bc(op::S_GREATER_THAN_EQUAL, sh, one_i);
+        let res = self.select(u, grid, dbits, normal);
+        let c255 = self.dn_ki(255);
+        let ovf = self.dn_bc(op::S_GREATER_THAN_EQUAL, total, c255);
+        let inf = self.dn_ku(0x7f80_0000);
+        let sinf = self.dn_ub(op::BITWISE_OR, sign, inf);
+        let res = self.select(u, ovf, sinf, res);
+        let r1z = self.dn_bc(op::I_EQUAL, mag, z);
+        self.select(u, r1z, z, res)
     }
 
     /// Rounds `(r1 + E) * 2^r` by `mode` to the guest's result bits.
