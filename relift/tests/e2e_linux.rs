@@ -96,8 +96,8 @@ fn built(
         !trampoline || stderr.contains("returns: trampoline mode"),
         "{stderr}"
     );
-    let exe = root
-        .join("cache/projects/game/build/host")
+    let exe = Path::new(cache)
+        .join("projects/game/build/host")
         .join(format!("game{}", std::env::consts::EXE_SUFFIX));
     (exe, stderr.into_owned())
 }
@@ -272,11 +272,12 @@ fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
         .status()
         .expect("build.sh runs");
     assert!(status.success());
-    let cache = root.join("cache").display().to_string();
+    let kept = Path::new(env!("CARGO_TARGET_TMPDIR")).join("e2e-linux-dynamic-cache");
+    let cache = kept.display().to_string();
     {
         let (name, modes) = ("shared_lib.dyn", (false, false));
         let _ = std::fs::remove_dir_all(root.join("game"));
-        let _ = std::fs::remove_dir_all(root.join("cache"));
+        let _ = std::fs::remove_dir_all(kept.join("projects"));
         let (exe, _) = built(&root, &programs.join(name), &cache, modes, Some(&sysroot));
         let dir = corpus.join(name.split('.').next().expect("a name"));
         let out = relift_proc::command(&exe)

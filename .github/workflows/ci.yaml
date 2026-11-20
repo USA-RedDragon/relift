@@ -164,6 +164,20 @@ jobs:
           echo "RELIFT_VK_REQUIRE=1" >> "$GITHUB_ENV"
           echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
 
+      - name: Install the arm64 Linux cross compiler for the dynamic program
+        if: matrix.part == 'rest'
+        run: |
+          scripts/ci/apt-install.sh gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "RELIFT_LINUX_REQUIRE=1" >> "$GITHUB_ENV"
+
+      - name: Restore the compiled libraries of the dynamic program
+        if: matrix.part == 'rest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/e2e-linux-dynamic-cache
+          key: linux-dynamic-${{ hashFiles('core/emit/**', 'core/analyze/**', 'cpus/arm64/**', 'guests/linux/guest/**', 'relift/src/gba.rs') }}
+          restore-keys: linux-dynamic-
+
       - name: end-to-end tests of relift
         run: scripts/ci/tests-relift-e2e.sh ${{ matrix.part }}
 
