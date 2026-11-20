@@ -969,9 +969,12 @@ void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYT
 /**
  * @brief Writes the constant banks the bound modules read into new
  * descriptor sets, sets[0] and sets[1], with the texture set in sets[2].
+ * A bank that does not fit the upload arena submits the batch, which resets the pool and frees the sets; the sets
+ * are then not written, and nvn_vk_stage runs the stage again with new ones.
  */
 static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[3])
 {
+    uint64_t flushes;
     VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                        .descriptorPool = d.pool,
                                        .descriptorSetCount = 2,
@@ -980,6 +983,7 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
         if (!nvn_vk_flush(r) || VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS)
             return nvn_vk_stop(r, "cannot allocate descriptor sets");
     }
+    flushes = g.flushes;
     sets[2] = nvn_texset();
     VkDescriptorBufferInfo bi[(USER_BINDINGS + DRIVER_BINDINGS) * 5];
     VkWriteDescriptorSet wr[(USER_BINDINGS + DRIVER_BINDINGS) * 5];
@@ -1051,6 +1055,8 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
             n++;
         }
     }
+    if (g.flushes != flushes)
+        return RL_OK;
     if (n)
         VK(vkUpdateDescriptorSets)(g.dev, n, wr, 0, NULL);
     return RL_OK;
@@ -1456,6 +1462,7 @@ static int stage_dispatch(replay *r, void *arg)
         if (!nvn_vk_flush(r) || VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS)
             return nvn_vk_stop(r, "cannot allocate descriptor sets");
     }
+    uint64_t flushes = g.flushes;
     sets[2] = nvn_texset();
     VkDescriptorBufferInfo bi[USER_BINDINGS + DRIVER_BINDINGS];
     VkWriteDescriptorSet wr[USER_BINDINGS + DRIVER_BINDINGS];
@@ -1496,6 +1503,8 @@ static int stage_dispatch(replay *r, void *arg)
                                          .pBufferInfo = &bi[nw] };
         nw++;
     }
+    if (g.flushes != flushes)
+        return RL_OK;
     if (nw)
         VK(vkUpdateDescriptorSets)(g.dev, nw, wr, 0, NULL);
     return RL_OK;
