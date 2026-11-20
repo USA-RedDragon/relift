@@ -583,6 +583,15 @@ typedef struct rlvk_buffer_image_copy {
     rlvk_extent3d imageExtent;
 } rlvk_buffer_image_copy;
 
+/** @brief VkImageCopy. */
+typedef struct rlvk_image_copy {
+    rlvk_image_subresource_layers srcSubresource;
+    rlvk_offset3d srcOffset;
+    rlvk_image_subresource_layers dstSubresource;
+    rlvk_offset3d dstOffset;
+    rlvk_extent3d extent;
+} rlvk_image_copy;
+
 /** @brief VkImageBlit. */
 typedef struct rlvk_image_blit {
     rlvk_image_subresource_layers srcSubresource;
@@ -678,6 +687,8 @@ typedef struct rlvk_semaphore_create_info {
       (rlvk_handle, rlvk_handle, rlvk_handle, int32_t, uint32_t, const rlvk_buffer_image_copy *))                   \
     X(vkCmdCopyImageToBuffer, void,                                                                                 \
       (rlvk_handle, rlvk_handle, int32_t, rlvk_handle, uint32_t, const rlvk_buffer_image_copy *))                   \
+    X(vkCmdCopyImage, void,                                                                                         \
+      (rlvk_handle, rlvk_handle, int32_t, rlvk_handle, int32_t, uint32_t, const rlvk_image_copy *))                 \
     X(vkCmdBlitImage, void,                                                                                         \
       (rlvk_handle, rlvk_handle, int32_t, rlvk_handle, int32_t, uint32_t, const rlvk_image_blit *, int32_t))        \
     X(vkCmdClearColorImage, void,                                                                                   \
