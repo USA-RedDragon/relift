@@ -144,6 +144,32 @@ fn walk(dir: &Path, rel: &str, out: &mut Vec<SourceFile>) -> Result<()> {
     Ok(())
 }
 
+fn disk_identity(p: &Path, size: u64) -> Result<String> {
+    if size <= HASH_LIMIT {
+        return Ok(sha256_hex(&std::fs::read(p)?));
+    }
+    let mtime = std::fs::metadata(p)?
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    Ok(format!("stat:{size}:{mtime}"))
+}
+
+fn disk_ranges(p: &Path, ranges: &[(u64, u64)]) -> Result<Vec<Vec<u8>>> {
+    let mut file = File::open(p)?;
+    let mut out = Vec::new();
+    for &(o, n) in ranges {
+        let Ok(n) = usize::try_from(n) else {
+            return malformed("a range does not fit in memory");
+        };
+        file.seek(SeekFrom::Start(o))?;
+        let mut b = vec![0u8; n];
+        file.read_exact(&mut b)?;
+        out.push(b);
+    }
+    Ok(out)
+}
+
 impl Source for DirSource {
     fn files(&self) -> Result<Vec<SourceFile>> {
         let mut out = Vec::new();
@@ -156,15 +182,7 @@ impl Source for DirSource {
     }
 
     fn identity(&self, f: &SourceFile) -> Result<String> {
-        let p = self.path(f);
-        if f.size <= HASH_LIMIT {
-            return Ok(sha256_hex(&std::fs::read(p)?));
-        }
-        let mtime = std::fs::metadata(&p)?
-            .modified()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        Ok(format!("stat:{}:{mtime}", f.size))
+        disk_identity(&self.path(f), f.size)
     }
 
     fn read(&self, f: &SourceFile) -> Result<Vec<u8>> {
@@ -180,18 +198,7 @@ impl Source for DirSource {
     }
 
     fn read_ranges(&self, f: &SourceFile, ranges: &[(u64, u64)]) -> Result<Vec<Vec<u8>>> {
-        let mut file = File::open(self.path(f))?;
-        let mut out = Vec::new();
-        for &(o, n) in ranges {
-            let Ok(n) = usize::try_from(n) else {
-                return malformed("a range does not fit in memory");
-            };
-            file.seek(SeekFrom::Start(o))?;
-            let mut b = vec![0u8; n];
-            file.read_exact(&mut b)?;
-            out.push(b);
-        }
-        Ok(out)
+        disk_ranges(&self.path(f), ranges)
     }
 
     fn ranges_are_cheap(&self, _: &SourceFile) -> bool {
@@ -300,5 +307,212 @@ impl Source for NupSource {
 
     fn ranges_are_cheap(&self, f: &SourceFile) -> bool {
         self.entry(f).is_ok_and(|e| e.codec == Codec::Raw)
+    }
+}
+
+/// Where one file of an [`ImportSource`] is read from.
+enum Place {
+    /// A file of the import folder.
+    Disk(PathBuf),
+    /// `offset..offset + size` of a romfs image (`unit` of the source).
+    Image(usize, u64),
+}
+
+/// An import folder as a build sees it: the files of the folder itself
+/// (`exefs/`, `modules/`), the game's romfs as `romfs/<path>`, each DLC's
+/// as `dlc/<title id>/<index>/romfs/<path>` and each other program's
+/// below `programs/<title id>/`, whether a romfs is kept as a map, a plain
+/// image or an extracted tree.
+pub struct ImportSource {
+    files: Vec<(SourceFile, Place)>,
+    units: Vec<(Shared, String)>,
+}
+
+fn skip_name(name: &str) -> bool {
+    matches!(
+        name,
+        "romfs" | "dlc" | "programs" | "romfs.map" | "romfs.img" | "romfs.blob"
+    )
+}
+
+fn walk_top(dir: &Path, rel: &str, top: bool, out: &mut Vec<(SourceFile, Place)>) -> Result<()> {
+    let mut names: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
+    names.sort_by_key(std::fs::DirEntry::file_name);
+    for e in names {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if top && skip_name(&name) {
+            continue;
+        }
+        let path = format!("{rel}{name}");
+        let ty = e.file_type()?;
+        if ty.is_dir() {
+            walk_top(&e.path(), &format!("{path}/"), false, out)?;
+        } else if ty.is_file() {
+            out.push((
+                SourceFile {
+                    pkg: 0,
+                    path,
+                    size: e.metadata()?.len(),
+                },
+                Place::Disk(e.path()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+impl ImportSource {
+    /// A source over the import folder `root`.
+    ///
+    /// # Errors
+    ///
+    /// The folder or a romfs in it cannot be read.
+    pub fn new(root: &Path) -> Result<ImportSource> {
+        let mut s = ImportSource {
+            files: Vec::new(),
+            units: Vec::new(),
+        };
+        s.add(root, "")?;
+        s.files.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+        Ok(s)
+    }
+
+    fn add(&mut self, dir: &Path, rel: &str) -> Result<()> {
+        walk_top(dir, rel, true, &mut self.files)?;
+        self.add_romfs(dir, rel)?;
+        let dlc = dir.join("dlc");
+        if dlc.is_dir() {
+            let mut ids = sorted_dirs(&dlc)?;
+            ids.sort();
+            for id in ids {
+                for idx in sorted_dirs(&id)? {
+                    let sub = format!("{rel}dlc/{}/{}/", file_name(&id), file_name(&idx));
+                    self.add_romfs(&idx, &sub)?;
+                }
+            }
+        }
+        let programs = dir.join("programs");
+        if programs.is_dir() {
+            for p in sorted_dirs(&programs)? {
+                self.add(&p, &format!("{rel}programs/{}/", file_name(&p)))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_romfs(&mut self, dir: &Path, rel: &str) -> Result<()> {
+        let Some(found) = relift_switch_formats::romfs_image::find(dir) else {
+            return Ok(());
+        };
+        let storage = relift_switch_formats::romfs_image::open(found.path())?;
+        let romfs = relift_switch_formats::romfs::Romfs::open(storage.clone())?;
+        let id = match &found {
+            relift_switch_formats::romfs_image::Found::Map(p) => sha256_hex(&std::fs::read(p)?),
+            f => {
+                let m = std::fs::metadata(f.path())?;
+                let t = m
+                    .modified()?
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos());
+                format!("stat:{}:{t}", m.len())
+            }
+        };
+        let unit = self.units.len();
+        self.units.push((storage, id));
+        for f in romfs.files() {
+            self.files.push((
+                SourceFile {
+                    pkg: 0,
+                    path: format!("{rel}romfs/{}", f.path),
+                    size: f.size,
+                },
+                Place::Image(unit, f.offset),
+            ));
+        }
+        Ok(())
+    }
+
+    fn place(&self, f: &SourceFile) -> Result<&Place> {
+        match self
+            .files
+            .binary_search_by(|(s, _)| s.path.as_str().cmp(&f.path))
+        {
+            Ok(i) => Ok(&self.files[i].1),
+            Err(_) => malformed(format!("no file {} in the import", f.path)),
+        }
+    }
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn sorted_dirs(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut v = Vec::new();
+    for e in std::fs::read_dir(dir)? {
+        let e = e?;
+        if e.file_type()?.is_dir() {
+            v.push(e.path());
+        }
+    }
+    v.sort();
+    Ok(v)
+}
+
+impl Source for ImportSource {
+    fn files(&self) -> Result<Vec<SourceFile>> {
+        Ok(self.files.iter().map(|(s, _)| s.clone()).collect())
+    }
+
+    fn has_packages(&self) -> bool {
+        false
+    }
+
+    fn identity(&self, f: &SourceFile) -> Result<String> {
+        match self.place(f)? {
+            Place::Disk(p) => disk_identity(p, f.size),
+            Place::Image(u, off) => Ok(format!("{}:{off}:{}", self.units[*u].1, f.size)),
+        }
+    }
+
+    fn read(&self, f: &SourceFile) -> Result<Vec<u8>> {
+        match self.place(f)? {
+            Place::Disk(p) => Ok(std::fs::read(p)?),
+            Place::Image(u, off) => Ok(relift_switch_formats::storage::read_vec(
+                &*self.units[*u].0,
+                *off,
+                f.size,
+            )?),
+        }
+    }
+
+    fn head(&self, f: &SourceFile) -> Result<Option<Vec<u8>>> {
+        let n = f.size.min(SNIFF_HEAD as u64);
+        Ok(Some(self.read_ranges(f, &[(0, n)])?.remove(0)))
+    }
+
+    fn read_ranges(&self, f: &SourceFile, ranges: &[(u64, u64)]) -> Result<Vec<Vec<u8>>> {
+        match self.place(f)? {
+            Place::Disk(p) => disk_ranges(p, ranges),
+            Place::Image(u, off) => ranges
+                .iter()
+                .map(|&(o, n)| {
+                    if o.checked_add(n).is_none_or(|e| e > f.size) {
+                        return malformed("a range runs past the end of the file");
+                    }
+                    Ok(relift_switch_formats::storage::read_vec(
+                        &*self.units[*u].0,
+                        off + o,
+                        n,
+                    )?)
+                })
+                .collect(),
+        }
+    }
+
+    fn ranges_are_cheap(&self, _: &SourceFile) -> bool {
+        true
     }
 }

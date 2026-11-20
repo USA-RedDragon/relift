@@ -10,8 +10,9 @@ use relift_switch_formats::nso::{self, NsoSpec};
 use relift_switch_formats::nup::{self, BuildPackage, PackageKind};
 use relift_switch_formats::storage::MemStorage;
 use relift_switch_shaders::carve::{BRA_SELF, Kind, MAX_LINES, carve};
-use relift_switch_shaders::ktgl::{self, Location};
-use relift_switch_shaders::{DirSource, NupSource, Options, Report, Source, sarc, scan};
+use relift_switch_shaders::{
+    DirSource, ImportSource, NupSource, Options, Report, Source, sarc, scan,
+};
 
 const DICT: &[u8] = &[
     0x37, 0xa4, 0x30, 0xec, 0xd8, 0xd8, 0x3f, 0x07, 0x17, 0x10, 0xe8, 0xa9, 0xd0, 0x01, 0x00, 0x00,
@@ -204,7 +205,7 @@ fn game() -> Game {
     let junk = blob(&[&graphics(1, 99)]);
     let files = vec![
         ("exefs/main".to_string(), nso_with(&blob(&[&g3]))),
-        ("exefs/main.npdm".to_string(), junk.clone()),
+        ("exefs/main.npdm".to_string(), blob(&[&graphics(1, 98)])),
         ("romfs/Shader/a.bfsha.zs".to_string(), zstd(&fsha)),
         ("romfs/Lib/agl.sarc".to_string(), agl),
         ("romfs/Effect/e.byml.zs".to_string(), zstd(&effect)),
@@ -218,7 +219,7 @@ fn game() -> Game {
     ];
     Game {
         files,
-        expected: shas(&[&g1, &g5, &g2, &g4, &g3, &g1b, &c1, &c2]),
+        expected: shas(&[&g1, &g5, &g2, &g4, &g3, &g1b, &c1, &c2, &graphics(1, 99)]),
     }
 }
 
@@ -380,7 +381,7 @@ fn sarc_round_trip() {
 }
 
 #[test]
-fn directory_scan_finds_every_container_and_nothing_else() {
+fn directory_scan_finds_the_programs_of_every_file_but_the_npdm() {
     let g = game();
     let root = scratch("dir");
     put(&root.join("tree"), &g.files);
@@ -410,7 +411,7 @@ fn directory_scan_finds_every_container_and_nothing_else() {
         assert!(out.join(format!("{s}.bin")).is_file());
     }
     for (c, n) in [
-        ("zstd", 4),
+        ("zstd", 5),
         ("sarc", 1),
         ("bfsha", 1),
         ("sead-bin", 1),
@@ -569,186 +570,163 @@ fn zstd_dictionaries_come_from_the_games_pack() {
     assert_eq!(found(&r), shas(&[&p]));
 }
 
-fn ktgl_files() -> (Vec<(String, Vec<u8>)>, BTreeSet<String>) {
+fn crc32(b: &[u8]) -> u32 {
+    let mut c = !0u32;
+    for &x in b {
+        c ^= u32::from(x);
+        for _ in 0..8 {
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
+        }
+    }
+    !c
+}
+
+fn gzip_stored(b: &[u8]) -> Vec<u8> {
+    let mut v = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 1];
+    let n = u16::try_from(b.len()).expect("a small member");
+    v.extend_from_slice(&n.to_le_bytes());
+    v.extend_from_slice(&(!n).to_le_bytes());
+    v.extend_from_slice(b);
+    v.extend_from_slice(&crc32(b).to_le_bytes());
+    v.extend_from_slice(&u32::from(n).to_le_bytes());
+    v
+}
+
+fn junk(n: usize) -> Vec<u8> {
+    (0..n).map(|i| (i * 131 + 7) as u8 | 0x80).collect()
+}
+
+fn scan_tree(name: &str, files: &[(String, Vec<u8>)]) -> Report {
+    let root = scratch(name);
+    put(&root.join("tree"), files);
+    scan(
+        &DirSource::new(&root.join("tree")),
+        &root.join("out"),
+        &opts(&root.join("cache")),
+    )
+    .expect("scans")
+}
+
+#[test]
+fn streams_are_found_in_any_file_by_content() {
     let (a, b, c, d) = (
         graphics(1, 31),
-        graphics(5, 32),
         compute(33),
+        graphics(5, 32),
         graphics(3, 34),
     );
-    let blob_a = blob(&[&a]);
-    let blob_b = blob(&[&b, &c]);
-    let whole_d = blob(&[&d]);
-    let (d1, d2) = whole_d.split_at(whole_d.len() / 2);
-    let mut u32_chunks = Vec::new();
-    for ch in [zlib_stored(d1), zlib_stored(d2)] {
-        u32_chunks.extend_from_slice(&(ch.len() as u32).to_le_bytes());
-        u32_chunks.extend(ch);
-    }
-    u32_chunks.extend_from_slice(&0u32.to_le_bytes());
-    let mut u16_chunks = Vec::new();
-    for ch in [zlib_stored(&blob_b[..0x180]), zlib_stored(&blob_b[0x180..])] {
-        u16_chunks.extend_from_slice(&1u16.to_le_bytes());
-        u16_chunks.extend_from_slice(&[0u8; 8]);
-        u16_chunks.extend(ch);
-    }
-    u16_chunks.extend_from_slice(&0u16.to_le_bytes());
-    let entries = [
-        ktgl::build_entry(ktgl::TYPE_S2G, 0, &blob_a),
-        ktgl::build_entry(ktgl::TYPE_DOK, 0x40_0000, &u16_chunks),
-        ktgl::build_entry(ktgl::TYPE_S2G, 0x10_0000, &u32_chunks),
-        ktgl::build_entry(ktgl::TYPE_S2G, 0x50_0000, &[1, 2, 3, 4]),
-    ];
-    let mut near = vec![0u8; 0x40];
-    let mut locs = Vec::new();
-    for e in &entries {
-        locs.push(Location {
-            index: 0,
-            offset: near.len() as u32,
-            size: e.len() as u32,
-        });
-        near.extend_from_slice(e);
-        near.extend(vec![0u8; 0x20]);
-    }
-    locs.push(Location {
-        index: 1,
-        offset: 0,
-        size: 8,
-    });
-    locs.push(Location {
-        index: 2,
-        offset: 0,
-        size: 8,
-    });
-    locs.push(Location {
-        index: 9,
-        offset: 0,
-        size: 8,
-    });
-    let mut rdb = ktgl::build_rdb(ktgl::TYPE_S2G, &locs);
-    rdb.extend(ktgl::build_entry(0x1234_5678, 0, &[0u8; 12]));
-    let rdx = ktgl::build_rdx(&[(0xFE, 0x1111), (1, 0xabcd), (1, 0xdead)]);
-    let files = vec![
-        ("romfs/kt/root.rdb".to_string(), rdb),
-        ("romfs/kt/root.rdx".to_string(), rdx),
-        ("romfs/kt/0x00001111.fdata".to_string(), near),
-        (
-            "romfs/kt/MountPoint_1/0x0000abcd.fdata".to_string(),
-            vec![0u8; 0x40],
-        ),
-    ];
-    (files, shas(&[&a, &b, &c, &d]))
+    let mut data = junk(300);
+    data.extend(zlib_stored(&blob(&[&a])));
+    data.extend(junk(900));
+    data.extend(gzip_stored(&blob(&[&b])));
+    data.extend(junk(17));
+    data.extend(zstd(&blob(&[&c])));
+    data.extend(junk(40));
+    let nested = zlib_stored(&zstd(&blob(&[&d])));
+    let files = vec![("romfs/any/name.xyz".to_string(), [data, nested].concat())];
+    let r = scan_tree("sweep-any", &files);
+    assert_eq!(found(&r), shas(&[&a, &b, &c, &d]));
+    assert_eq!(r.containers.get("zlib-stream"), Some(&2));
+    assert_eq!(r.containers.get("gzip-stream"), Some(&1));
 }
 
-fn check_ktgl(r: &Report, expected: &BTreeSet<String>) {
-    assert_eq!(&found(r), expected);
-    assert_eq!(r.errors["malformed: KTGL: LZ4 chunks"].count, 1);
-    assert_eq!(
-        r.errors["malformed: KTGL: no IDRK at the entry offset"].count,
-        1
+#[test]
+fn chunks_of_one_payload_are_decoded_together() {
+    let (p, q) = (graphics(2, 41), graphics(4, 42));
+    let whole = blob(&[&p, &q]);
+    let cut = whole.len() / 2;
+    let mut file = junk(64);
+    for (i, part) in [&whole[..cut], &whole[cut..]].into_iter().enumerate() {
+        file.extend_from_slice(&[0xAA ^ i as u8; 10]);
+        file.extend(zlib_stored(part));
+    }
+    file.extend(junk(64));
+    let r = scan_tree("sweep-chain", &[("romfs/chunks.dat".to_string(), file)]);
+    assert_eq!(found(&r), shas(&[&p, &q]));
+}
+
+#[test]
+fn streams_far_apart_are_not_one_payload() {
+    let p = graphics(2, 43);
+    let whole = blob(&[&p]);
+    let cut = whole.len() / 2;
+    let mut file = zlib_stored(&whole[..cut]);
+    file.extend(junk(200));
+    file.extend(zlib_stored(&whole[cut..]));
+    let r = scan_tree("sweep-gap", &[("romfs/gap.dat".to_string(), file)]);
+    assert!(!found(&r).contains(&sha(&p)));
+}
+
+#[test]
+fn a_chance_header_or_a_bad_checksum_is_no_stream() {
+    let p = graphics(3, 44);
+    let mut bad = zlib_stored(&blob(&[&p]));
+    let n = bad.len();
+    bad[n - 1] ^= 0xff;
+    let mut file = vec![0x78, 0x9c, 0x01, 0x02, 0x03];
+    file.extend(vec![0x78, 0x01, 0x01, 0xff, 0xff, 0x00, 0x00]);
+    file.extend(vec![0x1f, 0x8b, 8, 0]);
+    file.extend(bad);
+    let r = scan_tree("sweep-chance", &[("romfs/chance.dat".to_string(), file)]);
+    assert_eq!(found(&r), shas(&[&p]));
+    assert_eq!(r.containers.get("zlib-stream"), None);
+}
+
+#[test]
+fn an_import_folder_is_read_with_its_romfs_dlc_and_programs() {
+    let (a, b, c, d) = (
+        graphics(1, 51),
+        graphics(5, 52),
+        compute(53),
+        graphics(3, 54),
     );
-    assert_eq!(r.errors["KTGL: the .fdata is not in the input"].count, 1);
-    assert_eq!(
-        r.errors["KTGL: an entry names an index the .rdx lacks"].count,
-        1
+    let root = scratch("import");
+    let imp = root.join("import");
+    put(
+        &imp,
+        &[
+            ("modules.toml".to_string(), b"".to_vec()),
+            ("exefs/main".to_string(), nso_with(&blob(&[&d]))),
+            ("exefs/main.npdm".to_string(), blob(&[&graphics(1, 99)])),
+            (
+                "romfs.img".to_string(),
+                relift_switch_formats::romfs::build(&[("s/a.dat", &zstd(&blob(&[&a])))]),
+            ),
+            (
+                "dlc/0100000000000001/0/romfs.img".to_string(),
+                relift_switch_formats::romfs::build(&[("b.dat", &blob(&[&b]))]),
+            ),
+            (
+                "programs/0200000000000002/romfs.img".to_string(),
+                relift_switch_formats::romfs::build(&[("c.dat", &zstd(&blob(&[&c])))]),
+            ),
+        ],
     );
-    assert_eq!(r.errors.len(), 4, "{:?}", r.errors);
-    assert_eq!(r.containers.get("ktgl-entry"), Some(&5));
-}
-
-#[test]
-fn ktgl_entries_whole_and_in_zlib_chunks() {
-    let (files, expected) = ktgl_files();
-    let root = scratch("ktgl");
-    put(&root.join("tree"), &files);
-    let r = scan(
-        &DirSource::new(&root.join("tree")),
-        &root.join("out"),
-        &opts(&root.join("cache")),
-    )
-    .expect("scans");
-    check_ktgl(&r, &expected);
-    let again = scan(
-        &DirSource::new(&root.join("tree")),
-        &root.join("out"),
-        &opts(&root.join("cache")),
-    )
-    .expect("scans");
-    assert_eq!(again.stats.hits, again.stats.jobs);
-    assert_eq!(found(&again), expected);
-}
-
-#[test]
-fn ktgl_names_match_in_any_case() {
-    let (mut files, expected) = ktgl_files();
-    for (p, _) in &mut files {
-        *p = match p.as_str() {
-            "romfs/kt/root.rdb" => "romfs/kt/ROOT.RDB".into(),
-            "romfs/kt/root.rdx" => "romfs/kt/Root.Rdx".into(),
-            "romfs/kt/0x00001111.fdata" => "romfs/kt/0x00001111.FDATA".into(),
-            other => other.to_string(),
-        };
-    }
-    files.push((
-        "romfs/kt/alone.rdb".into(),
-        ktgl::build_rdb(ktgl::TYPE_S2G, &[]),
-    ));
-    let root = scratch("ktgl-case");
-    put(&root.join("tree"), &files);
-    let r = scan(
-        &DirSource::new(&root.join("tree")),
-        &root.join("out"),
-        &opts(&root.join("cache")),
-    )
-    .expect("scans");
-    assert_eq!(found(&r), expected);
-    assert_eq!(r.errors["KTGL: an .rdb has no .rdx beside it"].count, 1);
-}
-
-#[test]
-fn a_ktgl_entry_length_that_wraps_is_reported() {
-    let (mut files, expected) = ktgl_files();
-    let mut bad = ktgl::build_entry(ktgl::TYPE_S2G, 0, &[0u8; 12]);
-    let at = files[0].1.len() as u64;
-    bad[8..16].copy_from_slice(&(u64::MAX - at + 1).to_le_bytes());
-    files[0].1.extend(bad);
-    let root = scratch("ktgl-wrap");
-    put(&root.join("tree"), &files);
-    let r = scan(
-        &DirSource::new(&root.join("tree")),
-        &root.join("out"),
-        &opts(&root.join("cache")),
-    )
-    .expect("scans");
-    assert_eq!(found(&r), expected);
-    let e = r
-        .errors
-        .iter()
-        .find(|(m, _)| m.contains(".rdb entry length"))
-        .expect("the bad entry is reported");
-    assert_eq!(e.1.count, 1);
-}
-
-#[test]
-fn ktgl_through_a_nup_reads_the_same_entries() {
-    let (files, expected) = ktgl_files();
-    let list: Vec<(&str, &[u8])> = files
-        .iter()
-        .map(|(n, b)| (n.as_str(), b.as_slice()))
+    let source = ImportSource::new(&imp).expect("the import opens");
+    let mut names: Vec<String> = source
+        .files()
+        .expect("lists")
+        .into_iter()
+        .map(|f| f.path)
         .collect();
-    let image = nup::build(&[BuildPackage {
-        title_id: 0x0100_1234_5678_0000,
-        version: 0,
-        kind: PackageKind::Base,
-        standalone: false,
-        files: list,
-        empty_dirs: vec![],
-        meta: vec![],
-    }]);
-    let source = NupSource::new(Arc::new(MemStorage(image))).expect("the NUP opens");
-    let root = scratch("ktgl-nup");
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "dlc/0100000000000001/0/romfs/b.dat",
+            "exefs/main",
+            "exefs/main.npdm",
+            "modules.toml",
+            "programs/0200000000000002/romfs/c.dat",
+            "romfs/s/a.dat",
+        ]
+    );
     let r = scan(&source, &root.join("out"), &opts(&root.join("cache"))).expect("scans");
-    check_ktgl(&r, &expected);
+    assert_eq!(found(&r), shas(&[&a, &b, &c, &d]));
 }
 
 /// Lines that decode as no SM86 instruction (a container's header and

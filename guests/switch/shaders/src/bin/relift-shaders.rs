@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use relift_switch_formats::storage::FileStorage;
-use relift_switch_shaders::{Arch, DirSource, NupSource, Options, Source, scan};
+use relift_switch_shaders::{Arch, DirSource, ImportSource, NupSource, Options, Source, scan};
 
 /// Find every NVIDIA shader program of a game.
 #[derive(Parser, Debug)]
@@ -19,9 +19,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Scan a `.nup`, or an extracted `exefs`/`romfs` tree.
+    /// Scan a `.nup`, an extracted `exefs`/`romfs` tree or an import folder.
     Scan {
-        /// The `.nup` file or the directory.
+        /// The `.nup` file, an extracted tree, or an import folder (one with a
+        /// `modules.toml`, whose romfs may be a map).
         input: PathBuf,
         /// The output directory: `<sha256>.bin` per program,
         /// `manifest.json`, `meshes.json` and `summary.json`.
@@ -63,7 +64,9 @@ fn body(cli: Cli) -> Result<(), BoxError> {
         package,
         sm53,
     } = cli.command;
-    let source: Box<dyn Source> = if input.is_dir() {
+    let source: Box<dyn Source> = if input.is_dir() && input.join("modules.toml").is_file() {
+        Box::new(ImportSource::new(&input)?)
+    } else if input.is_dir() {
         Box::new(DirSource::new(&input))
     } else {
         Box::new(NupSource::new(Arc::new(FileStorage::open(&input)?))?)

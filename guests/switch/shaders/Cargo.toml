@@ -1,6 +1,6 @@
 [package]
 name = "relift-switch-shaders"
-description = "`relift-shaders scan`: finds every NVIDIA SM86 (Switch 2) or SM53 (Switch 1) shader program in a NUP or an extracted tree (zstd with the game's dictionaries, SARC, Yaz0, UnityFS, BNSH, agl BAHS, sead bin, KTGL rdb/fdata, NSO), deduplicated, cached per file and parallel"
+description = "`relift-shaders scan`: finds every NVIDIA SM86 (Switch 2) or SM53 (Switch 1) shader program in a NUP, an extracted tree or an import folder, by content (zstd with the game's dictionaries, zlib and gzip streams at any offset, SARC, Yaz0, UnityFS, BNSH, agl BAHS, sead bin, NSO), deduplicated, cached per file and parallel"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

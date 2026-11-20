@@ -12,7 +12,7 @@
 //! cached job decompresses and reads nothing; a cached result is used only
 //! while every program it names is still in the output directory.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,18 +24,16 @@ use serde_json::{Value, json};
 use crate::carve::{self, Kind, find_all};
 use crate::error::{Error, Result};
 use crate::sha256_hex;
-use crate::source::{SNIFF_WHOLE, Source, SourceFile};
-use crate::{cubin, ktgl, sarc, unity, yaz0, zst};
+use crate::source::{Source, SourceFile};
+use crate::{cubin, sarc, sweep, unity, yaz0, zst};
 
 const CACHE_VERSION: u32 = 4;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
-const GAP: u64 = 256 << 10;
-const SPAN: u64 = 32 << 20;
 const CODE: [&str; 11] = [
+    include_str!("sweep.rs"),
     include_str!("scan.rs"),
     include_str!("carve.rs"),
-    include_str!("ktgl.rs"),
     include_str!("inflate.rs"),
     include_str!("sarc.rs"),
     include_str!("zst.rs"),
@@ -197,6 +195,29 @@ impl Out {
         }
     }
 
+    fn merge(&mut self, o: Out) {
+        for (sha, p) in o.programs {
+            match self.programs.get_mut(&sha) {
+                Some(have) => {
+                    have.n += p.n;
+                    for s in p.srcs {
+                        if have.srcs.len() < MAX_SRCS {
+                            have.srcs.push(s);
+                        }
+                    }
+                }
+                None => {
+                    self.programs.insert(sha, p);
+                }
+            }
+        }
+        for (k, n) in o.containers {
+            *self.containers.entry(k).or_default() += n;
+        }
+        self.errors.extend(o.errors);
+        self.meshes.extend(o.meshes);
+    }
+
     fn error(&mut self, msg: String, at: &str) {
         self.errors.push((msg, at.to_string()));
     }
@@ -254,62 +275,26 @@ impl Out {
 enum Class {
     Nso,
     Container,
-    Sniff,
+    Skip,
 }
 
-fn strip_zstd(name: &str) -> (&str, bool) {
-    for suf in [".zstd", ".zst", ".zs"] {
-        if let Some(s) = name.strip_suffix(suf) {
-            return (s, true);
-        }
-    }
-    (name, false)
-}
-
-fn classify(path: &str, arch: Arch) -> Option<Class> {
+/// A file is an NSO by its place and name (`exefs`, `*.nso`, the module
+/// names of a program); everything else is searched by its content.
+fn classify(path: &str) -> Class {
     let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
     let parent = dir.rsplit('/').next().unwrap_or("");
     let lower = name.to_ascii_lowercase();
-    let (stem, zstd) = strip_zstd(&lower);
-    let ext = stem.rsplit_once('.').map(|x| x.1);
-    if ext == Some("npdm") || matches!(ext, Some("rdb" | "rdx" | "fdata")) {
-        return None;
+    let ext = lower.rsplit_once('.').map(|x| x.1);
+    if ext == Some("npdm") {
+        return Class::Skip;
     }
-    let nso_name =
-        ext.is_none() && (matches!(stem, "main" | "rtld" | "sdk") || stem.starts_with("subsdk"));
+    let nso_name = ext.is_none()
+        && (matches!(lower.as_str(), "main" | "rtld" | "sdk") || lower.starts_with("subsdk"));
     if ext == Some("nso") || parent == "exefs" || nso_name {
-        return Some(Class::Nso);
+        Class::Nso
+    } else {
+        Class::Container
     }
-    if arch == Arch::Sm53 {
-        return Some(Class::Container);
-    }
-    match ext {
-        Some(
-            "bfsha" | "sarc" | "sharc" | "sharcb" | "byml" | "ptcl" | "dat" | "bnsh" | "esetb"
-            | "vsetb" | "cubin" | "fatbin",
-        ) => Some(Class::Container),
-        Some("bin") if zstd => Some(Class::Container),
-        Some("bin") | None => Some(Class::Sniff),
-        _ => None,
-    }
-}
-
-fn sniff(head: &[u8]) -> Option<Class> {
-    if head.starts_with(b"NSO0") {
-        return Some(Class::Nso);
-    }
-    if head.starts_with(b"SARC")
-        || head.starts_with(b"FSHA")
-        || head.starts_with(b"BNSH")
-        || head.starts_with(b"BAHS")
-        || head.get(0x10..0x14) == Some(&carve::PROGRAM_MAGIC)
-        || head.starts_with(&cubin::FATBIN_MAGIC)
-        || (head.starts_with(b"\x7fELF")
-            && head.get(0x12..0x14) == Some(&cubin::EM_CUDA.to_le_bytes()))
-    {
-        return Some(Class::Container);
-    }
-    None
 }
 
 struct Ctx<'a> {
@@ -539,7 +524,46 @@ impl Ctx<'_> {
         if self.arch == Arch::Sm53 {
             return self.leaf_maxwell(out, name, b, depth);
         }
-        self.leaf(out, name, b)
+        self.leaf(out, name, b)?;
+        self.streams(out, name, b, depth)
+    }
+
+    /// The programs of the compressed streams inside `b`: zstd frames
+    /// (with the game's dictionaries) and the zlib and gzip streams
+    /// [`sweep`] finds, whose payloads are unwrapped in turn.
+    fn streams(&self, out: &mut Out, name: &str, b: &[u8], depth: u32) -> Result<()> {
+        if depth >= MAX_DEPTH {
+            return Ok(());
+        }
+        for k in find_all(b, &zst::FRAME_MAGIC).filter(|&k| k > 0) {
+            match zst::decode(&b[k..], &self.dicts) {
+                Ok(d) => {
+                    out.container("zstd-embedded", 1);
+                    self.unwrap_plain(out, &format!("{name}@{k:#x}"), &d, depth + 1)?;
+                }
+                Err(_) => out.container("zstd-embedded-undecodable", 1),
+            }
+        }
+        let spans = sweep::spans(b);
+        out.container(
+            "zlib-stream",
+            spans.iter().filter(|s| !s.gzip).count() as u64,
+        );
+        out.container(
+            "gzip-stream",
+            spans.iter().filter(|s| s.gzip).count() as u64,
+        );
+        let chains = sweep::chains(&spans);
+        let parts = relift_proc::workers::parallel(&chains, |c| {
+            let mut o = Out::default();
+            let p = sweep::payload(b, c);
+            self.unwrap_plain(&mut o, &format!("{name}@{:#x}", c[0].at), &p, depth + 1)
+                .map(|()| o)
+        });
+        for o in parts {
+            out.merge(o?);
+        }
+        Ok(())
     }
 
     fn key(&self, parts: &[&str]) -> String {
@@ -573,233 +597,21 @@ impl Ctx<'_> {
     fn scan_file(&self, f: &SourceFile, class: Class) -> Result<Out> {
         let mut out = Out::default();
         let label = f.label(self.packages);
-        let mut whole = None;
-        let mut class = class;
-        if class == Class::Sniff {
-            let head = if f.size <= SNIFF_WHOLE {
-                let b = self.source.read(f)?;
-                let head = b[..b.len().min(crate::source::SNIFF_HEAD)].to_vec();
-                whole = Some(b);
-                Some(head)
-            } else {
-                self.source.head(f)?
-            };
-            match head.as_deref().and_then(sniff) {
-                Some(c) => class = c,
-                None => return Ok(out),
-            }
-        }
-        let bytes = match whole {
-            Some(b) => b,
-            None => self.source.read(f)?,
-        };
+        let bytes = self.source.read(f)?;
         if class == Class::Nso {
             out.container("nso", 1);
             match Nso::parse(&bytes) {
-                Ok(n) => self.leaf(&mut out, &label, &n.flat_image())?,
+                Ok(n) => {
+                    let image = n.flat_image();
+                    self.leaf(&mut out, &label, &image)?;
+                    self.streams(&mut out, &label, &image, 0)?;
+                }
                 Err(e) => out.error(format!("nso: {e}"), &label),
             }
         } else {
             self.unwrap(&mut out, &label, &bytes, 0)?;
         }
         Ok(out)
-    }
-}
-
-struct Plan {
-    rows: Vec<(u8, u32, u32, u32)>,
-    unmapped: u64,
-    bad: Option<String>,
-}
-
-fn plan_rdb(cx: &Ctx, rdb: &SourceFile, rdx: &SourceFile) -> Result<Plan> {
-    let key = cx.key(&[
-        "plan",
-        &rdb.pkg.to_string(),
-        &rdb.path,
-        &cx.source.identity(rdb)?,
-        &cx.source.identity(rdx)?,
-    ]);
-    if let Some(path) = cx.cache_path(&key)
-        && let Ok(bytes) = std::fs::read(path)
-        && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
-        && let Some(plan) = plan_from_json(&v)
-    {
-        cx.hits.fetch_add(1, Ordering::Relaxed);
-        return Ok(plan);
-    }
-    let map: HashMap<u16, (u8, u32)> = ktgl::rdx(&cx.source.read(rdx)?)
-        .into_iter()
-        .map(|(i, m, id)| (i, (m, id)))
-        .collect();
-    let locs = ktgl::shader_locations(&cx.source.read(rdb)?);
-    let mut plan = Plan {
-        rows: Vec::new(),
-        unmapped: 0,
-        bad: locs.bad.map(str::to_string),
-    };
-    for l in locs.found {
-        match map.get(&l.index) {
-            Some(&(m, id)) => plan.rows.push((m, id, l.offset, l.size)),
-            None => plan.unmapped += 1,
-        }
-    }
-    if let Some(path) = cx.cache_path(&key) {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let v = json!({"v": CACHE_VERSION, "rows": plan.rows, "unmapped": plan.unmapped, "bad": plan.bad});
-        let bytes = serde_json::to_vec(&v).map_err(|e| Error::Format(e.to_string()))?;
-        relift_cache::write_if_changed(&path, &bytes)?;
-    }
-    Ok(plan)
-}
-
-fn plan_from_json(v: &Value) -> Option<Plan> {
-    if v.get("v")?.as_u64()? != u64::from(CACHE_VERSION) {
-        return None;
-    }
-    let mut rows = Vec::new();
-    for r in v.get("rows")?.as_array()? {
-        let r = r.as_array()?;
-        rows.push((
-            u8::try_from(r.first()?.as_u64()?).ok()?,
-            u32::try_from(r.get(1)?.as_u64()?).ok()?,
-            u32::try_from(r.get(2)?.as_u64()?).ok()?,
-            u32::try_from(r.get(3)?.as_u64()?).ok()?,
-        ));
-    }
-    Some(Plan {
-        rows,
-        unmapped: v.get("unmapped")?.as_u64()?,
-        bad: match v.get("bad")? {
-            Value::Null => None,
-            b => Some(b.as_str()?.to_string()),
-        },
-    })
-}
-
-struct Fdata {
-    file: SourceFile,
-    entries: Vec<(u32, u32)>,
-}
-
-fn run_fdata(cx: &Ctx, job: &Fdata) -> Result<Out> {
-    let f = &job.file;
-    let id = cx.source.identity(f)?;
-    let ranges: String = job
-        .entries
-        .iter()
-        .map(|(o, n)| format!("{o}+{n};"))
-        .collect();
-    let key = cx.key(&[
-        "fdata",
-        &f.pkg.to_string(),
-        &f.path,
-        &f.size.to_string(),
-        &id,
-        &ranges,
-    ]);
-    if let Some(o) = cx.lookup(&key) {
-        return Ok(o);
-    }
-    let mut out = Out::default();
-    let label = f.label(cx.packages);
-    let wanted: Vec<(u64, u64)> = job
-        .entries
-        .iter()
-        .map(|&(o, n)| (u64::from(o), u64::from(n)))
-        .collect();
-    let mut spans: Vec<(u64, u64)> = Vec::new();
-    if cx.source.ranges_are_cheap(f) {
-        for &(o, n) in &wanted {
-            match spans.last_mut() {
-                Some(s) if o <= s.0 + s.1 + GAP && o + n - s.0 <= SPAN => {
-                    s.1 = s.1.max(o + n - s.0);
-                }
-                _ => spans.push((o, n)),
-            }
-        }
-    } else {
-        spans.push((0, f.size));
-    }
-    let spans = spans
-        .into_iter()
-        .map(|(o, n)| (o.min(f.size), n.min(f.size.saturating_sub(o))))
-        .collect::<Vec<_>>();
-    let data = cx.source.read_ranges(f, &spans)?;
-    let mut at = 0;
-    for &(o, n) in &wanted {
-        while at + 1 < spans.len() && o >= spans[at + 1].0 {
-            at += 1;
-        }
-        let name = format!("{label}@{o:#x}");
-        let Some(span) = spans.get(at) else {
-            out.error("KTGL: the .fdata is empty".into(), &name);
-            continue;
-        };
-        let lo = usize::try_from(o - span.0.min(o)).unwrap_or(usize::MAX);
-        let Some(entry) = usize::try_from(n)
-            .ok()
-            .and_then(|n| data[at].get(lo..lo.checked_add(n)?))
-        else {
-            out.error("KTGL: an entry runs past the .fdata".into(), &name);
-            continue;
-        };
-        out.container("ktgl-entry", 1);
-        match ktgl::inflate_entry(entry) {
-            Ok(inf) => cx.leaf(&mut out, &name, &inf)?,
-            Err(e) => out.error(e.to_string(), &name),
-        }
-    }
-    cx.save(&key, &out)?;
-    Ok(out)
-}
-
-enum Job {
-    File(SourceFile, Class),
-    Fdata(Fdata),
-}
-
-impl Job {
-    fn name(&self) -> String {
-        match self {
-            Job::File(f, _) => f.path.clone(),
-            Job::Fdata(d) => d.file.path.clone(),
-        }
-    }
-}
-
-/// The input files by package and path: an exact match first, then one
-/// that differs only in ASCII case, since an index names its `.rdx` and
-/// `.fdata` files in a case of its own.
-struct Paths<'a> {
-    exact: HashMap<(usize, &'a str), &'a SourceFile>,
-    folded: HashMap<(usize, String), &'a SourceFile>,
-}
-
-impl<'a> Paths<'a> {
-    fn new(files: &'a [SourceFile]) -> Paths<'a> {
-        let mut folded = HashMap::new();
-        for f in files {
-            folded
-                .entry((f.pkg, f.path.to_ascii_lowercase()))
-                .or_insert(f);
-        }
-        Paths {
-            exact: files
-                .iter()
-                .map(|f| ((f.pkg, f.path.as_str()), f))
-                .collect(),
-            folded,
-        }
-    }
-
-    fn get(&self, pkg: usize, path: &str) -> Option<&'a SourceFile> {
-        self.exact
-            .get(&(pkg, path))
-            .or_else(|| self.folded.get(&(pkg, path.to_ascii_lowercase())))
-            .copied()
     }
 }
 
@@ -861,75 +673,15 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         packages: source.has_packages(),
         salt: salt(source.has_packages(), opts.package, opts.arch),
     };
-    let paths = Paths::new(&files);
-    let mut jobs: Vec<Job> = Vec::new();
-    let mut plans: Vec<(&SourceFile, &SourceFile)> = Vec::new();
-    let mut extra: Vec<(String, String)> = Vec::new();
+    let mut jobs: Vec<(SourceFile, Class)> = Vec::new();
     for f in &files {
-        if f.path.to_ascii_lowercase().ends_with(".rdb") {
-            let rdx = format!("{}.rdx", &f.path[..f.path.len() - 4]);
-            match paths.get(f.pkg, &rdx) {
-                Some(x) => plans.push((f, x)),
-                None => extra.push(("KTGL: an .rdb has no .rdx beside it".into(), f.path.clone())),
-            }
-        } else if let Some(c) = classify(&f.path, opts.arch) {
-            jobs.push(Job::File(f.clone(), c));
+        match classify(&f.path) {
+            Class::Skip => {}
+            c => jobs.push((f.clone(), c)),
         }
     }
-    let planned = relift_proc::workers::parallel(&plans, |&(rdb, rdx)| plan_rdb(&cx, rdb, rdx));
-    let mut groups: BTreeMap<(usize, String), Vec<(u32, u32)>> = BTreeMap::new();
-    for (&(rdb, _), plan) in plans.iter().zip(planned) {
-        let plan = plan?;
-        let dir = rdb.path.rsplit_once('/').map_or("", |x| x.0);
-        let pre = if dir.is_empty() {
-            String::new()
-        } else {
-            format!("{dir}/")
-        };
-        if let Some(bad) = plan.bad {
-            extra.push((bad, rdb.path.clone()));
-        }
-        for _ in 0..plan.unmapped {
-            extra.push((
-                "KTGL: an entry names an index the .rdx lacks".into(),
-                rdb.path.clone(),
-            ));
-        }
-        for (mnt, id, off, size) in plan.rows {
-            let sub = if mnt >= 0xFE {
-                String::new()
-            } else {
-                format!("MountPoint_{mnt}/")
-            };
-            let name = format!("{pre}{sub}0x{id:08x}.fdata");
-            let found = (0..=rdb.pkg).rev().find_map(|p| paths.get(p, &name));
-            match found {
-                Some(f) => groups
-                    .entry((f.pkg, f.path.clone()))
-                    .or_default()
-                    .push((off, size)),
-                None => extra.push(("KTGL: the .fdata is not in the input".into(), name)),
-            }
-        }
-    }
-    for ((pkg, name), mut entries) in groups {
-        entries.sort_unstable();
-        entries.dedup();
-        if let Some(f) = paths.get(pkg, &name) {
-            jobs.push(Job::Fdata(Fdata {
-                file: (*f).clone(),
-                entries,
-            }));
-        }
-    }
-    jobs.sort_by_key(|j| match j {
-        Job::File(f, _) => (f.pkg, f.path.clone()),
-        Job::Fdata(d) => (d.file.pkg, d.file.path.clone()),
-    });
-    let results = relift_proc::workers::parallel(&jobs, |j| match j {
-        Job::File(f, c) => cx.run_file(f, *c),
-        Job::Fdata(d) => run_fdata(&cx, d),
-    });
+    jobs.sort_by(|a, b| (a.0.pkg, &a.0.path).cmp(&(b.0.pkg, &b.0.path)));
+    let results = relift_proc::workers::parallel(&jobs, |(f, c)| cx.run_file(f, *c));
     let mut report = Report::default();
     let add_error = |report: &mut Report, msg: String, at: String| {
         let e = report.errors.entry(msg).or_default();
@@ -938,15 +690,12 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
             e.examples.push(at);
         }
     };
-    for (msg, at) in extra {
-        add_error(&mut report, msg, at);
-    }
-    for (job, r) in jobs.iter().zip(results) {
+    for ((file, _), r) in jobs.iter().zip(results) {
         let out = match r {
             Ok(o) => o,
             Err(Error::Io(e)) => return Err(Error::Io(e)),
             Err(e) => {
-                add_error(&mut report, e.to_string(), job.name());
+                add_error(&mut report, e.to_string(), file.path.clone());
                 continue;
             }
         };
@@ -977,7 +726,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
     report.meshes.dedup();
     report.stats = Stats {
         files: files.len() as u64,
-        jobs: (jobs.len() + plans.len()) as u64,
+        jobs: jobs.len() as u64,
         hits: cx.hits.load(Ordering::Relaxed),
         millis: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };

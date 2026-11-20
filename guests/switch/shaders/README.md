@@ -3,8 +3,10 @@
 Finds every NVIDIA SM86 (Ampere, the Switch 2 GPU) shader program in a game,
 or with `--sm53` every SM53 (Maxwell, the Switch 1 GPU) program:
 `relift-switch-shaders` is the library and `relift-shaders` the tool. It reads
-a decrypted `.nup`, or an extracted `exefs`/`romfs` tree, and writes each
-unique program once.
+a decrypted `.nup`, an extracted `exefs`/`romfs` tree, or an import folder
+(one with a `modules.toml`; its romfs may be a map, an image or a tree, and
+its DLC and other programs are read too), and writes each unique program once.
+`relift build` runs the same scan on the import of a Switch 2 game.
 
 ```sh
 cargo build --release -p relift-switch-shaders
@@ -23,12 +25,19 @@ that decodes past 1 GiB, which is reported rather than cut short). The cache
 defaults to `<out>/.cache`. A `--package` that holds no file is an error.
 
 A program is the bytes of the 0x80-byte shader program header (graphics only)
-and the code through the `BRA self` terminator. The scan unwraps zstd frames
-(dictionaries come from the game's own `ZsDic.pack.zs`), SARC archives, and
-looks for programs in shader archives (`bfsha`, BNSH, agl `BAHS`), sead `.bin`
-files, effect files with embedded BNSH, the NSOs of `exefs`, and KTGL
-`rdb`/`rdx`/`fdata` entries (whole or in zlib chunks; the zlib decoder is
-this crate's own).
+and the code through the `BRA self` terminator. Every file is searched by its
+content, whatever its name or extension (only an NSO is known by its place and
+name, and `main.npdm` is skipped). The scan carves the bytes, unwraps zstd
+frames (dictionaries come from the game's own `ZsDic.pack.zs`) and SARC
+archives, looks for programs in shader archives (`bfsha`, BNSH, agl `BAHS`),
+sead `.bin` files, effect files with embedded BNSH and the NSOs, and searches
+every buffer for zlib streams (a 0x78 header, deflate data, a matching
+Adler-32) and gzip members (a matching CRC-32 and length) at any offset;
+streams that follow each other within 16 bytes are the chunks of one payload
+and are decoded together, since a program can run across them. The zlib
+decoder is this crate's own. Every decoded payload is searched again.
+Compression the scan has no decoder for (Oodle, raw LZ4 or LZ77 blocks
+without a frame, encryption) hides programs it cannot show.
 
 With `--sm53` every file is read (NSOs as their flat image). A program
 starts at an NVN code header (the word 0x12345678 and 44 zero bytes); its
@@ -56,14 +65,13 @@ summary's errors.
 
 Each input file is one cached job, keyed by its path, size and content (the
 SHA-256 a NUP records; a hash of the file for a directory, size and
-modification time above 32 MiB), the dictionaries and, for an `.fdata`, the
-byte ranges the indexes name, salted with the cache and crate versions, a
+modification time above 32 MiB), the dictionaries, salted with the cache and crate versions, a
 digest of the crate's sources, whether labels name packages and `--package`.
 A rerun with no change restores every job from the cache without reading or
 decompressing the input; a result is used only while its programs are still in
 `--out`. Jobs run on `-j` threads.
 
-The library takes any `Source`: `DirSource`, or `NupSource` over any
+The library takes any `Source`: `DirSource`, `ImportSource` (an import folder), or `NupSource` over any
 `relift_switch_formats::storage::Storage` (a file, memory, or a remote
 reader).
 
