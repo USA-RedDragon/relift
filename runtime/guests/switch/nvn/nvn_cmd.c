@@ -18,6 +18,8 @@
 /** @brief Top bits of a command handle relift returns; the low bits index the set table. */
 #define HANDLE_TAG 0x524c000000000000ull
 #define HANDLE_INDEX(h) ((uint32_t)((h) & 0xffffffffu))
+/** @brief Bytes of command memory one recorded command counts as in the used-memory getters. */
+#define NVN_CMD_BYTES 16u
 
 typedef struct nvn_cmdbuf {
     nvn_obj o;
@@ -27,6 +29,8 @@ typedef struct nvn_cmdbuf {
     uint64_t callback, callback_data;
     uint32_t row_stride, image_stride, recording_mode;
     bool recording;
+    /** @brief The commands the last recording ended with; the used-memory getters answer from it after EndRecording. */
+    uint32_t ended_n;
     nvn_cmd *cmds;
     uint32_t n, cap;
     uint8_t *bytes;
@@ -207,18 +211,37 @@ uint64_t nvnh_nvnCommandBufferGetCommandMemorySize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnCommandBufferGetCommandMemoryUsed(const NVNcommandBuffer *): relift writes none of it. */
+/**
+ * @brief The command memory the recorded commands stand for, in bytes. The driver (SDK 22.2.8) answers Used as its
+ * write pointer less the start of the command memory, and Free as the end less the write pointer, so Used plus Free
+ * is the memory the game added. relift writes none of that memory, but the game's end-of-pass code asks how much a
+ * buffer used after EndRecording and submits only a buffer that used some, so a buffer with commands must answer
+ * nonzero. Inferred: each command is counted as 16 bytes, where the driver's own encodings run from 4 bytes (a
+ * single method word) to 96 (a draw record in control memory); the total stops at the memory the game added, and
+ * only grows as commands are recorded.
+ */
+static uint64_t cmd_used(const nvn_cmdbuf *b)
+{
+    uint64_t used = (uint64_t)(b->recording ? b->n : b->ended_n) * NVN_CMD_BYTES;
+    return b->cmd_size && used > b->cmd_size ? b->cmd_size : used;
+}
+
+/** @brief nvnCommandBufferGetCommandMemoryUsed(const NVNcommandBuffer *). */
 uint64_t nvnh_nvnCommandBufferGetCommandMemoryUsed(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    c->x[0] = 0;
+    nvn_cmdbuf *b = cb_of(c);
+    c->x[0] = b ? cmd_used(b) : 0;
     return nvn_ret(c);
 }
 
-/** @brief nvnCommandBufferGetCommandMemoryFree(const NVNcommandBuffer *). */
+/** @brief nvnCommandBufferGetCommandMemoryFree(const NVNcommandBuffer *): the memory added, less what the commands use. */
 uint64_t nvnh_nvnCommandBufferGetCommandMemoryFree(rl_ctx *c, uint8_t *mem)
 {
-    return nvnh_nvnCommandBufferGetCommandMemorySize(c, mem);
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    c->x[0] = b ? b->cmd_size - (b->cmd_size ? cmd_used(b) : 0) : 0;
+    return nvn_ret(c);
 }
 
 /** @brief nvnCommandBufferGetControlMemorySize(const NVNcommandBuffer *). */
@@ -378,6 +401,7 @@ uint64_t nvnh_nvnCommandBufferBeginRecording(rl_ctx *c, uint8_t *mem)
     if (!b)
         return not_cb(c, "nvnCommandBufferBeginRecording");
     b->recording = true;
+    b->ended_n = 0;
     b->n = 0;
     b->nbytes = 0;
     return nvn_ret(c);
@@ -401,6 +425,7 @@ uint64_t nvnh_nvnCommandBufferEndRecording(rl_ctx *c, uint8_t *mem)
     if (b->nbytes)
         memcpy(s->bytes, b->bytes, b->nbytes);
     b->recording = false;
+    b->ended_n = b->n;
     b->n = 0;
     b->nbytes = 0;
     pthread_mutex_lock(&sets.lock);

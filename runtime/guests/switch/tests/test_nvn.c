@@ -358,8 +358,14 @@ TEST(nvn_command_buffer_records_and_submits)
     c->v[0].d[0] = 0x3ff0000000000000ull;
     CHECK_EQ(call(c, nvnh_nvnCommandBufferClearColor, cb, 0, heap, 0xf), RET);
     CHECK_EQ(call(c, nvnh_nvnCommandBufferSetStencilRef, cb, 3, 0x80, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryUsed, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 32);
     CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
     uint64_t h = c->x[0];
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryUsed, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 32);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryFree, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x4000 - 32);
     const nvn_cmdset *s = nvn_cmdset_of(h);
     CHECK(s != NULL);
     CHECK_EQ(s->n, 2);
@@ -373,6 +379,30 @@ TEST(nvn_command_buffer_records_and_submits)
     CHECK_EQ(call(c, nvnh_nvnQueueSubmitCommands, queue, 1, handles, 0), RL_PENDING);
     CHECK_EQ(call(c, nvnh_nvnCommandBufferFinalize, cb, 0, 0, 0), RET);
     CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RL_PENDING);
+}
+
+TEST(nvn_command_buffer_memory_used_follows_the_recording)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, cb, heap, 0, 0x40), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryUsed, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    for (int i = 0; i < 6; i++)
+        CHECK_EQ(call(c, nvnh_nvnCommandBufferSetStencilRef, cb, 3, 0x80, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryUsed, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x40);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryFree, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetCommandMemoryUsed, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
 }
 
 TEST(nvn_command_buffer_getters_read_the_layers_state)
