@@ -445,6 +445,9 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(nvnCommandBufferGetControlMemoryFree)                                                                            \
     X(nvnCommandBufferSetMemoryCallback)                                                                               \
     X(nvnCommandBufferSetMemoryCallbackData)                                                                           \
+    X(nvnCommandBufferGetMemoryCallback)                                                                               \
+    X(nvnCommandBufferGetMemoryCallbackData)                                                                           \
+    X(nvnCommandBufferIsRecording)                                                                                     \
     X(nvnCommandBufferSetRecordingMode)                                                                                \
     X(nvnCommandBufferBeginRecording)                                                                                  \
     X(nvnCommandBufferEndRecording)                                                                                    \

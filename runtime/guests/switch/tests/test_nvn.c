@@ -288,6 +288,32 @@ TEST(nvn_command_buffer_records_and_submits)
     CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RL_PENDING);
 }
 
+TEST(nvn_command_buffer_getters_read_the_layers_state)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetMemoryCallback, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetMemoryCallback, cb, 0x1234, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetMemoryCallbackData, cb, 0x5678, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetMemoryCallback, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x1234);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferGetMemoryCallbackData, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x5678);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferIsRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferIsRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferIsRecording, cb, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferFinalize, cb, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferIsRecording, cb, 0, 0, 0), RL_PENDING);
+}
+
 TEST(nvn_copy_strides_are_command_buffer_state_each_copy_keeps)
 {
     rl_ctx *c = t_boot(NULL);

@@ -262,6 +262,48 @@ uint64_t nvnh_nvnCommandBufferSetMemoryCallbackData(rl_ctx *c, uint8_t *mem)
 }
 
 /**
+ * @brief nvnCommandBufferGetMemoryCallback(const NVNcommandBuffer *): the callback nvnCommandBufferSetMemoryCallback
+ * gave. The driver returns a word of the command buffer object (a one-load getter in every NVN1 and NVN2 driver
+ * read) that its own setter fills; the layer keeps the callback in its record of the command buffer instead, so the
+ * driver's word is never written. 0 before any is set, as in a driver-initialized command buffer.
+ */
+uint64_t nvnh_nvnCommandBufferGetMemoryCallback(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferGetMemoryCallback");
+    c->x[0] = b->callback;
+    return nvn_ret(c);
+}
+
+/** @brief nvnCommandBufferGetMemoryCallbackData(const NVNcommandBuffer *): the pointer nvnCommandBufferSetMemoryCallbackData gave. */
+uint64_t nvnh_nvnCommandBufferGetMemoryCallbackData(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferGetMemoryCallbackData");
+    c->x[0] = b->callback_data;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief nvnCommandBufferIsRecording(const NVNcommandBuffer *): NVNboolean. The driver returns a byte its own
+ * nvnCommandBufferBeginRecording sets and nvnCommandBufferEndRecording clears; both are the layer's, which keeps
+ * the state in its record of the command buffer.
+ */
+uint64_t nvnh_nvnCommandBufferIsRecording(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_cmdbuf *b = cb_of(c);
+    if (!b)
+        return not_cb(c, "nvnCommandBufferIsRecording");
+    c->x[0] = b->recording;
+    return nvn_ret(c);
+}
+
+/**
  * @brief nvnCommandBufferSetCopyRowStride(NVNcommandBuffer *, ptrdiff_t):
  * the bytes between rows of the buffer side of later buffer and texture
  * copies, 0 for rows packed tight. As in the driver, where it is one store
