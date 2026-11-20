@@ -2,8 +2,9 @@
  * @file av1_dav1d.c
  * @brief AV1 decoding through dav1d (BSD-2-Clause license, see host/dav1d/NOTICE).
  *
- * dav1d decodes temporal units as they come out of a stream. This file feeds it one unit at a time on a single
- * thread (so frames come out in decode order, with no frame delay) and converts the shown picture to 8-bit 4:2:0:
+ * dav1d decodes temporal units as they come out of a stream. This file feeds it one unit at a time with a frame delay
+ * of one (so frames come out in decode order, each as its unit is sent; one worker thread per processor splits the tiles
+ * and filter rows of that one frame) and converts the shown picture to 8-bit 4:2:0:
  * higher bit depths are rounded down, 4:2:2 and 4:4:4 chroma is decimated, and monochrome gets neutral chroma
  * (inferred: the decoded surfaces a game asks for are 8-bit NV12).
  */
@@ -11,6 +12,7 @@
 
 #include <dav1d/dav1d.h>
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,7 +29,7 @@ static void *av1_open(void)
         return NULL;
     Dav1dSettings s;
     dav1d_default_settings(&s);
-    s.n_threads = 1;
+    s.n_threads = 0;
     s.max_frame_delay = 1;
     s.logger.callback = NULL;
     if (dav1d_open(&d->ctx, &s) < 0) {
@@ -71,21 +73,33 @@ static int av1_convert(av1_dec *d, const Dav1dPicture *p, rl_video_image *out)
         d->cap = need;
     }
     uint8_t *y = d->planes, *u = y + (size_t)w * h, *v = u + (size_t)cw * ch;
-    for (uint32_t r = 0; r < h; r++)
-        for (uint32_t c = 0; c < w; c++)
-            y[(size_t)r * w + c] = (uint8_t)sample(p, 0, c, r);
-    for (uint32_t r = 0; r < ch; r++)
-        for (uint32_t c = 0; c < cw; c++) {
-            uint8_t uu = 128, vv = 128;
-            if (p->p.layout != DAV1D_PIXEL_LAYOUT_I400) {
-                uint32_t px = p->p.layout == DAV1D_PIXEL_LAYOUT_I444 ? c * 2 : c;
-                uint32_t py = p->p.layout == DAV1D_PIXEL_LAYOUT_I420 ? r : r * 2;
-                uu = (uint8_t)sample(p, 1, px, py);
-                vv = (uint8_t)sample(p, 2, px, py);
-            }
-            u[(size_t)r * cw + c] = uu;
-            v[(size_t)r * cw + c] = vv;
+    bool copy_rows = p->p.bpc == 8;
+    if (copy_rows)
+        for (uint32_t r = 0; r < h; r++)
+            memcpy(y + (size_t)r * w, (const uint8_t *)p->data[0] + (ptrdiff_t)r * p->stride[0], w);
+    else
+        for (uint32_t r = 0; r < h; r++)
+            for (uint32_t c = 0; c < w; c++)
+                y[(size_t)r * w + c] = (uint8_t)sample(p, 0, c, r);
+    if (copy_rows && p->p.layout == DAV1D_PIXEL_LAYOUT_I420) {
+        for (uint32_t r = 0; r < ch; r++) {
+            memcpy(u + (size_t)r * cw, (const uint8_t *)p->data[1] + (ptrdiff_t)r * p->stride[1], cw);
+            memcpy(v + (size_t)r * cw, (const uint8_t *)p->data[2] + (ptrdiff_t)r * p->stride[1], cw);
         }
+    } else {
+        for (uint32_t r = 0; r < ch; r++)
+            for (uint32_t c = 0; c < cw; c++) {
+                uint8_t uu = 128, vv = 128;
+                if (p->p.layout != DAV1D_PIXEL_LAYOUT_I400) {
+                    uint32_t px = p->p.layout == DAV1D_PIXEL_LAYOUT_I444 ? c * 2 : c;
+                    uint32_t py = p->p.layout == DAV1D_PIXEL_LAYOUT_I420 ? r : r * 2;
+                    uu = (uint8_t)sample(p, 1, px, py);
+                    vv = (uint8_t)sample(p, 2, px, py);
+                }
+                u[(size_t)r * cw + c] = uu;
+                v[(size_t)r * cw + c] = vv;
+            }
+    }
     out->width = w;
     out->height = h;
     out->y = y;
