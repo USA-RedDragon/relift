@@ -227,7 +227,8 @@ static uint8_t *capture_slot(rl_present *p, const uint8_t *rgb, uint32_t w, uint
         return NULL;
     }
     free(rgba);
-    rl_present_slot_end(p, &s, w, h, true, g_w, g_h, NULL);
+    rl_present_set_fit(p, true);
+    rl_present_slot_end(p, &s, w, h);
     return rl_present_capture(p, 5000, cw, ch);
 }
 

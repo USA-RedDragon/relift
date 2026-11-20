@@ -8,6 +8,7 @@
 #include <relift/window.h>
 
 #include "core.h"
+#include "present.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -36,12 +37,18 @@ void rl_window_set_events(rl_window_event_fn *fn, void *user)
     pthread_mutex_unlock(&g_lock);
 }
 
+struct rl_present *rl_window_presenter(rl_window *w)
+{
+    return w && w->b && w->b->presenter ? w->b->presenter(w) : NULL;
+}
+
 bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height,
                                  uint32_t shown_width, uint32_t shown_height)
 {
     if (!w || !w->b || !w->b->present_rgb)
         return false;
-    rgb = rl_post_apply(rgb, width, height, &width, &height);
+    if (!rl_window_presenter(w))
+        rgb = rl_post_apply(rgb, width, height, &width, &height);
     w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
     while (!w->extra && rl_touchpad_hold(16))
         w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);

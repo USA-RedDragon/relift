@@ -53,6 +53,9 @@ struct rl_present {
 
     slot slots[SLOTS];
     int next_slot, cur_slot;
+    bool fit;
+    rl_present_rect shown_at;
+    uint32_t shown_fw, shown_fh;
     uint32_t release_mask;
     bool gpu_frames;
     rl_post_gpu *post;
@@ -492,6 +495,11 @@ static bool record(rl_present *p, uint32_t index, bool capture)
     rl_present_rect logical, at;
     rl_present_place(p->work_sw, p->work_sh, lw, lh, rl_post_integer(p->work_fit), &logical);
     rl_present_turn(&logical, lw, lh, t, &at);
+    pthread_mutex_lock(&p->lock);
+    p->shown_at = logical;
+    p->shown_fw = p->work_w;
+    p->shown_fh = p->work_h;
+    pthread_mutex_unlock(&p->lock);
     int sampling = rl_post_sampling(cw, ch, at.w, at.h);
     bool sharp = sampling == RL_POST_SAMPLE_SHARP;
     uint32_t kx = at.w / cw, ky = at.h / ch;
@@ -995,11 +1003,8 @@ void rl_present_slot_abort(rl_present *p, const rl_present_slot *s)
     pthread_mutex_unlock(&p->lock);
 }
 
-void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h, bool fit,
-                         uint32_t win_w, uint32_t win_h, rl_present_rect *place)
+void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h)
 {
-    if (place)
-        rl_present_place(shown_w, shown_h, win_w, win_h, rl_post_integer(fit), place);
     pthread_mutex_lock(&p->lock);
     slot *sl = &p->slots[s->index];
     if (p->fresh)
@@ -1012,10 +1017,28 @@ void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown
     p->next_h = sl->im.h;
     p->next_sw = shown_w ? shown_w : sl->im.w;
     p->next_sh = shown_h ? shown_h : sl->im.h;
-    p->next_fit = fit;
+    p->next_fit = p->fit;
     p->fresh = true;
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
+}
+
+void rl_present_set_fit(rl_present *p, bool fit)
+{
+    pthread_mutex_lock(&p->lock);
+    p->fit = fit;
+    pthread_mutex_unlock(&p->lock);
+}
+
+bool rl_present_shown(rl_present *p, rl_present_rect *at, uint32_t *frame_w, uint32_t *frame_h)
+{
+    pthread_mutex_lock(&p->lock);
+    bool ok = p->shown_at.w && p->shown_at.h;
+    *at = p->shown_at;
+    *frame_w = p->shown_fw;
+    *frame_h = p->shown_fh;
+    pthread_mutex_unlock(&p->lock);
+    return ok;
 }
 
 void rl_present_surface(rl_present *p, bool have)

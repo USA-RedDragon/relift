@@ -90,9 +90,21 @@ typedef struct rl_present_slot {
  * swapchain: the newest ready slot replaces an older one the presenter has not taken yet.
  */
 bool rl_present_slot_begin(rl_present *p, uint32_t width, uint32_t height, rl_present_slot *out);
-/** @brief Hands the filled slot to the presenter, with the picture's shown size as rl_present_frame takes it. */
-void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h, bool fit,
-                         uint32_t win_w, uint32_t win_h, rl_present_rect *place);
+/** @brief Hands the filled slot to the presenter, as a picture shown shown_w by shown_h square pixels. */
+void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h);
+/** @brief How slot pictures (the backend's own way, as rl_window_set_fit says) fill the window: to fit, or by whole multiples. */
+void rl_present_set_fit(rl_present *p, bool fit);
+/**
+ * @brief Where the presenter last drew its picture in the window's pixels, and that picture's size in the guest's
+ * pixels (for mapping a pointer to a frame pixel); false before the first frame.
+ */
+bool rl_present_shown(rl_present *p, rl_present_rect *at, uint32_t *frame_w, uint32_t *frame_h);
+/**
+ * @brief The window's presenter, which its backend makes with the first ask; NULL when the window has none (a
+ * backend that draws frames itself, or a host with no Vulkan swapchain). Guest GPU layers hand their pictures to it
+ * with rl_present_slot_begin.
+ */
+rl_present *rl_window_presenter(rl_window *w);
 /** @brief Gives a slot back that was not filled. */
 void rl_present_slot_abort(rl_present *p, const rl_present_slot *s);
 
