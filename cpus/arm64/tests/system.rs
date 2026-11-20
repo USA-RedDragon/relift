@@ -92,6 +92,17 @@ fn hints_without_the_feature_are_nops() {
     assert!(!b.insts.is_empty());
 }
 
+/// CSDB, the consumption of speculative data barrier, only limits what a
+/// CPU may speculate, so it has no effect a program can observe.
+#[test]
+fn csdb_lifts_to_nothing_on_every_cpu() {
+    for cpu in [Cpu::new(Features::CORTEX_A57, Va::BITS39), ALL] {
+        let b = lift(0xd503_229f, PC, &cpu).expect("lifts");
+        assert!(b.insts.is_empty());
+        assert_eq!(b.exit.next, Next::Const(PC + 4));
+    }
+}
+
 #[test]
 fn on_the_cortex_a57_pac_hints_are_nops_and_other_pac_forms_undefined() {
     let a57 = Cpu::new(Features::CORTEX_A57, Va::BITS39);

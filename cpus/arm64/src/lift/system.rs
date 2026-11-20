@@ -81,7 +81,7 @@ pub fn lifter(enc: Encoding) -> Option<LiftFn> {
         SYS_CR_systeminstrs => sys,
         WFE_HI_hints => wfe,
         SEV_HI_hints => sev,
-        BTI_HB_hints | CHKFEAT_HF_hints | XPACLRI_HI_hints | HINT_HM_hints => nop,
+        BTI_HB_hints | CHKFEAT_HF_hints | XPACLRI_HI_hints | HINT_HM_hints | CSDB_HI_hints => nop,
         _ => return None,
     };
     Some(f)
