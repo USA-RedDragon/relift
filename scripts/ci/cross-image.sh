@@ -13,7 +13,7 @@ export TARGET OWNER CARGO_BUILD_JOBS
 
 mkdir -p "$ROOT/target/cross/$TARGET"
 docker pull -q "$CROSS_IMAGE" >/dev/null
-docker run --rm -v "$ROOT:/project" -w /project -e TARGET -e OWNER -e CARGO_BUILD_JOBS "$CROSS_IMAGE" bash -euo pipefail -c '
+docker run --rm "${DOCKER_CPUS[@]}" -v "$ROOT:/project" -w /project -e TARGET -e OWNER -e CARGO_BUILD_JOBS "$CROSS_IMAGE" bash -euo pipefail -c '
   pinned=$(sed -n "s/^channel = \"\(.*\)\"$/\1/p" rust-toolchain.toml)
   test "${RUST_VERSION:?the image must set RUST_VERSION}" = "$pinned" \
     || { echo "error: the image carries Rust $RUST_VERSION but rust-toolchain.toml pins $pinned"; exit 1; }

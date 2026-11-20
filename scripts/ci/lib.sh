@@ -8,6 +8,11 @@ CI_WORK=${CI_WORK:-${RUNNER_TEMP:-${XDG_CACHE_HOME:-$HOME/.cache}/relift-ci}}
 mkdir -p "$CI_WORK"
 export RELIFT_REPORT_DIR=${RELIFT_REPORT_DIR:-$CI_WORK/reports}
 
+# The docker run options that keep a container on the cores all.sh gave the
+# job (CI_CPUSET); empty when the job has the whole host.
+DOCKER_CPUS=()
+[ -z "${CI_CPUSET:-}" ] || DOCKER_CPUS=(--cpuset-cpus "$CI_CPUSET")
+
 ACTIONLINT_VERSION=1.7.12
 ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 CARGO_DENY_VERSION=0.20.2

@@ -20,6 +20,14 @@
 # for the whole mac phase, so two runs of this script never share the Mac and
 # the second waits for the first.
 #
+# Every other job runs on this host in a slot of its own: a set of
+# CI_SLOT_CPUS (default 4, the size of a hosted Linux runner) cores it is
+# pinned to, with its docker container, so a job sees the cores a runner has
+# and its time does not depend on how many jobs share the host. There are as
+# many slots as whole sets fit in the cores this script may use, or CI_JOBS
+# if that is set; a job waits for a free slot, and its time starts when it
+# gets one.
+#
 # A job that takes longer than the timeout-minutes of the workflow job it
 # stands for is killed, with its children, and fails. Jobs named image-* need
 # docker and the pinned rust-cross image (about 16 GB unpacked); without
@@ -157,7 +165,7 @@ main() {
       [ -f "$f" ] && g=$(cat "$f") && kill -KILL -- "-$g" 2>/dev/null
     done
     kill -KILL "${subs[@]}" $mac_holder 2>/dev/null
-    rm -f "$logs"/*.pgid "$tokens"
+    rm -f "$logs"/*.pgid "$tokens" "$slots"
     exit "$1"
   }
 
@@ -204,7 +212,30 @@ main() {
     esac
   }
 
+  # slot_cpus: the CPU list of each slot, CI_SLOT_CPUS cores of the ones
+  # this script may run on, CI_JOBS of them if set, at least one. A slot is
+  # handed out as one byte, its index as a letter, because readers of a FIFO
+  # read a line a byte at a time and would interleave longer tokens.
+  slot_cpus=()
+  local per=${CI_SLOT_CPUS:-4} cpus=() n i
+  mapfile -t cpus < <(taskset -cp $$ | sed 's/.*: //' | tr ',' '\n' | awk -F- '{ e = NF > 1 ? $2 : $1; for (c = $1; c <= e; c++) print c }')
+  n=$((${#cpus[@]} / per))
+  [ "$n" -ge 1 ] || n=1
+  [ "$n" -le 26 ] || n=26
+  [ -z "${CI_JOBS:-}" ] || [ "$CI_JOBS" -ge "$n" ] || n=$CI_JOBS
+  for ((i = 0; i < n; i++)); do
+    local set=("${cpus[@]:i*per:per}")
+    [ "${#set[@]}" -gt 0 ] || set=("${cpus[@]}")
+    slot_cpus+=("$(IFS=,; echo "${set[*]}")")
+  done
+  letters=abcdefghijklmnopqrstuvwxyz
+
   [ -z "$has_mac" ] || [ -n "$mac_skip" ] || mac_cap=${CI_MAC_JOBS:-$(mac_default_cap)}
+  slots="$logs/host.slots"
+  rm -f "$slots"
+  mkfifo "$slots"
+  exec 9<>"$slots"
+  printf '%s' "${letters:0:n}" >&9
   mac_lock=${CI_MAC_LOCK:-$HOME/.cache/relift/mac.lock}
   tokens="$logs/mac.tokens"
   rm -f "$tokens"
@@ -236,17 +267,29 @@ main() {
     (
       queued=0
       held=
-      if [ "${j#mac-}" != "$j" ] && [ -z "$mac_skip" ]; then
-        q=$(date +%s)
-        read -r -u 8
-        held=1
-        queued=$(($(date +%s) - q))
+      slot=
+      q=$(date +%s)
+      if [ "${j#mac-}" != "$j" ]; then
+        if [ -z "$mac_skip" ]; then
+          read -r -u 8
+          held=1
+        fi
+      else
+        read -r -n 1 -u 9 slot
       fi
+      queued=$(($(date +%s) - q))
       s=$(date +%s)
       set +e
       limit=$(limit_minutes "$j")
       set -m
-      job "$j" >"$logs/$j.log" 2>&1 &
+      (
+        if [ -n "$slot" ]; then
+          i=${letters%%"$slot"*}
+          export CI_CPUSET=${slot_cpus[${#i}]}
+          taskset -cp "$CI_CPUSET" "$BASHPID" >/dev/null
+        fi
+        job "$j"
+      ) >"$logs/$j.log" 2>&1 &
       pid=$!
       echo "$pid" >"$logs/$j.pgid"
       killed=
@@ -266,6 +309,7 @@ main() {
       set +m
       set -e
       [ -z "$held" ] || echo >&8
+      [ -z "$slot" ] || printf '%s' "$slot" >&9
       if [ -n "$killed" ]; then
         echo "killed after $limit minutes (the workflow's timeout-minutes)" >>"$logs/$j.log"
         rc=1

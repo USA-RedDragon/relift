@@ -25,7 +25,7 @@ mkdir -p "$src" "$arb"
 cp -r "$ROOT/check/nds-timing/." "$src/"
 cp -r "$ROOT/check/nds-timing/." "$arb/"
 docker pull -q "$DEVKITARM_IMAGE" >/dev/null
-docker run --rm -v "$src:/src" -v "$arb:/arb" -w /src/sdk -e OWNER -e PART "$DEVKITARM_IMAGE" bash -euo pipefail -c '
+docker run --rm "${DOCKER_CPUS[@]}" -v "$src:/src" -v "$arb:/arb" -w /src/sdk -e OWNER -e PART "$DEVKITARM_IMAGE" bash -euo pipefail -c '
   trap "chown -R \"\$OWNER\" /src /arb" EXIT
   [ "$PART" = arb ] || make relift-hwtest-ntr.nds
   [ "$PART" = timing ] || make -C /arb/sdk ARB=1 ARB_SPINS=16384u ARB_WAIT9=4194304u relift-hwtest-ntr.nds
