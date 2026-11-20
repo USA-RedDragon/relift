@@ -635,6 +635,9 @@ uint64_t nvn_pool_gpu(uint64_t pool);
     X(nvnDeviceGetInteger)                                                                                             \
     X(nvnDeviceSetWindowOriginMode)                                                                                    \
     X(nvnDeviceSetDepthMode)                                                                                           \
+    X(nvnDeviceGetWindowOriginMode)                                                                                    \
+    X(nvnDeviceGetDepthMode)                                                                                           \
+    X(nvnDeviceGenerateDebugDomainId)                                                                                  \
     X(nvnDeviceGetImageHandle)                                                                                         \
     X(nvnDeviceGetTextureHandle)                                                                                       \
     X(nvnQueueInitialize)                                                                                              \

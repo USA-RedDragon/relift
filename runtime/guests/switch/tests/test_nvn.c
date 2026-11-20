@@ -103,6 +103,35 @@ TEST(nvn_device_queries_and_syncs)
     CHECK_EQ(c->x[0], 3);
 }
 
+TEST(nvn_device_modes_read_back_what_was_set)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK_EQ(call(c, nvnh_nvnDeviceSetWindowOriginMode, heap, 1, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetWindowOriginMode, heap, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+    CHECK_EQ(call(c, nvnh_nvnDeviceSetDepthMode, heap, 1, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetDepthMode, heap, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+    CHECK_EQ(call(c, nvnh_nvnDeviceSetDepthMode, heap, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetDepthMode, heap, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetWindowOriginMode, heap, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+}
+
+TEST(nvn_debug_domain_ids_count_up)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x1000);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGenerateDebugDomainId, heap, 0, 0, 0), RET);
+    uint64_t first = c->x[0];
+    CHECK_EQ(call(c, nvnh_nvnDeviceGenerateDebugDomainId, heap, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], first + 1);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGenerateDebugDomainId, heap + 8, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], first + 2);
+}
+
 TEST(nvn_pools_report_their_descriptor_count)
 {
     rl_ctx *c = t_boot(NULL);

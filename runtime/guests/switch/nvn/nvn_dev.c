@@ -416,6 +416,41 @@ uint64_t nvnh_nvnDeviceSetDepthMode(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/**
+ * @brief nvnDeviceGetWindowOriginMode(const NVNdevice *): NVNwindowOriginMode. The driver returns the word its
+ * nvnDeviceSetWindowOriginMode stored in the device object (a one-load getter in every NVN1 and NVN2 driver read);
+ * the layer keeps that mode in its own record of the device, and the driver's initial 0 is the default the layer
+ * starts from. A device the layer does not know gives the last mode set on any device.
+ */
+uint64_t nvnh_nvnDeviceGetWindowOriginMode(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_device *d = (nvn_device *)nvn_obj_get(c->x[0], NVN_DEVICE);
+    c->x[0] = d ? d->origin_mode : nvn_device_origin_mode();
+    return nvn_ret(c);
+}
+
+/** @brief nvnDeviceGetDepthMode(const NVNdevice *): NVNdepthMode, as nvnDeviceGetWindowOriginMode answers for the origin. */
+uint64_t nvnh_nvnDeviceGetDepthMode(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_device *d = (nvn_device *)nvn_obj_get(c->x[0], NVN_DEVICE);
+    c->x[0] = d ? d->depth_mode : nvn_device_depth_mode();
+    return nvn_ret(c);
+}
+
+/**
+ * @brief nvnDeviceGenerateDebugDomainId(const NVNdevice *): the next id of a counter the driver keeps in its own
+ * data (a fetch-and-add of 1 that returns the old value, from the 0 of its zeroed data), shared by every device.
+ */
+uint64_t nvnh_nvnDeviceGenerateDebugDomainId(rl_ctx *c, uint8_t *mem)
+{
+    static uint32_t next;
+    (void)mem;
+    c->x[0] = __atomic_fetch_add(&next, 1, __ATOMIC_RELAXED);
+    return nvn_ret(c);
+}
+
 /** @brief nvnDeviceGetImageHandle(const NVNdevice *, int id): the id, as the driver encodes it (sdk 0x5d6830). */
 uint64_t nvnh_nvnDeviceGetImageHandle(rl_ctx *c, uint8_t *mem)
 {
