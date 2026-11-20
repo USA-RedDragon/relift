@@ -15,6 +15,7 @@
 #include <string.h>
 
 #define CHUNK_PAGES 8192u
+#define GROUP_PAGES 16u
 #define F_EVER 1u
 #define F_ON 2u
 
@@ -30,6 +31,11 @@ static uint64_t g_faults, g_starts;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool g_ready, g_failed;
 
+/**
+ * @brief A write to a watched page opens the whole aligned group of GROUP_PAGES pages around it: every page of the
+ * group that was watched is stamped as written and made writable again, so a writer that fills a buffer front to back
+ * faults once per group and not once per page.
+ */
 static bool fault_hook(const rl_fault *f)
 {
     rl_vm *vm = &hos.vm;
@@ -44,10 +50,31 @@ static bool fault_hook(const rl_fault *f)
     uint8_t fl = __atomic_load_n(&ck->flags[i], __ATOMIC_ACQUIRE);
     if (!(fl & F_EVER) || !rl_vm_host_writable(vm, page * hp))
         return false;
-    __atomic_store_n(&ck->stamp[i], __atomic_add_fetch(&g_stamp, 1, __ATOMIC_ACQ_REL), __ATOMIC_RELEASE);
-    __atomic_and_fetch(&ck->flags[i], (uint8_t)~F_ON, __ATOMIC_RELEASE);
+    uint32_t lo = i & ~(GROUP_PAGES - 1), hi = lo + GROUP_PAGES;
+    uint64_t stamp = __atomic_add_fetch(&g_stamp, 1, __ATOMIC_ACQ_REL);
+    bool open[GROUP_PAGES];
+    for (uint32_t k = lo; k < hi; k++) {
+        open[k - lo] = k == i;
+        if (!(__atomic_load_n(&ck->flags[k], __ATOMIC_ACQUIRE) & F_ON))
+            continue;
+        __atomic_store_n(&ck->stamp[k], stamp, __ATOMIC_RELEASE);
+        __atomic_and_fetch(&ck->flags[k], (uint8_t)~F_ON, __ATOMIC_RELEASE);
+        open[k - lo] = true;
+    }
     __atomic_add_fetch(&g_faults, 1, __ATOMIC_RELAXED);
-    return rl_vm_host_access(vm, page * hp, hp, true) == 0;
+    bool ok = true;
+    for (uint32_t k = lo; k < hi;) {
+        if (!open[k - lo]) {
+            k++;
+            continue;
+        }
+        uint32_t e = k;
+        while (e < hi && open[e - lo])
+            e++;
+        ok = rl_vm_host_access(vm, ((uint64_t)c * CHUNK_PAGES + k) * hp, (uint64_t)(e - k) * hp, true) == 0 && ok;
+        k = e;
+    }
+    return ok;
 }
 
 static bool ready(void)
