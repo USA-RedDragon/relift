@@ -554,6 +554,14 @@ enum nvn_cmd_op {
 #define NVN_COPY_ROW_STRIDE_ARG 6
 #define NVN_COPY_IMAGE_STRIDE_ARG 7
 
+/**
+ * @brief The words of the value a generic vertex output holds before its program stores to it, (0, 0, 0, 1) as float
+ * bits. The translator (gpus/nv translate io vtg.rs, position_defaults and finish) writes it to every output the
+ * vertex program declares; a fragment input the vertex program does not declare reads the same value here.
+ * Inferred: the console's vertex stage leaves it in the output buffer; no per component measurement exists.
+ */
+static const uint32_t UNWRITTEN_VARYING[4] = { 0x00000000u, 0x00000000u, 0x00000000u, 0x3f800000u };
+
 typedef struct nvn_cmd {
     uint32_t op;
     uint64_t x[8];
