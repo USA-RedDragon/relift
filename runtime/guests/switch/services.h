@@ -106,6 +106,10 @@ void rl_srv_install_audsmx(void);
 void rl_srv_install_friend(void);
 /** @brief Registers nifm:u (srv_nifm.c). */
 void rl_srv_install_nifm(void);
+/** @brief Installs nsd:u and nsd:a, the network settings services. */
+void rl_srv_install_nsd(void);
+/** @brief Installs ssl and ssl:s, the TLS services. */
+void rl_srv_install_ssl(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
