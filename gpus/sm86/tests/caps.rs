@@ -155,4 +155,25 @@ fn a_program_set_translates_into_a_table() {
             .collect::<Vec<u8>>()
     );
     assert!(z.len() < b.len());
+    let head = relift_gpu_nv::translate::build::compressed_head(&[
+        relift_gpu_nv::translate::build::Frame {
+            key: [1; 32],
+            frame_len: 5,
+            words: 9,
+        },
+        relift_gpu_nv::translate::build::Frame {
+            key: [2; 32],
+            frame_len: 8,
+            words: 3,
+        },
+    ]);
+    assert_eq!(&head[..8], b"RLSPV002");
+    assert_eq!(u32::from_le_bytes(head[8..12].try_into().unwrap()), 2);
+    let at =
+        |i: usize| u64::from_le_bytes(head[12 + 48 * i + 32..12 + 48 * i + 40].try_into().unwrap());
+    assert_eq!(
+        (at(0), at(1)),
+        (108, 116),
+        "frames follow the index, each padded to 4 bytes"
+    );
 }

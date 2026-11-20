@@ -118,29 +118,54 @@ impl Table {
     /// The table with each module zstd-compressed at `level` (see the
     /// module documentation).
     pub fn to_compressed_bytes(&self, level: i32) -> std::io::Result<Vec<u8>> {
-        let n = self.shaders.len();
-        let mut frames = Vec::with_capacity(n);
-        for (_, words, _) in self.shaders.values() {
+        let mut frames = Vec::with_capacity(self.shaders.len());
+        let mut index = Vec::with_capacity(self.shaders.len());
+        for (key, (_, words, _)) in &self.shaders {
             let raw: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-            frames.push(zstd::bulk::compress(&raw, level)?);
+            let f = zstd::bulk::compress(&raw, level)?;
+            index.push(Frame {
+                key: *key,
+                frame_len: f.len() as u32,
+                words: words.len() as u32,
+            });
+            frames.push(f);
         }
-        let mut out = Vec::new();
-        out.extend(b"RLSPV002");
-        out.extend((n as u32).to_le_bytes());
-        let mut at = 12 + 48 * n;
-        for ((key, (_, words, _)), f) in self.shaders.iter().zip(&frames) {
-            out.extend(key);
-            out.extend((at as u64).to_le_bytes());
-            out.extend((f.len() as u32).to_le_bytes());
-            out.extend((words.len() as u32).to_le_bytes());
-            at += f.len().next_multiple_of(4);
-        }
+        let mut out = compressed_head(&index);
         for f in &frames {
             out.extend(f);
             out.resize(out.len().next_multiple_of(4), 0);
         }
         Ok(out)
     }
+}
+
+/// One module of a compressed table: its key, the length of its zstd frame
+/// in bytes and the length of the module in 32-bit words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Frame {
+    pub key: [u8; 32],
+    pub frame_len: u32,
+    pub words: u32,
+}
+
+/// The bytes of a compressed table before its frames (see the module
+/// documentation), for `frames` sorted by key. The frames follow in the
+/// same order, each padded to 4 bytes, so a table can be written a frame
+/// at a time.
+pub fn compressed_head(frames: &[Frame]) -> Vec<u8> {
+    let n = frames.len();
+    let mut out = Vec::with_capacity(12 + 48 * n);
+    out.extend(b"RLSPV002");
+    out.extend((n as u32).to_le_bytes());
+    let mut at = (12 + 48 * n) as u64;
+    for f in frames {
+        out.extend(f.key);
+        out.extend(at.to_le_bytes());
+        out.extend(f.frame_len.to_le_bytes());
+        out.extend(f.words.to_le_bytes());
+        at += u64::from(f.frame_len).next_multiple_of(4);
+    }
+    out
 }
 
 const FLAGS: &[(&str, u64)] = &[
