@@ -245,7 +245,8 @@ typedef struct video_session {
     uint64_t submitted;
     handed free[RING];
     uint32_t nfree;
-    frame pending[RING];
+    /** @brief Decoded frames not yet in an image; the extra slot keeps the end-of-stream marker when the ring is full. */
+    frame pending[RING + 1];
     uint32_t npending;
     finished done[RING];
     uint32_t ndone;
@@ -568,7 +569,7 @@ static void fill_images(video_session *v)
 
 static void queue_frame(video_session *v, const rl_vp9_image *im, uint64_t pts, bool end)
 {
-    if (v->npending >= RING)
+    if (v->npending >= RING + (end ? 1u : 0u))
         return;
     frame *f = &v->pending[v->npending];
     memset(f, 0, sizeof *f);

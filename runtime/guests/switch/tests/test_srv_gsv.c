@@ -8,6 +8,8 @@
 #include "tc.h"
 #include "services.h"
 
+#include <relift/video.h>
+
 #define CUR_PROCESS_HANDLE 0xFFFF8001u
 
 /** @brief A TIPC request on session h with the copy handles and the data words; returns the result. */
@@ -517,4 +519,76 @@ TEST(gsv_is_not_on_the_switch)
     uint64_t heap = t_heap(c, 0x200000);
     CHECK_EQ(supervisor(c, heap), 0);
     CHECK_EQ(tc_open_service_result(c, heap, "chat:u"), SM_RESULT_NOT_REGISTERED);
+}
+
+static uint8_t g_pic[16 * 16 * 3 / 2];
+
+static void *fake_open(void) { return g_pic; }
+
+static void fake_close(void *d) { (void)d; }
+
+static int fake_decode(void *d, const uint8_t *data, size_t size, rl_video_image *out)
+{
+    (void)d;
+    (void)data;
+    (void)size;
+    *out = (rl_video_image){ .width = 16, .height = 16, .y = g_pic, .u = g_pic + 256, .v = g_pic + 320, .y_stride = 16,
+                             .uv_stride = 8 };
+    return 1;
+}
+
+static const rl_vp9_stream_backend g_fake = { "fake", fake_open, fake_close, fake_decode };
+
+TEST(gsv_video_end_of_stream_reaches_the_client_when_the_frame_ring_is_full)
+{
+    rl_vp9_stream_backend_override(&g_fake);
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, (tc_req){ .cmd = 906, .tipc = true });
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    tc_obj vs = { .handle = r.move[0] };
+    memcpy(t_mem() + heap + 0x100, "video/vp9", 10);
+    tc_req q = tc_new(101);
+    q.tipc = true;
+    q.na = 1;
+    q.a_addr[0] = heap + 0x100;
+    q.a_size[0] = 10;
+    tc_put32(&q, 16);
+    tc_put32(&q, 16);
+    tc_put32(&q, 60);
+    CHECK_EQ(tc_send(c, vs, q).result, 0);
+    for (uint32_t i = 0; i < 20; i++) {
+        q = tc_new(109);
+        q.tipc = true;
+        q.na = 1;
+        q.a_addr[0] = heap + 0x200;
+        q.a_size[0] = 4;
+        tc_put64(&q, 1000 * i);
+        uint8_t end = i == 19;
+        tc_put(&q, &end, 1);
+        CHECK_EQ(tc_send(c, vs, q).result, 0);
+    }
+    uint32_t frames = 0;
+    bool end_seen = false;
+    for (uint32_t i = 0; i < 40 && !end_seen; i++) {
+        q = tc_new(311);
+        q.tipc = true;
+        tc_put32(&q, 1 + i % 2);
+        CHECK_EQ(tc_send(c, vs, q).result, 0);
+        q = tc_new(213);
+        q.tipc = true;
+        r = tc_send(c, vs, q);
+        CHECK_EQ(r.result, 0);
+        end_seen = tc_u32(&r, 32) == 1;
+        frames++;
+    }
+    CHECK(end_seen);
+    CHECK_EQ(frames, 17);
+    rl_vp9_stream_backend_override(NULL);
 }

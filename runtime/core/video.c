@@ -49,8 +49,14 @@ static const rl_vp9_stream_backend g_stub_stream = {
     .decode = stub_stream_decode,
 };
 
+static const rl_vp9_stream_backend *g_vp9_override;
+
+void rl_vp9_stream_backend_override(const rl_vp9_stream_backend *b) { g_vp9_override = b; }
+
 const rl_vp9_stream_backend *rl_vp9_stream_backend_current(void)
 {
+    if (g_vp9_override)
+        return g_vp9_override;
 #ifdef RL_HOST_VP9
     return rl_host_vp9_stream_backend();
 #else

@@ -198,6 +198,9 @@ RL_RUNTIME_API const rl_av1_stream_backend *rl_av1_stream_backend_current(void);
 /** @brief The host's AV1 backend (runtime/host, only with RL_HOST_AV1). */
 RL_RUNTIME_API const rl_av1_stream_backend *rl_host_av1_stream_backend(void);
 
+/** @brief Makes b the stream VP9 backend of rl_vp9_stream_backend_current, for tests; NULL restores the default. */
+RL_RUNTIME_API void rl_vp9_stream_backend_override(const rl_vp9_stream_backend *b);
+
 /** @brief The whole-frame VP9 backend: the host's when built in, else a stub that decodes nothing. */
 RL_RUNTIME_API const rl_vp9_stream_backend *rl_vp9_stream_backend_current(void);
 /** @brief The host's whole-frame VP9 backend (runtime/host, only with RL_HOST_VP9). */
