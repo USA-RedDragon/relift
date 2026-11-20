@@ -21,6 +21,11 @@
 //! address is reported as a continuation, to be made a function entry,
 //! instead of a resume point.
 //!
+//! An indirect call has no known target. When the address of any escaper is
+//! taken anywhere in the program (a code address in data or computed in
+//! code), every indirect call is treated as a call to an escaper, which is
+//! sound; a program that never takes one's address gets no such pads.
+//!
 //! A forward dataflow over each function tracks, for every register, whether
 //! it holds the stack pointer plus a constant and whether its value derives
 //! from the link register. A call leaves the registers the frontend names
@@ -32,7 +37,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use relift_guest::Frontend;
+use relift_guest::{Frontend, Module, RootKind};
 use relift_ir::{BinOp, Block, Flow, Next, Op};
 
 use crate::{Analysis, Function, Insn};
@@ -71,6 +76,7 @@ impl V {
 struct Summary {
     escapes: bool,
     calls: Vec<(u64, u64)>,
+    indirect: Vec<u64>,
     tails: Vec<u64>,
 }
 
@@ -148,10 +154,10 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
         let mut next: Vec<u64> = Vec::new();
         match (b.exit.flow, b.exit.next) {
             (Flow::Call { ret }, n) => {
-                if let Next::Const(t) = n
-                    && known.contains_key(&t)
-                {
-                    sum.calls.push((ret, t));
+                match n {
+                    Next::Const(t) if known.contains_key(&t) => sum.calls.push((ret, t)),
+                    Next::Const(_) => {}
+                    _ => sum.indirect.push(ret),
                 }
                 for (r, v) in out.iter_mut().enumerate() {
                     if !preserved.contains(&r) {
@@ -204,7 +210,7 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
 }
 
 /// The resume points and continuations of `a`'s functions.
-pub fn return_escapes(fe: &dyn Frontend, a: &Analysis) -> Escapes {
+pub fn return_escapes(fe: &dyn Frontend, module: &Module, a: &Analysis) -> Escapes {
     if fe.link_register().is_none() {
         return Escapes::default();
     }
@@ -231,7 +237,29 @@ pub fn return_escapes(fe: &dyn Frontend, a: &Analysis) -> Escapes {
         escapers.extend(more);
     }
     let mut out = Escapes::default();
+    let mut taken: BTreeSet<u64> = module
+        .roots
+        .iter()
+        .filter(|r| r.kind == RootKind::Pointer)
+        .map(|r| r.addr)
+        .collect();
+    for f in a.functions.values() {
+        taken.extend(crate::address_taken(module, fe.granule(), f));
+    }
+    let escaper_taken = escapers.iter().any(|e| taken.contains(e));
     for (&g, s) in &sums {
+        if escaper_taken {
+            for &ret in &s.indirect {
+                if known.contains_key(&ret) {
+                    continue;
+                }
+                if escapers.contains(&g) {
+                    out.continuations.insert(ret);
+                } else {
+                    out.resume_points.push((g, ret));
+                }
+            }
+        }
         for &(ret, t) in &s.calls {
             if !escapers.contains(&t) || known.contains_key(&ret) {
                 continue;

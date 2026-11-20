@@ -1059,7 +1059,7 @@ target is a pad. An escaper that itself calls an escaper (musl's
 `sigsetjmp`) has no frame when the jump comes; the address after its inner
 call is made a function entry instead (a continuation) that runs on top of
 the frames and returns to the saved address in the live frame, which is a
-pad. Calls through a function pointer to an escaper are not covered.
+pad. Calls through a function pointer to an escaper are treated as calls to one when an escaper's address is taken anywhere in the program.
 
 ## 7.2 Memory routine overrides
 

@@ -782,7 +782,7 @@ fn stack_slots_follow_the_stack_pointer_across_calls() {
 
 fn escapes_of(code: &[[u8; 4]], roots: &[u64]) -> escape::Escapes {
     let m = module(code, &[], roots);
-    escape::return_escapes(&Toy, &discover(&Toy, &m))
+    escape::return_escapes(&Toy, &m, &discover(&Toy, &m))
 }
 
 #[test]
@@ -861,7 +861,7 @@ fn applying_the_escapes_adds_the_pads() {
         &[BASE],
     );
     let mut a = discover(&Toy, &m);
-    let e = escape::return_escapes(&Toy, &a);
+    let e = escape::return_escapes(&Toy, &m, &a);
     escape::apply(&mut a, &e);
     assert_eq!(a.functions[&BASE].pads, BTreeSet::from([BASE + 4]));
 }
@@ -881,4 +881,22 @@ fn a_return_address_parked_in_a_register_across_a_call_still_escapes() {
         &[BASE],
     );
     assert_eq!(e.resume_points, [(BASE, BASE + 4)]);
+}
+
+#[test]
+fn an_indirect_call_is_a_resume_point_when_an_escapers_address_is_taken() {
+    let code = |imm: u16| {
+        [
+            word(0x04, 1, imm),
+            word(0x0c, 1, 0),
+            word(0x03, 0, 0),
+            word(0x00, 0, 0),
+            word(0x0b, 3, 1),
+            word(0x03, 0, 0),
+        ]
+    };
+    let e = escapes_of(&code(0x1010), &[BASE]);
+    assert_eq!(e.resume_points, [(BASE, BASE + 8)]);
+    let e = escapes_of(&code(0x1100), &[BASE, BASE + 16]);
+    assert_eq!(e, escape::Escapes::default());
 }

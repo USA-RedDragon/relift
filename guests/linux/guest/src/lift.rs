@@ -46,7 +46,7 @@ pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
     let fe = frontend();
     let mut module = program::module(p);
     let mut analysis = discover(&fe, &module);
-    let found = relift_analyze::escape::return_escapes(&fe, &analysis);
+    let found = relift_analyze::escape::return_escapes(&fe, &module, &analysis);
     if !found.continuations.is_empty() {
         module
             .roots
@@ -57,7 +57,7 @@ pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
             }));
         analysis = discover(&fe, &module);
     }
-    let found = relift_analyze::escape::return_escapes(&fe, &analysis);
+    let found = relift_analyze::escape::return_escapes(&fe, &module, &analysis);
     relift_analyze::escape::apply(&mut analysis, &found);
     let granule = fe.granule();
     let raw = |pc: u64| {
