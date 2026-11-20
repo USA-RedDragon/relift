@@ -141,7 +141,9 @@
      "canonicalNan32": true,
      "exactFloat16": true,
      "denormDefault32": 1,
-     "denormPreserveMode32": false
+     "denormPreserveMode32": false,
+     "denormAddFlush32": true,
+     "denormMulFix32": 0
     }
    }
   }

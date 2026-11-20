@@ -1160,9 +1160,27 @@ TEST(nvn_probes_reach_device_json)
     char want[256];
     snprintf(want, sizeof want,
              "\"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": %s, \"denormDefault32\": %u, "
-             "\"denormPreserveMode32\": %s",
+             "\"denormPreserveMode32\": %s, \"denormAddFlush32\": %s, \"denormMulFix32\": %u",
              p.canonical_nan32 ? "true" : "false", p.exact_f16 ? "true" : "false", p.hmma_coop ? "true" : "false",
-             p.denorm32, p.denorm_preserve_mode32 ? "true" : "false");
+             p.denorm32, p.denorm_preserve_mode32 ? "true" : "false", p.denorm_add_flush ? "true" : "false",
+             p.denorm_mul_fix);
     CHECK(strstr(text, want) != NULL);
     fprintf(stderr, "nvn_probes_reach_device_json: %s\n", want);
+}
+
+TEST(nvn_denorm_probe_holds_on_millions_of_random_rows)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_denorm_probe_holds_on_millions_of_random_rows: no host Vulkan device, skipped\n");
+        return;
+    }
+    nvn_denorm_class big;
+    for (uint32_t seed = 1; seed <= 2; seed++) {
+        CHECK(nvn_vk_denorm_stress(4000000, seed, &big));
+        fprintf(stderr, "denorm stress seed %u: add models %u, mul models %u, mul fix %u\n", seed, big.add_models,
+                big.mul_models, big.mul_fix);
+        CHECK((big.add_models & 1) == (uint32_t)p.denorm_add_flush);
+        CHECK(p.denorm_mul_fix == 255 ? big.mul_fix_ok == 0 : (big.mul_fix_ok >> p.denorm_mul_fix & 1) != 0);
+    }
 }

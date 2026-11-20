@@ -277,6 +277,14 @@ typedef struct nvn_probes {
      * flushed), 2 keep them as IEEE 754 does, 0 neither (or SignedZeroInfNanPreserve is missing).
      */
     uint32_t denorm32;
+    /** @brief Whether addition follows the flushing model (inputs read as zero, results rounded to 24 bits and flushed) exactly. */
+    bool denorm_add_flush;
+    /**
+     * @brief The smallest correction of a multiplication result that makes it follow that model: bit 0 the sign of
+     * a zero result, bit 1 a result of the smallest normal number that the model flushes (see den_fix); 255 when
+     * no combination does.
+     */
+    uint32_t denorm_mul_fix;
     /** @brief The DenormPreserve execution mode, on top of those, keeps denormals as IEEE 754 does. */
     bool denorm_preserve_mode32;
 } nvn_probes;
@@ -292,8 +300,19 @@ bool nvn_probe_nan_check(const uint32_t *w);
 uint32_t nvn_probe_denorm_rows(void);
 /** @brief Writes the denormal probe's inputs to w[0 .. 2 * rows). */
 void nvn_probe_denorm_input(uint32_t *w);
-/** @brief Whether the denormal probe's outputs (after its inputs in w) all follow the flushing model (bit 0) and the IEEE model (bit 1). */
-uint32_t nvn_probe_denorm_check(const uint32_t *w);
+/** @brief Writes rows random inputs of the denormal probe to w (see nvn_probe.c). */
+void nvn_probe_denorm_random(uint32_t *w, uint32_t rows, uint32_t seed);
+/** @brief What the denormal probe found: the models each operation matches on every row (bit 0 flush before, 1 IEEE, 2 flush after), and the multiplication correction. */
+typedef struct nvn_denorm_class {
+    uint32_t add_models, mul_models, mul_fix;
+    /** @brief Bit f is set when correction f of the multiplication gives the flushing model on every row. */
+    uint32_t mul_fix_ok;
+} nvn_denorm_class;
+/** @brief Runs the denormal probe on the host device over rows random rows of seed and says what it found (see nvn_probe_denorm_check); false without a device. */
+bool nvn_vk_denorm_stress(uint32_t rows, uint32_t seed, nvn_denorm_class *out);
+
+/** @brief Checks the outputs (after the rows inputs in w) of the denormal probe; the result is 1 when both operations follow the flushing model, 2 the IEEE one, else 0. */
+uint32_t nvn_probe_denorm_check(const uint32_t *w, uint32_t rows, nvn_denorm_class *out);
 /** @brief Half-precision probe sizes: arithmetic rows (two lanes each), conversions to half, words in all. */
 uint32_t nvn_probe_f16_rows(void);
 uint32_t nvn_probe_f16_convs(void);

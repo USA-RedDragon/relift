@@ -26,10 +26,10 @@ mod uniform;
 
 pub use calls::ASSERT_BINDING;
 pub use host::{
-    Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, DeviceCaps, GUEST_MEMORY_SET,
-    GlobalPath, HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, MeshLimits,
-    SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp,
-    WarpPath,
+    Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, DeviceCaps, FIX_ROUND_AFTER,
+    FIX_ZERO_SIGN, GUEST_MEMORY_SET, GlobalPath, HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS,
+    MeshLimits, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT,
+    SEGMENT_SHIFT_SPEC, Warp, WarpPath,
 };
 pub use io::mesh::{
     Component, MESH_FIRST_TASK_OFFSET, MeshPath, MeshPipeline, MeshTopology,

@@ -470,9 +470,10 @@ static bool probe_canonical_nan(bool szinp, bool dp32, bool fma32)
  * (nvn_probe_denorm_check): 1 flush, 2 keep, 0 neither. With dp32 (the device lists DenormPreserve) it also runs the
  * DEN32 DP32 variant and sets *preserve_mode when that keeps denormals.
  */
-static uint32_t probe_denorm32(bool szinp, bool dp32, bool *preserve_mode)
+static uint32_t probe_denorm32(bool szinp, bool dp32, bool *preserve_mode, nvn_denorm_class *cls)
 {
     *preserve_mode = false;
+    *cls = (nvn_denorm_class){ 0, 0, 255, 0 };
     if (!szinp)
         return 0;
     uint32_t rows = nvn_probe_denorm_rows(), kind = 0;
@@ -489,11 +490,14 @@ static uint32_t probe_denorm32(bool szinp, bool dp32, bool *preserve_mode)
         size_t size = mode ? sizeof nvn_probe_den_dp : sizeof nvn_probe_den;
         if (!run_probe(code, size, &buf, rows, 0, (rows + 63) / 64, 0))
             continue;
-        uint32_t got = nvn_probe_denorm_check(w);
-        if (mode)
+        nvn_denorm_class c;
+        uint32_t got = nvn_probe_denorm_check(w, rows, &c);
+        if (mode) {
             *preserve_mode = got == 2;
-        else
-            kind = got == 1 ? 1 : got == 2 ? 2 : 0;
+        } else {
+            kind = got;
+            *cls = c;
+        }
     }
     nvn_vk_staging_free(&buf);
     return kind;
@@ -689,8 +693,11 @@ static void write_caps(void)
                 fma.b[0];
     g.probes.canonical_nan32 = probe_canonical_nan(p12.shaderSignedZeroInfNanPreserveFloat32,
                                                    p12.shaderDenormPreserveFloat32, has[3] && fma.b[1]);
+    nvn_denorm_class dc;
     g.probes.denorm32 = probe_denorm32(p12.shaderSignedZeroInfNanPreserveFloat32, p12.shaderDenormPreserveFloat32,
-                                       &g.probes.denorm_preserve_mode32);
+                                       &g.probes.denorm_preserve_mode32, &dc);
+    g.probes.denorm_add_flush = dc.add_models & 1;
+    g.probes.denorm_mul_fix = dc.mul_fix;
     g.probes.exact_f16 = half && probe_exact_f16();
     bool sub32 = f13.subgroupSizeControl && f13.computeFullSubgroups && p13.minSubgroupSize <= 32 &&
                  p13.maxSubgroupSize >= 32 && (p13.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT);
@@ -698,15 +705,34 @@ static void write_caps(void)
                                          f12.vulkanMemoryModelDeviceScope && f12.shaderFloat16 && sub32);
     fprintf(f,
             "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": "
-            "%s, \"denormDefault32\": %u, \"denormPreserveMode32\": %s },\n",
+            "%s, \"denormDefault32\": %u, \"denormPreserveMode32\": %s, \"denormAddFlush32\": %s, "
+            "\"denormMulFix32\": %u },\n",
             B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop), g.probes.denorm32,
-            B(g.probes.denorm_preserve_mode32));
+            B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix);
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);
     fprintf(f, " }\n   }\n  }\n },\n \"source\": \"relift runtime, %s\"\n}\n", g.name);
     fclose(f);
     free(ext);
+}
+
+bool nvn_vk_denorm_stress(uint32_t rows, uint32_t seed, nvn_denorm_class *out)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok || rows > 65535u * 64u)
+        return false;
+    staging buf;
+    if (!nvn_vk_staging_new(&buf, 16ull * rows))
+        return false;
+    uint32_t *w = (uint32_t *)(void *)buf.map;
+    memset(w, 0, 16ull * rows);
+    nvn_probe_denorm_random(w, rows, seed);
+    bool ok = run_probe(nvn_probe_den, sizeof nvn_probe_den, &buf, rows, 0, (rows + 63) / 64, 0);
+    if (ok)
+        nvn_probe_denorm_check(w, rows, out);
+    nvn_vk_staging_free(&buf);
+    return ok;
 }
 
 bool nvn_vk_probes(nvn_probes *out)

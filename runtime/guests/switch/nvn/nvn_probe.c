@@ -59,13 +59,57 @@ static const uint32_t den_vals[] = { 0x00000000, 0x80000000, 0x00000001, 0x80000
                                      0x0d800000, 0x8d800000, 0x73800000, 0x7f7fffff, 0x40000000, 0x34000000 };
 #define DEN_VALS (uint32_t)(sizeof den_vals / sizeof den_vals[0])
 
-uint32_t nvn_probe_denorm_rows(void) { return DEN_VALS * DEN_VALS; }
+#define DEN_RANDOM 16384u
+
+uint32_t nvn_probe_denorm_rows(void) { return DEN_VALS * DEN_VALS + DEN_RANDOM; }
 
 void nvn_probe_denorm_input(uint32_t *w)
 {
     for (uint32_t i = 0; i < DEN_VALS * DEN_VALS; i++) {
         w[2 * i] = den_vals[i / DEN_VALS];
         w[2 * i + 1] = den_vals[i % DEN_VALS];
+    }
+    nvn_probe_denorm_random(w + 2 * DEN_VALS * DEN_VALS, DEN_RANDOM, 0);
+}
+
+/**
+ * @brief Writes rows random inputs of the denormal probe to w (two words each): bits from the whole range, from
+ * the exponents at and just above zero (denormals and the smallest normals), and in pairs whose exponents sum to
+ * about the smallest normal exponent (products at the edge of the normal range, a quarter of them with the mantissas that put the product just below the smallest normal number), from the seed.
+ */
+void nvn_probe_denorm_random(uint32_t *w, uint32_t rows, uint32_t seed)
+{
+    uint32_t x = seed * 2654435761u + 1;
+    for (uint32_t i = 0; i < rows; i++) {
+        uint32_t r[4];
+        for (int k = 0; k < 4; k++) {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            r[k] = x;
+        }
+        uint32_t kind = r[0] % 4, a = r[1], b = r[2];
+        if (kind == 1) {
+            a = (a & 0x807fffffu) | (r[3] % 4) << 23;
+            b = (b & 0x807fffffu) | (r[3] >> 4) % 4 << 23;
+        } else if (kind >= 2) {
+            uint32_t ea = 1 + r[3] % 127;
+            int eb = 128 - (int)ea + (int)(r[3] >> 8) % 5 - 2;
+            eb = eb < 0 ? 0 : eb;
+            a = (a & 0x807fffffu) | ea << 23;
+            b = (b & 0x807fffffu) | (uint32_t)eb << 23;
+            if (kind == 3) {
+                a |= 0x007fffffu;
+                b &= 0xff800000u;
+            }
+            if (r[3] >> 12 & 1) {
+                uint32_t t = a;
+                a = b;
+                b = t;
+            }
+        }
+        w[2 * i] = a;
+        w[2 * i + 1] = b;
     }
 }
 
@@ -102,24 +146,67 @@ static uint32_t ftz_bits(double v)
     return float_bits((float)v);
 }
 
-uint32_t nvn_probe_denorm_check(const uint32_t *w)
+/** @brief The result of rounding v to the denormal grid and then flushing a denormal result to the zero of its sign. */
+static uint32_t after_bits(double v)
 {
-    uint32_t rows = nvn_probe_denorm_rows(), flush = 1, keep = 1;
-    for (uint32_t i = 0; i < rows; i++) {
-        float a = bits_float(w[2 * i]), b = bits_float(w[2 * i + 1]);
-        const uint32_t *out = w + 2 * rows + 2 * i;
-        double da = a, db = b;
-        double fa = flush32(a), fb = flush32(b);
-        uint32_t want_keep[2] = { float_bits((float)(da + db)), float_bits((float)(da * db)) };
-        uint32_t want_flush[2] = { ftz_bits(fa + fb), ftz_bits(fa * fb) };
-        for (uint32_t k = 0; k < 2; k++) {
-            if (out[k] != want_keep[k])
-                keep = 0;
-            if (out[k] != want_flush[k])
-                flush = 0;
-        }
+    uint32_t r = float_bits((float)v);
+    return (r & 0x7f800000u) == 0 ? r & 0x80000000u : r;
+}
+
+/** @brief The result bits of the multiplication or addition (op 1 or 0) of the bits a and b under denormal model (bit 0 flush before, 1 keep, 2 flush after). */
+static uint32_t den_model(uint32_t model, uint32_t op, uint32_t a, uint32_t b)
+{
+    float fa = bits_float(a), fb = bits_float(b);
+    double x = model == 1 ? (double)fa : flush32(fa), y = model == 1 ? (double)fb : flush32(fb);
+    double v = op ? x * y : x + y;
+    return model == 0 ? ftz_bits(v) : model == 1 ? float_bits((float)v) : after_bits(v);
+}
+
+/**
+ * @brief What a translator correction of a multiplication result res (bits of a * b on the device) does: fix bit 0
+ * gives a zero result the sign of the exclusive or of the operands' signs; bit 1 turns a result of exactly the
+ * smallest normal number into zero when the product, rounded to 24 bits with an unbounded exponent, is below it (a
+ * device that rounds to the denormal grid before it flushes). The translator computes that product by scaling the
+ * operand of the smaller exponent by 2^64.
+ */
+static uint32_t den_fix(uint32_t fix, uint32_t res, uint32_t a, uint32_t b)
+{
+    uint32_t sign = (a ^ b) & 0x80000000u;
+    if (fix & 2 && (res & 0x7fffffffu) == 0x00800000u) {
+        double p = ldexp(flush32(bits_float(a)) * flush32(bits_float(b)), 64);
+        if (fabsf((float)p) < ldexpf(1.0f, -62))
+            res = sign;
     }
-    return flush | keep << 1;
+    if (fix & 1 && (res & 0x7fffffffu) == 0)
+        res = sign;
+    return res;
+}
+
+/** @brief Whether the result bits got and want agree: equal, or both a NaN (the payload is no part of what this probe asks). */
+static bool den_same(uint32_t got, uint32_t want) { return got == want || (is_nan32(got) && is_nan32(want)); }
+
+uint32_t nvn_probe_denorm_check(const uint32_t *w, uint32_t rows, nvn_denorm_class *out)
+{
+    uint32_t add = 7, mul = 7, fixes = 0xf;
+    for (uint32_t i = 0; i < rows; i++) {
+        uint32_t a = w[2 * i], b = w[2 * i + 1];
+        const uint32_t *o = w + 2 * rows + 2 * i;
+        for (uint32_t m = 0; m < 3; m++) {
+            if (!den_same(o[0], den_model(m, 0, a, b)))
+                add &= ~(1u << m);
+            if (!den_same(o[1], den_model(m, 1, a, b)))
+                mul &= ~(1u << m);
+        }
+        uint32_t want = den_model(0, 1, a, b);
+        for (uint32_t f = 0; f < 4; f++)
+            if (!den_same(den_fix(f, o[1], a, b), want))
+                fixes &= ~(1u << f);
+    }
+    out->add_models = add;
+    out->mul_models = mul;
+    out->mul_fix = fixes ? (uint32_t)__builtin_ctz(fixes) : 255;
+    out->mul_fix_ok = fixes;
+    return add & mul & 1 ? 1 : add & mul & 2 ? 2 : 0;
 }
 
 double nvn_half_value(uint16_t h)

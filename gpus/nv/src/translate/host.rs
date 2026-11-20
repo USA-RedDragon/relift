@@ -98,6 +98,12 @@ pub struct HostProfile {
     pub float32_atomic_add: bool,
     /// Denormal behavior without an execution mode.
     pub denorm: Denorm,
+    /// A device that flushes as SM86 `.FTZ` does except for what a probe
+    /// found in its multiplication, which the translator corrects:
+    /// [`FIX_ZERO_SIGN`] and [`FIX_ROUND_AFTER`]. Its addition follows the
+    /// flushing model exactly. `None` for a device without such a probe
+    /// result.
+    pub flush_fix: Option<u8>,
     /// `shaderDenormPreserveFloat32`: the DenormPreserve execution mode can
     /// be requested.
     pub denorm_preserve_mode: bool,
@@ -193,6 +199,7 @@ impl HostProfile {
             int64_atomics_image: true,
             float32_atomic_add: true,
             denorm: Denorm::Flush,
+            flush_fix: None,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: true,
@@ -226,6 +233,7 @@ impl HostProfile {
                 ..MeshLimits::NVIDIA
             }),
             denorm: Denorm::Unknown,
+            flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
             max_shared_bytes: 1 << 16,
@@ -253,6 +261,7 @@ impl HostProfile {
                 ..MeshLimits::NVIDIA
             }),
             denorm: Denorm::Unknown,
+            flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
             max_shared_bytes: 32_768,
@@ -283,6 +292,7 @@ impl HostProfile {
             }),
             int64_atomics_shared: false,
             denorm: Denorm::Unknown,
+            flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
             clock: Clock::Subgroup,
@@ -312,6 +322,7 @@ impl HostProfile {
             int64_atomics_shared: false,
             int64_atomics_image: false,
             denorm: Denorm::Unknown,
+            flush_fix: Some(FIX_ZERO_SIGN),
             clock: Clock::None,
             max_shared_bytes: 32_768,
             max_samplers: 1024,
@@ -343,6 +354,7 @@ impl HostProfile {
             int64_atomics_image: false,
             float32_atomic_add: false,
             denorm: Denorm::Unknown,
+            flush_fix: Some(FIX_ROUND_AFTER),
             denorm_flush_mode: true,
             fused_fma: false,
             clock: Clock::None,
@@ -376,6 +388,7 @@ impl HostProfile {
             int64_atomics_image: false,
             float32_atomic_add: false,
             denorm: Denorm::Unknown,
+            flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
             fused_fma: false,
@@ -407,6 +420,7 @@ impl HostProfile {
             warp_mesh: Warp::Absent,
             float32_atomic_add: false,
             denorm: Denorm::Unknown,
+            flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
             fused_fma: false,
@@ -443,6 +457,7 @@ impl HostProfile {
             }),
             warp_mesh: Warp::Narrow(8),
             denorm: Denorm::Flush,
+            flush_fix: None,
             fused_fma: false,
             constant_cull_stores: true,
             max_shared_bytes: 32_768,
@@ -502,6 +517,7 @@ impl HostProfile {
             int64_atomics_image: false,
             float32_atomic_add: false,
             denorm: Denorm::Unknown,
+            flush_fix: None,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: false,
@@ -594,6 +610,14 @@ impl HostProfile {
                 2 => Denorm::Preserve,
                 _ => Denorm::Unknown,
             },
+            flush_fix: match (
+                caps.get("denormDefault32"),
+                caps.on("denormAddFlush32"),
+                caps.values.get("denormMulFix32"),
+            ) {
+                (0, true, Some(&f)) if f <= 3 => Some(f as u8),
+                _ => None,
+            },
             denorm_preserve_mode: caps.on("shaderDenormPreserveFloat32")
                 && (!caps.values.contains_key("denormPreserveMode32")
                     || caps.on("denormPreserveMode32")),
@@ -630,6 +654,14 @@ impl HostProfile {
         }
     }
 }
+
+/// [`HostProfile::flush_fix`]: a multiplication that gives a zero result
+/// the wrong sign (Apple GPUs) gets the sign of the operands' product.
+pub const FIX_ZERO_SIGN: u8 = 1;
+/// [`HostProfile::flush_fix`]: a multiplication rounds to the denormal grid
+/// before it flushes (Adreno), so a product just below the smallest normal
+/// number reads as that number; the translator turns it back into zero.
+pub const FIX_ROUND_AFTER: u8 = 2;
 
 /// `VK_DRIVER_ID_NVIDIA_PROPRIETARY`.
 pub const DRIVER_NVIDIA_PROPRIETARY: u64 = 4;

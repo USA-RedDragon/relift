@@ -1,6 +1,12 @@
 {
  "devices": [
   {
+   "ReliftDeviceProbes": {
+    "denormDefault32": 0,
+    "denormPreserveMode32": false,
+    "denormAddFlush32": true,
+    "denormMulFix32": 2
+   },
    "VK_EXT_descriptor_indexing": {
     "descriptorIndexingPropertiesEXT": {
      "maxDescriptorSetUpdateAfterBindSampledImages": 16777216.0,
@@ -144,5 +150,5 @@
    }
   }
  ],
- "source": "adb shell cmd gpu vkjson, Adreno (TM) 740, Qualcomm driver 0676.53, Android 17"
+ "source": "adb shell cmd gpu vkjson, Adreno (TM) 740, Qualcomm driver 0676.53, Android 17; ReliftDeviceProbes from the relift denormal probe on the same device"
 }
