@@ -269,6 +269,8 @@ typedef struct rl_vm {
     uint32_t cap;
     /** @brief Number of host mprotect calls made (tests read it). */
     uint64_t protect_calls;
+    /** @brief Counts changes of the guest map (rl_vm_set, rl_vm_map_shm): a host protection made before a change may be gone after it. */
+    uint64_t map_gen;
 } rl_vm;
 
 /** @brief Low guard below guest address 0 (docs/abi.md section 2). */
@@ -297,6 +299,8 @@ RL_RUNTIME_API int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t p
 RL_RUNTIME_API rl_vm_block rl_vm_query(const rl_vm *vm, uint64_t addr);
 /** @brief True when [addr, addr+size) lies in one block; *out receives that block. */
 RL_RUNTIME_API bool rl_vm_uniform(const rl_vm *vm, uint64_t addr, uint64_t size, rl_vm_block *out);
+/** @brief True when the policy gives the host page containing addr read and write access. */
+RL_RUNTIME_API bool rl_vm_host_writable(const rl_vm *vm, uint64_t addr);
 /** @brief Host protection (PROT_*) the policy gives the host page containing addr. */
 RL_RUNTIME_API int rl_vm_host_prot(const rl_vm *vm, uint64_t addr);
 /**
@@ -306,6 +310,12 @@ RL_RUNTIME_API int rl_vm_host_prot(const rl_vm *vm, uint64_t addr);
  * and touches no shared state, so a fault hook may call it. Returns 0 or -1.
  */
 RL_RUNTIME_API int rl_vm_host_access(rl_vm *vm, uint64_t addr, uint64_t size, bool access);
+/**
+ * @brief Makes the host pages of [addr, addr+size) read-only (watch true: the first guest or host write to them
+ * faults into the fault hooks) or read and write again (watch false). Same alignment rules and fault-hook safety as
+ * rl_vm_host_access. Returns 0 or -1.
+ */
+RL_RUNTIME_API int rl_vm_host_watch(rl_vm *vm, uint64_t addr, uint64_t size, bool watch);
 /** @brief True when guest range [addr, addr+size) is inside the space. */
 static inline bool rl_vm_contains(const rl_vm *vm, uint64_t addr, uint64_t size)
 {
@@ -398,6 +408,13 @@ RL_RUNTIME_API void rl_fault_disarm(rl_fault_catch *prev);
 typedef bool rl_fault_hook(const rl_fault *f);
 /** @brief Sets the guest layer's fault hook (NULL for none). */
 RL_RUNTIME_API void rl_fault_set_hook(rl_fault_hook *hook);
+/**
+ * @brief Adds a hook that runs after the one rl_fault_set_hook holds and any added before it, until one returns true
+ * (the fault is handled and the access retried). Hooks run in the signal handler: no locks, no allocation. At most
+ * RL_FAULT_HOOKS; an extra one is dropped (false). Adding a hook twice keeps one.
+ */
+RL_RUNTIME_API bool rl_fault_add_hook(rl_fault_hook *hook);
+#define RL_FAULT_HOOKS 4
 /** @brief True once rl_fault_install has run, so guest faults reach the hook. */
 RL_RUNTIME_API bool rl_fault_installed(void);
 

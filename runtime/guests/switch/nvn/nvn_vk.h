@@ -7,6 +7,7 @@
 #define RELIFT_NVN_VK_H
 
 #include "nvn_priv.h"
+#include "nvn_watch.h"
 #include "vkf.h"
 
 #include <pthread.h>
@@ -69,6 +70,9 @@ typedef struct vimg {
     uint64_t written;
     /** @brief The hash of its storage when last filled, and the frame (presents + 1) it was last checked in. */
     uint64_t hash, hash_frame;
+    /** @brief Write tracking of the storage's whole pages, and the hash of the bytes beside them (nvn_watch.h). */
+    nvn_watch watch;
+    uint64_t edge_hash;
     /** @brief For a buffer texture in an imported pool: the write stamp last copied into the pool's bytes. */
     uint64_t flushed;
     VkImage image;

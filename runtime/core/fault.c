@@ -25,11 +25,25 @@
 
 static rl_vm *g_vm;
 static rl_fault_hook *g_hook;
+static rl_fault_hook *g_hooks[RL_FAULT_HOOKS];
+static int g_nhooks;
 static _Thread_local rl_fault_catch *t_catch;
 #if !defined(_WIN32)
 static _Thread_local void *t_altstack;
 #endif
 static int g_installed;
+
+/** @brief Runs the hooks over a guest fault; true when one handled it. */
+static bool run_hooks(const rl_fault *f)
+{
+    if (g_hook && g_hook(f))
+        return true;
+    int n = __atomic_load_n(&g_nhooks, __ATOMIC_ACQUIRE);
+    for (int i = 0; i < n; i++)
+        if (g_hooks[i](f))
+            return true;
+    return false;
+}
 
 #if defined(_WIN32)
 static LONG CALLBACK handler(EXCEPTION_POINTERS *ep)
@@ -48,7 +62,7 @@ static LONG CALLBACK handler(EXCEPTION_POINTERS *ep)
         f.in_guest = true;
         f.guest_addr = (uint64_t)(a - (uintptr_t)g_vm->base);
     }
-    if (f.in_guest && g_hook && g_hook(&f))
+    if (f.in_guest && run_hooks(&f))
         return EXCEPTION_CONTINUE_EXECUTION;
     if (t_catch) {
         rl_fault_catch *c = t_catch;
@@ -95,7 +109,7 @@ static void handler(int sig, siginfo_t *si, void *uc)
         f.in_guest = true;
         f.guest_addr = (uint64_t)(a - (uintptr_t)g_vm->base);
     }
-    if (f.in_guest && g_hook && g_hook(&f))
+    if (f.in_guest && run_hooks(&f))
         return;
     if (t_catch) {
         rl_fault_catch *c = t_catch;
@@ -180,6 +194,19 @@ void rl_fault_disarm(rl_fault_catch *prev)
 void rl_fault_set_hook(rl_fault_hook *hook)
 {
     g_hook = hook;
+}
+
+bool rl_fault_add_hook(rl_fault_hook *hook)
+{
+    int n = g_nhooks;
+    for (int i = 0; i < n; i++)
+        if (g_hooks[i] == hook)
+            return true;
+    if (n == RL_FAULT_HOOKS)
+        return false;
+    g_hooks[n] = hook;
+    __atomic_store_n(&g_nhooks, n + 1, __ATOMIC_RELEASE);
+    return true;
 }
 
 bool rl_fault_installed(void) { return g_installed != 0; }

@@ -238,6 +238,8 @@ static int union_perm(const rl_vm *vm, uint64_t hp_start, uint64_t hp_end)
     return prot_of(perm);
 }
 
+bool rl_vm_host_writable(const rl_vm *vm, uint64_t addr) { return (rl_vm_host_prot(vm, addr) & PROT_WRITE) != 0; }
+
 int rl_vm_host_prot(const rl_vm *vm, uint64_t addr)
 {
     uint64_t s = align_down(addr, vm->host_page);
@@ -260,6 +262,13 @@ int rl_vm_host_access(rl_vm *vm, uint64_t addr, uint64_t size, bool access)
     if ((addr | size) & (vm->host_page - 1) || !rl_vm_contains(vm, addr, size))
         return -1;
     return os_protect(vm->base + addr, size, access ? PROT_READ | PROT_WRITE : PROT_NONE);
+}
+
+int rl_vm_host_watch(rl_vm *vm, uint64_t addr, uint64_t size, bool watch)
+{
+    if ((addr | size) & (vm->host_page - 1) || !rl_vm_contains(vm, addr, size))
+        return -1;
+    return os_protect(vm->base + addr, size, watch ? PROT_READ : PROT_READ | PROT_WRITE);
 }
 
 static int apply_range(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm)
@@ -313,6 +322,7 @@ static int discard(rl_vm *vm, uint64_t addr, uint64_t size)
 
 int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
 {
+    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
     if ((addr | size) & (vm->guest_page - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
         return -1;
     if (content == RL_VM_DISCARD && discard(vm, addr, size))
@@ -427,6 +437,7 @@ void rl_shm_destroy(rl_shm *s)
 
 int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
 {
+    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
     (void)vm;
     (void)addr;
     (void)size;
@@ -471,6 +482,7 @@ void rl_shm_destroy(rl_shm *s)
 
 int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
 {
+    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
     if (((addr | size) & (vm->host_page - 1)) || size > s->size || !rl_vm_contains(vm, addr, size))
         return -1;
     vm_address_t at = (vm_address_t)(uintptr_t)(vm->base + addr);
@@ -529,6 +541,7 @@ void rl_shm_destroy(rl_shm *s)
 
 int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
 {
+    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
     if (((addr | size) & (vm->host_page - 1)) || size > s->size || !rl_vm_contains(vm, addr, size))
         return -1;
     void *p = mmap(vm->base + addr, size, PROT_NONE, MAP_SHARED | MAP_FIXED, s->fd, 0);

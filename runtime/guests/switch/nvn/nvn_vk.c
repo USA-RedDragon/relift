@@ -17,6 +17,7 @@
 #include "nvn_astc.h"
 #include "nvn_vk.h"
 #include "hostlib.h"
+#include "nvn_watch.h"
 #include "vkdev.h"
 #include "nvn_probe_spv.h"
 
@@ -946,6 +947,19 @@ static uint64_t bytes_hash(const uint8_t *p, uint64_t n)
     return h;
 }
 
+/**
+ * @brief A hash of the bytes of v's storage that its write watch does not cover (the partial pages at either end);
+ * the whole storage's hash when v is not watched.
+ */
+static uint64_t edge_hash(replay *r, const vimg *v)
+{
+    const uint8_t *p = r->mem + v->storage;
+    if (!v->watch.on)
+        return bytes_hash(p, v->d.size);
+    uint64_t head = v->watch.addr - v->storage, tail_at = v->watch.addr + v->watch.size - v->storage;
+    return bytes_hash(p, head) * 31 + bytes_hash(p + tail_at, v->d.size - tail_at);
+}
+
 /** @brief The depth of level l of a 3D texture, 1 for other targets. */
 static uint32_t depth_of(const nvn_tex_desc *d, uint32_t l)
 {
@@ -1295,9 +1309,11 @@ static vimg *image_of(replay *r, uint64_t tex)
                                 .subresourceRange = rr };
     VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                              NULL, 1, &ib);
+    nvn_watch_start(&v->watch, storage, d->size);
+    v->hash = bytes_hash(r->mem + storage, d->size);
+    v->edge_hash = edge_hash(r, v);
     if (!depth && !upload(r, v))
         goto fail;
-    v->hash = bytes_hash(r->mem + storage, d->size);
     v->hash_frame = g.presents + 1;
     if (depth && !nvn_vk_flush(r))
         goto fail;
@@ -1328,7 +1344,11 @@ bool nvn_vk_refresh(replay *r, vimg *v)
     if (v->written || v->hash_frame == g.presents + 1)
         return true;
     v->hash_frame = g.presents + 1;
+    if (v->watch.on && !nvn_watch_changed(&v->watch) && edge_hash(r, v) == v->edge_hash)
+        return true;
+    nvn_watch_start(&v->watch, v->storage, v->d.size);
     uint64_t h = bytes_hash(r->mem + v->storage, v->d.size);
+    v->edge_hash = edge_hash(r, v);
     if (h == v->hash)
         return true;
     v->hash = h;
@@ -2343,8 +2363,11 @@ static void present_rate(uint64_t total)
     }
     if (now - last_ns < PRESENT_RATE_NS)
         return;
-    rl_log(RL_LOG_INFO, "nvn", "%llu presents, %.1f per second over the last %.1f s", (unsigned long long)total,
-           (double)(total - last_total) * 1e9 / (double)(now - last_ns), (double)(now - last_ns) / 1e9);
+    uint64_t faults, starts;
+    nvn_watch_stats(&faults, &starts);
+    rl_log(RL_LOG_INFO, "nvn", "%llu presents, %.1f per second over the last %.1f s; texture watches %llu started, %llu written",
+           (unsigned long long)total, (double)(total - last_total) * 1e9 / (double)(now - last_ns),
+           (double)(now - last_ns) / 1e9, (unsigned long long)starts, (unsigned long long)faults);
     last_ns = now;
     last_total = total;
 }
