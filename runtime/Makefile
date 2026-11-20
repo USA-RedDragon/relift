@@ -491,7 +491,7 @@ $(ARM64_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(ARM64_HDRS) $(RUNNER_HDRS)
 
 $(SWITCH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(SWITCH_HDRS) $(RUNNER_HDRS) $(SWITCH_TEST_HDRS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_BASE) $(SWITCH_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS_BASE) $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
 $(CORE_LIB): $(CORE_OBJS)
 $(ARM64_LIB): $(ARM64_OBJS)

@@ -17,9 +17,25 @@
  * set (nvn_texset.c), and the numeric kind and dimension of each bound
  * handle's texture go to the specialization constants the translation's
  * interface names.
+ *
+ * Fixed-function state the command buffer sets reaches the host three ways.
+ * The sample mask (bit 0), the first viewport's swizzle (VK_NV_viewport_swizzle),
+ * the provoking vertex (VK_EXT_provoking_vertex) and the conservative dilate are
+ * in the pipeline key. The point size and the alpha reference are push constants
+ * every draw sets (the translations of a vertex program that stores no point
+ * size and of a fragment program that writes render target 0's alpha read
+ * them), and the alpha test's compare function, which the bound color state
+ * holds, is the specialization constant ALPHA_FUNC_SPEC of such a fragment
+ * program. Render enable skips draws, and a conditional one reads its counters
+ * when the draw replays. The tessellation levels are kept for the control stage
+ * a draw without one writes (draws with tessellation stop until they are
+ * supported). Each optional extension a setter needs, when the device has none,
+ * logs one warning and draws without the effect, except a swizzle that is not
+ * the identity, which stops.
  */
 #include "nvn_vk.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 #define MAX_PIPELINES 1024u
@@ -34,6 +50,14 @@
 #define DRIVER_BINDINGS 4u
 #define MAX_RECS 48u
 #define MAX_SPECS 32u
+/** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
+#define ALPHA_FUNC_SPEC 0x300u
+/** @brief The graphics stages that read the fixed-state push constants: the point size and the alpha reference. */
+#define FIXED_STAGES (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+/** @brief The fixed-state push constant block (the translator's: point size, then alpha reference). */
+typedef struct fixed_push {
+    float point_size, alpha_ref;
+} fixed_push;
 
 /** @brief A translated program as a shader module, with what its interface uses. */
 typedef struct module {
@@ -49,6 +73,8 @@ typedef struct module {
     bool images, other_sets;
     /** @brief Output locations the program declares (a vertex program's varyings). */
     uint32_t outputs;
+    /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
+    bool alpha_test, fixed_push;
     /** @brief Its interface records (nvn_shader_iface). */
     nvn_iface_rec recs[MAX_RECS];
     uint32_t nrecs;
@@ -81,6 +107,8 @@ typedef struct pipe_key {
     uint32_t depth_test, depth_write, depth_func, stencil_test;
     VkStencilOpState front_ops, back_ops;
     uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp, rasterizer_discard, conservative_raster;
+    /** @brief The sample mask's bit for the one sample, the conservative dilate in quarter pixels, the first viewport's swizzle and the provoking vertex. */
+    uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
     /** @brief Specialization constants of each stage: id and value. */
     uint32_t nspec[5];
     VkSpecializationMapEntry spec_map[5][MAX_SPECS];
@@ -135,8 +163,11 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, module *m)
                 x->binding = w[i + 3], x->has_binding = true;
             else if (w[i + 2] == 30)
                 x->location = w[i + 3], x->has_location = true;
+            else if (w[i + 2] == 1 && w[i + 3] == ALPHA_FUNC_SPEC)
+                m->alpha_test = true;
         } else if (op == 59 && len >= 4 && w[i + 2] < bound) {
             v[w[i + 2]].storage = w[i + 3] + 1u;
+            m->fixed_push |= w[i + 3] == 9;
         }
         i += len;
     }
@@ -402,9 +433,12 @@ static bool layouts(void)
             return false;
     if (!(d.set_layout[2] = nvn_texset_layout()))
         return false;
+    VkPushConstantRange fixed = { FIXED_STAGES, 0, sizeof(fixed_push) };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                        .setLayoutCount = 3,
-                                       .pSetLayouts = d.set_layout };
+                                       .pSetLayouts = d.set_layout,
+                                       .pushConstantRangeCount = 1,
+                                       .pPushConstantRanges = &fixed };
     if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &d.layout) != VK_SUCCESS)
         return false;
     VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SET_POOL_SETS * 8 };
@@ -720,6 +754,34 @@ static int fixed_state(replay *r, pipe_key *k)
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;
+    if (k->conservative_raster) {
+        uint32_t most = (uint32_t)(g.conservative_extra_max * 4.0f);
+        k->conservative_dilate = st->conservative_dilate;
+        if (k->conservative_dilate > most) {
+            k->conservative_dilate = most;
+            if (!g.dilate_warned) {
+                g.dilate_warned = true;
+                rl_log(RL_LOG_WARN, "nvn",
+                       "conservative raster dilate of %u quarter pixels is past what the host device allows "
+                       "(%u): the largest it allows is used",
+                       st->conservative_dilate, most);
+            }
+        }
+    }
+    k->sample_mask = st->sample_mask & 1u;
+    k->viewport_swizzle = st->viewport_swizzle[0];
+    if (k->viewport_swizzle != NVN_VIEWPORT_SWIZZLE_IDENTITY && !g.viewport_swizzle)
+        return nvn_vk_stop(r, "viewport swizzle 0x%x, and the host device has no VK_NV_viewport_swizzle",
+                           k->viewport_swizzle);
+    k->provoking_last = st->provoking_last;
+    if (k->provoking_last && !g.provoking_last) {
+        k->provoking_last = 0;
+        if (!g.provoking_warned) {
+            g.provoking_warned = true;
+            rl_log(RL_LOG_WARN, "nvn", "the last vertex is the provoking vertex and the host device has no "
+                   "VK_EXT_provoking_vertex with provokingVertexLast: the first vertex provokes");
+        }
+    }
     k->depth_clamp = st->depth_clamp;
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
     return RL_OK;
@@ -850,13 +912,25 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                                   .primitiveRestartEnable = k->primitive_restart };
     VkPipelineTessellationStateCreateInfo ts = { .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
                                                  .patchControlPoints = k->patch_points ? k->patch_points : 1 };
+    uint32_t sw = k->viewport_swizzle;
+    int swizzle_axes[4] = { (int)(sw & 7), (int)(sw >> 4 & 7), (int)(sw >> 8 & 7), (int)(sw >> 12 & 7) };
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        VkFlags flags;
+        uint32_t viewportCount;
+        const int *pViewportSwizzles;
+    } swizzle = { (VkStructureType)1000098000, NULL, 0, 1, swizzle_axes };
+    bool swizzled = sw != NVN_VIEWPORT_SWIZZLE_IDENTITY;
     struct {
         VkStructureType sType;
         const void *pNext;
         VkBool32 negativeOneToOne;
-    } clip = { (VkStructureType)1000355001, NULL, VK_TRUE };
+    } clip = { (VkStructureType)1000355001, swizzled ? &swizzle : NULL, VK_TRUE };
     VkPipelineViewportStateCreateInfo vp = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-                                             .pNext = k->negative_one_to_one ? &clip : NULL,
+                                             .pNext = k->negative_one_to_one ? (const void *)&clip
+                                                      : swizzled              ? (const void *)&swizzle
+                                                                              : NULL,
                                              .viewportCount = 1,
                                              .scissorCount = 1 };
     struct {
@@ -865,9 +939,16 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
         VkFlags flags;
         int conservativeRasterizationMode;
         float extraPrimitiveOverestimationSize;
-    } conservative = { (VkStructureType)1000101001, NULL, 0, 1, 0.0f };
+    } conservative = { (VkStructureType)1000101001, NULL, 0, 1, 0.25f * (float)k->conservative_dilate };
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        int provokingVertexMode;
+    } provoking = { (VkStructureType)1000254001, k->conservative_raster ? &conservative : NULL, 1 };
     VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-                                                  .pNext = k->conservative_raster ? &conservative : NULL,
+                                                  .pNext = k->provoking_last ? (const void *)&provoking
+                                                           : k->conservative_raster ? (const void *)&conservative
+                                                                                    : NULL,
                                                   .polygonMode = (VkPolygonMode)k->polygon,
                                                   .cullMode = k->cull,
                                                   .frontFace = (VkFrontFace)k->front,
@@ -875,8 +956,10 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                                   .depthBiasEnable = k->bias_enable,
                                                   .rasterizerDiscardEnable = k->rasterizer_discard,
                                                   .lineWidth = 1.0f };
+    VkSampleMask sample_mask = k->sample_mask;
     VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
+                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+                                                .pSampleMask = &sample_mask };
     VkPipelineDepthStencilStateCreateInfo ds = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
                                                  .depthTestEnable = k->depth_test,
                                                  .depthWriteEnable = k->depth_write,
@@ -1275,11 +1358,39 @@ static int stage_draw(replay *r, void *arg)
     return write_constants(r, dd->mods, dd->sets);
 }
 
+/**
+ * @brief Whether draws run now: nvnCommandBufferSetRenderEnable(false) skips them, and a conditional render enable
+ * runs them when the two 64-bit counter values at its address (a ReportCounter pair, 16 bytes apart) are equal or
+ * unequal. The values are read after the host device finished what was recorded, the way the GPU reads them when the
+ * draw reaches it, so a counter the GPU wrote earlier in the stream counts.
+ */
+int nvn_draw_render_enabled(replay *r, bool *run)
+{
+    nvn_gfx *st = r->st;
+    *run = true;
+    if (st->render_mode == NVN_RENDER_ALWAYS)
+        return RL_OK;
+    if (st->render_mode == NVN_RENDER_NEVER) {
+        *run = false;
+        return RL_OK;
+    }
+    if (!nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    const uint8_t *p = r->mem + nvn_gpu_guest(st->render_addr);
+    bool equal = rl_ld64(p, 0) == rl_ld64(p, 16);
+    *run = equal == (st->render_mode == NVN_RENDER_IF_EQUAL);
+    return RL_OK;
+}
+
 /** @brief A draw: mode, then indexed (index type, index address, base vertex) or not (first vertex), and count. */
 static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t iaddr, int32_t base, uint32_t first,
                 uint32_t count)
 {
     nvn_gfx *st = r->st;
+    bool run;
+    int cond = nvn_draw_render_enabled(r, &run);
+    if (cond != RL_OK || !run)
+        return cond;
     memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!layouts())
         return nvn_vk_stop(r, "cannot make the pipeline layout");
@@ -1320,6 +1431,19 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             return trc;
         k.mods[s] = mods[s]->m;
     }
+    int rc;
+    if (mods[1] && mods[1]->alpha_test) {
+        uint64_t func = 8;
+        if (st->have_color_state &&
+            (rc = nvn_vk_getter(r, "nvnColorStateGetAlphaTest", st->color_state, 4, NULL, 0, 0, NULL, &func)) != RL_OK)
+            return rc;
+        if ((uint32_t)func < 1 || (uint32_t)func > 8)
+            return nvn_vk_stop(r, "alpha test function %u", (uint32_t)func);
+        if (k.nspec[1] == MAX_SPECS)
+            return nvn_vk_stop(r, "program %s has no room for its alpha test constant", mods[1]->key);
+        k.spec_map[1][k.nspec[1]] = (VkSpecializationMapEntry){ ALPHA_FUNC_SPEC, 4 * k.nspec[1], 4 };
+        k.spec[1][k.nspec[1]++] = (uint32_t)func;
+    }
     if (!mods[0])
         return nvn_vk_stop(r, "draw without a vertex program");
     if (mods[3] || mods[4] || mods[2])
@@ -1327,7 +1451,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if (mods[1] && !(k.mods[1] = fragment_for(mods[0], mods[1])))
         return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the vertex program writes",
                            mods[1]->key);
-    int rc = fixed_state(r, &k);
+    rc = fixed_state(r, &k);
     if (rc == RL_OK)
         rc = vertex_state(r, mods[0], &k);
     if (rc != RL_OK)
@@ -1348,6 +1472,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
+    fixed_push fp = { st->point_size, st->alpha_ref };
+    VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     VkBuffer bufs[NVN_VERTEX_BUFFERS];
     for (uint32_t i = 0; i < dd.nb; i++)
@@ -2000,6 +2126,56 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
                    "primitives are rasterized normally");
         }
         return RL_OK;
+    case NVN_CMD_SET_CONSERVATIVE_RASTER_DILATE: {
+        float v;
+        memcpy(&v, &e->d[0], 4);
+        float q = ceilf(v * 4.0f);
+        st->conservative_dilate = q >= 3.0f ? 3u : q > 0.0f ? (uint32_t)q : 0u;
+        return RL_OK;
+    }
+    case NVN_CMD_SET_SAMPLE_MASK:
+        st->sample_mask = (uint32_t)e->x[1] & 0xffffu;
+        return RL_OK;
+    case NVN_CMD_SET_ALPHA_REF:
+        memcpy(&st->alpha_ref, &e->d[0], 4);
+        return RL_OK;
+    case NVN_CMD_SET_POINT_SIZE:
+        memcpy(&st->point_size, &e->d[0], 4);
+        return RL_OK;
+    case NVN_CMD_SET_RENDER_ENABLE:
+        st->render_mode = (e->x[1] & 0xff) ? NVN_RENDER_ALWAYS : NVN_RENDER_NEVER;
+        return RL_OK;
+    case NVN_CMD_SET_RENDER_ENABLE_CONDITIONAL:
+        if ((uint32_t)e->x[1] > 1)
+            return RL_OK;
+        st->render_mode = (uint32_t)e->x[1] == 0 ? NVN_RENDER_IF_EQUAL : NVN_RENDER_IF_NOT_EQUAL;
+        st->render_addr = e->x[2];
+        return RL_OK;
+    case NVN_CMD_SET_VIEWPORT_SWIZZLES: {
+        uint32_t first = (uint32_t)e->x[1], n = (uint32_t)e->x[2];
+        const uint32_t *v = nvn_cmd_bytes(r->s, e->x[3]);
+        for (uint32_t i = 0; v && i < n && first + i < 16; i++)
+            st->viewport_swizzle[first + i] = (v[4 * i] & 7u) | (v[4 * i + 1] & 7u) << 4 | (v[4 * i + 2] & 7u) << 8 |
+                                              (v[4 * i + 3] & 7u) << 12;
+        return RL_OK;
+    }
+    case NVN_CMD_SET_INNER_TESSELLATION_LEVELS: {
+        const float *v = nvn_cmd_bytes(r->s, e->x[1]);
+        if (v)
+            memcpy(st->tess_inner, v, sizeof st->tess_inner);
+        return RL_OK;
+    }
+    case NVN_CMD_SET_OUTER_TESSELLATION_LEVELS: {
+        const float *v = nvn_cmd_bytes(r->s, e->x[1]);
+        if (v)
+            memcpy(st->tess_outer, v, sizeof st->tess_outer);
+        return RL_OK;
+    }
+    case NVN_CMD_SET_PROVOKING_VERTEX_MODE:
+        st->provoking_last = (uint32_t)e->x[1] == 1;
+        return RL_OK;
+    case NVN_CMD_BIND_COVERAGE_MODULATION_TABLE:
+    case NVN_CMD_SET_GEOMETRY_PROCESSING_MODE:
     case NVN_CMD_SET_PATCH_SIZE:
         return RL_OK;
     case NVN_CMD_SET_LINE_WIDTH:

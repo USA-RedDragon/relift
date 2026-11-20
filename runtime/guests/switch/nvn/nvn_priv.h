@@ -105,6 +105,10 @@
     X(nvnCommandBufferPushDebugGroupDynamic)                                                                           \
     X(nvnCommandBufferPushDebugGroupStatic)                                                                            \
     X(nvnCommandBufferPopDebugGroupId)                                                                                 \
+    X(nvnCommandBufferPushDebugGroupCompute)                                                                           \
+    X(nvnCommandBufferPushDebugGroupGraphics)                                                                          \
+    X(nvnCommandBufferPopDebugGroupCompute)                                                                            \
+    X(nvnCommandBufferPopDebugGroupGraphics)                                                                           \
     X(nvnDeviceApplyDeferredFinalizes)
 
 /** @brief Returns 0 from a proc of NVN_ZERO_PROCS. */
@@ -558,6 +562,18 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_GRAPHICS_WORKLOAD_PRIORITY, nvnCommandBufferSetGraphicsWorkloadPriority) \
     X(NVN_CMD_SET_RESOURCE_OCCUPANCY, nvnCommandBufferSetResourceOccupancy) \
     X(NVN_CMD_SET_CONSERVATIVE_RASTER_ENABLE, nvnCommandBufferSetConservativeRasterEnable) \
+    X(NVN_CMD_SET_CONSERVATIVE_RASTER_DILATE, nvnCommandBufferSetConservativeRasterDilate) \
+    X(NVN_CMD_SET_SAMPLE_MASK, nvnCommandBufferSetSampleMask) \
+    X(NVN_CMD_SET_ALPHA_REF, nvnCommandBufferSetAlphaRef) \
+    X(NVN_CMD_SET_POINT_SIZE, nvnCommandBufferSetPointSize) \
+    X(NVN_CMD_SET_RENDER_ENABLE, nvnCommandBufferSetRenderEnable) \
+    X(NVN_CMD_SET_RENDER_ENABLE_CONDITIONAL, nvnCommandBufferSetRenderEnableConditional) \
+    X(NVN_CMD_SET_VIEWPORT_SWIZZLES, nvnCommandBufferSetViewportSwizzles) \
+    X(NVN_CMD_SET_INNER_TESSELLATION_LEVELS, nvnCommandBufferSetInnerTessellationLevels) \
+    X(NVN_CMD_SET_OUTER_TESSELLATION_LEVELS, nvnCommandBufferSetOuterTessellationLevels) \
+    X(NVN_CMD_SET_PROVOKING_VERTEX_MODE, nvnCommandBufferSetProvokingVertexMode) \
+    X(NVN_CMD_BIND_COVERAGE_MODULATION_TABLE, nvnCommandBufferBindCoverageModulationTable) \
+    X(NVN_CMD_SET_GEOMETRY_PROCESSING_MODE, nvnCommandBufferSetGeometryProcessingMode) \
     X(NVN_CMD_SET_DEPTH_CLAMP, nvnCommandBufferSetDepthClamp) \
     X(NVN_CMD_SET_DEPTH_RANGE, nvnCommandBufferSetDepthRange) \
     X(NVN_CMD_SET_DEPTH_RANGES, nvnCommandBufferSetDepthRanges) \

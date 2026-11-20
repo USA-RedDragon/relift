@@ -116,6 +116,13 @@ typedef struct nvn_vkdev {
     bool wide_lines;
     /** @brief VK_EXT_conservative_rasterization is on: nvnCommandBufferSetConservativeRasterEnable is honored. */
     bool conservative_raster, conservative_warned;
+    /** @brief The largest extra overestimation (pixels) of VK_EXT_conservative_rasterization, and whether a dilate past it was warned of. */
+    float conservative_extra_max;
+    bool dilate_warned;
+    /** @brief VK_NV_viewport_swizzle is on; whether a swizzle without it was warned of. */
+    bool viewport_swizzle, swizzle_warned;
+    /** @brief VK_EXT_provoking_vertex is on with provokingVertexLast; whether the last-vertex mode without it was warned of. */
+    bool provoking_last, provoking_warned;
     /** @brief VK_EXT_robustness2 nullDescriptor is on: a descriptor can be written with no image view. */
     bool null_descriptor;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
@@ -152,6 +159,14 @@ typedef struct nvn_vkdev {
 } nvn_vkdev;
 
 extern nvn_vkdev g;
+
+/** @brief nvnCommandBufferSetRenderEnable and SetRenderEnableConditional's state: draws run, are skipped, or follow two counters. */
+#define NVN_RENDER_ALWAYS 0u
+#define NVN_RENDER_NEVER 1u
+#define NVN_RENDER_IF_EQUAL 2u
+#define NVN_RENDER_IF_NOT_EQUAL 3u
+/** @brief The identity viewport swizzle (x, y, z, w as +X, +Y, +Z, +W), packed as the driver writes it. */
+#define NVN_VIEWPORT_SWIZZLE_IDENTITY 0x6420u
 
 /** @brief Draw state a queue keeps across command sets, as the GPU keeps it. */
 typedef struct nvn_gfx {
@@ -207,6 +222,21 @@ typedef struct nvn_gfx {
     bool primitive_restart;
     bool rasterizer_discard;
     bool conservative_raster;
+    /** @brief Conservative raster dilate in quarter pixels (0 to 3), as the driver stores it. */
+    uint32_t conservative_dilate;
+    /** @brief The sample mask (nvnCommandBufferSetSampleMask), 16 bits as the driver writes it. */
+    uint32_t sample_mask;
+    /** @brief The fixed point size and alpha reference value, which the graphics pipelines read as push constants. */
+    float point_size, alpha_ref;
+    /** @brief Render enable: NVN_RENDER_ALWAYS, NVN_RENDER_NEVER, or a conditional mode and its counter address. */
+    uint32_t render_mode;
+    uint64_t render_addr;
+    /** @brief The swizzle of each viewport (x, y, z, w selectors packed 4 bits each, as the driver writes them). */
+    uint32_t viewport_swizzle[16];
+    /** @brief The provoking vertex is the last (NVN_PROVOKING_VERTEX_MODE_LAST); false until the game sets it. */
+    bool provoking_last;
+    /** @brief The default tessellation levels a pass-through control stage writes: inner then outer. */
+    float tess_inner[2], tess_outer[4];
     uint32_t restart_index;
     float polygon_offset[3];
     float blend_color[4];
@@ -220,6 +250,9 @@ typedef struct nvn_gfx {
     uint32_t inst_base, inst_count;
     bool depth_clamp;
 } nvn_gfx;
+
+/** @brief Sets a queue's draw state to the GPU's state before any command (nvn_vk.c). */
+void nvn_gfx_init(nvn_gfx *st);
 
 /** @brief One command set being replayed. */
 typedef struct replay {
@@ -351,6 +384,13 @@ void nvn_dlss_reset(void);
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
 /** @brief What nvn_draw_cmd returns for a command it does not run; distinct from RL_OK and RL_PENDING. */
 #define NVN_UNHANDLED (-1)
+/**
+ * @brief Whether the draw about to run is rendered: *run is false after nvnCommandBufferSetRenderEnable(false), and,
+ * after a conditional render enable, when the two counters (the 64-bit values 16 bytes apart at its address) are not
+ * in the relation it names. The counters are read after the host device finished what was recorded. RL_OK or a pending
+ * stop.
+ */
+int nvn_draw_render_enabled(replay *r, bool *run);
 /**
  * @brief The compute program's driver bank c[0] for a dispatch of groups (see nvn_draw.c): its counts of uniform buffers,
  * storage buffers, texture handles and image handles, and the end byte of its table. *img_lo is where the image

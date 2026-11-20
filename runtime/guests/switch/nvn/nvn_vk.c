@@ -83,6 +83,8 @@ typedef struct ext_features {
 #define STYPE_SHADER_FMA ((VkStructureType)1000579000)
 #define STYPE_COOPERATIVE_MATRIX ((VkStructureType)1000506000)
 #define STYPE_ROBUSTNESS2 ((VkStructureType)1000286000)
+#define STYPE_PROVOKING_VERTEX ((VkStructureType)1000254000)
+#define STYPE_CONSERVATIVE_PROPS ((VkStructureType)1000101000)
 #define STYPE_COOPERATIVE_MATRIX_PROPS ((VkStructureType)1000506001)
 
 /** @brief VkCooperativeMatrixPropertiesKHR, which the generated headers do not hold. */
@@ -106,12 +108,12 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_EXT_shader_atomic_float",         "VK_EXT_shader_image_atomic_int64",
                                            "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma",
                                            "VK_KHR_cooperative_matrix",
-                                           "VK_EXT_robustness2" };
+                                           "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -146,8 +148,10 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.fma = (ext_features){ .sType = STYPE_SHADER_FMA };
     feat.coop = (ext_features){ .sType = STYPE_COOPERATIVE_MATRIX };
     feat.rob2 = (ext_features){ .sType = STYPE_ROBUSTNESS2 };
+    feat.provoking = (ext_features){ .sType = STYPE_PROVOKING_VERTEX };
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
-                                               &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2 };
+                                               &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
+                                               &feat.provoking };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -156,6 +160,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
     rob2_on = false;
+    bool provoking_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
@@ -164,6 +169,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 f13->pNext = feats[k];
                 g.depth_clip_control |= k == 0;
                 rob2_on |= feats[k] == &feat.rob2;
+                provoking_on |= feats[k] == &feat.provoking;
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)
@@ -173,6 +179,9 @@ static bool device_hook(void *user, rl_vkdev_build *b)
         } else if (!strcmp(exts[i].extensionName, "VK_EXT_conservative_rasterization")) {
             rl_vkdev_add_ext(b, "VK_EXT_conservative_rasterization");
             g.conservative_raster = true;
+        } else if (!strcmp(exts[i].extensionName, "VK_NV_viewport_swizzle")) {
+            rl_vkdev_add_ext(b, "VK_NV_viewport_swizzle");
+            g.viewport_swizzle = true;
         }
     free(exts);
     feat.f12 = (VkPhysicalDeviceVulkan12Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
@@ -192,6 +201,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     g.occlusion_precise = feat.f2.features.occlusionQueryPrecise;
     feat.f2.features.robustBufferAccess = VK_FALSE;
     g.null_descriptor = rob2_on && feat.rob2.b[2];
+    g.provoking_last = provoking_on && feat.provoking.b[0];
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     feat.f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
@@ -244,6 +254,16 @@ static void bring_up(void)
     if (VK(vkAllocateCommandBuffers)(g.dev, &cai, &g.cb) != VK_SUCCESS ||
         VK(vkCreateFence)(g.dev, &fci, NULL, &g.fence) != VK_SUCCESS)
         return;
+    if (g.conservative_raster) {
+        struct {
+            VkStructureType sType;
+            void *pNext;
+            float primitive, max_extra, granularity;
+        } cp = { STYPE_CONSERVATIVE_PROPS, NULL, 0, 0, 0 };
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &cp };
+        VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
+        g.conservative_extra_max = cp.max_extra;
+    }
     if (g.host_import) {
         VkPhysicalDeviceExternalMemoryHostPropertiesEXT hp = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT
@@ -2047,15 +2067,29 @@ static nvn_gfx *state_of(uint64_t queue)
     nvn_gfx *st = calloc(1, sizeof *st);
     if (!st)
         return NULL;
+    nvn_gfx_init(st);
+    queues[i].queue = queue;
+    queues[i].st = st;
+    return st;
+}
+
+void nvn_gfx_init(nvn_gfx *st)
+{
     st->line_width = 1.0f;
+    st->sample_mask = 0xffffu;
+    st->point_size = 1.0f;
+    for (uint32_t k = 0; k < 16; k++)
+        st->viewport_swizzle[k] = NVN_VIEWPORT_SWIZZLE_IDENTITY;
+    for (uint32_t k = 0; k < 4; k++) {
+        st->tess_outer[k] = 1.0f;
+        if (k < 2)
+            st->tess_inner[k] = 1.0f;
+    }
     for (uint32_t k = 0; k < 16; k++) {
         st->depth_ranges[k][1] = 1.0f;
     }
     st->stencil_value_mask[0] = st->stencil_value_mask[1] = 0xff;
     st->stencil_mask[0] = st->stencil_mask[1] = 0xff;
-    queues[i].queue = queue;
-    queues[i].st = st;
-    return st;
 }
 
 bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)
