@@ -112,6 +112,7 @@ SWITCH_INC := $(ARM64_INC) -Iguests/switch
 GB_INC := $(CORE_INC) -Iguests/gb
 GBA_INC := $(CORE_INC) -Iguests/gba
 SMS_INC := $(CORE_INC) -Iguests/sms
+LINUX_INC := $(ARM64_INC) -Iguests/linux
 N64_INC := $(CORE_INC) -Iguests/n64
 SM83_INC := $(CORE_INC) -Icpus/sm83/include -Icpus/sm83
 Z80_INC := $(CORE_INC) -Icpus/z80/include -Icpus/z80
@@ -153,6 +154,8 @@ GBX_HDRS := $(SM83_HDRS) $(wildcard guests/gb/*.h guests/gb/exact/*.h guests/gb/
 GBAR_INC := $(ARM32_INC) -Iguests/gba -Iguests/gba/run -Iguests/gba/run/include
 GBAR_SRCS := $(wildcard guests/gba/run/*.c)
 GBAR_HDRS := $(ARM32_HDRS) $(GBA_HDRS) $(wildcard guests/gba/run/*.h guests/gba/run/include/relift/gba/*.h)
+LINUX_SRCS := $(wildcard guests/linux/*.c)
+LINUX_HDRS := $(ARM64_HDRS) $(wildcard guests/linux/*.h)
 SMS_SRCS := $(wildcard guests/sms/*.c)
 SMS_HDRS := $(CORE_HDRS) $(wildcard guests/sms/*.h)
 SMSR_INC := $(Z80_INC) -Iguests/sms -Iguests/sms/run -Iguests/sms/run/include
@@ -190,6 +193,7 @@ GB_TEST_HDRS := $(wildcard guests/gb/tests/*.h)
 GBA_TEST_SRCS := $(wildcard guests/gba/tests/*.c)
 GBA_TEST_HDRS := $(wildcard guests/gba/tests/*.h)
 GBAR_TEST_SRCS := $(wildcard guests/gba/run/tests/*.c)
+LINUX_TEST_SRCS := $(wildcard guests/linux/tests/*.c)
 SMS_TEST_SRCS := $(wildcard guests/sms/tests/*.c)
 SMS_TOOL_SRCS := $(wildcard guests/sms/tests/tool/*.c)
 N64_TEST_SRCS := $(wildcard guests/n64/tests/*.c)
@@ -221,6 +225,8 @@ GBA_OBJS := $(call obj,$(GBA_SRCS))
 GBA_TEST_OBJS := $(call obj,$(GBA_TEST_SRCS))
 GBAR_OBJS := $(call obj,$(GBAR_SRCS))
 GBAR_TEST_OBJS := $(call obj,$(GBAR_TEST_SRCS))
+LINUX_OBJS := $(call obj,$(LINUX_SRCS))
+LINUX_TEST_OBJS := $(call obj,$(LINUX_TEST_SRCS))
 SMS_OBJS := $(call obj,$(SMS_SRCS))
 SMS_TEST_OBJS := $(call obj,$(SMS_TEST_SRCS))
 SMS_TOOL_OBJS := $(call obj,$(SMS_TOOL_SRCS))
@@ -261,6 +267,7 @@ GB_LIB := $(BUILD)/librelift_gb.a
 GBA_LIB := $(BUILD)/librelift_gba.a
 GBX_LIB := $(BUILD)/librelift_gb_exact.a
 GBAR_LIB := $(BUILD)/librelift_gba_run.a
+LINUX_LIB := $(BUILD)/librelift_linux.a
 SMS_LIB := $(BUILD)/librelift_sms.a
 SMSR_LIB := $(BUILD)/librelift_sms_run.a
 N64_LIB := $(BUILD)/librelift_n64.a
@@ -282,6 +289,7 @@ VK_TESTS := $(BUILD)/switch_vk_tests
 GB_TESTS := $(BUILD)/gb_tests
 GBA_TESTS := $(BUILD)/gba_tests
 GBAR_TESTS := $(BUILD)/gba_run_tests
+LINUX_TESTS := $(BUILD)/linux_tests
 SMS_TESTS := $(BUILD)/sms_tests
 SMS_PSG_SCRIPT := $(BUILD)/sms_psg_script
 SMS_YM2413_SCRIPT := $(BUILD)/sms_ym2413_script
@@ -290,7 +298,7 @@ N64R_TESTS := $(BUILD)/n64_run_tests
 NDSR_TESTS := $(BUILD)/nds_run_tests
 NDS_TESTS := $(BUILD)/nds_tests
 VK_PRESENT := $(BUILD)/vk_present
-TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(RSP_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS) $(SMS_PSG_SCRIPT) $(SMS_YM2413_SCRIPT) $(NDS_TESTS) $(NDSR_TESTS) $(VK_PRESENT)
+TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(RSP_TESTS) $(SWITCH_TESTS) $(LINUX_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS) $(SMS_PSG_SCRIPT) $(SMS_YM2413_SCRIPT) $(NDS_TESTS) $(NDSR_TESTS) $(VK_PRESENT)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
 CRASH_TEST := $(BUILD)/crash_test$(EXE)
@@ -309,8 +317,8 @@ GBDEV_FRAMES ?= 60
 GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
 
 .PHONY: all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
-all: $(MIPS_FPU_CASES) $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
-libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC) $(SHARED)
+all: $(MIPS_FPU_CASES) $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(LINUX_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
+libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(LINUX_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC) $(SHARED)
 portable: $(PORTABLE)
 
 $(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -392,6 +400,14 @@ $(GBA_OBJS): $(BUILD)/obj/%.o: %.c $(GBA_HDRS)
 $(GBA_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(GBA_HDRS) $(RUNNER_HDRS) $(GBA_TEST_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(GBA_INC) $(RUNNER_INC) $(CFLAGS) -Iguests/gba/tests -c $< -o $@
+
+$(LINUX_OBJS): $(BUILD)/obj/%.o: %.c $(LINUX_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(LINUX_INC) $(CFLAGS) -c $< -o $@
+
+$(LINUX_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(LINUX_HDRS) $(RUNNER_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(LINUX_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
 $(SMS_OBJS): $(BUILD)/obj/%.o: %.c $(SMS_HDRS)
 	@mkdir -p $(dir $@)
@@ -491,13 +507,14 @@ $(GBA_LIB): $(GBA_OBJS)
 $(GBX_LIB): $(GBX_OBJS)
 $(GBAR_LIB): $(GBAR_OBJS)
 $(SMSR_LIB): $(SMSR_OBJS)
+$(LINUX_LIB): $(LINUX_OBJS)
 $(SMS_LIB): $(SMS_OBJS)
 $(N64_LIB): $(N64_OBJS)
 $(N64R_LIB): $(N64R_OBJS)
 $(NDS_LIB): $(NDS_OBJS)
 $(NDSR_LIB): $(NDSR_OBJS)
 $(STATIC): $(RT_OBJS)
-$(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC):
+$(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(LINUX_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC):
 	@rm -f $@
 	$(AR) rcs $@ $^
 
@@ -516,6 +533,7 @@ $(SWITCH_TESTS): $(SWITCH_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(GB_TESTS): $(GB_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GB_OBJS)
 $(GBA_TESTS): $(GBA_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GBA_OBJS)
+$(LINUX_TESTS): $(LINUX_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(ARM64_OBJS) $(LINUX_OBJS)
 $(SMS_TESTS): $(SMS_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(SMS_OBJS)
 $(SMS_PSG_SCRIPT): $(BUILD)/obj/guests/sms/tests/tool/psg_script.o $(SMS_OBJS)
 $(SMS_YM2413_SCRIPT): $(BUILD)/obj/guests/sms/tests/tool/ym2413_script.o $(SMS_OBJS)
@@ -567,7 +585,7 @@ test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
 
-TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(RSP_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS) $(NDS_TESTS) $(NDSR_TESTS)
+TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(RSP_TESTS) $(SWITCH_TESTS) $(LINUX_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS) $(NDS_TESTS) $(NDSR_TESTS)
 
 test: export RELIFT_VIDEO := headless
 test: export RELIFT_REPORT_DIR := $(abspath $(BUILD))/reports
