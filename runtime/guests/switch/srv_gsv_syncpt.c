@@ -40,6 +40,8 @@ static syncpt_session *g_sessions;
 static bool reached(uint32_t id, uint64_t value, bool wide, bool nv_held)
 {
     if (id >= NV_SYNCPOINTS) {
+        if (id - NV_SYNCPOINTS >= COUNTERS_MAX)
+            return false;
         uint64_t have = g_counter[id - NV_SYNCPOINTS];
         return wide ? have >= value : (int32_t)((uint32_t)have - (uint32_t)value) >= 0;
     }
@@ -83,6 +85,15 @@ uint32_t rl_gsv_counter_new(void)
         }
     pthread_mutex_unlock(&g_mu);
     return id;
+}
+
+void rl_gsv_counter_free(uint32_t id)
+{
+    if (id < NV_SYNCPOINTS || id - NV_SYNCPOINTS >= COUNTERS_MAX)
+        return;
+    pthread_mutex_lock(&g_mu);
+    g_counter_used[id - NV_SYNCPOINTS] = false;
+    pthread_mutex_unlock(&g_mu);
 }
 
 uint64_t rl_gsv_counter_get(uint32_t id)

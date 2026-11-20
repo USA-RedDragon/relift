@@ -363,6 +363,49 @@ TEST(gsv_syncpt_slot_events_fire_when_a_counter_reaches_the_value)
     CHECK_EQ(tc_send(c, sp, q).result, 0);
 }
 
+TEST(gsv_counters_are_given_back_and_an_unknown_counter_never_fires)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    uint32_t ids[256];
+    uint32_t n = 0;
+    while (n < 256 && (ids[n] = rl_gsv_counter_new()) != UINT32_MAX)
+        n++;
+    CHECK(n > 0 && n < 256);
+    uint32_t first = ids[0];
+    rl_gsv_counter_free(first);
+    CHECK_EQ(rl_gsv_counter_new(), first);
+    rl_gsv_counter_free(UINT32_MAX);
+    rl_gsv_counter_free(5);
+    tc_req q = tc_new(202);
+    q.tipc = true;
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.result, 0);
+    tc_obj sp = { .handle = r.move[0] };
+    q = tc_new(22);
+    q.tipc = true;
+    tc_put32(&q, 3);
+    r = tc_send(c, sp, q);
+    CHECK_EQ(r.result, 0);
+    *(uint32_t *)(void *)(t_mem() + heap + 0x800) = r.ncopy ? r.copy[0] : r.move[0];
+    q = tc_new(201);
+    q.tipc = true;
+    tc_put32(&q, 3);
+    tc_put32(&q, ~(first + 4096));
+    tc_put64(&q, 1);
+    tc_put32(&q, 1);
+    CHECK_EQ(tc_send(c, sp, q).result, 0);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
+    for (uint32_t i = 1; i < n; i++)
+        rl_gsv_counter_free(ids[i]);
+    rl_gsv_counter_free(first);
+}
+
 TEST(gsv_decoder_image_pool_layout_is_nv12_in_128_row_planes)
 {
     rl_hos_config cfg;

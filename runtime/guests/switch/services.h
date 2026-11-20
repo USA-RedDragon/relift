@@ -88,6 +88,8 @@ rl_result rl_gsv_open_syncpt_session(rl_ipc_req *r);
 void rl_gsv_syncpt_changed(void);
 /** @brief A new counter of the supervisor's sync points: its id (the SyncCounterId is its bitwise NOT), starting at 0. */
 uint32_t rl_gsv_counter_new(void);
+/** @brief Gives counter id back for another session; ids outside the counters (sync points, UINT32_MAX) are ignored. */
+void rl_gsv_counter_free(uint32_t id);
 /** @brief The value of counter id. */
 uint64_t rl_gsv_counter_get(uint32_t id);
 /** @brief Raises counter id to at least value and signals the waits it reaches. */

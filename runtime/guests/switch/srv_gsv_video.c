@@ -267,6 +267,7 @@ static void video_destroy(void *state)
         frame_free(&v->pending[i]);
     if (v->dec)
         v->vp9 ? v->vp9->close(v->dec) : v->av1->close(v->dec);
+    rl_gsv_counter_free(v->counter);
     pthread_mutex_destroy(&v->mu);
     free(v);
 }
