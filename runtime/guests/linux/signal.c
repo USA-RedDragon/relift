@@ -9,8 +9,9 @@
  * A signal comes from kill, tkill or tgkill on the process, or from a write
  * to a closed pipe. A fault in guest code (a bad address, an undefined
  * instruction) is not delivered to the guest's handlers: it stops the
- * program with a report. The pc in the context a handler sees is 0, since a
- * system call does not tell the runtime where it came from.
+ * program with a report. The pc in the context a handler sees is the one
+ * after the svc that delivered it, and a handler that changes it continues
+ * there when it returns.
  */
 #include "arm64.h"
 #include "linux_priv.h"
@@ -138,6 +139,7 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     uint64_t frame = (sp - FRAME_BYTES) & ~15ull;
     if (!lx_ok(frame, FRAME_BYTES, RL_VM_W))
         return rl_guest_fatal(c, "signal", "no room on the stack to deliver signal %d (sp 0x%llx)", sig, (unsigned long long)sp);
+    const uint64_t resume = c->pc + 4;
     uint8_t *f = mem + frame;
     memset(f, 0, FRAME_BYTES);
     int32_t si[4] = { sig, 0, p->code, 0 };
@@ -152,6 +154,7 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     memcpy(uc + UC_SIGMASK, &lx_cur()->blocked, 8);
     memcpy(uc + UC_REGS, c->x, 31 * 8);
     memcpy(uc + UC_SP, &c->sp, 8);
+    memcpy(uc + UC_PC, &resume, 8);
     uint32_t hdr[2] = { LX_FPSIMD_MAGIC, LX_FPSIMD_SIZE };
     uint32_t fp[2] = { rl_mrs_fpsr(c), (uint32_t)rl_mrs_fpcr(c) };
     memcpy(uc + UC_RESERVED, hdr, 8);
@@ -188,10 +191,14 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     }
     if (rc != RL_OK)
         return rc;
+    lx_cur()->handlers++;
     rc = rl_call_guest(c, mem, act.handler);
+    lx_cur()->handlers--;
     if (rc != RL_OK)
         return rc;
 
+    uint64_t new_pc;
+    memcpy(&new_pc, uc + UC_PC, 8);
     memcpy(c->x, uc + UC_REGS, 31 * 8);
     memcpy(&c->sp, uc + UC_SP, 8);
     memcpy(fp, uc + UC_RESERVED + 8, 8);
@@ -204,7 +211,30 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     lx_cur()->blocked = mask & ~unblockable();
     lx_cur()->on_altstack = old_on_alt;
     (void)old_blocked;
+    if (new_pc != resume && !rl_arm64_trampoline()) {
+        rl_guest_fatal(c, "signal",
+                       "a signal handler changed the pc to 0x%llx, which a build with direct returns does not take: "
+                       "rebuild with emit.trampoline = true",
+                       (unsigned long long)new_pc);
+        return RL_PENDING;
+    }
+    if (new_pc != resume) {
+        c->pc = resume - 4;
+        c->pend.pc = new_pc;
+        c->pend.sp = RL_SP_NONE;
+        c->pend.kind = RL_PEND_REDIRECT;
+        c->pend.code = 0;
+        return RL_PENDING;
+    }
     return RL_OK;
+}
+
+int64_t lx_sigreturn(rl_ctx *c)
+{
+    if (lx_cur()->handlers == 0)
+        return -L_ENOSYS;
+    c->pend.kind = RL_PEND_RETURN;
+    return LX_PENDING;
 }
 
 /**

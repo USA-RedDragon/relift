@@ -84,6 +84,8 @@ typedef struct lx_thread {
     uint64_t altstack_size;
     /** @brief Whether a handler runs on it now. */
     bool on_altstack;
+    /** @brief How many signal handlers run nested on this thread. */
+    int handlers;
     /** @brief Where set_tid_address or clone says the thread id is cleared when the thread ends. */
     uint64_t clear_child_tid;
     /** @brief The wake handle blocking waits of this thread take (hio_waker_*). */
@@ -210,6 +212,8 @@ void lx_fs_init(void);
 /** @brief Closes what the process has open. */
 void lx_fs_shutdown(void);
 
+/** @brief rt_sigreturn: ends the innermost signal handler's host entry; LX_PENDING, or -ENOSYS outside a handler. */
+int64_t lx_sigreturn(rl_ctx *c);
 /** @brief Delivers the queued signals the process does not block, after a system call. Returns RL_OK or RL_PENDING. */
 int lx_signal_deliver(rl_ctx *c, uint8_t *mem);
 /** @brief Whether a signal waits that the thread does not block and that does something (a handler, or the default action that ends the process). */

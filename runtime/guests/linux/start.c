@@ -203,6 +203,7 @@ static int64_t dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6
     case NR_mremap: return locked(lx_sys_mremap, c, mem, a);
     case NR_madvise: return locked(lx_sys_madvise, c, mem, a);
     case NR_clone: return lx_sys_clone(c, mem, a);
+    case NR_rt_sigreturn: return lx_sigreturn(c);
     case NR_rseq:
     case NR_clone3: return -L_ENOSYS;
     case NR_openat:

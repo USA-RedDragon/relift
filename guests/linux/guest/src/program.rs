@@ -171,8 +171,14 @@ pub struct ProgramFile {
 
 /// The files that describe `p` to the runtime and hold its image:
 /// `image.bin`, `image.c` and `program.c`, which lists the lifted units
-/// `units` (C symbols of `const rl_unit`) and carries `image_id`.
-pub fn program_files(p: &Placed, units: &[String], image_id: [u8; 32]) -> Vec<ProgramFile> {
+/// `units` (C symbols of `const rl_unit`) and carries `image_id`; `trampoline`
+/// says the units were emitted in trampoline mode.
+pub fn program_files(
+    p: &Placed,
+    units: &[String],
+    image_id: [u8; 32],
+    trampoline: bool,
+) -> Vec<ProgramFile> {
     vec![
         ProgramFile {
             name: "image.bin".into(),
@@ -185,7 +191,7 @@ pub fn program_files(p: &Placed, units: &[String], image_id: [u8; 32]) -> Vec<Pr
         },
         ProgramFile {
             name: "program.c".into(),
-            bytes: program_c(p, units, image_id).into_bytes(),
+            bytes: program_c(p, units, image_id, trampoline).into_bytes(),
         },
     ]
 }
@@ -215,9 +221,12 @@ fn c_string(s: &str) -> String {
 
 /// `program.c`: the segments, the entry, the program headers, the stack
 /// size, the units and `main`.
-pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32]) -> String {
+pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32], trampoline: bool) -> String {
     let o = &p.object;
     let mut t = String::from("#include <stdint.h>\n#include \"linux.h\"\n");
+    if trampoline {
+        t.push_str("#include \"arm64.h\"\n");
+    }
     for u in units {
         let _ = writeln!(t, "extern const rl_unit {u};");
     }
@@ -251,7 +260,7 @@ pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32]) -> String {
     let id: Vec<String> = image_id.iter().map(|b| format!("0x{b:02x}")).collect();
     let _ = write!(
         t,
-        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .segments = segments,\n    .segment_count = {}u,\n    .image = rl_linux_image,\n    .image_base = UINT64_C({:#x}),\n    .image_size = UINT64_C({:#x}),\n    .entry = UINT64_C({:#x}),\n    .phdr = UINT64_C({:#x}),\n    .phent = {}u,\n    .phnum = {}u,\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
+        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .segments = segments,\n    .segment_count = {}u,\n    .image = rl_linux_image,\n    .image_base = UINT64_C({:#x}),\n    .image_size = UINT64_C({:#x}),\n    .entry = UINT64_C({:#x}),\n    .phdr = UINT64_C({:#x}),\n    .phent = {}u,\n    .phnum = {}u,\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
         id.join(", "),
         c_string(&p.name),
         o.segments.len(),
@@ -264,6 +273,11 @@ pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32]) -> String {
         stack,
         crate::cpu::hwcap(),
         units.len(),
+        if trampoline {
+            "    rl_arm64_set_trampoline(1);\n"
+        } else {
+            ""
+        },
     );
     t
 }

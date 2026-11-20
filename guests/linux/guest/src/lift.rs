@@ -34,10 +34,49 @@ pub struct Lifted {
     pub instructions: usize,
     /// The instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
+    /// Whether the program was emitted in trampoline mode.
+    pub trampoline: bool,
+    /// Why trampoline mode was chosen, when it was.
+    pub reason: Option<String>,
 }
 
 /// `__NR_clone` on aarch64.
 const NR_CLONE: u128 = 220;
+
+/// `__NR_mmap` and `__NR_mprotect` on aarch64.
+const NR_MAP: [u128; 2] = [222, 226];
+
+/// The `PROT_EXEC` bit.
+const PROT_EXEC: u128 = 4;
+
+/// The constant `reg` holds at the `svc` at `pc`, set by the straight-line
+/// code just before it (at most eight instructions back).
+fn constant_before(f: &relift_analyze::Function, pc: u64, reg: relift_ir::Reg) -> Option<u128> {
+    for k in 1..=8u64 {
+        let Some(Insn::Lifted(p)) = f.insts.get(&pc.wrapping_sub(4 * k)) else {
+            break;
+        };
+        if p.exit.flow != Flow::Jump || p.exit.next != Next::Const(pc.wrapping_sub(4 * (k - 1))) {
+            break;
+        }
+        let set = p.insts.iter().find_map(|i| match i.op {
+            Op::Set(r, v) if r == reg => Some(v),
+            _ => None,
+        });
+        if let Some(v) = set {
+            let konst = |v: relift_ir::Value| match p.insts[v.index()].op {
+                Op::Const(c) => Some(c.get()),
+                Op::Ext(_, w) => match p.insts[w.index()].op {
+                    Op::Const(c) => Some(c.get()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            return konst(v);
+        }
+    }
+    None
+}
 
 /// The addresses after each `svc #0` whose system call number is the
 /// constant `clone`, set by the straight-line code just before it. A thread
@@ -51,40 +90,63 @@ pub fn clone_continuations(a: &relift_analyze::Analysis) -> BTreeSet<u64> {
     for f in a.functions.values() {
         for (&pc, i) in &f.insts {
             let Insn::Lifted(b) = i else { continue };
-            if b.exit.flow != Flow::Trap(0) {
-                continue;
-            }
-            for k in 1..=8u64 {
-                let Some(Insn::Lifted(p)) = f.insts.get(&pc.wrapping_sub(4 * k)) else {
-                    break;
-                };
-                if p.exit.flow != Flow::Jump
-                    || p.exit.next != Next::Const(pc.wrapping_sub(4 * (k - 1)))
-                {
-                    break;
-                }
-                let set = p.insts.iter().find_map(|i| match i.op {
-                    Op::Set(r, v) if r == nr => Some(v),
-                    _ => None,
-                });
-                if let Some(v) = set {
-                    let konst = |v: relift_ir::Value| match p.insts[v.index()].op {
-                        Op::Const(c) => Some(c.get()),
-                        Op::Ext(_, w) => match p.insts[w.index()].op {
-                            Op::Const(c) => Some(c.get()),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    if konst(v) == Some(NR_CLONE) {
-                        out.insert(pc + 4);
-                    }
-                    break;
-                }
+            if b.exit.flow == Flow::Trap(0) && constant_before(f, pc, nr) == Some(NR_CLONE) {
+                out.insert(pc + 4);
             }
         }
     }
     out
+}
+
+/// The address of an `svc #0` that maps or protects memory with a
+/// constant protection that includes `PROT_EXEC`: the program writes the
+/// code it runs.
+pub fn maps_executable(a: &relift_analyze::Analysis) -> Option<u64> {
+    let (nr, prot) = (relift_cpu_arm64::regs::x(8), relift_cpu_arm64::regs::x(2));
+    a.functions.values().find_map(|f| {
+        f.insts.iter().find_map(|(&pc, i)| {
+            let Insn::Lifted(b) = i else { return None };
+            let maps = b.exit.flow == Flow::Trap(0)
+                && constant_before(f, pc, nr).is_some_and(|n| NR_MAP.contains(&n));
+            (maps && constant_before(f, pc, prot).is_some_and(|p| p & PROT_EXEC != 0)).then_some(pc)
+        })
+    })
+}
+
+/// Why the program needs trampoline mode (`docs/abi.md` section 5.5), or
+/// `None` when direct returns are proven safe: the build forces it, a
+/// segment is writable and executable, a system call maps executable memory,
+/// or a write of the stack pointer is not relative to the function's entry
+/// value ([`relift_analyze::stack`]).
+fn mode_reason(
+    fe: &Arm64,
+    p: &Placed,
+    a: &relift_analyze::Analysis,
+    force: bool,
+) -> Option<String> {
+    if force {
+        return Some("forced by emit.trampoline".into());
+    }
+    if p.object
+        .segments
+        .iter()
+        .any(|s| s.perm.write && s.perm.exec)
+    {
+        return Some("a segment is writable and executable".into());
+    }
+    if let Some(at) = maps_executable(a) {
+        return Some(format!("the system call at {at:#x} maps executable memory"));
+    }
+    let w = relift_analyze::stack::stack_writes(fe, a);
+    w.unproven.first().map(|u| {
+        format!(
+            "{} of {} stack pointer writes are not relative to the entry value, the first at {:#x} in the function at {:#x}",
+            w.unproven.len(),
+            w.writes,
+            u.at,
+            u.function
+        )
+    })
 }
 
 /// The frontend of the program's CPU.
@@ -93,8 +155,9 @@ pub fn frontend() -> Arm64 {
 }
 
 /// Lifts every function discovery finds in `p` and emits them as one unit;
-/// `image_id` identifies the program to the runtime.
-pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
+/// `image_id` identifies the program to the runtime. `force_trampoline`
+/// makes the program use trampoline mode whatever the analysis says.
+pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool) -> Lifted {
     let fe = frontend();
     let mut module = program::module(p);
     let mut analysis = discover(&fe, &module);
@@ -161,6 +224,8 @@ pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
         .collect();
     unlifted.sort_by_key(|u| u.at);
     unlifted.dedup_by_key(|u| u.at);
+    let reason = mode_reason(&fe, p, &analysis, force_trampoline);
+    let trampoline = reason.is_some();
     let output = relift_emit::emit(
         &fe,
         &fns,
@@ -170,6 +235,7 @@ pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
             unit_symbol: UNIT_SYMBOL.into(),
             module_base: p.image.base,
             image_id,
+            trampoline,
             ..Options::default()
         },
     );
@@ -178,5 +244,7 @@ pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
         functions: fns.len(),
         instructions,
         unlifted,
+        trampoline,
+        reason,
     }
 }

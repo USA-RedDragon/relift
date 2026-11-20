@@ -5,6 +5,7 @@
  * address map (rl_vm). A page is mapped when its block's tag is 1; the
  * unmapped space has tag 0 and no permissions.
  */
+#include "arm64.h"
 #include "linux_priv.h"
 
 #include <errno.h>
@@ -71,6 +72,22 @@ static uint32_t vm_perm(uint32_t prot)
     if (prot & L_PROT_EXEC)
         p |= RL_VM_R | RL_VM_X;
     return p;
+}
+
+/**
+ * @brief A request for executable memory in a build with direct returns:
+ * the build only proves direct returns safe for code that is in the file,
+ * so a program that makes executable memory stops with a report.
+ */
+static int64_t exec_refused(rl_ctx *c, uint32_t prot)
+{
+    if (!(prot & L_PROT_EXEC) || rl_arm64_trampoline())
+        return 0;
+    rl_guest_fatal(c, "linux",
+                   "the program maps executable memory (protection 0x%x), which a build with direct returns does not take: "
+                   "rebuild with emit.trampoline = true",
+                   prot);
+    return LX_PENDING;
 }
 
 int lx_map(uint64_t addr, uint64_t size, uint32_t prot)
@@ -159,6 +176,8 @@ int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EINVAL;
     if (len > lx.vm.size)
         return -L_ENOMEM;
+    if (exec_refused(c, prot))
+        return LX_PENDING;
     uint64_t size = lx_page_up(len);
     bool anon = (flags & L_MAP_ANONYMOUS) != 0;
     int host = -1;
@@ -216,7 +235,6 @@ int64_t lx_sys_munmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 
 int64_t lx_sys_mprotect(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
-    (void)c;
     (void)mem;
     uint64_t addr = a[0], len = a[1];
     uint32_t prot = (uint32_t)a[2];
@@ -226,6 +244,8 @@ int64_t lx_sys_mprotect(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EINVAL;
     if (len == 0)
         return 0;
+    if (exec_refused(c, prot))
+        return LX_PENDING;
     uint64_t size = lx_page_up(len);
     if (!lx_mapped(addr, size))
         return -L_ENOMEM;
