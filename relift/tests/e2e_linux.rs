@@ -80,6 +80,7 @@ fn built(
         &[
             ("RELIFT_EMIT_TRAMPOLINE", forced),
             ("RELIFT_EMIT_COLD", if cold { "true" } else { "false" }),
+            ("RELIFT_TEST_SEED", "off"),
         ],
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -93,6 +94,59 @@ fn built(
         .join("cache/projects/game/build/host")
         .join(format!("game{}", std::env::consts::EXE_SUFFIX));
     (exe, stderr.into_owned())
+}
+
+/// Programs built and run at once by the corpus test: each build compiles
+/// with four jobs, and one large file at the end of it leaves the other
+/// cores idle.
+const WORKERS: usize = 4;
+
+/// Builds the corpus program `name` in a directory of its own under `root`,
+/// in trampoline mode or not, runs it, and checks its output and status
+/// against the files of its corpus directory.
+fn check_program(root: &Path, corpus: &Path, programs: &Path, name: &str, trampoline: bool) {
+    let mode = if trampoline { "trampoline" } else { "direct" };
+    let root = root.join(format!("{name}-{mode}"));
+    std::fs::create_dir_all(&root).expect("the program dir is creatable");
+    let cache = root.join("cache").display().to_string();
+    let (exe, note) = built(
+        &root,
+        &programs.join(name),
+        &cache,
+        (trampoline, name == "hello.static" && !trampoline),
+    );
+    let wants = match name {
+        "coroutines.static" | "setjmp.static" => Some("returns: trampoline mode ("),
+        "hello.static" => Some("returns: direct"),
+        _ => None,
+    };
+    if let Some(wants) = wants.filter(|_| !trampoline) {
+        assert!(note.contains(wants), "{name}: {note}");
+    }
+    let dir = corpus.join(name.split('.').next().expect("a name"));
+    let mut cmd = relift_proc::command(&exe);
+    cmd.env("RELIFT_REPORT_DIR", &root).env("TMPDIR", &root);
+    if let Ok(args) = std::fs::read_to_string(dir.join("args")) {
+        cmd.args(args.lines());
+    }
+    let out = cmd.output().expect("the program runs");
+    let want = std::fs::read(dir.join("expected.stdout")).expect("expected.stdout");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&want),
+        "{name} (trampoline: {trampoline})"
+    );
+    let code: i32 = std::fs::read_to_string(dir.join("expected.exit"))
+        .expect("expected.exit")
+        .trim()
+        .parse()
+        .expect("a status");
+    assert_eq!(
+        out.status.code(),
+        Some(code),
+        "{name} (trampoline: {trampoline})"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -139,8 +193,7 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
         .status()
         .expect("build.sh runs");
     assert!(status.success());
-    let cache = root.join("cache").display().to_string();
-    for name in [
+    let work: Vec<(&str, bool)> = [
         "hello.static",
         "setjmp.static",
         "setjmp.pie",
@@ -158,47 +211,28 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
         [(name, false)]
             .into_iter()
             .chain(both.then_some((name, true)))
-    }) {
-        let (name, trampoline) = name;
-        let _ = std::fs::remove_dir_all(root.join("game"));
-        let _ = std::fs::remove_dir_all(root.join("cache"));
-        let (exe, note) = built(
-            &root,
-            &programs.join(name),
-            &cache,
-            (trampoline, name == "hello.static" && !trampoline),
-        );
-        let wants = match name {
-            "coroutines.static" | "setjmp.static" => Some("returns: trampoline mode ("),
-            "hello.static" => Some("returns: direct"),
-            _ => None,
-        };
-        if let Some(wants) = wants.filter(|_| !trampoline) {
-            assert!(note.contains(wants), "{name}: {note}");
+    })
+    .collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..WORKERS.min(work.len()))
+            .map(|_| {
+                scope.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some(&(name, trampoline)) = work.get(i) else {
+                            return;
+                        };
+                        check_program(&root, &corpus, &programs, name, trampoline);
+                    }
+                })
+            })
+            .collect();
+        for w in workers {
+            if let Err(e) = w.join() {
+                std::panic::resume_unwind(e);
+            }
         }
-        let dir = corpus.join(name.split('.').next().expect("a name"));
-        let mut cmd = relift_proc::command(&exe);
-        cmd.env("RELIFT_REPORT_DIR", &root).env("TMPDIR", &root);
-        if let Ok(args) = std::fs::read_to_string(dir.join("args")) {
-            cmd.args(args.lines());
-        }
-        let out = cmd.output().expect("the program runs");
-        let want = std::fs::read(dir.join("expected.stdout")).expect("expected.stdout");
-        assert_eq!(
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&want),
-            "{name} (trampoline: {trampoline})"
-        );
-        let code: i32 = std::fs::read_to_string(dir.join("expected.exit"))
-            .expect("expected.exit")
-            .trim()
-            .parse()
-            .expect("a status");
-        assert_eq!(
-            out.status.code(),
-            Some(code),
-            "{name} (trampoline: {trampoline})"
-        );
-    }
+    });
     let _ = std::fs::remove_dir_all(&root);
 }
