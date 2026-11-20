@@ -1,7 +1,8 @@
 /**
  * @file log.c
  * @brief Logging, report-once keys, the unknown-call reporter, environment
- * configuration and the clock.
+ * configuration, the clock and the program's own files (executable path,
+ * shipped assets).
  */
 #include "core.h"
 
@@ -251,4 +252,42 @@ bool rl_exe_dir(char *buf, size_t n)
         slash++;
     *slash = 0;
     return true;
+}
+
+static rl_asset_loader g_asset_loader;
+
+void rl_set_asset_loader(rl_asset_loader fn) { g_asset_loader = fn; }
+
+static void *read_whole_file(const char *path, size_t *len)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    uint8_t *data = NULL;
+    long n = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+    if (n >= 0 && fseek(f, 0, SEEK_SET) == 0) {
+        data = malloc(n ? (size_t)n : 1);
+        if (data && fread(data, 1, (size_t)n, f) != (size_t)n) {
+            free(data);
+            data = NULL;
+        }
+    }
+    fclose(f);
+    if (data)
+        *len = (size_t)n;
+    return data;
+}
+
+void *rl_asset_load(const char *name, size_t *len)
+{
+    static const char *const roots[] = { "%s/%s", "%s/../share/relift/%s", "%s/../Resources/%s" };
+    char exe[1024], path[4096];
+    if (rl_exe_dir(exe, sizeof exe))
+        for (size_t i = 0; i < sizeof roots / sizeof *roots; i++) {
+            snprintf(path, sizeof path, roots[i], exe, name);
+            void *data = read_whole_file(path, len);
+            if (data)
+                return data;
+        }
+    return g_asset_loader ? g_asset_loader(name, len) : NULL;
 }

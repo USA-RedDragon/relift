@@ -8,8 +8,12 @@
  * The fonts are the player's own, decoded from their console's system data
  * by relift import into the folder RELIFT_FONTS names (`<type>.ttf`,
  * `<type>` the SharedFontType); a type the player has not imported comes from
- * the open fallback relift build makes into the folder RELIFT_FONTS_FALLBACK
- * names (Noto Sans CJK cut to the type's standard character set). Each font is placed as the console's pl
+ * the open fallback relift build makes (Noto Sans CJK cut to the type's
+ * standard character set). The program finds the fallback by itself, as the
+ * `fonts` folder of the files it ships (rl_asset_load): beside the executable
+ * in a build folder, an iOS bundle or a Windows folder, in `../share/relift`
+ * of an AppImage, in `../Resources` of a macOS bundle, in an Android APK's
+ * assets. RELIFT_FONTS_FALLBACK, when set, names the folder instead. Each font is placed as the console's pl
  * service places it (inferred from Ryujinx and yuzu, which load the same
  * files): one after another in SharedFontType order, each behind an 8-byte
  * header (the .bfttf magic, and the size big-endian XOR the key), the offset naming the
@@ -40,6 +44,34 @@ static struct {
     bool present[PL_TYPES], asked[PL_TYPES];
 } g_pl;
 
+/**
+ * @brief The bytes of font type t from folder dir, or for the fallback with no folder named (shipped) from the files
+ * the program ships (rl_asset_load: `fonts` beside the program or in its package). path names where it looked.
+ */
+static uint8_t *font_file(const char *dir, bool fallback, uint32_t t, char *path, size_t path_size, size_t *n)
+{
+    if (dir && *dir) {
+        snprintf(path, path_size, "%s/%u.ttf", dir, t);
+        FILE *f = fopen(path, "rb");
+        if (!f)
+            return NULL;
+        long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+        rewind(f);
+        uint8_t *data = size > 0 ? malloc((size_t)size) : NULL;
+        if (data && fread(data, 1, (size_t)size, f) != (size_t)size) {
+            free(data);
+            data = NULL;
+        }
+        fclose(f);
+        *n = data ? (size_t)size : 0;
+        return data;
+    }
+    if (!fallback)
+        return NULL;
+    snprintf(path, path_size, "fonts/%u.ttf", t);
+    return rl_asset_load(path, n);
+}
+
 /** @brief Reads the fonts into the shared memory once; false when it cannot be made. */
 static bool pl_load(void)
 {
@@ -50,24 +82,20 @@ static bool pl_load(void)
     if (!g_pl.shm)
         return false;
     uint8_t *base = rl_hos_shmem_ptr(g_pl.shm);
-    const char *dirs[2] = { getenv("RELIFT_FONTS"), getenv("RELIFT_FONTS_FALLBACK") };
+    const char *own = getenv("RELIFT_FONTS"), *override = getenv("RELIFT_FONTS_FALLBACK");
     static const char *const from[2] = { "the player's system data", "the open fallback (Noto Sans CJK)" };
     uint32_t at = 0;
     for (uint32_t t = 0; t < PL_TYPES; t++) {
         for (int d = 0; d < 2 && !g_pl.present[t]; d++) {
-            if (!dirs[d] || !*dirs[d])
-                continue;
+            size_t n = 0;
             char path[4096];
-            snprintf(path, sizeof path, "%s/%u.ttf", dirs[d], t);
-            FILE *f = fopen(path, "rb");
-            if (!f)
+            uint8_t *font = font_file(d ? override : own, d == 1, t, path, sizeof path, &n);
+            if (!font)
                 continue;
-            long n = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
-            rewind(f);
-            if (n > 0 && (uint64_t)at + 8 + (uint64_t)n <= PL_SHMEM_SIZE &&
-                fread(base + at + 8, 1, (size_t)n, f) == (size_t)n) {
+            if (n > 0 && (uint64_t)at + 8 + (uint64_t)n <= PL_SHMEM_SIZE) {
                 uint32_t hdr[2] = { PL_BFTTF_MAGIC, __builtin_bswap32((uint32_t)n) ^ PL_BFTTF_KEY };
                 memcpy(base + at, hdr, sizeof hdr);
+                memcpy(base + at + 8, font, n);
                 g_pl.offset[t] = at + 8;
                 g_pl.size[t] = (uint32_t)n;
                 g_pl.present[t] = true;
@@ -76,7 +104,7 @@ static bool pl_load(void)
             } else {
                 rl_log(RL_LOG_ERROR, "pl", "%s font: %s does not fit or cannot be read", type_names[t], path);
             }
-            fclose(f);
+            free(font);
         }
     }
     return true;

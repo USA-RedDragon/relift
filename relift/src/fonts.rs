@@ -12,7 +12,10 @@
 //! fallback (relift-switch-fonts) into `fonts/` beside the build: Noto Sans
 //! CJK, fetched once into `<cache>/sdk/fonts/<tag>/` and accepted only with
 //! its pinned SHA-256, cut to each type's standard character set. pl:u serves
-//! it where the player's own font is missing (`RELIFT_FONTS_FALLBACK`).
+//! it where the player's own font is missing. The program finds the folder by
+//! its own location (`fonts` beside it, `../share/relift/fonts` in an
+//! AppImage, `../Resources/fonts` in a macOS bundle, an Android APK's assets);
+//! `RELIFT_FONTS_FALLBACK` only overrides it.
 
 use std::path::{Path, PathBuf};
 
@@ -81,9 +84,6 @@ pub fn import(system_data: &Path, out: &Path) -> Result<(Vec<FontType>, Vec<Font
     }
     Ok((found, missing))
 }
-
-/// The variable the runtime reads the fallback folder from.
-pub const FALLBACK_ENV: &str = "RELIFT_FONTS_FALLBACK";
 
 /// The source and character set of `t`'s fallback, if relift makes one.
 #[must_use]
@@ -193,13 +193,50 @@ pub fn fallback(
     Ok(made)
 }
 
-/// Points a run of the program built in `out` at the fallback fonts made
-/// beside it.
-pub fn set_env(cmd: &mut std::process::Command, out: &Path) {
+/// The fallback fonts of the build in `out` that a package carries: its
+/// `fonts` folder, when the build made any `.ttf` there.
+#[must_use]
+pub fn packaged(out: &Path) -> Option<PathBuf> {
     let d = out.join(DIR);
-    if d.is_dir() {
-        cmd.env(FALLBACK_ENV, d);
+    let has = std::fs::read_dir(&d)
+        .ok()?
+        .flatten()
+        .any(|e| e.path().extension().is_some_and(|x| x == "ttf"));
+    has.then_some(d)
+}
+
+/// The `.ttf` files of `from`, by file name, sorted.
+///
+/// # Errors
+///
+/// A folder or a file cannot be read.
+pub fn files(from: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(from)? {
+        let p = e?.path();
+        if p.extension().is_some_and(|x| x == "ttf")
+            && let Some(name) = p.file_name()
+        {
+            out.push((name.to_string_lossy().into_owned(), std::fs::read(&p)?));
+        }
     }
+    out.sort();
+    Ok(out)
+}
+
+/// Copies the `.ttf` files of `from` into `to`, which is made. The program
+/// finds them there by its own location (`rl_asset_load` in the runtime),
+/// without a variable.
+///
+/// # Errors
+///
+/// A folder cannot be made or a file cannot be copied.
+pub fn install(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for (name, bytes) in files(from)? {
+        relift_cache::write_if_changed(&to.join(name), &bytes)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -194,6 +194,18 @@ RL_RUNTIME_API bool rl_exe_path(char *buf, size_t n);
  * buf (n bytes). Returns false when the OS does not say or buf is too small.
  */
 RL_RUNTIME_API bool rl_exe_dir(char *buf, size_t n);
+
+/** @brief A host's way to read a file the program ships inside its package (an Android APK's assets). */
+typedef void *(*rl_asset_loader)(const char *name, size_t *len);
+/** @brief Sets the loader rl_asset_load falls back to; NULL removes it. */
+RL_RUNTIME_API void rl_set_asset_loader(rl_asset_loader fn);
+/**
+ * @brief Reads a file the program ships, by its path under the package's data folder (`fonts/4.ttf`, '/' separators).
+ * Looks in `<exe dir>/<name>` (the build folder, an iOS bundle, a Windows folder), `<exe dir>/../share/relift/<name>`
+ * (an AppImage's usr/bin), `<exe dir>/../Resources/<name>` (a macOS bundle's Contents/MacOS), then the host's asset
+ * loader. Returns the bytes in a malloc'd block (free it) with *len set, or NULL when no place has the file.
+ */
+RL_RUNTIME_API void *rl_asset_load(const char *name, size_t *len);
 /** @brief The process's memory: the physical footprint on Apple hosts, the resident set on Linux and Android, private bytes on Windows; 0 when unknown. */
 RL_RUNTIME_API uint64_t rl_os_memory_bytes(void);
 

@@ -2366,6 +2366,10 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         (Some(_), Ok((_, out))) => crate::shaders::tables(&out),
         _ => Vec::new(),
     };
+    let fonts = match (req.import, project_out(settings)) {
+        (Some(_), Ok((_, out))) => crate::fonts::packaged(&out),
+        _ => None,
+    };
     let data_manifest = match (req.import, req.ios.is_some() || req.android.is_some()) {
         (Some(import), true) => {
             let work = req.exe.parent().ok_or("the program has no folder")?;
@@ -2386,6 +2390,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
                 data_manifest: data_manifest.as_deref(),
                 data,
                 shaders: &shaders,
+                fonts: fonts.as_deref(),
             },
             ui,
         )?;
@@ -2400,7 +2405,15 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     }
     if let Some(a) = req.android {
         let l = crate::android::launcher(req.exe, req.name, label)?;
-        let apk = crate::android::package(a, req.exe, req.name, &l, data_manifest.as_deref(), ui)?;
+        let apk = crate::android::package(
+            a,
+            req.exe,
+            req.name,
+            &l,
+            data_manifest.as_deref(),
+            fonts.as_deref(),
+            ui,
+        )?;
         ui.summary(&Line::new().text(format!("  apk: {}", apk.display())));
         return Ok(());
     }
@@ -2409,6 +2422,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         exe: req.exe,
         import: req.import,
         shaders: &shaders,
+        fonts: fonts.as_deref(),
     };
     if let Some(p) = crate::macapp::package(settings, &request, ui)? {
         ui.summary(&Line::new().text(format!("  app: {}", p.path.display())));
@@ -2527,7 +2541,6 @@ pub fn run_run(
     cmd.env(crate::dev::SOCKET_ENV, &sock);
     crate::gamedata::set_env(&mut cmd, &import);
     crate::shaders::set_env(&mut cmd, &built.out);
-    crate::fonts::set_env(&mut cmd, &built.out);
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }

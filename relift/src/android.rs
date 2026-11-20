@@ -430,6 +430,9 @@ pub struct Apk<'a> {
     pub output: &'a Path,
     /// The game data manifest, shipped as an asset (crate::datamanifest).
     pub data_manifest: Option<&'a [u8]>,
+    /// The build's fallback fonts (crate::fonts::packaged), shipped as the
+    /// assets `fonts/<type>.ttf`.
+    pub fonts: Option<&'a Path>,
     /// What the settings pages say about the game.
     pub about: &'a About,
 }
@@ -645,6 +648,7 @@ pub fn package(
     name: &str,
     launcher: &Launcher,
     data_manifest: Option<&[u8]>,
+    fonts: Option<&Path>,
     ui: &mut Ui,
 ) -> Result<PathBuf, BoxError> {
     let dir = exe.parent().ok_or("the program has no folder")?;
@@ -662,6 +666,7 @@ pub fn package(
             work: &dir.join("apk"),
             output: &apk,
             data_manifest,
+            fonts,
             about: &launcher.about,
         },
         &a.sdk,
@@ -987,6 +992,11 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
     if let Some(m) = a.data_manifest {
         z.add(&format!("assets/{}", crate::datamanifest::FILE), m.to_vec());
     }
+    if let Some(f) = a.fonts {
+        for (name, bytes) in crate::fonts::files(f)? {
+            z.add(&format!("assets/fonts/{name}"), bytes);
+        }
+    }
     if a.about.vulkan {
         z.add(
             "assets/gpu_drivers.json",
@@ -1199,6 +1209,7 @@ mod tests {
             work: Path::new("w"),
             output: Path::new("o"),
             data_manifest: None,
+            fonts: None,
             about: &About {
                 platform: "Switch".into(),
                 version: "1.0.2".into(),

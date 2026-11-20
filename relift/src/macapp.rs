@@ -469,6 +469,9 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
         None => (false, false),
     };
     crate::shaders::install(req.shaders, &resources.join("shaders"))?;
+    if let Some(f) = req.fonts {
+        crate::fonts::install(f, &resources.join("fonts"))?;
+    }
     let script = macos.join(slug);
     relift_cache::write_if_changed(
         &script,

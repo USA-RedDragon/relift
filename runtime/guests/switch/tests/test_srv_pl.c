@@ -7,6 +7,7 @@
  */
 #include "tc.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -120,4 +121,32 @@ TEST(pl_takes_the_fallback_only_for_fonts_the_player_lacks)
     CHECK_EQ(rc, SF_RESULT_NOT_SUPPORTED);
     unsetenv("RELIFT_FONTS");
     unsetenv("RELIFT_FONTS_FALLBACK");
+}
+
+TEST(pl_finds_the_fallback_fonts_beside_the_program_from_any_directory)
+{
+    char exe[1024], dir[1100], path[1200], cwd[1024];
+    CHECK(rl_exe_dir(exe, sizeof exe));
+    snprintf(dir, sizeof dir, "%s/fonts", exe);
+    CHECK(mkdir(dir, 0755) == 0 || errno == EEXIST);
+    snprintf(path, sizeof path, "%s/4.ttf", dir);
+    FILE *f = fopen(path, "wb");
+    CHECK(f != NULL);
+    fwrite("shipped Korean", 1, 14, f);
+    fclose(f);
+    CHECK(getcwd(cwd, sizeof cwd) != NULL);
+    CHECK_EQ(chdir("/"), 0);
+    unsetenv("RELIFT_FONTS");
+    unsetenv("RELIFT_FONTS_FALLBACK");
+
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    tc_obj pl = tc_open_service(c, heap, "pl:u");
+    uint32_t rc;
+    CHECK_EQ(u32_of(c, pl, 2, 4, &rc), 14);
+    CHECK_EQ(rc, 0);
+
+    CHECK_EQ(chdir(cwd), 0);
+    CHECK_EQ(unlink(path), 0);
+    rmdir(dir);
 }

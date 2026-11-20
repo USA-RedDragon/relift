@@ -95,8 +95,24 @@ static bool call_activity(const char *method, const char *arg)
 
 static void driver_failed(const char *name) { call_activity("reliftGpuDriverFailed", name); }
 
+static void *apk_asset(const char *name, size_t *len)
+{
+    size_t n = 0;
+    void *data = SDL_LoadFile(name, &n);
+    if (!data)
+        return NULL;
+    void *copy = malloc(n ? n : 1);
+    if (copy) {
+        memcpy(copy, data, n);
+        *len = n;
+    }
+    SDL_free(data);
+    return copy;
+}
+
 static void init_once(void)
 {
+    rl_set_asset_loader(apk_asset);
     rl_hostlib_on_gpu_driver_failed(driver_failed);
     const char *dir = rl_android_files_dir();
     if (dir) {

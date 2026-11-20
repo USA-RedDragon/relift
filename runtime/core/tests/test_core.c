@@ -11,7 +11,9 @@
 
 #include <dirent.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /** @brief The fake CPU's context. */
@@ -709,4 +711,50 @@ TEST(core_stop_report_takes_a_call_site_from_the_cpu)
     rl_report_reset();
     rl_fn_maps_reset();
     rl_thread_free(t);
+}
+
+static void *fake_assets(const char *name, size_t *len)
+{
+    if (strcmp(name, "packaged/in-an-apk.bin") != 0)
+        return NULL;
+    *len = 3;
+    return memcpy(malloc(3), "apk", 3);
+}
+
+TEST(core_finds_shipped_files_by_the_executable_not_the_working_directory)
+{
+    char exe[1024], dir[1100], file[1200], cwd[1024];
+    CHECK(rl_exe_dir(exe, sizeof exe));
+    snprintf(dir, sizeof dir, "%s/assets-%d", exe, (int)getpid());
+    snprintf(file, sizeof file, "%s/found.bin", dir);
+    CHECK_EQ(mkdir(dir, 0755), 0);
+    FILE *f = fopen(file, "wb");
+    CHECK(f != NULL);
+    fwrite("beside", 1, 6, f);
+    fclose(f);
+    CHECK(getcwd(cwd, sizeof cwd) != NULL);
+    CHECK_EQ(chdir("/"), 0);
+
+    char name[64];
+    snprintf(name, sizeof name, "assets-%d/found.bin", (int)getpid());
+    size_t len = 0;
+    char *data = rl_asset_load(name, &len);
+    CHECK(data != NULL);
+    CHECK_EQ(len, 6);
+    CHECK(data && memcmp(data, "beside", 6) == 0);
+    free(data);
+    CHECK(rl_asset_load("assets-missing/none.bin", &len) == NULL);
+
+    rl_set_asset_loader(fake_assets);
+    data = rl_asset_load("packaged/in-an-apk.bin", &len);
+    CHECK(data != NULL);
+    CHECK_EQ(len, 3);
+    CHECK(data && memcmp(data, "apk", 3) == 0);
+    free(data);
+    rl_set_asset_loader(NULL);
+    CHECK(rl_asset_load("packaged/in-an-apk.bin", &len) == NULL);
+
+    CHECK_EQ(chdir(cwd), 0);
+    CHECK_EQ(unlink(file), 0);
+    CHECK_EQ(rmdir(dir), 0);
 }

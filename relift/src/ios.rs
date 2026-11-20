@@ -699,6 +699,9 @@ pub struct Contents<'a> {
     /// The build's shader tables (crate::shaders::tables), which go into the
     /// bundle's `shaders/` folder.
     pub shaders: &'a [PathBuf],
+    /// The build's fallback fonts (crate::fonts::packaged), which go into
+    /// the bundle's `fonts/` folder beside the program.
+    pub fonts: Option<&'a Path>,
 }
 
 /// The packaging step of an iOS build: `<name>.app` beside the program
@@ -715,6 +718,7 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
         data_manifest,
         data,
         shaders,
+        fonts,
     } = *c;
     let dir = exe.parent().ok_or("the program has no folder")?;
     let row = ui.row("");
@@ -741,6 +745,9 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
     }
     if !shaders.is_empty() {
         crate::shaders::install(shaders, &app.join("shaders"))?;
+    }
+    if let Some(f) = fonts {
+        crate::fonts::install(f, &app.join("fonts"))?;
     }
     for (n, png) in &home.icons {
         relift_cache::write_if_changed(&app.join(n), png)?;

@@ -124,6 +124,10 @@ pub struct Request<'a> {
     /// The build's shader tables (crate::shaders::tables), which go into the
     /// AppImage beside the data.
     pub shaders: &'a [PathBuf],
+    /// The build's fallback fonts (crate::fonts::packaged), which go into
+    /// `usr/share/relift/fonts`, where the program finds them from its own
+    /// location.
+    pub fonts: Option<&'a Path>,
 }
 
 /// When to build the AppImage.
@@ -455,6 +459,9 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
     };
     let has_shaders = !req.shaders.is_empty();
     crate::shaders::install(req.shaders, &share.join("shaders"))?;
+    if let Some(f) = req.fonts {
+        crate::fonts::install(f, &share.join("fonts"))?;
+    }
     relift_cache::write_if_changed(&dir.join(INFO_PATH), &info.to_bytes())?;
     write_licenses(dir, &slug, &name, &bundled, platform == "switch")?;
     let run = dir.join("AppRun");
@@ -721,12 +728,17 @@ mod tests {
         let table = root.join("table.rlspv");
         relift_cache::write_if_changed(&table, b"RLSPV002\0\0\0\x01x").unwrap();
         let shaders = [table];
+        let fonts = root.join("fonts");
+        std::fs::create_dir_all(&fonts).unwrap();
+        relift_cache::write_if_changed(&fonts.join("4.ttf"), b"font").unwrap();
+        let packaged = crate::fonts::packaged(&root);
         let exe = std::env::current_exe().unwrap();
         let req = Request {
             name: "my game",
             exe: &exe,
             import: Some(&data),
             shaders: &shaders,
+            fonts: packaged.as_deref(),
         };
         let out = root.join("AppDir");
         let p = layout(&req, &info, &out).unwrap();
@@ -739,6 +751,7 @@ mod tests {
             "usr/bin/my-game",
             "usr/share/relift/romfs.img",
             "usr/share/relift/shaders/table.rlspv",
+            "usr/share/relift/fonts/4.ttf",
             "usr/share/licenses/my-game/BUNDLED.txt",
             "usr/share/licenses/my-game/relift-LICENSE",
             "usr/share/licenses/my-game/type2-runtime-LICENSE",

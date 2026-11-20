@@ -125,7 +125,6 @@ pub fn run(settings: &Settings, req: &Request<'_>, ui: &mut Ui) -> Result<u8, Bo
         .env("RELIFT_DIFF_ENGINE", engine);
     crate::gamedata::set_env(&mut cmd, &import);
     crate::shaders::set_env(&mut cmd, &built.out);
-    crate::fonts::set_env(&mut cmd, &built.out);
     let status = cmd.status()?;
     Ok(u8::try_from(status.code().unwrap_or(128)).unwrap_or(1))
 }
