@@ -324,12 +324,15 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
         return log_fail("the address space is too small");
     lx_fs_init();
     lx_signal_init();
+    rl_arm64_set_safepoint_hook(lx_safepoint);
     lx_proc_init();
     rl_dispatch_set_image(p->image_id);
     if (rl_dispatch_reserve(p->image_base, p->image_base + p->image_size) != 0)
         return log_fail("cannot allocate the dispatch table");
     if (p->unit_count && rl_units_register(p->units, p->unit_count) != 0)
         return log_fail("a lifted unit was refused");
+    if (p->code_map_count && rl_code_maps_register(p->code_maps, p->code_map_count, NULL) != 0)
+        return log_fail("the code maps disagree with the lifted units");
     describe_program(p);
     struct rl_thread *t = rl_thread_alloc();
     if (!t)
@@ -357,6 +360,18 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     return 0;
 }
 
+/**
+ * @brief The run summary line of the cold copy (docs/abi.md section 5.2):
+ * how many instructions ran there, printed when RELIFT_STATS=1.
+ */
+void lx_report_cold(void)
+{
+    const char *e = getenv("RELIFT_STATS");
+    if (e && e[0] == '1')
+        rl_log(RL_LOG_INFO, "cold", "%llu instructions ran in the cold copy",
+               (unsigned long long)__atomic_load_n(&rl_counted_insns, __ATOMIC_RELAXED));
+}
+
 int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
 {
     rl_ctx *c;
@@ -370,6 +385,7 @@ int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
         status = (int)lx.exit_status;
     }
     lx_fs_shutdown();
+    lx_report_cold();
     rl_process_exit((uint32_t)status);
     return status;
 }

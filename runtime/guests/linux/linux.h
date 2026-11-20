@@ -68,6 +68,10 @@ typedef struct rl_linux_program {
     uint32_t unit_count;
     /** @brief RL_IMAGE_ID_BYTES bytes identifying the program to hot-loaded units. */
     const uint8_t *image_id;
+    /** @brief The class maps of the executable pages (rl_code_map), or NULL for none. */
+    const rl_code_map *const *code_maps;
+    /** @brief Number of code maps. */
+    uint32_t code_map_count;
 } rl_linux_program;
 
 /**

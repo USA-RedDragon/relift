@@ -38,8 +38,10 @@ done
 
 cargo test -p relift --locked "${args[@]}"
 
-# The programs of these targets are built a second time with every return
-# going through dispatch (emit.trampoline); the output must not change.
+# The targets whose programs exercise control flow that trampoline mode changes (unwinding,
+# returns to rewritten addresses, missed calls, the tiny program) run again with every return
+# through dispatch (emit.trampoline); their output must not change. Nothing else is repeated:
+# the Linux corpus check runs every program in both modes.
 both=()
 for name in "${all[@]}"; do
   case " e2e e2e_eh e2e_ret e2e_hotload " in

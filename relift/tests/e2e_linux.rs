@@ -5,7 +5,11 @@
 //! the guest's corpus (`guests/linux/guest/corpus`) with zig and compares
 //! them with the answers recorded on a real arm64 Linux. Both skip with a
 //! note when clang is not on `PATH`, and the second when zig is not, unless
-//! `RELIFT_LINUX_REQUIRE` is set.
+//! `RELIFT_LINUX_REQUIRE` is set. `setjmp` and `coroutines` are built a second
+//! time with trampoline mode forced; the corpus check script runs every
+//! program in both modes. Only `hello` builds with the cold copy (the Go and
+//! signal programs of the corpus check use it); the rest build without it,
+//! which keeps the test short.
 
 mod tiny;
 
@@ -56,7 +60,7 @@ fn built(
     root: &Path,
     program: &Path,
     cache: &str,
-    trampoline: bool,
+    (trampoline, cold): (bool, bool),
 ) -> (std::path::PathBuf, String) {
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
@@ -73,7 +77,10 @@ fn built(
     let out = tiny::relift_env(
         &project,
         &["--cache-dir", cache, "-j", "4", "build"],
-        &[("RELIFT_EMIT_TRAMPOLINE", forced)],
+        &[
+            ("RELIFT_EMIT_TRAMPOLINE", forced),
+            ("RELIFT_EMIT_COLD", if cold { "true" } else { "false" }),
+        ],
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
@@ -99,7 +106,7 @@ fn a_hand_assembled_program_builds_and_exits_with_its_status() {
     std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
     relift_cache::write_if_changed(&elf, &program()).expect("the program is writable");
     let cache = root.join("cache").display().to_string();
-    let (exe, _) = built(&root, &elf, &cache, false);
+    let (exe, _) = built(&root, &elf, &cache, (false, false));
     let out = relift_proc::command(&exe)
         .env("RELIFT_REPORT_DIR", &root)
         .output()
@@ -146,12 +153,21 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
         "coroutines.static",
     ]
     .into_iter()
-    .flat_map(|name| [(name, false), (name, true)])
-    {
+    .flat_map(|name| {
+        let both = ["setjmp.static", "coroutines.static"].contains(&name);
+        [(name, false)]
+            .into_iter()
+            .chain(both.then_some((name, true)))
+    }) {
         let (name, trampoline) = name;
         let _ = std::fs::remove_dir_all(root.join("game"));
         let _ = std::fs::remove_dir_all(root.join("cache"));
-        let (exe, note) = built(&root, &programs.join(name), &cache, trampoline);
+        let (exe, note) = built(
+            &root,
+            &programs.join(name),
+            &cache,
+            (trampoline, name == "hello.static" && !trampoline),
+        );
         let wants = match name {
             "coroutines.static" | "setjmp.static" => Some("returns: trampoline mode ("),
             "hello.static" => Some("returns: direct"),

@@ -6,6 +6,7 @@
 //! code into one unit (`relift-linux`) and links it with the runtime's core,
 //! A64 and Linux layers, which are the kernel the program runs on.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use relift_linux::{lift, program};
@@ -138,6 +139,160 @@ fn project() -> Result<Project, BoxError> {
     })
 }
 
+/// What [`emit_cold`] made.
+struct ColdMade {
+    files: Vec<PathBuf>,
+    unit: String,
+    map: String,
+}
+
+/// Emits the cold copy of the program (`docs/abi.md` section 5.2): the
+/// functions of the hot unit again, as pieces dispatch can enter at any
+/// instruction, with every function the superset roots add for the words
+/// discovery left out. The hot unit is untouched. Dispatch finds cold code
+/// where an address is not a hot entry, so a target that only data names
+/// (a return address Go computes from a table) runs lifted code too.
+fn emit_cold(
+    placed: &program::Placed,
+    lifted: &lift::Lifted,
+    cdir: &Path,
+    ui: &mut Ui,
+) -> Result<ColdMade, BoxError> {
+    let row = ui.row("cold");
+    ui.begin(row, "cold");
+    let fe = lift::frontend();
+    let granule = relift_guest::Frontend::granule(&fe);
+    let module = &lifted.module;
+    let hot_layout = relift_analyze::Layout::of(&lifted.analysis, granule);
+    let sup = &lifted.superset;
+    let mut hot: BTreeSet<u64> = lifted.inner.clone();
+    for f in lifted.analysis.functions.values() {
+        hot.insert(f.entry);
+        hot.extend(f.pads.iter().copied());
+    }
+    let mut all: Vec<&relift_analyze::Outline> = hot_layout
+        .functions
+        .values()
+        .filter(|o| {
+            o.runs
+                .iter()
+                .any(|&(first, n)| (0..u64::from(n)).any(|k| !hot.contains(&(first + granule * k))))
+        })
+        .chain(sup.layout.functions.values())
+        .collect();
+    all.sort_by_key(|o| o.entry);
+    let raw = |pc: u64| {
+        module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
+            u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        })
+    };
+    let mut lifted_fns: Vec<relift_analyze::Function> = Vec::new();
+    relift_analyze::lift_each(&fe, module, &all, &mut |_, f| lifted_fns.push(f.clone()));
+    let fns: Vec<relift_emit::Function<'_>> = lifted_fns
+        .iter()
+        .map(|f| relift_emit::Function {
+            entry: f.entry,
+            name: format!("{}_cold", program::host_name(f.entry)),
+            guest_name: f.name.clone(),
+            span: f.span(granule),
+            insts: f
+                .insts
+                .iter()
+                .map(|(&pc, i)| {
+                    let e = match i {
+                        relift_analyze::Insn::Lifted(b) => relift_emit::Insn::Lifted {
+                            block: b,
+                            raw: raw(pc),
+                        },
+                        relift_analyze::Insn::Failed(e) => relift_emit::Insn::Failed(e),
+                    };
+                    (pc, e)
+                })
+                .collect(),
+            tables: f.tables.clone(),
+            pads: f.pads.clone(),
+            guesses: BTreeMap::new(),
+            entries: BTreeMap::new(),
+        })
+        .collect();
+    let calls: Vec<relift_emit::Override> = lifted
+        .analysis
+        .functions
+        .values()
+        .map(|f| relift_emit::Override {
+            entry: f.entry,
+            host_fn: program::host_name(f.entry),
+            may_unwind: true,
+            resume_point: false,
+            declare: true,
+        })
+        .collect();
+    let unit = format!("{}_cold", lift::UNIT_SYMBOL);
+    let output = relift_emit::emit(
+        &fe,
+        &fns,
+        &[],
+        &relift_emit::Options {
+            unit_name: format!("{} (cold)", placed.name),
+            unit_symbol: unit.clone(),
+            module_base: placed.image.base,
+            enter_anywhere: Some(u64::MAX),
+            entry_ranges: true,
+            piece_syms: false,
+            calls,
+            trampoline: lifted.trampoline,
+            preempt_resume: true,
+            count_insns: true,
+            ..relift_emit::Options::default()
+        },
+    );
+    let dir = cdir.join("cold");
+    std::fs::create_dir_all(&dir)?;
+    let mut files = Vec::new();
+    for f in &output.files {
+        let path = dir.join(&f.name);
+        relift_cache::write_if_changed(&path, f.text.as_bytes())?;
+        if f.name.ends_with(".c") {
+            files.push(path);
+        }
+    }
+    relift_cache::write_if_changed(
+        &dir.join(relift_emit::PRELUDE_NAME),
+        relift_emit::PRELUDE.as_bytes(),
+    )?;
+    let map = crate::total::code_map(&fe, module, &hot, &all)?;
+    let sym = format!("rl_code_{}", lift::UNIT_SYMBOL);
+    let map_c = dir.join("codemap.c");
+    relift_cache::write_if_changed(
+        &map_c,
+        crate::total::code_map_c(
+            relift_guest::Frontend::abi_headers(&fe),
+            &map,
+            &sym,
+            lift::UNIT_SYMBOL,
+            &unit,
+            &placed.name,
+        )
+        .as_bytes(),
+    )?;
+    files.push(map_c);
+    ui.done(
+        row,
+        Line::new().text(format!(
+            "{} cold functions, {} superset from {}; {}",
+            noun(all.len() as u64, "function"),
+            sup.layout.functions.len(),
+            noun(sup.roots as u64, "root"),
+            map.census.line()
+        )),
+    );
+    Ok(ColdMade {
+        files,
+        unit,
+        map: sym,
+    })
+}
+
 /// What a build made.
 pub struct Built {
     /// The program.
@@ -183,7 +338,7 @@ pub fn build(
     let object = elf::parse(&p.bytes).map_err(|e| format!("{}: {e}", p.title))?;
     let placed = program::place(&p.title, object)?;
     let id = relift_switch_formats::sha256(&p.bytes);
-    let lifted = lift::lift(&placed, id, settings.emit.trampoline);
+    let lifted = lift::lift(&placed, id, settings.emit.trampoline, settings.emit.cold);
     let mut files = Vec::new();
     let udir = cdir.join("unit");
     std::fs::create_dir_all(&udir)?;
@@ -218,13 +373,16 @@ pub fn build(
             lifted.unlifted.len()
         )),
     );
+    let mut units = vec![lift::UNIT_SYMBOL.to_string()];
+    let mut maps = Vec::new();
+    if settings.emit.cold {
+        let made = emit_cold(&placed, &lifted, &cdir, ui)?;
+        files.extend(made.files);
+        units.push(made.unit);
+        maps.push(made.map);
+    }
     let mut prog = Vec::new();
-    for f in program::program_files(
-        &placed,
-        &[lift::UNIT_SYMBOL.to_string()],
-        id,
-        lifted.trampoline,
-    ) {
+    for f in program::program_files(&placed, &units, id, lifted.trampoline, &maps) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
         if f.name.ends_with(".c") {

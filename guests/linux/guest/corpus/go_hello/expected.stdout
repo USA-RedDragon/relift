@@ -1,0 +1,3 @@
+hello from go
+os: linux arch: arm64
+args: 1

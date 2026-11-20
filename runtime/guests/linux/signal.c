@@ -48,8 +48,10 @@ static void raise_on(lx_thread *t, int sig, int32_t code)
 {
     t->pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = 0, .queued = false };
     __atomic_store_n(&t->pending[sig].queued, true, __ATOMIC_RELEASE);
-    if (t != lx_cur())
+    if (t != lx_cur()) {
+        rl_preempt_request(t->rt->ctx);
         lx_thread_kick(t);
+    }
 }
 
 void lx_signal_raise(int sig, int32_t code)
@@ -124,6 +126,7 @@ int lx_signal_peek(uint64_t *flags)
 }
 
 static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c);
+static int lx_signal_deliver_from(rl_ctx *c, uint8_t *mem);
 
 static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p)
 {
@@ -139,7 +142,8 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     uint64_t frame = (sp - FRAME_BYTES) & ~15ull;
     if (!lx_ok(frame, FRAME_BYTES, RL_VM_W))
         return rl_guest_fatal(c, "signal", "no room on the stack to deliver signal %d (sp 0x%llx)", sig, (unsigned long long)sp);
-    const uint64_t resume = c->pc + 4;
+    const uint64_t bias = lx_cur()->resume_bias;
+    const uint64_t resume = c->pc + bias;
     uint8_t *f = mem + frame;
     memset(f, 0, FRAME_BYTES);
     int32_t si[4] = { sig, 0, p->code, 0 };
@@ -219,7 +223,7 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
         return RL_PENDING;
     }
     if (new_pc != resume) {
-        c->pc = resume - 4;
+        c->pc = resume - bias;
         c->pend.pc = new_pc;
         c->pend.sp = RL_SP_NONE;
         c->pend.kind = RL_PEND_REDIRECT;
@@ -267,6 +271,12 @@ static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c)
  * second runs first (run_handler nests).
  */
 int lx_signal_deliver(rl_ctx *c, uint8_t *mem)
+{
+    lx_cur()->resume_bias = 4;
+    return lx_signal_deliver_from(c, mem);
+}
+
+static int lx_signal_deliver_from(rl_ctx *c, uint8_t *mem)
 {
     for (int sig = next_pending(); sig; sig = next_pending()) {
         lx_pending_sig p;
@@ -526,4 +536,12 @@ lx_sys_fn *lx_signal_call(uint32_t nr)
     case NR_tgkill: return sys_tgkill;
     default: return NULL;
     }
+}
+
+int lx_safepoint(rl_ctx *c, uint8_t *mem)
+{
+    if (!lx_signal_ready())
+        return RL_OK;
+    lx_cur()->resume_bias = 0;
+    return lx_signal_deliver_from(c, mem);
 }

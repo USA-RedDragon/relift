@@ -1,0 +1,3 @@
+main kept running with spinners: true
+main woke while a plain loop spins
+loop done: true

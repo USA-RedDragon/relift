@@ -1,0 +1,7 @@
+ticks at least 8: true
+timed out first
+then slow
+stopped: true
+reset fired
+order: 1 2 3
+elapsed sane: true

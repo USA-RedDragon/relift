@@ -178,6 +178,7 @@ pub fn program_files(
     units: &[String],
     image_id: [u8; 32],
     trampoline: bool,
+    code_maps: &[String],
 ) -> Vec<ProgramFile> {
     vec![
         ProgramFile {
@@ -191,7 +192,7 @@ pub fn program_files(
         },
         ProgramFile {
             name: "program.c".into(),
-            bytes: program_c(p, units, image_id, trampoline).into_bytes(),
+            bytes: program_c(p, units, image_id, trampoline, code_maps).into_bytes(),
         },
     ]
 }
@@ -221,7 +222,13 @@ fn c_string(s: &str) -> String {
 
 /// `program.c`: the segments, the entry, the program headers, the stack
 /// size, the units and `main`.
-pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32], trampoline: bool) -> String {
+pub fn program_c(
+    p: &Placed,
+    units: &[String],
+    image_id: [u8; 32],
+    trampoline: bool,
+    code_maps: &[String],
+) -> String {
     let o = &p.object;
     let mut t = String::from("#include <stdint.h>\n#include \"linux.h\"\n");
     if trampoline {
@@ -230,6 +237,17 @@ pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32], trampoline: b
     for u in units {
         let _ = writeln!(t, "extern const rl_unit {u};");
     }
+    for m in code_maps {
+        let _ = writeln!(t, "extern const rl_code_map {m};");
+    }
+    t.push_str("static const rl_code_map *const code_maps[] = {");
+    for m in code_maps {
+        let _ = write!(t, " &{m},");
+    }
+    if code_maps.is_empty() {
+        t.push_str(" 0");
+    }
+    t.push_str(" };\n");
     t.push_str("static const rl_unit *const static_units[] = {");
     for u in units {
         let _ = write!(t, " &{u},");
@@ -260,7 +278,7 @@ pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32], trampoline: b
     let id: Vec<String> = image_id.iter().map(|b| format!("0x{b:02x}")).collect();
     let _ = write!(
         t,
-        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .segments = segments,\n    .segment_count = {}u,\n    .image = rl_linux_image,\n    .image_base = UINT64_C({:#x}),\n    .image_size = UINT64_C({:#x}),\n    .entry = UINT64_C({:#x}),\n    .phdr = UINT64_C({:#x}),\n    .phent = {}u,\n    .phnum = {}u,\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
+        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .segments = segments,\n    .segment_count = {}u,\n    .image = rl_linux_image,\n    .image_base = UINT64_C({:#x}),\n    .image_size = UINT64_C({:#x}),\n    .entry = UINT64_C({:#x}),\n    .phdr = UINT64_C({:#x}),\n    .phent = {}u,\n    .phnum = {}u,\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n    .code_maps = code_maps,\n    .code_map_count = {}u,\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
         id.join(", "),
         c_string(&p.name),
         o.segments.len(),
@@ -273,6 +291,7 @@ pub fn program_c(p: &Placed, units: &[String], image_id: [u8; 32], trampoline: b
         stack,
         crate::cpu::hwcap(),
         units.len(),
+        code_maps.len(),
         if trampoline {
             "    rl_arm64_set_trampoline(1);\n"
         } else {

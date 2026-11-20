@@ -87,6 +87,8 @@ typedef struct lx_thread {
     bool on_altstack;
     /** @brief How many signal handlers run nested on this thread. */
     int handlers;
+    /** @brief What a handler's saved pc adds to the pc of the interruption: 4 after an svc, 0 at a safe point. */
+    uint64_t resume_bias;
     /** @brief Where set_tid_address or clone says the thread id is cleared when the thread ends. */
     uint64_t clear_child_tid;
     /** @brief The wake handle blocking waits of this thread take (hio_waker_*). */
@@ -219,6 +221,8 @@ void lx_fs_shutdown(void);
 
 /** @brief rt_sigreturn: ends the innermost signal handler's host entry; LX_PENDING, or -ENOSYS outside a handler. */
 int64_t lx_sigreturn(rl_ctx *c);
+/** @brief The arm64 safe point hook: delivers the signals a thread is ready for at a preemption check. */
+int lx_safepoint(rl_ctx *c, uint8_t *mem);
 /** @brief Delivers the queued signals the process does not block, after a system call. Returns RL_OK or RL_PENDING. */
 int lx_signal_deliver(rl_ctx *c, uint8_t *mem);
 /** @brief Whether a signal waits that the thread does not block and that does something (a handler, or the default action that ends the process). */
@@ -242,6 +246,8 @@ void lx_signal_raise(int sig, int32_t code);
 /** @brief Sets the signals' initial state. */
 void lx_signal_init(void);
 
+/** @brief Logs how many instructions ran in the cold copy when RELIFT_STATS=1. */
+void lx_report_cold(void);
 /** @brief Fills in the resource limits. */
 void lx_proc_init(void);
 

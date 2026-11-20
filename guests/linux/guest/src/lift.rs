@@ -38,6 +38,14 @@ pub struct Lifted {
     pub trampoline: bool,
     /// Why trampoline mode was chosen, when it was.
     pub reason: Option<String>,
+    /// The hot functions as discovery and the escape analysis left them.
+    pub analysis: relift_analyze::Analysis,
+    /// The functions the superset roots add, for the cold copy.
+    pub superset: relift_analyze::total::Superset,
+    /// The program's code and data as the analysis reads them.
+    pub module: relift_guest::Module,
+    /// The entries inside the unit's functions that its table lists.
+    pub inner: std::collections::BTreeSet<u64>,
 }
 
 /// `__NR_clone` on aarch64.
@@ -116,7 +124,7 @@ pub fn maps_executable(a: &relift_analyze::Analysis) -> Option<u64> {
 /// Why the program needs trampoline mode (`docs/abi.md` section 5.5), or
 /// `None` when direct returns are proven safe: the build forces it, a
 /// segment is writable and executable, a system call maps executable memory,
-/// or a write of the stack pointer is not relative to the function's entry
+/// or (in any function, the cold copy's superset included) a write of the stack pointer is not relative to the function's entry
 /// value ([`relift_analyze::stack`]).
 fn mode_reason(
     fe: &Arm64,
@@ -157,7 +165,7 @@ pub fn frontend() -> Arm64 {
 /// Lifts every function discovery finds in `p` and emits them as one unit;
 /// `image_id` identifies the program to the runtime. `force_trampoline`
 /// makes the program use trampoline mode whatever the analysis says.
-pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool) -> Lifted {
+pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool, cold: bool) -> Lifted {
     let fe = frontend();
     let mut module = program::module(p);
     let mut analysis = discover(&fe, &module);
@@ -224,7 +232,17 @@ pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool) -> Lifted {
         .collect();
     unlifted.sort_by_key(|u| u.at);
     unlifted.dedup_by_key(|u| u.at);
-    let reason = mode_reason(&fe, p, &analysis, force_trampoline);
+    let superset = if cold {
+        let hot = relift_analyze::Layout::of(&analysis, granule);
+        relift_analyze::total::superset(&fe, &module, &hot)
+    } else {
+        relift_analyze::total::Superset::default()
+    };
+    let mut every = analysis.clone();
+    every
+        .functions
+        .extend(superset.layout.lift(&fe, &module).functions);
+    let reason = mode_reason(&fe, p, &every, force_trampoline);
     let trampoline = reason.is_some();
     let output = relift_emit::emit(
         &fe,
@@ -236,9 +254,16 @@ pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool) -> Lifted {
             module_base: p.image.base,
             image_id,
             trampoline,
+            preempt_resume: true,
             ..Options::default()
         },
     );
+    let inner = output
+        .files
+        .iter()
+        .filter(|f| f.name == "unit.c")
+        .flat_map(|f| f.fns.iter().map(|(pc, _)| *pc))
+        .collect();
     Lifted {
         output,
         functions: fns.len(),
@@ -246,5 +271,9 @@ pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool) -> Lifted {
         unlifted,
         trampoline,
         reason,
+        inner,
+        analysis,
+        superset,
+        module,
     }
 }

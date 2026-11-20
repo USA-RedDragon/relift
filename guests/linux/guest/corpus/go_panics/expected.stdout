@@ -1,0 +1,8 @@
+recovered: boom
+recovered: runtime error: index out of range [5] with length 3
+recovered: runtime error: integer divide by zero
+recovered: myErr 7
+recovered: rethrown at 3
+true 9
+recovered: in goroutine
+deferred before the crash
