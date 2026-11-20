@@ -27,6 +27,8 @@ typedef struct child_run {
     char out[32768];
     /** @brief POSIX: true when a signal ended it. */
     bool signaled;
+    /** @brief POSIX: true when the kernel dumped its core. */
+    bool cored;
     /** @brief The signal (POSIX, when signaled) or the exit code (Windows: the exception code after a crash). */
     unsigned long code;
 } child_run;
@@ -96,6 +98,7 @@ static int child_spawn(const char *self, const char *mode, child_run *r)
     int st = 0;
     waitpid(pid, &st, 0);
     r->signaled = WIFSIGNALED(st);
+    r->cored = WIFSIGNALED(st) && WCOREDUMP(st);
     r->code = r->signaled ? (unsigned long)WTERMSIG(st) : (unsigned long)WEXITSTATUS(st);
     return 0;
 }

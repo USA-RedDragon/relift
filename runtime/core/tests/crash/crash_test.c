@@ -13,6 +13,10 @@
  * not ported yet.
  */
 #include "child.h"
+
+#if !defined(_WIN32)
+#include <sys/resource.h>
+#endif
 #include "crash.h"
 #include "fiber.h"
 
@@ -222,7 +226,19 @@ static int child(const char *mode)
     if (strcmp(mode, "nomap") != 0 && rl_fn_maps_register(maps, 1) != 0)
         return 3;
     rl_crash_install();
+#if !defined(_WIN32)
+    if (!strcmp(mode, "core")) {
+        struct rlimit all = { RLIM_INFINITY, RLIM_INFINITY };
+        setrlimit(RLIMIT_CORE, &all);
+    }
+#endif
     g_mode = !strcmp(mode, "ill") ? 1 : !strcmp(mode, "host") ? 2 : 0;
+    if (!strcmp(mode, "core")) {
+        g_mode = 0;
+        memset(g_ctx, 0, sizeof g_ctx);
+        _ZN5guest4test5outerEv((rl_ctx *)(void *)g_ctx, mem);
+        return 4;
+    }
     g_mem = mem;
     if (!strcmp(mode, "pieces")) {
         if ((uintptr_t)_ZN5guest4test11pieced_partE2 >= (uintptr_t)_ZN5guest4test11pieced_partE1)
@@ -320,6 +336,15 @@ static int parent(const char *self)
     expect(r, "host: fault is outside guest memory", strstr(r->out, "(outside guest memory)") != NULL);
     expect(r, "host: pc is in host code", strstr(r->out, "in host code, not in a lifted function") != NULL);
     check_backtrace(r, "guest::test::callshost()");
+
+#if !defined(_WIN32)
+    if (spawn(self, "core", r) != 0)
+        return 1;
+    printf("--- a crash with the core limit raised ---\n%.600s\n", r->out);
+    expect(r, "core: the child crashed", CRASHED(r));
+    expect(r, "core: the report was written", strstr(r->out, "[relift crash] SIGSEGV") != NULL);
+    expect(r, "core: no core dump follows the report (it would take minutes for a game's address space)", !r->cored);
+#endif
 
     if (spawn(self, "nomap", r) != 0)
         return 1;

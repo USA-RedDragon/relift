@@ -11,7 +11,9 @@
 #include <dlfcn.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <sys/ucontext.h>
@@ -83,11 +85,28 @@ static const char *sig_name(int sig)
     }
 }
 
+/**
+ * @brief Keeps the kernel from writing a core file when the process ends on the signal the handler hands back. The
+ * report is what a crash leaves; a game's address space is over 100 GiB reserved and tens of GiB touched, and
+ * dumping it through a core handler takes minutes, in which the process looks hung. A limit of 1 byte (not 0) is the
+ * one that also stops a dump piped to a handler program. RELIFT_CORE=1 keeps the dump.
+ */
+static void no_core(void)
+{
+    const char *keep = getenv("RELIFT_CORE");
+    if (keep && *keep && *keep != '0')
+        return;
+    struct rlimit none = { 1, 1 };
+    setrlimit(RLIMIT_CORE, &none);
+}
+
 void rl_crash_signal(int sig, void *siginfo, void *ucontext)
 {
     siginfo_t *si = siginfo;
-    if (g_reporting)
+    if (g_reporting) {
+        no_core();
         return;
+    }
     g_reporting = 1;
     rl_crash_info ci;
     memset(&ci, 0, sizeof ci);
@@ -100,6 +119,7 @@ void rl_crash_signal(int sig, void *siginfo, void *ucontext)
     r.pc = ci.pc;
     ci.nframes = walk(r, ci.frames, RL_CRASH_MAX_FRAMES);
     rl_crash_report(&ci);
+    no_core();
     g_reporting = 0;
 }
 
