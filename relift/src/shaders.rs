@@ -28,8 +28,9 @@ use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use relift_gpu_nv::translate::build::{Input, Table, translate_set};
-use relift_gpu_nv::translate::{DeviceCaps, HostProfile, Options};
+use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
+use relift_gpu_nv::translate::{DeviceCaps, HostProfile, Interface, Options};
+use relift_switch_shaders::{ImportSource, Options as ScanOptions, scan};
 
 use crate::import::BoxError;
 
@@ -42,6 +43,13 @@ pub const DIR: &str = "shaders";
 
 /// The table's file in the folder.
 const TABLE: &str = "table.rlspv";
+
+/// The scan's per-file results in the folder.
+const SCAN_CACHE: &str = "scan";
+
+/// The translations' frames while the table is written (the table's index
+/// comes before them and needs every frame's length).
+const SPOOL: &str = "table.rlspv.frames";
 
 /// The interface table's file in the folder.
 const INTERFACES: &str = "table.rlspi";
@@ -67,7 +75,7 @@ pub const SHADERS_ENV: &str = "RELIFT_NVN_SHADERS";
 
 /// What a build's shader table holds.
 pub struct Built {
-    /// Programs recorded.
+    /// Programs found: by the scan of the import and recorded by runs.
     pub programs: usize,
     /// Programs translated.
     pub translated: usize,
@@ -94,30 +102,60 @@ fn hex(k: &[u8; 32]) -> String {
     })
 }
 
-/// The recorded programs of `dir`, sorted by key; a file whose bytes do not
-/// hash to its name is left out.
-fn programs(dir: &Path) -> Result<Vec<Input>, BoxError> {
+/// The keys of the programs in `dir`/programs (found by the scan or
+/// recorded by a run), sorted.
+fn program_keys(dir: &Path) -> Result<Vec<[u8; 32]>, BoxError> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir.join("programs")) else {
         return Ok(out);
     };
     for e in rd {
-        let e = e?;
-        let Some(key) = e.file_name().to_str().and_then(hex_key) else {
-            continue;
-        };
-        let code = std::fs::read(e.path())?;
-        if relift_switch_formats::sha256(&code) != key {
-            continue;
+        if let Some(key) = e?.file_name().to_str().and_then(hex_key) {
+            out.push(key);
         }
-        out.push(Input {
-            key,
-            code,
-            options: Options::default(),
-        });
     }
-    out.sort_by_key(|i| i.key);
+    out.sort_unstable();
     Ok(out)
+}
+
+/// What the scan of an import found.
+pub struct Discovered {
+    /// Programs found (unique by content).
+    pub programs: usize,
+    /// What went wrong in the scan, by message and count.
+    pub errors: BTreeMap<String, u64>,
+}
+
+/// Finds every shader program of the Switch 2 game in `import`, by its
+/// content alone (see `relift_switch_shaders`): `out`/shaders/programs
+/// gets one `<sha256>.bin` per program, and the scan keeps its per-file
+/// results in `out`/shaders/scan so that a rebuild reads only what
+/// changed. Nothing a run recorded is needed.
+///
+/// # Errors
+///
+/// The import or the folder cannot be read or written.
+pub fn discover(import: &Path, out: &Path) -> Result<Discovered, BoxError> {
+    let dir = out.join(DIR);
+    let programs = dir.join("programs");
+    std::fs::create_dir_all(&programs)?;
+    let source = ImportSource::new(import)?;
+    let report = scan(
+        &source,
+        &programs,
+        &ScanOptions {
+            cache: Some(dir.join(SCAN_CACHE)),
+            ..ScanOptions::default()
+        },
+    )?;
+    Ok(Discovered {
+        programs: report.programs.len(),
+        errors: report
+            .errors
+            .iter()
+            .map(|(k, v)| (k.clone(), v.count))
+            .collect(),
+    })
 }
 
 /// The kind of a refusal: its text with addresses and instruction words
@@ -135,29 +173,50 @@ pub fn reason_kind(reason: &str) -> String {
         .join(" ")
 }
 
-/// Translates `inputs` for `host` on `jobs` threads.
-fn translate_all(host: &HostProfile, inputs: &[Input], jobs: usize) -> Table {
-    let chunk = inputs.len().div_ceil(jobs.max(1)).max(1);
-    let parts: Vec<Table> = std::thread::scope(|s| {
-        let hs: Vec<_> = inputs
-            .chunks(chunk)
-            .map(|c| s.spawn(move || translate_set(host, c, relift_gpu_sm86::program::parse)))
-            .collect();
-        hs.into_iter()
-            .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))
-            .collect()
-    });
-    let mut t = Table::default();
-    for p in parts {
-        t.shaders.extend(p.shaders);
-        t.failed.extend(p.failed);
-    }
-    t
+/// One program translated and compressed, or why not.
+enum Item {
+    Skipped,
+    Failed(String),
+    Done {
+        frame: Vec<u8>,
+        words: u32,
+        records: Vec<[u32; 4]>,
+    },
 }
 
-/// Translates the programs recorded in `out`/shaders for the device of its
-/// `device.json` and writes the tables beside them. Without a
-/// device file the table is empty: the game has not run on a device yet.
+fn translate_one(host: &HostProfile, dir: &Path, key: [u8; 32]) -> Result<Item, BoxError> {
+    let code = std::fs::read(dir.join("programs").join(format!("{}.bin", hex(&key))))?;
+    if relift_switch_formats::sha256(&code) != key {
+        return Ok(Item::Skipped);
+    }
+    let t = translate_set(
+        host,
+        &[Input {
+            key,
+            code,
+            options: Options::default(),
+        }],
+        relift_gpu_sm86::program::parse,
+    );
+    if let Some(why) = t.failed.get(&key) {
+        return Ok(Item::Failed(why.clone()));
+    }
+    let Some((_, words, interface)) = t.shaders.get(&key) else {
+        return Ok(Item::Skipped);
+    };
+    let raw: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    Ok(Item::Done {
+        frame: zstd::bulk::compress(&raw, ZSTD_LEVEL)?,
+        words: words.len() as u32,
+        records: records(interface),
+    })
+}
+
+/// Translates the programs in `out`/shaders/programs for the device of its
+/// `device.json` and writes the tables beside them, a batch of programs at
+/// a time: a game's translations run to gigabytes, more than memory holds.
+/// Without a device file the table is empty: the game has not run on a
+/// device yet.
 ///
 /// # Errors
 ///
@@ -165,29 +224,69 @@ fn translate_all(host: &HostProfile, inputs: &[Input], jobs: usize) -> Table {
 pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
     let dir = out.join(DIR);
     std::fs::create_dir_all(dir.join("programs"))?;
-    let inputs = programs(&dir)?;
+    let keys = program_keys(&dir)?;
     let device = dir.join("device.json");
-    let table = if inputs.is_empty() || !device.is_file() {
-        Table::default()
-    } else {
+    let mut failed = String::new();
+    let mut refused = BTreeMap::new();
+    let mut index: Vec<Frame> = Vec::new();
+    let mut interface: Vec<([u8; 32], Vec<[u32; 4]>)> = Vec::new();
+    let spool = dir.join(SPOOL);
+    if !keys.is_empty() && device.is_file() {
         let text = std::fs::read_to_string(&device)?;
         let caps =
             DeviceCaps::from_json(&text).map_err(|e| format!("{}: {e}", device.display()))?;
         let host = HostProfile::from_device("device", &caps);
-        translate_all(&host, &inputs, jobs)
-    };
-    let mut failed = String::new();
-    let mut refused = BTreeMap::new();
-    for (k, why) in &table.failed {
-        let _ = writeln!(failed, "{}\t{}", hex(k), why.replace('\n', " "));
-        *refused.entry(reason_kind(why)).or_insert(0) += 1;
+        let mut spool_file = relift_cache::StreamWriter::new(&spool)?;
+        for batch in keys.chunks(jobs.max(1) * 4) {
+            let items = relift_proc::workers::parallel_with(jobs, batch, |&k| {
+                translate_one(&host, &dir, k).map_err(|e| e.to_string())
+            });
+            for (&key, item) in batch.iter().zip(items) {
+                match item? {
+                    Item::Skipped => {}
+                    Item::Failed(why) => {
+                        let _ = writeln!(failed, "{}\t{}", hex(&key), why.replace('\n', " "));
+                        *refused.entry(reason_kind(&why)).or_insert(0) += 1;
+                    }
+                    Item::Done {
+                        frame,
+                        words,
+                        records,
+                    } => {
+                        index.push(Frame {
+                            key,
+                            frame_len: frame.len() as u32,
+                            words,
+                        });
+                        spool_file.write_all(&frame)?;
+                        spool_file.write_all(&[0u8; 3][..frame.len().wrapping_neg() % 4])?;
+                        interface.push((key, records));
+                    }
+                }
+            }
+        }
+        spool_file.finish()?;
     }
     relift_cache::write_if_changed(&dir.join("failed.txt"), failed.as_bytes())?;
-    relift_cache::write_if_changed(&dir.join(TABLE), &table.to_compressed_bytes(ZSTD_LEVEL)?)?;
-    relift_cache::write_if_changed(&dir.join(INTERFACES), &interfaces(&table))?;
+    let mut table = relift_cache::StreamWriter::new(&dir.join(TABLE))?;
+    table.write_all(&compressed_head(&index))?;
+    if spool.is_file() {
+        let mut from = std::fs::File::open(&spool)?;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = from.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            table.write_all(&buf[..n])?;
+        }
+    }
+    table.finish()?;
+    let _ = std::fs::remove_file(&spool);
+    relift_cache::write_if_changed(&dir.join(INTERFACES), &interface_table(&interface))?;
     Ok(Built {
-        programs: inputs.len(),
-        translated: table.shaders.len(),
+        programs: keys.len(),
+        translated: index.len(),
         refused,
     })
 }
@@ -198,31 +297,37 @@ pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
 /// record count (u32 each), then the records, four u32 each: the record kind
 /// (`RECORD_*`), the constant bank and byte offset of the bound handle, and
 /// the specialization constant id (zero where a kind has none).
-pub fn interfaces(t: &Table) -> Vec<u8> {
+pub fn interface_table(entries: &[([u8; 32], Vec<[u32; 4]>)]) -> Vec<u8> {
     let mut head = Vec::new();
     let mut recs: Vec<[u32; 4]> = Vec::new();
     head.extend(b"RLSPI001");
-    head.extend((t.shaders.len() as u32).to_le_bytes());
-    for (key, (_, _, i)) in &t.shaders {
-        let first = recs.len();
-        for &(bank, off) in &i.textures {
-            recs.push([RECORD_TEXTURE, bank, off, 0]);
-        }
-        for (&(bank, off), &spec) in &i.texture_kinds {
-            recs.push([RECORD_TEXTURE_KIND, bank, off, spec]);
-        }
-        for (&(bank, off), &spec) in &i.texture_dims {
-            recs.push([RECORD_TEXTURE_DIM, bank, off, spec]);
-        }
-        if i.global_memory {
-            recs.push([RECORD_GLOBAL_MEMORY, 0, 0, 0]);
-        }
+    head.extend((entries.len() as u32).to_le_bytes());
+    for (key, rs) in entries {
         head.extend(key);
-        head.extend((first as u32).to_le_bytes());
-        head.extend(((recs.len() - first) as u32).to_le_bytes());
+        head.extend((recs.len() as u32).to_le_bytes());
+        head.extend((rs.len() as u32).to_le_bytes());
+        recs.extend_from_slice(rs);
     }
     head.extend(recs.iter().flatten().flat_map(|w| w.to_le_bytes()));
     head
+}
+
+/// The interface records of one translation (see [`interface_table`]).
+fn records(i: &Interface) -> Vec<[u32; 4]> {
+    let mut recs = Vec::new();
+    for &(bank, off) in &i.textures {
+        recs.push([RECORD_TEXTURE, bank, off, 0]);
+    }
+    for (&(bank, off), &spec) in &i.texture_kinds {
+        recs.push([RECORD_TEXTURE_KIND, bank, off, spec]);
+    }
+    for (&(bank, off), &spec) in &i.texture_dims {
+        recs.push([RECORD_TEXTURE_DIM, bank, off, spec]);
+    }
+    if i.global_memory {
+        recs.push([RECORD_GLOBAL_MEMORY, 0, 0, 0]);
+    }
+    recs
 }
 
 /// The table files of the build in `out` that a package carries: both when
@@ -368,6 +473,133 @@ mod tests {
                 Some(Path::new("/b/host/shaders").as_os_str())
             )]
         );
+    }
+
+    const CAPS: &str =
+        r#"{"capabilities": {"device": {"extensions": {}, "features": {}, "properties": {}}}}"#;
+
+    fn words(ws: &[u128]) -> Vec<u8> {
+        ws.iter().flat_map(|w| w.to_le_bytes()).collect()
+    }
+
+    fn exit() -> u128 {
+        0x14d | (4 << 9) | (7 << 12) | (7 << 87) | (7 << 110) | (7 << 113)
+    }
+
+    fn bra_self() -> u128 {
+        0x147 | (4 << 9) | (7 << 12) | (0xffff_ffff_fffc << 34) | (7 << 87)
+    }
+
+    fn adler32(b: &[u8]) -> u32 {
+        let (mut a, mut s) = (1u32, 0u32);
+        for &x in b {
+            a = (a + u32::from(x)) % 65521;
+            s = (s + a) % 65521;
+        }
+        (s << 16) | a
+    }
+
+    fn zlib_stored(b: &[u8]) -> Vec<u8> {
+        let n = u16::try_from(b.len()).unwrap();
+        let mut v = vec![0x78, 0x01, 1];
+        v.extend_from_slice(&n.to_le_bytes());
+        v.extend_from_slice(&(!n).to_le_bytes());
+        v.extend_from_slice(b);
+        v.extend_from_slice(&adler32(b).to_be_bytes());
+        v
+    }
+
+    #[test]
+    fn the_table_is_what_translating_the_whole_set_in_memory_gives() {
+        use relift_gpu_nv::translate::build::translate_set;
+        let out = scratch("table");
+        let dir = out.join(DIR);
+        relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
+        std::fs::create_dir_all(dir.join("programs")).unwrap();
+        let good = words(&[exit(), bra_self()]);
+        let longer = words(&[exit(), exit(), bra_self()]);
+        let bad = words(&[0x1ff, exit(), bra_self()]);
+        let mut inputs = Vec::new();
+        for code in [&good, &longer, &bad] {
+            let key = relift_switch_formats::sha256(code);
+            relift_cache::write_if_changed(
+                &dir.join("programs").join(format!("{}.bin", hex(&key))),
+                code,
+            )
+            .unwrap();
+            inputs.push(relift_gpu_nv::translate::build::Input {
+                key,
+                code: code.clone(),
+                options: Options::default(),
+            });
+        }
+        let built = build(&out, 3).unwrap();
+        assert_eq!((built.programs, built.translated), (3, 2));
+        assert_eq!(built.refused.values().sum::<usize>(), 1);
+        let host = HostProfile::from_device("device", &DeviceCaps::from_json(CAPS).unwrap());
+        let whole = translate_set(&host, &inputs, relift_gpu_sm86::program::parse);
+        assert_eq!(
+            std::fs::read(dir.join(TABLE)).unwrap(),
+            whole.to_compressed_bytes(ZSTD_LEVEL).unwrap()
+        );
+        let entries: Vec<_> = whole
+            .shaders
+            .iter()
+            .map(|(k, (_, _, i))| (*k, records(i)))
+            .collect();
+        assert_eq!(
+            std::fs::read(dir.join(INTERFACES)).unwrap(),
+            interface_table(&entries)
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("failed.txt"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        assert!(!dir.join(SPOOL).exists());
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn a_build_without_a_device_has_an_empty_table() {
+        let out = scratch("nodevice");
+        let key = relift_switch_formats::sha256(b"x");
+        std::fs::create_dir_all(out.join(DIR).join("programs")).unwrap();
+        relift_cache::write_if_changed(
+            &out.join(DIR)
+                .join("programs")
+                .join(format!("{}.bin", hex(&key))),
+            b"x",
+        )
+        .unwrap();
+        let built = build(&out, 2).unwrap();
+        assert_eq!((built.programs, built.translated), (1, 0));
+        assert!(tables(&out).is_empty());
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn the_scan_of_an_import_needs_nothing_a_run_recorded() {
+        let out = scratch("discover");
+        let import = out.join("import");
+        let program = words(&[exit(), bra_self()]);
+        let mut data = vec![0x80u8; 100];
+        data.extend(zlib_stored(&program));
+        let img = relift_switch_formats::romfs::build(&[("any/file.dat", &data)]);
+        std::fs::create_dir_all(&import).unwrap();
+        relift_cache::write_if_changed(&import.join("romfs.img"), &img).unwrap();
+        let found = discover(&import, &out).unwrap();
+        assert_eq!(found.programs, 1);
+        let key = relift_switch_formats::sha256(&program);
+        let bin = out
+            .join(DIR)
+            .join("programs")
+            .join(format!("{}.bin", hex(&key)));
+        assert_eq!(std::fs::read(bin).unwrap(), program);
+        assert_eq!(program_keys(&out.join(DIR)).unwrap(), [key]);
+        std::fs::remove_dir_all(&out).unwrap();
     }
 
     #[test]

@@ -1527,6 +1527,24 @@ fn lift_and_emit(
     }
     if console == relift_switch::cpu::Console::Switch2 {
         let jobs = relift_proc::workers::jobs().max(1);
+        let found = crate::shaders::discover(&import, out)?;
+        ui.note(&Line::new().text(format!(
+            "shaders: {} programs found in the import{}",
+            found.programs,
+            if found.errors.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; not read: {}",
+                    found
+                        .errors
+                        .iter()
+                        .map(|(k, n)| format!("{n} {k}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        )));
         let built = crate::shaders::build(out, jobs as usize)?;
         if built.programs > 0 {
             let refused: Vec<String> = built
