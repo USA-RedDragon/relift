@@ -39,6 +39,11 @@ pub const CACHE_MAINT: &str = "arm64.cache_maint";
 pub const WFE: &str = "arm64.wfe";
 /// Intrinsic: `SEV`; no operands, no result.
 pub const SEV: &str = "arm64.sev";
+/// Intrinsic: runs before an `SVC` and records the address of the `SVC` in
+/// the context's pc, so the runtime's handler knows where the call came
+/// from (a thread that starts at the instruction after the call needs it);
+/// one operand, the address, and no result.
+pub const SVC_SITE: &str = "arm64.svc_site";
 
 /// The `relift-ir` interpreter's view of the intrinsics that have no effect
 /// a single-threaded interpreter can see: `WFE` and `SEV` (an event wait
@@ -54,7 +59,7 @@ impl relift_ir::interp::Intrinsics for InterpIntrinsics {
         args: &[u128],
     ) -> Result<u128, relift_ir::interp::Error> {
         match name {
-            WFE | SEV | CACHE_MAINT => Ok(0),
+            WFE | SEV | CACHE_MAINT | SVC_SITE => Ok(0),
             super::sm4::SBOX => Ok(u128::from(super::sm4::sbox(args[0] as u8))),
             _ => Err(relift_ir::interp::Error::UnknownIntrinsic(name)),
         }
@@ -83,6 +88,8 @@ pub fn lifter(enc: Encoding) -> Option<LiftFn> {
 }
 
 fn svc(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
+    let site = b.konst(Width::W64, u128::from(b.pc()));
+    b.intrinsic(SVC_SITE, &[site], None);
     Ok(End::Exit(Exit {
         next: Next::Const(b.pc().wrapping_add(4)),
         flow: Flow::Trap(insn.get("imm16")),

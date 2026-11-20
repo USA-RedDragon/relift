@@ -1,11 +1,12 @@
 //! A program's code lifted and emitted as one unit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use relift_analyze::{Insn, discover};
 use relift_cpu_arm64::frontend::Arm64;
 use relift_emit::{Options, Output};
 use relift_guest::{Frontend, LiftFailure, Root, RootKind};
+use relift_ir::{Flow, Next, Op};
 
 use crate::cpu;
 use crate::program::{self, Placed};
@@ -35,6 +36,57 @@ pub struct Lifted {
     pub unlifted: Vec<Unlifted>,
 }
 
+/// `__NR_clone` on aarch64.
+const NR_CLONE: u128 = 220;
+
+/// The addresses after each `svc #0` whose system call number is the
+/// constant `clone`, set by the straight-line code just before it. A thread
+/// that `clone` creates starts at the instruction after the `svc`, in the
+/// middle of the function that made the call, so that address needs a
+/// function of its own (a continuation, like the one after an escaper's
+/// inner call).
+pub fn clone_continuations(a: &relift_analyze::Analysis) -> BTreeSet<u64> {
+    let nr = relift_cpu_arm64::regs::x(8);
+    let mut out = BTreeSet::new();
+    for f in a.functions.values() {
+        for (&pc, i) in &f.insts {
+            let Insn::Lifted(b) = i else { continue };
+            if b.exit.flow != Flow::Trap(0) {
+                continue;
+            }
+            for k in 1..=8u64 {
+                let Some(Insn::Lifted(p)) = f.insts.get(&pc.wrapping_sub(4 * k)) else {
+                    break;
+                };
+                if p.exit.flow != Flow::Jump
+                    || p.exit.next != Next::Const(pc.wrapping_sub(4 * (k - 1)))
+                {
+                    break;
+                }
+                let set = p.insts.iter().find_map(|i| match i.op {
+                    Op::Set(r, v) if r == nr => Some(v),
+                    _ => None,
+                });
+                if let Some(v) = set {
+                    let konst = |v: relift_ir::Value| match p.insts[v.index()].op {
+                        Op::Const(c) => Some(c.get()),
+                        Op::Ext(_, w) => match p.insts[w.index()].op {
+                            Op::Const(c) => Some(c.get()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    if konst(v) == Some(NR_CLONE) {
+                        out.insert(pc + 4);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The frontend of the program's CPU.
 pub fn frontend() -> Arm64 {
     Arm64 { cpu: cpu::cpu() }
@@ -46,7 +98,8 @@ pub fn lift(p: &Placed, image_id: [u8; 32]) -> Lifted {
     let fe = frontend();
     let mut module = program::module(p);
     let mut analysis = discover(&fe, &module);
-    let found = relift_analyze::escape::return_escapes(&fe, &module, &analysis);
+    let mut found = relift_analyze::escape::return_escapes(&fe, &module, &analysis);
+    found.continuations.extend(clone_continuations(&analysis));
     if !found.continuations.is_empty() {
         module
             .roots

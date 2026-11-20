@@ -106,6 +106,7 @@ impl Frontend for Arm64 {
             system::CACHE_MAINT => format!("rl_cache_maint({})", arg(0)),
             system::WFE => "rl_wfe(c)".into(),
             system::SEV => "rl_sev()".into(),
+            system::SVC_SITE => format!("rl_svc_site(c, {})", arg(0)),
             system::MRS_FPSR => format!("rl_mrs_fpsr_flags({})", arg(0)),
             system::MSR_FPSR => "rl_msr_fpsr_flags()".into(),
             system::FP_RAISE => format!("rl_fp_raise({})", arg(0)),
@@ -121,7 +122,7 @@ impl Frontend for Arm64 {
             system::CTR => WasmIntrinsic::Const(CTR_EL0),
             system::DCZID => WasmIntrinsic::Const(DCZID_EL0),
             system::DC_ZVA => WasmIntrinsic::ZeroBlock(DC_ZVA_BYTES),
-            system::CACHE_MAINT | system::SEV => WasmIntrinsic::Nop,
+            system::CACHE_MAINT | system::SEV | system::SVC_SITE => WasmIntrinsic::Nop,
             lift::sm4::SBOX => WasmIntrinsic::Import,
             _ => return None,
         })
@@ -361,6 +362,7 @@ mod tests {
             system::CACHE_MAINT,
             system::WFE,
             system::SEV,
+            system::SVC_SITE,
             lift::sm4::SBOX,
         ] {
             assert!(f.intrinsic(name, &["a".into()]).is_some(), "{name} in C");
