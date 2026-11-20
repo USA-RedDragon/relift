@@ -610,7 +610,9 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_VIEWPORT, nvnCommandBufferSetViewport) \
     X(NVN_CMD_SET_VIEWPORTS, nvnCommandBufferSetViewports) \
     X(NVN_CMD_SET_ZCULL_ZF32_COMPRESSION_ENABLE, nvnCommandBufferSetZCullZF32CompressionEnable) \
-    X(NVN_CMD_WAIT_SYNC, nvnCommandBufferWaitSync)
+    X(NVN_CMD_WAIT_SYNC, nvnCommandBufferWaitSync) \
+    X(NVN_CMD_WAIT_EVENT, nvnCommandBufferWaitEvent) \
+    X(NVN_CMD_SIGNAL_EVENT, nvnCommandBufferSignalEvent)
 
 /** @brief Recorded command ops. */
 enum nvn_cmd_op {
@@ -674,6 +676,13 @@ typedef struct nvn_cmdset {
 #define NVN_SNAP (1ull << 63)
 /** @brief The bytes a recorded argument v points at (one marked NVN_SNAP), or NULL for a guest NULL. */
 const void *nvn_cmd_bytes(const nvn_cmdset *s, uint64_t v);
+/**
+ * @brief The guest address of the u32 an NVNevent (at guest address event) keeps its value in, or 0 when event is
+ * not an event the layer made.
+ */
+uint64_t nvn_event_word(uint64_t event);
+/** @brief Replays the submitted command sets that wait for an event and can go on now (nvn_vk.c); the CPU calls it after it signals an event. */
+void nvn_vk_pump(rl_ctx *c, uint8_t *mem);
 /** @brief Runs command set s on relift's Vulkan device for queue (nvn_vk.c). Returns RL_OK, or RL_PENDING after a stop. */
 int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s);
 

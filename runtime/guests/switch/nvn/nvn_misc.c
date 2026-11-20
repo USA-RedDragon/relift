@@ -97,6 +97,12 @@ uint64_t nvnh_nvnEventInitialize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+uint64_t nvn_event_word(uint64_t event)
+{
+    nvn_event *e = (nvn_event *)nvn_obj_get(event, NVN_EVENT);
+    return e ? e->addr : 0;
+}
+
 /** @brief nvnEventFinalize(NVNevent *). */
 uint64_t nvnh_nvnEventFinalize(rl_ctx *c, uint8_t *mem)
 {
@@ -137,6 +143,7 @@ uint64_t nvnh_nvnEventSignal(rl_ctx *c, uint8_t *mem)
         __atomic_add_fetch(p, (uint32_t)c->x[2], __ATOMIC_RELEASE);
     else
         __atomic_store_n(p, (uint32_t)c->x[2], __ATOMIC_RELEASE);
+    nvn_vk_pump(c, mem);
     return nvn_ret(c);
 }
 

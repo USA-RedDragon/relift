@@ -450,6 +450,8 @@ uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
             return (uint64_t)rl_guest_fatal(c, "nvn", "%s: cannot keep %llu bytes of argument %u", nvn_cmd_name(op),
                                             (unsigned long long)(count * r->elem), r->reg);
     }
+    if (op == NVN_CMD_WAIT_EVENT || op == NVN_CMD_SIGNAL_EVENT)
+        e->x[1] = nvn_event_word(c->x[1]);
     if (op == NVN_CMD_COPY_BUFFER_TO_TEXTURE || op == NVN_CMD_COPY_TEXTURE_TO_BUFFER) {
         e->x[NVN_COPY_ROW_STRIDE_ARG] = b->row_stride;
         e->x[NVN_COPY_IMAGE_STRIDE_ARG] = b->image_stride;

@@ -16,6 +16,7 @@
  */
 #include "nvn_astc.h"
 #include "nvn_vk.h"
+#include "nvn_sched.h"
 #include "hostlib.h"
 #include "nvn_watch.h"
 #include "vkdev.h"
@@ -1977,21 +1978,6 @@ static int clear_texture(replay *r, const nvn_cmd *e)
  */
 static int run_cmd(replay *r, const nvn_cmd *e);
 
-/** @brief Runs every command of set s in order, as the commands of the set being replayed (sync_each: wait for the device after each). */
-static int run_set(replay *r, const nvn_cmdset *s, bool sync_each)
-{
-    const nvn_cmdset *outer = r->s;
-    r->s = s;
-    int rc = RL_OK;
-    for (uint32_t i = 0; i < s->n && rc == RL_OK; i++) {
-        rc = run_cmd(r, &s->cmds[i]);
-        if (rc == RL_OK && sync_each && !nvn_vk_flush(r))
-            rc = nvn_vk_stop(r, "the host device failed after %s (command %u of %u)", nvn_cmd_name(s->cmds[i].op), i, s->n);
-    }
-    r->s = outer;
-    return rc;
-}
-
 static bool sync_each_command(void)
 {
     static int sync_each = -1;
@@ -2000,39 +1986,13 @@ static bool sync_each_command(void)
     return sync_each;
 }
 
-/**
- * @brief nvnCommandBufferCallCommand(cb, handle) and nvnCommandBufferCallCommands(cb, n, handles): the commands
- * of each command handle (a set the game ended recording) run here, in order, as if recorded in this place.
- */
-static int call_commands(replay *r, const nvn_cmd *e)
-{
-    uint32_t n = 1;
-    uint64_t one = e->x[1];
-    const uint64_t *handles = &one;
-    if (e->op == NVN_CMD_CALL_COMMANDS) {
-        n = (uint32_t)e->x[1];
-        handles = nvn_cmd_bytes(r->s, e->x[2]);
-        if (n && !handles)
-            return nvn_vk_stop(r, "%s without its handles", nvn_cmd_name(e->op));
-    }
-    for (uint32_t i = 0; i < n; i++) {
-        const nvn_cmdset *s = nvn_cmdset_of(handles[i]);
-        if (!s)
-            return nvn_vk_stop(r, "%s: 0x%llx is not a command handle relift made", nvn_cmd_name(e->op),
-                               (unsigned long long)handles[i]);
-        int rc = run_set(r, s, sync_each_command());
-        if (rc != RL_OK)
-            return rc;
-    }
-    return RL_OK;
-}
-
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
     switch (e->op) {
-    case NVN_CMD_CALL_COMMAND:
-    case NVN_CMD_CALL_COMMANDS:
-        return call_commands(r, e);
+    case NVN_CMD_WAIT_EVENT:
+    case NVN_CMD_SIGNAL_EVENT:
+        return nvn_vk_stop(r, "%s on 0x%llx, which is not an event the layer made", nvn_cmd_name(e->op),
+                           (unsigned long long)e->x[1]);
     case NVN_CMD_CLEAR_COLOR:
         return clear_color(r, e);
     case NVN_CMD_CLEAR_TEXTURE:
@@ -2221,27 +2181,95 @@ void nvn_unlock(void)
                (long long)(held / 1000000));
 }
 
+/** @brief A submitted command set being replayed: its replay state and the syncs its fences signal when it finishes. */
+typedef struct vk_run {
+    replay r;
+} vk_run;
+
+static nvn_sched sched;
+
+static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
+{
+    replay *r = &((vk_run *)user)->r;
+    r->s = s;
+    int rc = run_cmd(r, e);
+    if (rc == RL_OK && sync_each_command() && !nvn_vk_flush(r))
+        rc = nvn_vk_stop(r, "the host device failed after %s", nvn_cmd_name(e->op));
+    return rc;
+}
+
+static bool sched_flush(void *user) { return nvn_vk_flush(&((vk_run *)user)->r); }
+
+static uint32_t *sched_word(void *user, uint64_t addr) { return (uint32_t *)(void *)(((vk_run *)user)->r.mem + addr); }
+
+static const nvn_sched_ops sched_ops = { sched_exec, sched_flush, sched_word };
+
+/** @brief Signals the fence syncs of the finished runs, frees them, and returns the first stop a pump found. */
+static void finish_runs(nvn_sched_run *done)
+{
+    while (done) {
+        nvn_sched_run *next = done->next;
+        vk_run *u = done->user;
+        for (uint32_t i = 0; i < u->r.nsyncs; i++)
+            nvn_sync_signal(u->r.syncs[i]);
+        free(u);
+        nvn_sched_run_free(done);
+        done = next;
+    }
+}
+
 int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
 {
     if (!up(c))
         return RL_PENDING;
+    nvn_sched_item *items;
+    uint32_t n;
+    uint64_t bad;
     nvn_lock();
-    replay r = { .c = c, .mem = mem, .s = s, .st = state_of(queue) };
-    if (!r.st) {
+    replay probe = { .c = c, .mem = mem, .s = s };
+    if (nvn_sched_flatten(s, &items, &n, &bad)) {
+        int rc = nvn_vk_stop(&probe, "a call of command handle 0x%llx, which is not a command set relift made",
+                             (unsigned long long)bad);
         nvn_unlock();
-        return rl_guest_fatal(c, "nvn", "more than %u queues", MAX_QUEUES);
+        return rc;
     }
+    vk_run *u = calloc(1, sizeof *u);
+    nvn_gfx *st = state_of(queue);
+    if (!u || !st || !nvn_sched_add(&sched, queue, items, n, u)) {
+        free(u);
+        free(items);
+        nvn_unlock();
+        return rl_guest_fatal(c, "nvn", st ? "out of memory queueing a submit" : "more than %u queues", MAX_QUEUES);
+    }
+    u->r = (replay){ .c = c, .mem = mem, .s = s, .st = st };
+    nvn_sched_run *done = NULL;
     int64_t t0 = now_ns();
-    int rc = run_set(&r, s, sync_each_command());
-    if (rc == RL_OK && !nvn_vk_flush(&r))
+    int rc = nvn_sched_pump(&sched, &sched_ops, &done);
+    if (rc == RL_OK && !nvn_vk_flush(&u->r))
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
     tm.runs++;
     nvn_unlock();
     if (rc == RL_OK)
-        for (uint32_t i = 0; i < r.nsyncs; i++)
-            nvn_sync_signal(r.syncs[i]);
+        finish_runs(done);
     return rc;
+}
+
+void nvn_vk_pump(rl_ctx *c, uint8_t *mem)
+{
+    if (!__atomic_load_n(&sched.pending, __ATOMIC_ACQUIRE))
+        return;
+    nvn_lock();
+    nvn_sched_run *done = NULL;
+    for (nvn_sched_run *r = sched.head; r; r = r->next) {
+        vk_run *u = r->user;
+        u->r.c = c;
+        u->r.mem = mem;
+    }
+    int rc = sched.head ? nvn_sched_pump(&sched, &sched_ops, &done) : RL_OK;
+    nvn_unlock();
+    if (rc == RL_OK)
+        finish_runs(done);
 }
 
 static int64_t now_ns(void)
