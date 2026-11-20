@@ -2320,6 +2320,8 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
     return ok;
 }
 
+#define PRESENT_RATE_NS 5000000000ull
+
 /** @brief The window frames go to, opened with the first one; NULL in a headless run. */
 static rl_window *present_window(uint32_t w, uint32_t h)
 {
@@ -2328,6 +2330,23 @@ static rl_window *present_window(uint32_t w, uint32_t h)
     if (!win && b && b->open)
         win = b->open("relift", w, h);
     return win;
+}
+
+/** @brief Logs the guest's present rate every few seconds (info), so a run's speed shows without a profiler. */
+static void present_rate(uint64_t total)
+{
+    static uint64_t last_ns, last_total;
+    uint64_t now = (uint64_t)now_ns();
+    if (!last_ns) {
+        last_ns = now;
+        return;
+    }
+    if (now - last_ns < PRESENT_RATE_NS)
+        return;
+    rl_log(RL_LOG_INFO, "nvn", "%llu presents, %.1f per second over the last %.1f s", (unsigned long long)total,
+           (double)(total - last_total) * 1e9 / (double)(now - last_ns), (double)(now - last_ns) / 1e9);
+    last_ns = now;
+    last_total = total;
 }
 
 int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4])
@@ -2404,6 +2423,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_frame_presented();
+    present_rate(n + 1);
     if (rgb)
         rl_window_present_rgb(win, rgb, rect[2], rect[3]);
     if (n == 0)
