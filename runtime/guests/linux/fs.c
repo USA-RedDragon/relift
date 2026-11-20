@@ -29,8 +29,7 @@ void lx_fs_shutdown(void)
         if (lx.fds[i].host >= 0) {
             if (lx.fds[i].dir)
                 hio_dir_close(lx.fds[i].dir);
-            else
-                hio_close(lx.fds[i].host);
+            hio_close(lx.fds[i].host);
             lx.fds[i].host = -1;
         }
 }
@@ -119,12 +118,9 @@ static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EBADF;
     lx_fd *f = &lx.fds[fd];
     int64_t rc;
-    if (f->dir) {
+    if (f->dir)
         hio_dir_close(f->dir);
-        rc = 0;
-    } else {
-        rc = hio_close(f->host);
-    }
+    rc = hio_close(f->host);
     *f = (lx_fd){ .host = -1 };
     return rc;
 }
@@ -345,9 +341,9 @@ static int64_t sys_statx(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     put64(x, 32, st.st_ino);
     put64(x, 40, (uint64_t)st.st_size);
     put64(x, 48, (uint64_t)st.st_blocks);
-    statx_time(x, 64, st.st_atime_sec, st.st_atime_nsec);
-    statx_time(x, 96, st.st_ctime_sec, st.st_ctime_nsec);
-    statx_time(x, 112, st.st_mtime_sec, st.st_mtime_nsec);
+    statx_time(x, 64, st.st_atime_sec, st.st_atime_ns);
+    statx_time(x, 96, st.st_ctime_sec, st.st_ctime_ns);
+    statx_time(x, 112, st.st_mtime_sec, st.st_mtime_ns);
     put32(x, 128, dev_major(st.st_rdev));
     put32(x, 132, dev_minor(st.st_rdev));
     put32(x, 136, dev_major(st.st_dev));
@@ -445,7 +441,7 @@ static void drop_fd(int fd)
     lx_fd *f = &lx.fds[fd];
     if (f->dir)
         hio_dir_close(f->dir);
-    else if (f->host >= 0)
+    if (f->host >= 0)
         hio_close(f->host);
     *f = (lx_fd){ .host = -1 };
 }

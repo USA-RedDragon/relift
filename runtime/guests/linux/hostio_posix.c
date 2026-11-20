@@ -149,11 +149,11 @@ static void convert(const struct stat *s, l_stat *o)
     o->st_blksize = (int32_t)s->st_blksize;
     o->st_blocks = (int64_t)s->st_blocks;
     o->st_atime_sec = (int64_t)ST_TIME(s, a).tv_sec;
-    o->st_atime_nsec = (uint64_t)ST_TIME(s, a).tv_nsec;
+    o->st_atime_ns = (uint64_t)ST_TIME(s, a).tv_nsec;
     o->st_mtime_sec = (int64_t)ST_TIME(s, m).tv_sec;
-    o->st_mtime_nsec = (uint64_t)ST_TIME(s, m).tv_nsec;
+    o->st_mtime_ns = (uint64_t)ST_TIME(s, m).tv_nsec;
     o->st_ctime_sec = (int64_t)ST_TIME(s, c).tv_sec;
-    o->st_ctime_nsec = (uint64_t)ST_TIME(s, c).tv_nsec;
+    o->st_ctime_ns = (uint64_t)ST_TIME(s, c).tv_nsec;
 }
 
 int64_t hio_fstat(int fd, l_stat *st)

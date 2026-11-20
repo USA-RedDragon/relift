@@ -353,11 +353,11 @@ typedef struct l_stat {
     int32_t pad2;
     int64_t st_blocks;
     int64_t st_atime_sec;
-    uint64_t st_atime_nsec;
+    uint64_t st_atime_ns;
     int64_t st_mtime_sec;
-    uint64_t st_mtime_nsec;
+    uint64_t st_mtime_ns;
     int64_t st_ctime_sec;
-    uint64_t st_ctime_nsec;
+    uint64_t st_ctime_ns;
     uint32_t unused4;
     uint32_t unused5;
 } l_stat;

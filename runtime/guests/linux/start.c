@@ -20,7 +20,12 @@
 
 lx_state lx;
 
+#if defined(_WIN32)
+#define host_environ _environ
+#else
 extern char **environ;
+#define host_environ environ
+#endif
 
 enum {
     MAIN_STACK = 8u << 20,
@@ -122,14 +127,14 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
     uint64_t sp = top;
     uint64_t execfn = push_str(&sp, p->name);
     int envn = 0;
-    while (environ && environ[envn])
+    while (host_environ && host_environ[envn])
         envn++;
     uint64_t *envp = calloc((size_t)envn + 1, 8);
     uint64_t *argp = calloc((size_t)argc + 1, 8);
     if (!envp || !argp)
         return log_fail("out of memory");
     for (int i = envn - 1; i >= 0; i--)
-        envp[i] = push_str(&sp, environ[i]);
+        envp[i] = push_str(&sp, host_environ[i]);
     for (int i = argc - 1; i >= 0; i--)
         argp[i] = push_str(&sp, argv[i]);
     uint64_t platform = push_str(&sp, "aarch64");
