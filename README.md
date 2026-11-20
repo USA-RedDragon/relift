@@ -15,14 +15,13 @@ relift ships no game code, keys or data, and never will.
 
 | Guest | CPU | State |
 |---|---|---|
-| Linux | ARM64 | Static and dynamically linked aarch64 programs (musl and glibc; threads, signals, C++ exceptions, shared libraries, `dlopen` of a library in the import) run with the output a real arm64 Linux gives; a dynamic program imports with `--sysroot` and its loader and libraries are lifted with it. |
 | Nintendo Switch | ARM64 | Test programs built with libnx run end to end, and CI runs synthetic ones. A commercial game reaches gameplay in test runs; most games are untested and many will fail. |
 | Nintendo Switch 2 | ARM64 | Shaders are translated from SM86 to SPIR-V at build time (`gpus/sm86`, `gpus/nv`), and the NVN2 graphics API runs over Vulkan. A retail game reaches its menus in test runs; most games stop early in their boot. |
 | Game Boy and Game Boy Color | SM83 | Test ROMs from public suites pass in CI. Retail games run in test runs. |
 | Game Boy Advance | ARMv4T | Public test ROMs pass and match the NanoBoyAdvance oracle in test runs. Retail games run in test runs; code that discovery misses stops the program with a report. |
 | Nintendo 64 | VR4300 and RSP | Public test ROMs for the CPU, the RSP and VI match the ares oracle in test runs. A retail game reaches gameplay in test runs and matches ares frame for frame through its intro. |
 | Nintendo DS | ARM946E-S and ARM7TDMI | relift imports and builds decrypted `.nds` dumps. A retail game runs through its boot and into its intro in test runs, compared frame by frame with the melonDS oracle. `--target android-arm64` builds one APK with the on-screen controller, the touch screen, sound, battery saves and both screens (stacked, side by side, large and small, or one on each display of a dual-screen device). |
-| Linux | ARM64 | Statically linked programs (musl or glibc, C or C++) run end to end: threads, signals, `setjmp` and `longjmp`, and C++ exceptions. The test programs built from the repository's own sources match the output of a real arm64 Linux device. Dynamically linked programs are not supported yet. |
+| Linux | ARM64 | Statically and dynamically linked programs (musl or glibc, C or C++) run end to end: threads, signals, `setjmp` and `longjmp`, C++ exceptions, shared libraries, and `dlopen` of a library in the import. A dynamic program imports with `--sysroot`, and its program interpreter and libraries are lifted with it. The test programs built from the repository's own sources match the output of a real arm64 Linux device. |
 | Master System, Game Gear and SG-1000 | Z80 | relift imports, builds and runs cartridges and BIOS images, compared with the ares oracle. Code discovery is not written yet: a build takes its code from an ares trace. |
 
 ## Hosts
