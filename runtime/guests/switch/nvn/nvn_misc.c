@@ -178,6 +178,19 @@ uint64_t nvnh_nvnDeviceRegisterFastClearColor(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/**
+ * @brief nvnDeviceRegisterFastClearDepth(NVNdevice *, float depth): NVNboolean. As for a fast clear color, the value
+ * only lets the GPU compress depth clears, which relift's clears do not depend on. The driver adds the value to the
+ * device's hardware table of clear values and answers whether it had room (NVN1 and NVN2 drivers read: true while the
+ * table has an entry free, whatever the value); relift's table never fills.
+ */
+uint64_t nvnh_nvnDeviceRegisterFastClearDepth(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
 /** @brief Procs that answer 0: no queue error, no command memory relift tracks, no attached debugger. */
 uint64_t nvn_zero(rl_ctx *c, uint8_t *mem)
 {

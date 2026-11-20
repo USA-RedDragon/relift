@@ -148,6 +148,34 @@ TEST(nvn_pools_report_their_descriptor_count)
     CHECK_EQ(call(c, nvnh_nvnSamplerPoolFinalize, smp, 0, 0, 0), RET);
 }
 
+TEST(nvn_pools_report_the_memory_they_were_initialized_over)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t tex = heap + 0x300, smp = heap + 0x380;
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolInitialize, tex, heap, 0x1000, 0x8000), RET);
+    CHECK_EQ(call(c, nvnh_nvnSamplerPoolInitialize, smp, heap + 0x40, 0x2000, 2048), RET);
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolGetMemoryPool, tex, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], heap);
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolGetMemoryOffset, tex, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x1000);
+    CHECK_EQ(call(c, nvnh_nvnSamplerPoolGetMemoryPool, smp, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], heap + 0x40);
+    CHECK_EQ(call(c, nvnh_nvnSamplerPoolGetMemoryOffset, smp, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0x2000);
+    CHECK_EQ(call(c, nvnh_nvnTexturePoolGetMemoryPool, smp, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+}
+
+TEST(nvn_fast_clear_depth_is_accepted_like_the_drivers_while_its_table_has_room)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x1000);
+    c->v[0].d[0] = 0;
+    CHECK_EQ(call(c, nvnh_nvnDeviceRegisterFastClearDepth, heap, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+}
+
 TEST(nvn_dlss_optimal_settings_are_the_librarys)
 {
     static const uint32_t rows[][9] = {

@@ -14,17 +14,21 @@ typedef struct nvn_window {
     uint32_t n, active, next, interval;
     int32_t crop[4];
     uint64_t presents;
+    /** @brief The builder's native window (nvnWindowBuilderSetNativeWindow). */
+    uint64_t native;
 } nvn_window;
 
 /** @brief nvnWindowInitialize(NVNwindow *, const NVNwindowBuilder *): NVNboolean. */
 uint64_t nvnh_nvnWindowInitialize(rl_ctx *c, uint8_t *mem)
 {
-    uint64_t win = c->x[0], builder = c->x[1], n = 0, active = 0, interval = 0;
+    uint64_t win = c->x[0], builder = c->x[1], n = 0, active = 0, interval = 0, native = 0;
     int rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetNumTextures", &builder, 1, &n);
     if (rc == RL_OK)
         rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetNumActiveTextures", &builder, 1, &active);
     if (rc == RL_OK)
         rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetPresentInterval", &builder, 1, &interval);
+    if (rc == RL_OK)
+        rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetNativeWindow", &builder, 1, &native);
     if (rc != RL_OK)
         return (uint64_t)rc;
     if (n == 0 || n > WINDOW_TEXTURES)
@@ -42,6 +46,7 @@ uint64_t nvnh_nvnWindowInitialize(rl_ctx *c, uint8_t *mem)
         w->n = (uint32_t)n;
         w->active = active && active <= n ? (uint32_t)active : (uint32_t)n;
         w->interval = (uint32_t)interval;
+        w->native = native;
     }
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "nvnWindowInitialize(0x%llx): %llu textures, %llu active, interval %llu",
@@ -119,6 +124,22 @@ uint64_t nvnh_nvnWindowGetPresentInterval(rl_ctx *c, uint8_t *mem)
     if (!w)
         return RL_PENDING;
     c->x[0] = w->interval;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief nvnWindowGetNativeWindow(const NVNwindow *): the native window of the builder the window was initialized
+ * from. The driver returns the word its own nvnWindowInitialize copies from the builder (a one-load getter in every
+ * NVN1 and NVN2 driver read); the layer's initialization does not write the driver's window object, so it keeps the
+ * value in its record of the window.
+ */
+uint64_t nvnh_nvnWindowGetNativeWindow(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    nvn_window *w = win_of(c, c->x[0], "nvnWindowGetNativeWindow");
+    if (!w)
+        return RL_PENDING;
+    c->x[0] = w->native;
     return nvn_ret(c);
 }
 

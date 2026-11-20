@@ -569,6 +569,46 @@ uint64_t nvnh_nvnSamplerPoolGetSize(rl_ctx *c, uint8_t *mem)
     return pool_size(c, NVN_SAMPLER_POOL);
 }
 
+/**
+ * @brief The memory pool and offset a descriptor pool was initialized with. The driver keeps them at +0 and +8 of
+ * the pool object and returns them (SDK 16.2.0 and 22.2.0 getters, one load each); the layer's pool initialization
+ * does not write the driver's object, so it answers from its own record.
+ */
+static uint64_t pool_field(rl_ctx *c, uint32_t kind, bool offset)
+{
+    nvn_desc_pool *p = (nvn_desc_pool *)nvn_obj_get(c->x[0], kind);
+    c->x[0] = p ? (offset ? p->offset : p->pool) : 0;
+    return nvn_ret(c);
+}
+
+/** @brief nvnTexturePoolGetMemoryPool(const NVNtexturePool *). */
+uint64_t nvnh_nvnTexturePoolGetMemoryPool(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return pool_field(c, NVN_TEXTURE_POOL, false);
+}
+
+/** @brief nvnTexturePoolGetMemoryOffset(const NVNtexturePool *). */
+uint64_t nvnh_nvnTexturePoolGetMemoryOffset(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return pool_field(c, NVN_TEXTURE_POOL, true);
+}
+
+/** @brief nvnSamplerPoolGetMemoryPool(const NVNsamplerPool *). */
+uint64_t nvnh_nvnSamplerPoolGetMemoryPool(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return pool_field(c, NVN_SAMPLER_POOL, false);
+}
+
+/** @brief nvnSamplerPoolGetMemoryOffset(const NVNsamplerPool *). */
+uint64_t nvnh_nvnSamplerPoolGetMemoryOffset(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return pool_field(c, NVN_SAMPLER_POOL, true);
+}
+
 /** @brief Registrations by descriptor id (relift keeps one table for all texture pools and one for all sampler pools). */
 static struct {
     uint64_t *tex, *sampler;

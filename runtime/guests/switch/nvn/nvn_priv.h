@@ -27,6 +27,7 @@
     X(nvnQueueAcquireTexture)                                                                                          \
     X(nvnWindowSetPresentInterval)                                                                                     \
     X(nvnWindowGetPresentInterval)                                                                                     \
+    X(nvnWindowGetNativeWindow)                                                                                        \
     X(nvnWindowSetCrop)                                                                                                \
     X(nvnWindowGetCrop)                                                                                                \
     X(nvnTextureWriteTexels)                                                                                           \
@@ -59,7 +60,8 @@
     X(nvnWindowGetNumTextures)                                                                                         \
     X(nvnWindowGetNumActiveTextures)                                                                                   \
     X(nvnWindowSetNumActiveTextures)                                                                                   \
-    X(nvnDeviceRegisterFastClearColor)
+    X(nvnDeviceRegisterFastClearColor)                                                                                 \
+    X(nvnDeviceRegisterFastClearDepth)
 
 /** @brief Procs that do nothing relift needs and return 0 (nvn_zero). */
 #define NVN_ZERO_PROCS(X)                                                                                              \
@@ -148,6 +150,10 @@ bool nvn_crop_rect(const int32_t crop[4], uint32_t width, uint32_t height, uint3
     X(nvnSamplerPoolFinalize)                                                                                          \
     X(nvnTexturePoolGetSize)                                                                                           \
     X(nvnSamplerPoolGetSize)                                                                                           \
+    X(nvnTexturePoolGetMemoryPool)                                                                                     \
+    X(nvnTexturePoolGetMemoryOffset)                                                                                   \
+    X(nvnSamplerPoolGetMemoryPool)                                                                                     \
+    X(nvnSamplerPoolGetMemoryOffset)                                                                                   \
     X(nvnTexturePoolRegisterTexture)                                                                                   \
     X(nvnTexturePoolRegisterImage)                                                                                     \
     X(nvnSamplerPoolRegisterSampler)
