@@ -426,7 +426,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: macos-workspace
+          key: macos-debug
           workspaces: |
             .
 
@@ -449,7 +449,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: macos-relift
+          key: macos-debug
           workspaces: |
             .
 
@@ -472,7 +472,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: macos-relift-e2e-slow
+          key: macos-debug
           workspaces: |
             .
 
@@ -495,7 +495,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: macos-relift-e2e-rest
+          key: macos-debug
           workspaces: |
             .
 
