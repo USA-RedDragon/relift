@@ -2920,6 +2920,36 @@ void vkg_aout_VkGraphicsPipelineCreateInfo(vkf_call *k, uint64_t g, const VkGrap
         vkg_out_VkGraphicsPipelineCreateInfo(k, g + 144 * i, &h[i]);
 }
 
+void vkg_in_VkGraphicsPipelineLibraryCreateInfoEXT(vkf_call *k, VkGraphicsPipelineLibraryCreateInfoEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkGraphicsPipelineLibraryCreateInfoEXT(vkf_call *k, uint64_t g, const VkGraphicsPipelineLibraryCreateInfoEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 4);
+}
+
+VkGraphicsPipelineLibraryCreateInfoEXT *vkg_ain_VkGraphicsPipelineLibraryCreateInfoEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkGraphicsPipelineLibraryCreateInfoEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkGraphicsPipelineLibraryCreateInfoEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkGraphicsPipelineLibraryCreateInfoEXT(vkf_call *k, uint64_t g, const VkGraphicsPipelineLibraryCreateInfoEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkGraphicsPipelineLibraryCreateInfoEXT(k, g + 24 * i, &h[i]);
+}
+
 void vkg_in_VkHdrMetadataEXT(vkf_call *k, VkHdrMetadataEXT *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -4249,6 +4279,66 @@ void vkg_aout_VkPhysicalDeviceExtendedDynamicState2FeaturesEXT(vkf_call *k, uint
         vkg_out_VkPhysicalDeviceExtendedDynamicState2FeaturesEXT(k, g + 32 * i, &h[i]);
 }
 
+void vkg_in_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(vkf_call *k, VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 124);
+}
+
+VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *vkg_ain_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(k, &h[i], g + 144 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(k, g + 144 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(vkf_call *k, VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 4);
+}
+
+VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *vkg_ain_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(k, g + 24 * i, &h[i]);
+}
+
 void vkg_in_VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(vkf_call *k, VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -4517,6 +4607,66 @@ void vkg_aout_VkPhysicalDeviceFloatControlsProperties(vkf_call *k, uint64_t g, c
         return;
     for (uint64_t i = 0; i < n; i++)
         vkg_out_VkPhysicalDeviceFloatControlsProperties(k, g + 88 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(vkf_call *k, VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 4);
+}
+
+VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *vkg_ain_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(k, g + 24 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(vkf_call *k, VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 8);
+}
+
+VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *vkg_ain_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(k, g + 24 * i, &h[i]);
 }
 
 void vkg_in_VkPhysicalDeviceGroupProperties(vkf_call *k, VkPhysicalDeviceGroupProperties *h, uint64_t g)
@@ -5604,6 +5754,66 @@ void vkg_aout_VkPhysicalDeviceShaderIntegerDotProductProperties(vkf_call *k, uin
         vkg_out_VkPhysicalDeviceShaderIntegerDotProductProperties(k, g + 136 * i, &h[i]);
 }
 
+void vkg_in_VkPhysicalDeviceShaderObjectFeaturesEXT(vkf_call *k, VkPhysicalDeviceShaderObjectFeaturesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceShaderObjectFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceShaderObjectFeaturesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 4);
+}
+
+VkPhysicalDeviceShaderObjectFeaturesEXT *vkg_ain_VkPhysicalDeviceShaderObjectFeaturesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceShaderObjectFeaturesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceShaderObjectFeaturesEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceShaderObjectFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceShaderObjectFeaturesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceShaderObjectFeaturesEXT(k, g + 24 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceShaderObjectPropertiesEXT(vkf_call *k, VkPhysicalDeviceShaderObjectPropertiesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceShaderObjectPropertiesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceShaderObjectPropertiesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 20);
+}
+
+VkPhysicalDeviceShaderObjectPropertiesEXT *vkg_ain_VkPhysicalDeviceShaderObjectPropertiesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceShaderObjectPropertiesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceShaderObjectPropertiesEXT(k, &h[i], g + 40 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceShaderObjectPropertiesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceShaderObjectPropertiesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceShaderObjectPropertiesEXT(k, g + 40 * i, &h[i]);
+}
+
 void vkg_in_VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures(vkf_call *k, VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -6052,6 +6262,36 @@ void vkg_aout_VkPhysicalDeviceVariablePointersFeatures(vkf_call *k, uint64_t g, 
         return;
     for (uint64_t i = 0; i < n; i++)
         vkg_out_VkPhysicalDeviceVariablePointersFeatures(k, g + 24 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(vkf_call *k, VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 4);
+}
+
+VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *vkg_ain_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(k, g + 24 * i, &h[i]);
 }
 
 void vkg_in_VkPhysicalDeviceVulkan11Features(vkf_call *k, VkPhysicalDeviceVulkan11Features *h, uint64_t g)
@@ -6542,6 +6782,37 @@ void vkg_aout_VkPipelineLayoutCreateInfo(vkf_call *k, uint64_t g, const VkPipeli
         return;
     for (uint64_t i = 0; i < n; i++)
         vkg_out_VkPipelineLayoutCreateInfo(k, g + 48 * i, &h[i]);
+}
+
+void vkg_in_VkPipelineLibraryCreateInfoKHR(vkf_call *k, VkPipelineLibraryCreateInfoKHR *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+    h->pLibraries = (const VkPipeline *)vkf_ptr(k, vkf_g64(k, g + 24));
+}
+
+void vkg_out_VkPipelineLibraryCreateInfoKHR(vkf_call *k, uint64_t g, const VkPipelineLibraryCreateInfoKHR *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 4);
+}
+
+VkPipelineLibraryCreateInfoKHR *vkg_ain_VkPipelineLibraryCreateInfoKHR(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPipelineLibraryCreateInfoKHR *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPipelineLibraryCreateInfoKHR(k, &h[i], g + 32 * i);
+    return h;
+}
+
+void vkg_aout_VkPipelineLibraryCreateInfoKHR(vkf_call *k, uint64_t g, const VkPipelineLibraryCreateInfoKHR *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPipelineLibraryCreateInfoKHR(k, g + 32 * i, &h[i]);
 }
 
 void vkg_in_VkPipelineMultisampleStateCreateInfo(vkf_call *k, VkPipelineMultisampleStateCreateInfo *h, uint64_t g)
@@ -7673,6 +7944,43 @@ void vkg_aout_VkSemaphoreWaitInfo(vkf_call *k, uint64_t g, const VkSemaphoreWait
         vkg_out_VkSemaphoreWaitInfo(k, g + 40 * i, &h[i]);
 }
 
+void vkg_in_VkShaderCreateInfoEXT(vkf_call *k, VkShaderCreateInfoEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+    h->pCode = (const void *)vkf_ptr(k, vkf_g64(k, g + 40));
+    h->pName = (const char *)vkf_ptr(k, vkf_g64(k, g + 48));
+    h->pSetLayouts = (const VkDescriptorSetLayout *)vkf_ptr(k, vkf_g64(k, g + 64));
+    h->pPushConstantRanges = (const VkPushConstantRange *)vkf_ptr(k, vkf_g64(k, g + 80));
+    h->pSpecializationInfo = vkg_ain_VkSpecializationInfo(k, vkf_g64(k, g + 88), 1);
+}
+
+void vkg_out_VkShaderCreateInfoEXT(vkf_call *k, uint64_t g, const VkShaderCreateInfoEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 24);
+    memcpy(k->mem + g + 56, (const uint8_t *)h + 56, 4);
+    memcpy(k->mem + g + 72, (const uint8_t *)h + 72, 4);
+}
+
+VkShaderCreateInfoEXT *vkg_ain_VkShaderCreateInfoEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkShaderCreateInfoEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkShaderCreateInfoEXT(k, &h[i], g + 96 * i);
+    return h;
+}
+
+void vkg_aout_VkShaderCreateInfoEXT(vkf_call *k, uint64_t g, const VkShaderCreateInfoEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkShaderCreateInfoEXT(k, g + 96 * i, &h[i]);
+}
+
 void vkg_in_VkShaderModuleCreateInfo(vkf_call *k, VkShaderModuleCreateInfo *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -8343,6 +8651,66 @@ void vkg_aout_VkTimelineSemaphoreSubmitInfo(vkf_call *k, uint64_t g, const VkTim
         vkg_out_VkTimelineSemaphoreSubmitInfo(k, g + 48 * i, &h[i]);
 }
 
+void vkg_in_VkVertexInputAttributeDescription2EXT(vkf_call *k, VkVertexInputAttributeDescription2EXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkVertexInputAttributeDescription2EXT(vkf_call *k, uint64_t g, const VkVertexInputAttributeDescription2EXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 16);
+}
+
+VkVertexInputAttributeDescription2EXT *vkg_ain_VkVertexInputAttributeDescription2EXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkVertexInputAttributeDescription2EXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkVertexInputAttributeDescription2EXT(k, &h[i], g + 32 * i);
+    return h;
+}
+
+void vkg_aout_VkVertexInputAttributeDescription2EXT(vkf_call *k, uint64_t g, const VkVertexInputAttributeDescription2EXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkVertexInputAttributeDescription2EXT(k, g + 32 * i, &h[i]);
+}
+
+void vkg_in_VkVertexInputBindingDescription2EXT(vkf_call *k, VkVertexInputBindingDescription2EXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkVertexInputBindingDescription2EXT(vkf_call *k, uint64_t g, const VkVertexInputBindingDescription2EXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 16);
+}
+
+VkVertexInputBindingDescription2EXT *vkg_ain_VkVertexInputBindingDescription2EXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkVertexInputBindingDescription2EXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkVertexInputBindingDescription2EXT(k, &h[i], g + 32 * i);
+    return h;
+}
+
+void vkg_aout_VkVertexInputBindingDescription2EXT(vkf_call *k, uint64_t g, const VkVertexInputBindingDescription2EXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkVertexInputBindingDescription2EXT(k, g + 32 * i, &h[i]);
+}
+
 void vkg_in_VkViSurfaceCreateInfoNN(vkf_call *k, VkViSurfaceCreateInfoNN *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -8892,6 +9260,11 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
             vkg_in_VkGraphicsPipelineCreateInfo(k, h, g);
             return h;
         }
+        case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT: {
+            VkGraphicsPipelineLibraryCreateInfoEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkGraphicsPipelineLibraryCreateInfoEXT(k, h, g);
+            return h;
+        }
         case VK_STRUCTURE_TYPE_HDR_METADATA_EXT: {
             VkHdrMetadataEXT *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkHdrMetadataEXT(k, h, g);
@@ -9112,6 +9485,16 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
             vkg_in_VkPhysicalDeviceExtendedDynamicState2FeaturesEXT(k, h, g);
             return h;
         }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT: {
+            VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT: {
+            VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(k, h, g);
+            return h;
+        }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
             VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(k, h, g);
@@ -9155,6 +9538,16 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES: {
             VkPhysicalDeviceFloatControlsProperties *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPhysicalDeviceFloatControlsProperties(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT: {
+            VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT: {
+            VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(k, h, g);
             return h;
         }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES: {
@@ -9327,6 +9720,16 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
             vkg_in_VkPhysicalDeviceShaderIntegerDotProductProperties(k, h, g);
             return h;
         }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT: {
+            VkPhysicalDeviceShaderObjectFeaturesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceShaderObjectFeaturesEXT(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_PROPERTIES_EXT: {
+            VkPhysicalDeviceShaderObjectPropertiesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceShaderObjectPropertiesEXT(k, h, g);
+            return h;
+        }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES: {
             VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures(k, h, g);
@@ -9400,6 +9803,11 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES: {
             VkPhysicalDeviceVariablePointersFeatures *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPhysicalDeviceVariablePointersFeatures(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT: {
+            VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(k, h, g);
             return h;
         }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES: {
@@ -9480,6 +9888,11 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
         case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO: {
             VkPipelineLayoutCreateInfo *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPipelineLayoutCreateInfo(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR: {
+            VkPipelineLibraryCreateInfoKHR *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPipelineLibraryCreateInfoKHR(k, h, g);
             return h;
         }
         case VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO: {
@@ -9662,6 +10075,11 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
             vkg_in_VkSemaphoreWaitInfo(k, h, g);
             return h;
         }
+        case VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT: {
+            VkShaderCreateInfoEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkShaderCreateInfoEXT(k, h, g);
+            return h;
+        }
         case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO: {
             VkShaderModuleCreateInfo *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkShaderModuleCreateInfo(k, h, g);
@@ -9730,6 +10148,16 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
         case VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO: {
             VkTimelineSemaphoreSubmitInfo *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkTimelineSemaphoreSubmitInfo(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT: {
+            VkVertexInputAttributeDescription2EXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkVertexInputAttributeDescription2EXT(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT: {
+            VkVertexInputBindingDescription2EXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkVertexInputBindingDescription2EXT(k, h, g);
             return h;
         }
         case VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN: {
@@ -10029,6 +10457,9 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
         case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
             vkg_out_VkGraphicsPipelineCreateInfo(k, g, (const VkGraphicsPipelineCreateInfo *)h);
             return;
+        case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
+            vkg_out_VkGraphicsPipelineLibraryCreateInfoEXT(k, g, (const VkGraphicsPipelineLibraryCreateInfoEXT *)h);
+            return;
         case VK_STRUCTURE_TYPE_HDR_METADATA_EXT:
             vkg_out_VkHdrMetadataEXT(k, g, (const VkHdrMetadataEXT *)h);
             return;
@@ -10161,6 +10592,12 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT:
             vkg_out_VkPhysicalDeviceExtendedDynamicState2FeaturesEXT(k, g, (const VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *)h);
             return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT:
+            vkg_out_VkPhysicalDeviceExtendedDynamicState3FeaturesEXT(k, g, (const VkPhysicalDeviceExtendedDynamicState3FeaturesEXT *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT:
+            vkg_out_VkPhysicalDeviceExtendedDynamicState3PropertiesEXT(k, g, (const VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *)h);
+            return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT:
             vkg_out_VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(k, g, (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)h);
             return;
@@ -10187,6 +10624,12 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES:
             vkg_out_VkPhysicalDeviceFloatControlsProperties(k, g, (const VkPhysicalDeviceFloatControlsProperties *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT:
+            vkg_out_VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT(k, g, (const VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT:
+            vkg_out_VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT(k, g, (const VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT *)h);
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES:
             vkg_out_VkPhysicalDeviceGroupProperties(k, g, (const VkPhysicalDeviceGroupProperties *)h);
@@ -10290,6 +10733,12 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES:
             vkg_out_VkPhysicalDeviceShaderIntegerDotProductProperties(k, g, (const VkPhysicalDeviceShaderIntegerDotProductProperties *)h);
             return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+            vkg_out_VkPhysicalDeviceShaderObjectFeaturesEXT(k, g, (const VkPhysicalDeviceShaderObjectFeaturesEXT *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_PROPERTIES_EXT:
+            vkg_out_VkPhysicalDeviceShaderObjectPropertiesEXT(k, g, (const VkPhysicalDeviceShaderObjectPropertiesEXT *)h);
+            return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES:
             vkg_out_VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures(k, g, (const VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures *)h);
             return;
@@ -10334,6 +10783,9 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
             vkg_out_VkPhysicalDeviceVariablePointersFeatures(k, g, (const VkPhysicalDeviceVariablePointersFeatures *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT:
+            vkg_out_VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT(k, g, (const VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *)h);
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
             vkg_out_VkPhysicalDeviceVulkan11Features(k, g, (const VkPhysicalDeviceVulkan11Features *)h);
@@ -10382,6 +10834,9 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
             return;
         case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
             vkg_out_VkPipelineLayoutCreateInfo(k, g, (const VkPipelineLayoutCreateInfo *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
+            vkg_out_VkPipelineLibraryCreateInfoKHR(k, g, (const VkPipelineLibraryCreateInfoKHR *)h);
             return;
         case VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO:
             vkg_out_VkPipelineMultisampleStateCreateInfo(k, g, (const VkPipelineMultisampleStateCreateInfo *)h);
@@ -10491,6 +10946,9 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
         case VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO:
             vkg_out_VkSemaphoreWaitInfo(k, g, (const VkSemaphoreWaitInfo *)h);
             return;
+        case VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT:
+            vkg_out_VkShaderCreateInfoEXT(k, g, (const VkShaderCreateInfoEXT *)h);
+            return;
         case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
             vkg_out_VkShaderModuleCreateInfo(k, g, (const VkShaderModuleCreateInfo *)h);
             return;
@@ -10532,6 +10990,12 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
             return;
         case VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO:
             vkg_out_VkTimelineSemaphoreSubmitInfo(k, g, (const VkTimelineSemaphoreSubmitInfo *)h);
+            return;
+        case VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT:
+            vkg_out_VkVertexInputAttributeDescription2EXT(k, g, (const VkVertexInputAttributeDescription2EXT *)h);
+            return;
+        case VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT:
+            vkg_out_VkVertexInputBindingDescription2EXT(k, g, (const VkVertexInputBindingDescription2EXT *)h);
             return;
         case VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN:
             vkg_out_VkViSurfaceCreateInfoNN(k, g, (const VkViSurfaceCreateInfoNN *)h);

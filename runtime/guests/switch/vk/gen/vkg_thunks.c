@@ -3134,63 +3134,63 @@ static const char *const vkg_alias_7[] = {"vkBindBufferMemory2KHR", NULL};
 static const char *const vkg_alias_9[] = {"vkBindImageMemory2KHR", NULL};
 static const char *const vkg_alias_13[] = {"vkCmdBeginRenderPass2KHR", NULL};
 static const char *const vkg_alias_14[] = {"vkCmdBeginRenderingKHR", NULL};
-static const char *const vkg_alias_19[] = {"vkCmdBindVertexBuffers2EXT", NULL};
-static const char *const vkg_alias_21[] = {"vkCmdBlitImage2KHR", NULL};
-static const char *const vkg_alias_26[] = {"vkCmdCopyBuffer2KHR", NULL};
-static const char *const vkg_alias_28[] = {"vkCmdCopyBufferToImage2KHR", NULL};
-static const char *const vkg_alias_30[] = {"vkCmdCopyImage2KHR", NULL};
-static const char *const vkg_alias_32[] = {"vkCmdCopyImageToBuffer2KHR", NULL};
-static const char *const vkg_alias_43[] = {"vkCmdDrawIndexedIndirectCountKHR", NULL};
-static const char *const vkg_alias_45[] = {"vkCmdDrawIndirectCountKHR", NULL};
-static const char *const vkg_alias_49[] = {"vkCmdEndRenderPass2KHR", NULL};
-static const char *const vkg_alias_50[] = {"vkCmdEndRenderingKHR", NULL};
-static const char *const vkg_alias_55[] = {"vkCmdNextSubpass2KHR", NULL};
-static const char *const vkg_alias_57[] = {"vkCmdPipelineBarrier2KHR", NULL};
-static const char *const vkg_alias_62[] = {"vkCmdResetEvent2KHR", NULL};
-static const char *const vkg_alias_65[] = {"vkCmdResolveImage2KHR", NULL};
-static const char *const vkg_alias_67[] = {"vkCmdSetCullModeEXT", NULL};
-static const char *const vkg_alias_70[] = {"vkCmdSetDepthBiasEnableEXT", NULL};
-static const char *const vkg_alias_72[] = {"vkCmdSetDepthBoundsTestEnableEXT", NULL};
-static const char *const vkg_alias_73[] = {"vkCmdSetDepthCompareOpEXT", NULL};
-static const char *const vkg_alias_74[] = {"vkCmdSetDepthTestEnableEXT", NULL};
-static const char *const vkg_alias_75[] = {"vkCmdSetDepthWriteEnableEXT", NULL};
-static const char *const vkg_alias_81[] = {"vkCmdSetEvent2KHR", NULL};
-static const char *const vkg_alias_82[] = {"vkCmdSetFrontFaceEXT", NULL};
-static const char *const vkg_alias_86[] = {"vkCmdSetPrimitiveRestartEnableEXT", NULL};
-static const char *const vkg_alias_87[] = {"vkCmdSetPrimitiveTopologyEXT", NULL};
-static const char *const vkg_alias_88[] = {"vkCmdSetRasterizerDiscardEnableEXT", NULL};
-static const char *const vkg_alias_91[] = {"vkCmdSetScissorWithCountEXT", NULL};
-static const char *const vkg_alias_93[] = {"vkCmdSetStencilOpEXT", NULL};
-static const char *const vkg_alias_95[] = {"vkCmdSetStencilTestEnableEXT", NULL};
-static const char *const vkg_alias_98[] = {"vkCmdSetViewportWithCountEXT", NULL};
-static const char *const vkg_alias_101[] = {"vkCmdWaitEvents2KHR", NULL};
-static const char *const vkg_alias_103[] = {"vkCmdWriteTimestamp2KHR", NULL};
-static const char *const vkg_alias_112[] = {"vkCreateDescriptorUpdateTemplateKHR", NULL};
-static const char *const vkg_alias_127[] = {"vkCreateRenderPass2KHR", NULL};
-static const char *const vkg_alias_129[] = {"vkCreateSamplerYcbcrConversionKHR", NULL};
-static const char *const vkg_alias_144[] = {"vkDestroyDescriptorUpdateTemplateKHR", NULL};
-static const char *const vkg_alias_159[] = {"vkDestroySamplerYcbcrConversionKHR", NULL};
-static const char *const vkg_alias_171[] = {"vkEnumeratePhysicalDeviceGroupsKHR", NULL};
-static const char *const vkg_alias_179[] = {"vkGetBufferMemoryRequirements2KHR", NULL};
-static const char *const vkg_alias_181[] = {"vkGetDescriptorSetLayoutSupportKHR", NULL};
-static const char *const vkg_alias_197[] = {"vkGetImageMemoryRequirements2KHR", NULL};
-static const char *const vkg_alias_199[] = {"vkGetImageSparseMemoryRequirements2KHR", NULL};
-static const char *const vkg_alias_203[] = {"vkGetPhysicalDeviceExternalBufferPropertiesKHR", NULL};
-static const char *const vkg_alias_204[] = {"vkGetPhysicalDeviceExternalFencePropertiesKHR", NULL};
-static const char *const vkg_alias_205[] = {"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", NULL};
-static const char *const vkg_alias_207[] = {"vkGetPhysicalDeviceFeatures2KHR", NULL};
-static const char *const vkg_alias_209[] = {"vkGetPhysicalDeviceFormatProperties2KHR", NULL};
-static const char *const vkg_alias_211[] = {"vkGetPhysicalDeviceImageFormatProperties2KHR", NULL};
-static const char *const vkg_alias_213[] = {"vkGetPhysicalDeviceMemoryProperties2KHR", NULL};
-static const char *const vkg_alias_217[] = {"vkGetPhysicalDeviceProperties2KHR", NULL};
-static const char *const vkg_alias_219[] = {"vkGetPhysicalDeviceQueueFamilyProperties2KHR", NULL};
-static const char *const vkg_alias_221[] = {"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", NULL};
-static const char *const vkg_alias_233[] = {"vkGetSemaphoreCounterValueKHR", NULL};
-static const char *const vkg_alias_245[] = {"vkQueueSubmit2KHR", NULL};
-static const char *const vkg_alias_258[] = {"vkSignalSemaphoreKHR", NULL};
-static const char *const vkg_alias_260[] = {"vkTrimCommandPoolKHR", NULL};
-static const char *const vkg_alias_263[] = {"vkUpdateDescriptorSetWithTemplateKHR", NULL};
-static const char *const vkg_alias_266[] = {"vkWaitSemaphoresKHR", NULL};
+static const char *const vkg_alias_20[] = {"vkCmdBindVertexBuffers2EXT", NULL};
+static const char *const vkg_alias_22[] = {"vkCmdBlitImage2KHR", NULL};
+static const char *const vkg_alias_27[] = {"vkCmdCopyBuffer2KHR", NULL};
+static const char *const vkg_alias_29[] = {"vkCmdCopyBufferToImage2KHR", NULL};
+static const char *const vkg_alias_31[] = {"vkCmdCopyImage2KHR", NULL};
+static const char *const vkg_alias_33[] = {"vkCmdCopyImageToBuffer2KHR", NULL};
+static const char *const vkg_alias_44[] = {"vkCmdDrawIndexedIndirectCountKHR", NULL};
+static const char *const vkg_alias_46[] = {"vkCmdDrawIndirectCountKHR", NULL};
+static const char *const vkg_alias_50[] = {"vkCmdEndRenderPass2KHR", NULL};
+static const char *const vkg_alias_51[] = {"vkCmdEndRenderingKHR", NULL};
+static const char *const vkg_alias_56[] = {"vkCmdNextSubpass2KHR", NULL};
+static const char *const vkg_alias_58[] = {"vkCmdPipelineBarrier2KHR", NULL};
+static const char *const vkg_alias_63[] = {"vkCmdResetEvent2KHR", NULL};
+static const char *const vkg_alias_66[] = {"vkCmdResolveImage2KHR", NULL};
+static const char *const vkg_alias_73[] = {"vkCmdSetCullModeEXT", NULL};
+static const char *const vkg_alias_76[] = {"vkCmdSetDepthBiasEnableEXT", NULL};
+static const char *const vkg_alias_78[] = {"vkCmdSetDepthBoundsTestEnableEXT", NULL};
+static const char *const vkg_alias_80[] = {"vkCmdSetDepthCompareOpEXT", NULL};
+static const char *const vkg_alias_81[] = {"vkCmdSetDepthTestEnableEXT", NULL};
+static const char *const vkg_alias_82[] = {"vkCmdSetDepthWriteEnableEXT", NULL};
+static const char *const vkg_alias_88[] = {"vkCmdSetEvent2KHR", NULL};
+static const char *const vkg_alias_89[] = {"vkCmdSetFrontFaceEXT", NULL};
+static const char *const vkg_alias_95[] = {"vkCmdSetPrimitiveRestartEnableEXT", NULL};
+static const char *const vkg_alias_96[] = {"vkCmdSetPrimitiveTopologyEXT", NULL};
+static const char *const vkg_alias_98[] = {"vkCmdSetRasterizerDiscardEnableEXT", NULL};
+static const char *const vkg_alias_103[] = {"vkCmdSetScissorWithCountEXT", NULL};
+static const char *const vkg_alias_105[] = {"vkCmdSetStencilOpEXT", NULL};
+static const char *const vkg_alias_107[] = {"vkCmdSetStencilTestEnableEXT", NULL};
+static const char *const vkg_alias_112[] = {"vkCmdSetViewportWithCountEXT", NULL};
+static const char *const vkg_alias_115[] = {"vkCmdWaitEvents2KHR", NULL};
+static const char *const vkg_alias_117[] = {"vkCmdWriteTimestamp2KHR", NULL};
+static const char *const vkg_alias_126[] = {"vkCreateDescriptorUpdateTemplateKHR", NULL};
+static const char *const vkg_alias_141[] = {"vkCreateRenderPass2KHR", NULL};
+static const char *const vkg_alias_143[] = {"vkCreateSamplerYcbcrConversionKHR", NULL};
+static const char *const vkg_alias_159[] = {"vkDestroyDescriptorUpdateTemplateKHR", NULL};
+static const char *const vkg_alias_174[] = {"vkDestroySamplerYcbcrConversionKHR", NULL};
+static const char *const vkg_alias_187[] = {"vkEnumeratePhysicalDeviceGroupsKHR", NULL};
+static const char *const vkg_alias_195[] = {"vkGetBufferMemoryRequirements2KHR", NULL};
+static const char *const vkg_alias_197[] = {"vkGetDescriptorSetLayoutSupportKHR", NULL};
+static const char *const vkg_alias_213[] = {"vkGetImageMemoryRequirements2KHR", NULL};
+static const char *const vkg_alias_215[] = {"vkGetImageSparseMemoryRequirements2KHR", NULL};
+static const char *const vkg_alias_219[] = {"vkGetPhysicalDeviceExternalBufferPropertiesKHR", NULL};
+static const char *const vkg_alias_220[] = {"vkGetPhysicalDeviceExternalFencePropertiesKHR", NULL};
+static const char *const vkg_alias_221[] = {"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", NULL};
+static const char *const vkg_alias_223[] = {"vkGetPhysicalDeviceFeatures2KHR", NULL};
+static const char *const vkg_alias_225[] = {"vkGetPhysicalDeviceFormatProperties2KHR", NULL};
+static const char *const vkg_alias_227[] = {"vkGetPhysicalDeviceImageFormatProperties2KHR", NULL};
+static const char *const vkg_alias_229[] = {"vkGetPhysicalDeviceMemoryProperties2KHR", NULL};
+static const char *const vkg_alias_233[] = {"vkGetPhysicalDeviceProperties2KHR", NULL};
+static const char *const vkg_alias_235[] = {"vkGetPhysicalDeviceQueueFamilyProperties2KHR", NULL};
+static const char *const vkg_alias_237[] = {"vkGetPhysicalDeviceSparseImageFormatProperties2KHR", NULL};
+static const char *const vkg_alias_249[] = {"vkGetSemaphoreCounterValueKHR", NULL};
+static const char *const vkg_alias_262[] = {"vkQueueSubmit2KHR", NULL};
+static const char *const vkg_alias_275[] = {"vkSignalSemaphoreKHR", NULL};
+static const char *const vkg_alias_277[] = {"vkTrimCommandPoolKHR", NULL};
+static const char *const vkg_alias_280[] = {"vkUpdateDescriptorSetWithTemplateKHR", NULL};
+static const char *const vkg_alias_283[] = {"vkWaitSemaphoresKHR", NULL};
 
 const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkAcquireNextImage2KHR", NULL, 2, 1},
@@ -3211,21 +3211,22 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkCmdBindDescriptorSets", NULL, 2, 1},
     {"vkCmdBindIndexBuffer", NULL, 2, 1},
     {"vkCmdBindPipeline", NULL, 2, 1},
+    {"vkCmdBindShadersEXT", NULL, 2, 0},
     {"vkCmdBindVertexBuffers", NULL, 2, 1},
-    {"vkCmdBindVertexBuffers2", vkg_alias_19, 2, 1},
+    {"vkCmdBindVertexBuffers2", vkg_alias_20, 2, 1},
     {"vkCmdBlitImage", NULL, 2, 1},
-    {"vkCmdBlitImage2", vkg_alias_21, 2, 1},
+    {"vkCmdBlitImage2", vkg_alias_22, 2, 1},
     {"vkCmdClearAttachments", NULL, 2, 1},
     {"vkCmdClearColorImage", NULL, 2, 1},
     {"vkCmdClearDepthStencilImage", NULL, 2, 1},
     {"vkCmdCopyBuffer", NULL, 2, 1},
-    {"vkCmdCopyBuffer2", vkg_alias_26, 2, 1},
+    {"vkCmdCopyBuffer2", vkg_alias_27, 2, 1},
     {"vkCmdCopyBufferToImage", NULL, 2, 1},
-    {"vkCmdCopyBufferToImage2", vkg_alias_28, 2, 1},
+    {"vkCmdCopyBufferToImage2", vkg_alias_29, 2, 1},
     {"vkCmdCopyImage", NULL, 2, 1},
-    {"vkCmdCopyImage2", vkg_alias_30, 2, 1},
+    {"vkCmdCopyImage2", vkg_alias_31, 2, 1},
     {"vkCmdCopyImageToBuffer", NULL, 2, 1},
-    {"vkCmdCopyImageToBuffer2", vkg_alias_32, 2, 1},
+    {"vkCmdCopyImageToBuffer2", vkg_alias_33, 2, 1},
     {"vkCmdCopyQueryPoolResults", NULL, 2, 1},
     {"vkCmdDebugMarkerBeginEXT", NULL, 2, 1},
     {"vkCmdDebugMarkerEndEXT", NULL, 2, 1},
@@ -3236,67 +3237,80 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkCmdDraw", NULL, 2, 1},
     {"vkCmdDrawIndexed", NULL, 2, 1},
     {"vkCmdDrawIndexedIndirect", NULL, 2, 1},
-    {"vkCmdDrawIndexedIndirectCount", vkg_alias_43, 2, 1},
+    {"vkCmdDrawIndexedIndirectCount", vkg_alias_44, 2, 1},
     {"vkCmdDrawIndirect", NULL, 2, 1},
-    {"vkCmdDrawIndirectCount", vkg_alias_45, 2, 1},
+    {"vkCmdDrawIndirectCount", vkg_alias_46, 2, 1},
     {"vkCmdEndDebugUtilsLabelEXT", NULL, 2, 1},
     {"vkCmdEndQuery", NULL, 2, 1},
     {"vkCmdEndRenderPass", NULL, 2, 1},
-    {"vkCmdEndRenderPass2", vkg_alias_49, 2, 1},
-    {"vkCmdEndRendering", vkg_alias_50, 2, 1},
+    {"vkCmdEndRenderPass2", vkg_alias_50, 2, 1},
+    {"vkCmdEndRendering", vkg_alias_51, 2, 1},
     {"vkCmdExecuteCommands", NULL, 2, 1},
     {"vkCmdFillBuffer", NULL, 2, 1},
     {"vkCmdInsertDebugUtilsLabelEXT", NULL, 2, 1},
     {"vkCmdNextSubpass", NULL, 2, 1},
-    {"vkCmdNextSubpass2", vkg_alias_55, 2, 1},
+    {"vkCmdNextSubpass2", vkg_alias_56, 2, 1},
     {"vkCmdPipelineBarrier", NULL, 2, 1},
-    {"vkCmdPipelineBarrier2", vkg_alias_57, 2, 1},
+    {"vkCmdPipelineBarrier2", vkg_alias_58, 2, 1},
     {"vkCmdPushConstants", NULL, 2, 1},
     {"vkCmdPushDescriptorSetKHR", NULL, 2, 1},
     {"vkCmdPushDescriptorSetWithTemplateKHR", NULL, 2, 1},
     {"vkCmdResetEvent", NULL, 2, 1},
-    {"vkCmdResetEvent2", vkg_alias_62, 2, 1},
+    {"vkCmdResetEvent2", vkg_alias_63, 2, 1},
     {"vkCmdResetQueryPool", NULL, 2, 1},
     {"vkCmdResolveImage", NULL, 2, 1},
-    {"vkCmdResolveImage2", vkg_alias_65, 2, 1},
+    {"vkCmdResolveImage2", vkg_alias_66, 2, 1},
+    {"vkCmdSetAlphaToCoverageEnableEXT", NULL, 2, 0},
+    {"vkCmdSetAlphaToOneEnableEXT", NULL, 2, 0},
     {"vkCmdSetBlendConstants", NULL, 2, 1},
-    {"vkCmdSetCullMode", vkg_alias_67, 2, 1},
+    {"vkCmdSetColorBlendEnableEXT", NULL, 2, 0},
+    {"vkCmdSetColorBlendEquationEXT", NULL, 2, 0},
+    {"vkCmdSetColorWriteMaskEXT", NULL, 2, 0},
+    {"vkCmdSetCullMode", vkg_alias_73, 2, 1},
     {"vkCmdSetDepthBias", NULL, 2, 1},
     {"vkCmdSetDepthBias2EXT", NULL, 2, 0},
-    {"vkCmdSetDepthBiasEnable", vkg_alias_70, 2, 1},
+    {"vkCmdSetDepthBiasEnable", vkg_alias_76, 2, 1},
     {"vkCmdSetDepthBounds", NULL, 2, 1},
-    {"vkCmdSetDepthBoundsTestEnable", vkg_alias_72, 2, 1},
-    {"vkCmdSetDepthCompareOp", vkg_alias_73, 2, 1},
-    {"vkCmdSetDepthTestEnable", vkg_alias_74, 2, 1},
-    {"vkCmdSetDepthWriteEnable", vkg_alias_75, 2, 1},
+    {"vkCmdSetDepthBoundsTestEnable", vkg_alias_78, 2, 1},
+    {"vkCmdSetDepthClampEnableEXT", NULL, 2, 0},
+    {"vkCmdSetDepthCompareOp", vkg_alias_80, 2, 1},
+    {"vkCmdSetDepthTestEnable", vkg_alias_81, 2, 1},
+    {"vkCmdSetDepthWriteEnable", vkg_alias_82, 2, 1},
     {"vkCmdSetDeviceMask", NULL, 2, 1},
     {"vkCmdSetDiscardRectangleEXT", NULL, 2, 1},
     {"vkCmdSetDiscardRectangleEnableEXT", NULL, 2, 1},
     {"vkCmdSetDiscardRectangleModeEXT", NULL, 2, 1},
     {"vkCmdSetEvent", NULL, 2, 1},
-    {"vkCmdSetEvent2", vkg_alias_81, 2, 1},
-    {"vkCmdSetFrontFace", vkg_alias_82, 2, 1},
+    {"vkCmdSetEvent2", vkg_alias_88, 2, 1},
+    {"vkCmdSetFrontFace", vkg_alias_89, 2, 1},
     {"vkCmdSetLineWidth", NULL, 2, 1},
     {"vkCmdSetLogicOpEXT", NULL, 2, 1},
+    {"vkCmdSetLogicOpEnableEXT", NULL, 2, 0},
     {"vkCmdSetPatchControlPointsEXT", NULL, 2, 1},
-    {"vkCmdSetPrimitiveRestartEnable", vkg_alias_86, 2, 1},
-    {"vkCmdSetPrimitiveTopology", vkg_alias_87, 2, 1},
-    {"vkCmdSetRasterizerDiscardEnable", vkg_alias_88, 2, 1},
+    {"vkCmdSetPolygonModeEXT", NULL, 2, 0},
+    {"vkCmdSetPrimitiveRestartEnable", vkg_alias_95, 2, 1},
+    {"vkCmdSetPrimitiveTopology", vkg_alias_96, 2, 1},
+    {"vkCmdSetRasterizationSamplesEXT", NULL, 2, 0},
+    {"vkCmdSetRasterizerDiscardEnable", vkg_alias_98, 2, 1},
     {"vkCmdSetSampleLocationsEXT", NULL, 2, 1},
+    {"vkCmdSetSampleLocationsEnableEXT", NULL, 2, 0},
+    {"vkCmdSetSampleMaskEXT", NULL, 2, 0},
     {"vkCmdSetScissor", NULL, 2, 1},
-    {"vkCmdSetScissorWithCount", vkg_alias_91, 2, 1},
+    {"vkCmdSetScissorWithCount", vkg_alias_103, 2, 1},
     {"vkCmdSetStencilCompareMask", NULL, 2, 1},
-    {"vkCmdSetStencilOp", vkg_alias_93, 2, 1},
+    {"vkCmdSetStencilOp", vkg_alias_105, 2, 1},
     {"vkCmdSetStencilReference", NULL, 2, 1},
-    {"vkCmdSetStencilTestEnable", vkg_alias_95, 2, 1},
+    {"vkCmdSetStencilTestEnable", vkg_alias_107, 2, 1},
     {"vkCmdSetStencilWriteMask", NULL, 2, 1},
+    {"vkCmdSetTessellationDomainOriginEXT", NULL, 2, 0},
+    {"vkCmdSetVertexInputEXT", NULL, 2, 0},
     {"vkCmdSetViewport", NULL, 2, 1},
-    {"vkCmdSetViewportWithCount", vkg_alias_98, 2, 1},
+    {"vkCmdSetViewportWithCount", vkg_alias_112, 2, 1},
     {"vkCmdUpdateBuffer", NULL, 2, 1},
     {"vkCmdWaitEvents", NULL, 2, 1},
-    {"vkCmdWaitEvents2", vkg_alias_101, 2, 1},
+    {"vkCmdWaitEvents2", vkg_alias_115, 2, 1},
     {"vkCmdWriteTimestamp", NULL, 2, 1},
-    {"vkCmdWriteTimestamp2", vkg_alias_103, 2, 1},
+    {"vkCmdWriteTimestamp2", vkg_alias_117, 2, 1},
     {"vkCreateBuffer", NULL, 2, 1},
     {"vkCreateBufferView", NULL, 2, 1},
     {"vkCreateCommandPool", NULL, 2, 1},
@@ -3305,7 +3319,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkCreateDebugUtilsMessengerEXT", NULL, 1, 1},
     {"vkCreateDescriptorPool", NULL, 2, 1},
     {"vkCreateDescriptorSetLayout", NULL, 2, 1},
-    {"vkCreateDescriptorUpdateTemplate", vkg_alias_112, 2, 1},
+    {"vkCreateDescriptorUpdateTemplate", vkg_alias_126, 2, 1},
     {"vkCreateDevice", NULL, 1, 1},
     {"vkCreateEvent", NULL, 2, 1},
     {"vkCreateFence", NULL, 2, 1},
@@ -3320,11 +3334,12 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkCreatePrivateDataSlot", NULL, 2, 1},
     {"vkCreateQueryPool", NULL, 2, 1},
     {"vkCreateRenderPass", NULL, 2, 1},
-    {"vkCreateRenderPass2", vkg_alias_127, 2, 1},
+    {"vkCreateRenderPass2", vkg_alias_141, 2, 1},
     {"vkCreateSampler", NULL, 2, 1},
-    {"vkCreateSamplerYcbcrConversion", vkg_alias_129, 2, 1},
+    {"vkCreateSamplerYcbcrConversion", vkg_alias_143, 2, 1},
     {"vkCreateSemaphore", NULL, 2, 1},
     {"vkCreateShaderModule", NULL, 2, 1},
+    {"vkCreateShadersEXT", NULL, 2, 0},
     {"vkCreateSwapchainKHR", NULL, 2, 1},
     {"vkCreateViSurfaceNN", NULL, 1, 1},
     {"vkDebugMarkerSetObjectNameEXT", NULL, 2, 1},
@@ -3337,7 +3352,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkDestroyDebugUtilsMessengerEXT", NULL, 1, 1},
     {"vkDestroyDescriptorPool", NULL, 2, 1},
     {"vkDestroyDescriptorSetLayout", NULL, 2, 1},
-    {"vkDestroyDescriptorUpdateTemplate", vkg_alias_144, 2, 1},
+    {"vkDestroyDescriptorUpdateTemplate", vkg_alias_159, 2, 1},
     {"vkDestroyDevice", NULL, 2, 1},
     {"vkDestroyEvent", NULL, 2, 1},
     {"vkDestroyFence", NULL, 2, 1},
@@ -3352,8 +3367,9 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkDestroyQueryPool", NULL, 2, 1},
     {"vkDestroyRenderPass", NULL, 2, 1},
     {"vkDestroySampler", NULL, 2, 1},
-    {"vkDestroySamplerYcbcrConversion", vkg_alias_159, 2, 1},
+    {"vkDestroySamplerYcbcrConversion", vkg_alias_174, 2, 1},
     {"vkDestroySemaphore", NULL, 2, 1},
+    {"vkDestroyShaderEXT", NULL, 2, 0},
     {"vkDestroyShaderModule", NULL, 2, 1},
     {"vkDestroySurfaceKHR", NULL, 1, 1},
     {"vkDestroySwapchainKHR", NULL, 2, 1},
@@ -3364,7 +3380,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkEnumerateInstanceExtensionProperties", NULL, 0, 1},
     {"vkEnumerateInstanceLayerProperties", NULL, 0, 1},
     {"vkEnumerateInstanceVersion", NULL, 0, 1},
-    {"vkEnumeratePhysicalDeviceGroups", vkg_alias_171, 1, 1},
+    {"vkEnumeratePhysicalDeviceGroups", vkg_alias_187, 1, 1},
     {"vkEnumeratePhysicalDevices", NULL, 1, 1},
     {"vkFlushMappedMemoryRanges", NULL, 2, 1},
     {"vkFreeCommandBuffers", NULL, 2, 1},
@@ -3372,9 +3388,9 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkFreeMemory", NULL, 2, 1},
     {"vkGetBufferDeviceAddress", NULL, 2, 1},
     {"vkGetBufferMemoryRequirements", NULL, 2, 1},
-    {"vkGetBufferMemoryRequirements2", vkg_alias_179, 2, 1},
+    {"vkGetBufferMemoryRequirements2", vkg_alias_195, 2, 1},
     {"vkGetBufferOpaqueCaptureAddress", NULL, 2, 1},
-    {"vkGetDescriptorSetLayoutSupport", vkg_alias_181, 2, 1},
+    {"vkGetDescriptorSetLayoutSupport", vkg_alias_197, 2, 1},
     {"vkGetDeviceBufferMemoryRequirements", NULL, 2, 1},
     {"vkGetDeviceFaultInfoEXT", NULL, 2, 0},
     {"vkGetDeviceGroupPeerMemoryFeatures", NULL, 2, 1},
@@ -3390,31 +3406,31 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkGetEventStatus", NULL, 2, 1},
     {"vkGetFenceStatus", NULL, 2, 1},
     {"vkGetImageMemoryRequirements", NULL, 2, 1},
-    {"vkGetImageMemoryRequirements2", vkg_alias_197, 2, 1},
+    {"vkGetImageMemoryRequirements2", vkg_alias_213, 2, 1},
     {"vkGetImageSparseMemoryRequirements", NULL, 2, 1},
-    {"vkGetImageSparseMemoryRequirements2", vkg_alias_199, 2, 1},
+    {"vkGetImageSparseMemoryRequirements2", vkg_alias_215, 2, 1},
     {"vkGetImageSubresourceLayout", NULL, 2, 1},
     {"vkGetInstanceProcAddr", NULL, 1, 1},
     {"vkGetMemoryHostPointerPropertiesEXT", NULL, 2, 0},
-    {"vkGetPhysicalDeviceExternalBufferProperties", vkg_alias_203, 1, 1},
-    {"vkGetPhysicalDeviceExternalFenceProperties", vkg_alias_204, 1, 1},
-    {"vkGetPhysicalDeviceExternalSemaphoreProperties", vkg_alias_205, 1, 1},
+    {"vkGetPhysicalDeviceExternalBufferProperties", vkg_alias_219, 1, 1},
+    {"vkGetPhysicalDeviceExternalFenceProperties", vkg_alias_220, 1, 1},
+    {"vkGetPhysicalDeviceExternalSemaphoreProperties", vkg_alias_221, 1, 1},
     {"vkGetPhysicalDeviceFeatures", NULL, 1, 1},
-    {"vkGetPhysicalDeviceFeatures2", vkg_alias_207, 1, 1},
+    {"vkGetPhysicalDeviceFeatures2", vkg_alias_223, 1, 1},
     {"vkGetPhysicalDeviceFormatProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceFormatProperties2", vkg_alias_209, 1, 1},
+    {"vkGetPhysicalDeviceFormatProperties2", vkg_alias_225, 1, 1},
     {"vkGetPhysicalDeviceImageFormatProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceImageFormatProperties2", vkg_alias_211, 1, 1},
+    {"vkGetPhysicalDeviceImageFormatProperties2", vkg_alias_227, 1, 1},
     {"vkGetPhysicalDeviceMemoryProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceMemoryProperties2", vkg_alias_213, 1, 1},
+    {"vkGetPhysicalDeviceMemoryProperties2", vkg_alias_229, 1, 1},
     {"vkGetPhysicalDeviceMultisamplePropertiesEXT", NULL, 1, 1},
     {"vkGetPhysicalDevicePresentRectanglesKHR", NULL, 1, 1},
     {"vkGetPhysicalDeviceProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceProperties2", vkg_alias_217, 1, 1},
+    {"vkGetPhysicalDeviceProperties2", vkg_alias_233, 1, 1},
     {"vkGetPhysicalDeviceQueueFamilyProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceQueueFamilyProperties2", vkg_alias_219, 1, 1},
+    {"vkGetPhysicalDeviceQueueFamilyProperties2", vkg_alias_235, 1, 1},
     {"vkGetPhysicalDeviceSparseImageFormatProperties", NULL, 1, 1},
-    {"vkGetPhysicalDeviceSparseImageFormatProperties2", vkg_alias_221, 1, 1},
+    {"vkGetPhysicalDeviceSparseImageFormatProperties2", vkg_alias_237, 1, 1},
     {"vkGetPhysicalDeviceSurfaceCapabilities2KHR", NULL, 1, 1},
     {"vkGetPhysicalDeviceSurfaceCapabilitiesKHR", NULL, 1, 1},
     {"vkGetPhysicalDeviceSurfaceFormats2KHR", NULL, 1, 1},
@@ -3426,7 +3442,8 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkGetPrivateData", NULL, 2, 1},
     {"vkGetQueryPoolResults", NULL, 2, 1},
     {"vkGetRenderAreaGranularity", NULL, 2, 1},
-    {"vkGetSemaphoreCounterValue", vkg_alias_233, 2, 1},
+    {"vkGetSemaphoreCounterValue", vkg_alias_249, 2, 1},
+    {"vkGetShaderBinaryDataEXT", NULL, 2, 0},
     {"vkGetSwapchainImagesKHR", NULL, 2, 1},
     {"vkInvalidateMappedMemoryRanges", NULL, 2, 1},
     {"vkMapMemory", NULL, 2, 1},
@@ -3438,7 +3455,7 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkQueueInsertDebugUtilsLabelEXT", NULL, 2, 1},
     {"vkQueuePresentKHR", NULL, 2, 1},
     {"vkQueueSubmit", NULL, 2, 1},
-    {"vkQueueSubmit2", vkg_alias_245, 2, 1},
+    {"vkQueueSubmit2", vkg_alias_262, 2, 1},
     {"vkQueueWaitIdle", NULL, 2, 1},
     {"vkResetCommandBuffer", NULL, 2, 1},
     {"vkResetCommandPool", NULL, 2, 1},
@@ -3451,15 +3468,15 @@ const vkg_cmd_info vkg_cmds[VKG_COUNT] = {
     {"vkSetEvent", NULL, 2, 1},
     {"vkSetHdrMetadataEXT", NULL, 2, 1},
     {"vkSetPrivateData", NULL, 2, 1},
-    {"vkSignalSemaphore", vkg_alias_258, 2, 1},
+    {"vkSignalSemaphore", vkg_alias_275, 2, 1},
     {"vkSubmitDebugUtilsMessageEXT", NULL, 1, 1},
-    {"vkTrimCommandPool", vkg_alias_260, 2, 1},
+    {"vkTrimCommandPool", vkg_alias_277, 2, 1},
     {"vkUnmapMemory", NULL, 2, 1},
     {"vkUnmapMemory2KHR", NULL, 2, 0},
-    {"vkUpdateDescriptorSetWithTemplate", vkg_alias_263, 2, 1},
+    {"vkUpdateDescriptorSetWithTemplate", vkg_alias_280, 2, 1},
     {"vkUpdateDescriptorSets", NULL, 2, 1},
     {"vkWaitForFences", NULL, 2, 1},
-    {"vkWaitSemaphores", vkg_alias_266, 2, 1},
+    {"vkWaitSemaphores", vkg_alias_283, 2, 1},
 };
 
 const vkg_name vkg_names[] = {
@@ -3807,6 +3824,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCmdBindDescriptorSets,
     vkt_vkCmdBindIndexBuffer,
     vkt_vkCmdBindPipeline,
+    NULL,
     vkt_vkCmdBindVertexBuffers,
     vkt_vkCmdBindVertexBuffers2,
     vkt_vkCmdBlitImage,
@@ -3855,13 +3873,19 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCmdResetQueryPool,
     vkt_vkCmdResolveImage,
     vkt_vkCmdResolveImage2,
+    NULL,
+    NULL,
     vkt_vkCmdSetBlendConstants,
+    NULL,
+    NULL,
+    NULL,
     vkt_vkCmdSetCullMode,
     vkh_vkCmdSetDepthBias,
     NULL,
     vkt_vkCmdSetDepthBiasEnable,
     vkt_vkCmdSetDepthBounds,
     vkt_vkCmdSetDepthBoundsTestEnable,
+    NULL,
     vkt_vkCmdSetDepthCompareOp,
     vkt_vkCmdSetDepthTestEnable,
     vkt_vkCmdSetDepthWriteEnable,
@@ -3874,11 +3898,16 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCmdSetFrontFace,
     vkt_vkCmdSetLineWidth,
     vkt_vkCmdSetLogicOpEXT,
+    NULL,
     vkt_vkCmdSetPatchControlPointsEXT,
+    NULL,
     vkt_vkCmdSetPrimitiveRestartEnable,
     vkt_vkCmdSetPrimitiveTopology,
+    NULL,
     vkt_vkCmdSetRasterizerDiscardEnable,
     vkt_vkCmdSetSampleLocationsEXT,
+    NULL,
+    NULL,
     vkt_vkCmdSetScissor,
     vkt_vkCmdSetScissorWithCount,
     vkt_vkCmdSetStencilCompareMask,
@@ -3886,6 +3915,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCmdSetStencilReference,
     vkt_vkCmdSetStencilTestEnable,
     vkt_vkCmdSetStencilWriteMask,
+    NULL,
+    NULL,
     vkt_vkCmdSetViewport,
     vkt_vkCmdSetViewportWithCount,
     vkt_vkCmdUpdateBuffer,
@@ -3921,6 +3952,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCreateSamplerYcbcrConversion,
     vkt_vkCreateSemaphore,
     vkh_vkCreateShaderModule,
+    NULL,
     vkh_vkCreateSwapchainKHR,
     vkh_vkCreateViSurfaceNN,
     vkt_vkDebugMarkerSetObjectNameEXT,
@@ -3950,6 +3982,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkDestroySampler,
     vkt_vkDestroySamplerYcbcrConversion,
     vkt_vkDestroySemaphore,
+    NULL,
     vkt_vkDestroyShaderModule,
     vkh_vkDestroySurfaceKHR,
     vkh_vkDestroySwapchainKHR,
@@ -4023,6 +4056,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetQueryPoolResults,
     vkt_vkGetRenderAreaGranularity,
     vkt_vkGetSemaphoreCounterValue,
+    NULL,
     vkh_vkGetSwapchainImagesKHR,
     vkh_vkInvalidateMappedMemoryRanges,
     vkh_vkMapMemory,

@@ -60,10 +60,14 @@
 #define VK_EXT_DISCARD_RECTANGLES_SPEC_VERSION 2
 #define VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME "VK_EXT_extended_dynamic_state2"
 #define VK_EXT_EXTENDED_DYNAMIC_STATE_2_SPEC_VERSION 1
+#define VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME "VK_EXT_extended_dynamic_state3"
+#define VK_EXT_EXTENDED_DYNAMIC_STATE_3_SPEC_VERSION 2
 #define VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME "VK_EXT_extended_dynamic_state"
 #define VK_EXT_EXTENDED_DYNAMIC_STATE_SPEC_VERSION 1
 #define VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME "VK_EXT_external_memory_host"
 #define VK_EXT_EXTERNAL_MEMORY_HOST_SPEC_VERSION 1
+#define VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME "VK_EXT_graphics_pipeline_library"
+#define VK_EXT_GRAPHICS_PIPELINE_LIBRARY_SPEC_VERSION 1
 #define VK_EXT_HDR_METADATA_EXTENSION_NAME "VK_EXT_hdr_metadata"
 #define VK_EXT_HDR_METADATA_SPEC_VERSION 3
 #define VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME "VK_EXT_headless_surface"
@@ -72,6 +76,10 @@
 #define VK_EXT_MAP_MEMORY_PLACED_SPEC_VERSION 1
 #define VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME "VK_EXT_sample_locations"
 #define VK_EXT_SAMPLE_LOCATIONS_SPEC_VERSION 1
+#define VK_EXT_SHADER_OBJECT_EXTENSION_NAME "VK_EXT_shader_object"
+#define VK_EXT_SHADER_OBJECT_SPEC_VERSION 1
+#define VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME "VK_EXT_vertex_input_dynamic_state"
+#define VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_SPEC_VERSION 2
 #define VK_KHR_BIND_MEMORY_2_EXTENSION_NAME "VK_KHR_bind_memory2"
 #define VK_KHR_BIND_MEMORY_2_SPEC_VERSION 1
 #define VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME "VK_KHR_copy_commands2"
@@ -116,6 +124,8 @@
 #define VK_KHR_MAINTENANCE_3_SPEC_VERSION 1
 #define VK_KHR_MAP_MEMORY_2_EXTENSION_NAME "VK_KHR_map_memory2"
 #define VK_KHR_MAP_MEMORY_2_SPEC_VERSION 1
+#define VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME "VK_KHR_pipeline_library"
+#define VK_KHR_PIPELINE_LIBRARY_SPEC_VERSION 1
 #define VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME "VK_KHR_push_descriptor"
 #define VK_KHR_PUSH_DESCRIPTOR_SPEC_VERSION 2
 #define VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME "VK_KHR_sampler_ycbcr_conversion"
@@ -168,6 +178,7 @@ typedef struct VkRenderPass_T *VkRenderPass;
 typedef struct VkSampler_T *VkSampler;
 typedef struct VkSamplerYcbcrConversion_T *VkSamplerYcbcrConversion;
 typedef struct VkSemaphore_T *VkSemaphore;
+typedef struct VkShaderEXT_T *VkShaderEXT;
 typedef struct VkShaderModule_T *VkShaderModule;
 typedef struct VkSurfaceKHR_T *VkSurfaceKHR;
 typedef struct VkSwapchainKHR_T *VkSwapchainKHR;
@@ -284,6 +295,12 @@ typedef enum VkBlendOp {
     VK_BLEND_OP_SUBTRACT = 1,
     VK_BLEND_OP_MAX_ENUM = 0x7FFFFFFF
 } VkBlendOp;
+typedef enum VkBlendOverlapEXT {
+    VK_BLEND_OVERLAP_CONJOINT_EXT = 2,
+    VK_BLEND_OVERLAP_DISJOINT_EXT = 1,
+    VK_BLEND_OVERLAP_UNCORRELATED_EXT = 0,
+    VK_BLEND_OVERLAP_E_X_T_MAX_ENUM = 0x7FFFFFFF
+} VkBlendOverlapEXT;
 typedef enum VkBorderColor {
     VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK = 2,
     VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE = 4,
@@ -580,12 +597,18 @@ typedef enum VkDriverId {
     VK_DRIVER_ID_MAX_ENUM = 0x7FFFFFFF
 } VkDriverId;
 typedef enum VkDynamicState {
+    VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT = 1000455007,
+    VK_DYNAMIC_STATE_ALPHA_TO_ONE_ENABLE_EXT = 1000455008,
     VK_DYNAMIC_STATE_BLEND_CONSTANTS = 4,
+    VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT = 1000455010,
+    VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT = 1000455011,
+    VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT = 1000455012,
     VK_DYNAMIC_STATE_CULL_MODE = 1000267000,
     VK_DYNAMIC_STATE_DEPTH_BIAS = 3,
     VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE = 1000377002,
     VK_DYNAMIC_STATE_DEPTH_BOUNDS = 5,
     VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE = 1000267009,
+    VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT = 1000455003,
     VK_DYNAMIC_STATE_DEPTH_COMPARE_OP = 1000267008,
     VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE = 1000267006,
     VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE = 1000267007,
@@ -594,12 +617,17 @@ typedef enum VkDynamicState {
     VK_DYNAMIC_STATE_DISCARD_RECTANGLE_MODE_EXT = 1000099002,
     VK_DYNAMIC_STATE_FRONT_FACE = 1000267001,
     VK_DYNAMIC_STATE_LINE_WIDTH = 2,
+    VK_DYNAMIC_STATE_LOGIC_OP_ENABLE_EXT = 1000455009,
     VK_DYNAMIC_STATE_LOGIC_OP_EXT = 1000377003,
     VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT = 1000377000,
+    VK_DYNAMIC_STATE_POLYGON_MODE_EXT = 1000455004,
     VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE = 1000377004,
     VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY = 1000267002,
+    VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT = 1000455005,
     VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE = 1000377001,
+    VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_ENABLE_EXT = 1000455017,
     VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT = 1000143000,
+    VK_DYNAMIC_STATE_SAMPLE_MASK_EXT = 1000455006,
     VK_DYNAMIC_STATE_SCISSOR = 1,
     VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT = 1000267004,
     VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK = 6,
@@ -607,7 +635,9 @@ typedef enum VkDynamicState {
     VK_DYNAMIC_STATE_STENCIL_REFERENCE = 8,
     VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE = 1000267010,
     VK_DYNAMIC_STATE_STENCIL_WRITE_MASK = 7,
+    VK_DYNAMIC_STATE_TESSELLATION_DOMAIN_ORIGIN_EXT = 1000455002,
     VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE = 1000267005,
+    VK_DYNAMIC_STATE_VERTEX_INPUT_EXT = 1000352000,
     VK_DYNAMIC_STATE_VIEWPORT = 0,
     VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT = 1000267003,
     VK_DYNAMIC_STATE_CULL_MODE_EXT = VK_DYNAMIC_STATE_CULL_MODE,
@@ -1060,6 +1090,13 @@ typedef enum VkFrontFace {
     VK_FRONT_FACE_COUNTER_CLOCKWISE = 0,
     VK_FRONT_FACE_MAX_ENUM = 0x7FFFFFFF
 } VkFrontFace;
+typedef enum VkGraphicsPipelineLibraryFlagBitsEXT {
+    VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT = 0x00000008,
+    VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT = 0x00000004,
+    VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT = 0x00000002,
+    VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT = 0x00000001,
+    VK_GRAPHICS_PIPELINE_LIBRARY_FLAG_BITS_E_X_T_MAX_ENUM = 0x7FFFFFFF
+} VkGraphicsPipelineLibraryFlagBitsEXT;
 typedef enum VkImageAspectFlagBits {
     VK_IMAGE_ASPECT_COLOR_BIT = 0x00000001,
     VK_IMAGE_ASPECT_DEPTH_BIT = 0x00000002,
@@ -1245,6 +1282,7 @@ typedef enum VkObjectType {
     VK_OBJECT_TYPE_SAMPLER = 21,
     VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION = 1000156000,
     VK_OBJECT_TYPE_SEMAPHORE = 5,
+    VK_OBJECT_TYPE_SHADER_EXT = 1000482000,
     VK_OBJECT_TYPE_SHADER_MODULE = 15,
     VK_OBJECT_TYPE_SURFACE_KHR = 1000000000,
     VK_OBJECT_TYPE_SWAPCHAIN_KHR = 1000001000,
@@ -1291,6 +1329,9 @@ typedef enum VkPipelineCreateFlagBits {
     VK_PIPELINE_CREATE_DISPATCH_BASE_BIT = 0x00000010,
     VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT = 0x00000200,
     VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT = 0x00000100,
+    VK_PIPELINE_CREATE_LIBRARY_BIT_KHR = 0x00000800,
+    VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT = 0x00000400,
+    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT = 0x00800000,
     VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT = 0x00000008,
     VK_PIPELINE_CREATE_DISPATCH_BASE = VK_PIPELINE_CREATE_DISPATCH_BASE_BIT,
     VK_PIPELINE_CREATE_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
@@ -1305,6 +1346,7 @@ typedef enum VkPipelineDepthStencilStateCreateFlagBits {
     VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
 } VkPipelineDepthStencilStateCreateFlagBits;
 typedef enum VkPipelineLayoutCreateFlagBits {
+    VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT = 0x00000002,
     VK_PIPELINE_LAYOUT_CREATE_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
 } VkPipelineLayoutCreateFlagBits;
 typedef enum VkPipelineShaderStageCreateFlagBits {
@@ -1515,12 +1557,14 @@ typedef enum VkResult {
     VK_ERROR_VALIDATION_FAILED = -1000011001,
     VK_EVENT_RESET = 4,
     VK_EVENT_SET = 3,
+    VK_INCOMPATIBLE_SHADER_BINARY_EXT = 1000482000,
     VK_INCOMPLETE = 5,
     VK_NOT_READY = 1,
     VK_PIPELINE_COMPILE_REQUIRED = 1000297000,
     VK_SUBOPTIMAL_KHR = 1000001003,
     VK_SUCCESS = 0,
     VK_TIMEOUT = 2,
+    VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT = VK_INCOMPATIBLE_SHADER_BINARY_EXT,
     VK_ERROR_OUT_OF_POOL_MEMORY_KHR = VK_ERROR_OUT_OF_POOL_MEMORY,
     VK_ERROR_VALIDATION_FAILED_EXT = VK_ERROR_VALIDATION_FAILED,
     VK_RESULT_MAX_ENUM = 0x7FFFFFFF
@@ -1593,6 +1637,18 @@ typedef enum VkSemaphoreWaitFlagBits {
     VK_SEMAPHORE_WAIT_ANY_BIT_KHR = VK_SEMAPHORE_WAIT_ANY_BIT,
     VK_SEMAPHORE_WAIT_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
 } VkSemaphoreWaitFlagBits;
+typedef enum VkShaderCodeTypeEXT {
+    VK_SHADER_CODE_TYPE_BINARY_EXT = 0,
+    VK_SHADER_CODE_TYPE_SPIRV_EXT = 1,
+    VK_SHADER_CODE_TYPE_E_X_T_MAX_ENUM = 0x7FFFFFFF
+} VkShaderCodeTypeEXT;
+typedef enum VkShaderCreateFlagBitsEXT {
+    VK_SHADER_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT = 0x00000002,
+    VK_SHADER_CREATE_DISPATCH_BASE_BIT_EXT = 0x00000010,
+    VK_SHADER_CREATE_LINK_STAGE_BIT_EXT = 0x00000001,
+    VK_SHADER_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT = 0x00000004,
+    VK_SHADER_CREATE_FLAG_BITS_E_X_T_MAX_ENUM = 0x7FFFFFFF
+} VkShaderCreateFlagBitsEXT;
 typedef enum VkShaderFloatControlsIndependence {
     VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_32_BIT_ONLY = 0,
     VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL = 1,
@@ -1734,6 +1790,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO = 1000108002,
     VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO = 37,
     VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO = 28,
+    VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT = 1000320002,
     VK_STRUCTURE_TYPE_HDR_METADATA_EXT = 1000105000,
     VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT = 1000256000,
     VK_STRUCTURE_TYPE_IMAGE_BLIT_2 = 1000337008,
@@ -1780,6 +1837,8 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES = 1000196000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES = 1000044003,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT = 1000377000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT = 1000455000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT = 1000455001,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT = 1000267000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO = 1000071002,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FENCE_INFO = 1000112000,
@@ -1789,6 +1848,8 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT = 1000341000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 = 1000059000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES = 1000197000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT = 1000320000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT = 1000320001,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES = 1000070000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES = 1000261000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES = 1000071004,
@@ -1823,6 +1884,8 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES = 1000082000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES = 1000280000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES = 1000280001,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT = 1000482000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_PROPERTIES_EXT = 1000482001,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES = 1000175000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES = 1000215000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SPARSE_IMAGE_FORMAT_INFO_2 = 1000059008,
@@ -1838,6 +1901,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES = 1000245000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES = 1000253000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES = 1000120000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT = 1000352000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES = 49,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES = 50,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES = 51,
@@ -1854,6 +1918,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO = 27,
     VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO = 20,
     VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO = 30,
+    VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR = 1000290000,
     VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO = 24,
     VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO = 23,
     VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO = 1000044002,
@@ -1890,6 +1955,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO = 1000314005,
     VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO = 1000207002,
     VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO = 1000207004,
+    VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT = 1000482002,
     VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO = 16,
     VK_STRUCTURE_TYPE_SPARSE_IMAGE_FORMAT_PROPERTIES_2 = 1000059007,
     VK_STRUCTURE_TYPE_SPARSE_IMAGE_MEMORY_REQUIREMENTS_2 = 1000146004,
@@ -1904,6 +1970,8 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR = 1000119002,
     VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR = 1000001000,
     VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO = 1000207003,
+    VK_STRUCTURE_TYPE_VERTEX_INPUT_ATTRIBUTE_DESCRIPTION_2_EXT = 1000352002,
+    VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT = 1000352001,
     VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN = 1000062000,
     VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET = 35,
     VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK = 1000138002,
@@ -1985,6 +2053,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO_KHR = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
     VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO_KHR = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
     VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO_KHR = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+    VK_STRUCTURE_TYPE_SHADER_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO,
     VK_STRUCTURE_TYPE_SPARSE_IMAGE_FORMAT_PROPERTIES_2_KHR = VK_STRUCTURE_TYPE_SPARSE_IMAGE_FORMAT_PROPERTIES_2,
     VK_STRUCTURE_TYPE_SPARSE_IMAGE_MEMORY_REQUIREMENTS_2_KHR = VK_STRUCTURE_TYPE_SPARSE_IMAGE_MEMORY_REQUIREMENTS_2,
     VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
@@ -2118,6 +2187,7 @@ typedef VkFlags VkFenceImportFlags;
 typedef VkFlags VkFormatFeatureFlags;
 typedef VkFlags64 VkFormatFeatureFlags2;
 typedef VkFlags VkFramebufferCreateFlags;
+typedef VkFlags VkGraphicsPipelineLibraryFlagsEXT;
 typedef VkFlags VkHeadlessSurfaceCreateFlagsEXT;
 typedef VkFlags VkImageAspectFlags;
 typedef VkFlags VkImageCreateFlags;
@@ -2161,6 +2231,7 @@ typedef VkFlags VkSamplerCreateFlags;
 typedef VkFlags VkSemaphoreCreateFlags;
 typedef VkFlags VkSemaphoreImportFlags;
 typedef VkFlags VkSemaphoreWaitFlags;
+typedef VkFlags VkShaderCreateFlagsEXT;
 typedef VkFlags VkShaderModuleCreateFlags;
 typedef VkFlags VkShaderStageFlags;
 typedef VkFlags VkSparseImageFormatFlags;
@@ -2209,6 +2280,8 @@ typedef union VkClearColorValue VkClearColorValue;
 typedef struct VkClearDepthStencilValue VkClearDepthStencilValue;
 typedef struct VkClearRect VkClearRect;
 typedef union VkClearValue VkClearValue;
+typedef struct VkColorBlendAdvancedEXT VkColorBlendAdvancedEXT;
+typedef struct VkColorBlendEquationEXT VkColorBlendEquationEXT;
 typedef struct VkCommandBufferAllocateInfo VkCommandBufferAllocateInfo;
 typedef struct VkCommandBufferBeginInfo VkCommandBufferBeginInfo;
 typedef struct VkCommandBufferInheritanceInfo VkCommandBufferInheritanceInfo;
@@ -2294,6 +2367,7 @@ typedef struct VkFramebufferAttachmentImageInfo VkFramebufferAttachmentImageInfo
 typedef struct VkFramebufferAttachmentsCreateInfo VkFramebufferAttachmentsCreateInfo;
 typedef struct VkFramebufferCreateInfo VkFramebufferCreateInfo;
 typedef struct VkGraphicsPipelineCreateInfo VkGraphicsPipelineCreateInfo;
+typedef struct VkGraphicsPipelineLibraryCreateInfoEXT VkGraphicsPipelineLibraryCreateInfoEXT;
 typedef struct VkHdrMetadataEXT VkHdrMetadataEXT;
 typedef struct VkHeadlessSurfaceCreateInfoEXT VkHeadlessSurfaceCreateInfoEXT;
 typedef struct VkImageBlit VkImageBlit;
@@ -2352,6 +2426,8 @@ typedef struct VkPhysicalDeviceDiscardRectanglePropertiesEXT VkPhysicalDeviceDis
 typedef struct VkPhysicalDeviceDriverProperties VkPhysicalDeviceDriverProperties;
 typedef struct VkPhysicalDeviceDynamicRenderingFeatures VkPhysicalDeviceDynamicRenderingFeatures;
 typedef struct VkPhysicalDeviceExtendedDynamicState2FeaturesEXT VkPhysicalDeviceExtendedDynamicState2FeaturesEXT;
+typedef struct VkPhysicalDeviceExtendedDynamicState3FeaturesEXT VkPhysicalDeviceExtendedDynamicState3FeaturesEXT;
+typedef struct VkPhysicalDeviceExtendedDynamicState3PropertiesEXT VkPhysicalDeviceExtendedDynamicState3PropertiesEXT;
 typedef struct VkPhysicalDeviceExtendedDynamicStateFeaturesEXT VkPhysicalDeviceExtendedDynamicStateFeaturesEXT;
 typedef struct VkPhysicalDeviceExternalBufferInfo VkPhysicalDeviceExternalBufferInfo;
 typedef struct VkPhysicalDeviceExternalFenceInfo VkPhysicalDeviceExternalFenceInfo;
@@ -2362,6 +2438,8 @@ typedef struct VkPhysicalDeviceFaultFeaturesEXT VkPhysicalDeviceFaultFeaturesEXT
 typedef struct VkPhysicalDeviceFeatures VkPhysicalDeviceFeatures;
 typedef struct VkPhysicalDeviceFeatures2 VkPhysicalDeviceFeatures2;
 typedef struct VkPhysicalDeviceFloatControlsProperties VkPhysicalDeviceFloatControlsProperties;
+typedef struct VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
+typedef struct VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
 typedef struct VkPhysicalDeviceGroupProperties VkPhysicalDeviceGroupProperties;
 typedef struct VkPhysicalDeviceHostQueryResetFeatures VkPhysicalDeviceHostQueryResetFeatures;
 typedef struct VkPhysicalDeviceIDProperties VkPhysicalDeviceIDProperties;
@@ -2399,6 +2477,8 @@ typedef struct VkPhysicalDeviceShaderDrawParametersFeatures VkPhysicalDeviceShad
 typedef struct VkPhysicalDeviceShaderFloat16Int8Features VkPhysicalDeviceShaderFloat16Int8Features;
 typedef struct VkPhysicalDeviceShaderIntegerDotProductFeatures VkPhysicalDeviceShaderIntegerDotProductFeatures;
 typedef struct VkPhysicalDeviceShaderIntegerDotProductProperties VkPhysicalDeviceShaderIntegerDotProductProperties;
+typedef struct VkPhysicalDeviceShaderObjectFeaturesEXT VkPhysicalDeviceShaderObjectFeaturesEXT;
+typedef struct VkPhysicalDeviceShaderObjectPropertiesEXT VkPhysicalDeviceShaderObjectPropertiesEXT;
 typedef struct VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures;
 typedef struct VkPhysicalDeviceShaderTerminateInvocationFeatures VkPhysicalDeviceShaderTerminateInvocationFeatures;
 typedef struct VkPhysicalDeviceSparseImageFormatInfo2 VkPhysicalDeviceSparseImageFormatInfo2;
@@ -2415,6 +2495,7 @@ typedef struct VkPhysicalDeviceTimelineSemaphoreProperties VkPhysicalDeviceTimel
 typedef struct VkPhysicalDeviceToolProperties VkPhysicalDeviceToolProperties;
 typedef struct VkPhysicalDeviceUniformBufferStandardLayoutFeatures VkPhysicalDeviceUniformBufferStandardLayoutFeatures;
 typedef struct VkPhysicalDeviceVariablePointersFeatures VkPhysicalDeviceVariablePointersFeatures;
+typedef struct VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT;
 typedef struct VkPhysicalDeviceVulkan11Features VkPhysicalDeviceVulkan11Features;
 typedef struct VkPhysicalDeviceVulkan11Properties VkPhysicalDeviceVulkan11Properties;
 typedef struct VkPhysicalDeviceVulkan12Features VkPhysicalDeviceVulkan12Features;
@@ -2434,6 +2515,7 @@ typedef struct VkPipelineDiscardRectangleStateCreateInfoEXT VkPipelineDiscardRec
 typedef struct VkPipelineDynamicStateCreateInfo VkPipelineDynamicStateCreateInfo;
 typedef struct VkPipelineInputAssemblyStateCreateInfo VkPipelineInputAssemblyStateCreateInfo;
 typedef struct VkPipelineLayoutCreateInfo VkPipelineLayoutCreateInfo;
+typedef struct VkPipelineLibraryCreateInfoKHR VkPipelineLibraryCreateInfoKHR;
 typedef struct VkPipelineMultisampleStateCreateInfo VkPipelineMultisampleStateCreateInfo;
 typedef struct VkPipelineRasterizationStateCreateInfo VkPipelineRasterizationStateCreateInfo;
 typedef struct VkPipelineRenderingCreateInfo VkPipelineRenderingCreateInfo;
@@ -2474,6 +2556,7 @@ typedef struct VkSemaphoreSignalInfo VkSemaphoreSignalInfo;
 typedef struct VkSemaphoreSubmitInfo VkSemaphoreSubmitInfo;
 typedef struct VkSemaphoreTypeCreateInfo VkSemaphoreTypeCreateInfo;
 typedef struct VkSemaphoreWaitInfo VkSemaphoreWaitInfo;
+typedef struct VkShaderCreateInfoEXT VkShaderCreateInfoEXT;
 typedef struct VkShaderModuleCreateInfo VkShaderModuleCreateInfo;
 typedef struct VkSparseBufferMemoryBindInfo VkSparseBufferMemoryBindInfo;
 typedef struct VkSparseImageFormatProperties VkSparseImageFormatProperties;
@@ -2505,7 +2588,9 @@ typedef struct VkSurfaceFormatKHR VkSurfaceFormatKHR;
 typedef struct VkSwapchainCreateInfoKHR VkSwapchainCreateInfoKHR;
 typedef struct VkTimelineSemaphoreSubmitInfo VkTimelineSemaphoreSubmitInfo;
 typedef struct VkVertexInputAttributeDescription VkVertexInputAttributeDescription;
+typedef struct VkVertexInputAttributeDescription2EXT VkVertexInputAttributeDescription2EXT;
 typedef struct VkVertexInputBindingDescription VkVertexInputBindingDescription;
+typedef struct VkVertexInputBindingDescription2EXT VkVertexInputBindingDescription2EXT;
 typedef struct VkViSurfaceCreateInfoNN VkViSurfaceCreateInfoNN;
 typedef struct VkViewport VkViewport;
 typedef struct VkWriteDescriptorSet VkWriteDescriptorSet;
@@ -2639,6 +2724,7 @@ typedef VkSemaphoreType VkSemaphoreTypeKHR;
 typedef VkSemaphoreWaitFlagBits VkSemaphoreWaitFlagBitsKHR;
 typedef VkSemaphoreWaitFlags VkSemaphoreWaitFlagsKHR;
 typedef VkSemaphoreWaitInfo VkSemaphoreWaitInfoKHR;
+typedef VkPipelineShaderStageRequiredSubgroupSizeCreateInfo VkShaderRequiredSubgroupSizeCreateInfoEXT;
 typedef VkSparseImageFormatProperties2 VkSparseImageFormatProperties2KHR;
 typedef VkSparseImageMemoryRequirements2 VkSparseImageMemoryRequirements2KHR;
 typedef VkSubmitFlagBits VkSubmitFlagBitsKHR;
@@ -2988,6 +3074,23 @@ struct VkClearRect {
     VkRect2D rect;
     uint32_t baseArrayLayer;
     uint32_t layerCount;
+};
+
+struct VkColorBlendAdvancedEXT {
+    VkBlendOp advancedBlendOp;
+    VkBool32 srcPremultiplied;
+    VkBool32 dstPremultiplied;
+    VkBlendOverlapEXT blendOverlap;
+    VkBool32 clampResults;
+};
+
+struct VkColorBlendEquationEXT {
+    VkBlendFactor srcColorBlendFactor;
+    VkBlendFactor dstColorBlendFactor;
+    VkBlendOp colorBlendOp;
+    VkBlendFactor srcAlphaBlendFactor;
+    VkBlendFactor dstAlphaBlendFactor;
+    VkBlendOp alphaBlendOp;
 };
 
 struct VkCommandBufferAllocateInfo {
@@ -3675,6 +3778,12 @@ struct VkGraphicsPipelineCreateInfo {
     int32_t basePipelineIndex;
 };
 
+struct VkGraphicsPipelineLibraryCreateInfoEXT {
+    VkStructureType sType;
+    const void* pNext;
+    VkGraphicsPipelineLibraryFlagsEXT flags;
+};
+
 struct VkXYColorEXT {
     float x;
     float y;
@@ -4149,6 +4258,48 @@ struct VkPhysicalDeviceExtendedDynamicState2FeaturesEXT {
     VkBool32 extendedDynamicState2PatchControlPoints;
 };
 
+struct VkPhysicalDeviceExtendedDynamicState3FeaturesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 extendedDynamicState3TessellationDomainOrigin;
+    VkBool32 extendedDynamicState3DepthClampEnable;
+    VkBool32 extendedDynamicState3PolygonMode;
+    VkBool32 extendedDynamicState3RasterizationSamples;
+    VkBool32 extendedDynamicState3SampleMask;
+    VkBool32 extendedDynamicState3AlphaToCoverageEnable;
+    VkBool32 extendedDynamicState3AlphaToOneEnable;
+    VkBool32 extendedDynamicState3LogicOpEnable;
+    VkBool32 extendedDynamicState3ColorBlendEnable;
+    VkBool32 extendedDynamicState3ColorBlendEquation;
+    VkBool32 extendedDynamicState3ColorWriteMask;
+    VkBool32 extendedDynamicState3RasterizationStream;
+    VkBool32 extendedDynamicState3ConservativeRasterizationMode;
+    VkBool32 extendedDynamicState3ExtraPrimitiveOverestimationSize;
+    VkBool32 extendedDynamicState3DepthClipEnable;
+    VkBool32 extendedDynamicState3SampleLocationsEnable;
+    VkBool32 extendedDynamicState3ColorBlendAdvanced;
+    VkBool32 extendedDynamicState3ProvokingVertexMode;
+    VkBool32 extendedDynamicState3LineRasterizationMode;
+    VkBool32 extendedDynamicState3LineStippleEnable;
+    VkBool32 extendedDynamicState3DepthClipNegativeOneToOne;
+    VkBool32 extendedDynamicState3ViewportWScalingEnable;
+    VkBool32 extendedDynamicState3ViewportSwizzle;
+    VkBool32 extendedDynamicState3CoverageToColorEnable;
+    VkBool32 extendedDynamicState3CoverageToColorLocation;
+    VkBool32 extendedDynamicState3CoverageModulationMode;
+    VkBool32 extendedDynamicState3CoverageModulationTableEnable;
+    VkBool32 extendedDynamicState3CoverageModulationTable;
+    VkBool32 extendedDynamicState3CoverageReductionMode;
+    VkBool32 extendedDynamicState3RepresentativeFragmentTestEnable;
+    VkBool32 extendedDynamicState3ShadingRateImageEnable;
+};
+
+struct VkPhysicalDeviceExtendedDynamicState3PropertiesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 dynamicPrimitiveTopologyUnrestricted;
+};
+
 struct VkPhysicalDeviceExtendedDynamicStateFeaturesEXT {
     VkStructureType sType;
     void* pNext;
@@ -4278,6 +4429,19 @@ struct VkPhysicalDeviceFloatControlsProperties {
     VkBool32 shaderRoundingModeRTZFloat16;
     VkBool32 shaderRoundingModeRTZFloat32;
     VkBool32 shaderRoundingModeRTZFloat64;
+};
+
+struct VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 graphicsPipelineLibrary;
+};
+
+struct VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 graphicsPipelineLibraryFastLinking;
+    VkBool32 graphicsPipelineLibraryIndependentInterpolationDecoration;
 };
 
 struct VkPhysicalDeviceGroupProperties {
@@ -4677,6 +4841,19 @@ struct VkPhysicalDeviceShaderIntegerDotProductProperties {
     VkBool32 integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated;
 };
 
+struct VkPhysicalDeviceShaderObjectFeaturesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 shaderObject;
+};
+
+struct VkPhysicalDeviceShaderObjectPropertiesEXT {
+    VkStructureType sType;
+    void* pNext;
+    uint8_t shaderBinaryUUID[VK_UUID_SIZE];
+    uint32_t shaderBinaryVersion;
+};
+
 struct VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures {
     VkStructureType sType;
     void* pNext;
@@ -4784,6 +4961,12 @@ struct VkPhysicalDeviceVariablePointersFeatures {
     void* pNext;
     VkBool32 variablePointersStorageBuffer;
     VkBool32 variablePointers;
+};
+
+struct VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 vertexInputDynamicState;
 };
 
 struct VkPhysicalDeviceVulkan11Features {
@@ -5127,6 +5310,13 @@ struct VkPipelineLayoutCreateInfo {
     const VkPushConstantRange* pPushConstantRanges;
 };
 
+struct VkPipelineLibraryCreateInfoKHR {
+    VkStructureType sType;
+    const void* pNext;
+    uint32_t libraryCount;
+    const VkPipeline* pLibraries;
+};
+
 struct VkPipelineMultisampleStateCreateInfo {
     VkStructureType sType;
     const void* pNext;
@@ -5464,6 +5654,23 @@ struct VkSemaphoreWaitInfo {
     const uint64_t* pValues;
 };
 
+struct VkShaderCreateInfoEXT {
+    VkStructureType sType;
+    const void* pNext;
+    VkShaderCreateFlagsEXT flags;
+    VkShaderStageFlagBits stage;
+    VkShaderStageFlags nextStage;
+    VkShaderCodeTypeEXT codeType;
+    size_t codeSize;
+    const void* pCode;
+    const char* pName;
+    uint32_t setLayoutCount;
+    const VkDescriptorSetLayout* pSetLayouts;
+    uint32_t pushConstantRangeCount;
+    const VkPushConstantRange* pPushConstantRanges;
+    const VkSpecializationInfo* pSpecializationInfo;
+};
+
 struct VkShaderModuleCreateInfo {
     VkStructureType sType;
     const void* pNext;
@@ -5721,10 +5928,28 @@ struct VkVertexInputAttributeDescription {
     uint32_t offset;
 };
 
+struct VkVertexInputAttributeDescription2EXT {
+    VkStructureType sType;
+    void* pNext;
+    uint32_t location;
+    uint32_t binding;
+    VkFormat format;
+    uint32_t offset;
+};
+
 struct VkVertexInputBindingDescription {
     uint32_t binding;
     uint32_t stride;
     VkVertexInputRate inputRate;
+};
+
+struct VkVertexInputBindingDescription2EXT {
+    VkStructureType sType;
+    void* pNext;
+    uint32_t binding;
+    uint32_t stride;
+    VkVertexInputRate inputRate;
+    uint32_t divisor;
 };
 
 struct VkViSurfaceCreateInfoNN {
@@ -5986,6 +6211,19 @@ _Static_assert(offsetof(VkClearRect, layerCount) == 20, "VkClearRect.layerCount 
 _Static_assert(sizeof(VkClearValue) == 16 && _Alignof(VkClearValue) == 4, "VkClearValue guest layout");
 _Static_assert(offsetof(VkClearValue, color) == 0, "VkClearValue.color guest offset");
 _Static_assert(offsetof(VkClearValue, depthStencil) == 0, "VkClearValue.depthStencil guest offset");
+_Static_assert(sizeof(VkColorBlendAdvancedEXT) == 20 && _Alignof(VkColorBlendAdvancedEXT) == 4, "VkColorBlendAdvancedEXT guest layout");
+_Static_assert(offsetof(VkColorBlendAdvancedEXT, advancedBlendOp) == 0, "VkColorBlendAdvancedEXT.advancedBlendOp guest offset");
+_Static_assert(offsetof(VkColorBlendAdvancedEXT, srcPremultiplied) == 4, "VkColorBlendAdvancedEXT.srcPremultiplied guest offset");
+_Static_assert(offsetof(VkColorBlendAdvancedEXT, dstPremultiplied) == 8, "VkColorBlendAdvancedEXT.dstPremultiplied guest offset");
+_Static_assert(offsetof(VkColorBlendAdvancedEXT, blendOverlap) == 12, "VkColorBlendAdvancedEXT.blendOverlap guest offset");
+_Static_assert(offsetof(VkColorBlendAdvancedEXT, clampResults) == 16, "VkColorBlendAdvancedEXT.clampResults guest offset");
+_Static_assert(sizeof(VkColorBlendEquationEXT) == 24 && _Alignof(VkColorBlendEquationEXT) == 4, "VkColorBlendEquationEXT guest layout");
+_Static_assert(offsetof(VkColorBlendEquationEXT, srcColorBlendFactor) == 0, "VkColorBlendEquationEXT.srcColorBlendFactor guest offset");
+_Static_assert(offsetof(VkColorBlendEquationEXT, dstColorBlendFactor) == 4, "VkColorBlendEquationEXT.dstColorBlendFactor guest offset");
+_Static_assert(offsetof(VkColorBlendEquationEXT, colorBlendOp) == 8, "VkColorBlendEquationEXT.colorBlendOp guest offset");
+_Static_assert(offsetof(VkColorBlendEquationEXT, srcAlphaBlendFactor) == 12, "VkColorBlendEquationEXT.srcAlphaBlendFactor guest offset");
+_Static_assert(offsetof(VkColorBlendEquationEXT, dstAlphaBlendFactor) == 16, "VkColorBlendEquationEXT.dstAlphaBlendFactor guest offset");
+_Static_assert(offsetof(VkColorBlendEquationEXT, alphaBlendOp) == 20, "VkColorBlendEquationEXT.alphaBlendOp guest offset");
 _Static_assert(sizeof(VkCommandBufferAllocateInfo) == 32 && _Alignof(VkCommandBufferAllocateInfo) == 8, "VkCommandBufferAllocateInfo guest layout");
 _Static_assert(offsetof(VkCommandBufferAllocateInfo, sType) == 0, "VkCommandBufferAllocateInfo.sType guest offset");
 _Static_assert(offsetof(VkCommandBufferAllocateInfo, pNext) == 8, "VkCommandBufferAllocateInfo.pNext guest offset");
@@ -6502,6 +6740,10 @@ _Static_assert(offsetof(VkGraphicsPipelineCreateInfo, renderPass) == 112, "VkGra
 _Static_assert(offsetof(VkGraphicsPipelineCreateInfo, subpass) == 120, "VkGraphicsPipelineCreateInfo.subpass guest offset");
 _Static_assert(offsetof(VkGraphicsPipelineCreateInfo, basePipelineHandle) == 128, "VkGraphicsPipelineCreateInfo.basePipelineHandle guest offset");
 _Static_assert(offsetof(VkGraphicsPipelineCreateInfo, basePipelineIndex) == 136, "VkGraphicsPipelineCreateInfo.basePipelineIndex guest offset");
+_Static_assert(sizeof(VkGraphicsPipelineLibraryCreateInfoEXT) == 24 && _Alignof(VkGraphicsPipelineLibraryCreateInfoEXT) == 8, "VkGraphicsPipelineLibraryCreateInfoEXT guest layout");
+_Static_assert(offsetof(VkGraphicsPipelineLibraryCreateInfoEXT, sType) == 0, "VkGraphicsPipelineLibraryCreateInfoEXT.sType guest offset");
+_Static_assert(offsetof(VkGraphicsPipelineLibraryCreateInfoEXT, pNext) == 8, "VkGraphicsPipelineLibraryCreateInfoEXT.pNext guest offset");
+_Static_assert(offsetof(VkGraphicsPipelineLibraryCreateInfoEXT, flags) == 16, "VkGraphicsPipelineLibraryCreateInfoEXT.flags guest offset");
 _Static_assert(sizeof(VkHdrMetadataEXT) == 64 && _Alignof(VkHdrMetadataEXT) == 8, "VkHdrMetadataEXT guest layout");
 _Static_assert(offsetof(VkHdrMetadataEXT, sType) == 0, "VkHdrMetadataEXT.sType guest offset");
 _Static_assert(offsetof(VkHdrMetadataEXT, pNext) == 8, "VkHdrMetadataEXT.pNext guest offset");
@@ -6873,6 +7115,44 @@ _Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT, pNext)
 _Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT, extendedDynamicState2) == 16, "VkPhysicalDeviceExtendedDynamicState2FeaturesEXT.extendedDynamicState2 guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT, extendedDynamicState2LogicOp) == 20, "VkPhysicalDeviceExtendedDynamicState2FeaturesEXT.extendedDynamicState2LogicOp guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT, extendedDynamicState2PatchControlPoints) == 24, "VkPhysicalDeviceExtendedDynamicState2FeaturesEXT.extendedDynamicState2PatchControlPoints guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT) == 144 && _Alignof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT) == 8, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, sType) == 0, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, pNext) == 8, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3TessellationDomainOrigin) == 16, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3TessellationDomainOrigin guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3DepthClampEnable) == 20, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3DepthClampEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3PolygonMode) == 24, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3PolygonMode guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3RasterizationSamples) == 28, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3RasterizationSamples guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3SampleMask) == 32, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3SampleMask guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3AlphaToCoverageEnable) == 36, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3AlphaToCoverageEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3AlphaToOneEnable) == 40, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3AlphaToOneEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3LogicOpEnable) == 44, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3LogicOpEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ColorBlendEnable) == 48, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ColorBlendEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ColorBlendEquation) == 52, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ColorBlendEquation guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ColorWriteMask) == 56, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ColorWriteMask guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3RasterizationStream) == 60, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3RasterizationStream guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ConservativeRasterizationMode) == 64, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ConservativeRasterizationMode guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ExtraPrimitiveOverestimationSize) == 68, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ExtraPrimitiveOverestimationSize guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3DepthClipEnable) == 72, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3DepthClipEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3SampleLocationsEnable) == 76, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3SampleLocationsEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ColorBlendAdvanced) == 80, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ColorBlendAdvanced guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ProvokingVertexMode) == 84, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ProvokingVertexMode guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3LineRasterizationMode) == 88, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3LineRasterizationMode guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3LineStippleEnable) == 92, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3LineStippleEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3DepthClipNegativeOneToOne) == 96, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3DepthClipNegativeOneToOne guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ViewportWScalingEnable) == 100, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ViewportWScalingEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ViewportSwizzle) == 104, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ViewportSwizzle guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3CoverageToColorEnable) == 108, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3CoverageToColorEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3CoverageToColorLocation) == 112, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3CoverageToColorLocation guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3CoverageModulationMode) == 116, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3CoverageModulationMode guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3CoverageModulationTableEnable) == 120, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3CoverageModulationTableEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3CoverageModulationTable) == 124, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3CoverageModulationTable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3CoverageReductionMode) == 128, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3CoverageReductionMode guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3RepresentativeFragmentTestEnable) == 132, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3RepresentativeFragmentTestEnable guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT, extendedDynamicState3ShadingRateImageEnable) == 136, "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ShadingRateImageEnable guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceExtendedDynamicState3PropertiesEXT) == 24 && _Alignof(VkPhysicalDeviceExtendedDynamicState3PropertiesEXT) == 8, "VkPhysicalDeviceExtendedDynamicState3PropertiesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3PropertiesEXT, sType) == 0, "VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3PropertiesEXT, pNext) == 8, "VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicState3PropertiesEXT, dynamicPrimitiveTopologyUnrestricted) == 16, "VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.dynamicPrimitiveTopologyUnrestricted guest offset");
 _Static_assert(sizeof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT) == 24 && _Alignof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT) == 8, "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT guest layout");
 _Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT, sType) == 0, "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT.sType guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT, pNext) == 8, "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT.pNext guest offset");
@@ -6984,6 +7264,15 @@ _Static_assert(offsetof(VkPhysicalDeviceFloatControlsProperties, shaderRoundingM
 _Static_assert(offsetof(VkPhysicalDeviceFloatControlsProperties, shaderRoundingModeRTZFloat16) == 72, "VkPhysicalDeviceFloatControlsProperties.shaderRoundingModeRTZFloat16 guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceFloatControlsProperties, shaderRoundingModeRTZFloat32) == 76, "VkPhysicalDeviceFloatControlsProperties.shaderRoundingModeRTZFloat32 guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceFloatControlsProperties, shaderRoundingModeRTZFloat64) == 80, "VkPhysicalDeviceFloatControlsProperties.shaderRoundingModeRTZFloat64 guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT) == 24 && _Alignof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT) == 8, "VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT, sType) == 0, "VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT, pNext) == 8, "VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT, graphicsPipelineLibrary) == 16, "VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT.graphicsPipelineLibrary guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT) == 24 && _Alignof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT) == 8, "VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT, sType) == 0, "VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT, pNext) == 8, "VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT, graphicsPipelineLibraryFastLinking) == 16, "VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT.graphicsPipelineLibraryFastLinking guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT, graphicsPipelineLibraryIndependentInterpolationDecoration) == 20, "VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT.graphicsPipelineLibraryIndependentInterpolationDecoration guest offset");
 _Static_assert(sizeof(VkPhysicalDeviceGroupProperties) == 288 && _Alignof(VkPhysicalDeviceGroupProperties) == 8, "VkPhysicalDeviceGroupProperties guest layout");
 _Static_assert(offsetof(VkPhysicalDeviceGroupProperties, sType) == 0, "VkPhysicalDeviceGroupProperties.sType guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceGroupProperties, pNext) == 8, "VkPhysicalDeviceGroupProperties.pNext guest offset");
@@ -7299,6 +7588,15 @@ _Static_assert(offsetof(VkPhysicalDeviceShaderIntegerDotProductProperties, integ
 _Static_assert(offsetof(VkPhysicalDeviceShaderIntegerDotProductProperties, integerDotProductAccumulatingSaturating64BitUnsignedAccelerated) == 124, "VkPhysicalDeviceShaderIntegerDotProductProperties.integerDotProductAccumulatingSaturating64BitUnsignedAccelerated guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceShaderIntegerDotProductProperties, integerDotProductAccumulatingSaturating64BitSignedAccelerated) == 128, "VkPhysicalDeviceShaderIntegerDotProductProperties.integerDotProductAccumulatingSaturating64BitSignedAccelerated guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceShaderIntegerDotProductProperties, integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated) == 132, "VkPhysicalDeviceShaderIntegerDotProductProperties.integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceShaderObjectFeaturesEXT) == 24 && _Alignof(VkPhysicalDeviceShaderObjectFeaturesEXT) == 8, "VkPhysicalDeviceShaderObjectFeaturesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectFeaturesEXT, sType) == 0, "VkPhysicalDeviceShaderObjectFeaturesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectFeaturesEXT, pNext) == 8, "VkPhysicalDeviceShaderObjectFeaturesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectFeaturesEXT, shaderObject) == 16, "VkPhysicalDeviceShaderObjectFeaturesEXT.shaderObject guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceShaderObjectPropertiesEXT) == 40 && _Alignof(VkPhysicalDeviceShaderObjectPropertiesEXT) == 8, "VkPhysicalDeviceShaderObjectPropertiesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectPropertiesEXT, sType) == 0, "VkPhysicalDeviceShaderObjectPropertiesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectPropertiesEXT, pNext) == 8, "VkPhysicalDeviceShaderObjectPropertiesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectPropertiesEXT, shaderBinaryUUID) == 16, "VkPhysicalDeviceShaderObjectPropertiesEXT.shaderBinaryUUID guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceShaderObjectPropertiesEXT, shaderBinaryVersion) == 32, "VkPhysicalDeviceShaderObjectPropertiesEXT.shaderBinaryVersion guest offset");
 _Static_assert(sizeof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures) == 24 && _Alignof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures) == 8, "VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures guest layout");
 _Static_assert(offsetof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures, sType) == 0, "VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures.sType guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures, pNext) == 8, "VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures.pNext guest offset");
@@ -7384,6 +7682,10 @@ _Static_assert(offsetof(VkPhysicalDeviceVariablePointersFeatures, sType) == 0, "
 _Static_assert(offsetof(VkPhysicalDeviceVariablePointersFeatures, pNext) == 8, "VkPhysicalDeviceVariablePointersFeatures.pNext guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceVariablePointersFeatures, variablePointersStorageBuffer) == 16, "VkPhysicalDeviceVariablePointersFeatures.variablePointersStorageBuffer guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceVariablePointersFeatures, variablePointers) == 20, "VkPhysicalDeviceVariablePointersFeatures.variablePointers guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT) == 24 && _Alignof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT) == 8, "VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT, sType) == 0, "VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT, pNext) == 8, "VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT, vertexInputDynamicState) == 16, "VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT.vertexInputDynamicState guest offset");
 _Static_assert(sizeof(VkPhysicalDeviceVulkan11Features) == 64 && _Alignof(VkPhysicalDeviceVulkan11Features) == 8, "VkPhysicalDeviceVulkan11Features guest layout");
 _Static_assert(offsetof(VkPhysicalDeviceVulkan11Features, sType) == 0, "VkPhysicalDeviceVulkan11Features.sType guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceVulkan11Features, pNext) == 8, "VkPhysicalDeviceVulkan11Features.pNext guest offset");
@@ -7677,6 +7979,11 @@ _Static_assert(offsetof(VkPipelineLayoutCreateInfo, setLayoutCount) == 20, "VkPi
 _Static_assert(offsetof(VkPipelineLayoutCreateInfo, pSetLayouts) == 24, "VkPipelineLayoutCreateInfo.pSetLayouts guest offset");
 _Static_assert(offsetof(VkPipelineLayoutCreateInfo, pushConstantRangeCount) == 32, "VkPipelineLayoutCreateInfo.pushConstantRangeCount guest offset");
 _Static_assert(offsetof(VkPipelineLayoutCreateInfo, pPushConstantRanges) == 40, "VkPipelineLayoutCreateInfo.pPushConstantRanges guest offset");
+_Static_assert(sizeof(VkPipelineLibraryCreateInfoKHR) == 32 && _Alignof(VkPipelineLibraryCreateInfoKHR) == 8, "VkPipelineLibraryCreateInfoKHR guest layout");
+_Static_assert(offsetof(VkPipelineLibraryCreateInfoKHR, sType) == 0, "VkPipelineLibraryCreateInfoKHR.sType guest offset");
+_Static_assert(offsetof(VkPipelineLibraryCreateInfoKHR, pNext) == 8, "VkPipelineLibraryCreateInfoKHR.pNext guest offset");
+_Static_assert(offsetof(VkPipelineLibraryCreateInfoKHR, libraryCount) == 16, "VkPipelineLibraryCreateInfoKHR.libraryCount guest offset");
+_Static_assert(offsetof(VkPipelineLibraryCreateInfoKHR, pLibraries) == 24, "VkPipelineLibraryCreateInfoKHR.pLibraries guest offset");
 _Static_assert(sizeof(VkPipelineMultisampleStateCreateInfo) == 48 && _Alignof(VkPipelineMultisampleStateCreateInfo) == 8, "VkPipelineMultisampleStateCreateInfo guest layout");
 _Static_assert(offsetof(VkPipelineMultisampleStateCreateInfo, sType) == 0, "VkPipelineMultisampleStateCreateInfo.sType guest offset");
 _Static_assert(offsetof(VkPipelineMultisampleStateCreateInfo, pNext) == 8, "VkPipelineMultisampleStateCreateInfo.pNext guest offset");
@@ -7958,6 +8265,21 @@ _Static_assert(offsetof(VkSemaphoreWaitInfo, flags) == 16, "VkSemaphoreWaitInfo.
 _Static_assert(offsetof(VkSemaphoreWaitInfo, semaphoreCount) == 20, "VkSemaphoreWaitInfo.semaphoreCount guest offset");
 _Static_assert(offsetof(VkSemaphoreWaitInfo, pSemaphores) == 24, "VkSemaphoreWaitInfo.pSemaphores guest offset");
 _Static_assert(offsetof(VkSemaphoreWaitInfo, pValues) == 32, "VkSemaphoreWaitInfo.pValues guest offset");
+_Static_assert(sizeof(VkShaderCreateInfoEXT) == 96 && _Alignof(VkShaderCreateInfoEXT) == 8, "VkShaderCreateInfoEXT guest layout");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, sType) == 0, "VkShaderCreateInfoEXT.sType guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pNext) == 8, "VkShaderCreateInfoEXT.pNext guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, flags) == 16, "VkShaderCreateInfoEXT.flags guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, stage) == 20, "VkShaderCreateInfoEXT.stage guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, nextStage) == 24, "VkShaderCreateInfoEXT.nextStage guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, codeType) == 28, "VkShaderCreateInfoEXT.codeType guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, codeSize) == 32, "VkShaderCreateInfoEXT.codeSize guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pCode) == 40, "VkShaderCreateInfoEXT.pCode guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pName) == 48, "VkShaderCreateInfoEXT.pName guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, setLayoutCount) == 56, "VkShaderCreateInfoEXT.setLayoutCount guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pSetLayouts) == 64, "VkShaderCreateInfoEXT.pSetLayouts guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pushConstantRangeCount) == 72, "VkShaderCreateInfoEXT.pushConstantRangeCount guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pPushConstantRanges) == 80, "VkShaderCreateInfoEXT.pPushConstantRanges guest offset");
+_Static_assert(offsetof(VkShaderCreateInfoEXT, pSpecializationInfo) == 88, "VkShaderCreateInfoEXT.pSpecializationInfo guest offset");
 _Static_assert(sizeof(VkShaderModuleCreateInfo) == 40 && _Alignof(VkShaderModuleCreateInfo) == 8, "VkShaderModuleCreateInfo guest layout");
 _Static_assert(offsetof(VkShaderModuleCreateInfo, sType) == 0, "VkShaderModuleCreateInfo.sType guest offset");
 _Static_assert(offsetof(VkShaderModuleCreateInfo, pNext) == 8, "VkShaderModuleCreateInfo.pNext guest offset");
@@ -8163,10 +8485,24 @@ _Static_assert(offsetof(VkVertexInputAttributeDescription, location) == 0, "VkVe
 _Static_assert(offsetof(VkVertexInputAttributeDescription, binding) == 4, "VkVertexInputAttributeDescription.binding guest offset");
 _Static_assert(offsetof(VkVertexInputAttributeDescription, format) == 8, "VkVertexInputAttributeDescription.format guest offset");
 _Static_assert(offsetof(VkVertexInputAttributeDescription, offset) == 12, "VkVertexInputAttributeDescription.offset guest offset");
+_Static_assert(sizeof(VkVertexInputAttributeDescription2EXT) == 32 && _Alignof(VkVertexInputAttributeDescription2EXT) == 8, "VkVertexInputAttributeDescription2EXT guest layout");
+_Static_assert(offsetof(VkVertexInputAttributeDescription2EXT, sType) == 0, "VkVertexInputAttributeDescription2EXT.sType guest offset");
+_Static_assert(offsetof(VkVertexInputAttributeDescription2EXT, pNext) == 8, "VkVertexInputAttributeDescription2EXT.pNext guest offset");
+_Static_assert(offsetof(VkVertexInputAttributeDescription2EXT, location) == 16, "VkVertexInputAttributeDescription2EXT.location guest offset");
+_Static_assert(offsetof(VkVertexInputAttributeDescription2EXT, binding) == 20, "VkVertexInputAttributeDescription2EXT.binding guest offset");
+_Static_assert(offsetof(VkVertexInputAttributeDescription2EXT, format) == 24, "VkVertexInputAttributeDescription2EXT.format guest offset");
+_Static_assert(offsetof(VkVertexInputAttributeDescription2EXT, offset) == 28, "VkVertexInputAttributeDescription2EXT.offset guest offset");
 _Static_assert(sizeof(VkVertexInputBindingDescription) == 12 && _Alignof(VkVertexInputBindingDescription) == 4, "VkVertexInputBindingDescription guest layout");
 _Static_assert(offsetof(VkVertexInputBindingDescription, binding) == 0, "VkVertexInputBindingDescription.binding guest offset");
 _Static_assert(offsetof(VkVertexInputBindingDescription, stride) == 4, "VkVertexInputBindingDescription.stride guest offset");
 _Static_assert(offsetof(VkVertexInputBindingDescription, inputRate) == 8, "VkVertexInputBindingDescription.inputRate guest offset");
+_Static_assert(sizeof(VkVertexInputBindingDescription2EXT) == 32 && _Alignof(VkVertexInputBindingDescription2EXT) == 8, "VkVertexInputBindingDescription2EXT guest layout");
+_Static_assert(offsetof(VkVertexInputBindingDescription2EXT, sType) == 0, "VkVertexInputBindingDescription2EXT.sType guest offset");
+_Static_assert(offsetof(VkVertexInputBindingDescription2EXT, pNext) == 8, "VkVertexInputBindingDescription2EXT.pNext guest offset");
+_Static_assert(offsetof(VkVertexInputBindingDescription2EXT, binding) == 16, "VkVertexInputBindingDescription2EXT.binding guest offset");
+_Static_assert(offsetof(VkVertexInputBindingDescription2EXT, stride) == 20, "VkVertexInputBindingDescription2EXT.stride guest offset");
+_Static_assert(offsetof(VkVertexInputBindingDescription2EXT, inputRate) == 24, "VkVertexInputBindingDescription2EXT.inputRate guest offset");
+_Static_assert(offsetof(VkVertexInputBindingDescription2EXT, divisor) == 28, "VkVertexInputBindingDescription2EXT.divisor guest offset");
 _Static_assert(sizeof(VkViSurfaceCreateInfoNN) == 32 && _Alignof(VkViSurfaceCreateInfoNN) == 8, "VkViSurfaceCreateInfoNN guest layout");
 _Static_assert(offsetof(VkViSurfaceCreateInfoNN, sType) == 0, "VkViSurfaceCreateInfoNN.sType guest offset");
 _Static_assert(offsetof(VkViSurfaceCreateInfoNN, pNext) == 8, "VkViSurfaceCreateInfoNN.pNext guest offset");
@@ -8221,6 +8557,7 @@ typedef void (VKAPI_PTR *PFN_vkCmdBeginRenderingKHR)(VkCommandBuffer commandBuff
 typedef void (VKAPI_PTR *PFN_vkCmdBindDescriptorSets)(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t firstSet, uint32_t descriptorSetCount, const VkDescriptorSet* pDescriptorSets, uint32_t dynamicOffsetCount, const uint32_t* pDynamicOffsets);
 typedef void (VKAPI_PTR *PFN_vkCmdBindIndexBuffer)(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType);
 typedef void (VKAPI_PTR *PFN_vkCmdBindPipeline)(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline);
+typedef void (VKAPI_PTR *PFN_vkCmdBindShadersEXT)(VkCommandBuffer commandBuffer, uint32_t stageCount, const VkShaderStageFlagBits* pStages, const VkShaderEXT* pShaders);
 typedef void (VKAPI_PTR *PFN_vkCmdBindVertexBuffers)(VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer* pBuffers, const VkDeviceSize* pOffsets);
 typedef void (VKAPI_PTR *PFN_vkCmdBindVertexBuffers2)(VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer* pBuffers, const VkDeviceSize* pOffsets, const VkDeviceSize* pSizes, const VkDeviceSize* pStrides);
 typedef void (VKAPI_PTR *PFN_vkCmdBindVertexBuffers2EXT)(VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer* pBuffers, const VkDeviceSize* pOffsets, const VkDeviceSize* pSizes, const VkDeviceSize* pStrides);
@@ -8283,7 +8620,12 @@ typedef void (VKAPI_PTR *PFN_vkCmdResetQueryPool)(VkCommandBuffer commandBuffer,
 typedef void (VKAPI_PTR *PFN_vkCmdResolveImage)(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount, const VkImageResolve* pRegions);
 typedef void (VKAPI_PTR *PFN_vkCmdResolveImage2)(VkCommandBuffer commandBuffer, const VkResolveImageInfo2* pResolveImageInfo);
 typedef void (VKAPI_PTR *PFN_vkCmdResolveImage2KHR)(VkCommandBuffer commandBuffer, const VkResolveImageInfo2* pResolveImageInfo);
+typedef void (VKAPI_PTR *PFN_vkCmdSetAlphaToCoverageEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 alphaToCoverageEnable);
+typedef void (VKAPI_PTR *PFN_vkCmdSetAlphaToOneEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 alphaToOneEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetBlendConstants)(VkCommandBuffer commandBuffer, const float blendConstants[4]);
+typedef void (VKAPI_PTR *PFN_vkCmdSetColorBlendEnableEXT)(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkBool32* pColorBlendEnables);
+typedef void (VKAPI_PTR *PFN_vkCmdSetColorBlendEquationEXT)(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkColorBlendEquationEXT* pColorBlendEquations);
+typedef void (VKAPI_PTR *PFN_vkCmdSetColorWriteMaskEXT)(VkCommandBuffer commandBuffer, uint32_t firstAttachment, uint32_t attachmentCount, const VkColorComponentFlags* pColorWriteMasks);
 typedef void (VKAPI_PTR *PFN_vkCmdSetCullMode)(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode);
 typedef void (VKAPI_PTR *PFN_vkCmdSetCullModeEXT)(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBias)(VkCommandBuffer commandBuffer, float depthBiasConstantFactor, float depthBiasClamp, float depthBiasSlopeFactor);
@@ -8293,6 +8635,7 @@ typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBiasEnableEXT)(VkCommandBuffer command
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBounds)(VkCommandBuffer commandBuffer, float minDepthBounds, float maxDepthBounds);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBoundsTestEnable)(VkCommandBuffer commandBuffer, VkBool32 depthBoundsTestEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBoundsTestEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 depthBoundsTestEnable);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthClampEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 depthClampEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOp)(VkCommandBuffer commandBuffer, VkCompareOp depthCompareOp);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOpEXT)(VkCommandBuffer commandBuffer, VkCompareOp depthCompareOp);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnable)(VkCommandBuffer commandBuffer, VkBool32 depthTestEnable);
@@ -8310,14 +8653,19 @@ typedef void (VKAPI_PTR *PFN_vkCmdSetFrontFace)(VkCommandBuffer commandBuffer, V
 typedef void (VKAPI_PTR *PFN_vkCmdSetFrontFaceEXT)(VkCommandBuffer commandBuffer, VkFrontFace frontFace);
 typedef void (VKAPI_PTR *PFN_vkCmdSetLineWidth)(VkCommandBuffer commandBuffer, float lineWidth);
 typedef void (VKAPI_PTR *PFN_vkCmdSetLogicOpEXT)(VkCommandBuffer commandBuffer, VkLogicOp logicOp);
+typedef void (VKAPI_PTR *PFN_vkCmdSetLogicOpEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 logicOpEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetPatchControlPointsEXT)(VkCommandBuffer commandBuffer, uint32_t patchControlPoints);
+typedef void (VKAPI_PTR *PFN_vkCmdSetPolygonModeEXT)(VkCommandBuffer commandBuffer, VkPolygonMode polygonMode);
 typedef void (VKAPI_PTR *PFN_vkCmdSetPrimitiveRestartEnable)(VkCommandBuffer commandBuffer, VkBool32 primitiveRestartEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetPrimitiveRestartEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 primitiveRestartEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetPrimitiveTopology)(VkCommandBuffer commandBuffer, VkPrimitiveTopology primitiveTopology);
 typedef void (VKAPI_PTR *PFN_vkCmdSetPrimitiveTopologyEXT)(VkCommandBuffer commandBuffer, VkPrimitiveTopology primitiveTopology);
+typedef void (VKAPI_PTR *PFN_vkCmdSetRasterizationSamplesEXT)(VkCommandBuffer commandBuffer, VkSampleCountFlagBits rasterizationSamples);
 typedef void (VKAPI_PTR *PFN_vkCmdSetRasterizerDiscardEnable)(VkCommandBuffer commandBuffer, VkBool32 rasterizerDiscardEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetRasterizerDiscardEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 rasterizerDiscardEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetSampleLocationsEXT)(VkCommandBuffer commandBuffer, const VkSampleLocationsInfoEXT* pSampleLocationsInfo);
+typedef void (VKAPI_PTR *PFN_vkCmdSetSampleLocationsEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 sampleLocationsEnable);
+typedef void (VKAPI_PTR *PFN_vkCmdSetSampleMaskEXT)(VkCommandBuffer commandBuffer, VkSampleCountFlagBits samples, const VkSampleMask* pSampleMask);
 typedef void (VKAPI_PTR *PFN_vkCmdSetScissor)(VkCommandBuffer commandBuffer, uint32_t firstScissor, uint32_t scissorCount, const VkRect2D* pScissors);
 typedef void (VKAPI_PTR *PFN_vkCmdSetScissorWithCount)(VkCommandBuffer commandBuffer, uint32_t scissorCount, const VkRect2D* pScissors);
 typedef void (VKAPI_PTR *PFN_vkCmdSetScissorWithCountEXT)(VkCommandBuffer commandBuffer, uint32_t scissorCount, const VkRect2D* pScissors);
@@ -8328,6 +8676,8 @@ typedef void (VKAPI_PTR *PFN_vkCmdSetStencilReference)(VkCommandBuffer commandBu
 typedef void (VKAPI_PTR *PFN_vkCmdSetStencilTestEnable)(VkCommandBuffer commandBuffer, VkBool32 stencilTestEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetStencilTestEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 stencilTestEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetStencilWriteMask)(VkCommandBuffer commandBuffer, VkStencilFaceFlags faceMask, uint32_t writeMask);
+typedef void (VKAPI_PTR *PFN_vkCmdSetTessellationDomainOriginEXT)(VkCommandBuffer commandBuffer, VkTessellationDomainOrigin domainOrigin);
+typedef void (VKAPI_PTR *PFN_vkCmdSetVertexInputEXT)(VkCommandBuffer commandBuffer, uint32_t vertexBindingDescriptionCount, const VkVertexInputBindingDescription2EXT* pVertexBindingDescriptions, uint32_t vertexAttributeDescriptionCount, const VkVertexInputAttributeDescription2EXT* pVertexAttributeDescriptions);
 typedef void (VKAPI_PTR *PFN_vkCmdSetViewport)(VkCommandBuffer commandBuffer, uint32_t firstViewport, uint32_t viewportCount, const VkViewport* pViewports);
 typedef void (VKAPI_PTR *PFN_vkCmdSetViewportWithCount)(VkCommandBuffer commandBuffer, uint32_t viewportCount, const VkViewport* pViewports);
 typedef void (VKAPI_PTR *PFN_vkCmdSetViewportWithCountEXT)(VkCommandBuffer commandBuffer, uint32_t viewportCount, const VkViewport* pViewports);
@@ -8369,6 +8719,7 @@ typedef VkResult (VKAPI_PTR *PFN_vkCreateSamplerYcbcrConversion)(VkDevice device
 typedef VkResult (VKAPI_PTR *PFN_vkCreateSamplerYcbcrConversionKHR)(VkDevice device, const VkSamplerYcbcrConversionCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSamplerYcbcrConversion* pYcbcrConversion);
 typedef VkResult (VKAPI_PTR *PFN_vkCreateSemaphore)(VkDevice device, const VkSemaphoreCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSemaphore* pSemaphore);
 typedef VkResult (VKAPI_PTR *PFN_vkCreateShaderModule)(VkDevice device, const VkShaderModuleCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkShaderModule* pShaderModule);
+typedef VkResult (VKAPI_PTR *PFN_vkCreateShadersEXT)(VkDevice device, uint32_t createInfoCount, const VkShaderCreateInfoEXT* pCreateInfos, const VkAllocationCallbacks* pAllocator, VkShaderEXT* pShaders);
 typedef VkResult (VKAPI_PTR *PFN_vkCreateSwapchainKHR)(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain);
 typedef VkResult (VKAPI_PTR *PFN_vkCreateViSurfaceNN)(VkInstance instance, const VkViSurfaceCreateInfoNN* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
 typedef VkResult (VKAPI_PTR *PFN_vkDebugMarkerSetObjectNameEXT)(VkDevice device, const VkDebugMarkerObjectNameInfoEXT* pNameInfo);
@@ -8400,6 +8751,7 @@ typedef void (VKAPI_PTR *PFN_vkDestroySampler)(VkDevice device, VkSampler sample
 typedef void (VKAPI_PTR *PFN_vkDestroySamplerYcbcrConversion)(VkDevice device, VkSamplerYcbcrConversion ycbcrConversion, const VkAllocationCallbacks* pAllocator);
 typedef void (VKAPI_PTR *PFN_vkDestroySamplerYcbcrConversionKHR)(VkDevice device, VkSamplerYcbcrConversion ycbcrConversion, const VkAllocationCallbacks* pAllocator);
 typedef void (VKAPI_PTR *PFN_vkDestroySemaphore)(VkDevice device, VkSemaphore semaphore, const VkAllocationCallbacks* pAllocator);
+typedef void (VKAPI_PTR *PFN_vkDestroyShaderEXT)(VkDevice device, VkShaderEXT shader, const VkAllocationCallbacks* pAllocator);
 typedef void (VKAPI_PTR *PFN_vkDestroyShaderModule)(VkDevice device, VkShaderModule shaderModule, const VkAllocationCallbacks* pAllocator);
 typedef void (VKAPI_PTR *PFN_vkDestroySurfaceKHR)(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator);
 typedef void (VKAPI_PTR *PFN_vkDestroySwapchainKHR)(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator);
@@ -8489,6 +8841,7 @@ typedef VkResult (VKAPI_PTR *PFN_vkGetQueryPoolResults)(VkDevice device, VkQuery
 typedef void (VKAPI_PTR *PFN_vkGetRenderAreaGranularity)(VkDevice device, VkRenderPass renderPass, VkExtent2D* pGranularity);
 typedef VkResult (VKAPI_PTR *PFN_vkGetSemaphoreCounterValue)(VkDevice device, VkSemaphore semaphore, uint64_t* pValue);
 typedef VkResult (VKAPI_PTR *PFN_vkGetSemaphoreCounterValueKHR)(VkDevice device, VkSemaphore semaphore, uint64_t* pValue);
+typedef VkResult (VKAPI_PTR *PFN_vkGetShaderBinaryDataEXT)(VkDevice device, VkShaderEXT shader, size_t* pDataSize, void* pData);
 typedef VkResult (VKAPI_PTR *PFN_vkGetSwapchainImagesKHR)(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages);
 typedef VkResult (VKAPI_PTR *PFN_vkInvalidateMappedMemoryRanges)(VkDevice device, uint32_t memoryRangeCount, const VkMappedMemoryRange* pMemoryRanges);
 typedef VkResult (VKAPI_PTR *PFN_vkMapMemory)(VkDevice device, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size, VkMemoryMapFlags flags, void** ppData);
