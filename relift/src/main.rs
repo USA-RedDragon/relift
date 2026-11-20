@@ -66,8 +66,11 @@ fn main() -> ExitCode {
             relift::push::run_push(&settings, target, device.as_deref(), &mut ui)
         }
         Command::Run {
-            target, trace_os, ..
-        } => match relift::build::run_run(&settings, target.as_deref(), *trace_os, &mut ui) {
+            target,
+            trace_os,
+            args,
+            ..
+        } => match relift::build::run_run(&settings, target.as_deref(), *trace_os, args, &mut ui) {
             Ok(code) => return ExitCode::from(u8::try_from(code).unwrap_or(1)),
             Err(e) => Err(e),
         },

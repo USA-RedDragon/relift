@@ -1039,6 +1039,7 @@ dependencies = [
  "relift-info",
  "relift-input",
  "relift-ir",
+ "relift-linux",
  "relift-manifest",
  "relift-n64",
  "relift-n64-analyze",
@@ -1046,6 +1047,7 @@ dependencies = [
  "relift-nds",
  "relift-nds-analyze",
  "relift-nds-formats",
+ "relift-objfile",
  "relift-patch",
  "relift-proc",
  "relift-progress",
@@ -1354,7 +1356,9 @@ version = "0.1.0"
 name = "relift-linux"
 version = "0.1.0"
 dependencies = [
+ "relift-analyze",
  "relift-cpu-arm64",
+ "relift-emit",
  "relift-guest",
  "relift-ir",
  "relift-objfile",

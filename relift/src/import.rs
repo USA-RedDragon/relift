@@ -118,6 +118,13 @@ pub fn run(
         }
         return crate::sms::import(settings, dump, ui);
     }
+    if crate::linux::is_executable(dump) {
+        switch_only("a Linux program has no system fonts")?;
+        if update.is_some() {
+            return Err("--update is for Switch dumps; a Linux program has no updates".into());
+        }
+        return crate::linux::import(settings, dump, ui);
+    }
     if crate::n64::is_rom(dump) {
         switch_only("a cartridge has no system fonts")?;
         if update.is_some() {

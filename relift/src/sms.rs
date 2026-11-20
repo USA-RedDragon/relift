@@ -47,6 +47,7 @@ const SMS_LAYERS: Layers = Layers {
     ],
     lifted_opt: LIFTED_OPT,
     cache: "sms-runtime",
+    cx16: false,
 };
 
 /// The extensions of the cartridge images the import takes.

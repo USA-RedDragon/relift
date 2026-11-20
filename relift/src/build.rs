@@ -2197,6 +2197,17 @@ pub fn run_build(
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     check_toolchain(settings)?;
+    if crate::linux::is_project() {
+        if targets.len() > 1 {
+            return Err("one target at a time for a Linux build".into());
+        }
+        let target = match targets.first() {
+            Some(t) => crate::cross::target(t)?,
+            None => None,
+        };
+        crate::linux::build(settings, !dev, target, ui)?;
+        return Ok(());
+    }
     let handheld = if crate::gb::is_project() {
         Some("Game Boy")
     } else if crate::gba::is_project() {
@@ -2399,9 +2410,16 @@ pub fn run_run(
     settings: &Settings,
     target: Option<&str>,
     trace_os: bool,
+    args: &[String],
     ui: &mut Ui,
 ) -> Result<i32, BoxError> {
     check_toolchain(settings)?;
+    if crate::linux::is_project() {
+        if target.is_some_and(|t| t != "host") {
+            return Err("only the host target runs so far".into());
+        }
+        return crate::linux::run(settings, args, ui);
+    }
     if crate::gb::is_project() {
         if target.is_some_and(|t| t != "host") {
             return Err("only the host target runs so far".into());

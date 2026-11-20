@@ -286,6 +286,10 @@ pub enum SeedKind {
     Relocation,
     /// A function of an initialization or finalization list.
     Initializer,
+    /// A code address stored in data of a file with no relocations to
+    /// find it by (a file linked for fixed addresses): an aligned word
+    /// that holds the address of an instruction.
+    Pointer,
 }
 
 /// A code address the file names itself.
@@ -395,6 +399,33 @@ impl Object {
         }
     }
 
+    /// The code addresses stored as aligned 64-bit words in data the file
+    /// does not execute. Only a file linked for fixed addresses needs this:
+    /// a position-independent file's relocations name its code pointers
+    /// exactly. A word counts when it is the address of a 4-byte aligned
+    /// byte in code, so the result may include integers that happen to
+    /// look like one.
+    pub fn data_pointers(&self) -> Vec<u64> {
+        let mut out = Vec::new();
+        for s in self.segments.iter().filter(|s| !s.perm.exec) {
+            let first = s.addr.next_multiple_of(8);
+            let mut a = first;
+            while let Some(end) = a.checked_add(8)
+                && end <= s.addr + s.data.len() as u64
+            {
+                let at = (a - s.addr) as usize;
+                let v = u64::from_le_bytes(s.data[at..at + 8].try_into().unwrap_or_default());
+                if v % 4 == 0 && self.is_code(v) {
+                    out.push(v);
+                }
+                a = end;
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// The symbol table's function symbols and the dynamic table's, both
     /// defined, without duplicates by address and name.
     pub fn functions(&self) -> Vec<&Symbol> {
@@ -499,6 +530,11 @@ impl Object {
             };
             if let Some(t) = target.filter(|&t| self.is_code(t)) {
                 add(t, SeedKind::Relocation, None);
+            }
+        }
+        if self.kind == Kind::Fixed && self.relocations.is_empty() {
+            for a in self.data_pointers() {
+                add(a, SeedKind::Pointer, None);
             }
         }
         let mut lists: Vec<(u64, u64)> = self

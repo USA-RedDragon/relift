@@ -102,6 +102,9 @@ pub enum Command {
         /// Stop on the first unknown service command or system call.
         #[arg(long)]
         strict: bool,
+        /// The arguments a Linux program runs with, after `--`.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Compare lifted functions against the reference interpreter.
     Check {

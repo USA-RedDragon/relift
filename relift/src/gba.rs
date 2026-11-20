@@ -383,6 +383,9 @@ pub(crate) struct Layers {
     pub(crate) rt_inc: &'static [&'static str],
     pub(crate) lifted_opt: &'static str,
     pub(crate) cache: &'static str,
+    /// Whether the layers include the A64 header, which needs 16-byte
+    /// compare-and-swap on an x86-64 host.
+    pub(crate) cx16: bool,
 }
 
 const GBA_LAYERS: Layers = Layers {
@@ -403,6 +406,7 @@ const GBA_LAYERS: Layers = Layers {
     ],
     lifted_opt: LIFTED_OPT,
     cache: "gba-runtime",
+    cx16: false,
 };
 
 fn compile(
@@ -445,9 +449,11 @@ pub(crate) fn compile_layers(
         None => crate::build::c_compiler(&settings.toolchain)?,
     };
     let zig = cc.len() > 1;
+    let cx16 = layers.cx16 && cross.is_none() && cfg!(target_arch = "x86_64");
     let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
         .iter()
         .map(|s| s.to_string())
+        .chain(cx16.then(|| "-mcx16".to_string()))
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
         .chain(cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string()))
         .collect();

@@ -11,7 +11,9 @@ publish.workspace = true
 band = "2"
 
 [dependencies]
+relift-analyze = { workspace = true }
 relift-cpu-arm64 = { workspace = true }
+relift-emit = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }
 relift-objfile = { workspace = true }
