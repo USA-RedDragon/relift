@@ -580,7 +580,7 @@ TEST(audren_rejects_bad_updates)
 TEST(audren_mixes_adpcm_voices)
 {
     rl_ctx *c = t_boot(NULL);
-    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t heap = t_heap(c, 0x800000);
     uint32_t h = open_service(c, heap, "audren:u");
     uint32_t rend = open_renderer(c, heap, h);
     CHECK(rend);
@@ -595,9 +595,9 @@ TEST(audren_mixes_adpcm_voices)
     g_end = 14;
     g_wave_size = 8;
     g_ds = heap + 0x11000;
-    uint64_t sink = heap + 0x20000;
+    uint64_t sink = heap + 0x100000;
     upd *u = calloc(1, sizeof *u);
-    build_update(u, true, heap + 0x10000, sink, 480 * 50, true);
+    build_update(u, true, heap + 0x10000, sink, 480 * 12000, true);
     memcpy(t_mem() + heap + 0x30000, u->in, u->size);
     msg q = mk(4);
     q.na = 1;
@@ -612,7 +612,8 @@ TEST(audren_mixes_adpcm_voices)
     CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
     const int16_t want[14] = { 1, 2, 3, -1, 7, -2, 0, 0, 5, 7, 6, -6, 2, 1 };
     const int16_t *s = (const int16_t *)(const void *)(t_mem() + sink);
-    while (memcmp(s, want, sizeof want) != 0)
+    uint64_t give_up = rl_clock_ns() + 10000000000ull;
+    while (memcmp(s, want, sizeof want) != 0 && rl_clock_ns() < give_up)
         sleep_ms(5);
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 6 }).result, 0);
     for (int i = 0; i < 14; i++)
