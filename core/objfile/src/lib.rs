@@ -82,6 +82,8 @@ pub struct Segment {
     pub perm: Perm,
     /// The alignment of `addr` the file asks for.
     pub align: u64,
+    /// Where the segment's bytes start in the file.
+    pub offset: u64,
 }
 
 impl Segment {
@@ -233,6 +235,10 @@ pub struct Dynamic {
     /// The library search path it asks for, from its run path or path
     /// entry.
     pub search_path: Option<String>,
+    /// Whether `search_path` is a path entry (`DT_RPATH`), which the loader
+    /// also applies to the libraries this file's dependencies need, and
+    /// before the library path of the environment, instead of a run path.
+    pub rpath: bool,
     /// The initialization function.
     pub init: Option<u64>,
     /// The finalization function.
@@ -342,6 +348,10 @@ pub struct Object {
     /// The stack size the file asks for, when it does; 0 is the system's
     /// default.
     pub stack_size: u64,
+    /// How far [`Object::rebase`] moved the file from where it is linked,
+    /// which the bytes of its segments, as the file holds them, do not
+    /// include: a pointer in the data is the linked address.
+    pub bias: u64,
     /// Whether the file asks for an executable stack.
     pub exec_stack: bool,
 }
@@ -531,6 +541,12 @@ impl Object {
             if let Some(t) = target.filter(|&t| self.is_code(t)) {
                 add(t, SeedKind::Relocation, None);
             }
+            if r.kind == RelocKind::JumpSlot
+                && let Some(lazy) = self.read_u64(r.offset).map(|v| v.wrapping_add(self.bias))
+                && self.is_code(lazy)
+            {
+                add(lazy, SeedKind::Relocation, None);
+            }
         }
         if self.kind == Kind::Fixed && self.relocations.is_empty() {
             for a in self.data_pointers() {
@@ -581,6 +597,7 @@ impl Object {
             return err("the file is linked for fixed addresses and cannot move");
         }
         let up = |a: &mut u64| *a = a.wrapping_add(bias);
+        self.bias = self.bias.wrapping_add(bias);
         up(&mut self.entry);
         for s in &mut self.segments {
             up(&mut s.addr);

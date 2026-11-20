@@ -205,6 +205,7 @@ pub fn parse(file: &[u8]) -> Result<Object, Error> {
                 exec: p.flags & 1 != 0,
             },
             align: p.align,
+            offset: p.offset,
         });
     }
     segments.sort_by_key(|s| s.addr);
@@ -229,6 +230,7 @@ pub fn parse(file: &[u8]) -> Result<Object, Error> {
         program_headers: None,
         unwind: None,
         stack_size: 0,
+        bias: 0,
         exec_stack: false,
     };
     for p in &phdrs {
@@ -400,6 +402,7 @@ fn read_dynamic(o: &mut Object, p: &Phdr, dynsym: Option<&Shdr>) -> Result<(), E
             .collect(),
         soname: get(DT_SONAME).and_then(name),
         search_path: get(DT_RUNPATH).or(get(DT_RPATH)).and_then(name),
+        rpath: get(DT_RUNPATH).is_none() && get(DT_RPATH).is_some(),
         init: get(DT_INIT),
         fini: get(DT_FINI),
         init_array: pair(DT_INIT_ARRAY, DT_INIT_ARRAYSZ),
