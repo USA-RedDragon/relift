@@ -94,6 +94,13 @@
      "shaderDenormPreserveFloat32": false,
      "shaderSignedZeroInfNanPreserveFloat32": true
     },
+    "ReliftDeviceProbes": {
+     "canonicalNan32": false,
+     "exactFloat16": false,
+     "hmmaCooperativeMatrix": false,
+     "denormDefault32": 1,
+     "denormPreserveMode32": false
+    },
     "VkPhysicalDeviceVulkan13Properties": {
      "maxSubgroupSize": 8,
      "minSubgroupSize": 8,
@@ -105,5 +112,5 @@
    }
   }
  },
- "source": "vulkaninfo --json, llvmpipe (LLVM 23.1.1), Mesa 26.2.4, Linux"
+ "source": "vulkaninfo --json, llvmpipe (LLVM 23.1.1), Mesa 26.2.4, Linux; ReliftDeviceProbes from the relift runtime probe on the same device"
 }

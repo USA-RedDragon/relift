@@ -139,7 +139,9 @@
     },
     "ReliftDeviceProbes": {
      "canonicalNan32": true,
-     "exactFloat16": true
+     "exactFloat16": true,
+     "denormDefault32": 1,
+     "denormPreserveMode32": false
     }
    }
   }

@@ -271,6 +271,14 @@ typedef struct nvn_probes {
      * components in the translator's register order, give the SM86 HMMA.F16 results.
      */
     bool hmma_coop;
+    /**
+     * @brief What single-precision add and multiply do with denormals under the execution modes the translator emits
+     * with no denormal mode: 1 flush as SM86 `.FTZ` does (inputs read as zero, results rounded to 24 bits and then
+     * flushed), 2 keep them as IEEE 754 does, 0 neither (or SignedZeroInfNanPreserve is missing).
+     */
+    uint32_t denorm32;
+    /** @brief The DenormPreserve execution mode, on top of those, keeps denormals as IEEE 754 does. */
+    bool denorm_preserve_mode32;
 } nvn_probes;
 /** @brief Brings the host device up and gives its probe results; false without a host Vulkan device. */
 bool nvn_vk_probes(nvn_probes *out);
@@ -280,6 +288,12 @@ uint32_t nvn_probe_nan_rows(void);
 void nvn_probe_nan_input(uint32_t *w);
 /** @brief Whether the NaN probe's outputs (after its inputs in w) are all the guest's canonical NaN where NaN. */
 bool nvn_probe_nan_check(const uint32_t *w);
+/** @brief Rows of the denormal probe (two input words and two output words each). */
+uint32_t nvn_probe_denorm_rows(void);
+/** @brief Writes the denormal probe's inputs to w[0 .. 2 * rows). */
+void nvn_probe_denorm_input(uint32_t *w);
+/** @brief Whether the denormal probe's outputs (after its inputs in w) all follow the flushing model (bit 0) and the IEEE model (bit 1). */
+uint32_t nvn_probe_denorm_check(const uint32_t *w);
 /** @brief Half-precision probe sizes: arithmetic rows (two lanes each), conversions to half, words in all. */
 uint32_t nvn_probe_f16_rows(void);
 uint32_t nvn_probe_f16_convs(void);

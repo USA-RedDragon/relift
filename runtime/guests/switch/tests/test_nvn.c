@@ -1157,9 +1157,12 @@ TEST(nvn_probes_reach_device_json)
     size_t len = fread(text, 1, sizeof text - 1, f);
     fclose(f);
     text[len] = 0;
-    char want[160];
-    snprintf(want, sizeof want, "\"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": %s",
-             p.canonical_nan32 ? "true" : "false", p.exact_f16 ? "true" : "false", p.hmma_coop ? "true" : "false");
+    char want[256];
+    snprintf(want, sizeof want,
+             "\"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": %s, \"denormDefault32\": %u, "
+             "\"denormPreserveMode32\": %s",
+             p.canonical_nan32 ? "true" : "false", p.exact_f16 ? "true" : "false", p.hmma_coop ? "true" : "false",
+             p.denorm32, p.denorm_preserve_mode32 ? "true" : "false");
     CHECK(strstr(text, want) != NULL);
     fprintf(stderr, "nvn_probes_reach_device_json: %s\n", want);
 }

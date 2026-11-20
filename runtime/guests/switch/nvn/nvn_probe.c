@@ -9,6 +9,7 @@
 #include "nvn_priv.h"
 
 #include <math.h>
+#include <string.h>
 
 /** @brief Single-precision inputs of the NaN probe: payloads, signaling NaNs, infinities, zeros and denormals. */
 static const uint32_t nan_vals[] = { 0x7fc00000, 0xffc00000, 0x7f800001, 0x7fbfffff, 0x7fc12345, 0xffd00001,
@@ -49,6 +50,76 @@ bool nvn_probe_nan_check(const uint32_t *w)
         }
     }
     return nans > 0;
+}
+
+/** @brief Single-precision inputs of the denormal probe: zeros, denormals, the smallest normals, and values whose sums and products land near the normal range. */
+static const uint32_t den_vals[] = { 0x00000000, 0x80000000, 0x00000001, 0x80000001, 0x00000002, 0x00400000,
+                                     0x80400000, 0x007fffff, 0x807fffff, 0x00800000, 0x80800000, 0x00800001,
+                                     0x00ffffff, 0x01000000, 0x3f800000, 0xbf800000, 0x3f800001, 0x3f000000,
+                                     0x0d800000, 0x8d800000, 0x73800000, 0x7f7fffff, 0x40000000, 0x34000000 };
+#define DEN_VALS (uint32_t)(sizeof den_vals / sizeof den_vals[0])
+
+uint32_t nvn_probe_denorm_rows(void) { return DEN_VALS * DEN_VALS; }
+
+void nvn_probe_denorm_input(uint32_t *w)
+{
+    for (uint32_t i = 0; i < DEN_VALS * DEN_VALS; i++) {
+        w[2 * i] = den_vals[i / DEN_VALS];
+        w[2 * i + 1] = den_vals[i % DEN_VALS];
+    }
+}
+
+static float bits_float(uint32_t v)
+{
+    float f;
+    memcpy(&f, &v, 4);
+    return f;
+}
+
+static uint32_t float_bits(float f)
+{
+    uint32_t v;
+    memcpy(&v, &f, 4);
+    return v;
+}
+
+/** @brief x with a denormal read as the zero of its sign. */
+static double flush32(float x)
+{
+    return fabsf(x) < 1.17549435e-38f ? copysign(0.0, (double)x) : (double)x;
+}
+
+/** @brief The SM86 `.FTZ` result bits for the exact double v: rounded to 24 bits with an unbounded exponent, then a result below the normal range is a signed zero. */
+static uint32_t ftz_bits(double v)
+{
+    if (v != 0.0 && isfinite(v)) {
+        int e;
+        double m = frexp(v, &e);
+        v = ldexp(nearbyint(ldexp(m, 24)), e - 24);
+        if (fabs(v) < ldexp(1.0, -126))
+            v = copysign(0.0, v);
+    }
+    return float_bits((float)v);
+}
+
+uint32_t nvn_probe_denorm_check(const uint32_t *w)
+{
+    uint32_t rows = nvn_probe_denorm_rows(), flush = 1, keep = 1;
+    for (uint32_t i = 0; i < rows; i++) {
+        float a = bits_float(w[2 * i]), b = bits_float(w[2 * i + 1]);
+        const uint32_t *out = w + 2 * rows + 2 * i;
+        double da = a, db = b;
+        double fa = flush32(a), fb = flush32(b);
+        uint32_t want_keep[2] = { float_bits((float)(da + db)), float_bits((float)(da * db)) };
+        uint32_t want_flush[2] = { ftz_bits(fa + fb), ftz_bits(fa * fb) };
+        for (uint32_t k = 0; k < 2; k++) {
+            if (out[k] != want_keep[k])
+                keep = 0;
+            if (out[k] != want_flush[k])
+                flush = 0;
+        }
+    }
+    return flush | keep << 1;
 }
 
 double nvn_half_value(uint16_t h)

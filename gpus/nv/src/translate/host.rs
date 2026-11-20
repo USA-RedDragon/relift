@@ -442,7 +442,7 @@ impl HostProfile {
                 ..MeshLimits::NVIDIA
             }),
             warp_mesh: Warp::Narrow(8),
-            denorm: Denorm::Unknown,
+            denorm: Denorm::Flush,
             fused_fma: false,
             constant_cull_stores: true,
             max_shared_bytes: 32_768,
@@ -537,10 +537,14 @@ impl HostProfile {
     ///   anything else [`Warp::Varies`], except that MoltenVK's default
     ///   size of 32 is [`Warp::Unchecked32`] (Apple GPUs run 32-wide SIMD
     ///   groups; Metal cannot require it, so the runtime checks it);
-    /// * NVIDIA's proprietary driver flushes denormals as SM86 does
-    ///   ([`Denorm::Flush`], measured on an SM86 device and checked at
-    ///   start-up by the runtime) and, from Ampere (PCI device ids from
-    ///   0x2200) on, lowers transcendentals to the MUFU unit;
+    /// * denormals ([`Denorm`]) come from the runtime's probe of what the
+    ///   device does with no denormal mode (`denormDefault32`: 1 flushes as
+    ///   SM86 `.FTZ` does, 2 keeps them, anything else or no probe is
+    ///   [`Denorm::Unknown`]); the DenormPreserve mode counts only where the
+    ///   device lists it and the probe (`denormPreserveMode32`, when
+    ///   present) saw it keep denormals;
+    /// * NVIDIA's proprietary driver lowers transcendentals to the MUFU unit
+    ///   from Ampere (PCI device ids from 0x2200) on;
     /// * MoltenVK reports `shaderDemoteToHelperInvocation` but carries a
     ///   demote out as a terminating discard;
     /// * task and mesh shaders need `VK_EXT_mesh_shader` with both
@@ -585,12 +589,14 @@ impl HostProfile {
                 ),
             float32_atomic_add: caps
                 .extension_on("VK_EXT_shader_atomic_float", "shaderBufferFloat32AtomicAdd"),
-            denorm: if nvidia {
-                Denorm::Flush
-            } else {
-                Denorm::Unknown
+            denorm: match caps.get("denormDefault32") {
+                1 => Denorm::Flush,
+                2 => Denorm::Preserve,
+                _ => Denorm::Unknown,
             },
-            denorm_preserve_mode: caps.on("shaderDenormPreserveFloat32"),
+            denorm_preserve_mode: caps.on("shaderDenormPreserveFloat32")
+                && (!caps.values.contains_key("denormPreserveMode32")
+                    || caps.on("denormPreserveMode32")),
             denorm_flush_mode: caps.on("shaderDenormFlushToZeroFloat32"),
             signed_zero_inf_nan_preserve: caps.on("shaderSignedZeroInfNanPreserveFloat32"),
             fused_fma: caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat32"),

@@ -77,6 +77,35 @@ fn half_and_nan_paths_need_the_device_probes() {
     assert!(!HostProfile::from_device("nvidia", &c).native_f16);
 }
 
+/// A device's denormal behavior is what the runtime's probe measured with no
+/// denormal mode, not what its driver is: the NVIDIA capture's probe makes
+/// it flush, a probe that saw IEEE behavior makes it keep, and a capture
+/// whose probe failed or never ran leaves it unknown, so a program takes the
+/// exact guards. The DenormPreserve mode needs the device's listing and,
+/// when the probe ran, its confirmation.
+#[test]
+fn denormals_come_from_the_device_probe() {
+    use relift_gpu_nv::translate::Denorm;
+    let caps = load("nvidia");
+    let host = |c: &DeviceCaps| HostProfile::from_device("nvidia", c);
+    assert_eq!(host(&caps).denorm, Denorm::Flush);
+    for (value, want) in [(2, Denorm::Preserve), (0, Denorm::Unknown)] {
+        let mut c = caps.clone();
+        c.values.insert("denormDefault32".into(), value);
+        assert_eq!(host(&c).denorm, want, "denormDefault32 {value}");
+    }
+    let mut c = caps.clone();
+    c.values.remove("denormDefault32");
+    assert_eq!(host(&c).denorm, Denorm::Unknown, "no probe");
+    let mut c = caps.clone();
+    c.values.insert("shaderDenormPreserveFloat32".into(), 1);
+    assert!(!host(&c).denorm_preserve_mode, "listed, probe saw it flush");
+    c.values.insert("denormPreserveMode32".into(), 1);
+    assert!(host(&c).denorm_preserve_mode, "listed and confirmed");
+    c.values.remove("denormPreserveMode32");
+    assert!(host(&c).denorm_preserve_mode, "listed, no probe");
+}
+
 /// A device at Vulkan's minimum limits: no capture has fewer than 1024
 /// invocations per workgroup, so this one is built from the minimum values
 /// the specification requires, with a wide subgroup the device could
