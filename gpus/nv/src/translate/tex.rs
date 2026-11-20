@@ -620,6 +620,9 @@ fn texref(c: &Ctx) -> Res<Option<(u32, u32)>> {
     }
 }
 
+/// A fetch of one numeric kind from the parameters of a shared kind function.
+type KindFetch<'a> = dyn Fn(&mut Ctx, Kind, &[u32]) -> Res<u32> + 'a;
+
 impl Ctx {
     /// The [`Dim`] of the texture whose id handle `h` holds, from the
     /// runtime's table ([`TEXTURE_DIMS_BINDING`]).
@@ -839,6 +842,30 @@ impl Ctx {
         self.m.emit_void(op::BRANCH, &[m]);
         self.m.emit_void(op::LABEL, &[m]);
         Ok(self.m.emit(op::PHI, t, &[vf, lf, vn, m2]))
+    }
+
+    /// [`Ctx::by_kind`] as a function shared by every fetch of the same
+    /// form on the same bound handle: `args` are (value, type) pairs the
+    /// function takes and `f` reads back as parameters, so the three
+    /// numeric kinds are written once per form, not once per fetch.
+    fn kinded(
+        &mut self,
+        key: Option<(u32, u32)>,
+        ints: bool,
+        tag: String,
+        args: &[(u32, u32)],
+        f: &KindFetch<'_>,
+    ) -> Res<u32> {
+        let vals: Vec<u32> = args.iter().map(|a| a.0).collect();
+        let Some(k) = key.filter(|_| ints) else {
+            return self.by_kind(None, false, &mut |c, k| f(c, k, &vals));
+        };
+        let tys: Vec<u32> = args.iter().map(|a| a.1).collect();
+        let t = self.tx_uvec4();
+        self.shared_typed(format!("kind {tag} {k:?}"), t, &tys, &vals, |c, p| {
+            let p = p.to_vec();
+            c.by_kind(key, true, &mut |c, k| f(c, k, &p))
+        })
     }
 
     fn tx_fvec(&mut self, parts: &[u32]) -> u32 {
@@ -1191,7 +1218,6 @@ fn tex(c: &mut Ctx) -> Res<()> {
     };
     let coords = float_coords(c, &s, d)?;
     let mut mask = 0u32;
-    let mut ops = Vec::new();
     let lod_v = if implicit {
         None
     } else if lod == 3 {
@@ -1201,39 +1227,68 @@ fn tex(c: &mut Ctx) -> Res<()> {
         Some(c.m.c_f32(0))
     };
     let coord = with_layer(c, &s, d, coords)?;
-    if matches!(lod, 2 | 5) {
-        mask |= 1;
-        let b = s.get(Slot::Lod)?;
-        ops.push(c.as_float(b));
-    }
-    if let Some(l) = lod_v {
-        mask |= 2;
-        ops.push(l);
-    }
-    if let Some(k) = konst {
-        mask |= 8;
-        ops.push(k);
-    }
-    if implicit && lc {
-        c.cap(42);
-        mask |= 0x80;
-        let p = s.get(Slot::Packed)?;
-        ops.push(c.min_lod(p));
-    }
+    let f32t = c.f32t();
+    let ncoord = d.coords() + usize::from(d.arrayed());
+    let cty = if ncoord == 1 {
+        f32t
+    } else {
+        c.m.t_vec(f32t, ncoord as u32)
+    };
     let dref = if dc {
         let r = s.get(Slot::Dc)?;
         Some(c.as_float(r))
     } else {
         None
     };
-    let smp = c.sampler(h, nu);
-    let v = c.by_kind(key, !dc, &mut |c, k| {
-        let (si, _) = c.sampled_with(k, d, h, nu, smp);
-        let mut args = vec![si, coord];
-        args.extend(dref);
+    let mut args = vec![(h, c.u32t()), (coord, cty)];
+    if matches!(lod, 2 | 5) {
+        mask |= 1;
+        let b = s.get(Slot::Lod)?;
+        let b = c.as_float(b);
+        args.push((b, f32t));
+    }
+    if let Some(l) = lod_v {
+        mask |= 2;
+        args.push((l, f32t));
+    }
+    if konst.is_some() {
+        mask |= 8;
+    }
+    if implicit && lc {
+        c.cap(42);
+        mask |= 0x80;
+        let p = s.get(Slot::Packed)?;
+        let m = c.min_lod(p);
+        args.push((m, f32t));
+    }
+    if let Some(r) = dref {
+        args.push((r, f32t));
+    }
+    let tag = format!("TEX {d:?} {mask} {nu} {konst:?} {dc} {implicit}");
+    let v = c.kinded(key, !dc, tag, &args, &|c, k, p| {
+        let smp = c.sampler(p[0], nu);
+        let (si, _) = c.sampled_with(k, d, p[0], nu, smp);
+        let mut a = vec![si, p[1]];
+        let mut rest = p[2..].iter().copied();
+        let mut ops = Vec::new();
+        if mask & 1 != 0 {
+            ops.extend(rest.next());
+        }
+        if mask & 2 != 0 {
+            ops.extend(rest.next());
+        }
+        if mask & 8 != 0 {
+            ops.extend(konst);
+        }
+        if mask & 0x80 != 0 {
+            ops.extend(rest.next());
+        }
+        if dc {
+            a.extend(rest.next());
+        }
         if mask != 0 {
-            args.push(mask);
-            args.extend(ops.iter().copied());
+            a.push(mask);
+            a.extend(ops);
         }
         let opc = match (dc, implicit) {
             (false, true) => op::IMAGE_SAMPLE_IMPLICIT_LOD,
@@ -1243,13 +1298,13 @@ fn tex(c: &mut Ctx) -> Res<()> {
         };
         if dc {
             let f = c.f32t();
-            let r = c.m.emit(opc, f, &args);
+            let r = c.m.emit(opc, f, &a);
             let v4 = c.f4_from_scalar(r);
             Ok(c.texel_bits(v4, Kind::Float))
         } else {
             let st = c.sampled_type(k);
             let t = c.m.t_vec(st, 4);
-            let r = c.m.emit(opc, t, &args);
+            let r = c.m.emit(opc, t, &a);
             Ok(c.texel_bits(r, k))
         }
     })?;
@@ -1328,34 +1383,52 @@ fn tld(c: &mut Ctx) -> Res<()> {
         let l = c.tx_opk(op::BITWISE_AND, p, 0xffff);
         coords.push(c.tx_as_i32(l));
     }
+    let ncoord = coords.len();
     let coord = c.tx_ivec(&coords);
+    let i32t = c.tx_i32();
+    let cty = if ncoord == 1 {
+        i32t
+    } else {
+        c.m.t_vec(i32t, ncoord as u32)
+    };
     let mut mask = 0;
-    let mut ops = Vec::new();
+    let mut args = vec![(h, c.u32t()), (coord, cty)];
+    let mut konst_arg = None;
     if !ms {
         mask |= 2;
-        ops.push(if lod == 3 {
+        let l = if lod == 3 {
             let l = s.get(Slot::Lod)?;
             c.tx_as_i32(l)
         } else {
             c.m.c_i32(0)
-        });
+        };
+        args.push((l, i32t));
     }
     if let Some(k) = konst {
         mask |= 8;
-        ops.push(k);
+        konst_arg = Some(k);
     }
     if ms {
         mask |= 0x40;
         let m = s.get(Slot::Ms)?;
-        ops.push(c.tx_as_i32(m));
+        let m = c.tx_as_i32(m);
+        args.push((m, i32t));
     }
-    let v = c.by_kind(key, true, &mut |c, k| {
-        let img = c.texture(k, d, h, nu);
-        let mut args = vec![img, coord, mask];
-        args.extend(ops.iter().copied());
+    let tag = format!("TLD {d:?} {mask} {nu} {konst_arg:?}");
+    let v = c.kinded(key, true, tag, &args, &|c, k, p| {
+        let img = c.texture(k, d, p[0], nu);
+        let mut a = vec![img, p[1], mask];
+        let mut rest = p[2..].iter().copied();
+        if !ms {
+            a.extend(rest.next());
+        }
+        a.extend(konst_arg);
+        if ms {
+            a.extend(rest.next());
+        }
         let st = c.sampled_type(k);
         let t = c.m.t_vec(st, 4);
-        let r = c.m.emit(op::IMAGE_FETCH, t, &args);
+        let r = c.m.emit(op::IMAGE_FETCH, t, &a);
         Ok(c.texel_bits(r, k))
     })?;
     c.no_fault();

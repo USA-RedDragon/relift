@@ -315,6 +315,20 @@ impl Ctx {
         body: impl FnOnce(&mut Ctx, &[u32]) -> Result<u32, E>,
     ) -> Result<u32, E> {
         let u = self.u32t();
+        let tys = vec![u; args.len()];
+        self.shared_typed(key, u, &tys, args, body)
+    }
+
+    /// [`Ctx::shared`] for parameters of the types `tys` and a result of
+    /// type `ret`.
+    pub(crate) fn shared_typed<E>(
+        &mut self,
+        key: String,
+        ret: u32,
+        tys: &[u32],
+        args: &[u32],
+        body: impl FnOnce(&mut Ctx, &[u32]) -> Result<u32, E>,
+    ) -> Result<u32, E> {
         let id = match self.shared_fns.get(&key) {
             Some(&f) => f,
             None => {
@@ -322,13 +336,12 @@ impl Ctx {
                 let saved_vars = self.m.suspend_vars();
                 let saved_var = self.denorm.var.take();
                 let first_local = self.locals.len();
-                let params = vec![u; args.len()];
-                let fnt = self.m.t_fn_args(u, &params);
+                let fnt = self.m.t_fn_args(ret, tys);
                 let id = self.m.id();
-                self.m.emit_void(op::FUNCTION, &[u, id, 0, fnt]);
-                let ps: Vec<u32> = params
+                self.m.emit_void(op::FUNCTION, &[ret, id, 0, fnt]);
+                let ps: Vec<u32> = tys
                     .iter()
-                    .map(|_| self.m.emit(FUNCTION_PARAMETER, u, &[]))
+                    .map(|&t| self.m.emit(FUNCTION_PARAMETER, t, &[]))
                     .collect();
                 let entry = self.m.id();
                 self.m.emit_void(op::LABEL, &[entry]);
@@ -344,6 +357,7 @@ impl Ctx {
                 };
                 self.m.emit_void(RETURN_VALUE, &[r]);
                 self.m.emit_void(op::FUNCTION_END, &[]);
+                let u = self.u32t();
                 let pu = self.m.t_ptr(FUNCTION, u);
                 let mut decls = Vec::new();
                 for v in self.locals.split_off(first_local) {
@@ -360,7 +374,7 @@ impl Ctx {
         };
         let mut a = vec![id];
         a.extend_from_slice(args);
-        Ok(self.m.emit(FUNCTION_CALL, u, &a))
+        Ok(self.m.emit(FUNCTION_CALL, ret, &a))
     }
 
     pub fn u32t(&mut self) -> u32 {
@@ -1180,9 +1194,10 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
         );
     }
     let iface = c.iface;
+    let spirv = c.m.finish();
     Ok(Shader {
         stage,
-        spirv: c.m.finish(),
+        spirv,
         interface: iface,
     })
 }
