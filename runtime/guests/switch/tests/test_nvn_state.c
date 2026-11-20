@@ -14,6 +14,7 @@
 #include <relift/ports.h>
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #define RET 0x7000000ull
@@ -253,5 +254,49 @@ TEST(nvn_debug_group_procs_for_either_engine_do_nothing)
         for (unsigned j = 0; j < sizeof zero / sizeof zero[0]; j++)
             found |= !strcmp(zero[j], want[i]);
         CHECK(found);
+    }
+}
+
+/** @brief Declares gpu and mem: a memory pool imported into the host device, or returns when there is none. */
+#define IMPORTED_POOL(c, heap, gpu, mem, name)                                                                         \
+    uint64_t mem = (heap) + 0x100000, gpu;                                                                             \
+    do {                                                                                                               \
+        if (!nvn_pool_make((heap) + 0x100, mem, 0x10000, 0x18c) || (gpu = nvn_pool_gpu((heap) + 0x100)) == mem) {      \
+            fprintf(stderr, #name ": no host device that imports guest memory, skipped\n");                            \
+            return;                                                                                                    \
+        }                                                                                                              \
+    } while (0)
+
+static void update_uniform_buffer(rl_ctx *c, uint64_t cb, uint64_t gpu, uint64_t offset, uint64_t data, uint64_t size)
+{
+    c->x[0] = cb;
+    c->x[1] = gpu;
+    c->x[2] = 0x1000;
+    c->x[3] = offset;
+    c->x[4] = size;
+    c->x[5] = data;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnCommandBufferUpdateUniformBuffer(c, t_mem()), RET);
+}
+
+TEST(nvn_update_uniform_buffer_in_a_pool_lands_in_the_order_the_commands_run)
+{
+    RECORDING(c, heap, cb);
+    IMPORTED_POOL(c, heap, gpu, mem, nvn_update_uniform_buffer_in_a_pool_lands_in_the_order_the_commands_run);
+    uint64_t data = heap + 0x2000;
+    for (unsigned i = 0; i < 16; i++) {
+        t_mem()[data + i] = (uint8_t)(0x10 + i);
+        t_mem()[data + 16 + i] = (uint8_t)(0x40 + i);
+    }
+    update_uniform_buffer(c, cb, gpu, 0x100, data, 16);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferCopyBufferToBuffer, cb, gpu + 0x100, gpu + 0x200, 16), RET);
+    update_uniform_buffer(c, cb, gpu, 0x100, data + 16, 16);
+    FINISHED(s, c, cb);
+    CHECK_EQ(s->n, 3);
+    memset(t_mem() + mem, 0, 0x1000);
+    CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x800, s), RL_OK);
+    for (unsigned i = 0; i < 16; i++) {
+        CHECK_EQ(t_mem()[mem + 0x200 + i], 0x10 + i);
+        CHECK_EQ(t_mem()[mem + 0x100 + i], 0x40 + i);
     }
 }

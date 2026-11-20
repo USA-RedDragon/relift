@@ -1064,10 +1064,16 @@ bool nvn_vk_flush(replay *r)
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     g.arena_used = 0;
+    g.uniform_pending = false;
     g.flushes++;
     nvn_draw_reset();
     nvn_dlss_reset();
     return ok;
+}
+
+bool nvn_vk_sync_uniforms(replay *r)
+{
+    return !g.uniform_pending || nvn_vk_flush(r);
 }
 
 int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what)
@@ -1925,8 +1931,9 @@ static int copy_buffer_to_buffer(replay *r, const nvn_cmd *e)
 
 /**
  * @brief nvnCommandBufferUpdateUniformBuffer(buffer address, buffer size, offset, size, data): the data, copied when
- * the command was recorded, lands at the buffer's offset in the order the commands replay, so draws before it read
- * the old bytes and draws after it the new ones (a draw stages its uniform data from guest memory when it replays).
+ * the command was recorded, lands at the buffer's offset in the order the commands execute, so draws before it read
+ * the old bytes and draws after it the new ones. In a pool imported into the host device it is a GPU write into
+ * the pool's buffer, where the draws read their uniform buffers from; elsewhere it is a copy into guest memory.
  */
 static int update_uniform_buffer(replay *r, const nvn_cmd *e)
 {
@@ -1936,7 +1943,17 @@ static int update_uniform_buffer(replay *r, const nvn_cmd *e)
         return RL_OK;
     if (!data)
         return nvn_vk_stop(r, "%s without its data", nvn_cmd_name(e->op));
-    memcpy(r->mem + nvn_gpu_guest(e->x[1]) + e->x[3], data, size);
+    uint64_t at = nvn_gpu_guest(e->x[1]) + e->x[3], off;
+    void *pool;
+    if (size <= 65536 && size % 4 == 0 && nvn_guest_buffer(at, size, &pool, &off) && off % 4 == 0) {
+        nvn_vk_begin(r);
+        nvn_vk_barrier(g.cb);
+        VK(vkCmdUpdateBuffer)(g.cb, (VkBuffer)pool, off, size, data);
+        nvn_vk_barrier(g.cb);
+        g.uniform_pending = true;
+        return RL_OK;
+    }
+    memcpy(r->mem + at, data, size);
     return RL_OK;
 }
 

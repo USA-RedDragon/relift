@@ -577,6 +577,25 @@ static int bank_of(replay *r, const void *src, uint64_t n, VkDescriptorBufferInf
 static const void *user_bank(replay *r, uint32_t s, uint32_t b, uint64_t addr);
 
 /**
+ * @brief The uniform buffer descriptor for user bank b of stage s at GPU address addr (size bytes): the pool's own
+ * buffer when the bytes lie in imported guest memory, so the draw reads them when it executes, after the GPU
+ * writes that precede it in the batch, as the hardware reads a bound buffer; else a copy of the bytes (bank_of).
+ */
+static int nvn_ubo_bind(replay *r, uint32_t s, uint32_t b, uint64_t addr, uint64_t size, VkDescriptorBufferInfo *bi)
+{
+    void *pool;
+    uint64_t off;
+    if (addr && size && !(r->st->ubo_patched[s] & 1u << b) && nvn_guest_buffer(nvn_gpu_guest(addr), size, &pool, &off) &&
+        off % 256 == 0) {
+        *bi = (VkDescriptorBufferInfo){ (VkBuffer)pool, off, size > UBO_BYTES ? UBO_BYTES : size };
+        return RL_OK;
+    }
+    if (!nvn_vk_sync_uniforms(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    return bank_of(r, user_bank(r, s, b, addr), addr ? size : 0, bi);
+}
+
+/**
  * @brief The driver bank c[0] of graphics stage s: each storage buffer slot k of the stage is 16 bytes
  * {GPU address, u32 size} at 16 * (first[s] + k), where first is the driver's per-stage table (sdk 0xbb0570,
  * read by nvnCommandBufferBindStorageBuffer, sdk 0x67be50: vertex 0x11, fragment 0x51, geometry 0x41, tessellation
@@ -673,7 +692,7 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
             if (b >= NVN_UBO_SLOTS)
                 return nvn_vk_stop(r, "program %s reads constant bank c[%u]", mods[s]->key, b + 3);
             uint64_t addr = r->st->ubo[s][b].addr, size = r->st->ubo[s][b].size;
-            int rc = bank_of(r, user_bank(r, s, b, addr), addr ? size : 0, &bi[n]);
+            int rc = nvn_ubo_bind(r, s, b, addr, size, &bi[n]);
             if (rc != RL_OK)
                 return rc;
             wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -771,6 +790,8 @@ static int bind_user_textures(replay *r, const module *m, uint32_t s, uint32_t *
             size = UBO_BYTES;
         if (!st->ubo_host[s][b] && !(st->ubo_host[s][b] = malloc(UBO_BYTES)))
             return nvn_vk_stop(r, "out of memory");
+        if (!nvn_vk_sync_uniforms(r))
+            return nvn_vk_stop(r, "the host device failed a submit");
         memcpy(st->ubo_host[s][b], r->mem + nvn_gpu_guest(addr), size);
         memset(st->ubo_host[s][b] + size, 0, UBO_BYTES - size);
         int rc = bind_textures(r, m, h->bank, st->ubo_host[s][b], (uint32_t)size, n, map, vals, 0, 0);
@@ -1158,7 +1179,7 @@ static int stage_dispatch(replay *r, void *arg)
         if (b >= NVN_UBO_SLOTS)
             return nvn_vk_stop(r, "compute program %s reads constant bank c[%u]", m->key, b + 3);
         uint64_t addr = st->ubo[NVN_STAGE_COMPUTE][b].addr, size = st->ubo[NVN_STAGE_COMPUTE][b].size;
-        if ((rc = bank_of(r, user_bank(r, NVN_STAGE_COMPUTE, b, addr), addr ? size : 0, &bi[nw])) != RL_OK)
+        if ((rc = nvn_ubo_bind(r, NVN_STAGE_COMPUTE, b, addr, size, &bi[nw])) != RL_OK)
             return rc;
         wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                          .dstSet = sets[0],

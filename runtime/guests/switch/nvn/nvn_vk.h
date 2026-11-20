@@ -161,6 +161,8 @@ typedef struct nvn_vkdev {
     /** @brief Guest bytes copied for the commands of the batch being recorded: buffers, indices, constants. */
     staging arena;
     uint64_t arena_used;
+    /** @brief Whether the batch holds a GPU write of guest uniform data that guest memory does not show yet. */
+    bool uniform_pending;
     /** @brief The device probes' results, as device.json reports them. */
     nvn_probes probes;
     /**
@@ -304,6 +306,11 @@ bool nvn_vk_begin(replay *r);
  * before recording (that counts as a submit for nvn_vk_stage).
  */
 bool nvn_vk_flush(replay *r);
+/**
+ * @brief Submits the batch when it holds a GPU write of guest uniform data, so a host copy of guest memory taken
+ * next shows it.
+ */
+bool nvn_vk_sync_uniforms(replay *r);
 /**
  * @brief Runs stage(r, arg), which puts one command's data into the batch
  * being recorded (uploads, descriptor sets), before the command records
