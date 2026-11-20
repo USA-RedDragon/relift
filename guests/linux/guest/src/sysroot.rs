@@ -549,6 +549,186 @@ fn file_name(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use relift_objfile::synth::{Builder, SegmentSpec};
+
+    fn words(v: &[u64]) -> Vec<u8> {
+        v.iter().flat_map(|w| w.to_le_bytes()).collect()
+    }
+
+    fn elf(needed: &[&str], run_path: Option<(&str, bool)>, interp: Option<&str>) -> Vec<u8> {
+        let mut strtab = vec![0u8];
+        let at = |s: &str, strtab: &mut Vec<u8>| {
+            let off = strtab.len() as u64;
+            strtab.extend_from_slice(s.as_bytes());
+            strtab.push(0);
+            off
+        };
+        let mut dynamic = Vec::new();
+        for n in needed {
+            dynamic.extend([1, at(n, &mut strtab)]);
+        }
+        if let Some((p, rpath)) = run_path {
+            dynamic.extend([if rpath { 15 } else { 29 }, at(p, &mut strtab)]);
+        }
+        dynamic.extend([5, 0x1000, 10, strtab.len() as u64, 0, 0]);
+        let mut data = vec![0u8; 0x400];
+        data[..strtab.len()].copy_from_slice(&strtab);
+        let dyn_bytes = words(&dynamic);
+        data[0x200..0x200 + dyn_bytes.len()].copy_from_slice(&dyn_bytes);
+        Builder {
+            shared: true,
+            entry: 0x1000,
+            segments: vec![SegmentSpec {
+                addr: 0x1000,
+                data,
+                mem_size: 0x400,
+                flags: 7,
+            }],
+            dynamic: Some((0x1200, dyn_bytes.len() as u64)),
+            interpreter: interp.map(String::from),
+            ..Builder::default()
+        }
+        .build()
+    }
+
+    fn root(name: &str, files: &[(&str, Vec<u8>)]) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("relift-sysroot-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (path, bytes) in files {
+            let p = dir.join(path.trim_start_matches('/'));
+            std::fs::create_dir_all(p.parent().expect("a parent")).expect("dirs");
+            std::fs::write(p, bytes).expect("file");
+        }
+        dir
+    }
+
+    fn names(libs: &[Library]) -> Vec<&str> {
+        libs.iter().map(|l| l.name.as_str()).collect()
+    }
+
+    #[test]
+    fn the_closure_follows_needed_libraries_in_loader_order() {
+        let exe = elf(&["liba.so.1", "libb.so.1"], None, Some("/lib/ld.so.1"));
+        let dir = root(
+            "order",
+            &[
+                ("/lib/ld.so.1", elf(&[], None, None)),
+                ("/lib/liba.so.1", elf(&["libc.so.6"], None, None)),
+                ("/lib/libb.so.1", elf(&["libc.so.6"], None, None)),
+                ("/lib/libc.so.6", elf(&["ld.so.1"], None, None)),
+            ],
+        );
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let object = elf::parse(&exe).expect("parses");
+        let c = closure(&object, &exe, "/app", &sys).expect("closure");
+        assert_eq!(
+            c.interpreter.as_ref().map(|l| l.name.as_str()),
+            Some("ld.so.1")
+        );
+        assert_eq!(names(&c.libraries), ["liba.so.1", "libb.so.1", "libc.so.6"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_answers_to_its_own_path_and_its_targets() {
+        let exe = elf(&["libc.so.6"], None, None);
+        let dir = root("link", &[("/lib/libc-2.so", elf(&[], None, None))]);
+        std::os::unix::fs::symlink("libc-2.so", dir.join("lib/libc.so.6")).expect("link");
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let object = elf::parse(&exe).expect("parses");
+        let c = closure(&object, &exe, "/app", &sys).expect("closure");
+        assert_eq!(c.libraries[0].paths, ["/lib/libc.so.6", "/lib/libc-2.so"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_run_path_with_origin_beats_the_default_directories() {
+        let exe = elf(&["libx.so"], Some(("$ORIGIN/../private", false)), None);
+        let dir = root(
+            "origin",
+            &[
+                ("/lib/libx.so", elf(&["libdefault.so"], None, None)),
+                ("/opt/private/libx.so", elf(&[], None, None)),
+                ("/opt/bin/app", exe.clone()),
+            ],
+        );
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let object = elf::parse(&exe).expect("parses");
+        let c = closure(&object, &exe, "/opt/bin", &sys).expect("closure");
+        assert_eq!(c.libraries[0].paths[0], "/opt/private/libx.so");
+        assert_eq!(c.libraries.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_ld_so_conf_directories_come_before_the_defaults() {
+        let exe = elf(&["libx.so"], None, None);
+        let dir = root(
+            "conf",
+            &[
+                (
+                    "/etc/ld.so.conf",
+                    b"include /etc/ld.so.conf.d/*.conf\n".to_vec(),
+                ),
+                ("/etc/ld.so.conf.d/a.conf", b"# a\n/opt/libs\n".to_vec()),
+                ("/opt/libs/libx.so", elf(&[], None, None)),
+                ("/lib/libx.so", elf(&[], None, None)),
+            ],
+        );
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        assert_eq!(sys.conf_dirs(), ["/opt/libs"]);
+        let object = elf::parse(&exe).expect("parses");
+        let c = closure(&object, &exe, "/app", &sys).expect("closure");
+        assert_eq!(c.libraries[0].paths[0], "/opt/libs/libx.so");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_missing_library_names_what_needed_it_and_where_it_looked() {
+        let exe = elf(&["libgone.so.3"], None, None);
+        let dir = root("missing", &[("/lib/other.so", elf(&[], None, None))]);
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let object = elf::parse(&exe).expect("parses");
+        let e = closure(&object, &exe, "/app", &sys).expect_err("not found");
+        assert!(
+            e.contains("libgone.so.3") && e.contains("/lib/libgone.so.3"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_library_a_file_spells_by_name_joins_the_closure() {
+        let mut exe = elf(&[], None, None);
+        exe.extend_from_slice(b"\0libplugin.so.2\0/usr/lib/libskip.so.x\0notalib.so\0");
+        let dir = root(
+            "spelled",
+            &[
+                ("/lib/libplugin.so.2", elf(&[], None, None)),
+                ("/lib/libskip.so.x", elf(&[], None, None)),
+            ],
+        );
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let object = elf::parse(&exe).expect("parses");
+        let c = closure(&object, &exe, "/app", &sys).expect("closure");
+        assert_eq!(names(&c.libraries), ["libplugin.so.2"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_absolute_link_resolves_inside_the_sysroot() {
+        let dir = root("abs", &[("/real/lib.so", vec![1])]);
+        std::fs::create_dir_all(dir.join("lib")).expect("dir");
+        std::os::unix::fs::symlink("/real/lib.so", dir.join("lib/lib.so")).expect("link");
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let (host, guest) = sys.resolve("/lib/lib.so").expect("resolves");
+        assert_eq!(guest, "/real/lib.so");
+        assert!(host.starts_with(sys.root.clone()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_wildcard_matches_the_way_a_glob_does() {
@@ -567,5 +747,11 @@ mod tests {
     fn the_directory_of_a_path() {
         assert_eq!(dir_of("/a/b"), "/a");
         assert_eq!(dir_of("/a"), "/");
+    }
+
+    #[test]
+    fn paths_normalize_lexically() {
+        assert_eq!(normalize("/a/./b/../c//d"), "/a/c/d");
+        assert_eq!(normalize("/"), "/");
     }
 }
