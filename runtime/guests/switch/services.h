@@ -110,6 +110,8 @@ void rl_srv_install_nifm(void);
 void rl_srv_install_nsd(void);
 /** @brief Installs prepo:u and the other play report services. */
 void rl_srv_install_prepo(void);
+/** @brief Installs nfp:user, the NFC service. */
+void rl_srv_install_nfp(void);
 /** @brief Installs ssl and ssl:s, the TLS services. */
 void rl_srv_install_ssl(void);
 

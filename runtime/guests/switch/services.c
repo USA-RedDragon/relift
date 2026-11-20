@@ -45,6 +45,7 @@ void rl_srv_install_all(void)
     rl_srv_install_nifm();
     rl_srv_install_nsd();
     rl_srv_install_prepo();
+    rl_srv_install_nfp();
     rl_srv_install_ssl();
     rl_hos_audio_register();
 }
