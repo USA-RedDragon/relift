@@ -29,3 +29,11 @@ TEST(nvn_timestamps_of_both_pipe_locations_write_the_guest_clock)
         CHECK(rl_ld64(mem, at + 8) != 0);
     }
 }
+
+TEST(nvn_render_target_views_may_name_the_srgb_or_linear_twin)
+{
+    CHECK_EQ(nvn_vk_color_twin(VK_FORMAT_R8G8B8A8_UNORM), VK_FORMAT_R8G8B8A8_SRGB);
+    CHECK_EQ(nvn_vk_color_twin(VK_FORMAT_R8G8B8A8_SRGB), VK_FORMAT_R8G8B8A8_UNORM);
+    CHECK_EQ(nvn_vk_color_twin(VK_FORMAT_B8G8R8A8_UNORM), VK_FORMAT_B8G8R8A8_SRGB);
+    CHECK_EQ(nvn_vk_color_twin(VK_FORMAT_R16G16B16A16_SFLOAT), VK_FORMAT_UNDEFINED);
+}

@@ -687,7 +687,7 @@ static int fixed_state(replay *r, pipe_key *k)
     int rc;
     k->ncolor = st->ncolor;
     for (uint32_t i = 0; i < st->ncolor; i++) {
-        k->color[i] = st->color[i].v ? st->color[i].v->format : VK_FORMAT_UNDEFINED;
+        k->color[i] = st->color[i].v ? st->color[i].format : VK_FORMAT_UNDEFINED;
         if ((rc = blend_of(r, i, &k->blend[i])) != RL_OK)
             return rc;
     }

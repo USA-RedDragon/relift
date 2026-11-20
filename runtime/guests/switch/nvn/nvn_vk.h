@@ -84,6 +84,8 @@ typedef struct vimg {
     struct vsub {
         uint32_t level, layer;
         VkImageView view;
+        /** @brief The view's format when it is not the image's, else VK_FORMAT_UNDEFINED. */
+        VkFormat format;
     } *sub;
     uint32_t nsub, capsub;
     /** @brief Sampling views by VkImageViewType (1D to cube array), made when first asked for. */
@@ -95,6 +97,8 @@ typedef struct rt {
     vimg *v;
     uint32_t level, layer;
     VkImageView view;
+    /** @brief The format the target is drawn in: its image's, or an sRGB or linear twin a texture view names. */
+    VkFormat format;
 } rt;
 
 /** @brief A host-visible buffer, mapped. */
@@ -269,6 +273,8 @@ typedef struct replay {
     float fret;
 } replay;
 
+/** @brief The linear or sRGB twin of an 8-bit color format, which a texture view may name for a render target of the other; VK_FORMAT_UNDEFINED for any other format. */
+VkFormat nvn_vk_color_twin(VkFormat f);
 int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want);
 bool nvn_vk_staging_new(staging *s, uint64_t size);
 void nvn_vk_staging_free(staging *s);

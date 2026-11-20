@@ -1685,10 +1685,11 @@ bool nvn_vk_rt_inside(const nvn_tex_desc *d, uint32_t level, uint32_t layer)
  * @brief The view of level and layer of v (a depth slice of a 3D image, which
  * is made 2D array compatible), made the first time.
  */
-static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer)
+static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer, VkFormat format)
 {
+    VkFormat own = format == v->format ? VK_FORMAT_UNDEFINED : format;
     for (uint32_t i = 0; i < v->nsub; i++)
-        if (v->sub[i].level == level && v->sub[i].layer == layer)
+        if (v->sub[i].level == level && v->sub[i].layer == layer && v->sub[i].format == own)
             return v->sub[i].view;
     if (v->nsub == v->capsub) {
         uint32_t cap = v->capsub ? 2 * v->capsub : 8;
@@ -1703,13 +1704,25 @@ static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer)
                                   .pNext = plain_usage(v, &vu),
                                   .image = v->image,
                                   .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                                  .format = v->format,
+                                  .format = format,
                                   .subresourceRange = { v->aspect, level, 1, layer, 1 } };
     VkImageView view;
     if (VK(vkCreateImageView)(g.dev, &vci, NULL, &view) != VK_SUCCESS)
         return NULL;
-    v->sub[v->nsub++] = (struct vsub){ level, layer, view };
+    v->sub[v->nsub++] = (struct vsub){ level, layer, view, own };
     return view;
+}
+
+/** @brief The linear or sRGB twin of an 8-bit color format a texture view may name for a render target, else VK_FORMAT_UNDEFINED. */
+VkFormat nvn_vk_color_twin(VkFormat f)
+{
+    switch (f) {
+    case VK_FORMAT_R8G8B8A8_UNORM: return VK_FORMAT_R8G8B8A8_SRGB;
+    case VK_FORMAT_R8G8B8A8_SRGB: return VK_FORMAT_R8G8B8A8_UNORM;
+    case VK_FORMAT_B8G8R8A8_UNORM: return VK_FORMAT_B8G8R8A8_SRGB;
+    case VK_FORMAT_B8G8R8A8_SRGB: return VK_FORMAT_B8G8R8A8_UNORM;
+    default: return VK_FORMAT_UNDEFINED;
+    }
 }
 
 /** @brief Makes *t the render target of texture tex seen through the view bytes view (NULL for none). */
@@ -1720,13 +1733,22 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
         return RL_OK;
     if (!(t->v = image_of(r, tex)))
         return RL_PENDING;
+    t->format = VK_FORMAT_UNDEFINED;
     nvn_vk_written(t->v);
     if (view) {
         nvn_view nv;
         int rc = nvn_view_read(r->c, r->mem, view, &nv);
         if (rc != RL_OK)
             return rc;
-        if ((nv.has_format && nv.format != t->v->d.format) || nv.has_swizzle ||
+        if (nv.has_format && nv.format != t->v->d.format) {
+            VkImageAspectFlags va = 0;
+            VkFormat want = nvn_vk_format(nv.format, &va);
+            if (va == VK_IMAGE_ASPECT_COLOR_BIT || va == 0) {
+                if (want != VK_FORMAT_UNDEFINED && want == nvn_vk_color_twin(t->v->format))
+                    t->format = want;
+            }
+        }
+        if ((nv.has_format && nv.format != t->v->d.format && !t->format) || nv.has_swizzle ||
             (nv.has_target && nv.target != t->v->d.target) || (nv.has_levels && nv.base_level < 0) ||
             (nv.has_layers && nv.min_layer < 0))
             return nvn_vk_stop(r,
@@ -1743,8 +1765,10 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
     if (!nvn_vk_rt_inside(&t->v->d, t->level, t->layer))
         return nvn_vk_stop(r, "render target 0x%llx at level %u layer %u, outside it", (unsigned long long)tex, t->level,
                     t->layer);
-    bool whole = rr.levelCount == 1 && rr.layerCount == 1 && t->v->d.target != NVN_TARGET_3D;
-    t->view = whole ? t->v->view : sub_view(t->v, t->level, t->layer);
+    VkFormat drawn = t->format ? t->format : t->v->format;
+    bool whole = rr.levelCount == 1 && rr.layerCount == 1 && t->v->d.target != NVN_TARGET_3D && drawn == t->v->format;
+    t->format = drawn;
+    t->view = whole ? t->v->view : sub_view(t->v, t->level, t->layer, drawn);
     if (!t->view)
         return nvn_vk_stop(r, "no host view of render target 0x%llx", (unsigned long long)tex);
     return RL_OK;
@@ -1937,9 +1961,9 @@ static int clear_texture(replay *r, const nvn_cmd *e)
     VkRect2D clear = { { rg->x, rg->y }, { (uint32_t)rg->width, (uint32_t)rg->height } };
     uint32_t layers = rg->depth > 1 ? (uint32_t)rg->depth : 1;
     for (uint32_t i = 0; i < layers; i++) {
-        rt t = { .v = v, .level = level, .layer = layer + i };
+        rt t = { .v = v, .level = level, .layer = layer + i, .format = v->format };
         VkImageSubresourceRange rr = range_of(v);
-        t.view = rr.levelCount == 1 && rr.layerCount == 1 ? v->view : sub_view(v, level, layer + i);
+        t.view = rr.levelCount == 1 && rr.layerCount == 1 ? v->view : sub_view(v, level, layer + i, v->format);
         if (!t.view)
             return nvn_vk_stop(r, "no host view of the texture %s clears", nvn_cmd_name(e->op));
         r->st->ncolor = 1;
