@@ -13,7 +13,8 @@
 # bit of time to compile, so a name list picks some. A `.dyn` program
 # imports with SYSROOT, the arm64 root file system or toolchain sysroot that
 # holds its libraries (default: the sysroot of AARCH64_GCC,
-# aarch64-linux-gnu-gcc). Exit status 1 when any differs.
+# aarch64-linux-gnu-gcc), plus the program's `etc` directory when it has
+# one. Exit status 1 when any differs.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: check.sh OUT_DIR WORK_DIR [NAME[.VARIANT]...]}
@@ -47,7 +48,20 @@ for b in $list; do
     fi
     mkdir -p "$proj"
     flags=
-    case $b in *.dyn) flags="--sysroot $sysroot" ;; esac
+    case $b in
+    *.dyn)
+        sys=$sysroot
+        if [ -d "$dir/etc" ]; then
+            sys=$work/sysroot-$name
+            if [ ! -d "$sys" ]; then
+                mkdir -p "$sys"
+                cp -a "$sysroot/lib" "$sysroot/lib64" "$sys/"
+                cp -a "$dir/etc" "$sys/etc"
+            fi
+        fi
+        flags="--sysroot $sys"
+        ;;
+    esac
     if ! (cd "$proj" && rm -f game.toml && "$relift" import $flags "$out/$b" >import.log 2>&1 && RELIFT_EMIT_TRAMPOLINE=$forced RELIFT_EMIT_COLD=$cold "$relift" build ${RELIFT_BUILD_FLAGS:-} >build.log 2>&1); then
         echo "FAIL $tag: build (see $proj/build.log)"
         failed=1

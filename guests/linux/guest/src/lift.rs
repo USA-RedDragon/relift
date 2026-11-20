@@ -247,7 +247,14 @@ pub fn lift_program(
     });
     let reason = reasons.into_iter().flatten().next();
     relift_proc::workers::parallel(&indexed, |&i| {
-        emit_module(&fe, &placed[i], i, (&found[i], &supersets[i]), image_id, &reason)
+        emit_module(
+            &fe,
+            &placed[i],
+            i,
+            (&found[i], &supersets[i]),
+            image_id,
+            &reason,
+        )
     })
 }
 

@@ -16,6 +16,7 @@ failed=0
 for prog in "$out"/*.dyn; do
     name=$(basename "$prog" .dyn)
     dir=$here/$name
+    [ -d "$dir/etc" ] && continue
     work=$remote/$name
     script=$out/$name.remote.sh
     {

@@ -1,0 +1,7 @@
+pw relift uid=1234 gid=100 gecos=Relift Test home=/home/relift shell=/bin/zsh
+uid 0: root
+nobody-here: none
+gr users gid=100 members: relift guest
+gid 0: root
+host box.example.test 10.20.30.40
+addr 127.0.0.1:80

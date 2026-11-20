@@ -37,6 +37,13 @@ writes the two expected files; it takes the lock `RELIFT_ADB_LOCK` names (defaul
 device, picks the device with `ANDROID_SERIAL`, and removes what it pushed. `run.sh <out-dir> <name> <variant>`
 runs one build under `qemu-aarch64` when that is installed.
 
+An `etc` directory holds the system configuration the program reads
+(`nsswitch.conf`, `passwd`, `group`, `hosts`): `check.sh` imports the
+program with a sysroot that has it, and `record.sh` runs the program on the
+device in a root directory (`chroot`) that holds the same files and the
+libraries, since glibc reads these at fixed paths; `verify_dyn.sh` skips
+such programs.
+
 A `gconv` file marks a program that loads glibc's iconv plugins: the device
 runs it with `GCONV_PATH` pointing at the sysroot's `gconv` directory pushed
 beside it, and relift imports the plugin directory glibc spells with the

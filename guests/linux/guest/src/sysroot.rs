@@ -28,6 +28,7 @@ pub const LOADER_CONFIG: [&str; 3] = ["/etc/ld.so.cache", "/etc/ld.so.preload", 
 
 const MAX_LINKS: usize = 40;
 const MAX_FILE: u64 = 1 << 30;
+const MAX_CONFIG: usize = 1 << 20;
 
 /// One file of the closure.
 #[derive(Clone, Debug)]
@@ -458,6 +459,17 @@ fn spelled_directories(bytes: &[u8]) -> BTreeSet<String> {
         .collect()
 }
 
+/// The absolute paths under `/etc` a file spells out: the files of the
+/// system's configuration glibc reads (`/etc/nsswitch.conf`,
+/// `/etc/passwd`), without the loader's own, which are never present.
+fn spelled_configs(bytes: &[u8]) -> BTreeSet<String> {
+    spelled_strings(bytes)
+        .filter(|s| s.starts_with("/etc/") && !s.contains('%') && s.len() > 5)
+        .map(normalize)
+        .filter(|s| !LOADER_CONFIG.contains(&s.as_str()))
+        .collect()
+}
+
 struct Walk {
     out: Closure,
     plugin_dirs: BTreeSet<String>,
@@ -661,6 +673,18 @@ pub fn closure(
                         w.add(at, &n, found);
                     }
                 }
+            }
+        }
+        for path in spelled_configs(&w.files[at]) {
+            if let Some((bytes, real)) = sysroot.read(&path)
+                && bytes.len() <= MAX_CONFIG
+                && !w.out.data.iter().any(|d| d.paths.contains(&path))
+            {
+                let mut paths = vec![path];
+                if !paths.contains(&real) {
+                    paths.push(real);
+                }
+                w.out.data.push(DataFile { paths, bytes });
             }
         }
         for dir in spelled_directories(&w.files[at]) {
@@ -876,6 +900,29 @@ mod tests {
         let (host, guest) = sys.resolve("/lib/lib.so").expect("resolves");
         assert_eq!(guest, "/real/lib.so");
         assert!(host.starts_with(sys.root.clone()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_configuration_files_a_library_spells_join_as_data() {
+        let mut libc = elf(&[], None, None);
+        libc.extend_from_slice(b"\0/etc/passwd\0/etc/hosts\0/etc/ld.so.conf\0/etc/gone\0");
+        let exe = elf(&["libc.so.6"], None, None);
+        let dir = root(
+            "etc",
+            &[
+                ("/lib/libc.so.6", libc),
+                ("/etc/passwd", b"root:x:0:0::/:/bin/sh\n".to_vec()),
+                ("/etc/hosts", b"127.0.0.1 localhost\n".to_vec()),
+                ("/etc/ld.so.conf", b"/opt\n".to_vec()),
+            ],
+        );
+        let sys = Sysroot::new(&dir).expect("sysroot");
+        let object = elf::parse(&exe).expect("parses");
+        let c = closure(&object, &exe, "/app", &sys).expect("closure");
+        let mut paths: Vec<&str> = c.data.iter().map(|d| d.paths[0].as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["/etc/hosts", "/etc/passwd"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 
