@@ -297,6 +297,17 @@ int nvn_builder_device_fields(rl_ctx *c, uint8_t *mem, uint64_t builder)
     return nvn_device_fields(c, mem, rl_ld64(mem, builder + g_layout->builder_device));
 }
 
+int nvn_builder_storage_class(rl_ctx *c, uint8_t *mem, uint64_t builder, uint64_t *cls)
+{
+    *cls = 0;
+    if (!g_layout)
+        return RL_OK;
+    int rc = nvn_builder_device_fields(c, mem, builder);
+    if (rc != RL_OK)
+        return rc;
+    return nvn_guest_call(c, mem, g_layout->storage_class, &builder, 1, cls);
+}
+
 /** @brief nvnTextureBuilderGetStorageClass(const NVNtextureBuilder *): the driver's own function, on the fields it reads. */
 uint64_t nvnh_nvnTextureBuilderGetStorageClass(rl_ctx *c, uint8_t *mem)
 {

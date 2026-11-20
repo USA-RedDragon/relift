@@ -144,6 +144,10 @@ bool nvn_crop_rect(const int32_t crop[4], uint32_t width, uint32_t height, uint3
     X(nvnTextureGetTarget)                                                                                             \
     X(nvnTextureGetFlags)                                                                                              \
     X(nvnTextureGetStorageSize)                                                                                        \
+    X(nvnTextureGetSwizzle)                                                                                            \
+    X(nvnTextureGetDepthStencilMode)                                                                                   \
+    X(nvnTextureGetStorageClass)                                                                                       \
+    X(nvnTextureCompare)                                                                                               \
     X(nvnTextureGetLevels)                                                                                             \
     X(nvnTextureGetMemoryPool)                                                                                         \
     X(nvnTextureGetMemoryOffset)                                                                                       \
@@ -173,6 +177,8 @@ typedef struct nvn_tex_desc {
     uint32_t target, format, width, height, depth, levels, samples, flags;
     /** @brief NVNtextureSwizzle of each channel (the builder's), as the texture is sampled without a view. */
     uint32_t swizzle[4];
+    /** @brief NVNdepthStencilMode of the builder, as nvnTextureGetDepthStencilMode answers it. */
+    uint32_t ds_mode;
     uint64_t stride, pool, offset;
     /** @brief Bytes of storage, its alignment and the bytes from one layer to the next. */
     uint64_t size, align, layer_stride;
@@ -230,6 +236,18 @@ bool nvn_tex_copy(const nvn_tex_desc *d, uint8_t *storage, uint32_t level, uint3
                   uint8_t *packed, bool to_storage);
 /** @brief The layout of the texture at guest address tex, or NULL. */
 const nvn_tex_desc *nvn_texture_desc(uint64_t tex);
+/** @brief Bytes of an NVN1 texture builder the layer keeps with the texture it initializes (the driver's builder reads up to +108). */
+#define NVN_TEXTURE_BUILDER_BYTES 128u
+/**
+ * @brief Records a texture of layout d at guest address tex, as nvnTextureInitialize does once it has the layout, with
+ * the NVN_TEXTURE_BUILDER_BYTES bytes of the builder it came from (NULL for none); false when it cannot.
+ */
+bool nvn_texture_record(uint64_t tex, const nvn_tex_desc *d, const uint8_t *builder);
+/**
+ * @brief The NVNstorageClass the driver's own function answers for the texture builder at builder (0 when the build
+ * read no driver layout), as nvnTextureBuilderGetStorageClass does. Returns RL_OK or a pending stop.
+ */
+int nvn_builder_storage_class(rl_ctx *c, uint8_t *mem, uint64_t builder, uint64_t *cls);
 /**
  * @brief Texture id's registration: the texture's guest address (0 when the id is free), whether it was
  * registered as an image, and a copy of its view's bytes (has_view false for none).
@@ -754,7 +772,7 @@ uint32_t nvn_format_count(void);
 bool nvn_version_measured(uint32_t info, int32_t *out);
 
 /** @brief Number of procs that stay the SDK driver's own code (nvn_driver.c). */
-#define NVN_DRIVER_PROC_COUNT 319u
+#define NVN_DRIVER_PROC_COUNT 322u
 
 /**
  * @brief Whether the kept proc name reads what the driver's own

@@ -72,6 +72,9 @@ enum { FLAG_LINEAR = 1u << 4, FLAG_LINEAR_RENDER_TARGET = 1u << 6 };
 typedef struct nvn_texture {
     nvn_obj o;
     nvn_tex_desc d;
+    /** @brief The builder's bytes on NVN1 (nvn_texture_record), which the driver's storage class function reads at a call. */
+    uint8_t builder[NVN_TEXTURE_BUILDER_BYTES];
+    bool has_builder;
 } nvn_texture;
 
 typedef struct nvn_desc_pool {
@@ -227,7 +230,12 @@ static int read_builder(rl_ctx *c, uint8_t *mem, uint64_t builder, nvn_tex_desc 
         return src;
     uint32_t swz[4];
     memcpy(swz, mem + out, sizeof swz);
+    uint64_t ds = 0;
+    src = nvn_driver_call(c, mem, "nvnTextureBuilderGetDepthStencilMode", &builder, 1, &ds);
+    if (src != RL_OK)
+        return src;
     memset(d, 0, sizeof *d);
+    d->ds_mode = (uint32_t)ds;
     d->target = (uint32_t)v[0];
     d->format = (uint32_t)v[1];
     d->width = (uint32_t)v[2];
@@ -379,14 +387,12 @@ uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
     rc = read_storage(c, mem, builder, &d, NULL, NULL);
     if (rc != RL_OK)
         return (uint64_t)rc;
-    nvn_texture *t = (nvn_texture *)nvn_obj_new(tex, NVN_TEXTURE, sizeof *t);
-    if (t)
-        t->d = d;
+    bool recorded = nvn_texture_record(tex, &d, nvn_generation() == 1 ? mem + builder : NULL);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "nvnTextureInitialize(0x%llx): target %u format %u %ux%ux%u levels %u flags 0x%x, size 0x%llx",
                (unsigned long long)tex, d.target, d.format, d.width, d.height, d.depth, d.levels, d.flags,
                (unsigned long long)d.size);
-    c->x[0] = t != NULL;
+    c->x[0] = recorded;
     return nvn_ret(c);
 }
 
@@ -438,6 +444,105 @@ const nvn_tex_desc *nvn_texture_desc(uint64_t tex)
 {
     nvn_texture *t = (nvn_texture *)nvn_obj_get(tex, NVN_TEXTURE);
     return t ? &t->d : NULL;
+}
+
+bool nvn_texture_record(uint64_t tex, const nvn_tex_desc *d, const uint8_t *builder)
+{
+    nvn_texture *t = (nvn_texture *)nvn_obj_new(tex, NVN_TEXTURE, sizeof *t);
+    if (t) {
+        t->d = *d;
+        if (builder) {
+            memcpy(t->builder, builder, sizeof t->builder);
+            t->has_builder = true;
+        }
+    }
+    return t != NULL;
+}
+
+static const nvn_tex_desc *tex_of(rl_ctx *c, uint64_t a, const char *proc)
+{
+    const nvn_tex_desc *d = nvn_texture_desc(a);
+    if (!d)
+        rl_guest_fatal(c, "nvn", "%s on 0x%llx, not a texture", proc, (unsigned long long)a);
+    return d;
+}
+
+/**
+ * @brief nvnTextureGetSwizzle(const NVNtexture *, NVNtextureSwizzle *r, *g, *b, *a): the builder's swizzle. An
+ * NVN2 driver's own code reads it back from the texture its nvnTextureInitialize filled; on NVN1, whose textures
+ * the layer initializes itself, the driver's getter would read fields nothing wrote, so the layer answers with the
+ * swizzle it read from the builder (the driver's NVN1 texture holds a copy of the builder's four words).
+ */
+uint64_t nvnh_nvnTextureGetSwizzle(rl_ctx *c, uint8_t *mem)
+{
+    const nvn_tex_desc *d = tex_of(c, c->x[0], "nvnTextureGetSwizzle");
+    if (!d)
+        return RL_PENDING;
+    for (unsigned i = 0; i < 4; i++)
+        rl_st32(mem, c->x[1 + i], d->swizzle[i]);
+    return nvn_ret(c);
+}
+
+/** @brief nvnTextureGetDepthStencilMode(const NVNtexture *): NVNdepthStencilMode, the builder's word as the driver's NVN1 texture holds it. */
+uint64_t nvnh_nvnTextureGetDepthStencilMode(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    const nvn_tex_desc *d = tex_of(c, c->x[0], "nvnTextureGetDepthStencilMode");
+    if (!d)
+        return RL_PENDING;
+    c->x[0] = d->ds_mode;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief nvnTextureGetStorageClass(const NVNtexture *): NVNstorageClass. The NVN1 driver returns 0x100 or a byte its
+ * nvnTextureInitialize stores in the texture, from the same inputs its nvnTextureBuilderGetStorageClass reads (0x100
+ * for a buffer or a linear texture, else what the format and device give); the layer keeps the builder's bytes and
+ * runs the driver's own builder function on a copy of them (inferred to be the same value, see
+ * .work/s2-console-questions.md). Stops when the texture has no builder bytes or the build read no driver layout.
+ */
+uint64_t nvnh_nvnTextureGetStorageClass(rl_ctx *c, uint8_t *mem)
+{
+    nvn_texture *t = (nvn_texture *)nvn_obj_get(c->x[0], NVN_TEXTURE);
+    if (!t)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnTextureGetStorageClass on 0x%llx, not a texture", (unsigned long long)c->x[0]);
+    if (!t->has_builder)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnTextureGetStorageClass: the layer holds no builder for 0x%llx", (unsigned long long)c->x[0]);
+    uint64_t sp = c->sp, copy = (sp - NVN_TEXTURE_BUILDER_BYTES) & ~15ull, cls = 0;
+    memcpy(mem + copy, t->builder, sizeof t->builder);
+    c->sp = copy;
+    int rc = nvn_builder_storage_class(c, mem, copy, &cls);
+    c->sp = sp;
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    if (!cls)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "nvnTextureGetStorageClass: the build read no driver layout to answer it from");
+    c->x[0] = cls;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief nvnTextureCompare(const NVNtexture *, const NVNtexture *): NVNboolean. The NVN1 driver compares the words
+ * of the two texture objects its own nvnTextureInitialize filled: the pool, offset, derived addresses and size,
+ * width, height, depth, levels, format, flags, swizzle, depth stencil mode and the 64-byte hardware descriptor. The
+ * layer does not run that initialization on NVN1, so it compares what those words are derived from, the values it
+ * read from the two builders: textures that differ in one of them differ in a word of the driver's, and the
+ * driver's derived words (class, size, descriptor) follow from them and the device, which one program shares. A
+ * stride only reaches the driver's words of a linear texture, so it only counts there. (On NVN2 the driver's own
+ * function stays, as its nvnTextureInitialize runs.)
+ */
+uint64_t nvnh_nvnTextureCompare(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    const nvn_tex_desc *a = tex_of(c, c->x[0], "nvnTextureCompare");
+    const nvn_tex_desc *b = a ? tex_of(c, c->x[1], "nvnTextureCompare") : NULL;
+    if (!a || !b)
+        return RL_PENDING;
+    c->x[0] = a->pool == b->pool && a->offset == b->offset && a->flags == b->flags && a->target == b->target &&
+              a->width == b->width && a->height == b->height && a->depth == b->depth && a->levels == b->levels &&
+              a->format == b->format && a->samples == b->samples && !memcmp(a->swizzle, b->swizzle, sizeof a->swizzle) &&
+              a->ds_mode == b->ds_mode && (!(a->flags & (FLAG_LINEAR | FLAG_LINEAR_RENDER_TARGET)) || a->stride == b->stride);
+    return nvn_ret(c);
 }
 
 static uint64_t tex_get(rl_ctx *c, int field)

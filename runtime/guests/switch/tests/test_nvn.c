@@ -296,6 +296,12 @@ TEST(nvn_debug_and_checkpoint_procs_stay_the_drivers_and_the_layers_getters_do_n
     CHECK_EQ(nvn_driver_index("nvnCommandBufferGetMemoryCallback"), -1);
     CHECK_EQ(nvn_driver_index("nvnTexturePoolGetMemoryPool"), -1);
     CHECK_EQ(nvn_driver_index("nvnWindowGetNativeWindow"), -1);
+    CHECK(nvn_driver_index("nvnTextureGetSwizzle") >= 0);
+    CHECK(nvn_driver_index("nvnTextureGetDepthStencilMode") >= 0);
+    CHECK(nvn_driver_index("nvnTextureCompare") >= 0);
+    CHECK(nvn_driver_reads_texture("nvnTextureGetSwizzle"));
+    CHECK(nvn_driver_reads_texture("nvnTextureGetDepthStencilMode"));
+    CHECK(nvn_driver_reads_texture("nvnTextureCompare"));
 }
 
 TEST(nvn_slots_hold_ids_past_the_device_limit)
@@ -673,6 +679,86 @@ TEST(nvn_presents_show_the_window_crop)
     CHECK(r[0] == 0 && r[1] == 100 && r[2] == 3840 && r[3] == 2060);
     static const int32_t outside[4] = { 3840, 0, 16, 16 };
     CHECK(!nvn_crop_rect(outside, 3840, 2160, r));
+}
+
+static nvn_tex_desc sample_texture(void)
+{
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 64, .height = 32, .depth = 1, .levels = 3, .samples = 0,
+                       .flags = 0, .swizzle = { 4, 3, 2, 1 }, .ds_mode = 2, .pool = 0x1000, .offset = 0x200 };
+    return d;
+}
+
+TEST(nvn_texture_getters_answer_from_the_builders_values)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t tex = heap + 0x400, out = heap + 0x800;
+    nvn_tex_desc d = sample_texture();
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    c->x[4] = out + 12;
+    c->x[0] = tex;
+    c->x[1] = out;
+    c->x[2] = out + 4;
+    c->x[3] = out + 8;
+    c->x[30] = RET;
+    CHECK_EQ(nvnh_nvnTextureGetSwizzle(c, t_mem()), RET);
+    for (uint32_t i = 0; i < 4; i++)
+        CHECK_EQ(rl_ld32(t_mem(), out + 4 * i), 4 - i);
+    CHECK_EQ(call(c, nvnh_nvnTextureGetDepthStencilMode, tex, 0, 0, 0), RET);
+    CHECK_EQ(c->x[0], 2);
+    CHECK_EQ(call(c, nvnh_nvnTextureGetDepthStencilMode, tex + 8, 0, 0, 0), RL_PENDING);
+}
+
+TEST(nvn_texture_compare_follows_the_values_a_texture_was_built_from)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t a = heap + 0x400, b = heap + 0x500, e = heap + 0x600;
+    nvn_tex_desc d = sample_texture();
+    CHECK(nvn_texture_record(a, &d, NULL));
+    CHECK(nvn_texture_record(b, &d, NULL));
+    CHECK_EQ(call(c, nvnh_nvnTextureCompare, a, b, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+    d.offset += 0x100;
+    CHECK(nvn_texture_record(e, &d, NULL));
+    CHECK_EQ(call(c, nvnh_nvnTextureCompare, a, e, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    d = sample_texture();
+    d.swizzle[3] = 5;
+    CHECK(nvn_texture_record(e, &d, NULL));
+    CHECK_EQ(call(c, nvnh_nvnTextureCompare, a, e, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+    d = sample_texture();
+    d.stride = 4096;
+    CHECK(nvn_texture_record(e, &d, NULL));
+    CHECK_EQ(call(c, nvnh_nvnTextureCompare, a, e, 0, 0), RET);
+    CHECK_EQ(c->x[0], 1);
+    d.flags = 16;
+    CHECK(nvn_texture_record(e, &d, NULL));
+    CHECK_EQ(call(c, nvnh_nvnTextureCompare, a, e, 0, 0), RET);
+    CHECK_EQ(c->x[0], 0);
+}
+
+TEST(nvn_texture_storage_class_needs_the_builder_it_was_made_from)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    nvn_tex_desc d = sample_texture();
+    rl_nvn_set_layout(NULL);
+    CHECK(nvn_texture_record(heap + 0x400, &d, NULL));
+    CHECK_EQ(call(c, nvnh_nvnTextureGetStorageClass, heap + 0x400, 0, 0, 0), RL_PENDING);
+}
+
+TEST(nvn_texture_storage_class_needs_the_drivers_layout_too)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    nvn_tex_desc d = sample_texture();
+    uint8_t builder[NVN_TEXTURE_BUILDER_BYTES] = { 0 };
+    rl_nvn_set_layout(NULL);
+    CHECK(nvn_texture_record(heap + 0x400, &d, builder));
+    c->sp = heap + 0x100000;
+    CHECK_EQ(call(c, nvnh_nvnTextureGetStorageClass, heap + 0x400, 0, 0, 0), RL_PENDING);
 }
 
 TEST(nvn_storage_class_needs_the_drivers_layout)

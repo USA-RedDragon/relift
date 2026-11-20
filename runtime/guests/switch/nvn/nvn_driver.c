@@ -294,10 +294,13 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnTextureBuilderSetSwizzle",
     "nvnTextureBuilderSetTarget",
     "nvnTextureBuilderSetWidth",
+    "nvnTextureCompare",
     "nvnTextureGetDebugID",
+    "nvnTextureGetDepthStencilMode",
     "nvnTextureGetRawStorageClass",
     "nvnTextureGetSparseTileLayout",
     "nvnTextureGetStorageClass",
+    "nvnTextureGetSwizzle",
     "nvnTextureViewCompare",
     "nvnTextureViewGetDepthStencilMode",
     "nvnTextureViewGetFormat",
@@ -360,8 +363,9 @@ int nvn_driver_index(const char *name)
 
 bool nvn_driver_reads_texture(const char *name)
 {
-    static const char *const getters[] = { "nvnTextureGetRawStorageClass", "nvnTextureGetSparseTileLayout",
-                                           "nvnTextureGetStorageClass" };
+    static const char *const getters[] = { "nvnTextureCompare",       "nvnTextureGetDepthStencilMode",
+                                           "nvnTextureGetRawStorageClass", "nvnTextureGetSparseTileLayout",
+                                           "nvnTextureGetStorageClass",   "nvnTextureGetSwizzle" };
     for (size_t i = 0; i < sizeof getters / sizeof getters[0]; i++)
         if (name && !strcmp(name, getters[i]))
             return true;
