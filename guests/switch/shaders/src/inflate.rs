@@ -32,6 +32,17 @@ struct Bits<'a> {
 }
 
 impl<'a> Bits<'a> {
+    fn refill(&mut self) {
+        while self.cnt <= 56 {
+            let Some(&b) = self.data.get(self.pos) else {
+                break;
+            };
+            self.pos += 1;
+            self.buf |= u64::from(b) << self.cnt;
+            self.cnt += 8;
+        }
+    }
+
     fn need(&mut self, n: u32) -> Result<()> {
         while self.cnt < n {
             let Some(&b) = self.data.get(self.pos) else {
@@ -66,9 +77,15 @@ impl<'a> Bits<'a> {
     }
 }
 
+/// How many bits the first-level decoding table of a Huffman code looks up.
+const FAST_BITS: u32 = 10;
+
 struct Huffman {
     count: [u16; MAX_BITS + 1],
     symbol: Vec<u16>,
+    /// Per `FAST_BITS` bits of input: the symbol shifted left by 4 or'd with
+    /// the code length, 0 where the code is longer than `FAST_BITS`.
+    fast: Vec<u16>,
 }
 
 impl Huffman {
@@ -95,10 +112,51 @@ impl Huffman {
                 offs[usize::from(l)] += 1;
             }
         }
-        Ok(Huffman { count, symbol })
+        let mut fast = vec![0u16; 1 << FAST_BITS];
+        let mut next = [0u32; MAX_BITS + 2];
+        let mut code = 0u32;
+        let mut prev = 0u32;
+        for len in 1..=MAX_BITS {
+            code = (code + prev) << 1;
+            next[len] = code;
+            prev = u32::from(count[len]);
+        }
+        for (sym, &l) in lengths.iter().enumerate() {
+            let l = u32::from(l);
+            if l == 0 {
+                continue;
+            }
+            let c = next[l as usize];
+            next[l as usize] += 1;
+            if l <= FAST_BITS {
+                let rev = c.reverse_bits() >> (32 - l);
+                let entry = ((sym as u16) << 4) | l as u16;
+                let mut at = rev as usize;
+                while at < fast.len() {
+                    fast[at] = entry;
+                    at += 1 << l;
+                }
+            }
+        }
+        Ok(Huffman {
+            count,
+            symbol,
+            fast,
+        })
     }
 
     fn decode(&self, bits: &mut Bits) -> Result<usize> {
+        bits.refill();
+        let e = self.fast[(bits.buf & ((1 << FAST_BITS) - 1)) as usize];
+        if e != 0 {
+            let len = u32::from(e & 15);
+            if len > bits.cnt {
+                return malformed("deflate: the stream ends early");
+            }
+            bits.buf >>= len;
+            bits.cnt -= len;
+            return Ok(usize::from(e >> 4));
+        }
         let mut code: i32 = 0;
         let mut first: i32 = 0;
         let mut index: i32 = 0;
@@ -212,8 +270,12 @@ fn codes(
             return malformed("deflate: output over the limit");
         }
         let from = out.len() - back;
-        for k in 0..len {
-            out.push(out[from + k]);
+        if back >= len {
+            out.extend_from_within(from..from + len);
+        } else {
+            for k in 0..len {
+                out.push(out[from + k]);
+            }
         }
     }
 }
@@ -302,4 +364,68 @@ pub fn zlib(data: &[u8], limit: usize) -> Result<(Vec<u8>, usize)> {
         return malformed("zlib: the checksum does not match");
     }
     Ok((out, end + 4))
+}
+
+fn crc32(b: &[u8]) -> u32 {
+    let mut table = [0u32; 256];
+    for (i, t) in table.iter_mut().enumerate() {
+        let mut c = i as u32;
+        for _ in 0..8 {
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
+        }
+        *t = c;
+    }
+    !b.iter().fold(!0u32, |c, &x| {
+        table[((c ^ u32::from(x)) & 0xFF) as usize] ^ (c >> 8)
+    })
+}
+
+/// Decode a gzip member (RFC 1952: header, deflate, CRC-32 and length);
+/// gives the output and how many input bytes the member took.
+///
+/// # Errors
+///
+/// The header, stream, checksum or length is bad, or the output passes
+/// `limit`.
+pub fn gzip(data: &[u8], limit: usize) -> Result<(Vec<u8>, usize)> {
+    if data.len() < 18 || data[..3] != [0x1F, 0x8B, 8] || data[3] & 0xE0 != 0 {
+        return malformed("gzip: no header");
+    }
+    let flags = data[3];
+    let mut at = 10;
+    if flags & 4 != 0 {
+        let Some(n) = data.get(at..at + 2) else {
+            return malformed("gzip: the header is cut off");
+        };
+        at += 2 + usize::from(u16::from_le_bytes([n[0], n[1]]));
+    }
+    for bit in [8, 16] {
+        if flags & bit != 0 {
+            let Some(z) = data.get(at..).and_then(|r| r.iter().position(|&x| x == 0)) else {
+                return malformed("gzip: a text field is not ended");
+            };
+            at += z + 1;
+        }
+    }
+    if flags & 2 != 0 {
+        at += 2;
+    }
+    let Some(body) = data.get(at..) else {
+        return malformed("gzip: the header is cut off");
+    };
+    let (out, used) = inflate(body, limit)?;
+    let end = at + used;
+    let Some(tail) = data.get(end..end + 8) else {
+        return malformed("gzip: no trailer");
+    };
+    let crc = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]);
+    let size = u32::from_le_bytes([tail[4], tail[5], tail[6], tail[7]]);
+    if crc != crc32(&out) || size != out.len() as u32 {
+        return malformed("gzip: the checksum or length does not match");
+    }
+    Ok((out, end + 8))
 }

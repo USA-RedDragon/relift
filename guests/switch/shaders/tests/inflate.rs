@@ -1,7 +1,7 @@
 //! RFC 1950/1951 decoding against streams made by zlib at authoring time:
 //! a stored block, fixed Huffman codes and dynamic Huffman codes.
 
-use relift_switch_shaders::inflate::{inflate, zlib};
+use relift_switch_shaders::inflate::{gzip, inflate, zlib};
 
 const STORED: &[u8] = &[
     0x78, 0x01, 0x01, 0x2d, 0x00, 0xd2, 0xff, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75, 0x69, 0x63, 0x6b,
@@ -171,4 +171,63 @@ fn bad_input_is_an_error() {
     assert!(zlib(DYNAMIC, 100).is_err(), "output over the limit");
     assert!(zlib(&[0x79, 0x01, 0, 0], 100).is_err(), "a bad header");
     assert!(inflate(&[0x07], 100).is_err(), "a reserved block type");
+}
+
+fn crc32(b: &[u8]) -> u32 {
+    let mut c = !0u32;
+    for &x in b {
+        c ^= u32::from(x);
+        for _ in 0..8 {
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
+        }
+    }
+    !c
+}
+
+fn member(flags: u8, header_extra: &[u8], body: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut v = vec![0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3];
+    v.extend_from_slice(header_extra);
+    v.extend_from_slice(body);
+    v.extend_from_slice(&crc32(data).to_le_bytes());
+    v.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    v
+}
+
+fn stored_deflate(data: &[u8]) -> Vec<u8> {
+    let n = data.len() as u16;
+    let mut b = vec![1];
+    b.extend_from_slice(&n.to_le_bytes());
+    b.extend_from_slice(&(!n).to_le_bytes());
+    b.extend_from_slice(data);
+    b
+}
+
+#[test]
+fn a_gzip_member_checks_its_crc_and_length() {
+    let m = member(0, &[], &stored_deflate(FOX), FOX);
+    let (out, used) = gzip(&m, 1 << 20).expect("decodes");
+    assert_eq!(out, FOX);
+    assert_eq!(used, m.len());
+    let mut bad = m.clone();
+    let n = bad.len();
+    bad[n - 5] ^= 1;
+    assert!(gzip(&bad, 1 << 20).is_err());
+    let mut short = m;
+    let n = short.len();
+    short[n - 1] ^= 1;
+    assert!(gzip(&short, 1 << 20).is_err());
+}
+
+#[test]
+fn a_gzip_header_may_carry_extra_name_and_comment_fields() {
+    let mut extra = vec![3, 0, 1, 2, 3];
+    extra.extend_from_slice(b"name\0");
+    extra.extend_from_slice(b"note\0");
+    let m = member(4 | 8 | 16, &extra, &stored_deflate(FOX), FOX);
+    assert_eq!(gzip(&m, 1 << 20).expect("decodes").0, FOX);
+    assert!(gzip(&m[..14], 1 << 20).is_err());
 }
