@@ -801,6 +801,10 @@ struct nvn_obj {
 nvn_obj *nvn_obj_new(uint64_t addr, uint32_t kind, size_t size);
 /** @brief The object for the NVN object at addr, of kind (0: any kind), or NULL. */
 nvn_obj *nvn_obj_get(uint64_t addr, uint32_t kind);
+/** @brief The first vi vsync after t (CLOCK_MONOTONIC ns), for the headless pacing measurement mode. */
+int64_t nvn_vsync_after(int64_t t);
+/** @brief One line of the frame trace (stats.trace), with vi_trace's kinds and fields. */
+void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
 /** @brief Removes and frees o; NULL does nothing. */
 void nvn_obj_free(nvn_obj *o);
 

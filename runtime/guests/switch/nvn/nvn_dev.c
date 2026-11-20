@@ -401,6 +401,10 @@ int64_t nvn_window_top(uint32_t origin, uint32_t height, int64_t y, int64_t h)
 
 void nvn_frame_presented(void) { vi_guest_frame(); }
 
+int64_t nvn_vsync_after(int64_t t) { return vi_vsync_after(t); }
+
+void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c) { vi_trace(kind, a, b, c); }
+
 /** @brief nvnDeviceSetWindowOriginMode(NVNdevice *, NVNwindowOriginMode). */
 uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)
 {

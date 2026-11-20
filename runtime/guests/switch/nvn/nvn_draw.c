@@ -877,6 +877,14 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
     return RL_OK;
 }
 
+/** @brief CLOCK_MONOTONIC in nanoseconds. */
+static int64_t now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
 static VkPipeline pipeline_of(replay *r, const pipe_key *k)
 {
     for (uint32_t i = 0; i < d.npipes; i++)
@@ -998,7 +1006,9 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                         .layout = d.layout };
     VkPipeline p;
     nvn_core_leave();
+    int64_t t0 = now_ns();
     VkResult vr = VK(vkCreateGraphicsPipelines)(g.dev, NULL, 1, &ci, NULL, &p);
+    nvn_vk_note_pipeline(now_ns() - t0);
     if (vr != VK_SUCCESS) {
         nvn_vk_stop(r, "vkCreateGraphicsPipelines failed (%d)", (int)vr);
         return NULL;
@@ -1574,7 +1584,10 @@ static VkPipeline compute_pipeline_of(replay *r, const module *m, uint32_t n, co
                                        .layout = d.clayout };
     VkPipeline p;
     nvn_core_leave();
-    if (VK(vkCreateComputePipelines)(g.dev, NULL, 1, &ci, NULL, &p) != VK_SUCCESS) {
+    int64_t t0 = now_ns();
+    VkResult cr = VK(vkCreateComputePipelines)(g.dev, NULL, 1, &ci, NULL, &p);
+    nvn_vk_note_pipeline(now_ns() - t0);
+    if (cr != VK_SUCCESS) {
         nvn_vk_stop(r, "vkCreateComputePipelines failed for %s", m->key);
         return NULL;
     }

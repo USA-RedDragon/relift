@@ -56,8 +56,21 @@ static int64_t now_ns(void);
 
 /** @brief Where the guest thread's time went, summed between two rate lines (nanoseconds and counts). */
 static struct {
-    uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads;
+    uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads, gpu_ns, pipes, pipe_ns;
 } tm;
+
+/** @brief Two timestamps around each submit: the device's busy time per frame. */
+static struct {
+    VkQueryPool pool;
+    double period_ns;
+    bool failed;
+} gpu_ts;
+
+void nvn_vk_note_pipeline(int64_t ns)
+{
+    tm.pipes++;
+    tm.pipe_ns += (uint64_t)ns;
+}
 
 /** @brief Submits si to the guest queue with g.fence, under the core's queue lock when the presenter shares the queue. */
 static VkResult guest_submit(const VkSubmitInfo *si)
@@ -140,6 +153,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     VkPhysicalDeviceProperties props;
     VK(vkGetPhysicalDeviceProperties)(g.phys, &props);
     memcpy(g.name, props.deviceName, sizeof g.name);
+    gpu_ts.period_ns = (double)props.limits.timestampPeriod;
     g.family = b->family;
     feat.clip_control = (ext_features){ .sType = STYPE_DEPTH_CLIP_CONTROL };
     feat.clock = (ext_features){ .sType = STYPE_SHADER_CLOCK };
@@ -953,6 +967,16 @@ bool nvn_vk_begin(replay *r)
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &bi) != VK_SUCCESS)
         return false;
     r->recording = true;
+    if (!gpu_ts.pool && !gpu_ts.failed && gpu_ts.period_ns > 0) {
+        VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                     .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                                     .queryCount = 2 };
+        gpu_ts.failed = VK(vkCreateQueryPool)(g.dev, &qi, NULL, &gpu_ts.pool) != VK_SUCCESS;
+    }
+    if (gpu_ts.pool) {
+        VK(vkResetQueryPool)(g.dev, gpu_ts.pool, 0, 2);
+        VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu_ts.pool, 0);
+    }
     return true;
 }
 
@@ -967,6 +991,8 @@ bool nvn_vk_flush(replay *r)
         return true;
     }
     r->recording = false;
+    if (gpu_ts.pool)
+        VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 1);
     VkResult vr = VK(vkEndCommandBuffer)(g.cb);
     if (vr != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "vkEndCommandBuffer failed (%d)", (int)vr);
@@ -986,6 +1012,11 @@ bool nvn_vk_flush(replay *r)
     tm.wait_ns += (uint64_t)(now_ns() - t1);
     tm.flushes++;
     bool ok = vr == VK_SUCCESS;
+    uint64_t ts[2];
+    if (ok && gpu_ts.pool &&
+        VK(vkGetQueryPoolResults)(g.dev, gpu_ts.pool, 0, 2, sizeof ts, ts, sizeof ts[0], VK_QUERY_RESULT_64_BIT) ==
+            VK_SUCCESS)
+        tm.gpu_ns += (uint64_t)((double)(ts[1] - ts[0]) * gpu_ts.period_ns);
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     g.arena_used = 0;
@@ -2318,6 +2349,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
     tm.runs++;
+    nvn_trace('U', (uint64_t)(now_ns() - t0), n, 0);
     nvn_unlock();
     if (rc == RL_OK)
         finish_runs(done);
@@ -2571,6 +2603,30 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
 
 #define PRESENT_RATE_NS 5000000000ull
 
+/**
+ * @brief RELIFT_HEADLESS_PACE=1, a measuring aid: a run with no window waits for the vi vsync grid after each present,
+ * one vsync at least after the last, as a display with a present interval of 1 does, so its frame times are a
+ * windowed run's.
+ */
+static void pace_headless(void)
+{
+    static int on = -1;
+    static int64_t last;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_HEADLESS_PACE");
+        on = e && *e == '1';
+    }
+    if (!on)
+        return;
+    int64_t now = now_ns();
+    int64_t at = nvn_vsync_after(now > last ? now : last);
+    if (at > now) {
+        struct timespec d = { (time_t)((at - now) / 1000000000ll), (long)((at - now) % 1000000000ll) };
+        nanosleep(&d, NULL);
+    }
+    last = at;
+}
+
 /** @brief The window frames go to, opened with the first one; NULL in a headless run. */
 static rl_window *present_window(uint32_t w, uint32_t h)
 {
@@ -2600,10 +2656,10 @@ static void present_rate(uint64_t total)
     double frames = (double)(total - last_total);
     rl_log(RL_LOG_INFO, "nvn",
            "per present: wall %.2f ms, thread cpu %.2f ms, replay %.2f ms in %.1f submits (%.1f batches), submit call %.2f ms, "
-           "wait for the device %.2f ms",
+           "wait for the device %.2f ms, device busy %.2f ms, %.2f pipelines created taking %.2f ms",
            (double)(now - last_ns) / 1e6 / frames, cpu_ms / frames, (double)tm.run_ns / 1e6 / frames,
            (double)tm.runs / frames, (double)tm.flushes / frames, (double)tm.submit_ns / 1e6 / frames,
-           (double)tm.wait_ns / 1e6 / frames);
+           (double)tm.wait_ns / 1e6 / frames, (double)tm.gpu_ns / 1e6 / frames, (double)tm.pipes / frames, (double)tm.pipe_ns / 1e6 / frames);
     memset(&tm, 0, sizeof tm);
     uint64_t faults, starts;
     nvn_watch_stats(&faults, &starts);
@@ -2688,6 +2744,9 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_core_leave();
+    if (!win)
+        pace_headless();
+    nvn_trace('N', n, 0, 0);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "present %llu: texture 0x%llx, %ux%u", (unsigned long long)n, (unsigned long long)texture,
                rect[2], rect[3]);
