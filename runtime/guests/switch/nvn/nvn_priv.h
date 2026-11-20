@@ -754,7 +754,7 @@ uint32_t nvn_format_count(void);
 bool nvn_version_measured(uint32_t info, int32_t *out);
 
 /** @brief Number of procs that stay the SDK driver's own code (nvn_driver.c). */
-#define NVN_DRIVER_PROC_COUNT 312u
+#define NVN_DRIVER_PROC_COUNT 319u
 
 /**
  * @brief Whether the kept proc name reads what the driver's own

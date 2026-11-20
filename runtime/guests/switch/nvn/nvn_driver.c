@@ -12,8 +12,11 @@
  * SDK 22.2.0 driver); creating, resizing and evaluating a network are not.
  * Texture getters that read what the driver's own nvnTextureInitialize
  * stores in a texture also stay: they read the texture and the device fields
- * the layer writes for that initialization. The list is sorted (strcmp
- * order).
+ * the layer writes for that initialization. The debug ids (always 0), the
+ * debug database walk and the checkpoints (a constant or nothing) read no
+ * state at all, and the two memory callback enables store one byte of the
+ * command buffer object that the layer, which keeps its own record of the
+ * command buffer, never reads. The list is sorted (strcmp order).
  */
 #include "nvn_priv.h"
 
@@ -40,6 +43,7 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnBufferBuilderSetDefaults",
     "nvnBufferBuilderSetDevice",
     "nvnBufferBuilderSetStorage",
+    "nvnBufferGetDebugID",
     "nvnChannelMaskStateGetChannelMask",
     "nvnChannelMaskStateSetChannelMask",
     "nvnChannelMaskStateSetDefaults",
@@ -50,6 +54,10 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnColorStateSetBlendEnable",
     "nvnColorStateSetDefaults",
     "nvnColorStateSetLogicOp",
+    "nvnCommandBufferInsertCheckpointDynamic",
+    "nvnCommandBufferInsertCheckpointStatic",
+    "nvnCommandBufferSetCommandMemoryCallbackEnabled",
+    "nvnCommandBufferSetControlMemoryCallbackEnabled",
     "nvnDepthStencilStateGetDepthFunc",
     "nvnDepthStencilStateGetDepthTestEnable",
     "nvnDepthStencilStateGetDepthWriteEnable",
@@ -66,6 +74,7 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnDeviceBuilderGetFlags",
     "nvnDeviceBuilderSetDefaults",
     "nvnDeviceBuilderSetFlags",
+    "nvnDeviceWalkDebugDatabase",
     "nvnDlssNetworkBuilderGetDevice",
     "nvnDlssNetworkBuilderGetFlags",
     "nvnDlssNetworkBuilderGetMaxEvaluationEntries",
@@ -285,6 +294,7 @@ static const char *const driver_procs[NVN_DRIVER_PROC_COUNT] = {
     "nvnTextureBuilderSetSwizzle",
     "nvnTextureBuilderSetTarget",
     "nvnTextureBuilderSetWidth",
+    "nvnTextureGetDebugID",
     "nvnTextureGetRawStorageClass",
     "nvnTextureGetSparseTileLayout",
     "nvnTextureGetStorageClass",

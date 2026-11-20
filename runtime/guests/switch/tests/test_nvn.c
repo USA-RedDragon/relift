@@ -283,6 +283,21 @@ TEST(nvn_sampler_compare_stays_the_drivers)
     CHECK(nvn_driver_index("nvnTextureViewCompare") >= 0);
 }
 
+TEST(nvn_debug_and_checkpoint_procs_stay_the_drivers_and_the_layers_getters_do_not)
+{
+    CHECK(nvn_driver_index("nvnBufferGetDebugID") >= 0);
+    CHECK(nvn_driver_index("nvnTextureGetDebugID") >= 0);
+    CHECK(nvn_driver_index("nvnDeviceWalkDebugDatabase") >= 0);
+    CHECK(nvn_driver_index("nvnCommandBufferInsertCheckpointDynamic") >= 0);
+    CHECK(nvn_driver_index("nvnCommandBufferInsertCheckpointStatic") >= 0);
+    CHECK(nvn_driver_index("nvnCommandBufferSetCommandMemoryCallbackEnabled") >= 0);
+    CHECK(nvn_driver_index("nvnCommandBufferSetControlMemoryCallbackEnabled") >= 0);
+    CHECK_EQ(nvn_driver_index("nvnCommandBufferIsRecording"), -1);
+    CHECK_EQ(nvn_driver_index("nvnCommandBufferGetMemoryCallback"), -1);
+    CHECK_EQ(nvn_driver_index("nvnTexturePoolGetMemoryPool"), -1);
+    CHECK_EQ(nvn_driver_index("nvnWindowGetNativeWindow"), -1);
+}
+
 TEST(nvn_slots_hold_ids_past_the_device_limit)
 {
     nvn_slots s;
