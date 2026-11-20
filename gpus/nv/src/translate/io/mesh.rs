@@ -67,7 +67,7 @@
 use super::super::{Ctx, INPUT, OUTPUT, Res, bad};
 use crate::program::Stage;
 use crate::spirv::op;
-use crate::translate::WarpPath;
+use crate::translate::{HostProfile, WarpPath};
 use crate::{Fields, Inst, Operand};
 
 pub mod fallback;
@@ -292,6 +292,56 @@ impl MeshPipeline {
             });
         }
         Ok(out)
+    }
+
+    /// The back end a mesh program with the SPH `sph` takes on `host`
+    /// ([`Options::mesh_compute`] left off), and this pipeline as the
+    /// programs of the draw must be translated with it: the fragment
+    /// program of a native draw declares the per-primitive generic
+    /// locations, and the compute back end passes the per-primitive
+    /// PrimitiveId in the location after the highest the mesh program
+    /// writes (without one free, the program is refused when it is
+    /// translated).
+    ///
+    /// # Errors
+    ///
+    /// The SPH or the pipeline names an output the translation does not
+    /// take.
+    pub fn for_host(&self, host: &HostProfile, sph: &[u32; 32]) -> Res<(MeshPath, MeshPipeline)> {
+        let comps = mesh_components(sph)?;
+        let prims = self.primitive_components()?;
+        let shared = 4
+            * (self.vertex_words(comps.len() as u32)
+                + self.primitive_words(prims.len() as u32 + 1)
+                + 1
+                + self.index_words());
+        let native = host.mesh_shader.is_some_and(|l| l.fits(self, shared));
+        let mut p = self.clone();
+        if native {
+            p.fragment_per_primitive = prims
+                .iter()
+                .filter_map(|c| match *c {
+                    PrimComponent::Generic(loc, _) if loc < 64 => Some(1u64 << loc),
+                    _ => None,
+                })
+                .fold(0, |a, b| a | b);
+            return Ok((MeshPath::Native, p));
+        }
+        if prims.contains(&PrimComponent::PrimitiveId) {
+            let top = comps
+                .iter()
+                .filter_map(|c| match *c {
+                    Component::Generic(loc, _) => Some(loc),
+                    _ => None,
+                })
+                .chain(prims.iter().filter_map(|c| match *c {
+                    PrimComponent::Generic(loc, _) => Some(loc),
+                    _ => None,
+                }))
+                .max();
+            p.primitive_id_location = Some(top.map_or(0, |t| t + 1));
+        }
+        Ok((MeshPath::Compute, p))
     }
 
     fn check(&self) -> Res<()> {
