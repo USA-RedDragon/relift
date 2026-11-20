@@ -217,3 +217,39 @@ TEST(nvn_pipe_cache_is_read_back_and_discarded_on_a_changed_header_or_body)
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
+
+TEST(nvn_pipe_without_libraries_warms_each_stage_as_a_pipeline_of_its_own)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    char dir[] = "nvn_pipe_mono_XXXXXX";
+    CHECK(mkdtemp(dir) != NULL);
+    setenv("RELIFT_PIPELINE_MODE", "monolithic", 1);
+    setenv("RELIFT_PIPELINE_CACHE", dir, 1);
+    nvn_pipe_init();
+    CHECK(!nvn_pipe_uses_libraries());
+    CHECK(nvn_draw_layouts());
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_key k;
+    make_key(&k, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
+    uint64_t made0, ns, late, lns, made1;
+    nvn_pipe_stats(&made0, &ns, &late, &lns);
+    CHECK(nvn_pipe_warm_vertex(&k));
+    CHECK(nvn_pipe_warm_fragment(&k));
+    nvn_pipe_stats(&made1, &ns, &late, &lns);
+    CHECK_EQ(made1 - made0, 2u);
+    CHECK(nvn_pipe_graphics(&k) != NULL);
+    nvn_pipe_stats(&made1, &ns, &late, &lns);
+    CHECK_EQ(made1 - made0, 3u);
+    unsetenv("RELIFT_PIPELINE_MODE");
+    unsetenv("RELIFT_PIPELINE_CACHE");
+    nvn_pipe_init();
+    char path[300];
+    snprintf(path, sizeof path, "%s/pipeline-cache.bin", dir);
+    remove(path);
+    rmdir(dir);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+}

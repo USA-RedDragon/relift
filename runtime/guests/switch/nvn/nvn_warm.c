@@ -90,7 +90,7 @@ static bool warm_key(const char *key, const uint32_t *wg, uint32_t *kind)
         *kind = 3;
         return nvn_pipe_compute(m->m, n, map, vals) != NULL;
     }
-    if (wg || !nvn_pipe_uses_libraries())
+    if (wg)
         return true;
     if (m->stage == 0) {
         default_key(&k, m, 0);
