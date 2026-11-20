@@ -648,15 +648,13 @@ VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecialization
     return p;
 }
 
-/** @brief Adds rec to the records of this launch unless one with the same bytes is there. */
-static void record(const nvn_pipe_rec *rec)
+/** @brief Adds rec to the records of this launch unless one with the same bytes is there; true when it was new. */
+static bool record(const nvn_pipe_rec *rec)
 {
     bool mine;
     entry *e = claim_ex(&P.seen, rec, sizeof *rec, &mine, false);
-    if (!e)
-        return;
-    if (!mine)
-        return;
+    if (!e || !mine)
+        return false;
     finish(e, NULL);
     pthread_mutex_lock(&P.lock);
     if (P.nfresh == P.capfresh) {
@@ -664,7 +662,7 @@ static void record(const nvn_pipe_rec *rec)
         nvn_pipe_rec *r = realloc(P.fresh, cap * sizeof *r);
         if (!r) {
             pthread_mutex_unlock(&P.lock);
-            return;
+            return false;
         }
         P.fresh = r;
         P.capfresh = cap;
@@ -672,6 +670,20 @@ static void record(const nvn_pipe_rec *rec)
     P.fresh[P.nfresh++] = *rec;
     P.dirty = true;
     pthread_mutex_unlock(&P.lock);
+    return true;
+}
+
+bool nvn_pipe_record_program(const char *key, uint32_t stage, const uint32_t wg[3])
+{
+    if (stage != NVN_STAGE_COMPUTE && !P.gpl)
+        return false;
+    nvn_pipe_rec rec;
+    memset(&rec, 0, sizeof rec);
+    rec.kind = NVN_REC_PROGRAM;
+    memcpy(rec.keys[5], key, 65);
+    rec.k.topology = stage;
+    memcpy(rec.k.spec[0], wg, 3 * sizeof wg[0]);
+    return record(&rec);
 }
 
 void nvn_pipe_record_graphics(const char *const keys[5], const nvn_pipe_key *k)

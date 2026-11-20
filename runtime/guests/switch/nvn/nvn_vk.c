@@ -773,6 +773,17 @@ bool nvn_vk_probes(nvn_probes *out)
     return g.ok;
 }
 
+bool nvn_vk_ready(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok)
+        return false;
+    pthread_mutex_lock(&g.lock);
+    bool ok = nvn_draw_layouts();
+    pthread_mutex_unlock(&g.lock);
+    return ok;
+}
+
 static bool up(rl_ctx *c)
 {
     pthread_once(&g.once, bring_up);

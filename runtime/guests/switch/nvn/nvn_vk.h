@@ -182,8 +182,10 @@ extern nvn_vkdev g;
 
 /** @brief Makes the pipeline layouts (nvn_draw.c); false when the device refuses. */
 bool nvn_draw_layouts(void);
-/** @brief Makes every pipeline the build's programs need, once (nvn_warm.c); returns when the game may start. */
+/** @brief Starts the warm-up of the programs the build and earlier launches name, once (nvn_warm.c); returns when the game may go on. */
 void nvn_warm_launch(void);
+/** @brief Brings the host device up if no call has, and makes the pipeline layouts; true when both worked. Safe from any thread. */
+bool nvn_vk_ready(void);
 
 /** @brief Draw state a queue keeps across command sets, as the GPU keeps it. */
 typedef struct nvn_gfx {

@@ -109,12 +109,22 @@ typedef struct nvn_pipe_rec {
 
 #define NVN_REC_GRAPHICS 1u
 #define NVN_REC_COMPUTE 2u
+#define NVN_REC_PROGRAM 3u
 
 /** @brief Remembers a graphics pipeline the game made (on a device that links libraries it adds nothing the libraries do not already hold, so it is kept only without them). */
 void nvn_pipe_record_graphics(const char *const keys[5], const nvn_pipe_key *k);
 
 /** @brief Remembers a compute pipeline the game made: its program, and n specialization constants sorted by id. */
 void nvn_pipe_record_compute(const char *key, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
+
+/**
+ * @brief Remembers a program the game registered, with its stage and, for a
+ * compute program, workgroup size. True when it is new (not registered in an
+ * earlier launch or earlier in this one), which is when it needs warming;
+ * programs that warm nothing on this device (not compute, and no libraries)
+ * are never new.
+ */
+bool nvn_pipe_record_program(const char *key, uint32_t stage, const uint32_t wg[3]);
 
 /** @brief The number of pipelines the previous launches recorded (read from the keys file at nvn_pipe_init). */
 uint32_t nvn_pipe_recorded(void);

@@ -1,21 +1,35 @@
 /**
  * @file nvn_warm.c
- * @brief The launch warm-up: the host driver's compile of every program the
- * build translated, done before the game draws.
+ * @brief The shader warm-up: the host driver's compile of the programs a game
+ * uses, done by worker threads ahead of the draws that need them.
  *
  * A draw's pipeline depends on state the game sets as it draws, but the
  * expensive part of it, the driver lowering each shader stage to GPU code,
  * depends only on the stage's module and specialization constants. The
- * warm-up makes that part for every vertex and fragment program of the
- * build's shader table (nvn_pipe.h: pre-raster and fragment libraries), and
- * for every compute program the game has registered (whose workgroup size
- * the game's control section holds), on one worker thread per processor. A
- * draw then only links libraries.
+ * warm-up makes that part (nvn_pipe.h: a pre-raster library of a vertex
+ * program, a fragment library of a fragment program, a compute pipeline of a
+ * compute program, whose workgroup size the game's control section holds), so
+ * a draw only links libraries.
  *
- * RELIFT_PIPELINE_WARM is "block" (the default: the game's first submit
- * returns when the warm-up is done), "background" (it returns at once and a
- * draw that needs a pipeline nobody has made waits for the warm-up to end)
- * or "off".
+ * Three things feed it:
+ *
+ * - The programs the game registers (nvnProgramSetShaders), as it registers
+ *   them: a game builds its programs when it loads, well before the first
+ *   draw that uses them, so the compile runs beside the loading.
+ * - The programs and pipelines earlier launches recorded (nvn_pipe.h), made
+ *   at the first submit before the game goes on, so a later launch has every
+ *   program of a play ready before the game asks for any (and finds them in
+ *   the driver's pipeline cache).
+ * - With RELIFT_PIPELINE_WARM=all, every program of the build's shader
+ *   table, at the first submit.
+ *
+ * RELIFT_PIPELINE_WARM is "registered" (the default: the first two),
+ * "all" (also the table, and the first submit returns when it is done),
+ * "all-background" (the first submit returns at once and a draw that needs
+ * a pipeline nobody has made waits for the warm-up to end) or "off".
+ *
+ * A draw that needs a library or pipeline a worker is making waits for it;
+ * one nobody has started it makes itself.
  */
 #include "nvn_module.h"
 #include "nvn_pipe.h"
@@ -29,32 +43,32 @@
 #include <unistd.h>
 #endif
 
-/** @brief A compute program the game registered: its key and workgroup size. */
-typedef struct compute_job {
+/** @brief A program to warm: its key, stage and, for a compute program, workgroup size. */
+typedef struct job {
     char key[65];
+    uint32_t stage;
     uint32_t wg[3];
-} compute_job;
+} job;
 
 static struct {
     pthread_mutex_t lock;
-    compute_job *compute, *late;
-    pthread_cond_t late_cv;
-    bool late_started;
-    uint32_t ncompute, capcompute, nlate, caplate;
-    bool launched;
-    uint32_t total, next, done, nvertex, nfragment, ncompute_done, nreplayed, failed;
-    uint32_t nrecorded, ncompute0;
+    pthread_cond_t cv;
+    job *queue;
+    uint32_t nqueue, capqueue, active;
+    bool pool_started;
+    bool launched, all, background;
+    uint32_t total, next, done, nrecorded, nshader, failed;
     uint64_t t0, last_log;
-} W = { .lock = PTHREAD_MUTEX_INITIALIZER, .late_cv = PTHREAD_COND_INITIALIZER };
+} W = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
 
 /** @brief Memory one compile may take: a driver compile of a large translated program was measured at 2.4 GiB. */
 #define COMPILE_MEMORY (4ull << 30)
 
 /**
  * @brief The workers to start: one per processor, and no more than the
- * memory available (Linux) or installed (elsewhere) holds at COMPILE_MEMORY each (a driver's compile of a large
- * program takes over a gigabyte, so a worker per processor of a big machine
- * runs it out of memory).
+ * memory available (Linux) or installed (elsewhere) holds at COMPILE_MEMORY
+ * each, so that a worker per processor of a big machine does not run it out
+ * of memory.
  */
 static uint32_t worker_count(void)
 {
@@ -87,6 +101,9 @@ static uint32_t worker_count(void)
     uint64_t by_memory = ram / COMPILE_MEMORY;
     if (by_memory && by_memory < cpus)
         cpus = (uint32_t)by_memory;
+    const char *want = getenv("RELIFT_WARM_THREADS");
+    if (want && atoi(want) > 0)
+        cpus = (uint32_t)atoi(want);
     return cpus ? cpus : 1u;
 }
 
@@ -101,18 +118,30 @@ static void default_key(nvn_pipe_key *k, const nvn_module *m, uint32_t stage)
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
 }
 
-/** @brief Makes the pipeline part of the program with key; wg is the workgroup size of a compute program, else NULL. */
-static bool warm_key(const char *key, const uint32_t *wg, uint32_t *kind)
+/**
+ * @brief Makes what the driver compiles of the program with key and stage
+ * (negative: the stage its translation names; wg: a compute program's
+ * workgroup size, all zero when the game has not said).
+ */
+static bool warm_program(const char *key, int stage, const uint32_t wg[3])
 {
+    static _Atomic bool ready;
+    if (!ready) {
+        if (!nvn_vk_ready())
+            return false;
+        ready = true;
+    }
     char why[200];
-    nvn_module *m = nvn_module_get(key, wg ? NVN_STAGE_COMPUTE : -1, why, sizeof why);
+    nvn_module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m) {
         rl_log(RL_LOG_ERROR, "nvn", "warm-up: %s", why);
         return false;
     }
+    stage = m->stage;
     nvn_pipe_key k;
-    *kind = 0;
-    if (wg && m->stage == (int)NVN_STAGE_COMPUTE) {
+    if (stage == (int)NVN_STAGE_COMPUTE) {
+        if (!wg[0] && !wg[1] && !wg[2])
+            return true;
         VkSpecializationMapEntry map[NVN_MAX_SPECS];
         uint32_t vals[NVN_MAX_SPECS], n = 3;
         for (uint32_t i = 0; i < 3; i++) {
@@ -121,28 +150,20 @@ static bool warm_key(const char *key, const uint32_t *wg, uint32_t *kind)
         }
         nvn_module_default_spec(m, &n, map, vals);
         nvn_spec_sort(&n, map, vals);
-        *kind = 3;
         return nvn_pipe_compute(m->m, n, map, vals) != NULL;
     }
-    if (wg || !nvn_pipe_uses_libraries())
+    if (!nvn_pipe_uses_libraries() || (stage != 0 && stage != 1))
         return true;
-    if (m->stage == 0) {
-        default_key(&k, m, 0);
-        *kind = 1;
-        return nvn_pipe_warm_vertex(&k);
-    }
-    if (m->stage == 1) {
-        default_key(&k, m, 1);
-        *kind = 2;
-        return nvn_pipe_warm_fragment(&k);
-    }
-    return true;
+    default_key(&k, m, stage);
+    return stage == 0 ? nvn_pipe_warm_vertex(&k) : nvn_pipe_warm_fragment(&k);
 }
 
 /** @brief Makes the pipeline of a record the earlier launches kept. */
 static bool make_recorded(const nvn_pipe_rec *rec)
 {
     char why[200];
+    if (rec->kind == NVN_REC_PROGRAM)
+        return warm_program(rec->keys[5], (int)rec->k.topology, rec->k.spec[0]);
     if (rec->kind == NVN_REC_COMPUTE) {
         nvn_module *m = nvn_module_get(rec->keys[5], (int)NVN_STAGE_COMPUTE, why, sizeof why);
         if (!m)
@@ -167,115 +188,102 @@ static bool make_recorded(const nvn_pipe_rec *rec)
     return nvn_pipe_graphics(&k) != NULL;
 }
 
-static void progress(bool force)
+/** @brief Logs progress at most every two seconds, or at once when force is set; W.lock held. */
+static void progress(bool force, const char *what)
 {
     uint64_t now = rl_clock_ns();
     if (!force && now - W.last_log < 2000000000ull)
         return;
     W.last_log = now;
-    rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u of %u programs, %.1f s", W.done, W.total, (now - W.t0) / 1e9);
+    rl_log(RL_LOG_INFO, "nvn", "shader warm-up (%s): %u of %u programs, %.1f s", what, W.done, W.total,
+           (now - W.t0) / 1e9);
 }
 
-static void *worker(void *arg)
+/** @brief A launch worker: takes the next table program or recorded pipeline until none is left. */
+static void *launch_worker(void *arg)
 {
     (void)arg;
     nvn_pipe_worker();
     for (;;) {
         pthread_mutex_lock(&W.lock);
         uint32_t i = W.next++;
-        uint32_t nshader = W.total - W.ncompute0 - W.nrecorded;
-        compute_job cj;
-        bool is_compute = i >= nshader && i < nshader + W.ncompute0;
-        bool is_replay = i >= nshader + W.ncompute0 && i < W.total;
-        if (is_compute)
-            cj = W.compute[i - nshader];
         pthread_mutex_unlock(&W.lock);
         if (i >= W.total)
             return NULL;
-        char key[65];
-        uint32_t kind = 0;
         bool ok = true;
-        if (is_replay) {
-            ok = make_recorded(nvn_pipe_recorded_at(i - nshader - W.ncompute0));
-            kind = 4;
-        } else if (is_compute) {
-            ok = warm_key(cj.key, cj.wg, &kind);
-        } else if (nvn_shader_key_at(i, key)) {
-            ok = warm_key(key, NULL, &kind);
+        if (i < W.nrecorded) {
+            ok = make_recorded(nvn_pipe_recorded_at(i));
+        } else {
+            char key[65];
+            uint32_t wg[3] = { 0, 0, 0 };
+            if (nvn_shader_key_at(i - W.nrecorded, key))
+                ok = warm_program(key, -1, wg);
         }
         pthread_mutex_lock(&W.lock);
         W.done++;
-        W.nvertex += kind == 1;
-        W.nfragment += kind == 2;
-        W.ncompute_done += kind == 3;
-        W.nreplayed += kind == 4;
         W.failed += !ok;
-        progress(false);
+        progress(false, i < W.nrecorded ? "recorded" : "table");
         pthread_mutex_unlock(&W.lock);
     }
 }
 
-static void *background_main(void *arg)
-{
-    (void)arg;
-    worker(NULL);
-    return NULL;
-}
-
-/** @brief Makes the compute pipelines of programs the game registered after the launch warm-up began, in the order it registered them. */
-static void *late_worker(void *arg)
+/** @brief A pool worker: makes the programs the game registers, in the order it registers them. */
+static void *pool_worker(void *arg)
 {
     (void)arg;
     nvn_pipe_worker();
     for (;;) {
         pthread_mutex_lock(&W.lock);
-        while (!W.nlate)
-            pthread_cond_wait(&W.late_cv, &W.lock);
-        compute_job j = W.late[0];
-        memmove(W.late, W.late + 1, --W.nlate * sizeof *W.late);
+        while (!W.nqueue)
+            pthread_cond_wait(&W.cv, &W.lock);
+        job j = W.queue[0];
+        memmove(W.queue, W.queue + 1, --W.nqueue * sizeof *W.queue);
+        W.active++;
         pthread_mutex_unlock(&W.lock);
-        uint32_t kind;
-        warm_key(j.key, j.wg, &kind);
+        bool ok = warm_program(j.key, (int)j.stage, j.wg);
+        pthread_mutex_lock(&W.lock);
+        W.active--;
+        if (!ok)
+            W.failed++;
+        pthread_mutex_unlock(&W.lock);
     }
 }
 
 static void launch(void)
 {
-    W.launched = true;
     const char *mode = getenv("RELIFT_PIPELINE_WARM");
-    bool off = mode && !strcmp(mode, "off"), background = mode && !strcmp(mode, "background");
-    if (!nvn_draw_layouts() || off) {
+    bool off = mode && !strcmp(mode, "off");
+    W.all = mode && (!strcmp(mode, "all") || !strcmp(mode, "all-background"));
+    W.background = mode && !strcmp(mode, "all-background");
+    if (off || !nvn_vk_ready()) {
         nvn_pipe_warmed();
         return;
     }
     pthread_mutex_lock(&W.lock);
+    W.launched = true;
     W.nrecorded = nvn_pipe_recorded();
-    W.ncompute0 = W.ncompute;
-    W.total = nvn_shader_count() + W.ncompute + W.nrecorded;
+    W.nshader = W.all ? nvn_shader_count() : 0;
+    W.total = W.nrecorded + W.nshader;
     W.t0 = W.last_log = rl_clock_ns();
-    uint32_t total = W.total;
+    uint32_t total = W.total, nthreads = worker_count();
     pthread_mutex_unlock(&W.lock);
-    uint32_t nthreads = worker_count();
-    const char *want = getenv("RELIFT_WARM_THREADS");
-    if (want && atoi(want) > 0)
-        nthreads = (uint32_t)atoi(want);
     if (nthreads > total)
         nthreads = total;
     if (!nthreads) {
         nvn_pipe_warmed();
         return;
     }
-    rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u programs on %u threads%s", total, nthreads,
-           background ? ", the game starts now" : "");
+    rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u recorded pipelines and %u table programs on %u threads%s",
+           W.nrecorded, W.nshader, nthreads, W.background ? ", the game starts now" : "");
     nvn_pipe_warming(true);
     pthread_t th[256];
     uint32_t started = 0;
     for (uint32_t i = 0; i < nthreads && i < 256; i++)
-        if (pthread_create(&th[started], NULL, background ? background_main : worker, NULL) == 0)
+        if (pthread_create(&th[started], NULL, launch_worker, NULL) == 0)
             started++;
     if (!started)
-        worker(NULL);
-    if (background) {
+        launch_worker(NULL);
+    if (W.background) {
         for (uint32_t i = 0; i < started; i++)
             pthread_detach(th[i]);
         return;
@@ -284,12 +292,13 @@ static void launch(void)
         pthread_join(th[i], NULL);
     uint64_t made, made_ns, late, late_ns;
     nvn_pipe_stats(&made, &made_ns, &late, &late_ns);
-    progress(true);
+    pthread_mutex_lock(&W.lock);
+    progress(true, "done");
+    pthread_mutex_unlock(&W.lock);
     rl_log(RL_LOG_INFO, "nvn",
-           "shader warm-up done in %.1f s: %u vertex and %u fragment programs, %u compute pipelines, %u recorded pipelines, %u "
-           "refused; the driver compiled %llu in %.1f s of thread time",
-           (rl_clock_ns() - W.t0) / 1e9, W.nvertex, W.nfragment, W.ncompute_done, W.nreplayed, W.failed, (unsigned long long)made,
-           made_ns / 1e9);
+           "shader warm-up done in %.1f s: %u of %u programs, %u refused; the driver compiled %llu in %.1f s of thread "
+           "time",
+           (rl_clock_ns() - W.t0) / 1e9, W.done, W.total, W.failed, (unsigned long long)made, made_ns / 1e9);
     nvn_pipe_warming(false);
     nvn_pipe_warmed();
 }
@@ -302,54 +311,43 @@ void nvn_warm_launch(void)
 
 void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control)
 {
-    if (nvn_shader_stage(mem, code) != (int)NVN_STAGE_COMPUTE || !control)
-        return;
-    compute_job j;
+    job j;
     memset(&j, 0, sizeof j);
+    int stage = nvn_shader_stage(mem, code);
+    if (stage < 0 || stage > (int)NVN_STAGE_COMPUTE || (stage == (int)NVN_STAGE_COMPUTE && !control))
+        return;
     if (!nvn_shader_key(mem, code, j.key, &(uint64_t){ 0 }))
         return;
-    for (uint32_t i = 0; i < 3; i++)
-        j.wg[i] = rl_ld32(mem, control + 0x58 + 4 * i);
+    j.stage = (uint32_t)stage;
+    if (stage == (int)NVN_STAGE_COMPUTE)
+        for (uint32_t i = 0; i < 3; i++)
+            j.wg[i] = rl_ld32(mem, control + 0x58 + 4 * i);
+    const char *mode = getenv("RELIFT_PIPELINE_WARM");
+    if (mode && !strcmp(mode, "off"))
+        return;
+    if (!nvn_pipe_record_program(j.key, j.stage, j.wg))
+        return;
     pthread_mutex_lock(&W.lock);
-    for (uint32_t i = 0; i < W.ncompute; i++)
-        if (!memcmp(&W.compute[i], &j, sizeof j)) {
+    if (W.nqueue == W.capqueue) {
+        uint32_t cap = W.capqueue ? W.capqueue * 2 : 64;
+        job *q = realloc(W.queue, cap * sizeof *q);
+        if (!q) {
             pthread_mutex_unlock(&W.lock);
             return;
         }
-    if (W.ncompute == W.capcompute) {
-        uint32_t cap = W.capcompute ? W.capcompute * 2 : 64;
-        compute_job *c = realloc(W.compute, cap * sizeof *c);
-        if (!c) {
-            pthread_mutex_unlock(&W.lock);
-            return;
-        }
-        W.compute = c;
-        W.capcompute = cap;
+        W.queue = q;
+        W.capqueue = cap;
     }
-    W.compute[W.ncompute++] = j;
-    bool after = W.launched;
-    if (after) {
-        if (W.nlate == W.caplate) {
-            uint32_t cap = W.caplate ? W.caplate * 2 : 64;
-            compute_job *q = realloc(W.late, cap * sizeof *q);
-            if (!q) {
-                pthread_mutex_unlock(&W.lock);
-                return;
-            }
-            W.late = q;
-            W.caplate = cap;
+    W.queue[W.nqueue++] = j;
+    if (!W.pool_started) {
+        W.pool_started = true;
+        uint32_t n = worker_count();
+        for (uint32_t i = 0; i < n && i < 64; i++) {
+            pthread_t t;
+            if (pthread_create(&t, NULL, pool_worker, NULL) == 0)
+                pthread_detach(t);
         }
-        W.late[W.nlate++] = j;
-        if (!W.late_started) {
-            W.late_started = true;
-            uint32_t n = worker_count();
-            for (uint32_t i = 0; i < n && i < 8; i++) {
-                pthread_t t;
-                if (pthread_create(&t, NULL, late_worker, NULL) == 0)
-                    pthread_detach(t);
-            }
-        }
-        pthread_cond_signal(&W.late_cv);
     }
+    pthread_cond_signal(&W.cv);
     pthread_mutex_unlock(&W.lock);
 }

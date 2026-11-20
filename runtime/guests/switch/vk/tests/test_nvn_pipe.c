@@ -274,10 +274,15 @@ TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
     VkSpecializationMapEntry map[1] = { { 3, 0, 4 } };
     uint32_t vals[1] = { 7 };
     nvn_pipe_record_compute("compute-program", 1, map, vals);
+    uint32_t wg[3] = { 8, 4, 1 };
+    CHECK(nvn_pipe_record_program("compute-program", NVN_STAGE_COMPUTE, wg));
+    CHECK(!nvn_pipe_record_program("compute-program", NVN_STAGE_COMPUTE, wg));
+    CHECK(!nvn_pipe_record_program("vertex-program", 0, wg));
     nvn_pipe_save();
     nvn_pipe_init();
-    CHECK_EQ(nvn_pipe_recorded(), 2u);
-    const nvn_pipe_rec *a = nvn_pipe_recorded_at(0), *b = nvn_pipe_recorded_at(1);
+    CHECK_EQ(nvn_pipe_recorded(), 3u);
+    const nvn_pipe_rec *a = nvn_pipe_recorded_at(0), *b = nvn_pipe_recorded_at(1), *c = nvn_pipe_recorded_at(2);
+    CHECK(c && c->kind == NVN_REC_PROGRAM && c->k.spec[0][0] == 8 && c->k.topology == NVN_STAGE_COMPUTE);
     CHECK(a && b);
     if (a && b) {
         CHECK_EQ(a->kind, NVN_REC_GRAPHICS);
