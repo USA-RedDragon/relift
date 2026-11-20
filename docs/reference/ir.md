@@ -242,6 +242,8 @@ block 0x1000 len 4 regs arm64
   exit call 0x1004 0x1040
 ; 0x1004 d4001001 SVC_EX_exception
 block 0x1004 len 4 regs arm64
+  v0:i64 = const 0x1004
+  intrinsic "arm64.svc_site" v0
   exit trap 0x80 0x1008
 ```
 <!-- /docgen:output -->
