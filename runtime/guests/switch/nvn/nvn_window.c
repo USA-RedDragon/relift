@@ -18,13 +18,19 @@ typedef struct nvn_window {
     uint64_t native;
 } nvn_window;
 
-/** @brief nvnWindowInitialize(NVNwindow *, const NVNwindowBuilder *): NVNboolean. */
+/**
+ * @brief nvnWindowInitialize(NVNwindow *, const NVNwindowBuilder *): NVNboolean. A driver without
+ * nvnWindowBuilderGetNumActiveTextures (older NVN1 SDKs) has every texture active.
+ */
 uint64_t nvnh_nvnWindowInitialize(rl_ctx *c, uint8_t *mem)
 {
     uint64_t win = c->x[0], builder = c->x[1], n = 0, active = 0, interval = 0, native = 0;
     int rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetNumTextures", &builder, 1, &n);
+    uint64_t active_fn = 0;
     if (rc == RL_OK)
-        rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetNumActiveTextures", &builder, 1, &active);
+        rc = nvn_driver_lookup(c, mem, "nvnWindowBuilderGetNumActiveTextures", &active_fn);
+    if (rc == RL_OK && active_fn)
+        rc = nvn_guest_call(c, mem, active_fn, &builder, 1, &active);
     if (rc == RL_OK)
         rc = nvn_driver_call(c, mem, "nvnWindowBuilderGetPresentInterval", &builder, 1, &interval);
     if (rc == RL_OK)
