@@ -54,3 +54,17 @@ done
 if [ ${#both[@]} -gt 0 ]; then
   RELIFT_EMIT_TRAMPOLINE=true cargo test -p relift --locked "${both[@]}"
 fi
+
+# The targets whose programs exercise control flow that trampoline mode changes (unwinding,
+# returns to rewritten addresses, missed calls, the tiny program) run again with every return
+# through dispatch (emit.trampoline); their output must not change. Nothing else is repeated:
+# the Linux corpus check runs every program in both modes.
+again=()
+for name in e2e e2e_eh e2e_ret e2e_hotload; do
+  for a in "${args[@]}"; do
+    [ "$a" != "$name" ] || again+=(--test "$name")
+  done
+done
+if [ ${#again[@]} -gt 0 ]; then
+  RELIFT_EMIT_TRAMPOLINE=true cargo test -p relift --locked "${again[@]}"
+fi
