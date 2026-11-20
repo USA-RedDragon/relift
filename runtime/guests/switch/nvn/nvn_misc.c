@@ -283,7 +283,8 @@ uint64_t nvn_zero(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnTextureGetTextureAddress(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    const nvn_tex_desc *d = nvn_texture_desc(c->x[0]);
+    nvn_tex_desc dd;
+    const nvn_tex_desc *d = nvn_texture_desc(c->x[0], &dd) ? &dd : NULL;
     c->x[0] = d ? nvn_pool_gpu(d->pool) + d->offset : 0;
     return nvn_ret(c);
 }

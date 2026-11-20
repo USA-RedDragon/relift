@@ -14,6 +14,7 @@
 #include <ftw.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -1244,4 +1245,125 @@ TEST(nvn_denorm_probe_holds_on_millions_of_random_rows)
         CHECK((big.add_models & 1) == (uint32_t)p.denorm_add_flush);
         CHECK(p.denorm_mul_fix == 255 ? big.mul_fix_ok == 0 : (big.mul_fix_ok >> p.denorm_mul_fix & 1) != 0);
     }
+}
+
+#define OBJ_ADDRS 8u
+#define OBJ_ROUNDS 100000u
+
+typedef struct held_obj {
+    nvn_obj o;
+    uint32_t w, h;
+    uint32_t *drops;
+} held_obj;
+
+typedef struct obj_hammer {
+    uint64_t base;
+    bool done;
+    uint32_t bad, drops, made;
+} obj_hammer;
+
+static uint64_t obj_addr(const obj_hammer *h, uint32_t i) { return h->base + 0x100ull * i; }
+
+static void held_drop(nvn_obj *o)
+{
+    held_obj *h = (held_obj *)o;
+    h->w = 1;
+    h->h = 7;
+    __atomic_add_fetch(h->drops, 1, __ATOMIC_RELAXED);
+}
+
+static void held_make(obj_hammer *h, uint32_t i, uint32_t n)
+{
+    held_obj *o = (held_obj *)nvn_obj_new(obj_addr(h, i), NVN_EVENT, sizeof *o);
+    if (!o)
+        return;
+    o->h = 1 + n % 97;
+    o->w = 2 * o->h;
+    o->drops = &h->drops;
+    o->o.drop = held_drop;
+    __atomic_add_fetch(&h->made, 1, __ATOMIC_RELAXED);
+}
+
+static void *obj_writer(void *arg)
+{
+    obj_hammer *h = arg;
+    for (uint32_t n = 0; n < OBJ_ROUNDS; n++) {
+        held_make(h, n % OBJ_ADDRS, n);
+        if (n % 5 == 0)
+            nvn_obj_free(nvn_obj_get(obj_addr(h, (n + 3) % OBJ_ADDRS), 0));
+        if (n % 8 == 0)
+            usleep(20);
+    }
+    __atomic_store_n(&h->done, true, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+static void *obj_reader(void *arg)
+{
+    obj_hammer *h = arg;
+    for (uint32_t n = 0; !__atomic_load_n(&h->done, __ATOMIC_ACQUIRE); n++) {
+        held_obj *o = (held_obj *)nvn_obj_acquire(obj_addr(h, n % OBJ_ADDRS), NVN_EVENT);
+        if (!o)
+            continue;
+        if (o->w != 2 * o->h)
+            __atomic_add_fetch(&h->bad, 1, __ATOMIC_RELAXED);
+        if (n % 16 == 0) {
+            usleep(200);
+            if (o->w != 2 * o->h)
+                __atomic_add_fetch(&h->bad, 1, __ATOMIC_RELAXED);
+        }
+        nvn_obj_release(&o->o);
+    }
+    return NULL;
+}
+
+TEST(nvn_objects_survive_create_finalize_and_lookup_from_several_threads)
+{
+    obj_hammer h = { .base = 0x60000000ull };
+    pthread_t w, r[3];
+    for (uint32_t i = 0; i < OBJ_ADDRS; i++)
+        held_make(&h, i, i);
+    for (uint32_t i = 0; i < 3; i++)
+        CHECK_EQ(pthread_create(&r[i], NULL, obj_reader, &h), 0);
+    CHECK_EQ(pthread_create(&w, NULL, obj_writer, &h), 0);
+    pthread_join(w, NULL);
+    for (uint32_t i = 0; i < 3; i++)
+        pthread_join(r[i], NULL);
+    CHECK_EQ(h.bad, 0u);
+    for (uint32_t i = 0; i < OBJ_ADDRS; i++)
+        nvn_obj_free(nvn_obj_get(obj_addr(&h, i), 0));
+    CHECK_EQ(h.drops, h.made);
+}
+
+typedef struct look {
+    obj_hammer *h;
+    uint32_t *missing;
+} look;
+
+static void *obj_look(void *arg)
+{
+    look *l = arg;
+    while (!__atomic_load_n(&l->h->done, __ATOMIC_ACQUIRE)) {
+        nvn_obj *o = nvn_obj_acquire(l->h->base, NVN_EVENT);
+        if (!o)
+            __atomic_add_fetch(l->missing, 1, __ATOMIC_RELAXED);
+        nvn_obj_release(o);
+    }
+    return NULL;
+}
+
+TEST(nvn_a_replaced_object_is_never_missing_from_a_lookup)
+{
+    obj_hammer h = { .base = 0x61000000ull };
+    held_make(&h, 0, 0);
+    pthread_t r;
+    uint32_t missing = 0;
+    look lk = { &h, &missing };
+    CHECK_EQ(pthread_create(&r, NULL, obj_look, &lk), 0);
+    for (uint32_t n = 0; n < 50000; n++)
+        held_make(&h, 0, n);
+    __atomic_store_n(&h.done, true, __ATOMIC_RELEASE);
+    pthread_join(r, NULL);
+    CHECK_EQ(missing, 0u);
+    nvn_obj_free(nvn_obj_get(h.base, 0));
 }

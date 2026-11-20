@@ -451,10 +451,14 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     return rc;
 }
 
-const nvn_tex_desc *nvn_texture_desc(uint64_t tex)
+bool nvn_texture_desc(uint64_t tex, nvn_tex_desc *out)
 {
-    nvn_texture *t = (nvn_texture *)nvn_obj_get(tex, NVN_TEXTURE);
-    return t ? &t->d : NULL;
+    nvn_texture *t = (nvn_texture *)nvn_obj_acquire(tex, NVN_TEXTURE);
+    if (!t)
+        return false;
+    *out = t->d;
+    nvn_obj_release(&t->o);
+    return true;
 }
 
 bool nvn_texture_record(uint64_t tex, const nvn_tex_desc *d, const uint8_t *builder)
@@ -470,12 +474,12 @@ bool nvn_texture_record(uint64_t tex, const nvn_tex_desc *d, const uint8_t *buil
     return t != NULL;
 }
 
-static const nvn_tex_desc *tex_of(rl_ctx *c, uint64_t a, const char *proc)
+static bool tex_of(rl_ctx *c, uint64_t a, const char *proc, nvn_tex_desc *out)
 {
-    const nvn_tex_desc *d = nvn_texture_desc(a);
-    if (!d)
+    bool ok = nvn_texture_desc(a, out);
+    if (!ok)
         rl_guest_fatal(c, "nvn", "%s on 0x%llx, not a texture", proc, (unsigned long long)a);
-    return d;
+    return ok;
 }
 
 /**
@@ -486,7 +490,8 @@ static const nvn_tex_desc *tex_of(rl_ctx *c, uint64_t a, const char *proc)
  */
 uint64_t nvnh_nvnTextureGetSwizzle(rl_ctx *c, uint8_t *mem)
 {
-    const nvn_tex_desc *d = tex_of(c, c->x[0], "nvnTextureGetSwizzle");
+    nvn_tex_desc dd;
+    const nvn_tex_desc *d = tex_of(c, c->x[0], "nvnTextureGetSwizzle", &dd) ? &dd : NULL;
     if (!d)
         return RL_PENDING;
     for (unsigned i = 0; i < 4; i++)
@@ -498,7 +503,8 @@ uint64_t nvnh_nvnTextureGetSwizzle(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnTextureGetDepthStencilMode(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    const nvn_tex_desc *d = tex_of(c, c->x[0], "nvnTextureGetDepthStencilMode");
+    nvn_tex_desc dd;
+    const nvn_tex_desc *d = tex_of(c, c->x[0], "nvnTextureGetDepthStencilMode", &dd) ? &dd : NULL;
     if (!d)
         return RL_PENDING;
     c->x[0] = d->ds_mode;
@@ -545,8 +551,9 @@ uint64_t nvnh_nvnTextureGetStorageClass(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnTextureCompare(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    const nvn_tex_desc *a = tex_of(c, c->x[0], "nvnTextureCompare");
-    const nvn_tex_desc *b = a ? tex_of(c, c->x[1], "nvnTextureCompare") : NULL;
+    nvn_tex_desc ad, bd;
+    const nvn_tex_desc *a = tex_of(c, c->x[0], "nvnTextureCompare", &ad) ? &ad : NULL;
+    const nvn_tex_desc *b = a && tex_of(c, c->x[1], "nvnTextureCompare", &bd) ? &bd : NULL;
     if (!a || !b)
         return RL_PENDING;
     c->x[0] = a->pool == b->pool && a->offset == b->offset && a->flags == b->flags && a->target == b->target &&
@@ -801,13 +808,17 @@ uint64_t nvn_tex_registered(uint32_t id, uint8_t view[16], bool *has_view, bool 
     return t;
 }
 
-const uint8_t *nvn_sampler_registered(uint32_t id)
+bool nvn_sampler_registered(uint32_t id, uint8_t out[128])
 {
     pthread_mutex_lock(&reg_lock);
     uint64_t s = id < reg.nsampler ? reg.sampler[id] : 0;
     pthread_mutex_unlock(&reg_lock);
-    nvn_sampler *o = s ? (nvn_sampler *)nvn_obj_get(s, NVN_SAMPLER) : NULL;
-    return o ? (const uint8_t *)o->builder_copy : NULL;
+    nvn_sampler *o = s ? (nvn_sampler *)nvn_obj_acquire(s, NVN_SAMPLER) : NULL;
+    if (!o)
+        return false;
+    memcpy(out, o->builder_copy, 128);
+    nvn_obj_release(&o->o);
+    return true;
 }
 
 /** @brief nvnTexturePoolRegisterTexture(const NVNtexturePool *, int id, const NVNtexture *, const NVNtextureView *). */
@@ -867,7 +878,8 @@ static int view_base(rl_ctx *c, uint8_t *mem, uint64_t view, uint32_t *level, ui
 
 static uint64_t texels(rl_ctx *c, uint8_t *mem, bool write, const char *proc)
 {
-    const nvn_tex_desc *d = nvn_texture_desc(c->x[0]);
+    nvn_tex_desc dd;
+    const nvn_tex_desc *d = nvn_texture_desc(c->x[0], &dd) ? &dd : NULL;
     if (!d)
         return (uint64_t)rl_guest_fatal(c, "nvn", "%s on 0x%llx, not a texture", proc, (unsigned long long)c->x[0]);
     uint64_t view = c->x[1], region = c->x[2], data = c->x[3];

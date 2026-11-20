@@ -238,8 +238,8 @@ bool nvn_vk_rt_inside(const nvn_tex_desc *d, uint32_t level, uint32_t layer);
  */
 bool nvn_tex_copy(const nvn_tex_desc *d, uint8_t *storage, uint32_t level, uint32_t layer, const nvn_region *r,
                   uint8_t *packed, bool to_storage);
-/** @brief The layout of the texture at guest address tex, or NULL. */
-const nvn_tex_desc *nvn_texture_desc(uint64_t tex);
+/** @brief Copies the layout of the texture at guest address tex into out; false when there is none. No pointer into the object escapes. */
+bool nvn_texture_desc(uint64_t tex, nvn_tex_desc *out);
 /** @brief Bytes of an NVN1 texture builder the layer keeps with the texture it initializes (the driver's builder reads up to +108). */
 #define NVN_TEXTURE_BUILDER_BYTES 128u
 /**
@@ -257,8 +257,8 @@ int nvn_builder_storage_class(rl_ctx *c, uint8_t *mem, uint64_t builder, uint64_
  * registered as an image, and a copy of its view's bytes (has_view false for none).
  */
 uint64_t nvn_tex_registered(uint32_t id, uint8_t view[16], bool *has_view, bool *image);
-/** @brief The builder bytes of the sampler registered as id (128 bytes), or NULL. */
-const uint8_t *nvn_sampler_registered(uint32_t id);
+/** @brief Copies the builder bytes of the sampler registered as id (128 bytes) into out; false when none. */
+bool nvn_sampler_registered(uint32_t id, uint8_t out[128]);
 
 /** @brief What the device probes measured (nvn_probe.c, run by the Vulkan layer before it writes device.json). */
 typedef struct nvn_probes {
@@ -803,6 +803,8 @@ struct nvn_obj {
     uint64_t addr;
     /** @brief enum nvn_kind. */
     uint32_t kind;
+    /** @brief Holders: the table, and each nvn_obj_acquire not yet released. Guarded by the table's lock. */
+    uint32_t refs;
     /** @brief Frees what the kind holds besides the struct itself; may be NULL. */
     void (*drop)(nvn_obj *o);
 };
@@ -814,12 +816,24 @@ struct nvn_obj {
 nvn_obj *nvn_obj_new(uint64_t addr, uint32_t kind, size_t size);
 /** @brief The object for the NVN object at addr, of kind (0: any kind), or NULL. */
 nvn_obj *nvn_obj_get(uint64_t addr, uint32_t kind);
+/** @brief Describes the last removal of the object at addr (kind, how, thread, age) into out; false when none is remembered. */
+bool nvn_obj_gone(uint64_t addr, char *out, size_t n);
 /** @brief The first vi vsync after t (CLOCK_MONOTONIC ns), for the headless pacing measurement mode. */
 int64_t nvn_vsync_after(int64_t t);
 /** @brief One line of the frame trace (stats.trace), with vi_trace's kinds and fields. */
 void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
-/** @brief Removes and frees o; NULL does nothing. */
+/**
+ * @brief Removes o from the table (a lookup no longer finds it) and drops the table's reference; the object is freed
+ * when the last reference is gone. NULL does nothing.
+ */
 void nvn_obj_free(nvn_obj *o);
+/**
+ * @brief Like nvn_obj_get, and the object stays allocated until nvn_obj_release, whatever the guest finalizes or
+ * re-initializes meanwhile. For a thread that uses an object past the call that found it.
+ */
+nvn_obj *nvn_obj_acquire(uint64_t addr, uint32_t kind);
+/** @brief Drops a reference nvn_obj_acquire took; NULL does nothing. */
+void nvn_obj_release(nvn_obj *o);
 
 /**
  * @brief Calls the driver's own proc name (one nvn_driver_proc accepts) with

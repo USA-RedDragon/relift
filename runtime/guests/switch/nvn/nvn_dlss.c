@@ -342,7 +342,13 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss without parameters");
     nvn_dlss_params p;
     nvn_dlss_params_of(raw, &p);
-    const nvn_dlss_net *n = (const nvn_dlss_net *)nvn_obj_get(e->x[1], NVN_DLSS_NETWORK);
+    nvn_dlss_net net_copy;
+    nvn_dlss_net *held = (nvn_dlss_net *)nvn_obj_acquire(e->x[1], NVN_DLSS_NETWORK);
+    if (held) {
+        net_copy = *held;
+        nvn_obj_release(&held->o);
+    }
+    const nvn_dlss_net *n = held ? &net_copy : NULL;
     uint32_t choice = rl_upscale_resolve(rl_setting_enum("picture.upscaler"), true, false);
     if (choice == RL_UPSCALE_GAME)
         return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss: the game's own DLSS does not run on the host yet; set "

@@ -376,11 +376,10 @@ static int bind_sampler(replay *r, uint32_t id)
 {
     if (id >= SAMPLERS)
         return nvn_vk_stop(r, "sampler id %u is past the layer's %u", id, SAMPLERS);
-    const uint8_t *bytes = nvn_sampler_registered(id);
+    uint8_t found[128];
     static const uint8_t zero[128];
-    bool none = !bytes;
-    if (none)
-        bytes = zero;
+    bool none = !nvn_sampler_registered(id, found);
+    const uint8_t *bytes = none ? zero : found;
     if (t.samplers[id] && !memcmp(t.sampler_bytes[id], bytes, 128) && (!none || t.samplers[id] == t.fallback))
         return RL_OK;
     VkSampler s;
@@ -601,7 +600,7 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
     if (t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
         *kind = t.tex_kind[sl];
         memcpy(dim, t.dims.map + 4ull * sl, 4);
-        return !with_sampler || (image && !nvn_sampler_registered(sid)) ? RL_OK : bind_sampler(r, sid);
+        return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
     }
     nvn_view nv;
     VkFormat vf = v->format;
@@ -661,7 +660,7 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
     t.tex_guest[sl] = tex;
     memcpy(t.tex_view[sl], view, sizeof view);
     memcpy(t.dims.map + 4ull * sl, dim, 4);
-    return !with_sampler || (image && !nvn_sampler_registered(sid)) ? RL_OK : bind_sampler(r, sid);
+    return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
 }
 
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)

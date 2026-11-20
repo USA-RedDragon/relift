@@ -1353,9 +1353,12 @@ void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
 static vimg *image_of(replay *r, uint64_t tex)
 {
-    const nvn_tex_desc *d = nvn_texture_desc(tex);
+    nvn_tex_desc dd;
+    const nvn_tex_desc *d = nvn_texture_desc(tex, &dd) ? &dd : NULL;
     if (!d) {
-        rl_guest_fatal(r->c, "nvn", "0x%llx is not a texture", (unsigned long long)tex);
+        char gone[160] = "no removal remembered";
+        nvn_obj_gone(tex, gone, sizeof gone);
+        rl_guest_fatal(r->c, "nvn", "0x%llx is not a texture (%s)", (unsigned long long)tex, gone);
         return NULL;
     }
     uint64_t storage = nvn_pool_memory(d->pool, NULL) + d->offset;
