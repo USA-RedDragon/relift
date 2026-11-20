@@ -369,3 +369,61 @@ TEST(present_headless_swapchain_shows_frames)
     rl_window_set_backend(NULL);
     rl_settings_reset();
 }
+
+#ifdef RL_HOST_VIDEO
+static int sdl_body(void *arg)
+{
+    int *failures = arg;
+    const rl_window_backend *b = rl_window_backend_current();
+    if (!b || !b->open) {
+        printf("    (no window backend: the SDL window is not run)\n");
+        return 0;
+    }
+    rl_window *win = b->open("relift test", 320, 240);
+    EXPECT(win != NULL);
+    rl_present *p = win ? rl_window_presenter(win) : NULL;
+    if (!p) {
+        printf("    (the window has no presenter: not run)\n");
+        return 0;
+    }
+    rl_settings_set("picture.filter", "integer");
+    EXPECT(rl_window_present_rgb(win, g_frame, 4, 2));
+    uint32_t w = 0, h = 0;
+    uint8_t *img = rl_present_capture(p, 5000, &w, &h);
+    EXPECT(img && w && h);
+    rl_present_rect r;
+    rl_present_place(4, 2, w, h, true, &r);
+    uint32_t fx = 99, fy = 99;
+    if (img && w && h && r.w && r.h) {
+        EXPECT(same(px(img, w, r.x + 1, r.y + 1), &g_frame[0]));
+        EXPECT(same(px(img, w, r.x + r.w - 2, r.y + r.h - 2), &g_frame[21]));
+        EXPECT(rl_window_frame_point(win, (int32_t)(r.x + 1), (int32_t)(r.y + 1), &fx, &fy));
+        EXPECT(fx == 0 && fy == 0);
+        EXPECT(rl_window_frame_point(win, (int32_t)(r.x + r.w - 2), (int32_t)(r.y + r.h - 2), &fx, &fy));
+        EXPECT(fx == 3 && fy == 1);
+        EXPECT(!rl_window_frame_point(win, 0, 0, &fx, &fy));
+    }
+    free(img);
+    uint32_t sw = 0, sh = 0;
+    uint8_t *gpu = capture_slot(p, g_frame, 4, 2, &sw, &sh);
+    EXPECT(gpu && sw == w && sh == h);
+    if (gpu && sw == w && sh == h)
+        EXPECT(same(px(gpu, sw, r.x + 1, r.y + 1), &g_frame[0]));
+    free(gpu);
+    b->close(win);
+    return 0;
+}
+
+TEST(present_sdl_window_shows_cpu_and_gpu_frames)
+{
+    setenv(RL_WINDOW_ENV, "sdl3", 1);
+    rl_settings_reset();
+    rl_settings_declare_runtime();
+    rl_window_set_backend(NULL);
+    int failures = 0;
+    CHECK_EQ(rl_window_main(sdl_body, &failures), 0);
+    CHECK_EQ(failures, 0);
+    unsetenv(RL_WINDOW_ENV);
+    rl_settings_reset();
+}
+#endif
