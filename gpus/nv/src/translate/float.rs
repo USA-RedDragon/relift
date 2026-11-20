@@ -252,16 +252,38 @@ impl Ctx {
         self.m.emit(op::I_SUB, i, &[fi, bias])
     }
 
-    /// `x * 2^k` in two steps, so an implementation that multiplies by
-    /// `2^k` never overflows the power for `|k|` up to 254.
+    /// `x * 2^k` for `|k|` up to 254, as up to three multiplications by
+    /// powers of two built from their bits. The pieces share the sign of
+    /// `k`, so no step overflows or underflows unless the result does.
+    /// GLSL `Ldexp` costs a driver about as long to compile as two hundred
+    /// plain instructions, which the exact paths' call sites multiply.
     pub(crate) fn ldexp(&mut self, x: u32, k: u32) -> u32 {
         let f = self.f32t();
         let i = self.i32t();
-        let one = self.m.c_i32(1);
-        let h = self.m.emit(op::SHIFT_RIGHT_ARITHMETIC, i, &[k, one]);
-        let rest = self.m.emit(op::I_SUB, i, &[k, h]);
-        let y = self.ext(f, glsl::LDEXP, &[x, h]);
-        self.ext(f, glsl::LDEXP, &[y, rest])
+        let lo = self.m.c_i32(-126);
+        let hi = self.m.c_i32(126);
+        let a = self.ext(i, glsl::S_CLAMP, &[k, lo, hi]);
+        let r = self.m.emit(op::I_SUB, i, &[k, a]);
+        let b = self.ext(i, glsl::S_CLAMP, &[r, lo, hi]);
+        let c = self.m.emit(op::I_SUB, i, &[r, b]);
+        let mut y = x;
+        for e in [a, b, c] {
+            let p = self.pow2(e);
+            y = self.m.emit(op::F_MUL, f, &[y, p]);
+        }
+        y
+    }
+
+    /// `2^e` for `e` from -126 to 127, from its bits.
+    fn pow2(&mut self, e: u32) -> u32 {
+        let u = self.u32t();
+        let i = self.i32t();
+        let bias = self.m.c_i32(127);
+        let k23 = self.m.c_u32(23);
+        let biased = self.m.emit(op::I_ADD, i, &[e, bias]);
+        let bits = self.m.emit(op::BITCAST, u, &[biased]);
+        let sh = self.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[bits, k23]);
+        self.as_float(sh)
     }
 
     pub(crate) fn ineg(&mut self, k: u32) -> u32 {
