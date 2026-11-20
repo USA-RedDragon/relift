@@ -101,6 +101,13 @@ pub trait Frontend {
     /// unwind target's (`c->pend.sp`); `None` for a CPU without one.
     fn stack_pointer(&self) -> Option<Reg>;
 
+    /// The link register, which holds the return address at a function's
+    /// entry; `None` for a CPU that pushes it. Return-address escape analysis
+    /// (`relift_analyze::escape`) reads it.
+    fn link_register(&self) -> Option<Reg> {
+        None
+    }
+
     /// The host function the dispatch table holds at every landing pad, which
     /// is not a function entry: a computed jump to a pad (an unwinder's
     /// install step) must unwind the host stack to the frame that owns it.

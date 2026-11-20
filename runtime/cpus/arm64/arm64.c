@@ -155,9 +155,14 @@ uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc)
     if (to != RL_PENDING || c->pend.kind == RL_PEND_NONE) {
         c->pc = pc;
         c->pend.pc = to;
-        c->pend.sp = RL_SP_NONE;
-        c->pend.kind = RL_PEND_REDIRECT;
         c->pend.code = 0;
+        if (to != RL_PENDING && rl_dispatch_find_ctx(c, to) == rl_pad_resume) {
+            c->pend.sp = c->sp;
+            c->pend.kind = RL_PEND_UNWIND;
+        } else {
+            c->pend.sp = RL_SP_NONE;
+            c->pend.kind = RL_PEND_REDIRECT;
+        }
     }
     return RL_PENDING;
 }

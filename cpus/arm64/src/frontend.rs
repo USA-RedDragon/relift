@@ -39,6 +39,10 @@ impl Frontend for Arm64 {
         Some(regs::SP)
     }
 
+    fn link_register(&self) -> Option<Reg> {
+        Some(regs::x(30))
+    }
+
     fn pad_resume(&self) -> Option<&'static str> {
         Some("rl_pad_resume")
     }

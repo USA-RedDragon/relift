@@ -1037,6 +1037,30 @@ host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
   no frame matches and `RL_PENDING` with `RL_PEND_UNWIND` reaches the thread
   entry, which reports it as an escaped unwind.
 
+### Non-local transfers without overrides
+
+A guest whose libc relift does not know needs no `setjmp` or `longjmp`
+override: any function that stores the return address it was entered with
+to memory outside its own frame saves it for a later non-local jump.
+`relift_analyze::escape::return_escapes` finds such functions with a
+dataflow over each lifted function (a stored value derived from the link
+register, at an address that is not the stack pointer plus a constant; a
+function that tail-calls one is one too) [checked: musl's `setjmp` and
+`sigsetjmp`, libunwind's `unw_getcontext`; unit tests in `relift-analyze`].
+The return address of every direct call to such a function is then a landing
+pad of the caller: the emitter gives the caller a dispatch case for it and
+the dispatch table a `rl_pad_resume` entry, so the library's own `longjmp`
+(restore the registers and the stack pointer, `br` or `ret` to the saved
+address) unwinds the host stack to the frame whose stack pointer it carries
+as section 7 describes for exceptions. A `ret` to a pad reaches it through
+the call site's return check: `rl_arm64_ret_elsewhere` records an unwind
+(`pend.sp` the context's stack pointer) rather than a redirect when the
+target is a pad. An escaper that itself calls an escaper (musl's
+`sigsetjmp`) has no frame when the jump comes; the address after its inner
+call is made a function entry instead (a continuation) that runs on top of
+the frames and returns to the saved address in the live frame, which is a
+pad. Calls through a function pointer to an escaper are not covered.
+
 ## 7.2 Memory routine overrides
 
 Lifted `memcpy`, `memmove` and `memset` of the guest's libc run the guest's

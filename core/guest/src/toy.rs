@@ -88,6 +88,10 @@ impl Frontend for Toy {
         Some(Reg(2))
     }
 
+    fn link_register(&self) -> Option<Reg> {
+        Some(LR)
+    }
+
     fn pad_resume(&self) -> Option<&'static str> {
         Some("rl_toy_pad_resume")
     }

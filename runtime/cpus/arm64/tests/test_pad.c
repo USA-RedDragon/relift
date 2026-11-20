@@ -4,6 +4,9 @@
  * unwinder's install step, in a shape that is not any one library's)
  * reaches the table's rl_pad_resume entry, and the host stack unwinds to
  * the frame whose landing-pad dispatch owns the pad (docs/abi.md section 7).
+ * A function that returns to a pad (a `ret` with a restored link register,
+ * which an unwinder's `jumpto` and a `longjmp` end with) reaches the same
+ * frame through the call site's return check.
  */
 #include "arm64.h"
 #include "runner.h"
@@ -32,11 +35,14 @@ static int g_middle_ran_after;
 static int g_outer_ran_after;
 static int g_outer_caught;
 static uint64_t g_outer_x0;
+static int g_by_return;
 
 static RL_LIFTED(g_install)
 {
     c->x[0] = 0x77;
     c->sp = g_target_sp;
+    if (g_by_return)
+        return g_target_pad;
     return rl_indirect(c, g_target_pad)(c, mem);
 }
 
@@ -147,6 +153,20 @@ TEST(pad_jump_resumes_the_frame_that_owns_the_pad)
     CHECK_EQ(g_outer_x0, 0x77);
     CHECK_EQ(g_middle_ran_after, 0);
     CHECK_EQ(g_outer_ran_after, 0);
+    CHECK_EQ(c->sp, STACK_TOP);
+    CHECK_EQ(c->pend.kind, RL_PEND_NONE);
+}
+
+TEST(a_return_to_a_pad_unwinds_to_the_frame_that_owns_it)
+{
+    g_by_return = 1;
+    rl_ctx *c = boot(OUTER_PAD, STACK_TOP - 48);
+    CHECK(c != NULL);
+    c->x[30] = 0x9990;
+    CHECK_EQ(g_outer(c, g_mem), 0x9990);
+    CHECK_EQ(g_outer_caught, 1);
+    CHECK_EQ(g_outer_x0, 0x77);
+    CHECK_EQ(g_middle_ran_after, 0);
     CHECK_EQ(c->sp, STACK_TOP);
     CHECK_EQ(c->pend.kind, RL_PEND_NONE);
 }

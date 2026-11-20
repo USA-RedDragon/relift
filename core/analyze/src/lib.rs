@@ -17,6 +17,7 @@
 
 mod binary;
 mod consts;
+pub mod escape;
 mod incremental;
 mod inline;
 mod slots;

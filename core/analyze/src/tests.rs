@@ -779,3 +779,89 @@ fn stack_slots_follow_the_stack_pointer_across_calls() {
     );
     assert_eq!(s.get(&(BASE + 0x20)), Some(&BTreeMap::from([(0, v)])));
 }
+
+fn escapes_of(code: &[[u8; 4]], roots: &[u64]) -> escape::Escapes {
+    let m = module(code, &[], roots);
+    escape::return_escapes(&Toy, &discover(&Toy, &m))
+}
+
+#[test]
+fn a_call_to_a_function_that_saves_its_return_address_elsewhere_is_a_resume_point() {
+    let e = escapes_of(
+        &[
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x0b, 3, 1),
+            word(0x03, 0, 0),
+        ],
+        &[BASE],
+    );
+    assert_eq!(e.resume_points, [(BASE, BASE + 4)]);
+    assert!(e.continuations.is_empty());
+}
+
+#[test]
+fn saving_the_return_address_in_the_functions_own_frame_is_not_an_escape() {
+    let e = escapes_of(
+        &[
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x0b, 3, 2),
+            word(0x03, 0, 0),
+        ],
+        &[BASE],
+    );
+    assert_eq!(e, escape::Escapes::default());
+}
+
+#[test]
+fn a_value_derived_from_the_return_address_counts_and_a_tail_call_inherits_the_escape() {
+    let e = escapes_of(
+        &[
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            branch(0x01, 0, 1),
+            word(0x05, 1, 3),
+            word(0x0b, 1, 0),
+            word(0x03, 0, 0),
+        ],
+        &[BASE, BASE + 12],
+    );
+    assert_eq!(e.resume_points, [(BASE, BASE + 4)]);
+}
+
+#[test]
+fn an_escaper_that_calls_an_escaper_has_a_continuation_and_its_caller_a_resume_point() {
+    let e = escapes_of(
+        &[
+            word(0x0b, 3, 1),
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x0b, 3, 1),
+            word(0x03, 0, 0),
+            branch(0x02, 0, -5),
+            word(0x03, 0, 0),
+        ],
+        &[BASE, BASE + 20],
+    );
+    assert_eq!(e.continuations, BTreeSet::from([BASE + 8]));
+    assert_eq!(e.resume_points, [(BASE + 20, BASE + 24)]);
+}
+
+#[test]
+fn applying_the_escapes_adds_the_pads() {
+    let m = module(
+        &[
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x0b, 3, 1),
+            word(0x03, 0, 0),
+        ],
+        &[],
+        &[BASE],
+    );
+    let mut a = discover(&Toy, &m);
+    let e = escape::return_escapes(&Toy, &a);
+    escape::apply(&mut a, &e);
+    assert_eq!(a.functions[&BASE].pads, BTreeSet::from([BASE + 4]));
+}
