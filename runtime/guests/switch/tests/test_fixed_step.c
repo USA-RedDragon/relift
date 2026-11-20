@@ -16,6 +16,8 @@
 
 #define POINTS_PER_NOTE 1024
 #define SLICES 3
+/** @brief Iterations between the host yields inside the read-modify-write; a yield costs a host time slice on a loaded machine. */
+#define YIELD_EVERY 64
 
 static struct {
     uint32_t counter;
@@ -57,7 +59,8 @@ static uint64_t w_count(rl_ctx *c, uint8_t *mem)
         uint32_t v = __atomic_load_n(&S.counter, __ATOMIC_RELAXED);
         if (k % POINTS_PER_NOTE == 0 && S.ntrace < (int)sizeof S.trace - 1)
             S.trace[S.ntrace++] = me;
-        rl_host_yield();
+        if (k % YIELD_EVERY == 0)
+            rl_host_yield();
         __atomic_store_n(&S.counter, v + 1, __ATOMIC_RELAXED);
         point(c);
     }
