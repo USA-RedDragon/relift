@@ -242,6 +242,7 @@ type Extent = (BTreeMap<u64, Insn>, BTreeMap<u64, Vec<u64>>, BTreeSet<u64>);
 fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Extent {
     let mut insts: BTreeMap<u64, Insn> = BTreeMap::new();
     let mut tables: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    let mut tried: BTreeMap<u64, usize> = BTreeMap::new();
     let mut pads: BTreeSet<u64> = BTreeSet::new();
     let mut work = vec![entry];
     let preserved = lifter.fe.preserved();
@@ -268,7 +269,8 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         }
         let jumps: Vec<(u64, Arc<Block>)> = insts
             .iter()
-            .filter(|(pc, _)| !tables.contains_key(pc))
+            .filter(|(pc, _)| tables.get(pc).is_none_or(Vec::is_empty))
+            .filter(|(pc, _)| tried.get(pc) != Some(&insts.len()))
             .filter_map(|(pc, i)| match i {
                 Insn::Lifted(b)
                     if b.exit.flow == Flow::Jump && matches!(b.exit.next, Next::Dynamic(_)) =>
@@ -281,17 +283,16 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         if jumps.is_empty() {
             break;
         }
-        let states = consts::in_states(&insts, entry, &preserved);
+        let states = consts::in_states(&insts, &tables, entry, &preserved);
         let known = |a: u64| states.get(&a).cloned().unwrap_or_default();
         let sp = lifter.fe.stack_pointer();
         let stack = std::cell::OnceCell::new();
         let frame = |r: Reg, at: u64| {
             if Some(r) == sp {
-                let s = stack.get_or_init(|| consts::stack_slots(&insts, entry, &preserved, r));
-                let mut slots: BTreeMap<u64, Vec<u8>> = s.get(&at).cloned().unwrap_or_default();
-                if slots.is_empty() {
-                    slots = consts::frame_slots(&insts, &states, r);
-                }
+                let s = stack
+                    .get_or_init(|| consts::stack_slots(&insts, &tables, entry, &preserved, r));
+                let mut slots = consts::frame_slots(&insts, &states, r);
+                slots.extend(s.get(&at).cloned().unwrap_or_default());
                 slots
             } else {
                 consts::frame_slots(&insts, &states, r)
@@ -304,6 +305,7 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         let module = lifter.module;
         let fe = lifter.fe;
         let mut found = false;
+        let mut resolved = Vec::new();
         for (pc, b) in jumps {
             let mut at = |a: u64| match lifter.get(a) {
                 Insn::Lifted(b) => Some(b),
@@ -320,12 +322,16 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
             };
             let t =
                 tables::resolve(module, pc, &b, fe, &mut at, &entering, &facts).unwrap_or_default();
+            resolved.push((pc, t));
+        }
+        for (pc, t) in resolved {
             work.extend(
                 t.iter()
                     .copied()
                     .filter(|a| *a == entry || !entries.contains(a)),
             );
             found |= !t.is_empty();
+            tried.insert(pc, insts.len());
             tables.insert(pc, t);
         }
         if !found {

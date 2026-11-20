@@ -30,7 +30,7 @@ use relift_ir::{Block, Flow, Next, Op, Reg, Value};
 use crate::consts;
 
 /// The most instructions between the conditional branch and the jump.
-const RUN_BACK: usize = 16;
+const RUN_BACK: usize = 32;
 /// The most instructions before the conditional branch in the check.
 const CMP_BACK: usize = 4;
 /// The most instructions the check skips over because they do not touch

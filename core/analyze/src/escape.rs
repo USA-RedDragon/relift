@@ -127,7 +127,12 @@ fn state_after(b: &Block, entry: &[V], sum: &mut Summary) -> Vec<V> {
     out
 }
 
-fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summary {
+fn summarize(
+    fe: &dyn Frontend,
+    f: &Function,
+    known: &dyn Fn(u64) -> bool,
+    via: &BTreeMap<u64, u64>,
+) -> Summary {
     let regs = fe.regs().len();
     let sp = fe.stack_pointer().map(|r| usize::from(r.0));
     let link = fe.link_register().map(|r| usize::from(r.0));
@@ -155,9 +160,12 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
         match (b.exit.flow, b.exit.next) {
             (Flow::Call { ret }, n) => {
                 match n {
-                    Next::Const(t) if known.contains_key(&t) => sum.calls.push((ret, t)),
+                    Next::Const(t) if known(t) => sum.calls.push((ret, t)),
                     Next::Const(_) => {}
-                    _ => sum.indirect.push(ret),
+                    _ => match via.get(&pc) {
+                        Some(&t) => sum.calls.push((ret, t)),
+                        None => sum.indirect.push(ret),
+                    },
                 }
                 for (r, v) in out.iter_mut().enumerate() {
                     if !preserved.contains(&r) {
@@ -173,7 +181,7 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
             (Flow::Jump, Next::Const(t)) => {
                 if f.insts.contains_key(&t) {
                     next.push(t);
-                } else if known.contains_key(&t) {
+                } else if known(t) {
                     sum.tails.push(t);
                 }
             }
@@ -186,12 +194,15 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
                 for t in [taken, not_taken] {
                     if f.insts.contains_key(&t) {
                         next.push(t);
-                    } else if known.contains_key(&t) {
+                    } else if known(t) {
                         sum.tails.push(t);
                     }
                 }
             }
             (Flow::Jump, Next::Dynamic(_)) => {
+                if let Some(&t) = via.get(&pc) {
+                    sum.tails.push(t);
+                }
                 next.extend(f.tables.get(&pc).into_iter().flatten().copied());
             }
         }
@@ -209,25 +220,70 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
     sum
 }
 
+/// One module of a program for [`return_escapes_linked`].
+pub struct Linked<'a> {
+    /// The module.
+    pub module: &'a Module,
+    /// What discovery found in it.
+    pub analysis: &'a Analysis,
+    /// Each loader-filled slot of the module (a global offset table word)
+    /// and the function of the program the loader binds it to, as far as
+    /// the symbol names the program defines say.
+    pub slots: &'a BTreeMap<u64, u64>,
+}
+
 /// The resume points and continuations of `a`'s functions.
 pub fn return_escapes(fe: &dyn Frontend, module: &Module, a: &Analysis) -> Escapes {
+    let slots = BTreeMap::new();
+    let linked = [Linked {
+        module,
+        analysis: a,
+        slots: &slots,
+    }];
+    return_escapes_linked(fe, &linked).pop().unwrap_or_default()
+}
+
+/// The resume points and continuations of the functions of every module of
+/// a program, one [`Escapes`] per module. A call to a procedure linkage
+/// stub that jumps through a slot, and a call or jump through a slot, count
+/// as going to the function the slot is bound to, so a `setjmp` in one
+/// library makes the code after its call in another a resume point.
+pub fn return_escapes_linked(fe: &dyn Frontend, mods: &[Linked<'_>]) -> Vec<Escapes> {
     if fe.link_register().is_none() {
-        return Escapes::default();
+        return vec![Escapes::default(); mods.len()];
     }
-    let known: BTreeMap<u64, ()> = a.functions.keys().map(|&e| (e, ())).collect();
-    let sums: BTreeMap<u64, Summary> = a
-        .functions
+    let known: BTreeSet<u64> = mods
         .iter()
-        .map(|(&e, f)| (e, summarize(fe, f, &known)))
+        .flat_map(|m| m.analysis.functions.keys().copied())
         .collect();
+    let is_known = |a: u64| known.contains(&a);
+    let mut sums: Vec<BTreeMap<u64, Summary>> = Vec::new();
+    let mut escaped_targets: BTreeSet<u64> = BTreeSet::new();
+    for m in mods {
+        let slot_set: BTreeSet<u64> = m.slots.keys().copied().collect();
+        let mut sm = BTreeMap::new();
+        for (&e, f) in &m.analysis.functions {
+            let uses = crate::slots::slot_uses(f, &slot_set, 8);
+            escaped_targets.extend(uses.escaped.iter().filter_map(|s| m.slots.get(s).copied()));
+            let via: BTreeMap<u64, u64> = uses
+                .transfers
+                .iter()
+                .filter_map(|(pc, s)| Some((*pc, *m.slots.get(s)?)))
+                .collect();
+            sm.insert(e, summarize(fe, f, &is_known, &via));
+        }
+        sums.push(sm);
+    }
     let mut escapers: BTreeSet<u64> = sums
         .iter()
+        .flatten()
         .filter(|(_, s)| s.escapes)
         .map(|(&e, _)| e)
         .collect();
     loop {
         let more: Vec<u64> = sums
             .iter()
+            .flatten()
             .filter(|(e, s)| !escapers.contains(e) && s.tails.iter().any(|t| escapers.contains(t)))
             .map(|(&e, _)| e)
             .collect();
@@ -236,42 +292,50 @@ pub fn return_escapes(fe: &dyn Frontend, module: &Module, a: &Analysis) -> Escap
         }
         escapers.extend(more);
     }
-    let mut out = Escapes::default();
-    let mut taken: BTreeSet<u64> = module
-        .roots
-        .iter()
-        .filter(|r| r.kind == RootKind::Pointer)
-        .map(|r| r.addr)
-        .collect();
-    for f in a.functions.values() {
-        taken.extend(crate::address_taken(module, fe.granule(), f));
+    let mut taken: BTreeSet<u64> = escaped_targets;
+    for m in mods {
+        taken.extend(
+            m.module
+                .roots
+                .iter()
+                .filter(|r| r.kind == RootKind::Pointer)
+                .map(|r| r.addr),
+        );
+        for f in m.analysis.functions.values() {
+            taken.extend(crate::address_taken(m.module, fe.granule(), f));
+        }
     }
     let escaper_taken = escapers.iter().any(|e| taken.contains(e));
-    for (&g, s) in &sums {
-        if escaper_taken {
-            for &ret in &s.indirect {
-                if known.contains_key(&ret) {
-                    continue;
+    sums.iter()
+        .map(|sm| {
+            let mut out = Escapes::default();
+            for (&g, s) in sm {
+                if escaper_taken {
+                    for &ret in &s.indirect {
+                        if is_known(ret) {
+                            continue;
+                        }
+                        if escapers.contains(&g) {
+                            out.continuations.insert(ret);
+                        } else {
+                            out.resume_points.push((g, ret));
+                        }
+                    }
                 }
-                if escapers.contains(&g) {
-                    out.continuations.insert(ret);
-                } else {
-                    out.resume_points.push((g, ret));
+                for &(ret, t) in &s.calls {
+                    if !escapers.contains(&t) || is_known(ret) {
+                        continue;
+                    }
+                    if escapers.contains(&g) {
+                        out.continuations.insert(ret);
+                    } else {
+                        out.resume_points.push((g, ret));
+                    }
                 }
             }
-        }
-        for &(ret, t) in &s.calls {
-            if !escapers.contains(&t) || known.contains_key(&ret) {
-                continue;
-            }
-            if escapers.contains(&g) {
-                out.continuations.insert(ret);
-            } else {
-                out.resume_points.push((g, ret));
-            }
-        }
-    }
-    out
+            out
+        })
+        .collect()
 }
 
 /// Adds the resume points of `e` to the pads of the functions of `a`.

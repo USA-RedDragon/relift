@@ -168,9 +168,10 @@ fn meet(into: &mut HashMap<Reg, u128>, from: &HashMap<Reg, u128>) -> bool {
 /// The registers known to hold one constant when each instruction of the
 /// function at `entry` starts, by forward propagation over its control flow.
 /// Nothing is known at the entry; a call or trap keeps only the `preserved`
-/// registers.
+/// registers. A computed jump continues at the targets `tables` holds for it.
 pub(crate) fn in_states(
     insts: &BTreeMap<u64, Insn>,
+    tables: &BTreeMap<u64, Vec<u64>>,
     entry: u64,
     preserved: &[Reg],
 ) -> HashMap<u64, HashMap<Reg, u128>> {
@@ -223,7 +224,7 @@ pub(crate) fn in_states(
                 succ.push(taken);
                 succ.push(not_taken);
             }
-            (_, Next::Dynamic(_)) => {}
+            (_, Next::Dynamic(_)) => succ.extend(tables.get(&pc).into_iter().flatten()),
         }
         for s in succ {
             if !insts.contains_key(&s) {
@@ -277,6 +278,7 @@ fn meet_frame(into: &mut Frame, from: &Frame) -> bool {
 /// that reach the instruction all stored the same one.
 pub(crate) fn stack_slots(
     insts: &BTreeMap<u64, Insn>,
+    tables: &BTreeMap<u64, Vec<u64>>,
     entry: u64,
     preserved: &[Reg],
     sp: Reg,
@@ -365,7 +367,7 @@ pub(crate) fn stack_slots(
         let succ: Vec<u64> = match (b.exit.flow, b.exit.next) {
             (Flow::Return, _) => Vec::new(),
             (Flow::Call { ret }, _) => vec![ret],
-            (_, Next::Dynamic(_)) => Vec::new(),
+            (_, Next::Dynamic(_)) => tables.get(&pc).cloned().unwrap_or_default(),
             (_, Next::Const(t)) => vec![t],
             (
                 _,

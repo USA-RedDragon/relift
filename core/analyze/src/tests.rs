@@ -770,7 +770,7 @@ fn stack_slots_follow_the_stack_pointer_across_calls() {
             (pc, Insn::Lifted(Arc::new(b)))
         })
         .collect();
-    let s = consts::stack_slots(&insts, BASE, &Toy.preserved(), Reg(2));
+    let s = consts::stack_slots(&insts, &BTreeMap::new(), BASE, &Toy.preserved(), Reg(2));
     assert!(!s.contains_key(&(BASE + 0x10)));
     let v = 0x1234u64.to_le_bytes().to_vec();
     assert_eq!(
