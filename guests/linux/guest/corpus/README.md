@@ -20,7 +20,7 @@ and optionally
 With `AARCH64_GCC=aarch64-linux-gnu-gcc` set, `build.sh` also builds every program
 with that compiler, statically against glibc, as `<name>.gnu`; they use the
 same expected answers.
-`record.sh <out-dir>` pushes each `static` build to the shared arm64 test
+`record.sh <out-dir> [name...]` pushes each named (default: every) `static` build to the shared arm64 test
 device in its own folder under `/data/local/tmp/relift-elf`, runs it and
 writes the two expected files; it takes the lock `RELIFT_ADB_LOCK` names (default: a file under
 `$XDG_RUNTIME_DIR` or the output directory) around every use of the

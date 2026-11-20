@@ -1,13 +1,17 @@
 #!/bin/sh
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-out=${1:?usage: record.sh OUT_DIR}
+out=${1:?usage: record.sh OUT_DIR [NAME...]}
+shift
 lock=${RELIFT_ADB_LOCK:-${XDG_RUNTIME_DIR:-$out}/relift-adb.lock}
 remote=/data/local/tmp/relift-elf
 dev() { flock "$lock" adb "$@"; }
 quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-for dir in "$here"/*/; do
-    name=$(basename "$dir")
+if [ $# -eq 0 ]; then
+    set -- $(for d in "$here"/*/; do basename "$d"; done)
+fi
+for name in "$@"; do
+    dir=$here/$name
     work=$remote/$name
     script=$out/$name.remote.sh
     {

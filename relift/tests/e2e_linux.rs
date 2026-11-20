@@ -52,7 +52,12 @@ fn program() -> Vec<u8> {
     .build()
 }
 
-fn built(root: &Path, program: &Path, cache: &str) -> std::path::PathBuf {
+fn built(
+    root: &Path,
+    program: &Path,
+    cache: &str,
+    trampoline: bool,
+) -> (std::path::PathBuf, String) {
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = program.display().to_string();
@@ -64,12 +69,23 @@ fn built(root: &Path, program: &Path, cache: &str) -> std::path::PathBuf {
     );
     let toml = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
     assert!(toml.contains("guest = \"linux\""), "{toml}");
-    let out = tiny::relift(&project, &["--cache-dir", cache, "-j", "4", "build"]);
+    let forced = if trampoline { "true" } else { "false" };
+    let out = tiny::relift_env(
+        &project,
+        &["--cache-dir", cache, "-j", "4", "build"],
+        &[("RELIFT_EMIT_TRAMPOLINE", forced)],
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     assert!(!stderr.contains("missed"), "{stderr}");
-    root.join("cache/projects/game/build/host")
-        .join(format!("game{}", std::env::consts::EXE_SUFFIX))
+    assert!(
+        !trampoline || stderr.contains("returns: trampoline mode"),
+        "{stderr}"
+    );
+    let exe = root
+        .join("cache/projects/game/build/host")
+        .join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    (exe, stderr.into_owned())
 }
 
 #[test]
@@ -83,7 +99,7 @@ fn a_hand_assembled_program_builds_and_exits_with_its_status() {
     std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
     relift_cache::write_if_changed(&elf, &program()).expect("the program is writable");
     let cache = root.join("cache").display().to_string();
-    let exe = built(&root, &elf, &cache);
+    let (exe, _) = built(&root, &elf, &cache, false);
     let out = relift_proc::command(&exe)
         .env("RELIFT_REPORT_DIR", &root)
         .output()
@@ -127,10 +143,23 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
         "signals.static",
         "cxx_exceptions.static",
         "fileio.static",
-    ] {
+        "coroutines.static",
+    ]
+    .into_iter()
+    .flat_map(|name| [(name, false), (name, true)])
+    {
+        let (name, trampoline) = name;
         let _ = std::fs::remove_dir_all(root.join("game"));
         let _ = std::fs::remove_dir_all(root.join("cache"));
-        let exe = built(&root, &programs.join(name), &cache);
+        let (exe, note) = built(&root, &programs.join(name), &cache, trampoline);
+        let wants = match name {
+            "coroutines.static" | "setjmp.static" => Some("returns: trampoline mode ("),
+            "hello.static" => Some("returns: direct"),
+            _ => None,
+        };
+        if let Some(wants) = wants.filter(|_| !trampoline) {
+            assert!(note.contains(wants), "{name}: {note}");
+        }
         let dir = corpus.join(name.split('.').next().expect("a name"));
         let mut cmd = relift_proc::command(&exe);
         cmd.env("RELIFT_REPORT_DIR", &root).env("TMPDIR", &root);
@@ -142,14 +171,18 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
         assert_eq!(
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&want),
-            "{name}"
+            "{name} (trampoline: {trampoline})"
         );
         let code: i32 = std::fs::read_to_string(dir.join("expected.exit"))
             .expect("expected.exit")
             .trim()
             .parse()
             .expect("a status");
-        assert_eq!(out.status.code(), Some(code), "{name}");
+        assert_eq!(
+            out.status.code(),
+            Some(code),
+            "{name} (trampoline: {trampoline})"
+        );
     }
     let _ = std::fs::remove_dir_all(&root);
 }
