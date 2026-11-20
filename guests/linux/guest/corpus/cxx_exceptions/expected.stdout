@@ -1,0 +1,12 @@
+acquire frame
+acquire frame
+acquire frame
+release frame
+release frame
+release frame
+custom code 42
+caught inner failure, rethrowing
+outer got inner failure
+out_of_range
+int 17
+0,1,4,9,16,

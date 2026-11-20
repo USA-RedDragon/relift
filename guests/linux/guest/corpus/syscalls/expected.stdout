@@ -1,0 +1,22 @@
+uname: Linux aarch64
+pid>0=1 ppid>=0=1
+monotonic ordered=1
+realtime after 2020=1
+slept at least 2ms=1
+getrandom=32 32 differ=1
+ioctl winsz on a pipe: rc=-1 isatty=0
+one two three
+writev=14
+mmap ok=1 zero=1
+mprotect ok, byte=5a
+fixed remap zeroed=1 same=1
+brk grew=1
+readv=9 <pipe data>
+dup>2=1
+write to closed fd: -1 errno=9
+stack limit >= 1MiB: 1
+sysconf pagesize=4096
+getuid consistent=1
+syscall(getpid)=1
+getcwd ok=1
+exit_group next

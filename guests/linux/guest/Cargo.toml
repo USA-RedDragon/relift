@@ -1,0 +1,20 @@
+[package]
+name = "relift-linux"
+description = "The Linux guest: static aarch64 ELF programs over `relift-objfile` and `relift-cpu-arm64`"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.relift]
+band = "2"
+
+[dependencies]
+relift-cpu-arm64 = { workspace = true }
+relift-guest = { workspace = true }
+relift-ir = { workspace = true }
+relift-objfile = { workspace = true }
+
+[lints]
+workspace = true

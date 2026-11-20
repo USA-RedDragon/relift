@@ -1,0 +1,12 @@
+size=2000 regular=1
+lines=100
+line5=line 005 abcdefghij
+tell=120
+end=2005 tail=tail
+truncated=38
+old exists=0 new exists=1
+entry f0
+entry f1
+entry f2
+open missing: -1 errno=2 (No such file or directory)
+rmdir=0

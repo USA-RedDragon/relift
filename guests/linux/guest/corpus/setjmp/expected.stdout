@@ -1,0 +1,5 @@
+a=308
+b=908
+zero maps to one: 108
+loop r=5 count=5
+sigsetjmp r=42

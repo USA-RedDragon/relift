@@ -1,0 +1,10 @@
+after raise: usr1=1
+blocked: usr1=1 usr2=0
+pending usr1=1 usr2=1
+unblocked: usr1=2 usr2=1
+siginfo: usr1=12 reset=1
+ignored: usr2=1
+seen[0]=10
+seen[1]=12
+seen[2]=10
+seen[3]=1001
