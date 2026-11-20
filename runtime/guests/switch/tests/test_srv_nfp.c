@@ -17,6 +17,13 @@ TEST(nfp_user_creates_an_interface_that_reports_its_state)
     CHECK_EQ(tc_cmd(c, u, 0), 0);
     tc_res r = tc_send(c, u, tc_new(2));
     CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 0);
+    r = tc_send(c, u, tc_new(19));
+    CHECK_EQ(r.result, 0);
     CHECK_EQ(tc_u32(&r, 0), 1);
+    r = tc_send(c, u, tc_new(23));
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy, 1);
+    CHECK_EQ(tc_send(c, u, tc_new(3)).result, RL_MAKE_RESULT(115, 64));
     CHECK_EQ(tc_cmd(c, u, 1), 0);
 }
