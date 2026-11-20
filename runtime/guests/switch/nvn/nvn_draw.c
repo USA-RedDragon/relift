@@ -1666,7 +1666,18 @@ static uint32_t single_of(uint32_t op)
     case NVN_CMD_BIND_SEPARATE_TEXTURES:
         return NVN_CMD_BIND_SEPARATE_TEXTURE;
     case NVN_CMD_BIND_SEPARATE_SAMPLERS:
+    case NVN_CMD_BIND_SEPARATE_SAMPLERS_DEFERRED:
         return NVN_CMD_BIND_SEPARATE_SAMPLER;
+    case NVN_CMD_BIND_UNIFORM_BUFFERS_DEFERRED:
+        return NVN_CMD_BIND_UNIFORM_BUFFER;
+    case NVN_CMD_BIND_STORAGE_BUFFERS_DEFERRED:
+        return NVN_CMD_BIND_STORAGE_BUFFER;
+    case NVN_CMD_BIND_TEXTURES_DEFERRED:
+        return NVN_CMD_BIND_TEXTURE;
+    case NVN_CMD_BIND_IMAGES_DEFERRED:
+        return NVN_CMD_BIND_IMAGE;
+    case NVN_CMD_BIND_SEPARATE_TEXTURES_DEFERRED:
+        return NVN_CMD_BIND_SEPARATE_TEXTURE;
     default:
         return NVN_CMD_NONE;
     }
@@ -1711,6 +1722,27 @@ static int bind_many(replay *r, const nvn_cmd *e)
     if (count && !v)
         return nvn_vk_stop(r, "%s without its array", nvn_cmd_name(e->op));
     return bind_slots(r, e, single, e->x[reg], count, v);
+}
+
+/** @brief The most slots a deferred bind may name: the arrays the console's binds fill have far fewer. */
+#define DEFERRED_SLOTS 0x1000u
+
+/**
+ * @brief The deferred binds (nvnCommandBufferBindTexturesDeferred, BindImagesDeferred, BindSeparateTexturesDeferred,
+ * BindSeparateSamplersDeferred, BindUniformBuffersDeferred and BindStorageBuffersDeferred: a stage, a first slot, a
+ * count and the GPU address of the array of buffer ranges or handles). The driver records only the address and the
+ * GPU reads the array when it runs the command, so the array is read here, as the replay reaches the command, not
+ * when the guest recorded it, and then bound as the same single binds of each slot.
+ */
+static int bind_deferred(replay *r, const nvn_cmd *e)
+{
+    uint32_t single = single_of(e->op), count = (uint32_t)e->x[3];
+    uint64_t addr = e->x[4];
+    if (count > DEFERRED_SLOTS)
+        return nvn_vk_stop(r, "%s of %u slots", nvn_cmd_name(e->op), count);
+    if (count && !addr)
+        return nvn_vk_stop(r, "%s without its array", nvn_cmd_name(e->op));
+    return bind_slots(r, e, single, e->x[2], count, count ? r->mem + nvn_gpu_guest(addr) : NULL);
 }
 
 /**
@@ -1771,6 +1803,13 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_BIND_SEPARATE_TEXTURES:
     case NVN_CMD_BIND_SEPARATE_SAMPLERS:
         return bind_many(r, e);
+    case NVN_CMD_BIND_TEXTURES_DEFERRED:
+    case NVN_CMD_BIND_IMAGES_DEFERRED:
+    case NVN_CMD_BIND_SEPARATE_TEXTURES_DEFERRED:
+    case NVN_CMD_BIND_SEPARATE_SAMPLERS_DEFERRED:
+    case NVN_CMD_BIND_UNIFORM_BUFFERS_DEFERRED:
+    case NVN_CMD_BIND_STORAGE_BUFFERS_DEFERRED:
+        return bind_deferred(r, e);
     case NVN_CMD_BIND_SEPARATE_TEXTURE:
     case NVN_CMD_BIND_SEPARATE_SAMPLER:
         return bind_separate(r, e);

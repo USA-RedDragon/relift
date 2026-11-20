@@ -479,6 +479,12 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_BIND_SEPARATE_SAMPLER, nvnCommandBufferBindSeparateSampler) \
     X(NVN_CMD_BIND_SEPARATE_TEXTURES, nvnCommandBufferBindSeparateTextures) \
     X(NVN_CMD_BIND_SEPARATE_SAMPLERS, nvnCommandBufferBindSeparateSamplers) \
+    X(NVN_CMD_BIND_TEXTURES_DEFERRED, nvnCommandBufferBindTexturesDeferred) \
+    X(NVN_CMD_BIND_IMAGES_DEFERRED, nvnCommandBufferBindImagesDeferred) \
+    X(NVN_CMD_BIND_SEPARATE_TEXTURES_DEFERRED, nvnCommandBufferBindSeparateTexturesDeferred) \
+    X(NVN_CMD_BIND_SEPARATE_SAMPLERS_DEFERRED, nvnCommandBufferBindSeparateSamplersDeferred) \
+    X(NVN_CMD_BIND_UNIFORM_BUFFERS_DEFERRED, nvnCommandBufferBindUniformBuffersDeferred) \
+    X(NVN_CMD_BIND_STORAGE_BUFFERS_DEFERRED, nvnCommandBufferBindStorageBuffersDeferred) \
     X(NVN_CMD_BIND_IMAGES, nvnCommandBufferBindImages) \
     X(NVN_CMD_BIND_VERTEX_STREAM_STATE, nvnCommandBufferBindVertexStreamState) \
     X(NVN_CMD_CALL_COMMAND, nvnCommandBufferCallCommand) \

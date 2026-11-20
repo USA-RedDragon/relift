@@ -217,6 +217,56 @@ TEST(nvn_replay_bulk_separate_binds_bind_each_slot)
     free(ss);
 }
 
+TEST(nvn_replay_deferred_binds_read_their_array_when_replayed)
+{
+    static nvn_gfx st;
+    static uint8_t mem[0x1000];
+    memset(&st, 0, sizeof st);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.st = &st;
+    r.mem = mem;
+    nvn_cmd t = { .op = NVN_CMD_BIND_TEXTURES_DEFERRED, .x = { 0, 4, 1, 2, 0x100 } };
+    CHECK_EQ(word_at(&st, 4, 0x20 + 8 * 1), 0u);
+    const uint64_t handles[2] = { 31, 32 };
+    memcpy(mem + 0x100, handles, sizeof handles);
+    CHECK_EQ(nvn_draw_cmd(&r, &t), RL_OK);
+    CHECK_EQ(word_at(&st, 4, 0x20 + 8 * 1), 31u);
+    CHECK_EQ(word_at(&st, 4, 0x20 + 8 * 2), 32u);
+    CHECK_EQ(word_at(&st, 4, 0x20), 0u);
+    nvn_cmd i = { .op = NVN_CMD_BIND_IMAGES_DEFERRED, .x = { 0, 4, 0, 2, 0x100 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &i), RL_OK);
+    CHECK_EQ(word_at(&st, 4, 0x120), 31u);
+    CHECK_EQ(word_at(&st, 4, 0x128), 32u);
+    nvn_cmd c = { .op = NVN_CMD_BIND_IMAGES_DEFERRED, .x = { 0, NVN_STAGE_COMPUTE, 2, 2, 0x100 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &c), RL_OK);
+    CHECK_EQ(st.image[NVN_STAGE_COMPUTE][2], 31u);
+    CHECK_EQ(st.image[NVN_STAGE_COMPUTE][3], 32u);
+    nvn_cmd ts = { .op = NVN_CMD_BIND_SEPARATE_TEXTURES_DEFERRED, .x = { 0, 4, 6, 2, 0x100 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &ts), RL_OK);
+    CHECK_EQ(word_at(&st, 4, 0x168 + 8 * 6), 31u);
+    CHECK_EQ(word_at(&st, 4, 0x168 + 8 * 7), 32u);
+    CHECK_EQ(st.separate_bound[4][0][0], 0xc0u);
+    nvn_cmd ms = { .op = NVN_CMD_BIND_SEPARATE_SAMPLERS_DEFERRED, .x = { 0, 4, 0, 2, 0x100 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &ms), RL_OK);
+    CHECK_EQ(word_at(&st, 4, 0x568), 31u);
+    CHECK_EQ(st.separate_bound[4][1][0], 3u);
+    uint64_t ranges[4] = { 0x5000, 0x40, 0x6000, 0x80 };
+    memcpy(mem + 0x200, ranges, sizeof ranges);
+    nvn_cmd ub = { .op = NVN_CMD_BIND_UNIFORM_BUFFERS_DEFERRED, .x = { 0, 1, 3, 2, 0x200 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &ub), RL_OK);
+    CHECK_EQ(st.ubo[1][3].addr, 0x5000u);
+    CHECK_EQ(st.ubo[1][3].size, 0x40u);
+    CHECK_EQ(st.ubo[1][4].addr, 0x6000u);
+    CHECK_EQ(st.ubo[1][4].size, 0x80u);
+    nvn_cmd sb = { .op = NVN_CMD_BIND_STORAGE_BUFFERS_DEFERRED, .x = { 0, NVN_STAGE_COMPUTE, 1, 2, 0x200 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &sb), RL_OK);
+    CHECK_EQ(st.storage[1].addr, 0x5000u);
+    CHECK_EQ(st.storage[2].size, 0x80u);
+    nvn_cmd none = { .op = NVN_CMD_BIND_TEXTURES_DEFERRED, .x = { 0, 4, 0, 0, 0 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &none), RL_OK);
+}
+
 TEST(nvn_separate_handles_of_unregistered_textures_read_a_null_texture)
 {
     nvn_probes probes;
