@@ -383,6 +383,12 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
  * descriptor instead of the draw stopping on a stale binding).
  */
 int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot);
+/**
+ * @brief The dimensions (bits of the translator's Dim) a texture of Dim dim, width by height texels and layers array
+ * layers is sampled as. A square 2D array of 6 or more layers also has a cube view, and a cube array view when its
+ * layers are a multiple of 6: the guest makes cube maps as 2D arrays and samples them as cubes.
+ */
+uint32_t nvn_texset_fit(uint32_t dim, uint32_t width, uint32_t height, uint32_t layers);
 /** @brief Makes the texture set's sampler id hold the sampler registered under it (a default sampler when none is). */
 int nvn_texset_sampler(replay *r, uint32_t id);
 /**

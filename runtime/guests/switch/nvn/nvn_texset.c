@@ -290,6 +290,17 @@ static uint32_t dims_fitting(uint32_t d)
     }
 }
 
+uint32_t nvn_texset_fit(uint32_t dim, uint32_t width, uint32_t height, uint32_t layers)
+{
+    uint32_t fit = dims_fitting(dim);
+    if (dim == DIM_2D_ARRAY && width == height && layers >= 6) {
+        fit |= 1u << DIM_CUBE;
+        if (layers % 6 == 0)
+            fit |= 1u << DIM_CUBE_ARRAY;
+    }
+    return fit;
+}
+
 /** @brief NVNwrapMode (CLAMP 0, REPEAT 1, MIRROR_CLAMP 2, MIRROR_CLAMP_TO_EDGE 3, MIRROR_CLAMP_TO_BORDER 4, CLAMP_TO_BORDER 5, MIRRORED_REPEAT 6, CLAMP_TO_EDGE 7). */
 static VkSamplerAddressMode wrap(uint32_t m)
 {
@@ -629,7 +640,10 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
         }
     VkDescriptorImageInfo ii[DIMS];
     VkWriteDescriptorSet w[DIMS];
-    uint32_t n = 0, fit = dims_fitting(*dim);
+    uint32_t layers = v->d.depth;
+    if (has_view && nv.has_layers)
+        layers = nv.num_layers ? (uint32_t)nv.num_layers : v->d.depth - (uint32_t)nv.min_layer;
+    uint32_t n = 0, fit = nvn_texset_fit(*dim, v->d.width, v->d.height, layers);
     for (uint32_t d = 0; d < DIMS; d++) {
         if (!(fit & (1u << d)))
             continue;

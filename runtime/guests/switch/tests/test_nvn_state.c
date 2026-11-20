@@ -300,3 +300,15 @@ TEST(nvn_update_uniform_buffer_in_a_pool_lands_in_the_order_the_commands_run)
         CHECK_EQ(t_mem()[mem + 0x100 + i], 0x40 + i);
     }
 }
+
+TEST(nvn_a_square_2d_array_of_six_layers_is_also_sampled_as_a_cube)
+{
+    enum { DIM_CUBE = 3, DIM_2D_ARRAY = 5, DIM_CUBE_ARRAY = 6 };
+    uint32_t cube = 1u << DIM_CUBE, array = 1u << DIM_2D_ARRAY, cubes = 1u << DIM_CUBE_ARRAY;
+    CHECK_EQ(nvn_texset_fit(DIM_2D_ARRAY, 64, 64, 6) & (cube | cubes), cube | cubes);
+    CHECK_EQ(nvn_texset_fit(DIM_2D_ARRAY, 64, 64, 12) & (cube | cubes), cube | cubes);
+    CHECK_EQ(nvn_texset_fit(DIM_2D_ARRAY, 64, 64, 8) & (cube | cubes), cube);
+    CHECK_EQ(nvn_texset_fit(DIM_2D_ARRAY, 64, 64, 5) & (cube | cubes), 0u);
+    CHECK_EQ(nvn_texset_fit(DIM_2D_ARRAY, 64, 32, 6) & (cube | cubes), 0u);
+    CHECK(nvn_texset_fit(DIM_2D_ARRAY, 64, 32, 1) & array);
+}
