@@ -635,3 +635,45 @@ TEST(gsv_video_end_of_stream_reaches_the_client_when_the_frame_ring_is_full)
     CHECK_EQ(frames, 17);
     rl_vp9_stream_backend_override(NULL);
 }
+
+TEST(gsv_decoder_pools_and_memories_are_reused_once_freed)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    uint32_t pref[16] = { 0, 0, 255u | (127u << 16) };
+    for (uint32_t round = 0; round < 200; round++) {
+        tc_req q = tc_new(111);
+        q.tipc = true;
+        tc_put32(&q, 0);
+        tc_put64(&q, 0x100000);
+        tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+        CHECK_EQ(r.result, 0);
+        uint32_t mem = tc_u32(&r, 0);
+        CHECK(mem != 0);
+        q = tc_new(911);
+        q.tipc = true;
+        for (int i = 0; i < 16; i++)
+            tc_put32(&q, pref[i]);
+        tc_put32(&q, 3);
+        tc_put32(&q, mem);
+        r = tc_send(c, (tc_obj){ .handle = h }, q);
+        CHECK_EQ(r.result, 0);
+        uint32_t first = tc_u32(&r, 0);
+        CHECK(first != 0);
+        for (uint32_t i = 0; i < 3; i++) {
+            q = tc_new(912);
+            q.tipc = true;
+            tc_put32(&q, first + i);
+            CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
+        }
+        q = tc_new(112);
+        q.tipc = true;
+        tc_put32(&q, mem);
+        CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
+    }
+}

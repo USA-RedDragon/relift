@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** @brief Decoder output images the supervisor tracks (ids are handed out from 1). */
+/** @brief Decoder output images the supervisor tracks (ids are handed out from 1, the lowest free run first). */
 #define IMAGES_MAX 256u
 #define ROW_ALIGN 64u
 #define PLANE_ROWS 128u
@@ -32,7 +32,6 @@ typedef struct image {
 
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static image g_images[IMAGES_MAX];
-static uint32_t g_next_image = 1;
 
 typedef struct layout {
     uint32_t code, width, height;
@@ -95,12 +94,17 @@ rl_result rl_gsv_decoder_pool_init(rl_ipc_req *r)
     uint32_t count = in.count ? in.count : 1;
     layout l = image_layout(in.pref);
     pthread_mutex_lock(&g_mu);
-    uint32_t first = g_next_image;
-    if (first + count > IMAGES_MAX) {
+    uint32_t first = 1, run = 0;
+    for (uint32_t i = 1; i < IMAGES_MAX && run < count; i++) {
+        if (g_images[i].used)
+            run = 0;
+        else if (++run == count)
+            first = i + 1 - count;
+    }
+    if (run < count) {
         pthread_mutex_unlock(&g_mu);
         return KR_OUT_OF_RESOURCE;
     }
-    g_next_image += count;
     for (uint32_t i = 0; i < count; i++) {
         image *m = &g_images[first + i];
         m->used = true;
@@ -157,7 +161,6 @@ typedef struct memory {
 } memory;
 
 static memory g_memories[MEMORIES_MAX];
-static uint32_t g_next_memory = 1;
 
 /** @brief UserSession 111 (CreateNativeMemory): a u32 mode and a u64 size; a u32 memory id. */
 rl_result rl_gsv_native_memory_create(rl_ipc_req *r)
@@ -169,7 +172,10 @@ rl_result rl_gsv_native_memory_create(rl_ipc_req *r)
     if (!rl_srv_in(r, &in, sizeof in))
         return SF_RESULT_INVALID_HEADER;
     pthread_mutex_lock(&g_mu);
-    uint32_t id = g_next_memory < MEMORIES_MAX ? g_next_memory++ : 0;
+    uint32_t id = 0;
+    for (uint32_t i = 1; i < MEMORIES_MAX && !id; i++)
+        if (!g_memories[i].used)
+            id = i;
     if (id) {
         g_memories[id].used = true;
         g_memories[id].size = in.size;
