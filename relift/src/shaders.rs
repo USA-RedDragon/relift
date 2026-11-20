@@ -291,6 +291,28 @@ pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
     })
 }
 
+/// `relift shaders`: translates the programs recorded in `out`/shaders again
+/// and says how many came out and how long it took.
+///
+/// # Errors
+///
+/// As [`build`].
+pub fn run(out: &Path, ui: &mut crate::ui::Ui) -> Result<(), BoxError> {
+    let jobs = relift_proc::workers::jobs().max(1);
+    let start = std::time::Instant::now();
+    let built = build(out, jobs)?;
+    ui.note(&relift_progress::Line::new().text(format!(
+        "{} of {} programs translated on {jobs} threads in {:.1} s",
+        built.translated,
+        built.programs,
+        start.elapsed().as_secs_f64()
+    )));
+    for (why, n) in &built.refused {
+        ui.note(&relift_progress::Line::new().text(format!("{n} refused: {why}")));
+    }
+    Ok(())
+}
+
 /// What the runtime needs of each translation's interface, all
 /// little-endian: the magic `RLSPI001`, the entry count (u32), per entry
 /// sorted by key the key (32 bytes), the index of its first record and its

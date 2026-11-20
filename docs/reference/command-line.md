@@ -20,6 +20,7 @@ Commands:
   where     Map between a host address, a guest address and a symbol
   info      Print the self-description of a built game binary, without running it: the JSON document its `--relift-info` flag prints
   coverage  List what discovery could not resolve: per module, functions, instructions not lifted and every unresolved indirect call or jump, with hints from earlier hot-load runs. Switch projects only; for a Game Boy ROM use `relift-gbrom functions`
+  shaders   Translate the GPU programs a build recorded again, for the device of its `shaders/device.json`, and rewrite its tables, without building the game. Switch 2 builds only
   report    Explain a stop report a shipped build wrote (missed code, an instruction it could not run) and add the missed target as a root for the next build
   help      Print this message or the help of the given subcommand(s)
 

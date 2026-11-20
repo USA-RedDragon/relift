@@ -170,6 +170,13 @@ pub enum Command {
         #[arg(long, value_name = "NAME")]
         module: Option<String>,
     },
+    /// Translate the GPU programs a build recorded again, for the device of
+    /// its `shaders/device.json`, and rewrite its tables, without building
+    /// the game. Switch 2 builds only.
+    Shaders {
+        /// The build directory (the folder that holds `shaders/`).
+        build_dir: PathBuf,
+    },
     /// Explain a stop report a shipped build wrote (missed code, an
     /// instruction it could not run) and add the missed target as a root
     /// for the next build.
@@ -205,6 +212,7 @@ impl Command {
             Command::Coverage { .. } => "coverage",
             Command::Info { .. } => "info",
             Command::Report { .. } => "report",
+            Command::Shaders { .. } => "shaders",
         }
     }
 }
