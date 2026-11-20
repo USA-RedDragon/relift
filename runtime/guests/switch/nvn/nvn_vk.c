@@ -48,6 +48,13 @@ static void_fn load(void *(*get)(void *, const char *), void *h, int i)
 
 static void write_caps(void);
 
+static int64_t now_ns(void);
+
+/** @brief Where the guest thread's time went, summed between two rate lines (nanoseconds and counts). */
+static struct {
+    uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads;
+} tm;
+
 /** @brief Submits si to the guest queue with g.fence, under the core's queue lock when the presenter shares the queue. */
 static VkResult guest_submit(const VkSubmitInfo *si)
 {
@@ -877,12 +884,17 @@ bool nvn_vk_flush(replay *r)
         return false;
     }
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
+    int64_t t0 = now_ns();
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS ||
         (vr = guest_submit(&si)) != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
         return false;
     }
+    int64_t t1 = now_ns();
     vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
+    tm.submit_ns += (uint64_t)(t1 - t0);
+    tm.wait_ns += (uint64_t)(now_ns() - t1);
+    tm.flushes++;
     bool ok = vr == VK_SUCCESS;
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
@@ -2102,9 +2114,12 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         pthread_mutex_unlock(&g.lock);
         return rl_guest_fatal(c, "nvn", "more than %u queues", MAX_QUEUES);
     }
+    int64_t t0 = now_ns();
     int rc = run_set(&r, s, sync_each_command());
     if (rc == RL_OK && !nvn_vk_flush(&r))
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
+    tm.run_ns += (uint64_t)(now_ns() - t0);
+    tm.runs++;
     pthread_mutex_unlock(&g.lock);
     if (rc == RL_OK)
         for (uint32_t i = 0; i < r.nsyncs; i++)
@@ -2363,6 +2378,19 @@ static void present_rate(uint64_t total)
     }
     if (now - last_ns < PRESENT_RATE_NS)
         return;
+    static struct timespec cpu_prev;
+    struct timespec cpu;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
+    double cpu_ms = (double)(cpu.tv_sec - cpu_prev.tv_sec) * 1e3 + (double)(cpu.tv_nsec - cpu_prev.tv_nsec) / 1e6;
+    cpu_prev = cpu;
+    double frames = (double)(total - last_total);
+    rl_log(RL_LOG_INFO, "nvn",
+           "per present: wall %.2f ms, thread cpu %.2f ms, replay %.2f ms in %.1f submits (%.1f batches), submit call %.2f ms, "
+           "wait for the device %.2f ms",
+           (double)(now - last_ns) / 1e6 / frames, cpu_ms / frames, (double)tm.run_ns / 1e6 / frames,
+           (double)tm.runs / frames, (double)tm.flushes / frames, (double)tm.submit_ns / 1e6 / frames,
+           (double)tm.wait_ns / 1e6 / frames);
+    memset(&tm, 0, sizeof tm);
     uint64_t faults, starts;
     nvn_watch_stats(&faults, &starts);
     rl_log(RL_LOG_INFO, "nvn", "%llu presents, %.1f per second over the last %.1f s; texture watches %llu started, %llu written",

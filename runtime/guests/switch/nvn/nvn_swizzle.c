@@ -94,13 +94,15 @@ bool nvn_tex_copy(const nvn_tex_desc *d, uint8_t *storage, uint32_t level, uint3
             uint32_t yy = y0 + y;
             uint64_t yrow = slab + (uint64_t)(yy / (8 * gbh)) * gobs_w * block_bytes + (uint64_t)((yy / 8) % gbh) * 512;
             uint8_t *p = packed + ((uint64_t)z * ch + y) * row;
-            for (uint32_t xb = 0; xb < row; xb++) {
+            for (uint32_t xb = 0; xb < row;) {
                 uint32_t bx = x0 * bpb + xb;
+                uint32_t n = 16 - bx % 16 < row - xb ? 16 - bx % 16 : row - xb;
                 uint8_t *s = base + yrow + (uint64_t)(bx / 64) * block_bytes + gob_offset(bx, yy);
                 if (to_storage)
-                    *s = p[xb];
+                    memcpy(s, p + xb, n);
                 else
-                    p[xb] = *s;
+                    memcpy(p + xb, s, n);
+                xb += n;
             }
         }
     }

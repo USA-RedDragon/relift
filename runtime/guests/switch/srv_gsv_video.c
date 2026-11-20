@@ -437,9 +437,10 @@ static bool put_frame(const video_session *v, uint32_t image_id, const frame *f)
     if (m.gpu_read) {
         for (uint64_t y = 0; y < rows; y++) {
             uint64_t block_row = y / (8 * block_gobs), gob_in_block = (y / 8) % block_gobs;
-            for (uint64_t x = 0; x < l.pitch; x++) {
+            for (uint64_t x = 0; x < l.pitch; x += 16) {
                 uint64_t gob = (block_row * gobs_wide + x / 64) * block_gobs + gob_in_block;
-                tiled[gob * 512 + nvn_gob_offset((uint32_t)x, (uint32_t)y)] = linear[y * l.pitch + x];
+                memcpy(&tiled[gob * 512 + nvn_gob_offset((uint32_t)x, (uint32_t)y)], &linear[y * l.pitch + x],
+                       l.pitch - x < 16 ? l.pitch - x : 16);
             }
         }
         rl_vm_kernel_write(&hos.vm, base, tiled, bytes);
