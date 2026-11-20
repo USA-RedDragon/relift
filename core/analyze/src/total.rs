@@ -39,7 +39,11 @@ pub fn spare(fe: &dyn Frontend, module: &Module, pc: u64) -> Spare {
     let Some(w) = word_at(module, pc) else {
         return Spare::Zero;
     };
-    if w == 0 {
+    let in_code = module
+        .sections
+        .iter()
+        .any(|s| s.kind == SectionKind::Code && (s.addr..s.addr + s.size).contains(&pc));
+    if w == 0 || !in_code {
         return Spare::Zero;
     }
     if w == 0xD503_201F || w & 0xFFE0_001F == 0xD420_0000 || w & 0xFFFF_0000 == 0 {
