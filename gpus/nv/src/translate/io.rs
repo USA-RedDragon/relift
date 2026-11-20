@@ -84,10 +84,28 @@ const CAP_VIEWPORT_INDEX_LAYER: u32 = 5254;
 const CAP_DEMOTE: u32 = 5379;
 const CAP_DRAW_PARAMETERS: u32 = 4427;
 const OP_DEMOTE: u16 = 5380;
+const PUSH_CONSTANT: u32 = 9;
+
+/// Specialization constant id of the fragment alpha test's compare function
+/// (an `NVNalphaFunc`, 1 never to 8 always; 8 when unset, which compiles the
+/// test away). The runtime sets it from the bound color state.
+pub const ALPHA_FUNC_SPEC: u32 = 0x300;
+
+/// Byte offset in the fixed-state push constant block of the point size a
+/// vertex program that does not write one gets.
+pub const PUSH_POINT_SIZE: u32 = 0;
+
+/// Byte offset in the fixed-state push constant block of the alpha test's
+/// reference value.
+pub const PUSH_ALPHA_REF: u32 = 4;
 
 /// What the stage I/O needs to know about the whole program.
 #[derive(Default)]
 pub(crate) struct State {
+    /// The program has a store to the point size attribute.
+    writes_point_size: bool,
+    /// The fixed-state push constant block variable, once declared.
+    push_block: Option<u32>,
     /// Per fragment input location: (read at the center, read at the
     /// centroid).
     sites: BTreeMap<u32, (bool, bool)>,
@@ -100,6 +118,17 @@ pub(crate) struct State {
 
 /// Records how each fragment input is sampled before any code is emitted.
 pub(crate) fn prescan(c: &mut Ctx, insts: &[Inst]) {
+    c.io.writes_point_size = insts.iter().any(|i| {
+        i.mnemonic == "AST"
+            && matches!(
+                i.ops.first(),
+                Some(Operand::Attr {
+                    offset: 0x6c,
+                    patch: false,
+                    ..
+                })
+            )
+    });
     for i in insts.iter().filter(|i| i.mnemonic == "IPA") {
         let Some(Operand::Attr {
             index: None,
@@ -509,6 +538,98 @@ impl Ctx {
             let v = self.as_float(u);
             self.m.emit_void(op::STORE, &[var, v]);
         }
+    }
+}
+
+impl Ctx {
+    /// The fixed-state push constant block (`{ float point_size; float
+    /// alpha_ref; }`, the host's graphics pipelines give it to every stage
+    /// that reads it), declared the first time.
+    fn push_block(&mut self) -> u32 {
+        if let Some(v) = self.io.push_block {
+            return v;
+        }
+        let f = self.f32t();
+        let st = self.m.t_struct_unique(&[f, f]);
+        self.m.deco(st, 2, &[]);
+        self.m.member_deco(st, 0, 35, &[PUSH_POINT_SIZE]);
+        self.m.member_deco(st, 1, 35, &[PUSH_ALPHA_REF]);
+        let p = self.m.t_ptr(PUSH_CONSTANT, st);
+        let var = self.m.global(p, PUSH_CONSTANT);
+        self.globals.push(var);
+        self.io.push_block = Some(var);
+        var
+    }
+
+    fn push_float(&mut self, member: u32) -> u32 {
+        let var = self.push_block();
+        let f = self.f32t();
+        let p = self.m.t_ptr(PUSH_CONSTANT, f);
+        let i = self.m.c_u32(member);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, i]);
+        self.m.emit(op::LOAD, f, &[ptr])
+    }
+
+    /// What a vertex program that writes no point size gets as one: the
+    /// size the command buffer set (nvnCommandBufferSetPointSize), from the
+    /// push constants.
+    pub(crate) fn fixed_point_size(&mut self) {
+        if self.stage != Stage::Vertex || self.io.writes_point_size {
+            return;
+        }
+        let size = self.push_float(0);
+        let var = self.scalar_builtin(B_POINT_SIZE, OUTPUT, false);
+        self.m.emit_void(op::STORE, &[var, size]);
+    }
+
+    /// The fixed-function alpha test: the invocation is discarded when its
+    /// alpha (render target 0) fails the compare function against the
+    /// reference value, demoted like a `KILL`. The function is
+    /// [`ALPHA_FUNC_SPEC`], always when unset, which the host driver folds
+    /// away when it makes the pipeline.
+    pub(crate) fn alpha_test(&mut self, targets: u32) {
+        if targets & 0xf == 0 || targets & 0x8 == 0 {
+            return;
+        }
+        let u = self.load_reg(3);
+        let alpha = self.as_float(u);
+        let reference = self.push_float(1);
+        let func = self.m.spec_u32(8, ALPHA_FUNC_SPEC);
+        let b = self.boolt();
+        let cmps = [
+            self.m.emit(op::F_ORD_LESS_THAN, b, &[alpha, reference]),
+            self.m.emit(op::F_ORD_EQUAL, b, &[alpha, reference]),
+            self.m
+                .emit(op::F_ORD_LESS_THAN_EQUAL, b, &[alpha, reference]),
+            self.m.emit(op::F_ORD_GREATER_THAN, b, &[alpha, reference]),
+            self.m.emit(op::F_UNORD_NOT_EQUAL, b, &[alpha, reference]),
+            self.m
+                .emit(op::F_ORD_GREATER_THAN_EQUAL, b, &[alpha, reference]),
+        ];
+        let mut pass = self.m.c_bool(true);
+        for f in (1..=7u32).rev() {
+            let fc = self.m.c_u32(f);
+            let is = self.m.emit(op::I_EQUAL, b, &[func, fc]);
+            let v = if f == 1 {
+                self.m.c_bool(false)
+            } else {
+                cmps[(f - 2) as usize]
+            };
+            pass = self.m.emit(op::SELECT, b, &[is, v, pass]);
+        }
+        let fail = self.m.emit(op::LOGICAL_NOT, b, &[pass]);
+        self.cap(CAP_DEMOTE);
+        self.exts.insert("SPV_EXT_demote_to_helper_invocation");
+        self.iface.kills = true;
+        let then = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[fail, then, merge]);
+        self.m.emit_void(op::LABEL, &[then]);
+        self.m.emit_void(OP_DEMOTE, &[]);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
     }
 }
 

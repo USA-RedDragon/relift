@@ -1639,3 +1639,96 @@ fn registers_stay_values_within_a_block() {
     );
     assert_eq!(spirv_count(&s.spirv, 247), 0, "no selection for the guard");
 }
+
+/// Whether `words` decorates some id with `deco` and, if given, the first operand `value`.
+fn decorates(words: &[u32], deco: u32, value: Option<u32>) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        if words[k] & 0xffff == 71
+            && n >= 4
+            && words[k + 2] == deco
+            && value.is_none_or(|v| words[k + 3] == v)
+        {
+            return true;
+        }
+        k += n.max(1);
+    }
+    false
+}
+
+/// Whether `words` declares a variable of storage class `class`.
+fn has_variable_in(words: &[u32], class: u32) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        if words[k] & 0xffff == 59 && n >= 4 && words[k + 3] == class {
+            return true;
+        }
+        k += n.max(1);
+    }
+    false
+}
+
+const BUILTIN_POINT_SIZE: u32 = 1;
+const ALPHA_FUNC_SPEC: u32 = 0x300;
+
+fn vertex_storing(attribute: u64) -> Vec<u8> {
+    let mut b = sph(1, 1, &[]);
+    b.extend(word(
+        0x021,
+        4,
+        &[(16, 8, 1), (24, 8, 10), (32, 32, 0x3f80_0000)],
+    ));
+    b.extend(word(
+        0x122,
+        1,
+        &[(24, 8, 255), (32, 8, 10), (40, 11, attribute), (74, 2, 3)],
+    ));
+    exit_and_halt(&mut b);
+    b
+}
+
+#[test]
+fn vertex_without_a_point_size_gets_the_fixed_one() {
+    let p = relift_gpu_sm86::program::parse(&vertex_storing(0x70));
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("vertex_fixed_point_size", &s.spirv);
+    assert!(decorates(&s.spirv, 11, Some(BUILTIN_POINT_SIZE)));
+    assert!(has_variable_in(&s.spirv, 9), "no push constant block");
+}
+
+#[test]
+fn vertex_that_stores_a_point_size_keeps_its_own() {
+    let p = relift_gpu_sm86::program::parse(&vertex_storing(0x6c));
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(decorates(&s.spirv, 11, Some(BUILTIN_POINT_SIZE)));
+    assert!(!has_variable_in(&s.spirv, 9), "push constant block");
+}
+
+#[test]
+fn fragment_alpha_is_tested_by_a_specialized_function() {
+    let mut b = sph(2, 5, &[(6, 0xaa), (18, 0xf)]);
+    exit_and_halt(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("fragment_alpha_test", &s.spirv);
+    assert!(
+        decorates(&s.spirv, 1, Some(ALPHA_FUNC_SPEC)),
+        "no alpha function constant"
+    );
+    assert!(has_variable_in(&s.spirv, 9), "no push constant block");
+    assert!(spirv_has(&s.spirv, 5380), "no OpDemoteToHelperInvocation");
+    assert!(s.interface.kills);
+}
+
+#[test]
+fn fragment_without_alpha_has_no_alpha_test() {
+    let mut b = sph(2, 5, &[(6, 0xaa), (18, 0x7)]);
+    exit_and_halt(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!decorates(&s.spirv, 1, Some(ALPHA_FUNC_SPEC)));
+    assert!(!has_variable_in(&s.spirv, 9), "push constant block");
+    assert!(!s.interface.kills);
+}

@@ -844,7 +844,9 @@ impl Ctx {
         if self.stage == Stage::Fragment {
             let targets = self.sph_words[18];
             self.fragment_outputs(targets);
+            self.alpha_test(targets);
         }
+        self.fixed_point_size();
     }
 }
 
