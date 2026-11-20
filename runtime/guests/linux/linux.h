@@ -44,7 +44,9 @@ enum rl_linux_role {
     /** @brief The program interpreter: mapped and entered by the kernel. */
     RL_LINUX_INTERPRETER = 1,
     /** @brief A library the interpreter maps from the file system. */
-    RL_LINUX_LIBRARY = 2
+    RL_LINUX_LIBRARY = 2,
+    /** @brief A file the program reads that is not code (a plugin directory's configuration): it opens by path and has no segments. */
+    RL_LINUX_DATA = 3
 };
 
 /**

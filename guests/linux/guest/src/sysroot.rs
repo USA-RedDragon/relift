@@ -41,9 +41,22 @@ pub struct Library {
     pub bytes: Vec<u8>,
 }
 
+/// A file the program reads that is not code: the configuration of a
+/// plugin directory.
+#[derive(Clone, Debug)]
+pub struct DataFile {
+    /// Every guest path the file answers to.
+    pub paths: Vec<String>,
+    /// The file.
+    pub bytes: Vec<u8>,
+}
+
 /// The files of a program besides its executable.
 #[derive(Clone, Debug, Default)]
 pub struct Closure {
+    /// The files of the plugin directories the libraries name (the
+    /// configuration next to the plugins).
+    pub data: Vec<DataFile>,
     /// The program interpreter, when the executable names one.
     pub interpreter: Option<Library>,
     /// The libraries in the order the loader loads them.
@@ -152,6 +165,29 @@ impl Sysroot {
         let mut host = self.root.clone();
         host.extend(&at);
         Some((host, format!("/{}", at.join("/"))))
+    }
+
+    /// The names in the guest directory `path` and whether each is a
+    /// directory, sorted; empty when `path` is not a directory.
+    fn list(&self, path: &str) -> Vec<(String, bool)> {
+        let Some((host, _)) = self.resolve(path) else {
+            return Vec::new();
+        };
+        let Ok(rd) = std::fs::read_dir(host) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(String, bool)> = rd
+            .filter_map(|e| {
+                let e = e.ok()?;
+                let name = e.file_name().into_string().ok()?;
+                let dir = self
+                    .resolve(&format!("{}/{name}", path.trim_end_matches('/')))
+                    .is_some_and(|(h, _)| h.is_dir());
+                Some((name, dir))
+            })
+            .collect();
+        out.sort();
+        out
     }
 
     fn read(&self, path: &str) -> Option<(Vec<u8>, String)> {
@@ -331,17 +367,49 @@ fn find(sysroot: &Sysroot, candidates: &[String]) -> Option<Found> {
     })
 }
 
-fn candidates(nodes: &[Node], at: usize, name: &str, conf: &[String]) -> Vec<String> {
-    if name.contains('/') {
-        return vec![name.to_string()];
-    }
+fn search_dirs(nodes: &[Node], at: usize, conf: &[String]) -> Vec<String> {
     let mut dirs = rpath_chain(nodes, Some(at));
     dirs.extend(run_path(&nodes[at]));
     dirs.extend(conf.iter().cloned());
     dirs.extend(DEFAULT_DIRS.iter().map(|d| (*d).to_string()));
-    dirs.iter()
+    dirs
+}
+
+/// The files under the guest directory `dir`, to a few levels, as guest
+/// paths.
+fn collect_files(sysroot: &Sysroot, dir: &str, depth: usize, out: &mut Vec<String>) {
+    for (name, is_dir) in sysroot.list(dir) {
+        let path = format!("{}/{name}", dir.trim_end_matches('/'));
+        if !is_dir {
+            out.push(path);
+        } else if depth < 3 {
+            collect_files(sysroot, &path, depth + 1, out);
+        }
+    }
+}
+
+fn candidates(nodes: &[Node], at: usize, name: &str, conf: &[String]) -> Vec<String> {
+    if name.contains('/') {
+        return vec![name.to_string()];
+    }
+    search_dirs(nodes, at, conf)
+        .iter()
         .map(|d| format!("{}/{name}", d.trim_end_matches('/')))
         .collect()
+}
+
+/// The strings of `bytes` made of the characters of path names and format
+/// templates, at least four of them.
+fn spelled_strings(bytes: &[u8]) -> impl Iterator<Item = &str> {
+    bytes.split(|&b| b == 0).filter_map(|s| {
+        if s.len() < 4 || s.len() > 255 {
+            return None;
+        }
+        let s = std::str::from_utf8(s).ok()?;
+        s.bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"_.+-/%".contains(&c))
+            .then_some(s)
+    })
 }
 
 /// The library names a file spells out: strings of its bytes that name a
@@ -349,17 +417,8 @@ fn candidates(nodes: &[Node], at: usize, name: &str, conf: &[String]) -> Vec<Str
 /// directory), the names a program hands to `dlopen`.
 fn spelled_libraries(bytes: &[u8]) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for s in bytes.split(|&b| b == 0) {
-        if s.len() < 4 || s.len() > 255 {
-            continue;
-        }
-        let Ok(s) = std::str::from_utf8(s) else {
-            continue;
-        };
-        if !s
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || b"_.+-/".contains(&c))
-        {
+    for s in spelled_strings(bytes) {
+        if s.contains('%') {
             continue;
         }
         let leaf = s.rsplit('/').next().unwrap_or(s);
@@ -380,8 +439,28 @@ fn spelled_libraries(bytes: &[u8]) -> BTreeSet<String> {
     out
 }
 
+/// The library file name templates a file spells out (`libnss_%s.so%s`:
+/// the loader builds a plugin's name from a configuration value), as globs.
+fn spelled_templates(bytes: &[u8]) -> BTreeSet<String> {
+    spelled_strings(bytes)
+        .filter(|s| !s.contains('/') && s.starts_with("lib") && s.contains(".so"))
+        .filter(|s| s.contains("%s"))
+        .map(|s| s.replace("%s", "*"))
+        .collect()
+}
+
+/// The absolute directory paths a file spells out (a default plugin
+/// directory).
+fn spelled_directories(bytes: &[u8]) -> BTreeSet<String> {
+    spelled_strings(bytes)
+        .filter(|s| s.starts_with('/') && !s.contains('%') && s.matches('/').count() >= 2)
+        .map(normalize)
+        .collect()
+}
+
 struct Walk {
     out: Closure,
+    plugin_dirs: BTreeSet<String>,
     libs: Vec<Library>,
     nodes: Vec<Node>,
     files: Vec<Vec<u8>>,
@@ -391,6 +470,53 @@ struct Walk {
 }
 
 impl Walk {
+    /// Adds every file under `dir` when it holds a shared object: the
+    /// shared objects as libraries, the rest as data files.
+    fn add_plugin_dir(&mut self, sysroot: &Sysroot, parent: usize, dir: &str) {
+        let mut files = Vec::new();
+        collect_files(sysroot, dir, 0, &mut files);
+        let plugins: Vec<String> = files
+            .iter()
+            .filter(|f| {
+                f.rsplit('/').next().is_some_and(|n| n.contains(".so"))
+                    && sysroot
+                        .read(f)
+                        .is_some_and(|(b, _)| is_aarch64(&b).is_some())
+            })
+            .cloned()
+            .collect();
+        if plugins.is_empty() {
+            return;
+        }
+        for f in files {
+            let Some((bytes, real)) = sysroot.read(&f) else {
+                continue;
+            };
+            if let Some(object) = is_aarch64(&bytes) {
+                let name = file_name(&f);
+                if self.names.contains(&name) {
+                    continue;
+                }
+                self.add(
+                    parent,
+                    &name,
+                    Found {
+                        searched: f,
+                        real,
+                        bytes,
+                        object,
+                    },
+                );
+            } else {
+                let mut paths = vec![normalize(&f)];
+                if !paths.contains(&real) {
+                    paths.push(real);
+                }
+                self.out.data.push(DataFile { paths, bytes });
+            }
+        }
+    }
+
     fn add(&mut self, parent: usize, need: &str, found: Found) {
         let Found {
             searched,
@@ -442,6 +568,7 @@ pub fn closure(
 ) -> Result<Closure, String> {
     let mut w = Walk {
         out: Closure::default(),
+        plugin_dirs: BTreeSet::new(),
         libs: Vec::new(),
         nodes: vec![Node {
             object: exe.clone(),
@@ -520,6 +647,28 @@ pub fn closure(
             let tried = candidates(&w.nodes, at, &name, &conf);
             if let Some(found) = find(sysroot, &tried) {
                 w.add(at, &name, found);
+            }
+        }
+        let dirs = search_dirs(&w.nodes, at, &conf);
+        for glob in spelled_templates(&w.files[at]) {
+            for d in &dirs {
+                for (n, is_dir) in sysroot.list(d) {
+                    if is_dir || !matches(&glob, &n) || w.names.contains(&n) {
+                        continue;
+                    }
+                    let path = format!("{}/{n}", d.trim_end_matches('/'));
+                    if let Some(found) = find(sysroot, &[path]) {
+                        w.add(at, &n, found);
+                    }
+                }
+            }
+        }
+        for dir in spelled_directories(&w.files[at]) {
+            let below = dir
+                .rsplit_once('/')
+                .is_some_and(|(parent, _)| dirs.iter().any(|d| normalize(d) == normalize(parent)));
+            if below && w.plugin_dirs.insert(dir.clone()) {
+                w.add_plugin_dir(sysroot, at, &dir);
             }
         }
     }

@@ -20,6 +20,9 @@ static const rl_linux_segment segments[] = {
 };
 static uint8_t image[2 * L_PAGE];
 static const uint8_t image_id[32] = { 0 };
+static const uint8_t conf_bytes[] = "alias a b\n";
+static const char *const conf_paths[] = { "/lib/gconv/conf", "/lib/gconv/real/conf" };
+static const char *const sub_paths[] = { "/lib/gconv/sub/a.conf" };
 static const rl_linux_module modules[] = {
     {
         .name = "prog",
@@ -35,12 +38,14 @@ static const rl_linux_module modules[] = {
         .phent = 56,
         .phnum = 3,
     },
+    { .name = "data", .role = RL_LINUX_DATA, .paths = conf_paths, .path_count = 2, .file = conf_bytes, .file_size = sizeof conf_bytes - 1 },
+    { .name = "data", .role = RL_LINUX_DATA, .paths = sub_paths, .path_count = 1, .file = conf_bytes, .file_size = 3 },
 };
 static rl_linux_program prog = {
     .name = "prog",
     .exec_path = "/bin/prog",
     .modules = modules,
-    .module_count = 1,
+    .module_count = 3,
     .code_lo = 0x400000,
     .code_hi = 0x403000,
     .stack_size = 0x800000,
@@ -82,6 +87,51 @@ static uint64_t put_str(uint64_t at, const char *s)
 {
     rl_vm_kernel_write(&lx.vm, at, s, strlen(s) + 1);
     return at;
+}
+
+TEST(program_files_open_by_path_and_directories_list_what_lies_under_them)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint64_t at = 0x401000;
+    put_str(at, "/lib/./gconv/conf");
+    int64_t fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)fd, 0x401100, 64, 0, 0, 0), 10);
+    CHECK(memcmp(cstr(0x401100), "alias a b\n", 10) == 0);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)fd, 0x401100, 64, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_lseek, (uint64_t)fd, 6, 0, 0, 0, 0), 6);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)fd, 0x401100, 64, 0, 0, 0), 4);
+    CHECK_EQ(sys(c, NR_fstat, (uint64_t)fd, 0x401200, 0, 0, 0, 0), 0);
+    l_stat st;
+    memcpy(&st, cstr(0x401200), sizeof st);
+    CHECK_EQ(st.st_size, 10);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)fd, 0x401100, 64, 0, 0, 0), -L_EBADF);
+    put_str(at, "/lib/gconv/real/conf");
+    fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    put_str(at, "/lib/gconv");
+    fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY | L_O_DIRECTORY, 0, 0, 0);
+    CHECK(fd >= 3);
+    int64_t n = sys(c, NR_getdents64, (uint64_t)fd, 0x402000, 1024, 0, 0, 0);
+    CHECK(n > 0);
+    char names[8][32];
+    int count = 0;
+    for (int64_t off = 0; off < n && count < 8;) {
+        uint16_t reclen;
+        memcpy(&reclen, cstr(0x402000 + (uint64_t)off + 16), 2);
+        strcpy(names[count++], cstr(0x402000 + (uint64_t)off + 19));
+        off += reclen;
+    }
+    CHECK_EQ(count, 5);
+    CHECK(strcmp(names[0], ".") == 0 && strcmp(names[1], "..") == 0);
+    CHECK(strcmp(names[2], "conf") == 0 && strcmp(names[3], "real") == 0 && strcmp(names[4], "sub") == 0);
+    CHECK_EQ(sys(c, NR_getdents64, (uint64_t)fd, 0x402000, 1024, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    put_str(at, "/lib/gconv/missing");
+    CHECK_EQ(sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0), -L_ENOENT);
 }
 
 TEST(initial_stack_holds_argc_argv_envp_and_auxv)

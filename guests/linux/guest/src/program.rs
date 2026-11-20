@@ -55,6 +55,25 @@ pub struct Placed {
     pub image: Image,
 }
 
+/// A file the program reads that is not code (the configuration of a
+/// plugin directory), served to the program's reads by path.
+#[derive(Clone, Debug)]
+pub struct Data {
+    /// The guest paths the file answers to when opened.
+    pub paths: Vec<String>,
+    /// The file.
+    pub bytes: Vec<u8>,
+}
+
+/// The files of a program placed: the code, and the data it reads.
+#[derive(Clone, Debug)]
+pub struct Program {
+    /// The executable, the interpreter and the libraries, placed.
+    pub modules: Vec<Placed>,
+    /// The data files.
+    pub data: Vec<Data>,
+}
+
 /// A file to place.
 #[derive(Clone, Debug)]
 pub struct Input {
@@ -84,7 +103,7 @@ fn round_up(v: u64, to: u64) -> u64 {
 /// has no memory, spans more than [`IMAGE_LIMIT`], or is a fixed-address
 /// file placed after the executable; or the executable is dynamically
 /// linked and no other file was given.
-pub fn place(inputs: Vec<Input>) -> Result<Vec<Placed>, String> {
+pub fn place(inputs: Vec<Input>, data: Vec<Data>) -> Result<Program, String> {
     let mut out: Vec<Placed> = Vec::new();
     let mut cursor = 0;
     let count = inputs.len();
@@ -154,7 +173,7 @@ pub fn place(inputs: Vec<Input>) -> Result<Vec<Placed>, String> {
             image,
         });
     }
-    Ok(out)
+    Ok(Program { modules: out, data })
 }
 
 /// The analysis view of `p`: its sections and the entries its symbols,
@@ -254,31 +273,36 @@ pub struct ProgramFile {
 /// `trampoline` says the units were emitted in trampoline mode and
 /// `code_maps` lists the cold copies' maps.
 pub fn program_files(
-    modules: &[Placed],
+    program: &Program,
     exec_path: &str,
     (units, code_maps): (&[String], &[String]),
     image_id: [u8; 32],
     trampoline: bool,
 ) -> Vec<ProgramFile> {
     let mut out = Vec::new();
-    for (i, m) in modules.iter().enumerate() {
+    let files = program
+        .modules
+        .iter()
+        .map(|m| &m.file)
+        .chain(program.data.iter().map(|d| &d.bytes));
+    for (i, bytes) in files.enumerate() {
         out.push(ProgramFile {
             name: format!("module{i}.bin"),
-            bytes: m.file.clone(),
+            bytes: bytes.clone(),
         });
         out.push(ProgramFile {
             name: format!("module{i}.c"),
             bytes: relift_guest::blob::blob_c(
                 &format!("rl_linux_file_{i}"),
                 &format!("c/module{i}.bin"),
-                &m.file,
+                bytes,
             )
             .into_bytes(),
         });
     }
     out.push(ProgramFile {
         name: "program.c".into(),
-        bytes: program_c(modules, exec_path, (units, code_maps), image_id, trampoline).into_bytes(),
+        bytes: program_c(program, exec_path, (units, code_maps), image_id, trampoline).into_bytes(),
     });
     out
 }
@@ -317,7 +341,7 @@ fn role_c(r: Role) -> &'static str {
 /// `program.c`: per module its segments, paths, entry, program headers and
 /// file, then the stack size, the units and `main`.
 pub fn program_c(
-    modules: &[Placed],
+    program: &Program,
     exec_path: &str,
     (units, code_maps): (&[String], &[String]),
     image_id: [u8; 32],
@@ -349,6 +373,7 @@ pub fn program_c(
         t.push_str(" 0");
     }
     t.push_str(" };\n");
+    let modules = &program.modules;
     for (i, p) in modules.iter().enumerate() {
         let o = &p.object;
         let _ = writeln!(t, "extern const uint8_t rl_linux_file_{i}[];");
@@ -371,6 +396,15 @@ pub fn program_c(
         }
         if p.paths.is_empty() {
             t.push_str(" 0");
+        }
+        t.push_str(" };\n");
+    }
+    for (k, d) in program.data.iter().enumerate() {
+        let i = modules.len() + k;
+        let _ = writeln!(t, "extern const uint8_t rl_linux_file_{i}[];");
+        let _ = write!(t, "static const char *const paths_{i}[] = {{");
+        for path in &d.paths {
+            let _ = write!(t, " {},", c_string(path));
         }
         t.push_str(" };\n");
     }
@@ -397,6 +431,15 @@ pub fn program_c(
             ph.1,
         );
     }
+    for (k, d) in program.data.iter().enumerate() {
+        let i = modules.len() + k;
+        let _ = writeln!(
+            t,
+            "    {{ .name = \"data\", .role = RL_LINUX_DATA, .paths = paths_{i}, .path_count = {}u, .file = rl_linux_file_{i}, .file_size = UINT64_C({:#x}) }},",
+            d.paths.len(),
+            d.bytes.len(),
+        );
+    }
     let stack = match modules.first().map_or(0, |m| m.object.stack_size) {
         0 => DEFAULT_STACK,
         n => n,
@@ -418,7 +461,7 @@ pub fn program_c(
         id.join(", "),
         c_string(modules.first().map_or("program", |m| m.name.as_str())),
         c_string(exec_path),
-        modules.len(),
+        modules.len() + program.data.len(),
         low & !(PAGE - 1),
         high.div_ceil(PAGE) * PAGE,
         stack,

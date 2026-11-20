@@ -29,6 +29,8 @@ typedef struct lx_fd {
     const rl_linux_module *virt;
     /** @brief The read position in a virtual file. */
     uint64_t virt_pos;
+    /** @brief The path of the directory of program files this descriptor lists (a directory the import's paths lie under), or NULL. */
+    char *vdir;
     /** @brief FD_CLOEXEC, which nothing here acts on but fcntl reports. */
     bool cloexec;
     /** @brief The directory stream getdents64 reads, opened on first use. */
@@ -221,6 +223,8 @@ lx_sys_fn *lx_signal_call(uint32_t nr);
 
 /** @brief The file of the program that guest descriptor fd reads (an interpreter's open of a library), or NULL. */
 const rl_linux_module *lx_virt_fd(int fd);
+/** @brief The directory of program files that guest descriptor fd lists, or NULL. */
+const char *lx_vdir_fd(int fd);
 /** @brief The host descriptor of guest descriptor fd, or -1. */
 int lx_host_fd(int fd);
 /** @brief Reads len bytes of the file open as host descriptor host from offset off into guest memory at addr (the rest of the last page stays zero): 0 or -errno. */

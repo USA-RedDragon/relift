@@ -11,6 +11,7 @@
 #include <string.h>
 
 #define PATH_CAP 4096u
+#define NAME_CAP 256u
 #define IOV_MAX_COUNT 1024u
 
 void lx_fs_init(void)
@@ -44,13 +45,20 @@ int lx_host_fd(int fd)
 static int64_t alloc_fd(int host, int min, bool cloexec)
 {
     for (int i = min < 0 ? 0 : min; i < LX_MAX_FDS; i++)
-        if (lx.fds[i].host < 0 && !lx.fds[i].virt) {
+        if (lx.fds[i].host < 0 && !lx.fds[i].virt && !lx.fds[i].vdir) {
             lx.fds[i] = (lx_fd){ .host = host, .cloexec = cloexec };
             return i;
         }
     if (host >= 0)
         hio_close(host);
     return -L_EMFILE;
+}
+
+const char *lx_vdir_fd(int fd)
+{
+    if (fd < 0 || fd >= LX_MAX_FDS)
+        return NULL;
+    return lx.fds[fd].vdir;
 }
 
 const rl_linux_module *lx_virt_fd(int fd)
@@ -115,10 +123,15 @@ static const rl_linux_module *module_at(const char *path)
     return NULL;
 }
 
-/** @brief Whether the file name is a shared object's. */
+static bool vdir_exists(const char *dir);
+
+/** @brief Whether the file name is a shared object's: it has a ".so" that ends the name or a version suffix. */
 static bool shared_object_name(const char *leaf)
 {
-    return (strncmp(leaf, "lib", 3) == 0 || strncmp(leaf, "ld-", 3) == 0) && strstr(leaf, ".so") != NULL;
+    for (const char *p = strstr(leaf, ".so"); p; p = strstr(p + 1, ".so"))
+        if (p[3] == 0 || p[3] == '.')
+            return true;
+    return false;
 }
 
 /** @brief Whether some module of the program is named leaf (a file of that name elsewhere is a probe miss of the loader's search). */
@@ -140,7 +153,7 @@ static bool module_named(const char *leaf)
  * finds: the loader's configuration and the probes of its library search
  * find nothing (a miss must not reach a file of the machine the program
  * runs on, whose libraries are not the ones the program was lifted with),
- * and a shared object the import does not hold at all (a dlopen of an
+ * as does any other name in a directory the import's files lie in, and a shared object the import does not hold at all (a dlopen of an
  * unknown name) stops the program with a report. Returns false when the
  * open goes on to the host file system.
  */
@@ -156,6 +169,14 @@ static bool loader_miss(rl_ctx *c, const char *path, int64_t *result)
         }
     const char *leaf = strrchr(norm, '/');
     leaf = leaf ? leaf + 1 : norm;
+    char parent[PATH_CAP];
+    size_t plen = (size_t)(leaf - norm);
+    memcpy(parent, norm, plen);
+    parent[plen > 1 ? plen - 1 : plen] = 0;
+    if (plen > 1 && vdir_exists(parent)) {
+        *result = -L_ENOENT;
+        return true;
+    }
     if (!shared_object_name(leaf))
         return false;
     if (module_named(leaf)) {
@@ -165,6 +186,81 @@ static bool loader_miss(rl_ctx *c, const char *path, int64_t *result)
     rl_guest_fatal(c, "linux", "the program loads the library %s, which is not in the import: import it with a sysroot that holds it", norm);
     *result = LX_PENDING;
     return true;
+}
+
+/** @brief Whether some file of the program lies under the directory path (without a trailing slash). */
+static bool vdir_exists(const char *dir)
+{
+    char norm[PATH_CAP];
+    if (!lx.prog || !normalize(dir, norm, sizeof norm))
+        return false;
+    size_t n = strcmp(norm, "/") == 0 ? 0 : strlen(norm);
+    for (uint32_t i = 0; i < lx.prog->module_count; i++) {
+        const rl_linux_module *m = &lx.prog->modules[i];
+        for (uint32_t k = 0; k < m->path_count; k++)
+            if (strncmp(m->paths[k], norm, n) == 0 && m->paths[k][n] == '/' && m->paths[k][n + 1] != 0)
+                return true;
+    }
+    return false;
+}
+
+/**
+ * @brief The index-th distinct entry under the directory (its first path
+ * component below it, a directory when more follows), counting "." and "..";
+ * false past the last one.
+ */
+static bool vdir_entry(const char *dir, uint64_t index, char *name, uint8_t *type)
+{
+    if (index == 0 || index == 1) {
+        strcpy(name, index ? ".." : ".");
+        *type = L_DT_DIR;
+        return true;
+    }
+    size_t n = strcmp(dir, "/") == 0 ? 0 : strlen(dir);
+    uint64_t seen = 2;
+    for (uint32_t i = 0; i < lx.prog->module_count; i++) {
+        const rl_linux_module *m = &lx.prog->modules[i];
+        for (uint32_t k = 0; k < m->path_count; k++) {
+            const char *p = m->paths[k];
+            if (strncmp(p, dir, n) != 0 || p[n] != '/' || p[n + 1] == 0)
+                continue;
+            const char *leaf = p + n + 1;
+            size_t len = strcspn(leaf, "/");
+            if (len >= NAME_CAP)
+                continue;
+            bool dup = false;
+            for (uint32_t j = 0; j <= i && !dup; j++) {
+                const rl_linux_module *o = &lx.prog->modules[j];
+                for (uint32_t l = 0; l < o->path_count && (j < i || l < k); l++) {
+                    const char *q = o->paths[l];
+                    if (strncmp(q, dir, n) == 0 && q[n] == '/' && strncmp(q + n + 1, leaf, len) == 0 &&
+                        (q[n + 1 + len] == 0 || q[n + 1 + len] == '/') && strcspn(q + n + 1, "/") == len) {
+                        dup = true;
+                        break;
+                    }
+                }
+            }
+            if (dup)
+                continue;
+            if (seen++ == index) {
+                memcpy(name, leaf, len);
+                name[len] = 0;
+                *type = leaf[len] ? L_DT_DIR : L_DT_REG;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void vdir_stat(l_stat *st)
+{
+    memset(st, 0, sizeof *st);
+    st->st_dev = 0x7e57;
+    st->st_ino = 0x900;
+    st->st_mode = L_S_IFDIR | 0755;
+    st->st_nlink = 2;
+    st->st_blksize = 4096;
 }
 
 static void virt_stat(const rl_linux_module *m, l_stat *st)
@@ -237,8 +333,25 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         int64_t fd = alloc_fd(-1, 0, (flags & L_O_CLOEXEC) != 0);
         if (fd >= 0) {
             lx.fds[fd].virt = vm;
-            lx.pending_lib = vm;
+            if (vm->role == RL_LINUX_LIBRARY)
+                lx.pending_lib = vm;
         }
+        return fd;
+    }
+    if (vdir_exists(path)) {
+        if ((flags & L_O_ACCMODE) != L_O_RDONLY || (flags & (L_O_CREAT | L_O_TRUNC)))
+            return -L_EISDIR;
+        char norm[PATH_CAP];
+        normalize(path, norm, sizeof norm);
+        char *copy = strdup(norm);
+        if (!copy)
+            return -L_ENOMEM;
+        int64_t fd = alloc_fd(-1, 0, (flags & L_O_CLOEXEC) != 0);
+        if (fd < 0) {
+            free(copy);
+            return fd;
+        }
+        lx.fds[fd].vdir = copy;
         return fd;
     }
     int64_t miss;
@@ -255,9 +368,10 @@ static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)c;
     (void)mem;
     int fd = (int)a[0];
-    if (lx_virt_fd(fd)) {
+    if (lx_virt_fd(fd) || lx_vdir_fd(fd)) {
         if (lx.pending_lib == lx.fds[fd].virt)
             lx.pending_lib = NULL;
+        free(lx.fds[fd].vdir);
         lx.fds[fd] = (lx_fd){ .host = -1 };
         return 0;
     }
@@ -489,6 +603,11 @@ static int64_t sys_fstat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         virt_stat(vm, &st);
         return lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
     }
+    if (lx_vdir_fd((int)a[0])) {
+        l_stat st;
+        vdir_stat(&st);
+        return lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+    }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)
         return -L_EBADF;
@@ -513,12 +632,20 @@ static int64_t stat_of(int64_t dirfd, uint64_t path_addr, uint64_t flags, l_stat
             virt_stat(vm, st);
             return 0;
         }
+        if (lx_vdir_fd((int)dirfd)) {
+            vdir_stat(st);
+            return 0;
+        }
         int h = lx_host_fd((int)dirfd);
         return h < 0 ? -L_EBADF : hio_fstat(h, st);
     }
     const rl_linux_module *vm = module_at(path);
     if (vm) {
         virt_stat(vm, st);
+        return 0;
+    }
+    if (vdir_exists(path)) {
+        vdir_stat(st);
         return 0;
     }
     int64_t miss;
@@ -676,6 +803,7 @@ static void drop_fd(int fd)
         hio_dir_close(f->dir);
     if (f->host >= 0)
         hio_close(f->host);
+    free(f->vdir);
     *f = (lx_fd){ .host = -1 };
 }
 
@@ -694,7 +822,7 @@ static int64_t sys_dup3(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t n = hio_dup(h, 0);
     if (n < 0)
         return n;
-    if (lx.fds[to].host >= 0 || lx.fds[to].virt)
+    if (lx.fds[to].host >= 0 || lx.fds[to].virt || lx.fds[to].vdir)
         drop_fd(to);
     lx.fds[to] = (lx_fd){ .host = (int)n, .cloexec = (a[2] & L_O_CLOEXEC) != 0 };
     return to;
@@ -814,7 +942,7 @@ static int64_t sys_faccessat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return rc;
     if (a[2] & ~7ull)
         return -L_EINVAL;
-    if (module_at(path))
+    if (module_at(path) || vdir_exists(path))
         return (a[2] & 2) ? -L_EACCES : 0;
     int64_t miss;
     if (loader_miss(NULL, path, &miss) && miss != LX_PENDING)
@@ -929,6 +1057,36 @@ static int64_t sys_getdents64(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)c;
     (void)mem;
     int fd = (int)a[0];
+    if (lx_vdir_fd(fd)) {
+        lx_fd *v = &lx.fds[fd];
+        uint64_t cap = a[2];
+        if (!lx_ok(a[1], cap, RL_VM_W))
+            return -L_EFAULT;
+        uint8_t *out = mem + a[1];
+        uint64_t at = 0;
+        char name[NAME_CAP];
+        uint8_t type;
+        while (vdir_entry(v->vdir, v->virt_pos, name, &type)) {
+            size_t len = strlen(name);
+            uint64_t reclen = (19 + len + 1 + 7) & ~7ull;
+            if (at + reclen > cap) {
+                if (at == 0)
+                    return -L_EINVAL;
+                break;
+            }
+            uint64_t ino = 0x901 + v->virt_pos, off = at + reclen;
+            memcpy(out + at, &ino, 8);
+            memcpy(out + at + 8, &off, 8);
+            uint16_t rl = (uint16_t)reclen;
+            memcpy(out + at + 16, &rl, 2);
+            out[at + 18] = type;
+            memcpy(out + at + 19, name, len + 1);
+            memset(out + at + 19 + len + 1, 0, reclen - 19 - len - 1);
+            at += reclen;
+            v->virt_pos++;
+        }
+        return (int64_t)at;
+    }
     int h = lx_host_fd(fd);
     if (h < 0)
         return -L_EBADF;

@@ -125,7 +125,7 @@ static int load_image(const rl_linux_program *p)
 {
     uint64_t hi = p->code_hi;
     for (uint32_t i = 0; i < p->module_count; i++)
-        if (p->modules[i].role != RL_LINUX_LIBRARY && !load_module(&p->modules[i]))
+        if ((p->modules[i].role == RL_LINUX_MAIN || p->modules[i].role == RL_LINUX_INTERPRETER) && !load_module(&p->modules[i]))
             return 1;
     lx.lib_lo = 0;
     lx.lib_hi = 0;
@@ -301,8 +301,12 @@ int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
             rl_log(RL_LOG_INFO, "linux", "svc %u (0x%llx, 0x%llx, 0x%llx, 0x%llx)", nr, (unsigned long long)a[0],
                    (unsigned long long)a[1], (unsigned long long)a[2], (unsigned long long)a[3]);
         int64_t r = dispatch(c, mem, nr, a);
-        if (rl_cfg()->trace_os)
-            rl_log(RL_LOG_INFO, "linux", "  svc %u = %lld", nr, (long long)r);
+        if (rl_cfg()->trace_os) {
+            char path[96] = "";
+            if ((nr == 56 || nr == 79 || nr == 48) && lx_get(path, a[1], sizeof path - 1))
+                path[sizeof path - 1] = 0;
+            rl_log(RL_LOG_INFO, "linux", "  svc %u = %lld %s", nr, (long long)r, path);
+        }
         if (r == LX_PENDING)
             return RL_PENDING;
         bool restart = r == -L_ERESTARTSYS || r == -L_ERESTARTNOHAND || r == -L_ERESTART_RESTARTBLOCK;
@@ -325,7 +329,8 @@ static void describe_program(const rl_linux_program *p)
     rl_report_info("guest", "linux");
     rl_report_info("program", p->name);
     for (uint32_t i = 0; i < p->module_count; i++)
-        rl_report_module(p->modules[i].name, p->modules[i].base, p->modules[i].span, "");
+        if (p->modules[i].role != RL_LINUX_DATA)
+            rl_report_module(p->modules[i].name, p->modules[i].base, p->modules[i].span, "");
 }
 
 static int finish(rl_ctx *c, int rc)

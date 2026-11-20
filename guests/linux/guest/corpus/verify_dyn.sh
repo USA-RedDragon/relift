@@ -24,6 +24,7 @@ for prog in "$out"/*.dyn; do
         if [ -f "$dir/env" ]; then
             while IFS= read -r e; do printf ' %s' "$(quote "$e")"; done < "$dir/env"
         fi
+        [ -f "$dir/gconv" ] && printf ' GCONV_PATH=%s/gconv' "$work"
         printf ' ./lib/ld-linux-aarch64.so.1 --library-path %s/lib:%s ./prog' "$work" "$work"
         if [ -f "$dir/args" ]; then
             while IFS= read -r a; do printf ' %s' "$(quote "$a")"; done < "$dir/args"
@@ -37,6 +38,7 @@ for prog in "$out"/*.dyn; do
     for so in "$out"/lib"$name".so; do
         [ -f "$so" ] && dev push -q "$so" "$work/$(basename "$so")" > /dev/null
     done
+    [ -f "$dir/gconv" ] && dev push -q "$sysroot/lib/gconv" "$work/gconv" > /dev/null
     dev push -q "$prog" "$work/prog" > /dev/null
     dev push -q "$script" "$work/run.sh" > /dev/null
     dev shell "chmod 755 $work/prog"

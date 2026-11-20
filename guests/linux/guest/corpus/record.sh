@@ -24,6 +24,7 @@ for name in "$@"; do
         if [ -f "$dir/env" ]; then
             while IFS= read -r e; do printf ' %s' "$(quote "$e")"; done < "$dir/env"
         fi
+        [ -f "$dir/gconv" ] && printf ' GCONV_PATH=%s/gconv' "$work"
         if [ -n "$dynamic" ]; then
             printf ' ./lib/ld-linux-aarch64.so.1 --library-path %s/lib:%s ./prog' "$work" "$work"
         else
@@ -43,6 +44,7 @@ for name in "$@"; do
         for so in "$out"/lib"$name".so; do
             [ -f "$so" ] && dev push -q "$so" "$work/$(basename "$so")" > /dev/null
         done
+        [ -f "$dir/gconv" ] && dev push -q "$sysroot/lib/gconv" "$work/gconv" > /dev/null
         dev push -q "$out/$name.dyn" "$work/prog" > /dev/null
     else
         dev push -q "$out/$name.static" "$work/prog" > /dev/null

@@ -36,3 +36,8 @@ writes the two expected files; it takes the lock `RELIFT_ADB_LOCK` names (defaul
 `$XDG_RUNTIME_DIR` or the output directory) around every use of the
 device, picks the device with `ANDROID_SERIAL`, and removes what it pushed. `run.sh <out-dir> <name> <variant>`
 runs one build under `qemu-aarch64` when that is installed.
+
+A `gconv` file marks a program that loads glibc's iconv plugins: the device
+runs it with `GCONV_PATH` pointing at the sysroot's `gconv` directory pushed
+beside it, and relift imports the plugin directory glibc spells with the
+program's libraries.

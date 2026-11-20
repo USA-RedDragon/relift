@@ -167,7 +167,7 @@ pub fn import(
         paths: l.paths.clone(),
         bytes: l.bytes.clone(),
     }));
-    program::place(inputs).map_err(|e| format!("{}: {e}", path.display()))?;
+    program::place(inputs, Vec::new()).map_err(|e| format!("{}: {e}", path.display()))?;
     let out = crate::import::import_dir(settings, Path::new("."))?;
     std::fs::create_dir_all(&out)?;
     relift_cache::write_if_changed(&out.join(PROGRAM_FILE), &bytes)?;
@@ -180,23 +180,28 @@ pub fn import(
         .interpreter
         .iter()
         .map(|l| ("interpreter", l))
-        .chain(closure.libraries.iter().map(|l| ("library", l)));
+        .chain(closure.libraries.iter().map(|l| ("library", l)))
+        .map(|(role, l)| (role, l.name.clone(), &l.paths, &l.bytes))
+        .chain(closure.data.iter().map(|d| {
+            let name = d.paths.first().map_or("data", |p| p.as_str());
+            ("data", name.to_string(), &d.paths, &d.bytes)
+        }));
     let mut count = 0;
     let mut size = 0;
-    for (i, (role, l)) in files.enumerate() {
+    for (i, (role, name, paths, bytes)) in files.enumerate() {
         std::fs::create_dir_all(&mods)?;
-        let file = format!("{i:03}-{}", l.name.replace('/', "_"));
-        relift_cache::write_if_changed(&mods.join(&file), &l.bytes)?;
-        let paths: Vec<String> = l.paths.iter().map(|p| quote(p)).collect();
+        let file = format!("{i:03}-{}", name.replace('/', "_"));
+        relift_cache::write_if_changed(&mods.join(&file), bytes)?;
+        let paths: Vec<String> = paths.iter().map(|p| quote(p)).collect();
         manifest.push_str(&format!(
             "\n[[module]]\nrole = \"{role}\"\nname = {}\nfile = {}\nsha256 = \"{}\"\npaths = [{}]\n",
-            quote(&l.name),
+            quote(&name),
             quote(&file),
-            sha_hex(&l.bytes),
+            sha_hex(bytes),
             paths.join(", ")
         ));
         count += 1;
-        size += l.bytes.len();
+        size += bytes.len();
     }
     relift_cache::write_if_changed(&out.join(MODULES_FILE), manifest.as_bytes())?;
     let sha = sha_hex(&bytes);
@@ -235,6 +240,7 @@ pub fn import(
 
 struct Project {
     inputs: Vec<Input>,
+    data: Vec<program::Data>,
     exec_path: String,
     title: String,
 }
@@ -253,6 +259,7 @@ fn project() -> Result<Project, BoxError> {
         paths: Vec::new(),
         bytes,
     }];
+    let mut data = Vec::new();
     let mut exec_path = s("program").unwrap_or_else(|| "/program".into());
     let list = dir.join(MODULES_FILE);
     if list.exists() {
@@ -285,28 +292,33 @@ fn project() -> Result<Project, BoxError> {
                 )
                 .into());
             }
-            inputs.push(Input {
-                name: field("name")?.into(),
-                role: if field("role")? == "interpreter" {
-                    Role::Interpreter
-                } else {
-                    Role::Library
-                },
-                paths: m
-                    .get("paths")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|p| p.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                bytes,
-            });
+            let paths: Vec<String> = m
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|p| p.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            match field("role")? {
+                "data" => data.push(program::Data { paths, bytes }),
+                role => inputs.push(Input {
+                    name: field("name")?.into(),
+                    role: if role == "interpreter" {
+                        Role::Interpreter
+                    } else {
+                        Role::Library
+                    },
+                    paths,
+                    bytes,
+                }),
+            }
         }
     }
     Ok(Project {
         inputs,
+        data,
         exec_path,
         title,
     })
@@ -507,19 +519,23 @@ pub fn build(
             |c| c.name().to_string()
         )
     ));
-    let placed = program::place(p.inputs).map_err(|e| format!("{}: {e}", p.title))?;
+    let program = program::place(p.inputs, p.data).map_err(|e| format!("{}: {e}", p.title))?;
+    let placed = &program.modules;
     let mut all = Vec::new();
-    for m in &placed {
+    for m in placed {
         all.extend_from_slice(m.name.as_bytes());
         all.push(0);
         all.extend_from_slice(&relift_switch_formats::sha256(&m.file));
+    }
+    for d in &program.data {
+        all.extend_from_slice(&relift_switch_formats::sha256(&d.bytes));
     }
     let id = relift_switch_formats::sha256(&all);
     let rows: Vec<usize> = placed.iter().map(|m| ui.row(&m.name)).collect();
     for &row in &rows {
         ui.begin(row, "lift");
     }
-    let results = lift::lift_program(&placed, id, settings.emit.trampoline, settings.emit.cold);
+    let results = lift::lift_program(placed, id, settings.emit.trampoline, settings.emit.cold);
     let mut files = Vec::new();
     let mut units = Vec::new();
     let mut maps = Vec::new();
@@ -568,7 +584,7 @@ pub fn build(
     relift_cache::write_if_changed(&out.join("unlifted.txt"), list.as_bytes())?;
     let mut prog = Vec::new();
     for f in program::program_files(
-        &placed,
+        &program,
         &p.exec_path,
         (&units, &maps),
         id,
