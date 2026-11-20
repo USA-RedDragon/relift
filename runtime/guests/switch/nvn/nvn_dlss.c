@@ -21,6 +21,30 @@
 
 const uint8_t nvn_dlss_texture_offsets[NVN_DLSS_PARAM_TEXTURES] = { 0, 16, 32, 48, 64, 104 };
 
+/** @brief Bytes of the texture ids a DLSS network builder holds: 32 ints, at +0x38 of the builder, its texture pool's guest address at +8. */
+#define DLSS_TEXTURE_IDS 0x80u
+
+/**
+ * @brief nvnDlssNetworkBuilderSetTextureIDs(NVNdlssNetworkBuilder *, const NVNtexturePool *, const int *ids): the
+ * driver stores the pool at +8 of the builder and memmoves 128 bytes of ids to +0x38 (SDK 22.2.0, read in three
+ * games). Only its call to memmove makes the driver's own code impure, so the layer does the same two stores; the
+ * builder's other procs stay the driver's and read the same fields back.
+ */
+uint64_t nvnh_nvnDlssNetworkBuilderSetTextureIDs(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t builder = c->x[0];
+    memmove(mem + builder + 0x38, mem + c->x[2], DLSS_TEXTURE_IDS);
+    rl_st64(mem, builder + 8, c->x[1]);
+    return nvn_ret(c);
+}
+
+/** @brief nvnDlssNetworkBuilderGetTextureIDs(const NVNdlssNetworkBuilder *, int *ids): memmoves the 128 bytes at +0x38 of the builder to ids, as the driver does. */
+uint64_t nvnh_nvnDlssNetworkBuilderGetTextureIDs(rl_ctx *c, uint8_t *mem)
+{
+    memmove(mem + c->x[1], mem + c->x[0] + 0x38, DLSS_TEXTURE_IDS);
+    return nvn_ret(c);
+}
+
 /**
  * @brief The builder's flags, as the driver hands them to the DLSS library (bit 0 inverted into the library's HDR
  * flag, bits 1, 2, 3 and 6 as they are; lane dlss's loader reproduces it): the color is not HDR, motion vectors are at

@@ -389,6 +389,8 @@ const uint64_t *nvn_program_code(uint64_t prog, uint32_t *n, const nvn_consts **
 #define NVN_DLSS_PROCS(X)                                                                                              \
     X(nvnDlssNetworkBuilderGetOptimalSettings)                                                                         \
     X(nvnDlssNetworkBuilderGetStorageSize)                                                                             \
+    X(nvnDlssNetworkBuilderSetTextureIDs)                                                                              \
+    X(nvnDlssNetworkBuilderGetTextureIDs)                                                                              \
     X(nvnDlssNetworkFinalize)                                                                                          \
     X(nvnDlssNetworkInitialize)                                                                                        \
     X(nvnDlssNetworkResize)

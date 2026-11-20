@@ -228,6 +228,23 @@ TEST(nvn_dlss_parameters_read_as_the_setters_store_them)
     CHECK_EQ(p.out_base[1], 4);
 }
 
+TEST(nvn_dlss_builder_texture_ids_round_trip_through_the_builder)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t builder = heap + 0x100, ids = heap + 0x400, out = heap + 0x600, pool = heap + 0x800;
+    for (uint32_t i = 0; i < 32; i++)
+        rl_st32(t_mem(), ids + 4 * i, 1000 + i);
+    CHECK_EQ(call(c, nvnh_nvnDlssNetworkBuilderSetTextureIDs, builder, pool, ids, 0), RET);
+    CHECK_EQ(rl_ld64(t_mem(), builder + 8), pool);
+    CHECK_EQ(rl_ld32(t_mem(), builder + 0x38), 1000);
+    CHECK_EQ(rl_ld32(t_mem(), builder + 0x38 + 124), 1031);
+    CHECK_EQ(rl_ld32(t_mem(), builder + 0x38 + 128), 0);
+    CHECK_EQ(call(c, nvnh_nvnDlssNetworkBuilderGetTextureIDs, builder, out, 0, 0), RET);
+    for (uint32_t i = 0; i < 32; i++)
+        CHECK_EQ(rl_ld32(t_mem(), out + 4 * i), 1000 + i);
+}
+
 TEST(nvn_dlss_state_procs_stay_the_drivers_and_work_procs_do_not)
 {
     CHECK(nvn_driver_index("nvnDlssNetworkBuilderSetDefaults") >= 0);
@@ -625,7 +642,7 @@ TEST(nvn_presents_show_the_window_crop)
 TEST(nvn_storage_class_needs_the_drivers_layout)
 {
     rl_ctx *c = t_boot(NULL);
-    uint64_t heap = t_heap(c, 0x10000);
+    uint64_t heap = t_heap(c, 0x200000);
     rl_nvn_set_layout(NULL);
     CHECK_EQ(call(c, nvnh_nvnTextureBuilderGetStorageClass, heap, 0, 0, 0), RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
