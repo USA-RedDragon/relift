@@ -517,82 +517,9 @@ static VkPipeline fragment_library(const nvn_pipe_key *k)
     return library(&P.fs, &sk, sizeof sk, VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT, &f, "fragment library");
 }
 
-/** @brief A vertex program with no inputs that writes one position: the front of a fragment program's warm-up pipeline. */
-static const uint32_t passthrough_spv[] = {
-    0x07230203, 0x00010000, 0x0008000b, 0x00000015, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
-    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
-    0x0006000f, 0x00000000, 0x00000004, 0x6e69616d, 0x00000000, 0x0000000d, 0x00030003, 0x00000002,
-    0x000001c2, 0x00040005, 0x00000004, 0x6e69616d, 0x00000000, 0x00060005, 0x0000000b, 0x505f6c67,
-    0x65567265, 0x78657472, 0x00000000, 0x00060006, 0x0000000b, 0x00000000, 0x505f6c67, 0x7469736f,
-    0x006e6f69, 0x00070006, 0x0000000b, 0x00000001, 0x505f6c67, 0x746e696f, 0x657a6953, 0x00000000,
-    0x00070006, 0x0000000b, 0x00000002, 0x435f6c67, 0x4470696c, 0x61747369, 0x0065636e, 0x00070006,
-    0x0000000b, 0x00000003, 0x435f6c67, 0x446c6c75, 0x61747369, 0x0065636e, 0x00030005, 0x0000000d,
-    0x00000000, 0x00030047, 0x0000000b, 0x00000002, 0x00050048, 0x0000000b, 0x00000000, 0x0000000b,
-    0x00000000, 0x00050048, 0x0000000b, 0x00000001, 0x0000000b, 0x00000001, 0x00050048, 0x0000000b,
-    0x00000002, 0x0000000b, 0x00000003, 0x00050048, 0x0000000b, 0x00000003, 0x0000000b, 0x00000004,
-    0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00030016, 0x00000006, 0x00000020,
-    0x00040017, 0x00000007, 0x00000006, 0x00000004, 0x00040015, 0x00000008, 0x00000020, 0x00000000,
-    0x0004002b, 0x00000008, 0x00000009, 0x00000001, 0x0004001c, 0x0000000a, 0x00000006, 0x00000009,
-    0x0006001e, 0x0000000b, 0x00000007, 0x00000006, 0x0000000a, 0x0000000a, 0x00040020, 0x0000000c,
-    0x00000003, 0x0000000b, 0x0004003b, 0x0000000c, 0x0000000d, 0x00000003, 0x00040015, 0x0000000e,
-    0x00000020, 0x00000001, 0x0004002b, 0x0000000e, 0x0000000f, 0x00000000, 0x0004002b, 0x00000006,
-    0x00000010, 0x00000000, 0x0004002b, 0x00000006, 0x00000011, 0x3f800000, 0x0007002c, 0x00000007,
-    0x00000012, 0x00000010, 0x00000010, 0x00000010, 0x00000011, 0x00040020, 0x00000013, 0x00000003,
-    0x00000007, 0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005,
-    0x00050041, 0x00000013, 0x00000014, 0x0000000d, 0x0000000f, 0x0003003e, 0x00000014, 0x00000012,
-    0x000100fd, 0x00010038,
-};
+bool nvn_pipe_warm_vertex(const nvn_pipe_key *k) { return P.gpl && vertex_library(k) != NULL; }
 
-static VkShaderModule passthrough_module(void)
-{
-    static VkShaderModule m;
-    pthread_mutex_lock(&P.lock);
-    if (!m) {
-        VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                        .codeSize = sizeof passthrough_spv,
-                                        .pCode = passthrough_spv };
-        if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
-            m = NULL;
-    }
-    VkShaderModule have = m;
-    pthread_mutex_unlock(&P.lock);
-    return have;
-}
-
-/**
- * @brief The pipeline of one stage of k alone, for a driver that makes whole
- * pipelines only: a vertex program with no fragment program, or a fragment
- * program behind a vertex program that writes one position, with the default
- * render target. It does the driver's work on the stage's module (and, when
- * the driver keeps compiled stages apart from the pipeline state, caches it
- * for the draws' pipelines); how much of that carries to a draw is up to the
- * driver.
- */
-static bool stage_pipeline(const nvn_pipe_key *k, uint32_t stage)
-{
-    nvn_pipe_key w;
-    memset(&w, 0, sizeof w);
-    w.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    w.polygon = VK_POLYGON_MODE_FILL;
-    w.depth = w.stencil = VK_FORMAT_UNDEFINED;
-    w.nspec[stage] = k->nspec[stage];
-    memcpy(w.spec_map[stage], k->spec_map[stage], sizeof w.spec_map[stage]);
-    memcpy(w.spec[stage], k->spec[stage], sizeof w.spec[stage]);
-    w.mods[stage] = k->mods[stage];
-    if (stage == 1) {
-        w.mods[0] = passthrough_module();
-        if (!w.mods[0])
-            return false;
-        w.ncolor = 1;
-        w.color[0] = VK_FORMAT_R8G8B8A8_UNORM;
-        w.blend[0].colorWriteMask = 0xf;
-    }
-    return nvn_pipe_graphics(&w) != NULL;
-}
-
-bool nvn_pipe_warm_vertex(const nvn_pipe_key *k) { return P.gpl ? vertex_library(k) != NULL : stage_pipeline(k, 0); }
-
-bool nvn_pipe_warm_fragment(const nvn_pipe_key *k) { return P.gpl ? fragment_library(k) != NULL : stage_pipeline(k, 1); }
+bool nvn_pipe_warm_fragment(const nvn_pipe_key *k) { return P.gpl && fragment_library(k) != NULL; }
 
 /** @brief The monolithic pipeline for k, which a device without libraries makes at the draw. */
 static VkPipeline monolithic(const nvn_pipe_key *k)

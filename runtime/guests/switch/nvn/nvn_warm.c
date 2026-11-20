@@ -47,8 +47,8 @@ static struct {
     uint64_t t0, last_log;
 } W = { .lock = PTHREAD_MUTEX_INITIALIZER, .late_cv = PTHREAD_COND_INITIALIZER };
 
-/** @brief Physical memory one compile may take, as measured on a large translated program: about 1.2 GiB. */
-#define COMPILE_MEMORY (2ull << 30)
+/** @brief Memory one compile may take: a driver compile of a large translated program was measured at 2.4 GiB. */
+#define COMPILE_MEMORY (4ull << 30)
 
 /**
  * @brief The workers to start: one per processor, and no more than the
@@ -124,7 +124,7 @@ static bool warm_key(const char *key, const uint32_t *wg, uint32_t *kind)
         *kind = 3;
         return nvn_pipe_compute(m->m, n, map, vals) != NULL;
     }
-    if (wg)
+    if (wg || !nvn_pipe_uses_libraries())
         return true;
     if (m->stage == 0) {
         default_key(&k, m, 0);

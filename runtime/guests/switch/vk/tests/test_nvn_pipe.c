@@ -218,7 +218,7 @@ TEST(nvn_pipe_cache_is_read_back_and_discarded_on_a_changed_header_or_body)
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
 
-TEST(nvn_pipe_without_libraries_warms_each_stage_as_a_pipeline_of_its_own)
+TEST(nvn_pipe_without_libraries_makes_whole_pipelines_and_warms_no_stage)
 {
     nvn_probes probes;
     if (!nvn_vk_probes(&probes))
@@ -234,15 +234,13 @@ TEST(nvn_pipe_without_libraries_warms_each_stage_as_a_pipeline_of_its_own)
     CHECK(vs && fs);
     nvn_pipe_key k;
     make_key(&k, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
+    CHECK(!nvn_pipe_warm_vertex(&k));
+    CHECK(!nvn_pipe_warm_fragment(&k));
     uint64_t made0, ns, late, lns, made1;
     nvn_pipe_stats(&made0, &ns, &late, &lns);
-    CHECK(nvn_pipe_warm_vertex(&k));
-    CHECK(nvn_pipe_warm_fragment(&k));
-    nvn_pipe_stats(&made1, &ns, &late, &lns);
-    CHECK_EQ(made1 - made0, 2u);
     CHECK(nvn_pipe_graphics(&k) != NULL);
     nvn_pipe_stats(&made1, &ns, &late, &lns);
-    CHECK_EQ(made1 - made0, 3u);
+    CHECK_EQ(made1 - made0, 1u);
     unsetenv("RELIFT_PIPELINE_MODE");
     unsetenv("RELIFT_PIPELINE_CACHE");
     nvn_pipe_init();

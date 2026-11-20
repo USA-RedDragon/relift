@@ -72,10 +72,10 @@ bool nvn_pipe_uses_libraries(void);
  */
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k);
 
-/** @brief Makes (or waits for) the pre-raster library of vertex module k->mods[0] with k's specialization constants and fixed state. */
+/** @brief Makes (or waits for) the pre-raster library of vertex module k->mods[0] with k's specialization constants and fixed state; false without libraries. */
 bool nvn_pipe_warm_vertex(const nvn_pipe_key *k);
 
-/** @brief Makes (or waits for) the fragment library of k->mods[1] with k's specialization constants. */
+/** @brief Makes (or waits for) the fragment library of k->mods[1] with k's specialization constants; false without libraries. */
 bool nvn_pipe_warm_fragment(const nvn_pipe_key *k);
 
 /** @brief The compute pipeline of module m with n specialization constants (sorted by id). NULL when the driver refuses. */
