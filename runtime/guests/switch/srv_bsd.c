@@ -389,11 +389,121 @@ static rl_result do_eventfd(rl_ipc_req *r)
     return reply(r, ret, err);
 }
 
+/** @brief Largest descriptor number a Select set can name. */
+#define BSD_FD_SETSIZE 1024
+
+/** @brief Ioctl request codes of the console (FreeBSD) that sockets use. */
+#define BSD_FIONREAD 0x4004667fu
+#define BSD_FIONBIO 0x8004667eu
+
+/**
+ * @brief Select (5): i32 nfds, 4 bytes of padding, i64 seconds, i64 microseconds, a u8 that is 1 when the program
+ * passed no timeout; the read, write and except sets as send buffers 0 to 2 and again as receive buffers 0 to 2 (an
+ * empty buffer is a null set; a set is whole 64-bit words); i32 ready count and errno. A descriptor is ready for
+ * reading as Poll's POLLIN says, for writing as POLLOUT says; the except set is always empty.
+ */
+static rl_result do_select(rl_ipc_req *r)
+{
+    struct {
+        int32_t nfds;
+        uint32_t pad;
+        int64_t sec;
+        int64_t usec;
+        uint8_t no_timeout;
+    } in;
+    if (!rl_srv_in(r, &in, 25))
+        return SF_RESULT_INVALID_HEADER;
+    if (in.nfds < 0)
+        return reply(r, -1, BSD_EINVAL);
+    uint32_t nfds = in.nfds > BSD_FD_SETSIZE ? BSD_FD_SETSIZE : (uint32_t)in.nfds;
+    size_t bytes = ((size_t)nfds + 63) / 64 * 8;
+    uint64_t sets[3][BSD_FD_SETSIZE / 64] = { { 0 } };
+    bool present[3] = { false, false, false };
+    for (uint32_t i = 0; i < 3; i++) {
+        rl_ipc_buf b = rl_ipc_auto_in(r, i);
+        if (!b.size || !bytes)
+            continue;
+        present[i] = true;
+        if (!rl_ipc_buf_read(&b, sets[i], b.size < bytes ? b.size : bytes))
+            return SF_RESULT_INVALID_HEADER;
+    }
+    int64_t timeout_ms = in.no_timeout ? -1 : in.sec * 1000 + in.usec / 1000;
+    int64_t waited = 0;
+    int32_t ready = 0;
+    uint64_t out[3][BSD_FD_SETSIZE / 64];
+    for (;;) {
+        memset(out, 0, sizeof out);
+        ready = 0;
+        for (uint32_t fd = 0; fd < nfds; fd++) {
+            uint64_t bit = UINT64_C(1) << (fd % 64);
+            for (uint32_t k = 0; k < 2; k++) {
+                if (!(sets[k][fd / 64] & bit))
+                    continue;
+                uint16_t want = k == 0 ? 1 : 4;
+                if (bsd_net_revents(net_of(r), (int32_t)fd, want) & (uint16_t)(want | 0x10)) {
+                    out[k][fd / 64] |= bit;
+                    ready++;
+                }
+            }
+        }
+        if (ready || timeout_ms == 0 || (timeout_ms > 0 && waited >= timeout_ms))
+            break;
+        hos_sleep_thread(INT64_C(1000000));
+        waited++;
+    }
+    for (uint32_t i = 0; i < 3; i++) {
+        if (!present[i])
+            continue;
+        rl_ipc_buf b = rl_ipc_auto_out(r, i);
+        if (b.size && !rl_ipc_buf_write(&b, out[i], b.size < bytes ? b.size : bytes))
+            return SF_RESULT_INVALID_HEADER;
+    }
+    return reply(r, ready, 0);
+}
+
+/**
+ * @brief Ioctl (19): i32 fd, u32 request, u32 buffer count; the argument as send buffer 0 (and as receive buffer 0);
+ * i32 ret and errno. FIONBIO sets the nonblocking mode from the int in the argument, FIONREAD writes the bytes a
+ * Recv would return as an int to receive buffer 0; any other request is not a socket ioctl, so ENOTTY.
+ */
+static rl_result do_ioctl(rl_ipc_req *r)
+{
+    struct {
+        int32_t fd;
+        uint32_t request;
+        uint32_t count;
+    } in;
+    if (!rl_srv_in(r, &in, 12))
+        return SF_RESULT_INVALID_HEADER;
+    int32_t err;
+    int32_t ret;
+    if (in.request == BSD_FIONBIO) {
+        int32_t on = 0;
+        rl_ipc_buf b = rl_ipc_auto_in(r, 0);
+        if (!rl_ipc_buf_read(&b, &on, 4))
+            return SF_RESULT_INVALID_HEADER;
+        ret = bsd_net_set_nonblock(net_of(r), in.fd, on != 0, &err);
+    } else if (in.request == BSD_FIONREAD) {
+        int32_t pending = bsd_net_pending(net_of(r), in.fd, &err);
+        ret = pending < 0 ? -1 : 0;
+        if (ret == 0) {
+            rl_ipc_buf b = rl_ipc_auto_out(r, 0);
+            if (!rl_ipc_buf_write(&b, &pending, 4))
+                return SF_RESULT_INVALID_HEADER;
+        }
+    } else {
+        ret = -1;
+        err = BSD_ENOTTY;
+    }
+    return reply(r, ret, err);
+}
+
 static const rl_ipc_cmd client_cmds[] = {
     { 0, "RegisterClient", register_client },
     { 1, "StartMonitoring", rl_srv_stub_ok },
     { 2, "Socket", socket_create },
     { 3, "SocketExempt", socket_create },
+    { 5, "Select", do_select },
     { 6, "Poll", poll_fds },
     { 8, "Recv", do_recv },
     { 9, "RecvFrom", do_recvfrom },
@@ -406,6 +516,7 @@ static const rl_ipc_cmd client_cmds[] = {
     { 16, "GetSockName", do_getsockname },
     { 17, "GetSockOpt", do_getsockopt },
     { 18, "Listen", do_listen },
+    { 19, "Ioctl", do_ioctl },
     { 20, "Fcntl", do_fcntl },
     { 21, "SetSockOpt", do_setsockopt },
     { 22, "Shutdown", do_shutdown },

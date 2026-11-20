@@ -759,6 +759,37 @@ int32_t bsd_net_shutdown(bsd_net *n, int32_t fd, int32_t how, int32_t *err)
     return r;
 }
 
+int32_t bsd_net_pending(bsd_net *n, int32_t fd, int32_t *err)
+{
+    *err = 0;
+    pthread_mutex_lock(&n->lock);
+    sock *s = get(n, fd);
+    int32_t r = 0;
+    if (!s) {
+        r = fail(err, BSD_EBADF);
+    } else if (s->type == SOCK_DGRAM) {
+        r = s->ndgrams ? (int32_t)s->dgrams[0].len : 0;
+    } else if (s->type == SOCK_STREAM) {
+        r = (int32_t)s->len;
+    }
+    pthread_mutex_unlock(&n->lock);
+    return r;
+}
+
+int32_t bsd_net_set_nonblock(bsd_net *n, int32_t fd, bool on, int32_t *err)
+{
+    *err = 0;
+    pthread_mutex_lock(&n->lock);
+    sock *s = get(n, fd);
+    int32_t r = 0;
+    if (!s)
+        r = fail(err, BSD_EBADF);
+    else
+        s->nonblock = on;
+    pthread_mutex_unlock(&n->lock);
+    return r;
+}
+
 uint16_t bsd_net_revents(bsd_net *n, int32_t fd, uint16_t events)
 {
     pthread_mutex_lock(&n->lock);

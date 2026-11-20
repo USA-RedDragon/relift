@@ -23,6 +23,7 @@ enum {
     BSD_EDESTADDRREQ = 39,
     BSD_EMSGSIZE = 40,
     BSD_EPROTONOSUPPORT = 43,
+    BSD_ENOTTY = 25,
     BSD_EOPNOTSUPP = 45,
     BSD_EAFNOSUPPORT = 47,
     BSD_EADDRINUSE = 48,
@@ -76,6 +77,10 @@ int32_t bsd_net_setsockopt(bsd_net *n, int32_t fd, uint32_t level, uint32_t name
                            int32_t *err);
 int32_t bsd_net_fcntl(bsd_net *n, int32_t fd, int32_t cmd, int32_t arg, int32_t *err);
 int32_t bsd_net_shutdown(bsd_net *n, int32_t fd, int32_t how, int32_t *err);
+/** @brief Bytes a Recv would return now (FIONREAD), or -1 with *err when fd is not open. */
+int32_t bsd_net_pending(bsd_net *n, int32_t fd, int32_t *err);
+/** @brief Sets or clears a descriptor's nonblocking mode (FIONBIO). */
+int32_t bsd_net_set_nonblock(bsd_net *n, int32_t fd, bool on, int32_t *err);
 /** @brief The revents of one descriptor for events (BSD_POLLNVAL for one that is not open). */
 uint16_t bsd_net_revents(bsd_net *n, int32_t fd, uint16_t events);
 

@@ -387,3 +387,93 @@ TEST(bsd_poll_reports_what_is_ready_and_waits_out_the_timeout)
     CHECK_EQ(ret_of(&r), 0);
     CHECK_EQ(errno_of(&r), 0);
 }
+
+TEST(bsd_select_reports_ready_sets)
+{
+    fx f = fx_open("bsd:u");
+    int32_t l = sock_new(f, 1);
+    op_addr(f, CMD_BIND, l, LOOPBACK, 4100);
+    op_fd(f, CMD_LISTEN, l, 2);
+    int32_t c = sock_new(f, 1);
+    op_addr(f, CMD_CONNECT, c, LOOPBACK, 4100);
+    uint64_t *rd = (uint64_t *)(void *)(t_mem() + A_BUF(f));
+    uint64_t *wr = (uint64_t *)(void *)(t_mem() + A_BUF2(f));
+    rd[0] = UINT64_C(1) << l;
+    wr[0] = UINT64_C(1) << c;
+    tc_req q = tc_new(5);
+    tc_put32(&q, 16);
+    tc_put32(&q, 0);
+    tc_put64(&q, 0);
+    tc_put64(&q, 0);
+    tc_put32(&q, 0);
+    q.na = 2;
+    q.a_addr[0] = A_BUF(f);
+    q.a_size[0] = 8;
+    q.a_addr[1] = A_BUF2(f);
+    q.a_size[1] = 8;
+    q.nb = 2;
+    q.b_addr[0] = A_BUF(f);
+    q.b_size[0] = 8;
+    q.b_addr[1] = A_BUF2(f);
+    q.b_size[1] = 8;
+    tc_res r = call(f, q);
+    CHECK_EQ(ret_of(&r), 2);
+    CHECK_EQ(rd[0], UINT64_C(1) << l);
+    CHECK_EQ(wr[0], UINT64_C(1) << c);
+    int32_t idle = sock_new(f, 1);
+    rd[0] = UINT64_C(1) << idle;
+    q.a_size[1] = 0;
+    q.b_size[1] = 0;
+    q.nb = 1;
+    r = call(f, q);
+    CHECK_EQ(ret_of(&r), 0);
+    CHECK_EQ(rd[0], 0);
+}
+
+TEST(bsd_ioctl_sets_nonblocking_and_counts_pending_bytes)
+{
+    fx f = fx_open("bsd:u");
+    int32_t a = sock_new(f, 2);
+    int32_t b = sock_new(f, 2);
+    op_addr(f, CMD_BIND, a, LOOPBACK, 5100);
+    int32_t on = 1;
+    memcpy(t_mem() + A_BUF(f), &on, 4);
+    tc_req q = tc_new(19);
+    tc_put32(&q, (uint32_t)a);
+    tc_put32(&q, 0x8004667eu);
+    tc_put32(&q, 1);
+    q.na = 1;
+    q.a_addr[0] = A_BUF(f);
+    q.a_size[0] = 4;
+    tc_res r = call(f, q);
+    CHECK_EQ(ret_of(&r), 0);
+    r = op_recv(f, a, 8, 0);
+    CHECK_EQ(errno_of(&r), E_WOULDBLOCK);
+    memcpy(t_mem() + A_BUF(f), "abc", 3);
+    put_addr(f, A_BUF2(f), LOOPBACK, 5100);
+    q = tc_new(CMD_SENDTO);
+    tc_put32(&q, (uint32_t)b);
+    tc_put32(&q, 0);
+    q.na = 2;
+    q.a_addr[0] = A_BUF(f);
+    q.a_size[0] = 3;
+    q.a_addr[1] = A_BUF2(f);
+    q.a_size[1] = 16;
+    call(f, q);
+    q = tc_new(19);
+    tc_put32(&q, (uint32_t)a);
+    tc_put32(&q, 0x4004667fu);
+    tc_put32(&q, 1);
+    q.nb = 1;
+    q.b_addr[0] = B_BUF(f);
+    q.b_size[0] = 4;
+    r = call(f, q);
+    CHECK_EQ(ret_of(&r), 0);
+    CHECK_EQ(*(int32_t *)(void *)(t_mem() + B_BUF(f)), 3);
+    q = tc_new(19);
+    tc_put32(&q, (uint32_t)a);
+    tc_put32(&q, 0x1234u);
+    tc_put32(&q, 0);
+    r = call(f, q);
+    CHECK_EQ(errno_of(&r), 25);
+}
