@@ -22,6 +22,8 @@
 
 #include <relift/window.h>
 
+#include "present.h"
+
 #include <pthread.h>
 #include <stdarg.h>
 #include <sys/stat.h>
@@ -2195,42 +2197,42 @@ static struct {
     bool coherent;
     uint8_t *rgb;
     size_t rgb_cap;
-} pres;
+} pres_buf;
 
 /** @brief Makes the present readback buffer at least bytes big, in cached host memory when there is some. */
 static bool present_buffer(uint64_t bytes)
 {
-    if (pres.s.buf && pres.s.size >= bytes)
+    if (pres_buf.s.buf && pres_buf.s.size >= bytes)
         return true;
-    if (pres.s.buf)
-        nvn_vk_staging_free(&pres.s);
-    memset(&pres.s, 0, sizeof pres.s);
+    if (pres_buf.s.buf)
+        nvn_vk_staging_free(&pres_buf.s);
+    memset(&pres_buf.s, 0, sizeof pres_buf.s);
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                .size = bytes,
                                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
-    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &pres.s.buf) != VK_SUCCESS)
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &pres_buf.s.buf) != VK_SUCCESS)
         return false;
     VkMemoryRequirements req;
-    VK(vkGetBufferMemoryRequirements)(g.dev, pres.s.buf, &req);
+    VK(vkGetBufferMemoryRequirements)(g.dev, pres_buf.s.buf, &req);
     int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-    pres.coherent = false;
+    pres_buf.coherent = false;
     if (t >= 0)
-        pres.coherent = (g.memprops.memoryTypes[t].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+        pres_buf.coherent = (g.memprops.memoryTypes[t].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
     else
-        pres.coherent = (t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) >= 0;
+        pres_buf.coherent = (t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) >= 0;
     VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                                  .allocationSize = req.size,
                                  .memoryTypeIndex = (uint32_t)t };
     void *p = NULL;
-    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &pres.s.memory) != VK_SUCCESS ||
-        VK(vkBindBufferMemory)(g.dev, pres.s.buf, pres.s.memory, 0) != VK_SUCCESS ||
-        VK(vkMapMemory)(g.dev, pres.s.memory, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) {
-        nvn_vk_staging_free(&pres.s);
-        memset(&pres.s, 0, sizeof pres.s);
+    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &pres_buf.s.memory) != VK_SUCCESS ||
+        VK(vkBindBufferMemory)(g.dev, pres_buf.s.buf, pres_buf.s.memory, 0) != VK_SUCCESS ||
+        VK(vkMapMemory)(g.dev, pres_buf.s.memory, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) {
+        nvn_vk_staging_free(&pres_buf.s);
+        memset(&pres_buf.s, 0, sizeof pres_buf.s);
         return false;
     }
-    pres.s.map = p;
-    pres.s.size = bytes;
+    pres_buf.s.map = p;
+    pres_buf.s.size = bytes;
     return true;
 }
 
@@ -2253,7 +2255,7 @@ static const uint8_t *present_readback(replay *r, vimg *v)
         nvn_vk_begin(r);
         VkBufferImageCopy bic = { .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
                                   .imageExtent = { v->d.width, v->d.height, 1 } };
-        VK(vkCmdCopyImageToBuffer)(g.cb, direct ? v->image : tmp, VK_IMAGE_LAYOUT_GENERAL, pres.s.buf, 1, &bic);
+        VK(vkCmdCopyImageToBuffer)(g.cb, direct ? v->image : tmp, VK_IMAGE_LAYOUT_GENERAL, pres_buf.s.buf, 1, &bic);
         nvn_vk_barrier(g.cb);
         ok = nvn_vk_flush(r);
     }
@@ -2263,13 +2265,69 @@ static const uint8_t *present_readback(replay *r, vimg *v)
         VK(vkFreeMemory)(g.dev, tmp_mem, NULL);
     if (!ok)
         return NULL;
-    if (!pres.coherent) {
+    if (!pres_buf.coherent) {
         VkMappedMemoryRange mr = { .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-                                   .memory = pres.s.memory,
+                                   .memory = pres_buf.s.memory,
                                    .size = VK_WHOLE_SIZE };
         VK(vkInvalidateMappedMemoryRanges)(g.dev, 1, &mr);
     }
-    return pres.s.map;
+    return pres_buf.s.map;
+}
+
+/**
+ * @brief Copies the crop rectangle of v's level 0 into a presenter slot's image on the GPU (RGBA8 images straight,
+ * other color formats through a blit), and waits for the copy. The slot ends in TRANSFER_SRC_OPTIMAL.
+ */
+static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl_present_slot *s)
+{
+    if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
+        return false;
+    bool direct = v->format == VK_FORMAT_R8G8B8A8_UNORM || v->format == VK_FORMAT_R8G8B8A8_SRGB;
+    VkImage tmp = NULL;
+    VkDeviceMemory tmp_mem = NULL;
+    bool ok = direct || blit_rgba8(r, v, &tmp, &tmp_mem);
+    VkImage slot = (VkImage)(uintptr_t)s->image;
+    if (ok) {
+        nvn_vk_begin(r);
+        VkImageMemoryBarrier ib = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                                    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                    .image = slot,
+                                    .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+        VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0,
+                                 NULL, 1, &ib);
+        VkImageCopy ic = { .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                           .srcOffset = { (int32_t)rect[0], (int32_t)rect[1], 0 },
+                           .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                           .extent = { rect[2], rect[3], 1 } };
+        VK(vkCmdCopyImage)(g.cb, direct ? v->image : tmp, VK_IMAGE_LAYOUT_GENERAL, slot,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
+        ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        ib.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
+                                 NULL, 1, &ib);
+        ok = nvn_vk_flush(r);
+    }
+    if (tmp)
+        VK(vkDestroyImage)(g.dev, tmp, NULL);
+    if (tmp_mem)
+        VK(vkFreeMemory)(g.dev, tmp_mem, NULL);
+    return ok;
+}
+
+/** @brief The window frames go to, opened with the first one; NULL in a headless run. */
+static rl_window *present_window(uint32_t w, uint32_t h)
+{
+    static rl_window *win;
+    const rl_window_backend *b = rl_window_backend_current();
+    if (!win && b && b->open)
+        win = b->open("relift", w, h);
+    return win;
 }
 
 int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4])
@@ -2281,56 +2339,75 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     nvn_gfx none = { 0 };
     replay r = { .c = c, .mem = mem, .st = &none };
     vimg *v = image_of(&r, texture);
-    const uint8_t *px = v ? present_readback(&r, v) : NULL;
     uint32_t w = v ? v->d.width : 0, h = v ? v->d.height : 0;
     uint32_t format = v ? v->d.format : 0;
     uint64_t n = g.presents++;
     uint32_t rect[4] = { 0, 0, w, h };
-    bool cropped = px && nvn_crop_rect(crop, w, h, rect);
+    bool cropped = v && nvn_crop_rect(crop, w, h, rect);
     const rl_window_backend *b = rl_window_backend_current();
+    rl_window *win = NULL;
+    rl_present *pres = NULL;
+    bool shown = true;
+    const uint8_t *px = NULL;
     uint64_t frame;
-    if (cropped) {
-        if (vkf_capture_due(&frame)) {
-            vkf_capture_write(frame, (uint64_t)now_ns(), rect[2], rect[3], px + ((size_t)rect[1] * w + rect[0]) * 4,
-                              (size_t)w * 4, false);
-        }
-        if (b && b->present_rgb) {
-            size_t need = (size_t)rect[2] * rect[3] * 3;
-            if (need > pres.rgb_cap) {
-                free(pres.rgb);
-                pres.rgb = malloc(need);
-                pres.rgb_cap = pres.rgb ? need : 0;
-            }
-            uint8_t *dst = pres.rgb;
-            for (uint32_t y = 0; dst && y < rect[3]; y++) {
-                const uint8_t *src = px + ((size_t)(rect[1] + y) * w + rect[0]) * 4;
-                for (uint32_t x = 0; x < rect[2]; x++, src += 4, dst += 3) {
-                    dst[0] = src[0];
-                    dst[1] = src[1];
-                    dst[2] = src[2];
-                }
-            }
+    bool capture = cropped && vkf_capture_due(&frame);
+    if (cropped && b && b->open) {
+        pthread_mutex_unlock(&g.lock);
+        win = present_window(rect[2], rect[3]);
+        pres = win ? rl_window_presenter(win) : NULL;
+        pthread_mutex_lock(&g.lock);
+        v = image_of(&r, texture);
+        shown = v != NULL;
+    }
+    if (shown && cropped && pres) {
+        rl_present_slot slot;
+        shown = rl_present_slot_begin(pres, rect[2], rect[3], &slot);
+        if (shown && !present_to_slot(&r, v, rect, &slot)) {
+            rl_present_slot_abort(pres, &slot);
+            shown = false;
+        } else if (shown) {
+            rl_present_slot_end(pres, &slot, rect[2], rect[3]);
         }
     }
-    uint8_t *rgb = cropped && b && b->present_rgb ? pres.rgb : NULL;
+    bool pixels = capture || (cropped && win && !pres && b->present_rgb);
+    if (shown && pixels)
+        px = present_readback(&r, v);
+    if (shown && px && capture)
+        vkf_capture_write(frame, (uint64_t)now_ns(), rect[2], rect[3], px + ((size_t)rect[1] * w + rect[0]) * 4,
+                          (size_t)w * 4, false);
+    uint8_t *rgb = NULL;
+    if (px && win && !pres && b->present_rgb) {
+        size_t need = (size_t)rect[2] * rect[3] * 3;
+        if (need > pres_buf.rgb_cap) {
+            free(pres_buf.rgb);
+            pres_buf.rgb = malloc(need);
+            pres_buf.rgb_cap = pres_buf.rgb ? need : 0;
+        }
+        uint8_t *dst = pres_buf.rgb;
+        for (uint32_t y = 0; dst && y < rect[3]; y++) {
+            const uint8_t *src = px + ((size_t)(rect[1] + y) * w + rect[0]) * 4;
+            for (uint32_t x = 0; x < rect[2]; x++, src += 4, dst += 3) {
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+            }
+        }
+        rgb = pres_buf.rgb;
+    }
     pthread_mutex_unlock(&g.lock);
     if (!v)
         return RL_PENDING;
-    if (!px)
-        return rl_guest_fatal(c, "nvn", "cannot read back texture 0x%llx (format %u) to present it",
+    if (!shown)
+        return rl_guest_fatal(c, "nvn", "cannot present texture 0x%llx (format %u): its copy to the window failed",
                               (unsigned long long)texture, format);
     if (!cropped)
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_frame_presented();
-    if (rgb) {
-        static rl_window *win;
-        if (!win && b->open)
-            win = b->open("relift", rect[2], rect[3]);
-        if (win)
-            rl_window_present_rgb(win, rgb, rect[2], rect[3]);
-    }
+    if (rgb)
+        rl_window_present_rgb(win, rgb, rect[2], rect[3]);
     if (n == 0)
-        rl_log(RL_LOG_INFO, "nvn", "first frame on the host device: %ux%u", rect[2], rect[3]);
+        rl_log(RL_LOG_INFO, "nvn", "first frame on the host device: %ux%u, %s", rect[2], rect[3],
+               pres ? "presented from the GPU" : px ? "presented through host memory" : "not shown");
     return RL_OK;
 }
