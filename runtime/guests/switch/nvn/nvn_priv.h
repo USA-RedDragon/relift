@@ -125,7 +125,7 @@ void nvn_sync_signal(uint64_t sync);
  * the next frame, after the work queue submitted. Returns RL_OK or
  * RL_PENDING.
  */
-int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4]);
+int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4], uint32_t interval);
 /**
  * @brief The part of a width x height texture that crop (x, y, width,
  * height) shows, into out (x, y, width, height): the whole texture when

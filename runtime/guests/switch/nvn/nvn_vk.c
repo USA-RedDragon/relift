@@ -2631,22 +2631,24 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
 #define PRESENT_RATE_NS 5000000000ull
 
 /**
- * @brief RELIFT_HEADLESS_PACE=1, a measuring aid: a run with no window waits for the vi vsync grid after each present,
- * one vsync at least after the last, as a display with a present interval of 1 does, so its frame times are a
- * windowed run's.
+ * @brief Holds a present until the vi vsync grid reaches the frame's turn: interval vsyncs (the window's present
+ * interval; 0 does not wait) after the previous present's, as the console's display shows a frame at a vblank. The
+ * grid is the one the vsync event runs on (and follows the host display), so the game's own vsync waits and its
+ * presents line up. RELIFT_UNPACED=1, a measuring aid, skips the wait to find the host's cost of a frame.
  */
-static void pace_headless(void)
+static void pace_present(uint32_t interval)
 {
-    static int on = -1;
+    static int off = -1;
     static int64_t last;
-    if (on < 0) {
-        const char *e = getenv("RELIFT_HEADLESS_PACE");
-        on = e && *e == '1';
+    if (off < 0) {
+        const char *e = getenv("RELIFT_UNPACED");
+        off = e && *e == '1';
     }
-    if (!on)
+    if (off || interval == 0)
         return;
     int64_t now = now_ns();
-    int64_t at = nvn_vsync_after(now > last ? now : last);
+    int64_t earliest = last + (int64_t)(interval > 1 ? interval - 1 : 0) * 16666667ll;
+    int64_t at = nvn_vsync_after(now > earliest ? now : earliest);
     if (at > now) {
         struct timespec d = { (time_t)((at - now) / 1000000000ll), (long)((at - now) % 1000000000ll) };
         nanosleep(&d, NULL);
@@ -2705,7 +2707,7 @@ static void present_rate(uint64_t total)
     last_total = total;
 }
 
-int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4])
+int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4], uint32_t interval)
 {
     (void)queue;
     if (!up(c))
@@ -2779,8 +2781,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_core_leave();
-    if (!win)
-        pace_headless();
+    pace_present(interval);
     nvn_trace('N', n, 0, 0);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "present %llu: texture 0x%llx, %ux%u", (unsigned long long)n, (unsigned long long)texture,

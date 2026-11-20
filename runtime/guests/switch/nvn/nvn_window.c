@@ -240,7 +240,7 @@ uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
     uint32_t idx = (uint32_t)c->x[2];
     if (idx >= w->n)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueuePresentTexture of texture %u of %u", idx, w->n);
-    int rc = nvn_present(c, mem, c->x[0], w->textures[idx], w->crop);
+    int rc = nvn_present(c, mem, c->x[0], w->textures[idx], w->crop, w->interval);
     if (rc != RL_OK)
         return (uint64_t)rc;
     if (w->presents++ == 0)
