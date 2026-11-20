@@ -104,6 +104,7 @@ typedef struct nvn_vkdev {
     pthread_once_t once;
     pthread_mutex_t lock;
     bool ok;
+    bool dev_made;
     bool depth_clip_control;
     /** @brief The device can clamp fragment depth to the viewport range instead of clipping it (depthClamp). */
     bool depth_clamp;

@@ -17,6 +17,7 @@
 #include "nvn_astc.h"
 #include "nvn_vk.h"
 #include "hostlib.h"
+#include "vkdev.h"
 #include "nvn_probe_spv.h"
 
 #include <relift/window.h>
@@ -42,41 +43,17 @@ static void_fn load(void *(*get)(void *, const char *), void *h, int i)
     return f;
 }
 
-static bool pick_device(void)
-{
-    uint32_t n = 0;
-    VK(vkEnumeratePhysicalDevices)(g.instance, &n, NULL);
-    if (!n)
-        return false;
-    VkPhysicalDevice *list = calloc(n, sizeof *list);
-    if (!list)
-        return false;
-    VK(vkEnumeratePhysicalDevices)(g.instance, &n, list);
-    const char *want = getenv(RL_VK_DEVICE_ENV);
-    for (uint32_t i = 0; i < n && !g.phys; i++) {
-        VkPhysicalDeviceProperties p;
-        VK(vkGetPhysicalDeviceProperties)(list[i], &p);
-        if (want && *want && !strstr(p.deviceName, want))
-            continue;
-        uint32_t nf = 0;
-        VK(vkGetPhysicalDeviceQueueFamilyProperties)(list[i], &nf, NULL);
-        VkQueueFamilyProperties qf[16];
-        nf = nf > 16 ? 16 : nf;
-        VK(vkGetPhysicalDeviceQueueFamilyProperties)(list[i], &nf, qf);
-        for (uint32_t f = 0; f < nf; f++)
-            if ((qf[f].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) ==
-                (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) {
-                g.phys = list[i];
-                g.family = f;
-                memcpy(g.name, p.deviceName, sizeof g.name);
-                break;
-            }
-    }
-    free(list);
-    return g.phys != NULL;
-}
-
 static void write_caps(void);
+
+/** @brief Submits si to the guest queue with g.fence, under the core's queue lock when the presenter shares the queue. */
+static VkResult guest_submit(const VkSubmitInfo *si)
+{
+    rl_vkdev_guest_queue_lock();
+    VkResult r = VK(vkQueueSubmit)(g.queue, 1, si, g.fence);
+    rl_vkdev_guest_queue_unlock();
+    return r;
+}
+static bool rob2_on;
 
 /** @brief Feature structs of extensions the generated headers do not hold. */
 typedef struct ext_features {
@@ -119,103 +96,117 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_EXT_robustness2" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
-static void bring_up(void)
+/** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
+static struct {
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2;
+    VkPhysicalDeviceVulkan13Features f13;
+    VkPhysicalDeviceVulkan12Features f12;
+    VkPhysicalDeviceVulkan11Features f11;
+    VkPhysicalDeviceFeatures2 f2;
+} feat;
+
+/** @brief The core's device hook: the extensions and features the NVN layer needs, enabled when the device has them. */
+static bool device_hook(void *user, rl_vkdev_build *b)
 {
-    void *gipa = rl_hostlib_vulkan_gipa();
-    if (!gipa) {
-        rl_log(RL_LOG_ERROR, "nvn", "no host Vulkan loader");
-        return;
-    }
+    (void)user;
     void *(*get)(void *, const char *);
-    memcpy(&get, &gipa, sizeof get);
+    memcpy(&get, &b->gipa, sizeof get);
     for (int i = 0; i < VKG_COUNT; i++)
         if (vkg_cmds[i].level == 0)
             g.fns.f[i] = load(get, NULL, i);
-    VkApplicationInfo app = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                              .pApplicationName = "relift",
-                              .apiVersion = VKF_API_VERSION(1, 3) };
-    VkInstanceCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app };
-    if (!VK(vkCreateInstance) || VK(vkCreateInstance)(&ici, NULL, &g.instance) != VK_SUCCESS) {
-        rl_log(RL_LOG_ERROR, "nvn", "vkCreateInstance failed");
-        return;
-    }
+    g.instance = (VkInstance)(uintptr_t)b->instance;
+    g.phys = (VkPhysicalDevice)(uintptr_t)b->phys;
     for (int i = 0; i < VKG_COUNT; i++)
         if (vkg_cmds[i].level != 0)
             g.fns.f[i] = load(get, g.instance, i);
     void *coop_fn = get(g.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
     memcpy(&coop_props_fn, &coop_fn, sizeof coop_props_fn);
-    if (!pick_device()) {
-        rl_log(RL_LOG_ERROR, "nvn", "no host Vulkan device with a graphics and compute queue");
-        return;
-    }
-    ext_features clip_control = { .sType = STYPE_DEPTH_CLIP_CONTROL }, clock = { .sType = STYPE_SHADER_CLOCK };
-    ext_features afloat = { .sType = STYPE_ATOMIC_FLOAT }, i64 = { .sType = STYPE_IMAGE_ATOMIC_INT64 };
-    ext_features recon = { .sType = STYPE_MAXIMAL_RECONVERGENCE }, fma = { .sType = STYPE_SHADER_FMA };
-    ext_features coop = { .sType = STYPE_COOPERATIVE_MATRIX }, rob2 = { .sType = STYPE_ROBUSTNESS2 };
-    ext_features *const feats[DEVICE_EXTS] = { &clip_control, &clock, &afloat, &i64, &recon, &fma, &coop, &rob2 };
-    const char *ext_names[DEVICE_EXTS + 2];
-    uint32_t next = 0, nnames = 0;
+    VkPhysicalDeviceProperties props;
+    VK(vkGetPhysicalDeviceProperties)(g.phys, &props);
+    memcpy(g.name, props.deviceName, sizeof g.name);
+    g.family = b->family;
+    feat.clip_control = (ext_features){ .sType = STYPE_DEPTH_CLIP_CONTROL };
+    feat.clock = (ext_features){ .sType = STYPE_SHADER_CLOCK };
+    feat.afloat = (ext_features){ .sType = STYPE_ATOMIC_FLOAT };
+    feat.i64 = (ext_features){ .sType = STYPE_IMAGE_ATOMIC_INT64 };
+    feat.recon = (ext_features){ .sType = STYPE_MAXIMAL_RECONVERGENCE };
+    feat.fma = (ext_features){ .sType = STYPE_SHADER_FMA };
+    feat.coop = (ext_features){ .sType = STYPE_COOPERATIVE_MATRIX };
+    feat.rob2 = (ext_features){ .sType = STYPE_ROBUSTNESS2 };
+    ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
+                                               &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2 };
+    uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
     if (exts)
         VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, exts);
-    VkPhysicalDeviceVulkan13Features f13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
-    bool rob2_on = false;
+    feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+    VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
+    rob2_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
-                ext_names[nnames++] = device_exts[k];
-                feats[k]->pNext = f13.pNext;
-                f13.pNext = feats[k];
+                rl_vkdev_add_ext(b, device_exts[k]);
+                feats[k]->pNext = f13->pNext;
+                f13->pNext = feats[k];
                 g.depth_clip_control |= k == 0;
-                rob2_on |= feats[k] == &rob2;
+                rob2_on |= feats[k] == &feat.rob2;
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)
         if (!strcmp(exts[i].extensionName, "VK_EXT_external_memory_host")) {
-            ext_names[nnames++] = "VK_EXT_external_memory_host";
+            rl_vkdev_add_ext(b, "VK_EXT_external_memory_host");
             g.host_import = true;
         } else if (!strcmp(exts[i].extensionName, "VK_EXT_conservative_rasterization")) {
-            ext_names[nnames++] = "VK_EXT_conservative_rasterization";
+            rl_vkdev_add_ext(b, "VK_EXT_conservative_rasterization");
             g.conservative_raster = true;
         }
     free(exts);
-    VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-                                             .pNext = &f13 };
-    VkPhysicalDeviceVulkan11Features f11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-                                             .pNext = &f12 };
-    VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11 };
-    VK(vkGetPhysicalDeviceFeatures2)(g.phys, &f2);
-    if (!f13.dynamicRendering) {
+    feat.f12 = (VkPhysicalDeviceVulkan12Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                                   .pNext = f13 };
+    feat.f11 = (VkPhysicalDeviceVulkan11Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+                                                   .pNext = &feat.f12 };
+    feat.f2 = (VkPhysicalDeviceFeatures2){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &feat.f11 };
+    VK(vkGetPhysicalDeviceFeatures2)(g.phys, &feat.f2);
+    if (!f13->dynamicRendering) {
         rl_log(RL_LOG_ERROR, "nvn", "%s has no dynamic rendering", g.name);
+        return false;
+    }
+    g.depth_clamp = feat.f2.features.depthClamp;
+    g.wide_lines = feat.f2.features.wideLines;
+    g.query_ok = feat.f2.features.pipelineStatisticsQuery && feat.f2.features.geometryShader &&
+                 feat.f2.features.tessellationShader && feat.f12.hostQueryReset;
+    g.occlusion_precise = feat.f2.features.occlusionQueryPrecise;
+    feat.f2.features.robustBufferAccess = VK_FALSE;
+    g.null_descriptor = rob2_on && feat.rob2.b[2];
+    feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
+    feat.f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
+    feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
+    f13->robustImageAccess = VK_FALSE;
+    feat.f2.pNext = (void *)(uintptr_t)b->pnext;
+    b->pnext = &feat.f2;
+    g.dev_made = true;
+    return true;
+}
+
+__attribute__((constructor)) static void require_device(void)
+{
+    rl_vkdev_require("the NVN layer", VKF_API_VERSION(1, 3), VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT, device_hook,
+                     NULL);
+}
+
+static void bring_up(void)
+{
+    const rlvk_dev *core = rl_vkdev();
+    if (!core) {
+        rl_log(RL_LOG_ERROR, "nvn", "no host Vulkan device");
         return;
     }
-    g.depth_clamp = f2.features.depthClamp;
-    g.wide_lines = f2.features.wideLines;
-    g.query_ok = f2.features.pipelineStatisticsQuery && f2.features.geometryShader && f2.features.tessellationShader &&
-                 f12.hostQueryReset;
-    g.occlusion_precise = f2.features.occlusionQueryPrecise;
-    f2.features.robustBufferAccess = VK_FALSE;
-    g.null_descriptor = rob2_on && rob2.b[2];
-    rob2.b[0] = rob2.b[1] = VK_FALSE;
-    f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
-    f12.bufferDeviceAddressMultiDevice = VK_FALSE;
-    f13.robustImageAccess = VK_FALSE;
-    float prio = 1.0f;
-    VkDeviceQueueCreateInfo qci = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                                    .queueFamilyIndex = g.family,
-                                    .queueCount = 1,
-                                    .pQueuePriorities = &prio };
-    VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-                               .pNext = &f2,
-                               .queueCreateInfoCount = 1,
-                               .pQueueCreateInfos = &qci,
-                               .enabledExtensionCount = nnames,
-                               .ppEnabledExtensionNames = ext_names };
-    if (VK(vkCreateDevice)(g.phys, &dci, NULL, &g.dev) != VK_SUCCESS) {
-        rl_log(RL_LOG_ERROR, "nvn", "vkCreateDevice failed on %s", g.name);
+    if (!g.dev_made) {
+        rl_log(RL_LOG_ERROR, "nvn", "the core's Vulkan device was made without the NVN layer's requirements");
         return;
     }
+    g.dev = (VkDevice)(uintptr_t)core->device;
     void (*raw)(void) = g.fns.f[VKG_vkGetDeviceProcAddr];
     void *(*gdpa)(void *, const char *);
     memcpy(&gdpa, &raw, sizeof gdpa);
@@ -225,7 +216,7 @@ static void bring_up(void)
             if (f)
                 g.fns.f[i] = f;
         }
-    VK(vkGetDeviceQueue)(g.dev, g.family, 0, &g.queue);
+    g.queue = (VkQueue)(uintptr_t)core->guest_queue;
     VK(vkGetPhysicalDeviceMemoryProperties)(g.phys, &g.memprops);
     VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                     .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -386,7 +377,7 @@ static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t 
     nvn_vk_barrier(g.cb);
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
     ok = VK(vkEndCommandBuffer)(g.cb) == VK_SUCCESS && VK(vkResetFences)(g.dev, 1, &g.fence) == VK_SUCCESS &&
-         VK(vkQueueSubmit)(g.queue, 1, &si, g.fence) == VK_SUCCESS &&
+         guest_submit(&si) == VK_SUCCESS &&
          VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
 out:
     if (dp)
@@ -884,7 +875,7 @@ bool nvn_vk_flush(replay *r)
     }
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS ||
-        (vr = VK(vkQueueSubmit)(g.queue, 1, &si, g.fence)) != VK_SUCCESS) {
+        (vr = guest_submit(&si)) != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
         return false;
     }
