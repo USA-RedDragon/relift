@@ -2194,6 +2194,93 @@ static uint8_t *read_back(replay *r, vimg *v)
     return px;
 }
 
+/**
+ * @brief The readback of the presented image, kept between presents: a host buffer in cached memory when the host
+ * has it (CPU reads of uncached write-combined memory run at a fraction of the speed of cached ones), the image
+ * copied into it, and the RGB frame converted from it. One of each exists; nvn_present uses them under g.lock.
+ */
+static struct {
+    staging s;
+    bool coherent;
+    uint8_t *rgb;
+    size_t rgb_cap;
+} pres;
+
+/** @brief Makes the present readback buffer at least bytes big, in cached host memory when there is some. */
+static bool present_buffer(uint64_t bytes)
+{
+    if (pres.s.buf && pres.s.size >= bytes)
+        return true;
+    if (pres.s.buf)
+        nvn_vk_staging_free(&pres.s);
+    memset(&pres.s, 0, sizeof pres.s);
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = bytes,
+                               .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &pres.s.buf) != VK_SUCCESS)
+        return false;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, pres.s.buf, &req);
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    pres.coherent = false;
+    if (t >= 0)
+        pres.coherent = (g.memprops.memoryTypes[t].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+    else
+        pres.coherent = (t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) >= 0;
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    void *p = NULL;
+    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &pres.s.memory) != VK_SUCCESS ||
+        VK(vkBindBufferMemory)(g.dev, pres.s.buf, pres.s.memory, 0) != VK_SUCCESS ||
+        VK(vkMapMemory)(g.dev, pres.s.memory, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) {
+        nvn_vk_staging_free(&pres.s);
+        memset(&pres.s, 0, sizeof pres.s);
+        return false;
+    }
+    pres.s.map = p;
+    pres.s.size = bytes;
+    return true;
+}
+
+/**
+ * @brief Copies v's level 0 into the present buffer as RGBA8 (RGBA8 images straight, other color formats through a
+ * blit) and makes it visible to the CPU. NULL when it cannot (a depth image or a failed submit).
+ */
+static const uint8_t *present_readback(replay *r, vimg *v)
+{
+    if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
+        return NULL;
+    bool direct = v->format == VK_FORMAT_R8G8B8A8_UNORM || v->format == VK_FORMAT_R8G8B8A8_SRGB;
+    uint64_t bytes = (uint64_t)v->d.width * v->d.height * 4;
+    if (!present_buffer(bytes))
+        return NULL;
+    VkImage tmp = NULL;
+    VkDeviceMemory tmp_mem = NULL;
+    bool ok = direct || blit_rgba8(r, v, &tmp, &tmp_mem);
+    if (ok) {
+        nvn_vk_begin(r);
+        VkBufferImageCopy bic = { .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
+                                  .imageExtent = { v->d.width, v->d.height, 1 } };
+        VK(vkCmdCopyImageToBuffer)(g.cb, direct ? v->image : tmp, VK_IMAGE_LAYOUT_GENERAL, pres.s.buf, 1, &bic);
+        nvn_vk_barrier(g.cb);
+        ok = nvn_vk_flush(r);
+    }
+    if (tmp)
+        VK(vkDestroyImage)(g.dev, tmp, NULL);
+    if (tmp_mem)
+        VK(vkFreeMemory)(g.dev, tmp_mem, NULL);
+    if (!ok)
+        return NULL;
+    if (!pres.coherent) {
+        VkMappedMemoryRange mr = { .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                                   .memory = pres.s.memory,
+                                   .size = VK_WHOLE_SIZE };
+        VK(vkInvalidateMappedMemoryRanges)(g.dev, 1, &mr);
+    }
+    return pres.s.map;
+}
+
 int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4])
 {
     (void)queue;
@@ -2203,46 +2290,56 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     nvn_gfx none = { 0 };
     replay r = { .c = c, .mem = mem, .st = &none };
     vimg *v = image_of(&r, texture);
-    uint8_t *px = v ? read_back(&r, v) : NULL;
+    const uint8_t *px = v ? present_readback(&r, v) : NULL;
     uint32_t w = v ? v->d.width : 0, h = v ? v->d.height : 0;
+    uint32_t format = v ? v->d.format : 0;
     uint64_t n = g.presents++;
+    uint32_t rect[4] = { 0, 0, w, h };
+    bool cropped = px && nvn_crop_rect(crop, w, h, rect);
+    const rl_window_backend *b = rl_window_backend_current();
+    uint64_t frame;
+    if (cropped) {
+        if (vkf_capture_due(&frame)) {
+            vkf_capture_write(frame, (uint64_t)now_ns(), rect[2], rect[3], px + ((size_t)rect[1] * w + rect[0]) * 4,
+                              (size_t)w * 4, false);
+        }
+        if (b && b->present_rgb) {
+            size_t need = (size_t)rect[2] * rect[3] * 3;
+            if (need > pres.rgb_cap) {
+                free(pres.rgb);
+                pres.rgb = malloc(need);
+                pres.rgb_cap = pres.rgb ? need : 0;
+            }
+            uint8_t *dst = pres.rgb;
+            for (uint32_t y = 0; dst && y < rect[3]; y++) {
+                const uint8_t *src = px + ((size_t)(rect[1] + y) * w + rect[0]) * 4;
+                for (uint32_t x = 0; x < rect[2]; x++, src += 4, dst += 3) {
+                    dst[0] = src[0];
+                    dst[1] = src[1];
+                    dst[2] = src[2];
+                }
+            }
+        }
+    }
+    uint8_t *rgb = cropped && b && b->present_rgb ? pres.rgb : NULL;
     pthread_mutex_unlock(&g.lock);
     if (!v)
         return RL_PENDING;
     if (!px)
         return rl_guest_fatal(c, "nvn", "cannot read back texture 0x%llx (format %u) to present it",
-                              (unsigned long long)texture, v->d.format);
-    uint32_t rect[4];
-    if (!nvn_crop_rect(crop, w, h, rect)) {
-        free(px);
+                              (unsigned long long)texture, format);
+    if (!cropped)
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
-    }
-    if (rect[2] != w || rect[3] != h) {
-        for (uint32_t y = 0; y < rect[3]; y++)
-            memmove(px + (size_t)y * rect[2] * 4, px + ((size_t)(rect[1] + y) * w + rect[0]) * 4, (size_t)rect[2] * 4);
-        w = rect[2];
-        h = rect[3];
-    }
-    uint64_t frame;
-    if (vkf_capture_due(&frame))
-        vkf_capture_write(frame, (uint64_t)now_ns(), w, h, px, (size_t)w * 4, false);
     nvn_frame_presented();
-    const rl_window_backend *b = rl_window_backend_current();
-    if (b) {
+    if (rgb) {
         static rl_window *win;
         if (!win && b->open)
-            win = b->open("relift", w, h);
-        uint8_t *rgb = malloc((size_t)w * h * 3);
-        if (win && rgb) {
-            for (size_t i = 0; i < (size_t)w * h; i++)
-                memcpy(rgb + 3 * i, px + 4 * i, 3);
-            rl_window_present_rgb(win, rgb, w, h);
-        }
-        free(rgb);
+            win = b->open("relift", rect[2], rect[3]);
+        if (win)
+            rl_window_present_rgb(win, rgb, rect[2], rect[3]);
     }
-    free(px);
     if (n == 0)
-        rl_log(RL_LOG_INFO, "nvn", "first frame on the host device: %ux%u", w, h);
+        rl_log(RL_LOG_INFO, "nvn", "first frame on the host device: %ux%u", rect[2], rect[3]);
     return RL_OK;
 }
