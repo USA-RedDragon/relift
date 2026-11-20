@@ -865,3 +865,20 @@ fn applying_the_escapes_adds_the_pads() {
     escape::apply(&mut a, &e);
     assert_eq!(a.functions[&BASE].pads, BTreeSet::from([BASE + 4]));
 }
+
+#[test]
+fn a_return_address_parked_in_a_register_across_a_call_still_escapes() {
+    let e = escapes_of(
+        &[
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x05, 1, 3),
+            branch(0x02, 0, 3),
+            word(0x0b, 1, 0),
+            word(0x03, 0, 0),
+            word(0x03, 0, 0),
+        ],
+        &[BASE],
+    );
+    assert_eq!(e.resume_points, [(BASE, BASE + 4)]);
+}

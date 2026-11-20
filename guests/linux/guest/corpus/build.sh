@@ -24,3 +24,15 @@ for dir in "$here"/*/; do
         $cc -target $target $flags -O2 -fno-sanitize=undefined -o "$out/$name.$v" "$src" -lm
     done
 done
+
+gcc=${AARCH64_GCC:-}
+if [ -n "$gcc" ]; then
+    for dir in "$here"/*/; do
+        name=$(basename "$dir")
+        if [ -f "$dir/main.cpp" ]; then
+            "${gcc%gcc}g++" -static -O2 -o "$out/$name.gnu" "$dir/main.cpp"
+        else
+            "$gcc" -static -O2 -o "$out/$name.gnu" "$dir/main.c" -lm
+        fi
+    done
+fi

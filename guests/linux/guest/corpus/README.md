@@ -17,6 +17,9 @@ and optionally
 
 `build.sh <out-dir>` builds every program for aarch64 with musl, static
 (`zig cc -target aarch64-linux-musl -static`), as `<out-dir>/<name>.<variant>`.
+With `AARCH64_GCC=aarch64-linux-gnu-gcc` set, `build.sh` also builds every program
+with that compiler, statically against glibc, as `<name>.gnu`; they use the
+same expected answers.
 `record.sh <out-dir>` pushes each `static` build to the shared arm64 test
 device in its own folder under `/data/local/tmp/relift-elf`, runs it and
 writes the two expected files; it takes the lock `RELIFT_ADB_LOCK` names (default: a file under

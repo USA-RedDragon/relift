@@ -15,7 +15,7 @@ shift 2
 relift=${RELIFT:-relift}
 mkdir -p "$work"
 if [ $# -eq 0 ]; then
-    list=$(ls "$out" | grep -E '\.(static|pie)$')
+    list=$(ls "$out" | grep -E '\.(static|pie|gnu)$')
 else
     list=$*
 fi

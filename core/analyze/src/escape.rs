@@ -24,7 +24,11 @@
 //! A forward dataflow over each function tracks, for every register, whether
 //! it holds the stack pointer plus a constant and whether its value derives
 //! from the link register. A call leaves the registers the frontend names
-//! [`Frontend::preserved`] as they were and clears the others.
+//! [`Frontend::preserved`] as they were; the others stop holding the stack
+//! pointer plus a constant but keep what derives from the link register,
+//! since a function may park its return address in a register it knows the
+//! callee leaves alone (glibc's `__sigsetjmp` does around its call to
+//! `__libc_arm_za_disable`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -151,7 +155,10 @@ fn summarize(fe: &dyn Frontend, f: &Function, known: &BTreeMap<u64, ()>) -> Summ
                 }
                 for (r, v) in out.iter_mut().enumerate() {
                     if !preserved.contains(&r) {
-                        *v = V::default();
+                        *v = V {
+                            link: v.link,
+                            ..V::default()
+                        };
                     }
                 }
                 next.push(ret);
