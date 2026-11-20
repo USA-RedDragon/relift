@@ -7,7 +7,7 @@
  * counter restarts from zero and no memory changes. The timestamp (type 0) is the guest clock. Every other type
  * counts what the draws since its reset did: once a queue has reset one, each of its draws runs inside an occlusion
  * query and a pipeline statistics query, and a report reads the batch back and adds each statistic to the counters it
- * feeds. The statistic of each NVN counter is the one Vulkan names alike: samples passed, input assembly vertices and
+ * feeds. The timestamp at the top of the pipe (type 16) is the same clock as type 0: relift runs a command set's work in order, so the top and the bottom of the pipe are one moment. The statistic of each NVN counter is the one Vulkan names alike: samples passed, input assembly vertices and
  * primitives, vertex, tessellation control, tessellation evaluation, geometry and fragment invocations, geometry
  * primitives, and the clipper's input and output primitives. Tessellation evaluation primitives have no host
  * statistic, so a counter fed by a tessellated draw stops when it is reported; primitives generated are the geometry
@@ -110,7 +110,7 @@ int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
 {
     nvn_gfx *st = r->st;
     uint64_t value = 0;
-    if (type != 0) {
+    if (type != 0 && type != NVN_COUNTER_TIMESTAMP_TOP) {
         if (type >= NVN_COUNTERS)
             return nvn_vk_stop(r, "nvnCommandBufferReportCounter of counter type %u, which the layer does not count",
                                type);

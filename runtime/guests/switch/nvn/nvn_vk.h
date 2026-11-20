@@ -48,6 +48,8 @@
 #define NVN_PUSH_BYTES 0x100u
 /** @brief GPU counter types 0 (timestamp) to 14 (transform feedback primitives written); 15 (ZCull statistics) is not counted. */
 #define NVN_COUNTERS 15u
+/** @brief NVNcounterType of a timestamp taken at the top of the pipe. */
+#define NVN_COUNTER_TIMESTAMP_TOP 16u
 /** @brief The compute stage's NVNshaderStage, and its storage buffer slots. */
 #define NVN_STAGE_COMPUTE 5u
 #define NVN_STORAGE_SLOTS 16u
