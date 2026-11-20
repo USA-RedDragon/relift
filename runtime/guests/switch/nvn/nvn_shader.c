@@ -19,11 +19,13 @@
  * the mobile entries set), else the shader folder. The shader folder is
  * $RELIFT_NVN_SHADERS when set (the launchers and mobile entries point it at
  * the user's own data folder), else "shaders" beside the executable, which is
- * where relift build puts it next to the program. A program the table lacks
- * is written to <shader folder>/programs/<key>.bin when the game sets it, and
- * the host device's capabilities to <shader folder>/device.json, so the next
- * relift build translates it for that device once the folder is back in that
- * build's shaders folder; a draw that needs it stops the game.
+ * where relift build puts it next to the program. The build finds every
+ * program in the game's files and translates it, so a program the table
+ * lacks is a stop with a report: the scan did not find it. A development
+ * run with $RELIFT_NVN_RECORD set also writes each program the game sets to
+ * <shader folder>/programs/<key>.bin, a tool for finding what the scan
+ * misses; the host device's capabilities go to <shader folder>/device.json
+ * for the build to translate for.
  */
 #include "nvn_priv.h"
 
@@ -314,7 +316,8 @@ bool nvn_shader_note(const uint8_t *mem, uint64_t code, char key[65])
     if (!program_span(mem, code, &start, &len))
         return false;
     rl_data_sha256(mem + start, (size_t)len, key);
-    if (spirv_entry(key))
+    const char *record = getenv("RELIFT_NVN_RECORD");
+    if (!record || !*record || spirv_entry(key))
         return true;
     const char *dir = nvn_shader_dir();
     char sub[1024], bin[1100];

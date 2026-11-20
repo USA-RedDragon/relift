@@ -339,9 +339,9 @@ static module *module_of(replay *r, uint64_t code)
     uint32_t *w = nvn_shader_spirv(key, &n);
     if (!w) {
         nvn_vk_stop(r,
-                    "program %s (at 0x%llx) is not in the build's shader table; it is recorded in %s/programs for "
-                    "the next relift build (%s/failed.txt names programs the translator refused)",
-                    key, (unsigned long long)code, nvn_shader_dir(), nvn_shader_dir());
+                    "program %s (at 0x%llx) is not in the build's shader table: the build's scan of the game's files "
+                    "did not find it, or the translator refused it (%s/failed.txt names those)",
+                    key, (unsigned long long)code, nvn_shader_dir());
         return NULL;
     }
     module *m = calloc(1, sizeof *m);
