@@ -385,3 +385,39 @@ uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
     }
     return count < max ? count : max;
 }
+
+uint32_t nvn_shader_count(void)
+{
+    pthread_mutex_lock(&g_lock);
+    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    pthread_mutex_unlock(&g_lock);
+    return t ? t->n : 0;
+}
+
+bool nvn_shader_key_at(uint32_t i, char key[65])
+{
+    pthread_mutex_lock(&g_lock);
+    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    pthread_mutex_unlock(&g_lock);
+    if (!t || i >= t->n)
+        return false;
+    static const char hex[] = "0123456789abcdef";
+    const uint8_t *e = t->head + TABLE_HEAD + (size_t)i * t->entry;
+    for (int j = 0; j < 32; j++) {
+        key[2 * j] = hex[e[j] >> 4];
+        key[2 * j + 1] = hex[e[j] & 15];
+    }
+    key[64] = 0;
+    return true;
+}
+
+bool nvn_shader_table_hash(char hex[65])
+{
+    pthread_mutex_lock(&g_lock);
+    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    pthread_mutex_unlock(&g_lock);
+    if (!t)
+        return false;
+    rl_data_sha256(t->head, TABLE_HEAD + (size_t)t->n * t->entry, hex);
+    return true;
+}

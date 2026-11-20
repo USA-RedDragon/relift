@@ -135,6 +135,8 @@ typedef struct nvn_vkdev {
     bool provoking_last, provoking_warned;
     /** @brief VK_EXT_robustness2 nullDescriptor is on: a descriptor can be written with no image view. */
     bool null_descriptor;
+    /** @brief Graphics pipelines can be linked from libraries (VK_EXT_graphics_pipeline_library with fast linking). */
+    bool gpl;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
@@ -177,6 +179,11 @@ extern nvn_vkdev g;
 #define NVN_RENDER_IF_NOT_EQUAL 3u
 /** @brief The identity viewport swizzle (x, y, z, w as +X, +Y, +Z, +W), packed as the driver writes it. */
 #define NVN_VIEWPORT_SWIZZLE_IDENTITY 0x6420u
+
+/** @brief Makes the pipeline layouts (nvn_draw.c); false when the device refuses. */
+bool nvn_draw_layouts(void);
+/** @brief Makes every pipeline the build's programs need, once (nvn_warm.c); returns when the game may start. */
+void nvn_warm_launch(void);
 
 /** @brief Draw state a queue keeps across command sets, as the GPU keeps it. */
 typedef struct nvn_gfx {

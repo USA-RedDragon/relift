@@ -58,6 +58,13 @@ bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage);
 nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_n);
 
 /**
+ * @brief Appends to the n specialization constants in map and vals the ones a
+ * draw of m with no texture bound sets: every handle's numeric kind float and
+ * its dimension 2D. The values a draw sets for textures it binds replace them.
+ */
+void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationMapEntry *map, uint32_t *vals);
+
+/**
  * @brief The fragment module of frag to draw with after vertex program vert:
  * frag itself when the vertex program writes every location frag reads, else
  * a variant of frag with the unwritten inputs demoted to the constants the

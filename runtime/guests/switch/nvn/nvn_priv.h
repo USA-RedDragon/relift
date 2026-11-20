@@ -366,6 +366,13 @@ bool nvn_v1_program(const uint8_t *mem, uint64_t code, uint64_t *start, uint64_t
 bool nvn_v1_sph(const uint8_t *b, int *stage);
 /** @brief The NVNshaderStage of the program at code (vertex 0, fragment 1, geometry 2, tessellation control 3 and evaluation 4, compute 5). */
 int nvn_shader_stage(const uint8_t *mem, uint64_t code);
+/**
+ * @brief Tells the launch warm-up of a program the game gave a stage: a compute
+ * program's pipeline can only be made with the workgroup size its control
+ * section holds. Before the warm-up has run the program is kept for it; after,
+ * its pipeline is made at once (on a worker thread).
+ */
+void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control);
 /** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */
 uint32_t nvn_device_depth_mode(void);
 uint32_t nvn_device_origin_mode(void);
@@ -391,6 +398,12 @@ void nvn_frame_presented(void);
 void nvn_window_viewport(uint32_t origin, uint32_t height, const float v[4], float out[4]);
 /** @brief The first memory row of a window rectangle at y, h rows tall, on a render area height rows tall. */
 int64_t nvn_window_top(uint32_t origin, uint32_t height, int64_t y, int64_t h);
+/** @brief The number of programs in the build's shader table (0 without one). */
+uint32_t nvn_shader_count(void);
+/** @brief Writes the key (hex) of table entry i; false past the end. */
+bool nvn_shader_key_at(uint32_t i, char key[65]);
+/** @brief The SHA-256 (hex) of the shader table's index, which names its contents; false without a table. */
+bool nvn_shader_table_hash(char hex[65]);
 /** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
 uint32_t *nvn_shader_spirv(const char *key, size_t *words);
 /** @brief An interface record of a translation (relift build's "RLSPI001" table). */

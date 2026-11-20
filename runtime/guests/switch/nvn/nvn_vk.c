@@ -20,6 +20,7 @@
 #include "hostlib.h"
 #include "nvn_watch.h"
 #include "vkdev.h"
+#include "nvn_pipe.h"
 #include "nvn_probe_spv.h"
 
 #include <relift/window.h>
@@ -99,6 +100,7 @@ typedef struct ext_features {
 #define STYPE_ROBUSTNESS2 ((VkStructureType)1000286000)
 #define STYPE_PROVOKING_VERTEX ((VkStructureType)1000254000)
 #define STYPE_CONSERVATIVE_PROPS ((VkStructureType)1000101000)
+#define STYPE_PIPELINE_LIBRARY ((VkStructureType)1000320000)
 #define STYPE_COOPERATIVE_MATRIX_PROPS ((VkStructureType)1000506001)
 
 /** @brief VkCooperativeMatrixPropertiesKHR, which the generated headers do not hold. */
@@ -122,12 +124,13 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_EXT_shader_atomic_float",         "VK_EXT_shader_image_atomic_int64",
                                            "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma",
                                            "VK_KHR_cooperative_matrix",
-                                           "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex" };
+                                           "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex",
+                                           "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -164,9 +167,10 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.coop = (ext_features){ .sType = STYPE_COOPERATIVE_MATRIX };
     feat.rob2 = (ext_features){ .sType = STYPE_ROBUSTNESS2 };
     feat.provoking = (ext_features){ .sType = STYPE_PROVOKING_VERTEX };
+    feat.gpl = (ext_features){ .sType = STYPE_PIPELINE_LIBRARY };
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
                                                &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
-                                               &feat.provoking };
+                                               &feat.provoking,    NULL,        &feat.gpl };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -175,16 +179,19 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
     rob2_on = false;
-    bool provoking_on = false;
+    bool provoking_on = false, gpl_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
                 rl_vkdev_add_ext(b, device_exts[k]);
-                feats[k]->pNext = f13->pNext;
-                f13->pNext = feats[k];
+                if (feats[k]) {
+                    feats[k]->pNext = f13->pNext;
+                    f13->pNext = feats[k];
+                }
                 g.depth_clip_control |= k == 0;
                 rob2_on |= feats[k] == &feat.rob2;
                 provoking_on |= feats[k] == &feat.provoking;
+                gpl_on |= feats[k] == &feat.gpl;
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)
@@ -217,6 +224,15 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f2.features.robustBufferAccess = VK_FALSE;
     g.null_descriptor = rob2_on && feat.rob2.b[2];
     g.provoking_last = provoking_on && feat.provoking.b[0];
+    g.gpl = gpl_on && feat.gpl.b[0];
+    if (g.gpl) {
+        VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT gp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT
+        };
+        VkPhysicalDeviceProperties2 pp = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &gp };
+        VK(vkGetPhysicalDeviceProperties2)(g.phys, &pp);
+        g.gpl = gp.graphicsPipelineLibraryFastLinking && gp.graphicsPipelineLibraryIndependentInterpolationDecoration;
+    }
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     feat.f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
@@ -291,6 +307,7 @@ static void bring_up(void)
         rl_log(RL_LOG_ERROR, "nvn", "cannot allocate the upload arena");
         return;
     }
+    nvn_pipe_init();
     rl_log(RL_LOG_INFO, "nvn", "NVN2 device on %s (queue family %u)", g.name, g.family);
     write_caps();
     g.ok = true;
@@ -761,6 +778,8 @@ static bool up(rl_ctx *c)
     pthread_once(&g.once, bring_up);
     if (!g.ok)
         rl_guest_fatal(c, "nvn", "the NVN2 layer needs a host Vulkan 1.3 device with dynamic rendering");
+    else
+        nvn_warm_launch();
     return g.ok;
 }
 

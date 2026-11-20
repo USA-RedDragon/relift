@@ -3,6 +3,7 @@
  * @brief Shader modules of translated programs (see nvn_module.h).
  */
 #include "nvn_module.h"
+#include "nvn_pipe.h"
 
 #include <pthread.h>
 #include <stdarg.h>
@@ -381,4 +382,21 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         return NULL;
     }
     return m;
+}
+
+void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationMapEntry *map, uint32_t *vals)
+{
+    for (uint32_t i = 0; i < m->nrecs; i++) {
+        const nvn_iface_rec *h = &m->recs[i];
+        if (h->kind != NVN_IFACE_TEXTURE)
+            continue;
+        for (uint32_t j = 0; j < m->nrecs; j++) {
+            const nvn_iface_rec *c = &m->recs[j];
+            if ((c->kind != NVN_IFACE_TEXTURE_KIND && c->kind != NVN_IFACE_TEXTURE_DIM) || c->bank != h->bank ||
+                c->offset != h->offset || *n == NVN_MAX_SPECS)
+                continue;
+            map[*n] = (VkSpecializationMapEntry){ c->spec, 4 * *n, 4 };
+            vals[(*n)++] = c->kind == NVN_IFACE_TEXTURE_KIND ? 0u : 1u;
+        }
+    }
 }

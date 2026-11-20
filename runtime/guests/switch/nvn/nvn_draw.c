@@ -34,18 +34,18 @@
  * the identity, which stops.
  */
 #include "nvn_module.h"
+#include "nvn_pipe.h"
 
 #include <math.h>
 #include <stdlib.h>
 
-#define MAX_PIPELINES 1024u
 #define UBO_BYTES 65536u
 #define SET_POOL_SETS 4096u
 /** @brief The user binding (constant bank c[24]) a fragment program reads the stage's storage buffer table from. */
 #define STORAGE_TABLE_BINDING 21u
 /** @brief Storage buffer entries of the table in c[24]: each is {GPU address, u32 size, u32 0}, 16 bytes. */
 #define STORAGE_TABLE_ENTRIES 5u
-#define MAX_SPECS 32u
+#define MAX_SPECS NVN_MAX_SPECS
 /** @brief The graphics stages that read the fixed-state push constants: the point size and the alpha reference. */
 #define FIXED_STAGES (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
 /** @brief The fixed-state push constant block (the translator's: point size, then alpha reference). */
@@ -55,64 +55,15 @@ typedef struct fixed_push {
 
 typedef nvn_module module;
 
-/** @brief Everything a pipeline is made from. */
-typedef struct pipe_key {
-    VkShaderModule mods[5];
-    uint32_t topology;
-    uint32_t nattr, nbind;
-    VkVertexInputAttributeDescription attr[NVN_VERTEX_ATTRIBS];
-    VkVertexInputBindingDescription bind[NVN_VERTEX_BUFFERS + NVN_VERTEX_ATTRIBS];
-    /** @brief Integer attributes, fed expanded (see expand_integer): stream, offset in the stream, format. */
-    uint32_t nint;
-    struct {
-        uint32_t stream, offset;
-        VkFormat format;
-        uint32_t stride, per_instance;
-    } ints[NVN_VERTEX_ATTRIBS];
-    uint32_t ncolor;
-    VkFormat color[MAX_RT], depth, stencil;
-    VkPipelineColorBlendAttachmentState blend[MAX_RT];
-    uint32_t cull, front, polygon, bias_enable;
-    uint32_t depth_test, depth_write, depth_func, stencil_test;
-    VkStencilOpState front_ops, back_ops;
-    uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp, rasterizer_discard, conservative_raster;
-    /** @brief The sample mask's bit for the one sample, the conservative dilate in quarter pixels, the first viewport's swizzle and the provoking vertex. */
-    uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
-    /** @brief Specialization constants of each stage: id and value. */
-    uint32_t nspec[5];
-    VkSpecializationMapEntry spec_map[5][MAX_SPECS];
-    uint32_t spec[5][MAX_SPECS];
-} pipe_key;
+typedef nvn_pipe_key pipe_key;
 
 static struct {
-    struct {
-        pipe_key k;
-        VkPipeline p;
-    } *pipes;
-    uint32_t npipes;
     VkDescriptorSetLayout set_layout[3], cset_layout[3];
     VkPipelineLayout layout, clayout;
-    struct {
-        VkShaderModule m;
-        uint32_t n, ids[MAX_SPECS], vals[MAX_SPECS];
-        VkPipeline p;
-    } cpipes[MAX_PIPELINES];
-    uint32_t ncpipes;
     VkDescriptorPool pool;
     VkBuffer zero;
     bool ready;
 } d;
-
-/** @brief Runs a driver call that compiles and adds its time to the running total. */
-static void note_compile(const char *what, uint64_t t0, uint32_t n)
-{
-    uint64_t dt = rl_clock_ns() - t0;
-    d.made++;
-    d.made_ns += dt;
-    if (rl_cfg()->trace_os || dt > 20000000u)
-        rl_log(RL_LOG_INFO, "nvn", "%s %u created in %.1f ms (%llu created, %.0f ms in all)", what, n, dt / 1e6,
-               (unsigned long long)d.made, d.made_ns / 1e6);
-}
 
 static module *module_of(replay *r, uint64_t code)
 {
@@ -177,9 +128,9 @@ static bool layouts(void)
                                        .pPoolSizes = &ps };
     if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.pool) != VK_SUCCESS)
         return false;
-    d.pipes = calloc(MAX_PIPELINES, sizeof *d.pipes);
-    d.ready = d.pipes != NULL;
-    return d.ready;
+    d.ready = true;
+    nvn_pipe_set_layouts(d.layout, d.clayout);
+    return true;
 }
 
 void nvn_draw_reset(void)
@@ -604,150 +555,6 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
             };
     }
     return RL_OK;
-}
-
-/** @brief CLOCK_MONOTONIC in nanoseconds. */
-static int64_t now_ns(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
-}
-
-static VkPipeline pipeline_of(replay *r, const pipe_key *k)
-{
-    for (uint32_t i = 0; i < d.npipes; i++)
-        if (!memcmp(&d.pipes[i].k, k, sizeof *k))
-            return d.pipes[i].p;
-    if (d.npipes == MAX_PIPELINES) {
-        nvn_vk_stop(r, "more than %u pipelines", MAX_PIPELINES);
-        return NULL;
-    }
-    static const VkShaderStageFlagBits bits[5] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                   VK_SHADER_STAGE_GEOMETRY_BIT,
-                                                   VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
-                                                   VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT };
-    VkPipelineShaderStageCreateInfo stages[5];
-    VkSpecializationInfo si[5];
-    uint32_t ns = 0;
-    for (uint32_t s = 0; s < 5; s++)
-        if (k->mods[s]) {
-            si[s] = (VkSpecializationInfo){ k->nspec[s], k->spec_map[s], 4u * k->nspec[s], k->spec[s] };
-            stages[ns++] = (VkPipelineShaderStageCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                                              .stage = bits[s],
-                                                              .module = k->mods[s],
-                                                              .pName = "main",
-                                                              .pSpecializationInfo = k->nspec[s] ? &si[s] : NULL };
-        }
-    VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                                                .vertexBindingDescriptionCount = k->nbind,
-                                                .pVertexBindingDescriptions = k->bind,
-                                                .vertexAttributeDescriptionCount = k->nattr,
-                                                .pVertexAttributeDescriptions = k->attr };
-    VkPipelineInputAssemblyStateCreateInfo ia = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-                                                  .topology = (VkPrimitiveTopology)k->topology,
-                                                  .primitiveRestartEnable = k->primitive_restart };
-    VkPipelineTessellationStateCreateInfo ts = { .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
-                                                 .patchControlPoints = k->patch_points ? k->patch_points : 1 };
-    uint32_t sw = k->viewport_swizzle;
-    int swizzle_axes[4] = { (int)(sw & 7), (int)(sw >> 4 & 7), (int)(sw >> 8 & 7), (int)(sw >> 12 & 7) };
-    struct {
-        VkStructureType sType;
-        const void *pNext;
-        VkFlags flags;
-        uint32_t viewportCount;
-        const int *pViewportSwizzles;
-    } swizzle = { (VkStructureType)1000098000, NULL, 0, 1, swizzle_axes };
-    bool swizzled = sw != NVN_VIEWPORT_SWIZZLE_IDENTITY;
-    struct {
-        VkStructureType sType;
-        const void *pNext;
-        VkBool32 negativeOneToOne;
-    } clip = { (VkStructureType)1000355001, swizzled ? &swizzle : NULL, VK_TRUE };
-    VkPipelineViewportStateCreateInfo vp = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-                                             .pNext = k->negative_one_to_one ? (const void *)&clip
-                                                      : swizzled              ? (const void *)&swizzle
-                                                                              : NULL,
-                                             .viewportCount = 1,
-                                             .scissorCount = 1 };
-    struct {
-        VkStructureType sType;
-        const void *pNext;
-        VkFlags flags;
-        int conservativeRasterizationMode;
-        float extraPrimitiveOverestimationSize;
-    } conservative = { (VkStructureType)1000101001, NULL, 0, 1, 0.25f * (float)k->conservative_dilate };
-    struct {
-        VkStructureType sType;
-        const void *pNext;
-        int provokingVertexMode;
-    } provoking = { (VkStructureType)1000254001, k->conservative_raster ? &conservative : NULL, 1 };
-    VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-                                                  .pNext = k->provoking_last ? (const void *)&provoking
-                                                           : k->conservative_raster ? (const void *)&conservative
-                                                                                    : NULL,
-                                                  .polygonMode = (VkPolygonMode)k->polygon,
-                                                  .cullMode = k->cull,
-                                                  .frontFace = (VkFrontFace)k->front,
-                                                  .depthClampEnable = k->depth_clamp,
-                                                  .depthBiasEnable = k->bias_enable,
-                                                  .rasterizerDiscardEnable = k->rasterizer_discard,
-                                                  .lineWidth = 1.0f };
-    VkSampleMask sample_mask = k->sample_mask;
-    VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-                                                .pSampleMask = &sample_mask };
-    VkPipelineDepthStencilStateCreateInfo ds = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-                                                 .depthTestEnable = k->depth_test,
-                                                 .depthWriteEnable = k->depth_write,
-                                                 .depthCompareOp = (VkCompareOp)k->depth_func,
-                                                 .stencilTestEnable = k->stencil_test,
-                                                 .front = k->front_ops,
-                                                 .back = k->back_ops };
-    VkPipelineColorBlendStateCreateInfo cb = { .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-                                               .attachmentCount = k->ncolor,
-                                               .pAttachments = k->blend };
-    VkDynamicState dyn[] = { VK_DYNAMIC_STATE_VIEWPORT,          VK_DYNAMIC_STATE_SCISSOR,
-                             VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
-                             VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_DEPTH_BIAS,
-                             VK_DYNAMIC_STATE_BLEND_CONSTANTS,   VK_DYNAMIC_STATE_LINE_WIDTH };
-    VkPipelineDynamicStateCreateInfo dy = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                            .dynamicStateCount = sizeof dyn / sizeof dyn[0],
-                                            .pDynamicStates = dyn };
-    VkPipelineRenderingCreateInfo ri = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-                                         .colorAttachmentCount = k->ncolor,
-                                         .pColorAttachmentFormats = k->color,
-                                         .depthAttachmentFormat = k->depth,
-                                         .stencilAttachmentFormat = k->stencil };
-    VkGraphicsPipelineCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-                                        .pNext = &ri,
-                                        .stageCount = ns,
-                                        .pStages = stages,
-                                        .pVertexInputState = &vi,
-                                        .pInputAssemblyState = &ia,
-                                        .pTessellationState = k->mods[3] ? &ts : NULL,
-                                        .pViewportState = &vp,
-                                        .pRasterizationState = &rs,
-                                        .pMultisampleState = &ms,
-                                        .pDepthStencilState = &ds,
-                                        .pColorBlendState = &cb,
-                                        .pDynamicState = &dy,
-                                        .layout = d.layout };
-    VkPipeline p;
-    nvn_core_leave();
-    int64_t t0 = now_ns();
-    VkResult vr = VK(vkCreateGraphicsPipelines)(g.dev, NULL, 1, &ci, NULL, &p);
-    nvn_vk_note_pipeline(now_ns() - t0);
-    if (vr != VK_SUCCESS) {
-        nvn_vk_stop(r, "vkCreateGraphicsPipelines failed (%d)", (int)vr);
-        return NULL;
-    }
-    d.pipes[d.npipes].k = *k;
-    d.pipes[d.npipes++].p = p;
-    if (rl_cfg()->trace_os)
-        rl_log(RL_LOG_INFO, "nvn", "pipeline %u: %u stages, %u attributes, %u color targets", d.npipes, ns, k->nattr,
-               k->ncolor);
-    return p;
 }
 
 /** @brief A uniform buffer descriptor for n bytes at src (host bytes) in the arena, padded to a whole bank. */
@@ -1191,6 +998,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         trc = bind_user_textures(r, mods[s], s, &k.nspec[s], k.spec_map[s], k.spec[s]);
         if (trc != RL_OK)
             return trc;
+        nvn_spec_sort(&k.nspec[s], k.spec_map[s], k.spec[s]);
         k.mods[s] = mods[s]->m;
     }
     int rc;
@@ -1218,9 +1026,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         rc = vertex_state(r, mods[0], &k);
     if (rc != RL_OK)
         return rc;
-    VkPipeline p = pipeline_of(r, &k);
+    VkPipeline p = nvn_pipe_graphics(&k);
     if (!p)
-        return RL_PENDING;
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw");
     draw_data dd = { .k = &k, .mods = mods, .indexed = indexed, .itype = itype, .first = first, .count = count,
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
@@ -1233,6 +1041,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                            st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
     uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    nvn_pipe_set_dynamic(g.cb, &k);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
     fixed_push fp = { st->point_size, st->alpha_ref };
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
@@ -1283,54 +1092,13 @@ static bool compute_layouts(void)
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                        .setLayoutCount = 3,
                                        .pSetLayouts = d.cset_layout };
-    return VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &d.clayout) == VK_SUCCESS;
+    if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &d.clayout) != VK_SUCCESS)
+        return false;
+    nvn_pipe_set_layouts(d.layout, d.clayout);
+    return true;
 }
 
-/** @brief The compute pipeline of module m with specialization constants (n of them in map and vals). */
-static VkPipeline compute_pipeline_of(replay *r, const module *m, uint32_t n, const VkSpecializationMapEntry *map,
-                                      const uint32_t *vals)
-{
-    for (uint32_t i = 0; i < d.ncpipes; i++) {
-        if (d.cpipes[i].m != m->m || d.cpipes[i].n != n || memcmp(d.cpipes[i].vals, vals, 4u * n))
-            continue;
-        bool same = true;
-        for (uint32_t j = 0; j < n && same; j++)
-            same = d.cpipes[i].ids[j] == map[j].constantID;
-        if (same)
-            return d.cpipes[i].p;
-    }
-    if (d.ncpipes == MAX_PIPELINES) {
-        nvn_vk_stop(r, "more than %u compute pipelines", MAX_PIPELINES);
-        return NULL;
-    }
-    VkSpecializationInfo si = { n, map, 4u * n, vals };
-    VkComputePipelineCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                                       .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                                  .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-                                                  .module = m->m,
-                                                  .pName = "main",
-                                                  .pSpecializationInfo = &si },
-                                       .layout = d.clayout };
-    VkPipeline p;
-    nvn_core_leave();
-    int64_t t0 = now_ns();
-    VkResult cr = VK(vkCreateComputePipelines)(g.dev, NULL, 1, &ci, NULL, &p);
-    nvn_vk_note_pipeline(now_ns() - t0);
-    if (cr != VK_SUCCESS) {
-        nvn_vk_stop(r, "vkCreateComputePipelines failed for %s", m->key);
-        return NULL;
-    }
-    d.cpipes[d.ncpipes].m = m->m;
-    d.cpipes[d.ncpipes].n = n;
-    for (uint32_t j = 0; j < n; j++) {
-        d.cpipes[d.ncpipes].ids[j] = map[j].constantID;
-        d.cpipes[d.ncpipes].vals[j] = vals[j];
-    }
-    d.cpipes[d.ncpipes++].p = p;
-    if (rl_cfg()->trace_os)
-        rl_log(RL_LOG_INFO, "nvn", "compute pipeline %u: %s", d.ncpipes, m->key);
-    return p;
-}
+bool nvn_draw_layouts(void) { return layouts() && compute_layouts(); }
 
 /** @brief What a dispatch puts into the batch being recorded. */
 typedef struct dispatch_data {
@@ -1494,9 +1262,10 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
         return rc;
     if ((rc = bind_user_textures(r, m, NVN_STAGE_COMPUTE, &n, map, vals)) != RL_OK)
         return rc;
-    VkPipeline p = compute_pipeline_of(r, m, n, map, vals);
+    nvn_spec_sort(&n, map, vals);
+    VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
     if (!p)
-        return RL_PENDING;
+        return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s", m->key);
     dispatch_data dd = { .m = m, .c0 = c0 };
     if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
         return rc;

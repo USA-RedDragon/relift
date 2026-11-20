@@ -86,6 +86,7 @@ static uint64_t set_stages(rl_ctx *c, uint8_t *mem, nvn_program *p, uint64_t pro
         if (!nvn_shader_note(mem, code, key))
             return (uint64_t)rl_guest_fatal(c, "nvn", "nvnProgramSetShaders(0x%llx): stage %u at 0x%llx has no end",
                                             (unsigned long long)c->x[0], i, (unsigned long long)p->stages[i].data);
+        nvn_warm_program(mem, code, p->control[i]);
         if (rl_cfg()->trace_os)
             rl_log(RL_LOG_INFO, "nvn", "program 0x%llx stage %u: %s", (unsigned long long)c->x[0], i, key);
     }
