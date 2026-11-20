@@ -153,7 +153,7 @@ static bool module_named(const char *leaf)
  * finds: the loader's configuration and the probes of its library search
  * find nothing (a miss must not reach a file of the machine the program
  * runs on, whose libraries are not the ones the program was lifted with),
- * as does any other name in a directory the import's files lie in, and a shared object the import does not hold at all (a dlopen of an
+ * as does any other name in a directory the import's files lie in, and a shared object the import does not hold at all (a load of an
  * unknown name) stops the program with a report. Returns false when the
  * open goes on to the host file system.
  */
