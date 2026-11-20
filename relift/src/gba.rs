@@ -386,6 +386,11 @@ pub(crate) struct Layers {
     /// Whether the layers include the A64 header, which needs 16-byte
     /// compare-and-swap on an x86-64 host.
     pub(crate) cx16: bool,
+    /// Whether the lifted files of one directory (but `unit.c`, which holds
+    /// the program's identity) compile once into an object kept by content
+    /// in the shared cache, so a program that lifts the same libraries
+    /// again compiles none of them.
+    pub(crate) share_lifted: bool,
 }
 
 const GBA_LAYERS: Layers = Layers {
@@ -407,6 +412,7 @@ const GBA_LAYERS: Layers = Layers {
     lifted_opt: LIFTED_OPT,
     cache: "gba-runtime",
     cx16: false,
+    share_lifted: false,
 };
 
 fn compile(
@@ -511,10 +517,14 @@ pub(crate) fn compile_layers(
             .unwrap_or(src);
         out.join("obj").join(tag).join(stem).with_extension("o")
     };
+    let shared = cross.is_some() || !cfg!(windows);
+    let (kept, lifted): (Vec<&PathBuf>, Vec<&PathBuf>) = lifted.iter().partition(|f| {
+        layers.share_lifted && shared && f.file_name().is_some_and(|n| n != "unit.c")
+    });
     let mut compiles: Vec<Compile> = lifted
         .iter()
         .map(|s| Compile {
-            src: s.clone(),
+            src: (*s).clone(),
             obj: obj(s, "lifted"),
             flags: lifted_flags.clone(),
             pool: None,
@@ -541,7 +551,6 @@ pub(crate) fn compile_layers(
     }
     let jobs = relift_build::job_count(settings.jobs);
     let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let shared = cross.is_some() || !cfg!(windows);
     let key: String =
         relift_switch_formats::sha256(format!("{cc:?}\n{rt_flags:?}\n{}", rt.display()).as_bytes())
             [..8]
@@ -605,6 +614,30 @@ pub(crate) fn compile_layers(
             std::fs::remove_file(&exe)?;
         }
         link.push(rt_o.display().to_string());
+        let mut groups: std::collections::BTreeMap<&Path, Vec<&PathBuf>> =
+            std::collections::BTreeMap::new();
+        for f in &kept {
+            if let Some(dir) = f.parent() {
+                groups.entry(dir).or_default().push(f);
+            }
+        }
+        for (dir, files) in groups {
+            let o = shared_lifted(
+                (
+                    &cc,
+                    &lifted_flags,
+                    &croot.join(format!("{}-lifted", layers.cache)),
+                ),
+                dir,
+                files,
+                (ninja.as_deref(), jobs),
+                (ui, row),
+            )?;
+            if time(&o) > time(&exe) && exe.exists() {
+                std::fs::remove_file(&exe)?;
+            }
+            link.push(o.display().to_string());
+        }
     } else {
         compiles.extend(rt_plan_compiles);
     }
@@ -653,6 +686,73 @@ pub(crate) fn compile_layers(
     )?;
     ui.done(row, Line::new().text(noun(n as u64, "file")));
     Ok(())
+}
+
+/// The object of the C files `files` of one lifted unit directory `dir`,
+/// compiled once and kept under `store` by the content of the files, the
+/// compiler and the flags: the sources are copied into the entry so the
+/// compile commands do not name the project, and a later build of the same
+/// libraries finds the object and compiles nothing.
+fn shared_lifted(
+    (cc, flags, store): (&[String], &[String], &Path),
+    dir: &Path,
+    files: Vec<&PathBuf>,
+    (ninja, jobs): (Option<&Path>, u32),
+    (ui, row): (&mut Ui, usize),
+) -> Result<PathBuf, BoxError> {
+    let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
+    for f in files {
+        let name = f
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        texts.push((name, std::fs::read(f)?));
+    }
+    let prelude = std::fs::read(dir.join(relift_emit::PRELUDE_NAME))?;
+    let mut hashed = format!("{cc:?}\n{flags:?}\n").into_bytes();
+    hashed.extend_from_slice(&prelude);
+    for (n, t) in &texts {
+        hashed.extend_from_slice(n.as_bytes());
+        hashed.extend_from_slice(&relift_switch_formats::sha256(t));
+    }
+    let key: String = relift_switch_formats::sha256(&hashed)[..12]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let entry = store.join(key);
+    std::fs::create_dir_all(&entry)?;
+    let lock_path = entry.join("lock");
+    relift_cache::write_if_changed(&lock_path, b"")?;
+    let lock = std::fs::File::open(&lock_path)?;
+    lock.lock()?;
+    std::fs::create_dir_all(entry.join("src"))?;
+    relift_cache::write_if_changed(&entry.join("src").join(relift_emit::PRELUDE_NAME), &prelude)?;
+    let mut compiles = Vec::new();
+    for (n, t) in &texts {
+        let src = entry.join("src").join(n);
+        relift_cache::write_if_changed(&src, t)?;
+        compiles.push(Compile {
+            src: src.clone(),
+            obj: entry.join("obj").join(n).with_extension("o"),
+            flags: flags.to_vec(),
+            pool: None,
+            stage: 0,
+        });
+    }
+    let output = entry.join("module.o");
+    let pools = crate::build::memory_pools(&mut compiles, jobs);
+    let plan = Plan {
+        cc: cc.to_vec(),
+        asm: None,
+        compiles,
+        output: output.clone(),
+        link_flags: ["-r", "-nostdlib"].map(String::from).into(),
+        pools,
+        root: None,
+    };
+    crate::build::build_plans(ui, row, &[(plan, entry)], ninja, jobs, "")?;
+    drop(lock);
+    Ok(output)
 }
 
 /// `relift run` of the Game Boy Advance project: builds, then runs the

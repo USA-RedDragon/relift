@@ -53,6 +53,7 @@ const NDS_LAYERS: Layers = Layers {
     lifted_opt: LIFTED_OPT,
     cache: "nds-runtime",
     cx16: false,
+    share_lifted: false,
 };
 
 /// Whether `path` is a decrypted Nintendo DS cartridge image: a file whose

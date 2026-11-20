@@ -57,6 +57,7 @@ const LINUX_LAYERS: Layers = Layers {
     lifted_opt: LIFTED_OPT,
     cache: "linux-runtime",
     cx16: true,
+    share_lifted: true,
 };
 
 /// The largest file read to check whether it is an executable.
