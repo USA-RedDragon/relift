@@ -420,10 +420,32 @@ typedef struct nvn_iface_rec {
 #define NVN_IFACE_TEXTURE_DIM 1u
 #define NVN_IFACE_GLOBAL_MEMORY 2u
 #define NVN_IFACE_TEXTURE 3u
+/** @brief Record kinds of a task or mesh program's pipeline (see nvn_mesh_info). */
+#define NVN_IFACE_MESH 4u
+#define NVN_IFACE_MESH_LIMITS 5u
+#define NVN_IFACE_MESH_RECORD 6u
+/**
+ * @brief What relift build's translation of a task or mesh program says of its pipeline: the stage (6 or 7), whether
+ * the native back end (VK_EXT_mesh_shader) draws it, else the compute back end does, whether that draw is indexed,
+ * the guest workgroups its compute workgroups run, the output limits and topology (1 points, 2 lines, 3 triangles),
+ * the stage buffer, mesh record and index words, and the task and mesh workgroup sizes.
+ */
+typedef struct nvn_mesh_info {
+    bool present, native, indexed;
+    uint32_t stage, slots, topology, max_vertices, max_primitives, payload_words, record_words, index_words;
+    uint32_t task_lanes, mesh_lanes;
+} nvn_mesh_info;
+/** @brief The pipeline the n records say a task or mesh program has; false when they say none. */
+bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out);
+/**
+ * @brief The shader table key of the compute back end's helper program of kind ("scan" or "vertex") for the mesh
+ * program with key (relift build writes the helpers under keys made from the mesh program's).
+ */
+void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65]);
 /** @brief Up to max interface records of the translation with key to out; the count (0 without an entry). */
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max);
 /** @brief Shader stages a program holds. */
-#define NVN_PROGRAM_STAGES 6u
+#define NVN_PROGRAM_STAGES 8u
 /** @brief Guest memory imported as a host Vulkan buffer (nvn_vk.c); handles kept opaque here. */
 typedef struct nvn_import {
     void *buf, *memory;
@@ -593,6 +615,14 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_DRAW_ELEMENTS_INSTANCED, nvnCommandBufferDrawElementsInstanced) \
     X(NVN_CMD_DRAW_ELEMENTS, nvnCommandBufferDrawElements) \
     X(NVN_CMD_DRAW_ELEMENTS_BASE_VERTEX, nvnCommandBufferDrawElementsBaseVertex) \
+    X(NVN_CMD_DRAW_MESH_TASKS, nvnCommandBufferDrawMeshTasks) \
+    X(NVN_CMD_DRAW_MESH_TASKS_3D, nvnCommandBufferDrawMeshTasks3D) \
+    X(NVN_CMD_DRAW_MESH_TASKS_INDIRECT, nvnCommandBufferDrawMeshTasksIndirect) \
+    X(NVN_CMD_DRAW_MESH_TASKS_3D_INDIRECT, nvnCommandBufferDrawMeshTasks3DIndirect) \
+    X(NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT, nvnCommandBufferMultiDrawMeshTasksIndirect) \
+    X(NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT_COUNT, nvnCommandBufferMultiDrawMeshTasksIndirectCount) \
+    X(NVN_CMD_MULTI_DRAW_MESH_TASKS_3D_INDIRECT, nvnCommandBufferMultiDrawMeshTasks3DIndirect) \
+    X(NVN_CMD_MULTI_DRAW_MESH_TASKS_3D_INDIRECT_COUNT, nvnCommandBufferMultiDrawMeshTasks3DIndirectCount) \
     X(NVN_CMD_END_TRANSFORM_FEEDBACK, nvnCommandBufferEndTransformFeedback) \
     X(NVN_CMD_EVALUATE_DLSS, nvnCommandBufferEvaluateDlss) \
     X(NVN_CMD_FENCE_SYNC, nvnCommandBufferFenceSync) \

@@ -445,6 +445,46 @@ uint32_t *nvn_shader_spirv(const char *key, size_t *words)
     return w;
 }
 
+bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out)
+{
+    *out = (nvn_mesh_info){ 0 };
+    for (uint32_t i = 0; i < n; i++) {
+        const nvn_iface_rec *r = &recs[i];
+        if (r->kind == NVN_IFACE_MESH) {
+            out->present = true;
+            out->stage = r->bank & 0xff;
+            out->native = (r->bank >> 8 & 1) != 0;
+            out->indexed = (r->bank >> 9 & 1) != 0;
+            out->slots = r->offset;
+            out->topology = r->spec;
+        } else if (r->kind == NVN_IFACE_MESH_LIMITS) {
+            out->max_vertices = r->bank;
+            out->max_primitives = r->offset;
+            out->payload_words = r->spec;
+        } else if (r->kind == NVN_IFACE_MESH_RECORD) {
+            out->record_words = r->bank;
+            out->index_words = r->offset;
+            out->task_lanes = r->spec & 0xffff;
+            out->mesh_lanes = r->spec >> 16;
+        }
+    }
+    return out->present;
+}
+
+void nvn_shader_helper_key(const char *kind, const char *key, char hkey[65])
+{
+    static const char scan[] = "relift mesh scan", vertex[] = "relift mesh vertex";
+    const char *what = !strcmp(kind, "scan") ? scan : vertex;
+    size_t n = strlen(what);
+    uint8_t buf[sizeof vertex + 32];
+    memcpy(buf, what, n);
+    for (uint32_t i = 0; i < 32; i++) {
+        int hi = hexv(key[2 * i]), lo = hexv(key[2 * i + 1]);
+        buf[n + i] = (uint8_t)(hi << 4 | lo);
+    }
+    rl_data_sha256(buf, n + 32, hkey);
+}
+
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
 {
     pthread_mutex_lock(&g_lock);

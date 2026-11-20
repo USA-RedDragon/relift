@@ -13,6 +13,10 @@
 /** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
 #define ALPHA_FUNC_SPEC 0x300u
 
+/** @brief The set and binding of the compute back end's mesh buffer (the translator's GUEST_MEMORY_SET and BINDING). */
+#define NVN_MESH_BUFFER_SET 3u
+#define NVN_MESH_BUFFER_BINDING 2u
+
 /** @brief A translated program as a shader module, with what its interface uses. */
 typedef struct nvn_module {
     char key[65];
@@ -25,6 +29,8 @@ typedef struct nvn_module {
     /** @brief Bindings of set 2 the program declares (bit n: binding n, for n < 32), and whether it has others. */
     uint32_t texture_bindings;
     bool images, other_sets;
+    /** @brief The program reads or writes the compute back end's mesh buffer (set NVN_MESH_BUFFER_SET, binding NVN_MESH_BUFFER_BINDING). */
+    bool mesh_buffer;
     /** @brief Output locations the program declares (a vertex program's varyings). */
     uint32_t outputs;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
@@ -52,6 +58,8 @@ bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage);
  * @brief The module of the program with key, made from the build's shader
  * table the first time: its bindings moved for stage (or, when stage is
  * negative, the stage its SPIR-V names), its banks, inputs and outputs read.
+ * A program used in two stages (a mesh program of the compute back end is a
+ * compute shader) has a module for each.
  * Safe from any thread. NULL, with the reason in why, when the table lacks
  * the program or the driver refuses the module.
  */

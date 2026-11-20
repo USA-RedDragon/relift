@@ -95,7 +95,20 @@ typedef struct ext_features {
 #define STYPE_PROVOKING_VERTEX ((VkStructureType)1000254000)
 #define STYPE_CONSERVATIVE_PROPS ((VkStructureType)1000101000)
 #define STYPE_PIPELINE_LIBRARY ((VkStructureType)1000320000)
+#define STYPE_MESH_SHADER ((VkStructureType)1000328000)
+#define STYPE_MESH_SHADER_PROPS ((VkStructureType)1000328001)
 #define STYPE_COOPERATIVE_MATRIX_PROPS ((VkStructureType)1000506001)
+
+/**
+ * @brief VkPhysicalDeviceMeshShaderPropertiesEXT, which the generated headers do not hold: every member after the
+ * header is 32 bits, w[n] the nth (maxTaskWorkGroupInvocations w[4], maxTaskPayloadSize w[8], maxMeshWorkGroupInvocations
+ * w[15], maxMeshSharedMemorySize w[19], maxMeshOutputVertices w[24], maxMeshOutputPrimitives w[25]).
+ */
+typedef struct mesh_props {
+    VkStructureType sType;
+    void *pNext;
+    uint32_t w[32];
+} mesh_props;
 
 /** @brief VkCooperativeMatrixPropertiesKHR, which the generated headers do not hold. */
 typedef struct coop_props {
@@ -119,12 +132,13 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_KHR_shader_maximal_reconvergence", "VK_KHR_shader_fma",
                                            "VK_KHR_cooperative_matrix",
                                            "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex",
-                                           "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library" };
+                                           "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library",
+                                           "VK_EXT_mesh_shader" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -162,9 +176,10 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.rob2 = (ext_features){ .sType = STYPE_ROBUSTNESS2 };
     feat.provoking = (ext_features){ .sType = STYPE_PROVOKING_VERTEX };
     feat.gpl = (ext_features){ .sType = STYPE_PIPELINE_LIBRARY };
+    feat.mesh = (ext_features){ .sType = STYPE_MESH_SHADER };
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
                                                &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
-                                               &feat.provoking,    NULL,        &feat.gpl };
+                                               &feat.provoking,    NULL,        &feat.gpl,          &feat.mesh };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -173,7 +188,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
     rob2_on = false;
-    bool provoking_on = false, gpl_on = false;
+    bool provoking_on = false, gpl_on = false, mesh_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
@@ -186,6 +201,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 rob2_on |= feats[k] == &feat.rob2;
                 provoking_on |= feats[k] == &feat.provoking;
                 gpl_on |= feats[k] == &feat.gpl;
+                mesh_on |= feats[k] == &feat.mesh;
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)
@@ -227,6 +243,8 @@ static bool device_hook(void *user, rl_vkdev_build *b)
         VK(vkGetPhysicalDeviceProperties2)(g.phys, &pp);
         g.gpl = gp.graphicsPipelineLibraryFastLinking && gp.graphicsPipelineLibraryIndependentInterpolationDecoration;
     }
+    g.mesh_shader = mesh_on && feat.mesh.b[0] && feat.mesh.b[1];
+    feat.mesh.b[2] = feat.mesh.b[3] = feat.mesh.b[4] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     feat.f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
@@ -264,8 +282,19 @@ static void bring_up(void)
             if (f)
                 g.fns.f[i] = f;
         }
+    if (g.mesh_shader) {
+        void *draw = gdpa(g.dev, "vkCmdDrawMeshTasksEXT");
+        memcpy(&g.draw_mesh_tasks, &draw, sizeof draw);
+        g.mesh_shader = g.draw_mesh_tasks != NULL;
+    }
     g.queue = (VkQueue)(uintptr_t)core->guest_queue;
     VK(vkGetPhysicalDeviceMemoryProperties)(g.phys, &g.memprops);
+    {
+        VkPhysicalDeviceProperties dp;
+        VK(vkGetPhysicalDeviceProperties)(g.phys, &dp);
+        g.max_storage_range = dp.limits.maxStorageBufferRange;
+        g.max_index_value = dp.limits.maxDrawIndexedIndexValue;
+    }
     VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                     .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
                                     .queueFamilyIndex = g.family };
@@ -619,6 +648,8 @@ static void write_caps(void)
     VkPhysicalDeviceVulkan12Features f12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13 };
     VkPhysicalDeviceVulkan11Features f11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &f12 };
     VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11 };
+    ext_features mesh = { .sType = STYPE_MESH_SHADER };
+    mesh_props mp = { .sType = STYPE_MESH_SHADER_PROPS };
     VkPhysicalDeviceVulkan13Properties p13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES };
     VkPhysicalDeviceVulkan12Properties p12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES, .pNext = &p13 };
     VkPhysicalDeviceVulkan11Properties p11 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES, .pNext = &p12 };
@@ -631,18 +662,22 @@ static void write_caps(void)
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &n, ext);
     static const char *const wanted[] = { "VK_EXT_shader_atomic_float", "VK_EXT_shader_image_atomic_int64",
                                           "VK_KHR_shader_clock", "VK_KHR_shader_fma",
-                                          "VK_KHR_shader_maximal_reconvergence", "VK_KHR_cooperative_matrix" };
-    bool has[6] = { false };
+                                          "VK_KHR_shader_maximal_reconvergence", "VK_KHR_cooperative_matrix",
+                                          "VK_EXT_mesh_shader" };
+    bool has[7] = { false };
     for (uint32_t i = 0; i < n; i++)
-        for (uint32_t k = 0; k < 6; k++)
+        for (uint32_t k = 0; k < 7; k++)
             has[k] |= !strcmp(ext[i].extensionName, wanted[k]);
     ext_features *chain[] = { has[2] ? &clock : NULL, has[0] ? &afloat : NULL, has[1] ? &i64 : NULL,
-                              has[4] ? &recon : NULL, has[3] ? &fma : NULL, has[5] ? &coop : NULL };
-    for (uint32_t k = 0; k < 6; k++)
+                              has[4] ? &recon : NULL, has[3] ? &fma : NULL, has[5] ? &coop : NULL,
+                              has[6] ? &mesh : NULL };
+    for (uint32_t k = 0; k < 7; k++)
         if (chain[k]) {
             chain[k]->pNext = f13.pNext;
             f13.pNext = chain[k];
         }
+    if (has[6])
+        p13.pNext = &mp;
     VK(vkGetPhysicalDeviceFeatures2)(g.phys, &f2);
     VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
     char path[1024];
@@ -657,7 +692,7 @@ static void write_caps(void)
     const VkPhysicalDeviceLimits *l = &p2.properties.limits;
     fprintf(f, "{\n \"capabilities\": {\n  \"device\": {\n   \"extensions\": {");
     bool first = true;
-    for (uint32_t k = 0; k < 6; k++)
+    for (uint32_t k = 0; k < 7; k++)
         for (uint32_t i = 0; i < n; i++)
             if (has[k] && !strcmp(ext[i].extensionName, wanted[k])) {
                 fprintf(f, "%s\n    \"%s\": %u", first ? "" : ",", wanted[k], ext[i].specVersion);
@@ -688,8 +723,12 @@ static void write_caps(void)
             B(f11.storageBuffer16BitAccess));
     fprintf(f,
             "    \"VkPhysicalDeviceVulkan13Features\": { \"computeFullSubgroups\": %s, \"shaderDemoteToHelperInvocation\": "
-            "%s, \"subgroupSizeControl\": %s }\n   },\n   \"properties\": {\n",
+            "%s, \"subgroupSizeControl\": %s }",
             B(f13.computeFullSubgroups), B(f13.shaderDemoteToHelperInvocation), B(f13.subgroupSizeControl));
+    if (has[6])
+        fprintf(f, ",\n    \"VkPhysicalDeviceMeshShaderFeaturesEXT\": { \"taskShader\": %s, \"meshShader\": %s }",
+                B(mesh.b[0]), B(mesh.b[1]));
+    fprintf(f, "\n   },\n   \"properties\": {\n");
     fprintf(f,
             "    \"VkPhysicalDeviceProperties\": { \"deviceID\": %u, \"deviceName\": \"%s\", \"vendorID\": %u, \"limits\": "
             "{ \"maxComputeSharedMemorySize\": %u, \"maxComputeWorkGroupInvocations\": %u, \"maxComputeWorkGroupSize\": "
@@ -737,7 +776,14 @@ static void write_caps(void)
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);
-    fprintf(f, " }\n   }\n  }\n },\n \"source\": \"relift runtime, %s\"\n}\n", g.name);
+    fprintf(f, " }");
+    if (has[6])
+        fprintf(f,
+                ",\n    \"VkPhysicalDeviceMeshShaderPropertiesEXT\": { \"maxTaskWorkGroupInvocations\": %u, "
+                "\"maxTaskPayloadSize\": %u, \"maxMeshWorkGroupInvocations\": %u, \"maxMeshSharedMemorySize\": %u, "
+                "\"maxMeshOutputVertices\": %u, \"maxMeshOutputPrimitives\": %u }",
+                mp.w[4], mp.w[8], mp.w[15], mp.w[19], mp.w[24], mp.w[25]);
+    fprintf(f, "\n   }\n  }\n },\n \"source\": \"relift runtime, %s\"\n}\n", g.name);
     fclose(f);
     free(ext);
 }
@@ -882,13 +928,18 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
 {
     memset(out, 0, sizeof *out);
     pthread_once(&g.once, bring_up);
-    if (!g.ok || !g.host_import || !size || guest % g.import_align || size % g.import_align)
+    if (!g.ok || !g.host_import || !size || guest % g.import_align || size % g.import_align) {
+        rl_log(RL_LOG_WARN, "nvn", "import of 0x%llx (0x%llx bytes) refused: ok %d host_import %d align 0x%llx",
+               (unsigned long long)guest, (unsigned long long)size, g.ok, g.host_import, (unsigned long long)g.import_align);
         return false;
+    }
     void *host = rl_mem_base() + guest;
     VkMemoryHostPointerPropertiesEXT props = { .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT };
     if (VK(vkGetMemoryHostPointerPropertiesEXT)(g.dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host,
-                                                &props) != VK_SUCCESS)
+                                                &props) != VK_SUCCESS) {
+        rl_log(RL_LOG_WARN, "nvn", "import of 0x%llx: vkGetMemoryHostPointerPropertiesEXT failed", (unsigned long long)guest);
         return false;
+    }
     VkExternalMemoryBufferCreateInfo eb = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
                                             .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT };
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -920,6 +971,8 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
     bool ok = t >= 0 && VK(vkAllocateMemory)(g.dev, &mai, NULL, &dm) == VK_SUCCESS;
     out->memory = dm;
     if (!ok || VK(vkBindBufferMemory)(g.dev, buf, dm, 0) != VK_SUCCESS) {
+        rl_log(RL_LOG_WARN, "nvn", "import of 0x%llx (0x%llx bytes) failed: memory type %d (req bits 0x%x, host bits 0x%x)",
+               (unsigned long long)guest, (unsigned long long)size, t, req.memoryTypeBits, props.memoryTypeBits);
         nvn_vk_unimport(out);
         return false;
     }
@@ -940,6 +993,31 @@ void nvn_vk_unimport(nvn_import *im)
 }
 
 static bool staging_new(staging *s, uint64_t size, bool read);
+bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size)
+{
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = size,
+                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT };
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, buf) != VK_SUCCESS)
+        return false;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, *buf, &req);
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (t < 0)
+        t = nvn_vk_mem_type(req.memoryTypeBits, 0);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, memory) != VK_SUCCESS ||
+        VK(vkBindBufferMemory)(g.dev, *buf, *memory, 0) != VK_SUCCESS) {
+        VK(vkDestroyBuffer)(g.dev, *buf, NULL);
+        *buf = NULL;
+        return false;
+    }
+    return true;
+}
 
 bool nvn_vk_staging_new(staging *s, uint64_t size)
 {

@@ -15,8 +15,8 @@
 #define VK(name) VKF_FN(&g.fns, name)
 #define MAX_RT 8u
 #define MAX_IMAGES 4096u
-/** @brief Graphics and compute stages, in NVNshaderStage order. */
-#define NVN_STAGES 6u
+/** @brief Graphics, compute, task and mesh stages, in NVNshaderStage order. */
+#define NVN_STAGES 8u
 /** @brief Uniform buffer slots of a stage (c[3] to c[16]). */
 #define NVN_UBO_SLOTS 14u
 /** @brief Bytes of a stage's driver bank c[2] the layer keeps: bound texture handles from 0x20, 8 bytes apart. */
@@ -52,6 +52,12 @@
 #define NVN_COUNTER_TIMESTAMP_TOP 16u
 /** @brief The compute stage's NVNshaderStage, and its storage buffer slots. */
 #define NVN_STAGE_COMPUTE 5u
+/** @brief VK_EXT_mesh_shader's shader stage bits, which the generated headers do not hold. */
+#define VK_SHADER_STAGE_TASK_BIT_EXT 0x40u
+#define VK_SHADER_STAGE_MESH_BIT_EXT 0x80u
+/** @brief The task and mesh stages' NVNshaderStage (NVN2): the draw's programs when a game draws mesh tasks. */
+#define NVN_STAGE_TASK 6u
+#define NVN_STAGE_MESH 7u
 #define NVN_STORAGE_SLOTS 16u
 /** @brief Image (and compute texture) slots of a stage. */
 #define NVN_IMAGE_SLOTS 32u
@@ -139,6 +145,12 @@ typedef struct nvn_vkdev {
     bool gpl;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
     bool query_ok, occlusion_precise;
+    /** @brief VK_EXT_mesh_shader is on with task and mesh shaders: the native back end of task and mesh programs runs. */
+    bool mesh_shader;
+    /** @brief maxStorageBufferRange and maxDrawIndexedIndexValue of the device. */
+    uint32_t max_storage_range, max_index_value;
+    /** @brief vkCmdDrawMeshTasksEXT (loaded with the device when the extension is on). */
+    void (*draw_mesh_tasks)(VkCommandBuffer, uint32_t, uint32_t, uint32_t);
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
     bool host_import;
     uint64_t import_align;
@@ -325,6 +337,8 @@ int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want);
 bool nvn_vk_staging_new(staging *s, uint64_t size);
 /** @brief A staging buffer the CPU reads after the device writes it: host-cached memory where the device has it. */
 bool nvn_vk_readback_new(staging *s, uint64_t size);
+/** @brief A device-local buffer of size bytes with the given usage (storage, index, indirect and transfer ones). */
+bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size);
 void nvn_vk_staging_free(staging *s);
 void nvn_vk_barrier(VkCommandBuffer cb);
 bool nvn_vk_begin(replay *r);

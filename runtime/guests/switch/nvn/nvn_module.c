@@ -64,6 +64,8 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
                     m->texture_bindings |= 1u << x->binding;
                 else
                     m->images = true;
+            } else if (x->set == NVN_MESH_BUFFER_SET && x->binding == NVN_MESH_BUFFER_BINDING) {
+                m->mesh_buffer = true;
             } else {
                 m->other_sets = true;
             }
@@ -246,8 +248,8 @@ bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage)
         uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
         if (!len || i + len > n)
             break;
-        if (op == 15 && len >= 2 && w[i + 1] < sizeof map / sizeof map[0]) {
-            *stage = map[w[i + 1]];
+        if (op == 15 && len >= 2 && (w[i + 1] < sizeof map / sizeof map[0] || w[i + 1] == 5364 || w[i + 1] == 5365)) {
+            *stage = w[i + 1] == 5364 ? (int)NVN_STAGE_TASK : w[i + 1] == 5365 ? (int)NVN_STAGE_MESH : map[w[i + 1]];
             return true;
         }
         i += len;
@@ -269,15 +271,15 @@ static uint32_t key_hash(const char *key)
     return h;
 }
 
-/** @brief The module with key in the table, or NULL; g_lock held. */
-static nvn_module *find_locked(const char *key)
+/** @brief The module with key made for stage (any stage when it is negative) in the table, or NULL; g_lock held. */
+static nvn_module *find_locked(const char *key, int stage)
 {
     if (!g_mods.cap)
         return NULL;
     for (uint32_t i = key_hash(key) & (g_mods.cap - 1);; i = (i + 1) & (g_mods.cap - 1)) {
         if (!g_mods.slot[i])
             return NULL;
-        if (!memcmp(g_mods.slot[i]->key, key, 64))
+        if (!memcmp(g_mods.slot[i]->key, key, 64) && (stage < 0 || g_mods.slot[i]->stage == stage))
             return g_mods.slot[i];
     }
 }
@@ -325,7 +327,7 @@ static void why_set(char *why, size_t n, const char *fmt, ...)
 nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_n)
 {
     pthread_mutex_lock(&g_lock);
-    nvn_module *have = find_locked(key);
+    nvn_module *have = find_locked(key, stage);
     pthread_mutex_unlock(&g_lock);
     if (have)
         return have;
@@ -367,7 +369,7 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         return NULL;
     }
     pthread_mutex_lock(&g_lock);
-    have = find_locked(key);
+    have = find_locked(key, stage);
     bool ok = have || insert_locked(m);
     pthread_mutex_unlock(&g_lock);
     if (have) {

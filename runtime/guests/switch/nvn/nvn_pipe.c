@@ -40,12 +40,12 @@ typedef struct table {
 static _Thread_local bool t_worker;
 
 static struct {
-    VkPipelineLayout layout, clayout;
+    VkPipelineLayout layout, clayout, mlayout;
     VkPipelineCache cache;
     bool gpl, warmed, warming, dirty, cache_ctl;
     pthread_mutex_t lock;
     pthread_cond_t cv;
-    table vi, pr, fs, fo, full, comp;
+    table vi, pr, fs, fo, full, comp, mcomp;
     uint64_t made, made_ns, late, late_ns, saved_ns, loaded;
     nvn_pipe_rec *old, *fresh;
     uint32_t nold, nfresh, capfresh;
@@ -83,6 +83,8 @@ void nvn_pipe_set_layouts(VkPipelineLayout graphics, VkPipelineLayout compute)
     P.layout = graphics;
     P.clayout = compute;
 }
+
+void nvn_pipe_set_mesh_layout(VkPipelineLayout mesh) { P.mlayout = mesh; }
 
 bool nvn_pipe_uses_libraries(void) { return P.gpl; }
 
@@ -255,15 +257,19 @@ void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k)
     VK(vkCmdSetRasterizerDiscardEnable)(cb, k->rasterizer_discard);
 }
 
-static const VkShaderStageFlagBits stage_bits[5] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                     VK_SHADER_STAGE_GEOMETRY_BIT,
-                                                     VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
-                                                     VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT };
+static const VkShaderStageFlagBits stage_bits[NVN_STAGES] = { VK_SHADER_STAGE_VERTEX_BIT,
+                                                              VK_SHADER_STAGE_FRAGMENT_BIT,
+                                                              VK_SHADER_STAGE_GEOMETRY_BIT,
+                                                              VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
+                                                              VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                                                              0,
+                                                              VK_SHADER_STAGE_TASK_BIT_EXT,
+                                                              VK_SHADER_STAGE_MESH_BIT_EXT };
 
 /** @brief The create infos that several libraries and the monolithic pipeline share. */
 typedef struct state {
-    VkPipelineShaderStageCreateInfo stages[5];
-    VkSpecializationInfo si[5];
+    VkPipelineShaderStageCreateInfo stages[NVN_STAGES];
+    VkSpecializationInfo si[NVN_STAGES];
     uint32_t ns;
     VkPipelineVertexInputStateCreateInfo vi;
     VkPipelineInputAssemblyStateCreateInfo ia;
@@ -306,8 +312,8 @@ typedef struct state {
 static void fill_state(state *s, const nvn_pipe_key *k)
 {
     s->ns = 0;
-    for (uint32_t i = 0; i < 5; i++)
-        if (k->mods[i]) {
+    for (uint32_t i = 0; i < NVN_STAGES; i++)
+        if (k->mods[i] && stage_bits[i]) {
             s->si[i] = (VkSpecializationInfo){ k->nspec[i], k->spec_map[i], 4u * k->nspec[i], k->spec[i] };
             s->stages[s->ns++] = (VkPipelineShaderStageCreateInfo){
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -530,8 +536,8 @@ static VkPipeline monolithic(const nvn_pipe_key *k)
                                         .pNext = &s.ri,
                                         .stageCount = s.ns,
                                         .pStages = s.stages,
-                                        .pVertexInputState = &s.vi,
-                                        .pInputAssemblyState = &s.ia,
+                                        .pVertexInputState = k->mesh_mode == 1 ? NULL : &s.vi,
+                                        .pInputAssemblyState = k->mesh_mode == 1 ? NULL : &s.ia,
                                         .pTessellationState = k->mods[3] ? &s.ts : NULL,
                                         .pViewportState = &s.vp,
                                         .pRasterizationState = &s.rs,
@@ -539,9 +545,9 @@ static VkPipeline monolithic(const nvn_pipe_key *k)
                                         .pDepthStencilState = &s.ds,
                                         .pColorBlendState = &s.cb,
                                         .pDynamicState = &s.dy,
-                                        .layout = P.layout };
+                                        .layout = k->mesh_mode == 2 ? P.mlayout : P.layout };
     VkPipeline p = NULL;
-    if (create_graphics(&ci, "pipeline", &p) != VK_SUCCESS)
+    if (create_graphics(&ci, k->mesh_mode ? "mesh pipeline" : "pipeline", &p) != VK_SUCCESS)
         return NULL;
     return p;
 }
@@ -555,7 +561,7 @@ static void maybe_save(void)
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
 {
     maybe_save();
-    if (!P.gpl) {
+    if (!P.gpl || k->mesh_mode) {
         bool mine;
         entry *e = claim(&P.full, k, sizeof *k, &mine);
         if (!e || !mine)
@@ -594,7 +600,9 @@ VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
     return p;
 }
 
-VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
+/** @brief The compute pipeline of m with n specialization constants in layout, kept in t. */
+static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m, uint32_t n,
+                             const VkSpecializationMapEntry *map, const uint32_t *vals)
 {
     maybe_save();
     stage_key sk;
@@ -604,7 +612,7 @@ VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecialization
     memcpy(sk.map, map, n * sizeof sk.map[0]);
     memcpy(sk.val, vals, n * sizeof sk.val[0]);
     bool mine;
-    entry *e = claim(&P.comp, &sk, sizeof sk, &mine);
+    entry *e = claim(t, &sk, sizeof sk, &mine);
     if (!e || !mine)
         return e ? e->p : NULL;
     VkSpecializationInfo si = { n, map, 4u * n, vals };
@@ -614,7 +622,7 @@ VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecialization
                                                   .module = m,
                                                   .pName = "main",
                                                   .pSpecializationInfo = &si },
-                                       .layout = P.clayout };
+                                       .layout = layout };
     bool probe = P.warmed && P.cache_ctl;
     uint64_t t0 = rl_clock_ns();
     if (probe)
@@ -646,6 +654,16 @@ VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecialization
         p = NULL;
     finish(e, p);
     return p;
+}
+
+VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
+{
+    return compute_in(&P.comp, P.clayout, m, n, map, vals);
+}
+
+VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
+{
+    return compute_in(&P.mcomp, P.mlayout, m, n, map, vals);
 }
 
 /** @brief Adds rec to the records of this launch unless one with the same bytes is there; true when it was new. */

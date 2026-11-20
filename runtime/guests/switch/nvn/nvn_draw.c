@@ -46,6 +46,27 @@
 /** @brief Storage buffer entries of the table in c[24]: each is {GPU address, u32 size, u32 0}, 16 bytes. */
 #define STORAGE_TABLE_ENTRIES 5u
 #define MAX_SPECS NVN_MAX_SPECS
+/** @brief Byte offset in driver bank c[0] of the first task of a mesh draw (the translator's MESH_FIRST_TASK_OFFSET). */
+#define MESH_FIRST_TASK_OFFSET 0x1f4u
+/** @brief The byte of a GLSLC control section that names the program's stage (NVNshaderStage). */
+#define GLSLC_STAGE_BYTE 0x56u
+/** @brief Words of the mesh buffer's header and the offsets in it the translator's passes read and write (H_*). */
+#define MESH_HEADER_WORDS 32u
+#define MESH_H_TASKS 0u
+#define MESH_H_MESHES 1u
+#define MESH_H_OVERFLOW 3u
+#define MESH_H_DISPATCH 4u
+#define MESH_H_DRAW 8u
+#define MESH_H_CAP 12u
+#define MESH_H_TASK_RECS 13u
+#define MESH_H_TASK_SCAN 14u
+#define MESH_H_MESH_RECS 15u
+#define MESH_H_INDEXES 16u
+#define MESH_H_DRAW_INDEXED 17u
+/** @brief Bytes of the mesh buffer, and the draws of a batch whose overflow flag is kept. */
+#define MESH_BUFFER_BYTES (128ull << 20)
+#define MESH_STATUS_SLOTS 4096u
+#define MESH_DISPATCH_X 65535u
 /** @brief The graphics stages that read the fixed-state push constants: the point size and the alpha reference. */
 #define FIXED_STAGES (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
 /** @brief The fixed-state push constant block (the translator's: point size, then alpha reference). */
@@ -59,13 +80,24 @@ typedef nvn_pipe_key pipe_key;
 
 static struct {
     VkDescriptorSetLayout set_layout[3], cset_layout[3];
-    VkPipelineLayout layout, clayout;
+    VkPipelineLayout layout, clayout, mlayout;
+    /** @brief The compute back end of mesh draws: descriptor set layouts, the buffer all its passes share and its set. */
+    VkDescriptorSetLayout mset_layout[4];
+    VkBuffer mbuf;
+    VkDeviceMemory mmem;
+    VkDescriptorPool mpool;
+    VkDescriptorSet mset;
+    /** @brief The overflow word of each draw's mesh buffer in the batch being recorded, copied out for the host. */
+    staging mstatus;
+    uint32_t mstatus_n;
+    bool moverflow;
+    bool mready;
     VkDescriptorPool pool;
     VkBuffer zero;
     bool ready;
 } d;
 
-static module *module_of(replay *r, uint64_t code)
+static module *module_of(replay *r, uint64_t code, int stage)
 {
     char key[65];
     uint64_t len;
@@ -74,7 +106,7 @@ static module *module_of(replay *r, uint64_t code)
         return NULL;
     }
     char why[200];
-    module *m = nvn_module_get(key, nvn_shader_stage(r->mem, code), why, sizeof why);
+    module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m) {
         nvn_shader_note(r->mem, code, key);
         nvn_vk_stop(r,
@@ -85,28 +117,44 @@ static module *module_of(replay *r, uint64_t code)
     return m;
 }
 
+/** @brief The helper module of kind ("scan" or "vertex") of the compute back end for mesh module mesh. */
+static module *module_helper(replay *r, const char *kind, const module *mesh, int stage)
+{
+    char key[65], why[200];
+    nvn_shader_helper_key(kind, mesh->key, key);
+    module *m = nvn_module_get(key, stage, why, sizeof why);
+    if (!m)
+        nvn_vk_stop(r, "the %s helper of mesh program %s: %s", kind, mesh->key, why);
+    return m;
+}
+
 static bool layouts(void)
 {
     if (d.ready)
         return true;
-    VkDescriptorSetLayoutBinding ub[USER_BINDINGS * 5], db[DRIVER_BINDINGS * 5];
-    static const VkShaderStageFlags stage_bits[5] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                      VK_SHADER_STAGE_GEOMETRY_BIT,
-                                                      VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
-                                                      VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT };
-    for (uint32_t s = 0; s < 5; s++) {
+    VkDescriptorSetLayoutBinding ub[USER_BINDINGS * NVN_STAGES], db[DRIVER_BINDINGS * NVN_STAGES];
+    static const VkShaderStageFlags stage_bits[NVN_STAGES] = { VK_SHADER_STAGE_VERTEX_BIT,
+                                                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                                                               VK_SHADER_STAGE_GEOMETRY_BIT,
+                                                               VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
+                                                               VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                                                               0,
+                                                               VK_SHADER_STAGE_TASK_BIT_EXT,
+                                                               VK_SHADER_STAGE_MESH_BIT_EXT };
+    uint32_t nu = 0, nd = 0;
+    for (uint32_t s = 0; s < NVN_STAGES; s++) {
+        if (!stage_bits[s] || (s >= NVN_STAGE_TASK && !g.mesh_shader))
+            continue;
         for (uint32_t b = 0; b < USER_BINDINGS; b++)
-            ub[s * USER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * s + b,
-                                                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                                                                         stage_bits[s], NULL };
+            ub[nu++] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * s + b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                                                       stage_bits[s], NULL };
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++)
-            db[s * DRIVER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * s + b,
-                                                                           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                                                                           stage_bits[s], NULL };
+            db[nd++] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * s + b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                                                       stage_bits[s], NULL };
     }
     VkDescriptorSetLayoutCreateInfo li[2] = {
-        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = USER_BINDINGS * 5, .pBindings = ub },
-        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = DRIVER_BINDINGS * 5, .pBindings = db },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nu, .pBindings = ub },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nd, .pBindings = db },
     };
     for (int i = 0; i < 2; i++)
         if (VK(vkCreateDescriptorSetLayout)(g.dev, &li[i], NULL, &d.set_layout[i]) != VK_SUCCESS)
@@ -133,8 +181,99 @@ static bool layouts(void)
     return true;
 }
 
+/**
+ * @brief The layouts and buffers of the compute back end of mesh draws: sets 0 and 1 hold the constant banks of the
+ * fragment program (stage 1) and of the task and mesh programs (stages 6 and 7, visible to compute), set 2 the
+ * textures, set 3 the mesh buffer (binding 2) the passes and the draw's vertex program share.
+ */
+static bool mesh_layouts(void)
+{
+    if (d.mready)
+        return true;
+    if (!layouts())
+        return false;
+    VkDescriptorSetLayoutBinding ub[USER_BINDINGS * 3], db[DRIVER_BINDINGS * 3];
+    static const uint32_t groups[3] = { 1, NVN_STAGE_TASK, NVN_STAGE_MESH };
+    static const VkShaderStageFlags bits[3] = { VK_SHADER_STAGE_FRAGMENT_BIT, VK_SHADER_STAGE_COMPUTE_BIT,
+                                                VK_SHADER_STAGE_COMPUTE_BIT };
+    for (uint32_t i = 0; i < 3; i++) {
+        for (uint32_t b = 0; b < USER_BINDINGS; b++)
+            ub[i * USER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * groups[i] + b,
+                                                                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, bits[i], NULL };
+        for (uint32_t b = 0; b < DRIVER_BINDINGS; b++)
+            db[i * DRIVER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * groups[i] + b,
+                                                                          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, bits[i], NULL };
+    }
+    VkDescriptorSetLayoutBinding mb = { NVN_MESH_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                                        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, NULL };
+    VkDescriptorSetLayoutCreateInfo li[3] = {
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = USER_BINDINGS * 3, .pBindings = ub },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = DRIVER_BINDINGS * 3, .pBindings = db },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &mb },
+    };
+    if (VK(vkCreateDescriptorSetLayout)(g.dev, &li[0], NULL, &d.mset_layout[0]) != VK_SUCCESS ||
+        VK(vkCreateDescriptorSetLayout)(g.dev, &li[1], NULL, &d.mset_layout[1]) != VK_SUCCESS ||
+        VK(vkCreateDescriptorSetLayout)(g.dev, &li[2], NULL, &d.mset_layout[3]) != VK_SUCCESS)
+        return false;
+    d.mset_layout[2] = d.set_layout[2];
+    VkPushConstantRange fixed = { FIXED_STAGES, 0, sizeof(fixed_push) };
+    VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                       .setLayoutCount = 4,
+                                       .pSetLayouts = d.mset_layout,
+                                       .pushConstantRangeCount = 1,
+                                       .pPushConstantRanges = &fixed };
+    if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &d.mlayout) != VK_SUCCESS)
+        return false;
+    nvn_pipe_set_mesh_layout(d.mlayout);
+    uint64_t bytes = MESH_BUFFER_BYTES;
+    if (bytes > g.max_storage_range)
+        bytes = g.max_storage_range & ~3u;
+    if (bytes > (uint64_t)g.max_index_value * 4)
+        bytes = (uint64_t)g.max_index_value * 4;
+    if (!nvn_vk_gpu_buffer(&d.mbuf, &d.mmem, bytes) || !nvn_vk_staging_new(&d.mstatus, 16ull * MESH_STATUS_SLOTS))
+        return false;
+    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
+    VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                       .maxSets = 1,
+                                       .poolSizeCount = 1,
+                                       .pPoolSizes = &ps };
+    VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                       .descriptorSetCount = 1,
+                                       .pSetLayouts = &d.mset_layout[3] };
+    if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.mpool) != VK_SUCCESS)
+        return false;
+    ai.descriptorPool = d.mpool;
+    if (VK(vkAllocateDescriptorSets)(g.dev, &ai, &d.mset) != VK_SUCCESS)
+        return false;
+    VkDescriptorBufferInfo bi = { d.mbuf, 0, bytes };
+    VkWriteDescriptorSet wr = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                .dstSet = d.mset,
+                                .dstBinding = NVN_MESH_BUFFER_BINDING,
+                                .descriptorCount = 1,
+                                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                .pBufferInfo = &bi };
+    VK(vkUpdateDescriptorSets)(g.dev, 1, &wr, 0, NULL);
+    d.mready = true;
+    return true;
+}
+
+/** @brief Reads what the draws of the batch that just finished left in their status words: a mesh buffer that overflowed. */
+static void mesh_flushed(void)
+{
+    const uint32_t *w = (const uint32_t *)(const void *)d.mstatus.map;
+    for (uint32_t i = 0; w && i < d.mstatus_n; i++)
+        if (w[4 * i + 2]) {
+            rl_log(RL_LOG_ERROR, "nvn", "a mesh draw made %u mesh workgroups, more than the %llu MiB mesh buffer holds",
+                   w[4 * i], (unsigned long long)(MESH_BUFFER_BYTES >> 20));
+            d.moverflow = true;
+        }
+    d.mstatus_n = 0;
+}
+
 void nvn_draw_reset(void)
 {
+    if (d.mready)
+        mesh_flushed();
     if (d.pool)
         VK(vkResetDescriptorPool)(g.dev, d.pool, 0);
 }
@@ -599,14 +738,14 @@ static int nvn_ubo_bind(replay *r, uint32_t s, uint32_t b, uint64_t addr, uint64
  * @brief The driver bank c[0] of graphics stage s: each storage buffer slot k of the stage is 16 bytes
  * {GPU address, u32 size} at 16 * (first[s] + k), where first is the driver's per-stage table (sdk 0xbb0570,
  * read by nvnCommandBufferBindStorageBuffer, sdk 0x67be50: vertex 0x11, fragment 0x51, geometry 0x41, tessellation
- * control 0x21, tessellation evaluation 0x31); vertex programs read their slots at 0x110 and up. Every other word
+ * control 0x21, tessellation evaluation 0x31, and on NVN2 task 0x67 and mesh 0x77); vertex programs read their slots at 0x110 and up. Every other word
  * is 0 (the layer does not know the driver's other c[0] fields yet).
  */
 void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYTES])
 {
-    static const uint32_t first[5] = { 0x11, 0x51, 0x41, 0x21, 0x31 };
+    static const uint32_t first[NVN_STAGES] = { 0x11, 0x51, 0x41, 0x21, 0x31, 0, 0x67, 0x77 };
     memset(c0, 0, NVN_GFX_C0_BYTES);
-    for (uint32_t k = 0; k < NVN_STORAGE_SLOTS && s < 5; k++) {
+    for (uint32_t k = 0; k < NVN_STORAGE_SLOTS && s < NVN_STAGES && first[s]; k++) {
         uint32_t at = 16 * (first[s] + k), size = (uint32_t)st->gstorage[s][k].size;
         if (at + 16 > NVN_GFX_C0_BYTES)
             break;
@@ -621,23 +760,24 @@ void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYT
  * A bank that does not fit the upload arena submits the batch, which resets the pool and frees the sets; the sets
  * are then not written, and nvn_vk_stage runs the stage again with new ones.
  */
-static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[3])
+static int write_constants(replay *r, module *const *mods, uint32_t first_task, const VkDescriptorSetLayout *layouts_in,
+                           VkDescriptorSet sets[3])
 {
     uint64_t flushes;
     VkDescriptorSetAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                        .descriptorPool = d.pool,
                                        .descriptorSetCount = 2,
-                                       .pSetLayouts = d.set_layout };
+                                       .pSetLayouts = layouts_in };
     if (VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS) {
         if (!nvn_vk_flush(r) || VK(vkAllocateDescriptorSets)(g.dev, &ai, sets) != VK_SUCCESS)
             return nvn_vk_stop(r, "cannot allocate descriptor sets");
     }
     flushes = g.flushes;
     sets[2] = nvn_texset();
-    VkDescriptorBufferInfo bi[(USER_BINDINGS + DRIVER_BINDINGS) * 5];
-    VkWriteDescriptorSet wr[(USER_BINDINGS + DRIVER_BINDINGS) * 5];
+    VkDescriptorBufferInfo bi[(USER_BINDINGS + DRIVER_BINDINGS) * NVN_STAGES];
+    VkWriteDescriptorSet wr[(USER_BINDINGS + DRIVER_BINDINGS) * NVN_STAGES];
     uint32_t n = 0;
-    for (uint32_t s = 0; s < 5; s++) {
+    for (uint32_t s = 0; s < NVN_STAGES; s++) {
         if (!mods[s])
             continue;
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++) {
@@ -652,6 +792,8 @@ static int write_constants(replay *r, module *const *mods, VkDescriptorSet sets[
             } else if (b == 0) {
                 uint8_t c0[NVN_GFX_C0_BYTES];
                 nvn_graphics_table(r->st, s, c0);
+                if (s >= NVN_STAGE_TASK)
+                    memcpy(c0 + MESH_FIRST_TASK_OFFSET, &first_task, 4);
                 rc = bank_of(r, c0, sizeof c0, &bi[n]);
             } else {
                 rc = nvn_vk_stop(r, "program %s reads driver constant bank c[%u], which the layer does not fill yet",
@@ -945,7 +1087,7 @@ static int stage_draw(replay *r, void *arg)
                 return nvn_vk_stop(r, "the upload arena is full");
         }
     }
-    return write_constants(r, dd->mods, dd->sets);
+    return write_constants(r, dd->mods, 0, d.set_layout, dd->sets);
 }
 
 /**
@@ -972,6 +1114,44 @@ int nvn_draw_render_enabled(replay *r, bool *run)
     return RL_OK;
 }
 
+/**
+ * @brief Finds the translation of the program bound to stage s (none leaves mods[s] NULL), checks what it reads,
+ * binds its textures and notes its module and specialization constants in k.
+ */
+static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
+{
+    nvn_gfx *st = r->st;
+    if (!st->code[s])
+        return RL_OK;
+    if (!(mods[s] = module_of(r, st->code[s], (int)s)))
+        return RL_PENDING;
+    if (mods[s]->user >> USER_BINDINGS)
+        return nvn_vk_stop(r, "program %s reads constant bank c[%d], past the %u user banks the layer binds", mods[s]->key,
+                           3 + __builtin_ctz(mods[s]->user >> USER_BINDINGS) + (int)USER_BINDINGS, USER_BINDINGS);
+    if (mods[s]->other_sets)
+        return nvn_vk_stop(r, "program %s uses a guest memory set, which draws do not bind yet", mods[s]->key);
+    bool bound = false;
+    for (uint32_t i = 0; i < mods[s]->nrecs; i++)
+        bound |= mods[s]->recs[i].kind == NVN_IFACE_TEXTURE;
+    if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound)
+        return nvn_vk_stop(r, "program %s samples textures only through register handles", mods[s]->key);
+    memcpy(st->bank2_host[s], st->bank2[s], NVN_BANK2_BYTES);
+    int trc = bind_textures(r, mods[s], 2, st->bank2_host[s], NVN_BANK2_BYTES, &k->nspec[s], k->spec_map[s], k->spec[s],
+                            NVN_BANK2_IMAGES, NVN_BANK2_IMAGES + 8u * NVN_IMAGE_SLOTS);
+    if (trc != RL_OK)
+        return trc;
+    if (mods[s]->driver & 1u << 2)
+        trc = nvn_separate_handles(r, s);
+    if (trc != RL_OK)
+        return trc;
+    trc = bind_user_textures(r, mods[s], s, &k->nspec[s], k->spec_map[s], k->spec[s]);
+    if (trc != RL_OK)
+        return trc;
+    nvn_spec_sort(&k->nspec[s], k->spec_map[s], k->spec[s]);
+    k->mods[s] = mods[s]->m;
+    return RL_OK;
+}
+
 /** @brief A draw: mode, then indexed (index type, index address, base vertex) or not (first vertex), and count. */
 static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t iaddr, int32_t base, uint32_t first,
                 uint32_t count)
@@ -994,37 +1174,11 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if (!topology(mode, &topo))
         return nvn_vk_stop(r, "draw primitive %u", mode);
     k.topology = topo;
-    module *mods[5] = { NULL };
+    module *mods[NVN_STAGES] = { NULL };
     for (uint32_t s = 0; s < 5; s++) {
-        if (!st->code[s])
-            continue;
-        if (!(mods[s] = module_of(r, st->code[s])))
-            return RL_PENDING;
-        if (mods[s]->user >> USER_BINDINGS)
-            return nvn_vk_stop(r, "program %s reads constant bank c[%d], past the %u user banks the layer binds", mods[s]->key,
-                               3 + __builtin_ctz(mods[s]->user >> USER_BINDINGS) + (int)USER_BINDINGS, USER_BINDINGS);
-        if (mods[s]->other_sets)
-            return nvn_vk_stop(r, "program %s uses a guest memory set, which draws do not bind yet",
-                               mods[s]->key);
-        bool bound = false;
-        for (uint32_t i = 0; i < mods[s]->nrecs; i++)
-            bound |= mods[s]->recs[i].kind == NVN_IFACE_TEXTURE;
-        if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound)
-            return nvn_vk_stop(r, "program %s samples textures only through register handles", mods[s]->key);
-        memcpy(st->bank2_host[s], st->bank2[s], NVN_BANK2_BYTES);
-        int trc = bind_textures(r, mods[s], 2, st->bank2_host[s], NVN_BANK2_BYTES, &k.nspec[s], k.spec_map[s], k.spec[s],
-                           NVN_BANK2_IMAGES, NVN_BANK2_IMAGES + 8u * NVN_IMAGE_SLOTS);
-        if (trc != RL_OK)
-            return trc;
-        if (mods[s]->driver & 1u << 2)
-            trc = nvn_separate_handles(r, s);
-        if (trc != RL_OK)
-            return trc;
-        trc = bind_user_textures(r, mods[s], s, &k.nspec[s], k.spec_map[s], k.spec[s]);
-        if (trc != RL_OK)
-            return trc;
-        nvn_spec_sort(&k.nspec[s], k.spec_map[s], k.spec[s]);
-        k.mods[s] = mods[s]->m;
+        int prc = prepare_stage(r, &k, mods, s);
+        if (prc != RL_OK)
+            return prc;
     }
     int rc;
     if (mods[1] && mods[1]->alpha_test) {
@@ -1102,6 +1256,300 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     return RL_OK;
 }
 
+static VkPipeline mesh_pass_pipeline(replay *r, const module *m, uint32_t n, const VkSpecializationMapEntry *map,
+                                     const uint32_t *vals);
+
+/** @brief What a mesh draw puts into the batch being recorded. */
+typedef struct mesh_data {
+    module *const *mods;
+    uint32_t first;
+    const VkDescriptorSetLayout *layouts;
+    VkDescriptorSet sets[3];
+} mesh_data;
+
+/** @brief Puts a mesh draw's constant banks into the batch being recorded (an nvn_vk_stage step). */
+static int stage_mesh(replay *r, void *arg)
+{
+    mesh_data *dd = arg;
+    return write_constants(r, dd->mods, dd->first, dd->layouts, dd->sets);
+}
+
+/** @brief The alpha test function constant of the fragment program, in k (as a draw makes it). */
+static int mesh_alpha(replay *r, pipe_key *k, module *frag)
+{
+    nvn_gfx *st = r->st;
+    if (!frag || !frag->alpha_test)
+        return RL_OK;
+    uint64_t func = 8;
+    int rc;
+    if (st->have_color_state &&
+        (rc = nvn_vk_getter(r, "nvnColorStateGetAlphaTest", st->color_state, 4, NULL, 0, 0, NULL, &func)) != RL_OK)
+        return rc;
+    if ((uint32_t)func < 1 || (uint32_t)func > 8)
+        return nvn_vk_stop(r, "alpha test function %u", (uint32_t)func);
+    if (k->nspec[1] == MAX_SPECS)
+        return nvn_vk_stop(r, "program %s has no room for its alpha test constant", frag->key);
+    k->spec_map[1][k->nspec[1]] = (VkSpecializationMapEntry){ ALPHA_FUNC_SPEC, 4 * k->nspec[1], 4 };
+    k->spec[1][k->nspec[1]++] = (uint32_t)func;
+    return RL_OK;
+}
+
+/** @brief The draw of the native back end: vkCmdDrawMeshTasksEXT over the task workgroups. */
+static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_t first, uint32_t count)
+{
+    nvn_gfx *st = r->st;
+    int rc;
+    k->mesh_mode = 1;
+    if ((rc = fixed_state(r, k)) != RL_OK)
+        return rc;
+    nvn_core_leave();
+    VkPipeline p = nvn_pipe_graphics(k);
+    if (!p)
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this mesh draw");
+    mesh_data dd = { .mods = mods, .first = first, .layouts = d.set_layout };
+    if ((rc = nvn_vk_stage(r, stage_mesh, &dd, "a mesh draw")) != RL_OK)
+        return rc;
+    VkRect2D area;
+    if ((rc = nvn_counters_prepare(r)) != RL_OK)
+        return rc;
+    if (!nvn_vk_begin_rendering(r, &area))
+        return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
+                           st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
+    uint32_t counted = nvn_counters_begin(st, false, false);
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    nvn_pipe_set_dynamic(g.cb, k);
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
+    fixed_push fp = { st->point_size, st->alpha_ref };
+    VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
+    dynamic_state(r, area);
+    g.draw_mesh_tasks(g.cb, count, 1, 1);
+    nvn_counters_end(counted);
+    VK(vkCmdEndRendering)(g.cb);
+    nvn_vk_barrier(g.cb);
+    return RL_OK;
+}
+
+/** @brief Guest workgroups of slots per compute workgroup that cover n of them, as an x and y of a dispatch (x at most MESH_DISPATCH_X). */
+static void dispatch_dims(uint32_t n, uint32_t slots, uint32_t *x, uint32_t *y)
+{
+    uint32_t groups = (uint32_t)(((uint64_t)n + (slots ? slots : 1) - 1) / (slots ? slots : 1));
+    *x = groups < MESH_DISPATCH_X ? (groups ? groups : 1) : MESH_DISPATCH_X;
+    *y = groups <= MESH_DISPATCH_X ? 1 : (groups + MESH_DISPATCH_X - 1) / MESH_DISPATCH_X;
+}
+
+/**
+ * @brief The draw of the compute back end (the translator's mesh_fallback): the task program over count workgroups,
+ * the scan of its mesh counts, the mesh program by indirect dispatch, then an indirect draw of the records with the
+ * helper vertex program, all in the buffer every pass shares and in submission order. mi and ti are the mesh and
+ * task programs' pipelines (ti NULL without a task program).
+ */
+static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const nvn_mesh_info *mi,
+                             const nvn_mesh_info *ti, uint32_t first, uint32_t count)
+{
+    nvn_gfx *st = r->st;
+    int rc;
+    if (!mesh_layouts())
+        return nvn_vk_stop(r, "cannot make the mesh pass layouts");
+    if (d.moverflow)
+        return nvn_vk_stop(r, "an earlier mesh draw overflowed the mesh buffer");
+    module *mesh = mods[NVN_STAGE_MESH], *task = mods[NVN_STAGE_TASK];
+    module *scan_m = module_helper(r, "scan", mesh, NVN_STAGE_MESH), *vert = module_helper(r, "vertex", mesh, 0);
+    if (!scan_m || !vert)
+        return RL_PENDING;
+    if (vert->other_sets || scan_m->other_sets)
+        return nvn_vk_stop(r, "a helper of mesh program %s uses a set the layer does not bind", mesh->key);
+    for (uint32_t s = NVN_STAGE_TASK; s <= NVN_STAGE_MESH; s++)
+        for (uint32_t i = 0; mods[s] && i < NVN_STORAGE_SLOTS; i++)
+            if (st->gstorage[s][i].size && !nvn_gpu_mapped(st->gstorage[s][i].addr, (uint32_t)st->gstorage[s][i].size))
+                return nvn_vk_stop(r, "program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool",
+                                   mods[s]->key, i, (unsigned long long)st->gstorage[s][i].addr,
+                                   (uint32_t)st->gstorage[s][i].size);
+    uint64_t total = d.mstatus.size ? MESH_BUFFER_BYTES : 0;
+    if (total > g.max_storage_range)
+        total = g.max_storage_range & ~3u;
+    if (total > (uint64_t)g.max_index_value * 4)
+        total = (uint64_t)g.max_index_value * 4;
+    uint64_t words = total / 4, pw = ti ? ti->payload_words : 0, n = ti ? count : 0;
+    uint64_t scan_at = MESH_HEADER_WORDS + n * pw, mesh_at = scan_at + (ti ? n + 1 : 0);
+    uint64_t per = (uint64_t)mi->record_words + (mi->indexed ? mi->index_words : 0);
+    if (!per || mesh_at >= words || (words - mesh_at) / per < 1)
+        return nvn_vk_stop(r, "a mesh draw of %u tasks needs more than the %llu MiB mesh buffer", count,
+                           (unsigned long long)(MESH_BUFFER_BYTES >> 20));
+    uint64_t cap = (words - mesh_at) / per;
+    uint64_t verts = (uint64_t)mi->max_vertices + 1;
+    if (cap * verts > (uint64_t)g.max_index_value)
+        cap = g.max_index_value / verts;
+    uint32_t hdr[MESH_HEADER_WORDS] = { 0 };
+    hdr[MESH_H_TASKS] = (uint32_t)n;
+    hdr[MESH_H_CAP] = (uint32_t)cap;
+    hdr[MESH_H_TASK_RECS] = MESH_HEADER_WORDS;
+    hdr[MESH_H_TASK_SCAN] = (uint32_t)scan_at;
+    hdr[MESH_H_MESH_RECS] = (uint32_t)mesh_at;
+    hdr[MESH_H_INDEXES] = (uint32_t)(mesh_at + cap * mi->record_words);
+    uint32_t mx, my;
+    dispatch_dims(count, mi->slots, &mx, &my);
+    if (!ti) {
+        hdr[MESH_H_MESHES] = count;
+        hdr[MESH_H_DISPATCH] = mx;
+        hdr[MESH_H_DISPATCH + 1] = my;
+        hdr[MESH_H_DISPATCH + 2] = 1;
+    }
+    pipe_key kg;
+    memset(&kg, 0, sizeof kg);
+    static const uint32_t list[4] = { 0, VK_PRIMITIVE_TOPOLOGY_POINT_LIST, VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+                                      VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    if (mi->topology < 1 || mi->topology > 3)
+        return nvn_vk_stop(r, "mesh program %s has output topology %u", mesh->key, mi->topology);
+    kg.topology = list[mi->topology];
+    kg.mods[0] = vert->m;
+    kg.nspec[1] = k->nspec[1];
+    memcpy(kg.spec_map[1], k->spec_map[1], sizeof kg.spec_map[1]);
+    memcpy(kg.spec[1], k->spec[1], sizeof kg.spec[1]);
+    if (mods[1] && !(kg.mods[1] = nvn_module_fragment_for(vert, mods[1])))
+        return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the helper vertex program writes",
+                           mods[1]->key);
+    kg.mesh_mode = 2;
+    if ((rc = fixed_state(r, &kg)) != RL_OK)
+        return rc;
+    kg.topology = list[mi->topology];
+    nvn_core_leave();
+    VkPipeline gp = nvn_pipe_graphics(&kg);
+    if (!gp)
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this mesh draw");
+    VkPipeline tp = NULL, sp, mp;
+    if (task && !(tp = mesh_pass_pipeline(r, task, k->nspec[NVN_STAGE_TASK], k->spec_map[NVN_STAGE_TASK],
+                                          k->spec[NVN_STAGE_TASK])))
+        return RL_PENDING;
+    if (!(sp = mesh_pass_pipeline(r, scan_m, 0, NULL, NULL)) ||
+        !(mp = mesh_pass_pipeline(r, mesh, k->nspec[NVN_STAGE_MESH], k->spec_map[NVN_STAGE_MESH],
+                                  k->spec[NVN_STAGE_MESH])))
+        return RL_PENDING;
+    mesh_data dd = { .mods = mods, .first = first, .layouts = d.mset_layout };
+    if ((rc = nvn_vk_stage(r, stage_mesh, &dd, "a mesh draw")) != RL_OK)
+        return rc;
+    if (d.mstatus_n == MESH_STATUS_SLOTS && !nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    VkRect2D area;
+    if ((rc = nvn_counters_prepare(r)) != RL_OK)
+        return rc;
+    if (!nvn_vk_begin(r))
+        return nvn_vk_stop(r, "cannot begin a command buffer");
+    VkDescriptorSet sets[4] = { dd.sets[0], dd.sets[1], dd.sets[2], d.mset };
+    VK(vkCmdUpdateBuffer)(g.cb, d.mbuf, 0, sizeof hdr, hdr);
+    nvn_vk_barrier(g.cb);
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.mlayout, 0, 4, sets, 0, NULL);
+    if (task) {
+        uint32_t tx, ty;
+        dispatch_dims((uint32_t)n, ti->slots, &tx, &ty);
+        VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, tp);
+        VK(vkCmdDispatch)(g.cb, tx, ty, 1);
+        nvn_vk_barrier(g.cb);
+        VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, sp);
+        VK(vkCmdDispatch)(g.cb, 1, 1, 1);
+        nvn_vk_barrier(g.cb);
+    }
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, mp);
+    VK(vkCmdDispatchIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DISPATCH);
+    nvn_vk_barrier(g.cb);
+    VkBufferCopy cp = { 4ull * MESH_H_MESHES, 16ull * d.mstatus_n, 12 };
+    VK(vkCmdCopyBuffer)(g.cb, d.mbuf, d.mstatus.buf, 1, &cp);
+    d.mstatus_n++;
+    nvn_vk_barrier(g.cb);
+    if (!nvn_vk_begin_rendering(r, &area))
+        return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
+                           st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
+    uint32_t counted = nvn_counters_begin(st, false, false);
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
+    nvn_pipe_set_dynamic(g.cb, &kg);
+    VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, 0, 4, sets, 0, NULL);
+    fixed_push fp = { st->point_size, st->alpha_ref };
+    VK(vkCmdPushConstants)(g.cb, d.mlayout, FIXED_STAGES, 0, sizeof fp, &fp);
+    dynamic_state(r, area);
+    if (mi->indexed) {
+        VK(vkCmdBindIndexBuffer)(g.cb, d.mbuf, 0, VK_INDEX_TYPE_UINT32);
+        VK(vkCmdDrawIndexedIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DRAW_INDEXED, 1, 20);
+    } else {
+        VK(vkCmdDrawIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DRAW, 1, 16);
+    }
+    nvn_counters_end(counted);
+    VK(vkCmdEndRendering)(g.cb);
+    nvn_vk_barrier(g.cb);
+    return RL_OK;
+}
+
+/**
+ * @brief One draw of count task workgroups (mesh workgroups without a task program) from workgroup first, on the
+ * programs bound to stages 6 and 7 and the fragment program: by VK_EXT_mesh_shader when the build translated them
+ * for it, else by compute passes and an indirect draw.
+ */
+static int draw_mesh(replay *r, uint32_t first, uint32_t count)
+{
+    nvn_gfx *st = r->st;
+    bool run;
+    int rc = nvn_draw_render_enabled(r, &run);
+    if (rc != RL_OK || !run || !count)
+        return rc;
+    memset(st->ubo_patched, 0, sizeof st->ubo_patched);
+    if (!layouts())
+        return nvn_vk_stop(r, "cannot make the pipeline layout");
+    if (!st->code[NVN_STAGE_MESH])
+        return nvn_vk_stop(r, "a mesh draw without a mesh program");
+    pipe_key k;
+    memset(&k, 0, sizeof k);
+    module *mods[NVN_STAGES] = { NULL };
+    static const uint32_t used[] = { NVN_STAGE_TASK, NVN_STAGE_MESH, 1 };
+    for (uint32_t i = 0; i < sizeof used / sizeof used[0]; i++)
+        if ((rc = prepare_stage(r, &k, mods, used[i])) != RL_OK)
+            return rc;
+    module *mesh = mods[NVN_STAGE_MESH], *task = mods[NVN_STAGE_TASK];
+    nvn_mesh_info mi, ti;
+    if (!nvn_mesh_info_of(mesh->recs, mesh->nrecs, &mi))
+        return nvn_vk_stop(r, "mesh program %s has no pipeline in the build's shader table", mesh->key);
+    if (task && (!nvn_mesh_info_of(task->recs, task->nrecs, &ti) || ti.native != mi.native))
+        return nvn_vk_stop(r, "task program %s and mesh program %s were not translated for one back end", task->key,
+                           mesh->key);
+    if ((rc = mesh_alpha(r, &k, mods[1])) != RL_OK)
+        return rc;
+    if (mi.native) {
+        if (!g.mesh_shader)
+            return nvn_vk_stop(r, "mesh program %s was translated for VK_EXT_mesh_shader, which the host device lacks",
+                               mesh->key);
+        if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(mesh, mods[1])))
+            return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the mesh program writes",
+                               mods[1]->key);
+        return draw_mesh_native(r, mods, &k, first, count);
+    }
+    return draw_mesh_compute(r, mods, &k, &mi, task ? &ti : NULL, first, count);
+}
+
+/**
+ * @brief The draws of an indirect mesh command: up to max records of stride bytes at the GPU address indirect, each
+ * {task count, first task} (NV_mesh_shader's VkDrawMeshTasksIndirectCommandNV), as many as the u32 at count_addr says
+ * when it is not 0. They are read now, after the host device finished what was recorded before the command, the way
+ * the GPU reads them when the draw reaches it.
+ */
+static int draw_mesh_indirect(replay *r, uint64_t indirect, uint64_t count_addr, uint32_t max, uint32_t stride)
+{
+    bool run;
+    int rc = nvn_draw_render_enabled(r, &run);
+    if (rc != RL_OK || !run)
+        return rc;
+    if (!nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    uint32_t n = max;
+    if (count_addr) {
+        uint32_t c = rl_ld32(r->mem + nvn_gpu_guest(count_addr), 0);
+        n = c < max ? c : max;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        const uint8_t *rec = r->mem + nvn_gpu_guest(indirect + (uint64_t)i * stride);
+        rc = draw_mesh(r, rl_ld32(rec, 4), rl_ld32(rec, 0));
+        if (rc != RL_OK)
+            return rc;
+    }
+    return RL_OK;
+}
+
 /** @brief The compute pipeline layout: set 0 the stage's user banks, set 1 its driver banks, set 2 the texture set. */
 static bool compute_layouts(void)
 {
@@ -1134,6 +1582,22 @@ static bool compute_layouts(void)
 }
 
 bool nvn_draw_layouts(void) { return layouts() && compute_layouts(); }
+
+/** @brief The compute pipeline of mesh pass m in the mesh pass layout, with n specialization constants in map and vals. */
+static VkPipeline mesh_pass_pipeline(replay *r, const module *m, uint32_t n, const VkSpecializationMapEntry *map,
+                                     const uint32_t *vals)
+{
+    VkSpecializationMapEntry sm[MAX_SPECS];
+    uint32_t sv[MAX_SPECS];
+    memcpy(sm, map, n * sizeof sm[0]);
+    memcpy(sv, vals, n * sizeof sv[0]);
+    nvn_spec_sort(&n, sm, sv);
+    nvn_core_leave();
+    VkPipeline p = nvn_pipe_mesh_compute(m->m, n, sm, sv);
+    if (!p)
+        nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s", m->key);
+    return p;
+}
 
 /** @brief What a dispatch puts into the batch being recorded. */
 typedef struct dispatch_data {
@@ -1270,7 +1734,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
         return nvn_vk_stop(r, "dispatch without a compute program");
     if (!ctl)
         return nvn_vk_stop(r, "the compute program at 0x%llx has no GLSLC control section", (unsigned long long)code);
-    module *m = module_of(r, code);
+    module *m = module_of(r, code, NVN_STAGE_COMPUTE);
     if (!m)
         return RL_PENDING;
     if (m->other_sets)
@@ -1285,7 +1749,7 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
                            "constants pushed in slots 0x%x",
                            m->key, nubo, nssbo, ntex, nimg, end, st->push_used[NVN_STAGE_COMPUTE]);
     for (uint32_t i = 0; i < nssbo; i++)
-        if (!nvn_gpu_mapped(st->storage[i].addr, (uint32_t)st->storage[i].size))
+        if ((uint32_t)st->storage[i].size && !nvn_gpu_mapped(st->storage[i].addr, (uint32_t)st->storage[i].size))
             return nvn_vk_stop(r, "compute program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool",
                                m->key, i, (unsigned long long)st->storage[i].addr, (uint32_t)st->storage[i].size);
     VkSpecializationMapEntry map[MAX_SPECS];
@@ -1320,9 +1784,24 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     return RL_OK;
 }
 
+/**
+ * @brief The stage of the program at code whose GLSLC control section is at ctl (0 for none): the stage byte of the
+ * section when it names the task or mesh stage (their SPH types are the vertex and tessellation evaluation ones, and
+ * only the section tells them apart), else the SPH's.
+ */
+static int stage_of(const replay *r, uint64_t code, uint64_t ctl)
+{
+    if (ctl && nvn_generation() != 1) {
+        uint8_t s = r->mem[ctl + GLSLC_STAGE_BYTE];
+        if (s == NVN_STAGE_TASK || s == NVN_STAGE_MESH)
+            return s;
+    }
+    return nvn_shader_stage(r->mem, code);
+}
+
 static int bind_program(replay *r, const nvn_cmd *e)
 {
-    uint32_t n = 0, mask = (uint32_t)e->x[2] & 0x3fu;
+    uint32_t n = 0, mask = (uint32_t)e->x[2] & 0xffu;
     const nvn_consts *consts = NULL;
     const uint64_t *control = NULL;
     const uint64_t *code = e->x[1] ? nvn_program_code(e->x[1], &n, &consts, &control) : NULL;
@@ -1335,7 +1814,7 @@ static int bind_program(replay *r, const nvn_cmd *e)
         r->st->consts[s] = (nvn_consts){ 0, 0 };
         r->st->control[s] = 0;
         for (uint32_t i = 0; i < n; i++)
-            if (nvn_shader_stage(r->mem, code[i]) == (int)s) {
+            if (stage_of(r, code[i], control ? control[i] : 0) == (int)s) {
                 r->st->code[s] = code[i];
                 r->st->consts[s] = consts[i];
                 r->st->control[s] = control[i];
@@ -1766,6 +2245,21 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return nvn_counters_report(r, (uint32_t)e->x[1], e->x[2]);
     case NVN_CMD_RESET_COUNTER:
         return nvn_counters_reset(r, (uint32_t)e->x[1]);
+    case NVN_CMD_DRAW_MESH_TASKS:
+        return draw_mesh(r, (uint32_t)e->x[1], (uint32_t)e->x[2]);
+    case NVN_CMD_DRAW_MESH_TASKS_INDIRECT:
+        return draw_mesh_indirect(r, e->x[1], 0, 1, 8);
+    case NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT:
+        return draw_mesh_indirect(r, e->x[1], 0, (uint32_t)e->x[2], (uint32_t)e->x[3]);
+    case NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT_COUNT:
+        return draw_mesh_indirect(r, e->x[1], e->x[2], (uint32_t)e->x[3], (uint32_t)e->x[4]);
+    case NVN_CMD_DRAW_MESH_TASKS_3D:
+    case NVN_CMD_DRAW_MESH_TASKS_3D_INDIRECT:
+    case NVN_CMD_MULTI_DRAW_MESH_TASKS_3D_INDIRECT:
+    case NVN_CMD_MULTI_DRAW_MESH_TASKS_3D_INDIRECT_COUNT:
+        return nvn_vk_stop(r, "%s(0x%llx, 0x%llx, 0x%llx, 0x%llx, 0x%llx)", nvn_cmd_name(e->op),
+                           (unsigned long long)e->x[1], (unsigned long long)e->x[2], (unsigned long long)e->x[3],
+                           (unsigned long long)e->x[4], (unsigned long long)e->x[5]);
     case NVN_CMD_DRAW_ARRAYS:
         st->inst_base = 0;
         st->inst_count = 1;

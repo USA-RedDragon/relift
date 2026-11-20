@@ -20,7 +20,9 @@
 
 /** @brief Everything a graphics pipeline is made from. All of it is zero before a draw fills it in. */
 typedef struct nvn_pipe_key {
-    VkShaderModule mods[5];
+    VkShaderModule mods[NVN_STAGES];
+    /** @brief 1 for a native task and mesh pipeline (no vertex input), 2 for the compute back end's draw of a mesh program (the mesh pass layout). */
+    uint32_t mesh_mode;
     uint32_t topology;
     uint32_t nattr, nbind;
     VkVertexInputAttributeDescription attr[NVN_VERTEX_ATTRIBS];
@@ -42,9 +44,9 @@ typedef struct nvn_pipe_key {
     /** @brief The sample mask's bit for the one sample, the conservative dilate in quarter pixels, the first viewport's swizzle and the provoking vertex. */
     uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
     /** @brief Specialization constants of each stage: id and value, sorted by id (nvn_spec_sort). */
-    uint32_t nspec[5];
-    VkSpecializationMapEntry spec_map[5][NVN_MAX_SPECS];
-    uint32_t spec[5][NVN_MAX_SPECS];
+    uint32_t nspec[NVN_STAGES];
+    VkSpecializationMapEntry spec_map[NVN_STAGES][NVN_MAX_SPECS];
+    uint32_t spec[NVN_STAGES][NVN_MAX_SPECS];
 } nvn_pipe_key;
 
 /** @brief Sorts n specialization constants by id, drops repeated ids, and lays the data out in order (4 bytes each). */
@@ -52,6 +54,9 @@ void nvn_spec_sort(uint32_t *n, VkSpecializationMapEntry *map, uint32_t *vals);
 
 /** @brief The layouts of graphics and compute pipelines; set once, before any pipeline is made. */
 void nvn_pipe_set_layouts(VkPipelineLayout graphics, VkPipelineLayout compute);
+
+/** @brief The layout of the compute back end of mesh draws (its passes and its draw); set before any mesh pipeline is made. */
+void nvn_pipe_set_mesh_layout(VkPipelineLayout mesh);
 
 /**
  * @brief Brings up the pipeline machinery after the device is made: reads
@@ -68,7 +73,8 @@ bool nvn_pipe_uses_libraries(void);
 /**
  * @brief The pipeline for k, made if it is new. Safe from any thread; when
  * another thread is making a library k needs, waits for it instead of making
- * it again. NULL when the driver refuses.
+ * it again. A mesh pipeline (k->mesh_mode set) is made whole. NULL when the
+ * driver refuses.
  */
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k);
 
@@ -80,6 +86,9 @@ bool nvn_pipe_warm_fragment(const nvn_pipe_key *k);
 
 /** @brief The compute pipeline of module m with n specialization constants (sorted by id). NULL when the driver refuses. */
 VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
+
+/** @brief The compute pipeline of mesh pass module m in the mesh pass layout, with n specialization constants (sorted by id). NULL when the driver refuses. */
+VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals);
 
 /** @brief Sets the dynamic state of graphics pipelines that k's pipeline leaves to the command buffer. */
 void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k);
