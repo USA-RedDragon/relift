@@ -1769,14 +1769,15 @@ pub(crate) fn runtime_dir(settings: &Settings) -> PathBuf {
 /// directory (`layers` of `src` into `dst`), so the compile commands name
 /// files inside the cache and read the same wherever the cache or relift
 /// lives. Only what changed is written, so a copy of another version of
-/// the runtime rebuilds only what differs.
+/// the runtime rebuilds only what differs. C, header and assembly files are
+/// copied (`.asm` is dav1d's NASM configuration, `config.asm`).
 pub(crate) fn mirror_runtime(src: &Path, dst: &Path, layers: &[&str]) -> Result<PathBuf, BoxError> {
     for layer in layers {
         relift_cache::sync_tree(
             &src.join(layer),
             &dst.join(layer),
             &|rel| match rel.extension() {
-                Some(e) => e == "c" || e == "h" || e == "S",
+                Some(e) => e == "c" || e == "h" || e == "S" || e == "asm",
                 None => !rel
                     .file_name()
                     .is_some_and(|n| n == "tests" || n == "devtests"),
@@ -2072,6 +2073,7 @@ pub(crate) fn build_project(
         plans.push((
             Plan {
                 cc: cc.clone(),
+                asm: extras.assembler(),
                 compiles: rt_compiles,
                 output: rt_lib.clone(),
                 link_flags: shlib_flags(runtime_lib_name())
@@ -2088,6 +2090,7 @@ pub(crate) fn build_project(
         plans.push((
             Plan {
                 cc: cc.clone(),
+                asm: extras.assembler(),
                 compiles,
                 output: exe.clone(),
                 link_flags: [rt_lib.display().to_string()]
@@ -2107,6 +2110,7 @@ pub(crate) fn build_project(
         plans.push((
             Plan {
                 cc: cc.clone(),
+                asm: extras.assembler(),
                 compiles,
                 output: exe.clone(),
                 link_flags: resources

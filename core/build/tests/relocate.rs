@@ -43,6 +43,7 @@ fn plan(root: &Path, clang: &Path) -> (Plan, PathBuf) {
         .collect();
     let plan = Plan {
         cc: vec![clang.display().to_string()],
+        asm: None,
         compiles,
         output: dir.join("game"),
         link_flags: Vec::new(),

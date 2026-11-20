@@ -93,6 +93,7 @@ fn the_av1_backend_decodes_a_generated_stream_to_the_reference_frames() {
         adrenotools: None,
         vpx: None,
         dav1d: Some(dav1d),
+        dav1d_asm: None,
     };
     let own = vec![
         "-std=c11".to_string(),

@@ -28,6 +28,7 @@ fn plan(dir: &Path, clang: &Path, bodies: &[&str]) -> Plan {
     }
     Plan {
         cc: vec![clang.display().to_string()],
+        asm: None,
         compiles,
         output: dir.join("game"),
         link_flags: Vec::new(),

@@ -584,6 +584,7 @@ pub(crate) fn compile_layers(
         let pools = crate::build::memory_pools(&mut rt_plan_compiles, jobs);
         let plan = Plan {
             cc: cc.clone(),
+            asm: None,
             compiles: rt_plan_compiles,
             output: rt_o.clone(),
             link_flags: ["-r", "-nostdlib"].map(String::from).into(),
@@ -630,6 +631,7 @@ pub(crate) fn compile_layers(
     };
     let plan = Plan {
         cc: cc.clone(),
+        asm: None,
         compiles,
         output: exe,
         link_flags: link

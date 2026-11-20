@@ -346,6 +346,7 @@ impl Server {
         let lib = dir.join(format!("hot{seq}{}", lib_suffix()));
         let plan = Plan {
             cc: self.tools.cc.clone(),
+            asm: None,
             compiles: srcs
                 .iter()
                 .map(|s| Compile {

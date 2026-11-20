@@ -32,6 +32,9 @@ pub struct Compile {
 pub struct Plan {
     /// The C compiler driver (clang, or zig with `cc` as its first flag).
     pub cc: Vec<String>,
+    /// The NASM-syntax assembler (its command and leading arguments), which assembles the compiles whose
+    /// source is a `.asm` file with their flags; `None` when the plan has none.
+    pub asm: Option<Vec<String>>,
     /// The objects.
     pub compiles: Vec<Compile>,
     /// The linked executable.
@@ -268,6 +271,20 @@ fn debug_map_flag(plan: &Plan, prefix: &str) -> Option<String> {
     (plan.root.is_some() && links_mach_o(&plan.cc)).then(|| format!("-Wl,-oso_prefix,{prefix}"))
 }
 
+/// Whether `src` is NASM-syntax assembly, assembled by the plan's assembler instead of the C compiler.
+fn is_asm(src: &Path) -> bool {
+    src.extension().is_some_and(|x| x == "asm")
+}
+
+/// An include flag of NASM, which joins the directory and a file name without a separator, with the
+/// trailing `/` it needs; any other flag as it is.
+fn nasm_dir(flag: &str) -> String {
+    match flag.strip_prefix("-I") {
+        Some(d) if !d.is_empty() && !d.ends_with('/') => format!("-I{d}/"),
+        _ => flag.to_string(),
+    }
+}
+
 /// The text of `build.ninja` for `plan` as run in `dir`. The link reads its objects from a
 /// response file: ninja runs each command as one `sh -c` string, which
 /// Linux caps at 128 KiB, and a game's thousands of shard objects pass it.
@@ -284,8 +301,15 @@ pub fn ninja_file(plan: &Plan, dir: &Path) -> String {
     };
     let oso = debug_map_flag(plan, ".").map_or(String::new(), |f| format!(" {}", sh(&f)));
     let cc: Vec<String> = plan.cc.iter().map(|s| sh(s)).collect();
+    let asm_rule = plan.asm.as_ref().map_or(String::new(), |a| {
+        let a: Vec<String> = a.iter().map(|s| sh(s)).collect();
+        format!(
+            "asm = {}\n\nrule asm\n  command = $asm $flags -MQ $out -MF $out.d -o $out $in\n  depfile = $out.d\n  deps = gcc\n  description = asm $in\n\n",
+            a.join(" ")
+        )
+    });
     let mut t = format!(
-        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags{debug_dir} -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp{oso} -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
+        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags{debug_dir} -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp{oso} -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n{asm_rule}",
         cc.join(" ")
     );
     // Stage `k` waits (order-only) on the phony `stage<k-1>`, which stands
@@ -307,15 +331,24 @@ pub fn ninja_file(plan: &Plan, dir: &Path) -> String {
         let _ = writeln!(t, "pool {name}\n  depth = {depth}\n");
     }
     for c in &plan.compiles {
-        let flags: Vec<String> = c.flags.iter().map(|s| nv(&sh(&f(s)))).collect();
+        let asm = is_asm(&c.src);
+        let flags: Vec<String> = c
+            .flags
+            .iter()
+            .map(|s| {
+                let s = f(s);
+                nv(&sh(&if asm { nasm_dir(&s) } else { s }))
+            })
+            .collect();
         let after = if c.stage > 0 {
             format!(" || stage{}", c.stage - 1)
         } else {
             String::new()
         };
+        let rule = if is_asm(&c.src) { "asm" } else { "cc" };
         let _ = writeln!(
             t,
-            "build {}: cc {}{after}\n  flags = {}",
+            "build {}: {rule} {}{after}\n  flags = {}",
             nj(&p(&c.obj)),
             nj(&p(&c.src)),
             flags.join(" ")
@@ -453,6 +486,7 @@ fn run(
 fn compile_parallel(
     prog: &str,
     pre: &[String],
+    asm: Option<&[String]>,
     stale: &[&Compile],
     workers: usize,
     total: usize,
@@ -471,10 +505,19 @@ fn compile_parallel(
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            let r = relift_proc::command(prog)
-                .args(pre)
-                .args(&c.flags)
-                .arg("-c")
+            let mut cmd = match (asm, is_asm(&c.src)) {
+                (Some([a, rest @ ..]), true) => {
+                    let mut cmd = relift_proc::command(a);
+                    cmd.args(rest).args(&c.flags);
+                    cmd
+                }
+                _ => {
+                    let mut cmd = relift_proc::command(prog);
+                    cmd.args(pre).args(&c.flags).arg("-c");
+                    cmd
+                }
+            };
+            let r = cmd
                 .arg(&c.src)
                 .arg("-o")
                 .arg(&c.obj)
@@ -614,7 +657,15 @@ pub fn build_with(
         .collect();
     let relink = !stale.is_empty() || !plan.output.exists();
     let total = stale.len() + usize::from(relink);
-    compile_parallel(prog, pre, &stale, job_count(jobs) as usize, total, on)?;
+    compile_parallel(
+        prog,
+        pre,
+        plan.asm.as_deref(),
+        &stale,
+        job_count(jobs) as usize,
+        total,
+        on,
+    )?;
     if relink {
         let mut cmd = relift_proc::command(prog);
         cmd.args(pre)
@@ -650,6 +701,7 @@ mod tests {
     fn plan() -> Plan {
         Plan {
             cc: vec!["clang".into()],
+            asm: None,
             compiles: vec![Compile {
                 src: "c/a b.c".into(),
                 obj: "obj/a.o".into(),
@@ -681,11 +733,38 @@ mod tests {
         assert!(t.contains("build obj/b.o: cc c/a$ b.c || stage0\n"), "{t}");
     }
 
+    #[test]
+    fn asm_sources_go_to_the_assembler() {
+        let mut p = plan();
+        p.asm = Some(vec!["nasm".into(), "-w-all".into()]);
+        p.compiles.push(Compile {
+            src: "s/x86/mc.asm".into(),
+            obj: "obj/mc.o".into(),
+            flags: vec!["-f".into(), "elf64".into(), "-Is/".into()],
+            pool: None,
+            stage: 0,
+        });
+        let t = ninja_file(&p, Path::new("."));
+        assert!(t.contains("asm = nasm -w-all\n"), "{t}");
+        assert!(
+            t.contains("rule asm\n  command = $asm $flags -MQ $out -MF $out.d -o $out $in\n"),
+            "{t}"
+        );
+        assert!(
+            t.contains("build obj/mc.o: asm s/x86/mc.asm\n  flags = -f elf64 -Is/\n"),
+            "{t}"
+        );
+        assert!(t.contains("build obj/a.o: cc c/a$ b.c"), "{t}");
+        p.asm = None;
+        assert!(!ninja_file(&p, Path::new(".")).contains("rule asm"));
+    }
+
     fn moved(root: &str) -> (Plan, PathBuf) {
         let at = |p: &str| Path::new(root).join(p);
         let dir = at("projects/g/build/host");
         let plan = Plan {
             cc: vec!["clang".into()],
+            asm: None,
             compiles: vec![Compile {
                 src: dir.join("c/u.c"),
                 obj: dir.join("obj/u.o"),

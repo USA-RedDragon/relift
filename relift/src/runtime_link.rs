@@ -164,6 +164,97 @@ const DAV1D_BITDEPTH_SOURCES: [&str; 13] = [
     "src/recon_tmpl.c",
 ];
 
+/// The x86-64 assembly files of dav1d: first those of every bit depth, then 8 bit only, then 16 bit only.
+/// They are NASM syntax; dav1d picks among their SSE, AVX2 and AVX-512 versions at run time from the CPU's
+/// features, so one binary is right on every x86-64 CPU.
+const DAV1D_X86_ASM: [&str; 9] = [
+    "cpuid",
+    "msac",
+    "pal",
+    "refmvs",
+    "itx_avx512",
+    "cdef_avx2",
+    "itx_avx2",
+    "cdef_sse",
+    "itx_sse",
+];
+const DAV1D_X86_ASM_8: [&str; 16] = [
+    "cdef_avx512",
+    "filmgrain_avx512",
+    "ipred_avx512",
+    "loopfilter_avx512",
+    "looprestoration_avx512",
+    "mc_avx512",
+    "filmgrain_avx2",
+    "ipred_avx2",
+    "loopfilter_avx2",
+    "looprestoration_avx2",
+    "mc_avx2",
+    "filmgrain_sse",
+    "ipred_sse",
+    "loopfilter_sse",
+    "looprestoration_sse",
+    "mc_sse",
+];
+const DAV1D_X86_ASM_16: [&str; 21] = [
+    "cdef16_avx512",
+    "filmgrain16_avx512",
+    "ipred16_avx512",
+    "itx16_avx512",
+    "loopfilter16_avx512",
+    "looprestoration16_avx512",
+    "mc16_avx512",
+    "cdef16_avx2",
+    "filmgrain16_avx2",
+    "ipred16_avx2",
+    "itx16_avx2",
+    "loopfilter16_avx2",
+    "looprestoration16_avx2",
+    "mc16_avx2",
+    "cdef16_sse",
+    "filmgrain16_sse",
+    "ipred16_sse",
+    "itx16_sse",
+    "loopfilter16_sse",
+    "looprestoration16_sse",
+    "mc16_sse",
+];
+
+/// How dav1d's assembly is built on a host: the assembler, the object format it writes and the configuration
+/// directory under `runtime/host/dav1d` (its `config.h` and `config.asm`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dav1dAsm {
+    /// NASM's command.
+    pub nasm: Vec<String>,
+    /// NASM's `-f` format.
+    pub format: &'static str,
+    /// The configuration directory name.
+    pub config: &'static str,
+}
+
+/// The assembly dav1d is built with for a native build on this machine: x86-64 Linux with NASM 2.14 or later on
+/// the path. Every other host, and a host without NASM, builds dav1d's plain C, which decodes the same pictures
+/// several times slower.
+fn native_dav1d_asm() -> Option<Dav1dAsm> {
+    if !cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        return None;
+    }
+    let nasm = relift_build::find_tool("nasm")?;
+    let out = relift_proc::command(&nasm).arg("-v").output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let version = text.split_whitespace().nth(2)?;
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().ok());
+    let (major, minor) = (parts.next()??, parts.next()??);
+    if (major, minor) < (2, 14) {
+        return None;
+    }
+    Some(Dav1dAsm {
+        nasm: vec![nasm.display().to_string()],
+        format: "elf64",
+        config: "x86_64",
+    })
+}
+
 /// A dav1d source tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dav1d {
@@ -237,6 +328,8 @@ pub struct Extras {
     pub vpx: Option<Vpx>,
     /// dav1d, compiled in for AV1 decoding.
     pub dav1d: Option<Dav1d>,
+    /// The assembly dav1d is built with on this host, or `None` for its plain C.
+    pub dav1d_asm: Option<Dav1dAsm>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -424,6 +517,7 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         vulkan: find_moltenvk(cache_root),
         adrenotools: None,
         vpx,
+        dav1d_asm: dav1d.as_ref().and_then(|_| native_dav1d_asm()),
         dav1d,
     })
 }
@@ -480,6 +574,7 @@ pub fn android_extras(
         adrenotools: deps.adrenotools.clone(),
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
+        dav1d_asm: None,
     })
 }
 
@@ -534,10 +629,16 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
         adrenotools: None,
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
+        dav1d_asm: None,
     })
 }
 
 impl Extras {
+    /// The assembler of the plan these extras go into, when dav1d is built with assembly.
+    pub fn assembler(&self) -> Option<Vec<String>> {
+        self.dav1d_asm.as_ref().map(|a| a.nasm.clone())
+    }
+
     /// What the build prints about the window, audio and Opus backends.
     pub fn note(&self) -> String {
         let window = match &self.sdl3 {
@@ -685,7 +786,13 @@ impl Extras {
             out.extend(vpx_compiles(rt, v, rt_flags, obj));
         }
         if let Some(v) = &self.dav1d {
-            out.extend(dav1d_compiles(rt, v, rt_flags, obj));
+            out.extend(dav1d_compiles(
+                rt,
+                v,
+                self.dav1d_asm.as_ref(),
+                rt_flags,
+                obj,
+            ));
         }
         out
     }
@@ -697,30 +804,40 @@ impl Extras {
 fn dav1d_compiles(
     rt: &Path,
     v: &Dav1d,
+    asm: Option<&Dav1dAsm>,
     rt_flags: &[String],
     obj: &dyn Fn(&Path) -> PathBuf,
 ) -> Vec<Compile> {
     let config = rt.join("host").join("dav1d");
+    let arch_config = asm.map(|a| config.join(a.config));
     let own: Vec<String> = rt_flags
         .iter()
         .filter(|f| !f.starts_with("-I") && !f.starts_with("-D"))
         .cloned()
         .collect();
     let flags = |extra: Option<u32>| -> Vec<String> {
-        [
-            format!("-I{}", config.display()),
-            format!("-I{}", v.src.display()),
-            format!("-I{}", v.src.join("include").display()),
-            format!("-I{}", v.src.join("include").join("dav1d").display()),
-            "-D_GNU_SOURCE".into(),
-        ]
-        .into_iter()
-        .chain(extra.map(|b| format!("-DBITDEPTH={b}")))
-        .chain(own.iter().cloned())
-        .collect()
+        arch_config
+            .iter()
+            .map(|c| format!("-I{}", c.display()))
+            .chain([
+                format!("-I{}", config.display()),
+                format!("-I{}", v.src.display()),
+                format!("-I{}", v.src.join("include").display()),
+                format!("-I{}", v.src.join("include").join("dav1d").display()),
+                "-D_GNU_SOURCE".into(),
+            ])
+            .chain(extra.map(|b| format!("-DBITDEPTH={b}")))
+            .chain(own.iter().cloned())
+            .collect()
+    };
+    let arch_sources: &[&str] = if asm.is_some() {
+        &["src/x86/cpu.c"]
+    } else {
+        &[]
     };
     let mut out: Vec<Compile> = DAV1D_SOURCES
         .iter()
+        .chain(arch_sources)
         .map(|s| Compile {
             src: v.src.join(s),
             obj: obj(&rt.join("host").join("dav1d").join(s)),
@@ -738,6 +855,32 @@ fn dav1d_compiles(
                     .join("dav1d")
                     .join(s.replace("_tmpl.c", &format!("_{bits}bpc.c")))),
                 flags: flags(Some(bits)),
+                pool: None,
+                stage: 0,
+            });
+        }
+    }
+    if let (Some(a), Some(arch)) = (asm, &arch_config) {
+        let nasm_flags = [
+            "-f".to_string(),
+            a.format.to_string(),
+            format!("-I{}/", v.src.join("src").display()),
+            format!("-I{}/", arch.display()),
+        ];
+        let listed = DAV1D_X86_ASM
+            .iter()
+            .chain(&DAV1D_X86_ASM_8)
+            .chain(&DAV1D_X86_ASM_16);
+        for name in listed {
+            let src = v.src.join("src").join("x86").join(format!("{name}.asm"));
+            out.push(Compile {
+                obj: obj(&rt
+                    .join("host")
+                    .join("dav1d")
+                    .join("src/x86")
+                    .join(format!("{name}.o"))),
+                src,
+                flags: nasm_flags.to_vec(),
                 pool: None,
                 stage: 0,
             });
@@ -867,6 +1010,7 @@ mod tests {
             adrenotools: None,
             vpx: None,
             dav1d: None,
+            dav1d_asm: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
@@ -891,6 +1035,7 @@ mod tests {
             }),
             vpx: None,
             dav1d: None,
+            dav1d_asm: None,
         };
         assert_eq!(e.defines(), ["-DRL_ADRENOTOOLS", "-I/a/include"]);
         assert_eq!(e.libs(), ["/a/lib/libadrenotools.so"]);
@@ -912,6 +1057,7 @@ mod tests {
                 origin: "t".into(),
             }),
             dav1d: None,
+            dav1d_asm: None,
         };
         assert!(e.note().contains("vp9: libvpx (t)"));
         assert_eq!(e.defines(), ["-DRL_HOST_VP9"]);
@@ -947,8 +1093,10 @@ mod tests {
                 src: PathBuf::from("/d"),
                 origin: "t".into(),
             }),
+            dav1d_asm: None,
         };
         assert!(e.note().contains("av1: dav1d (t)"));
+        assert_eq!(e.assembler(), None);
         assert_eq!(e.defines(), ["-DRL_HOST_AV1"]);
         let rt = Path::new("/rt");
         let flags = ["-O2".to_string(), "-Ix".into(), "-DY".into()];
@@ -970,6 +1118,53 @@ mod tests {
         let glue = c.last().unwrap();
         assert_eq!(glue.src, Path::new("/rt/host/av1_dav1d.c"));
         assert!(glue.flags.contains(&"-DY".to_string()));
+    }
+
+    #[test]
+    fn dav1d_with_assembly_adds_the_x86_files_and_the_assembler() {
+        let e = Extras {
+            vk: Vec::new(),
+            window: None,
+            sdl3: None,
+            vulkan: None,
+            host: Vec::new(),
+            opus_src: None,
+            opus: None,
+            adrenotools: None,
+            vpx: None,
+            dav1d: Some(Dav1d {
+                src: PathBuf::from("/d"),
+                origin: "t".into(),
+            }),
+            dav1d_asm: Some(Dav1dAsm {
+                nasm: vec!["/bin/nasm".into()],
+                format: "elf64",
+                config: "x86_64",
+            }),
+        };
+        assert_eq!(e.assembler(), Some(vec!["/bin/nasm".to_string()]));
+        let rt = Path::new("/rt");
+        let c = e.compiles(rt, &["-O2".to_string()], &|s| s.with_extension("o"));
+        let asm: Vec<_> = c
+            .iter()
+            .filter(|x| x.src.extension().is_some_and(|e| e == "asm"))
+            .collect();
+        assert_eq!(
+            asm.len(),
+            DAV1D_X86_ASM.len() + DAV1D_X86_ASM_8.len() + DAV1D_X86_ASM_16.len()
+        );
+        assert_eq!(asm[0].src, Path::new("/d/src/x86/cpuid.asm"));
+        assert_eq!(asm[0].obj, Path::new("/rt/host/dav1d/src/x86/cpuid.o"));
+        assert_eq!(
+            asm[0].flags,
+            ["-f", "elf64", "-I/d/src/", "-I/rt/host/dav1d/x86_64/"]
+        );
+        assert!(c.iter().any(|x| x.src == Path::new("/d/src/x86/cpu.c")));
+        let cdef = c
+            .iter()
+            .find(|x| x.src == Path::new("/d/src/cdef_tmpl.c"))
+            .unwrap();
+        assert_eq!(cdef.flags[0], "-I/rt/host/dav1d/x86_64");
     }
 
     #[test]
@@ -1006,6 +1201,7 @@ mod tests {
             adrenotools: None,
             vpx: None,
             dav1d: None,
+            dav1d_asm: None,
         };
         std::fs::remove_dir_all(&m).unwrap();
         assert!(e.note().contains("MoltenVK linked (t)"));
