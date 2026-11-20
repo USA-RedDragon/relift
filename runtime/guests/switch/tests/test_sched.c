@@ -10,6 +10,8 @@
  */
 #include "t.h"
 
+#include "nvn/nvn_priv.h"
+
 #include <stdlib.h>
 
 #define HAS_LISTENERS 0x40000000u
@@ -194,13 +196,38 @@ static uint64_t w_lock(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-enum { F_COUNT, F_FLAG, F_WAIT_EVENT, F_PING, F_PONG, F_MIGRATE, F_YIELD, F_FLAG_SLEEP, F_HOST_WAIT, F_LOCK, F_SLEEP_FLAG, F_RET_TWICE, F_N };
+static uint64_t w_nvn_holder(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    int i = idx_of(c);
+    nvn_lock();
+    nvn_core_leave();
+    while (!get(&S.flag[i + 2]))
+        rl_sleep_ns(1000000);
+    nvn_unlock();
+    S.ok[i] = 1;
+    return RL_OK;
+}
+
+static uint64_t w_nvn_waiter(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    int i = idx_of(c);
+    set(&S.flag[i + 1], 1);
+    nvn_lock();
+    S.ok[i] = 1;
+    nvn_unlock();
+    return RL_OK;
+}
+
+enum { F_COUNT, F_FLAG, F_WAIT_EVENT, F_PING, F_PONG, F_MIGRATE, F_YIELD, F_FLAG_SLEEP, F_HOST_WAIT, F_LOCK, F_SLEEP_FLAG, F_RET_TWICE, F_NVN_HOLDER, F_NVN_WAITER, F_N };
 
 static rl_ctx *setup(uint64_t *heap)
 {
     rl_ctx *c = t_boot(NULL);
     static rl_fn const fns[F_N] = { w_count,     w_flag, w_wait_event,     w_ping,     w_pong, w_migrate,
-                                    w_yield,     w_flag_then_sleep, w_host_wait, w_lock, w_sleep_then_flag, w_ret_twice };
+                                    w_yield,     w_flag_then_sleep, w_host_wait, w_lock, w_sleep_then_flag, w_ret_twice,
+                                    w_nvn_holder, w_nvn_waiter };
     uint64_t addrs[F_N];
     for (uint32_t k = 0; k < F_N; k++)
         addrs[k] = t_code(k);
@@ -465,4 +492,20 @@ TEST(a_thread_in_a_host_wait_leaves_its_core_to_the_others)
     CHECK_EQ(join(c, heap, b), 0);
     CHECK_EQ(S.ok[0], 1);
     CHECK_EQ(S.cpu[1], 0);
+}
+
+TEST(a_guest_thread_that_waits_for_the_nvn_lock_leaves_its_core)
+{
+    uint64_t heap;
+    rl_ctx *c = setup(&heap);
+    /* The holder (index 0) takes the lock and leaves its core; the waiter (index 1) shares that core, runs while
+     * the holder still has the lock, flags that it started (flag 2) and blocks on the lock until the holder is
+     * released by that flag. Without the holder leaving the core the waiter would never run. */
+    uint32_t a = spawn(c, heap, F_NVN_HOLDER, 0, 44, 0), b = spawn(c, heap, F_NVN_WAITER, 1, 44, 0);
+    CHECK_EQ(start(c, a), 0);
+    CHECK_EQ(start(c, b), 0);
+    CHECK_EQ(join(c, heap, a), 0);
+    CHECK_EQ(join(c, heap, b), 0);
+    CHECK_EQ(S.ok[0], 1);
+    CHECK_EQ(S.ok[1], 1);
 }

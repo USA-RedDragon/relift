@@ -572,6 +572,23 @@ enum nvn_cmd_op {
  */
 static const uint32_t UNWRITTEN_VARYING[4] = { 0x00000000u, 0x00000000u, 0x00000000u, 0x3f800000u };
 
+/**
+ * @brief Takes the layer's lock (nvn_vk.c g.lock) for a guest thread. A blocked wait for the lock, a wait on the host
+ * device (a fence, the first compile of a pipeline) and the host display run on a guest thread that holds a core's
+ * run token, which keeps every other guest thread of that core from running for as long as the host takes: a
+ * console core does not stall while its GPU or display works. So a guest thread that would block first leaves its
+ * core (hos_sched_leave) and stays off it until nvn_unlock, the end of the work, returns it (hos_sched_return waits
+ * for a core with no lock held, which is why the thread stays off its core while it holds the lock: it cannot
+ * wait for a core that a lock waiter holds).
+ */
+void nvn_lock(void);
+/** @brief Releases the layer's lock and, when the thread left its core since nvn_lock, takes its core back. */
+void nvn_unlock(void);
+/** @brief Leaves the thread's core before a host wait (nvn_unlock returns it); a no-op when it already left. */
+void nvn_core_leave(void);
+/** @brief Takes the core back outside the lock (after the host display); a no-op when the thread did not leave. */
+void nvn_core_return(void);
+
 typedef struct nvn_cmd {
     uint32_t op;
     uint64_t x[8];

@@ -32,6 +32,9 @@
 #include <stdlib.h>
 #include <time.h>
 
+/** @brief A guest thread that keeps its core this long inside the NVN layer is logged. */
+#define HOLD_WARN_NS 20000000ll
+
 nvn_vkdev g = { .once = PTHREAD_ONCE_INIT, .lock = PTHREAD_MUTEX_INITIALIZER };
 
 typedef void (*void_fn)(void);
@@ -891,6 +894,7 @@ bool nvn_vk_flush(replay *r)
         return false;
     }
     int64_t t1 = now_ns();
+    nvn_core_leave();
     vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
     tm.submit_ns += (uint64_t)(t1 - t0);
     tm.wait_ns += (uint64_t)(now_ns() - t1);
@@ -2104,14 +2108,54 @@ int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const
     return rc;
 }
 
+static int64_t now_ns(void);
+static __thread bool core_left;
+static __thread int64_t lock_since;
+
+void nvn_core_leave(void)
+{
+    if (core_left)
+        return;
+    core_left = true;
+    hos_sched_leave();
+}
+
+void nvn_core_return(void)
+{
+    if (!core_left)
+        return;
+    core_left = false;
+    hos_sched_return();
+}
+
+void nvn_lock(void)
+{
+    if (pthread_mutex_trylock(&g.lock) != 0) {
+        nvn_core_leave();
+        pthread_mutex_lock(&g.lock);
+    }
+    lock_since = now_ns();
+}
+
+void nvn_unlock(void)
+{
+    int64_t held = now_ns() - lock_since;
+    bool kept = !core_left;
+    pthread_mutex_unlock(&g.lock);
+    nvn_core_return();
+    if (kept && held > HOLD_WARN_NS)
+        rl_log(RL_LOG_WARN, "nvn", "a guest thread held its core for %lld ms inside the NVN layer without leaving it",
+               (long long)(held / 1000000));
+}
+
 int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
 {
     if (!up(c))
         return RL_PENDING;
-    pthread_mutex_lock(&g.lock);
+    nvn_lock();
     replay r = { .c = c, .mem = mem, .s = s, .st = state_of(queue) };
     if (!r.st) {
-        pthread_mutex_unlock(&g.lock);
+        nvn_unlock();
         return rl_guest_fatal(c, "nvn", "more than %u queues", MAX_QUEUES);
     }
     int64_t t0 = now_ns();
@@ -2120,7 +2164,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
     tm.runs++;
-    pthread_mutex_unlock(&g.lock);
+    nvn_unlock();
     if (rc == RL_OK)
         for (uint32_t i = 0; i < r.nsyncs; i++)
             nvn_sync_signal(r.syncs[i]);
@@ -2405,7 +2449,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     (void)queue;
     if (!up(c))
         return RL_PENDING;
-    pthread_mutex_lock(&g.lock);
+    nvn_lock();
     nvn_gfx none = { 0 };
     replay r = { .c = c, .mem = mem, .st = &none };
     vimg *v = image_of(&r, texture);
@@ -2464,7 +2508,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         }
         rgb = pres_buf.rgb;
     }
-    pthread_mutex_unlock(&g.lock);
+    nvn_unlock();
     if (!v)
         return RL_PENDING;
     if (!shown)
@@ -2473,10 +2517,12 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     if (!cropped)
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
+    nvn_core_leave();
     nvn_frame_presented();
     present_rate(n + 1);
     if (rgb)
         rl_window_present_rgb(win, rgb, rect[2], rect[3]);
+    nvn_core_return();
     if (n == 0)
         rl_log(RL_LOG_INFO, "nvn", "first frame on the host device: %ux%u, %s", rect[2], rect[3],
                pres ? "presented from the GPU" : px ? "presented through host memory" : "not shown");

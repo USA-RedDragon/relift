@@ -562,7 +562,7 @@ void nvn_texset_texture_gone(uint64_t tex)
 {
     if (!t.ok)
         return;
-    pthread_mutex_lock(&g.lock);
+    nvn_lock();
     for (uint32_t ts = 0; ts < t.ntex; ts++) {
         nvn_slots *tb = ts < t.reserve ? &t.islots : &t.slots;
         uint32_t local = ts < t.reserve ? ts : ts - t.reserve;
@@ -572,7 +572,7 @@ void nvn_texset_texture_gone(uint64_t tex)
             nvn_slots_free(tb, local);
         }
     }
-    pthread_mutex_unlock(&g.lock);
+    nvn_unlock();
 }
 
 /** @brief nvn_texset_bind; with_sampler false leaves the handle's sampler id alone (a separate texture handle names none). */

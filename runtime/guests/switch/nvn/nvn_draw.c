@@ -914,6 +914,7 @@ static VkPipeline pipeline_of(replay *r, const pipe_key *k)
                                         .pDynamicState = &dy,
                                         .layout = d.layout };
     VkPipeline p;
+    nvn_core_leave();
     VkResult vr = VK(vkCreateGraphicsPipelines)(g.dev, NULL, 1, &ci, NULL, &p);
     if (vr != VK_SUCCESS) {
         nvn_vk_stop(r, "vkCreateGraphicsPipelines failed (%d)", (int)vr);
@@ -1423,6 +1424,7 @@ static VkPipeline compute_pipeline_of(replay *r, const module *m, uint32_t n, co
                                                   .pSpecializationInfo = &si },
                                        .layout = d.clayout };
     VkPipeline p;
+    nvn_core_leave();
     if (VK(vkCreateComputePipelines)(g.dev, NULL, 1, &ci, NULL, &p) != VK_SUCCESS) {
         nvn_vk_stop(r, "vkCreateComputePipelines failed for %s", m->key);
         return NULL;
