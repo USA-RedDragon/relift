@@ -742,9 +742,12 @@ writable and executable memory and no `dlopen`, so it works on every host.
   for the entries of `enter_anywhere` (section 6).
 - **Calls and returns.** `bl` to a lifted function stores the dirty
   registers, sets `c->pc` and tail calls the callee by name; a call to an
-  address inside the same C function is a `goto`. `blr`, `br` and `ret` are
-  `RL_JUMP(target, site)`: the flat table lookup of section 6 and a tail
-  call. A call to a host override is a tail call too: the override returns
+  address inside the same C function is a `goto`. `br` and `ret` are
+  `RL_JUMP(target, site)` and `blr` is `RL_CALL(target, site)`: the flat table
+  lookup of section 6 and a tail call; a miss of `RL_CALL` is reported (and
+  hot-loaded) as a call. The report of that miss has no caller function
+  and no guest backtrace frames, since both come from host frames that
+  trampoline mode does not leave. A call to a host override is a tail call too: the override returns
   x30, and the entry loop (`rl_call_guest`) dispatches what a function
   returns that is not `RL_PENDING`. There is no return check
   (`rl_arm64_ret_elsewhere`), no `lp_dispatch`, no pad entry
@@ -2060,6 +2063,7 @@ is not in.
 - Version 10 added the RSP issue pipeline (`relift/rsp/abi.h`): lifted
   RSP blocks call `rl_rsp_pipe`, `rl_rsp_pipe_hold` and `rl_rsp_tick`, and
   an RSP image carries the pipeline each bound word is entered with.
+- Version 13 added `rl_arm64_preempt_resume` (the trampoline-mode preemption check), 14 added `rl_count_insn` and `rl_counted_insns`, and 15 added `RL_CALL` (a missed indirect call in trampoline mode is reported as a call).
 - Version 12 added trampoline mode (section 5.5): `RL_PEND_RETURN`,
   `entry_set` and `entry_ra` in the context, the entry switch of lifted
   functions and `rl_arm64_set_trampoline`.

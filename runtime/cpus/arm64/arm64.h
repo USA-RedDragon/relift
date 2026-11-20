@@ -41,6 +41,14 @@ extern int rl_arm64_trampoline_on;
 RL_RUNTIME_API void rl_arm64_set_trampoline(int on);
 /** @brief Whether the program was built in trampoline mode. */
 RL_RUNTIME_API int rl_arm64_trampoline(void);
+/**
+ * @brief What a safe point runs (rl_arm64_preempt_resume): the guest layer's delivery of signals.
+ * The registers are in the context and c->pc is the resume address. Returns RL_OK to go on at
+ * c->pc as the hook left it, or RL_PENDING with a pending record set (a redirect, an exit).
+ */
+typedef int rl_arm64_safepoint_hook(rl_ctx *c, uint8_t *mem);
+/** @brief Sets the safe point hook; without one a safe point only clears the budget. */
+RL_RUNTIME_API void rl_arm64_set_safepoint_hook(rl_arm64_safepoint_hook *hook);
 /** @brief Saves and clears the host FP flags at a runtime entry that may do host FP work, in flag mode. */
 static inline uint32_t rl_arm64_flags_enter(void)
 {

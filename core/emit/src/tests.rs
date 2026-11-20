@@ -405,6 +405,8 @@ fn shards_declare_their_foreign_callees() {
             guess_ranges: Vec::new(),
             guess_decl: String::new(),
             trampoline: false,
+            preempt_resume: false,
+            count_insns: false,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -888,6 +890,8 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         guess_ranges: Vec::new(),
         guess_decl: String::new(),
         trampoline: false,
+        preempt_resume: false,
+        count_insns: false,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -1926,6 +1930,8 @@ fn a_guessed_computed_jump_goes_to_its_guess_by_name_under_the_condition() {
         }],
         guess_decl: "extern int hooked;\n".into(),
         trampoline: false,
+        preempt_resume: false,
+        count_insns: false,
         ..Options::default()
     };
     let s = shard(&emit(&PREEMPT, &fns, &[], &opts)).to_string();
@@ -2053,4 +2059,12 @@ fn in_trampoline_mode_a_landing_pad_is_an_entry_and_no_pad_resume_is_listed() {
     let all: String = out.files.iter().map(|f| f.text.as_str()).collect();
     assert!(!all.contains("rl_toy_pad_resume"), "{all}");
     assert!(!all.contains("lp_dispatch"), "{all}");
+}
+
+#[test]
+fn in_trampoline_mode_an_indirect_call_misses_as_a_call_and_a_jump_as_a_jump() {
+    let code = [word(0x0c, 1, 0), word(0x06, 1, 0)];
+    let (s, _) = trampoline_emit(&code, &[(0x100, 0..2)]);
+    assert!(s.contains("RL_CALL(r1, UINT64_C(0x100));"), "{s}");
+    assert!(s.contains("RL_JUMP(r1, UINT64_C(0x104));"), "{s}");
 }

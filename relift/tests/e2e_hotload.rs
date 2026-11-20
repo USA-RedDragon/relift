@@ -93,11 +93,17 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
         "\ntarget code: not lifted (outside every lifted function)\n",
         "\ntarget where: main text segment\n",
         "\nsite: 0x800001c main+0x1c\nsite function: 0x8000000 main+0x0 ",
-        "\ncaller function: 0x8000000 main+0x0 ",
         "\n  x8  0000000008000040  x9  0000000000000004",
-        "\nguest backtrace: lifted frames, innermost first; tail calls leave no frame\n  #0 0x8000000 main+0x0 ",
     ] {
         assert!(report.contains(want), "{want:?} in\n{report}");
+    }
+    let hosted = [
+        "\ncaller function: 0x8000000 main+0x0 ",
+        "\nguest backtrace: lifted frames, innermost first; tail calls leave no frame\n  #0 0x8000000 main+0x0 ",
+    ];
+    let trampoline = std::env::var("RELIFT_EMIT_TRAMPOLINE").is_ok_and(|v| v == "true");
+    for want in hosted {
+        assert_eq!(report.contains(want), !trampoline, "{want:?} in\n{report}");
     }
     assert!(err.contains(&report), "{err}");
     let reports = root.join("reports");
@@ -123,7 +129,12 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
     if relift_build::find_tool("llvm-mc").is_some() {
         assert!(text.contains("=> 0x800001c: blr\tx8\n"), "{text}");
     }
-    assert!(text.contains("rc = rl_indirect(c, r8)(c, mem);"), "{text}");
+    let call = if std::env::var("RELIFT_EMIT_TRAMPOLINE").is_ok_and(|v| v == "true") {
+        "RL_CALL(r8, UINT64_C(0x800001c));"
+    } else {
+        "rc = rl_indirect(c, r8)(c, mem);"
+    };
+    assert!(text.contains(call), "{text}");
     assert!(
         text.contains("0x8000040 is not among the build's function entries"),
         "{text}"

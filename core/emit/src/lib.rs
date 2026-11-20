@@ -190,6 +190,16 @@ pub struct Options {
     /// the guest stack. The address after every call, every landing pad
     /// and the address after every trap are entries of their function.
     pub trampoline: bool,
+    /// With `trampoline`: every preemption check leaves the registers in
+    /// the context and resumes through the runtime's safe point
+    /// (`rl_arm64_preempt_resume`), so a signal handler can run there and
+    /// even change the resume address; and every jump back and every
+    /// computed jump has a check, so no loop runs without one. The exit
+    /// targets of the checks are entries.
+    pub preempt_resume: bool,
+    /// Counts every instruction run (`rl_count_insn`), for a cold copy that
+    /// should be seen to run rarely.
+    pub count_insns: bool,
 }
 
 /// Guest addresses a guess may name ([`Options::guess_ranges`]).
@@ -225,6 +235,8 @@ impl Default for Options {
             guess_ranges: Vec::new(),
             guess_decl: String::new(),
             trampoline: false,
+            preempt_resume: false,
+            count_insns: false,
         }
     }
 }

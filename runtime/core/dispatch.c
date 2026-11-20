@@ -18,6 +18,7 @@ static uint64_t g_count;
 static uint8_t g_image[RL_IMAGE_ID_BYTES];
 static bool g_have_image;
 /* Dev builds: the cold function of each RL_CODE_COLD slot not dispatched to yet. */
+uint64_t rl_counted_insns;
 static rl_fn *g_cold;
 static rl_fn g_cold_first;
 static const rl_code_map *const *g_maps;

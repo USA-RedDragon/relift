@@ -23,6 +23,7 @@ mod inline;
 mod slots;
 pub mod stack;
 mod tables;
+pub mod total;
 mod transfers;
 
 pub use binary::{FORMAT, from_bytes, to_bytes};

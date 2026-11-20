@@ -500,6 +500,15 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
 }
 
 /**
+ * @brief The preemption check of trampoline mode with resume (docs/abi.md
+ * section 5.5): the registers are in the context and c->pc is the address the
+ * check was about to go to, an entry. Runs the safe point hook (a signal
+ * handler may run, and may change where the guest goes), then dispatches
+ * there. Has the lifted signature so it stays a tail call.
+ */
+RL_RUNTIME_API uint64_t rl_arm64_preempt_resume(rl_ctx *c, uint8_t *mem);
+
+/**
  * @brief The miss path of RL_JUMP: the target is in c->pc and the guest
  * address of the transferring instruction in c->pend.pc. Has the lifted
  * signature so the miss stays a tail call.

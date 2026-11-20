@@ -117,6 +117,8 @@ struct Ctx<'a> {
     ranges: &'a [GuessRange],
     /// Trampoline mode: calls and returns leave by tail calls.
     trampoline: bool,
+    /// Checks resume through the runtime, and every loop has one.
+    resume: bool,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -503,7 +505,7 @@ pub(crate) fn emit_function(
     let all: Vec<u64> = f.insts.keys().copied().collect();
     let shape = Shape::of(fe);
     let extras = if opts.trampoline {
-        trampoline_entries(f, &blocks)
+        trampoline_entries(f, &blocks, opts.preempt_resume)
     } else {
         BTreeSet::new()
     };
@@ -520,6 +522,8 @@ pub(crate) fn emit_function(
         shape: &shape,
         ranges: &opts.guess_ranges,
         trampoline: opts.trampoline,
+        resume: opts.trampoline && opts.preempt_resume,
+        count: opts.count_insns,
         extras: &extras,
     };
     let whole = emit_piece(&env, &all, None);
@@ -641,6 +645,8 @@ pub(crate) struct Env<'a> {
     ranges: &'a [GuessRange],
     /// Trampoline mode.
     pub(crate) trampoline: bool,
+    resume: bool,
+    count: bool,
     /// The entries a trampoline-mode function has besides its first: the
     /// instructions the table enters at with the context up to date.
     extras: &'a BTreeSet<u64>,
@@ -669,6 +675,8 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         in_context,
         ranges,
         trampoline,
+        resume,
+        count,
         extras,
         ..
     } = *env;
@@ -807,6 +815,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         link: fe.return_link(),
         ranges,
         trampoline,
+        resume,
     };
     let own: BTreeSet<u64> = pcs.iter().copied().collect();
     let more: Vec<u64> = extras
@@ -843,6 +852,9 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     for (k, &pc) in pcs.iter().enumerate() {
         let start = t.len();
         let _ = writeln!(t, "{}: {{", label(pc));
+        if count {
+            t.push_str("    rl_count_insn();\n");
+        }
         let body = match (&f.insts[&pc], blocks.get(&pc)) {
             (Insn::Lifted { raw, .. }, Some(b)) => block(&mut cx, b, *raw),
             (Insn::Failed(e), _) => Err((e.insn, e.message.clone())),
@@ -963,6 +975,9 @@ fn loops_back(cx: &Ctx<'_>, b: &Block) -> bool {
 /// until the loop or function around it reaches a check.
 fn preempts(cx: &Ctx<'_>, b: &Block) -> bool {
     let back = |t: u64| t <= b.pc;
+    if cx.resume {
+        return resume_check(b);
+    }
     let jump = |t: u64| {
         if !back(t) {
             false
@@ -984,6 +999,23 @@ fn preempts(cx: &Ctx<'_>, b: &Block) -> bool {
             },
         ) => jump(taken) || jump(not_taken),
         (Flow::Jump, Next::Dynamic(_)) => true,
+    }
+}
+
+/// Whether the exit of `b` has a check in resume mode: every jump back,
+/// every computed jump and call, and every call to a lower address.
+fn resume_check(b: &Block) -> bool {
+    let back = |t: u64| t <= b.pc;
+    match (b.exit.flow, b.exit.next) {
+        (Flow::Return | Flow::Trap(_), _) => false,
+        (_, Next::Const(t)) => back(t),
+        (
+            _,
+            Next::Select {
+                taken, not_taken, ..
+            },
+        ) => back(taken) || back(not_taken),
+        (_, Next::Dynamic(_)) => true,
     }
 }
 
@@ -1242,7 +1274,16 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         guessed = true;
     }
     if let Some(clk) = cx.fe.preempt_clock().filter(|_| preempts(cx, b)) {
-        s.push_str(&time::preempt(clk));
+        if cx.resume {
+            let _ = write!(
+                s,
+                "    if (RL_UNLIKELY(rl_time_spent(&{clk}))) {{\n{}        c->pc = {};\n        RL_MUSTTAIL return rl_arm64_preempt_resume(c, mem);\n    }}\n",
+                Ctx::line(&out_store, "        "),
+                next_expr(b, &val)
+            );
+        } else {
+            s.push_str(&time::preempt(clk));
+        }
     }
     if loops_back(cx, b) {
         s.push_str("    RL_LOOP_FENCE();\n");
@@ -1318,8 +1359,13 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 }
                 let _ = writeln!(
                     s,
-                    "{}    RL_JUMP({}, UINT64_C({:#x}));",
+                    "{}    {}({}, UINT64_C({:#x}));",
                     Ctx::line(&out_store, "    "),
+                    if matches!(b.exit.flow, Flow::Call { .. }) {
+                        "RL_CALL"
+                    } else {
+                        "RL_JUMP"
+                    },
                     val(v),
                     b.pc
                 );
@@ -1383,7 +1429,11 @@ fn reload(
 /// address after each call (what a return goes to), each landing pad, and
 /// the address after each trap (where a signal delivered at the system call
 /// resumes). Only addresses of instructions of the function count.
-fn trampoline_entries(f: &Function<'_>, blocks: &BTreeMap<u64, Block>) -> BTreeSet<u64> {
+fn trampoline_entries(
+    f: &Function<'_>,
+    blocks: &BTreeMap<u64, Block>,
+    resume: bool,
+) -> BTreeSet<u64> {
     let mut out: BTreeSet<u64> = f.pads.iter().copied().collect();
     for b in blocks.values() {
         match (b.exit.flow, b.exit.next) {
@@ -1394,6 +1444,19 @@ fn trampoline_entries(f: &Function<'_>, blocks: &BTreeMap<u64, Block>) -> BTreeS
                 out.insert(t);
             }
             _ => {}
+        }
+        if resume && resume_check(b) {
+            match b.exit.next {
+                Next::Const(t) => {
+                    out.insert(t);
+                }
+                Next::Select {
+                    taken, not_taken, ..
+                } => out.extend([taken, not_taken]),
+                Next::Dynamic(_) => {
+                    out.extend(f.tables.get(&b.pc).into_iter().flatten().copied());
+                }
+            }
         }
     }
     out.retain(|pc| *pc != f.entry && f.insts.contains_key(pc));

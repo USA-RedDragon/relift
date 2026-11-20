@@ -204,18 +204,33 @@ uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 
 uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
 {
+    const uint32_t call = c->pend.code == RL_CALL_MARK;
+    c->pend.code = 0;
     if (c->entry_set && c->pc == c->entry_ra)
         return c->pc;
     if (!canonical(c->pc)) {
         abort_report(c, c->pc, c->pend.pc, 2);
         return RL_PENDING;
     }
-    rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
+    rl_miss_info m = { c->pc, c->pend.pc, call ? RL_MISS_CALL : RL_MISS_JUMP, 0 };
     c->pend.pc = 0;
     rl_fn f = rl_core_miss_load(c, &m, c->fpcr);
     if (f)
         RL_MUSTTAIL return f(c, mem);
     return rl_core_miss_at(c, mem, &m);
+}
+
+static rl_arm64_safepoint_hook *g_safepoint;
+
+void rl_arm64_set_safepoint_hook(rl_arm64_safepoint_hook *hook) { g_safepoint = hook; }
+
+uint64_t rl_arm64_preempt_resume(rl_ctx *c, uint8_t *mem)
+{
+    rl_preempt_clear(c);
+    uint64_t pc = c->pc;
+    if (g_safepoint && g_safepoint(c, mem) != RL_OK)
+        return RL_PENDING;
+    RL_JUMP(pc, pc);
 }
 
 uint64_t rl_dispatch_cold(rl_ctx *c, uint8_t *mem)

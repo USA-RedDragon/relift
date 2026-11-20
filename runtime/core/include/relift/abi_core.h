@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 12u
+#define RL_ABI_VERSION 15u
 
 /** @brief Lifted function return on a CPU without a link register: normal return to the caller. A CPU with one returns where its return went instead (docs/abi.md section 5.4). */
 #define RL_OK 0
@@ -260,6 +260,26 @@ RL_RUNTIME_API void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t
         rl_fn rl_j_ = rl_jump_find(c, (target));                                                        \
         if (RL_UNLIKELY(!rl_j_)) {                                                                      \
             c->pend.pc = (site);                                                                        \
+            RL_MUSTTAIL return rl_dispatch_jump_miss(c, mem);                                           \
+        }                                                                                               \
+        RL_MUSTTAIL return rl_j_(c, mem);                                                               \
+    } while (0)
+/** @brief How many instructions ran in code emitted with counting (the cold copy); see rl_count_insn. */
+RL_RUNTIME_API extern uint64_t rl_counted_insns;
+/** @brief Counts one instruction run, for code emitted with Options::count_insns. */
+#define rl_count_insn() ((void)__atomic_fetch_add(&rl_counted_insns, 1, __ATOMIC_RELAXED))
+/** @brief The value RL_CALL leaves in c->pend.code for the jump miss path. */
+#define RL_CALL_MARK 0x43414c4cu
+/**
+ * @brief RL_JUMP for a call in trampoline mode (docs/abi.md section 5.5): the same lookup and
+ * tail call, and a miss is reported as a call (c->pend.code is RL_CALL_MARK for the miss path).
+ */
+#define RL_CALL(target, site)                                                                           \
+    do {                                                                                                \
+        rl_fn rl_j_ = rl_jump_find(c, (target));                                                        \
+        if (RL_UNLIKELY(!rl_j_)) {                                                                      \
+            c->pend.pc = (site);                                                                        \
+            c->pend.code = RL_CALL_MARK;                                                                \
             RL_MUSTTAIL return rl_dispatch_jump_miss(c, mem);                                           \
         }                                                                                               \
         RL_MUSTTAIL return rl_j_(c, mem);                                                               \
