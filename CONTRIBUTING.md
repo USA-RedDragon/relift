@@ -51,7 +51,7 @@ CI_WORK=$HOME/ci-work scripts/ci/all.sh docs
 | Job | Checks |
 |---|---|
 | `lint` | rustfmt and clippy (three Cargo workspaces), the charter tests, the config docs and Vulkan forwarding are current, `cargo deny` |
-| `tests-workspace`, `tests-gb-devices`, `tests-relift`, `tests-relift-e2e` | Every crate's tests; the end-to-end tests build and run synthetic programs |
+| `tests-workspace`, `tests-gb-devices`, `tests-relift`, `tests-relift-e2e-slow`, `tests-relift-e2e-rest` | Every crate's tests; the end-to-end tests build and run synthetic programs |
 | `generated` | Reruns the Sail template generators on pinned sources and fails on any difference |
 | `docs` | docgen facts are current and the docs site builds with no broken link |
 | `workflows` | Workflow files parse and lint |

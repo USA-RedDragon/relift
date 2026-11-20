@@ -56,7 +56,7 @@ main() {
   mkdir -p "$logs"
   rm -f "$logs"/*.status "$logs"/*.pgid
 
-  jobs=(lint tests-workspace tests-gb-devices tests-relift tests-relift-e2e mesh-kat nds-timing-sdk docs gb-corpus z80-sst z80-zexdoc generated workflows runtime-charter runtime-tests release-guard)
+  jobs=(lint tests-workspace tests-gb-devices tests-relift tests-relift-e2e-slow tests-relift-e2e-rest mesh-kat nds-timing-sdk docs gb-corpus z80-sst z80-zexdoc generated workflows runtime-charter runtime-tests release-guard)
   image_targets=(x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm)
   if [ "$(uname -s)" = Linux ]; then
     jobs+=(appimage cross-windows-x64 cross-windows-arm64 cross-android-arm64)
@@ -131,7 +131,8 @@ main() {
   limit_minutes() {
     local wf=
     case $1 in
-      lint | tests-workspace | tests-gb-devices | tests-relift | tests-relift-e2e | mesh-kat | nds-timing-sdk | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
+      tests-relift-e2e-*) wf=ci.yaml:tests-relift-e2e ;;
+      lint | tests-workspace | tests-gb-devices | tests-relift | mesh-kat | nds-timing-sdk | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
       mac-runtime-tests) wf=runtime.yaml:c-tests ;;
       mac-tests-*) wf=ci.yaml:macos-${1#mac-tests-} ;;
       image-*) wf=ci.yaml:cross ;;
@@ -180,6 +181,7 @@ main() {
   # job NAME: run one job; exit 77 means skipped, with the reason on stdout.
   job() {
     case $1 in
+      tests-relift-e2e-*) "$ROOT/scripts/ci/tests-relift-e2e.sh" "${1#tests-relift-e2e-}" ;;
       cross-gba-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-gba-}" --guest gba --jobs 4 ;;
       cross-n64-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-n64-}" --guest n64 --jobs 4 ;;
       cross-sms-*) "$ROOT/scripts/ci/gbcross.sh" "${1#cross-sms-}" --guest sms --jobs 4 ;;

@@ -25,7 +25,7 @@ A crate's band and exact dependencies are in `relift/tests/workspace_charter.rs`
 
 1. `cargo fmt -p <crate>` for each crate you touched (never `--all` to write; `--all --check` to verify).
 2. `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`.
-3. `cargo test -p <crate>` for each crate you touched, then `scripts/ci/all.sh tests-workspace tests-relift tests-relift-e2e lint` when the change is wide.
+3. `cargo test -p <crate>` for each crate you touched, then `scripts/ci/all.sh tests-workspace tests-relift "tests-relift-e2e-*" lint` when the change is wide.
 4. Runtime C changes: `make -C runtime -j2 test` and `make -C runtime charter`.
 5. Generated code (`cpus/*/gen`): `scripts/ci/all.sh generated`.
 6. Docs: `go run github.com/USA-RedDragon/docgen@v0.1.0 update`, then `check -diff`, then `scripts/ci/all.sh docs`.
