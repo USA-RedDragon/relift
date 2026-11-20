@@ -471,6 +471,25 @@ fn f2i(c: &mut Ctx, i: &Inst) -> Res<()> {
     if m.not {
         return bad("F2I source modifiers");
     }
+    let spec = F2i {
+        ntz,
+        signed,
+        size,
+        how,
+        mode,
+    };
+    if !f16 && size != 64 {
+        if m.swz != Swz::None {
+            return bad("F2I source selector");
+        }
+        let key = format!("F2I {ftz} {ntz} {signed} {size} {mode} {} {}", m.abs, m.neg);
+        let (abs, neg) = (m.abs, m.neg);
+        let r = c.shared(key, &[v], |c, p| {
+            let (bits, den) = f2i_bits(c, p[0], abs, neg, ftz);
+            Ok(f2i_core(c, bits, den, &spec)?.0)
+        })?;
+        return c.store_dst(&i.ops[0], r);
+    }
     let (bits, den) = if f16 {
         let h = pick(c, v, m.swz, 16, false)?;
         let h = if m.abs { c.and_k(h, 0x7fff) } else { h };
@@ -484,28 +503,62 @@ fn f2i(c: &mut Ctx, i: &Inst) -> Res<()> {
         if m.swz != Swz::None {
             return bad("F2I source selector");
         }
-        let b = if m.abs { c.and_k(v, 0x7fff_ffff) } else { v };
-        let b = if m.neg {
-            c.sh(op::BITWISE_XOR, b, 0x8000_0000)
-        } else {
-            b
-        };
-        let ex = c.and_k(b, 0x7f80_0000);
-        let mn = c.and_k(b, 0x7f_ffff);
-        let ex0 = c.cmp_k(op::I_EQUAL, ex, 0);
-        let mnz = c.cmp_k(op::I_NOT_EQUAL, mn, 0);
-        let denorm = c.land(ex0, mnz);
-        let sign = c.and_k(b, 0x8000_0000);
-        let zeroed = sign;
-        if ftz {
-            (c.bpick(ex0, zeroed, b), None)
-        } else {
-            (c.bpick(denorm, zeroed, b), Some(denorm))
-        }
+        f2i_bits(c, v, m.abs, m.neg, ftz)
     };
-    let f = c.f32t();
+    let (lo, hi) = f2i_core(c, bits, den, &spec)?;
+    if size == 64 {
+        c.store_pair(&i.ops[0], lo, hi)
+    } else {
+        c.store_dst(&i.ops[0], lo)
+    }
+}
+
+/// What F2I converts: its flags and the integer it produces.
+struct F2i {
+    ntz: bool,
+    signed: bool,
+    size: u32,
+    how: u32,
+    mode: u32,
+}
+
+/// The float bits F2I converts from the source word `v` with its `.ABS` and
+/// `.NEG`, a denormal read as the signed zero, and the denormal's test where
+/// the instruction has no `.FTZ`.
+fn f2i_bits(c: &mut Ctx, v: u32, abs: bool, neg: bool, ftz: bool) -> (u32, Option<u32>) {
+    let b = if abs { c.and_k(v, 0x7fff_ffff) } else { v };
+    let b = if neg {
+        c.sh(op::BITWISE_XOR, b, 0x8000_0000)
+    } else {
+        b
+    };
+    let ex = c.and_k(b, 0x7f80_0000);
+    let mn = c.and_k(b, 0x7f_ffff);
+    let ex0 = c.cmp_k(op::I_EQUAL, ex, 0);
+    let mnz = c.cmp_k(op::I_NOT_EQUAL, mn, 0);
+    let denorm = c.land(ex0, mnz);
+    let sign = c.and_k(b, 0x8000_0000);
+    let zeroed = sign;
+    if ftz {
+        (c.bpick(ex0, zeroed, b), None)
+    } else {
+        (c.bpick(denorm, zeroed, b), Some(denorm))
+    }
+}
+
+/// The converted integer (low word, high word) of the float bits `bits`.
+fn f2i_core(c: &mut Ctx, bits: u32, den: Option<u32>, f: &F2i) -> Res<(u32, u32)> {
+    let F2i {
+        ntz,
+        signed,
+        size,
+        how,
+        mode,
+        ..
+    } = *f;
+    let fl = c.f32t();
     let x = c.as_float(bits);
-    let r = c.ext(f, how, &[x]);
+    let r = c.ext(fl, how, &[x]);
     let is_nan = {
         let t = c.boolt();
         c.m.emit(op::IS_NAN, t, &[x])
@@ -524,7 +577,7 @@ fn f2i(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         (f2i_small(c, r, signed, size, is_nan, ntz), c.kc(0))
     };
-    let (lo, hi) = match den {
+    Ok(match den {
         None => (lo, hi),
         Some(d) => {
             let pos = c.lnot(neg);
@@ -542,12 +595,7 @@ fn f2i(c: &mut Ctx, i: &Inst) -> Res<()> {
             };
             (c.bpick(d, small_lo, lo), c.bpick(d, small_hi, hi))
         }
-    };
-    if size == 64 {
-        c.store_pair(&i.ops[0], lo, hi)
-    } else {
-        c.store_dst(&i.ops[0], lo)
-    }
+    })
 }
 
 /// F2IP: two floats to saturated 8-bit integers, packed under the low half
@@ -782,7 +830,10 @@ pub(crate) fn i2f_with(c: &mut Ctx, i: &Inst, abs: bool, neg: bool) -> Res<()> {
             (v, zero, zero)
         }
     };
-    let r = c.int_to_float(lo, hi, neg, mode, half);
+    let key = format!("I2F {mode} {half}");
+    let r = c.shared_pure(key, &[lo, hi, neg], |c, p| {
+        c.int_to_float(p[0], p[1], p[2], mode, half)
+    });
     c.store_dst(&i.ops[0], r)
 }
 
@@ -846,32 +897,36 @@ fn f2fp(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
     let a = c.usrc(&i.ops[1])?;
     let b = c.usrc(&i.ops[2])?;
-    let mut halves = Vec::new();
-    let convert = if merge { vec![a] } else { vec![a, b] };
-    for v in convert {
-        let mut h = c.f32_to_f16(v, mode, false);
-        if relu {
-            let s = c.and_k(h, 0x8000);
-            let n = c.cmp_k(op::I_NOT_EQUAL, s, 0);
-            let z = c.kc(0);
-            h = c.bpick(n, z, h);
+    let key = format!("F2FP {relu} {sat} {mode} {merge}");
+    let r = c.shared_pure(key, &[a, b], |c, p| {
+        let (a, b) = (p[0], p[1]);
+        let mut halves = Vec::new();
+        let convert = if merge { vec![a] } else { vec![a, b] };
+        for v in convert {
+            let mut h = c.f32_to_f16(v, mode, false);
+            if relu {
+                let s = c.and_k(h, 0x8000);
+                let n = c.cmp_k(op::I_NOT_EQUAL, s, 0);
+                let z = c.kc(0);
+                h = c.bpick(n, z, h);
+            }
+            if sat {
+                let ab = c.and_k(h, 0x7fff);
+                let inf = c.cmp_k(op::I_EQUAL, ab, 0x7c00);
+                let s = c.and_k(h, 0x8000);
+                let mx = c.sh(op::BITWISE_OR, s, 0x7bff);
+                h = c.bpick(inf, mx, h);
+            }
+            halves.push(h);
         }
-        if sat {
-            let ab = c.and_k(h, 0x7fff);
-            let inf = c.cmp_k(op::I_EQUAL, ab, 0x7c00);
-            let s = c.and_k(h, 0x8000);
-            let mx = c.sh(op::BITWISE_OR, s, 0x7bff);
-            h = c.bpick(inf, mx, h);
-        }
-        halves.push(h);
-    }
-    let (hi, lo) = if merge {
-        (b, halves[0])
-    } else {
-        (halves[0], halves[1])
-    };
-    let hi = c.sh(op::SHIFT_LEFT_LOGICAL, hi, 16);
-    let r = c.ib(op::BITWISE_OR, hi, lo);
+        let (hi, lo) = if merge {
+            (b, halves[0])
+        } else {
+            (halves[0], halves[1])
+        };
+        let hi = c.sh(op::SHIFT_LEFT_LOGICAL, hi, 16);
+        c.ib(op::BITWISE_OR, hi, lo)
+    });
     c.store_dst(&i.ops[0], r)
 }
 

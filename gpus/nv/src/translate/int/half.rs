@@ -219,26 +219,41 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
         _ => None,
     };
     if c.host.native_f16 && !md.ftz && !md.f32 {
-        let v = c.native_half(kind, a, b, z);
-        let mut halves = [c.and_k(v, 0xffff), c.sh(op::SHIFT_RIGHT_LOGICAL, v, 16)];
-        for h in &mut halves {
-            let ab = c.and_k(*h, 0x7fff);
-            let nan = c.cmp_k(op::U_GREATER_THAN, ab, 0x7c00);
-            let canon = c.kc(0x7fff);
-            *h = c.bpick(nan, canon, *h);
-            if md.relu {
-                let r = c.h_relu(*h);
-                *h = match relu_pred {
-                    Some(p) => c.bpick(p, r, *h),
-                    None => r,
-                };
+        let (sat, relu) = (md.sat, md.relu);
+        let has_pred = relu_pred.is_some();
+        let pred = match relu_pred {
+            Some(p) => c.b2u(p),
+            None => c.kc(0),
+        };
+        let key = format!("H native {kind} {sat} {relu} {has_pred}");
+        let args = [a.0, a.1, b.0, b.1, z.0, z.1, pred];
+        let r = c.shared_pure(key, &args, |c, p| {
+            let v = c.native_half(kind, (p[0], p[1]), (p[2], p[3]), (p[4], p[5]));
+            let relu_pred = if has_pred {
+                Some(c.cmp_k(op::I_NOT_EQUAL, p[6], 0))
+            } else {
+                None
+            };
+            let mut halves = [c.and_k(v, 0xffff), c.sh(op::SHIFT_RIGHT_LOGICAL, v, 16)];
+            for h in &mut halves {
+                let ab = c.and_k(*h, 0x7fff);
+                let nan = c.cmp_k(op::U_GREATER_THAN, ab, 0x7c00);
+                let canon = c.kc(0x7fff);
+                *h = c.bpick(nan, canon, *h);
+                if relu {
+                    let r = c.h_relu(*h);
+                    *h = match relu_pred {
+                        Some(p) => c.bpick(p, r, *h),
+                        None => r,
+                    };
+                }
+                if sat {
+                    *h = c.h_sat(*h);
+                }
             }
-            if md.sat {
-                *h = c.h_sat(*h);
-            }
-        }
-        let hi = c.sh(op::SHIFT_LEFT_LOGICAL, halves[1], 16);
-        let r = c.ib(op::BITWISE_OR, hi, halves[0]);
+            let hi = c.sh(op::SHIFT_LEFT_LOGICAL, halves[1], 16);
+            c.ib(op::BITWISE_OR, hi, halves[0])
+        });
         return c.store_dst(&i.ops[0], r);
     }
     let lanes: &[usize] = if md.f32 { &[0] } else { &[0, 1] };

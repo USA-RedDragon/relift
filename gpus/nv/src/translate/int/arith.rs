@@ -445,8 +445,12 @@ fn shf(c: &mut Ctx, i: &Inst) -> Res<()> {
         let u = c.u32t();
         c.ext(u, glsl::U_MIN, &[s, k])
     };
-    let (lo, hi) = c.shift64(a, cv, s, left, arith);
-    c.store_dst(&i.ops[0], if high { hi } else { lo })
+    let key = format!("SHF {left} {arith} {high}");
+    let r = c.shared_pure(key, &[a, s, cv], |c, p| {
+        let (lo, hi) = c.shift64(p[0], p[2], p[1], left, arith);
+        if high { hi } else { lo }
+    });
+    c.store_dst(&i.ops[0], r)
 }
 
 pub(crate) fn icmp(c: &mut Ctx, cmp: &str, signed: bool, a: u32, b: u32) -> Res<u32> {
