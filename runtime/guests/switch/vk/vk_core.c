@@ -671,6 +671,8 @@ uint64_t vkh_vkGetInstanceProcAddr(rl_ctx *restrict c, uint8_t *mem)
                 addr = vkf.global.f[cmd] ? a : 0;
             else if (o && emulated(cmd))
                 addr = o->inst->vi_surface ? a : 0;
+            else if (o && cmd == VKG_vkGetPhysicalDevicePresentRectanglesKHR && o->inst->vi_surface && vkf_offscreen())
+                addr = a;
             else if (o)
                 addr = o->fns->f[cmd] ? a : 0;
         }

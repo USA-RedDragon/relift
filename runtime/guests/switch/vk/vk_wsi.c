@@ -111,7 +111,7 @@ uint64_t vkh_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8_t
     if (!pd)
         return vkf_bad_handle(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR, c->x[0]);
     PFN_vkGetPhysicalDevicePresentRectanglesKHR fn = VKF_FN(k.fns, vkGetPhysicalDevicePresentRectanglesKHR);
-    if (!fn)
+    if (!fn && !vkf_offscreen())
         return vkf_no_fn(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR);
     uint32_t *count = vkf_ptr(&k, c->x[2]);
     VkRect2D *rects = vkf_ptr(&k, c->x[3]);
