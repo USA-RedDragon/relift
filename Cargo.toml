@@ -99,6 +99,17 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 2
 
+# The crates that analyze and lift a game run on every `relift build`; at
+# opt-level 0 the analysis of one small Game Boy ROM took 106 s against 4 s.
+[profile.dev.package.relift-gb-analyze]
+opt-level = 3
+
+[profile.dev.package.relift-gb]
+opt-level = 3
+
+[profile.dev.package.relift-cpu-sm83]
+opt-level = 3
+
 [profile.release]
 strip = true
 opt-level = 3
