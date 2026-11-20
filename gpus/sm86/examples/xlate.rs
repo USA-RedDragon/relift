@@ -3,7 +3,18 @@ use relift_gpu_nv::translate::{HostProfile, Options, translate_with};
 fn main() {
     let mut o = Options::default();
     let mut no_fma = false;
-    let args: Vec<String> = std::env::args()
+    let mut flush_fix = None;
+    let mut raw = std::env::args().peekable();
+    let mut kept = Vec::new();
+    while let Some(a) = raw.next() {
+        if a == "--flush-fix" {
+            flush_fix = raw.next().and_then(|v| v.parse::<u8>().ok());
+        } else {
+            kept.push(a);
+        }
+    }
+    let args: Vec<String> = kept
+        .into_iter()
         .filter(|a| {
             let flag = a == "--exact-mufu";
             o.exact_mufu |= flag;
@@ -20,6 +31,11 @@ fn main() {
     };
     o.host = host;
     o.host.fused_fma &= !no_fma;
+    if let Some(f) = flush_fix {
+        o.host.denorm = relift_gpu_nv::translate::Denorm::Unknown;
+        o.host.denorm_preserve_mode = false;
+        o.host.flush_fix = Some(f);
+    }
     match translate_with(&p, &o) {
         Ok(s) => {
             let bytes: Vec<u8> = s.spirv.iter().flat_map(|w| w.to_le_bytes()).collect();

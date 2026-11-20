@@ -202,6 +202,10 @@ int main(int argc, char **argv) {
     const char *want = argc > 2 ? argv[2] : "";
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO, 0, "krun", 1, 0, 0, VK_API_VERSION_1_3 };
     VkInstanceCreateInfo ici = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, 0, 0, &app };
+#ifdef __APPLE__
+    const char *iexts[] = { "VK_KHR_portability_enumeration" };
+    ici.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR; ici.enabledExtensionCount = 1; ici.ppEnabledExtensionNames = iexts;
+#endif
     VkInstance inst; CK(vkCreateInstance(&ici, 0, &inst));
     uint32_t n = 8; VkPhysicalDevice pds[8]; CK(vkEnumeratePhysicalDevices(inst, &n, pds));
     pd = 0;
@@ -247,7 +251,8 @@ int main(int argc, char **argv) {
     f2.features.shaderImageGatherExtended = s2.features.shaderImageGatherExtended;
     f2.features.imageCubeArray = s2.features.imageCubeArray;
     f2.features.shaderResourceMinLod = s2.features.shaderResourceMinLod;
-    const char *exts[4]; uint32_t nexts = 0;
+    const char *exts[8]; uint32_t nexts = 0;
+    if (has_ext("VK_KHR_portability_subset")) exts[nexts++] = "VK_KHR_portability_subset";
     VkPhysicalDeviceShaderClockFeaturesKHR fck = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR };
     fck.shaderSubgroupClock = 1; fck.shaderDeviceClock = 1;
     VkPhysicalDeviceShaderFmaFeaturesKHR ffma = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR, 0, 0, 1, 0 };

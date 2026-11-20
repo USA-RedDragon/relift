@@ -15,3 +15,8 @@ PATH="$spirv_val:$PATH" VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" CARGO_TAR
 PATH="$spirv_val:$PATH" VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" CARGO_TARGET_DIR="$target" \
   KAT_DEVS=llvmpipe \
   python3 -I gpus/sm86/kat/compute/kat.py "$CI_WORK/compute-kat" --replay gpus/sm86/tests/kat/compute.txt
+# The probed denormal corrections, translated and run on the same lavapipe: every one must give the
+# flushing results SM86 gives.
+PATH="$spirv_val:$PATH" VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" CARGO_TARGET_DIR="$target" \
+  KAT_DEVS=llvmpipe \
+  python3 -I gpus/sm86/kat/flush/fix.py "$CI_WORK/flush-fix" run
