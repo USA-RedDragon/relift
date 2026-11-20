@@ -61,7 +61,7 @@ main() {
   jobs+=(mac-tests-workspace mac-release-aarch64-apple-darwin mac-release-x86_64-apple-darwin mac-tests-relift)
   jobs+=(mac-tests-relift-e2e-slow mac-tests-relift-e2e-rest mac-cross-ios-arm64 mac-cross-gba-ios-arm64)
   jobs+=(mac-cross-n64-ios-arm64 mac-cross-sms-ios-arm64 mac-cross-macos-x64 mac-cross-gba-macos-x64)
-  jobs+=(mac-cross-n64-macos-x64 mac-cross-sms-macos-x64)
+  jobs+=(mac-cross-n64-macos-x64 mac-cross-sms-macos-x64 mac-runtime-tests)
 
   if [ $# -gt 0 ]; then
     picked=()
@@ -124,6 +124,7 @@ main() {
     local wf=
     case $1 in
       lint | tests-workspace | tests-gb-devices | tests-relift | tests-relift-e2e | mesh-kat | nds-timing-sdk | docs | gb-corpus | z80-sst | z80-zexdoc | generated | workflows | appimage) wf=ci.yaml:$1 ;;
+      mac-runtime-tests) wf=runtime.yaml:c-tests ;;
       mac-tests-*) wf=ci.yaml:macos-${1#mac-tests-} ;;
       image-*) wf=ci.yaml:cross ;;
       runtime-charter) wf=runtime.yaml:charter ;;
@@ -187,6 +188,7 @@ main() {
       mac-*)
         [ -z "$mac_skip" ] || { echo "$mac_skip"; return 77; }
         case $1 in
+          mac-runtime-tests) on_mac "$1" runtime "scripts/ci/runtime-tests.sh" ;;
           mac-tests-workspace) on_mac "$1" debug "scripts/ci/tests.sh workspace" ;;
           mac-tests-relift) on_mac "$1" debug "scripts/ci/tests.sh relift" ;;
           mac-tests-relift-e2e-slow) on_mac "$1" debug "scripts/ci/tests.sh e2e-slow" ;;
