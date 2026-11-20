@@ -74,14 +74,14 @@ fn a_tiny_program_split_into_pieces_runs_the_same() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
-        .args(["--cache-dir", &cache, "-j", "4", "run"])
-        .env_remove("RELIFT_JOBS")
-        .env("RELIFT_EMIT_PIECE_KIB", "0")
-        .env("RELIFT_EMIT_SHARD_KIB", "0")
-        .current_dir(&project)
-        .output()
-        .expect("the relift binary runs");
+    let out = tiny::relift_env(
+        &project,
+        &["--cache-dir", &cache, "-j", "4", "run"],
+        &[
+            ("RELIFT_EMIT_PIECE_KIB", "0"),
+            ("RELIFT_EMIT_SHARD_KIB", "0"),
+        ],
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");

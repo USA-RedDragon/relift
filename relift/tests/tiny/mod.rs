@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use relift_switch_formats::nso::{NsoSpec, build};
 
+pub mod seed;
+
 pub const MSG: &[u8] = b"hello from relift";
 
 fn adr(rd: u32, off: i32) -> u32 {
@@ -212,14 +214,22 @@ pub fn relift_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> std::proce
         || PathBuf::from(env!("CARGO_BIN_EXE_relift")),
         PathBuf::from,
     );
-    relift_proc::command(bin)
-        .args(args)
-        .env_remove("RELIFT_JOBS")
-        .env("RELIFT_PACKAGE_APPIMAGE", "never")
-        .envs(env.iter().copied())
-        .current_dir(dir)
-        .output()
-        .expect("the relift binary runs")
+    let unseeded = env.contains(&("RELIFT_TEST_SEED", "off"));
+    let run = || {
+        relift_proc::command(&bin)
+            .args(args)
+            .env_remove("RELIFT_JOBS")
+            .env("RELIFT_PACKAGE_APPIMAGE", "never")
+            .envs(env.iter().copied())
+            .current_dir(dir)
+            .output()
+            .expect("the relift binary runs")
+    };
+    if unseeded {
+        run()
+    } else {
+        seed::seeded(dir, args, &bin, run)
+    }
 }
 
 /// Writes the decrypted dump of the tiny program under `root/dump` and

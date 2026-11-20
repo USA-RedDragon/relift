@@ -37,16 +37,22 @@ fn import(root: &Path, project: &Path) -> String {
 }
 
 fn diff(project: &Path, cache: &str, args: &[&str], fault: Option<u64>) -> Run {
-    let mut cmd = relift_proc::command(env!("CARGO_BIN_EXE_relift"));
-    cmd.args(["--cache-dir", cache, "-j", "4", "diff"])
-        .args(args)
-        .env_remove("RELIFT_JOBS")
-        .env_remove("RELIFT_EMIT_TEST_FAULT")
-        .current_dir(project);
-    if let Some(f) = fault {
-        cmd.env("RELIFT_EMIT_TEST_FAULT", format!("{f:x}"));
-    }
-    let out = cmd.output().expect("the relift binary runs");
+    let bin = std::path::PathBuf::from(env!("CARGO_BIN_EXE_relift"));
+    let all: Vec<&str> = ["--cache-dir", cache, "-j", "4", "diff"]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
+    let out = tiny::seed::seeded(project, &all, &bin, || {
+        let mut cmd = relift_proc::command(&bin);
+        cmd.args(&all)
+            .env_remove("RELIFT_JOBS")
+            .env_remove("RELIFT_EMIT_TEST_FAULT")
+            .current_dir(project);
+        if let Some(f) = fault {
+            cmd.env("RELIFT_EMIT_TEST_FAULT", format!("{f:x}"));
+        }
+        cmd.output().expect("the relift binary runs")
+    });
     Run {
         code: out.status.code(),
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),

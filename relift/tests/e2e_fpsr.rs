@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 
 use relift_switch_formats::nso::{NsoSpec, build};
 
+#[path = "tiny/seed.rs"]
+mod seed;
+
 const MSG: &[u8] = b"divide by zero seen";
 const MSG2: &[u8] = b"fp ok";
 
@@ -62,14 +65,17 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn relift(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
-    relift_proc::command(env!("CARGO_BIN_EXE_relift"))
-        .args(args)
-        .env_remove("RELIFT_JOBS")
-        .env_remove("RELIFT_FP_EXACT")
-        .envs(env.iter().copied())
-        .current_dir(dir)
-        .output()
-        .expect("the relift binary runs")
+    let bin = Path::new(env!("CARGO_BIN_EXE_relift"));
+    seed::seeded(dir, args, bin, || {
+        relift_proc::command(bin)
+            .args(args)
+            .env_remove("RELIFT_JOBS")
+            .env_remove("RELIFT_FP_EXACT")
+            .envs(env.iter().copied())
+            .current_dir(dir)
+            .output()
+            .expect("the relift binary runs")
+    })
 }
 
 fn bl(from: u32, to: u32) -> u32 {
