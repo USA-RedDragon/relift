@@ -2518,6 +2518,9 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_core_leave();
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "present %llu: texture 0x%llx, %ux%u", (unsigned long long)n, (unsigned long long)texture,
+               rect[2], rect[3]);
     nvn_frame_presented();
     present_rate(n + 1);
     if (rgb)
