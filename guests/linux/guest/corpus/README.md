@@ -19,6 +19,7 @@ and optionally
 (`zig cc -target aarch64-linux-musl -static`), as `<out-dir>/<name>.<variant>`.
 `record.sh <out-dir>` pushes each `static` build to the shared arm64 test
 device in its own folder under `/data/local/tmp/relift-elf`, runs it and
-writes the two expected files; it takes the device lock around every use of
-the device and removes what it pushed. `run.sh <out-dir> <name> <variant>`
+writes the two expected files; it takes the lock `RELIFT_ADB_LOCK` names (default: a file under
+`$XDG_RUNTIME_DIR` or the output directory) around every use of the
+device, picks the device with `ANDROID_SERIAL`, and removes what it pushed. `run.sh <out-dir> <name> <variant>`
 runs one build under `qemu-aarch64` when that is installed.

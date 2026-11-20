@@ -2,7 +2,7 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: record.sh OUT_DIR}
-lock=${RELIFT_THOR_LOCK:-$HOME/.cache/relift/thor.lock}
+lock=${RELIFT_ADB_LOCK:-${XDG_RUNTIME_DIR:-$out}/relift-adb.lock}
 remote=/data/local/tmp/relift-elf
 dev() { flock "$lock" adb "$@"; }
 quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
@@ -32,4 +32,4 @@ for dir in "$here"/*/; do
     tr -d '\r' < "$out/$name.code" > "$dir/expected.exit"
     dev shell "rm -rf $work"
 done
-dev shell "rmdir $remote 2>/dev/null; true"
+dev shell "rm -rf $remote"
