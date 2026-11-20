@@ -315,6 +315,12 @@ jobs:
             .
             guests/gb/devices
 
+      - name: Cache the built ROM programs, keyed by everything that shapes them
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/gb-work
+          key: gb-corpus-${{ hashFiles('Cargo.lock', 'core/**', 'cpus/sm83/**', 'guests/gb/**', 'relift/src/**', 'runtime/core/**', 'runtime/cpus/sm83/**', 'runtime/guests/gb/**', 'scripts/ci/gb-corpus.sh') }}
+
       - name: Import, build and run the cases of runtime/guests/gb/devtests/ci_cases.toml
         run: scripts/ci/gb-corpus.sh
 
