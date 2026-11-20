@@ -9,6 +9,7 @@
 #include "runner.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -285,7 +286,7 @@ TEST(signal_masks_and_actions_round_trip_and_default_actions_end_the_process)
     uint64_t old;
     memcpy(&old, rl_mem_base() + 0x401008, 8);
     CHECK_EQ(old, 0);
-    CHECK_EQ(lx.blocked, 1ull << (L_SIGUSR1 - 1));
+    CHECK_EQ(lx_cur()->blocked, 1ull << (L_SIGUSR1 - 1));
     CHECK_EQ(sys(c, NR_rt_sigprocmask, L_SIG_BLOCK, 0x401000, 0, 4, 0, 0), -L_EINVAL);
     CHECK_EQ(sys(c, NR_kill, (uint64_t)lx.pid, L_SIGUSR1, 0, 0, 0, 0), 0);
     CHECK_EQ(sys(c, NR_rt_sigpending, 0x401020, 8, 0, 0, 0, 0), 0);
@@ -345,4 +346,41 @@ TEST(the_kernel_header_values_match_the_uapi_headers_where_the_host_has_them)
     CHECK_EQ(NR_ppoll, __NR_ppoll);
 #endif
 #endif
+}
+
+static void *waiter_main(void *arg)
+{
+    int64_t *out = arg;
+    rl_thread_bind(NULL);
+    *out = lx_futex_wait(0x401000, 5, -1, ~0u);
+    return NULL;
+}
+
+TEST(futex_wake_releases_a_waiter_and_a_changed_word_does_not_wait)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint32_t v = 5;
+    rl_vm_kernel_write(&lx.vm, 0x401000, &v, 4);
+    CHECK_EQ(lx_futex_wait(0x401000, 6, -1, ~0u), -L_EAGAIN);
+    CHECK_EQ(lx_futex_wait(0x401000, 5, 1000000, ~0u), -L_ETIMEDOUT);
+    pthread_t th;
+    int64_t result = 1;
+    CHECK_EQ(pthread_create(&th, NULL, waiter_main, &result), 0);
+    int woke = 0;
+    for (int i = 0; i < 2000 && !woke; i++) {
+        woke = lx_futex_wake(0x401000, 1, ~0u);
+        rl_sleep_ns(1000000);
+    }
+    pthread_join(th, NULL);
+    CHECK_EQ(woke, 1);
+    CHECK_EQ(result, 0);
+    CHECK_EQ(lx_futex_wake(0x401000, 1, ~0u), 0);
+}
+
+TEST(a_clone_that_is_not_a_thread_is_refused)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    CHECK_EQ(sys(c, NR_clone, 17, 0, 0, 0, 0, 0), -L_ENOSYS);
 }

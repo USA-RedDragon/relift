@@ -649,6 +649,8 @@ static inline void rl_yield(void)
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
 }
 /** @brief SEV and SEVL: no effect, because rl_wfe never sleeps longer than its bounded wait. */
+/** @brief Records the guest address of the SVC about to run (c->pc), for the guest layer's call handler. */
+static inline void rl_svc_site(rl_ctx *c, uint64_t pc) { c->pc = pc; }
 static inline void rl_sev(void) { __atomic_signal_fence(__ATOMIC_SEQ_CST); }
 
 /**

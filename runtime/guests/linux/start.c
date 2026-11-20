@@ -184,15 +184,36 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
     return 0;
 }
 
+static int64_t locked(lx_sys_fn *f, rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    lx_mutex_lock(&lx_big);
+    int64_t r = f(c, mem, a);
+    lx_mutex_unlock(&lx_big);
+    return r;
+}
+
 static int64_t dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6])
 {
+    int64_t r;
     switch (nr) {
-    case NR_brk: return lx_sys_brk(c, mem, a);
-    case NR_mmap: return lx_sys_mmap(c, mem, a);
-    case NR_munmap: return lx_sys_munmap(c, mem, a);
-    case NR_mprotect: return lx_sys_mprotect(c, mem, a);
-    case NR_mremap: return lx_sys_mremap(c, mem, a);
-    case NR_madvise: return lx_sys_madvise(c, mem, a);
+    case NR_brk: return locked(lx_sys_brk, c, mem, a);
+    case NR_mmap: return locked(lx_sys_mmap, c, mem, a);
+    case NR_munmap: return locked(lx_sys_munmap, c, mem, a);
+    case NR_mprotect: return locked(lx_sys_mprotect, c, mem, a);
+    case NR_mremap: return locked(lx_sys_mremap, c, mem, a);
+    case NR_madvise: return locked(lx_sys_madvise, c, mem, a);
+    case NR_clone: return lx_sys_clone(c, mem, a);
+    case NR_rseq:
+    case NR_clone3: return -L_ENOSYS;
+    case NR_openat:
+    case NR_close:
+    case NR_dup:
+    case NR_dup3:
+    case NR_pipe2:
+    case NR_fcntl:
+    case NR_getdents64:
+        r = locked(lx_fs_call(nr), c, mem, a);
+        return r;
     default: break;
     }
     lx_sys_fn *f = lx_fs_call(nr);
@@ -281,6 +302,15 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     if (!t)
         return log_fail("cannot create the main thread");
     rl_thread_bind(t);
+    lx_thread *main_thread = calloc(1, sizeof *main_thread);
+    if (!main_thread)
+        return log_fail("out of memory");
+    main_thread->rt = t;
+    main_thread->main = true;
+    main_thread->tid = lx.pid;
+    t->guest = main_thread;
+    lx.threads = main_thread;
+    lx.live = 1;
     rl_ctx *c = t->ctx;
     char *self[1] = { (char *)p->name };
     if (argc < 1) {
@@ -298,7 +328,13 @@ int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
     rl_ctx *c;
     if (lx_start(p, argc, argv, &c) != 0)
         return 1;
-    int status = finish(c, rl_call_guest(c, rl_mem_base(), p->entry));
+    int rc = rl_call_guest(c, rl_mem_base(), p->entry);
+    int status = finish(c, rc);
+    if (rc == RL_PENDING && c->pend.kind == RL_PEND_EXIT_THREAD) {
+        lx_thread_end(lx_cur());
+        lx_wait_others();
+        status = (int)lx.exit_status;
+    }
     lx_fs_shutdown();
     rl_process_exit((uint32_t)status);
     return status;

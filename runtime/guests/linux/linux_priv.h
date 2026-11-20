@@ -9,6 +9,7 @@
 #include "abi.h"
 #include "core.h"
 #include "linux.h"
+#include "lxsync.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -61,6 +62,32 @@ typedef struct lx_pending_sig {
     bool queued;
 } lx_pending_sig;
 
+/** @brief One guest thread: the state the kernel keeps per thread. */
+typedef struct lx_thread {
+    /** @brief The runtime thread, whose context holds the registers. */
+    struct rl_thread *rt;
+    /** @brief The thread id. */
+    int32_t tid;
+    /** @brief Whether this is the thread the program started on. */
+    bool main;
+    /** @brief The address of the instruction the thread starts at (a clone's child). */
+    uint64_t start;
+    /** @brief The blocked signals, bit n - 1 for signal n. */
+    uint64_t blocked;
+    /** @brief The queued signals sent to this thread, by number. */
+    lx_pending_sig pending[L_NSIG + 1];
+    /** @brief The alternate signal stack. */
+    uint64_t altstack_sp;
+    /** @brief Its size. */
+    uint64_t altstack_size;
+    /** @brief Whether a handler runs on it now. */
+    bool on_altstack;
+    /** @brief Where set_tid_address or clone says the thread id is cleared when the thread ends. */
+    uint64_t clear_child_tid;
+    /** @brief The next thread. */
+    struct lx_thread *next;
+} lx_thread;
+
 /** @brief The process. */
 typedef struct lx_state {
     /** @brief The guest address space. */
@@ -89,26 +116,40 @@ typedef struct lx_state {
     lx_fd fds[LX_MAX_FDS];
     /** @brief Dispositions by signal number. */
     lx_sigaction sig[L_NSIG + 1];
-    /** @brief The blocked signals, bit n - 1 for signal n. */
-    uint64_t blocked;
-    /** @brief The queued signals by number. */
-    lx_pending_sig pending[L_NSIG + 1];
-    /** @brief The alternate signal stack. */
-    uint64_t altstack_sp;
-    /** @brief Its size. */
-    uint64_t altstack_size;
-    /** @brief Whether a handler runs on it now. */
-    bool on_altstack;
     /** @brief The umask. */
     uint32_t umask;
-    /** @brief Where set_tid_address says the thread id is cleared. */
-    uint64_t clear_child_tid;
+    /** @brief The threads, newest first; threads_lock guards the list, live and exit_status. */
+    lx_thread *threads;
+    /** @brief Threads that have not ended. */
+    int live;
+    /** @brief The status the last thread to end gave. */
+    uint32_t exit_status;
+    /** @brief The next thread id. */
+    int32_t next_tid;
     /** @brief Resource limits, soft then hard. */
     uint64_t rlim[L_RLIM_NLIMITS][2];
 } lx_state;
 
 /** @brief The process. */
 extern lx_state lx;
+/** @brief Guards the address map, the descriptor table and the thread list. */
+extern lx_mutex lx_big;
+/** @brief Signals the last thread's end to the main thread. */
+extern lx_cond lx_ended;
+
+/** @brief The calling guest thread. */
+static inline lx_thread *lx_cur(void) { return rl_thread_current()->guest; }
+
+/** @brief clone for threads. */
+int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
+/** @brief Ends the calling thread: clears its tid word, wakes its waiters, leaves the list. */
+void lx_thread_end(lx_thread *t);
+/** @brief Waits until the other threads have ended. */
+void lx_wait_others(void);
+/** @brief Wakes up to n futex waiters on guest address a; how many woke. */
+int lx_futex_wake(uint64_t a, uint32_t n, uint32_t bits);
+/** @brief futex wait: 0, -EAGAIN, -ETIMEDOUT or -EINTR. */
+int64_t lx_futex_wait(uint64_t a, uint32_t val, int64_t timeout_ns, uint32_t bits);
 
 /** @brief Whether [a, a + n) lies in guest memory with the permission bits perm (RL_VM_R, RL_VM_W). */
 bool lx_ok(uint64_t a, uint64_t n, uint32_t perm);

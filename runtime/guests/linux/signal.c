@@ -31,8 +31,8 @@ enum {
     FRAME_BYTES = L_SIGINFO_BYTES + L_UCONTEXT_MCONTEXT + L_SIGCONTEXT_BYTES
 };
 
-#define FPSIMD_MAGIC 0x46508001u
-#define FPSIMD_SIZE 0x210u
+#define LX_FPSIMD_MAGIC 0x46508001u
+#define LX_FPSIMD_SIZE 0x210u
 
 static uint64_t bit(int sig) { return 1ull << (sig - 1); }
 
@@ -41,15 +41,35 @@ static uint64_t unblockable(void) { return bit(L_SIGKILL) | bit(L_SIGSTOP); }
 void lx_signal_init(void)
 {
     memset(lx.sig, 0, sizeof lx.sig);
-    memset(lx.pending, 0, sizeof lx.pending);
-    lx.blocked = 0;
+}
+
+static void raise_on(lx_thread *t, int sig, int32_t code)
+{
+    t->pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = 0, .queued = true };
 }
 
 void lx_signal_raise(int sig, int32_t code)
 {
     if (sig < 1 || sig > L_NSIG)
         return;
-    lx.pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = 0, .queued = true };
+    raise_on(lx_cur(), sig, code);
+}
+
+/** @brief The thread a signal sent to the process goes to: this one unless it blocks the signal, then the first that does not. */
+static lx_thread *receiver(int sig)
+{
+    lx_thread *me = lx_cur();
+    if (!(me->blocked & (1ull << (sig - 1))))
+        return me;
+    lx_mutex_lock(&lx_big);
+    lx_thread *pick = me;
+    for (lx_thread *t = lx.threads; t; t = t->next)
+        if (!(t->blocked & (1ull << (sig - 1)))) {
+            pick = t;
+            break;
+        }
+    lx_mutex_unlock(&lx_big);
+    return pick;
 }
 
 static bool default_ignores(int sig)
@@ -60,9 +80,9 @@ static bool default_ignores(int sig)
 
 static int next_pending(void)
 {
-    uint64_t mask = lx.blocked & ~unblockable();
+    uint64_t mask = lx_cur()->blocked & ~unblockable();
     for (int s = 1; s <= L_NSIG; s++)
-        if (lx.pending[s].queued && !(mask & bit(s)))
+        if (lx_cur()->pending[s].queued && !(mask & bit(s)))
             return s;
     return 0;
 }
@@ -74,8 +94,8 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     lx_sigaction act = lx.sig[sig];
     uint64_t sp;
     bool on_alt = false;
-    if ((act.flags & L_SA_ONSTACK) && lx.altstack_size && !lx.on_altstack) {
-        sp = lx.altstack_sp + lx.altstack_size;
+    if ((act.flags & L_SA_ONSTACK) && lx_cur()->altstack_size && !lx_cur()->on_altstack) {
+        sp = lx_cur()->altstack_sp + lx_cur()->altstack_size;
         on_alt = true;
     } else {
         sp = c->sp;
@@ -90,30 +110,30 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     memcpy(f + FRAME_INFO + 16, &p->pid, 4);
     memcpy(f + FRAME_INFO + 20, &p->uid, 4);
     uint8_t *uc = f + FRAME_UC;
-    int32_t ss_flags = lx.on_altstack ? L_SS_ONSTACK : (lx.altstack_size ? 0 : L_SS_DISABLE);
-    memcpy(uc + UC_STACK, &lx.altstack_sp, 8);
+    int32_t ss_flags = lx_cur()->on_altstack ? L_SS_ONSTACK : (lx_cur()->altstack_size ? 0 : L_SS_DISABLE);
+    memcpy(uc + UC_STACK, &lx_cur()->altstack_sp, 8);
     memcpy(uc + UC_STACK + 8, &ss_flags, 4);
-    memcpy(uc + UC_STACK + 16, &lx.altstack_size, 8);
-    memcpy(uc + UC_SIGMASK, &lx.blocked, 8);
+    memcpy(uc + UC_STACK + 16, &lx_cur()->altstack_size, 8);
+    memcpy(uc + UC_SIGMASK, &lx_cur()->blocked, 8);
     memcpy(uc + UC_REGS, c->x, 31 * 8);
     memcpy(uc + UC_SP, &c->sp, 8);
-    uint32_t hdr[2] = { FPSIMD_MAGIC, FPSIMD_SIZE };
+    uint32_t hdr[2] = { LX_FPSIMD_MAGIC, LX_FPSIMD_SIZE };
     uint32_t fp[2] = { rl_mrs_fpsr(c), (uint32_t)rl_mrs_fpcr(c) };
     memcpy(uc + UC_RESERVED, hdr, 8);
     memcpy(uc + UC_RESERVED + 8, fp, 8);
     for (int i = 0; i < 32; i++)
         memcpy(uc + UC_RESERVED + 16 + 16 * i, &c->v[i], 16);
 
-    uint64_t old_blocked = lx.blocked;
-    bool old_on_alt = lx.on_altstack;
-    lx.blocked |= act.mask;
+    uint64_t old_blocked = lx_cur()->blocked;
+    bool old_on_alt = lx_cur()->on_altstack;
+    lx_cur()->blocked |= act.mask;
     if (!(act.flags & L_SA_NODEFER))
-        lx.blocked |= bit(sig);
-    lx.blocked &= ~unblockable();
+        lx_cur()->blocked |= bit(sig);
+    lx_cur()->blocked &= ~unblockable();
     if (act.flags & L_SA_RESETHAND)
         lx.sig[sig] = (lx_sigaction){ 0 };
     if (on_alt)
-        lx.on_altstack = true;
+        lx_cur()->on_altstack = true;
 
     c->x[0] = (uint64_t)sig;
     c->x[1] = frame + FRAME_INFO;
@@ -146,8 +166,8 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
         memcpy(&c->v[i], uc + UC_RESERVED + 16 + 16 * i, 16);
     uint64_t mask;
     memcpy(&mask, uc + UC_SIGMASK, 8);
-    lx.blocked = mask & ~unblockable();
-    lx.on_altstack = old_on_alt;
+    lx_cur()->blocked = mask & ~unblockable();
+    lx_cur()->on_altstack = old_on_alt;
     (void)old_blocked;
     return RL_OK;
 }
@@ -158,8 +178,8 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
  */
 static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c)
 {
-    *p = lx.pending[sig];
-    lx.pending[sig].queued = false;
+    *p = lx_cur()->pending[sig];
+    lx_cur()->pending[sig].queued = false;
     *ignored = false;
     lx_sigaction act = lx.sig[sig];
     if (act.handler == L_SIG_IGN || (act.handler == L_SIG_DFL && default_ignores(sig))) {
@@ -219,7 +239,7 @@ static int64_t sys_rt_sigaction(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         }
         lx.sig[sig] = n;
         if (n.handler == L_SIG_IGN || (n.handler == L_SIG_DFL && default_ignores(sig)))
-            lx.pending[sig].queued = false;
+            lx_cur()->pending[sig].queued = false;
         return 0;
     }
     if (a[2]) {
@@ -236,25 +256,25 @@ static int64_t sys_rt_sigprocmask(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     if (a[3] != L_SIGSET_BYTES)
         return -L_EINVAL;
-    uint64_t old = lx.blocked;
+    uint64_t old = lx_cur()->blocked;
     if (a[1]) {
         uint64_t set;
         if (!lx_get(&set, a[1], 8))
             return -L_EFAULT;
         switch ((uint32_t)a[0]) {
         case L_SIG_BLOCK:
-            lx.blocked |= set;
+            lx_cur()->blocked |= set;
             break;
         case L_SIG_UNBLOCK:
-            lx.blocked &= ~set;
+            lx_cur()->blocked &= ~set;
             break;
         case L_SIG_SETMASK:
-            lx.blocked = set;
+            lx_cur()->blocked = set;
             break;
         default:
             return -L_EINVAL;
         }
-        lx.blocked &= ~unblockable();
+        lx_cur()->blocked &= ~unblockable();
     }
     if (a[2] && !lx_put(a[2], &old, 8))
         return -L_EFAULT;
@@ -269,7 +289,7 @@ static int64_t sys_rt_sigpending(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EINVAL;
     uint64_t set = 0;
     for (int s = 1; s <= L_NSIG; s++)
-        if (lx.pending[s].queued && (lx.blocked & bit(s)))
+        if (lx_cur()->pending[s].queued && (lx_cur()->blocked & bit(s)))
             set |= bit(s);
     return lx_put(a[0], &set, 8) ? 0 : -L_EFAULT;
 }
@@ -279,11 +299,11 @@ static int64_t sys_sigaltstack(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)c;
     (void)mem;
     if (a[1]) {
-        int32_t flags = lx.on_altstack ? L_SS_ONSTACK : (lx.altstack_size ? 0 : L_SS_DISABLE);
+        int32_t flags = lx_cur()->on_altstack ? L_SS_ONSTACK : (lx_cur()->altstack_size ? 0 : L_SS_DISABLE);
         uint8_t o[24] = { 0 };
-        memcpy(o, &lx.altstack_sp, 8);
+        memcpy(o, &lx_cur()->altstack_sp, 8);
         memcpy(o + 8, &flags, 4);
-        memcpy(o + 16, &lx.altstack_size, 8);
+        memcpy(o + 16, &lx_cur()->altstack_size, 8);
         if (!lx_put(a[1], o, sizeof o))
             return -L_EFAULT;
     }
@@ -296,30 +316,41 @@ static int64_t sys_sigaltstack(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         memcpy(&sp, n, 8);
         memcpy(&flags, n + 8, 4);
         memcpy(&size, n + 16, 8);
-        if (lx.on_altstack)
+        if (lx_cur()->on_altstack)
             return -L_EPERM;
         if (flags & ~L_SS_DISABLE)
             return -L_EINVAL;
         if (flags & L_SS_DISABLE) {
-            lx.altstack_sp = 0;
-            lx.altstack_size = 0;
+            lx_cur()->altstack_sp = 0;
+            lx_cur()->altstack_size = 0;
         } else {
             if (size < L_MINSIGSTKSZ)
                 return -L_ENOMEM;
-            lx.altstack_sp = sp;
-            lx.altstack_size = size;
+            lx_cur()->altstack_sp = sp;
+            lx_cur()->altstack_size = size;
         }
     }
     return 0;
 }
 
-static int64_t send(int sig, int32_t code)
+static int64_t send_to(lx_thread *t, int sig, int32_t code)
 {
     if (sig < 0 || sig > L_NSIG)
         return -L_EINVAL;
     if (sig)
-        lx_signal_raise(sig, code);
+        raise_on(t, sig, code);
     return 0;
+}
+
+static lx_thread *find_thread(int32_t tid)
+{
+    lx_thread *found = NULL;
+    lx_mutex_lock(&lx_big);
+    for (lx_thread *t = lx.threads; t; t = t->next)
+        if (t->tid == tid)
+            found = t;
+    lx_mutex_unlock(&lx_big);
+    return found;
 }
 
 static int64_t sys_kill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -327,9 +358,12 @@ static int64_t sys_kill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)c;
     (void)mem;
     int32_t pid = (int32_t)a[0];
+    int sig = (int)a[1];
     if (pid != lx.pid && pid != 0 && pid != -1 && pid != -lx.pid)
         return -L_ESRCH;
-    return send((int)a[1], L_SI_USER);
+    if (sig < 0 || sig > L_NSIG)
+        return -L_EINVAL;
+    return send_to(sig ? receiver(sig) : lx_cur(), sig, L_SI_USER);
 }
 
 static int64_t sys_tkill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -338,9 +372,8 @@ static int64_t sys_tkill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     if ((int32_t)a[0] <= 0)
         return -L_EINVAL;
-    if ((int32_t)a[0] != lx.pid)
-        return -L_ESRCH;
-    return send((int)a[1], L_SI_TKILL);
+    lx_thread *t = find_thread((int32_t)a[0]);
+    return t ? send_to(t, (int)a[1], L_SI_TKILL) : -L_ESRCH;
 }
 
 static int64_t sys_tgkill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -349,9 +382,10 @@ static int64_t sys_tgkill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     if ((int32_t)a[0] <= 0 || (int32_t)a[1] <= 0)
         return -L_EINVAL;
-    if ((int32_t)a[0] != lx.pid || (int32_t)a[1] != lx.pid)
+    if ((int32_t)a[0] != lx.pid)
         return -L_ESRCH;
-    return send((int)a[2], L_SI_TKILL);
+    lx_thread *t = find_thread((int32_t)a[1]);
+    return t ? send_to(t, (int)a[2], L_SI_TKILL) : -L_ESRCH;
 }
 
 static int64_t sys_rt_sigtimedwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -363,9 +397,9 @@ static int64_t sys_rt_sigtimedwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EFAULT;
     for (;;) {
         for (int s = 1; s <= L_NSIG; s++)
-            if (lx.pending[s].queued && (set & bit(s))) {
-                lx_pending_sig p = lx.pending[s];
-                lx.pending[s].queued = false;
+            if (lx_cur()->pending[s].queued && (set & bit(s))) {
+                lx_pending_sig p = lx_cur()->pending[s];
+                lx_cur()->pending[s].queued = false;
                 if (a[1]) {
                     uint8_t info[L_SIGINFO_BYTES] = { 0 };
                     int32_t si[4] = { s, 0, p.code, 0 };
@@ -402,15 +436,15 @@ static int64_t sys_rt_sigsuspend(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     uint64_t set;
     if (!lx_get(&set, a[0], 8))
         return -L_EFAULT;
-    uint64_t old = lx.blocked;
-    lx.blocked = set & ~unblockable();
+    uint64_t old = lx_cur()->blocked;
+    lx_cur()->blocked = set & ~unblockable();
     if (!next_pending()) {
-        lx.blocked = old;
+        lx_cur()->blocked = old;
         rl_guest_fatal(c, "signal", "sigsuspend with no other thread or process to send a signal");
         return LX_PENDING;
     }
     int rc = lx_signal_deliver(c, mem);
-    lx.blocked = old;
+    lx_cur()->blocked = old;
     if (rc != RL_OK)
         return LX_PENDING;
     return -L_EINTR;

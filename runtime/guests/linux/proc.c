@@ -23,12 +23,28 @@ void lx_proc_init(void)
     lx.rlim[L_RLIMIT_MEMLOCK][0] = lx.rlim[L_RLIMIT_MEMLOCK][1] = 64 * 1024;
     lx.umask = 022;
     lx.pid = hio_pid();
+    lx.next_tid = lx.pid + 1;
+}
+
+static int64_t sys_exit_group(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)mem;
+    rl_pend_exit_process(c, (uint32_t)a[0] & 0xff);
+    return LX_PENDING;
 }
 
 static int64_t sys_exit(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)mem;
-    rl_pend_exit_process(c, (uint32_t)a[0] & 0xff);
+    lx_mutex_lock(&lx_big);
+    lx.exit_status = (uint32_t)a[0] & 0xff;
+    int others = lx.live - 1;
+    lx_mutex_unlock(&lx_big);
+    if (others <= 0) {
+        rl_pend_exit_process(c, lx.exit_status);
+        return LX_PENDING;
+    }
+    rl_pend_exit_thread(c);
     return LX_PENDING;
 }
 
@@ -36,8 +52,8 @@ static int64_t sys_set_tid_address(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
     (void)mem;
-    lx.clear_child_tid = a[0];
-    return lx.pid;
+    lx_cur()->clear_child_tid = a[0];
+    return lx_cur()->tid;
 }
 
 static int64_t sys_getpid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -46,6 +62,14 @@ static int64_t sys_getpid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     (void)a;
     return lx.pid;
+}
+
+static int64_t sys_gettid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    (void)a;
+    return lx_cur()->tid;
 }
 
 static int64_t sys_getppid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -366,40 +390,53 @@ static int64_t sys_prctl(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 
 static int64_t sys_futex(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
+    (void)c;
     (void)mem;
     uint32_t op = (uint32_t)a[1];
     uint32_t cmd = op & (uint32_t)L_FUTEX_CMD_MASK;
     switch (cmd) {
     case L_FUTEX_WAIT:
     case L_FUTEX_WAIT_BITSET: {
-        uint32_t cur;
-        if (!lx_get(&cur, a[0], 4))
-            return -L_EFAULT;
-        if (cur != (uint32_t)a[2])
-            return -L_EAGAIN;
-        if (cmd == L_FUTEX_WAIT_BITSET && (uint32_t)a[5] == 0)
+        uint32_t bits = cmd == L_FUTEX_WAIT_BITSET ? (uint32_t)a[5] : ~0u;
+        if (bits == 0)
             return -L_EINVAL;
-        if (!a[3]) {
-            rl_guest_fatal(c, "futex", "a futex wait on 0x%llx with no timeout and no other thread to wake it", (unsigned long long)a[0]);
-            return LX_PENDING;
+        int64_t timeout = -1;
+        if (a[3]) {
+            l_timespec ts;
+            if (!lx_get(&ts, a[3], sizeof ts))
+                return -L_EFAULT;
+            if (ts.sec < 0 || ts.nsec < 0 || ts.nsec >= 1000000000)
+                return -L_EINVAL;
+            timeout = ts.sec * 1000000000ll + ts.nsec;
+            if (cmd == L_FUTEX_WAIT_BITSET) {
+                int64_t now;
+                int64_t rc = clock_ns((op & L_FUTEX_CLOCK_REALTIME) ? L_CLOCK_REALTIME : L_CLOCK_MONOTONIC, &now);
+                if (rc < 0)
+                    return rc;
+                timeout = timeout > now ? timeout - now : 0;
+            }
         }
-        int64_t rc = sleep_for(a[3], 0, cmd == L_FUTEX_WAIT_BITSET, (op & L_FUTEX_CLOCK_REALTIME) ? L_CLOCK_REALTIME : L_CLOCK_MONOTONIC);
-        return rc < 0 ? rc : -L_ETIMEDOUT;
+        return lx_futex_wait(a[0], (uint32_t)a[2], timeout, bits);
     }
     case L_FUTEX_WAKE:
-    case L_FUTEX_WAKE_BITSET:
-        if (cmd == L_FUTEX_WAKE_BITSET && (uint32_t)a[5] == 0)
+    case L_FUTEX_WAKE_BITSET: {
+        uint32_t bits = cmd == L_FUTEX_WAKE_BITSET ? (uint32_t)a[5] : ~0u;
+        if (bits == 0)
             return -L_EINVAL;
         if (!lx_ok(a[0], 4, RL_VM_R))
             return -L_EFAULT;
-        return 0;
+        return lx_futex_wake(a[0], (uint32_t)a[2] > 0x7fffffffu ? 0x7fffffffu : (uint32_t)a[2], bits);
+    }
     case L_FUTEX_REQUEUE:
-        return lx_ok(a[0], 4, RL_VM_R) ? 0 : -L_EFAULT;
     case L_FUTEX_CMP_REQUEUE: {
-        uint32_t cur;
-        if (!lx_get(&cur, a[0], 4))
-            return -L_EFAULT;
-        return cur != (uint32_t)a[5] ? -L_EAGAIN : 0;
+        if (cmd == L_FUTEX_CMP_REQUEUE) {
+            uint32_t cur;
+            if (!lx_get(&cur, a[0], 4))
+                return -L_EFAULT;
+            if (cur != (uint32_t)a[5])
+                return -L_EAGAIN;
+        }
+        return lx_futex_wake(a[0], (uint32_t)a[2], ~0u);
     }
     case L_FUTEX_WAKE_OP: {
         uint32_t v, op2 = (uint32_t)a[5];
@@ -419,8 +456,20 @@ static int64_t sys_futex(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         }
         if (!lx_put(a[4], &nv, 4))
             return -L_EFAULT;
-        (void)cmparg;
-        return 0;
+        int woke = lx_futex_wake(a[0], (uint32_t)a[2], ~0u);
+        bool hit;
+        switch ((op2 >> 24) & 15) {
+        case 0: hit = v == cmparg; break;
+        case 1: hit = v != cmparg; break;
+        case 2: hit = (int32_t)v < (int32_t)cmparg; break;
+        case 3: hit = (int32_t)v <= (int32_t)cmparg; break;
+        case 4: hit = (int32_t)v > (int32_t)cmparg; break;
+        case 5: hit = (int32_t)v >= (int32_t)cmparg; break;
+        default: return -L_ENOSYS;
+        }
+        if (hit)
+            woke += lx_futex_wake(a[4], (uint32_t)a[3], ~0u);
+        return woke;
     }
     default:
         return -L_ENOSYS;
@@ -430,11 +479,11 @@ static int64_t sys_futex(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 lx_sys_fn *lx_proc_call(uint32_t nr)
 {
     switch (nr) {
-    case NR_exit:
-    case NR_exit_group: return sys_exit;
+    case NR_exit: return sys_exit;
+    case NR_exit_group: return sys_exit_group;
     case NR_set_tid_address: return sys_set_tid_address;
-    case NR_getpid:
-    case NR_gettid: return sys_getpid;
+    case NR_getpid: return sys_getpid;
+    case NR_gettid: return sys_gettid;
     case NR_getppid: return sys_getppid;
     case NR_getuid:
     case NR_geteuid: return sys_getuid;

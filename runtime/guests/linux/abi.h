@@ -84,6 +84,7 @@ enum rl_linux_nr {
     NR_gettid = 178,
     NR_sysinfo = 179,
     NR_brk = 214,
+    NR_clone = 220,
     NR_munmap = 215,
     NR_mremap = 216,
     NR_mmap = 222,
@@ -92,7 +93,8 @@ enum rl_linux_nr {
     NR_prlimit64 = 261,
     NR_getrandom = 278,
     NR_statx = 291,
-    NR_rseq = 293
+    NR_rseq = 293,
+    NR_clone3 = 435
 };
 
 /** @brief Linux errno values (asm-generic/errno-base.h and errno.h). */
