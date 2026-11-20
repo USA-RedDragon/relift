@@ -582,6 +582,13 @@ pub fn build(
         );
     }
     relift_cache::write_if_changed(&out.join("unlifted.txt"), list.as_bytes())?;
+    ui.note(
+        &Line::new().text(match results.first().and_then(|l| l.reason.as_ref()) {
+            Some(why) => format!("returns: trampoline mode ({why})"),
+            None => "returns: direct (every stack pointer write is relative to the entry value)"
+                .to_string(),
+        }),
+    );
     let mut prog = Vec::new();
     for f in program::program_files(
         &program,

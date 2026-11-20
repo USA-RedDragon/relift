@@ -534,7 +534,7 @@ const CHARTERS: &[Charter] = &[
             "relift-objfile",
             "relift-proc",
         ],
-        dev: NONE,
+        dev: &["relift-cache"],
         build: NONE,
     },
     Charter {

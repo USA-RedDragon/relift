@@ -771,7 +771,7 @@ mod tests {
         for (path, bytes) in files {
             let p = dir.join(path.trim_start_matches('/'));
             std::fs::create_dir_all(p.parent().expect("a parent")).expect("dirs");
-            std::fs::write(p, bytes).expect("file");
+            relift_cache::write_if_changed(&p, bytes).expect("file");
         }
         dir
     }

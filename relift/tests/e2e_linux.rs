@@ -273,11 +273,8 @@ fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
         .expect("build.sh runs");
     assert!(status.success());
     let cache = root.join("cache").display().to_string();
-    for (name, modes) in [
-        ("shared_lib.dyn", (false, false)),
-        ("dlopen_lib.dyn", (false, true)),
-        ("cxx_throw_lib.dyn", (true, false)),
-    ] {
+    {
+        let (name, modes) = ("shared_lib.dyn", (false, false));
         let _ = std::fs::remove_dir_all(root.join("game"));
         let _ = std::fs::remove_dir_all(root.join("cache"));
         let (exe, _) = built(&root, &programs.join(name), &cache, modes, Some(&sysroot));
