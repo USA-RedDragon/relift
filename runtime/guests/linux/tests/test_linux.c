@@ -14,25 +14,35 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const uint8_t code_image[L_PAGE] = { 1 };
-static const uint8_t data_image[L_PAGE] = { 2 };
 static const rl_linux_segment segments[] = {
     { 0x400000, L_PAGE, 0, L_PAGE, RL_LINUX_RX },
     { 0x401000, 2 * L_PAGE, L_PAGE, L_PAGE, RL_LINUX_RW },
 };
 static uint8_t image[2 * L_PAGE];
 static const uint8_t image_id[32] = { 0 };
+static const rl_linux_module modules[] = {
+    {
+        .name = "prog",
+        .role = RL_LINUX_MAIN,
+        .file = image,
+        .file_size = sizeof image,
+        .segments = segments,
+        .segment_count = 2,
+        .base = 0x400000,
+        .span = 3 * L_PAGE,
+        .entry = 0x400000,
+        .phdr = 0x400040,
+        .phent = 56,
+        .phnum = 3,
+    },
+};
 static rl_linux_program prog = {
     .name = "prog",
-    .segments = segments,
-    .segment_count = 2,
-    .image = image,
-    .image_base = 0x400000,
-    .image_size = sizeof image,
-    .entry = 0x400000,
-    .phdr = 0x400040,
-    .phent = 56,
-    .phnum = 3,
+    .exec_path = "/bin/prog",
+    .modules = modules,
+    .module_count = 1,
+    .code_lo = 0x400000,
+    .code_hi = 0x403000,
     .stack_size = 0x800000,
     .hwcap = 0xfb,
     .image_id = image_id,
@@ -42,8 +52,9 @@ static char *g_args[] = { "prog", "one", "two words" };
 
 static rl_ctx *boot(void)
 {
-    memcpy(image, code_image, L_PAGE);
-    memcpy(image + L_PAGE, data_image, L_PAGE);
+    memset(image, 0, sizeof image);
+    image[0] = 1;
+    image[L_PAGE] = 2;
     rl_ctx *c = NULL;
     if (lx_start(&prog, 3, g_args, &c) != 0)
         return NULL;

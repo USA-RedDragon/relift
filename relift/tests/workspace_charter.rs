@@ -532,6 +532,7 @@ const CHARTERS: &[Charter] = &[
             "relift-guest",
             "relift-ir",
             "relift-objfile",
+            "relift-proc",
         ],
         dev: NONE,
         build: NONE,

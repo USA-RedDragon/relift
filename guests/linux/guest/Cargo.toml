@@ -17,6 +17,7 @@ relift-emit = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }
 relift-objfile = { workspace = true }
+relift-proc = { workspace = true }
 
 [lints]
 workspace = true

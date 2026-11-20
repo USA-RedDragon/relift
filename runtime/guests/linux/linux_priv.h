@@ -23,8 +23,12 @@
 
 /** @brief What an open descriptor is. */
 typedef struct lx_fd {
-    /** @brief The host descriptor, -1 when the slot is free. */
+    /** @brief The host descriptor, -1 when the slot is free or the file is virtual. */
     int host;
+    /** @brief The file of the program this descriptor reads, NULL for a host file. */
+    const rl_linux_module *virt;
+    /** @brief The read position in a virtual file. */
+    uint64_t virt_pos;
     /** @brief FD_CLOEXEC, which nothing here acts on but fcntl reports. */
     bool cloexec;
     /** @brief The directory stream getdents64 reads, opened on first use. */
@@ -111,6 +115,12 @@ typedef struct lx_state {
     uint64_t brk_mapped;
     /** @brief The highest address the break may reach. */
     uint64_t brk_limit;
+    /** @brief The range the program's libraries load into (the interpreter maps them there), 0 and 0 for a program with none. */
+    uint64_t lib_lo, lib_hi;
+    /** @brief The library the interpreter opened last and has not mapped yet (it maps it next), or NULL. */
+    const rl_linux_module *pending_lib;
+    /** @brief Whether the program has a program interpreter. */
+    bool dynamic;
     /** @brief The top of the area mmap takes from, growing down. */
     uint64_t mmap_top;
     /** @brief The lowest address mmap may take. */
@@ -209,6 +219,8 @@ lx_sys_fn *lx_proc_call(uint32_t nr);
 /** @brief The signal system calls. */
 lx_sys_fn *lx_signal_call(uint32_t nr);
 
+/** @brief The file of the program that guest descriptor fd reads (an interpreter's open of a library), or NULL. */
+const rl_linux_module *lx_virt_fd(int fd);
 /** @brief The host descriptor of guest descriptor fd, or -1. */
 int lx_host_fd(int fd);
 /** @brief Reads len bytes of the file open as host descriptor host from offset off into guest memory at addr (the rest of the last page stays zero): 0 or -errno. */

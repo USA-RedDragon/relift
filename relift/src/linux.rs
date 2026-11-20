@@ -2,14 +2,21 @@
 //! executable, `relift build` of a native program from it, and `relift run`.
 //!
 //! The import copies the executable into the project's import directory and
-//! writes `game.toml` with `guest = "linux"`. The build lifts the program's
-//! code into one unit (`relift-linux`) and links it with the runtime's core,
-//! A64 and Linux layers, which are the kernel the program runs on.
+//! writes `game.toml` with `guest = "linux"`. A dynamically linked program
+//! also brings its program interpreter and every library of its `DT_NEEDED`
+//! closure, found in the sysroot the user names (`--sysroot`) the way the
+//! interpreter searches, copied into the import directory and listed in
+//! `modules.toml`, so a build needs the sysroot no more. The build lifts
+//! every file's code into a unit of its own (`relift-linux`) and links them
+//! with the runtime's core, A64 and Linux layers, which are the kernel the
+//! program runs on.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use relift_linux::{lift, program};
+use relift_linux::lift;
+use relift_linux::program::{self, Input, Role};
+use relift_linux::sysroot::{self, Sysroot};
 use relift_objfile::{Machine, elf};
 use relift_progress::{Line, Paint, duration, noun};
 
@@ -21,6 +28,14 @@ use crate::ui::Ui;
 
 /// The executable's file name in the import directory.
 const PROGRAM_FILE: &str = "program";
+
+/// The description of the program's other files in the import directory:
+/// the guest path of the executable and, per file, its role, name, paths
+/// and place in the directory.
+const MODULES_FILE: &str = "modules.toml";
+
+/// The directory of the import's copies of the interpreter and libraries.
+const MODULES_DIR: &str = "modules";
 
 /// The runtime directories the program compiles, below the runtime root.
 const LAYERS: [&str; 3] = ["core", "cpus/arm64", "guests/linux"];
@@ -79,25 +94,112 @@ fn quote(s: &str) -> String {
     toml::Value::String(s.into()).to_string()
 }
 
+/// The guest path of the executable: where the program was imported from.
+fn guest_path(path: &Path) -> Result<String, BoxError> {
+    let source = crate::paths::canonical(path)?;
+    Ok(source.to_string_lossy().replace('\\', "/"))
+}
+
+fn sha_hex(bytes: &[u8]) -> String {
+    relift_switch_formats::sha256(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// `relift import` of the executable at `path` into the project in the
-/// working directory.
+/// working directory. A dynamically linked executable needs `sysroot`, a
+/// directory that is the guest's root file system (or a toolchain's
+/// sysroot), to find its interpreter and libraries.
 ///
 /// # Errors
 ///
-/// The file cannot be read or is not an executable this guest takes, or the
-/// import directory or `game.toml` cannot be written.
-pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxError> {
+/// The file cannot be read or is not an executable this guest takes, a
+/// dynamically linked one has no sysroot or a file it needs is not in it, or
+/// the import directory or `game.toml` cannot be written.
+pub fn import(
+    settings: &Settings,
+    path: &Path,
+    sysroot_dir: Option<&Path>,
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let object = elf::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-    program::place("program", object).map_err(|e| format!("{}: {e}", path.display()))?;
+    let exec = guest_path(path)?;
+    let dynamic = object.interpreter.is_some()
+        || object
+            .dynamic
+            .as_ref()
+            .is_some_and(|d| !d.needed.is_empty());
+    let closure = if dynamic {
+        let dir = sysroot_dir.ok_or_else(|| {
+            format!(
+                "{}: a dynamically linked program needs its interpreter and libraries: pass --sysroot DIR, an arm64 Linux root file system or a toolchain's sysroot",
+                path.display()
+            )
+        })?;
+        let origin = sysroot::normalize(&exec);
+        let origin = origin
+            .rsplit_once('/')
+            .map_or("/", |(d, _)| if d.is_empty() { "/" } else { d });
+        let root =
+            Sysroot::new(dir)?.with_overlay(origin, path.parent().unwrap_or(Path::new(".")))?;
+        sysroot::closure(&object, &bytes, origin, &root)
+            .map_err(|e| format!("{}: {e}", path.display()))?
+    } else {
+        sysroot::Closure::default()
+    };
+    let mut inputs = vec![Input {
+        name: "program".into(),
+        role: Role::Main,
+        paths: Vec::new(),
+        bytes: bytes.clone(),
+    }];
+    inputs.extend(closure.interpreter.iter().map(|l| Input {
+        name: l.name.clone(),
+        role: Role::Interpreter,
+        paths: l.paths.clone(),
+        bytes: l.bytes.clone(),
+    }));
+    inputs.extend(closure.libraries.iter().map(|l| Input {
+        name: l.name.clone(),
+        role: Role::Library,
+        paths: l.paths.clone(),
+        bytes: l.bytes.clone(),
+    }));
+    program::place(inputs).map_err(|e| format!("{}: {e}", path.display()))?;
     let out = crate::import::import_dir(settings, Path::new("."))?;
     std::fs::create_dir_all(&out)?;
     relift_cache::write_if_changed(&out.join(PROGRAM_FILE), &bytes)?;
-    let source = crate::paths::canonical(path)?;
-    let sha: String = relift_switch_formats::sha256(&bytes)
+    let mods = out.join(MODULES_DIR);
+    if mods.exists() {
+        std::fs::remove_dir_all(&mods)?;
+    }
+    let mut manifest = format!("exec_path = {}\n", quote(&exec));
+    let files = closure
+        .interpreter
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+        .map(|l| ("interpreter", l))
+        .chain(closure.libraries.iter().map(|l| ("library", l)));
+    let mut count = 0;
+    let mut size = 0;
+    for (i, (role, l)) in files.enumerate() {
+        std::fs::create_dir_all(&mods)?;
+        let file = format!("{i:03}-{}", l.name.replace('/', "_"));
+        relift_cache::write_if_changed(&mods.join(&file), &l.bytes)?;
+        let paths: Vec<String> = l.paths.iter().map(|p| quote(p)).collect();
+        manifest.push_str(&format!(
+            "\n[[module]]\nrole = \"{role}\"\nname = {}\nfile = {}\nsha256 = \"{}\"\npaths = [{}]\n",
+            quote(&l.name),
+            quote(&file),
+            sha_hex(&l.bytes),
+            paths.join(", ")
+        ));
+        count += 1;
+        size += l.bytes.len();
+    }
+    relift_cache::write_if_changed(&out.join(MODULES_FILE), manifest.as_bytes())?;
+    let sha = sha_hex(&bytes);
     let title = path
         .file_name()
         .and_then(|s| s.to_str())
@@ -107,13 +209,23 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         "# game.toml, written by relift import.\n\n[game]\nguest = \"linux\"\ntitle = {}\nimport_dir = {}\nprogram = {}\nprogram_sha256 = \"{sha}\"\n",
         quote(&title),
         quote(&out.display().to_string()),
-        quote(&source.display().to_string()),
+        quote(&exec),
     );
-    let manifest = Path::new("game.toml");
-    let wrote = !manifest.exists() && relift_cache::write_if_changed(manifest, text.as_bytes())?;
+    let manifest_toml = Path::new("game.toml");
+    let wrote =
+        !manifest_toml.exists() && relift_cache::write_if_changed(manifest_toml, text.as_bytes())?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
-        " {title} ({} bytes, aarch64 Linux), into {}{}, {}",
+        " {title} ({} bytes, aarch64 Linux{}), into {}{}, {}",
         bytes.len(),
+        if count > 0 {
+            format!(
+                ", with {} and {} KiB of libraries",
+                noun(count, "file"),
+                size / 1024
+            )
+        } else {
+            String::new()
+        },
         out.display(),
         if wrote { "; wrote game.toml" } else { "" },
         duration(ui.elapsed())
@@ -122,7 +234,8 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
 }
 
 struct Project {
-    bytes: Vec<u8>,
+    inputs: Vec<Input>,
+    exec_path: String,
     title: String,
 }
 
@@ -133,9 +246,69 @@ fn project() -> Result<Project, BoxError> {
     let path = dir.join(PROGRAM_FILE);
     let bytes = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
-    Ok(Project {
+    let title = s("title").unwrap_or_else(|| "program".into());
+    let mut inputs = vec![Input {
+        name: title.clone(),
+        role: Role::Main,
+        paths: Vec::new(),
         bytes,
-        title: s("title").unwrap_or_else(|| "program".into()),
+    }];
+    let mut exec_path = s("program").unwrap_or_else(|| "/program".into());
+    let list = dir.join(MODULES_FILE);
+    if list.exists() {
+        let text = std::fs::read_to_string(&list)?;
+        let t: toml::Table = text
+            .parse()
+            .map_err(|e| format!("{}: {e}", list.display()))?;
+        if let Some(p) = t.get("exec_path").and_then(|v| v.as_str()) {
+            exec_path = p.into();
+        }
+        for m in t
+            .get("module")
+            .and_then(|v| v.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            let field = |k: &str| {
+                m.get(k)
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("{}: a module has no {k}", list.display()))
+            };
+            let file = dir.join(MODULES_DIR).join(field("file")?);
+            let bytes = std::fs::read(&file)
+                .map_err(|e| format!("{}: {e}; run relift import again", file.display()))?;
+            let want = field("sha256")?;
+            if sha_hex(&bytes) != want {
+                return Err(format!(
+                    "{} changed since the import; run relift import again",
+                    file.display()
+                )
+                .into());
+            }
+            inputs.push(Input {
+                name: field("name")?.into(),
+                role: if field("role")? == "interpreter" {
+                    Role::Interpreter
+                } else {
+                    Role::Library
+                },
+                paths: m
+                    .get("paths")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|p| p.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                bytes,
+            });
+        }
+    }
+    Ok(Project {
+        inputs,
+        exec_path,
+        title,
     })
 }
 
@@ -154,11 +327,12 @@ struct ColdMade {
 /// (a return address Go computes from a table) runs lifted code too.
 fn emit_cold(
     placed: &program::Placed,
+    index: usize,
     lifted: &lift::Lifted,
     cdir: &Path,
     ui: &mut Ui,
 ) -> Result<ColdMade, BoxError> {
-    let row = ui.row("cold");
+    let row = ui.row(&format!("{} cold", placed.name));
     ui.begin(row, "cold");
     let fe = lift::frontend();
     let granule = relift_guest::Frontend::granule(&fe);
@@ -227,7 +401,7 @@ fn emit_cold(
             declare: true,
         })
         .collect();
-    let unit = format!("{}_cold", lift::UNIT_SYMBOL);
+    let unit = format!("{}_cold", lift::unit_symbol(index));
     let output = relift_emit::emit(
         &fe,
         &fns,
@@ -246,7 +420,7 @@ fn emit_cold(
             ..relift_emit::Options::default()
         },
     );
-    let dir = cdir.join("cold");
+    let dir = cdir.join("cold").join(index.to_string());
     std::fs::create_dir_all(&dir)?;
     let mut files = Vec::new();
     for f in &output.files {
@@ -261,7 +435,7 @@ fn emit_cold(
         relift_emit::PRELUDE.as_bytes(),
     )?;
     let map = crate::total::code_map(&fe, module, &hot, &all)?;
-    let sym = format!("rl_code_{}", lift::UNIT_SYMBOL);
+    let sym = format!("rl_code_{}", lift::unit_symbol(index));
     let map_c = dir.join("codemap.c");
     relift_cache::write_if_changed(
         &map_c,
@@ -269,7 +443,7 @@ fn emit_cold(
             relift_guest::Frontend::abi_headers(&fe),
             &map,
             &sym,
-            lift::UNIT_SYMBOL,
+            &lift::unit_symbol(index),
             &unit,
             &placed.name,
         )
@@ -327,62 +501,79 @@ pub fn build(
     ui.title(&format!(
         "relift build: {name} ({}, {} KiB, {})",
         p.title,
-        p.bytes.len() / 1024,
+        p.inputs.iter().map(|i| i.bytes.len()).sum::<usize>() / 1024,
         cross.as_ref().map_or_else(
             || format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
             |c| c.name().to_string()
         )
     ));
-    let row = ui.row("program");
-    ui.begin(row, "lift");
-    let object = elf::parse(&p.bytes).map_err(|e| format!("{}: {e}", p.title))?;
-    let placed = program::place(&p.title, object)?;
-    let id = relift_switch_formats::sha256(&p.bytes);
-    let lifted = lift::lift(&placed, id, settings.emit.trampoline, settings.emit.cold);
-    let mut files = Vec::new();
-    let udir = cdir.join("unit");
-    std::fs::create_dir_all(&udir)?;
-    for f in &lifted.output.files {
-        let path = udir.join(&f.name);
-        relift_cache::write_if_changed(&path, f.text.as_bytes())?;
-        if f.name.ends_with(".c") {
-            files.push(path);
-        }
+    let placed = program::place(p.inputs).map_err(|e| format!("{}: {e}", p.title))?;
+    let mut all = Vec::new();
+    for m in &placed {
+        all.extend_from_slice(m.name.as_bytes());
+        all.push(0);
+        all.extend_from_slice(&relift_switch_formats::sha256(&m.file));
     }
-    relift_cache::write_if_changed(
-        &udir.join(relift_emit::PRELUDE_NAME),
-        relift_emit::PRELUDE.as_bytes(),
-    )?;
-    ui.note(&Line::new().text(match &lifted.reason {
-        Some(why) => format!("returns: trampoline mode ({why})"),
-        None => {
-            "returns: direct (every stack pointer write is relative to the entry value)".to_string()
-        }
-    }));
+    let id = relift_switch_formats::sha256(&all);
+    let rows: Vec<usize> = placed.iter().map(|m| ui.row(&m.name)).collect();
+    for &row in &rows {
+        ui.begin(row, "lift");
+    }
+    let results = lift::lift_program(&placed, id, settings.emit.trampoline, settings.emit.cold);
+    let mut files = Vec::new();
+    let mut units = Vec::new();
+    let mut maps = Vec::new();
     let mut list = String::new();
-    for u in &lifted.unlifted {
-        list.push_str(&format!("{:08x}  {}\n", u.at, u.failure.message));
+    let (mut functions, mut instructions, mut not_lifted) = (0, 0, 0);
+    for (i, lifted) in results.iter().enumerate() {
+        let udir = cdir.join("unit").join(i.to_string());
+        std::fs::create_dir_all(&udir)?;
+        for f in &lifted.output.files {
+            let path = udir.join(&f.name);
+            relift_cache::write_if_changed(&path, f.text.as_bytes())?;
+            if f.name.ends_with(".c") {
+                files.push(path);
+            }
+        }
+        relift_cache::write_if_changed(
+            &udir.join(relift_emit::PRELUDE_NAME),
+            relift_emit::PRELUDE.as_bytes(),
+        )?;
+        for u in &lifted.unlifted {
+            list.push_str(&format!(
+                "{}\t{:08x}  {}\n",
+                placed[i].name, u.at, u.failure.message
+            ));
+        }
+        units.push(lift::unit_symbol(i));
+        if settings.emit.cold {
+            let made = emit_cold(&placed[i], i, lifted, &cdir, ui)?;
+            files.extend(made.files);
+            units.push(made.unit);
+            maps.push(made.map);
+        }
+        functions += lifted.functions;
+        instructions += lifted.instructions;
+        not_lifted += lifted.unlifted.len();
+        ui.done(
+            rows[i],
+            Line::new().text(format!(
+                "{}, {}, {} not lifted",
+                noun(lifted.functions as u64, "function"),
+                noun(lifted.instructions as u64, "instruction"),
+                lifted.unlifted.len()
+            )),
+        );
     }
     relift_cache::write_if_changed(&out.join("unlifted.txt"), list.as_bytes())?;
-    ui.done(
-        row,
-        Line::new().text(format!(
-            "{}, {}, {} not lifted",
-            noun(lifted.functions as u64, "function"),
-            noun(lifted.instructions as u64, "instruction"),
-            lifted.unlifted.len()
-        )),
-    );
-    let mut units = vec![lift::UNIT_SYMBOL.to_string()];
-    let mut maps = Vec::new();
-    if settings.emit.cold {
-        let made = emit_cold(&placed, &lifted, &cdir, ui)?;
-        files.extend(made.files);
-        units.push(made.unit);
-        maps.push(made.map);
-    }
     let mut prog = Vec::new();
-    for f in program::program_files(&placed, &units, id, lifted.trampoline, &maps) {
+    for f in program::program_files(
+        &placed,
+        &p.exec_path,
+        (&units, &maps),
+        id,
+        results.first().is_some_and(|l| l.trampoline),
+    ) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
         if f.name.ends_with(".c") {
@@ -403,9 +594,7 @@ pub fn build(
         None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
     };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
-        " {} functions, {} instructions not lifted, {} in all",
-        lifted.functions,
-        lifted.unlifted.len(),
+        " {functions} functions, {instructions} instructions lifted, {not_lifted} not lifted, {} in all",
         duration(ui.elapsed())
     )));
     ui.summary(&Line::new().text(format!("  output: {}", exe.display())));

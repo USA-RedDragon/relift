@@ -44,12 +44,139 @@ int lx_host_fd(int fd)
 static int64_t alloc_fd(int host, int min, bool cloexec)
 {
     for (int i = min < 0 ? 0 : min; i < LX_MAX_FDS; i++)
-        if (lx.fds[i].host < 0) {
+        if (lx.fds[i].host < 0 && !lx.fds[i].virt) {
             lx.fds[i] = (lx_fd){ .host = host, .cloexec = cloexec };
             return i;
         }
-    hio_close(host);
+    if (host >= 0)
+        hio_close(host);
     return -L_EMFILE;
+}
+
+const rl_linux_module *lx_virt_fd(int fd)
+{
+    if (fd < 0 || fd >= LX_MAX_FDS)
+        return NULL;
+    return lx.fds[fd].virt;
+}
+
+/** @brief The paths the loader's configuration lives at: a dynamic program finds none, whatever the machine under it has. */
+static const char *const loader_absent[] = { "/etc/ld.so.cache", "/etc/ld.so.preload", "/etc/ld.so.conf" };
+
+/** @brief Writes the lexically normalized absolute path (no ".", ".." or doubled slashes) to out; false for a relative or too long path. */
+static bool normalize(const char *path, char *out, size_t cap)
+{
+    if (path[0] != '/')
+        return false;
+    size_t n = 0;
+    const char *p = path;
+    while (*p) {
+        while (*p == '/')
+            p++;
+        const char *e = p;
+        while (*e && *e != '/')
+            e++;
+        size_t len = (size_t)(e - p);
+        if (len == 0) {
+            break;
+        } else if (len == 1 && p[0] == '.') {
+        } else if (len == 2 && p[0] == '.' && p[1] == '.') {
+            while (n > 0 && out[n - 1] != '/')
+                n--;
+            if (n > 0)
+                n--;
+        } else {
+            if (n + 1 + len + 1 > cap)
+                return false;
+            out[n++] = '/';
+            memcpy(out + n, p, len);
+            n += len;
+        }
+        p = e;
+    }
+    if (n == 0)
+        out[n++] = '/';
+    out[n] = 0;
+    return true;
+}
+
+/** @brief The module of the program that answers to the absolute path, NULL when none does. */
+static const rl_linux_module *module_at(const char *path)
+{
+    char norm[PATH_CAP];
+    if (!lx.prog || !normalize(path, norm, sizeof norm))
+        return NULL;
+    for (uint32_t i = 0; i < lx.prog->module_count; i++) {
+        const rl_linux_module *m = &lx.prog->modules[i];
+        for (uint32_t k = 0; k < m->path_count; k++)
+            if (strcmp(m->paths[k], norm) == 0)
+                return m;
+    }
+    return NULL;
+}
+
+/** @brief Whether the file name is a shared object's. */
+static bool shared_object_name(const char *leaf)
+{
+    return (strncmp(leaf, "lib", 3) == 0 || strncmp(leaf, "ld-", 3) == 0) && strstr(leaf, ".so") != NULL;
+}
+
+/** @brief Whether some module of the program is named leaf (a file of that name elsewhere is a probe miss of the loader's search). */
+static bool module_named(const char *leaf)
+{
+    for (uint32_t i = 0; i < lx.prog->module_count; i++) {
+        const rl_linux_module *m = &lx.prog->modules[i];
+        for (uint32_t k = 0; k < m->path_count; k++) {
+            const char *p = strrchr(m->paths[k], '/');
+            if (strcmp(p ? p + 1 : m->paths[k], leaf) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief What a dynamic program's open of a path that is not a module
+ * finds: the loader's configuration and the probes of its library search
+ * find nothing (a miss must not reach a file of the machine the program
+ * runs on, whose libraries are not the ones the program was lifted with),
+ * and a shared object the import does not hold at all (a dlopen of an
+ * unknown name) stops the program with a report. Returns false when the
+ * open goes on to the host file system.
+ */
+static bool loader_miss(rl_ctx *c, const char *path, int64_t *result)
+{
+    char norm[PATH_CAP];
+    if (!lx.dynamic || !normalize(path, norm, sizeof norm))
+        return false;
+    for (size_t i = 0; i < sizeof loader_absent / sizeof *loader_absent; i++)
+        if (strcmp(norm, loader_absent[i]) == 0) {
+            *result = -L_ENOENT;
+            return true;
+        }
+    const char *leaf = strrchr(norm, '/');
+    leaf = leaf ? leaf + 1 : norm;
+    if (!shared_object_name(leaf))
+        return false;
+    if (module_named(leaf)) {
+        *result = -L_ENOENT;
+        return true;
+    }
+    rl_guest_fatal(c, "linux", "the program loads the library %s, which is not in the import: import it with a sysroot that holds it", norm);
+    *result = LX_PENDING;
+    return true;
+}
+
+static void virt_stat(const rl_linux_module *m, l_stat *st)
+{
+    memset(st, 0, sizeof *st);
+    st->st_dev = 0x7e57;
+    st->st_ino = 0x1000 + (uint64_t)(m - lx.prog->modules);
+    st->st_mode = L_S_IFREG | 0755;
+    st->st_nlink = 1;
+    st->st_size = (int64_t)m->file_size;
+    st->st_blksize = 4096;
+    st->st_blocks = (int64_t)((m->file_size + 511) / 512);
 }
 
 static int dir_arg(int64_t dirfd, const char *path, int *host)
@@ -103,6 +230,20 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return rc;
     uint32_t flags = (uint32_t)a[2];
     uint32_t mode = (uint32_t)a[3] & ~lx.umask;
+    const rl_linux_module *vm = module_at(path);
+    if (vm) {
+        if ((flags & L_O_ACCMODE) != L_O_RDONLY || (flags & (L_O_CREAT | L_O_TRUNC)))
+            return -L_EACCES;
+        int64_t fd = alloc_fd(-1, 0, (flags & L_O_CLOEXEC) != 0);
+        if (fd >= 0) {
+            lx.fds[fd].virt = vm;
+            lx.pending_lib = vm;
+        }
+        return fd;
+    }
+    int64_t miss;
+    if (loader_miss(c, path, &miss))
+        return miss;
     int64_t h = hio_open(dir, path, flags, (flags & L_O_CREAT) ? mode : 0);
     if (h < 0)
         return h;
@@ -114,6 +255,12 @@ static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)c;
     (void)mem;
     int fd = (int)a[0];
+    if (lx_virt_fd(fd)) {
+        if (lx.pending_lib == lx.fds[fd].virt)
+            lx.pending_lib = NULL;
+        lx.fds[fd] = (lx_fd){ .host = -1 };
+        return 0;
+    }
     if (lx_host_fd(fd) < 0)
         return -L_EBADF;
     lx_fd *f = &lx.fds[fd];
@@ -147,9 +294,28 @@ static int64_t wait_readable(int fd, int h)
     return lx_wait(h, L_POLLIN, -1) == -L_EINTR ? -L_ERESTARTSYS : 0;
 }
 
+static int64_t virt_read(const rl_linux_module *m, uint8_t *dst, uint64_t n, uint64_t off)
+{
+    if (off >= m->file_size)
+        return 0;
+    if (n > m->file_size - off)
+        n = m->file_size - off;
+    memcpy(dst, m->file + off, n);
+    return (int64_t)n;
+}
+
 static int64_t sys_read(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
+    const rl_linux_module *vm = lx_virt_fd((int)a[0]);
+    if (vm) {
+        uint64_t n = a[2] > 0x7ffff000u ? 0x7ffff000u : a[2];
+        if (!lx_ok(a[1], n, RL_VM_W))
+            return -L_EFAULT;
+        int64_t r = virt_read(vm, mem + a[1], n, lx.fds[a[0]].virt_pos);
+        lx.fds[a[0]].virt_pos += (uint64_t)r;
+        return r;
+    }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)
         return -L_EBADF;
@@ -183,6 +349,15 @@ static int64_t sys_write(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 static int64_t sys_pread64(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
+    const rl_linux_module *vm = lx_virt_fd((int)a[0]);
+    if (vm) {
+        if ((int64_t)a[3] < 0)
+            return -L_EINVAL;
+        uint64_t n = a[2] > 0x7ffff000u ? 0x7ffff000u : a[2];
+        if (!lx_ok(a[1], n, RL_VM_W))
+            return -L_EFAULT;
+        return virt_read(vm, mem + a[1], n, a[3]);
+    }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)
         return -L_EBADF;
@@ -289,6 +464,15 @@ static int64_t sys_lseek(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
     (void)mem;
+    const rl_linux_module *vm = lx_virt_fd((int)a[0]);
+    if (vm) {
+        int64_t base = a[2] == 0 ? 0 : a[2] == 1 ? (int64_t)lx.fds[a[0]].virt_pos : a[2] == 2 ? (int64_t)vm->file_size : -1;
+        int64_t at = base + (int64_t)a[1];
+        if (base < 0 || at < 0)
+            return -L_EINVAL;
+        lx.fds[a[0]].virt_pos = (uint64_t)at;
+        return at;
+    }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)
         return -L_EBADF;
@@ -299,6 +483,12 @@ static int64_t sys_fstat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
     (void)mem;
+    const rl_linux_module *vm = lx_virt_fd((int)a[0]);
+    if (vm) {
+        l_stat st;
+        virt_stat(vm, &st);
+        return lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+    }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)
         return -L_EBADF;
@@ -318,9 +508,22 @@ static int64_t stat_of(int64_t dirfd, uint64_t path_addr, uint64_t flags, l_stat
     if (path[0] == 0 && (flags & L_AT_EMPTY_PATH)) {
         if ((int)dirfd == L_AT_FDCWD)
             return hio_stat(HIO_CWD, ".", false, st);
+        const rl_linux_module *vm = lx_virt_fd((int)dirfd);
+        if (vm) {
+            virt_stat(vm, st);
+            return 0;
+        }
         int h = lx_host_fd((int)dirfd);
         return h < 0 ? -L_EBADF : hio_fstat(h, st);
     }
+    const rl_linux_module *vm = module_at(path);
+    if (vm) {
+        virt_stat(vm, st);
+        return 0;
+    }
+    int64_t miss;
+    if (loader_miss(NULL, path, &miss) && miss != LX_PENDING)
+        return miss;
     int dir;
     rc = dir_arg(dirfd, path, &dir);
     if (rc < 0)
@@ -491,7 +694,7 @@ static int64_t sys_dup3(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t n = hio_dup(h, 0);
     if (n < 0)
         return n;
-    if (lx.fds[to].host >= 0)
+    if (lx.fds[to].host >= 0 || lx.fds[to].virt)
         drop_fd(to);
     lx.fds[to] = (lx_fd){ .host = (int)n, .cloexec = (a[2] & L_O_CLOEXEC) != 0 };
     return to;
@@ -611,6 +814,11 @@ static int64_t sys_faccessat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return rc;
     if (a[2] & ~7ull)
         return -L_EINVAL;
+    if (module_at(path))
+        return (a[2] & 2) ? -L_EACCES : 0;
+    int64_t miss;
+    if (loader_miss(NULL, path, &miss) && miss != LX_PENDING)
+        return miss;
     int dir;
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
     return rc < 0 ? rc : hio_access(dir, path, (uint32_t)a[2]);
@@ -624,6 +832,13 @@ static int64_t sys_readlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t rc = path_arg(a[1], path);
     if (rc < 0)
         return rc;
+    char norm[PATH_CAP];
+    if (lx.prog && normalize(path, norm, sizeof norm) && strcmp(norm, "/proc/self/exe") == 0) {
+        size_t n = strlen(lx.prog->exec_path);
+        if (n > a[3])
+            n = a[3];
+        return lx_put(a[2], lx.prog->exec_path, n) ? (int64_t)n : -L_EFAULT;
+    }
     int dir;
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
     if (rc < 0)

@@ -51,12 +51,14 @@ fn main() -> ExitCode {
             update,
             program,
             system_data,
+            sysroot,
         } => relift::import::run(
             &settings,
             dump,
             update.as_deref(),
             program.as_deref(),
             system_data.as_deref(),
+            sysroot.as_deref(),
             &mut ui,
         ),
         Command::Build { target, mods, dev } => {

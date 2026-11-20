@@ -11,8 +11,10 @@ use relift_ir::{Flow, Next, Op};
 use crate::cpu;
 use crate::program::{self, Placed};
 
-/// The unit's C symbol.
-pub const UNIT_SYMBOL: &str = "rl_unit_linux";
+/// The C symbol of the unit of module `index`.
+pub fn unit_symbol(index: usize) -> String {
+    format!("rl_unit_linux_{index}")
+}
 
 /// An instruction that did not lift.
 #[derive(Clone, Debug)]
@@ -162,27 +164,121 @@ pub fn frontend() -> Arm64 {
     Arm64 { cpu: cpu::cpu() }
 }
 
-/// Lifts every function discovery finds in `p` and emits them as one unit;
-/// `image_id` identifies the program to the runtime. `force_trampoline`
-/// makes the program use trampoline mode whatever the analysis says.
-pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool, cold: bool) -> Lifted {
+/// Discovery of one module, then the escapes found with the other modules
+/// in view: each module's analysis, the slots each is bound through and the
+/// continuations the analysis added as roots.
+struct Found {
+    module: relift_guest::Module,
+    analysis: relift_analyze::Analysis,
+}
+
+/// Lifts every function discovery finds in the modules `placed` of the
+/// program, and emits each module as one unit; `image_id` identifies the
+/// program to the runtime. The modules are analyzed together for what
+/// crosses between them: a `setjmp` of one library makes the code after its
+/// call in another a resume point. `force_trampoline` makes the program use
+/// trampoline mode whatever the analysis says; one module that needs it puts
+/// them all in it. `cold` adds the superset of each module for its cold copy.
+pub fn lift_program(
+    placed: &[Placed],
+    image_id: [u8; 32],
+    force_trampoline: bool,
+    cold: bool,
+) -> Vec<Lifted> {
     let fe = frontend();
-    let mut module = program::module(p);
-    let mut analysis = discover(&fe, &module);
-    let mut found = relift_analyze::escape::return_escapes(&fe, &module, &analysis);
-    found.continuations.extend(clone_continuations(&analysis));
-    if !found.continuations.is_empty() {
-        module
-            .roots
-            .extend(found.continuations.iter().map(|&addr| Root {
+    let slots = program::bound_slots(placed);
+    let mut found: Vec<Found> = relift_proc::workers::parallel(placed, |p| {
+        let module = program::module(p);
+        let analysis = discover(&fe, &module);
+        Found { module, analysis }
+    });
+    let mut escapes = escapes_of(&fe, &found, &slots);
+    for _ in 0..2 {
+        let wanted: Vec<BTreeSet<u64>> = escapes
+            .iter()
+            .zip(&found)
+            .map(|(e, f)| {
+                let mut c = e.continuations.clone();
+                c.extend(clone_continuations(&f.analysis));
+                c
+            })
+            .collect();
+        let mut changed = false;
+        for (f, c) in found.iter_mut().zip(&wanted) {
+            let have: BTreeSet<u64> = f.module.roots.iter().map(|r| r.addr).collect();
+            let new: Vec<u64> = c.iter().copied().filter(|a| !have.contains(a)).collect();
+            if new.is_empty() {
+                continue;
+            }
+            changed = true;
+            f.module.roots.extend(new.into_iter().map(|addr| Root {
                 addr,
                 kind: RootKind::Pointer,
                 name: None,
             }));
-        analysis = discover(&fe, &module);
+            f.analysis = discover(&fe, &f.module);
+        }
+        if !changed {
+            break;
+        }
+        escapes = escapes_of(&fe, &found, &slots);
     }
-    let found = relift_analyze::escape::return_escapes(&fe, &module, &analysis);
-    relift_analyze::escape::apply(&mut analysis, &found);
+    for (f, e) in found.iter_mut().zip(&escapes) {
+        relift_analyze::escape::apply(&mut f.analysis, e);
+    }
+    let indexed: Vec<usize> = (0..placed.len()).collect();
+    let supersets: Vec<relift_analyze::total::Superset> =
+        relift_proc::workers::parallel(&indexed, |&i| {
+            let f = &found[i];
+            if cold {
+                let hot = relift_analyze::Layout::of(&f.analysis, fe.granule());
+                relift_analyze::total::superset(&fe, &f.module, &hot)
+            } else {
+                relift_analyze::total::Superset::default()
+            }
+        });
+    let reasons: Vec<Option<String>> = relift_proc::workers::parallel(&indexed, |&i| {
+        let f = &found[i];
+        let mut every = f.analysis.clone();
+        every
+            .functions
+            .extend(supersets[i].layout.lift(&fe, &f.module).functions);
+        mode_reason(&fe, &placed[i], &every, force_trampoline)
+    });
+    let reason = reasons.into_iter().flatten().next();
+    relift_proc::workers::parallel(&indexed, |&i| {
+        emit_module(&fe, &placed[i], i, (&found[i], &supersets[i]), image_id, &reason)
+    })
+}
+
+fn escapes_of(
+    fe: &Arm64,
+    found: &[Found],
+    slots: &[BTreeMap<u64, u64>],
+) -> Vec<relift_analyze::escape::Escapes> {
+    let linked: Vec<relift_analyze::escape::Linked<'_>> = found
+        .iter()
+        .zip(slots)
+        .map(|(f, s)| relift_analyze::escape::Linked {
+            module: &f.module,
+            analysis: &f.analysis,
+            slots: s,
+        })
+        .collect();
+    relift_analyze::escape::return_escapes_linked(fe, &linked)
+}
+
+fn emit_module(
+    fe: &Arm64,
+    p: &Placed,
+    index: usize,
+    (found, superset): (&Found, &relift_analyze::total::Superset),
+    image_id: [u8; 32],
+    reason: &Option<String>,
+) -> Lifted {
+    let module = &found.module;
+    let analysis = &found.analysis;
+    let trampoline = reason.is_some();
     let granule = fe.granule();
     let raw = |pc: u64| {
         module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
@@ -232,25 +328,13 @@ pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool, cold: bool) 
         .collect();
     unlifted.sort_by_key(|u| u.at);
     unlifted.dedup_by_key(|u| u.at);
-    let superset = if cold {
-        let hot = relift_analyze::Layout::of(&analysis, granule);
-        relift_analyze::total::superset(&fe, &module, &hot)
-    } else {
-        relift_analyze::total::Superset::default()
-    };
-    let mut every = analysis.clone();
-    every
-        .functions
-        .extend(superset.layout.lift(&fe, &module).functions);
-    let reason = mode_reason(&fe, p, &every, force_trampoline);
-    let trampoline = reason.is_some();
     let output = relift_emit::emit(
-        &fe,
+        fe,
         &fns,
         &[],
         &Options {
             unit_name: p.name.clone(),
-            unit_symbol: UNIT_SYMBOL.into(),
+            unit_symbol: unit_symbol(index),
             module_base: p.image.base,
             image_id,
             trampoline,
@@ -270,10 +354,10 @@ pub fn lift(p: &Placed, image_id: [u8; 32], force_trampoline: bool, cold: bool) 
         instructions,
         unlifted,
         trampoline,
-        reason,
+        reason: reason.clone(),
         inner,
-        analysis,
-        superset,
-        module,
+        analysis: analysis.clone(),
+        superset: superset.clone(),
+        module: module.clone(),
     }
 }

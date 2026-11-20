@@ -82,8 +82,12 @@ pub fn run(
     update: Option<&str>,
     program: Option<&str>,
     system_data: Option<&Path>,
+    sysroot: Option<&Path>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
+    if sysroot.is_some() && !crate::linux::is_executable(dump) {
+        return Err("--sysroot is for a dynamically linked Linux program".into());
+    }
     let switch_only = |what: &str| -> Result<(), BoxError> {
         if system_data.is_some() || program.is_some() {
             return Err(format!("--system-data and --program are for Switch dumps; {what}").into());
@@ -123,7 +127,7 @@ pub fn run(
         if update.is_some() {
             return Err("--update is for Switch dumps; a Linux program has no updates".into());
         }
-        return crate::linux::import(settings, dump, ui);
+        return crate::linux::import(settings, dump, sysroot, ui);
     }
     if crate::n64::is_rom(dump) {
         switch_only("a cartridge has no system fonts")?;

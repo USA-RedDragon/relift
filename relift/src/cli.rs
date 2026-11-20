@@ -54,6 +54,13 @@ pub enum Command {
         /// Its fonts are decoded into the import for pl:u.
         #[arg(long, value_name = "DIR")]
         system_data: Option<PathBuf>,
+        /// For a dynamically linked Linux program: the arm64 Linux root file
+        /// system, or a cross toolchain's sysroot, that holds its program
+        /// interpreter and libraries. They are found the way the interpreter
+        /// searches (run paths, the sysroot's ld.so.conf, the default
+        /// directories) and copied into the import.
+        #[arg(long, value_name = "DIR")]
+        sysroot: Option<PathBuf>,
     },
     /// Lift, emit and compile the project.
     Build {

@@ -1,8 +1,9 @@
 /**
  * @file linux.h
  * @brief The Linux guest: what the generated program.c hands the runtime
- * and the entry point it calls. A program is one statically linked aarch64
- * Linux executable; the runtime is the kernel it runs on.
+ * and the entry point it calls. A program is an aarch64 Linux executable, with
+ * its program interpreter and libraries when it is dynamically linked; the
+ * runtime is the kernel it runs on.
  */
 #ifndef RL_LINUX_H
 #define RL_LINUX_H
@@ -36,20 +37,43 @@ typedef struct rl_linux_segment {
     uint32_t perm;
 } rl_linux_segment;
 
-/** @brief A program as the build describes it. */
-typedef struct rl_linux_program {
-    /** @brief The program's name, for reports. */
+/** @brief What a file of the program is to the process. */
+enum rl_linux_role {
+    /** @brief The executable the kernel starts. */
+    RL_LINUX_MAIN = 0,
+    /** @brief The program interpreter: mapped and entered by the kernel. */
+    RL_LINUX_INTERPRETER = 1,
+    /** @brief A library the interpreter maps from the file system. */
+    RL_LINUX_LIBRARY = 2
+};
+
+/**
+ * @brief One file of the program: an executable, the program interpreter or
+ * a library, placed at the address its code was lifted for.
+ */
+typedef struct rl_linux_module {
+    /** @brief The file's name, for reports. */
     const char *name;
-    /** @brief The loadable segments, by address. */
+    /** @brief enum rl_linux_role. */
+    uint32_t role;
+    /** @brief The guest paths the file answers to when it is opened. */
+    const char *const *paths;
+    /** @brief Number of paths. */
+    uint32_t path_count;
+    /** @brief The file as it is on disk. */
+    const uint8_t *file;
+    /** @brief Its size. */
+    uint64_t file_size;
+    /** @brief The loadable segments, by address; image_offset is a file offset. */
     const rl_linux_segment *segments;
     /** @brief Number of segments. */
     uint32_t segment_count;
-    /** @brief The loaded bytes of every segment from image_base. */
-    const uint8_t *image;
-    /** @brief Guest address of image[0]. */
-    uint64_t image_base;
-    /** @brief Bytes in image. */
-    uint64_t image_size;
+    /** @brief The page-aligned guest address the first segment loads at. */
+    uint64_t base;
+    /** @brief Bytes from base to the end of the last segment, page rounded. */
+    uint64_t span;
+    /** @brief The alignment of base the loader asks of the file. */
+    uint64_t align;
     /** @brief Guest address of the entry point. */
     uint64_t entry;
     /** @brief Guest address of the program headers, 0 when none are mapped. */
@@ -58,6 +82,22 @@ typedef struct rl_linux_program {
     uint32_t phent;
     /** @brief Number of program headers. */
     uint32_t phnum;
+} rl_linux_module;
+
+/** @brief A program as the build describes it. */
+typedef struct rl_linux_program {
+    /** @brief The program's name, for reports. */
+    const char *name;
+    /** @brief The guest path of the executable: what /proc/self/exe and AT_EXECFN name, and what $ORIGIN of the executable is. */
+    const char *exec_path;
+    /** @brief The files, the executable first. */
+    const rl_linux_module *modules;
+    /** @brief Number of modules. */
+    uint32_t module_count;
+    /** @brief The lowest guest address any module loads at. */
+    uint64_t code_lo;
+    /** @brief One above the highest. */
+    uint64_t code_hi;
     /** @brief The stack size the file asks for; the main stack is the kernel's default either way. */
     uint64_t stack_size;
     /** @brief AT_HWCAP: the features of the CPU the program was lifted for. */

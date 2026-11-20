@@ -160,6 +160,27 @@ int64_t lx_sys_brk(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return (int64_t)want;
 }
 
+/**
+ * @brief Whether an anonymous reservation of size bytes is the one the
+ * interpreter makes before it maps a library whose segments ask for more than
+ * page alignment: room for the library and its alignment, to align inside,
+ * after which it maps the file at the aligned address inside it.
+ */
+static bool lib_reservation(const rl_linux_module *m, uint64_t size)
+{
+    if (m->role != RL_LINUX_LIBRARY || size < m->span || !range_free(m->base, size))
+        return false;
+    return size <= m->span + m->align || size <= 2 * m->align;
+}
+
+/** @brief Whether a fixed mapping may take [addr, addr + size): the mmap area, or the range the program's libraries load into. */
+static bool fixed_ok(uint64_t addr, uint64_t size)
+{
+    if (!in_space(addr, size) || addr + size > lx.stack_lo)
+        return false;
+    return addr >= lx.mmap_floor || (lx.lib_hi && addr >= lx.lib_lo && addr + size <= lx.lib_hi);
+}
+
 int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -181,16 +202,17 @@ int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     uint64_t size = lx_page_up(len);
     bool anon = (flags & L_MAP_ANONYMOUS) != 0;
     int host = -1;
+    const rl_linux_module *vm = anon ? NULL : lx_virt_fd(fd);
     if (!anon) {
         host = lx_host_fd(fd);
-        if (host < 0)
+        if (host < 0 && !vm)
             return -L_EBADF;
         if (type != L_MAP_PRIVATE && (prot & L_PROT_WRITE))
             return -L_ENODEV;
     }
     uint64_t at;
     if (flags & (L_MAP_FIXED | L_MAP_FIXED_NOREPLACE)) {
-        if ((addr & (L_PAGE - 1)) != 0 || addr < lx.mmap_floor || !in_space(addr, size) || addr + size > lx.stack_lo)
+        if ((addr & (L_PAGE - 1)) != 0 || !fixed_ok(addr, size))
             return -L_EINVAL;
         if ((flags & L_MAP_FIXED_NOREPLACE) && !(flags & L_MAP_FIXED) && !range_free(addr, size))
             return -L_EEXIST;
@@ -199,14 +221,30 @@ int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         at = 0;
         if (addr && (addr & (L_PAGE - 1)) == 0 && addr >= lx.mmap_floor && addr + size <= lx.mmap_top && range_free(addr, size))
             at = addr;
+        if (!at && vm && vm->role == RL_LINUX_LIBRARY && off == 0) {
+            if (size > vm->span || !range_free(vm->base, size))
+                return -L_ENOMEM;
+            at = vm->base;
+        }
+        if (!at && anon && lx.pending_lib && prot == L_PROT_NONE && lib_reservation(lx.pending_lib, size))
+            at = lx.pending_lib->base;
         if (!at)
             at = lx_find_free(size);
         if (!at)
             return -L_ENOMEM;
     }
+    if ((flags & L_MAP_FIXED) && !range_free(at, size) && rl_vm_set(&lx.vm, at, size, RL_VM_NONE, TAG_FREE, RL_VM_DISCARD) != 0)
+        return -L_ENOMEM;
     if (lx_map(at, size, anon ? prot : (L_PROT_READ | L_PROT_WRITE)) != 0)
         return -L_ENOMEM;
-    if (!anon) {
+    if (vm) {
+        if (off < vm->file_size) {
+            uint64_t n = vm->file_size - off < len ? vm->file_size - off : len;
+            memcpy(rl_mem_base() + at, vm->file + off, n);
+        }
+        if (prot != (L_PROT_READ | L_PROT_WRITE))
+            rl_vm_set(&lx.vm, at, size, vm_perm(prot), TAG_MAPPED, RL_VM_KEEP);
+    } else if (!anon) {
         int64_t rc = lx_fill_from_file(host, at, len, off);
         if (rc < 0) {
             rl_vm_set(&lx.vm, at, size, RL_VM_NONE, TAG_FREE, RL_VM_DISCARD);

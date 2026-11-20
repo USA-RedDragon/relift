@@ -1363,6 +1363,7 @@ dependencies = [
  "relift-guest",
  "relift-ir",
  "relift-objfile",
+ "relift-proc",
 ]
 
 [[package]]

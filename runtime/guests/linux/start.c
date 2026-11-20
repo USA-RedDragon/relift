@@ -61,45 +61,85 @@ static int log_fail(const char *what)
     return 1;
 }
 
-static int load_image(const rl_linux_program *p)
+static const rl_linux_module *module_of(const rl_linux_program *p, uint32_t role)
+{
+    for (uint32_t i = 0; i < p->module_count; i++)
+        if (p->modules[i].role == role)
+            return &p->modules[i];
+    return NULL;
+}
+
+/**
+ * @brief Maps a file the way the kernel's ELF loader does: each segment's
+ * bytes from the file at its address, the rest zero, with the segment's
+ * permissions. Returns the end of the mapping, 0 after logging why not.
+ */
+static uint64_t load_module(const rl_linux_module *m)
 {
     uint64_t lo = UINT64_MAX, hi = 0;
-    for (uint32_t i = 0; i < p->segment_count; i++) {
-        const rl_linux_segment *s = &p->segments[i];
-        if (s->file_size > s->mem_size || s->image_offset + s->file_size > p->image_size)
-            return log_fail("a segment's bytes lie outside the image");
+    for (uint32_t i = 0; i < m->segment_count; i++) {
+        const rl_linux_segment *s = &m->segments[i];
+        if (s->file_size > s->mem_size || s->image_offset + s->file_size > m->file_size)
+            return log_fail("a segment's bytes lie outside the file"), 0;
         if (s->addr + s->mem_size < s->addr)
-            return log_fail("a segment wraps the address space");
+            return log_fail("a segment wraps the address space"), 0;
         uint64_t slo = lx_page_down(s->addr), shi = lx_page_up(s->addr + s->mem_size);
         if (slo < lo)
             lo = slo;
         if (shi > hi)
             hi = shi;
     }
-    if (p->segment_count == 0 || hi > lx.vm.size / 2)
-        return log_fail("the program does not fit the address space");
+    if (m->segment_count == 0 || hi > lx.vm.size / 2)
+        return log_fail("the program does not fit the address space"), 0;
     if (rl_vm_set(&lx.vm, lo, hi - lo, RL_VM_RW, 1, RL_VM_FRESH) != 0)
-        return log_fail("cannot map the program");
-    for (uint32_t i = 0; i < p->segment_count; i++) {
-        const rl_linux_segment *s = &p->segments[i];
-        rl_vm_kernel_write(&lx.vm, s->addr, p->image + s->image_offset, s->file_size);
+        return log_fail("cannot map the program"), 0;
+    for (uint32_t i = 0; i < m->segment_count; i++) {
+        const rl_linux_segment *s = &m->segments[i];
+        rl_vm_kernel_write(&lx.vm, s->addr, m->file + s->image_offset, s->file_size);
     }
     uint64_t prev_hi = 0;
     uint32_t prev_perm = 0;
-    for (uint32_t i = 0; i < p->segment_count; i++) {
-        const rl_linux_segment *s = &p->segments[i];
+    for (uint32_t i = 0; i < m->segment_count; i++) {
+        const rl_linux_segment *s = &m->segments[i];
         uint64_t slo = lx_page_down(s->addr), shi = lx_page_up(s->addr + s->mem_size);
         uint32_t perm = vm_perm_of(s->perm);
         if (i > 0 && slo < prev_hi) {
             if (rl_vm_set(&lx.vm, slo, L_PAGE, perm | prev_perm, 1, RL_VM_KEEP) != 0)
-                return log_fail("cannot protect the program");
+                return log_fail("cannot protect the program"), 0;
             slo += L_PAGE;
         }
         if (slo < shi && rl_vm_set(&lx.vm, slo, shi - slo, perm, 1, RL_VM_KEEP) != 0)
-            return log_fail("cannot protect the program");
+            return log_fail("cannot protect the program"), 0;
         prev_hi = shi;
         prev_perm = perm;
     }
+    return hi;
+}
+
+/**
+ * @brief The program as the kernel leaves it: the executable and the program
+ * interpreter mapped, the libraries' range reserved for the interpreter to
+ * map into, and the heap above the lot.
+ */
+static int load_image(const rl_linux_program *p)
+{
+    uint64_t hi = p->code_hi;
+    for (uint32_t i = 0; i < p->module_count; i++)
+        if (p->modules[i].role != RL_LINUX_LIBRARY && !load_module(&p->modules[i]))
+            return 1;
+    lx.lib_lo = 0;
+    lx.lib_hi = 0;
+    for (uint32_t i = 0; i < p->module_count; i++) {
+        const rl_linux_module *m = &p->modules[i];
+        if (m->role != RL_LINUX_LIBRARY)
+            continue;
+        if (!lx.lib_lo || m->base < lx.lib_lo)
+            lx.lib_lo = m->base;
+        if (m->base + m->span > lx.lib_hi)
+            lx.lib_hi = m->base + m->span;
+    }
+    if (hi > lx.vm.size / 2)
+        return log_fail("the program does not fit the address space");
     lx.brk_start = lx_page_up((hi + HEAP_ALIGN - 1) & ~(uint64_t)(HEAP_ALIGN - 1));
     lx.brk = lx.brk_start;
     lx.brk_mapped = lx.brk_start;
@@ -125,7 +165,7 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
     if (lx_map(lx.stack_lo, top - lx.stack_lo, L_PROT_READ | L_PROT_WRITE) != 0)
         return log_fail("cannot map the stack");
     uint64_t sp = top;
-    uint64_t execfn = push_str(&sp, p->name);
+    uint64_t execfn = push_str(&sp, p->exec_path);
     int envn = 0;
     while (host_environ && host_environ[envn])
         envn++;
@@ -144,14 +184,16 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
     uint64_t random = push_bytes(&sp, rnd, sizeof rnd);
     sp &= ~15ull;
     uint32_t uid = hio_uid(), gid = hio_gid();
+    const rl_linux_module *main_module = module_of(p, RL_LINUX_MAIN);
+    const rl_linux_module *interp = module_of(p, RL_LINUX_INTERPRETER);
     uint64_t aux[][2] = {
-        { L_AT_PHDR, p->phdr },
-        { L_AT_PHENT, p->phent },
-        { L_AT_PHNUM, p->phnum },
+        { L_AT_PHDR, main_module->phdr },
+        { L_AT_PHENT, main_module->phent },
+        { L_AT_PHNUM, main_module->phnum },
         { L_AT_PAGESZ, L_PAGE },
-        { L_AT_BASE, 0 },
+        { L_AT_BASE, interp ? interp->base : 0 },
         { L_AT_FLAGS, 0 },
-        { L_AT_ENTRY, p->entry },
+        { L_AT_ENTRY, main_module->entry },
         { L_AT_UID, uid },
         { L_AT_EUID, uid },
         { L_AT_GID, gid },
@@ -255,7 +297,12 @@ int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
     uint64_t a[6] = { c->x[0], c->x[1], c->x[2], c->x[3], c->x[4], c->x[5] };
     uint32_t nr = (uint32_t)c->x[8];
     for (;;) {
+        if (rl_cfg()->trace_os)
+            rl_log(RL_LOG_INFO, "linux", "svc %u (0x%llx, 0x%llx, 0x%llx, 0x%llx)", nr, (unsigned long long)a[0],
+                   (unsigned long long)a[1], (unsigned long long)a[2], (unsigned long long)a[3]);
         int64_t r = dispatch(c, mem, nr, a);
+        if (rl_cfg()->trace_os)
+            rl_log(RL_LOG_INFO, "linux", "  svc %u = %lld", nr, (long long)r);
         if (r == LX_PENDING)
             return RL_PENDING;
         bool restart = r == -L_ERESTARTSYS || r == -L_ERESTARTNOHAND || r == -L_ERESTART_RESTARTBLOCK;
@@ -277,7 +324,8 @@ static void describe_program(const rl_linux_program *p)
 {
     rl_report_info("guest", "linux");
     rl_report_info("program", p->name);
-    rl_report_module(p->name, p->image_base, p->image_size, "");
+    for (uint32_t i = 0; i < p->module_count; i++)
+        rl_report_module(p->modules[i].name, p->modules[i].base, p->modules[i].span, "");
 }
 
 static int finish(rl_ctx *c, int rc)
@@ -314,12 +362,15 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     rl_arm64_set_va_bits(bits);
     rl_set_mem_base(lx.vm.base);
     rl_fault_install(&lx.vm);
+    if (!module_of(p, RL_LINUX_MAIN))
+        return log_fail("the program has no executable");
     if (load_image(p) != 0)
         return 1;
     lx.stack_hi = lx.vm.size - TOP_RESERVE;
     lx.stack_lo = lx.stack_hi - MAIN_STACK;
     lx.mmap_top = lx.stack_lo - STACK_GAP;
     lx.mmap_floor = lx.brk_limit + STACK_GAP;
+    lx.dynamic = module_of(p, RL_LINUX_INTERPRETER) != NULL;
     if (lx.mmap_floor >= lx.mmap_top)
         return log_fail("the address space is too small");
     lx_fs_init();
@@ -327,7 +378,7 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     rl_arm64_set_safepoint_hook(lx_safepoint);
     lx_proc_init();
     rl_dispatch_set_image(p->image_id);
-    if (rl_dispatch_reserve(p->image_base, p->image_base + p->image_size) != 0)
+    if (rl_dispatch_reserve(p->code_lo, p->code_hi) != 0)
         return log_fail("cannot allocate the dispatch table");
     if (p->unit_count && rl_units_register(p->units, p->unit_count) != 0)
         return log_fail("a lifted unit was refused");
@@ -377,7 +428,10 @@ int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
     rl_ctx *c;
     if (lx_start(p, argc, argv, &c) != 0)
         return 1;
-    int rc = rl_call_guest(c, rl_mem_base(), p->entry);
+    const rl_linux_module *start = module_of(p, RL_LINUX_INTERPRETER);
+    if (!start)
+        start = module_of(p, RL_LINUX_MAIN);
+    int rc = rl_call_guest(c, rl_mem_base(), start->entry);
     int status = finish(c, rc);
     if (rc == RL_PENDING && c->pend.kind == RL_PEND_EXIT_THREAD) {
         lx_thread_end(lx_cur());
