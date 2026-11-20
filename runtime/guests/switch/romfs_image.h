@@ -39,10 +39,17 @@ typedef struct rl_romfs_image rl_romfs_image;
 /**
  * @brief Opens root: an extracted tree (scanned, metadata built), a plain
  * image file or a RomFS map. Returns NULL with errno set when it cannot be
- * read, is malformed (EINVAL), names a source that changed (ESTALE) or is too
- * large for the format.
+ * read, is malformed (EINVAL), names a source that changed (ESTALE) or is
+ * missing (ENOLINK) or is too large for the format.
  */
 rl_romfs_image *rl_romfs_image_open(const char *root);
+
+/**
+ * @brief The path of the source file a RomFS map names that does not exist,
+ * set when a rl_romfs_image_open on this thread failed with ENOLINK: the map
+ * is there, but a file it reads from is not.
+ */
+const char *rl_romfs_image_missing_source(void);
 
 /**
  * @brief Opens the plain image of length bytes at offset in the file at path

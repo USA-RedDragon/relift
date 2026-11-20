@@ -1003,6 +1003,42 @@ TEST(romfs_image_file_and_map_serve_the_tree_bytes)
     tree_remove(out);
 }
 
+TEST(romfs_map_with_a_missing_source_is_named_and_unservable)
+{
+    char root[512], out[512], path[1024], map[1024];
+    rl_romfs_image *tree;
+    uint8_t *bytes;
+    make_root(root, sizeof root);
+    make_root(out, sizeof out);
+    make_tree(root);
+    tree = rl_romfs_image_open(root);
+    CHECK(tree != NULL);
+    bytes = image_bytes(tree);
+    CHECK(bytes != NULL);
+    make_map(out, bytes, rl_romfs_image_size(tree), map, sizeof map);
+    snprintf(path, sizeof path, "%s/data.bin", out);
+
+    rl_hos_fs_set_romfs(map);
+    CHECK(!rl_hos_fs_romfs_unservable());
+    rl_hos_fs_set_romfs(NULL);
+
+    CHECK_EQ(unlink(path), 0);
+    CHECK(rl_romfs_image_open(map) == NULL);
+    CHECK_EQ(errno, ENOLINK);
+    CHECK_EQ(strcmp(rl_romfs_image_missing_source(), path), 0);
+
+    rl_hos_fs_set_romfs(map);
+    CHECK(rl_hos_fs_romfs_unservable());
+    rl_hos_fs_set_romfs(root);
+    CHECK(!rl_hos_fs_romfs_unservable());
+    rl_hos_fs_set_romfs(NULL);
+
+    rl_romfs_image_close(tree);
+    free(bytes);
+    tree_remove(root);
+    tree_remove(out);
+}
+
 TEST(romfs_mods_layer_over_an_image_as_over_its_tree)
 {
     char base[512], out[512], mod[512], img_path[1024];

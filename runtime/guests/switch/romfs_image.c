@@ -161,6 +161,10 @@ static bool is_absolute(const char *p)
     return p[0] == '/' || p[0] == '\\' || (p[0] && p[1] == ':');
 }
 
+static _Thread_local char g_missing[PATH_MAX];
+
+const char *rl_romfs_image_missing_source(void) { return g_missing; }
+
 static int map_source(img_store *s, const char *map_path, const uint8_t *rec, const uint8_t *path, uint32_t len,
                       uint32_t i)
 {
@@ -185,8 +189,12 @@ static int map_source(img_store *s, const char *map_path, const uint8_t *rec, co
         full[dir_len + 1 + len] = 0;
     }
     s->fds[i] = open(full, O_RDONLY | O_CLOEXEC);
-    if (s->fds[i] < 0)
-        return errno;
+    if (s->fds[i] < 0) {
+        if (errno != ENOENT)
+            return errno;
+        memcpy(g_missing, full, strlen(full) + 1);
+        return ENOLINK;
+    }
     if (fd_size(s->fds[i]) != get64(rec))
         return ESTALE;
     rc = pread_all(s->fds[i], check, sizeof check, get64(rec + 8));

@@ -921,4 +921,6 @@ void rl_srv_install_fs(void)
     rl_hos_fs_set_save(save);
     rl_fs_romfs_env();
     rl_hos_mods_install();
+    if (rl_hos_fs_romfs_unservable())
+        rl_process_exit(RL_EXIT_SOFTWARE);
 }

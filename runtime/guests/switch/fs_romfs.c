@@ -245,6 +245,9 @@ static rl_romfs_image *source_image(source *s, rl_result *rc)
             rl_log(RL_LOG_INFO, "fs", "romfs %s: %u files, %llu MiB, opened in %lld ms", what,
                    rl_romfs_image_file_count(s->img), (unsigned long long)(rl_romfs_image_size(s->img) >> 20),
                    (long long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
+        else if (s->err == ENOLINK)
+            rl_log(RL_LOG_ERROR, "fs", "romfs %s: the file it reads from, %s, is missing; restore it or import the game again",
+                   what, rl_romfs_image_missing_source());
         else if (s->err == ESTALE)
             rl_log(RL_LOG_ERROR, "fs", "romfs %s: a file it reads changed since the import; import the game again",
                    what);
@@ -254,6 +257,21 @@ static rl_romfs_image *source_image(source *s, rl_result *rc)
     if (!s->img)
         *rc = open_error(s->err);
     return s->img;
+}
+
+bool rl_hos_fs_romfs_unservable(void)
+{
+    struct stat st;
+    bool bad = false;
+    pthread_mutex_lock(&g_lock);
+    const char *root = g_main.nlayers ? g_main.layers[0].root : g_main.dir;
+    if (root && stat(root, &st) == 0 && S_ISREG(st.st_mode)) {
+        rl_result rc = KR_SUCCESS;
+        (void)source_image(&g_main, &rc);
+        bad = g_main.err == ENOLINK || g_main.err == ESTALE;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return bad;
 }
 
 static source *addon_source(uint64_t id)

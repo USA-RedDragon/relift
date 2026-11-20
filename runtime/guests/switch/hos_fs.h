@@ -45,6 +45,15 @@ RL_RUNTIME_API const char *rl_hos_fs_save_dir(void);
 RL_RUNTIME_API void rl_hos_fs_set_romfs(const char *dir);
 
 /**
+ * @brief Whether the romfs set above is a RomFS map or image file that cannot
+ * be served because a file it reads from is missing or changed since the
+ * import. It opens the image now and logs which file. rl_srv_install_fs ends
+ * the process when this is true, so a game never runs with a data storage
+ * that fails.
+ */
+RL_RUNTIME_API bool rl_hos_fs_romfs_unservable(void);
+
+/**
  * @brief Like rl_hos_fs_set_romfs for several trees layered in order (see
  * rl_romfs_image_open_layers): the first is normally the base tree, later ones
  * win. warn is called while the image is built, on first use of the storage.

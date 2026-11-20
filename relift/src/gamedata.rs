@@ -117,6 +117,32 @@ pub fn units(import: &Path) -> std::io::Result<Vec<Unit>> {
     Ok(out)
 }
 
+/// The first host file a romfs map of `import` (the game's or a DLC's) reads
+/// from that does not exist, as the map and the file. An import made from a
+/// dump keeps its romfs data in the file the map names, so a missing one means
+/// the program would run without its data.
+///
+/// # Errors
+///
+/// A map cannot be read or is malformed.
+pub fn missing_source(import: &Path) -> Result<Option<(PathBuf, PathBuf)>, BoxError> {
+    for u in units(import)? {
+        let Found::Map(map) = &u.found else {
+            continue;
+        };
+        let parsed = romfs_image::RomfsMap::parse(&std::fs::read(map)?)
+            .map_err(|e| format!("{}: {e}", map.display()))?;
+        let dir = map.parent().unwrap_or(Path::new("."));
+        for s in &parsed.sources {
+            let file = dir.join(&s.path);
+            if !file.exists() {
+                return Ok(Some((map.clone(), file)));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Point a run of the program at `import`'s data: `RELIFT_ROMFS` at the
 /// romfs as it is, `RELIFT_DLC` at the DLC folder, `RELIFT_PROGRAMS` at the
 /// other programs' romfs, `RELIFT_FONTS` at the shared fonts decoded from
@@ -378,6 +404,31 @@ mod tests {
     fn put(p: &Path, b: &[u8]) {
         std::fs::create_dir_all(p.parent().expect("parent")).expect("mkdir");
         relift_cache::write_if_changed(p, b).expect("write");
+    }
+
+    #[test]
+    fn a_map_whose_source_file_is_gone_is_named() {
+        let d = scratch("missing-source");
+        let import = d.join("import");
+        let map = romfs_image::RomfsMap {
+            size: 0,
+            meta: Vec::new(),
+            sources: vec![romfs_image::MapSource {
+                path: "data.blob".into(),
+                size: 4,
+                check_offset: 0,
+                check: [0; 32],
+            }],
+            pieces: Vec::new(),
+        };
+        put(&import.join("romfs.map"), &map.to_bytes());
+        assert_eq!(
+            missing_source(&import).expect("check"),
+            Some((import.join("romfs.map"), import.join("data.blob")))
+        );
+        put(&import.join("data.blob"), b"data");
+        assert_eq!(missing_source(&import).expect("check"), None);
+        std::fs::remove_dir_all(&d).expect("clean");
     }
 
     #[test]

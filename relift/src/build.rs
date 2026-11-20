@@ -1430,6 +1430,14 @@ fn lift_and_emit(
     ui: &mut Ui,
 ) -> Result<EmitRecord, BoxError> {
     let import = import_dir(settings)?;
+    if let Some((map, file)) = crate::gamedata::missing_source(&import)? {
+        return Err(format!(
+            "{}: the file it reads the game data from, {}, is missing; restore it or import the game again",
+            map.display(),
+            file.display()
+        )
+        .into());
+    }
     let (mut loaded, npdm) = load_slots(&import)?;
     let closed = crate::closed::check(npdm.as_ref(), &import)?;
     if let Some(n) = closed {
