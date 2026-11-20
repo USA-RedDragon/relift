@@ -480,7 +480,10 @@ static rl_result display_unbind(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
-/** @brief DisplaySession 103 (nn::vi2::QueryDisplayRefreshRate): a u64 display name; a u32 rate in Hz and a bool. */
+/**
+ * @brief DisplaySession 103 and 354 (nn::vi2::QueryDisplayRefreshRate; a Switch 2 SDK sends 354, which the SDK reads as
+ * one u64 holding a u32 rate and a bool): a u64 display name; a u32 rate in Hz and a bool.
+ */
 static rl_result display_query_refresh_rate(rl_ipc_req *r)
 {
     uint64_t name;
@@ -545,6 +548,22 @@ static rl_result display_query_buffer_max_resolution(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief DisplaySession 107 (nn::vi2::QueryDisplayModeCapability): a u64 display name; three u64 flag sets, the
+ * supported refresh rates, the supported HDR output formats and a second refresh rate set. The SDK reads bit 63 of the
+ * first as "the display has a variable refresh rate" and nothing else. relift reports none of them (inferred: the
+ * SDK's bit layout is not known beyond bit 63, and a fixed-rate panel answers with that bit clear).
+ */
+static rl_result display_query_mode_capability(rl_ipc_req *r)
+{
+    uint64_t name;
+    if (!rl_srv_in(r, &name, 8))
+        return SF_RESULT_INVALID_HEADER;
+    if (!rl_ipc_out(r, 24))
+        return SF_RESULT_INVALID_HEADER;
+    return KR_SUCCESS;
+}
+
 static const rl_ipc_cmd display_session_cmds[] = {
     { 1, "GetCount", display_count },
     { 3, "GetDisplayId", display_first_id },
@@ -560,6 +579,7 @@ static const rl_ipc_cmd display_session_cmds[] = {
     { 104, "QueryDisplayHdrStatus", display_query_hdr_status },
     { 105, "QueryDisplayHdrPaperWhite", display_query_paper_white },
     { 106, "QueryDisplayBufferMaxResolution", display_query_buffer_max_resolution },
+    { 107, "QueryDisplayModeCapability", display_query_mode_capability },
     { 111, "Command111", rl_srv_stub_ok },
     { 112, "Command112", rl_srv_stub_ok },
     { 113, "Command113", rl_srv_stub_ok },
@@ -585,6 +605,7 @@ static const rl_ipc_cmd display_session_cmds[] = {
     { 351, "Command351", rl_srv_stub_ok },
     { 352, "Command352", rl_srv_stub_ok },
     { 353, "Command353", rl_srv_stub_ok },
+    { 354, "QueryDisplayRefreshRate2", display_query_refresh_rate },
 };
 
 static const rl_ipc_class display_session_class = { "nn::gsv::DisplaySession", display_session_cmds,

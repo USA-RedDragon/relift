@@ -283,6 +283,15 @@ TEST(gsv_display_change_events_fire_when_bound_and_the_queries_answer)
     r = display_query(c, d, 105, 0x00746c7561666564ull);
     CHECK_EQ(r.result, 0);
     CHECK_EQ(tc_u32(&r, 0), 203);
+    r = display_query(c, d, 354, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 60);
+    CHECK_EQ(tc_u32(&r, 4), 0);
+    r = display_query(c, d, 107, 0x00746c7561666564ull);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u64(&r, 0), 0);
+    CHECK_EQ(tc_u64(&r, 8), 0);
+    CHECK_EQ(tc_u64(&r, 16), 0);
 }
 
 TEST(gsv_display_buffer_max_resolution_follows_the_operation_mode)
