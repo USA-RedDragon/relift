@@ -17,11 +17,13 @@
 #include <relift/settings.h>
 #include <relift/touchpad.h>
 #include <relift/window.h>
+
 #ifdef __ANDROID__
 #include <relift/android.h>
 #endif
 
 #include "core.h"
+#include "present.h"
 
 #ifdef __ANDROID__
 #define VK_USE_PLATFORM_ANDROID_KHR
@@ -68,6 +70,8 @@ typedef struct sdl_win {
     bool integer;
     int sampling;
     bool no_renderer;
+    rl_present *pres;
+    bool pres_tried;
     struct sdl_win *next;
 } sdl_win;
 
@@ -515,8 +519,12 @@ static void do_close(void *p)
 
 static void sdl_close(rl_window *h)
 {
-    if (h)
-        on_loop(do_close, h);
+    if (!h)
+        return;
+    sdl_win *w = (sdl_win *)h;
+    rl_present_close(w->pres);
+    w->pres = NULL;
+    on_loop(do_close, h);
 }
 
 static void sdl_size(rl_window *h, uint32_t *width, uint32_t *height)
@@ -697,11 +705,37 @@ static void do_present(void *p)
     SDL_RenderPresent(w->r);
 }
 
+/**
+ * @brief The window's presenter, opened with the first ask unless the on-screen controller is in use (its overlay is
+ * still drawn by the SDL renderer) or the host has no Vulkan device with swapchains (the renderer shows the frames).
+ */
+static rl_present *sdl_presenter(rl_window *h)
+{
+    sdl_win *w = (sdl_win *)h;
+    if (!w->pres_tried) {
+        w->pres_tried = true;
+        if (g_exts && !rl_touchpad_wanted()) {
+            w->pres = rl_present_open(h);
+            if (w->pres)
+                rl_present_set_fit(w->pres, w->fit);
+        }
+    }
+    return w->pres;
+}
+
 static void sdl_present_rgb(rl_window *h, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_w,
                             uint32_t shown_h)
 {
+    sdl_win *w = (sdl_win *)h;
+    rl_present *p = sdl_presenter(h);
+    if (p) {
+        uint32_t ww = 0, wh = 0;
+        sdl_size(h, &ww, &wh);
+        rl_present_frame(p, rgb, width, height, shown_w, shown_h, w->fit, ww, wh, NULL);
+        return;
+    }
     present_req q = {
-        .w = (sdl_win *)h, .rgb = rgb, .width = width, .height = height, .shown_w = shown_w, .shown_h = shown_h
+        .w = w, .rgb = rgb, .width = width, .height = height, .shown_w = shown_w, .shown_h = shown_h
     };
     on_loop(do_present, &q);
 }
@@ -718,6 +752,22 @@ static void do_point(void *p)
     point_req *q = p;
     sdl_win *w = q->w;
     float lx = 0, ly = 0;
+    rl_present_rect at;
+    uint32_t fw = 0, fh = 0;
+    if (w->pres) {
+        int pw = 0, ph = 0;
+        SDL_GetWindowSize(w->w, &pw, &ph);
+        float sx = pw > 0 ? (float)w->width / (float)pw : 1.0f, sy = ph > 0 ? (float)w->height / (float)ph : 1.0f;
+        if (!rl_present_shown(w->pres, &at, &fw, &fh))
+            return;
+        float px = q->x * sx - (float)at.x, py = q->y * sy - (float)at.y;
+        if (px < 0 || py < 0 || px >= (float)at.w || py >= (float)at.h)
+            return;
+        q->fx = (uint32_t)(px * (float)fw / (float)at.w);
+        q->fy = (uint32_t)(py * (float)fh / (float)at.h);
+        q->ok = q->fx < fw && q->fy < fh;
+        return;
+    }
     if (!w->r || !w->logical || !w->lw || !w->lh || !SDL_RenderCoordinatesFromWindow(w->r, q->x, q->y, &lx, &ly))
         return;
     if (lx < 0 || ly < 0 || lx >= (float)w->lw || ly >= (float)w->lh)
@@ -749,6 +799,8 @@ static void do_fit(void *p)
     if (q->w->fit != q->fit) {
         q->w->fit = q->fit;
         q->w->logical = false;
+        if (q->w->pres)
+            rl_present_set_fit(q->w->pres, q->fit);
     }
 }
 
@@ -776,6 +828,7 @@ static const rl_window_backend g_sdl = {
     .vulkan_gipa = sdl_vulkan_gipa,
     .vulkan_surface = sdl_vulkan_surface,
     .present_rgb = sdl_present_rgb,
+    .presenter = sdl_presenter,
     .screen = sdl_screen,
     .frame_point = sdl_frame_point,
     .set_fit = sdl_set_fit,
