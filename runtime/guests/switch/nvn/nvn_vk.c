@@ -57,7 +57,7 @@ static int64_t now_ns(void);
 
 /** @brief Where the guest thread's time went, summed between two rate lines (nanoseconds and counts). */
 static struct {
-    uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads, gpu_ns, pipes, pipe_ns;
+    uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads, gpu_ns;
 } tm;
 
 /** @brief Two timestamps around each submit: the device's busy time per frame. */
@@ -66,12 +66,6 @@ static struct {
     double period_ns;
     bool failed;
 } gpu_ts;
-
-void nvn_vk_note_pipeline(int64_t ns)
-{
-    tm.pipes++;
-    tm.pipe_ns += (uint64_t)ns;
-}
 
 /** @brief Submits si to the guest queue with g.fence, under the core's queue lock when the presenter shares the queue. */
 static VkResult guest_submit(const VkSubmitInfo *si)
@@ -2684,12 +2678,20 @@ static void present_rate(uint64_t total)
     double cpu_ms = (double)(cpu.tv_sec - cpu_prev.tv_sec) * 1e3 + (double)(cpu.tv_nsec - cpu_prev.tv_nsec) / 1e6;
     cpu_prev = cpu;
     double frames = (double)(total - last_total);
+    static uint64_t pm0, pn0, pl0, pln0;
+    uint64_t pm, pn, pl, pln;
+    nvn_pipe_stats(&pm, &pn, &pl, &pln);
     rl_log(RL_LOG_INFO, "nvn",
            "per present: wall %.2f ms, thread cpu %.2f ms, replay %.2f ms in %.1f submits (%.1f batches), submit call %.2f ms, "
-           "wait for the device %.2f ms, device busy %.2f ms, %.2f pipelines created taking %.2f ms",
+           "wait for the device %.2f ms, device busy %.2f ms, %.2f pipelines made taking %.2f ms (%.2f of them late, %.2f ms)",
            (double)(now - last_ns) / 1e6 / frames, cpu_ms / frames, (double)tm.run_ns / 1e6 / frames,
            (double)tm.runs / frames, (double)tm.flushes / frames, (double)tm.submit_ns / 1e6 / frames,
-           (double)tm.wait_ns / 1e6 / frames, (double)tm.gpu_ns / 1e6 / frames, (double)tm.pipes / frames, (double)tm.pipe_ns / 1e6 / frames);
+           (double)tm.wait_ns / 1e6 / frames, (double)tm.gpu_ns / 1e6 / frames, (double)(pm - pm0) / frames, (double)(pn - pn0) / 1e6 / frames,
+           (double)(pl - pl0) / frames, (double)(pln - pln0) / 1e6 / frames);
+    pm0 = pm;
+    pn0 = pn;
+    pl0 = pl;
+    pln0 = pln;
     memset(&tm, 0, sizeof tm);
     uint64_t faults, starts;
     nvn_watch_stats(&faults, &starts);

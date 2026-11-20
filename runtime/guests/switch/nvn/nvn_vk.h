@@ -295,8 +295,6 @@ bool nvn_vk_staging_new(staging *s, uint64_t size);
 void nvn_vk_staging_free(staging *s);
 void nvn_vk_barrier(VkCommandBuffer cb);
 bool nvn_vk_begin(replay *r);
-/** @brief Counts one host pipeline creation (graphics or compute) that took ns, for the rate line. */
-void nvn_vk_note_pipeline(int64_t ns);
 
 /**
  * @brief Submits what r recorded and waits for it; the arena is free again
