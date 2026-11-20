@@ -108,6 +108,8 @@ void rl_srv_install_friend(void);
 void rl_srv_install_nifm(void);
 /** @brief Installs nsd:u and nsd:a, the network settings services. */
 void rl_srv_install_nsd(void);
+/** @brief Installs prepo:u and the other play report services. */
+void rl_srv_install_prepo(void);
 /** @brief Installs ssl and ssl:s, the TLS services. */
 void rl_srv_install_ssl(void);
 
