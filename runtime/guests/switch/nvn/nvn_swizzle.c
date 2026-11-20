@@ -30,6 +30,11 @@ static uint32_t gob_offset_maxwell(uint32_t x, uint32_t y)
     return ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((x % 32) / 16) * 32 + (y % 2) * 16 + (x % 16);
 }
 
+uint32_t (*nvn_gob_offset_fn(void))(uint32_t, uint32_t)
+{
+    return nvn_generation() == 1 ? gob_offset_maxwell : gob_offset_turing;
+}
+
 uint32_t nvn_gob_offset(uint32_t x, uint32_t y)
 {
     return nvn_generation() == 1 ? gob_offset_maxwell(x, y) : gob_offset_turing(x, y);

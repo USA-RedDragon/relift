@@ -825,6 +825,8 @@ const char *nvn_version_name(void);
 uint64_t nvn_sampled_handle_mark(void);
 /** @brief Offset of byte x of row y inside a 512-byte GOB, in the layout of the program's GPU (nvn_swizzle.c). */
 uint32_t nvn_gob_offset(uint32_t x, uint32_t y);
+/** @brief The GOB layout function of the program's NVN generation, to call in a loop without asking for the generation each time. */
+uint32_t (*nvn_gob_offset_fn(void))(uint32_t, uint32_t);
 /** @brief Number of NVNformat values the driver knows. */
 uint32_t nvn_format_count(void);
 /** @brief The NVN1 answer for an NVNdeviceInfo the driver measures at device start; false for NVN2 or another info. */

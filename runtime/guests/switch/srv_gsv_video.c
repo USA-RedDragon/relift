@@ -407,6 +407,36 @@ static void nv12_to_rgba(const frame *f, uint32_t w, uint32_t h, uint8_t *out, u
         }
 }
 
+/**
+ * @brief nv12_to_rgba for an image the GPU reads, written straight into its block-linear layout (blocks of block_gobs
+ * GOBs, gobs_wide GOBs across): each row converts four pixels at a time, the 16 bytes the layout keeps together, so
+ * no linear copy and no per-pixel address work. Pixels past w by h (the image's padding) stay zero; tiled is zeroed.
+ */
+static void nv12_to_rgba_tiled(const frame *f, uint32_t w, uint32_t h, uint8_t *tiled, uint64_t pitch, uint64_t rows,
+                               uint64_t gobs_wide, uint64_t block_gobs)
+{
+    const uint8_t *luma = f->data, *chroma = f->data + (uint64_t)f->width * f->height;
+    uint32_t (*gob_offset)(uint32_t, uint32_t) = nvn_gob_offset_fn();
+    (void)rows;
+    for (uint32_t y = 0; y < h; y++) {
+        uint64_t block_row = y / (8 * block_gobs), gob_in_block = (y / 8) % block_gobs;
+        const uint8_t *yrow = luma + (uint64_t)y * f->width, *crow = chroma + (uint64_t)(y / 2) * f->width;
+        for (uint32_t x = 0; x < w; x += 4) {
+            uint8_t px[16];
+            for (uint32_t k = 0; k < 4; k++) {
+                uint32_t xx = x + k;
+                if (xx < w)
+                    rl_gsv_yuv_to_rgba(yrow[xx], crow[(xx / 2) * 2], crow[(xx / 2) * 2 + 1], false, px + 4 * k);
+                else
+                    memset(px + 4 * k, 0, 4);
+            }
+            uint64_t bx = (uint64_t)x * 4;
+            uint64_t gob = (block_row * gobs_wide + bx / 64) * block_gobs + gob_in_block;
+            memcpy(&tiled[gob * 512 + gob_offset((uint32_t)bx, y)], px, bx + 16 <= pitch ? 16 : pitch - bx);
+        }
+    }
+}
+
 /** @brief Block height, in GOBs (log2), of a decoder image the GPU reads (inferred: Eglantine writes 16-GOB blocks). */
 #define GPU_READ_BLOCK_LOG2 4u
 
@@ -433,26 +463,19 @@ static bool put_frame(const video_session *v, uint32_t image_id, const frame *f)
     uint64_t rows = l.chroma_offset / l.pitch;
     uint64_t gobs_wide = l.pitch / 64, gob_rows = (rows + 7) / 8, block_gobs = 1u << GPU_READ_BLOCK_LOG2;
     uint64_t bytes = (gob_rows + block_gobs - 1) / block_gobs * block_gobs * gobs_wide * 512;
-    uint8_t *linear = calloc(1, l.pitch * rows), *tiled = m.gpu_read ? calloc(1, bytes) : NULL;
-    if (!linear || (m.gpu_read && !tiled)) {
+    uint8_t *linear = m.gpu_read ? NULL : calloc(1, l.pitch * rows), *tiled = m.gpu_read ? calloc(1, bytes) : NULL;
+    if ((!m.gpu_read && !linear) || (m.gpu_read && !tiled)) {
         free(linear);
         free(tiled);
         return false;
     }
     /* An image the GPU reads is sampled through the movie player's view of the native image, an RGBA8 texture (NVN format
      * 0x38), so its bytes are R, G, B, A whatever the pool's layout code is. */
-    nv12_to_rgba(f, w, h, linear, l.pitch, !m.gpu_read && (l.code == 2 || l.code == 5));
     if (m.gpu_read) {
-        for (uint64_t y = 0; y < rows; y++) {
-            uint64_t block_row = y / (8 * block_gobs), gob_in_block = (y / 8) % block_gobs;
-            for (uint64_t x = 0; x < l.pitch; x += 16) {
-                uint64_t gob = (block_row * gobs_wide + x / 64) * block_gobs + gob_in_block;
-                memcpy(&tiled[gob * 512 + nvn_gob_offset((uint32_t)x, (uint32_t)y)], &linear[y * l.pitch + x],
-                       l.pitch - x < 16 ? l.pitch - x : 16);
-            }
-        }
+        nv12_to_rgba_tiled(f, w, h, tiled, l.pitch, rows, gobs_wide, block_gobs);
         rl_vm_kernel_write(&hos.vm, base, tiled, bytes);
     } else {
+        nv12_to_rgba(f, w, h, linear, l.pitch, l.code == 2 || l.code == 5);
         rl_vm_kernel_write(&hos.vm, base, linear, l.pitch * rows);
     }
     free(linear);
