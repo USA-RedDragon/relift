@@ -20,6 +20,16 @@ and optionally
 With `AARCH64_GCC=aarch64-linux-gnu-gcc` set, `build.sh` also builds every program
 with that compiler, statically against glibc, as `<name>.gnu`; they use the
 same expected answers.
+A program with a `dynamic_only` file is built dynamically only (it needs a
+shared library, `dlopen` or the program interpreter); with a `lib.c` or
+`lib.cpp` its shared library `lib<name>.so` is built beside it and the
+program finds it through `$ORIGIN`; a `dlopen` file says the program loads
+the library by name instead of linking it. Every `<name>.dyn` is the same
+program linked against glibc's shared libraries, built with
+`aarch64-linux-gnu-gcc`; `ONLY_DYNAMIC=1` skips the musl builds. `check.sh`
+imports a `.dyn` with the sysroot of that compiler (`SYSROOT` overrides it).
+`verify_dyn.sh <out-dir>` runs each `.dyn` build on the device, through the
+sysroot's loader pushed with it, and compares with the recorded output.
 `record.sh <out-dir> [name...]` pushes each named (default: every) `static` build to the shared arm64 test
 device in its own folder under `/data/local/tmp/relift-elf`, runs it and
 writes the two expected files; it takes the lock `RELIFT_ADB_LOCK` names (default: a file under

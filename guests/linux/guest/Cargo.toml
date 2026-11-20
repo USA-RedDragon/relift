@@ -1,6 +1,6 @@
 [package]
 name = "relift-linux"
-description = "The Linux guest: static aarch64 ELF programs over `relift-objfile` and `relift-cpu-arm64`"
+description = "The Linux guest: static and dynamically linked aarch64 ELF programs over `relift-objfile` and `relift-cpu-arm64`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

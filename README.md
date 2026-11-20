@@ -15,6 +15,7 @@ relift ships no game code, keys or data, and never will.
 
 | Guest | CPU | State |
 |---|---|---|
+| Linux | ARM64 | Static and dynamically linked aarch64 programs (musl and glibc; threads, signals, C++ exceptions, shared libraries, `dlopen` of a library in the import) run with the output a real arm64 Linux gives; a dynamic program imports with `--sysroot` and its loader and libraries are lifted with it. |
 | Nintendo Switch | ARM64 | Test programs built with libnx run end to end, and CI runs synthetic ones. A commercial game reaches gameplay in test runs; most games are untested and many will fail. |
 | Nintendo Switch 2 | ARM64 | Shaders are translated from SM86 to SPIR-V at build time (`gpus/sm86`, `gpus/nv`), and the NVN2 graphics API runs over Vulkan. A retail game reaches its menus in test runs; most games stop early in their boot. |
 | Game Boy and Game Boy Color | SM83 | Test ROMs from public suites pass in CI. Retail games run in test runs. |

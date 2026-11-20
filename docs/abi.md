@@ -2958,6 +2958,63 @@ arguments [checked: `sig_interrupt` in the corpus, recorded on arm64 Linux,
 static, static-PIE and glibc]. A thread that runs guest code without making
 a system call sees a signal at its next call.
 
+## 14.3 Linux dynamic linking
+
+A dynamically linked aarch64 Linux program is lifted whole: the executable,
+the program interpreter it names (`PT_INTERP`) and every library of its
+`DT_NEEDED` closure, one lifted unit per file, all at build time. The real
+`ld.so` runs as lifted guest code, so symbol binding, relocation,
+indirect-function resolvers, thread-local storage layout and the order of
+initializers and finalizers are the loader's own behavior, not a
+reimplementation.
+
+- **Import.** `relift import --sysroot DIR program` reads the executable,
+  finds the interpreter and each library the way `ld.so` searches (the
+  executable's and its loaders' `DT_RPATH`, the file's `DT_RUNPATH`, with
+  `$ORIGIN`, `$LIB` and `$PLATFORM` expanded, then the `ld.so.conf`
+  directories of the sysroot, then the default directories), and copies
+  them into the import directory with their hashes and the guest paths each
+  answers to (`modules.toml`), so a build does not need the sysroot again
+  (`guests/linux/guest/src/sysroot.rs`). A library whose file name a loaded
+  file spells as a string (`libfoo.so.1`, as in a `dlopen` of a constant
+  name) and the sysroot holds joins the closure. [checked: the corpus's
+  shared library and `dlopen` programs]
+- **Layout.** The files are placed one after another from the end of the
+  executable, each aligned to 64 KiB or its segments' alignment
+  (`program::place`), so the lifted code and the run agree on every
+  address. The kernel layer maps the executable and the interpreter as the
+  kernel does (`AT_PHDR`, `AT_ENTRY`, `AT_BASE`, `AT_EXECFN` and the rest of
+  the auxiliary vector) and starts the interpreter. A library's address
+  range is reserved for it: when `ld.so` asks for room for a library (an
+  anonymous map of the library's span, or a map of its file), the layer
+  answers with the address the build lifted the library at.
+- **Files.** The interpreter opens and maps the libraries through the layer
+  (`openat`, `read`, `pread64`, `fstat`, `mmap` of a descriptor): a path
+  that one of the import's files answers to opens that file's bytes, which
+  the layer holds as data in the program. `/etc/ld.so.cache`,
+  `/etc/ld.so.preload` and `/etc/ld.so.conf` are absent, and a library path
+  the loader probes that is not an import file's path is absent too (never
+  a file of the machine under the program). A path to a shared object whose
+  name no import file has stops the program with a report that names it:
+  the library was not in the import. `/proc/self/exe` reads as the
+  executable's import path.
+- **Discovery.** Each file's roots are its entry, dynamic and static
+  symbols, unwind table, relocation targets, initializer and finalizer
+  lists, the lazy-binding entry each procedure linkage word starts with,
+  and its indirect-function resolvers. Every exported function is a root. A
+  call through a procedure linkage stub is a direct call to the stub and an
+  indirect jump through the word the loader filled, which the dispatch
+  table resolves like any indirect transfer. [checked: corpus]
+- **Escapes across files.** Return-address escape analysis
+  (`relift_analyze::escape::return_escapes_linked`) takes every module at
+  once: a call through a procedure linkage stub or a global offset table
+  word counts as a call to the function the word is bound to by symbol
+  name, so a `setjmp` in `libc.so` makes the code after its call in the
+  executable a landing pad. [checked: `setjmp.dyn`]
+- **Not covered.** A `dlopen` of a library name built at run time that is
+  not in the import stops with a report (a dev build cannot hot-load it
+  either). `fork`, `exec` and processes stay unsupported.
+
 ## 15. WebAssembly modules
 
 `relift-emit-wasm` (`core/emit-wasm`) emits lifted functions as

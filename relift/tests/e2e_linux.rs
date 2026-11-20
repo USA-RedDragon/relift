@@ -61,11 +61,17 @@ fn built(
     program: &Path,
     cache: &str,
     (trampoline, cold): (bool, bool),
+    sysroot: Option<&str>,
 ) -> (std::path::PathBuf, String) {
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = program.display().to_string();
-    let out = tiny::relift(&project, &["--cache-dir", cache, "import", &image]);
+    let mut args = vec!["--cache-dir", cache, "import"];
+    if let Some(s) = sysroot {
+        args.extend(["--sysroot", s]);
+    }
+    args.push(&image);
+    let out = tiny::relift(&project, &args);
     assert!(
         out.status.success(),
         "{}",
@@ -114,6 +120,7 @@ fn check_program(root: &Path, corpus: &Path, programs: &Path, name: &str, trampo
         &programs.join(name),
         &cache,
         (trampoline, name == "hello.static" && !trampoline),
+        None,
     );
     let wants = match name {
         "coroutines.static" | "setjmp.static" => Some("returns: trampoline mode ("),
@@ -160,7 +167,7 @@ fn a_hand_assembled_program_builds_and_exits_with_its_status() {
     std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
     relift_cache::write_if_changed(&elf, &program()).expect("the program is writable");
     let cache = root.join("cache").display().to_string();
-    let (exe, _) = built(&root, &elf, &cache, (false, false));
+    let (exe, _) = built(&root, &elf, &cache, (false, false), None);
     let out = relift_proc::command(&exe)
         .env("RELIFT_REPORT_DIR", &root)
         .output()
@@ -234,5 +241,64 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
             }
         }
     });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
+    let have = |t: &str| relift_build::find_tool(t).is_some();
+    if !have("clang") || !have("aarch64-linux-gnu-gcc") {
+        assert!(
+            std::env::var_os("RELIFT_LINUX_REQUIRE").is_none(),
+            "RELIFT_LINUX_REQUIRE is set and clang or aarch64-linux-gnu-gcc is missing"
+        );
+        eprintln!("skipped: no clang or aarch64-linux-gnu-gcc on PATH");
+        return;
+    }
+    let sysroot = relift_proc::command("aarch64-linux-gnu-gcc")
+        .arg("-print-sysroot")
+        .output()
+        .expect("the compiler runs");
+    let sysroot = String::from_utf8_lossy(&sysroot.stdout).trim().to_string();
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guests/linux/guest/corpus");
+    let root = tiny::scratch("e2e-linux-dynamic");
+    std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
+    let programs = root.join("programs");
+    let status = relift_proc::command("sh")
+        .arg(corpus.join("build.sh"))
+        .arg(&programs)
+        .env("ONLY_DYNAMIC", "1")
+        .env("AARCH64_GCC", "aarch64-linux-gnu-gcc")
+        .status()
+        .expect("build.sh runs");
+    assert!(status.success());
+    let cache = root.join("cache").display().to_string();
+    for (name, modes) in [
+        ("shared_lib.dyn", (false, false)),
+        ("dlopen_lib.dyn", (false, true)),
+        ("cxx_throw_lib.dyn", (true, false)),
+    ] {
+        let _ = std::fs::remove_dir_all(root.join("game"));
+        let _ = std::fs::remove_dir_all(root.join("cache"));
+        let (exe, _) = built(&root, &programs.join(name), &cache, modes, Some(&sysroot));
+        let dir = corpus.join(name.split('.').next().expect("a name"));
+        let out = relift_proc::command(&exe)
+            .env("RELIFT_REPORT_DIR", &root)
+            .env("TMPDIR", &root)
+            .output()
+            .expect("the program runs");
+        let want = std::fs::read(dir.join("expected.stdout")).expect("expected.stdout");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&want),
+            "{name}"
+        );
+        let code: i32 = std::fs::read_to_string(dir.join("expected.exit"))
+            .expect("expected.exit")
+            .trim()
+            .parse()
+            .expect("a status");
+        assert_eq!(out.status.code(), Some(code), "{name}");
+    }
     let _ = std::fs::remove_dir_all(&root);
 }

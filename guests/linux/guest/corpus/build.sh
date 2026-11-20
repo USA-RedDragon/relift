@@ -5,6 +5,7 @@ out=${1:?usage: build.sh OUT_DIR}
 mkdir -p "$out"
 target=aarch64-linux-musl
 for dir in "$here"/*/; do
+    [ -n "${ONLY_DYNAMIC:-}" ] && break
     name=$(basename "$dir")
     if [ -f "$dir/main.go" ]; then
         command -v go >/dev/null || continue
