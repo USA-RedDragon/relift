@@ -470,6 +470,28 @@ fn spelled_configs(bytes: &[u8]) -> BTreeSet<String> {
         .collect()
 }
 
+/// The entry point whose callers load the plugins of the directory named
+/// `leaf`.
+const PLUGIN_ENTRY: [(&str, &str); 1] = [("gconv", "iconv_open")];
+
+/// Whether the plugin directory `dir`, spelled by the file `at`, is used: a
+/// directory with a known entry point is imported when a file besides the
+/// one that spells it imports that entry point (a program that never calls
+/// `iconv_open` loads no converter); any other directory always is.
+fn plugin_wanted(nodes: &[Node], at: usize, dir: &str) -> bool {
+    let leaf = dir.rsplit('/').next().unwrap_or(dir);
+    let Some((_, entry)) = PLUGIN_ENTRY.iter().find(|(l, _)| *l == leaf) else {
+        return true;
+    };
+    nodes.iter().enumerate().any(|(i, n)| {
+        i != at
+            && n.object
+                .dynamic_symbols
+                .iter()
+                .any(|s| !s.defined && s.name == *entry)
+    })
+}
+
 struct Walk {
     out: Closure,
     plugin_dirs: BTreeSet<String>,
@@ -618,6 +640,7 @@ pub fn closure(
         w.out.interpreter = Some(Library { name, paths, bytes });
     }
     let conf = sysroot.conf_dirs();
+    let mut pending: Vec<(usize, String)> = Vec::new();
     let mut scanned = 0;
     loop {
         while let Some(i) = w.queue.pop_front() {
@@ -648,6 +671,15 @@ pub fn closure(
             }
         }
         let Some(file) = w.files.get(scanned) else {
+            let before = w.files.len();
+            for (at, dir) in std::mem::take(&mut pending) {
+                if plugin_wanted(&w.nodes, at, &dir) {
+                    w.add_plugin_dir(sysroot, at, &dir);
+                }
+            }
+            if w.files.len() > before || scanned < w.files.len() {
+                continue;
+            }
             break;
         };
         let at = scanned;
@@ -692,7 +724,7 @@ pub fn closure(
                 .rsplit_once('/')
                 .is_some_and(|(parent, _)| dirs.iter().any(|d| normalize(d) == normalize(parent)));
             if below && w.plugin_dirs.insert(dir.clone()) {
-                w.add_plugin_dir(sysroot, at, &dir);
+                pending.push((at, dir));
             }
         }
     }
@@ -924,6 +956,35 @@ mod tests {
         paths.sort_unstable();
         assert_eq!(paths, ["/etc/hosts", "/etc/passwd"]);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_converter_directory_is_wanted_only_when_a_file_calls_iconv_open() {
+        let bytes = elf(&[], None, None);
+        let node = |import: bool| {
+            let mut object = elf::parse(&bytes).expect("parses");
+            if import {
+                object.dynamic_symbols.push(relift_objfile::Symbol {
+                    name: "iconv_open".into(),
+                    value: 0,
+                    size: 0,
+                    kind: relift_objfile::SymbolKind::Function,
+                    bind: relift_objfile::Binding::Global,
+                    defined: false,
+                });
+            }
+            Node {
+                object,
+                origin: "/".into(),
+                parent: None,
+            }
+        };
+        let plain = [node(false), node(false)];
+        let calls = [node(false), node(true)];
+        assert!(!plugin_wanted(&plain, 0, "/lib/gconv"));
+        assert!(plugin_wanted(&calls, 0, "/lib/gconv"));
+        assert!(!plugin_wanted(&calls, 1, "/lib/gconv"));
+        assert!(plugin_wanted(&plain, 0, "/lib/other"));
     }
 
     #[test]
