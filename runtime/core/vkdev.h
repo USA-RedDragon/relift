@@ -25,8 +25,11 @@ typedef struct rlvk_dev {
 #undef RLVK_DEV_FIELD
     /** @brief The loader's vkGetInstanceProcAddr. */
     rlvk_gipa_fn gipa;
-    rlvk_handle instance, phys, device, queue;
-    uint32_t family;
+    rlvk_handle instance, phys, device;
+    /** @brief The queue the core's own users (the presenter, the picture pipeline) submit to, and the one a guest layer submits to; one queue when the family has only one, else two. */
+    rlvk_handle queue, guest_queue;
+    uint32_t family, queue_count;
+    char name[256];
     rlvk_memory_properties mem;
     /** @brief The instance has VK_KHR_surface and the backend's surface extensions, the device VK_KHR_swapchain. */
     bool surfaces;
@@ -39,6 +42,35 @@ typedef struct rlvk_buf {
     rlvk_size size;
     bool coherent;
 } rlvk_buf;
+
+/** @brief What a requirement hook sees and fills while the core makes the device. */
+typedef struct rl_vkdev_build {
+    rlvk_gipa_fn gipa;
+    rlvk_handle instance, phys;
+    uint32_t family;
+    /** @brief The device extensions enabled so far (add with rl_vkdev_add_ext). */
+    const char **exts;
+    uint32_t nexts, max_exts;
+    /** @brief The pNext chain of the VkDeviceCreateInfo (a hook links its feature structs in front). */
+    const void *pnext;
+} rl_vkdev_build;
+
+/** @brief Called while the device is made, with the physical device chosen; false stops the device (the log names who). */
+typedef bool rl_vkdev_hook(void *user, rl_vkdev_build *b);
+
+/**
+ * @brief Registers what a user of the device needs: the Vulkan API version of the instance, queue flags the family
+ * must have, and a hook that adds device extensions and features. Guest layers call it at startup; the core makes
+ * one device with the union on the first rl_vkdev call by anyone. A call after the device exists logs who came too
+ * late and aborts, so the order is fixed instead of papered over.
+ */
+void rl_vkdev_require(const char *who, uint32_t api_version, uint32_t queue_flags, rl_vkdev_hook *hook, void *user);
+/** @brief Enables a device extension from a hook; false when the list is full. */
+bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name);
+/** @brief Takes the guest queue for a submit; a no-op when the guest and the core use different queues. */
+void rl_vkdev_guest_queue_lock(void);
+/** @brief Gives it back. */
+void rl_vkdev_guest_queue_unlock(void);
 
 /**
  * @brief The device, made the first time it is asked for on any thread; NULL when Vulkan cannot start (the log says

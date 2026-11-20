@@ -31,6 +31,20 @@ static pthread_mutex_t g_queue = PTHREAD_MUTEX_INITIALIZER;
 static rlvk_dev g_dev;
 static bool g_tried, g_ok;
 
+#define MAX_REQUIRES 8
+#define MAX_DEVICE_EXTS 48
+
+typedef struct require {
+    const char *who;
+    uint32_t api, queue_flags;
+    rl_vkdev_hook *hook;
+    void *user;
+} require;
+
+static require g_req[MAX_REQUIRES];
+static uint32_t g_nreq;
+static bool g_shared_queue;
+
 static bool fail(const char *what, rlvk_result r)
 {
     rl_log(RL_LOG_WARN, "vulkan", "the core's Vulkan device is off: %s failed (VkResult %d)", what, (int)r);
@@ -107,11 +121,14 @@ static bool make_instance(rlvk_dev *d)
     rlvk_create_instance_fn create = (rlvk_create_instance_fn)d->gipa(0, "vkCreateInstance");
     if (!create)
         return fail("vkCreateInstance lookup", 0);
+    uint32_t api = RLVK_API_VERSION_1_0;
+    for (uint32_t i = 0; i < g_nreq; i++)
+        api = g_req[i].api > api ? g_req[i].api : api;
     rlvk_application_info app = {
         .sType = RLVK_ST_APPLICATION_INFO,
         .pApplicationName = "relift",
         .pEngineName = "relift",
-        .apiVersion = RLVK_API_VERSION_1_0,
+        .apiVersion = api,
     };
     const char *exts[MAX_INSTANCE_EXTS];
     uint32_t n = instance_exts(d->gipa, exts, &d->surfaces);
@@ -154,6 +171,10 @@ static bool pick_device(rlvk_dev *d)
         return fail("allocation", 0);
     r = d->vkEnumeratePhysicalDevices(d->instance, &n, devs);
     int best = 12;
+    uint32_t need = RLVK_QUEUE_COMPUTE_BIT;
+    for (uint32_t i = 0; i < g_nreq; i++)
+        need |= g_req[i].queue_flags;
+    const char *want = getenv("RELIFT_VK_DEVICE");
     for (uint32_t i = 0; r >= RLVK_SUCCESS && i < n; i++) {
         uint32_t nf = 0;
         d->vkGetPhysicalDeviceQueueFamilyProperties(devs[i], &nf, NULL);
@@ -163,14 +184,18 @@ static bool pick_device(rlvk_dev *d)
         rlvk_device_properties p = { 0 };
         if (props)
             props(devs[i], &p);
+        if (want && *want && !strstr(p.deviceName, want))
+            continue;
         for (uint32_t f = 0; f < nf; f++) {
-            if (!(fam[f].queueFlags & RLVK_QUEUE_COMPUTE_BIT) || !fam[f].queueCount)
+            if ((fam[f].queueFlags & need) != need || !fam[f].queueCount)
                 continue;
             int rank = device_rank(p.deviceType) * 2 + !(fam[f].queueFlags & RLVK_QUEUE_GRAPHICS_BIT);
             if (rank < best) {
                 best = rank;
                 d->phys = devs[i];
                 d->family = f;
+                d->queue_count = fam[f].queueCount;
+                memcpy(d->name, p.deviceName, sizeof d->name);
             }
         }
     }
@@ -183,25 +208,34 @@ static bool pick_device(rlvk_dev *d)
 
 static bool make_device(rlvk_dev *d)
 {
-    float prio = 1.0f;
+    float prio[2] = { 1.0f, 1.0f };
+    uint32_t queues = d->queue_count > 1 ? 2 : 1;
     rlvk_device_queue_create_info q = {
         .sType = RLVK_ST_DEVICE_QUEUE_CREATE_INFO,
         .queueFamilyIndex = d->family,
-        .queueCount = 1,
-        .pQueuePriorities = &prio,
+        .queueCount = queues,
+        .pQueuePriorities = prio,
     };
-    const char *exts[2];
+    const char *exts[MAX_DEVICE_EXTS];
     uint32_t n = 0;
     if (has_device_ext(d, d->phys, "VK_KHR_portability_subset"))
         exts[n++] = "VK_KHR_portability_subset";
     d->surfaces = d->surfaces && has_device_ext(d, d->phys, "VK_KHR_swapchain");
     if (d->surfaces)
         exts[n++] = "VK_KHR_swapchain";
+    rl_vkdev_build b = { .gipa = d->gipa, .instance = d->instance, .phys = d->phys, .family = d->family };
+    b.exts = exts;
+    b.nexts = n;
+    b.max_exts = MAX_DEVICE_EXTS;
+    for (uint32_t i = 0; i < g_nreq; i++)
+        if (g_req[i].hook && !g_req[i].hook(g_req[i].user, &b))
+            return fail(g_req[i].who, 0);
     rlvk_device_create_info ci = {
         .sType = RLVK_ST_DEVICE_CREATE_INFO,
+        .pNext = b.pnext,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &q,
-        .enabledExtensionCount = n,
+        .enabledExtensionCount = b.nexts,
         .ppEnabledExtensionNames = exts,
     };
     rlvk_result r = d->vkCreateDevice(d->phys, &ci, NULL, &d->device);
@@ -220,8 +254,50 @@ static bool make_device(rlvk_dev *d)
         RLVK_SWAPCHAIN_FNS(RLVK_LOAD_W)
     }
 #undef RLVK_LOAD_W
-    d->vkGetDeviceQueue(d->device, d->family, 0, &d->queue);
+    d->vkGetDeviceQueue(d->device, d->family, 0, &d->guest_queue);
+    d->queue = d->guest_queue;
+    if (queues > 1)
+        d->vkGetDeviceQueue(d->device, d->family, 1, &d->queue);
+    g_shared_queue = d->queue == d->guest_queue;
     return true;
+}
+
+void rl_vkdev_require(const char *who, uint32_t api_version, uint32_t queue_flags, rl_vkdev_hook *hook, void *user)
+{
+    pthread_mutex_lock(&g_lock);
+    if (g_tried || g_nreq == MAX_REQUIRES) {
+        rl_log(RL_LOG_ERROR, "vulkan", "%s asked for Vulkan device requirements %s", who,
+               g_tried ? "after the device was made: it came too late, so it must register before the first use of "
+                         "the device (guest layers at startup)"
+                       : "but too many layers registered");
+        pthread_mutex_unlock(&g_lock);
+        abort();
+    }
+    g_req[g_nreq++] = (require){ who, api_version, queue_flags, hook, user };
+    pthread_mutex_unlock(&g_lock);
+}
+
+bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name)
+{
+    for (uint32_t i = 0; i < b->nexts; i++)
+        if (!strcmp(b->exts[i], name))
+            return true;
+    if (b->nexts == b->max_exts)
+        return false;
+    b->exts[b->nexts++] = name;
+    return true;
+}
+
+void rl_vkdev_guest_queue_lock(void)
+{
+    if (g_shared_queue)
+        pthread_mutex_lock(&g_queue);
+}
+
+void rl_vkdev_guest_queue_unlock(void)
+{
+    if (g_shared_queue)
+        pthread_mutex_unlock(&g_queue);
 }
 
 const rlvk_dev *rl_vkdev(void)
@@ -232,8 +308,8 @@ const rlvk_dev *rl_vkdev(void)
         g_dev.gipa = (rlvk_gipa_fn)rl_hostlib_vulkan_gipa();
         g_ok = g_dev.gipa ? make_instance(&g_dev) && pick_device(&g_dev) && make_device(&g_dev) : fail("loading Vulkan", 0);
         if (g_ok)
-            rl_log(RL_LOG_INFO, "vulkan", "core device up, queue family %u, %s", g_dev.family,
-                   g_dev.surfaces ? "with swapchains" : "without swapchains");
+            rl_log(RL_LOG_INFO, "vulkan", "core device up on %s, queue family %u, %u queue%s, %s", g_dev.name, g_dev.family,
+                   g_shared_queue ? 1u : 2u, g_shared_queue ? "" : "s", g_dev.surfaces ? "with swapchains" : "without swapchains");
     }
     const rlvk_dev *d = g_ok ? &g_dev : NULL;
     pthread_mutex_unlock(&g_lock);
