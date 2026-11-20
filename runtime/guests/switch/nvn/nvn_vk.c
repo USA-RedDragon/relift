@@ -1992,7 +1992,7 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     default: {
         int rc = nvn_draw_cmd(r, e);
-        if (rc == 1)
+        if (rc == NVN_UNHANDLED)
             return nvn_vk_stop(r, "%s is not handled on the host device yet", nvn_cmd_name(e->op));
         return rc;
     }

@@ -336,13 +336,16 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e);
 /** @brief Frees what DLSS evaluations held for the batch just finished (called after each wait). */
 void nvn_dlss_reset(void);
 /**
- * @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop, or 1 when it is not one.
+ * @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop (the stop is raised and
+ * reported already), or NVN_UNHANDLED when it is not one.
  * GPU counters: the driver's ResetCounter writes only a CLEAR_REPORT_VALUE
  * method, so a counter reported before any draw ran since its reset reads 0
  * (the report is the value then the timestamp); a counter no reset covers or
  * a draw has run on stops, since the host device does not count.
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
+/** @brief What nvn_draw_cmd returns for a command it does not run; distinct from RL_OK and RL_PENDING. */
+#define NVN_UNHANDLED (-1)
 /**
  * @brief The compute program's driver bank c[0] for a dispatch of groups (see nvn_draw.c): its counts of uniform buffers,
  * storage buffers, texture handles and image handles, and the end byte of its table. *img_lo is where the image

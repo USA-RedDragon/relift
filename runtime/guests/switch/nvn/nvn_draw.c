@@ -2025,6 +2025,6 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
                                      (uint32_t)e->x[3])
                               : RL_OK;
     default:
-        return 1;
+        return NVN_UNHANDLED;
     }
 }

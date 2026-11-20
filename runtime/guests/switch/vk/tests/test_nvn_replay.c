@@ -39,6 +39,17 @@ TEST(nvn_replay_set_viewport_and_depth_range_are_kept_in_the_state)
     CHECK_EQ(st.depth_ranges[0][1], 0.75f);
 }
 
+TEST(nvn_replay_an_unhandled_command_is_not_a_raised_stop)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmd e = { .op = NVN_CMD_NONE };
+    int rc = replay_one(&st, &e);
+    CHECK_EQ(rc, NVN_UNHANDLED);
+    CHECK(rc != RL_PENDING);
+    CHECK(rc != RL_OK);
+}
+
 TEST(nvn_replay_depth_clamp_is_kept_in_the_state)
 {
     nvn_gfx st;
