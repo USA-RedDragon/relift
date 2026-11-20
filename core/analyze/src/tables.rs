@@ -62,6 +62,28 @@ fn writes(b: &Block, r: Reg) -> bool {
         .any(|i| matches!(i.op, Op::Set(x, _) if x == r))
 }
 
+/// The registers `b` reads whose value something uses: a lifted instruction
+/// may read a register for a check that folds away, which feeds nothing.
+fn live_reads(b: &Block) -> impl Iterator<Item = Reg> + '_ {
+    let mut used = vec![false; b.insts.len()];
+    for i in &b.insts {
+        for v in i.op.operands() {
+            used[v.index()] = true;
+        }
+    }
+    match b.exit.next {
+        Next::Dynamic(v) | Next::Select { cond: v, .. } => used[v.index()] = true,
+        Next::Const(_) => {}
+    }
+    b.insts
+        .iter()
+        .enumerate()
+        .filter_map(move |(n, i)| match i.op {
+            Op::Get(r) if used[n] => Some(r),
+            _ => None,
+        })
+}
+
 fn has_memory(b: &Block) -> bool {
     b.insts.iter().any(|i| {
         matches!(
@@ -141,10 +163,8 @@ fn reads(blocks: &[Arc<Block>]) -> BTreeSet<Reg> {
     let mut read = BTreeSet::new();
     let mut written = BTreeSet::new();
     for b in blocks {
-        for i in &b.insts {
-            if let Op::Get(x) = i.op
-                && !written.contains(&x)
-            {
+        for x in live_reads(b) {
+            if !written.contains(&x) {
                 read.insert(x);
             }
         }
@@ -368,9 +388,8 @@ pub(crate) fn resolve(
     let mut read = Vec::new();
     let mut written = BTreeSet::new();
     for b in &body {
-        for i in &b.insts {
-            if let Op::Get(r) = i.op
-                && !written.contains(&r)
+        for r in live_reads(b) {
+            if !written.contains(&r)
                 && !read.contains(&r)
                 && !seeds.contains_key(&r)
                 && b.regs.width(r).bits() > 1
@@ -502,4 +521,32 @@ pub(crate) fn resolve(
         }
     }
     best
+}
+
+#[cfg(test)]
+mod tests {
+    use relift_guest::Frontend;
+    use relift_guest::toy::{Toy, word};
+
+    use super::*;
+
+    fn block(code: [u8; 4]) -> Block {
+        Toy.lift(&code, BASE_PC).expect("lifts")
+    }
+
+    const BASE_PC: u64 = 0x1000;
+
+    #[test]
+    fn a_read_nothing_uses_is_not_a_live_read() {
+        let mut b = block(word(0x09, 0, 1));
+        let used: Vec<Reg> = live_reads(&b).collect();
+        assert_eq!(used.len(), 1);
+        let dead = b.insts.len();
+        b.insts.push(relift_ir::Inst {
+            op: Op::Get(Reg(3)),
+            ..b.insts[0].clone()
+        });
+        assert_eq!(b.insts.len(), dead + 1);
+        assert_eq!(live_reads(&b).count(), 1);
+    }
 }
