@@ -619,7 +619,11 @@ Options:
 ```text
 Build if needed, then run the project
 
-Usage: relift run [OPTIONS]
+Usage: relift run [OPTIONS] [-- <ARGS>...]
+
+Arguments:
+  [ARGS]...
+          The arguments a Linux program runs with, after `--`
 
 Options:
   -q, --quiet
