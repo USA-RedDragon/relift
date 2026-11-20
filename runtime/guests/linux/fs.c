@@ -125,6 +125,28 @@ static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return rc;
 }
 
+/**
+ * @brief Before a read that may block: waits for the descriptor to be
+ * readable so that a signal can interrupt the wait. 0 to go on with the
+ * read, or -ERESTARTSYS (a read on a pipe, terminal or socket is restarted
+ * after a handler with SA_RESTART, signal(7)).
+ */
+static int64_t wait_readable(int fd, int h)
+{
+    lx_fd *f = &lx.fds[fd];
+    if (f->kind == 0) {
+        l_stat st;
+        uint32_t t = hio_fstat(h, &st) == 0 ? st.st_mode & L_S_IFMT : 0;
+        f->kind = (t == L_S_IFREG || t == L_S_IFDIR) ? 1 : 2;
+    }
+    if (f->kind == 1)
+        return 0;
+    int64_t fl = hio_get_status_flags(h);
+    if (fl >= 0 && (fl & L_O_NONBLOCK))
+        return 0;
+    return lx_wait(h, L_POLLIN, -1) == -L_EINTR ? -L_ERESTARTSYS : 0;
+}
+
 static int64_t sys_read(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -136,6 +158,9 @@ static int64_t sys_read(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         n = 0x7ffff000u;
     if (!lx_ok(a[1], n, RL_VM_W))
         return -L_EFAULT;
+    int64_t w = wait_readable((int)a[0], h);
+    if (w < 0)
+        return w;
     return hio_read(h, mem + a[1], n);
 }
 
@@ -219,6 +244,11 @@ static int64_t sys_readv(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     for (uint64_t i = 0; i < a[2]; i++) {
         if (v[i][1] == 0)
             continue;
+        if (!done) {
+            int64_t w = wait_readable((int)a[0], h);
+            if (w < 0)
+                return w;
+        }
         int64_t r = hio_read(h, mem + v[i][0], v[i][1]);
         if (r < 0)
             return done ? done : r;
@@ -762,26 +792,41 @@ static int64_t sys_ppoll(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     } p[LX_MAX_FDS];
     if (!lx_get(p, a[0], n * 8))
         return -L_EFAULT;
+    int64_t end = timeout < 0 ? 0 : (int64_t)rl_clock_ns() + timeout;
     int64_t ready = 0;
-    for (uint64_t i = 0; i < n; i++) {
-        p[i].revents = 0;
-        if (p[i].fd < 0)
-            continue;
-        int h = lx_host_fd(p[i].fd);
-        if (h < 0) {
-            p[i].revents = L_POLLNVAL;
-            ready++;
-            continue;
+    for (;;) {
+        int valid = 0, only = -1;
+        ready = 0;
+        for (uint64_t i = 0; i < n; i++) {
+            p[i].revents = 0;
+            if (p[i].fd < 0)
+                continue;
+            int h = lx_host_fd(p[i].fd);
+            if (h < 0) {
+                p[i].revents = L_POLLNVAL;
+                ready++;
+                continue;
+            }
+            int64_t r = hio_poll(h, (uint32_t)p[i].events, 0);
+            if (r < 0)
+                return r;
+            p[i].revents = (int16_t)r;
+            if (r)
+                ready++;
+            valid++;
+            only = h;
         }
-        int64_t r = hio_poll(h, (uint32_t)p[i].events, n == 1 ? timeout : 0);
-        if (r < 0)
-            return r;
-        p[i].revents = (int16_t)r;
-        if (r)
-            ready++;
+        int64_t left = timeout < 0 ? -1 : end - (int64_t)rl_clock_ns();
+        if (ready || timeout == 0 || (timeout > 0 && left <= 0))
+            break;
+        int64_t w;
+        if (valid == 1 && n == 1)
+            w = lx_wait(only, (uint32_t)p[0].events, left);
+        else
+            w = lx_wait(-1, 0, left < 0 || left > 1000000 ? 1000000 : left);
+        if (w == -L_EINTR)
+            return -L_ERESTARTNOHAND;
     }
-    if (ready == 0 && n != 1 && timeout > 0)
-        rl_sleep_ns((uint64_t)timeout);
     if (!lx_put(a[0], p, n * 8))
         return -L_EFAULT;
     return ready;

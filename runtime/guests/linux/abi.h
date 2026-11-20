@@ -94,6 +94,7 @@ enum rl_linux_nr {
     NR_getrandom = 278,
     NR_statx = 291,
     NR_rseq = 293,
+    NR_wait4 = 260,
     NR_clone3 = 435
 };
 
@@ -140,6 +141,21 @@ enum rl_linux_errno {
     L_EOVERFLOW = 75,
     L_ENOTSUP = 95,
     L_ETIMEDOUT = 110
+};
+
+/**
+ * @brief Kernel-internal results a blocking system call returns when a signal
+ * interrupted it (include/linux/errno.h; user space never sees them). The
+ * system call return path turns each into -EINTR or runs the call again
+ * after the handler, by SA_RESTART and the code (signal(7)).
+ */
+enum rl_linux_restart {
+    /** @brief Run again after a handler with SA_RESTART, else EINTR. */
+    L_ERESTARTSYS = 512,
+    /** @brief Run again when no handler ran, else EINTR. */
+    L_ERESTARTNOHAND = 514,
+    /** @brief EINTR after a handler; the remaining time is returned by the call. */
+    L_ERESTART_RESTARTBLOCK = 516
 };
 
 /** @brief open flags (arm64 asm/fcntl.h over asm-generic/fcntl.h). */

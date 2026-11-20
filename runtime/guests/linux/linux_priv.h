@@ -28,6 +28,8 @@ typedef struct lx_fd {
     bool cloexec;
     /** @brief The directory stream getdents64 reads, opened on first use. */
     void *dir;
+    /** @brief 0 not looked at yet, 1 a regular file or directory (never blocks), 2 anything else. */
+    uint8_t kind;
     /** @brief Whether an entry read from the stream waits in stash_*, because it did not fit the last buffer. */
     bool has_stash;
     /** @brief The waiting entry's type. */
@@ -84,6 +86,8 @@ typedef struct lx_thread {
     bool on_altstack;
     /** @brief Where set_tid_address or clone says the thread id is cleared when the thread ends. */
     uint64_t clear_child_tid;
+    /** @brief The wake handle blocking waits of this thread take (hio_waker_*). */
+    void *waker;
     /** @brief The next thread. */
     struct lx_thread *next;
 } lx_thread;
@@ -208,6 +212,22 @@ void lx_fs_shutdown(void);
 
 /** @brief Delivers the queued signals the process does not block, after a system call. Returns RL_OK or RL_PENDING. */
 int lx_signal_deliver(rl_ctx *c, uint8_t *mem);
+/** @brief Whether a signal waits that the thread does not block and that does something (a handler, or the default action that ends the process). */
+bool lx_signal_ready(void);
+/**
+ * @brief The flags of the handler the next delivered signal would run: 1 and
+ * *flags when there is one, 0 when the next deliverable signal (if any) runs
+ * no handler.
+ */
+int lx_signal_peek(uint64_t *flags);
+/** @brief Wakes thread t from a blocking wait so it sees a signal sent to it. */
+void lx_thread_kick(lx_thread *t);
+/**
+ * @brief The calling thread's interruptible wait for host descriptor h (-1: none)
+ * to be ready for the POLL bits in events, or timeout_ns (negative: never).
+ * The ready bits, 0 for the timeout, or -EINTR when a signal is ready.
+ */
+int64_t lx_wait(int h, uint32_t events, int64_t timeout_ns);
 /** @brief Makes a signal pending for the process. */
 void lx_signal_raise(int sig, int32_t code);
 /** @brief Sets the signals' initial state. */

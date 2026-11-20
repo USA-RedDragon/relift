@@ -2837,7 +2837,29 @@ futex is a wait queue over a host mutex and condition variable
 (`lxsync.h`); the address map and the descriptor table take one lock around
 the calls that change them. A signal sent to a thread by `tgkill` is
 delivered when that thread next returns from a system call. A `clone`
-without the thread flags (a fork) returns `ENOSYS`.
+without the thread flags (a fork) returns `ENOSYS`; fork-style `clone`,
+`fork` and `exec` are not supported, and `wait4` returns `ECHILD`.
+
+### Signals that interrupt blocking calls
+
+Every guest thread has a wake handle (`hio_waker_*`: a self-pipe on POSIX
+hosts, an event on Windows). A blocking call waits through `lx_wait`
+(`hio_wait`: the descriptor, the timeout and the handle together), and the
+futex waits on a condition variable that a kick also wakes. A signal sent to
+a thread (`tgkill`, `tkill`, `kill` picking a thread that does not block it)
+queues on that thread and kicks it; a signal that is blocked, ignored or
+default-ignored does not interrupt anything. An interrupted call returns a
+kernel restart code (`include/linux/errno.h`), and `rl_svc` decides as the
+arm64 kernel does, before the handler runs: `ERESTARTSYS` (a read on a pipe,
+terminal or socket; a futex wait without a timeout) runs the call again after
+the handler when the handler has `SA_RESTART` and returns `EINTR` otherwise;
+`ERESTARTNOHAND` (`ppoll`) and `ERESTART_RESTARTBLOCK` (`nanosleep`,
+`clock_nanosleep`, a futex wait with a timeout) return `EINTR` whenever a
+handler runs, `SA_RESTART` or not, and a relative sleep stores the time left
+in its `rem` argument. A restarted call runs again with its original
+arguments [checked: `sig_interrupt` in the corpus, recorded on arm64 Linux,
+static, static-PIE and glibc]. A thread that runs guest code without making
+a system call sees a signal at its next call.
 
 ## 15. WebAssembly modules
 

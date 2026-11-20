@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #if defined(__linux__)
@@ -339,6 +340,92 @@ int64_t hio_poll(int fd, uint32_t events, int64_t timeout_ns)
     if (p.revents & POLLNVAL)
         out |= L_POLLNVAL;
     return out;
+}
+
+void *hio_waker_new(void)
+{
+    int *p = malloc(2 * sizeof *p);
+    if (!p)
+        return NULL;
+    if (pipe(p) < 0) {
+        free(p);
+        return NULL;
+    }
+    for (int i = 0; i < 2; i++) {
+        fcntl(p[i], F_SETFD, FD_CLOEXEC);
+        fcntl(p[i], F_SETFL, fcntl(p[i], F_GETFL) | O_NONBLOCK);
+    }
+    return p;
+}
+
+void hio_waker_free(void *w)
+{
+    int *p = w;
+    if (!p)
+        return;
+    close(p[0]);
+    close(p[1]);
+    free(p);
+}
+
+void hio_waker_kick(void *w)
+{
+    char b = 1;
+    ssize_t r = write(((int *)w)[1], &b, 1);
+    (void)r;
+}
+
+void hio_waker_clear(void *w)
+{
+    char buf[64];
+    while (read(((int *)w)[0], buf, sizeof buf) > 0) {
+    }
+}
+
+int64_t hio_wait(int fd, uint32_t events, int64_t timeout_ns, void *waker)
+{
+    struct pollfd p[2] = { { .fd = fd, .events = 0 }, { .fd = waker ? ((int *)waker)[0] : -1, .events = POLLIN } };
+    if (events & L_POLLIN)
+        p[0].events |= POLLIN;
+    if (events & L_POLLOUT)
+        p[0].events |= POLLOUT;
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (;;) {
+        int ms = -1;
+        if (timeout_ns >= 0) {
+            struct timespec t1;
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            int64_t used = ((int64_t)t1.tv_sec - t0.tv_sec) * 1000000000ll + (t1.tv_nsec - t0.tv_nsec);
+            int64_t left = timeout_ns - used;
+            if (left <= 0)
+                return 0;
+            ms = (int)((left + 999999) / 1000000);
+        }
+        int r = poll(p, 2, ms);
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            return fail();
+        }
+        uint32_t out = 0;
+        if (p[0].revents & POLLIN)
+            out |= L_POLLIN;
+        if (p[0].revents & POLLOUT)
+            out |= L_POLLOUT;
+        if (p[0].revents & POLLERR)
+            out |= L_POLLERR;
+        if (p[0].revents & POLLHUP)
+            out |= L_POLLHUP;
+        if (p[0].revents & POLLNVAL)
+            out |= L_POLLNVAL;
+        if (out)
+            return out;
+        if (p[1].revents & POLLIN)
+            return -L_EINTR;
+        if (r == 0 && timeout_ns >= 0)
+            continue;
+    }
 }
 
 void *hio_dir_open(int fd) { return fdopendir(fd); }

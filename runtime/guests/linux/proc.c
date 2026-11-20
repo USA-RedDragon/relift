@@ -171,6 +171,12 @@ static int64_t sys_gettimeofday(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return 0;
 }
 
+/**
+ * @brief nanosleep and clock_nanosleep: sleeps until the interval or the
+ * absolute time passes. A signal with a handler interrupts it: the call
+ * returns -ERESTART_RESTARTBLOCK, which the return path makes -EINTR, and a
+ * relative sleep stores the time left in rem first.
+ */
 static int64_t sleep_for(uint64_t req, uint64_t rem, bool absolute, uint32_t clk)
 {
     l_timespec ts;
@@ -186,8 +192,16 @@ static int64_t sleep_for(uint64_t req, uint64_t rem, bool absolute, uint32_t clk
             return rc;
         ns -= now;
     }
-    if (ns > 0)
-        rl_sleep_ns((uint64_t)ns);
+    int64_t start = (int64_t)rl_clock_ns();
+    if (ns > 0 && lx_wait(-1, 0, ns) == -L_EINTR) {
+        if (rem && !absolute) {
+            int64_t left = ns - ((int64_t)rl_clock_ns() - start);
+            l_timespec r = { left > 0 ? left / 1000000000 : 0, left > 0 ? left % 1000000000 : 0 };
+            if (!lx_put(rem, &r, sizeof r))
+                return -L_EFAULT;
+        }
+        return -L_ERESTART_RESTARTBLOCK;
+    }
     if (rem && !absolute) {
         l_timespec z = { 0, 0 };
         if (!lx_put(rem, &z, sizeof z))
@@ -211,6 +225,14 @@ static int64_t sys_clock_nanosleep(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     if (clk == L_CLOCK_PROCESS_CPUTIME_ID || clk > L_CLOCK_BOOTTIME)
         return -L_EINVAL;
     return sleep_for(a[2], a[3], (a[1] & L_TIMER_ABSTIME) != 0, clk);
+}
+
+static int64_t sys_wait4(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    (void)a;
+    return -L_ECHILD;
 }
 
 static int64_t sys_sched_yield(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -495,6 +517,7 @@ lx_sys_fn *lx_proc_call(uint32_t nr)
     case NR_gettimeofday: return sys_gettimeofday;
     case NR_nanosleep: return sys_nanosleep;
     case NR_clock_nanosleep: return sys_clock_nanosleep;
+    case NR_wait4: return sys_wait4;
     case NR_sched_yield: return sys_sched_yield;
     case NR_sched_getaffinity: return sys_sched_getaffinity;
     case NR_uname: return sys_uname;

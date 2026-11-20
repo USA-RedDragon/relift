@@ -1,0 +1,9 @@
+nanosleep flags=none: ret=-1 errno=EINTR handler_ran=1 rem_between_2s_and_3s=1
+pipe read flags=none: ret=-1 errno=EINTR handler_ran=1
+  read after: 2
+futex wait flags=none: ret=-1 errno=EINTR handler_ran=1
+futex wait with timeout flags=none: ret=-1 errno=EINTR handler_ran=1
+nanosleep flags=SA_RESTART: ret=-1 errno=EINTR handler_ran=1 rem_between_2s_and_3s=1
+pipe read flags=SA_RESTART: ret=2 errno=none handler_ran=1
+futex wait flags=SA_RESTART: ret=0 errno=none handler_ran=1
+futex wait with timeout flags=SA_RESTART: ret=-1 errno=EINTR handler_ran=1

@@ -10,6 +10,7 @@
  * gave it. A clone without the flags of a thread (a fork) is not supported.
  */
 #include "arm64.h"
+#include "hostio.h"
 #include "linux_priv.h"
 
 #include <stdlib.h>
@@ -43,6 +44,37 @@ static lx_mutex fx_lock = LX_MUTEX_INIT;
 static lx_cond fx_cond = LX_COND_INIT;
 static waiter *fx_waiters;
 
+void lx_thread_kick(lx_thread *t)
+{
+    lx_mutex_lock(&lx_big);
+    if (t->waker)
+        hio_waker_kick(t->waker);
+    lx_mutex_unlock(&lx_big);
+    lx_mutex_lock(&fx_lock);
+    lx_cond_broadcast(&fx_cond);
+    lx_mutex_unlock(&fx_lock);
+}
+
+int64_t lx_wait(int h, uint32_t events, int64_t timeout_ns)
+{
+    lx_thread *t = lx_cur();
+    int64_t end = timeout_ns < 0 ? 0 : (int64_t)rl_clock_ns() + timeout_ns;
+    for (;;) {
+        int64_t left = -1;
+        if (timeout_ns >= 0) {
+            left = end - (int64_t)rl_clock_ns();
+            if (left < 0)
+                left = 0;
+        }
+        int64_t r = hio_wait(h, events, left, t->waker);
+        if (r != -L_EINTR)
+            return r;
+        hio_waker_clear(t->waker);
+        if (lx_signal_ready())
+            return -L_EINTR;
+    }
+}
+
 int lx_futex_wake(uint64_t a, uint32_t n, uint32_t bits)
 {
     int woke = 0;
@@ -74,6 +106,10 @@ int64_t lx_futex_wait(uint64_t a, uint32_t val, int64_t timeout_ns, uint32_t bit
     int64_t end = timeout_ns < 0 ? 0 : (int64_t)rl_clock_ns() + timeout_ns;
     int64_t rc = 0;
     while (!me.woken) {
+        if (lx_signal_ready()) {
+            rc = timeout_ns >= 0 ? -L_ERESTART_RESTARTBLOCK : -L_ERESTARTSYS;
+            break;
+        }
         int64_t left = -1;
         if (timeout_ns >= 0) {
             left = end - (int64_t)rl_clock_ns();
@@ -105,6 +141,8 @@ void lx_thread_end(lx_thread *t)
             *p = t->next;
             break;
         }
+    hio_waker_free(t->waker);
+    t->waker = NULL;
     lx.live--;
     lx_cond_broadcast(&lx_ended);
     lx_mutex_unlock(&lx_big);
@@ -159,6 +197,12 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     n->x[0] = 0;
     n->x[30] = 0;
     n->sp = a[1] ? a[1] : c->sp;
+    t->waker = hio_waker_new();
+    if (!t->waker) {
+        rl_thread_free(rt);
+        free(t);
+        return -L_EMFILE;
+    }
     t->rt = rt;
     t->start = site + 4;
     t->blocked = lx_cur()->blocked;

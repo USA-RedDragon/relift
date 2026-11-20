@@ -228,16 +228,43 @@ static int64_t dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6
     return -L_ENOSYS;
 }
 
+/**
+ * @brief Whether the interrupted call with kernel result r (one of enum
+ * rl_linux_restart) runs again: signal(7) and the kernel's arch signal
+ * code. ERESTARTSYS restarts after a handler with SA_RESTART; ERESTARTNOHAND
+ * and ERESTART_RESTARTBLOCK only when no handler runs.
+ */
+static bool restarts(int64_t r)
+{
+    uint64_t flags;
+    if (!lx_signal_peek(&flags))
+        return true;
+    return r == -L_ERESTARTSYS && (flags & L_SA_RESTART) != 0;
+}
+
 int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
 {
     (void)imm;
     rl_clrex(&c->excl);
     uint64_t a[6] = { c->x[0], c->x[1], c->x[2], c->x[3], c->x[4], c->x[5] };
-    int64_t r = dispatch(c, mem, (uint32_t)c->x[8], a);
-    if (r == LX_PENDING)
-        return RL_PENDING;
-    c->x[0] = (uint64_t)r;
-    return lx_signal_deliver(c, mem);
+    uint32_t nr = (uint32_t)c->x[8];
+    for (;;) {
+        int64_t r = dispatch(c, mem, nr, a);
+        if (r == LX_PENDING)
+            return RL_PENDING;
+        bool restart = r == -L_ERESTARTSYS || r == -L_ERESTARTNOHAND || r == -L_ERESTART_RESTARTBLOCK;
+        if (!restart) {
+            c->x[0] = (uint64_t)r;
+            return lx_signal_deliver(c, mem);
+        }
+        restart = restarts(r);
+        c->x[0] = restart ? a[0] : (uint64_t)-(int64_t)L_EINTR;
+        int rc = lx_signal_deliver(c, mem);
+        if (rc != RL_OK || !restart)
+            return rc;
+        c->x[8] = nr;
+        rl_clrex(&c->excl);
+    }
 }
 
 static void describe_program(const rl_linux_program *p)
@@ -305,6 +332,7 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     lx_thread *main_thread = calloc(1, sizeof *main_thread);
     if (!main_thread)
         return log_fail("out of memory");
+    main_thread->waker = hio_waker_new();
     main_thread->rt = t;
     main_thread->main = true;
     main_thread->tid = lx.pid;

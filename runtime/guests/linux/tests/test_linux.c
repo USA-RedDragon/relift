@@ -5,6 +5,7 @@
  * signal state and process exit, all through rl_svc as a guest's `svc #0`
  * reaches it.
  */
+#include "hostio.h"
 #include "linux_priv.h"
 #include "runner.h"
 
@@ -351,7 +352,12 @@ TEST(the_kernel_header_values_match_the_uapi_headers_where_the_host_has_them)
 static void *waiter_main(void *arg)
 {
     int64_t *out = arg;
-    rl_thread_bind(NULL);
+    struct rl_thread *rt = rl_thread_alloc();
+    lx_thread *t = calloc(1, sizeof *t);
+    t->rt = rt;
+    t->waker = hio_waker_new();
+    rt->guest = t;
+    rl_thread_bind(rt);
     *out = lx_futex_wait(0x401000, 5, -1, ~0u);
     return NULL;
 }
@@ -383,4 +389,38 @@ TEST(a_clone_that_is_not_a_thread_is_refused)
     rl_ctx *c = boot();
     CHECK(c != NULL);
     CHECK_EQ(sys(c, NR_clone, 17, 0, 0, 0, 0, 0), -L_ENOSYS);
+}
+
+static void *kick_main(void *arg)
+{
+    lx_thread *t = arg;
+    rl_sleep_ns(20000000);
+    uint64_t one = 1;
+    (void)one;
+    t->pending[L_SIGUSR1] = (lx_pending_sig){ .queued = true };
+    lx_thread_kick(t);
+    return NULL;
+}
+
+TEST(a_signal_interrupts_a_blocking_pipe_read_and_a_sleep)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint64_t act[4] = { 0x400000, 0, 0, 0 };
+    rl_vm_kernel_write(&lx.vm, 0x401040, act, sizeof act);
+    CHECK_EQ(sys(c, NR_rt_sigaction, L_SIGUSR1, 0x401040, 0, 8, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_pipe2, 0x401000, 0, 0, 0, 0, 0), 0);
+    int32_t fds[2];
+    memcpy(fds, rl_mem_base() + 0x401000, 8);
+    pthread_t th;
+    CHECK_EQ(pthread_create(&th, NULL, kick_main, lx_cur()), 0);
+    uint64_t t0 = rl_clock_ns();
+    CHECK_EQ(lx_wait(lx_host_fd(fds[0]), L_POLLIN, 5000000000ll), -L_EINTR);
+    CHECK(rl_clock_ns() - t0 < 2000000000ull);
+    pthread_join(th, NULL);
+    lx_cur()->pending[L_SIGUSR1].queued = false;
+    CHECK_EQ(lx_wait(-1, 0, 1000000), 0);
+    put_str(0x401100, "x");
+    CHECK_EQ(sys(c, NR_write, (uint64_t)fds[1], 0x401100, 1, 0, 0, 0), 1);
+    CHECK_EQ(lx_wait(lx_host_fd(fds[0]), L_POLLIN, 1000000000ll), L_POLLIN);
 }

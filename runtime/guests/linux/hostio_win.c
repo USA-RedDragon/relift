@@ -556,6 +556,66 @@ int64_t hio_poll(int fd, uint32_t events, int64_t timeout_ns)
     }
 }
 
+void *hio_waker_new(void) { return CreateEventW(NULL, TRUE, FALSE, NULL); }
+
+void hio_waker_free(void *w)
+{
+    if (w)
+        CloseHandle((HANDLE)w);
+}
+
+void hio_waker_kick(void *w) { SetEvent((HANDLE)w); }
+
+void hio_waker_clear(void *w) { ResetEvent((HANDLE)w); }
+
+int64_t hio_wait(int fd, uint32_t events, int64_t timeout_ns, void *waker)
+{
+    HANDLE ev = (HANDLE)waker;
+    ULONGLONG end = timeout_ns < 0 ? 0 : GetTickCount64() + (ULONGLONG)((timeout_ns + 999999) / 1000000);
+    HANDLE h = fd >= 0 ? handle_of(fd) : INVALID_HANDLE_VALUE;
+    DWORD type = h != INVALID_HANDLE_VALUE ? GetFileType(h) : FILE_TYPE_UNKNOWN;
+    uint32_t out = (fd >= 0) ? (events & L_POLLOUT) : 0;
+    for (;;) {
+        if (fd >= 0 && (events & L_POLLIN)) {
+            if (type == FILE_TYPE_PIPE) {
+                DWORD avail = 0;
+                if (!PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL))
+                    return L_POLLIN | L_POLLHUP;
+                if (avail)
+                    return L_POLLIN;
+            } else if (type == FILE_TYPE_CHAR) {
+                if (WaitForSingleObject(h, 0) == WAIT_OBJECT_0)
+                    return L_POLLIN;
+            } else {
+                return L_POLLIN;
+            }
+        } else if (out) {
+            return out;
+        }
+        if (ev && WaitForSingleObject(ev, 0) == WAIT_OBJECT_0)
+            return -L_EINTR;
+        DWORD slice = 1;
+        if (timeout_ns >= 0) {
+            ULONGLONG now = GetTickCount64();
+            if (now >= end)
+                return 0;
+            if (end - now < slice)
+                slice = (DWORD)(end - now);
+        }
+        if (fd < 0 && ev) {
+            DWORD ms = timeout_ns < 0 ? INFINITE : (DWORD)(end - GetTickCount64());
+            if (WaitForSingleObject(ev, ms) == WAIT_OBJECT_0)
+                return -L_EINTR;
+            if (timeout_ns >= 0)
+                return 0;
+        } else if (ev) {
+            WaitForSingleObject(ev, slice);
+        } else {
+            Sleep(slice);
+        }
+    }
+}
+
 typedef struct win_dir {
     HANDLE find;
     wchar_t pattern[PATH_MAX_W];

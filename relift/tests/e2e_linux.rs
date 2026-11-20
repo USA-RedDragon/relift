@@ -123,6 +123,7 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
         "setjmp.pie",
         "jmp_ptr.static",
         "threads.static",
+        "sig_interrupt.static",
         "signals.static",
         "cxx_exceptions.static",
         "fileio.static",

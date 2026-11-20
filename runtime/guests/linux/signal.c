@@ -45,7 +45,10 @@ void lx_signal_init(void)
 
 static void raise_on(lx_thread *t, int sig, int32_t code)
 {
-    t->pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = 0, .queued = true };
+    t->pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = 0, .queued = false };
+    __atomic_store_n(&t->pending[sig].queued, true, __ATOMIC_RELEASE);
+    if (t != lx_cur())
+        lx_thread_kick(t);
 }
 
 void lx_signal_raise(int sig, int32_t code)
@@ -78,12 +81,44 @@ static bool default_ignores(int sig)
            sig == L_SIGTTOU;
 }
 
+static bool default_ignores(int sig);
+
 static int next_pending(void)
 {
     uint64_t mask = lx_cur()->blocked & ~unblockable();
     for (int s = 1; s <= L_NSIG; s++)
-        if (lx_cur()->pending[s].queued && !(mask & bit(s)))
+        if (__atomic_load_n(&lx_cur()->pending[s].queued, __ATOMIC_ACQUIRE) && !(mask & bit(s)))
             return s;
+    return 0;
+}
+
+static bool does_something(int sig)
+{
+    lx_sigaction act = lx.sig[sig];
+    return !(act.handler == L_SIG_IGN || (act.handler == L_SIG_DFL && default_ignores(sig)));
+}
+
+bool lx_signal_ready(void)
+{
+    uint64_t mask = lx_cur()->blocked & ~unblockable();
+    for (int s = 1; s <= L_NSIG; s++)
+        if (__atomic_load_n(&lx_cur()->pending[s].queued, __ATOMIC_ACQUIRE) && !(mask & bit(s)) && does_something(s))
+            return true;
+    return false;
+}
+
+int lx_signal_peek(uint64_t *flags)
+{
+    uint64_t mask = lx_cur()->blocked & ~unblockable();
+    for (int s = 1; s <= L_NSIG; s++)
+        if (__atomic_load_n(&lx_cur()->pending[s].queued, __ATOMIC_ACQUIRE) && !(mask & bit(s))) {
+            if (!does_something(s))
+                continue;
+            if (lx.sig[s].handler == L_SIG_DFL)
+                return 0;
+            *flags = lx.sig[s].flags;
+            return 1;
+        }
     return 0;
 }
 
@@ -430,7 +465,7 @@ static int64_t sys_rt_sigtimedwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 
 static int64_t sys_rt_sigsuspend(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
-    (void)mem;
+    (void)c;
     if (a[1] != L_SIGSET_BYTES)
         return -L_EINVAL;
     uint64_t set;
@@ -438,10 +473,7 @@ static int64_t sys_rt_sigsuspend(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EFAULT;
     uint64_t old = lx_cur()->blocked;
     lx_cur()->blocked = set & ~unblockable();
-    if (!next_pending()) {
-        lx_cur()->blocked = old;
-        rl_guest_fatal(c, "signal", "sigsuspend with no other thread or process to send a signal");
-        return LX_PENDING;
+    while (lx_wait(-1, 0, -1) != -L_EINTR) {
     }
     int rc = lx_signal_deliver(c, mem);
     lx_cur()->blocked = old;

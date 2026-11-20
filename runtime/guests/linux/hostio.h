@@ -81,6 +81,26 @@ int64_t hio_set_status_flags(int fd, uint32_t flags);
 /** @brief Waits up to timeout_ns (negative: forever) until the descriptor can be read or written; the ready Linux POLL* bits. */
 int64_t hio_poll(int fd, uint32_t events, int64_t timeout_ns);
 
+/**
+ * @brief A per-thread wake handle: a host-blocking wait that is given it
+ * returns when it is kicked. The handle is level triggered: a kick stays
+ * until hio_waker_clear, so a kick before the wait is not lost.
+ */
+void *hio_waker_new(void);
+/** @brief Frees a handle. */
+void hio_waker_free(void *w);
+/** @brief Makes every wait on the handle, now and until it is cleared, return. */
+void hio_waker_kick(void *w);
+/** @brief Clears the kick. */
+void hio_waker_clear(void *w);
+/**
+ * @brief Waits until descriptor fd (when not negative) is ready for the Linux
+ * POLL bits in events, timeout_ns passes (negative: never) or the waker is
+ * kicked. The ready bits (a ready descriptor wins over a kick), 0 for the
+ * timeout, or -EINTR for the kick.
+ */
+int64_t hio_wait(int fd, uint32_t events, int64_t timeout_ns, void *waker);
+
 /** @brief Opens a directory stream on the host descriptor; the stream takes the descriptor over. */
 void *hio_dir_open(int fd);
 /** @brief Closes the stream and its descriptor. */
