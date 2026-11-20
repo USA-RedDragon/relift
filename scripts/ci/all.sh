@@ -160,11 +160,12 @@ main() {
     exit "$1"
   }
 
-  # on_mac JOB CMD: run CMD on the mac in the copied tree (see mac-run.sh), with
-  # the target cache of JOB.
+  # on_mac JOB KIND CMD: run CMD on the mac in the copied tree (see
+  # mac-run.sh), with the target cache of what KIND builds.
+  mac_run=$mac_dir-$$-$(date +%s)
   on_mac() {
     ssh -tt -o BatchMode=yes "$CI_MAC" "eval \"\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || true)\"
-      cd \"\$HOME/$mac_dir/src\" && CI_MAC_WORK=\"\$HOME/$mac_dir/work\" CI_MAC_CACHE_GB=${CI_MAC_CACHE_GB:-5} scripts/ci/mac-run.sh $1 $1 $2"
+      cd \"\$HOME/$mac_dir/src\" && CI_MAC_WORK=\"\$HOME/$mac_dir/work\" CI_MAC_RUN=$mac_run ${CI_MAC_CACHE_GB:+CI_MAC_CACHE_GB=$CI_MAC_CACHE_GB} scripts/ci/mac-run.sh $1 $2 $3"
   }
 
   # job NAME: run one job; exit 77 means skipped, with the reason on stdout.
@@ -186,15 +187,15 @@ main() {
       mac-*)
         [ -z "$mac_skip" ] || { echo "$mac_skip"; return 77; }
         case $1 in
-          mac-tests-workspace) on_mac "$1" "scripts/ci/tests.sh workspace" ;;
-          mac-tests-relift) on_mac "$1" "scripts/ci/tests.sh relift" ;;
-          mac-tests-relift-e2e-slow) on_mac "$1" "scripts/ci/tests.sh e2e-slow" ;;
-          mac-tests-relift-e2e-rest) on_mac "$1" "scripts/ci/tests.sh e2e-rest" ;;
-          mac-cross-gba-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-gba-} --guest gba --jobs 4" ;;
-          mac-cross-n64-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
-          mac-cross-sms-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-sms-} --guest sms --jobs 4" ;;
-          mac-cross-*) on_mac "$1" "scripts/ci/gbcross.sh ${1#mac-cross-} --jobs 4" ;;
-          mac-release-*) on_mac "$1" "cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
+          mac-tests-workspace) on_mac "$1" debug "scripts/ci/tests.sh workspace" ;;
+          mac-tests-relift) on_mac "$1" debug "scripts/ci/tests.sh relift" ;;
+          mac-tests-relift-e2e-slow) on_mac "$1" debug "scripts/ci/tests.sh e2e-slow" ;;
+          mac-tests-relift-e2e-rest) on_mac "$1" debug "scripts/ci/tests.sh e2e-rest" ;;
+          mac-cross-gba-*) on_mac "$1" debug "scripts/ci/gbcross.sh ${1#mac-cross-gba-} --guest gba --jobs 4" ;;
+          mac-cross-n64-*) on_mac "$1" debug "scripts/ci/gbcross.sh ${1#mac-cross-n64-} --guest n64 --jobs 4" ;;
+          mac-cross-sms-*) on_mac "$1" debug "scripts/ci/gbcross.sh ${1#mac-cross-sms-} --guest sms --jobs 4" ;;
+          mac-cross-*) on_mac "$1" debug "scripts/ci/gbcross.sh ${1#mac-cross-} --jobs 4" ;;
+          mac-release-*) on_mac "$1" "release-${1#mac-release-}" "cargo build --release --locked -p relift --target ${1#mac-release-}" ;;
         esac
         ;;
       *) "$ROOT/scripts/ci/$1.sh" ;;
