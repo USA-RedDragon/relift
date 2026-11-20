@@ -524,9 +524,11 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-linux",
-        why: "the Linux guest: static aarch64 ELF programs over the ELF reader and the ARM64 frontend",
+        why: "the Linux guest: a static aarch64 ELF program lifted and emitted as one unit, over the ELF reader, the ARM64 frontend, discovery and the C emitter",
         normal: &[
+            "relift-analyze",
             "relift-cpu-arm64",
+            "relift-emit",
             "relift-guest",
             "relift-ir",
             "relift-objfile",
