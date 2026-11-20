@@ -56,3 +56,42 @@ TEST(nifm_opens_a_general_service)
     tc_obj old;
     CHECK_EQ(tc_sub(c, s, tc_new(4), &old), 0);
 }
+
+TEST(nifm_requests_report_no_network)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    tc_obj s = tc_open_service(c, heap, "nifm:u");
+    CHECK_EQ(tc_to_domain(c, &s), 0);
+    tc_obj g;
+    tc_req q = tc_new(5);
+    q.send_pid = true;
+    tc_put64(&q, 0);
+    CHECK_EQ(tc_sub(c, s, q, &g), 0);
+    tc_res r = tc_send(c, g, tc_new(1));
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(tc_u32(&r, 0), 1);
+    r = tc_send(c, g, tc_new(21));
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.data[0], 0);
+    r = tc_send(c, g, tc_new(18));
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.data[2], 0);
+    tc_obj req;
+    q = tc_new(4);
+    tc_put32(&q, 3);
+    CHECK_EQ(tc_sub(c, g, q, &req), 0);
+    r = tc_send(c, req, tc_new(0));
+    CHECK_EQ(tc_u32(&r, 0), 1);
+    r = tc_send(c, req, tc_new(2));
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy, 2);
+    CHECK_EQ(tc_send(c, req, tc_new(4)).result, 0);
+    r = tc_send(c, req, tc_new(0));
+    CHECK_EQ(tc_u32(&r, 0), 2);
+    CHECK_EQ(tc_send(c, req, tc_new(1)).result, RL_MAKE_RESULT(110, 111));
+    r = tc_send(c, req, tc_new(0));
+    CHECK_EQ(tc_u32(&r, 0), 1);
+    CHECK_EQ(tc_send(c, req, tc_new(1)).result, RL_MAKE_RESULT(110, 1111));
+    CHECK_EQ(tc_send(c, g, tc_new(12)).result, RL_MAKE_RESULT(110, 1111));
+}
