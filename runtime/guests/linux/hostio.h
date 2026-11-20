@@ -81,6 +81,34 @@ int64_t hio_set_status_flags(int fd, uint32_t flags);
 /** @brief Waits up to timeout_ns (negative: forever) until the descriptor can be read or written; the ready Linux POLL* bits. */
 int64_t hio_poll(int fd, uint32_t events, int64_t timeout_ns);
 
+/** @brief One event of hio_epoll_wait: the Linux EPOLL* bits and the data word given to hio_epoll_ctl. */
+typedef struct hio_epoll_event {
+    uint32_t events;
+    uint64_t data;
+} hio_epoll_event;
+
+/** @brief epoll_create1(2); the descriptor, close-on-exec. */
+int64_t hio_epoll_create(void);
+/**
+ * @brief epoll_ctl(2) with Linux operation and event values (EPOLLIN, EPOLLOUT, EPOLLRDHUP,
+ * EPOLLPRI, EPOLLERR, EPOLLHUP, EPOLLET, EPOLLONESHOT) over host descriptors.
+ */
+int64_t hio_epoll_ctl(int ep, int op, int fd, uint32_t events, uint64_t data);
+/**
+ * @brief Waits up to timeout_ns (negative: for ever) for events on ep, or until the waker is
+ * kicked: how many events were stored in out (at most max; 0 for the timeout), or -EINTR for
+ * the kick.
+ */
+int64_t hio_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns, void *waker);
+/** @brief eventfd2(2) with Linux flags (EFD_NONBLOCK, EFD_CLOEXEC, EFD_SEMAPHORE); the descriptor. */
+int64_t hio_eventfd(uint32_t init, uint32_t flags);
+/** @brief timerfd_create(2) with Linux clock id and flags (TFD_NONBLOCK, TFD_CLOEXEC); the descriptor. */
+int64_t hio_timerfd_create(int clock, uint32_t flags);
+/** @brief timerfd_settime(2): new_value and old_value are interval seconds, interval nanoseconds, value seconds, value nanoseconds; old_value may be NULL. */
+int64_t hio_timerfd_settime(int fd, uint32_t flags, const int64_t new_value[4], int64_t old_value[4]);
+/** @brief timerfd_gettime(2), in the layout of hio_timerfd_settime. */
+int64_t hio_timerfd_gettime(int fd, int64_t value[4]);
+
 /**
  * @brief A per-thread wake handle: a host-blocking wait that is given it
  * returns when it is kicked. The handle is level triggered: a kick stays

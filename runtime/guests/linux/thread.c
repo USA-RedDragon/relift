@@ -75,6 +75,26 @@ int64_t lx_wait(int h, uint32_t events, int64_t timeout_ns)
     }
 }
 
+int64_t lx_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns)
+{
+    lx_thread *t = lx_cur();
+    int64_t end = timeout_ns < 0 ? 0 : (int64_t)rl_clock_ns() + timeout_ns;
+    for (;;) {
+        int64_t left = -1;
+        if (timeout_ns >= 0) {
+            left = end - (int64_t)rl_clock_ns();
+            if (left < 0)
+                left = 0;
+        }
+        int64_t r = hio_epoll_wait(ep, out, max, left, t->waker);
+        if (r != -L_EINTR)
+            return r;
+        hio_waker_clear(t->waker);
+        if (lx_signal_ready())
+            return -L_EINTR;
+    }
+}
+
 int lx_futex_wake(uint64_t a, uint32_t n, uint32_t bits)
 {
     int woke = 0;

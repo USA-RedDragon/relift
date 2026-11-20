@@ -206,6 +206,9 @@ static int64_t dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6
     case NR_rt_sigreturn: return lx_sigreturn(c);
     case NR_rseq:
     case NR_clone3: return -L_ENOSYS;
+    case NR_eventfd2:
+    case NR_epoll_create1:
+    case NR_timerfd_create: return locked(lx_event_call(nr), c, mem, a);
     case NR_openat:
     case NR_close:
     case NR_dup:
@@ -218,6 +221,8 @@ static int64_t dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6
     default: break;
     }
     lx_sys_fn *f = lx_fs_call(nr);
+    if (!f)
+        f = lx_event_call(nr);
     if (!f)
         f = lx_proc_call(nr);
     if (!f)

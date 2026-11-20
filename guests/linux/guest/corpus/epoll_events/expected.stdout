@@ -1,0 +1,13 @@
+add: 0
+add again: -1 errno EEXIST
+empty wait: 0
+woken: 1 events 0x1 data 0xabcdef
+read: 8 value 5
+read again: -1 errno EAGAIN
+sum: 7
+settime: 0
+timer: 1 events, read 8 expirations 1 data 7
+del: 0
+del again: -1 errno ENOENT
+pipe: 1 events data 1
+hangup: 1 events has HUP 1

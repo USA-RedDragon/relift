@@ -516,3 +516,205 @@ uint32_t hio_cpu_count(void)
 uint32_t hio_umask(uint32_t mask) { return (uint32_t)umask((mode_t)mask); }
 
 #endif
+
+#if defined(__linux__)
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/timerfd.h>
+
+int64_t hio_epoll_create(void)
+{
+    int fd = epoll_create1(EPOLL_CLOEXEC);
+    return fd < 0 ? fail() : fd;
+}
+
+int64_t hio_epoll_ctl(int ep, int op, int fd, uint32_t events, uint64_t data)
+{
+    struct epoll_event ev = { .events = events, .data.u64 = data };
+    return epoll_ctl(ep, op, fd, &ev) < 0 ? fail() : 0;
+}
+
+int64_t hio_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns, void *waker)
+{
+    int64_t w = hio_wait(ep, L_POLLIN, timeout_ns, waker);
+    if (w <= 0)
+        return w;
+    struct epoll_event ev[64];
+    if (max > 64)
+        max = 64;
+    int n;
+    do
+        n = epoll_wait(ep, ev, max, 0);
+    while (n < 0 && errno == EINTR);
+    if (n < 0)
+        return fail();
+    for (int i = 0; i < n; i++) {
+        out[i].events = ev[i].events;
+        out[i].data = ev[i].data.u64;
+    }
+    return n;
+}
+
+int64_t hio_eventfd(uint32_t init, uint32_t flags)
+{
+    int fd = eventfd(init, (int)flags);
+    return fd < 0 ? fail() : fd;
+}
+
+int64_t hio_timerfd_create(int clock, uint32_t flags)
+{
+    int fd = timerfd_create(clock, (int)flags);
+    return fd < 0 ? fail() : fd;
+}
+
+int64_t hio_timerfd_settime(int fd, uint32_t flags, const int64_t nv[4], int64_t old[4])
+{
+    struct itimerspec n = { .it_interval = { nv[0], nv[1] }, .it_value = { nv[2], nv[3] } }, o;
+    if (timerfd_settime(fd, (int)flags, &n, &o) < 0)
+        return fail();
+    if (old) {
+        old[0] = o.it_interval.tv_sec;
+        old[1] = o.it_interval.tv_nsec;
+        old[2] = o.it_value.tv_sec;
+        old[3] = o.it_value.tv_nsec;
+    }
+    return 0;
+}
+
+int64_t hio_timerfd_gettime(int fd, int64_t v[4])
+{
+    struct itimerspec o;
+    if (timerfd_gettime(fd, &o) < 0)
+        return fail();
+    v[0] = o.it_interval.tv_sec;
+    v[1] = o.it_interval.tv_nsec;
+    v[2] = o.it_value.tv_sec;
+    v[3] = o.it_value.tv_nsec;
+    return 0;
+}
+#endif
+
+#if defined(__APPLE__)
+#include <sys/event.h>
+
+enum { EP_IN = 0x1, EP_OUT = 0x4, EP_ERR = 0x8, EP_HUP = 0x10, EP_RDHUP = 0x2000, EP_ONESHOT = 1u << 30, EP_ET = 1u << 31 };
+
+int64_t hio_epoll_create(void)
+{
+    int kq = kqueue();
+    if (kq < 0)
+        return fail();
+    fcntl(kq, F_SETFD, FD_CLOEXEC);
+    return kq;
+}
+
+static int kev(int kq, int fd, int filter, uint16_t flags, void *udata)
+{
+    struct kevent k;
+    EV_SET(&k, (uintptr_t)fd, filter, flags, 0, 0, udata);
+    return kevent(kq, &k, 1, NULL, 0, NULL);
+}
+
+int64_t hio_epoll_ctl(int ep, int op, int fd, uint32_t events, uint64_t data)
+{
+    if (op == 2) {
+        int a = kev(ep, fd, EVFILT_READ, EV_DELETE, NULL), b = kev(ep, fd, EVFILT_WRITE, EV_DELETE, NULL);
+        return a < 0 && b < 0 ? -L_ENOENT : 0;
+    }
+    if (op != 1 && op != 3)
+        return -L_EINVAL;
+    uint16_t fl = EV_ADD | EV_ENABLE;
+    if (events & EP_ET)
+        fl |= EV_CLEAR;
+    if (events & EP_ONESHOT)
+        fl |= EV_ONESHOT;
+    void *u = (void *)(uintptr_t)data;
+    if (events & (EP_IN | EP_RDHUP)) {
+        if (kev(ep, fd, EVFILT_READ, fl, u) < 0)
+            return fail();
+    } else {
+        kev(ep, fd, EVFILT_READ, EV_DELETE, NULL);
+    }
+    if (events & EP_OUT) {
+        if (kev(ep, fd, EVFILT_WRITE, fl, u) < 0)
+            return fail();
+    } else {
+        kev(ep, fd, EVFILT_WRITE, EV_DELETE, NULL);
+    }
+    return 0;
+}
+
+int64_t hio_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns, void *waker)
+{
+    int wfd = waker ? ((int *)waker)[0] : -1;
+    static char kick_tag;
+    if (wfd >= 0)
+        kev(ep, wfd, EVFILT_READ, EV_ADD | EV_ENABLE, &kick_tag);
+    struct kevent ev[64];
+    if (max > 64)
+        max = 64;
+    struct timespec ts, *tp = NULL;
+    if (timeout_ns >= 0) {
+        ts.tv_sec = timeout_ns / 1000000000;
+        ts.tv_nsec = timeout_ns % 1000000000;
+        tp = &ts;
+    }
+    int n = kevent(ep, NULL, 0, ev, max, tp);
+    int err = errno;
+    if (wfd >= 0)
+        kev(ep, wfd, EVFILT_READ, EV_DELETE, NULL);
+    if (n < 0)
+        return err == EINTR ? 0 : (errno = err, fail());
+    int got = 0;
+    for (int i = 0; i < n; i++) {
+        if (ev[i].udata == &kick_tag) {
+            if (!got)
+                return -L_EINTR;
+            continue;
+        }
+        uint32_t e = 0;
+        if (ev[i].filter == EVFILT_READ)
+            e |= EP_IN;
+        if (ev[i].filter == EVFILT_WRITE)
+            e |= EP_OUT;
+        if (ev[i].flags & EV_EOF)
+            e |= EP_HUP;
+        if (ev[i].flags & EV_ERROR)
+            e |= EP_ERR;
+        out[got].events = e;
+        out[got].data = (uint64_t)(uintptr_t)ev[i].udata;
+        got++;
+    }
+    return got;
+}
+
+int64_t hio_eventfd(uint32_t init, uint32_t flags)
+{
+    (void)init;
+    (void)flags;
+    return -L_ENOSYS;
+}
+
+int64_t hio_timerfd_create(int clock, uint32_t flags)
+{
+    (void)clock;
+    (void)flags;
+    return -L_ENOSYS;
+}
+
+int64_t hio_timerfd_settime(int fd, uint32_t flags, const int64_t nv[4], int64_t old[4])
+{
+    (void)fd;
+    (void)flags;
+    (void)nv;
+    (void)old;
+    return -L_ENOSYS;
+}
+
+int64_t hio_timerfd_gettime(int fd, int64_t v[4])
+{
+    (void)fd;
+    (void)v;
+    return -L_ENOSYS;
+}
+#endif

@@ -9,6 +9,7 @@
 #include "abi.h"
 #include "core.h"
 #include "linux.h"
+#include "hostio.h"
 #include "lxsync.h"
 
 #include <stdbool.h>
@@ -195,6 +196,10 @@ int64_t lx_sys_mprotect(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
 int64_t lx_sys_mremap(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
 int64_t lx_sys_madvise(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
 
+/** @brief eventfd, timerfd and epoll, by number: NULL for a number they do not take. */
+lx_sys_fn *lx_event_call(uint32_t nr);
+/** @brief hio_epoll_wait for the calling thread: interrupted (-EINTR) when a signal is ready. */
+int64_t lx_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns);
 /** @brief The file and descriptor system calls, by number: NULL for a number they do not take. */
 lx_sys_fn *lx_fs_call(uint32_t nr);
 /** @brief The process, time and information system calls. */

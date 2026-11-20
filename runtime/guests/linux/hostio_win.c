@@ -740,4 +740,50 @@ uint32_t hio_umask(uint32_t mask)
     return (uint32_t)old;
 }
 
+int64_t hio_epoll_create(void) { return -L_ENOSYS; }
+int64_t hio_epoll_ctl(int ep, int op, int fd, uint32_t events, uint64_t data)
+{
+    (void)ep;
+    (void)op;
+    (void)fd;
+    (void)events;
+    (void)data;
+    return -L_ENOSYS;
+}
+int64_t hio_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns, void *waker)
+{
+    (void)ep;
+    (void)out;
+    (void)max;
+    (void)timeout_ns;
+    (void)waker;
+    return -L_ENOSYS;
+}
+int64_t hio_eventfd(uint32_t init, uint32_t flags)
+{
+    (void)init;
+    (void)flags;
+    return -L_ENOSYS;
+}
+int64_t hio_timerfd_create(int clock, uint32_t flags)
+{
+    (void)clock;
+    (void)flags;
+    return -L_ENOSYS;
+}
+int64_t hio_timerfd_settime(int fd, uint32_t flags, const int64_t nv[4], int64_t old[4])
+{
+    (void)fd;
+    (void)flags;
+    (void)nv;
+    (void)old;
+    return -L_ENOSYS;
+}
+int64_t hio_timerfd_gettime(int fd, int64_t v[4])
+{
+    (void)fd;
+    (void)v;
+    return -L_ENOSYS;
+}
+
 #endif
