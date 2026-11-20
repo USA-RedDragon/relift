@@ -2998,6 +2998,17 @@ reimplementation.
   name no import file has stops the program with a report that names it:
   the library was not in the import. `/proc/self/exe` reads as the
   executable's import path.
+- **Plugins and configuration.** A directory a loaded file spells out
+  that lies under a library search directory and holds shared objects
+  (glibc's `gconv` modules) is imported whole: the shared objects as
+  libraries, the rest (`gconv-modules`, its `.d` files and cache) as data.
+  The libraries a file names by template (`libnss_%s.so%s`) that the
+  sysroot holds join the closure. The files under `/etc` a loaded file
+  spells out (`nsswitch.conf`, `passwd`, `group`, `hosts`) and the sysroot
+  holds are imported as data, and are served read-only at their own paths.
+  A directory that holds import files lists as a directory, and a name in
+  it that is not an import file is absent, so the machine's own `/etc`
+  never shows. [checked: the corpus's `iconv_plugins` and `nss_files`]
 - **Discovery.** Each file's roots are its entry, dynamic and static
   symbols, unwind table, relocation targets, initializer and finalizer
   lists, the lazy-binding entry each procedure linkage word starts with,
