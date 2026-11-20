@@ -75,6 +75,8 @@ typedef struct nvn_texture {
     /** @brief The builder's bytes on NVN1 (nvn_texture_record), which the driver's storage class function reads at a call. */
     uint8_t builder[NVN_TEXTURE_BUILDER_BYTES];
     bool has_builder;
+    /** @brief The game finalized the texture; its description stays (see nvnh_nvnTextureFinalize). */
+    bool finalized;
 } nvn_texture;
 
 typedef struct nvn_desc_pool {
@@ -396,12 +398,21 @@ uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnTextureFinalize(NVNtexture *). */
+/**
+ * @brief nvnTextureFinalize(NVNtexture *). The driver's finalize only retires the object; the texture's layout,
+ * address and storage stay what the game's own commands and descriptors named, and a command buffer recorded
+ * before the finalize (replayed by a CallCommands, or submitted after it) still reads or writes that storage. So
+ * the layer keeps the texture's description until the same address is initialized again (nvn_obj_new replaces it),
+ * and only the texture set's slots of it go (nvn_texset_texture_gone). Dropping it here stopped the game with
+ * "is not a texture" at the first replay of such a command.
+ */
 uint64_t nvnh_nvnTextureFinalize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_texset_texture_gone(c->x[0]);
-    nvn_obj_free(nvn_obj_get(c->x[0], NVN_TEXTURE));
+    nvn_texture *t = (nvn_texture *)nvn_obj_get(c->x[0], NVN_TEXTURE);
+    if (t)
+        t->finalized = true;
     return nvn_ret(c);
 }
 
