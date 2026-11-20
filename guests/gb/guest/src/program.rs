@@ -263,6 +263,9 @@ struct Lifts {
     span: u64,
 }
 
+/// A RAM unit: the entry addresses it holds, and its functions as (entry, key, lifts).
+type RamUnit = (BTreeSet<u16>, Vec<(u16, u16, Lifts)>);
+
 fn lift_function(
     fe: &Gb,
     rom: &[u8],
@@ -898,6 +901,13 @@ fn ram_halt_bug_keys(by_pc: &BTreeMap<u16, BTreeSet<u16>>) -> Vec<(u16, u16)> {
     out
 }
 
+/// The most functions of RAM instructions in one unit. Each unit is one C
+/// file with the lifted prelude, so one per few instructions meant about
+/// 4,000 compiler runs for a ROM that executes from RAM. No two functions in
+/// a unit start within 3 bytes of each other, since the instruction of one
+/// would run into the next, and they are in address order.
+const RAM_UNIT_FUNCTIONS: usize = 96;
+
 fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
     let fe = Gb::new();
     let mut by_pc: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
@@ -946,7 +956,23 @@ fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
             groups[g].push((pc, k, Lifts { blocks, span: 1 }));
         }
     }
-    for (i, list) in groups.iter().enumerate() {
+    let mut units: Vec<RamUnit> = Vec::new();
+    for item in groups.into_iter().flatten() {
+        let at = units.iter().position(|(pcs, list)| {
+            list.len() < RAM_UNIT_FUNCTIONS && !pcs.iter().any(|p| p.abs_diff(item.0) < 4)
+        });
+        let (pcs, list) = match at {
+            Some(at) => &mut units[at],
+            None => {
+                units.push((BTreeSet::new(), Vec::new()));
+                units.last_mut().expect("just pushed")
+            }
+        };
+        pcs.insert(item.0);
+        list.push(item);
+    }
+    for (i, (_, list)) in units.iter_mut().enumerate() {
+        list.sort_by_key(|(pc, k, _)| (*pc, *k));
         let fns: Vec<Function<'_>> = list
             .iter()
             .map(|(pc, k, l)| Function {
