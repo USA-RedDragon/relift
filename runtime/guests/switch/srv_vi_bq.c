@@ -384,25 +384,51 @@ static uint64_t cpu_ns(clockid_t id)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* The stats.every line: frames per second, process cores and this thread's CPU per frame since the last one. */
+static int cmp_u64(const void *a, const void *b)
+{
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return x < y ? -1 : x > y;
+}
+
+/** @brief The largest window of frame times the stats line sorts. */
+#define STATS_WINDOW 65536
+
+/**
+ * @brief The stats.every line: frames per second, the frame time's median, 95th and 99th percentile and worst case
+ * (the wall time between two queued frames), process cores and this thread's CPU per frame since the last one.
+ */
 static void frame_stats(uint64_t frame)
 {
-    static uint64_t every, t0, p0, h0, f0;
+    static uint64_t every, t0, p0, h0, f0, last, n;
+    static uint64_t dt[STATS_WINDOW];
     static bool read;
     if (!read) {
-        int64_t n = rl_setting_int("stats.every");
-        every = n > 0 ? (uint64_t)n : 0;
+        int64_t v = rl_setting_int("stats.every");
+        every = v > 0 ? (uint64_t)v : 0;
+        if (every > STATS_WINDOW)
+            every = STATS_WINDOW;
         read = true;
     }
     if (!every)
         return;
     uint64_t t = rl_clock_ns(), p = cpu_ns(CLOCK_PROCESS_CPUTIME_ID), h = cpu_ns(CLOCK_THREAD_CPUTIME_ID);
+    if (last && n < STATS_WINDOW)
+        dt[n++] = t - last;
+    last = t;
     if (f0 && frame - f0 >= every && t > t0) {
-        double s = (double)(t - t0) / 1e9, n = (double)(frame - f0);
+        double s = (double)(t - t0) / 1e9, nf = (double)(frame - f0);
+        if (n) {
+            qsort(dt, n, sizeof dt[0], cmp_u64);
+            rl_log(RL_LOG_INFO, "stats",
+                   "frames %llu-%llu: frame time median %.2f p95 %.2f p99 %.2f worst %.2f ms",
+                   (unsigned long long)f0, (unsigned long long)frame, (double)dt[n / 2] / 1e6,
+                   (double)dt[n * 95 / 100] / 1e6, (double)dt[n * 99 / 100] / 1e6, (double)dt[n - 1] / 1e6);
+        }
         rl_log(RL_LOG_INFO, "stats",
                "frames %llu-%llu: %.2f frames/s, process %.2f cores, presenting thread %.3f ms per frame, memory %llu MiB",
-               (unsigned long long)f0, (unsigned long long)frame, n / s, (double)(p - p0) / 1e9 / s,
-               (double)(h - h0) / 1e6 / n, (unsigned long long)(rl_os_memory_bytes() >> 20));
+               (unsigned long long)f0, (unsigned long long)frame, nf / s, (double)(p - p0) / 1e9 / s,
+               (double)(h - h0) / 1e6 / nf, (unsigned long long)(rl_os_memory_bytes() >> 20));
+        n = 0;
     }
     if (!f0 || frame - f0 >= every) {
         t0 = t;
