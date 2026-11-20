@@ -653,7 +653,10 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     let u = c.shared_pure(key, &args, |c, p| {
         let r = match name {
             "FADD" => c.fadd_exact(p[0], p[1], mode, ftz),
-            "FMUL" => c.fmul_exact(p[0], p[1], mode, ftz, scale),
+            "FMUL" => {
+                let r = c.fmul_exact(p[0], p[1], mode, ftz, scale);
+                c.mul_zero_sign(r, p[0], p[1])
+            }
             _ => c.ffma_exact(p[0], p[1], p[2], mode, ftz),
         };
         c.sat_bits(r, sat)

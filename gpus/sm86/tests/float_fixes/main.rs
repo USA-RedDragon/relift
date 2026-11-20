@@ -201,8 +201,9 @@ fn check(name: &str, o: &Options, devs: &[Device], inst: u128, cases: &[(u32, u3
 }
 
 /// The devices a preset may run on: as promised, preserving where the
-/// translator asks for DenormPreserve, or anything for a host that promises
-/// no denormal mode; all with a GLSL `Fma` that rounds twice.
+/// translator asks for DenormPreserve, flushing for a host whose probe found
+/// only the multiplication corrections (which leave a plain flushing device
+/// as it is), or anything for a host that promises no denormal mode; all with a GLSL `Fma` that rounds twice.
 fn devices(h: &HostProfile) -> Vec<Device> {
     use relift_gpu_nv::translate::Denorm;
     let unfused = |d: Device| Device { fused: false, ..d };
@@ -215,6 +216,7 @@ fn devices(h: &HostProfile) -> Vec<Device> {
         .collect();
     let devs = match h.denorm {
         Denorm::Flush => flush,
+        Denorm::Unknown if h.flush_fix.is_some() => flush,
         Denorm::Unknown if h.denorm_preserve_mode => vec![unfused(PRESERVE)],
         Denorm::Preserve => vec![unfused(PRESERVE)],
         Denorm::Unknown => [&flush[..], &[unfused(PRESERVE)]].concat(),

@@ -12,7 +12,9 @@ mod spvi;
 
 use common::translate_with;
 use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS};
-use relift_gpu_nv::translate::{Denorm as HostDenorm, HostProfile, Options};
+use relift_gpu_nv::translate::{
+    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Options,
+};
 use relift_gpu_nv::{Inst, Operand, RegMods};
 use spvi::{Denorm, Env, Memory, Module, Run};
 use std::collections::{HashMap, HashSet};
@@ -89,17 +91,31 @@ fn hosts() -> Vec<HostProfile> {
 }
 
 /// The denormal behaviors a host may show for a module.
-fn behaviors(m: &Module, host: &HostProfile) -> Vec<Denorm> {
+fn behaviors(m: &Module, host: &HostProfile) -> Vec<(Denorm, bool)> {
     if m.modes.contains(&4459) {
-        return vec![Denorm::Preserve];
+        return vec![(Denorm::Preserve, false)];
     }
     if m.modes.contains(&4460) {
-        return vec![Denorm::FlushBefore, Denorm::FlushAfter];
+        return vec![(Denorm::FlushBefore, false), (Denorm::FlushAfter, false)];
+    }
+    if let Some(fix) = host.flush_fix {
+        let mut v = Vec::new();
+        if fix & FIX_ROUND_AFTER != 0 {
+            v.push((Denorm::FlushAfter, fix & FIX_ZERO_SIGN != 0));
+        }
+        if fix & FIX_ROUND_AFTER == 0 {
+            v.push((Denorm::FlushBefore, fix & FIX_ZERO_SIGN != 0));
+        }
+        return v;
     }
     match host.denorm {
-        HostDenorm::Flush => vec![Denorm::FlushBefore],
-        HostDenorm::Preserve => vec![Denorm::Preserve],
-        HostDenorm::Unknown => vec![Denorm::Preserve, Denorm::FlushBefore, Denorm::FlushAfter],
+        HostDenorm::Flush => vec![(Denorm::FlushBefore, false)],
+        HostDenorm::Preserve => vec![(Denorm::Preserve, false)],
+        HostDenorm::Unknown => vec![
+            (Denorm::Preserve, false),
+            (Denorm::FlushBefore, false),
+            (Denorm::FlushAfter, false),
+        ],
     }
 }
 
@@ -109,7 +125,13 @@ fn spirv_bytes(w: &[u32]) -> Vec<u8> {
 
 /// Runs one program on one row: the wrapper reads the row from `c[0][0x160]`
 /// and writes its outputs to `c[0][0x168]`, both for thread 0.
-fn exec(m: &Module, denorm: Denorm, canonical_nan: bool, row: &[u32; 4], outs: usize) -> Vec<u32> {
+fn exec(
+    m: &Module,
+    behavior: (Denorm, bool),
+    canonical_nan: bool,
+    row: &[u32; 4],
+    outs: usize,
+) -> Vec<u32> {
     let mut cb = vec![0u8; 0x10000];
     for k in 0..3 {
         cb[4 * k..4 * k + 4].copy_from_slice(&1u32.to_le_bytes());
@@ -121,8 +143,9 @@ fn exec(m: &Module, denorm: Denorm, canonical_nan: bool, row: &[u32; 4], outs: u
         regions: vec![(CBUF, cb), (IN, input), (OUT, vec![0; 64])],
     };
     let env = Env {
-        denorm,
+        denorm: behavior.0,
         canonical_nan,
+        mul_zero_positive: behavior.1,
         uniforms: HashMap::from([((1, 0), CBUF)]),
         local_id: [0; 3],
         group_id: [0; 3],
@@ -346,7 +369,13 @@ fn maxwell_rro_gives_the_mufu_operand() {
                     x ^= 0x8000_0000;
                 }
                 let want = if kind == RRO_SINCOS { rz(x) } else { x };
-                let got = exec(&m, Denorm::Preserve, host.canonical_nan, row, v.outs);
+                let got = exec(
+                    &m,
+                    (Denorm::Preserve, false),
+                    host.canonical_nan,
+                    row,
+                    v.outs,
+                );
                 assert_eq!(
                     got[0], want,
                     "{name} {kind} -{neg} |{abs}| in {:08x}",
@@ -421,7 +450,13 @@ fn maxwell_i2f_converts_the_integer_abs_and_neg() {
                 if neg {
                     x = x.wrapping_neg();
                 }
-                let got = exec(&m, Denorm::Preserve, host.canonical_nan, row, v.outs);
+                let got = exec(
+                    &m,
+                    (Denorm::Preserve, false),
+                    host.canonical_nan,
+                    row,
+                    v.outs,
+                );
                 assert_eq!(got[0], cvt(x), "{label} |{abs}| -{neg} in {:08x}", row[0]);
             }
             checked += 1;
@@ -448,3 +483,107 @@ families!(
     shf, fadd, fmul, ffma, fcmp, f2i, f2i_f16, i2f, f2f, frnd, f2fp, half, int, mufu_f16, mufu_64h,
     mufu_rcp, mufu_rsq, mufu_sqrt, mufu_ex2, mufu_lg2, mufu_sin, mufu_cos
 );
+
+/// A pseudo-random 32-bit sequence (xorshift32).
+fn xorshift(x: &mut u32) -> u32 {
+    *x ^= *x << 13;
+    *x ^= *x >> 17;
+    *x ^= *x << 5;
+    *x
+}
+
+/// Operand pairs at the edge of the normal range: random bits, denormals and
+/// the smallest normals, and pairs whose product lands just below the
+/// smallest normal number (a quarter with the mantissas that put it in the
+/// window where rounding before and after the flush differ).
+fn edge_rows(n: usize) -> Vec<[u32; 4]> {
+    let mut x = 0x2545_f491;
+    let mut rows = vec![
+        [0x00ff_ffff, 0x3f00_0000, 0, 0],
+        [0x3f00_0000, 0x00ff_ffff, 0, 0],
+        [0x0000_0000, 0xbf80_0000, 0, 0],
+        [0x8000_0000, 0x3f80_0000, 0, 0],
+        [0x0000_0001, 0xbf80_0000, 0, 0],
+        [0x0080_0000, 0xbf00_0000, 0, 0],
+    ];
+    for _ in 0..n {
+        let (kind, r1, r2, r3) = (
+            xorshift(&mut x) % 4,
+            xorshift(&mut x),
+            xorshift(&mut x),
+            xorshift(&mut x),
+        );
+        let (mut a, mut b) = (r1, r2);
+        if kind == 1 {
+            a = (a & 0x807f_ffff) | (r3 % 4) << 23;
+            b = (b & 0x807f_ffff) | ((r3 >> 4) % 4) << 23;
+        } else if kind >= 2 {
+            let ea = 1 + r3 % 127;
+            let eb = (128 - ea as i32 + (r3 >> 8) as i32 % 5 - 2).max(0) as u32;
+            a = (a & 0x807f_ffff) | ea << 23;
+            b = (b & 0x807f_ffff) | eb << 23;
+            if kind == 3 {
+                a |= 0x007f_ffff;
+                b &= 0xff80_0000;
+            }
+            if r3 >> 12 & 1 != 0 {
+                std::mem::swap(&mut a, &mut b);
+            }
+        }
+        rows.push([a, b, 0, 0]);
+    }
+    rows
+}
+
+/// A host whose probe found only corrections of the flushing model gets the
+/// results SM86 gives, on the device it is: the translation for the NVIDIA
+/// preset (which flushes as SM86 does) is the reference, and the corrected
+/// translation, run on a device with that host's deviation, must equal it
+/// on every `.FTZ` multiplication and addition row, edge and random.
+#[test]
+fn probed_multiplication_fixes_give_the_flushing_results() {
+    let rows = edge_rows(20_000);
+    for (name, family) in [("fmul", "FMUL.FTZ.RN"), ("fadd", "FADD.FTZ.RN")] {
+        let f = file::load(name);
+        let v = f.variants.iter().find(|v| v.label == family).unwrap();
+        let p = relift_gpu_sm86::program::parse(&v.code);
+        let reference = {
+            let o = Options {
+                host: HostProfile::nvidia(),
+                exact_mufu: true,
+                ..Options::default()
+            };
+            let s = translate_with(&p, &o).unwrap();
+            let m = Module::parse(&s.spirv);
+            rows.iter()
+                .map(|r| exec(&m, (Denorm::FlushBefore, false), true, r, v.outs))
+                .collect::<Vec<_>>()
+        };
+        for host in ["adreno", "moltenvk"] {
+            let h = HostProfile::preset(host).unwrap();
+            let o = Options {
+                host: h.clone(),
+                exact_mufu: true,
+                ..Options::default()
+            };
+            let s = translate_with(&p, &o).unwrap();
+            let m = Module::parse(&s.spirv);
+            let behavior = behaviors(&m, &h);
+            assert_eq!(behavior.len(), 1, "{host}");
+            let mut bad = 0;
+            for (r, want) in rows.iter().zip(&reference) {
+                let got = exec(&m, behavior[0], h.canonical_nan, r, v.outs);
+                let same = got
+                    .iter()
+                    .zip(want)
+                    .all(|(g, w)| g == w || is_nan(*g) && is_nan(*w));
+                if !same {
+                    bad += 1;
+                    assert!(bad < 4, "{name} {host}: more than 3 rows differ");
+                    eprintln!("{name} {host}: in {r:08x?} want {want:08x?} got {got:08x?}");
+                }
+            }
+            assert_eq!(bad, 0, "{name} {host}");
+        }
+    }
+}

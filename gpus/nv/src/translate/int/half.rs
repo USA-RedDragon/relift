@@ -10,7 +10,7 @@
 //! rounding it again to half precision cannot double-round.
 
 use crate::spirv::op;
-use crate::translate::{Ctx, Res, bad};
+use crate::translate::{Ctx, FIX_ZERO_SIGN, Res, bad};
 use crate::{Inst, Operand, Swz};
 
 const NO_CONTRACTION: u32 = 42;
@@ -26,6 +26,18 @@ pub(super) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
 }
 
 impl Ctx {
+    /// The product of two floats that came from halves, with the sign of a
+    /// zero product as [`Ctx::mul_zero_sign`] gives it.
+    fn half_product(&mut self, x: u32, y: u32) -> u32 {
+        let p = self.nc(op::F_MUL, x, y);
+        if self.host.flush_fix.is_none_or(|f| f & FIX_ZERO_SIGN == 0) {
+            return p;
+        }
+        let (pb, xb, yb) = (self.as_bits(p), self.as_bits(x), self.as_bits(y));
+        let r = self.mul_zero_sign(pb, xb, yb);
+        self.as_float(r)
+    }
+
     fn nc(&mut self, opc: u16, a: u32, b: u32) -> u32 {
         let f = self.f32t();
         let r = self.m.emit(opc, f, &[a, b]);
@@ -269,11 +281,11 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
             let yf = c.as_float(y);
             let v = match kind {
                 0 => c.nc(op::F_ADD, xf, yf),
-                1 => c.nc(op::F_MUL, xf, yf),
+                1 => c.half_product(xf, yf),
                 _ => {
                     let zz = c.f16_to_f32(p[2], ftz);
                     let zf = c.as_float(zz);
-                    let p = c.nc(op::F_MUL, xf, yf);
+                    let p = c.half_product(xf, yf);
                     c.sum_odd(p, zf)
                 }
             };

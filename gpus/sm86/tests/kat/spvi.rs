@@ -401,6 +401,9 @@ pub struct Env {
     /// Single-precision arithmetic writes `0x7fffffff` for every NaN result
     /// (a host with `HostProfile::canonical_nan`), not [`ODD_NAN`].
     pub canonical_nan: bool,
+    /// A single-precision multiplication gives every zero result the sign
+    /// plus (Apple GPUs).
+    pub mul_zero_positive: bool,
     /// Contents of uniform blocks by (set, binding), placed in memory.
     pub uniforms: HashMap<(u32, u32), u64>,
     pub local_id: [u32; 3],
@@ -1009,7 +1012,12 @@ impl<'m> Run<'m> {
                     131 => two_sum(f64::from(p), -f64::from(q)),
                     _ => (f64::from(p) * f64::from(q), 0.0),
                 };
-                u64::from(self.round_arith(s, e))
+                let r = u64::from(self.round_arith(s, e));
+                if op == 133 && self.env.mul_zero_positive && r & 0x7fff_ffff == 0 {
+                    0
+                } else {
+                    r
+                }
             }
             4427 => {
                 let (p, q, r) = (

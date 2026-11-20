@@ -98,15 +98,35 @@ fn preserving_hosts_ask_for_denormals_and_flush_ftz_inputs() {
 
 #[test]
 fn unknown_hosts_repair_both_forms() {
+    let mut host = HostProfile::moltenvk();
+    host.flush_fix = None;
     let mvk = Options {
-        host: HostProfile::moltenvk(),
+        host,
         ..Options::default()
     };
     for ftz in [false, true] {
         let s = translate_with(&fadd(ftz), &mvk).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(s.interface.host.denorm_mode, None);
         assert_eq!(s.interface.host.denorm_fixups, 1);
-        assert_eq!(s.interface.host.host, "moltenvk");
+    }
+}
+
+/// A device whose probe found its `.FTZ` addition exactly the flushing model
+/// (what the translator relies on) needs no exact path for it, and takes the
+/// exact one only for the forms the flushing model does not cover.
+#[test]
+fn probed_flush_devices_correct_ftz_arithmetic_without_the_exact_path() {
+    for name in ["moltenvk", "adreno"] {
+        let o = Options {
+            host: HostProfile::preset(name).unwrap(),
+            ..Options::default()
+        };
+        let s = translate_with(&fadd(true), &o).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(s.interface.host.denorm_mode, None, "{name}");
+        assert_eq!(s.interface.host.denorm_fixups, 0, "{name}");
+        assert_eq!(count(&s.spirv, FUNCTION_CALL), 1, "{name}: the shared FADD");
+        let s = translate_with(&fadd(false), &o).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(s.interface.host.denorm_fixups, 1, "{name}");
     }
 }
 

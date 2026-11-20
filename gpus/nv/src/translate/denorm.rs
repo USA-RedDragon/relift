@@ -27,6 +27,7 @@
 //! compare.
 
 use super::float::Round;
+use super::host::{FIX_ROUND_AFTER, FIX_ZERO_SIGN};
 use super::{Ctx, Denorm, Res};
 use crate::Inst;
 use crate::spirv::{glsl, op};
@@ -297,6 +298,15 @@ impl Ctx {
     }
 
     fn arith_exact(&mut self, k: Arith, xs: &[u32], mode: Round, ftz: bool, scale: i32) -> u32 {
+        if ftz
+            && scale == 0
+            && mode == Round::Nearest
+            && k != Arith::Fma
+            && self.dn_dmode() == Denorm::Unknown
+            && let Some(fix) = self.host.flush_fix
+        {
+            return self.arith_flush_fixed(k, xs, fix);
+        }
         if k == Arith::Fma && !self.host.fused_fma {
             return self.soft_fma(xs[0], xs[1], Some(xs[2]), mode, ftz, 0);
         }
@@ -305,6 +315,71 @@ impl Ctx {
             return self.arith_guarded(k, xs);
         }
         self.arith_checked(k, xs, mode, ftz, scale)
+    }
+
+    /// The result `r` of a multiplication of the bits `a` and `b` with a zero
+    /// result given the sign of the product's operands, on a device whose
+    /// probe found its multiplication loses it ([`FIX_ZERO_SIGN`]); every
+    /// other result is as it is.
+    pub(crate) fn mul_zero_sign(&mut self, r: u32, a: u32, b: u32) -> u32 {
+        if self.host.flush_fix.is_none_or(|f| f & FIX_ZERO_SIGN == 0) {
+            return r;
+        }
+        let sm = self.dn_ku(0x8000_0000);
+        let x = self.dn_ub(op::BITWISE_XOR, a, b);
+        let sign = self.dn_ub(op::BITWISE_AND, x, sm);
+        let mag = self.dn_ku(0x7fff_ffff);
+        let m = self.dn_ub(op::BITWISE_AND, r, mag);
+        let z = self.dn_ku(0);
+        let zero = self.dn_bc(op::I_EQUAL, m, z);
+        let u = self.u32t();
+        self.select(u, zero, sign, r)
+    }
+
+    /// A round-to-nearest `.FTZ` add or multiply on a device that flushes
+    /// as the instruction does except for what its probe found in the
+    /// multiplication (see [`HostProfile::flush_fix`]): the device's result
+    /// with each probed deviation corrected, nothing else.
+    fn arith_flush_fixed(&mut self, k: Arith, xs: &[u32], fix: u8) -> u32 {
+        let fs: Vec<u32> = xs.iter().map(|&x| self.as_float(x)).collect();
+        let r = match k {
+            Arith::Add => self.fadd_round(fs[0], fs[1], Round::Nearest, true),
+            _ => self.fmul_round(fs[0], fs[1], Round::Nearest, true),
+        };
+        let mut res = self.as_bits(r);
+        if k == Arith::Mul {
+            let sm = self.dn_ku(0x8000_0000);
+            let x = self.dn_ub(op::BITWISE_XOR, xs[0], xs[1]);
+            let sign = self.dn_ub(op::BITWISE_AND, x, sm);
+            let u = self.u32t();
+            if fix & FIX_ROUND_AFTER != 0 {
+                let mag = self.dn_ku(0x7fff_ffff);
+                let m = self.dn_ub(op::BITWISE_AND, res, mag);
+                let min = self.dn_ku(0x0080_0000);
+                let at_min = self.dn_bc(op::I_EQUAL, m, min);
+                let k23 = self.dn_ku(23);
+                let ff = self.dn_ku(0xff);
+                let ea = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, xs[0], k23);
+                let ea = self.dn_ub(op::BITWISE_AND, ea, ff);
+                let eb = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, xs[1], k23);
+                let eb = self.dn_ub(op::BITWISE_AND, eb, ff);
+                let first = self.dn_bc(op::U_LESS_THAN_EQUAL, ea, eb);
+                let up = self.m.c_f32(0x5f80_0000);
+                let fa_up = self.exact(op::F_MUL, fs[0], up);
+                let fb_up = self.exact(op::F_MUL, fs[1], up);
+                let f = self.f32t();
+                let a = self.select(f, first, fa_up, fs[0]);
+                let b = self.select(f, first, fs[1], fb_up);
+                let q = self.exact(op::F_MUL, a, b);
+                let qb = self.as_bits(q);
+                let qm = self.dn_ub(op::BITWISE_AND, qb, mag);
+                let lim = self.dn_ku(0x2080_0000);
+                let small = self.dn_bc(op::U_LESS_THAN, qm, lim);
+                let flush = self.and(at_min, small);
+                res = self.select(u, flush, sign, res);
+            }
+        }
+        self.canonical_nan(res, xs)
     }
 
     /// A round-to-nearest add, multiply or fused multiply-add without
