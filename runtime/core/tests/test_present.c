@@ -446,3 +446,40 @@ TEST(vkdev_chain_links_a_whole_chain_in_front_of_what_was_there)
     rl_vkdev_chain(&build, NULL);
     CHECK(build.pnext == &a);
 }
+
+TEST(present_headless_swapchain_frames_pass_validation)
+{
+    const char *dir = getenv("RELIFT_REPORT_DIR");
+    char log[1024];
+    snprintf(log, sizeof log, "%s/present_validation.txt", dir && *dir ? dir : ".");
+    remove(log);
+    setenv("VK_LOADER_DRIVERS_SELECT", "*lvp*", 0);
+    setenv("VK_INSTANCE_LAYERS", "VK_LAYER_KHRONOS_validation", 1);
+    setenv("VK_KHRONOS_VALIDATION_VALIDATE_SYNC", "true", 1);
+    setenv("VK_KHRONOS_VALIDATION_REPORT_FLAGS", "error", 1);
+    setenv("VK_KHRONOS_VALIDATION_DEBUG_ACTION", "VK_DBG_LAYER_ACTION_LOG_MSG", 1);
+    setenv("VK_KHRONOS_VALIDATION_LOG_FILENAME", log, 1);
+    unsetenv(RL_WINDOW_ENV);
+    rl_settings_reset();
+    rl_settings_declare_runtime();
+    g_win.b = &g_headless;
+    rl_window_set_backend(&g_headless);
+    int failures = 0;
+    CHECK_EQ(rl_window_main(body, &failures), 0);
+    CHECK_EQ(failures, 0);
+    rl_window_set_backend(NULL);
+    rl_settings_reset();
+    FILE *f = fopen(log, "r");
+    if (!f) {
+        printf("    (no validation layer: not checked)\n");
+        return;
+    }
+    static char text[1 << 16];
+    size_t n = fread(text, 1, sizeof text - 1, f);
+    fclose(f);
+    text[n] = 0;
+    if (strstr(text, "Validation Error"))
+        printf("%s\n", text);
+    CHECK(strstr(text, "SYNC-HAZARD") == NULL);
+    CHECK(strstr(text, "Validation Error") == NULL);
+}

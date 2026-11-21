@@ -566,8 +566,7 @@ static bool record(rl_present *p, uint32_t index, bool capture)
                xfer, xfer);
         img = p->pic.image;
     }
-    layout(p, sc, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
-           RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, xfer);
+    layout(p, sc, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer, xfer);
     rlvk_clear_color black = { .float32 = { 0, 0, 0, 1 } };
     rlvk_image_subresource_range all = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
     d->vkCmdClearColorImage(p->cmd, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &all);
