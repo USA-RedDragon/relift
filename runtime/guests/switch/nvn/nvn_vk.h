@@ -444,6 +444,8 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot);
  * its own stops, naming the id and the limit. Returns RL_OK, or RL_PENDING after a stop.
  */
 int nvn_texset_sync_registered(replay *r);
+/** @brief Whether the view nv of image v names a format the host can give the image (no format change, or one of the same block footprint). */
+bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv);
 /** @brief How many texture ids sit in a slot of their own number (0 before the set is made). */
 uint32_t nvn_texset_pinned(void);
 /**

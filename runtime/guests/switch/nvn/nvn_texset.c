@@ -745,6 +745,40 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
     return bind_texture(r, handle, &kind, &dim, slot, false);
 }
 
+bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv)
+{
+    VkImageAspectFlags a;
+    return !nv->has_format || nv->format == v->d.format || nvn_vk_view_format(v, nv->format, &a) != VK_FORMAT_UNDEFINED;
+}
+
+/**
+ * @brief Whether the texture registered under id can be seen through the view it was registered with. A registration
+ * that names a view format the host cannot give the texture's image (blocks of another footprint, as a descriptor left
+ * from an earlier use of the pool entry may) is not made resident: it is reported once, and a program that does sample
+ * it stops as the bind of a handle in a constant bank does.
+ */
+static int resident_ok(replay *r, uint32_t id, uint64_t tex, const uint8_t *view, bool has_view, bool *ok)
+{
+    *ok = true;
+    if (!has_view)
+        return RL_OK;
+    vimg *v = nvn_vk_image(r, tex);
+    if (!v)
+        return RL_PENDING;
+    nvn_view nv;
+    int rc = nvn_view_read(r->c, r->mem, view, &nv);
+    if (rc != RL_OK)
+        return rc;
+    if (!nvn_texset_view_fits(v, &nv)) {
+        *ok = false;
+        (void)rl_report_unknown(0x4e564e5645574944ull ^ id, "nvn",
+                                "texture id %u is registered with a view of format %u over format %u, which the host cannot "
+                                "give it: it is not made resident",
+                                id, nv.format, v->d.format);
+    }
+    return RL_OK;
+}
+
 int nvn_texset_sync_registered(replay *r)
 {
     if (!make())
@@ -779,12 +813,18 @@ int nvn_texset_sync_registered(replay *r)
                 t.synced = p;
                 t.capsynced = cap;
             }
+            bool ok;
+            int rc = resident_ok(r, ids[i], tex, view, has_view, &ok);
+            if (rc != RL_OK)
+                return rc;
+            if (!ok)
+                continue;
             if (!t.is_synced[ids[i]]) {
                 t.is_synced[ids[i]] = true;
                 t.synced[t.nsynced++] = ids[i];
             }
             uint32_t kind, dim, slot;
-            int rc = bind_texture(r, ids[i], &kind, &dim, &slot, false);
+            rc = bind_texture(r, ids[i], &kind, &dim, &slot, false);
             if (rc != RL_OK)
                 return rc;
         }
@@ -796,8 +836,14 @@ int nvn_texset_sync_registered(replay *r)
         uint64_t tex = nvn_tex_registered(t.synced[i], view, &has_view, &image);
         if (!tex || !nvn_texture_desc(tex, &(nvn_tex_desc){ 0 }))
             continue;
+        bool ok;
+        int rc = resident_ok(r, t.synced[i], tex, view, has_view, &ok);
+        if (rc != RL_OK)
+            return rc;
+        if (!ok)
+            continue;
         uint32_t kind, dim, slot;
-        int rc = bind_texture(r, t.synced[i], &kind, &dim, &slot, false);
+        rc = bind_texture(r, t.synced[i], &kind, &dim, &slot, false);
         if (rc != RL_OK)
             return rc;
     }

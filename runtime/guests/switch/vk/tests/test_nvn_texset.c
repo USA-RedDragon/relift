@@ -440,3 +440,46 @@ TEST(nvn_one_dimensional_textures_get_host_images_of_their_own_dimension)
     CHECK(w && w->view != NULL);
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_texset_a_view_of_another_block_footprint_is_not_made_resident)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, tex = 0x200, rgba = 0x300;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 75, .width = 16, .height = 16, .depth = 1, .levels = 1, .pool = pool,
+                       .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    nvn_tex_desc p = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .pool = pool,
+                       .offset = 0x8000 };
+    CHECK(nvn_tex_layout(&p));
+    CHECK(nvn_texture_record(rgba, &p, NULL));
+    vimg *bc5 = nvn_vk_image(&r, tex), *plain = nvn_vk_image(&r, rgba);
+    CHECK(bc5 != NULL && plain != NULL);
+    nvn_view nv;
+    memset(&nv, 0, sizeof nv);
+    CHECK(nvn_texset_view_fits(bc5, &nv));
+    nv.has_format = true;
+    nv.format = 75;
+    CHECK(nvn_texset_view_fits(bc5, &nv));
+    nv.format = 123;
+    CHECK(!nvn_texset_view_fits(bc5, &nv));
+    nv.format = 37;
+    CHECK(nvn_texset_view_fits(plain, &nv));
+    CHECK(nvn_vk_flush(&r));
+}
