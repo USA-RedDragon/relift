@@ -72,12 +72,12 @@ relift-switch-vkgen = { path = "guests/switch/vkgen" }
 relift-switch-shaders = { path = "guests/switch/shaders" }
 relift-testguest = { path = "testguest" }
 
-clap = { version = "=4.6.7", features = ["derive"] }
-configulator-rs = "=0.4.1"
-cpp_demangle = "=0.5.1"
+clap = { version = "=4.6.8", features = ["derive"] }
+configulator-rs = "=0.5.0"
+cpp_demangle = "=0.6.0"
 encoding_rs = "=0.8.44"
 lzma-rs = { version = "=0.3.0", default-features = false }
-lz4_flex = { version = "=0.14.0", default-features = false, features = ["safe-decode", "safe-encode", "std"] }
+lz4_flex = { version = "=0.14.2", default-features = false, features = ["safe-decode", "safe-encode", "std"] }
 jpeg-decoder = { version = "=0.3.2", default-features = false }
 read-fonts = "=0.47.0"
 roxmltree = "=0.21.2"
@@ -89,7 +89,7 @@ skera = { version = "=0.10.0", default-features = false }
 skrifa = "=0.50.0"
 toml = "=1.2.1"
 wasm-encoder = { version = "=0.263.0", default-features = false }
-wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "=50.0.3", default-features = false, features = ["cranelift", "runtime", "std"] }
 write-fonts = "=0.56.0"
 zstd = { version = "=0.14.4", default-features = false }
 
