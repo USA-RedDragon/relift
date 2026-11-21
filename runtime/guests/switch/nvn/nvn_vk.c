@@ -1115,6 +1115,8 @@ static VkImageSubresourceRange range_of(const vimg *v)
                                       .layerCount = layers };
 }
 
+VkImageSubresourceRange nvn_vk_image_range(const vimg *v) { return range_of(v); }
+
 /** @brief A fast hash of n bytes (whole 8-byte words, then the tail). */
 static uint64_t bytes_hash(const uint8_t *p, uint64_t n)
 {
@@ -2776,6 +2778,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     uint32_t w = v ? v->d.width : 0, h = v ? v->d.height : 0;
     uint32_t format = v ? v->d.format : 0;
     uint64_t n = g.presents++;
+    nvn_trace_present(NULL);
     uint32_t rect[4] = { 0, 0, w, h };
     bool cropped = v && nvn_crop_rect(crop, w, h, rect);
     const rl_window_backend *b = rl_window_backend_current();

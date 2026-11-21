@@ -543,6 +543,9 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
                            v->d.format);
     VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
     null_rest(slot, true, 0, wrote);
+    if (nvn_trace_active)
+        rl_log(RL_LOG_INFO, "nvn", "trace: storage image id %u slot %u (format %u, host format %d, usage 0x%x) has views of kinds/dims mask 0x%llx", id,
+               slot, v->d.format, (int)v->format, (unsigned)v->usage, (unsigned long long)wrote);
     return RL_OK;
 }
 
@@ -586,7 +589,7 @@ void nvn_texset_texture_gone(uint64_t tex)
 }
 
 /** @brief nvn_texset_bind; with_sampler false leaves the handle's sampler id alone (a separate texture handle names none). */
-static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
+static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
 {
     if (!make())
         return nvn_vk_stop(r, "cannot make the texture set");
@@ -675,6 +678,19 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
     memcpy(t.tex_view[sl], view, sizeof view);
     memcpy(t.dims.map + 4ull * sl, dim, 4);
     return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
+}
+
+static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
+{
+    int rc = bind_texture_slot(r, handle, kind, dim, slot, with_sampler);
+    if (rc == RL_OK && nvn_trace_active) {
+        uint8_t view[17] = { 0 };
+        bool has_view = false, image = false;
+        nvn_tex_registered(handle & 0xfffffu, view, &has_view, &image);
+        view[16] = has_view;
+        nvn_trace_texture(r, t.tex_img[*slot], handle & 0xfffffu, *slot, *kind, *dim, image, view);
+    }
+    return rc;
 }
 
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)

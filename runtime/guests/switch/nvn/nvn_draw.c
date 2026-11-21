@@ -984,6 +984,10 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!layouts())
         return nvn_vk_stop(r, "cannot make the pipeline layout");
+    if (st->ncolor >= 4)
+        nvn_trace_wide_draws++;
+    if (nvn_trace_active)
+        nvn_trace_begin(r, "draw");
     pipe_key k;
     memset(&k, 0, sizeof k);
     VkPrimitiveTopology topo;
@@ -1089,6 +1093,12 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     nvn_counters_end(counted);
     VK(vkCmdEndRendering)(g.cb);
     nvn_vk_barrier(g.cb);
+    if (nvn_trace_active) {
+        nvn_trace_cmd tc = { .mode = mode, .itype = itype, .first = first, .count = count, .base = base, .indexed = indexed };
+        for (uint32_t s = 0; s < 5; s++)
+            tc.keys[s] = mods[s] ? mods[s]->key : NULL;
+        nvn_trace_end(r, &tc);
+    }
     return RL_OK;
 }
 
@@ -1253,6 +1263,8 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!compute_layouts())
         return nvn_vk_stop(r, "cannot make the compute pipeline layout");
+    if (nvn_trace_active)
+        nvn_trace_begin(r, "dispatch");
     uint64_t code = st->code[NVN_STAGE_COMPUTE], ctl = st->control[NVN_STAGE_COMPUTE];
     if (!code)
         return nvn_vk_stop(r, "dispatch without a compute program");
@@ -1300,6 +1312,11 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
     VK(vkCmdDispatch)(g.cb, x, y, z);
     nvn_vk_barrier(g.cb);
+    if (nvn_trace_active) {
+        nvn_trace_cmd tc = { .groups = { x, y, z } };
+        tc.keys[NVN_STAGE_COMPUTE] = m->key;
+        nvn_trace_end(r, &tc);
+    }
     return RL_OK;
 }
 

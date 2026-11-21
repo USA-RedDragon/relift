@@ -288,6 +288,35 @@ typedef struct replay {
     float fret;
 } replay;
 
+/** @brief What a traced draw or dispatch tells the trace beyond the draw state (nvn_trace.c). */
+typedef struct nvn_trace_cmd {
+    const char *keys[NVN_STAGES];
+    uint32_t mode, itype, first, count, groups[3];
+    int32_t base;
+    bool indexed;
+} nvn_trace_cmd;
+
+/** @brief A frame is being traced (RELIFT_NVN_TRACE). */
+extern bool nvn_trace_active;
+/** @brief Draws so far into four or more render targets at once; the trace's G-buffer trigger counts them. */
+extern uint64_t nvn_trace_wide_draws;
+/**
+ * @brief Parses RELIFT_NVN_TRACE, <dir>:<present>[:<frames>]: the folder, the present the trace starts at and the
+ * number of frames (default 1). False for anything else.
+ */
+bool nvn_trace_parse(const char *spec, char *dir, size_t dirsz, uint64_t *from, uint64_t *frames);
+/** @brief At every present: ends the frame being traced and starts the next one when the trace is due. */
+void nvn_trace_present(replay *r);
+/** @brief Before a draw or dispatch ("draw", "dispatch"): submits the batch and saves what the command will read. */
+void nvn_trace_begin(replay *r, const char *kind);
+/** @brief A texture or image the command being traced binds, saved as it is before the command. */
+void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t kind, uint32_t dim, bool image,
+                       const uint8_t view[17]);
+/** @brief After the command is recorded: submits it and writes its line and its files. */
+void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
+/** @brief The levels and layers of an image's host image (nvn_vk.c). */
+VkImageSubresourceRange nvn_vk_image_range(const vimg *v);
+
 /** @brief The linear or sRGB twin of an 8-bit color format, which a texture view may name for a render target of the other; VK_FORMAT_UNDEFINED for any other format. */
 VkFormat nvn_vk_color_twin(VkFormat f);
 /** @brief Widens n 8-bit indices to 16 bits for the host device, which has no 8-bit index type; with restart, the 8-bit restart index 0xff becomes the 16-bit one, 0xffff. */
