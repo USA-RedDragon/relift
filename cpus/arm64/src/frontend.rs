@@ -253,8 +253,15 @@ impl Frontend for Arm64 {
     }
 
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
-        matches!(code, sail::SLOW_FPCR | sail::SLOW_FLAGS)
-            .then(|| format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
+        match code {
+            sail::SLOW_FPCR | sail::SLOW_FLAGS => {
+                Some(format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
+            }
+            sail::SLOW_ALIGN => Some(format!(
+                "rl_align_fault(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"
+            )),
+            _ => None,
+        }
     }
 }
 
@@ -387,6 +394,10 @@ mod tests {
         assert_eq!(
             f.guard_slow(sail::SLOW_FPCR, 0x40, 0x1e602820).as_deref(),
             Some("rl_fp_slow(c, mem, UINT64_C(0x40), 0x1e602820u)")
+        );
+        assert_eq!(
+            f.guard_slow(sail::SLOW_ALIGN, 0x40, 0xb829_0108).as_deref(),
+            Some("rl_align_fault(c, mem, UINT64_C(0x40), 0xb8290108u)")
         );
         assert_eq!(f.guard_slow(1, 0x40, 0), None);
         assert_eq!(f.guard_flag(regs::FPCR, "r68"), "RL_FPCR_GUARD(r68)");

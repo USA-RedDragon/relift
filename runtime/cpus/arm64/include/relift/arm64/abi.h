@@ -625,6 +625,13 @@ RL_RUNTIME_API int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm);
 /** @brief UDF, HLT, an instruction relift cannot lift, or MSR to a read-only register. Reports a guest crash; always returns RL_PENDING with RL_PEND_EXIT_PROCESS. */
 RL_RUNTIME_API __attribute__((cold)) int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
 
+/**
+ * @brief The slow path of an atomic, ordered or exclusive access whose address is not naturally aligned (no FEAT_LSE2 on
+ * the guest CPU): the guest takes an alignment fault. Reports a guest crash naming the base register and its value, which is
+ * the access address for the forms without an offset; always returns RL_PENDING with RL_PEND_EXIT_PROCESS.
+ */
+RL_RUNTIME_API __attribute__((cold)) int rl_align_fault(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
+
 /** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: the guest's clock (rl_guest_clock_ns, the host's monotonic clock by default) in RL_CNTFRQ ticks. */
 RL_RUNTIME_API uint64_t rl_mrs_cntpct(rl_ctx *c);
 /** @brief MSR FPCR. Stores the value; reports in dev builds when it selects a mode the lifted code was not generated for. */

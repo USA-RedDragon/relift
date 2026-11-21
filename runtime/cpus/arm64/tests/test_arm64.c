@@ -473,3 +473,20 @@ TEST(arm64_a_fetch_from_a_non_canonical_address_is_an_instruction_abort)
     CHECK(strstr(out, "instruction abort: fetch from guest pc 0x1000000000, outside the 36-bit address space") != NULL);
     CHECK(strstr(out, "missed code") == NULL);
 }
+
+TEST(arm64_align_fault_names_the_base_register_and_pc)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    c->x[8] = 0x10966e35f1ull;
+    int fds[2];
+    static char out[32768];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_align_fault(c, rl_mem_base(), 0x8124e4c, 0xb8290108u);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK(strstr(out, "kind: alignment fault\nsummary: alignment fault: the atomic, ordered or exclusive access 0xb8290108 "
+                      "through x8 = 0x10966e35f1 is not naturally aligned, at guest pc 0x8124e4c\n") != NULL);
+}

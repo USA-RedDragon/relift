@@ -251,6 +251,7 @@ uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { m
 uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { return rl_dispatch_miss(c, mem); }
 int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm) { (void)mem; (void)imm; events |= 4; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)mem; (void)pc; (void)insn; events |= 1; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
+int rl_align_fault(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)mem; (void)pc; (void)insn; events |= 1; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
 int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)mem; (void)pc; (void)insn; events |= 2; c->pend.kind = RL_PEND_EXIT_PROCESS; return RL_PENDING; }
 uint64_t rl_mrs_cntpct(rl_ctx *c) { (void)c; events |= 8; return 0; }
 void rl_msr_fpcr(rl_ctx *c, uint64_t v) { events |= 8; c->fpcr = (uint32_t)v; }

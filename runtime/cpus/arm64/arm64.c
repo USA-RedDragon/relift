@@ -313,6 +313,22 @@ int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm)
     return rl_guest_fatal(c, "breakpoint", "breakpoint BRK #%u", imm);
 }
 
+int rl_align_fault(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
+{
+    (void)mem;
+    uint32_t rn = insn >> 5 & 31u;
+    uint64_t base = rn == 31 ? c->sp : c->x[rn];
+    char reg[8];
+    if (rn == 31)
+        snprintf(reg, sizeof reg, "sp");
+    else
+        snprintf(reg, sizeof reg, "x%u", rn);
+    return rl_guest_stop_at(c, "alignment fault", pc,
+                            "alignment fault: the atomic, ordered or exclusive access 0x%08x through %s = 0x%llx is not "
+                            "naturally aligned, at guest pc 0x%llx",
+                            insn, reg, (unsigned long long)base, (unsigned long long)pc);
+}
+
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     char kind[32];
