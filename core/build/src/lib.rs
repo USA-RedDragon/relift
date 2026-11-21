@@ -188,6 +188,22 @@ fn relative(root: &Path, dir: &Path, p: &Path) -> PathBuf {
     out
 }
 
+/// Whether a folder from `root` down to `dir` is a symbolic link, so `dir`
+/// really sits somewhere else. A folder that does not exist yet is no link.
+fn linked(root: &Path, dir: &Path) -> bool {
+    let Ok(rest) = dir.strip_prefix(root) else {
+        return false;
+    };
+    let mut at = root.to_path_buf();
+    for c in rest.components() {
+        at.push(c);
+        if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+            return true;
+        }
+    }
+    false
+}
+
 /// A flag whose value is a path: the path moved by `relative`.
 fn relative_flag(root: &Path, dir: &Path, flag: &str) -> String {
     for prefix in ["", "-I", "-L"] {
@@ -207,7 +223,16 @@ struct Paths<'a> {
     base: Option<(&'a Path, &'a Path)>,
 }
 
-impl Paths<'_> {
+impl<'a> Paths<'a> {
+    /// The paths of a plan with `root` run in `dir`. A `..` climbs the
+    /// folders `dir` really sits in, so when one between `root` and `dir` is
+    /// a symbolic link, the paths stay absolute.
+    fn new(root: Option<&'a Path>, dir: &'a Path) -> Self {
+        Paths {
+            base: root.filter(|r| !linked(r, dir)).map(|r| (r, dir)),
+        }
+    }
+
     fn path(&self, p: &Path) -> PathBuf {
         match self.base {
             Some((root, dir)) => relative(root, dir, p),
@@ -289,9 +314,7 @@ fn nasm_dir(flag: &str) -> String {
 /// response file: ninja runs each command as one `sh -c` string, which
 /// Linux caps at 128 KiB, and a game's thousands of shard objects pass it.
 pub fn ninja_file(plan: &Plan, dir: &Path) -> String {
-    let at = Paths {
-        base: plan.root.as_deref().map(|r| (r, dir)),
-    };
+    let at = Paths::new(plan.root.as_deref(), dir);
     let p = |x: &Path| at.path(x);
     let f = |x: &String| at.flag(x);
     let debug_dir = if plan.root.is_some() {
@@ -872,6 +895,30 @@ mod tests {
             relative(root, dir, Path::new("/usr/lib")),
             Path::new("/usr/lib")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_build_directory_behind_a_link_keeps_paths_outside_it_whole() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp")
+            .join(format!("relative-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("cache");
+        let real = base.join("elsewhere").join("g");
+        std::fs::create_dir_all(real.join("build/host")).unwrap();
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::create_dir_all(root.join("sdk/lib")).unwrap();
+        std::os::unix::fs::symlink(&real, root.join("projects/g")).unwrap();
+        let dir = root.join("projects/g/build/host");
+        let sdk = root.join("sdk/lib/a.c");
+        assert_eq!(Paths::new(Some(&root), &dir).path(&sdk), sdk);
+        let plain = root.join("projects/h/build/host");
+        assert_eq!(
+            Paths::new(Some(&root), &plain).path(&sdk),
+            Path::new("../../../../sdk/lib/a.c")
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
