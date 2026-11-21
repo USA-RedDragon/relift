@@ -654,7 +654,13 @@ fn compile(
         crate::build::mirror_runtime(
             &rt_real,
             &base.join("src"),
-            &["core", "cpus/sm83", "guests/gb", "host"],
+            &[
+                "core",
+                "cpus/sm83",
+                "guests/gb",
+                "host",
+                "third_party/renderdoc",
+            ],
         )?
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());

@@ -179,6 +179,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             )
         },
         s(
+            "renderdoc.capture",
+            "RenderDoc capture",
+            "<present>[:<frames>]: when the program runs under RenderDoc, capture that many frames (default 1) from the numbered guest present (counting from 1), including runs with no window. Only Vulkan work is captured. Empty: off",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "save.dir",
             "Save folder",
             "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
@@ -1040,7 +1047,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 24);
+        assert_eq!(section(Vec::new()).runtime.len(), 25);
     }
 
     #[test]

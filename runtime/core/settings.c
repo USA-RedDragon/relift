@@ -137,6 +137,15 @@ static const rl_setting_def g_runtime_defs[] = {
         .min_int = 1,
         .max_int = 8,
     },
+    {
+        .key = "renderdoc.capture",
+        .type = RL_SETTING_STRING,
+        .label = "RenderDoc capture",
+        .description = "<present>[:<frames>]: when the program runs under RenderDoc, capture that many frames "
+                       "(default 1) from the numbered guest present (counting from 1), including runs with no "
+                       "window. Only Vulkan work is captured. Empty: off",
+        .env = "RELIFT_RENDERDOC_CAPTURE",
+    },
 };
 
 static char *g_mods[RL_SETTINGS_MODS_MAX];

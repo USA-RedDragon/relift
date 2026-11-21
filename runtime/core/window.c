@@ -7,6 +7,7 @@
 #include <relift/touchpad.h>
 #include <relift/window.h>
 
+#include "capture.h"
 #include "core.h"
 #include "present.h"
 
@@ -45,14 +46,17 @@ struct rl_present *rl_window_presenter(rl_window *w)
 bool rl_window_present_rgb_shown(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height,
                                  uint32_t shown_width, uint32_t shown_height)
 {
-    if (!w || !w->b || !w->b->present_rgb)
-        return false;
-    if (!rl_window_presenter(w))
-        rgb = rl_post_apply(rgb, width, height, &width, &height);
-    w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
-    while (!w->extra && rl_touchpad_hold(16))
+    rl_capture_present_begin();
+    bool shown = w && w->b && w->b->present_rgb;
+    if (shown) {
+        if (!rl_window_presenter(w))
+            rgb = rl_post_apply(rgb, width, height, &width, &height);
         w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
-    return true;
+        while (!w->extra && rl_touchpad_hold(16))
+            w->b->present_rgb(w, rgb, width, height, shown_width, shown_height);
+    }
+    rl_capture_present_end();
+    return shown;
 }
 
 bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height)

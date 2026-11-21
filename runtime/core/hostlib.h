@@ -16,6 +16,11 @@
 
 /** @brief Opens the first library of a NULL-terminated name list that loads; NULL when none does. */
 RL_RUNTIME_API void *rl_hostlib_open(const char *const *names);
+/**
+ * @brief Finds the first library of a NULL-terminated name list that the process already has loaded, without loading
+ * one (a tool that injects itself, such as a capture layer); NULL when none is loaded.
+ */
+RL_RUNTIME_API void *rl_hostlib_loaded(const char *const *names);
 /** @brief Looks up a symbol in a library from rl_hostlib_open; NULL when absent. */
 RL_RUNTIME_API void *rl_hostlib_sym(void *lib, const char *name);
 

@@ -1,0 +1,8 @@
+Provenance of the vendored RenderDoc in-application API header (runtime/third_party/renderdoc)
+
+renderdoc_app.h is the header of RenderDoc 1.45 (https://github.com/baldurk/renderdoc,
+renderdoc/api/app/renderdoc_app.h), unchanged (SHA-256
+b7005e7dc34c3635046868bbd76d81b9b055aede0f56daa0bd39fedee0639ffb). The layer includes it for the
+types of RENDERDOC_GetAPI and the frame capture calls; nothing of RenderDoc is linked or loaded
+unless the program runs under it (core/capture.c finds RENDERDOC_GetAPI in the already loaded
+library). RenderDoc is offered under the MIT license, whose text is in LICENSE beside this file.

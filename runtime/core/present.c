@@ -9,6 +9,7 @@
  * (through a prescale image for sharp bilinear), then presents. Each swapchain image has its own
  * semaphore for the present to wait on.
  */
+#include "capture.h"
 #include "present.h"
 
 #include <relift/post.h>
@@ -958,6 +959,7 @@ void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_
 
 bool rl_present_slot_begin(rl_present *p, uint32_t w, uint32_t h, rl_present_slot *out)
 {
+    rl_capture_present_begin();
     if (!p || !w || !h)
         return false;
     pthread_mutex_lock(&p->lock);
@@ -1020,6 +1022,7 @@ void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown
     p->fresh = true;
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
+    rl_capture_present_end();
 }
 
 void rl_present_set_fit(rl_present *p, bool fit)

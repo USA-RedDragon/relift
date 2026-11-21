@@ -17,6 +17,8 @@
 
 static void *open_one(const char *name) { return (void *)LoadLibraryA(name); }
 
+static void *loaded_one(const char *name) { return (void *)GetModuleHandleA(name); }
+
 static void *sym_one(void *lib, const char *name) { return (void *)(uintptr_t)GetProcAddress((HMODULE)lib, name); }
 
 static const char *const vulkan_names[] = { "vulkan-1.dll", NULL };
@@ -24,6 +26,8 @@ static const char *const vulkan_names[] = { "vulkan-1.dll", NULL };
 #include <dlfcn.h>
 
 static void *open_one(const char *name) { return dlopen(name, RTLD_NOW | RTLD_LOCAL); }
+
+static void *loaded_one(const char *name) { return dlopen(name, RTLD_NOW | RTLD_NOLOAD); }
 
 static void *sym_one(void *lib, const char *name) { return dlsym(lib, name); }
 
@@ -38,6 +42,16 @@ void *rl_hostlib_open(const char *const *names)
 {
     for (; names && *names; names++) {
         void *lib = open_one(*names);
+        if (lib)
+            return lib;
+    }
+    return NULL;
+}
+
+void *rl_hostlib_loaded(const char *const *names)
+{
+    for (; names && *names; names++) {
+        void *lib = loaded_one(*names);
         if (lib)
             return lib;
     }

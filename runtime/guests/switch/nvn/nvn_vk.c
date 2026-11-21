@@ -25,6 +25,7 @@
 #include "nvn_watch.h"
 #include "vkdev.h"
 #include "nvn_pipe.h"
+#include "capture.h"
 #include "nvn_probe_spv.h"
 
 #include <relift/input.h>
@@ -3327,6 +3328,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     const uint8_t *px = NULL;
     uint64_t frame;
     bool capture = cropped && vkf_capture_due(&frame);
+    bool counted = false;
     if (cropped && b && b->open) {
         pthread_mutex_unlock(&g.lock);
         win = present_window(rect[2], rect[3]);
@@ -3343,6 +3345,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
             shown = false;
         } else if (shown) {
             rl_present_slot_end(pres, &slot, rect[2], rect[3]);
+            counted = true;
         }
     }
     bool pixels = capture || (cropped && win && !pres && b->present_rgb);
@@ -3391,8 +3394,14 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
                rect[2], rect[3]);
     nvn_frame_presented();
     present_rate(n + 1);
-    if (rgb)
+    if (rgb) {
         rl_window_present_rgb(win, rgb, rect[2], rect[3]);
+        counted = true;
+    }
+    if (!counted) {
+        rl_capture_present_begin();
+        rl_capture_present_end();
+    }
     nvn_core_return();
     if (n == 0)
         rl_log(RL_LOG_INFO, "nvn", "first frame on the host device: %ux%u, %s", rect[2], rect[3],
