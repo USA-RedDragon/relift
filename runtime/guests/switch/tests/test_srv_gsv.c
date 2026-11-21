@@ -620,6 +620,7 @@ TEST(gsv_video_every_submitted_frame_reaches_the_client_however_far_ahead_it_sub
         tc_put(&q, &end, 1);
         CHECK_EQ(tc_send(c, vs, q).result, 0);
     }
+    rl_gsv_video_settle();
     CHECK_EQ(g_decodes, 16);
     uint32_t frames = 0;
     bool end_seen = false;
@@ -637,6 +638,7 @@ TEST(gsv_video_every_submitted_frame_reaches_the_client_however_far_ahead_it_sub
     }
     CHECK(end_seen);
     CHECK_EQ(frames, 21);
+    rl_gsv_video_settle();
     CHECK_EQ(g_decodes, 20);
     rl_vp9_stream_backend_override(NULL);
 }

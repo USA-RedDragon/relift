@@ -10,6 +10,7 @@
 #include "services.h"
 #include "vi.h"
 
+#include <relift/settings.h>
 #include <relift/video.h>
 
 #include <pthread.h>
@@ -276,7 +277,42 @@ typedef struct video_session {
     uint8_t *scratch;
     size_t scratch_cap;
     uint32_t scratch_w, scratch_h;
+    /**
+     * @brief The session's decoder thread (see kick): it decodes and fills images while the guest runs, as the
+     * console's decoder engine does. Off in fixed-step mode, where the calls do the work themselves.
+     */
+    pthread_t worker;
+    bool worker_on, stop;
+    /** @brief Work the worker may do or is doing (set by kick, cleared by the worker once nothing is left). */
+    bool busy;
+    /** @brief worker waits on wake; GetFrame and rl_gsv_video_settle wait on idle. */
+    pthread_cond_t wake, idle;
+    /** @brief Counts flushes: a frame decoded across a flush is dropped. */
+    uint64_t epoch;
+    /** @brief Size of a frame that did not decode, reported by the session's next call; 0 when none. */
+    size_t bad;
 } video_session;
+
+static pthread_mutex_t g_busy_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_busy_cv = PTHREAD_COND_INITIALIZER;
+static uint32_t g_busy;
+
+static void busy_add(int d)
+{
+    pthread_mutex_lock(&g_busy_mu);
+    g_busy = (uint32_t)((int)g_busy + d);
+    if (!g_busy)
+        pthread_cond_broadcast(&g_busy_cv);
+    pthread_mutex_unlock(&g_busy_mu);
+}
+
+void rl_gsv_video_settle(void)
+{
+    pthread_mutex_lock(&g_busy_mu);
+    while (g_busy)
+        pthread_cond_wait(&g_busy_cv, &g_busy_mu);
+    pthread_mutex_unlock(&g_busy_mu);
+}
 
 static void frame_free(frame *f)
 {
@@ -287,6 +323,15 @@ static void frame_free(frame *f)
 static void video_destroy(void *state)
 {
     video_session *v = state;
+    if (v->worker_on) {
+        pthread_mutex_lock(&v->mu);
+        v->stop = true;
+        pthread_cond_signal(&v->wake);
+        pthread_mutex_unlock(&v->mu);
+        pthread_join(v->worker, NULL);
+    }
+    if (v->busy)
+        busy_add(-1);
     if (v->input_event)
         hos_kobj_unref(&v->input_event->obj);
     for (uint32_t i = 0; i < v->npending; i++)
@@ -298,6 +343,8 @@ static void video_destroy(void *state)
     if (v->dec)
         v->vp9 ? v->vp9->close(v->dec) : v->av1->close(v->dec);
     rl_gsv_counter_free(v->counter);
+    pthread_cond_destroy(&v->wake);
+    pthread_cond_destroy(&v->idle);
     pthread_mutex_destroy(&v->mu);
     free(v);
 }
@@ -310,6 +357,8 @@ static video_session *video_new(void)
     if (!v)
         return NULL;
     pthread_mutex_init(&v->mu, NULL);
+    pthread_cond_init(&v->wake, NULL);
+    pthread_cond_init(&v->idle, NULL);
     v->counter = rl_gsv_counter_new();
     return v;
 }
@@ -653,93 +702,156 @@ rl_result rl_gsv_native_image_unmap(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
-/** @brief Moves decoded frames into the registered images in order and signals each image's counter value. mu held. */
-static void fill_images(video_session *v)
+/** @brief Copies a decoded picture into a frame of its own (NV12, tightly packed); false when out of memory. */
+static bool frame_from(frame *f, const rl_vp9_image *im, uint64_t pts, bool end)
 {
-    while (v->npending && v->nfree) {
+    memset(f, 0, sizeof *f);
+    f->pts = pts;
+    f->end = end;
+    if (!im)
+        return true;
+    f->width = im->width;
+    f->height = im->height;
+    size_t luma = (size_t)im->width * im->height, cw = (im->width + 1) / 2, ch = (im->height + 1) / 2;
+    f->data = malloc(luma + cw * ch * 2);
+    if (!f->data)
+        return false;
+    for (uint32_t y = 0; y < im->height; y++)
+        memcpy(f->data + (size_t)y * im->width, im->y + (size_t)y * im->y_stride, im->width);
+    uint8_t *uv = f->data + luma;
+    for (size_t y = 0; y < ch; y++)
+        for (size_t x = 0; x < cw; x++) {
+            uv[(y * cw + x) * 2] = im->u[y * im->uv_stride + x];
+            uv[(y * cw + x) * 2 + 1] = im->v[y * im->uv_stride + x];
+        }
+    return true;
+}
+
+/** @brief Adds a frame to the decoded ring; dropped when the ring is full (the end marker has a slot of its own). mu held. */
+static void queue_frame(video_session *v, frame *f)
+{
+    if (v->npending >= RING + (f->end ? 1u : 0u)) {
+        frame_free(f);
+        return;
+    }
+    v->pending[v->npending++] = *f;
+}
+
+/** @brief Whether a step of the decoder can run: a decoded frame and a free image, or a submitted frame and room in the decoded ring. mu held. */
+static bool can_step(const video_session *v)
+{
+    return !v->bad && ((v->npending && v->nfree) || (v->head < v->ninputs && v->npending < RING));
+}
+
+/**
+ * @brief One step of the decoder, mu held on entry and return and let go around the decode and the image write:
+ * the oldest decoded frame goes into the oldest free image, whose counter value is then signaled, or, with no such
+ * pair, the oldest submitted frame is decoded into the decoded ring. Only one thread steps a session at a time.
+ */
+static void step(video_session *v)
+{
+    if (v->npending && v->nfree) {
         frame f = v->pending[0];
         memmove(&v->pending[0], &v->pending[1], (v->npending - 1) * sizeof v->pending[0]);
         v->npending--;
         handed h = v->free[0];
         memmove(&v->free[0], &v->free[1], (v->nfree - 1) * sizeof v->free[0]);
         v->nfree--;
+        pthread_mutex_unlock(&v->mu);
         int64_t t0 = vi_trace_now();
         if (!f.end)
             put_frame(v, h.image, &f);
         if (t0)
             vi_trace('W', (uint64_t)(vi_trace_now() - t0), h.image, f.pts);
         frame_free(&f);
+        pthread_mutex_lock(&v->mu);
         if (v->ndone < RING)
             v->done[v->ndone++] = (finished){ h.image, f.width, f.height, f.pts, f.end };
         rl_gsv_counter_signal(v->counter, h.value);
+        pthread_cond_broadcast(&v->idle);
+        return;
     }
+    input in = v->inputs[v->head++];
+    if (v->head == v->ninputs)
+        v->head = v->ninputs = 0;
+    uint64_t epoch = v->epoch;
+    pthread_mutex_unlock(&v->mu);
+    int shown = 0;
+    rl_vp9_image im;
+    int64_t t0 = vi_trace_now();
+    if (in.size)
+        shown = v->vp9 ? v->vp9->decode(v->dec, in.data, in.size, &im) : v->av1->decode(v->dec, in.data, in.size, &im);
+    if (t0)
+        vi_trace('D', (uint64_t)(vi_trace_now() - t0), in.size, (uint64_t)shown);
+    frame pic = { 0 }, end = { 0 };
+    bool have = shown > 0 && frame_from(&pic, &im, in.pts, false);
+    if (in.end)
+        frame_from(&end, NULL, in.pts, true);
+    free(in.data);
+    pthread_mutex_lock(&v->mu);
+    if (shown < 0) {
+        v->bad = in.size;
+        return;
+    }
+    if (epoch != v->epoch) {
+        frame_free(&pic);
+        return;
+    }
+    if (have)
+        queue_frame(v, &pic);
+    if (in.end)
+        queue_frame(v, &end);
 }
 
-static void queue_frame(video_session *v, const rl_vp9_image *im, uint64_t pts, bool end)
+static void *video_worker(void *arg)
 {
-    if (v->npending >= RING + (end ? 1u : 0u))
-        return;
-    frame *f = &v->pending[v->npending];
-    memset(f, 0, sizeof *f);
-    f->pts = pts;
-    f->end = end;
-    if (im) {
-        f->width = im->width;
-        f->height = im->height;
-        size_t luma = (size_t)im->width * im->height, cw = (im->width + 1) / 2, ch = (im->height + 1) / 2;
-        f->data = malloc(luma + cw * ch * 2);
-        if (!f->data)
-            return;
-        for (uint32_t y = 0; y < im->height; y++)
-            memcpy(f->data + (size_t)y * im->width, im->y + (size_t)y * im->y_stride, im->width);
-        uint8_t *uv = f->data + luma;
-        for (size_t y = 0; y < ch; y++)
-            for (size_t x = 0; x < cw; x++) {
-                uv[(y * cw + x) * 2] = im->u[y * im->uv_stride + x];
-                uv[(y * cw + x) * 2 + 1] = im->v[y * im->uv_stride + x];
-            }
+    video_session *v = arg;
+    pthread_mutex_lock(&v->mu);
+    while (!v->stop) {
+        if (can_step(v)) {
+            step(v);
+            continue;
+        }
+        if (v->busy) {
+            v->busy = false;
+            busy_add(-1);
+            pthread_cond_broadcast(&v->idle);
+        }
+        pthread_cond_wait(&v->wake, &v->mu);
     }
-    v->npending++;
+    pthread_mutex_unlock(&v->mu);
+    return NULL;
 }
 
 /**
- * @brief Decodes submitted frames while the decoded ring has room and moves decoded frames into free images. False
- * when a frame does not decode, with its size in bad. mu held.
+ * @brief Lets the decoder go on after a submit or an image handed back: the session's worker thread wakes (started
+ * the first time), or in fixed-step mode the steps run here, so the guest's clock alone orders them. False when a
+ * frame did not decode, with its size in bad. mu held.
  */
-static bool pump(video_session *v, size_t *bad)
+static bool kick(video_session *v, size_t *bad)
 {
-    for (;;) {
-        fill_images(v);
-        if (v->head == v->ninputs || v->npending >= RING) {
-            if (v->head == v->ninputs)
-                v->head = v->ninputs = 0;
-            return true;
+    static int async = -1;
+    if (async < 0)
+        async = !rl_setting_bool("clock.fixed_step");
+    if (!async || (!v->worker_on && pthread_create(&v->worker, NULL, video_worker, v) != 0)) {
+        while (can_step(v))
+            step(v);
+    } else {
+        v->worker_on = true;
+        if (can_step(v) && !v->busy) {
+            v->busy = true;
+            busy_add(1);
         }
-        input in = v->inputs[v->head++];
-        int shown = 0;
-        rl_vp9_image im;
-        int64_t t0 = vi_trace_now();
-        if (in.size)
-            shown = v->vp9 ? v->vp9->decode(v->dec, in.data, in.size, &im)
-                           : v->av1->decode(v->dec, in.data, in.size, &im);
-        if (t0)
-            vi_trace('D', (uint64_t)(vi_trace_now() - t0), in.size, (uint64_t)shown);
-        free(in.data);
-        if (shown < 0) {
-            *bad = in.size;
-            return false;
-        }
-        if (shown)
-            queue_frame(v, &im, in.pts, false);
-        if (in.end)
-            queue_frame(v, NULL, in.pts, true);
+        pthread_cond_signal(&v->wake);
     }
+    *bad = v->bad;
+    return !v->bad;
 }
 
 /**
  * @brief Commands 109 and 400 (submit input): the compressed frame in the first send buffer (400 adds a second
  * buffer with a frame information block, which is not needed), a u64 presentation time in microseconds and a u8
- * end-of-stream flag; a u64 submission id. The frame is kept and decoded once the decoded ring has room (pump).
+ * end-of-stream flag; a u64 submission id. The frame is kept and decoded once the decoded ring has room (kick).
  */
 static rl_result video_submit(rl_ipc_req *r)
 {
@@ -779,7 +891,7 @@ static rl_result video_submit(rl_ipc_req *r)
         } else {
             rl_ipc_buf_read(&r->a[0], data, r->a[0].size);
             v->inputs[v->ninputs++] = (input){ data, r->a[0].size, in.pts, in.end != 0 };
-            if (!pump(v, &bad)) {
+            if (!kick(v, &bad)) {
                 rl_ipc_stop(r, "gsv", "video decoder: a %llu byte frame did not decode", (unsigned long long)bad);
                 rc = KR_NOT_IMPLEMENTED;
             } else {
@@ -794,7 +906,7 @@ static rl_result video_submit(rl_ipc_req *r)
     return rc;
 }
 
-/** @brief Hands an output image to the stream: queues it for the next frame, writes its counter value and decodes what now fits; false as pump. mu held. */
+/** @brief Hands an output image to the stream: queues it for the next frame, writes its counter value and lets the decoder go on; false as kick. mu held. */
 static bool hand_out(video_session *v, uint32_t image, uint8_t *out16, size_t *bad)
 {
     uint64_t value = ++v->handed_total;
@@ -804,7 +916,7 @@ static bool hand_out(video_session *v, uint32_t image, uint8_t *out16, size_t *b
     memset(out16, 0, 16);
     memcpy(out16, &counter, 4);
     memcpy(out16 + 8, &value, 8);
-    return pump(v, bad);
+    return kick(v, bad);
 }
 
 /** @brief Command 311 (register an output image): a u32 image id; its NativeSyncHandle, signaled once a frame is in the image. */
@@ -878,12 +990,15 @@ static rl_result video_unregister(rl_ipc_req *r)
 /**
  * @brief Command 213 (get the next finished frame): 64 bytes: u32 image id, width, height, width, height, a u32
  * zero, a u64 presentation time in nanoseconds and a u32 end-of-stream flag. With nothing finished, the result the
- * client's own acquire uses for an empty ring (inferred: Eglantine).
+ * client's own acquire uses for an empty ring (inferred: Eglantine). While the worker still has a frame it can put
+ * into an image, the call waits for it, so the answer is the one the frames submitted so far give.
  */
 static rl_result video_get_frame(rl_ipc_req *r)
 {
     video_session *v = r->self->state;
     pthread_mutex_lock(&v->mu);
+    while (!v->ndone && v->busy)
+        pthread_cond_wait(&v->idle, &v->mu);
     if (!v->ndone) {
         pthread_mutex_unlock(&v->mu);
         return RESULT_NO_FRAME;
@@ -918,6 +1033,7 @@ static rl_result video_flush(rl_ipc_req *r)
     for (size_t i = v->head; i < v->ninputs; i++)
         free(v->inputs[i].data);
     v->head = v->ninputs = 0;
+    v->epoch++;
     pthread_mutex_unlock(&v->mu);
     return KR_SUCCESS;
 }

@@ -74,6 +74,8 @@ rl_result rl_gsv_native_image_query(rl_ipc_req *r);
 rl_result rl_gsv_native_image_unmap(rl_ipc_req *r);
 /** @brief The guest memory of a decoder native image (address and size), marking it as read by the GPU; false when it is unknown or not bound to memory. */
 bool rl_gsv_native_image_region(uint32_t handle, uint64_t *addr, uint64_t *size);
+/** @brief Waits until no video decoder session has work its decoder thread could still do (for tests). */
+void rl_gsv_video_settle(void);
 rl_result rl_gsv_decoder_image_free(rl_ipc_req *r);
 /** @brief One decoded pixel as 8-bit RGBA, or BGRA when bgra (BT.709, limited range). */
 void rl_gsv_yuv_to_rgba(uint8_t y, uint8_t u, uint8_t v, bool bgra, uint8_t out[4]);
