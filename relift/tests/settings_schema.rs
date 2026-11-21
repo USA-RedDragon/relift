@@ -139,6 +139,8 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "picture.filter"
                 | "picture.upscaler"
                 | "picture.upscale_scale"
+                | "renderdoc.capture"
+                | "renderdoc.capture_dir"
         )
     });
     rust.extend(gb_settings());
