@@ -62,9 +62,11 @@ impl Features {
     /// The Cortex-A78C (the Nintendo Switch 2 CPU), from its ID registers
     /// (Technical Reference Manual r0p2): Armv8.2-A with the Cryptographic
     /// Extension, CRC32, LSE, RDM, FP16, DotProd, FlagM, LRCPC2, DPB, RAS,
-    /// LOR, SSBS, CSV2 and CSV3, and pointer authentication with QARMA5 and
-    /// PAuth2 but without EPAC, FPAC or BTI (`ID_AA64ISAR1_EL1.APA` 3,
-    /// `GPA` 1).
+    /// LOR, SSBS, CSV2 and CSV3, LSE2 (`ID_AA64MMFR2_EL1.AT` 1, one of the
+    /// Armv8.4-A features the core has: an unaligned atomic or ordered
+    /// access inside one 16-byte granule does not fault), and pointer
+    /// authentication with QARMA5 and PAuth2 but without EPAC, FPAC or BTI
+    /// (`ID_AA64ISAR1_EL1.APA` 3, `GPA` 1).
     pub const CORTEX_A78C: Features = Features::CORTEX_A57
         .with(Feature::LSE)
         .with(Feature::RDM)
@@ -81,7 +83,8 @@ impl Features {
         .with(Feature::CSV3)
         .with(Feature::PAuth)
         .with(Feature::PAuth2)
-        .with(Feature::PACQARMA5);
+        .with(Feature::PACQARMA5)
+        .with(Feature::LSE2);
 
     /// Every feature the specification names; what [`super::decode`] uses.
     pub const ALL: Features = {

@@ -177,6 +177,43 @@ fn exclusive_pair_of_64_bit_registers() {
     assert_eq!(x(&s, 3), 7);
 }
 
+/// Runs `word` lifted for `cpu` with x1 = `addr`, x2 = 1; returns the
+/// block's flow and x3.
+fn at(word: u32, cpu: &Cpu, addr: u64) -> (Flow, u64) {
+    let mut s = state();
+    let mut m = mem();
+    setx(&mut s, 1, addr);
+    setx(&mut s, 2, 1);
+    setx(&mut s, 3, 7);
+    let b = lift(word, PC, cpu).expect("lifts");
+    let o = interp::run(&b, &mut s, &mut m, &mut NoIntrinsics).expect("runs");
+    (o.flow, x(&s, 3))
+}
+
+#[test]
+fn the_cortex_a78c_runs_unaligned_atomics_inside_a_16_byte_granule() {
+    let a78c = Cpu::new(Features::CORTEX_A78C, Va::BITS39);
+    let a57 = Cpu::new(Features::CORTEX_A57, Va::BITS39);
+    let ldadd = 0xb822_0023;
+    let ldar = 0x88df_fc23;
+    let ldxr = 0x885f_7c23;
+    let fault = Flow::Trap(sail::SLOW_ALIGN);
+    let (flow, old) = at(ldadd, &a78c, 0x1_0121);
+    assert_ne!(flow, fault);
+    assert_eq!(old, 0x2423_2221);
+    assert_ne!(at(ldadd, &a78c, 0x1_012c).0, fault);
+    assert_eq!(at(ldadd, &a78c, 0x1_012d).0, fault);
+    let (flow, v) = at(ldar, &a78c, 0x1_0125);
+    assert_ne!(flow, fault);
+    assert_eq!(v, 0x2827_2625);
+    assert_eq!(at(ldar, &a78c, 0x1_013e).0, fault);
+    assert_eq!(at(ldxr, &a78c, 0x1_0121).0, fault);
+    let (flow, v) = at(ldar, &a57, 0x1_0124);
+    assert_ne!(flow, fault);
+    assert_eq!(v, 0x2726_2524);
+    assert_eq!(at(ldar, &a57, 0x1_0125).0, fault);
+}
+
 #[test]
 fn unpredictable_and_unallocated_words_are_refused() {
     let ldr_post_same = 0xf840_0400 | (1 << 5) | 1;
