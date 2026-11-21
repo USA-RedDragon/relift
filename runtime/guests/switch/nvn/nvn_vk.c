@@ -1259,14 +1259,21 @@ static const void *plain_usage(const vimg *v, VkImageViewUsageCreateInfo *u)
 
 /**
  * @brief Whether textures a and b on the same storage lay their common rows
- * out alike: single-level 2D textures of one format, width and block
- * height, differing only in height (a render target and a smaller texture
- * over its first rows, as a shadow atlas and one of its pages). Such
- * textures get one host image each, kept in step by copies (sync_alias).
+ * out alike: single-level 2D textures of one width, row pitch, block height
+ * and sample count, with one texel size and no blocks, differing only in
+ * height and format (a render target and a smaller texture over its first
+ * rows, as a shadow atlas and one of its pages, or a target read through a
+ * format of the same texel size). An image copy of the common rows then
+ * moves every byte where the guest's layout has it (sync_alias).
  */
 static bool same_rows(const nvn_tex_desc *a, const nvn_tex_desc *b)
 {
-    return a->format == b->format && a->width == b->width && a->target == 1 && b->target == 1 &&
+    uint32_t abpb, abw, abh, bbpb, bbw, bbh;
+    if (a->format != b->format &&
+        (!nvn_tex_format(a->format, &abpb, &abw, &abh) || !nvn_tex_format(b->format, &bbpb, &bbw, &bbh) ||
+         abpb != bbpb || abw != 1 || abh != 1 || bbw != 1 || bbh != 1))
+        return false;
+    return a->width == b->width && a->target == 1 && b->target == 1 &&
            (a->levels ? a->levels : 1) == 1 && (b->levels ? b->levels : 1) == 1 && a->samples == b->samples &&
            a->block_h == b->block_h && a->stride == b->stride;
 }
@@ -1331,6 +1338,19 @@ static bool write_back(replay *r, vimg *u)
 }
 
 /**
+ * @brief Whether an image copy between u and v moves their bytes unchanged: one guest format, or color images both
+ * kept in the host format that has their guest texels' bytes (not a substitute), whose sizes then agree.
+ */
+static bool copy_keeps_bytes(const vimg *u, const vimg *v)
+{
+    if (u->d.format == v->d.format)
+        return true;
+    VkImageAspectFlags a;
+    return u->aspect == VK_IMAGE_ASPECT_COLOR_BIT && v->aspect == VK_IMAGE_ASPECT_COLOR_BIT &&
+           u->format == nvn_vk_format(u->d.format, &a) && v->format == nvn_vk_format(v->d.format, &a);
+}
+
+/**
  * @brief Brings v up to date with the images over its storage that the
  * GPU wrote after v last took their bytes, oldest first: one of the same rows (see
  * same_rows) by an image copy, any other through its guest storage (it is
@@ -1348,7 +1368,7 @@ static vimg *sync_alias(replay *r, vimg *v)
         }
         if (!src)
             return v;
-        if (src->storage == v->storage && same_rows(&src->d, &v->d)) {
+        if (src->storage == v->storage && same_rows(&src->d, &v->d) && copy_keeps_bytes(src, v)) {
             uint32_t h = src->d.height < v->d.height ? src->d.height : v->d.height;
             nvn_vk_begin(r);
             nvn_vk_barrier(g.cb);
