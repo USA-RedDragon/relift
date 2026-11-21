@@ -133,12 +133,12 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_KHR_cooperative_matrix",
                                            "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex",
                                            "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library",
-                                           "VK_EXT_mesh_shader" };
+                                           "VK_EXT_mesh_shader",                 "VK_EXT_device_fault" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -177,9 +177,11 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.provoking = (ext_features){ .sType = STYPE_PROVOKING_VERTEX };
     feat.gpl = (ext_features){ .sType = STYPE_PIPELINE_LIBRARY };
     feat.mesh = (ext_features){ .sType = STYPE_MESH_SHADER };
+    feat.fault = (ext_features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
                                                &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
-                                               &feat.provoking,    NULL,        &feat.gpl,          &feat.mesh };
+                                               &feat.provoking,    NULL,        &feat.gpl,          &feat.mesh,
+                                               &feat.fault };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -188,7 +190,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
     rob2_on = false;
-    bool provoking_on = false, gpl_on = false, mesh_on = false;
+    bool provoking_on = false, gpl_on = false, mesh_on = false, fault_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
@@ -202,6 +204,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 provoking_on |= feats[k] == &feat.provoking;
                 gpl_on |= feats[k] == &feat.gpl;
                 mesh_on |= feats[k] == &feat.mesh;
+                fault_on |= feats[k] == &feat.fault;
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)
@@ -245,6 +248,8 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     }
     g.mesh_shader = mesh_on && feat.mesh.b[0] && feat.mesh.b[1];
     feat.mesh.b[2] = feat.mesh.b[3] = feat.mesh.b[4] = VK_FALSE;
+    g.device_fault = fault_on && feat.fault.b[0];
+    feat.fault.b[1] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
@@ -1140,6 +1145,47 @@ bool nvn_vk_begin(replay *r)
     return true;
 }
 
+/**
+ * @brief Logs what VK_EXT_device_fault tells about the lost device, once per process: its description, each faulting
+ * address with what of the layer's pools held it (live, freed, or the nearest), and the vendor records.
+ */
+static void fault_report(void)
+{
+    static int done;
+    if (!g.device_fault || __atomic_exchange_n(&done, 1, __ATOMIC_RELAXED))
+        return;
+    VkDeviceFaultCountsEXT n = { .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
+    if (VK(vkGetDeviceFaultInfoEXT)(g.dev, &n, NULL) < 0) {
+        rl_log(RL_LOG_ERROR, "nvn", "device fault: the host gives no fault information");
+        return;
+    }
+    VkDeviceFaultAddressInfoEXT *a = calloc(n.addressInfoCount + 1, sizeof *a);
+    VkDeviceFaultVendorInfoEXT *v = calloc(n.vendorInfoCount + 1, sizeof *v);
+    if (!a || !v) {
+        free(a);
+        free(v);
+        return;
+    }
+    VkDeviceFaultInfoEXT info = { .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT, .pAddressInfos = a, .pVendorInfos = v };
+    n.vendorBinarySize = 0;
+    if (VK(vkGetDeviceFaultInfoEXT)(g.dev, &n, &info) >= 0) {
+        rl_log(RL_LOG_ERROR, "nvn", "device fault: %s (%u addresses, %u vendor records)", info.description,
+               n.addressInfoCount, n.vendorInfoCount);
+        for (uint32_t i = 0; i < n.addressInfoCount; i++) {
+            char where[512];
+            nvn_gpu_describe(a[i].reportedAddress, where, sizeof where);
+            rl_log(RL_LOG_ERROR, "nvn", "device fault address: type %d, 0x%llx (precision 0x%llx): %s",
+                   (int)a[i].addressType, (unsigned long long)a[i].reportedAddress,
+                   (unsigned long long)a[i].addressPrecision, where);
+        }
+        for (uint32_t i = 0; i < n.vendorInfoCount; i++)
+            rl_log(RL_LOG_ERROR, "nvn", "device fault vendor record: %s (code 0x%llx, data 0x%llx)", v[i].description,
+                   (unsigned long long)v[i].vendorFaultCode, (unsigned long long)v[i].vendorFaultData);
+    }
+    free(a);
+    free(v);
+}
+
 /** @brief Submits what r recorded and waits for it. */
 bool nvn_vk_flush(replay *r)
 {
@@ -1163,6 +1209,8 @@ bool nvn_vk_flush(replay *r)
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS ||
         (vr = guest_submit(&si)) != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
+        if (vr == VK_ERROR_DEVICE_LOST)
+            fault_report();
         return false;
     }
     int64_t t1 = now_ns();
@@ -1179,6 +1227,8 @@ bool nvn_vk_flush(replay *r)
         tm.gpu_ns += (uint64_t)((double)(ts[1] - ts[0]) * gpu_ts.period_ns);
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
+    if (vr == VK_ERROR_DEVICE_LOST)
+        fault_report();
     g.arena_used = 0;
     g.uniform_pending = false;
     g.flushes++;

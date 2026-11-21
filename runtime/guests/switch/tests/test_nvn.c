@@ -1423,3 +1423,25 @@ TEST(nvn_a_replaced_object_is_never_missing_from_a_lookup)
     CHECK_EQ(missing, 0u);
     nvn_obj_free(nvn_obj_get(h.base, 0));
 }
+
+TEST(nvn_gpu_describe_names_the_live_and_the_freed_pool_that_held_an_address)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t pool = heap, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(pool, storage, 0x40000, 0x18c));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    if (gpu == storage)
+        return;
+    char where[512];
+    nvn_gpu_describe(gpu + 0x20, where, sizeof where);
+    CHECK(strstr(where, "in pool span") != NULL);
+    CHECK(strstr(where, "offset 0x20") != NULL);
+    nvn_gpu_describe(gpu + 0x40010, where, sizeof where);
+    CHECK(strstr(where, "0x10 past the span") != NULL);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    nvn_gpu_describe(gpu + 0x20, where, sizeof where);
+    CHECK(strstr(where, "in pool span") == NULL);
+    CHECK(strstr(where, "in FREED pool span") != NULL);
+    CHECK(strstr(where, "0 frees ago") != NULL);
+}

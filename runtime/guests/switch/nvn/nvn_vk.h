@@ -157,6 +157,8 @@ typedef struct nvn_vkdev {
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_mesh_shader is on with task and mesh shaders: the native back end of task and mesh programs runs. */
     bool mesh_shader;
+    /** @brief VK_EXT_device_fault's deviceFault is on: a lost device reports what faulted. */
+    bool device_fault;
     /** @brief maxStorageBufferRange and maxDrawIndexedIndexValue of the device. */
     uint32_t max_storage_range, max_index_value;
     /** @brief vkCmdDrawMeshTasksEXT (loaded with the device when the extension is on). */

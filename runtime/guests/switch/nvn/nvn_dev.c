@@ -15,6 +15,7 @@
 
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 /**
@@ -151,12 +152,18 @@ static const nvn_import *retired_of(uint64_t memory, uint64_t size, nvn_import *
     return found;
 }
 
+/** @brief The spans of the imports the layer freed, newest last: what a device fault at an address no pool holds names. */
+#define FREED_MAX 256
+static struct pool_span g_freed[FREED_MAX];
+static uint32_t g_freed_n;
+
 /** @brief Drops the span of the import whose buffer is buf (spans of two imports may start at one address). */
 static void pools_remove(void *buf)
 {
     pthread_rwlock_wrlock(&g_pools.lock);
     for (uint32_t i = 0; i < g_pools.n; i++)
         if (g_pools.v[i].buf == buf) {
+            g_freed[g_freed_n++ % FREED_MAX] = g_pools.v[i];
             memmove(&g_pools.v[i], &g_pools.v[i + 1], (g_pools.n - i - 1) * sizeof *g_pools.v);
             g_pools.n--;
             break;
@@ -183,6 +190,48 @@ uint64_t nvn_gpu_guest(uint64_t gpu)
         }
     pthread_rwlock_unlock(&g_pools.lock);
     return out;
+}
+
+size_t nvn_gpu_describe(uint64_t gpu, char *out, size_t n)
+{
+    size_t w = 0;
+    pthread_rwlock_rdlock(&g_pools.lock);
+    const struct pool_span *below = NULL, *above = NULL;
+    for (uint32_t i = 0; i < g_pools.n; i++) {
+        const struct pool_span *p = &g_pools.v[i];
+        if (gpu >= p->gpu && gpu - p->gpu < p->size)
+            w += (size_t)snprintf(out + w, w < n ? n - w : 0,
+                                  "in pool span 0x%llx+0x%llx (guest 0x%llx, offset 0x%llx); ",
+                                  (unsigned long long)p->gpu, (unsigned long long)p->size,
+                                  (unsigned long long)p->memory, (unsigned long long)(gpu - p->gpu));
+        else if (p->gpu + p->size <= gpu && (!below || p->gpu + p->size > below->gpu + below->size))
+            below = p;
+        else if (p->gpu > gpu && (!above || p->gpu < above->gpu))
+            above = p;
+    }
+    uint32_t have = g_freed_n < FREED_MAX ? g_freed_n : FREED_MAX;
+    for (uint32_t k = 0; k < have; k++) {
+        const struct pool_span *f = &g_freed[(g_freed_n - 1 - k) % FREED_MAX];
+        if (gpu >= f->gpu && gpu - f->gpu < f->size)
+            w += (size_t)snprintf(out + w, w < n ? n - w : 0,
+                                  "in FREED pool span 0x%llx+0x%llx (guest 0x%llx, offset 0x%llx, %u frees ago); ",
+                                  (unsigned long long)f->gpu, (unsigned long long)f->size,
+                                  (unsigned long long)f->memory, (unsigned long long)(gpu - f->gpu), k);
+    }
+    if (!w) {
+        if (below)
+            w += (size_t)snprintf(out + w, w < n ? n - w : 0, "0x%llx past the span 0x%llx+0x%llx below; ",
+                                  (unsigned long long)(gpu - below->gpu - below->size),
+                                  (unsigned long long)below->gpu, (unsigned long long)below->size);
+        if (above)
+            w += (size_t)snprintf(out + w, w < n ? n - w : 0, "0x%llx before the span 0x%llx+0x%llx above; ",
+                                  (unsigned long long)(above->gpu - gpu), (unsigned long long)above->gpu,
+                                  (unsigned long long)above->size);
+        if (!w)
+            w += (size_t)snprintf(out, n, "no pool span; ");
+    }
+    pthread_rwlock_unlock(&g_pools.lock);
+    return w;
 }
 
 bool nvn_gpu_mapped(uint64_t gpu, uint64_t size)
