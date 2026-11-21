@@ -377,6 +377,14 @@ bool nvn_vk_begin(replay *r);
  * before recording (that counts as a submit for nvn_vk_stage).
  */
 bool nvn_vk_flush(replay *r);
+/**
+ * @brief Submits what r recorded without waiting for it: the host device runs it while the guest goes on, and the
+ * next use of the layer's device state (nvn_lock, nvn_vk_begin, nvn_vk_flush) waits for it first. With nothing
+ * recorded, as nvn_vk_flush.
+ */
+bool nvn_vk_submit(replay *r);
+/** @brief Waits for the batch nvn_vk_submit left running, if any; false on a device failure. */
+bool nvn_vk_settle(void);
 /** @brief Whether nvn_untile_move can move v's bytes on the GPU (nvn_untile.c). */
 bool nvn_untile_can(const vimg *v);
 /**

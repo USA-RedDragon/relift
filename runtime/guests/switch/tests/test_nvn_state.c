@@ -295,6 +295,7 @@ TEST(nvn_update_uniform_buffer_in_a_pool_lands_in_the_order_the_commands_run)
     CHECK_EQ(s->n, 3);
     memset(t_mem() + mem, 0, 0x1000);
     CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x800, s), RL_OK);
+    CHECK(nvn_vk_settle());
     for (unsigned i = 0; i < 16; i++) {
         CHECK_EQ(t_mem()[mem + 0x200 + i], 0x10 + i);
         CHECK_EQ(t_mem()[mem + 0x100 + i], 0x40 + i);

@@ -277,7 +277,9 @@ typedef struct nvn_buffer {
 
 typedef struct nvn_sync {
     nvn_obj o;
+    /** @brief The sync was fenced; it is signaled once the host device finished batch seq (nvn_vk_submitted). */
     bool signaled;
+    uint64_t seq;
 } nvn_sync;
 
 static void trace(const char *fmt, ...) RL_PRINTF(1, 2);
@@ -613,10 +615,12 @@ uint64_t nvnh_nvnQueueFlush(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnQueueFinish(NVNqueue *). */
+/** @brief nvnQueueFinish(NVNqueue *): returns once the host device finished every submit. */
 uint64_t nvnh_nvnQueueFinish(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
+    nvn_lock();
+    nvn_unlock();
     return nvn_ret(c);
 }
 
@@ -639,7 +643,7 @@ uint64_t nvnh_nvnQueueSubmitCommands(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnQueueFenceSync(NVNqueue *, NVNsync *, NVNsyncCondition, int flags): work runs at submit, so the sync is signaled now. */
+/** @brief nvnQueueFenceSync(NVNqueue *, NVNsync *, NVNsyncCondition, int flags): signaled once the work submitted so far finished. */
 uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
@@ -647,6 +651,7 @@ uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
     if (!s)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueueFenceSync with 0x%llx, not a sync",
                                         (unsigned long long)c->x[1]);
+    s->seq = nvn_vk_submitted();
     s->signaled = true;
     return nvn_ret(c);
 }
@@ -1153,18 +1158,34 @@ uint64_t nvnh_nvnSyncFinalize(rl_ctx *c, uint8_t *mem)
 void nvn_sync_signal(uint64_t sync)
 {
     nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
-    if (s)
+    if (s) {
+        s->seq = nvn_vk_submitted();
         s->signaled = true;
+    }
 }
 
 /** @brief NVNsyncWaitResult values. */
 enum { SYNC_ALREADY_SIGNALED = 0, SYNC_CONDITION_SATISFIED = 1, SYNC_TIMEOUT_EXPIRED = 2, SYNC_FAILED = 3 };
 
-/** @brief nvnSyncWait(const NVNsync *, uint64_t timeout_ns): NVNsyncWaitResult. */
+/**
+ * @brief nvnSyncWait(const NVNsync *, uint64_t timeout_ns): NVNsyncWaitResult. A fenced sync whose work the host
+ * device is still running is waited for (the batch in flight is the only one, so the wait is short and the timeout
+ * does not cut it).
+ */
 uint64_t nvnh_nvnSyncWait(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_sync *s = (nvn_sync *)nvn_obj_get(c->x[0], NVN_SYNC);
-    c->x[0] = !s ? SYNC_FAILED : s->signaled ? SYNC_ALREADY_SIGNALED : SYNC_TIMEOUT_EXPIRED;
+    uint64_t rc = SYNC_FAILED;
+    if (s && !s->signaled) {
+        rc = SYNC_TIMEOUT_EXPIRED;
+    } else if (s && s->seq <= nvn_vk_finished()) {
+        rc = SYNC_ALREADY_SIGNALED;
+    } else if (s) {
+        nvn_lock();
+        nvn_unlock();
+        rc = SYNC_CONDITION_SATISFIED;
+    }
+    c->x[0] = rc;
     return nvn_ret(c);
 }

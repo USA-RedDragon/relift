@@ -119,6 +119,15 @@ void nvn_cmdset_free(uint64_t handle);
 
 /** @brief Marks the sync at guest address sync signaled; 0 does nothing. */
 void nvn_sync_signal(uint64_t sync);
+/** @brief Batches submitted to the host device so far, and the count of them known finished (nvn_vk.c). */
+uint64_t nvn_vk_submitted(void);
+uint64_t nvn_vk_finished(void);
+/**
+ * @brief Checks that a submit runs while the caller goes on: a long batch that ends by writing a buffer is submitted
+ * with nvn_vk_submit, which must return before the device finished it, and after nvn_vk_settle the CPU must read
+ * what the batch wrote. 0 when both hold, the failing step's number otherwise, -1 with no device.
+ */
+int nvn_vk_async_check(void);
 /**
  * @brief Shows the crop rectangle crop (x, y, width, height, as
  * nvnWindowSetCrop takes it) of texture (an NVNtexture the game rendered) as

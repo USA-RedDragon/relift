@@ -4,10 +4,14 @@
  * into host command buffers, textures as host images, presents read back to
  * the host window and the capture folder.
  *
- * Every command set runs to completion inside nvnQueueSubmitCommands: the
- * layer records one host command buffer, submits it and waits for it. Every
- * image stays in the general layout and a full barrier separates any two
- * operations, so the order the game recorded is the order the host runs.
+ * A submit's command sets are replayed inside nvnQueueSubmitCommands into
+ * one host command buffer, which is submitted without waiting: the host
+ * device runs it while the guest goes on, as the console's GPU does. The
+ * next use of the layer's device state (the next submit or present, a
+ * readback, a write-back) waits for it first, and so do the guest's CPU
+ * sync points (nvnSyncWait, nvnQueueFinish). Every image stays in the
+ * general layout and a full barrier separates any two operations, so the
+ * order the game recorded is the order the host runs.
  *
  * A texture's host image is made the first time a command uses it, from the
  * guest bytes of its storage (deswizzled from block-linear), and from then on
@@ -1139,10 +1143,14 @@ void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, 
     VK(vkCmdDispatchIndirect)(cb, ibuf, ioff);
 }
 
+static bool wait_submitted(void);
+
 bool nvn_vk_begin(replay *r)
 {
     if (r->recording)
         return true;
+    if (!wait_submitted())
+        return false;
     VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &bi) != VK_SUCCESS)
@@ -1202,16 +1210,20 @@ static void fault_report(void)
     free(v);
 }
 
-/** @brief Submits what r recorded and waits for it. */
-bool nvn_vk_flush(replay *r)
+/**
+ * @brief The batch submitted last and not yet waited for (see nvn_vk_submit): its number, counted from 1, and the
+ * number of the last batch known finished. The arena, the descriptor pools and the command buffer stay its own until
+ * nvn_vk_settle waits for it.
+ */
+static struct {
+    bool on;
+    int64_t t1;
+} pending;
+static uint64_t g_submitted, g_finished;
+
+/** @brief Ends r's command buffer and submits it with g.fence; false (logged) when the device refuses. */
+static bool submit_recorded(replay *r)
 {
-    if (!r->recording) {
-        if (g.arena_used) {
-            g.arena_used = 0;
-            g.flushes++;
-        }
-        return true;
-    }
     r->recording = false;
     if (gpu_ts.pool)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 1);
@@ -1222,18 +1234,28 @@ bool nvn_vk_flush(replay *r)
     }
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
     int64_t t0 = now_ns();
-    if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS ||
-        (vr = guest_submit(&si)) != VK_SUCCESS) {
+    if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS || (vr = guest_submit(&si)) != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
         if (vr == VK_ERROR_DEVICE_LOST)
             fault_report();
         return false;
     }
-    int64_t t1 = now_ns();
+    pending.t1 = now_ns();
+    tm.submit_ns += (uint64_t)(pending.t1 - t0);
+    pending.on = true;
+    __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
+    return true;
+}
+
+/** @brief Waits for the submitted batch and frees what it held; true when there was none. */
+static bool wait_submitted(void)
+{
+    if (!pending.on)
+        return true;
+    pending.on = false;
     nvn_core_leave();
-    vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
-    tm.submit_ns += (uint64_t)(t1 - t0);
-    tm.wait_ns += (uint64_t)(now_ns() - t1);
+    VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
+    tm.wait_ns += (uint64_t)(now_ns() - pending.t1);
     tm.flushes++;
     bool ok = vr == VK_SUCCESS;
     uint64_t ts[2];
@@ -1245,18 +1267,93 @@ bool nvn_vk_flush(replay *r)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     if (vr == VK_ERROR_DEVICE_LOST)
         fault_report();
-    nvn_untile_release();
-    g.arena_used = 0;
+    __atomic_store_n(&g_finished, g_submitted, __ATOMIC_RELEASE);
     g.uniform_pending = false;
-    g.flushes++;
+    nvn_untile_release();
     nvn_draw_reset();
     nvn_dlss_reset();
     return ok;
 }
 
+bool nvn_vk_settle(void) { return wait_submitted(); }
+
+uint64_t nvn_vk_submitted(void) { return __atomic_load_n(&g_submitted, __ATOMIC_ACQUIRE); }
+
+uint64_t nvn_vk_finished(void) { return __atomic_load_n(&g_finished, __ATOMIC_ACQUIRE); }
+
+bool nvn_vk_submit(replay *r)
+{
+    if (!r->recording)
+        return nvn_vk_flush(r);
+    if (!submit_recorded(r))
+        return false;
+    g.arena_used = 0;
+    g.flushes++;
+    return true;
+}
+
+/** @brief Submits what r recorded and waits for it. */
+bool nvn_vk_flush(replay *r)
+{
+    if (!r->recording) {
+        if (g.arena_used) {
+            if (!wait_submitted())
+                return false;
+            g.arena_used = 0;
+            g.flushes++;
+        }
+        return true;
+    }
+    if (!submit_recorded(r))
+        return false;
+    bool ok = wait_submitted();
+    g.arena_used = 0;
+    g.flushes++;
+    return ok;
+}
+
 bool nvn_vk_sync_uniforms(replay *r)
 {
-    return !g.uniform_pending || nvn_vk_flush(r);
+    if (!g.uniform_pending)
+        return true;
+    return r->recording ? nvn_vk_flush(r) : wait_submitted();
+}
+
+int nvn_vk_async_check(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok)
+        return -1;
+    nvn_lock();
+    staging big, out;
+    const uint64_t bytes = 64ull << 20;
+    int rc = 0;
+    if (!nvn_vk_staging_new(&big, bytes) || !nvn_vk_readback_new(&out, 4096)) {
+        nvn_unlock();
+        return 1;
+    }
+    memset(out.map, 0, 4096);
+    replay r = { 0 };
+    uint64_t before = nvn_vk_finished();
+    nvn_vk_begin(&r);
+    for (uint32_t i = 0; i < 64; i++) {
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, bytes, i);
+        nvn_vk_barrier(g.cb);
+    }
+    VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x5a5a5a5au);
+    nvn_vk_barrier(g.cb);
+    if (!nvn_vk_submit(&r))
+        rc = 2;
+    else if (VK(vkGetFenceStatus)(g.dev, g.fence) != VK_NOT_READY || nvn_vk_finished() != before)
+        rc = 3;
+    else if (!nvn_vk_settle() || nvn_vk_finished() != nvn_vk_submitted())
+        rc = 4;
+    else if (((uint32_t *)out.map)[1023] != 0x5a5a5a5au)
+        rc = 5;
+    nvn_vk_staging_free(&big);
+    nvn_vk_staging_free(&out);
+    nvn_unlock();
+    return rc;
 }
 
 int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what)
@@ -2710,6 +2807,7 @@ void nvn_lock(void)
         pthread_mutex_lock(&g.lock);
     }
     lock_since = now_ns();
+    wait_submitted();
 }
 
 void nvn_unlock(void)
@@ -2787,7 +2885,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     nvn_sched_run *done = NULL;
     int64_t t0 = now_ns();
     int rc = nvn_sched_pump(&sched, &sched_ops, &done);
-    if (rc == RL_OK && !nvn_vk_flush(&u->r))
+    if (rc == RL_OK && !nvn_vk_submit(&u->r))
         rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
     tm.runs++;
