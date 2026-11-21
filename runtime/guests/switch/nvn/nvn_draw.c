@@ -46,6 +46,12 @@
 /** @brief Storage buffer entries of the table in c[24]: each is {GPU address, u32 size, u32 0}, 16 bytes. */
 #define STORAGE_TABLE_ENTRIES 5u
 #define MAX_SPECS NVN_MAX_SPECS
+/**
+ * @brief Byte offset in driver bank c[0] of a vertex program's base instance: the program adds it to the zero-based
+ * instance id the hardware gives (the translated vertex program of a game that draws its glyph quads reads it as
+ * c[0] word 0x191 and indexes its instance records with the sum), so it holds the draw's first instance.
+ */
+#define NVN_C0_BASE_INSTANCE 0x644u
 /** @brief Byte offset in driver bank c[0] of the first task of a mesh draw (the translator's MESH_FIRST_TASK_OFFSET). */
 #define MESH_FIRST_TASK_OFFSET 0x1f4u
 /** @brief The byte of a GLSLC control section that names the program's stage (NVNshaderStage). */
@@ -752,6 +758,8 @@ void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYT
         memcpy(c0 + at, &st->gstorage[s][k].addr, 8);
         memcpy(c0 + at + 8, &size, 4);
     }
+    if (s == 0)
+        memcpy(c0 + NVN_C0_BASE_INSTANCE, &st->inst_base, 4);
 }
 
 /**

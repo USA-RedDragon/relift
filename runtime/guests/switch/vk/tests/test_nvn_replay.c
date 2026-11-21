@@ -341,3 +341,18 @@ TEST(nvn_a_mesh_pipeline_reads_back_from_its_interface_records)
     CHECK(m.record_words == 500 && m.index_words == 378 && m.task_lanes == 32 && m.mesh_lanes == 32);
     CHECK(!nvn_mesh_info_of(recs, 1, &m));
 }
+
+TEST(nvn_graphics_table_gives_a_vertex_program_the_draws_first_instance)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    st.inst_base = 4;
+    uint8_t c0[NVN_GFX_C0_BYTES];
+    uint32_t w;
+    nvn_graphics_table(&st, 0, c0);
+    memcpy(&w, c0 + 0x644, 4);
+    CHECK_EQ(w, 4u);
+    nvn_graphics_table(&st, 1, c0);
+    memcpy(&w, c0 + 0x644, 4);
+    CHECK_EQ(w, 0u);
+}
