@@ -2,8 +2,8 @@
 # The relift crate's end-to-end test targets (every tests/e2e*.rs). With the
 # argument slow or linux, only the targets listed below for it; with rest,
 # every other one, so a new target lands in exactly one of the three; with
-# none, all of them. linux is the Linux corpus, whose dynamic programs compile
-# their libraries cold in well over half of a job's 15 minutes.
+# none, all of them. linux is the Linux corpus, whose dynamic program lifts
+# and compiles glibc: about four minutes cold, too much to add to rest.
 # Usage: tests-relift-e2e.sh [slow|linux|rest]
 # The targets that build Switch programs run a second time with emit.trampoline.
 . "$(dirname "$0")/lib.sh"
