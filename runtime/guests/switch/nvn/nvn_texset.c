@@ -44,12 +44,18 @@ static struct {
      */
     uint32_t ntex;
     /**
-     * @brief Texture ids and slots. A handle names one of 2^20 texture ids, the arrays hold ntex slots: id_slot
-     * maps an id to its slot plus one and slot_id a slot to its id plus one (0: free). Slots are handed out from
-     * the free stack, then in turn; taking one that holds a texture waits for the work that may still use it.
-     * Everything below is indexed by slot, and the handle a program reads has its id replaced by the slot.
+     * @brief Texture ids and slots. A handle names one of 2^20 texture ids, the arrays hold ntex slots: the ids below
+     * pinned are their own slots (a program that reads a handle out of memory names the id, which the host cannot
+     * rewrite), the others share the slots from pinned on: id_slot maps an id to its slot plus one and slot_id a slot
+     * to its id plus one (0: free). Slots are handed out from the free stack, then in turn; taking one that holds a
+     * texture waits for the work that may still use it. Everything below is indexed by slot, and the handle a program
+     * reads from a constant bank has its id replaced by the slot.
      */
     nvn_slots slots;
+    /** @brief The ids nvn_texset_sync_registered keeps in their slots, the flag of each (by id below the pinned ones) and the frame it last refreshed them. */
+    uint32_t *synced, nsynced, capsynced;
+    bool *is_synced;
+    uint64_t sync_frame;
     VkDescriptorSetLayout layout;
     VkDescriptorPool pool;
     VkDescriptorSet set;
@@ -69,12 +75,9 @@ static struct {
     uint32_t *tex_target, *tex_layer, *tex_layers;
     /**
      * @brief Storage images are indexed by the same slot as the sampled arrays: a program reads one handle word
-     * both ways. The first reserve slots belong to textures registered as images (islots, which the storage image
-     * arrays have room for), the rest to the others (slots, counted from reserve). img_done[slot]: the storage
-     * descriptors of the slot are written for what the sampled ones hold.
+     * both ways, so a texture registered as an image takes a slot below IMAGES (the pinned ids are below it).
+     * img_done[slot]: the storage descriptors of the slot are written for what the sampled ones hold.
      */
-    nvn_slots islots;
-    uint32_t reserve;
     bool *img_done;
     /** @brief The sampler each sampler id's element holds and the builder bytes it was made from. */
     VkSampler *samplers;
@@ -233,14 +236,13 @@ static bool make(void)
     t.tex_target = calloc(t.ntex, sizeof *t.tex_target);
     t.tex_layer = calloc(t.ntex, sizeof *t.tex_layer);
     t.tex_layers = calloc(t.ntex, sizeof *t.tex_layers);
-    t.reserve = t.ntex / 4 < IMAGES ? t.ntex / 4 : IMAGES;
-    bool slots_ok = t.reserve && nvn_slots_init(&t.slots, t.ntex - t.reserve, 1u << 20) &&
-                    nvn_slots_init(&t.islots, t.reserve, 1u << 20);
+    bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20, t.ntex / 2 < IMAGES ? t.ntex / 2 : IMAGES);
+    t.is_synced = calloc(t.ntex, sizeof *t.is_synced);
     t.img_done = calloc(t.ntex, sizeof *t.img_done);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
     bool filled = fill_samplers();
-    t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && slots_ok && t.samplers && t.sampler_bytes;
+    t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -550,17 +552,18 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
 }
 
 /**
- * @brief The slot of texture id (of the image slots when image): the one it
- * holds, or a free one, or the next in turn after the work that may use it
- * has run.
+ * @brief The slot of texture id: its own number below the pinned ids, else the one it holds, or a free one, or the
+ * next in turn after the work that may use it has run. A texture registered as an image needs one below IMAGES.
  */
 static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
 {
     uint32_t evicted;
-    uint32_t local = nvn_slots_take(image ? &t.islots : &t.slots, id, &evicted);
-    if (local == UINT32_MAX)
+    *slot = nvn_slots_take(&t.slots, id, &evicted);
+    if (*slot == UINT32_MAX)
         return nvn_vk_stop(r, "texture id %u is past the 2^20 a handle names", id);
-    *slot = image ? local : t.reserve + local;
+    if (image && *slot >= IMAGES)
+        return nvn_vk_stop(r, "texture id %u is registered as an image but the host holds %u images below the ids it pins",
+                           id, IMAGES);
     if (!evicted)
         return RL_OK;
     if (!nvn_vk_flush(r))
@@ -576,15 +579,12 @@ void nvn_texset_texture_gone(uint64_t tex)
     if (!t.ok)
         return;
     nvn_lock();
-    for (uint32_t ts = 0; ts < t.ntex; ts++) {
-        nvn_slots *tb = ts < t.reserve ? &t.islots : &t.slots;
-        uint32_t local = ts < t.reserve ? ts : ts - t.reserve;
-        if (tb->slot_id[local] && t.tex_guest[ts] == tex) {
+    for (uint32_t ts = 0; ts < t.ntex; ts++)
+        if (t.tex_guest[ts] == tex) {
             t.tex_guest[ts] = 0;
             t.img_done[ts] = false;
-            nvn_slots_free(tb, local);
+            nvn_slots_free(&t.slots, ts);
         }
-    }
     nvn_unlock();
 }
 
@@ -744,6 +744,67 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
     uint32_t kind, dim;
     return bind_texture(r, handle, &kind, &dim, slot, false);
 }
+
+int nvn_texset_sync_registered(replay *r)
+{
+    if (!make())
+        return nvn_vk_stop(r, "cannot make the texture set");
+    uint32_t ids[256], n;
+    while ((n = nvn_tex_pending(true, ids, 256)) != 0)
+        for (uint32_t i = 0; i < n; i++)
+            if (ids[i] < SAMPLERS) {
+                int rc = bind_sampler(r, ids[i]);
+                if (rc != RL_OK)
+                    return rc;
+            }
+    bool refresh = t.sync_frame != g.presents + 1;
+    t.sync_frame = g.presents + 1;
+    while ((n = nvn_tex_pending(false, ids, 256)) != 0)
+        for (uint32_t i = 0; i < n; i++) {
+            uint8_t view[17];
+            bool has_view, image;
+            uint64_t tex = nvn_tex_registered(ids[i], view, &has_view, &image);
+            if (!tex || !nvn_texture_desc(tex, &(nvn_tex_desc){ 0 }))
+                continue;
+            if (ids[i] >= t.slots.pinned)
+                return nvn_vk_stop(r,
+                                   "texture id %u is registered, but a program reads texture handles out of memory and the "
+                                   "host keeps only the ids below %u in a slot of their own",
+                                   ids[i], t.slots.pinned);
+            if (t.nsynced == t.capsynced) {
+                uint32_t cap = t.capsynced ? 2 * t.capsynced : 1024;
+                uint32_t *p = realloc(t.synced, cap * sizeof *p);
+                if (!p)
+                    return nvn_vk_stop(r, "out of memory");
+                t.synced = p;
+                t.capsynced = cap;
+            }
+            if (!t.is_synced[ids[i]]) {
+                t.is_synced[ids[i]] = true;
+                t.synced[t.nsynced++] = ids[i];
+            }
+            uint32_t kind, dim, slot;
+            int rc = bind_texture(r, ids[i], &kind, &dim, &slot, false);
+            if (rc != RL_OK)
+                return rc;
+        }
+    if (!refresh)
+        return RL_OK;
+    for (uint32_t i = 0; i < t.nsynced; i++) {
+        uint8_t view[17];
+        bool has_view, image;
+        uint64_t tex = nvn_tex_registered(t.synced[i], view, &has_view, &image);
+        if (!tex || !nvn_texture_desc(tex, &(nvn_tex_desc){ 0 }))
+            continue;
+        uint32_t kind, dim, slot;
+        int rc = bind_texture(r, t.synced[i], &kind, &dim, &slot, false);
+        if (rc != RL_OK)
+            return rc;
+    }
+    return RL_OK;
+}
+
+uint32_t nvn_texset_pinned(void) { return t.ok ? t.slots.pinned : 0; }
 
 int nvn_texset_sampler(replay *r, uint32_t id)
 {

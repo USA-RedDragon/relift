@@ -260,6 +260,11 @@ int nvn_builder_storage_class(rl_ctx *c, uint8_t *mem, uint64_t builder, uint64_
 uint64_t nvn_tex_registered(uint32_t id, uint8_t view[16], bool *has_view, bool *image);
 /** @brief Copies the builder bytes of the sampler registered as id (128 bytes) into out; false when none. */
 bool nvn_sampler_registered(uint32_t id, uint8_t out[128]);
+/**
+ * @brief Takes up to max ids of the textures (sampler false) or samplers registered since the last call, oldest
+ * first, one entry per registration; returns how many.
+ */
+uint32_t nvn_tex_pending(bool sampler, uint32_t *ids, uint32_t max);
 
 /** @brief What the device probes measured (nvn_probe.c, run by the Vulkan layer before it writes device.json). */
 typedef struct nvn_probes {

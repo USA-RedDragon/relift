@@ -437,6 +437,16 @@ int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, u
  */
 int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot);
 /**
+ * @brief Makes the texture set hold every texture and sampler registered in the guest's pools, each texture in the slot
+ * of its own id, and brings them up to date once per presented frame: a program that reads a texture handle out of
+ * memory names the id, which the host cannot rewrite, so the pool's whole contents must be where the id points (the
+ * console's model: a pool holds every descriptor). A texture registered under an id the set cannot hold in a slot of
+ * its own stops, naming the id and the limit. Returns RL_OK, or RL_PENDING after a stop.
+ */
+int nvn_texset_sync_registered(replay *r);
+/** @brief How many texture ids sit in a slot of their own number (0 before the set is made). */
+uint32_t nvn_texset_pinned(void);
+/**
  * @brief The dimensions (bits of the translator's Dim) a texture of Dim dim, width by height texels and layers array
  * layers is sampled as. A square 2D array of 6 or more layers also has a cube view, and a cube array view when its
  * layers are a multiple of 6: the guest makes cube maps as 2D arrays and samples them as cubes.

@@ -759,6 +759,8 @@ static struct {
     uint8_t (*view)[17];
     bool *image;
     uint32_t ntex, nsampler;
+    /** @brief Ids registered since the replay last took them (texture, sampler), one entry per registration. */
+    uint32_t *pending[2], npending[2], cappending[2];
 } reg;
 
 static void *grow(void *a, size_t elem, uint32_t old, uint32_t cap)
@@ -799,6 +801,32 @@ static bool tex_room(uint32_t id)
 
 static pthread_mutex_t reg_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/** @brief Notes that id was registered, for nvn_tex_pending; the registry lock is held. Out of memory drops the note. */
+static void note_pending(int kind, uint32_t id)
+{
+    if (reg.npending[kind] == reg.cappending[kind]) {
+        uint32_t cap = reg.cappending[kind] ? 2 * reg.cappending[kind] : 1024;
+        uint32_t *p = realloc(reg.pending[kind], cap * sizeof *p);
+        if (!p)
+            return;
+        reg.pending[kind] = p;
+        reg.cappending[kind] = cap;
+    }
+    reg.pending[kind][reg.npending[kind]++] = id;
+}
+
+uint32_t nvn_tex_pending(bool sampler, uint32_t *ids, uint32_t max)
+{
+    int kind = sampler;
+    pthread_mutex_lock(&reg_lock);
+    uint32_t n = reg.npending[kind] < max ? reg.npending[kind] : max;
+    memcpy(ids, reg.pending[kind], n * sizeof *ids);
+    memmove(reg.pending[kind], reg.pending[kind] + n, (reg.npending[kind] - n) * sizeof *ids);
+    reg.npending[kind] -= n;
+    pthread_mutex_unlock(&reg_lock);
+    return n;
+}
+
 static uint64_t register_texture(rl_ctx *c, uint8_t *mem, bool image)
 {
     uint32_t id = (uint32_t)c->x[1];
@@ -812,6 +840,7 @@ static uint64_t register_texture(rl_ctx *c, uint8_t *mem, bool image)
     if (c->x[3])
         memcpy(reg.view[id], mem + c->x[3], 16);
     reg.image[id] = image;
+    note_pending(0, id);
     pthread_mutex_unlock(&reg_lock);
     return nvn_ret(c);
 }
@@ -871,6 +900,7 @@ uint64_t nvnh_nvnSamplerPoolRegisterSampler(rl_ctx *c, uint8_t *mem)
         reg.nsampler = cap;
     }
     reg.sampler[id] = c->x[2];
+    note_pending(1, id);
     pthread_mutex_unlock(&reg_lock);
     return nvn_ret(c);
 }

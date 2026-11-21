@@ -339,7 +339,7 @@ TEST(nvn_debug_and_checkpoint_procs_stay_the_drivers_and_the_layers_getters_do_n
 TEST(nvn_slots_hold_ids_past_the_device_limit)
 {
     nvn_slots s;
-    CHECK(nvn_slots_init(&s, 4, 1u << 20));
+    CHECK(nvn_slots_init(&s, 4, 1u << 20, 0));
     uint32_t ev;
     uint32_t a = nvn_slots_take(&s, 426141, &ev);
     CHECK(a < 4);
@@ -358,10 +358,34 @@ TEST(nvn_slots_hold_ids_past_the_device_limit)
     free(s.free_stack);
 }
 
+TEST(nvn_slots_pin_the_low_ids_to_their_own_numbers)
+{
+    nvn_slots s;
+    CHECK(!nvn_slots_init(&s, 4, 1u << 20, 4));
+    CHECK(nvn_slots_init(&s, 6, 1u << 20, 4));
+    uint32_t ev = 9;
+    CHECK_EQ(nvn_slots_take(&s, 0, &ev), 0);
+    CHECK_EQ(nvn_slots_take(&s, 3, &ev), 3);
+    CHECK_EQ(ev, 0);
+    uint32_t a = nvn_slots_take(&s, 500000, &ev), b = nvn_slots_take(&s, 600000, &ev);
+    CHECK(a >= 4 && a < 6 && b >= 4 && b < 6 && a != b);
+    uint32_t c = nvn_slots_take(&s, 700000, &ev);
+    CHECK_EQ(c, a);
+    CHECK_EQ(ev, 500001);
+    CHECK_EQ(nvn_slots_take(&s, 3, &ev), 3);
+    nvn_slots_free(&s, 3);
+    nvn_slots_free(&s, b);
+    CHECK_EQ(nvn_slots_take(&s, 800000, &ev), b);
+    CHECK_EQ(ev, 0);
+    free(s.id_slot);
+    free(s.slot_id);
+    free(s.free_stack);
+}
+
 TEST(nvn_slots_evict_the_oldest_when_full)
 {
     nvn_slots s;
-    CHECK(nvn_slots_init(&s, 2, 1u << 20));
+    CHECK(nvn_slots_init(&s, 2, 1u << 20, 0));
     uint32_t ev;
     uint32_t a = nvn_slots_take(&s, 500000, &ev);
     uint32_t b = nvn_slots_take(&s, 600000, &ev);

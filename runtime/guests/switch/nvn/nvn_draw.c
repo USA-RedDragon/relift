@@ -1141,8 +1141,11 @@ static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
     bool bound = false;
     for (uint32_t i = 0; i < mods[s]->nrecs; i++)
         bound |= mods[s]->recs[i].kind == NVN_IFACE_TEXTURE;
-    if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound)
-        return nvn_vk_stop(r, "program %s samples textures only through register handles", mods[s]->key);
+    if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound) {
+        int src = nvn_texset_sync_registered(r);
+        if (src != RL_OK)
+            return src;
+    }
     memcpy(st->bank2_host[s], st->bank2[s], NVN_BANK2_BYTES);
     int trc = bind_textures(r, mods[s], 2, st->bank2_host[s], NVN_BANK2_BYTES, &k->nspec[s], k->spec_map[s], k->spec[s],
                             NVN_BANK2_IMAGES, NVN_BANK2_IMAGES + 8u * NVN_IMAGE_SLOTS);
