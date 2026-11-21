@@ -403,3 +403,40 @@ TEST(nvn_texset_a_handle_read_out_of_memory_samples_the_texture_registered_under
     CHECK_EQ(out[0], 0xddccu << 16 | 0x51u << 8 | 0xaau);
     CHECK(nvn_texset_pinned() > 4097u);
 }
+
+TEST(nvn_one_dimensional_textures_get_host_images_of_their_own_dimension)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, tex = 0x200, array = 0x300;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 0, .format = 37, .width = 4, .height = 1, .depth = 1, .levels = 1, .pool = pool,
+                       .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    vimg *v = nvn_vk_image(&r, tex);
+    CHECK(v != NULL);
+    CHECK(v && v->view != NULL);
+    nvn_tex_desc a = { .target = 3, .format = 37, .width = 4, .height = 1, .depth = 3, .levels = 1, .pool = pool,
+                       .offset = 0x8000 };
+    CHECK(nvn_tex_layout(&a));
+    CHECK(nvn_texture_record(array, &a, NULL));
+    vimg *w = nvn_vk_image(&r, array);
+    CHECK(w != NULL);
+    CHECK(w && w->view != NULL);
+    CHECK(nvn_vk_flush(&r));
+}

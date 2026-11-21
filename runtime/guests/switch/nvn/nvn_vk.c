@@ -1548,9 +1548,10 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     }
     VkImageAspectFlags aspect;
     VkFormat f = nvn_vk_format(d->format, &aspect);
-    bool buffer = d->target == NVN_TARGET_BUFFER;
+    bool buffer = d->target == NVN_TARGET_BUFFER, line = d->target == 0 || d->target == 3;
     if (f == VK_FORMAT_UNDEFINED || d->samples > 1 ||
-        (d->target != 1 && d->target != 4 && d->target != 7 && d->target != NVN_TARGET_3D && d->target != NVN_TARGET_CUBEMAP &&
+        (d->target != 0 && d->target != 1 && d->target != 3 && d->target != 4 && d->target != 7 &&
+         d->target != NVN_TARGET_3D && d->target != NVN_TARGET_CUBEMAP &&
          d->target != NVN_TARGET_CUBEMAP_ARRAY && !buffer)) {
         rl_guest_fatal(r->c, "nvn", "texture 0x%llx: format %u, target %u, %u samples not handled",
                        (unsigned long long)tex, d->format, d->target, d->samples);
@@ -1599,9 +1600,9 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
                       ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
                       : 0) |
                  (d->target == NVN_TARGET_3D && !buffer ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0),
-        .imageType = buffer ? VK_IMAGE_TYPE_1D : d->target == NVN_TARGET_3D ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D,
+        .imageType = buffer || line ? VK_IMAGE_TYPE_1D : d->target == NVN_TARGET_3D ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D,
         .format = f,
-        .extent = { d->width, buffer ? 1 : d->height, depth_of(d, 0) },
+        .extent = { d->width, buffer || line ? 1 : d->height, depth_of(d, 0) },
         .mipLevels = rr.levelCount,
         .arrayLayers = rr.layerCount,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -1625,7 +1626,8 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                   .pNext = plain_usage(v, &vu),
                                   .image = v->image,
-                                  .viewType = buffer                         ? VK_IMAGE_VIEW_TYPE_1D
+                                  .viewType = buffer || d->target == 0       ? VK_IMAGE_VIEW_TYPE_1D
+                                              : d->target == 3             ? VK_IMAGE_VIEW_TYPE_1D_ARRAY
                                               : d->target == NVN_TARGET_3D ? VK_IMAGE_VIEW_TYPE_3D
                                               : rr.layerCount > 1          ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
                                                                            : VK_IMAGE_VIEW_TYPE_2D,
