@@ -356,3 +356,34 @@ TEST(nvn_graphics_table_gives_a_vertex_program_the_draws_first_instance)
     memcpy(&w, c0 + 0x644, 4);
     CHECK_EQ(w, 0u);
 }
+
+TEST(nvn_a_compressed_texture_is_drawn_through_an_integer_texture_of_its_blocks)
+{
+    nvn_tex_desc bc4 = { .target = NVN_TARGET_3D, .format = 73, .width = 64, .height = 64, .depth = 64, .levels = 1 };
+    CHECK(nvn_tex_layout(&bc4));
+    CHECK_EQ(bc4.size, 0x20000);
+    nvn_tex_desc ad;
+    CHECK(nvn_vk_block_alias(&bc4, 44, &ad));
+    CHECK_EQ(ad.format, 44);
+    CHECK_EQ(ad.width, 16);
+    CHECK_EQ(ad.height, 16);
+    CHECK_EQ(ad.depth, 64);
+    CHECK_EQ(ad.target, NVN_TARGET_3D);
+    CHECK_EQ(ad.size, bc4.size);
+    CHECK(!nvn_vk_block_alias(&bc4, 47, &ad));
+    CHECK(!nvn_vk_block_alias(&bc4, 37, &ad));
+    CHECK(!nvn_vk_block_alias(&bc4, 73, &ad));
+    nvn_tex_desc bc7 = { .target = 1, .format = 77, .width = 128, .height = 64, .depth = 1, .levels = 1 };
+    CHECK(nvn_tex_layout(&bc7));
+    CHECK(nvn_vk_block_alias(&bc7, 47, &ad));
+    CHECK_EQ(ad.width, 32);
+    CHECK_EQ(ad.height, 16);
+    CHECK_EQ(ad.size, bc7.size);
+    CHECK(!nvn_vk_block_alias(&bc7, 44, &ad));
+    bc7.levels = 3;
+    CHECK(nvn_tex_layout(&bc7));
+    CHECK(!nvn_vk_block_alias(&bc7, 47, &ad));
+    nvn_tex_desc plain = { .target = 1, .format = 37, .width = 64, .height = 64, .depth = 1, .levels = 1 };
+    CHECK(nvn_tex_layout(&plain));
+    CHECK(!nvn_vk_block_alias(&plain, 44, &ad));
+}

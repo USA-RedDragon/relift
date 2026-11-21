@@ -111,6 +111,14 @@ typedef struct rt {
     VkFormat format;
 } rt;
 
+/**
+ * @brief The texture ad that a view of a block-compressed texture d in an uncompressed color format of the block's
+ * size draws into: one texel per block over the same storage and layout (a game that compresses on the GPU draws the
+ * blocks of a BC texture as the texels of an integer texture). Single-level textures only, and false when the
+ * layout of ad does not fill the same bytes as d.
+ */
+bool nvn_vk_block_alias(const nvn_tex_desc *d, uint32_t view_format, nvn_tex_desc *ad);
+
 /** @brief A host-visible buffer, mapped. */
 typedef struct staging {
     VkBuffer buf;

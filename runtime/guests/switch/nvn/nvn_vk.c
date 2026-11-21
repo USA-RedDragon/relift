@@ -1514,6 +1514,8 @@ static vimg *sync_alias(replay *r, vimg *v)
 
 void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
 
+static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex);
+
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
 static vimg *image_of(replay *r, uint64_t tex)
 {
@@ -1525,6 +1527,15 @@ static vimg *image_of(replay *r, uint64_t tex)
         rl_guest_fatal(r->c, "nvn", "0x%llx is not a texture (%s)", (unsigned long long)tex, gone);
         return NULL;
     }
+    return image_of_desc(r, d, tex);
+}
+
+/**
+ * @brief The host image of the texture d describes over its storage, made and filled from the storage the first
+ * time; tex names the texture it came from in reports.
+ */
+static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
+{
     uint64_t storage = nvn_pool_memory(d->pool, NULL) + d->offset;
     for (uint32_t i = 0; i < g.nimages; i++) {
         vimg *v = g.images[i];
@@ -1973,6 +1984,20 @@ VkFormat nvn_vk_color_twin(VkFormat f)
     }
 }
 
+bool nvn_vk_block_alias(const nvn_tex_desc *d, uint32_t view_format, nvn_tex_desc *ad)
+{
+    uint32_t bpb, bw, bh, vbpb, vbw, vbh;
+    if (!nvn_tex_format(d->format, &bpb, &bw, &bh) || !nvn_tex_format(view_format, &vbpb, &vbw, &vbh) ||
+        (bw == 1 && bh == 1) || vbw != 1 || vbh != 1 || vbpb != bpb || (d->levels ? d->levels : 1) != 1 ||
+        d->samples > 1 || d->target == NVN_TARGET_BUFFER)
+        return false;
+    *ad = *d;
+    ad->format = view_format;
+    ad->width = (d->width + bw - 1) / bw;
+    ad->height = (d->height + bh - 1) / bh;
+    return nvn_tex_layout(ad) && ad->size == d->size;
+}
+
 /** @brief Makes *t the render target of texture tex seen through the view bytes view (NULL for none). */
 static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
 {
@@ -1988,6 +2013,13 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
         int rc = nvn_view_read(r->c, r->mem, view, &nv);
         if (rc != RL_OK)
             return rc;
+        nvn_tex_desc alias_desc;
+        if (nv.has_format && nv.format != t->v->d.format && (!nv.has_levels || nv.base_level == 0) &&
+            nvn_vk_block_alias(&t->v->d, nv.format, &alias_desc)) {
+            if (!(t->v = image_of_desc(r, &alias_desc, tex)))
+                return RL_PENDING;
+            nvn_vk_written(t->v);
+        }
         if (nv.has_format && nv.format != t->v->d.format) {
             VkImageAspectFlags va = 0;
             VkFormat want = nvn_vk_format(nv.format, &va);
