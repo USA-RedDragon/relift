@@ -9,7 +9,11 @@
 //! time with trampoline mode forced; the corpus check script runs every
 //! program in both modes. Only `hello` builds with the cold copy (the Go and
 //! signal programs of the corpus check use it); the rest build without it,
-//! which keeps the test short.
+//! which keeps the test short. The dynamic program builds as a dev build
+//! (`relift build --dev`), so its libraries' lifted C compiles at -O0:
+//! libc's 34 shards took 131 CPU seconds there against 1119 at the release
+//! build's -O2. The static programs keep the release build, so the corpus
+//! still runs code the optimizer compiled.
 
 mod tiny;
 
@@ -60,7 +64,7 @@ fn built(
     root: &Path,
     program: &Path,
     cache: &str,
-    (trampoline, cold): (bool, bool),
+    (trampoline, cold, dev): (bool, bool, bool),
     sysroot: Option<&str>,
 ) -> (std::path::PathBuf, String) {
     let project = root.join("game");
@@ -80,9 +84,13 @@ fn built(
     let toml = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
     assert!(toml.contains("guest = \"linux\""), "{toml}");
     let forced = if trampoline { "true" } else { "false" };
+    let mut args = vec!["--cache-dir", cache, "-j", "4", "build"];
+    if dev {
+        args.push("--dev");
+    }
     let out = tiny::relift_env(
         &project,
-        &["--cache-dir", cache, "-j", "4", "build"],
+        &args,
         &[
             ("RELIFT_EMIT_TRAMPOLINE", forced),
             ("RELIFT_EMIT_COLD", if cold { "true" } else { "false" }),
@@ -119,7 +127,7 @@ fn check_program(root: &Path, corpus: &Path, programs: &Path, name: &str, trampo
         &root,
         &programs.join(name),
         &cache,
-        (trampoline, name == "hello.static" && !trampoline),
+        (trampoline, name == "hello.static" && !trampoline, false),
         None,
     );
     let wants = match name {
@@ -167,7 +175,7 @@ fn a_hand_assembled_program_builds_and_exits_with_its_status() {
     std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
     relift_cache::write_if_changed(&elf, &program()).expect("the program is writable");
     let cache = root.join("cache").display().to_string();
-    let (exe, _) = built(&root, &elf, &cache, (false, false), None);
+    let (exe, _) = built(&root, &elf, &cache, (false, false, false), None);
     let out = relift_proc::command(&exe)
         .env("RELIFT_REPORT_DIR", &root)
         .output()
@@ -275,7 +283,7 @@ fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
     let kept = Path::new(env!("CARGO_TARGET_TMPDIR")).join("e2e-linux-dynamic-cache");
     let cache = kept.display().to_string();
     {
-        let (name, modes) = ("shared_lib.dyn", (false, false));
+        let (name, modes) = ("shared_lib.dyn", (false, false, true));
         let _ = std::fs::remove_dir_all(root.join("game"));
         let _ = std::fs::remove_dir_all(kept.join("projects"));
         let (exe, _) = built(&root, &programs.join(name), &cache, modes, Some(&sysroot));
