@@ -301,12 +301,90 @@ static bool program_span(const uint8_t *mem, uint64_t code, uint64_t *start, uin
     return *len != 0;
 }
 
+/**
+ * @brief A program's key kept by its GPU address, so a draw does not hash the program again: valid while the
+ * program's bytes equal the copy kept with it (a compare runs many times faster than SHA-256 and is exact).
+ */
+typedef struct key_entry {
+    uint64_t code, start, len;
+    char key[65];
+    uint8_t *bytes;
+} key_entry;
+
+static struct {
+    pthread_mutex_t mu;
+    key_entry *slots;
+    uint32_t cap, n;
+} g_keys = { PTHREAD_MUTEX_INITIALIZER, NULL, 0, 0 };
+
+static uint32_t key_slot(uint64_t code, uint32_t cap)
+{
+    return (uint32_t)((code >> 4) * 0x9E3779B97F4A7C15ull >> 32) & (cap - 1);
+}
+
+static key_entry *key_find(uint64_t code)
+{
+    if (!g_keys.cap)
+        return NULL;
+    for (uint32_t i = key_slot(code, g_keys.cap);; i = (i + 1) & (g_keys.cap - 1)) {
+        key_entry *e = &g_keys.slots[i];
+        if (!e->code || e->code == code)
+            return e;
+    }
+}
+
+static bool key_grow(void)
+{
+    uint32_t cap = g_keys.cap ? g_keys.cap * 2 : 1024;
+    key_entry *slots = calloc(cap, sizeof *slots);
+    if (!slots)
+        return false;
+    for (uint32_t i = 0; i < g_keys.cap; i++) {
+        key_entry *e = &g_keys.slots[i];
+        if (!e->code)
+            continue;
+        uint32_t j = key_slot(e->code, cap);
+        while (slots[j].code)
+            j = (j + 1) & (cap - 1);
+        slots[j] = *e;
+    }
+    free(g_keys.slots);
+    g_keys.slots = slots;
+    g_keys.cap = cap;
+    return true;
+}
+
 bool nvn_shader_key(const uint8_t *mem, uint64_t code, char key[65], uint64_t *len)
 {
     uint64_t start;
     if (!program_span(mem, code, &start, len))
         return false;
+    pthread_mutex_lock(&g_keys.mu);
+    key_entry *e = key_find(code);
+    if (e && e->code && e->start == start && e->len == *len && memcmp(e->bytes, mem + start, *len) == 0) {
+        memcpy(key, e->key, 65);
+        pthread_mutex_unlock(&g_keys.mu);
+        return true;
+    }
     rl_data_sha256(mem + start, (size_t)*len, key);
+    bool fresh = !e || !e->code;
+    uint8_t *copy = malloc(*len ? *len : 1);
+    if (copy && code && (!fresh || (g_keys.n + 1) * 2 <= g_keys.cap || key_grow())) {
+        if (fresh) {
+            e = key_find(code);
+            e->code = code;
+            g_keys.n++;
+        }
+        free(e->bytes);
+        memcpy(copy, mem + start, *len);
+        e->bytes = copy;
+        e->start = start;
+        e->len = *len;
+        memcpy(e->key, key, 65);
+    } else {
+        free(copy);
+    }
+    pthread_mutex_unlock(&g_keys.mu);
     return true;
 }
 
