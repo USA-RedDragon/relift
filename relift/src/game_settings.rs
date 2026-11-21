@@ -186,6 +186,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "renderdoc.capture_dir",
+            "RenderDoc capture folder",
+            "Where RenderDoc writes the captures renderdoc.capture asks for. Empty: the captures folder of the user data folder",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "save.dir",
             "Save folder",
             "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
@@ -1047,7 +1054,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 25);
+        assert_eq!(section(Vec::new()).runtime.len(), 26);
     }
 
     #[test]

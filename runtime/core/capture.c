@@ -18,7 +18,17 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#define SEP '\\'
+#else
+#define MKDIR(p) mkdir((p), 0755)
+#define SEP '/'
+#endif
 
 static struct {
     pthread_mutex_t lock;
@@ -26,6 +36,32 @@ static struct {
     uint64_t presents, first, frames;
     RENDERDOC_API_1_1_2 *api;
 } rd = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+/**
+ * @brief Points RenderDoc's capture files at renderdoc.capture_dir, or at the captures folder of the app's user
+ * data folder (settings.h), so a capture never lands in a system temporary folder. The folders are made.
+ */
+static void set_capture_path(void)
+{
+    char dir[1024], tmpl[1100];
+    const char *set = rl_setting_str("renderdoc.capture_dir");
+    const char *app = rl_settings_app();
+    if (set && *set) {
+        snprintf(dir, sizeof dir, "%s", set);
+    } else {
+        char user[900];
+        if (!rl_settings_user_dir(user, sizeof user, app && *app ? app : "relift"))
+            return;
+        MKDIR(user);
+        snprintf(dir, sizeof dir, "%s%ccaptures", user, SEP);
+    }
+    MKDIR(dir);
+    int k = snprintf(tmpl, sizeof tmpl, "%s%c%s", dir, SEP, app && *app ? app : "relift");
+    if (k > 0 && (size_t)k < sizeof tmpl) {
+        rd.api->SetCaptureFilePathTemplate(tmpl);
+        rl_log(RL_LOG_INFO, "capture", "RenderDoc captures go to %s_frame<n>.rdc", tmpl);
+    }
+}
 
 static void rd_init(void)
 {
@@ -48,6 +84,7 @@ static void rd_init(void)
         rl_log(RL_LOG_WARN, "capture", "renderdoc.capture is set but RenderDoc is not loaded into the process");
         return;
     }
+    set_capture_path();
     rd.first = first;
     rd.frames = frames;
     rd.armed = true;

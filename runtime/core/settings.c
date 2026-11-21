@@ -146,6 +146,14 @@ static const rl_setting_def g_runtime_defs[] = {
                        "window. Only Vulkan work is captured. Empty: off",
         .env = "RELIFT_RENDERDOC_CAPTURE",
     },
+    {
+        .key = "renderdoc.capture_dir",
+        .type = RL_SETTING_STRING,
+        .label = "RenderDoc capture folder",
+        .description = "Where RenderDoc writes the captures renderdoc.capture asks for. Empty: the captures folder of "
+                       "the user data folder",
+        .env = "RELIFT_RENDERDOC_DIR",
+    },
 };
 
 static char *g_mods[RL_SETTINGS_MODS_MAX];
