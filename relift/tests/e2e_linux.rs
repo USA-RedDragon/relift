@@ -252,6 +252,23 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Removes the compiled libraries of the kept cache `kept` that the last
+/// build did not link: each change of the lifted C keys new ones, and CI
+/// saves the folder whole, so without this it would grow by every version.
+fn prune_lifted(kept: &Path) {
+    let ninja = std::fs::read_to_string(kept.join("projects/game/build/host/build.ninja"))
+        .expect("the build wrote build.ninja");
+    let Ok(entries) = std::fs::read_dir(kept.join("linux-runtime-lifted")) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !ninja.contains(&format!("linux-runtime-lifted/{name}/")) {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 #[test]
 fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
     let have = |t: &str| relift_build::find_tool(t).is_some();
@@ -287,6 +304,7 @@ fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
         let _ = std::fs::remove_dir_all(root.join("game"));
         let _ = std::fs::remove_dir_all(kept.join("projects"));
         let (exe, _) = built(&root, &programs.join(name), &cache, modes, Some(&sysroot));
+        prune_lifted(&kept);
         let dir = corpus.join(name.split('.').next().expect("a name"));
         let out = relift_proc::command(&exe)
             .env("RELIFT_REPORT_DIR", &root)
