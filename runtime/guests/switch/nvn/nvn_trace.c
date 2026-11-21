@@ -506,13 +506,15 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
     }
     fprintf(f, "],\"push\":{");
     first = true;
-    for (uint32_t s = 0; s < NVN_STAGES; s++)
-        if (st->push_used[s] && c->keys[s]) {
-            fprintf(f, "%s\"%s\":\"", first ? "" : ",", names[s]);
-            hex(f, st->push[s][0], NVN_PUSH_BYTES);
-            fprintf(f, "\"");
-            first = false;
-        }
+    for (uint32_t s = 0; s < NVN_STAGES; s++) {
+        bool cs = s == NVN_STAGE_COMPUTE;
+        if (!c->keys[s] || !(cs ? st->push_used[s] : st->gfx_push_used))
+            continue;
+        fprintf(f, "%s\"%s\":\"", first ? "" : ",", names[s]);
+        hex(f, cs ? st->push[s][0] : st->gfx_push[0], NVN_PUSH_BYTES);
+        fprintf(f, "\"");
+        first = false;
+    }
     fprintf(f, "}}\n");
     fflush(f);
 }

@@ -41,10 +41,8 @@
 
 #define UBO_BYTES 65536u
 #define SET_POOL_SETS 4096u
-/** @brief The user binding (constant bank c[24]) a fragment program reads the stage's storage buffer table from. */
-#define STORAGE_TABLE_BINDING 21u
-/** @brief Storage buffer entries of the table in c[24]: each is {GPU address, u32 size, u32 0}, 16 bytes. */
-#define STORAGE_TABLE_ENTRIES 5u
+/** @brief The user binding of constant bank c[24]: graphics push constant slot 0 (nvnCommandBufferPushGraphicsConstants). */
+#define PUSH_BINDING (NVN_GFX_PUSH_BANK - 3u)
 #define MAX_SPECS NVN_MAX_SPECS
 /**
  * @brief Byte offset in driver bank c[0] of a vertex program's base instance: the program adds it to the zero-based
@@ -820,14 +818,8 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
         for (uint32_t b = 0; b < USER_BINDINGS; b++) {
             if (!(mods[s]->user & (1u << b)))
                 continue;
-            if (b == STORAGE_TABLE_BINDING && s == 1u) {
-                uint8_t table[16 * STORAGE_TABLE_ENTRIES] = { 0 };
-                for (uint32_t k = 0; k < STORAGE_TABLE_ENTRIES; k++) {
-                    uint32_t sz = (uint32_t)r->st->gstorage[s][k].size;
-                    memcpy(table + 16 * k, &r->st->gstorage[s][k].addr, 8);
-                    memcpy(table + 16 * k + 8, &sz, 4);
-                }
-                int trc = bank_of(r, table, sizeof table, &bi[n]);
+            if (b == PUSH_BINDING) {
+                int trc = bank_of(r, r->st->gfx_push[0], NVN_PUSH_BYTES, &bi[n]);
                 if (trc != RL_OK)
                     return trc;
                 wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -2113,18 +2105,20 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_PUSH_COMPUTE_CONSTANTS:
     case NVN_CMD_PUSH_GRAPHICS_CONSTANTS: {
         bool compute = e->op == NVN_CMD_PUSH_COMPUTE_CONSTANTS;
-        uint32_t stage = compute ? NVN_STAGE_COMPUTE : (uint32_t)e->x[1] & 7u;
-        uint32_t slot = compute ? (uint32_t)e->x[1] : 0, off = (uint32_t)e->x[2];
+        uint32_t slot = compute ? (uint32_t)e->x[1] : (uint32_t)e->x[1] & 7u, off = (uint32_t)e->x[2];
         uint32_t size = (uint32_t)e->x[3] < NVN_PUSH_BYTES ? (uint32_t)e->x[3] & ~3u : NVN_PUSH_BYTES;
         const uint8_t *data = nvn_cmd_bytes(r->s, e->x[4]);
-        if (stage >= NVN_STAGES || slot >= NVN_PUSH_SLOTS || off % 4 || off + size > NVN_PUSH_BYTES)
-            return nvn_vk_stop(r, "%s of %u bytes at offset %u into slot %u of stage %u", nvn_cmd_name(e->op), size,
-                               off, slot, stage);
+        if (slot >= (compute ? NVN_PUSH_SLOTS : NVN_GFX_PUSH_SLOTS) || off % 4 || off + size > NVN_PUSH_BYTES)
+            return nvn_vk_stop(r, "%s of %u bytes at offset %u into slot %u", nvn_cmd_name(e->op), size, off, slot);
         if (size && !data)
             return nvn_vk_stop(r, "%s without its data", nvn_cmd_name(e->op));
+        uint8_t *dst = compute ? st->push[NVN_STAGE_COMPUTE][slot] : st->gfx_push[slot];
         if (size)
-            memcpy(st->push[stage][slot] + off, data, size);
-        st->push_used[stage] |= 1u << slot;
+            memcpy(dst + off, data, size);
+        if (compute)
+            st->push_used[NVN_STAGE_COMPUTE] |= 1u << slot;
+        else
+            st->gfx_push_used |= 1u << slot;
         return RL_OK;
     }
     case NVN_CMD_SET_DEPTH_CLAMP:

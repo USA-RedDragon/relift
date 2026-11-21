@@ -176,6 +176,30 @@ static uint32_t word_at(const nvn_gfx *st, uint32_t stage, uint32_t at)
     return w;
 }
 
+TEST(nvn_replay_graphics_pushes_fill_the_slot_the_game_names)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    const uint64_t words[2] = { 0x3f8000003f000000ull, 0x4000000040400000ull };
+    nvn_cmdset *s = handle_set(words, 2);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.st = &st;
+    r.s = s;
+    nvn_cmd p = { .op = NVN_CMD_PUSH_GRAPHICS_CONSTANTS, .x = { 0, 2, 0x40, 16, NVN_SNAP } };
+    CHECK_EQ(nvn_draw_cmd(&r, &p), RL_OK);
+    CHECK_EQ(memcmp(st.gfx_push[2] + 0x40, words, 16), 0);
+    CHECK_EQ(st.gfx_push_used, 1u << 2);
+    for (uint32_t i = 0; i < NVN_STAGES; i++)
+        CHECK_EQ(st.push_used[i], 0u);
+    nvn_cmd q = { .op = NVN_CMD_PUSH_GRAPHICS_CONSTANTS, .x = { 0, 8 + 1, 0, 8, NVN_SNAP } };
+    CHECK_EQ(nvn_draw_cmd(&r, &q), RL_OK);
+    CHECK_EQ(memcmp(st.gfx_push[1], words, 8), 0);
+    CHECK_EQ(st.gfx_push_used, (1u << 2) | (1u << 1));
+    free(s->bytes);
+    free(s);
+}
+
 TEST(nvn_replay_separate_binds_land_where_the_driver_writes_them)
 {
     static nvn_gfx st;

@@ -46,6 +46,9 @@
 /** @brief Pushed constant slots of a stage and bytes of each (the driver clamps a push to 0x100 bytes). */
 #define NVN_PUSH_SLOTS 4u
 #define NVN_PUSH_BYTES 0x100u
+/** @brief Graphics push constant slots (the driver keeps slot & 7); every graphics stage reads slot n as c[24 + n]. */
+#define NVN_GFX_PUSH_SLOTS 8u
+#define NVN_GFX_PUSH_BANK 24u
 /** @brief GPU counter types 0 (timestamp) to 14 (transform feedback primitives written); 15 (ZCull statistics) is not counted. */
 #define NVN_COUNTERS 15u
 /** @brief NVNcounterType of a timestamp taken at the top of the pipe. */
@@ -236,12 +239,19 @@ typedef struct nvn_gfx {
     /** @brief Image handles bound per stage and slot. */
     uint32_t image[NVN_STAGES][NVN_IMAGE_SLOTS];
     /**
-     * @brief Constants pushed with nvnCommandBufferPushGraphicsConstants (slot
-     * 0 of the stage) and PushComputeConstants (the slot the program names):
-     * NVN_PUSH_BYTES bytes each, the most the driver writes at once.
+     * @brief Constants pushed with nvnCommandBufferPushComputeConstants (the
+     * slot the program names): NVN_PUSH_BYTES bytes each, the most the driver
+     * writes at once. Only the compute stage's entries are used.
      */
     uint8_t push[NVN_STAGES][NVN_PUSH_SLOTS][NVN_PUSH_BYTES];
     uint32_t push_used[NVN_STAGES];
+    /**
+     * @brief Constants pushed with nvnCommandBufferPushGraphicsConstants, by
+     * slot: one set for all graphics stages, which read slot n as constant
+     * bank c[24 + n].
+     */
+    uint8_t gfx_push[NVN_GFX_PUSH_SLOTS][NVN_PUSH_BYTES];
+    uint32_t gfx_push_used;
     /** @brief Each stage's c[2] as the driver fills it. */
     uint8_t bank2[NVN_STAGES][NVN_BANK2_BYTES];
     /** @brief bank2 as the bound programs read it: each texture handle names the layer's slot, not the texture id (nvn_texset_bind). */
