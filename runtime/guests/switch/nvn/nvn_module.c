@@ -352,6 +352,8 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     }
     m->stage = stage;
     m->nrecs = nvn_shader_iface(key, m->recs, NVN_MODULE_RECS);
+    for (uint32_t i = 0; i < m->nrecs; i++)
+        m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
     if (!patch_spirv(w, n, stage, m)) {
         free(w);
         free(m);

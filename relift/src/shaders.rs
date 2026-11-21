@@ -67,7 +67,7 @@ pub const RECORD_GLOBAL_MEMORY: u32 = 2;
 /// An interface record: the program reads a bound texture handle.
 pub const RECORD_TEXTURE: u32 = 3;
 /// The program stores through, or does an atomic read-modify-write on, 64-bit global addresses.
-pub const RECORD_GLOBAL_STORE: u32 = 4;
+pub const RECORD_GLOBAL_STORE: u32 = 7;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.

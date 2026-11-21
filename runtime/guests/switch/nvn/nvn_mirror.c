@@ -13,8 +13,9 @@
  *   buffer copy) notes the bytes it can reach. The layer completes every batch before its submit returns, so when a
  *   batch completes, those bytes are copied back, and only the pages that differ, before the game can observe them.
  *
- * Shaders reach pools through the storage buffer ranges the game binds; an address a program builds from other data
- * is outside what the layer notes, so a write through one stays on the device.
+ * Shaders reach pools through the storage buffer ranges the game binds, which are noted exactly. A program whose
+ * translation stores through addresses it builds from other data (NVN_IFACE_GLOBAL_STORE) can write anywhere, so every
+ * mirror is noted as written for its batch and the pages that differ are copied back.
  */
 #include "nvn_vk.h"
 
@@ -397,6 +398,18 @@ void nvn_mirror_written_guest(uint64_t guest, uint64_t size)
             mi.pending[mi.npending++] = (span){ m, off, len };
         break;
     }
+    pthread_mutex_unlock(&mi.lock);
+}
+
+void nvn_mirror_written_all(void)
+{
+    if (!mi.n)
+        return;
+    pthread_once(&mi_once, mi_init);
+    pthread_mutex_lock(&mi.lock);
+    for (uint32_t i = 0; i < mi.n; i++)
+        if (grow((void **)&mi.pending, mi.npending, &mi.cappending, sizeof *mi.pending))
+            mi.pending[mi.npending++] = (span){ mi.v[i], 0, mi.v[i]->size };
     pthread_mutex_unlock(&mi.lock);
 }
 

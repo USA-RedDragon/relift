@@ -470,6 +470,8 @@ bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out)
  * program with key (relift build writes the helpers under keys made from the mesh program's).
  */
 void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65]);
+/** @brief Record kind: the program stores or does atomic read-modify-writes through 64-bit global addresses. */
+#define NVN_IFACE_GLOBAL_STORE 7u
 /** @brief Up to max interface records of the translation with key to out; the count (0 without an entry). */
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max);
 /** @brief Shader stages a program holds. */
@@ -513,6 +515,8 @@ bool nvn_vk_can_import(void);
 void nvn_mirror_written(uint64_t gpu, uint64_t size);
 /** @brief As nvn_mirror_written, for guest bytes (a buffer texture's storage the device wrote). */
 void nvn_mirror_written_guest(uint64_t guest, uint64_t size);
+/** @brief Notes every byte of every mirror as possibly written: a program stores through addresses it builds itself. */
+void nvn_mirror_written_all(void);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */
 uint64_t nvn_gpu_guest(uint64_t gpu);
 /**

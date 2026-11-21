@@ -1227,6 +1227,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
         return rc;
+    for (uint32_t s = 0; s < 5; s++)
+        if (mods[s] && mods[s]->global_store)
+            nvn_mirror_written_all();
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
@@ -1800,6 +1803,8 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         return rc;
     for (uint32_t i = 0; i < nssbo; i++)
         nvn_mirror_written(st->storage[i].addr, st->storage[i].size);
+    if (m->global_store)
+        nvn_mirror_written_all();
     nvn_vk_begin(r);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);

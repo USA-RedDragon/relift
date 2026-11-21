@@ -31,6 +31,8 @@ typedef struct nvn_module {
     bool images, other_sets;
     /** @brief The program reads or writes the compute back end's mesh buffer (set NVN_MESH_BUFFER_SET, binding NVN_MESH_BUFFER_BINDING). */
     bool mesh_buffer;
+    /** @brief Its translation stores through 64-bit global addresses (NVN_IFACE_GLOBAL_STORE). */
+    bool global_store;
     /** @brief Output locations the program declares (a vertex program's varyings). */
     uint32_t outputs;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
