@@ -7,7 +7,7 @@
  * one line of trace.jsonl: the programs, the render targets, the fixed-function and dynamic state, every bound
  * uniform and storage buffer with its GPU and guest address, the pushed constants, and every texture and image
  * the command bound with its host image, format, size, view and swizzle. The bytes go to files that the lines
- * name: buffer ranges before and after the command, images and render targets before and after it (level 0, every
+ * name: buffer ranges before and after the command, images and render targets before and after it (every level and
  * layer, in the host image's format). Files are named by a hash of their bytes, so a range that did not change
  * is written once. With RELIFT_NVN_TRACE_GBUFFER set, the trace starts at the first frame after a frame that drew into four
  * or more render targets at once (a deferred renderer's G-buffer pass), at or past <present>. Each traced command submits the batch before and after it so the files show the GPU's work.
@@ -26,6 +26,7 @@
 #define MAX_TEX 128u
 #define MAX_CACHE 1024u
 #define MAX_FILES 65536u
+#define MAX_COPIES 512u
 #define BUF_CAP (64ull << 20)
 #define IMG_CAP (512ull << 20)
 
@@ -196,6 +197,21 @@ static void dump_image(replay *r, vimg *v, bool cacheable, char *name)
     uint64_t bytes = image_bytes(v, &layers);
     if (!bytes || bytes > IMG_CAP)
         return;
+    bool mips = false;
+    uint64_t alloc = bytes;
+    {
+        uint32_t bpb, bw, bh;
+        if (!volume && !v->decoded && v->aspect == VK_IMAGE_ASPECT_COLOR_BIT && v->d.levels > 1 && layers <= 64 &&
+            nvn_tex_format(v->d.format, &bpb, &bw, &bh) && bw == 1 && bh == 1 && (uint64_t)layers * v->d.levels <= MAX_COPIES) {
+            uint64_t extra = 0;
+            for (uint32_t lv = 1; lv < v->d.levels; lv++)
+                extra += (uint64_t)(v->d.width >> lv ? v->d.width >> lv : 1) * (v->d.height >> lv ? v->d.height >> lv : 1) * bpb * layers;
+            if (bytes + extra <= IMG_CAP) {
+                mips = true;
+                alloc = bytes + extra;
+            }
+        }
+    }
     if (cacheable)
         for (uint32_t i = 0; i < tr.ncache; i++)
             if (tr.cache[i].v == v && tr.cache[i].written == v->written) {
@@ -203,7 +219,7 @@ static void dump_image(replay *r, vimg *v, bool cacheable, char *name)
                 return;
             }
     staging s;
-    if (!nvn_vk_staging_new(&s, bytes))
+    if (!nvn_vk_staging_new(&s, alloc))
         return;
     if (!nvn_vk_flush(r)) {
         nvn_vk_staging_free(&s);
@@ -212,16 +228,31 @@ static void dump_image(replay *r, vimg *v, bool cacheable, char *name)
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
     uint64_t per = bytes / layers;
-    VkBufferImageCopy bic[64];
+    VkBufferImageCopy bic[MAX_COPIES];
     uint32_t n = layers < 64 ? layers : 64;
     for (uint32_t l = 0; l < n; l++)
         bic[l] = (VkBufferImageCopy){ .bufferOffset = per * l,
                                       .imageSubresource = { .aspectMask = v->aspect, .baseArrayLayer = volume ? 0 : l, .layerCount = 1 },
                                       .imageExtent = { v->d.width, v->d.height, volume ? v->d.depth : 1 } };
-    VK(vkCmdCopyImageToBuffer)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, s.buf, n, bic);
+    uint64_t total = per * n;
+    uint32_t nbic = n;
+    if (mips) {
+        uint32_t bpb, bw, bh;
+        nvn_tex_format(v->d.format, &bpb, &bw, &bh);
+        for (uint32_t lv = 1; lv < v->d.levels; lv++) {
+            uint32_t lw = v->d.width >> lv ? v->d.width >> lv : 1, lh = v->d.height >> lv ? v->d.height >> lv : 1;
+            for (uint32_t l = 0; l < layers; l++) {
+                bic[nbic++] = (VkBufferImageCopy){ .bufferOffset = total,
+                                                   .imageSubresource = { .aspectMask = v->aspect, .mipLevel = lv, .baseArrayLayer = l, .layerCount = 1 },
+                                                   .imageExtent = { lw, lh, 1 } };
+                total += (uint64_t)lw * lh * bpb;
+            }
+        }
+    }
+    VK(vkCmdCopyImageToBuffer)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, s.buf, nbic, bic);
     nvn_vk_barrier(g.cb);
     if (nvn_vk_flush(r))
-        put_file("imgs", "raw", s.map, per * n, name);
+        put_file("imgs", "raw", s.map, total, name);
     nvn_vk_staging_free(&s);
     if (cacheable && name[0]) {
         uint32_t slot = tr.ncache < MAX_CACHE ? tr.ncache++ : 0;

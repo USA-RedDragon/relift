@@ -5,12 +5,14 @@
   python3 -I nvn_trace.py show FRAME_DIR COMMAND
   python3 -I nvn_trace.py writes FRAME_DIR [ADDRESS]
   python3 -I nvn_trace.py buffer FRAME_DIR COMMAND STAGE:KIND:SLOT [--when pre|post] [--as f32|u32] [--count N]
-  python3 -I nvn_trace.py image FRAME_DIR COMMAND STORAGE [--when pre|post] [--ppm FILE]
+  python3 -I nvn_trace.py image FRAME_DIR COMMAND STORAGE [--when pre|post] [--level N] [--layer N] [--ppm FILE]
 
 FRAME_DIR is the frame-<n> folder holding trace.jsonl. A command is its number in the trace; an address is a GPU
 or guest address of a buffer, or a storage address of an image, as hex. `writes` lists the commands after which a
 buffer or an image with that address (any, when none is given) holds other bytes than before. `image` prints each
-channel's range and mean and, with --ppm, writes the first layer as a picture (values clamped to 0..1).
+channel's range and mean of the chosen level (default 0) and layer (default 0) and, with --ppm, writes it as a
+picture (values clamped to 0..1). An image file holds level 0 of every layer, then each further level, every layer
+of it, in the host image's format (uncompressed color images; block formats and volumes keep level 0).
 Standard library only.
 """
 
@@ -144,7 +146,35 @@ def cmd_buffer(frame, index, which, when, as_type, count):
     raise SystemExit("no such buffer")
 
 
-def cmd_image(frame, index, storage, when, ppm):
+BYTES = {37: 4, 43: 4, 44: 4, 50: 4, 97: 8, 83: 4, 76: 2, 100: 4, 126: 4, 122: 4}
+
+
+def level_slice(t, data, level, layer):
+    """Returns (width, height, bytes) of one level and layer of an image file."""
+    bpp = BYTES.get(t["vk_format"])
+    if bpp is None:
+        raise SystemExit("image format %d is not decoded by this reader" % t["vk_format"])
+    w, h = t["width"], t["height"]
+    layers = max(1, len(data) // (w * h * bpp)) if level == 0 else None
+    if layers is None:
+        total = 0
+        layers = 0
+        for cand in range(1, 65):
+            size = sum(max(1, w >> lv) * max(1, h >> lv) * bpp * cand for lv in range(t["levels"]))
+            if size == len(data):
+                layers = cand
+                break
+        if not layers:
+            raise SystemExit("this image file holds only level 0")
+    off = 0
+    for lv in range(level):
+        off += max(1, w >> lv) * max(1, h >> lv) * bpp * layers
+    lw, lh = max(1, w >> level), max(1, h >> level)
+    off += lw * lh * bpp * layer
+    return lw, lh, data[off:off + lw * lh * bpp]
+
+
+def cmd_image(frame, index, storage, when, ppm, level=0, layer=0):
     for c in load(frame):
         if c["i"] != index:
             continue
@@ -154,9 +184,9 @@ def cmd_image(frame, index, storage, when, ppm):
             name = t.get(when)
             if not name:
                 raise SystemExit("no %s file for that image" % when)
-            w, h = t["width"], t["height"]
-            nch, px = decode(read(frame, name), t["vk_format"], w, h)
-            print("storage %s fmt %d (vk %d) %dx%d file %s" % (t["storage"], t["format"], t["vk_format"], w, h, name))
+            w, h, chunk = level_slice(t, read(frame, name), level, layer)
+            nch, px = decode(chunk, t["vk_format"], w, h)
+            print("storage %s fmt %d (vk %d) level %d layer %d %dx%d file %s" % (t["storage"], t["format"], t["vk_format"], level, layer, w, h, name))
             for k in range(nch):
                 col = [p[k] for p in px if p[k] == p[k]]
                 if col:
@@ -198,6 +228,8 @@ def main():
     p.add_argument("command", type=int)
     p.add_argument("storage", type=num)
     p.add_argument("--when", choices=["pre", "post"], default="post")
+    p.add_argument("--level", type=int, default=0)
+    p.add_argument("--layer", type=int, default=0)
     p.add_argument("--ppm")
     a = ap.parse_args()
     if a.cmd == "summary":
@@ -209,7 +241,7 @@ def main():
     elif a.cmd == "buffer":
         cmd_buffer(a.frame, a.command, a.which, a.when, a.as_type, a.count)
     else:
-        cmd_image(a.frame, a.command, a.storage, a.when, a.ppm)
+        cmd_image(a.frame, a.command, a.storage, a.when, a.ppm, a.level, a.layer)
 
 
 if __name__ == "__main__":
