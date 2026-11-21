@@ -3292,6 +3292,15 @@ static void present_rate(uint64_t total)
            (unsigned long long)total, (double)(total - last_total) * 1e9 / (double)(now - last_ns),
            (double)(now - last_ns) / 1e9, (unsigned long long)starts, (unsigned long long)faults,
            (unsigned long long)rl_input_host_events(RL_INPUT_HOST_KINDS));
+    uint64_t up, down, syncs;
+    static uint64_t up0, down0, syncs0;
+    nvn_mirror_stats(&up, &down, &syncs);
+    if (up || down)
+        rl_log(RL_LOG_INFO, "nvn", "per present: mirror uploads %.1f KiB in %.2f syncs, readbacks changed %.1f KiB",
+               (double)(up - up0) / 1024 / frames, (double)(syncs - syncs0) / frames, (double)(down - down0) / 1024 / frames);
+    up0 = up;
+    down0 = down;
+    syncs0 = syncs;
     last_ns = now;
     last_total = total;
 }
