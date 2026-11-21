@@ -214,6 +214,15 @@ impl Ctx {
         }
     }
 
+    /// As [`Self::global_ptr`], for a pointer the program stores or does an
+    /// atomic read-modify-write through: the interface records that the
+    /// program writes global memory, so a host that mirrors the memory
+    /// knows to copy it back.
+    pub(crate) fn global_ptr_w(&mut self, addr: u32, ty: u32) -> u32 {
+        self.iface.global_store = true;
+        self.global_ptr(addr, ty)
+    }
+
     /// Extracts the sub-word `size` at byte address `addr` from the 32-bit
     /// word that contains it.
     pub(crate) fn extract_sub(&mut self, word: u32, addr: u32, size: Size) -> u32 {
@@ -421,7 +430,7 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
         let wa = c.addr_align(addr, 2);
         let lo = c.addr_low(addr);
         let (keep, bits) = c.insert_sub(parts[0], lo, m.size);
-        let p = c.global_ptr(wa, u);
+        let p = c.global_ptr_w(wa, u);
         c.cas_insert(p, scope.unwrap_or(SCOPE_DEVICE), keep, bits);
         return Ok(());
     }
@@ -435,7 +444,7 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         c.m.emit(op::COMPOSITE_CONSTRUCT, ty, &parts)
     };
-    let p = c.global_ptr(addr, ty);
+    let p = c.global_ptr_w(addr, ty);
     c.m.emit_void(op::STORE, &[p, v, ALIGNED, 4 * n]);
     Ok(())
 }

@@ -66,6 +66,8 @@ pub const RECORD_TEXTURE_DIM: u32 = 1;
 pub const RECORD_GLOBAL_MEMORY: u32 = 2;
 /// An interface record: the program reads a bound texture handle.
 pub const RECORD_TEXTURE: u32 = 3;
+/// The program stores through, or does an atomic read-modify-write on, 64-bit global addresses.
+pub const RECORD_GLOBAL_STORE: u32 = 4;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -436,6 +438,9 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     }
     if i.global_memory {
         recs.push([RECORD_GLOBAL_MEMORY, 0, 0, 0]);
+    }
+    if i.global_store {
+        recs.push([RECORD_GLOBAL_STORE, 0, 0, 0]);
     }
     recs
 }

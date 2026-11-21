@@ -141,9 +141,9 @@ impl Ctx {
         let phi = self.global_ptr(hi_addr, u);
         let hi = self.m.emit(spv::ATOMIC_LOAD, u, &[phi, scope, relaxed]);
         if let Some((nlo, nhi)) = f(self, (lo, hi)) {
-            let plo = self.global_ptr(addr, u);
+            let plo = self.global_ptr_w(addr, u);
             self.m.emit_void(ATOMIC_STORE, &[plo, scope, relaxed, nlo]);
-            let phi = self.global_ptr(hi_addr, u);
+            let phi = self.global_ptr_w(hi_addr, u);
             self.m.emit_void(ATOMIC_STORE, &[phi, scope, relaxed, nhi]);
         }
         self.m.emit_void(op::MEMORY_BARRIER, &[scope, fence]);

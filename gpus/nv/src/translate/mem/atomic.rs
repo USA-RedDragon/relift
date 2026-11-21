@@ -204,7 +204,7 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<Vec
         let u = c.u32t();
         let xv = c.load_reg(x);
         let yv = y.map(|y| c.load_reg(y));
-        let ptr = c.global_ptr(addr, u);
+        let ptr = c.global_ptr_w(addr, u);
         let scope = c.m.c_u32(SCOPE_DEVICE);
         return Ok(vec![rmw(c, ptr, scope, s, u, xv, yv)]);
     }
@@ -222,7 +222,7 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<Vec
     let wide = |c: &mut Ctx, (lo, hi): (u32, u32)| c.addr_pair(lo, hi);
     let xw = wide(c, xv);
     let yw = yv.map(|v| wide(c, v));
-    let ptr = c.global_ptr(addr, t);
+    let ptr = c.global_ptr_w(addr, t);
     let scope = c.m.c_u32(SCOPE_DEVICE);
     let old = rmw(c, ptr, scope, s, t, xw, yw);
     let (lo, hi) = c.addr_words(old);

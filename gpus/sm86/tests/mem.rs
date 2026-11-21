@@ -80,6 +80,15 @@ fn stg(size: u64, a: u64, off: u64, s: u64) -> [u8; 16] {
 }
 
 #[test]
+fn only_global_stores_mark_the_program_as_writing() {
+    let loads = run(&[ldg(SIZE_S16, 2, 4, 2)], &["S16"]);
+    assert!(loads.interface.global_memory);
+    assert!(!loads.interface.global_store);
+    let stores = run(&[stg(SIZE_U8, 4, 1, 2)], &["STG.E.EF.U8"]);
+    assert!(stores.interface.global_store);
+}
+
+#[test]
 fn sub_word_global_access() {
     let s = run(
         &[ldg(SIZE_S16, 2, 4, 2), stg(SIZE_U8, 4, 1, 2)],

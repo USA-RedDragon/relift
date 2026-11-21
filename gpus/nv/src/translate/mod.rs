@@ -98,6 +98,9 @@ pub struct Interface {
     /// The program dereferences 64-bit global addresses (buffer device
     /// addresses).
     pub global_memory: bool,
+    /// The program stores to, or does an atomic read-modify-write on, 64-bit
+    /// global addresses.
+    pub global_store: bool,
     /// Bytes of shared memory addressed (compute), rounded up to a word.
     pub shared_bytes: u32,
     /// Bytes of local (per-thread) memory addressed.

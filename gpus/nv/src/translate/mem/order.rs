@@ -231,14 +231,14 @@ impl Ctx {
                 let v2 = self.m.t_vec(u, 2);
                 let pair = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, half);
                 let v = self.m.emit(op::BITCAST, t, &[pair]);
-                let p = self.global_ptr(a, t);
+                let p = self.global_ptr_w(a, t);
                 self.m.emit_void(ATOMIC_STORE, &[p, sc, relaxed, v]);
             }
             return;
         }
         for (k, &v) in vals.iter().enumerate() {
             let a = self.word_address(addr, k as u32);
-            let p = self.global_ptr(a, u);
+            let p = self.global_ptr_w(a, u);
             self.m.emit_void(ATOMIC_STORE, &[p, sc, relaxed, v]);
         }
     }
