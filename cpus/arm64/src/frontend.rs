@@ -8,8 +8,6 @@ use crate::cpu::Cpu;
 use crate::lift::{self, sail, system};
 use crate::regs;
 
-/// `CNTFRQ_EL0`, `RL_CNTFRQ` in `abi.h`.
-const CNTFRQ: u128 = 19_200_000;
 /// `CTR_EL0`, `RL_CTR_EL0` in `abi.h`.
 const CTR_EL0: u128 = 0x8444_c004;
 /// `DCZID_EL0`, `RL_DCZID_EL0` in `abi.h`.
@@ -117,8 +115,7 @@ impl Frontend for Arm64 {
 
     fn wasm_intrinsic(&self, name: &str) -> Option<WasmIntrinsic> {
         Some(match name {
-            system::CNTPCT | system::WFE => WasmIntrinsic::Import,
-            system::CNTFRQ => WasmIntrinsic::Const(CNTFRQ),
+            system::CNTPCT | system::CNTFRQ | system::WFE => WasmIntrinsic::Import,
             system::CTR => WasmIntrinsic::Const(CTR_EL0),
             system::DCZID => WasmIntrinsic::Const(DCZID_EL0),
             system::DC_ZVA => WasmIntrinsic::ZeroBlock(DC_ZVA_BYTES),
@@ -339,6 +336,23 @@ mod tests {
     }
 
     #[test]
+    fn the_counter_rate_is_read_at_run_time() {
+        let f = ARM64;
+        assert_eq!(
+            f.intrinsic(system::CNTFRQ, &[]).as_deref(),
+            Some("rl_mrs_cntfrq_el0()")
+        );
+        assert_eq!(
+            f.wasm_intrinsic(system::CNTFRQ),
+            Some(WasmIntrinsic::Import)
+        );
+        assert_eq!(
+            f.wasm_intrinsic(system::CNTPCT),
+            Some(WasmIntrinsic::Import)
+        );
+    }
+
+    #[test]
     fn wasm_intrinsics_match_the_c_header() {
         let h = include_str!("../../../runtime/cpus/arm64/include/relift/arm64/abi.h");
         let define = |name: &str| -> u128 {
@@ -354,7 +368,7 @@ mod tests {
                 None => v.parse().expect("decimal"),
             }
         };
-        assert_eq!(CNTFRQ, define("RL_CNTFRQ"));
+        assert_eq!(19_200_000, define("RL_CNTFRQ"));
         assert_eq!(CTR_EL0, define("RL_CTR_EL0"));
         assert_eq!(DCZID_EL0, define("RL_DCZID_EL0"));
         assert_eq!(u128::from(DC_ZVA_BYTES), define("RL_DC_ZVA_BYTES"));
