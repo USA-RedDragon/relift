@@ -367,3 +367,25 @@ TEST(nvn_indirect_mesh_draws_stop_when_their_records_or_count_leave_the_pool)
     nvn_cmd m = { .op = NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT, .x = { 0, gpu + 0x3fff0, 4, 16 } };
     CHECK_EQ(nvn_draw_cmd(&r, &m), RL_PENDING);
 }
+
+TEST(nvn_integer_attributes_widen_to_four_words)
+{
+    const uint8_t b8[8] = { 0x80, 0x7f, 0xff, 0x00, 0x01, 0xfe, 0x02, 0x00 };
+    uint32_t out[8];
+    nvn_expand_integer(b8, 4, VK_FORMAT_R8G8B8_SINT, 2, out);
+    const uint32_t w8[8] = { 0xffffff80u, 0x7fu, 0xffffffffu, 1u, 1u, 0xfffffffeu, 2u, 1u };
+    CHECK(memcmp(out, w8, sizeof out) == 0);
+    nvn_expand_integer(b8, 4, VK_FORMAT_R8G8_UINT, 2, out);
+    const uint32_t u8w[8] = { 0x80u, 0x7fu, 0u, 1u, 1u, 0xfeu, 0u, 1u };
+    CHECK(memcmp(out, u8w, sizeof out) == 0);
+    const uint16_t b16[4] = { 0x8000, 0x1234, 0xffff, 0x0001 };
+    nvn_expand_integer((const uint8_t *)b16, 4, VK_FORMAT_R16G16_SINT, 2, out);
+    const uint32_t w16[8] = { 0xffff8000u, 0x1234u, 0u, 1u, 0xffffffffu, 1u, 0u, 1u };
+    CHECK(memcmp(out, w16, sizeof out) == 0);
+    nvn_expand_integer((const uint8_t *)b16, 4, VK_FORMAT_R16G16_UINT, 2, out);
+    const uint32_t u16[8] = { 0x8000u, 0x1234u, 0u, 1u, 0xffffu, 1u, 0u, 1u };
+    CHECK(memcmp(out, u16, sizeof out) == 0);
+    const uint32_t b32[4] = { 0x80000000u, 7u, 0xdeadbeefu, 9u };
+    nvn_expand_integer((const uint8_t *)b32, 16, VK_FORMAT_R32G32B32A32_SINT, 1, out);
+    CHECK(memcmp(out, b32, 16) == 0);
+}

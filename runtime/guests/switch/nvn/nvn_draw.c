@@ -391,7 +391,7 @@ static bool integer_layout(VkFormat f, uint32_t *n, uint32_t *bytes, bool *sign)
  * format feeds only an integer-typed input; an R32G32B32A32_SFLOAT input
  * over these words gives the program the integer's bits unchanged.
  */
-static void expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_t n, uint32_t *out)
+void nvn_expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_t n, uint32_t *out)
 {
     uint32_t comps, bytes;
     bool sign;
@@ -400,10 +400,16 @@ static void expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint
         const uint8_t *p = src + v * stride;
         uint32_t w[4] = { 0, 0, 0, 1 };
         for (uint32_t c = 0; c < comps; c++) {
-            uint32_t x = 0;
-            memcpy(&x, p + c * bytes, bytes);
-            if (sign && bytes < 4 && (x >> (8 * bytes - 1)) & 1)
-                x |= ~0u << (8 * bytes);
+            uint32_t x;
+            if (bytes == 1) {
+                x = sign ? (uint32_t)(int32_t)(int8_t)p[c] : p[c];
+            } else if (bytes == 2) {
+                uint16_t h;
+                memcpy(&h, p + 2 * c, 2);
+                x = sign ? (uint32_t)(int32_t)(int16_t)h : h;
+            } else {
+                memcpy(&x, p + 4 * c, 4);
+            }
             w[c] = x;
         }
         memcpy(out + 4 * v, w, sizeof w);
@@ -1079,7 +1085,7 @@ static int stage_draw(replay *r, void *arg)
             uint32_t *w = malloc(n ? n * 16 : 16);
             if (!w)
                 return nvn_vk_stop(r, "out of memory expanding an integer vertex attribute");
-            expand_integer(r->mem + nvn_gpu_guest(st->vb[s].addr) + kp->ints[j].offset, kp->ints[j].stride, kp->ints[j].format,
+            nvn_expand_integer(r->mem + nvn_gpu_guest(st->vb[s].addr) + kp->ints[j].offset, kp->ints[j].stride, kp->ints[j].format,
                            n, w);
             bool ok = nvn_vk_upload_bytes(r, w, n ? n * 16 : 16, 0, 16, &dd->int_off[j]);
             free(w);

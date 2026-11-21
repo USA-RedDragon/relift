@@ -372,6 +372,11 @@ void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, 
 bool nvn_vk_begin(replay *r);
 
 /**
+ * @brief Writes n elements of an integer vertex attribute of format f, read from src stride bytes apart, as four
+ * 32-bit words each (missing components 0, 0, 1; signed formats sign-extended) into out (nvn_draw.c).
+ */
+void nvn_expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_t n, uint32_t *out);
+/**
  * @brief Submits what r recorded and waits for it; the arena is free again
  * after. With nothing recorded, it frees what a command put in the arena
  * before recording (that counts as a submit for nvn_vk_stage).
