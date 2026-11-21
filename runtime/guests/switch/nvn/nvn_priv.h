@@ -495,6 +495,24 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_i
 bool nvn_vk_address_replay(void);
 /** @brief Frees an import (waits for the device). */
 void nvn_vk_unimport(nvn_import *im);
+/**
+ * @brief Makes a device buffer of size bytes whose device address is the GPU address, kept equal to the size guest
+ * bytes at guest (nvn_mirror.c), for a host that cannot import guest pages. False when the device refuses.
+ */
+bool nvn_mirror_make(uint64_t guest, uint64_t size, nvn_import *out);
+/** @brief Frees a mirror made by nvn_mirror_make (waits for the device). */
+void nvn_mirror_free(nvn_import *im);
+/** @brief Whether the buffer is a mirror's: its bytes are the guest's only once nvn_mirror_sync recorded the copies. */
+bool nvn_mirror_buffer(const void *buf);
+/** @brief Whether the host device can import guest pages (VK_EXT_external_memory_host). */
+bool nvn_vk_can_import(void);
+/**
+ * @brief Notes that the device may have written the size bytes at GPU address gpu, so that when the batch completes
+ * they are copied to guest memory. Nothing for an address outside the mirrors.
+ */
+void nvn_mirror_written(uint64_t gpu, uint64_t size);
+/** @brief As nvn_mirror_written, for guest bytes (a buffer texture's storage the device wrote). */
+void nvn_mirror_written_guest(uint64_t guest, uint64_t size);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */
 uint64_t nvn_gpu_guest(uint64_t gpu);
 /**

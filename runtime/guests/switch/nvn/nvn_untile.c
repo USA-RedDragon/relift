@@ -103,12 +103,15 @@ void nvn_untile_release(void)
 
 uint64_t nvn_untile_moves(void) { return U.moves; }
 
-/** @brief The device address of guest bytes [guest, guest + size) through an imported pool; 0 when none holds them. */
+/**
+ * @brief The device address of guest bytes [guest, guest + size) through an imported pool; 0 when none holds them or
+ * the pool is a mirror (nvn_mirror.c), whose bytes the moves would read stale and write without a readback.
+ */
 static uint64_t guest_address(uint64_t guest, uint64_t size)
 {
     void *buf;
     uint64_t off;
-    if (!nvn_guest_buffer(guest, size, &buf, &off))
+    if (!nvn_guest_buffer(guest, size, &buf, &off) || nvn_mirror_buffer(buf))
         return 0;
     VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = (VkBuffer)buf };
     uint64_t a = VK(vkGetBufferDeviceAddress)(g.dev, &ai);

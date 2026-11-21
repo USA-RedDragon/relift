@@ -7,10 +7,13 @@
  * is that buffer's device address, so the translated programs dereference
  * the addresses the game computes from it, and the layer turns a GPU
  * address back into the guest address of the same byte (nvn_gpu_guest).
- * Without an import a pool's GPU address is its guest address.
+ * A host without the import (or nvn.memory set to mirror) gets a device
+ * buffer kept equal to the guest bytes instead (nvn_mirror.c), with the same
+ * addresses. Without either a pool's GPU address is its guest address.
  */
 #include "nvn_priv.h"
 #include "services.h"
+#include <relift/settings.h>
 #include "vi.h"
 
 #include <pthread.h>
@@ -66,6 +69,10 @@ typedef struct nvn_pool {
      */
     bool mapped;
     uint64_t phys;
+    /** @brief The pool's storage is a mirror (nvn_mirror.c), not an import. */
+    bool mirrored;
+    /** @brief A virtual pool whose addresses lie inside its physical pool's mirror: im holds the address and the shared buffer, and owns nothing. */
+    bool alias;
 } nvn_pool;
 
 /**
@@ -80,12 +87,14 @@ static struct {
     struct pool_span {
         uint64_t gpu, size, memory;
         void *buf;
+        /** @brief The guest address of the buffer's first byte, which memory is at or past. */
+        uint64_t base;
     } *v;
     uint32_t n, cap;
     uint64_t max;
 } g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0, 0 };
 
-static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf)
+static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf, uint64_t base)
 {
     pthread_rwlock_wrlock(&g_pools.lock);
     if (g_pools.n == g_pools.cap) {
@@ -107,6 +116,7 @@ static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf)
     g_pools.v[i].size = size;
     g_pools.v[i].memory = memory;
     g_pools.v[i].buf = buf;
+    g_pools.v[i].base = base;
     if (size > g_pools.max)
         g_pools.max = size;
     pthread_rwlock_unlock(&g_pools.lock);
@@ -157,12 +167,12 @@ static const nvn_import *retired_of(uint64_t memory, uint64_t size, nvn_import *
 static struct pool_span g_freed[FREED_MAX];
 static uint32_t g_freed_n;
 
-/** @brief Drops the span of the import whose buffer is buf (spans of two imports may start at one address). */
-static void pools_remove(void *buf)
+/** @brief Drops the span of size bytes that starts at gpu over the import whose buffer is buf (spans of two imports may start at one address). */
+static void pools_remove(uint64_t gpu, uint64_t size, void *buf)
 {
     pthread_rwlock_wrlock(&g_pools.lock);
     for (uint32_t i = 0; i < g_pools.n; i++)
-        if (g_pools.v[i].buf == buf) {
+        if (g_pools.v[i].buf == buf && g_pools.v[i].gpu == gpu && g_pools.v[i].size == size) {
             g_freed[g_freed_n++ % FREED_MAX] = g_pools.v[i];
             memmove(&g_pools.v[i], &g_pools.v[i + 1], (g_pools.n - i - 1) * sizeof *g_pools.v);
             g_pools.n--;
@@ -253,7 +263,7 @@ bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off)
         const struct pool_span *p = &g_pools.v[i];
         if (p->buf && guest >= p->memory && guest - p->memory + size <= p->size) {
             *buf = p->buf;
-            *off = guest - p->memory;
+            *off = guest - p->base;
             found = true;
         }
     }
@@ -664,6 +674,31 @@ uint64_t nvnh_nvnQueueWaitSync(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+/** @brief nvn.memory: how pools reach the host device (see nvn_pool_back). */
+enum { MEMORY_AUTO = 0, MEMORY_IMPORT = 1, MEMORY_MIRROR = 2 };
+
+/**
+ * @brief Gives pool p a device buffer over its guest bytes: an import where the host has one, a mirror otherwise or
+ * when nvn.memory says mirror. False when neither works, which leaves the pool's GPU address its guest address.
+ */
+static bool pool_back(nvn_pool *p, uint64_t memory, uint64_t size, const nvn_import *again)
+{
+    int mode = rl_setting_enum("nvn.memory");
+    if (mode != MEMORY_MIRROR && nvn_vk_import(memory, size, again, &p->im))
+        return true;
+    if (mode != MEMORY_IMPORT && nvn_mirror_make(memory, size, &p->im)) {
+        static bool said;
+        if (!said) {
+            said = true;
+            rl_log(RL_LOG_INFO, "nvn", "memory pools are mirrored into device memory (%s)",
+                   mode == MEMORY_MIRROR ? "nvn.memory is mirror" : "the host device cannot import guest memory");
+        }
+        p->mirrored = true;
+        return true;
+    }
+    return false;
+}
+
 bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags)
 {
     nvn_pool *p = (nvn_pool *)nvn_obj_new(pool, NVN_POOL, sizeof *p);
@@ -673,8 +708,8 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
         p->flags = flags;
         bool virt = p->flags & NVN_POOL_VIRTUAL;
         nvn_import back;
-        if (!virt && nvn_vk_import(memory, size, retired_of(memory, size, &back), &p->im))
-            pools_add(p->im.gpu, size, memory, p->im.buf);
+        if (!virt && pool_back(p, memory, size, retired_of(memory, size, &back)))
+            pools_add(p->im.gpu, size, memory, p->im.buf, memory);
         else if (!virt)
             rl_log(RL_LOG_WARN, "nvn", "memory pool 0x%llx (0x%llx bytes at 0x%llx) is not imported into the host device; "
                    "its GPU address is its guest address",
@@ -844,10 +879,16 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
     (void)mem;
     nvn_pool *p = (nvn_pool *)nvn_obj_get(c->x[0], NVN_POOL);
     if (p && p->im.gpu) {
-        pools_remove(p->im.buf);
-        nvn_import gone = p->im;
-        nvn_vk_unimport(&p->im);
-        retire_import(p->memory, p->size, &gone);
+        pools_remove(p->im.gpu, p->size, p->im.buf);
+        if (p->alias) {
+            memset(&p->im, 0, sizeof p->im);
+        } else if (p->mirrored) {
+            nvn_mirror_free(&p->im);
+        } else {
+            nvn_import gone = p->im;
+            nvn_vk_unimport(&p->im);
+            retire_import(p->memory, p->size, &gone);
+        }
     }
     nvn_obj_free(p ? &p->o : NULL);
     return nvn_ret(c);
@@ -916,7 +957,8 @@ uint64_t nvnh_nvnMemoryPoolGetSize(rl_ctx *c, uint8_t *mem)
  * address the host gives it. As on the console, that range is the virtual
  * pool's own on hosts that address each allocation apart; a host whose
  * device addresses are the host pointers (llvmpipe) gives it the physical
- * pool's addresses of the same bytes instead, which reach the same bytes. One import is one linear
+ * pool's addresses of the same bytes instead, which reach the same bytes. A physical pool that is a mirror needs no
+ * second buffer: the virtual pool's addresses are the mirror's from the mapped distance. One import is one linear
  * map, so every request must map at the same distance into the same pool,
  * and anything else stops. The storage class (the page kind) only chooses
  * how the console's GPU compresses the pages, which the host does not model.
@@ -978,13 +1020,17 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
                                             (unsigned long long)pool, i);
         if (!p->mapped) {
             nvn_import back;
-            if (!q->im.gpu || !nvn_vk_import(memory, p->size, retired_of(memory, p->size, &back), &p->im))
+            if (q->mirrored) {
+                p->im = (nvn_import){ .buf = q->im.buf, .memory = NULL, .gpu = q->im.gpu + (poff - voff) };
+                p->alias = true;
+            } else if (!q->im.gpu || !nvn_vk_import(memory, p->size, retired_of(memory, p->size, &back), &p->im)) {
                 return (uint64_t)rl_guest_fatal(c, "nvn",
                                                 "nvnMemoryPoolMapVirtual(0x%llx): pool 0x%llx is not in the host "
                                                 "device, or its bytes from 0x%llx cannot be imported again",
                                                 (unsigned long long)pool, (unsigned long long)phys,
                                                 (unsigned long long)(poff - voff));
-            pools_add(p->im.gpu, p->size, memory, p->im.buf);
+            }
+            pools_add(p->im.gpu, p->size, memory, p->im.buf, p->alias ? q->memory : memory);
         }
         p->memory = memory;
         p->phys = phys;

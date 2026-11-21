@@ -416,6 +416,24 @@ bool nvn_vk_sync_uniforms(replay *r);
  * and it stops. Returns RL_OK or a pending stop.
  */
 int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what);
+/**
+ * @brief Records into the batch r is recording (starting one) the copies that bring the mirrors up to the guest's
+ * writes: only the pages written since the last copy. With may_flush and nothing recorded yet, a large upload is
+ * submitted in slices. Call it before recording a command that can read a pool. False when the device failed.
+ */
+bool nvn_mirror_sync(replay *r, bool may_flush);
+/** @brief Frees the staging of uploads once the batch that used it completed. */
+void nvn_mirror_flushed(void);
+/** @brief Whether the bytes noted by nvn_mirror_written still wait for a readback. */
+bool nvn_mirror_readback_pending(void);
+/** @brief Records copies of the next slice of the noted bytes into cb; they land in guest memory at nvn_mirror_apply_readback. */
+bool nvn_mirror_record_readback(VkCommandBuffer cb);
+/** @brief After the batch completed: writes the readback slice into guest memory, the pages that differ only. */
+void nvn_mirror_apply_readback(void);
+/** @brief Forgets the noted bytes (the device failed). */
+void nvn_mirror_drop_readback(void);
+/** @brief Bytes uploaded and read back and uploads made, for the stats line. */
+void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs);
 /** @brief Stops the game with a report (after flushing what r recorded). Returns RL_PENDING. */
 int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
 /** @brief The host format of an NVNformat; VK_FORMAT_UNDEFINED for one the layer does not map. */

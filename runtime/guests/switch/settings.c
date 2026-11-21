@@ -14,6 +14,7 @@
 
 static const char *const g_keep[] = { "auto", "on", "off" };
 static const char *const g_layout[] = { "compact", "console" };
+static const char *const g_memory[] = { "auto", "import", "mirror" };
 
 static const char *const g_pac_choices[] = { "fast", "qarma5" };
 
@@ -80,6 +81,19 @@ static const rl_setting_def g_defs[] = {
                        "only the formats the host GPU cannot sample (Apple, some Adreno and Mali)",
         .env = "RELIFT_VK_DECODE_BC",
         .choices = g_keep,
+        .nchoices = 3,
+    },
+    {
+        .key = "nvn.memory",
+        .type = RL_SETTING_ENUM,
+        .label = "Graphics memory pools",
+        .description = "How the game's graphics memory pools reach the host graphics device. import: the device uses the "
+                       "game's pages in place (needs VK_EXT_external_memory_host); mirror: each pool gets a device copy "
+                       "that the layer keeps equal at the game's sync points, for devices without the import (some "
+                       "Android drivers, MoltenVK) and for GPU capture tools that hide it. auto: import where the "
+                       "device has it",
+        .env = "RELIFT_NVN_MEMORY",
+        .choices = g_memory,
         .nchoices = 3,
     },
     {

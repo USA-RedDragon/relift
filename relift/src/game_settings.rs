@@ -236,6 +236,15 @@ pub fn runtime_settings() -> Vec<Setting> {
             },
         ),
         s(
+            "nvn.memory",
+            "Graphics memory pools",
+            "How the game's graphics memory pools reach the host graphics device. import: the device uses the game's pages in place (needs VK_EXT_external_memory_host); mirror: each pool gets a device copy that the layer keeps equal at the game's sync points, for devices without the import (some Android drivers, MoltenVK) and for GPU capture tools that hide it. auto: import where the device has it",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: ["auto", "import", "mirror"].map(String::from).into(),
+            },
+        ),
+        s(
             "kernel.layout",
             "Address space layout",
             "compact: the regions the game uses packed at the lowest bases, so less host address space is reserved; console: the console's exact region sizes",
@@ -1031,7 +1040,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 23);
+        assert_eq!(section(Vec::new()).runtime.len(), 24);
     }
 
     #[test]

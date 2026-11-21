@@ -939,6 +939,12 @@ int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want)
     return -1;
 }
 
+bool nvn_vk_can_import(void)
+{
+    nvn_vk_ready();
+    return g.ok && g.host_import;
+}
+
 bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_import *out)
 {
     memset(out, 0, sizeof *out);
@@ -1217,6 +1223,7 @@ static void fault_report(void)
  */
 static struct {
     bool on;
+    bool readback, copies;
     int64_t t1;
 } pending;
 static uint64_t g_submitted, g_finished;
@@ -1227,6 +1234,8 @@ static bool submit_recorded(replay *r)
     r->recording = false;
     if (gpu_ts.pool)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 1);
+    bool copies = nvn_mirror_readback_pending();
+    bool readback = nvn_mirror_record_readback(g.cb);
     VkResult vr = VK(vkEndCommandBuffer)(g.cb);
     if (vr != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "vkEndCommandBuffer failed (%d)", (int)vr);
@@ -1243,6 +1252,8 @@ static bool submit_recorded(replay *r)
     pending.t1 = now_ns();
     tm.submit_ns += (uint64_t)(pending.t1 - t0);
     pending.on = true;
+    pending.readback = readback;
+    pending.copies = copies;
     __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
     return true;
 }
@@ -1267,6 +1278,11 @@ static bool wait_submitted(void)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     if (vr == VK_ERROR_DEVICE_LOST)
         fault_report();
+    if (ok && pending.readback)
+        nvn_mirror_apply_readback();
+    else
+        nvn_mirror_drop_readback();
+    nvn_mirror_flushed();
     __atomic_store_n(&g_finished, g_submitted, __ATOMIC_RELEASE);
     g.uniform_pending = false;
     nvn_untile_release();
@@ -1281,6 +1297,8 @@ uint64_t nvn_vk_submitted(void) { return __atomic_load_n(&g_submitted, __ATOMIC_
 
 uint64_t nvn_vk_finished(void) { return __atomic_load_n(&g_finished, __ATOMIC_ACQUIRE); }
 
+static bool flush_once(replay *r);
+
 bool nvn_vk_submit(replay *r)
 {
     if (!r->recording)
@@ -1289,11 +1307,26 @@ bool nvn_vk_submit(replay *r)
         return false;
     g.arena_used = 0;
     g.flushes++;
-    return true;
+    /* A batch that copies pool mirrors back waits here: the guest reads those bytes at its next sync. */
+    if (!pending.copies)
+        return true;
+    bool ok = wait_submitted();
+    while (ok && nvn_mirror_readback_pending())
+        ok = nvn_vk_begin(r) && flush_once(r);
+    return ok;
 }
 
-/** @brief Submits what r recorded and waits for it. */
+/** @brief Submits what r recorded and waits for it, then brings the bytes the device wrote to pool mirrors into guest memory. */
 bool nvn_vk_flush(replay *r)
+{
+    bool recorded = r->recording;
+    bool ok = flush_once(r);
+    while (ok && recorded && nvn_mirror_readback_pending())
+        ok = nvn_vk_begin(r) && flush_once(r);
+    return ok;
+}
+
+static bool flush_once(replay *r)
 {
     if (!r->recording) {
         if (g.arena_used) {
@@ -1358,6 +1391,8 @@ int nvn_vk_async_check(void)
 
 int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what)
 {
+    if (!nvn_mirror_sync(r, !r->recording))
+        return nvn_vk_stop(r, "the host device failed to bring a memory pool up to date for %s", what);
     for (int pass = 0; pass < 2; pass++) {
         uint64_t before = g.flushes;
         int rc = stage(r, arg);
@@ -1504,6 +1539,8 @@ static bool upload_body(replay *r, vimg *v)
         void *pool;
         VkBuffer src = g.arena.buf;
         bool in_pool = nvn_guest_buffer(v->storage, bytes, &pool, &off) && off % bpb == 0;
+        if (in_pool && nvn_mirror_buffer(pool) && !nvn_mirror_sync(r, false))
+            return false;
         if (in_pool)
             src = pool;
         else if (!nvn_vk_upload_bytes(r, r->mem + v->storage, bytes, 0, 16, &off))
@@ -1513,8 +1550,10 @@ static bool upload_body(replay *r, vimg *v)
         VkBufferImageCopy bic = { .bufferOffset = off,
                                   .imageSubresource = { .aspectMask = v->aspect, .layerCount = 1 },
                                   .imageExtent = { d->width, 1, 1 } };
-        if (in_pool && v->written != v->flushed)
+        if (in_pool && v->written != v->flushed) {
             VK(vkCmdCopyImageToBuffer)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, src, 1, &bic);
+            nvn_mirror_written_guest(v->storage, bytes);
+        }
         else
             VK(vkCmdCopyBufferToImage)(g.cb, src, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
         v->flushed = v->written;

@@ -806,6 +806,8 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
                 nvn_graphics_table(r->st, s, c0);
                 if (s >= NVN_STAGE_TASK)
                     memcpy(c0 + MESH_FIRST_TASK_OFFSET, &first_task, 4);
+                for (uint32_t k = 0; k < NVN_STORAGE_SLOTS && s < 5; k++)
+                    nvn_mirror_written(r->st->gstorage[s][k].addr, r->st->gstorage[s][k].size);
                 rc = bank_of(r, c0, sizeof c0, &bi[n]);
             } else {
                 rc = nvn_vk_stop(r, "program %s reads driver constant bank c[%u], which the layer does not fill yet",
@@ -1796,6 +1798,8 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     dispatch_data dd = { .m = m, .c0 = c0, .c0_at = { 0 } };
     if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
         return rc;
+    for (uint32_t i = 0; i < nssbo; i++)
+        nvn_mirror_written(st->storage[i].addr, st->storage[i].size);
     nvn_vk_begin(r);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
