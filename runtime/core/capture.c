@@ -59,7 +59,7 @@ static void set_capture_path(void)
     int k = snprintf(tmpl, sizeof tmpl, "%s%c%s", dir, SEP, app && *app ? app : "relift");
     if (k > 0 && (size_t)k < sizeof tmpl) {
         rd.api->SetCaptureFilePathTemplate(tmpl);
-        rl_log(RL_LOG_INFO, "capture", "RenderDoc captures go to %s_frame<n>.rdc", tmpl);
+        rl_log(RL_LOG_INFO, "capture", "RenderDoc captures go to %s_capture.rdc", tmpl);
     }
 }
 
