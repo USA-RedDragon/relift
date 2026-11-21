@@ -565,6 +565,7 @@ TEST(gsv_is_not_on_the_switch)
 }
 
 static uint8_t g_pic[16 * 16 * 3 / 2];
+static uint32_t g_decodes;
 
 static void *fake_open(void) { return g_pic; }
 
@@ -575,6 +576,7 @@ static int fake_decode(void *d, const uint8_t *data, size_t size, rl_video_image
     (void)d;
     (void)data;
     (void)size;
+    g_decodes++;
     *out = (rl_video_image){ .width = 16, .height = 16, .y = g_pic, .u = g_pic + 256, .v = g_pic + 320, .y_stride = 16,
                              .uv_stride = 8 };
     return 1;
@@ -582,9 +584,10 @@ static int fake_decode(void *d, const uint8_t *data, size_t size, rl_video_image
 
 static const rl_vp9_stream_backend g_fake = { "fake", fake_open, fake_close, fake_decode };
 
-TEST(gsv_video_end_of_stream_reaches_the_client_when_the_frame_ring_is_full)
+TEST(gsv_video_every_submitted_frame_reaches_the_client_however_far_ahead_it_submits)
 {
     rl_vp9_stream_backend_override(&g_fake);
+    g_decodes = 0;
     rl_hos_config cfg;
     rl_hos_default_config(&cfg);
     rl_hos_switch2_config(&cfg);
@@ -617,6 +620,7 @@ TEST(gsv_video_end_of_stream_reaches_the_client_when_the_frame_ring_is_full)
         tc_put(&q, &end, 1);
         CHECK_EQ(tc_send(c, vs, q).result, 0);
     }
+    CHECK_EQ(g_decodes, 16);
     uint32_t frames = 0;
     bool end_seen = false;
     for (uint32_t i = 0; i < 40 && !end_seen; i++) {
@@ -632,7 +636,8 @@ TEST(gsv_video_end_of_stream_reaches_the_client_when_the_frame_ring_is_full)
         frames++;
     }
     CHECK(end_seen);
-    CHECK_EQ(frames, 17);
+    CHECK_EQ(frames, 21);
+    CHECK_EQ(g_decodes, 20);
     rl_vp9_stream_backend_override(NULL);
 }
 

@@ -231,6 +231,14 @@ typedef struct handed {
     uint64_t value;
 } handed;
 
+/** @brief A submitted frame's bitstream, not decoded yet. */
+typedef struct input {
+    uint8_t *data;
+    size_t size;
+    uint64_t pts;
+    bool end;
+} input;
+
 typedef struct finished {
     uint32_t image, width, height;
     uint64_t pts;
@@ -256,6 +264,13 @@ typedef struct video_session {
     uint32_t npending;
     finished done[RING];
     uint32_t ndone;
+    /**
+     * @brief Submitted frames not decoded yet, oldest first (inputs[head] to inputs[ninputs - 1]): the decoder takes
+     * the next only while the decoded ring has room, as the console's decoder waits for an output image, so no
+     * decoded frame is ever dropped however far ahead the game submits.
+     */
+    input *inputs;
+    size_t head, ninputs, inputs_cap;
 } video_session;
 
 static void frame_free(frame *f)
@@ -271,6 +286,9 @@ static void video_destroy(void *state)
         hos_kobj_unref(&v->input_event->obj);
     for (uint32_t i = 0; i < v->npending; i++)
         frame_free(&v->pending[i]);
+    for (size_t i = v->head; i < v->ninputs; i++)
+        free(v->inputs[i].data);
+    free(v->inputs);
     if (v->dec)
         v->vp9 ? v->vp9->close(v->dec) : v->av1->close(v->dec);
     rl_gsv_counter_free(v->counter);
@@ -625,9 +643,40 @@ static void queue_frame(video_session *v, const rl_vp9_image *im, uint64_t pts, 
 }
 
 /**
+ * @brief Decodes submitted frames while the decoded ring has room and moves decoded frames into free images. False
+ * when a frame does not decode, with its size in bad. mu held.
+ */
+static bool pump(video_session *v, size_t *bad)
+{
+    for (;;) {
+        fill_images(v);
+        if (v->head == v->ninputs || v->npending >= RING) {
+            if (v->head == v->ninputs)
+                v->head = v->ninputs = 0;
+            return true;
+        }
+        input in = v->inputs[v->head++];
+        int shown = 0;
+        rl_vp9_image im;
+        if (in.size)
+            shown = v->vp9 ? v->vp9->decode(v->dec, in.data, in.size, &im)
+                           : v->av1->decode(v->dec, in.data, in.size, &im);
+        free(in.data);
+        if (shown < 0) {
+            *bad = in.size;
+            return false;
+        }
+        if (shown)
+            queue_frame(v, &im, in.pts, false);
+        if (in.end)
+            queue_frame(v, NULL, in.pts, true);
+    }
+}
+
+/**
  * @brief Commands 109 and 400 (submit input): the compressed frame in the first send buffer (400 adds a second
  * buffer with a frame information block, which is not needed), a u64 presentation time in microseconds and a u8
- * end-of-stream flag; a u64 submission id. The frame is decoded at once.
+ * end-of-stream flag; a u64 submission id. The frame is kept and decoded once the decoded ring has room (pump).
  */
 static rl_result video_submit(rl_ipc_req *r)
 {
@@ -647,24 +696,30 @@ static rl_result video_submit(rl_ipc_req *r)
         rc = SF_RESULT_INVALID_HEADER;
     } else {
         uint8_t *data = malloc(r->a[0].size ? r->a[0].size : 1);
-        if (!data) {
+        if (v->head && v->ninputs == v->inputs_cap) {
+            memmove(v->inputs, v->inputs + v->head, (v->ninputs - v->head) * sizeof *v->inputs);
+            v->ninputs -= v->head;
+            v->head = 0;
+        }
+        if (data && v->ninputs == v->inputs_cap) {
+            size_t cap = v->inputs_cap ? v->inputs_cap * 2 : 64;
+            input *grown = realloc(v->inputs, cap * sizeof *grown);
+            if (grown) {
+                v->inputs = grown;
+                v->inputs_cap = cap;
+            }
+        }
+        size_t bad = 0;
+        if (!data || v->ninputs == v->inputs_cap) {
+            free(data);
             rc = KR_OUT_OF_RESOURCE;
         } else {
             rl_ipc_buf_read(&r->a[0], data, r->a[0].size);
-            rl_vp9_image im;
-            int shown = v->vp9 ? v->vp9->decode(v->dec, data, r->a[0].size, &im)
-                               : v->av1->decode(v->dec, data, r->a[0].size, &im);
-            free(data);
-            if (shown < 0) {
-                rl_ipc_stop(r, "gsv", "video decoder: a %llu byte frame did not decode",
-                            (unsigned long long)r->a[0].size);
+            v->inputs[v->ninputs++] = (input){ data, r->a[0].size, in.pts, in.end != 0 };
+            if (!pump(v, &bad)) {
+                rl_ipc_stop(r, "gsv", "video decoder: a %llu byte frame did not decode", (unsigned long long)bad);
                 rc = KR_NOT_IMPLEMENTED;
             } else {
-                if (shown)
-                    queue_frame(v, &im, in.pts, false);
-                if (in.end)
-                    queue_frame(v, NULL, in.pts, true);
-                fill_images(v);
                 *out = ++v->submitted;
             }
         }
@@ -676,8 +731,8 @@ static rl_result video_submit(rl_ipc_req *r)
     return rc;
 }
 
-/** @brief Hands an output image to the stream: queues it for the next frame and returns its counter value. mu held. */
-static void hand_out(video_session *v, uint32_t image, uint8_t *out16)
+/** @brief Hands an output image to the stream: queues it for the next frame, writes its counter value and decodes what now fits; false as pump. mu held. */
+static bool hand_out(video_session *v, uint32_t image, uint8_t *out16, size_t *bad)
 {
     uint64_t value = ++v->handed_total;
     if (v->nfree < RING)
@@ -686,7 +741,7 @@ static void hand_out(video_session *v, uint32_t image, uint8_t *out16)
     memset(out16, 0, 16);
     memcpy(out16, &counter, 4);
     memcpy(out16 + 8, &value, 8);
-    fill_images(v);
+    return pump(v, bad);
 }
 
 /** @brief Command 311 (register an output image): a u32 image id; its NativeSyncHandle, signaled once a frame is in the image. */
@@ -699,9 +754,14 @@ static rl_result video_register(rl_ipc_req *r)
     uint8_t *out = rl_ipc_out(r, 16);
     if (!out)
         return SF_RESULT_INVALID_HEADER;
+    size_t bad = 0;
     pthread_mutex_lock(&v->mu);
-    hand_out(v, image, out);
+    bool ok = hand_out(v, image, out, &bad);
     pthread_mutex_unlock(&v->mu);
+    if (!ok) {
+        rl_ipc_stop(r, "gsv", "video decoder: a %llu byte frame did not decode", (unsigned long long)bad);
+        return KR_NOT_IMPLEMENTED;
+    }
     return KR_SUCCESS;
 }
 
@@ -721,9 +781,14 @@ static rl_result video_release(rl_ipc_req *r)
     uint8_t *out = rl_ipc_out(r, 16);
     if (!out)
         return SF_RESULT_INVALID_HEADER;
+    size_t bad = 0;
     pthread_mutex_lock(&v->mu);
-    hand_out(v, in.image, out);
+    bool ok = hand_out(v, in.image, out, &bad);
     pthread_mutex_unlock(&v->mu);
+    if (!ok) {
+        rl_ipc_stop(r, "gsv", "video decoder: a %llu byte frame did not decode", (unsigned long long)bad);
+        return KR_NOT_IMPLEMENTED;
+    }
     return KR_SUCCESS;
 }
 
@@ -776,7 +841,10 @@ static rl_result video_get_frame(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
-/** @brief Commands 8 and 207 (flush, stop): the queued frames are dropped; images already handed out keep their place. */
+/**
+ * @brief Commands 8 and 207 (flush, stop): the queued frames, decoded or not, are dropped; images already handed out
+ * keep their place.
+ */
 static rl_result video_flush(rl_ipc_req *r)
 {
     video_session *v = r->self->state;
@@ -784,6 +852,9 @@ static rl_result video_flush(rl_ipc_req *r)
     for (uint32_t i = 0; i < v->npending; i++)
         frame_free(&v->pending[i]);
     v->npending = 0;
+    for (size_t i = v->head; i < v->ninputs; i++)
+        free(v->inputs[i].data);
+    v->head = v->ninputs = 0;
     pthread_mutex_unlock(&v->mu);
     return KR_SUCCESS;
 }
