@@ -88,13 +88,23 @@ void nvn_pipe_set_mesh_layout(VkPipelineLayout mesh) { P.mlayout = mesh; }
 
 bool nvn_pipe_uses_libraries(void) { return P.gpl; }
 
+/** @brief A hash of n bytes for the in-memory tables, eight bytes a step (keys are a few hundred bytes). */
 static uint32_t hash_bytes(const void *p, size_t n)
 {
     const uint8_t *b = p;
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < n; i++)
-        h = (h ^ b[i]) * 16777619u;
-    return h;
+    uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        uint64_t w;
+        memcpy(&w, b + i, 8);
+        h = (h ^ w) * 0xff51afd7ed558ccdull;
+        h ^= h >> 32;
+    }
+    uint64_t w = 0;
+    memcpy(&w, b + i, n - i);
+    h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
+    h ^= h >> 29;
+    return (uint32_t)h ^ (uint32_t)(h >> 32);
 }
 
 /** @brief The entry for key in t; P.lock held. NULL when there is none. */
