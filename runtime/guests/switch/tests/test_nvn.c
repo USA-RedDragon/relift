@@ -823,6 +823,15 @@ TEST(nvn_texture_storage_class_needs_the_drivers_layout_too)
     CHECK_EQ(call(c, nvnh_nvnTextureGetStorageClass, heap + 0x400, 0, 0, 0), RL_PENDING);
 }
 
+TEST(nvn_zcull_storage_size_needs_the_drivers_layout)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    rl_nvn_set_layout(NULL);
+    CHECK_EQ(call(c, nvnh_nvnTextureBuilderGetZCullStorageSize, heap, 0, 0, 0), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+}
+
 TEST(nvn_storage_class_needs_the_drivers_layout)
 {
     rl_ctx *c = t_boot(NULL);

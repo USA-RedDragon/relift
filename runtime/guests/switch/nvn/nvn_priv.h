@@ -139,6 +139,7 @@ bool nvn_crop_rect(const int32_t crop[4], uint32_t width, uint32_t height, uint3
     X(nvnTextureBuilderGetStorageSize)                                                                                 \
     X(nvnTextureBuilderGetStorageClass)                                                                                \
     X(nvnTextureBuilderGetStorageAlignment)                                                                            \
+    X(nvnTextureBuilderGetZCullStorageSize)                                                                            \
     X(nvnTextureInitialize)                                                                                            \
     X(nvnTextureFinalize)                                                                                              \
     X(nvnTextureGetWidth)                                                                                              \

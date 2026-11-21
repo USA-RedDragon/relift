@@ -345,6 +345,27 @@ uint64_t nvnh_nvnTextureBuilderGetStorageAlignment(rl_ctx *c, uint8_t *mem)
 }
 
 /**
+ * @brief nvnTextureBuilderGetZCullStorageSize(const NVNtextureBuilder *): size_t, the driver's own function on the
+ * device fields it reads. The host has no ZCull storage and keeps no layout of it, so a game that places the
+ * storage gets the size the console's driver names.
+ */
+uint64_t nvnh_nvnTextureBuilderGetZCullStorageSize(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t builder = c->x[0], fn = 0, size = 0;
+    int rc = nvn_builder_device_fields(c, mem, builder);
+    if (rc == RL_OK)
+        rc = nvn_driver_lookup(c, mem, "nvnTextureBuilderGetZCullStorageSize", &fn);
+    if (rc == RL_OK && !fn)
+        rc = rl_guest_fatal(c, "nvn", "the NVN2 driver has no nvnTextureBuilderGetZCullStorageSize");
+    if (rc == RL_OK)
+        rc = nvn_guest_call(c, mem, fn, &builder, 1, &size);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = size;
+    return nvn_ret(c);
+}
+
+/**
  * @brief Runs the NVN2 driver's own nvnTextureInitialize on the texture at
  * tex: it fills the texture object (its getters that stay driver code, such
  * as nvnTextureGetSparseTileLayout, read it back) and decides the result, on
