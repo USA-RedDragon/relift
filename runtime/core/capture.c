@@ -9,6 +9,7 @@
  * nothing to capture, and a run with no window and no Vulkan device has no device to capture from.
  */
 #include "capture.h"
+#include "core.h"
 #include "hostlib.h"
 
 #include <relift/settings.h>

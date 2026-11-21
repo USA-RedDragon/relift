@@ -9,6 +9,9 @@
 
 #include <relift/settings.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+
 /** @brief Compute program: dst[i] = src[i] + 1 for i < n, through buffer references in push constants (glslang, SPIR-V 1.5). */
 static const uint32_t copy_spv[] = {
     0x07230203, 0x00010500, 0x000d000b, 0x00000034, 0x00000000, 0x00020011,
@@ -59,10 +62,67 @@ static const uint32_t copy_spv[] = {
     0x0000001d, 0x000100fd, 0x00010038
 };
 
+/** @brief Compute program: writes push.value to word 3 of the memory at the address stored at push.table (a pointer it reads, so the layer cannot know the target). */
+static const uint32_t ptr_spv[] = {
+    0x07230203, 0x00010500, 0x000d000b, 0x00000024, 0x00000000, 0x00020011,
+    0x00000001, 0x00020011, 0x0000000b, 0x00020011, 0x000014e3, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
+    0x000014e4, 0x00000001, 0x0006000f, 0x00000005, 0x00000004, 0x6e69616d,
+    0x00000000, 0x0000000a, 0x00060010, 0x00000004, 0x00000011, 0x00000001,
+    0x00000001, 0x00000001, 0x00030047, 0x00000008, 0x00000002, 0x00050048,
+    0x00000008, 0x00000000, 0x00000023, 0x00000000, 0x00050048, 0x00000008,
+    0x00000001, 0x00000023, 0x00000008, 0x00030047, 0x00000011, 0x00000002,
+    0x00050048, 0x00000011, 0x00000000, 0x00000023, 0x00000000, 0x00040047,
+    0x00000017, 0x00000006, 0x00000004, 0x00030047, 0x00000018, 0x00000002,
+    0x00050048, 0x00000018, 0x00000000, 0x00000023, 0x00000000, 0x00040047,
+    0x00000023, 0x0000000b, 0x00000019, 0x00020013, 0x00000002, 0x00030021,
+    0x00000003, 0x00000002, 0x00040015, 0x00000006, 0x00000040, 0x00000000,
+    0x00040015, 0x00000007, 0x00000020, 0x00000000, 0x0004001e, 0x00000008,
+    0x00000006, 0x00000007, 0x00040020, 0x00000009, 0x00000009, 0x00000008,
+    0x0004003b, 0x00000009, 0x0000000a, 0x00000009, 0x00040015, 0x0000000b,
+    0x00000020, 0x00000001, 0x0004002b, 0x0000000b, 0x0000000c, 0x00000000,
+    0x00040020, 0x0000000d, 0x00000009, 0x00000006, 0x00030027, 0x00000010,
+    0x000014e5, 0x0003001e, 0x00000011, 0x00000006, 0x00040020, 0x00000010,
+    0x000014e5, 0x00000011, 0x00040020, 0x00000013, 0x000014e5, 0x00000006,
+    0x00030027, 0x00000016, 0x000014e5, 0x0003001d, 0x00000017, 0x00000007,
+    0x0003001e, 0x00000018, 0x00000017, 0x00040020, 0x00000016, 0x000014e5,
+    0x00000018, 0x0004002b, 0x0000000b, 0x0000001a, 0x00000003, 0x0004002b,
+    0x0000000b, 0x0000001b, 0x00000001, 0x00040020, 0x0000001c, 0x00000009,
+    0x00000007, 0x00040020, 0x0000001f, 0x000014e5, 0x00000007, 0x00040017,
+    0x00000021, 0x00000007, 0x00000003, 0x0004002b, 0x00000007, 0x00000022,
+    0x00000001, 0x0006002c, 0x00000021, 0x00000023, 0x00000022, 0x00000022,
+    0x00000022, 0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003,
+    0x000200f8, 0x00000005, 0x00050041, 0x0000000d, 0x0000000e, 0x0000000a,
+    0x0000000c, 0x0004003d, 0x00000006, 0x0000000f, 0x0000000e, 0x00040078,
+    0x00000010, 0x00000012, 0x0000000f, 0x00050041, 0x00000013, 0x00000014,
+    0x00000012, 0x0000000c, 0x0006003d, 0x00000006, 0x00000015, 0x00000014,
+    0x00000002, 0x00000010, 0x00040078, 0x00000016, 0x00000019, 0x00000015,
+    0x00050041, 0x0000001c, 0x0000001d, 0x0000000a, 0x0000001b, 0x0004003d,
+    0x00000007, 0x0000001e, 0x0000001d, 0x00060041, 0x0000001f, 0x00000020,
+    0x00000019, 0x0000000c, 0x0000001a, 0x0005003e, 0x00000020, 0x0000001e,
+    0x00000002, 0x00000004, 0x000100fd, 0x00010038
+};
+
+typedef struct ptr_push {
+    uint64_t table;
+    uint32_t value;
+} ptr_push;
+
 typedef struct copy_push {
     uint64_t src, dst;
     uint32_t n;
 } copy_push;
+
+/** @brief Whether a host Vulkan device is up; without one the test is skipped, and the device it runs on is printed; the tests fail instead of skipping when RELIFT_VK_REQUIRE is set (CI sets it where lavapipe is installed). */
+static bool have_device(void)
+{
+    bool up = nvn_vk_ready();
+    if (up)
+        printf("  mirror test on host device %s\n", g.name);
+    else
+        printf("  skipped: no host Vulkan device\n");
+    return up;
+}
 
 /** @brief Runs the program over n words from GPU address src to dst as the layer's replay does around a dispatch. */
 static bool run_copy(replay *r, uint64_t src, uint64_t dst, uint32_t n)
@@ -112,7 +172,9 @@ TEST(nvn_mirror_carries_cpu_writes_to_the_gpu_and_gpu_writes_to_the_cpu)
 {
     rl_ctx *c = t_boot(NULL);
     CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
-    if (!nvn_vk_ready()) {
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
         rl_settings_set("nvn.memory", "auto");
         return;
     }
@@ -146,5 +208,64 @@ TEST(nvn_mirror_carries_cpu_writes_to_the_gpu_and_gpu_writes_to_the_cpu)
     CHECK(run_copy(&r, gpu, dst, n));
     CHECK_EQ(rl_ld32(m, at + 8 * hp + 4 * 5), 556u);
     CHECK_EQ(rl_ld32(m, at + 8 * hp + 4 * 6), 43u);
+    rl_settings_set("nvn.memory", "auto");
+}
+
+TEST(nvn_mirror_carries_writes_through_a_pointer_a_program_reads_back_to_the_cpu)
+{
+    rl_ctx *c = t_boot(NULL);
+    CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        rl_settings_set("nvn.memory", "auto");
+        return;
+    }
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp;
+    uint64_t size = 16 * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    uint64_t target = gpu + 9 * hp;
+    rl_st64(m, at, target);
+    rl_st32(m, at + 9 * hp + 12, 1);
+    VkShaderModuleCreateInfo smi = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                     .codeSize = sizeof ptr_spv,
+                                     .pCode = ptr_spv };
+    VkPushConstantRange pcr = { .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(ptr_push) };
+    VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                       .pushConstantRangeCount = 1,
+                                       .pPushConstantRanges = &pcr };
+    VkShaderModule sm = 0;
+    VkPipelineLayout pl = 0;
+    VkPipeline pipe = 0;
+    CHECK_EQ(VK(vkCreateShaderModule)(g.dev, &smi, NULL, &sm), VK_SUCCESS);
+    CHECK_EQ(VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &pl), VK_SUCCESS);
+    VkComputePipelineCreateInfo cpi = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                        .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                                                   .module = sm,
+                                                   .pName = "main" },
+                                        .layout = pl };
+    CHECK_EQ(VK(vkCreateComputePipelines)(g.dev, NULL, 1, &cpi, NULL, &pipe), VK_SUCCESS);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    CHECK(nvn_mirror_sync(&r, false) && nvn_vk_begin(&r));
+    ptr_push p = { gpu, 0xabcd };
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    VK(vkCmdPushConstants)(g.cb, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof p, &p);
+    VK(vkCmdDispatch)(g.cb, 1, 1, 1);
+    nvn_vk_barrier(g.cb);
+    nvn_mirror_written_all();
+    CHECK(nvn_vk_flush(&r));
+    CHECK_EQ(rl_ld32(m, at + 9 * hp + 12), 0xabcdu);
+    CHECK_EQ(rl_ld32(m, at + 9 * hp + 8), 0u);
+    VK(vkDestroyPipeline)(g.dev, pipe, NULL);
+    VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
+    VK(vkDestroyShaderModule)(g.dev, sm, NULL);
     rl_settings_set("nvn.memory", "auto");
 }
