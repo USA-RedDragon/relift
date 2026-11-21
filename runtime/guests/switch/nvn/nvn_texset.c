@@ -588,6 +588,41 @@ void nvn_texset_texture_gone(uint64_t tex)
     nvn_unlock();
 }
 
+/**
+ * @brief A sampled handle whose texture id was never registered names a pool entry nothing was written to: it takes
+ * a slot of its own whose every array element is a null descriptor, so it reads zeros (inferred, as for a separate
+ * texture handle), and a texture registered under the id later is bound afresh.
+ */
+static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, uint32_t *dim, uint32_t *slot,
+                          bool with_sampler)
+{
+    if (rl_report_unknown(0x4e564e5445584944ull ^ id, "nvn",
+                          "a sampled handle names texture id %u, which no texture was registered under: it reads zeros",
+                          id))
+        return nvn_vk_stop(r, "texture id %u is not registered", id);
+    int src = slot_for(r, id, false, slot);
+    if (src != RL_OK)
+        return src;
+    uint32_t sl = *slot;
+    if (t.tex_img[sl] && !nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    for (uint32_t d = 0; d < DIMS; d++)
+        if (t.tex_views[sl][d]) {
+            VK(vkDestroyImageView)(g.dev, t.tex_views[sl][d], NULL);
+            t.tex_views[sl][d] = NULL;
+        }
+    *kind = 0;
+    *dim = DIM_2D;
+    null_rest(sl, false, 0, 0);
+    t.tex_img[sl] = NULL;
+    t.tex_guest[sl] = 0;
+    t.img_done[sl] = false;
+    t.tex_kind[sl] = 0;
+    memset(t.tex_view[sl], 0, sizeof t.tex_view[sl]);
+    memcpy(t.dims.map + 4ull * sl, dim, 4);
+    return with_sampler ? bind_sampler(r, sid) : RL_OK;
+}
+
 /** @brief nvn_texset_bind; with_sampler false leaves the handle's sampler id alone (a separate texture handle names none). */
 static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
 {
@@ -598,7 +633,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
     if (!tex)
-        return nvn_vk_stop(r, "texture id %u (handle 0x%x) is not registered", id, handle);
+        return bind_unwritten(r, id, sid, kind, dim, slot, with_sampler);
     int src = slot_for(r, id, image, slot);
     if (src != RL_OK)
         return src;

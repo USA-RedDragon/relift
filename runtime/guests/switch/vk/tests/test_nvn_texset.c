@@ -167,3 +167,23 @@ TEST(nvn_texset_elements_nothing_was_bound_to_read_zeros)
     VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
     VK(vkDestroyDescriptorSetLayout)(g.dev, out_layout, NULL);
 }
+
+TEST(nvn_texset_a_sampled_handle_nothing_registered_binds_a_slot_of_null_descriptors)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes) || !g.null_descriptor)
+        return;
+    CHECK(nvn_texset_layout());
+    static replay r;
+    memset(&r, 0, sizeof r);
+    uint32_t kind = 9, dim = 9, slot = UINT32_MAX, again = UINT32_MAX;
+    CHECK_EQ(nvn_texset_bind(&r, 0x30000u | 11u, &kind, &dim, &slot), RL_OK);
+    CHECK(slot != UINT32_MAX);
+    CHECK_EQ(kind, 0);
+    CHECK(dim != 9u);
+    CHECK_EQ(nvn_texset_bind(&r, 0x30000u | 11u, &kind, &dim, &again), RL_OK);
+    CHECK_EQ(again, slot);
+    uint32_t other;
+    CHECK_EQ(nvn_texset_bind(&r, 12u, &kind, &dim, &other), RL_OK);
+    CHECK(other != slot);
+}
