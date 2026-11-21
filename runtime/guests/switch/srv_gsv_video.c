@@ -8,6 +8,7 @@
  */
 #include "nvn/nvn_priv.h"
 #include "services.h"
+#include "vi.h"
 
 #include <relift/video.h>
 
@@ -662,8 +663,11 @@ static void fill_images(video_session *v)
         handed h = v->free[0];
         memmove(&v->free[0], &v->free[1], (v->nfree - 1) * sizeof v->free[0]);
         v->nfree--;
+        int64_t t0 = vi_trace_now();
         if (!f.end)
             put_frame(v, h.image, &f);
+        if (t0)
+            vi_trace('W', (uint64_t)(vi_trace_now() - t0), h.image, f.pts);
         frame_free(&f);
         if (v->ndone < RING)
             v->done[v->ndone++] = (finished){ h.image, f.width, f.height, f.pts, f.end };
@@ -714,9 +718,12 @@ static bool pump(video_session *v, size_t *bad)
         input in = v->inputs[v->head++];
         int shown = 0;
         rl_vp9_image im;
+        int64_t t0 = vi_trace_now();
         if (in.size)
             shown = v->vp9 ? v->vp9->decode(v->dec, in.data, in.size, &im)
                            : v->av1->decode(v->dec, in.data, in.size, &im);
+        if (t0)
+            vi_trace('D', (uint64_t)(vi_trace_now() - t0), in.size, (uint64_t)shown);
         free(in.data);
         if (shown < 0) {
             *bad = in.size;

@@ -6,6 +6,11 @@
  *
  * A line is "<kind> <CLOCK_MONOTONIC ns> <guest thread id or 0> <a> <b> <c>"
  * with a, b and c in hex. "<file>|<kinds>" writes only the kinds listed.
+ * Per present, N carries the ns the present slept for the vsync grid, and
+ * T, X and Y the presenting thread's costs since its last present (wall,
+ * CPU and NVN replay ns; upload, write-back and pipeline creation ns; their
+ * counts and uploaded bytes). D and W time a movie frame's decode and its
+ * write into the output image.
  * Off (the default), each trace point costs one load.
  */
 #include "hos.h"

@@ -495,6 +495,8 @@ int64_t nvn_vsync_after(int64_t t) { return vi_vsync_after(t); }
 
 void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c) { vi_trace(kind, a, b, c); }
 
+bool nvn_trace_on(void) { return vi_trace_on(); }
+
 /** @brief nvnDeviceSetWindowOriginMode(NVNdevice *, NVNwindowOriginMode). */
 uint64_t nvnh_nvnDeviceSetWindowOriginMode(rl_ctx *c, uint8_t *mem)
 {

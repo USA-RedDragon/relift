@@ -61,6 +61,12 @@ static struct {
     uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads, gpu_ns;
 } tm;
 
+/** @brief Per-present costs for the frame trace's T, X and Y lines (stats.trace): uploads from guest bytes and write-backs to them. */
+static struct {
+    uint64_t upload_ns, upload_bytes, wb_ns;
+    uint32_t uploads, wbs, gpu_alias;
+} ppc;
+
 /** @brief Two timestamps around each submit: the device's busy time per frame. */
 static struct {
     VkQueryPool pool;
@@ -1361,7 +1367,19 @@ static bool upload_decoded(replay *r, const vimg *v, uint32_t level, uint32_t la
     return ok;
 }
 
+static bool upload_body(replay *r, vimg *v);
+
 static bool upload(replay *r, vimg *v)
+{
+    int64_t t0 = now_ns();
+    bool ok = upload_body(r, v);
+    ppc.upload_ns += (uint64_t)(now_ns() - t0);
+    ppc.uploads++;
+    ppc.upload_bytes += v->d.size;
+    return ok;
+}
+
+static bool upload_body(replay *r, vimg *v)
 {
     const nvn_tex_desc *d = &v->d;
     uint32_t bpb, bw, bh;
@@ -1474,7 +1492,18 @@ static bool overlaps(const vimg *u, const vimg *v)
  * reads what the GPU last wrote. Color images and depth images of one
  * aspect (whose host texels are the guest's bytes) only.
  */
+static bool write_back_body(replay *r, vimg *u);
+
 static bool write_back(replay *r, vimg *u)
+{
+    int64_t t0 = now_ns();
+    bool ok = write_back_body(r, u);
+    ppc.wb_ns += (uint64_t)(now_ns() - t0);
+    ppc.wbs++;
+    return ok;
+}
+
+static bool write_back_body(replay *r, vimg *u)
 {
     const nvn_tex_desc *d = &u->d;
     uint32_t bpb, bw, bh;
@@ -1560,6 +1589,7 @@ static vimg *sync_alias(replay *r, vimg *v)
                                { v->d.width, h, 1 } };
             VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
             nvn_vk_barrier(g.cb);
+            ppc.gpu_alias++;
         } else if (!write_back(r, src) || !upload(r, v)) {
             nvn_vk_stop(r,
                         "texture storage 0x%llx (format %u, %ux%u) was written as format %u, %ux%u, which cannot be "
@@ -2925,6 +2955,40 @@ static void pace_present(uint32_t interval)
     last = at;
 }
 
+static int64_t g_last_present_ns;
+
+/**
+ * @brief Writes the frame trace's per-present cost lines (stats.trace): T with the presenting thread's wall time since
+ * its last present returned, its CPU time and the NVN replay time; X with the upload, write-back and pipeline creation times;
+ * Y with the counts (uploads, write-backs, alias copies on the GPU, pipelines made in 16 bits each) and uploaded bytes.
+ */
+static void trace_present_costs(void)
+{
+    static int64_t last_wall, last_cpu;
+    static uint64_t last_run, last_pm, last_pn, last_pl;
+    struct timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    int64_t cpu = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec, wall = now_ns();
+    uint64_t pm, pn, pl, pln;
+    nvn_pipe_stats(&pm, &pn, &pl, &pln);
+    uint64_t run = tm.run_ns >= last_run ? tm.run_ns - last_run : tm.run_ns;
+    if (last_wall) {
+        nvn_trace('T', (uint64_t)(wall - g_last_present_ns), (uint64_t)(cpu - last_cpu), run);
+        nvn_trace('X', ppc.upload_ns, ppc.wb_ns, pn - last_pn);
+        nvn_trace('Y',
+                  (uint64_t)(ppc.uploads & 0xffff) | (uint64_t)(ppc.wbs & 0xffff) << 16 |
+                      (uint64_t)(ppc.gpu_alias & 0xffff) << 32 | (uint64_t)((pm - last_pm) & 0xffff) << 48,
+                  ppc.upload_bytes, pl - last_pl);
+    }
+    memset(&ppc, 0, sizeof ppc);
+    last_wall = wall;
+    last_cpu = cpu;
+    last_run = tm.run_ns;
+    last_pm = pm;
+    last_pn = pn;
+    last_pl = pl;
+}
+
 /** @brief The window frames go to, opened with the first one; NULL in a headless run. */
 static rl_window *present_window(uint32_t w, uint32_t h)
 {
@@ -3054,8 +3118,12 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_core_leave();
+    if (nvn_trace_on())
+        trace_present_costs();
+    int64_t paced_at = now_ns();
     pace_present(interval);
-    nvn_trace('N', n, 0, 0);
+    g_last_present_ns = now_ns();
+    nvn_trace('N', n, (uint64_t)(g_last_present_ns - paced_at), 0);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "present %llu: texture 0x%llx, %ux%u", (unsigned long long)n, (unsigned long long)texture,
                rect[2], rect[3]);

@@ -880,6 +880,8 @@ bool nvn_obj_gone(uint64_t addr, char *out, size_t n);
 int64_t nvn_vsync_after(int64_t t);
 /** @brief One line of the frame trace (stats.trace), with vi_trace's kinds and fields. */
 void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
+/** @brief Whether the frame trace (stats.trace) is on. */
+bool nvn_trace_on(void);
 /**
  * @brief Removes o from the table (a lookup no longer finds it) and drops the table's reference; the object is freed
  * when the last reference is gone. NULL does nothing.
