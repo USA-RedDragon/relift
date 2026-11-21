@@ -1123,6 +1123,16 @@ void nvn_vk_barrier(VkCommandBuffer cb)
                              0, NULL);
 }
 
+void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, VkBuffer c0, uint64_t c0_off)
+{
+    if (c0) {
+        VkBufferCopy cp = { .srcOffset = ioff, .dstOffset = c0_off, .size = 12 };
+        VK(vkCmdCopyBuffer)(cb, ibuf, c0, 1, &cp);
+        nvn_vk_barrier(cb);
+    }
+    VK(vkCmdDispatchIndirect)(cb, ibuf, ioff);
+}
+
 bool nvn_vk_begin(replay *r)
 {
     if (r->recording)

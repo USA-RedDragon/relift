@@ -312,3 +312,31 @@ TEST(nvn_a_square_2d_array_of_six_layers_is_also_sampled_as_a_cube)
     CHECK_EQ(nvn_texset_fit(DIM_2D_ARRAY, 64, 32, 6) & (cube | cubes), 0u);
     CHECK(nvn_texset_fit(DIM_2D_ARRAY, 64, 32, 1) & array);
 }
+
+TEST(nvn_dispatch_compute_indirect_takes_its_counts_from_the_pool_buffer_on_the_gpu)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t pool = heap, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(pool, storage, 0x40000, 0x18c));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    if (gpu == storage)
+        return;
+    void *buf = NULL;
+    uint64_t off = 0;
+    CHECK(nvn_guest_buffer(nvn_gpu_guest(gpu + 0x40), 12, &buf, &off));
+    CHECK(buf != NULL);
+    CHECK_EQ(off, 0x40);
+    CHECK(!nvn_guest_buffer(nvn_gpu_guest(gpu + 0x3fffc), 12, &buf, &off));
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    r.st = &st;
+    nvn_cmd e = { .op = NVN_CMD_DISPATCH_COMPUTE_INDIRECT, .x = { 0, gpu + 0x40 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &e), RL_PENDING);
+    e.x[1] = gpu + 0x3fffc;
+    CHECK_EQ(nvn_draw_cmd(&r, &e), RL_PENDING);
+}

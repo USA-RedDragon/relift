@@ -1607,6 +1607,8 @@ typedef struct dispatch_data {
     const module *m;
     const uint8_t *c0;
     VkDescriptorSet sets[3];
+    /** @brief Where c[0] went in the batch (buffer NULL when the program does not read it). */
+    VkDescriptorBufferInfo c0_at;
 } dispatch_data;
 
 /** @brief Puts a dispatch's constant banks into the batch being recorded (an nvn_vk_stage step). */
@@ -1634,8 +1636,10 @@ static int stage_dispatch(replay *r, void *arg)
         if (!(m->driver & (1u << b)))
             continue;
         const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];
-        if (b == 0)
+        if (b == 0) {
             rc = bank_of(r, dd->c0, NVN_BANK2_BYTES, &bi[nw]);
+            dd->c0_at = bi[nw];
+        }
         else if (b == 1)
             rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[nw]);
         else
@@ -1724,7 +1728,7 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
  * 0x80 and its handle at 0xf0 (the offsets its translation reads them at).
  * The workgroup size comes from the control section (0x58, 0x5c, 0x60).
  */
-static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
+static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer ibuf, VkDeviceSize ioff)
 {
     nvn_gfx *st = r->st;
     memset(st->ubo_patched, 0, sizeof st->ubo_patched);
@@ -1771,13 +1775,17 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
     if (!p)
         return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s", m->key);
     nvn_pipe_record_compute(m->key, n, map, vals);
-    dispatch_data dd = { .m = m, .c0 = c0 };
+    dispatch_data dd = { .m = m, .c0 = c0, .c0_at = { 0 } };
     if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
         return rc;
     nvn_vk_begin(r);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
-    VK(vkCmdDispatch)(g.cb, x, y, z);
+    if (ibuf) {
+        nvn_vk_dispatch_indirect(g.cb, ibuf, ioff, dd.c0_at.buffer, dd.c0_at.offset);
+    } else {
+        VK(vkCmdDispatch)(g.cb, x, y, z);
+    }
     nvn_vk_barrier(g.cb);
     if (nvn_trace_active) {
         nvn_trace_cmd tc = { .groups = { x, y, z } };
@@ -1785,6 +1793,28 @@ static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z)
         nvn_trace_end(r, &tc);
     }
     return RL_OK;
+}
+
+static int dispatch(replay *r, uint32_t x, uint32_t y, uint32_t z) { return dispatch_from(r, x, y, z, NULL, 0); }
+
+/**
+ * @brief nvnCommandBufferDispatchComputeIndirect(NVNcommandBuffer *, NVNbufferAddress): the group counts x, y and z
+ * are the three u32 at the GPU address indirect, which the GPU reads when the dispatch runs (an earlier dispatch in
+ * the same command buffer may write them). The host dispatch reads them from the pool's buffer, and a copy of them
+ * fills c[0]'s first 12 bytes, where the driver's per-dispatch table has them. The barrier after every dispatch makes
+ * earlier writes visible to both. Counts outside one memory pool stop, naming what holds the address.
+ */
+static int dispatch_indirect(replay *r, uint64_t indirect)
+{
+    void *buf = NULL;
+    uint64_t off = 0;
+    if (!nvn_gpu_mapped(indirect, 12) || !nvn_guest_buffer(nvn_gpu_guest(indirect), 12, &buf, &off)) {
+        char where[512];
+        nvn_gpu_describe(indirect, where, sizeof where);
+        return nvn_vk_stop(r, "an indirect dispatch's group counts at 0x%llx are in no one pool: %s",
+                           (unsigned long long)indirect, where);
+    }
+    return dispatch_from(r, 0, 0, 0, (VkBuffer)buf, off);
 }
 
 /**
@@ -2057,6 +2087,8 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     }
     case NVN_CMD_DISPATCH_COMPUTE:
         return dispatch(r, (uint32_t)e->x[1], (uint32_t)e->x[2], (uint32_t)e->x[3]);
+    case NVN_CMD_DISPATCH_COMPUTE_INDIRECT:
+        return dispatch_indirect(r, e->x[1]);
     case NVN_CMD_BIND_VERTEX_BUFFER: {
         uint32_t i = (uint32_t)e->x[1];
         if (i >= NVN_VERTEX_BUFFERS)

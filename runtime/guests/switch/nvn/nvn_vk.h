@@ -363,6 +363,12 @@ bool nvn_vk_readback_new(staging *s, uint64_t size);
 bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size);
 void nvn_vk_staging_free(staging *s);
 void nvn_vk_barrier(VkCommandBuffer cb);
+/**
+ * @brief Records an indirect dispatch of the bound compute pipeline whose group counts are the three u32 at ioff in
+ * ibuf, read by the GPU when it runs; when c0 is not NULL, a copy of the counts first fills the 12 bytes at c0_off in
+ * c0 (the driver table's group counts), behind a barrier.
+ */
+void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, VkBuffer c0, uint64_t c0_off);
 bool nvn_vk_begin(replay *r);
 
 /**
