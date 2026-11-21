@@ -1245,6 +1245,7 @@ bool nvn_vk_flush(replay *r)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     if (vr == VK_ERROR_DEVICE_LOST)
         fault_report();
+    nvn_untile_release();
     g.arena_used = 0;
     g.uniform_pending = false;
     g.flushes++;
@@ -1369,6 +1370,20 @@ static bool upload_decoded(replay *r, const vimg *v, uint32_t level, uint32_t la
 
 static bool upload_body(replay *r, vimg *v);
 
+/**
+ * @brief Whether texture bytes move between guest storage and host images on the GPU where they can
+ * (nvn_untile.c); RELIFT_NVN_CPU_MOVES=1, a measuring and checking aid, keeps them on the CPU.
+ */
+static bool gpu_moves(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_CPU_MOVES");
+        on = !(e && *e == '1');
+    }
+    return on;
+}
+
 static bool upload(replay *r, vimg *v)
 {
     int64_t t0 = now_ns();
@@ -1385,6 +1400,8 @@ static bool upload_body(replay *r, vimg *v)
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
         return false;
+    if (gpu_moves() && nvn_untile_move(r, v, false))
+        return true;
     if (d->target == NVN_TARGET_BUFFER) {
         uint64_t off, bytes = (uint64_t)d->width * bpb;
         void *pool;
@@ -1506,6 +1523,11 @@ static bool write_back(replay *r, vimg *u)
 static bool write_back_body(replay *r, vimg *u)
 {
     const nvn_tex_desc *d = &u->d;
+    if (gpu_moves() && nvn_untile_move(r, u, true)) {
+        bool ok = nvn_vk_flush(r);
+        nvn_watch_touch(u->storage, d->size);
+        return ok;
+    }
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh) || d->target == NVN_TARGET_BUFFER ||
         (u->aspect != VK_IMAGE_ASPECT_COLOR_BIT && u->aspect != VK_IMAGE_ASPECT_DEPTH_BIT) ||
@@ -1762,7 +1784,9 @@ vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
  * @brief Refills v from its storage when the CPU changed the bytes: a
  * buffer texture at every use, any texture the GPU never wrote (the game
  * fills it through the CPU, as a glyph cache) when the hash of its storage
- * differs, checked at most once per presented frame.
+ * differs, checked at most once per presented frame. A watched texture the
+ * GPU can fill (nvn_untile_can) is filled once a page of it was written,
+ * without hashing its bytes first.
  */
 bool nvn_vk_refresh(replay *r, vimg *v)
 {
@@ -1774,6 +1798,11 @@ bool nvn_vk_refresh(replay *r, vimg *v)
     if (v->watch.on && !nvn_watch_changed(&v->watch) && edge_hash(r, v) == v->edge_hash)
         return true;
     nvn_watch_start(&v->watch, v->storage, v->d.size);
+    if (gpu_moves() && v->watch.on && nvn_untile_can(v)) {
+        v->edge_hash = edge_hash(r, v);
+        v->hash = 0;
+        return upload(r, v);
+    }
     uint64_t h = bytes_hash(r->mem + v->storage, v->d.size);
     v->edge_hash = edge_hash(r, v);
     if (h == v->hash)

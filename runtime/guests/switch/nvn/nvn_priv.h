@@ -193,6 +193,12 @@ typedef struct nvn_tex_desc {
     uint64_t level_offset[NVN_TEX_MAX_LEVELS];
 } nvn_tex_desc;
 
+/**
+ * @brief The block height and depth, in GOBs, that level level of the block-linear texture d is laid out with (the
+ * level's own, as nvn_tex_copy uses: smaller than level 0's once the level is too small for it).
+ */
+void nvn_tex_level_blocks(const nvn_tex_desc *d, uint32_t level, uint32_t *gbh, uint32_t *gbd);
+
 /** @brief NVNcopyRegion: a box of texels. */
 typedef struct nvn_region {
     int32_t x, y, z, width, height, depth;
@@ -316,6 +322,13 @@ typedef struct nvn_denorm_class {
 } nvn_denorm_class;
 /** @brief Runs the denormal probe on the host device over rows random rows of seed and says what it found (see nvn_probe_denorm_check); false without a device. */
 bool nvn_vk_denorm_stress(uint32_t rows, uint32_t seed, nvn_denorm_class *out);
+/**
+ * @brief Checks nvn_untile_move against nvn_tex_copy on the host device over a set of layouts (block-linear 2D with
+ * levels, 3D, arrays, 4, 8 and 16-byte texels, pitch-linear), with guest bytes from seed: 0 when every texel moved
+ * exactly both ways and storage outside every imported pool is left to the CPU path (nvn_untile_can false), the
+ * failing case's number (from 1, 100 for the fallback) otherwise, -1 with no device.
+ */
+int nvn_untile_check(uint32_t seed);
 
 /** @brief Checks the outputs (after the rows inputs in w) of the denormal probe; the result is 1 when both operations follow the flushing model, 2 the IEEE one, else 0. */
 uint32_t nvn_probe_denorm_check(const uint32_t *w, uint32_t rows, nvn_denorm_class *out);

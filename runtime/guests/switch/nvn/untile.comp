@@ -1,0 +1,98 @@
+#version 450
+// Moves the texels of one level and layer of a texture between the guest's
+// storage (read and written through the buffer device address of the pool
+// it lies in) and the host image, on the GPU: without TILE the image's texels
+// come from the storage (an upload), with TILE they go to it (a write-back).
+// WORDS is the texel size in 32-bit words (1, 2 or 4); the image is bound
+// through an unsigned integer view of that size, so every byte moves
+// unchanged. The storage is block-linear (gbh GOBs high, gbd deep, the
+// Turing GOB layout, or the Maxwell one with maxwell set) or pitch-linear
+// (gbh 0, rows pitch bytes apart), as nvn_tex_copy lays it out.
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Words {
+    uint w[];
+};
+
+layout(push_constant) uniform Params {
+    uvec2 base;
+    uint width, height, depth;
+    uint gbh, gbd, gobs_w, block_rows;
+    uint pitch, maxwell;
+} p;
+
+#if WORDS == 1
+#define FMT r32ui
+#define VEC uvec4(v.x, 0u, 0u, 0u)
+#elif WORDS == 2
+#define FMT rg32ui
+#define VEC uvec4(v.x, v.y, 0u, 0u)
+#else
+#define FMT rgba32ui
+#define VEC v
+#endif
+
+#ifdef VOLUME
+#ifdef TILE
+layout(binding = 0, FMT) uniform readonly uimage3D img;
+#else
+layout(binding = 0, FMT) uniform writeonly uimage3D img;
+#endif
+#define COORD ivec3(x, y, z)
+#else
+#ifdef TILE
+layout(binding = 0, FMT) uniform readonly uimage2D img;
+#else
+layout(binding = 0, FMT) uniform writeonly uimage2D img;
+#endif
+#define COORD ivec2(x, y)
+#endif
+
+uint gob(uint bx, uint y)
+{
+    if (p.maxwell != 0u)
+        return ((bx % 64u) / 32u) * 256u + ((y % 8u) / 2u) * 64u + ((bx % 32u) / 16u) * 32u + (y % 2u) * 16u + (bx % 16u);
+    return ((bx % 64u) / 32u) * 256u + ((y % 8u) / 4u) * 128u + ((bx % 32u) / 16u) * 64u + (y % 4u) * 16u + (bx % 16u);
+}
+
+void main()
+{
+    uint x = gl_GlobalInvocationID.x, y = gl_GlobalInvocationID.y, z = gl_GlobalInvocationID.z;
+    if (x >= p.width || y >= p.height || z >= p.depth)
+        return;
+    uint bx = x * (4u * WORDS);
+    uint off;
+    if (p.gbh == 0u) {
+        off = (z * p.height + y) * p.pitch + bx;
+    } else {
+        uint block_bytes = 512u * p.gbh * p.gbd;
+        off = (z / p.gbd) * p.block_rows * p.gobs_w * block_bytes + (z % p.gbd) * 512u * p.gbh +
+              (y / (8u * p.gbh)) * p.gobs_w * block_bytes + ((y / 8u) % p.gbh) * 512u + (bx / 64u) * block_bytes +
+              gob(bx, y);
+    }
+    Words s = Words(p.base);
+    uint i = off / 4u;
+#ifdef TILE
+    uvec4 v = imageLoad(img, COORD);
+    s.w[i] = v.x;
+#if WORDS >= 2
+    s.w[i + 1u] = v.y;
+#endif
+#if WORDS == 4
+    s.w[i + 2u] = v.z;
+    s.w[i + 3u] = v.w;
+#endif
+#else
+    uvec4 v = uvec4(s.w[i], 0u, 0u, 0u);
+#if WORDS >= 2
+    v.y = s.w[i + 1u];
+#endif
+#if WORDS == 4
+    v.z = s.w[i + 2u];
+    v.w = s.w[i + 3u];
+#endif
+    imageStore(img, COORD, VEC);
+#endif
+}

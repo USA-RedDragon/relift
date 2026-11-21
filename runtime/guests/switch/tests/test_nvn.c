@@ -1303,6 +1303,17 @@ TEST(nvn_denorm_probe_holds_on_millions_of_random_rows)
     }
 }
 
+TEST(nvn_gpu_texel_moves_match_the_cpu_layout_both_ways)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_gpu_texel_moves_match_the_cpu_layout_both_ways: no host Vulkan device, skipped\n");
+        return;
+    }
+    for (uint32_t seed = 1; seed <= 2; seed++)
+        CHECK_EQ(nvn_untile_check(seed), 0);
+}
+
 #define OBJ_ADDRS 8u
 #define OBJ_ROUNDS 100000u
 

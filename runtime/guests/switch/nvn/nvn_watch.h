@@ -37,6 +37,11 @@ bool nvn_watch_start(nvn_watch *w, uint64_t addr, uint64_t size);
 void nvn_watch_release(uint64_t addr, uint64_t size);
 /** @brief True when a watched page was written since the watch began, or the guest map changed. */
 bool nvn_watch_changed(const nvn_watch *w);
+/**
+ * @brief Marks the pages of [addr, addr + size) as written now, for a write that did not go through the CPU (the GPU
+ * wrote the guest's bytes): a watch that covers one of them then reports a change.
+ */
+void nvn_watch_touch(uint64_t addr, uint64_t size);
 /** @brief Number of faults the hook turned into stamps, and watches started, for the layer's stats. */
 void nvn_watch_stats(uint64_t *faults, uint64_t *starts);
 

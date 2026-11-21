@@ -377,6 +377,18 @@ bool nvn_vk_begin(replay *r);
  * before recording (that counts as a submit for nvn_vk_stage).
  */
 bool nvn_vk_flush(replay *r);
+/** @brief Whether nvn_untile_move can move v's bytes on the GPU (nvn_untile.c). */
+bool nvn_untile_can(const vimg *v);
+/**
+ * @brief Records the move of every level and layer of v between its guest storage and its host image on the GPU:
+ * into the image (an upload) or, with tile, into the storage (a write-back), the storage read or written when the
+ * batch runs. False, with nothing recorded, when v's format or storage does not allow it.
+ */
+bool nvn_untile_move(replay *r, vimg *v, bool tile);
+/** @brief Frees what the moves of the batch that just ran used; called once a submit has finished. */
+void nvn_untile_release(void);
+/** @brief Moves recorded so far, for the stats. */
+uint64_t nvn_untile_moves(void);
 /**
  * @brief Submits the batch when it holds a GPU write of guest uniform data, so a host copy of guest memory taken
  * next shows it.

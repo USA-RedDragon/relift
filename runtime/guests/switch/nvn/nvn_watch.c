@@ -176,6 +176,22 @@ bool nvn_watch_changed(const nvn_watch *w)
     return false;
 }
 
+void nvn_watch_touch(uint64_t addr, uint64_t size)
+{
+    if (!ready() || !size)
+        return;
+    rl_vm *vm = &hos.vm;
+    uint64_t hp = vm->host_page, first = addr / hp, end = (addr + size + hp - 1) / hp;
+    if (end > g_nchunks * CHUNK_PAGES)
+        end = g_nchunks * CHUNK_PAGES;
+    uint64_t stamp = __atomic_add_fetch(&g_stamp, 1, __ATOMIC_ACQ_REL);
+    for (uint64_t p = first; p < end; p++) {
+        chunk *ck = __atomic_load_n(&g_chunks[p / CHUNK_PAGES], __ATOMIC_ACQUIRE);
+        if (ck && __atomic_load_n(&ck->flags[p % CHUNK_PAGES], __ATOMIC_ACQUIRE) & F_EVER)
+            __atomic_store_n(&ck->stamp[p % CHUNK_PAGES], stamp, __ATOMIC_RELEASE);
+    }
+}
+
 void nvn_watch_stats(uint64_t *faults, uint64_t *starts)
 {
     *faults = __atomic_load_n(&g_faults, __ATOMIC_RELAXED);

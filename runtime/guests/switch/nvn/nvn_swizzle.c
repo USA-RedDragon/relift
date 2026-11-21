@@ -59,6 +59,16 @@ static uint32_t level_block_d(const nvn_tex_desc *d, uint32_t depth)
     return b;
 }
 
+void nvn_tex_level_blocks(const nvn_tex_desc *d, uint32_t level, uint32_t *gbh, uint32_t *gbd)
+{
+    uint32_t bpb = 0, bw = 1, bh = 1;
+    nvn_tex_format(d->format, &bpb, &bw, &bh);
+    uint32_t h = d->height >> level ? d->height >> level : 1;
+    uint32_t depth = d->target == 2 ? (d->depth >> level ? d->depth >> level : 1) : 1;
+    *gbh = level_block_h(d, div_up(h, bh ? bh : 1));
+    *gbd = d->target == 2 ? level_block_d(d, depth) : 1;
+}
+
 bool nvn_tex_copy(const nvn_tex_desc *d, uint8_t *storage, uint32_t level, uint32_t layer, const nvn_region *r,
                   uint8_t *packed, bool to_storage)
 {
