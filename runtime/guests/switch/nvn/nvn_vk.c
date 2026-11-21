@@ -246,7 +246,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     g.mesh_shader = mesh_on && feat.mesh.b[0] && feat.mesh.b[1];
     feat.mesh.b[2] = feat.mesh.b[3] = feat.mesh.b[4] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
-    feat.f12.bufferDeviceAddressCaptureReplay = VK_FALSE;
+    g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
     f13->robustImageAccess = VK_FALSE;
     feat.f2.pNext = (void *)(uintptr_t)b->pnext;
@@ -924,7 +924,7 @@ int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want)
     return -1;
 }
 
-bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
+bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_import *out)
 {
     memset(out, 0, sizeof *out);
     pthread_once(&g.once, bring_up);
@@ -941,10 +941,15 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
         rl_log(RL_LOG_WARN, "nvn", "import of 0x%llx: vkGetMemoryHostPointerPropertiesEXT failed", (unsigned long long)guest);
         return false;
     }
+    bool replay = g.address_replay, take_back = replay && again && again->buf_opaque && again->mem_opaque;
+    VkBufferOpaqueCaptureAddressCreateInfo boc = { .sType = VK_STRUCTURE_TYPE_BUFFER_OPAQUE_CAPTURE_ADDRESS_CREATE_INFO,
+                                                   .opaqueCaptureAddress = take_back ? again->buf_opaque : 0 };
     VkExternalMemoryBufferCreateInfo eb = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+                                            .pNext = take_back ? &boc : NULL,
                                             .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT };
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                .pNext = &eb,
+                               .flags = replay ? VK_BUFFER_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT : 0,
                                .size = size,
                                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
@@ -959,12 +964,16 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
     VkMemoryRequirements req;
     VK(vkGetBufferMemoryRequirements)(g.dev, buf, &req);
     int32_t t = nvn_vk_mem_type(req.memoryTypeBits & props.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    VkMemoryOpaqueCaptureAddressAllocateInfo moc = { .sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO,
+                                                     .opaqueCaptureAddress = take_back ? again->mem_opaque : 0 };
     VkImportMemoryHostPointerInfoEXT imp = { .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+                                             .pNext = take_back ? &moc : NULL,
                                              .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
                                              .pHostPointer = host };
     VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
                                      .pNext = &imp,
-                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT |
+                                              (replay ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT : 0) };
     VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                                  .pNext = &fl,
                                  .allocationSize = size,
@@ -988,11 +997,26 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out)
                (unsigned long long)guest, (unsigned long long)size, (int)ar, (int)br, t, req.memoryTypeBits,
                props.memoryTypeBits);
         nvn_vk_unimport(out);
-        return false;
+        return take_back ? nvn_vk_import(guest, size, NULL, out) : false;
     }
     VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
     out->gpu = VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+    if (replay) {
+        VkDeviceMemoryOpaqueCaptureAddressInfo mi = { .sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_OPAQUE_CAPTURE_ADDRESS_INFO,
+                                                      .memory = dm };
+        out->buf_opaque = VK(vkGetBufferOpaqueCaptureAddress)(g.dev, &ai);
+        out->mem_opaque = VK(vkGetDeviceMemoryOpaqueCaptureAddress)(g.dev, &mi);
+    }
+    if (take_back && again->gpu != out->gpu)
+        rl_log(RL_LOG_INFO, "nvn", "import of 0x%llx did not get its old address 0x%llx back, got 0x%llx",
+               (unsigned long long)guest, (unsigned long long)again->gpu, (unsigned long long)out->gpu);
     return out->gpu != 0;
+}
+
+bool nvn_vk_address_replay(void)
+{
+    pthread_once(&g.once, bring_up);
+    return g.ok && g.address_replay;
 }
 
 void nvn_vk_unimport(nvn_import *im)

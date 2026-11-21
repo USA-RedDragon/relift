@@ -143,6 +143,8 @@ typedef struct nvn_vkdev {
     bool null_descriptor;
     /** @brief Graphics pipelines can be linked from libraries (VK_EXT_graphics_pipeline_library with fast linking). */
     bool gpl;
+    /** @brief Whether imports can take back the device address of an earlier import (bufferDeviceAddressCaptureReplay). */
+    bool address_replay;
     /** @brief Occlusion and pipeline statistics queries (all graphics stages, precise samples) work, and can be reset from the host. */
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_mesh_shader is on with task and mesh shaders: the native back end of task and mesh programs runs. */

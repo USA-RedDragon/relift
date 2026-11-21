@@ -451,13 +451,20 @@ typedef struct nvn_import {
     void *buf, *memory;
     /** @brief The buffer's device address: the GPU address the game sees for the memory. */
     uint64_t gpu;
+    /** @brief The buffer's and the memory's opaque capture addresses (0 without address replay): what takes the address back. */
+    uint64_t buf_opaque, mem_opaque;
 } nvn_import;
 /**
  * @brief Imports size guest bytes at guest as a buffer whose device address is
  * the GPU address (host Vulkan up first). Each import of the same bytes gets
- * addresses of its own over the same pages.
+ * addresses of its own over the same pages, except that again, the import
+ * of the same bytes that was freed, has its address taken back when the host
+ * can (a console's driver gives a pool that is created again the address it
+ * had); NULL asks for no address in particular.
  */
-bool nvn_vk_import(uint64_t guest, uint64_t size, nvn_import *out);
+bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_import *out);
+/** @brief Whether the host gives an import the device address of an earlier one (host Vulkan up first). */
+bool nvn_vk_address_replay(void);
 /** @brief Frees an import (waits for the device). */
 void nvn_vk_unimport(nvn_import *im);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */

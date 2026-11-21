@@ -900,6 +900,29 @@ TEST(nvn_virtual_pools_reach_the_mapped_pages_through_an_import_of_their_own)
     rl_nvn_set_layout(NULL);
 }
 
+TEST(nvn_a_pool_made_again_over_the_same_bytes_gets_its_old_address_back)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t pool = heap, again = heap + 0x100, other = heap + 0x200, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(pool, storage, 0x40000, 0x18c));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    if (gpu == storage || !nvn_vk_address_replay()) {
+        CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+        return;
+    }
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    CHECK(!nvn_gpu_mapped(gpu + 0x20, 0x100));
+    CHECK(nvn_pool_make(again, storage, 0x40000, 0x18c));
+    CHECK_EQ(nvn_pool_gpu(again), gpu);
+    CHECK(nvn_gpu_mapped(gpu + 0x20, 0x40000 - 0x20));
+    CHECK_EQ(nvn_gpu_guest(gpu + 0x20), storage + 0x20);
+    CHECK(nvn_pool_make(other, storage + 0x40000, 0x40000, 0x18c));
+    CHECK(nvn_pool_gpu(other) != gpu);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, again, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, other, 0, 0, 0), RET);
+}
+
 TEST(nvn_pool_mappings_take_a_textures_page_kind)
 {
     rl_ctx *c = t_boot(NULL);

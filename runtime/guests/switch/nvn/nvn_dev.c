@@ -111,6 +111,46 @@ static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf)
     pthread_rwlock_unlock(&g_pools.lock);
 }
 
+/**
+ * @brief The imports of pools the guest finalized, newest last. A console's driver gives a pool that is created again
+ * over the same bytes the address range it just freed, and the guest still holds addresses of the old pool (in
+ * buffers, constant banks and recorded commands), so an import of the same bytes takes the old device address back.
+ */
+#define RETIRED_MAX 64
+static struct retired_import {
+    uint64_t memory, size;
+    nvn_import im;
+} g_retired[RETIRED_MAX];
+static uint32_t g_retired_n;
+static pthread_mutex_t g_retired_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void retire_import(uint64_t memory, uint64_t size, const nvn_import *im)
+{
+    if (!im->buf_opaque)
+        return;
+    pthread_mutex_lock(&g_retired_lock);
+    g_retired[g_retired_n++ % RETIRED_MAX] = (struct retired_import){ memory, size, *im };
+    pthread_mutex_unlock(&g_retired_lock);
+}
+
+/** @brief The newest retired import of exactly these bytes, which stays retired until it is taken. */
+static const nvn_import *retired_of(uint64_t memory, uint64_t size, nvn_import *copy)
+{
+    const nvn_import *found = NULL;
+    pthread_mutex_lock(&g_retired_lock);
+    uint32_t have = g_retired_n < RETIRED_MAX ? g_retired_n : RETIRED_MAX;
+    for (uint32_t k = 0; k < have && !found; k++) {
+        struct retired_import *r = &g_retired[(g_retired_n - 1 - k) % RETIRED_MAX];
+        if (r->im.buf_opaque && r->memory == memory && r->size == size) {
+            *copy = r->im;
+            r->im.buf_opaque = 0;
+            found = copy;
+        }
+    }
+    pthread_mutex_unlock(&g_retired_lock);
+    return found;
+}
+
 /** @brief Drops the span of the import whose buffer is buf (spans of two imports may start at one address). */
 static void pools_remove(void *buf)
 {
@@ -574,7 +614,8 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
         p->size = size;
         p->flags = flags;
         bool virt = p->flags & NVN_POOL_VIRTUAL;
-        if (!virt && nvn_vk_import(memory, size, &p->im))
+        nvn_import back;
+        if (!virt && nvn_vk_import(memory, size, retired_of(memory, size, &back), &p->im))
             pools_add(p->im.gpu, size, memory, p->im.buf);
         else if (!virt)
             rl_log(RL_LOG_WARN, "nvn", "memory pool 0x%llx (0x%llx bytes at 0x%llx) is not imported into the host device; "
@@ -746,7 +787,9 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
     nvn_pool *p = (nvn_pool *)nvn_obj_get(c->x[0], NVN_POOL);
     if (p && p->im.gpu) {
         pools_remove(p->im.buf);
+        nvn_import gone = p->im;
         nvn_vk_unimport(&p->im);
+        retire_import(p->memory, p->size, &gone);
     }
     nvn_obj_free(p ? &p->o : NULL);
     return nvn_ret(c);
@@ -876,7 +919,8 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
                                             "than earlier ones (only one linear range per virtual pool is implemented)",
                                             (unsigned long long)pool, i);
         if (!p->mapped) {
-            if (!q->im.gpu || !nvn_vk_import(memory, p->size, &p->im))
+            nvn_import back;
+            if (!q->im.gpu || !nvn_vk_import(memory, p->size, retired_of(memory, p->size, &back), &p->im))
                 return (uint64_t)rl_guest_fatal(c, "nvn",
                                                 "nvnMemoryPoolMapVirtual(0x%llx): pool 0x%llx is not in the host "
                                                 "device, or its bytes from 0x%llx cannot be imported again",
