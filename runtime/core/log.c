@@ -213,6 +213,18 @@ uint32_t rl_os_page_size(void)
 #endif
 }
 
+uint32_t rl_os_cpu_count(void)
+{
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1u;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (uint32_t)n : 1u;
+#endif
+}
+
 bool rl_exe_path(char *buf, size_t n)
 {
     char path[4096];

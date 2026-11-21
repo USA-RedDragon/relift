@@ -184,6 +184,8 @@ RL_RUNTIME_API uint64_t rl_ns_to_ticks(uint64_t ns);
 RL_RUNTIME_API uint64_t rl_ticks_to_ns(uint64_t ticks);
 /** @brief Real host page size from the OS. */
 RL_RUNTIME_API uint32_t rl_os_page_size(void);
+/** @brief The host's online processors, at least 1. */
+RL_RUNTIME_API uint32_t rl_os_cpu_count(void);
 /**
  * @brief The path of the running program's executable, with '/' separators, written to buf (n bytes). Returns false
  * when the OS does not say or buf is too small.
