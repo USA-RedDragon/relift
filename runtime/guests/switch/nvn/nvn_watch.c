@@ -18,16 +18,21 @@
 #define GROUP_PAGES 16u
 #define F_EVER 1u
 #define F_ON 2u
+#define F_MIRROR 4u
+#define F_DIRTY 8u
+#define F_FRESH 16u
 
 typedef struct chunk {
     uint64_t stamp[CHUNK_PAGES];
     uint8_t flags[CHUNK_PAGES];
+    /** @brief Set by the fault hook when a mirrored page of the chunk was dirtied; the collector clears it before it scans. */
+    uint32_t dirty;
 } chunk;
 
 static chunk **g_chunks;
 static uint64_t g_nchunks;
 static uint64_t g_stamp;
-static uint64_t g_faults, g_starts;
+static uint64_t g_faults, g_starts, g_epoch;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool g_ready, g_failed;
 
@@ -58,6 +63,11 @@ static bool fault_hook(const rl_fault *f)
         if (!(__atomic_load_n(&ck->flags[k], __ATOMIC_ACQUIRE) & F_ON))
             continue;
         __atomic_store_n(&ck->stamp[k], stamp, __ATOMIC_RELEASE);
+        if (__atomic_load_n(&ck->flags[k], __ATOMIC_ACQUIRE) & F_MIRROR) {
+            __atomic_or_fetch(&ck->flags[k], F_DIRTY, __ATOMIC_RELEASE);
+            __atomic_store_n(&ck->dirty, 1, __ATOMIC_RELEASE);
+            __atomic_add_fetch(&g_epoch, 1, __ATOMIC_RELEASE);
+        }
         __atomic_and_fetch(&ck->flags[k], (uint8_t)~F_ON, __ATOMIC_RELEASE);
         open[k - lo] = true;
     }
@@ -196,4 +206,118 @@ void nvn_watch_stats(uint64_t *faults, uint64_t *starts)
 {
     *faults = __atomic_load_n(&g_faults, __ATOMIC_RELAXED);
     *starts = __atomic_load_n(&g_starts, __ATOMIC_RELAXED);
+}
+
+/** @brief The pages [first, end) a track call over [addr, addr + size) touches, rounded outward to whole host pages. */
+static void track_pages(uint64_t addr, uint64_t size, uint64_t *first, uint64_t *end)
+{
+    uint64_t hp = hos.vm.host_page;
+    *first = addr / hp;
+    *end = (addr + size + hp - 1) / hp;
+}
+
+bool nvn_track_add(uint64_t addr, uint64_t size)
+{
+    if (!size || !ready())
+        return false;
+    uint64_t first, end;
+    track_pages(addr, size, &first, &end);
+    if (end * hos.vm.host_page > hos.vm.size)
+        return false;
+    for (uint64_t p = first; p < end; p++) {
+        chunk *ck = chunk_for(p / CHUNK_PAGES);
+        if (!ck)
+            return false;
+        __atomic_or_fetch(&ck->flags[p % CHUNK_PAGES], F_EVER | F_MIRROR | F_DIRTY | F_FRESH, __ATOMIC_RELEASE);
+        __atomic_store_n(&ck->dirty, 1, __ATOMIC_RELEASE);
+    }
+    __atomic_add_fetch(&g_epoch, 1, __ATOMIC_RELEASE);
+    return true;
+}
+
+void nvn_track_remove(uint64_t addr, uint64_t size)
+{
+    if (!g_ready)
+        return;
+    uint64_t first, end;
+    track_pages(addr, size, &first, &end);
+    for (uint64_t p = first; p < end && p / CHUNK_PAGES < g_nchunks; p++) {
+        chunk *ck = __atomic_load_n(&g_chunks[p / CHUNK_PAGES], __ATOMIC_ACQUIRE);
+        if (ck)
+            __atomic_and_fetch(&ck->flags[p % CHUNK_PAGES], (uint8_t)~(F_MIRROR | F_DIRTY | F_FRESH), __ATOMIC_RELEASE);
+    }
+}
+
+void nvn_track_dirty_all(uint64_t addr, uint64_t size)
+{
+    if (!g_ready)
+        return;
+    uint64_t first, end;
+    track_pages(addr, size, &first, &end);
+    for (uint64_t p = first; p < end && p / CHUNK_PAGES < g_nchunks; p++) {
+        chunk *ck = __atomic_load_n(&g_chunks[p / CHUNK_PAGES], __ATOMIC_ACQUIRE);
+        if (ck && (ck->flags[p % CHUNK_PAGES] & F_MIRROR)) {
+            __atomic_or_fetch(&ck->flags[p % CHUNK_PAGES], F_DIRTY, __ATOMIC_RELEASE);
+            __atomic_store_n(&ck->dirty, 1, __ATOMIC_RELEASE);
+        }
+    }
+    __atomic_add_fetch(&g_epoch, 1, __ATOMIC_RELEASE);
+}
+
+uint64_t nvn_track_epoch(void) { return __atomic_load_n(&g_epoch, __ATOMIC_ACQUIRE); }
+
+/**
+ * @brief Arms the pages [first, last) of chunk ck (global page numbers from base) that the policy lets the guest write,
+ * so the next write to them faults and dirties them again. Runs of pages the guest cannot write are left unarmed: only a
+ * map change alters them.
+ */
+static void arm(chunk *ck, uint64_t base, uint32_t first, uint32_t last)
+{
+    rl_vm *vm = &hos.vm;
+    uint64_t hp = vm->host_page;
+    for (uint32_t k = first; k < last;) {
+        if (!rl_vm_host_writable(vm, (base + k) * hp)) {
+            k++;
+            continue;
+        }
+        uint32_t e = k;
+        while (e < last && rl_vm_host_writable(vm, (base + e) * hp))
+            e++;
+        for (uint32_t j = k; j < e; j++)
+            __atomic_or_fetch(&ck->flags[j], F_EVER | F_ON, __ATOMIC_RELEASE);
+        rl_vm_host_watch(vm, (base + k) * hp, (uint64_t)(e - k) * hp, true);
+        k = e;
+    }
+}
+
+void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, bool fresh), void *user)
+{
+    if (!g_ready)
+        return;
+    uint64_t hp = hos.vm.host_page;
+    for (uint64_t c = 0; c < g_nchunks; c++) {
+        chunk *ck = __atomic_load_n(&g_chunks[c], __ATOMIC_ACQUIRE);
+        if (!ck || !__atomic_exchange_n(&ck->dirty, 0, __ATOMIC_ACQ_REL))
+            continue;
+        for (uint32_t i = 0; i < CHUNK_PAGES;) {
+            uint8_t fl = __atomic_load_n(&ck->flags[i], __ATOMIC_ACQUIRE);
+            if (!(fl & F_MIRROR) || !(fl & F_DIRTY)) {
+                i++;
+                continue;
+            }
+            bool fresh = fl & F_FRESH;
+            uint32_t e = i + 1;
+            while (e < CHUNK_PAGES) {
+                uint8_t f2 = __atomic_load_n(&ck->flags[e], __ATOMIC_ACQUIRE);
+                if (!(f2 & F_MIRROR) || !(f2 & F_DIRTY) || !!(f2 & F_FRESH) != fresh)
+                    break;
+                e++;
+            }
+            for (uint32_t j = i; j < e; j++)
+                __atomic_and_fetch(&ck->flags[j], (uint8_t)~(F_DIRTY | F_FRESH), __ATOMIC_RELEASE);
+            arm(ck, c * CHUNK_PAGES, i, e);
+            run(user, (c * CHUNK_PAGES + i) * hp, (uint64_t)(e - i) * hp, fresh);
+            i = e;
+        }
+    }
 }

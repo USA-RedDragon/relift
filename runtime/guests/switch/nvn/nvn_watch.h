@@ -45,4 +45,24 @@ void nvn_watch_touch(uint64_t addr, uint64_t size);
 /** @brief Number of faults the hook turned into stamps, and watches started, for the layer's stats. */
 void nvn_watch_stats(uint64_t *faults, uint64_t *starts);
 
+/**
+ * @brief Mirror tracking: the layer keeps a device copy of guest pages and needs the pages the guest wrote since it
+ * last copied them. A tracked page starts dirty (and fresh, never copied); a write to a tracked page that the
+ * collector has armed faults, dirties the page and opens its group. Adding a page twice keeps one mark, so callers
+ * that overlap must re-add the ranges that stay when one goes.
+ */
+bool nvn_track_add(uint64_t addr, uint64_t size);
+/** @brief Stops tracking the whole host pages that [addr, addr + size) touches. */
+void nvn_track_remove(uint64_t addr, uint64_t size);
+/** @brief Marks every tracked page of the range dirty (the guest map changed under it, or the layer wrote it). */
+void nvn_track_dirty_all(uint64_t addr, uint64_t size);
+/** @brief A number that changes whenever a tracked page was dirtied: equal to an earlier value, nothing is dirty. */
+uint64_t nvn_track_epoch(void);
+/**
+ * @brief Calls run for each run of dirty tracked pages (guest address and size on host page boundaries; fresh when
+ * none of its pages was ever collected), after clearing their dirty marks and arming them, so a write after the call
+ * dirties them again. The callback copies the bytes of the run.
+ */
+void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, bool fresh), void *user);
+
 #endif
