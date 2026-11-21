@@ -684,3 +684,69 @@ TEST(gsv_decoder_pools_and_memories_are_reused_once_freed)
         CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
     }
 }
+
+static void submit_frames(rl_ctx *c, tc_obj vs, uint64_t heap, uint32_t from, uint32_t n)
+{
+    for (uint32_t i = from; i < from + n; i++) {
+        tc_req q = tc_new(109);
+        q.tipc = true;
+        q.na = 1;
+        q.a_addr[0] = heap + 0x200;
+        q.a_size[0] = 4;
+        tc_put64(&q, 1000 * i);
+        uint8_t end = 0;
+        tc_put(&q, &end, 1);
+        CHECK_EQ(tc_send(c, vs, q).result, 0);
+    }
+}
+
+TEST(gsv_video_the_submission_ready_event_is_signaled_only_while_there_is_room)
+{
+    rl_vp9_stream_backend_override(&g_fake);
+    g_decodes = 0;
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, (tc_req){ .cmd = 906, .tipc = true });
+    CHECK_EQ(r.result, 0);
+    tc_obj vs = { .handle = r.move[0] };
+    memcpy(t_mem() + heap + 0x100, "video/vp9", 10);
+    tc_req q = tc_new(101);
+    q.tipc = true;
+    q.na = 1;
+    q.a_addr[0] = heap + 0x100;
+    q.a_size[0] = 10;
+    tc_put32(&q, 16);
+    tc_put32(&q, 16);
+    tc_put32(&q, 60);
+    CHECK_EQ(tc_send(c, vs, q).result, 0);
+    q = tc_new(3);
+    q.tipc = true;
+    r = tc_send(c, vs, q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy, 1);
+    rl_st32(t_mem(), heap + 0x800, r.copy[0]);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    submit_frames(c, vs, heap, 0, 16);
+    rl_gsv_video_settle();
+    CHECK_EQ(g_decodes, 16);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    submit_frames(c, vs, heap, 16, 15);
+    rl_gsv_video_settle();
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    submit_frames(c, vs, heap, 31, 1);
+    rl_gsv_video_settle();
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), KR_TIMED_OUT);
+    q = tc_new(311);
+    q.tipc = true;
+    tc_put32(&q, 1);
+    CHECK_EQ(tc_send(c, vs, q).result, 0);
+    rl_gsv_video_settle();
+    CHECK_EQ(g_decodes, 17);
+    CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    rl_vp9_stream_backend_override(NULL);
+}

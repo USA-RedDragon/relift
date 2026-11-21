@@ -438,7 +438,25 @@ static rl_result video_configure(rl_ipc_req *r)
     return rc;
 }
 
-/** @brief Command 3 (GetInputEvent): a copied handle; the decoder always has room for input, so the event is signaled. */
+/**
+ * @brief Submitted frames the session holds before the submission-ready event (GetInputEvent, the SDK's
+ * Get...DecoderSubmissionReadyEvent) stops being signaled: the event means there is room for another submission.
+ * The console's depth is not known; this one matches the decoded ring.
+ */
+#define INPUT_SLOTS RING
+
+/** @brief Signals the submission-ready event while fewer than INPUT_SLOTS submitted frames wait, clears it otherwise. mu held. */
+static void input_room(video_session *v)
+{
+    if (!v->input_event)
+        return;
+    if (v->ninputs - v->head < INPUT_SLOTS)
+        rl_hos_event_signal(v->input_event);
+    else
+        rl_hos_event_clear(v->input_event);
+}
+
+/** @brief Command 3 (GetInputEvent): a copied handle to the submission-ready event, signaled while there is room for a submission (input_room). */
 static rl_result video_input_event(rl_ipc_req *r)
 {
     video_session *v = r->self->state;
@@ -446,10 +464,10 @@ static rl_result video_input_event(rl_ipc_req *r)
     if (!v->input_event)
         v->input_event = rl_hos_event_create();
     hos_revent *e = v->input_event;
+    input_room(v);
     pthread_mutex_unlock(&v->mu);
     if (!e)
         return KR_OUT_OF_RESOURCE;
-    rl_hos_event_signal(e);
     return rl_ipc_push_copy(r, &e->obj);
 }
 
@@ -774,6 +792,7 @@ static void step(video_session *v)
     input in = v->inputs[v->head++];
     if (v->head == v->ninputs)
         v->head = v->ninputs = 0;
+    input_room(v);
     uint64_t epoch = v->epoch;
     pthread_mutex_unlock(&v->mu);
     int shown = 0;
@@ -899,10 +918,8 @@ static rl_result video_submit(rl_ipc_req *r)
             }
         }
     }
-    hos_revent *e = v->input_event;
+    input_room(v);
     pthread_mutex_unlock(&v->mu);
-    if (e)
-        rl_hos_event_signal(e);
     return rc;
 }
 
@@ -1033,6 +1050,7 @@ static rl_result video_flush(rl_ipc_req *r)
     for (size_t i = v->head; i < v->ninputs; i++)
         free(v->inputs[i].data);
     v->head = v->ninputs = 0;
+    input_room(v);
     v->epoch++;
     pthread_mutex_unlock(&v->mu);
     return KR_SUCCESS;
