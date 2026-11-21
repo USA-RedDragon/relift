@@ -478,7 +478,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 [[package]]
 name = "rustyboi-core"
 version = "0.1.0"
-source = "git+https://github.com/USA-RedDragon/rustyboi?rev=14acecf35f6bfc8589a09ce7affbf7c1be3854a0#14acecf35f6bfc8589a09ce7affbf7c1be3854a0"
+source = "git+https://github.com/USA-RedDragon/rustyboi?rev=b6687f38120bd81c2251519e54f1c40f6002c9ef#b6687f38120bd81c2251519e54f1c40f6002c9ef"
 dependencies = [
  "bincode",
  "libm",
@@ -492,7 +492,7 @@ dependencies = [
 [[package]]
 name = "rustyboi-mix"
 version = "0.1.0"
-source = "git+https://github.com/USA-RedDragon/rustyboi?rev=14acecf35f6bfc8589a09ce7affbf7c1be3854a0#14acecf35f6bfc8589a09ce7affbf7c1be3854a0"
+source = "git+https://github.com/USA-RedDragon/rustyboi?rev=b6687f38120bd81c2251519e54f1c40f6002c9ef#b6687f38120bd81c2251519e54f1c40f6002c9ef"
 dependencies = [
  "libm",
  "serde",
