@@ -928,6 +928,8 @@ int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *a
 
 /** @brief The NVN generation of the program's driver (nvn_version.c): 1 or 2 (also without a build record). */
 uint32_t nvn_generation(void);
+/** @brief The driver record rl_nvn_set_driver registered, NULL without one; it names what nvn_impure answers from. */
+const void *nvn_driver_record(void);
 /** @brief Why the build found the driver's own code for proc name impure, or NULL when it is pure or unread. */
 const char *nvn_impure(const char *name);
 /** @brief Why the build could not read the driver's device layout, or NULL. */

@@ -25,6 +25,8 @@ void rl_nvn_set_driver(const struct rl_nvn_driver *d)
     rl_nvn_set_layout(d ? d->layout : NULL);
 }
 
+const void *nvn_driver_record(void) { return g_driver; }
+
 uint32_t nvn_generation(void) { return g_driver && g_driver->generation == 1 ? 1u : 2u; }
 
 const char *nvn_impure(const char *name)

@@ -212,10 +212,54 @@ static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
     return RL_OK;
 }
 
+/**
+ * @brief What nvn_driver_index and nvn_impure answer for one name, kept by the name's address: callers pass string
+ * literals, so a replayed getter finds its proc without string compares. Entries are made once and never change.
+ */
+typedef struct proc_memo {
+    const char *name;
+    const void *driver;
+    int k;
+    const char *impure;
+} proc_memo;
+
+/** @brief Open-addressed table of proc_memo, filled by compare-and-swap; a full table leaves names unremembered. */
+static proc_memo *proc_memos[512];
+
+static void proc_lookup(const char *name, int *k, const char **impure)
+{
+    const void *drv = nvn_driver_record();
+    uint32_t h = (uint32_t)(((uintptr_t)name >> 3) * 0x9E3779B1u) % 512u;
+    for (uint32_t i = 0; i < 16; i++) {
+        proc_memo **slot = &proc_memos[(h + i) % 512u];
+        proc_memo *m = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+        if (m && m->name == name && m->driver == drv) {
+            *k = m->k;
+            *impure = m->impure;
+            return;
+        }
+        if (m)
+            continue;
+        *k = nvn_driver_index(name);
+        *impure = nvn_impure(name);
+        proc_memo *fresh = malloc(sizeof *fresh);
+        if (!fresh)
+            return;
+        *fresh = (proc_memo){ name, drv, *k, *impure };
+        proc_memo *none = NULL;
+        if (!__atomic_compare_exchange_n(slot, &none, fresh, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            free(fresh);
+        return;
+    }
+    *k = nvn_driver_index(name);
+    *impure = nvn_impure(name);
+}
+
 int nvn_driver_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *args, unsigned n, uint64_t *ret)
 {
-    int k = nvn_driver_index(name);
-    const char *impure = nvn_impure(name);
+    int k;
+    const char *impure;
+    proc_lookup(name, &k, &impure);
     if (impure)
         return rl_guest_fatal(c, "nvn", "the %s driver's own %s is not pure: it %s", nvn_version_name(), name, impure);
     uint64_t a = 0;
