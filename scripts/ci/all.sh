@@ -56,7 +56,7 @@ main() {
   mkdir -p "$logs"
   rm -f "$logs"/*.status "$logs"/*.pgid
 
-  jobs=(lint tests-workspace tests-gb-devices tests-relift tests-relift-e2e-slow tests-relift-e2e-rest mesh-kat nds-timing-sdk docs gb-corpus z80-sst z80-zexdoc generated workflows runtime-charter runtime-tests release-guard)
+  jobs=(lint tests-workspace tests-gb-devices tests-relift tests-relift-e2e-slow tests-relift-e2e-linux tests-relift-e2e-rest mesh-kat nds-timing-sdk docs gb-corpus z80-sst z80-zexdoc generated workflows runtime-charter runtime-tests release-guard)
   image_targets=(x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm)
   if [ "$(uname -s)" = Linux ]; then
     jobs+=(appimage cross-windows-x64 cross-windows-arm64 cross-android-arm64)

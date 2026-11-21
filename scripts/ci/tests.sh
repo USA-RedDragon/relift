@@ -4,13 +4,14 @@
 #   workspace  every crate but relift
 #   relift     the relift crate without its end-to-end targets
 #   e2e-slow   the end-to-end targets that take longest
-#   e2e-rest   the other end-to-end targets
+#   e2e-rest   the other end-to-end targets, the Linux corpus among them (on
+#              macOS its dynamic programs are skipped, so it stays small)
 . "$(dirname "$0")/lib.sh"
 
 case ${1:-} in
   workspace) cargo test --workspace --exclude relift --locked ;;
   relift) scripts/ci/tests-relift.sh ;;
   e2e-slow) scripts/ci/tests-relift-e2e.sh slow ;;
-  e2e-rest) scripts/ci/tests-relift-e2e.sh rest ;;
+  e2e-rest) scripts/ci/tests-relift-e2e.sh rest && scripts/ci/tests-relift-e2e.sh linux ;;
   *) echo "usage: tests.sh workspace|relift|e2e-slow|e2e-rest" >&2; exit 2 ;;
 esac

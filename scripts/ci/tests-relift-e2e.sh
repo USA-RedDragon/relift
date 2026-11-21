@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # The relift crate's end-to-end test targets (every tests/e2e*.rs). With the
-# argument slow, only the targets listed below; with rest, every other one, so
-# a new target lands in exactly one of the two; with none, all of them.
-# Usage: tests-relift-e2e.sh [slow|rest]
+# argument slow or linux, only the targets listed below for it; with rest,
+# every other one, so a new target lands in exactly one of the three; with
+# none, all of them. linux is the Linux corpus, whose dynamic programs compile
+# their libraries cold in well over half of a job's 15 minutes.
+# Usage: tests-relift-e2e.sh [slow|linux|rest]
 # The targets that build Switch programs run a second time with emit.trampoline.
 . "$(dirname "$0")/lib.sh"
 
 slow=(e2e_gb e2e_hotload e2e_n64)
+linux=(e2e_linux)
 
 all=()
 while read -r name; do
@@ -14,24 +17,26 @@ while read -r name; do
 done < <(cargo metadata --no-deps --format-version 1 --locked |
   jq -r '.packages[] | select(.name == "relift") | .targets[] | select(.kind | index("test")) | .name | select(startswith("e2e"))')
 
-for name in "${slow[@]}"; do
+for name in "${slow[@]}" "${linux[@]}"; do
   case " ${all[*]} " in
     *" $name "*) ;;
-    *) echo "tests-relift-e2e.sh lists $name as slow, but relift has no such e2e target" >&2; exit 1 ;;
+    *) echo "tests-relift-e2e.sh lists $name as slow or linux, but relift has no such e2e target" >&2; exit 1 ;;
   esac
 done
 
 args=()
 for name in "${all[@]}"; do
-  is_slow=
+  part=rest
   for s in "${slow[@]}"; do
-    [ "$s" != "$name" ] || is_slow=1
+    [ "$s" != "$name" ] || part=slow
+  done
+  for s in "${linux[@]}"; do
+    [ "$s" != "$name" ] || part=linux
   done
   case ${1:-all} in
     all) args+=(--test "$name") ;;
-    slow) [ -z "$is_slow" ] || args+=(--test "$name") ;;
-    rest) [ -n "$is_slow" ] || args+=(--test "$name") ;;
-    *) echo "usage: tests-relift-e2e.sh [slow|rest]" >&2; exit 2 ;;
+    slow | linux | rest) [ "$part" != "$1" ] || args+=(--test "$name") ;;
+    *) echo "usage: tests-relift-e2e.sh [slow|linux|rest]" >&2; exit 2 ;;
   esac
 done
 [ ${#args[@]} -gt 0 ] || { echo "no e2e targets selected" >&2; exit 1; }

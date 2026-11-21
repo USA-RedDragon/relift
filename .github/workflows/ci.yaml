@@ -134,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [slow, rest]
+        part: [slow, linux, rest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -165,13 +165,13 @@ jobs:
           echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
 
       - name: Install the arm64 Linux cross compiler for the dynamic program
-        if: matrix.part == 'rest'
+        if: matrix.part == 'linux'
         run: |
           scripts/ci/apt-install.sh gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           echo "RELIFT_LINUX_REQUIRE=1" >> "$GITHUB_ENV"
 
       - name: Restore the compiled libraries of the dynamic program
-        if: matrix.part == 'rest'
+        if: matrix.part == 'linux'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target/tmp/e2e-linux-dynamic-cache
