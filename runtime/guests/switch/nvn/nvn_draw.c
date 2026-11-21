@@ -711,7 +711,7 @@ static int bank_of(replay *r, const void *src, uint64_t n, VkDescriptorBufferInf
     }
     if (n > UBO_BYTES)
         n = UBO_BYTES;
-    if (!nvn_vk_upload_bytes(r, src, n, UBO_BYTES, 256, &off))
+    if (!nvn_vk_upload_bank(r, src, n, UBO_BYTES, 256, &off))
         return nvn_vk_stop(r, "the upload arena is full");
     *bi = (VkDescriptorBufferInfo){ g.arena.buf, off, UBO_BYTES };
     return RL_OK;

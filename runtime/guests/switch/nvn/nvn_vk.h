@@ -446,6 +446,11 @@ VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, ui
 VkFormat nvn_vk_view_format(const vimg *v, uint32_t format, VkImageAspectFlags *aspect);
 /** @brief Copies n host bytes into the arena (zero-filled to pad bytes); offset of the copy in *off. */
 bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
+/**
+ * @brief nvn_vk_upload_bytes for a uniform bank, which the GPU only reads: when the batch being recorded already
+ * holds the same n bytes padded the same way, their offset is given instead of a new copy.
+ */
+bool nvn_vk_upload_bank(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
 /** @brief The layout of the texture set (set 2); VK_NULL_HANDLE when it cannot be made (nvn_texset.c). */
 VkDescriptorSetLayout nvn_texset_layout(void);
 /** @brief The texture set, to bind as set 2. */

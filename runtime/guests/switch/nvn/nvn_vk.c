@@ -2551,6 +2551,68 @@ bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t 
     return nvn_vk_upload_bytes(r, r->mem + nvn_gpu_guest(addr), n, pad, align, off);
 }
 
+#define ARENA_CHUNK 256u
+#define BANK_CACHE 512u
+
+/**
+ * @brief Which ARENA_CHUNK-byte chunks of the arena may hold nonzero bytes (a clear bit: all zero), so a padded
+ * upload only zeroes the padding that is not zero already; a host copy of the uniform banks uploaded, and the banks
+ * of the batch being recorded by their bytes, so a bank the batch already holds is not uploaded again.
+ */
+static struct {
+    uint64_t *dirty;
+    uint8_t *shadow;
+    bool failed;
+    struct bank_entry {
+        uint64_t flushes, hash, n, off;
+    } banks[BANK_CACHE];
+} az;
+
+static bool arena_tracking(void)
+{
+    if (az.dirty || az.failed)
+        return !az.failed;
+    uint64_t words = (g.arena.size / ARENA_CHUNK + 63) / 64;
+    az.dirty = malloc(words * 8);
+    az.shadow = malloc(g.arena.size);
+    if (!az.dirty || !az.shadow) {
+        free(az.dirty);
+        free(az.shadow);
+        az.dirty = NULL;
+        az.shadow = NULL;
+        az.failed = true;
+        return false;
+    }
+    memset(az.dirty, 0xff, words * 8);
+    return true;
+}
+
+static void arena_mark(uint64_t at, uint64_t n)
+{
+    for (uint64_t c = at / ARENA_CHUNK; c < (at + n + ARENA_CHUNK - 1) / ARENA_CHUNK; c++)
+        az.dirty[c / 64] |= 1ull << (c % 64);
+}
+
+/** @brief Makes arena bytes [p0, p1) zero, writing only the chunks that may not be. */
+static void arena_zero(uint64_t p0, uint64_t p1)
+{
+    uint64_t c = p0 / ARENA_CHUNK, end = (p1 + ARENA_CHUNK - 1) / ARENA_CHUNK;
+    while (c < end) {
+        if (c % 64 == 0 && c + 64 <= end && az.dirty[c / 64] == 0) {
+            c += 64;
+            continue;
+        }
+        if (az.dirty[c / 64] >> (c % 64) & 1) {
+            uint64_t cs = c * ARENA_CHUNK, ce = cs + ARENA_CHUNK;
+            uint64_t lo = p0 > cs ? p0 : cs, hi = p1 < ce ? p1 : ce;
+            memset(g.arena.map + lo, 0, hi - lo);
+            if (lo == cs && hi == ce)
+                az.dirty[c / 64] &= ~(1ull << (c % 64));
+        }
+        c++;
+    }
+}
+
 bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)
 {
     uint64_t total = n > pad ? n : pad;
@@ -2563,10 +2625,35 @@ bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, u
     if (total > g.arena.size)
         return false;
     memcpy(g.arena.map + at, src, n);
-    if (total > n)
-        memset(g.arena.map + at + n, 0, total - n);
+    if (total > n) {
+        if (arena_tracking()) {
+            arena_mark(at, n);
+            arena_zero(at + n, at + total);
+        } else {
+            memset(g.arena.map + at + n, 0, total - n);
+        }
+    } else if (az.dirty) {
+        arena_mark(at, n);
+    }
     g.arena_used = at + total;
     *off = at;
+    return true;
+}
+
+bool nvn_vk_upload_bank(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)
+{
+    if (!arena_tracking() || n > pad)
+        return nvn_vk_upload_bytes(r, src, n, pad, align, off);
+    uint64_t h = bytes_hash(src, n) ^ n * 0x9e3779b97f4a7c15ull;
+    struct bank_entry *e = &az.banks[h % BANK_CACHE];
+    if (e->flushes == g.flushes && e->hash == h && e->n == n && memcmp(az.shadow + e->off, src, n) == 0) {
+        *off = e->off;
+        return true;
+    }
+    if (!nvn_vk_upload_bytes(r, src, n, pad, align, off))
+        return false;
+    memcpy(az.shadow + *off, src, n);
+    *e = (struct bank_entry){ g.flushes, h, n, *off };
     return true;
 }
 
