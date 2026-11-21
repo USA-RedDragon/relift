@@ -1765,6 +1765,21 @@ void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
 
 static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex);
 
+void nvn_vk_retire_images(void)
+{
+    uint64_t removed = nvn_obj_pools_removed();
+    if (removed == g.pools_seen)
+        return;
+    g.pools_seen = removed;
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < g.nimages; i++) {
+        vimg *v = g.images[i];
+        if (!v->pool_serial || nvn_obj_serial(v->d.pool, NVN_POOL) == v->pool_serial)
+            g.images[n++] = v;
+    }
+    g.nimages = n;
+}
+
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
 static vimg *image_of(replay *r, uint64_t tex)
 {
@@ -1785,6 +1800,7 @@ static vimg *image_of(replay *r, uint64_t tex)
  */
 static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
 {
+    nvn_vk_retire_images();
     uint64_t storage = nvn_pool_memory(d->pool, NULL) + d->offset;
     for (uint32_t i = 0; i < g.nimages; i++) {
         vimg *v = g.images[i];
@@ -1815,6 +1831,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
         return NULL;
     v->storage = storage;
     v->d = *d;
+    v->pool_serial = nvn_obj_serial(d->pool, NVN_POOL);
     v->format = f;
     v->aspect = aspect;
     VkFormatProperties fp;

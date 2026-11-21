@@ -31,6 +31,8 @@ static struct {
         uint32_t kind, how;
     } gone[GONE_RING];
     uint32_t gone_next;
+    uint64_t serials;
+    uint64_t pools_removed;
 } objs = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
 static void note_gone_locked(const nvn_obj *o, uint32_t how)
@@ -38,6 +40,8 @@ static void note_gone_locked(const nvn_obj *o, uint32_t how)
     hos_thread *h = hos_current();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    if (o->kind == NVN_POOL)
+        __atomic_add_fetch(&objs.pools_removed, 1, __ATOMIC_RELEASE);
     uint32_t i = objs.gone_next++ % GONE_RING;
     objs.gone[i].addr = o->addr;
     objs.gone[i].kind = o->kind;
@@ -107,6 +111,7 @@ nvn_obj *nvn_obj_publish(nvn_obj *o)
         return NULL;
     uint64_t addr = o->addr;
     pthread_mutex_lock(&objs.lock);
+    o->serial = ++objs.serials;
     if ((objs.filled + 1) * 2 > objs.cap)
         grow_locked();
     if (!objs.cap) {
@@ -157,6 +162,25 @@ nvn_obj *nvn_obj_get(uint64_t addr, uint32_t kind)
     pthread_mutex_unlock(&objs.lock);
     return found && (!kind || found->kind == kind) ? found : NULL;
 }
+
+uint64_t nvn_obj_serial(uint64_t addr, uint32_t kind)
+{
+    uint64_t serial = 0;
+    pthread_mutex_lock(&objs.lock);
+    if (objs.cap) {
+        uint32_t k = hash(addr) & (objs.cap - 1);
+        for (nvn_obj *o; (o = objs.slots[k]) != NULL; k = (k + 1) & (objs.cap - 1))
+            if (o != NVN_TOMB && o->addr == addr) {
+                if (o->kind == kind)
+                    serial = o->serial;
+                break;
+            }
+    }
+    pthread_mutex_unlock(&objs.lock);
+    return serial;
+}
+
+uint64_t nvn_obj_pools_removed(void) { return __atomic_load_n(&objs.pools_removed, __ATOMIC_ACQUIRE); }
 
 nvn_obj *nvn_obj_acquire(uint64_t addr, uint32_t kind)
 {

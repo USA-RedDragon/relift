@@ -900,6 +900,8 @@ struct nvn_obj {
     uint32_t refs;
     /** @brief Frees what the kind holds besides the struct itself; may be NULL. */
     void (*drop)(nvn_obj *o);
+    /** @brief Which object this is among all the layer published, from 1 (set by nvn_obj_publish): an object published again at the same address differs. */
+    uint64_t serial;
 };
 
 /** @brief A slot left by a freed object in the object table. */
@@ -918,6 +920,10 @@ nvn_obj *nvn_obj_new(uint64_t addr, uint32_t kind, size_t size);
 nvn_obj *nvn_obj_publish(nvn_obj *o);
 /** @brief The object for the NVN object at addr, of kind (0: any kind), or NULL. */
 nvn_obj *nvn_obj_get(uint64_t addr, uint32_t kind);
+/** @brief The serial of the object of kind at addr (see nvn_obj.serial), or 0 when there is none. */
+uint64_t nvn_obj_serial(uint64_t addr, uint32_t kind);
+/** @brief How many memory pools were removed so far (finalized, or replaced by an object made at their address). */
+uint64_t nvn_obj_pools_removed(void);
 /** @brief Describes the last removal of the object at addr (kind, how, thread, age) into out; false when none is remembered. */
 bool nvn_obj_gone(uint64_t addr, char *out, size_t n);
 /** @brief The first vi vsync after t (CLOCK_MONOTONIC ns), for the headless pacing measurement mode. */

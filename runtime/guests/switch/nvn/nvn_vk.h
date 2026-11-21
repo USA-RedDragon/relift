@@ -74,6 +74,8 @@
 typedef struct vimg {
     uint64_t storage;
     nvn_tex_desc d;
+    /** @brief The serial of the memory pool d.pool names when the image was made (nvn_obj_serial), 0 for none. */
+    uint64_t pool_serial;
     VkFormat format;
     VkImageAspectFlags aspect;
     /** @brief An ASTC texture the host device cannot sample: the image holds its decoded RGBA8 texels. */
@@ -182,6 +184,8 @@ typedef struct nvn_vkdev {
     char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     vimg *images[MAX_IMAGES];
     uint32_t nimages;
+    /** @brief nvn_obj_pools_removed when images were last checked for a removed pool (nvn_vk_retire_images). */
+    uint64_t pools_seen;
     /** @brief The running count vimg.written takes its values from. */
     uint64_t write_stamp;
     uint64_t presents;
@@ -467,6 +471,13 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv);
 /** @brief A new storage view of level level of v as type t in format f (the caller destroys it), or NULL. */
 /** @brief Notes that v is written now (it becomes the image the textures sharing its storage copy from). */
 void nvn_vk_written(vimg *v);
+/**
+ * @brief Takes out of the images a texture can find or copy from every image whose memory pool was removed after it
+ * was made (finalized, or another object made at the pool's address). The pool's memory is the game's again, and the
+ * console's GPU wrote the image's texels when it drew them, so nothing of the image may land in that memory later.
+ * The image stays allocated, as a render target or texture binding may still name it.
+ */
+void nvn_vk_retire_images(void);
 VkImageView nvn_vk_storage_view(const vimg *v, VkImageViewType t, VkFormat f, uint32_t level, uint32_t layer,
                                 uint32_t layers);
 /**
