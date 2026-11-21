@@ -55,6 +55,12 @@ typedef struct rl_vkdev_build {
     const void *pnext;
 } rl_vkdev_build;
 
+/**
+ * @brief Links the pNext chain that starts at head (structs that each begin with sType and pNext) in front of b's chain:
+ * the last struct of head's chain then points at what b->pnext held, and b->pnext at head.
+ */
+void rl_vkdev_chain(rl_vkdev_build *b, void *head);
+
 /** @brief Called while the device is made, with the physical device chosen; false stops the device (the log names who). */
 typedef bool rl_vkdev_hook(void *user, rl_vkdev_build *b);
 

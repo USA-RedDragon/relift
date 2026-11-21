@@ -254,8 +254,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
     f13->robustImageAccess = VK_FALSE;
-    feat.f2.pNext = (void *)(uintptr_t)b->pnext;
-    b->pnext = &feat.f2;
+    rl_vkdev_chain(b, &feat.f2);
     g.dev_made = true;
     return true;
 }

@@ -427,3 +427,22 @@ TEST(present_sdl_window_shows_cpu_and_gpu_frames)
     rl_settings_reset();
 }
 #endif
+
+TEST(vkdev_chain_links_a_whole_chain_in_front_of_what_was_there)
+{
+    struct link {
+        int32_t stype;
+        void *next;
+    } a = { 1, NULL }, b = { 2, NULL }, c = { 3, NULL };
+    a.next = &b;
+    rl_vkdev_build build;
+    memset(&build, 0, sizeof build);
+    build.pnext = &c;
+    rl_vkdev_chain(&build, &a);
+    CHECK(build.pnext == &a);
+    CHECK(a.next == &b);
+    CHECK(b.next == &c);
+    CHECK(c.next == NULL);
+    rl_vkdev_chain(&build, NULL);
+    CHECK(build.pnext == &a);
+}

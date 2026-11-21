@@ -277,6 +277,20 @@ void rl_vkdev_require(const char *who, uint32_t api_version, uint32_t queue_flag
     pthread_mutex_unlock(&g_lock);
 }
 
+void rl_vkdev_chain(rl_vkdev_build *b, void *head)
+{
+    if (!head)
+        return;
+    struct link {
+        int32_t stype;
+        struct link *next;
+    } *l = head;
+    while (l->next)
+        l = l->next;
+    l->next = (struct link *)(uintptr_t)b->pnext;
+    b->pnext = head;
+}
+
 bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name)
 {
     for (uint32_t i = 0; i < b->nexts; i++)
