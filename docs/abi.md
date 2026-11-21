@@ -1614,7 +1614,16 @@ are also call boundaries. [inferred]
   be in the layer. The rest of FP (compares, min/max, FRECPE, FCSEL, moves)
   stays generated from Sail. [verified need: Sail prototype; implementations
   open]
-- **Inline fast paths** (`rl_fadd32` ... `rl_fsqrt64`, `rl_fmuladd32/64`):
+- **Inline fast paths** (`rl_fadd32` ... `rl_fsqrt64`, `rl_fmuladd32/64`,
+  and the conversions `rl_ftoint`, `rl_inttof`, `rl_fcvt`): the frontend
+  emits them for every FP operation of these kinds, scalar and vector lanes
+  alike; only FPRoundInt and the half-precision helpers stay out of line.
+  The conversions keep to the cases where the host conversion is the Arm
+  one: FPToFixed rounding toward zero with the operand in range,
+  FixedToFP and single-double FPConvert in the FPCR rounding mode; any
+  other mode, a NaN or an out-of-range operand takes the exact layer. In
+  flag-producing programs fused multiply-add and the narrowing FPConvert
+  take the tininess fix-up of FMUL.
   - x86-64: valid when RMode is round-to-nearest and FZ, DN, AHP are clear
     and FPSR is not tracked. IEEE basic operations and fused multiply-add
     are correctly rounded on both ISAs, so non-NaN results are bit-exact.

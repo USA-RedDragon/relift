@@ -192,9 +192,9 @@ impl Frontend for Arm64 {
                 };
                 format!("rl_f{name}{t}({}, {}, {fpcr}, 0)", arg(0), arg(1))
             }
-            FpOp::Sqrt => format!("rl_fp{t}_sqrt({}, {fpcr}, 0)", arg(0)),
+            FpOp::Sqrt => format!("rl_fsqrt{t}({}, {fpcr}, 0)", arg(0)),
             FpOp::MulAdd => format!(
-                "rl_fp{t}_muladd({}, {}, {}, {fpcr}, 0)",
+                "rl_fmuladd{t}({}, {}, {}, {fpcr}, 0)",
                 arg(2),
                 arg(0),
                 arg(1)
@@ -203,17 +203,17 @@ impl Frontend for Arm64 {
                 format!("rl_fp{t}_round_int({}, {}, 0, {fpcr}, 0)", arg(0), rmode(r))
             }
             FpOp::ToSInt(r) | FpOp::ToUInt(r) => format!(
-                "rl_fp_to_fixed({}, {f}, {t}, 0, {}, {}, {fpcr}, 0)",
+                "rl_ftoint({}, {f}, {t}, {}, {}, {fpcr}, 0)",
                 arg(0),
                 u8::from(matches!(op, FpOp::ToUInt(_))),
                 rmode(r)
             ),
             FpOp::FromSInt | FpOp::FromUInt => format!(
-                "rl_fixed_to_fp({}, {f}, {t}, 0, {}, RL_RM_FPCR, {fpcr}, 0)",
+                "rl_inttof({}, {f}, {t}, {}, RL_RM_FPCR, {fpcr}, 0)",
                 arg(0),
                 u8::from(op == FpOp::FromUInt)
             ),
-            FpOp::Convert => format!("rl_fp_convert({}, {f}, {t}, RL_RM_FPCR, {fpcr}, 0)", arg(0)),
+            FpOp::Convert => format!("rl_fcvt({}, {f}, {t}, RL_RM_FPCR, {fpcr}, 0)", arg(0)),
             FpOp::Neg | FpOp::Abs => return None,
         })
     }
@@ -416,7 +416,11 @@ mod tests {
         let fma = f
             .fp(FpOp::MulAdd, Width::W32, Width::W32, &args, &name)
             .expect("fma");
-        assert_eq!(fma, "rl_fp32_muladd(c, a, b, r68, 0)");
+        assert_eq!(fma, "rl_fmuladd32(c, a, b, r68, 0)");
+        let sqrt = f
+            .fp(FpOp::Sqrt, Width::W64, Width::W64, &args, &name)
+            .expect("sqrt");
+        assert_eq!(sqrt, "rl_fsqrt64(a, r68, 0)");
         let cvt = f
             .fp(
                 FpOp::ToUInt(FpRound::Zero),
@@ -426,7 +430,15 @@ mod tests {
                 &name,
             )
             .expect("cvt");
-        assert_eq!(cvt, "rl_fp_to_fixed(a, 64, 32, 0, 1, RL_RM_ZERO, r68, 0)");
+        assert_eq!(cvt, "rl_ftoint(a, 64, 32, 1, RL_RM_ZERO, r68, 0)");
+        let from = f
+            .fp(FpOp::FromSInt, Width::W64, Width::W32, &args, &name)
+            .expect("from");
+        assert_eq!(from, "rl_inttof(a, 64, 32, 0, RL_RM_FPCR, r68, 0)");
+        let narrow = f
+            .fp(FpOp::Convert, Width::W64, Width::W32, &args, &name)
+            .expect("narrow");
+        assert_eq!(narrow, "rl_fcvt(a, 64, 32, RL_RM_FPCR, r68, 0)");
         assert!(
             f.fp(FpOp::Neg, Width::W32, Width::W32, &args, &name)
                 .is_none()
@@ -460,11 +472,11 @@ mod tests {
         // not half precision.
         assert_eq!(
             fp(FpOp::ToSInt(FpRound::TiesAway), Width::W64, Width::W16),
-            "rl_fp_to_fixed(a, 64, 16, 0, 0, RL_RM_AWAY, r1, 0)".replace("r1", &name(regs::FPCR))
+            "rl_ftoint(a, 64, 16, 0, RL_RM_AWAY, r1, 0)".replace("r1", &name(regs::FPCR))
         );
         assert_eq!(
             fp(FpOp::FromUInt, Width::W16, Width::W64),
-            "rl_fixed_to_fp(a, 16, 64, 0, 1, RL_RM_FPCR, r1, 0)".replace("r1", &name(regs::FPCR))
+            "rl_inttof(a, 16, 64, 1, RL_RM_FPCR, r1, 0)".replace("r1", &name(regs::FPCR))
         );
         assert_eq!(
             f.crypto(CryptoOp::AesMixColumns, "x").as_deref(),

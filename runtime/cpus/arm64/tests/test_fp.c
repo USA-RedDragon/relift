@@ -536,3 +536,111 @@ TEST(fp_conversions_match_host)
         CHECK_EQ(rl_fixed_to_fp((uint64_t)si, 64, 64, 0, 1, RL_RM_FPCR, 0, NULL), bits_of_f64((double)(uint64_t)si));
     }
 }
+
+/* Special values for the inline fast paths: zeros, ones, infinities, quiet
+ * and signaling NaNs with payloads, the smallest normals and subnormals,
+ * the largest finite values. */
+static uint32_t special32(void)
+{
+    static const uint32_t v[] = {
+        0, NEG0, ONE, 0xBF800000u, INF, NINF, 0x7FC00001u, 0xFFC12345u, 0x7F800001u, 0xFFA00000u,
+        0x00800000u, 0x80800000u, 0x007FFFFFu, 0x00000001u, 0x80000001u, 0x7F7FFFFFu, 0xFF7FFFFFu, 0x3F800001u,
+        0x4F000000u, 0x4EFFFFFFu, 0xCF000000u, 0xCF000001u, 0x4F800000u, 0x4F7FFFFFu, 0x5F000000u, 0x5EFFFFFFu,
+        0xDF000000u, 0xDF000001u, 0x5F800000u, 0x5F7FFFFFu, 0xBF7FFFFFu, 0xBF000000u,
+    };
+    uint64_t r = rnd();
+    return (r & 1) ? v[(r >> 8) % (sizeof v / sizeof v[0])] : rnd32();
+}
+
+static uint64_t special64(void)
+{
+    static const uint64_t v[] = {
+        0, 0x8000000000000000ull, 0x3FF0000000000000ull, 0xBFF0000000000000ull, 0x7FF0000000000000ull,
+        0xFFF0000000000000ull, 0x7FF8000000000001ull, 0xFFF8000000012345ull, 0x7FF0000000000001ull,
+        0xFFF4000000000000ull, 0x0010000000000000ull, 0x000FFFFFFFFFFFFFull, 0x0000000000000001ull,
+        0x8000000000000001ull, 0x7FEFFFFFFFFFFFFFull, 0x3FF0000000000001ull, 0x41E0000000000000ull,
+        0x41DFFFFFFFC00000ull, 0x41DFFFFFFFFFFFFFull, 0xC1E0000000000000ull, 0xC1E0000000100000ull,
+        0xC1E00000001FFFFFull, 0x41F0000000000000ull, 0x41EFFFFFFFFFFFFFull, 0x43E0000000000000ull,
+        0x43DFFFFFFFFFFFFFull, 0xC3E0000000000000ull, 0xC3E0000000000001ull, 0x43F0000000000000ull,
+        0x43EFFFFFFFFFFFFFull, 0xBFEFFFFFFFFFFFFFull, 0x380FFFFFF0000000ull, 0x36A0000000000000ull,
+    };
+    uint64_t r = rnd();
+    return (r & 1) ? v[(r >> 8) % (sizeof v / sizeof v[0])] : rnd64();
+}
+
+/* The inline fused multiply-add and square root that scalar and vector
+ * lanes use with FPCR zero give the bits of the exact layer, NaNs
+ * included; a third of the addends cancel the product, for the rounding
+ * cases of a tiny exact sum. */
+TEST(fp_inline_muladd_and_sqrt_match_the_exact_layer)
+{
+    for (int i = 0; i < 400000; i++) {
+        uint32_t a = special32(), b = special32(), c = special32();
+        uint64_t x = special64(), y = special64(), z = special64();
+        if (i % 3 == 0) {
+            c = rl_fp32_mul(a, b, 0, NULL) ^ 0x80000000u ^ (uint32_t)(i & 4);
+            z = rl_fp64_mul(x, y, 0, NULL) ^ 0x8000000000000000ull ^ (uint64_t)(i & 4);
+        }
+        uint32_t g32 = rl_fmuladd32(c, a, b, 0, NULL), w32 = rl_fp32_muladd(c, a, b, 0, NULL);
+        uint64_t g64 = rl_fmuladd64(z, x, y, 0, NULL), w64 = rl_fp64_muladd(z, x, y, 0, NULL);
+        if (g32 != w32)
+            fprintf(stderr, "  fmuladd32(%08x, %08x, %08x)\n", c, a, b);
+        if (g64 != w64)
+            fprintf(stderr, "  fmuladd64(%016llx, %016llx, %016llx)\n", (unsigned long long)z,
+                    (unsigned long long)x, (unsigned long long)y);
+        CHECK_EQ(g32, w32);
+        CHECK_EQ(g64, w64);
+        CHECK_EQ(rl_fsqrt32(a, 0, NULL), rl_fp32_sqrt(a, 0, NULL));
+        CHECK_EQ(rl_fsqrt64(x, 0, NULL), rl_fp64_sqrt(x, 0, NULL));
+        CHECK_EQ(rl_fp32_muladd_cold(c, a, b), w32);
+        CHECK_EQ(rl_fp64_muladd_cold(z, x, y), w64);
+        CHECK_EQ(rl_fp32_sqrt_cold(a), rl_fp32_sqrt(a, 0, NULL));
+        CHECK_EQ(rl_fp64_sqrt_cold(x), rl_fp64_sqrt(x, 0, NULL));
+    }
+}
+
+/* Integers near the limits of every conversion, and random ones. */
+static uint64_t special_int(void)
+{
+    static const uint64_t v[] = {
+        0, 1, 0xFFFFFFFFull, 0x7FFFFFFFull, 0x80000000ull, 0xFFFFFFFFFFFFFFFFull, 0x7FFFFFFFFFFFFFFFull,
+        0x8000000000000000ull, 0x00FFFFFFull, 0x01000001ull, 0x0020000000000001ull, 0xFFFFFF7FFFFFFFFFull,
+    };
+    uint64_t r = rnd();
+    switch (r & 3) {
+    case 0: return v[(r >> 8) % (sizeof v / sizeof v[0])];
+    case 1: return rnd() >> (rnd() & 63);
+    default: return rnd();
+    }
+}
+
+/* The inline conversions that scalar and vector lanes use with FPCR zero
+ * give the bits of the exact layer, for every rounding mode they are given
+ * (the modes other than theirs go to the exact layer). */
+TEST(fp_inline_conversions_match_the_exact_layer)
+{
+    static const uint32_t modes[] = {RL_RM_ZERO, RL_RM_NEAREST, RL_RM_POSINF, RL_RM_AWAY, RL_RM_FPCR};
+    for (int i = 0; i < 400000; i++) {
+        uint64_t a32 = special32(), a64 = special64(), n = special_int();
+        uint32_t rm = modes[(unsigned)i % 5];
+        for (unsigned from = 32; from <= 64; from += 32) {
+            uint64_t a = from == 32 ? a32 : a64;
+            for (unsigned to = 32; to <= 64; to += 32) {
+                for (int u = 0; u < 2; u++) {
+                    uint64_t g = rl_ftoint(a, from, to, u, rm, 0, NULL);
+                    uint64_t w = rl_fp_to_fixed(a, from, to, 0, u, rm, 0, NULL);
+                    if (g != w)
+                        fprintf(stderr, "  ftoint(%llx, %u, %u, %d, %u)\n", (unsigned long long)a, from, to, u, rm);
+                    CHECK_EQ(g, w);
+                    g = rl_inttof(n, from, to, u, rm, 0, NULL);
+                    w = rl_fixed_to_fp(n, from, to, 0, u, rm, 0, NULL);
+                    if (g != w)
+                        fprintf(stderr, "  inttof(%llx, %u, %u, %d, %u)\n", (unsigned long long)n, from, to, u, rm);
+                    CHECK_EQ(g, w);
+                }
+            }
+        }
+        CHECK_EQ(rl_fcvt(a32, 32, 64, RL_RM_FPCR, 0, NULL), rl_fp_convert(a32, 32, 64, RL_RM_FPCR, 0, NULL));
+        CHECK_EQ(rl_fcvt(a64, 64, 32, RL_RM_FPCR, 0, NULL), rl_fp_convert(a64, 64, 32, RL_RM_FPCR, 0, NULL));
+    }
+}

@@ -754,6 +754,14 @@ RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_sub_cold(uint64_t a, uint64_t b);
 RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_mul_cold(uint64_t a, uint64_t b);
 /** @brief rl_fp64_div, as rl_fp32_add_cold. */
 RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_div_cold(uint64_t a, uint64_t b);
+/** @brief rl_fp32_muladd, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_muladd_cold(uint32_t addend, uint32_t a, uint32_t b);
+/** @brief rl_fp64_muladd, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_muladd_cold(uint64_t addend, uint64_t a, uint64_t b);
+/** @brief rl_fp32_sqrt, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_sqrt_cold(uint32_t a);
+/** @brief rl_fp64_sqrt, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_sqrt_cold(uint64_t a);
 
 /*
  * FPSR flags on host hardware (docs/abi.md section 10.1). The lifted
@@ -916,27 +924,26 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
  */
 #define RL_FP_OPAQUE(u) __asm__("" : "+r"(u))
 
+/**
+ * @brief Whether the host result r (its bits u, of type U) of an inline fast
+ * path must come from the slow path instead: rl_fp_flags_fixup in
+ * flag-producing programs (tiny as there), else a NaN result.
+ */
 #if defined(RL_FP_FLAGS)
-#define RL_FP_RESULT_(slow, U, r, tiny)                                                \
-    do {                                                                               \
-        U u_;                                                                          \
-        memcpy(&u_, &r, sizeof u_);                                                    \
-        if (rl_fp_flags_fixup((uint64_t)u_, sizeof(U) * 8, tiny))                      \
-            u_ = fpcr == 0 && fpsr == 0 ? slow##_cold(a, b) : slow(a, b, fpcr, fpsr);  \
-        RL_FP_OPAQUE(u_);                                                              \
-        return u_;                                                                     \
-    } while (0)
+#define RL_FP_NEEDS_SLOW_(U, u, r, tiny) rl_fp_flags_fixup((uint64_t)(u), sizeof(U) * 8, tiny)
 #else
+#define RL_FP_NEEDS_SLOW_(U, u, r, tiny) (rl_fp_nan_fixup() && RL_UNLIKELY((r) != (r)))
+#endif
+
 #define RL_FP_RESULT_(slow, U, r, tiny)                                                \
     do {                                                                               \
         U u_;                                                                          \
         memcpy(&u_, &r, sizeof u_);                                                    \
-        if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
+        if (RL_FP_NEEDS_SLOW_(U, u_, r, tiny))                                         \
             u_ = fpcr == 0 && fpsr == 0 ? slow##_cold(a, b) : slow(a, b, fpcr, fpsr);  \
         RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
     } while (0)
-#endif
 
 #define RL_FP_BINOP(name, slow, T, U, expr, tiny)                                       \
     static inline U name(U a, U b, uint32_t fpcr, uint32_t *fpsr)                      \
@@ -970,7 +977,11 @@ RL_FP_BINOP(rl_fdiv64, rl_fp64_div, double, uint64_t, x / y, 1)
 #undef RL_FP_BINOP
 #undef RL_FP_RESULT_
 
-/** @brief FMADD/FMLA lane single, inline fast path: addend + a * b with one rounding. */
+/**
+ * @brief FMADD/FMLA single, scalar or one lane, inline fast path: addend +
+ * a * b with one rounding. The result can round up to the smallest normal,
+ * so in flag-producing programs it takes the tininess fix-up of FMUL.
+ */
 static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr)
 {
     if (!rl_fp_fast(fpcr, fpsr))
@@ -982,13 +993,13 @@ static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uin
     memcpy(&y, &b, 4);
     r = __builtin_fmaf(x, y, z);
     memcpy(&u, &r, 4);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        u = rl_fp32_muladd(addend, a, b, fpcr, fpsr);
+    if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 1))
+        u = fpcr == 0 && fpsr == 0 ? rl_fp32_muladd_cold(addend, a, b) : rl_fp32_muladd(addend, a, b, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
 }
 
-/** @brief FMADD/FMLA lane double, inline fast path. */
+/** @brief FMADD/FMLA double, scalar or one lane, inline fast path, as rl_fmuladd32. */
 static inline uint64_t rl_fmuladd64(uint64_t addend, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
 {
     if (!rl_fp_fast(fpcr, fpsr))
@@ -1000,13 +1011,16 @@ static inline uint64_t rl_fmuladd64(uint64_t addend, uint64_t a, uint64_t b, uin
     memcpy(&y, &b, 8);
     r = __builtin_fma(x, y, z);
     memcpy(&u, &r, 8);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        u = rl_fp64_muladd(addend, a, b, fpcr, fpsr);
+    if (RL_FP_NEEDS_SLOW_(uint64_t, u, r, 1))
+        u = fpcr == 0 && fpsr == 0 ? rl_fp64_muladd_cold(addend, a, b) : rl_fp64_muladd(addend, a, b, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
 }
 
-/** @brief FSQRT single, inline fast path. */
+/**
+ * @brief FSQRT single, scalar or one lane, inline fast path. A square root
+ * is never below the smallest normal, so it needs no tininess fix-up.
+ */
 static inline uint32_t rl_fsqrt32(uint32_t a, uint32_t fpcr, uint32_t *fpsr)
 {
     if (!rl_fp_fast(fpcr, fpsr))
@@ -1016,13 +1030,13 @@ static inline uint32_t rl_fsqrt32(uint32_t a, uint32_t fpcr, uint32_t *fpsr)
     memcpy(&x, &a, 4);
     r = __builtin_sqrtf(x);
     memcpy(&u, &r, 4);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        u = rl_fp32_sqrt(a, fpcr, fpsr);
+    if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 0))
+        u = fpcr == 0 && fpsr == 0 ? rl_fp32_sqrt_cold(a) : rl_fp32_sqrt(a, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
 }
 
-/** @brief FSQRT double, inline fast path. */
+/** @brief FSQRT double, scalar or one lane, inline fast path, as rl_fsqrt32. */
 static inline uint64_t rl_fsqrt64(uint64_t a, uint32_t fpcr, uint32_t *fpsr)
 {
     if (!rl_fp_fast(fpcr, fpsr))
@@ -1032,10 +1046,120 @@ static inline uint64_t rl_fsqrt64(uint64_t a, uint32_t fpcr, uint32_t *fpsr)
     memcpy(&x, &a, 8);
     r = __builtin_sqrt(x);
     memcpy(&u, &r, 8);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        u = rl_fp64_sqrt(a, fpcr, fpsr);
+    if (RL_FP_NEEDS_SLOW_(uint64_t, u, r, 0))
+        u = fpcr == 0 && fpsr == 0 ? rl_fp64_sqrt_cold(a) : rl_fp64_sqrt(a, fpcr, fpsr);
     RL_FP_OPAQUE(u);
     return u;
 }
+
+/**
+ * @brief FCVTZS/FCVTZU of 32 or 64 bits to a 32- or 64-bit integer, scalar
+ * or one lane, inline fast path for the round-toward-zero mode (the others
+ * and a NaN or out-of-range operand take rl_fp_to_fixed). The host's
+ * truncating conversion of an in-range value is the Arm result and raises
+ * IXC exactly when Arm does; the compare that rejects a NaN raises the IOC
+ * the Arm conversion raises too.
+ */
+static inline uint64_t rl_ftoint(uint64_t a, unsigned from_bits, unsigned to_bits, int is_unsigned, uint32_t rmode,
+                                 uint32_t fpcr, uint32_t *fpsr)
+{
+    double x;
+    if (rmode != RL_RM_ZERO || !rl_fp_fast(fpcr, fpsr) || (from_bits != 32 && from_bits != 64) ||
+        (to_bits != 32 && to_bits != 64))
+        return rl_fp_to_fixed(a, from_bits, to_bits, 0, is_unsigned, rmode, fpcr, fpsr);
+    if (from_bits == 32) {
+        uint32_t b = (uint32_t)a;
+        float f;
+        memcpy(&f, &b, 4);
+        x = (double)f;
+    } else {
+        memcpy(&x, &a, 8);
+    }
+    if (is_unsigned) {
+        if (to_bits == 32 && x > -1.0 && x < 4294967296.0)
+            return (uint32_t)x;
+        if (to_bits == 64 && x > -1.0 && x < 18446744073709551616.0)
+            return (uint64_t)x;
+    } else {
+        if (to_bits == 32 && x > -2147483649.0 && x < 2147483648.0)
+            return (uint32_t)(int32_t)x;
+        if (to_bits == 64 && x >= -9223372036854775808.0 && x < 9223372036854775808.0)
+            return (uint64_t)(int64_t)x;
+    }
+    return rl_fp_to_fixed(a, from_bits, to_bits, 0, is_unsigned, rmode, fpcr, fpsr);
+}
+
+/**
+ * @brief SCVTF/UCVTF of a 32- or 64-bit integer to 32 or 64 bits, scalar or
+ * one lane, inline fast path for the FPCR rounding mode: the host's
+ * conversion rounds to nearest even as FPCR zero does, never gives a NaN or
+ * a tiny result, and raises IXC exactly when Arm does.
+ */
+static inline uint64_t rl_inttof(uint64_t a, unsigned from_bits, unsigned to_bits, int is_unsigned, uint32_t rmode,
+                                 uint32_t fpcr, uint32_t *fpsr)
+{
+    if (rmode != RL_RM_FPCR || !rl_fp_fast(fpcr, fpsr) || (from_bits != 32 && from_bits != 64) ||
+        (to_bits != 32 && to_bits != 64))
+        return rl_fixed_to_fp(a, from_bits, to_bits, 0, is_unsigned, rmode, fpcr, fpsr);
+    if (to_bits == 32) {
+        float f;
+        uint32_t u;
+        if (from_bits == 32)
+            f = is_unsigned ? (float)(uint32_t)a : (float)(int32_t)(uint32_t)a;
+        else
+            f = is_unsigned ? (float)a : (float)(int64_t)a;
+        memcpy(&u, &f, 4);
+        return u;
+    }
+    double d;
+    uint64_t u;
+    if (from_bits == 32)
+        d = is_unsigned ? (double)(uint32_t)a : (double)(int32_t)(uint32_t)a;
+    else
+        d = is_unsigned ? (double)a : (double)(int64_t)a;
+    memcpy(&u, &d, 8);
+    return u;
+}
+
+/**
+ * @brief FCVT between single and double, scalar or one lane, inline fast
+ * path for the FPCR rounding mode. A NaN takes rl_fp_convert for Arm's NaN;
+ * in flag-producing programs a narrowed result of the smallest normal
+ * magnitude does too, for the tininess Arm detects before rounding.
+ */
+static inline uint64_t rl_fcvt(uint64_t a, unsigned from_bits, unsigned to_bits, uint32_t rmode, uint32_t fpcr,
+                               uint32_t *fpsr)
+{
+    if (rmode != RL_RM_FPCR || !rl_fp_fast(fpcr, fpsr))
+        return rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
+    if (from_bits == 32 && to_bits == 64) {
+        uint32_t b = (uint32_t)a;
+        float f;
+        double r;
+        uint64_t u;
+        memcpy(&f, &b, 4);
+        r = (double)f;
+        memcpy(&u, &r, 8);
+        if (RL_FP_NEEDS_SLOW_(uint64_t, u, r, 0))
+            u = rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
+        RL_FP_OPAQUE(u);
+        return u;
+    }
+    if (from_bits == 64 && to_bits == 32) {
+        double d;
+        float r;
+        uint32_t u;
+        memcpy(&d, &a, 8);
+        r = (float)d;
+        memcpy(&u, &r, 4);
+        if (RL_FP_NEEDS_SLOW_(uint32_t, u, r, 1))
+            u = (uint32_t)rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
+        RL_FP_OPAQUE(u);
+        return u;
+    }
+    return rl_fp_convert(a, from_bits, to_bits, rmode, fpcr, fpsr);
+}
+
+#undef RL_FP_NEEDS_SLOW_
 
 #endif

@@ -1178,3 +1178,17 @@ COLD(rl_fp64_add, uint64_t)
 COLD(rl_fp64_sub, uint64_t)
 COLD(rl_fp64_mul, uint64_t)
 COLD(rl_fp64_div, uint64_t)
+
+RL_FP_COLD uint32_t rl_fp32_muladd_cold(uint32_t addend, uint32_t a, uint32_t b)
+{
+    return rl_fp32_muladd(addend, a, b, 0, NULL);
+}
+
+RL_FP_COLD uint64_t rl_fp64_muladd_cold(uint64_t addend, uint64_t a, uint64_t b)
+{
+    return rl_fp64_muladd(addend, a, b, 0, NULL);
+}
+
+RL_FP_COLD uint32_t rl_fp32_sqrt_cold(uint32_t a) { return rl_fp32_sqrt(a, 0, NULL); }
+
+RL_FP_COLD uint64_t rl_fp64_sqrt_cold(uint64_t a) { return rl_fp64_sqrt(a, 0, NULL); }
