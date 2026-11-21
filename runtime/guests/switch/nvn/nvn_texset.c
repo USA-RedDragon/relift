@@ -623,8 +623,13 @@ static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, 
     return with_sampler ? bind_sampler(r, sid) : RL_OK;
 }
 
-/** @brief nvn_texset_bind; with_sampler false leaves the handle's sampler id alone (a separate texture handle names none). */
-static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
+/**
+ * @brief nvn_texset_bind; with_sampler false leaves the handle's sampler id alone (a separate texture handle names none),
+ * and as_image takes the texture for an image whether it was registered as one or not (a game may bind the descriptor
+ * it registered as a texture to an image slot: both are the same texture pool entry).
+ */
+static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler,
+                             bool as_image)
 {
     if (!make())
         return nvn_vk_stop(r, "cannot make the texture set");
@@ -632,8 +637,11 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     uint8_t view[17] = { 0 };
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
-    if (!tex)
+    if (!tex && !as_image)
         return bind_unwritten(r, id, sid, kind, dim, slot, with_sampler);
+    if (!tex)
+        return nvn_vk_stop(r, "texture id %u (handle 0x%x) is not registered", id, handle);
+    image |= as_image;
     int src = slot_for(r, id, image, slot);
     if (src != RL_OK)
         return src;
@@ -715,9 +723,10 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
 }
 
-static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler)
+static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler,
+                        bool as_image)
 {
-    int rc = bind_texture_slot(r, handle, kind, dim, slot, with_sampler);
+    int rc = bind_texture_slot(r, handle, kind, dim, slot, with_sampler, as_image);
     if (rc == RL_OK && nvn_trace_active) {
         uint8_t view[17] = { 0 };
         bool has_view = false, image = false;
@@ -730,7 +739,7 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
 
 int nvn_texset_bind(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot)
 {
-    return bind_texture(r, handle, kind, dim, slot, true);
+    return bind_texture(r, handle, kind, dim, slot, true, false);
 }
 
 int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
@@ -742,7 +751,7 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot)
         return RL_OK;
     }
     uint32_t kind, dim;
-    return bind_texture(r, handle, &kind, &dim, slot, false);
+    return bind_texture(r, handle, &kind, &dim, slot, false, false);
 }
 
 bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv)
@@ -824,7 +833,7 @@ int nvn_texset_sync_registered(replay *r)
                 t.synced[t.nsynced++] = ids[i];
             }
             uint32_t kind, dim, slot;
-            rc = bind_texture(r, ids[i], &kind, &dim, &slot, false);
+            rc = bind_texture(r, ids[i], &kind, &dim, &slot, false, false);
             if (rc != RL_OK)
                 return rc;
         }
@@ -843,7 +852,7 @@ int nvn_texset_sync_registered(replay *r)
         if (!ok)
             continue;
         uint32_t kind, dim, slot;
-        rc = bind_texture(r, t.synced[i], &kind, &dim, &slot, false);
+        rc = bind_texture(r, t.synced[i], &kind, &dim, &slot, false, false);
         if (rc != RL_OK)
             return rc;
     }
@@ -862,16 +871,10 @@ int nvn_texset_sampler(replay *r, uint32_t id)
 int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind, uint32_t *dim)
 {
     uint32_t ts;
-    int rc = nvn_texset_bind(r, handle, kind, dim, &ts);
+    int rc = bind_texture(r, handle, kind, dim, &ts, true, true);
     if (rc != RL_OK)
         return rc;
     uint32_t id = handle & 0xfffffu;
-    uint8_t view[17];
-    bool has_view = false, image = false;
-    nvn_tex_registered(id, view, &has_view, &image);
-    if (!image)
-        return nvn_vk_stop(r, "handle 0x%x binds texture id %u as an image, but it is not registered as one", handle,
-                           id);
     if (t.img_done[ts]) {
         *slot = ts;
         return RL_OK;

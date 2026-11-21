@@ -483,3 +483,41 @@ TEST(nvn_texset_a_view_of_another_block_footprint_is_not_made_resident)
     CHECK(nvn_texset_view_fits(plain, &nv));
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_texset_an_image_handle_binds_the_texture_registered_under_its_id)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, tex = 0x200;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 32, .pool = pool, .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    c.x[1] = 9;
+    c.x[2] = tex;
+    c.x[3] = 0;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    uint32_t slot = UINT32_MAX, kind = 0, dim = 0;
+    CHECK_EQ(nvn_texset_image(&r, 9u, &slot, &kind, &dim), RL_OK);
+    CHECK(slot != UINT32_MAX);
+    uint32_t again = UINT32_MAX;
+    CHECK_EQ(nvn_texset_image(&r, 9u, &again, &kind, &dim), RL_OK);
+    CHECK_EQ(again, slot);
+    CHECK(nvn_vk_flush(&r));
+}
