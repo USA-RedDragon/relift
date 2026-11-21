@@ -292,6 +292,8 @@ VkFormat nvn_vk_color_twin(VkFormat f);
 void nvn_widen_indices(const uint8_t *src, uint32_t n, bool restart, uint16_t *dst);
 int32_t nvn_vk_mem_type(uint32_t bits, VkMemoryPropertyFlags want);
 bool nvn_vk_staging_new(staging *s, uint64_t size);
+/** @brief A staging buffer the CPU reads after the device writes it: host-cached memory where the device has it. */
+bool nvn_vk_readback_new(staging *s, uint64_t size);
 void nvn_vk_staging_free(staging *s);
 void nvn_vk_barrier(VkCommandBuffer cb);
 bool nvn_vk_begin(replay *r);

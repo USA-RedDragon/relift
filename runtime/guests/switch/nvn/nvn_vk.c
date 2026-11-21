@@ -939,7 +939,24 @@ void nvn_vk_unimport(nvn_import *im)
     memset(im, 0, sizeof *im);
 }
 
+static bool staging_new(staging *s, uint64_t size, bool read);
+
 bool nvn_vk_staging_new(staging *s, uint64_t size)
+{
+    return staging_new(s, size, false);
+}
+
+bool nvn_vk_readback_new(staging *s, uint64_t size)
+{
+    return staging_new(s, size, true);
+}
+
+/**
+ * @brief A host-visible, coherent buffer of size bytes, mapped; for a readback (the CPU reads what the device wrote)
+ * from host-cached memory where the device has it, since reading uncached memory runs at a small fraction of the
+ * speed.
+ */
+static bool staging_new(staging *s, uint64_t size, bool read)
 {
     memset(s, 0, sizeof *s);
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -951,7 +968,10 @@ bool nvn_vk_staging_new(staging *s, uint64_t size)
         return false;
     VkMemoryRequirements req;
     VK(vkGetBufferMemoryRequirements)(g.dev, s->buf, &req);
-    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    const VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    int32_t t = read ? nvn_vk_mem_type(req.memoryTypeBits, host | VK_MEMORY_PROPERTY_HOST_CACHED_BIT) : -1;
+    if (t < 0)
+        t = nvn_vk_mem_type(req.memoryTypeBits, host);
     VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                                  .allocationSize = req.size,
                                  .memoryTypeIndex = (uint32_t)t };
@@ -1278,7 +1298,7 @@ static bool write_back(replay *r, vimg *u)
         total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * bpb * rr.layerCount * depth_of(d, l);
     }
     staging s;
-    if (!nvn_vk_staging_new(&s, total))
+    if (!nvn_vk_readback_new(&s, total))
         return false;
     VkBufferImageCopy bic[NVN_TEX_MAX_LEVELS];
     uint64_t at = 0;
@@ -2468,7 +2488,7 @@ static uint8_t *read_back(replay *r, vimg *v)
     VkImage tmp = NULL;
     VkDeviceMemory tmp_mem = NULL;
     uint8_t *px = malloc(bytes);
-    if (!px || !nvn_vk_staging_new(&s, bytes)) {
+    if (!px || !nvn_vk_readback_new(&s, bytes)) {
         free(px);
         return NULL;
     }
