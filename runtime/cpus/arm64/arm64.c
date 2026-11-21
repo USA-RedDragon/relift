@@ -271,6 +271,12 @@ uint64_t rl_mrs_cntpct(rl_ctx *c)
     return rl_ns_to_ticks(rl_guest_clock_ns());
 }
 
+uint64_t rl_mrs_cntfrq(void)
+{
+    const rl_guest_desc *g = rl_core_guest();
+    return g ? g->tick_hz : RL_CNTFRQ;
+}
+
 void rl_msr_fpcr(rl_ctx *c, uint64_t v)
 {
     uint32_t f = ((uint32_t)v & RL_FPCR_GUEST) | (c->fpcr & RL_FPCR_EXACT);

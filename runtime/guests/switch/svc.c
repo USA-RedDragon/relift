@@ -79,6 +79,13 @@ static const rl_guest_desc hos_guest = {
     .address_bits = 39,
     .tick_hz = HOS_TICK_HZ,
 };
+/** @brief As hos_guest for the Switch 2, whose counter runs at 31.25 MHz. */
+static const rl_guest_desc hos_switch2_guest = {
+    .name = "switch",
+    .page_size = HOS_PAGE,
+    .address_bits = 39,
+    .tick_hz = HOS_SWITCH2_TICK_HZ,
+};
 
 static void reslimit_destroy(hos_kobj *o) { free(o); }
 
@@ -571,7 +578,7 @@ int rl_hos_init(const rl_hos_config *cfg)
         return -1;
     if (!rl_cfg()->loaded)
         rl_config_load();
-    if (rl_core_init(&hos_guest, rl_arm64_cpu()) != 0)
+    if (rl_core_init(cfg && cfg->console == RL_CONSOLE_SWITCH2 ? &hos_switch2_guest : &hos_guest, rl_arm64_cpu()) != 0)
         return -1;
     memset(&hos, 0, sizeof hos);
     pthread_mutexattr_init(&ma);

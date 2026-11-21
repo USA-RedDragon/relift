@@ -18,6 +18,12 @@
 /** @brief Horizon system counter rate (CNTFRQ_EL0), 19.2 MHz: the guest clock the Switch guest gives the core. */
 #define HOS_TICK_HZ 19200000u
 _Static_assert(HOS_TICK_HZ == RL_CNTFRQ, "lifted A64 code reports the Horizon counter rate");
+/**
+ * @brief The Switch 2's system counter rate, 31.25 MHz: its SDK converts ticks with this constant
+ * (nn::os::GetSystemTickFrequency, TickManager::ConvertToTimeSpan and ConvertToTick), so the counter the guest reads
+ * (CNTPCT_EL0, svcGetSystemTick) counts at it on that console, and CNTFRQ_EL0 reads it.
+ */
+#define HOS_SWITCH2_TICK_HZ 31250000u
 
 /** @brief Memory permission bits as Horizon encodes them (svcSetMemoryPermission, svcQueryMemory). */
 enum hos_perm {

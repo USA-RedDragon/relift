@@ -207,3 +207,29 @@ TEST(entropy_is_a_fixed_sequence)
     CHECK_EQ(e0, again);
     CHECK(e0 != 0);
 }
+
+TEST(the_switch2_counter_runs_at_31_25_mhz)
+{
+    setenv("RELIFT_FIXED_STEP", "1", 1);
+    rl_switch_declare_settings();
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    CHECK_EQ(rl_core_guest()->tick_hz, 31250000u);
+    CHECK_EQ(rl_mrs_cntfrq_el0(), 31250000u);
+    uint64_t ns = hos_clock_ns();
+    t_svc(c, SVC_GET_SYSTEM_TICK, 0, 0, 0, 0, 0, 0);
+    CHECK_EQ(c->x[0], (uint64_t)(((unsigned __int128)ns * 31250000u) / 1000000000u));
+}
+
+TEST(the_switch_counter_runs_at_19_2_mhz)
+{
+    uint64_t heap;
+    rl_ctx *c = boot_fixed(&heap);
+    CHECK_EQ(rl_core_guest()->tick_hz, 19200000u);
+    CHECK_EQ(rl_mrs_cntfrq_el0(), 19200000u);
+    uint64_t ns = hos_clock_ns();
+    t_svc(c, SVC_GET_SYSTEM_TICK, 0, 0, 0, 0, 0, 0);
+    CHECK_EQ(c->x[0], (uint64_t)(((unsigned __int128)ns * 19200000u) / 1000000000u));
+}

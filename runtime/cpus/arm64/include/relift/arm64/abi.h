@@ -27,10 +27,10 @@
 #endif
 
 /**
- * @brief CNTFRQ_EL0 value, in Hz. It must equal the tick rate the guest layer
- * gives the core (rl_guest_desc.tick_hz), which scales rl_mrs_cntpct. The
- * default is the rate of the Switch guest's counter, 19.2 MHz; relift defines
- * RL_CNTFRQ before this header for an A64 guest with another rate.
+ * @brief The default counter rate, in Hz: the Switch's 19.2 MHz. CNTFRQ_EL0
+ * itself reads the rate the guest layer gives the core (rl_guest_desc.tick_hz),
+ * which also scales rl_mrs_cntpct, so a guest whose counter runs at another
+ * rate (the Switch 2's 31.25 MHz) reads that one.
  */
 #ifndef RL_CNTFRQ
 #define RL_CNTFRQ 19200000u
@@ -632,8 +632,10 @@ RL_RUNTIME_API __attribute__((cold)) int rl_undefined(rl_ctx *c, uint8_t *mem, u
  */
 RL_RUNTIME_API __attribute__((cold)) int rl_align_fault(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
 
-/** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: the guest's clock (rl_guest_clock_ns, the host's monotonic clock by default) in RL_CNTFRQ ticks. */
+/** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: the guest's clock (rl_guest_clock_ns, the host's monotonic clock by default) in ticks of rl_mrs_cntfrq. */
 RL_RUNTIME_API uint64_t rl_mrs_cntpct(rl_ctx *c);
+/** @brief MRS CNTFRQ_EL0: the rate the guest's counter runs at (rl_guest_desc.tick_hz). */
+RL_RUNTIME_API uint64_t rl_mrs_cntfrq(void);
 /** @brief MSR FPCR. Stores the value; reports in dev builds when it selects a mode the lifted code was not generated for. */
 RL_RUNTIME_API void rl_msr_fpcr(rl_ctx *c, uint64_t v);
 /** @brief WFE: block briefly or yield the host thread. A spurious wake is allowed by the architecture. */
@@ -645,8 +647,8 @@ static inline uint64_t rl_mrs_tpidr_el0(const rl_ctx *c) { return c->tpidr_el0; 
 static inline void rl_msr_tpidr_el0(rl_ctx *c, uint64_t v) { c->tpidr_el0 = v; }
 /** @brief MRS TPIDRRO_EL0. MSR to it is UNDEFINED at EL0 and goes to rl_undefined. */
 static inline uint64_t rl_mrs_tpidrro_el0(const rl_ctx *c) { return c->tpidrro_el0; }
-/** @brief MRS CNTFRQ_EL0. */
-static inline uint64_t rl_mrs_cntfrq_el0(void) { return RL_CNTFRQ; }
+/** @brief MRS CNTFRQ_EL0 (rl_mrs_cntfrq). */
+static inline uint64_t rl_mrs_cntfrq_el0(void) { return rl_mrs_cntfrq(); }
 /** @brief MRS CTR_EL0. */
 static inline uint64_t rl_mrs_ctr_el0(void) { return RL_CTR_EL0; }
 /** @brief MRS DCZID_EL0. */
