@@ -1,4 +1,5 @@
 /target
+**/target/
 .hermes/
 .work/
 __pycache__/
