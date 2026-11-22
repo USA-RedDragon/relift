@@ -41,18 +41,18 @@ relift ships no game code, keys or data, and never will.
 
 **Have a game and want to recompile it? Read [Recompile a game](docs/guides/workflow.md).** It answers whether your console is supported, what file to bring, what each command prints, and what to do when the program stops.
 
-Build the tools, import a dump that you own and run it:
+Build the tools, import a static arm64 Linux program and run it:
 
 ```sh
 cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools -p relift-gba-tools
 export PATH="$PWD/target/release:$PATH"
-mkdir mygame && cd mygame
-relift import ~/dumps/game.gbc   # or a .gba ROM, a Switch .nup or dump folder
-relift build      # a shipped, packaged build
+mkdir hello-demo && cd hello-demo
+relift import ../hello   # a static arm64 Linux ELF; or a game dump, see below
+relift build      # a shipped, packaged build, named after the project
 relift run        # a dev build, run on this host
 ```
 
-[Install](docs/start/01-install.md) lists what you need, and [Make your first game](docs/start/02-first-game.md) goes through the commands.
+[Install](docs/start/01-install.md) lists what you need, and [Recompile your first program](docs/start/02-first-program.md) goes through the commands. [Recompile your first game](docs/start/03-first-game.md) does the same for a game dump.
 
 ## Tools
 
@@ -71,7 +71,7 @@ The docs are built as a site from these pages, in the order of [the site outline
 
 | Page | Holds |
 |---|---|
-| [Get started](docs/start/01-install.md) | install, and your first game |
+| [Get started](docs/start/01-install.md) | install, your first program and your first game |
 | [Recompile a game](docs/guides/workflow.md) | the end-to-end answer: support, inputs, real output, stops, reports, packaging, when things go wrong |
 | [Use relift](docs/guides/usage.md) | projects, commands, missed code and stop reports |
 | [Package a game for each host](docs/guides/packaging.md) | what `relift build` makes for each host, titles and icons |

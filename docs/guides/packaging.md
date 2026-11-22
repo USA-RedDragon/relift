@@ -4,6 +4,15 @@ What `relift build` makes for each host, and where the game's title and icon
 come from. The settings named here (`package.*`, `toolchain.*`) are listed in
 [Settings](../reference/configuration.md).
 
+Every output is named after the project: the `name` in the `[game]` table of
+`game.toml`, else the name of the project folder, cut down to lowercase ASCII
+letters, digits and dashes (`Example Project 2` becomes `example-project-2`).
+The same file name is used on every host: the program (`example-project-2`, or
+`example-project-2.exe` on Windows), the dev build in `dev/`, the app bundle,
+the AppImage, the APK and its library, and the iOS app. A title that a host
+shows to people (an app label, the desktop entry name) is the program's own
+title, kept apart from the file name.
+
 | Host | `relift build` output |
 |---|---|
 | Linux | the program and `<project>.AppImage` beside it |
@@ -86,7 +95,7 @@ API key and staples the ticket to the bundle, so it opens offline.
 
 ## Android: APK
 
-The program is a shared library, `libmain.so`, that SDL's Java activity
+The program is a shared library, `lib<project>.so`, that SDL's Java activity
 loads and enters through `SDL_main`. relift drives the Android SDK's own
 tools (`aapt2`, `d8`, `zipalign`, `apksigner`) and `javac`, with no Gradle;
 `toolchain.android-sdk` and `toolchain.android-ndk` find them. The APK
@@ -96,7 +105,7 @@ application id `package.android-id`. The app has settings pages, including
 the choice of a custom Vulkan driver package. Game Boy and GBA apps keep the
 battery save in the app's own folder and show the on-screen controller on
 the touch screen. A Nintendo DS app holds the whole cartridge image in
-`libmain.so` (stored uncompressed and page aligned in the APK, so one file is
+`lib<project>.so` (stored uncompressed and page aligned in the APK, so one file is
 the game), keeps its save in the app's own folder (`battery.sav`, also written
 when the app goes to the background), turns with the device (portrait and
 landscape, live), draws the two screens by the `video.nds_layout` setting and

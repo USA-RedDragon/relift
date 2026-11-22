@@ -856,7 +856,7 @@ it]:
 
 - On Windows relift listens on an AF_UNIX socket through the `uds_windows`
   crate (the standard library has none there), the runtime connects with
-  Winsock, and the dev runtime is `relift_rt.dll` beside `game.exe`, which the
+  Winsock, and the dev runtime is `relift_rt.dll` beside the program (`<project>.exe`), which the
   program and every hot-loaded library link against directly (lld links a
   DLL as an input, so no separate import library is built). The program
   image defines the text bounds markers (`RL_TEXT_BOUNDS_DEFINE`) in its

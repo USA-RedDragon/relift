@@ -5,8 +5,9 @@ This page lists the pages of the docs site in reading order, by section; the sit
 - [Overview](../README.md)
 - Get started
   - [Install](start/01-install.md)
-  - [Make your first game](start/02-first-game.md)
-  - [Next steps](start/03-next-steps.md)
+  - [Recompile your first program](start/02-first-program.md)
+  - [Recompile your first game](start/03-first-game.md)
+  - [Next steps](start/04-next-steps.md)
 - Guides
   - [Recompile a game](guides/workflow.md)
   - [Use relift](guides/usage.md)

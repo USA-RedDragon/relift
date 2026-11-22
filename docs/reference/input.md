@@ -239,7 +239,7 @@ guests count the console's own video frames; the GB and Master System runners
 have their own `--input` that counts the same. The runtime logs each step as it starts.
 
 ```sh
-RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./game
+RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./my-program
 ```
 
 `rl_ports_set_script` sets a script from code (tests).

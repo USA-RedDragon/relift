@@ -25,7 +25,7 @@ relift build                     # a shipped build
 relift run                       # a dev build, run on this host
 ```
 
-relift never reads encrypted dumps and ships no game data. Use a dump you own, decrypted. [Make your first game](docs/start/02-first-game.md) goes through the commands, and [Use relift](docs/guides/usage.md) covers stop reports for code that discovery missed.
+relift never reads encrypted dumps and ships no game data. Use a dump you own, decrypted. [Recompile your first program](docs/start/02-first-program.md) goes through the commands, and [Use relift](docs/guides/usage.md) covers stop reports for code that discovery missed.
 
 The C runtime builds and tests on its own:
 

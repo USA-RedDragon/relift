@@ -1,6 +1,6 @@
-# Make your first game
+# Recompile your first game
 
-This step turns one dump into a native program: a project folder, a shipped build and a development build that runs on this computer.
+This step, after [the first program](02-first-program.md), turns one dump into a native program: a project folder, a shipped build and a development build that runs on this computer.
 
 ## Import the dump
 
@@ -28,4 +28,4 @@ Both commands keep their artifacts in the cache directory. The cache can be copi
 
 Discovery cannot see every code address. A shipped build that reaches code that discovery missed writes a stop report and exits with status <!-- docgen:const file=runtime/core/include/relift/abi_core.h name=RL_EXIT_SOFTWARE -->`70`<!-- /docgen:const -->. `relift report <file>` explains the report and adds the missed target for the next build. What the report fields mean, what a development build does with the miss, and how to report it upstream are in [Recompile a game](../guides/workflow.md#4-what-usually-happens-next-it-stops); the short form of the same facts is in [missed code and stop reports](../guides/usage.md#missed-code-and-stop-reports).
 
-Next: [Next steps](03-next-steps.md).
+Next: [Next steps](04-next-steps.md).

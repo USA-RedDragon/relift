@@ -571,7 +571,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 #### Pages and stale statements (small each; good first issues)
 
-- Missing: `guests/nds` has no README, and the site outline (`docs/nav.md`) omits the N64 and Master System guest pages, the DS, `cpus/z80`, `cpus/rsp` and the `check` guest tables. The README's tool list names only `relift-gbrom` and `relift-gbarom`, not `relift-n64rom`, `relift-ndsrom`, `relift-smsrom` or `relift-shaders`. `docs/guides/usage.md` and `docs/start/02-first-game.md` say `import` takes Switch dumps and `.gb`, `.gbc`, `.gba` ROMs only.
+- Missing: `guests/nds` has no README, and the site outline (`docs/nav.md`) omits the N64 and Master System guest pages, the DS, `cpus/z80`, `cpus/rsp` and the `check` guest tables. The README's tool list names only `relift-gbrom` and `relift-gbarom`, not `relift-n64rom`, `relift-ndsrom`, `relift-smsrom` or `relift-shaders`. `docs/guides/usage.md` and `docs/start/03-first-game.md` say `import` takes Switch dumps and `.gb`, `.gbc`, `.gba` ROMs only.
 - Stale statements to fix: `guests/n64/README.md` opens by saying the RDP and audio are not there, while the same page and the runtime document both; `cpus/arm32/README.md` says no guest links the ARMv5TE profile, and the DS guest does; `runtime/guests/switch/vk/README.md` says `relift build` does not compile that folder or `runtime/host`, and `runtime/README.md` says it does; the `check/README.md` table lists four guests. `docs/reference/input.md` native ports table lists no N64 or Master System ports.
 - Where: the files named; `docs/nav.md`.
 - Verify: `scripts/ci/all.sh docs`. Facts that come from the code go through docgen markers.

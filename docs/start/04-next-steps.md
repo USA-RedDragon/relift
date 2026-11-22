@@ -1,11 +1,12 @@
 # Next steps
 
-This page lists where to go after the first two steps.
+This page lists where to go after the first steps.
 
 ## What you did
 
 - [Install](01-install.md): you built relift and its tools.
-- [Make your first game](02-first-game.md): you imported a dump, built it and ran it.
+- [Recompile your first program](02-first-program.md): you recompiled a Linux arm64 program and ran it.
+- [Recompile your first game](03-first-game.md): you imported a dump, built it and ran it.
 
 ## Do a task
 

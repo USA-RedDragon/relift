@@ -139,7 +139,7 @@ relift build: acid (DMG-ACID2, 32 KiB, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  60 files  1.4 s
 built 85 functions, 0 instructions not lifted, 8.9 s in all
-  output: ~/.cache/relift/projects/acid/build/host/game
+  output: ~/.cache/relift/projects/acid/build/host/acid
 # wall time 8.89 s
 ```
 
@@ -155,7 +155,7 @@ relift build: acid (DMG-ACID2, 32 KiB, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  0 files  0.0 s
 built 85 functions, 0 instructions not lifted, 0.1 s in all
-  output: ~/.cache/relift/projects/acid/build/host/game
+  output: ~/.cache/relift/projects/acid/build/host/acid
 # wall time 0.08 s
 ```
 
@@ -166,7 +166,7 @@ A change that touches a few functions reuses the emitted shards that did not cha
 `relift run` builds a development build if needed and opens a window. To run without a window, call the built program yourself: `--headless` opens none, `--frames N` stops after N frames and prints the frame hash, and `--png FILE` writes the last frame. `RELIFT_AUDIO=null` plays through a null output, and `RELIFT_VIDEO=headless` opens no window on the guests that have one.
 
 ```text
-$ ./game --headless --frames 15 --png ~/acid/last.png
+$ ./acid --headless --frames 15 --png ~/acid/last.png
 relift-gb: pass: frame 5f8fc47e01df7f2d serial 
 relift-gb: audio: 16657 frames at 44100 Hz, peak 8781, hash 769514bc8a4bb134
 ```
@@ -174,7 +174,7 @@ relift-gb: audio: 16657 frames at 44100 Hz, peak 8781, hash 769514bc8a4bb134
 The line `pass` is the program's own verdict for a run with no test case; for a game it only means that the run ended without a stop. `--png-dir DIR --png-every N` writes a series of frames, `--wav FILE` records the sound and `--input` scripts the pad:
 
 ```text
-$ ./game --headless --frames 30 --png-dir frames --png-every 10
+$ ./acid --headless --frames 30 --png-dir frames --png-every 10
 relift-gb: pass: frame 5f8fc47e01df7f2d serial 
 relift-gb: audio: 27732 frames at 44100 Hz, peak 8781, hash 2060f1dc721874f4
 ```
@@ -199,14 +199,14 @@ relift build: stop (CPU_INSTRS, 64 KiB, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  2,605 files  3.2 s
 built 5,143 functions, 0 instructions not lifted, 4.5 s in all
-  output: ~/.cache/relift/projects/stop/build/host/game
+  output: ~/.cache/relift/projects/stop/build/host/stop
 # wall time 4.48 s
 ```
 
 Running it:
 
 ```text
-$ ./game --headless --frames 300
+$ ./stop --headless --frames 300
 [relift error stop] missed code: no lifted code at guest 0x0b8f (ROM bank 0); no lifted code at the ROM address (opcode 0xf5); report written to ~/reports/relift-stop-20261118-084359-3147136.txt
 relift stop report 1
 kind: missed code
@@ -309,11 +309,11 @@ relift build: stop (CPU_INSTRS, 64 KiB, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  0 files  0.0 s
 built 5,143 functions, 0 instructions not lifted, 1.3 s in all
-  output: ~/.cache/relift/projects/stop/build/host/game
+  output: ~/.cache/relift/projects/stop/build/host/stop
 ```
 
 ```text
-$ ./game --headless --frames 300
+$ ./stop --headless --frames 300
 [relift error stop] missed code: no lifted code at guest 0x0b8f (ROM bank 0); no lifted code at the ROM address (opcode 0xf5); report written to ~/reports/relift-stop-20261118-084401-3147608.txt
 ```
 
@@ -340,14 +340,14 @@ relift build: stop (CPU_INSTRS, 64 KiB, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  50 files  1.1 s
 built 5,145 functions, 0 instructions not lifted, 10.5 s in all
-  output: ~/.cache/relift/projects/stop/build/host/game
+  output: ~/.cache/relift/projects/stop/build/host/stop
 # wall time 10.47 s
 ```
 
 Run with `--stats`, the program counts what it ran on the CPU instead of lifted code (the lines are cut to the two that matter):
 
 ```text
-$ ./game --headless --frames 300 --stats
+$ ./stop --headless --frames 300 --stats
 relift-gb: pass: frame 2524576692a9
 interpreter rom 13 entries 110 instructions, ram 0 entries 0 instructions
 ```
@@ -361,7 +361,7 @@ built 5,155 functions, 0 instructions not lifted, 2.5 s in all
 ```
 
 ```text
-$ ./game --headless --frames 300 --stats
+$ ./stop --headless --frames 300 --stats
 relift-gb: pass: frame 2524576692a9
 interpreter rom 1 entries 38 instructions, ram 0 entries 0 instructions
 ```
@@ -375,7 +375,7 @@ built 5,163 functions, 0 instructions not lifted, 2.3 s in all
 ```
 
 ```text
-$ ./game --headless --frames 300 --stats
+$ ./stop --headless --frames 300 --stats
 relift-gb: pass: frame 2524576692a9
 interpreter rom 0 entries 0 instructions, ram 0 entries 0 instructions
 ```
@@ -393,12 +393,12 @@ relift build: tiny (1 module, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
        compile  2 files, clang -O2, -j4  0.1 s
 built 1 function, 0 instructions not lifted, 0.2 s in all
-  output: ~/.cache/relift/projects/tiny/build/host/game
+  output: ~/.cache/relift/projects/tiny/build/host/tiny
 # wall time 0.15 s
 ```
 
 ```text
-$ ./game
+$ ./tiny
 [relift info kernel] compact 39-bit layout: address space 0x8000000-0x818000000, 37249 MiB reserved with guards
 [relift error stop] missed code: no function at guest 0x8000040; report written to ~/reports/relift-stop-20261118-084412-3162286.txt
 relift stop report 1
@@ -503,7 +503,7 @@ relift build: tiny (1 module, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
        compile  7 files, clang -O2, -j4  0.2 s
 built 1 function, 0 instructions not lifted, 0.2 s in all
-  output: ~/.cache/relift/projects/tiny/build/host/dev/game
+  output: ~/.cache/relift/projects/tiny/build/host/dev/tiny
 [relift info kernel] compact 39-bit layout: address space 0x8000000-0x818000000, 37249 MiB reserved with guards
 relift run: hot-loaded 0x8000040 (main+0x40): 1 function, 0 unlifted, lift 5 ms, compile 60 ms
 [relift info hotload] loaded 0x8000040: 1 functions in 64.8 ms (relift 64.8 ms, load 0.05 ms, register 0.002 ms), 1 libraries so far: 1 functions
@@ -526,13 +526,13 @@ relift build: tiny (1 module, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
        compile  3 files, clang -O2, -j4  0.1 s
 built 2 functions, 0 instructions not lifted, 0.2 s in all
-  output: ~/.cache/relift/projects/tiny/build/host/game
+  output: ~/.cache/relift/projects/tiny/build/host/tiny
 ```
 
 A development program run by hand cannot hot-load, and says so:
 
 ```text
-$ ./dev/game
+$ ./dev/tiny
 [relift info kernel] compact 39-bit layout: address space 0x8000000-0x818000000, 37249 MiB reserved with guards
 [relift error hotload] RELIFT_DEV_SOCKET is not set: this dev build runs only under relift run
 [relift error stop] missed code: no function at guest 0x8000040
@@ -623,7 +623,7 @@ relift's own settings come from `relift.toml` in the working directory, then `RE
 The built program has run-time settings of its own, and `relift info` lists each with its type, default and range. In order, last wins: the default, `<user folder>/settings.json`, `--relift-settings FILE`, `--relift-set key=value`, then the key's environment variable (`RELIFT_VIDEO`, `RELIFT_SAVE` and the others in [the C runtime](../../runtime/README.md)). A wrong key or value never stops a run; it warns and is skipped:
 
 ```text
-$ ./game --headless --frames 2 --relift-set nosuch=1 --relift-set picture.aa=bogus
+$ ./tiny --headless --frames 2 --relift-set nosuch=1 --relift-set picture.aa=bogus
 [relift warn settings] unknown setting nosuch; ignored
 [relift warn settings] picture.aa: 'bogus' is not one of off, fxaa, smaa; ignored
 relift-gb: pass: frame e2a0ea132b4a3b25 serial 
@@ -633,7 +633,7 @@ relift-gb: audio: 7058 frames at 44100 Hz, peak 8781, hash d389f0b1fcedae74
 The input ports and their default keys and buttons come from the same document. For the Game Boy ROM above:
 
 ```text
-$ ./game --relift-info | (a summary)
+$ ./tiny --relift-info | (a summary)
 identity: {"platform": "gb", "names": {"default": "acid"}, "default_language": "default", "version": ...
 runtime settings: video, language, video.gpu_driver, picture.aa, picture.aa_quality, picture.upscale ...
 game settings: []
@@ -652,7 +652,7 @@ save: {"kind": "none", "changes_format": false}
 Rebind a control with `--relift-set bind.p1.a=gamepad:east,key:f`, or the same key in `settings.json` ([Input ports and bindings](../reference/input.md)). A bad binding is skipped with a warning:
 
 ```text
-$ ./game --headless --frames 3 --relift-set bind.p1.a=bogus
+$ ./tiny --headless --frames 3 --relift-set bind.p1.a=bogus
 [relift warn settings] bind.p1.a: 'bogus' is not a comma separated list of host inputs such as gamepad:south,key:z; ignored
 relift-gb: pass: frame 5f8fc47e01df7f2d serial 
 relift-gb: audio: 7797 frames at 44100 Hz, peak 8781, hash caad2be6bce25634
@@ -661,7 +661,7 @@ relift-gb: audio: 7797 frames at 44100 Hz, peak 8781, hash caad2be6bce25634
 `--input FRAME:BUTTON,...` presses buttons at frames in a headless Game Boy run (`--input 5:start`). A name the runner does not know stops the run:
 
 ```text
-$ ./game --headless --frames 20 --input 5:bogus
+$ ./tiny --headless --frames 20 --input 5:bogus
 relift-gb: case: unknown button bogus
 # exit status 2
 ```
@@ -732,7 +732,7 @@ relift build: acid (DMG-ACID2, 32 KiB, linux-x86_64)
 window and audio: SDL3 (pkg-config); opus: libopus (pkg-config)
       compile  60 files  1.5 s
 built 85 functions, 0 instructions not lifted, 1.6 s in all
-  output: ~/.cache/relift/projects/acid/build/host/game
+  output: ~/.cache/relift/projects/acid/build/host/acid
 no AppImage built: appimagetool is not on PATH (get it from https://github.com/AppImage/appimagetool/releases or your package manager, or set toolchain.appimagetool; package.appimage=never silences this)
 ```
 
