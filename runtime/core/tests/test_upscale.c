@@ -9,6 +9,7 @@
  */
 #include "runner.h"
 
+#include "dlss.h"
 #include "hostlib.h"
 #include "fsr1_ref.h"
 #include "upscale_ref.h"
@@ -20,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /** @brief A window-pipeline stage that runs one relift choice at a fixed output size. */
 typedef struct test_stage {
@@ -50,9 +52,9 @@ static void ts_record(void *user, uint64_t cmd, uint64_t in, uint64_t out, uint3
     test_stage *t = user;
     rl_upscaler_retire(t->u);
     rl_upscale_inputs ui = {
-        .color = { in, w, h },
+        .color = { .handle = in, .width = w, .height = h },
         .in = { 0, 0, w, h },
-        .out = { out, ow, oh },
+        .out = { .handle = out, .width = ow, .height = oh },
         .out_rect = { 0, 0, ow, oh },
         .pre_exposure = 1.0f,
     };
@@ -123,7 +125,9 @@ TEST(upscale_names_and_spatial_siblings)
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_GAME), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_AUTO), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, true), RL_UPSCALE_GAME);
-    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_FSR2);
+    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_DLSS);
+    CHECK(rl_upscale_temporal(RL_UPSCALE_FALLBACK_TEMPORAL));
+    CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_DLSS), RL_UPSCALE_FSR1);
     CHECK(rl_upscale_temporal(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false)));
     CHECK(!rl_upscale_temporal(RL_UPSCALE_FSR1));
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, false, true), RL_UPSCALE_OFF);
@@ -280,4 +284,32 @@ TEST(upscale_fsr1_keeps_flat_pictures_and_matches_its_c_port)
         free(src);
         free(want);
     }
+}
+
+TEST(upscale_dlss_looks_beside_the_program_and_names_the_folder)
+{
+    const char *base = getenv("RELIFT_REPORT_DIR");
+    char root[512], lib[700];
+    snprintf(root, sizeof root, "%s/dlss-find", base && *base ? base : ".");
+    mkdir(base && *base ? base : ".", 0755);
+    mkdir(root, 0755);
+    snprintf(lib, sizeof lib, "%s/libnvidia-ngx-dlss.so.310.9.16", root);
+    remove(lib);
+    char found[1200] = "", why[1600] = "";
+    CHECK(!rl_dlss_find(root, found, sizeof found, why, sizeof why));
+    CHECK(strstr(why, root) != NULL);
+    CHECK(!rl_dlss_find(NULL, found, sizeof found, why, sizeof why));
+    FILE *f = fopen(lib, "wb");
+    CHECK(f != NULL);
+    if (f)
+        fclose(f);
+    CHECK(rl_dlss_find(root, found, sizeof found, why, sizeof why));
+    CHECK(!strcmp(found, lib));
+    remove(lib);
+}
+
+TEST(upscale_auto_falls_back_from_dlss_to_fsr2)
+{
+    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_DLSS);
+    CHECK_EQ(RL_UPSCALE_FALLBACK_TEMPORAL, RL_UPSCALE_FSR2);
 }

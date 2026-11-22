@@ -29,6 +29,7 @@
 #include "nvn_probe_spv.h"
 
 #include <relift/input.h>
+#include <relift/upscale.h>
 #include <relift/window.h>
 
 #include "present.h"
@@ -281,6 +282,14 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 gpl_on |= feats[k] == &feat.gpl;
                 mesh_on |= feats[k] == &feat.mesh;
                 fault_on |= feats[k] == &feat.fault;
+                break;
+            }
+    const char *const *up = NULL;
+    uint32_t nup = rl_upscale_device_extensions(props.vendorID, &up);
+    for (uint32_t k = 0; k < nup; k++)
+        for (uint32_t i = 0; exts && i < next; i++)
+            if (!strcmp(exts[i].extensionName, up[k])) {
+                rl_vkdev_add_ext(b, up[k]);
                 break;
             }
     for (uint32_t i = 0; exts && i < next; i++)

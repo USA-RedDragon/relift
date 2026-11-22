@@ -295,9 +295,9 @@ TEST(upscale_images_spatial_choices_run_on_images)
         CHECK(u != NULL);
         if (!u)
             continue;
-        rl_upscale_inputs ui = { .color = { (uint64_t)(uintptr_t)in.view, W, H },
+        rl_upscale_inputs ui = { .color = { .handle = (uint64_t)(uintptr_t)in.view, .width = W, .height = H },
                                  .in = { 0, 0, W, H },
-                                 .out = { (uint64_t)(uintptr_t)out.view, OW, OH },
+                                 .out = { .handle = (uint64_t)(uintptr_t)out.view, .width = OW, .height = OH },
                                  .out_rect = { 0, 0, OW, OH } };
         CHECK(run_stage(u, &ui));
         read_back(&out, img_out);
@@ -336,14 +336,14 @@ static int temporal_still(uint32_t choice, const uint32_t *src, uint32_t w, uint
     rl_post_device d = device();
     rl_upscaler *u = rl_upscaler_new(&d, choice, RL_UPSCALE_IMAGES);
     if (u) {
-        rl_upscale_inputs ui = { .color = { (uint64_t)(uintptr_t)color.view, w, h },
-                                 .depth = { (uint64_t)(uintptr_t)dep.view, w, h },
-                                 .motion = { (uint64_t)(uintptr_t)mv.view, w, h },
+        rl_upscale_inputs ui = { .color = { .handle = (uint64_t)(uintptr_t)color.view, .width = w, .height = h },
+                                 .depth = { .handle = (uint64_t)(uintptr_t)dep.view, .width = w, .height = h },
+                                 .motion = { .handle = (uint64_t)(uintptr_t)mv.view, .width = w, .height = h },
                                  .motion_display_size = true,
                                  .motion_scale = { 1.0f, 1.0f },
                                  .pre_exposure = 1.0f,
                                  .in = { 0, 0, w, h },
-                                 .out = { (uint64_t)(uintptr_t)dst.view, w, h },
+                                 .out = { .handle = (uint64_t)(uintptr_t)dst.view, .width = w, .height = h },
                                  .out_rect = { 0, 0, w, h } };
         bool ran = true;
         for (int frame = 0; frame < 16; frame++) {
@@ -464,15 +464,15 @@ static double temporal_moving(uint32_t choice, uint32_t w, uint32_t h, float spe
                 frame[y * w + x] = c | c << 8 | c << 16 | 0xff000000u;
             }
         fill(&color, frame);
-        rl_upscale_inputs ui = { .color = { (uint64_t)(uintptr_t)color.view, w, h },
-                                 .depth = { (uint64_t)(uintptr_t)dep.view, w, h },
-                                 .motion = { (uint64_t)(uintptr_t)mv.view, w, h },
+        rl_upscale_inputs ui = { .color = { .handle = (uint64_t)(uintptr_t)color.view, .width = w, .height = h },
+                                 .depth = { .handle = (uint64_t)(uintptr_t)dep.view, .width = w, .height = h },
+                                 .motion = { .handle = (uint64_t)(uintptr_t)mv.view, .width = w, .height = h },
                                  .motion_scale = { 1.0f, 1.0f },
                                  .pre_exposure = 1.0f,
                                  .jitter = { jsign * jx, jsign * jy },
                                  .reset = k == 0,
                                  .in = { 0, 0, w, h },
-                                 .out = { (uint64_t)(uintptr_t)dst.view, dw, dh },
+                                 .out = { .handle = (uint64_t)(uintptr_t)dst.view, .width = dw, .height = dh },
                                  .out_rect = { 0, 0, dw, dh } };
         ran = run_stage(u, &ui);
     }
@@ -524,6 +524,17 @@ TEST(upscale_fsr3_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
 {
     if (start())
         takes_dlss_conventions(RL_UPSCALE_FSR3, "fsr3");
+}
+
+TEST(upscale_dlss_where_it_cannot_run_runs_its_fallback)
+{
+    if (!start())
+        return;
+    int a, b, c, e;
+    still_pictures(RL_UPSCALE_DLSS, "dlss", &a, &b);
+    still_pictures(RL_UPSCALE_FALLBACK_TEMPORAL, "fallback", &c, &e);
+    CHECK_EQ(a, c);
+    CHECK_EQ(b, e);
 }
 
 TEST(upscale_taa_keeps_still_pictures_at_ratio_one)

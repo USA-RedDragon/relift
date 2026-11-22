@@ -98,9 +98,9 @@ static void own_record(void *user, uint64_t cmd, uint64_t in, uint64_t out, uint
     vk *v = user;
     rl_upscaler_retire(v->own_u);
     rl_upscale_inputs ui = {
-        .color = { in, width, height },
+        .color = { .handle = in, .width = width, .height = height },
         .in = { 0, 0, width, height },
-        .out = { out, out_width, out_height },
+        .out = { .handle = out, .width = out_width, .height = out_height },
         .out_rect = { 0, 0, out_width, out_height },
         .pre_exposure = 1.0f,
     };

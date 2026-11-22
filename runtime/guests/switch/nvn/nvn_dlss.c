@@ -346,12 +346,29 @@ static int view_of(replay *r, uint64_t v, nvn_view *nv, bool *has)
 }
 
 /**
+ * @brief Fills out's image, format, level, layer and size (the level's) from host image im seen through view nv (NULL
+ * for the whole image).
+ */
+static void describe(const vimg *im, const nvn_view *nv, rl_upscale_image *out)
+{
+    VkImageAspectFlags aspect = 0;
+    VkFormat f = nv && nv->has_format ? nvn_vk_view_format(im, nv->format, &aspect) : im->format;
+    uint32_t level = nv && nv->has_levels ? (uint32_t)nv->base_level : 0;
+    out->image = (uint64_t)(uintptr_t)im->image;
+    out->format = (int32_t)(f ? f : im->format);
+    out->level = level;
+    out->layer = nv && nv->has_layers ? (uint32_t)nv->min_layer : 0;
+    out->width = im->d.width >> level ? im->d.width >> level : 1;
+    out->height = im->d.height >> level ? im->d.height >> level : 1;
+}
+
+/**
  * @brief A sampled host view of the texture at guest address tex through the recorded view pointer v (none when tex is
  * 0), held until the batch's wait when it is made for this view; RL_OK, RL_PENDING, or a stop.
  */
-static int side_view(replay *r, uint64_t tex, uint64_t v, uint64_t *out)
+static int side_view(replay *r, uint64_t tex, uint64_t v, rl_upscale_image *out)
 {
-    *out = 0;
+    memset(out, 0, sizeof *out);
     if (!tex)
         return RL_OK;
     nvn_view nv;
@@ -367,7 +384,8 @@ static int side_view(replay *r, uint64_t tex, uint64_t v, uint64_t *out)
         return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss: no host view of texture 0x%llx", (unsigned long long)tex);
     if (has)
         hold(view);
-    *out = (uint64_t)(uintptr_t)view;
+    out->handle = (uint64_t)(uintptr_t)view;
+    describe(im, has ? &nv : NULL, out);
     return RL_OK;
 }
 
@@ -414,7 +432,7 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
     uint32_t ow = out->d.width >> level, oh = out->d.height >> level;
     iw = iw ? iw : 1, ih = ih ? ih : 1, ow = ow ? ow : 1, oh = oh ? oh : 1;
     rl_upscale_inputs ui = {
-        .color = { 0, iw, ih },
+        .color = { .width = iw, .height = ih },
         .hdr = n && !(n->flags & NVN_DLSS_FLAG_LDR),
         .depth_inverted = n && (n->flags & NVN_DLSS_FLAG_DEPTH_INVERTED),
         .motion_display_size = n && !(n->flags & NVN_DLSS_FLAG_MV_LOW_RES),
@@ -427,7 +445,7 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         .in = { p.color_base[0], p.color_base[1], p.in_size[0], p.in_size[1] },
         .out_rect = { p.out_base[0], p.out_base[1], n ? n->out_w : ow - p.out_base[0],
                       n ? n->out_h : oh - p.out_base[1] },
-        .out = { 0, ow, oh },
+        .out = { .width = ow, .height = oh },
     };
     if (!ui.in.width || !ui.in.height) {
         ui.in.width = n ? n->render_w : iw - ui.in.x;
@@ -462,13 +480,13 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         if ((pass || st.nheld + 6 > MAX_HELD) && !nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed a submit");
         if (rl_upscale_temporal(choice)) {
-            int vrc = side_view(r, p.depth, p.depth_view, &ui.depth.handle);
+            int vrc = side_view(r, p.depth, p.depth_view, &ui.depth);
             if (vrc == RL_OK)
-                vrc = side_view(r, p.motion, p.motion_view, &ui.motion.handle);
+                vrc = side_view(r, p.motion, p.motion_view, &ui.motion);
             if (vrc == RL_OK)
-                vrc = side_view(r, p.exposure, p.exposure_view, &ui.exposure.handle);
+                vrc = side_view(r, p.exposure, p.exposure_view, &ui.exposure);
             if (vrc == RL_OK)
-                vrc = side_view(r, p.bias, p.bias_view, &ui.reactive.handle);
+                vrc = side_view(r, p.bias, p.bias_view, &ui.reactive);
             if (vrc != RL_OK)
                 return vrc;
         }
@@ -482,6 +500,10 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
             return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss: no host view of the input or output texture");
         ui.color.handle = (uint64_t)(uintptr_t)iv;
         ui.out.handle = (uint64_t)(uintptr_t)owv;
+        describe(in, has_cv ? &cv : NULL, &ui.color);
+        ui.out.image = (uint64_t)(uintptr_t)out->image;
+        ui.out.format = (int32_t)out->format;
+        ui.out.level = level;
         if (!nvn_vk_begin(r))
             return nvn_vk_stop(r, "the host device could not begin a command buffer");
         nvn_vk_barrier(g.cb);

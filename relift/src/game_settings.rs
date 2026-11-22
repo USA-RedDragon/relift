@@ -146,7 +146,7 @@ pub fn runtime_settings() -> Vec<Setting> {
             ..s(
                 "picture.upscaler",
                 "Upscaler",
-                "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the game's UI: game is the game's own, translated; auto is the game's own where this device meets its requirements, else the best temporal one relift has (fsr2); off copies the picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are relift's; fsr1 is AMD FSR 1 (EASU and RCAS); fsr2 and fsr3 are AMD FSR 2 and the FSR 3 upscaler, temporal, where the game gives depth and motion vectors, else FSR 1; taa is relift's plain temporal upscaler, else bilinear. Every choice but game changes the picture from the console's",
+                "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the game's UI: game is the game's own, translated; auto is the game's own where this device meets its requirements, else the best temporal one this host has (dlss, else fsr2); off copies the picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are relift's; fsr1 is AMD FSR 1 (EASU and RCAS); fsr2 and fsr3 are AMD FSR 2 and the FSR 3 upscaler, temporal, where the game gives depth and motion vectors, else FSR 1; taa is relift's plain temporal upscaler, else bilinear; dlss is NVIDIA DLSS, temporal, on an NVIDIA GPU with the driver's NGX library and NVIDIA's DLSS library beside the program, else fsr2. Every choice but game changes the picture from the console's",
                 Value::String("auto".into()),
                 SettingKind::Enum {
                     choices: [
@@ -161,6 +161,7 @@ pub fn runtime_settings() -> Vec<Setting> {
                         "fsr2",
                         "fsr3",
                         "taa",
+                        "dlss",
                     ]
                     .map(String::from)
                     .into(),

@@ -35,14 +35,20 @@ enum {
     RL_UPSCALE_FSR2,
     RL_UPSCALE_FSR3,
     RL_UPSCALE_TAA,
+    RL_UPSCALE_DLSS,
     RL_UPSCALE_CHOICES
 };
 
 /**
- * @brief The best temporal choice relift has, which auto runs in the frame when the game's own upscaler cannot run; a
- * device it does not start on runs its spatial sibling (rl_upscale_spatial).
+ * @brief The best temporal choice relift has, which auto runs in the frame when the game's own upscaler cannot run:
+ * NVIDIA DLSS, which runs only where the NVIDIA driver and the user's DLSS library are there. A stage for it that does
+ * not start runs RL_UPSCALE_FALLBACK_TEMPORAL instead, and one for that which does not start its spatial sibling
+ * (rl_upscale_spatial).
  */
-#define RL_UPSCALE_BEST_TEMPORAL RL_UPSCALE_FSR2
+#define RL_UPSCALE_BEST_TEMPORAL RL_UPSCALE_DLSS
+
+/** @brief The temporal choice that runs where DLSS does not: one that runs on every GPU. */
+#define RL_UPSCALE_FALLBACK_TEMPORAL RL_UPSCALE_FSR2
 
 /** @brief How a stage reaches its pictures. */
 enum {
@@ -58,6 +64,13 @@ typedef struct rl_upscale_image {
     uint64_t handle;
     /** @brief The size of the whole image or buffer picture, in pixels. */
     uint32_t width, height;
+    /**
+     * @brief For a view: the VkImage it views (0 when the caller does not give it), the view's VkFormat, and the
+     * level and layer it shows. Choices that hand pictures to a vendor library (DLSS) need them.
+     */
+    uint64_t image;
+    int32_t format;
+    uint32_t level, layer;
 } rl_upscale_image;
 
 /** @brief A rectangle of a picture, in pixels. */
@@ -116,6 +129,13 @@ RL_RUNTIME_API uint32_t rl_upscale_spatial(uint32_t choice);
 
 /** @brief Whether choice is temporal: it reads depth, motion vectors and the jitter, and keeps a history. */
 RL_RUNTIME_API bool rl_upscale_temporal(uint32_t choice);
+
+/**
+ * @brief The device extensions the upscaler stage needs enabled on a device of PCI vendor vendor_id, for the
+ * picture.upscaler setting as it is: the ones NVIDIA's NGX library asks for when the choice may be DLSS and the
+ * driver's NGX library is installed, else none. *names stays valid while the runtime runs.
+ */
+RL_RUNTIME_API uint32_t rl_upscale_device_extensions(uint32_t vendor_id, const char *const **names);
 
 /**
  * @brief The choice that runs for choice: in_frame for place 1, where game_ok says whether the game's own upscaler

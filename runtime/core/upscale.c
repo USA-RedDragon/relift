@@ -13,6 +13,7 @@
 #include "fsr2.h"
 #include "fsr3.h"
 #include "taa.h"
+#include "dlss.h"
 #include "hostlib.h"
 #include "post_data.h"
 #include "vkmin.h"
@@ -104,23 +105,27 @@ struct rl_upscaler {
     rl_fsr3 *fsr3;
     /** @brief relift's TAA, for its choice on images; frames without depth and motion vectors run bilinear. */
     rl_taa *taa;
+    /** @brief NVIDIA DLSS, for its choice on images where it starts; frames without its inputs run FSR 1. */
+    rl_dlss *dlss;
     uint32_t used, choice, kind;
 };
 
 static bool is_fsr1(const rl_upscaler *u)
 {
-    return u->choice == RL_UPSCALE_FSR1 || u->choice == RL_UPSCALE_FSR2 || u->choice == RL_UPSCALE_FSR3;
+    return u->choice == RL_UPSCALE_FSR1 || u->choice == RL_UPSCALE_FSR2 || u->choice == RL_UPSCALE_FSR3 ||
+           u->choice == RL_UPSCALE_DLSS;
 }
 
 static const char *const g_names[RL_UPSCALE_CHOICES] = {
-    "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa",
+    "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa", "dlss",
 };
 
 const char *rl_upscale_name(uint32_t choice) { return choice < RL_UPSCALE_CHOICES ? g_names[choice] : "?"; }
 
 bool rl_upscale_temporal(uint32_t choice)
 {
-    return choice == RL_UPSCALE_FSR2 || choice == RL_UPSCALE_FSR3 || choice == RL_UPSCALE_TAA;
+    return choice == RL_UPSCALE_FSR2 || choice == RL_UPSCALE_FSR3 || choice == RL_UPSCALE_TAA ||
+           choice == RL_UPSCALE_DLSS;
 }
 
 uint32_t rl_upscale_spatial(uint32_t choice)
@@ -288,6 +293,10 @@ rl_upscaler *rl_upscaler_new(const rl_post_device *device, uint32_t choice, uint
 #undef UPSCALE_LOAD
     if (rl_upscale_temporal(choice) && kind == RL_UPSCALE_BUFFERS)
         u->choice = rl_upscale_spatial(choice);
+    if (u->choice == RL_UPSCALE_DLSS && !(u->dlss = rl_dlss_new(device))) {
+        rl_log(RL_LOG_INFO, "upscale", "the dlss upscaler runs %s instead", g_names[RL_UPSCALE_FALLBACK_TEMPORAL]);
+        u->choice = RL_UPSCALE_FALLBACK_TEMPORAL;
+    }
     if (u->choice == RL_UPSCALE_FSR2 && !(u->fsr2 = rl_fsr2_new(device)))
         rl_log(RL_LOG_WARN, "upscale", "the fsr2 upscaler runs FSR 1 instead");
     if (u->choice == RL_UPSCALE_FSR3 && !(u->fsr3 = rl_fsr3_new(device)))
@@ -385,6 +394,8 @@ bool rl_upscaler_record(rl_upscaler *u, uint64_t cmd, const rl_upscale_inputs *i
     if (!u || !cmd || !in || !in->color.handle || !in->out.handle || !rect_inside(&in->in, &in->color) ||
         !rect_inside(&in->out_rect, &in->out) || u->used == SETS)
         return false;
+    if (u->dlss && rl_dlss_takes(in))
+        return rl_dlss_record(u->dlss, cmd, in);
     if (u->fsr2 && rl_fsr2_takes(in))
         return rl_fsr2_record(u->fsr2, cmd, in);
     if (u->fsr3 && rl_fsr3_takes(in))
@@ -475,6 +486,7 @@ void rl_upscaler_retire(rl_upscaler *u)
     rl_fsr2_retire(u->fsr2);
     rl_fsr3_retire(u->fsr3);
     rl_taa_retire(u->taa);
+    rl_dlss_retire(u->dlss);
 }
 
 void rl_upscaler_free(rl_upscaler *u)
@@ -484,6 +496,7 @@ void rl_upscaler_free(rl_upscaler *u)
     rl_fsr2_free(u->fsr2);
     rl_fsr3_free(u->fsr3);
     rl_taa_free(u->taa);
+    rl_dlss_free(u->dlss);
     buf_drop(u, &u->old);
     buf_drop(u, &u->work);
     if (u->sampler)
