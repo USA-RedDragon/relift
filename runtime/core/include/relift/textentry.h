@@ -2,18 +2,30 @@
  * @file textentry.h
  * @brief Text entry: a guest asks the player for a line of text (a name, a
  * password), as a console's software keyboard does. In a run with a window
- * and a person at it, the module shows a panel over the game picture and
- * takes typed text from the host; otherwise it answers at once from the
- * settings, so scripted and headless runs never wait.
+ * and a person at it, a panel over the game picture takes typed text from the
+ * host's keyboard or the system's own on-screen keyboard; otherwise the
+ * module answers at once from the settings, so scripted and headless runs
+ * never wait.
  *
  * The answer, in order: the setting `text_entry.text` when it is set; else,
- * when no panel can be shown (no host registered, or an input script drives
- * the run), the guest's initial text, or `text_entry.default` when the guest
- * gives none; else the panel's text when the player confirms or cancels.
+ * when no panel can be shown (no host registered, the host cannot show it,
+ * an input script drives the run and `text_entry.panel` is not `always`, or
+ * it is `never`), the guest's initial text, or
+ * `text_entry.default` when the guest gives none; else the panel's text when
+ * the player confirms or cancels.
  *
- * Threads: a guest calls open and close from any thread, a host calls end
- * from any thread. The done callback runs on the thread that ends the entry, with no lock of
- * this module held, and must not call back into it.
+ * The module keeps the panel's text and draws the panel (rl_text_entry_draw)
+ * with the TrueType fonts the program ships (`fonts/<n>.ttf`, rl_asset_load),
+ * so it shows any character a keyboard or input method produces that the
+ * fonts cover. The game's picture keeps its full size; one compact line
+ * floats over it, near the bottom with a physical keyboard, and right above
+ * the system keyboard (which covers the lower part of the view) on touch
+ * screens.
+ *
+ * Threads: a guest calls open and close from any thread; the host calls the
+ * input, key, tap and draw functions from its own threads. The done callback
+ * runs on the thread that ends the entry with no lock of this module held,
+ * and must not call back into it.
  */
 #ifndef RELIFT_TEXTENTRY_H
 #define RELIFT_TEXTENTRY_H
@@ -21,6 +33,7 @@
 #include <relift/abi_core.h>
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /** @brief Most bytes of UTF-8 text an entry holds, with its terminator. */
@@ -28,7 +41,7 @@
 
 /** @brief What the guest asks for. Strings are UTF-8 and may be NULL; the module copies them. */
 typedef struct rl_text_entry_args {
-    /** @brief The question, shown in bold at the top. */
+    /** @brief The question, shown at the top. */
     const char *header;
     /** @brief A second line under it. */
     const char *sub;
@@ -63,15 +76,29 @@ typedef enum rl_text_entry_status {
     RL_TEXT_ENTRY_BUSY = 2
 } rl_text_entry_status;
 
+/** @brief Keys a host passes on while the panel is shown. */
+enum rl_text_entry_key {
+    RL_TEXT_ENTRY_KEY_CONFIRM = 0,
+    RL_TEXT_ENTRY_KEY_CANCEL = 1,
+    RL_TEXT_ENTRY_KEY_BACKSPACE = 2,
+    RL_TEXT_ENTRY_KEY_DELETE = 3,
+    RL_TEXT_ENTRY_KEY_LEFT = 4,
+    RL_TEXT_ENTRY_KEY_RIGHT = 5,
+    RL_TEXT_ENTRY_KEY_HOME = 6,
+    RL_TEXT_ENTRY_KEY_END = 7
+};
+
 /** @brief What a host does for the module. */
 typedef struct rl_text_entry_host {
     /**
-     * @brief Shows the panel for args and returns true, or returns false when it cannot (the module then answers
-     * from the settings). The host ends the entry with rl_text_entry_end.
+     * @brief The panel opens: start taking text (and open the system keyboard on a touch screen) and draw it;
+     * return false when the panel cannot be shown (the module then answers from the settings).
      */
-    bool (*show)(const rl_text_entry_args *args);
-    /** @brief Takes the panel down without an answer (the guest closed the entry). */
+    bool (*show)(void);
+    /** @brief The panel closed: stop taking text and show the game again. */
     void (*hide)(void);
+    /** @brief The panel's look changed (text, caret): draw it again. Any thread. */
+    void (*changed)(void);
 } rl_text_entry_host;
 
 /** @brief Registers the host that can show the panel, or NULL for none. */
@@ -81,9 +108,31 @@ RL_RUNTIME_API rl_text_entry_status rl_text_entry_open(const rl_text_entry_args 
                                                       void *user);
 /** @brief Ends the open entry of user without calling done; once it returns done will not run for it. */
 RL_RUNTIME_API void rl_text_entry_close(void *user);
-/** @brief The host's panel ended the open entry: confirmed with text, or canceled. */
-RL_RUNTIME_API void rl_text_entry_end(bool confirmed, const char *text);
-/** @brief Forgets everything (tests). */
+/** @brief True while the panel is shown: the host keeps its input from the guest. */
+RL_RUNTIME_API bool rl_text_entry_active(void);
+/** @brief True when the module has a font to draw the panel with. */
+RL_RUNTIME_API bool rl_text_entry_can_draw(void);
+/** @brief Typed text (UTF-8) at the caret; control characters are dropped and the length limit holds. */
+RL_RUNTIME_API void rl_text_entry_input(const char *text);
+/** @brief A key (enum rl_text_entry_key). Confirm ends the entry when the text is long enough. */
+RL_RUNTIME_API void rl_text_entry_key(int key);
+/** @brief A tap or click at (x, y) in a view of width by height pixels drawn with layout touch; true when it hit a button. */
+RL_RUNTIME_API bool rl_text_entry_tap(float x, float y, uint32_t width, uint32_t height, bool touch);
+/** @brief Where the text field is in a view of width by height pixels (x, y, width, height), for an input method's popup. */
+RL_RUNTIME_API void rl_text_entry_field(uint32_t width, uint32_t height, bool touch, int32_t out[4]);
+/**
+ * @brief Draws the panel into rgb (RGB888, width by height) over under (RGBA8, under_w by under_h, the picture the
+ * game showed, scaled to fit), with the line placed for a touch screen or a physical keyboard; now_ns times the caret's blink. False when
+ * no entry is open or no font can be read.
+ */
+RL_RUNTIME_API bool rl_text_entry_draw(uint8_t *rgb, uint32_t width, uint32_t height, const uint8_t *under,
+                                       uint32_t under_w, uint32_t under_h, bool touch, uint64_t now_ns);
+/**
+ * @brief Adds a TrueType font (the bytes stay the caller's) ahead of the shipped ones; the first font with a glyph
+ * draws it. For tests and hosts that bring their own.
+ */
+RL_RUNTIME_API void rl_text_entry_add_font(const uint8_t *data, size_t size);
+/** @brief Forgets everything but the shipped fonts (tests). */
 RL_RUNTIME_API void rl_text_entry_reset(void);
 
 #endif

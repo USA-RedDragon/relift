@@ -161,6 +161,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "renderdoc.capture_dir"
                 | "text_entry.text"
                 | "text_entry.default"
+                | "text_entry.panel"
         )
     });
     rust.extend(gb_settings());

@@ -44,6 +44,7 @@ static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none
 static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
+static const char *const g_panel_choices[] = { "auto", "always", "never" };
 static const char *const g_upscaler_choices[] = {
     "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa", "dlss",
 };
@@ -188,6 +189,17 @@ static const rl_setting_def g_runtime_defs[] = {
         .description = "The answer when the game asks for text, no panel can be shown (no window, or an input script "
                        "drives the run) and the game offers no text of its own",
         .def_str = "Player",
+    },
+    {
+        .key = "text_entry.panel",
+        .type = RL_SETTING_ENUM,
+        .label = "Text entry panel",
+        .description = "When the panel that takes typed text is shown: auto in a run with a window and no input script; "
+                       "always also when an input script drives the run (the run waits for the player); never answers "
+                       "from the settings at once",
+        .env = "RELIFT_TEXT_ENTRY_PANEL",
+        .choices = g_panel_choices,
+        .nchoices = 3,
     },
 };
 
