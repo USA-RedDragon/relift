@@ -513,3 +513,22 @@ TEST(nvn_a_program_writes_guest_memory_only_when_it_stores_to_a_guest_buffer)
     CHECK(!nvn_spirv_stores(spv_image_store, sizeof spv_image_store / 4));
     CHECK(!nvn_spirv_stores(spv_mesh_buffer, sizeof spv_mesh_buffer / 4));
 }
+
+TEST(nvn_after_a_lost_device_a_stop_names_the_loss_and_its_fault_first)
+{
+    CHECK(nvn_vk_lost_text() == NULL);
+    CHECK(strcmp(nvn_vk_fault_type(5), "a shader program counter, invalid") == 0);
+    CHECK(strcmp(nvn_vk_fault_type(2), "an invalid write") == 0);
+    CHECK(strcmp(nvn_vk_fault_type(99), "an unknown kind") == 0);
+    const int types[1] = { 5 };
+    const uint64_t addrs[1] = { 0xdf00519190ull };
+    const char *const where[1] = { "0xffae6e70 before the span 0xe000000000+0x1f000000" };
+    nvn_vk_lost_note("CTX SWITCH TIMEOUT", types, addrs, where, 1);
+    const char *s = nvn_vk_lost_text();
+    CHECK(s != NULL);
+    CHECK(strstr(s, "the host device was lost: CTX SWITCH TIMEOUT") == s);
+    CHECK(strstr(s, "a shader program counter, invalid 0xdf00519190") != NULL);
+    CHECK(strstr(s, "before the span 0xe000000000") != NULL);
+    nvn_vk_lost_note("a second loss", NULL, NULL, NULL, 0);
+    CHECK(strstr(nvn_vk_lost_text(), "a second loss") == NULL);
+}

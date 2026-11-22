@@ -1425,14 +1425,49 @@ bool nvn_vk_begin(replay *r)
  * @brief Logs what VK_EXT_device_fault tells about the lost device, once per process: its description, each faulting
  * address with what of the layer's pools held it (live, freed, or the nearest), and the vendor records.
  */
+const char *nvn_vk_fault_type(int type)
+{
+    static const char *const names[] = { "no address",
+                                         "an invalid read",
+                                         "an invalid write",
+                                         "an invalid instruction fetch",
+                                         "a shader program counter, unknown",
+                                         "a shader program counter, invalid",
+                                         "a shader program counter at the fault" };
+    return type >= 0 && type < (int)(sizeof names / sizeof names[0]) ? names[type] : "an unknown kind";
+}
+
+/** @brief What the lost device's fault report said, for every stop after it (nvn_vk_lost_text); empty before a loss. */
+static char g_lost[1024];
+
+const char *nvn_vk_lost_text(void) { return g_lost[0] ? g_lost : NULL; }
+
+void nvn_vk_lost_note(const char *desc, const int *types, const uint64_t *addrs, const char *const *where, uint32_t n)
+{
+    if (g_lost[0])
+        return;
+    size_t at = (size_t)snprintf(g_lost, sizeof g_lost, "the host device was lost%s%s", desc && desc[0] ? ": " : "",
+                                 desc ? desc : "");
+    for (uint32_t i = 0; i < n && at < sizeof g_lost; i++)
+        at += (size_t)snprintf(g_lost + at, sizeof g_lost - at, "%s %s 0x%llx (%s)", i ? ";" : "; the fault:",
+                               nvn_vk_fault_type(types[i]), (unsigned long long)addrs[i], where && where[i] ? where[i] : "");
+    if (!n && at < sizeof g_lost)
+        snprintf(g_lost + at, sizeof g_lost - at, "; the host gave no fault address");
+}
+
 static void fault_report(void)
 {
     static int done;
-    if (!g.device_fault || __atomic_exchange_n(&done, 1, __ATOMIC_RELAXED))
+    if (__atomic_exchange_n(&done, 1, __ATOMIC_RELAXED))
         return;
+    if (!g.device_fault) {
+        nvn_vk_lost_note("the host has no device fault reports", NULL, NULL, NULL, 0);
+        return;
+    }
     VkDeviceFaultCountsEXT n = { .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
     if (VK(vkGetDeviceFaultInfoEXT)(g.dev, &n, NULL) < 0) {
         rl_log(RL_LOG_ERROR, "nvn", "device fault: the host gives no fault information");
+        nvn_vk_lost_note("the host gives no fault information", NULL, NULL, NULL, 0);
         return;
     }
     VkDeviceFaultAddressInfoEXT *a = calloc(n.addressInfoCount + 1, sizeof *a);
@@ -1440,6 +1475,7 @@ static void fault_report(void)
     if (!a || !v) {
         free(a);
         free(v);
+        nvn_vk_lost_note(NULL, NULL, NULL, NULL, 0);
         return;
     }
     VkDeviceFaultInfoEXT info = { .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT, .pAddressInfos = a, .pVendorInfos = v };
@@ -1447,16 +1483,32 @@ static void fault_report(void)
     if (VK(vkGetDeviceFaultInfoEXT)(g.dev, &n, &info) >= 0) {
         rl_log(RL_LOG_ERROR, "nvn", "device fault: %s (%u addresses, %u vendor records)", info.description,
                n.addressInfoCount, n.vendorInfoCount);
+        enum { KEEP = 4 };
+        int types[KEEP];
+        uint64_t addrs[KEEP];
+        static char where[KEEP][256];
+        const char *wp[KEEP];
+        uint32_t kept = 0;
         for (uint32_t i = 0; i < n.addressInfoCount; i++) {
-            char where[512];
-            nvn_gpu_describe(a[i].reportedAddress, where, sizeof where);
-            rl_log(RL_LOG_ERROR, "nvn", "device fault address: type %d, 0x%llx (precision 0x%llx): %s",
-                   (int)a[i].addressType, (unsigned long long)a[i].reportedAddress,
-                   (unsigned long long)a[i].addressPrecision, where);
+            char w[512];
+            nvn_gpu_describe(a[i].reportedAddress, w, sizeof w);
+            rl_log(RL_LOG_ERROR, "nvn", "device fault address: %s, type %d, 0x%llx (precision 0x%llx): %s",
+                   nvn_vk_fault_type((int)a[i].addressType), (int)a[i].addressType,
+                   (unsigned long long)a[i].reportedAddress, (unsigned long long)a[i].addressPrecision, w);
+            if (kept < KEEP) {
+                types[kept] = (int)a[i].addressType;
+                addrs[kept] = a[i].reportedAddress;
+                snprintf(where[kept], sizeof where[kept], "%s", w);
+                wp[kept] = where[kept];
+                kept++;
+            }
         }
         for (uint32_t i = 0; i < n.vendorInfoCount; i++)
             rl_log(RL_LOG_ERROR, "nvn", "device fault vendor record: %s (code 0x%llx, data 0x%llx)", v[i].description,
                    (unsigned long long)v[i].vendorFaultCode, (unsigned long long)v[i].vendorFaultData);
+        nvn_vk_lost_note(info.description, types, addrs, wp, kept);
+    } else {
+        nvn_vk_lost_note("the host gives no fault information", NULL, NULL, NULL, 0);
     }
     free(a);
     free(v);
@@ -2070,7 +2122,7 @@ static vimg *image_of(replay *r, uint64_t tex)
     if (!d) {
         char gone[160] = "no removal remembered";
         nvn_obj_gone(tex, gone, sizeof gone);
-        rl_guest_fatal(r->c, "nvn", "0x%llx is not a texture (%s)", (unsigned long long)tex, gone);
+        nvn_vk_fatal(r->c, "0x%llx is not a texture (%s)", (unsigned long long)tex, gone);
         return NULL;
     }
     return image_of_desc(r, d, tex);
@@ -2131,12 +2183,12 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
         (d->target != 0 && d->target != 1 && d->target != 3 && d->target != 4 && d->target != 7 &&
          d->target != NVN_TARGET_3D && d->target != NVN_TARGET_CUBEMAP &&
          d->target != NVN_TARGET_CUBEMAP_ARRAY && !buffer)) {
-        rl_guest_fatal(r->c, "nvn", "texture 0x%llx: format %u, target %u, %u samples not handled",
+        nvn_vk_fatal(r->c, "texture 0x%llx: format %u, target %u, %u samples not handled",
                        (unsigned long long)tex, d->format, d->target, d->samples);
         return NULL;
     }
     if (g.nimages == MAX_IMAGES) {
-        rl_guest_fatal(r->c, "nvn", "more than %u textures in use", MAX_IMAGES);
+        nvn_vk_fatal(r->c, "more than %u textures in use", MAX_IMAGES);
         return NULL;
     }
     vimg *v = calloc(1, sizeof *v);
@@ -2159,7 +2211,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     VkFormatFeatureFlags ff = fp.optimalTilingFeatures;
     if (!(ff & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
         free(v);
-        rl_guest_fatal(r->c, "nvn", "texture 0x%llx: the host device cannot sample format %u (Vulkan %d)",
+        nvn_vk_fatal(r->c, "texture 0x%llx: the host device cannot sample format %u (Vulkan %d)",
                        (unsigned long long)tex, d->format, (int)f);
         return NULL;
     }
@@ -2242,7 +2294,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     return v;
 fail:
     image_free(v);
-    rl_guest_fatal(r->c, "nvn", "cannot make a host image for texture 0x%llx", (unsigned long long)tex);
+    nvn_vk_fatal(r->c, "cannot make a host image for texture 0x%llx", (unsigned long long)tex);
     return NULL;
 }
 
@@ -2462,6 +2514,18 @@ static VkRect2D clip(const replay *r, VkRect2D area)
 static uint8_t *read_back(replay *r, vimg *v);
 
 /** @brief Stops the game with a report; with capture on, the 8-bit RGBA host images go to the capture folder first. */
+int nvn_vk_fatal(rl_ctx *c, const char *fmt, ...)
+{
+    char msg[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    if (nvn_vk_lost_text())
+        return rl_guest_fatal(c, "nvn", "%s (then: %s)", nvn_vk_lost_text(), msg);
+    return rl_guest_fatal(c, "nvn", "%s", msg);
+}
+
 int nvn_vk_stop(replay *r, const char *fmt, ...)
 {
     char msg[512];
@@ -2469,6 +2533,8 @@ int nvn_vk_stop(replay *r, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
+    if (nvn_vk_lost_text())
+        return rl_guest_fatal(r->c, "nvn", "%s (then: %s)", nvn_vk_lost_text(), msg);
     nvn_vk_flush(r);
     for (uint32_t i = 0; i < g.nimages && i < 16; i++) {
         uint64_t frame;
@@ -3266,14 +3332,14 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         free(u);
         free(items);
         nvn_unlock();
-        return rl_guest_fatal(c, "nvn", st ? "out of memory queueing a submit" : "more than %u queues", MAX_QUEUES);
+        return nvn_vk_fatal(c, st ? "out of memory queueing a submit" : "more than %u queues", MAX_QUEUES);
     }
     u->r = (replay){ .c = c, .mem = mem, .s = s, .st = st };
     nvn_sched_run *done = NULL;
     int64_t t0 = now_ns();
     int rc = nvn_sched_pump(&sched, &sched_ops, &done);
     if (rc == RL_OK && !nvn_vk_submit(&u->r))
-        rc = rl_guest_fatal(c, "nvn", "the host device failed a submit");
+        rc = nvn_vk_fatal(c, "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
     tm.runs++;
     nvn_trace('U', (uint64_t)(now_ns() - t0), n, 0);
@@ -3724,10 +3790,10 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     if (!v)
         return RL_PENDING;
     if (!shown)
-        return rl_guest_fatal(c, "nvn", "cannot present texture 0x%llx (format %u): its copy to the window failed",
+        return nvn_vk_fatal(c, "cannot present texture 0x%llx (format %u): its copy to the window failed",
                               (unsigned long long)texture, format);
     if (!cropped)
-        return rl_guest_fatal(c, "nvn", "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
+        return nvn_vk_fatal(c, "the window crop %d,%d %dx%d leaves nothing of the %ux%u texture 0x%llx",
                               crop[0], crop[1], crop[2], crop[3], w, h, (unsigned long long)texture);
     nvn_core_leave();
     if (nvn_trace_on())

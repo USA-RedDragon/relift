@@ -422,6 +422,17 @@ void nvn_expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_
  * before recording (that counts as a submit for nvn_vk_stage).
  */
 bool nvn_vk_flush(replay *r);
+/** @brief The meaning of a VkDeviceFaultAddressTypeEXT value, for the fault report and stops. */
+const char *nvn_vk_fault_type(int type);
+/**
+ * @brief Notes the lost device's fault report (its description and n addresses with their types and what the layer's
+ * pools held there), once; every later stop names it first (nvn_vk_lost_text).
+ */
+void nvn_vk_lost_note(const char *desc, const int *types, const uint64_t *addrs, const char *const *where, uint32_t n);
+/** @brief What the lost device's fault report said, NULL while the device was not lost. */
+const char *nvn_vk_lost_text(void);
+/** @brief Stops the game as rl_guest_fatal does, naming the lost device and its fault first when the device was lost. */
+int nvn_vk_fatal(rl_ctx *c, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 /**
  * @brief Submits what r recorded without waiting for it: the host device runs it while the guest goes on, and the
  * next use of the layer's device state (nvn_lock, nvn_vk_begin, nvn_vk_flush) waits for it first. With nothing
