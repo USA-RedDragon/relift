@@ -158,8 +158,8 @@ fn hmma_f16() {
     assert!(HostProfile::nvidia().native_f16);
     assert_eq!(
         calls(&spirv),
-        8 + 8 + 4 + 1,
-        "steps, and the float step's call of the decoded one"
+        3 + 8 + 4 + 1,
+        "a call per HMMA, the steps in one helper per shape, and the float step's call of the decoded one"
     );
     let mut host = HostProfile::nvidia();
     host.native_f16 = false;
@@ -168,8 +168,23 @@ fn hmma_f16() {
         ..Options::default()
     };
     let s = translate_with(&program(&words), &opts).unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(calls(&s.spirv), 8 + 8 + 4);
+    assert_eq!(calls(&s.spirv), 3 + 8 + 4);
     assert_eq!(narrow_warp_path(&words), WarpPath::Shared);
+}
+
+#[test]
+fn hmma_of_one_shape_share_one_helper() {
+    let one = w(0x000f_ee00_0000_08ff, 0x0000_0008_040e_723c);
+    let size = |n: usize| check(&vec![one; n], &["HMMA.16816.F16 R14, R4, R8, RZ"]).len();
+    let (s1, s2, s9) = (size(1), size(2), size(9));
+    assert!(
+        s9 - s1 <= 8 * (s2 - s1),
+        "each HMMA after the first adds no more than the second did: {s1} {s2} {s9}"
+    );
+    assert!(
+        s2 - s1 < 200,
+        "one more HMMA of a shape is a call, not a copy of its steps: {s1} {s2}"
+    );
 }
 
 fn spirv_ops(words: &[u32]) -> Vec<u32> {

@@ -21,6 +21,7 @@
 
 use super::{Ctx, Res, bad};
 use crate::spirv::{glsl, op};
+use crate::translate::host::WarpPath;
 use crate::{Inst, Operand};
 
 const FUNCTION_PARAMETER: u16 = 55;
@@ -28,6 +29,7 @@ const FUNCTION_CALL: u16 = 57;
 const RETURN_VALUE: u16 = 254;
 const DOT8_KEY: u32 = 0x4_0000;
 const DOT8_FLOAT_KEY: u32 = 0x4_0001;
+const HMMA_KEY: u32 = 0x4_0010;
 /// The step functions are called, not inlined (`DontInline`): a program
 /// has hundreds of HMMA and eight steps each, and inlined they made
 /// binaries of megabytes and drivers compile for minutes.
@@ -75,64 +77,21 @@ fn hmma(c: &mut Ctx, i: &Inst) -> Res<()> {
     let a: Vec<u32> = (0..na).map(|k| load(c, ra, k)).collect();
     let b: Vec<u32> = (0..nb).map(|k| load(c, rb, k)).collect();
     let acc: Vec<u32> = (0..2).map(|k| load(c, rc, k)).collect();
-    let u = c.u32t();
-    let lane = c.lane_id();
-    let k2 = c.m.c_u32(2);
-    let k3 = c.m.c_u32(3);
-    let g = c.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[lane, k2]);
-    let q = c.m.emit(op::BITWISE_AND, u, &[lane, k3]);
-    let row_lanes: Vec<u32> = (0..4)
-        .map(|j| {
-            let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[g, k2]);
-            let kj = c.m.c_u32(j);
-            c.m.emit(op::BITWISE_OR, u, &[base, kj])
-        })
-        .collect();
-    let col_lanes: Vec<Vec<u32>> = (0..2)
-        .map(|h| {
-            let k1 = c.m.c_u32(1);
-            let n2 = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[q, k1]);
-            let kh = c.m.c_u32(h);
-            let n = c.m.emit(op::BITWISE_OR, u, &[n2, kh]);
-            let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[n, k2]);
-            (0..4)
-                .map(|j| {
-                    let kj = c.m.c_u32(j);
-                    c.m.emit(op::BITWISE_OR, u, &[base, kj])
-                })
-                .collect()
-        })
-        .collect();
-    let arows: Vec<Vec<u32>> = a.iter().map(|&v| c.shuffle_set(v, &row_lanes)).collect();
-    let bcols: Vec<Vec<Vec<u32>>> = b
-        .iter()
-        .map(|&v| col_lanes.iter().map(|ls| c.shuffle_set(v, ls)).collect())
-        .collect();
-    let dot = if c.host.native_f16 {
-        c.dot8_float_fn()
+    let out = if c.hmma_callable() {
+        let f = c.hmma_fn(usize::from(na), usize::from(nb));
+        let u = c.u32t();
+        let v2 = c.m.t_vec(u, 2);
+        let mut args = vec![f];
+        args.extend_from_slice(&a);
+        args.extend_from_slice(&b);
+        args.extend_from_slice(&acc);
+        let r = c.m.emit(FUNCTION_CALL, v2, &args);
+        (0..2)
+            .map(|k| c.m.emit(op::COMPOSITE_EXTRACT, u, &[r, k]))
+            .collect()
     } else {
-        c.dot8_fn()
+        c.hmma_body(&a, &b, &acc)
     };
-    let k16c = c.m.c_u32(16);
-    let mut out = Vec::new();
-    for (half_row, &accw) in acc.iter().enumerate() {
-        let mut halves = Vec::new();
-        for (h, bh) in bcols[0].iter().enumerate() {
-            let off = c.m.c_u32(16 * h as u32);
-            let mut r = c.m.emit(op::BIT_FIELD_U_EXTRACT, u, &[accw, off, k16c]);
-            for step in 0..nb {
-                let aw = &arows[half_row + 2 * usize::from(step)];
-                let bw = if step == 0 { bh } else { &bcols[1][h] };
-                let mut args = vec![dot, r];
-                args.extend_from_slice(aw);
-                args.extend_from_slice(bw);
-                r = c.m.emit(FUNCTION_CALL, u, &args);
-            }
-            halves.push(r);
-        }
-        let hi = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[halves[1], k16c]);
-        out.push(c.m.emit(op::BITWISE_OR, u, &[halves[0], hi]));
-    }
     if d != 255 {
         for (k, &v) in out.iter().enumerate() {
             c.store_reg(d + k as u8, v);
@@ -142,6 +101,116 @@ fn hmma(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 impl Ctx {
+    /// Whether an HMMA can be a call of [`Ctx::hmma_fn`]: on the paths whose
+    /// lane exchange is a subgroup shuffle, which reads nothing of the
+    /// caller's function.
+    fn hmma_callable(&self) -> bool {
+        matches!(
+            self.iface.host.warp,
+            WarpPath::Subgroup | WarpPath::Cluster | WarpPath::Invariant
+        ) && !self.stage.is_mesh_pipeline()
+    }
+
+    /// The helper `hmma(a0.., b0.., c0, c1)` of one shape (`na` words of A,
+    /// `nb` of B): the whole of an HMMA, its lane exchange and its fused
+    /// steps, returning D's two words. It is called, not inlined
+    /// (`DontInline`): a program of hundreds of HMMA inlined made the host
+    /// driver compile for tens of seconds.
+    fn hmma_fn(&mut self, na: usize, nb: usize) -> u32 {
+        let key = HMMA_KEY + na as u32;
+        if let Some(&f) = self.builtins.get(&key) {
+            return f;
+        }
+        let saved = std::mem::take(&mut self.m.body);
+        let saved_vars = self.m.suspend_vars();
+        let u = self.u32t();
+        let v2 = self.m.t_vec(u, 2);
+        let params = vec![u; na + nb + 2];
+        let fnt = self.m.t_fn_args(v2, &params);
+        let id = self.m.id();
+        self.m.emit_void(op::FUNCTION, &[v2, id, DOT8_CONTROL, fnt]);
+        let ps: Vec<u32> = (0..na + nb + 2)
+            .map(|_| self.m.emit(FUNCTION_PARAMETER, u, &[]))
+            .collect();
+        let entry = self.m.id();
+        self.m.emit_void(op::LABEL, &[entry]);
+        let out = self.hmma_body(&ps[..na], &ps[na..na + nb], &ps[na + nb..]);
+        let r = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, &out);
+        self.m.emit_void(RETURN_VALUE, &[r]);
+        self.m.emit_void(op::FUNCTION_END, &[]);
+        let body = std::mem::replace(&mut self.m.body, saved);
+        self.m.restore_vars(saved_vars);
+        self.funcs.extend(body);
+        self.builtins.insert(key, id);
+        id
+    }
+
+    /// An HMMA's D words from its A, B and C words: each lane gathers the A
+    /// rows and B columns it needs from the other lanes and runs the fused
+    /// steps.
+    fn hmma_body(&mut self, a: &[u32], b: &[u32], acc: &[u32]) -> Vec<u32> {
+        let c = self;
+        let u = c.u32t();
+        let nb = b.len() as u8;
+        let lane = c.lane_id();
+        let k2 = c.m.c_u32(2);
+        let k3 = c.m.c_u32(3);
+        let g = c.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[lane, k2]);
+        let q = c.m.emit(op::BITWISE_AND, u, &[lane, k3]);
+        let row_lanes: Vec<u32> = (0..4)
+            .map(|j| {
+                let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[g, k2]);
+                let kj = c.m.c_u32(j);
+                c.m.emit(op::BITWISE_OR, u, &[base, kj])
+            })
+            .collect();
+        let col_lanes: Vec<Vec<u32>> = (0..2)
+            .map(|h| {
+                let k1 = c.m.c_u32(1);
+                let n2 = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[q, k1]);
+                let kh = c.m.c_u32(h);
+                let n = c.m.emit(op::BITWISE_OR, u, &[n2, kh]);
+                let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[n, k2]);
+                (0..4)
+                    .map(|j| {
+                        let kj = c.m.c_u32(j);
+                        c.m.emit(op::BITWISE_OR, u, &[base, kj])
+                    })
+                    .collect()
+            })
+            .collect();
+        let arows: Vec<Vec<u32>> = a.iter().map(|&v| c.shuffle_set(v, &row_lanes)).collect();
+        let bcols: Vec<Vec<Vec<u32>>> = b
+            .iter()
+            .map(|&v| col_lanes.iter().map(|ls| c.shuffle_set(v, ls)).collect())
+            .collect();
+        let dot = if c.host.native_f16 {
+            c.dot8_float_fn()
+        } else {
+            c.dot8_fn()
+        };
+        let k16c = c.m.c_u32(16);
+        let mut out = Vec::new();
+        for (half_row, &accw) in acc.iter().enumerate() {
+            let mut halves = Vec::new();
+            for (h, bh) in bcols[0].iter().enumerate() {
+                let off = c.m.c_u32(16 * h as u32);
+                let mut r = c.m.emit(op::BIT_FIELD_U_EXTRACT, u, &[accw, off, k16c]);
+                for step in 0..nb {
+                    let aw = &arows[half_row + 2 * usize::from(step)];
+                    let bw = if step == 0 { bh } else { &bcols[1][h] };
+                    let mut args = vec![dot, r];
+                    args.extend_from_slice(aw);
+                    args.extend_from_slice(bw);
+                    r = c.m.emit(FUNCTION_CALL, u, &args);
+                }
+                halves.push(r);
+            }
+            let hi = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[halves[1], k16c]);
+            out.push(c.m.emit(op::BITWISE_OR, u, &[halves[0], hi]));
+        }
+        out
+    }
     /// The helper `dot8(acc, a0..a3, b0..b3)`: one fused step of eight
     /// half-precision products (the halves of the packed words, low first)
     /// added to the half-precision `acc`, returned as half-precision bits.
