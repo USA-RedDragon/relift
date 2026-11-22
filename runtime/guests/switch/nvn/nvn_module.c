@@ -426,8 +426,10 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         return NULL;
     }
     nvn_shader_iface(key, m->recs, m->nrecs);
-    for (uint32_t i = 0; i < m->nrecs; i++)
+    for (uint32_t i = 0; i < m->nrecs; i++) {
         m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
+        m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
+    }
     if (!patch_spirv(w, n, stage, m)) {
         free(w);
         free(m->recs);

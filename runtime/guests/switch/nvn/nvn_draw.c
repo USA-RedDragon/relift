@@ -1249,10 +1249,7 @@ static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
                            3 + __builtin_ctz(mods[s]->user >> USER_BINDINGS) + (int)USER_BINDINGS, USER_BINDINGS);
     if (mods[s]->other_sets)
         return nvn_vk_stop(r, "program %s uses a guest memory set, which draws do not bind yet", mods[s]->key);
-    bool bound = false;
-    for (uint32_t i = 0; i < mods[s]->nrecs; i++)
-        bound |= mods[s]->recs[i].kind == NVN_IFACE_TEXTURE;
-    if ((mods[s]->texture_bindings & ~(1u << 31)) && !bound) {
+    if (mods[s]->register_handles) {
         int src = nvn_texset_sync_registered(r);
         if (src != RL_OK)
             return src;
@@ -1918,8 +1915,10 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         if (st->ubo[NVN_STAGE_COMPUTE][i].addr)
             nvn_vk_dispatch_buffer(nvn_gpu_guest(st->ubo[NVN_STAGE_COMPUTE][i].addr), st->ubo[NVN_STAGE_COMPUTE][i].size,
                                    false);
-    int rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals, img_lo, at);
+    int rc = m->register_handles ? nvn_texset_sync_registered(r) : RL_OK;
     if (rc != RL_OK)
+        return rc;
+    if ((rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals, img_lo, at)) != RL_OK)
         return rc;
     if ((rc = bind_user_textures(r, m, NVN_STAGE_COMPUTE, &n, map, vals)) != RL_OK)
         return rc;

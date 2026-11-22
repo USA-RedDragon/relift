@@ -33,6 +33,8 @@ typedef struct nvn_module {
     bool global_store;
     /** @brief The program stores to guest memory: nvn_spirv_stores of its SPIR-V. */
     bool stores_guest;
+    /** @brief Its translation reads texture handles from registers (NVN_IFACE_REGISTER_HANDLES). */
+    bool register_handles;
     /** @brief Output locations the program declares (a vertex program's varyings). */
     uint32_t outputs;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
