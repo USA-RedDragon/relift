@@ -412,9 +412,14 @@ void vi_host_flip(int64_t t);
 bool vi_trace_on(void);
 /** @brief CLOCK_MONOTONIC nanoseconds while the frame trace is on, else 0. */
 int64_t vi_trace_now(void);
+/** @brief Whether a trace limited to kinds (the letters after its path's bar; empty for all) writes kind. */
+bool vi_trace_kind_listed(const char *kinds, char kind);
 /** @brief Writes one frame trace line of this kind when the trace is on. */
 void vi_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
-/** @brief Writes a frame trace line with a and the calling thread's CPU time. */
+/**
+ * @brief Writes a frame trace line with a and the calling thread's CPU time; reads neither for a kind the trace
+ * leaves out.
+ */
 void vi_trace_cpu(char kind, uint64_t a);
 
 #endif

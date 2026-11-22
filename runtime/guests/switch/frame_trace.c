@@ -63,9 +63,14 @@ bool vi_trace_on(void)
 
 int64_t vi_trace_now(void) { return vi_trace_on() ? mono_ns() : 0; }
 
+bool vi_trace_kind_listed(const char *kinds, char kind) { return !kinds[0] || (kind && strchr(kinds, kind)); }
+
+/** @brief Whether the trace is on and writes lines of kind. */
+static bool traced(char kind) { return vi_trace_on() && vi_trace_kind_listed(g_kinds, kind); }
+
 void vi_trace_cpu(char kind, uint64_t a)
 {
-    if (!vi_trace_on())
+    if (!traced(kind))
         return;
     struct timespec ts;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
@@ -84,7 +89,7 @@ void vi_trace_cpu(char kind, uint64_t a)
 
 void vi_trace(char kind, uint64_t a, uint64_t b, uint64_t c)
 {
-    if (!vi_trace_on() || (g_kinds[0] && !strchr(g_kinds, kind)))
+    if (!traced(kind))
         return;
     int64_t t = mono_ns();
     hos_thread *h = hos_current();

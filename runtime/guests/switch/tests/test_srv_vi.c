@@ -1158,3 +1158,12 @@ TEST(vi_frame_callback_and_layers)
     CHECK_EQ(id, f.layer);
     CHECK(!rl_vi_layer_id(1, &id));
 }
+
+TEST(vi_frame_trace_kinds_name_the_lines_it_writes)
+{
+    CHECK(vi_trace_kind_listed("", 'c'));
+    CHECK(vi_trace_kind_listed("NUS", 'N'));
+    CHECK(!vi_trace_kind_listed("NUS", 'c'));
+    CHECK(!vi_trace_kind_listed("NUS", 'C'));
+    CHECK(!vi_trace_kind_listed("NUS", 0));
+}
