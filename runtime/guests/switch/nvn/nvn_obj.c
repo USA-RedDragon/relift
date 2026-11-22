@@ -98,12 +98,20 @@ nvn_obj *nvn_obj_new(uint64_t addr, uint32_t kind, size_t size)
     o->addr = addr;
     o->kind = kind;
     o->refs = 1;
+    return o;
+}
+
+nvn_obj *nvn_obj_publish(nvn_obj *o)
+{
+    if (!o)
+        return NULL;
+    uint64_t addr = o->addr;
     pthread_mutex_lock(&objs.lock);
     if ((objs.filled + 1) * 2 > objs.cap)
         grow_locked();
     if (!objs.cap) {
         pthread_mutex_unlock(&objs.lock);
-        free(o);
+        nvn_obj_release(o);
         return NULL;
     }
     nvn_obj *old = NULL;

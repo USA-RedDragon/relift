@@ -93,7 +93,7 @@ uint64_t nvnh_nvnEventInitialize(rl_ctx *c, uint8_t *mem)
         e->offset = offset;
         e->addr = base + offset;
     }
-    c->x[0] = e != NULL;
+    c->x[0] = nvn_obj_publish((nvn_obj *)e) != NULL;
     return nvn_ret(c);
 }
 

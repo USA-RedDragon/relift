@@ -1338,6 +1338,7 @@ static void held_make(obj_hammer *h, uint32_t i, uint32_t n)
     o->drops = &h->drops;
     o->o.drop = held_drop;
     __atomic_add_fetch(&h->made, 1, __ATOMIC_RELAXED);
+    CHECK(nvn_obj_publish(&o->o) == &o->o);
 }
 
 static void *obj_writer(void *arg)

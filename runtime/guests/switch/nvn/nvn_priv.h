@@ -860,8 +860,17 @@ struct nvn_obj {
 /** @brief A slot left by a freed object in the object table. */
 #define NVN_TOMB ((nvn_obj *)(uintptr_t)1)
 
-/** @brief A new zeroed object of size bytes for the NVN object at addr, replacing any object there; NULL when out of memory. */
+/**
+ * @brief A new zeroed object of size bytes for the NVN object at addr, not in the table yet: no lookup finds it until
+ * nvn_obj_publish, so the caller fills it first. NULL when out of memory.
+ */
 nvn_obj *nvn_obj_new(uint64_t addr, uint32_t kind, size_t size);
+/**
+ * @brief Puts o, already filled, in the table, replacing any object at its address, the way the console's object is
+ * usable once its Initialize returns. Returns o, or NULL (o dropped and freed) when the table cannot grow; NULL gives
+ * NULL.
+ */
+nvn_obj *nvn_obj_publish(nvn_obj *o);
 /** @brief The object for the NVN object at addr, of kind (0: any kind), or NULL. */
 nvn_obj *nvn_obj_get(uint64_t addr, uint32_t kind);
 /** @brief Describes the last removal of the object at addr (kind, how, thread, age) into out; false when none is remembered. */

@@ -236,6 +236,7 @@ uint64_t nvnh_nvnDlssNetworkInitialize(rl_ctx *c, uint8_t *mem)
         n->render_w = opt[0];
         n->render_h = opt[1];
     }
+    n = (nvn_dlss_net *)nvn_obj_publish((nvn_obj *)n);
     trace("nvnDlssNetworkInitialize(0x%llx: %ux%u, method %u, preset %u, flags 0x%x)", (unsigned long long)net, wh[0],
           wh[1], (unsigned)method, (unsigned)preset, (unsigned)flags);
     c->x[0] = n != NULL;

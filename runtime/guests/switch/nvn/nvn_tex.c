@@ -423,7 +423,7 @@ uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
  * @brief nvnTextureFinalize(NVNtexture *). The driver's finalize only retires the object; the texture's layout,
  * address and storage stay what the game's own commands and descriptors named, and a command buffer recorded
  * before the finalize (replayed by a CallCommands, or submitted after it) still reads or writes that storage. So
- * the layer keeps the texture's description until the same address is initialized again (nvn_obj_new replaces it),
+ * the layer keeps the texture's description until the same address is initialized again (nvn_obj_publish replaces it),
  * and only the texture set's slots of it go (nvn_texset_texture_gone). Dropping it here stopped the game with
  * "is not a texture" at the first replay of such a command.
  */
@@ -492,7 +492,7 @@ bool nvn_texture_record(uint64_t tex, const nvn_tex_desc *d, const uint8_t *buil
             t->has_builder = true;
         }
     }
-    return t != NULL;
+    return nvn_obj_publish((nvn_obj *)t) != NULL;
 }
 
 static bool tex_of(rl_ctx *c, uint64_t a, const char *proc, nvn_tex_desc *out)
@@ -629,7 +629,7 @@ uint64_t nvnh_nvnSamplerInitialize(rl_ctx *c, uint8_t *mem)
     nvn_sampler *s = (nvn_sampler *)nvn_obj_new(c->x[0], NVN_SAMPLER, sizeof *s);
     if (s)
         memcpy(s->builder_copy, mem + c->x[1], sizeof s->builder_copy);
-    c->x[0] = s != NULL;
+    c->x[0] = nvn_obj_publish((nvn_obj *)s) != NULL;
     return nvn_ret(c);
 }
 
@@ -652,7 +652,7 @@ static uint64_t pool_init(rl_ctx *c, uint32_t kind)
             rl_log(RL_LOG_INFO, "nvn", "%s pool 0x%llx: %d descriptors", kind == NVN_TEXTURE_POOL ? "texture" : "sampler",
                    (unsigned long long)c->x[0], p->count);
     }
-    c->x[0] = p != NULL;
+    c->x[0] = nvn_obj_publish((nvn_obj *)p) != NULL;
     return nvn_ret(c);
 }
 

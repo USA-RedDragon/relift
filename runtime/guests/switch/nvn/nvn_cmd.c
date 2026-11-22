@@ -165,7 +165,7 @@ uint64_t nvnh_nvnCommandBufferInitialize(rl_ctx *c, uint8_t *mem)
         b->device = c->x[1];
         b->o.drop = cb_drop;
     }
-    c->x[0] = b != NULL;
+    c->x[0] = nvn_obj_publish((nvn_obj *)b) != NULL;
     return nvn_ret(c);
 }
 

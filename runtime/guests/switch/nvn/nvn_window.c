@@ -54,6 +54,7 @@ uint64_t nvnh_nvnWindowInitialize(rl_ctx *c, uint8_t *mem)
         w->interval = (uint32_t)interval;
         w->native = native;
     }
+    w = (nvn_window *)nvn_obj_publish((nvn_obj *)w);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "nvnWindowInitialize(0x%llx): %llu textures, %llu active, interval %llu",
                (unsigned long long)win, (unsigned long long)n, (unsigned long long)active,

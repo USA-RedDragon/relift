@@ -303,6 +303,7 @@ uint64_t nvnh_nvnDeviceInitialize(rl_ctx *c, uint8_t *mem)
     nvn_device *d = (nvn_device *)nvn_obj_new(dev, NVN_DEVICE, sizeof *d);
     if (d)
         d->flags = (uint32_t)flags;
+    d = (nvn_device *)nvn_obj_publish((nvn_obj *)d);
     trace("nvnDeviceInitialize(0x%llx, flags 0x%x)", (unsigned long long)dev, (unsigned)flags);
     c->x[0] = d != NULL;
     return nvn_ret(c);
@@ -589,6 +590,7 @@ uint64_t nvnh_nvnQueueInitialize(rl_ctx *c, uint8_t *mem)
     nvn_queue *q = (nvn_queue *)nvn_obj_new(queue, NVN_QUEUE, sizeof *q);
     if (q)
         q->device = device;
+    q = (nvn_queue *)nvn_obj_publish((nvn_obj *)q);
     trace("nvnQueueInitialize(0x%llx, device 0x%llx)", (unsigned long long)queue, (unsigned long long)device);
     c->x[0] = q != NULL;
     return nvn_ret(c);
@@ -671,7 +673,7 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
                    "its GPU address is its guest address",
                    (unsigned long long)pool, (unsigned long long)size, (unsigned long long)memory);
     }
-    return p != NULL;
+    return nvn_obj_publish((nvn_obj *)p) != NULL;
 }
 
 /**
@@ -1057,7 +1059,7 @@ uint64_t nvnh_nvnBufferInitialize(rl_ctx *c, uint8_t *mem)
         b->memory = nvn_pool_memory(pool, NULL) + offset;
         b->gpu = nvn_pool_gpu(pool) + offset;
     }
-    c->x[0] = b != NULL;
+    c->x[0] = nvn_obj_publish((nvn_obj *)b) != NULL;
     return nvn_ret(c);
 }
 
@@ -1134,7 +1136,7 @@ uint64_t nvnh_nvnBufferInvalidateMappedRange(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnSyncInitialize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    c->x[0] = nvn_obj_new(c->x[0], NVN_SYNC, sizeof(nvn_sync)) != NULL;
+    c->x[0] = nvn_obj_publish(nvn_obj_new(c->x[0], NVN_SYNC, sizeof(nvn_sync))) != NULL;
     return nvn_ret(c);
 }
 

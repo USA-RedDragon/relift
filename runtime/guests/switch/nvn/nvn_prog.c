@@ -44,7 +44,7 @@ typedef struct nvn_program {
 uint64_t nvnh_nvnProgramInitialize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    c->x[0] = nvn_obj_new(c->x[0], NVN_PROGRAM, sizeof(nvn_program)) != NULL;
+    c->x[0] = nvn_obj_publish(nvn_obj_new(c->x[0], NVN_PROGRAM, sizeof(nvn_program))) != NULL;
     return nvn_ret(c);
 }
 
@@ -164,7 +164,7 @@ uint64_t nvnh_nvnProgramInitializeFromBuilder(rl_ctx *c, uint8_t *mem)
                                         "nvnProgramInitializeFromBuilder(0x%llx): %d ray tracing modules and %d "
                                         "subroutine linkages are not implemented",
                                         (unsigned long long)prog, (int32_t)modules, (int32_t)links);
-    if (!nvn_obj_new(prog, NVN_PROGRAM, sizeof(nvn_program))) {
+    if (!nvn_obj_publish(nvn_obj_new(prog, NVN_PROGRAM, sizeof(nvn_program)))) {
         c->x[0] = 0;
         return nvn_ret(c);
     }
