@@ -1,5 +1,5 @@
 //! `relift import`: extract a dump into the project's import directory and
-//! write a `game.toml` stub.
+//! write a `relift.toml` stub.
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ pub fn cache_root(settings: &Settings) -> Result<PathBuf, BoxError> {
     Err("no cache directory: set cache-dir".into())
 }
 
-/// The import directory as `game.toml` names it: relative to the cache
+/// The import directory as `relift.toml` names it: relative to the cache
 /// root, so the manifest reads the same wherever the cache lives.
 ///
 /// # Errors
@@ -224,12 +224,8 @@ pub fn run(
         }
         None => String::new(),
     };
-    let manifest = project.join("game.toml");
-    let wrote_manifest = if manifest.exists() {
-        false
-    } else {
-        relift_cache::write_if_changed(&manifest, game.to_toml().as_bytes())?
-    };
+    let manifest = project.join("relift.toml");
+    let wrote_manifest = crate::projectfile::write_stub(&manifest, &game.to_toml())?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " title {:016x} v{}, {}, {}, {} DLC{}, {} written into {}{}, {}",
         report.program_id,
@@ -241,7 +237,7 @@ pub fn run(
         noun(report.written as u64, "file"),
         out.display(),
         if wrote_manifest {
-            "; wrote game.toml"
+            "; wrote relift.toml"
         } else {
             ""
         },

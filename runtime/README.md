@@ -196,7 +196,7 @@ layer declares `save.dir`, `vk.device`, `vk.keep_attachments`, `vk.decode_bc` an
 Boy layer declares `video.gb_color_correction`; the Nintendo DS layer
 declares `save.dir`, `save.type`, `video.nds_layout`, `video.nds_displays`,
 `video.nds_integer_scale` and `video.nds_lcd_response`; a game adds its own from the
-`[settings]` tables of game.toml. Precedence, last wins:
+`[settings]` tables of relift.toml. Precedence, last wins:
 
 1. the declared default;
 2. `<user folder>/settings.json`, read only when the program names an app with

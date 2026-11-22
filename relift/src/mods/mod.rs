@@ -3,7 +3,7 @@
 //! [`user`] reads the mods `relift build --mods` names (Atmosphere and
 //! Ryujinx layouts: exefs replacements and `exefs_patches` IPS32 and
 //! `.pchtxt` patches matched by build id) and applies them in order before
-//! analysis. [`bundled`] reads the mods `game.toml` declares, which are
+//! analysis. [`bundled`] reads the mods `relift.toml` declares, which are
 //! built in and switched at start. [`conflicts`] refuses the ambiguous
 //! cases. [`rom`] patches a handheld ROM into a ROM hack with its own
 //! identity.

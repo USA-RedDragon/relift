@@ -2,7 +2,7 @@
 //! each module of the import it gives the functions found, the
 //! instructions that do not lift, every computed call or jump that analysis
 //! left to the dispatcher ([`relift_analyze::unresolved_transfers`]), and
-//! the hints in `game.toml` that earlier hot-load runs recorded. Discovery
+//! the hints in `relift.toml` that earlier hot-load runs recorded. Discovery
 //! starts from the hints too, as the next `relift build` does, so a hint
 //! shows as lifted once the build will include it.
 //!
@@ -126,7 +126,7 @@ pub struct Site {
     pub symbol: Option<String>,
 }
 
-/// One hint of `game.toml`, placed.
+/// One hint of `relift.toml`, placed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HintRow {
     /// The offset from the module's load address.
@@ -370,7 +370,7 @@ pub fn json(reports: &[ModuleReport]) -> serde_json::Value {
 ///
 /// # Errors
 ///
-/// No project, an import that does not load, a `game.toml` hint that does
+/// No project, an import that does not load, a `relift.toml` hint that does
 /// not parse, or an `only` that names no module.
 pub fn run(
     settings: &Settings,
@@ -387,7 +387,7 @@ pub fn run(
         let names: Vec<&str> = placed.iter().map(|p| p.name.as_str()).collect();
         return Err(format!("no module {m:?}; the import has {}", names.join(", ")).into());
     }
-    let hints = crate::hints::read(Path::new("game.toml"))?;
+    let hints = crate::hints::read(Path::new("relift.toml"))?;
     for h in &hints {
         if !placed.iter().any(|p| p.name == h.module) {
             ui.note(&Line::new().text(format!("hint {} names no module of the import", h.text())));

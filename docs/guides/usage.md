@@ -10,7 +10,7 @@ per-guest details (import layouts, the built program's flags) are in
 
 ## Projects and the cache
 
-Run `relift` in an empty project folder. Each project holds one `game.toml`;
+Run `relift` in an empty project folder. Each project holds one `relift.toml`;
 artifacts go to the cache directory (`cache-dir`, [Settings](../reference/configuration.md)).
 
 The cache is relocatable: copy or hard-link it to another path, or move the
@@ -149,7 +149,7 @@ in `RELIFT_REPORT_DIR` if set, else in `reports` in the app's user folder
 Files app shows it). `relift report <file>`, run in the project directory,
 prints the transfer site and target with the guest instructions around them
 and what the build knew about the target, and adds the target as a root: a
-hint in `game.toml` (Switch, GBA) or a line in the learned file (Game Boy;
+hint in `relift.toml` (Switch, GBA) or a line in the learned file (Game Boy;
 only development builds read it).
 `--no-hint` only prints. The format and the folder rules are in
 [the ABI contract](../abi.md#stop-reports), section 11, "Stop reports".
@@ -157,7 +157,7 @@ only development builds read it).
 Under `relift run` a Switch program asks relift for the missed code instead:
 relift lifts it and everything newly reachable from it, compiles one shared
 library, the program loads it and goes on. relift adds each such address to
-the `[hints]` list in `game.toml`, and the next `relift build` lifts it with
+the `[hints]` list in `relift.toml`, and the next `relift build` lifts it with
 the rest ([the ABI contract](../abi.md), section 6). Hot-loading is not available for the
 Game Boy Advance yet; the Game Boy dev build runs such code on the device
 library's CPU ([Game Boy](../../guests/gb/README.md)).
@@ -175,7 +175,7 @@ reads it to build its settings and input screens ([Input ports and bindings](../
 for one module) lists, per module, the functions found, the instructions
 that do not lift, each indirect call or computed jump left to the dispatcher
 with its reason (`slot`, `table` or `pointer`), and the hint addresses
-earlier dev runs recorded in `game.toml`. For a Game Boy ROM use
+earlier dev runs recorded in `relift.toml`. For a Game Boy ROM use
 `relift-gbrom functions`, for a GBA ROM `relift-gbarom functions`.
 
 `relift diff <function>` builds a dev build, runs it under gdb and, at each

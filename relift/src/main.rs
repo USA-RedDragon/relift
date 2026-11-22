@@ -12,11 +12,15 @@ use relift::cli::{Cli, Command};
 use relift::settings::Settings;
 
 fn main() -> ExitCode {
+    if let Err(e) = relift::projectfile::refuse_old_file(std::path::Path::new(".")) {
+        eprintln!("relift: {e}");
+        return ExitCode::FAILURE;
+    }
     let loaded = Configulator::<Settings>::new()
         .with_cli_command(Cli::command())
         .with_file(FileOptions {
-            paths: vec!["relift.toml".into()],
-            ..FileOptions::new(serde_loader(|s| toml::from_str(s)))
+            paths: vec![relift::projectfile::FILE.into()],
+            ..FileOptions::new(serde_loader(relift::projectfile::settings_from_str))
         })
         .with_environment_variables(EnvironmentVariableOptions {
             prefix: "RELIFT_".into(),

@@ -2,7 +2,7 @@
 //! program connects over `RELIFT_DEV_SOCKET` when it misses code, and for
 //! each missed address relift lifts the target and everything newly
 //! reachable from it, past the entries the build already has, compiles one
-//! shared library, adds the target to the hint list in `game.toml` and
+//! shared library, adds the target to the hint list in `relift.toml` and
 //! replies with the library's path.
 
 use std::collections::BTreeMap;

@@ -111,7 +111,7 @@ fn build_and_run_without_a_project_say_what_is_missing() {
         assert!(!out.status.success(), "relift {args:?} succeeded");
         let err = stderr(&out);
         assert!(
-            err.starts_with(&format!("relift {name}: game.toml")),
+            err.starts_with(&format!("relift {name}: relift.toml")),
             "relift {args:?} -- {err}"
         );
         assert!(
@@ -156,6 +156,54 @@ fn relift_toml_in_the_working_dir_is_read() {
         !out.status.success() && stderr(&out).contains("jobs"),
         "{}",
         stderr(&out)
+    );
+}
+
+#[test]
+fn the_project_tables_share_the_file_with_the_settings() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("relift-toml-project");
+    std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
+    relift_cache::write_if_changed(
+        &dir.join("relift.toml"),
+        b"jobs = 2\n\n[game]\nguest = \"linux\"\nname = \"Example Project 2\"\n\n[hints]\ncode = []\n",
+    )
+    .expect("the project file is writable");
+    let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
+        .args(["check", "x"])
+        .current_dir(&dir)
+        .output()
+        .expect("the relift binary runs");
+    assert!(
+        stderr(&out).starts_with("relift check: not implemented yet; "),
+        "{}",
+        stderr(&out)
+    );
+    relift_cache::write_if_changed(&dir.join("relift.toml"), b"jobz = 2\n[game]\n")
+        .expect("the project file is writable");
+    let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
+        .args(["check", "x"])
+        .current_dir(&dir)
+        .output()
+        .expect("the relift binary runs");
+    assert!(stderr(&out).contains("jobz"), "{}", stderr(&out));
+}
+
+#[test]
+fn a_game_toml_is_refused_with_the_new_name() {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("relift-old-project");
+    std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
+    relift_cache::write_if_changed(&dir.join("game.toml"), b"[game]\nguest = \"gb\"\n")
+        .expect("the old file is writable");
+    let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
+        .args(["build"])
+        .current_dir(&dir)
+        .output()
+        .expect("the relift binary runs");
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("game.toml") && err.contains("relift.toml"),
+        "{err}"
     );
 }
 
@@ -233,7 +281,7 @@ fn import_reads_an_extracted_tree_and_picks_the_update() {
     );
     let table = std::fs::read_to_string(import.join("modules.toml")).expect("module table");
     assert!(table.contains("name = \"nnSdk\""), "{table}");
-    let game = std::fs::read_to_string(project.join("game.toml")).expect("game.toml stub");
+    let game = std::fs::read_to_string(project.join("relift.toml")).expect("relift.toml stub");
     assert!(game.contains("title_id = \"0100123456780000\""), "{game}");
     assert!(game.contains("version = 131072"), "{game}");
 
@@ -285,7 +333,7 @@ fn import_reads_a_nup_and_picks_the_base() {
     let import = root.join("cache/projects/game/import");
     assert_eq!(romfs_file(&import, "readme.txt"), b"version 0");
     assert!(import.join("romfs.map").is_file() && !import.join("romfs").exists());
-    let game = std::fs::read_to_string(project.join("game.toml")).expect("game.toml stub");
+    let game = std::fs::read_to_string(project.join("relift.toml")).expect("relift.toml stub");
     assert!(game.contains("version = 0"), "{game}");
 }
 
@@ -338,7 +386,7 @@ fn a_relative_cache_dir_is_taken_from_the_working_directory() {
     let rom = rom.display().to_string();
     let out = import_in(&project, &["--cache-dir", "rel-cache", "import", &rom]);
     assert!(out.status.success(), "{}", stderr(&out));
-    let game = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
+    let game = std::fs::read_to_string(project.join("relift.toml")).expect("relift.toml");
     let import = project.join("rel-cache/projects/game/import");
     assert!(import.join("rom.gba").is_file(), "{game}");
     let want = format!("import_dir = {:?}", import.display().to_string());

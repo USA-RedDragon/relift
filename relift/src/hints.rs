@@ -1,4 +1,4 @@
-//! The hint list in `game.toml`: guest code addresses that a dev run
+//! The hint list in `relift.toml`: guest code addresses that a dev run
 //! (`relift run`) missed and hot-loaded. `relift build` lifts each as a root,
 //! so the next build has no miss there; `relift coverage` lists them.
 //!
@@ -57,7 +57,7 @@ impl Hint {
     }
 }
 
-/// The hints of the game.toml text `text`.
+/// The hints of the relift.toml text `text`.
 ///
 /// # Errors
 ///
@@ -74,7 +74,7 @@ pub fn parse(text: &str) -> Result<BTreeSet<Hint>, BoxError> {
         .collect()
 }
 
-/// The hints in the game.toml at `path`; none when the file has no list.
+/// The hints in the relift.toml at `path`; none when the file has no list.
 ///
 /// # Errors
 ///
@@ -114,7 +114,7 @@ pub fn with_hints(text: &str, hints: &BTreeSet<Hint>) -> String {
     out
 }
 
-/// Adds `new` to the hints of the game.toml at `path`; returns the ones
+/// Adds `new` to the hints of the relift.toml at `path`; returns the ones
 /// that were not there before.
 ///
 /// # Errors
@@ -138,7 +138,7 @@ pub fn add(path: &Path, new: &[Hint]) -> Result<Vec<Hint>, BoxError> {
 mod tests {
     use super::*;
 
-    const GAME: &str = "# game.toml, written by relift import.\n\n[game]\nguest = \"switch\"\n\n[[game.module]]\nname = \"main\"\n";
+    const GAME: &str = "# The project file, written by relift import.\n\n[game]\nguest = \"switch\"\n\n[[game.module]]\nname = \"main\"\n";
 
     fn h(m: &str, o: u64) -> Hint {
         Hint {

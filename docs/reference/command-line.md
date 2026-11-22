@@ -1588,7 +1588,7 @@ Options:
 ```text
 Explain a stop report a shipped build wrote (missed code, an instruction it could not run) and add the missed target as a root for the next build.
 
-Prints the transfer site and target with the guest instructions around them, the site's lifted function and its C at the site, and what the build knew about the target. Run in the project directory to read its build and add the root (a hint in game.toml for a Switch project, the learned file for a Game Boy one).
+Prints the transfer site and target with the guest instructions around them, the site's lifted function and its C at the site, and what the build knew about the target. Run in the project directory to read its build and add the root (a hint in relift.toml for a Switch project, the learned file for a Game Boy one).
 
 Usage: relift report [OPTIONS] <FILE>
 

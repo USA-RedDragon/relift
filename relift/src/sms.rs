@@ -2,7 +2,7 @@
 //! ROM, `relift build` of a native program from it, and `relift run`.
 //!
 //! The import copies the ROM (less a copier header) into the project's
-//! import directory and writes `game.toml` with `guest = "sms"` and the
+//! import directory and writes `relift.toml` with `guest = "sms"` and the
 //! console. The build lifts the ROM's code into one unit per bank and slot
 //! and one per group of code in RAM (`relift-sms`) and links it with the
 //! runtime's core, Z80 and SMS layers. Until discovery gives the code, a
@@ -77,7 +77,7 @@ pub fn is_rom(path: &Path) -> bool {
     })
 }
 
-/// Whether the project's `game.toml` names this guest.
+/// Whether the project's `relift.toml` names this guest.
 #[must_use]
 pub fn is_project() -> bool {
     project_table()
@@ -86,7 +86,7 @@ pub fn is_project() -> bool {
 }
 
 fn project_table() -> Option<toml::Table> {
-    let t: toml::Table = std::fs::read_to_string("game.toml").ok()?.parse().ok()?;
+    let t: toml::Table = std::fs::read_to_string("relift.toml").ok()?.parse().ok()?;
     t.get("game")?.as_table().cloned()
 }
 
@@ -110,7 +110,7 @@ fn console_of(c: &Cartridge) -> &'static str {
 /// # Errors
 ///
 /// The ROM cannot be read or its layout is not a cartridge's, or the
-/// import directory or `game.toml` cannot be written.
+/// import directory or `relift.toml` cannot be written.
 pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxError> {
     let image = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let ext = path.extension().and_then(|e| e.to_str());
@@ -131,22 +131,22 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         .to_string();
     let console = console_of(&cart);
     let text = format!(
-        "# game.toml, written by relift import.\n\n[game]\nguest = \"sms\"\nconsole = \"{console}\"\nregion = \"ntsc-u\"\nmapper = \"{}\"\ncopier_header = {}\ntitle = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"sms\"\nconsole = \"{console}\"\nregion = \"ntsc-u\"\nmapper = \"{}\"\ncopier_header = {}\ntitle = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n",
         cart.mapper.kind.name(),
         cart.layout.rom_start(),
         quote(&title),
         quote(&out.display().to_string()),
         quote(&source.display().to_string()),
     );
-    let manifest = Path::new("game.toml");
-    let wrote = !manifest.exists() && relift_cache::write_if_changed(manifest, text.as_bytes())?;
+    let manifest = Path::new("relift.toml");
+    let wrote = crate::projectfile::write_stub(manifest, &text)?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " {title} ({} bytes, {}, {} mapper), into {}{}, {}",
         rom.len(),
         console_name(console),
         cart.mapper.kind.name(),
         out.display(),
-        if wrote { "; wrote game.toml" } else { "" },
+        if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
@@ -173,9 +173,9 @@ struct Project {
 }
 
 fn project() -> Result<Project, BoxError> {
-    let g = project_table().ok_or("game.toml has no [game]")?;
+    let g = project_table().ok_or("relift.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
-    let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = PathBuf::from(s("import_dir").ok_or("relift.toml has no game.import_dir")?);
     let path = dir.join(ROM_FILE);
     let rom = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
@@ -185,7 +185,7 @@ fn project() -> Result<Project, BoxError> {
         Some("sg") => Console::Sg,
         Some("sms") | None => Console::Ms,
         Some(o) => {
-            return Err(format!("game.toml: console {o:?} is not sms, gg, gg-ms or sg").into());
+            return Err(format!("relift.toml: console {o:?} is not sms, gg, gg-ms or sg").into());
         }
     };
     let region = match s("region").as_deref() {
@@ -193,7 +193,7 @@ fn project() -> Result<Project, BoxError> {
         Some("pal") => Region::Pal,
         Some("ntsc-u") | None => Region::NtscU,
         Some(o) => {
-            return Err(format!("game.toml: region {o:?} is not ntsc-u, ntsc-j or pal").into());
+            return Err(format!("relift.toml: region {o:?} is not ntsc-u, ntsc-j or pal").into());
         }
     };
     let mapper = match s("mapper").as_deref() {
@@ -329,7 +329,7 @@ pub fn build(
         Console::Ms | Console::GgMs => "sms",
     };
     let ports = relift_input::native_ports(platform)?;
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
     let doc = crate::info::sms_document(&p.title, platform, game_settings.clone(), &ports);
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;

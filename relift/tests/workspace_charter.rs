@@ -199,7 +199,7 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-manifest",
-        why: "game.toml types; the guest owns its own section",
+        why: "relift.toml types; the guest owns its own section",
         normal: &["relift-guest"],
         dev: NONE,
         build: NONE,
@@ -702,6 +702,7 @@ const CHARTERS: &[Charter] = &[
             "relift-switch-names",
             "relift-switch-shaders",
             "relift-testguest",
+            "serde",
             "serde_json",
             "sha2",
             "toml",

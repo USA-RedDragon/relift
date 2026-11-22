@@ -1059,6 +1059,7 @@ dependencies = [
  "relift-switch-names",
  "relift-switch-shaders",
  "relift-testguest",
+ "serde",
  "serde_json",
  "sha2 0.11.1",
  "toml",

@@ -26,7 +26,7 @@ zig cc -target aarch64-linux-musl -static -O2 -o hello hello.c
 
 ## Import it
 
-Run `relift` in an empty project folder. `import` reads the executable and writes a `game.toml` for the project:
+Run `relift` in an empty project folder. `import` reads the executable and writes a `relift.toml` for the project:
 
 ```sh
 mkdir hello-demo && cd hello-demo
@@ -34,10 +34,10 @@ relift import ../hello
 ```
 
 ```text
-imported hello (1411592 bytes, aarch64 Linux), into ~/.cache/relift/projects/hello-demo/import; wrote game.toml, 0.0 s
+imported hello (1411592 bytes, aarch64 Linux), into ~/.cache/relift/projects/hello-demo/import; wrote relift.toml, 0.0 s
 ```
 
-The program that `relift build` makes is named after the project: the `name` in the `[game]` table of `game.toml` when it has one, otherwise the name of the project folder, cut down to lowercase letters, digits and dashes. Here that is `hello-demo`. Add `name = "Hello Demo"` under `[game]` to choose another; the file becomes `hello-demo`, and the title people see (an app label, a window title) stays what the program says it is.
+The program that `relift build` makes is named after the project: the `name` in the `[game]` table of `relift.toml` when it has one, otherwise the name of the project folder, cut down to lowercase letters, digits and dashes. Here that is `hello-demo`. Add `name = "Hello Demo"` under `[game]` to choose another; the file becomes `hello-demo`, and the title people see (an app label, a window title) stays what the program says it is.
 
 ## Build and run
 

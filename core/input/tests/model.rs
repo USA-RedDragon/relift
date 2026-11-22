@@ -165,12 +165,12 @@ fn bad_declarations_are_refused() {
     for c in cases {
         assert!(
             set.clone()
-                .extend_from_toml("game.toml", Origin::Game, c)
+                .extend_from_toml("relift.toml", Origin::Game, c)
                 .is_err(),
             "{c}"
         );
     }
-    set.extend_from_toml("game.toml", Origin::Game, "[game]\nx = 1\n")
+    set.extend_from_toml("relift.toml", Origin::Game, "[game]\nx = 1\n")
         .unwrap();
     assert_eq!(set, pad());
 }
@@ -188,7 +188,7 @@ fn the_self_description_lists_ports_and_marks_extras() {
     assert_eq!(i.ports[0].controls[0].defaults, ["gamepad:east", "key:x"]);
     assert_eq!(i.ports[0].controls[2].kind, "axis");
     set.extend_from_toml(
-        "game.toml",
+        "relift.toml",
         Origin::Game,
         "[input.port.p2]\nkind = \"GBA pad\"\n[input.port.p2.control.go]\n",
     )
@@ -215,7 +215,7 @@ fn extras_hold_only_what_was_added() {
     let mut set = pad();
     assert!(set.extras().is_empty());
     set.extend_from_toml(
-        "game.toml",
+        "relift.toml",
         Origin::Game,
         "[input.port.p1.control.turbo]\n[input.port.dial]\nkind = \"Dial\"\n",
     )

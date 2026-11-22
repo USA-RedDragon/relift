@@ -90,7 +90,7 @@ fn import_prints_one_plain_line_per_stage_when_not_a_terminal() {
     assert!(!err.contains('\x1b') && !err.contains('\r'), "{err:?}");
     let want = "relift import: ../dump\n\
         \x20 exefs extract  2 files, 524 bytes  <time>\n\
-        imported title 0100000000001234 v0, 1 module, 0 romfs files, 0 DLC, 4 files written into <root>/cache/projects/tiny/import; wrote game.toml, <time>\n";
+        imported title 0100000000001234 v0, 1 module, 0 romfs files, 0 DLC, 4 files written into <root>/cache/projects/tiny/import; wrote relift.toml, <time>\n";
     let got = mask(&err, &root);
     assert!(got.starts_with("relift import: ../dump\n  exefs"), "{got}");
     assert_eq!(got, want);
@@ -237,7 +237,7 @@ fn a_failed_build_still_prints_the_error_in_one_place() {
     let out = run(&project, &[], &["--cache-dir", &cache, "build"]);
     assert!(!out.status.success());
     let err = stderr(&out);
-    assert!(err.starts_with("relift build: game.toml"), "{err}");
+    assert!(err.starts_with("relift build: relift.toml"), "{err}");
 }
 
 #[test]

@@ -2,7 +2,7 @@
  * @file override.h
  * @brief The header an override includes: settings reads and port input.
  *
- * A game declares its settings in game.toml (`[settings.<key>]`). An
+ * A game declares its settings in relift.toml (`[settings.<key>]`). An
  * override reads them with the functions below and a string literal key.
  * `relift build` scans the override sources and fails the build when a key
  * is not declared, or is read as another type than it was declared with, so

@@ -2,7 +2,7 @@
 //! computed pointer that discovery cannot see. Without the cold copy
 //! (`emit.cold` off), a shipped build (`relift build`) stops at the miss
 //! with exit status 70; `relift run` hot-loads the function, runs to the
-//! right output and records the address in `game.toml`; the next `relift
+//! right output and records the address in `relift.toml`; the next `relift
 //! build` lifts it and runs with no miss. With the cold copy the shipped
 //! build runs the function from it, and `relift run` logs the first entry.
 //! Skipped with a note when neither clang nor zig is on `PATH`.
@@ -140,12 +140,14 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
         "{text}"
     );
     assert!(
-        text.contains("added main+0x40 to the hints in game.toml; the next relift build lifts it"),
+        text.contains(
+            "added main+0x40 to the hints in relift.toml; the next relift build lifts it"
+        ),
         "{text}"
     );
-    let toml = std::fs::read_to_string(project.join("game.toml")).unwrap();
+    let toml = std::fs::read_to_string(project.join("relift.toml")).unwrap();
     assert!(toml.contains("\"main+0x40\""), "{toml}");
-    relift_cache::write_if_changed(&project.join("game.toml"), hints_free(&toml).as_bytes())
+    relift_cache::write_if_changed(&project.join("relift.toml"), hints_free(&toml).as_bytes())
         .unwrap();
 
     let out = r(&["run"]);
@@ -157,7 +159,7 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
         1,
         "{stderr}"
     );
-    let toml = std::fs::read_to_string(project.join("game.toml")).unwrap();
+    let toml = std::fs::read_to_string(project.join("relift.toml")).unwrap();
     assert!(toml.contains("\"main+0x40\""), "{toml}");
 
     let dev = program(&root, true);

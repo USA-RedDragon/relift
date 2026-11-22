@@ -1,6 +1,6 @@
 [package]
 name = "relift-input"
-description = "The input model: ports, controls, `bind.<port>.<control>` bindings, extra ports from `game.toml` or a mod, the self-description `input` section and the C port declarations"
+description = "The input model: ports, controls, `bind.<port>.<control>` bindings, extra ports from `relift.toml` or a mod, the self-description `input` section and the C port declarations"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

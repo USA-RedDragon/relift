@@ -1,5 +1,5 @@
 //! Code mods on disk: the Atmosphere and Ryujinx layouts a user mod is read
-//! from, and the bundled mods `game.toml` declares.
+//! from, and the bundled mods `relift.toml` declares.
 
 use std::path::{Path, PathBuf};
 

@@ -2,7 +2,7 @@
 //! `relift build` of a native program from it, and `relift run`.
 //!
 //! The import copies the image into the project's import directory and
-//! writes `game.toml` with `guest = "nds"` and an `[nds]` section. The build
+//! writes `relift.toml` with `guest = "nds"` and an `[nds]` section. The build
 //! reads the units of both processors and finds their code
 //! (`relift-nds-analyze`), lifts each unit into a C unit of its own
 //! (`relift-nds`), and links them with the runtime's core, ARM32 and NDS
@@ -81,10 +81,10 @@ pub fn is_rom_image(rom: &[u8], named: bool) -> bool {
     })
 }
 
-/// Whether the project's `game.toml` names the Nintendo DS guest.
+/// Whether the project's `relift.toml` names the Nintendo DS guest.
 #[must_use]
 pub fn is_project() -> bool {
-    std::fs::read_to_string("game.toml")
+    std::fs::read_to_string("relift.toml")
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| {
@@ -106,7 +106,7 @@ fn quote(s: &str) -> String {
 /// # Errors
 ///
 /// The image cannot be read or its header does not decode, or the import
-/// directory or `game.toml` cannot be written.
+/// directory or `relift.toml` cannot be written.
 pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxError> {
     let rom = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let h =
@@ -117,22 +117,22 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
     let source = crate::paths::canonical(path)?;
     let sha = relift_nds_formats::checksum::hex(&relift_nds_formats::checksum::sha256(&rom));
     let text = format!(
-        "# game.toml, written by relift import.\n\n[game]\nguest = \"nds\"\ntitle = {}\ngame_code = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n\n# The run: ticks of the 67 MHz ARM9 clock after which the program stops\n# with a report (0: never), and ARM9 words it prints at the end.\n[nds]\nmax_ticks = 0\npeek = []\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"nds\"\ntitle = {}\ngame_code = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n\n# The run: ticks of the 67 MHz ARM9 clock after which the program stops\n# with a report (0: never), and ARM9 words it prints at the end.\n[nds]\nmax_ticks = 0\npeek = []\n",
         quote(&h.title),
         quote(&h.game_code),
         h.version,
         quote(&out.display().to_string()),
         quote(&source.display().to_string()),
     );
-    let manifest = Path::new("game.toml");
-    let wrote = !manifest.exists() && relift_cache::write_if_changed(manifest, text.as_bytes())?;
+    let manifest = Path::new("relift.toml");
+    let wrote = crate::projectfile::write_stub(manifest, &text)?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " {} ({}, {} bytes, Nintendo DS), into {}{}, {}",
         h.title,
         h.game_code,
         rom.len(),
         out.display(),
-        if wrote { "; wrote game.toml" } else { "" },
+        if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
@@ -146,11 +146,11 @@ struct Project {
 }
 
 fn project() -> Result<Project, BoxError> {
-    let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
-    let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
-    let g = t.get("game").ok_or("game.toml has no [game]")?;
+    let text = std::fs::read_to_string("relift.toml").map_err(|e| format!("relift.toml: {e}"))?;
+    let t: toml::Table = text.parse().map_err(|e| format!("relift.toml: {e}"))?;
+    let g = t.get("game").ok_or("relift.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
-    let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = PathBuf::from(s("import_dir").ok_or("relift.toml has no game.import_dir")?);
     let path = dir.join(ROM_FILE);
     let rom = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
@@ -348,7 +348,7 @@ pub fn build(
         relift_cache::write_if_changed(&path, text.as_bytes())?;
         prog.push(path);
     }
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
     let mut ports = relift_input::native_ports("nds")?;
     if cross.is_some()
         && let Some(t) = relift_input::touchpad_port("nds")

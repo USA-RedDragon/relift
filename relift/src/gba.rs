@@ -2,7 +2,7 @@
 //! build` of a native program from it, and `relift run`.
 //!
 //! The import copies the ROM into the project's import directory and writes
-//! `game.toml` with `guest = "gba"`. The build finds the code
+//! `relift.toml` with `guest = "gba"`. The build finds the code
 //! (`relift-gba-analyze`), lifts it into one unit (`relift-gba`), and links
 //! it with the runtime's core, ARMv4T and GBA layers, for this host or for
 //! another target (`relift build --target`), where it enters from the app
@@ -86,10 +86,10 @@ pub fn rom_hints(
         .collect()
 }
 
-/// Whether the project's `game.toml` names the Game Boy Advance guest.
+/// Whether the project's `relift.toml` names the Game Boy Advance guest.
 #[must_use]
 pub fn is_project() -> bool {
-    std::fs::read_to_string("game.toml")
+    std::fs::read_to_string("relift.toml")
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| {
@@ -117,7 +117,7 @@ fn quote(s: &str) -> String {
 /// # Errors
 ///
 /// The ROM cannot be read or its header does not decode, or the import
-/// directory or `game.toml` cannot be written.
+/// directory or `relift.toml` cannot be written.
 pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxError> {
     let rom = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let h =
@@ -128,33 +128,33 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
     let source = crate::paths::canonical(path)?;
     let sha = relift_gba_formats::checksum::hex(&relift_switch_formats::sha256(&rom));
     let text = format!(
-        "# game.toml, written by relift import.\n\n[game]\nguest = \"gba\"\ntitle = {}\ngame_code = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"gba\"\ntitle = {}\ngame_code = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n",
         quote(&h.title),
         quote(&h.game_code),
         h.version,
         quote(&out.display().to_string()),
         quote(&source.display().to_string()),
     );
-    let manifest = Path::new("game.toml");
-    let wrote = !manifest.exists() && relift_cache::write_if_changed(manifest, text.as_bytes())?;
+    let manifest = Path::new("relift.toml");
+    let wrote = crate::projectfile::write_stub(manifest, &text)?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " {} ({}, {} bytes, Game Boy Advance), into {}{}, {}",
         h.title,
         h.game_code,
         rom.len(),
         out.display(),
-        if wrote { "; wrote game.toml" } else { "" },
+        if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
 }
 
 fn project_rom() -> Result<(Vec<u8>, String, String), BoxError> {
-    let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
-    let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
-    let g = t.get("game").ok_or("game.toml has no [game]")?;
+    let text = std::fs::read_to_string("relift.toml").map_err(|e| format!("relift.toml: {e}"))?;
+    let t: toml::Table = text.parse().map_err(|e| format!("relift.toml: {e}"))?;
+    let g = t.get("game").ok_or("relift.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
-    let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = PathBuf::from(s("import_dir").ok_or("relift.toml has no game.import_dir")?);
     let path = dir.join(ROM_FILE);
     let rom = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
@@ -215,7 +215,7 @@ pub fn build(
     ));
     let row = ui.row("rom");
     ui.begin(row, "analyze");
-    let hints = rom_hints(&crate::hints::read(Path::new("game.toml"))?);
+    let hints = rom_hints(&crate::hints::read(Path::new("relift.toml"))?);
     let report =
         relift_gba_analyze::analyze_with(&rom, &hints).map_err(|e| format!("analyze: {e}"))?;
     ui.done(
@@ -319,7 +319,7 @@ pub fn build(
     {
         ports.add_port(t)?;
     }
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
     let doc = crate::info::handheld_document(
         &title,
         &rom,

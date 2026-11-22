@@ -31,7 +31,7 @@ pub enum Console {
 }
 
 impl Console {
-    /// The name `game.toml` uses: `switch` or `switch2`.
+    /// The name `relift.toml` uses: `switch` or `switch2`.
     pub fn name(self) -> &'static str {
         match self {
             Console::Switch => "switch",

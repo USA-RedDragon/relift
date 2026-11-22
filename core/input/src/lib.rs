@@ -2,7 +2,7 @@
 //! host inputs to those controls, and the two renderings a build needs (the
 //! `input` section of the self-description and the C declarations the runtime
 //! reads). The model knows no platform: a guest crate supplies its native
-//! ports, and `game.toml` or a mod adds extra ports and controls.
+//! ports, and `relift.toml` or a mod adds extra ports and controls.
 
 mod bind;
 mod cdecl;

@@ -13,6 +13,7 @@ band = "3"
 [dependencies]
 clap = { workspace = true }
 configulator-rs = { workspace = true }
+serde = { workspace = true }
 toml = { workspace = true }
 sha2 = { workspace = true }
 jpeg-decoder = { workspace = true }

@@ -1,6 +1,6 @@
 //! The picture settings of a Nintendo 64 program (`n64.picture.*`, declared
 //! by `runtime/guests/n64/picture.c`) and the developer's defaults for them
-//! in `game.toml`. The declared defaults are the console's picture; the
+//! in `relift.toml`. The declared defaults are the console's picture; the
 //! developer picks another as the program's default, and a run can still
 //! override every key.
 //!
@@ -179,19 +179,19 @@ fn value_text(s: &Setting, v: &toml::Value) -> Result<String, String> {
 /// The text is not TOML, or the table names an unknown key or a value that
 /// does not fit its setting.
 pub fn defaults(game_toml: &str) -> Result<Vec<String>, BoxError> {
-    let doc: toml::Table = game_toml.parse().map_err(|e| format!("game.toml: {e}"))?;
+    let doc: toml::Table = game_toml.parse().map_err(|e| format!("relift.toml: {e}"))?;
     let Some(table) = doc.get("n64").and_then(|n| n.get("picture")) else {
         return Ok(Vec::new());
     };
     let toml::Value::Table(table) = table else {
-        return Err("game.toml: n64.picture must be a table".into());
+        return Err("relift.toml: n64.picture must be a table".into());
     };
     let all = settings();
     for k in table.keys() {
         if !all.iter().any(|s| s.key[PREFIX.len()..] == *k) {
             let names: Vec<&str> = all.iter().map(|s| &s.key[PREFIX.len()..]).collect();
             return Err(format!(
-                "game.toml: n64.picture.{k} is not a picture setting ({})",
+                "relift.toml: n64.picture.{k} is not a picture setting ({})",
                 names.join(", ")
             )
             .into());
@@ -202,7 +202,7 @@ pub fn defaults(game_toml: &str) -> Result<Vec<String>, BoxError> {
         let name = &s.key[PREFIX.len()..];
         if let Some(v) = table.get(name) {
             let text = value_text(s, v)
-                .map_err(|want| format!("game.toml: n64.picture.{name} must be {want}"))?;
+                .map_err(|want| format!("relift.toml: n64.picture.{name} must be {want}"))?;
             out.push(format!("{name}={text}"));
         }
     }

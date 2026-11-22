@@ -191,7 +191,7 @@ pub enum Command {
     /// Prints the transfer site and target with the guest instructions
     /// around them, the site's lifted function and its C at the site, and
     /// what the build knew about the target. Run in the project directory
-    /// to read its build and add the root (a hint in game.toml for a Switch
+    /// to read its build and add the root (a hint in relift.toml for a Switch
     /// project, the learned file for a Game Boy one).
     Report {
         /// The report file (`relift-stop-*.txt`).

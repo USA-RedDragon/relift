@@ -17,7 +17,7 @@ pub enum Error {
     BadKind(String),
     /// A host input does not parse.
     BadInput { text: String, why: String },
-    /// A `game.toml` or mod declaration is malformed.
+    /// A `relift.toml` or mod declaration is malformed.
     BadDeclaration { source: String, why: String },
 }
 

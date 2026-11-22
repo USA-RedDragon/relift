@@ -1,4 +1,4 @@
-//! The game's own settings: the `[settings.<key>]` tables of `game.toml`,
+//! The game's own settings: the `[settings.<key>]` tables of `relift.toml`,
 //! the C that declares them to the runtime, and the build-time check that
 //! every `relift_setting_*` read in an override names a declared key of the
 //! matching type (design 006).
@@ -607,18 +607,18 @@ fn setting(key: &str, t: &toml::Table) -> Result<Setting, BoxError> {
     })
 }
 
-/// The settings of a game.toml text, in key order.
+/// The settings of a relift.toml text, in key order.
 ///
 /// # Errors
 ///
 /// The text is not TOML, or a `[settings.<key>]` table is malformed.
 pub fn parse(game_toml: &str) -> Result<Vec<Setting>, BoxError> {
-    let doc: toml::Table = game_toml.parse().map_err(|e| format!("game.toml: {e}"))?;
+    let doc: toml::Table = game_toml.parse().map_err(|e| format!("relift.toml: {e}"))?;
     let Some(settings) = doc.get("settings") else {
         return Ok(Vec::new());
     };
     let toml::Value::Table(settings) = settings else {
-        return Err("game.toml: settings must be a table of settings".into());
+        return Err("relift.toml: settings must be a table of settings".into());
     };
     settings
         .iter()
@@ -629,7 +629,7 @@ pub fn parse(game_toml: &str) -> Result<Vec<Setting>, BoxError> {
         .collect()
 }
 
-/// The settings of the game.toml at `path`; none when the file is absent.
+/// The settings of the relift.toml at `path`; none when the file is absent.
 ///
 /// # Errors
 ///
@@ -870,12 +870,12 @@ pub fn check_source(file: &str, source: &str, settings: &[Setting]) -> Vec<Strin
                     .filter(|k| distance(k, key) <= 2);
                 let hint = near.map_or(String::new(), |k| format!("; did you mean {k:?}?"));
                 errors.push(format!(
-                    "{file}:{}: {} reads {key:?}, which game.toml does not declare{hint}",
+                    "{file}:{}: {} reads {key:?}, which relift.toml does not declare{hint}",
                     r.line, r.func
                 ));
             }
             Some(s) if type_name(&s.kind) != want => errors.push(format!(
-                "{file}:{}: {} reads {key:?}, which game.toml declares as {}",
+                "{file}:{}: {} reads {key:?}, which relift.toml declares as {}",
                 r.line,
                 r.func,
                 type_name(&s.kind)

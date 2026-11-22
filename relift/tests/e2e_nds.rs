@@ -220,11 +220,11 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     assert!(stderr.contains("Nintendo DS"), "{stderr}");
-    let manifest = project.join("game.toml");
-    let text = std::fs::read_to_string(&manifest).expect("game.toml");
+    let manifest = project.join("relift.toml");
+    let text = std::fs::read_to_string(&manifest).expect("relift.toml");
     assert!(text.contains("guest = \"nds\""), "{text}");
     let text = text.replace("peek = []", "peek = [0x02100000, 0x02100004, 0x02100008]");
-    relift_cache::write_if_changed(&manifest, text.as_bytes()).expect("game.toml is writable");
+    relift_cache::write_if_changed(&manifest, text.as_bytes()).expect("relift.toml is writable");
     let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");

@@ -1,5 +1,5 @@
 //! `relift coverage` on the tiny program: the text and JSON reports, and
-//! the hints of `game.toml`.
+//! the hints of `relift.toml`.
 
 mod tiny;
 
@@ -93,7 +93,7 @@ fn hints_are_listed_with_whether_they_are_lifted() {
         module: "main".into(),
         offset,
     });
-    relift::hints::add(&project.join("game.toml"), &hints).expect("the hints are written");
+    relift::hints::add(&project.join("relift.toml"), &hints).expect("the hints are written");
     let j = report(&project, &cache);
     let m = &j["modules"][0];
     let base = m["base"].as_u64().expect("the base is a number");

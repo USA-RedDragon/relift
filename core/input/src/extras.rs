@@ -50,7 +50,7 @@ fn read_control(
 }
 
 impl PortSet {
-    /// Applies the `[input.port.<id>]` tables of a `game.toml` or a mod
+    /// Applies the `[input.port.<id>]` tables of a `relift.toml` or a mod
     /// manifest. A table for a new port needs a `kind`; a table for an
     /// existing port may only add controls. `source` names the file in errors.
     pub fn extend_from_toml(

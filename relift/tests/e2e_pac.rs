@@ -39,10 +39,10 @@ fn build(name: &str, leaf: bool, corrupt: bool, svcs: &[u32], console: Option<&s
         String::from_utf8_lossy(&out.stderr)
     );
     if let Some(c) = console {
-        let path = project.join("game.toml");
-        let text = std::fs::read_to_string(&path).expect("game.toml reads");
+        let path = project.join("relift.toml");
+        let text = std::fs::read_to_string(&path).expect("relift.toml reads");
         let text = text.replacen("[game]\n", &format!("[game]\nconsole = \"{c}\"\n"), 1);
-        relift_cache::write_if_changed(&path, text.as_bytes()).expect("game.toml writes");
+        relift_cache::write_if_changed(&path, text.as_bytes()).expect("relift.toml writes");
     }
     let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
     assert!(

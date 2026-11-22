@@ -5,7 +5,7 @@ come from. The settings named here (`package.*`, `toolchain.*`) are listed in
 [Settings](../reference/configuration.md).
 
 Every output is named after the project: the `name` in the `[game]` table of
-`game.toml`, else the name of the project folder, cut down to lowercase ASCII
+`relift.toml`, else the name of the project folder, cut down to lowercase ASCII
 letters, digits and dashes (`Example Project 2` becomes `example-project-2`).
 The same file name is used on every host: the program (`example-project-2`, or
 `example-project-2.exe` on Windows), the dev build in `dev/`, the app bundle,

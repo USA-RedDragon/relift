@@ -119,11 +119,11 @@ fn prune(root: &Path) {
 }
 
 /// What decides that two projects can share a build directory: the project
-/// name, the kind of input it was imported from (the guest in `game.toml`,
+/// name, the kind of input it was imported from (the guest in `relift.toml`,
 /// else the files in its `import` directory) and the settings given on the
 /// command line.
 fn key(dir: &Path, project: &Path, name: &str, args: &[&str]) -> String {
-    let guest = fs::read_to_string(dir.join("game.toml"))
+    let guest = fs::read_to_string(dir.join("relift.toml"))
         .ok()
         .and_then(|t| {
             t.lines()

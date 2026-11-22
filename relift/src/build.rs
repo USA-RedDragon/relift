@@ -45,14 +45,14 @@ fn read_toml(path: &Path) -> Result<toml::Table, BoxError> {
         .map_err(|e| format!("{}: {e}", path.display()).into())
 }
 
-/// The import directory game.toml in the working directory names.
+/// The import directory relift.toml in the working directory names.
 pub(crate) fn import_dir(settings: &Settings) -> Result<PathBuf, BoxError> {
-    let game = read_toml(Path::new("game.toml"))?;
+    let game = read_toml(Path::new("relift.toml"))?;
     let dir = game
         .get("game")
         .and_then(|g| g.get("import_dir"))
         .and_then(|d| d.as_str())
-        .ok_or("game.toml has no game.import_dir; run relift import first")?;
+        .ok_or("relift.toml has no game.import_dir; run relift import first")?;
     let dir = Path::new(dir);
     if dir.is_absolute() {
         Ok(dir.to_path_buf())
@@ -127,19 +127,19 @@ fn game_console(game: &toml::Table) -> Result<Option<relift_switch::cpu::Console
         Some(v) => {
             let name = v.as_str().unwrap_or_default();
             Some(relift_switch::cpu::Console::from_name(name).ok_or_else(|| {
-                format!("game.toml: game.console is {v}, not \"switch\" or \"switch2\"")
+                format!("relift.toml: game.console is {v}, not \"switch\" or \"switch2\"")
             })?)
         }
     })
 }
 
 /// The CPU of the project's program ([`program_cpu`]), from the import
-/// `game.toml` in the working directory names.
+/// `relift.toml` in the working directory names.
 pub(crate) fn project_cpu(settings: &Settings) -> Result<Cpu, BoxError> {
     let import = import_dir(settings)?;
     program_cpu(
         read_npdm(&import).as_ref(),
-        &read_toml(Path::new("game.toml"))?,
+        &read_toml(Path::new("relift.toml"))?,
     )
 }
 
@@ -1443,7 +1443,7 @@ fn lift_and_emit(
     if let Some(n) = closed {
         ui.note(&Line::new().text(n));
     }
-    let game = read_toml(Path::new("game.toml"))?;
+    let game = read_toml(Path::new("relift.toml"))?;
     let target_cpu = program_cpu(npdm.as_ref(), &game)?;
     let title_id = npdm
         .as_ref()
@@ -1469,8 +1469,8 @@ fn lift_and_emit(
         std::env::consts::ARCH
     ));
     let cdir = out.join("c");
-    let hints = crate::hints::read(Path::new("game.toml"))?;
-    let mut game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let hints = crate::hints::read(Path::new("relift.toml"))?;
+    let mut game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
     game_settings.extend(stage.settings());
     crate::game_settings::check_dir(Path::new("overrides"), &game_settings)?;
     let emitted = emit_modules(settings, target_cpu, &placed, &cdir, ui, &hints, &mut stage)?;
@@ -1509,8 +1509,8 @@ fn lift_and_emit(
     }
     let fpcr_const = emitted.fpcr.constant;
     let mut prog = Vec::new();
-    let game = read_toml(Path::new("game.toml"))?;
-    let mut ports = game_ports(Path::new("game.toml"))?;
+    let game = read_toml(Path::new("relift.toml"))?;
+    let mut ports = game_ports(Path::new("relift.toml"))?;
     if touchpad && let Some(t) = relift_input::touchpad_port("switch") {
         ports.add_port(t)?;
     }
@@ -1541,7 +1541,7 @@ fn lift_and_emit(
     )?;
     prog.push(settings_c);
     let ports_c = cdir.join("game_ports.c");
-    relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("game.toml"))?.as_bytes())?;
+    relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("relift.toml"))?.as_bytes())?;
     prog.push(ports_c);
     let console = program_console(npdm.as_ref(), &game)?;
     if placed.iter().any(|m| uses_shared_fonts(&m.nso)) {
@@ -1640,9 +1640,9 @@ fn lift_and_emit(
 /// arguments, [`EMIT_RECORD`] set), so the memory they use is gone before
 /// the compilers start, and reads back what it emitted.
 fn lift_in_child(out: &Path) -> Result<EmitRecord, BoxError> {
-    if !Path::new("game.toml").is_file() {
+    if !Path::new("relift.toml").is_file() {
         return Err(
-            "game.toml: not found in this folder; run `relift import <dump>` here first, or change to the project folder"
+            "relift.toml: not found in this folder; run `relift import <dump>` here first, or change to the project folder"
                 .into(),
         );
     }
@@ -2236,7 +2236,7 @@ pub fn run_info(settings: &Settings, binary: Option<&Path>) -> Result<(), BoxErr
 ///
 /// # Errors
 ///
-/// No game.toml or import, a module that does not parse, or a failed
+/// No relift.toml or import, a module that does not parse, or a failed
 /// compile or link.
 pub fn run_build(
     settings: &Settings,
@@ -2537,7 +2537,7 @@ pub fn run_run(
         abi,
         built.toolchain.clone(),
         hot,
-        crate::paths::canonical("game.toml")?,
+        crate::paths::canonical("relift.toml")?,
     );
     server.trampoline = settings.emit.trampoline;
     let sock = crate::dev::socket_path(&built.out);
@@ -2589,7 +2589,7 @@ pub fn run_run(
     let status = status?;
     if !loads.is_empty() {
         ui.summary(&Line::new().text(format!(
-            "hot-loaded {}; added to the hints in game.toml, so the next relift build lifts them",
+            "hot-loaded {}; added to the hints in relift.toml, so the next relift build lifts them",
             noun(loads.len() as u64, "target")
         )));
     }
@@ -2597,11 +2597,11 @@ pub fn run_run(
 }
 
 /// The C that declares the extra input ports of a game to the runtime: the
-/// `[input.port.*]` tables of `game.toml` on top of the Switch's native ports.
+/// `[input.port.*]` tables of `relift.toml` on top of the Switch's native ports.
 fn game_ports(game_toml: &Path) -> Result<relift_input::PortSet, BoxError> {
     let mut set = relift_input::native_ports("switch")?;
     match std::fs::read_to_string(game_toml) {
-        Ok(text) => set.extend_from_toml("game.toml", relift_input::Origin::Game, &text)?,
+        Ok(text) => set.extend_from_toml("relift.toml", relift_input::Origin::Game, &text)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("{}: {e}", game_toml.display()).into()),
     }
@@ -2618,7 +2618,7 @@ mod ports_tests {
 
     #[test]
     fn a_missing_game_toml_declares_no_extras() {
-        let c = game_ports_c(std::path::Path::new("/nonexistent/game.toml")).unwrap();
+        let c = game_ports_c(std::path::Path::new("/nonexistent/relift.toml")).unwrap();
         assert!(c.contains("rl_game_ports_count = 0;"));
     }
 
@@ -2626,7 +2626,7 @@ mod ports_tests {
     fn game_toml_extras_reach_the_c() {
         let dir = std::env::temp_dir().join(format!("relift-ports-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("game.toml");
+        let path = dir.join("relift.toml");
         relift_cache::write_if_changed(
             &path,
             b"[input.port.dial]\nkind = \"Dial\"\n[input.port.dial.control.turn]\nkind = \"axis\"\n[input.port.p2.control.turbo]\n",

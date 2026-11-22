@@ -2,7 +2,13 @@
 
 relift reads its own settings from `relift.toml` in the working directory (or
 the file given with `-c`), then `RELIFT_*` environment variables, then flags.
-Per-game data lives in each game project's `game.toml`, not here.
+The project folder has one `relift.toml` for both: the keys below go at the top
+level and in the `[toolchain]`, `[emit]` and `[package]` tables, and the
+project's own data goes in the tables `[game]`, `[hints]`, `[settings.<key>]`,
+`[input]`, `[mods]`, `[n64]` and `[nds]`, which `relift import` and `relift run` write and
+which this page does not list. The settings loader skips those tables, so a
+mistyped setting is still an error. A project folder from an earlier relift has
+a `game.toml`; relift stops and says to move its tables into `relift.toml`.
 `relift.example.toml` lists every key. The table below is generated from the
 settings struct (`relift/src/settings.rs`) by docgen; CI fails when it is
 stale. The built program's own run-time settings and environment

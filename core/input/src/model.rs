@@ -14,7 +14,7 @@ pub enum ControlKind {
 }
 
 impl ControlKind {
-    /// The name used in `game.toml` and the self-description.
+    /// The name used in `relift.toml` and the self-description.
     pub fn as_str(self) -> &'static str {
         match self {
             ControlKind::Button => "button",
@@ -48,7 +48,7 @@ impl ControlKind {
 pub enum Origin {
     /// The platform.
     Native,
-    /// The game repo's `game.toml`.
+    /// The game repo's `relift.toml`.
     Game,
     /// A mod, by name.
     Mod(String),

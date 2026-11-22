@@ -9,7 +9,7 @@
  * and are skipped; they never stop a run.
  *
  * The runtime declares its own keys, a guest layer declares the keys of its
- * host services, and a game declares its own from game.toml. The same
+ * host services, and a game declares its own from relift.toml. The same
  * validation applies to every layer.
  */
 #ifndef RELIFT_SETTINGS_H

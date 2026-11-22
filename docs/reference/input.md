@@ -101,7 +101,7 @@ input is held hardest.
 
 ## Extra ports and controls
 
-`game.toml` or a mod adds ports or controls:
+`relift.toml` or a mod adds ports or controls:
 
 ```toml
 [input.port.dial]

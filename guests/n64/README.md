@@ -42,7 +42,7 @@ checks as that variant, for images with a custom boot code.
 ## Running a ROM
 
 ```sh
-relift import rom.z64        # writes game.toml with guest = "n64"
+relift import rom.z64        # writes relift.toml with guest = "n64"
 relift build                 # analysis, lift, C, the runtime's N64 layers
 relift run
 game --headless --frames 60 --png out.png --stats

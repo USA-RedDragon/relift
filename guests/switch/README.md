@@ -66,7 +66,7 @@ kernel capabilities grant SVC 0x80 is a Switch 2 program (Cortex-A78C, with
 pointer authentication), any other one a Switch program (Cortex-A57), and
 Switch programs a Switch 2 runs keep the Cortex-A57 they were compiled for.
 A program without an NPDM (homebrew) is a Switch program; `console =
-"switch2"` (or `"switch"`) in the `[game]` table of `game.toml` overrides the
+"switch2"` (or `"switch"`) in the `[game]` table of `relift.toml` overrides the
 choice.
 
 `relift build --mods <list>` builds code mods in: Atmosphere or Ryujinx mod

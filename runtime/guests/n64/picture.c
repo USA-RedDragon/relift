@@ -3,7 +3,7 @@
  * @brief The picture settings (n64.picture.*): how the renderer draws and
  * scans out, each one a parallel-rdp option. Their declared defaults are the
  * console's picture; a program replaces them with its developer's choices
- * (game.toml [n64.picture]) before declaring them, and a run overrides them
+ * (relift.toml [n64.picture]) before declaring them, and a run overrides them
  * like any setting. With n64.picture.mode at "console" every other key is
  * ignored and the picture is the console's.
  */

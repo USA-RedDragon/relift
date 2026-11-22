@@ -1,5 +1,5 @@
 //! The self-description of a build and `relift info`: the document of
-//! design 006 assembled from the import and `game.toml`, the C file that
+//! design 006 assembled from the import and `relift.toml`, the C file that
 //! embeds it, and the reader of a built binary.
 
 use std::collections::HashMap;
@@ -594,7 +594,7 @@ mod tests {
         let mut ports = relift_input::native_ports("gba").unwrap();
         ports
             .extend_from_toml(
-                "game.toml",
+                "relift.toml",
                 relift_input::Origin::Game,
                 "[input.port.dial]\nkind = \"Rotary dial\"\n[input.port.dial.control.turn]\nkind = \"axis\"\n",
             )

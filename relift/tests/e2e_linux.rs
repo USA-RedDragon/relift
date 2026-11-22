@@ -81,7 +81,7 @@ fn built(
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let toml = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
+    let toml = std::fs::read_to_string(project.join("relift.toml")).expect("relift.toml");
     assert!(toml.contains("guest = \"linux\""), "{toml}");
     let forced = if trampoline { "true" } else { "false" };
     let mut args = vec!["--cache-dir", cache, "-j", "4", "build"];
@@ -219,10 +219,10 @@ fn the_program_is_named_after_the_project() {
         exe("Nameless Folder").is_file(),
         "a nameless project takes its folder's name"
     );
-    let manifest = project.join("game.toml");
-    let text = std::fs::read_to_string(&manifest).expect("game.toml reads");
+    let manifest = project.join("relift.toml");
+    let text = std::fs::read_to_string(&manifest).expect("relift.toml reads");
     let text = text.replacen("[game]\n", "[game]\nname = \"Example Project 2\"\n", 1);
-    relift_cache::write_if_changed(&manifest, text.as_bytes()).expect("game.toml writes");
+    relift_cache::write_if_changed(&manifest, text.as_bytes()).expect("relift.toml writes");
     run(&["--cache-dir", &cache, "-j", "4", "build"]);
     let named = root
         .join("cache/projects/Nameless Folder/build/host")

@@ -120,7 +120,7 @@ fn build(
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let toml = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
+    let toml = std::fs::read_to_string(project.join("relift.toml")).expect("relift.toml");
     assert!(toml.contains("guest = \"n64\""), "{toml}");
     let out = tiny::relift_env(&project, &["--cache-dir", &cache, "-j", "4", "build"], env);
     let stderr = String::from_utf8_lossy(&out.stderr);

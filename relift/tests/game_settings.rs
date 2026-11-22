@@ -17,7 +17,7 @@ fn imported(name: &str) -> (std::path::PathBuf, std::path::PathBuf, String) {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let toml = project.join("game.toml");
+    let toml = project.join("relift.toml");
     let mut text = std::fs::read_to_string(&toml).unwrap();
     text.push_str(SETTINGS);
     relift_cache::write_if_changed(&toml, text.as_bytes()).unwrap();

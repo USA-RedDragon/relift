@@ -2,7 +2,7 @@
 //! ROM, `relift build` of a native program from it, and `relift run`.
 //!
 //! The import copies the ROM into the project's import directory and
-//! writes `game.toml` with `guest = "gb"` and where the ROM came from. The
+//! writes `relift.toml` with `guest = "gb"` and where the ROM came from. The
 //! build applies the ROM-hack patches given as mods, finds the functions
 //! with `relift-gb-analyze`, lifts them into one unit per bank
 //! (`relift-gb`), and links them with the runtime's core, SM83 and Game
@@ -58,10 +58,10 @@ pub fn is_rom(path: &Path) -> bool {
     named && rom.len() >= 0x150 || relift_gb_formats::Header::parse(&rom).is_ok_and(|h| h.logo_ok)
 }
 
-/// Whether the project's `game.toml` names the Game Boy guest.
+/// Whether the project's `relift.toml` names the Game Boy guest.
 #[must_use]
 pub fn is_project() -> bool {
-    std::fs::read_to_string("game.toml")
+    std::fs::read_to_string("relift.toml")
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| {
@@ -121,7 +121,7 @@ fn quote(s: &str) -> String {
 /// # Errors
 ///
 /// The ROM cannot be read or its header does not decode, or the import
-/// directory or `game.toml` cannot be written.
+/// directory or `relift.toml` cannot be written.
 pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxError> {
     let rom = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let h = relift_gb_formats::Header::parse(&rom);
@@ -140,15 +140,15 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         .map(|b| format!("{b:02x}"))
         .collect();
     let text = format!(
-        "# game.toml, written by relift import.\n\n[game]\nguest = \"gb\"\ntitle = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\nmodel = \"{}\"\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"gb\"\ntitle = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\nmodel = \"{}\"\n",
         quote(&title(&rom)),
         rom.get(0x14C).copied().unwrap_or(0),
         quote(&import_dir_value(settings, &out)?),
         quote(&source.display().to_string()),
         default_model(&rom)
     );
-    let manifest = Path::new("game.toml");
-    let wrote = !manifest.exists() && relift_cache::write_if_changed(manifest, text.as_bytes())?;
+    let manifest = Path::new("relift.toml");
+    let wrote = crate::projectfile::write_stub(manifest, &text)?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " {} ({}, {} bytes, {}), into {}{}, {}",
         title(&rom),
@@ -160,7 +160,7 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
             "Game Boy"
         },
         out.display(),
-        if wrote { "; wrote game.toml" } else { "" },
+        if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
@@ -174,11 +174,11 @@ struct Project {
 }
 
 fn project(settings: &Settings) -> Result<Project, BoxError> {
-    let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
-    let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
-    let g = t.get("game").ok_or("game.toml has no [game]")?;
+    let text = std::fs::read_to_string("relift.toml").map_err(|e| format!("relift.toml: {e}"))?;
+    let t: toml::Table = text.parse().map_err(|e| format!("relift.toml: {e}"))?;
+    let g = t.get("game").ok_or("relift.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
-    let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = PathBuf::from(s("import_dir").ok_or("relift.toml has no game.import_dir")?);
     let dir = if dir.is_absolute() {
         dir
     } else {
@@ -203,7 +203,7 @@ fn project(settings: &Settings) -> Result<Project, BoxError> {
 ///
 /// # Errors
 ///
-/// No `game.toml` or no import.
+/// No `relift.toml` or no import.
 pub fn learned_file(settings: &Settings) -> Result<PathBuf, BoxError> {
     Ok(project(settings)?.dir.join(LEARNED_FILE))
 }
@@ -552,7 +552,7 @@ pub fn build(
     {
         ports.add_port(t)?;
     }
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
     let mods_section = relift_info::Mods {
         code: hack
             .iter()

@@ -70,7 +70,7 @@ pub fn check(
             let name = || label(module, a.functions.get(&e), e);
             if let Some(b) = bundled.get(&e) {
                 return Err(format!(
-                    "{} patches {}, which the bundled mod {} also patches; a user mod cannot change a bundled mod's function (turn the bundled mod off in game.toml or drop the user mod)",
+                    "{} patches {}, which the bundled mod {} also patches; a user mod cannot change a bundled mod's function (turn the bundled mod off in relift.toml or drop the user mod)",
                     m.name,
                     name(),
                     b.join(" and ")

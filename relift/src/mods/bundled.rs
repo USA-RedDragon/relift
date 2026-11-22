@@ -1,4 +1,4 @@
-//! Bundled mods: code mods the game repo declares in `game.toml`, built
+//! Bundled mods: code mods the game repo declares in `relift.toml`, built
 //! into the binary and switched on or off at start.
 //!
 //! ```toml
@@ -72,7 +72,7 @@ fn strings(t: &toml::Table, k: &str, name: &str) -> Result<Vec<String>, BoxError
     }
 }
 
-/// Reads the bundled mods of `game` (the parsed `game.toml`), with patch
+/// Reads the bundled mods of `game` (the parsed `relift.toml`), with patch
 /// paths relative to `dir`.
 ///
 /// # Errors

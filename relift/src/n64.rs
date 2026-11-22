@@ -2,7 +2,7 @@
 //! build` of a native program from it, and `relift run`.
 //!
 //! The import normalizes the ROM to big-endian, copies it into the
-//! project's import directory and writes `game.toml` with `guest = "n64"`.
+//! project's import directory and writes `relift.toml` with `guest = "n64"`.
 //! The build finds the code (`relift-n64-analyze`), lifts each segment into
 //! one unit (`relift-n64`), and links them with the runtime's core, VR4300
 //! and N64 layers. The program binds each unit when it finds its bytes in
@@ -79,10 +79,10 @@ pub fn is_rom_image(rom: &[u8]) -> bool {
     Rom::new(rom).is_ok()
 }
 
-/// Whether the project's `game.toml` names the Nintendo 64 guest.
+/// Whether the project's `relift.toml` names the Nintendo 64 guest.
 #[must_use]
 pub fn is_project() -> bool {
-    std::fs::read_to_string("game.toml")
+    std::fs::read_to_string("relift.toml")
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| {
@@ -108,7 +108,7 @@ fn title_of(rom: &Rom) -> String {
 /// # Errors
 ///
 /// The ROM cannot be read or is no N64 image, or the import directory or
-/// `game.toml` cannot be written.
+/// `relift.toml` cannot be written.
 pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxError> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let rom = Rom::new(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -131,7 +131,7 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         .to_string();
     let cic = rom.cic().map_or("unknown", |c| c.name());
     let text = format!(
-        "# game.toml, written by relift import.\n\n[game]\nguest = \"n64\"\ntitle = {}\ngame_id = {}\nversion = {}\nboot = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"n64\"\ntitle = {}\ngame_id = {}\nversion = {}\nboot = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\n",
         quote(&title),
         quote(&game_id),
         h.version,
@@ -139,8 +139,8 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         quote(&out.display().to_string()),
         quote(&source.display().to_string()),
     );
-    let manifest = Path::new("game.toml");
-    let wrote = !manifest.exists() && relift_cache::write_if_changed(manifest, text.as_bytes())?;
+    let manifest = Path::new("relift.toml");
+    let wrote = crate::projectfile::write_stub(manifest, &text)?;
     let order = match rom.order {
         ByteOrder::Z64 => "big-endian",
         ByteOrder::V64 => "byte-swapped",
@@ -150,18 +150,18 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         " {title} ({game_id}, {} bytes {order}, boot {cic}, Nintendo 64), into {}{}, {}",
         rom.bytes.len(),
         out.display(),
-        if wrote { "; wrote game.toml" } else { "" },
+        if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
 }
 
 fn project_rom() -> Result<(Vec<u8>, String, String), BoxError> {
-    let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
-    let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
-    let g = t.get("game").ok_or("game.toml has no [game]")?;
+    let text = std::fs::read_to_string("relift.toml").map_err(|e| format!("relift.toml: {e}"))?;
+    let t: toml::Table = text.parse().map_err(|e| format!("relift.toml: {e}"))?;
+    let g = t.get("game").ok_or("relift.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
-    let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = PathBuf::from(s("import_dir").ok_or("relift.toml has no game.import_dir")?);
     let path = dir.join(ROM_FILE);
     let rom = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
@@ -329,9 +329,9 @@ pub fn build(
         project_title
     };
     let symbols: Vec<String> = lifted.units.iter().map(|u| u.symbol.clone()).collect();
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
     let picture = crate::n64_picture::defaults(
-        &std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?,
+        &std::fs::read_to_string("relift.toml").map_err(|e| format!("relift.toml: {e}"))?,
     )?;
     let rdp_variants = match std::fs::read_to_string(RDP_VARIANTS) {
         Ok(s) => s,

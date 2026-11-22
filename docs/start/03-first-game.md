@@ -4,7 +4,7 @@ This step, after [the first program](02-first-program.md), turns one dump into a
 
 ## Import the dump
 
-Run `relift` in an empty project folder. `import` reads the dump and writes a `game.toml` for the project:
+Run `relift` in an empty project folder. `import` reads the dump and writes a `relift.toml` for the project:
 
 ```sh
 mkdir mygame && cd mygame

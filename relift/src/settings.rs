@@ -1,7 +1,8 @@
 //! The tool's own settings, loaded by configulator-rs from defaults,
 //! `relift.toml`, `RELIFT_*` environment variables and global flags.
 //!
-//! Per-game data lives in `game.toml` (`relift-manifest`), never here. No key
+//! Per-game data lives in the project tables of the same file (see
+//! [`crate::projectfile`]), never here. No key
 //! may share a flag name with a subcommand flag, so `target` is never a key.
 
 use std::path::PathBuf;

@@ -2,7 +2,7 @@
 //! executable, `relift build` of a native program from it, and `relift run`.
 //!
 //! The import copies the executable into the project's import directory and
-//! writes `game.toml` with `guest = "linux"`. A dynamically linked program
+//! writes `relift.toml` with `guest = "linux"`. A dynamically linked program
 //! also brings its program interpreter and every library of its `DT_NEEDED`
 //! closure, found in the sysroot the user names (`--sysroot`) the way the
 //! interpreter searches, copied into the import directory and listed in
@@ -74,7 +74,7 @@ pub fn is_executable(path: &Path) -> bool {
     })
 }
 
-/// Whether the project's `game.toml` names this guest.
+/// Whether the project's `relift.toml` names this guest.
 #[must_use]
 pub fn is_project() -> bool {
     project_table()
@@ -87,7 +87,7 @@ pub fn is_project() -> bool {
 }
 
 fn project_table() -> Option<toml::Table> {
-    let t: toml::Table = std::fs::read_to_string("game.toml").ok()?.parse().ok()?;
+    let t: toml::Table = std::fs::read_to_string("relift.toml").ok()?.parse().ok()?;
     t.get("game")?.as_table().cloned()
 }
 
@@ -117,7 +117,7 @@ fn sha_hex(bytes: &[u8]) -> String {
 ///
 /// The file cannot be read or is not an executable this guest takes, a
 /// dynamically linked one has no sysroot or a file it needs is not in it, or
-/// the import directory or `game.toml` cannot be written.
+/// the import directory or `relift.toml` cannot be written.
 pub fn import(
     settings: &Settings,
     path: &Path,
@@ -212,14 +212,12 @@ pub fn import(
         .unwrap_or("program")
         .to_string();
     let text = format!(
-        "# game.toml, written by relift import.\n\n[game]\nguest = \"linux\"\ntitle = {}\nimport_dir = {}\nprogram = {}\nprogram_sha256 = \"{sha}\"\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"linux\"\ntitle = {}\nimport_dir = {}\nprogram = {}\nprogram_sha256 = \"{sha}\"\n",
         quote(&title),
         quote(&out.display().to_string()),
         quote(&exec),
     );
-    let manifest_toml = Path::new("game.toml");
-    let wrote =
-        !manifest_toml.exists() && relift_cache::write_if_changed(manifest_toml, text.as_bytes())?;
+    let wrote = crate::projectfile::write_stub(Path::new(crate::projectfile::FILE), &text)?;
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
         " {title} ({} bytes, aarch64 Linux{}), into {}{}, {}",
         bytes.len(),
@@ -233,7 +231,7 @@ pub fn import(
             String::new()
         },
         out.display(),
-        if wrote { "; wrote game.toml" } else { "" },
+        if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
     Ok(())
@@ -247,9 +245,9 @@ struct Project {
 }
 
 fn project() -> Result<Project, BoxError> {
-    let g = project_table().ok_or("game.toml has no [game]")?;
+    let g = project_table().ok_or("relift.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
-    let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = PathBuf::from(s("import_dir").ok_or("relift.toml has no game.import_dir")?);
     let path = dir.join(PROGRAM_FILE);
     let bytes = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;

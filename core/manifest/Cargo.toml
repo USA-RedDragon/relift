@@ -1,6 +1,6 @@
 [package]
 name = "relift-manifest"
-description = "`game.toml` types: core keys plus a guest-owned section"
+description = "`relift.toml` types: core keys plus a guest-owned section"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

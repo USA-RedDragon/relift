@@ -78,8 +78,8 @@ impl Project {
     }
 
     fn add_game_toml(&self, text: &str) {
-        let p = self.dir.join("game.toml");
-        let mut t = std::fs::read_to_string(&p).expect("game.toml");
+        let p = self.dir.join("relift.toml");
+        let mut t = std::fs::read_to_string(&p).expect("relift.toml");
         t.push_str(text);
         relift_cache::write_if_changed(&p, t.as_bytes()).expect("write");
     }

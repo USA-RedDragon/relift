@@ -70,7 +70,7 @@ typedef struct rl_nds_program {
     uint32_t unit_count;
     /** @brief The title, for reports. */
     const char *title;
-    /** @brief Options taken before the command line's (game.toml's [nds]). */
+    /** @brief Options taken before the command line's (relift.toml's [nds]). */
     const char *const *args;
     uint32_t arg_count;
     /** @brief The save file the program uses unless --save names another; NULL or empty for the per-user default. */

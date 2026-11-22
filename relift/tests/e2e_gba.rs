@@ -202,7 +202,9 @@ fn a_jump_no_analysis_follows_stops_with_a_report_naming_its_site() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        text.contains("added rom+0x100 to the hints in game.toml; the next relift build lifts it"),
+        text.contains(
+            "added rom+0x100 to the hints in relift.toml; the next relift build lifts it"
+        ),
         "{text}"
     );
     let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);

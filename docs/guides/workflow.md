@@ -42,7 +42,7 @@ If your console is not in the table, relift cannot recompile it, and no setting 
 | Nintendo 64 | a ROM (`.z64`, `.v64`) | any byte order ([guests/n64](../../guests/n64/README.md)) |
 | Nintendo DS | a `.nds` ROM | decrypted, with a valid header CRC |
 
-Run `relift` in an empty folder, one folder per game. The folder holds one `game.toml`; everything relift builds goes to the cache directory (`~/.cache/relift` by default).
+Run `relift` in an empty folder, one folder per game. The folder holds one `relift.toml`; everything relift builds goes to the cache directory (`~/.cache/relift` by default).
 
 ## 3. Import, build and run
 
@@ -52,13 +52,13 @@ The first command, in the project folder, is `import`. This one imports a Game B
 
 ```text
 $ relift import ~/roms/dmg-acid2/dmg-acid2.gb
-imported DMG-ACID2 (none, 32768 bytes, Game Boy), into ~/.cache/relift/projects/acid/import; wrote game.toml, 0.0 s
+imported DMG-ACID2 (none, 32768 bytes, Game Boy), into ~/.cache/relift/projects/acid/import; wrote relift.toml, 0.0 s
 ```
 
-`import` wrote `game.toml` and copied what it needs into the cache. The file names the guest and records where the ROM came from:
+`import` wrote `relift.toml` and copied what it needs into the cache. The file names the guest and records where the ROM came from:
 
 ```text
-# game.toml, written by relift import.
+# The project file, written by relift import.
 
 [game]
 guest = "gb"
@@ -70,7 +70,7 @@ rom_sha256 = "464e14b7d42e7feea0b7ede42be7071dc88913f75b9ffa444299424b63d1dff1"
 model = "dmg"
 ```
 
-Importing the same file again is harmless; it does not rewrite `game.toml`:
+Importing the same file again is harmless; it does not rewrite `relift.toml`:
 
 ```text
 $ relift import ~/roms/dmg-acid2/dmg-acid2.gb
@@ -295,7 +295,7 @@ guest code at the target:
 added 000:0b8f to ~/.cache/relift/projects/stop/import/learned.txt; a development build (relift build --dev, relift run) lifts it; a release build leaves the learned file out
 ```
 
-The last line is the action. A Game Boy project gets the target in `learned.txt` in its import directory; a Switch or Game Boy Advance project gets it as a hint in the `[hints]` table of `game.toml`. `relift report --no-hint FILE` only prints.
+The last line is the action. A Game Boy project gets the target in `learned.txt` in its import directory; a Switch or Game Boy Advance project gets it as a hint in the `[hints]` table of `relift.toml`. `relift report --no-hint FILE` only prints.
 
 ### What a release build does with it
 
@@ -325,7 +325,7 @@ What a development build does with missed code depends on the guest:
 
 | Guest | Release build | Development build |
 |---|---|---|
-| Switch, Switch 2 | stops with a report | `relift run` hot-loads: relift lifts the missing code and everything newly reachable from it, compiles a shared library, and the program loads it and goes on; the address is added to `[hints]` in `game.toml` |
+| Switch, Switch 2 | stops with a report | `relift run` hot-loads: relift lifts the missing code and everything newly reachable from it, compiles a shared library, and the program loads it and goes on; the address is added to `[hints]` in `relift.toml` |
 | Game Boy, Game Boy Color | stops with a report | `relift build --dev` runs unlifted code on the device library's CPU, one instruction at a time, and records it in `learned.txt`; the next `--dev` build lifts it |
 | Game Boy Advance | stops with a report | no hot-load yet; `relift report` adds the target as a hint and the next build lifts it |
 | Nintendo 64, Master System, Game Gear | stops with a report | no hot-load yet |
@@ -481,7 +481,7 @@ what the build knew about the target:
 what analysis says about the site:
   analysis left this computed call unresolved: reason pointer, target computed
 
-added main+0x40 to the hints in game.toml; the next relift build lifts it
+added main+0x40 to the hints in relift.toml; the next relift build lifts it
 ```
 
 ```text
@@ -510,11 +510,11 @@ relift run: hot-loaded 0x8000040 (main+0x40): 1 function, 0 unlifted, lift 5 ms,
 hello from relift
 hello from relift
 hello from relift
-hot-loaded 1 target; added to the hints in game.toml, so the next relift build lifts them
+hot-loaded 1 target; added to the hints in relift.toml, so the next relift build lifts them
 # wall time 0.25 s
 ```
 
-The program went on and printed its three lines. The hint is in `game.toml`, so the next release build lifts the target:
+The program went on and printed its three lines. The hint is in `relift.toml`, so the next release build lifts the target:
 
 ```text
 $ relift --emit.cold=false build
@@ -618,7 +618,7 @@ relift where: not implemented yet; a stop report names the module, the guest add
 
 ## 6. Settings and input
 
-relift's own settings come from `relift.toml` in the working directory, then `RELIFT_*` environment variables, then flags; later wins. They control the build: `cache-dir`, `jobs`, `toolchain.*`, `emit.*` and `package.*`. [Settings](../reference/configuration.md) lists every key. Per-game data lives in the project's `game.toml`: the guest and model, the `[hints]` that relift writes, and any `[settings.<key>]` tables a game declares for itself.
+relift's own settings come from `relift.toml` in the working directory, then `RELIFT_*` environment variables, then flags; later wins. They control the build: `cache-dir`, `jobs`, `toolchain.*`, `emit.*` and `package.*`. [Settings](../reference/configuration.md) lists every key. Per-game data lives in the project's `relift.toml`: the guest and model, the `[hints]` that relift writes, and any `[settings.<key>]` tables a game declares for itself.
 
 The built program has run-time settings of its own, and `relift info` lists each with its type, default and range. In order, last wins: the default, `<user folder>/settings.json`, `--relift-settings FILE`, `--relift-set key=value`, then the key's environment variable (`RELIFT_VIDEO`, `RELIFT_SAVE` and the others in [the C runtime](../../runtime/README.md)). A wrong key or value never stops a run; it warns and is skipped:
 
@@ -767,7 +767,7 @@ relift build: ~/.cache/relift/projects/acid/import/rom.gb: No such file or direc
 | `import: malformed: X: not a dump directory: want base/ and updates/...` | a folder without `exefs/` and `romfs/` | point `import` at the folder that holds them, or at `base/` |
 | `import: --update is for Switch dumps` | `--update` on a cartridge ROM | drop `--update` |
 | `import: i/o: X: No such file or directory` | the path is wrong | check the path |
-| `build: game.toml: not found in this folder` | you are not in a project folder | `relift import <dump>` here, or change folder |
+| `build: relift.toml: not found in this folder` | you are not in a project folder | `relift import <dump>` here, or change folder |
 | `build: ...rom.gb: No such file or directory; run relift import again` | the project's import is not in this cache directory | import again, or point `--cache-dir` at the old one |
 | `build: no clang or zig on PATH` | no C compiler | install clang or zig, or set `toolchain.clang` |
 | `build: toolchain.X: P is not a file` or `is not on PATH` | a `toolchain.*` setting names nothing | fix the key or clear it |

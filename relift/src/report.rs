@@ -474,7 +474,7 @@ fn switch_site(settings: &Settings, out: &Path, site: &Place) -> Vec<String> {
             site.addr
         )];
     };
-    let hints = crate::hints::read(Path::new("game.toml")).unwrap_or_default();
+    let hints = crate::hints::read(Path::new("relift.toml")).unwrap_or_default();
     let p = &placed[i];
     let m = crate::build::module_with_hints(p, &hints);
     let linkages: Vec<_> = placed.iter().map(relift_switch::program::linkage).collect();
@@ -708,12 +708,12 @@ pub fn explain(r: &Report, out: Option<&Path>) -> String {
 }
 
 /// Adds the report's target as a root for the next build: a hint in
-/// `game.toml` (Switch, and GBA for the cartridge ROM), a line of the
+/// `relift.toml` (Switch, and GBA for the cartridge ROM), a line of the
 /// learned file `learned` (Game Boy). Returns what it did, for the user.
 ///
 /// # Errors
 ///
-/// A game.toml or learned file that cannot be read or written.
+/// A relift.toml or learned file that cannot be read or written.
 pub fn add_hint(
     r: &Report,
     project: &Path,
@@ -729,9 +729,9 @@ pub fn add_hint(
             r.get("kind").unwrap_or("?")
         ));
     }
-    let game = std::fs::read_to_string(project.join("game.toml"))?
+    let game = std::fs::read_to_string(project.join("relift.toml"))?
         .parse::<toml::Table>()
-        .map_err(|e| format!("game.toml: {e}"))?;
+        .map_err(|e| format!("relift.toml: {e}"))?;
     if let Some(why) = foreign(r, &game) {
         return Ok(format!(
             "the report is from another game than this project ({why}); no root added"
@@ -799,20 +799,20 @@ pub fn add_hint(
     Ok(added + &note)
 }
 
-/// Adds `h` to the hints of the project's game.toml; says what it did.
+/// Adds `h` to the hints of the project's relift.toml; says what it did.
 fn hint(project: &Path, h: Hint) -> Result<String, BoxError> {
-    let added = crate::hints::add(&project.join("game.toml"), std::slice::from_ref(&h))?;
+    let added = crate::hints::add(&project.join("relift.toml"), std::slice::from_ref(&h))?;
     Ok(if added.is_empty() {
-        format!("{} is already a hint in game.toml", h.text())
+        format!("{} is already a hint in relift.toml", h.text())
     } else {
         format!(
-            "added {} to the hints in game.toml; the next relift build lifts it",
+            "added {} to the hints in relift.toml; the next relift build lifts it",
             h.text()
         )
     })
 }
 
-/// Why the report `r` cannot be from the project whose game.toml is
+/// Why the report `r` cannot be from the project whose relift.toml is
 /// `game`: another title or program id, a module the project does not have
 /// or whose build id differs (Switch), or another cartridge code or version
 /// (GBA). None when nothing says so.
@@ -921,7 +921,7 @@ pub fn run(
         )
     })?;
     let r = Report::parse(&text).map_err(|e| format!("{}: {e}", file.display()))?;
-    let project = Path::new("game.toml").is_file();
+    let project = Path::new("relift.toml").is_file();
     let out = match build_dir {
         Some(d) => Some(d.to_path_buf()),
         None if project => crate::build::project_out(settings).ok().map(|(_, o)| o),
@@ -1093,7 +1093,7 @@ mod tests {
     fn a_switch_hint_needs_a_text_segment() {
         let dir = std::env::temp_dir().join(format!("relift-report-hint-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("dir");
-        relift_cache::write_if_changed(&dir.join("game.toml"), b"[game]\nguest = \"switch\"\n")
+        relift_cache::write_if_changed(&dir.join("relift.toml"), b"[game]\nguest = \"switch\"\n")
             .expect("write");
         let r = |w: &str| {
             Report::parse(&format!(

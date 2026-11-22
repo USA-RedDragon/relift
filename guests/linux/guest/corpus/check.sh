@@ -62,7 +62,7 @@ for b in $list; do
         flags="--sysroot $sys"
         ;;
     esac
-    if ! (cd "$proj" && rm -f game.toml && "$relift" import $flags "$out/$b" >import.log 2>&1 && RELIFT_EMIT_TRAMPOLINE=$forced RELIFT_EMIT_COLD=$cold "$relift" build ${RELIFT_BUILD_FLAGS:-} >build.log 2>&1); then
+    if ! (cd "$proj" && rm -f relift.toml && "$relift" import $flags "$out/$b" >import.log 2>&1 && RELIFT_EMIT_TRAMPOLINE=$forced RELIFT_EMIT_COLD=$cold "$relift" build ${RELIFT_BUILD_FLAGS:-} >build.log 2>&1); then
         echo "FAIL $tag: build (see $proj/build.log)"
         failed=1
         continue

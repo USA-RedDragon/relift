@@ -31,7 +31,7 @@ relift build --dev    # a development build
 relift run            # a development build, run in a window
 ```
 
-`relift import` takes a cartridge ROM as it is and writes `game.toml` with
+`relift import` takes a cartridge ROM as it is and writes `relift.toml` with
 `guest = "gb"`. `relift build --mods hack.ips` applies IPS, UPS or BPS
 ROM-hack patches in order before discovery. A build also needs cargo: it
 builds the device library (rustyboi-core) into the cache. `relift build`

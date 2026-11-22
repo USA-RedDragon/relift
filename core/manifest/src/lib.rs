@@ -1,9 +1,9 @@
-//! The per-game `game.toml` types: core keys plus a guest-owned section.
+//! The per-game tables of `relift.toml`: core keys plus a guest-owned section.
 //!
 //! Minimal for now: `relift import` writes a stub with the title's identity
 //! and where the import landed. The reader comes with `relift build`.
 
-/// The core keys of `game.toml`.
+/// The core keys of `relift.toml`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
     /// The guest that owns the game (`switch`).
@@ -45,10 +45,10 @@ fn quote(s: &str) -> String {
 }
 
 impl Game {
-    /// The stub `game.toml` text.
+    /// The stub `relift.toml` text.
     pub fn to_toml(&self) -> String {
         let mut s = format!(
-            "# game.toml, written by relift import.\n\n[game]\nguest = {}\ntitle_id = \"{}\"\nversion = {}\nimport_dir = {}\n",
+            "# The project file, written by relift import.\n\n[game]\nguest = {}\ntitle_id = \"{}\"\nversion = {}\nimport_dir = {}\n",
             quote(&self.guest),
             self.title_id,
             self.version,

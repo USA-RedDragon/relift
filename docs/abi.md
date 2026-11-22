@@ -829,7 +829,7 @@ and reads the target from `c->pc`.
    `core_stop_report_takes_a_call_site_from_the_cpu`, e2e_hotload]
 4. relift lifts the target and all code newly reachable from it, compiles
    **one** shared library for the whole request, adds the target to the
-   hint list in `game.toml`, and answers `RL_DEV_LIFT_REPLY`: status,
+   hint list in `relift.toml`, and answers `RL_DEV_LIFT_REPLY`: status,
    absolute library path, message text. One library per request because
    macOS pays about 125 to 260 ms on the first load of any new library
    file; reopening a loaded file costs under 1.3 ms, and a byte-identical
@@ -2008,7 +2008,7 @@ the target (llvm-mc for A64 and arm32 when it is on `PATH`, the opcode
 table for SM83), the guest backtrace, the site's lifted C from the build's
 `c/` folder and what `entries.txt` and `unlifted.txt` say about the target,
 and adds the target as a root for the next build: a `[hints]` entry in
-`game.toml` (Switch, as `relift run` does for hot-loaded code, and GBA,
+`relift.toml` (Switch, as `relift run` does for hot-loaded code, and GBA,
 `rom+0x<offset>` for a cartridge ROM target, an odd offset for Thumb code,
 which `relift-gba-analyze` takes as roots of origin `hint`) or a line of the
 learned file (Game Boy: `BBB:AAAA` for a ROM target in bank `BBB`, `ram AAAA

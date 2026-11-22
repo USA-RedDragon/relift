@@ -33,7 +33,7 @@ relift run
 ```
 
 `relift import` copies the ROM (less a copier header) into the project and
-writes `game.toml` with `guest = "sms"`, the console (`sms`, `gg`, `gg-ms`
+writes `relift.toml` with `guest = "sms"`, the console (`sms`, `gg`, `gg-ms`
 for a Master System cartridge on a Game Gear, or `sg`), the region (`ntsc-u`,
 `ntsc-j` with the FM unit, `pal`) and the mapper guess; edit them there.
 `mapper = "bios"` builds a Master System BIOS image as the BIOS, with no
