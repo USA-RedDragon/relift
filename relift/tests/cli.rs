@@ -210,7 +210,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("game")).expect("the project dir is creatable");
-    root
+    root.canonicalize().expect("the scratch dir resolves")
 }
 
 #[test]
