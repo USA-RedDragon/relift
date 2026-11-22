@@ -35,11 +35,15 @@
 //! format; atomics use 32-bit `R32ui` views.
 //!
 //! The numeric kind of a bound handle's texture is chosen by the runtime:
-//! each bound handle that a TEX, TLD, TLD4, TXD, SULD.P or SUST.P reads gets
-//! a specialization constant ([`TEXTURE_KIND_SPEC`] onwards, listed in
-//! `Interface::texture_kinds`; 0 float, 1 signed, 2 unsigned) that selects
-//! the array, so integer textures read their integer bits. Depth compares,
-//! TMML, TXQ and handles from a register always use the float arrays.
+//! a TEX, TLD, TLD4 or TXD of a bound handle reads it from the runtime's
+//! table beside the pool ([`TEXTURE_DIMS_BINDING`], bits 8 and up of the
+//! texture's word; 0 float, 1 signed, 2 unsigned) and takes the array of
+//! that kind, so integer textures read their integer bits and one program
+//! serves every kind of texture bound to it. Each bound handle that a
+//! SULD.P or SUST.P reads gets a specialization constant
+//! ([`TEXTURE_KIND_SPEC`] onwards, listed in `Interface::texture_kinds`)
+//! with the image's kind instead. Depth compares, TMML, TXQ and handles from
+//! a register always use the float arrays.
 //!
 //! # Sources
 //!
@@ -98,13 +102,15 @@ pub const SAMPLER_BINDING: u32 = 0;
 
 /// Binding of the texture dimension table in set
 /// [`TEXTURE_SET`](super::TEXTURE_SET): a storage buffer of one 32-bit
-/// word per texture id of the pool, the [`Dim`] of that texture (the
-/// dimension its header gives; a six-layer 2D array the runtime also
-/// views as a cube stays a 2D array). TXQ of a handle from a register
-/// reads it.
+/// word per texture id of the pool: in bits 0..8 the [`Dim`] of that
+/// texture (the dimension its header gives; a six-layer 2D array the
+/// runtime also views as a cube stays a 2D array), which TXQ of a handle
+/// from a register reads, and in bits 8 and up its [`Kind`], which fetches
+/// of bound handles select their array with.
 pub const TEXTURE_DIMS_BINDING: u32 = 31;
 
-/// First specialization constant id of the per-handle numeric kinds.
+/// First specialization constant id of the per-handle numeric kinds of
+/// formatted surface accesses.
 pub const TEXTURE_KIND_SPEC: u32 = 0x100;
 
 /// First specialization constant id of the per-handle dimensions (a [`Dim`]
@@ -768,6 +774,20 @@ impl Ctx {
     /// The [`Dim`] of the texture whose id handle `h` holds, from the
     /// runtime's table ([`TEXTURE_DIMS_BINDING`]).
     fn texture_dim_of(&mut self, h: u32) -> u32 {
+        let w = self.texture_word_of(h);
+        self.tx_opk(op::BITWISE_AND, w, 0xff)
+    }
+
+    /// The [`Kind`] of the texture whose id handle `h` holds, from the
+    /// runtime's table ([`TEXTURE_DIMS_BINDING`]).
+    fn texture_kind_of(&mut self, h: u32) -> u32 {
+        let w = self.texture_word_of(h);
+        self.tx_opk(op::SHIFT_RIGHT_LOGICAL, w, 8)
+    }
+
+    /// The word of the runtime's table ([`TEXTURE_DIMS_BINDING`]) for the
+    /// texture whose id handle `h` holds.
+    fn texture_word_of(&mut self, h: u32) -> u32 {
         let u = self.u32t();
         let var = match self.tex.vars.get(&TEXTURE_DIMS_BINDING) {
             Some(&v) => v,
@@ -937,24 +957,37 @@ impl Ctx {
     }
 
     /// Runs `f` for the numeric kind the runtime picks for bound handle
-    /// `key` (or for floats only), merging the four result words.
+    /// `key` (or for floats only), merging the four result words: the kind
+    /// of the texture handle `h` names, read at run time, or without `h` a
+    /// specialization constant of `key`.
     fn by_kind(
         &mut self,
         key: Option<(u32, u32)>,
         ints: bool,
+        h: Option<u32>,
         f: &mut dyn FnMut(&mut Ctx, Kind) -> Res<u32>,
     ) -> Res<u32> {
         let Some(key) = key.filter(|_| ints) else {
             return f(self, Kind::Float);
         };
-        let next = TEXTURE_KIND_SPEC + self.iface.texture_kinds.len() as u32;
-        let id = *self.iface.texture_kinds.entry(key).or_insert(next);
-        let kc = self.m.spec_u32(0, id);
         let b = self.boolt();
         let zero = self.m.c_u32(0);
         let one = self.m.c_u32(1);
-        let is_f = self.m.spec_op(b, op::I_EQUAL, &[kc, zero]);
-        let is_s = self.m.spec_op(b, op::I_EQUAL, &[kc, one]);
+        let (is_f, is_s) = if let Some(h) = h {
+            let kc = self.texture_kind_of(h);
+            (
+                self.m.emit(op::I_EQUAL, b, &[kc, zero]),
+                self.m.emit(op::I_EQUAL, b, &[kc, one]),
+            )
+        } else {
+            let next = TEXTURE_KIND_SPEC + self.iface.texture_kinds.len() as u32;
+            let id = *self.iface.texture_kinds.entry(key).or_insert(next);
+            let kc = self.m.spec_u32(0, id);
+            (
+                self.m.spec_op(b, op::I_EQUAL, &[kc, zero]),
+                self.m.spec_op(b, op::I_EQUAL, &[kc, one]),
+            )
+        };
         let (lf, ln, ls, lu, m2, m) = (
             self.m.id(),
             self.m.id(),
@@ -999,13 +1032,13 @@ impl Ctx {
     ) -> Res<u32> {
         let vals: Vec<u32> = args.iter().map(|a| a.0).collect();
         let Some(k) = key.filter(|_| ints) else {
-            return self.by_kind(None, false, &mut |c, k| f(c, k, &vals));
+            return self.by_kind(None, false, None, &mut |c, k| f(c, k, &vals));
         };
         let tys: Vec<u32> = args.iter().map(|a| a.1).collect();
         let t = self.tx_uvec4();
         self.shared_typed(format!("kind {tag} {k:?}"), t, &tys, &vals, |c, p| {
             let p = p.to_vec();
-            c.by_kind(key, true, &mut |c, k| f(c, k, &p))
+            c.by_kind(key, true, Some(p[0]), &mut |c, k| f(c, k, &p))
         })
     }
 
@@ -1618,7 +1651,7 @@ fn tld4(c: &mut Ctx) -> Res<()> {
     let s = sources(c, &g0, &g1, tx.scr)?;
     let (h, nu) = handle(c, key, &s)?;
     let k_at = (c.pc / 16) as usize;
-    let v = c.by_kind(key, !dc, &mut |c, k| {
+    let v = c.by_kind(key, !dc, Some(h), &mut |c, k| {
         c.cap(25);
         let (si, _) = c.sampled(k, d, h, nu);
         let coords = float_coords(c, &s, d)?;
@@ -1791,7 +1824,7 @@ fn txd(c: &mut Ctx) -> Res<()> {
     } else {
         None
     };
-    let v = c.by_kind(key, true, &mut |c, k| {
+    let v = c.by_kind(key, true, Some(h), &mut |c, k| {
         let (si, _) = c.sampled(k, d, h, nu);
         let coords = float_coords(c, &s, d)?;
         let coord = with_layer(c, &s, d, coords)?;
@@ -2079,7 +2112,7 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
                 data.push(x);
             }
         }
-        let v = c.by_kind(key, true, &mut |c, k| {
+        let v = c.by_kind(key, true, None, &mut |c, k| {
             let ik = match k {
                 Kind::Float => ImageKind::Float,
                 Kind::Sint => ImageKind::Sint,

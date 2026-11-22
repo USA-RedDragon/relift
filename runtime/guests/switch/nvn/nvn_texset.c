@@ -6,8 +6,9 @@
  *
  * Binding 0 holds the sampler pool, binding 1 + 10 kind + dim the textures
  * of numeric kind kind (0 float, 1 signed, 2 unsigned) seen as dimension
- * dim (the translator's Dim), binding 31 a storage buffer with the Dim of
- * each texture id, and binding 32 + 8 kind + dim the images registered with
+ * dim (the translator's Dim), binding 31 a storage buffer with a word per
+ * texture id (its Dim in bits 0..8, its numeric kind from bit 8, which the
+ * programs select the array of a bound handle with), and binding 32 + 8 kind + dim the images registered with
  * nvnTexturePoolRegisterImage as storage images of the translator's
  * ImageKind kind and ImageDim dim: formatted kinds through a view of the
  * image's own numeric kind, raw kinds through an unsigned view of the
@@ -478,6 +479,13 @@ static VkFormat image_format(uint32_t ik, VkFormat f, uint32_t bpb)
  * and never a stale element of the texture the slot held before (inferred: the hardware reads such a handle
  * through the texture header's own type and faults on nothing).
  */
+/** @brief Writes the programs' word for texture slot sl: its Dim in bits 0..8 and its numeric kind from bit 8. */
+static void set_word(uint32_t sl, uint32_t dim, uint32_t kind)
+{
+    uint32_t w = dim | kind << 8;
+    memcpy(t.dims.map + 4ull * sl, &w, 4);
+}
+
 static void null_rest(uint32_t slot, bool image, uint32_t kind, uint64_t fit)
 {
     if (!g.null_descriptor)
@@ -654,7 +662,7 @@ static int null_slot(replay *r, uint32_t sl, uint32_t *kind, uint32_t *dim)
     t.img_done[sl] = false;
     t.tex_kind[sl] = 0;
     memset(t.tex_view[sl], 0, sizeof t.tex_view[sl]);
-    memcpy(t.dims.map + 4ull * sl, dim, 4);
+    set_word(sl, *dim, *kind);
     return RL_OK;
 }
 
@@ -736,6 +744,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
         nvn_vk_dispatch_image(v, t.tex_level[sl], image, t.tex_layer[sl], t.tex_layers[sl], image);
         *kind = t.tex_kind[sl];
         memcpy(dim, t.dims.map + 4ull * sl, 4);
+        *dim &= 0xffu;
         return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
     }
     nvn_view nv;
@@ -796,7 +805,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     t.tex_kind[sl] = *kind;
     t.tex_guest[sl] = tex;
     memcpy(t.tex_view[sl], view, sizeof view);
-    memcpy(t.dims.map + 4ull * sl, dim, 4);
+    set_word(sl, *dim, *kind);
     nvn_vk_dispatch_image(v, t.tex_level[sl], image, t.tex_layer[sl], t.tex_layers[sl], image);
     return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
 }

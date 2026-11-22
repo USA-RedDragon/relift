@@ -4,7 +4,7 @@ use common::translate;
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::{
     Dim, HandleSource, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC,
-    TEXTURE_DIMS_BINDING, TEXTURE_KIND_SPEC, image_binding, texture_binding,
+    TEXTURE_DIMS_BINDING, image_binding, texture_binding,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -80,20 +80,24 @@ fn bound_texture_uses_the_pools() {
     assert!(s.interface.textures.contains(&(3, 16)));
     assert!(!s.interface.bindless);
     assert!(!s.interface.register_handles);
-    assert_eq!(
-        s.interface.texture_kinds.get(&(3, 16)),
-        Some(&TEXTURE_KIND_SPEC)
-    );
+    assert!(s.interface.texture_kinds.is_empty());
     for b in [
         SAMPLER_BINDING,
         texture_binding(Kind::Float, Dim::D2),
         texture_binding(Kind::Sint, Dim::D2),
         texture_binding(Kind::Uint, Dim::D2),
+        TEXTURE_DIMS_BINDING,
     ] {
         assert!(s.interface.texture_bindings.contains(&b), "binding {b}");
     }
     assert_eq!(insts(&s.spirv, 88).len(), 3);
-    assert!(!insts(&s.spirv, 52).is_empty());
+    assert!(
+        insts(&s.spirv, 71)
+            .iter()
+            .all(|d| d[2] != 1 || !(0x100..0x200).contains(&d[3]))
+    );
+    assert!(insts(&s.spirv, 52).is_empty());
+    assert!(!insts(&s.spirv, 194).is_empty());
 }
 
 #[test]
