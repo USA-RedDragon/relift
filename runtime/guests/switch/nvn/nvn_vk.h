@@ -414,6 +414,11 @@ void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t 
 void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
 /** @brief The levels and layers of an image's host image (nvn_vk.c). */
 VkImageSubresourceRange nvn_vk_image_range(const vimg *v);
+/**
+ * @brief The range of a barrier over all of v: every level and every layer as VK_REMAINING_*, which for a 3D image
+ * made 2D-array compatible means its whole depth whether or not the host has maintenance9.
+ */
+VkImageSubresourceRange nvn_vk_barrier_range(const vimg *v);
 
 /** @brief The linear or sRGB twin of an 8-bit color format, which a texture view may name for a render target of the other; VK_FORMAT_UNDEFINED for any other format. */
 VkFormat nvn_vk_color_twin(VkFormat f);

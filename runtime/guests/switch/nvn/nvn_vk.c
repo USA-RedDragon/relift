@@ -1976,6 +1976,14 @@ static VkImageSubresourceRange range_of(const vimg *v)
 
 VkImageSubresourceRange nvn_vk_image_range(const vimg *v) { return range_of(v); }
 
+VkImageSubresourceRange nvn_vk_barrier_range(const vimg *v)
+{
+    VkImageSubresourceRange rr = range_of(v);
+    rr.levelCount = VK_REMAINING_MIP_LEVELS;
+    rr.layerCount = VK_REMAINING_ARRAY_LAYERS;
+    return rr;
+}
+
 /** @brief A fast hash of n bytes (whole 8-byte words, then the tail). */
 static uint64_t bytes_hash(const uint8_t *p, uint64_t n)
 {
@@ -2505,7 +2513,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
                                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                                 .image = v->image,
-                                .subresourceRange = rr };
+                                .subresourceRange = nvn_vk_barrier_range(v) };
     VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                              NULL, 1, &ib);
     nvn_watch_start(&v->watch, storage, d->size);

@@ -664,3 +664,18 @@ TEST(nvn_texset_a_view_of_a_cube_counts_its_six_faces)
     arr.d.depth = 12;
     CHECK_EQ(nvn_texset_view_layers(&arr, NULL), 12u);
 }
+
+TEST(nvn_a_barrier_over_a_whole_volume_names_its_remaining_layers)
+{
+    vimg vol;
+    memset(&vol, 0, sizeof vol);
+    vol.d.target = NVN_TARGET_3D;
+    vol.d.depth = 16;
+    vol.d.levels = 3;
+    vol.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkImageSubresourceRange rr = nvn_vk_barrier_range(&vol);
+    CHECK_EQ(rr.layerCount, VK_REMAINING_ARRAY_LAYERS);
+    CHECK_EQ(rr.levelCount, VK_REMAINING_MIP_LEVELS);
+    CHECK_EQ(rr.baseArrayLayer, 0u);
+    CHECK_EQ(nvn_vk_image_range(&vol).layerCount, 1u);
+}
