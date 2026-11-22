@@ -626,6 +626,13 @@ static int fixed_state(replay *r, pipe_key *k)
  */
 #define DEFAULT_BINDING (NVN_VERTEX_BUFFERS - 1u)
 
+uint32_t nvn_vertex_attrib_source(uint32_t nattribs, uint32_t i)
+{
+    if (i < nattribs)
+        return NVN_ATTRIB_BOUND;
+    return i == nattribs && nattribs % 2 ? NVN_ATTRIB_CONSTANT : NVN_ATTRIB_UNKNOWN;
+}
+
 /** @brief Fills the vertex input of k for the attributes vs reads. */
 static int vertex_state(replay *r, const module *vs, pipe_key *k)
 {
@@ -637,14 +644,16 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
     for (uint32_t i = 0; i < NVN_VERTEX_ATTRIBS && i < 32; i++) {
         if (!(vs->inputs & (1u << i)))
             continue;
-        if (i >= st->nattribs)
+        uint32_t source = nvn_vertex_attrib_source(st->nattribs, i);
+        if (source == NVN_ATTRIB_UNKNOWN)
             return nvn_vk_stop(r, "the vertex program reads attribute %u, beyond the %u bound", i, st->nattribs);
-        uint32_t fo[2];
+        uint32_t fo[2] = { 0, 0 };
         uint64_t stream = 0;
-        if ((rc = nvn_vk_getter(r, "nvnVertexAttribStateGetFormat", st->attribs[i], 4, NULL, 0, 2, fo, NULL)) !=
-                RL_OK ||
-            (rc = nvn_vk_getter(r, "nvnVertexAttribStateGetStreamIndex", st->attribs[i], 4, NULL, 0, 0, NULL,
-                                &stream)) != RL_OK)
+        if (source == NVN_ATTRIB_BOUND &&
+            ((rc = nvn_vk_getter(r, "nvnVertexAttribStateGetFormat", st->attribs[i], 4, NULL, 0, 2, fo, NULL)) !=
+                 RL_OK ||
+             (rc = nvn_vk_getter(r, "nvnVertexAttribStateGetStreamIndex", st->attribs[i], 4, NULL, 0, 0, NULL,
+                                 &stream)) != RL_OK))
             return rc;
         if (fo[0] == 0) {
             def = true;

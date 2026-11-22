@@ -144,6 +144,17 @@ const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i);
 /** @brief Tells the machinery that every pipeline the game will start with exists: a compile after this is late, and logged. */
 void nvn_pipe_warmed(void);
 
+/** @brief Where a vertex attribute's state comes from (nvn_vertex_attrib_source). */
+enum { NVN_ATTRIB_BOUND, NVN_ATTRIB_CONSTANT, NVN_ATTRIB_UNKNOWN };
+
+/**
+ * @brief Where attribute i of a draw gets its state after nvnCommandBufferBindVertexAttribState bound nattribs of
+ * them. Bound attributes come from their state objects. The driver sends the attribute words to the GPU in pairs and
+ * pads an odd count with a constant (unfetched) attribute, so attribute nattribs of an odd count is constant and reads
+ * (0, 0, 0, 1). Any later one keeps a value no capture shows (unknown).
+ */
+uint32_t nvn_vertex_attrib_source(uint32_t nattribs, uint32_t i);
+
 /**
  * @brief The vertex streams a draw with pipeline key k binds buffers to, in the key's order, into out; returns how
  * many. The streams need not be contiguous: each of the GPU's vertex streams is set apart, so a program may read
