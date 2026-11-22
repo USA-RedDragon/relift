@@ -1445,6 +1445,7 @@ fn lift_and_emit(
     }
     let game = read_toml(Path::new("relift.toml"))?;
     let target_cpu = program_cpu(npdm.as_ref(), &game)?;
+    let display_version = crate::display_version::resolve(&import, &game)?;
     let title_id = npdm
         .as_ref()
         .map(|n| format!("{:016x}", n.program_id))
@@ -1605,6 +1606,7 @@ fn lift_and_emit(
         program::Process {
             npdm: npdm.as_ref(),
             console,
+            display_version: display_version.as_deref(),
         },
         &units,
         &emitted.code_maps,

@@ -767,6 +767,29 @@ pub struct Process<'a> {
     pub npdm: Option<&'a Npdm>,
     /// The console whose kernel, services and memory the runtime gives it.
     pub console: Console,
+    /// The display version of the program's control data (1 to 15 printable
+    /// ASCII characters), or `None` when the build has none.
+    pub display_version: Option<&'a str>,
+}
+
+/// `s` as a C string literal; printable ASCII passes through, anything else
+/// becomes an octal escape.
+fn c_string(s: &str) -> String {
+    let mut out = String::from('"');
+    for b in s.bytes() {
+        match b {
+            b'"' | b'\\' => {
+                out.push('\\');
+                out.push(char::from(b));
+            }
+            0x20..=0x7e => out.push(char::from(b)),
+            _ => {
+                let _ = write!(out, "\\{b:03o}");
+            }
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// The files that describe the placed modules to the runtime's loader and
@@ -895,7 +918,11 @@ int main(int argc, char **argv)
 /// images live in the `image<i>.c` files [`program_files`] adds.
 fn program_c(
     placed: &[Placed],
-    Process { npdm, console }: Process<'_>,
+    Process {
+        npdm,
+        console,
+        display_version,
+    }: Process<'_>,
     units: &[String],
     code_maps: &[String],
     fp: Fp,
@@ -974,7 +1001,7 @@ fn program_c(
         .unwrap_or(CODE_START);
     let _ = write!(
         t,
-        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u, {}u, UINT64_C({sysres:#x}) }};\n",
+        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u, {}u, UINT64_C({sysres:#x}), {} }};\n",
         placed.len(),
         units.len(),
         mods.map_or_else(|| "0".to_string(), |m| format!("&{m}")),
@@ -988,7 +1015,8 @@ fn program_c(
         match console {
             Console::Switch => 0,
             Console::Switch2 => 1,
-        }
+        },
+        display_version.map_or_else(|| "0".to_string(), c_string)
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp.flags || fp.fpcr_const || fp.trampoline {
@@ -1229,6 +1257,37 @@ mod tests {
     }
 
     #[test]
+    fn the_display_version_is_a_c_string_or_zero() {
+        let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
+        let files = |v| {
+            let f = program_files(
+                &p,
+                Process {
+                    npdm: None,
+                    console: Console::Switch,
+                    display_version: v,
+                },
+                &[],
+                &[],
+                Fp::default(),
+                None,
+                false,
+            );
+            String::from_utf8(
+                f.iter()
+                    .find(|f| f.name == "program.c")
+                    .unwrap()
+                    .bytes
+                    .clone(),
+            )
+            .unwrap()
+        };
+        assert!(files(Some("1.0.1")).contains("UINT64_C(0x0), \"1.0.1\" };"));
+        assert!(files(Some("a\"\\b")).contains("\"a\\\"\\\\b\" };"));
+        assert!(files(None).contains("UINT64_C(0x0), 0 };"));
+    }
+
+    #[test]
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
         let files = program_files(
@@ -1236,6 +1295,7 @@ mod tests {
             Process {
                 npdm: None,
                 console: Console::Switch,
+                display_version: None,
             },
             &["rl_unit_main".into()],
             &[],
@@ -1259,7 +1319,7 @@ mod tests {
         ));
         assert!(c.contains("rl_switch_main(&rl_program, argc, argv)"));
         assert!(
-            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u, 0u, UINT64_C(0x0) };"),
+            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u, 0u, UINT64_C(0x0), 0 };"),
             "{c}"
         );
         assert!(c.contains("extern const uint8_t rl_image_id[];"));
@@ -1268,6 +1328,7 @@ mod tests {
             Process {
                 npdm: None,
                 console: Console::Switch,
+                display_version: None,
             },
             &["rl_unit_main".into(), "rl_cold_main".into()],
             &["rl_code_main".into()],
@@ -1290,7 +1351,7 @@ mod tests {
             "{c}"
         );
         assert!(
-            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u, 0u, UINT64_C(0x0) };"),
+            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u, 0u, UINT64_C(0x0), 0 };"),
             "{c}"
         );
         let files = program_files(
@@ -1298,6 +1359,7 @@ mod tests {
             Process {
                 npdm: None,
                 console: Console::Switch,
+                display_version: None,
             },
             &[],
             &[],
@@ -1308,7 +1370,7 @@ mod tests {
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("extern const rl_mods rl_mods_bundled;"), "{c}");
         assert!(
-            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u, 0u, UINT64_C(0x0) };"),
+            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u, 0u, UINT64_C(0x0), 0 };"),
             "{c}"
         );
     }

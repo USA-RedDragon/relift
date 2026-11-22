@@ -27,8 +27,8 @@ const NACP_LANGUAGES: [&str; 16] = [
 ];
 const NACP_ENTRY: usize = 0x300;
 const NACP_NAME: usize = 0x200;
-const NACP_VERSION: usize = 0x3060;
-const NACP_SIZE: usize = 0x3070;
+pub(crate) const NACP_VERSION: usize = 0x3060;
+pub(crate) const NACP_SIZE: usize = 0x3070;
 
 /// Why a header did not give an identity.
 #[derive(Debug, PartialEq, Eq)]

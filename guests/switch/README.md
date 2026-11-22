@@ -50,6 +50,13 @@ another; its exefs and romfs replace the base's when it has them. The same
 choice applies to the update packages of a `.nup`. The program ID comes from
 `main.npdm`. Import also writes `control.nacp` and `icon.jpg` when the dump
 has them; they give the game's title and icon (`docs/guides/packaging.md`).
+A `.nup` whose meta block holds a display version gives `display_version.txt`.
+The display version the game reads (`nn::oe::GetDisplayVersion`) comes from
+the first of these: the NACP's field, that file, or `display_version` in the
+`[game]` table of `relift.toml` (1 to 15 printable ASCII characters). A dump
+with none of them builds without a version: the call answers with an empty
+16-byte field, as the console does for an empty one, and the run logs once
+that the version is unknown. relift never makes one up.
 Encrypted dumps are refused: convert them with a separate tool first.
 
 Import never extracts the romfs into a folder tree. From a `.nup` it writes a

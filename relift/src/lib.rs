@@ -14,6 +14,7 @@ pub mod dev;
 pub mod devsock;
 pub mod diff;
 pub mod diff_ir;
+pub mod display_version;
 pub mod elfdeps;
 pub mod emitstore;
 pub mod fonts;
