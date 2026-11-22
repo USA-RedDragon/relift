@@ -1249,6 +1249,119 @@ static struct {
     VkRect2D area;
 } open_pass;
 
+static VkImageSubresourceRange range_of(const vimg *v);
+
+/** @brief Guest address ranges of the open dispatches (or the next one's), each read or written. */
+typedef struct cs_set {
+    uint32_t n;
+    bool full;
+    struct {
+        uint64_t lo, hi;
+        bool write;
+    } r[64];
+} cs_set;
+
+/**
+ * @brief Dispatches recorded since the last barrier, which the console runs without ordering between them, and what
+ * the next dispatch binds: it runs without a barrier before it unless it touches what an open one writes, or writes
+ * what one reads.
+ */
+static struct {
+    bool open;
+    cs_set done, next;
+} open_cs;
+
+static void cs_add(cs_set *s, uint64_t lo, uint64_t size, bool write)
+{
+    if (s->n == sizeof s->r / sizeof s->r[0]) {
+        s->full = true;
+        return;
+    }
+    s->r[s->n].lo = lo;
+    s->r[s->n].hi = lo + (size ? size : 1);
+    s->r[s->n++].write = write;
+}
+
+void nvn_vk_dispatch_reset(void)
+{
+    open_cs.next.n = 0;
+    open_cs.next.full = false;
+}
+
+void nvn_vk_dispatch_buffer(uint64_t addr, uint64_t size, bool write) { cs_add(&open_cs.next, addr, size, write); }
+
+void nvn_vk_dispatch_anywhere(void) { open_cs.next.full = true; }
+
+void nvn_vk_dispatch_image(const vimg *v, uint32_t level, bool one_level, uint32_t layer, uint32_t layers, bool write)
+{
+    if (!v)
+        return;
+    const nvn_tex_desc *d = &v->d;
+    uint32_t nlev = d->levels ? d->levels : 1, nlay = range_of(v).layerCount;
+    if (d->target == NVN_TARGET_3D || d->target == NVN_TARGET_BUFFER || !d->layer_stride || nlev > NVN_TEX_MAX_LEVELS ||
+        level >= nlev || layer >= nlay) {
+        cs_add(&open_cs.next, v->storage, d->size, write);
+        return;
+    }
+    if (!layers || layers > nlay - layer)
+        layers = nlay - layer;
+    uint32_t last = one_level ? level : nlev - 1;
+    uint64_t end = last + 1 < nlev ? d->level_offset[last + 1] : d->layer_stride;
+    if (end <= d->level_offset[level] || end > d->layer_stride ||
+        (uint64_t)(layer + layers) * d->layer_stride > d->size) {
+        cs_add(&open_cs.next, v->storage, d->size, write);
+        return;
+    }
+    if (layers > 8) {
+        cs_add(&open_cs.next, v->storage + (uint64_t)layer * d->layer_stride + d->level_offset[level],
+               (uint64_t)(layers - 1) * d->layer_stride + end - d->level_offset[level], write);
+        return;
+    }
+    for (uint32_t k = layer; k < layer + layers; k++)
+        cs_add(&open_cs.next, v->storage + (uint64_t)k * d->layer_stride + d->level_offset[level],
+               end - d->level_offset[level], write);
+}
+
+/** @brief Whether the next dispatch may run beside the open ones: no range of it meets one of theirs that either writes. */
+static bool cs_independent(void)
+{
+    if (open_cs.done.full || open_cs.next.full)
+        return false;
+    for (uint32_t i = 0; i < open_cs.next.n; i++)
+        for (uint32_t j = 0; j < open_cs.done.n; j++)
+            if ((open_cs.next.r[i].write || open_cs.done.r[j].write) && open_cs.next.r[i].lo < open_cs.done.r[j].hi &&
+                open_cs.done.r[j].lo < open_cs.next.r[i].hi)
+                return false;
+    return true;
+}
+
+/** @brief Ends the open dispatches with a barrier on all commands. */
+static void cs_close(void)
+{
+    if (!open_cs.open)
+        return;
+    open_cs.open = false;
+    open_cs.done.n = 0;
+    open_cs.done.full = false;
+    nvn_vk_barrier(g.cb);
+}
+
+bool nvn_vk_begin_dispatch(replay *r)
+{
+    if (r->recording && open_cs.open && cs_independent())
+        return true;
+    return nvn_vk_begin(r);
+}
+
+void nvn_vk_dispatched(void)
+{
+    open_cs.open = true;
+    for (uint32_t i = 0; i < open_cs.next.n; i++)
+        cs_add(&open_cs.done, open_cs.next.r[i].lo, open_cs.next.r[i].hi - open_cs.next.r[i].lo, open_cs.next.r[i].write);
+    open_cs.done.full |= open_cs.next.full;
+    nvn_vk_dispatch_reset();
+}
+
 void nvn_vk_reading(const vimg *v)
 {
     if (!open_pass.open || !v)
@@ -1264,7 +1377,9 @@ void nvn_vk_game_barrier(replay *r)
 {
     if (!r->recording)
         return;
-    if (open_pass.open)
+    if (open_cs.open)
+        cs_close();
+    else if (open_pass.open)
         nvn_vk_end_rendering();
     else
         nvn_vk_barrier(g.cb);
@@ -1283,6 +1398,7 @@ bool nvn_vk_begin(replay *r)
 {
     if (r->recording) {
         nvn_vk_end_rendering();
+        cs_close();
         return true;
     }
     if (!wait_submitted())
@@ -1362,6 +1478,7 @@ static uint64_t g_submitted, g_finished;
 static bool submit_recorded(replay *r)
 {
     nvn_vk_end_rendering();
+    cs_close();
     r->recording = false;
     nvn_counters_close(g.cb);
     if (gpu_ts.pool)

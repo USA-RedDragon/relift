@@ -497,6 +497,25 @@ void nvn_vk_end_rendering(void);
  * the open render pass, the pass ends with its barrier first, so the read sees what the pass drew.
  */
 void nvn_vk_reading(const vimg *v);
+/**
+ * @brief The ranges a dispatch about to be recorded touches: nvn_vk_dispatch_reset starts them, the buffer and image
+ * calls add guest address ranges it reads or writes: an image by the bytes of its storage that the levels (one, or
+ * level and those after it) hold in each layer a view names (0 layers for all from layer; one range for up to 8
+ * layers, past that one span over them).
+ */
+void nvn_vk_dispatch_reset(void);
+void nvn_vk_dispatch_buffer(uint64_t addr, uint64_t size, bool write);
+void nvn_vk_dispatch_image(const vimg *v, uint32_t level, bool one_level, uint32_t layer, uint32_t layers, bool write);
+/** @brief The dispatch may read or write memory no binding names (global loads and stores): it waits and is waited for. */
+void nvn_vk_dispatch_anywhere(void);
+/**
+ * @brief Begins recording a dispatch: after other dispatches with no barrier since (the console orders dispatches only
+ * at the game's barriers), it records no barrier when the ranges it touches meet none that they write and it writes
+ * none they read; otherwise as nvn_vk_begin, which ends the open dispatches with a barrier.
+ */
+bool nvn_vk_begin_dispatch(replay *r);
+/** @brief The dispatch was recorded: its ranges join the open dispatches until the next barrier. */
+void nvn_vk_dispatched(void);
 /** @brief The game's nvnCommandBufferBarrier: ends the open render pass (with its barrier), else a barrier alone. */
 void nvn_vk_game_barrier(replay *r);
 /** @brief Copies n guest bytes at addr into the arena (zero-filled to pad bytes); offset of the copy in *off. */

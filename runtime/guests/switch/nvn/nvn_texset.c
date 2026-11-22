@@ -678,6 +678,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     if (image)
         nvn_vk_written(v);
     if (t.tex_img[sl] == v && t.tex_guest[sl] == tex && !memcmp(t.tex_view[sl], view, sizeof view)) {
+        nvn_vk_dispatch_image(v, t.tex_level[sl], image, t.tex_layer[sl], t.tex_layers[sl], image);
         *kind = t.tex_kind[sl];
         memcpy(dim, t.dims.map + 4ull * sl, 4);
         return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
@@ -743,6 +744,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     t.tex_guest[sl] = tex;
     memcpy(t.tex_view[sl], view, sizeof view);
     memcpy(t.dims.map + 4ull * sl, dim, 4);
+    nvn_vk_dispatch_image(v, t.tex_level[sl], image, t.tex_layer[sl], t.tex_layers[sl], image);
     return !with_sampler || (image && !nvn_sampler_registered(sid, (uint8_t[128]){ 0 })) ? RL_OK : bind_sampler(r, sid);
 }
 

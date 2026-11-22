@@ -1850,6 +1850,17 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         map[i] = (VkSpecializationMapEntry){ i, 4 * i, 4 };
         vals[i] = rl_ld32(r->mem, ctl + 0x58 + 4 * i);
     }
+    nvn_vk_dispatch_reset();
+    for (uint32_t i = 0; i < m->nrecs; i++)
+        if (m->recs[i].kind == NVN_IFACE_GLOBAL_MEMORY || m->recs[i].kind == NVN_IFACE_GLOBAL_STORE)
+            nvn_vk_dispatch_anywhere();
+    for (uint32_t i = 0; i < nssbo; i++)
+        if (st->storage[i].addr)
+            nvn_vk_dispatch_buffer(nvn_gpu_guest(st->storage[i].addr), (uint32_t)st->storage[i].size, true);
+    for (uint32_t i = 0; i < nubo; i++)
+        if (st->ubo[NVN_STAGE_COMPUTE][i].addr)
+            nvn_vk_dispatch_buffer(nvn_gpu_guest(st->ubo[NVN_STAGE_COMPUTE][i].addr), st->ubo[NVN_STAGE_COMPUTE][i].size,
+                                   false);
     int rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals, img_lo, at);
     if (rc != RL_OK)
         return rc;
@@ -1867,7 +1878,10 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         nvn_mirror_written(st->storage[i].addr, st->storage[i].size);
     if (m->global_store)
         nvn_mirror_written_all();
-    nvn_vk_begin(r);
+    if (ibuf)
+        nvn_vk_begin(r);
+    else
+        nvn_vk_begin_dispatch(r);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
     if (ibuf) {
@@ -1875,7 +1889,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     } else {
         VK(vkCmdDispatch)(g.cb, x, y, z);
     }
-    nvn_vk_barrier(g.cb);
+    nvn_vk_dispatched();
     if (nvn_trace_active) {
         nvn_trace_cmd tc = { .groups = { x, y, z } };
         tc.keys[NVN_STAGE_COMPUTE] = m->key;

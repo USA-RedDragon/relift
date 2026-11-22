@@ -3,7 +3,8 @@
  * @brief Render passes follow what the console orders: draws into the same
  * attachments share one host pass, and the pass ends, with its barrier, only
  * where the game changes targets, calls a barrier or reads a target the pass
- * drew into. The device calls go to recording stand-ins.
+ * drew into; dispatches the game puts no barrier between run without one unless
+ * one touches what another writes. The device calls go to recording stand-ins.
  */
 #include "nvn_priv.h"
 #include "nvn_vk.h"
@@ -158,5 +159,192 @@ TEST(nvn_a_command_outside_a_pass_ends_the_open_one)
     CHECK_EQ(calls.barriers, 1u);
     CHECK(nvn_vk_begin_rendering(&f.r, &area));
     CHECK_EQ(calls.begins, 2u);
+    teardown(&f);
+}
+
+/** @brief A 2D color array of two layers with two levels each: level 0 at 0, level 1 at 0x1000, layers 0x2000 apart. */
+static void array_image(vimg *v, uint64_t storage)
+{
+    memset(v, 0, sizeof *v);
+    v->storage = storage;
+    v->d.target = 4;
+    v->d.levels = 2;
+    v->d.depth = 2;
+    v->d.layer_stride = 0x2000;
+    v->d.size = 0x4000;
+    v->d.level_offset[1] = 0x1000;
+}
+
+TEST(nvn_dispatches_without_a_hazard_or_barrier_between_them_overlap)
+{
+    static fixture f;
+    setup(&f);
+    vimg img;
+    array_image(&img, 0x100000);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 0, true, 0, 1, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 0, true, 1, 1, true);
+    nvn_vk_dispatch_buffer(0x200000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 1, true, 0, 1, true);
+    nvn_vk_dispatch_buffer(0x300000, 0x100, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before);
+    nvn_vk_game_barrier(&f.r);
+    CHECK_EQ(calls.barriers, before + 1);
+    teardown(&f);
+}
+
+TEST(nvn_a_dispatch_touching_what_an_open_one_writes_waits_for_it)
+{
+    static fixture f;
+    setup(&f);
+    vimg img;
+    array_image(&img, 0x100000);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 1, true, 0, 1, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 0, false, 0, 1, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x200000, 0x100, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x2000f0, 0x10, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 2);
+    teardown(&f);
+}
+
+TEST(nvn_any_other_command_after_open_dispatches_waits_for_them)
+{
+    static fixture f;
+    setup(&f);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x200000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    VkRect2D area;
+    CHECK(nvn_vk_begin_rendering(&f.r, &area));
+    CHECK_EQ(calls.barriers, before + 1);
+    CHECK_EQ(calls.begins, 1u);
+    teardown(&f);
+}
+
+TEST(nvn_a_view_of_every_layer_covers_each_layers_levels)
+{
+    static fixture f;
+    setup(&f);
+    vimg img;
+    array_image(&img, 0x100000);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 0, true, 1, 1, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 1, true, 0, 0, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 0, false, 0, 0, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    teardown(&f);
+}
+
+TEST(nvn_dispatches_writing_other_levels_of_every_face_overlap)
+{
+    static fixture f;
+    setup(&f);
+    vimg cube;
+    array_image(&cube, 0x100000);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&cube, 0, true, 0, 0, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&cube, 1, true, 0, 0, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&cube, 0, false, 1, 1, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    teardown(&f);
+}
+
+TEST(nvn_dispatches_writing_other_faces_of_a_cube_overlap)
+{
+    static fixture f;
+    setup(&f);
+    vimg cube;
+    memset(&cube, 0, sizeof cube);
+    cube.storage = 0x100000;
+    cube.d.target = NVN_TARGET_CUBEMAP;
+    cube.d.levels = 2;
+    cube.d.depth = 1;
+    cube.d.layer_stride = 0x2000;
+    cube.d.size = 0xc000;
+    cube.d.level_offset[1] = 0x1000;
+    unsigned before = 0;
+    for (uint32_t face = 0; face < 6; face++) {
+        nvn_vk_dispatch_reset();
+        nvn_vk_dispatch_image(&cube, 0, true, face, 1, true);
+        CHECK(nvn_vk_begin_dispatch(&f.r));
+        nvn_vk_dispatched();
+        if (face == 0)
+            before = calls.barriers;
+    }
+    CHECK_EQ(calls.barriers, before);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&cube, 0, true, 5, 1, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    teardown(&f);
+}
+
+TEST(nvn_a_dispatch_storing_through_global_addresses_waits_and_is_waited_for)
+{
+    static fixture f;
+    setup(&f);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x200000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_anywhere();
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x900000, 0x100, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 2);
     teardown(&f);
 }
