@@ -142,6 +142,8 @@ pub mod op {
     pub const ATOMIC_OR: u16 = 241;
     pub const ATOMIC_XOR: u16 = 242;
     pub const PHI: u16 = 245;
+    pub const TYPE_COOPERATIVE_MATRIX: u16 = 4456;
+    pub const COOPERATIVE_MATRIX_MUL_ADD: u16 = 4459;
 }
 
 pub mod glsl {
@@ -279,6 +281,15 @@ impl Module {
     }
     pub fn t_i32(&mut self) -> u32 {
         self.ty(op::TYPE_INT, &[32, 1])
+    }
+    /// `OpTypeCooperativeMatrixKHR` of `component`, subgroup scope, with
+    /// `usage` 0 for A, 1 for B and 2 for the accumulator.
+    pub fn t_coop_matrix(&mut self, component: u32, rows: u32, cols: u32, usage: u32) -> u32 {
+        let scope = self.c_u32(3);
+        let r = self.c_u32(rows);
+        let c = self.c_u32(cols);
+        let u = self.c_u32(usage);
+        self.ty(op::TYPE_COOPERATIVE_MATRIX, &[component, scope, r, c, u])
     }
     pub fn t_f16(&mut self) -> u32 {
         self.ty(op::TYPE_FLOAT, &[16])

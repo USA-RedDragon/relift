@@ -6,6 +6,8 @@ use relift_gpu_nv::translate::{HostProfile, Options, WarpPath, translate, transl
 
 const EXIT: u128 = 0x000f_ea00_0380_0000_0000_0000_0000_794d;
 const BRA_SELF: u128 = 0x000f_c000_0383_ffff_ffff_fff0_0000_7947;
+/// `OpCooperativeMatrixMulAddKHR`.
+const COOPERATIVE_MATRIX_MUL_ADD: u32 = 4459;
 
 fn program(body: &[u128]) -> Program {
     let mut b = Vec::new();
@@ -170,6 +172,27 @@ fn hmma_f16() {
     let s = translate_with(&program(&words), &opts).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(calls(&s.spirv), 3 + 8 + 4);
     assert_eq!(narrow_warp_path(&words), WarpPath::Shared);
+    let mut host = HostProfile::nvidia();
+    host.coop_hmma = true;
+    let opts = Options {
+        host,
+        ..Options::default()
+    };
+    let s = translate_with(&program(&words), &opts).unwrap_or_else(|e| panic!("{e}"));
+    let ops = spirv_ops(&s.spirv);
+    assert_eq!(calls(&s.spirv), 3, "a call per HMMA and no step functions");
+    assert_eq!(
+        ops.iter()
+            .filter(|&&o| o == COOPERATIVE_MATRIX_MUL_ADD)
+            .count(),
+        2,
+        "one multiply-add in each shape's helper"
+    );
+    let model = s
+        .spirv
+        .windows(3)
+        .any(|w| w[0] == (3 << 16 | 14) && w[2] == 3);
+    assert!(model, "OpMemoryModel Vulkan");
 }
 
 #[test]

@@ -153,6 +153,15 @@ pub struct HostProfile {
     /// `ReliftDeviceProbes` of its capability dump); no Vulkan property
     /// promises it.
     pub canonical_nan: bool,
+    /// HMMA.F16 runs on `VK_KHR_cooperative_matrix` multiply-adds whose
+    /// matrices are built from and read into each lane's registers: the
+    /// runtime's probe measured that the device's 16x8x16 and 16x8x8 half
+    /// multiply-adds give the SM86 results in that layout
+    /// (`hmmaCooperativeMatrix` in `ReliftDeviceProbes`; it asks only when
+    /// the device also has the Vulkan memory model at device scope, which
+    /// such modules need, and 32-wide compute subgroups). Used only where
+    /// warps are 32-wide subgroups.
+    pub coop_hmma: bool,
     /// `maxComputeWorkGroupInvocations`: Vulkan guarantees 128.
     pub max_workgroup_invocations: u32,
     /// `maxComputeWorkGroupSize`: Vulkan guarantees 128, 128 and 64.
@@ -214,6 +223,7 @@ impl HostProfile {
             native_mufu: true,
             native_f16: true,
             canonical_nan: true,
+            coop_hmma: false,
             max_workgroup_invocations: 1024,
             max_workgroup_size: [1024, 1024, 64],
             subgroup_sizes: (32, 32),
@@ -243,6 +253,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (32, 64),
             ..HostProfile::nvidia()
@@ -271,6 +282,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (32, 64),
             ..HostProfile::nvidia()
@@ -302,6 +314,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (8, 32),
             ..HostProfile::nvidia()
@@ -331,6 +344,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (4, 32),
             compute_subgroup: None,
@@ -366,6 +380,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (64, 128),
             compute_subgroup: Some(64),
@@ -400,6 +415,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_invocations: 2048,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (64, 128),
@@ -432,6 +448,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (16, 16),
             compute_subgroup: None,
@@ -468,6 +485,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_size: [1024, 1024, 1024],
             subgroup_sizes: (8, 8),
             compute_subgroup: None,
@@ -532,6 +550,7 @@ impl HostProfile {
             native_mufu: false,
             native_f16: false,
             canonical_nan: false,
+            coop_hmma: false,
             max_workgroup_invocations: 128,
             max_workgroup_size: [128, 128, 64],
             subgroup_sizes: (1, 128),
@@ -645,6 +664,7 @@ impl HostProfile {
                 && caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat16")
                 && caps.on("exactFloat16"),
             canonical_nan: caps.on("canonicalNan32"),
+            coop_hmma: caps.on("hmmaCooperativeMatrix"),
             max_workgroup_invocations: caps.get32("maxComputeWorkGroupInvocations"),
             max_workgroup_size: [0, 1, 2]
                 .map(|k| caps.get32(&format!("maxComputeWorkGroupSize[{k}]"))),

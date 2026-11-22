@@ -18,8 +18,18 @@
 //! result rounded to half precision before the second. A NaN input, an
 //! infinity times zero or infinities of both signs give `0x7fff`; otherwise
 //! an infinite input gives that infinity.
+//!
+//! Where the runtime's probe measured that the host's cooperative matrix
+//! multiply-adds give these results ([`HostProfile::coop_hmma`]) and warps
+//! are 32-wide subgroups, HMMA is one `OpCooperativeMatrixMulAddKHR` on
+//! matrices built from the lanes' registers instead: each lane's
+//! components are its fragment's halves in register order, except that the
+//! K = 16 A takes registers 0, 2, 1, 3 (the order the probe checks).
+//!
+//! [`HostProfile::coop_hmma`]: crate::translate::HostProfile::coop_hmma
 
 use super::{Ctx, Res, bad};
+use crate::program::Stage;
 use crate::spirv::{glsl, op};
 use crate::translate::host::WarpPath;
 use crate::{Inst, Operand};
@@ -30,11 +40,18 @@ const RETURN_VALUE: u16 = 254;
 const DOT8_KEY: u32 = 0x4_0000;
 const DOT8_FLOAT_KEY: u32 = 0x4_0001;
 const HMMA_KEY: u32 = 0x4_0010;
+const HMMA_COOP_KEY: u32 = 0x8;
 /// The step functions are called, not inlined (`DontInline`): a program
 /// has hundreds of HMMA and eight steps each, and inlined they made
 /// binaries of megabytes and drivers compile for minutes.
 const DOT8_CONTROL: u32 = 2;
 const NO_EXP: u32 = -64i32 as u32;
+const COMPOSITE_INSERT: u16 = 82;
+const CAP_FLOAT16: u32 = 9;
+const CAP_COOPERATIVE_MATRIX: u32 = 6022;
+const USE_A: u32 = 0;
+const USE_B: u32 = 1;
+const USE_ACCUMULATOR: u32 = 2;
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
@@ -78,7 +95,7 @@ fn hmma(c: &mut Ctx, i: &Inst) -> Res<()> {
     let b: Vec<u32> = (0..nb).map(|k| load(c, rb, k)).collect();
     let acc: Vec<u32> = (0..2).map(|k| load(c, rc, k)).collect();
     let out = if c.hmma_callable() {
-        let f = c.hmma_fn(usize::from(na), usize::from(nb));
+        let f = c.hmma_fn(usize::from(na), usize::from(nb), c.coop_hmma_ok());
         let u = c.u32t();
         let v2 = c.m.t_vec(u, 2);
         let mut args = vec![f];
@@ -101,6 +118,15 @@ fn hmma(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 impl Ctx {
+    /// Whether an HMMA is a cooperative matrix multiply-add (see the module
+    /// docs): the host's probe passed, the stage is compute and a warp is a
+    /// full 32-wide subgroup.
+    fn coop_hmma_ok(&self) -> bool {
+        self.host.coop_hmma
+            && self.stage == Stage::Compute
+            && self.iface.host.warp == WarpPath::Subgroup
+    }
+
     /// Whether an HMMA can be a call of [`Ctx::hmma_fn`]: on the paths whose
     /// lane exchange is a subgroup shuffle, which reads nothing of the
     /// caller's function.
@@ -112,12 +138,13 @@ impl Ctx {
     }
 
     /// The helper `hmma(a0.., b0.., c0, c1)` of one shape (`na` words of A,
-    /// `nb` of B): the whole of an HMMA, its lane exchange and its fused
-    /// steps, returning D's two words. It is called, not inlined
+    /// `nb` of B): the whole of an HMMA, returning D's two words, as one
+    /// cooperative matrix multiply-add when `coop` holds and otherwise as
+    /// its lane exchange and its fused steps. It is called, not inlined
     /// (`DontInline`): a program of hundreds of HMMA inlined made the host
     /// driver compile for tens of seconds.
-    fn hmma_fn(&mut self, na: usize, nb: usize) -> u32 {
-        let key = HMMA_KEY + na as u32;
+    fn hmma_fn(&mut self, na: usize, nb: usize, coop: bool) -> u32 {
+        let key = HMMA_KEY + na as u32 + if coop { HMMA_COOP_KEY } else { 0 };
         if let Some(&f) = self.builtins.get(&key) {
             return f;
         }
@@ -134,7 +161,12 @@ impl Ctx {
             .collect();
         let entry = self.m.id();
         self.m.emit_void(op::LABEL, &[entry]);
-        let out = self.hmma_body(&ps[..na], &ps[na..na + nb], &ps[na + nb..]);
+        let (a, b, acc) = (&ps[..na], &ps[na..na + nb], &ps[na + nb..]);
+        let out = if coop {
+            coop_body(self, a, b, acc)
+        } else {
+            self.hmma_body(a, b, acc)
+        };
         let r = self.m.emit(op::COMPOSITE_CONSTRUCT, v2, &out);
         self.m.emit_void(RETURN_VALUE, &[r]);
         self.m.emit_void(op::FUNCTION_END, &[]);
@@ -553,4 +585,50 @@ impl Ctx {
         }
         self.dot8_round(sum, big)
     }
+}
+
+/// D of one HMMA as a cooperative matrix multiply-add of matrices built
+/// from the lanes' A, B and C registers (see the module docs).
+fn coop_body(c: &mut Ctx, a: &[u32], b: &[u32], acc: &[u32]) -> Vec<u32> {
+    c.cap(CAP_COOPERATIVE_MATRIX);
+    c.cap(CAP_FLOAT16);
+    c.exts.insert("SPV_KHR_cooperative_matrix");
+    let u = c.u32t();
+    let h = c.m.t_f16();
+    let v2h = c.m.t_vec(h, 2);
+    let k = if b.len() == 2 { 16 } else { 8 };
+    let ta = c.m.t_coop_matrix(h, 16, k, USE_A);
+    let tb = c.m.t_coop_matrix(h, k, 8, USE_B);
+    let tc = c.m.t_coop_matrix(h, 16, 8, USE_ACCUMULATOR);
+    let build = |c: &mut Ctx, t: u32, words: &[u32]| {
+        let z = c.m.c_u32(0);
+        let zh = c.m.emit(op::BITCAST, v2h, &[z]);
+        let zh = c.m.emit(op::COMPOSITE_EXTRACT, h, &[zh, 0]);
+        let mut m = c.m.emit(op::COMPOSITE_CONSTRUCT, t, &[zh]);
+        for (n, &w) in words.iter().enumerate() {
+            let p = c.m.emit(op::BITCAST, v2h, &[w]);
+            for j in 0..2u32 {
+                let e = c.m.emit(op::COMPOSITE_EXTRACT, h, &[p, j]);
+                m = c.m.emit(COMPOSITE_INSERT, t, &[e, m, 2 * n as u32 + j]);
+            }
+        }
+        m
+    };
+    let a_order: Vec<u32> = if k == 16 {
+        vec![a[0], a[2], a[1], a[3]]
+    } else {
+        a.to_vec()
+    };
+    let ma = build(c, ta, &a_order);
+    let mb = build(c, tb, b);
+    let mc = build(c, tc, acc);
+    let md = c.m.emit(op::COOPERATIVE_MATRIX_MUL_ADD, tc, &[ma, mb, mc]);
+    (0..acc.len() as u32)
+        .map(|n| {
+            let lo = c.m.emit(op::COMPOSITE_EXTRACT, h, &[md, 2 * n]);
+            let hi = c.m.emit(op::COMPOSITE_EXTRACT, h, &[md, 2 * n + 1]);
+            let p = c.m.emit(op::COMPOSITE_CONSTRUCT, v2h, &[lo, hi]);
+            c.m.emit(op::BITCAST, u, &[p])
+        })
+        .collect()
 }

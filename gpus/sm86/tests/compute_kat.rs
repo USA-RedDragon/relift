@@ -37,7 +37,10 @@ fn recorded_programs_translate_for_every_host() {
     assert!(progs.len() >= 5, "{} programs", progs.len());
     for (name, bytes) in &progs {
         let p = relift_gpu_sm86::program::parse(bytes);
-        for host in HostProfile::presets() {
+        let mut coop = HostProfile::nvidia();
+        coop.coop_hmma = true;
+        coop.name = "nvidia with cooperative matrix HMMA".into();
+        for host in HostProfile::presets().into_iter().chain([coop]) {
             let o = Options {
                 host: host.clone(),
                 ..Options::default()
