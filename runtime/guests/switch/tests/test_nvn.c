@@ -1402,6 +1402,16 @@ TEST(nvn_timestamp_reports_land_once_the_gpu_ran_them_without_a_wait)
     fprintf(stderr, "  timestamps %s\n", nvn_vk_calibrated() ? "calibrated" : "on the fallback (no calibrated pair)");
 }
 
+TEST(nvn_the_next_batch_is_recorded_while_one_runs_and_writers_are_waited_for)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_the_next_batch_is_recorded_while_one_runs_and_writers_are_waited_for: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_ring_check(), 0);
+}
+
 TEST(nvn_a_submit_returns_before_the_device_finished_and_a_settle_sees_its_results)
 {
     nvn_probes p;

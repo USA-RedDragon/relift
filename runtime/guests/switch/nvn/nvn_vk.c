@@ -341,6 +341,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
     g.timeline_ok = feat.f12.timelineSemaphore;
+    g.unused_while_pending = feat.f12.descriptorBindingUpdateUnusedWhilePending;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
     f13->robustImageAccess = VK_FALSE;
     rl_vkdev_chain(b, &feat.f2);
@@ -405,9 +406,12 @@ static void bring_up(void)
     if (VK(vkCreateCommandPool)(g.dev, &pci, NULL, &g.pool) != VK_SUCCESS)
         return;
     cai.commandPool = g.pool;
-    if (VK(vkAllocateCommandBuffers)(g.dev, &cai, &g.cb) != VK_SUCCESS ||
-        VK(vkCreateFence)(g.dev, &fci, NULL, &g.fence) != VK_SUCCESS)
-        return;
+    for (uint32_t s = 0; s < NVN_SLOTS; s++)
+        if (VK(vkAllocateCommandBuffers)(g.dev, &cai, &g.cbs[s]) != VK_SUCCESS ||
+            VK(vkCreateFence)(g.dev, &fci, NULL, &g.fences[s]) != VK_SUCCESS)
+            return;
+    g.cb = g.cbs[0];
+    g.fence = g.fences[0];
     if (g.conservative_raster) {
         struct {
             VkStructureType sType;
@@ -426,10 +430,12 @@ static void bring_up(void)
         VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
         g.import_align = hp.minImportedHostPointerAlignment ? hp.minImportedHostPointerAlignment : 4096;
     }
-    if (!nvn_vk_staging_new(&g.arena, 64ull << 20)) {
-        rl_log(RL_LOG_ERROR, "nvn", "cannot allocate the upload arena");
-        return;
-    }
+    for (uint32_t s = 0; s < NVN_SLOTS; s++)
+        if (!nvn_vk_staging_new(&g.arenas[s], 64ull << 20)) {
+            rl_log(RL_LOG_ERROR, "nvn", "cannot allocate the upload arena");
+            return;
+        }
+    g.arena = g.arenas[0];
     nvn_pipe_init();
     rl_log(RL_LOG_INFO, "nvn", "NVN2 device on %s (queue family %u)", g.name, g.family);
     write_caps();
@@ -1406,8 +1412,6 @@ bool nvn_vk_begin(replay *r)
         cs_close();
         return true;
     }
-    if (!wait_submitted())
-        return false;
     VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &bi) != VK_SUCCESS)
@@ -1416,12 +1420,12 @@ bool nvn_vk_begin(replay *r)
     if (!gpu_ts.pool && !gpu_ts.failed && gpu_ts.period_ns > 0) {
         VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                      .queryType = VK_QUERY_TYPE_TIMESTAMP,
-                                     .queryCount = 2 };
+                                     .queryCount = 2 * NVN_SLOTS };
         gpu_ts.failed = VK(vkCreateQueryPool)(g.dev, &qi, NULL, &gpu_ts.pool) != VK_SUCCESS;
     }
     if (gpu_ts.pool) {
-        VK(vkResetQueryPool)(g.dev, gpu_ts.pool, 0, 2);
-        VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu_ts.pool, 0);
+        VK(vkResetQueryPool)(g.dev, gpu_ts.pool, 2 * g.slot, 2);
+        VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot);
     }
     return true;
 }
@@ -1520,18 +1524,43 @@ static void fault_report(void)
 }
 
 /**
- * @brief The batch submitted last and not yet waited for (see nvn_vk_submit): its number, counted from 1, and the
- * number of the last batch known finished. The arena, the descriptor pools and the command buffer stay its own until
- * nvn_vk_settle waits for it.
+ * @brief The batch each slot submitted and that was not yet waited for (see nvn_vk_submit): whether there is one, its
+ * number (counted from 1), when it was submitted, and whether it may write guest memory (nvn_vk_mark_write). A slot's
+ * command buffer, arena, descriptor pools and queries stay its batch's until wait_slot waits for it. g_finished is the
+ * number of the last batch known finished.
  */
 static struct {
-    bool on;
+    bool on, writer;
     bool readback, copies;
+    uint64_t seq;
     int64_t t1;
-} pending;
+} pending[NVN_SLOTS];
 static uint64_t g_submitted, g_finished;
+static bool g_writer;
 
-/** @brief Ends r's command buffer and submits it with g.fence; false (logged) when the device refuses. */
+void nvn_vk_mark_write(void) { g_writer = true; }
+
+static bool wait_slot(uint32_t s);
+
+/** @brief Makes slot s the one recorded into: its command buffer, fence, arena and the modules' per-batch state. */
+static void use_slot(uint32_t s)
+{
+    if (s == g.slot)
+        return;
+    g.arenas[g.slot] = g.arena;
+    g.arena_used_of[g.slot] = g.arena_used;
+    g.slot = s;
+    g.cb = g.cbs[s];
+    g.fence = g.fences[s];
+    g.arena = g.arenas[s];
+    g.arena_used = g.arena_used_of[s];
+    nvn_draw_slot(s);
+    nvn_untile_slot(s);
+    nvn_dlss_slot(s);
+    nvn_counters_slot(s);
+}
+
+/** @brief Ends r's command buffer and submits it with the slot's fence; false (logged) when the device refuses. */
 static bool submit_recorded(replay *r)
 {
     nvn_vk_end_rendering();
@@ -1539,7 +1568,7 @@ static bool submit_recorded(replay *r)
     r->recording = false;
     nvn_counters_close(g.cb);
     if (gpu_ts.pool)
-        VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 1);
+        VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot + 1);
     bool copies = nvn_mirror_readback_pending();
     bool readback = nvn_mirror_record_readback(g.cb);
     VkResult vr = VK(vkEndCommandBuffer)(g.cb);
@@ -1564,53 +1593,98 @@ static bool submit_recorded(replay *r)
             fault_report();
         return false;
     }
-    pending.t1 = now_ns();
+    uint32_t s = g.slot;
+    pending[s].t1 = now_ns();
     if (g.timeline_ok)
         g.timeline_value = signal;
     nvn_counters_submitted(g.timeline_ok ? g.timeline_value : 0);
-    tm.submit_ns += (uint64_t)(pending.t1 - t0);
-    pending.on = true;
-    pending.readback = readback;
-    pending.copies = copies;
-    __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
-    return true;
+    tm.submit_ns += (uint64_t)(pending[s].t1 - t0);
+    pending[s].on = true;
+    pending[s].readback = readback;
+    pending[s].copies = copies;
+    pending[s].writer = g_writer || g.uniform_pending || !g.unused_while_pending || nvn_mirror_any();
+    g_writer = false;
+    g.uniform_pending = false;
+    pending[s].seq = __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
+    g.arena_used = 0;
+    g.flushes++;
+    uint32_t next = (s + 1) % NVN_SLOTS;
+    bool ok = wait_slot(next);
+    use_slot(next);
+    return ok;
 }
 
-/** @brief Waits for the submitted batch and frees what it held; true when there was none. */
-static bool wait_submitted(void)
+/** @brief Waits for slot s's batch and frees what it held; true when there was none. */
+static bool wait_slot(uint32_t s)
 {
-    if (!pending.on)
+    if (!pending[s].on)
         return true;
-    pending.on = false;
+    pending[s].on = false;
     nvn_core_leave();
-    VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
-    nvn_counters_settle();
-    tm.wait_ns += (uint64_t)(now_ns() - pending.t1);
+    VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fences[s], VK_TRUE, UINT64_MAX);
+    nvn_counters_settle(s);
+    tm.wait_ns += (uint64_t)(now_ns() - pending[s].t1);
     tm.flushes++;
     bool ok = vr == VK_SUCCESS;
     uint64_t ts[2];
     if (ok && gpu_ts.pool &&
-        VK(vkGetQueryPoolResults)(g.dev, gpu_ts.pool, 0, 2, sizeof ts, ts, sizeof ts[0], VK_QUERY_RESULT_64_BIT) ==
+        VK(vkGetQueryPoolResults)(g.dev, gpu_ts.pool, 2 * s, 2, sizeof ts, ts, sizeof ts[0], VK_QUERY_RESULT_64_BIT) ==
             VK_SUCCESS)
         tm.gpu_ns += (uint64_t)((double)(ts[1] - ts[0]) * gpu_ts.period_ns);
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     if (vr == VK_ERROR_DEVICE_LOST)
         fault_report();
-    if (ok && pending.readback)
+    if (ok && pending[s].readback)
         nvn_mirror_apply_readback();
-    else
+    else if (pending[s].readback)
         nvn_mirror_drop_readback();
-    nvn_mirror_flushed();
-    __atomic_store_n(&g_finished, g_submitted, __ATOMIC_RELEASE);
-    g.uniform_pending = false;
-    nvn_untile_release();
-    nvn_draw_reset();
-    nvn_dlss_reset();
+    bool idle = true;
+    for (uint32_t o = 0; o < NVN_SLOTS; o++)
+        idle = idle && !pending[o].on;
+    if (idle)
+        nvn_mirror_flushed();
+    uint64_t done = pending[s].seq;
+    for (uint32_t o = 0; o < NVN_SLOTS; o++)
+        if (pending[o].on && pending[o].seq < done)
+            done = pending[o].seq - 1;
+    if (done > __atomic_load_n(&g_finished, __ATOMIC_ACQUIRE))
+        __atomic_store_n(&g_finished, done, __ATOMIC_RELEASE);
+    nvn_untile_release(s);
+    nvn_draw_reset(s);
+    nvn_dlss_reset(s);
     return ok;
 }
 
+/** @brief Waits for every batch in flight, oldest first. */
+static bool wait_submitted(void)
+{
+    bool ok = true;
+    for (;;) {
+        int oldest = -1;
+        for (uint32_t s = 0; s < NVN_SLOTS; s++)
+            if (pending[s].on && (oldest < 0 || pending[s].seq < pending[oldest].seq))
+                oldest = (int)s;
+        if (oldest < 0)
+            return ok;
+        ok = wait_slot((uint32_t)oldest) && ok;
+    }
+}
+
 bool nvn_vk_settle(void) { return wait_submitted(); }
+
+static bool settle_writers(void);
+
+/** @brief Waits for the batches in flight when any of them may write guest memory the CPU is about to read. */
+bool nvn_vk_settle_writers(void) { return settle_writers(); }
+
+static bool settle_writers(void)
+{
+    for (uint32_t s = 0; s < NVN_SLOTS; s++)
+        if (pending[s].on && pending[s].writer)
+            return wait_submitted();
+    return true;
+}
 
 uint64_t nvn_vk_submitted(void) { return __atomic_load_n(&g_submitted, __ATOMIC_ACQUIRE); }
 
@@ -1622,12 +1696,11 @@ bool nvn_vk_submit(replay *r)
 {
     if (!r->recording)
         return nvn_vk_flush(r);
+    uint32_t s = g.slot;
     if (!submit_recorded(r))
         return false;
-    g.arena_used = 0;
-    g.flushes++;
     /* A batch that copies pool mirrors back waits here: the guest reads those bytes at its next sync. */
-    if (!pending.copies)
+    if (!pending[s].copies)
         return true;
     bool ok = wait_submitted();
     while (ok && nvn_mirror_readback_pending())
@@ -1635,7 +1708,7 @@ bool nvn_vk_submit(replay *r)
     return ok;
 }
 
-/** @brief Submits what r recorded and waits for it, then brings the bytes the device wrote to pool mirrors into guest memory. */
+/** @brief Submits what r recorded and waits for it and every batch before it, then brings the bytes the device wrote to pool mirrors into guest memory. */
 bool nvn_vk_flush(replay *r)
 {
     bool recorded = r->recording;
@@ -1647,28 +1720,20 @@ bool nvn_vk_flush(replay *r)
 
 static bool flush_once(replay *r)
 {
-    if (!r->recording) {
-        if (g.arena_used) {
-            if (!wait_submitted())
-                return false;
-            g.arena_used = 0;
-            g.flushes++;
-        }
-        return true;
-    }
-    if (!submit_recorded(r))
+    if (r->recording && !submit_recorded(r))
         return false;
-    bool ok = wait_submitted();
-    g.arena_used = 0;
-    g.flushes++;
-    return ok;
+    if (!r->recording && g.arena_used) {
+        g.arena_used = 0;
+        g.flushes++;
+    }
+    return wait_submitted();
 }
 
 bool nvn_vk_sync_uniforms(replay *r)
 {
-    if (!g.uniform_pending)
-        return true;
-    return r->recording ? nvn_vk_flush(r) : wait_submitted();
+    if (g.uniform_pending)
+        return nvn_vk_flush(r);
+    return settle_writers();
 }
 
 int nvn_vk_async_check(void)
@@ -1694,14 +1759,99 @@ int nvn_vk_async_check(void)
     }
     VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x5a5a5a5au);
     nvn_vk_barrier(g.cb);
+    VkFence f = g.fence;
     if (!nvn_vk_submit(&r))
         rc = 2;
-    else if (VK(vkGetFenceStatus)(g.dev, g.fence) != VK_NOT_READY || nvn_vk_finished() != before)
+    else if (VK(vkGetFenceStatus)(g.dev, f) != VK_NOT_READY || nvn_vk_finished() != before)
         rc = 3;
     else if (!nvn_vk_settle() || nvn_vk_finished() != nvn_vk_submitted())
         rc = 4;
     else if (((uint32_t *)out.map)[1023] != 0x5a5a5a5au)
         rc = 5;
+    nvn_vk_staging_free(&big);
+    nvn_vk_staging_free(&out);
+    nvn_unlock();
+    return rc;
+}
+
+/** @brief Records a batch of n 64 MiB fills of big (long GPU work) and submits it; its fence, or NULL. */
+static VkFence long_batch(replay *r, staging *big, uint32_t n, bool writer)
+{
+    nvn_vk_begin(r);
+    for (uint32_t i = 0; i < n; i++) {
+        VK(vkCmdFillBuffer)(g.cb, big->buf, 0, big->size, i);
+        nvn_vk_barrier(g.cb);
+    }
+    if (writer)
+        nvn_vk_mark_write();
+    VkFence f = g.fence;
+    return nvn_vk_submit(r) ? f : NULL;
+}
+
+int nvn_vk_ring_check(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok)
+        return -1;
+    nvn_lock();
+    staging big, out;
+    int rc = 0;
+    if (!nvn_vk_staging_new(&big, 64ull << 20) || !nvn_vk_readback_new(&out, 4096)) {
+        nvn_unlock();
+        return 1;
+    }
+    memset(out.map, 0, 4096);
+    replay r = { 0 };
+    VkFence a = long_batch(&r, &big, 64, false);
+    nvn_vk_begin(&r);
+    VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x11111111u);
+    nvn_vk_barrier(g.cb);
+    if (!a)
+        rc = 2;
+    else if (VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
+        rc = 3;
+    VkFence b = g.fence;
+    if (!rc && !nvn_vk_submit(&r))
+        rc = 4;
+    if (!rc && VK(vkGetFenceStatus)(g.dev, a) != VK_SUCCESS)
+        rc = 5;
+    if (!rc && (!nvn_vk_settle() || VK(vkGetFenceStatus)(g.dev, b) != VK_SUCCESS || ((uint32_t *)out.map)[1023] != 0x11111111u))
+        rc = 6;
+    VkFence c = rc ? NULL : long_batch(&r, &big, 64, false);
+    if (!rc && (!c || !nvn_vk_settle_writers() || VK(vkGetFenceStatus)(g.dev, c) != VK_NOT_READY))
+        rc = 7;
+    if (!rc && !nvn_vk_settle())
+        rc = 8;
+    VkFence w = rc ? NULL : long_batch(&r, &big, 64, true);
+    if (!rc && (!w || !nvn_vk_settle_writers() || VK(vkGetFenceStatus)(g.dev, w) != VK_SUCCESS))
+        rc = 9;
+    if (!rc && !nvn_vk_settle())
+        rc = 13;
+    if (!rc) {
+        staging x, y;
+        if (!nvn_vk_staging_new(&x, 4096) || !nvn_vk_readback_new(&y, 4096)) {
+            rc = 14;
+        } else {
+            memset(y.map, 0, 4096);
+            nvn_gfx gst;
+            memset(&gst, 0, sizeof gst);
+            replay q2 = { .mem = r.mem, .st = &gst };
+            long_batch(&q2, &big, 16, 0);
+            nvn_vk_begin(&q2);
+            VK(vkCmdFillBuffer)(g.cb, x.buf, 0, 4096, 0x7e7e7e7eu);
+            if (nvn_counters_stamp_check(&q2) != RL_OK || !nvn_vk_submit(&q2))
+                rc = 15;
+            nvn_vk_begin(&q2);
+            VkBufferCopy bc = { 0, 0, 4096 };
+            VK(vkCmdCopyBuffer)(g.cb, x.buf, y.buf, 1, &bc);
+            nvn_vk_barrier(g.cb);
+            if (!rc && (!nvn_vk_flush(&q2) || ((uint32_t *)y.map)[1023] != 0x7e7e7e7eu))
+                rc = 16;
+            nvn_vk_staging_free(&x);
+            nvn_vk_staging_free(&y);
+        }
+    }
+    nvn_vk_settle();
     nvn_vk_staging_free(&big);
     nvn_vk_staging_free(&out);
     nvn_unlock();
@@ -2777,6 +2927,7 @@ static int update_uniform_buffer(replay *r, const nvn_cmd *e)
         nvn_vk_begin(r);
         nvn_vk_barrier(g.cb);
         VK(vkCmdUpdateBuffer)(g.cb, (VkBuffer)pool, off, size, data);
+        nvn_vk_mark_write();
         nvn_vk_barrier(g.cb);
         g.uniform_pending = true;
         return RL_OK;
@@ -3113,14 +3264,15 @@ bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t 
  * upload only zeroes the padding that is not zero already; a host copy of the uniform banks uploaded, and the banks
  * of the batch being recorded by their bytes, so a bank the batch already holds is not uploaded again.
  */
-static struct {
+static struct arena_track {
     uint64_t *dirty;
     uint8_t *shadow;
     bool failed;
     struct bank_entry {
         uint64_t flushes, hash, n, off;
     } banks[BANK_CACHE];
-} az;
+} azs[NVN_SLOTS];
+#define az azs[g.slot]
 
 static bool arena_tracking(void)
 {
@@ -3264,7 +3416,7 @@ void nvn_lock(void)
         pthread_mutex_lock(&g.lock);
     }
     lock_since = now_ns();
-    wait_submitted();
+    settle_writers();
 }
 
 void nvn_unlock(void)

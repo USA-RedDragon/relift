@@ -35,16 +35,19 @@
 #define BATCH 1024u
 #define STATS 10u
 
-static struct {
+/** @brief Each slot's draws in queries: the pools, the slots used, and each one's queue and stages. */
+static struct qslot {
     VkQueryPool occ, stats;
     uint32_t pending;
     nvn_gfx *owner[BATCH];
     uint8_t tess[BATCH], geom[BATCH];
-} q;
+} qs[NVN_SLOTS];
+/** @brief The slot the counters record into (nvn_counters_slot). */
+static uint32_t rec;
 
 static bool pools(void)
 {
-    if (q.occ)
+    if (qs[rec].occ)
         return true;
     VkQueryPoolCreateInfo oi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                  .queryType = VK_QUERY_TYPE_OCCLUSION,
@@ -53,13 +56,13 @@ static bool pools(void)
                                  .queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS,
                                  .queryCount = BATCH,
                                  .pipelineStatistics = 0x3ffu };
-    if (VK(vkCreateQueryPool)(g.dev, &oi, NULL, &q.occ) != VK_SUCCESS ||
-        VK(vkCreateQueryPool)(g.dev, &si, NULL, &q.stats) != VK_SUCCESS) {
-        q.occ = NULL;
+    if (VK(vkCreateQueryPool)(g.dev, &oi, NULL, &qs[rec].occ) != VK_SUCCESS ||
+        VK(vkCreateQueryPool)(g.dev, &si, NULL, &qs[rec].stats) != VK_SUCCESS) {
+        qs[rec].occ = NULL;
         return false;
     }
-    VK(vkResetQueryPool)(g.dev, q.occ, 0, BATCH);
-    VK(vkResetQueryPool)(g.dev, q.stats, 0, BATCH);
+    VK(vkResetQueryPool)(g.dev, qs[rec].occ, 0, BATCH);
+    VK(vkResetQueryPool)(g.dev, qs[rec].stats, 0, BATCH);
     return true;
 }
 
@@ -80,31 +83,34 @@ typedef struct event {
  * query of its own index (index n is the batch's last timestamp, for the fallback clock), and the completion state.
  * One batch at a time is recorded or in flight (nvn_vk_begin waits for the previous), so one list serves both.
  */
-static struct {
+static struct rslot {
     VkQueryPool pool;
-    bool failed;
     event ev[EVENTS];
     uint32_t n;
-    pthread_mutex_t mu;
-    pthread_cond_t cv;
-    pthread_t thread;
-    bool started;
     /** @brief The batch's timeline value and whether its completion is queued, being done (claimed) or done. */
     uint64_t value;
     bool queued, claimed, done;
     /** @brief The batch's calibrated pair (nvn_vk_calibrate), read when it was submitted; cal false without one. */
     bool cal;
     uint64_t cal_gpu, cal_ns;
-    uint8_t *mem;
-    /** @brief The GPU timestamps of the last batch's reports, for nvn_counters_async_check. */
+    /** @brief The GPU timestamps of the slot's last batch's reports, for nvn_counters_async_check. */
     uint64_t last_ts[EVENTS];
-} rp = { .mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
+} rps[NVN_SLOTS];
+
+/** @brief What the slots share: the reports thread, its lock, and guest memory. */
+static struct {
+    bool failed, started;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_t thread;
+    uint8_t *mem;
+} rq = { .mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
 
 /** @brief Adds the query results of slots [from, to) to their queues' counters. */
-static void accumulate(const uint64_t *occ, const uint64_t (*stats)[STATS], uint32_t from, uint32_t to)
+static void accumulate(uint32_t sl, const uint64_t *occ, const uint64_t (*stats)[STATS], uint32_t from, uint32_t to)
 {
     for (uint32_t i = from; i < to; i++) {
-        uint64_t *a = q.owner[i]->counter_acc;
+        uint64_t *a = qs[sl].owner[i]->counter_acc;
         const uint64_t *s = stats[i];
         a[1] += occ[i];
         a[2] += s[0];
@@ -117,7 +123,7 @@ static void accumulate(const uint64_t *occ, const uint64_t (*stats)[STATS], uint
         a[10] += s[4];
         a[11] += s[5];
         a[12] += s[6];
-        a[13] += q.geom[i] ? s[4] : s[1];
+        a[13] += qs[sl].geom[i] ? s[4] : s[1];
     }
 }
 
@@ -126,13 +132,13 @@ static void accumulate(const uint64_t *occ, const uint64_t (*stats)[STATS], uint
  * queue's counters before the events after it, a counter zeroed at its reset, and each report's value and time
  * (from ts on the calibrated pair or the fallback, or seen without ts) written to guest memory.
  */
-static void walk(const uint64_t *occ, const uint64_t (*stats)[STATS], const uint64_t *ts, uint32_t np, uint32_t n,
-                 uint64_t seen)
+static void walk(uint32_t s, const uint64_t *occ, const uint64_t (*stats)[STATS], const uint64_t *ts, uint32_t np,
+                 uint32_t n, uint64_t seen)
 {
     uint32_t at = 0;
     for (uint32_t i = 0; i < n; i++) {
-        const event *e = &rp.ev[i];
-        accumulate(occ, stats, at, e->slot);
+        const event *e = &rps[s].ev[i];
+        accumulate(s, occ, stats, at, e->slot);
         at = e->slot;
         if (!e->report) {
             e->st->counter_acc[e->type] = 0;
@@ -142,18 +148,18 @@ static void walk(const uint64_t *occ, const uint64_t (*stats)[STATS], const uint
                              ? 0
                              : e->st->counter_acc[e->type];
         uint64_t when = seen;
-        if (ts && rp.cal) {
-            when = (uint64_t)((double)rp.cal_ns + (double)(int64_t)(ts[i] - rp.cal_gpu) * g.timestamp_period_ns);
+        if (ts && rps[s].cal) {
+            when = (uint64_t)((double)rps[s].cal_ns + (double)(int64_t)(ts[i] - rps[s].cal_gpu) * g.timestamp_period_ns);
         } else if (ts) {
             uint64_t back = (uint64_t)((double)(ts[n] - ts[i]) * g.timestamp_period_ns);
             when = back < seen ? seen - back : 0;
         }
-        __atomic_store_n((uint64_t *)(rp.mem + e->addr), value, __ATOMIC_RELAXED);
-        __atomic_store_n((uint64_t *)(rp.mem + e->addr + 8), when, __ATOMIC_RELEASE);
+        __atomic_store_n((uint64_t *)(rq.mem + e->addr), value, __ATOMIC_RELAXED);
+        __atomic_store_n((uint64_t *)(rq.mem + e->addr + 8), when, __ATOMIC_RELEASE);
     }
-    accumulate(occ, stats, at, np);
+    accumulate(s, occ, stats, at, np);
     if (ts)
-        memcpy(rp.last_ts, ts, sizeof ts[0] * n);
+        memcpy(rps[s].last_ts, ts, sizeof ts[0] * n);
 }
 
 /**
@@ -161,48 +167,54 @@ static void walk(const uint64_t *occ, const uint64_t (*stats)[STATS], const uint
  * draw's queries to its queue's counters before the events after it, zeroing a counter at its reset, and writing each
  * report's value and time to guest memory. Runs once per batch, on whichever thread claimed it.
  */
-static void complete(void)
+static void complete(uint32_t s)
 {
     static uint64_t occ[BATCH], stats[BATCH][STATS], ts[EVENTS + 1];
-    uint32_t np = q.pending, n = rp.n;
+    uint32_t np = qs[s].pending, n = rps[s].n;
     uint64_t seen = rl_guest_clock_ns();
     bool ok = true;
     if (np)
-        ok = VK(vkGetQueryPoolResults)(g.dev, q.occ, 0, np, sizeof occ[0] * np, occ, sizeof occ[0],
+        ok = VK(vkGetQueryPoolResults)(g.dev, qs[s].occ, 0, np, sizeof occ[0] * np, occ, sizeof occ[0],
                                        VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
-             VK(vkGetQueryPoolResults)(g.dev, q.stats, 0, np, sizeof stats[0] * np, stats, sizeof stats[0],
+             VK(vkGetQueryPoolResults)(g.dev, qs[s].stats, 0, np, sizeof stats[0] * np, stats, sizeof stats[0],
                                        VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
     bool stamped = n && !hos_fixed();
     if (ok && stamped)
-        ok = VK(vkGetQueryPoolResults)(g.dev, rp.pool, 0, n + 1, sizeof ts[0] * (n + 1), ts, sizeof ts[0],
+        ok = VK(vkGetQueryPoolResults)(g.dev, rps[s].pool, 0, n + 1, sizeof ts[0] * (n + 1), ts, sizeof ts[0],
                                        VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device could not read its counter queries; %u reports are not written", n);
     else
-        walk(occ, stats, stamped ? ts : NULL, np, n, seen);
+        walk(s, occ, stats, stamped ? ts : NULL, np, n, seen);
     if (np) {
-        VK(vkResetQueryPool)(g.dev, q.occ, 0, np);
-        VK(vkResetQueryPool)(g.dev, q.stats, 0, np);
+        VK(vkResetQueryPool)(g.dev, qs[s].occ, 0, np);
+        VK(vkResetQueryPool)(g.dev, qs[s].stats, 0, np);
     }
     if (stamped)
-        VK(vkResetQueryPool)(g.dev, rp.pool, 0, n + 1);
-    q.pending = 0;
-    rp.n = 0;
+        VK(vkResetQueryPool)(g.dev, rps[s].pool, 0, n + 1);
+    qs[s].pending = 0;
+    rps[s].n = 0;
 }
 
-/** @brief Claims the queued completion and runs it, or waits for the thread that claimed it. rp.mu held. */
-static void claim_or_wait(void)
+/**
+ * @brief Claims slot s's queued completion and runs it, or waits for the thread that claimed it, after the completions
+ * of older batches, so counters add up in stream order. rq.mu held.
+ */
+static void claim_or_wait(uint32_t s)
 {
-    if (!rp.claimed) {
-        rp.claimed = true;
-        pthread_mutex_unlock(&rp.mu);
-        complete();
-        pthread_mutex_lock(&rp.mu);
-        rp.done = true;
-        pthread_cond_broadcast(&rp.cv);
+    for (uint32_t o = 0; o < NVN_SLOTS; o++)
+        if (o != s && rps[o].queued && !rps[o].done && rps[o].value < rps[s].value)
+            claim_or_wait(o);
+    if (!rps[s].claimed) {
+        rps[s].claimed = true;
+        pthread_mutex_unlock(&rq.mu);
+        complete(s);
+        pthread_mutex_lock(&rq.mu);
+        rps[s].done = true;
+        pthread_cond_broadcast(&rq.cv);
     }
-    while (!rp.done)
-        pthread_cond_wait(&rp.cv, &rp.mu);
+    while (!rps[s].done)
+        pthread_cond_wait(&rq.cv, &rq.mu);
 }
 
 /**
@@ -212,23 +224,30 @@ static void claim_or_wait(void)
 static void *reports_main(void *arg)
 {
     (void)arg;
-    pthread_mutex_lock(&rp.mu);
+    pthread_mutex_lock(&rq.mu);
     for (;;) {
-        while (!rp.queued || rp.claimed)
-            pthread_cond_wait(&rp.cv, &rp.mu);
-        uint64_t value = rp.value;
-        pthread_mutex_unlock(&rp.mu);
+        int s = -1;
+        for (uint32_t i = 0; i < NVN_SLOTS; i++)
+            if (rps[i].queued && !rps[i].claimed && rps[i].n && rps[i].value &&
+                (s < 0 || rps[i].value < rps[s].value))
+                s = (int)i;
+        if (s < 0) {
+            pthread_cond_wait(&rq.cv, &rq.mu);
+            continue;
+        }
+        uint64_t value = rps[s].value;
+        pthread_mutex_unlock(&rq.mu);
         VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
                                    .semaphoreCount = 1,
                                    .pSemaphores = &g.timeline,
                                    .pValues = &value };
         VkResult vr = VK(vkWaitSemaphores)(g.dev, &wi, UINT64_MAX);
-        pthread_mutex_lock(&rp.mu);
-        if (vr == VK_SUCCESS && rp.queued && rp.value == value)
-            claim_or_wait();
+        pthread_mutex_lock(&rq.mu);
+        if (vr == VK_SUCCESS && rps[s].queued && rps[s].value == value)
+            claim_or_wait((uint32_t)s);
         else if (vr != VK_SUCCESS)
-            while (rp.queued && rp.value == value)
-                pthread_cond_wait(&rp.cv, &rp.mu);
+            while (rps[s].queued && rps[s].value == value)
+                pthread_cond_wait(&rq.cv, &rq.mu);
     }
     return NULL;
 }
@@ -236,27 +255,27 @@ static void *reports_main(void *arg)
 /** @brief Whether reports and resets can wait for the batch's completion; false keeps the waiting path. */
 static bool deferrable(replay *r)
 {
-    if (rp.failed || g.timestamp_period_ns <= 0)
+    if (rq.failed || g.timestamp_period_ns <= 0)
         return false;
-    if (rp.n == EVENTS && !nvn_vk_flush(r))
+    if (rps[rec].n == EVENTS && !nvn_vk_flush(r))
         return false;
-    if (!rp.pool) {
+    if (!rps[rec].pool) {
         VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                      .queryType = VK_QUERY_TYPE_TIMESTAMP,
                                      .queryCount = EVENTS + 1 };
-        if (VK(vkCreateQueryPool)(g.dev, &qi, NULL, &rp.pool) != VK_SUCCESS) {
-            rp.failed = true;
+        if (VK(vkCreateQueryPool)(g.dev, &qi, NULL, &rps[rec].pool) != VK_SUCCESS) {
+            rq.failed = true;
             return false;
         }
-        VK(vkResetQueryPool)(g.dev, rp.pool, 0, EVENTS + 1);
+        VK(vkResetQueryPool)(g.dev, rps[rec].pool, 0, EVENTS + 1);
     }
-    rp.mem = r->mem;
-    if (!rp.started && g.timeline_ok && !hos_fixed()) {
-        if (pthread_create(&rp.thread, NULL, reports_main, NULL) != 0) {
-            rp.failed = true;
+    rq.mem = r->mem;
+    if (!rq.started && g.timeline_ok && !hos_fixed()) {
+        if (pthread_create(&rq.thread, NULL, reports_main, NULL) != 0) {
+            rq.failed = true;
             return false;
         }
-        rp.started = true;
+        rq.started = true;
     }
     return nvn_vk_begin(r);
 }
@@ -265,15 +284,15 @@ static bool deferrable(replay *r)
 static void add_event(event e)
 {
     nvn_vk_barrier(g.cb);
-    VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, rp.pool, rp.n);
-    e.slot = q.pending;
-    rp.ev[rp.n++] = e;
+    VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, rps[rec].pool, rps[rec].n);
+    e.slot = qs[rec].pending;
+    rps[rec].ev[rps[rec].n++] = e;
 }
 
 /** @brief Submits what the queue recorded and waits for it: the completion adds the finished draws' queries. */
 static int harvest(replay *r)
 {
-    if (!q.pending && !rp.n)
+    if (!qs[rec].pending && !rps[rec].n)
         return RL_OK;
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
@@ -307,41 +326,43 @@ int nvn_counters_reset(replay *r, uint32_t type)
 
 void nvn_counters_close(VkCommandBuffer cb)
 {
-    if (rp.n)
-        VK(vkCmdWriteTimestamp)(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, rp.pool, rp.n);
+    if (rps[rec].n)
+        VK(vkCmdWriteTimestamp)(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, rps[rec].pool, rps[rec].n);
 }
 
 void nvn_counters_submitted(uint64_t value)
 {
-    if (!rp.n && !q.pending)
+    if (!rps[rec].n && !qs[rec].pending)
         return;
     uint64_t cg = 0, cn = 0;
-    bool cal = rp.n && nvn_vk_calibrate(&cg, &cn);
-    pthread_mutex_lock(&rp.mu);
-    rp.cal = cal;
-    rp.cal_gpu = cg;
-    rp.cal_ns = cn;
-    rp.value = value;
-    rp.queued = true;
-    rp.claimed = false;
-    rp.done = false;
-    if (rp.started && value && rp.n)
-        pthread_cond_broadcast(&rp.cv);
-    pthread_mutex_unlock(&rp.mu);
+    bool cal = rps[rec].n && nvn_vk_calibrate(&cg, &cn);
+    pthread_mutex_lock(&rq.mu);
+    rps[rec].cal = cal;
+    rps[rec].cal_gpu = cg;
+    rps[rec].cal_ns = cn;
+    rps[rec].value = value;
+    rps[rec].queued = true;
+    rps[rec].claimed = false;
+    rps[rec].done = false;
+    if (rq.started && value && rps[rec].n)
+        pthread_cond_broadcast(&rq.cv);
+    pthread_mutex_unlock(&rq.mu);
 }
 
-void nvn_counters_settle(void)
+void nvn_counters_settle(uint32_t s)
 {
-    pthread_mutex_lock(&rp.mu);
-    if (rp.queued) {
-        claim_or_wait();
-        rp.queued = false;
-        pthread_cond_broadcast(&rp.cv);
+    pthread_mutex_lock(&rq.mu);
+    if (rps[s].queued) {
+        claim_or_wait(s);
+        rps[s].queued = false;
+        pthread_cond_broadcast(&rq.cv);
     }
-    pthread_mutex_unlock(&rp.mu);
+    pthread_mutex_unlock(&rq.mu);
 }
 
-uint32_t nvn_counters_reports_pending(void) { return rp.n; }
+uint32_t nvn_counters_reports_pending(void) { return rps[rec].n; }
+
+void nvn_counters_slot(uint32_t slot) { rec = slot; }
 
 int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
 {
@@ -383,7 +404,7 @@ int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
 
 int nvn_counters_prepare(replay *r)
 {
-    return r->st->counting && q.pending == BATCH ? harvest(r) : RL_OK;
+    return r->st->counting && qs[rec].pending == BATCH ? harvest(r) : RL_OK;
 }
 
 uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellation)
@@ -392,14 +413,16 @@ uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellatio
         st->drew_uncounted = true;
         return UINT32_MAX;
     }
-    uint32_t slot = q.pending++;
-    q.owner[slot] = st;
-    q.geom[slot] = has_geometry;
-    q.tess[slot] = has_tessellation;
+    if (!pools())
+        return UINT32_MAX;
+    uint32_t slot = qs[rec].pending++;
+    qs[rec].owner[slot] = st;
+    qs[rec].geom[slot] = has_geometry;
+    qs[rec].tess[slot] = has_tessellation;
     if (has_tessellation)
         st->counter_inexact |= 1u << 9 | 1u << 13;
-    VK(vkCmdBeginQuery)(g.cb, q.occ, slot, g.occlusion_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
-    VK(vkCmdBeginQuery)(g.cb, q.stats, slot, 0);
+    VK(vkCmdBeginQuery)(g.cb, qs[rec].occ, slot, g.occlusion_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+    VK(vkCmdBeginQuery)(g.cb, qs[rec].stats, slot, 0);
     return slot;
 }
 
@@ -407,8 +430,18 @@ void nvn_counters_end(uint32_t slot)
 {
     if (slot == UINT32_MAX)
         return;
-    VK(vkCmdEndQuery)(g.cb, q.stats, slot);
-    VK(vkCmdEndQuery)(g.cb, q.occ, slot);
+    VK(vkCmdEndQuery)(g.cb, qs[rec].stats, slot);
+    VK(vkCmdEndQuery)(g.cb, qs[rec].occ, slot);
+}
+
+int nvn_counters_stamp_check(replay *r)
+{
+    static uint8_t mem[64];
+    uint8_t *was = r->mem;
+    r->mem = mem;
+    int rc = nvn_counters_report(r, 0, 0);
+    r->mem = was;
+    return rc;
 }
 
 int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
@@ -437,6 +470,7 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
         rc = 3;
     if (!rc && rl_ld64(mem, addr + 8) != 0xaaaaaaaaaaaaaaaaull)
         rc = 4;
+    uint32_t sub = rec;
     if (!rc && !nvn_vk_submit(&r))
         rc = 5;
     uint64_t limit = rl_guest_clock_ns() + 5000000000ull;
@@ -458,7 +492,7 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
         if (!nvn_vk_calibrate(&gpu1, &ns1))
             rc = 11;
         for (int i = 0; !rc && i < 2; i++) {
-            double want = (double)ns1 - (double)(gpu1 - rp.last_ts[i]) * g.timestamp_period_ns;
+            double want = (double)ns1 - (double)(gpu1 - rps[sub].last_ts[i]) * g.timestamp_period_ns;
             double got = (double)(i ? b : a);
             if (got - want > 15000.0 || want - got > 15000.0)
                 rc = 12 + i;
@@ -475,25 +509,25 @@ int nvn_counters_order_check(uint8_t *mem, uint64_t addr)
     static uint64_t occ[3], stats[3][STATS];
     nvn_gfx st;
     memset(&st, 0, sizeof st);
-    rp.mem = mem;
-    rp.n = 0;
+    rq.mem = mem;
+    rps[rec].n = 0;
     for (uint32_t d = 0; d < 3; d++) {
         occ[d] = 1000 + d;
         for (uint32_t k = 0; k < STATS; k++)
             stats[d][k] = 100 * (d + 1) + k;
-        q.owner[d] = &st;
-        q.geom[d] = d == 1;
-        q.tess[d] = 0;
+        qs[rec].owner[d] = &st;
+        qs[rec].geom[d] = d == 1;
+        qs[rec].tess[d] = 0;
     }
     for (uint32_t t = 1; t < NVN_COUNTERS; t++)
-        rp.ev[rp.n++] = (event){ .st = &st, .type = t, .slot = 0 };
+        rps[rec].ev[rps[rec].n++] = (event){ .st = &st, .type = t, .slot = 0 };
     for (uint32_t t = 0; t < NVN_COUNTERS; t++)
-        rp.ev[rp.n++] = (event){ .st = &st, .addr = addr + 16 * t, .type = t, .slot = 1, .report = true, .valid = t != 0 };
-    rp.ev[rp.n++] = (event){ .st = &st, .type = 3, .slot = 2 };
+        rps[rec].ev[rps[rec].n++] = (event){ .st = &st, .addr = addr + 16 * t, .type = t, .slot = 1, .report = true, .valid = t != 0 };
+    rps[rec].ev[rps[rec].n++] = (event){ .st = &st, .type = 3, .slot = 2 };
     for (uint32_t t = 0; t < NVN_COUNTERS; t++)
-        rp.ev[rp.n++] = (event){ .st = &st, .addr = addr + 256 + 16 * t, .type = t, .slot = 3, .report = true, .valid = t != 0 };
-    walk(occ, stats, NULL, 3, rp.n, 77);
-    rp.n = 0;
+        rps[rec].ev[rps[rec].n++] = (event){ .st = &st, .addr = addr + 256 + 16 * t, .type = t, .slot = 3, .report = true, .valid = t != 0 };
+    walk(rec, occ, stats, NULL, 3, rps[rec].n, 77);
+    rps[rec].n = 0;
     for (uint32_t r = 0; r < 2; r++)
         for (uint32_t t = 0; t < NVN_COUNTERS; t++) {
             uint64_t want = 0;

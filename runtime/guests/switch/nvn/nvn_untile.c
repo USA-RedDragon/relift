@@ -44,11 +44,13 @@ static struct {
     VkDescriptorPool pool;
     VkPipeline pipe[3][2][3];
     bool pipe_failed[3][2][3];
-    VkDescriptorSet dead_sets[DEAD_MAX];
-    VkImageView dead_views[DEAD_MAX];
-    uint32_t ndead;
-    packed_buf dead_bufs[PACKED_MAX];
-    uint32_t ndead_bufs;
+    /** @brief What each slot's batch holds until it finished (nvn_untile_release); cur is the recording slot. */
+    VkDescriptorSet dead_sets[NVN_SLOTS][DEAD_MAX];
+    VkImageView dead_views[NVN_SLOTS][DEAD_MAX];
+    uint32_t ndead[NVN_SLOTS];
+    packed_buf dead_bufs[NVN_SLOTS][PACKED_MAX];
+    uint32_t ndead_bufs[NVN_SLOTS];
+    uint32_t cur;
     uint64_t moves;
 } U;
 
@@ -65,10 +67,10 @@ static bool ready(void)
                                             .bindingCount = 1,
                                             .pBindings = &b };
     VkPushConstantRange pcr = { .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(params) };
-    VkDescriptorPoolSize ps = { .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = DEAD_MAX };
+    VkDescriptorPoolSize ps = { .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = DEAD_MAX * NVN_SLOTS };
     VkDescriptorPoolCreateInfo dpi = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-                                       .maxSets = DEAD_MAX,
+                                       .maxSets = DEAD_MAX * NVN_SLOTS,
                                        .poolSizeCount = 1,
                                        .pPoolSizes = &ps };
     U.failed = VK(vkCreateDescriptorSetLayout)(g.dev, &dli, NULL, &U.dsl) != VK_SUCCESS;
@@ -106,19 +108,24 @@ static VkPipeline pipeline(uint32_t tile, uint32_t volume, uint32_t words_log2)
     return *p;
 }
 
-void nvn_untile_release(void)
+void nvn_untile_release(uint32_t slot)
 {
-    for (uint32_t i = 0; i < U.ndead; i++) {
-        VK(vkFreeDescriptorSets)(g.dev, U.pool, 1, &U.dead_sets[i]);
-        VK(vkDestroyImageView)(g.dev, U.dead_views[i], NULL);
+    uint32_t cur = U.cur;
+    U.cur = slot;
+    for (uint32_t i = 0; i < U.ndead[U.cur]; i++) {
+        VK(vkFreeDescriptorSets)(g.dev, U.pool, 1, &U.dead_sets[U.cur][i]);
+        VK(vkDestroyImageView)(g.dev, U.dead_views[U.cur][i], NULL);
     }
-    U.ndead = 0;
-    for (uint32_t i = 0; i < U.ndead_bufs; i++) {
-        VK(vkDestroyBuffer)(g.dev, U.dead_bufs[i].buf, NULL);
-        VK(vkFreeMemory)(g.dev, U.dead_bufs[i].mem, NULL);
+    U.ndead[U.cur] = 0;
+    for (uint32_t i = 0; i < U.ndead_bufs[U.cur]; i++) {
+        VK(vkDestroyBuffer)(g.dev, U.dead_bufs[U.cur][i].buf, NULL);
+        VK(vkFreeMemory)(g.dev, U.dead_bufs[U.cur][i].mem, NULL);
     }
-    U.ndead_bufs = 0;
+    U.ndead_bufs[U.cur] = 0;
+    U.cur = cur;
 }
+
+void nvn_untile_slot(uint32_t slot) { U.cur = slot; }
 
 uint64_t nvn_untile_moves(void) { return U.moves; }
 
@@ -176,7 +183,7 @@ static bool move_at(replay *r, vimg *v, uint64_t addr, bool tile)
     uint32_t layers = volume ? 1 : d->target == NVN_TARGET_CUBEMAP ? 6 : d->depth ? d->depth : 1;
     if (levels > NVN_TEX_MAX_LEVELS)
         levels = NVN_TEX_MAX_LEVELS;
-    if (U.ndead + levels * layers > DEAD_MAX && !nvn_vk_flush(r))
+    if (U.ndead[U.cur] + levels * layers > DEAD_MAX && !nvn_vk_flush(r))
         return false;
     if (levels * layers > DEAD_MAX)
         return false;
@@ -203,8 +210,8 @@ static bool move_at(replay *r, vimg *v, uint64_t addr, bool tile)
                 VK(vkDestroyImageView)(g.dev, view, NULL);
                 return false;
             }
-            U.dead_sets[U.ndead] = set;
-            U.dead_views[U.ndead++] = view;
+            U.dead_sets[U.cur][U.ndead[U.cur]] = set;
+            U.dead_views[U.cur][U.ndead[U.cur]++] = view;
             VkDescriptorImageInfo ii = { .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
             VkWriteDescriptorSet wd = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                         .dstSet = set,
@@ -238,6 +245,8 @@ static bool move_at(replay *r, vimg *v, uint64_t addr, bool tile)
 
 bool nvn_untile_move(replay *r, vimg *v, bool tile)
 {
+    if (tile)
+        nvn_vk_mark_write();
     return movable(v) && move_at(r, v, guest_address(v->storage, v->d.size), tile);
 }
 
@@ -249,7 +258,7 @@ static uint64_t packed_new(uint64_t size, VkBuffer *out)
                                .size = size,
                                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
-    if (U.ndead_bufs == PACKED_MAX || VK(vkCreateBuffer)(g.dev, &bci, NULL, &b.buf) != VK_SUCCESS)
+    if (U.ndead_bufs[U.cur] == PACKED_MAX || VK(vkCreateBuffer)(g.dev, &bci, NULL, &b.buf) != VK_SUCCESS)
         return 0;
     VkMemoryRequirements req;
     VK(vkGetBufferMemoryRequirements)(g.dev, b.buf, &req);
@@ -266,7 +275,7 @@ static uint64_t packed_new(uint64_t size, VkBuffer *out)
     }
     VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = b.buf };
     uint64_t a = VK(vkBindBufferMemory)(g.dev, b.buf, b.mem, 0) == VK_SUCCESS ? VK(vkGetBufferDeviceAddress)(g.dev, &ai) : 0;
-    U.dead_bufs[U.ndead_bufs++] = b;
+    U.dead_bufs[U.cur][U.ndead_bufs[U.cur]++] = b;
     *out = b.buf;
     return a;
 }
@@ -307,7 +316,7 @@ static bool packed_at(replay *r, vimg *v, uint64_t addr)
         uint32_t dl = volume ? (d->depth >> l ? d->depth >> l : 1) : 1;
         total += (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * dl * bpb * layers;
     }
-    if (U.ndead_bufs == PACKED_MAX && !nvn_vk_flush(r))
+    if (U.ndead_bufs[U.cur] == PACKED_MAX && !nvn_vk_flush(r))
         return false;
     VkBuffer buf;
     uint64_t dst = packed_new(total, &buf);

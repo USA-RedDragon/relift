@@ -13,6 +13,12 @@
 #include <pthread.h>
 
 #define VK(name) VKF_FN(&g.fns, name)
+
+/**
+ * @brief Batches recorded or in flight at once: the layer records the next batch into one slot while the host device
+ * runs the one before from the other, as the console's CPU builds commands while its GPU runs earlier ones.
+ */
+#define NVN_SLOTS 2u
 #define MAX_RT 8u
 #define MAX_IMAGES 4096u
 /** @brief Graphics, compute, task and mesh stages, in NVNshaderStage order. */
@@ -187,8 +193,12 @@ typedef struct nvn_vkdev {
     uint32_t family;
     VkQueue queue;
     VkCommandPool pool;
+    /** @brief The slot being recorded into (see nvn_vk_submit) and its command buffer and fence, of cbs and fences. */
+    uint32_t slot;
     VkCommandBuffer cb;
     VkFence fence;
+    VkCommandBuffer cbs[NVN_SLOTS];
+    VkFence fences[NVN_SLOTS];
     /** @brief Nanoseconds per GPU timestamp tick; 0 when the queue has no timestamps. */
     double timestamp_period_ns;
     /** @brief Whether nvn_vk_calibrate reads the GPU clock and the guest clock at one moment. */
@@ -198,6 +208,11 @@ typedef struct nvn_vkdev {
      * thread other than the one that submits can wait for a batch without the fence the next submit resets.
      */
     bool timeline_ok;
+    /**
+     * @brief The texture set's descriptors can be written while a batch that does not use them runs; without it every
+     * batch counts as a writer, so replay waits for the one in flight as with one slot.
+     */
+    bool unused_while_pending;
     VkSemaphore timeline;
     uint64_t timeline_value;
     VkPhysicalDeviceMemoryProperties memprops;
@@ -214,6 +229,9 @@ typedef struct nvn_vkdev {
     /** @brief Guest bytes copied for the commands of the batch being recorded: buffers, indices, constants. */
     staging arena;
     uint64_t arena_used;
+    /** @brief Each slot's arena and how much of it its batch used; arena and arena_used are the recording slot's. */
+    staging arenas[NVN_SLOTS];
+    uint64_t arena_used_of[NVN_SLOTS];
     /** @brief Whether the batch holds a GPU write of guest uniform data that guest memory does not show yet. */
     bool uniform_pending;
     /** @brief The device probes' results, as device.json reports them. */
@@ -440,13 +458,21 @@ const char *nvn_vk_lost_text(void);
 /** @brief Stops the game as rl_guest_fatal does, naming the lost device and its fault first when the device was lost. */
 int nvn_vk_fatal(rl_ctx *c, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 /**
- * @brief Submits what r recorded without waiting for it: the host device runs it while the guest goes on, and the
- * next use of the layer's device state (nvn_lock, nvn_vk_begin, nvn_vk_flush) waits for it first. With nothing
- * recorded, as nvn_vk_flush.
+ * @brief Submits what r recorded without waiting for it, from the recording slot: the host device runs it while the
+ * guest goes on and the layer records the next batch into the other slot (NVN_SLOTS). The submit first waits for the
+ * batch the other slot still holds, and replay waits at nvn_lock only for batches that may write guest memory
+ * (nvn_vk_mark_write); a flush, a sync point and nvn_vk_settle wait for every batch. With nothing recorded, as
+ * nvn_vk_flush.
  */
 bool nvn_vk_submit(replay *r);
-/** @brief Waits for the batch nvn_vk_submit left running, if any; false on a device failure. */
-bool nvn_vk_settle(void);
+/**
+ * @brief Marks the batch being recorded as one whose GPU work may write guest memory (a program that stores to a
+ * guest buffer, a uniform update or a texture write-back into a pool): until it finished, replay waits for it before
+ * reading guest memory (nvn_lock).
+ */
+void nvn_vk_mark_write(void);
+/** @brief For nvn_vk_ring_check: records a timestamp report (type 0) as the batch's last command, into a scratch address. */
+int nvn_counters_stamp_check(replay *r);
 /** @brief Whether nvn_untile_move can move v's bytes on the GPU (nvn_untile.c). */
 bool nvn_untile_can(const vimg *v);
 /**
@@ -468,8 +494,10 @@ bool nvn_untile_upload_packed(replay *r, vimg *v);
  * does; NULL when no imported pool holds them (nvn_draw.c copies them into the arena then).
  */
 VkBuffer nvn_draw_pool_span(uint64_t addr, uint64_t n, uint64_t align, VkDeviceSize *off);
-/** @brief Frees what the moves of the batch that just ran used; called once a submit has finished. */
-void nvn_untile_release(void);
+/** @brief Frees what the moves of slot's batch used; called once that batch has finished. */
+void nvn_untile_release(uint32_t slot);
+/** @brief Makes slot the one moves record their descriptor sets, views and buffers for. */
+void nvn_untile_slot(uint32_t slot);
 /** @brief Moves recorded so far, for the stats. */
 uint64_t nvn_untile_moves(void);
 /**
@@ -494,6 +522,11 @@ int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const
 bool nvn_mirror_sync(replay *r, bool may_flush);
 /** @brief Frees the staging of uploads once the batch that used it completed. */
 void nvn_mirror_flushed(void);
+/**
+ * @brief Whether any pool is mirrored. Mirror staging is shared by the batches in flight and freed only once all
+ * finished, and every batch counts as one that writes guest memory while mirrors exist.
+ */
+bool nvn_mirror_any(void);
 /** @brief Whether the bytes noted by nvn_mirror_written still wait for a readback. */
 bool nvn_mirror_readback_pending(void);
 /** @brief Records copies of the next slice of the noted bytes into cb; they land in guest memory at nvn_mirror_apply_readback. */
@@ -659,12 +692,16 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
  * RL_OK, or RL_PENDING after a stop.
  */
 int nvn_separate_handles(replay *r, uint32_t s);
-/** @brief Frees what draws of the batch just finished held (descriptor sets); called after each wait. */
-void nvn_draw_reset(void);
+/** @brief Frees what draws of slot's batch held (its descriptor pool); called once that batch has finished. */
+void nvn_draw_reset(uint32_t slot);
+/** @brief Makes slot the one draws take descriptor sets for. */
+void nvn_draw_slot(uint32_t slot);
 /** @brief Runs a recorded nvnCommandBufferEvaluateDlss with the player's upscaler (nvn_dlss.c); RL_OK or a pending stop. */
 int nvn_dlss_run(replay *r, const nvn_cmd *e);
-/** @brief Frees what DLSS evaluations held for the batch just finished (called after each wait). */
-void nvn_dlss_reset(void);
+/** @brief Frees what DLSS evaluations held for slot's batch (called once that batch has finished). */
+void nvn_dlss_reset(uint32_t slot);
+/** @brief Makes slot the one DLSS evaluations hold their views for. */
+void nvn_dlss_slot(uint32_t slot);
 /**
  * @brief Runs a draw-state or draw command of nvn_draw.c; RL_OK, RL_PENDING after a stop (the stop is raised and
  * reported already), or NVN_UNHANDLED when it is not one.
@@ -715,7 +752,9 @@ void nvn_counters_submitted(uint64_t value);
  * @brief After the batch's fence signaled: adds its draws' queries to their counters and writes its reports, unless
  * the reports thread already did; returns once they are written.
  */
-void nvn_counters_settle(void);
+void nvn_counters_settle(uint32_t slot);
+/** @brief Makes slot the one the counters record into (its query pools and events). */
+void nvn_counters_slot(uint32_t slot);
 /** @brief Timestamp reports the batch being recorded or run holds. */
 uint32_t nvn_counters_reports_pending(void);
 /** @brief Before a draw's rendering opens: makes room for its queries (submits and reads back a full batch). */

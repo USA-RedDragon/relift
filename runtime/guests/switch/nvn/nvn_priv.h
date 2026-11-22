@@ -129,6 +129,16 @@ uint64_t nvn_vk_finished(void);
  */
 int nvn_vk_async_check(void);
 /**
+ * @brief Checks the two-slot submits: while a long batch runs, the next is recorded without waiting for it; the next
+ * submit waits for the one before; a wait on writers (nvn_lock's) does not wait for a batch that writes no guest
+ * memory and does wait for one that may. 0 when all hold, the failing step's number otherwise, -1 with no device.
+ */
+int nvn_vk_ring_check(void);
+/** @brief Waits for every batch nvn_vk_submit left running, oldest first; false on a device failure. */
+bool nvn_vk_settle(void);
+/** @brief Waits for the batches in flight when any may write guest memory (what nvn_lock does); false on a failure. */
+bool nvn_vk_settle_writers(void);
+/**
  * @brief Checks timestamp reports: two reports at guest address addr and addr + 16 with a long GPU batch between
  * them must be unwritten when recorded, written without any wait once the batch finishes (the check spins on the
  * memory), with value 0 and times in order, apart by at least 0.1 ms and within the check's own span; with

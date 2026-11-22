@@ -91,9 +91,17 @@ static struct {
     VkDeviceMemory mmem;
     VkDescriptorPool mpool;
     VkDescriptorSet mset;
-    /** @brief The overflow word of each draw's mesh buffer in the batch being recorded, copied out for the host. */
+    /**
+     * @brief The overflow word of each draw's mesh buffer in the batch being recorded, copied out for the host; each
+     * slot has its own (mstatus_of), and mstatus is the recording slot's.
+     */
     staging mstatus;
     uint32_t mstatus_n;
+    staging mstatus_of[NVN_SLOTS];
+    uint32_t mstatus_n_of[NVN_SLOTS];
+    /** @brief The descriptor pool of each slot's batch; pool is the recording slot's. */
+    VkDescriptorPool pools[NVN_SLOTS];
+    uint32_t slot;
     bool moverflow;
     bool mready;
     VkDescriptorPool pool;
@@ -117,6 +125,8 @@ static module *module_of(replay *r, uint64_t code, int stage)
                     "program %s (at 0x%llx): %s; a program missing from the table is recorded in %s/programs for the next "
                     "relift build (%s/failed.txt names programs the translator refused)",
                     key, (unsigned long long)code, why, nvn_shader_dir(), nvn_shader_dir());
+    } else if (m->stores_guest) {
+        nvn_vk_mark_write();
     }
     return m;
 }
@@ -129,6 +139,8 @@ static module *module_helper(replay *r, const char *kind, const module *mesh, in
     module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m)
         nvn_vk_stop(r, "the %s helper of mesh program %s: %s", kind, mesh->key, why);
+    else if (m->stores_guest)
+        nvn_vk_mark_write();
     return m;
 }
 
@@ -178,8 +190,10 @@ static bool layouts(void)
                                        .maxSets = SET_POOL_SETS,
                                        .poolSizeCount = 1,
                                        .pPoolSizes = &ps };
-    if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.pool) != VK_SUCCESS)
-        return false;
+    for (uint32_t i = 0; i < NVN_SLOTS; i++)
+        if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.pools[i]) != VK_SUCCESS)
+            return false;
+    d.pool = d.pools[d.slot];
     d.ready = true;
     nvn_pipe_set_layouts(d.layout, d.clayout);
     return true;
@@ -234,8 +248,12 @@ static bool mesh_layouts(void)
         bytes = g.max_storage_range & ~3u;
     if (bytes > (uint64_t)g.max_index_value * 4)
         bytes = (uint64_t)g.max_index_value * 4;
-    if (!nvn_vk_gpu_buffer(&d.mbuf, &d.mmem, bytes) || !nvn_vk_staging_new(&d.mstatus, 16ull * MESH_STATUS_SLOTS))
+    if (!nvn_vk_gpu_buffer(&d.mbuf, &d.mmem, bytes))
         return false;
+    for (uint32_t i = 0; i < NVN_SLOTS; i++)
+        if (!nvn_vk_staging_new(&d.mstatus_of[i], 16ull * MESH_STATUS_SLOTS))
+            return false;
+    d.mstatus = d.mstatus_of[d.slot];
     VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                        .maxSets = 1,
@@ -262,24 +280,37 @@ static bool mesh_layouts(void)
 }
 
 /** @brief Reads what the draws of the batch that just finished left in their status words: a mesh buffer that overflowed. */
-static void mesh_flushed(void)
+static void mesh_flushed(uint32_t slot)
 {
-    const uint32_t *w = (const uint32_t *)(const void *)d.mstatus.map;
-    for (uint32_t i = 0; w && i < d.mstatus_n; i++)
+    const uint32_t *w = (const uint32_t *)(const void *)d.mstatus_of[slot].map;
+    uint32_t n = slot == d.slot ? d.mstatus_n : d.mstatus_n_of[slot];
+    for (uint32_t i = 0; w && i < n; i++)
         if (w[4 * i + 2]) {
             rl_log(RL_LOG_ERROR, "nvn", "a mesh draw made %u mesh workgroups, more than the %llu MiB mesh buffer holds",
                    w[4 * i], (unsigned long long)(MESH_BUFFER_BYTES >> 20));
             d.moverflow = true;
         }
-    d.mstatus_n = 0;
+    if (slot == d.slot)
+        d.mstatus_n = 0;
+    else
+        d.mstatus_n_of[slot] = 0;
 }
 
-void nvn_draw_reset(void)
+void nvn_draw_reset(uint32_t slot)
 {
     if (d.mready)
-        mesh_flushed();
-    if (d.pool)
-        VK(vkResetDescriptorPool)(g.dev, d.pool, 0);
+        mesh_flushed(slot);
+    if (d.pools[slot])
+        VK(vkResetDescriptorPool)(g.dev, d.pools[slot], 0);
+}
+
+void nvn_draw_slot(uint32_t slot)
+{
+    d.mstatus_n_of[d.slot] = d.mstatus_n;
+    d.slot = slot;
+    d.pool = d.pools[slot];
+    d.mstatus = d.mstatus_of[slot];
+    d.mstatus_n = d.mstatus_n_of[slot];
 }
 
 /** @brief NVNdrawPrimitive to a topology; false for one Vulkan has none of. */

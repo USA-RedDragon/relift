@@ -235,6 +235,8 @@ static bool stage_alloc(uint64_t n, VkBuffer *buf, uint64_t *off, uint8_t **map)
     return true;
 }
 
+bool nvn_mirror_any(void) { return __atomic_load_n(&mi.n, __ATOMIC_ACQUIRE) != 0; }
+
 void nvn_mirror_flushed(void)
 {
     pthread_once(&mi_once, mi_init);

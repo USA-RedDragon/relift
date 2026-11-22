@@ -169,8 +169,10 @@ static bool make(void)
     VkDescriptorSetLayoutBinding b[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     VkDescriptorBindingFlags f[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
+    const VkDescriptorBindingFlags pending =
+        g.unused_while_pending ? VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT : 0;
     const VkDescriptorBindingFlags partial =
-        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | pending;
     b[n] = (VkDescriptorSetLayoutBinding){ 0, VK_DESCRIPTOR_TYPE_SAMPLER, SAMPLERS, VK_SHADER_STAGE_ALL, NULL };
     f[n++] = partial;
     for (uint32_t k = 0; k < KINDS; k++)
@@ -181,7 +183,7 @@ static bool make(void)
         }
     b[n] = (VkDescriptorSetLayoutBinding){ DIMS_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL,
                                            NULL };
-    f[n++] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    f[n++] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | pending;
     for (uint32_t k = 0; k < IMAGE_KINDS; k++)
         for (uint32_t d = 0; d < IMAGE_DIMS; d++) {
             b[n] = (VkDescriptorSetLayoutBinding){ IMAGE_BINDING(k, d), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, IMAGES,
@@ -531,6 +533,8 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
                 continue;
             uint32_t at = 8u * k + d;
             if (t.img_views[slot][at]) {
+                if (!nvn_vk_flush(r))
+                    return nvn_vk_stop(r, "the host device failed a submit");
                 VK(vkDestroyImageView)(g.dev, t.img_views[slot][at], NULL);
                 t.img_views[slot][at] = NULL;
             }

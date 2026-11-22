@@ -283,16 +283,30 @@ static struct {
     uint32_t choice;
     uint64_t evaluations;
     nvn_dlss_seen seen;
-    VkImageView held[MAX_HELD];
+    /** @brief The views each slot's batch holds; held and nheld are the recording slot's. */
+    VkImageView held_of[NVN_SLOTS][MAX_HELD];
+    uint32_t nheld_of[NVN_SLOTS];
+    VkImageView *held;
     uint32_t nheld;
-} st;
+    uint32_t slot;
+} st = { .held = st.held_of[0] };
 
-void nvn_dlss_reset(void)
+void nvn_dlss_reset(uint32_t slot)
 {
-    for (uint32_t i = 0; i < st.nheld; i++)
-        VK(vkDestroyImageView)(g.dev, st.held[i], NULL);
-    st.nheld = 0;
+    VkImageView *h = slot == st.slot ? st.held : st.held_of[slot];
+    uint32_t *n = slot == st.slot ? &st.nheld : &st.nheld_of[slot];
+    for (uint32_t i = 0; i < *n; i++)
+        VK(vkDestroyImageView)(g.dev, h[i], NULL);
+    *n = 0;
     rl_upscaler_retire(st.u);
+}
+
+void nvn_dlss_slot(uint32_t slot)
+{
+    st.nheld_of[st.slot] = st.nheld;
+    st.slot = slot;
+    st.held = st.held_of[slot];
+    st.nheld = st.nheld_of[slot];
 }
 
 /** @brief The stage for choice on the host device, started the first time and again when the choice changes. */
@@ -391,6 +405,7 @@ static int side_view(replay *r, uint64_t tex, uint64_t v, rl_upscale_image *out)
 
 int nvn_dlss_run(replay *r, const nvn_cmd *e)
 {
+    nvn_vk_mark_write();
     const uint8_t *raw = nvn_cmd_bytes(r->s, e->x[2]);
     if (!raw)
         return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss without parameters");

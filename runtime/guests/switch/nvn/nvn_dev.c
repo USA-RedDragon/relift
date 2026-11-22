@@ -631,6 +631,7 @@ uint64_t nvnh_nvnQueueFinish(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_lock();
+    nvn_vk_settle();
     nvn_unlock();
     return nvn_ret(c);
 }
@@ -1234,6 +1235,7 @@ uint64_t nvnh_nvnSyncWait(rl_ctx *c, uint8_t *mem)
         rc = SYNC_ALREADY_SIGNALED;
     } else if (s) {
         nvn_lock();
+        nvn_vk_settle();
         nvn_unlock();
         rc = SYNC_CONDITION_SATISFIED;
     }
