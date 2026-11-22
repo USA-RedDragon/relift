@@ -3115,7 +3115,9 @@ static int copy_side(replay *r, uint64_t view, const nvn_region *rg, uint32_t *l
 /**
  * @brief nvnCommandBufferCopyTextureToTexture(src, srcView, srcRegion, dst,
  * dstView, dstRegion, flags): a texel copy between same-sized regions of
- * size-compatible formats, otherwise a blit (nearest, or linear with flag 1).
+ * size-compatible formats, otherwise a blit (nearest, or linear with the
+ * linear filter flag), with the source turned around by the mirror flags
+ * (nvn_copy_plan_of).
  */
 static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
 {
@@ -3123,8 +3125,6 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
     uint32_t flags = (uint32_t)e->x[7];
     if (!sr || !dr)
         return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture without a region");
-    if (flags & ~1u)
-        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture with flags 0x%x", flags);
     if (sr->depth != 1 || dr->depth != 1 || sr->width <= 0 || sr->height <= 0 || dr->width <= 0 || dr->height <= 0)
         return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture of %dx%dx%d to %dx%dx%d texels", sr->width,
                            sr->height, sr->depth, dr->width, dr->height, dr->depth);
@@ -3147,25 +3147,26 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
     if (!nvn_tex_format(src->d.format, &sb, &sw, &sh) || !nvn_tex_format(dst->d.format, &db, &dw, &dh))
         return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture of formats %u and %u", src->d.format,
                            dst->d.format);
+    nvn_copy_plan plan;
+    const char *why = "";
+    if (!nvn_copy_plan_of(sr, dr, flags, sb, sw, sh, db, dw, dh, src->aspect == dst->aspect,
+                          src->aspect == VK_IMAGE_ASPECT_COLOR_BIT, &plan, &why))
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture with flags 0x%x from format %u to format %u (%s)",
+                           flags, src->d.format, dst->d.format, why);
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
     VkImageSubresourceLayers ss = { src->aspect, sl, slayer, 1 }, ds = { dst->aspect, dl, dlayer, 1 };
-    bool same = sr->width == dr->width && sr->height == dr->height && sb == db && sw == dw && sh == dh &&
-                src->aspect == dst->aspect;
-    if (same) {
+    if (plan.texel_copy) {
         VkImageCopy ic = { ss, { sr->x, sr->y, 0 }, ds, { dr->x, dr->y, 0 },
                            { (uint32_t)sr->width, (uint32_t)sr->height, 1 } };
         VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
     } else {
-        if (sw != 1 || sh != 1 || dw != 1 || dh != 1 || src->aspect != dst->aspect)
-            return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture scaling format %u to format %u",
-                               src->d.format, dst->d.format);
         VkImageBlit ib = { ss,
-                           { { sr->x, sr->y, 0 }, { sr->x + sr->width, sr->y + sr->height, 1 } },
+                           { { plan.src[0][0], plan.src[0][1], 0 }, { plan.src[1][0], plan.src[1][1], 1 } },
                            ds,
-                           { { dr->x, dr->y, 0 }, { dr->x + dr->width, dr->y + dr->height, 1 } } };
-        VkFilter f = flags & 1 && src->aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-        VK(vkCmdBlitImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ib, f);
+                           { { plan.dst[0][0], plan.dst[0][1], 0 }, { plan.dst[1][0], plan.dst[1][1], 1 } } };
+        VK(vkCmdBlitImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ib,
+                           plan.linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     }
     nvn_vk_barrier(g.cb);
     return RL_OK;

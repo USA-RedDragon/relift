@@ -275,6 +275,88 @@ TEST(nvn_demoted_inputs_leave_valid_spirv)
     free(d);
 }
 
+TEST(nvn_copy_plan_without_flags_copies_texels_or_blits_nearest)
+{
+    nvn_region a = { 2, 3, 0, 10, 6, 1 }, b = { 0, 0, 0, 20, 12, 1 };
+    nvn_copy_plan p;
+    const char *why = "";
+    CHECK(nvn_copy_plan_of(&a, &a, 0, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(p.texel_copy);
+    CHECK(nvn_copy_plan_of(&a, &b, 0, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(!p.texel_copy);
+    CHECK(!p.linear);
+    CHECK_EQ(p.src[0][0], 2);
+    CHECK_EQ(p.src[1][0], 12);
+    CHECK_EQ(p.src[0][1], 3);
+    CHECK_EQ(p.src[1][1], 9);
+    CHECK_EQ(p.dst[1][0], 20);
+    CHECK_EQ(p.dst[1][1], 12);
+}
+
+TEST(nvn_copy_plan_linear_filter_bit_filters_color_only)
+{
+    nvn_region a = { 0, 0, 0, 10, 6, 1 }, b = { 0, 0, 0, 20, 12, 1 };
+    nvn_copy_plan p;
+    const char *why = "";
+    CHECK(nvn_copy_plan_of(&a, &b, NVN_COPY_LINEAR_FILTER, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(p.linear);
+    CHECK(nvn_copy_plan_of(&a, &b, NVN_COPY_LINEAR_FILTER, 4, 1, 1, 4, 1, 1, true, false, &p, &why));
+    CHECK(!p.linear);
+    CHECK(nvn_copy_plan_of(&a, &a, NVN_COPY_LINEAR_FILTER, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(p.texel_copy);
+}
+
+TEST(nvn_copy_plan_mirror_x_bit_turns_the_source_around_in_x)
+{
+    nvn_region a = { 2, 3, 0, 10, 6, 1 };
+    nvn_copy_plan p;
+    const char *why = "";
+    CHECK(nvn_copy_plan_of(&a, &a, NVN_COPY_MIRROR_X, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(!p.texel_copy);
+    CHECK_EQ(p.src[0][0], 12);
+    CHECK_EQ(p.src[1][0], 2);
+    CHECK_EQ(p.src[0][1], 3);
+    CHECK_EQ(p.src[1][1], 9);
+    CHECK_EQ(p.dst[0][0], 2);
+    CHECK_EQ(p.dst[1][0], 12);
+}
+
+TEST(nvn_copy_plan_mirror_y_bit_turns_the_source_around_in_y)
+{
+    nvn_region a = { 2, 3, 0, 10, 6, 1 }, b = { 0, 0, 0, 20, 12, 1 };
+    nvn_copy_plan p;
+    const char *why = "";
+    CHECK(nvn_copy_plan_of(&a, &b, NVN_COPY_LINEAR_FILTER | NVN_COPY_MIRROR_Y, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(p.linear);
+    CHECK_EQ(p.src[0][0], 2);
+    CHECK_EQ(p.src[1][0], 12);
+    CHECK_EQ(p.src[0][1], 9);
+    CHECK_EQ(p.src[1][1], 3);
+}
+
+TEST(nvn_copy_plan_mirror_z_bit_does_nothing_to_one_slice)
+{
+    nvn_region a = { 0, 0, 0, 10, 6, 1 };
+    nvn_copy_plan p;
+    const char *why = "";
+    CHECK(nvn_copy_plan_of(&a, &a, NVN_COPY_MIRROR_Z, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(p.texel_copy);
+}
+
+TEST(nvn_copy_plan_mirrors_skip_compressed_formats_and_unknown_bits_stop)
+{
+    nvn_region a = { 0, 0, 0, 16, 8, 1 };
+    nvn_copy_plan p;
+    const char *why = "";
+    CHECK(nvn_copy_plan_of(&a, &a, NVN_COPY_MIRROR_X | NVN_COPY_MIRROR_Y, 8, 4, 4, 8, 4, 4, true, true, &p, &why));
+    CHECK(p.texel_copy);
+    CHECK(!nvn_copy_plan_of(&a, &a, 0x2, 4, 1, 1, 4, 1, 1, true, true, &p, &why));
+    CHECK(!strcmp(why, "flags"));
+    nvn_region b = { 0, 0, 0, 32, 16, 1 };
+    CHECK(!nvn_copy_plan_of(&a, &b, 0, 8, 4, 4, 8, 4, 4, true, true, &p, &why));
+    CHECK(!strcmp(why, "formats"));
+}
+
 /** @brief The command set of one 8 byte handle array, for the bulk binds that snapshot their array. */
 static nvn_cmdset *handle_set(const uint64_t *v, uint32_t n)
 {

@@ -246,6 +246,33 @@ typedef struct nvn_region {
 /** @brief Bytes per block and block size of an NVNformat; false for a format relift does not know. */
 bool nvn_tex_format(uint32_t format, uint32_t *bpb, uint32_t *bw, uint32_t *bh);
 
+/** @brief NVNcopyFlags: linear filtering of a scaled copy, and mirroring of the source along x, y and z. */
+#define NVN_COPY_LINEAR_FILTER 0x1u
+#define NVN_COPY_MIRROR_X 0x4u
+#define NVN_COPY_MIRROR_Y 0x8u
+#define NVN_COPY_MIRROR_Z 0x10u
+
+/** @brief How a texture to texture copy runs on the host. */
+typedef struct nvn_copy_plan {
+    /** @brief True for a texel copy (same size, same block layout, no mirror), false for a blit. */
+    bool texel_copy;
+    /** @brief True for linear filtering of the blit. */
+    bool linear;
+    /** @brief The blit's source and destination corners (x, y), the source's swapped where it is mirrored. */
+    int32_t src[2][2], dst[2][2];
+} nvn_copy_plan;
+
+/**
+ * @brief Plans nvnCommandBufferCopyTextureToTexture of 2D regions sr to dr with flags, between formats of block size
+ * sw by sh and dw by dh and bytes per block sb and db; color says the textures are color. As the driver does, the
+ * mirror flags turn the source region around (its origin moves to the far edge and its size changes sign) only for
+ * formats of one texel blocks, and a depth of one makes the z mirror a no-op. False, with why, for flags or formats
+ * it cannot copy: unknown flag bits, or a scaled or mirrored copy of block-compressed formats.
+ */
+bool nvn_copy_plan_of(const nvn_region *sr, const nvn_region *dr, uint32_t flags, uint32_t sb, uint32_t sw, uint32_t sh,
+                      uint32_t db, uint32_t dw, uint32_t dh, bool same_aspect, bool color, nvn_copy_plan *out,
+                      const char **why);
+
 /** @brief The buffer side of a copy between a buffer and a texture region. */
 typedef struct nvn_copy_pitch {
     /** @brief Bytes from one row of blocks to the next, and from one layer or slice to the next. */

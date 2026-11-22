@@ -967,3 +967,36 @@ uint64_t nvnh_nvnTextureInvalidateTexels(rl_ctx *c, uint8_t *mem)
     (void)mem;
     return nvn_ret(c);
 }
+
+bool nvn_copy_plan_of(const nvn_region *sr, const nvn_region *dr, uint32_t flags, uint32_t sb, uint32_t sw, uint32_t sh,
+                      uint32_t db, uint32_t dw, uint32_t dh, bool same_aspect, bool color, nvn_copy_plan *out,
+                      const char **why)
+{
+    memset(out, 0, sizeof *out);
+    const uint32_t known = NVN_COPY_LINEAR_FILTER | NVN_COPY_MIRROR_X | NVN_COPY_MIRROR_Y | NVN_COPY_MIRROR_Z;
+    if (flags & ~known) {
+        *why = "flags";
+        return false;
+    }
+    bool texel_blocks = sw == 1 && sh == 1;
+    bool mx = texel_blocks && (flags & NVN_COPY_MIRROR_X), my = texel_blocks && (flags & NVN_COPY_MIRROR_Y);
+    bool same = sr->width == dr->width && sr->height == dr->height && sb == db && sw == dw && sh == dh && same_aspect;
+    if (same && !mx && !my) {
+        out->texel_copy = true;
+        return true;
+    }
+    if (!texel_blocks || dw != 1 || dh != 1 || !same_aspect) {
+        *why = "formats";
+        return false;
+    }
+    out->src[0][0] = mx ? sr->x + sr->width : sr->x;
+    out->src[1][0] = mx ? sr->x : sr->x + sr->width;
+    out->src[0][1] = my ? sr->y + sr->height : sr->y;
+    out->src[1][1] = my ? sr->y : sr->y + sr->height;
+    out->dst[0][0] = dr->x;
+    out->dst[0][1] = dr->y;
+    out->dst[1][0] = dr->x + dr->width;
+    out->dst[1][1] = dr->y + dr->height;
+    out->linear = (flags & NVN_COPY_LINEAR_FILTER) && color;
+    return true;
+}
