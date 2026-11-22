@@ -14,8 +14,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  ZIG_VERSION: 0.17.1
-  ZIG_SHA256: 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
 
 jobs:
   release-guard:
@@ -67,13 +65,7 @@ jobs:
 
       - name: Install zig
         if: startsWith(matrix.target, 'windows-')
-        run: |
-          dir="$RUNNER_TEMP/zig"
-          mkdir -p "$dir"
-          curl -fsSL -o "$dir/zig.tar.xz" "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
-          echo "$ZIG_SHA256  $dir/zig.tar.xz" | sha256sum -c -
-          tar -xJf "$dir/zig.tar.xz" -C "$dir"
-          echo "$dir/zig-x86_64-linux-$ZIG_VERSION" >> "$GITHUB_PATH"
+        run: scripts/ci/install-zig.sh
 
       - name: Restore the wine packages
         id: wine-cache

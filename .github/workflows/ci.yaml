@@ -170,6 +170,10 @@ jobs:
           scripts/ci/apt-install.sh gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           echo "RELIFT_LINUX_REQUIRE=1" >> "$GITHUB_ENV"
 
+      - name: Install the pinned zig for the static corpus programs
+        if: matrix.part == 'linux'
+        run: scripts/ci/install-zig.sh
+
       - name: Restore the compiled libraries of the dynamic program
         if: matrix.part == 'linux'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
