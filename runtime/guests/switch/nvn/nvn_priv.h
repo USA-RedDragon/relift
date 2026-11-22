@@ -131,7 +131,8 @@ int nvn_vk_async_check(void);
 /**
  * @brief Checks the two-slot submits: while a long batch runs, the next is recorded without waiting for it; the next
  * submit waits for the one before; a wait on writers (nvn_lock's) does not wait for a batch that writes no guest
- * memory and does wait for one that may. 0 when all hold, the failing step's number otherwise, -1 with no device.
+ * memory and does wait for one that may write anywhere; a batch that writes a known range is not waited for by
+ * nvn_lock nor by a read beside the range, and is by a read that overlaps it. 0 when all hold, the failing step's number otherwise, -1 with no device.
  */
 int nvn_vk_ring_check(void);
 /** @brief Waits for every batch nvn_vk_submit left running, oldest first; false on a device failure. */

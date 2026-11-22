@@ -473,6 +473,15 @@ bool nvn_vk_submit(replay *r);
 void nvn_vk_mark_write(void);
 /** @brief For nvn_vk_ring_check: records a timestamp report (type 0) as the batch's last command, into a scratch address. */
 int nvn_counters_stamp_check(replay *r);
+/** @brief Marks guest bytes [guest, guest + size) as ones the batch being recorded may write (a storage buffer a storing program has bound, a uniform update into a pool). */
+void nvn_vk_mark_write_range(uint64_t guest, uint64_t size);
+/**
+ * @brief Before replay reads guest bytes [guest, guest + size): waits for the batches in flight that may write them,
+ * so the read sees what the GPU wrote there, as the console's in-order GPU would have by then. False on a failure.
+ */
+bool nvn_vk_reading_guest(uint64_t guest, uint64_t size);
+/** @brief Whether a batch in flight may write guest bytes [guest, guest + size). */
+bool nvn_vk_pending_write(uint64_t guest, uint64_t size);
 /** @brief Whether nvn_untile_move can move v's bytes on the GPU (nvn_untile.c). */
 bool nvn_untile_can(const vimg *v);
 /**

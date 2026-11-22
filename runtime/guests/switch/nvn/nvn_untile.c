@@ -246,7 +246,7 @@ static bool move_at(replay *r, vimg *v, uint64_t addr, bool tile)
 bool nvn_untile_move(replay *r, vimg *v, bool tile)
 {
     if (tile)
-        nvn_vk_mark_write();
+        nvn_vk_mark_write_range(v->storage, v->d.size);
     return movable(v) && move_at(r, v, guest_address(v->storage, v->d.size), tile);
 }
 

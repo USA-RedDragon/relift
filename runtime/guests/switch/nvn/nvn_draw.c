@@ -117,6 +117,12 @@ static module *module_of(replay *r, uint64_t code, int stage)
         nvn_vk_stop(r, "the program at 0x%llx has no end", (unsigned long long)code);
         return NULL;
     }
+    if (nvn_vk_pending_write(code, len)) {
+        if (!nvn_vk_reading_guest(code, len) || !nvn_shader_key(r->mem, code, key, &len)) {
+            nvn_vk_stop(r, "the program at 0x%llx has no end", (unsigned long long)code);
+            return NULL;
+        }
+    }
     char why[200];
     module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m) {
@@ -125,7 +131,7 @@ static module *module_of(replay *r, uint64_t code, int stage)
                     "program %s (at 0x%llx): %s; a program missing from the table is recorded in %s/programs for the next "
                     "relift build (%s/failed.txt names programs the translator refused)",
                     key, (unsigned long long)code, why, nvn_shader_dir(), nvn_shader_dir());
-    } else if (m->stores_guest) {
+    } else if (m->global_store) {
         nvn_vk_mark_write();
     }
     return m;
@@ -139,7 +145,7 @@ static module *module_helper(replay *r, const char *kind, const module *mesh, in
     module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m)
         nvn_vk_stop(r, "the %s helper of mesh program %s: %s", kind, mesh->key, why);
-    else if (m->stores_guest)
+    else if (m->global_store)
         nvn_vk_mark_write();
     return m;
 }
@@ -852,7 +858,9 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
             int rc;
             if (b == 1) {
                 const nvn_consts *k = &r->st->consts[s];
-                rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[n]);
+                rc = k->addr && !nvn_vk_reading_guest(k->addr, k->size)
+                         ? nvn_vk_stop(r, "the host device failed a submit")
+                         : bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[n]);
             } else if (b == 2) {
                 rc = bank_of(r, r->st->bank2_host[s], NVN_BANK2_BYTES, &bi[n]);
             } else if (b == 0) {
@@ -996,6 +1004,8 @@ static int bind_user_textures(replay *r, const module *m, uint32_t s, uint32_t *
             return nvn_vk_stop(r, "out of memory");
         if (!nvn_vk_sync_uniforms(r))
             return nvn_vk_stop(r, "the host device failed a submit");
+        if (!nvn_vk_reading_guest(nvn_gpu_guest(addr), size))
+            return nvn_vk_stop(r, "the host device failed a submit");
         memcpy(st->ubo_host[s][b], r->mem + nvn_gpu_guest(addr), size);
         memset(st->ubo_host[s][b] + size, 0, UBO_BYTES - size);
         int rc = bind_textures(r, m, h->bank, st->ubo_host[s][b], (uint32_t)size, n, map, vals, 0, 0);
@@ -1135,6 +1145,8 @@ static int stage_draw(replay *r, void *arg)
             uint16_t *wide = malloc(count ? (size_t)count * 2 : 2);
             if (!wide)
                 return nvn_vk_stop(r, "out of memory widening %u 8-bit indices", count);
+            if (!nvn_vk_reading_guest(nvn_gpu_guest(dd->iaddr), count))
+                return nvn_vk_stop(r, "the host device failed a submit");
             const uint8_t *narrow = r->mem + nvn_gpu_guest(dd->iaddr);
             nvn_widen_indices(narrow, count, kp->primitive_restart, wide);
             bool ok = nvn_vk_upload_bytes(r, wide, (uint64_t)count * 2, 0, 16, &dd->ioff);
@@ -1157,6 +1169,8 @@ static int stage_draw(replay *r, void *arg)
     if (kp->nint) {
         uint64_t nv = (uint64_t)first + count;
         if (indexed) {
+            if (!nvn_vk_reading_guest(nvn_gpu_guest(dd->iaddr), (uint64_t)count * isize[itype]))
+                return nvn_vk_stop(r, "the host device failed a submit");
             const uint8_t *ip = r->mem + nvn_gpu_guest(dd->iaddr);
             int64_t hi = -1;
             for (uint32_t i = 0; i < count; i++) {
@@ -1180,6 +1194,10 @@ static int stage_draw(replay *r, void *arg)
             uint32_t *w = malloc(n ? n * 16 : 16);
             if (!w)
                 return nvn_vk_stop(r, "out of memory expanding an integer vertex attribute");
+            if (!nvn_vk_reading_guest(nvn_gpu_guest(st->vb[s].addr), st->vb[s].size)) {
+                free(w);
+                return nvn_vk_stop(r, "the host device failed a submit");
+            }
             nvn_expand_integer(r->mem + nvn_gpu_guest(st->vb[s].addr) + kp->ints[j].offset, kp->ints[j].stride, kp->ints[j].format,
                            n, w);
             bool ok = nvn_vk_upload_bytes(r, w, n ? n * 16 : 16, 0, 16, &dd->int_off[j]);
@@ -1320,9 +1338,12 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
         return rc;
-    for (uint32_t s = 0; s < 5; s++)
+    for (uint32_t s = 0; s < 5; s++) {
         if (mods[s] && mods[s]->global_store)
             nvn_mirror_written_all();
+        for (uint32_t j = 0; mods[s] && mods[s]->stores_guest && j < NVN_STORAGE_SLOTS; j++)
+            nvn_vk_mark_write_range(nvn_gpu_guest(st->gstorage[s][j].addr), st->gstorage[s][j].size);
+    }
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
@@ -1457,6 +1478,9 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     module *scan_m = module_helper(r, "scan", mesh, NVN_STAGE_MESH), *vert = module_helper(r, "vertex", mesh, 0);
     if (!scan_m || !vert)
         return RL_PENDING;
+    if (mesh->stores_guest || (task && task->stores_guest) || scan_m->stores_guest || vert->stores_guest ||
+        (mods[1] && mods[1]->stores_guest))
+        nvn_vk_mark_write();
     if (vert->other_sets || scan_m->other_sets)
         return nvn_vk_stop(r, "a helper of mesh program %s uses a set the layer does not bind", mesh->key);
     for (uint32_t s = NVN_STAGE_TASK; s <= NVN_STAGE_MESH; s++)
@@ -1753,7 +1777,9 @@ static int stage_dispatch(replay *r, void *arg)
             dd->c0_at = bi[nw];
         }
         else if (b == 1)
-            rc = bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[nw]);
+            rc = k->addr && !nvn_vk_reading_guest(k->addr, k->size)
+                     ? nvn_vk_stop(r, "the host device failed a submit")
+                     : bank_of(r, k->addr ? r->mem + k->addr : NULL, k->addr ? k->size : 0, &bi[nw]);
         else
             rc = nvn_vk_stop(r, "compute program %s reads driver constant bank c[%u]", m->key, b);
         if (rc != RL_OK)
@@ -1905,8 +1931,11 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     dispatch_data dd = { .m = m, .c0 = c0, .c0_at = { 0 } };
     if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
         return rc;
-    for (uint32_t i = 0; i < nssbo; i++)
+    for (uint32_t i = 0; i < nssbo; i++) {
         nvn_mirror_written(st->storage[i].addr, st->storage[i].size);
+        if (m->stores_guest)
+            nvn_vk_mark_write_range(nvn_gpu_guest(st->storage[i].addr), st->storage[i].size);
+    }
     if (m->global_store)
         nvn_mirror_written_all();
     if (ibuf)
@@ -2102,6 +2131,8 @@ static int bind_deferred(replay *r, const nvn_cmd *e)
         return nvn_vk_stop(r, "%s of %u slots", nvn_cmd_name(e->op), count);
     if (count && !addr)
         return nvn_vk_stop(r, "%s without its array", nvn_cmd_name(e->op));
+    if (count && !nvn_vk_reading_guest(nvn_gpu_guest(addr), (uint64_t)count * 16))
+        return nvn_vk_stop(r, "the host device failed a submit");
     return bind_slots(r, e, single, e->x[2], count, count ? r->mem + nvn_gpu_guest(addr) : NULL);
 }
 
