@@ -839,14 +839,24 @@ bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv)
 }
 
 /**
- * @brief Whether the texture registered under id can be seen through the view it was registered with. A registration
- * that names a view format the host cannot give the texture's image (blocks of another footprint, as a descriptor left
- * from an earlier use of the pool entry may) is not made resident: it is reported once, and a program that does sample
- * it stops as the bind of a handle in a constant bank does.
+ * @brief Whether the texture registered under id can be made resident: the layer can make a host image of it, and see
+ * it through the view it was registered with. A registration the layer cannot (a format or target it does not handle,
+ * or a view format of blocks of another footprint, as a descriptor left from an earlier use of the pool entry may) is
+ * not made resident: it is reported once, and a program that does sample it stops as the bind of a handle in a
+ * constant bank does.
  */
 static int resident_ok(replay *r, uint32_t id, uint64_t tex, const uint8_t *view, bool has_view, bool *ok)
 {
     *ok = true;
+    nvn_tex_desc d;
+    if (nvn_texture_desc(tex, &d) && !nvn_vk_can_image(&d)) {
+        *ok = false;
+        (void)rl_report_unknown(0x4e564e4e4f494d47ull ^ id, "nvn",
+                                "texture id %u is registered with format %u, target %u, %u samples, which the layer "
+                                "cannot make a host image of: it is not made resident",
+                                id, d.format, d.target, d.samples);
+        return RL_OK;
+    }
     if (!has_view)
         return RL_OK;
     vimg *v = nvn_vk_image(r, tex);

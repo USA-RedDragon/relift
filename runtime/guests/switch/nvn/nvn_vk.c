@@ -2552,10 +2552,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     VkImageAspectFlags aspect;
     VkFormat f = nvn_vk_format(d->format, &aspect);
     bool buffer = d->target == NVN_TARGET_BUFFER, line = d->target == 0 || d->target == 3;
-    if (f == VK_FORMAT_UNDEFINED || d->samples > 1 ||
-        (d->target != 0 && d->target != 1 && d->target != 3 && d->target != 4 && d->target != 7 &&
-         d->target != NVN_TARGET_3D && d->target != NVN_TARGET_CUBEMAP &&
-         d->target != NVN_TARGET_CUBEMAP_ARRAY && !buffer)) {
+    if (!nvn_vk_can_image(d)) {
         nvn_vk_fatal(r->c, "texture 0x%llx: format %u, target %u, %u samples not handled",
                        (unsigned long long)tex, d->format, d->target, d->samples);
         return NULL;
