@@ -4,6 +4,7 @@
  * and guest function registration.
  */
 #include "t.h"
+#include "tc.h"
 
 #include <ftw.h>
 #include <stdio.h>
@@ -27,6 +28,9 @@ static void sdmc_remove(void)
     if (g_sdmc[0])
         nftw(g_sdmc, remove_one, 16, FTW_DEPTH | FTW_PHYS);
 }
+
+/** @brief Registers the guest thread report as the runner's hang report. */
+__attribute__((constructor)) static void hang_report_register(void) { t_timed_out = tc_hang_report; }
 
 __attribute__((constructor)) static void sdmc_default(void)
 {

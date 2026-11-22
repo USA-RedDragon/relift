@@ -17,6 +17,12 @@ typedef void t_fn(void);
 
 /** @brief Registers a test (called from constructors). */
 void t_register(const char *name, t_fn *fn);
+/**
+ * @brief Called in a test's process when the test runs past its time, before the process dies: a test library sets
+ * it from a constructor to print what it knows of the hang (the guest threads and what they wait on). NULL when none
+ * does.
+ */
+extern void (*t_timed_out)(void);
 /** @brief Records a failure in the running test. */
 void t_fail(const char *file, int line, const char *expr, unsigned long long a, unsigned long long b, int has_values);
 

@@ -99,8 +99,21 @@ static bool selected(const char *name, int argc, char **argv)
     return false;
 }
 
+void (*t_timed_out)(void);
+
+static void on_alarm(int sig)
+{
+    static const char msg[] = "  the test ran past 60 s\n";
+    (void)!write(2, msg, sizeof msg - 1);
+    if (t_timed_out)
+        t_timed_out();
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 static int run_one(int i)
 {
+    signal(SIGALRM, on_alarm);
     alarm(60);
     g_failed = 0;
     g_tests[i].fn();

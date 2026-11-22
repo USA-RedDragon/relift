@@ -89,5 +89,10 @@ uint32_t tc_to_domain(rl_ctx *c, tc_obj *o);
 uint32_t tc_sub(rl_ctx *c, tc_obj o, tc_req q, tc_obj *out);
 /** @brief Closes a session handle with the kernel. */
 void tc_close(rl_ctx *c, uint32_t handle);
+/**
+ * @brief The runner's hang report (core/tests/runner.c): each guest thread's id, state, priority, cores and what it
+ * waits on, and each core's selected and holding thread. Read without the kernel lock, which a hung thread may hold.
+ */
+void tc_hang_report(void);
 
 #endif

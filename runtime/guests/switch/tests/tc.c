@@ -271,3 +271,19 @@ uint32_t tc_sub(rl_ctx *c, tc_obj o, tc_req q, tc_obj *out)
 }
 
 void tc_close(rl_ctx *c, uint32_t handle) { t_svc(c, SVC_CLOSE_HANDLE, handle, 0, 0, 0, 0, 0); }
+
+void tc_hang_report(void)
+{
+    fprintf(stderr, "  guest threads at the timeout:\n");
+    for (hos_thread *t = hos.threads; t; t = t->next_all)
+        fprintf(stderr, "    thread %llu: state %d prio %d core %d active %d cur %d wait %d woken %d mutex 0x%llx\n",
+                (unsigned long long)t->id, t->state, t->prio, t->core, t->active_core, t->cur_core, t->wait_kind,
+                t->woken, (unsigned long long)t->mutex_addr);
+    for (int i = 0; i < HOS_MAX_CORES; i++) {
+        const hos_core *k = &hos.sched.cores[i];
+        if (k->selected || k->holder)
+            fprintf(stderr, "    core %d: selected %llu holder %llu\n", i,
+                    (unsigned long long)(k->selected ? k->selected->id : 0),
+                    (unsigned long long)(k->holder ? k->holder->id : 0));
+    }
+}
