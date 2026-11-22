@@ -158,7 +158,7 @@ static void *quit_force_thread(void *p)
 /**
  * @brief A quit signal (SIGTERM, SIGINT, or a console close on Windows) arrived: without a listener the process ends at
  * once with code; with one the listener is asked as for a window close, and a guest that has not ended the process
- * within the grace is ended anyway, so a signal always stops a run.
+ * within the grace is ended anyway, so a signal always stops a run (and one that cannot start the timer ends it now).
  */
 static void quit_requested(uint32_t code)
 {
@@ -172,15 +172,18 @@ static void quit_requested(uint32_t code)
         return;
     quit_force *f = malloc(sizeof *f);
     if (!f)
-        return;
+        rl_process_exit(code);
     f->code = code;
     pthread_t t;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&t, &attr, quit_force_thread, f) != 0)
-        free(f);
+    int rc = pthread_create(&t, &attr, quit_force_thread, f);
     pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        free(f);
+        rl_process_exit(code);
+    }
 }
 
 #if !defined(_WIN32)
