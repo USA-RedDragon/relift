@@ -330,6 +330,15 @@ bool rl_ports_script_value(const char *port, const char *control, float *value)
     return held;
 }
 
+bool rl_ports_script_in_use(void)
+{
+    pthread_mutex_lock(&g_lock);
+    load_locked();
+    bool used = g_follow || g_nsteps;
+    pthread_mutex_unlock(&g_lock);
+    return used;
+}
+
 void rl_ports_script_reset(void)
 {
     pthread_mutex_lock(&g_lock);

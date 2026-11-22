@@ -159,6 +159,8 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "picture.taa_sharpness"
                 | "renderdoc.capture"
                 | "renderdoc.capture_dir"
+                | "text_entry.text"
+                | "text_entry.default"
         )
     });
     rust.extend(gb_settings());

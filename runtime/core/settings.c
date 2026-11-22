@@ -173,6 +173,22 @@ static const rl_setting_def g_runtime_defs[] = {
                        "the user data folder",
         .env = "RELIFT_RENDERDOC_DIR",
     },
+    {
+        .key = "text_entry.text",
+        .type = RL_SETTING_STRING,
+        .label = "Typed text",
+        .description = "When set, the answer to every text the game asks for (a name, for one), given without showing "
+                       "the text entry panel. Empty: a run with a window and no input script shows the panel",
+        .env = "RELIFT_TEXT_ENTRY_TEXT",
+    },
+    {
+        .key = "text_entry.default",
+        .type = RL_SETTING_STRING,
+        .label = "Default typed text",
+        .description = "The answer when the game asks for text, no panel can be shown (no window, or an input script "
+                       "drives the run) and the game offers no text of its own",
+        .def_str = "Player",
+    },
 };
 
 static char *g_mods[RL_SETTINGS_MODS_MAX];

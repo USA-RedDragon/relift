@@ -664,6 +664,9 @@ RL_RUNTIME_API void rl_dispatch_own(rl_ctx *c, rl_fn *table, uint64_t lo, uint64
 /** @brief The function at guest address a in c's own table (rl_dispatch_own), else as rl_dispatch_find; NULL for none. */
 RL_RUNTIME_API rl_fn rl_dispatch_find_ctx(rl_ctx *c, uint64_t a);
 
+/** @brief True when an input script drives this run (relift/ports.h): it holds steps or follows a file. */
+bool rl_ports_script_in_use(void);
+
 /** @brief Guest memory base used by runtime entries that get only a context. */
 RL_RUNTIME_API uint8_t *rl_mem_base(void);
 /** @brief Sets the guest memory base (the guest layer calls this after it reserves the space). */

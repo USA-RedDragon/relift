@@ -211,6 +211,20 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "text_entry.text",
+            "Typed text",
+            "When set, the answer to every text the game asks for (a name, for one), given without showing the text entry panel. Empty: a run with a window and no input script shows the panel",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
+            "text_entry.default",
+            "Default typed text",
+            "The answer when the game asks for text, no panel can be shown (no window, or an input script drives the run) and the game offers no text of its own",
+            Value::String("Player".into()),
+            SettingKind::String,
+        ),
+        s(
             "save.dir",
             "Save folder",
             "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
@@ -1072,7 +1086,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 27);
+        assert_eq!(section(Vec::new()).runtime.len(), 29);
     }
 
     #[test]
