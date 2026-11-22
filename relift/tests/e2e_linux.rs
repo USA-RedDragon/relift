@@ -269,6 +269,26 @@ fn prune_lifted(kept: &Path) {
     }
 }
 
+/// The sysroot of the arm64 cross compiler: the directory above the `lib`
+/// that holds its loader. `-print-sysroot` is no help, since Debian and
+/// Ubuntu print `/` for a compiler whose libraries sit in
+/// `/usr/aarch64-linux-gnu/lib`, while Arch prints that directory.
+fn cross_sysroot() -> String {
+    let out = relift_proc::command("aarch64-linux-gnu-gcc")
+        .arg("-print-file-name=ld-linux-aarch64.so.1")
+        .output()
+        .expect("the compiler runs");
+    let loader = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let lib = Path::new(&loader)
+        .parent()
+        .and_then(|d| d.canonicalize().ok())
+        .unwrap_or_else(|| panic!("the compiler does not find its loader: {loader}"));
+    lib.parent()
+        .expect("the loader's directory has a parent")
+        .display()
+        .to_string()
+}
+
 #[test]
 fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
     let have = |t: &str| relift_build::find_tool(t).is_some();
@@ -280,11 +300,7 @@ fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
         eprintln!("skipped: no clang or aarch64-linux-gnu-gcc on PATH");
         return;
     }
-    let sysroot = relift_proc::command("aarch64-linux-gnu-gcc")
-        .arg("-print-sysroot")
-        .output()
-        .expect("the compiler runs");
-    let sysroot = String::from_utf8_lossy(&sysroot.stdout).trim().to_string();
+    let sysroot = cross_sysroot();
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../guests/linux/guest/corpus");
     let root = tiny::scratch("e2e-linux-dynamic");
     std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
