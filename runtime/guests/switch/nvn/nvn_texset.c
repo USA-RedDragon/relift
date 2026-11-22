@@ -628,6 +628,26 @@ static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, 
  * and as_image takes the texture for an image whether it was registered as one or not (a game may bind the descriptor
  * it registered as a texture to an image slot: both are the same texture pool entry).
  */
+/**
+ * @brief Whether the texture at tex still lies in a memory pool: false when the pool its descriptor names was finalized
+ * (the registration is a descriptor left from before), so the texture has no storage to make a host image from.
+ */
+static bool pool_live(uint32_t id, uint64_t tex)
+{
+    nvn_tex_desc d;
+    if (!nvn_texture_desc(tex, &d))
+        return false;
+    uint64_t size = 0;
+    nvn_pool_memory(d.pool, &size);
+    if (size)
+        return true;
+    (void)rl_report_unknown(0x4e564e504f4f4c47ull ^ id, "nvn",
+                            "texture id %u (texture 0x%llx) lies in memory pool 0x%llx, which no longer exists: it is not "
+                            "made resident and reads zeros",
+                            id, (unsigned long long)tex, (unsigned long long)d.pool);
+    return false;
+}
+
 static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler,
                              bool as_image)
 {
@@ -637,6 +657,8 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     uint8_t view[17] = { 0 };
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
+    if (tex && !pool_live(id, tex))
+        tex = 0;
     if (!tex && !as_image)
         return bind_unwritten(r, id, sid, kind, dim, slot, with_sampler);
     if (!tex)
@@ -807,7 +829,7 @@ int nvn_texset_sync_registered(replay *r)
             uint8_t view[17];
             bool has_view, image;
             uint64_t tex = nvn_tex_registered(ids[i], view, &has_view, &image);
-            if (!tex || !nvn_texture_desc(tex, &(nvn_tex_desc){ 0 }))
+            if (!tex || !pool_live(ids[i], tex))
                 continue;
             if (ids[i] >= t.slots.pinned)
                 return nvn_vk_stop(r,
@@ -843,7 +865,7 @@ int nvn_texset_sync_registered(replay *r)
         uint8_t view[17];
         bool has_view, image;
         uint64_t tex = nvn_tex_registered(t.synced[i], view, &has_view, &image);
-        if (!tex || !nvn_texture_desc(tex, &(nvn_tex_desc){ 0 }))
+        if (!tex || !pool_live(t.synced[i], tex))
             continue;
         bool ok;
         int rc = resident_ok(r, t.synced[i], tex, view, has_view, &ok);

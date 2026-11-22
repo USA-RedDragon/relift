@@ -1801,7 +1801,13 @@ static vimg *image_of(replay *r, uint64_t tex)
 static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
 {
     nvn_vk_retire_images();
-    uint64_t storage = nvn_pool_memory(d->pool, NULL) + d->offset;
+    uint64_t pool_size = 0;
+    uint64_t storage = nvn_pool_memory(d->pool, &pool_size) + d->offset;
+    if (!pool_size) {
+        rl_guest_fatal(r->c, "nvn", "texture 0x%llx lies in memory pool 0x%llx, which no longer exists",
+                       (unsigned long long)tex, (unsigned long long)d->pool);
+        return NULL;
+    }
     for (uint32_t i = 0; i < g.nimages; i++) {
         vimg *v = g.images[i];
         if (v->storage != storage)
