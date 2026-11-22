@@ -44,3 +44,24 @@ TEST(nvn_a_draw_binds_vertex_streams_with_a_gap_between_them)
     CHECK_EQ(s[0], 0);
     CHECK_EQ(s[1], 2);
 }
+
+TEST(nvn_streams_past_a_bind_keep_what_an_earlier_bind_wrote)
+{
+    uint32_t state = 0;
+    nvn_vertex_streams_bound(&state, 4);
+    nvn_vertex_streams_bound(&state, 1);
+    CHECK(nvn_vertex_stream_known(state, 0));
+    CHECK(nvn_vertex_stream_known(state, 3));
+    CHECK(!nvn_vertex_stream_known(state, 4));
+    CHECK(!nvn_vertex_stream_known(state, 40));
+    state = 0;
+    nvn_vertex_streams_bound(&state, 1);
+    CHECK(!nvn_vertex_stream_known(state, 3));
+}
+
+TEST(nvn_a_stream_whose_pool_is_gone_reads_zeros)
+{
+    CHECK_EQ(nvn_vertex_stream_bytes(0, false), NVN_STREAM_UNBOUND);
+    CHECK_EQ(nvn_vertex_stream_bytes(0x900000000ull, true), NVN_STREAM_POOL);
+    CHECK_EQ(nvn_vertex_stream_bytes(0x900000000ull, false), NVN_STREAM_ZEROS);
+}

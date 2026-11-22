@@ -161,6 +161,28 @@ void nvn_vertex_attribs_bound(uint32_t *state, uint32_t *constant, uint32_t n);
 uint32_t nvn_vertex_attrib_source(uint32_t state, uint32_t constant, uint32_t i);
 
 /**
+ * @brief The GPU's vertex stream registers as nvnCommandBufferBindVertexStreamState leaves them: a bind of n writes
+ * the stride and divisor registers of streams 0 to n - 1 (bit s of *state set: nvn_gfx.streams[s] holds the state
+ * object); streams past that keep what an earlier bind wrote, as the attribute registers do (registers keep their
+ * values until written; inferred, like nvn_vertex_attribs_bound).
+ */
+void nvn_vertex_streams_bound(uint32_t *state, uint32_t n);
+
+/** @brief Whether stream s holds a stride and divisor some bind on the queue wrote (nvn_vertex_streams_bound). */
+bool nvn_vertex_stream_known(uint32_t state, uint32_t s);
+
+/** @brief Where a stream's vertex bytes come from (nvn_vertex_stream_bytes). */
+enum { NVN_STREAM_UNBOUND, NVN_STREAM_POOL, NVN_STREAM_ZEROS };
+
+/**
+ * @brief Where a draw fetches stream bytes from given the buffer address the stream's address register holds (0: no
+ * bind on the queue wrote one) and whether that range still lies in a memory pool: a range in a pool is read from it;
+ * one whose pool was finalized reads zeros, as the GPU's fetch from a GPU address with no pool mapped behind it does
+ * (inferred: the driver maps nothing there, so the fetch reads the zero page the layer stands in for).
+ */
+uint32_t nvn_vertex_stream_bytes(uint64_t addr, bool mapped);
+
+/**
  * @brief The vertex streams a draw with pipeline key k binds buffers to, in the key's order, into out; returns how
  * many. The streams need not be contiguous: each of the GPU's vertex streams is set apart, so a program may read
  * streams 0 and 2 with nothing bound to 1.

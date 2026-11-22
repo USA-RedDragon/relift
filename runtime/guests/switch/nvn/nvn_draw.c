@@ -683,6 +683,17 @@ uint32_t nvn_vertex_attrib_source(uint32_t state, uint32_t constant, uint32_t i)
     return constant & (1u << i) ? NVN_ATTRIB_CONSTANT : NVN_ATTRIB_UNKNOWN;
 }
 
+void nvn_vertex_streams_bound(uint32_t *state, uint32_t n) { *state |= n >= 32 ? ~0u : (1u << n) - 1u; }
+
+bool nvn_vertex_stream_known(uint32_t state, uint32_t s) { return s < 32 && (state & (1u << s)); }
+
+uint32_t nvn_vertex_stream_bytes(uint64_t addr, bool mapped)
+{
+    if (!addr)
+        return NVN_STREAM_UNBOUND;
+    return mapped ? NVN_STREAM_POOL : NVN_STREAM_ZEROS;
+}
+
 /** @brief Fills the vertex input of k for the attributes vs reads. */
 static int vertex_state(replay *r, const module *vs, pipe_key *k)
 {
@@ -719,8 +730,9 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
         VkFormat f = vertex_format(fo[0]);
         if (f == VK_FORMAT_UNDEFINED || f == VK_FORMAT_A2B10G10R10_UINT_PACK32)
             return nvn_vk_stop(r, "vertex attribute %u has format %u, which the float input cannot take", i, fo[0]);
-        if ((uint32_t)stream >= st->nstreams)
-            return nvn_vk_stop(r, "vertex attribute %u reads stream %u of %u", i, (uint32_t)stream, st->nstreams);
+        if ((uint32_t)stream >= NVN_VERTEX_BUFFERS || !nvn_vertex_stream_known(st->stream_state, (uint32_t)stream))
+            return nvn_vk_stop(r, "vertex attribute %u reads stream %u, which no bind on this queue wrote (%u bound)", i,
+                               (uint32_t)stream, st->nstreams);
         if (integer_format(f)) {
             uint32_t b = NVN_VERTEX_BUFFERS + k->nint;
             k->ints[k->nint].stream = (uint32_t)stream;
@@ -1162,8 +1174,24 @@ static int stage_draw(replay *r, void *arg)
             dd->has_def = true;
             continue;
         }
-        if (!st->vb[s].addr)
+        uint32_t bytes = nvn_vertex_stream_bytes(st->vb[s].addr, nvn_gpu_mapped(st->vb[s].addr, st->vb[s].size));
+        if (bytes == NVN_STREAM_UNBOUND)
             return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
+        if (bytes == NVN_STREAM_ZEROS) {
+            (void)rl_report_unknown(0x4e564e5354524d5aull ^ st->vb[s].addr, "nvn",
+                                    "vertex stream %u reads 0x%llx bytes at 0x%llx, which no memory pool holds any "
+                                    "more: it reads zeros",
+                                    s, (unsigned long long)st->vb[s].size, (unsigned long long)st->vb[s].addr);
+            uint8_t *zero = calloc(1, st->vb[s].size ? st->vb[s].size : 16);
+            bool ok = zero && nvn_vk_upload_bytes(r, zero, st->vb[s].size ? st->vb[s].size : 16, 0, 16, &off);
+            free(zero);
+            if (!ok)
+                return nvn_vk_stop(r, "the upload arena is full");
+            dd->binding[dd->nb] = s;
+            dd->vbuf[dd->nb] = g.arena.buf;
+            dd->offs[dd->nb++] = off;
+            continue;
+        }
         VkDeviceSize po;
         VkBuffer pb = nvn_draw_pool_span(st->vb[s].addr, st->vb[s].size, 4, &po);
         if (pb)
@@ -2339,6 +2367,7 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return st->nattribs ? keep(r, e, 2, st->attribs, 4u * st->nattribs, NULL) : RL_OK;
     case NVN_CMD_BIND_VERTEX_STREAM_STATE:
         st->nstreams = (uint32_t)e->x[1] > NVN_VERTEX_BUFFERS ? NVN_VERTEX_BUFFERS : (uint32_t)e->x[1];
+        nvn_vertex_streams_bound(&st->stream_state, st->nstreams);
         return st->nstreams ? keep(r, e, 2, st->streams, 8u * st->nstreams, NULL) : RL_OK;
     case NVN_CMD_BIND_DEPTH_STENCIL_STATE:
         return keep(r, e, 1, st->depth_stencil, 8, &st->have_depth_stencil);
