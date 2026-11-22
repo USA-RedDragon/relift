@@ -56,6 +56,13 @@ static struct {
     uint32_t *synced, nsynced, capsynced;
     bool *is_synced;
     uint64_t sync_frame;
+    /**
+     * @brief What the last refresh of every synced id saw: the watch stamp (nvn_watch_stamp), the synced count and the
+     * GPU write stamp; and the synced ids whose image has no write watch, which every frame checks by their bytes.
+     */
+    uint64_t seen_stamp, seen_written;
+    uint32_t seen_count;
+    uint32_t *loose, nloose, caploose;
     VkDescriptorSetLayout layout;
     VkDescriptorPool pool;
     VkDescriptorSet set;
@@ -871,6 +878,36 @@ static int stale_slot(replay *r, uint32_t id)
     return null_slot(r, id, &kind, &dim);
 }
 
+/**
+ * @brief Brings the texture registered under synced id up to date in its slot: a slot that still holds the image of the
+ * same registration only has its bytes checked (nvn_vk_refresh, by its write watch where it has one); a changed
+ * registration is bound again, and one whose pool is gone reads zeros.
+ */
+static int refresh_synced(replay *r, uint32_t id)
+{
+    uint8_t view[17];
+    bool has_view, image;
+    uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
+    if (!tex)
+        return RL_OK;
+    if (!pool_live(id, tex))
+        return stale_slot(r, id);
+    if (t.tex_img[id] && t.tex_guest[id] == tex) {
+        if (!nvn_vk_refresh(r, t.tex_img[id]))
+            return nvn_vk_stop(r, "cannot refill texture id %u from its storage", id);
+        return RL_OK;
+    }
+    bool ok;
+    int rc = resident_ok(r, id, tex, view, has_view, &ok);
+    if (rc != RL_OK || !ok)
+        return rc;
+    uint32_t kind, dim, slot;
+    rc = bind_texture(r, id, &kind, &dim, &slot, false, false);
+    if (rc == RL_OK && t.tex_img[slot])
+        t.tex_img[slot]->synced = true;
+    return rc;
+}
+
 int nvn_texset_sync_registered(replay *r)
 {
     if (!make())
@@ -920,37 +957,46 @@ int nvn_texset_sync_registered(replay *r)
             if (!t.is_synced[ids[i]]) {
                 t.is_synced[ids[i]] = true;
                 t.synced[t.nsynced++] = ids[i];
+                if (t.nsynced >= 1024 && !(t.nsynced & (t.nsynced - 1)))
+                    rl_log(RL_LOG_INFO, "nvn", "texture set: %u registered textures kept in their slots", t.nsynced);
             }
             uint32_t kind, dim, slot;
             rc = bind_texture(r, ids[i], &kind, &dim, &slot, false, false);
             if (rc != RL_OK)
                 return rc;
+            if (t.tex_img[slot])
+                t.tex_img[slot]->synced = true;
         }
     if (!refresh)
         return RL_OK;
-    for (uint32_t i = 0; i < t.nsynced; i++) {
-        uint8_t view[17];
-        bool has_view, image;
-        uint64_t tex = nvn_tex_registered(t.synced[i], view, &has_view, &image);
-        if (!tex)
-            continue;
-        if (!pool_live(t.synced[i], tex)) {
-            int rc = stale_slot(r, t.synced[i]);
-            if (rc != RL_OK)
-                return rc;
-            continue;
+    uint64_t stamp = nvn_watch_stamp();
+    bool full = stamp != t.seen_stamp || t.nsynced != t.seen_count;
+    t.seen_stamp = stamp;
+    t.seen_count = t.nsynced;
+    if (full)
+        t.nloose = 0;
+    uint32_t n_ids = full ? t.nsynced : t.nloose;
+    for (uint32_t i = 0; i < n_ids; i++) {
+        uint32_t id = full ? t.synced[i] : t.loose[i];
+        int rc = refresh_synced(r, id);
+        if (rc != RL_OK)
+            return rc;
+        vimg *v = t.tex_img[id];
+        if (full && v && !v->watch.on && v->d.target != NVN_TARGET_BUFFER) {
+            if (t.nloose == t.caploose) {
+                uint32_t cap = t.caploose ? 2 * t.caploose : 256;
+                uint32_t *p = realloc(t.loose, cap * sizeof *p);
+                if (!p)
+                    return nvn_vk_stop(r, "out of memory");
+                t.loose = p;
+                t.caploose = cap;
+            }
+            t.loose[t.nloose++] = id;
         }
-        bool ok;
-        int rc = resident_ok(r, t.synced[i], tex, view, has_view, &ok);
-        if (rc != RL_OK)
-            return rc;
-        if (!ok)
-            continue;
-        uint32_t kind, dim, slot;
-        rc = bind_texture(r, t.synced[i], &kind, &dim, &slot, false, false);
-        if (rc != RL_OK)
-            return rc;
     }
+    if (!nvn_vk_sync_aliases(r, t.seen_written))
+        return RL_PENDING;
+    t.seen_written = g.write_stamp;
     return RL_OK;
 }
 

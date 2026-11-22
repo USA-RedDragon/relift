@@ -7,10 +7,12 @@
 #include "hos.h"
 #include "nvn_priv.h"
 #include "nvn_vk.h"
+#include "nvn_watch.h"
 #include "runner.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /** @brief Binds sampled image 3D element 5 and storage image 2D element 7 (set 0, bindings 3 and 35) and writes the fetched texel to a buffer. */
 static const uint32_t never_bound_spv[] = {
@@ -875,4 +877,85 @@ TEST(nvn_texset_handles_a_bank_names_are_bound_without_making_every_registered_t
     CHECK_EQ(out[0], 0xa55a0000u | (4321u >> 8) << 8 | (4321u & 0xff));
     run_read_handle(FIRST + 17u, out);
     CHECK_EQ(out[0], 0xa55a0000u | 17u);
+}
+
+/** @brief Registers count 4x4 RGBA8 textures under ids first.. over the pool, texel words (i, 0x5a, 0xa5). */
+static void register_many(replay *r, uint8_t *mem, uint64_t pool, uint64_t tex, uint32_t first, uint32_t count,
+                          uint64_t at, uint32_t span)
+{
+    for (uint32_t i = 0; i < count; i++) {
+        nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1,
+                           .flags = 1u << 4, .stride = 32, .swizzle = { 2, 3, 4, 5 }, .pool = pool,
+                           .offset = at + (uint64_t)i * span };
+        CHECK(nvn_tex_layout(&d));
+        CHECK(nvn_texture_record(tex + 0x100 * (uint64_t)i, &d, NULL));
+        uint8_t *p = mem + d.offset;
+        for (uint32_t k = 0; k < span; k += 4) {
+            p[k] = (uint8_t)i;
+            p[k + 1] = (uint8_t)(i >> 8);
+            p[k + 2] = 0x5a;
+            p[k + 3] = 0xa5;
+        }
+        r->c->x[1] = first + i;
+        r->c->x[2] = tex + 0x100 * (uint64_t)i;
+        r->c->x[3] = 0;
+        nvnh_nvnTexturePoolRegisterTexture(r->c, mem);
+    }
+}
+
+static double now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+}
+
+TEST(nvn_texset_every_registered_texture_reads_its_texels_and_an_unchanged_frame_costs_little)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    enum { COUNT = 5000, FIRST = 6000, SPAN = 0x80 };
+    static rl_ctx c;
+    static uint8_t mem[0x10000 + COUNT * SPAN];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x600;
+    CHECK(nvn_pool_make(pool, 0, sizeof mem, 0x2a1));
+    CHECK(nvn_texset_pinned() > FIRST + COUNT);
+    register_many(&r, mem, pool, 0x20000000, FIRST, COUNT, 0x10000, SPAN);
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+    CHECK(g.nimages >= COUNT);
+    uint32_t out[2] = { 0, 0 };
+    run_read_handle(FIRST + 4711u, out);
+    CHECK_EQ(out[1], FIRST + 4711u);
+    CHECK_EQ(out[0], 0xa55a0000u | (4711u >> 8) << 8 | (4711u & 0xff));
+    double t0 = now_ms();
+    for (int f = 0; f < 10; f++) {
+        g.presents++;
+        CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    }
+    double per = (now_ms() - t0) / 10;
+    printf("  an unchanged frame over %u registered textures: %.3f ms\n", COUNT, per);
+    CHECK(per < 2.0);
+    for (uint32_t k = 0; k < SPAN; k += 4)
+        mem[0x10000 + 4711u * SPAN + k] = 0x77;
+    nvn_watch_touch(0x10000 + 4711u * SPAN, SPAN);
+    g.presents++;
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+    run_read_handle(FIRST + 4711u, out);
+    CHECK_EQ(out[0] & 0xffu, 0x77u);
+    printf("  images %u for %u registered textures\n", g.nimages, COUNT);
 }

@@ -11,6 +11,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 /** @brief Compute program: dst[i] = src[i] + 1 for i < n, through buffer references in push constants (glslang, SPIR-V 1.5). */
 static const uint32_t copy_spv[] = {
@@ -268,4 +270,91 @@ TEST(nvn_mirror_carries_writes_through_a_pointer_a_program_reads_back_to_the_cpu
     VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
     VK(vkDestroyShaderModule)(g.dev, sm, NULL);
     rl_settings_set("nvn.memory", "auto");
+}
+
+static double ms_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+}
+
+/** @brief The time one present's refresh of every synced registered texture takes, over frames presents after one more. */
+static double refresh_ms(replay *r, int frames)
+{
+    g.presents++;
+    if (nvn_texset_sync_registered(r) != RL_OK)
+        return 1e9;
+    double t0 = ms_now();
+    for (int f = 0; f < frames; f++) {
+        g.presents++;
+        if (nvn_texset_sync_registered(r) != RL_OK)
+            return 1e9;
+    }
+    return (ms_now() - t0) / frames;
+}
+
+TEST(nvn_registered_textures_cost_nothing_per_frame_until_their_bytes_change)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    enum { FEW = 50, MANY = 5000, SPAN = 0x200, FIRST = 9000 };
+    uint64_t heap = t_heap(c, 0x1000000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, (uint64_t)MANY * SPAN + hp, 0));
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    r.st = &st;
+    CHECK(nvn_texset());
+    CHECK(nvn_texset_pinned() > FIRST + MANY);
+    double few = 0, many = 0;
+    for (uint32_t i = 0; i < MANY; i++) {
+        nvn_tex_desc d = { .target = 1, .format = 37, .width = 8, .height = 8, .depth = 1, .levels = 1,
+                           .flags = 1u << 4, .stride = 64, .swizzle = { 2, 3, 4, 5 }, .pool = pool,
+                           .offset = (uint64_t)i * SPAN };
+        CHECK(nvn_tex_layout(&d));
+        uint64_t tex = heap + 0x800000 + 0x100 * (uint64_t)i;
+        CHECK(nvn_texture_record(tex, &d, NULL));
+        for (uint32_t k = 0; k < SPAN; k += 4)
+            rl_st32(m, at + (uint64_t)i * SPAN + k, 0xa55a0000u | i);
+        c->x[1] = FIRST + i;
+        c->x[2] = tex;
+        c->x[3] = 0;
+        nvnh_nvnTexturePoolRegisterTexture(c, m);
+        if (i + 1 == FEW) {
+            CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+            few = refresh_ms(&r, 20);
+        }
+    }
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+    many = refresh_ms(&r, 20);
+    printf("  an unchanged frame: %.4f ms with %u registered textures, %.4f ms with %u\n", few, FEW, many, MANY);
+    CHECK(many < few + 0.05);
+    vimg *v = nvn_vk_image(&r, heap + 0x800000 + 0x100 * 4711ull);
+    CHECK(v != NULL);
+    uint64_t before = v ? v->hash : 0;
+    CHECK(!t_write(at + 4711ull * SPAN + 8, 0x77).faulted);
+    g.presents++;
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(v && v->hash != before);
+    vimg *next = nvn_vk_image(&r, heap + 0x800000 + 0x100 * 4710ull);
+    CHECK(next != NULL);
+    uint64_t kept = next ? next->hash : 0, kept_edges = next ? next->edge_hash : 0;
+    CHECK(!t_write(at + 4711ull * SPAN + 12, 0x66).faulted);
+    g.presents++;
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(kept != 0);
+    CHECK(next && next->hash == kept && next->edge_hash == kept_edges);
+    CHECK(v && v->hash != before);
+    CHECK(nvn_vk_flush(&r));
 }
