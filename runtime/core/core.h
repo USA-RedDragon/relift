@@ -477,6 +477,11 @@ RL_RUNTIME_API bool rl_host_random(void *dst, size_t n);
 typedef void rl_exit_hook(uint32_t code);
 /** @brief Sets the exit hook (tests catch the exit instead of ending the process). */
 RL_RUNTIME_API void rl_set_exit_hook(rl_exit_hook *hook);
+/**
+ * @brief Adds fn to what rl_process_exit runs before the process ends (or before the exit hook), in the order added: a
+ * layer's last writes of what it keeps across launches. Up to 8; returns false when the list is full.
+ */
+RL_RUNTIME_API bool rl_at_process_exit(void (*fn)(void));
 /** @brief Ends the guest process with code (runs the hook). */
 RL_RUNTIME_API void rl_process_exit(uint32_t code);
 /** @brief Sets an RL_PEND_EXIT_PROCESS record in c and returns RL_PENDING. */

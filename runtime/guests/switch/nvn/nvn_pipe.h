@@ -169,6 +169,12 @@ uint32_t nvn_draw_vertex_streams(const nvn_pipe_key *k, uint32_t out[NVN_VERTEX_
 
 /** @brief Writes the persistent cache when it holds pipelines made since it was last written. */
 void nvn_pipe_save(void);
+/**
+ * @brief Whether the keys and cache are due to be written at now (clock ns): something changed, and the last write is
+ * a minute old, or a pipeline compiled during play (at late_at, 0 for none) two seconds ago. A saver thread writes
+ * them then, off the game's threads, and the process writes them once more when it ends.
+ */
+bool nvn_pipe_save_due(uint64_t now, uint64_t saved, uint64_t late_at, bool dirty);
 
 /** @brief Pipelines the driver compiled, and the time it took (ns), counting those made before and after nvn_pipe_warmed. */
 void nvn_pipe_stats(uint64_t *made, uint64_t *made_ns, uint64_t *late, uint64_t *late_ns);

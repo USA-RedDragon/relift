@@ -244,8 +244,29 @@ bool rl_host_random(void *dst, size_t n)
 
 void rl_set_exit_hook(rl_exit_hook *hook) { g_exit_hook = hook; }
 
+static void (*g_at_exit[8])(void);
+static uint32_t g_nat_exit;
+
+bool rl_at_process_exit(void (*fn)(void))
+{
+    uint32_t i = __atomic_fetch_add(&g_nat_exit, 1, __ATOMIC_ACQ_REL);
+    if (i >= 8)
+        return false;
+    __atomic_store_n(&g_at_exit[i], fn, __ATOMIC_RELEASE);
+    return true;
+}
+
 void rl_process_exit(uint32_t code)
 {
+    static int ran;
+    if (!__atomic_exchange_n(&ran, 1, __ATOMIC_ACQ_REL)) {
+        uint32_t n = __atomic_load_n(&g_nat_exit, __ATOMIC_ACQUIRE);
+        for (uint32_t i = 0; i < n && i < 8; i++) {
+            void (*fn)(void) = __atomic_load_n(&g_at_exit[i], __ATOMIC_ACQUIRE);
+            if (fn)
+                fn();
+        }
+    }
     if (g_exit_hook) {
         g_exit_hook(code);
         return;

@@ -21,6 +21,8 @@
 #define CACHE_IDENTITY 112u
 #define CACHE_HEAD (8u + 64u + CACHE_IDENTITY + 8u)
 #define SAVE_INTERVAL_NS (60ull * 1000000000ull)
+/** @brief How soon after a pipeline compiled during play the keys and cache are written again. */
+#define SAVE_AFTER_LATE_NS (2ull * 1000000000ull)
 
 /** @brief One made thing (a library or a pipeline) in a table keyed by bytes. */
 typedef struct entry {
@@ -47,11 +49,15 @@ static struct {
     pthread_cond_t cv;
     table vi, pr, fs, fo, full, comp, mcomp;
     uint64_t made, made_ns, late, late_ns, saved_ns, loaded;
+    /** @brief When the last pipeline was compiled after warm-up (0: none since the last save), and the saver thread. */
+    uint64_t late_at;
+    bool saver;
+    pthread_mutex_t save_lock;
     nvn_pipe_rec *old, *fresh;
     uint32_t nold, nfresh, capfresh;
     table seen;
     uint8_t identity[CACHE_IDENTITY];
-} P = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
+} P = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER, .save_lock = PTHREAD_MUTEX_INITIALIZER };
 
 void nvn_spec_sort(uint32_t *n, VkSpecializationMapEntry *map, uint32_t *vals)
 {
@@ -224,6 +230,7 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
     if (late) {
         P.late++;
         P.late_ns += dt;
+        P.late_at = rl_clock_ns();
     }
     pthread_mutex_unlock(&P.lock);
     if (late || rl_cfg()->trace_os)
@@ -562,10 +569,46 @@ static VkPipeline monolithic(const nvn_pipe_key *k)
     return p;
 }
 
+bool nvn_pipe_save_due(uint64_t now, uint64_t saved, uint64_t late_at, bool dirty)
+{
+    if (!dirty)
+        return false;
+    return now - saved > SAVE_INTERVAL_NS || (late_at && now - late_at > SAVE_AFTER_LATE_NS);
+}
+
+/** @brief The saver thread: writes the keys and the cache once nvn_pipe_save_due says so, off the game's threads. */
+static void *saver_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        rl_sleep_ns(250000000ull);
+        pthread_mutex_lock(&P.lock);
+        bool due = nvn_pipe_save_due(rl_clock_ns(), P.saved_ns, P.late_at, P.dirty);
+        pthread_mutex_unlock(&P.lock);
+        if (due)
+            nvn_pipe_save();
+    }
+    return NULL;
+}
+
 static void maybe_save(void)
 {
-    if (P.dirty && rl_clock_ns() - P.saved_ns > SAVE_INTERVAL_NS)
-        nvn_pipe_save();
+    if (__atomic_load_n(&P.saver, __ATOMIC_ACQUIRE))
+        return;
+    pthread_mutex_lock(&P.lock);
+    bool start = !P.saver;
+    P.saver = true;
+    pthread_mutex_unlock(&P.lock);
+    if (!start)
+        return;
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &attr, saver_main, NULL) != 0)
+        rl_log(RL_LOG_WARN, "nvn", "cannot start the pipeline cache saver: pipelines are saved at exit only");
+    pthread_attr_destroy(&attr);
+    rl_at_process_exit(nvn_pipe_save);
 }
 
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
@@ -656,6 +699,7 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
     if (late) {
         P.late++;
         P.late_ns += dt;
+        P.late_at = rl_clock_ns();
     }
     pthread_mutex_unlock(&P.lock);
     if (late || rl_cfg()->trace_os)
@@ -974,13 +1018,23 @@ static void keys_save(void)
         remove(tmp);
 }
 
+static void save_locked(void);
+
 void nvn_pipe_save(void)
+{
+    pthread_mutex_lock(&P.save_lock);
+    save_locked();
+    pthread_mutex_unlock(&P.save_lock);
+}
+
+static void save_locked(void)
 {
     if (!P.cache)
         return;
     pthread_mutex_lock(&P.lock);
     bool dirty = P.dirty;
     P.dirty = false;
+    P.late_at = 0;
     P.saved_ns = rl_clock_ns();
     pthread_mutex_unlock(&P.lock);
     if (!dirty && P.loaded)

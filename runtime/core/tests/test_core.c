@@ -758,3 +758,25 @@ TEST(core_finds_shipped_files_by_the_executable_not_the_working_directory)
     CHECK_EQ(unlink(file), 0);
     CHECK_EQ(rmdir(dir), 0);
 }
+
+static unsigned g_at_exit_runs, g_at_exit_hooked;
+
+static void count_at_exit(void) { g_at_exit_runs++; }
+
+static void hook_after_at_exit(uint32_t code)
+{
+    (void)code;
+    g_at_exit_hooked = g_at_exit_runs;
+}
+
+TEST(core_the_process_exit_runs_what_layers_added_once_before_it_ends)
+{
+    CHECK(rl_at_process_exit(count_at_exit));
+    rl_set_exit_hook(hook_after_at_exit);
+    rl_process_exit(0);
+    CHECK_EQ(g_at_exit_runs, 1u);
+    CHECK_EQ(g_at_exit_hooked, 1u);
+    rl_process_exit(0);
+    CHECK_EQ(g_at_exit_runs, 1u);
+    rl_set_exit_hook(NULL);
+}

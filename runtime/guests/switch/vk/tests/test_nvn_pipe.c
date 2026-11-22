@@ -308,3 +308,14 @@ TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
+
+TEST(nvn_pipelines_compiled_in_play_are_saved_two_seconds_later)
+{
+    const uint64_t s = 1000000000ull;
+    CHECK(!nvn_pipe_save_due(100 * s, 99 * s, 0, false));
+    CHECK(!nvn_pipe_save_due(100 * s, 99 * s, 0, true));
+    CHECK(nvn_pipe_save_due(200 * s, 100 * s, 0, true));
+    CHECK(!nvn_pipe_save_due(101 * s, 100 * s, 100 * s, true));
+    CHECK(nvn_pipe_save_due(103 * s, 100 * s, 100 * s, true));
+    CHECK(!nvn_pipe_save_due(103 * s, 100 * s, 100 * s, false));
+}
