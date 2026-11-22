@@ -1,0 +1,53 @@
+#version 450
+/**
+ * @file taa_rcas.comp
+ * @brief The sharpening pass after relift's TAA (taa.c): AMD FidelityFX RCAS from ffx_fsr1.h (MIT; provenance in
+ * runtime/third_party/fsr1), unchanged, in 32-bit floats. It reads the history taa.comp just wrote (color as it
+ * blends, tonemapped for HDR) and writes the sharpened picture to the output, the HDR tonemap undone.
+ */
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#define A_GPU 1
+#define A_GLSL 1
+#include "ffx_a.h"
+
+layout(binding = 3) uniform texture2D history_img;
+layout(binding = 5) uniform writeonly image2D out_img;
+
+/** @brief taa.comp's Params, then RCAS's sharpness in stops below its strongest. */
+layout(binding = 7, std140) uniform Params {
+    ivec2 render;
+    ivec2 display;
+    vec2 jitter;
+    vec2 motion_scale;
+    vec2 motion_jitter;
+    float min_alpha;
+    float variance_gamma;
+    int flags;
+    float stops;
+} pc;
+
+const int HDR = 2;
+
+#define FSR_RCAS_F 1
+AF4 FsrRcasLoadF(ASU2 p) { return AF4(texelFetch(history_img, clamp(p, ivec2(0), pc.display - 1), 0).rgb, 1.0); }
+void FsrRcasInputF(inout AF1 r, inout AF1 g, inout AF1 b) {}
+
+#include "ffx_fsr1.h"
+
+void main()
+{
+    ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(o, pc.display)))
+        return;
+    AU4 con;
+    FsrRcasCon(con, pc.stops);
+    AF1 r, g, b;
+    FsrRcasF(r, g, b, AU2(o), con);
+    vec3 c = max(vec3(r, g, b), vec3(0.0));
+    if ((pc.flags & HDR) != 0)
+        c = c / max(1.0 - max(max(c.r, c.g), c.b), 1.0 / 65504.0);
+    imageStore(out_img, o, vec4(c, 1.0));
+}

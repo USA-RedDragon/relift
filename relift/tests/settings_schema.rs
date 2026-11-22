@@ -80,14 +80,31 @@ fn declared(
     for s in &mut c {
         s.as_object_mut().unwrap().remove("env");
     }
-    Some(c)
+    Some(c.into_iter().map(numbers_as_floats).collect())
 }
 
 fn as_json(settings: &[relift_info::Setting]) -> Vec<serde_json::Value> {
     settings
         .iter()
-        .map(|s| serde_json::to_value(s).unwrap())
+        .map(|s| numbers_as_floats(serde_json::to_value(s).unwrap()))
         .collect()
+}
+
+/// `v` with every number as a float, so a float setting's whole-number bounds, which C prints as `1` and serde as
+/// `1.0`, compare equal.
+fn numbers_as_floats(v: serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .and_then(serde_json::Number::from_f64)
+            .map_or(serde_json::Value::Number(n), serde_json::Value::Number),
+        serde_json::Value::Array(a) => a.into_iter().map(numbers_as_floats).collect(),
+        serde_json::Value::Object(o) => o
+            .into_iter()
+            .map(|(k, x)| (k, numbers_as_floats(x)))
+            .collect(),
+        other => other,
+    }
 }
 
 #[test]
@@ -139,6 +156,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "picture.filter"
                 | "picture.upscaler"
                 | "picture.upscale_scale"
+                | "picture.taa_sharpness"
                 | "renderdoc.capture"
                 | "renderdoc.capture_dir"
         )

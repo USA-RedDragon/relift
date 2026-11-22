@@ -182,6 +182,20 @@ pub fn runtime_settings() -> Vec<Setting> {
                 },
             )
         },
+        Setting {
+            apply: Apply::Live,
+            ..s(
+                "picture.taa_sharpness",
+                "TAA sharpening",
+                "How strongly AMD's RCAS sharpens the picture the taa upscaler writes, from 0 (no sharpening pass) to 1 (its strongest). Anything but 0 changes the picture further from the console's",
+                Value::from(0.5),
+                SettingKind::Float {
+                    min: 0.0,
+                    max: 1.0,
+                    step: 0.05,
+                },
+            )
+        },
         s(
             "renderdoc.capture",
             "RenderDoc capture",
@@ -1058,7 +1072,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 26);
+        assert_eq!(section(Vec::new()).runtime.len(), 27);
     }
 
     #[test]

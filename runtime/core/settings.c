@@ -144,6 +144,19 @@ static const rl_setting_def g_runtime_defs[] = {
         .max_int = 8,
     },
     {
+        .key = "picture.taa_sharpness",
+        .type = RL_SETTING_FLOAT,
+        .label = "TAA sharpening",
+        .apply = RL_APPLY_LIVE,
+        .description = "How strongly AMD's RCAS sharpens the picture the taa upscaler writes, from 0 (no sharpening "
+                       "pass) to 1 (its strongest). Anything but 0 changes the picture further from the console's",
+        .env = "RELIFT_TAA_SHARPNESS",
+        .def_float = 0.5,
+        .min_float = 0.0,
+        .max_float = 1.0,
+        .step_float = 0.05,
+    },
+    {
         .key = "renderdoc.capture",
         .type = RL_SETTING_STRING,
         .label = "RenderDoc capture",

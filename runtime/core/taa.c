@@ -1,13 +1,16 @@
 /**
  * @file taa.c
  * @brief relift's plain temporal upscaler (shaders/taa.comp) for the upscaler stage: one pass per frame over the
- * display, a history image in and one out, swapped each frame.
+ * display, a history image in and one out, swapped each frame, then AMD's RCAS sharpening (shaders/taa_rcas.comp)
+ * over the new history at the strength picture.taa_sharpness gives (none at 0).
  */
 #include "taa.h"
 
 #include "core.h"
 #include "ffx.h"
 #include "post_data.h"
+
+#include <relift/settings.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -23,9 +26,17 @@ typedef struct cb_taa {
     float jitter[2], motion_scale[2], motion_jitter[2];
     float min_alpha, variance_gamma;
     int32_t flags;
+    float stops;
 } cb_taa;
 
 enum { F_RESET = 1, F_HDR = 2, F_INVERTED = 4, F_MOTION_DISPLAY = 8 };
+
+/** @brief taa_rcas.comp's descriptors: the history TAA wrote, the output, the parameters. */
+static const rl_ffx_bind g_rcas_binds[] = {
+    { 0, 3, RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE },
+    { 0, 5, RLVK_DESCRIPTOR_TYPE_STORAGE_IMAGE },
+    { 0, 7, RLVK_DESCRIPTOR_TYPE_UNIFORM_BUFFER },
+};
 
 static const rl_ffx_bind g_binds[] = {
     { 0, 0, RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE }, { 0, 1, RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE },
@@ -36,7 +47,7 @@ static const rl_ffx_bind g_binds[] = {
 
 struct rl_taa {
     rl_ffx_vk vk;
-    rl_ffx_pipeline pipe;
+    rl_ffx_pipeline pipe, rcas;
     rlvk_handle sampler, pool, cb, cb_memory;
     rl_ffx_image history[2];
     uint32_t display[2], used, parity;
@@ -77,14 +88,17 @@ rl_taa *rl_taa_new(const rl_post_device *d)
     if (!rl_ffx_pipeline_new(&t->vk, rl_post_spv_taa, sizeof rl_post_spv_taa, g_binds,
                              sizeof g_binds / sizeof g_binds[0], 0, NULL, 0, t->sampler, &t->pipe))
         return failed(t, "the pipeline", 0), NULL;
+    if (!rl_ffx_pipeline_new(&t->vk, rl_post_spv_taa_rcas, sizeof rl_post_spv_taa_rcas, g_rcas_binds,
+                             sizeof g_rcas_binds / sizeof g_rcas_binds[0], 0, NULL, 0, 0, &t->rcas))
+        return failed(t, "the sharpening pipeline", 0), NULL;
     rlvk_descriptor_pool_size ps[4] = {
         { RLVK_DESCRIPTOR_TYPE_SAMPLER, RECORDS },
-        { RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, RECORDS * 4 },
-        { RLVK_DESCRIPTOR_TYPE_STORAGE_IMAGE, RECORDS * 2 },
-        { RLVK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, RECORDS },
+        { RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, RECORDS * 5 },
+        { RLVK_DESCRIPTOR_TYPE_STORAGE_IMAGE, RECORDS * 3 },
+        { RLVK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, RECORDS * 2 },
     };
     rlvk_descriptor_pool_create_info dp = {
-        .sType = RLVK_ST_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = RECORDS, .poolSizeCount = 4, .pPoolSizes = ps
+        .sType = RLVK_ST_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = RECORDS * 2, .poolSizeCount = 4, .pPoolSizes = ps
     };
     if ((r = t->vk.vkCreateDescriptorPool(t->vk.device, &dp, NULL, &t->pool)) != RLVK_SUCCESS)
         return failed(t, "vkCreateDescriptorPool", r), NULL;
@@ -136,12 +150,17 @@ bool rl_taa_record(rl_taa *t, uint64_t cmd, const rl_upscale_inputs *in)
             return false;
         }
     }
-    rlvk_handle set = 0;
+    double sharp = rl_setting_float("picture.taa_sharpness");
+    bool sharpen = sharp > 0.0;
+    rlvk_handle set = 0, rset = 0;
     rlvk_descriptor_set_allocate_info da = { .sType = RLVK_ST_DESCRIPTOR_SET_ALLOCATE_INFO,
                                              .descriptorPool = t->pool,
                                              .descriptorSetCount = 1,
                                              .pSetLayouts = &t->pipe.set_layout };
     if (t->vk.vkAllocateDescriptorSets(t->vk.device, &da, &set) != RLVK_SUCCESS)
+        return false;
+    da.pSetLayouts = &t->rcas.set_layout;
+    if (sharpen && t->vk.vkAllocateDescriptorSets(t->vk.device, &da, &rset) != RLVK_SUCCESS)
         return false;
     bool odd = t->parity & 1;
     rlvk_handle views[6] = { in->color.handle, in->depth.handle, in->motion.handle, t->history[odd].view,
@@ -166,6 +185,17 @@ bool rl_taa_record(rl_taa *t, uint64_t cmd, const rl_upscale_inputs *in)
                                          .descriptorType = RLVK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                          .pBufferInfo = &bi };
     t->vk.vkUpdateDescriptorSets(t->vk.device, 7, wr, 0, NULL);
+    if (sharpen) {
+        rlvk_write_descriptor_set rw3[3] = { wr[4], wr[5], wr[6] };
+        rlvk_descriptor_image_info hist = { .imageView = t->history[!odd].view,
+                                            .imageLayout = RLVK_IMAGE_LAYOUT_GENERAL };
+        rw3[0].dstBinding = 3;
+        rw3[0].descriptorType = RLVK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        rw3[0].pImageInfo = &hist;
+        for (int i = 0; i < 3; i++)
+            rw3[i].dstSet = rset;
+        t->vk.vkUpdateDescriptorSets(t->vk.device, 3, rw3, 0, NULL);
+    }
     t->used++;
     t->pending = true;
     bool reset = in->reset || t->first;
@@ -180,6 +210,7 @@ bool rl_taa_record(rl_taa *t, uint64_t cmd, const rl_upscale_inputs *in)
         .variance_gamma = VARIANCE_GAMMA,
         .flags = (reset ? F_RESET : 0) | (in->hdr ? F_HDR : 0) | (in->depth_inverted ? F_INVERTED : 0) |
                  (in->motion_display_size ? F_MOTION_DISPLAY : 0),
+        .stops = 2.0f * (1.0f - (float)(sharp < 1.0 ? sharp : 1.0)),
     };
     if (in->motion_jittered && !reset) {
         c.motion_jitter[0] = (t->previous_jitter[0] - in->jitter[0]) / tw;
@@ -212,6 +243,12 @@ bool rl_taa_record(rl_taa *t, uint64_t cmd, const rl_upscale_inputs *in)
     t->vk.vkCmdBindPipeline(cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, t->pipe.pipe);
     t->vk.vkCmdBindDescriptorSets(cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, t->pipe.layout, 0, 1, &set, 0, NULL);
     t->vk.vkCmdDispatch(cmd, (dw + 7) / 8, (dh + 7) / 8, 1);
+    if (sharpen) {
+        rl_ffx_barrier(&t->vk, cmd, cs, rw_access, cs, rw_access);
+        t->vk.vkCmdBindPipeline(cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, t->rcas.pipe);
+        t->vk.vkCmdBindDescriptorSets(cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, t->rcas.layout, 0, 1, &rset, 0, NULL);
+        t->vk.vkCmdDispatch(cmd, (dw + 7) / 8, (dh + 7) / 8, 1);
+    }
     t->parity++;
     return true;
 }
@@ -233,6 +270,7 @@ void rl_taa_free(rl_taa *t)
         for (int i = 0; i < 2; i++)
             rl_ffx_image_free(&t->vk, &t->history[i]);
         rl_ffx_pipeline_free(&t->vk, &t->pipe);
+        rl_ffx_pipeline_free(&t->vk, &t->rcas);
         if (t->cb)
             t->vk.vkDestroyBuffer(t->vk.device, t->cb, NULL);
         if (t->cb_memory)

@@ -9,6 +9,7 @@
 
 #include "hostlib.h"
 
+#include <relift/settings.h>
 #include <relift/upscale.h>
 
 #include <math.h>
@@ -315,15 +316,34 @@ TEST(upscale_images_spatial_choices_run_on_images)
 }
 
 /**
- * @brief Temporal choice over 16 frames of a still W by H picture src (zero motion, flat depth); the worst channel
- * difference.
+ * @brief Choice over 16 frames of a still W by H picture src (zero motion, flat depth) into got (W times H words);
+ * false when a frame did not record.
  */
+static bool temporal_run(uint32_t choice, const uint32_t *src, uint32_t w, uint32_t h, uint32_t *got);
+
+/** @brief Temporal choice over 16 frames of a still picture (temporal_run); the worst channel difference from src. */
 static int temporal_still(uint32_t choice, const uint32_t *src, uint32_t w, uint32_t h)
 {
-    uint32_t *got = calloc((size_t)w * h, 4), *zero = calloc((size_t)w * h, 4);
-    float *depth = malloc((size_t)w * h * 4);
+    uint32_t *got = calloc((size_t)w * h, 4);
     int worst = 999;
-    if (!got || !zero || !depth)
+    if (got && temporal_run(choice, src, w, h, got)) {
+        worst = 0;
+        for (size_t i = 0; i < (size_t)w * h; i++)
+            for (int k = 0; k < 3; k++) {
+                int dlt = abs((int)((got[i] >> (8 * k)) & 0xff) - (int)((src[i] >> (8 * k)) & 0xff));
+                worst = dlt > worst ? dlt : worst;
+            }
+    }
+    free(got);
+    return worst;
+}
+
+static bool temporal_run(uint32_t choice, const uint32_t *src, uint32_t w, uint32_t h, uint32_t *got)
+{
+    uint32_t *zero = calloc((size_t)w * h, 4);
+    float *depth = malloc((size_t)w * h * 4);
+    bool ran = false;
+    if (!zero || !depth)
         goto out;
     for (size_t i = 0; i < (size_t)w * h; i++)
         depth[i] = 0.5f;
@@ -345,18 +365,12 @@ static int temporal_still(uint32_t choice, const uint32_t *src, uint32_t w, uint
                                  .in = { 0, 0, w, h },
                                  .out = { .handle = (uint64_t)(uintptr_t)dst.view, .width = w, .height = h },
                                  .out_rect = { 0, 0, w, h } };
-        bool ran = true;
+        ran = true;
         for (int frame = 0; frame < 16; frame++) {
             ui.reset = frame == 0;
             ran = run_stage(u, &ui) && ran;
         }
         read_back(&dst, got);
-        worst = ran ? 0 : 999;
-        for (size_t i = 0; ran && i < (size_t)w * h; i++)
-            for (int k = 0; k < 3; k++) {
-                int dlt = abs((int)((got[i] >> (8 * k)) & 0xff) - (int)((src[i] >> (8 * k)) & 0xff));
-                worst = dlt > worst ? dlt : worst;
-            }
         rl_upscaler_free(u);
     }
     image_free(&color);
@@ -364,10 +378,9 @@ static int temporal_still(uint32_t choice, const uint32_t *src, uint32_t w, uint
     image_free(&dep);
     image_free(&mv);
 out:
-    free(got);
     free(zero);
     free(depth);
-    return worst;
+    return ran;
 }
 
 /** @brief The worst differences of choice over a still flat picture and a still ramp at ratio 1, printed as name. */
@@ -545,6 +558,42 @@ TEST(upscale_taa_keeps_still_pictures_at_ratio_one)
     still_pictures(RL_UPSCALE_TAA, "taa", &a, &b);
     CHECK_EQ(a, 0);
     CHECK(b <= 2);
+}
+
+TEST(upscale_taa_sharpening_changes_a_soft_edge_and_keeps_a_flat_field)
+{
+    if (!start())
+        return;
+    enum { W = 64, H = 48 };
+    static uint32_t edge[W * H], flat[W * H], plain[W * H], sharp[W * H], flat_sharp[W * H];
+    for (uint32_t i = 0; i < W * H; i++) {
+        float t = ((float)(i % W) - 28.0f) / 8.0f;
+        t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+        uint32_t v = (uint32_t)lrintf(40.0f + 170.0f * t * t * (3.0f - 2.0f * t));
+        edge[i] = 0xff000000u | v | v << 8 | v << 16;
+        flat[i] = 0xff6080a0u;
+    }
+    CHECK(rl_settings_set("picture.taa_sharpness", "0") == RL_SETTING_OK);
+    CHECK(temporal_run(RL_UPSCALE_TAA, edge, W, H, plain));
+    CHECK(rl_settings_set("picture.taa_sharpness", "1") == RL_SETTING_OK);
+    CHECK(temporal_run(RL_UPSCALE_TAA, edge, W, H, sharp));
+    CHECK(temporal_run(RL_UPSCALE_TAA, flat, W, H, flat_sharp));
+    CHECK(rl_settings_set("picture.taa_sharpness", "0.5") == RL_SETTING_OK);
+    int edge_diff = 0, flat_diff = 0, plain_diff = 0;
+    for (uint32_t i = 0; i < W * H; i++)
+        for (int k = 0; k < 3; k++) {
+            int a = (int)((plain[i] >> (8 * k)) & 0xff), b = (int)((sharp[i] >> (8 * k)) & 0xff);
+            int f = (int)((flat_sharp[i] >> (8 * k)) & 0xff), e = (int)((edge[i] >> (8 * k)) & 0xff);
+            edge_diff = abs(a - b) > edge_diff ? abs(a - b) : edge_diff;
+            plain_diff = abs(a - e) > plain_diff ? abs(a - e) : plain_diff;
+            int g = abs(f - (int)((flat[i] >> (8 * k)) & 0xff));
+            flat_diff = g > flat_diff ? g : flat_diff;
+        }
+    printf("    taa 64x48 soft edge: sharpened differs by up to %d, plain by %d from the input; flat field by %d\n",
+           edge_diff, plain_diff, flat_diff);
+    CHECK(plain_diff <= 1);
+    CHECK(edge_diff >= 4);
+    CHECK(flat_diff <= 1);
 }
 
 TEST(upscale_taa_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
