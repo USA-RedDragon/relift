@@ -954,6 +954,36 @@ int nvn_texset_sync_registered(replay *r)
     return RL_OK;
 }
 
+int nvn_texset_bind_words(replay *r, const uint8_t *bytes, uint32_t size, uint32_t offset, bool indexed)
+{
+    if (!make())
+        return nvn_vk_stop(r, "cannot make the texture set");
+    for (uint32_t o = offset; o <= size && size - o >= 4; o += 4) {
+        uint32_t handle;
+        memcpy(&handle, bytes + o, 4);
+        uint32_t id = handle & 0xfffffu;
+        uint8_t view[17];
+        bool has_view, image;
+        uint64_t tex = id < t.slots.pinned ? nvn_tex_registered(id, view, &has_view, &image) : 0;
+        if (tex) {
+            int rc = RL_OK;
+            bool ok = pool_live(id, tex);
+            if (!ok)
+                rc = stale_slot(r, id);
+            else
+                rc = resident_ok(r, id, tex, view, has_view, &ok);
+            uint32_t kind, dim, slot;
+            if (rc == RL_OK && ok)
+                rc = bind_texture(r, handle, &kind, &dim, &slot, true, false);
+            if (rc != RL_OK)
+                return rc;
+        }
+        if (!indexed)
+            break;
+    }
+    return RL_OK;
+}
+
 uint32_t nvn_texset_pinned(void) { return t.ok ? t.slots.pinned : 0; }
 
 int nvn_texset_sampler(replay *r, uint32_t id)

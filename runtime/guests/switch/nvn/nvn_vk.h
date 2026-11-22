@@ -679,6 +679,13 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot);
  * its own stops, naming the id and the limit. Returns RL_OK, or RL_PENDING after a stop.
  */
 int nvn_texset_sync_registered(replay *r);
+/**
+ * @brief Keeps in its slot, with its sampler, the registered texture each word of a constant bank's bytes (size of
+ * them) names that a program may load as a handle from a register: the word at offset, or with indexed every word from
+ * offset to the end. A word that names no registered texture, or an id past the ones with a slot of their own, is not
+ * a handle the program can sample and is left alone.
+ */
+int nvn_texset_bind_words(replay *r, const uint8_t *bytes, uint32_t size, uint32_t offset, bool indexed);
 /** @brief Whether the view nv of image v names a format the host can give the image (no format change, or one of the same block footprint). */
 bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv);
 /** @brief How many texture ids sit in a slot of their own number (0 before the set is made). */

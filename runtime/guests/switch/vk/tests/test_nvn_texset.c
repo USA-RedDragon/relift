@@ -817,3 +817,62 @@ TEST(nvn_texset_a_synced_texture_whose_pool_goes_reads_zeros_through_a_handle_re
     CHECK_EQ(out[1], 33u);
     CHECK_EQ(out[0], 0u);
 }
+
+TEST(nvn_texset_handles_a_bank_names_are_bound_without_making_every_registered_texture_resident)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    enum { COUNT = 5000, FIRST = 200, SPAN = 0x80 };
+    static rl_ctx c;
+    static uint8_t mem[0x10000 + COUNT * SPAN];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x500, tex = 0x10000;
+    CHECK(nvn_pool_make(pool, 0, sizeof mem, 0x2a1));
+    CHECK(nvn_texset_pinned() > FIRST + COUNT);
+    for (uint32_t i = 0; i < COUNT; i++) {
+        nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1,
+                           .flags = 1u << 4, .stride = 32, .swizzle = { 2, 3, 4, 5 }, .pool = pool,
+                           .offset = 0x10000 + (uint64_t)i * SPAN };
+        CHECK(nvn_tex_layout(&d));
+        CHECK(nvn_texture_record(tex + 0x100 * (uint64_t)i, &d, NULL));
+        uint8_t *p = mem + d.offset;
+        for (uint32_t k = 0; k < SPAN; k += 4) {
+            p[k] = (uint8_t)i;
+            p[k + 1] = (uint8_t)(i >> 8);
+            p[k + 2] = 0x5a;
+            p[k + 3] = 0xa5;
+        }
+        c.x[1] = FIRST + i;
+        c.x[2] = tex + 0x100 * (uint64_t)i;
+        c.x[3] = 0;
+        nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    }
+    uint32_t images = g.nimages;
+    uint32_t bank[16];
+    for (uint32_t k = 0; k < 16; k++)
+        bank[k] = 0xffffffffu;
+    bank[4] = FIRST + 4321u;
+    bank[9] = FIRST + 17u;
+    CHECK_EQ(nvn_texset_bind_words(&r, (const uint8_t *)bank, sizeof bank, 8, true), RL_OK);
+    CHECK_EQ(nvn_texset_bind_words(&r, (const uint8_t *)bank, sizeof bank, 0, false), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+    CHECK(g.nimages - images <= 2u);
+    uint32_t out[2] = { 0, 0 };
+    run_read_handle(FIRST + 4321u, out);
+    CHECK_EQ(out[1], FIRST + 4321u);
+    CHECK_EQ(out[0], 0xa55a0000u | (4321u >> 8) << 8 | (4321u & 0xff));
+    run_read_handle(FIRST + 17u, out);
+    CHECK_EQ(out[0], 0xa55a0000u | 17u);
+}

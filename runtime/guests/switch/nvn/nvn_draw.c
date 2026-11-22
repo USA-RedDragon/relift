@@ -1016,6 +1016,44 @@ static int bind_user_textures(replay *r, const module *m, uint32_t s, uint32_t *
     return RL_OK;
 }
 
+/**
+ * @brief Keeps in their slots the textures m's handles in registers may name (NVN_IFACE_HANDLE_SOURCE records): the
+ * words of the banks they are loaded from, read as the guest left them, not as the layer rewrote bound handles in its
+ * copies. bank0 (compute's driver table, size0 bytes) stands in for c[0]; draws have none.
+ */
+static int bind_handle_sources(replay *r, const module *m, uint32_t s, const uint8_t *bank0, uint32_t size0)
+{
+    nvn_gfx *st = r->st;
+    for (uint32_t i = 0; i < m->nrecs; i++) {
+        const nvn_iface_rec *h = &m->recs[i];
+        if (h->kind != NVN_IFACE_HANDLE_SOURCE)
+            continue;
+        const uint8_t *bytes;
+        uint32_t size;
+        if (h->bank == 0 && bank0) {
+            bytes = bank0;
+            size = size0;
+        } else if (h->bank == 2 && s < NVN_STAGE_COMPUTE) {
+            bytes = st->bank2[s];
+            size = NVN_BANK2_BYTES;
+        } else if (h->bank >= 3 && h->bank < 3 + NVN_UBO_SLOTS) {
+            uint64_t addr = st->ubo[s][h->bank - 3].addr, ubo = st->ubo[s][h->bank - 3].size;
+            if (!addr)
+                continue;
+            if (!nvn_vk_sync_uniforms(r))
+                return nvn_vk_stop(r, "the host device failed a submit");
+            bytes = r->mem + nvn_gpu_guest(addr);
+            size = ubo > UBO_BYTES ? UBO_BYTES : (uint32_t)ubo;
+        } else {
+            return nvn_vk_stop(r, "program %s loads a texture handle from c[%u][0x%x]", m->key, h->bank, h->offset);
+        }
+        int rc = nvn_texset_bind_words(r, bytes, size, h->offset, h->spec != 0);
+        if (rc != RL_OK)
+            return rc;
+    }
+    return RL_OK;
+}
+
 static void dynamic_state(replay *r, VkRect2D area)
 {
     nvn_gfx *st = r->st;
@@ -1264,6 +1302,9 @@ static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
     if (trc != RL_OK)
         return trc;
     trc = bind_user_textures(r, mods[s], s, &k->nspec[s], k->spec_map[s], k->spec[s]);
+    if (trc != RL_OK)
+        return trc;
+    trc = bind_handle_sources(r, mods[s], s, NULL, 0);
     if (trc != RL_OK)
         return trc;
     nvn_spec_sort(&k->nspec[s], k->spec_map[s], k->spec[s]);
@@ -1917,6 +1958,8 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
                                    false);
     int rc = m->register_handles ? nvn_texset_sync_registered(r) : RL_OK;
     if (rc != RL_OK)
+        return rc;
+    if ((rc = bind_handle_sources(r, m, NVN_STAGE_COMPUTE, c0, sizeof c0)) != RL_OK)
         return rc;
     if ((rc = bind_textures(r, m, 0, c0, sizeof c0, &n, map, vals, img_lo, at)) != RL_OK)
         return rc;

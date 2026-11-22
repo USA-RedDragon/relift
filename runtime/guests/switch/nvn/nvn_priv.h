@@ -534,6 +534,11 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
 /** @brief Record kind: the program reads a texture handle from a register, which can name any registered texture. */
 #define NVN_IFACE_REGISTER_HANDLES 10u
 /**
+ * @brief Record kind: handles in registers are loaded from constant bank `bank` at byte `offset`, or with `spec` 1 from
+ * any word from there to the bank's end (see nvn_texset_bind_words).
+ */
+#define NVN_IFACE_HANDLE_SOURCE 9u
+/**
  * @brief Copies up to max interface records of the translation with key to out (out may be NULL) and returns how
  * many it has, which may be more than max (0 without an entry).
  */
