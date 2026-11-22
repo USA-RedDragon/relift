@@ -9,7 +9,7 @@
 #include "nvn_vk.h"
 
 /** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
-#define ALPHA_FUNC_SPEC 0x300u
+#define ALPHA_FUNC_SPEC 0x400u
 /** @brief The alpha test function that always passes (NVNalphaFunc ALWAYS), the one a queue starts with. */
 #define NVN_ALPHA_ALWAYS 8u
 

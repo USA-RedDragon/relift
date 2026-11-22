@@ -32,6 +32,7 @@ pub use host::{
     MeshLimits, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT,
     SEGMENT_SHIFT_SPEC, Warp, WarpPath,
 };
+pub use io::ALPHA_FUNC_SPEC;
 pub use io::mesh::{
     Component, MESH_FIRST_TASK_OFFSET, MeshPath, MeshPipeline, MeshTopology,
     fallback as mesh_fallback, mesh_components,

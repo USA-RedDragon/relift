@@ -3,7 +3,7 @@ mod common;
 use common::{translate, translate_with};
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::pseudo::{IPA_MUL, IPA_SAT};
-use relift_gpu_nv::translate::{Interp, Kind, Options};
+use relift_gpu_nv::translate::{ALPHA_FUNC_SPEC, Interp, Kind, Options};
 use relift_gpu_nv::{Inst, Operand, RegMods};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -1671,7 +1671,6 @@ fn has_variable_in(words: &[u32], class: u32) -> bool {
 }
 
 const BUILTIN_POINT_SIZE: u32 = 1;
-const ALPHA_FUNC_SPEC: u32 = 0x300;
 
 fn vertex_storing(attribute: u64) -> Vec<u8> {
     let mut b = sph(1, 1, &[]);
@@ -1731,4 +1730,20 @@ fn fragment_without_alpha_has_no_alpha_test() {
     assert!(!decorates(&s.spirv, 1, Some(ALPHA_FUNC_SPEC)));
     assert!(!has_variable_in(&s.spirv, 9), "push constant block");
     assert!(!s.interface.kills);
+}
+
+#[test]
+fn specialization_constant_ranges_do_not_overlap() {
+    use relift_gpu_nv::translate::{TESS_LEVEL_SPEC, TEXTURE_DIM_SPEC, TEXTURE_KIND_SPEC};
+    let ranges = [
+        (TEXTURE_KIND_SPEC, TEXTURE_KIND_SPEC + 0x100),
+        (TESS_LEVEL_SPEC, TESS_LEVEL_SPEC + 6),
+        (TEXTURE_DIM_SPEC, TEXTURE_DIM_SPEC + 0x100),
+        (ALPHA_FUNC_SPEC, ALPHA_FUNC_SPEC + 1),
+    ];
+    for (i, a) in ranges.iter().enumerate() {
+        for b in &ranges[i + 1..] {
+            assert!(a.1 <= b.0 || b.1 <= a.0, "{a:x?} overlaps {b:x?}");
+        }
+    }
 }

@@ -89,7 +89,7 @@ const PUSH_CONSTANT: u32 = 9;
 /// Specialization constant id of the fragment alpha test's compare function
 /// (an `NVNalphaFunc`, 1 never to 8 always; 8 when unset, which compiles the
 /// test away). The runtime sets it from the bound color state.
-pub const ALPHA_FUNC_SPEC: u32 = 0x300;
+pub const ALPHA_FUNC_SPEC: u32 = 0x400;
 
 /// Byte offset in the fixed-state push constant block of the point size a
 /// vertex program that does not write one gets.
