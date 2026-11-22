@@ -52,6 +52,8 @@ typedef struct buf_entry {
     uint32_t stage, slot;
     bool storage;
     uint64_t addr, guest, size;
+    /** @brief The range is not inside one memory pool: its bytes are not read. */
+    bool unmapped;
     char pre[40], post[40];
 } buf_entry;
 
@@ -168,6 +170,8 @@ static void dump_range(uint64_t gpu, uint64_t size, char *name)
         return;
     if (size > BUF_CAP)
         size = BUF_CAP;
+    if (!nvn_gpu_mapped(gpu, size))
+        return;
     uint64_t guest = nvn_gpu_guest(gpu);
     put_file("bufs", "bin", rl_mem_base() + guest, size, name);
 }
@@ -336,8 +340,18 @@ static void collect_buffers(const nvn_gfx *st, uint32_t first, uint32_t last)
             }
         }
     }
-    for (uint32_t i = 0; i < tr.nbuf; i++)
-        tr.buf[i].guest = nvn_gpu_guest(tr.buf[i].addr);
+    for (uint32_t i = 0; i < tr.nbuf; i++) {
+        buf_entry *e = &tr.buf[i];
+        e->guest = nvn_gpu_guest(e->addr);
+        e->unmapped = !nvn_gpu_mapped(e->addr, e->size > BUF_CAP ? BUF_CAP : e->size);
+        if (e->unmapped) {
+            char where[512];
+            nvn_gpu_describe(e->addr, where, sizeof where);
+            rl_log(RL_LOG_WARN, "nvn", "trace: present %llu %s stage %u %s slot %u at 0x%llx (0x%llx bytes) is not in one memory pool: %s",
+                   (unsigned long long)g.presents, tr.kind, e->stage, e->storage ? "storage" : "uniform", e->slot,
+                   (unsigned long long)e->addr, (unsigned long long)e->size, where);
+        }
+    }
 }
 
 void nvn_trace_begin(replay *r, const char *kind)
@@ -483,6 +497,8 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
         fprintf(f, "%s{\"stage\":\"%s\",\"kind\":\"%s\",\"slot\":%u,\"gpu\":\"0x%llx\",\"guest\":\"0x%llx\",\"size\":%llu",
                 i ? "," : "", names[e->stage], e->storage ? "storage" : "uniform", e->slot,
                 (unsigned long long)e->addr, (unsigned long long)e->guest, (unsigned long long)e->size);
+        if (e->unmapped)
+            fprintf(f, ",\"unmapped\":1");
         json_file(f, "pre", e->pre);
         json_file(f, "post", e->post);
         fprintf(f, "}");

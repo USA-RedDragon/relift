@@ -1,8 +1,10 @@
 /**
  * @file test_nvn_trace.c
  * @brief The NVN frame trace (RELIFT_NVN_TRACE): its setting, and one traced command that leaves its line and the
- * bytes of the buffer it changed, before and after, in the folder.
+ * bytes of the buffer it changed, before and after, in the folder, and marks a binding outside every memory pool
+ * instead of reading it.
  */
+#include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
 #include "tc.h"
 
@@ -72,7 +74,9 @@ static int remove_one(const char *path, const struct stat *st, int flag, struct 
 TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
 {
     rl_ctx *c = t_boot(NULL);
-    uint64_t heap = t_heap(c, 0x200000), buf = heap + 0x1000;
+    uint64_t heap = t_heap(c, 0x200000), buf = heap + 0x10000;
+    CHECK(nvn_pool_make(heap, buf, 0x10000, 0x18c));
+    uint64_t gpu = nvn_pool_gpu(heap);
     char dir[PATH_MAX];
     const char *base = getenv("TMPDIR");
     snprintf(dir, sizeof dir, "%s/relift-trace-XXXXXX", base && *base ? base : "/tmp");
@@ -86,8 +90,10 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     memset(&st, 0, sizeof st);
     nvn_gfx_init(&st);
     st.code[NVN_STAGE_COMPUTE] = 0x1000;
-    st.storage[2].addr = buf;
+    st.storage[2].addr = gpu;
     st.storage[2].size = 32;
+    st.storage[3].addr = gpu + 0x1000000000ull;
+    st.storage[3].size = 64;
     replay r = { .c = c, .mem = t_mem(), .st = &st };
     memset(t_mem() + buf, 0x11, 32);
     nvn_trace_begin(&r, "dispatch");
@@ -108,6 +114,15 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     CHECK(strstr(line, "\"groups\":[4,2,1]") != NULL);
     CHECK(strstr(line, "\"compute\":{\"key\":\"feedc0de\"") != NULL);
     CHECK(strstr(line, "\"stage\":\"compute\",\"kind\":\"storage\",\"slot\":2") != NULL);
+    const char *outside = strstr(line, "\"slot\":3");
+    CHECK(outside != NULL);
+    if (outside) {
+        const char *end = strchr(outside, '}');
+        const char *mark = strstr(outside, "\"unmapped\":1");
+        CHECK(mark != NULL && end != NULL && mark < end);
+        const char *pre3 = strstr(outside, "\"pre\"");
+        CHECK(pre3 == NULL || pre3 > end);
+    }
     char pre[64], post[64];
     CHECK(field(line, "pre", pre, sizeof pre) != NULL);
     CHECK(field(line, "post", post, sizeof post) != NULL);
@@ -132,6 +147,9 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
         fclose(f);
     }
     free(line);
+    c->x[0] = heap;
+    c->x[30] = 0x7000000ull;
+    nvnh_nvnMemoryPoolFinalize(c, t_mem());
     CHECK_EQ(nftw(dir, remove_one, 16, FTW_DEPTH | FTW_PHYS), 0);
     unsetenv("RELIFT_NVN_TRACE");
 }
