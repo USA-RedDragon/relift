@@ -396,17 +396,26 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
     let objs: Vec<PathBuf> = (0..jobs.len())
         .map(|i| dir.join(format!("o{i}.o")))
         .collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(16));
     std::thread::scope(|s| {
-        for ((src, flags), obj) in jobs.iter().zip(&objs) {
-            let mut a = flags.to_vec();
-            a.extend([
-                "-c".into(),
-                src.display().to_string(),
-                "-o".into(),
-                obj.display().to_string(),
-            ]);
-            let cc = &cc;
-            s.spawn(move || clang(cc, &a));
+        for _ in 0..threads.min(jobs.len()) {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some((src, flags)) = jobs.get(i) else {
+                        break;
+                    };
+                    let mut a = flags.to_vec();
+                    a.extend([
+                        "-c".into(),
+                        src.display().to_string(),
+                        "-o".into(),
+                        objs[i].display().to_string(),
+                    ]);
+                    clang(&cc, &a);
+                }
+            });
         }
     });
     let exe = dir.join("harness");
