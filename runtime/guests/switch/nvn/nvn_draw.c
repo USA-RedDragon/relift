@@ -1409,10 +1409,13 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
         return nvn_vk_stop(r, "a helper of mesh program %s uses a set the layer does not bind", mesh->key);
     for (uint32_t s = NVN_STAGE_TASK; s <= NVN_STAGE_MESH; s++)
         for (uint32_t i = 0; mods[s] && i < NVN_STORAGE_SLOTS; i++)
-            if (st->gstorage[s][i].size && !nvn_gpu_mapped(st->gstorage[s][i].addr, (uint32_t)st->gstorage[s][i].size))
-                return nvn_vk_stop(r, "program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool",
+            if (st->gstorage[s][i].size && !nvn_gpu_mapped(st->gstorage[s][i].addr, (uint32_t)st->gstorage[s][i].size)) {
+                char where[512];
+                nvn_gpu_describe(st->gstorage[s][i].addr, where, sizeof where);
+                return nvn_vk_stop(r, "program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool: %s",
                                    mods[s]->key, i, (unsigned long long)st->gstorage[s][i].addr,
-                                   (uint32_t)st->gstorage[s][i].size);
+                                   (uint32_t)st->gstorage[s][i].size, where);
+            }
     uint64_t total = d.mstatus.size ? MESH_BUFFER_BYTES : 0;
     if (total > g.max_storage_range)
         total = g.max_storage_range & ~3u;
@@ -1814,9 +1817,13 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
                            "constants pushed in slots 0x%x",
                            m->key, nubo, nssbo, ntex, nimg, end, st->push_used[NVN_STAGE_COMPUTE]);
     for (uint32_t i = 0; i < nssbo; i++)
-        if ((uint32_t)st->storage[i].size && !nvn_gpu_mapped(st->storage[i].addr, (uint32_t)st->storage[i].size))
-            return nvn_vk_stop(r, "compute program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool",
-                               m->key, i, (unsigned long long)st->storage[i].addr, (uint32_t)st->storage[i].size);
+        if ((uint32_t)st->storage[i].size && !nvn_gpu_mapped(st->storage[i].addr, (uint32_t)st->storage[i].size)) {
+            char where[512];
+            nvn_gpu_describe(st->storage[i].addr, where, sizeof where);
+            return nvn_vk_stop(r,
+                               "compute program %s: storage buffer %u at 0x%llx (0x%x bytes) is not in one memory pool: %s",
+                               m->key, i, (unsigned long long)st->storage[i].addr, (uint32_t)st->storage[i].size, where);
+        }
     VkSpecializationMapEntry map[MAX_SPECS];
     uint32_t vals[MAX_SPECS], n = 3;
     for (uint32_t i = 0; i < 3; i++) {
