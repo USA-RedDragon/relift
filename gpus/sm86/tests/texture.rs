@@ -3,8 +3,8 @@ mod common;
 use common::translate;
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::{
-    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING,
-    TEXTURE_KIND_SPEC, image_binding, texture_binding,
+    Dim, HandleSource, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC,
+    TEXTURE_DIMS_BINDING, TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -143,6 +143,72 @@ fn uniform_register_handle_is_uniform() {
     let decos = insts(&s.spirv, 71);
     assert!(decos.iter().all(|d| d.get(2) != Some(&5300)));
     assert_eq!(insts(&s.spirv, 88).len(), 1);
+}
+
+#[test]
+fn a_handle_loaded_from_a_bank_names_its_words() {
+    let uldc = word(
+        0x0b9,
+        5,
+        &[
+            (16, 6, 6),
+            (24, 6, 63),
+            (38, 16, 0x10),
+            (54, 5, 3),
+            (73, 3, 4),
+        ],
+    );
+    let ur = word(
+        0x160,
+        7,
+        &[
+            (64, 8, 2),
+            (24, 8, 8),
+            (32, 8, 4),
+            (40, 6, 6),
+            (60, 1, 1),
+            (61, 3, 1),
+            (72, 4, 0xf),
+            (81, 3, 7),
+            (84, 3, 1),
+            (87, 3, 1),
+        ],
+    );
+    let s = compute(&[uldc, ur]);
+    assert!(!s.interface.register_handles);
+    let found: Vec<_> = s.interface.handle_sources.iter().copied().collect();
+    assert_eq!(
+        found,
+        [HandleSource {
+            bank: 3,
+            offset: 0x10,
+            indexed: false
+        }]
+    );
+    let ldc = word(
+        0x182,
+        5,
+        &[
+            (16, 8, 4),
+            (24, 8, 2),
+            (38, 16, 0x20),
+            (54, 5, 4),
+            (73, 3, 4),
+        ],
+    );
+    let mut b = tex(0x161, &[(59, 1, 1), (61, 3, 1), (87, 3, 1)]);
+    b[1] = (b[1] & !0x0e) | (1 << 1);
+    let s = compute(&[ldc, b]);
+    assert!(!s.interface.register_handles);
+    let found: Vec<_> = s.interface.handle_sources.iter().copied().collect();
+    assert_eq!(
+        found,
+        [HandleSource {
+            bank: 4,
+            offset: 0x20,
+            indexed: true
+        }]
+    );
 }
 
 #[test]

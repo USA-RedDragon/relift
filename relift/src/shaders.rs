@@ -73,6 +73,10 @@ pub const RECORD_BINDLESS: u32 = 8;
 /// An interface record: the program reads a texture handle from a register,
 /// so the runtime keeps every registered texture in the slot of its id.
 pub const RECORD_REGISTER_HANDLES: u32 = 10;
+/// An interface record: handles in registers are loaded from the word of
+/// the bank at the byte offset, or with the last field 1 from any word of
+/// the bank from that offset on.
+pub const RECORD_HANDLE_SOURCE: u32 = 9;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -452,6 +456,9 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     }
     if i.register_handles {
         recs.push([RECORD_REGISTER_HANDLES, 0, 0, 0]);
+    }
+    for h in &i.handle_sources {
+        recs.push([RECORD_HANDLE_SOURCE, h.bank, h.offset, u32::from(h.indexed)]);
     }
     recs
 }

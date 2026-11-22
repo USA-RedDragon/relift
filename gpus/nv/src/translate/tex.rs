@@ -255,6 +255,63 @@ pub(crate) struct Prep {
     preds: Option<Vec<Vec<usize>>>,
     /// The registers each instruction writes or may write.
     writes: Vec<Vec<u8>>,
+    /// The uniform registers each instruction writes or may write.
+    uwrites: Vec<Vec<u8>>,
+    /// The constant bank load of each instruction that is one (see
+    /// [`CbufLoad`]).
+    loads: Vec<Option<CbufLoad>>,
+}
+
+/// A whole-word constant bank load (LDC or ULDC): `words` registers from
+/// `dst` (uniform ones for ULDC) get the words of bank `bank` from byte
+/// `offset`, plus an index register when `indexed`.
+#[derive(Clone, Copy)]
+struct CbufLoad {
+    uniform: bool,
+    dst: u8,
+    words: u8,
+    bank: u32,
+    offset: i64,
+    indexed: bool,
+    guarded: bool,
+}
+
+/// Where the handle a texture instruction reads from a register comes
+/// from: the word of bank `bank` at byte `offset`, or with `indexed` any
+/// word from `offset` to the end of the bank (the load adds an index
+/// register whose value is not known).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct HandleSource {
+    pub bank: u32,
+    pub offset: u32,
+    pub indexed: bool,
+}
+
+/// The constant bank load instruction `i` is, if it is a whole-word load
+/// from a fixed bank in the plain mode.
+fn cbuf_load(i: &Inst) -> Option<CbufLoad> {
+    if !matches!(i.mnemonic, "LDC" | "ULDC") {
+        return None;
+    }
+    let cb = i.fields.cbuf;
+    let (n, sub) = super::int::cbuf_words(i).ok()?;
+    if cb.bank_ureg || sub.is_some() || (i.mnemonic == "LDC" && cb.mode != 0) {
+        return None;
+    }
+    let (uniform, dst) = match i.ops.first()? {
+        Operand::Reg(d, _) if *d != 255 => (false, *d),
+        Operand::UReg(d, _) if *d != 63 => (true, *d),
+        _ => return None,
+    };
+    Some(CbufLoad {
+        uniform,
+        dst,
+        words: n as u8,
+        bank: cb.bank,
+        offset: cb.offset,
+        indexed: !matches!(cb.index, crate::fields::CbufIndex::None),
+        guarded: i.guard.is_some(),
+    })
 }
 
 /// The instructions that may run right after each one, or `None` for
@@ -341,6 +398,19 @@ impl Prep {
             starts: vec![false; n + 1],
             imm: vec![None; n],
             writes: insts.iter().map(uniform::written_regs).collect(),
+            uwrites: insts
+                .iter()
+                .map(|i| {
+                    uniform::written_locs(i)
+                        .into_iter()
+                        .filter_map(|l| match l {
+                            uniform::Loc::Ur(n) if n != 63 => Some(n),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .collect(),
+            loads: insts.iter().map(cbuf_load).collect(),
             preds: successors(code).map(|s| {
                 let mut p = vec![Vec::new(); n];
                 for (k, ts) in s.iter().enumerate() {
@@ -483,6 +553,57 @@ impl Prep {
         value
     }
 
+    /// The constant bank words register `r` (a uniform one with
+    /// `uniform`) may hold before instruction `k`: the loads that reach `k`
+    /// on every path with no other write of `r` between. `None` when a path
+    /// reaches the start of the program, an instruction other than such a
+    /// load writes `r`, or the program has control flow this does not
+    /// follow.
+    fn handle_sources(&self, k: usize, r: u8, uniform: bool) -> Option<Vec<HandleSource>> {
+        let preds = self.preds.as_ref()?;
+        let names = |j: usize| {
+            if uniform {
+                self.uwrites[j].contains(&r)
+            } else {
+                self.writes[j].contains(&r)
+            }
+        };
+        let mut seen = vec![false; preds.len()];
+        let mut todo = vec![k];
+        let mut out = Vec::new();
+        while let Some(at) = todo.pop() {
+            if preds[at].is_empty() {
+                return None;
+            }
+            for &j in &preds[at] {
+                if std::mem::replace(&mut seen[j], true) {
+                    continue;
+                }
+                if !names(j) {
+                    todo.push(j);
+                    continue;
+                }
+                let l = self.loads[j]?;
+                if l.uniform != uniform || r < l.dst || r - l.dst >= l.words {
+                    return None;
+                }
+                let at = l.offset + 4 * i64::from(r - l.dst);
+                let offset = u32::try_from(at).ok().filter(|o| o % 4 == 0)?;
+                out.push(HandleSource {
+                    bank: l.bank,
+                    offset,
+                    indexed: l.indexed,
+                });
+                if l.guarded {
+                    todo.push(j);
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        Some(out)
+    }
+
     /// [`Prep::known`] within the block of `k` only.
     fn known_in_block(&self, k: usize, r: u8) -> Option<u32> {
         let mut j = k;
@@ -580,8 +701,10 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
     if key.is_none() {
         c.iface.bindless = true;
     }
-    if key.is_none() && matches!(c.fields.tex.handle, Handle::UReg { .. }) {
-        c.iface.register_handles = true;
+    if key.is_none()
+        && let Handle::UReg { n, .. } = c.fields.tex.handle
+    {
+        note_register_handle(c, Some(n), true);
         return Ok((ur_handle(c)?, false));
     }
     match key {
@@ -590,9 +713,20 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
             Ok((c.load_cbuf(bank, i64::from(off))?, false))
         }
         None => {
-            c.iface.register_handles = true;
+            note_register_handle(c, s.reg(Slot::Handle), false);
             Ok((s.get(Slot::Handle)?, true))
         }
+    }
+}
+
+/// Notes in the interface where the handle in register `r` (a uniform one
+/// with `uniform`) of this texture instruction comes from, or that it may
+/// come from anywhere.
+fn note_register_handle(c: &mut Ctx, r: Option<u8>, uniform: bool) {
+    let k = (c.pc / 16) as usize;
+    match r.and_then(|r| c.tex.handle_sources(k, r, uniform)) {
+        Some(found) => c.iface.handle_sources.extend(found),
+        None => c.iface.register_handles = true,
     }
 }
 

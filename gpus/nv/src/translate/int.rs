@@ -170,7 +170,7 @@ fn cs2r(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
 }
 
-fn cbuf_words(i: &Inst) -> Res<(u32, Option<(u32, bool)>)> {
+pub(super) fn cbuf_words(i: &Inst) -> Res<(u32, Option<(u32, bool)>)> {
     let mut n = 1;
     let mut sub = None;
     for m in &i.mods {

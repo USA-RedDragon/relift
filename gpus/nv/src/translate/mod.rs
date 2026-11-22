@@ -38,8 +38,8 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use tex::{
-    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING,
-    TEXTURE_KIND_SPEC, image_binding, texture_binding,
+    Dim, HandleSource, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC,
+    TEXTURE_DIMS_BINDING, TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
 
 use crate::program::{Program, Stage};
@@ -115,9 +115,14 @@ pub struct Interface {
     /// known only when it runs.
     pub bindless: bool,
     /// The program samples or queries a texture through a handle in a
-    /// register or uniform register, which can name any texture of the pool,
-    /// so the runtime must keep every registered texture in its slot.
+    /// register or uniform register whose source is not known, which can
+    /// name any texture of the pool, so the runtime must keep every
+    /// registered texture in its slot.
     pub register_handles: bool,
+    /// The constant bank words that handles in registers are loaded from,
+    /// where every load that reaches the texture instruction is known: the
+    /// runtime keeps the textures those words name in their slots.
+    pub handle_sources: BTreeSet<tex::HandleSource>,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
     pub texture_bindings: BTreeSet<u32>,
     /// Specialization constant id per bound handle whose texture's numeric
