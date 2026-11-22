@@ -76,7 +76,8 @@ typedef struct nvn_pool {
 } nvn_pool;
 
 /**
- * @brief Imported pools by GPU address, for nvn_gpu_guest. Spans may
+ * @brief Pools by GPU address, for nvn_gpu_guest and nvn_gpu_mapped: imported and mirrored pools at their device
+ * address, and a pool the host device holds no buffer for (buf NULL) at its guest address, its GPU address. Spans may
  * overlap: a host whose device addresses are the host pointers of imported
  * memory (llvmpipe) gives a virtual pool's import the addresses of the
  * physical pool's bytes it reaches, so the same address names the same byte
@@ -710,10 +711,12 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
         nvn_import back;
         if (!virt && pool_back(p, memory, size, retired_of(memory, size, &back)))
             pools_add(p->im.gpu, size, memory, p->im.buf, memory);
-        else if (!virt)
+        else if (!virt) {
             rl_log(RL_LOG_WARN, "nvn", "memory pool 0x%llx (0x%llx bytes at 0x%llx) is not imported into the host device; "
                    "its GPU address is its guest address",
                    (unsigned long long)pool, (unsigned long long)size, (unsigned long long)memory);
+            pools_add(memory, size, memory, NULL, memory);
+        }
     }
     return nvn_obj_publish((nvn_obj *)p) != NULL;
 }
@@ -878,6 +881,8 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_pool *p = (nvn_pool *)nvn_obj_get(c->x[0], NVN_POOL);
+    if (p && !p->im.gpu && !(p->flags & NVN_POOL_VIRTUAL))
+        pools_remove(p->memory, p->size, NULL);
     if (p && p->im.gpu) {
         pools_remove(p->im.gpu, p->size, p->im.buf);
         if (p->alias) {

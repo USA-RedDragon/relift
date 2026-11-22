@@ -2,7 +2,7 @@
  * @file test_nvn_trace.c
  * @brief The NVN frame trace (RELIFT_NVN_TRACE): its setting, and one traced command that leaves its line and the
  * bytes of the buffer it changed, before and after, in the folder, and marks a binding outside every memory pool
- * instead of reading it.
+ * instead of reading it; a pool the host device holds no buffer for is still a pool at its guest address.
  */
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 TEST(nvn_trace_setting_names_a_folder_a_present_and_a_frame_count)
@@ -152,4 +153,53 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     nvnh_nvnMemoryPoolFinalize(c, t_mem());
     CHECK_EQ(nftw(dir, remove_one, 16, FTW_DEPTH | FTW_PHYS), 0);
     unsetenv("RELIFT_NVN_TRACE");
+}
+
+/**
+ * The child of nvn_a_pool_without_a_host_device_is_mapped_at_its_guest_address: run with no Vulkan driver, so the pool
+ * takes the fallback, it checks that the pool's bytes are mapped at its guest address and stop being so when it is
+ * finalized. Without RL_NODEV_CHILD it is a test that passes.
+ */
+TEST(nvn_pool_without_a_device_child)
+{
+    if (!getenv("RL_NODEV_CHILD"))
+        return;
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000), memory = heap + 0x10000;
+    CHECK(nvn_pool_make(heap, memory, 0x10000, 0x18c));
+    CHECK_EQ(nvn_pool_gpu(heap), memory);
+    CHECK(nvn_gpu_mapped(memory, 32));
+    CHECK(nvn_gpu_mapped(memory + 0xffff, 1));
+    CHECK(!nvn_gpu_mapped(memory + 0x10000, 1));
+    CHECK(!nvn_gpu_mapped(memory + 0xfff0, 0x20));
+    CHECK_EQ(nvn_gpu_guest(memory + 0x40), memory + 0x40);
+    c->x[0] = heap;
+    nvnh_nvnMemoryPoolFinalize(c, t_mem());
+    CHECK(!nvn_gpu_mapped(memory, 32));
+}
+
+TEST(nvn_a_pool_without_a_host_device_is_mapped_at_its_guest_address)
+{
+    char exe[PATH_MAX], none[PATH_MAX + 32];
+    CHECK(rl_exe_path(exe, sizeof exe));
+    const char *base = getenv("TMPDIR");
+    snprintf(none, sizeof none, "%s/relift-no-icd.json", base && *base ? base : "/tmp");
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid == 0) {
+        setenv("VK_ICD_FILENAMES", none, 1);
+        setenv("VK_DRIVER_FILES", none, 1);
+        setenv("RELIFT_VULKAN_LIBRARY", none, 1);
+        unsetenv("RELIFT_VK_REQUIRE");
+        setenv("RL_NODEV_CHILD", "1", 1);
+        setenv("RELIFT_TEST_ONE", "nvn_pool_without_a_device_child", 1);
+        char *argv[] = { exe, NULL };
+        execv(exe, argv);
+        _exit(126);
+    }
+    int st = 0;
+    CHECK(waitpid(pid, &st, 0) == pid);
+    CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
 }
