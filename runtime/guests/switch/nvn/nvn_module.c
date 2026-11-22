@@ -4,6 +4,7 @@
  */
 #include "nvn_module.h"
 #include "nvn_pipe.h"
+#include "spirvval.h"
 
 #include <pthread.h>
 #include <stdarg.h>
@@ -292,6 +293,7 @@ VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
                                     .codeSize = dn * 4,
                                     .pCode = dw };
     VkShaderModule m = NULL;
+    rl_spirv_check(dw, dn, "a fragment program with demoted inputs");
     if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
         m = NULL;
     free(dw);
@@ -436,6 +438,7 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                                     .codeSize = n * 4,
                                     .pCode = w };
+    rl_spirv_check(w, n, key);
     VkResult vr = VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m->m);
     free(w);
     if (vr != VK_SUCCESS) {

@@ -33,6 +33,7 @@
 #include <relift/window.h>
 
 #include "present.h"
+#include "spirvval.h"
 
 #include <pthread.h>
 #include <stdarg.h>
@@ -518,6 +519,7 @@ static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t 
                                        .maxSets = 1,
                                        .poolSizeCount = 1,
                                        .pPoolSizes = &ps };
+    rl_spirv_check(smi.pCode, smi.codeSize / 4, "a texture copy program");
     if (VK(vkCreateShaderModule)(g.dev, &smi, NULL, &sm) != VK_SUCCESS ||
         VK(vkCreateDescriptorSetLayout)(g.dev, &dli, NULL, &dsl) != VK_SUCCESS)
         goto out;

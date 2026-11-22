@@ -17,6 +17,7 @@
 #include "hostlib.h"
 #include "post_data.h"
 #include "vkmin.h"
+#include "spirvval.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -261,6 +262,7 @@ static bool make(rl_upscaler *u)
                      : (buffers ? rl_post_spv_upscale_buffers : rl_post_spv_upscale),
     };
     rlvk_handle module = 0;
+    rl_spirv_check(sm.pCode, sm.codeSize / 4, "an upscaler program");
     r = u->vkCreateShaderModule(u->device, &sm, NULL, &module);
     if (r != RLVK_SUCCESS)
         return failed(u, "vkCreateShaderModule", r);

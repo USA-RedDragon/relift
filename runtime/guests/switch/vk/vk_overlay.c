@@ -9,6 +9,7 @@
 #include "vkf.h"
 #include "vk_overlay.h"
 #include "vk_overlay_spv.h"
+#include "spirvval.h"
 
 #include <relift/touchpad.h>
 
@@ -66,6 +67,7 @@ static VkShaderModule shader(vkf_overlay *o, const uint32_t *code, size_t size)
 {
     VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = size, .pCode = code };
     VkShaderModule m = NULL;
+    rl_spirv_check(ci.pCode, ci.codeSize / 4, "the overlay program");
     if (FN(o, vkCreateShaderModule)(o->dev, &ci, NULL, &m) < 0)
         return NULL;
     return m;

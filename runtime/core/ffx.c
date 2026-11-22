@@ -6,6 +6,7 @@
 
 #include "core.h"
 #include "hostlib.h"
+#include "spirvval.h"
 
 #include <math.h>
 #include <string.h>
@@ -164,6 +165,7 @@ bool rl_ffx_pipeline_new(const rl_ffx_vk *vk, const uint32_t *code, uint32_t siz
         return false;
     rlvk_shader_module_create_info sm = { .sType = RLVK_ST_SHADER_MODULE_CREATE_INFO, .codeSize = size, .pCode = code };
     rlvk_handle shader = 0;
+    rl_spirv_check(code, size / 4, "an FFX program");
     if (vk->vkCreateShaderModule(vk->device, &sm, NULL, &shader) != RLVK_SUCCESS)
         return false;
     rlvk_compute_pipeline_create_info cp = {

@@ -18,6 +18,7 @@
  * known.
  */
 #include "vkf.h"
+#include "spirvval.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -180,6 +181,7 @@ uint64_t vkh_vkCreateShaderModule(rl_ctx *restrict c, uint8_t *mem)
         }
     }
     VkShaderModule *outm = vkf_ptr(&k, c->x[3]);
+    rl_spirv_check(ci->pCode, ci->codeSize / 4, "a forwarded program");
     VkResult r = VKF_FN(k.fns, vkCreateShaderModule)(dev, ci, NULL, outm);
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateShaderModule, r);
     return vkf_end(&k);

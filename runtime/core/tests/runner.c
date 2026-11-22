@@ -9,8 +9,12 @@
  */
 #include "runner.h"
 
+#include "spirvval.h"
+
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -21,6 +25,28 @@ extern char **environ;
 #endif
 
 #define ONE_ENV "RELIFT_TEST_ONE"
+
+/** @brief Sets RELIFT_SPIRV_VAL to spirv-val when it is unset and spirv-val is on the path, so tests check every module. */
+static void find_spirv_val(void)
+{
+    const char *path = getenv("PATH");
+    if (getenv(RL_SPIRV_VAL_ENV) || !path)
+        return;
+    while (*path) {
+        size_t len = strcspn(path, ":");
+        char exe[4096];
+        if (len && len < sizeof exe - 16) {
+            snprintf(exe, sizeof exe, "%.*s/spirv-val", (int)len, path);
+            if (access(exe, X_OK) == 0) {
+                setenv(RL_SPIRV_VAL_ENV, "spirv-val --target-env vulkan1.3 -", 0);
+                return;
+            }
+        }
+        path += len;
+        if (*path)
+            path++;
+    }
+}
 
 static struct test {
     const char *name;
@@ -166,6 +192,7 @@ int main(int argc, char **argv)
     int run = 0, failed = 0;
     bool nofork = getenv("RELIFT_TEST_NOFORK") != NULL;
     const char *only = getenv(ONE_ENV);
+    find_spirv_val();
     rl_config_load();
     if (only && *only) {
         for (int i = 0; i < g_count; i++)

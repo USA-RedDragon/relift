@@ -23,6 +23,7 @@
 #include "post_data.h"
 #include "postgpu.h"
 #include "vkdev.h"
+#include "spirvval.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -189,6 +190,7 @@ static bool make_pipelines(vk *v)
             .pCode = g_spv[p].code,
         };
         rlvk_handle module = 0;
+        rl_spirv_check(sm.pCode, sm.codeSize / 4, "a picture pipeline program");
         r = v->d->vkCreateShaderModule(v->d->device, &sm, NULL, &module);
         if (r != RLVK_SUCCESS)
             return fail("vkCreateShaderModule", r);

@@ -13,6 +13,7 @@
  */
 #include "nvn_vk.h"
 #include "nvn_untile_spv.h"
+#include "spirvval.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,7 @@ static VkPipeline pipeline(uint32_t tile, uint32_t volume, uint32_t words_log2)
                                      .codeSize = nvn_untile_spv[tile][volume][words_log2].size,
                                      .pCode = nvn_untile_spv[tile][volume][words_log2].code };
     VkShaderModule sm = 0;
+    rl_spirv_check(smi.pCode, smi.codeSize / 4, "an untile program");
     if (VK(vkCreateShaderModule)(g.dev, &smi, NULL, &sm) == VK_SUCCESS) {
         VkComputePipelineCreateInfo cpi = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
                                             .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
