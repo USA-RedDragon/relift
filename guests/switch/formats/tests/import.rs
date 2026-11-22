@@ -389,6 +389,39 @@ fn control_data_reaches_the_import_directory() {
     assert!(!out.join("icon.jpg").exists());
 }
 
+#[test]
+fn a_package_display_version_reaches_the_import_directory() {
+    use relift_switch_formats::nup::{self, BuildPackage, PackageKind, TLV_DISPLAY_VERSION};
+    let d = scratch("import-display-version");
+    let build = |meta: Vec<(u16, Vec<u8>)>| {
+        nup::build(&[BuildPackage {
+            title_id: PROGRAM_ID,
+            version: 0,
+            kind: PackageKind::Base,
+            standalone: false,
+            files: vec![
+                ("exefs/rtld", b"x".as_slice()),
+                ("romfs/a.txt", b"a".as_slice()),
+            ],
+            empty_dirs: vec![],
+            meta,
+        }])
+    };
+    let file = put(
+        &d,
+        "v.nup",
+        &build(vec![(TLV_DISPLAY_VERSION, b"3.1.4".to_vec())]),
+    );
+    let out = d.join("out");
+    import(&file, &out, &Options::default()).expect("import");
+    assert_eq!(read(out.join("display_version.txt")), b"3.1.4");
+
+    let file = put(&d, "n.nup", &build(vec![]));
+    let out = d.join("out-none");
+    import(&file, &out, &Options::default()).expect("import");
+    assert!(!out.join("display_version.txt").exists());
+}
+
 fn two_program<'a>(
     id: u64,
     npdm: &'a [u8],
