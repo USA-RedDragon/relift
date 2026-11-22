@@ -272,20 +272,24 @@ fn android_sizes_command(dir: &str) -> String {
     )
 }
 
-/// The device command that opens to all every data folder the app (the
-/// owner of `dir`) does not own and that is not yet open.
+/// The device command that gives the app (the owner of `dir`) its data:
+/// as root (a rooted device's adbd), every data file and folder another user
+/// owns is handed to the app's user and group, as the app cannot enter a
+/// folder root made there even when it is open to all; otherwise every data
+/// folder the app does not own and that is not yet open is opened to all.
 fn android_open_command(dir: &str) -> String {
     format!(
-        "u=$(stat -c %u '{dir}') || exit 1; for r in {}; do [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 -print0 | xargs -0 -r chmod a+rx || exit 1; done",
+        "u=$(stat -c %u '{dir}') && g=$(stat -c %g '{dir}') || exit 1; for r in {}; do [ -e \"$r\" ] || continue; if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" -print0 | xargs -0 -r chown \"$u:$g\" || exit 1; fi; [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 -print0 | xargs -0 -r chmod a+rx || exit 1; done",
         android_roots(dir)
     )
 }
 
-/// The device command that prints the data folders the app still cannot
-/// enter: owned by another user and closed to others.
+/// The device command that prints the data the app still cannot use: as
+/// root, anything another user owns; otherwise folders owned by another
+/// user and closed to others.
 fn android_closed_command(dir: &str) -> String {
     format!(
-        "u=$(stat -c %u '{dir}') || exit 1; for r in {}; do [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 || exit 1; done",
+        "u=$(stat -c %u '{dir}') || exit 1; for r in {}; do [ -e \"$r\" ] || continue; if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" || exit 1; elif [ -d \"$r\" ]; then find \"$r\" -type d ! -user \"$u\" ! -perm -005 || exit 1; fi; done",
         android_roots(dir)
     )
 }
@@ -613,6 +617,23 @@ mod tests {
             assert!(!cmd.contains("-exec"), "{cmd}");
         }
         assert!(android_open_command("/d").contains("xargs -0 -r chmod a+rx"));
+        let open = android_open_command("/d");
+        let root = open
+            .find("if [ \"$(id -u)\" = 0 ]")
+            .expect("a root shell hands the data over");
+        let chown = open
+            .find("! -user \"$u\" -print0 | xargs -0 -r chown \"$u:$g\"")
+            .unwrap();
+        assert!(
+            root < chown && chown < open.find("chmod a+rx").unwrap(),
+            "{open}"
+        );
+        assert!(open.contains("g=$(stat -c %g '/d')"), "{open}");
+        let closed = android_closed_command("/d");
+        assert!(
+            closed.contains("if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" ||"),
+            "as root anything another user owns is closed to the app: {closed}"
+        );
         assert_eq!(
             android_names("/sdcard/x/files/romfs/a\n/elsewhere/b\n", "/sdcard/x/files"),
             ["romfs/a"]
