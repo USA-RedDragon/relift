@@ -67,7 +67,7 @@ class ReleaseGuard(unittest.TestCase):
         elf[0:4] = b"\x7fELF"
         elf[4] = 2
         d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
-        path = os.path.join(d, "game")
+        path = os.path.join(d, "program")
         with open(path, "wb") as f:
             f.write(bytes(elf) + extra)
         return path
@@ -92,7 +92,7 @@ class ReleaseGuard(unittest.TestCase):
         struct.pack_into("<HH", elf, 0x36, 56, 1)
         struct.pack_into("<II", elf, 0x40, 1, 7)
         d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
-        path = os.path.join(d, "game")
+        path = os.path.join(d, "program")
         with open(path, "wb") as f:
             f.write(elf)
         r = guard("--binary", path)

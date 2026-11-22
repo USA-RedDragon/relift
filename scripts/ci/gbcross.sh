@@ -37,5 +37,5 @@ if [ "$target" = ios-arm64 ]; then
     RELIFT_CACHE_DIR="$cache" RELIFT_SMS_TRACE="$work/exec.tsv" "$relift" build --target ios-arm64)
   app="$cache/projects/proj/build/ios-arm64/proj.app"
   plutil -lint "$app/Info.plist"
-  python3 -I runtime/tools/cross/release_guard.py --binary "$app/game" --no-interpreter
+  python3 -I runtime/tools/cross/release_guard.py --binary "$app/proj" --no-interpreter
 fi

@@ -373,7 +373,7 @@ def compile_all(args, tool, ninjas):
                 continue
             o = os.path.join(out, kind, re.sub(r"[^A-Za-z0-9_.]", "_", src[-100:]) + ".o")
             jobs.append((src, adjust(flags, tool), o, cwd))
-    os.makedirs(os.path.join(out, "game"), exist_ok=True)
+    os.makedirs(os.path.join(out, "program"), exist_ok=True)
     os.makedirs(os.path.join(out, "rt"), exist_ok=True)
     failures = []
 
@@ -394,7 +394,7 @@ def compile_all(args, tool, ninjas):
 
 
 def link(args, tool, objs, devlib):
-    exe_name = "game.exe" if tool.target["kind"] == "windows" else "game"
+    exe_name = "program.exe" if tool.target["kind"] == "windows" else "program"
     exe = os.path.join(args.work, "out", args.target, exe_name)
     os.makedirs(os.path.dirname(exe), exist_ok=True)
     rsp = exe + ".rsp"
@@ -424,7 +424,7 @@ def adb_run(exe, work, serial, gba=None, prog=GBA_ARGS, extra=None):
     case = os.path.join(work, "case.txt")
     with open(case, "w") as f:
         f.write("protocol=mooneye\nframes=0xf\nmarker=0x40\n")
-    steps = [adb + ["shell", f"rm -rf {d}; mkdir -p {d}"], adb + ["push", exe, f"{d}/game"], adb + ["push", case, f"{d}/case.txt"], adb + ["shell", f"chmod 755 {d}/game"]]
+    steps = [adb + ["shell", f"rm -rf {d}; mkdir -p {d}"], adb + ["push", exe, f"{d}/program"], adb + ["push", case, f"{d}/case.txt"], adb + ["shell", f"chmod 755 {d}/program"]]
     for s in steps:
         r = run(s)
         if r.returncode:
@@ -432,10 +432,10 @@ def adb_run(exe, work, serial, gba=None, prog=GBA_ARGS, extra=None):
     try:
         if gba is not None:
             env = " ".join(f"{k}={v}" for k, v in (extra or {}).items())
-            r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless {env} HOME={d} ./game {' '.join(prog)}; echo exit=$?"])
+            r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless {env} HOME={d} ./program {' '.join(prog)}; echo exit=$?"])
             print(r.stdout + r.stderr)
             return "exit=0" in r.stdout and gba_report(r.stdout) == gba
-        r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./game --case case.txt --model dmg --stats; echo exit=$?"])
+        r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./program --case case.txt --model dmg --stats; echo exit=$?"])
         print(r.stdout + r.stderr)
         return "relift-gb: pass" in r.stdout and "exit=0" in r.stdout
     finally:
@@ -546,7 +546,7 @@ def main():
         runtime_libs(args, tool)
         print("runtime libraries build")
         devlib = device_library(args, tool, env) if args.guest == "gb" else None
-        objs, n = compile_all(args, tool, [("game", game), ("rt", rt)])
+        objs, n = compile_all(args, tool, [("program", game), ("rt", rt)])
         print(f"{n} files compile")
         if args.guest == "n64":
             tool.libs = tool.libs + cxx_runtime(tool)
@@ -564,7 +564,9 @@ def main():
             gba = None
             prog, extra = {"n64": (N64_ARGS, NO_VULKAN), "nds": (NDS_ARGS, None), "sms": (SMS_ARGS, None)}.get(args.guest, (GBA_ARGS, None))
             if args.guest in ("gba", "n64", "nds", "sms"):
-                host_exe = os.path.join(os.path.dirname(game), "game.exe" if platform.system() == "Windows" else "game")
+                project = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(game))))
+                stem = re.sub(r"[^a-z0-9]+", "-", project.lower()).strip("-")
+                host_exe = os.path.join(os.path.dirname(game), stem + (".exe" if platform.system() == "Windows" else ""))
                 r = run([host_exe] + prog, env=dict(os.environ, RELIFT_VIDEO="headless", **(extra or {})))
                 gba = gba_report(r.stdout)
                 if r.returncode or not gba:
