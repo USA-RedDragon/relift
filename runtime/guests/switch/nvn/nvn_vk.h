@@ -107,6 +107,8 @@ typedef struct vimg {
     uint64_t edge_hash;
     /** @brief For a buffer texture in an imported pool: the write stamp last copied into the pool's bytes. */
     uint64_t flushed;
+    /** @brief For an image whose pool is gone: the batch serial (nvn_vk_submitted) that must finish before it is freed. */
+    uint64_t retire_after;
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
@@ -221,6 +223,9 @@ typedef struct nvn_vkdev {
     uint32_t nimages;
     /** @brief nvn_obj_pools_removed when images were last checked for a removed pool (nvn_vk_retire_images). */
     uint64_t pools_seen;
+    /** @brief Images of removed pools, waiting for the last batch that may use them before they are freed. */
+    vimg **retired;
+    uint32_t nretired, capretired;
     /** @brief The running count vimg.written takes its values from. */
     uint64_t write_stamp;
     /** @brief Counts the changes of the set of host images (one made, or some retired). */
@@ -783,5 +788,16 @@ void nvn_counters_end(uint32_t slot);
  * formats, integer formats of other sizes and failed submits; the caller frees the pixels.
  */
 uint8_t *nvn_vk_read_rgba8(replay *r, vimg *v);
+
+/** @brief Images of removed pools not freed yet: a batch that may use them has not finished, or state still names them. */
+uint32_t nvn_vk_retired_count(void);
+
+/**
+ * @brief Drops every slot that holds image v before v is freed: its views made for the slots are destroyed and the
+ * slots' descriptors made null. Called under the NVN lock once no batch that may use them is in flight.
+ */
+void nvn_texset_image_gone(const vimg *v);
+/** @brief Forgets image v in the trace's capture cache before v is freed. */
+void nvn_trace_image_gone(const vimg *v);
 
 #endif

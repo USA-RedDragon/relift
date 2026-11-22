@@ -89,6 +89,19 @@ static struct {
 bool nvn_trace_active;
 uint64_t nvn_trace_wide_draws;
 
+void nvn_trace_image_gone(const vimg *v)
+{
+    for (uint32_t i = 0; i < tr.ncache && i < MAX_CACHE; i++)
+        if (tr.cache[i].v == v)
+            tr.cache[i].v = NULL;
+    for (uint32_t i = 0; i < tr.ntex && i < MAX_TEX; i++)
+        if (tr.tex[i].v == v)
+            tr.tex[i].v = NULL;
+    for (uint32_t i = 0; i < tr.nrt && i < MAX_RT + 1; i++)
+        if (tr.rt[i].v == v)
+            tr.rt[i].v = NULL;
+}
+
 bool nvn_trace_parse(const char *spec, char *dir, size_t dirsz, uint64_t *from, uint64_t *frames)
 {
     if (!spec)

@@ -722,3 +722,48 @@ TEST(nvn_an_integer_texture_reads_back_bit_for_bit)
     free(px);
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_an_image_of_a_removed_pool_is_freed_after_its_last_batch)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_texset_layout());
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x1c0, tex = 0x2c0;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 32, .pool = pool, .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    c.x[1] = 23;
+    c.x[2] = tex;
+    c.x[3] = 0;
+    nvnh_nvnTexturePoolRegisterTexture(&c, mem);
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    uint32_t kind = 9, dim = 9, slot = UINT32_MAX;
+    CHECK_EQ(nvn_texset_bind(&r, 23u, &kind, &dim, &slot), RL_OK);
+    CHECK(nvn_vk_begin(&r));
+    nvn_obj_free(nvn_obj_get(pool, NVN_POOL));
+    nvn_vk_retire_images();
+    CHECK_EQ(nvn_vk_retired_count(), 1u);
+    nvn_vk_retire_images();
+    CHECK_EQ(nvn_vk_retired_count(), 1u);
+    CHECK(nvn_vk_flush(&r));
+    nvn_vk_retire_images();
+    CHECK_EQ(nvn_vk_retired_count(), 0u);
+    CHECK_EQ(nvn_texset_bind(&r, 23u, &kind, &dim, &slot), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+}

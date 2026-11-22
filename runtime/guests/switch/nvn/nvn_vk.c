@@ -2338,22 +2338,88 @@ void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
 
 static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex);
 
+#define MAX_QUEUES 16u
+
+static struct {
+    uint64_t queue;
+    nvn_gfx *st;
+} queues[MAX_QUEUES];
+
+/** @brief Whether draw state or the open render pass still names image v. */
+static bool image_named(const vimg *v)
+{
+    for (uint32_t i = 0; i <= MAX_RT; i++)
+        if (open_pass.open && open_pass.images[i] == v)
+            return true;
+    for (uint32_t q = 0; q < MAX_QUEUES && queues[q].st; q++) {
+        const nvn_gfx *st = queues[q].st;
+        if (st->depth.v == v)
+            return true;
+        for (uint32_t i = 0; i < MAX_RT; i++)
+            if (st->color[i].v == v)
+                return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Frees the retired images whose last batch has finished and that no state names; an image state still names
+ * waits for the batch after the one being recorded, since a draw may use it again.
+ */
+static void reap_retired(void)
+{
+    if (!g.nretired)
+        return;
+    uint64_t finished = nvn_vk_finished(), next = nvn_vk_submitted() + 1;
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < g.nretired; i++) {
+        vimg *v = g.retired[i];
+        if (finished < v->retire_after) {
+            g.retired[n++] = v;
+        } else if (image_named(v)) {
+            v->retire_after = next;
+            g.retired[n++] = v;
+        } else {
+            nvn_texset_image_gone(v);
+            nvn_trace_image_gone(v);
+            image_free(v);
+        }
+    }
+    g.nretired = n;
+}
+
 void nvn_vk_retire_images(void)
 {
+    reap_retired();
     uint64_t removed = nvn_obj_pools_removed();
     if (removed == g.pools_seen)
         return;
     g.pools_seen = removed;
     uint32_t n = 0;
+    uint64_t next = nvn_vk_submitted() + 1;
     for (uint32_t i = 0; i < g.nimages; i++) {
         vimg *v = g.images[i];
-        if (!v->pool_serial || nvn_obj_serial(v->d.pool, NVN_POOL) == v->pool_serial)
+        if (!v->pool_serial || nvn_obj_serial(v->d.pool, NVN_POOL) == v->pool_serial) {
             g.images[n++] = v;
+            continue;
+        }
+        if (g.nretired == g.capretired) {
+            uint32_t cap = g.capretired ? 2 * g.capretired : 64;
+            vimg **grown = realloc(g.retired, cap * sizeof *grown);
+            if (!grown)
+                continue;
+            g.retired = grown;
+            g.capretired = cap;
+        }
+        v->retire_after = next;
+        g.retired[g.nretired++] = v;
     }
     if (g.nimages != n)
         g.image_epoch++;
     g.nimages = n;
 }
+
+uint32_t nvn_vk_retired_count(void) { return g.nretired; }
 
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
 static vimg *image_of(replay *r, uint64_t tex)
@@ -3297,13 +3363,6 @@ static int run_cmd(replay *r, const nvn_cmd *e)
     }
     }
 }
-
-#define MAX_QUEUES 16u
-
-static struct {
-    uint64_t queue;
-    nvn_gfx *st;
-} queues[MAX_QUEUES];
 
 /** @brief The draw state of queue, made the first time. */
 static nvn_gfx *state_of(uint64_t queue)

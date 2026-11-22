@@ -588,6 +588,33 @@ static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
     return RL_OK;
 }
 
+void nvn_texset_image_gone(const vimg *v)
+{
+    if (!t.ok || !v)
+        return;
+    for (uint32_t sl = 0; sl < t.ntex; sl++) {
+        if (t.tex_img[sl] != v)
+            continue;
+        for (uint32_t d = 0; d < DIMS; d++)
+            if (t.tex_views[sl][d]) {
+                VK(vkDestroyImageView)(g.dev, t.tex_views[sl][d], NULL);
+                t.tex_views[sl][d] = NULL;
+            }
+        null_rest(sl, false, 0, 0);
+        if (sl < IMAGES) {
+            for (uint32_t at = 0; at < IMAGE_KINDS * 8u; at++)
+                if (t.img_views[sl][at]) {
+                    VK(vkDestroyImageView)(g.dev, t.img_views[sl][at], NULL);
+                    t.img_views[sl][at] = NULL;
+                }
+            null_rest(sl, true, 0, 0);
+        }
+        t.tex_img[sl] = NULL;
+        t.tex_guest[sl] = 0;
+        t.img_done[sl] = false;
+    }
+}
+
 void nvn_texset_texture_gone(uint64_t tex)
 {
     if (!t.ok)
