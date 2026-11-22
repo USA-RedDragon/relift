@@ -529,6 +529,11 @@ void nvn_vk_dispatch_image(const vimg *v, uint32_t level, bool one_level, uint32
 /** @brief The dispatch may read or write memory no binding names (global loads and stores): it waits and is waited for. */
 void nvn_vk_dispatch_anywhere(void);
 /**
+ * @brief Whether a program with an interface record of this kind may touch memory no binding names: global loads or
+ * stores, or a texture or image reached through a register handle. Such a dispatch is ordered against every other.
+ */
+bool nvn_dispatch_unbounded(uint32_t kind);
+/**
  * @brief Begins recording a dispatch: after other dispatches with no barrier since (the console orders dispatches only
  * at the game's barriers), it records no barrier when the ranges it touches meet none that they write and it writes
  * none they read; otherwise as nvn_vk_begin, which ends the open dispatches with a barrier.

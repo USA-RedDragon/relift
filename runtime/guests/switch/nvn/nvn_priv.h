@@ -491,6 +491,8 @@ bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out)
 void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65]);
 /** @brief Record kind: the program stores or does atomic read-modify-writes through 64-bit global addresses. */
 #define NVN_IFACE_GLOBAL_STORE 7u
+/** @brief Record kind: the program reads or writes a texture or image whose handle comes from a register. */
+#define NVN_IFACE_BINDLESS 8u
 /**
  * @brief Copies up to max interface records of the translation with key to out (out may be NULL) and returns how
  * many it has, which may be more than max (0 without an entry).

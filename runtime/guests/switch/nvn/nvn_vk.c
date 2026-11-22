@@ -1292,6 +1292,11 @@ void nvn_vk_dispatch_buffer(uint64_t addr, uint64_t size, bool write) { cs_add(&
 
 void nvn_vk_dispatch_anywhere(void) { open_cs.next.full = true; }
 
+bool nvn_dispatch_unbounded(uint32_t kind)
+{
+    return kind == NVN_IFACE_GLOBAL_MEMORY || kind == NVN_IFACE_GLOBAL_STORE || kind == NVN_IFACE_BINDLESS;
+}
+
 void nvn_vk_dispatch_image(const vimg *v, uint32_t level, bool one_level, uint32_t layer, uint32_t layers, bool write)
 {
     if (!v)

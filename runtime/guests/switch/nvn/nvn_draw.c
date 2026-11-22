@@ -1852,7 +1852,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     }
     nvn_vk_dispatch_reset();
     for (uint32_t i = 0; i < m->nrecs; i++)
-        if (m->recs[i].kind == NVN_IFACE_GLOBAL_MEMORY || m->recs[i].kind == NVN_IFACE_GLOBAL_STORE)
+        if (nvn_dispatch_unbounded(m->recs[i].kind))
             nvn_vk_dispatch_anywhere();
     for (uint32_t i = 0; i < nssbo; i++)
         if (st->storage[i].addr)

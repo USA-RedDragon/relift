@@ -348,3 +348,26 @@ TEST(nvn_a_dispatch_storing_through_global_addresses_waits_and_is_waited_for)
     CHECK_EQ(calls.barriers, before + 2);
     teardown(&f);
 }
+
+TEST(nvn_a_dispatch_writing_an_image_through_a_register_handle_is_ordered_before_a_later_reader)
+{
+    CHECK(nvn_dispatch_unbounded(NVN_IFACE_BINDLESS));
+    CHECK(nvn_dispatch_unbounded(NVN_IFACE_GLOBAL_MEMORY));
+    CHECK(nvn_dispatch_unbounded(NVN_IFACE_GLOBAL_STORE));
+    CHECK(!nvn_dispatch_unbounded(NVN_IFACE_TEXTURE));
+    static fixture f;
+    setup(&f);
+    vimg img;
+    array_image(&img, 0x100000);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_anywhere();
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_image(&img, 0, true, 0, 1, false);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    teardown(&f);
+}
