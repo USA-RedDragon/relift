@@ -23,6 +23,7 @@
 #include "nvn_pipe.h"
 #include "nvn_probe_spv.h"
 
+#include <relift/input.h>
 #include <relift/window.h>
 
 #include "present.h"
@@ -2958,9 +2959,12 @@ static void present_rate(uint64_t total)
     memset(&tm, 0, sizeof tm);
     uint64_t faults, starts;
     nvn_watch_stats(&faults, &starts);
-    rl_log(RL_LOG_INFO, "nvn", "%llu presents, %.1f per second over the last %.1f s; texture watches %llu started, %llu written",
+    rl_log(RL_LOG_INFO, "nvn",
+           "%llu presents, %.1f per second over the last %.1f s; texture watches %llu started, %llu written; "
+           "host input %llu events",
            (unsigned long long)total, (double)(total - last_total) * 1e9 / (double)(now - last_ns),
-           (double)(now - last_ns) / 1e9, (unsigned long long)starts, (unsigned long long)faults);
+           (double)(now - last_ns) / 1e9, (unsigned long long)starts, (unsigned long long)faults,
+           (unsigned long long)rl_input_host_events(RL_INPUT_HOST_KINDS));
     last_ns = now;
     last_total = total;
 }

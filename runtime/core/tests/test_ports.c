@@ -304,3 +304,35 @@ TEST(ports_input_script_follows_a_file)
     unlink(path);
     CHECK(!rl_ports_follow_script(path));
 }
+
+TEST(input_host_events_are_counted_by_kind)
+{
+    uint64_t all = rl_input_host_events(RL_INPUT_HOST_KINDS);
+    uint64_t key = rl_input_host_events(RL_INPUT_HOST_KEY), pad = rl_input_host_events(RL_INPUT_HOST_PAD);
+    rl_input_host_event(RL_INPUT_HOST_KEY);
+    rl_input_host_event(RL_INPUT_HOST_KEY);
+    rl_input_host_event(RL_INPUT_HOST_PAD);
+    rl_input_host_event(RL_INPUT_HOST_KINDS);
+    CHECK_EQ(rl_input_host_events(RL_INPUT_HOST_KEY), key + 2);
+    CHECK_EQ(rl_input_host_events(RL_INPUT_HOST_PAD), pad + 1);
+    CHECK_EQ(rl_input_host_events(RL_INPUT_HOST_KINDS), all + 3);
+}
+
+static void scripted(void *user, rl_input_snapshot *out)
+{
+    (void)user;
+    out->pads[0].connected = true;
+    out->pads[0].buttons = 1u << RL_BTN_SOUTH;
+}
+
+TEST(input_a_source_or_published_snapshot_is_not_host_input)
+{
+    uint64_t all = rl_input_host_events(RL_INPUT_HOST_KINDS);
+    rl_input_snapshot s = blank();
+    s.pads[0].buttons = 1u << RL_BTN_EAST;
+    rl_input_publish(&s);
+    rl_input_set_source(scripted, NULL);
+    rl_input_sample(&s);
+    rl_input_set_source(NULL, NULL);
+    CHECK_EQ(rl_input_host_events(RL_INPUT_HOST_KINDS), all);
+}

@@ -115,4 +115,22 @@ RL_RUNTIME_API void rl_input_publish(const rl_input_snapshot *s);
  */
 RL_RUNTIME_API void rl_input_sample(rl_input_snapshot *out);
 
+/** @brief Kinds of host input event counted by rl_input_host_event. */
+enum rl_input_host_kind {
+    RL_INPUT_HOST_KEY,
+    RL_INPUT_HOST_MOUSE,
+    RL_INPUT_HOST_PAD,
+    RL_INPUT_HOST_TOUCH,
+    RL_INPUT_HOST_KINDS
+};
+
+/**
+ * @brief Counts one input event from a real host device (a key, the mouse,
+ * a gamepad button or stick, a touch), so a log shows whether a run had
+ * manual input; the first one of a run logs an info line. Thread safe.
+ */
+RL_RUNTIME_API void rl_input_host_event(enum rl_input_host_kind kind);
+/** @brief Host input events of kind counted so far (RL_INPUT_HOST_KINDS for all of them). */
+RL_RUNTIME_API uint64_t rl_input_host_events(enum rl_input_host_kind kind);
+
 #endif

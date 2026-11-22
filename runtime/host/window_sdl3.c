@@ -346,8 +346,38 @@ static void publish(void)
     rl_input_publish(&s);
 }
 
+/** @brief Counts e when it is input from a real device (rl_input_host_event). */
+static void count_host(const SDL_Event *e)
+{
+    switch (e->type) {
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:
+        rl_input_host_event(RL_INPUT_HOST_KEY);
+        break;
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_MOUSE_WHEEL:
+        if (e->type != SDL_EVENT_MOUSE_MOTION || e->motion.which != SDL_TOUCH_MOUSEID)
+            rl_input_host_event(RL_INPUT_HOST_MOUSE);
+        break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        rl_input_host_event(RL_INPUT_HOST_PAD);
+        break;
+    case SDL_EVENT_FINGER_DOWN:
+    case SDL_EVENT_FINGER_UP:
+        rl_input_host_event(RL_INPUT_HOST_TOUCH);
+        break;
+    default:
+        break;
+    }
+}
+
 static void handle(const SDL_Event *e)
 {
+    count_host(e);
     if (e->type >= SDL_EVENT_WINDOW_FIRST && e->type <= SDL_EVENT_WINDOW_LAST)
         window_event(e);
     else if (e->type == SDL_EVENT_GAMEPAD_ADDED || e->type == SDL_EVENT_GAMEPAD_REMOVED)

@@ -10,6 +10,7 @@
 #include "hos_mods.h"
 #include "vi.h"
 
+#include <relift/input.h>
 #include <relift/ports.h>
 #include <relift/settings.h>
 
@@ -425,9 +426,11 @@ static void frame_stats(uint64_t frame)
                    (double)dt[n * 95 / 100] / 1e6, (double)dt[n * 99 / 100] / 1e6, (double)dt[n - 1] / 1e6);
         }
         rl_log(RL_LOG_INFO, "stats",
-               "frames %llu-%llu: %.2f frames/s, process %.2f cores, presenting thread %.3f ms per frame, memory %llu MiB",
+               "frames %llu-%llu: %.2f frames/s, process %.2f cores, presenting thread %.3f ms per frame, memory %llu MiB, "
+               "host input %llu events",
                (unsigned long long)f0, (unsigned long long)frame, nf / s, (double)(p - p0) / 1e9 / s,
-               (double)(h - h0) / 1e6 / nf, (unsigned long long)(rl_os_memory_bytes() >> 20));
+               (double)(h - h0) / 1e6 / nf, (unsigned long long)(rl_os_memory_bytes() >> 20),
+               (unsigned long long)rl_input_host_events(RL_INPUT_HOST_KINDS));
         n = 0;
     }
     if (!f0 || frame - f0 >= every) {
