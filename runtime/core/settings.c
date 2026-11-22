@@ -119,14 +119,14 @@ static const rl_setting_def g_runtime_defs[] = {
         .apply = RL_APPLY_LIVE,
         .description = "The upscaler a game's own upscaler call (such as DLSS) runs inside the frame, before the "
                        "game's UI: game is the game's own, translated; auto is the game's own where this device "
-                       "meets its requirements, else the best temporal one this host has (dlss, else fsr2); off "
-                       "copies the picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are "
-                       "relift's; fsr1 is AMD FSR 1 (EASU and RCAS); fsr2 and fsr3 are AMD FSR 2 and the FSR 3 "
-                       "upscaler, temporal, where the game gives depth and motion vectors, else FSR 1; taa is "
-                       "relift's plain temporal upscaler, else bilinear; dlss is NVIDIA DLSS, temporal, on an NVIDIA "
-                       "GPU with the driver's NGX library and NVIDIA's DLSS library beside the program, else fsr2. "
-                       "Every "
-                       "choice but game changes the picture from the console's",
+                       "meets its requirements, else picked by GPU: taa on integrated and mobile GPUs, and on "
+                       "discrete ones dlss where it runs, else fsr2; off copies the picture at its render size; "
+                       "nearest, bilinear, sharp_bilinear and lanczos are relift's; fsr1 is AMD FSR 1 (EASU and "
+                       "RCAS); fsr2 and fsr3 are AMD FSR 2 and the FSR 3 upscaler, temporal, where the game gives "
+                       "depth and motion vectors, else FSR 1; taa is relift's plain temporal upscaler, else "
+                       "bilinear; dlss is NVIDIA DLSS, temporal, on an NVIDIA GPU with the driver's NGX library and "
+                       "NVIDIA's DLSS library beside the program, else fsr2. Every choice but game changes the "
+                       "picture from the console's",
         .env = "RELIFT_UPSCALER",
         .choices = g_upscaler_choices,
         .nchoices = 12,

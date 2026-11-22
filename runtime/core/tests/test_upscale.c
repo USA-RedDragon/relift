@@ -125,10 +125,9 @@ TEST(upscale_names_and_spatial_siblings)
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_GAME), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_AUTO), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, true), RL_UPSCALE_GAME);
-    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_DLSS);
+    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_AUTO);
     CHECK(rl_upscale_temporal(RL_UPSCALE_FALLBACK_TEMPORAL));
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_DLSS), RL_UPSCALE_FSR1);
-    CHECK(rl_upscale_temporal(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false)));
     CHECK(!rl_upscale_temporal(RL_UPSCALE_FSR1));
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, false, true), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_GAME, false, true), RL_UPSCALE_OFF);
@@ -308,8 +307,25 @@ TEST(upscale_dlss_looks_beside_the_program_and_names_the_folder)
     remove(lib);
 }
 
-TEST(upscale_auto_falls_back_from_dlss_to_fsr2)
+TEST(upscale_auto_picks_by_gpu_class)
 {
-    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_DLSS);
+    enum { OTHER = 0, INTEGRATED = 1, DISCRETE = 2, VIRTUAL = 3, CPU = 4 };
+    const char *why = NULL;
+    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_AUTO);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x10de, true, &why), RL_UPSCALE_DLSS);
+    CHECK(strstr(why, "DLSS") != NULL);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x10de, false, &why), RL_UPSCALE_FSR2);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x1002, false, &why), RL_UPSCALE_FSR2);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x8086, false, &why), RL_UPSCALE_FSR2);
+    CHECK_EQ(rl_upscale_pick(INTEGRATED, 0x1002, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(INTEGRATED, 0x8086, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(INTEGRATED, 0x10de, true, &why), RL_UPSCALE_TAA);
+    CHECK(strstr(why, "TAA") != NULL);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x13b5, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x5143, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(DISCRETE, 0x106b, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(OTHER, 0x8086, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(VIRTUAL, 0x1af4, false, &why), RL_UPSCALE_TAA);
+    CHECK_EQ(rl_upscale_pick(CPU, 0x10005, false, &why), RL_UPSCALE_TAA);
     CHECK_EQ(RL_UPSCALE_FALLBACK_TEMPORAL, RL_UPSCALE_FSR2);
 }

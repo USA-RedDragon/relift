@@ -321,7 +321,7 @@ static rl_upscaler *stage_for(replay *r, uint32_t choice)
     if (st.u)
         rl_log(RL_LOG_INFO, "nvn",
                "DLSS evaluations run relift's %s upscaler (picture.upscaler); the picture differs from the console's",
-               rl_upscale_name(choice));
+               rl_upscale_name(rl_upscaler_choice(st.u)));
     return st.u;
 }
 
@@ -479,7 +479,7 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
                                ui.out_rect.height, ui.out_rect.x, ui.out_rect.y, ow, oh);
         if ((pass || st.nheld + 6 > MAX_HELD) && !nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed a submit");
-        if (rl_upscale_temporal(choice)) {
+        if (rl_upscale_temporal(rl_upscaler_choice(u))) {
             int vrc = side_view(r, p.depth, p.depth_view, &ui.depth);
             if (vrc == RL_OK)
                 vrc = side_view(r, p.motion, p.motion_view, &ui.motion);
@@ -514,6 +514,6 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
     nvn_vk_written(out);
     if (!st.evaluations++)
         trace("nvnCommandBufferEvaluateDlss: %ux%u -> %ux%u with %s", ui.in.width, ui.in.height, ui.out_rect.width,
-              ui.out_rect.height, rl_upscale_name(choice));
+              ui.out_rect.height, rl_upscale_name(rl_upscaler_choice(u)));
     return RL_OK;
 }

@@ -550,6 +550,27 @@ TEST(upscale_dlss_where_it_cannot_run_runs_its_fallback)
     CHECK_EQ(b, e);
 }
 
+TEST(upscale_auto_on_a_cpu_device_runs_taa)
+{
+    if (!start())
+        return;
+    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)rl_hostlib_vulkan_gipa();
+    PFN_vkGetPhysicalDeviceProperties props =
+        (PFN_vkGetPhysicalDeviceProperties)gipa(T.inst, "vkGetPhysicalDeviceProperties");
+    VkPhysicalDeviceProperties p;
+    props(T.phys, &p);
+    if (p.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU) {
+        printf("    (the first Vulkan device is not a CPU one: auto's CPU choice is not checked)\n");
+        return;
+    }
+    rl_post_device d = device();
+    rl_upscaler *u = rl_upscaler_new(&d, RL_UPSCALE_AUTO, RL_UPSCALE_IMAGES);
+    CHECK(u != NULL);
+    if (u)
+        CHECK_EQ(rl_upscaler_choice(u), RL_UPSCALE_TAA);
+    rl_upscaler_free(u);
+}
+
 TEST(upscale_taa_keeps_still_pictures_at_ratio_one)
 {
     if (!start())

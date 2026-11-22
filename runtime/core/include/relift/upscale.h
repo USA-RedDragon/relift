@@ -39,14 +39,6 @@ enum {
     RL_UPSCALE_CHOICES
 };
 
-/**
- * @brief The best temporal choice relift has, which auto runs in the frame when the game's own upscaler cannot run:
- * NVIDIA DLSS, which runs only where the NVIDIA driver and the user's DLSS library are there. A stage for it that does
- * not start runs RL_UPSCALE_FALLBACK_TEMPORAL instead, and one for that which does not start its spatial sibling
- * (rl_upscale_spatial).
- */
-#define RL_UPSCALE_BEST_TEMPORAL RL_UPSCALE_DLSS
-
 /** @brief The temporal choice that runs where DLSS does not: one that runs on every GPU. */
 #define RL_UPSCALE_FALLBACK_TEMPORAL RL_UPSCALE_FSR2
 
@@ -131,6 +123,17 @@ RL_RUNTIME_API uint32_t rl_upscale_spatial(uint32_t choice);
 RL_RUNTIME_API bool rl_upscale_temporal(uint32_t choice);
 
 /**
+ * @brief The choice auto runs in the frame on a GPU of VkPhysicalDeviceType device_type and PCI vendor vendor_id:
+ * relift's TAA (with its sharpening) on anything but a discrete GPU, and on Arm, Qualcomm, Apple and Intel
+ * integrated GPUs whatever type they report, since it costs a third of FSR 2; on a discrete GPU DLSS where
+ * dlss_runs, else FSR 2. why gets a short reason for the log.
+ */
+RL_RUNTIME_API uint32_t rl_upscale_pick(int32_t device_type, uint32_t vendor_id, bool dlss_runs, const char **why);
+
+/** @brief The choice u runs: what it was made for, or what it fell back to (auto's pick, DLSS's fallback). */
+RL_RUNTIME_API uint32_t rl_upscaler_choice(const rl_upscaler *u);
+
+/**
  * @brief The device extensions the upscaler stage needs enabled on a device of PCI vendor vendor_id, for the
  * picture.upscaler setting as it is: the ones NVIDIA's NGX library asks for when the choice may be DLSS and the
  * driver's NGX library is installed, else none. *names stays valid while the runtime runs.
@@ -139,8 +142,8 @@ RL_RUNTIME_API uint32_t rl_upscale_device_extensions(uint32_t vendor_id, const c
 
 /**
  * @brief The choice that runs for choice: in_frame for place 1, where game_ok says whether the game's own upscaler
- * can run on this device. RL_UPSCALE_AUTO is the game's own where it can run, else RL_UPSCALE_BEST_TEMPORAL, in the
- * frame; in the window it is rl_upscale_spatial(choice).
+ * can run on this device. RL_UPSCALE_AUTO is the game's own where it can run, else RL_UPSCALE_AUTO itself in the
+ * frame (rl_upscaler_new picks for the device with rl_upscale_pick); in the window it is rl_upscale_spatial(choice).
  */
 RL_RUNTIME_API uint32_t rl_upscale_resolve(uint32_t choice, bool in_frame, bool game_ok);
 

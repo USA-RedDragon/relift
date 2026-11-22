@@ -137,18 +137,63 @@ uint32_t rl_upscale_spatial(uint32_t choice)
     return choice <= RL_UPSCALE_GAME || choice >= RL_UPSCALE_CHOICES ? RL_UPSCALE_OFF : choice;
 }
 
+/** @brief PCI vendor ids of GPUs auto treats as integrated or mobile. */
+#define VENDOR_ARM 0x13b5u
+#define VENDOR_QUALCOMM 0x5143u
+#define VENDOR_APPLE 0x106bu
+#define VENDOR_INTEL 0x8086u
+
+/** @brief device's VkPhysicalDeviceType and PCI vendor id, or 0 and 0 when they cannot be read. */
+static void device_kind(const rl_post_device *device, int32_t *type, uint32_t *vendor)
+{
+    *type = 0;
+    *vendor = 0;
+    void *raw = rl_hostlib_vulkan_gipa();
+    void *(RLVK_CALL *gipa)(rlvk_handle, const char *);
+    memcpy(&gipa, &raw, sizeof gipa);
+    void *fp = raw ? gipa(device->instance, "vkGetPhysicalDeviceProperties") : NULL;
+    if (!fp)
+        return;
+    struct {
+        uint32_t api, driver, vendor, device;
+        int32_t type;
+        uint8_t rest[1024];
+    } props;
+    void(RLVK_CALL * get)(rlvk_handle, void *);
+    memcpy(&get, &fp, sizeof get);
+    get(device->physical_device, &props);
+    *type = props.type;
+    *vendor = props.vendor;
+}
+
 static bool g_in_frame;
 
 void rl_upscale_in_frame(void) { __atomic_store_n(&g_in_frame, true, __ATOMIC_RELEASE); }
 
 bool rl_upscale_window_off(void) { return __atomic_load_n(&g_in_frame, __ATOMIC_ACQUIRE); }
 
+uint32_t rl_upscale_pick(int32_t device_type, uint32_t vendor_id, bool dlss_runs, const char **why)
+{
+    bool mobile = vendor_id == VENDOR_ARM || vendor_id == VENDOR_QUALCOMM || vendor_id == VENDOR_APPLE ||
+                  (vendor_id == VENDOR_INTEL && device_type != RLVK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+    if (mobile || device_type != RLVK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        *why = mobile ? "an integrated or mobile GPU, where relift's TAA is the best look for its cost"
+                      : "not a discrete GPU, where relift's TAA is the best look for its cost";
+        return RL_UPSCALE_TAA;
+    }
+    *why = dlss_runs ? "a discrete NVIDIA GPU with NVIDIA's DLSS library found"
+                     : "a discrete GPU without DLSS (another vendor, or no DLSS library found)";
+    return dlss_runs ? RL_UPSCALE_DLSS : RL_UPSCALE_FALLBACK_TEMPORAL;
+}
+
+uint32_t rl_upscaler_choice(const rl_upscaler *u) { return u ? u->choice : RL_UPSCALE_OFF; }
+
 uint32_t rl_upscale_resolve(uint32_t choice, bool in_frame, bool game_ok)
 {
     if (!in_frame)
         return rl_upscale_spatial(choice);
     if (choice == RL_UPSCALE_AUTO)
-        return game_ok ? RL_UPSCALE_GAME : RL_UPSCALE_BEST_TEMPORAL;
+        return game_ok ? RL_UPSCALE_GAME : RL_UPSCALE_AUTO;
     return choice < RL_UPSCALE_CHOICES ? choice : RL_UPSCALE_BILINEAR;
 }
 
@@ -270,7 +315,9 @@ static bool make(rl_upscaler *u)
 
 rl_upscaler *rl_upscaler_new(const rl_post_device *device, uint32_t choice, uint32_t kind)
 {
-    if (choice <= RL_UPSCALE_GAME || choice >= RL_UPSCALE_CHOICES || kind > RL_UPSCALE_BUFFERS || !device ||
+    if (choice == RL_UPSCALE_AUTO && kind == RL_UPSCALE_BUFFERS)
+        choice = rl_upscale_spatial(choice);
+    if (choice == RL_UPSCALE_GAME || choice >= RL_UPSCALE_CHOICES || kind > RL_UPSCALE_BUFFERS || !device ||
         !device->device || !device->get_device_proc_addr) {
         rl_log(RL_LOG_WARN, "upscale", "the %s upscaler is not one relift runs", rl_upscale_name(choice));
         return NULL;
@@ -293,7 +340,17 @@ rl_upscaler *rl_upscaler_new(const rl_post_device *device, uint32_t choice, uint
 #undef UPSCALE_LOAD
     if (rl_upscale_temporal(choice) && kind == RL_UPSCALE_BUFFERS)
         u->choice = rl_upscale_spatial(choice);
-    if (u->choice == RL_UPSCALE_DLSS && !(u->dlss = rl_dlss_new(device))) {
+    if (u->choice == RL_UPSCALE_AUTO) {
+        int32_t type = 0;
+        uint32_t vendor = 0;
+        device_kind(device, &type, &vendor);
+        const char *why = "";
+        bool discrete = rl_upscale_pick(type, vendor, true, &why) == RL_UPSCALE_DLSS;
+        u->dlss = discrete ? rl_dlss_new(device) : NULL;
+        u->choice = rl_upscale_pick(type, vendor, u->dlss != NULL, &why);
+        rl_log(RL_LOG_INFO, "upscale", "auto runs the %s upscaler: %s", g_names[u->choice], why);
+    }
+    if (u->choice == RL_UPSCALE_DLSS && !u->dlss && !(u->dlss = rl_dlss_new(device))) {
         rl_log(RL_LOG_INFO, "upscale", "the dlss upscaler runs %s instead", g_names[RL_UPSCALE_FALLBACK_TEMPORAL]);
         u->choice = RL_UPSCALE_FALLBACK_TEMPORAL;
     }
