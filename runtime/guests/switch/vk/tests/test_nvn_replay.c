@@ -4,12 +4,17 @@
  * replay (nvn_draw_cmd), for the commands that change only the replay's
  * state and make no Vulkan call.
  */
+#include "nvn_module.h"
 #include "nvn_priv.h"
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 /** @brief Replays e against a zeroed replay and state; returns its result. */
 static int replay_one(nvn_gfx *st, const nvn_cmd *e)
@@ -157,6 +162,117 @@ TEST(nvn_copy_pitch_follows_the_drivers_strides)
     CHECK_EQ(p.row_texels, 12);
     CHECK_EQ(p.image_rows, 8);
     CHECK_EQ(p.span, 48);
+}
+
+/** @brief A fragment program (spirv-as) reading inputs at locations 0 and 1 and writing output 0. */
+static const uint32_t two_inputs_frag[] = {
+    0x07230203u, 0x00010600u, 0x00070000u, 0x0000000fu, 0x00000000u, 0x00020011u,
+    0x00000001u, 0x0003000eu, 0x00000000u, 0x00000001u, 0x0008000fu, 0x00000004u,
+    0x00000001u, 0x6e69616du, 0x00000000u, 0x00000002u, 0x00000003u, 0x00000004u,
+    0x00030010u, 0x00000001u, 0x00000007u, 0x00040047u, 0x00000002u, 0x0000001eu,
+    0x00000000u, 0x00040047u, 0x00000003u, 0x0000001eu, 0x00000001u, 0x00040047u,
+    0x00000004u, 0x0000001eu, 0x00000000u, 0x00020013u, 0x00000005u, 0x00030021u,
+    0x00000006u, 0x00000005u, 0x00030016u, 0x00000007u, 0x00000020u, 0x00040017u,
+    0x00000008u, 0x00000007u, 0x00000004u, 0x00040020u, 0x00000009u, 0x00000001u,
+    0x00000008u, 0x00040020u, 0x0000000au, 0x00000003u, 0x00000008u, 0x0004003bu,
+    0x00000009u, 0x00000002u, 0x00000001u, 0x0004003bu, 0x00000009u, 0x00000003u,
+    0x00000001u, 0x0004003bu, 0x0000000au, 0x00000004u, 0x00000003u, 0x00050036u,
+    0x00000005u, 0x00000001u, 0x00000000u, 0x00000006u, 0x000200f8u, 0x0000000bu,
+    0x0004003du, 0x00000008u, 0x0000000cu, 0x00000002u, 0x0004003du, 0x00000008u,
+    0x0000000du, 0x00000003u, 0x00050081u, 0x00000008u, 0x0000000eu, 0x0000000cu,
+    0x0000000du, 0x0003003eu, 0x00000004u, 0x0000000eu, 0x000100fdu, 0x00010038u,
+};
+
+/** @brief True when spirv-val is on the path and accepts the n words at w; false when it rejects them. Hosts that cannot start a process (iOS) accept. */
+static bool spirv_valid(const uint32_t *w, size_t n, bool *ran)
+{
+    *ran = false;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    (void)w;
+    (void)n;
+    return true;
+#else
+    if (system("spirv-val --version >/dev/null 2>&1") != 0)
+        return true;
+    const char *dir = getenv("RELIFT_REPORT_DIR");
+    char path[4096];
+    snprintf(path, sizeof path, "%s/demote-test.spv", dir && *dir ? dir : ".");
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return true;
+    fwrite(w, 4, n, f);
+    fclose(f);
+    char cmd[4200];
+    snprintf(cmd, sizeof cmd, "spirv-val --target-env vulkan1.3 '%s' >/dev/null 2>&1", path);
+    *ran = true;
+    bool ok = system(cmd) == 0;
+    remove(path);
+    return ok;
+#endif
+}
+
+/** @brief A fragment program (spirv-as) reading input 0 whole and the x component of input 1 through an access chain. */
+static const uint32_t chained_input_frag[] = {
+    0x07230203u, 0x00010600u, 0x00070000u, 0x00000013u, 0x00000000u, 0x00020011u,
+    0x00000001u, 0x0003000eu, 0x00000000u, 0x00000001u, 0x0008000fu, 0x00000004u,
+    0x00000001u, 0x6e69616du, 0x00000000u, 0x00000002u, 0x00000003u, 0x00000004u,
+    0x00030010u, 0x00000001u, 0x00000007u, 0x00040047u, 0x00000002u, 0x0000001eu,
+    0x00000000u, 0x00040047u, 0x00000003u, 0x0000001eu, 0x00000001u, 0x00040047u,
+    0x00000004u, 0x0000001eu, 0x00000000u, 0x00020013u, 0x00000005u, 0x00030021u,
+    0x00000006u, 0x00000005u, 0x00030016u, 0x00000007u, 0x00000020u, 0x00040015u,
+    0x00000008u, 0x00000020u, 0x00000000u, 0x0004002bu, 0x00000008u, 0x00000009u,
+    0x00000000u, 0x00040017u, 0x0000000au, 0x00000007u, 0x00000004u, 0x00040020u,
+    0x0000000bu, 0x00000001u, 0x0000000au, 0x00040020u, 0x0000000cu, 0x00000001u,
+    0x00000007u, 0x00040020u, 0x0000000du, 0x00000003u, 0x0000000au, 0x0004003bu,
+    0x0000000bu, 0x00000002u, 0x00000001u, 0x0004003bu, 0x0000000bu, 0x00000003u,
+    0x00000001u, 0x0004003bu, 0x0000000du, 0x00000004u, 0x00000003u, 0x00050036u,
+    0x00000005u, 0x00000001u, 0x00000000u, 0x00000006u, 0x000200f8u, 0x0000000eu,
+    0x0004003du, 0x0000000au, 0x0000000fu, 0x00000002u, 0x00050041u, 0x0000000cu,
+    0x00000010u, 0x00000003u, 0x00000009u, 0x0004003du, 0x00000007u, 0x00000011u,
+    0x00000010u, 0x0005008eu, 0x0000000au, 0x00000012u, 0x0000000fu, 0x00000011u,
+    0x0003003eu, 0x00000004u, 0x00000012u, 0x000100fdu, 0x00010038u,
+};
+
+TEST(nvn_demoted_inputs_leave_valid_spirv)
+{
+    size_t n = sizeof two_inputs_frag / 4, dn = 0;
+    uint32_t *d = nvn_spirv_demote_inputs(two_inputs_frag, n, 1u << 1, &dn);
+    CHECK(d != NULL);
+    bool decorated = false, nop = false;
+    for (size_t i = 5; d && i < dn;) {
+        uint32_t op = d[i] & 0xffff, len = d[i] >> 16;
+        CHECK(len != 0);
+        if (!len)
+            break;
+        nop |= op == 0;
+        decorated |= op == 71 && d[i + 1] == 3;
+        i += len;
+    }
+    CHECK(!nop);
+    CHECK(!decorated);
+    bool ran;
+    CHECK(spirv_valid(d, dn, &ran));
+    free(d);
+    d = nvn_spirv_demote_inputs(chained_input_frag, sizeof chained_input_frag / 4, 1u << 1, &dn);
+    CHECK(d != NULL);
+    bool input_chain = false;
+    for (size_t i = 5; d && i < dn;) {
+        uint32_t op = d[i] & 0xffff, len = d[i] >> 16;
+        if (!len)
+            break;
+        if (op == 65)
+            for (size_t j = 5; j < dn;) {
+                uint32_t op2 = d[j] & 0xffff, len2 = d[j] >> 16;
+                if (!len2)
+                    break;
+                input_chain |= op2 == 32 && d[j + 1] == d[i + 1] && d[j + 2] == 1;
+                j += len2;
+            }
+        i += len;
+    }
+    CHECK(!input_chain);
+    CHECK(spirv_valid(d, dn, &ran));
+    free(d);
 }
 
 /** @brief The command set of one 8 byte handle array, for the bulk binds that snapshot their array. */

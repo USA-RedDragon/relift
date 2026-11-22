@@ -89,5 +89,15 @@ void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationM
  * vertex stage leaves. NULL when it cannot be made.
  */
 VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag);
+/**
+ * @brief A copy of the SPIR-V w (n words) in which every Input variable at a location in mask is a Private variable
+ * initialized to UNWRITTEN_VARYING (see nvn_priv.h), with no location. The host driver needs every fragment input
+ * matched by an output of the vertex program; an input the vertex program does not declare reads what the vertex
+ * stage leaves in its output buffer, the value the translator gives every generic output component before the
+ * program stores it. Only 32-bit float scalars and vectors take it; any other type reads zero. Returns NULL when
+ * memory runs out; *out_n is the new length. The input's decorations go with it, and access chains into it point into the Private storage class, so the result
+ * is valid SPIR-V.
+ */
+uint32_t *nvn_spirv_demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n);
 
 #endif

@@ -131,23 +131,21 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
     return true;
 }
 
-/**
- * @brief A copy of the SPIR-V w (n words) in which every Input variable at a location in mask is a Private variable
- * initialized to UNWRITTEN_VARYING (see nvn_priv.h), with no location. The host driver needs every fragment input
- * matched by an output of the vertex program; an input the vertex program does not declare reads what the vertex
- * stage leaves in its output buffer, the value the translator gives every generic output component before the
- * program stores it. Only 32-bit float scalars and vectors take it; any other type reads zero. Returns NULL when
- * memory runs out; *out_n is the new length.
- */
-static uint32_t *demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n)
+uint32_t *nvn_spirv_demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n)
 {
     uint32_t bound = w[3];
     uint32_t *loc = calloc(bound, sizeof *loc), *pointee = calloc(bound, sizeof *pointee);
     uint32_t *tcomp = calloc(bound, sizeof *tcomp), *tcount = calloc(bound, sizeof *tcount);
     uint8_t *tfloat = calloc(bound, 1);
     uint8_t *hasloc = calloc(bound, 1), *demote = calloc(bound, 1);
-    uint32_t *o = malloc((n + 16 * 32 + 16) * sizeof *o);
-    if (!loc || !pointee || !tcomp || !tcount || !tfloat || !hasloc || !demote || !o) {
+    uint8_t *chained = calloc(bound, 1), *privtype = calloc(bound, 1);
+    uint32_t *privof = calloc(bound, sizeof *privof);
+    uint32_t *o = malloc((n + 16 * 32 + 16 + 4 * (size_t)bound) * sizeof *o);
+    if (!loc || !pointee || !tcomp || !tcount || !tfloat || !hasloc || !demote || !chained || !privtype || !privof ||
+        !o) {
+        free(chained);
+        free(privtype);
+        free(privof);
         free(tcomp);
         free(tcount);
         free(tfloat);
@@ -173,6 +171,9 @@ static uint32_t *demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_
         if (op == 59 && len >= 4 && w[i + 3] == 1 && w[i + 2] < bound && hasloc[w[i + 2]] && loc[w[i + 2]] < 32 &&
             (mask >> loc[w[i + 2]] & 1))
             demote[w[i + 2]] = 1;
+        if ((op == 65 || op == 66) && len >= 4 && w[i + 1] < bound && w[i + 2] < bound && w[i + 3] < bound &&
+            (demote[w[i + 3]] || chained[w[i + 3]]))
+            chained[w[i + 2]] = 1, privtype[w[i + 1]] = 1;
         i += len;
     }
     memcpy(o, w, 5 * sizeof *o);
@@ -189,8 +190,19 @@ static uint32_t *demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_
         if (op == 23 && len >= 4 && w[i + 1] < bound && w[i + 2] < bound && tfloat[w[i + 2]])
             tcomp[w[i + 1]] = w[i + 2], tcount[w[i + 1]] = w[i + 3];
         if (op == 71 && len >= 3 && w[i + 1] < bound && demote[w[i + 1]]) {
-            for (uint32_t k = 0; k < len; k++)
-                o[at++] = 1u << 16;
+        } else if (op == 32 && len >= 4 && w[i + 1] < bound && privtype[w[i + 1]]) {
+            memcpy(o + at, w + i, len * sizeof *o);
+            at += len;
+            privof[w[i + 1]] = next++;
+            o[at++] = 4u << 16 | 32;
+            o[at++] = privof[w[i + 1]];
+            o[at++] = 6;
+            o[at++] = w[i + 3];
+        } else if ((op == 65 || op == 66) && len >= 4 && w[i + 2] < bound && chained[w[i + 2]] && w[i + 1] < bound &&
+                   privof[w[i + 1]]) {
+            memcpy(o + at, w + i, len * sizeof *o);
+            o[at + 1] = privof[w[i + 1]];
+            at += len;
         } else if (op == 59 && len >= 4 && w[i + 2] < bound && demote[w[i + 2]]) {
             uint32_t ptr = next++, init = next++, ty = pointee[w[i + 1]];
             o[at++] = 4u << 16 | 32;
@@ -241,12 +253,15 @@ static uint32_t *demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_
     free(pointee);
     free(hasloc);
     free(demote);
+    free(chained);
+    free(privtype);
+    free(privof);
     return o;
 }
 
 /**
  * @brief The fragment module of frag to draw with after vertex program vert: frag itself when the vertex program writes
- * every location frag reads, else a variant of frag with the unwritten inputs demoted (demote_inputs). 0 when it
+ * every location frag reads, else a variant of frag with the unwritten inputs demoted (nvn_spirv_demote_inputs). 0 when it
  * cannot be made.
  */
 VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
@@ -269,7 +284,7 @@ VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
         return NULL;
     nvn_module scratch;
     memset(&scratch, 0, sizeof scratch);
-    uint32_t *dw = patch_spirv(w, n, frag->stage, &scratch) ? demote_inputs(w, n, missing, &dn) : NULL;
+    uint32_t *dw = patch_spirv(w, n, frag->stage, &scratch) ? nvn_spirv_demote_inputs(w, n, missing, &dn) : NULL;
     free(w);
     if (!dw)
         return NULL;
