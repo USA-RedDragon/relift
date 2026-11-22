@@ -70,6 +70,9 @@ pub const RECORD_TEXTURE: u32 = 3;
 pub const RECORD_GLOBAL_STORE: u32 = 7;
 /// An interface record: the program reads or writes a texture or image whose handle comes from a register.
 pub const RECORD_BINDLESS: u32 = 8;
+/// An interface record: the program reads a texture handle from a register,
+/// so the runtime keeps every registered texture in the slot of its id.
+pub const RECORD_REGISTER_HANDLES: u32 = 10;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -446,6 +449,9 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     }
     if i.bindless {
         recs.push([RECORD_BINDLESS, 0, 0, 0]);
+    }
+    if i.register_handles {
+        recs.push([RECORD_REGISTER_HANDLES, 0, 0, 0]);
     }
     recs
 }

@@ -581,6 +581,7 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
         c.iface.bindless = true;
     }
     if key.is_none() && matches!(c.fields.tex.handle, Handle::UReg { .. }) {
+        c.iface.register_handles = true;
         return Ok((ur_handle(c)?, false));
     }
     match key {
@@ -588,7 +589,10 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
             c.iface.textures.insert((bank, off));
             Ok((c.load_cbuf(bank, i64::from(off))?, false))
         }
-        None => Ok((s.get(Slot::Handle)?, true)),
+        None => {
+            c.iface.register_handles = true;
+            Ok((s.get(Slot::Handle)?, true))
+        }
     }
 }
 

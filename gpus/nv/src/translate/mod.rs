@@ -114,6 +114,10 @@ pub struct Interface {
     /// (a bindless texture or image): which images it reads or writes is
     /// known only when it runs.
     pub bindless: bool,
+    /// The program samples or queries a texture through a handle in a
+    /// register or uniform register, which can name any texture of the pool,
+    /// so the runtime must keep every registered texture in its slot.
+    pub register_handles: bool,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
     pub texture_bindings: BTreeSet<u32>,
     /// Specialization constant id per bound handle whose texture's numeric
