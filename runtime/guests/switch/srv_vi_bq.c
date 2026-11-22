@@ -28,6 +28,7 @@ static pthread_mutex_t cb_lock = PTHREAD_MUTEX_INITIALIZER;
 static void (*frame_cb)(uint64_t, void *);
 static void *frame_cb_user;
 static uint64_t frames_queued;
+static bool script_clock_started;
 
 static int64_t now_ns(void)
 {
@@ -447,7 +448,8 @@ void vi_guest_frame(void)
     uint64_t frame = ++frames_queued;
     frame_stats(frame);
     pthread_mutex_unlock(&cb_lock);
-    rl_ports_script_frame(frame);
+    if (rl_ports_script_wanted() && !__atomic_exchange_n(&script_clock_started, true, __ATOMIC_RELAXED))
+        vi_vsync_event(true);
     rl_hos_mods_frame();
 }
 

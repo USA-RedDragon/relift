@@ -40,6 +40,13 @@ int64_t vi_clock_after(const vi_clock *c, int64_t t)
     return c->epoch + ((t - c->epoch) / VI_VSYNC_NS + 1) * VI_VSYNC_NS;
 }
 
+int64_t vi_clock_index(const vi_clock *c, int64_t t)
+{
+    int64_t d = t - c->epoch;
+    int64_t k = (d + (d < 0 ? -VI_VSYNC_NS / 2 : VI_VSYNC_NS / 2)) / VI_VSYNC_NS;
+    return k;
+}
+
 static int64_t wrap(int64_t d)
 {
     d %= VI_VSYNC_NS;

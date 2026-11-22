@@ -108,8 +108,14 @@ RL_RUNTIME_API bool rl_ports_set_script(const char *text);
 RL_RUNTIME_API bool rl_ports_follow_script(const char *path);
 /** @brief True when text is a valid input script (empty is valid). */
 RL_RUNTIME_API bool rl_ports_valid_script(const char *text);
-/** @brief The guest layer tells the input script the number of the frame the guest just finished. */
+/**
+ * @brief The guest layer tells the input script the number of the frame the guest is in. The number counts the
+ * guest's own clock (for example vsyncs since the guest's vsync clock started), not host presents or host time, and is
+ * given before the guest can see that frame.
+ */
 RL_RUNTIME_API void rl_ports_script_frame(uint64_t frame);
+/** @brief True when a script (set, followed or from RELIFT_INPUT_SCRIPT) will hold controls, so the guest layer must step it. */
+RL_RUNTIME_API bool rl_ports_script_wanted(void);
 /** @brief True with the value when the input script holds port.control at the current frame. */
 RL_RUNTIME_API bool rl_ports_script_value(const char *port, const char *control, float *value);
 /** @brief Drops the input script and the frame count (tests). */

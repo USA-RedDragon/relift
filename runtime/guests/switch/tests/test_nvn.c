@@ -741,14 +741,12 @@ TEST(nvn_shader_tables_follow_the_executable)
     nftw(root, rm_entry, 8, FTW_DEPTH | FTW_PHYS);
 }
 
-TEST(nvn_presents_step_the_input_script)
+TEST(nvn_presents_count_guest_frames)
 {
     uint64_t f0 = vi_guest_frames();
-    CHECK(rl_ports_set_script("1:p1.a"));
     nvn_frame_presented();
     nvn_frame_presented();
     CHECK_EQ(vi_guest_frames(), f0 + 2);
-    CHECK(rl_ports_set_script(""));
 }
 
 TEST(nvn_presents_show_the_window_crop)

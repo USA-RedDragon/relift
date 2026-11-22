@@ -10,6 +10,7 @@
 
 #include "srv_link.h"
 
+#include <relift/ports.h>
 #include <relift/settings.h>
 
 #include <stdlib.h>
@@ -99,6 +100,17 @@ void vi_host_flip(int64_t t)
     vi_trace('F', (uint64_t)phase, (uint64_t)shift, locked);
 }
 
+uint64_t vi_vsync_tick(int64_t t)
+{
+    pthread_mutex_lock(&clock_lock);
+    clock_start();
+    int64_t k = vi_clock_index(&vsync_clock, t);
+    pthread_mutex_unlock(&clock_lock);
+    uint64_t n = k > 0 ? (uint64_t)k : 0;
+    rl_ports_script_frame(n);
+    return n;
+}
+
 static void vsync_signal_listeners(void)
 {
     pthread_mutex_lock(&vsync_lock);
@@ -126,6 +138,7 @@ static void *vsync_main(void *arg)
         pthread_mutex_unlock(&vsync_lock);
         if (quit)
             return NULL;
+        vi_vsync_tick(next);
         int64_t woke = vi_trace_now();
         if (e) {
             rl_hos_event_signal(e);
@@ -142,6 +155,7 @@ static void *vsync_main(void *arg)
 static void vsync_timer(void *ctx)
 {
     (void)ctx;
+    vi_vsync_tick(mono_ns());
     pthread_mutex_lock(&vsync_lock);
     hos_revent *e = vsync_ev;
     if (e)
@@ -221,6 +235,10 @@ void rl_vi_stop(void)
 
 static void vsync_reset(void)
 {
+    pthread_mutex_lock(&clock_lock);
+    clock_ready = false;
+    clock_start();
+    pthread_mutex_unlock(&clock_lock);
     rl_vi_stop();
     pthread_mutex_lock(&vsync_lock);
     vsync_quit = false;

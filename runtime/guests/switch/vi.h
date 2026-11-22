@@ -368,6 +368,11 @@ hos_revent *vi_vsync_event(bool start);
  */
 int64_t vi_vsync_after(int64_t t);
 
+/**
+ * @brief The vsync at time t (a time on the grid) has fired: the input script moves to its number, counted from
+ * the start of the clock, before any guest event for it is signaled. Returns the number.
+ */
+uint64_t vi_vsync_tick(int64_t t);
 /** @brief The vi vsync grid and its lock to the host display (vi_clock.c). */
 typedef struct vi_clock {
     /** @brief A vsync of the grid; the others are VI_VSYNC_NS apart. */
@@ -391,6 +396,11 @@ typedef struct vi_clock {
 void vi_clock_init(vi_clock *c, int64_t epoch, bool lock);
 /** @brief The first vsync of the grid strictly after t. */
 int64_t vi_clock_after(const vi_clock *c, int64_t t);
+/**
+ * @brief The number of the vsync of the grid nearest t: 0 is the epoch, so the count of vsyncs since the clock started.
+ * Steering moves the grid but not its numbering.
+ */
+int64_t vi_clock_index(const vi_clock *c, int64_t t);
 /** @brief Takes a time the host showed a present; returns how far the grid moved (ns). */
 int64_t vi_clock_flip(vi_clock *c, int64_t t);
 /** @brief Whether the grid follows the host now. */

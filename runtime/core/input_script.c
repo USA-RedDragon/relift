@@ -2,7 +2,9 @@
  * @file input_script.c
  * @brief The input script: a debug tool that holds port controls at given
  * guest frames, so that runs without a person at the controls are
- * reproducible.
+ * reproducible. A guest frame is the guest's own clock, not its presents:
+ * for a console with a vsync clock, the number of the vsync counted from the
+ * start of that clock, so a script reaches the same scene however slowly the host presents.
  *
  * The script comes from RELIFT_INPUT_SCRIPT or rl_ports_set_script: comma
  * separated steps `<frame>[+<frames>]:<port>.<control>[=<value>]`. A
@@ -301,6 +303,15 @@ void rl_ports_script_frame(uint64_t frame)
                    (unsigned long long)frame, g_steps[i].port, g_steps[i].control, (double)g_steps[i].value,
                    (unsigned long long)g_steps[i].frames);
     pthread_mutex_unlock(&g_lock);
+}
+
+bool rl_ports_script_wanted(void)
+{
+    pthread_mutex_lock(&g_lock);
+    load_locked();
+    bool wanted = g_nsteps || g_follow;
+    pthread_mutex_unlock(&g_lock);
+    return wanted;
 }
 
 bool rl_ports_script_value(const char *port, const char *control, float *value)

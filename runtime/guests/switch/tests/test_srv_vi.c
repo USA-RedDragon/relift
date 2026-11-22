@@ -7,6 +7,8 @@
 #include "vi.h"
 #include "srv_link.h"
 
+#include <relift/ports.h>
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <math.h>
@@ -1036,6 +1038,55 @@ TEST(vi_vsync_signal)
     rl_vi_stop();
     ev_clear(ev);
     CHECK(!ev_signaled(ev));
+}
+
+static uint64_t press_seen_at(uint32_t vsyncs_per_present)
+{
+    rl_ports_script_reset();
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    int64_t first = vi_vsync_after((int64_t)now.tv_sec * 1000000000ll + now.tv_nsec);
+    uint64_t n0 = vi_vsync_tick(first);
+    char text[64];
+    snprintf(text, sizeof text, "%llu+3:p1.a", (unsigned long long)(n0 + 10));
+    if (!rl_ports_set_script(text))
+        return 0;
+    uint64_t seen = 0;
+    for (uint32_t i = 1; i < 40; i++) {
+        uint64_t n = vi_vsync_tick(first + (int64_t)i * VI_VSYNC_NS);
+        if (n != n0 + i)
+            return 0;
+        if (i % vsyncs_per_present == 0)
+            vi_guest_frame();
+        float v;
+        if (!seen && rl_ports_script_value("p1", "a", &v))
+            seen = n - n0;
+    }
+    rl_ports_script_reset();
+    return seen;
+}
+
+TEST(vi_input_script_follows_vsyncs_not_presents)
+{
+    fx f;
+    CHECK(fx_setup(&f, false));
+    rl_vi_stop();
+    uint64_t fast = press_seen_at(1);
+    uint64_t slow = press_seen_at(3);
+    CHECK_EQ(fast, 10);
+    CHECK_EQ(slow, 10);
+}
+
+TEST(vi_vsync_index_numbers_the_grid)
+{
+    vi_clock c;
+    vi_clock_init(&c, 1000, false);
+    CHECK_EQ(vi_clock_index(&c, 1000), 0);
+    CHECK_EQ(vi_clock_index(&c, 1000 + 7 * VI_VSYNC_NS), 7);
+    CHECK_EQ(vi_clock_index(&c, 1000 + 7 * VI_VSYNC_NS + 50000), 7);
+    CHECK_EQ(vi_clock_index(&c, 1000 - 2 * VI_VSYNC_NS), -2);
+    c.epoch += 40000;
+    CHECK_EQ(vi_clock_index(&c, 1000 + 7 * VI_VSYNC_NS), 7);
 }
 
 TEST(vi_scaling_and_memory)

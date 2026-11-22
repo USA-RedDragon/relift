@@ -228,8 +228,15 @@ debugging tool, not a setting. Steps are comma separated:
 A step holds the control at the value (default 1; -1 to 1 for an axis) from
 guest frame `frame` for `frames` frames (default 6). While a step holds a
 control, its value replaces what the control's bindings read; other controls
-keep reading the host. The guest layer counts frames: on Switch, each buffer
-the guest queues to vi and each Vulkan present is one frame. The runtime logs each step as it starts.
+keep reading the host. The guest layer counts frames, and it counts the
+guest's own clock, never host presents, so a run that presents slowly under
+load reaches the same scene at the same frame number. On Switch and Switch 2
+a frame is a vi vsync: frame 0 is when the vsync clock starts at boot, and
+the count rises by one every 1/60 s of the guest's timeline, so 3600 is a
+minute in. A step is applied before the game can see its vsync, so a press
+that starts at frame N is visible from vsync N on. The GBA, DS and N64
+guests count the console's own video frames; the GB and Master System runners
+have their own `--input` that counts the same. The runtime logs each step as it starts.
 
 ```sh
 RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./game
