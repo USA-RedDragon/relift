@@ -69,6 +69,7 @@ static void setup(fixture *f)
     f->a.d.height = f->b.d.height = 32;
     f->st.ncolor = 1;
     f->st.color[0] = (rt){ .v = &f->a, .view = (VkImageView)(uintptr_t)0x10 };
+    f->st.compute_overlap = 1;
     f->r.st = &f->st;
     f->r.recording = true;
 }
@@ -369,5 +370,38 @@ TEST(nvn_a_dispatch_writing_an_image_through_a_register_handle_is_ordered_before
     CHECK(nvn_vk_begin_dispatch(&f.r));
     nvn_vk_dispatched();
     CHECK_EQ(calls.barriers, before + 1);
+    teardown(&f);
+}
+
+TEST(nvn_dispatches_run_one_after_another_unless_the_game_set_the_overlap_mode)
+{
+    static fixture f;
+    setup(&f);
+    f.st.compute_overlap = 0;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x200000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    unsigned before = calls.barriers;
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x300000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    nvn_cmd mode = { .op = NVN_CMD_SET_COMPUTE_OVERLAP_MODE, .x = { 0, 1 } };
+    CHECK_EQ(nvn_draw_cmd(&f.r, &mode), RL_OK);
+    CHECK_EQ(f.st.compute_overlap, 1u);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x400000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 1);
+    mode.x[1] = 0;
+    CHECK_EQ(nvn_draw_cmd(&f.r, &mode), RL_OK);
+    nvn_vk_dispatch_reset();
+    nvn_vk_dispatch_buffer(0x500000, 0x100, true);
+    CHECK(nvn_vk_begin_dispatch(&f.r));
+    nvn_vk_dispatched();
+    CHECK_EQ(calls.barriers, before + 2);
     teardown(&f);
 }

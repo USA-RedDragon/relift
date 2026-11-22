@@ -2286,6 +2286,9 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
             st->gfx_push_used |= 1u << slot;
         return RL_OK;
     }
+    case NVN_CMD_SET_COMPUTE_OVERLAP_MODE:
+        st->compute_overlap = (uint32_t)e->x[1];
+        return RL_OK;
     case NVN_CMD_SET_DEPTH_CLAMP:
         if ((e->x[1] & 0xff) && !g.depth_clamp)
             return nvn_vk_stop(r, "depth clamp, which the host device does not have");

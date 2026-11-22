@@ -333,6 +333,12 @@ typedef struct nvn_gfx {
     uint32_t inst_base, inst_count;
     bool depth_clamp;
     /**
+     * @brief The compute overlap mode the game set (nvnCommandBufferSetComputeOverlapMode, its driver's token 0x27):
+     * nonzero lets dispatches with no barrier between them run side by side; 0, the mode a queue starts in, runs
+     * each dispatch after the one before.
+     */
+    uint32_t compute_overlap;
+    /**
      * @brief Variable-rate shading (nvnCommandBufferShadingRateImagePalette, BindShadingRateImage,
      * SetShadingRatePaletteMode): per viewport, whether a palette was given and its 16 four-bit rates (the hardware's
      * values, VK_NV_shading_rate_image's VkShadingRatePaletteEntryNV; 5 is one invocation per pixel); the texture bound
@@ -534,9 +540,10 @@ void nvn_vk_dispatch_anywhere(void);
  */
 bool nvn_dispatch_unbounded(uint32_t kind);
 /**
- * @brief Begins recording a dispatch: after other dispatches with no barrier since (the console orders dispatches only
- * at the game's barriers), it records no barrier when the ranges it touches meet none that they write and it writes
- * none they read; otherwise as nvn_vk_begin, which ends the open dispatches with a barrier.
+ * @brief Begins recording a dispatch: while the game's compute overlap mode lets dispatches overlap and other
+ * dispatches ran with no barrier since, it records no barrier when the ranges it touches meet none that they write and
+ * it writes none they read; otherwise (the console's default mode runs each dispatch after the one before) as
+ * nvn_vk_begin, which ends the open dispatches with a barrier.
  */
 bool nvn_vk_begin_dispatch(replay *r);
 /** @brief The dispatch was recorded: its ranges join the open dispatches until the next barrier. */

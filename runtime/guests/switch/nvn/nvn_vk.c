@@ -1353,7 +1353,7 @@ static void cs_close(void)
 
 bool nvn_vk_begin_dispatch(replay *r)
 {
-    if (r->recording && open_cs.open && cs_independent())
+    if (r->recording && open_cs.open && r->st->compute_overlap && cs_independent())
         return true;
     return nvn_vk_begin(r);
 }
@@ -3034,7 +3034,6 @@ static int run_cmd(replay *r, const nvn_cmd *e)
             return nvn_vk_stop(r, "more than %u fence syncs in one command set", r->nsyncs);
         r->syncs[r->nsyncs++] = e->x[1];
         return RL_OK;
-    case NVN_CMD_SET_COMPUTE_OVERLAP_MODE:
     case NVN_CMD_SET_COMPUTE_WORKLOAD_PRIORITY:
     case NVN_CMD_SET_GRAPHICS_WORKLOAD_PRIORITY:
     case NVN_CMD_SET_RESOURCE_OCCUPANCY:
