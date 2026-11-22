@@ -18,7 +18,7 @@ These areas have active work. Do not start in them without an issue and an answe
 |---|---|
 | The Switch 2 NVN2 graphics layer and its services | `runtime/guests/switch/nvn`, `runtime/guests/switch/srv_*.c` |
 | The Maxwell (SM53) shader translator and the Switch 1 NVN path | `gpus/sm53`, `guests/switch/guest/src/nvndriver.rs` |
-| The SM86 translator and DLSS | `gpus/nv`, `gpus/sm86`, the upscaler seam in `runtime/core/post.c` |
+| The SM86 translator, DLSS and the temporal upscalers | `gpus/nv`, `gpus/sm86`, `runtime/core/post.c`, `runtime/core/upscale.c` |
 | Nintendo DS discovery and 3D | `guests/nds/analyze`, `runtime/guests/nds/gpu3d*.c` |
 | Nintendo 64 RSP timing (and RDP timing) | `runtime/cpus/rsp`, `runtime/guests/n64`, `guests/n64` |
 
@@ -30,10 +30,10 @@ Smaller entries below that touch these folders say so.
 |---|---|
 | 1. Guests | Switch, Switch 2, Game Boy, Game Boy Advance, Nintendo 64, Nintendo DS, Master System family |
 | 2. CPU and GPU translators | A64, SM53, SM86, shader scan, Vulkan forwarding |
-| 3. Runtime and hosts | Windows, macOS, Linux arm64, Android, iOS, packaging, web |
+| 3. Runtime and hosts | Windows, macOS, Linux arm64, Android, iOS, presentation, packaging, web |
 | 4. Player features | Anti-aliasing and upscalers, save states, input, launcher |
 | 5. Tooling, CI and docs | Test-ROM coverage, CI jobs, commands, docs |
-| 6. New guests | NES, Genesis, PS1, SNES, 3DS, later systems |
+| 6. New guests | WebAssembly, NES, Genesis, PS1, SNES, 3DS, later systems |
 
 ---
 
@@ -43,12 +43,12 @@ Smaller entries below that touch these folders say so.
 
 #### Missing system services (medium each)
 
-- Missing: the service registry in `runtime/guests/switch` has no handler, by a name search, for the audio input service (`audin:u`, the microphone), NFC, local wireless (`ldn:*`), the album and screenshot services (`caps:*`), DNS and TLS (`sfdnsres`, `ssl`), play reports (`prepo:*`), play statistics (`pdm:*`), Bluetooth management (`btm`) and the bad-word filter (`ngc`). A game that opens one stops with a report naming the service (`rl_report_unknown`, or an error result under `RELIFT_STRICT`).
+- Missing: the service registry in `runtime/guests/switch` has no handler, by a name search, for the audio input service (`audin:u`, the microphone), the NFC service (`nfc:*`; the amiibo service `nfp:user` exists), local wireless (`ldn:*`), the album and screenshot services (`caps:*`), the DNS resolver (`sfdnsres`), play statistics (`pdm:*`), Bluetooth management (`btm`) and the bad-word filter (`ngc`). Play reports (`prepo:*`), the network setup, name and TLS services (`nifm:u`, `nsd:*`, `ssl`) and sockets (`bsd:*`, over an in-process loopback) answer as a console with no network does. A game that opens one stops with a report naming the service (`rl_report_unknown`, or an error result under `RELIFT_STRICT`).
 - Why: each is a stop for a class of games. Several can answer "not available" or "empty" truthfully and exactly, which is what the console does with no hardware or network.
 - Where: `runtime/guests/switch/services.c`, `srv_*.c`, `ipc.c`; tests in `runtime/guests/switch/tests/test_srv_*.c`.
 - Read first: switchbrew's service pages (command ids and structures), the SDK behavior of the game's own code when a service returns an error.
 - Verify: a C test per command through `rl_svc` and IPC like the existing `test_srv_*.c`; `make -C runtime test`. Label any value you infer as inferred and cite where it came from.
-- **Good first issue:** `prepo:*` and `pdm:*` (report sinks that accept and discard).
+- **Good first issue:** `pdm:*` (a report sink that accepts and discards; `prepo:*` in `srv_prepo.c` is the model).
 
 #### Motion and rumble input (medium)
 
@@ -57,6 +57,17 @@ Smaller entries below that touch these folders say so.
 - Where: `core/input/src/native.rs`, `runtime/guests/switch/hid_priv.h`, `srv_hid*.c`, `runtime/host/window_sdl3.c`.
 - Read first: switchbrew HID shared memory and sixaxis pages; SDL3's gamepad sensor and rumble API.
 - Verify: a scripted sensor port (`RELIFT_INPUT_SCRIPT`) read back through the HID shared memory in a C test.
+
+#### Small stops found by running programs (small each, check first)
+
+Each of these was seen as a stop or a wrong answer in a program, and the cause was not chased. Re-check the current behavior first; a name search is all that was done.
+
+- Thread suspend: no handler for `svcSetThreadActivity` (0x32) was found in `runtime/guests/switch` by a name search; a program that suspends another thread stops with an unknown-svc report. Where: `runtime/guests/switch/svc*.c`, `ksched.c`. Verify: a C test that pauses a thread and sees it not run.
+- The loader service for NRO programs (`ldr:ro`) has no handler by a name search, so a program that loads a module at run time through the SDK's own loader stops. Where: `runtime/guests/switch/services.c`; `guests/switch/formats` already reads NRO files. Verify: a synthetic NRO loaded through the IPC commands.
+- The shared font fallback: the `Nintendo extension` font (`pl:u`) has no copy shipped with relift, so a program that draws those symbols with no font in the import shows boxes. Where: `runtime/guests/switch/srv_pl*.c`, the fallback fonts found beside the program. Read first: the licensing of any font you would ship; relift ships only open fonts.
+- `nvnTextureCompare` of a pointer that is not a texture the layer made stops with "not a texture" (`runtime/guests/switch/nvn/nvn_tex.c`), where the console's driver compares the bytes. Verify: a test that compares a texture with a copy of its object.
+- `nvnProgramSetShaders` with a program whose code the layer cannot find an end for stops with "stage 0 has no end" (`nvn_draw.c`). The cause is open: a program in a pool the layer has not seen, or a terminator form the scan misses.
+- Two Switch programs draw their picture into the top-left 1280x720 of a 1080p surface. The cause is unknown: the presenter's scaling, or the surface size the layer reports. Check first. Where: `runtime/guests/switch/vk`, `runtime/core/present*.c`.
 
 #### 32-bit address spaces (medium)
 
@@ -84,7 +95,56 @@ Smaller entries below that touch these folders say so.
 
 ### Switch 2
 
-The NVN2 graphics layer and the services it needs are in the coordinate-first list. The entry below is the part outside it; services shared with the Switch are in the Switch section.
+The NVN2 graphics layer and the services it needs are in the coordinate-first list; most of what is open there is in progress, so ask the maintainer before you touch it. Services shared with the Switch are in the Switch section.
+
+#### The software keyboard applet (medium, in progress on branch `swkbd`)
+
+- State: the applet is answered by relift itself (library applet storages, channels and events in `runtime/guests/switch/srv_am_*.c`) with a text-entry panel on the desktop and on phones, or a scripted answer from the settings (`text_entry.text`). It works for a program that asks for a name. Still open: on Android with the on-screen controller in use the panel has no renderer to draw on, so the settings' answer is used; text checks by the application and customized dictionaries are read but not exercised.
+- Where: `runtime/guests/switch/srv_am_swkbd.c`, `runtime/core/textentry*.c`, `runtime/host/window_sdl3.c`.
+
+#### Vertex attribute registers past the bound count (small, check first)
+
+- Missing: `nvnCommandBufferBindVertexAttribState` with fewer attributes than a later program reads. relift keeps the register an earlier bind wrote (register persistence); this is inferred, because the GPU macro's code (method 0xe96) is not in any lifted function and was not found.
+- Why: a wrong guess changes which attribute a program reads silently. The alternative is that the macro resets the rest.
+- Verify: a capture of the draw described in the console-only values list; otherwise the entry stays labeled `inferred:`.
+
+#### Shading-rate image and palettes (medium, in progress)
+
+- Missing: the NVN shading-rate image and its palettes are accepted and drawn at full rate. Next is `VK_NV_shading_rate_image` on hosts that have it, which keeps the picture exact where the console's rate is full and saves work where it is not; a host without it stays at full rate.
+- Where: `runtime/guests/switch/nvn`, `runtime/guests/switch/vk`.
+
+#### GPU counter reports (medium, in progress)
+
+- Missing: reports that read a counter at a later point than the command that wrote them are deferred (in progress). 15 counter types map to Vulkan queries; types 9 and 14 have no host counterpart and read 0.
+- Verify: `switch_tests` nvn counters; a program that reads each type back.
+
+#### The game's own DLSS, translated (large, paused)
+
+- Missing: the translated DLSS network runs on hosts that pass the device probes (`picture.upscaler=game`), but one kernel hangs NVIDIA GPUs; the cause is not known and it has not been run on those devices since. A program whose kernels the build cannot prove safe must not run on an NVIDIA device. Cooperative-matrix HMMA is in progress on branch `coopmat` (below).
+- Where: `gpus/nv`, `gpus/sm86`, `runtime/guests/switch/nvn/nvn_dlss.c`.
+- Verify: `kat/` programs and `scripts/ci/mesh-kat.sh`; a supervised run on a device whose reset is cheap.
+
+#### Cooperative-matrix HMMA where bit-exact (medium, in progress on branch `coopmat`)
+
+- Missing: the HMMA instruction runs through a helper function that is exact and slow. `VK_KHR_cooperative_matrix` is used where a device probe (`hmmaCooperativeMatrix`) proves the layout and the arithmetic; the translator handles the 16x8x16 and 16x8x8 half forms only, and the inlined form was larger than the helper, so it is one helper per shape.
+
+#### Speed of a large game on the Switch 2 path (large, in progress)
+
+- State: a Switch 2 program with a large open world runs GPU-bound at about 15% of the console's speed on a desktop GPU; where the GPU time goes is being profiled. The NVN memory mirror (`nvn.memory`, a Vulkan buffer per pool instead of importing the guest's pages) and the RenderDoc frame capture trigger (`RELIFT_RENDERDOC_CAPTURE`) are landing with it.
+
+#### Dull specular highlights on characters (small, in progress)
+
+- State: a Switch 2 program shows flat highlights on characters where the console shows sharp ones; the lighting translation is being checked.
+
+#### A moved or bare build binary loses its data (small)
+
+- Missing: a built Switch 2 program that is copied away from its build folder, or built as a bare binary, no longer finds its romfs, shader table or pipeline cache, and then fails late or draws nothing. It should find its data, or stop at start with a message naming what is missing (the romfs map's source file already stops clearly).
+- Where: `runtime/guests/switch/loader.c`, `runtime/guests/switch/nvn`, `relift/src/` (what `relift build` writes beside the program).
+- Verify: build a program, move it, run it: either it runs or it stops at once and says which file it wants.
+
+#### Android game builds (large, waits)
+
+- Missing: Switch 2 programs do not build for Android yet; the work waits until desktop performance is acceptable.
 
 #### Console-only values (small to medium, needs a capture)
 
@@ -353,6 +413,18 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 - Read first: `docs/reference/input.md` (the on-screen controller section); the existing layouts as templates. Layouts are a design: propose a mockup in the issue.
 - Verify: `runtime` tests for placement and touch rules; screenshots from a device.
 
+### Variable refresh rate presentation (medium, owed)
+
+- Missing: the presenters pace to a fixed 60 Hz vsync grid; no host asks for variable refresh (adaptive sync or each platform's equivalent).
+- Where: `runtime/core/present*.c`, `runtime/host/window_sdl3.c`, the NVN present in `runtime/guests/switch/nvn`.
+- Verify: a presented-frame timing log on a display that has the feature; the picture bit-identical.
+
+### Progress screen during shader warm-up (small, owed)
+
+- Missing: the launch warm-up of a Switch program's shaders (see the shader warm-up page in the docs) runs with a blank window on every host; it needs a progress screen with a count, drawn by the presenter before the game's first frame.
+- Where: `runtime/core/present*.c`, `runtime/guests/switch/nvn` (the warm-up), `runtime/host`; on Android the activity.
+- Verify: a headless run reports the progress events; a screenshot of the screen on each host.
+
 ### Android and iOS: packaging polish (medium)
 
 - Missing: check the packaging guide against the build: Android and iOS apps of the DS and Master System guests, an exported `.ipa`, store-ready metadata and a release signing flow.
@@ -386,18 +458,18 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 ### Anti-aliasing beyond FXAA and SMAA (medium)
 
-- Missing: `picture.aa` offers off, FXAA and SMAA (`runtime/core/post.c`, `runtime/third_party`); there is no MSAA and no temporal anti-aliasing. The Nintendo 64 picture options (`n64.picture.*`) use parallel-rdp's own upscale and supersample controls.
+- Missing: `picture.aa` offers off, FXAA and SMAA (`runtime/core/post.c`, `runtime/third_party`); there is no MSAA; a temporal choice is part of the upscaler work below. The Nintendo 64 picture options (`n64.picture.*`) use parallel-rdp's own upscale and supersample controls.
 - Why: players of the Switch games that render through Vulkan have only the post filters.
 - Where: `runtime/core/post.c`, `runtime/core/include/relift/post.h`, `runtime/guests/switch/vk`.
-- Read first: how the picture pipeline runs on the host's compute queue; TAA needs motion vectors and jitter the guest does not provide, so MSAA on the guest's own render passes may be the practical path. Every option stays off by default and says it changes the picture.
+- Read first: how the picture pipeline runs on the host's compute queue; temporal anti-aliasing needs motion vectors and jitter that only some guests provide, so MSAA on the guest's own render passes may be the practical path. Every option stays off by default and says it changes the picture.
 - Verify: golden images (`--shown-png`) with the option on and off, and bit-identical output with it off.
 
-### Upscalers: FSR and others (medium)
+### Upscalers: temporal and vendor (medium, in progress)
 
-- Missing: the upscaler stage (`runtime/core/upscale.c`, `picture.upscaler`) has relift's spatial choices (nearest, bilinear, sharp bilinear, Lanczos) and AMD FSR 1, in the frame at the Switch 2 driver's DLSS calls and in the window; FSR 2, the game's own translated DLSS, and the other vendors' upscalers are not wired.
+- State: the upscaler stage (`runtime/core/upscale.c`, `picture.upscaler`) has relift's spatial choices (nearest, bilinear, sharp bilinear, Lanczos) and AMD FSR 1, in the frame at the Switch 2 driver's DLSS calls and in the window. Temporal upscalers are in progress on a branch: FSR 2 (the default for now), FSR 3.1, Arm ASR, a temporal anti-aliasing choice and MetalFX on Apple hosts. NVIDIA DLSS and Intel XeSS are loaded at run time from the vendor's library on the host only and never shipped. The game's own translated DLSS is under Switch 2.
 - Why: lower internal resolutions on weak hosts.
 - Where: `runtime/core/upscale.c`, `runtime/core/include/relift/upscale.h`, `runtime/core/shaders`, `runtime/guests/switch/nvn/nvn_dlss.c`.
-- Read first: AMD FSR 1 (MIT) for a spatial upscaler that fits the stage's RGBA8 buffer interface; check the license of any other (XeSS, MetalFX) before you write code.
+- Read first: AMD FSR 1 and 2 (MIT) for the existing ports; check the license of any other before you write code. The temporal ones need motion vectors, depth and jitter, which only a guest that passes them (Switch 2's DLSS call) provides.
 - Verify: unit tests for the stage contract in `runtime/core/tests/test_post.c`; golden images; the pipeline never starts with every option off.
 
 ### Save states (large)
@@ -511,6 +583,13 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 A new guest is a new folder under `guests/`, a CPU description in `cpus/` when none exists, and runtime devices under `runtime/`. The Game Boy guest is the model for a small hardware-register guest: `cpus/sm83` (decoder, opcode table, lifter, `sail/sm83.sail` and a `gen` crate that generates the templates), `guests/gb/{formats,analyze,guest,tools}`, `runtime/cpus/sm83` and `runtime/guests/gb`, with the corpus job in `scripts/ci/gb-corpus.sh`. Each new guest needs charter rows (`relift/tests/workspace_charter.rs`), a registry entry in the `relift` crate, a README, and the zero-interpreted-instructions goal from the start. Open an issue with a plan before you write code; a new guest is several PRs.
 
 Where no Sail model of a CPU exists, relift writes its own: `cpus/sm83/sail/sm83.sail` and `cpus/z80/sail/z80.sail` are our own, on the shared Sail frontend `core/sail`, while `cpus/mips` and `cpus/arm32` come from published models plus an overlay.
+
+### WebAssembly (large, not started)
+
+- Missing: relift lifts no WebAssembly module. This is the guest that runs `.wasm` programs, apart from the host entry in section 3 that would run relift's own output in a browser.
+- Plan: a `guests/wasm` crate with a module reader and validation, lifting of the instruction set to relift's IR (structured control flow maps directly, linear memory is one region, imports are a host-call table), and a runtime layer with the WASI calls a program needs. Zero interpreted instructions as for every guest.
+- Read first: the WebAssembly core specification and its test suite (Apache-2.0); `core/emit-wasm` for the opposite direction.
+- Verify: the specification's tests run through a build, with output equal to a reference engine's.
 
 ### NES (large)
 
