@@ -2008,10 +2008,24 @@ static uint64_t bytes_hash(const uint8_t *p, uint64_t n)
 static uint64_t edge_hash(replay *r, const vimg *v)
 {
     const uint8_t *p = r->mem + v->storage;
-    if (!v->watch.on)
+    uint64_t hp = hos.vm.host_page ? hos.vm.host_page : 4096, end = v->storage + v->d.size;
+    uint64_t lo = (v->storage + hp - 1) / hp * hp, hi = end / hp * hp;
+    if (!v->watch.on || hi <= lo)
         return bytes_hash(p, v->d.size);
-    uint64_t head = v->watch.addr - v->storage, tail_at = v->watch.addr + v->watch.size - v->storage;
-    return bytes_hash(p, head) * 31 + bytes_hash(p + tail_at, v->d.size - tail_at);
+    return bytes_hash(p, lo - v->storage) * 31 + bytes_hash(p + (hi - v->storage), end - hi);
+}
+
+/**
+ * @brief Starts the write watch of v's storage over every host page the storage touches, so the bytes it shares a page
+ * with another range are watched too and need no hash each frame; where those outer pages cannot be watched (outside
+ * the guest map, or not writable), over the whole pages inside the storage only.
+ */
+static void watch_storage(vimg *v)
+{
+    uint64_t hp = hos.vm.host_page ? hos.vm.host_page : 4096;
+    uint64_t lo = v->storage / hp * hp, hi = (v->storage + v->d.size + hp - 1) / hp * hp;
+    if (!nvn_watch_start(&v->watch, lo, hi - lo))
+        nvn_watch_start(&v->watch, v->storage, v->d.size);
 }
 
 /** @brief The depth of level l of a 3D texture, 1 for other targets. */
@@ -2277,23 +2291,17 @@ static bool copy_keeps_bytes(const vimg *u, const vimg *v)
            u->format == nvn_vk_format(u->d.format, &a) && v->format == nvn_vk_format(v->d.format, &a);
 }
 
-/**
- * @brief Brings v up to date with the images over its storage that the
- * GPU wrote after v last took their bytes, oldest first: one of the same rows (see
- * same_rows) by an image copy, any other through its guest storage (it is
- * written back and v filled again from the bytes). Returns v, or NULL with
- * the game stopped when the newer image cannot be written back.
- */
-static vimg *sync_alias(replay *r, vimg *v)
+/** @brief Lists the other images over any byte of v's storage (vimg.aliases); false with the game stopped. */
+static bool list_aliases(replay *r, vimg *v)
 {
-    if (v->alias_epoch != g.image_epoch) {
+    {
         uint32_t n = 0;
         for (uint32_t i = 0; i < g.nimages; i++)
             n += g.images[i] != v && overlaps(g.images[i], v);
         vimg **a = n ? realloc(v->aliases, n * sizeof *a) : NULL;
         if (n && !a) {
             nvn_vk_stop(r, "out of memory listing the images over texture storage 0x%llx", (unsigned long long)v->storage);
-            return NULL;
+            return false;
         }
         if (!n)
             free(v->aliases);
@@ -2304,6 +2312,20 @@ static vimg *sync_alias(replay *r, vimg *v)
                 v->aliases[v->naliases++] = g.images[i];
         v->alias_epoch = g.image_epoch;
     }
+    return true;
+}
+
+/**
+ * @brief Brings v up to date with the images over its storage that the
+ * GPU wrote after v last took their bytes, oldest first: one of the same rows (see
+ * same_rows) by an image copy, any other through its guest storage (it is
+ * written back and v filled again from the bytes). Returns v, or NULL with
+ * the game stopped when the newer image cannot be written back.
+ */
+static vimg *sync_alias(replay *r, vimg *v)
+{
+    if (v->alias_epoch != g.image_epoch && !list_aliases(r, v))
+        return NULL;
     for (;;) {
         vimg *src = NULL;
         for (uint32_t i = 0; i < v->naliases; i++) {
@@ -2421,6 +2443,43 @@ void nvn_vk_retire_images(void)
 
 uint32_t nvn_vk_retired_count(void) { return g.nretired; }
 
+bool nvn_vk_can_image(const nvn_tex_desc *d)
+{
+    VkImageAspectFlags aspect;
+    return nvn_vk_format(d->format, &aspect) != VK_FORMAT_UNDEFINED && d->samples <= 1 &&
+           (d->target == 0 || d->target == 1 || d->target == 3 || d->target == 4 || d->target == 7 ||
+            d->target == NVN_TARGET_3D || d->target == NVN_TARGET_CUBEMAP || d->target == NVN_TARGET_CUBEMAP_ARRAY ||
+            d->target == NVN_TARGET_BUFFER);
+}
+
+bool nvn_vk_sync_aliases(replay *r, uint64_t since)
+{
+    if (g.write_stamp == since)
+        return true;
+    for (uint32_t k = 0; k < g.nimages; k++) {
+        vimg *u = g.images[k];
+        if (u->written <= since)
+            continue;
+        if (u->alias_epoch != g.image_epoch && !list_aliases(r, u))
+            return false;
+        for (uint32_t i = 0; i < u->naliases; i++) {
+            vimg *v = u->aliases[i];
+            if (!v->synced || v->written >= u->written)
+                continue;
+            if (v->storage != u->storage || !same_rows(&u->d, &v->d) || !copy_keeps_bytes(u, v)) {
+                (void)rl_report_unknown(0x4e564e414c494153ull ^ v->storage, "nvn",
+                                        "a registered texture over storage 0x%llx shares bytes the GPU wrote as another "
+                                        "layout: it takes them when a draw binds it, not every frame",
+                                        (unsigned long long)v->storage);
+                continue;
+            }
+            if (!sync_alias(r, v))
+                return false;
+        }
+    }
+    return true;
+}
+
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
 static vimg *image_of(replay *r, uint64_t tex)
 {
@@ -2439,7 +2498,7 @@ static vimg *image_of(replay *r, uint64_t tex)
 
 /** @brief The host images by storage address: heads and links of index chains in g.images order, as of epoch. */
 static struct {
-    uint32_t head[IMAGE_BUCKETS], next[MAX_IMAGES];
+    uint32_t head[IMAGE_BUCKETS], *next, capnext;
     uint64_t epoch;
 } by_storage;
 
@@ -2449,6 +2508,13 @@ static uint32_t storage_bucket(uint64_t storage) { return (uint32_t)((storage >>
 static uint32_t first_at(uint64_t storage)
 {
     if (by_storage.epoch != g.image_epoch) {
+        if (by_storage.capnext < g.nimages) {
+            uint32_t *p = realloc(by_storage.next, (size_t)g.capimages * sizeof *p);
+            if (!p)
+                return 0;
+            by_storage.next = p;
+            by_storage.capnext = g.capimages;
+        }
         memset(by_storage.head, 0, sizeof by_storage.head);
         for (uint32_t i = g.nimages; i-- > 0;) {
             uint32_t b = storage_bucket(g.images[i]->storage);
@@ -2492,10 +2558,6 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
          d->target != NVN_TARGET_CUBEMAP_ARRAY && !buffer)) {
         nvn_vk_fatal(r->c, "texture 0x%llx: format %u, target %u, %u samples not handled",
                        (unsigned long long)tex, d->format, d->target, d->samples);
-        return NULL;
-    }
-    if (g.nimages == MAX_IMAGES) {
-        nvn_vk_fatal(r->c, "more than %u textures in use", MAX_IMAGES);
         return NULL;
     }
     vimg *v = calloc(1, sizeof *v);
@@ -2584,7 +2646,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
                                 .subresourceRange = nvn_vk_barrier_range(v) };
     VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                              NULL, 1, &ib);
-    nvn_watch_start(&v->watch, storage, d->size);
+    watch_storage(v);
     if (!nvn_vk_reading_guest(storage, d->size))
         goto fail;
     v->hash = bytes_hash(r->mem + storage, d->size);
@@ -2594,7 +2656,22 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     v->hash_frame = g.presents + 1;
     if (depth && !nvn_vk_flush(r))
         goto fail;
+    if (g.nimages == g.capimages) {
+        uint32_t cap = g.capimages ? 2 * g.capimages : 4096;
+        vimg **grown = realloc(g.images, (size_t)cap * sizeof *grown);
+        if (!grown)
+            goto fail;
+        g.images = grown;
+        g.capimages = cap;
+    }
+    bool linked = by_storage.epoch == g.image_epoch && by_storage.capnext > g.nimages;
     g.images[g.nimages++] = v;
+    if (linked) {
+        uint32_t b = storage_bucket(v->storage);
+        by_storage.next[g.nimages - 1] = by_storage.head[b];
+        by_storage.head[b] = g.nimages;
+        by_storage.epoch = g.image_epoch + 1;
+    }
     g.image_epoch++;
     sync_alias(r, v);
     if (rl_cfg()->trace_os)
@@ -2614,8 +2691,9 @@ vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
  * buffer texture at every use, any texture the GPU never wrote (the game
  * fills it through the CPU, as a glyph cache) when the hash of its storage
  * differs, checked at most once per presented frame. A watched texture the
- * GPU can fill (nvn_untile_can) is filled once a page of it was written,
- * without hashing its bytes first.
+ * GPU can fill (nvn_untile_can) is filled once a page wholly inside it was
+ * written, without hashing its bytes first; a write only to the pages it
+ * shares with other bytes compares just its bytes on those pages.
  */
 bool nvn_vk_refresh(replay *r, vimg *v)
 {
@@ -2626,16 +2704,23 @@ bool nvn_vk_refresh(replay *r, vimg *v)
     if (v->written || v->hash_frame == g.presents + 1)
         return true;
     v->hash_frame = g.presents + 1;
-    if (v->watch.on && !nvn_watch_changed(&v->watch) && edge_hash(r, v) == v->edge_hash)
+    uint64_t hp = hos.vm.host_page ? hos.vm.host_page : 4096, end = v->storage + v->d.size;
+    uint64_t lo = (v->storage + hp - 1) / hp * hp, hi = end / hp * hp;
+    bool covers = v->watch.on && v->watch.addr <= v->storage / hp * hp &&
+                  v->watch.addr + v->watch.size >= (end + hp - 1) / hp * hp;
+    if (v->watch.on && !nvn_watch_changed(&v->watch) && (covers || edge_hash(r, v) == v->edge_hash))
         return true;
-    nvn_watch_start(&v->watch, v->storage, v->d.size);
+    bool inner = !v->watch.on || (hi > lo && nvn_watch_changed_in(&v->watch, lo, hi - lo));
+    watch_storage(v);
+    uint64_t e = edge_hash(r, v);
+    if (!inner && e == v->edge_hash)
+        return true;
+    v->edge_hash = e;
     if (gpu_moves() && v->watch.on && nvn_untile_can(v)) {
-        v->edge_hash = edge_hash(r, v);
         v->hash = 0;
         return upload(r, v);
     }
     uint64_t h = bytes_hash(r->mem + v->storage, v->d.size);
-    v->edge_hash = edge_hash(r, v);
     if (h == v->hash)
         return true;
     v->hash = h;

@@ -35,8 +35,12 @@ bool nvn_watch_start(nvn_watch *w, uint64_t addr, uint64_t size);
  * pages for writing and refuses a range with a read-only page.
  */
 void nvn_watch_release(uint64_t addr, uint64_t size);
+/** @brief A number that changes whenever a watched page is written or the guest map changes. */
+uint64_t nvn_watch_stamp(void);
 /** @brief True when a watched page was written since the watch began, or the guest map changed. */
 bool nvn_watch_changed(const nvn_watch *w);
+/** @brief nvn_watch_changed for the watched pages that [addr, addr + size) touches only. */
+bool nvn_watch_changed_in(const nvn_watch *w, uint64_t addr, uint64_t size);
 /**
  * @brief Marks the pages of [addr, addr + size) as written now, for a write that did not go through the CPU (the GPU
  * wrote the guest's bytes): a watch that covers one of them then reports a change.

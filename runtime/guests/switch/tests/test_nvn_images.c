@@ -9,6 +9,8 @@
 
 #include <relift/ports.h>
 
+#include <stdlib.h>
+
 #define RET 0x7000000ull
 
 static uint64_t call(rl_ctx *c, rl_fn_t *fn, uint64_t x0)
@@ -24,6 +26,14 @@ static void add_image(vimg *v, uint64_t pool, uint64_t storage)
     v->storage = storage;
     v->d.pool = pool;
     v->pool_serial = nvn_obj_serial(pool, NVN_POOL);
+    if (g.nimages == g.capimages) {
+        uint32_t cap = g.capimages ? 2 * g.capimages : 16;
+        vimg **p = realloc(g.images, cap * sizeof *p);
+        if (!p)
+            return;
+        g.images = p;
+        g.capimages = cap;
+    }
     g.images[g.nimages++] = v;
 }
 

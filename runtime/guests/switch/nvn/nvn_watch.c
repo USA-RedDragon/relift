@@ -168,7 +168,14 @@ void nvn_watch_release(uint64_t addr, uint64_t size)
     }
 }
 
-bool nvn_watch_changed(const nvn_watch *w)
+uint64_t nvn_watch_stamp(void)
+{
+    return __atomic_load_n(&g_stamp, __ATOMIC_ACQUIRE) + __atomic_load_n(&hos.vm.map_gen, __ATOMIC_ACQUIRE);
+}
+
+bool nvn_watch_changed(const nvn_watch *w) { return nvn_watch_changed_in(w, w->addr, w->size); }
+
+bool nvn_watch_changed_in(const nvn_watch *w, uint64_t addr, uint64_t size)
 {
     if (!w->on)
         return true;
@@ -177,7 +184,10 @@ bool nvn_watch_changed(const nvn_watch *w)
         return true;
     if (__atomic_load_n(&g_stamp, __ATOMIC_ACQUIRE) == w->stamp)
         return false;
-    uint64_t hp = vm->host_page, first = w->addr / hp, end = (w->addr + w->size) / hp;
+    uint64_t lo = addr > w->addr ? addr : w->addr, hi = addr + size < w->addr + w->size ? addr + size : w->addr + w->size;
+    if (hi <= lo)
+        return false;
+    uint64_t hp = vm->host_page, first = lo / hp, end = (hi + hp - 1) / hp;
     for (uint64_t p = first; p < end; p++) {
         chunk *ck = __atomic_load_n(&g_chunks[p / CHUNK_PAGES], __ATOMIC_ACQUIRE);
         if (!ck || __atomic_load_n(&ck->stamp[p % CHUNK_PAGES], __ATOMIC_ACQUIRE) > w->stamp)

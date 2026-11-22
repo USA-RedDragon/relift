@@ -20,7 +20,6 @@
  */
 #define NVN_SLOTS 2u
 #define MAX_RT 8u
-#define MAX_IMAGES 4096u
 /** @brief Graphics, compute, task and mesh stages, in NVNshaderStage order. */
 #define NVN_STAGES 8u
 /** @brief The viewports a shading-rate palette can be given for. */
@@ -122,6 +121,8 @@ typedef struct vimg {
     uint32_t nsub, capsub;
     /** @brief Sampling views by VkImageViewType (1D to cube array), made when first asked for. */
     VkImageView views[7];
+    /** @brief The texture set keeps it for a registered texture's id (nvn_texset_sync_registered). */
+    bool synced;
 } vimg;
 
 /** @brief A render target: one level and layer of an image. */
@@ -219,7 +220,9 @@ typedef struct nvn_vkdev {
     uint64_t timeline_value;
     VkPhysicalDeviceMemoryProperties memprops;
     char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
-    vimg *images[MAX_IMAGES];
+    /** @brief Every host image, capimages of room; there is no limit but memory. */
+    vimg **images;
+    uint32_t capimages;
     uint32_t nimages;
     /** @brief nvn_obj_pools_removed when images were last checked for a removed pool (nvn_vk_retire_images). */
     uint64_t pools_seen;
@@ -615,6 +618,14 @@ int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time; NULL after a stop. */
 vimg *nvn_vk_image(replay *r, uint64_t tex);
 /** @brief Refills v from its storage when the CPU may have changed the bytes (nvn_vk.c); false when the refill fails. */
+/**
+ * @brief Brings up to date, by an image copy, the images the texture set keeps for every registered texture
+ * (vimg.synced) over the same rows as an image the GPU wrote after write stamp since; one over the bytes in another
+ * layout takes them when a draw binds it. False with the game stopped when one cannot be.
+ */
+bool nvn_vk_sync_aliases(replay *r, uint64_t since);
+/** @brief Whether the layer can make a host image of the texture d describes (its format, target and samples). */
+bool nvn_vk_can_image(const nvn_tex_desc *d);
 bool nvn_vk_refresh(replay *r, vimg *v);
 /**
  * @brief A view of v of type t: over all its levels and the layers t takes
