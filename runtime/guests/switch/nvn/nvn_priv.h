@@ -129,6 +129,25 @@ uint64_t nvn_vk_finished(void);
  */
 int nvn_vk_async_check(void);
 /**
+ * @brief Checks timestamp reports: two reports at guest address addr and addr + 16 with a long GPU batch between
+ * them must be unwritten when recorded, written without any wait once the batch finishes (the check spins on the
+ * memory), with value 0 and times in order, apart by at least 0.1 ms and within the check's own span; with
+ * calibrated timestamps each time must also be where a second calibrated pair, read after the batch, puts the
+ * report's GPU timestamp, within 15 microseconds. 0 when all hold, the failing step's number otherwise.
+ */
+int nvn_counters_async_check(uint8_t *mem, uint64_t addr);
+/**
+ * @brief Checks the reports' values against the waiting path's: three draws with known query results, every counter
+ * reset, all fifteen types reported after the first draw, type 3 reset again after the second and all reported after
+ * the third; each value must be the sum the waiting path reads back at the same place (per type: samples passed,
+ * the statistic Vulkan names alike, primitives generated from the geometry or the input primitives, 0 for the
+ * timestamps, tessellation evaluation primitives and transform feedback). 0 when all match, else 1 + the index of
+ * the first wrong report.
+ */
+int nvn_counters_order_check(uint8_t *mem, uint64_t addr);
+/** @brief Whether the host device gives calibrated timestamps (nvn_vk_calibrate). */
+bool nvn_vk_calibrated(void);
+/**
  * @brief Shows the crop rectangle crop (x, y, width, height, as
  * nvnWindowSetCrop takes it) of texture (an NVNtexture the game rendered) as
  * the next frame, after the work queue submitted. Returns RL_OK or

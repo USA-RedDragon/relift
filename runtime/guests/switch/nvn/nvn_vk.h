@@ -182,6 +182,17 @@ typedef struct nvn_vkdev {
     VkCommandPool pool;
     VkCommandBuffer cb;
     VkFence fence;
+    /** @brief Nanoseconds per GPU timestamp tick; 0 when the queue has no timestamps. */
+    double timestamp_period_ns;
+    /** @brief Whether nvn_vk_calibrate reads the GPU clock and the guest clock at one moment. */
+    bool calibrated;
+    /**
+     * @brief A timeline semaphore every batch signals with the next value (timeline_value after a submit), so a
+     * thread other than the one that submits can wait for a batch without the fence the next submit resets.
+     */
+    bool timeline_ok;
+    VkSemaphore timeline;
+    uint64_t timeline_value;
     VkPhysicalDeviceMemoryProperties memprops;
     char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     vimg *images[MAX_IMAGES];
@@ -620,6 +631,22 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
  */
 int nvn_counters_reset(replay *r, uint32_t type);
 int nvn_counters_report(replay *r, uint32_t type, uint64_t addr);
+/** @brief Before the batch's command buffer ends: writes the timestamp its reports are put on the guest clock by. */
+void nvn_counters_close(VkCommandBuffer cb);
+/**
+ * @brief Reads the GPU's timestamp clock and the host clock the guest clock runs on at one moment
+ * (VK_KHR_calibrated_timestamps); false where the host has no such pair.
+ */
+bool nvn_vk_calibrate(uint64_t *gpu, uint64_t *host_ns);
+/** @brief After the batch was submitted to signal timeline value (0 without a timeline): hands its reports on. */
+void nvn_counters_submitted(uint64_t value);
+/**
+ * @brief After the batch's fence signaled: adds its draws' queries to their counters and writes its reports, unless
+ * the reports thread already did; returns once they are written.
+ */
+void nvn_counters_settle(void);
+/** @brief Timestamp reports the batch being recorded or run holds. */
+uint32_t nvn_counters_reports_pending(void);
 /** @brief Before a draw's rendering opens: makes room for its queries (submits and reads back a full batch). */
 int nvn_counters_prepare(replay *r);
 /** @brief Inside the draw's rendering, before the draw: starts its queries; the slot to hand to nvn_counters_end, or UINT32_MAX when the queue is not counting. */

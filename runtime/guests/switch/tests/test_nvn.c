@@ -1301,6 +1301,28 @@ TEST(nvn_denorm_probe_holds_on_millions_of_random_rows)
     }
 }
 
+TEST(nvn_deferred_counter_reports_read_what_the_waiting_path_read)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap != 0);
+    CHECK_EQ(nvn_counters_order_check(t_mem(), heap + 0x1000), 0);
+}
+
+TEST(nvn_timestamp_reports_land_once_the_gpu_ran_them_without_a_wait)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_timestamp_reports_land_once_the_gpu_ran_them_without_a_wait: no host Vulkan device, skipped\n");
+        return;
+    }
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap != 0);
+    CHECK_EQ(nvn_counters_async_check(t_mem(), heap + 0x100), 0);
+    fprintf(stderr, "  timestamps %s\n", nvn_vk_calibrated() ? "calibrated" : "on the fallback (no calibrated pair)");
+}
+
 TEST(nvn_a_submit_returns_before_the_device_finished_and_a_settle_sees_its_results)
 {
     nvn_probes p;

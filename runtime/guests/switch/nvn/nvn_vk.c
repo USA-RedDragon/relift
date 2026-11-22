@@ -135,6 +135,67 @@ typedef struct coop_props {
 static VkResult (*coop_props_fn)(VkPhysicalDevice, uint32_t *, coop_props *);
 
 /**
+ * @brief VK_KHR_calibrated_timestamps, which the generated tables do not carry: a device timestamp and the host's
+ * clock read at one moment, the host clock being the guest clock's own (CLOCK_MONOTONIC, rl_clock_ns), so a GPU
+ * timestamp converts to the guest clock exactly up to the pair's deviation. Linux and Android only: the guest clock
+ * is QueryPerformanceCounter scaled on Windows and mach time on Apple hosts, which this does not convert.
+ */
+typedef struct calibrated_info {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t timeDomain;
+} calibrated_info;
+
+#define STYPE_CALIBRATED_TIMESTAMP_INFO ((VkStructureType)1000184000)
+#define TIME_DOMAIN_DEVICE 0u
+#define TIME_DOMAIN_CLOCK_MONOTONIC 1u
+
+static VkResult (*domains_fn)(VkPhysicalDevice, uint32_t *, uint32_t *);
+static VkResult (*calibrated_fn)(VkDevice, uint32_t, const calibrated_info *, uint64_t *, uint64_t *);
+
+static void calibration_start(void)
+{
+    bool ok = false;
+#if defined(__linux__)
+    if (g.calibrated && domains_fn) {
+        void *fn = (void *)VK(vkGetDeviceProcAddr)(g.dev, "vkGetCalibratedTimestampsKHR");
+        memcpy(&calibrated_fn, &fn, sizeof calibrated_fn);
+        uint32_t n = 0, dom[16];
+        bool device = false, mono = false;
+        if (calibrated_fn && domains_fn(g.phys, &n, NULL) == VK_SUCCESS && n) {
+            n = n > 16 ? 16 : n;
+            if (domains_fn(g.phys, &n, dom) >= VK_SUCCESS)
+                for (uint32_t i = 0; i < n; i++) {
+                    device |= dom[i] == TIME_DOMAIN_DEVICE;
+                    mono |= dom[i] == TIME_DOMAIN_CLOCK_MONOTONIC;
+                }
+        }
+        ok = calibrated_fn && device && mono;
+    }
+#endif
+    g.calibrated = ok;
+    if (!ok)
+        rl_log(RL_LOG_INFO, "nvn",
+               "no calibrated timestamps on this host: timestamp reports take the batch's end as the CPU saw it");
+}
+
+bool nvn_vk_calibrated(void) { return g.calibrated; }
+
+bool nvn_vk_calibrate(uint64_t *gpu, uint64_t *host_ns)
+{
+    if (!g.calibrated)
+        return false;
+    calibrated_info ci[2] = { { STYPE_CALIBRATED_TIMESTAMP_INFO, NULL, TIME_DOMAIN_DEVICE },
+                              { STYPE_CALIBRATED_TIMESTAMP_INFO, NULL, TIME_DOMAIN_CLOCK_MONOTONIC } };
+    uint64_t ts[2], dev = 0;
+    if (calibrated_fn(g.dev, 2, ci, ts, &dev) != VK_SUCCESS)
+        return false;
+    *gpu = ts[0];
+    *host_ns = ts[1];
+    return true;
+}
+
+/**
  * @brief The device extensions relift enables when the device has them, with
  * all their features: the ones device.json reports (and the translator may
  * use), plus depth clip control for the NVN depth mode.
@@ -173,10 +234,13 @@ static bool device_hook(void *user, rl_vkdev_build *b)
             g.fns.f[i] = load(get, g.instance, i);
     void *coop_fn = get(g.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
     memcpy(&coop_props_fn, &coop_fn, sizeof coop_props_fn);
+    void *dom_fn = get(g.instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR");
+    memcpy(&domains_fn, &dom_fn, sizeof domains_fn);
     VkPhysicalDeviceProperties props;
     VK(vkGetPhysicalDeviceProperties)(g.phys, &props);
     memcpy(g.name, props.deviceName, sizeof g.name);
     gpu_ts.period_ns = (double)props.limits.timestampPeriod;
+    g.timestamp_period_ns = gpu_ts.period_ns;
     g.family = b->family;
     feat.clip_control = (ext_features){ .sType = STYPE_DEPTH_CLIP_CONTROL };
     feat.clock = (ext_features){ .sType = STYPE_SHADER_CLOCK };
@@ -229,6 +293,9 @@ static bool device_hook(void *user, rl_vkdev_build *b)
         } else if (!strcmp(exts[i].extensionName, "VK_NV_viewport_swizzle")) {
             rl_vkdev_add_ext(b, "VK_NV_viewport_swizzle");
             g.viewport_swizzle = true;
+        } else if (!strcmp(exts[i].extensionName, "VK_KHR_calibrated_timestamps")) {
+            rl_vkdev_add_ext(b, "VK_KHR_calibrated_timestamps");
+            g.calibrated = true;
         }
     free(exts);
     feat.f12 = (VkPhysicalDeviceVulkan12Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
@@ -264,6 +331,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.fault.b[1] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
+    g.timeline_ok = feat.f12.timelineSemaphore;
     feat.f12.bufferDeviceAddressMultiDevice = VK_FALSE;
     f13->robustImageAccess = VK_FALSE;
     rl_vkdev_chain(b, &feat.f2);
@@ -289,6 +357,13 @@ static void bring_up(void)
         return;
     }
     g.dev = (VkDevice)(uintptr_t)core->device;
+    calibration_start();
+    if (g.timeline_ok) {
+        VkSemaphoreTypeCreateInfo ti = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                         .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE };
+        VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti };
+        g.timeline_ok = VK(vkCreateSemaphore)(g.dev, &sci, NULL, &g.timeline) == VK_SUCCESS;
+    }
     void (*raw)(void) = g.fns.f[VKG_vkGetDeviceProcAddr];
     void *(*gdpa)(void *, const char *);
     memcpy(&gdpa, &raw, sizeof gdpa);
@@ -1233,6 +1308,7 @@ static uint64_t g_submitted, g_finished;
 static bool submit_recorded(replay *r)
 {
     r->recording = false;
+    nvn_counters_close(g.cb);
     if (gpu_ts.pool)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 1);
     bool copies = nvn_mirror_readback_pending();
@@ -1243,6 +1319,15 @@ static bool submit_recorded(replay *r)
         return false;
     }
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
+    uint64_t signal = g.timeline_value + 1;
+    VkTimelineSemaphoreSubmitInfo tsi = { .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                          .signalSemaphoreValueCount = 1,
+                                          .pSignalSemaphoreValues = &signal };
+    if (g.timeline_ok) {
+        si.pNext = &tsi;
+        si.signalSemaphoreCount = 1;
+        si.pSignalSemaphores = &g.timeline;
+    }
     int64_t t0 = now_ns();
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS || (vr = guest_submit(&si)) != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
@@ -1251,6 +1336,9 @@ static bool submit_recorded(replay *r)
         return false;
     }
     pending.t1 = now_ns();
+    if (g.timeline_ok)
+        g.timeline_value = signal;
+    nvn_counters_submitted(g.timeline_ok ? g.timeline_value : 0);
     tm.submit_ns += (uint64_t)(pending.t1 - t0);
     pending.on = true;
     pending.readback = readback;
@@ -1267,6 +1355,7 @@ static bool wait_submitted(void)
     pending.on = false;
     nvn_core_leave();
     VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX);
+    nvn_counters_settle();
     tm.wait_ns += (uint64_t)(now_ns() - pending.t1);
     tm.flushes++;
     bool ok = vr == VK_SUCCESS;
