@@ -18,6 +18,7 @@
 #define AM_NOT_ACQUIRED (128u | (504u << 9))
 #define AM_OBJ_INVALID (128u | (500u << 9))
 #define AM_OOB (128u | (503u << 9))
+#define AM_TERMINATED (128u | (22u << 9))
 
 typedef struct env {
     rl_ctx *c;
@@ -1007,8 +1008,9 @@ TEST(am_library_applet_creator)
     CHECK(!signaled(&e, changed));
     CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(20))), 0);
     CHECK(signaled(&e, changed));
+    CHECK_EQ(u8_out(&e, la, 1), 1);
     CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(10))), 0);
-    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(30))), 0);
+    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(30))), AM_TERMINATED);
     CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(60))), 0);
     CHECK_EQ(tc_cmd(e.c, la, 101), AM_NOT_AVAIL);
     CHECK_EQ(tc_cmd(e.c, la, 104), AM_NOT_AVAIL);
@@ -1121,4 +1123,22 @@ TEST(am_switch_has_no_switch2_proxy)
     CHECK(tc_sub(e.c, e.svc, proxy_req(10), &o) != 0);
     CHECK_EQ(set8(&e, e.sc, 2400, 1), SF_RESULT_UNKNOWN_COMMAND);
     CHECK_EQ(rc_of(tc_send(e.c, e.af, tc_new(321))), SF_RESULT_UNKNOWN_COMMAND);
+}
+
+TEST(am_unknown_library_applet_ends_as_terminated)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    tc_obj la;
+    tc_req q = tc_new(0);
+    tc_put32(&q, 0x13);
+    tc_put32(&q, 0);
+    CHECK_EQ(tc_sub(e.c, e.lc, q, &la), 0);
+    uint32_t changed = get_event(&e, la, 0);
+    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(10))), 0);
+    CHECK(signaled(&e, changed));
+    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(30))), AM_TERMINATED);
+    tc_res r = tc_send(e.c, la, tc_new(120));
+    CHECK_EQ(tc_u32(&r, 0), 0x13);
 }

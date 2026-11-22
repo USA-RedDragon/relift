@@ -1,8 +1,7 @@
 /**
  * @file srv_am_app.c
- * @brief IApplicationFunctions, IStorage and its accessor, ILibraryAppletCreator
- * with its accessor, IHomeMenuFunctions, ILibraryAppletSelfAccessor and
- * IProcessWindingController.
+ * @brief IApplicationFunctions, IHomeMenuFunctions, ILibraryAppletSelfAccessor
+ * and IProcessWindingController.
  *
  * Command ids and behavior follow Ryujinx (MIT, Copyright (c) Ryujinx Team
  * and Contributors) and libnx (ISC, Copyright (c) libnx Authors).
@@ -29,12 +28,6 @@ typedef struct am_uid {
     uint64_t v[2];
 } am_uid;
 
-typedef struct am_storage {
-    uint8_t *data;
-    uint64_t size;
-    bool read_only;
-} am_storage;
-
 static pthread_mutex_t app_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     uint8_t *data;
@@ -59,103 +52,6 @@ void am_app_reset(void)
     previous_program_index = -1;
     pthread_mutex_unlock(&app_mu);
 }
-
-static void storage_destroy(void *state)
-{
-    am_storage *s = state;
-    free(s->data);
-    free(s);
-}
-
-static void accessor_destroy(void *state)
-{
-    rl_ipc_object_unref(state);
-}
-
-static const rl_ipc_class accessor_class;
-
-static rl_result storage_open(rl_ipc_req *r)
-{
-    rl_ipc_object_ref(r->self);
-    rl_ipc_object *acc = rl_srv_object(&accessor_class, r->self);
-    if (!acc) {
-        rl_ipc_object_unref(r->self);
-        return KR_OUT_OF_RESOURCE;
-    }
-    return rl_ipc_push_object(r, acc);
-}
-
-static const rl_ipc_cmd storage_cmds[] = {
-    { 0, "Open", storage_open },
-};
-
-static const rl_ipc_class storage_class = { "nn::am::service::IStorage", storage_cmds, AM_N(storage_cmds), 0, storage_destroy };
-
-static rl_ipc_object *storage_new(const void *data, uint64_t size, bool read_only)
-{
-    am_storage *s = calloc(1, sizeof *s);
-    if (!s)
-        return NULL;
-    s->data = calloc(1, size ? size : 1);
-    if (!s->data) {
-        free(s);
-        return NULL;
-    }
-    if (data)
-        memcpy(s->data, data, size);
-    s->size = size;
-    s->read_only = read_only;
-    rl_ipc_object *o = rl_srv_object(&storage_class, s);
-    if (!o)
-        storage_destroy(s);
-    return o;
-}
-
-static am_storage *accessor_storage(const rl_ipc_req *r) { return ((rl_ipc_object *)r->self->state)->state; }
-
-static rl_result accessor_get_size(rl_ipc_req *r)
-{
-    *(uint64_t *)rl_ipc_out(r, 8) = accessor_storage(r)->size;
-    return KR_SUCCESS;
-}
-
-static rl_result accessor_write(rl_ipc_req *r)
-{
-    am_storage *s = accessor_storage(r);
-    AM_IN(uint64_t, offset);
-    if (s->read_only)
-        return AM_OBJECT_INVALID;
-    if (offset > s->size)
-        return AM_OUT_OF_BOUNDS;
-    rl_ipc_buf b = rl_ipc_auto_in(r, 0);
-    uint64_t n = b.size < s->size - offset ? b.size : s->size - offset;
-    if (n && !rl_ipc_buf_read(&b, s->data + offset, n))
-        return KR_INVALID_MEM_STATE;
-    return KR_SUCCESS;
-}
-
-static rl_result accessor_read(rl_ipc_req *r)
-{
-    am_storage *s = accessor_storage(r);
-    AM_IN(uint64_t, offset);
-    if (offset > s->size)
-        return AM_OUT_OF_BOUNDS;
-    rl_ipc_buf b = rl_ipc_auto_out(r, 0);
-    uint64_t n = b.size < s->size - offset ? b.size : s->size - offset;
-    if (n && !rl_ipc_buf_write(&b, s->data + offset, n))
-        return KR_INVALID_MEM_STATE;
-    return KR_SUCCESS;
-}
-
-static const rl_ipc_cmd accessor_cmds[] = {
-    { 0, "GetSize", accessor_get_size },
-    { 10, "Write", accessor_write },
-    { 11, "Read", accessor_read },
-};
-
-static const rl_ipc_class accessor_class = {
-    "nn::am::service::IStorageAccessor", accessor_cmds, AM_N(accessor_cmds), 0, accessor_destroy
-};
 
 enum { EV_GPU_ERROR, EV_FRIEND_INVITATION, EV_NOTIFICATION, EV_HEALTH_WARNING, EV_UNKNOWN, EV_COUNT };
 
@@ -193,7 +89,7 @@ static rl_result af_pop_launch_parameter(rl_ipc_req *r)
         pthread_mutex_unlock(&app_mu);
         if (!data)
             return AM_NOT_AVAILABLE;
-        st = storage_new(data, size, false);
+        st = am_storage_new(data, size);
         free(data);
     } else if (kind == LAUNCH_KIND_PRESELECTED_USER) {
         uint8_t params[LAUNCH_PARAMS_SIZE] = { 0 };
@@ -203,7 +99,7 @@ static rl_result af_pop_launch_parameter(rl_ipc_req *r)
         memcpy(params, &magic, 4);
         memcpy(params + 4, &selected, 4);
         memcpy(params + 8, uid, 16);
-        st = storage_new(params, sizeof params, false);
+        st = am_storage_new(params, sizeof params);
     } else {
         return AM_OBJECT_INVALID;
     }
@@ -423,13 +319,16 @@ static rl_result af_clear_user_channel(rl_ipc_req *r)
 
 static rl_result af_unpop_to_user_channel(rl_ipc_req *r)
 {
-    if (r->n_in_objects != 1 || !r->in_objects[0] || r->in_objects[0]->cls != &storage_class)
+    if (r->n_in_objects != 1 || !am_storage_is(r->in_objects[0]))
         return SF_RESULT_INVALID_IN_OBJECT;
-    const am_storage *s = r->in_objects[0]->state;
-    uint8_t *copy = malloc(s->size ? s->size : 1);
+    uint64_t size = am_storage_size(r->in_objects[0]);
+    uint8_t *copy = malloc(size ? size : 1);
     if (!copy)
         return KR_OUT_OF_RESOURCE;
-    memcpy(copy, s->data, s->size);
+    if (!am_storage_read(r->in_objects[0], 0, copy, size)) {
+        free(copy);
+        return AM_INVALID_STORAGE_TYPE;
+    }
     pthread_mutex_lock(&app_mu);
     if (user_channel_count == USER_CHANNEL_MAX) {
         free(user_channel[0].data);
@@ -437,7 +336,7 @@ static rl_result af_unpop_to_user_channel(rl_ipc_req *r)
         user_channel_count--;
     }
     user_channel[user_channel_count].data = copy;
-    user_channel[user_channel_count].size = s->size;
+    user_channel[user_channel_count].size = size;
     user_channel_count++;
     pthread_mutex_unlock(&app_mu);
     return KR_SUCCESS;
@@ -566,152 +465,6 @@ rl_ipc_object *am_new_application_functions(void)
         af_destroy(s);
     return o;
 }
-
-typedef struct lac_state {
-    hos_revent *state_changed;
-    hos_revent *normal_out;
-    hos_revent *interactive_out;
-    uint64_t indirect_layer;
-} lac_state;
-
-static void lac_destroy(void *state)
-{
-    lac_state *s = state;
-    if (s->state_changed)
-        hos_kobj_unref(&s->state_changed->obj);
-    if (s->normal_out)
-        hos_kobj_unref(&s->normal_out->obj);
-    if (s->interactive_out)
-        hos_kobj_unref(&s->interactive_out->obj);
-    free(s);
-}
-
-static lac_state *lac(const rl_ipc_req *r) { return r->self->state; }
-
-static rl_result lac_get_state_changed_event(rl_ipc_req *r) { return am_push_event(r, lac(r)->state_changed); }
-static rl_result lac_get_pop_out_data_event(rl_ipc_req *r) { return am_push_event(r, lac(r)->normal_out); }
-static rl_result lac_get_pop_interactive_out_data_event(rl_ipc_req *r) { return am_push_event(r, lac(r)->interactive_out); }
-
-static rl_result lac_request_exit(rl_ipc_req *r)
-{
-    if (lac(r)->state_changed)
-        rl_hos_event_signal(lac(r)->state_changed);
-    return KR_SUCCESS;
-}
-
-static rl_result lac_get_result(rl_ipc_req *r)
-{
-    (void)r;
-    return KR_SUCCESS;
-}
-
-static rl_result lac_push_in_data(rl_ipc_req *r)
-{
-    if (r->n_in_objects != 1 || !r->in_objects[0] || r->in_objects[0]->cls != &storage_class)
-        return SF_RESULT_INVALID_IN_OBJECT;
-    return KR_SUCCESS;
-}
-
-static rl_result lac_pop_out_data(rl_ipc_req *r)
-{
-    (void)r;
-    return AM_NOT_AVAILABLE;
-}
-
-static rl_result lac_stubbed(rl_ipc_req *r)
-{
-    (void)r;
-    return AM_STUBBED;
-}
-
-static rl_result lac_get_indirect_layer_consumer_handle(rl_ipc_req *r)
-{
-    lac_state *s = lac(r);
-    if (!s->indirect_layer)
-        s->indirect_layer = 0x1000 + am_resource_user_id(rl_srv_pid(r));
-    *(uint64_t *)rl_ipc_out(r, 8) = s->indirect_layer;
-    return KR_SUCCESS;
-}
-
-static const rl_ipc_cmd lac_cmds[] = {
-    { 0, "GetAppletStateChangedEvent", lac_get_state_changed_event },
-    RL_SRV_STUB(10, "Start"),
-    { 20, "RequestExit", lac_request_exit },
-    { 30, "GetResult", lac_get_result },
-    RL_SRV_STUB(60, "PresetLibraryAppletGpuTimeSliceZero"),
-    { 100, "PushInData", lac_push_in_data },
-    { 101, "PopOutData", lac_pop_out_data },
-    { 103, "PushInteractiveInData", lac_push_in_data },
-    { 104, "PopInteractiveOutData", lac_pop_out_data },
-    { 105, "GetPopOutDataEvent", lac_get_pop_out_data_event },
-    { 106, "GetPopInteractiveOutDataEvent", lac_get_pop_interactive_out_data_event },
-    { 110, "NeedsToExitProcess", lac_stubbed },
-    { 150, "RequestForAppletToGetForeground", lac_stubbed },
-    { 160, "GetIndirectLayerConsumerHandle", lac_get_indirect_layer_consumer_handle },
-};
-
-static const rl_ipc_class lac_class = {
-    "nn::am::service::ILibraryAppletAccessor", lac_cmds, AM_N(lac_cmds), 0, lac_destroy
-};
-
-static rl_ipc_object *lac_new(void)
-{
-    lac_state *s = calloc(1, sizeof *s);
-    if (!s)
-        return NULL;
-    s->state_changed = rl_hos_event_create();
-    s->normal_out = rl_hos_event_create();
-    s->interactive_out = rl_hos_event_create();
-    rl_ipc_object *o = rl_srv_object(&lac_class, s);
-    if (!o)
-        lac_destroy(s);
-    return o;
-}
-
-static rl_result lc_create_library_applet(rl_ipc_req *r)
-{
-    struct {
-        uint32_t applet_id;
-        uint32_t mode;
-    } q;
-    if (!rl_srv_in(r, &q, sizeof q))
-        return SF_RESULT_INVALID_HEADER;
-    return am_push_object(r, lac_new());
-}
-
-static rl_result lc_create_library_applet_ex(rl_ipc_req *r)
-{
-    struct {
-        uint32_t applet_id;
-        uint32_t mode;
-        uint64_t thread_id;
-    } q;
-    if (!rl_srv_in(r, &q, sizeof q))
-        return SF_RESULT_INVALID_HEADER;
-    return am_push_object(r, lac_new());
-}
-
-static rl_result lc_create_storage(rl_ipc_req *r)
-{
-    AM_IN(int64_t, size);
-    if (size <= 0)
-        return AM_OBJECT_INVALID;
-    if (size > (int64_t)1 << 30)
-        return AM_RESULT(600);
-    return am_push_object(r, storage_new(NULL, (uint64_t)size, false));
-}
-
-static const rl_ipc_cmd lc_cmds[] = {
-    { 0, "CreateLibraryApplet", lc_create_library_applet },
-    { 3, "CreateLibraryAppletEx", lc_create_library_applet_ex },
-    { 10, "CreateStorage", lc_create_storage },
-};
-
-static const rl_ipc_class lc_class = {
-    "nn::am::service::ILibraryAppletCreator", lc_cmds, AM_N(lc_cmds), 0, NULL
-};
-
-rl_ipc_object *am_new_library_applet_creator(void) { return rl_srv_object(&lc_class, NULL); }
 
 static rl_result hm_get_pop_from_general_channel_event(rl_ipc_req *r)
 {
