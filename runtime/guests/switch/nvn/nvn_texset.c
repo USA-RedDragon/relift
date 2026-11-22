@@ -629,22 +629,9 @@ void nvn_texset_texture_gone(uint64_t tex)
     nvn_unlock();
 }
 
-/**
- * @brief A sampled handle whose texture id was never registered names a pool entry nothing was written to: it takes
- * a slot of its own whose every array element is a null descriptor, so it reads zeros (inferred, as for a separate
- * texture handle), and a texture registered under the id later is bound afresh.
- */
-static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, uint32_t *dim, uint32_t *slot,
-                          bool with_sampler)
+/** @brief Makes slot sl hold null descriptors only, so every read of it gives zeros; *kind and *dim get what it now says. */
+static int null_slot(replay *r, uint32_t sl, uint32_t *kind, uint32_t *dim)
 {
-    if (rl_report_unknown(0x4e564e5445584944ull ^ id, "nvn",
-                          "a sampled handle names texture id %u, which no texture was registered under: it reads zeros",
-                          id))
-        return nvn_vk_stop(r, "texture id %u is not registered", id);
-    int src = slot_for(r, id, false, slot);
-    if (src != RL_OK)
-        return src;
-    uint32_t sl = *slot;
     if (t.tex_img[sl] && !nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     for (uint32_t d = 0; d < DIMS; d++)
@@ -661,6 +648,26 @@ static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, 
     t.tex_kind[sl] = 0;
     memset(t.tex_view[sl], 0, sizeof t.tex_view[sl]);
     memcpy(t.dims.map + 4ull * sl, dim, 4);
+    return RL_OK;
+}
+
+/**
+ * @brief A sampled handle whose texture id was never registered names a pool entry nothing was written to: it takes
+ * a slot of its own whose every array element is a null descriptor, so it reads zeros (inferred, as for a separate
+ * texture handle), and a texture registered under the id later is bound afresh.
+ */
+static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, uint32_t *dim, uint32_t *slot,
+                          bool with_sampler)
+{
+    if (rl_report_unknown(0x4e564e5445584944ull ^ id, "nvn",
+                          "a sampled handle names texture id %u, which no texture was registered under: it reads zeros",
+                          id))
+        return nvn_vk_stop(r, "texture id %u is not registered", id);
+    int src = slot_for(r, id, false, slot);
+    if (src != RL_OK)
+        return src;
+    if ((src = null_slot(r, *slot, kind, dim)) != RL_OK)
+        return src;
     return with_sampler ? bind_sampler(r, sid) : RL_OK;
 }
 
@@ -852,6 +859,18 @@ static int resident_ok(replay *r, uint32_t id, uint64_t tex, const uint8_t *view
     return RL_OK;
 }
 
+/**
+ * @brief A registered id whose texture's memory pool is gone reads zeros, as its handle bound from a constant bank does:
+ * the slot of its own (ids below the pinned ones) drops the image it may still hold from before the pool went.
+ */
+static int stale_slot(replay *r, uint32_t id)
+{
+    if (id >= t.slots.pinned || !t.tex_img[id])
+        return RL_OK;
+    uint32_t kind, dim;
+    return null_slot(r, id, &kind, &dim);
+}
+
 int nvn_texset_sync_registered(replay *r)
 {
     if (!make())
@@ -871,8 +890,14 @@ int nvn_texset_sync_registered(replay *r)
             uint8_t view[17];
             bool has_view, image;
             uint64_t tex = nvn_tex_registered(ids[i], view, &has_view, &image);
-            if (!tex || !pool_live(ids[i], tex))
+            if (!tex)
                 continue;
+            if (!pool_live(ids[i], tex)) {
+                int rc = stale_slot(r, ids[i]);
+                if (rc != RL_OK)
+                    return rc;
+                continue;
+            }
             if (ids[i] >= t.slots.pinned)
                 return nvn_vk_stop(r,
                                    "texture id %u is registered, but a program reads texture handles out of memory and the "
@@ -907,8 +932,14 @@ int nvn_texset_sync_registered(replay *r)
         uint8_t view[17];
         bool has_view, image;
         uint64_t tex = nvn_tex_registered(t.synced[i], view, &has_view, &image);
-        if (!tex || !pool_live(t.synced[i], tex))
+        if (!tex)
             continue;
+        if (!pool_live(t.synced[i], tex)) {
+            int rc = stale_slot(r, t.synced[i]);
+            if (rc != RL_OK)
+                return rc;
+            continue;
+        }
         bool ok;
         int rc = resident_ok(r, t.synced[i], tex, view, has_view, &ok);
         if (rc != RL_OK)
