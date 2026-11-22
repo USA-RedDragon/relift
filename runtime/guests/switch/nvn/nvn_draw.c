@@ -626,11 +626,24 @@ static int fixed_state(replay *r, pipe_key *k)
  */
 #define DEFAULT_BINDING (NVN_VERTEX_BUFFERS - 1u)
 
-uint32_t nvn_vertex_attrib_source(uint32_t nattribs, uint32_t i)
+void nvn_vertex_attribs_bound(uint32_t *state, uint32_t *constant, uint32_t n)
 {
-    if (i < nattribs)
+    uint32_t written = n >= 32 ? ~0u : (1u << n) - 1u;
+    *state |= written;
+    *constant &= ~written;
+    if (n % 2 && n < 32) {
+        *constant |= 1u << n;
+        *state &= ~(1u << n);
+    }
+}
+
+uint32_t nvn_vertex_attrib_source(uint32_t state, uint32_t constant, uint32_t i)
+{
+    if (i >= 32)
+        return NVN_ATTRIB_UNKNOWN;
+    if (state & (1u << i))
         return NVN_ATTRIB_BOUND;
-    return i == nattribs && nattribs % 2 ? NVN_ATTRIB_CONSTANT : NVN_ATTRIB_UNKNOWN;
+    return constant & (1u << i) ? NVN_ATTRIB_CONSTANT : NVN_ATTRIB_UNKNOWN;
 }
 
 /** @brief Fills the vertex input of k for the attributes vs reads. */
@@ -644,9 +657,10 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
     for (uint32_t i = 0; i < NVN_VERTEX_ATTRIBS && i < 32; i++) {
         if (!(vs->inputs & (1u << i)))
             continue;
-        uint32_t source = nvn_vertex_attrib_source(st->nattribs, i);
+        uint32_t source = nvn_vertex_attrib_source(st->attrib_state, st->attrib_constant, i);
         if (source == NVN_ATTRIB_UNKNOWN)
-            return nvn_vk_stop(r, "the vertex program reads attribute %u, beyond the %u bound", i, st->nattribs);
+            return nvn_vk_stop(r, "the vertex program reads attribute %u, which no bind on this queue wrote (%u bound)",
+                               i, st->nattribs);
         uint32_t fo[2] = { 0, 0 };
         uint64_t stream = 0;
         if (source == NVN_ATTRIB_BOUND &&
@@ -2147,6 +2161,7 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     }
     case NVN_CMD_BIND_VERTEX_ATTRIB_STATE:
         st->nattribs = (uint32_t)e->x[1] > NVN_VERTEX_ATTRIBS ? NVN_VERTEX_ATTRIBS : (uint32_t)e->x[1];
+        nvn_vertex_attribs_bound(&st->attrib_state, &st->attrib_constant, st->nattribs);
         return st->nattribs ? keep(r, e, 2, st->attribs, 4u * st->nattribs, NULL) : RL_OK;
     case NVN_CMD_BIND_VERTEX_STREAM_STATE:
         st->nstreams = (uint32_t)e->x[1] > NVN_VERTEX_BUFFERS ? NVN_VERTEX_BUFFERS : (uint32_t)e->x[1];

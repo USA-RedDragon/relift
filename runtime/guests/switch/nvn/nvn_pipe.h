@@ -148,12 +148,17 @@ void nvn_pipe_warmed(void);
 enum { NVN_ATTRIB_BOUND, NVN_ATTRIB_CONSTANT, NVN_ATTRIB_UNKNOWN };
 
 /**
- * @brief Where attribute i of a draw gets its state after nvnCommandBufferBindVertexAttribState bound nattribs of
- * them. Bound attributes come from their state objects. The driver sends the attribute words to the GPU in pairs and
- * pads an odd count with a constant (unfetched) attribute, so attribute nattribs of an odd count is constant and reads
- * (0, 0, 0, 1). Any later one keeps a value no capture shows (unknown).
+ * @brief The GPU's attribute registers as nvnCommandBufferBindVertexAttribState leaves them: bit i of *state is set
+ * when register i holds a state object's word (kept in nvn_gfx.attribs), bit i of *constant when it holds the
+ * constant (unfetched) attribute, which reads (0, 0, 0, 1). A bind of n writes registers 0 to n - 1 from its state
+ * objects; the driver sends the words in pairs and pads an odd n with the constant attribute (0x3a400040), which
+ * lands in register n. Registers past that are not written and keep what an earlier bind left (registers keep their
+ * values until written; inferred, as the macro the driver sends the words to was not found).
  */
-uint32_t nvn_vertex_attrib_source(uint32_t nattribs, uint32_t i);
+void nvn_vertex_attribs_bound(uint32_t *state, uint32_t *constant, uint32_t n);
+
+/** @brief Where attribute i reads from given the registers' state and constant masks (nvn_vertex_attribs_bound). */
+uint32_t nvn_vertex_attrib_source(uint32_t state, uint32_t constant, uint32_t i);
 
 /**
  * @brief The vertex streams a draw with pipeline key k binds buffers to, in the key's order, into out; returns how

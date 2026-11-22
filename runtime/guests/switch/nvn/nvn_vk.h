@@ -269,6 +269,8 @@ typedef struct nvn_gfx {
         uint64_t addr, size;
     } ubo[NVN_STAGES][NVN_UBO_SLOTS], vb[NVN_VERTEX_BUFFERS];
     uint32_t nattribs, nstreams;
+    /** @brief Which attribute registers hold a bound state (in attribs) and which the constant attribute (nvn_vertex_attribs_bound). */
+    uint32_t attrib_state, attrib_constant;
     uint8_t attribs[NVN_VERTEX_ATTRIBS][4];
     uint8_t streams[NVN_VERTEX_BUFFERS][8];
     uint8_t depth_stencil[8], color_state[4], channel_mask[4], polygon[4], multisample[24];

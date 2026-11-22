@@ -9,11 +9,28 @@
 
 TEST(nvn_the_attribute_padding_an_odd_count_is_the_constant_default)
 {
-    CHECK_EQ(nvn_vertex_attrib_source(5, 4), NVN_ATTRIB_BOUND);
-    CHECK_EQ(nvn_vertex_attrib_source(5, 5), NVN_ATTRIB_CONSTANT);
-    CHECK_EQ(nvn_vertex_attrib_source(5, 6), NVN_ATTRIB_UNKNOWN);
-    CHECK_EQ(nvn_vertex_attrib_source(4, 4), NVN_ATTRIB_UNKNOWN);
-    CHECK_EQ(nvn_vertex_attrib_source(0, 0), NVN_ATTRIB_UNKNOWN);
+    uint32_t state = 0, constant = 0;
+    nvn_vertex_attribs_bound(&state, &constant, 5);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 4), NVN_ATTRIB_BOUND);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 5), NVN_ATTRIB_CONSTANT);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 6), NVN_ATTRIB_UNKNOWN);
+    state = constant = 0;
+    nvn_vertex_attribs_bound(&state, &constant, 4);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 4), NVN_ATTRIB_UNKNOWN);
+}
+
+TEST(nvn_attributes_past_a_bind_keep_what_an_earlier_bind_wrote)
+{
+    uint32_t state = 0, constant = 0;
+    nvn_vertex_attribs_bound(&state, &constant, 10);
+    nvn_vertex_attribs_bound(&state, &constant, 5);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 4), NVN_ATTRIB_BOUND);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 5), NVN_ATTRIB_CONSTANT);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 6), NVN_ATTRIB_BOUND);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 9), NVN_ATTRIB_BOUND);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 10), NVN_ATTRIB_UNKNOWN);
+    nvn_vertex_attribs_bound(&state, &constant, 6);
+    CHECK_EQ(nvn_vertex_attrib_source(state, constant, 5), NVN_ATTRIB_BOUND);
 }
 
 TEST(nvn_a_draw_binds_vertex_streams_with_a_gap_between_them)
