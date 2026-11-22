@@ -2754,7 +2754,6 @@ static VkRect2D clip(const replay *r, VkRect2D area)
     return (VkRect2D){ { (int32_t)x0, (int32_t)y0 }, { (uint32_t)(x1 - x0), (uint32_t)(y1 - y0) } };
 }
 
-static uint8_t *read_back(replay *r, vimg *v);
 
 /** @brief Stops the game with a report; with capture on, the 8-bit RGBA host images go to the capture folder first. */
 int nvn_vk_fatal(rl_ctx *c, const char *fmt, ...)
@@ -2782,7 +2781,7 @@ int nvn_vk_stop(replay *r, const char *fmt, ...)
     for (uint32_t i = 0; i < g.nimages && i < 16; i++) {
         uint64_t frame;
         vimg *v = g.images[i];
-        uint8_t *px = read_back(r, v);
+        uint8_t *px = nvn_vk_read_rgba8(r, v);
         if (px && vkf_capture_due(&frame)) {
             vkf_capture_write(frame, 0, v->d.width, v->d.height, px, (size_t)v->d.width * 4, false);
             rl_log(RL_LOG_INFO, "nvn", "texture storage 0x%llx at the stop captured as frame %llu",
@@ -3619,10 +3618,43 @@ static int64_t now_ns(void)
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
-/** @brief Reads v back into RGBA8 pixels (rows of 4 * width bytes); NULL when v is not a 4-byte color format. */
-/** @brief A color image of v's size in RGBA8, with v's level 0 blitted into it (for formats other than RGBA8). */
+/** @brief Bytes per texel of an integer color format (which a blit cannot convert), 0 for every other format. */
+static uint32_t integer_texel_bytes(VkFormat f)
+{
+    switch (f) {
+    case VK_FORMAT_R8_UINT:
+    case VK_FORMAT_R8_SINT: return 1;
+    case VK_FORMAT_R8G8_UINT:
+    case VK_FORMAT_R8G8_SINT:
+    case VK_FORMAT_R16_UINT:
+    case VK_FORMAT_R16_SINT: return 2;
+    case VK_FORMAT_R8G8B8A8_UINT:
+    case VK_FORMAT_R8G8B8A8_SINT:
+    case VK_FORMAT_R16G16_UINT:
+    case VK_FORMAT_R16G16_SINT:
+    case VK_FORMAT_R32_UINT:
+    case VK_FORMAT_R32_SINT:
+    case VK_FORMAT_A2B10G10R10_UINT_PACK32: return 4;
+    case VK_FORMAT_R16G16B16A16_UINT:
+    case VK_FORMAT_R16G16B16A16_SINT:
+    case VK_FORMAT_R32G32_UINT:
+    case VK_FORMAT_R32G32_SINT: return 8;
+    case VK_FORMAT_R32G32B32A32_UINT:
+    case VK_FORMAT_R32G32B32A32_SINT: return 16;
+    default: return 0;
+    }
+}
+
+/**
+ * @brief A color image of v's size in RGBA8 holding v's level 0: blitted for other float and normalized formats, and
+ * copied bit for bit for 4-byte integer formats (a blit cannot convert integers). False for integer formats of
+ * other sizes.
+ */
 static bool blit_rgba8(replay *r, vimg *v, VkImage *img, VkDeviceMemory *memory)
 {
+    uint32_t int_bytes = integer_texel_bytes(v->format);
+    if (int_bytes && int_bytes != 4)
+        return false;
     VkImageCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                              .imageType = VK_IMAGE_TYPE_2D,
                              .format = VK_FORMAT_R8G8B8A8_UNORM,
@@ -3656,21 +3688,25 @@ static bool blit_rgba8(replay *r, vimg *v, VkImage *img, VkDeviceMemory *memory)
                                 .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
     VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                              NULL, 1, &ib);
-    VkImageBlit b = { .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                      .srcOffsets = { { 0, 0, 0 }, { (int32_t)v->d.width, (int32_t)v->d.height, 1 } },
-                      .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                      .dstOffsets = { { 0, 0, 0 }, { (int32_t)v->d.width, (int32_t)v->d.height, 1 } } };
-    VK(vkCmdBlitImage)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, *img, VK_IMAGE_LAYOUT_GENERAL, 1, &b,
-                       VK_FILTER_NEAREST);
+    if (int_bytes) {
+        VkImageCopy ic = { .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                           .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                           .extent = { v->d.width, v->d.height, 1 } };
+        VK(vkCmdCopyImage)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, *img, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
+    } else {
+        VkImageBlit b = { .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                          .srcOffsets = { { 0, 0, 0 }, { (int32_t)v->d.width, (int32_t)v->d.height, 1 } },
+                          .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                          .dstOffsets = { { 0, 0, 0 }, { (int32_t)v->d.width, (int32_t)v->d.height, 1 } } };
+        VK(vkCmdBlitImage)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, *img, VK_IMAGE_LAYOUT_GENERAL, 1, &b,
+                           VK_FILTER_NEAREST);
+    }
     nvn_vk_barrier(g.cb);
     return true;
 }
 
-/**
- * @brief Reads v's level 0 back as RGBA8 pixels (rows of 4 * width bytes): RGBA8 images as they are, other color
- * formats converted by a blit (for looking at them, not exact). NULL for depth formats.
- */
-static uint8_t *read_back(replay *r, vimg *v)
+/** @brief See nvn_vk.h. */
+uint8_t *nvn_vk_read_rgba8(replay *r, vimg *v)
 {
     if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
         return NULL;

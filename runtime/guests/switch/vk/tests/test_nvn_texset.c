@@ -9,6 +9,7 @@
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /** @brief Binds sampled image 3D element 5 and storage image 2D element 7 (set 0, bindings 3 and 35) and writes the fetched texel to a buffer. */
@@ -678,4 +679,46 @@ TEST(nvn_a_barrier_over_a_whole_volume_names_its_remaining_layers)
     CHECK_EQ(rr.levelCount, VK_REMAINING_MIP_LEVELS);
     CHECK_EQ(rr.baseArrayLayer, 0u);
     CHECK_EQ(nvn_vk_image_range(&vol).layerCount, 1u);
+}
+
+TEST(nvn_an_integer_texture_reads_back_bit_for_bit)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x1a0, tex = 0x2a0;
+    for (uint32_t y = 0; y < 4; y++)
+        for (uint32_t x = 0; x < 4; x++) {
+            uint32_t word = 0x80000000u | y << 16 | x * 0x1111u;
+            memcpy(mem + 0x4000 + y * 32 + x * 4, &word, 4);
+        }
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 11, .width = 4, .height = 4, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 32, .pool = pool, .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    vimg *v = nvn_vk_image(&r, tex);
+    CHECK(v != NULL);
+    if (!v)
+        return;
+    CHECK_EQ(v->format, VK_FORMAT_R32_UINT);
+    uint8_t *px = nvn_vk_read_rgba8(&r, v);
+    CHECK(px != NULL);
+    for (uint32_t y = 0; px && y < 4; y++)
+        CHECK(!memcmp(px + y * 16, mem + 0x4000 + y * 32, 16));
+    free(px);
+    CHECK(nvn_vk_flush(&r));
 }

@@ -777,4 +777,11 @@ int nvn_counters_prepare(replay *r);
 uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellation);
 void nvn_counters_end(uint32_t slot);
 
+/**
+ * @brief Reads v's level 0 back as RGBA8 pixels (rows of 4 * width bytes), for looking at it: RGBA8 images as they
+ * are, 4-byte integer formats bit for bit, other color formats converted by a blit (not exact). NULL for depth
+ * formats, integer formats of other sizes and failed submits; the caller frees the pixels.
+ */
+uint8_t *nvn_vk_read_rgba8(replay *r, vimg *v);
+
 #endif
