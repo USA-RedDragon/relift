@@ -1,9 +1,9 @@
 /**
  * @file test_upscale_images.c
  * @brief The upscaler stage on image views, as a guest's frame calls it (place 1): every spatial choice runs on images
- * (nearest picks the pixel the mapping names), FSR 2 with depth and motion vectors keeps a still flat picture and a
- * still ramp at ratio 1, and FSR 2 rebuilds a detailed picture from jittered frames at half size closer with the
- * jitter and motion vectors as DLSS takes them than with either one's sign turned.
+ * (nearest picks the pixel the mapping names), FSR 2 and the FSR 3 upscaler with depth and motion vectors keep a still
+ * flat picture and a still ramp at ratio 1, and both rebuild a detailed picture from jittered frames at half size closer
+ * with the jitter and motion vectors as DLSS takes them than with either one's sign turned.
  */
 #include "runner.h"
 
@@ -315,9 +315,10 @@ TEST(upscale_images_spatial_choices_run_on_images)
 }
 
 /**
- * @brief FSR 2 over 16 frames of a still W by H picture src (zero motion, flat depth); the worst channel difference.
+ * @brief Temporal choice over 16 frames of a still W by H picture src (zero motion, flat depth); the worst channel
+ * difference.
  */
-static int fsr2_still(const uint32_t *src, uint32_t w, uint32_t h)
+static int temporal_still(uint32_t choice, const uint32_t *src, uint32_t w, uint32_t h)
 {
     uint32_t *got = calloc((size_t)w * h, 4), *zero = calloc((size_t)w * h, 4);
     float *depth = malloc((size_t)w * h * 4);
@@ -333,7 +334,7 @@ static int fsr2_still(const uint32_t *src, uint32_t w, uint32_t h)
     fill(&dep, depth);
     fill(&mv, zero);
     rl_post_device d = device();
-    rl_upscaler *u = rl_upscaler_new(&d, RL_UPSCALE_FSR2, RL_UPSCALE_IMAGES);
+    rl_upscaler *u = rl_upscaler_new(&d, choice, RL_UPSCALE_IMAGES);
     if (u) {
         rl_upscale_inputs ui = { .color = { (uint64_t)(uintptr_t)color.view, w, h },
                                  .depth = { (uint64_t)(uintptr_t)dep.view, w, h },
@@ -369,21 +370,41 @@ out:
     return worst;
 }
 
-TEST(upscale_fsr2_keeps_still_pictures_at_ratio_one)
+/** @brief The worst differences of choice over a still flat picture and a still ramp at ratio 1, printed as name. */
+static void still_pictures(uint32_t choice, const char *name, int *flat_worst, int *ramp_worst)
 {
-    if (!start())
-        return;
     enum { W = 64, H = 48 };
     static uint32_t flat[W * H], ramp[W * H];
     for (uint32_t i = 0; i < W * H; i++) {
         flat[i] = 0xff2050c8u;
         ramp[i] = 0xff000000u | (i % W) * 4 | (i / W) * 5 << 8 | (255 - (i % W) * 2) << 16;
     }
-    int a = fsr2_still(flat, W, H), b = fsr2_still(ramp, W, H);
-    printf("    fsr2 64x48 still, 16 frames: flat worst difference %d, ramp worst difference %d\n", a, b);
+    *flat_worst = temporal_still(choice, flat, W, H);
+    *ramp_worst = temporal_still(choice, ramp, W, H);
+    printf("    %s 64x48 still, 16 frames: flat worst difference %d, ramp worst difference %d\n", name, *flat_worst,
+           *ramp_worst);
+}
+
+TEST(upscale_fsr2_keeps_still_pictures_at_ratio_one)
+{
+    if (!start())
+        return;
+    int a, b;
+    still_pictures(RL_UPSCALE_FSR2, "fsr2", &a, &b);
     CHECK_EQ(a, 0);
     CHECK(b <= 2);
 }
+
+TEST(upscale_fsr3_keeps_still_pictures_at_ratio_one)
+{
+    if (!start())
+        return;
+    int a, b;
+    still_pictures(RL_UPSCALE_FSR3, "fsr3", &a, &b);
+    CHECK_EQ(a, 0);
+    CHECK(b <= 2);
+}
+
 /** @brief The test picture at display pixel position (x, y): detail finer than half the display size holds. */
 static float detail(float x, float y)
 {
@@ -403,13 +424,13 @@ static float halton(uint32_t i, uint32_t b)
 }
 
 /**
- * @brief FSR 2 over 48 frames of detail() at W by H render pixels to twice that, the picture moving speed display
- * pixels a frame to the right. Each frame is drawn with the Halton jitter the way DLSS and FSR 2 take it (a render
- * pixel's center shows the picture at the center minus the jitter) and its motion vectors point to where a pixel was
- * the frame before, in render pixels; the stage gets the jitter times jsign and the motion vectors times msign. The
+ * @brief Temporal choice over 48 frames of detail() at W by H render pixels to twice that, the picture moving speed
+ * display pixels a frame to the right. Each frame is drawn with the Halton jitter the way DLSS and FSR 2 take it (a
+ * render pixel's center shows the picture at the center minus the jitter) and its motion vectors point to where a pixel
+ * was the frame before, in render pixels; the stage gets the jitter times jsign and the motion vectors times msign. The
  * mean channel difference from the picture drawn at display size, over the last frame.
  */
-static double fsr2_moving(uint32_t w, uint32_t h, float speed, float jsign, float msign)
+static double temporal_moving(uint32_t choice, uint32_t w, uint32_t h, float speed, float jsign, float msign)
 {
     uint32_t dw = 2 * w, dh = 2 * h;
     uint32_t *frame = malloc((size_t)w * h * 4), *got = malloc((size_t)dw * dh * 4);
@@ -429,7 +450,7 @@ static double fsr2_moving(uint32_t w, uint32_t h, float speed, float jsign, floa
     fill(&dep, depth);
     fill(&mv, motion);
     rl_post_device d = device();
-    rl_upscaler *u = rl_upscaler_new(&d, RL_UPSCALE_FSR2, RL_UPSCALE_IMAGES);
+    rl_upscaler *u = rl_upscaler_new(&d, choice, RL_UPSCALE_IMAGES);
     enum { FRAMES = 48 };
     bool ran = u != NULL;
     float shift = 0.0f;
@@ -478,16 +499,30 @@ out:
     return err;
 }
 
-TEST(upscale_fsr2_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
+/** @brief Checks choice (printed as name) rebuilds detail() closer with the jitter and motion as DLSS gives them. */
+static void takes_dlss_conventions(uint32_t choice, const char *name)
 {
-    if (!start())
-        return;
     enum { W = 48, H = 32 };
-    double still = fsr2_moving(W, H, 0.0f, 1.0f, 1.0f), still_flip = fsr2_moving(W, H, 0.0f, -1.0f, 1.0f);
-    double moving = fsr2_moving(W, H, 1.0f, 1.0f, 1.0f), moving_flip = fsr2_moving(W, H, 1.0f, 1.0f, -1.0f);
-    printf("    fsr2 %ux%u -> %ux%u, mean difference: still %.2f (jitter turned %.2f), moving %.2f (motion turned %.2f)\n",
-           W, H, 2 * W, 2 * H, still, still_flip, moving, moving_flip);
+    double still = temporal_moving(choice, W, H, 0.0f, 1.0f, 1.0f);
+    double still_flip = temporal_moving(choice, W, H, 0.0f, -1.0f, 1.0f);
+    double moving = temporal_moving(choice, W, H, 1.0f, 1.0f, 1.0f);
+    double moving_flip = temporal_moving(choice, W, H, 1.0f, 1.0f, -1.0f);
+    printf("    %s %ux%u -> %ux%u, mean difference: still %.2f (jitter turned %.2f), moving %.2f (motion turned "
+           "%.2f)\n",
+           name, W, H, 2 * W, 2 * H, still, still_flip, moving, moving_flip);
     CHECK(still < 0.7 * still_flip);
     CHECK(moving < 0.7 * moving_flip);
+}
+
+TEST(upscale_fsr2_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
+{
+    if (start())
+        takes_dlss_conventions(RL_UPSCALE_FSR2, "fsr2");
+}
+
+TEST(upscale_fsr3_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
+{
+    if (start())
+        takes_dlss_conventions(RL_UPSCALE_FSR3, "fsr3");
 }
 #endif

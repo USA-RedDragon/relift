@@ -35,13 +35,14 @@ pub const MIN_API: u32 = 30;
 /// landscape while another display shows a screen of the game.
 /// The license of the Zstandard decoder the Switch runtime compiles in.
 const LICENSE_ZSTD: &str = include_str!("../../runtime/third_party/zstd/LICENSE");
-/// The licenses of the picture options' FXAA, SMAA, FSR 1 and FSR 2 passes, in every runtime.
+/// The licenses of the picture options' FXAA, SMAA, FSR 1, FSR 2 and FSR 3 passes, in every runtime.
 const LICENSE_FXAA: &str = include_str!("../../runtime/third_party/fxaa/LICENSE");
 const LICENSE_SMAA: &str = include_str!("../../runtime/third_party/smaa/LICENSE");
 const LICENSE_FSR1: &str = include_str!("../../runtime/third_party/fsr1/LICENSE");
 /// The license of the RenderDoc in-application API header, in every runtime.
 const LICENSE_RENDERDOC: &str = include_str!("../../runtime/third_party/renderdoc/LICENSE");
 const LICENSE_FSR2: &str = include_str!("../../runtime/third_party/fsr2/LICENSE");
+const LICENSE_FSR3: &str = include_str!("../../runtime/third_party/fsr3/LICENSE");
 const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 /// The Java sources of the app, compiled into `classes.dex` with SDL3's
@@ -1035,6 +1036,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         LICENSE_RENDERDOC.as_bytes().to_vec(),
     );
     z.add("assets/licenses/fsr2.txt", LICENSE_FSR2.as_bytes().to_vec());
+    z.add("assets/licenses/fsr3.txt", LICENSE_FSR3.as_bytes().to_vec());
     if a.deps.dav1d.is_some() {
         z.add(
             "assets/licenses/dav1d.txt",

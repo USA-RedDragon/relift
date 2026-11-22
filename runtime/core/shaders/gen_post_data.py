@@ -2,8 +2,9 @@
 picture pipeline: the SPIR-V of every pass in this folder (compiled with
 glslc from shaderc, FSR 1's with runtime/third_party/fsr1) and SMAA's area
 and search textures, read from runtime/third_party/smaa; and
-runtime/core/fsr2_data.h, FSR 2's passes from runtime/third_party/fsr2 with
-the descriptors each one reads. Run it from any
+runtime/core/fsr2_data.h and fsr3_data.h, the passes of FSR 2 and of the FSR 3
+upscaler from runtime/third_party/fsr2 and fsr3 with the descriptors each one
+reads. Run it from any
 folder after changing a shader or the vendored files; it needs glslc on PATH.
 """
 
@@ -19,8 +20,10 @@ CORE = os.path.dirname(HERE)
 SMAA = os.path.join(CORE, "..", "third_party", "smaa")
 FSR1 = os.path.join(CORE, "..", "third_party", "fsr1")
 FSR2 = os.path.join(CORE, "..", "third_party", "fsr2")
+FSR3 = os.path.join(CORE, "..", "third_party", "fsr3")
 OUT = os.path.join(CORE, "post_data.h")
 OUT_FSR2 = os.path.join(CORE, "fsr2_data.h")
+OUT_FSR3 = os.path.join(CORE, "fsr3_data.h")
 
 FSR2_PASSES = [
     "compute_luminance_pyramid",
@@ -31,6 +34,17 @@ FSR2_PASSES = [
     "rcas",
 ]
 FSR2_OPTIONS = ["HDR_COLOR_INPUT", "LOW_RESOLUTION_MOTION_VECTORS", "INVERTED_DEPTH", "APPLY_SHARPENING"]
+FSR3_PASSES = [
+    "prepare_inputs",
+    "luma_pyramid",
+    "shading_change_pyramid",
+    "shading_change",
+    "prepare_reactivity",
+    "luma_instability",
+    "accumulate",
+    "rcas",
+]
+FSR3_OPTIONS = FSR2_OPTIONS
 
 PASSES = [
     ("fxaa", "fxaa.comp", []),
@@ -100,17 +114,19 @@ def reflect(words):
     return sorted(out)
 
 
-def fsr2(work):
-    """The lines of fsr2_data.h."""
+def ffx_modules(passes, noptions, compile_pass):
+    """The deduplicated modules of passes over noptions option sets: SPIR-V blobs, their descriptor tables, the
+    resource names they read, and the module of each pass and option set. compile_pass(name, options, optimize)
+    gives a module's words; the unoptimized one keeps the names the optimized one drops."""
     blobs, index, tables, names = [], {}, [], []
     table = []
-    for name in FSR2_PASSES:
+    for name in passes:
         row = []
-        for options in range(1 << len(FSR2_OPTIONS)):
-            words = fsr2_spirv(name, options, True, work)
+        for options in range(noptions):
+            words = compile_pass(name, options, True)
             if words not in index:
                 used = {(s, b) for s, b, _, _ in reflect(words)}
-                named = {(s, b): (k, n) for s, b, k, n in reflect(fsr2_spirv(name, options, False, work))}
+                named = {(s, b): (k, n) for s, b, k, n in reflect(compile_pass(name, options, False))}
                 binds = []
                 for key in sorted(used):
                     kind, var = named[key]
@@ -122,69 +138,118 @@ def fsr2(work):
                 tables.append(binds)
             row.append(index[words])
         table.append(row)
-    lines = [
-        "/**",
-        " * @file fsr2_data.h",
-        " * @brief The data of FSR 2 (fsr2.c), written by runtime/core/shaders/gen_post_data.py from",
-        " * runtime/third_party/fsr2: the SPIR-V of its passes (glslc -O, 32-bit floats, the jittered motion vector",
-        " * path compiled in) for every combination of the options each one reads, and the descriptors each module",
-        " * reads.",
-        " */",
-        "#ifndef RELIFT_CORE_FSR2_DATA_H",
-        "#define RELIFT_CORE_FSR2_DATA_H",
+    return blobs, tables, names, table
+
+
+def ffx_header(p, brief, bind_type, passes, options, modules, table_doc):
+    """The lines of an FFX data header with prefix p (fsr2, fsr3) from ffx_modules' result."""
+    blobs, tables, names, table = modules
+    up = p.upper()
+    lines = ["/**", f" * @file {p}_data.h", *brief, " */", f"#ifndef RELIFT_CORE_{up}_DATA_H", f"#define RELIFT_CORE_{up}_DATA_H"]
+    lines += [
         "",
         "#include <stdint.h>",
         "",
         "/** @brief One descriptor of a module: set, binding, VkDescriptorType and the index of its name. */",
-        "typedef struct rl_fsr2_bind {",
-        "    uint8_t set, binding, type, name;",
-        "} rl_fsr2_bind;",
+        f"typedef struct rl_{p}_bind {{",
+        f"    {bind_type} set, binding, type, name;",
+        f"}} rl_{p}_bind;",
         "",
-        f"#define RL_FSR2_PASSES {len(FSR2_PASSES)}",
-        f"#define RL_FSR2_OPTIONS {1 << len(FSR2_OPTIONS)}",
-        f"#define RL_FSR2_MODULES {len(blobs)}",
-        f"#define RL_FSR2_NAMES {len(names)}",
+        f"#define RL_{up}_PASSES {len(passes)}",
+        f"#define RL_{up}_OPTIONS {1 << len(options)}",
+        f"#define RL_{up}_MODULES {len(blobs)}",
+        f"#define RL_{up}_NAMES {len(names)}",
         "",
         "/** @brief The resource names the modules read, as the shaders call them. */",
-        "static const char *const rl_fsr2_names[RL_FSR2_NAMES] = {",
+        f"static const char *const rl_{p}_names[RL_{up}_NAMES] = {{",
     ]
     lines += [f'    "{n}",' for n in names]
     lines += ["};", ""]
     for i, words in enumerate(blobs):
-        lines.append(f"static const uint32_t rl_fsr2_spv_{i}[] = {{")
+        lines.append(f"static const uint32_t rl_{p}_spv_{i}[] = {{")
         lines += rows(words, 8, lambda v: f"0x{v:08x}")
         lines += ["};", ""]
-        lines.append(f"static const rl_fsr2_bind rl_fsr2_binds_{i}[] = {{")
+        lines.append(f"static const rl_{p}_bind rl_{p}_binds_{i}[] = {{")
         lines += [f"    {{ {s}, {b}, {k}, {n} }}," for s, b, k, n in tables[i]]
         lines += ["};", ""]
     lines += [
         "/** @brief A module: its SPIR-V and its descriptors. */",
-        "typedef struct rl_fsr2_module {",
+        f"typedef struct rl_{p}_module {{",
         "    const uint32_t *code;",
         "    uint32_t size;",
-        "    const rl_fsr2_bind *binds;",
+        f"    const rl_{p}_bind *binds;",
         "    uint32_t nbinds;",
-        "} rl_fsr2_module;",
+        f"}} rl_{p}_module;",
         "",
-        "static const rl_fsr2_module rl_fsr2_modules[RL_FSR2_MODULES] = {",
+        f"static const rl_{p}_module rl_{p}_modules[RL_{up}_MODULES] = {{",
     ]
     lines += [
-        f"    {{ rl_fsr2_spv_{i}, sizeof rl_fsr2_spv_{i}, rl_fsr2_binds_{i}, {len(tables[i])} }},"
+        f"    {{ rl_{p}_spv_{i}, sizeof rl_{p}_spv_{i}, rl_{p}_binds_{i}, {len(tables[i])} }},"
         for i in range(len(blobs))
     ]
-    lines += [
-        "};",
-        "",
-        "/**",
-        " * @brief The module of each pass (compute_luminance_pyramid, reconstruct_previous_depth, depth_clip, lock,",
-        " * accumulate, rcas) for options bit 0 HDR color, bit 1 motion vectors at render size, bit 2 inverted depth,",
-        " * bit 3 sharpening (an rcas pass after accumulate).",
-        " */",
-        "static const uint8_t rl_fsr2_pass_module[RL_FSR2_PASSES][RL_FSR2_OPTIONS] = {",
-    ]
+    lines += ["};", "", "/**", *table_doc, " */", f"static const uint8_t rl_{p}_pass_module[RL_{up}_PASSES][RL_{up}_OPTIONS] = {{"]
     lines += ["    { " + ", ".join(str(v) for v in row) + " }," for row in table]
     lines += ["};", "", "#endif", ""]
     return lines
+
+
+def fsr2(work):
+    """The lines of fsr2_data.h."""
+    modules = ffx_modules(FSR2_PASSES, 1 << len(FSR2_OPTIONS), lambda n, o, opt: fsr2_spirv(n, o, opt, work))
+    brief = [
+        " * @brief The data of FSR 2 (fsr2.c), written by runtime/core/shaders/gen_post_data.py from",
+        " * runtime/third_party/fsr2: the SPIR-V of its passes (glslc -O, 32-bit floats, the jittered motion vector",
+        " * path compiled in) for every combination of the options each one reads, and the descriptors each module",
+        " * reads.",
+    ]
+    doc = [
+        " * @brief The module of each pass (compute_luminance_pyramid, reconstruct_previous_depth, depth_clip, lock,",
+        " * accumulate, rcas) for options bit 0 HDR color, bit 1 motion vectors at render size, bit 2 inverted depth,",
+        " * bit 3 sharpening (an rcas pass after accumulate).",
+    ]
+    return ffx_header("fsr2", brief, "uint8_t", FSR2_PASSES, FSR2_OPTIONS, modules, doc)
+
+
+def fsr3_spirv(name, options, optimize, work):
+    out = os.path.join(work, "fsr3.spv")
+    defines = [
+        "-DFFX_GLSL=1",
+        "-DFFX_GPU=1",
+        "-DFFX_HALF=0",
+        "-DFFX_FSR3UPSCALER_OPTION_JITTERED_MOTION_VECTORS=1",
+        "-DFFX_FSR3UPSCALER_OPTION_UPSAMPLE_SAMPLERS_USE_DATA_HALF=0",
+        "-DFFX_FSR3UPSCALER_OPTION_ACCUMULATE_SAMPLERS_USE_DATA_HALF=0",
+        "-DFFX_FSR3UPSCALER_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=0",
+        "-DFFX_FSR3UPSCALER_OPTION_POSTPROCESSLOCKSTATUS_SAMPLERS_USE_DATA_HALF=0",
+        "-DFFX_FSR3UPSCALER_OPTION_UPSAMPLE_USE_LANCZOS_TYPE=2",
+        "-DFFX_FSR3UPSCALER_OPTION_REPROJECT_USE_LANCZOS_TYPE=0",
+    ]
+    for i, opt in enumerate(FSR3_OPTIONS):
+        defines.append(f"-DFFX_FSR3UPSCALER_OPTION_{opt}={(options >> i) & 1}")
+    src = os.path.join(FSR3, "shaders", f"ffx_fsr3upscaler_{name}_pass.glsl")
+    inc = os.path.join(FSR3, "gpu")
+    cmd = ["glslc", "--target-env=vulkan1.1", "-O" if optimize else "-O0", "-fshader-stage=comp", "-I", inc, *defines]
+    subprocess.run([*cmd, src, "-o", out], check=True)
+    with open(out, "rb") as f:
+        data = f.read()
+    return struct.unpack(f"<{len(data) // 4}I", data)
+
+
+def fsr3(work):
+    """The lines of fsr3_data.h."""
+    modules = ffx_modules(FSR3_PASSES, 1 << len(FSR3_OPTIONS), lambda n, o, opt: fsr3_spirv(n, o, opt, work))
+    brief = [
+        " * @brief The data of the FSR 3 upscaler (fsr3.c), written by runtime/core/shaders/gen_post_data.py from",
+        " * runtime/third_party/fsr3: the SPIR-V of its passes (glslc -O, 32-bit floats, the jittered motion vector",
+        " * path compiled in, the approximate Lanczos upsample and the reference reprojection) for every combination",
+        " * of the options each one reads, and the descriptors each module reads.",
+    ]
+    doc = [
+        " * @brief The module of each pass (prepare_inputs, luma_pyramid, shading_change_pyramid, shading_change,",
+        " * prepare_reactivity, luma_instability, accumulate, rcas) for options bit 0 HDR color, bit 1 motion vectors",
+        " * at render size, bit 2 inverted depth, bit 3 sharpening (an rcas pass after accumulate).",
+    ]
+    return ffx_header("fsr3", brief, "uint16_t", FSR3_PASSES, FSR3_OPTIONS, modules, doc)
 
 
 def texture(name, array):
@@ -222,6 +287,7 @@ def main():
             lines += rows(words, 8, lambda v: f"0x{v:08x}")
             lines += ["};", ""]
         fsr2_lines = fsr2(work)
+        fsr3_lines = fsr3(work)
     area = texture("AreaTex.h", "areaTexBytes")
     search = texture("SearchTex.h", "searchTexBytes")
     if len(area) != 160 * 560 * 2 or len(search) != 64 * 16:
@@ -235,6 +301,8 @@ def main():
         f.write("\n".join(lines))
     with open(OUT_FSR2, "w", encoding="utf-8") as f:
         f.write("\n".join(fsr2_lines))
+    with open(OUT_FSR3, "w", encoding="utf-8") as f:
+        f.write("\n".join(fsr3_lines))
 
 
 if __name__ == "__main__":

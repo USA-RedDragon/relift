@@ -149,7 +149,9 @@ bool rl_ffx_pipeline_new(const rl_ffx_vk *vk, const uint32_t *code, uint32_t siz
     rlvk_descriptor_set_layout_create_info sl = {
         .sType = RLVK_ST_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = k, .pBindings = lb
     };
-    if (nbefore + 1 > MAX_SETS || vk->vkCreateDescriptorSetLayout(vk->device, &sl, NULL, &p->set_layout) != RLVK_SUCCESS)
+    if (nbefore + 1 > MAX_SETS)
+        return false;
+    if (vk->vkCreateDescriptorSetLayout(vk->device, &sl, NULL, &p->set_layout) != RLVK_SUCCESS)
         return false;
     rlvk_handle layouts[MAX_SETS];
     for (uint32_t i = 0; i < nbefore; i++)
