@@ -23,6 +23,7 @@ pub mod pseudo;
 mod simt;
 mod tex;
 mod uniform;
+mod vmm;
 
 pub use calls::ASSERT_BINDING;
 pub use host::{
@@ -56,6 +57,8 @@ const RETURN_VALUE: u16 = 254;
 pub(crate) const PHYSICAL_STORAGE_BUFFER: u32 = 5349;
 const CBUF_VEC4S: u32 = 4096;
 const EXECUTION_MODE_MAXIMALLY_RECONVERGES: u32 = 6023;
+const MEMORY_MODEL_GLSL450: u32 = 1;
+const MEMORY_MODEL_VULKAN: u32 = 3;
 
 /// Why a program could not be translated: the first construct the
 /// translator does not handle.
@@ -1146,6 +1149,10 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
         c.cap(5347);
         c.exts.insert("SPV_KHR_physical_storage_buffer");
     }
+    let vmm = vmm::needed(&c);
+    if vmm {
+        vmm::lower(&mut c);
+    }
     for &cap in &c.caps {
         crate::spirv::inst(&mut c.m.caps, op::CAPABILITY, &[cap]);
     }
@@ -1156,7 +1163,12 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
     e.extend(crate::spirv::str_words("GLSL.std.450"));
     crate::spirv::inst(&mut c.m.ext, op::EXT_INST_IMPORT, &e);
     let addressing = if c.iface.global_memory { 5348 } else { 0 };
-    crate::spirv::inst(&mut c.m.head, op::MEMORY_MODEL, &[addressing, 1]);
+    let model = if vmm {
+        MEMORY_MODEL_VULKAN
+    } else {
+        MEMORY_MODEL_GLSL450
+    };
+    crate::spirv::inst(&mut c.m.head, op::MEMORY_MODEL, &[addressing, model]);
     let model = match stage {
         Stage::Vertex => 0,
         Stage::TessControl => 1,
