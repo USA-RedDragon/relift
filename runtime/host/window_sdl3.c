@@ -9,12 +9,16 @@
  * rl_input snapshots; with no gamepad connected, pad 0 follows the keyboard.
  * Fingers, the gamepad count, the view size and the back gesture go to the
  * on-screen controller (touchpad.h); when it is in use, frames are drawn at
- * the picture place it names with its overlay on top.
+ * the picture place it names with its overlay on top. While a text entry
+ * panel is open (textentry.h), the window's presenter shows the panel over
+ * the last picture, typed text and keys go to the panel and the guest gets
+ * no input.
  */
 #include <relift/appinfo.h>
 #include <relift/input.h>
 #include <relift/post.h>
 #include <relift/settings.h>
+#include <relift/textentry.h>
 #include <relift/touchpad.h>
 #include <relift/window.h>
 
@@ -65,6 +69,8 @@ typedef struct sdl_win {
     uint32_t lw, lh;
     SDL_Texture *ov;
     uint32_t ow, oh;
+    SDL_Texture *te;
+    uint32_t te_w, te_h;
     bool logical;
     bool fit;
     bool integer;
@@ -84,6 +90,28 @@ static sdl_win *g_wins;
 static SDL_Gamepad *g_pads[RL_INPUT_PADS];
 static uint64_t g_keys[4];
 
+/** @brief The text entry panel: the window it is shown in, the picture under it and the panel's pixels. */
+static struct {
+    SDL_Mutex *lock;
+    sdl_win *w;
+    uint8_t *under;
+    uint32_t uw, uh;
+    uint8_t *rgb;
+    size_t cap;
+    bool on;
+    bool dirty;
+    uint64_t drawn_ns;
+} g_te;
+
+/** @brief How often the panel is drawn again for its caret's blink. */
+#define TE_BLINK_NS 265000000ull
+
+#ifdef RL_MOBILE
+#define TE_TOUCH true
+#else
+#define TE_TOUCH false
+#endif
+
 static void leave(void)
 {
     SDL_Event e;
@@ -100,6 +128,232 @@ static const rl_touchpad_host g_touch_host = {
     .leave = leave,
 };
 
+static void on_loop(SDL_MainThreadCallback fn, void *arg);
+
+static void sdl_wake(void);
+
+/** @brief Shows the panel's pixels with the window's SDL renderer (loop thread, panel lock held). */
+static void te_render(sdl_win *w, uint32_t W, uint32_t H)
+{
+    if (!w->r)
+        return;
+    if (!w->te || w->te_w != W || w->te_h != H) {
+        if (w->te)
+            SDL_DestroyTexture(w->te);
+        w->te = SDL_CreateTexture(w->r, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, (int)W, (int)H);
+        w->te_w = W;
+        w->te_h = H;
+        if (!w->te)
+            return;
+    }
+    SDL_UpdateTexture(w->te, NULL, g_te.rgb, (int)(W * 3));
+    SDL_SetRenderLogicalPresentation(w->r, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+    w->logical = false;
+    SDL_RenderTexture(w->r, w->te, NULL, NULL);
+    SDL_RenderPresent(w->r);
+}
+
+/**
+ * @brief Draws the panel: into the window's presenter, or, for a window the SDL renderer draws (the on-screen
+ * controller's), with the renderer on the loop thread.
+ */
+static void te_draw(void)
+{
+    SDL_LockMutex(g_te.lock);
+    sdl_win *w = g_te.w;
+    if (g_te.on && w && !w->pres) {
+        if (SDL_GetCurrentThreadID() != g_loop) {
+            g_te.dirty = true;
+            SDL_UnlockMutex(g_te.lock);
+            sdl_wake();
+            return;
+        }
+        g_te.dirty = false;
+    }
+    if (g_te.on && w) {
+        uint32_t W = __atomic_load_n(&w->width, __ATOMIC_RELAXED), H = __atomic_load_n(&w->height, __ATOMIC_RELAXED);
+        size_t need = (size_t)W * H * 3;
+        if (need > g_te.cap) {
+            uint8_t *g = realloc(g_te.rgb, need);
+            if (g) {
+                g_te.rgb = g;
+                g_te.cap = need;
+            }
+        }
+        uint64_t now = rl_clock_ns();
+        __atomic_store_n(&g_te.drawn_ns, now, __ATOMIC_RELAXED);
+        if (W && H && need <= g_te.cap &&
+            rl_text_entry_draw(g_te.rgb, W, H, g_te.under, g_te.uw, g_te.uh, TE_TOUCH, now)) {
+            if (w->pres)
+                rl_present_still(w->pres, g_te.rgb, W, H);
+            else
+                te_render(w, W, H);
+        }
+    }
+    SDL_UnlockMutex(g_te.lock);
+}
+
+static void te_start_input(void *arg)
+{
+    sdl_win *w = arg;
+    memset(g_keys, 0, sizeof g_keys);
+    int32_t f[4];
+    rl_text_entry_field(__atomic_load_n(&w->width, __ATOMIC_RELAXED), __atomic_load_n(&w->height, __ATOMIC_RELAXED),
+                        TE_TOUCH, f);
+    float density = SDL_GetWindowPixelDensity(w->w);
+    if (density <= 0)
+        density = 1;
+    SDL_Rect area = { (int)((float)f[0] / density), (int)((float)f[1] / density), (int)((float)f[2] / density),
+                      (int)((float)f[3] / density) };
+    SDL_SetTextInputArea(w->w, &area, 0);
+    SDL_StartTextInput(w->w);
+}
+
+static void te_stop_input(void *arg)
+{
+    sdl_win *w = arg;
+    SDL_StopTextInput(w->w);
+    memset(g_keys, 0, sizeof g_keys);
+}
+
+/**
+ * @brief Shows the panel in the first window that has shown a frame, over the picture it shows now: read back from
+ * its presenter, or for a window the SDL renderer draws, taken from the next frame it gets.
+ */
+static bool te_show(void)
+{
+    SDL_LockMutex(g_lock);
+    sdl_win *w = g_wins;
+    while (w && !w->pres && !w->r)
+        w = w->next;
+    SDL_UnlockMutex(g_lock);
+    if (!w)
+        return false;
+    uint32_t uw = 0, uh = 0;
+    uint8_t *under = NULL;
+    if (w->pres) {
+        rl_present_stats st;
+        rl_present_stats_get(w->pres, &st);
+        if (!st.presented)
+            return false;
+        under = rl_present_snapshot(w->pres, 1000, &uw, &uh);
+        if (!under)
+            return false;
+    }
+    SDL_LockMutex(g_te.lock);
+    free(g_te.under);
+    g_te.under = under;
+    g_te.uw = uw;
+    g_te.uh = uh;
+    g_te.w = w;
+    g_te.on = true;
+    SDL_UnlockMutex(g_te.lock);
+    on_loop(te_start_input, w);
+    te_draw();
+    return true;
+}
+
+static void te_hide(void)
+{
+    SDL_LockMutex(g_te.lock);
+    sdl_win *w = g_te.w;
+    g_te.on = false;
+    g_te.w = NULL;
+    free(g_te.under);
+    g_te.under = NULL;
+    SDL_UnlockMutex(g_te.lock);
+    if (!w)
+        return;
+    if (w->pres)
+        rl_present_still(w->pres, NULL, 0, 0);
+    on_loop(te_stop_input, w);
+}
+
+static const rl_text_entry_host g_te_host = { te_show, te_hide, te_draw };
+
+/** @brief While the panel is open, takes the events it uses and keeps keys, buttons and touches from the guest. */
+static bool te_event(const SDL_Event *e)
+{
+    if (!rl_text_entry_active())
+        return false;
+    switch (e->type) {
+    case SDL_EVENT_TEXT_INPUT:
+        rl_text_entry_input(e->text.text);
+        return true;
+    case SDL_EVENT_KEY_DOWN: {
+        int k = -1;
+        switch (e->key.key) {
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            k = RL_TEXT_ENTRY_KEY_CONFIRM;
+            break;
+        case SDLK_ESCAPE:
+        case SDLK_AC_BACK:
+            k = RL_TEXT_ENTRY_KEY_CANCEL;
+            break;
+        case SDLK_BACKSPACE:
+            k = RL_TEXT_ENTRY_KEY_BACKSPACE;
+            break;
+        case SDLK_DELETE:
+            k = RL_TEXT_ENTRY_KEY_DELETE;
+            break;
+        case SDLK_LEFT:
+            k = RL_TEXT_ENTRY_KEY_LEFT;
+            break;
+        case SDLK_RIGHT:
+            k = RL_TEXT_ENTRY_KEY_RIGHT;
+            break;
+        case SDLK_HOME:
+            k = RL_TEXT_ENTRY_KEY_HOME;
+            break;
+        case SDLK_END:
+            k = RL_TEXT_ENTRY_KEY_END;
+            break;
+        default:
+            break;
+        }
+        if (k >= 0)
+            rl_text_entry_key(k);
+        return true;
+    }
+    case SDL_EVENT_KEY_UP:
+        return true;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START)
+            rl_text_entry_key(RL_TEXT_ENTRY_KEY_CONFIRM);
+        else if (e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK)
+            rl_text_entry_key(RL_TEXT_ENTRY_KEY_CANCEL);
+        return true;
+    case SDL_EVENT_FINGER_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+        SDL_LockMutex(g_te.lock);
+        sdl_win *w = g_te.w;
+        uint32_t W = w ? __atomic_load_n(&w->width, __ATOMIC_RELAXED) : 0;
+        uint32_t H = w ? __atomic_load_n(&w->height, __ATOMIC_RELAXED) : 0;
+        float density = w ? SDL_GetWindowPixelDensity(w->w) : 1;
+        SDL_UnlockMutex(g_te.lock);
+        float x, y;
+        if (e->type == SDL_EVENT_FINGER_DOWN) {
+            x = e->tfinger.x * (float)W;
+            y = e->tfinger.y * (float)H;
+        } else {
+            x = e->button.x * (density > 0 ? density : 1);
+            y = e->button.y * (density > 0 ? density : 1);
+        }
+        if (W && H)
+            rl_text_entry_tap(x, y, W, H, TE_TOUCH);
+        return true;
+    }
+    case SDL_EVENT_FINGER_MOTION:
+    case SDL_EVENT_FINGER_UP:
+    case SDL_EVENT_FINGER_CANCELED:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static int sdl_init(void)
 {
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
@@ -113,6 +367,7 @@ static int sdl_init(void)
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
     rl_touchpad_set_host(&g_touch_host);
+    rl_text_entry_set_host(&g_te_host);
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         rl_log(RL_LOG_INFO, "window", "SDL video init failed: %s", SDL_GetError());
         return -1;
@@ -120,7 +375,8 @@ static int sdl_init(void)
     g_loop = SDL_GetCurrentThreadID();
     g_lock = SDL_CreateMutex();
     g_wake_event = SDL_RegisterEvents(1);
-    if (!g_lock || !g_wake_event) {
+    g_te.lock = SDL_CreateMutex();
+    if (!g_lock || !g_wake_event || !g_te.lock) {
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
         return -1;
     }
@@ -343,6 +599,13 @@ static void publish(void)
     s.pointer.buttons = ((mb & SDL_BUTTON_LMASK) ? 1u << RL_PTR_LEFT : 0) | ((mb & SDL_BUTTON_RMASK) ? 1u << RL_PTR_RIGHT : 0) |
                         ((mb & SDL_BUTTON_MMASK) ? 1u << RL_PTR_MIDDLE : 0);
     s.touch_count = rl_touchpad_game_touches(s.touches, RL_INPUT_TOUCHES);
+    if (rl_text_entry_active()) {
+        rl_input_snapshot quiet;
+        memset(&quiet, 0, sizeof quiet);
+        for (int i = 0; i < RL_INPUT_PADS; i++)
+            quiet.pads[i].connected = s.pads[i].connected;
+        s = quiet;
+    }
     rl_input_publish(&s);
 }
 
@@ -378,8 +641,13 @@ static void count_host(const SDL_Event *e)
 static void handle(const SDL_Event *e)
 {
     count_host(e);
-    if (e->type >= SDL_EVENT_WINDOW_FIRST && e->type <= SDL_EVENT_WINDOW_LAST)
+    if (te_event(e))
+        return;
+    if (e->type >= SDL_EVENT_WINDOW_FIRST && e->type <= SDL_EVENT_WINDOW_LAST) {
         window_event(e);
+        if (e->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED && rl_text_entry_active())
+            te_draw();
+    }
     else if (e->type == SDL_EVENT_GAMEPAD_ADDED || e->type == SDL_EVENT_GAMEPAD_REMOVED)
         pad_event(e);
     else if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP)
@@ -412,12 +680,16 @@ static void sdl_run(bool (*done)(void *user), void *user)
 {
     while (!done(user)) {
         SDL_Event e;
-        if (!SDL_WaitEventTimeout(&e, wait_ms()))
-            continue;
-        handle(&e);
-        while (SDL_PollEvent(&e))
+        bool got = SDL_WaitEventTimeout(&e, wait_ms());
+        if (got) {
             handle(&e);
-        publish();
+            while (SDL_PollEvent(&e))
+                handle(&e);
+            publish();
+        }
+        if (rl_text_entry_active() && (g_te.dirty || rl_clock_ns() - __atomic_load_n(&g_te.drawn_ns, __ATOMIC_RELAXED) >=
+                                                            TE_BLINK_NS))
+            te_draw();
     }
 }
 
@@ -541,6 +813,8 @@ static void do_close(void *p)
         SDL_DestroyTexture(w->t);
     if (w->ov)
         SDL_DestroyTexture(w->ov);
+    if (w->te)
+        SDL_DestroyTexture(w->te);
     if (w->r)
         SDL_DestroyRenderer(w->r);
     SDL_DestroyWindow(w->w);
@@ -681,6 +955,25 @@ static void do_present(void *p)
         w->logical = false;
     }
     SDL_UpdateTexture(w->t, NULL, q->rgb, (int)(q->width * 3));
+    SDL_LockMutex(g_te.lock);
+    bool te_here = g_te.on && g_te.w == w;
+    if (te_here && !g_te.under) {
+        g_te.under = malloc((size_t)q->width * q->height * 4);
+        if (g_te.under) {
+            for (size_t i = 0; i < (size_t)q->width * q->height; i++) {
+                memcpy(g_te.under + i * 4, q->rgb + i * 3, 3);
+                g_te.under[i * 4 + 3] = 255;
+            }
+            g_te.uw = q->width;
+            g_te.uh = q->height;
+            g_te.dirty = true;
+        }
+    }
+    SDL_UnlockMutex(g_te.lock);
+    if (te_here) {
+        te_draw();
+        return;
+    }
     bool pad = rl_touchpad_wanted();
     if (w->logical == pad) {
         SDL_SetRenderLogicalPresentation(w->r, pad ? 0 : (int)q->shown_w, pad ? 0 : (int)q->shown_h,
