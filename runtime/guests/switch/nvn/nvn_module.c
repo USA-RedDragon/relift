@@ -400,11 +400,20 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         return NULL;
     }
     m->stage = stage;
-    m->nrecs = nvn_shader_iface(key, m->recs, NVN_MODULE_RECS);
+    m->nrecs = nvn_shader_iface(key, NULL, 0);
+    m->recs = calloc(m->nrecs ? m->nrecs : 1, sizeof *m->recs);
+    if (!m->recs) {
+        free(w);
+        free(m);
+        why_set(why, why_n, "out of memory reading the interface of %s", key);
+        return NULL;
+    }
+    nvn_shader_iface(key, m->recs, m->nrecs);
     for (uint32_t i = 0; i < m->nrecs; i++)
         m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
     if (!patch_spirv(w, n, stage, m)) {
         free(w);
+        free(m->recs);
         free(m);
         why_set(why, why_n, "translation %s is not SPIR-V", key);
         return NULL;
@@ -415,6 +424,7 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     VkResult vr = VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m->m);
     free(w);
     if (vr != VK_SUCCESS) {
+        free(m->recs);
         free(m);
         why_set(why, why_n, "vkCreateShaderModule failed for %s (%d)", key, (int)vr);
         return NULL;
@@ -425,11 +435,13 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     pthread_mutex_unlock(&g_lock);
     if (have) {
         VK(vkDestroyShaderModule)(g.dev, m->m, NULL);
+        free(m->recs);
         free(m);
         return have;
     }
     if (!ok) {
         VK(vkDestroyShaderModule)(g.dev, m->m, NULL);
+        free(m->recs);
         free(m);
         why_set(why, why_n, "out of memory making module %s", key);
         return NULL;

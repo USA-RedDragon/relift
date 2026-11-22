@@ -497,11 +497,11 @@ uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
     size_t recs = TABLE_HEAD + (size_t)t->n * TABLE_ENTRY, room = (t->len - recs) / 16;
     if (first > room || count > room - first)
         return 0;
-    for (uint32_t i = 0; i < count && i < max; i++) {
+    for (uint32_t i = 0; out && i < count && i < max; i++) {
         const uint8_t *r = t->all + recs + 16 * ((size_t)first + i);
         out[i] = (nvn_iface_rec){ le32(r), le32(r + 4), le32(r + 8), le32(r + 12) };
     }
-    return count < max ? count : max;
+    return count;
 }
 
 uint32_t nvn_shader_count(void)

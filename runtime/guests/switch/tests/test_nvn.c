@@ -661,6 +661,73 @@ TEST(nvn_reads_compressed_translation_table)
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
+/** @brief Interface records in the test table: more than the 48 a program could hold before. */
+#define IFACE_RECS 60u
+
+/** Writes dir/table.rlspi with one program of IFACE_RECS records, keyed by table_key; record i holds i to i + 3. */
+static bool write_iface_table(const char *dir)
+{
+    size_t len = 12 + 40 + 16 * IFACE_RECS;
+    uint8_t *t = calloc(1, len);
+    if (!t)
+        return false;
+    memcpy(t, "RLSPI001", 8);
+    put_le(t + 8, 1, 4);
+    for (int i = 0; i < 32; i++)
+        t[12 + i] = (uint8_t)(0xa0 + i);
+    put_le(t + 44, 0, 4);
+    put_le(t + 48, IFACE_RECS, 4);
+    for (uint32_t i = 0; i < IFACE_RECS; i++)
+        for (uint32_t w = 0; w < 4; w++)
+            put_le(t + 52 + 16 * i + 4 * w, i + w, 4);
+    char path[PATH_MAX + 16];
+    snprintf(path, sizeof path, "%s/table.rlspi", dir);
+    FILE *f = fopen(path, "wb");
+    bool ok = f && fwrite(t, 1, len, f) == len;
+    free(t);
+    return f && fclose(f) == 0 && ok;
+}
+
+/** Child of nvn_iface_keeps_every_record: the shader tables are read once per process. */
+static int iface_child(const char *dir)
+{
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    char key[65];
+    table_key(key);
+    if (nvn_shader_iface(key, NULL, 0) != IFACE_RECS)
+        return 1;
+    nvn_iface_rec recs[IFACE_RECS + 1];
+    memset(recs, 0xff, sizeof recs);
+    if (nvn_shader_iface(key, recs, IFACE_RECS) != IFACE_RECS)
+        return 2;
+    for (uint32_t i = 0; i < IFACE_RECS; i++)
+        if (recs[i].kind != i || recs[i].bank != i + 1 || recs[i].offset != i + 2 || recs[i].spec != i + 3)
+            return 3;
+    if (recs[IFACE_RECS].kind != 0xffffffffu)
+        return 4;
+    if (nvn_shader_iface(key, recs, 10) != IFACE_RECS)
+        return 5;
+    return 0;
+}
+
+TEST(nvn_iface_keeps_every_record)
+{
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_iface_table(dir));
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid == 0)
+        _exit(iface_child(dir));
+    int st = 0;
+    CHECK(waitpid(pid, &st, 0) == pid);
+    CHECK(WIFEXITED(st));
+    CHECK_EQ(WEXITSTATUS(st), 0);
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
 /**
  * The child of nvn_shader_tables_follow_the_executable: it runs from a copy of the test program and says whether
  * the table beside that copy is found (RL_SHADER_EXPECT=found) or not (missing). Without the variable it is a test

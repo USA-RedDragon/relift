@@ -8,8 +8,6 @@
 
 #include "nvn_vk.h"
 
-#define NVN_MODULE_RECS 48u
-
 /** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
 #define ALPHA_FUNC_SPEC 0x300u
 
@@ -39,8 +37,8 @@ typedef struct nvn_module {
     uint32_t outputs;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
     bool alpha_test, fixed_push;
-    /** @brief Its interface records (nvn_shader_iface). */
-    nvn_iface_rec recs[NVN_MODULE_RECS];
+    /** @brief Its interface records (nvn_shader_iface), as many as the translation has. */
+    nvn_iface_rec *recs;
     uint32_t nrecs;
     /** @brief Fragment variants with some inputs demoted to zero constants (see demote_inputs), by the mask of those inputs. */
     struct {
