@@ -132,6 +132,9 @@ bool am_applet_push_interactive_out(am_applet *a, const void *data, uint64_t siz
 /** @brief The applet ends with result (GetResult); signals the state changed event. Later calls do nothing. */
 void am_applet_exit(am_applet *a, rl_result result);
 
+/** @brief The software keyboard (applet 0x11). */
+extern const am_applet_impl am_swkbd_applet;
+
 extern const rl_ipc_class am_debug_functions_class;
 extern const rl_ipc_class am_global_state_controller_class;
 extern const rl_ipc_class am_application_creator_class;

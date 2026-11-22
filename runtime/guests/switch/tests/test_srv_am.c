@@ -8,6 +8,8 @@
 #include "srv_link.h"
 #include "tc.h"
 
+#include <relift/settings.h>
+
 #define CUR_PROCESS_HANDLE 0xFFFF8001u
 #define AM_NO_MSG 0x680u
 #define AM_NOT_AVAIL 0x480u
@@ -1123,6 +1125,199 @@ TEST(am_switch_has_no_switch2_proxy)
     CHECK(tc_sub(e.c, e.svc, proxy_req(10), &o) != 0);
     CHECK_EQ(set8(&e, e.sc, 2400, 1), SF_RESULT_UNKNOWN_COMMAND);
     CHECK_EQ(rc_of(tc_send(e.c, e.af, tc_new(321))), SF_RESULT_UNKNOWN_COMMAND);
+}
+
+/** @brief Library applet id the SDK 22 keyboard asks for, its library version and config size. */
+#define SWKBD_APPLET 0x1020011u
+#define SWKBD_VERSION 0x160012u
+#define SWKBD_CONFIG 0x530u
+
+/** @brief Creates a storage of size bytes in the creator and writes data at guest scratch into it. */
+static tc_obj make_storage(env *e, const void *data, uint32_t size)
+{
+    tc_obj st = { 0 }, acc;
+    tc_req q = tc_new(10);
+    tc_put64(&q, size);
+    if (tc_sub(e->c, e->lc, q, &st) != 0 || get(e, st, 0, &acc) != 0)
+        return (tc_obj){ 0 };
+    memcpy(t_mem() + e->heap + 0x10000, data, size);
+    if (rc_of(write_storage(e, acc, 0, e->heap + 0x10000, size)) != 0)
+        return (tc_obj){ 0 };
+    return st;
+}
+
+static uint32_t push_storage(env *e, tc_obj la, uint32_t cmd, tc_obj st)
+{
+    tc_req q = tc_new(cmd);
+    q.object_id = la.id;
+    q.n_in_objects = 1;
+    q.in_objects[0] = st.id;
+    return rc_of(tc_call(e->c, la.handle, &q, true));
+}
+
+static void put16(uint8_t *cfg, uint32_t off, const char *ascii)
+{
+    for (uint32_t i = 0; ascii[i]; i++)
+        cfg[off + 2 * i] = (uint8_t)ascii[i];
+}
+
+/** @brief Opens the keyboard as nn::swkbd::ShowKeyboard of SDK 22 does, up to Start; la gets the accessor. */
+static void start_keyboard(env *e, bool utf8, bool text_check, const char *initial, tc_obj *la_out, uint32_t *changed,
+                           uint32_t *interactive)
+{
+    tc_obj la = { 0 };
+    tc_req q = tc_new(0);
+    tc_put32(&q, SWKBD_APPLET);
+    tc_put32(&q, 0);
+    CHECK_EQ(tc_sub(e->c, e->lc, q, &la), 0);
+    *la_out = la;
+    *changed = get_event(e, la, 0);
+    CHECK(get_event(e, la, 170) != 0);
+    *interactive = get_event(e, la, 106);
+    uint32_t common[8] = { 1, 0x20, SWKBD_VERSION, 0, 0, 0, 0, 0 };
+    CHECK_EQ(push_storage(e, la, 100, make_storage(e, common, sizeof common)), 0);
+    uint8_t cfg[SWKBD_CONFIG];
+    memset(cfg, 0, sizeof cfg);
+    put16(cfg, 0x24, "Name");
+    put16(cfg, 0x1a8, "Enter a name");
+    cfg[0x3aa] = utf8;
+    uint32_t max = 10, min = 1, off = 0x14, len = (uint32_t)strlen(initial);
+    memcpy(cfg + 0x3ac, &max, 4);
+    memcpy(cfg + 0x3b0, &min, 4);
+    memcpy(cfg + 0x3bc, &off, 4);
+    memcpy(cfg + 0x3c0, &len, 4);
+    cfg[0x48d] = text_check;
+    CHECK_EQ(push_storage(e, la, 100, make_storage(e, cfg, sizeof cfg)), 0);
+    uint64_t work = e->heap + 0x20000;
+    memset(t_mem() + work, 0, 0x1000);
+    put16(t_mem() + work, off, initial);
+    CHECK_EQ(t_svc(e->c, SVC_CREATE_TRANSFER_MEMORY, 0, work, 0x1000, 0, 0, 0), 0);
+    tc_req tq = tc_new(11);
+    tq.ncopy = 1;
+    tq.copy[0] = (uint32_t)e->c->x[1];
+    tc_put64(&tq, 1);
+    tc_put64(&tq, 0x1000);
+    tc_obj ws;
+    CHECK_EQ(tc_sub(e->c, e->lc, tq, &ws), 0);
+    CHECK_EQ(push_storage(e, la, 100, ws), 0);
+    CHECK(!signaled(e, *changed));
+    CHECK_EQ(rc_of(call_data(e, la, 90, (uint8_t[2]){ 0, 0 }, 2)), 0);
+    CHECK_EQ(rc_of(tc_send(e->c, la, tc_new(10))), 0);
+}
+
+/** @brief Pops a storage of channel cmd and reads its first n bytes to out; returns its size, 0 when empty. */
+static uint64_t pop_storage(env *e, tc_obj la, uint32_t cmd, void *out, uint32_t n)
+{
+    tc_obj st, acc;
+    if (tc_sub(e->c, la, tc_new(cmd), &st) != 0 || get(e, st, 0, &acc) != 0)
+        return 0;
+    tc_res r = tc_send(e->c, acc, tc_new(0));
+    uint64_t size = tc_u64(&r, 0);
+    if (rc_of(read_storage(e, acc, 0, e->heap + 0x30000, n)) != 0)
+        return 0;
+    memcpy(out, t_mem() + e->heap + 0x30000, n);
+    return size;
+}
+
+TEST(am_software_keyboard_answers_from_the_settings)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("text_entry.text", "Ada Lovelace"), RL_SETTING_OK);
+    uint32_t changed, inter;
+    tc_obj la;
+    start_keyboard(&e, false, false, "", &la, &changed, &inter);
+    CHECK(signaled(&e, changed));
+    CHECK_EQ(u8_out(&e, la, 1), 1);
+    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(30))), 0);
+    uint8_t out[0x7d8];
+    CHECK_EQ(pop_storage(&e, la, 101, out, sizeof out), 0x7d8);
+    uint32_t close;
+    memcpy(&close, out, 4);
+    CHECK_EQ(close, 0);
+    const char *want = "Ada Lovela";
+    for (uint32_t i = 0; i < 10; i++)
+        CHECK_EQ(out[4 + 2 * i] | (out[5 + 2 * i] << 8), (uint8_t)want[i]);
+    CHECK_EQ(out[24] | out[25], 0);
+    CHECK_EQ(tc_cmd(e.c, la, 101), AM_NOT_AVAIL);
+    CHECK(!signaled(&e, inter));
+    CHECK_EQ(rl_settings_set("text_entry.text", ""), RL_SETTING_OK);
+}
+
+TEST(am_software_keyboard_returns_the_initial_text_in_utf8)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("text_entry.text", ""), RL_SETTING_OK);
+    uint32_t changed, inter;
+    tc_obj la;
+    start_keyboard(&e, true, false, "Mira", &la, &changed, &inter);
+    CHECK(signaled(&e, changed));
+    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(30))), 0);
+    uint8_t out[16];
+    CHECK_EQ(pop_storage(&e, la, 101, out, sizeof out), 0x7d8);
+    CHECK_EQ(out[0], 0);
+    CHECK(!memcmp(out + 4, "Mira", 5));
+}
+
+TEST(am_software_keyboard_default_text_without_initial_text)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("text_entry.text", ""), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("text_entry.default", "Tess"), RL_SETTING_OK);
+    uint32_t changed, inter;
+    tc_obj la;
+    start_keyboard(&e, true, false, "", &la, &changed, &inter);
+    CHECK(signaled(&e, changed));
+    uint8_t out[16];
+    CHECK_EQ(pop_storage(&e, la, 101, out, sizeof out), 0x7d8);
+    CHECK(!memcmp(out + 4, "Tess", 5));
+    CHECK_EQ(rl_settings_set("text_entry.default", "Player"), RL_SETTING_OK);
+}
+
+TEST(am_software_keyboard_text_check)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_settings_set("text_entry.text", "Bad"), RL_SETTING_OK);
+    uint32_t changed, inter;
+    tc_obj la;
+    start_keyboard(&e, true, true, "", &la, &changed, &inter);
+    CHECK(!signaled(&e, changed));
+    CHECK(signaled(&e, inter));
+    uint8_t chk[16];
+    CHECK_EQ(pop_storage(&e, la, 104, chk, sizeof chk), 8 + 0x7d4);
+    uint64_t n;
+    memcpy(&n, chk, 8);
+    CHECK_EQ(n, 4);
+    CHECK(!memcmp(chk + 8, "Bad", 4));
+    CHECK(!signaled(&e, inter));
+    uint8_t verdict[0x7d8];
+    memset(verdict, 0, sizeof verdict);
+    verdict[0] = 1;
+    memcpy(verdict + 4, "No", 3);
+    CHECK_EQ(push_storage(&e, la, 103, make_storage(&e, verdict, sizeof verdict)), 0);
+    CHECK(signaled(&e, inter));
+    CHECK_EQ(pop_storage(&e, la, 104, chk, sizeof chk), 8 + 0x7d4);
+    CHECK(!signaled(&e, changed));
+    verdict[0] = 0;
+    CHECK_EQ(push_storage(&e, la, 103, make_storage(&e, verdict, sizeof verdict)), 0);
+    CHECK(signaled(&e, changed));
+    CHECK_EQ(rc_of(tc_send(e.c, la, tc_new(30))), 0);
+    uint8_t out[16];
+    CHECK_EQ(pop_storage(&e, la, 101, out, sizeof out), 0x7d8);
+    CHECK_EQ(out[0], 0);
+    CHECK(!memcmp(out + 4, "Bad", 4));
+    CHECK_EQ(rl_settings_set("text_entry.text", ""), RL_SETTING_OK);
 }
 
 TEST(am_unknown_library_applet_ends_as_terminated)

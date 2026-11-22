@@ -320,11 +320,7 @@ static const rl_ipc_class lac_class = {
     "nn::am::service::ILibraryAppletAccessor", lac_cmds, AM_N(lac_cmds), 0, lac_destroy
 };
 
-static const am_applet_impl *impl_for(uint32_t id)
-{
-    (void)id;
-    return NULL;
-}
+static const am_applet_impl *impl_for(uint32_t id) { return id == AM_APPLET_ID_SWKBD ? &am_swkbd_applet : NULL; }
 
 /** @brief A new applet. The id's low byte names the applet; the SDK 22 sets bits above it (0x1020011 for the keyboard). */
 static rl_ipc_object *lac_new(uint32_t raw_id, uint32_t mode)
