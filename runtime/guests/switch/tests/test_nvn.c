@@ -281,6 +281,18 @@ TEST(nvn_dlss_parameters_read_as_the_setters_store_them)
     CHECK_EQ(p.out_base[1], 4);
 }
 
+TEST(nvn_dlss_history_starts_again_on_another_network_or_size)
+{
+    nvn_dlss_seen seen = { 0 };
+    const uint32_t a[4] = { 1920, 1080, 3840, 2160 }, b[4] = { 960, 540, 1920, 1080 };
+    CHECK(!nvn_dlss_continues(&seen, 0x1000, a));
+    CHECK(nvn_dlss_continues(&seen, 0x1000, a));
+    CHECK(!nvn_dlss_continues(&seen, 0x2000, a));
+    CHECK(!nvn_dlss_continues(&seen, 0x2000, b));
+    CHECK(nvn_dlss_continues(&seen, 0x2000, b));
+    CHECK(!nvn_dlss_continues(&seen, 0x1000, b));
+}
+
 TEST(nvn_dlss_builder_texture_ids_round_trip_through_the_builder)
 {
     rl_ctx *c = t_boot(NULL);

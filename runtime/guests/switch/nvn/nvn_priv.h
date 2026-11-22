@@ -601,6 +601,18 @@ void nvn_dlss_params_of(const uint8_t *raw, nvn_dlss_params *out);
  */
 void nvn_dlss_optimal(uint32_t width, uint32_t height, uint32_t method, uint32_t out[6]);
 
+/** @brief The network and sizes of the last DLSS evaluation: a temporal upscaler's history is only valid for them. */
+typedef struct nvn_dlss_seen {
+    uint64_t net;
+    uint32_t sizes[4];
+} nvn_dlss_seen;
+
+/**
+ * @brief Whether an evaluation on network net at sizes (input width and height, output width and height) continues
+ * the history of the last one in seen (else the history starts again); seen becomes this evaluation.
+ */
+bool nvn_dlss_continues(nvn_dlss_seen *seen, uint64_t net, const uint32_t sizes[4]);
+
 /** @brief Bytes of an NVNtextureView. */
 #define NVN_VIEW_BYTES 16u
 

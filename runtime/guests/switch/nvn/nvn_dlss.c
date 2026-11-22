@@ -267,6 +267,14 @@ uint64_t nvnh_nvnDlssNetworkFinalize(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
+bool nvn_dlss_continues(nvn_dlss_seen *seen, uint64_t net, const uint32_t sizes[4])
+{
+    bool same = seen->net == net && !memcmp(seen->sizes, sizes, sizeof seen->sizes);
+    seen->net = net;
+    memcpy(seen->sizes, sizes, sizeof seen->sizes);
+    return same;
+}
+
 #define MAX_HELD 64u
 
 /** @brief The stage on the host device, and the views the batch being recorded uses (freed after its wait). */
@@ -274,6 +282,7 @@ static struct {
     rl_upscaler *u;
     uint32_t choice;
     uint64_t evaluations;
+    nvn_dlss_seen seen;
     VkImageView held[MAX_HELD];
     uint32_t nheld;
 } st;
@@ -432,6 +441,17 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         ui.out_rect.width = ow > ui.out_rect.x ? ow - ui.out_rect.x : 0;
     if (ui.out_rect.y + ui.out_rect.height > oh)
         ui.out_rect.height = oh > ui.out_rect.y ? oh - ui.out_rect.y : 0;
+    uint32_t sizes[4] = { ui.in.width, ui.in.height, ui.out_rect.width, ui.out_rect.height };
+    if (!nvn_dlss_continues(&st.seen, e->x[1], sizes)) {
+        ui.reset = true;
+        rl_log(RL_LOG_INFO, "nvn",
+               "DLSS evaluation on network 0x%llx (method %u, preset %u, flags 0x%x): %ux%u of a %ux%u input to %ux%u, "
+               "jitter %g,%g, motion vector scale %g,%g, pre-exposure %g, depth %s, motion vectors %s, exposure %s",
+               (unsigned long long)e->x[1], n ? n->method : 0, n ? n->preset : 0, n ? n->flags : 0, ui.in.width,
+               ui.in.height, iw, ih, ui.out_rect.width, ui.out_rect.height, (double)p.jitter[0], (double)p.jitter[1],
+               (double)p.motion_scale[0], (double)p.motion_scale[1], (double)p.pre_exposure, p.depth ? "yes" : "no",
+               p.motion ? "yes" : "no", p.exposure ? "yes" : "no");
+    }
     for (int pass = 0;; pass++) {
         if (pass == 2)
             return nvn_vk_stop(r,
