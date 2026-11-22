@@ -1342,7 +1342,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     }
     int rc;
     if (mods[1] && mods[1]->alpha_test) {
-        uint64_t func = 8;
+        uint64_t func = NVN_ALPHA_ALWAYS;
         if (st->have_color_state &&
             (rc = nvn_vk_getter(r, "nvnColorStateGetAlphaTest", st->color_state, 4, NULL, 0, 0, NULL, &func)) != RL_OK)
             return rc;

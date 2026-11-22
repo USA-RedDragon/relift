@@ -170,6 +170,14 @@ uint32_t nvn_draw_vertex_streams(const nvn_pipe_key *k, uint32_t out[NVN_VERTEX_
 /** @brief Writes the persistent cache when it holds pipelines made since it was last written. */
 void nvn_pipe_save(void);
 /**
+ * @brief The warm-up's library key of stage of program m: the specialization a draw starts from (texture kinds and
+ * dimensions as nvn_module_default_spec gives them, the alpha test always passing) and the pre-raster and fragment
+ * state of a queue the game has not changed (nvn_gfx_init: every sample, no viewport swizzle, no depth clamp), so the
+ * library a first draw links is the one the warm-up made.
+ */
+struct nvn_module;
+void nvn_warm_key(nvn_pipe_key *k, const struct nvn_module *m, uint32_t stage);
+/**
  * @brief Whether the keys and cache are due to be written at now (clock ns): something changed, and the last write is
  * a minute old, or a pipeline compiled during play (at late_at, 0 for none) two seconds ago. A saver thread writes
  * them then, off the game's threads, and the process writes them once more when it ends.

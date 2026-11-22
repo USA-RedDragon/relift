@@ -6,6 +6,7 @@
  * matches the device, the driver and the shader table.
  */
 #include "nvn_pipe.h"
+#include "nvn_module.h"
 #include "nvn_priv.h"
 #include "nvn_vk.h"
 #include "runner.h"
@@ -318,4 +319,28 @@ TEST(nvn_pipelines_compiled_in_play_are_saved_two_seconds_later)
     CHECK(!nvn_pipe_save_due(101 * s, 100 * s, 100 * s, true));
     CHECK(nvn_pipe_save_due(103 * s, 100 * s, 100 * s, true));
     CHECK(!nvn_pipe_save_due(103 * s, 100 * s, 100 * s, false));
+}
+
+TEST(nvn_the_warm_up_makes_the_libraries_a_first_draw_links)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    static nvn_module m;
+    memset(&m, 0, sizeof m);
+    m.m = (VkShaderModule)(uintptr_t)0x1234;
+    m.alpha_test = true;
+    nvn_pipe_key k;
+    nvn_warm_key(&k, &m, 1u);
+    CHECK_EQ(k.sample_mask, st.sample_mask & 1u);
+    CHECK_EQ(k.viewport_swizzle, st.viewport_swizzle[0]);
+    CHECK_EQ(k.viewport_swizzle, NVN_VIEWPORT_SWIZZLE_IDENTITY);
+    CHECK_EQ(k.depth_clamp, st.depth_clamp);
+    CHECK_EQ(k.nspec[1u], 1u);
+    CHECK_EQ(k.spec_map[1u][0].constantID, ALPHA_FUNC_SPEC);
+    CHECK_EQ(k.spec[1u][0], NVN_ALPHA_ALWAYS);
+    m.alpha_test = false;
+    nvn_warm_key(&k, &m, 0u);
+    CHECK_EQ(k.nspec[0u], 0u);
+    CHECK(k.mods[0u] == m.m);
 }

@@ -108,14 +108,24 @@ static uint32_t worker_count(void)
 }
 
 /** @brief The key of a draw that uses module m alone in its stage with the specialization constants it starts with. */
-static void default_key(nvn_pipe_key *k, const nvn_module *m, uint32_t stage)
+void nvn_warm_key(nvn_pipe_key *k, const nvn_module *m, uint32_t stage)
 {
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
     memset(k, 0, sizeof *k);
     k->mods[stage] = m->m;
     nvn_module_default_spec(m, &k->nspec[stage], k->spec_map[stage], k->spec[stage]);
+    if (stage == 1 && m->alpha_test && k->nspec[stage] < NVN_MAX_SPECS) {
+        k->spec_map[stage][k->nspec[stage]] = (VkSpecializationMapEntry){ ALPHA_FUNC_SPEC, 4 * k->nspec[stage], 4 };
+        k->spec[stage][k->nspec[stage]++] = NVN_ALPHA_ALWAYS;
+    }
     nvn_spec_sort(&k->nspec[stage], k->spec_map[stage], k->spec[stage]);
     k->polygon = VK_POLYGON_MODE_FILL;
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
+    k->sample_mask = st.sample_mask & 1u;
+    k->viewport_swizzle = st.viewport_swizzle[0];
+    k->depth_clamp = st.depth_clamp;
 }
 
 /**
@@ -154,7 +164,7 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
     }
     if (!nvn_pipe_uses_libraries() || (stage != 0 && stage != 1))
         return true;
-    default_key(&k, m, stage);
+    nvn_warm_key(&k, m, stage);
     return stage == 0 ? nvn_pipe_warm_vertex(&k) : nvn_pipe_warm_fragment(&k);
 }
 

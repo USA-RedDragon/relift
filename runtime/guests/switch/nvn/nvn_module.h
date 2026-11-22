@@ -10,6 +10,8 @@
 
 /** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
 #define ALPHA_FUNC_SPEC 0x300u
+/** @brief The alpha test function that always passes (NVNalphaFunc ALWAYS), the one a queue starts with. */
+#define NVN_ALPHA_ALWAYS 8u
 
 /** @brief The set and binding of the compute back end's mesh buffer (the translator's GUEST_MEMORY_SET and BINDING). */
 #define NVN_MESH_BUFFER_SET 3u
