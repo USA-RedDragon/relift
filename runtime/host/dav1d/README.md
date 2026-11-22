@@ -11,7 +11,12 @@ included (AV1 decoding is exact integer arithmetic).
 `relift build` uses it on an x86-64 Linux host with NASM 2.14 or later on the
 path: it assembles dav1d's `src/x86/*.asm` (SSE, AVX2 and AVX-512 versions of
 the hot loops) and compiles `src/x86/cpu.c`, so dav1d picks the version for
-the running CPU at run time and one binary is right on every x86-64 CPU. A
+the running CPU at run time and one binary is right on every x86-64 CPU.
+
+`aarch64/` is the configuration of the arm64 assembly build, which an
+`android-arm64` build uses: dav1d's `src/arm/64/*.S` (GNU assembler syntax,
+NEON with dot product, i8mm and SVE versions) go through the NDK's clang,
+with `src/arm/cpu.c` picking among them at run time from `getauxval`. A
 host without NASM, and every other host, builds the plain C; the pictures
 are identical, the decode is several times slower. dav1d is BSD-2-Clause licensed; its
 license is in `NOTICE`. `relift build` passes this directory and the dav1d

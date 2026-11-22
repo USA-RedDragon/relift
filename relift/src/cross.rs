@@ -134,7 +134,7 @@ impl Build {
     /// The runtime's Vulkan sources cannot be listed.
     pub fn extras(&self, rt: &Path, with_vk: bool) -> std::io::Result<Extras> {
         match self {
-            Self::Android(a) => crate::runtime_link::android_extras(rt, &a.deps, with_vk),
+            Self::Android(a) => crate::runtime_link::android_extras(rt, &a.deps, a.target, with_vk),
             Self::Ios(i) => crate::runtime_link::ios_extras(rt, &i.deps, with_vk),
         }
     }

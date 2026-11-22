@@ -220,8 +220,35 @@ const DAV1D_X86_ASM_16: [&str; 21] = [
     "mc16_sse",
 ];
 
+/// The arm64 assembly files of dav1d (GNU assembler syntax, through the C
+/// compiler): first those of every bit depth, then 8 bit, then 16 bit. dav1d
+/// picks the dot product and SVE versions at run time from the CPU's
+/// features, so one library is right on every arm64 CPU.
+const DAV1D_ARM64_ASM: [&str; 19] = [
+    "itx",
+    "looprestoration_common",
+    "msac",
+    "refmvs",
+    "cdef",
+    "filmgrain",
+    "ipred",
+    "loopfilter",
+    "looprestoration",
+    "mc",
+    "mc_dotprod",
+    "cdef16",
+    "filmgrain16",
+    "ipred16",
+    "itx16",
+    "loopfilter16",
+    "looprestoration16",
+    "mc16",
+    "mc16_sve",
+];
+
 /// How dav1d's assembly is built on a host: the assembler, the object format it writes and the configuration
-/// directory under `runtime/host/dav1d` (its `config.h` and `config.asm`).
+/// directory under `runtime/host/dav1d` (its `config.h` and `config.asm`). The arm64 assembly goes through the C
+/// compiler: no assembler and no format.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dav1dAsm {
     /// NASM's command.
@@ -253,6 +280,17 @@ fn native_dav1d_asm() -> Option<Dav1dAsm> {
         format: "elf64",
         config: "x86_64",
     })
+}
+
+/// The assembly dav1d is built with for an arm64 target (Android): its GNU syntax files go through the target's
+/// C compiler, with the configuration in `runtime/host/dav1d/aarch64`.
+#[must_use]
+pub fn aarch64_dav1d_asm() -> Dav1dAsm {
+    Dav1dAsm {
+        nasm: Vec::new(),
+        format: "",
+        config: "aarch64",
+    }
 }
 
 /// A dav1d source tree.
@@ -689,6 +727,7 @@ fn has_vpx_glue(rt: &Path) -> bool {
 pub fn android_extras(
     rt: &Path,
     deps: &crate::android::Deps,
+    target: crate::android::Target,
     with_vk: bool,
 ) -> std::io::Result<Extras> {
     let host = rt.join("host");
@@ -728,7 +767,7 @@ pub fn android_extras(
         adrenotools: deps.adrenotools.clone(),
         vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
-        dav1d_asm: None,
+        dav1d_asm: (target.abi == "arm64-v8a").then(aarch64_dav1d_asm),
         video: has_video(rt),
     })
 }
@@ -792,7 +831,10 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
 impl Extras {
     /// The assembler of the plan these extras go into, when dav1d is built with assembly.
     pub fn assembler(&self) -> Option<Vec<String>> {
-        self.dav1d_asm.as_ref().map(|a| a.nasm.clone())
+        self.dav1d_asm
+            .as_ref()
+            .filter(|a| !a.nasm.is_empty())
+            .map(|a| a.nasm.clone())
     }
 
     /// What the build prints about the window, audio and Opus backends.
@@ -991,10 +1033,11 @@ fn dav1d_compiles(
             .chain(own.iter().cloned())
             .collect()
     };
-    let arch_sources: &[&str] = if asm.is_some() {
-        &["src/x86/cpu.c"]
-    } else {
-        &[]
+    let arm = asm.is_some_and(|a| a.config == "aarch64");
+    let arch_sources: &[&str] = match asm {
+        Some(_) if arm => &["src/arm/cpu.c"],
+        Some(_) => &["src/x86/cpu.c"],
+        None => &[],
     };
     let mut out: Vec<Compile> = DAV1D_SOURCES
         .iter()
@@ -1021,7 +1064,18 @@ fn dav1d_compiles(
             });
         }
     }
-    if let (Some(a), Some(arch)) = (asm, &arch_config) {
+    if arm {
+        for name in DAV1D_ARM64_ASM {
+            let s = format!("src/arm/64/{name}.S");
+            out.push(Compile {
+                src: v.src.join(&s),
+                obj: obj(&rt.join("host").join("dav1d").join(&s)),
+                flags: flags(None),
+                pool: None,
+                stage: 0,
+            });
+        }
+    } else if let (Some(a), Some(arch)) = (asm, &arch_config) {
         let nasm_flags = [
             "-f".to_string(),
             a.format.to_string(),
@@ -1404,6 +1458,80 @@ mod tests {
             .find(|x| x.src == Path::new("/d/src/cdef_tmpl.c"))
             .unwrap();
         assert_eq!(cdef.flags[0], "-I/rt/host/dav1d/x86_64");
+    }
+
+    #[test]
+    fn dav1d_on_arm64_assembles_its_arm_files_with_the_c_compiler() {
+        let e = Extras {
+            vk: Vec::new(),
+            window: None,
+            sdl3: None,
+            vulkan: None,
+            host: Vec::new(),
+            opus_src: None,
+            opus: None,
+            adrenotools: None,
+            vpx: None,
+            dav1d: Some(Dav1d {
+                src: PathBuf::from("/d"),
+                origin: "t".into(),
+            }),
+            dav1d_asm: Some(aarch64_dav1d_asm()),
+            video: true,
+        };
+        assert_eq!(e.assembler(), None, "no NASM for arm64");
+        let rt = Path::new("/rt");
+        let c = e.compiles(rt, &["-O2".to_string()], &|s| s.with_extension("o"));
+        let asm: Vec<_> = c
+            .iter()
+            .filter(|x| x.src.extension().is_some_and(|e| e == "S"))
+            .collect();
+        assert_eq!(asm.len(), DAV1D_ARM64_ASM.len());
+        assert_eq!(asm[0].src, Path::new("/d/src/arm/64/itx.S"));
+        assert_eq!(asm[0].obj, Path::new("/rt/host/dav1d/src/arm/64/itx.o"));
+        assert_eq!(asm[0].flags[0], "-I/rt/host/dav1d/aarch64");
+        assert!(asm[0].flags.contains(&"-O2".to_string()));
+        assert!(
+            asm.iter()
+                .all(|x| !x.flags.iter().any(|f| f.starts_with("-DBITDEPTH")))
+        );
+        assert!(c.iter().any(|x| x.src == Path::new("/d/src/arm/cpu.c")));
+        assert!(!c.iter().any(|x| x.src == Path::new("/d/src/x86/cpu.c")));
+        assert!(
+            !c.iter()
+                .any(|x| x.src.extension().is_some_and(|e| e == "asm"))
+        );
+    }
+
+    #[test]
+    fn android_arm64_builds_dav1d_with_assembly_and_x64_without() {
+        let rt = Path::new("/nonexistent-rt");
+        let deps = crate::android::Deps {
+            sdl3_include: PathBuf::new(),
+            sdl3_lib: PathBuf::new(),
+            sdl3_jar: PathBuf::new(),
+            opus_include: PathBuf::new(),
+            opus_lib: PathBuf::new(),
+            adrenotools: None,
+            vpx: None,
+            dav1d: None,
+        };
+        let arm = android_extras(
+            rt,
+            &deps,
+            crate::android::target("android-arm64").unwrap(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(arm.dav1d_asm, Some(aarch64_dav1d_asm()));
+        let x64 = android_extras(
+            rt,
+            &deps,
+            crate::android::target("android-x64").unwrap(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(x64.dav1d_asm, None);
     }
 
     #[test]
