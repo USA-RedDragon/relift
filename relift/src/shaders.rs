@@ -265,8 +265,57 @@ fn translate_one(
 /// A file cannot be read or written, or `device.json` is not capabilities.
 pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
     let dir = out.join(DIR);
-    std::fs::create_dir_all(dir.join("programs"))?;
-    let keys = program_keys(&dir)?;
+    build_in(&dir, &dir, jobs)
+}
+
+/// The folder of the tables a build for `target` (an `android-*` or `ios-*`
+/// name) carries: `out`/`target`/shaders. Its `device.json` is the
+/// capabilities of the target device, which the app writes at its first start
+/// to its own shader folder; the host's table never goes to another device.
+#[must_use]
+pub fn target_dir(out: &Path, target: &str) -> PathBuf {
+    out.join(target).join(DIR)
+}
+
+/// What [`build_target`] did.
+pub enum TargetBuilt {
+    /// The game has no GPU programs (not a Switch 2 game).
+    NoPrograms,
+    /// No `device.json` for the target: the path it is wanted at.
+    NoDevice(PathBuf),
+    /// The table for the target's device.
+    Built(Built),
+}
+
+/// Translates the programs of the build in `out` for `target`'s device
+/// (the `device.json` in [`target_dir`]) into that folder's tables.
+///
+/// # Errors
+///
+/// As [`build`].
+pub fn build_target(out: &Path, target: &str, jobs: usize) -> Result<TargetBuilt, BoxError> {
+    let programs = out.join(DIR);
+    if program_keys(&programs)?.is_empty() {
+        return Ok(TargetBuilt::NoPrograms);
+    }
+    let dir = target_dir(out, target);
+    let device = dir.join("device.json");
+    if !device.is_file() {
+        for f in [TABLE, INTERFACES] {
+            let _ = std::fs::remove_file(dir.join(f));
+        }
+        return Ok(TargetBuilt::NoDevice(device));
+    }
+    Ok(TargetBuilt::Built(build_in(&programs, &dir, jobs)?))
+}
+
+/// Translates the programs in `programs`/programs (with the scan's
+/// `meshes.json` there) for the device of `dir`/device.json, writing the
+/// tables and `failed.txt` in `dir`.
+fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError> {
+    std::fs::create_dir_all(programs.join("programs"))?;
+    std::fs::create_dir_all(dir)?;
+    let keys = program_keys(programs)?;
     let device = dir.join("device.json");
     let mut failed = String::new();
     let mut refused = BTreeMap::new();
@@ -279,11 +328,11 @@ pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
         let caps =
             DeviceCaps::from_json(&text).map_err(|e| format!("{}: {e}", device.display()))?;
         let host = HostProfile::from_device("device", &caps);
-        let pipes = mesh::Pipelines::read(&dir, &host)?;
+        let pipes = mesh::Pipelines::read(programs, &host)?;
         let mut spool_file = relift_cache::StreamWriter::new(&spool)?;
         for batch in keys.chunks(jobs.max(1) * 4) {
             let items = relift_proc::workers::parallel_with(jobs, batch, |&k| {
-                translate_one(&host, &dir, k, &pipes).map_err(|e| e.to_string())
+                translate_one(&host, programs, k, &pipes).map_err(|e| e.to_string())
             });
             for (&key, item) in batch.iter().zip(items) {
                 match item? {
@@ -467,7 +516,21 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
 /// the build translated at least one program, else none.
 #[must_use]
 pub fn tables(out: &Path) -> Vec<PathBuf> {
-    let dir = out.join(DIR);
+    tables_in(&out.join(DIR))
+}
+
+/// The table files a package for `target` carries: the host's for `None`,
+/// else only those translated for the target's own device ([`target_dir`]),
+/// never the host's.
+#[must_use]
+pub fn tables_for(out: &Path, target: Option<&str>) -> Vec<PathBuf> {
+    match target {
+        None => tables(out),
+        Some(t) => tables_in(&target_dir(out, t)),
+    }
+}
+
+fn tables_in(dir: &Path) -> Vec<PathBuf> {
     let files = [dir.join(TABLE), dir.join(INTERFACES)];
     let head = std::fs::metadata(&files[0]).map_or(0, |m| m.len());
     if head > TABLE_HEAD_BYTES && files[1].is_file() {
@@ -701,6 +764,58 @@ mod tests {
             1
         );
         assert!(!dir.join(SPOOL).exists());
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn a_target_gets_a_table_for_its_own_device_and_never_the_hosts() {
+        let out = scratch("target");
+        let dir = out.join(DIR);
+        std::fs::create_dir_all(dir.join("programs")).unwrap();
+        let t = "android-arm64";
+        assert!(matches!(
+            build_target(&out, t, 1).unwrap(),
+            TargetBuilt::NoPrograms
+        ));
+        let code = words(&[exit(), bra_self()]);
+        let key = relift_switch_formats::sha256(&code);
+        relift_cache::write_if_changed(
+            &dir.join("programs").join(format!("{}.bin", hex(&key))),
+            &code,
+        )
+        .unwrap();
+        relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
+        assert_eq!(build(&out, 1).unwrap().translated, 1);
+        assert_eq!(tables_for(&out, None).len(), 2);
+        let want = target_dir(&out, t).join("device.json");
+        match build_target(&out, t, 1).unwrap() {
+            TargetBuilt::NoDevice(p) => assert_eq!(p, want),
+            _ => panic!("a target without its device file has no table"),
+        }
+        assert!(tables_for(&out, Some(t)).is_empty());
+        std::fs::create_dir_all(target_dir(&out, t)).unwrap();
+        relift_cache::write_if_changed(&want, CAPS.as_bytes()).unwrap();
+        match build_target(&out, t, 1).unwrap() {
+            TargetBuilt::Built(b) => assert_eq!((b.programs, b.translated), (1, 1)),
+            _ => panic!("a target with its device file gets a table"),
+        }
+        let files = tables_for(&out, Some(t));
+        assert_eq!(
+            files,
+            [
+                target_dir(&out, t).join(TABLE),
+                target_dir(&out, t).join(INTERFACES)
+            ]
+        );
+        std::fs::remove_file(&want).unwrap();
+        assert!(matches!(
+            build_target(&out, t, 1).unwrap(),
+            TargetBuilt::NoDevice(_)
+        ));
+        assert!(
+            tables_for(&out, Some(t)).is_empty(),
+            "a stale target table is removed"
+        );
         std::fs::remove_dir_all(&out).unwrap();
     }
 

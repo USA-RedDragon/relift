@@ -2326,6 +2326,9 @@ pub fn run_build(
         return package(settings, &request, ui);
     }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
+    if let Some(c) = &built.cross {
+        target_shaders(settings, c.name(), ui)?;
+    }
     let name = crate::progname::project_name();
     let import = import_dir(settings)?;
     let request = PackageRequest {
@@ -2362,6 +2365,38 @@ struct PackageRequest<'a> {
     ios: Option<&'a crate::ios::IosBuild>,
 }
 
+/// Translates a Switch 2 game's GPU programs for the device of a phone
+/// target (crate::shaders::build_target): the build machine's table is made
+/// for its own GPU and never goes to another device. Without the target's
+/// device file the app carries no table, and the note says where the file
+/// goes: the app writes it at its first start, and `relift push` fetches it.
+fn target_shaders(settings: &Settings, target: &str, ui: &mut Ui) -> Result<(), BoxError> {
+    let (_, out) = project_out(settings)?;
+    let jobs = relift_proc::workers::jobs().max(1) as usize;
+    match crate::shaders::build_target(&out, target, jobs)? {
+        crate::shaders::TargetBuilt::NoPrograms => {}
+        crate::shaders::TargetBuilt::NoDevice(want) => {
+            ui.note(&Line::new().paint(
+                Paint::Yellow,
+                format!(
+                    "shaders: no table for {target}: the table is made for the device the game runs on; start \
+                     the app once on the device (it stops at its first GPU program and writes its \
+                     shaders/device.json), copy that file to {} (relift push does it for Android), and \
+                     build again",
+                    want.display()
+                ),
+            ));
+        }
+        crate::shaders::TargetBuilt::Built(b) => {
+            ui.note(&Line::new().text(format!(
+                "shaders: {} of {} translated for the {target} device",
+                b.translated, b.programs
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// The release output of the target: an APK for Android, an app bundle for
 /// iOS, a signed `.app` on macOS, on Linux an AppImage of the program.
 fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result<(), BoxError> {
@@ -2371,8 +2406,12 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         req.label
     };
     let stem = crate::progname::slug(req.name);
+    let target = req
+        .android
+        .map(|a| a.target.name)
+        .or(req.ios.map(|i| i.target.name));
     let shaders = match (req.import, project_out(settings)) {
-        (Some(_), Ok((_, out))) => crate::shaders::tables(&out),
+        (Some(_), Ok((_, out))) => crate::shaders::tables_for(&out, target),
         _ => Vec::new(),
     };
     let fonts = match (req.import, project_out(settings)) {

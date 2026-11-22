@@ -42,6 +42,12 @@ trait Device {
     fn open_up(&self) -> Result<Vec<String>, BoxError> {
         Ok(Vec::new())
     }
+    /// The `shaders/device.json` the app wrote at its last start (the
+    /// capabilities its shader table must be made for), when the device
+    /// lets a push read it.
+    fn device_caps(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 struct Ios {
@@ -176,6 +182,7 @@ struct Android {
     adb: PathBuf,
     serial: Option<String>,
     dir: String,
+    package: String,
 }
 
 impl Android {
@@ -240,6 +247,21 @@ impl Device for Android {
             &String::from_utf8_lossy(&out.stdout),
             &self.dir,
         ))
+    }
+
+    fn device_caps(&self) -> Option<Vec<u8>> {
+        let out = self
+            .adb()
+            .args([
+                "exec-out",
+                "run-as",
+                &self.package,
+                "cat",
+                "files/shaders/device.json",
+            ])
+            .output()
+            .ok()?;
+        (out.status.success() && out.stdout.starts_with(b"{")).then_some(out.stdout)
     }
 }
 
@@ -351,10 +373,11 @@ fn local_images(
 /// a push compares sizes only, and the app's manifest does not list them.
 fn add_shader_tables(
     out: &Path,
+    target: &str,
     entries: &mut Vec<Entry>,
     local: &mut BTreeMap<String, PathBuf>,
 ) -> Result<(), BoxError> {
-    for f in crate::shaders::tables(out) {
+    for f in crate::shaders::tables_for(out, Some(target)) {
         let Some(file) = f.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
@@ -433,7 +456,7 @@ pub fn run_push(
     }
     let mut entries = entries;
     let mut local = local_images(&import, &work, ui)?;
-    add_shader_tables(&out, &mut entries, &mut local)?;
+    add_shader_tables(&out, target, &mut entries, &mut local)?;
     let bytes: u64 = entries.iter().map(|e| e.size).sum();
     let what = match crate::cross::target(target)? {
         Some(crate::cross::Target::Ios(_)) => {
@@ -465,8 +488,14 @@ pub fn run_push(
                 adb: adb(settings),
                 serial: device.map(String::from),
                 dir: dir.clone(),
+                package,
             };
             push_to(&dev, &local, &entries, ui)?;
+            if !crate::shaders::tables(&out).is_empty()
+                && let Some(note) = fetch_caps(&dev, &out, target)?
+            {
+                ui.note(&Line::new().paint(relift_progress::Paint::Yellow, note));
+            }
             dir
         }
         None => return Err("relift push needs --target ios-arm64 or android-arm64".into()),
@@ -480,6 +509,36 @@ pub fn run_push(
         )),
     );
     Ok(())
+}
+
+/// Keeps the capabilities the app on `dev` wrote as the device file of
+/// `target`'s shader table (crate::shaders::target_dir) when they are new or
+/// changed (another driver, an update), and says that a build is due; also
+/// says when the app has no table yet and the device cannot tell.
+fn fetch_caps(dev: &dyn Device, out: &Path, target: &str) -> Result<Option<String>, BoxError> {
+    let want = crate::shaders::target_dir(out, target).join("device.json");
+    let have = std::fs::read(&want).ok();
+    let table = !crate::shaders::tables_for(out, Some(target)).is_empty();
+    match dev.device_caps() {
+        Some(caps) if have.as_deref() != Some(caps.as_slice()) => {
+            if let Some(d) = want.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            relift_cache::write_if_changed(&want, &caps)?;
+            Ok(Some(format!(
+                "the app's device capabilities are now {}: build again for a shader table made for this \
+                 device, then push",
+                want.display()
+            )))
+        }
+        Some(_) => Ok(None),
+        None if table => Ok(None),
+        None => Ok(Some(format!(
+            "no shader table for {target}: start the app once (it writes its shaders/device.json), then \
+             push again to fetch it, or copy it to {}",
+            want.display()
+        ))),
+    }
 }
 
 fn adb(settings: &Settings) -> PathBuf {
@@ -638,6 +697,48 @@ mod tests {
             android_names("/sdcard/x/files/romfs/a\n/elsewhere/b\n", "/sdcard/x/files"),
             ["romfs/a"]
         );
+    }
+
+    struct Caps(Option<Vec<u8>>);
+
+    impl Device for Caps {
+        fn copy(&self, _: &Path, _: &str) -> Result<(), BoxError> {
+            Ok(())
+        }
+        fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError> {
+            Ok(BTreeMap::new())
+        }
+        fn device_caps(&self) -> Option<Vec<u8>> {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn a_push_keeps_the_apps_device_capabilities_for_the_targets_table() {
+        let out = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("relift-push-caps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let t = "android-arm64";
+        let want = crate::shaders::target_dir(&out, t).join("device.json");
+        let none = fetch_caps(&Caps(None), &out, t).unwrap().unwrap();
+        assert!(none.contains("no shader table for android-arm64"), "{none}");
+        let a = Caps(Some(b"{\"a\": 1}".to_vec()));
+        let note = fetch_caps(&a, &out, t).unwrap().unwrap();
+        assert!(note.contains("build again"), "{note}");
+        assert_eq!(std::fs::read(&want).unwrap(), b"{\"a\": 1}");
+        assert!(
+            fetch_caps(&a, &out, t).unwrap().is_none(),
+            "the same capabilities need no build"
+        );
+        let b = Caps(Some(b"{\"b\": 2}".to_vec()));
+        assert!(
+            fetch_caps(&b, &out, t).unwrap().is_some(),
+            "another driver's need a build"
+        );
+        assert_eq!(std::fs::read(&want).unwrap(), b"{\"b\": 2}");
+        std::fs::remove_dir_all(&out).unwrap();
     }
 
     struct Fake {
