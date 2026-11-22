@@ -4,11 +4,12 @@
  *
  * The game's picture keeps its full size and place; a compact panel floats
  * over it: the game's prompt in full, wrapped onto as many lines as it needs
- * (and its sub text and any hint), over one line with the field (the text and
- * a blinking caret, or the guide text in gray when empty), the character
- * count, and OK (and Cancel when the game allows it). With a physical keyboard the line sits near the
- * bottom of the view; on a touch screen it sits right above the system
- * keyboard, which covers the lower part of the view.
+ * (and its sub text and any hint), with the character count small in the top
+ * right corner, over one line with the field (the text and a blinking caret,
+ * or the guide text in gray when empty) and OK (and Cancel when the game
+ * allows it). With a physical keyboard the line sits near the bottom of the
+ * view; on a touch screen it sits right above the system keyboard, which
+ * covers the lower part of the view.
  */
 #include "core.h"
 #include "textentry_int.h"
@@ -29,6 +30,8 @@
 #define PROMPT_LINE 42.0f
 #define SUB_PX 26.0f
 #define SUB_LINE 34.0f
+/** @brief The size of the count in the top right corner at scale 1. */
+#define COUNT_PX 24.0f
 
 static pthread_mutex_t g_font_lock = PTHREAD_MUTEX_INITIALIZER;
 static rl_ttf g_fonts[FONTS_MAX];
@@ -241,13 +244,13 @@ static void set4(float *r, float x, float y, float w, float h)
     r[3] = h;
 }
 
-/** @brief The count line beside the field: "n of max characters". */
+/** @brief The count for the panel's top right corner: "n/max", or "n" with no limit. */
 static void count_line(char *out, size_t size, uint32_t n)
 {
     if (rl_te.max_chars)
-        snprintf(out, size, "%u of %u characters", n, rl_te.max_chars);
+        snprintf(out, size, "%u/%u", n, rl_te.max_chars);
     else
-        snprintf(out, size, "%u character%s", n, n == 1 ? "" : "s");
+        snprintf(out, size, "%u", n);
 }
 
 /**
@@ -298,7 +301,9 @@ void rl_te_layout(uint32_t width, uint32_t height, bool touch, rl_te_place *out)
     float pad = 14 * s, fh = 72 * s, bw = 170 * s, gap = 14 * s, inset = 24 * s;
     float pw = fminf(W - 2 * inset, 1600 * s);
     float x0 = floorf((W - pw) / 2);
-    float text_w = pw - 2 * pad - 12 * s;
+    char count[64];
+    count_line(count, sizeof count, rl_te_chars(rl_te.text));
+    float text_w = pw - 2 * pad - 12 * s - text_width(count, COUNT_PX * s) - gap;
     const char *header = rl_te.header[0] ? rl_te.header : "Enter text";
     out->nheader = wrap(header, text_w, PROMPT_PX * s, out->header_at, out->header_len, RL_TE_LINES);
     out->nsub = rl_te.sub[0] ? wrap(rl_te.sub, text_w, SUB_PX * s, out->sub_at, out->sub_len, RL_TE_LINES) : 0;
@@ -319,9 +324,6 @@ void rl_te_layout(uint32_t width, uint32_t height, bool touch, rl_te_place *out)
         out->has_button[RL_TE_CANCEL] = true;
         right -= bw + gap;
     }
-    char count[64];
-    count_line(count, sizeof count, n);
-    right -= text_width(count, 28 * s) + gap;
     set4(out->field, x0 + pad, fy, right - (x0 + pad), fh);
 }
 
@@ -335,7 +337,7 @@ void rl_te_layout(uint32_t width, uint32_t height, bool touch, rl_te_place *out)
 #define FIELD 0x0A0C10u
 #define KEY 0x3A3E46u
 
-/** @brief The hint left of the count: the guest's message, or the minimum when the text is shorter. */
+/** @brief The hint under the prompt: the guest's message, or the minimum when the text is shorter. */
 static bool hint_line(char *out, size_t size, uint32_t n, uint32_t *rgb)
 {
     if (rl_te.message[0]) {
@@ -376,14 +378,13 @@ static void field(canvas *c, const rl_te_place *pl, float px, bool caret_on)
     }
 }
 
-/** @brief The floating one-line panel: prompt, field, count, buttons, and a hint line under them when there is one. */
-/** @brief The floating panel: the prompt (and sub text, and a hint) wrapped in a strip, over one line of field, count and buttons. */
+/** @brief The floating panel: the prompt (and sub text, and a hint) wrapped in a strip, over one line of field and buttons, and the count in the top right corner. */
 static void floating_panel(canvas *c, const rl_te_place *pl, uint32_t n, bool caret_on)
 {
     float s = pl->s;
     const float *p = pl->panel, *f = pl->field;
     rrect(c, p, 22 * s, PANEL, 0.92f, EDGE, fmaxf(2 * s, 1));
-    float pad = 14 * s, gap = 14 * s, x = p[0] + pad + 6 * s, y = pl->strip_y;
+    float pad = 14 * s, x = p[0] + pad + 6 * s, y = pl->strip_y;
     const char *header = rl_te.header[0] ? rl_te.header : "Enter text";
     char line[1100];
     for (uint32_t i = 0; i < pl->nheader; i++) {
@@ -402,7 +403,8 @@ static void floating_panel(canvas *c, const rl_te_place *pl, uint32_t n, bool ca
     float mid = f[1] + f[3] / 2;
     field(c, pl, 40 * s, caret_on);
     count_line(line, sizeof line, n);
-    text(c, f[0] + f[2] + gap, mid + 10 * s, line, 28 * s, GRAY, NULL, false);
+    float cw = text_width(line, COUNT_PX * s);
+    text(c, p[0] + p[2] - pad - 6 * s - cw, pl->strip_y + PROMPT_LINE * s * 0.72f, line, COUNT_PX * s, GRAY, NULL, false);
     for (int b = 0; b <= RL_TE_CANCEL; b++) {
         if (!pl->has_button[b])
             continue;
