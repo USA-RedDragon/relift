@@ -144,6 +144,13 @@ const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i);
 /** @brief Tells the machinery that every pipeline the game will start with exists: a compile after this is late, and logged. */
 void nvn_pipe_warmed(void);
 
+/**
+ * @brief The vertex streams a draw with pipeline key k binds buffers to, in the key's order, into out; returns how
+ * many. The streams need not be contiguous: each of the GPU's vertex streams is set apart, so a program may read
+ * streams 0 and 2 with nothing bound to 1.
+ */
+uint32_t nvn_draw_vertex_streams(const nvn_pipe_key *k, uint32_t out[NVN_VERTEX_BUFFERS]);
+
 /** @brief Writes the persistent cache when it holds pipelines made since it was last written. */
 void nvn_pipe_save(void);
 

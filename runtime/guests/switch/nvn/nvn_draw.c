@@ -992,12 +992,31 @@ void nvn_widen_indices(const uint8_t *src, uint32_t n, bool restart, uint16_t *d
         dst[i] = restart && src[i] == 0xffu ? 0xffffu : src[i];
 }
 
+uint32_t nvn_draw_vertex_streams(const pipe_key *k, uint32_t out[NVN_VERTEX_BUFFERS])
+{
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < k->nbind && n < NVN_VERTEX_BUFFERS; i++)
+        if (k->bind[i].binding < NVN_VERTEX_BUFFERS)
+            out[n++] = k->bind[i].binding;
+    return n;
+}
+
+/** @brief Whether k reads the default attribute values (0, 0, 0, 1) through DEFAULT_BINDING with stride 0. */
+static bool default_stream(const pipe_key *k)
+{
+    for (uint32_t i = 0; i < k->nbind; i++)
+        if (k->bind[i].binding == DEFAULT_BINDING)
+            return k->bind[i].stride == 0;
+    return false;
+}
+
 /** @brief What a draw puts into the batch being recorded, and where. */
 typedef struct draw_data {
     const pipe_key *k;
     module *const *mods;
     bool indexed, has_def;
-    uint32_t itype, first, count, nb, firstb;
+    uint32_t itype, first, count, nb;
+    uint32_t binding[NVN_VERTEX_BUFFERS];
     /** @brief The Vulkan index type the uploaded indices have (8-bit indices are widened to 16 bits). */
     VkIndexType ivk;
     int32_t base;
@@ -1015,14 +1034,13 @@ static int stage_draw(replay *r, void *arg)
     bool indexed = dd->indexed;
     uint32_t itype = dd->itype, first = dd->first, count = dd->count;
     int32_t base = dd->base;
-    dd->nb = dd->firstb = 0;
+    dd->nb = 0;
     dd->has_def = false;
-    for (uint32_t i = 0; i < kp->nbind; i++) {
-        uint32_t s = kp->bind[i].binding;
+    uint32_t streams[NVN_VERTEX_BUFFERS], nstreams = nvn_draw_vertex_streams(kp, streams);
+    for (uint32_t i = 0; i < nstreams; i++) {
+        uint32_t s = streams[i];
         uint64_t off;
-        if (s >= NVN_VERTEX_BUFFERS)
-            continue;
-        if (s == DEFAULT_BINDING && kp->bind[i].stride == 0 && !st->vb[s].addr) {
+        if (s == DEFAULT_BINDING && !st->vb[s].addr && default_stream(kp)) {
             static const float one[4] = { 0, 0, 0, 1 };
             if (!nvn_vk_upload_bytes(r, (const uint8_t *)one, sizeof one, 0, 16, &off))
                 return nvn_vk_stop(r, "the upload arena is full");
@@ -1034,10 +1052,7 @@ static int stage_draw(replay *r, void *arg)
             return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
         if (!nvn_vk_upload(r, st->vb[s].addr, st->vb[s].size, 0, 16, &off))
             return nvn_vk_stop(r, "the upload arena is full");
-        if (dd->nb == 0)
-            dd->firstb = s;
-        if (s != dd->firstb + dd->nb)
-            return nvn_vk_stop(r, "vertex streams that are not contiguous");
+        dd->binding[dd->nb] = s;
         dd->offs[dd->nb++] = off;
     }
     static const uint32_t isize[] = { 1, 2, 4 };
@@ -1243,11 +1258,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     fixed_push fp = { st->point_size, st->alpha_ref };
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
-    VkBuffer bufs[NVN_VERTEX_BUFFERS];
     for (uint32_t i = 0; i < dd.nb; i++)
-        bufs[i] = g.arena.buf;
-    if (dd.nb)
-        VK(vkCmdBindVertexBuffers)(g.cb, dd.firstb, dd.nb, bufs, dd.offs);
+        VK(vkCmdBindVertexBuffers)(g.cb, dd.binding[i], 1, &g.arena.buf, &dd.offs[i]);
     if (dd.has_def)
         VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &dd.def_off);
     for (uint32_t j = 0; j < k.nint; j++)
