@@ -418,6 +418,13 @@ bool nvn_untile_can(const vimg *v);
  * batch runs. False, with nothing recorded, when v's format or storage does not allow it.
  */
 bool nvn_untile_move(replay *r, vimg *v, bool tile);
+/**
+ * @brief Records an upload of v's storage into v's image through a packed device buffer: a shader reads the storage
+ * through its pool's device address and writes the texels (or compressed blocks) packed, and a buffer copy puts them
+ * into the image, for images no shader can store to (depth, compressed). False, with nothing recorded, when v's
+ * format, aspect or layout does not allow it or its storage is outside every imported pool.
+ */
+bool nvn_untile_upload_packed(replay *r, vimg *v);
 /** @brief Frees what the moves of the batch that just ran used; called once a submit has finished. */
 void nvn_untile_release(void);
 /** @brief Moves recorded so far, for the stats. */

@@ -1533,7 +1533,7 @@ static bool upload_body(replay *r, vimg *v)
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
         return false;
-    if (gpu_moves() && nvn_untile_move(r, v, false))
+    if (gpu_moves() && (nvn_untile_move(r, v, false) || nvn_untile_upload_packed(r, v)))
         return true;
     if (d->target == NVN_TARGET_BUFFER) {
         uint64_t off, bytes = (uint64_t)d->width * bpb;
