@@ -87,6 +87,13 @@ typedef struct vimg {
     VkImageUsageFlags usage;
     /** @brief When the GPU last wrote it (a render target, copy or storage binding), from a running count. */
     uint64_t written;
+    /**
+     * @brief The other images over any byte of its storage, listed when the set of images was as g.image_epoch was at
+     * alias_epoch (sync_alias lists them again once it changes).
+     */
+    struct vimg **aliases;
+    uint32_t naliases;
+    uint64_t alias_epoch;
     /** @brief The hash of its storage when last filled, and the frame (presents + 1) it was last checked in. */
     uint64_t hash, hash_frame;
     /** @brief Write tracking of the storage's whole pages, and the hash of the bytes beside them (nvn_watch.h). */
@@ -201,6 +208,8 @@ typedef struct nvn_vkdev {
     uint64_t pools_seen;
     /** @brief The running count vimg.written takes its values from. */
     uint64_t write_stamp;
+    /** @brief Counts the changes of the set of host images (one made, or some retired). */
+    uint64_t image_epoch;
     uint64_t presents;
     /** @brief Guest bytes copied for the commands of the batch being recorded: buffers, indices, constants. */
     staging arena;

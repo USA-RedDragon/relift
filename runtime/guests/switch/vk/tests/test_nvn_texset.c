@@ -559,3 +559,45 @@ TEST(nvn_texset_a_texture_whose_pool_is_gone_reads_zeros)
     CHECK_EQ(kind, 0);
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_an_image_takes_every_newer_write_of_an_alias_even_after_a_quiet_lookup)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, a = 0x200, b = 0x300;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .pool = pool,
+                       .offset = 0x4000 };
+    CHECK(nvn_tex_layout(&d));
+    nvn_tex_desc e = d;
+    e.height = 2;
+    CHECK(nvn_texture_record(a, &d, NULL));
+    CHECK(nvn_texture_record(b, &e, NULL));
+    vimg *va = nvn_vk_image(&r, a), *vb = nvn_vk_image(&r, b);
+    CHECK(va != NULL && vb != NULL && va != vb);
+    CHECK(nvn_vk_image(&r, b) == vb);
+    uint64_t quiet = vb->written;
+    CHECK(nvn_vk_image(&r, b) == vb);
+    CHECK_EQ(vb->written, quiet);
+    nvn_vk_written(va);
+    CHECK(nvn_vk_image(&r, b) == vb);
+    CHECK_EQ(vb->written, va->written);
+    nvn_vk_written(va);
+    CHECK(nvn_vk_image(&r, b) == vb);
+    CHECK_EQ(vb->written, va->written);
+    CHECK(nvn_vk_flush(&r));
+}

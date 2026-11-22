@@ -1672,6 +1672,7 @@ static void image_free(vimg *v)
     for (uint32_t i = 0; i < v->nsub; i++)
         VK(vkDestroyImageView)(g.dev, v->sub[i].view, NULL);
     free(v->sub);
+    free(v->aliases);
     if (v->view)
         VK(vkDestroyImageView)(g.dev, v->view, NULL);
     if (v->image)
@@ -1992,11 +1993,29 @@ static bool copy_keeps_bytes(const vimg *u, const vimg *v)
  */
 static vimg *sync_alias(replay *r, vimg *v)
 {
+    if (v->alias_epoch != g.image_epoch) {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < g.nimages; i++)
+            n += g.images[i] != v && overlaps(g.images[i], v);
+        vimg **a = n ? realloc(v->aliases, n * sizeof *a) : NULL;
+        if (n && !a) {
+            nvn_vk_stop(r, "out of memory listing the images over texture storage 0x%llx", (unsigned long long)v->storage);
+            return NULL;
+        }
+        if (!n)
+            free(v->aliases);
+        v->aliases = a;
+        v->naliases = 0;
+        for (uint32_t i = 0; i < g.nimages; i++)
+            if (g.images[i] != v && overlaps(g.images[i], v))
+                v->aliases[v->naliases++] = g.images[i];
+        v->alias_epoch = g.image_epoch;
+    }
     for (;;) {
         vimg *src = NULL;
-        for (uint32_t i = 0; i < g.nimages; i++) {
-            vimg *u = g.images[i];
-            if (u != v && overlaps(u, v) && u->written > v->written && (!src || u->written < src->written))
+        for (uint32_t i = 0; i < v->naliases; i++) {
+            vimg *u = v->aliases[i];
+            if (u->written > v->written && (!src || u->written < src->written))
                 src = u;
         }
         if (!src)
@@ -2038,6 +2057,8 @@ void nvn_vk_retire_images(void)
         if (!v->pool_serial || nvn_obj_serial(v->d.pool, NVN_POOL) == v->pool_serial)
             g.images[n++] = v;
     }
+    if (g.nimages != n)
+        g.image_epoch++;
     g.nimages = n;
 }
 
@@ -2188,6 +2209,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     if (depth && !nvn_vk_flush(r))
         goto fail;
     g.images[g.nimages++] = v;
+    g.image_epoch++;
     sync_alias(r, v);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "host image for texture 0x%llx: storage 0x%llx, format %u (%d), %ux%u",
