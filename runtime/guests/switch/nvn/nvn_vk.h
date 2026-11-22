@@ -609,6 +609,11 @@ bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv);
 /** @brief How many texture ids sit in a slot of their own number (0 before the set is made). */
 uint32_t nvn_texset_pinned(void);
 /**
+ * @brief The layers a sampling view of v sees: the view's count, else those of the image from the view's first one
+ * (an image's layers as its host image has them: six for a cube, whose descriptor depth is 1). nv NULL for no view.
+ */
+uint32_t nvn_texset_view_layers(const vimg *v, const nvn_view *nv);
+/**
  * @brief The dimensions (bits of the translator's Dim) a texture of Dim dim, width by height texels and layers array
  * layers is sampled as. A square 2D array of 6 or more layers also has a cube view, and a cube array view when its
  * layers are a multiple of 6: the guest makes cube maps as 2D arrays and samples them as cubes.

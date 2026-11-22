@@ -292,6 +292,16 @@ static uint32_t dims_fitting(uint32_t d)
     }
 }
 
+uint32_t nvn_texset_view_layers(const vimg *v, const nvn_view *nv)
+{
+    uint32_t all = nvn_vk_image_range(v).layerCount;
+    if (!nv || !nv->has_layers)
+        return all;
+    if (nv->num_layers)
+        return (uint32_t)nv->num_layers;
+    return (uint32_t)nv->min_layer < all ? all - (uint32_t)nv->min_layer : 0;
+}
+
 uint32_t nvn_texset_fit(uint32_t dim, uint32_t width, uint32_t height, uint32_t layers)
 {
     uint32_t fit = dims_fitting(dim);
@@ -710,9 +720,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
         }
     VkDescriptorImageInfo ii[DIMS];
     VkWriteDescriptorSet w[DIMS];
-    uint32_t layers = v->d.depth;
-    if (has_view && nv.has_layers)
-        layers = nv.num_layers ? (uint32_t)nv.num_layers : v->d.depth - (uint32_t)nv.min_layer;
+    uint32_t layers = nvn_texset_view_layers(v, has_view ? &nv : NULL);
     uint32_t n = 0, fit = nvn_texset_fit(*dim, v->d.width, v->d.height, layers);
     for (uint32_t d = 0; d < DIMS; d++) {
         if (!(fit & (1u << d)))

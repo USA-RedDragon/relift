@@ -640,3 +640,27 @@ TEST(nvn_a_texture_finds_its_host_image_among_many_by_storage_and_shape)
     }
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_texset_a_view_of_a_cube_counts_its_six_faces)
+{
+    vimg cube;
+    memset(&cube, 0, sizeof cube);
+    cube.d.target = NVN_TARGET_CUBEMAP;
+    cube.d.depth = 1;
+    cube.d.levels = 1;
+    CHECK_EQ(nvn_texset_view_layers(&cube, NULL), 6u);
+    nvn_view nv;
+    memset(&nv, 0, sizeof nv);
+    nv.has_layers = true;
+    nv.min_layer = 2;
+    CHECK_EQ(nvn_texset_view_layers(&cube, &nv), 4u);
+    nv.num_layers = 1;
+    CHECK_EQ(nvn_texset_view_layers(&cube, &nv), 1u);
+    nv.num_layers = 0;
+    nv.min_layer = 7;
+    CHECK_EQ(nvn_texset_view_layers(&cube, &nv), 0u);
+    vimg arr = cube;
+    arr.d.target = 4;
+    arr.d.depth = 12;
+    CHECK_EQ(nvn_texset_view_layers(&arr, NULL), 12u);
+}
