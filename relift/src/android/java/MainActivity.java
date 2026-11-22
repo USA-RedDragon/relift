@@ -12,6 +12,7 @@ import android.view.Display;
 import android.view.Surface;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
@@ -79,6 +80,13 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         getSystemService(DisplayManager.class).registerDisplayListener(watch, null);
         addContentView(ui.root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+        if (Build.VERSION.SDK_INT >= 26) {
+            getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((View was, View now) -> {
+                if (now != null) {
+                    now.setDefaultFocusHighlightEnabled(false);
+                }
+            });
+        }
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this);
         }
