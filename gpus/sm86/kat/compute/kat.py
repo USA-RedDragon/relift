@@ -5,7 +5,8 @@
 For each case under cases/ (k.comp, GLSL, and spec, a krun spec): compile the GLSL, run it on the
 NVIDIA device (KAT_REF, default "NVIDIA") for the reference outputs, carve the SASS the driver built
 from its pipeline cache with relift-shaders, translate it for every host preset in KAT_HOSTS,
-validate each translation with spirv-val, run it on every device in KAT_DEVS (default "llvmpipe
+validate each translation with spirv-val (a KAT_HOSTS entry ending in .json is a runtime device.json,
+the host it describes; one ending in :staged gathers HMMA fragments through workgroup memory), run it on every device in KAT_DEVS (default "llvmpipe
 NVIDIA") and compare every output with the reference, word for word. --record writes the SASS,
 the inputs and the reference outputs to the kat file. Needs glslangValidator, spirv-val, zstd, a C
 compiler with the Vulkan headers, and `cargo build --release -p relift-switch-shaders -p
@@ -19,7 +20,7 @@ KAT_DEVS devices; it needs no NVIDIA device, glslangValidator or zstd.
 A spec names its files with placeholders: SPV (the module), OUT (the prefix of the output files)
 and IN<n> (input file n). `input <n> <bytes> <kind> <seed>` lines make input n: kind u32 for
 random words, f32:<lo>:<hi> for floats drawn between lo and hi, words:<a>,<b>,... for those words
-then zeros, zero for zeros. The translated
+then zeros, halves:<a>,<b>,... for halves drawn from that list, zero for zeros. The translated
 program finds its buffer addresses in constant bank 0, so a spec places them there with `put`
 lines as well as in the push constants the GLSL reads. A run that needs VK_KHR_shader_fma or
 VK_KHR_cooperative_matrix on a device without it is skipped, and so is a translation that runs warp
@@ -34,7 +35,7 @@ TARGET = os.environ.get('CARGO_TARGET_DIR', os.path.join(ROOT, 'target'))
 XLATE = os.path.join(TARGET, 'release/examples/xlate')
 DIS = os.path.join(TARGET, 'release/examples/dis')
 SHADERS = os.path.join(TARGET, 'release/relift-shaders')
-HOSTS = os.environ.get('KAT_HOSTS', 'lavapipe mali amd_pro anv nvidia adreno').split()
+HOSTS = os.environ.get('KAT_HOSTS', 'lavapipe mali amd_pro anv nvidia adreno lavapipe:staged nvidia:staged').split()
 DEVS = os.environ.get('KAT_DEVS', 'llvmpipe NVIDIA').split()
 REF = os.environ.get('KAT_REF', 'NVIDIA')
 
@@ -55,6 +56,9 @@ def make_input(n, kind, seed):
         return struct.pack('<%df' % (n // 4), *[rng.uniform(lo, hi) for _ in range(n // 4)])
     if kind == 'zero':
         return bytes(n)
+    if kind.startswith('halves:'):
+        h = [int(x, 0) for x in kind[7:].split(',')]
+        return struct.pack('<%dH' % (n // 2), *[rng.choice(h) for _ in range(n // 2)])
     if kind.startswith('words:'):
         w = [int(x, 0) for x in kind[6:].split(',')]
         return struct.pack('<%dI' % (n // 4), *(w + [0] * (n // 4 - len(w))))
@@ -137,9 +141,11 @@ def check(work, name, prog, lines, inputs, answers):
     open(os.path.join(o, 'k.bin'), 'wb').write(prog)
     krun = os.path.join(work, 'krun')
     ok = True
-    for host in HOSTS:
+    for spec_host in HOSTS:
+        spec_host, staged = spec_host.removesuffix(':staged'), spec_host.endswith(':staged')
+        host = os.path.basename(spec_host).removesuffix('.json') + ('-staged' if staged else '')
         spv = os.path.join(o, host + '.spv')
-        x = run([XLATE, os.path.join(o, 'k.bin'), spv, host])
+        x = run([XLATE, os.path.join(o, 'k.bin'), spv, spec_host] + (['--hmma-staged'] if staged else []))
         if not x.startswith('ok'):
             print('%s %s: %s' % (name, host, x.strip()))
             ok = False
