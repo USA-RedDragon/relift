@@ -129,7 +129,7 @@ uint32_t rl_upscale_resolve(uint32_t choice, bool in_frame, bool game_ok)
     if (!in_frame)
         return rl_upscale_spatial(choice);
     if (choice == RL_UPSCALE_AUTO)
-        return game_ok ? RL_UPSCALE_GAME : RL_UPSCALE_BILINEAR;
+        return game_ok ? RL_UPSCALE_GAME : RL_UPSCALE_BEST_TEMPORAL;
     return choice < RL_UPSCALE_CHOICES ? choice : RL_UPSCALE_BILINEAR;
 }
 

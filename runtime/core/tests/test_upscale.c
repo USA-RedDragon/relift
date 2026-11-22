@@ -123,7 +123,9 @@ TEST(upscale_names_and_spatial_siblings)
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_GAME), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_spatial(RL_UPSCALE_AUTO), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, true), RL_UPSCALE_GAME);
-    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_BILINEAR);
+    CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false), RL_UPSCALE_FSR2);
+    CHECK(rl_upscale_temporal(rl_upscale_resolve(RL_UPSCALE_AUTO, true, false)));
+    CHECK(!rl_upscale_temporal(RL_UPSCALE_FSR1));
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_AUTO, false, true), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_GAME, false, true), RL_UPSCALE_OFF);
     CHECK_EQ(rl_upscale_resolve(RL_UPSCALE_BILINEAR, false, true), RL_UPSCALE_BILINEAR);

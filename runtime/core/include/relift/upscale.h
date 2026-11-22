@@ -36,6 +36,12 @@ enum {
     RL_UPSCALE_CHOICES
 };
 
+/**
+ * @brief The best temporal choice relift has, which auto runs in the frame when the game's own upscaler cannot run; a
+ * device it does not start on runs its spatial sibling (rl_upscale_spatial).
+ */
+#define RL_UPSCALE_BEST_TEMPORAL RL_UPSCALE_FSR2
+
 /** @brief How a stage reaches its pictures. */
 enum {
     /** @brief Image views: a sampled input and a storage output (needs shaderStorageImageWriteWithoutFormat). */
@@ -111,8 +117,8 @@ RL_RUNTIME_API bool rl_upscale_temporal(uint32_t choice);
 
 /**
  * @brief The choice that runs for choice: in_frame for place 1, where game_ok says whether the game's own upscaler
- * can run on this device. RL_UPSCALE_AUTO is the game's own where it can run, else bilinear, in the frame; in the
- * window it is rl_upscale_spatial(choice).
+ * can run on this device. RL_UPSCALE_AUTO is the game's own where it can run, else RL_UPSCALE_BEST_TEMPORAL, in the
+ * frame; in the window it is rl_upscale_spatial(choice).
  */
 RL_RUNTIME_API uint32_t rl_upscale_resolve(uint32_t choice, bool in_frame, bool game_ok);
 
