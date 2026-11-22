@@ -48,8 +48,9 @@ if [ "$(cat "$cache/.run" 2>/dev/null)" != "$run" ]; then
   while [ "$(total)" -gt "$budget_kb" ]; do
     victim=$(cd "$root" && for d in */; do
       d=${d%/}
-      [ -f "$d/.run" ] && [ "$(cat "$d/.run")" != "$run" ] && [ ! -d "$d.lock" ] &&
+      if [ -f "$d/.run" ] && [ "$(cat "$d/.run")" != "$run" ] && [ ! -d "$d.lock" ]; then
         echo "$(stat -f %m "$d/.run") $d"
+      fi
     done | sort -n | head -n 1 | cut -d' ' -f2)
     [ -n "$victim" ] || break
     echo "cache holds $(($(total) / 1048576)) GB, over ${CI_MAC_CACHE_GB:-8}: removed $victim"
