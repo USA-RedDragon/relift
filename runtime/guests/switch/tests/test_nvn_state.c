@@ -340,3 +340,29 @@ TEST(nvn_dispatch_compute_indirect_takes_its_counts_from_the_pool_buffer_on_the_
     e.x[1] = gpu + 0x3fffc;
     CHECK_EQ(nvn_draw_cmd(&r, &e), RL_PENDING);
 }
+
+TEST(nvn_indirect_mesh_draws_stop_when_their_records_or_count_leave_the_pool)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t pool = heap, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(pool, storage, 0x40000, 0x18c));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    if (gpu == storage)
+        return;
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    st.render_mode = NVN_RENDER_ALWAYS;
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    r.st = &st;
+    rl_st32(t_mem(), storage + 0x40, 0);
+    nvn_cmd e = { .op = NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT_COUNT, .x = { 0, gpu + 0x100, gpu + 0x40, 4, 16 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &e), RL_OK);
+    e.x[2] = gpu + 0x40000;
+    CHECK_EQ(nvn_draw_cmd(&r, &e), RL_PENDING);
+    nvn_cmd m = { .op = NVN_CMD_MULTI_DRAW_MESH_TASKS_INDIRECT, .x = { 0, gpu + 0x3fff0, 4, 16 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &m), RL_PENDING);
+}

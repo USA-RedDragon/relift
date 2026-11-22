@@ -1540,9 +1540,21 @@ static int draw_mesh_indirect(replay *r, uint64_t indirect, uint64_t count_addr,
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     uint32_t n = max;
+    if (count_addr && !nvn_gpu_mapped(count_addr, 4)) {
+        char where[512];
+        nvn_gpu_describe(count_addr, where, sizeof where);
+        return nvn_vk_stop(r, "an indirect mesh draw's count at 0x%llx is in no pool: %s", (unsigned long long)count_addr,
+                           where);
+    }
     if (count_addr) {
         uint32_t c = rl_ld32(r->mem + nvn_gpu_guest(count_addr), 0);
         n = c < max ? c : max;
+    }
+    if (n && !nvn_gpu_mapped(indirect, (uint64_t)(n - 1) * stride + 8)) {
+        char where[512];
+        nvn_gpu_describe(indirect, where, sizeof where);
+        return nvn_vk_stop(r, "an indirect mesh draw's %u records of %u bytes at 0x%llx are in no one pool: %s", n,
+                           stride, (unsigned long long)indirect, where);
     }
     for (uint32_t i = 0; i < n; i++) {
         const uint8_t *rec = r->mem + nvn_gpu_guest(indirect + (uint64_t)i * stride);
