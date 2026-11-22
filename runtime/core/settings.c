@@ -45,7 +45,7 @@ static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
 static const char *const g_upscaler_choices[] = {
-    "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3",
+    "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa",
 };
 
 static const rl_setting_def g_runtime_defs[] = {
@@ -122,11 +122,12 @@ static const rl_setting_def g_runtime_defs[] = {
                        "meets its requirements, else the best temporal one relift has (fsr2); off copies the "
                        "picture at its render size; nearest, bilinear, sharp_bilinear and lanczos are relift's; "
                        "fsr1 is AMD FSR 1 (EASU and RCAS); fsr2 and fsr3 are AMD FSR 2 and the FSR 3 upscaler, "
-                       "temporal, where the game gives depth and motion vectors, else FSR 1. Every choice but game "
-                       "changes the picture from the console's",
+                       "temporal, where the game gives depth and motion vectors, else FSR 1; taa is relift's plain "
+                       "temporal upscaler, else bilinear. Every choice but game changes the picture from the "
+                       "console's",
         .env = "RELIFT_UPSCALER",
         .choices = g_upscaler_choices,
-        .nchoices = 10,
+        .nchoices = 11,
     },
     {
         .key = "picture.upscale_scale",

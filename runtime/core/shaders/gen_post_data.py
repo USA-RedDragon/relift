@@ -56,6 +56,7 @@ PASSES = [
     ("upscale_buffers", "upscale.comp", ["-DRL_BUFFERS"]),
     ("fsr1", "fsr1.comp", []),
     ("fsr1_buffers", "fsr1.comp", ["-DRL_BUFFERS"]),
+    ("taa", "taa.comp", []),
 ]
 
 

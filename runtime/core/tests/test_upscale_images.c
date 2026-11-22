@@ -1,9 +1,9 @@
 /**
  * @file test_upscale_images.c
  * @brief The upscaler stage on image views, as a guest's frame calls it (place 1): every spatial choice runs on images
- * (nearest picks the pixel the mapping names), FSR 2 and the FSR 3 upscaler with depth and motion vectors keep a still
- * flat picture and a still ramp at ratio 1, and both rebuild a detailed picture from jittered frames at half size closer
- * with the jitter and motion vectors as DLSS takes them than with either one's sign turned.
+ * (nearest picks the pixel the mapping names), FSR 2, the FSR 3 upscaler and relift's TAA with depth and motion vectors
+ * keep a still flat picture and a still ramp at ratio 1, and all three rebuild a detailed picture from jittered frames
+ * at half size closer with the jitter and motion vectors as DLSS takes them than with either one's sign turned.
  */
 #include "runner.h"
 
@@ -524,5 +524,21 @@ TEST(upscale_fsr3_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
 {
     if (start())
         takes_dlss_conventions(RL_UPSCALE_FSR3, "fsr3");
+}
+
+TEST(upscale_taa_keeps_still_pictures_at_ratio_one)
+{
+    if (!start())
+        return;
+    int a, b;
+    still_pictures(RL_UPSCALE_TAA, "taa", &a, &b);
+    CHECK_EQ(a, 0);
+    CHECK(b <= 2);
+}
+
+TEST(upscale_taa_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
+{
+    if (start())
+        takes_dlss_conventions(RL_UPSCALE_TAA, "taa");
 }
 #endif
