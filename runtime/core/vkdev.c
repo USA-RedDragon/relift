@@ -28,6 +28,7 @@ typedef void(RLVK_CALL *rlvk_props_fn)(rlvk_handle, rlvk_device_properties *);
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_queue = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_guest_queue = PTHREAD_MUTEX_INITIALIZER;
 static rlvk_dev g_dev;
 static bool g_tried, g_ok;
 
@@ -302,16 +303,19 @@ bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name)
     return true;
 }
 
-void rl_vkdev_guest_queue_lock(void)
-{
-    if (g_shared_queue)
-        pthread_mutex_lock(&g_queue);
-}
+void rl_vkdev_guest_queue_lock(void) { pthread_mutex_lock(g_shared_queue ? &g_queue : &g_guest_queue); }
 
-void rl_vkdev_guest_queue_unlock(void)
+void rl_vkdev_guest_queue_unlock(void) { pthread_mutex_unlock(g_shared_queue ? &g_queue : &g_guest_queue); }
+
+void rl_vkdev_wait_idle(const rlvk_dev *d)
 {
-    if (g_shared_queue)
-        pthread_mutex_unlock(&g_queue);
+    if (!g_shared_queue)
+        pthread_mutex_lock(&g_guest_queue);
+    pthread_mutex_lock(&g_queue);
+    d->vkDeviceWaitIdle(d->device);
+    pthread_mutex_unlock(&g_queue);
+    if (!g_shared_queue)
+        pthread_mutex_unlock(&g_guest_queue);
 }
 
 const rlvk_dev *rl_vkdev(void)

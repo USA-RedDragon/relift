@@ -601,9 +601,7 @@ void rl_post_gpu_free(rl_post_gpu *v)
         return;
     const rlvk_dev *d = v->d;
     if (d) {
-        rl_vkdev_queue_lock();
-        d->vkDeviceWaitIdle(d->device);
-        rl_vkdev_queue_unlock();
+        rl_vkdev_wait_idle(d);
         rl_upscaler_free(v->own_u);
         for (int i = 0; i < B_COUNT; i++)
             rl_vkdev_buf_free(d, &v->b[i]);

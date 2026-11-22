@@ -18,6 +18,7 @@
  * mirror is noted as written for its batch and the pages that differ are copied back.
  */
 #include "nvn_vk.h"
+#include "vkdev.h"
 
 #include "hos.h"
 
@@ -174,7 +175,7 @@ void nvn_mirror_free(nvn_import *im)
     pthread_mutex_lock(&mi.lock);
     mirror *m = by_buf(im->buf);
     if (m) {
-        VK(vkDeviceWaitIdle)(g.dev);
+        rl_vkdev_wait_idle(rl_vkdev());
         uint32_t i = 0;
         while (mi.v[i] != m)
             i++;

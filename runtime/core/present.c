@@ -221,9 +221,7 @@ static bool start_objects(rl_present *p)
 /** @brief Waits until the device is done with everything, so a swapchain or surface can go. */
 static void idle(rl_present *p)
 {
-    rl_vkdev_queue_lock();
-    p->d->vkDeviceWaitIdle(p->d->device);
-    rl_vkdev_queue_unlock();
+    rl_vkdev_wait_idle(p->d);
 }
 
 static void drop_swapchain(rl_present *p, bool keep_handle)

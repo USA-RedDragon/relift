@@ -73,7 +73,7 @@ typedef bool rl_vkdev_hook(void *user, rl_vkdev_build *b);
 void rl_vkdev_require(const char *who, uint32_t api_version, uint32_t queue_flags, rl_vkdev_hook *hook, void *user);
 /** @brief Enables a device extension from a hook; false when the list is full. */
 bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name);
-/** @brief Takes the guest queue for a submit; a no-op when the guest and the core use different queues. */
+/** @brief Takes the guest queue for a submit (the core's queue lock when the guest shares that queue). */
 void rl_vkdev_guest_queue_lock(void);
 /** @brief Gives it back. */
 void rl_vkdev_guest_queue_unlock(void);
@@ -87,6 +87,11 @@ const rlvk_dev *rl_vkdev(void);
 void rl_vkdev_queue_lock(void);
 /** @brief Gives the queue back. */
 void rl_vkdev_queue_unlock(void);
+/**
+ * @brief vkDeviceWaitIdle with every queue of the device held, as Vulkan requires: the guest queue, then the core's.
+ * Callers hold neither lock.
+ */
+void rl_vkdev_wait_idle(const rlvk_dev *d);
 /** @brief A memory type in bits with every flag of want, preferring one that also has every flag of nice; -1 if none. */
 int rl_vkdev_memory_type(const rlvk_dev *d, uint32_t bits, uint32_t want, uint32_t nice);
 /** @brief Makes b (freeing what it held): device-local, or host-visible and mapped (cached when asked). */

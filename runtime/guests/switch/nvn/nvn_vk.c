@@ -1134,7 +1134,7 @@ bool nvn_vk_address_replay(void)
 void nvn_vk_unimport(nvn_import *im)
 {
     if (im->buf || im->memory)
-        VK(vkDeviceWaitIdle)(g.dev);
+        rl_vkdev_wait_idle(rl_vkdev());
     if (im->buf)
         VK(vkDestroyBuffer)(g.dev, (VkBuffer)im->buf, NULL);
     if (im->memory)
