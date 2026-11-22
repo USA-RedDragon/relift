@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -31,6 +32,21 @@ static uint64_t call(rl_ctx *c, rl_fn_t *fn, uint64_t x0, uint64_t x1, uint64_t 
     c->x[3] = x3;
     c->x[30] = RET;
     return fn(c, t_mem());
+}
+
+TEST(nvn_warm_warns_when_mappings_near_the_limit)
+{
+    char msg[512] = "untouched";
+    CHECK(!nvn_warm_maps_note(4000, 65530, 0, msg, sizeof msg));
+    CHECK(!nvn_warm_maps_note(49146, 65530, 0, msg, sizeof msg));
+    CHECK(!nvn_warm_maps_note(60000, 0, 0, msg, sizeof msg));
+    CHECK(!strcmp(msg, "untouched"));
+    CHECK(nvn_warm_maps_note(49148, 65530, 0, msg, sizeof msg));
+    CHECK(strstr(msg, "49148 memory mappings of the 65530 vm.max_map_count allows") != NULL);
+    CHECK(strstr(msg, "RELIFT_WARM_THREADS") == NULL);
+    CHECK(nvn_warm_maps_note(60272, 65530, 6, msg, sizeof msg));
+    CHECK(strstr(msg, "RELIFT_WARM_THREADS=6") != NULL);
+    CHECK(strstr(msg, "skips the memory rule") != NULL);
 }
 
 TEST(nvn_block_linear_layout)

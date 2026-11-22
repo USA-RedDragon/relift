@@ -58,6 +58,8 @@ static struct {
     bool pool_started;
     bool launched, all, background;
     uint32_t total, next, done, nrecorded, nshader, failed;
+    /** @brief The RELIFT_WARM_THREADS count, 0 when unset. */
+    uint32_t forced;
     uint64_t t0, last_log;
 } W = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
 
@@ -68,7 +70,9 @@ static struct {
  * @brief The workers to start: one per processor, and no more than the
  * memory available (Linux) or installed (elsewhere) holds at COMPILE_MEMORY
  * each, so that a worker per processor of a big machine does not run it out
- * of memory.
+ * of memory. RELIFT_WARM_THREADS overrides both: more compiles at once also
+ * use up the process's memory mappings faster (a driver compile maps many
+ * blocks), which maps_check watches.
  */
 static uint32_t worker_count(void)
 {
@@ -102,9 +106,57 @@ static uint32_t worker_count(void)
     if (by_memory && by_memory < cpus)
         cpus = (uint32_t)by_memory;
     const char *want = getenv("RELIFT_WARM_THREADS");
-    if (want && atoi(want) > 0)
+    if (want && atoi(want) > 0) {
         cpus = (uint32_t)atoi(want);
+        W.forced = cpus;
+    }
     return cpus ? cpus : 1u;
+}
+
+bool nvn_warm_maps_note(uint64_t count, uint64_t limit, uint32_t forced, char *buf, size_t n)
+{
+    if (!limit || count * 4 < limit * 3)
+        return false;
+    char why[128] = "";
+    if (forced)
+        snprintf(why, sizeof why, "; RELIFT_WARM_THREADS=%u runs that many compiles at once and skips the memory rule",
+                 forced);
+    snprintf(buf, n,
+             "the process holds %llu memory mappings of the %llu vm.max_map_count allows: the driver's shader compiles "
+             "use them up, and at the limit allocations and thread creation fail%s",
+             (unsigned long long)count, (unsigned long long)limit, why);
+    return true;
+}
+
+/** @brief Logs nvn_warm_maps_note's warning once when this process's mappings run high (Linux and Android). */
+static void maps_check(void)
+{
+#if defined(__linux__)
+    static bool warned;
+    if (warned)
+        return;
+    unsigned long long limit = 0, count = 0;
+    FILE *f = fopen("/proc/sys/vm/max_map_count", "r");
+    if (f) {
+        if (fscanf(f, "%llu", &limit) != 1)
+            limit = 0;
+        fclose(f);
+    }
+    f = limit ? fopen("/proc/self/maps", "r") : NULL;
+    if (!f)
+        return;
+    char chunk[65536];
+    size_t got;
+    while ((got = fread(chunk, 1, sizeof chunk, f)) > 0)
+        for (size_t i = 0; i < got; i++)
+            count += chunk[i] == '\n';
+    fclose(f);
+    char msg[512];
+    if (nvn_warm_maps_note(count, limit, W.forced, msg, sizeof msg)) {
+        warned = true;
+        rl_log(RL_LOG_WARN, "nvn", "%s", msg);
+    }
+#endif
 }
 
 /** @brief The key of a draw that uses module m alone in its stage with the specialization constants it starts with. */
@@ -207,6 +259,7 @@ static void progress(bool force, const char *what)
     W.last_log = now;
     rl_log(RL_LOG_INFO, "nvn", "shader warm-up (%s): %u of %u programs, %.1f s", what, W.done, W.total,
            (now - W.t0) / 1e9);
+    maps_check();
 }
 
 /** @brief A launch worker: takes the next table program or recorded pipeline until none is left. */

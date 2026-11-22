@@ -458,6 +458,12 @@ int nvn_shader_stage(const uint8_t *mem, uint64_t code);
  * its pipeline is made at once (on a worker thread).
  */
 void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control);
+/**
+ * @brief The warning for count memory mappings of the limit vm.max_map_count allows, written to buf (n bytes), when
+ * count is at three quarters of limit or more; false (buf untouched) otherwise or when limit is 0. forced is the
+ * RELIFT_WARM_THREADS count, 0 when unset.
+ */
+bool nvn_warm_maps_note(uint64_t count, uint64_t limit, uint32_t forced, char *buf, size_t n);
 /** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */
 uint32_t nvn_device_depth_mode(void);
 uint32_t nvn_device_origin_mode(void);
