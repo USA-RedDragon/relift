@@ -429,9 +429,15 @@ jobs:
         run: scripts/ci/generated.sh
 
   macos-workspace:
-    name: tests of every crate but relift (macOS)
+    name: tests of every crate but relift (macOS, ${{ matrix.part }})
     runs-on: macos-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The parts and their crates are listed in tests-workspace-part.sh,
+        # which puts every crate in exactly one of them.
+        part: [cpus, switch, rest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -444,12 +450,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: macos-debug
+          key: macos-debug-workspace-${{ matrix.part }}
           workspaces: |
             .
 
-      - name: tests of every crate but relift (macOS)
-        run: scripts/ci/tests.sh workspace
+      - name: tests of every crate but relift (macOS, ${{ matrix.part }})
+        run: scripts/ci/tests.sh workspace ${{ matrix.part }}
 
   macos-relift:
     name: tests of relift, without the end-to-end targets (macOS)
