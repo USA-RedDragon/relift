@@ -45,6 +45,8 @@ uint32_t am_focus_state(void);
 uint64_t am_resource_user_id(uint64_t pid);
 /** @brief Language code returned by GetDesiredLanguage. */
 uint64_t am_language_code(void);
+/** @brief Copies the display version into out (16 bytes, zero padded); false when none is set. */
+bool am_display_version(uint8_t out[16]);
 /** @brief Preselected user id halves. */
 void am_preselected_user(uint64_t *high, uint64_t *low);
 /** @brief Resets the state of the application side (called by the install function). */

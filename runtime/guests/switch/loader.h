@@ -65,6 +65,11 @@ typedef struct rl_switch_program {
     uint32_t console;
     /** @brief NPDM system resource size in bytes. */
     uint64_t system_resource_size;
+    /**
+     * @brief The program's display version (the control data's display version field), or NULL when the build has none;
+     * the NPDM-less and test programs leave it NULL.
+     */
+    const char *display_version;
 } rl_switch_program;
 
 /**

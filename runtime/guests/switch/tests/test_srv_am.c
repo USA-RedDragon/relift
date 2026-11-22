@@ -688,6 +688,19 @@ TEST(am_application_functions_basic)
     CHECK_EQ(rc_of(r), 0);
     for (int i = 0; i < 16; i++)
         CHECK_EQ(r.data[i], 0);
+    /* A display version from the program's control data comes back as its 16-byte field: the text, then zeros. */
+    rl_am_set_display_version("2.7.31");
+    r = tc_send(e.c, f, tc_new(23));
+    CHECK_EQ(rc_of(r), 0);
+    CHECK(memcmp(r.data, "2.7.31\0\0\0\0\0\0\0\0\0\0", 16) == 0);
+    /* A field longer than the 15 characters the console's field holds keeps its first 15 and a terminator. */
+    rl_am_set_display_version("0123456789abcdefgh");
+    r = tc_send(e.c, f, tc_new(23));
+    CHECK(memcmp(r.data, "0123456789abcde\0", 16) == 0);
+    rl_am_set_display_version(NULL);
+    r = tc_send(e.c, f, tc_new(23));
+    for (int i = 0; i < 16; i++)
+        CHECK_EQ(r.data[i], 0);
 
     struct {
         uint64_t type;

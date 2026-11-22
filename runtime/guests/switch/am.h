@@ -49,6 +49,12 @@ RL_RUNTIME_API bool rl_am_request_exit(void);
 RL_RUNTIME_API void rl_am_lock_exit(bool lock);
 /** @brief Sets the language code GetDesiredLanguage returns (default RL_AM_LANGUAGE_CODE_EN_US). */
 RL_RUNTIME_API void rl_am_set_desired_language(uint64_t code);
+/**
+ * @brief Sets the display version GetDisplayVersion returns: the program's display version string (the NACP's 16-byte
+ * field, at most 15 characters kept), or NULL when the program's control data does not hold one. With none set the
+ * command answers 16 zero bytes, as the console does for an empty field, and logs once that the version is unknown.
+ */
+RL_RUNTIME_API void rl_am_set_display_version(const char *version);
 /** @brief Sets the user id (high, low halves) the launch parameter preselects. Default 1, 0. */
 RL_RUNTIME_API void rl_am_set_preselected_user(uint64_t high, uint64_t low);
 

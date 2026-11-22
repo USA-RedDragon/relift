@@ -7,6 +7,7 @@
 #include "loader.h"
 
 #include "hos.h"
+#include "am.h"
 #include "hos_mods.h"
 #include "services.h"
 
@@ -500,6 +501,7 @@ static int run_program(void *arg)
         cfg.code_size = hi - cfg.code_start;
     cfg.program_id = p->program_id;
     cfg.system_resource_size = p->system_resource_size;
+    rl_am_set_display_version(p->display_version);
     cfg.main_prio = p->main_prio;
     cfg.main_core = p->main_core;
     if (p->main_stack_size)

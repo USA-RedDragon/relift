@@ -131,9 +131,23 @@ static rl_result af_set_terminate_result(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief GetDisplayVersion: the 16-byte display version field of the program's control data (a NUL padded string).
+ * Without one the answer is 16 zero bytes, the console's answer for an empty field; the first such call logs that
+ * the version is unknown and names the setting that supplies it.
+ */
 static rl_result af_get_display_version(rl_ipc_req *r)
 {
-    rl_ipc_out(r, 16);
+    static bool warned;
+    uint8_t *out = rl_ipc_out(r, 16);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    if (!am_display_version(out) && !warned) {
+        warned = true;
+        rl_log(RL_LOG_WARN, "am",
+               "the game's display version is unknown: its control data holds none; set display_version in the [game] "
+               "table of relift.toml");
+    }
     return KR_SUCCESS;
 }
 

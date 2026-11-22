@@ -10,6 +10,7 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define AM_QUEUE 64
 #define AM_PIDS 32
@@ -23,6 +24,8 @@ static hos_revent *am_res_event;
 static uint32_t am_focus = RL_AM_FOCUS_IN;
 static bool am_docked;
 static uint64_t am_language = RL_AM_LANGUAGE_CODE_EN_US;
+static char am_display_version_str[16];
+static bool am_display_version_known;
 static uint64_t am_user_high = 1;
 static uint64_t am_user_low;
 static uint64_t am_pids[AM_PIDS];
@@ -142,6 +145,25 @@ void rl_am_set_desired_language(uint64_t code)
     pthread_mutex_lock(&am_mu);
     am_language = code;
     pthread_mutex_unlock(&am_mu);
+}
+
+void rl_am_set_display_version(const char *version)
+{
+    pthread_mutex_lock(&am_mu);
+    memset(am_display_version_str, 0, sizeof am_display_version_str);
+    am_display_version_known = version && *version;
+    if (am_display_version_known)
+        strncpy(am_display_version_str, version, sizeof am_display_version_str - 1);
+    pthread_mutex_unlock(&am_mu);
+}
+
+bool am_display_version(uint8_t out[16])
+{
+    pthread_mutex_lock(&am_mu);
+    memcpy(out, am_display_version_str, sizeof am_display_version_str);
+    bool known = am_display_version_known;
+    pthread_mutex_unlock(&am_mu);
+    return known;
 }
 
 void rl_am_set_preselected_user(uint64_t high, uint64_t low)
