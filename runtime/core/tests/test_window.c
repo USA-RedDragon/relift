@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -143,6 +144,60 @@ TEST(window_headless_sigterm_and_sigint_close)
     CHECK_EQ(rl_window_main(signal_body, &sig), 1);
     rl_window_set_events(NULL, NULL);
     reset();
+}
+#endif
+
+#if !defined(_WIN32)
+static void ignore_close(void *user, rl_window *w, int event)
+{
+    (void)user;
+    (void)w;
+    (void)event;
+}
+
+static int stuck_body(void *arg)
+{
+    (void)arg;
+    for (;;)
+        pause();
+    return 0;
+}
+
+/** @brief Runs a program whose listener ignores a close and whose body never returns, sends it sig, and returns its wait status after at most 10 s (-1: it was still running and was killed). */
+static int signal_a_stuck_program(int sig)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        reset();
+        setenv(RL_WINDOW_ENV, "headless", 1);
+        rl_window_set_events(ignore_close, NULL);
+        rl_window_set_quit_grace(300);
+        rl_window_main(stuck_body, NULL);
+        _exit(99);
+    }
+    usleep(300000);
+    kill(pid, sig);
+    int status = 0;
+    for (int i = 0; i < 1000; i++) {
+        if (waitpid(pid, &status, WNOHANG) == pid)
+            return status;
+        usleep(10000);
+    }
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+    return -1;
+}
+
+TEST(window_a_quit_signal_ends_a_guest_that_ignores_the_close)
+{
+    int status = signal_a_stuck_program(SIGTERM);
+    CHECK(status != -1);
+    CHECK(WIFEXITED(status));
+    CHECK_EQ(WEXITSTATUS(status), 128 + SIGTERM);
+    status = signal_a_stuck_program(SIGINT);
+    CHECK(status != -1);
+    CHECK(WIFEXITED(status));
+    CHECK_EQ(WEXITSTATUS(status), 128 + SIGINT);
 }
 #endif
 

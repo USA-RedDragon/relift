@@ -128,11 +128,19 @@ RL_RUNTIME_API void rl_window_set_events(rl_window_event_fn *fn, void *user);
 RL_RUNTIME_API void rl_window_emit(rl_window *w, int event);
 /**
  * @brief Makes SIGTERM and SIGINT reach the listener as RL_WINDOW_CLOSE (a second
- * one asks it again), or end the process when no listener is set. Blocks both
- * signals in the calling thread and the threads it starts afterwards, so call it
- * before them; rl_window_main does. Once per process; does nothing on Windows.
+ * one asks it again), or end the process when no listener is set; a listener that
+ * has not ended the process within rl_window_set_quit_grace is overruled. Blocks
+ * both signals in the calling thread and the threads it starts afterwards, so call
+ * it before them; rl_window_main does. Once per process. On Windows it handles the
+ * console's Ctrl+C, Ctrl+Break and close instead.
  */
 RL_RUNTIME_API void rl_window_quit_on_signals(void);
+/**
+ * @brief How long, in milliseconds (default 3000), a guest has to end the process after a quit signal asked its
+ * listener to close: past it the process ends with the signal's usual code (128 plus the signal), so a guest that
+ * ignores the request cannot outlive its signal. On Windows the console's Ctrl+C, Ctrl+Break and close do the same.
+ */
+RL_RUNTIME_API void rl_window_set_quit_grace(uint32_t ms);
 /**
  * @brief Runs body(arg) and returns its result. With a backend (built in and
  * chosen as RL_WINDOW_ENV describes) that comes up, body runs on a new host

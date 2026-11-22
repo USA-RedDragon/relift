@@ -13,10 +13,13 @@
 
 #include <pthread.h>
 #include <stdlib.h>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <signal.h>
 #endif
 #include <string.h>
+#include <time.h>
 
 #define BODY_STACK (16u << 20)
 
@@ -120,6 +123,66 @@ void rl_window_emit(rl_window *w, int event)
         fn(user, w, event);
 }
 
+/** @brief How long the guest gets to leave after a quit signal asked it to (rl_window_set_quit_grace), in milliseconds. */
+static uint32_t g_quit_grace_ms = 3000;
+static int g_quit_forced;
+
+void rl_window_set_quit_grace(uint32_t ms) { __atomic_store_n(&g_quit_grace_ms, ms, __ATOMIC_RELAXED); }
+
+static void quit_sleep(uint32_t ms)
+{
+    struct timespec t = { ms / 1000, (long)(ms % 1000) * 1000000L };
+#if defined(_WIN32)
+    Sleep(ms);
+    (void)t;
+#else
+    while (nanosleep(&t, &t) != 0)
+        ;
+#endif
+}
+
+typedef struct quit_force {
+    uint32_t code;
+} quit_force;
+
+static void *quit_force_thread(void *p)
+{
+    uint32_t code = ((quit_force *)p)->code;
+    free(p);
+    quit_sleep(__atomic_load_n(&g_quit_grace_ms, __ATOMIC_RELAXED));
+    rl_log(RL_LOG_INFO, "window", "the guest did not leave within the grace after the quit signal: ending the process");
+    rl_process_exit(code);
+    return NULL;
+}
+
+/**
+ * @brief A quit signal (SIGTERM, SIGINT, or a console close on Windows) arrived: without a listener the process ends at
+ * once with code; with one the listener is asked as for a window close, and a guest that has not ended the process
+ * within the grace is ended anyway, so a signal always stops a run.
+ */
+static void quit_requested(uint32_t code)
+{
+    pthread_mutex_lock(&g_lock);
+    bool listened = g_fn != NULL;
+    pthread_mutex_unlock(&g_lock);
+    if (!listened)
+        rl_process_exit(code);
+    rl_window_emit(NULL, RL_WINDOW_CLOSE);
+    if (__atomic_exchange_n(&g_quit_forced, 1, __ATOMIC_ACQ_REL))
+        return;
+    quit_force *f = malloc(sizeof *f);
+    if (!f)
+        return;
+    f->code = code;
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &attr, quit_force_thread, f) != 0)
+        free(f);
+    pthread_attr_destroy(&attr);
+}
+
 #if !defined(_WIN32)
 
 static void *quit_watch(void *p)
@@ -129,13 +192,7 @@ static void *quit_watch(void *p)
         int sig;
         if (sigwait(set, &sig) != 0)
             continue;
-        pthread_mutex_lock(&g_lock);
-        bool listened = g_fn != NULL;
-        pthread_mutex_unlock(&g_lock);
-        if (listened)
-            rl_window_emit(NULL, RL_WINDOW_CLOSE);
-        else
-            rl_process_exit(128u + (uint32_t)sig);
+        quit_requested(128u + (uint32_t)sig);
     }
     return NULL;
 }
@@ -163,7 +220,15 @@ void rl_window_quit_on_signals(void) { pthread_once(&g_quit_once, quit_start); }
 
 #else
 
-void rl_window_quit_on_signals(void) {}
+static BOOL WINAPI quit_console(DWORD type)
+{
+    if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT && type != CTRL_CLOSE_EVENT)
+        return FALSE;
+    quit_requested(type == CTRL_C_EVENT ? 130u : 143u);
+    return TRUE;
+}
+
+void rl_window_quit_on_signals(void) { SetConsoleCtrlHandler(quit_console, TRUE); }
 
 #endif
 
