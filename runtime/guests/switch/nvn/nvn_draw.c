@@ -1045,8 +1045,20 @@ typedef struct draw_data {
     int32_t base;
     uint64_t iaddr, def_off, ioff;
     VkDeviceSize offs[NVN_VERTEX_BUFFERS], int_off[NVN_VERTEX_ATTRIBS];
+    /** @brief The buffer each vertex stream and the indices are read from: an imported pool's, or the arena. */
+    VkBuffer vbuf[NVN_VERTEX_BUFFERS], ibuf;
     VkDescriptorSet sets[3];
 } draw_data;
+
+VkBuffer nvn_draw_pool_span(uint64_t addr, uint64_t n, uint64_t align, VkDeviceSize *off)
+{
+    void *buf;
+    uint64_t o;
+    if (!n || !nvn_guest_buffer(nvn_gpu_guest(addr), n, &buf, &o) || o % align)
+        return NULL;
+    *off = o;
+    return (VkBuffer)buf;
+}
 
 /** @brief Puts a draw's vertices, indices and constant banks into the batch being recorded (an nvn_vk_stage step). */
 static int stage_draw(replay *r, void *arg)
@@ -1073,12 +1085,18 @@ static int stage_draw(replay *r, void *arg)
         }
         if (!st->vb[s].addr)
             return nvn_vk_stop(r, "vertex stream %u has no buffer bound", s);
-        if (!nvn_vk_upload(r, st->vb[s].addr, st->vb[s].size, 0, 16, &off))
+        VkDeviceSize po;
+        VkBuffer pb = nvn_draw_pool_span(st->vb[s].addr, st->vb[s].size, 4, &po);
+        if (pb)
+            off = po;
+        else if (!nvn_vk_upload(r, st->vb[s].addr, st->vb[s].size, 0, 16, &off))
             return nvn_vk_stop(r, "the upload arena is full");
         dd->binding[dd->nb] = s;
+        dd->vbuf[dd->nb] = pb ? pb : g.arena.buf;
         dd->offs[dd->nb++] = off;
     }
     static const uint32_t isize[] = { 1, 2, 4 };
+    dd->ibuf = g.arena.buf;
     if (indexed) {
         if (itype > 2)
             return nvn_vk_stop(r, "index type %u", itype);
@@ -1094,8 +1112,14 @@ static int stage_draw(replay *r, void *arg)
                 return nvn_vk_stop(r, "the upload arena is full");
             dd->ivk = VK_INDEX_TYPE_UINT16;
         } else {
-            if (!nvn_vk_upload(r, dd->iaddr, (uint64_t)count * isize[itype], 0, 16, &dd->ioff))
+            VkDeviceSize po;
+            VkBuffer pb = nvn_draw_pool_span(dd->iaddr, (uint64_t)count * isize[itype], isize[itype], &po);
+            if (pb) {
+                dd->ibuf = pb;
+                dd->ioff = po;
+            } else if (!nvn_vk_upload(r, dd->iaddr, (uint64_t)count * isize[itype], 0, 16, &dd->ioff)) {
                 return nvn_vk_stop(r, "the upload arena is full");
+            }
             dd->ivk = itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
         }
     }
@@ -1282,13 +1306,13 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     for (uint32_t i = 0; i < dd.nb; i++)
-        VK(vkCmdBindVertexBuffers)(g.cb, dd.binding[i], 1, &g.arena.buf, &dd.offs[i]);
+        VK(vkCmdBindVertexBuffers)(g.cb, dd.binding[i], 1, &dd.vbuf[i], &dd.offs[i]);
     if (dd.has_def)
         VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &dd.def_off);
     for (uint32_t j = 0; j < k.nint; j++)
         VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &dd.int_off[j]);
     if (indexed) {
-        VK(vkCmdBindIndexBuffer)(g.cb, g.arena.buf, dd.ioff, dd.ivk);
+        VK(vkCmdBindIndexBuffer)(g.cb, dd.ibuf, dd.ioff, dd.ivk);
         VK(vkCmdDrawIndexed)(g.cb, count, st->inst_count, 0, base, st->inst_base);
     } else {
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);

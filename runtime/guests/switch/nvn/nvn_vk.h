@@ -425,6 +425,12 @@ bool nvn_untile_move(replay *r, vimg *v, bool tile);
  * format, aspect or layout does not allow it or its storage is outside every imported pool.
  */
 bool nvn_untile_upload_packed(replay *r, vimg *v);
+/**
+ * @brief The imported pool buffer that holds guest GPU bytes [addr, addr + n) at a multiple of align, and the offset
+ * there, so a draw reads its vertices and indices where the guest keeps them, when the GPU runs it, as the console's
+ * does; NULL when no imported pool holds them (nvn_draw.c copies them into the arena then).
+ */
+VkBuffer nvn_draw_pool_span(uint64_t addr, uint64_t n, uint64_t align, VkDeviceSize *off);
 /** @brief Frees what the moves of the batch that just ran used; called once a submit has finished. */
 void nvn_untile_release(void);
 /** @brief Moves recorded so far, for the stats. */

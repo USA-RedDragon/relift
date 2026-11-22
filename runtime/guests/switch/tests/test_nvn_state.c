@@ -389,3 +389,21 @@ TEST(nvn_integer_attributes_widen_to_four_words)
     nvn_expand_integer((const uint8_t *)b32, 16, VK_FORMAT_R32G32B32A32_SINT, 1, out);
     CHECK(memcmp(out, b32, 16) == 0);
 }
+
+TEST(nvn_vertices_and_indices_in_an_imported_pool_are_read_from_the_pool)
+{
+    RECORDING(c, heap, cb);
+    (void)cb;
+    IMPORTED_POOL(c, heap, gpu, mem, nvn_vertices_and_indices_in_an_imported_pool_are_read_from_the_pool);
+    void *buf;
+    uint64_t base;
+    CHECK(nvn_guest_buffer(mem, 0x10000, &buf, &base));
+    VkDeviceSize off = 0;
+    CHECK(nvn_draw_pool_span(gpu + 0x200, 0x100, 4, &off) == (VkBuffer)buf);
+    CHECK_EQ(off, base + 0x200);
+    CHECK(nvn_draw_pool_span(gpu + 0x202, 0x100, 2, &off) == (VkBuffer)buf);
+    CHECK_EQ(off, base + 0x202);
+    CHECK(nvn_draw_pool_span(gpu + 0x202, 0x100, 4, &off) == NULL);
+    CHECK(nvn_draw_pool_span(gpu + 0xff00, 0x200, 4, &off) == NULL);
+    CHECK(nvn_draw_pool_span(gpu + 0x200, 0, 4, &off) == NULL);
+}
