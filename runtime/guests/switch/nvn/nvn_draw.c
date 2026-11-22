@@ -2053,6 +2053,35 @@ static int bind_separate(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+/**
+ * @brief nvnCommandBufferShadingRateImagePalette(NVNcommandBuffer *, int viewport, int count, const int *rates): the
+ * driver packs a 16-entry palette of four-bit rates for the viewport, rates[0..count) then 5 (one invocation per pixel)
+ * for the rest, all 5 and the palette off when rates is NULL. The host draws every pixel at full rate (reported once
+ * when a palette names another rate): coverage, depth and every sample's result stay as the console's, only shading
+ * runs more often than the game asked.
+ */
+static int shading_rate_palette(replay *r, const nvn_cmd *e)
+{
+    nvn_gfx *st = r->st;
+    uint32_t vp = (uint32_t)e->x[1] & 0xfu;
+    int32_t n = (int32_t)e->x[2];
+    const uint8_t *rates = nvn_cmd_bytes(r->s, e->x[3]);
+    bool coarse = false;
+    for (uint32_t i = 0; i < 16; i++) {
+        uint8_t v = rates && (int32_t)i < n ? (uint8_t)(rl_ld32(rates, 4 * i) & 0xfu) : 5u;
+        st->shading.palette[vp][i] = v;
+        coarse |= v != 5u;
+    }
+    if (rates)
+        st->shading.enabled |= (uint16_t)(1u << vp);
+    else
+        st->shading.enabled &= (uint16_t)~(1u << vp);
+    if (rates && coarse)
+        (void)rl_report_unknown(0x4e564e5352415445ull, "nvn",
+                                "the game shades at reduced rates through a shading-rate image; the host shades every pixel");
+    return RL_OK;
+}
+
 /** @brief nvn_separate_handles: the bound separate texture words get their slots, the bound sampler ids their sampler. */
 int nvn_separate_handles(replay *r, uint32_t s)
 {
@@ -2329,6 +2358,14 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     }
     case NVN_CMD_SET_PROVOKING_VERTEX_MODE:
         st->provoking_last = (uint32_t)e->x[1] == 1;
+        return RL_OK;
+    case NVN_CMD_SHADING_RATE_IMAGE_PALETTE:
+        return shading_rate_palette(r, e);
+    case NVN_CMD_BIND_SHADING_RATE_IMAGE:
+        st->shading.image = e->x[1];
+        return RL_OK;
+    case NVN_CMD_SET_SHADING_RATE_PALETTE_MODE:
+        st->shading.mode = (uint32_t)e->x[1];
         return RL_OK;
     case NVN_CMD_BIND_COVERAGE_MODULATION_TABLE:
     case NVN_CMD_SET_GEOMETRY_PROCESSING_MODE:

@@ -17,6 +17,8 @@
 #define MAX_IMAGES 4096u
 /** @brief Graphics, compute, task and mesh stages, in NVNshaderStage order. */
 #define NVN_STAGES 8u
+/** @brief The viewports a shading-rate palette can be given for. */
+#define NVN_SHADING_VIEWPORTS 16u
 /** @brief Uniform buffer slots of a stage (c[3] to c[16]). */
 #define NVN_UBO_SLOTS 14u
 /** @brief Bytes of a stage's driver bank c[2] the layer keeps: bound texture handles from 0x20, 8 bytes apart. */
@@ -310,6 +312,18 @@ typedef struct nvn_gfx {
     /** @brief The instances of the draw being replayed: the first and how many. */
     uint32_t inst_base, inst_count;
     bool depth_clamp;
+    /**
+     * @brief Variable-rate shading (nvnCommandBufferShadingRateImagePalette, BindShadingRateImage,
+     * SetShadingRatePaletteMode): per viewport, whether a palette was given and its 16 four-bit rates (the hardware's
+     * values, VK_NV_shading_rate_image's VkShadingRatePaletteEntryNV; 5 is one invocation per pixel); the texture bound
+     * as the shading-rate image (0: none); and the palette mode the game set.
+     */
+    struct {
+        uint16_t enabled;
+        uint8_t palette[NVN_SHADING_VIEWPORTS][16];
+        uint64_t image;
+        uint32_t mode;
+    } shading;
 } nvn_gfx;
 
 /** @brief Sets a queue's draw state to the GPU's state before any command (nvn_vk.c). */

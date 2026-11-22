@@ -411,3 +411,37 @@ TEST(nvn_a_compressed_texture_is_drawn_through_an_integer_texture_of_its_blocks)
     CHECK(nvn_tex_layout(&plain));
     CHECK(!nvn_vk_block_alias(&plain, 44, &ad));
 }
+
+TEST(nvn_replay_shading_rate_palettes_fill_the_rest_with_full_rate)
+{
+    static nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmdset *s = calloc(1, sizeof *s);
+    static const uint32_t rates[2] = { 8, 6 };
+    s->bytes = malloc(sizeof rates);
+    memcpy(s->bytes, rates, sizeof rates);
+    s->nbytes = sizeof rates;
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.st = &st;
+    r.s = s;
+    nvn_cmd p = { .op = NVN_CMD_SHADING_RATE_IMAGE_PALETTE, .x = { 0, 1, 2, NVN_SNAP } };
+    CHECK_EQ(nvn_draw_cmd(&r, &p), RL_OK);
+    CHECK_EQ(st.shading.enabled, 1u << 1);
+    CHECK_EQ(st.shading.palette[1][0], 8);
+    CHECK_EQ(st.shading.palette[1][1], 6);
+    for (uint32_t i = 2; i < 16; i++)
+        CHECK_EQ(st.shading.palette[1][i], 5);
+    nvn_cmd off = { .op = NVN_CMD_SHADING_RATE_IMAGE_PALETTE, .x = { 0, 1, 0, 0 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &off), RL_OK);
+    CHECK_EQ(st.shading.enabled, 0);
+    CHECK_EQ(st.shading.palette[1][0], 5);
+    nvn_cmd bind = { .op = NVN_CMD_BIND_SHADING_RATE_IMAGE, .x = { 0, 0x1234, 0 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &bind), RL_OK);
+    CHECK_EQ(st.shading.image, 0x1234u);
+    nvn_cmd mode = { .op = NVN_CMD_SET_SHADING_RATE_PALETTE_MODE, .x = { 0, 1 } };
+    CHECK_EQ(nvn_draw_cmd(&r, &mode), RL_OK);
+    CHECK_EQ(st.shading.mode, 1u);
+    free(s->bytes);
+    free(s);
+}

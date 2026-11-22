@@ -712,6 +712,9 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_INNER_TESSELLATION_LEVELS, nvnCommandBufferSetInnerTessellationLevels) \
     X(NVN_CMD_SET_OUTER_TESSELLATION_LEVELS, nvnCommandBufferSetOuterTessellationLevels) \
     X(NVN_CMD_SET_PROVOKING_VERTEX_MODE, nvnCommandBufferSetProvokingVertexMode) \
+    X(NVN_CMD_SHADING_RATE_IMAGE_PALETTE, nvnCommandBufferShadingRateImagePalette) \
+    X(NVN_CMD_BIND_SHADING_RATE_IMAGE, nvnCommandBufferBindShadingRateImage) \
+    X(NVN_CMD_SET_SHADING_RATE_PALETTE_MODE, nvnCommandBufferSetShadingRatePaletteMode) \
     X(NVN_CMD_BIND_COVERAGE_MODULATION_TABLE, nvnCommandBufferBindCoverageModulationTable) \
     X(NVN_CMD_SET_GEOMETRY_PROCESSING_MODE, nvnCommandBufferSetGeometryProcessingMode) \
     X(NVN_CMD_SET_DEPTH_CLAMP, nvnCommandBufferSetDepthClamp) \
