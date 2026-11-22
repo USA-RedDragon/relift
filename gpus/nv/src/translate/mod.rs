@@ -107,6 +107,10 @@ pub struct Interface {
     pub local_bytes: u32,
     /// Texture handle reads: (bank, byte offset) of each bound handle.
     pub textures: BTreeSet<(u32, u32)>,
+    /// A texture or surface instruction takes its handle from a register
+    /// (a bindless texture or image): which images it reads or writes is
+    /// known only when it runs.
+    pub bindless: bool,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
     pub texture_bindings: BTreeSet<u32>,
     /// Specialization constant id per bound handle whose texture's numeric

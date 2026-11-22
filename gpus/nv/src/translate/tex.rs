@@ -577,6 +577,9 @@ fn sources(c: &mut Ctx, g0: &[Slot], g1: &[Slot], scr: bool) -> Res<Srcs> {
 /// The handle word of a bound (`Some((bank, byte offset))`) or bindless
 /// texture, and whether its index may diverge.
 fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
+    if key.is_none() {
+        c.iface.bindless = true;
+    }
     if key.is_none() && matches!(c.fields.tex.handle, Handle::UReg { .. }) {
         return Ok((ur_handle(c)?, false));
     }

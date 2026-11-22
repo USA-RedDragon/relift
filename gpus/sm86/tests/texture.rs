@@ -78,6 +78,7 @@ fn compute(body: &[[u8; 16]]) -> relift_gpu_nv::translate::Shader {
 fn bound_texture_uses_the_pools() {
     let s = compute(&[tex(0x160, &[(60, 1, 1), (61, 3, 1), (87, 3, 1)])]);
     assert!(s.interface.textures.contains(&(3, 16)));
+    assert!(!s.interface.bindless);
     assert_eq!(
         s.interface.texture_kinds.get(&(3, 16)),
         Some(&TEXTURE_KIND_SPEC)
@@ -110,6 +111,7 @@ fn bindless_index_is_non_uniform() {
     w[1] = (w[1] & !0x0e) | (1 << 1);
     let s = compute(&[w]);
     assert!(s.interface.textures.is_empty());
+    assert!(s.interface.bindless);
     let decos = insts(&s.spirv, 71);
     assert!(decos.iter().any(|d| d.get(2) == Some(&5300)));
 }
@@ -134,6 +136,7 @@ fn uniform_register_handle_is_uniform() {
     );
     let s = compute(&[w]);
     assert!(s.interface.textures.is_empty());
+    assert!(s.interface.bindless);
     let decos = insts(&s.spirv, 71);
     assert!(decos.iter().all(|d| d.get(2) != Some(&5300)));
     assert_eq!(insts(&s.spirv, 88).len(), 1);

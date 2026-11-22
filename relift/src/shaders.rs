@@ -68,6 +68,8 @@ pub const RECORD_GLOBAL_MEMORY: u32 = 2;
 pub const RECORD_TEXTURE: u32 = 3;
 /// The program stores through, or does an atomic read-modify-write on, 64-bit global addresses.
 pub const RECORD_GLOBAL_STORE: u32 = 7;
+/// An interface record: the program reads or writes a texture or image whose handle comes from a register.
+pub const RECORD_BINDLESS: u32 = 8;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -442,6 +444,9 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     if i.global_store {
         recs.push([RECORD_GLOBAL_STORE, 0, 0, 0]);
     }
+    if i.bindless {
+        recs.push([RECORD_BINDLESS, 0, 0, 0]);
+    }
     recs
 }
 
@@ -532,6 +537,14 @@ mod tests {
             "decode at _ _ form"
         );
         assert_eq!(reason_kind("no end"), "no end");
+    }
+
+    #[test]
+    fn a_register_handle_is_recorded_as_bindless() {
+        let mut i = Interface::default();
+        assert!(records(&i).iter().all(|r| r[0] != RECORD_BINDLESS));
+        i.bindless = true;
+        assert!(records(&i).contains(&[RECORD_BINDLESS, 0, 0, 0]));
     }
 
     #[test]
