@@ -342,7 +342,8 @@ TEST(am_message_queue_and_event)
     CHECK(!signaled(&e, ev));
     CHECK_EQ(recv_msg(&e, e.csg, &msg), AM_NO_MSG);
 
-    rl_am_request_exit();
+    CHECK_EQ(rc_of(tc_send(e.c, e.sc, tc_new(1))), 0);
+    CHECK(rl_am_request_exit());
     CHECK(signaled(&e, ev));
     CHECK_EQ(recv_msg(&e, e.csg, &msg), 0);
     CHECK_EQ(msg, RL_AM_MSG_EXIT);
@@ -464,6 +465,59 @@ TEST(am_self_controller_exit_ends_process)
     rl_set_exit_hook(NULL);
     CHECK_EQ(g_exits, 1u);
     CHECK_EQ(g_exit_codes[0], 0u);
+}
+
+TEST(am_a_close_ends_a_program_that_never_opted_in_at_once)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    uint32_t msg;
+    while (recv_msg(&e, e.csg, &msg) == 0)
+        ;
+    g_exits = 0;
+    rl_set_exit_hook(record_exit);
+    rl_am_request_exit();
+    rl_set_exit_hook(NULL);
+    CHECK_EQ(g_exits, 1u);
+    CHECK_EQ(g_exit_codes[0], 0u);
+    CHECK_EQ(recv_msg(&e, e.csg, &msg), AM_NO_MSG);
+}
+
+TEST(am_a_close_asks_a_program_in_an_exit_handling_section_and_waits)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    uint32_t msg;
+    while (recv_msg(&e, e.csg, &msg) == 0)
+        ;
+    g_exits = 0;
+    rl_set_exit_hook(record_exit);
+    CHECK_EQ(rc_of(tc_send(e.c, e.sc, tc_new(1))), 0);
+    CHECK(rl_am_request_exit());
+    CHECK_EQ(g_exits, 0u);
+    CHECK_EQ(recv_msg(&e, e.csg, &msg), 0);
+    CHECK_EQ(msg, RL_AM_MSG_EXIT);
+    CHECK_EQ(g_exits, 0u);
+    CHECK_EQ(rc_of(tc_send(e.c, e.sc, tc_new(2))), 0);
+    rl_set_exit_hook(NULL);
+    CHECK_EQ(g_exits, 1u);
+    CHECK_EQ(g_exit_codes[0], 0u);
+}
+
+TEST(am_locking_exit_after_a_close_ends_the_program)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    g_exits = 0;
+    rl_set_exit_hook(record_exit);
+    CHECK_EQ(rc_of(tc_send(e.c, e.sc, tc_new(1))), 0);
+    CHECK(rl_am_request_exit());
+    CHECK_EQ(rc_of(tc_send(e.c, e.sc, tc_new(1))), 0);
+    rl_set_exit_hook(NULL);
+    CHECK_EQ(g_exits, 1u);
 }
 
 TEST(am_self_controller_commands)

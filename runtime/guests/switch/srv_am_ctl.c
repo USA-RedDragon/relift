@@ -232,6 +232,20 @@ static rl_result sc_exit(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+static rl_result sc_lock_exit(rl_ipc_req *r)
+{
+    (void)r;
+    rl_am_lock_exit(true);
+    return KR_SUCCESS;
+}
+
+static rl_result sc_unlock_exit(rl_ipc_req *r)
+{
+    (void)r;
+    rl_am_lock_exit(false);
+    return KR_SUCCESS;
+}
+
 static rl_result sc_leave_fatal_section(rl_ipc_req *r)
 {
     sc_state *s = sc(r);
@@ -409,8 +423,8 @@ static rl_result sc_get_graphics_supervisor(rl_ipc_req *r)
 
 static const rl_ipc_cmd sc_cmds[] = {
     { 0, "Exit", sc_exit },
-    RL_SRV_STUB(1, "LockExit"),
-    RL_SRV_STUB(2, "UnlockExit"),
+    { 1, "LockExit", sc_lock_exit },
+    { 2, "UnlockExit", sc_unlock_exit },
     { 3, "EnterFatalSection", sc_enter_fatal_section },
     { 4, "LeaveFatalSection", sc_leave_fatal_section },
     { 9, "GetLibraryAppletLaunchableEvent", sc_get_library_applet_launchable_event },

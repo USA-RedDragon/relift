@@ -35,8 +35,18 @@ RL_RUNTIME_API void rl_am_set_focus(bool in_focus);
 RL_RUNTIME_API void rl_am_set_operation_mode(bool docked);
 /** @brief True while docked. */
 RL_RUNTIME_API bool rl_am_is_docked(void);
-/** @brief Queues the exit request message. */
-RL_RUNTIME_API void rl_am_request_exit(void);
+/**
+ * @brief The user closed the application. As on the console, a program that is inside an exit request handling section
+ * (it called ISelfController LockExit, nn::oe::EnterExitRequestHandlingSection) is asked: the exit request message
+ * (RL_AM_MSG_EXIT) is queued, the call returns true, and the program is expected to end itself (the caller bounds the
+ * wait). Any other program is ended at once with exit code 0 and the call does not return.
+ */
+RL_RUNTIME_API bool rl_am_request_exit(void);
+/**
+ * @brief ISelfController LockExit (lock) and UnlockExit: enter and leave the exit request handling section. With an exit
+ * already requested, entering it, or leaving it, ends the process at once, as the console does.
+ */
+RL_RUNTIME_API void rl_am_lock_exit(bool lock);
 /** @brief Sets the language code GetDesiredLanguage returns (default RL_AM_LANGUAGE_CODE_EN_US). */
 RL_RUNTIME_API void rl_am_set_desired_language(uint64_t code);
 /** @brief Sets the user id (high, low halves) the launch parameter preselects. Default 1, 0. */

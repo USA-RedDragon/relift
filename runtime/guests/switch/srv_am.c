@@ -27,6 +27,7 @@ static uint64_t am_user_high = 1;
 static uint64_t am_user_low;
 static uint64_t am_pids[AM_PIDS];
 static uint32_t am_npids;
+static bool am_exit_locked, am_exit_requested;
 
 rl_result (*rl_srv_vi_layer_hook)(uint64_t *layer_id);
 
@@ -109,7 +110,32 @@ bool rl_am_is_docked(void)
     return d;
 }
 
-void rl_am_request_exit(void) { rl_am_push_message(RL_AM_MSG_EXIT); }
+bool rl_am_request_exit(void)
+{
+    pthread_mutex_lock(&am_mu);
+    bool locked = am_exit_locked;
+    if (locked) {
+        am_exit_requested = true;
+        ensure_events();
+        enqueue(RL_AM_MSG_EXIT);
+        sync_event();
+    }
+    pthread_mutex_unlock(&am_mu);
+    if (!locked)
+        rl_process_exit(0);
+    return locked;
+}
+
+void rl_am_lock_exit(bool lock)
+{
+    pthread_mutex_lock(&am_mu);
+    bool end = am_exit_requested && (lock || am_exit_locked);
+    if (!end)
+        am_exit_locked = lock;
+    pthread_mutex_unlock(&am_mu);
+    if (end)
+        rl_process_exit(0);
+}
 
 void rl_am_set_desired_language(uint64_t code)
 {

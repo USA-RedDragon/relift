@@ -156,7 +156,7 @@ static void on_window(void *user, rl_window *w, int event)
     switch (event) {
     case RL_WINDOW_CLOSE:
         if (__atomic_add_fetch(&g_closes, 1, __ATOMIC_RELAXED) == 1) {
-            rl_log(RL_LOG_INFO, "vk", "window closed: asking the guest to exit (close again to quit at once)");
+            rl_log(RL_LOG_INFO, "vk", "window closed: a program in an exit handling section is asked to exit, any other ends now (close again to quit at once)");
             rl_am_request_exit();
         } else {
             rl_log(RL_LOG_INFO, "vk", "window closed again: quitting");
