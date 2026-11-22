@@ -1040,6 +1040,7 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         abort();
     pthread_mutex_init(&d->lock, NULL);
     pthread_mutex_init(&d->queue_lock, NULL);
+    pthread_rwlock_init(&d->idle_lock, NULL);
     d->mems = vkf_map_new();
     pthread_mutex_init(&d->dpool_lock, NULL);
     d->dpools = vkf_map_new();
@@ -1057,6 +1058,7 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         free_decode_maps(d);
         vkf_map_free(d->mems);
         pthread_mutex_destroy(&d->queue_lock);
+        pthread_rwlock_destroy(&d->idle_lock);
         pthread_mutex_destroy(&d->lock);
         free(d);
         c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDevice, r);
@@ -1135,6 +1137,7 @@ uint64_t vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         pthread_mutex_destroy(&d->dpool_lock);
         vkf_map_free(d->mems);
         pthread_mutex_destroy(&d->queue_lock);
+        pthread_rwlock_destroy(&d->idle_lock);
         pthread_mutex_destroy(&d->lock);
         free(d);
         c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDevice, r);
@@ -1186,6 +1189,7 @@ uint64_t vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
     pthread_mutex_destroy(&d->wrap_lock);
     pthread_mutex_destroy(&d->dpool_lock);
     pthread_mutex_destroy(&d->queue_lock);
+    pthread_rwlock_destroy(&d->idle_lock);
     pthread_mutex_destroy(&d->lock);
     free(d);
     return vkf_end(&k);

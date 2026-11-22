@@ -2331,6 +2331,66 @@ TEST(vk_memory_types_are_ones_buffers_and_images_may_use)
     CHECK_EQ(vkf_guest_type_bits(&d, 0x1u), local);
 }
 
+/** @brief The device of the queue tests, and whether its fake vkDeviceWaitIdle ran while a queue operation was open. */
+static vkf_dev g_idle_dev;
+static volatile int g_in_queue_op, g_idle_during_op, g_idle_calls;
+
+static VkResult VKAPI_PTR idle_fake(VkDevice dev)
+{
+    (void)dev;
+    g_idle_during_op |= g_in_queue_op;
+    g_idle_calls++;
+    return VK_SUCCESS;
+}
+
+/** @brief Opens a queue operation on another thread, holds it 50 ms, and closes it. */
+static void *queue_op(void *arg)
+{
+    vkf_call *k = arg;
+    vkf_queue_lock(k);
+    g_in_queue_op = 1;
+    struct timespec ts = { 0, 50 * 1000 * 1000 };
+    nanosleep(&ts, NULL);
+    g_in_queue_op = 0;
+    vkf_queue_unlock(k);
+    return NULL;
+}
+
+TEST(vk_waiting_for_the_device_holds_every_queue)
+{
+    static vkf_fns fns;
+    fns.f[VKG_vkDeviceWaitIdle] = (void (*)(void))idle_fake;
+    static vkf_obj obj;
+    obj.dev = &g_idle_dev;
+    for (uint32_t shared = 0; shared < 2; shared++) {
+        memset(&g_idle_dev, 0, sizeof g_idle_dev);
+        pthread_mutex_init(&g_idle_dev.queue_lock, NULL);
+        pthread_rwlock_init(&g_idle_dev.idle_lock, NULL);
+        g_idle_dev.guest_queues = 2;
+        g_idle_dev.host_queues = shared ? 1 : 2;
+        vkf_call k;
+        memset(&k, 0, sizeof k);
+        k.obj = &obj;
+        g_idle_during_op = 0;
+        g_idle_calls = 0;
+        pthread_t th;
+        CHECK_EQ(pthread_create(&th, NULL, queue_op, &k), 0);
+        while (!g_in_queue_op) {
+            struct timespec ts = { 0, 1000 * 1000 };
+            nanosleep(&ts, NULL);
+        }
+        vkf_device_wait_idle(&g_idle_dev, &fns, NULL);
+        pthread_join(th, NULL);
+        CHECK(!g_idle_during_op);
+        vkf_queue_lock(&k);
+        vkf_device_wait_idle(&g_idle_dev, &fns, NULL);
+        vkf_queue_unlock(&k);
+        CHECK_EQ(g_idle_calls, 2);
+        pthread_rwlock_destroy(&g_idle_dev.idle_lock);
+        pthread_mutex_destroy(&g_idle_dev.queue_lock);
+    }
+}
+
 TEST(vk_a_failing_result_is_logged_once_with_its_caller)
 {
     static rl_ctx c;

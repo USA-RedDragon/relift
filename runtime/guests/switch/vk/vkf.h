@@ -156,6 +156,8 @@ struct vkf_dev {
     uint32_t guest_queues, host_queues;
     /** @brief Held by every queue operation while guest queues share host queues. */
     pthread_mutex_t queue_lock;
+    /** @brief Held shared by every queue operation while each guest queue has a host queue of its own, and exclusive by vkf_device_wait_idle. */
+    pthread_rwlock_t idle_lock;
     /** @brief Queue families the device was created with, and the queue count of each. */
     uint32_t queue_families[16], queue_counts[16];
     /** @brief Number of entries in queue_families. */
@@ -526,6 +528,12 @@ void vkf_queue_lock(vkf_call *k);
 
 /** @brief Releases what vkf_queue_lock took. */
 void vkf_queue_unlock(vkf_call *k);
+
+/**
+ * @brief vkDeviceWaitIdle on device dev of d with every one of its queues held, as Vulkan requires, from inside a queue
+ * operation of this thread or outside one.
+ */
+void vkf_device_wait_idle(vkf_dev *d, const vkf_fns *fns, VkDevice dev);
 
 /** @brief vkf_queue_lock, then vkf_shadow_flush: before a submit. */
 void vkf_queue_enter(vkf_call *k);

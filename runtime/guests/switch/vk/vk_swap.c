@@ -359,7 +359,7 @@ static void retire_semaphores(vkf_swap *s)
 {
     for (uint32_t i = 0; i < s->host_n; i++) {
         if (s->nretired == RETIRED_MAX) {
-            DFN(s, vkDeviceWaitIdle)(s->dev);
+            vkf_device_wait_idle(s->dobj->dev, s->fns, s->dev);
             for (uint32_t j = 0; j < s->nretired; j++)
                 DFN(s, vkDestroySemaphore)(s->dev, s->retired[j], NULL);
             s->nretired = 0;
@@ -488,7 +488,7 @@ static void lose(vkf_swap *s)
         rl_log(RL_LOG_INFO, "vk", "the host surface of swapchain 0x%llx was lost; a new one is made when the window has one again",
                (unsigned long long)s->id);
     wait_all(s);
-    DFN(s, vkDeviceWaitIdle)(s->dev);
+    vkf_device_wait_idle(s->dobj->dev, s->fns, s->dev);
     if (s->ov) {
         vkf_overlay_free(s->ov);
         s->ov = NULL;
@@ -624,7 +624,7 @@ static VkResult host_create(vkf_swap *s)
     }
     wait_all(s);
     if (s->ov) {
-        DFN(s, vkDeviceWaitIdle)(s->dev);
+        vkf_device_wait_idle(s->dobj->dev, s->fns, s->dev);
         vkf_overlay_free(s->ov);
         s->ov = NULL;
     }
@@ -673,7 +673,7 @@ static void swap_free(vkf_swap *s)
 {
     wait_all(s);
     if (s->host || s->nretired || s->host_n)
-        DFN(s, vkDeviceWaitIdle)(s->dev);
+        vkf_device_wait_idle(s->dobj->dev, s->fns, s->dev);
     for (uint32_t i = 0; i < s->n; i++) {
         DFN(s, vkDestroyImage)(s->dev, s->img[i], NULL);
         DFN(s, vkFreeMemory)(s->dev, s->mem[i], NULL);

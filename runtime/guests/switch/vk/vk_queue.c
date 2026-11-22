@@ -136,18 +136,46 @@ uint64_t vkh_vkGetDeviceQueue2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
+/** @brief Queue operations of this thread now in progress. */
+static _Thread_local uint32_t t_queue_ops;
+
 void vkf_queue_lock(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
     if (d->host_queues < d->guest_queues)
         pthread_mutex_lock(&d->queue_lock);
+    else if (!t_queue_ops)
+        pthread_rwlock_rdlock(&d->idle_lock);
+    t_queue_ops++;
 }
 
 void vkf_queue_unlock(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
+    t_queue_ops--;
     if (d->host_queues < d->guest_queues)
         pthread_mutex_unlock(&d->queue_lock);
+    else if (!t_queue_ops)
+        pthread_rwlock_unlock(&d->idle_lock);
+}
+
+void vkf_device_wait_idle(vkf_dev *d, const vkf_fns *fns, VkDevice dev)
+{
+    if (d->host_queues < d->guest_queues) {
+        if (!t_queue_ops)
+            pthread_mutex_lock(&d->queue_lock);
+        VKF_FN(fns, vkDeviceWaitIdle)(dev);
+        if (!t_queue_ops)
+            pthread_mutex_unlock(&d->queue_lock);
+        return;
+    }
+    if (t_queue_ops)
+        pthread_rwlock_unlock(&d->idle_lock);
+    pthread_rwlock_wrlock(&d->idle_lock);
+    VKF_FN(fns, vkDeviceWaitIdle)(dev);
+    pthread_rwlock_unlock(&d->idle_lock);
+    if (t_queue_ops)
+        pthread_rwlock_rdlock(&d->idle_lock);
 }
 
 void vkf_queue_enter(vkf_call *k)
