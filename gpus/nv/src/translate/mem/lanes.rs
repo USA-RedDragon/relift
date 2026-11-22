@@ -52,6 +52,11 @@ const VECTOR_EXTRACT_DYNAMIC: u16 = 77;
 const LANES_KEY: u32 = 0x2_0010;
 const WORDS_KEY: u32 = 0x2_0011;
 const CLUSTERED_REDUCE: u32 = 3;
+const STAGE_KEY: u32 = 0x2_0012;
+const BUILTIN_SUBGROUP_SIZE: u32 = 36;
+const BUILTIN_SUBGROUP_ID: u32 = 40;
+/// Words per lane that [`Ctx::stage_quads`] holds.
+pub(crate) const STAGE_REGS: usize = 6;
 
 /// The SHFL operand pattern stays inside a 2x2 quad: the segment mask
 /// covers lane bits 2 to 4, so the source lane keeps the quad bits of the
@@ -737,6 +742,106 @@ impl Ctx {
             return ls.iter().map(|&l| self.get(l)).collect();
         }
         ls.iter().map(|&l| self.shuffle(v, l)).collect()
+    }
+
+    /// Whether [`Ctx::stage_quads`] works on this program's warp path.
+    pub(crate) fn can_stage_quads(&self) -> bool {
+        matches!(
+            self.warp_path(),
+            WarpPath::Subgroup | WarpPath::Cluster | WarpPath::Shared
+        ) && !self.stage.is_mesh_pipeline()
+    }
+
+    /// The warp's index in the workgroup and the lane, for the staging
+    /// array of [`Ctx::stage_quads`].
+    fn stage_warp_lane(&mut self) -> (u32, u32) {
+        match self.warp_path() {
+            WarpPath::Shared => {
+                let i = self.local_index();
+                let w = self.lk(op::SHIFT_RIGHT_LOGICAL, i, 5);
+                let l = self.lk(op::BITWISE_AND, i, 31);
+                (w, l)
+            }
+            path => {
+                let u = self.u32t();
+                let var = self.builtin(BUILTIN_SUBGROUP_ID, INPUT, u);
+                let sub = self.m.emit(op::LOAD, u, &[var]);
+                let s = self.sg_id();
+                if path == WarpPath::Cluster {
+                    let var = self.builtin(BUILTIN_SUBGROUP_SIZE, INPUT, u);
+                    let size = self.m.emit(op::LOAD, u, &[var]);
+                    let per = self.lk(op::SHIFT_RIGHT_LOGICAL, size, 5);
+                    let base = self.lb(op::I_MUL, sub, per);
+                    let c = self.lk(op::SHIFT_RIGHT_LOGICAL, s, 5);
+                    let w = self.lb(op::I_ADD, base, c);
+                    let l = self.lk(op::BITWISE_AND, s, 31);
+                    (w, l)
+                } else {
+                    (sub, s)
+                }
+            }
+        }
+    }
+
+    /// A barrier among the lanes of the warp that orders workgroup memory:
+    /// the workgroup's on the shared path, the subgroup's otherwise.
+    fn stage_barrier(&mut self) {
+        if self.warp_path() == WarpPath::Shared {
+            self.barrier();
+            return;
+        }
+        let exec = self.m.c_u32(SCOPE_SUBGROUP);
+        let sem = self.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_WORKGROUP);
+        self.m.emit_void(op::CONTROL_BARRIER, &[exec, exec, sem]);
+    }
+
+    /// Up to [`STAGE_REGS`] words of every lane of the warp through
+    /// workgroup memory, written once: each read `(i, n)` gives the
+    /// four-word vector of word `regs[i]` of lanes `4n` to `4n + 3`, `n`
+    /// being a value from 0 to 7. Only where [`Ctx::can_stage_quads`].
+    pub(crate) fn stage_quads(&mut self, regs: &[u32], reads: &[(usize, u32)]) -> Vec<u32> {
+        let u = self.u32t();
+        let v4 = self.m.t_vec(u, 4);
+        let var = if let Some(&v) = self.builtins.get(&STAGE_KEY) {
+            v
+        } else {
+            let n = self.invocations();
+            let k31 = self.m.c_u32(31);
+            let k5 = self.m.c_u32(5);
+            let r = self.m.spec_op(u, op::I_ADD, &[n, k31]);
+            let warps = self.m.spec_op(u, op::SHIFT_RIGHT_LOGICAL, &[r, k5]);
+            let per = self.m.c_u32(8 * STAGE_REGS as u32);
+            let len = self.m.spec_op(u, op::I_MUL, &[warps, per]);
+            let arr = self.m.t_array_of(v4, len);
+            let p = self.m.t_ptr(WORKGROUP, arr);
+            let var = self.m.global(p, WORKGROUP);
+            self.builtins.insert(STAGE_KEY, var);
+            self.globals.push(var);
+            var
+        };
+        let (w, lane) = self.stage_warp_lane();
+        let base = self.lk(op::I_MUL, w, 8 * STAGE_REGS as u32);
+        let g = self.lk(op::SHIFT_RIGHT_LOGICAL, lane, 2);
+        let q = self.lk(op::BITWISE_AND, lane, 3);
+        let pu = self.m.t_ptr(WORKGROUP, u);
+        let pv = self.m.t_ptr(WORKGROUP, v4);
+        self.stage_barrier();
+        for (i, &r) in regs.iter().enumerate() {
+            let at = self.lk(op::I_ADD, base, 8 * i as u32);
+            let at = self.lb(op::I_ADD, at, g);
+            let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, at, q]);
+            self.m.emit_void(op::STORE, &[p, r]);
+        }
+        self.stage_barrier();
+        reads
+            .iter()
+            .map(|&(i, n)| {
+                let at = self.lk(op::I_ADD, base, 8 * i as u32);
+                let at = self.lb(op::I_ADD, at, n);
+                let p = self.m.emit(op::ACCESS_CHAIN, pv, &[var, at]);
+                self.m.emit(op::LOAD, v4, &[p])
+            })
+            .collect()
     }
 
     /// `v` from each of the 32 lanes of the warp.

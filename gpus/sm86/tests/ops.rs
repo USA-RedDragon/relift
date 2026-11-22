@@ -8,6 +8,10 @@ const EXIT: u128 = 0x000f_ea00_0380_0000_0000_0000_0000_794d;
 const BRA_SELF: u128 = 0x000f_c000_0383_ffff_ffff_fff0_0000_7947;
 /// `OpCooperativeMatrixMulAddKHR`.
 const COOPERATIVE_MATRIX_MUL_ADD: u32 = 4459;
+/// `OpGroupNonUniformShuffle`.
+const SHUFFLE: u32 = 345;
+/// `OpControlBarrier`.
+const CONTROL_BARRIER: u32 = 224;
 
 fn program(body: &[u128]) -> Program {
     let mut b = Vec::new();
@@ -193,6 +197,46 @@ fn hmma_f16() {
         .windows(3)
         .any(|w| w[0] == (3 << 16 | 14) && w[2] == 3);
     assert!(model, "OpMemoryModel Vulkan");
+}
+
+#[test]
+fn hmma_staged_gathers_through_workgroup_memory() {
+    let words = [
+        w(0x0c4f_f000_0000_080a, 0x0000_0008_040c_723c),
+        w(0x000f_e200_0000_0006, 0x0000_0009_0408_723c),
+    ];
+    let count = |s: &[u32], o: u32| spirv_ops(s).iter().filter(|&&x| x == o).count();
+    for base in [HostProfile::nvidia(), HostProfile::lavapipe()] {
+        let plain = Options {
+            host: base.clone(),
+            ..Options::default()
+        };
+        let mut host = base.clone();
+        host.hmma_staged = true;
+        let staged = Options {
+            host,
+            ..Options::default()
+        };
+        let p = translate_with(&program(&words), &plain).unwrap_or_else(|e| panic!("{e}"));
+        let s = translate_with(&program(&words), &staged).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(p.interface.host.warp, s.interface.host.warp);
+        if s.interface.host.warp == WarpPath::Subgroup {
+            assert!(count(&p.spirv, SHUFFLE) > 0);
+            assert_eq!(count(&s.spirv, SHUFFLE), 0, "{}: no shuffles", base.name);
+            assert_eq!(
+                count(&s.spirv, CONTROL_BARRIER),
+                4,
+                "two per shape's helper"
+            );
+        } else {
+            assert_eq!(s.interface.host.warp, WarpPath::Shared);
+            assert!(
+                count(&s.spirv, CONTROL_BARRIER) < count(&p.spirv, CONTROL_BARRIER),
+                "{}: fewer barriers",
+                base.name
+            );
+        }
+    }
 }
 
 #[test]

@@ -162,6 +162,13 @@ pub struct HostProfile {
     /// such modules need, and 32-wide compute subgroups). Used only where
     /// warps are 32-wide subgroups.
     pub coop_hmma: bool,
+    /// An HMMA that is not a cooperative matrix multiply-add gathers the
+    /// A rows and B columns each lane needs through workgroup memory, each
+    /// lane's fragment words written once and read back as four-word
+    /// vectors, instead of one subgroup shuffle (or one published word with
+    /// two barriers on the workgroup path) per word and lane read. The
+    /// arithmetic is the same.
+    pub hmma_staged: bool,
     /// `maxComputeWorkGroupInvocations`: Vulkan guarantees 128.
     pub max_workgroup_invocations: u32,
     /// `maxComputeWorkGroupSize`: Vulkan guarantees 128, 128 and 64.
@@ -224,6 +231,7 @@ impl HostProfile {
             native_f16: true,
             canonical_nan: true,
             coop_hmma: false,
+            hmma_staged: false,
             max_workgroup_invocations: 1024,
             max_workgroup_size: [1024, 1024, 64],
             subgroup_sizes: (32, 32),
@@ -551,6 +559,7 @@ impl HostProfile {
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
+            hmma_staged: false,
             max_workgroup_invocations: 128,
             max_workgroup_size: [128, 128, 64],
             subgroup_sizes: (1, 128),
@@ -665,6 +674,7 @@ impl HostProfile {
                 && caps.on("exactFloat16"),
             canonical_nan: caps.on("canonicalNan32"),
             coop_hmma: caps.on("hmmaCooperativeMatrix"),
+            hmma_staged: false,
             max_workgroup_invocations: caps.get32("maxComputeWorkGroupInvocations"),
             max_workgroup_size: [0, 1, 2]
                 .map(|k| caps.get32(&format!("maxComputeWorkGroupSize[{k}]"))),

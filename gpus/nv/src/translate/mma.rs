@@ -189,33 +189,59 @@ impl Ctx {
         let k3 = c.m.c_u32(3);
         let g = c.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[lane, k2]);
         let q = c.m.emit(op::BITWISE_AND, u, &[lane, k3]);
-        let row_lanes: Vec<u32> = (0..4)
-            .map(|j| {
-                let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[g, k2]);
-                let kj = c.m.c_u32(j);
-                c.m.emit(op::BITWISE_OR, u, &[base, kj])
-            })
-            .collect();
-        let col_lanes: Vec<Vec<u32>> = (0..2)
-            .map(|h| {
-                let k1 = c.m.c_u32(1);
-                let n2 = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[q, k1]);
-                let kh = c.m.c_u32(h);
-                let n = c.m.emit(op::BITWISE_OR, u, &[n2, kh]);
-                let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[n, k2]);
+        let (arows, bcols) = if c.host.hmma_staged && c.can_stage_quads() {
+            let k1 = c.m.c_u32(1);
+            let q2 = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[q, k1]);
+            let q21 = c.m.emit(op::BITWISE_OR, u, &[q2, k1]);
+            let na = a.len();
+            let mut reads: Vec<(usize, u32)> = (0..na).map(|i| (i, g)).collect();
+            for s in 0..b.len() {
+                reads.push((na + s, q2));
+                reads.push((na + s, q21));
+            }
+            let regs: Vec<u32> = a.iter().chain(b).copied().collect();
+            let quads = c.stage_quads(&regs, &reads);
+            let words = |c: &mut Ctx, v: u32| -> Vec<u32> {
                 (0..4)
-                    .map(|j| {
-                        let kj = c.m.c_u32(j);
-                        c.m.emit(op::BITWISE_OR, u, &[base, kj])
-                    })
+                    .map(|j| c.m.emit(op::COMPOSITE_EXTRACT, u, &[v, j]))
                     .collect()
-            })
-            .collect();
-        let arows: Vec<Vec<u32>> = a.iter().map(|&v| c.shuffle_set(v, &row_lanes)).collect();
-        let bcols: Vec<Vec<Vec<u32>>> = b
-            .iter()
-            .map(|&v| col_lanes.iter().map(|ls| c.shuffle_set(v, ls)).collect())
-            .collect();
+            };
+            let arows: Vec<Vec<u32>> = quads[..na].iter().map(|&v| words(c, v)).collect();
+            let bcols: Vec<Vec<Vec<u32>>> = quads[na..]
+                .chunks(2)
+                .map(|p| p.iter().map(|&v| words(c, v)).collect())
+                .collect();
+            (arows, bcols)
+        } else {
+            let row_lanes: Vec<u32> = (0..4)
+                .map(|j| {
+                    let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[g, k2]);
+                    let kj = c.m.c_u32(j);
+                    c.m.emit(op::BITWISE_OR, u, &[base, kj])
+                })
+                .collect();
+            let col_lanes: Vec<Vec<u32>> = (0..2)
+                .map(|h| {
+                    let k1 = c.m.c_u32(1);
+                    let n2 = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[q, k1]);
+                    let kh = c.m.c_u32(h);
+                    let n = c.m.emit(op::BITWISE_OR, u, &[n2, kh]);
+                    let base = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[n, k2]);
+                    (0..4)
+                        .map(|j| {
+                            let kj = c.m.c_u32(j);
+                            c.m.emit(op::BITWISE_OR, u, &[base, kj])
+                        })
+                        .collect()
+                })
+                .collect();
+            let arows: Vec<Vec<u32>> = a.iter().map(|&v| c.shuffle_set(v, &row_lanes)).collect();
+            let bcols: Vec<Vec<Vec<u32>>> = b
+                .iter()
+                .map(|&v| col_lanes.iter().map(|ls| c.shuffle_set(v, ls)).collect())
+                .collect();
+            (arows, bcols)
+        };
         let dot = if c.host.native_f16 {
             c.dot8_float_fn()
         } else {

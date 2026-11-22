@@ -3,6 +3,7 @@ use relift_gpu_nv::translate::{HostProfile, Options, translate_with};
 fn main() {
     let mut o = Options::default();
     let mut no_fma = false;
+    let mut hmma_staged = false;
     let mut flush_fix = None;
     let mut raw = std::env::args().peekable();
     let mut kept = Vec::new();
@@ -20,7 +21,9 @@ fn main() {
             o.exact_mufu |= flag;
             let unfused = a == "--no-fused-fma";
             no_fma |= unfused;
-            !flag && !unfused
+            let staged = a == "--hmma-staged";
+            hmma_staged |= staged;
+            !flag && !unfused && !staged
         })
         .collect();
     let b = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("{}: {e}", args[1]));
@@ -37,6 +40,7 @@ fn main() {
     };
     o.host = host;
     o.host.fused_fma &= !no_fma;
+    o.host.hmma_staged |= hmma_staged;
     if let Some(f) = flush_fix {
         o.host.denorm = relift_gpu_nv::translate::Denorm::Unknown;
         o.host.denorm_preserve_mode = false;
