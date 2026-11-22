@@ -110,7 +110,7 @@ def one_rom(args, index, rom, cases):
     os.makedirs(proj, exist_ok=True)
     path = os.path.join(args.local, rom) if cases[0].get("local") else os.path.join(args.roms, rom)
     rc, so, se = run([args.relift, "-q", "import", path], env, proj, BUILD_CPU_SECONDS)
-    game = os.path.join(args.work, "cache", "projects", name, "build", "host", "game")
+    game = os.path.join(args.work, "cache", "projects", name, "build", "host", name)
     verdicts = {}
     for dev in (False, True):
         t0 = time.monotonic()

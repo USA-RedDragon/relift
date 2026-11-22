@@ -137,7 +137,7 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         av1: dav1d off (RELIFT_DAV1D_DIR=off), AV1 video stays undecoded\n\
         \x20      compile  <n> files, clang -O2, -j4  <time>\n\
         built 2 functions, 0 instructions not lifted, <time> in all\n\
-        \x20 output: <root>/cache/projects/tiny/build/host/game\n",
+        \x20 output: <root>/cache/projects/tiny/build/host/tiny\n",
         std::env::consts::OS,
         std::env::consts::ARCH
     );

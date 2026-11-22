@@ -356,8 +356,8 @@ pub fn build(
         ui,
     )?;
     let exe = match &cross {
-        Some(c) => out.join(c.program()),
-        None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+        Some(c) => out.join(c.program(&crate::progname::stem())),
+        None => out.join(crate::progname::program()),
     };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {} units, {} instructions not lifted, {} in all",

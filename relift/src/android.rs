@@ -1,8 +1,9 @@
 //! Android as a host target: the NDK compiler, the SDL3 and libopus builds
 //! for the target, and the APK around the program's shared library.
 //!
-//! The program is a shared library named `libmain.so` that SDL's Java
-//! activity loads and enters through `SDL_main`. relift drives the Android
+//! The program is a shared library named after the project (`lib<name>.so`,
+//! see [`library`]) that SDL's Java activity loads and enters through
+//! `SDL_main`. relift drives the Android
 //! SDK's own tools (`aapt2`, `d8`, `zipalign`, `apksigner`) and `javac`; no
 //! Gradle. SDL3's Java glue is the `SDL3.jar` that its CMake install makes.
 
@@ -14,6 +15,13 @@ use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 use crate::ui::Ui;
 use relift_progress::Line;
+
+/// The file name of the shared library of the program `stem` (the project's
+/// file name, [`crate::progname::slug`]): `lib<stem>.so`.
+#[must_use]
+pub fn library(stem: &str) -> String {
+    format!("lib{stem}.so")
+}
 
 /// The Android API level the runtime builds for (`memfd_create` in bionic).
 pub const MIN_API: u32 = 30;
@@ -151,7 +159,7 @@ pub struct Adrenotools {
     pub licenses: Vec<(String, PathBuf)>,
 }
 
-/// The libadrenotools libraries an APK carries next to `libmain.so`.
+/// The libadrenotools libraries an APK carries next to the program's library.
 const ADRENOTOOLS_LIBS: [&str; 3] = ["libadrenotools.so", "libhook_impl.so", "libmain_hook.so"];
 
 fn version_key(p: &Path) -> Vec<u64> {
@@ -423,8 +431,11 @@ pub struct Apk<'a> {
     /// for each size. Empty: the system's default icon.
     pub icons: &'a [(&'static str, Vec<u8>)],
     pub target: Target,
-    /// The program's shared library, installed as `libmain.so`.
+    /// The program's shared library, installed under `library`.
     pub program: &'a Path,
+    /// The project's file name: the program is installed as
+    /// [`library`]`(stem)` and the activity loads it by `stem`.
+    pub stem: &'a str,
     pub deps: &'a Deps,
     /// Where intermediate files go.
     pub work: &'a Path,
@@ -538,6 +549,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
   <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
   {internet}{data_permissions}<application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
     <meta-data android:name="relift.gpu_driver" android:value="{vulkan}"/>
+    <meta-data android:name="relift.library" android:value="{stem}"/>
     <meta-data android:name="relift.platform" android:value="{platform}"/>
     <meta-data android:name="relift.game_version" android:value="{version}"/>
     <activity android:name="{ACTIVITY}" android:exported="true" android:launchMode="singleInstance" android:screenOrientation="{orientation}" android:configChanges="layoutDirection|locale|fontScale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
@@ -576,6 +588,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
         } else {
             "sensorLandscape"
         },
+        stem = xml(a.stem),
         platform = xml(&a.about.platform),
         version = xml(&a.about.version),
         icon = if a.icons.is_empty() {
@@ -647,7 +660,7 @@ pub fn default_package(name: &str) -> String {
 pub fn package(
     a: &AndroidBuild,
     exe: &Path,
-    name: &str,
+    stem: &str,
     launcher: &Launcher,
     data_manifest: Option<&[u8]>,
     fonts: Option<&Path>,
@@ -656,7 +669,7 @@ pub fn package(
     let dir = exe.parent().ok_or("the program has no folder")?;
     let row = ui.row("");
     ui.begin(row, "package");
-    let apk = dir.join(format!("{name}.apk"));
+    let apk = dir.join(format!("{stem}.apk"));
     build_apk(
         &Apk {
             package: &a.package,
@@ -664,6 +677,7 @@ pub fn package(
             icons: &launcher.icons,
             target: a.target,
             program: exe,
+            stem,
             deps: &a.deps,
             work: &dir.join("apk"),
             output: &apk,
@@ -945,7 +959,8 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         "d8",
     )?;
     link_resources(a, sdk, signing.debug)?;
-    let stripped = w.join("libmain.so");
+    let lib = library(a.stem);
+    let stripped = w.join(&lib);
     run(
         relift_proc::command(&ndk.strip)
             .arg("--strip-unneeded")
@@ -972,7 +987,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
     }
     z.add("classes.dex", std::fs::read(w.join("dex/classes.dex"))?);
     z.add(
-        &format!("lib/{}/libmain.so", a.target.abi),
+        &format!("lib/{}/{lib}", a.target.abi),
         std::fs::read(&stripped)?,
     );
     z.add(
@@ -1070,6 +1085,11 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_library_is_named_after_the_project() {
+        assert_eq!(library("example-project-2"), "libexample-project-2.so");
+    }
 
     #[test]
     fn target_names_map_to_triples() {
@@ -1211,6 +1231,7 @@ mod tests {
             icons: &[],
             target: target("android-arm64").unwrap(),
             program: Path::new("p"),
+            stem: "example-project-2",
             deps: &deps,
             work: Path::new("w"),
             output: Path::new("o"),
@@ -1233,6 +1254,7 @@ mod tests {
         assert!(m.contains("android.permission.INTERNET"));
         assert!(m.contains("android:name=\"relift.gpu_driver\" android:value=\"true\""));
         assert!(m.contains("android:process=\":gpucheck\""));
+        assert!(m.contains("android:name=\"relift.library\" android:value=\"example-project-2\""));
         assert!(m.contains("android:taskAffinity=\"dev.relift.game.x.settings\" android:excludeFromRecents=\"true\" android:screenOrientation=\"behind\""));
         assert!(!m.contains("DataService"));
         let with_data = Apk {

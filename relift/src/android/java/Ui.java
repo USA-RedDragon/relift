@@ -1,6 +1,7 @@
 package dev.relift.app;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -146,7 +147,7 @@ final class Ui {
         }
     }
 
-    static String metaString(Activity a, String key) {
+    static String metaString(Context a, String key) {
         try {
             ApplicationInfo ai = a.getPackageManager().getApplicationInfo(a.getPackageName(), PackageManager.GET_META_DATA);
             return ai.metaData == null ? "" : ai.metaData.getString(key, "");

@@ -45,7 +45,7 @@ fn plan(root: &Path, clang: &Path) -> (Plan, PathBuf) {
         cc: vec![clang.display().to_string()],
         asm: None,
         compiles,
-        output: dir.join("game"),
+        output: dir.join("program"),
         link_flags: Vec::new(),
         pools: Vec::new(),
         root: Some(root.to_path_buf()),
@@ -92,8 +92,8 @@ fn a_linked_copy_of_the_build_directory_builds_nothing() {
     let (pb, db) = plan(&b, &clang);
     assert_eq!(steps(&pb, &db, &ninja), 0, "the moved build is up to date");
     assert_eq!(
-        std::fs::read(da.join("game")).expect("the program reads"),
-        std::fs::read(db.join("game")).expect("the program reads")
+        std::fs::read(da.join("program")).expect("the program reads"),
+        std::fs::read(db.join("program")).expect("the program reads")
     );
     relift_cache::write_if_changed(&b.join("runtime/include/h.h"), b"#define V 8\n")
         .expect("the header writes");

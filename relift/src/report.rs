@@ -895,7 +895,7 @@ fn foreign(r: &Report, game: &toml::Table) -> Option<String> {
 
 /// The `build:` digest of the program in the build directory `out`.
 fn build_of(out: &Path) -> Option<String> {
-    let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    let exe = out.join(crate::progname::program());
     let image = std::fs::read(exe).ok()?;
     let doc = relift_info::section::read(&image).ok()?;
     Some(relift_info::embed::build_digest(doc))

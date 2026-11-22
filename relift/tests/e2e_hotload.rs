@@ -20,16 +20,16 @@ fn the_report(dir: &Path) -> String {
     std::fs::read_to_string(&files[0]).unwrap()
 }
 
-fn game(root: &Path, dev: bool) -> std::process::Output {
+fn program(root: &Path, dev: bool) -> std::process::Output {
     let exe = std::fs::read_dir(root.join("cache").join("projects"))
         .unwrap()
         .map(|e| {
             let host = e.unwrap().path().join("build").join("host");
             if dev { host.join("dev") } else { host }
-                .join(format!("game{}", std::env::consts::EXE_SUFFIX))
+                .join(format!("tiny{}", std::env::consts::EXE_SUFFIX))
         })
         .find(|p| p.is_file())
-        .expect("a built game");
+        .expect("a built program");
     let reports = root.join(if dev { "reports-dev" } else { "reports" });
     if reports.exists() {
         std::fs::remove_dir_all(&reports).unwrap();
@@ -39,7 +39,7 @@ fn game(root: &Path, dev: bool) -> std::process::Output {
         .env("RELIFT_REPORT_DIR", &reports)
         .current_dir(root.join("tiny"))
         .output()
-        .expect("the game runs")
+        .expect("the program runs")
 }
 
 /// `toml` without its `[hints]` table.
@@ -75,7 +75,7 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let shipped = game(&root, false);
+    let shipped = program(&root, false);
     let err = String::from_utf8_lossy(&shipped.stderr);
     assert_eq!(shipped.status.code(), Some(70), "{err}");
     assert!(
@@ -160,7 +160,7 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
     let toml = std::fs::read_to_string(project.join("game.toml")).unwrap();
     assert!(toml.contains("\"main+0x40\""), "{toml}");
 
-    let dev = game(&root, true);
+    let dev = program(&root, true);
     let err = String::from_utf8_lossy(&dev.stderr);
     assert_eq!(dev.status.code(), Some(70), "{err}");
     assert!(err.contains("RELIFT_DEV_SOCKET is not set"), "{err}");
@@ -172,7 +172,7 @@ fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
         stderr.contains("built 2 functions, 0 instructions not lifted"),
         "{stderr}"
     );
-    let shipped = game(&root, false);
+    let shipped = program(&root, false);
     assert!(
         shipped.status.success(),
         "{}",
@@ -215,7 +215,7 @@ fn a_missed_call_runs_from_the_cold_copy() {
         stderr.contains("1 superset functions from 1 root"),
         "{stderr}"
     );
-    let shipped = game(&root, false);
+    let shipped = program(&root, false);
     let err = String::from_utf8_lossy(&shipped.stderr);
     assert!(shipped.status.success(), "{err}");
     assert_eq!(String::from_utf8_lossy(&shipped.stdout), want, "{err}");
@@ -266,7 +266,7 @@ fn a_shipped_build_reports_the_site_of_a_computed_jump_that_missed() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let shipped = game(&root, false);
+    let shipped = program(&root, false);
     let err = String::from_utf8_lossy(&shipped.stderr);
     assert_eq!(shipped.status.code(), Some(70), "{err}");
     let report = the_report(&root.join("reports"));

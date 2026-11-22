@@ -32,12 +32,12 @@ fn a_spin_wait_gives_its_core_to_a_woken_higher_priority_thread() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let mut child = relift_proc::command(root.join("cache/projects/tiny/build/host/game"))
+    let mut child = relift_proc::command(root.join("cache/projects/tiny/build/host/tiny"))
         .current_dir(&project)
         .env_remove("RELIFT_SCHED")
         .stdout(Stdio::piped())
         .spawn()
-        .expect("the game runs");
+        .expect("the program runs");
     let mut pipe = child.stdout.take().expect("stdout is piped");
     let reader = std::thread::spawn(move || {
         let mut s = String::new();

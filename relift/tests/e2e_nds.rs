@@ -208,7 +208,7 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
         "arm7tdmi",
         0x0380_0000,
     );
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let nds: PathBuf = root.join("fifo.nds");
     relift_cache::write_if_changed(&nds, &image(&arm9, &arm7)).expect("the image is writable");
@@ -232,8 +232,8 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
         stderr.contains("in 2 units, 0 instructions not lifted"),
         "{stderr}"
     );
-    let host = root.join("cache/projects/game/build/host");
-    let out = relift_proc::command(host.join("game"))
+    let host = root.join("cache/projects/sample/build/host");
+    let out = relift_proc::command(host.join("sample"))
         .args([
             "--headless",
             "--stats",
@@ -242,7 +242,7 @@ fn two_cpus_trade_words_over_the_fifo_lifted_end_to_end() {
             "200000000",
         ])
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stdout}{err}");

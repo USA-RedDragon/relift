@@ -30,7 +30,7 @@ fn a_release_build_stops_at_unlifted_code_with_a_report_naming_the_jump() {
         return;
     }
     let root = tiny::scratch("e2e-gb-miss");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("miss.gb");
     relift_cache::write_if_changed(&image, &rom()).expect("the ROM is writable");
@@ -48,13 +48,13 @@ fn a_release_build_stops_at_unlifted_code_with_a_report_naming_the_jump() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let host = root.join("cache/projects/game/build/host");
+    let host = root.join("cache/projects/sample/build/host");
     let reports = root.join("reports");
-    let out = relift_proc::command(host.join(format!("game{}", std::env::consts::EXE_SUFFIX)))
+    let out = relift_proc::command(host.join(format!("sample{}", std::env::consts::EXE_SUFFIX)))
         .args(["--headless", "--no-save", "--no-audio", "--frames", "5"])
         .env("RELIFT_REPORT_DIR", &reports)
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(70), "{err}");
     let files: Vec<_> = std::fs::read_dir(&reports)
@@ -94,11 +94,11 @@ fn a_release_build_stops_at_unlifted_code_with_a_report_naming_the_jump() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = relift_proc::command(host.join(format!("game{}", std::env::consts::EXE_SUFFIX)))
+    let out = relift_proc::command(host.join(format!("sample{}", std::env::consts::EXE_SUFFIX)))
         .args(["--headless", "--no-save", "--no-audio", "--frames", "5"])
         .env("RELIFT_REPORT_DIR", root.join("reports-dev"))
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     assert!(
         !root.join("reports-dev").exists(),
         "{}",
@@ -132,7 +132,7 @@ fn a_miss_from_a_switchable_bank_names_the_site_in_its_bank() {
         return;
     }
     let root = tiny::scratch("e2e-gb-bank-miss");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("bank.gb");
     relift_cache::write_if_changed(&image, &banked_rom()).expect("the ROM is writable");
@@ -150,13 +150,13 @@ fn a_miss_from_a_switchable_bank_names_the_site_in_its_bank() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let host = root.join("cache/projects/game/build/host");
+    let host = root.join("cache/projects/sample/build/host");
     let reports = root.join("reports");
-    let out = relift_proc::command(host.join(format!("game{}", std::env::consts::EXE_SUFFIX)))
+    let out = relift_proc::command(host.join(format!("sample{}", std::env::consts::EXE_SUFFIX)))
         .args(["--headless", "--no-save", "--no-audio", "--frames", "5"])
         .env("RELIFT_REPORT_DIR", &reports)
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(70), "{err}");
     let file = std::fs::read_dir(&reports)

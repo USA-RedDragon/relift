@@ -45,7 +45,7 @@ fn code_copied_to_iwram_builds_and_runs() {
         return;
     }
     let root = tiny::scratch("e2e-gba-iwram");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("ram.gba");
     relift_cache::write_if_changed(&image, &rom()).expect("the ROM is writable");
@@ -64,11 +64,11 @@ fn code_copied_to_iwram_builds_and_runs() {
         stderr.contains("built 2 functions, 0 instructions not lifted"),
         "{stderr}"
     );
-    let host = root.join("cache/projects/game/build/host");
+    let host = root.join("cache/projects/sample/build/host");
     let shard = std::fs::read_to_string(host.join("c/rom/shard0000.c")).expect("the ROM shard");
     assert!(shard.contains("rl_gba_cpu_variant(c"), "{shard}");
     let dump = root.join("dump").display().to_string();
-    let out = relift_proc::command(host.join("game"))
+    let out = relift_proc::command(host.join("sample"))
         .args([
             "--headless",
             "--no-save",
@@ -79,7 +79,7 @@ fn code_copied_to_iwram_builds_and_runs() {
             &dump,
         ])
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stdout}{err}");
@@ -128,7 +128,7 @@ fn a_jump_no_analysis_follows_stops_with_a_report_naming_its_site() {
         return;
     }
     let root = tiny::scratch("e2e-gba-miss");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("miss.gba");
     relift_cache::write_if_changed(&image, &missing_rom()).expect("the ROM is writable");
@@ -146,13 +146,13 @@ fn a_jump_no_analysis_follows_stops_with_a_report_naming_its_site() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let host = root.join("cache/projects/game/build/host");
+    let host = root.join("cache/projects/sample/build/host");
     let reports = root.join("reports");
-    let out = relift_proc::command(host.join("game"))
+    let out = relift_proc::command(host.join("sample"))
         .args(["--headless", "--no-save", "--frames", "5"])
         .env("RELIFT_REPORT_DIR", &reports)
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(70), "{err}");
     let files: Vec<_> = std::fs::read_dir(&reports)
@@ -212,11 +212,11 @@ fn a_jump_no_analysis_follows_stops_with_a_report_naming_its_site() {
         String::from_utf8_lossy(&out.stderr)
     );
     let reports = root.join("reports-2");
-    let out = relift_proc::command(host.join("game"))
+    let out = relift_proc::command(host.join("sample"))
         .args(["--headless", "--no-save", "--frames", "5"])
         .env("RELIFT_REPORT_DIR", &reports)
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     assert!(
         out.status.success(),
         "{}",
@@ -232,7 +232,7 @@ fn a_miss_into_a_rom_mirror_is_named_by_its_rom_offset() {
         return;
     }
     let root = tiny::scratch("e2e-gba-mirror");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("mirror.gba");
     relift_cache::write_if_changed(&image, &missing_rom_at(0x0A)).expect("the ROM is writable");
@@ -251,11 +251,11 @@ fn a_miss_into_a_rom_mirror_is_named_by_its_rom_offset() {
         String::from_utf8_lossy(&out.stderr)
     );
     let reports = root.join("reports");
-    let out = relift_proc::command(root.join("cache/projects/game/build/host/game"))
+    let out = relift_proc::command(root.join("cache/projects/sample/build/host/sample"))
         .args(["--headless", "--no-save", "--frames", "5"])
         .env("RELIFT_REPORT_DIR", &reports)
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     assert_eq!(
         out.status.code(),
         Some(70),

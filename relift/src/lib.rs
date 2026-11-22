@@ -38,6 +38,7 @@ pub mod nds;
 pub mod nvndriver;
 pub mod parallel_rdp;
 pub mod paths;
+pub mod progname;
 pub mod push;
 pub mod report;
 pub mod runtime_link;

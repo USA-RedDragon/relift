@@ -728,7 +728,7 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
         std::fs::remove_dir_all(&app)?;
     }
     std::fs::create_dir_all(&app)?;
-    let exe_name = "game";
+    let exe_name = name;
     let dest = app.join(exe_name);
     relift_cache::write_if_changed(&dest, &std::fs::read(exe)?)?;
     executable(&dest)?;
@@ -930,11 +930,17 @@ mod tests {
             "A Very Long Ga\u{2026}"
         );
         let t = target("ios-arm64").unwrap();
-        let p = plist("dev.relift.x", t, "game", "A & B Long Title Here");
+        let p = plist(
+            "dev.relift.x",
+            t,
+            "example-project-2",
+            "A & B Long Title Here",
+        );
         assert!(
             p.contains("<key>CFBundleDisplayName</key><string>A &amp; B Long Title Here</string>")
         );
         assert!(p.contains("<key>CFBundleName</key><string>A &amp; B Long Tit\u{2026}</string>"));
+        assert!(p.contains("<key>CFBundleExecutable</key><string>example-project-2</string>"));
         assert!(p.contains("<string>AppIcon83.5x83.5</string>"));
     }
 

@@ -63,10 +63,10 @@ fn run(name: &str, llvm: bool, cold_first: bool) {
             );
         }
     }
-    let out = relift_proc::command(root.join("cache/projects/tiny/build/host/game"))
+    let out = relift_proc::command(root.join("cache/projects/tiny/build/host/tiny"))
         .current_dir(&project)
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");

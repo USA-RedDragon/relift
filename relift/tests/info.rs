@@ -36,9 +36,16 @@ fn the_section_and_the_flag_give_the_same_document() {
     );
     let exe = std::fs::read_dir(root.join("cache").join("projects"))
         .unwrap()
-        .map(|e| e.unwrap().path().join("build/host/game"))
+        .map(|e| {
+            let e = e.unwrap();
+            e.path().join("build/host").join(format!(
+                "{}{}",
+                e.file_name().to_string_lossy(),
+                std::env::consts::EXE_SUFFIX
+            ))
+        })
         .find(|p| p.is_file())
-        .expect("the built game");
+        .expect("the built program");
     let image = std::fs::read(&exe).unwrap();
     let from_section = section::read(&image).expect("a section").to_vec();
     let run = relift_proc::command(&exe)

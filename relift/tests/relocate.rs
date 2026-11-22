@@ -55,9 +55,15 @@ fn run(project: &Path, cache: &Path, args: &[&str]) -> String {
     text
 }
 
-fn game(cache: &Path, name: &str) -> Vec<u8> {
-    std::fs::read(cache.join("projects").join(name).join("build/host/game"))
-        .expect("the program was built")
+fn program(cache: &Path, name: &str) -> Vec<u8> {
+    std::fs::read(
+        cache
+            .join("projects")
+            .join(name)
+            .join("build/host")
+            .join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .expect("the program was built")
 }
 
 fn up_to_date(text: &str) -> bool {
@@ -87,7 +93,7 @@ fn a_linked_copy_of_the_cache_and_a_moved_project_build_nothing() {
     drop(first);
     let first = run(&project, &root.join("cache"), &["build"]);
     assert!(!up_to_date(&first), "the first build compiles: {first}");
-    let built = game(&root.join("cache"), "tiny");
+    let built = program(&root.join("cache"), "tiny");
 
     let there = root.join("elsewhere with spaces");
     link_tree(&root.join("cache"), &there.join("cache"));
@@ -99,7 +105,7 @@ fn a_linked_copy_of_the_cache_and_a_moved_project_build_nothing() {
         up_to_date(&moved),
         "a linked copy compiles nothing: {moved}{explained}"
     );
-    assert_eq!(game(&there.join("cache"), "tiny"), built);
+    assert_eq!(program(&there.join("cache"), "tiny"), built);
 
     let again = root.join("moved");
     std::fs::create_dir_all(&again).expect("the parent is creatable");
@@ -110,7 +116,7 @@ fn a_linked_copy_of_the_cache_and_a_moved_project_build_nothing() {
         up_to_date(&after),
         "a moved project compiles nothing: {after}{explained}"
     );
-    assert_eq!(game(&there.join("cache"), "tiny"), built);
+    assert_eq!(program(&there.join("cache"), "tiny"), built);
 }
 
 #[test]
@@ -122,7 +128,7 @@ fn another_copy_of_the_runtime_sources_is_the_same_build() {
     let project = tiny::dump(&root);
     run(&project, &root.join("cache"), &["import", "../dump"]);
     run(&project, &root.join("cache"), &["build"]);
-    let built = game(&root.join("cache"), "tiny");
+    let built = program(&root.join("cache"), "tiny");
 
     let rt: PathBuf = root.join("other relift/runtime");
     copy_tree(
@@ -139,7 +145,7 @@ fn another_copy_of_the_runtime_sources_is_the_same_build() {
         up_to_date(&again),
         "a copy of the runtime compiles nothing: {again}"
     );
-    assert_eq!(game(&root.join("cache"), "tiny"), built);
+    assert_eq!(program(&root.join("cache"), "tiny"), built);
 
     let header = Path::new(&rt).join("core/include/relift/abi_core.h");
     let mut text = std::fs::read(&header).expect("the header reads");

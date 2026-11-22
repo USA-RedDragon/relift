@@ -161,20 +161,7 @@ impl Policy {
     }
 }
 
-pub(crate) fn slug(name: &str) -> String {
-    let s: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let s = s.trim_matches(|c| c == '-' || c == '.').to_string();
-    if s.is_empty() { "game".into() } else { s }
-}
+pub(crate) use crate::progname::slug;
 
 pub(crate) fn display_name(info: &Info, fallback: &str) -> String {
     let pick = info.identity.title(&[]).unwrap_or(fallback);
@@ -633,13 +620,6 @@ mod tests {
         assert_eq!(Policy::parse("always"), Ok(Policy::Always));
         assert_eq!(Policy::parse("never"), Ok(Policy::Never));
         assert!(Policy::parse("yes").is_err());
-    }
-
-    #[test]
-    fn a_name_becomes_a_safe_file_name() {
-        assert_eq!(slug("Some Game (USA)"), "Some-Game--USA");
-        assert_eq!(slug("../x"), "x");
-        assert_eq!(slug("..."), "game");
     }
 
     #[test]

@@ -56,28 +56,28 @@ fn a_switch_2_program_runs_from_a_moved_copy_of_its_build() {
         "the build makes its shader folder"
     );
     assert!(!build.join("c/shaders.c").exists());
-    let game = std::fs::read(build.join("game")).expect("game reads");
+    let program = std::fs::read(build.join("tiny")).expect("program reads");
     let here = build.display().to_string();
     assert!(
-        !contains(&game, here.as_bytes()),
+        !contains(&program, here.as_bytes()),
         "the program names its build folder {here}"
     );
     let moved = root.join("moved");
     std::fs::create_dir_all(&moved).expect("folder is made");
-    relift_cache::write_if_changed(&moved.join("game"), &game).expect("game copies");
+    relift_cache::write_if_changed(&moved.join("tiny"), &program).expect("program copies");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(moved.join("game"), std::fs::Permissions::from_mode(0o755))
-            .expect("game is executable");
+        std::fs::set_permissions(moved.join("tiny"), std::fs::Permissions::from_mode(0o755))
+            .expect("program is executable");
     }
     copy_tree(&build.join("shaders"), &moved.join("shaders"));
     std::fs::remove_dir_all(root.join("cache")).expect("build is removed");
-    let run = relift_proc::command(moved.join("game"))
+    let run = relift_proc::command(moved.join("tiny"))
         .current_dir(root.join("tiny"))
         .env("RELIFT_PAC", "fast")
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(run.status.success(), "{stderr}");
     assert!(

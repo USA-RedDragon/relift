@@ -2068,13 +2068,13 @@ pub(crate) fn build_project(
         .collect();
     rt_compiles.extend(extras.compiles(&rt, &lib_flags, &|s| obj(s, "rt")));
     let exe = match &cross {
-        Some(c) => bdir.join(c.program()),
-        None => bdir.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+        Some(c) => bdir.join(c.program(&crate::progname::stem())),
+        None => bdir.join(crate::progname::program()),
     };
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = relift_build::job_count(settings.jobs);
     let mut libs: Vec<String> = if let Some(c) = &cross {
-        c.libs()
+        c.libs(&crate::progname::stem())
     } else if cfg!(windows) {
         ["-lpthread", "-lm", "-lws2_32"].map(String::from).into()
     } else {
@@ -2223,7 +2223,10 @@ fn summarize(ui: &mut Ui, functions: usize, unlifted: usize, list: &Path, exe: &
 /// No binary to read, or it holds no self-description.
 pub fn run_info(settings: &Settings, binary: Option<&Path>) -> Result<(), BoxError> {
     let exes = match project_out(settings) {
-        Ok((_, out)) => vec![out.join("game"), out.join("dev").join("game")],
+        Ok((_, out)) => {
+            let exe = crate::progname::program();
+            vec![out.join(&exe), out.join("dev").join(&exe)]
+        }
         Err(_) => Vec::new(),
     };
     crate::info::run(binary, &exes)
@@ -2303,7 +2306,7 @@ pub fn run_build(
             }
             built
         };
-        let (name, _) = project_out(settings)?;
+        let name = crate::progname::project_name();
         let request = PackageRequest {
             name: &name,
             label: &built.title,
@@ -2321,7 +2324,7 @@ pub fn run_build(
         return package(settings, &request, ui);
     }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
-    let (name, _) = project_out(settings)?;
+    let name = crate::progname::project_name();
     let import = import_dir(settings)?;
     let request = PackageRequest {
         name: &name,
@@ -2342,6 +2345,8 @@ pub fn run_build(
 
 /// What the packaging step of a release build works from.
 struct PackageRequest<'a> {
+    /// The project's name ([`crate::progname::project_name`]); its
+    /// [`crate::progname::slug`] names every file the packaging writes.
     name: &'a str,
     /// The title the game goes by; empty to use `name`.
     label: &'a str,
@@ -2363,6 +2368,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     } else {
         req.label
     };
+    let stem = crate::progname::slug(req.name);
     let shaders = match (req.import, project_out(settings)) {
         (Some(_), Ok((_, out))) => crate::shaders::tables(&out),
         _ => Vec::new(),
@@ -2386,7 +2392,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
             i,
             &crate::ios::Contents {
                 exe: req.exe,
-                name: req.name,
+                name: &stem,
                 home: &home,
                 data_manifest: data_manifest.as_deref(),
                 data,
@@ -2409,7 +2415,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         let apk = crate::android::package(
             a,
             req.exe,
-            req.name,
+            &stem,
             &l,
             data_manifest.as_deref(),
             fonts.as_deref(),

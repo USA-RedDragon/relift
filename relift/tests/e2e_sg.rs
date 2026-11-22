@@ -88,7 +88,7 @@ fn the_sg1000_test_rom_matches_ares_in_every_mode() {
     let rom = rom();
     assert_eq!(rom[0x0161], 0xBD);
     let root = tiny::scratch("e2e-sg");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("modes.sg");
     relift_cache::write_if_changed(&image, &rom).expect("the ROM is writable");
@@ -122,7 +122,7 @@ fn the_sg1000_test_rom_matches_ares_in_every_mode() {
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
     let log = root.join("frames.tsv");
     let ram_log = root.join("ram.tsv");
-    let out = relift_proc::command(root.join("cache/projects/game/build/host/game"))
+    let out = relift_proc::command(root.join("cache/projects/sample/build/host/sample"))
         .args(["--headless", "--no-audio", "--frames", "300", "--frame-log"])
         .arg(&log)
         .arg("--ram-log")

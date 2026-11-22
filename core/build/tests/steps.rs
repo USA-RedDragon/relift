@@ -30,7 +30,7 @@ fn plan(dir: &Path, clang: &Path, bodies: &[&str]) -> Plan {
         cc: vec![clang.display().to_string()],
         asm: None,
         compiles,
-        output: dir.join("game"),
+        output: dir.join("program"),
         link_flags: Vec::new(),
         pools: Vec::new(),
         root: None,

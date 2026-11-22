@@ -42,11 +42,10 @@ pub fn target(name: &str) -> Result<Option<Target>, BoxError> {
 /// lifted program's millions of code map pointers from taking 24 bytes each.
 /// Symbols bind inside the library, so the lifted code's calls into the
 /// runtime are direct branches rather than calls through the PLT.
-const ANDROID_LIBS: [&str; 9] = [
+const ANDROID_LIBS: [&str; 8] = [
     "-lm",
     "-ldl",
     "-shared",
-    "-Wl,-soname,libmain.so",
     "-Wl,-z,max-page-size=16384",
     "-Wl,--no-undefined",
     "-Wl,-Bsymbolic",
@@ -102,12 +101,13 @@ impl Build {
         }
     }
 
-    /// The file the link writes.
+    /// The file the link writes for the program `stem` (the project's file
+    /// name): `lib<stem>.so` for Android, `<stem>` for iOS.
     #[must_use]
-    pub fn program(&self) -> &'static str {
+    pub fn program(&self, stem: &str) -> String {
         match self {
-            Self::Android(_) => "libmain.so",
-            Self::Ios(_) => "game",
+            Self::Android(_) => android::library(stem),
+            Self::Ios(_) => stem.to_string(),
         }
     }
 
@@ -141,9 +141,13 @@ impl Build {
 
     /// The system libraries and link flags of the program.
     #[must_use]
-    pub fn libs(&self) -> Vec<String> {
+    pub fn libs(&self, stem: &str) -> Vec<String> {
         match self {
-            Self::Android(_) => ANDROID_LIBS.map(String::from).into(),
+            Self::Android(_) => {
+                let mut v: Vec<String> = ANDROID_LIBS.map(String::from).into();
+                v.push(format!("-Wl,-soname,{}", android::library(stem)));
+                v
+            }
             Self::Ios(i) => i.libs(),
         }
     }

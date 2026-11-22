@@ -42,6 +42,13 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
     static native void nativeDisplayTouch(int index, int id, int action, float x, float y);
 
     private Drivers drivers;
+
+    /** The libraries SDL loads: its own, then the program, whose name the manifest gives. */
+    @Override
+    protected String[] getLibraries() {
+        String name = Ui.metaString(this, "relift.library");
+        return new String[] {"SDL3", name.isEmpty() ? "main" : name};
+    }
     private Ui ui;
     private Displays displays;
     private DisplayManager.DisplayListener watch;

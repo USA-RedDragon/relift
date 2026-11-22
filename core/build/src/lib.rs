@@ -732,7 +732,7 @@ mod tests {
                 pool: None,
                 stage: 0,
             }],
-            output: "game".into(),
+            output: "program".into(),
             link_flags: vec!["-lm".into()],
             pools: Vec::new(),
             root: None,
@@ -802,7 +802,7 @@ mod tests {
                 pool: None,
                 stage: 0,
             }],
-            output: dir.join("game"),
+            output: dir.join("program"),
             link_flags: vec![
                 dir.join("rt/librelift_rt.so").display().to_string(),
                 "-Wl,-rpath,$ORIGIN/rt".into(),
@@ -872,7 +872,7 @@ mod tests {
         assert!(ta.contains("-fdebug-compilation-dir=."), "{ta}");
         assert!(
             ta.contains(
-                "build game: link obj/u.o\n  libs = rt/librelift_rt.so '-Wl,-rpath,$$ORIGIN/rt'"
+                "build program: link obj/u.o\n  libs = rt/librelift_rt.so '-Wl,-rpath,$$ORIGIN/rt'"
             ),
             "{ta}"
         );
@@ -958,14 +958,17 @@ mod tests {
             t.contains("build obj/a.o: cc c/a$ b.c\n  flags = -O2 '-DX=\"y\"'"),
             "{t}"
         );
-        assert!(t.contains("build game: link obj/a.o\n  libs = -lm"), "{t}");
+        assert!(
+            t.contains("build program: link obj/a.o\n  libs = -lm"),
+            "{t}"
+        );
         assert!(t.contains("deps = gcc"));
     }
 
     #[test]
     fn ninja_status_lines_split_and_other_lines_do_not() {
         assert_eq!(status("@12/340/8 cc a b.c"), Some((12, 340, "cc a b.c")));
-        assert_eq!(status("@1/2/3 link game"), Some((1, 2, "link game")));
+        assert_eq!(status("@1/2/3 link program"), Some((1, 2, "link program")));
         assert_eq!(status("FAILED: x.o"), None);
         assert_eq!(status("@x/2/3 cc"), None);
         assert_eq!(status("@1/2 cc"), None);

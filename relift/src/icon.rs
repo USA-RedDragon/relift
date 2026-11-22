@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn a_png_has_its_signature_and_a_header_of_the_image_size() {
-        let p = png(None, "game");
+        let p = png(None, "seed");
         assert!(p.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert_eq!(&p[12..16], b"IHDR");
         assert_eq!(u32::from_be_bytes(p[16..20].try_into().unwrap()), 128);

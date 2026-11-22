@@ -612,8 +612,8 @@ pub fn build(
         ui,
     )?;
     let exe = match &cross {
-        Some(c) => out.join(c.program()),
-        None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+        Some(c) => out.join(c.program(&crate::progname::stem())),
+        None => out.join(crate::progname::program()),
     };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {}, {} instructions not lifted, {} in all",
@@ -802,8 +802,8 @@ fn compile(
     let triple = cross.map(cross::Build::triple);
     let devices = device_library(settings, &rt_real, triple, release)?;
     let output = out.join(match cross {
-        Some(c) => c.program().to_string(),
-        None => format!("game{}", std::env::consts::EXE_SUFFIX),
+        Some(c) => c.program(&crate::progname::stem()),
+        None => crate::progname::program(),
     });
     let row = ui.row("");
     ui.begin(row, "compile");
@@ -852,7 +852,7 @@ fn compile(
     }
     let pools = crate::build::memory_pools(&mut compiles, jobs);
     let libs: Vec<String> = if let Some(c) = cross {
-        c.libs()
+        c.libs(&crate::progname::stem())
     } else if cfg!(windows) {
         [
             "-lpthread",

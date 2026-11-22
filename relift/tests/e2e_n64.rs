@@ -108,7 +108,7 @@ fn build(
         return None;
     }
     let root = tiny::scratch(name);
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("rom.z64");
     relift_cache::write_if_changed(&image, rom).expect("the ROM is writable");
@@ -126,7 +126,7 @@ fn build(
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
-    let host = root.join("cache/projects/game/build/host");
+    let host = root.join("cache/projects/sample/build/host");
     Some((root, host))
 }
 
@@ -135,10 +135,10 @@ fn build(
 fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)> {
     let (root, host) = build(name, rom, &[])?;
     let dump = root.join("dump").display().to_string();
-    let out = relift_proc::command(host.join("game"))
+    let out = relift_proc::command(host.join("sample"))
         .args(["--headless", "--frames", "3", "--stats", "--dump", &dump])
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "{stdout}{err}");
@@ -148,11 +148,11 @@ fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)>
 /// Runs the built game headless for 3 frames with the call trace asked for
 /// at `trace`; whether the run succeeded.
 fn run_traced(host: &std::path::Path, trace: &std::path::Path) -> bool {
-    relift_proc::command(host.join("game"))
+    relift_proc::command(host.join("sample"))
         .args(["--headless", "--frames", "3"])
         .env("RELIFT_N64_TRACE", trace)
         .output()
-        .expect("the game runs")
+        .expect("the program runs")
         .status
         .success()
 }
@@ -389,10 +389,10 @@ fn the_rdp_and_vi_draw_the_picture_ares_draws() {
     let Some((_root, host)) = build("e2e-n64-vi", &vi_rom(), &[]) else {
         return;
     };
-    let out = relift_proc::command(host.join("game"))
+    let out = relift_proc::command(host.join("sample"))
         .args(["--headless", "--no-audio", "--frames", "40", "--stats"])
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stdout}{err}");

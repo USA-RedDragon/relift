@@ -119,7 +119,7 @@ fn run_and_compare(check: &Path, root: &Path, rom: &Path, flag: Option<&str>) {
 /// Lifts and runs rom under root until the debug port prints `end`; returns
 /// the file of its result lines.
 fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let cache = root.join("cache").display().to_string();
     let out = tiny::relift(
@@ -134,8 +134,8 @@ fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
     ok(&out, "relift build --dev");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
-    let host = root.join("cache/projects/game/build/host");
-    let out = relift_proc::command(host.join("game"))
+    let host = root.join("cache/projects/sample/build/host");
+    let out = relift_proc::command(host.join("sample"))
         .args([
             "--headless",
             "--max-ticks",
@@ -144,7 +144,7 @@ fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
             end,
         ])
         .output()
-        .expect("the game runs");
+        .expect("the program runs");
     ok(&out, "the test ROM");
     let csv: String = String::from_utf8_lossy(&out.stdout)
         .lines()

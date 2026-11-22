@@ -67,7 +67,7 @@ fn built(
     (trampoline, cold, dev): (bool, bool, bool),
     sysroot: Option<&str>,
 ) -> (std::path::PathBuf, String) {
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = program.display().to_string();
     let mut args = vec!["--cache-dir", cache, "import"];
@@ -105,8 +105,8 @@ fn built(
         "{stderr}"
     );
     let exe = Path::new(cache)
-        .join("projects/game/build/host")
-        .join(format!("game{}", std::env::consts::EXE_SUFFIX));
+        .join("projects/sample/build/host")
+        .join(format!("sample{}", std::env::consts::EXE_SUFFIX));
     (exe, stderr.into_owned())
 }
 
@@ -186,6 +186,60 @@ fn a_hand_assembled_program_builds_and_exits_with_its_status() {
 }
 
 #[test]
+fn the_program_is_named_after_the_project() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let root = tiny::scratch("e2e-linux-name");
+    let elf = root.join("hello");
+    std::fs::create_dir_all(&root).expect("the scratch dir is creatable");
+    relift_cache::write_if_changed(&elf, &program()).expect("the program is writable");
+    let cache = root.join("cache").display().to_string();
+    let project = root.join("Nameless Folder");
+    std::fs::create_dir_all(&project).expect("the project dir is creatable");
+    let image = elf.display().to_string();
+    let exe = |dir: &str| {
+        root.join("cache/projects")
+            .join(dir)
+            .join("build/host")
+            .join(format!("{}{}", dir_slug(dir), std::env::consts::EXE_SUFFIX))
+    };
+    let run = |args: &[&str]| {
+        let out = tiny::relift(&project, args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run(&["--cache-dir", &cache, "import", &image]);
+    run(&["--cache-dir", &cache, "-j", "4", "build"]);
+    assert!(
+        exe("Nameless Folder").is_file(),
+        "a nameless project takes its folder's name"
+    );
+    let manifest = project.join("game.toml");
+    let text = std::fs::read_to_string(&manifest).expect("game.toml reads");
+    let text = text.replacen("[game]\n", "[game]\nname = \"Example Project 2\"\n", 1);
+    relift_cache::write_if_changed(&manifest, text.as_bytes()).expect("game.toml writes");
+    run(&["--cache-dir", &cache, "-j", "4", "build"]);
+    let named = root
+        .join("cache/projects/Nameless Folder/build/host")
+        .join(format!("example-project-2{}", std::env::consts::EXE_SUFFIX));
+    assert!(named.is_file(), "the manifest's name names the program");
+    let out = relift_proc::command(&named)
+        .output()
+        .expect("the program runs");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "hello\n");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+fn dir_slug(dir: &str) -> String {
+    dir.to_lowercase().replace(' ', "-")
+}
+
+#[test]
 fn corpus_programs_print_what_they_printed_on_arm64_linux() {
     let have = |t: &str| relift_build::find_tool(t).is_some();
     if !have("clang") || !have("zig") {
@@ -256,7 +310,7 @@ fn corpus_programs_print_what_they_printed_on_arm64_linux() {
 /// build did not link: each change of the lifted C keys new ones, and CI
 /// saves the folder whole, so without this it would grow by every version.
 fn prune_lifted(kept: &Path) {
-    let ninja = std::fs::read_to_string(kept.join("projects/game/build/host/build.ninja"))
+    let ninja = std::fs::read_to_string(kept.join("projects/sample/build/host/build.ninja"))
         .expect("the build wrote build.ninja");
     let Ok(entries) = std::fs::read_dir(kept.join("linux-runtime-lifted")) else {
         return;
@@ -317,7 +371,7 @@ fn dynamic_corpus_programs_print_what_they_printed_on_arm64_linux() {
     let cache = kept.display().to_string();
     {
         let (name, modes) = ("shared_lib.dyn", (false, false, true));
-        let _ = std::fs::remove_dir_all(root.join("game"));
+        let _ = std::fs::remove_dir_all(root.join("sample"));
         let _ = std::fs::remove_dir_all(kept.join("projects"));
         let (exe, _) = built(&root, &programs.join(name), &cache, modes, Some(&sysroot));
         prune_lifted(&kept);

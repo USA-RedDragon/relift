@@ -27,10 +27,10 @@ fn run(name: &str, wild: bool) -> Option<std::process::Output> {
         String::from_utf8_lossy(&out.stderr)
     );
     Some(
-        relift_proc::command(root.join("cache/projects/tiny/build/host/game"))
+        relift_proc::command(root.join("cache/projects/tiny/build/host/tiny"))
             .current_dir(&project)
             .output()
-            .expect("the game runs"),
+            .expect("the program runs"),
     )
 }
 

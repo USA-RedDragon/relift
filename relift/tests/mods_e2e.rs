@@ -63,12 +63,12 @@ impl Project {
     }
 
     fn run(&self, args: &[&str]) -> String {
-        let exe = self.root.join("cache/projects/tiny/build/host/game");
+        let exe = self.root.join("cache/projects/tiny/build/host/tiny");
         let out = relift_proc::command(&exe)
             .args(args)
             .current_dir(&self.dir)
             .output()
-            .expect("the game runs");
+            .expect("the program runs");
         assert!(
             out.status.success(),
             "{}",

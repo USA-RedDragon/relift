@@ -36,7 +36,8 @@ public class GpuProbe extends Service {
         new Thread(() -> {
             String r;
             try {
-                System.loadLibrary("main");
+                String name = Ui.metaString(this, "relift.library");
+                System.loadLibrary(name.isEmpty() ? "main" : name);
                 r = nativeProbe(dir, lib);
             } catch (Throwable t) {
                 r = "error\n" + t;

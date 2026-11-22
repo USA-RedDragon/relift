@@ -54,11 +54,11 @@ fn build(name: &str, leaf: bool, corrupt: bool, svcs: &[u32], console: Option<&s
 }
 
 fn run(root: &Path, pac: &str) -> Output {
-    relift_proc::command(root.join("cache/projects/tiny/build/host/game"))
+    relift_proc::command(root.join("cache/projects/tiny/build/host/tiny"))
         .current_dir(root.join("tiny"))
         .env("RELIFT_PAC", pac)
         .output()
-        .expect("the game runs")
+        .expect("the program runs")
 }
 
 fn passes(name: &str, leaf: bool, svcs: &[u32], console: Option<&str>) {

@@ -68,7 +68,7 @@ fn a_trace_builds_and_the_program_runs_with_sound() {
         return;
     }
     let root = tiny::scratch("e2e-sms");
-    let project = root.join("game");
+    let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let image = root.join("tone.sms");
     relift_cache::write_if_changed(&image, &rom()).expect("the ROM is writable");
@@ -100,9 +100,9 @@ fn a_trace_builds_and_the_program_runs_with_sound() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
-    let host = root.join("cache/projects/game/build/host");
+    let host = root.join("cache/projects/sample/build/host");
     let ram = root.join("ram.bin").display().to_string();
-    let out = relift_proc::command(host.join("game"))
+    let out = relift_proc::command(host.join("sample"))
         .args(["--headless", "--frames", "30", "--dump-ram", &ram])
         .env("RELIFT_REPORT_DIR", &root)
         .output()
