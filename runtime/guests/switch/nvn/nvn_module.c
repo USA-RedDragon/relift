@@ -18,6 +18,54 @@ typedef struct spv_var {
     bool has_set, has_binding, has_location;
 } spv_var;
 
+bool nvn_spirv_stores(const uint32_t *w, size_t n)
+{
+    if (n < 5 || w[0] != 0x07230203)
+        return false;
+    uint32_t bound = w[3];
+    uint32_t *cls = calloc(bound, sizeof *cls), *type = calloc(bound, sizeof *type), *root = calloc(bound, sizeof *root);
+    uint8_t *set3 = calloc(bound, 1), *bind2 = calloc(bound, 1);
+    bool stores = !cls || !type || !root || !set3 || !bind2;
+    for (size_t i = 5; !stores && i < n;) {
+        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
+        if (!len || i + len > n)
+            break;
+        if (op == 32 && len >= 4 && w[i + 1] < bound) {
+            cls[w[i + 1]] = w[i + 2] + 1u;
+        } else if (op == 71 && len >= 4 && w[i + 1] < bound) {
+            if (w[i + 2] == 34 && w[i + 3] == NVN_MESH_BUFFER_SET)
+                set3[w[i + 1]] = 1;
+            else if (w[i + 2] == 33 && w[i + 3] == NVN_MESH_BUFFER_BINDING)
+                bind2[w[i + 1]] = 1;
+        } else if (op >= 54 && (op < 71 || op > 75) && op != 332 && op != 5632 && op != 5633 && len >= 3 &&
+                   w[i + 1] < bound && w[i + 2] < bound && cls[w[i + 1]]) {
+            uint32_t id = w[i + 2];
+            type[id] = w[i + 1];
+            root[id] = (op == 65 || op == 66 || op == 67 || op == 70 || op == 83 || op == 124) && len >= 4 &&
+                               w[i + 3] < bound && root[w[i + 3]]
+                           ? root[w[i + 3]]
+                           : id;
+        }
+        uint32_t ptr = 0;
+        if ((op == 62 || op == 63 || op == 64 || op == 228) && len >= 2)
+            ptr = w[i + 1];
+        else if (((op >= 229 && op <= 242) || op == 5614 || op == 5615 || op == 6035) && len >= 4)
+            ptr = w[i + 3];
+        if (ptr && ptr < bound && type[ptr] && type[ptr] < bound) {
+            uint32_t c = cls[type[ptr]] - 1u, r = root[ptr];
+            bool mesh = r && r < bound && set3[r] && bind2[r];
+            stores = (c == 5349 || c == 12 || c == 2) && !mesh;
+        }
+        i += len;
+    }
+    free(cls);
+    free(type);
+    free(root);
+    free(set3);
+    free(bind2);
+    return stores;
+}
+
 /** @brief Reads which banks, inputs and sets words (n of them) uses, and moves its bindings for stage. */
 static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
 {
@@ -72,6 +120,7 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
         }
         i += len;
     }
+    m->stores_guest = nvn_spirv_stores(w, n);
     for (uint32_t id = 0; id < bound; id++) {
         if (v[id].storage == 2 && v[id].has_location && v[id].location < 32)
             m->inputs |= 1u << v[id].location;

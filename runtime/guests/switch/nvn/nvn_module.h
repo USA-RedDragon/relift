@@ -33,6 +33,8 @@ typedef struct nvn_module {
     bool mesh_buffer;
     /** @brief Its translation stores through 64-bit global addresses (NVN_IFACE_GLOBAL_STORE). */
     bool global_store;
+    /** @brief The program stores to guest memory: nvn_spirv_stores of its SPIR-V. */
+    bool stores_guest;
     /** @brief Output locations the program declares (a vertex program's varyings). */
     uint32_t outputs;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
@@ -55,6 +57,14 @@ typedef struct nvn_module {
  * has none.
  */
 bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage);
+
+/**
+ * @brief Whether the SPIR-V w (n words) can write guest memory: a store, a memory copy or an atomic that writes,
+ * through a pointer of the PhysicalStorageBuffer, StorageBuffer or Uniform storage class, except into the compute
+ * back end's mesh buffer (the layer's own). Image writes go to host images, not guest memory. True when memory runs
+ * out, so a program is only ever taken as read-only when it is.
+ */
+bool nvn_spirv_stores(const uint32_t *w, size_t n);
 
 /**
  * @brief The module of the program with key, made from the build's shader
