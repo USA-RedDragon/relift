@@ -2076,6 +2076,31 @@ static vimg *image_of(replay *r, uint64_t tex)
     return image_of_desc(r, d, tex);
 }
 
+#define IMAGE_BUCKETS 8192u
+
+/** @brief The host images by storage address: heads and links of index chains in g.images order, as of epoch. */
+static struct {
+    uint32_t head[IMAGE_BUCKETS], next[MAX_IMAGES];
+    uint64_t epoch;
+} by_storage;
+
+static uint32_t storage_bucket(uint64_t storage) { return (uint32_t)((storage >> 8) * 0x9E3779B97F4A7C15ull >> 51); }
+
+/** @brief The first host image (in g.images order) over storage, linked to the next by by_storage.next; index+1, 0 for none. */
+static uint32_t first_at(uint64_t storage)
+{
+    if (by_storage.epoch != g.image_epoch) {
+        memset(by_storage.head, 0, sizeof by_storage.head);
+        for (uint32_t i = g.nimages; i-- > 0;) {
+            uint32_t b = storage_bucket(g.images[i]->storage);
+            by_storage.next[i] = by_storage.head[b];
+            by_storage.head[b] = i + 1;
+        }
+        by_storage.epoch = g.image_epoch;
+    }
+    return by_storage.head[storage_bucket(storage)];
+}
+
 /**
  * @brief The host image of the texture d describes over its storage, made and filled from the storage the first
  * time; tex names the texture it came from in reports.
@@ -2090,8 +2115,8 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
                        (unsigned long long)tex, (unsigned long long)d->pool);
         return NULL;
     }
-    for (uint32_t i = 0; i < g.nimages; i++) {
-        vimg *v = g.images[i];
+    for (uint32_t k = first_at(storage); k; k = by_storage.next[k - 1]) {
+        vimg *v = g.images[k - 1];
         if (v->storage != storage)
             continue;
         if (v->d.format == d->format && v->d.width == d->width && v->d.height == d->height &&
