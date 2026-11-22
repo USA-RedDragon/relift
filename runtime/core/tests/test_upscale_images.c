@@ -550,7 +550,7 @@ TEST(upscale_dlss_where_it_cannot_run_runs_its_fallback)
     CHECK_EQ(b, e);
 }
 
-TEST(upscale_auto_on_a_cpu_device_runs_taa)
+TEST(upscale_auto_runs_the_choice_for_its_device_class)
 {
     if (!start())
         return;
@@ -559,15 +559,16 @@ TEST(upscale_auto_on_a_cpu_device_runs_taa)
         (PFN_vkGetPhysicalDeviceProperties)gipa(T.inst, "vkGetPhysicalDeviceProperties");
     VkPhysicalDeviceProperties p;
     props(T.phys, &p);
-    if (p.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU) {
-        printf("    (the first Vulkan device is not a CPU one: auto's CPU choice is not checked)\n");
-        return;
-    }
     rl_post_device d = device();
     rl_upscaler *u = rl_upscaler_new(&d, RL_UPSCALE_AUTO, RL_UPSCALE_IMAGES);
     CHECK(u != NULL);
-    if (u)
-        CHECK_EQ(rl_upscaler_choice(u), RL_UPSCALE_TAA);
+    if (u) {
+        uint32_t c = rl_upscaler_choice(u);
+        if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+            CHECK(c == RL_UPSCALE_DLSS || c == RL_UPSCALE_FALLBACK_TEMPORAL);
+        else
+            CHECK_EQ(c, RL_UPSCALE_TAA);
+    }
     rl_upscaler_free(u);
 }
 
