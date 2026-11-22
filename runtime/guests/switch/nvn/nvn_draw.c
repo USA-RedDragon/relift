@@ -1318,8 +1318,6 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
     nvn_counters_end(counted);
-    VK(vkCmdEndRendering)(g.cb);
-    nvn_vk_barrier(g.cb);
     if (nvn_trace_active) {
         nvn_trace_cmd tc = { .mode = mode, .itype = itype, .first = first, .count = count, .base = base, .indexed = indexed };
         for (uint32_t s = 0; s < 5; s++)
@@ -1397,8 +1395,7 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
     dynamic_state(r, area);
     g.draw_mesh_tasks(g.cb, count, 1, 1);
     nvn_counters_end(counted);
-    VK(vkCmdEndRendering)(g.cb);
-    nvn_vk_barrier(g.cb);
+    nvn_vk_end_rendering();
     return RL_OK;
 }
 
@@ -1548,8 +1545,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
         VK(vkCmdDrawIndirect)(g.cb, d.mbuf, 4ull * MESH_H_DRAW, 1, 16);
     }
     nvn_counters_end(counted);
-    VK(vkCmdEndRendering)(g.cb);
-    nvn_vk_barrier(g.cb);
+    nvn_vk_end_rendering();
     return RL_OK;
 }
 

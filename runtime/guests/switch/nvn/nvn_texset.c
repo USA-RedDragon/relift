@@ -672,6 +672,7 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     vimg *v = nvn_vk_image(r, tex);
     if (!v)
         return RL_PENDING;
+    nvn_vk_reading(v);
     if (!nvn_vk_refresh(r, v))
         return nvn_vk_stop(r, "cannot refill texture id %u from its storage", id);
     if (image)

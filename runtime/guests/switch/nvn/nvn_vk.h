@@ -482,8 +482,23 @@ void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs);
 int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
 /** @brief The host format of an NVNformat; VK_FORMAT_UNDEFINED for one the layer does not map. */
 VkFormat nvn_vk_format(uint32_t f, VkImageAspectFlags *aspect);
-/** @brief Begins dynamic rendering on the queue's render targets; area gets their common extent. */
+/**
+ * @brief Begins dynamic rendering on the queue's render targets, or keeps the open pass when it renders to the same
+ * attachments; area gets their common extent.
+ */
 bool nvn_vk_begin_rendering(replay *r, VkRect2D *area);
+/**
+ * @brief Ends the render pass the draws left open, with a barrier on all commands after it; nothing when none is open.
+ * Every command recorded outside a pass ends it first (nvn_vk_begin), as do a submit and the game's barriers.
+ */
+void nvn_vk_end_rendering(void);
+/**
+ * @brief A command about to read v (a texture or image binding of a draw or dispatch): when v is an attachment of
+ * the open render pass, the pass ends with its barrier first, so the read sees what the pass drew.
+ */
+void nvn_vk_reading(const vimg *v);
+/** @brief The game's nvnCommandBufferBarrier: ends the open render pass (with its barrier), else a barrier alone. */
+void nvn_vk_game_barrier(replay *r);
 /** @brief Copies n guest bytes at addr into the arena (zero-filled to pad bytes); offset of the copy in *off. */
 bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
 /**

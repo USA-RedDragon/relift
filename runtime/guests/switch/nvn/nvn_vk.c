@@ -1236,10 +1236,55 @@ void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, 
 
 static bool wait_submitted(void);
 
+/**
+ * @brief The render pass left open after the commands that drew into it, and what it renders to: draws, clears and
+ * mesh draws into the same attachments run in one pass, as the console runs them without anything between them.
+ */
+static struct {
+    bool open;
+    uint32_t ncolor;
+    VkImageView color[MAX_RT], depth;
+    const vimg *images[MAX_RT + 1];
+    bool has_depth, has_stencil;
+    VkRect2D area;
+} open_pass;
+
+void nvn_vk_reading(const vimg *v)
+{
+    if (!open_pass.open || !v)
+        return;
+    for (uint32_t i = 0; i <= MAX_RT; i++)
+        if (open_pass.images[i] == v) {
+            nvn_vk_end_rendering();
+            return;
+        }
+}
+
+void nvn_vk_game_barrier(replay *r)
+{
+    if (!r->recording)
+        return;
+    if (open_pass.open)
+        nvn_vk_end_rendering();
+    else
+        nvn_vk_barrier(g.cb);
+}
+
+void nvn_vk_end_rendering(void)
+{
+    if (!open_pass.open)
+        return;
+    open_pass.open = false;
+    VK(vkCmdEndRendering)(g.cb);
+    nvn_vk_barrier(g.cb);
+}
+
 bool nvn_vk_begin(replay *r)
 {
-    if (r->recording)
+    if (r->recording) {
+        nvn_vk_end_rendering();
         return true;
+    }
     if (!wait_submitted())
         return false;
     VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1316,6 +1361,7 @@ static uint64_t g_submitted, g_finished;
 /** @brief Ends r's command buffer and submits it with g.fence; false (logged) when the device refuses. */
 static bool submit_recorded(replay *r)
 {
+    nvn_vk_end_rendering();
     r->recording = false;
     nvn_counters_close(g.cb);
     if (gpu_ts.pool)
@@ -2159,7 +2205,7 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
 
 /**
  * @brief Begins dynamic rendering on r's render targets, limited to their common extent; with none (a draw that
- * only writes storage images) over the first viewport's size.
+ * only writes storage images) over the first viewport's size. A pass left open on the same attachments goes on.
  */
 bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
 {
@@ -2196,16 +2242,38 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
         h = (uint32_t)v[3];
     }
     bool stencil = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
+    bool depth = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_DEPTH_BIT);
     *area = (VkRect2D){ { 0, 0 }, { w, h } };
+    if (open_pass.open && r->recording && open_pass.ncolor == r->st->ncolor && open_pass.has_depth == depth && open_pass.has_stencil == stencil &&
+        (!(depth || stencil) || open_pass.depth == r->st->depth.view) && open_pass.area.extent.width == w &&
+        open_pass.area.extent.height == h) {
+        bool same = true;
+        for (uint32_t i = 0; i < r->st->ncolor && same; i++)
+            same = open_pass.color[i] == r->st->color[i].view;
+        if (same)
+            return true;
+    }
     VkRenderingInfo ri = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                            .renderArea = *area,
                            .layerCount = 1,
                            .colorAttachmentCount = r->st->ncolor,
                            .pColorAttachments = ca,
-                           .pDepthAttachment = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) ? &da : NULL,
+                           .pDepthAttachment = depth ? &da : NULL,
                            .pStencilAttachment = stencil ? &da : NULL };
     nvn_vk_begin(r);
     VK(vkCmdBeginRendering)(g.cb, &ri);
+    open_pass.open = true;
+    open_pass.ncolor = r->st->ncolor;
+    memset(open_pass.images, 0, sizeof open_pass.images);
+    for (uint32_t i = 0; i < r->st->ncolor; i++) {
+        open_pass.color[i] = r->st->color[i].view;
+        open_pass.images[i] = r->st->color[i].v;
+    }
+    open_pass.images[MAX_RT] = depth || stencil ? r->st->depth.v : NULL;
+    open_pass.depth = depth || stencil ? r->st->depth.view : NULL;
+    open_pass.has_depth = depth;
+    open_pass.has_stencil = stencil;
+    open_pass.area = *area;
     return true;
 }
 
@@ -2277,8 +2345,6 @@ static int clear_color(replay *r, const nvn_cmd *e)
     VkClearRect cr = { .rect = clip(r, area), .layerCount = 1 };
     if (cr.rect.extent.width && cr.rect.extent.height)
         VK(vkCmdClearAttachments)(g.cb, 1, &ca, 1, &cr);
-    VK(vkCmdEndRendering)(g.cb);
-    nvn_vk_barrier(g.cb);
     return RL_OK;
 }
 
@@ -2305,8 +2371,6 @@ static int clear_depth_stencil(replay *r, const nvn_cmd *e)
     VkClearRect cr = { .rect = clip(r, area), .layerCount = 1 };
     if (cr.rect.extent.width && cr.rect.extent.height)
         VK(vkCmdClearAttachments)(g.cb, 1, &ca, 1, &cr);
-    VK(vkCmdEndRendering)(g.cb);
-    nvn_vk_barrier(g.cb);
     return RL_OK;
 }
 
@@ -2666,8 +2730,7 @@ static int clear_texture(replay *r, const nvn_cmd *e)
             cr.rect.extent.height > area.extent.height)
             cr.rect = area;
         VK(vkCmdClearAttachments)(g.cb, 1, &ca, 1, &cr);
-        VK(vkCmdEndRendering)(g.cb);
-        nvn_vk_barrier(g.cb);
+        nvn_vk_end_rendering();
     }
     r->st->ncolor = saved_n;
     r->st->color[0] = saved_color;
@@ -2729,8 +2792,7 @@ static int run_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_EVALUATE_DLSS:
         return nvn_dlss_run(r, e);
     case NVN_CMD_BARRIER:
-        if (r->recording)
-            nvn_vk_barrier(g.cb);
+        nvn_vk_game_barrier(r);
         return RL_OK;
     case NVN_CMD_FENCE_SYNC:
         if (r->nsyncs == sizeof r->syncs / sizeof r->syncs[0])
