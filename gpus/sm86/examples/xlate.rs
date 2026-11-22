@@ -26,6 +26,12 @@ fn main() {
     let b = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("{}: {e}", args[1]));
     let p = relift_gpu_sm86::program::parse(&b);
     let host = match args.get(3) {
+        Some(n) if n.ends_with(".json") => {
+            let text = std::fs::read_to_string(n).unwrap_or_else(|e| panic!("{n}: {e}"));
+            let caps = relift_gpu_nv::translate::DeviceCaps::from_json(&text)
+                .unwrap_or_else(|e| panic!("{n}: {e}"));
+            HostProfile::from_device("device", &caps)
+        }
         Some(n) => HostProfile::preset(n).unwrap_or_else(|| panic!("no host preset {n}")),
         None => HostProfile::default(),
     };
