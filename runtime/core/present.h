@@ -121,5 +121,16 @@ void rl_present_stats_get(rl_present *p, rl_present_stats *out);
  * timeout_ms. Returns a malloc'd buffer the caller frees, or NULL.
  */
 uint8_t *rl_present_capture(rl_present *p, uint32_t timeout_ms, uint32_t *width, uint32_t *height);
+/**
+ * @brief The picture the window shows now, upright (the window's own orientation, whatever turn the swapchain
+ * takes), as RGBA8 rows of *width words; waits at most timeout_ms. A malloc'd buffer the caller frees, or NULL.
+ */
+uint8_t *rl_present_snapshot(rl_present *p, uint32_t timeout_ms, uint32_t *width, uint32_t *height);
+/**
+ * @brief Shows rgb (RGB888, width by height, upright, drawn to fill the window) in place of the guest's frames,
+ * which keep coming and are dropped, until a call with NULL goes back to them. Each call with a picture replaces
+ * the one shown; the presenter copies it.
+ */
+void rl_present_still(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_t height);
 
 #endif

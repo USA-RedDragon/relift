@@ -73,6 +73,11 @@ struct rl_present {
     uint8_t *captured;
     uint32_t cap_w, cap_h;
 
+    uint8_t *still_next, *still;
+    size_t still_next_cap, still_cap;
+    uint32_t still_next_w, still_next_h, still_w, still_h;
+    bool still_on, still_fresh, still_shown;
+
     uint8_t *work;
     size_t work_cap;
     uint32_t work_w, work_h, work_sw, work_sh;
@@ -469,22 +474,27 @@ static int32_t source_format(const rl_present *p)
                                                                       : RLVK_FORMAT_R8G8B8A8_UNORM;
 }
 
-/** @brief Records the frame into swapchain image index: upload, post passes, clear, scale. */
+/** @brief Records the frame into swapchain image index: upload, post passes, clear, scale. A still replaces it. */
 static bool record(rl_present *p, uint32_t index, bool capture)
 {
     const rlvk_dev *d = p->d;
     const uint32_t xfer = RLVK_PIPELINE_STAGE_TRANSFER_BIT;
     const uint32_t wr = RLVK_ACCESS_TRANSFER_WRITE_BIT, rd = RLVK_ACCESS_TRANSFER_READ_BIT;
-    bool gpu = p->cur_slot >= 0;
+    bool still = p->still_shown;
+    const uint8_t *cpu_px = still ? p->still : p->work;
+    uint32_t pw = still ? p->still_w : p->work_w, ph = still ? p->still_h : p->work_h;
+    uint32_t psw = still ? p->still_w : p->work_sw, psh = still ? p->still_h : p->work_sh;
+    bool pfit = still ? false : p->work_fit;
+    bool gpu = !still && p->cur_slot >= 0;
     uint32_t t = gpu ? RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : p->sc_transform;
     bool quarter = (t & QUARTER_TURNS) != 0;
     uint32_t lw = quarter ? p->sc_h : p->sc_w, lh = quarter ? p->sc_w : p->sc_h;
-    uint32_t fw = quarter ? p->work_h : p->work_w, fh = quarter ? p->work_w : p->work_h;
+    uint32_t fw = quarter ? ph : pw, fh = quarter ? pw : ph;
     int32_t src_format = source_format(p);
     rlvk_handle img = 0;
     uint32_t cw = fw, ch = fh;
     bool post = false;
-    if (!p->post_failed && rl_post_gpu_wanted()) {
+    if (!still && !p->post_failed && rl_post_gpu_wanted()) {
         if (!p->post && !(p->post = rl_post_gpu_new()))
             p->post_failed = true;
         post = p->post && rl_post_gpu_plan(p->post, fw, fh, &cw, &ch);
@@ -494,13 +504,15 @@ static bool record(rl_present *p, uint32_t index, bool capture)
         ch = fh;
     }
     rl_present_rect logical, at;
-    rl_present_place(p->work_sw, p->work_sh, lw, lh, rl_post_integer(p->work_fit), &logical);
+    rl_present_place(psw, psh, lw, lh, rl_post_integer(pfit), &logical);
     rl_present_turn(&logical, lw, lh, t, &at);
-    pthread_mutex_lock(&p->lock);
-    p->shown_at = logical;
-    p->shown_fw = p->work_w;
-    p->shown_fh = p->work_h;
-    pthread_mutex_unlock(&p->lock);
+    if (!still) {
+        pthread_mutex_lock(&p->lock);
+        p->shown_at = logical;
+        p->shown_fw = p->work_w;
+        p->shown_fh = p->work_h;
+        pthread_mutex_unlock(&p->lock);
+    }
     int sampling = rl_post_sampling(cw, ch, at.w, at.h);
     bool sharp = sampling == RL_POST_SAMPLE_SHARP;
     uint32_t kx = at.w / cw, ky = at.h / ch;
@@ -518,7 +530,7 @@ static bool record(rl_present *p, uint32_t index, bool capture)
         if (p->stage.size < bytes &&
             !rl_vkdev_buf_make(d, &p->stage, bytes, RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, false))
             return false;
-        pack_turned(p->stage.map, p->work, p->work_w, p->work_h, t);
+        pack_turned(p->stage.map, cpu_px, pw, ph, t);
         rl_vkdev_buf_flush(d, &p->stage);
     }
     rlvk_size cap_bytes = (rlvk_size)p->sc_w * p->sc_h * 4;
@@ -805,8 +817,24 @@ static void *thread_main(void *arg)
         bool moved = __atomic_load_n(&p->win->generation, __ATOMIC_ACQUIRE) != p->gen_seen;
         if (moved)
             p->create_failed = false;
-        bool redo = p->have_frame && (p->stale || moved);
-        if (p->surface_ok && !p->create_failed && (p->fresh || p->capture_want || redo) && (p->fresh || p->have_frame)) {
+        bool redo = (p->have_frame || p->still_shown) && (p->stale || moved);
+        bool still_due = p->still_fresh;
+        if (p->surface_ok && !p->create_failed && (p->fresh || p->capture_want || redo || still_due) &&
+            (p->fresh || p->have_frame || p->still_on || p->still_shown)) {
+            if (still_due) {
+                p->still_fresh = false;
+                if (p->still_on) {
+                    uint8_t *t = p->still;
+                    size_t c = p->still_cap;
+                    p->still = p->still_next;
+                    p->still_cap = p->still_next_cap;
+                    p->still_next = t;
+                    p->still_next_cap = c;
+                    p->still_w = p->still_next_w;
+                    p->still_h = p->still_next_h;
+                }
+                p->still_shown = p->still_on;
+            }
             if (p->fresh) {
                 if (p->cur_slot >= 0)
                     p->release_mask |= 1u << p->cur_slot;
@@ -918,6 +946,8 @@ void rl_present_close(rl_present *p)
     pthread_cond_destroy(&p->cond);
     free(p->next);
     free(p->work);
+    free(p->still);
+    free(p->still_next);
     free(p->captured);
     free(p);
 }
@@ -1091,4 +1121,70 @@ uint8_t *rl_present_capture(rl_present *p, uint32_t timeout_ms, uint32_t *width,
     *height = out ? p->cap_h : 0;
     pthread_mutex_unlock(&p->lock);
     return out;
+}
+
+void rl_present_still(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_t height)
+{
+    if (!p)
+        return;
+    size_t bytes = (size_t)width * height * 3;
+    pthread_mutex_lock(&p->lock);
+    if (rgb && width && height && bytes > p->still_next_cap) {
+        uint8_t *g = realloc(p->still_next, bytes);
+        if (!g) {
+            pthread_mutex_unlock(&p->lock);
+            return;
+        }
+        p->still_next = g;
+        p->still_next_cap = bytes;
+    }
+    p->still_on = rgb && width && height;
+    if (p->still_on) {
+        memcpy(p->still_next, rgb, bytes);
+        p->still_next_w = width;
+        p->still_next_h = height;
+    }
+    p->still_fresh = true;
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
+uint8_t *rl_present_snapshot(rl_present *p, uint32_t timeout_ms, uint32_t *width, uint32_t *height)
+{
+    uint32_t cw = 0, ch = 0;
+    uint8_t *img = rl_present_capture(p, timeout_ms, &cw, &ch);
+    *width = *height = 0;
+    if (!img)
+        return NULL;
+    pthread_mutex_lock(&p->lock);
+    uint32_t t = p->cur_slot >= 0 && !p->still_shown ? RLVK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : p->sc_transform;
+    pthread_mutex_unlock(&p->lock);
+    bool quarter = (t & QUARTER_TURNS) != 0;
+    uint32_t lw = quarter ? ch : cw, lh = quarter ? cw : ch;
+    if (!(t & (QUARTER_TURNS | RLVK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR))) {
+        *width = cw;
+        *height = ch;
+        return img;
+    }
+    uint32_t *out = malloc((size_t)lw * lh * 4);
+    if (!out) {
+        free(img);
+        return NULL;
+    }
+    const uint32_t *in = (const uint32_t *)(void *)img;
+    for (uint32_t y = 0; y < lh; y++)
+        for (uint32_t x = 0; x < lw; x++) {
+            size_t at;
+            if (t & RLVK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR)
+                at = (size_t)x * lh + (lh - 1 - y);
+            else if (t & RLVK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
+                at = (size_t)(lw - 1 - x) * lh + y;
+            else
+                at = (size_t)(lh - 1 - y) * lw + (lw - 1 - x);
+            out[(size_t)y * lw + x] = in[at];
+        }
+    free(img);
+    *width = lw;
+    *height = lh;
+    return (uint8_t *)out;
 }
