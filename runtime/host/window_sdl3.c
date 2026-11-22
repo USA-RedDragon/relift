@@ -1028,19 +1028,42 @@ static void do_present(void *p)
     SDL_RenderPresent(w->r);
 }
 
+/** @brief Where the on-screen controller puts the picture, while it is in use. */
+static bool pad_place(void *user, int32_t rect[4])
+{
+    (void)user;
+    if (!rl_touchpad_wanted())
+        return false;
+    rl_touchpad_picture(rect);
+    return true;
+}
+
+/** @brief The on-screen controller's overlay, its time moved on first; NULL while it is not in use. */
+static const uint8_t *pad_pixels(void *user, uint64_t now_ns, uint32_t *width, uint32_t *height, int32_t dirty[4])
+{
+    (void)user;
+    if (!rl_touchpad_wanted())
+        return NULL;
+    rl_touchpad_tick(now_ns);
+    return rl_touchpad_pixels(width, height, dirty);
+}
+
 /**
- * @brief The window's presenter, opened with the first ask unless the on-screen controller is in use (its overlay is
- * still drawn by the SDL renderer) or the host has no Vulkan device with swapchains (the renderer shows the frames).
+ * @brief The window's presenter, opened with the first ask unless the host has no Vulkan device with swapchains (the
+ * renderer shows the frames). The on-screen controller is the presenter's overlay, drawn over the picture on the GPU.
  */
 static rl_present *sdl_presenter(rl_window *h)
 {
     sdl_win *w = (sdl_win *)h;
     if (!w->pres_tried) {
         w->pres_tried = true;
-        if (g_exts && !rl_touchpad_wanted()) {
+        if (g_exts) {
             w->pres = rl_present_open(h);
-            if (w->pres)
+            if (w->pres) {
                 rl_present_set_fit(w->pres, w->fit);
+                rl_present_overlay ov = { .place = pad_place, .pixels = pad_pixels };
+                rl_present_set_overlay(w->pres, &ov);
+            }
         }
     }
     return w->pres;

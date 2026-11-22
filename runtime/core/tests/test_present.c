@@ -242,9 +242,6 @@ static uint8_t *diagonal(uint32_t w, uint32_t h)
     return rgb;
 }
 
-static int body(void *arg)
-{
-    int *failures = arg;
 #define EXPECT(c)                                                                                                    \
     do {                                                                                                             \
         if (!(c)) {                                                                                                  \
@@ -252,6 +249,108 @@ static int body(void *arg)
             (*failures)++;                                                                                           \
         }                                                                                                            \
     } while (0)
+
+/** @brief The test overlay: where it puts the picture and its pixels, the view's size, changed by the test. */
+static uint8_t *g_ov;
+static int32_t g_ov_place[4] = { 10, 20, 100, 50 };
+static uint32_t g_ov_ver, g_ov_seen;
+
+static bool ov_place(void *user, int32_t rect[4])
+{
+    (void)user;
+    memcpy(rect, g_ov_place, sizeof g_ov_place);
+    return true;
+}
+
+static const uint8_t *ov_pixels(void *user, uint64_t now_ns, uint32_t *width, uint32_t *height, int32_t dirty[4])
+{
+    (void)user;
+    (void)now_ns;
+    *width = g_w;
+    *height = g_h;
+    uint32_t v = __atomic_load_n(&g_ov_ver, __ATOMIC_ACQUIRE);
+    bool changed = v != g_ov_seen;
+    g_ov_seen = v;
+    dirty[0] = dirty[1] = 0;
+    dirty[2] = changed ? (int32_t)g_w : 0;
+    dirty[3] = changed ? (int32_t)g_h : 0;
+    return g_ov;
+}
+
+/** @brief Paints the test overlay: a half-covering red block over the picture's corner and an opaque blue square. */
+static void ov_paint(uint32_t blue_x)
+{
+    memset(g_ov, 0, (size_t)g_w * g_h * 4);
+    for (uint32_t y = 0; y < 30; y++)
+        for (uint32_t x = 0; x < 50; x++)
+            memcpy(g_ov + ((size_t)y * g_w + x) * 4, (const uint8_t[4]){ 64, 0, 0, 128 }, 4);
+    for (uint32_t y = 150; y < 160; y++)
+        for (uint32_t x = blue_x; x < blue_x + 10; x++)
+            memcpy(g_ov + ((size_t)y * g_w + x) * 4, (const uint8_t[4]){ 0, 0, 255, 255 }, 4);
+    __atomic_add_fetch(&g_ov_ver, 1, __ATOMIC_RELEASE);
+}
+
+static uint32_t word(const uint8_t *rgb) { return (uint32_t)rgb[0] | (uint32_t)rgb[1] << 8 | (uint32_t)rgb[2] << 16; }
+
+/** @brief Whether a captured pixel is the overlay's blend over the frame color rgb (RGB only). */
+static bool blended(const uint8_t *got, const uint8_t *rgb, uint32_t x, uint32_t y)
+{
+    uint32_t want = rl_present_overlay_blend(word(rgb), *(const uint32_t *)(g_ov + ((size_t)y * g_w + x) * 4));
+    const uint8_t w8[3] = { (uint8_t)want, (uint8_t)(want >> 8), (uint8_t)(want >> 16) };
+    return same(got, w8);
+}
+
+/** @brief The overlay on a presenter: placed picture, blended corner, opaque square, a change shown with no new frame. */
+static void overlay_checks(rl_present *p, int *failures)
+{
+    g_ov = calloc((size_t)g_w * g_h, 4);
+    if (!g_ov)
+        return;
+    ov_paint(200);
+    rl_present_overlay ov = { .place = ov_place, .pixels = ov_pixels };
+    rl_present_set_overlay(p, &ov);
+    rl_settings_set("picture.filter", "integer");
+    uint32_t w = 0, h = 0, sw = 0, sh = 0;
+    uint8_t *cpu = capture(p, &w, &h);
+    uint8_t *gpu = capture_slot(p, g_frame, 4, 2, &sw, &sh);
+    EXPECT(cpu && gpu && w == g_w && h == g_h && sw == w && sh == h);
+    static const uint8_t black[3] = { 0, 0, 0 }, blue[3] = { 0, 0, 255 };
+    for (int i = 0; i < 2 && cpu && gpu && w == g_w && h == g_h; i++) {
+        const uint8_t *img = i ? gpu : cpu;
+        EXPECT(same(px(img, w, 12, 35), &g_frame[0]));
+        EXPECT(same(px(img, w, 108, 68), &g_frame[21]));
+        EXPECT(same(px(img, w, 120, 45), black));
+        EXPECT(blended(px(img, w, 5, 5), black, 5, 5));
+        EXPECT(blended(px(img, w, 30, 25), &g_frame[0], 30, 25));
+        EXPECT(!same(px(img, w, 30, 25), &g_frame[0]));
+        EXPECT(same(px(img, w, 205, 155), blue));
+    }
+    if (cpu && gpu && sw == w && sh == h)
+        EXPECT(!memcmp(cpu, gpu, (size_t)w * h * 4));
+    free(cpu);
+    free(gpu);
+    rl_present_stats before, now;
+    rl_present_stats_get(p, &before);
+    ov_paint(250);
+    for (int i = 0; i < 100; i++) {
+        usleep(10000);
+        rl_present_stats_get(p, &now);
+        if (now.presented > before.presented)
+            break;
+    }
+    EXPECT(now.presented > before.presented);
+    uint8_t *moved = rl_present_snapshot(p, 5000, &w, &h);
+    EXPECT(moved && w == g_w && same(px(moved, w, 255, 155), blue));
+    EXPECT(moved && w == g_w && same(px(moved, w, 205, 155), black));
+    free(moved);
+    rl_present_set_overlay(p, NULL);
+    free(g_ov);
+    g_ov = NULL;
+}
+
+static int body(void *arg)
+{
+    int *failures = arg;
     rl_present *p = rl_present_open(&g_win);
     if (!p) {
         printf("    (no Vulkan with headless surfaces: the swapchain is not run)\n");
@@ -343,6 +442,8 @@ static int body(void *arg)
     free(plain);
     free(aa_cpu);
     free(aa_gpu);
+
+    overlay_checks(p, failures);
 
     rl_present_slot s[4];
     uint32_t got = 0;

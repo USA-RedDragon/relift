@@ -15,6 +15,7 @@
 #include <relift/post.h>
 
 #include "core.h"
+#include "post_data.h"
 #include "postgpu.h"
 #include "vkdev.h"
 
@@ -26,6 +27,8 @@
 #define MAX_IMAGES 8
 #define SLOTS 3
 #define IDLE_WAIT_MS 250
+/** @brief How often an overlay is asked for changes while no frame comes (the pause sheet over a paused game). */
+#define OVERLAY_POLL_MS 16
 #define SLOT_WAIT_MS 1000
 #define STATS_EVERY_NS 10000000000ull
 #define QUARTER_TURNS (RLVK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | RLVK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
@@ -94,7 +97,25 @@ struct rl_present {
     rlvk_buf stage, readback;
     image src, pre;
     uint64_t last_present_ns, last_log_ns;
+
+    /** @brief The window's overlay (rl_present_set_overlay) and what its last pixels call gave. */
+    rl_present_overlay ov;
+    bool ov_on, ov_due, ov_upload_all;
+    const uint8_t *ov_px;
+    uint32_t ov_w, ov_h;
+    /** @brief The rows changed since the last upload, first and one past the last. */
+    uint32_t ov_y0, ov_y1;
+    /** @brief The blend pass: the frame image and buffer, the overlay buffer, the pipeline and its set. */
+    image frame;
+    rlvk_buf ov_buf, fr_buf;
+    rlvk_handle ov_set_layout, ov_layout, ov_pipe, ov_dpool, ov_set, ov_bound_fr, ov_bound_ov;
+    bool ov_failed;
 };
+
+/** @brief The blend pass's push constants (overlay.comp). */
+typedef struct ov_params {
+    uint32_t width, height, view_w, view_h, over_w, over_h, turn, swap_rb;
+} ov_params;
 
 static bool fail(const char *what, rlvk_result r)
 {
@@ -472,6 +493,231 @@ static int32_t source_format(const rl_present *p)
                                                                       : RLVK_FORMAT_R8G8B8A8_UNORM;
 }
 
+uint32_t rl_present_overlay_blend(uint32_t frame, uint32_t over)
+{
+    uint32_t a = over >> 24;
+    if (a == 255)
+        return over | 0xff000000u;
+    if (!over)
+        return frame | 0xff000000u;
+    uint32_t k = 255 - a, r = 0;
+    for (uint32_t s = 0; s < 24; s += 8) {
+        uint32_t c = ((over >> s) & 255) + (((frame >> s) & 255) * k + 127) / 255;
+        r |= (c > 255 ? 255 : c) << s;
+    }
+    return r | 0xff000000u;
+}
+
+/** @brief Makes the blend pass's pipeline (overlay.comp) and its descriptor set, once; false (logged) when it cannot. */
+static bool ov_pipeline(rl_present *p)
+{
+    if (p->ov_pipe)
+        return true;
+    const rlvk_dev *d = p->d;
+    rlvk_descriptor_set_layout_binding bind[2];
+    for (uint32_t i = 0; i < 2; i++)
+        bind[i] = (rlvk_descriptor_set_layout_binding){
+            .binding = i,
+            .descriptorType = RLVK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = RLVK_SHADER_STAGE_COMPUTE_BIT,
+        };
+    rlvk_descriptor_set_layout_create_info sl = {
+        .sType = RLVK_ST_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2,
+        .pBindings = bind,
+    };
+    rlvk_result r = d->vkCreateDescriptorSetLayout(d->device, &sl, NULL, &p->ov_set_layout);
+    if (r != RLVK_SUCCESS)
+        return fail("overlay vkCreateDescriptorSetLayout", r);
+    rlvk_push_constant_range pcr = { .stageFlags = RLVK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(ov_params) };
+    rlvk_pipeline_layout_create_info pl = {
+        .sType = RLVK_ST_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &p->ov_set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pcr,
+    };
+    if ((r = d->vkCreatePipelineLayout(d->device, &pl, NULL, &p->ov_layout)) != RLVK_SUCCESS)
+        return fail("overlay vkCreatePipelineLayout", r);
+    rlvk_shader_module_create_info sm = {
+        .sType = RLVK_ST_SHADER_MODULE_CREATE_INFO,
+        .codeSize = sizeof rl_post_spv_overlay,
+        .pCode = rl_post_spv_overlay,
+    };
+    rlvk_handle module = 0;
+    if ((r = d->vkCreateShaderModule(d->device, &sm, NULL, &module)) != RLVK_SUCCESS)
+        return fail("overlay vkCreateShaderModule", r);
+    rlvk_compute_pipeline_create_info cp = {
+        .sType = RLVK_ST_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = {
+            .sType = RLVK_ST_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = RLVK_SHADER_STAGE_COMPUTE_BIT,
+            .module = module,
+            .pName = "main",
+        },
+        .layout = p->ov_layout,
+        .basePipelineIndex = -1,
+    };
+    r = d->vkCreateComputePipelines(d->device, 0, 1, &cp, NULL, &p->ov_pipe);
+    d->vkDestroyShaderModule(d->device, module, NULL);
+    if (r != RLVK_SUCCESS) {
+        p->ov_pipe = 0;
+        return fail("overlay vkCreateComputePipelines", r);
+    }
+    rlvk_descriptor_pool_size ps = { .type = RLVK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2 };
+    rlvk_descriptor_pool_create_info dp = {
+        .sType = RLVK_ST_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = &ps,
+    };
+    if ((r = d->vkCreateDescriptorPool(d->device, &dp, NULL, &p->ov_dpool)) != RLVK_SUCCESS)
+        return fail("overlay vkCreateDescriptorPool", r);
+    rlvk_descriptor_set_allocate_info da = {
+        .sType = RLVK_ST_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = p->ov_dpool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &p->ov_set_layout,
+    };
+    if ((r = d->vkAllocateDescriptorSets(d->device, &da, &p->ov_set)) != RLVK_SUCCESS)
+        return fail("overlay vkAllocateDescriptorSets", r);
+    return true;
+}
+
+/**
+ * @brief Readies the blend pass for a w by h swapchain image (after the frame fence): the pipeline, the frame image
+ * and buffer, and the overlay buffer with the rows that changed copied in. False when the pass cannot run, which
+ * leaves the frame without its overlay (logged once).
+ */
+static bool ov_ready(rl_present *p, uint32_t w, uint32_t h, int32_t format)
+{
+    const rlvk_dev *d = p->d;
+    if (p->ov_failed)
+        return false;
+    rlvk_size fbytes = (rlvk_size)w * h * 4, obytes = (rlvk_size)p->ov_w * p->ov_h * 4;
+    bool ok = ov_pipeline(p) && image_make(p, &p->frame, w, h, format);
+    if (ok && p->fr_buf.size < fbytes) {
+        rl_vkdev_buf_free(d, &p->fr_buf);
+        ok = rl_vkdev_buf_make(d, &p->fr_buf, fbytes,
+                               RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT | RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                   RLVK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                               false, false);
+    }
+    if (ok && p->ov_buf.size < obytes) {
+        rl_vkdev_buf_free(d, &p->ov_buf);
+        ok = rl_vkdev_buf_make(d, &p->ov_buf, obytes, RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, false);
+        p->ov_upload_all = true;
+    }
+    if (!ok) {
+        p->ov_failed = true;
+        rl_log(RL_LOG_WARN, "present", "the overlay pass is off: frames show without the on-screen controller");
+        return false;
+    }
+    uint32_t y0 = p->ov_upload_all ? 0 : p->ov_y0, y1 = p->ov_upload_all ? p->ov_h : p->ov_y1;
+    if (y1 > p->ov_h)
+        y1 = p->ov_h;
+    if (y0 < y1) {
+        size_t row = (size_t)p->ov_w * 4;
+        memcpy((uint8_t *)p->ov_buf.map + y0 * row, p->ov_px + y0 * row, (y1 - y0) * row);
+        rl_vkdev_buf_flush(d, &p->ov_buf);
+    }
+    p->ov_upload_all = false;
+    p->ov_y0 = p->ov_y1 = 0;
+    if (p->ov_bound_fr != p->fr_buf.buffer || p->ov_bound_ov != p->ov_buf.buffer) {
+        rlvk_descriptor_buffer_info info[2] = {
+            { .buffer = p->fr_buf.buffer, .range = p->fr_buf.size },
+            { .buffer = p->ov_buf.buffer, .range = p->ov_buf.size },
+        };
+        rlvk_write_descriptor_set wr[2];
+        for (uint32_t i = 0; i < 2; i++)
+            wr[i] = (rlvk_write_descriptor_set){
+                .sType = RLVK_ST_WRITE_DESCRIPTOR_SET,
+                .dstSet = p->ov_set,
+                .dstBinding = i,
+                .descriptorCount = 1,
+                .descriptorType = RLVK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &info[i],
+            };
+        d->vkUpdateDescriptorSets(d->device, 2, wr, 0, NULL);
+        p->ov_bound_fr = p->fr_buf.buffer;
+        p->ov_bound_ov = p->ov_buf.buffer;
+    }
+    return true;
+}
+
+/** @brief The quarter turns of transform, as overlay.comp counts them. */
+static uint32_t ov_turn(uint32_t transform)
+{
+    if (transform & RLVK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR)
+        return 1;
+    if (transform & RLVK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
+        return 2;
+    if (transform & RLVK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
+        return 3;
+    return 0;
+}
+
+/**
+ * @brief Records the blend pass: the frame image (the picture as it would go to the swapchain, TRANSFER_DST) through
+ * the frame buffer and overlay.comp into swapchain image sc, left in TRANSFER_DST.
+ */
+static void ov_record(rl_present *p, rlvk_handle sc, uint32_t transform, uint32_t lw, uint32_t lh)
+{
+    const rlvk_dev *d = p->d;
+    const uint32_t xfer = RLVK_PIPELINE_STAGE_TRANSFER_BIT, cs = RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    const uint32_t wr = RLVK_ACCESS_TRANSFER_WRITE_BIT, rd = RLVK_ACCESS_TRANSFER_READ_BIT;
+    uint32_t w = p->frame.w, h = p->frame.h;
+    layout(p, p->frame.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd,
+           xfer, xfer);
+    rlvk_buffer_image_copy whole = {
+        .imageSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent = { w, h, 1 },
+    };
+    d->vkCmdCopyImageToBuffer(p->cmd, p->frame.image, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, p->fr_buf.buffer, 1,
+                              &whole);
+    rlvk_memory_barrier mb = { .sType = RLVK_ST_MEMORY_BARRIER,
+                               .srcAccessMask = wr | RLVK_ACCESS_HOST_WRITE_BIT,
+                               .dstAccessMask = RLVK_ACCESS_SHADER_READ_BIT | RLVK_ACCESS_SHADER_WRITE_BIT };
+    d->vkCmdPipelineBarrier(p->cmd, xfer | RLVK_PIPELINE_STAGE_HOST_BIT, cs, 0, 1, &mb, 0, NULL, 0, NULL);
+    int32_t f = p->sc_format;
+    ov_params pc = {
+        .width = w,
+        .height = h,
+        .view_w = lw,
+        .view_h = lh,
+        .over_w = p->ov_w,
+        .over_h = p->ov_h,
+        .turn = ov_turn(transform),
+        .swap_rb = f == RLVK_FORMAT_B8G8R8A8_UNORM || f == RLVK_FORMAT_B8G8R8A8_SRGB,
+    };
+    d->vkCmdBindPipeline(p->cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, p->ov_pipe);
+    d->vkCmdBindDescriptorSets(p->cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, p->ov_layout, 0, 1, &p->ov_set, 0, NULL);
+    d->vkCmdPushConstants(p->cmd, p->ov_layout, RLVK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+    d->vkCmdDispatch(p->cmd, (w + 15) / 16, (h + 15) / 16, 1);
+    mb.srcAccessMask = RLVK_ACCESS_SHADER_WRITE_BIT;
+    mb.dstAccessMask = rd;
+    d->vkCmdPipelineBarrier(p->cmd, cs, xfer, 0, 1, &mb, 0, NULL, 0, NULL);
+    layout(p, sc, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer, xfer);
+    d->vkCmdCopyBufferToImage(p->cmd, p->fr_buf.buffer, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &whole);
+}
+
+void rl_present_set_overlay(rl_present *p, const rl_present_overlay *ov)
+{
+    if (!p)
+        return;
+    pthread_mutex_lock(&p->lock);
+    p->ov_on = ov && ov->pixels;
+    if (p->ov_on)
+        p->ov = *ov;
+    else
+        memset(&p->ov, 0, sizeof p->ov);
+    p->ov_px = NULL;
+    p->ov_due = true;
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
 /** @brief Records the frame into swapchain image index: upload, post passes, clear, scale. A still replaces it. */
 static bool record(rl_present *p, uint32_t index, bool capture)
 {
@@ -502,8 +748,14 @@ static bool record(rl_present *p, uint32_t index, bool capture)
         ch = fh;
     }
     rl_present_rect logical, at;
-    rl_present_place(psw, psh, lw, lh, rl_post_integer(pfit), &logical);
+    int32_t ov_at[4];
+    if (!still && p->ov_on && p->ov.place && p->ov.place(p->ov.user, ov_at) && ov_at[2] > 0 && ov_at[3] > 0 &&
+        ov_at[0] >= 0 && ov_at[1] >= 0 && (uint32_t)(ov_at[0] + ov_at[2]) <= lw && (uint32_t)(ov_at[1] + ov_at[3]) <= lh)
+        logical = (rl_present_rect){ (uint32_t)ov_at[0], (uint32_t)ov_at[1], (uint32_t)ov_at[2], (uint32_t)ov_at[3] };
+    else
+        rl_present_place(psw, psh, lw, lh, rl_post_integer(pfit), &logical);
     rl_present_turn(&logical, lw, lh, t, &at);
+    bool over = !still && p->ov_on && p->ov_px && p->ov_w && p->ov_h && ov_ready(p, p->sc_w, p->sc_h, src_format);
     if (!still) {
         pthread_mutex_lock(&p->lock);
         p->shown_at = logical;
@@ -544,6 +796,7 @@ static bool record(rl_present *p, uint32_t index, bool capture)
     if (r != RLVK_SUCCESS)
         return fail("vkBeginCommandBuffer", r);
     rlvk_handle sc = p->images[index];
+    rlvk_handle dst = over ? p->frame.image : sc;
     if (!gpu) {
         layout(p, p->src.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr,
                RLVK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, xfer);
@@ -577,11 +830,11 @@ static bool record(rl_present *p, uint32_t index, bool capture)
                xfer, xfer);
         img = p->pic.image;
     }
-    layout(p, sc, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer, xfer);
+    layout(p, dst, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer, xfer);
     rlvk_clear_color black = { .float32 = { 0, 0, 0, 1 } };
     rlvk_image_subresource_range all = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    d->vkCmdClearColorImage(p->cmd, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &all);
-    layout(p, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, wr, wr, xfer, xfer);
+    d->vkCmdClearColorImage(p->cmd, dst, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &all);
+    layout(p, dst, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, wr, wr, xfer, xfer);
     if (at.w && at.h) {
         if (sharp) {
             layout(p, p->pre.image, RLVK_IMAGE_LAYOUT_UNDEFINED, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, wr, xfer,
@@ -589,11 +842,16 @@ static bool record(rl_present *p, uint32_t index, bool capture)
             blit(p, img, cw, ch, p->pre.image, 0, 0, p->pre.w, p->pre.h, RLVK_FILTER_NEAREST);
             layout(p, p->pre.image, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr,
                    rd, xfer, xfer);
-            blit(p, p->pre.image, p->pre.w, p->pre.h, sc, at.x, at.y, at.w, at.h, RLVK_FILTER_LINEAR);
+            blit(p, p->pre.image, p->pre.w, p->pre.h, dst, at.x, at.y, at.w, at.h, RLVK_FILTER_LINEAR);
         } else {
-            blit(p, img, cw, ch, sc, at.x, at.y, at.w, at.h,
+            blit(p, img, cw, ch, dst, at.x, at.y, at.w, at.h,
                  sampling == RL_POST_SAMPLE_LINEAR ? RLVK_FILTER_LINEAR : RLVK_FILTER_NEAREST);
         }
+    }
+    if (over) {
+        layout(p, dst, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, wr, wr, xfer,
+               xfer);
+        ov_record(p, sc, t, lw, lh);
     }
     if (capture) {
         layout(p, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, wr, rd, xfer, xfer);
@@ -792,6 +1050,40 @@ static void deadline(struct timespec *t, uint32_t ms)
     }
 }
 
+/**
+ * @brief Asks the window's overlay for its pixels (lock held; released around the call): a change marks the overlay
+ * due for a draw and widens the rows to upload.
+ */
+static void ov_poll(rl_present *p)
+{
+    rl_present_overlay ov = p->ov;
+    pthread_mutex_unlock(&p->lock);
+    uint32_t w = 0, h = 0;
+    int32_t dirty[4] = { 0 };
+    const uint8_t *px = ov.pixels(ov.user, rl_clock_ns(), &w, &h, dirty);
+    pthread_mutex_lock(&p->lock);
+    if (!p->ov_on)
+        return;
+    if (px != p->ov_px || w != p->ov_w || h != p->ov_h) {
+        p->ov_upload_all = true;
+        p->ov_due = true;
+    }
+    p->ov_px = px;
+    p->ov_w = px ? w : 0;
+    p->ov_h = px ? h : 0;
+    if (px && dirty[2] > 0 && dirty[3] > 0) {
+        uint32_t y0 = (uint32_t)(dirty[1] > 0 ? dirty[1] : 0), y1 = (uint32_t)(dirty[1] + dirty[3]);
+        if (p->ov_y0 == p->ov_y1) {
+            p->ov_y0 = y0;
+            p->ov_y1 = y1;
+        } else {
+            p->ov_y0 = y0 < p->ov_y0 ? y0 : p->ov_y0;
+            p->ov_y1 = y1 > p->ov_y1 ? y1 : p->ov_y1;
+        }
+        p->ov_due = true;
+    }
+}
+
 static void *thread_main(void *arg)
 {
     rl_present *p = arg;
@@ -815,7 +1107,9 @@ static void *thread_main(void *arg)
         bool moved = __atomic_load_n(&p->win->generation, __ATOMIC_ACQUIRE) != p->gen_seen;
         if (moved)
             p->create_failed = false;
-        bool redo = (p->have_frame || p->still_shown) && (p->stale || moved);
+        if (p->ov_on && p->surface_ok && (p->have_frame || p->fresh))
+            ov_poll(p);
+        bool redo = (p->have_frame || p->still_shown) && (p->stale || moved || (p->ov_on && p->ov_due));
         bool still_due = p->still_fresh;
         if (p->surface_ok && !p->create_failed && (p->fresh || p->capture_want || redo || still_due) &&
             (p->fresh || p->have_frame || p->still_on || p->still_shown)) {
@@ -860,6 +1154,7 @@ static void *thread_main(void *arg)
                 p->have_frame = true;
             }
             bool capture = p->capture_want;
+            p->ov_due = false;
             p->holds = true;
             pthread_mutex_unlock(&p->lock);
             bool shown = draw(p, capture);
@@ -874,7 +1169,7 @@ static void *thread_main(void *arg)
             continue;
         }
         struct timespec t;
-        deadline(&t, IDLE_WAIT_MS);
+        deadline(&t, p->ov_on && p->have_frame ? OVERLAY_POLL_MS : IDLE_WAIT_MS);
         pthread_cond_timedwait(&p->cond, &p->lock, &t);
     }
     pthread_mutex_unlock(&p->lock);
@@ -914,6 +1209,17 @@ static void free_objects(rl_present *p)
     image_free(p, &p->src);
     image_free(p, &p->pre);
     image_free(p, &p->pic);
+    image_free(p, &p->frame);
+    rl_vkdev_buf_free(d, &p->fr_buf);
+    rl_vkdev_buf_free(d, &p->ov_buf);
+    if (p->ov_pipe)
+        d->vkDestroyPipeline(d->device, p->ov_pipe, NULL);
+    if (p->ov_layout)
+        d->vkDestroyPipelineLayout(d->device, p->ov_layout, NULL);
+    if (p->ov_dpool)
+        d->vkDestroyDescriptorPool(d->device, p->ov_dpool, NULL);
+    if (p->ov_set_layout)
+        d->vkDestroyDescriptorSetLayout(d->device, p->ov_set_layout, NULL);
     for (uint32_t i = 0; i < SLOTS; i++)
         image_free(p, &p->slots[i].im);
     rl_post_gpu_free(p->post);

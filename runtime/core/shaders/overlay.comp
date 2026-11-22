@@ -1,0 +1,59 @@
+#version 450
+/**
+ * @file overlay.comp
+ * @brief Lays the window's overlay (premultiplied RGBA8, view pixels) over the presenter's frame (RGBA8 words,
+ * swapchain pixels) in place: frame = overlay + frame * (1 - overlay alpha), in the stored encoding, as the SDL
+ * renderer blends it. The frame is turned by the swapchain's transform and the overlay is not: each frame pixel finds
+ * its view pixel by the turn (0 none, 1 a quarter, 2 a half, 3 three quarters, as present.c's pack_turned). swap_rb
+ * writes the result in BGRA order for a BGRA swapchain.
+ */
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std430, set = 0, binding = 0) buffer Frame { uint frame[]; };
+layout(std430, set = 0, binding = 1) readonly buffer Overlay { uint overlay[]; };
+
+layout(push_constant) uniform Params {
+    uint width, height;
+    uint view_w, view_h;
+    uint over_w, over_h;
+    uint turn, swap_rb;
+} pc;
+
+void main()
+{
+    uint x = gl_GlobalInvocationID.x, y = gl_GlobalInvocationID.y;
+    if (x >= pc.width || y >= pc.height)
+        return;
+    uint vx = x, vy = y;
+    if (pc.turn == 1u) {
+        vx = y;
+        vy = pc.view_h - 1u - x;
+    } else if (pc.turn == 3u) {
+        vx = pc.view_w - 1u - y;
+        vy = x;
+    } else if (pc.turn == 2u) {
+        vx = pc.view_w - 1u - x;
+        vy = pc.view_h - 1u - y;
+    }
+    uint at = y * pc.width + x;
+    uint f = frame[at];
+    if (vx < pc.over_w && vy < pc.over_h) {
+        uint o = overlay[vy * pc.over_w + vx];
+        uint a = o >> 24;
+        if (a == 255u) {
+            f = o;
+        } else if (o != 0u) {
+            uint k = 255u - a, r = 0u;
+            for (uint s = 0u; s < 24u; s += 8u) {
+                uint c = ((o >> s) & 255u) + (((f >> s) & 255u) * k + 127u) / 255u;
+                r |= min(c, 255u) << s;
+            }
+            f = r;
+        }
+    }
+    f |= 0xff000000u;
+    if (pc.swap_rb != 0u)
+        f = (f & 0xff00ff00u) | ((f & 0xffu) << 16) | ((f >> 16) & 0xffu);
+    frame[at] = f;
+}

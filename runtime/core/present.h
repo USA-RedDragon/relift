@@ -73,6 +73,23 @@ void rl_present_close(rl_present *p);
  */
 void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_t height, uint32_t shown_w,
                       uint32_t shown_h, bool fit, uint32_t win_w, uint32_t win_h, rl_present_rect *place);
+/**
+ * @brief What a window lays over its pictures (the on-screen controller), asked on the presenter's thread for each
+ * frame and while nothing new comes, so the overlay never takes the picture off the GPU. place gives where the picture
+ * sits in view pixels (x, y, width, height), or false to let the presenter place it; pixels moves the overlay's time
+ * on to now_ns, draws it when it changed and returns it (premultiplied RGBA8, the view's size, rows packed) with the
+ * changed rectangle in dirty (empty when nothing changed), or NULL when it shows nothing.
+ */
+typedef struct rl_present_overlay {
+    bool (*place)(void *user, int32_t rect[4]);
+    const uint8_t *(*pixels)(void *user, uint64_t now_ns, uint32_t *width, uint32_t *height, int32_t dirty[4]);
+    void *user;
+} rl_present_overlay;
+/** @brief Lays ov over every frame from now on (NULL: none). The presenter keeps a copy of ov. */
+void rl_present_set_overlay(rl_present *p, const rl_present_overlay *ov);
+/** @brief The overlay's blend of one pixel, as the GPU pass does it: premultiplied over, frame and result as RGBA8 words. */
+uint32_t rl_present_overlay_blend(uint32_t frame, uint32_t over);
+
 /** @brief A presenter-owned image a GPU guest layer fills with its picture (rl_present_slot_begin). */
 typedef struct rl_present_slot {
     /** @brief VkImage: RGBA8, TRANSFER_SRC and TRANSFER_DST usage, same device and queue family as the core's. */
