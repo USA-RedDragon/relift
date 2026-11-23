@@ -3209,6 +3209,33 @@ static int copy_buffer_to_buffer(replay *r, const nvn_cmd *e)
 }
 
 /**
+ * @brief nvnCommandBufferClearBuffer(buffer address, size, value): the size bytes at the address become the 32-bit
+ * value repeated, in the order the commands execute. In a pool imported into the host device it is a GPU fill of the
+ * pool's buffer; elsewhere the guest bytes are written once the work before it is done.
+ */
+static int clear_buffer(replay *r, const nvn_cmd *e)
+{
+    uint64_t at = nvn_gpu_guest(e->x[1]), size = e->x[2], off;
+    uint32_t value = (uint32_t)e->x[3];
+    void *pool;
+    if (!size)
+        return RL_OK;
+    if (size % 4 == 0 && nvn_guest_buffer(at, size, &pool, &off) && off % 4 == 0) {
+        nvn_vk_begin(r);
+        nvn_vk_barrier(g.cb);
+        VK(vkCmdFillBuffer)(g.cb, (VkBuffer)pool, off, size, value);
+        nvn_vk_mark_write_range(at, size);
+        nvn_vk_barrier(g.cb);
+        return RL_OK;
+    }
+    if (!nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    for (uint64_t i = 0; i < size; i++)
+        r->mem[at + i] = (uint8_t)(value >> (8 * (i % 4)));
+    return RL_OK;
+}
+
+/**
  * @brief nvnCommandBufferUpdateUniformBuffer(buffer address, buffer size, offset, size, data): the data, copied when
  * the command was recorded, lands at the buffer's offset in the order the commands execute, so draws before it read
  * the old bytes and draws after it the new ones. In a pool imported into the host device it is a GPU write into
@@ -3475,6 +3502,8 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return update_uniform_buffer(r, e);
     case NVN_CMD_COPY_BUFFER_TO_BUFFER:
         return copy_buffer_to_buffer(r, e);
+    case NVN_CMD_CLEAR_BUFFER:
+        return clear_buffer(r, e);
     case NVN_CMD_COPY_TEXTURE_TO_TEXTURE:
         return copy_texture_to_texture(r, e);
     case NVN_CMD_COPY_BUFFER_TO_TEXTURE:

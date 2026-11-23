@@ -281,6 +281,25 @@ static void update_uniform_buffer(rl_ctx *c, uint64_t cb, uint64_t gpu, uint64_t
     CHECK_EQ(nvnh_nvnCommandBufferUpdateUniformBuffer(c, t_mem()), RET);
 }
 
+TEST(nvn_clear_buffer_in_a_pool_fills_the_value_in_command_order)
+{
+    RECORDING(c, heap, cb);
+    IMPORTED_POOL(c, heap, gpu, mem, nvn_clear_buffer_in_a_pool_fills_the_value_in_command_order);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferClearBuffer, cb, gpu + 0x100, 32, 0xa1b2c3d4), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferCopyBufferToBuffer, cb, gpu + 0x100, gpu + 0x200, 16), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferClearBuffer, cb, gpu + 0x110, 16, 0x01020304), RET);
+    FINISHED(s, c, cb);
+    CHECK_EQ(s->n, 3);
+    memset(t_mem() + mem, 0, 0x1000);
+    CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x800, s), RL_OK);
+    CHECK(nvn_vk_settle());
+    for (unsigned i = 0; i < 16; i++) {
+        CHECK_EQ(t_mem()[mem + 0x100 + i], (uint8_t)(0xa1b2c3d4u >> (8 * (i % 4))));
+        CHECK_EQ(t_mem()[mem + 0x200 + i], (uint8_t)(0xa1b2c3d4u >> (8 * (i % 4))));
+        CHECK_EQ(t_mem()[mem + 0x110 + i], (uint8_t)(0x01020304u >> (8 * (i % 4))));
+    }
+}
+
 TEST(nvn_update_uniform_buffer_in_a_pool_lands_in_the_order_the_commands_run)
 {
     RECORDING(c, heap, cb);

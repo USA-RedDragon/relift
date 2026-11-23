@@ -852,7 +852,8 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_SET_ZCULL_ZF32_COMPRESSION_ENABLE, nvnCommandBufferSetZCullZF32CompressionEnable) \
     X(NVN_CMD_WAIT_SYNC, nvnCommandBufferWaitSync) \
     X(NVN_CMD_WAIT_EVENT, nvnCommandBufferWaitEvent) \
-    X(NVN_CMD_SIGNAL_EVENT, nvnCommandBufferSignalEvent)
+    X(NVN_CMD_SIGNAL_EVENT, nvnCommandBufferSignalEvent) \
+    X(NVN_CMD_CLEAR_BUFFER, nvnCommandBufferClearBuffer)
 
 /** @brief Recorded command ops. */
 enum nvn_cmd_op {
