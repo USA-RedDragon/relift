@@ -9,9 +9,12 @@
 
 #include "hos.h"
 #include "ldn.h"
+#include "services.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 enum { GET_STATE = 0, GET_INFO = 1, GET_IP = 2, GET_REASON = 3, GET_CONFIG = 5, ATTACH = 100, LATEST = 101,
        SCAN = 102, OPEN_AP = 200, CLOSE_AP = 201, CREATE = 202, DESTROY = 204, ADVERTISE = 206, OPEN_STA = 300,
@@ -415,4 +418,70 @@ TEST(ldn_offline_finds_no_one_and_cannot_host_or_join)
     CHECK_EQ(tc_cmd(f.c, f.u, FINALIZE), 0);
     CHECK_EQ(state(f), LDN_STATE_NONE);
     rl_ldn_set_backend_factory(NULL);
+}
+
+static void sleep_ms(long ms)
+{
+    struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
+}
+
+/** @brief Nodes of the network the process is in, 0 when in none. */
+static int node_count(fx f)
+{
+    tc_res r = get_info(f);
+    return r.result ? 0 : info_at(f)->ldn.node_count;
+}
+
+/**
+ * @brief Two processes on a network, through ldn:u with net.mode lan: RELIFT_LDN_PAIR=host hosts a network
+ * and waits for a station to join and leave; RELIFT_LDN_PAIR=station finds it, joins and leaves. Without the
+ * variable it does nothing (tools/ldn_pair.sh runs it in two network namespaces).
+ */
+TEST(ldn_pair_hosts_or_joins_a_network_of_another_process)
+{
+    const char *role = getenv("RELIFT_LDN_PAIR");
+    if (!role)
+        return;
+    setenv("RELIFT_NET", "lan", 1);
+    rl_switch_declare_settings();
+    fx f = open_ldn(NULL);
+    CHECK_EQ(tc_cmd(f.c, f.u, INIT_OLD), 0);
+    if (strcmp(role, "host") == 0) {
+        CHECK_EQ(tc_cmd(f.c, f.u, OPEN_AP), 0);
+        CHECK_EQ(create(f, 4), 0);
+        CHECK_EQ(state(f), LDN_STATE_ACCESS_POINT_CREATED);
+        int i = 0;
+        while (node_count(f) < 2 && i++ < 300)
+            sleep_ms(50);
+        CHECK_EQ(node_count(f), 2);
+        CHECK(strcmp(info_at(f)->ldn.nodes[1].user_name, "guest") == 0);
+        printf("ldn pair: host saw %s join\n", info_at(f)->ldn.nodes[1].user_name);
+        i = 0;
+        while (node_count(f) == 2 && i++ < 300)
+            sleep_ms(50);
+        CHECK_EQ(node_count(f), 1);
+        printf("ldn pair: host saw the station leave\n");
+        CHECK_EQ(tc_cmd(f.c, f.u, DESTROY), 0);
+    } else {
+        CHECK_EQ(tc_cmd(f.c, f.u, OPEN_STA), 0);
+        tc_res r;
+        int i = 0;
+        do
+            r = scan(f, LDN_FILTER_LOCAL_COMMUNICATION_ID, 0x0100abcd00000000ull);
+        while (r.result == 0 && tc_u32(&r, 0) == 0 && i++ < 10);
+        CHECK_EQ(r.result, 0);
+        CHECK_EQ(tc_u32(&r, 0), 1);
+        ldn_network_info n = *info_at(f);
+        printf("ldn pair: station found %s at %08x\n", n.ldn.nodes[0].user_name, n.ldn.nodes[0].ipv4);
+        CHECK_EQ(connect_to(f, &n), 0);
+        CHECK_EQ(state(f), LDN_STATE_STATION_CONNECTED);
+        CHECK_EQ(node_count(f), 2);
+        tc_res ip = tc_send(f.c, f.u, tc_new(GET_IP));
+        CHECK_EQ(ip.result, 0);
+        printf("ldn pair: station joined as %08x\n", tc_u32(&ip, 0));
+        sleep_ms(500);
+        CHECK_EQ(tc_cmd(f.c, f.u, DISCONNECT), 0);
+    }
+    CHECK_EQ(tc_cmd(f.c, f.u, FINALIZE), 0);
 }
