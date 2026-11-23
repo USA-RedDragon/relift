@@ -441,7 +441,11 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     size_t n;
     uint32_t *w = nvn_shader_spirv(key, &n);
     if (!w) {
-        why_set(why, why_n, "program %s is not in the build's shader table", key);
+        char refused[600];
+        if (nvn_shader_refusal(key, refused, sizeof refused))
+            why_set(why, why_n, "the translator refused program %s for this device: %s", key, refused);
+        else
+            why_set(why, why_n, "program %s is not in the build's shader table", key);
         return NULL;
     }
     nvn_module *m = calloc(1, sizeof *m);

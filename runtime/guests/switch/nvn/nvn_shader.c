@@ -422,6 +422,24 @@ static const uint8_t *table_find(const table *t, const char *key)
     return NULL;
 }
 
+bool nvn_shader_refusal(const char *key, char *why, size_t why_n)
+{
+    char path[1200], line[1024];
+    snprintf(path, sizeof path, "%s/failed.txt", nvn_shader_table_dir());
+    FILE *f = fopen(path, "r");
+    bool found = false;
+    while (f && !found && fgets(line, sizeof line, f)) {
+        if (strncmp(line, key, 64) || line[64] != '\t')
+            continue;
+        line[strcspn(line, "\r\n")] = 0;
+        snprintf(why, why_n, "%s", line + 65);
+        found = true;
+    }
+    if (f)
+        fclose(f);
+    return found;
+}
+
 void nvn_shader_tables_reopen(void)
 {
     pthread_mutex_lock(&g_lock);

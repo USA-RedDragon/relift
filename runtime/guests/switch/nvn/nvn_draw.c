@@ -154,7 +154,7 @@ static module *module_of(replay *r, uint64_t code, int stage)
             return NULL;
         }
     }
-    char why[200];
+    char why[800];
     module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m) {
         nvn_shader_note(r->mem, code, key);

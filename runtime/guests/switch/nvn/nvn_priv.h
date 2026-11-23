@@ -460,6 +460,11 @@ const char *nvn_shader_dir(void);
  */
 const char *nvn_shader_table_dir(void);
 /**
+ * @brief Why the translator refused program key, from failed.txt beside the tables (nvn_shader_table_dir) into why;
+ * false when it is not listed there.
+ */
+bool nvn_shader_refusal(const char *key, char *why, size_t why_n);
+/**
  * @brief Reads the tables again from nvn_shader_table_dir: after the tables were made on the device, a lookup that
  * ran before (and found the old folder's tables) must not keep them.
  */

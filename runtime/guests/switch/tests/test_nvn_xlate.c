@@ -7,6 +7,7 @@
  * them again, and a translator of another stamp is left alone. A table read before the tables were made (it found
  * none) does not hide them.
  */
+#include "nvn/nvn_module.h"
 #include "nvn/nvn_priv.h"
 #include "tc.h"
 
@@ -51,6 +52,35 @@ TEST(nvn_without_the_translator_the_build_tables_stay)
     unsetenv("RELIFT_NVN_SHADERS");
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 #endif
+}
+
+TEST(nvn_a_program_the_translator_refused_stops_naming_why)
+{
+    char dir[PATH_MAX], path[PATH_MAX + 32], why[800] = "";
+    CHECK(make_scratch(dir));
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    setenv("RELIFT_NVN_TABLES", dir, 1);
+    setenv("RELIFT_NVN_TABLE_STAMP", "allow", 1);
+    snprintf(path, sizeof path, "%s/failed.txt", dir);
+    FILE *f = fopen(path, "w");
+    CHECK(f != NULL);
+    char key[65];
+    memset(key, 'a', 64);
+    key[64] = 0;
+    fprintf(f, "%s\tF2F on a host without shaderInt64\n", key);
+    fclose(f);
+    CHECK(nvn_shader_refusal(key, why, sizeof why));
+    CHECK(!strcmp(why, "F2F on a host without shaderInt64"));
+    key[0] = 'b';
+    CHECK(!nvn_shader_refusal(key, why, sizeof why));
+    key[0] = 'a';
+    why[0] = 0;
+    CHECK(nvn_module_get(key, (int)NVN_STAGE_COMPUTE, why, sizeof why) == NULL);
+    CHECK(strstr(why, "the translator refused program") && strstr(why, "shaderInt64"));
+    unsetenv("RELIFT_NVN_TABLE_STAMP");
+    unsetenv("RELIFT_NVN_TABLES");
+    unsetenv("RELIFT_NVN_SHADERS");
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
 #ifdef RL_NVN_XLATE
