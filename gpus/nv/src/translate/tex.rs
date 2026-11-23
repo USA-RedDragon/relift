@@ -35,11 +35,13 @@
 //! format; atomics use 32-bit `R32ui` views.
 //!
 //! The numeric kind of a bound handle's texture is chosen by the runtime:
-//! a TEX, TLD, TLD4 or TXD of a bound handle reads it from the runtime's
-//! table beside the pool ([`TEXTURE_DIMS_BINDING`], bits 8 and up of the
-//! texture's word; 0 float, 1 signed, 2 unsigned) and takes the array of
-//! that kind, so integer textures read their integer bits and one program
-//! serves every kind of texture bound to it. Each bound handle that a
+//! a TEX, TLD, TLD4 or TXD of a bound handle takes the array of the kind
+//! its specialization constant gives ([`TEXTURE_FETCH_KIND_SPEC`] onwards;
+//! 0 float, 1 signed, 2 unsigned), so integer textures read their integer
+//! bits, or with [`KIND_AT_RUN_TIME`] (the default) the kind the runtime's
+//! table beside the pool gives ([`TEXTURE_DIMS_BINDING`], bits 8 and up of
+//! the texture's word), so one library serves every kind of texture bound
+//! to it while the one of the exact kinds compiles. Each bound handle that a
 //! SULD.P or SUST.P reads gets a specialization constant
 //! ([`TEXTURE_KIND_SPEC`] onwards, listed in `Interface::texture_kinds`)
 //! with the image's kind instead. Depth compares, TMML, TXQ and handles from
@@ -114,6 +116,17 @@ pub const TEXTURE_DIMS_BINDING: u32 = 31;
 /// First specialization constant id of the per-handle numeric kinds of
 /// formatted surface accesses.
 pub const TEXTURE_KIND_SPEC: u32 = 0x100;
+
+/// First specialization constant id of the per-handle numeric kinds of
+/// fetches (listed in `Interface::texture_fetch_kinds`): the kind, or
+/// [`KIND_AT_RUN_TIME`] (the default) for the kind the runtime's table
+/// gives when the program runs.
+pub const TEXTURE_FETCH_KIND_SPEC: u32 = 0x500;
+
+/// The value of a [`TEXTURE_FETCH_KIND_SPEC`] constant that has the
+/// program read the kind from the runtime's table: one library serves
+/// every kind, at the cost of a branch per fetch.
+pub const KIND_AT_RUN_TIME: u32 = 3;
 
 /// First specialization constant id of the per-handle dimensions (a [`Dim`]
 /// value) of textures that TXQ queries and no instruction samples with one
@@ -1055,7 +1068,14 @@ impl Ctx {
         let zero = self.m.c_u32(0);
         let one = self.m.c_u32(1);
         let (is_f, is_s) = if h.is_some() {
-            let kc = self.texture_kind_of(key);
+            let next = TEXTURE_FETCH_KIND_SPEC + self.iface.texture_fetch_kinds.len() as u32;
+            let id = *self.iface.texture_fetch_kinds.entry(key).or_insert(next);
+            let sc = self.m.spec_u32(KIND_AT_RUN_TIME, id);
+            let rt = self.m.c_u32(KIND_AT_RUN_TIME);
+            let at_run = self.m.spec_op(b, op::I_EQUAL, &[sc, rt]);
+            let table = self.texture_kind_of(key);
+            let u = self.u32t();
+            let kc = self.m.emit(op::SELECT, u, &[at_run, table, sc]);
             (
                 self.m.emit(op::I_EQUAL, b, &[kc, zero]),
                 self.m.emit(op::I_EQUAL, b, &[kc, one]),

@@ -513,7 +513,7 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     for &(bank, off) in &i.textures {
         recs.push([RECORD_TEXTURE, bank, off, 0]);
     }
-    for (&(bank, off), &spec) in &i.texture_kinds {
+    for (&(bank, off), &spec) in i.texture_kinds.iter().chain(&i.texture_fetch_kinds) {
         recs.push([RECORD_TEXTURE_KIND, bank, off, spec]);
     }
     for (&(bank, off), &spec) in &i.texture_dims {

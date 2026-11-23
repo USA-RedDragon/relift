@@ -188,6 +188,14 @@ uint32_t nvn_draw_vertex_streams(const nvn_pipe_key *k, uint32_t out[NVN_VERTEX_
 
 /** @brief Writes the persistent cache when it holds pipelines made since it was last written. */
 void nvn_pipe_save(void);
+
+/**
+ * @brief Sets every fetch texture kind constant among the n of map and vals (ids NVN_FETCH_KIND_SPEC onwards) to
+ * NVN_KIND_AT_RUN_TIME; true when one held an exact kind. A draw or dispatch whose library or pipeline of exact kinds is
+ * not made yet uses the one of these values (the warm-up's, which reads each texture's kind from the texture table)
+ * while a worker makes the exact one, so a texture kind no launch saw before costs no compile on the game's thread.
+ */
+bool nvn_spec_at_run_time(uint32_t n, const VkSpecializationMapEntry *map, uint32_t *vals);
 /**
  * @brief The warm-up's library key of stage of program m: the specialization a draw starts from (texture kinds and
  * dimensions as nvn_module_default_spec gives them, the alpha test always passing) and the pre-raster and fragment

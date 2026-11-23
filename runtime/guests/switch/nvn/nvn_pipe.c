@@ -7,6 +7,7 @@
  * build's shader table index), the SHA-256 of the driver's cache data, and
  * that data. Any difference discards the file.
  */
+#include "nvn_module.h"
 #include "nvn_pipe.h"
 
 #include <relift/datacheck.h>
@@ -159,6 +160,17 @@ static bool add_locked(table *t, entry *e)
  * one claims it (*mine) and must call finish; when another is making it,
  * waits until that one has finished. NULL when memory runs out.
  */
+/** @brief The pipeline made for key in t, or NULL when nobody has, or somebody is making it now; never waits. */
+static VkPipeline peek(table *t, const void *key, size_t len)
+{
+    uint32_t h = hash_bytes(key, len);
+    pthread_mutex_lock(&P.lock);
+    entry *e = find_locked(t, key, len, h);
+    VkPipeline p = e && e->state == 1 ? e->p : NULL;
+    pthread_mutex_unlock(&P.lock);
+    return p;
+}
+
 static entry *claim(table *t, const void *key, size_t len, bool *mine)
 {
     uint32_t h = hash_bytes(key, len);
@@ -542,6 +554,91 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
     return p;
 }
 
+bool nvn_spec_at_run_time(uint32_t n, const VkSpecializationMapEntry *map, uint32_t *vals)
+{
+    bool any = false;
+    for (uint32_t i = 0; i < n; i++)
+        if (map[i].constantID >= NVN_FETCH_KIND_SPEC && map[i].constantID < NVN_FETCH_KIND_SPEC + 0x100u &&
+            vals[i] != NVN_KIND_AT_RUN_TIME) {
+            vals[i] = NVN_KIND_AT_RUN_TIME;
+            any = true;
+        }
+    return any;
+}
+
+/** @brief A library or compute pipeline of exact texture kinds the exact-kind worker is to make. */
+typedef struct exact_job {
+    int what;
+    nvn_pipe_key k;
+    stage_key sk;
+    table *t;
+    VkPipelineLayout layout;
+} exact_job;
+
+static struct {
+    pthread_mutex_t lock;
+    pthread_cond_t cv;
+    exact_job *q;
+    uint32_t n, cap;
+    bool started;
+} X = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
+
+static VkPipeline vertex_library(const nvn_pipe_key *k);
+static VkPipeline fragment_library(const nvn_pipe_key *k);
+static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m, uint32_t n,
+                             const VkSpecializationMapEntry *map, const uint32_t *vals);
+
+/** @brief The exact-kind worker: makes the queued libraries and compute pipelines, newest first, off the game's threads. */
+static void *exact_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&X.lock);
+        while (!X.n)
+            pthread_cond_wait(&X.cv, &X.lock);
+        exact_job *j = malloc(sizeof *j);
+        if (j)
+            *j = X.q[--X.n];
+        pthread_mutex_unlock(&X.lock);
+        if (!j)
+            continue;
+        if (j->what == 0)
+            vertex_library(&j->k);
+        else if (j->what == 1)
+            fragment_library(&j->k);
+        else
+            compute_in(j->t, j->layout, j->sk.m, j->sk.nspec, j->sk.map, j->sk.val);
+        free(j);
+    }
+    return NULL;
+}
+
+/** @brief Queues j for the exact-kind worker, starting it the first time. */
+static void exact_queue(const exact_job *j)
+{
+    pthread_mutex_lock(&X.lock);
+    if (X.n == X.cap) {
+        uint32_t cap = X.cap ? X.cap * 2 : 16;
+        exact_job *q = realloc(X.q, cap * sizeof *q);
+        if (!q) {
+            pthread_mutex_unlock(&X.lock);
+            return;
+        }
+        X.q = q;
+        X.cap = cap;
+    }
+    X.q[X.n++] = *j;
+    bool start = !X.started;
+    X.started = true;
+    pthread_cond_signal(&X.cv);
+    pthread_mutex_unlock(&X.lock);
+    if (start) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, exact_main, NULL) == 0)
+            pthread_detach(t);
+    }
+}
+
 static VkPipeline vertex_library(const nvn_pipe_key *k)
 {
     nvn_pipe_key v = *k;
@@ -651,8 +748,21 @@ VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
     fo_of(k, &fk);
     libs[0] = library(&P.vi, &vk, sizeof vk, VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT, k,
                       "vertex input library");
-    libs[1] = vertex_library(k);
-    libs[2] = fragment_library(k);
+    for (uint32_t s = 0; s < 2; s++) {
+        nvn_pipe_key part = *k;
+        part.mods[1 - s] = NULL;
+        stage_key sk;
+        stage_of(&part, s, &sk);
+        VkPipeline have = peek(s ? &P.fs : &P.pr, &sk, sizeof sk);
+        nvn_pipe_key rt = *k;
+        if (!have && P.warmed && nvn_spec_at_run_time(rt.nspec[s], rt.spec_map[s], rt.spec[s])) {
+            exact_job j = { .what = (int)s, .k = *k };
+            exact_queue(&j);
+            libs[1 + s] = s ? fragment_library(&rt) : vertex_library(&rt);
+        } else {
+            libs[1 + s] = have ? have : s ? fragment_library(k) : vertex_library(k);
+        }
+    }
     libs[3] = library(&P.fo, &fk, sizeof fk, VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT, k,
                       "fragment output library");
     if (!libs[0] || !libs[1] || !libs[2] || !libs[3])
@@ -736,9 +846,34 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
     return p;
 }
 
+/**
+ * @brief The compute pipeline of m in t: the exact one when it is made; while it is not (after warm-up), the one that
+ * reads its texture kinds at run time, with the exact one queued for the exact-kind worker.
+ */
+static VkPipeline compute_exact_or_run_time(table *t, VkPipelineLayout layout, VkShaderModule m, uint32_t n,
+                                            const VkSpecializationMapEntry *map, const uint32_t *vals)
+{
+    stage_key sk;
+    memset(&sk, 0, sizeof sk);
+    sk.m = m;
+    sk.nspec = n;
+    memcpy(sk.map, map, n * sizeof sk.map[0]);
+    memcpy(sk.val, vals, n * sizeof sk.val[0]);
+    VkPipeline have = peek(t, &sk, sizeof sk);
+    if (have)
+        return have;
+    uint32_t rt[NVN_MAX_SPECS];
+    memcpy(rt, vals, n * sizeof rt[0]);
+    if (!P.warmed || !nvn_spec_at_run_time(n, map, rt))
+        return compute_in(t, layout, m, n, map, vals);
+    exact_job j = { .what = 2, .sk = sk, .t = t, .layout = layout };
+    exact_queue(&j);
+    return compute_in(t, layout, m, n, map, rt);
+}
+
 VkPipeline nvn_pipe_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)
 {
-    return compute_in(&P.comp, P.clayout, m, n, map, vals);
+    return compute_exact_or_run_time(&P.comp, P.clayout, m, n, map, vals);
 }
 
 VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializationMapEntry *map, const uint32_t *vals)

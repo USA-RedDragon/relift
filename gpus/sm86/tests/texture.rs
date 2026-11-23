@@ -3,8 +3,9 @@ mod common;
 use common::translate;
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::{
-    Dim, HandleSource, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC,
-    TEXTURE_DIMS_BINDING, image_binding, texture_binding,
+    Dim, HandleSource, ImageDim, ImageKind, KIND_AT_RUN_TIME, Kind, SAMPLER_BINDING,
+    TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC, image_binding,
+    texture_binding,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -81,6 +82,10 @@ fn bound_texture_uses_the_pools() {
     assert!(!s.interface.bindless);
     assert!(!s.interface.register_handles);
     assert!(s.interface.texture_kinds.is_empty());
+    assert_eq!(
+        s.interface.texture_fetch_kinds.get(&(3, 16)),
+        Some(&TEXTURE_FETCH_KIND_SPEC)
+    );
     for b in [
         SAMPLER_BINDING,
         texture_binding(Kind::Float, Dim::D2),
@@ -96,7 +101,16 @@ fn bound_texture_uses_the_pools() {
             .iter()
             .all(|d| d[2] != 1 || !(0x100..0x200).contains(&d[3]))
     );
-    assert!(insts(&s.spirv, 52).is_empty());
+    let kind = insts(&s.spirv, 71)
+        .into_iter()
+        .find(|d| d[2] == 1 && d[3] == TEXTURE_FETCH_KIND_SPEC)
+        .expect("the fetch kind constant")[1];
+    assert!(
+        insts(&s.spirv, 50)
+            .iter()
+            .any(|c| c[2] == kind && c[3] == KIND_AT_RUN_TIME),
+        "the kind defaults to reading it at run time"
+    );
     assert!(!insts(&s.spirv, 194).is_empty());
     assert!(
         insts(&s.spirv, 59).iter().any(|v| v.get(3) == Some(&6)),

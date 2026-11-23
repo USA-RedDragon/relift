@@ -376,3 +376,14 @@ TEST(nvn_pipe_a_draw_makes_its_pipeline_while_a_warm_up_thread_makes_another)
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
+
+TEST(nvn_a_draw_without_its_exact_library_reads_texture_kinds_at_run_time)
+{
+    VkSpecializationMapEntry map[3] = { { 0x100, 0, 4 }, { NVN_FETCH_KIND_SPEC, 4, 4 }, { NVN_FETCH_KIND_SPEC + 1, 8, 4 } };
+    uint32_t vals[3] = { 2, 1, NVN_KIND_AT_RUN_TIME };
+    CHECK(nvn_spec_at_run_time(3, map, vals));
+    CHECK_EQ(vals[0], 2u);
+    CHECK_EQ(vals[1], NVN_KIND_AT_RUN_TIME);
+    CHECK_EQ(vals[2], NVN_KIND_AT_RUN_TIME);
+    CHECK(!nvn_spec_at_run_time(3, map, vals));
+}

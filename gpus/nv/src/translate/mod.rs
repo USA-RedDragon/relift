@@ -39,8 +39,9 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use tex::{
-    Dim, HandleSource, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC,
-    TEXTURE_DIMS_BINDING, TEXTURE_KIND_SPEC, image_binding, texture_binding,
+    Dim, HandleSource, ImageDim, ImageKind, KIND_AT_RUN_TIME, Kind, SAMPLER_BINDING,
+    TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC, TEXTURE_KIND_SPEC,
+    image_binding, texture_binding,
 };
 
 use crate::program::{Program, Stage};
@@ -131,6 +132,10 @@ pub struct Interface {
     /// Specialization constant id per bound handle whose texture's numeric
     /// kind the runtime picks (see [`Kind`]).
     pub texture_kinds: BTreeMap<(u32, u32), u32>,
+    /// The specialization constant of the numeric kind of each bound
+    /// handle (bank, byte offset) a fetch reads (see
+    /// [`tex::TEXTURE_FETCH_KIND_SPEC`]).
+    pub texture_fetch_kinds: BTreeMap<(u32, u32), u32>,
     /// Specialization constant id per bound handle whose texture's
     /// dimension the runtime gives (see [`tex::TEXTURE_DIM_SPEC`]).
     pub texture_dims: BTreeMap<(u32, u32), u32>,

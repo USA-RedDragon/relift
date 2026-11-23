@@ -10,6 +10,10 @@
 
 /** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
 #define ALPHA_FUNC_SPEC 0x400u
+/** @brief The first specialization constant id of a fetch's texture kind (the translator's TEXTURE_FETCH_KIND_SPEC). */
+#define NVN_FETCH_KIND_SPEC 0x500u
+/** @brief The value of a fetch kind constant that has the program read the kind at run time (KIND_AT_RUN_TIME). */
+#define NVN_KIND_AT_RUN_TIME 3u
 /** @brief The alpha test function that always passes (NVNalphaFunc ALWAYS), the one a queue starts with. */
 #define NVN_ALPHA_ALWAYS 8u
 

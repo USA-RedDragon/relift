@@ -486,7 +486,9 @@ void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationM
                 c->offset != h->offset || *n == NVN_MAX_SPECS)
                 continue;
             map[*n] = (VkSpecializationMapEntry){ c->spec, 4 * *n, 4 };
-            vals[(*n)++] = c->kind == NVN_IFACE_TEXTURE_KIND ? 0u : 1u;
+            vals[(*n)++] = c->kind != NVN_IFACE_TEXTURE_KIND             ? 1u
+                           : c->spec >= NVN_FETCH_KIND_SPEC && c->spec < NVN_FETCH_KIND_SPEC + 0x100u ? NVN_KIND_AT_RUN_TIME
+                                                                                                       : 0u;
         }
     }
 }
