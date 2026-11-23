@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Check that all.sh stops cleanly: run it on a copy of scripts/ci whose lint
-# job is a slow fake that starts two sleepers, replace the copy of all.sh
-# while it runs, send it TERM, and check that it exits 143 and that no
-# process of the fake job is left.
+# job is a slow fake that starts three sleepers (one in a session of its own,
+# which a process group kill misses), replace the copy of all.sh while it
+# runs, send it TERM, and check that it exits 143 and that no process of the
+# fake job is left.
 . "$(dirname "$0")/lib.sh"
 
 tree="$CI_WORK/all-stops"
@@ -18,6 +19,8 @@ sleep 600 &
 echo "$!" >>"$MARKS"
 sleep 600 &
 echo "$!" >>"$MARKS"
+setsid sleep 600 &
+echo "$!" >>"$MARKS"
 wait
 EOF
 chmod +x "$tree/scripts/ci/lint.sh"
@@ -25,10 +28,10 @@ chmod +x "$tree/scripts/ci/lint.sh"
 MARKS="$marks" CI_WORK="$tree/work" CI_MAC= "$tree/scripts/ci/all.sh" lint >"$tree/out.log" 2>&1 &
 run=$!
 for _ in $(seq 1 600); do
-  [ "$(wc -l <"$marks")" -ge 2 ] && break
+  [ "$(wc -l <"$marks")" -ge 3 ] && break
   sleep 0.1
 done
-[ "$(wc -l <"$marks")" -ge 2 ] || {
+[ "$(wc -l <"$marks")" -ge 3 ] || {
   echo "all-stops: the fake job did not start" >&2
   kill -KILL "$run" 2>/dev/null
   exit 1

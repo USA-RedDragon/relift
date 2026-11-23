@@ -29,10 +29,13 @@
 # gets one.
 #
 # A job that takes longer than the timeout-minutes of the workflow job it
-# stands for is killed, with its children, and fails. Jobs named image-* need
-# docker and the pinned rust-cross image (about 16 GB unpacked); without
-# docker, or without the image and room to pull it, they are reported as
-# skipped. A skip never fails the run but is always printed with its reason.
+# stands for is killed, with its children, and fails. Each job's processes
+# carry RELIFT_CI_JOB in their environment, so a stopped job takes down
+# even the descendants that left its process group (a setsid, a daemon) or
+# were handed to init when their parent died, which a group kill misses.
+# Jobs named image-* need docker and the pinned rust-cross image (about 16 GB
+# unpacked); without docker, or without the image and room to pull it, they
+# are reported as skipped. A skip never fails the run but is always printed with its reason.
 #
 # On TERM, INT or HUP it stops every job's process group (with its mac ssh
 # session) and lets go of the mac lock before it exits. The whole script is
@@ -151,6 +154,20 @@ main() {
     ' "$ROOT/.github/workflows/${wf%%:*}"
   }
 
+  # reap PATTERN: KILL every process of this user whose RELIFT_CI_JOB matches
+  # the regular expression PATTERN. Linux only (it reads /proc/PID/environ); a no-op elsewhere.
+  reap() {
+    local e p
+    [ -d /proc/self ] || return 0
+    for e in /proc/[0-9]*/environ; do
+      p=${e#/proc/}
+      p=${p%/environ}
+      [ "$p" = "$$" ] && continue
+      grep -azq "^RELIFT_CI_JOB=$1\$" "$e" 2>/dev/null && kill -KILL "$p" 2>/dev/null
+    done
+    return 0
+  }
+
   # stop_all CODE: on TERM, INT or HUP, stop every job's process group (a
   # job runs in a group of its own, with its mac ssh session), the per-job
   # watchers and the holder of the mac lock, then exit with CODE.
@@ -167,6 +184,7 @@ main() {
       [ -f "$f" ] && g=$(cat "$f") && kill -KILL -- "-$g" 2>/dev/null
     done
     kill -KILL "${subs[@]}" $mac_holder 2>/dev/null
+    reap "$$-.*"
     rm -f "$logs"/*.pgid "$tokens" "$slots"
     exit "$1"
   }
@@ -286,6 +304,7 @@ main() {
       limit=$(limit_minutes "$j")
       set -m
       (
+        export RELIFT_CI_JOB="$$-$j"
         if [ -n "$slot" ]; then
           i=${letters%%"$slot"*}
           export CI_CPUSET=${slot_cpus[${#i}]}
@@ -301,6 +320,7 @@ main() {
           kill -TERM -- "-$pid" 2>/dev/null
           sleep 3
           kill -KILL -- "-$pid" 2>/dev/null
+          reap "$$-$j"
           killed=1
           break
         fi
