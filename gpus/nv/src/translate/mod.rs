@@ -9,6 +9,7 @@
 pub mod build;
 mod calls;
 mod cfg;
+mod debug;
 mod denorm;
 mod float;
 mod fma;
@@ -22,6 +23,7 @@ mod mufu;
 pub mod pseudo;
 mod simt;
 mod tex;
+mod trace;
 mod uniform;
 mod vmm;
 
@@ -51,6 +53,9 @@ pub use tex::{
     Dim, HandleSource, ImageDim, ImageKind, KIND_AT_RUN_TIME, Kind, SAMPLER_BINDING,
     SURFACE_KIND_RGB9E5, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC,
     TEXTURE_KIND_SPEC, image_binding, texture_binding,
+};
+pub use trace::{
+    TRACE_BINDING, TRACE_HEADER_WORDS, TRACE_SLOT_WORDS, TRACE_SOURCE_CBUF, TRACE_UREG, Trace,
 };
 
 use crate::program::{Program, Stage};
@@ -111,6 +116,9 @@ pub struct Interface {
     /// Byte addresses of the calls to `__assertfail`; the program uses the
     /// assert record (see [`ASSERT_BINDING`]) when there is one.
     pub asserts: Vec<u64>,
+    /// Words of the trace buffer (see [`TRACE_BINDING`]) the program
+    /// writes in trace mode; 0 when it has none.
+    pub trace_words: u32,
     /// The program dereferences 64-bit global addresses (buffer device
     /// addresses).
     pub global_memory: bool,
@@ -263,6 +271,15 @@ pub struct Options {
     /// `max_workgroup_invocations` does not allow, takes 1;
     /// [`Interface::mesh_slots`] says what the translation took.
     pub mesh_slots: u32,
+    /// Trace mode (see the `trace` module): a debugging translation that
+    /// records the first register write meeting the condition per
+    /// instruction. Never for a player's tables.
+    pub trace: Option<Trace>,
+    /// SPIR-V debug info (NonSemantic.Shader.DebugInfo.100) whose source is
+    /// the guest disassembly, with guest registers as named variables (see
+    /// the `debug` module). For RenderDoc's shader debugger; never for a
+    /// player's tables.
+    pub debug_info: bool,
 }
 
 /// A translated program.
@@ -361,6 +378,10 @@ pub(crate) struct Ctx {
     /// How warp operations whose result does not depend on the warp's
     /// composition are translated (see [`uniform`]).
     pub warp_idioms: uniform::Plan,
+    /// Trace mode state (see [`trace`]).
+    pub trace: trace::State,
+    /// Debug info state (see [`debug`]).
+    pub debug: debug::State,
 }
 
 impl Ctx {
@@ -453,6 +474,7 @@ impl Ctx {
             Some(&f) => f,
             None => {
                 let saved = std::mem::take(&mut self.m.body);
+                let saved_block = self.m.block();
                 let saved_vars = self.m.suspend_vars();
                 let saved_var = self.denorm.var.take();
                 let first_local = self.locals.len();
@@ -470,6 +492,7 @@ impl Ctx {
                     Ok(r) => r,
                     Err(e) => {
                         self.m.body = saved;
+                        self.m.set_block(saved_block);
                         self.m.restore_vars(saved_vars);
                         self.denorm.var = saved_var;
                         return Err(e);
@@ -486,6 +509,7 @@ impl Ctx {
                 let mut f = std::mem::replace(&mut self.m.body, saved);
                 f.splice(at..at, decls);
                 self.funcs.extend(f);
+                self.m.set_block(saved_block);
                 self.m.restore_vars(saved_vars);
                 self.denorm.var = saved_var;
                 self.shared_fns.insert(key, id);
@@ -527,7 +551,9 @@ impl Ctx {
             let v = self.lane_var(v, t);
             return self.m.emit(op::LOAD, t, &[v]);
         }
-        self.m.load_var(t, v)
+        let val = self.m.load_var(t, v);
+        self.trace_source(u32::from(n), val);
+        val
     }
 
     pub fn store_reg(&mut self, n: u8, val: u32) {
@@ -541,7 +567,9 @@ impl Ctx {
             self.m.emit_void(op::STORE, &[v, val]);
             return;
         }
+        self.trace_write(u32::from(n), val);
         let val = self.kept(t, v, val);
+        self.debug_value(debug::Reg::R(n), val);
         self.m.store_var(v, val);
     }
 
@@ -579,7 +607,9 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.uregs, &mut self.m, n);
         let t = self.u32t();
-        self.m.load_var(t, v)
+        let val = self.m.load_var(t, v);
+        self.trace_source(TRACE_UREG + u32::from(n), val);
+        val
     }
 
     pub fn store_ureg(&mut self, n: u8, val: u32) {
@@ -588,7 +618,9 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.uregs, &mut self.m, n);
         let t = self.u32t();
+        self.trace_write(TRACE_UREG + u32::from(n), val);
         let val = self.kept(t, v, val);
+        self.debug_value(debug::Reg::Ur(n), val);
         self.m.store_var(v, val);
     }
 
@@ -620,6 +652,7 @@ impl Ctx {
             return;
         }
         let val = self.kept(t, v, val);
+        self.debug_value(debug::Reg::P(n), val);
         self.m.store_var(v, val);
     }
 
@@ -641,6 +674,7 @@ impl Ctx {
         let v = Ctx::var_in(&mut self.upreds, &mut self.m, n);
         let t = self.m.t_bool();
         let val = self.kept(t, v, val);
+        self.debug_value(debug::Reg::Up(n), val);
         self.m.store_var(v, val);
     }
 
@@ -730,7 +764,9 @@ impl Ctx {
         }
         let var = self.cbuf_var(bank)?;
         let key = vec![var, off as u32];
+        let id = TRACE_SOURCE_CBUF | bank << 16 | off as u32;
         if let Some(v) = self.m.recall(&key) {
+            self.trace_source(id, v);
             return Ok(v);
         }
         let zero = self.m.c_u32(0);
@@ -741,6 +777,7 @@ impl Ctx {
         let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, zero, vi, ci]);
         let v = self.m.emit(op::LOAD, u, &[ptr]);
         self.m.remember(key, v);
+        self.trace_source(id, v);
         Ok(v)
     }
 
@@ -941,6 +978,8 @@ impl Ctx {
         self.fields = i.fields;
         self.pc = pc;
         self.route = None;
+        self.trace_begin(i.mnemonic, pc);
+        self.debug_line(pc);
         match self.simt_pass() {
             Some(simt::Pass::Collect) => {
                 let g = match &i.guard {
@@ -1056,6 +1095,23 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     let code = decode_all(p, o)?;
     let mut c = Ctx::new(stage, o, tex::Prep::new(&code));
     c.sph_words = p.sph.as_ref().map_or([0; 32], |s| s.words);
+    if let Some(t) = &o.trace {
+        trace::check(t, code.insts.len())?;
+        c.trace.spec = Some(t.clone());
+        c.trace.slots = code.insts.len() as u32;
+    }
+    if o.debug_info {
+        let lines: Vec<String> = p
+            .code
+            .iter()
+            .enumerate()
+            .map(|(k, d)| match d {
+                Ok(i) => format!("/*{:04x}*/ {i} ;", 16 * k),
+                Err(e) => format!("/*{:04x}*/ ?? {e}", 16 * k),
+            })
+            .collect();
+        c.debug_begin("guest.sass", &lines);
+    }
     c.iface.host.host = o.host.name.clone();
     c.io.color_kinds = o.color_kinds.clone();
     c.io.vtg.pipe = o.pipeline.clone();
@@ -1137,6 +1193,8 @@ impl Ctx {
             mactive_from_saved: HashSet::new(),
             shared_fns: BTreeMap::new(),
             store_guard: None,
+            trace: trace::State::default(),
+            debug: debug::State::default(),
         }
     }
 
@@ -1253,7 +1311,9 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
     let n = decls.len();
     c.m.body.splice(var_at..var_at, decls);
     let kinds = c.kind_prologue();
+    let k = kinds.len();
     c.m.body.splice(var_at + n..var_at + n, kinds);
+    c.debug_finish(main, var_at + n + k);
     io::finish(&mut c, entry);
     io::vtg::modes(&mut c, entry)?;
     let mut iface: Vec<u32> = Vec::new();

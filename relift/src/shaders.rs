@@ -30,7 +30,9 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use relift_gpu_nv::translate::Math;
-use relift_gpu_table::{BOTH, DEVICE_FILE, Programs, table_file, translate_math};
+use relift_gpu_table::{
+    BOTH, DEVICE_FILE, Programs, TraceSel, table_file, translate_math, translate_traced,
+};
 pub use relift_gpu_table::{STAMP, STAMP_FILE, stamp, stamp_of, stamp_of_mode};
 use relift_switch_shaders::{ImportSource, Options as ScanOptions, scan};
 
@@ -210,20 +212,69 @@ fn build_in(programs: &Path, dir: &Path, jobs: usize, modes: &[Math]) -> Result<
     first.ok_or_else(|| "no shader math mode to translate".into())
 }
 
+/// Writes a trace-mode table (see [`TraceSel`]) of the build in `out` to
+/// `dest`, with the build's `device.json`: the build's own tables stay as
+/// they are. The stamp is the translator's with ` trace` and the selection
+/// after it, so a run uses it only with `RELIFT_NVN_TABLES=<dest>` and
+/// `RELIFT_NVN_TABLE_STAMP=allow`.
+///
+/// # Errors
+///
+/// A file cannot be read or written.
+pub fn build_trace(
+    out: &Path,
+    dest: &Path,
+    sel: &TraceSel,
+    jobs: usize,
+) -> Result<Built, BoxError> {
+    let dir = out.join(DIR);
+    let set = Programs::dir(&dir)?;
+    let device = std::fs::read(dir.join(DEVICE_FILE))?;
+    let built = translate_traced(
+        &set,
+        Some(&device),
+        dest,
+        jobs,
+        Math::Exact,
+        Some(sel),
+        &|_, _| true,
+    )
+    .map_err(|e| format!("{}: {e}", dest.display()))?;
+    relift_cache::write_if_changed(
+        &dest.join(table_file(Math::Exact, "stamp")),
+        format!(
+            "{} trace {}:{:?}\n",
+            stamp(Math::Exact),
+            sel.keys.join(","),
+            sel.spec
+        )
+        .as_bytes(),
+    )?;
+    Ok(built)
+}
+
 /// `relift shaders`: translates the programs recorded in `out`/shaders again
 /// and says how many came out and how long it took.
 ///
 /// # Errors
 ///
 /// As [`build`].
-pub fn run(out: &Path, math: &str, ui: &mut crate::ui::Ui) -> Result<(), BoxError> {
+pub fn run(
+    out: &Path,
+    math: &str,
+    trace: Option<(&str, &Path)>,
+    ui: &mut crate::ui::Ui,
+) -> Result<(), BoxError> {
     let jobs = relift_proc::workers::jobs().max(1);
     let start = std::time::Instant::now();
     let modes = match math {
         "native" => vec![Math::Native],
         m => host_modes(m, false),
     };
-    let built = build(out, jobs, &modes)?;
+    let built = match trace {
+        Some((sel, dest)) => build_trace(out, dest, &TraceSel::parse(sel)?, jobs)?,
+        None => build(out, jobs, &modes)?,
+    };
     ui.note(&relift_progress::Line::new().text(format!(
         "{} of {} programs translated on {jobs} threads in {:.1} s",
         built.translated,

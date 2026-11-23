@@ -4,7 +4,7 @@
 programs, one file per family of instructions. `tests/kat.rs` translates each
 program for several hosts, validates the SPIR-V with `spirv-val` (when it is
 on the path) and runs it in a small SPIR-V interpreter
-(`tests/kat/spvi.rs`) under each denormal behavior the host may have; every
+(`gpus/spvi`) under each denormal behavior the host may have; every
 output must equal the device's, bit for bit.
 
 ## Programs

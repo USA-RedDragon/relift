@@ -112,6 +112,7 @@ pub struct Module {
 }
 
 // Opcodes.
+const OP_EXT_INST_IMPORT: u16 = 11;
 const OP_EXT_INST: u16 = 12;
 const OP_ENTRY_POINT: u16 = 15;
 const OP_EXECUTION_MODE: u16 = 16;
@@ -192,6 +193,9 @@ impl Module {
         };
         let mut i = 5;
         let mut cur: Option<(u32, Func)> = None;
+        // Imports of non-semantic instruction sets (debug info), whose
+        // instructions change nothing the program computes.
+        let mut non_semantic = Vec::new();
         while i < w.len() {
             let n = (w[i] >> 16) as usize;
             let op = (w[i] & 0xffff) as u16;
@@ -259,6 +263,13 @@ impl Module {
                     }
                 }
                 OP_ENTRY_POINT => m.entry = a[1],
+                OP_EXT_INST_IMPORT => {
+                    let name: Vec<u8> = a[1..].iter().flat_map(|x| x.to_le_bytes()).collect();
+                    if name.starts_with(b"NonSemantic.") {
+                        non_semantic.push(a[0]);
+                    }
+                }
+                OP_EXT_INST if non_semantic.contains(&a[2]) => {}
                 OP_EXECUTION_MODE => m.modes.push(a[1]),
                 OP_VARIABLE if cur.is_none() => {
                     m.globals.push((a[1], a[0], a[2], a.get(3).copied()));
@@ -604,6 +615,20 @@ impl<'m> Run<'m> {
                     }
                 }
                 224 | 225 => {} // barriers: one invocation
+                // AtomicIAdd, AtomicCompareExchange, AtomicExchange: one
+                // invocation, so a plain read and write.
+                234 | 230 | 229 => {
+                    let p = self.val(a[0]);
+                    let old = self.load(&p, ins.ty);
+                    let new = match ins.op {
+                        234 => V::S(old.s().wrapping_add(self.sv(a[3])) & mask(m.width(ins.ty))),
+                        230 if old.s() == self.sv(a[6]) => self.val(a[5]),
+                        230 => old.clone(),
+                        _ => self.val(a[3]),
+                    };
+                    self.store(&p, new);
+                    self.vals[ins.id as usize] = old;
+                }
                 _ => {
                     let v = self.op(ins);
                     self.vals[ins.id as usize] = v;

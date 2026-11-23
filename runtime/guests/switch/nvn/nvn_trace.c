@@ -89,6 +89,9 @@ static struct {
 bool nvn_trace_active;
 uint64_t nvn_trace_wide_draws;
 
+/** @brief The guest range RELIFT_NVN_TRACE_WATCH names (watch_size 0: none) and the hash of its bytes last seen. */
+static uint64_t watch_at, watch_size, watch_hash;
+
 void nvn_trace_image_gone(const vimg *v)
 {
     for (uint32_t i = 0; i < tr.ncache && i < MAX_CACHE; i++)
@@ -295,6 +298,12 @@ void nvn_trace_present(replay *r)
         if (!nvn_trace_parse(getenv("RELIFT_NVN_TRACE"), tr.dir, sizeof tr.dir, &tr.from, &tr.frames))
             tr.from = UINT64_MAX;
         tr.gbuffer = getenv("RELIFT_NVN_TRACE_GBUFFER") != NULL;
+        const char *w = getenv("RELIFT_NVN_TRACE_WATCH");
+        char *end = NULL;
+        if (w && (watch_at = strtoull(w, &end, 16), end && *end == ':'))
+            watch_size = strtoull(end + 1, NULL, 0);
+        if (watch_size > BUF_CAP)
+            watch_size = BUF_CAP;
     }
     if (tr.out) {
         fclose(tr.out);
@@ -322,6 +331,54 @@ void nvn_trace_present(replay *r)
     nvn_trace_active = tr.out != NULL;
     if (nvn_trace_active)
         rl_log(RL_LOG_INFO, "nvn", "tracing frame %llu into %s", (unsigned long long)g.presents, tr.frame_dir);
+}
+
+/**
+ * @brief The watched range's bytes as a file and a line, when they changed since the last look: "cpu" when the change
+ * came between commands (the guest wrote them), or the command name that ran before the look.
+ */
+static void watch_look(const char *after)
+{
+    if (!watch_size || !tr.out)
+        return;
+    const uint8_t *p = rl_mem_base() + watch_at;
+    uint64_t h = hash_bytes(p, watch_size);
+    if (h == watch_hash)
+        return;
+    watch_hash = h;
+    char name[40];
+    put_file("bufs", "bin", p, watch_size, name);
+    fprintf(tr.out, "{\"kind\":\"watch\",\"before\":%llu,\"after\":\"%s\",\"guest\":\"0x%llx\",\"size\":%llu,\"bytes\":\"%s\"}\n",
+            (unsigned long long)tr.cmd, after, (unsigned long long)watch_at, (unsigned long long)watch_size, name);
+}
+
+void nvn_trace_command(replay *r, const nvn_cmd *e, bool done)
+{
+    if (!tr.out)
+        return;
+    if (!done) {
+        watch_look("cpu");
+        fprintf(tr.out, "{\"kind\":\"cmd\",\"before\":%llu,\"name\":\"%s\",\"x\":[", (unsigned long long)tr.cmd,
+                nvn_cmd_name(e->op));
+        for (uint32_t i = 0; i < 8; i++)
+            fprintf(tr.out, "%s\"0x%llx\"", i ? "," : "", (unsigned long long)e->x[i]);
+        fprintf(tr.out, "]");
+        if (e->op == NVN_CMD_UPDATE_UNIFORM_BUFFER) {
+            const void *data = nvn_cmd_bytes(r->s, e->x[5]);
+            char name[40] = "";
+            if (data && e->x[4] && e->x[4] <= BUF_CAP)
+                put_file("bufs", "bin", data, e->x[4], name);
+            fprintf(tr.out, ",\"dst\":\"0x%llx\",\"data\":\"%s\"", (unsigned long long)(nvn_gpu_guest(e->x[1]) + e->x[3]),
+                    name);
+        }
+        fprintf(tr.out, "}\n");
+        return;
+    }
+    if (watch_size) {
+        if (!nvn_vk_flush(r))
+            return;
+        watch_look(nvn_cmd_name(e->op));
+    }
 }
 
 static void collect_buffers(const nvn_gfx *st, uint32_t first, uint32_t last)
@@ -446,8 +503,19 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
         dump_image(r, tr.tex[i].v, !tr.tex[i].image && !is_target(tr.tex[i].v), tr.tex[i].post);
     fprintf(f, "{\"i\":%llu,\"frame\":%llu,\"kind\":\"%s\"", (unsigned long long)tr.cmd++,
             (unsigned long long)g.presents, tr.kind);
-    if (compute)
+    if (compute) {
         fprintf(f, ",\"groups\":[%u,%u,%u]", c->groups[0], c->groups[1], c->groups[2]);
+        char name[40] = "";
+        if (c->c0) {
+            put_file("bufs", "bin", c->c0, c->c0_bytes, name);
+            json_file(f, "c0", name);
+        }
+        if (c->c1_guest && c->c1_size && c->c1_size <= BUF_CAP) {
+            put_file("bufs", "bin", rl_mem_base() + c->c1_guest, c->c1_size, name);
+            fprintf(f, ",\"c1_guest\":\"0x%llx\"", (unsigned long long)c->c1_guest);
+            json_file(f, "c1", name);
+        }
+    }
     else
         fprintf(f, ",\"mode\":%u,\"indexed\":%d,\"index_type\":%u,\"base_vertex\":%d,\"first\":%u,\"count\":%u,"
                    "\"first_instance\":%u,\"instances\":%u",

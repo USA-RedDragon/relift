@@ -131,8 +131,17 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Command::Shaders {
-            build_dir, math, ..
-        } => relift::shaders::run(build_dir, math, &mut ui),
+            build_dir,
+            math,
+            trace,
+            trace_dir,
+            ..
+        } => relift::shaders::run(
+            build_dir,
+            math,
+            trace.as_deref().zip(trace_dir.as_deref()),
+            &mut ui,
+        ),
         Command::Info { binary } => relift::build::run_info(&settings, binary.as_deref()),
         Command::Report {
             file,

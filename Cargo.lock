@@ -1318,10 +1318,15 @@ version = "0.1.0"
 dependencies = [
  "relift-cache",
  "relift-gpu-nv",
+ "relift-gpu-spvi",
  "relift-proc",
  "serde_json",
  "zstd",
 ]
+
+[[package]]
+name = "relift-gpu-spvi"
+version = "0.1.0"
 
 [[package]]
 name = "relift-gpu-table"

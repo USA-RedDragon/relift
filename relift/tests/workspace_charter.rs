@@ -264,7 +264,20 @@ const CHARTERS: &[Charter] = &[
         member: "relift-gpu-sm86",
         why: "the SM86 (Ampere) SASS decoder into relift-gpu-nv instructions; its tests run the translator on SM86 programs",
         normal: &["relift-gpu-nv"],
-        dev: &["relift-cache", "relift-proc", "serde_json", "zstd"],
+        dev: &[
+            "relift-cache",
+            "relift-gpu-spvi",
+            "relift-proc",
+            "serde_json",
+            "zstd",
+        ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-gpu-spvi",
+        why: "a small SPIR-V interpreter for the translator's compute programs; the known-answer tests and GPU replay run translations on the CPU with it",
+        normal: NONE,
+        dev: NONE,
         build: NONE,
     },
     Charter {

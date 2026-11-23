@@ -126,6 +126,53 @@ pub const RECORD_STORAGE_SLOT: u32 = 11;
 /// An interface record: the program reads or writes the storage image array
 /// at the binding in the second field (set 2, from binding 32 on).
 pub const RECORD_IMAGE_BINDING: u32 = 12;
+/// An interface record: the translation is in trace mode and writes a trace
+/// buffer of the word count in the second field (set 3, binding
+/// `TRACE_BINDING`; see `relift_gpu_nv::translate::Trace`).
+pub const RECORD_TRACE: u32 = 13;
+
+/// Trace mode for some programs of a table (`relift shaders --trace`): the
+/// programs whose key starts with one of `keys`, translated with `spec`.
+#[derive(Clone, Debug)]
+pub struct TraceSel {
+    pub keys: Vec<String>,
+    pub spec: relift_gpu_nv::translate::Trace,
+}
+
+impl TraceSel {
+    /// Parses `<key prefix>[,<key prefix>...]:<spec>` (see `Trace::parse`
+    /// for the spec).
+    ///
+    /// # Errors
+    ///
+    /// The text is not of that form.
+    pub fn parse(s: &str) -> Result<TraceSel, String> {
+        let (keys, spec) = s
+            .split_once(':')
+            .ok_or_else(|| format!("trace {s:?}: <key prefix>[,...]:<condition>"))?;
+        let keys: Vec<String> = keys.split(',').map(str::to_ascii_lowercase).collect();
+        if keys
+            .iter()
+            .any(|k| k.is_empty() || !k.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(format!("trace {s:?}: a key prefix is not hex"));
+        }
+        Ok(TraceSel {
+            keys,
+            spec: relift_gpu_nv::translate::Trace::parse(spec)?,
+        })
+    }
+
+    /// The trace spec for program `key`, if it is selected.
+    #[must_use]
+    pub fn of(&self, key: &[u8; 32]) -> Option<relift_gpu_nv::translate::Trace> {
+        let h = hex(key);
+        self.keys
+            .iter()
+            .any(|k| h.starts_with(k.as_str()))
+            .then(|| self.spec.clone())
+    }
+}
 
 /// The SHA-256 of `b`, the key a program goes by.
 #[must_use]
@@ -249,6 +296,7 @@ pub struct Translator {
     host: HostProfile,
     pipes: mesh::Pipelines,
     math: Math,
+    trace: Option<TraceSel>,
 }
 
 impl Translator {
@@ -273,7 +321,19 @@ impl Translator {
     ) -> Result<Translator, BoxError> {
         let host = host_of(device)?;
         let pipes = mesh::Pipelines::read(programs, &host)?;
-        Ok(Translator { host, pipes, math })
+        Ok(Translator {
+            host,
+            pipes,
+            math,
+            trace: None,
+        })
+    }
+
+    /// This translator with the programs `sel` selects in trace mode.
+    #[must_use]
+    pub fn with_trace(mut self, sel: Option<TraceSel>) -> Translator {
+        self.trace = sel;
+        self
     }
 
     /// Program `key`, whose bytes are `code`, translated as a table holds
@@ -300,6 +360,7 @@ impl Translator {
                 code,
                 options: Options {
                     math: self.math,
+                    trace: self.trace.as_ref().and_then(|t| t.of(&key)),
                     ..self.pipes.options(&key)
                 },
             }],
@@ -384,6 +445,24 @@ pub fn translate_math(
     math: Math,
     progress: &(dyn Fn(usize, usize) -> bool + Sync),
 ) -> Result<Built, BoxError> {
+    translate_traced(programs, device, dir, jobs, math, None, progress)
+}
+
+/// [`translate_math`] with the programs `trace` selects in trace mode, a
+/// debugging table (see [`TraceSel`]).
+///
+/// # Errors
+///
+/// As [`translate`].
+pub fn translate_traced(
+    programs: &Programs,
+    device: Option<&[u8]>,
+    dir: &Path,
+    jobs: usize,
+    math: Math,
+    trace: Option<&TraceSel>,
+    progress: &(dyn Fn(usize, usize) -> bool + Sync),
+) -> Result<Built, BoxError> {
     std::fs::create_dir_all(dir)?;
     let keys = programs.keys();
     let mut failed = String::new();
@@ -396,7 +475,7 @@ pub fn translate_math(
         m => dir.join(format!("{}.frames", table_file(m, "rlspv"))),
     };
     if let Some(device) = device.filter(|_| !keys.is_empty()) {
-        let tr = Translator::with_math(programs, device, math)?;
+        let tr = Translator::with_math(programs, device, math)?.with_trace(trace.cloned());
         let mut spool_file = relift_cache::StreamWriter::new(&spool)?;
         let mut done = 0;
         for batch in keys.chunks(jobs.max(1) * 4) {
@@ -626,6 +705,9 @@ pub fn records(i: &Interface) -> Vec<[u32; 4]> {
     }
     for &k in &i.storage_slots {
         recs.push([RECORD_STORAGE_SLOT, k, 0, 0]);
+    }
+    if i.trace_words != 0 {
+        recs.push([RECORD_TRACE, i.trace_words, 0, 0]);
     }
     let first_image = image_binding(ImageKind::Float, ImageDim::D1);
     for &b in i.texture_bindings.range(first_image..) {

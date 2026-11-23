@@ -35,6 +35,8 @@ typedef struct nvn_module {
     bool images, other_sets;
     /** @brief The program reads or writes the compute back end's mesh buffer (set NVN_MESH_BUFFER_SET, binding NVN_MESH_BUFFER_BINDING). */
     bool mesh_buffer;
+    /** @brief Words of its trace buffer (NVN_IFACE_TRACE); 0 for a translation not in trace mode. */
+    uint32_t trace_words;
     /**
      * @brief Storage buffer slots (bit k: slot k of its stage, from its interface records) the program reaches through
      * element k of its stage's slot array (set 1 binding nvn_slot_binding(stage)) instead of a buffer device address.

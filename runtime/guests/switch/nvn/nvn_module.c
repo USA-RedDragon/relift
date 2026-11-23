@@ -139,6 +139,8 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
                     m->other_sets = true;
             } else if (x->set == NVN_MESH_BUFFER_SET && x->binding == NVN_MESH_BUFFER_BINDING) {
                 m->mesh_buffer = true;
+            } else if (x->set == NVN_TRACE_SET && x->binding == NVN_TRACE_BINDING && stage == (int)NVN_STAGE_COMPUTE) {
+                /* the trace buffer: its size comes with the interface records */
             } else {
                 m->other_sets = true;
             }
@@ -468,6 +470,8 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
         m->marks_pages |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE && m->recs[i].bank == 1;
         m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
+        if (m->recs[i].kind == NVN_IFACE_TRACE)
+            m->trace_words = m->recs[i].bank;
         if (m->recs[i].kind == NVN_IFACE_STORAGE_SLOT && m->recs[i].bank < NVN_STORAGE_SLOTS)
             m->storage_slots |= 1u << m->recs[i].bank;
         if (m->recs[i].kind == NVN_IFACE_IMAGE_BINDING && !nvn_texset_declares_image(m->recs[i].bank)) {

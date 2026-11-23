@@ -216,6 +216,15 @@ pub enum Command {
         /// counts as hung and is killed.
         #[arg(long, value_name = "S", requires = "check_compile")]
         timeout: Option<u32>,
+        /// A debugging table in trace mode instead: `<key prefix>[,...]:<condition>`, where the condition is
+        /// `nan`, `inf`, `denorm` or `any`, comma-separated, then `@<pc>` and `/R<n>` to narrow it. The selected
+        /// programs record the first register write meeting it per instruction (runtime README,
+        /// RELIFT_NVN_GPU_TRACE). Written to --trace-dir; the build's own tables stay as they are.
+        #[arg(long, value_name = "SELECTION", requires = "trace_dir")]
+        trace: Option<String>,
+        /// Where the trace-mode table goes (run with RELIFT_NVN_TABLES set to it).
+        #[arg(long, value_name = "DIR")]
+        trace_dir: Option<PathBuf>,
     },
     /// Explain a stop report a shipped build wrote (missed code, an
     /// instruction it could not run) and add the missed target as a root

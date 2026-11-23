@@ -27,6 +27,7 @@ relift-gpu-nv = { path = "gpus/nv" }
 relift-gpu-sm53 = { path = "gpus/sm53" }
 relift-gpu-sm86 = { path = "gpus/sm86" }
 relift-gpu-table = { path = "gpus/table" }
+relift-gpu-spvi = { path = "gpus/spvi" }
 relift-cpu-z80 = { path = "cpus/z80" }
 relift-gb = { path = "guests/gb/guest" }
 relift-gb-analyze = { path = "guests/gb/analyze" }

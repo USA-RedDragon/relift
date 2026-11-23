@@ -443,6 +443,10 @@ typedef struct nvn_trace_cmd {
     uint32_t mode, itype, first, count, groups[3];
     int32_t base;
     bool indexed;
+    /** @brief A dispatch's driver bank c[0] as the program read it (c0_bytes of them), and c[1]'s guest range. */
+    const uint8_t *c0;
+    uint32_t c0_bytes;
+    uint64_t c1_guest, c1_size;
 } nvn_trace_cmd;
 
 /** @brief A frame is being traced (RELIFT_NVN_TRACE). */
@@ -463,6 +467,13 @@ void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t 
                        const uint8_t view[17]);
 /** @brief After the command is recorded: submits it and writes its line and its files. */
 void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
+/**
+ * @brief Each replayed command of a traced frame, before it runs (done false) and after (done true): a "cmd" line
+ * with its name and arguments (an inline uniform update with its target and its bytes as a file), and with
+ * RELIFT_NVN_TRACE_WATCH=<guest hex>:<size> a "watch" line with the range's bytes each time they change, naming
+ * the command that changed them or "cpu" for a change between commands.
+ */
+void nvn_trace_command(replay *r, const nvn_cmd *e, bool done);
 /** @brief The levels and layers of an image's host image (nvn_vk.c). */
 VkImageSubresourceRange nvn_vk_image_range(const vimg *v);
 /**

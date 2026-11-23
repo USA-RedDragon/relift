@@ -596,6 +596,14 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
 /** @brief Record kind: the program reads or writes the storage image array at binding `bank` of the texture set. */
 #define NVN_IFACE_IMAGE_BINDING 12u
 /**
+ * @brief Record kind: the translation is in trace mode (relift shaders --trace) and writes a trace buffer of `bank`
+ * words at set NVN_TRACE_SET binding NVN_TRACE_BINDING (the translator's TRACE_BINDING in GUEST_MEMORY_SET).
+ */
+#define NVN_IFACE_TRACE 13u
+/** @brief The descriptor set and binding of a trace-mode translation's trace buffer. */
+#define NVN_TRACE_SET 3u
+#define NVN_TRACE_BINDING 7u
+/**
  * @brief The storage image arrays the programs of the shader table use, as bits (binding - 32) / 8 * 6 + (binding - 32)
  * % 8 of *used; false when the table records none (a table without such records, or no table), and then every array
  * counts as used.

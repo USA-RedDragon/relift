@@ -192,6 +192,8 @@ pub struct Module {
     pub body: Vec<u32>,
     cache: HashMap<Vec<u32>, u32>,
     vars: Option<Vars>,
+    /// The label of the block being emitted (see [`Module::block`]).
+    block: u32,
 }
 
 /// The values of function variables known in the current block, so loads
@@ -437,6 +439,9 @@ impl Module {
     }
 
     pub fn emit_void(&mut self, opcode: u16, args: &[u32]) {
+        if opcode == op::LABEL {
+            self.block = args[0];
+        }
         if let Some(v) = &mut self.vars {
             let carried = std::mem::take(&mut v.carried);
             match opcode {
@@ -503,6 +508,18 @@ impl Module {
     /// emitted; [`Module::restore_vars`] puts it back.
     pub fn suspend_vars(&mut self) -> Option<Vars> {
         self.vars.take()
+    }
+
+    /// The label of the block code is being emitted into: a value made in
+    /// it since that label dominates what follows in the same block.
+    pub fn block(&self) -> u32 {
+        self.block
+    }
+
+    /// Sets the block [`Module::block`] reports, when code for another
+    /// function was emitted in between.
+    pub fn set_block(&mut self, b: u32) {
+        self.block = b;
     }
 
     /// Whether [`Module::keep_vars`] is on.

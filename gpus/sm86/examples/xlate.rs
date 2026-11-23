@@ -10,6 +10,13 @@ fn main() {
     while let Some(a) = raw.next() {
         if a == "--flush-fix" {
             flush_fix = raw.next().and_then(|v| v.parse::<u8>().ok());
+        } else if a == "--trace" {
+            let spec = raw.next().unwrap_or_default();
+            o.trace = Some(
+                relift_gpu_nv::translate::Trace::parse(&spec).unwrap_or_else(|e| panic!("{e}")),
+            );
+        } else if a == "--debug-info" {
+            o.debug_info = true;
         } else {
             kept.push(a);
         }

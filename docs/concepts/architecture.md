@@ -243,6 +243,7 @@ each choice.
 | `relift-gpu-nv` | `gpus/nv` | lib | 0.1.0 |  | What the NVIDIA shader front ends share: decoded instructions with nvdisasm's text form, programs, and the translator from them to SPIR-V | 2 |
 | `relift-gpu-sm53` | `gpus/sm53` | lib | 0.1.0 | `relift-gpu-nv` | NVIDIA SM53 (Maxwell GM20B, Switch) SASS: NVN programs, bundles and instruction forms; patterns from Ryujinx and envytools (MIT) | 2 |
 | `relift-gpu-sm86` | `gpus/sm86` | lib | 0.1.0 | `relift-gpu-nv` | NVIDIA SM86 (Ampere, Switch 2) SASS decoder into relift-gpu-nv instructions with nvdisasm's text form; field positions from Mesa NAK (MIT) | 2 |
+| `relift-gpu-spvi` | `gpus/spvi` | lib | 0.1.0 |  | A small SPIR-V interpreter for the compute programs relift's GPU translator emits: the known-answer tests and GPU replay run translations on the CPU with it | 2 |
 | `relift-gpu-table` | `gpus/table` | lib | 0.1.0 | `relift-cache`, `relift-gpu-nv`, `relift-gpu-sm86`, `relift-proc` | A Switch 2 game's shader table: translates its recorded SM86 programs for one device's capabilities into the tables the runtime reads, with the translator stamp; shared by relift and the on-device translator | 2 |
 | `relift-guest` | `core/guest` | lib | 0.1.0 | `relift-ir` | The guest contract and vocabulary, including the `Naming` trait a guest implements for its symbol scheme | 1 |
 | `relift-host` | `core/host` | lib | 0.1.0 |  | The host target list that emit and build share | 0 |

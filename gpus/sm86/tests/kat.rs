@@ -7,17 +7,16 @@
 mod common;
 #[path = "kat/file.rs"]
 mod file;
-#[path = "kat/spvi.rs"]
-mod spvi;
 
 use common::translate_with;
 use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS, XMAD};
 use relift_gpu_nv::translate::{
-    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Math, Options,
-    POOL_ARRAY_BINDING, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST, POOL_TABLE_STRIDE,
+    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, GUEST_MEMORY_SET, HostProfile, Math,
+    Options, POOL_ARRAY_BINDING, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST, POOL_TABLE_STRIDE,
+    TRACE_BINDING, TRACE_HEADER_WORDS, TRACE_SLOT_WORDS, Trace,
 };
 use relift_gpu_nv::{Inst, Operand, RegMods};
-use spvi::{Denorm, Env, Memory, Module, Run};
+use relift_gpu_spvi::{Denorm, Env, Memory, Module, Run};
 use std::collections::{HashMap, HashSet};
 
 /// Variants the translator rejects, as it should: it cannot do them exactly
@@ -76,6 +75,8 @@ const OUT: u64 = 0x3_0000_0000;
 const BASE_TABLE: u64 = 0x4_0000_0000;
 /// Where the pool table lies (see [`exec_pools`]).
 const POOL_TABLE: u64 = 0x5_0000_0000;
+/// Where the trace buffer lies.
+const TRACE: u64 = 0x6_0000_0000;
 
 /// The hosts the programs run for: the ones with buffer device addresses
 /// (the interpreter has no segment table). NVIDIA uses the MUFU model too:
@@ -149,12 +150,25 @@ fn exec(
     row: &[u32; 4],
     outs: usize,
 ) -> Vec<u32> {
-    exec_pools(m, behavior, canonical_nan, row, outs, true)
+    exec_pools(m, behavior, canonical_nan, row, outs, true, 0).0
+}
+
+/// [`exec`] with a trace buffer (see `Options::trace`) of `trace_words`
+/// at [`TRACE`], whose bytes come back with the outputs.
+fn exec_traced(
+    m: &Module,
+    behavior: (Denorm, bool),
+    canonical_nan: bool,
+    row: &[u32; 4],
+    outs: usize,
+    trace_words: u32,
+) -> (Vec<u32>, Vec<u8>) {
+    exec_pools(m, behavior, canonical_nan, row, outs, true, trace_words)
 }
 
 /// [`exec`] with the input and output regions in the pool table as two
 /// pools when `pools`, as the runtime binds every imported pool, or with
-/// an empty table.
+/// an empty table, and a trace buffer of `trace_words` at [`TRACE`].
 fn exec_pools(
     m: &Module,
     behavior: (Denorm, bool),
@@ -162,7 +176,8 @@ fn exec_pools(
     row: &[u32; 4],
     outs: usize,
     pools: bool,
-) -> Vec<u32> {
+    trace_words: u32,
+) -> (Vec<u32>, Vec<u8>) {
     let mut cb = vec![0u8; 0x10000];
     for k in 0..3 {
         cb[4 * k..4 * k + 4].copy_from_slice(&1u32.to_le_bytes());
@@ -183,6 +198,7 @@ fn exec_pools(
         }
     }
     uniforms.insert((POOL_SET, POOL_TABLE_BINDING), POOL_TABLE);
+    uniforms.insert((GUEST_MEMORY_SET, TRACE_BINDING), TRACE);
     let mem = Memory {
         regions: vec![
             (CBUF, cb),
@@ -190,6 +206,7 @@ fn exec_pools(
             (OUT, vec![0; 64]),
             (BASE_TABLE, table),
             (POOL_TABLE, pool_table),
+            (TRACE, vec![0; 4 * trace_words as usize]),
         ],
     };
     let env = Env {
@@ -203,9 +220,17 @@ fn exec_pools(
     };
     let mut r = Run::new(m, &env, mem);
     r.main();
-    (0..outs)
+    let out = (0..outs)
         .map(|k| r.mem.read(OUT + 4 * k as u64, 4) as u32)
-        .collect()
+        .collect();
+    let trace = r
+        .mem
+        .regions
+        .iter()
+        .find(|(b, _)| *b == TRACE)
+        .map(|(_, t)| t.clone())
+        .unwrap_or_default();
+    (out, trace)
 }
 
 /// The buffers a compute program reaches, as the runtime binds them:
@@ -856,4 +881,176 @@ fn probed_multiplication_fixes_give_the_flushing_results() {
             assert_eq!(bad, 0, "{name} {host}");
         }
     }
+}
+
+/// Trace mode (`Options::trace`) changes no result: every recorded program
+/// gives the same outputs with every check on as without it, on every
+/// fifth row (the rows are mixed edge and random values; all of them take
+/// minutes in the interpreter).
+#[test]
+fn trace_mode_keeps_every_output() {
+    let spec = Trace::parse("nan,inf,denorm").unwrap();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for name in file::names() {
+        let f = file::load(&name);
+        for v in &f.variants {
+            let p = relift_gpu_sm86::program::parse(&v.code);
+            for host in [unmirrored("nvidia")] {
+                let o = Options {
+                    host: host.clone(),
+                    exact_mufu: true,
+                    ..Options::default()
+                };
+                let Ok(plain) = translate_with(&p, &o) else {
+                    continue;
+                };
+                let traced = translate_with(
+                    &p,
+                    &Options {
+                        trace: Some(spec.clone()),
+                        ..o
+                    },
+                )
+                .unwrap_or_else(|e| panic!("{name}: {} traced: {e}", v.label));
+                let (mp, mt) = (Module::parse(&plain.spirv), Module::parse(&traced.spirv));
+                let d = behaviors(&mp, &host)[0];
+                for row in f.rows.iter().step_by(5) {
+                    let a = exec(&mp, d, host.canonical_nan, row, v.outs);
+                    let words = traced.interface.trace_words;
+                    let (b, _) = exec_traced(&mt, d, host.canonical_nan, row, v.outs, words);
+                    checked += 1;
+                    if a != b && failures.len() < 10 {
+                        failures.push(format!(
+                            "{name}: {} on {}: in {:08x?} plain {a:08x?} traced {b:08x?}",
+                            v.label, host.name, row
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 2_000, "{checked} rows");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// One slot of a trace buffer (see `Options::trace`): hits, sequence
+/// number, PC, destination, value, invocation id and source pairs.
+fn slot(t: &[u8], k: usize) -> Vec<u32> {
+    let w = |i: usize| u32::from_le_bytes(t[4 * i..4 * i + 4].try_into().unwrap());
+    let base = TRACE_HEADER_WORDS as usize + TRACE_SLOT_WORDS as usize * k;
+    (0..TRACE_SLOT_WORDS as usize)
+        .map(|i| w(base + i))
+        .collect()
+}
+
+/// The tracer names the instruction that makes a planted NaN (FADD of
+/// opposite infinities), infinity (MUFU.RCP of zero) and minus infinity
+/// (MUFU.LG2 of zero), with the value and the operand that made it.
+#[test]
+fn trace_names_planted_producers() {
+    let inf = |x: u32| x & 0x7fff_ffff == 0x7f80_0000;
+    type Case = (&'static str, &'static str, &'static str, fn(u32) -> bool);
+    let cases: [Case; 3] = [
+        ("fadd", "FADD", "nan", is_nan),
+        ("mufu_rcp", "MUFU", "inf", inf),
+        ("mufu_lg2", "MUFU", "inf", inf),
+    ];
+    let host = unmirrored("nvidia");
+    for (family, mnemonic, cond, made) in cases {
+        let f = file::load(family);
+        let spec = Trace::parse(cond).unwrap();
+        let mut named = 0;
+        for v in f.variants.iter().filter(|v| !v.label.contains("F16")) {
+            let p = relift_gpu_sm86::program::parse(&v.code);
+            let Some(k) = p
+                .code
+                .iter()
+                .position(|d| d.as_ref().is_ok_and(|i| i.mnemonic == mnemonic))
+            else {
+                continue;
+            };
+            let o = Options {
+                host: host.clone(),
+                exact_mufu: true,
+                trace: Some(spec.clone()),
+                ..Options::default()
+            };
+            let Ok(s) = translate_with(&p, &o) else {
+                continue;
+            };
+            let m = Module::parse(&s.spirv);
+            let d = behaviors(&m, &host)[0];
+            for (i, row) in f.rows.iter().enumerate() {
+                let want = v.expect[i * v.outs];
+                if !made(want) || row[..f.nin].iter().any(|&x| made(x) || is_nan(x)) {
+                    continue;
+                }
+                let words = s.interface.trace_words;
+                let (_, t) = exec_traced(&m, d, host.canonical_nan, row, v.outs, words);
+                let r = slot(&t, k);
+                assert!(
+                    r[0] >= 1,
+                    "{family} {}: {row:08x?} not caught at {:#x}",
+                    v.label,
+                    16 * k
+                );
+                assert_eq!(r[2], 16 * k as u32, "{family} {}: pc", v.label);
+                assert!(made(r[4]), "{family} {}: value {:#x}", v.label, r[4]);
+                let srcs: Vec<u32> = (0..4).map(|n| r[9 + 2 * n]).collect();
+                assert!(
+                    row[..f.nin].iter().any(|x| srcs.contains(x)),
+                    "{family} {}: sources {:08x?} of {row:08x?}",
+                    v.label,
+                    srcs
+                );
+                named += 1;
+            }
+        }
+        assert!(named > 0, "{family}: no planted case");
+    }
+}
+
+/// Debug info (`Options::debug_info`) and trace mode give modules `spirv-val`
+/// accepts for every recorded program, and debug info changes no output.
+#[test]
+fn debug_info_validates_and_keeps_outputs() {
+    let host = unmirrored("nvidia");
+    let mut checked = 0;
+    for name in file::names() {
+        let f = file::load(&name);
+        for v in f.variants.iter().step_by(7) {
+            let p = relift_gpu_sm86::program::parse(&v.code);
+            let o = Options {
+                host: host.clone(),
+                exact_mufu: true,
+                ..Options::default()
+            };
+            let Ok(plain) = translate_with(&p, &o) else {
+                continue;
+            };
+            let dbg = Options {
+                debug_info: true,
+                trace: Some(Trace::parse("nan,inf").unwrap()),
+                ..o
+            };
+            let s = common::translate_with(&p, &dbg)
+                .unwrap_or_else(|e| panic!("{name}: {} with debug info: {e}", v.label));
+            let (mp, md) = (Module::parse(&plain.spirv), Module::parse(&s.spirv));
+            let d = behaviors(&mp, &host)[0];
+            let row = &f.rows[0];
+            let a = exec(&mp, d, host.canonical_nan, row, v.outs);
+            let (b, _) = exec_traced(
+                &md,
+                d,
+                host.canonical_nan,
+                row,
+                v.outs,
+                s.interface.trace_words,
+            );
+            assert_eq!(a, b, "{name}: {}", v.label);
+            checked += 1;
+        }
+    }
+    assert!(checked > 50, "{checked} programs");
 }

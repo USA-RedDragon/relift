@@ -17,6 +17,7 @@ relift-gpu-nv = { workspace = true }
 workspace = true
 
 [dev-dependencies]
+relift-gpu-spvi = { workspace = true }
 relift-cache = { workspace = true }
 relift-proc = { workspace = true }
 serde_json = { workspace = true }
