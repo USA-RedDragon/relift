@@ -734,6 +734,9 @@ static bool record(rl_present *p, uint32_t index, bool capture)
     bool quarter = (t & QUARTER_TURNS) != 0;
     uint32_t lw = quarter ? p->sc_h : p->sc_w, lh = quarter ? p->sc_w : p->sc_h;
     uint32_t fw = quarter ? ph : pw, fh = quarter ? pw : ph;
+    /* A still taken away before the first frame arrives leaves nothing to show: skip the pass. */
+    if (!fw || !fh)
+        return false;
     int32_t src_format = source_format(p);
     rlvk_handle img = 0;
     uint32_t cw = fw, ch = fh;
