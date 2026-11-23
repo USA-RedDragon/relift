@@ -95,7 +95,29 @@ static struct {
     } *v;
     uint32_t n, cap;
     uint64_t max;
-} g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0, 0 };
+    /** @brief Counts the changes to the spans, for the pool table (nvn_pools.c). */
+    uint64_t gen;
+} g_pools = { PTHREAD_RWLOCK_INITIALIZER, NULL, 0, 0, 0, 0 };
+
+uint64_t nvn_pool_spans(nvn_span *out, uint32_t cap, uint32_t *n)
+{
+    pthread_rwlock_rdlock(&g_pools.lock);
+    uint32_t k = 0;
+    for (uint32_t i = 0; i < g_pools.n; i++) {
+        const struct pool_span *p = &g_pools.v[i];
+        if (!p->buf)
+            continue;
+        if (k < cap)
+            out[k] = (nvn_span){ p->gpu, p->size, p->memory, p->buf, p->base };
+        k++;
+    }
+    uint64_t gen = g_pools.gen;
+    pthread_rwlock_unlock(&g_pools.lock);
+    *n = k;
+    return gen;
+}
+
+uint64_t nvn_pool_generation(void) { return __atomic_load_n(&g_pools.gen, __ATOMIC_ACQUIRE); }
 
 static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf, uint64_t base)
 {
@@ -122,6 +144,7 @@ static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf, u
     g_pools.v[i].base = base;
     if (size > g_pools.max)
         g_pools.max = size;
+    __atomic_add_fetch(&g_pools.gen, 1, __ATOMIC_RELEASE);
     pthread_rwlock_unlock(&g_pools.lock);
 }
 
@@ -238,6 +261,7 @@ static void pools_remove(uint64_t gpu, uint64_t size, void *buf)
             g_freed[g_freed_n++ % FREED_MAX] = g_pools.v[i];
             memmove(&g_pools.v[i], &g_pools.v[i + 1], (g_pools.n - i - 1) * sizeof *g_pools.v);
             g_pools.n--;
+            __atomic_add_fetch(&g_pools.gen, 1, __ATOMIC_RELEASE);
             break;
         }
     pthread_rwlock_unlock(&g_pools.lock);

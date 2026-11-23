@@ -93,10 +93,10 @@ typedef nvn_module module;
 typedef nvn_pipe_key pipe_key;
 
 static struct {
-    VkDescriptorSetLayout set_layout[3], cset_layout[3];
+    VkDescriptorSetLayout set_layout[5], cset_layout[5];
     VkPipelineLayout layout, clayout, mlayout;
     /** @brief The compute back end of mesh draws: descriptor set layouts, the buffer all its passes share and its set. */
-    VkDescriptorSetLayout mset_layout[4];
+    VkDescriptorSetLayout mset_layout[5];
     VkBuffer mbuf;
     VkDeviceMemory mmem;
     /** @brief A 16-byte buffer for the storage slots a program never reaches (blank_buffer). */
@@ -167,6 +167,14 @@ static module *module_helper(replay *r, const char *kind, const module *mesh, in
     return m;
 }
 
+/** @brief Binds the batch slot's pool table (set NVN_POOL_SET) where the layout has it. */
+static void bind_pools(VkPipelineBindPoint at, VkPipelineLayout layout, VkDescriptorSetLayout has)
+{
+    VkDescriptorSet s = has ? nvn_pools_set(d.slot) : NULL;
+    if (s)
+        VK(vkCmdBindDescriptorSets)(g.cb, at, layout, NVN_POOL_SET, 1, &s, 0, NULL);
+}
+
 static bool layouts(void)
 {
     if (d.ready)
@@ -206,9 +214,11 @@ static bool layouts(void)
             return false;
     if (!(d.set_layout[2] = nvn_texset_layout()))
         return false;
+    d.set_layout[3] = nvn_empty_layout();
+    d.set_layout[4] = nvn_pools_layout();
     VkPushConstantRange fixed = { FIXED_STAGES, 0, sizeof(fixed_push) };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                       .setLayoutCount = 3,
+                                       .setLayoutCount = d.set_layout[3] && d.set_layout[4] ? 5 : 3,
                                        .pSetLayouts = d.set_layout,
                                        .pushConstantRangeCount = 1,
                                        .pPushConstantRanges = &fixed };
@@ -275,10 +285,11 @@ static bool mesh_layouts(void)
         VK(vkCreateDescriptorSetLayout)(g.dev, &li[2], NULL, &d.mset_layout[3]) != VK_SUCCESS)
         return false;
     d.mset_layout[2] = d.set_layout[2];
+    d.mset_layout[4] = d.set_layout[4];
     VkPushConstantRange fixed[2] = { { FIXED_STAGES, 0, sizeof(fixed_push) },
                                      { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(fixed_push) } };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                       .setLayoutCount = 4,
+                                       .setLayoutCount = d.mset_layout[4] ? 5 : 4,
                                        .pSetLayouts = d.mset_layout,
                                        .pushConstantRangeCount = 2,
                                        .pPushConstantRanges = fixed };
@@ -1596,6 +1607,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, &k);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
+    bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     for (uint32_t i = 0; i < dd.nb; i++)
@@ -1683,6 +1695,7 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, k);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
+    bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
     fixed_push fp = {
         .point_size = st->point_size,
         .alpha_ref = st->alpha_ref,
@@ -1811,6 +1824,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     VK(vkCmdUpdateBuffer)(g.cb, d.mbuf, 0, sizeof hdr, hdr);
     nvn_vk_barrier(g.cb);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.mlayout, 0, 4, sets, 0, NULL);
+    bind_pools(VK_PIPELINE_BIND_POINT_COMPUTE, d.mlayout, d.mset_layout[4]);
     fixed_push cfp = { .written_pages = nvn_mirror_written_pages_address() };
     VK(vkCmdPushConstants)(g.cb, d.mlayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof cfp, &cfp);
     if (task) {
@@ -1837,6 +1851,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
     nvn_pipe_set_dynamic(g.cb, &kg);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, 0, 4, sets, 0, NULL);
+    bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, d.mset_layout[4]);
     fixed_push fp = {
         .point_size = st->point_size,
         .alpha_ref = st->alpha_ref,
@@ -1970,9 +1985,11 @@ static bool compute_layouts(void)
         if (VK(vkCreateDescriptorSetLayout)(g.dev, &li[i], NULL, &d.cset_layout[i]) != VK_SUCCESS)
             return false;
     d.cset_layout[2] = d.set_layout[2];
+    d.cset_layout[3] = d.set_layout[3];
+    d.cset_layout[4] = d.set_layout[4];
     VkPushConstantRange pages = { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(fixed_push) };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                       .setLayoutCount = 3,
+                                       .setLayoutCount = d.set_layout[3] && d.set_layout[4] ? 5 : 3,
                                        .pSetLayouts = d.cset_layout,
                                        .pushConstantRangeCount = 1,
                                        .pPushConstantRanges = &pages };
@@ -2306,6 +2323,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         nvn_vk_begin_dispatch(r);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, 0, 3, dd.sets, 0, NULL);
+    bind_pools(VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, d.cset_layout[4]);
     fixed_push fp = { .written_pages = nvn_mirror_written_pages_address() };
     VK(vkCmdPushConstants)(g.cb, d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof fp, &fp);
     if (ibuf) {

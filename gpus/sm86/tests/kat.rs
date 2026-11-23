@@ -13,7 +13,8 @@ mod spvi;
 use common::translate_with;
 use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS, XMAD};
 use relift_gpu_nv::translate::{
-    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Options,
+    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Options, POOL_ARRAY_BINDING,
+    POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST, POOL_TABLE_STRIDE,
 };
 use relift_gpu_nv::{Inst, Operand, RegMods};
 use spvi::{Denorm, Env, Memory, Module, Run};
@@ -73,6 +74,8 @@ const IN: u64 = 0x2_0000_0000;
 const OUT: u64 = 0x3_0000_0000;
 /// Where the compute base table lies (see [`base_bindings`]).
 const BASE_TABLE: u64 = 0x4_0000_0000;
+/// Where the pool table lies (see [`exec_pools`]).
+const POOL_TABLE: u64 = 0x5_0000_0000;
 
 /// The hosts the programs run for: the ones with buffer device addresses
 /// (the interpreter has no segment table). NVIDIA uses the MUFU model too:
@@ -146,6 +149,20 @@ fn exec(
     row: &[u32; 4],
     outs: usize,
 ) -> Vec<u32> {
+    exec_pools(m, behavior, canonical_nan, row, outs, true)
+}
+
+/// [`exec`] with the input and output regions in the pool table as two
+/// pools when `pools`, as the runtime binds every imported pool, or with
+/// an empty table.
+fn exec_pools(
+    m: &Module,
+    behavior: (Denorm, bool),
+    canonical_nan: bool,
+    row: &[u32; 4],
+    outs: usize,
+    pools: bool,
+) -> Vec<u32> {
     let mut cb = vec![0u8; 0x10000];
     for k in 0..3 {
         cb[4 * k..4 * k + 4].copy_from_slice(&1u32.to_le_bytes());
@@ -153,13 +170,26 @@ fn exec(
     cb[0x160..0x168].copy_from_slice(&IN.to_le_bytes());
     cb[0x168..0x170].copy_from_slice(&OUT.to_le_bytes());
     let input: Vec<u8> = row.iter().flat_map(|x| x.to_le_bytes()).collect();
-    let (uniforms, table) = base_bindings(&cb);
+    let (mut uniforms, table) = base_bindings(&cb);
+    let mut pool_table = vec![0u8; 4 * (POOL_TABLE_FIRST + 2 * POOL_TABLE_STRIDE) as usize];
+    let mut arrays = HashMap::new();
+    if pools {
+        pool_table[..4].copy_from_slice(&2u32.to_le_bytes());
+        for (k, (at, size)) in [(IN, 16u32), (OUT, 64)].into_iter().enumerate() {
+            let w = 4 * (POOL_TABLE_FIRST + POOL_TABLE_STRIDE * k as u32) as usize;
+            pool_table[w..w + 8].copy_from_slice(&at.to_le_bytes());
+            pool_table[w + 8..w + 12].copy_from_slice(&size.to_le_bytes());
+            arrays.insert((POOL_SET, POOL_ARRAY_BINDING, k as u64), at);
+        }
+    }
+    uniforms.insert((POOL_SET, POOL_TABLE_BINDING), POOL_TABLE);
     let mem = Memory {
         regions: vec![
             (CBUF, cb),
             (IN, input),
             (OUT, vec![0; 64]),
             (BASE_TABLE, table),
+            (POOL_TABLE, pool_table),
         ],
     };
     let env = Env {
@@ -167,6 +197,7 @@ fn exec(
         canonical_nan,
         mul_zero_positive: behavior.1,
         uniforms,
+        arrays,
         local_id: [0; 3],
         group_id: [0; 3],
     };

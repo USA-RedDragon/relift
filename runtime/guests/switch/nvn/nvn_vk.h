@@ -82,6 +82,13 @@
 #define NVN_SLOT_BINDING_BASE 64u
 /** @brief The binding of set 1 that holds stage s's storage buffer slots, an array of NVN_STORAGE_SLOTS (slot k is element k). */
 static inline uint32_t nvn_slot_binding(uint32_t s) { return NVN_SLOT_BINDING_BASE + s; }
+/** @brief The translator's POOL_SET, POOL_ARRAY_BINDING, POOL_TABLE_BINDING, POOL_SEARCH_STEPS, POOL_TABLE_FIRST and POOL_TABLE_STRIDE (see nvn_pools.c). */
+#define NVN_POOL_SET 4u
+#define NVN_POOL_ARRAY_BINDING 0u
+#define NVN_POOL_TABLE_BINDING 1u
+#define NVN_POOL_SEARCH_STEPS 16u
+#define NVN_POOL_TABLE_FIRST 4u
+#define NVN_POOL_TABLE_STRIDE 4u
 /** @brief The translator's COMPUTE_BASE_BINDING: binding NVN_COMPUTE_BASE_BINDING + offset / 8 of set 1 is the compute base at c[0] byte offset. */
 #define NVN_COMPUTE_BASE_BINDING 128u
 /** @brief The translator's COMPUTE_BASE_BYTES: compute bases lie below this c[0] byte. */
@@ -914,5 +921,29 @@ uint32_t nvn_vk_retired_count(void);
 void nvn_texset_image_gone(const vimg *v);
 /** @brief Forgets image v in the trace's capture cache before v is freed. */
 void nvn_trace_image_gone(const vimg *v);
+
+/** @brief A piece of the pool table: the GPU address its descriptor starts at, its bytes, buffer and offset in it. */
+typedef struct nvn_pool_piece {
+    uint64_t gpu, size, off;
+    void *buf;
+} nvn_pool_piece;
+/**
+ * @brief The pieces of the n spans sp (at most cap into pc, sorted by address; *dropped those left out): each span cut
+ * into pieces of at most range bytes, the first starting at the align boundary at or below the span's first byte in
+ * its buffer, so piece k reaches GPU address a at byte a - gpu of its descriptor.
+ */
+uint32_t nvn_pool_pieces(const nvn_span *sp, uint32_t n, uint64_t range, uint64_t align, nvn_pool_piece *pc,
+                         uint32_t cap, uint32_t *dropped);
+/** @brief The pool table's set layout (set NVN_POOL_SET), made once; NULL when the device cannot make it. */
+VkDescriptorSetLayout nvn_pools_layout(void);
+/** @brief An empty set layout, for the set numbers a pipeline layout skips. */
+VkDescriptorSetLayout nvn_empty_layout(void);
+/**
+ * @brief The pool table's descriptor set of batch slot slot, its pieces and table written for the current pools (a
+ * change since it was last written rewrites it); NULL when it cannot be made.
+ */
+VkDescriptorSet nvn_pools_set(uint32_t slot);
+/** @brief The pieces of the pool table as written last, and the spans left out of it (no room), for the log. */
+void nvn_pools_counts(uint32_t *pieces, uint32_t *spans, uint32_t *dropped);
 
 #endif

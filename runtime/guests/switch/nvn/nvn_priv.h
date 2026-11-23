@@ -666,6 +666,20 @@ bool nvn_gpu_mapped(uint64_t gpu, uint64_t size);
  * the size guest bytes at guest; false when no imported pool holds them all.
  */
 bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off);
+/** @brief An imported pool's span: its GPU address and bytes, the guest address of its first byte, its buffer and the guest address of the buffer's first byte. */
+typedef struct nvn_span {
+    uint64_t gpu, size, memory;
+    void *buf;
+    uint64_t base;
+} nvn_span;
+/**
+ * @brief The spans of the imported pools (cap of them into out, sorted by GPU address; *n how many there are) and the
+ * generation of the span list they are, which nvn_pool_generation returns until the list changes.
+ */
+uint64_t nvn_pool_spans(nvn_span *out, uint32_t cap, uint32_t *n);
+/** @brief The generation of the imported pools' span list: it changes with every pool added or removed. */
+uint64_t nvn_pool_generation(void);
+
 /**
  * @brief The imported buffer (*buf) and offset (*off) of the pool that holds the guest byte at guest, the bytes of
  * the pool before it (*before) and from it on (*rest); false when no imported pool holds it.

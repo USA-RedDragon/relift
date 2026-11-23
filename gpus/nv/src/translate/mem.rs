@@ -22,6 +22,7 @@ mod atomic64;
 mod clock;
 pub(crate) mod lanes;
 pub(crate) mod order;
+pub(crate) mod pools;
 mod scratch;
 mod segments;
 pub(crate) mod slots;

@@ -39,6 +39,10 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use io::{PUSH_WRITTEN_PAGES, WRITTEN_PAGE_BITS};
+pub use mem::pools::{
+    POOL_ARRAY_BINDING, POOL_SEARCH_STEPS, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST,
+    POOL_TABLE_STRIDE,
+};
 pub use mem::slots::{
     COMPUTE_BASE_BINDING, COMPUTE_BASE_BYTES, COMPUTE_BASE_TABLE_BINDING, SLOT_BINDING_BASE,
     STORAGE_SLOTS, compute_base_binding, slot_binding, slot_row,
@@ -144,6 +148,8 @@ pub struct Interface {
     /// reaches through storage buffer descriptors (see
     /// [`compute_base_binding`]).
     pub compute_bases: BTreeSet<u32>,
+    /// The program searches the pool table (see `mem::pools`).
+    pub pools: bool,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
     pub texture_bindings: BTreeSet<u32>,
     /// Specialization constant id per bound handle whose texture's numeric

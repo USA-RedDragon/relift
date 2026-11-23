@@ -192,8 +192,10 @@ impl Ex<'_> {
                 let mut v = &self.slots[*s];
                 for &i in path {
                     match v {
-                        V::C(c) => v = &c[i],
-                        _ => panic!("bad access path"),
+                        V::C(c) if i < c.len() => v = &c[i],
+                        // a buffer the interpreter does not lay out (a runtime array, such as the empty pool
+                        // table): it reads zeros
+                        _ => return self.zero_of(t),
                     }
                 }
                 v.clone()

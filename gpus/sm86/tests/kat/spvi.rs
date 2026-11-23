@@ -61,6 +61,10 @@ pub enum Ptr {
     Var(usize, Rc<Vec<u64>>),
     /// Explicitly laid out memory: address and pointee type.
     Mem(u64, u32),
+    /// An array of buffer descriptors at (set, binding), its element type:
+    /// the first index of an access chain picks the buffer
+    /// ([`Env::arrays`]).
+    Desc(u32, u32, u32),
 }
 
 impl V {
@@ -406,6 +410,9 @@ pub struct Env {
     pub mul_zero_positive: bool,
     /// Contents of uniform blocks by (set, binding), placed in memory.
     pub uniforms: HashMap<(u32, u32), u64>,
+    /// Buffers of descriptor arrays by (set, binding, element), placed in
+    /// memory.
+    pub arrays: HashMap<(u32, u32, u64), u64>,
     pub local_id: [u32; 3],
     pub group_id: [u32; 3],
 }
@@ -454,6 +461,13 @@ impl<'m> Run<'m> {
             };
             let v = match class {
                 // Uniform, StorageBuffer: explicit layout at a fixed address.
+                2 | 12 if matches!(m.ty(pointee), Ty::Array(..) | Ty::RtArray(_)) => {
+                    let b = m.binding(id).expect("buffer binding");
+                    let (Ty::Array(e, _) | Ty::RtArray(e)) = m.ty(pointee).clone() else {
+                        unreachable!()
+                    };
+                    V::P(Ptr::Desc(b.0, b.1, e))
+                }
                 2 | 12 => {
                     let b = m.binding(id).expect("buffer binding");
                     let addr = *self
@@ -627,6 +641,14 @@ impl<'m> Run<'m> {
                     }
                 }
                 V::P(Ptr::Mem(addr, ty))
+            }
+            V::P(Ptr::Desc(set, binding, e)) => {
+                let addr = *self
+                    .env
+                    .arrays
+                    .get(&(*set, *binding, idx[0]))
+                    .unwrap_or_else(|| panic!("no buffer at ({set}, {binding})[{}]", idx[0]));
+                self.chain(&V::P(Ptr::Mem(addr, *e)), &idx[1..])
             }
             v => panic!("access chain base {v:?}"),
         }

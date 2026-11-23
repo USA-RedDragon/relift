@@ -944,13 +944,83 @@ fn graphics_accesses_off_the_slot_routes_search_the_slots() {
     assert!(spirv_ops(&s.spirv).contains(&234));
 }
 
-/// Compute programs do not search (their slots' place in c\[0\] is the
-/// dispatch's): an address no route takes keeps the buffer device address
-/// alone.
+/// Compute programs keep the buffer device address for an address no
+/// route proves: no slot or pool search.
 #[test]
 fn compute_accesses_off_the_routes_keep_the_address() {
     let s = run(&[ldg(SIZE_S16, 2, 4, 2)], &["S16"]);
     assert!(s.interface.storage_slots.is_empty());
+    assert!(!s.interface.pools);
     assert!(has_psb(&s));
     assert!(!spirv_ops(&s.spirv).contains(&247));
+}
+
+/// Whether the program searches the pool table: the table and the array
+/// at set 4, a NonUniform access chain, and the buffer device address
+/// only on the miss.
+fn searches_pools(s: &relift_gpu_nv::translate::Shader) -> bool {
+    let set4: Vec<u32> = insts(&s.spirv, DECORATE)
+        .iter()
+        .filter(|d| d[2] == 34 && d[3] == 4)
+        .map(|d| d[1])
+        .collect();
+    let bound = |b: u32| {
+        insts(&s.spirv, DECORATE)
+            .iter()
+            .any(|d| d[2] == DECO_BINDING && d[3] == b && set4.contains(&d[1]))
+    };
+    bound(0) && bound(1) && insts(&s.spirv, DECORATE).iter().any(|d| d[2] == 5300) && has_psb(s)
+}
+
+/// Graphics accesses that miss the slots search the pools too, in every
+/// kind of access: a load, a sub-word store and an atomic.
+#[test]
+fn graphics_slot_misses_search_the_pools() {
+    let s = staged(SPH_FRAGMENT, &[ldg(SIZE_S16, 2, 4, 2)], &["S16"]);
+    assert!(searches(&s) && searches_pools(&s));
+    let s = staged(SPH_FRAGMENT, &[stg(SIZE_U8, 4, 1, 2)], &["STG.E.EF.U8"]);
+    assert!(searches(&s) && searches_pools(&s));
+    let red = word(
+        0x18e,
+        1,
+        &[
+            (24, 8, 4),
+            (32, 8, 2),
+            (40, 24, 8),
+            (72, 1, 1),
+            (87, 3, 0),
+            (90, 1, 1),
+        ],
+    );
+    let s = staged(SPH_FRAGMENT, &[red], &["RED.E.ADD"]);
+    assert!(searches_pools(&s));
+}
+
+/// Where guest memory is mirrored, a graphics store marks its pages on
+/// every path, so one that goes through a slot or pool descriptor is
+/// copied back too: two marks (first and last byte) on each of the slot,
+/// pool and address paths.
+#[test]
+fn stores_through_slots_and_pools_mark_their_pages() {
+    use relift_gpu_nv::translate::{HostProfile, Options};
+    let h = HostProfile::presets()
+        .into_iter()
+        .find(|h| h.mirror_writes && h.bda)
+        .expect("a mirroring preset");
+    let mut b: Vec<u8> = [0u32; 32]
+        .iter()
+        .enumerate()
+        .flat_map(|(k, _)| if k == 0 { SPH_FRAGMENT } else { 0 }.to_le_bytes())
+        .collect();
+    b.extend(stg(SIZE_32, 4, 8, 2));
+    finish(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    let o = Options {
+        host: h,
+        ..Options::default()
+    };
+    let s = common::translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.marks_written_pages);
+    let marks = spirv_ops(&s.spirv).iter().filter(|&&o| o == 242).count();
+    assert_eq!(marks, 6, "page marks");
 }

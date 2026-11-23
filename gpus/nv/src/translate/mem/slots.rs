@@ -231,7 +231,7 @@ impl Ctx {
 
     /// A storage buffer block of a runtime array of `ty` (`size` bytes
     /// each).
-    fn view_block(&mut self, ty: u32, size: u32) -> u32 {
+    pub(crate) fn view_block(&mut self, ty: u32, size: u32) -> u32 {
         let arr = self.m.id();
         crate::spirv::inst(&mut self.m.types, op::TYPE_RUNTIME_ARRAY, &[arr, ty]);
         self.m.deco(arr, DECO_ARRAY_STRIDE, &[size]);
@@ -313,7 +313,7 @@ impl Ctx {
         Some(ptr)
     }
 
-    fn nonuniform_caps(&mut self) {
+    pub(crate) fn nonuniform_caps(&mut self) {
         self.cap(CAP_SHADER_NON_UNIFORM);
         self.cap(CAP_STORAGE_BUFFER_NON_UNIFORM);
     }
@@ -390,12 +390,29 @@ impl Ctx {
         Some((found, idx, base))
     }
 
+    /// Marks the page of a store or atomic at `addr` (and of its last
+    /// byte) written, where guest memory is mirrored, as a store through
+    /// the address does (see `Ctx::global_ptr_w`): the runtime copies back
+    /// only the pages a program marks, so a store through a slot or pool
+    /// descriptor that marked none would be lost.
+    fn mark_pool_write(&mut self, addr: u32) {
+        self.iface.global_store = true;
+        if self.host.mirror_writes && self.host.bda {
+            self.iface.marks_written_pages = true;
+            self.mark_written(addr);
+            let last = self.addr_add_const(addr, 15);
+            self.mark_written(last);
+        }
+    }
+
     /// Does `op` on the pointer to `ty` at global address `addr` (a store
     /// or atomic when `write`) and gives back the words it returns. An
     /// access no slot route takes searches the stage's slots at run time,
-    /// as the other recompilers do: one that holds the address is accessed
-    /// through its descriptor, and an address in none through the buffer
-    /// device address.
+    /// as the other recompilers do, and on a miss the table of every guest
+    /// memory pool (see [`super::pools`]): the slot or pool that holds the
+    /// address is accessed through its descriptor. Only an address in no
+    /// pool, which faults on the console, goes through the buffer device
+    /// address.
     pub(crate) fn global_op(
         &mut self,
         addr: u32,
@@ -411,42 +428,79 @@ impl Ctx {
             };
             op_fn(c, p)
         };
-        if self.route.is_some() || !self.searches() || !self.access_bytes(ty).is_power_of_two() {
+        if self.route.is_some() || !self.host.bda || !self.access_bytes(ty).is_power_of_two() {
             return direct(self, op_fn);
         }
-        let Some((found, idx, base)) = self.slot_search(addr) else {
+        // compute programs keep the buffer device address (see `mem::pools`)
+        if self.stage == Stage::Compute {
             return direct(self, op_fn);
+        }
+        let mut vars: Vec<u32> = Vec::new();
+        let keep = |c: &mut Ctx, words: Vec<u32>, vars: &mut Vec<u32>| {
+            if vars.is_empty() {
+                *vars = words
+                    .iter()
+                    .map(|_| {
+                        let v = c.m.id();
+                        c.locals.push(v);
+                        v
+                    })
+                    .collect();
+            }
+            for (&v, &w) in vars.iter().zip(&words) {
+                c.m.emit_void(op::STORE, &[v, w]);
+            }
         };
+        let slots = if self.searches() {
+            self.slot_search(addr)
+        } else {
+            None
+        };
+        let outer = self.m.id();
+        if let Some((found, idx, base)) = slots {
+            let hit = self.m.id();
+            let miss = self.m.id();
+            self.m.emit_void(op::SELECTION_MERGE, &[outer, 0]);
+            self.m
+                .emit_void(op::BRANCH_CONDITIONAL, &[found, hit, miss]);
+            self.m.emit_void(op::LABEL, &[hit]);
+            let p = self
+                .view_ptr(View::Slot(0), Some(idx), base, addr, ty, true)
+                .expect("the size is a power of two");
+            if write {
+                self.mark_pool_write(addr);
+            }
+            let words = op_fn(self, p);
+            keep(self, words, &mut vars);
+            self.m.emit_void(op::BRANCH, &[outer]);
+            self.m.emit_void(op::LABEL, &[miss]);
+        }
+        let (found, idx, base) = self.pool_search(addr);
         let hit = self.m.id();
         let miss = self.m.id();
-        let merge = self.m.id();
-        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        let inner = if slots.is_some() { self.m.id() } else { outer };
+        self.m.emit_void(op::SELECTION_MERGE, &[inner, 0]);
         self.m
             .emit_void(op::BRANCH_CONDITIONAL, &[found, hit, miss]);
         self.m.emit_void(op::LABEL, &[hit]);
         let p = self
-            .view_ptr(View::Slot(0), Some(idx), base, addr, ty, true)
+            .pool_ptr(idx, base, addr, ty)
             .expect("the size is a power of two");
-        let words = op_fn(self, p);
-        let vars: Vec<u32> = words
-            .iter()
-            .map(|_| {
-                let v = self.m.id();
-                self.locals.push(v);
-                v
-            })
-            .collect();
-        for (&v, &w) in vars.iter().zip(&words) {
-            self.m.emit_void(op::STORE, &[v, w]);
+        if write {
+            self.mark_pool_write(addr);
         }
-        self.m.emit_void(op::BRANCH, &[merge]);
+        let words = op_fn(self, p);
+        keep(self, words, &mut vars);
+        self.m.emit_void(op::BRANCH, &[inner]);
         self.m.emit_void(op::LABEL, &[miss]);
         let words = direct(self, op_fn);
-        for (&v, &w) in vars.iter().zip(&words) {
-            self.m.emit_void(op::STORE, &[v, w]);
+        keep(self, words, &mut vars);
+        self.m.emit_void(op::BRANCH, &[inner]);
+        self.m.emit_void(op::LABEL, &[inner]);
+        if slots.is_some() {
+            self.m.emit_void(op::BRANCH, &[outer]);
+            self.m.emit_void(op::LABEL, &[outer]);
         }
-        self.m.emit_void(op::BRANCH, &[merge]);
-        self.m.emit_void(op::LABEL, &[merge]);
         let u = self.u32t();
         vars.iter()
             .map(|&v| self.m.emit(op::LOAD, u, &[v]))

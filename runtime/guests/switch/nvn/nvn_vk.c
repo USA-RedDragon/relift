@@ -4380,6 +4380,18 @@ static void present_rate(uint64_t total)
     memset(&tm, 0, sizeof tm);
     uint64_t faults, starts;
     nvn_watch_stats(&faults, &starts);
+    {
+        static uint32_t last_pieces;
+        uint32_t pieces, spans, dropped;
+        nvn_pools_counts(&pieces, &spans, &dropped);
+        if (pieces != last_pieces || dropped) {
+            last_pieces = pieces;
+            if (dropped)
+                rl_log(RL_LOG_WARN, "nvn", "pool table: %u pieces of %u pools, %u left out", pieces, spans, dropped);
+            else
+                rl_log(RL_LOG_INFO, "nvn", "pool table: %u pieces of %u pools", pieces, spans);
+        }
+    }
     rl_log(RL_LOG_INFO, "nvn",
            "%llu presents, %.1f per second over the last %.1f s; texture watches %llu started, %llu written; "
            "host input %llu events",

@@ -42,6 +42,8 @@ typedef struct nvn_module {
     uint32_t storage_slots;
     /** @brief It declares its stage's slot array: every element is then bound, to a blank buffer past storage_slots. */
     bool slot_array;
+    /** @brief It searches the pool table (set NVN_POOL_SET, nvn_pools.c). */
+    bool pools;
     /**
      * @brief A compute program's bases (the translator's compute_base_binding): base j is reached through set 1
      * binding NVN_SLOT_BINDING_BASE + j, a storage buffer over the memory from the address in c[0] at byte

@@ -132,6 +132,11 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
                     m->texture_bindings |= 1u << x->binding;
                 else
                     m->images = true;
+            } else if (x->set == NVN_POOL_SET && (x->binding == NVN_POOL_ARRAY_BINDING || x->binding == NVN_POOL_TABLE_BINDING)) {
+                /* without the pool table the layouts have no set for it */
+                m->pools = true;
+                if (!nvn_pools_layout())
+                    m->other_sets = true;
             } else if (x->set == NVN_MESH_BUFFER_SET && x->binding == NVN_MESH_BUFFER_BINDING) {
                 m->mesh_buffer = true;
             } else {

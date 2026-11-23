@@ -284,6 +284,85 @@ TEST(nvn_a_compute_base_binding_becomes_a_slot_of_the_compute_layout)
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
+TEST(nvn_pool_pieces_reach_each_address_at_its_byte)
+{
+    /* spans: one unaligned in its buffer, one past the range, one small; the buffers' bytes are guest bytes */
+    nvn_span sp[3] = {
+        { 0xe1b47b0000ull, 0x29000, 0x1000040, (void *)1, 0x1000000 },
+        { 0xe100000000ull, 300ull << 20, 0x4000000, (void *)2, 0x4000000 },
+        { 0xe0a9010540ull, 0x40, 0x200540, (void *)3, 0x200000 },
+    };
+    nvn_pool_piece pc[16];
+    uint32_t dropped, n = nvn_pool_pieces(sp, 3, 128u << 20, 64, pc, 16, &dropped);
+    CHECK_EQ(dropped, 0u);
+    CHECK_EQ(n, 5u);
+    for (uint32_t k = 1; k < n; k++)
+        CHECK(pc[k - 1].gpu < pc[k].gpu);
+    for (uint32_t k = 0; k < n; k++) {
+        CHECK(pc[k].size <= 128u << 20);
+        CHECK_EQ(pc[k].off % 64, 0u);
+    }
+    /* every byte of every span: the last piece starting at or below it holds it, at the span's own byte */
+    for (uint32_t i = 0; i < 3; i++)
+        for (uint64_t at = 0; at < sp[i].size; at += sp[i].size / 97 + 1) {
+            uint64_t a = sp[i].gpu + at;
+            int32_t found = -1;
+            for (uint32_t k = 0; k < n; k++)
+                if (pc[k].gpu <= a)
+                    found = (int32_t)k;
+            CHECK(found >= 0);
+            if (found < 0)
+                continue;
+            const nvn_pool_piece *p = &pc[found];
+            CHECK(a - p->gpu < p->size);
+            CHECK(p->buf == sp[i].buf);
+            CHECK_EQ(p->off + (a - p->gpu), sp[i].memory - sp[i].base + at);
+        }
+    uint32_t few = nvn_pool_pieces(sp, 3, 128u << 20, 64, pc, 2, &dropped);
+    CHECK_EQ(few, 2u);
+    CHECK(dropped > 0);
+}
+
+TEST(nvn_a_program_that_searches_the_pools_binds_the_pool_table)
+{
+    uint32_t words[sizeof slot_vertex / 4];
+    memcpy(words, slot_vertex, sizeof words);
+    bool moved = false;
+    for (size_t i = 5; i + 3 < sizeof words / 4; i += words[i] >> 16)
+        if ((words[i] & 0xffff) == 71 && words[i + 2] == 33 && words[i + 3] == NVN_SLOT_BINDING_BASE) {
+            words[i + 3] = NVN_POOL_ARRAY_BINDING;
+            moved = true;
+        } else if ((words[i] & 0xffff) == 71 && words[i + 2] == 34 && words[i + 3] == 1) {
+            words[i + 3] = NVN_POOL_SET;
+        }
+    CHECK(moved);
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_one_table(dir, words, sizeof words, 0xa0));
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    if (!nvn_vk_ready()) {
+        CHECK(!getenv("RELIFT_VK_REQUIRE"));
+        printf("  skipped: no host Vulkan device\n");
+        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+        return;
+    }
+    char key[65], why[256] = "";
+    for (int i = 0; i < 32; i++)
+        snprintf(key + 2 * i, 3, "%02x", 0xa0 + i);
+    nvn_module *m = nvn_module_get(key, (int)NVN_STAGE_VERTEX, why, sizeof why);
+    if (!m)
+        printf("  %s\n", why);
+    CHECK(m != NULL);
+    if (m) {
+        CHECK(m->pools);
+        CHECK(!m->other_sets);
+        CHECK_EQ(m->driver, 0u);
+    }
+    CHECK(nvn_draw_layouts());
+    CHECK(nvn_pools_set(0) != NULL);
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
 TEST(nvn_a_geometry_program_that_writes_layer_draws_layered_and_feeds_the_fragment_program)
 {
     char dir[PATH_MAX];
