@@ -72,6 +72,41 @@ pub fn row(op: Op, src: Src) -> Row {
                        predicate other than PT stop; operands equal envydis on every census \
                        word",
         },
+        (Op::Iadd, _) => Row::Exact {
+            to: "IADD3",
+            evidence: "Ryujinx's EmitIadd adds SrcA and the second source (register, Imm20 \
+                       sign-extended, Imm32 or constant), plus the carry flag for .X, and with \
+                       .CC sets the carry flag from the unsigned wrap of the sum; SM86 IADD3 of \
+                       the two and RZ gives the same sum and that wrap as its carry out. The \
+                       carry flag is a predicate the program does not name (flow's \
+                       free_predicate): .CC writes it as IADD3's carry out, .X reads it as \
+                       IADD3.X's carry in. A negated operand (AvgMode NegA, NegB) is IADD3's \
+                       negated operand (Ryujinx negates it before the add); with a carry it \
+                       stops (the carries differ at -0), as do .PO (Ryujinx does not add \
+                       the one), .SAT and programs that name all seven predicates",
+        },
+        (Op::Iscadd, _) => Row::Exact {
+            to: "LEA",
+            evidence: "Ryujinx's EmitIscadd gives (SrcA << Imm5) + the second source and with \
+                       .CC the carry flag from the unsigned wrap of that add; SM86 LEA Rd, P, \
+                       Ra, B, s is the same sum with the same carry out, into the carry flag's \
+                       predicate as for IADD. Negated operands stop",
+        },
+        (Op::Ldg, _) => Row::Exact {
+            to: "LDG",
+            evidence: "Ryujinx's EmitLdg loads the words of the size (U8, S8, U16, S16, 32, 64, \
+                       128 bits) at the 64-bit address of the register pair (.E) plus Imm24 \
+                       sign-extended and does not read the cache operation; SM86 LDG.E of the \
+                       same size at [Ra.64+imm] is a weak load of the same bytes. A 32-bit \
+                       address, an RZ base, UB128 and .CV stop",
+        },
+        (Op::Stg, _) => Row::Exact {
+            to: "STG",
+            evidence: "Ryujinx's EmitStg stores the data register's words of the size at the \
+                       64-bit address (.E) plus Imm24 and does not read the cache operation; \
+                       SM86 STG.E of the same size at [Ra.64+imm] is a weak store of the same \
+                       bytes. A 32-bit address and an RZ base stop",
+        },
         (Op::Nop, _) => Row::Exact {
             to: "NOP",
             evidence: "Ryujinx's Nop emits nothing and the SM86 translator's NOP emits nothing",

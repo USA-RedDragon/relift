@@ -136,10 +136,10 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | I2I R | stop | | no semantic check yet |
 | I2I I | stop | | no semantic check yet |
 | I2I C | stop | | no semantic check yet |
-| IADD R | stop | | no semantic check yet |
-| IADD I | stop | | no semantic check yet |
-| IADD C | stop | | no semantic check yet |
-| IADD 32I | stop | | no semantic check yet |
+| IADD R | exact | IADD3 | Ryujinx's EmitIadd adds SrcA and the second source (register, Imm20 sign-extended, Imm32 or constant), plus the carry flag for .X, and with .CC sets the carry flag from the unsigned wrap of the sum; SM86 IADD3 of the two and RZ gives the same sum and that wrap as its carry out. The carry flag is a predicate the program does not name (flow's free_predicate): .CC writes it as IADD3's carry out, .X reads it as IADD3.X's carry in. A negated operand (AvgMode NegA, NegB) is IADD3's negated operand (Ryujinx negates it before the add); with a carry it stops (the carries differ at -0), as do .PO (Ryujinx does not add the one), .SAT and programs that name all seven predicates |
+| IADD I | exact | IADD3 | Ryujinx's EmitIadd adds SrcA and the second source (register, Imm20 sign-extended, Imm32 or constant), plus the carry flag for .X, and with .CC sets the carry flag from the unsigned wrap of the sum; SM86 IADD3 of the two and RZ gives the same sum and that wrap as its carry out. The carry flag is a predicate the program does not name (flow's free_predicate): .CC writes it as IADD3's carry out, .X reads it as IADD3.X's carry in. A negated operand (AvgMode NegA, NegB) is IADD3's negated operand (Ryujinx negates it before the add); with a carry it stops (the carries differ at -0), as do .PO (Ryujinx does not add the one), .SAT and programs that name all seven predicates |
+| IADD C | exact | IADD3 | Ryujinx's EmitIadd adds SrcA and the second source (register, Imm20 sign-extended, Imm32 or constant), plus the carry flag for .X, and with .CC sets the carry flag from the unsigned wrap of the sum; SM86 IADD3 of the two and RZ gives the same sum and that wrap as its carry out. The carry flag is a predicate the program does not name (flow's free_predicate): .CC writes it as IADD3's carry out, .X reads it as IADD3.X's carry in. A negated operand (AvgMode NegA, NegB) is IADD3's negated operand (Ryujinx negates it before the add); with a carry it stops (the carries differ at -0), as do .PO (Ryujinx does not add the one), .SAT and programs that name all seven predicates |
+| IADD 32I | exact | IADD3 | Ryujinx's EmitIadd adds SrcA and the second source (register, Imm20 sign-extended, Imm32 or constant), plus the carry flag for .X, and with .CC sets the carry flag from the unsigned wrap of the sum; SM86 IADD3 of the two and RZ gives the same sum and that wrap as its carry out. The carry flag is a predicate the program does not name (flow's free_predicate): .CC writes it as IADD3's carry out, .X reads it as IADD3.X's carry in. A negated operand (AvgMode NegA, NegB) is IADD3's negated operand (Ryujinx negates it before the add); with a carry it stops (the carries differ at -0), as do .PO (Ryujinx does not add the one), .SAT and programs that name all seven predicates |
 | IADD3 R | stop | | no semantic check yet |
 | IADD3 I | stop | | no semantic check yet |
 | IADD3 C | stop | | no semantic check yet |
@@ -168,10 +168,10 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | IMUL 32I | stop | | no semantic check yet |
 | IPA | exact and pseudo | IPA; IPA.MUL, IPA.SAT | Ryujinx's Ipa and the SM86 translator's IPA both give a perspective input times FragCoord.w and take the mode from the SPH input map (words 6 to 13 in both headers); .CONSTANT of a non-flat input stops in the translator. .MUL (times SrcB) and .SAT (clamp, NaN to 0) have no SM86 IPA form: pseudo, as Ryujinx (round to nearest, denormals kept, inferred). Indexed, offset, sample and .SC forms and a source predicate other than PT stop; operands equal envydis on every census word |
 | ISBERD | stop | | no semantic check yet |
-| ISCADD R | stop | | no semantic check yet |
-| ISCADD I | stop | | no semantic check yet |
-| ISCADD C | stop | | no semantic check yet |
-| ISCADD 32I | stop | | no semantic check yet |
+| ISCADD R | exact | LEA | Ryujinx's EmitIscadd gives (SrcA << Imm5) + the second source and with .CC the carry flag from the unsigned wrap of that add; SM86 LEA Rd, P, Ra, B, s is the same sum with the same carry out, into the carry flag's predicate as for IADD. Negated operands stop |
+| ISCADD I | exact | LEA | Ryujinx's EmitIscadd gives (SrcA << Imm5) + the second source and with .CC the carry flag from the unsigned wrap of that add; SM86 LEA Rd, P, Ra, B, s is the same sum with the same carry out, into the carry flag's predicate as for IADD. Negated operands stop |
+| ISCADD C | exact | LEA | Ryujinx's EmitIscadd gives (SrcA << Imm5) + the second source and with .CC the carry flag from the unsigned wrap of that add; SM86 LEA Rd, P, Ra, B, s is the same sum with the same carry out, into the carry flag's predicate as for IADD. Negated operands stop |
+| ISCADD 32I | exact | LEA | Ryujinx's EmitIscadd gives (SrcA << Imm5) + the second source and with .CC the carry flag from the unsigned wrap of that add; SM86 LEA Rd, P, Ra, B, s is the same sum with the same carry out, into the carry flag's predicate as for IADD. Negated operands stop |
 | ISET R | stop | | no semantic check yet |
 | ISET I | stop | | no semantic check yet |
 | ISET C | stop | | no semantic check yet |
@@ -184,7 +184,7 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | KIL | exact | KILL | the same kill-thread instruction (envydis's kil, nvdisasm's KILL); the SM86 translator demotes, as for every KILL, and Ryujinx terminates (OpKill), which differs only in the quad's derivatives after the kill, undefined under OpKill. An unguarded KIL ends its path: the control-flow pass ends the invocation after it where nothing else reaches. A condition code test stops (tests/flow.rs) |
 | LD | stop | | no semantic check yet |
 | LDC | stop | | no semantic check yet |
-| LDG | stop | | no semantic check yet |
+| LDG | exact | LDG | Ryujinx's EmitLdg loads the words of the size (U8, S8, U16, S16, 32, 64, 128 bits) at the 64-bit address of the register pair (.E) plus Imm24 sign-extended and does not read the cache operation; SM86 LDG.E of the same size at [Ra.64+imm] is a weak load of the same bytes. A 32-bit address, an RZ base, UB128 and .CV stop |
 | LDL | stop | | no semantic check yet |
 | LDS | stop | | no semantic check yet |
 | LEA R | stop | | no semantic check yet |
@@ -260,7 +260,7 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | SHR C | stop | | no semantic check yet |
 | SSY | exact | BSSY | the control-flow pass resolves the reconvergence stack as Ryujinx's decoder does (pushes propagated into their pops); the push becomes a BSSY on the barrier of its stack depth with the same target, where the guest's lanes meet again. A push at two depths stops (tests/flow.rs) |
 | ST | stop | | no semantic check yet |
-| STG | stop | | no semantic check yet |
+| STG | exact | STG | Ryujinx's EmitStg stores the data register's words of the size at the 64-bit address (.E) plus Imm24 and does not read the cache operation; SM86 STG.E of the same size at [Ra.64+imm] is a weak store of the same bytes. A 32-bit address and an RZ base stop |
 | STL | stop | | no semantic check yet |
 | STP | stop | | no semantic check yet |
 | STS | stop | | no semantic check yet |
@@ -315,4 +315,4 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | XMAD C | stop | | no semantic check yet |
 | XMAD RC | stop | | no semantic check yet |
 
-293 forms: 47 exact, 5 exact and pseudo, 3 pseudo, 238 stop.
+293 forms: 57 exact, 5 exact and pseudo, 3 pseudo, 228 stop.

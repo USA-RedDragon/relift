@@ -162,12 +162,218 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::TxqB, _) => txq(i, true),
         (Op::Ald, _) => ald(i),
         (Op::Ipa, _) => return Some(ipa(i)),
+        (Op::Iadd, _) => iadd(i, f),
+        (Op::Iscadd, _) => iscadd(i, f),
+        (Op::Ldg, _) => ldg(i),
+        (Op::Stg, _) => stg(i),
         _ => return None,
     };
     Some(r.map_or_else(Lowered::Stop, Lowered::Exact))
 }
 
 type Res = Result<Inst86, &'static str>;
+
+/// The second source of an integer form: a register, the immediate
+/// (Imm20 sign-extended from 20 bits, or Imm32), or a constant.
+fn int_b(i: &Inst) -> Result<Operand, &'static str> {
+    Ok(match i.enc.src {
+        Src::Reg => reg(f(i, "SrcB")),
+        Src::Imm => {
+            let v = f(i, "Imm20");
+            let v = if v & 0x8_0000 != 0 {
+                v | 0xfff0_0000
+            } else {
+                v
+            };
+            Operand::Hex(v & 0xffff_ffff)
+        }
+        Src::Imm32 => Operand::Hex(f(i, "Imm32")),
+        Src::CBuf => cbuf_of(i, false, false)?,
+        _ => return Err("no SM86 operand form"),
+    })
+}
+
+/// `o` negated when `neg`: a register or constant with its negation
+/// modifier, an immediate as its two's complement.
+fn negated(o: Operand, neg: bool) -> Operand {
+    if !neg {
+        return o;
+    }
+    match o {
+        Operand::Reg(n, m) => Operand::Reg(n, RegMods { neg: true, ..m }),
+        Operand::CBuf {
+            bank,
+            index,
+            offset,
+            mods,
+            space,
+        } => Operand::CBuf {
+            bank,
+            index,
+            offset,
+            mods: RegMods { neg: true, ..mods },
+            space,
+        },
+        Operand::Hex(v) => Operand::Hex(v.wrapping_neg() & 0xffff_ffff),
+        o => o,
+    }
+}
+
+/// The carry predicate of a program's condition code (see
+/// `flow::free_predicate`), for a form that writes or reads it.
+fn cc_pred(f: Option<&Flow>) -> Result<u8, &'static str> {
+    match f {
+        Some(Flow { cc: Some(p), .. }) => Ok(*p),
+        Some(_) => Err("condition code carry in a program that names all seven predicates"),
+        None => Err("condition code carry outside a program"),
+    }
+}
+
+/// `p` with the carry-out predicate fields of `IADD3`, `IMAD` and `LEA`:
+/// `pd` the first (`PT` for none), the second none.
+fn carry_out(mut p: Inst86, pd: u8) -> Inst86 {
+    p.fields = Fields {
+        pd,
+        pd2: PT as u8,
+        ..Fields::default()
+    };
+    p
+}
+
+/// `IADD Rd, Ra, B` with `.CC` and `.X`: SM86 `IADD3 Rd, Pcc, Ra, B, RZ`
+/// (the carry out into the condition code's predicate where `.CC`), and
+/// with `.X` `IADD3.X Rd, Pcc, Ra, B, RZ, Pcc, !PT` (the carry in from it).
+/// Ryujinx's EmitIadd adds the carry flag for `.X` and sets it from the
+/// unsigned wrap of the sum, which is IADD3's carry out of a two-term sum.
+/// A negated operand (AvgMode NegA, NegB) is IADD3's negated operand;
+/// with a carry it stops (Maxwell's carry of a + -0 is 0, IADD3's of
+/// a + ~0 + 1 is 1), as do `.PO` and `.SAT`.
+fn iadd(i: &Inst, fl: Option<&Flow>) -> Res {
+    let avg = f(i, "AvgMode");
+    if avg == 3 {
+        return Err("IADD.PO");
+    }
+    if f(i, "Sat") != 0 {
+        return Err("IADD.SAT");
+    }
+    let (cc_out, x) = (f(i, "WriteCC") != 0, f(i, "X") != 0);
+    if avg != 0 && (cc_out || x) {
+        return Err("IADD with a negated operand and a condition code carry");
+    }
+    let cc = if cc_out || x {
+        Some(cc_pred(fl)?)
+    } else {
+        None
+    };
+    let mut p = if x {
+        with(inst(i, "IADD3"), &["X"])
+    } else {
+        inst(i, "IADD3")
+    };
+    p.ops.push(reg(f(i, "Dest")));
+    let out = if cc_out {
+        cc.unwrap_or(PT as u8)
+    } else {
+        PT as u8
+    };
+    if cc_out {
+        p.ops.push(pred(u64::from(out), false));
+    }
+    p.ops.push(reg_m(f(i, "SrcA"), avg == 2, false));
+    p.ops.push(negated(int_b(i)?, avg == 1));
+    p.ops.push(reg(RZ));
+    if let (true, Some(c)) = (x, cc) {
+        p.ops.push(pred(u64::from(c), false));
+        p.ops.push(pred(PT, true));
+    }
+    Ok(carry_out(p, out))
+}
+
+/// `ISCADD Rd, Ra, B, s` with `.CC`: SM86 `LEA Rd, Pcc, Ra, B, s`, which
+/// is `(Ra << s) + B` with the carry out of the add, as Ryujinx's
+/// EmitIscadd computes and flags it. Negated operands stop.
+fn iscadd(i: &Inst, fl: Option<&Flow>) -> Res {
+    if f(i, "AvgMode") != 0 {
+        return Err("ISCADD with a negated operand or .PO");
+    }
+    let out = if f(i, "WriteCC") != 0 {
+        cc_pred(fl)?
+    } else {
+        PT as u8
+    };
+    let mut p = inst(i, "LEA");
+    p.ops.push(reg(f(i, "Dest")));
+    if out != PT as u8 {
+        p.ops.push(pred(u64::from(out), false));
+    }
+    p.ops.push(reg(f(i, "SrcA")));
+    p.ops.push(int_b(i)?);
+    p.ops.push(Operand::Hex(f(i, "Imm5")));
+    Ok(carry_out(p, out))
+}
+
+/// The SM86 size modifier of a Maxwell global access size: U8, S8, U16,
+/// S16, B32 (none), B64, B128.
+fn ls_size(v: u64) -> Result<&'static str, &'static str> {
+    Ok(match v {
+        0 => "U8",
+        1 => "S8",
+        2 => "U16",
+        3 => "S16",
+        4 => "",
+        5 => "64",
+        6 => "128",
+        _ => return Err("global access of size UB128"),
+    })
+}
+
+/// The SM86 address `[Ra.64+offset]` of a Maxwell global access: a
+/// register pair (`.E`) plus Imm24 sign-extended. A 32-bit address (no
+/// `.E`) and an RZ base stop.
+fn global_addr(i: &Inst) -> Result<Operand, &'static str> {
+    if f(i, "E") == 0 {
+        return Err("global access through a 32-bit address");
+    }
+    let ra = f(i, "SrcA");
+    if ra == RZ {
+        return Err("global access at an absolute address");
+    }
+    let v = f(i, "Imm24");
+    let off = if v & 0x80_0000 != 0 {
+        v as i64 - 0x100_0000
+    } else {
+        v as i64
+    };
+    let s = match off {
+        0 => format!("[R{ra}.64]"),
+        o if o < 0 => format!("[R{ra}.64-{:#x}]", -o),
+        o => format!("[R{ra}.64+{o:#x}]"),
+    };
+    Ok(Operand::Sym(s))
+}
+
+/// `LDG.E Rd, [Ra+imm]`: SM86 `LDG.E Rd, [Ra.64+imm]` of the same size, a
+/// weak load. Ryujinx's EmitLdg loads each word of the size at the address
+/// and does not read the cache operation; `.CV` (volatile) stops.
+fn ldg(i: &Inst) -> Res {
+    if f(i, "CacheOp") == 3 {
+        return Err("LDG.CV");
+    }
+    let mut p = with(inst(i, "LDG"), &["E", ls_size(f(i, "LsSize"))?]);
+    p.ops.push(reg(f(i, "Dest")));
+    p.ops.push(global_addr(i)?);
+    Ok(p)
+}
+
+/// `STG.E [Ra+imm], Rd`: SM86 `STG.E [Ra.64+imm], Rd` of the same size, a
+/// weak store, as Ryujinx's EmitStg stores the data register's words; the
+/// cache operation is not read there either.
+fn stg(i: &Inst) -> Res {
+    let mut p = with(inst(i, "STG"), &["E", ls_size(f(i, "LsSize"))?]);
+    p.ops.push(global_addr(i)?);
+    p.ops.push(reg(f(i, "Dest")));
+    Ok(p)
+}
 
 /// `BRA` with the condition code test T: SM86 `BRA` to the same
 /// instruction under the same guard.

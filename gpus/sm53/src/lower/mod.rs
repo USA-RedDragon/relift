@@ -82,7 +82,8 @@ fn sph86(p: &Program) -> Result<Option<Sph86>, &'static str> {
 /// Every form that stops, once per form and reason at its first use, or
 /// the first construct the control-flow pass does not resolve.
 pub fn program(p: &Program) -> Result<Program86, Vec<Stop>> {
-    let f = flow::flow(&p.code).map_err(|s| vec![s])?;
+    let mut f = flow::flow(&p.code).map_err(|s| vec![s])?;
+    f.cc = flow::free_predicate(&p.code);
     let sph = sph86(p).map_err(|reason| {
         vec![Stop {
             at: 0,

@@ -56,6 +56,34 @@ pub struct Flow {
     /// lowers to an unguarded `EXIT`, so that the demoted invocation ends
     /// where the Maxwell thread did. An index may be one past the code.
     pub kil_exits: BTreeSet<usize>,
+    /// The SM86 predicate that stands for the condition code's carry flag:
+    /// the highest of P0 to P6 the program does not name (see
+    /// [`free_predicate`]), `None` when it names all seven.
+    pub cc: Option<u8>,
+}
+
+/// The highest predicate of P0 to P6 that no instruction of `code` names
+/// in a predicate field (guards, destinations, sources). The lowering
+/// keeps the condition code's carry flag there: Maxwell's `.CC` carry out
+/// and `.X` carry in become an SM86 carry predicate, which no Maxwell
+/// instruction can then see or change.
+pub fn free_predicate(code: &[u8]) -> Option<u8> {
+    let mut used = [false; 7];
+    for s in crate::bundle::slots(code) {
+        let Some(i) = crate::Inst::decode(s.word, s.at) else {
+            continue;
+        };
+        for fld in i.form().fields() {
+            if fld.name.contains("Pred") && !fld.name.ends_with("Inv") && fld.name != "PredicateOp"
+            {
+                let v = fld.get(s.word);
+                if v < 7 {
+                    used[v as usize] = true;
+                }
+            }
+        }
+    }
+    (0..7u8).rev().find(|&p| !used[usize::from(p)])
 }
 
 /// The instruction index of code offset `at` (scheduling words skipped).
