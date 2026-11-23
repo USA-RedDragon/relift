@@ -1,10 +1,14 @@
 /**
  * @file bsd_net.h
  * @brief The socket layer behind bsd:u and bsd:s: a descriptor table of a
- * console that has no network. Sockets are created and configured as on a
- * console, and sockets of the program itself talk over an in-process
- * loopback (127.0.0.0/8 and 0.0.0.0) that never touches the host; every
- * other address is unreachable. Errno values are the console's (FreeBSD).
+ * console without an internet connection. Sockets are created and configured
+ * as on a console, and sockets of the program itself talk over an
+ * in-process loopback (127.0.0.0/8 and 0.0.0.0) that never touches the host.
+ * While the process is in a local wireless network (ldn.h, net.mode lan) the
+ * members of that network are reachable too, through host sockets on the
+ * network's interface: the other nodes' addresses and the network's
+ * broadcast address, and nothing else. Every other address is unreachable.
+ * Errno values are the console's (FreeBSD).
  */
 #ifndef RELIFT_BSD_NET_H
 #define RELIFT_BSD_NET_H
@@ -32,6 +36,7 @@ enum {
     BSD_EISCONN = 56,
     BSD_ENOTCONN = 57,
     BSD_ECONNREFUSED = 61,
+    BSD_EINPROGRESS = 36,
     BSD_EINVAL = 22
 };
 

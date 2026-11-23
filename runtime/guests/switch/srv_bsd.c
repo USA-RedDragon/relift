@@ -1,9 +1,11 @@
 /**
  * @file srv_bsd.c
  * @brief The socket services bsd:u and bsd:s (nn::socket::sf::IClient) of a
- * console without a network: a client registers, creates sockets and
- * configures them, sockets of the program talk over an in-process loopback
- * (bsd_net.c), and every other address is unreachable. Commands, request
+ * console without an internet connection: a client registers, creates
+ * sockets and configures them, sockets of the program talk over an
+ * in-process loopback (bsd_net.c), the members of a local wireless network
+ * the program is in are reachable through host sockets, and every other
+ * address is unreachable.
  * layouts and reply words follow the SDK's own client stubs (nn::socket::sf::
  * IClient proxy), switchbrew.org (Sockets services) and Ryujinx (MIT,
  * Copyright (c) Ryujinx Team and Contributors) Services/Sockets/Bsd IClient;

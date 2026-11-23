@@ -1,10 +1,18 @@
 /**
  * @file bsd_net.c
- * @brief The descriptor table and in-process loopback behind bsd:u, see bsd_net.h.
+ * @brief The descriptor table and in-process loopback behind bsd:u, and the
+ * route to the members of a local wireless network, see bsd_net.h. A socket
+ * that may reach the network gets a host socket beside its in-process state;
+ * every call that reads a socket's state first pumps what the host socket
+ * has into it (pump), so the in-process queues stay the one place a receive
+ * looks.
  */
 #include "bsd_net.h"
 
 #include "hos.h"
+#include "ldn.h"
+
+#include <relift/net.h>
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -76,12 +84,22 @@ struct sock {
         int32_t value;
         bool set;
     } opts[MAX_OPTS];
+    /** @brief The host socket that reaches the local network: UDP, a TCP listener, or a TCP connection. */
+    rl_net_sock *host;
+    /** @brief A TCP connection through host that is not up yet. */
+    bool connecting;
+    /** @brief A host socket could not be made for this bind; not tried again until the next network. */
+    uint32_t host_failed_for;
+    /** @brief SO_ERROR: why a connection through host failed. */
+    int32_t so_error;
 };
 
 struct bsd_net {
     pthread_mutex_t lock;
     sock *fds[MAX_FDS];
     uint16_t next_port;
+    /** @brief Where pump reads from host sockets, allocated at the first host socket. */
+    uint8_t *rx;
 };
 
 void bsd_addr_pack(uint8_t out[16], bsd_addr a)
@@ -114,6 +132,44 @@ static bool addr_parse(const uint8_t *sa, size_t len, bsd_addr *a, int32_t *err)
 
 static bool is_loopback(uint32_t ip) { return ip == 0 || (ip >> 24) == 127; }
 
+/** @brief The local network the process is in: its info, own address and mask, and a number that changes with it. */
+typedef struct route {
+    bool up;
+    ldn_network_info info;
+    uint32_t ip, mask;
+} route;
+
+static route route_now(void)
+{
+    route r;
+    r.up = rl_ldn_route(&r.info, &r.ip, &r.mask);
+    return r;
+}
+
+/** @brief True for the address of another connected node of the network. */
+static bool is_node(const route *r, uint32_t ip)
+{
+    if (!r->up || ip == r->ip)
+        return false;
+    for (int i = 0; i < LDN_NODE_MAX; i++)
+        if (r->info.ldn.nodes[i].is_connected && r->info.ldn.nodes[i].ipv4 == ip)
+            return true;
+    return false;
+}
+
+/** @brief True for the network's broadcast addresses (its subnet's, or the limited 255.255.255.255). */
+static bool is_broadcast(const route *r, uint32_t ip)
+{
+    return r->up && (ip == 0xffffffffu || ip == (r->ip | ~r->mask));
+}
+
+/** @brief The process's own address on the network counts as loopback. */
+static bool is_self(uint32_t ip)
+{
+    route r = route_now();
+    return is_loopback(ip) || (r.up && ip == r.ip);
+}
+
 bsd_net *bsd_net_new(void)
 {
     bsd_net *n = calloc(1, sizeof *n);
@@ -126,6 +182,7 @@ bsd_net *bsd_net_new(void)
 
 static void sock_free(sock *s)
 {
+    rl_net_close(s->host);
     free(s->buf);
     for (int i = 0; i < s->ndgrams; i++)
         free(s->dgrams[i].data);
@@ -165,6 +222,7 @@ void bsd_net_free(bsd_net *n)
         sock_close(s);
     }
     pthread_mutex_destroy(&n->lock);
+    free(n->rx);
     free(n);
 }
 
@@ -219,6 +277,124 @@ static void autobind(bsd_net *n, sock *s)
     s->bound = true;
     s->local.ip = LOOPBACK;
     s->local.port = ephemeral(n, s->type);
+}
+
+/** @brief Ends a connection through the host: what is buffered stays readable, then end of file. */
+static void host_lost(sock *s, int32_t why)
+{
+    rl_net_close(s->host);
+    s->host = NULL;
+    s->peer_gone = true;
+    s->eof_in = true;
+    if (s->connecting)
+        s->so_error = why;
+    s->connecting = false;
+}
+
+/**
+ * @brief Gives a bound UDP socket or TCP listener its host socket while the process is in a local network, and
+ * takes it (or a connection's) away when the process left. Lock held.
+ */
+static void host_sync(sock *s, const route *r)
+{
+    if (!r->up) {
+        s->host_failed_for = 0;
+        if (s->host && s->type == SOCK_STREAM && !s->listening)
+            host_lost(s, BSD_ENETUNREACH);
+        rl_net_close(s->host);
+        s->host = NULL;
+        return;
+    }
+    if (s->host || !s->bound || s->host_failed_for == r->ip)
+        return;
+    if (s->type == SOCK_DGRAM)
+        s->host = rl_net_udp(0, s->local.port);
+    else if (s->type == SOCK_STREAM && s->listening)
+        s->host = rl_net_tcp_listen(r->ip, s->local.port, s->backlog);
+    else
+        return;
+    if (!s->host) {
+        s->host_failed_for = r->ip;
+        rl_log(RL_LOG_WARN, "bsd", "cannot open host port %u for the local network", s->local.port);
+    }
+}
+
+/** @brief Moves what a socket's host socket has (datagrams, connections, stream bytes) into its in-process state. Lock held. */
+static void pump(bsd_net *n, sock *s)
+{
+    if (s->type != SOCK_DGRAM && s->type != SOCK_STREAM)
+        return;
+    route r = route_now();
+    host_sync(s, &r);
+    if (!s->host || (!n->rx && !(n->rx = malloc(DGRAM_MAX))))
+        return;
+    if (s->type == SOCK_DGRAM) {
+        uint8_t *buf = n->rx;
+        while (s->ndgrams < DGRAM_QUEUE) {
+            uint32_t ip;
+            uint16_t port;
+            long got = rl_net_recvfrom(s->host, buf, DGRAM_MAX, &ip, &port);
+            if (got < 0)
+                break;
+            if (!is_node(&r, ip))
+                continue;
+            uint8_t *copy = malloc(got ? (size_t)got : 1);
+            if (!copy)
+                break;
+            memcpy(copy, buf, (size_t)got);
+            s->dgrams[s->ndgrams++] = (msg){ { ip, port }, (size_t)got, copy };
+        }
+    } else if (s->listening) {
+        uint32_t ip;
+        uint16_t port;
+        rl_net_sock *h;
+        while (s->queued < s->backlog && (h = rl_net_tcp_accept(s->host, &ip, &port))) {
+            sock *c = is_node(&r, ip) ? calloc(1, sizeof *c) : NULL;
+            if (!c) {
+                rl_net_close(h);
+                continue;
+            }
+            c->open = 1;
+            c->type = SOCK_STREAM;
+            c->bound = true;
+            c->local = (bsd_addr){ r.ip, s->local.port };
+            c->connected = true;
+            c->remote = (bsd_addr){ ip, port };
+            c->host = h;
+            s->queue[s->queued++] = c;
+        }
+    } else if (s->connected) {
+        if (s->connecting) {
+            rl_net_sock *one[1] = { s->host };
+            uint8_t ev = RL_NET_OUT, rev = 0;
+            if (rl_net_poll(one, &ev, &rev, 1, 0) <= 0)
+                return;
+            if (rl_net_error(s->host) != 0) {
+                host_lost(s, BSD_ECONNREFUSED);
+                return;
+            }
+            s->connecting = false;
+        }
+        uint8_t *buf = n->rx;
+        while (!s->eof_in && s->len < STREAM_CAP) {
+            size_t room = STREAM_CAP - s->len < DGRAM_MAX ? STREAM_CAP - s->len : DGRAM_MAX;
+            long got = rl_net_recv(s->host, buf, room);
+            if (got == RL_NET_AGAIN)
+                break;
+            if (got <= 0) {
+                s->eof_in = true;
+                if (got < 0)
+                    s->peer_gone = true;
+                break;
+            }
+            uint8_t *nb = realloc(s->buf, s->len + (size_t)got);
+            if (!nb)
+                break;
+            s->buf = nb;
+            memcpy(s->buf + s->len, buf, (size_t)got);
+            s->len += (size_t)got;
+        }
+    }
 }
 
 static int32_t lookup_opt(sock *s, uint32_t level, uint32_t name)
@@ -320,7 +496,7 @@ int32_t bsd_net_bind(bsd_net *n, int32_t fd, const uint8_t *sockaddr, size_t len
         r = -1;
     } else if (s->bound) {
         r = fail(err, BSD_EINVAL);
-    } else if (!is_loopback(a.ip)) {
+    } else if (!is_self(a.ip)) {
         r = fail(err, BSD_EADDRNOTAVAIL);
     } else {
         if (a.port == 0)
@@ -377,10 +553,51 @@ static sock *find_dgram(bsd_net *n, uint16_t port)
     return NULL;
 }
 
+static bool wait_step(bsd_net *n, bool nonblock);
+
+/** @brief Connects a stream socket to a node of the local network through a host socket. Lock held. */
+static int32_t host_connect(bsd_net *n, int32_t fd, sock *s, const route *rt, bsd_addr a, int32_t *err)
+{
+    rl_net_sock *h = rl_net_tcp_connect(rt->ip, a.ip, a.port);
+    if (!h)
+        return fail(err, BSD_ECONNREFUSED);
+    uint16_t port = 0;
+    rl_net_local(h, NULL, &port);
+    s->host = h;
+    s->connecting = true;
+    s->connected = true;
+    s->bound = true;
+    s->local = (bsd_addr){ rt->ip, port };
+    s->remote = a;
+    s->so_error = 0;
+    if (s->nonblock)
+        return fail(err, BSD_EINPROGRESS);
+    for (int i = 0; i < 10000; i++) {
+        pump(n, s);
+        if (!s->connecting)
+            break;
+        wait_step(n, false);
+        if (get(n, fd) != s)
+            return fail(err, BSD_EBADF);
+    }
+    if (s->connecting || !s->host) {
+        int32_t e = s->so_error ? s->so_error : BSD_ECONNREFUSED;
+        rl_net_close(s->host);
+        s->host = NULL;
+        s->connecting = false;
+        s->connected = false;
+        s->peer_gone = false;
+        s->eof_in = false;
+        return fail(err, e);
+    }
+    return 0;
+}
+
 int32_t bsd_net_connect(bsd_net *n, int32_t fd, const uint8_t *sockaddr, size_t len, int32_t *err)
 {
     *err = 0;
     bsd_addr a;
+    route rt = route_now();
     pthread_mutex_lock(&n->lock);
     sock *s = get(n, fd);
     int32_t r = 0;
@@ -392,8 +609,11 @@ int32_t bsd_net_connect(bsd_net *n, int32_t fd, const uint8_t *sockaddr, size_t 
         r = fail(err, BSD_EISCONN);
     } else if (s->listening) {
         r = fail(err, BSD_EINVAL);
-    } else if (!is_loopback(a.ip) || s->type == SOCK_RAW) {
+    } else if (s->type == SOCK_RAW ||
+               (!is_self(a.ip) && !is_node(&rt, a.ip) && !(s->type == SOCK_DGRAM && is_broadcast(&rt, a.ip)))) {
         r = fail(err, BSD_ENETUNREACH);
+    } else if (s->type == SOCK_STREAM && !is_self(a.ip)) {
+        r = host_connect(n, fd, s, &rt, a, err);
     } else if (s->type == SOCK_DGRAM) {
         autobind(n, s);
         s->connected = true;
@@ -454,6 +674,7 @@ int32_t bsd_net_accept(bsd_net *n, int32_t fd, uint8_t peer[16], int32_t *err)
             *err = BSD_EINVAL;
             break;
         }
+        pump(n, s);
         if (s->queued > 0) {
             sock *c = s->queue[0];
             int32_t nfd = alloc_fd(n, c);
@@ -481,7 +702,18 @@ static int32_t dgram_send(bsd_net *n, sock *s, const void *data, size_t len, bsd
 {
     if (len > DGRAM_MAX)
         return fail(err, BSD_EMSGSIZE);
-    if (!is_loopback(dest.ip))
+    route r = route_now();
+    if (is_node(&r, dest.ip) || is_broadcast(&r, dest.ip)) {
+        autobind(n, s);
+        host_sync(s, &r);
+        if (!s->host)
+            return fail(err, BSD_ENETUNREACH);
+        uint32_t to = dest.ip == 0xffffffffu ? (r.ip | ~r.mask) : dest.ip;
+        if (rl_net_sendto(s->host, data, len, to, dest.port) == RL_NET_FAILED)
+            return fail(err, BSD_ENETUNREACH);
+        return (int32_t)len;
+    }
+    if (!is_self(dest.ip))
         return fail(err, BSD_ENETUNREACH);
     autobind(n, s);
     sock *t = find_dgram(n, dest.port);
@@ -496,6 +728,43 @@ static int32_t dgram_send(bsd_net *n, sock *s, const void *data, size_t len, bsd
         t->ndgrams++;
     }
     return (int32_t)len;
+}
+
+/** @brief Sends on a stream socket connected through a host socket, blocking as the descriptor's mode says. Lock held. */
+static int32_t host_send(bsd_net *n, int32_t fd, const void *data, size_t len, int32_t *err)
+{
+    size_t sent = 0;
+    for (;;) {
+        sock *s = get(n, fd);
+        if (!s) {
+            *err = BSD_EBADF;
+            return -1;
+        }
+        pump(n, s);
+        if (!s->connecting) {
+            if (s->shut_wr || s->peer_gone || !s->host) {
+                if (!sent)
+                    *err = BSD_EPIPE;
+                return sent ? (int32_t)sent : -1;
+            }
+            long w = rl_net_send(s->host, (const uint8_t *)data + sent, len - sent);
+            if (w > 0)
+                sent += (size_t)w;
+            if (sent == len)
+                return (int32_t)sent;
+            if (w == RL_NET_FAILED) {
+                host_lost(s, 0);
+                if (!sent)
+                    *err = BSD_EPIPE;
+                return sent ? (int32_t)sent : -1;
+            }
+        }
+        if (!wait_step(n, s->nonblock)) {
+            if (!sent)
+                *err = BSD_EWOULDBLOCK;
+            return sent ? (int32_t)sent : -1;
+        }
+    }
 }
 
 int32_t bsd_net_send(bsd_net *n, int32_t fd, const void *data, size_t len, const uint8_t *sockaddr, size_t alen,
@@ -521,6 +790,8 @@ int32_t bsd_net_send(bsd_net *n, int32_t fd, const void *data, size_t len, const
         }
     } else if (!s->connected) {
         *err = BSD_ENOTCONN;
+    } else if (s->host || s->connecting) {
+        r = host_send(n, fd, data, len, err);
     } else {
         size_t sent = 0;
         for (;;) {
@@ -578,6 +849,7 @@ int32_t bsd_net_recv(bsd_net *n, int32_t fd, void *data, size_t cap, uint32_t fl
             break;
         }
         bool nonblock = s->nonblock || (flags & BSD_MSG_DONTWAIT);
+        pump(n, s);
         if (s->type == TYPE_EVENTFD) {
             if (cap < 8) {
                 *err = BSD_EINVAL;
@@ -678,8 +950,10 @@ int32_t bsd_net_getsockopt(bsd_net *n, int32_t fd, uint32_t level, uint32_t name
             v = s->type == TYPE_EVENTFD ? 0 : s->type;
         else if (level == SOL_SOCKET && (name == SO_SNDBUF || name == SO_RCVBUF))
             v = 65536;
-        else if (level == SOL_SOCKET && name == SO_ERROR)
-            v = 0;
+        else if (level == SOL_SOCKET && name == SO_ERROR) {
+            v = s->so_error;
+            s->so_error = 0;
+        }
         size_t take = cap < 4 ? cap : 4;
         memcpy(out, &v, take);
         *len = (uint32_t)take;
@@ -765,6 +1039,8 @@ int32_t bsd_net_pending(bsd_net *n, int32_t fd, int32_t *err)
     pthread_mutex_lock(&n->lock);
     sock *s = get(n, fd);
     int32_t r = 0;
+    if (s)
+        pump(n, s);
     if (!s) {
         r = fail(err, BSD_EBADF);
     } else if (s->type == SOCK_DGRAM) {
@@ -795,6 +1071,8 @@ uint16_t bsd_net_revents(bsd_net *n, int32_t fd, uint16_t events)
     pthread_mutex_lock(&n->lock);
     sock *s = get(n, fd);
     uint16_t rev = 0;
+    if (s)
+        pump(n, s);
     if (!s) {
         rev = BSD_POLLNVAL;
     } else if (s->type == TYPE_EVENTFD) {
@@ -814,7 +1092,7 @@ uint16_t bsd_net_revents(bsd_net *n, int32_t fd, uint16_t events)
                 rev |= BSD_POLLIN;
             if (s->peer_gone)
                 rev |= BSD_POLLHUP;
-            else if (s->peer && s->peer->len < STREAM_CAP && !s->shut_wr)
+            else if (s->host ? !s->connecting && !s->shut_wr : s->peer && s->peer->len < STREAM_CAP && !s->shut_wr)
                 rev |= BSD_POLLOUT;
         }
     }

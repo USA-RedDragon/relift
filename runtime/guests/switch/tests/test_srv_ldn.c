@@ -420,6 +420,198 @@ TEST(ldn_offline_finds_no_one_and_cannot_host_or_join)
     rl_ldn_set_backend_factory(NULL);
 }
 
+/** @brief bsd:u, as a game uses it on the local network. */
+typedef struct net {
+    rl_ctx *c;
+    tc_obj s;
+    uint64_t at;
+} net;
+
+enum { B_SOCKET = 2, B_POLL = 6, B_RECVFROM = 9, B_SEND = 10, B_SENDTO = 11, B_ACCEPT = 12, B_BIND = 13,
+       B_CONNECT = 14, B_LISTEN = 18, B_RECV = 8, B_CLOSE = 26 };
+enum { E_NETUNREACH = 51 };
+
+#define N_A(k) (k.at)
+#define N_ADDR(k) (k.at + 0x1000)
+#define N_B(k) (k.at + 0x2000)
+#define N_FROM(k) (k.at + 0x3000)
+
+static net open_bsd(fx f)
+{
+    net k = { f.c, tc_open_service(f.c, f.heap + 0x120000, "bsd:u"), f.heap + 0x130000 };
+    NEED(k.s.handle != 0);
+    return k;
+}
+
+static void put_sockaddr(uint64_t at, uint32_t ip, uint16_t port)
+{
+    uint8_t *p = t_mem() + at;
+    memset(p, 0, 16);
+    p[0] = 16;
+    p[1] = 2;
+    p[2] = (uint8_t)(port >> 8);
+    p[3] = (uint8_t)port;
+    p[4] = (uint8_t)(ip >> 24);
+    p[5] = (uint8_t)(ip >> 16);
+    p[6] = (uint8_t)(ip >> 8);
+    p[7] = (uint8_t)ip;
+}
+
+/** @brief Result word ret, errno in *e. */
+static int32_t bsd_ret(tc_res r, int32_t *e)
+{
+    if (e)
+        *e = r.result ? -1 : (int32_t)tc_u32(&r, 4);
+    return r.result ? -1 : (int32_t)tc_u32(&r, 0);
+}
+
+static int32_t b_socket(net k, uint32_t type)
+{
+    tc_req q = tc_new(B_SOCKET);
+    tc_put32(&q, 2);
+    tc_put32(&q, type);
+    tc_put32(&q, 0);
+    return bsd_ret(tc_send(k.c, k.s, q), NULL);
+}
+
+static int32_t b_addr_op(net k, uint32_t cmd, int32_t fd, uint32_t ip, uint16_t port, int32_t *e)
+{
+    put_sockaddr(N_ADDR(k), ip, port);
+    tc_req q = tc_new(cmd);
+    tc_put32(&q, (uint32_t)fd);
+    q.na = 1;
+    q.a_addr[0] = N_ADDR(k);
+    q.a_size[0] = 16;
+    return bsd_ret(tc_send(k.c, k.s, q), e);
+}
+
+static int32_t b_fd_op(net k, uint32_t cmd, int32_t fd, int32_t arg)
+{
+    tc_req q = tc_new(cmd);
+    tc_put32(&q, (uint32_t)fd);
+    tc_put32(&q, (uint32_t)arg);
+    return bsd_ret(tc_send(k.c, k.s, q), NULL);
+}
+
+static int32_t b_sendto(net k, int32_t fd, const char *text, uint32_t ip, uint16_t port, int32_t *e)
+{
+    memcpy(t_mem() + N_A(k), text, strlen(text));
+    put_sockaddr(N_ADDR(k), ip, port);
+    tc_req q = tc_new(B_SENDTO);
+    tc_put32(&q, (uint32_t)fd);
+    tc_put32(&q, 0);
+    q.na = 2;
+    q.a_addr[0] = N_A(k);
+    q.a_size[0] = strlen(text);
+    q.a_addr[1] = N_ADDR(k);
+    q.a_size[1] = 16;
+    return bsd_ret(tc_send(k.c, k.s, q), e);
+}
+
+static int32_t b_send(net k, int32_t fd, const char *text)
+{
+    memcpy(t_mem() + N_A(k), text, strlen(text));
+    tc_req q = tc_new(B_SEND);
+    tc_put32(&q, (uint32_t)fd);
+    tc_put32(&q, 0);
+    q.na = 1;
+    q.a_addr[0] = N_A(k);
+    q.a_size[0] = strlen(text);
+    return bsd_ret(tc_send(k.c, k.s, q), NULL);
+}
+
+/** @brief Polls one descriptor for input for up to ms; true when it has some. */
+static bool b_readable(net k, int32_t fd, int32_t ms)
+{
+    uint32_t *in = (uint32_t *)(void *)(t_mem() + N_A(k));
+    in[0] = (uint32_t)fd;
+    in[1] = 1;
+    tc_req q = tc_new(B_POLL);
+    tc_put32(&q, 1);
+    tc_put32(&q, (uint32_t)ms);
+    q.na = 1;
+    q.a_addr[0] = N_A(k);
+    q.a_size[0] = 8;
+    q.nb = 1;
+    q.b_addr[0] = N_B(k);
+    q.b_size[0] = 8;
+    return bsd_ret(tc_send(k.c, k.s, q), NULL) == 1;
+}
+
+/** @brief Receives into N_B (and the sender into N_FROM); returns the size, NUL terminated. */
+static int32_t b_recvfrom(net k, int32_t fd)
+{
+    tc_req q = tc_new(B_RECVFROM);
+    tc_put32(&q, (uint32_t)fd);
+    tc_put32(&q, 0);
+    q.nb = 2;
+    q.b_addr[0] = N_B(k);
+    q.b_size[0] = 255;
+    q.b_addr[1] = N_FROM(k);
+    q.b_size[1] = 16;
+    int32_t n = bsd_ret(tc_send(k.c, k.s, q), NULL);
+    t_mem()[N_B(k) + (n > 0 ? (uint64_t)n : 0)] = 0;
+    return n;
+}
+
+static const char *b_text(net k) { return (const char *)(t_mem() + N_B(k)); }
+
+static uint32_t b_from_ip(net k)
+{
+    const uint8_t *p = t_mem() + N_FROM(k);
+    return (uint32_t)p[4] << 24 | (uint32_t)p[5] << 16 | (uint32_t)p[6] << 8 | p[7];
+}
+
+static uint16_t b_from_port(net k)
+{
+    const uint8_t *p = t_mem() + N_FROM(k);
+    return (uint16_t)(p[2] << 8 | p[3]);
+}
+
+static int32_t b_accept(net k, int32_t fd)
+{
+    tc_req q = tc_new(B_ACCEPT);
+    tc_put32(&q, (uint32_t)fd);
+    q.nb = 1;
+    q.b_addr[0] = N_FROM(k);
+    q.b_size[0] = 16;
+    return bsd_ret(tc_send(k.c, k.s, q), NULL);
+}
+
+/** @brief Datagrams and streams to addresses outside the network are unreachable. */
+static void check_closed_route(net k, uint32_t inside_not_node)
+{
+    int32_t u = b_socket(k, 2), t = b_socket(k, 1), e;
+    NEED_EQ(b_sendto(k, u, "x", inside_not_node, 7000, &e), -1);
+    NEED_EQ(e, E_NETUNREACH);
+    NEED_EQ(b_sendto(k, u, "x", 0x08080808, 53, &e), -1);
+    NEED_EQ(e, E_NETUNREACH);
+    NEED_EQ(b_addr_op(k, B_CONNECT, t, inside_not_node, 7001, &e), -1);
+    NEED_EQ(e, E_NETUNREACH);
+    NEED_EQ(b_addr_op(k, B_CONNECT, t, 0x01010101, 443, &e), -1);
+    NEED_EQ(e, E_NETUNREACH);
+    b_fd_op(k, B_CLOSE, u, 0);
+    b_fd_op(k, B_CLOSE, t, 0);
+}
+
+TEST(ldn_route_reaches_only_the_members_of_the_network)
+{
+    fx f = open_ldn(fake_factory);
+    net k = open_bsd(f);
+    int32_t u = b_socket(k, 2), e;
+    CHECK_EQ(b_sendto(k, u, "x", 0x0a0d0002, 7000, &e), -1);
+    CHECK_EQ(e, E_NETUNREACH);
+    CHECK_EQ(tc_cmd(f.c, f.u, INIT_OLD), 0);
+    CHECK_EQ(tc_cmd(f.c, f.u, OPEN_AP), 0);
+    CHECK_EQ(create(f, 4), 0);
+    check_closed_route(k, 0x0a0d0009);
+    CHECK_EQ(b_addr_op(k, B_BIND, b_socket(k, 2), 0x0a0d0001, 7100, &e), 0);
+    CHECK_EQ(b_addr_op(k, B_BIND, b_socket(k, 2), 0x0a0d0003, 7100, &e), -1);
+    CHECK_EQ(tc_cmd(f.c, f.u, DESTROY), 0);
+    CHECK_EQ(b_addr_op(k, B_BIND, b_socket(k, 2), 0x0a0d0001, 7101, &e), -1);
+    rl_ldn_set_backend_factory(NULL);
+}
+
 static void sleep_ms(long ms)
 {
     struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
@@ -447,21 +639,49 @@ TEST(ldn_pair_hosts_or_joins_a_network_of_another_process)
     rl_switch_declare_settings();
     fx f = open_ldn(NULL);
     CHECK_EQ(tc_cmd(f.c, f.u, INIT_OLD), 0);
+    net k = open_bsd(f);
     if (strcmp(role, "host") == 0) {
         CHECK_EQ(tc_cmd(f.c, f.u, OPEN_AP), 0);
         CHECK_EQ(create(f, 4), 0);
         CHECK_EQ(state(f), LDN_STATE_ACCESS_POINT_CREATED);
+        int32_t u = b_socket(k, 2), l = b_socket(k, 1);
+        CHECK_EQ(b_addr_op(k, B_BIND, u, 0, 7000, NULL), 0);
+        CHECK_EQ(b_addr_op(k, B_BIND, l, 0, 7001, NULL), 0);
+        CHECK_EQ(b_fd_op(k, B_LISTEN, l, 4), 0);
+        b_readable(k, u, 0);
+        b_readable(k, l, 0);
         int i = 0;
         while (node_count(f) < 2 && i++ < 300)
             sleep_ms(50);
         CHECK_EQ(node_count(f), 2);
         CHECK(strcmp(info_at(f)->ldn.nodes[1].user_name, "guest") == 0);
+        uint32_t peer = info_at(f)->ldn.nodes[1].ipv4;
         printf("ldn pair: host saw %s join\n", info_at(f)->ldn.nodes[1].user_name);
+        CHECK(b_readable(k, u, 5000));
+        CHECK_EQ(b_recvfrom(k, u), 4);
+        CHECK(strcmp(b_text(k), "ping") == 0);
+        CHECK_EQ(b_from_ip(k), peer);
+        CHECK_EQ(b_sendto(k, u, "pong", peer, b_from_port(k), NULL), 4);
+        CHECK(b_readable(k, u, 5000));
+        CHECK_EQ(b_recvfrom(k, u), 5);
+        CHECK(strcmp(b_text(k), "bcast") == 0);
+        CHECK(b_readable(k, l, 5000));
+        int32_t a = b_accept(k, l);
+        CHECK(a >= 0);
+        CHECK(b_readable(k, a, 5000));
+        CHECK_EQ(b_recvfrom(k, a), 5);
+        CHECK(strcmp(b_text(k), "hello") == 0);
+        CHECK_EQ(b_send(k, a, "world"), 5);
+        printf("ldn pair: host exchanged datagrams and a stream with %08x\n", peer);
+        check_closed_route(k, 0x0a0d0003);
         i = 0;
         while (node_count(f) == 2 && i++ < 300)
             sleep_ms(50);
         CHECK_EQ(node_count(f), 1);
         printf("ldn pair: host saw the station leave\n");
+        int32_t e;
+        CHECK_EQ(b_sendto(k, u, "late", peer, 7000, &e), -1);
+        CHECK_EQ(e, E_NETUNREACH);
         CHECK_EQ(tc_cmd(f.c, f.u, DESTROY), 0);
     } else {
         CHECK_EQ(tc_cmd(f.c, f.u, OPEN_STA), 0);
@@ -479,9 +699,26 @@ TEST(ldn_pair_hosts_or_joins_a_network_of_another_process)
         CHECK_EQ(node_count(f), 2);
         tc_res ip = tc_send(f.c, f.u, tc_new(GET_IP));
         CHECK_EQ(ip.result, 0);
-        printf("ldn pair: station joined as %08x\n", tc_u32(&ip, 0));
-        sleep_ms(500);
+        uint32_t me = tc_u32(&ip, 0), mask = tc_u32(&ip, 4), host = n.ldn.nodes[0].ipv4;
+        printf("ldn pair: station joined as %08x\n", me);
+        int32_t u = b_socket(k, 2), t = b_socket(k, 1);
+        CHECK_EQ(b_sendto(k, u, "ping", host, 7000, NULL), 4);
+        CHECK(b_readable(k, u, 5000));
+        CHECK_EQ(b_recvfrom(k, u), 4);
+        CHECK(strcmp(b_text(k), "pong") == 0);
+        CHECK_EQ(b_from_ip(k), host);
+        CHECK_EQ(b_sendto(k, u, "bcast", me | ~mask, 7000, NULL), 5);
+        CHECK_EQ(b_addr_op(k, B_CONNECT, t, host, 7001, NULL), 0);
+        CHECK_EQ(b_send(k, t, "hello"), 5);
+        CHECK(b_readable(k, t, 5000));
+        CHECK_EQ(b_recvfrom(k, t), 5);
+        CHECK(strcmp(b_text(k), "world") == 0);
+        printf("ldn pair: station exchanged datagrams and a stream with %08x\n", host);
+        check_closed_route(k, 0x0a0d0003);
         CHECK_EQ(tc_cmd(f.c, f.u, DISCONNECT), 0);
+        int32_t e;
+        CHECK_EQ(b_sendto(k, u, "late", host, 7000, &e), -1);
+        CHECK_EQ(e, E_NETUNREACH);
     }
     CHECK_EQ(tc_cmd(f.c, f.u, FINALIZE), 0);
 }
