@@ -34,9 +34,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__linux__) && defined(__x86_64__)
+#include <ucontext.h>
+/** @brief Breakpoints and watchpoints: they trap on the host and step one host instruction with the trap flag. */
+#define RL_GDB_TRAPS 1
+#endif
 
 int rl_gdb_stopping;
 
@@ -47,11 +55,34 @@ int rl_gdb_stopping;
 /** @brief How long a stop waits for running threads to reach a safe point. */
 #define STOP_WAIT_NS 2000000000ull
 
-/** @brief A parked thread: its context and whether its registers are exact. */
+/** @brief Most breakpoints and watchpoints. */
+#define MAX_BREAKS 64
+#define MAX_WATCHES 16
+
+/** @brief A parked thread: its context, whether its registers are exact, and the guest pc a breakpoint stopped it at. */
 typedef struct parked {
     rl_ctx *ctx;
     bool exact;
+    bool has_pc;
+    uint64_t pc;
 } parked;
+
+/** @brief A breakpoint: the entry of a lifted function, trapped by an int3 written over its first host byte. */
+typedef struct breakpoint {
+    uint64_t guest;
+    uint8_t *host;
+    uint8_t orig;
+    bool on;
+} breakpoint;
+
+/** @brief A write watchpoint over guest bytes [addr, addr + len): their host pages are kept read-only. */
+typedef struct watchpoint {
+    uint64_t addr, len;
+    bool on;
+} watchpoint;
+
+/** @brief Why the guest stopped on its own: a breakpoint, a watchpoint or the end of a step. */
+enum { HIT_NONE, HIT_BREAK, HIT_WATCH, HIT_STEP };
 
 static struct {
     const rl_gdb_cpu *cpu;
@@ -70,6 +101,14 @@ static struct {
     bool released;
     rl_gdb_thread th[MAX_THREADS];
     uint32_t nth;
+    breakpoint bp[MAX_BREAKS];
+    watchpoint wp[MAX_WATCHES];
+    /** @brief A stop a guest thread made (HIT_*), its context and the watched address it wrote; read by the server. */
+    int hit;
+    rl_ctx *hit_ctx;
+    uint64_t hit_addr;
+    /** @brief While stepping (rl_gdb_stopping is 2): the thread that stops at its next safe point. */
+    rl_ctx *step_ctx;
     char in[PACKET + 64], out[PACKET + 64];
 } G = { .lock = PTHREAD_MUTEX_INITIALIZER,
         .wake = PTHREAD_COND_INITIALIZER,
@@ -93,22 +132,38 @@ static parked *find_parked(const rl_ctx *c)
     return NULL;
 }
 
-void rl_gdb_park(rl_ctx *c, bool exact)
+/**
+ * @brief Parks c until the debugger resumes the guest. While stepping, only the stepping thread parks, and it stops
+ * the guest. A thread that hit a breakpoint or watchpoint (hit) stops the guest and names the stop.
+ */
+static void park(rl_ctx *c, bool exact, int hit, uint64_t pc, uint64_t addr)
 {
     pthread_mutex_lock(&G.lock);
-    if (!__atomic_load_n(&rl_gdb_stopping, __ATOMIC_ACQUIRE) || G.nparked == MAX_THREADS) {
+    int st = __atomic_load_n(&rl_gdb_stopping, __ATOMIC_ACQUIRE);
+    if (st == 2 && c == G.step_ctx && !hit)
+        hit = HIT_STEP;
+    if ((st == 2 && !hit) || (!st && !hit) || G.nparked == MAX_THREADS || !G.cpu) {
         pthread_mutex_unlock(&G.lock);
         return;
     }
-    G.park[G.nparked++] = (parked){ c, exact };
+    if (hit && G.hit == HIT_NONE) {
+        G.hit = hit;
+        G.hit_ctx = c;
+        G.hit_addr = addr;
+    }
+    __atomic_store_n(&rl_gdb_stopping, 1, __ATOMIC_RELEASE);
+    G.park[G.nparked++] = (parked){ c, exact, hit == HIT_BREAK, pc };
     pthread_cond_broadcast(&G.arrived);
-    while (__atomic_load_n(&rl_gdb_stopping, __ATOMIC_ACQUIRE))
+    /* 1 holds every thread; 0 (run) and 2 (step) let it go. */
+    while (__atomic_load_n(&rl_gdb_stopping, __ATOMIC_ACQUIRE) == 1)
         pthread_cond_wait(&G.wake, &G.lock);
     parked *p = find_parked(c);
     if (p)
         *p = G.park[--G.nparked];
     pthread_mutex_unlock(&G.lock);
 }
+
+void rl_gdb_park(rl_ctx *c, bool exact) { park(c, exact, HIT_NONE, 0, 0); }
 
 /** @brief Takes a fresh list of the guest's threads. */
 static void list_threads(void)
@@ -167,9 +222,23 @@ static void stop_all(void)
     G.cur = G.stop_thread;
 }
 
+/** @brief Resumes the guest; with step set, the thread step stops again at its next safe point or breakpoint. */
+static void resume(rl_ctx *step)
+{
+    pthread_mutex_lock(&G.lock);
+    G.hit = HIT_NONE;
+    G.step_ctx = step;
+    __atomic_store_n(&rl_gdb_stopping, step ? 2 : 0, __ATOMIC_RELEASE);
+    pthread_cond_broadcast(&G.wake);
+    G.released = true;
+    pthread_mutex_unlock(&G.lock);
+}
+
 static void resume_all(void)
 {
     pthread_mutex_lock(&G.lock);
+    G.hit = HIT_NONE;
+    G.step_ctx = NULL;
     __atomic_store_n(&rl_gdb_stopping, 0, __ATOMIC_RELEASE);
     pthread_cond_broadcast(&G.wake);
     G.released = true;
@@ -307,6 +376,27 @@ static void stop_reply(int sig)
     reply(G.out);
 }
 
+/** @brief After a thread stopped the guest itself: stops the rest and names the thread and the reason. */
+static void hit_reply(void)
+{
+    pthread_mutex_lock(&G.lock);
+    int hit = G.hit;
+    rl_ctx *c = G.hit_ctx;
+    uint64_t addr = G.hit_addr;
+    pthread_mutex_unlock(&G.lock);
+    stop_all();
+    for (uint32_t i = 0; i < G.nth; i++)
+        if (G.th[i].ctx == c)
+            G.stop_thread = G.th[i].id;
+    G.cur = G.stop_thread;
+    if (hit == HIT_WATCH)
+        snprintf(G.out, sizeof G.out, "T05thread:%llx;watch:%llx;", (unsigned long long)G.stop_thread,
+                 (unsigned long long)addr);
+    else
+        snprintf(G.out, sizeof G.out, "T05thread:%llx;", (unsigned long long)G.stop_thread);
+    reply(G.out);
+}
+
 /** @brief Answers a qXfer read of text at "offset,length" with m (more) or l (last). */
 static void xfer(const char *text, const char *args)
 {
@@ -423,6 +513,221 @@ static bool mem_write(uint64_t a, const uint8_t *src, size_t n)
     return true;
 }
 
+#if defined(RL_GDB_TRAPS)
+/** @brief The guest page size the watchpoints work in: the host page of the guest's address space. */
+static uint64_t host_page(void) { return G.guest->vm->host_page; }
+
+/** @brief Writes byte v over host code at p (the page made writable for the write, then executable again). */
+static void poke_code(uint8_t *p, uint8_t v)
+{
+    uintptr_t pg = (uintptr_t)sysconf(_SC_PAGESIZE);
+    void *page = (void *)((uintptr_t)p & ~(pg - 1));
+    size_t len = (uintptr_t)p + 1 - (uintptr_t)page <= pg ? pg : 2 * pg;
+    mprotect(page, len, PROT_READ | PROT_WRITE | PROT_EXEC);
+    __atomic_store_n(p, v, __ATOMIC_SEQ_CST);
+    mprotect(page, len, PROT_READ | PROT_EXEC);
+}
+
+/** @brief Per host thread: a breakpoint (index + 1) or a watched page to set again after one stepped instruction. */
+static _Thread_local int t_reinsert;
+static _Thread_local uint64_t t_rewatch;
+static _Thread_local bool t_rewatch_on;
+/** @brief The guest address of a watched store the stepped instruction made, 0 for none: stops after the store. */
+static _Thread_local uint64_t t_watch_hit;
+static struct sigaction g_old_trap;
+
+static void set_tf(ucontext_t *u, bool on)
+{
+    if (on)
+        u->uc_mcontext.gregs[REG_EFL] |= 0x100;
+    else
+        u->uc_mcontext.gregs[REG_EFL] &= ~(greg_t)0x100;
+}
+
+static void on_trap(int sig, siginfo_t *si, void *uc)
+{
+    ucontext_t *u = uc;
+    uint8_t *rip = (uint8_t *)u->uc_mcontext.gregs[REG_RIP];
+    if (t_reinsert || t_rewatch_on) {
+        /* The one stepped instruction is done: put the breakpoint or the watch back. */
+        if (t_reinsert) {
+            breakpoint *b = &G.bp[t_reinsert - 1];
+            if (b->on)
+                poke_code(b->host, 0xcc);
+            t_reinsert = 0;
+        }
+        if (t_rewatch_on) {
+            rl_vm_host_watch(G.guest->vm, t_rewatch, host_page(), true);
+            t_rewatch_on = false;
+        }
+        set_tf(u, false);
+        uint64_t hit = t_watch_hit;
+        struct rl_thread *t = rl_thread_current();
+        t_watch_hit = 0;
+        if (hit && t && t->ctx)
+            park(t->ctx, false, HIT_WATCH, 0, hit);
+        return;
+    }
+    for (int i = 0; i < MAX_BREAKS; i++) {
+        breakpoint *b = &G.bp[i];
+        if (!b->on || b->host != rip - 1)
+            continue;
+        u->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)b->host;
+        /* A lifted function is entered as fn(rl_ctx *c, uint8_t *mem): c is in rdi, and its registers are exact. */
+        rl_ctx *c = (rl_ctx *)(uintptr_t)u->uc_mcontext.gregs[REG_RDI];
+        park(c, true, HIT_BREAK, b->guest, 0);
+        if (b->on) {
+            poke_code(b->host, b->orig);
+            t_reinsert = i + 1;
+            set_tf(u, true);
+        }
+        return;
+    }
+    if (g_old_trap.sa_flags & SA_SIGINFO && g_old_trap.sa_sigaction)
+        g_old_trap.sa_sigaction(sig, si, uc);
+    else if (g_old_trap.sa_handler != SIG_DFL && g_old_trap.sa_handler != SIG_IGN)
+        g_old_trap.sa_handler(sig);
+    else {
+        signal(SIGTRAP, SIG_DFL);
+        raise(SIGTRAP);
+    }
+}
+
+/** @brief The debugger's fault hook: a write to a watched page stops the guest when it hits a watched range. */
+static bool on_watch_fault(const rl_fault *f, void *uc)
+{
+    uint64_t hp = host_page(), page = f->guest_addr & ~(hp - 1);
+    bool ours = false, hit = false;
+    for (int i = 0; i < MAX_WATCHES; i++) {
+        watchpoint *w = &G.wp[i];
+        if (!w->on)
+            continue;
+        uint64_t lo = w->addr & ~(hp - 1), hi = (w->addr + w->len + hp - 1) & ~(hp - 1);
+        ours |= page >= lo && page < hi;
+        hit |= f->guest_addr >= w->addr && f->guest_addr < w->addr + w->len;
+    }
+    if (!ours)
+        return false;
+    /* Let the store happen: open the page for one host instruction, watch it again, and stop after a hit, as a
+     * data breakpoint does, so the debugger sees the new value. */
+    t_watch_hit = hit ? f->guest_addr : 0;
+    rl_vm_host_access(G.guest->vm, page, hp, true);
+    t_rewatch = page;
+    t_rewatch_on = true;
+    set_tf(uc, true);
+    return true;
+}
+
+static void traps_install(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = on_trap;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTRAP, &sa, &g_old_trap);
+    rl_fault_set_debug_hook(on_watch_fault);
+}
+
+/** @brief Z0/Z1 at guest address a: the entry of a lifted function. 0 or an error number. */
+static int break_set(uint64_t a, bool on)
+{
+    int free_slot = -1;
+    for (int i = 0; i < MAX_BREAKS; i++) {
+        if (G.bp[i].on && G.bp[i].guest == a) {
+            if (!on) {
+                G.bp[i].on = false;
+                poke_code(G.bp[i].host, G.bp[i].orig);
+            }
+            return 0;
+        }
+        if (!G.bp[i].on && free_slot < 0)
+            free_slot = i;
+    }
+    if (!on)
+        return 0;
+    rl_fn_hit h;
+    if (!rl_fn_find_guest(a, &h) || !h.fn || h.fn->fn_addr != a || h.fn->guest_addr != a || !h.fn->fn)
+        return 22;
+    if (free_slot < 0)
+        return 28;
+    breakpoint *b = &G.bp[free_slot];
+    b->guest = a;
+    b->host = (uint8_t *)(uintptr_t)h.fn->fn;
+    b->orig = *b->host;
+    b->on = true;
+    poke_code(b->host, 0xcc);
+    return 0;
+}
+
+/** @brief Z2 over [a, a + len): protects the pages. 0 or an error number. */
+static int watch_set(uint64_t a, uint64_t len, bool on)
+{
+    uint64_t hp = host_page();
+    int free_slot = -1;
+    for (int i = 0; i < MAX_WATCHES; i++) {
+        if (G.wp[i].on && G.wp[i].addr == a && G.wp[i].len == len) {
+            if (!on)
+                G.wp[i].on = false;
+            free_slot = -2;
+            break;
+        }
+        if (!G.wp[i].on && free_slot == -1)
+            free_slot = i;
+    }
+    uint64_t lo = a & ~(hp - 1), hi = (a + len + hp - 1) & ~(hp - 1);
+    if (!on) {
+        /* Open the pages unless another watch still covers them. */
+        for (uint64_t p = lo; p < hi; p += hp) {
+            bool kept = false;
+            for (int i = 0; i < MAX_WATCHES; i++)
+                kept |= G.wp[i].on && p >= (G.wp[i].addr & ~(hp - 1)) && p < G.wp[i].addr + G.wp[i].len;
+            if (!kept)
+                rl_vm_host_access(G.guest->vm, p, hp, true);
+        }
+        return 0;
+    }
+    if (free_slot == -2)
+        return 0;
+    if (free_slot < 0)
+        return 28;
+    if (!len || !rl_vm_contains(G.guest->vm, a, len) || rl_vm_host_watch(G.guest->vm, lo, hi - lo, true) != 0)
+        return 22;
+    G.wp[free_slot] = (watchpoint){ a, len, true };
+    return 0;
+}
+
+/** @brief Z and z packets: 0 software and 1 hardware breakpoints (both at function entries), 2 write watchpoints. */
+static void z_packet(const char *p)
+{
+    bool on = p[0] == 'Z';
+    int type = p[1] - '0';
+    const char *q = p + 2;
+    q += *q == ',';
+    uint64_t a = parse_hex(&q);
+    q += *q == ',';
+    uint64_t len = parse_hex(&q);
+    int err;
+    if (type == 0 || type == 1)
+        err = break_set(a, on);
+    else if (type == 2)
+        err = watch_set(a, len, on);
+    else {
+        reply("");
+        return;
+    }
+    if (err)
+        snprintf(G.out, sizeof G.out, "E%02x", err);
+    reply(err ? G.out : "OK");
+}
+#else
+static void z_packet(const char *p)
+{
+    (void)p;
+    reply("");
+}
+#endif
+
 static void monitor(const char *hex)
 {
     char cmd[256];
@@ -457,11 +762,19 @@ static const char *after(const char *s, const char *prefix)
     return strncmp(s, prefix, n) == 0 ? s + n : NULL;
 }
 
-/** @brief Runs the guest until the debugger interrupts it; false when the connection closed. */
-static bool run_until_interrupt(void)
+/** @brief Runs the guest (stepping the thread step when set) until it stops or the debugger interrupts it; false when the connection closed. */
+static bool run_until_interrupt(rl_ctx *step)
 {
-    resume_all();
+    resume(step);
     for (;;) {
+        struct pollfd pf = { .fd = G.fd, .events = POLLIN };
+        int ready = poll(&pf, 1, 20);
+        if (__atomic_load_n(&G.hit, __ATOMIC_ACQUIRE) != HIT_NONE) {
+            hit_reply();
+            return true;
+        }
+        if (ready <= 0)
+            continue;
         int k = read_packet();
         if (k == 0)
             return false;
@@ -476,6 +789,17 @@ static bool run_until_interrupt(void)
         }
         reply("");
     }
+}
+
+/** @brief Reads register r of c: the guest pc of a breakpoint stop where the thread stopped at one. */
+static void reg_read(rl_ctx *c, uint32_t r, uint8_t *out)
+{
+    G.cpu->reg_read(c, r, out);
+    pthread_mutex_lock(&G.lock);
+    parked *p = find_parked(c);
+    if (p && p->has_pc && r == G.cpu->pc_reg)
+        memcpy(out, &p->pc, 8);
+    pthread_mutex_unlock(&G.lock);
 }
 
 /** @brief Serves one connection; returns when the debugger detaches or the connection closes. */
@@ -539,7 +863,7 @@ static void serve(void)
             uint8_t buf[64];
             for (uint32_t r = 0; r < G.cpu->nregs; r++) {
                 uint32_t sz = G.cpu->reg_size(r);
-                G.cpu->reg_read(t->ctx, r, buf);
+                reg_read(t->ctx, r, buf);
                 to_hex(G.out + o, buf, sz);
                 o += 2 * sz;
             }
@@ -563,7 +887,7 @@ static void serve(void)
             if (r >= G.cpu->nregs) {
                 reply("E01");
             } else {
-                G.cpu->reg_read(t->ctx, (uint32_t)r, buf);
+                reg_read(t->ctx, (uint32_t)r, buf);
                 to_hex(G.out, buf, G.cpu->reg_size((uint32_t)r));
                 reply(G.out);
             }
@@ -602,9 +926,17 @@ static void serve(void)
             bool ok = *q == ':' && len <= sizeof buf && strlen(q + 1) >= 2 * len && from_hex(buf, q + 1, (size_t)len);
             reply(ok && mem_write(addr, buf, (size_t)len) ? "OK" : "E14");
         } else if (strcmp(p, "vCont?") == 0) {
-            reply("vCont;c;C");
+            reply("vCont;c;C;s;S");
+        } else if ((p[0] == 'Z' || p[0] == 'z') && p[1] >= '0' && p[1] <= '4') {
+            z_packet(p);
+        } else if (p[0] == 's' || p[0] == 'S' || after(p, "vCont;s") || after(p, "vCont;S")) {
+            /* A step runs the thread to its next safe point or breakpoint: lifted code has no single guest instruction to stop after. */
+            const char *q = strstr(p, ":");
+            rl_gdb_thread *st = q ? (q++, thread_by_id(parse_hex(&q))) : t;
+            if (!run_until_interrupt(st ? st->ctx : NULL))
+                break;
         } else if (p[0] == 'c' || p[0] == 'C' || after(p, "vCont;c") || after(p, "vCont;C")) {
-            if (!run_until_interrupt())
+            if (!run_until_interrupt(NULL))
                 break;
         } else if (p[0] == 'D' || p[0] == 'k') {
             reply("OK");
@@ -656,6 +988,9 @@ bool rl_gdb_start(const rl_gdb_cpu *cpu, const rl_gdb_guest *guest)
         return false;
     }
     G.listen_fd = fd;
+#if defined(RL_GDB_TRAPS)
+    traps_install();
+#endif
     pthread_t th;
     if (pthread_create(&th, NULL, server, NULL) != 0) {
         close(fd);

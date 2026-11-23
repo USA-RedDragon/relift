@@ -32,6 +32,9 @@ static _Thread_local rl_fault_catch *t_catch;
 static _Thread_local void *t_altstack;
 #endif
 static int g_installed;
+static rl_fault_debug_hook *g_debug;
+
+void rl_fault_set_debug_hook(rl_fault_debug_hook *hook) { __atomic_store_n(&g_debug, hook, __ATOMIC_RELEASE); }
 
 /** @brief Runs the hooks over a guest fault; true when one handled it. */
 static bool run_hooks(const rl_fault *f)
@@ -109,6 +112,9 @@ static void handler(int sig, siginfo_t *si, void *uc)
         f.in_guest = true;
         f.guest_addr = (uint64_t)(a - (uintptr_t)g_vm->base);
     }
+    rl_fault_debug_hook *dbg = __atomic_load_n(&g_debug, __ATOMIC_ACQUIRE);
+    if (f.in_guest && dbg && dbg(&f, uc))
+        return;
     if (f.in_guest && run_hooks(&f))
         return;
     if (t_catch) {

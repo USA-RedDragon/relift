@@ -46,6 +46,8 @@ typedef struct rl_gdb_cpu {
     void (*reg_write)(rl_ctx *c, uint32_t n, const uint8_t *in);
     /** @brief The guest pc of a stopped context, for stop replies and thread names. */
     uint64_t (*pc)(const rl_ctx *c);
+    /** @brief The number of the pc register (8 bytes), which a breakpoint stop reports as the function's address. */
+    uint32_t pc_reg;
 } rl_gdb_cpu;
 
 /** @brief One guest thread as the guest layer reports it. */

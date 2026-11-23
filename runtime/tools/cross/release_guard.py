@@ -9,7 +9,9 @@
   header (host libraries such as the Vulkan loader), devload.c (the
   hot-load path, built only with RL_HOTLOAD) and the N64 renderer's
   noload.h (which renames those calls in parallel-rdp to stubs that open
-  nothing).
+  nothing). Code under `#if defined(RL_DEBUG_STUB)` (the GDB server, which
+  places breakpoints by changing page protection) is not checked: a player
+  package builds with RL_NO_DEBUG_STUB, which leaves it out.
 - objects: no object file under DIR holds the hot-load connection
   (RELIFT_DEV_SOCKET), and only hostlib objects import dlopen, LoadLibrary or
   adrenotools_open_libvulkan.

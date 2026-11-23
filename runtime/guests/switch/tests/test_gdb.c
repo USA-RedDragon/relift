@@ -7,6 +7,7 @@
  */
 #include "tc.h"
 
+#include "crash.h"
 #include "gdbstub.h"
 
 #if defined(RL_DEBUG_STUB)
@@ -154,6 +155,10 @@ TEST(gdb_server_reads_and_writes_guest_registers_and_memory)
  * guest with known registers and memory until the debugger writes 1 to the word at heap + 16 (up to 30 s);
  * without it, passes at once.
  */
+#if defined(__linux__) && defined(__x86_64__)
+static uint64_t fake_lifted(rl_ctx *c, uint8_t *mem);
+#endif
+
 TEST(gdb_serve_for_a_debugger)
 {
     const char *port = getenv("RELIFT_GDB_TEST_PORT");
@@ -169,13 +174,133 @@ TEST(gdb_serve_for_a_debugger)
     c->x[0] = 0x0123456789abcdefull;
     c->x[29] = 0;
     c->sp = heap + 0x1000;
+#if defined(__linux__) && defined(__x86_64__)
+    /* A lifted function at guest 0x8001000 runs each round, then a store to heap + 0x40: a breakpoint and a watch. */
+    static rl_fn_info info[1];
+    info[0] = (rl_fn_info){ .guest_addr = 0x8001000, .fn_addr = 0x8001000, .guest_size = 4, .fn = fake_lifted,
+                            .host_sym = "fake_lifted", .guest_name = "fake" };
+    static rl_fn_map map = { RL_FN_MAP_VERSION, 1, info, "main", "main-0", 0x8000000, NULL, NULL };
+    const rl_fn_map *maps[] = { &map };
+    CHECK_EQ(rl_fn_maps_register(maps, 1), 0);
+    uint64_t (*volatile call)(rl_ctx *, uint8_t *) = fake_lifted;
+#endif
     fprintf(stderr, "gdb-serve: heap 0x%llx\n", (unsigned long long)heap);
     for (int i = 0; i < 3000 && rl_ld32(m, heap + 16) != 1; i++) {
         hos_sched_point();
+#if defined(__linux__) && defined(__x86_64__)
+        uint64_t x2 = c->x[2];
+        call(c, m);
+        c->x[2] = x2;
+        rl_st64(m, heap + 0x40, (uint64_t)i);
+#endif
         usleep(10000);
     }
     CHECK_EQ(rl_ld32(m, heap + 16), 1u);
     CHECK_EQ(c->x[2], 0x42ull);
 }
+
+#if defined(__linux__) && defined(__x86_64__)
+
+/** @brief A stand-in lifted function: adds 1 to x5. */
+__attribute__((noinline)) static uint64_t fake_lifted(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    __asm__ volatile("" ::: "memory");
+    c->x[5] += 1;
+    return RL_OK;
+}
+
+/** @brief What the breakpoint and watchpoint client saw, for the test to check. */
+typedef struct traps {
+    int port;
+    uint64_t heap;
+    /** @brief Steps the guest thread takes when the client allows: 1 call the function, 2 store to the watch. */
+    volatile int go;
+    volatile int done;
+    char zb[8], stop_b[64], pc[17], x0[17], zw[8], stop_w[96];
+    bool ok;
+} traps;
+
+static void *trap_client(void *arg)
+{
+    traps *s = arg;
+    char r[4096], m[96];
+    int fd = fd_of(s->port);
+    s->ok = fd >= 0;
+    if (s->ok) {
+        s->ok = ask(fd, "Z0,8001000,4", r, sizeof r);
+        snprintf(s->zb, sizeof s->zb, "%s", r);
+        __atomic_store_n(&s->go, 1, __ATOMIC_RELEASE);
+        /* The continue's answer is the stop reply of the breakpoint. */
+        s->ok = s->ok && ask(fd, "vCont;c", r, sizeof r);
+        snprintf(s->stop_b, sizeof s->stop_b, "%s", r);
+        s->ok = s->ok && ask(fd, "p20", r, sizeof r);
+        snprintf(s->pc, sizeof s->pc, "%s", r);
+        s->ok = s->ok && ask(fd, "p5", r, sizeof r);
+        snprintf(s->x0, sizeof s->x0, "%s", r);
+        s->ok = s->ok && ask(fd, "z0,8001000,4", r, sizeof r);
+        snprintf(m, sizeof m, "Z2,%llx,8", (unsigned long long)(s->heap + 0x40));
+        s->ok = s->ok && ask(fd, m, r, sizeof r);
+        snprintf(s->zw, sizeof s->zw, "%s", r);
+        __atomic_store_n(&s->go, 2, __ATOMIC_RELEASE);
+        s->ok = s->ok && ask(fd, "vCont;c", r, sizeof r);
+        snprintf(s->stop_w, sizeof s->stop_w, "%s", r);
+        snprintf(m, sizeof m, "z2,%llx,8", (unsigned long long)(s->heap + 0x40));
+        s->ok = s->ok && ask(fd, m, r, sizeof r);
+        s->ok = s->ok && ask(fd, "D", r, sizeof r);
+        close(fd);
+    }
+    __atomic_store_n(&s->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+TEST(gdb_server_stops_at_a_breakpoint_and_a_watchpoint)
+{
+    rl_ctx *c = t_boot(NULL);
+    traps s = { .port = 20000 + (int)((getpid() + 7) % 20000) };
+    char port[16];
+    snprintf(port, sizeof port, "%d", s.port);
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(rl_gdb_start(rl_arm64_gdb(), hos_gdb_guest()));
+    static rl_fn_info info[1];
+    info[0] = (rl_fn_info){ .guest_addr = 0x8001000, .fn_addr = 0x8001000, .guest_size = 4, .fn = fake_lifted,
+                            .host_sym = "fake_lifted", .guest_name = "fake" };
+    static rl_fn_map map = { RL_FN_MAP_VERSION, 1, info, "main", "main-0", 0x8000000, NULL, NULL };
+    const rl_fn_map *maps[] = { &map };
+    CHECK_EQ(rl_fn_maps_register(maps, 1), 0);
+    s.heap = t_heap(c, 0x200000);
+    uint8_t *m = t_mem();
+    c->x[5] = 41;
+    uint64_t (*volatile call)(rl_ctx *, uint8_t *) = fake_lifted;
+    pthread_t th;
+    CHECK_EQ(pthread_create(&th, NULL, trap_client, &s), 0);
+    int step = 0;
+    while (!__atomic_load_n(&s.done, __ATOMIC_ACQUIRE)) {
+        hos_sched_point();
+        int go = __atomic_load_n(&s.go, __ATOMIC_ACQUIRE);
+        if (go >= 1 && step < 1) {
+            call(c, m);
+            step = 1;
+        }
+        if (go >= 2 && step < 2) {
+            rl_st64(m, s.heap + 0x40, 0x5555);
+            step = 2;
+        }
+    }
+    pthread_join(th, NULL);
+    rl_fn_maps_reset();
+    CHECK(s.ok);
+    CHECK(strcmp(s.zb, "OK") == 0);
+    CHECK(strncmp(s.stop_b, "T05thread:", 10) == 0);
+    CHECK(strcmp(s.pc, "0010000800000000") == 0);
+    CHECK(strcmp(s.x0, "2900000000000000") == 0);
+    CHECK_EQ(c->x[5], 42u);
+    CHECK(strcmp(s.zw, "OK") == 0);
+    char want[64];
+    snprintf(want, sizeof want, "watch:%llx;", (unsigned long long)(s.heap + 0x40));
+    CHECK(strstr(s.stop_w, want) != NULL);
+    CHECK_EQ(rl_ld64(m, s.heap + 0x40), 0x5555u);
+}
+#endif
 
 #endif

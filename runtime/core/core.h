@@ -466,6 +466,13 @@ RL_RUNTIME_API void rl_fault_set_hook(rl_fault_hook *hook);
  */
 RL_RUNTIME_API bool rl_fault_add_hook(rl_fault_hook *hook);
 #define RL_FAULT_HOOKS 4
+/**
+ * @brief A debugger's fault hook: it runs before every other hook, with the signal's host context (a ucontext_t), so
+ * it can step the faulting store and protect the page again. Returns true when it handled the fault.
+ */
+typedef bool rl_fault_debug_hook(const rl_fault *f, void *host_context);
+/** @brief Sets the debugger's fault hook (the GDB server's watchpoints), or NULL. */
+RL_RUNTIME_API void rl_fault_set_debug_hook(rl_fault_debug_hook *hook);
 /** @brief True once rl_fault_install has run, so guest faults reach the hook. */
 RL_RUNTIME_API bool rl_fault_installed(void);
 

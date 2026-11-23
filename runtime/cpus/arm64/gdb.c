@@ -140,6 +140,7 @@ static const rl_gdb_cpu g_gdb = {
     .reg_read = reg_read,
     .reg_write = reg_write,
     .pc = pc_of,
+    .pc_reg = 32,
 };
 
 const rl_gdb_cpu *rl_arm64_gdb(void) { return &g_gdb; }

@@ -356,7 +356,15 @@ gdb -ex 'set architecture aarch64' -ex 'target remote :2345'
 (gdb) detach
 ```
 
-A thread's registers are exact where it stopped at a system call or a runtime entry (the thread list says "stopped" or "waiting in the runtime", and pc is the system call's address). A thread stopped at a preemption check shows the registers of its last call, since lifted code keeps the rest in C locals. A guest thread that does not reach a safe point within 2 seconds (a long call-free loop) is listed as running. Breakpoints and watchpoints by guest address are not there yet (.work/design/debug-stub.md). `sh tools/gdb/stub-test.sh` checks the server with a real gdb.
+A thread's registers are exact where it stopped at a system call or a runtime entry (the thread list says "stopped" or "waiting in the runtime", and pc is the system call's address). A thread stopped at a preemption check shows the registers of its last call, since lifted code keeps the rest in C locals. A guest thread that does not reach a safe point within 2 seconds (a long call-free loop) is listed as running. On x86-64 Linux hosts the server also takes breakpoints and write watchpoints:
+
+```
+(gdb) break *0x8960000        # the entry of a lifted function (monitor sym names it)
+(gdb) watch *(long *)0x1025710000
+(gdb) continue
+```
+
+A breakpoint must be a lifted function's entry: the server writes an int3 over the first byte of its host code, and a thread that reaches it stops with exact registers and pc at the function. Calls clang inlined into a caller in the same shard do not stop. A watchpoint protects the guest pages it covers; a guest store into the watched bytes stops its thread right after the store (registers of its last call boundary), as a data breakpoint does, and other stores to those pages run on after one stepped host instruction. Stores the runtime makes for the guest (system calls, the GPU mirror's readback) are not seen. A step (`stepi`, `next`) runs the thread to its next safe point or breakpoint, since lifted code has no single guest instruction to stop after. `sh tools/gdb/stub-test.sh` checks the server with a real gdb.
 
 ## Capturing with RenderDoc
 
