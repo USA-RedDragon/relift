@@ -37,6 +37,8 @@ typedef struct nvn_module {
     bool mesh_buffer;
     /** @brief Its translation stores through 64-bit global addresses (NVN_IFACE_GLOBAL_STORE). */
     bool global_store;
+    /** @brief Those stores also mark their pages in the written-page bitmap (the record's second word is 1). */
+    bool marks_pages;
     /** @brief The program stores to guest memory: nvn_spirv_stores of its SPIR-V. */
     bool stores_guest;
     /** @brief Its translation reads texture handles from registers (NVN_IFACE_REGISTER_HANDLES). */

@@ -5,7 +5,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
 layout(local_size_x = 32) in;
 layout(buffer_reference, std430) buffer W { uint w[]; };
-layout(push_constant) uniform Bank { W a; W b; W o; };
+layout(push_constant) uniform Bank { W a; W b; W unused_pages; W o; };
 shared uint s[256];
 void main() {
     uint g = gl_WorkGroupID.x;

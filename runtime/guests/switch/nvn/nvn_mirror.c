@@ -14,8 +14,12 @@
  *   batch completes, those bytes are copied back, and only the pages that differ, before the game can observe them.
  *
  * Shaders reach pools through the storage buffer ranges the game binds, which are noted exactly. A program whose
- * translation stores through addresses it builds from other data (NVN_IFACE_GLOBAL_STORE) can write anywhere, so every
- * mirror is noted as written for its batch and the pages that differ are copied back.
+ * translation stores through addresses it builds from other data (NVN_IFACE_GLOBAL_STORE) can write anywhere. Its
+ * translation for this host marks the 4 KiB page of each such store in the written-page bitmap (the translator's
+ * PUSH_WRITTEN_PAGES): when its batch completes, the mirror pages whose bit is set are noted as written and copied
+ * back by the readback batches that follow, before the game runs on. Where the translation does not mark pages (a
+ * table made for a host that imports guest memory), every mirror is noted as written for its batch and the pages that
+ * differ are copied back.
  */
 #include "nvn_vk.h"
 #include "vkdev.h"
@@ -30,6 +34,8 @@
 /** @brief Bytes of the readback buffer. */
 #define READBACK (128ull << 20)
 #define PAGE 4096u
+/** @brief Bits of the written-page bitmap: the translator's WRITTEN_PAGE_BITS. */
+#define WRITTEN_PAGE_BITS (1u << 20)
 
 typedef struct mirror {
     uint64_t guest, size, gpu;
@@ -71,6 +77,14 @@ static struct {
     segment seg[64];
     uint32_t nseg;
     uint64_t stat_up, stat_down, stat_syncs;
+    /** @brief The written-page bitmap: a host-visible buffer with a device address, all zero between batches. */
+    VkBuffer pages_buf;
+    VkDeviceMemory pages_mem;
+    uint32_t *pages_map;
+    uint64_t pages_gpu;
+    /** @brief The batch being recorded runs a program that marks pages, and so the batch that waits to be read. */
+    bool marked, marked_sent;
+    uint64_t stat_marked_pages, stat_read;
 } mi;
 
 static pthread_once_t mi_once = PTHREAD_ONCE_INIT;
@@ -416,6 +430,96 @@ void nvn_mirror_written_all(void)
     pthread_mutex_unlock(&mi.lock);
 }
 
+uint64_t nvn_mirror_written_pages_address(void)
+{
+    uint64_t made = __atomic_load_n(&mi.pages_gpu, __ATOMIC_ACQUIRE);
+    if (made || !mi.n)
+        return made;
+    pthread_once(&mi_once, mi_init);
+    pthread_mutex_lock(&mi.lock);
+    if (!mi.pages_gpu && g.ok) {
+        VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                   .size = WRITTEN_PAGE_BITS / 8,
+                                   .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+        VkMemoryRequirements req = { 0 };
+        int32_t t = -1;
+        if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &mi.pages_buf) == VK_SUCCESS) {
+            VK(vkGetBufferMemoryRequirements)(g.dev, mi.pages_buf, &req);
+            t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+                                                        VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+            if (t < 0)
+                t = nvn_vk_mem_type(req.memoryTypeBits,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        }
+        VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                         .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+        VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                     .pNext = &fl,
+                                     .allocationSize = req.size,
+                                     .memoryTypeIndex = (uint32_t)t };
+        void *p = NULL;
+        if (t >= 0 && VK(vkAllocateMemory)(g.dev, &mai, NULL, &mi.pages_mem) == VK_SUCCESS &&
+            VK(vkBindBufferMemory)(g.dev, mi.pages_buf, mi.pages_mem, 0) == VK_SUCCESS &&
+            VK(vkMapMemory)(g.dev, mi.pages_mem, 0, VK_WHOLE_SIZE, 0, &p) == VK_SUCCESS) {
+            memset(p, 0, WRITTEN_PAGE_BITS / 8);
+            mi.pages_map = p;
+            VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+                                             .buffer = mi.pages_buf };
+            __atomic_store_n(&mi.pages_gpu, VK(vkGetBufferDeviceAddress)(g.dev, &ai), __ATOMIC_RELEASE);
+        } else {
+            rl_log(RL_LOG_ERROR, "nvn", "cannot make the written-page bitmap");
+        }
+    }
+    uint64_t a = mi.pages_gpu;
+    pthread_mutex_unlock(&mi.lock);
+    return a;
+}
+
+void nvn_mirror_written_marked(void)
+{
+    if (!mi.n)
+        return;
+    pthread_once(&mi_once, mi_init);
+    pthread_mutex_lock(&mi.lock);
+    mi.marked = true;
+    pthread_mutex_unlock(&mi.lock);
+}
+
+/**
+ * @brief Notes as written the mirror pages whose bit the batch set in the bitmap, and clears it. A bit stands for every
+ * page whose GPU page number is equal modulo the bitmap's size, so a page can be noted that the batch did not write;
+ * the readback copies only the bytes that differ.
+ */
+static void note_marked_pages(void)
+{
+    const uint32_t *bits = mi.pages_map;
+    for (uint32_t i = 0; i < mi.n; i++) {
+        mirror *m = mi.v[i];
+        uint64_t run = 0, run_len = 0;
+        for (uint64_t off = 0; off < m->size; off += PAGE) {
+            uint64_t b = ((m->gpu + off) / PAGE) & (WRITTEN_PAGE_BITS - 1);
+            bool set = bits[b / 32] >> (b % 32) & 1;
+            if (set && run_len && run + run_len == off) {
+                run_len += PAGE;
+            } else if (set) {
+                if (run_len && grow((void **)&mi.pending, mi.npending, &mi.cappending, sizeof *mi.pending))
+                    mi.pending[mi.npending++] = (span){ m, run, run_len };
+                run = off;
+                run_len = PAGE;
+            }
+            mi.stat_marked_pages += set;
+        }
+        if (run_len) {
+            if (run + run_len > m->size)
+                run_len = m->size - run;
+            if (grow((void **)&mi.pending, mi.npending, &mi.cappending, sizeof *mi.pending))
+                mi.pending[mi.npending++] = (span){ m, run, run_len };
+        }
+    }
+    memset(mi.pages_map, 0, WRITTEN_PAGE_BITS / 8);
+}
+
 static int span_cmp(const void *a, const void *b)
 {
     const span *x = a, *y = b;
@@ -447,7 +551,7 @@ bool nvn_mirror_readback_pending(void)
 {
     pthread_once(&mi_once, mi_init);
     pthread_mutex_lock(&mi.lock);
-    bool more = mi.cursor < mi.npending;
+    bool more = mi.cursor < mi.npending || mi.marked || mi.marked_sent;
     pthread_mutex_unlock(&mi.lock);
     return more;
 }
@@ -474,6 +578,7 @@ bool nvn_mirror_record_readback(VkCommandBuffer cb)
             VkBufferCopy bc = { .srcOffset = s->off + mi.cursor_off, .dstOffset = at, .size = len };
             VK(vkCmdCopyBuffer)(cb, s->m->buf, mi.rb.buf, 1, &bc);
             mi.seg[mi.nseg++] = (segment){ s->m, s->off + mi.cursor_off, len, at };
+            mi.stat_read += len;
             at += len;
             mi.cursor_off += len;
             if (mi.cursor_off == s->len) {
@@ -483,6 +588,10 @@ bool nvn_mirror_record_readback(VkCommandBuffer cb)
         }
         if (at)
             nvn_vk_barrier(cb);
+    }
+    if (mi.marked) {
+        mi.marked = false;
+        mi.marked_sent = true;
     }
     pthread_mutex_unlock(&mi.lock);
     return ok;
@@ -515,6 +624,10 @@ void nvn_mirror_apply_readback(void)
         mi.cursor = 0;
         mi.cursor_off = 0;
     }
+    if (mi.marked_sent && mi.pages_map) {
+        mi.marked_sent = false;
+        note_marked_pages();
+    }
     pthread_mutex_unlock(&mi.lock);
 }
 
@@ -526,12 +639,17 @@ void nvn_mirror_drop_readback(void)
     mi.cursor = 0;
     mi.cursor_off = 0;
     mi.nseg = 0;
+    if (mi.marked_sent && mi.pages_map)
+        memset(mi.pages_map, 0, WRITTEN_PAGE_BITS / 8);
+    mi.marked_sent = false;
     pthread_mutex_unlock(&mi.lock);
 }
 
-void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs)
+void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs, uint64_t *read, uint64_t *marked)
 {
+    *read = mi.stat_read;
     *up = mi.stat_up;
     *down = mi.stat_down;
     *syncs = mi.stat_syncs;
+    *marked = mi.stat_marked_pages;
 }

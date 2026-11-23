@@ -118,6 +118,12 @@ pub struct HostProfile {
     /// fused. GLSL `Fma` only has to be as precise as a multiply and an add,
     /// so without this FFMA is built from integer operations.
     pub fused_fma: bool,
+    /// The runtime keeps guest memory pools as device mirrors (the device has
+    /// no `VK_EXT_external_memory_host`; the runtime's `guestMemoryMirrored`
+    /// probe) and copies back what the GPU wrote: stores and atomics through
+    /// global addresses mark their pages in the written-page bitmap (see
+    /// [`super::PUSH_WRITTEN_PAGES`]).
+    pub mirror_writes: bool,
     /// A native mesh shader writes `CullPrimitiveEXT` only with constant
     /// stores under a branch, never from a computed bool (see
     /// [`HostProfile::from_device`]).
@@ -220,6 +226,7 @@ impl HostProfile {
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: true,
             fused_fma: true,
+            mirror_writes: false,
             constant_cull_stores: false,
             clock: Clock::Device,
             max_shared_bytes: 49152,
@@ -333,6 +340,7 @@ impl HostProfile {
     pub fn moltenvk() -> HostProfile {
         HostProfile {
             name: "moltenvk".into(),
+            mirror_writes: true,
             warp_compute: Warp::Unchecked32,
             warp_fragment: Warp::Unchecked32,
             warp_graphics: Warp::Absent,
@@ -364,6 +372,7 @@ impl HostProfile {
     pub fn adreno() -> HostProfile {
         HostProfile {
             name: "adreno".into(),
+            mirror_writes: true,
             warp_compute: Warp::Wide,
             warp_fragment: Warp::Wide,
             warp_graphics: Warp::Absent,
@@ -401,6 +410,7 @@ impl HostProfile {
     pub fn turnip() -> HostProfile {
         HostProfile {
             name: "turnip".into(),
+            mirror_writes: true,
             warp_compute: Warp::Wide,
             warp_fragment: Warp::Wide,
             warp_graphics: Warp::Wide,
@@ -437,6 +447,7 @@ impl HostProfile {
     pub fn mali() -> HostProfile {
         HostProfile {
             name: "mali".into(),
+            mirror_writes: true,
             warp_compute: Warp::Narrow(16),
             warp_fragment: Warp::Narrow(16),
             warp_graphics: Warp::Absent,
@@ -548,6 +559,7 @@ impl HostProfile {
             denorm_flush_mode: false,
             signed_zero_inf_nan_preserve: false,
             fused_fma: false,
+            mirror_writes: false,
             constant_cull_stores: false,
             clock: Clock::None,
             max_shared_bytes: 16384,
@@ -652,6 +664,7 @@ impl HostProfile {
             denorm_flush_mode: caps.on("shaderDenormFlushToZeroFloat32"),
             signed_zero_inf_nan_preserve: caps.on("shaderSignedZeroInfNanPreserveFloat32"),
             fused_fma: caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat32"),
+            mirror_writes: caps.on("guestMemoryMirrored"),
             constant_cull_stores: caps.get("driverID") == DRIVER_MESA_LLVMPIPE,
             clock: if caps.extension_on("VK_KHR_shader_clock", "shaderDeviceClock") {
                 Clock::Device

@@ -88,6 +88,33 @@ fn only_global_stores_mark_the_program_as_writing() {
     assert!(stores.interface.global_store);
 }
 
+/// On a host whose guest memory is mirrored, a global store also sets its
+/// page's bit in the written-page bitmap (an `OpAtomicOr` through the
+/// address in the push constants); elsewhere the program is as it was.
+#[test]
+fn global_stores_mark_their_pages_where_memory_is_mirrored() {
+    use relift_gpu_nv::translate::{HostProfile, Options};
+    let mut b: Vec<u8> = [stg(SIZE_U8, 4, 1, 2)].iter().flatten().copied().collect();
+    finish(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    for h in HostProfile::presets() {
+        let o = Options {
+            host: h.clone(),
+            ..Options::default()
+        };
+        let s = common::translate_with(&p, &o).unwrap_or_else(|e| panic!("{}: {e}", h.name));
+        assert!(s.interface.global_store, "{}", h.name);
+        let marks = h.mirror_writes && h.bda;
+        assert_eq!(s.interface.marks_written_pages, marks, "{}", h.name);
+        assert_eq!(spirv_ops(&s.spirv).contains(&242), marks, "{}", h.name);
+    }
+    assert!(
+        HostProfile::presets()
+            .iter()
+            .any(|h| h.mirror_writes && h.bda)
+    );
+}
+
 #[test]
 fn sub_word_global_access() {
     let s = run(

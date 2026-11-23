@@ -539,7 +539,10 @@ bool nvn_mesh_info_of(const nvn_iface_rec *recs, uint32_t n, nvn_mesh_info *out)
  * program with key (relift build writes the helpers under keys made from the mesh program's).
  */
 void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65]);
-/** @brief Record kind: the program stores or does atomic read-modify-writes through 64-bit global addresses. */
+/**
+ * @brief Record kind: the program stores or does atomic read-modify-writes through 64-bit global addresses; bank 1 when
+ * each such write also marks its page in the written-page bitmap (nvn_mirror_written_pages_address).
+ */
 #define NVN_IFACE_GLOBAL_STORE 7u
 /** @brief Record kind: the program reads or writes a texture or image whose handle comes from a register. */
 #define NVN_IFACE_BINDLESS 8u
@@ -598,6 +601,17 @@ void nvn_mirror_written(uint64_t gpu, uint64_t size);
 void nvn_mirror_written_guest(uint64_t guest, uint64_t size);
 /** @brief Notes every byte of every mirror as possibly written: a program stores through addresses it builds itself. */
 void nvn_mirror_written_all(void);
+/**
+ * @brief Notes that the batch being recorded runs a program that marks the pages it stores to in the written-page
+ * bitmap (NVN_IFACE_GLOBAL_STORE with marks): when the batch completes, the mirror pages marked are noted as written.
+ */
+void nvn_mirror_written_marked(void);
+/**
+ * @brief The device address of the written-page bitmap, made the first time, which every draw and dispatch pushes to
+ * the programs that mark pages; 0 while no pool is mirrored (a device that imports guest memory has no translation that marks pages), and 0
+ * (logged) when the device cannot make it.
+ */
+uint64_t nvn_mirror_written_pages_address(void);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */
 uint64_t nvn_gpu_guest(uint64_t gpu);
 /**

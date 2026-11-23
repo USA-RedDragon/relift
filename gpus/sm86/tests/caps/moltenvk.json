@@ -79,6 +79,7 @@
      "shaderSignedZeroInfNanPreserveFloat32": true
     },
     "ReliftDeviceProbes": {
+      "guestMemoryMirrored": true,
      "denormDefault32": 0,
      "denormPreserveMode32": false,
      "denormAddFlush32": true,

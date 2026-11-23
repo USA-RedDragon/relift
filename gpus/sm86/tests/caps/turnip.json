@@ -164,6 +164,9 @@
       "VK_SHADER_STAGE_MESH_BIT_EXT",
       "VK_SHADER_STAGE_SUBPASS_SHADING_BIT_HUAWEI"
      ]
+    },
+    "ReliftDeviceProbes": {
+     "guestMemoryMirrored": true
     }
    }
   }

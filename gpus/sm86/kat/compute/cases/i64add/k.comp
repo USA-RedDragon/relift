@@ -8,7 +8,7 @@ layout(local_size_x = 64) in;
 layout(buffer_reference, std430) buffer Q { uint64_t q[]; };
 layout(buffer_reference, std430) buffer W { uint w[]; };
 layout(buffer_reference, std430) buffer B8 { uint8_t b[]; };
-layout(push_constant) uniform Bank { W a; Q acc; W o; B8 bytes; };
+layout(push_constant) uniform Bank { W a; Q acc; W unused_pages; W o; B8 bytes; };
 void main() {
     uint g = gl_GlobalInvocationID.x;
     uint x = a.w[g];

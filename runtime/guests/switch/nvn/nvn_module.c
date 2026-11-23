@@ -433,6 +433,7 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     nvn_shader_iface(key, m->recs, m->nrecs);
     for (uint32_t i = 0; i < m->nrecs; i++) {
         m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
+        m->marks_pages |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE && m->recs[i].bank == 1;
         m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
     }
     if (!patch_spirv(w, n, stage, m)) {

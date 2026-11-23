@@ -76,7 +76,8 @@ pub const RECORD_TEXTURE_DIM: u32 = 1;
 pub const RECORD_GLOBAL_MEMORY: u32 = 2;
 /// An interface record: the program reads a bound texture handle.
 pub const RECORD_TEXTURE: u32 = 3;
-/// The program stores through, or does an atomic read-modify-write on, 64-bit global addresses.
+/// The program stores through, or does an atomic read-modify-write on, 64-bit global addresses; the second word is 1
+/// when every such write also marks its pages in the written-page bitmap (`Interface::marks_written_pages`).
 pub const RECORD_GLOBAL_STORE: u32 = 7;
 /// An interface record: the program reads or writes a texture or image whose handle comes from a register.
 pub const RECORD_BINDLESS: u32 = 8;
@@ -523,7 +524,7 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
         recs.push([RECORD_GLOBAL_MEMORY, 0, 0, 0]);
     }
     if i.global_store {
-        recs.push([RECORD_GLOBAL_STORE, 0, 0, 0]);
+        recs.push([RECORD_GLOBAL_STORE, u32::from(i.marks_written_pages), 0, 0]);
     }
     if i.bindless {
         recs.push([RECORD_BINDLESS, 0, 0, 0]);

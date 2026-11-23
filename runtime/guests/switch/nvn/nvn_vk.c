@@ -879,9 +879,10 @@ static void write_caps(void)
     fprintf(f,
             "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": "
             "%s, \"denormDefault32\": %u, \"denormPreserveMode32\": %s, \"denormAddFlush32\": %s, "
-            "\"denormMulFix32\": %u },\n",
+            "\"denormMulFix32\": %u, \"guestMemoryMirrored\": %s },\n",
             B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop), g.probes.denorm32,
-            B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix);
+            B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix,
+            B(!g.host_import));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);
@@ -4160,15 +4161,19 @@ static void present_rate(uint64_t total)
            (unsigned long long)total, (double)(total - last_total) * 1e9 / (double)(now - last_ns),
            (double)(now - last_ns) / 1e9, (unsigned long long)starts, (unsigned long long)faults,
            (unsigned long long)rl_input_host_events(RL_INPUT_HOST_KINDS));
-    uint64_t up, down, syncs;
-    static uint64_t up0, down0, syncs0;
-    nvn_mirror_stats(&up, &down, &syncs);
-    if (up || down)
-        rl_log(RL_LOG_INFO, "nvn", "per present: mirror uploads %.1f KiB in %.2f syncs, readbacks changed %.1f KiB",
-               (double)(up - up0) / 1024 / frames, (double)(syncs - syncs0) / frames, (double)(down - down0) / 1024 / frames);
+    uint64_t up, down, syncs, read, marked;
+    static uint64_t up0, down0, syncs0, read0, marked0;
+    nvn_mirror_stats(&up, &down, &syncs, &read, &marked);
+    if (up || down || read)
+        rl_log(RL_LOG_INFO, "nvn",
+               "per present: mirror uploads %.1f KiB in %.2f syncs, read back %.1f KiB (%.1f pages marked), changed %.1f KiB",
+               (double)(up - up0) / 1024 / frames, (double)(syncs - syncs0) / frames, (double)(read - read0) / 1024 / frames,
+               (double)(marked - marked0) / frames, (double)(down - down0) / 1024 / frames);
     up0 = up;
     down0 = down;
     syncs0 = syncs;
+    read0 = read;
+    marked0 = marked;
     last_ns = now;
     last_total = total;
 }

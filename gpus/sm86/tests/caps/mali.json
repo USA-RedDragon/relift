@@ -133,6 +133,9 @@
       "VK_SHADER_STAGE_FRAGMENT_BIT",
       "VK_SHADER_STAGE_COMPUTE_BIT"
      ]
+    },
+    "ReliftDeviceProbes": {
+     "guestMemoryMirrored": true
     }
    }
   }

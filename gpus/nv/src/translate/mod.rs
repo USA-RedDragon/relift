@@ -38,6 +38,7 @@ pub use io::mesh::{
     fallback as mesh_fallback, mesh_components,
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
+pub use io::{PUSH_WRITTEN_PAGES, WRITTEN_PAGE_BITS};
 pub use tex::{
     Dim, HandleSource, ImageDim, ImageKind, KIND_AT_RUN_TIME, Kind, SAMPLER_BINDING,
     TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC, TEXTURE_KIND_SPEC,
@@ -108,6 +109,10 @@ pub struct Interface {
     /// The program stores to, or does an atomic read-modify-write on, 64-bit
     /// global addresses.
     pub global_store: bool,
+    /// Every such store or atomic also marks its pages in the written-page
+    /// bitmap (see [`PUSH_WRITTEN_PAGES`]), whose address the program reads
+    /// from the push constants.
+    pub marks_written_pages: bool,
     /// Bytes of shared memory addressed (compute), rounded up to a word.
     pub shared_bytes: u32,
     /// Bytes of local (per-thread) memory addressed.

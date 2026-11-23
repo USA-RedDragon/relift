@@ -571,8 +571,11 @@ bool nvn_mirror_record_readback(VkCommandBuffer cb);
 void nvn_mirror_apply_readback(void);
 /** @brief Forgets the noted bytes (the device failed). */
 void nvn_mirror_drop_readback(void);
-/** @brief Bytes uploaded and read back and uploads made, for the stats line. */
-void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs);
+/**
+ * @brief Bytes uploaded, bytes read back that differed, uploads made, bytes copied back for compares, and pages the
+ * written-page bitmap noted, for the stats line.
+ */
+void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs, uint64_t *read, uint64_t *marked);
 /** @brief Stops the game with a report (after flushing what is recorded). Returns RL_PENDING. */
 int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
 /** @brief The host format of an NVNformat; VK_FORMAT_UNDEFINED for one the layer does not map. */

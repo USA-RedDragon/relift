@@ -110,6 +110,17 @@ pub const PUSH_SCALED_UNSIGNED: u32 = 8;
 /// [`PUSH_SCALED_UNSIGNED`].
 pub const PUSH_SCALED_SIGNED: u32 = 12;
 
+/// Byte offset in the fixed-state push constant block of the 64-bit device
+/// address of the written-page bitmap, on a host that mirrors guest memory
+/// ([`HostProfile::mirror_writes`](super::HostProfile::mirror_writes)):
+/// every store or atomic through a global address sets the bit of its
+/// 4 KiB page, page number modulo [`WRITTEN_PAGE_BITS`], in the bitmap's
+/// 32-bit words, so the runtime copies back only those pages.
+pub const PUSH_WRITTEN_PAGES: u32 = 16;
+
+/// Bits of the written-page bitmap (a power of two).
+pub const WRITTEN_PAGE_BITS: u32 = 1 << 20;
+
 /// What the stage I/O needs to know about the whole program.
 #[derive(Default)]
 pub(crate) struct State {
@@ -554,20 +565,29 @@ impl Ctx {
 
 impl Ctx {
     /// The fixed-state push constant block (`{ float point_size; float
-    /// alpha_ref; }`, the host's graphics pipelines give it to every stage
-    /// that reads it), declared the first time.
+    /// alpha_ref; }`, and on a host that mirrors guest memory `uvec2
+    /// written_pages` after them; the host's pipelines give it to every
+    /// stage that reads it), declared the first time.
     fn push_block(&mut self) -> u32 {
         if let Some(v) = self.io.push_block {
             return v;
         }
         let f = self.f32t();
         let u = self.u32t();
-        let st = self.m.t_struct_unique(&[f, f, u, u]);
+        let st = if self.host.mirror_writes {
+            let v2 = self.m.t_vec(u, 2);
+            self.m.t_struct_unique(&[f, f, u, u, v2])
+        } else {
+            self.m.t_struct_unique(&[f, f, u, u])
+        };
         self.m.deco(st, 2, &[]);
         self.m.member_deco(st, 0, 35, &[PUSH_POINT_SIZE]);
         self.m.member_deco(st, 1, 35, &[PUSH_ALPHA_REF]);
         self.m.member_deco(st, 2, 35, &[PUSH_SCALED_UNSIGNED]);
         self.m.member_deco(st, 3, 35, &[PUSH_SCALED_SIGNED]);
+        if self.host.mirror_writes {
+            self.m.member_deco(st, 4, 35, &[PUSH_WRITTEN_PAGES]);
+        }
         let p = self.m.t_ptr(PUSH_CONSTANT, st);
         let var = self.m.global(p, PUSH_CONSTANT);
         self.globals.push(var);
@@ -609,6 +629,20 @@ impl Ctx {
         let as_s = self.m.emit(op::BITCAST, u, &[as_i]);
         let r = self.m.emit(op::SELECT, u, &[is_s, as_s, plain]);
         self.m.emit(op::SELECT, u, &[is_u, as_u, r])
+    }
+
+    /// The (low, high) words of the written-page bitmap's address.
+    pub(crate) fn push_written_pages(&mut self) -> (u32, u32) {
+        let var = self.push_block();
+        let u = self.u32t();
+        let v2 = self.m.t_vec(u, 2);
+        let p = self.m.t_ptr(PUSH_CONSTANT, v2);
+        let i = self.m.c_u32(4);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, i]);
+        let w = self.m.emit(op::LOAD, v2, &[ptr]);
+        let lo = self.m.emit(op::COMPOSITE_EXTRACT, u, &[w, 0]);
+        let hi = self.m.emit(op::COMPOSITE_EXTRACT, u, &[w, 1]);
+        (lo, hi)
     }
 
     fn push_float(&mut self, member: u32) -> u32 {

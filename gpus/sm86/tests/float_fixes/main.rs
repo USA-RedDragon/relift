@@ -146,9 +146,15 @@ fn program(inst: u128, a: u32, b: u32, c: u32) -> Program {
     relift_gpu_sm86::program::parse(&bytes)
 }
 
+/// Options for host `h`, translated as for a device that imports guest
+/// memory: the interpreter has no push constants, which the written-page
+/// marks of a mirroring host read (`tests/mem.rs` checks those).
 fn host(h: HostProfile) -> Options {
     Options {
-        host: h,
+        host: HostProfile {
+            mirror_writes: false,
+            ..h
+        },
         ..Options::default()
     }
 }

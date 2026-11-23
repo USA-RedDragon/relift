@@ -75,10 +75,14 @@ const OUT: u64 = 0x3_0000_0000;
 /// The hosts the programs run for: the ones with buffer device addresses
 /// (the interpreter has no segment table). NVIDIA uses the MUFU model too:
 /// its native path relies on the driver, which an interpreter cannot check.
+///
+/// Each is translated as for a device that imports guest memory: the
+/// interpreter has no push constants, which the written-page marks of a
+/// mirroring host read (`tests/mem.rs` checks those).
 fn hosts() -> Vec<HostProfile> {
     let mut v: Vec<HostProfile> = ["nvidia", "radv", "lavapipe", "adreno", "moltenvk"]
         .iter()
-        .map(|n| HostProfile::preset(n).unwrap())
+        .map(|n| unmirrored(n))
         .collect();
     for (f16, nan) in [(false, false), (true, false), (false, true)] {
         let mut h = HostProfile::nvidia();
@@ -88,6 +92,14 @@ fn hosts() -> Vec<HostProfile> {
         v.push(h);
     }
     v
+}
+
+/// Preset `name` without the written-page marks (see [`hosts`]).
+fn unmirrored(name: &str) -> HostProfile {
+    HostProfile {
+        mirror_writes: false,
+        ..HostProfile::preset(name).unwrap()
+    }
 }
 
 /// The denormal behaviors a host may show for a module.
@@ -560,7 +572,7 @@ fn probed_multiplication_fixes_give_the_flushing_results() {
                 .collect::<Vec<_>>()
         };
         for host in ["adreno", "moltenvk"] {
-            let h = HostProfile::preset(host).unwrap();
+            let h = unmirrored(host);
             let o = Options {
                 host: h.clone(),
                 exact_mufu: true,

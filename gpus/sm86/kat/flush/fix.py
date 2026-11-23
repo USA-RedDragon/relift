@@ -252,9 +252,13 @@ def prepare(work):
         '<%dI' % (3 * n), *([expect('mul', a, b) for a, b, _ in rs] + [expect('add', a, b) for a, b, _ in rs]
                             + [expect_fma(a, b, c) for a, b, c in rs])))
     spec = ['local 64 1 1', 'groups %d 1 1' % (n // 64), 'buf a.bin', 'buf b.bin', 'buf c.bin',
-            'out m.out %d' % (4 * n), 'out s.out %d' % (4 * n), 'out f.out %d' % (4 * n)]
+            'out m.out %d' % (4 * n), 'out s.out %d' % (4 * n), 'out f.out %d' % (4 * n),
+            'out pages.out 131072']
     for k, off in enumerate(range(0x20, 0x50, 8)):
         spec += ['put 0 0x%x addr %d' % (off, k), 'push 0x%x addr %d' % (8 * k, k)]
+    # A host that mirrors guest memory marks the pages its stores touch in a bitmap whose address is
+    # push constant 0x10; it gets a buffer of its own so the marks leave the inputs alone.
+    spec += ['push 0x10 addr 6']
     for host, fix in HOSTS:
         name = '%s%s' % (host, '' if fix is None else '-fix%d' % fix)
         if ONLY and name not in ONLY:

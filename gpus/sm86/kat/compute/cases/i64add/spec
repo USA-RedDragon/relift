@@ -8,10 +8,12 @@ buf IN0
 outf OUT.q 4160 IN1
 out OUT.o 4096
 outf OUT.b 1024 IN2
+out OUT.pages 131072
 push 0x0 addr 0
 push 0x8 addr 1
-push 0x10 addr 2
-push 0x18 addr 3
+push 0x18 addr 2
+push 0x20 addr 3
+push 0x10 addr 4
 put 0 0x20 addr 0
 put 0 0x28 addr 1
 put 0 0x30 addr 2

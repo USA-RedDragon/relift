@@ -30,6 +30,10 @@ use crate::{Inst, Operand};
 use order::Order;
 
 const ALIGNED: u32 = 2;
+/// `OpAtomicOr`.
+const ATOMIC_OR: u16 = 242;
+/// Device scope, for the written-page marks.
+const SCOPE_DEVICE_MARK: u32 = 1;
 const SCOPE_DEVICE: u32 = 1;
 
 /// SPIR-V opcodes the memory family uses that the shared opcode table does
@@ -220,7 +224,47 @@ impl Ctx {
     /// knows to copy it back.
     pub(crate) fn global_ptr_w(&mut self, addr: u32, ty: u32) -> u32 {
         self.iface.global_store = true;
+        if self.host.mirror_writes && self.host.bda {
+            self.iface.marks_written_pages = true;
+            self.mark_written(addr);
+            let last = self.addr_add_const(addr, 15);
+            self.mark_written(last);
+        }
         self.global_ptr(addr, ty)
+    }
+
+    /// Sets the bit of the page of `addr` in the written-page bitmap (see
+    /// [`super::io::PUSH_WRITTEN_PAGES`]) where it is not set yet. A write
+    /// of up to 16 bytes at `a` touches the pages of `a` and `a + 15` only.
+    fn mark_written(&mut self, addr: u32) {
+        let u = self.u32t();
+        let lo = self.addr_low(addr);
+        let page = self.sh(op::SHIFT_RIGHT_LOGICAL, lo, 12);
+        let page = self.and_k(page, super::io::WRITTEN_PAGE_BITS - 1);
+        let word = self.sh(op::SHIFT_RIGHT_LOGICAL, page, 5);
+        let shift = self.and_k(page, 31);
+        let one = self.kc(1);
+        let bit = self.ib(op::SHIFT_LEFT_LOGICAL, one, shift);
+        let off = self.sh(op::SHIFT_LEFT_LOGICAL, word, 2);
+        let (blo, bhi) = self.push_written_pages();
+        let base = self.addr_pair(blo, bhi);
+        let off = self.addr_zext(off);
+        let at = self.addr_add(base, off);
+        let p = self.global_ptr(at, u);
+        let old = self.m.emit(op::LOAD, u, &[p, ALIGNED, 4]);
+        let has = self.ib(op::BITWISE_AND, old, bit);
+        let clear = self.cmp_k(op::I_EQUAL, has, 0);
+        let set = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[clear, set, merge]);
+        self.m.emit_void(op::LABEL, &[set]);
+        let scope = self.m.c_u32(SCOPE_DEVICE_MARK);
+        let sem = self.m.c_u32(0);
+        self.m.emit(ATOMIC_OR, u, &[p, scope, sem, bit]);
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
     }
 
     /// Extracts the sub-word `size` at byte address `addr` from the 32-bit
