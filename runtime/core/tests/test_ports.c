@@ -305,6 +305,43 @@ TEST(ports_input_script_follows_a_file)
     CHECK(!rl_ports_follow_script(path));
 }
 
+TEST(ports_input_script_adds_a_last_step_with_no_separator_after)
+{
+    rl_ports_reset();
+    rl_ports_script_reset();
+    CHECK(rl_ports_declare(native, 2));
+    char path[512];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(path, sizeof path, "%s/rl_script_XXXXXX", tmp && *tmp ? tmp : "/tmp");
+    int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    FILE *f = fdopen(fd, "w");
+    CHECK(f != NULL);
+    CHECK(rl_ports_follow_script(path));
+    rl_input_snapshot s = blank();
+    rl_control_ref a = rl_ports_find("p1", "a");
+    rl_control_ref b = rl_ports_find("p2", "b");
+    fputs("1+4:p1.a", f);
+    fflush(f);
+    rl_ports_script_frame(1);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    rl_ports_script_frame(2);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    fputs(",3:p2", f);
+    fflush(f);
+    rl_ports_script_frame(3);
+    rl_ports_script_frame(4);
+    CHECK(rl_ports_eval(b, &s) == 0.0f);
+    fputs(".b", f);
+    fflush(f);
+    rl_ports_script_frame(5);
+    rl_ports_script_frame(6);
+    CHECK(rl_ports_eval(b, &s) == 1.0f);
+    fclose(f);
+    rl_ports_script_reset();
+    unlink(path);
+}
+
 TEST(input_host_events_are_counted_by_kind)
 {
     uint64_t all = rl_input_host_events(RL_INPUT_HOST_KINDS);

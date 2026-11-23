@@ -15,8 +15,11 @@
  *
  * `@<path>` instead of steps follows a file: at each frame the steps
  * appended to it since the last frame are added, separated by commas or
- * newlines, so a driver can steer a running game. A step whose frame has
- * passed when it is read starts at that frame.
+ * newlines, so a driver can steer a running game. A step at the end of the
+ * file with no separator after it is added once a frame passes with nothing
+ * more appended and it reads as a whole step; until then a writer may still
+ * be finishing it. A step whose frame has passed when it is read starts at
+ * that frame.
  */
 #include "core.h"
 
@@ -224,7 +227,9 @@ static void read_follow_locked(void)
 {
     char buf[4096];
     size_t got;
+    bool appended = false;
     while ((got = fread(buf, 1, sizeof buf, g_follow)) > 0) {
+        appended = true;
         for (size_t i = 0; i < got; i++) {
             if (buf[i] == ',' || buf[i] == '\n') {
                 add_pending_locked();
@@ -238,6 +243,11 @@ static void read_follow_locked(void)
         }
     }
     clearerr(g_follow);
+    step st;
+    if (!appended && g_npending && !g_pending_bad && parse_step(g_pending, g_npending, &st)) {
+        add_pending_locked();
+        g_npending = 0;
+    }
 }
 
 static void drop_done_locked(void)
