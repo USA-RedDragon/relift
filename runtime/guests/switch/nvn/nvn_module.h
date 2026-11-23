@@ -72,12 +72,17 @@ typedef struct nvn_module {
     /** @brief Its interface records (nvn_shader_iface), as many as the translation has. */
     nvn_iface_rec *recs;
     uint32_t nrecs;
-    /** @brief Fragment variants with some inputs demoted to zero constants (see demote_inputs), by the mask of those inputs. */
+    /**
+     * @brief Variants by a mask of locations: of a fragment program, with the inputs there demoted to constants
+     * (nvn_spirv_demote_inputs); of a vertex program, with outputs added there (nvn_spirv_add_outputs).
+     */
     struct {
         uint32_t mask;
         VkShaderModule m;
     } variants[8];
     uint32_t nvariants;
+    /** @brief For a fragment program: 0 not checked yet, 1 some input is not a 32-bit float scalar or vector, 2 all are. */
+    uint8_t float_inputs;
 } nvn_module;
 
 
@@ -138,5 +143,28 @@ VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
  * is valid SPIR-V.
  */
 uint32_t *nvn_spirv_demote_inputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n);
+/** @brief Whether every Input variable with a location in the SPIR-V w (n words) is a 32-bit float scalar or vector. */
+bool nvn_spirv_float_inputs(const uint32_t *w, size_t n);
+/**
+ * @brief A copy of the SPIR-V w (n words) with one vec4 Output variable at each location in mask, initialized to
+ * UNWRITTEN_VARYING (see nvn_priv.h) and never stored, added to the entry point's interface: what a fragment input
+ * at that location reads on the console when the vertex program does not write it. NULL when w has no entry point or
+ * memory runs out; *out_n is the new length.
+ */
+uint32_t *nvn_spirv_add_outputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n);
+/**
+ * @brief The vertex module of vert to draw with before fragment program frag: vert itself when it writes every
+ * location frag reads, else a variant with the missing outputs added (nvn_spirv_add_outputs), so the fragment program
+ * keeps its own module and the library the warm-up made of it. NULL when vert is not a vertex program, an input of
+ * frag is not a float, or the variant cannot be made.
+ */
+VkShaderModule nvn_module_vertex_for(nvn_module *vert, nvn_module *frag);
+/**
+ * @brief Sets out[0] and out[1] (the vertex and fragment modules) of a draw with programs mods so every fragment input
+ * has an output: a vertex program alone before the fragment one gets the outputs it lacks (nvn_module_vertex_for);
+ * otherwise, or when that cannot be made, the fragment program gets its inputs demoted (nvn_module_fragment_for).
+ * False when neither can be made.
+ */
+bool nvn_module_link(nvn_module *const mods[5], VkShaderModule out[5]);
 
 #endif

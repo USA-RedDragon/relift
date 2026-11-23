@@ -1619,7 +1619,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if (mods[2] && (rc = geometry_draw(r, mods[2], mode)) != RL_OK)
         return rc;
     const module *last = nvn_module_last_stage(mods);
-    if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(last, mods[1])))
+    if (!nvn_module_link(mods, k.mods))
         return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the stage before it writes",
                            mods[1]->key);
     fixed_push fp = {

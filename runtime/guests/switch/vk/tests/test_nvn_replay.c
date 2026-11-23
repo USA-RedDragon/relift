@@ -275,6 +275,70 @@ TEST(nvn_demoted_inputs_leave_valid_spirv)
     free(d);
 }
 
+/** @brief A vertex program (spirv-as) writing Position and the vec4 output at location 0 only. */
+static const uint32_t one_output_vert[] = {
+    0x07230203u, 0x00010600u, 0x00070000u, 0x0000000cu, 0x00000000u, 0x00020011u,
+    0x00000001u, 0x0003000eu, 0x00000000u, 0x00000001u, 0x0007000fu, 0x00000000u,
+    0x00000001u, 0x6e69616du, 0x00000000u, 0x00000002u, 0x00000003u, 0x00040047u,
+    0x00000002u, 0x0000000bu, 0x00000000u, 0x00040047u, 0x00000003u, 0x0000001eu,
+    0x00000000u, 0x00020013u, 0x00000004u, 0x00030021u, 0x00000005u, 0x00000004u,
+    0x00030016u, 0x00000006u, 0x00000020u, 0x00040017u, 0x00000007u, 0x00000006u,
+    0x00000004u, 0x00040020u, 0x00000008u, 0x00000003u, 0x00000007u, 0x0004002bu,
+    0x00000006u, 0x00000009u, 0x3f800000u, 0x0007002cu, 0x00000007u, 0x0000000au,
+    0x00000009u, 0x00000009u, 0x00000009u, 0x00000009u, 0x0004003bu, 0x00000008u,
+    0x00000002u, 0x00000003u, 0x0004003bu, 0x00000008u, 0x00000003u, 0x00000003u,
+    0x00050036u, 0x00000004u, 0x00000001u, 0x00000000u, 0x00000005u, 0x000200f8u,
+    0x0000000bu, 0x0003003eu, 0x00000002u, 0x0000000au, 0x0003003eu, 0x00000003u,
+    0x0000000au, 0x000100fdu, 0x00010038u,
+};
+
+TEST(nvn_a_vertex_program_gets_the_outputs_its_fragment_program_reads_as_never_written)
+{
+    CHECK(nvn_spirv_float_inputs(chained_input_frag, sizeof chained_input_frag / 4));
+    size_t dn = 0;
+    uint32_t *d = nvn_spirv_add_outputs(one_output_vert, sizeof one_output_vert / 4, 1u << 1 | 1u << 3, &dn);
+    CHECK(d != NULL);
+    uint32_t loc[2] = { 0 }, nloc = 0, interface = 0, stores = 0, init = 0;
+    for (size_t i = 5; d && i < dn;) {
+        uint32_t op = d[i] & 0xffff, len = d[i] >> 16;
+        CHECK(len != 0);
+        if (!len)
+            break;
+        if (op == 71 && d[i + 2] == 30 && d[i + 3] != 0 && nloc < 2)
+            loc[nloc++] = d[i + 3];
+        if (op == 15)
+            interface = len - 5;
+        if (op == 62)
+            stores++;
+        if (op == 59 && len == 5 && d[i + 3] == 3) {
+            for (size_t j = 5; j < dn;) {
+                uint32_t op2 = d[j] & 0xffff, len2 = d[j] >> 16;
+                if (!len2)
+                    break;
+                if (op2 == 44 && d[j + 2] == d[i + 4])
+                    for (uint32_t k = 0; k < 4; k++)
+                        for (size_t c = 5; c < dn;) {
+                            uint32_t op3 = d[c] & 0xffff, len3 = d[c] >> 16;
+                            if (!len3)
+                                break;
+                            init += op3 == 43 && d[c + 2] == d[j + 3 + k] && d[c + 3] == UNWRITTEN_VARYING[k];
+                            c += len3;
+                        }
+                j += len2;
+            }
+        }
+        i += len;
+    }
+    CHECK_EQ(nloc, 2u);
+    CHECK(loc[0] == 1 && loc[1] == 3);
+    CHECK_EQ(interface, 4u);
+    CHECK_EQ(stores, 2u);
+    CHECK_EQ(init, 8u);
+    bool ran;
+    CHECK(spirv_valid(d, dn, &ran));
+    free(d);
+}
+
 TEST(nvn_copy_plan_without_flags_copies_texels_or_blits_nearest)
 {
     nvn_region a = { 2, 3, 0, 10, 6, 1 }, b = { 0, 0, 0, 20, 12, 1 };

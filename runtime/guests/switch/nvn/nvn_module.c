@@ -343,6 +343,223 @@ VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
 }
 
 
+bool nvn_spirv_float_inputs(const uint32_t *w, size_t n)
+{
+    if (n < 5)
+        return false;
+    uint32_t bound = w[3];
+    uint8_t *f32 = calloc(bound, 1), *vec = calloc(bound, 1), *isloc = calloc(bound, 1);
+    uint32_t *pointee = calloc(bound, sizeof *pointee);
+    bool ok = f32 && vec && isloc && pointee;
+    for (size_t i = 5; ok && i < n;) {
+        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
+        if (!len || i + len > n)
+            break;
+        if (op == 71 && len >= 4 && w[i + 2] == 30 && w[i + 1] < bound)
+            isloc[w[i + 1]] = 1;
+        else if (op == 22 && len >= 3 && w[i + 1] < bound && w[i + 2] == 32)
+            f32[w[i + 1]] = 1;
+        else if (op == 23 && len >= 4 && w[i + 1] < bound && w[i + 2] < bound && f32[w[i + 2]] && w[i + 3] <= 4)
+            vec[w[i + 1]] = 1;
+        else if (op == 32 && len >= 4 && w[i + 1] < bound)
+            pointee[w[i + 1]] = w[i + 3];
+        else if (op == 59 && len >= 4 && w[i + 3] == 1 && w[i + 2] < bound && isloc[w[i + 2]] && w[i + 1] < bound) {
+            uint32_t t = pointee[w[i + 1]];
+            ok = t < bound && (f32[t] || vec[t]);
+        }
+        i += len;
+    }
+    free(f32);
+    free(vec);
+    free(isloc);
+    free(pointee);
+    return ok;
+}
+
+uint32_t *nvn_spirv_add_outputs(const uint32_t *w, size_t n, uint32_t mask, size_t *out_n)
+{
+    if (n < 5 || !mask)
+        return NULL;
+    uint32_t f = 0, v4 = 0, nloc = 0;
+    size_t first_type = 0, first_fn = 0, entry = 0;
+    for (size_t i = 5; i < n;) {
+        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
+        if (!len || i + len > n)
+            return NULL;
+        if (op == 15 && !entry)
+            entry = i;
+        if (!first_type && ((op >= 19 && op <= 39) || (op >= 41 && op <= 52) || op == 59))
+            first_type = i;
+        if (op == 54 && !first_fn)
+            first_fn = i;
+        if (op == 22 && len >= 3 && w[i + 2] == 32)
+            f = w[i + 1];
+        i += len;
+    }
+    for (size_t i = 5; f && i < n;) {
+        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
+        if (op == 23 && len >= 4 && w[i + 2] == f && w[i + 3] == 4)
+            v4 = w[i + 1];
+        i += len;
+    }
+    if (!entry || !first_type || !first_fn)
+        return NULL;
+    uint32_t locs[32];
+    for (uint32_t l = 0; l < 32; l++)
+        if (mask >> l & 1)
+            locs[nloc++] = l;
+    uint32_t *o = malloc((n + 32 + 8 * (size_t)nloc) * sizeof *o);
+    if (!o)
+        return NULL;
+    uint32_t next = w[3];
+    uint32_t nf = f ? 0 : next++, nv4 = v4 ? 0 : next++;
+    f = f ? f : nf;
+    v4 = v4 ? v4 : nv4;
+    uint32_t ptr = next++, comps[4], init, var0;
+    for (uint32_t k = 0; k < 4; k++)
+        comps[k] = next++;
+    init = next++;
+    var0 = next;
+    next += nloc;
+    memcpy(o, w, 5 * sizeof *o);
+    size_t at = 5;
+    for (size_t i = 5; i < n;) {
+        uint32_t len = w[i] >> 16;
+        if (i == first_type)
+            for (uint32_t k = 0; k < nloc; k++) {
+                o[at++] = 4u << 16 | 71;
+                o[at++] = var0 + k;
+                o[at++] = 30;
+                o[at++] = locs[k];
+            }
+        if (i == first_fn) {
+            if (nf) {
+                o[at++] = 3u << 16 | 22;
+                o[at++] = nf;
+                o[at++] = 32;
+            }
+            if (nv4) {
+                o[at++] = 4u << 16 | 23;
+                o[at++] = nv4;
+                o[at++] = f;
+                o[at++] = 4;
+            }
+            o[at++] = 4u << 16 | 32;
+            o[at++] = ptr;
+            o[at++] = 3;
+            o[at++] = v4;
+            for (uint32_t k = 0; k < 4; k++) {
+                o[at++] = 4u << 16 | 43;
+                o[at++] = f;
+                o[at++] = comps[k];
+                o[at++] = UNWRITTEN_VARYING[k];
+            }
+            o[at++] = 7u << 16 | 44;
+            o[at++] = v4;
+            o[at++] = init;
+            for (uint32_t k = 0; k < 4; k++)
+                o[at++] = comps[k];
+            for (uint32_t k = 0; k < nloc; k++) {
+                o[at++] = 5u << 16 | 59;
+                o[at++] = ptr;
+                o[at++] = var0 + k;
+                o[at++] = 3;
+                o[at++] = init;
+            }
+        }
+        memcpy(o + at, w + i, len * sizeof *o);
+        if (i == entry) {
+            o[at] = (len + nloc) << 16 | 15;
+            for (uint32_t k = 0; k < nloc; k++)
+                o[at + len + k] = var0 + k;
+            at += nloc;
+        }
+        at += len;
+        i += len;
+    }
+    o[3] = next;
+    *out_n = at;
+    return o;
+}
+
+/** @brief Whether every input of frag is a 32-bit float scalar or vector, which a vertex variant's added outputs can feed. */
+static bool float_inputs(nvn_module *frag)
+{
+    pthread_mutex_lock(&g_lock);
+    uint8_t known = frag->float_inputs;
+    pthread_mutex_unlock(&g_lock);
+    if (!known) {
+        size_t n;
+        uint32_t *w = nvn_shader_spirv(frag->key, &n);
+        known = w && nvn_spirv_float_inputs(w, n) ? 2 : 1;
+        free(w);
+        pthread_mutex_lock(&g_lock);
+        frag->float_inputs = known;
+        pthread_mutex_unlock(&g_lock);
+    }
+    return known == 2;
+}
+
+VkShaderModule nvn_module_vertex_for(nvn_module *vert, nvn_module *frag)
+{
+    uint32_t missing = frag->inputs & ~vert->outputs;
+    if (!missing)
+        return vert->m;
+    if (vert->stage != (int)NVN_STAGE_VERTEX || !float_inputs(frag))
+        return NULL;
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = 0; i < vert->nvariants; i++)
+        if (vert->variants[i].mask == missing) {
+            VkShaderModule have = vert->variants[i].m;
+            pthread_mutex_unlock(&g_lock);
+            return have;
+        }
+    bool full = vert->nvariants == 8;
+    pthread_mutex_unlock(&g_lock);
+    size_t n, dn;
+    uint32_t *w = full ? NULL : nvn_shader_spirv(vert->key, &n);
+    if (!w)
+        return NULL;
+    nvn_module scratch;
+    memset(&scratch, 0, sizeof scratch);
+    uint32_t *dw = patch_spirv(w, n, vert->stage, &scratch) ? nvn_spirv_add_outputs(w, n, missing, &dn) : NULL;
+    free(w);
+    if (!dw)
+        return NULL;
+    VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                    .codeSize = dn * 4,
+                                    .pCode = dw };
+    VkShaderModule m = NULL;
+    rl_spirv_check(dw, dn, "a vertex program with outputs added for its fragment program");
+    if (VK(vkCreateShaderModule)(g.dev, &ci, NULL, &m) != VK_SUCCESS)
+        m = NULL;
+    free(dw);
+    if (m) {
+        pthread_mutex_lock(&g_lock);
+        if (vert->nvariants < 8) {
+            vert->variants[vert->nvariants].mask = missing;
+            vert->variants[vert->nvariants++].m = m;
+        }
+        pthread_mutex_unlock(&g_lock);
+    }
+    return m;
+}
+
+bool nvn_module_link(nvn_module *const mods[5], VkShaderModule out[5])
+{
+    if (!mods[1])
+        return true;
+    if (mods[0] && !mods[2] && !mods[3] && !mods[4]) {
+        VkShaderModule v = nvn_module_vertex_for(mods[0], mods[1]);
+        if (v) {
+            out[0] = v;
+            out[1] = mods[1]->m;
+            return true;
+        }
+    }
+    return (out[1] = nvn_module_fragment_for(nvn_module_last_stage(mods), mods[1])) != NULL;
+}
+
 bool nvn_spirv_stage(const uint32_t *w, size_t n, int *stage)
 {
     static const int map[] = { 0, 3, 4, 2, 1, 5 };
