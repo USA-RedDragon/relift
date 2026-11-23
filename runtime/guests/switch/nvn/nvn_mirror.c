@@ -84,11 +84,18 @@ static struct {
     segment seg[64];
     uint32_t nseg;
     uint64_t stat_up, stat_down, stat_syncs;
-    /** @brief The written-page bitmap: a host-visible buffer with a device address, all zero between batches. */
-    VkBuffer pages_buf;
-    VkDeviceMemory pages_mem;
+    /**
+     * @brief The written-page bitmap. Programs mark it in device memory (pages_dev, at pages_gpu), all zero between
+     * batches; a batch that ran marking programs copies it into the host-visible pages_buf (mapped at pages_map) and
+     * clears it. Marking straight into host memory made every marked store a round trip over the bus: Ocarina's
+     * opening ran its video compute at up to 50 ms a dispatch.
+     */
+    VkBuffer pages_buf, pages_dev;
+    VkDeviceMemory pages_mem, pages_dev_mem;
     uint32_t *pages_map;
     uint64_t pages_gpu;
+    /** @brief pages_dev was made and is not cleared yet: the next sync records its clear. */
+    bool pages_fresh;
     /** @brief The batch being recorded runs a program that marks pages, and so the batch that waits to be read. */
     bool marked, marked_sent;
     uint64_t stat_marked_pages, stat_read;
@@ -380,6 +387,11 @@ bool nvn_mirror_sync(replay *r, bool may_flush)
     uint64_t epoch = nvn_track_epoch();
     bool ok = true;
     mi.fail[0] = 0;
+    if (mi.pages_fresh && nvn_vk_begin(r)) {
+        VK(vkCmdFillBuffer)(g.cb, mi.pages_dev, 0, VK_WHOLE_SIZE, 0);
+        nvn_vk_barrier(g.cb);
+        mi.pages_fresh = false;
+    }
     if (epoch != mi.epoch) {
         mi.epoch = epoch;
         sync_ctx c = { .r = r, .can_flush = may_flush, .ok = true };
@@ -466,6 +478,31 @@ void nvn_mirror_written_all(void)
     pthread_mutex_unlock(&mi.lock);
 }
 
+/** @brief Makes pages_dev, the device-local bitmap programs mark, and returns its device address, 0 on failure. */
+static uint64_t device_bitmap(void)
+{
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = WRITTEN_PAGE_BITS / 8,
+                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT };
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &mi.pages_dev) != VK_SUCCESS)
+        return 0;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, mi.pages_dev, &req);
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .pNext = &fl,
+                                 .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &mi.pages_dev_mem) != VK_SUCCESS ||
+        VK(vkBindBufferMemory)(g.dev, mi.pages_dev, mi.pages_dev_mem, 0) != VK_SUCCESS)
+        return 0;
+    VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = mi.pages_dev };
+    return VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+}
+
 uint64_t nvn_mirror_written_pages_address(void)
 {
     uint64_t made = __atomic_load_n(&mi.pages_gpu, __ATOMIC_ACQUIRE);
@@ -476,7 +513,7 @@ uint64_t nvn_mirror_written_pages_address(void)
     if (!mi.pages_gpu && g.ok) {
         VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                    .size = WRITTEN_PAGE_BITS / 8,
-                                   .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+                                   .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
         VkMemoryRequirements req = { 0 };
         int32_t t = -1;
         if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &mi.pages_buf) == VK_SUCCESS) {
@@ -488,10 +525,7 @@ uint64_t nvn_mirror_written_pages_address(void)
                 t = nvn_vk_mem_type(req.memoryTypeBits,
                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         }
-        VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-                                         .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
         VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                     .pNext = &fl,
                                      .allocationSize = req.size,
                                      .memoryTypeIndex = (uint32_t)t };
         void *p = NULL;
@@ -500,9 +534,13 @@ uint64_t nvn_mirror_written_pages_address(void)
             VK(vkMapMemory)(g.dev, mi.pages_mem, 0, VK_WHOLE_SIZE, 0, &p) == VK_SUCCESS) {
             memset(p, 0, WRITTEN_PAGE_BITS / 8);
             mi.pages_map = p;
-            VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-                                             .buffer = mi.pages_buf };
-            __atomic_store_n(&mi.pages_gpu, VK(vkGetBufferDeviceAddress)(g.dev, &ai), __ATOMIC_RELEASE);
+            uint64_t dev = device_bitmap();
+            if (dev) {
+                mi.pages_fresh = true;
+                __atomic_store_n(&mi.pages_gpu, dev, __ATOMIC_RELEASE);
+            } else {
+                rl_log(RL_LOG_ERROR, "nvn", "cannot make the written-page bitmap in device memory");
+            }
         } else {
             rl_log(RL_LOG_ERROR, "nvn", "cannot make the written-page bitmap");
         }
@@ -624,6 +662,14 @@ bool nvn_mirror_record_readback(VkCommandBuffer cb)
         }
         if (at)
             nvn_vk_barrier(cb);
+    }
+    if (mi.marked && mi.pages_dev) {
+        nvn_vk_barrier(cb);
+        VkBufferCopy bc = { .size = WRITTEN_PAGE_BITS / 8 };
+        VK(vkCmdCopyBuffer)(cb, mi.pages_dev, mi.pages_buf, 1, &bc);
+        nvn_vk_barrier(cb);
+        VK(vkCmdFillBuffer)(cb, mi.pages_dev, 0, VK_WHOLE_SIZE, 0);
+        nvn_vk_barrier(cb);
     }
     if (mi.marked) {
         mi.marked = false;
