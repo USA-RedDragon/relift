@@ -30,6 +30,7 @@ relift-gb-analyze = { workspace = true }
 relift-gb-formats = { workspace = true }
 relift-gpu-nv = { workspace = true }
 relift-gpu-sm86 = { workspace = true }
+relift-gpu-table = { workspace = true }
 relift-gba = { workspace = true }
 relift-gba-analyze = { workspace = true }
 relift-gba-formats = { workspace = true }
@@ -62,9 +63,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 relift-cpu-z80 = { workspace = true }
-
-[build-dependencies]
-sha2 = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 uds_windows = { workspace = true }

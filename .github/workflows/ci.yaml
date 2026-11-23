@@ -54,6 +54,7 @@ jobs:
             .
             check
             guests/gb/devices
+            gpus/xlate
 
       - name: fmt, clippy, charter, generated docs and Vulkan forwarding, deny
         run: scripts/ci/lint.sh
@@ -103,6 +104,30 @@ jobs:
 
       - name: Game Boy devices tests, release profile
         run: scripts/ci/tests-gb-devices.sh
+
+  tests-gpu-xlate:
+    name: on-device shader translator, C ABI against the Rust tables
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+          clang --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: tests-gpu-xlate
+          workspaces: |
+            gpus/xlate
+
+      - name: on-device shader translator, C ABI against the Rust tables
+        run: scripts/ci/tests-gpu-xlate.sh
 
   tests-relift:
     name: tests of relift, without the end-to-end targets

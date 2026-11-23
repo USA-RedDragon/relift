@@ -1,4 +1,5 @@
-//! The task and mesh pipelines of a game's programs.
+//! The task and mesh pipelines of a game's NVN programs (NVN and Switch 2
+//! specific).
 //!
 //! A task or mesh program's pipeline state (workgroup size, payload size,
 //! output limits and topology, the primitive SPH) is not in its code but in
@@ -16,21 +17,18 @@
 //! program's own.
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use relift_gpu_nv::translate::mesh_fallback::{indexed, mesh_record_words, scan, vertex};
 use relift_gpu_nv::translate::{
     HostProfile, MeshPath, MeshPipeline, MeshTopology, Options, mesh_components,
 };
 
-use super::hex_key;
-
-/// The scan's file of pipelines, in the shader folder.
-pub(super) const FILE: &str = "meshes.json";
+use crate::pack::Programs;
+use crate::{BoxError, hex_key};
 
 /// Where a program is in a task and mesh pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Role {
+pub(crate) enum Role {
     Task,
     Mesh,
     Fragment,
@@ -39,7 +37,7 @@ pub(super) enum Role {
 /// What the runtime needs to draw a pipeline's programs, besides the
 /// programs.
 #[derive(Clone, Debug)]
-pub(super) struct Shape {
+pub(crate) struct Shape {
     /// The pipeline, with what the back end and the fragment program agree
     /// on (`MeshPipeline::for_host`).
     pub pipeline: MeshPipeline,
@@ -49,14 +47,14 @@ pub(super) struct Shape {
 
 /// A program of a pipeline.
 #[derive(Clone, Debug)]
-pub(super) struct Member {
+pub(crate) struct Member {
     pub role: Role,
     pub shape: Shape,
 }
 
 /// Every program of the pipelines in a folder, by key.
 #[derive(Default)]
-pub(super) struct Pipelines {
+pub(crate) struct Pipelines {
     members: HashMap<[u8; 32], Member>,
 }
 
@@ -71,7 +69,7 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 const GLSLC_PRIMITIVE_SPH: usize = 0x64;
 
 impl Pipelines {
-    /// The pipelines `dir`/meshes.json names, for `host`. A pipeline whose
+    /// The pipelines the scan's `meshes.json` of `programs` names, for `host`. A pipeline whose
     /// mesh program the folder lacks, or whose state the translation does
     /// not take, is left out (its programs then translate with the
     /// defaults, or fail as they do).
@@ -79,17 +77,14 @@ impl Pipelines {
     /// # Errors
     ///
     /// The file cannot be read as JSON.
-    pub(super) fn read(
-        dir: &Path,
-        host: &HostProfile,
-    ) -> Result<Pipelines, crate::import::BoxError> {
+    pub(crate) fn read(programs: &Programs, host: &HostProfile) -> Result<Pipelines, BoxError> {
         let mut out = Pipelines::default();
-        let path = dir.join(FILE);
-        let Ok(bytes) = std::fs::read(&path) else {
+        let bytes = programs.meshes();
+        if bytes.is_empty() {
             return Ok(out);
-        };
+        }
         let v: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+            serde_json::from_slice(bytes).map_err(|e| format!("{}: {e}", crate::pack::MESHES))?;
         for e in v.as_array().into_iter().flatten() {
             let hexes = |k: &str| e.get(k).and_then(|x| x.as_str()).and_then(unhex);
             let key = |k: &str| {
@@ -100,10 +95,7 @@ impl Pipelines {
             let (Some(mesh_glslc), Some(mesh_key)) = (hexes("mesh_glslc"), key("mesh")) else {
                 continue;
             };
-            let Ok(code) = std::fs::read(
-                dir.join("programs")
-                    .join(format!("{}.bin", super::hex(&mesh_key))),
-            ) else {
+            let Ok(Some(code)) = programs.code(&mesh_key) else {
                 continue;
             };
             let prog = relift_gpu_sm86::program::parse(&code);
@@ -147,13 +139,13 @@ impl Pipelines {
     }
 
     /// The pipeline member `key` is, if any.
-    pub(super) fn member(&self, key: &[u8; 32]) -> Option<&Member> {
+    pub(crate) fn member(&self, key: &[u8; 32]) -> Option<&Member> {
         self.members.get(key)
     }
 
     /// The translation options of program `key`: the defaults, with its
     /// pipeline when it is in one.
-    pub(super) fn options(&self, key: &[u8; 32]) -> Options {
+    pub(crate) fn options(&self, key: &[u8; 32]) -> Options {
         let mut o = Options::default();
         if let Some(m) = self.members.get(key) {
             o.pipeline.mesh = m.shape.pipeline.clone();
@@ -166,18 +158,18 @@ impl Pipelines {
 /// whether the native back end draws it (else the compute one), whether
 /// the compute back end's draw is indexed, the guest workgroups per
 /// compute workgroup, and the topology (1 points, 2 lines, 3 triangles).
-pub(super) const RECORD_MESH: u32 = 4;
+pub(crate) const RECORD_MESH: u32 = 4;
 /// The interface record of the limits of a pipeline: the vertices and
 /// primitives a mesh workgroup outputs, and the stage buffer's words.
-pub(super) const RECORD_MESH_LIMITS: u32 = 5;
+pub(crate) const RECORD_MESH_LIMITS: u32 = 5;
 /// The interface record of the compute back end's buffers: the words of a
 /// mesh record, the words of a mesh's indices, and the workgroup sizes of
 /// the task (low half) and mesh (high half) programs.
-pub(super) const RECORD_MESH_RECORD: u32 = 6;
+pub(crate) const RECORD_MESH_RECORD: u32 = 6;
 
 /// The records of a task or mesh program `m` translated for back end `path`
 /// with `mesh_slots`.
-pub(super) fn records(m: &Member, path: MeshPath, mesh_slots: u32) -> Vec<[u32; 4]> {
+pub(crate) fn records(m: &Member, path: MeshPath, mesh_slots: u32) -> Vec<[u32; 4]> {
     let p = &m.shape.pipeline;
     let stage = match m.role {
         Role::Task => 6,
@@ -217,7 +209,7 @@ pub(super) fn records(m: &Member, path: MeshPath, mesh_slots: u32) -> Vec<[u32; 
 fn helper_key(kind: &[u8], key: &[u8; 32]) -> [u8; 32] {
     let mut b = kind.to_vec();
     b.extend_from_slice(key);
-    relift_switch_formats::sha256(&b)
+    crate::sha256(&b)
 }
 
 /// What the key of the scan of the task counts of mesh program `key` is
@@ -228,12 +220,12 @@ const SCAN: &[u8] = b"relift mesh scan";
 const VERTEX: &[u8] = b"relift mesh vertex";
 
 /// A helper module: its key and SPIR-V words.
-pub(super) type Helper = ([u8; 32], Vec<u32>);
+pub(crate) type Helper = ([u8; 32], Vec<u32>);
 
 /// The helper modules of the compute back end's draw of mesh program
 /// `key`, translated for `host` with `mesh_slots`: the scan and the
 /// vertex program, by key.
-pub(super) fn helpers(
+pub(crate) fn helpers(
     key: &[u8; 32],
     m: &Member,
     host: &HostProfile,

@@ -6,10 +6,12 @@
 cargo fmt --all --check
 cargo fmt --manifest-path check/Cargo.toml --all --check
 cargo fmt --manifest-path guests/gb/devices/Cargo.toml --all --check
+cargo fmt --manifest-path gpus/xlate/Cargo.toml --all --check
 
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy --manifest-path check/Cargo.toml --all-targets --all-features --locked -- -D warnings
 cargo clippy --manifest-path guests/gb/devices/Cargo.toml --all-targets --all-features --locked -- -D warnings
+cargo clippy --manifest-path gpus/xlate/Cargo.toml --all-targets --all-features --locked -- -D warnings
 
 cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
 

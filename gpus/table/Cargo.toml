@@ -1,0 +1,26 @@
+[package]
+name = "relift-gpu-table"
+description = "A Switch 2 game's shader table: translates its recorded SM86 programs for one device's capabilities into the tables the runtime reads, with the translator stamp; shared by relift and the on-device translator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.relift]
+band = "2"
+
+[dependencies]
+relift-cache = { workspace = true }
+relift-gpu-nv = { workspace = true }
+relift-gpu-sm86 = { workspace = true }
+relift-proc = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+zstd = { workspace = true }
+
+[build-dependencies]
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

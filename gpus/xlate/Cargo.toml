@@ -1,0 +1,28 @@
+[package]
+name = "relift-gpu-xlate"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/USA-RedDragon/relift"
+publish = false
+description = "The NVIDIA GPU program translator (relift-gpu-table) behind a C ABI: a static library the runtime links to make its shader tables on the player's device"
+
+[workspace]
+
+[lib]
+name = "relift_gpu_xlate"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+relift-gpu-table = { path = "../table" }
+
+[dev-dependencies]
+relift-cache = { path = "../../core/cache" }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

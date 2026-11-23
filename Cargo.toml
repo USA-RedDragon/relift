@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["core/*", "cpus/*", "gpus/*", "cpus/arm64/gen", "cpus/arm32/analyze", "cpus/arm32/gen", "cpus/mips/gen", "cpus/rsp/gen", "cpus/sm83/gen", "cpus/z80/gen", "guests/*/*", "override/*", "relift", "testguest"]
-exclude = ["check", "guests/gb/devices"]
+exclude = ["check", "guests/gb/devices", "gpus/xlate"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +26,7 @@ relift-cpu-sm83 = { path = "cpus/sm83" }
 relift-gpu-nv = { path = "gpus/nv" }
 relift-gpu-sm53 = { path = "gpus/sm53" }
 relift-gpu-sm86 = { path = "gpus/sm86" }
+relift-gpu-table = { path = "gpus/table" }
 relift-cpu-z80 = { path = "cpus/z80" }
 relift-gb = { path = "guests/gb/guest" }
 relift-gb-analyze = { path = "guests/gb/analyze" }

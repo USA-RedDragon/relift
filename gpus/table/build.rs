@@ -1,6 +1,7 @@
 //! Embeds the shader translator stamp: a hash of every source that decides
-//! what a program translates to (the `gpus` crates, and the translator
-//! options and table layout in `src/shaders.rs`). `scripts/shader-stamp.sh`
+//! what a program translates to (the `gpus` crates, among them this one with
+//! the translator options and table layout; not `gpus/xlate`, the C ABI over
+//! this crate, which translates nothing itself). `scripts/shader-stamp.sh`
 //! computes the same value for a source tree, and a test keeps the two equal.
 
 use std::path::{Path, PathBuf};
@@ -23,12 +24,15 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files: Vec<PathBuf> = Vec::new();
     for c in std::fs::read_dir(root.join("gpus"))
         .expect("the gpus folder")
         .flatten()
     {
+        if c.file_name() == "xlate" {
+            continue;
+        }
         walk(&c.path().join("src"), &mut files);
         files.push(c.path().join("Cargo.toml"));
         println!("cargo:rerun-if-changed={}", c.path().join("src").display());
@@ -37,10 +41,6 @@ fn main() {
             c.path().join("Cargo.toml").display()
         );
     }
-    files.push(root.join("relift/src/shaders.rs"));
-    walk(&root.join("relift/src/shaders"), &mut files);
-    println!("cargo:rerun-if-changed=src/shaders.rs");
-    println!("cargo:rerun-if-changed=src/shaders");
     let mut named: Vec<(String, PathBuf)> = files
         .into_iter()
         .filter(|f| f.is_file())

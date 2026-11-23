@@ -9,15 +9,11 @@
 //!   `DeviceCaps::from_json` reads);
 //! * `programs/<key>.bin`, each program the runtime met (its shader program
 //!   header, if any, and its code), named by the hex SHA-256 of those bytes;
-//! * `failed.txt`, written here: one line per program the translator
-//!   refused, the key and the reason;
-//! * `table.rlspv`, written here: the translations, each module a zstd frame
-//!   (`Table::to_compressed_bytes` at [`ZSTD_LEVEL`]);
-//! * `table.rlspi`, written here: what the runtime must know of each
-//!   translation beyond its SPIR-V (see [`interfaces`]);
-//! * `table.stamp`, the translator that made them ([`stamp`]);
+//! * the tables (`table.rlspv`, `table.rlspi`, `table.stamp`,
+//!   `table.device`) and `failed.txt`, written here by
+//!   `relift_gpu_table::translate`;
 //! * `table-native.rlspv`, `table-native.rlspi` and `table-native.stamp`,
-//!   the same for native float math ([`Math::Native`]), which the runtime
+//!   the same for native float math (`Math::Native`), which the runtime
 //!   reads instead when its `gpu.math` setting is `native`; `failed-native.txt`
 //!   lists that table's refusals.
 //!
@@ -28,109 +24,23 @@
 //! in the build directory, and a package carries [`tables`] with the program
 //! and points the runtime at them (see [`env`]).
 
-mod mesh;
-
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
-use relift_gpu_nv::translate::{
-    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, Math, MeshPath, Options, image_binding,
-};
+use relift_gpu_nv::translate::Math;
+use relift_gpu_table::{BOTH, DEVICE_FILE, Programs, table_file, translate_math};
+pub use relift_gpu_table::{STAMP, STAMP_FILE, stamp, stamp_of, stamp_of_mode};
 use relift_switch_shaders::{ImportSource, Options as ScanOptions, scan};
 
 use crate::import::BoxError;
 
-/// The zstd level of the translation table: near the ratio of the highest
-/// levels on SPIR-V at a fraction of their time.
-const ZSTD_LEVEL: i32 = 9;
-
 /// The folder in the build directory.
 pub const DIR: &str = "shaders";
 
-/// The table's file in the folder.
-const TABLE: &str = "table.rlspv";
-
 /// The scan's per-file results in the folder.
 const SCAN_CACHE: &str = "scan";
-
-/// The translations' frames while the table is written (the table's index
-/// comes before them and needs every frame's length).
-const SPOOL: &str = "table.rlspv.frames";
-
-/// The interface table's file in the folder.
-const INTERFACES: &str = "table.rlspi";
-
-/// The stamp file in the folder: the translator that made the tables.
-pub const STAMP_FILE: &str = "table.stamp";
-
-/// Both float math modes, exact first: what a package or a phone target
-/// carries, so that the player can pick either on the device.
-pub const BOTH: [Math; 2] = [Math::Exact, Math::Native];
-
-/// The file name of a table file of `math`: `table.<ext>` for exact math,
-/// `table-native.<ext>` for native math. The runtime names them the same way
-/// (nvn_shader.c, nvn_shader_table_file).
-#[must_use]
-pub fn table_file(math: Math, ext: &str) -> String {
-    match (math, ext) {
-        (Math::Exact, "rlspv") => TABLE.into(),
-        (Math::Exact, "rlspi") => INTERFACES.into(),
-        (Math::Exact, "stamp") => STAMP_FILE.into(),
-        (Math::Exact, _) => format!("table.{ext}"),
-        (m, _) => format!("table-{}.{ext}", m.name()),
-    }
-}
-
-/// The stamp the tables of `math` carry and a program expects: [`STAMP`]
-/// for exact math, [`STAMP`] and `-native` for native math, so that a table
-/// of one mode is never read as the other.
-#[must_use]
-pub fn stamp(math: Math) -> String {
-    match math {
-        Math::Exact => STAMP.to_string(),
-        m => format!("{STAMP}-{}", m.name()),
-    }
-}
-
-/// The identity of this relift's shader translator: a hash of the sources of
-/// the `gpus` crates and of this module (`build.rs`), so it changes whenever
-/// the translation of any program could. Every table carries it in
-/// [`STAMP_FILE`], and every program this relift builds expects it there (the
-/// runtime stops on a table with another).
-pub const STAMP: &str = env!("RELIFT_SHADER_STAMP");
-
-/// An interface record: the specialization constant that picks the numeric
-/// kind of the texture a bound handle names.
-pub const RECORD_TEXTURE_KIND: u32 = 0;
-/// An interface record: the specialization constant that gives the
-/// dimension of the texture a bound handle names.
-pub const RECORD_TEXTURE_DIM: u32 = 1;
-/// An interface record: the program dereferences guest GPU addresses.
-pub const RECORD_GLOBAL_MEMORY: u32 = 2;
-/// An interface record: the program reads a bound texture handle.
-pub const RECORD_TEXTURE: u32 = 3;
-/// The program stores through, or does an atomic read-modify-write on, 64-bit global addresses; the second word is 1
-/// when every such write also marks its pages in the written-page bitmap (`Interface::marks_written_pages`).
-pub const RECORD_GLOBAL_STORE: u32 = 7;
-/// An interface record: the program reads or writes a texture or image whose handle comes from a register.
-pub const RECORD_BINDLESS: u32 = 8;
-/// An interface record: the program reads a texture handle from a register,
-/// so the runtime keeps every registered texture in the slot of its id.
-pub const RECORD_REGISTER_HANDLES: u32 = 10;
-/// An interface record: handles in registers are loaded from the word of
-/// the bank at the byte offset, or with the last field 1 from any word of
-/// the bank from that offset on.
-pub const RECORD_HANDLE_SOURCE: u32 = 9;
-/// An interface record: the vertex program loads through the storage
-/// buffer descriptor of the vertex storage buffer slot in the second
-/// field (set 1, binding 64 plus the slot).
-pub const RECORD_STORAGE_SLOT: u32 = 11;
-/// An interface record: the program reads or writes the storage image array
-/// at the binding in the second field (set 2, from binding 32 on).
-pub const RECORD_IMAGE_BINDING: u32 = 12;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -141,48 +51,12 @@ pub const TABLES_ENV: &str = "RELIFT_NVN_TABLES";
 pub const SHADERS_ENV: &str = "RELIFT_NVN_SHADERS";
 
 /// What a build's shader table holds.
-pub struct Built {
-    /// Programs found: by the scan of the import and recorded by runs.
-    pub programs: usize,
-    /// Programs translated.
-    pub translated: usize,
-    /// The refusals by kind: the reason up to its first detail, and how many.
-    pub refused: BTreeMap<String, usize>,
-}
-
-fn hex_key(name: &str) -> Option<[u8; 32]> {
-    let s = name.strip_suffix(".bin")?;
-    if s.len() != 64 {
-        return None;
-    }
-    let mut k = [0u8; 32];
-    for (i, b) in k.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok()?;
-    }
-    Some(k)
-}
-
-fn hex(k: &[u8; 32]) -> String {
-    k.iter().fold(String::new(), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    })
-}
+pub use relift_gpu_table::Built;
 
 /// The keys of the programs in `dir`/programs (found by the scan or
 /// recorded by a run), sorted.
 fn program_keys(dir: &Path) -> Result<Vec<[u8; 32]>, BoxError> {
-    let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir.join("programs")) else {
-        return Ok(out);
-    };
-    for e in rd {
-        if let Some(key) = e?.file_name().to_str().and_then(hex_key) {
-            out.push(key);
-        }
-    }
-    out.sort_unstable();
-    Ok(out)
+    Ok(Programs::dir(dir)?.keys().to_vec())
 }
 
 /// What the scan of an import found.
@@ -216,7 +90,7 @@ pub fn discover(import: &Path, out: &Path) -> Result<Discovered, BoxError> {
         },
     )?;
     relift_cache::write_if_changed(
-        &dir.join(mesh::FILE),
+        &dir.join(relift_gpu_table::MESHES),
         &serde_json::to_vec(&report.meshes_json())?,
     )?;
     Ok(Discovered {
@@ -226,89 +100,6 @@ pub fn discover(import: &Path, out: &Path) -> Result<Discovered, BoxError> {
             .iter()
             .map(|(k, v)| (k.clone(), v.count))
             .collect(),
-    })
-}
-
-/// The kind of a refusal: its text with addresses and instruction words
-/// (hex numbers) left out.
-pub fn reason_kind(reason: &str) -> String {
-    reason
-        .split_whitespace()
-        .map(|w| {
-            let t = w.trim_end_matches([':', ',', ';']);
-            let hex = t.strip_prefix("0x").is_some_and(|h| !h.is_empty())
-                || (t.len() >= 8 && t.bytes().all(|b| b.is_ascii_hexdigit()));
-            if hex { "_" } else { w }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// One program translated and compressed, or why not.
-enum Item {
-    Skipped,
-    Failed(String),
-    Done {
-        frame: Vec<u8>,
-        words: u32,
-        records: Vec<[u32; 4]>,
-        /// The helper modules of a mesh program's compute back end, with
-        /// their frames and lengths in words.
-        helpers: Vec<([u8; 32], Vec<u8>, u32)>,
-    },
-}
-
-fn translate_one(
-    host: &HostProfile,
-    dir: &Path,
-    key: [u8; 32],
-    pipes: &mesh::Pipelines,
-    math: Math,
-) -> Result<Item, BoxError> {
-    let code = std::fs::read(dir.join("programs").join(format!("{}.bin", hex(&key))))?;
-    if relift_switch_formats::sha256(&code) != key {
-        return Ok(Item::Skipped);
-    }
-    let t = translate_set(
-        host,
-        &[Input {
-            key,
-            code,
-            options: Options {
-                math,
-                ..pipes.options(&key)
-            },
-        }],
-        relift_gpu_sm86::program::parse,
-    );
-    if let Some(why) = t.failed.get(&key) {
-        return Ok(Item::Failed(why.clone()));
-    }
-    let Some((_, words, interface)) = t.shaders.get(&key) else {
-        return Ok(Item::Skipped);
-    };
-    let raw: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-    let mut records = records(interface);
-    let mut helpers = Vec::new();
-    if let Some(m) = pipes.member(&key) {
-        records.extend(mesh::records(m, interface.host.mesh, interface.mesh_slots));
-        if m.role == mesh::Role::Mesh && interface.host.mesh == MeshPath::Compute {
-            match mesh::helpers(&key, m, host, interface.mesh_slots) {
-                Ok(list) => {
-                    for (k, w) in list {
-                        let raw: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
-                        helpers.push((k, zstd::bulk::compress(&raw, ZSTD_LEVEL)?, w.len() as u32));
-                    }
-                }
-                Err(why) => return Ok(Item::Failed(why)),
-            }
-        }
-    }
-    Ok(Item::Done {
-        frame: zstd::bulk::compress(&raw, ZSTD_LEVEL)?,
-        words: words.len() as u32,
-        records,
-        helpers,
     })
 }
 
@@ -396,6 +187,7 @@ pub fn build_target(out: &Path, target: &str, jobs: usize) -> Result<TargetBuilt
                 let _ = std::fs::remove_file(dir.join(table_file(m, ext)));
             }
         }
+        let _ = std::fs::remove_file(dir.join(DEVICE_FILE));
         return Ok(TargetBuilt::NoDevice(device));
     }
     Ok(TargetBuilt::Built(build_in(&programs, &dir, jobs, &BOTH)?))
@@ -406,181 +198,16 @@ pub fn build_target(out: &Path, target: &str, jobs: usize) -> Result<TargetBuilt
 /// tables of each of `modes` and their `failed.txt` in `dir`. The [`Built`]
 /// is that of the first mode.
 fn build_in(programs: &Path, dir: &Path, jobs: usize, modes: &[Math]) -> Result<Built, BoxError> {
+    std::fs::create_dir_all(programs.join("programs"))?;
+    let set = Programs::dir(programs)?;
+    let device = std::fs::read(dir.join("device.json")).ok();
     let mut first = None;
     for &m in modes {
-        let b = build_mode(programs, dir, jobs, m)?;
+        let b = translate_math(&set, device.as_deref(), dir, jobs, m, &|_, _| true)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
         first.get_or_insert(b);
     }
     first.ok_or_else(|| "no shader math mode to translate".into())
-}
-
-/// [`build_in`] for one mode.
-fn build_mode(programs: &Path, dir: &Path, jobs: usize, math: Math) -> Result<Built, BoxError> {
-    std::fs::create_dir_all(programs.join("programs"))?;
-    std::fs::create_dir_all(dir)?;
-    let keys = program_keys(programs)?;
-    let device = dir.join("device.json");
-    let mut failed = String::new();
-    let mut refused = BTreeMap::new();
-    let mut index: Vec<Frame> = Vec::new();
-    let mut interface: Vec<([u8; 32], Vec<[u32; 4]>)> = Vec::new();
-    let mut extras: BTreeMap<[u8; 32], (Vec<u8>, u32)> = BTreeMap::new();
-    let spool = match math {
-        Math::Exact => dir.join(SPOOL),
-        m => dir.join(format!("{}.frames", table_file(m, "rlspv"))),
-    };
-    if !keys.is_empty() && device.is_file() {
-        let text = std::fs::read_to_string(&device)?;
-        let caps =
-            DeviceCaps::from_json(&text).map_err(|e| format!("{}: {e}", device.display()))?;
-        let host = HostProfile::from_device("device", &caps);
-        let pipes = mesh::Pipelines::read(programs, &host)?;
-        let mut spool_file = relift_cache::StreamWriter::new(&spool)?;
-        for batch in keys.chunks(jobs.max(1) * 4) {
-            let items = relift_proc::workers::parallel_with(jobs, batch, |&k| {
-                translate_one(&host, programs, k, &pipes, math).map_err(|e| e.to_string())
-            });
-            for (&key, item) in batch.iter().zip(items) {
-                match item? {
-                    Item::Skipped => {}
-                    Item::Failed(why) => {
-                        let _ = writeln!(failed, "{}\t{}", hex(&key), why.replace('\n', " "));
-                        *refused.entry(reason_kind(&why)).or_insert(0) += 1;
-                    }
-                    Item::Done {
-                        frame,
-                        words,
-                        records,
-                        helpers,
-                    } => {
-                        for (k, f, w) in helpers {
-                            extras.insert(k, (f, w));
-                        }
-                        index.push(Frame {
-                            key,
-                            frame_len: frame.len() as u32,
-                            words,
-                        });
-                        spool_file.write_all(&frame)?;
-                        spool_file.write_all(&[0u8; 3][..frame.len().wrapping_neg() % 4])?;
-                        interface.push((key, records));
-                    }
-                }
-            }
-        }
-        spool_file.finish()?;
-    }
-    let failed_name = match math {
-        Math::Exact => "failed.txt".to_string(),
-        m => format!("failed-{}.txt", m.name()),
-    };
-    relift_cache::write_if_changed(&dir.join(failed_name), failed.as_bytes())?;
-    let translated = index.len();
-    write_table(
-        &dir.join(table_file(math, "rlspv")),
-        &spool,
-        &index,
-        &extras,
-    )?;
-    let _ = std::fs::remove_file(&spool);
-    relift_cache::write_if_changed(
-        &dir.join(table_file(math, "rlspi")),
-        &interface_table(&interface),
-    )?;
-    write_stamp(dir, math)?;
-    Ok(Built {
-        programs: keys.len(),
-        translated,
-        refused,
-    })
-}
-
-/// Writes this relift's [`stamp`] of `math` in `dir`, beside the tables it
-/// made.
-fn write_stamp(dir: &Path, math: Math) -> std::io::Result<()> {
-    relift_cache::write_if_changed(
-        &dir.join(table_file(math, "stamp")),
-        format!("{}\n", stamp(math)).as_bytes(),
-    )
-    .map(drop)
-}
-
-/// The stamp of the exact tables in `dir`, or none when they have no stamp
-/// (made by a relift that wrote none).
-#[must_use]
-pub fn stamp_of(dir: &Path) -> Option<String> {
-    stamp_of_mode(dir, Math::Exact)
-}
-
-/// The stamp of the tables of `math` in `dir`, or none without one.
-#[must_use]
-pub fn stamp_of_mode(dir: &Path, math: Math) -> Option<String> {
-    let s = std::fs::read_to_string(dir.join(table_file(math, "stamp"))).ok()?;
-    let s = s.trim();
-    (!s.is_empty()).then(|| s.to_string())
-}
-
-/// Writes the table at `path`: the frames of `index` that `spool` holds,
-/// in order, with the helper modules `extras` (frame and length in words,
-/// by key) among them in key order.
-fn write_table(
-    path: &Path,
-    spool: &Path,
-    index: &[Frame],
-    extras: &BTreeMap<[u8; 32], (Vec<u8>, u32)>,
-) -> Result<(), BoxError> {
-    enum Source<'a> {
-        Spool(u64),
-        Extra(&'a [u8]),
-    }
-    let mut all: Vec<(Frame, Source)> = Vec::with_capacity(index.len() + extras.len());
-    for f in index {
-        all.push((
-            *f,
-            Source::Spool(u64::from(f.frame_len).next_multiple_of(4)),
-        ));
-    }
-    for (key, (frame, words)) in extras {
-        all.push((
-            Frame {
-                key: *key,
-                frame_len: frame.len() as u32,
-                words: *words,
-            },
-            Source::Extra(frame),
-        ));
-    }
-    all.sort_by_key(|(f, _)| f.key);
-    let heads: Vec<Frame> = all.iter().map(|(f, _)| *f).collect();
-    let mut table = relift_cache::StreamWriter::new(path)?;
-    table.write_all(&compressed_head(&heads))?;
-    let mut from = spool
-        .is_file()
-        .then(|| std::fs::File::open(spool))
-        .transpose()?;
-    let mut buf = vec![0u8; 1 << 20];
-    for (_, source) in &all {
-        match source {
-            Source::Spool(len) => {
-                let Some(f) = from.as_mut() else {
-                    continue;
-                };
-                let mut left = *len;
-                while left > 0 {
-                    let n = (left as usize).min(buf.len());
-                    f.read_exact(&mut buf[..n])?;
-                    table.write_all(&buf[..n])?;
-                    left -= n as u64;
-                }
-            }
-            Source::Extra(frame) => {
-                table.write_all(frame)?;
-                table.write_all(&[0u8; 3][..frame.len().wrapping_neg() % 4])?;
-            }
-        }
-    }
-    table.finish()?;
-    Ok(())
 }
 
 /// `relift shaders`: translates the programs recorded in `out`/shaders again
@@ -607,65 +234,6 @@ pub fn run(out: &Path, math: &str, ui: &mut crate::ui::Ui) -> Result<(), BoxErro
         ui.note(&relift_progress::Line::new().text(format!("{n} refused: {why}")));
     }
     Ok(())
-}
-
-/// What the runtime needs of each translation's interface, all
-/// little-endian: the magic `RLSPI002` (`RLSPI001` before storage image array
-/// records), the entry count (u32), per entry
-/// sorted by key the key (32 bytes), the index of its first record and its
-/// record count (u32 each), then the records, four u32 each: the record kind
-/// (`RECORD_*`), the constant bank and byte offset of the bound handle, and
-/// the specialization constant id (zero where a kind has none).
-pub fn interface_table(entries: &[([u8; 32], Vec<[u32; 4]>)]) -> Vec<u8> {
-    let mut head = Vec::new();
-    let mut recs: Vec<[u32; 4]> = Vec::new();
-    head.extend(b"RLSPI002");
-    head.extend((entries.len() as u32).to_le_bytes());
-    for (key, rs) in entries {
-        head.extend(key);
-        head.extend((recs.len() as u32).to_le_bytes());
-        head.extend((rs.len() as u32).to_le_bytes());
-        recs.extend_from_slice(rs);
-    }
-    head.extend(recs.iter().flatten().flat_map(|w| w.to_le_bytes()));
-    head
-}
-
-/// The interface records of one translation (see [`interface_table`]).
-fn records(i: &Interface) -> Vec<[u32; 4]> {
-    let mut recs = Vec::new();
-    for &(bank, off) in &i.textures {
-        recs.push([RECORD_TEXTURE, bank, off, 0]);
-    }
-    for (&(bank, off), &spec) in i.texture_kinds.iter().chain(&i.texture_fetch_kinds) {
-        recs.push([RECORD_TEXTURE_KIND, bank, off, spec]);
-    }
-    for (&(bank, off), &spec) in &i.texture_dims {
-        recs.push([RECORD_TEXTURE_DIM, bank, off, spec]);
-    }
-    if i.global_memory {
-        recs.push([RECORD_GLOBAL_MEMORY, 0, 0, 0]);
-    }
-    if i.global_store {
-        recs.push([RECORD_GLOBAL_STORE, u32::from(i.marks_written_pages), 0, 0]);
-    }
-    if i.bindless {
-        recs.push([RECORD_BINDLESS, 0, 0, 0]);
-    }
-    if i.register_handles {
-        recs.push([RECORD_REGISTER_HANDLES, 0, 0, 0]);
-    }
-    for h in &i.handle_sources {
-        recs.push([RECORD_HANDLE_SOURCE, h.bank, h.offset, u32::from(h.indexed)]);
-    }
-    for &k in &i.storage_slots {
-        recs.push([RECORD_STORAGE_SLOT, k, 0, 0]);
-    }
-    let first_image = image_binding(ImageKind::Float, ImageDim::D1);
-    for &b in i.texture_bindings.range(first_image..) {
-        recs.push([RECORD_IMAGE_BINDING, b, 0, 0]);
-    }
-    recs
 }
 
 /// The table files of the build in `out` that a package carries: both
@@ -702,6 +270,9 @@ fn tables_in(dir: &Path) -> Vec<PathBuf> {
                 out.push(stamp);
             }
         }
+    }
+    if !out.is_empty() && dir.join(DEVICE_FILE).is_file() {
+        out.push(dir.join(DEVICE_FILE));
     }
     out
 }
@@ -766,47 +337,11 @@ pub(crate) fn c_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_reason_kind_drops_its_details() {
-        assert_eq!(
-            reason_kind("BAR at 0x1640 in non-uniform control flow"),
-            "BAR at _ in non-uniform control flow"
-        );
-        assert_eq!(
-            reason_kind("decode at 0x3a0: 0011e4000d00403f0000000003ff7f8c: form"),
-            "decode at _ _ form"
-        );
-        assert_eq!(reason_kind("no end"), "no end");
-    }
-
-    #[test]
-    fn a_register_handle_is_recorded_as_bindless() {
-        let mut i = Interface::default();
-        assert!(records(&i).iter().all(|r| r[0] != RECORD_BINDLESS));
-        i.bindless = true;
-        assert!(records(&i).contains(&[RECORD_BINDLESS, 0, 0, 0]));
-    }
-
-    #[test]
-    fn every_storage_image_array_a_program_uses_is_recorded() {
-        let mut i = Interface::default();
-        let image = image_binding(ImageKind::Raw32, ImageDim::D2);
-        i.texture_bindings.extend([1, 31, image]);
-        let recs: Vec<_> = records(&i)
-            .into_iter()
-            .filter(|r| r[0] == RECORD_IMAGE_BINDING)
-            .collect();
-        assert_eq!(recs, [[RECORD_IMAGE_BINDING, image, 0, 0]]);
-    }
-
-    #[test]
-    fn a_key_is_the_hex_name_of_a_program() {
-        let k = hex_key(&format!("{}.bin", "ab".repeat(32))).unwrap();
-        assert_eq!(k, [0xab; 32]);
-        assert_eq!(hex(&k), "ab".repeat(32));
-        assert!(hex_key("ab.bin").is_none());
-    }
+    use relift_gpu_nv::translate::Options;
+    use relift_gpu_nv::translate::{DeviceCaps, HostProfile};
+    use relift_gpu_table::{
+        INTERFACES, SPOOL, TABLE, ZSTD_LEVEL, hex, interface_table, records, write_stamp,
+    };
 
     fn scratch(tag: &str) -> PathBuf {
         let d = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -824,7 +359,11 @@ mod tests {
         assert!(tables(&out).is_empty());
         let head = b"RLSPV002\0\0\0\0";
         relift_cache::write_if_changed(&out.join(DIR).join(TABLE), head).unwrap();
-        relift_cache::write_if_changed(&out.join(DIR).join(INTERFACES), b"RLSPI001").unwrap();
+        relift_cache::write_if_changed(
+            &out.join(DIR).join(INTERFACES),
+            relift_gpu_table::INTERFACE_MAGIC,
+        )
+        .unwrap();
         assert!(tables(&out).is_empty());
         relift_cache::write_if_changed(
             &out.join(DIR).join(TABLE),
@@ -852,9 +391,13 @@ mod tests {
             &[head.as_slice(), b"x"].concat(),
         )
         .unwrap();
-        relift_cache::write_if_changed(&out.join(DIR).join(INTERFACES), b"RLSPI001").unwrap();
+        relift_cache::write_if_changed(
+            &out.join(DIR).join(INTERFACES),
+            relift_gpu_table::INTERFACE_MAGIC,
+        )
+        .unwrap();
         assert_eq!(tables(&out).len(), 2);
-        write_stamp(&out.join(DIR), Math::Exact).unwrap();
+        write_stamp(&out.join(DIR)).unwrap();
         let t = tables(&out);
         assert_eq!(t.last().unwrap(), &out.join(DIR).join(STAMP_FILE));
         let dest = out.join("pkg").join("shaders");
@@ -1019,7 +562,7 @@ mod tests {
         .unwrap();
         relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
         assert_eq!(build(&out, 1, &[Math::Exact]).unwrap().translated, 1);
-        assert_eq!(tables_for(&out, None).len(), 3);
+        assert_eq!(tables_for(&out, None).len(), 4);
         assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
         let want = target_dir(&out, t).join("device.json");
         match build_target(&out, t, 1).unwrap() {
@@ -1044,6 +587,7 @@ mod tests {
                 td.join("table-native.rlspv"),
                 td.join("table-native.rlspi"),
                 td.join("table-native.stamp"),
+                td.join(DEVICE_FILE),
             ],
             "a target carries the tables of both float math modes"
         );
@@ -1091,10 +635,8 @@ mod tests {
         .unwrap();
         relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
         build(&out, 1, &[Math::Exact]).unwrap();
-        assert_eq!(tables(&out).len(), 3);
         assert_eq!(stamp_of_mode(&dir, Math::Native), None);
         ensure_native(&out, 1).unwrap();
-        assert_eq!(tables(&out).len(), 6);
         assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
         assert_eq!(stamp_of_mode(&dir, Math::Native), Some(stamp(Math::Native)));
         assert!(dir.join("failed-native.txt").is_file());

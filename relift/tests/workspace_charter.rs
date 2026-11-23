@@ -268,6 +268,21 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-gpu-table",
+        why: "a Switch 2 game's shader table: translates its SM86 programs for one device description into the files the runtime reads, with the translator stamp; shared by relift and the on-device translator",
+        normal: &[
+            "relift-cache",
+            "relift-gpu-nv",
+            "relift-gpu-sm86",
+            "relift-proc",
+            "serde_json",
+            "sha2",
+            "zstd",
+        ],
+        dev: NONE,
+        build: &["sha2"],
+    },
+    Charter {
         member: "relift-cpu-z80",
         why: "the Z80 decoder, lifter and frontend over the templates generated from our Sail model; no guest uses it yet",
         normal: &["relift-guest", "relift-ir"],
@@ -677,6 +692,7 @@ const CHARTERS: &[Charter] = &[
             "relift-gba-formats",
             "relift-gpu-nv",
             "relift-gpu-sm86",
+            "relift-gpu-table",
             "relift-guest",
             "relift-host",
             "relift-info",
@@ -710,7 +726,7 @@ const CHARTERS: &[Charter] = &[
             "zstd",
         ],
         dev: &["relift-cpu-z80"],
-        build: &["sha2"],
+        build: NONE,
     },
     Charter {
         member: "relift-override-macros",

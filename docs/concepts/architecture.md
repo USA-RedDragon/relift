@@ -97,6 +97,14 @@ rustyboi-core's devices behind a C ABI, built as a static library by
 `relift build` for Game Boy projects and linked into the program. The root
 manifest excludes it and CI tests it on its own.
 
+`gpus/xlate` (`relift-gpu-xlate`) is a separate Cargo workspace
+too: the NVIDIA GPU program translator (`relift-gpu-table`) behind a C ABI
+(`include/rlx.h`), a static library the runtime links to make a game's
+shader tables on the player's device. The program pack it reads is game
+data extracted from the player's own copy and travels with the game data,
+never in a repository or a public package. The root manifest excludes it and
+CI tests it on its own (`scripts/ci/tests-gpu-xlate.sh`).
+
 `check/` is a separate Cargo workspace holding `relift-check`, the
 differential runner: it lifts A64 words, runs them in the `relift-ir`
 interpreter and on an oracle on random states, and compares the
@@ -204,7 +212,7 @@ each choice.
 <!-- docgen:crates columns=metadata.relift.band -->
 | Crate | Path | Kind | Version | Depends on | Description | band |
 |---|---|---|---|---|---|---|
-| `relift` | `relift` | lib, bin | 0.1.0 | `relift-analyze`, `relift-build`, `relift-cache`, `relift-cpu-arm64`, `relift-cpu-sm83`, `relift-diff`, `relift-emit`, `relift-gb`, `relift-gb-analyze`, `relift-gb-formats`, `relift-gba`, `relift-gba-analyze`, `relift-gba-formats`, `relift-gpu-nv`, `relift-gpu-sm86`, `relift-guest`, `relift-host`, `relift-info`, `relift-input`, `relift-ir`, `relift-linux`, `relift-manifest`, `relift-n64`, `relift-n64-analyze`, `relift-n64-formats`, `relift-nds`, `relift-nds-analyze`, `relift-nds-formats`, `relift-objfile`, `relift-patch`, `relift-proc`, `relift-progress`, `relift-sms`, `relift-sms-formats`, `relift-switch`, `relift-switch-fonts`, `relift-switch-formats`, `relift-switch-names`, `relift-switch-shaders`, `relift-testguest` | The binary: settings, command dispatch, guest registry | 3 |
+| `relift` | `relift` | lib, bin | 0.1.0 | `relift-analyze`, `relift-build`, `relift-cache`, `relift-cpu-arm64`, `relift-cpu-sm83`, `relift-diff`, `relift-emit`, `relift-gb`, `relift-gb-analyze`, `relift-gb-formats`, `relift-gba`, `relift-gba-analyze`, `relift-gba-formats`, `relift-gpu-nv`, `relift-gpu-sm86`, `relift-gpu-table`, `relift-guest`, `relift-host`, `relift-info`, `relift-input`, `relift-ir`, `relift-linux`, `relift-manifest`, `relift-n64`, `relift-n64-analyze`, `relift-n64-formats`, `relift-nds`, `relift-nds-analyze`, `relift-nds-formats`, `relift-objfile`, `relift-patch`, `relift-proc`, `relift-progress`, `relift-sms`, `relift-sms-formats`, `relift-switch`, `relift-switch-fonts`, `relift-switch-formats`, `relift-switch-names`, `relift-switch-shaders`, `relift-testguest` | The binary: settings, command dispatch, guest registry | 3 |
 | `relift-analyze` | `core/analyze` | lib | 0.1.0 | `relift-guest`, `relift-ir`, `relift-proc` | Function boundaries, CFG, jump tables, indirect targets, generic over a CPU frontend | 2 |
 | `relift-build` | `core/build` | lib | 0.1.0 | `relift-cache`, `relift-host`, `relift-proc` | Toolchain discovery and the Ninja writer | 2 |
 | `relift-cache` | `core/cache` | lib | 0.1.0 |  | Content-addressed store, stage keys, and the one file writer | 0 |
@@ -235,6 +243,7 @@ each choice.
 | `relift-gpu-nv` | `gpus/nv` | lib | 0.1.0 |  | What the NVIDIA shader front ends share: decoded instructions with nvdisasm's text form, programs, and the translator from them to SPIR-V | 2 |
 | `relift-gpu-sm53` | `gpus/sm53` | lib | 0.1.0 | `relift-gpu-nv` | NVIDIA SM53 (Maxwell GM20B, Switch) SASS: NVN programs, bundles and instruction forms; patterns from Ryujinx and envytools (MIT) | 2 |
 | `relift-gpu-sm86` | `gpus/sm86` | lib | 0.1.0 | `relift-gpu-nv` | NVIDIA SM86 (Ampere, Switch 2) SASS decoder into relift-gpu-nv instructions with nvdisasm's text form; field positions from Mesa NAK (MIT) | 2 |
+| `relift-gpu-table` | `gpus/table` | lib | 0.1.0 | `relift-cache`, `relift-gpu-nv`, `relift-gpu-sm86`, `relift-proc` | A Switch 2 game's shader table: translates its recorded SM86 programs for one device's capabilities into the tables the runtime reads, with the translator stamp; shared by relift and the on-device translator | 2 |
 | `relift-guest` | `core/guest` | lib | 0.1.0 | `relift-ir` | The guest contract and vocabulary, including the `Naming` trait a guest implements for its symbol scheme | 1 |
 | `relift-host` | `core/host` | lib | 0.1.0 |  | The host target list that emit and build share | 0 |
 | `relift-info` | `core/info` | lib | 0.1.0 |  | The self-description of a built binary: the `--relift-info` JSON document in sections (identity, needs, settings, input, mods, save), its embedding in the binary and its reader; read by `relift info` and by launchers | 0 |

@@ -1034,6 +1034,7 @@ dependencies = [
  "relift-gba-formats",
  "relift-gpu-nv",
  "relift-gpu-sm86",
+ "relift-gpu-table",
  "relift-guest",
  "relift-host",
  "relift-info",
@@ -1319,6 +1320,19 @@ dependencies = [
  "relift-gpu-nv",
  "relift-proc",
  "serde_json",
+ "zstd",
+]
+
+[[package]]
+name = "relift-gpu-table"
+version = "0.1.0"
+dependencies = [
+ "relift-cache",
+ "relift-gpu-nv",
+ "relift-gpu-sm86",
+ "relift-proc",
+ "serde_json",
+ "sha2 0.11.1",
  "zstd",
 ]
 
