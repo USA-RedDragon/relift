@@ -336,3 +336,27 @@ fn uniform_datapath() {
         "R2UR UR4, R5",
     );
 }
+
+/// The slow path of a 64-bit integer to single conversion is a function the
+/// host calls (`DontInline`): NVIDIA's driver 615 for Ampere miscompiles some
+/// vertex programs that inline it.
+#[test]
+fn the_wide_integer_to_float_slow_path_stays_a_call() {
+    let p = program(&[word(
+        0x112,
+        1,
+        &[(16, 8, 6), (32, 8, 4), (74, 1, 1), (84, 3, 3), (75, 3, 2)],
+    )]);
+    let s = translate(&p).expect("i2f 64");
+    let w = &s.spirv;
+    let mut i = 5;
+    let mut calls = 0;
+    while i < w.len() {
+        let (op, len) = (w[i] & 0xffff, (w[i] >> 16) as usize);
+        if op == 54 && len >= 5 && w[i + 3] & 2 != 0 {
+            calls += 1;
+        }
+        i += len.max(1);
+    }
+    assert!(calls >= 1, "no DontInline function in the module");
+}

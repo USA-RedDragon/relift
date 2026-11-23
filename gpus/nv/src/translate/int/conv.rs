@@ -300,7 +300,7 @@ impl Ctx {
         let rf = self.ib(op::BITWISE_OR, v, sign);
         self.m.emit_void(op::BRANCH, &[merge]);
         self.m.emit_void(op::LABEL, &[slow]);
-        let rs = self.shared_pure(
+        let rs = self.shared_pure_call(
             format!("int_to_float {mode} {half}"),
             &[lo, hi, neg],
             |c, p| c.int_to_float_body(p[0], p[1], p[2], mode, half),

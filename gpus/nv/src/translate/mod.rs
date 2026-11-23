@@ -55,6 +55,8 @@ const FUNCTION_PARAMETER: u16 = 55;
 const FUNCTION_CALL: u16 = 57;
 const RETURN_VALUE: u16 = 254;
 pub(crate) const PHYSICAL_STORAGE_BUFFER: u32 = 5349;
+/// The `DontInline` function control bit.
+const DONT_INLINE: u32 = 2;
 const CBUF_VEC4S: u32 = 4096;
 const EXECUTION_MODE_MAXIMALLY_RECONVERGES: u32 = 6023;
 const MEMORY_MODEL_GLSL450: u32 = 1;
@@ -311,7 +313,7 @@ impl Ctx {
         args: &[u32],
         body: impl FnOnce(&mut Ctx, &[u32]) -> Res<u32>,
     ) -> Res<u32> {
-        self.shared_fn(key, args, body)
+        self.shared_fn(key, args, 0, body)
     }
 
     /// [`Ctx::shared`] for a body that cannot fail.
@@ -321,7 +323,29 @@ impl Ctx {
         args: &[u32],
         body: impl FnOnce(&mut Ctx, &[u32]) -> u32,
     ) -> u32 {
-        match self.shared_fn::<std::convert::Infallible>(key, args, |c, p| Ok(body(c, p))) {
+        match self.shared_fn::<std::convert::Infallible>(key, args, 0, |c, p| Ok(body(c, p))) {
+            Ok(v) => v,
+            Err(e) => match e {},
+        }
+    }
+
+    /// [`Ctx::shared_pure`] for a function the host must call rather than
+    /// inline (`DontInline`). NVIDIA's driver 615 for Ampere miscompiles
+    /// some vertex programs that inline the slow path of a 64-bit integer
+    /// to float conversion into code feeding an output: the compiled
+    /// program jumps to an invalid instruction address and the device is
+    /// lost. Kept as a call, the same SPIR-V compiles correctly; the call
+    /// is on a path taken only for magnitudes past `2^24`, so it costs
+    /// nothing on the usual one.
+    pub(crate) fn shared_pure_call(
+        &mut self,
+        key: String,
+        args: &[u32],
+        body: impl FnOnce(&mut Ctx, &[u32]) -> u32,
+    ) -> u32 {
+        match self
+            .shared_fn::<std::convert::Infallible>(key, args, DONT_INLINE, |c, p| Ok(body(c, p)))
+        {
             Ok(v) => v,
             Err(e) => match e {},
         }
@@ -331,11 +355,12 @@ impl Ctx {
         &mut self,
         key: String,
         args: &[u32],
+        control: u32,
         body: impl FnOnce(&mut Ctx, &[u32]) -> Result<u32, E>,
     ) -> Result<u32, E> {
         let u = self.u32t();
         let tys = vec![u; args.len()];
-        self.shared_typed(key, u, &tys, args, body)
+        self.shared_typed_with(key, u, &tys, args, control, body)
     }
 
     /// [`Ctx::shared`] for parameters of the types `tys` and a result of
@@ -348,6 +373,19 @@ impl Ctx {
         args: &[u32],
         body: impl FnOnce(&mut Ctx, &[u32]) -> Result<u32, E>,
     ) -> Result<u32, E> {
+        self.shared_typed_with(key, ret, tys, args, 0, body)
+    }
+
+    /// [`Ctx::shared_typed`] with the function control mask `control`.
+    fn shared_typed_with<E>(
+        &mut self,
+        key: String,
+        ret: u32,
+        tys: &[u32],
+        args: &[u32],
+        control: u32,
+        body: impl FnOnce(&mut Ctx, &[u32]) -> Result<u32, E>,
+    ) -> Result<u32, E> {
         let id = match self.shared_fns.get(&key) {
             Some(&f) => f,
             None => {
@@ -357,7 +395,7 @@ impl Ctx {
                 let first_local = self.locals.len();
                 let fnt = self.m.t_fn_args(ret, tys);
                 let id = self.m.id();
-                self.m.emit_void(op::FUNCTION, &[ret, id, 0, fnt]);
+                self.m.emit_void(op::FUNCTION, &[ret, id, control, fnt]);
                 let ps: Vec<u32> = tys
                     .iter()
                     .map(|&t| self.m.emit(FUNCTION_PARAMETER, t, &[]))
