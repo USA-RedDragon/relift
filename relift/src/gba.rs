@@ -476,7 +476,11 @@ pub(crate) fn compile_layers(
         .chain(
             ["-fno-omit-frame-pointer"]
                 .into_iter()
-                .chain(cross.is_none().then_some("-gline-tables-only"))
+                .chain(cross.is_none().then_some(if settings.emit.line_tables {
+                    "-gline-tables-only"
+                } else {
+                    "-g0"
+                }))
                 .map(String::from),
         )
         .chain(layers.lifted_inc.iter().map(|p| inc(p)))
@@ -521,12 +525,29 @@ pub(crate) fn compile_layers(
     let (kept, lifted): (Vec<&PathBuf>, Vec<&PathBuf>) = lifted.iter().partition(|f| {
         layers.share_lifted && shared && f.file_name().is_some_and(|n| n != "unit.c")
     });
+    // The cold copy of a unit (the files under its `cold` directory) runs
+    // only code that discovery missed, and a Switch build already compiles
+    // it without debug info; line tables cost about 40% of the compile time
+    // of a lifted file at -O0.
+    let cold_flags: Vec<String> = lifted_flags
+        .iter()
+        .filter(|f| f.as_str() != "-gline-tables-only")
+        .cloned()
+        .chain(["-g0".to_string()])
+        .collect();
     let mut compiles: Vec<Compile> = lifted
         .iter()
         .map(|s| Compile {
             src: (*s).clone(),
             obj: obj(s, "lifted"),
-            flags: lifted_flags.clone(),
+            flags: if s
+                .strip_prefix(cdir)
+                .is_ok_and(|r| r.components().any(|c| c.as_os_str() == "cold"))
+            {
+                cold_flags.clone()
+            } else {
+                lifted_flags.clone()
+            },
             pool: None,
             stage: 0,
         })

@@ -686,7 +686,17 @@ fn compile(
                 f.clone()
             }
         })
-        .chain(["-gline-tables-only", "-fno-omit-frame-pointer"].map(String::from))
+        .chain(
+            [
+                if settings.emit.line_tables {
+                    "-gline-tables-only"
+                } else {
+                    "-g0"
+                },
+                "-fno-omit-frame-pointer",
+            ]
+            .map(String::from),
+        )
         .chain([
             inc("core/include"),
             inc("cpus/sm83/include"),

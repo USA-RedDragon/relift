@@ -179,6 +179,13 @@ pub struct Emit {
         description = "make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)"
     )]
     pub trampoline: bool,
+
+    #[configulator(
+        name = "line-tables",
+        default = "true",
+        description = "give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster"
+    )]
+    pub line_tables: bool,
 }
 
 /// Host tools relift drives. An empty path means look it up on `PATH`.

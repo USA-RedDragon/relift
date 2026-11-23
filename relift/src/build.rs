@@ -1899,10 +1899,12 @@ pub(crate) fn build_project(
     let lifted_flags: Vec<String> = base
         .iter()
         .map(|f| {
-            if f == "-g" {
+            if f != "-g" {
+                f.clone()
+            } else if settings.emit.line_tables {
                 "-gline-tables-only".to_string()
             } else {
-                f.clone()
+                "-g0".to_string()
             }
         })
         .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))

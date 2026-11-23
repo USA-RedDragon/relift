@@ -21,6 +21,7 @@ cold-piece-kib = 4
 cold-first = false
 fpcr-guards = false
 trampoline = false
+line-tables = true
 
 [package]
 appimage = "auto"

@@ -439,7 +439,17 @@ fn compile(
     let lifted_flags: Vec<String> = base
         .iter()
         .map(|f| if f == "-O2" { opt.into() } else { f.clone() })
-        .chain(["-gline-tables-only", "-fno-omit-frame-pointer"].map(String::from))
+        .chain(
+            [
+                if settings.emit.line_tables {
+                    "-gline-tables-only"
+                } else {
+                    "-g0"
+                },
+                "-fno-omit-frame-pointer",
+            ]
+            .map(String::from),
+        )
         .chain([
             inc("core/include"),
             inc("cpus/mips/include"),

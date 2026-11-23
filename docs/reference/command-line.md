@@ -113,6 +113,11 @@ Options:
           
           [default: false]
 
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -278,6 +283,11 @@ Options:
           
           [default: false]
 
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -434,6 +444,11 @@ Options:
           
           [default: false]
 
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -586,6 +601,11 @@ Options:
           make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
+
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
 
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
@@ -750,6 +770,11 @@ Options:
           
           [default: false]
 
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -900,6 +925,11 @@ Options:
           make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
+
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
 
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
@@ -1077,6 +1107,11 @@ Options:
           
           [default: false]
 
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -1228,6 +1263,11 @@ Options:
           
           [default: false]
 
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
+
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
           
@@ -1378,6 +1418,11 @@ Options:
           make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
+
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
 
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
@@ -1531,6 +1576,11 @@ Options:
           make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
+
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
 
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)
@@ -1690,6 +1740,11 @@ Options:
           make every guest return and indirect branch go through dispatch, so the host stack never mirrors the guest stack (a Linux program that the build proves safe otherwise returns directly)
           
           [default: false]
+
+      --emit.line-tables [<emit.line-tables>]
+          give the lifted C of a host build line tables, so a crash names the guest function; false compiles it about 40% faster
+          
+          [default: true]
 
       --package.appimage <package.appimage>
           the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)

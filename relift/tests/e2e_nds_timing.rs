@@ -129,7 +129,15 @@ fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
     ok(&out, "relift import");
     let out = tiny::relift(
         &project,
-        &["--cache-dir", &cache, "-j", "4", "build", "--dev"],
+        &[
+            "--cache-dir",
+            &cache,
+            "-j",
+            "4",
+            "--emit.line-tables=false",
+            "build",
+            "--dev",
+        ],
     );
     ok(&out, "relift build --dev");
     let stderr = String::from_utf8_lossy(&out.stderr);
