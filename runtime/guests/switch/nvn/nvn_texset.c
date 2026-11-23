@@ -26,7 +26,6 @@
 #define KINDS 3u
 #define DIMS 9u
 #define DIMS_BINDING 31u
-#define IMAGES 16384u
 #define IMAGE_KINDS 9u
 #define IMAGE_DIMS 6u
 #define IMAGE_BINDING(k, d) (32u + 8u * (k) + (d))
@@ -45,10 +44,16 @@ static struct {
      */
     uint32_t ntex;
     /**
+     * @brief Slots that also hold storage images: as many as the device's update-after-bind storage image budget
+     * allows across the image kind and dimension arrays, at most ntex.
+     */
+    uint32_t nimg;
+    /**
      * @brief Texture ids and slots. A handle names one of 2^20 texture ids, the arrays hold ntex slots: the ids below
      * pinned are their own slots (a program that reads a handle out of memory names the id, which the host cannot
-     * rewrite), the others share the slots from pinned on: id_slot maps an id to its slot plus one and slot_id a slot
-     * to its id plus one (0: free). Slots are handed out from the free stack, then in turn; taking one that holds a
+     * rewrite). pinned is all but a sixteenth of the slots, so every id of a texture pool up to that size (an id is an
+     * index into the pool) has a slot of its own. The others share the slots from pinned on: id_slot maps an id to its
+     * slot plus one and slot_id a slot to its id plus one (0: free). Slots are handed out from the free stack, then in turn; taking one that holds a
      * texture waits for the work that may still use it. Everything below is indexed by slot, and the handle a program
      * reads from a constant bank has its id replaced by the slot.
      */
@@ -83,7 +88,7 @@ static struct {
     uint32_t *tex_target, *tex_layer, *tex_layers;
     /**
      * @brief Storage images are indexed by the same slot as the sampled arrays: a program reads one handle word
-     * both ways, so a texture registered as an image takes a slot below IMAGES (the pinned ids are below it).
+     * both ways, so a texture registered as an image takes a slot below nimg.
      * img_done[slot]: the storage descriptors of the slot are written for what the sampled ones hold.
      */
     bool *img_done;
@@ -129,7 +134,7 @@ static bool fill_samplers(void)
     free(ii);
     if (!g.null_descriptor)
         return true;
-    uint32_t most = t.ntex > IMAGES ? t.ntex : IMAGES;
+    uint32_t most = t.ntex > t.nimg ? t.ntex : t.nimg;
     VkDescriptorImageInfo *nul = calloc(most, sizeof *nul);
     if (!nul)
         return false;
@@ -150,7 +155,7 @@ static bool fill_samplers(void)
             w = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                         .dstSet = t.set,
                                         .dstBinding = IMAGE_BINDING(k, dd),
-                                        .descriptorCount = IMAGES,
+                                        .descriptorCount = t.nimg,
                                         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                         .pImageInfo = nul };
             VK(vkUpdateDescriptorSets)(g.dev, 1, &w, 0, NULL);
@@ -173,7 +178,13 @@ static bool make(void)
     t.ntex = budget / (KINDS * DIMS);
     if (t.ntex > 1u << 20)
         t.ntex = 1u << 20;
-    rl_log(RL_LOG_INFO, "nvn", "texture set: %u texture ids", t.ntex);
+    uint32_t images = p12.maxDescriptorSetUpdateAfterBindStorageImages;
+    if (p12.maxPerStageDescriptorUpdateAfterBindStorageImages < images)
+        images = p12.maxPerStageDescriptorUpdateAfterBindStorageImages;
+    t.nimg = images / (IMAGE_KINDS * IMAGE_DIMS);
+    if (t.nimg > t.ntex)
+        t.nimg = t.ntex;
+    rl_log(RL_LOG_INFO, "nvn", "texture set: %u texture ids, %u of them images", t.ntex, t.nimg);
     VkDescriptorSetLayoutBinding b[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     VkDescriptorBindingFlags f[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
@@ -194,7 +205,7 @@ static bool make(void)
     f[n++] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | pending;
     for (uint32_t k = 0; k < IMAGE_KINDS; k++)
         for (uint32_t d = 0; d < IMAGE_DIMS; d++) {
-            b[n] = (VkDescriptorSetLayoutBinding){ IMAGE_BINDING(k, d), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, IMAGES,
+            b[n] = (VkDescriptorSetLayoutBinding){ IMAGE_BINDING(k, d), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, t.nimg,
                                                    VK_SHADER_STAGE_ALL, NULL };
             f[n++] = partial;
         }
@@ -211,7 +222,7 @@ static bool make(void)
     VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLER, SAMPLERS },
                                    { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, t.ntex * KINDS * DIMS },
                                    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 },
-                                   { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, IMAGES * IMAGE_KINDS * IMAGE_DIMS } };
+                                   { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, t.nimg * IMAGE_KINDS * IMAGE_DIMS } };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                        .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
                                        .maxSets = 1,
@@ -241,12 +252,12 @@ static bool make(void)
     t.tex_kind = calloc(t.ntex, sizeof *t.tex_kind);
     t.tex_view = calloc(t.ntex, sizeof *t.tex_view);
     t.tex_views = calloc(t.ntex, sizeof *t.tex_views);
-    t.img_views = calloc(IMAGES, sizeof *t.img_views);
+    t.img_views = calloc(t.nimg, sizeof *t.img_views);
     t.tex_level = calloc(t.ntex, sizeof *t.tex_level);
     t.tex_target = calloc(t.ntex, sizeof *t.tex_target);
     t.tex_layer = calloc(t.ntex, sizeof *t.tex_layer);
     t.tex_layers = calloc(t.ntex, sizeof *t.tex_layers);
-    bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20, t.ntex / 2 < IMAGES ? t.ntex / 2 : IMAGES);
+    bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20, t.ntex - t.ntex / 16);
     t.is_synced = calloc(t.ntex, sizeof *t.is_synced);
     t.img_done = calloc(t.ntex, sizeof *t.img_done);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
@@ -582,7 +593,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
 
 /**
  * @brief The slot of texture id: its own number below the pinned ids, else the one it holds, or a free one, or the
- * next in turn after the work that may use it has run. A texture registered as an image needs one below IMAGES.
+ * next in turn after the work that may use it has run. A texture registered as an image needs one below nimg.
  */
 static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
 {
@@ -590,9 +601,8 @@ static int slot_for(replay *r, uint32_t id, bool image, uint32_t *slot)
     *slot = nvn_slots_take(&t.slots, id, &evicted);
     if (*slot == UINT32_MAX)
         return nvn_vk_stop(r, "texture id %u is past the 2^20 a handle names", id);
-    if (image && *slot >= IMAGES)
-        return nvn_vk_stop(r, "texture id %u is registered as an image but the host holds %u images below the ids it pins",
-                           id, IMAGES);
+    if (image && *slot >= t.nimg)
+        return nvn_vk_stop(r, "texture id %u is registered as an image but the host holds %u images", id, t.nimg);
     if (!evicted)
         return RL_OK;
     if (!nvn_vk_flush(r))
@@ -616,7 +626,7 @@ void nvn_texset_image_gone(const vimg *v)
                 t.tex_views[sl][d] = NULL;
             }
         null_rest(sl, false, 0, 0);
-        if (sl < IMAGES) {
+        if (sl < t.nimg) {
             for (uint32_t at = 0; at < IMAGE_KINDS * 8u; at++)
                 if (t.img_views[sl][at]) {
                     VK(vkDestroyImageView)(g.dev, t.img_views[sl][at], NULL);

@@ -424,6 +424,49 @@ static double refresh_ms(replay *r, int frames)
     return (ms_now() - t0) / frames;
 }
 
+/**
+ * @brief A program that reads texture handles out of memory names pool ids the host cannot rewrite, so every id of a
+ * texture pool of 33068 descriptors (a size games use) must have a slot of its own, including ids past 16384.
+ */
+TEST(nvn_every_id_of_a_large_texture_pool_keeps_its_own_slot)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    enum { POOL = 33068, SPAN = 0x200 };
+    uint64_t heap = t_heap(c, 0x1000000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, 4 * SPAN + hp, 0));
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    r.st = &st;
+    CHECK(nvn_texset());
+    CHECK(nvn_texset_pinned() >= POOL);
+    static const uint32_t ids[] = { 16383, 16384, 16465, POOL - 1 };
+    for (uint32_t i = 0; i < 4; i++) {
+        nvn_tex_desc d = { .target = 1, .format = 37, .width = 8, .height = 8, .depth = 1, .levels = 1,
+                           .flags = 1u << 4, .stride = 64, .swizzle = { 2, 3, 4, 5 }, .pool = pool,
+                           .offset = (uint64_t)i * SPAN };
+        CHECK(nvn_tex_layout(&d));
+        uint64_t tex = heap + 0x800000 + 0x100 * (uint64_t)i;
+        CHECK(nvn_texture_record(tex, &d, NULL));
+        c->x[1] = ids[i];
+        c->x[2] = tex;
+        c->x[3] = 0;
+        nvnh_nvnTexturePoolRegisterTexture(c, m);
+    }
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+}
+
 TEST(nvn_registered_textures_cost_nothing_per_frame_until_their_bytes_change)
 {
     rl_ctx *c = t_boot(NULL);
