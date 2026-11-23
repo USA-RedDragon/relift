@@ -104,6 +104,8 @@ typedef struct vimg {
     VkImageUsageFlags usage;
     /** @brief When the GPU last wrote it (a render target, copy or storage binding), from a running count. */
     uint64_t written;
+    /** @brief The write stamp its bytes were last written back to its storage at (0 for never), and that write-back's number. */
+    uint64_t wb_written, wb_seq;
     /**
      * @brief The other images over any byte of its storage, listed when the set of images was as g.image_epoch was at
      * alias_epoch (sync_alias lists them again once it changes).
@@ -683,6 +685,14 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv);
 /** @brief A new storage view of level level of v as type t in format f (the caller destroys it), or NULL. */
 /** @brief Notes that v is written now (it becomes the image the textures sharing its storage copy from). */
 void nvn_vk_written(vimg *v);
+/**
+ * @brief Whether u's storage holds what the GPU last wrote to u: u was written back at its current write stamp and no
+ * write-back of older contents over any of its bytes came after (a newer image's bytes there are newer data, kept).
+ * False when too many write-backs came after to tell.
+ */
+bool nvn_vk_wb_current(const vimg *u);
+/** @brief Notes that u's bytes were just written back to its storage. */
+void nvn_vk_wb_note(vimg *u);
 /**
  * @brief Takes out of the images a texture can find or copy from every image whose memory pool was removed after it
  * was made (finalized, or another object made at the pool's address). The pool's memory is the game's again, and the

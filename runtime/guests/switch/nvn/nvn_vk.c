@@ -2249,10 +2249,43 @@ static bool overlaps(const vimg *u, const vimg *v)
  */
 static bool write_back_body(replay *r, vimg *u);
 
+/** @brief The last write-backs, for nvn_vk_wb_current: number n at n % WB_LOG, with the range and stamp it wrote. */
+#define WB_LOG 256u
+static struct {
+    uint64_t lo, hi, stamp;
+} wb_log[WB_LOG];
+static uint64_t wb_count;
+
+bool nvn_vk_wb_current(const vimg *u)
+{
+    if (!u->wb_written || u->wb_written != u->written || wb_count - u->wb_seq >= WB_LOG)
+        return false;
+    for (uint64_t n = u->wb_seq + 1; n <= wb_count; n++) {
+        uint32_t i = (uint32_t)(n % WB_LOG);
+        if (wb_log[i].lo < u->storage + u->d.size && u->storage < wb_log[i].hi && wb_log[i].stamp < u->written)
+            return false;
+    }
+    return true;
+}
+
+void nvn_vk_wb_note(vimg *u)
+{
+    u->wb_seq = ++wb_count;
+    u->wb_written = u->written;
+    uint32_t i = (uint32_t)(wb_count % WB_LOG);
+    wb_log[i].lo = u->storage;
+    wb_log[i].hi = u->storage + u->d.size;
+    wb_log[i].stamp = u->written;
+}
+
 static bool write_back(replay *r, vimg *u)
 {
+    if (nvn_vk_wb_current(u))
+        return true;
     int64_t t0 = now_ns();
     bool ok = write_back_body(r, u);
+    if (ok)
+        nvn_vk_wb_note(u);
     ppc.wb_ns += (uint64_t)(now_ns() - t0);
     ppc.wbs++;
     return ok;

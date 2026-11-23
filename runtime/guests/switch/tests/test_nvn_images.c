@@ -82,3 +82,45 @@ TEST(nvn_images_of_a_pool_whose_address_holds_a_new_object_are_no_longer_listed)
     CHECK(!listed(&in_b));
     CHECK(listed(&in_keep));
 }
+
+TEST(nvn_an_image_written_back_at_its_stamp_needs_no_new_write_back)
+{
+    vimg u = { .storage = 0x10000, .d = { .size = 0x4000 } };
+    nvn_vk_written(&u);
+    CHECK(!nvn_vk_wb_current(&u));
+    nvn_vk_wb_note(&u);
+    CHECK(nvn_vk_wb_current(&u));
+    nvn_vk_written(&u);
+    CHECK(!nvn_vk_wb_current(&u));
+}
+
+TEST(nvn_a_later_write_back_of_older_bytes_over_an_image_needs_its_write_back_again)
+{
+    vimg older = { .storage = 0x20000, .d = { .size = 0x2000 } };
+    vimg u = { .storage = 0x21000, .d = { .size = 0x4000 } };
+    vimg newer = { .storage = 0x22000, .d = { .size = 0x1000 } };
+    vimg apart = { .storage = 0x40000, .d = { .size = 0x1000 } };
+    nvn_vk_written(&older);
+    nvn_vk_written(&apart);
+    nvn_vk_written(&u);
+    nvn_vk_written(&newer);
+    nvn_vk_wb_note(&u);
+    nvn_vk_wb_note(&newer);
+    nvn_vk_wb_note(&apart);
+    CHECK(nvn_vk_wb_current(&u));
+    nvn_vk_wb_note(&older);
+    CHECK(!nvn_vk_wb_current(&u));
+    CHECK(nvn_vk_wb_current(&newer));
+}
+
+TEST(nvn_an_image_written_back_too_many_write_backs_ago_is_written_back_again)
+{
+    vimg u = { .storage = 0x60000, .d = { .size = 0x1000 } };
+    vimg other = { .storage = 0x80000, .d = { .size = 0x1000 } };
+    nvn_vk_written(&u);
+    nvn_vk_written(&other);
+    nvn_vk_wb_note(&u);
+    for (int i = 0; i < 1000; i++)
+        nvn_vk_wb_note(&other);
+    CHECK(!nvn_vk_wb_current(&u));
+}
