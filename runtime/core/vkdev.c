@@ -45,6 +45,8 @@ typedef struct require {
 static require g_req[MAX_REQUIRES];
 static uint32_t g_nreq;
 static bool g_shared_queue;
+/** @brief Why a window backend that draws through Vulkan got no swapchains, for the warning; NULL when it did. */
+static const char *g_no_surface;
 
 static bool fail(const char *what, rlvk_result r)
 {
@@ -101,6 +103,8 @@ static uint32_t instance_exts(rlvk_gipa_fn gipa, const char *out[MAX_INSTANCE_EX
         out[count++] = "VK_KHR_portability_enumeration";
     const rl_window_backend *b = rl_window_backend_current();
     const char *const *want = b && b->vulkan_extensions && b->vulkan_surface ? b->vulkan_extensions() : NULL;
+    if (b && b->vulkan_surface && !(want && want[0]))
+        g_no_surface = "the window backend could not load Vulkan or name its surface extensions";
     if (want && want[0]) {
         uint32_t first = count;
         bool all = true;
@@ -108,6 +112,8 @@ static uint32_t instance_exts(rlvk_gipa_fn gipa, const char *out[MAX_INSTANCE_EX
             all = listed(e, n, want[i]) && count < MAX_INSTANCE_EXTS;
             if (all)
                 out[count++] = want[i];
+            else
+                g_no_surface = want[i];
         }
         if (!all)
             count = first;
@@ -374,6 +380,16 @@ const rlvk_dev *rl_vkdev(void)
         if (g_ok)
             rl_log(RL_LOG_INFO, "vulkan", "core device up on %s, queue family %u, %u queue%s, %s", g_dev.name, g_dev.family,
                    g_shared_queue ? 1u : 2u, g_shared_queue ? "" : "s", g_dev.surfaces ? "with swapchains" : "without swapchains");
+        if (g_ok && !g_dev.surfaces && g_no_surface)
+            rl_log(RL_LOG_WARN, "vulkan",
+                   "NO SWAPCHAINS: the window shows frames copied through host memory, many times slower than a "
+                   "swapchain, because the Vulkan instance lacks %s%s",
+                   g_no_surface,
+                   strstr(g_no_surface, "wayland") ? " (RenderDoc's layer hides it: run under X11 with DISPLAY set)" : "");
+        else if (g_ok && !g_dev.surfaces && rl_window_backend_current() && rl_window_backend_current()->vulkan_surface)
+            rl_log(RL_LOG_WARN, "vulkan",
+                   "NO SWAPCHAINS: the window shows frames copied through host memory, many times slower than a "
+                   "swapchain, because the device has no VK_KHR_swapchain");
     }
     const rlvk_dev *d = g_ok ? &g_dev : NULL;
     pthread_mutex_unlock(&g_lock);

@@ -598,7 +598,10 @@ static int sdl_init(void)
     return 0;
 #endif
     if (!SDL_Vulkan_LoadLibrary(getenv("RELIFT_VULKAN_LIBRARY"))) {
-        rl_log(RL_LOG_WARN, "window", "SDL could not load Vulkan: %s", SDL_GetError());
+        rl_log(RL_LOG_WARN, "window",
+               "SDL could not load Vulkan: %s. The window gets no swapchain: frames go through host memory, many "
+               "times slower",
+               SDL_GetError());
         return 0;
     }
     Uint32 n = 0;
