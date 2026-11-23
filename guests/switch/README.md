@@ -89,7 +89,10 @@ are described in `docs/guides/usage.md`.
 The build translates every GPU program of a game to SPIR-V (`shaders/table.rlspv`), so the translation never runs
 while the game does. A host Vulkan driver still compiles each SPIR-V stage to its GPU's code, and a driver that
 does that when a pipeline is first made would stall the first draw of each pipeline during play. The runtime does
-that compile at launch instead, and the game starts when it is done.
+that compile at launch instead. The game starts when it is done or after 3 s, whichever is first: a warm-up the
+driver's pipeline cache answers ends within that, and one it must compile afresh (after a new shader table) goes on
+beside the game, the most recently set program first, while a draw that needs a pipeline nobody has made makes it
+itself.
 
 Where the host driver has `VK_EXT_graphics_pipeline_library` with fast linking (the NVIDIA driver and lavapipe do), a game's pipeline is made from four libraries: vertex input, pre-rasterization shaders, fragment
 shader and fragment output. The launch warm-up makes a pre-rasterization library of every vertex program and a

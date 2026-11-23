@@ -17,16 +17,16 @@
  *   them: a game builds its programs when it loads, well before the first
  *   draw that uses them, so the compile runs beside the loading.
  * - The programs and pipelines earlier launches recorded (nvn_pipe.h), made
- *   at the first submit before the game goes on, so a later launch has every
- *   program of a play ready before the game asks for any (and finds them in
- *   the driver's pipeline cache).
+ *   from the first submit on, so a later launch has every program of a play
+ *   ready before the game asks for any (and finds them in the driver's
+ *   pipeline cache). The first submit waits for them for at most HOLD_NS;
+ *   past that the game goes on and the workers with it.
  * - With RELIFT_PIPELINE_WARM=all, every program of the build's shader
  *   table, at the first submit.
  *
  * RELIFT_PIPELINE_WARM is "registered" (the default: the first two),
- * "all" (also the table, and the first submit returns when it is done),
- * "all-background" (the first submit returns at once and a draw that needs
- * a pipeline nobody has made waits for the warm-up to end) or "off".
+ * "all" (also the table), "all-background" (also the table, and the first
+ * submit does not wait at all) or "off".
  *
  * A draw that needs a library or pipeline a worker is making waits for it;
  * one nobody has started it makes itself.
@@ -37,6 +37,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -57,11 +58,18 @@ static struct {
     uint32_t nqueue, capqueue, active;
     bool pool_started;
     bool launched, all, background;
-    uint32_t total, next, done, nrecorded, nshader, failed;
+    uint32_t total, next, done, nrecorded, nshader, failed, started, exited;
     /** @brief The RELIFT_WARM_THREADS count, 0 when unset. */
     uint32_t forced;
     uint64_t t0, last_log;
 } W = { .lock = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
+
+/**
+ * @brief How long the first submit waits for the launch warm-up: long enough for a warm-up the driver's pipeline cache
+ * answers (1 to 5 s measured), short enough that one it must compile afresh (minutes after a new shader table) does
+ * not hold the first picture; the workers go on beside the game after it.
+ */
+#define HOLD_NS (3ull * 1000000000ull)
 
 /** @brief Memory one compile may take: a driver compile of a large translated program was measured at 2.4 GiB. */
 #define COMPILE_MEMORY (4ull << 30)
@@ -287,6 +295,29 @@ static void make_set(const job *j)
 }
 
 /**
+ * @brief Notes that a launch worker is done; the last one logs the warm-up's end and tells the pipelines module, and
+ * wakes the first submit if it still waits.
+ */
+static void launch_exit(void)
+{
+    pthread_mutex_lock(&W.lock);
+    bool last = ++W.exited == W.started;
+    if (last)
+        progress(true, "done");
+    pthread_cond_broadcast(&W.cv);
+    pthread_mutex_unlock(&W.lock);
+    if (!last)
+        return;
+    uint64_t made, made_ns, late, late_ns;
+    nvn_pipe_stats(&made, &made_ns, &late, &late_ns);
+    rl_log(RL_LOG_INFO, "nvn",
+           "shader warm-up done in %.1f s: %u of %u programs, %u refused; the driver compiled %llu in %.1f s of thread "
+           "time",
+           (rl_clock_ns() - W.t0) / 1e9, W.done, W.total, W.failed, (unsigned long long)made, made_ns / 1e9);
+    nvn_pipe_warmed();
+}
+
+/**
  * @brief A launch worker: takes the next table program or recorded pipeline until none is left, first making any
  * program the game has set meanwhile (take_set).
  */
@@ -303,8 +334,10 @@ static void *launch_worker(void *arg)
         }
         uint32_t i = W.next++;
         pthread_mutex_unlock(&W.lock);
-        if (i >= W.total)
+        if (i >= W.total) {
+            launch_exit();
             return NULL;
+        }
         bool ok = true;
         if (i < W.nrecorded) {
             ok = make_recorded(nvn_pipe_recorded_at(i));
@@ -362,30 +395,44 @@ static void launch(void)
     }
     rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u recorded pipelines and %u table programs on %u threads%s",
            W.nrecorded, W.nshader, nthreads, W.background ? ", the game starts now" : "");
-    pthread_t th[256];
+    pthread_mutex_lock(&W.lock);
+    W.started = nthreads;
+    pthread_mutex_unlock(&W.lock);
     uint32_t started = 0;
-    for (uint32_t i = 0; i < nthreads && i < 256; i++)
-        if (pthread_create(&th[started], NULL, launch_worker, NULL) == 0)
+    for (uint32_t i = 0; i < nthreads; i++) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, launch_worker, NULL) == 0) {
+            pthread_detach(t);
             started++;
-    if (!started)
+        }
+    }
+    pthread_mutex_lock(&W.lock);
+    W.started = started;
+    pthread_mutex_unlock(&W.lock);
+    if (!started) {
+        pthread_mutex_lock(&W.lock);
+        W.started = 1;
+        pthread_mutex_unlock(&W.lock);
         launch_worker(NULL);
-    if (W.background) {
-        for (uint32_t i = 0; i < started; i++)
-            pthread_detach(th[i]);
         return;
     }
-    for (uint32_t i = 0; i < started; i++)
-        pthread_join(th[i], NULL);
-    uint64_t made, made_ns, late, late_ns;
-    nvn_pipe_stats(&made, &made_ns, &late, &late_ns);
+    if (W.background)
+        return;
+    uint64_t until = rl_clock_ns() + HOLD_NS;
     pthread_mutex_lock(&W.lock);
-    progress(true, "done");
+    while (W.exited < W.started && rl_clock_ns() < until) {
+        uint64_t left = until - rl_clock_ns();
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        uint64_t ns = (uint64_t)ts.tv_nsec + (left < 250000000ull ? left : 250000000ull);
+        ts.tv_sec += (time_t)(ns / 1000000000ull);
+        ts.tv_nsec = (long)(ns % 1000000000ull);
+        pthread_cond_timedwait(&W.cv, &W.lock, &ts);
+    }
+    bool going = W.exited < W.started;
+    if (going)
+        progress(true, "the game starts, the warm-up goes on");
     pthread_mutex_unlock(&W.lock);
-    rl_log(RL_LOG_INFO, "nvn",
-           "shader warm-up done in %.1f s: %u of %u programs, %u refused; the driver compiled %llu in %.1f s of thread "
-           "time",
-           (rl_clock_ns() - W.t0) / 1e9, W.done, W.total, W.failed, (unsigned long long)made, made_ns / 1e9);
-    nvn_pipe_warmed();
 }
 
 void nvn_warm_launch(void)
