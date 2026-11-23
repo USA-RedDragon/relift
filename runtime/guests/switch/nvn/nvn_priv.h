@@ -365,6 +365,8 @@ typedef struct nvn_probes {
     uint32_t denorm_mul_fix;
     /** @brief The DenormPreserve execution mode, on top of those, keeps denormals as IEEE 754 does. */
     bool denorm_preserve_mode32;
+    /** @brief The DenormFlushToZero execution mode, on top of those, follows the flushing model exactly. */
+    bool denorm_flush_mode32;
 } nvn_probes;
 /** @brief Brings the host device up and gives its probe results; false without a host Vulkan device. */
 bool nvn_vk_probes(nvn_probes *out);

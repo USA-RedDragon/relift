@@ -104,6 +104,13 @@ fn denormals_come_from_the_device_probe() {
     assert!(host(&c).denorm_preserve_mode, "listed and confirmed");
     c.values.remove("denormPreserveMode32");
     assert!(host(&c).denorm_preserve_mode, "listed, no probe");
+    let mut c = caps.clone();
+    c.values.insert("shaderDenormFlushToZeroFloat32".into(), 1);
+    assert!(!host(&c).denorm_flush_exact, "listed, no probe");
+    c.values.insert("denormFlushMode32".into(), 1);
+    assert!(host(&c).denorm_flush_exact, "listed and confirmed");
+    c.values.insert("shaderDenormFlushToZeroFloat32".into(), 0);
+    assert!(!host(&c).denorm_flush_exact, "confirmed but not listed");
 }
 
 /// A device at Vulkan's minimum limits: no capture has fewer than 1024

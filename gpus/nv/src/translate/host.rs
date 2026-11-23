@@ -109,6 +109,11 @@ pub struct HostProfile {
     pub denorm_preserve_mode: bool,
     /// `shaderDenormFlushToZeroFloat32`.
     pub denorm_flush_mode: bool,
+    /// The DenormFlushToZero execution mode makes the device's add and
+    /// multiply follow SM86's `.FTZ` model exactly (the runtime's probe,
+    /// `denormFlushMode32`); for a device with no denormal promise the
+    /// translator then asks for it, and `.FTZ` arithmetic runs native.
+    pub denorm_flush_exact: bool,
     /// `shaderSignedZeroInfNanPreserveFloat32`: the SignedZeroInfNanPreserve
     /// execution mode can be requested. Without it a compiler may treat
     /// signed zeros, infinities and NaNs loosely, and a program with float
@@ -224,6 +229,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
+            denorm_flush_exact: false,
             signed_zero_inf_nan_preserve: true,
             fused_fma: true,
             mirror_writes: false,
@@ -261,6 +267,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
+            denorm_flush_exact: false,
             max_shared_bytes: 1 << 16,
             max_samplers: 8_388_606,
             max_sampled_images: 8_388_606,
@@ -290,6 +297,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
+            denorm_flush_exact: false,
             max_shared_bytes: 32_768,
             max_samplers: u32::MAX,
             max_sampled_images: u32::MAX,
@@ -322,6 +330,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
+            denorm_flush_exact: false,
             clock: Clock::Subgroup,
             max_samplers: 1 << 26,
             max_sampled_images: 1 << 25,
@@ -387,6 +396,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             flush_fix: Some(FIX_ROUND_AFTER),
             denorm_flush_mode: true,
+            denorm_flush_exact: false,
             fused_fma: false,
             clock: Clock::None,
             max_shared_bytes: 32_768,
@@ -424,6 +434,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
+            denorm_flush_exact: false,
             fused_fma: false,
             max_shared_bytes: 32_768,
             max_samplers: 1 << 24,
@@ -458,6 +469,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
+            denorm_flush_exact: false,
             fused_fma: false,
             max_shared_bytes: 32_768,
             max_samplers: 1 << 23,
@@ -557,6 +569,7 @@ impl HostProfile {
             flush_fix: None,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
+            denorm_flush_exact: false,
             signed_zero_inf_nan_preserve: false,
             fused_fma: false,
             mirror_writes: false,
@@ -662,6 +675,8 @@ impl HostProfile {
                 && (!caps.values.contains_key("denormPreserveMode32")
                     || caps.on("denormPreserveMode32")),
             denorm_flush_mode: caps.on("shaderDenormFlushToZeroFloat32"),
+            denorm_flush_exact: caps.on("shaderDenormFlushToZeroFloat32")
+                && caps.on("denormFlushMode32"),
             signed_zero_inf_nan_preserve: caps.on("shaderSignedZeroInfNanPreserveFloat32"),
             fused_fma: caps.extension_on("VK_KHR_shader_fma", "shaderFmaFloat32"),
             mirror_writes: caps.on("guestMemoryMirrored"),

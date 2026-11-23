@@ -223,6 +223,7 @@ fn devices(h: &HostProfile) -> Vec<Device> {
     let devs = match h.denorm {
         Denorm::Flush => flush,
         Denorm::Unknown if h.flush_fix.is_some() => flush,
+        Denorm::Unknown if h.denorm_flush_exact && !h.denorm_preserve_mode => flush,
         Denorm::Unknown if h.denorm_preserve_mode => vec![unfused(PRESERVE)],
         Denorm::Preserve => vec![unfused(PRESERVE)],
         Denorm::Unknown => [&flush[..], &[unfused(PRESERVE)]].concat(),
@@ -1587,5 +1588,56 @@ fn ffma_float_path_matches_a_fused_multiply_add() {
         let devs = devices(&h);
         check("FFMA float path", &o, &devs, ffma(RN), &plain);
         check("FFMA.FTZ float path", &o, &devs, ffma(RN.ftz()), &ftz);
+    }
+}
+
+/// A device with no denormal promise whose probe found the DenormFlushToZero
+/// mode exact runs programs in that mode, with `.FTZ` arithmetic native and
+/// every FFMA and FMUL vector still matched on the flushing devices.
+#[test]
+fn a_confirmed_flush_mode_is_asked_for() {
+    let h = HostProfile {
+        denorm: translate::Denorm::Unknown,
+        flush_fix: None,
+        denorm_preserve_mode: false,
+        denorm_flush_exact: true,
+        ..HostProfile::adreno()
+    };
+    let o = host(h.clone());
+    let s = translate_with(&program(fadd(RN.ftz()), 0, 0, 0), &o).unwrap_or_else(|e| panic!("{e}"));
+    assert!(modes_of(&s.spirv).contains(&(4460, 32)));
+    assert_eq!(s.interface.host.denorm_fixups, 0);
+    let devs = devices(&h);
+    assert!(devs.iter().all(|d| d.flush));
+    check_vectors("FFMA", &o, &devs, ffma, &FFMA_VECTORS);
+    check_vectors("FMUL", &o, &devs, fmul, &FMUL_VECTORS);
+    // A module that mixes .FTZ and plain arithmetic runs in the flush mode
+    // too; its plain FADD keeps a denormal sum exactly.
+    let mixed = |a: u32, b: u32| {
+        let body = [
+            mov(2, OUT as u32),
+            mov(3, 0),
+            mov(4, a),
+            mov(5, b),
+            fmul(RN.ftz()),
+            fadd(RN),
+            stg(14, 0),
+            word(0x14d, 4, &[(87, 3, 7)]),
+            word(0x147, 4, &[(34, 48, 0xffff_ffff_fffc), (87, 3, 7)]),
+        ];
+        let bytes: Vec<u8> = body.iter().flat_map(|w| w.to_le_bytes()).collect();
+        relift_gpu_sm86::program::parse(&bytes)
+    };
+    for (a, b, want) in [
+        (0x0080_0000, 0x8000_0001, 0x007f_ffff),
+        (0x0000_0003, 0x0000_0004, 0x0000_0007),
+        (0x8080_0001, 0x0080_0000, 0x8000_0001),
+    ] {
+        let s = translate_with(&mixed(a, b), &o).unwrap_or_else(|e| panic!("{e}"));
+        assert!(modes_of(&s.spirv).contains(&(4460, 32)));
+        for dev in &devs {
+            let r = eval::run(&s.spirv, *dev);
+            assert_eq!(r.mem[&OUT], want, "mixed {a:08x} + {b:08x} on {dev:?}");
+        }
     }
 }

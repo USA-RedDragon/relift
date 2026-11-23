@@ -38,6 +38,8 @@ const FUNCTION_CALL: u16 = 57;
 const RETURN_VALUE: u16 = 254;
 const CAP_DENORM_PRESERVE: u32 = 4464;
 const MODE_DENORM_PRESERVE: u32 = 4459;
+const CAP_DENORM_FLUSH: u32 = 4465;
+const MODE_DENORM_FLUSH: u32 = 4460;
 const CAP_SZINP: u32 = 4466;
 const MODE_SZINP: u32 = 4461;
 const ZERO_EXP: i32 = -300;
@@ -84,7 +86,9 @@ fn arith_code(a: Arith) -> u8 {
 
 impl Ctx {
     /// Picks the denormal mode the shader runs with: the host's own, or
-    /// DenormPreserve where the host can be asked for it.
+    /// DenormPreserve where the host can be asked for it, else
+    /// DenormFlushToZero where the runtime's probe found that mode follows
+    /// SM86's flushing model exactly.
     pub(crate) fn denorm_plan(&mut self, insts: &[Inst]) {
         let uses_float = insts.iter().any(|i| {
             matches!(
@@ -97,6 +101,11 @@ impl Ctx {
                 self.cap(CAP_DENORM_PRESERVE);
                 self.iface.host.denorm_mode = Some(Denorm::Preserve);
                 Denorm::Preserve
+            }
+            Denorm::Unknown if self.host.denorm_flush_exact && uses_float => {
+                self.cap(CAP_DENORM_FLUSH);
+                self.iface.host.denorm_mode = Some(Denorm::Flush);
+                Denorm::Flush
             }
             d => d,
         };
@@ -125,6 +134,13 @@ impl Ctx {
                 &mut self.m.modes,
                 op::EXECUTION_MODE,
                 &[main, MODE_DENORM_PRESERVE, 32],
+            );
+        }
+        if self.iface.host.denorm_mode == Some(Denorm::Flush) {
+            crate::spirv::inst(
+                &mut self.m.modes,
+                op::EXECUTION_MODE,
+                &[main, MODE_DENORM_FLUSH, 32],
             );
         }
         if self.denorm.szinp {

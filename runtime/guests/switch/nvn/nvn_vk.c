@@ -631,11 +631,14 @@ static bool probe_canonical_nan(bool szinp, bool dp32, bool fma32)
  * (SignedZeroInfNanPreserve and no denormal mode, the modes the translator emits for a device with no denormal
  * promise) over denormal inputs and results and compares every result with the SM86 flushing model and with IEEE 754
  * (nvn_probe_denorm_check): 1 flush, 2 keep, 0 neither. With dp32 (the device lists DenormPreserve) it also runs the
- * DEN32 DP32 variant and sets *preserve_mode when that keeps denormals.
+ * DEN32 DP32 variant and sets *preserve_mode when that keeps denormals; with ftz32 (the device lists DenormFlushToZero)
+ * the DEN32 FTZ32 variant, setting *flush_mode when that follows the SM86 flushing model exactly.
  */
-static uint32_t probe_denorm32(bool szinp, bool dp32, bool *preserve_mode, nvn_denorm_class *cls)
+static uint32_t probe_denorm32(bool szinp, bool dp32, bool ftz32, bool *preserve_mode, bool *flush_mode,
+                               nvn_denorm_class *cls)
 {
     *preserve_mode = false;
+    *flush_mode = false;
     *cls = (nvn_denorm_class){ 0, 0, 255, 0 };
     if (!szinp)
         return 0;
@@ -644,19 +647,21 @@ static uint32_t probe_denorm32(bool szinp, bool dp32, bool *preserve_mode, nvn_d
     if (!nvn_vk_staging_new(&buf, 4ull * rows * sizeof(uint32_t)))
         return 0;
     uint32_t *w = (uint32_t *)(void *)buf.map;
-    for (int mode = 0; mode < 2; mode++) {
-        if (mode && !dp32)
-            break;
+    for (int mode = 0; mode < 3; mode++) {
+        if ((mode == 1 && !dp32) || (mode == 2 && !ftz32))
+            continue;
         memset(w, 0, 4ull * rows * sizeof(uint32_t));
         nvn_probe_denorm_input(w);
-        const uint32_t *code = mode ? nvn_probe_den_dp : nvn_probe_den;
-        size_t size = mode ? sizeof nvn_probe_den_dp : sizeof nvn_probe_den;
+        const uint32_t *code = mode == 1 ? nvn_probe_den_dp : mode == 2 ? nvn_probe_den_ftz : nvn_probe_den;
+        size_t size = mode == 1 ? sizeof nvn_probe_den_dp : mode == 2 ? sizeof nvn_probe_den_ftz : sizeof nvn_probe_den;
         if (!run_probe(code, size, &buf, rows, 0, (rows + 63) / 64, 0))
             continue;
         nvn_denorm_class c;
         uint32_t got = nvn_probe_denorm_check(w, rows, &c);
-        if (mode) {
+        if (mode == 1) {
             *preserve_mode = got == 2;
+        } else if (mode == 2) {
+            *flush_mode = got == 1;
         } else {
             kind = got;
             *cls = c;
@@ -868,7 +873,8 @@ static void write_caps(void)
                                                    p12.shaderDenormPreserveFloat32, has[3] && fma.b[1]);
     nvn_denorm_class dc;
     g.probes.denorm32 = probe_denorm32(p12.shaderSignedZeroInfNanPreserveFloat32, p12.shaderDenormPreserveFloat32,
-                                       &g.probes.denorm_preserve_mode32, &dc);
+                                       p12.shaderDenormFlushToZeroFloat32, &g.probes.denorm_preserve_mode32,
+                                       &g.probes.denorm_flush_mode32, &dc);
     g.probes.denorm_add_flush = dc.add_models & 1;
     g.probes.denorm_mul_fix = dc.mul_fix;
     g.probes.exact_f16 = half && probe_exact_f16();
@@ -879,10 +885,10 @@ static void write_caps(void)
     fprintf(f,
             "    \"ReliftDeviceProbes\": { \"canonicalNan32\": %s, \"exactFloat16\": %s, \"hmmaCooperativeMatrix\": "
             "%s, \"denormDefault32\": %u, \"denormPreserveMode32\": %s, \"denormAddFlush32\": %s, "
-            "\"denormMulFix32\": %u, \"guestMemoryMirrored\": %s },\n",
+            "\"denormMulFix32\": %u, \"denormFlushMode32\": %s, \"guestMemoryMirrored\": %s },\n",
             B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop), g.probes.denorm32,
             B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix,
-            B(!g.host_import));
+            B(g.probes.denorm_flush_mode32), B(!g.host_import));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);

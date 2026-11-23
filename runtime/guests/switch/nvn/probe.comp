@@ -5,7 +5,7 @@
 // with FMA32, a * b otherwise), NMin(a, b) and NMax(a, b) to w[3n + 5i..],
 // with DenormPreserve under DP32. DEN32: row i reads a and b from w[2i], w[2i+1]
 // and writes the bits of a + b and a * b to w[2n + 2i..] under the same modes, with no NaN or fma
-// operations (the probe for denormal behavior). F16: row i reads three packed half pairs
+// operations (the probe for denormal behavior), with DenormFlushToZero under FTZ32. F16: row i reads three packed half pairs
 // from w[3i..3i+2] and writes the packed a + b, a * b and fused a * b + c to
 // w[3n + 3i..]; word j < m of w[6n..] is converted to a half at
 // w[6n + m + j]; word j < 32768 of w[6n + 2m..] holds two halves, converted
@@ -81,6 +81,9 @@ void main() {
 spirv_execution_mode(capabilities = [4466], 4461, 32);
 #ifdef DP32
 spirv_execution_mode(capabilities = [4464], 4459, 32);
+#endif
+#ifdef FTZ32
+spirv_execution_mode(capabilities = [4465], 4460, 32);
 #endif
 #ifdef F16
 spirv_execution_mode(capabilities = [4464], 4459, 16);
