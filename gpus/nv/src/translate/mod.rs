@@ -45,8 +45,8 @@ pub use mem::slots::{
 };
 pub use tex::{
     Dim, HandleSource, ImageDim, ImageKind, KIND_AT_RUN_TIME, Kind, SAMPLER_BINDING,
-    TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC, TEXTURE_KIND_SPEC,
-    image_binding, texture_binding,
+    SURFACE_KIND_RGB9E5, TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC,
+    TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
 
 use crate::program::{Program, Stage};

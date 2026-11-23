@@ -97,6 +97,13 @@ static struct {
      * img_done[slot]: the storage descriptors of the slot are written for what the sampled ones hold.
      */
     bool *img_done;
+    /**
+     * @brief How formatted surface accesses reach each slot's storage image: NVN_SURFACE_DIRECT through the view of
+     * its own numeric kind, NVN_SURFACE_RGB9E5 (every E5B9G9R9 image) through its 32-bit raw view, which moves the
+     * texels unchanged as the console's formatted accesses to the format do (it has no shared-exponent surface
+     * encoder, so programs pack the format themselves), NVN_SURFACE_NONE when neither is possible.
+     */
+    uint8_t *img_surface;
     /** @brief The sampler each sampler id's element holds and the builder bytes it was made from. */
     VkSampler *samplers;
     /**
@@ -272,10 +279,11 @@ static bool make(void)
     bool slots_ok = nvn_slots_init(&t.slots, t.ntex, 1u << 20, t.ntex - t.ntex / 16);
     t.is_synced = calloc(t.ntex, sizeof *t.is_synced);
     t.img_done = calloc(t.ntex, sizeof *t.img_done);
+    t.img_surface = calloc(t.ntex, sizeof *t.img_surface);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
     bool filled = fill_samplers();
-    t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
+    t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.img_surface && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
 }
 
@@ -558,7 +566,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
     VkWriteDescriptorSet w[IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
     uint64_t wrote = 0;
-    bool fits = false;
+    bool fits = false, formatted = false;
     for (uint32_t k = 0; k < IMAGE_KINDS; k++) {
         VkFormat f = image_format(k, v->format, bpb);
         if (f == VK_FORMAT_UNDEFINED)
@@ -573,6 +581,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
             if (!(dims & (1u << d)))
                 continue;
             fits = true;
+            formatted |= k <= IK_UINT;
             if (!(t.img_used >> (k * IMAGE_DIMS + d) & 1))
                 continue;
             uint32_t at = 8u * k + d;
@@ -601,6 +610,9 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
     if (!fits)
         return nvn_vk_stop(r, "image id %u (format %u) has no storage view the host device supports", id,
                            v->d.format);
+    t.img_surface[slot] = v->format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 ? NVN_SURFACE_RGB9E5
+                          : formatted                                    ? NVN_SURFACE_DIRECT
+                                                                         : NVN_SURFACE_NONE;
     if (n)
         VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
     null_rest(slot, true, 0, wrote);
@@ -1116,4 +1128,16 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
     t.img_done[ts] = true;
     *slot = ts;
     return RL_OK;
+}
+
+uint32_t nvn_texset_format(uint32_t slot)
+{
+    return make() && slot < t.ntex && t.tex_img[slot] ? t.tex_img[slot]->d.format : 0;
+}
+
+uint32_t nvn_texset_surface_kind(uint32_t slot, uint32_t kind)
+{
+    if (!make() || slot >= t.ntex || t.img_surface[slot] == NVN_SURFACE_DIRECT)
+        return kind;
+    return t.img_surface[slot] == NVN_SURFACE_RGB9E5 ? NVN_SURFACE_KIND_RGB9E5 : UINT32_MAX;
 }

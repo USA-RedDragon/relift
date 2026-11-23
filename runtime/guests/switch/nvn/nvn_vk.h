@@ -775,6 +775,20 @@ bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv);
 uint32_t nvn_texset_pinned(void);
 /** @brief Whether the texture set's layout declares the storage image array at binding (true when there is no set). */
 bool nvn_texset_declares_image(uint32_t binding);
+/** @brief How formatted surface accesses reach a slot's storage image (see nvn_texset_surface_kind). */
+enum { NVN_SURFACE_DIRECT, NVN_SURFACE_RGB9E5, NVN_SURFACE_NONE };
+/**
+ * @brief The value of a formatted surface access's kind constant (the translator's TEXTURE_KIND_SPEC constants) for
+ * the storage image in slot whose numeric kind is kind: kind itself when the host device stores the image's format,
+ * NVN_SURFACE_KIND_RGB9E5 for an E5B9G9R9 image, whose texels the access moves unchanged through the 32-bit raw view,
+ * UINT32_MAX when the host can store the format neither way.
+ */
+uint32_t nvn_texset_surface_kind(uint32_t slot, uint32_t kind);
+/** @brief The NVN format of the texture in slot (0 when it holds none). */
+uint32_t nvn_texset_format(uint32_t slot);
+/** @brief The kind constant value that has a formatted surface access move an E5B9G9R9 image's 32-bit texels
+ * unchanged through its raw view, as the console does (the translator's SURFACE_KIND_RGB9E5). */
+#define NVN_SURFACE_KIND_RGB9E5 4u
 /** @brief Texture ids that also hold storage images (0 when the set could not be made). */
 uint32_t nvn_texset_images(void);
 /**

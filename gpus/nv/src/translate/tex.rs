@@ -2502,6 +2502,14 @@ fn image_type(c: &mut Ctx, k: ImageKind, d: ImageDim) -> u32 {
     c.m.t_image([st, dim, 0, arrayed, 0, 2, format])
 }
 
+/// The value of a formatted surface access's kind constant ([`TEXTURE_KIND_SPEC`] onwards) for an RGB9E5 image: the
+/// access moves the image's 32-bit texels unchanged through its raw storage image. The console has no shared-exponent
+/// surface encoder: a formatted store to an RGB9E5 surface writes the first data word as the texel and a formatted load
+/// returns the texel as an R32UI load does, so a program packs and unpacks the format itself (a game's upscale pass
+/// stores the RGB9E5 words of its scene that it packed in integer operations). Hosts give the format no storage image
+/// (an RTX 3090 has no storage feature for it), so its raw 32-bit view is the image's only storage view.
+pub const SURFACE_KIND_RGB9E5: u32 = 4;
+
 fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
     let w = c.fields;
     let tx = w.tex;
@@ -2589,6 +2597,57 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
                 data.push(x);
             }
         }
+        let packed = key.map(|key| {
+            let next = TEXTURE_KIND_SPEC + c.iface.texture_kinds.len() as u32;
+            let id = *c.iface.texture_kinds.entry(key).or_insert(next);
+            let b = c.boolt();
+            let kc = c.m.spec_u32(0, id);
+            let p = c.m.c_u32(SURFACE_KIND_RGB9E5);
+            c.m.spec_op(b, op::I_EQUAL, &[kc, p])
+        });
+        let (lp, ln, lm) = (c.m.id(), c.m.id(), c.m.id());
+        let vars: [u32; 4] = std::array::from_fn(|_| {
+            let v = c.m.id();
+            c.locals.push(v);
+            v
+        });
+        let put = |c: &mut Ctx, v: u32| {
+            let u = c.u32t();
+            for (k, &var) in vars.iter().enumerate() {
+                let x = c.m.emit(op::COMPOSITE_EXTRACT, u, &[v, k as u32]);
+                c.m.emit_void(op::STORE, &[var, x]);
+            }
+        };
+        let vp = if let Some(is_p) = packed {
+            c.m.emit_void(op::SELECTION_MERGE, &[lm, 0]);
+            c.m.emit_void(op::BRANCH_CONDITIONAL, &[is_p, lp, ln]);
+            c.m.emit_void(op::LABEL, &[lp]);
+            let ty = image_type(c, ImageKind::Raw32, d);
+            let img = c.descriptor(image_binding(ImageKind::Raw32, d), ty, idx, nu);
+            let t4 = c.tx_uvec4();
+            let v = if load {
+                c.cap(55);
+                let r = c.m.emit(op::IMAGE_READ, t4, &[img, coord]);
+                let u = c.u32t();
+                let w = c.m.emit(op::COMPOSITE_EXTRACT, u, &[r, 0]);
+                let zero = c.m.c_u32(0);
+                let one = c.m.c_u32(1);
+                c.tx_uvec4_of([w, zero, zero, one])
+            } else {
+                c.cap(56);
+                let zero = c.m.c_u32(0);
+                let w = data.first().copied().unwrap_or(zero);
+                let uv = c.tx_uvec4_of([w, zero, zero, zero]);
+                c.m.emit_void(op::IMAGE_WRITE, &[img, coord, uv]);
+                uv
+            };
+            put(c, v);
+            c.m.emit_void(op::BRANCH, &[lm]);
+            c.m.emit_void(op::LABEL, &[ln]);
+            Some(())
+        } else {
+            None
+        };
         let v = c.by_kind(key, true, None, &mut |c, k| {
             let ik = match k {
                 Kind::Float => ImageKind::Float,
@@ -2620,6 +2679,17 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
                 Ok(uv)
             }
         })?;
+        let v = match vp {
+            Some(()) => {
+                put(c, v);
+                c.m.emit_void(op::BRANCH, &[lm]);
+                c.m.emit_void(op::LABEL, &[lm]);
+                let u = c.u32t();
+                let parts = vars.map(|var| c.m.emit(op::LOAD, u, &[var]));
+                c.tx_uvec4_of(parts)
+            }
+            None => v,
+        };
         if load {
             let u = c.u32t();
             for k in 0..n {

@@ -515,7 +515,7 @@ fn surfaces_are_storage_images() {
         ],
     );
     let s = compute(&[sust, suld]);
-    assert_eq!(insts(&s.spirv, 99).len(), 3);
+    assert_eq!(insts(&s.spirv, 99).len(), 4);
     assert_eq!(insts(&s.spirv, 98).len(), 1);
     assert!(
         s.interface
@@ -523,6 +523,93 @@ fn surfaces_are_storage_images() {
             .contains(&image_binding(ImageKind::Raw32, ImageDim::D2))
     );
     assert!(s.interface.textures.contains(&(2, 0x48)));
+}
+
+/// The instruction defining SPIR-V id `id`, if any.
+fn def(words: &[u32], id: u32) -> Option<Vec<u32>> {
+    let mut k = 5;
+    while k < words.len() {
+        let n = ((words[k] >> 16) as usize).max(1);
+        let w = &words[k..k + n];
+        let op = w[0] & 0xffff;
+        let at = match op {
+            43 | 61 | 80 | 81 | 98 => 2,
+            _ => 0,
+        };
+        if at > 0 && w.get(at) == Some(&id) {
+            return Some(w.to_vec());
+        }
+        k += n;
+    }
+    None
+}
+
+/// Whether id is the u32 constant v.
+fn is_const(words: &[u32], id: u32, v: u32) -> bool {
+    def(words, id).is_some_and(|w| w[0] & 0xffff == 43 && w[3] == v)
+}
+
+/// A formatted surface access of an RGB9E5 image moves its 32-bit texels unchanged through the raw array, as the
+/// console does (it has no shared-exponent surface encoder; programs pack the format themselves): when the kind
+/// constant is `SURFACE_KIND_RGB9E5`, a store writes its first data register as the texel, and a load returns the
+/// texel in the first register, 0 in the next two and 1 in the last, as an R32UI load does.
+#[test]
+fn formatted_surface_accesses_of_rgb9e5_move_raw_texels() {
+    const SPEC_CONSTANT_OP: u32 = 52;
+    const IMAGE_READ: u32 = 98;
+    const IMAGE_WRITE: u32 = 99;
+    const LOAD: u32 = 61;
+    const COMPOSITE_CONSTRUCT: u32 = 80;
+    const COMPOSITE_EXTRACT: u32 = 81;
+    let (sust, _) = surface_words();
+    let suld_p = word(
+        0xb97,
+        0,
+        &[
+            (16, 8, 0),
+            (24, 8, 8),
+            (40, 14, 0x13),
+            (54, 5, 2),
+            (59, 2, 0),
+            (61, 3, 3),
+            (72, 4, 0xf),
+            (81, 3, 7),
+            (84, 3, 1),
+        ],
+    );
+    let s = compute(&[sust, suld_p]);
+    common::validate(&s.spirv);
+    let w = &s.spirv;
+    assert!(
+        s.interface
+            .texture_bindings
+            .contains(&image_binding(ImageKind::Raw32, ImageDim::D2))
+    );
+    let k = w
+        .windows(4)
+        .any(|x| x[0] == (4 << 16 | 43) && x[3] == relift_gpu_nv::translate::SURFACE_KIND_RGB9E5);
+    assert!(k, "a constant of the RGB9E5 kind");
+    assert!(!insts(w, SPEC_CONSTANT_OP).is_empty());
+    let raw_store = insts(w, IMAGE_WRITE).iter().any(|i| {
+        def(w, i[3]).is_some_and(|t| {
+            t[0] & 0xffff == COMPOSITE_CONSTRUCT
+                && def(w, t[3]).is_some_and(|x| x[0] & 0xffff == LOAD)
+                && t[4..7].iter().all(|&z| is_const(w, z, 0))
+        })
+    });
+    assert!(raw_store, "a store of the first data register unchanged");
+    let raw_load = insts(w, COMPOSITE_CONSTRUCT).iter().any(|t| {
+        t.len() == 7
+            && def(w, t[3]).is_some_and(|x| {
+                x[0] & 0xffff == COMPOSITE_EXTRACT
+                    && x[4] == 0
+                    && def(w, x[3]).is_some_and(|r| r[0] & 0xffff == IMAGE_READ)
+            })
+            && is_const(w, t[4], 0)
+            && is_const(w, t[5], 0)
+            && is_const(w, t[6], 1)
+    });
+    assert!(raw_load, "a load of the texel unchanged, as R32UI");
 }
 
 #[test]

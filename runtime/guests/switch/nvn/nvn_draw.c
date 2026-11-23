@@ -1106,8 +1106,14 @@ static int bind_textures(replay *r, const module *m, uint32_t bank_no, uint8_t *
                 continue;
             if (*n == MAX_SPECS)
                 return nvn_vk_stop(r, "program %s has more than %u specialization constants", m->key, MAX_SPECS);
+            uint32_t v = c->kind != NVN_IFACE_TEXTURE_KIND ? dim : image ? nvn_texset_surface_kind(slot, kind) : kind;
+            if (v == UINT32_MAX)
+                return nvn_vk_stop(r,
+                                   "program %s reads or writes image id %u through its format, which the host device "
+                                   "cannot store (format %u) and relift does not move raw",
+                                   m->key, handle & 0xfffffu, nvn_texset_format(slot));
             map[*n] = (VkSpecializationMapEntry){ c->spec, 4 * *n, 4 };
-            vals[(*n)++] = c->kind == NVN_IFACE_TEXTURE_KIND ? kind : dim;
+            vals[(*n)++] = v;
         }
     }
     return RL_OK;
