@@ -22,7 +22,7 @@
 /** @brief How long a compile pass the queue started runs before its card shows: a few quick compiles show nothing. */
 #define SHOW_AFTER_NS (1000ull * 1000000ull)
 /** @brief How long every queued compile must have been done before a queue-started pass ends (ns). */
-#define IDLE_NS (1500ull * 1000000ull)
+#define IDLE_NS (5000ull * 1000000ull)
 
 static struct {
     pthread_mutex_t lock;

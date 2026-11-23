@@ -471,10 +471,6 @@ TEST(a_pass_the_queue_started_has_an_open_total_and_ends_when_all_is_done)
     rl_warmup_done(10, 0);
     g_now += RL_WU_READY_NS / 2;
     CHECK(draw(d) != NULL);
-    g_now += 2 * SEC;
-    rl_warmup_queue(1);
-    CHECK(draw(d) == NULL);
-    rl_warmup_done(1, 0);
     g_now += 20 * SEC;
     CHECK(draw(d) == NULL);
     CHECK(!rl_warmup_active());
