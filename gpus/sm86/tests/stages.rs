@@ -603,3 +603,33 @@ fn a_fragment_program_does_not_get_the_vertex_defaults() {
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(zero_zero_zero_one(&s.spirv), None);
 }
+
+#[test]
+fn vertex_attributes_read_integers_from_scaled_formats() {
+    let p = program(
+        1,
+        &[],
+        &[
+            ald(4, 0x80, RZ, 4, false, false),
+            ast(0x80, 4, RZ, 4, false),
+        ],
+    );
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("vertex_scaled_attribute", &s.spirv);
+    assert_eq!(
+        count(&s.spirv, 109),
+        4,
+        "one unsigned conversion per component"
+    );
+    assert_eq!(
+        count(&s.spirv, 110),
+        4,
+        "one signed conversion per component"
+    );
+    assert!(
+        insts(&s.spirv)
+            .iter()
+            .any(|(o, a)| *o == 72 && a.get(2) == Some(&35) && a.get(3) == Some(&8)),
+        "the unsigned mask at push offset 8"
+    );
+}

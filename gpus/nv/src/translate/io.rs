@@ -99,6 +99,17 @@ pub const PUSH_POINT_SIZE: u32 = 0;
 /// reference value.
 pub const PUSH_ALPHA_REF: u32 = 4;
 
+/// Byte offset in the fixed-state push constant block of the mask of
+/// vertex attributes (bit `location`) the runtime binds with an unsigned
+/// scaled format: the input holds the integer as a float, which the
+/// program turns back into the integer's bits.
+pub const PUSH_SCALED_UNSIGNED: u32 = 8;
+
+/// Byte offset in the fixed-state push constant block of the mask of
+/// vertex attributes bound with a signed scaled format, as
+/// [`PUSH_SCALED_UNSIGNED`].
+pub const PUSH_SCALED_SIGNED: u32 = 12;
+
 /// What the stage I/O needs to know about the whole program.
 #[derive(Default)]
 pub(crate) struct State {
@@ -550,15 +561,54 @@ impl Ctx {
             return v;
         }
         let f = self.f32t();
-        let st = self.m.t_struct_unique(&[f, f]);
+        let u = self.u32t();
+        let st = self.m.t_struct_unique(&[f, f, u, u]);
         self.m.deco(st, 2, &[]);
         self.m.member_deco(st, 0, 35, &[PUSH_POINT_SIZE]);
         self.m.member_deco(st, 1, 35, &[PUSH_ALPHA_REF]);
+        self.m.member_deco(st, 2, 35, &[PUSH_SCALED_UNSIGNED]);
+        self.m.member_deco(st, 3, 35, &[PUSH_SCALED_SIGNED]);
         let p = self.m.t_ptr(PUSH_CONSTANT, st);
         let var = self.m.global(p, PUSH_CONSTANT);
         self.globals.push(var);
         self.io.push_block = Some(var);
         var
+    }
+
+    fn push_u32(&mut self, member: u32) -> u32 {
+        let var = self.push_block();
+        let u = self.u32t();
+        let p = self.m.t_ptr(PUSH_CONSTANT, u);
+        let i = self.m.c_u32(member);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, i]);
+        self.m.emit(op::LOAD, u, &[ptr])
+    }
+
+    /// The register bits of component value `v` (a float) of vertex input
+    /// `loc`: the float's own bits, or, when the runtime bound the
+    /// attribute with a scaled format (an integer format the program's
+    /// float input cannot take), the integer it holds.
+    fn vertex_input_bits(&mut self, v: u32, loc: u32) -> u32 {
+        let u = self.u32t();
+        let i = self.m.t_i32();
+        let b = self.boolt();
+        let plain = self.as_bits(v);
+        if loc >= 32 {
+            return plain;
+        }
+        let bit = self.m.c_u32(1 << loc);
+        let zero = self.m.c_u32(0);
+        let um = self.push_u32(2);
+        let sm = self.push_u32(3);
+        let ub = self.m.emit(op::BITWISE_AND, u, &[um, bit]);
+        let sb = self.m.emit(op::BITWISE_AND, u, &[sm, bit]);
+        let is_u = self.m.emit(op::I_NOT_EQUAL, b, &[ub, zero]);
+        let is_s = self.m.emit(op::I_NOT_EQUAL, b, &[sb, zero]);
+        let as_u = self.m.emit(op::CONVERT_F_TO_U, u, &[v]);
+        let as_i = self.m.emit(op::CONVERT_F_TO_S, i, &[v]);
+        let as_s = self.m.emit(op::BITCAST, u, &[as_i]);
+        let r = self.m.emit(op::SELECT, u, &[is_s, as_s, plain]);
+        self.m.emit(op::SELECT, u, &[is_u, as_u, r])
     }
 
     fn push_float(&mut self, member: u32) -> u32 {
@@ -678,7 +728,14 @@ fn ald(c: &mut Ctx, i: &Inst) -> Res<()> {
         if let Slot::Float(_, Some(loc)) = s {
             c.iface.inputs.entry(loc).or_insert(None);
         }
-        let u = c.load_slot(&s);
+        let u = match s {
+            Slot::Float(p, Some(loc)) if c.stage == Stage::Vertex => {
+                let f = c.f32t();
+                let v = c.m.emit(op::LOAD, f, &[p]);
+                c.vertex_input_bits(v, loc)
+            }
+            _ => c.load_slot(&s),
+        };
         c.store_reg(tuple_reg(d, k)?, u);
     }
     Ok(())

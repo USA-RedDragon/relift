@@ -76,6 +76,8 @@
 /** @brief The fixed-state push constant block (the translator's: point size, then alpha reference). */
 typedef struct fixed_push {
     float point_size, alpha_ref;
+    /** @brief The vertex attributes (bit per location) bound with an unsigned or a signed scaled format. */
+    uint32_t scaled_unsigned, scaled_signed;
 } fixed_push;
 
 typedef nvn_module module;
@@ -373,6 +375,46 @@ static VkFormat vertex_format(uint32_t f)
         return converted[f - 0x51];
     VkImageAspectFlags a;
     return nvn_vk_format(f, &a);
+}
+
+/**
+ * @brief The scaled format of the same layout as integer format f (UINT to USCALED, SINT to SSCALED; 8- and 16-bit
+ * components only, whose every value a float holds exactly), with *sign when signed; VK_FORMAT_UNDEFINED for one without
+ * or one the host device does not read vertices of. A float input over a scaled format reads each component's integer
+ * value, which the vertex program turns back into the integer (the fixed-state push constants say which attributes).
+ */
+static VkFormat scaled_format(VkFormat f, bool *sign)
+{
+    VkFormat s;
+    switch (f) {
+    case VK_FORMAT_R8_UINT: s = VK_FORMAT_R8_USCALED; break;
+    case VK_FORMAT_R8_SINT: s = VK_FORMAT_R8_SSCALED; break;
+    case VK_FORMAT_R8G8_UINT: s = VK_FORMAT_R8G8_USCALED; break;
+    case VK_FORMAT_R8G8_SINT: s = VK_FORMAT_R8G8_SSCALED; break;
+    case VK_FORMAT_R8G8B8_UINT: s = VK_FORMAT_R8G8B8_USCALED; break;
+    case VK_FORMAT_R8G8B8_SINT: s = VK_FORMAT_R8G8B8_SSCALED; break;
+    case VK_FORMAT_R8G8B8A8_UINT: s = VK_FORMAT_R8G8B8A8_USCALED; break;
+    case VK_FORMAT_R8G8B8A8_SINT: s = VK_FORMAT_R8G8B8A8_SSCALED; break;
+    case VK_FORMAT_R16_UINT: s = VK_FORMAT_R16_USCALED; break;
+    case VK_FORMAT_R16_SINT: s = VK_FORMAT_R16_SSCALED; break;
+    case VK_FORMAT_R16G16_UINT: s = VK_FORMAT_R16G16_USCALED; break;
+    case VK_FORMAT_R16G16_SINT: s = VK_FORMAT_R16G16_SSCALED; break;
+    case VK_FORMAT_R16G16B16_UINT: s = VK_FORMAT_R16G16B16_USCALED; break;
+    case VK_FORMAT_R16G16B16_SINT: s = VK_FORMAT_R16G16B16_SSCALED; break;
+    case VK_FORMAT_R16G16B16A16_UINT: s = VK_FORMAT_R16G16B16A16_USCALED; break;
+    case VK_FORMAT_R16G16B16A16_SINT: s = VK_FORMAT_R16G16B16A16_SSCALED; break;
+    default: return VK_FORMAT_UNDEFINED;
+    }
+    *sign = f == VK_FORMAT_R8_SINT || f == VK_FORMAT_R8G8_SINT || f == VK_FORMAT_R8G8B8_SINT ||
+            f == VK_FORMAT_R8G8B8A8_SINT || f == VK_FORMAT_R16_SINT || f == VK_FORMAT_R16G16_SINT ||
+            f == VK_FORMAT_R16G16B16_SINT || f == VK_FORMAT_R16G16B16A16_SINT;
+    static int8_t known[VK_FORMAT_R16G16B16A16_SSCALED + 1];
+    if (!known[s]) {
+        VkFormatProperties fp;
+        VK(vkGetPhysicalDeviceFormatProperties)(g.phys, s, &fp);
+        known[s] = fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT ? 1 : -1;
+    }
+    return known[s] > 0 ? s : VK_FORMAT_UNDEFINED;
 }
 
 static bool integer_format(VkFormat f)
@@ -695,8 +737,9 @@ uint32_t nvn_vertex_stream_bytes(uint64_t addr, bool mapped)
 }
 
 /** @brief Fills the vertex input of k for the attributes vs reads. */
-static int vertex_state(replay *r, const module *vs, pipe_key *k)
+static int vertex_state(replay *r, const module *vs, pipe_key *k, fixed_push *fp)
 {
+    fp->scaled_unsigned = fp->scaled_signed = 0;
     nvn_gfx *st = r->st;
     uint32_t streams = 0;
     bool real15 = false, def = false;
@@ -733,6 +776,19 @@ static int vertex_state(replay *r, const module *vs, pipe_key *k)
         if ((uint32_t)stream >= NVN_VERTEX_BUFFERS || !nvn_vertex_stream_known(st->stream_state, (uint32_t)stream))
             return nvn_vk_stop(r, "vertex attribute %u reads stream %u, which no bind on this queue wrote (%u bound)", i,
                                (uint32_t)stream, st->nstreams);
+        bool sign = false;
+        VkFormat sf = integer_format(f) ? scaled_format(f, &sign) : VK_FORMAT_UNDEFINED;
+        if (sf != VK_FORMAT_UNDEFINED) {
+            if (sign)
+                fp->scaled_signed |= 1u << i;
+            else
+                fp->scaled_unsigned |= 1u << i;
+            if ((uint32_t)stream == DEFAULT_BINDING)
+                real15 = true;
+            k->attr[k->nattr++] = (VkVertexInputAttributeDescription){ i, (uint32_t)stream, sf, fo[1] };
+            streams |= 1u << stream;
+            continue;
+        }
         if (integer_format(f)) {
             uint32_t b = NVN_VERTEX_BUFFERS + k->nint;
             k->ints[k->nint].stream = (uint32_t)stream;
@@ -1388,9 +1444,10 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(mods[0], mods[1])))
         return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the vertex program writes",
                            mods[1]->key);
+    fixed_push fp = { st->point_size, st->alpha_ref, 0, 0 };
     rc = fixed_state(r, &k);
     if (rc == RL_OK)
-        rc = vertex_state(r, mods[0], &k);
+        rc = vertex_state(r, mods[0], &k, &fp);
     if (rc != RL_OK)
         return rc;
     VkPipeline p = nvn_pipe_graphics(&k);
@@ -1420,7 +1477,6 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, &k);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
-    fixed_push fp = { st->point_size, st->alpha_ref };
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     for (uint32_t i = 0; i < dd.nb; i++)
@@ -1508,7 +1564,7 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, k);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
-    fixed_push fp = { st->point_size, st->alpha_ref };
+    fixed_push fp = { st->point_size, st->alpha_ref, 0, 0 };
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     g.draw_mesh_tasks(g.cb, count, 1, 1);
@@ -1656,7 +1712,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
     nvn_pipe_set_dynamic(g.cb, &kg);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, 0, 4, sets, 0, NULL);
-    fixed_push fp = { st->point_size, st->alpha_ref };
+    fixed_push fp = { st->point_size, st->alpha_ref, 0, 0 };
     VK(vkCmdPushConstants)(g.cb, d.mlayout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     if (mi->indexed) {
