@@ -499,3 +499,53 @@ TEST(nvn_a_target_with_its_sync_pending_is_brought_up_to_date_when_its_pass_begi
     CHECK_EQ(calls.begins, 1u);
     teardown(&f);
 }
+
+static unsigned g_clears;
+
+static void fake_clear(VkCommandBuffer cb, uint32_t na, const VkClearAttachment *a, uint32_t nr, const VkClearRect *rr)
+{
+    (void)cb, (void)na, (void)a, (void)nr, (void)rr;
+    g_clears++;
+}
+
+/**
+ * @brief Clears obey the render enable as draws do: with rendering off (nvnCommandBufferSetRenderEnable false, or a
+ * conditional render whose condition fails), a depth or color clear leaves its target as it was, so a game's pass
+ * setup that clears a depth target it then tests EQUAL keeps the depth it copied there. With rendering on, both clear.
+ */
+TEST(nvn_clears_obey_the_render_enable)
+{
+    static fixture f;
+    setup(&f);
+    g.fns.f[VKG_vkCmdClearAttachments] = (void (*)(void))fake_clear;
+    g_clears = 0;
+    f.a.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    f.b.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    f.st.depth = (rt){ .v = &f.b, .view = (VkImageView)(uintptr_t)0x20 };
+    static float rgba[4] = { 0, 0, 0, 0 };
+    nvn_cmdset *s = calloc(1, sizeof *s + 2 * sizeof(nvn_cmd));
+    s->n = 2;
+    s->bytes = (uint8_t *)rgba;
+    s->nbytes = sizeof rgba;
+    nvn_cmd *depth = &s->cmds[0], *color = &s->cmds[1];
+    float one = 1.0f;
+    depth->op = NVN_CMD_CLEAR_DEPTH_STENCIL;
+    depth->x[1] = 1;
+    memcpy(&depth->d[0], &one, 4);
+    color->op = NVN_CMD_CLEAR_COLOR;
+    color->x[1] = 0;
+    color->x[3] = 0xf;
+    f.r.s = s;
+    color->x[2] = NVN_SNAP;
+    f.st.render_mode = NVN_RENDER_NEVER;
+    CHECK_EQ(nvn_vk_cmd(&f.r, depth), RL_OK);
+    CHECK_EQ(nvn_vk_cmd(&f.r, color), RL_OK);
+    CHECK_EQ(g_clears, 0);
+    f.st.render_mode = NVN_RENDER_ALWAYS;
+    CHECK_EQ(nvn_vk_cmd(&f.r, depth), RL_OK);
+    CHECK_EQ(g_clears, 1);
+    CHECK_EQ(nvn_vk_cmd(&f.r, color), RL_OK);
+    CHECK_EQ(g_clears, 2);
+    teardown(&f);
+    free(s);
+}

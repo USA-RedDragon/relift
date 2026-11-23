@@ -3131,8 +3131,22 @@ bool nvn_vk_clears_all(const replay *r, const rt *t)
     return c.offset.x == 0 && c.offset.y == 0 && c.extent.width == w && c.extent.height == h;
 }
 
+/**
+ * @brief Whether a clear runs: like draws, clears obey the render enable (nvnCommandBufferSetRenderEnable and its
+ * conditional form). A game guards a pass's setup clears with a query result, and the console skips them when the
+ * condition fails, keeping what the targets hold.
+ */
+static int clear_enabled(replay *r, bool *run)
+{
+    return nvn_draw_render_enabled(r, run);
+}
+
 static int clear_color(replay *r, const nvn_cmd *e)
 {
+    bool run = true;
+    int rc = clear_enabled(r, &run);
+    if (rc != RL_OK || !run)
+        return rc;
     uint32_t idx = (uint32_t)e->x[1], mask = (uint32_t)e->x[3];
     const uint8_t *val = nvn_cmd_bytes(r->s, e->x[2]);
     if (idx >= r->st->ncolor || !r->st->color[idx].v)
@@ -3163,6 +3177,10 @@ static int clear_color(replay *r, const nvn_cmd *e)
 
 static int clear_depth_stencil(replay *r, const nvn_cmd *e)
 {
+    bool run = true;
+    int rc = clear_enabled(r, &run);
+    if (rc != RL_OK || !run)
+        return rc;
     float depth;
     memcpy(&depth, &e->d[0], sizeof depth);
     bool depth_mask = (uint32_t)e->x[1] != 0;
@@ -3604,6 +3622,8 @@ static int clear_texture(replay *r, const nvn_cmd *e)
  * they change no result, only timing, and the host device schedules its own work, so they do nothing as well.
  */
 static int run_cmd(replay *r, const nvn_cmd *e);
+
+int nvn_vk_cmd(replay *r, const nvn_cmd *e) { return run_cmd(r, e); }
 
 static bool sync_each_command(void)
 {

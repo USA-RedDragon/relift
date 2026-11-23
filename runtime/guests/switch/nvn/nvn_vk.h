@@ -483,6 +483,8 @@ void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t 
                        const uint8_t view[17]);
 /** @brief The GPU trace report's line limit and PC window from the environment (nvn_draw.c). */
 void trace_window(uint32_t *lines, uint32_t *from, uint32_t *to);
+/** @brief Replays one command of a set onto r, as the scheduler does (tests replay single commands with it). */
+int nvn_vk_cmd(replay *r, const nvn_cmd *e);
 /** @brief After the command is recorded: submits it and writes its line and its files. */
 void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
 /**
