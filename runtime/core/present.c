@@ -13,6 +13,7 @@
 #include "present.h"
 
 #include <relift/post.h>
+#include <relift/settings.h>
 
 #include "core.h"
 #include "post_data.h"
@@ -20,6 +21,7 @@
 #include "vkdev.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -97,6 +99,9 @@ struct rl_present {
     rlvk_buf stage, readback;
     image src, pre;
     uint64_t last_present_ns, last_log_ns;
+    /** @brief When the newest frame was handed over, and when the one being drawn was (rl_clock_ns). */
+    uint64_t next_ready_ns, work_ready_ns;
+    uint64_t present_ids;
 
     /** @brief The window's overlay (rl_present_set_overlay) and what its last pixels call gave. */
     rl_present_overlay ov;
@@ -291,18 +296,48 @@ static bool make_surface(rl_present *p)
     return true;
 }
 
+const char *rl_present_mode_name(int32_t mode)
+{
+    switch (mode) {
+    case RLVK_PRESENT_MODE_IMMEDIATE_KHR:
+        return "immediate";
+    case RLVK_PRESENT_MODE_MAILBOX_KHR:
+        return "mailbox";
+    case RLVK_PRESENT_MODE_FIFO_RELAXED_KHR:
+        return "fifo relaxed";
+    case RLVK_PRESENT_MODE_FIFO_LATEST_READY_KHR:
+        return "fifo latest ready";
+    default:
+        return "fifo";
+    }
+}
+
+static bool offered(const int32_t *avail, uint32_t n, int32_t mode)
+{
+    for (uint32_t i = 0; i < n; i++)
+        if (avail[i] == mode)
+            return true;
+    return false;
+}
+
+int32_t rl_present_mode_choose(uint32_t choice, int32_t base, const int32_t *avail, uint32_t n)
+{
+    static const int32_t named[] = {
+        RLVK_PRESENT_MODE_FIFO_KHR,       RLVK_PRESENT_MODE_FIFO_KHR,      RLVK_PRESENT_MODE_FIFO_RELAXED_KHR,
+        RLVK_PRESENT_MODE_FIFO_LATEST_READY_KHR, RLVK_PRESENT_MODE_MAILBOX_KHR, RLVK_PRESENT_MODE_IMMEDIATE_KHR,
+    };
+    if (choice != RL_PRESENT_MODE_AUTO && choice < sizeof named / sizeof *named && offered(avail, n, named[choice]))
+        return named[choice];
+    return offered(avail, n, base) ? base : RLVK_PRESENT_MODE_FIFO_KHR;
+}
+
 static int32_t pick_mode(rl_present *p)
 {
     int32_t modes[16];
     uint32_t n = 16;
     if (p->d->vkGetPhysicalDeviceSurfacePresentModesKHR(p->d->phys, p->surface, &n, modes) < RLVK_SUCCESS)
         n = 0;
-    const char *env = getenv("RELIFT_PRESENT_MODE");
-    int32_t want = env && !strcmp(env, "fifo") ? RLVK_PRESENT_MODE_FIFO_KHR : RLVK_PRESENT_MODE_MAILBOX_KHR;
-    for (uint32_t i = 0; i < n; i++)
-        if (modes[i] == want)
-            return want;
-    return RLVK_PRESENT_MODE_FIFO_KHR;
+    return rl_present_mode_choose(rl_setting_enum("video.present_mode"), RLVK_PRESENT_MODE_MAILBOX_KHR, modes, n);
 }
 
 static bool pick_format(rl_present *p, int32_t *format, int32_t *space)
@@ -420,7 +455,7 @@ static bool make_swapchain(rl_present *p)
     pthread_mutex_unlock(&p->lock);
     rl_log(RL_LOG_INFO, "present", "%s window: swapchain %ux%u, %u images, format %d, %s, transform %#x of %#x",
            p->win->b ? p->win->b->name : "a", w, h, n, (int)format,
-           mode == RLVK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : "fifo", transform, caps.currentTransform);
+           rl_present_mode_name(mode), transform, caps.currentTransform);
     return true;
 }
 
@@ -953,6 +988,83 @@ static void release_slots(rl_present *p)
     pthread_mutex_unlock(&p->lock);
 }
 
+/** @brief A present the trace thread waits to be shown. */
+typedef struct trace_job {
+    rlvk_handle swapchain;
+    uint64_t id, ready_ns, queued_ns;
+} trace_job;
+
+#define TRACE_QUEUE 32u
+#define TRACE_WAIT_NS 200000000ull
+
+static pthread_mutex_t g_trace_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_trace_cond = PTHREAD_COND_INITIALIZER;
+static trace_job g_trace_q[TRACE_QUEUE];
+static uint32_t g_trace_head, g_trace_count;
+static bool g_trace_started;
+static FILE *g_trace_file;
+static const rlvk_dev *g_trace_dev;
+
+/** @brief Waits for each traced present to be shown and writes "ready queued shown" in nanoseconds, one line each. */
+static void *trace_main(void *arg)
+{
+    (void)arg;
+    uint32_t lines = 0;
+    pthread_mutex_lock(&g_trace_lock);
+    for (;;) {
+        while (!g_trace_count)
+            pthread_cond_wait(&g_trace_cond, &g_trace_lock);
+        trace_job j = g_trace_q[g_trace_head];
+        g_trace_head = (g_trace_head + 1) % TRACE_QUEUE;
+        g_trace_count--;
+        pthread_mutex_unlock(&g_trace_lock);
+        rlvk_result r = g_trace_dev->vkWaitForPresentKHR(g_trace_dev->device, j.swapchain, j.id, TRACE_WAIT_NS);
+        uint64_t shown = rl_clock_ns();
+        if (r == RLVK_SUCCESS) {
+            fprintf(g_trace_file, "%llu %llu %llu\n", (unsigned long long)j.ready_ns, (unsigned long long)j.queued_ns,
+                    (unsigned long long)shown);
+            if (++lines % 64 == 0)
+                fflush(g_trace_file);
+        }
+        pthread_mutex_lock(&g_trace_lock);
+    }
+    return NULL;
+}
+
+/** @brief Whether presents are traced (the video.present_trace setting names a file and the device can wait). */
+static bool trace_on(const rlvk_dev *d)
+{
+    if (g_trace_started)
+        return g_trace_file != NULL;
+    g_trace_started = true;
+    const char *path = rl_setting_str("video.present_trace");
+    if (!path || !path[0] || !d->present_wait)
+        return false;
+    g_trace_file = fopen(path, "w");
+    if (!g_trace_file)
+        return false;
+    g_trace_dev = d;
+    pthread_t t;
+    if (pthread_create(&t, NULL, trace_main, NULL) != 0) {
+        fclose(g_trace_file);
+        g_trace_file = NULL;
+        return false;
+    }
+    pthread_detach(t);
+    return true;
+}
+
+static void trace_queue(rlvk_handle swapchain, uint64_t id, uint64_t ready_ns, uint64_t queued_ns)
+{
+    pthread_mutex_lock(&g_trace_lock);
+    if (g_trace_count < TRACE_QUEUE) {
+        g_trace_q[(g_trace_head + g_trace_count) % TRACE_QUEUE] = (trace_job){ swapchain, id, ready_ns, queued_ns };
+        g_trace_count++;
+        pthread_cond_signal(&g_trace_cond);
+    }
+    pthread_mutex_unlock(&g_trace_lock);
+}
+
 static bool draw(rl_present *p, bool capture)
 {
     const rlvk_dev *d = p->d;
@@ -1010,14 +1122,24 @@ static bool draw(rl_present *p, bool capture)
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &p->done[index],
     };
+    struct {
+        int32_t sType;
+        const void *pNext;
+        uint32_t swapchainCount;
+        const uint64_t *pPresentIds;
+    } pid = { 1000294000, NULL, 1, &(uint64_t){ 0 } };
+    uint64_t id = trace_on(d) ? ++p->present_ids : 0;
+    pid.pPresentIds = &id;
     rlvk_present_info pi = {
         .sType = RLVK_ST_PRESENT_INFO_KHR,
+        .pNext = id ? &pid : NULL,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &p->done[index],
         .swapchainCount = 1,
         .pSwapchains = &p->swapchain,
         .pImageIndices = &index,
     };
+    uint64_t queued_ns = rl_clock_ns();
     rl_vkdev_queue_lock();
     r = d->vkQueueSubmit(d->queue, 1, &sub, p->fence);
     rlvk_result pr = r == RLVK_SUCCESS ? d->vkQueuePresentKHR(d->queue, &pi) : r;
@@ -1034,6 +1156,8 @@ static bool draw(rl_present *p, bool capture)
         drop_surface(p);
     else if (pr != RLVK_SUCCESS)
         fail("vkQueuePresentKHR", pr);
+    if (id && pr == RLVK_SUCCESS)
+        trace_queue(p->swapchain, id, p->work_ready_ns, queued_ns);
     count_present(p, rl_clock_ns() - t0);
     if (capture) {
         d->vkWaitForFences(d->device, 1, &p->fence, 1, ~(uint64_t)0);
@@ -1154,6 +1278,7 @@ static void *thread_main(void *arg)
                 p->work_sh = p->next_sh;
                 p->work_fit = p->next_fit;
                 p->fresh = false;
+                p->work_ready_ns = p->next_ready_ns;
                 p->have_frame = true;
             }
             bool capture = p->capture_want;
@@ -1290,6 +1415,7 @@ void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_
     p->next_sh = shown_h ? shown_h : height;
     p->next_fit = fit;
     p->fresh = true;
+    p->next_ready_ns = rl_clock_ns();
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
 }
@@ -1357,6 +1483,7 @@ void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown
     p->next_sh = shown_h ? shown_h : sl->im.h;
     p->next_fit = p->fit;
     p->fresh = true;
+    p->next_ready_ns = rl_clock_ns();
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
     rl_capture_present_end();

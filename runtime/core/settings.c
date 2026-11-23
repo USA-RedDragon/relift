@@ -41,6 +41,7 @@ typedef struct slot {
 } slot;
 
 static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
+static const char *const g_present_choices[] = { "auto", "fifo", "relaxed", "latest_ready", "mailbox", "immediate" };
 static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
@@ -67,6 +68,39 @@ static const rl_setting_def g_runtime_defs[] = {
         .description = "The language of the game's window title: a language name such as AmericanEnglish or French, "
                        "or a locale such as ja or fr_CA. Empty follows the host's language",
         .env = "RELIFT_LANGUAGE",
+    },
+    {
+        .key = "video.present_mode",
+        .type = RL_SETTING_ENUM,
+        .label = "Present mode",
+        .description = "How the host shows a finished frame. auto: fifo for the game's own window, mailbox where the "
+                       "surface has it for windows on other displays. fifo: at the display's next refresh. relaxed: "
+                       "at once when the frame is late (a variable refresh display shows it as it arrives; a fixed "
+                       "one may tear). latest_ready: fifo that drops queued frames a newer one has passed. mailbox: "
+                       "the newest frame at each refresh. immediate: at once, may tear. A mode the surface lacks "
+                       "falls back to auto",
+        .env = "RELIFT_PRESENT_MODE",
+        .choices = g_present_choices,
+        .nchoices = 6,
+    },
+    {
+        .key = "video.present_trace",
+        .type = RL_SETTING_STRING,
+        .label = "Present trace",
+        .description = "A file to write a line to for each frame the core presenter shows: when the guest handed the "
+                       "frame over, when it was queued to the display and when the display showed it (nanoseconds of "
+                       "the host clock), where the device can wait for presents. Empty: off",
+        .env = "RELIFT_PRESENT_TRACE",
+    },
+    {
+        .key = "video.fullscreen",
+        .type = RL_SETTING_BOOL,
+        .label = "Fullscreen",
+        .description = "Open the game's window fullscreen. A compositor applies variable refresh (adaptive sync) only "
+                       "to fullscreen windows, so frames that miss the display's refresh show as soon as they are "
+                       "ready there. Off: a normal window",
+        .env = "RELIFT_FULLSCREEN",
+        .def_int = 0,
     },
     {
         .key = "video.gpu_driver",

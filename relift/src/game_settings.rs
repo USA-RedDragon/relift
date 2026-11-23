@@ -97,6 +97,38 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "video.present_mode",
+            "Present mode",
+            "How the host shows a finished frame. auto: fifo for the game's own window, mailbox where the surface has it for windows on other displays. fifo: at the display's next refresh. relaxed: at once when the frame is late (a variable refresh display shows it as it arrives; a fixed one may tear). latest_ready: fifo that drops queued frames a newer one has passed. mailbox: the newest frame at each refresh. immediate: at once, may tear. A mode the surface lacks falls back to auto",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: [
+                    "auto",
+                    "fifo",
+                    "relaxed",
+                    "latest_ready",
+                    "mailbox",
+                    "immediate",
+                ]
+                .map(String::from)
+                .into(),
+            },
+        ),
+        s(
+            "video.present_trace",
+            "Present trace",
+            "A file to write a line to for each frame the core presenter shows: when the guest handed the frame over, when it was queued to the display and when the display showed it (nanoseconds of the host clock), where the device can wait for presents. Empty: off",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
+            "video.fullscreen",
+            "Fullscreen",
+            "Open the game's window fullscreen. A compositor applies variable refresh (adaptive sync) only to fullscreen windows, so frames that miss the display's refresh show as soon as they are ready there. Off: a normal window",
+            Value::Bool(false),
+            SettingKind::Bool,
+        ),
+        s(
             "video.gpu_driver",
             "GPU driver",
             "Android: system uses the device's Vulkan driver; the name of an installed driver package (a meta.json and its library under the app's gpu_drivers folder) loads that driver instead",
@@ -1095,7 +1127,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 30);
+        assert_eq!(section(Vec::new()).runtime.len(), 33);
     }
 
     #[test]

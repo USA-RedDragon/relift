@@ -63,6 +63,39 @@ TEST(present_turn_maps_the_picture_into_a_turned_swapchain)
     CHECK(out.x == 190 && out.y == 130 && out.w == 100 && out.h == 50);
 }
 
+TEST(present_mode_choice_follows_the_setting_and_falls_back)
+{
+    const int32_t wayland[] = { RLVK_PRESENT_MODE_MAILBOX_KHR, RLVK_PRESENT_MODE_FIFO_LATEST_READY_KHR,
+                                RLVK_PRESENT_MODE_FIFO_KHR, RLVK_PRESENT_MODE_IMMEDIATE_KHR };
+    const int32_t relaxed[] = { RLVK_PRESENT_MODE_FIFO_KHR, RLVK_PRESENT_MODE_FIFO_RELAXED_KHR };
+    const int32_t fifo_only[] = { RLVK_PRESENT_MODE_FIFO_KHR };
+    /* auto takes the caller's base where offered, else FIFO */
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_AUTO, RLVK_PRESENT_MODE_FIFO_KHR, wayland, 4),
+             RLVK_PRESENT_MODE_FIFO_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_AUTO, RLVK_PRESENT_MODE_MAILBOX_KHR, wayland, 4),
+             RLVK_PRESENT_MODE_MAILBOX_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_AUTO, RLVK_PRESENT_MODE_MAILBOX_KHR, relaxed, 2),
+             RLVK_PRESENT_MODE_FIFO_KHR);
+    /* a named mode is used where offered */
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_RELAXED, RLVK_PRESENT_MODE_FIFO_KHR, relaxed, 2),
+             RLVK_PRESENT_MODE_FIFO_RELAXED_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_LATEST_READY, RLVK_PRESENT_MODE_FIFO_KHR, wayland, 4),
+             RLVK_PRESENT_MODE_FIFO_LATEST_READY_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_IMMEDIATE, RLVK_PRESENT_MODE_FIFO_KHR, wayland, 4),
+             RLVK_PRESENT_MODE_IMMEDIATE_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_FIFO, RLVK_PRESENT_MODE_MAILBOX_KHR, wayland, 4),
+             RLVK_PRESENT_MODE_FIFO_KHR);
+    /* a named mode the surface lacks falls back to auto, then FIFO */
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_RELAXED, RLVK_PRESENT_MODE_FIFO_KHR, wayland, 4),
+             RLVK_PRESENT_MODE_FIFO_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_MAILBOX, RLVK_PRESENT_MODE_MAILBOX_KHR, fifo_only, 1),
+             RLVK_PRESENT_MODE_FIFO_KHR);
+    CHECK_EQ(rl_present_mode_choose(RL_PRESENT_MODE_RELAXED, RLVK_PRESENT_MODE_FIFO_KHR, NULL, 0),
+             RLVK_PRESENT_MODE_FIFO_KHR);
+    /* a choice past the list is auto */
+    CHECK_EQ(rl_present_mode_choose(99, RLVK_PRESENT_MODE_FIFO_KHR, wayland, 4), RLVK_PRESENT_MODE_FIFO_KHR);
+}
+
 TEST(present_filter_setting_picks_the_scaling)
 {
     rl_settings_reset();

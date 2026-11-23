@@ -150,6 +150,9 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
             s.key.as_str(),
             "video"
                 | "language"
+                | "video.present_mode"
+                | "video.present_trace"
+                | "video.fullscreen"
                 | "video.gpu_driver"
                 | "picture.aa"
                 | "picture.aa_quality"

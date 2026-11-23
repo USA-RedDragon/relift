@@ -33,6 +33,9 @@ typedef struct rlvk_dev {
     rlvk_memory_properties mem;
     /** @brief The instance has VK_KHR_surface and the backend's surface extensions, the device VK_KHR_swapchain. */
     bool surfaces;
+    /** @brief VK_KHR_present_id and VK_KHR_present_wait are on, and vkWaitForPresentKHR is loaded: a present chained with a present id can be waited for until the display shows it. */
+    bool present_wait;
+    rlvk_result(RLVK_CALL *vkWaitForPresentKHR)(rlvk_handle device, rlvk_handle swapchain, uint64_t id, uint64_t timeout);
 } rlvk_dev;
 
 /** @brief A buffer and its memory; map is set for a host-visible one. */

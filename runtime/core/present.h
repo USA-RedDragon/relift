@@ -9,8 +9,7 @@
  * rl_post_sampling: nearest, bilinear, or sharp bilinear, which is nearest to a whole multiple, then bilinear) and
  * presents. The thread
  * alone waits on the swapchain, so a slow or blocked display never holds the caller; frames it cannot show in time
- * are replaced by newer ones. The present mode is MAILBOX where the surface has it, else FIFO;
- * RELIFT_PRESENT_MODE=fifo or mailbox picks one (a measuring aid).
+ * are replaced by newer ones. The present mode follows the video.present_mode setting (rl_present_mode_choose).
  */
 #ifndef RELIFT_CORE_PRESENT_H
 #define RELIFT_CORE_PRESENT_H
@@ -21,6 +20,26 @@
 #include <stdint.h>
 
 typedef struct rl_present rl_present;
+
+/** @brief Choices of the runtime's `video.present_mode` setting, as rl_setting_enum returns them. */
+enum {
+    RL_PRESENT_MODE_AUTO,
+    RL_PRESENT_MODE_FIFO,
+    RL_PRESENT_MODE_RELAXED,
+    RL_PRESENT_MODE_LATEST_READY,
+    RL_PRESENT_MODE_MAILBOX,
+    RL_PRESENT_MODE_IMMEDIATE
+};
+
+/**
+ * @brief The VkPresentModeKHR for a swapchain: the one the video.present_mode choice names when the surface offers
+ * it, else what auto picks. Auto takes base (a mode the caller wants when nothing else is asked, FIFO or MAILBOX)
+ * when offered, else FIFO, which every surface has. avail holds the n modes the surface offers.
+ */
+int32_t rl_present_mode_choose(uint32_t choice, int32_t base, const int32_t *avail, uint32_t n);
+
+/** @brief A VkPresentModeKHR's name for logs. */
+const char *rl_present_mode_name(int32_t mode);
 
 /** @brief Where a picture sits in a window, in the window's pixels. */
 typedef struct rl_present_rect {

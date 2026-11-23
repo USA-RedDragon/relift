@@ -32,6 +32,9 @@
 #include "vkf.h"
 #include "vi.h"
 #include "vk_overlay.h"
+#include "present.h"
+
+#include <relift/settings.h>
 
 #include <relift/touchpad.h>
 
@@ -409,10 +412,10 @@ static VkPresentModeKHR pick_mode(vkf_swap *s)
     if (n > 16)
         n = 16;
     IFN(s, vkGetPhysicalDeviceSurfacePresentModesKHR)(s->phys, s->hsurf, &n, m);
+    int32_t modes[16];
     for (uint32_t i = 0; i < n; i++)
-        if (m[i] == s->mode)
-            return s->mode;
-    return VK_PRESENT_MODE_FIFO_KHR;
+        modes[i] = (int32_t)m[i];
+    return (VkPresentModeKHR)rl_present_mode_choose(rl_setting_enum("video.present_mode"), (int32_t)s->mode, modes, n);
 }
 
 static bool have_host(const vkf_swap *s) { return s->offscreen ? s->host_n != 0 : s->host != NULL; }

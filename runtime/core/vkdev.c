@@ -207,6 +207,46 @@ static bool pick_device(rlvk_dev *d)
     return true;
 }
 
+/** @brief A VkPhysicalDevicePresentIdFeaturesKHR or VkPhysicalDevicePresentWaitFeaturesKHR. */
+typedef struct present_feature {
+    int32_t sType;
+    struct present_feature *next;
+    uint32_t enabled;
+} present_feature;
+
+/** @brief A VkPhysicalDeviceFeatures2 with the 55 core feature flags left out of the way. */
+typedef struct features2 {
+    int32_t sType;
+    void *next;
+    uint32_t core[55];
+} features2;
+
+static present_feature g_present_wait_feat = { 1000248000, NULL, 1 };
+static present_feature g_present_id_feat = { 1000294001, &g_present_wait_feat, 1 };
+
+/** @brief Whether the device has both present extensions with their features, and adds them to b when so. */
+static bool add_present_wait(rlvk_dev *d, rl_vkdev_build *b)
+{
+    if (!d->surfaces || !has_device_ext(d, d->phys, "VK_KHR_present_id") ||
+        !has_device_ext(d, d->phys, "VK_KHR_present_wait"))
+        return false;
+    typedef void(RLVK_CALL * features2_fn)(rlvk_handle, features2 *);
+    features2_fn get = (features2_fn)d->gipa(d->instance, "vkGetPhysicalDeviceFeatures2");
+    if (!get)
+        get = (features2_fn)d->gipa(d->instance, "vkGetPhysicalDeviceFeatures2KHR");
+    if (!get)
+        return false;
+    present_feature wait = { 1000248000, NULL, 0 }, id = { 1000294001, &wait, 0 };
+    features2 f = { .sType = 1000059000, .next = &id };
+    get(d->phys, &f);
+    if (!id.enabled || !wait.enabled)
+        return false;
+    if (!rl_vkdev_add_ext(b, "VK_KHR_present_id") || !rl_vkdev_add_ext(b, "VK_KHR_present_wait"))
+        return false;
+    rl_vkdev_chain(b, &g_present_id_feat);
+    return true;
+}
+
 static bool make_device(rlvk_dev *d)
 {
     float prio[2] = { 1.0f, 1.0f };
@@ -231,6 +271,7 @@ static bool make_device(rlvk_dev *d)
     for (uint32_t i = 0; i < g_nreq; i++)
         if (g_req[i].hook && !g_req[i].hook(g_req[i].user, &b))
             return fail(g_req[i].who, 0);
+    bool present_wait = add_present_wait(d, &b);
     rlvk_device_create_info ci = {
         .sType = RLVK_ST_DEVICE_CREATE_INFO,
         .pNext = b.pnext,
@@ -255,6 +296,11 @@ static bool make_device(rlvk_dev *d)
         RLVK_SWAPCHAIN_FNS(RLVK_LOAD_W)
     }
 #undef RLVK_LOAD_W
+    if (present_wait) {
+        d->vkWaitForPresentKHR = (rlvk_result(RLVK_CALL *)(rlvk_handle, rlvk_handle, uint64_t, uint64_t))
+            d->vkGetDeviceProcAddr(d->device, "vkWaitForPresentKHR");
+        d->present_wait = d->vkWaitForPresentKHR != NULL;
+    }
     d->vkGetDeviceQueue(d->device, d->family, 0, &d->guest_queue);
     d->queue = d->guest_queue;
     if (queues > 1)

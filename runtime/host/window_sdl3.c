@@ -988,6 +988,9 @@ static void do_open(void *p)
     SDL_WindowFlags flags = (g_exts ? SDL_WINDOW_VULKAN : 0) | SDL_WINDOW_RESIZABLE;
 #ifdef RL_MOBILE
     flags |= SDL_WINDOW_FULLSCREEN;
+#else
+    if (rl_setting_bool("video.fullscreen"))
+        flags |= SDL_WINDOW_FULLSCREEN;
 #endif
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
