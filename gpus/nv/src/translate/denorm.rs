@@ -308,6 +308,9 @@ impl Ctx {
             return self.arith_flush_fixed(k, xs, fix);
         }
         if k == Arith::Fma && !self.host.fused_fma {
+            if mode == Round::Nearest {
+                return self.float_fma(xs[0], xs[1], xs[2], ftz);
+            }
             return self.soft_fma(xs[0], xs[1], Some(xs[2]), mode, ftz, 0);
         }
         let dm = self.dn_dmode();

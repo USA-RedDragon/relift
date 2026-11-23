@@ -1496,3 +1496,90 @@ fn mufu_tanh_is_reported_inexact() {
         assert_eq!(n, 1, "{}", h.name);
     }
 }
+
+/// Operands at the edges of the float FFMA path's ranges (exponent fields
+/// 86 to 88 and 189 to 190 for the factors, 23 to 25 and 252 to 253 for
+/// the addend), of the normal and denormal ranges and of the significand,
+/// in both signs, with infinities and NaNs.
+fn ffma_edge_pool() -> Vec<u32> {
+    let fields = [
+        0u32, 1, 2, 23, 24, 25, 86, 87, 88, 100, 126, 127, 128, 150, 189, 190, 252, 253, 254, 255,
+    ];
+    let sigs = [
+        0u32, 1, 0x40_0000, 0x7f_ffff, 0x7f_f000, 0x00_0fff, 0x55_5555,
+    ];
+    let mut v = Vec::new();
+    for f in fields {
+        for m in sigs {
+            v.push(f << 23 | m);
+            v.push(0x8000_0000 | f << 23 | m);
+        }
+    }
+    v
+}
+
+/// Round-to-nearest FFMA with and without `.FTZ` on hosts without a fused
+/// multiply-add, which take the float path, against the CPU's fused
+/// multiply-add: rows from the edge pool, rows whose addend nearly cancels
+/// the product and rows whose addend sits at a halfway point of it.
+#[test]
+fn ffma_float_path_matches_a_fused_multiply_add() {
+    let pool = ffma_edge_pool();
+    let mut st = 0x9e37_79b9_7f4a_7c15u64;
+    let mut rnd = move || {
+        st ^= st << 13;
+        st ^= st >> 7;
+        st ^= st << 17;
+        st
+    };
+    let mut rows = Vec::new();
+    for k in 0..900 {
+        let r = rnd();
+        let pick = |s: u64| pool[(s % pool.len() as u64) as usize];
+        let (a, b) = (pick(r), pick(r >> 20));
+        let c = match k % 3 {
+            0 => pick(r >> 40),
+            1 => {
+                let p = f32::from_bits(a) * f32::from_bits(b);
+                (-p).to_bits()
+                    .wrapping_add((r >> 60) as u32)
+                    .wrapping_sub(8)
+            }
+            _ => {
+                let p = (f32::from_bits(a) * f32::from_bits(b)).to_bits();
+                let e = (p >> 23 & 0xff).saturating_sub(24 + (r >> 58) as u32 % 6);
+                (p & 0x8000_0000) ^ (0x8000_0000 * (r >> 63) as u32) | e << 23
+            }
+        };
+        rows.push((a, b, c));
+    }
+    let fused = |a: u32, b: u32, c: u32| {
+        let r = f32::from_bits(a).mul_add(f32::from_bits(b), f32::from_bits(c));
+        if r.is_nan() { 0x7fff_ffff } else { r.to_bits() }
+    };
+    let flush = |x: u32| {
+        if x & 0x7f80_0000 == 0 {
+            x & 0x8000_0000
+        } else {
+            x
+        }
+    };
+    let plain: Vec<_> = rows
+        .iter()
+        .map(|&(a, b, c)| (a, b, c, fused(a, b, c)))
+        .collect();
+    let ftz: Vec<_> = rows
+        .iter()
+        .filter_map(|&(a, b, c)| {
+            let w = fused(flush(a), flush(b), flush(c));
+            let tiny = w & 0x7fff_ffff != 0 && w & 0x7fff_ffff < 0x0100_0000;
+            (!tiny).then_some((a, b, c, w))
+        })
+        .collect();
+    for h in HostProfile::presets().into_iter().filter(|h| !h.fused_fma) {
+        let o = host(h.clone());
+        let devs = devices(&h);
+        check("FFMA float path", &o, &devs, ffma(RN), &plain);
+        check("FFMA.FTZ float path", &o, &devs, ffma(RN.ftz()), &ftz);
+    }
+}
