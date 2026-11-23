@@ -81,6 +81,7 @@ encoding_rs = "=0.8.44"
 lzma-rs = { version = "=0.3.0", default-features = false }
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["safe-decode", "safe-encode", "std"] }
 jpeg-decoder = { version = "=0.3.2", default-features = false }
+image-webp = "=0.2.4"
 read-fonts = "=0.47.0"
 roxmltree = "=0.21.2"
 serde = { version = "=1.0.229", features = ["derive"] }

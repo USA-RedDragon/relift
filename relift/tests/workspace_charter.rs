@@ -689,6 +689,7 @@ const CHARTERS: &[Charter] = &[
         normal: &[
             "clap",
             "configulator-rs",
+            "image-webp",
             "jpeg-decoder",
             "relift-analyze",
             "relift-build",

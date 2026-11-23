@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn the_icon_becomes_one_image_per_size_and_a_group() {
-        let icon = crate::icon::from_jpeg(include_bytes!("../tests/icon.jpg")).unwrap();
+        let icon = crate::icon::from_image(include_bytes!("../tests/icon.jpg")).unwrap();
         let e = entries(&res("G", Some(&icon)));
         let kinds: Vec<u16> = e.iter().map(|x| x.0).collect();
         assert_eq!(

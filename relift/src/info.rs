@@ -268,12 +268,39 @@ fn no_nacp_identity(title_id: u64, project: &str, icon: Option<&[u8]>) -> Identi
         ..Identity::default()
     };
     id.names.insert("default".into(), project.to_string());
-    id.icon = icon.and_then(crate::icon::from_jpeg);
+    id.icon = icon.and_then(crate::icon::from_image);
     id
 }
 
-/// The import directory supplies `control.nacp` and `icon.jpg` when it has
-/// them; without a NACP the title is the project name.
+/// What the game will show in place of its own name or icon, when the
+/// import kept no control data for them: an import made by an older relift
+/// (before it kept a package's name) shows the project folder's name, and
+/// one without an icon a generated icon. `None` when both are the title's.
+#[must_use]
+pub fn identity_gaps(import: &Path, id: &Identity, project: &str) -> Option<String> {
+    let named = import.join("control.nacp").is_file()
+        || import
+            .join(relift_switch_formats::import::CONTROL_TITLE)
+            .is_file();
+    let mut gaps = Vec::new();
+    if !named {
+        gaps.push(format!("its name (shown as \"{project}\")"));
+    }
+    if id.icon.is_none() {
+        gaps.push("its icon (a generated one is shown)".to_string());
+    }
+    (!gaps.is_empty()).then(|| {
+        format!(
+            "warning: the import in {} has no control data for {}: run relift import again from the dump to show the game's own",
+            import.display(),
+            gaps.join(" or ")
+        )
+    })
+}
+
+/// The import directory supplies `control.nacp` and `icon.jpg` (JPEG or,
+/// from a Switch 2 package, WebP) when it has them; without a NACP the title
+/// is the package's name (`title.txt`), else the project name.
 ///
 /// # Errors
 ///
@@ -643,6 +670,49 @@ mod tests {
         let icon = id.icon.expect("the icon");
         assert_eq!((icon.width, icon.height), (16, 8));
         assert!(no_nacp_identity(1, "p", None).icon.is_none());
+    }
+
+    #[test]
+    fn a_package_import_gives_the_titles_name_and_its_webp_icon_not_the_folders() {
+        let d = std::env::temp_dir().join(format!("relift-info-webp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut webp = Vec::new();
+        image_webp::WebPEncoder::new(&mut webp)
+            .encode(&[200u8; 12 * 6 * 3], 12, 6, image_webp::ColorType::Rgb8)
+            .unwrap();
+        std::fs::write(d.join("icon.jpg"), &webp).unwrap();
+        std::fs::write(
+            d.join(relift_switch_formats::import::CONTROL_TITLE),
+            "A Title\n",
+        )
+        .unwrap();
+        let game: toml::Table =
+            toml::from_str("[game]\ntitle_id = \"0400000000001000\"\n").unwrap();
+        let info = switch_document(
+            &d,
+            &game,
+            &[],
+            "fe",
+            Vec::new(),
+            &PortSet::default(),
+            Mods::default(),
+        )
+        .unwrap();
+        assert_eq!(info.identity.title(&[]), Some("A Title"));
+        let icon = info
+            .identity
+            .icon
+            .as_ref()
+            .expect("the title's icon, not a generated one");
+        assert_eq!((icon.width, icon.height), (12, 6));
+        assert!(identity_gaps(&d, &info.identity, "fe").is_none());
+        let launcher = crate::icon::launcher_pngs(Some(icon), "fe");
+        assert_ne!(launcher, crate::icon::launcher_pngs(None, "fe"));
+        std::fs::remove_file(d.join(relift_switch_formats::import::CONTROL_TITLE)).unwrap();
+        let w = identity_gaps(&d, &info.identity, "fe").unwrap();
+        assert!(w.contains("\"fe\"") && w.contains("relift import"), "{w}");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

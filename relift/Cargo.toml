@@ -17,6 +17,7 @@ serde = { workspace = true }
 toml = { workspace = true }
 sha2 = { workspace = true }
 jpeg-decoder = { workspace = true }
+image-webp = { workspace = true }
 zstd = { workspace = true }
 relift-analyze = { workspace = true }
 relift-build = { workspace = true }

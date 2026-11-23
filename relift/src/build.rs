@@ -1524,6 +1524,9 @@ fn lift_and_emit(
         &ports,
         stage.info(),
     )?;
+    if let Some(w) = crate::info::identity_gaps(&import, &doc.identity, name) {
+        ui.note(&Line::new().text(w));
+    }
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(
         &info_c,

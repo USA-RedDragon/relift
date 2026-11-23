@@ -101,7 +101,7 @@ pub fn from_nacp(nacp: &[u8], title_id: u64, icon: Option<&[u8]>) -> Result<Iden
     let version = text(&nacp[NACP_VERSION..NACP_VERSION + 16]);
     id.version = (!version.is_empty()).then_some(version);
     id.default_language = id.first_language();
-    id.icon = icon.and_then(crate::icon::from_jpeg);
+    id.icon = icon.and_then(crate::icon::from_image);
     Ok(id)
 }
 

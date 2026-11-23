@@ -145,11 +145,41 @@ fn generated(seed: &str) -> Rgb {
     }
 }
 
-/// The icon of a game from a JPEG image: converted to PNG, with its size.
-/// `None` when the bytes do not decode.
+/// Decodes a WebP image (lossy or lossless) to RGB, alpha dropped over
+/// black as the console's icon frame shows it.
+fn decode_webp(bytes: &[u8]) -> Option<Rgb> {
+    let mut d = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    let (w, h) = d.dimensions();
+    let mut buf = vec![0u8; d.output_buffer_size()?];
+    d.read_image(&mut buf).ok()?;
+    let pixels = if d.has_alpha() {
+        buf.chunks_exact(4)
+            .flat_map(|p| {
+                let a = u16::from(p[3]);
+                [0, 1, 2].map(|i| u8::try_from(u16::from(p[i]) * a / 255).unwrap_or(255))
+            })
+            .collect()
+    } else {
+        buf
+    };
+    Some(Rgb {
+        width: usize::try_from(w).ok()?,
+        height: usize::try_from(h).ok()?,
+        pixels,
+    })
+}
+
+/// The icon of a game from its control data's image, JPEG (the Switch)
+/// or WebP (the Switch 2), told apart by content, not by file name:
+/// converted to PNG, with its size. `None` when the bytes do not decode.
 #[must_use]
-pub fn from_jpeg(bytes: &[u8]) -> Option<Icon> {
-    let img = decode_jpeg(bytes)?;
+pub fn from_image(bytes: &[u8]) -> Option<Icon> {
+    let webp = bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP";
+    let img = if webp {
+        decode_webp(bytes)?
+    } else {
+        decode_jpeg(bytes)?
+    };
     Some(Icon {
         format: "png".into(),
         width: u32::try_from(img.width).ok()?,
@@ -427,6 +457,33 @@ mod tests {
         assert_eq!(png(Some(&broken), "y"), png(None, "y"));
     }
 
+    #[test]
+    fn a_webp_icon_is_told_by_content_and_decoded() {
+        let mut rgba = Vec::new();
+        for y in 0..8u8 {
+            for x in 0..8u8 {
+                rgba.extend([x * 30, y * 30, 200, if x == 0 { 0 } else { 255 }]);
+            }
+        }
+        let mut webp = Vec::new();
+        image_webp::WebPEncoder::new(&mut webp)
+            .encode(&rgba, 8, 8, image_webp::ColorType::Rgba8)
+            .unwrap();
+        let icon = from_image(&webp).expect("a WebP icon decodes");
+        assert_eq!(
+            (icon.format.as_str(), icon.width, icon.height),
+            ("png", 8, 8)
+        );
+        let rgb = decode_own(&unbase64(&icon.data).unwrap()).unwrap();
+        assert_eq!(
+            &rgb.pixels[..3],
+            &[0, 0, 0],
+            "a clear pixel shows over black"
+        );
+        assert_eq!(&rgb.pixels[3..6], &[30, 0, 200]);
+        assert!(from_image(b"RIFF\0\0\0\0WEBPbroken").is_none());
+    }
+
     fn gradient() -> Icon {
         let mut pixels = Vec::new();
         for y in 0..64u8 {
@@ -460,14 +517,14 @@ mod tests {
     #[test]
     fn a_jpeg_becomes_a_png_with_its_size() {
         let jpeg: &[u8] = include_bytes!("../tests/icon.jpg");
-        let icon = from_jpeg(jpeg).unwrap();
+        let icon = from_image(jpeg).unwrap();
         assert_eq!(
             (icon.format.as_str(), icon.width, icon.height),
             ("png", 16, 8)
         );
         let img = decode_own(&unbase64(&icon.data).unwrap()).unwrap();
         assert_eq!((img.width, img.height), (16, 8));
-        assert!(from_jpeg(b"not a jpeg").is_none());
+        assert!(from_image(b"not a jpeg").is_none());
     }
 
     #[test]
