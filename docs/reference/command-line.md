@@ -54,6 +54,11 @@ Options:
           
           [default: auto]
 
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
 
@@ -224,6 +229,11 @@ Options:
           
           [default: auto]
 
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
 
@@ -385,6 +395,11 @@ Options:
           
           [default: auto]
 
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
 
@@ -542,6 +557,11 @@ Options:
           color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never
           
           [default: auto]
+
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
 
       --toolchain.clang <toolchain.clang>
           the clang driver
@@ -711,6 +731,11 @@ Options:
           
           [default: auto]
 
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
 
@@ -866,6 +891,11 @@ Options:
           color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never
           
           [default: auto]
+
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
 
       --toolchain.clang <toolchain.clang>
           the clang driver
@@ -1048,6 +1078,11 @@ Options:
           
           [default: auto]
 
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
 
@@ -1204,6 +1239,11 @@ Options:
           
           [default: auto]
 
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
+
       --toolchain.clang <toolchain.clang>
           the clang driver
 
@@ -1359,6 +1399,11 @@ Options:
           color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never
           
           [default: auto]
+
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
 
       --toolchain.clang <toolchain.clang>
           the clang driver
@@ -1517,6 +1562,11 @@ Options:
           color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never
           
           [default: auto]
+
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
 
       --toolchain.clang <toolchain.clang>
           the clang driver
@@ -1681,6 +1731,11 @@ Options:
           color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never
           
           [default: auto]
+
+      --shader-math <shader-math>
+          the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both
+          
+          [default: exact]
 
       --toolchain.clang <toolchain.clang>
           the clang driver
