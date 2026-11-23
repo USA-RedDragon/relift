@@ -2639,14 +2639,19 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     VkMemoryRequirements req;
-    if (VK(vkCreateImage)(g.dev, &ci, NULL, &v->image) != VK_SUCCESS)
+    const char *why = "vkCreateImage failed";
+    VkResult vr;
+    if ((vr = VK(vkCreateImage)(g.dev, &ci, NULL, &v->image)) != VK_SUCCESS)
         goto fail;
     VK(vkGetImageMemoryRequirements)(g.dev, v->image, &req);
     VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size };
     int32_t t = nvn_vk_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     mai.memoryTypeIndex = (uint32_t)t;
-    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &v->memory) != VK_SUCCESS ||
-        VK(vkBindImageMemory)(g.dev, v->image, v->memory, 0) != VK_SUCCESS)
+    why = t < 0 ? "no device-local memory type" : "vkAllocateMemory failed";
+    if (t < 0 || (vr = VK(vkAllocateMemory)(g.dev, &mai, NULL, &v->memory)) != VK_SUCCESS)
+        goto fail;
+    why = "vkBindImageMemory failed";
+    if ((vr = VK(vkBindImageMemory)(g.dev, v->image, v->memory, 0)) != VK_SUCCESS)
         goto fail;
     v->usage = ci.usage;
     VkImageViewUsageCreateInfo vu;
@@ -2660,7 +2665,8 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
                                                                            : VK_IMAGE_VIEW_TYPE_2D,
                                   .format = f,
                                   .subresourceRange = rr };
-    if (VK(vkCreateImageView)(g.dev, &vci, NULL, &v->view) != VK_SUCCESS)
+    why = "vkCreateImageView failed";
+    if ((vr = VK(vkCreateImageView)(g.dev, &vci, NULL, &v->view)) != VK_SUCCESS)
         goto fail;
     nvn_vk_begin(r);
     VkImageMemoryBarrier ib = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -2674,18 +2680,23 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                              NULL, 1, &ib);
     watch_storage(v);
+    why = "the host device failed a submit before reading the guest bytes";
+    vr = VK_SUCCESS;
     if (!nvn_vk_reading_guest(storage, d->size))
         goto fail;
     v->hash = bytes_hash(r->mem + storage, d->size);
     v->edge_hash = edge_hash(r, v);
+    why = "its upload failed";
     if (!depth && !upload(r, v))
         goto fail;
     v->hash_frame = g.presents + 1;
+    why = "the host device failed a submit";
     if (depth && !nvn_vk_flush(r))
         goto fail;
     if (g.nimages == g.capimages) {
         uint32_t cap = g.capimages ? 2 * g.capimages : 4096;
         vimg **grown = realloc(g.images, (size_t)cap * sizeof *grown);
+        why = "out of host memory";
         if (!grown)
             goto fail;
         g.images = grown;
@@ -2707,7 +2718,9 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
     return v;
 fail:
     image_free(v);
-    nvn_vk_fatal(r->c, "cannot make a host image for texture 0x%llx", (unsigned long long)tex);
+    nvn_vk_fatal(r->c, "cannot make a host image for texture 0x%llx (format %u, target %u, %ux%ux%u, %u levels, %llu bytes): %s (%d)",
+                 (unsigned long long)tex, d->format, d->target, d->width, d->height, d->depth, d->levels,
+                 (unsigned long long)d->size, why, (int)vr);
     return NULL;
 }
 
