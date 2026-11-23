@@ -5,6 +5,7 @@
  */
 #include "nvn/nvn_module.h"
 #include "nvn/nvn_priv.h"
+#include "nvn/nvn_vk.h"
 #include "tc.h"
 
 #include <ftw.h>
@@ -119,5 +120,87 @@ TEST(nvn_programs_that_read_handles_from_registers_say_so)
     CHECK(reg->register_handles);
     CHECK(!bound->register_handles);
     CHECK_EQ(bound->nrecs, 1u);
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
+/** A vertex program that reads a vec4 from a storage buffer at set 1 binding 66 (the translation's storage slot 2). */
+static const uint32_t slot_vertex[] = {
+    0x07230203u, 0x00010300u, 0x00070000u, 0x00000012u, 0x00000000u, 0x00020011u, 0x00000001u, 0x0003000eu,
+    0x00000000u, 0x00000001u, 0x0006000fu, 0x00000000u, 0x00000001u, 0x6e69616du, 0x00000000u, 0x00000002u,
+    0x00040047u, 0x00000002u, 0x0000000bu, 0x00000000u, 0x00040047u, 0x00000003u, 0x00000006u, 0x00000010u,
+    0x00030047u, 0x00000004u, 0x00000002u, 0x00050048u, 0x00000004u, 0x00000000u, 0x00000023u, 0x00000000u,
+    0x00040047u, 0x00000005u, 0x00000022u, 0x00000001u, 0x00040047u, 0x00000005u, 0x00000021u, 0x00000042u,
+    0x00020013u, 0x00000006u, 0x00030021u, 0x00000007u, 0x00000006u, 0x00030016u, 0x00000008u, 0x00000020u,
+    0x00040017u, 0x00000009u, 0x00000008u, 0x00000004u, 0x00040015u, 0x0000000au, 0x00000020u, 0x00000000u,
+    0x0003001du, 0x00000003u, 0x00000009u, 0x0003001eu, 0x00000004u, 0x00000003u, 0x00040020u, 0x0000000bu,
+    0x0000000cu, 0x00000004u, 0x0004003bu, 0x0000000bu, 0x00000005u, 0x0000000cu, 0x00040020u, 0x0000000cu,
+    0x0000000cu, 0x00000009u, 0x00040020u, 0x0000000du, 0x00000003u, 0x00000009u, 0x0004003bu, 0x0000000du,
+    0x00000002u, 0x00000003u, 0x0004002bu, 0x0000000au, 0x0000000eu, 0x00000000u, 0x00050036u, 0x00000006u,
+    0x00000001u, 0x00000000u, 0x00000007u, 0x000200f8u, 0x0000000fu, 0x00060041u, 0x0000000cu, 0x00000010u,
+    0x00000005u, 0x0000000eu, 0x0000000eu, 0x0004003du, 0x00000009u, 0x00000011u, 0x00000010u, 0x0003003eu,
+    0x00000002u, 0x00000011u, 0x000100fdu, 0x00010038u,
+};
+
+/** Writes dir/table.rlspv holding slot_vertex under the key 0xc0.., with an empty dir/table.rlspi entry. */
+static bool write_slot_tables(const char *dir)
+{
+    enum { FRAME = 4 + 3 + 3 + sizeof slot_vertex };
+    uint8_t frame[FRAME] = { 0x28, 0xb5, 0x2f, 0xfd, 0x60 };
+    put_le(frame + 5, sizeof slot_vertex - 256, 2);
+    put_le(frame + 7, (sizeof slot_vertex << 3) | 1, 3);
+    memcpy(frame + 10, slot_vertex, sizeof slot_vertex);
+    uint8_t spv[12 + 48 + FRAME], spi[12 + 40];
+    memset(spv, 0, sizeof spv);
+    memset(spi, 0, sizeof spi);
+    memcpy(spv, "RLSPV002", 8);
+    put_le(spv + 8, 1, 4);
+    memcpy(spi, "RLSPI001", 8);
+    put_le(spi + 8, 1, 4);
+    for (int i = 0; i < 32; i++)
+        spv[12 + i] = spi[12 + i] = (uint8_t)(0xc0 + i);
+    put_le(spv + 12 + 32, 12 + 48, 8);
+    put_le(spv + 12 + 40, FRAME, 4);
+    put_le(spv + 12 + 44, sizeof slot_vertex / 4, 4);
+    memcpy(spv + 12 + 48, frame, FRAME);
+    bool ok = true;
+    const struct { const char *name; const uint8_t *bytes; size_t n; } files[2] = {
+        { "table.rlspv", spv, sizeof spv }, { "table.rlspi", spi, sizeof spi } };
+    for (int i = 0; i < 2; i++) {
+        char path[PATH_MAX + 16];
+        snprintf(path, sizeof path, "%s/%s", dir, files[i].name);
+        FILE *f = fopen(path, "wb");
+        if (!f)
+            return false;
+        ok = fwrite(files[i].bytes, 1, files[i].n, f) == files[i].n && ok;
+        ok = fclose(f) == 0 && ok;
+    }
+    return ok;
+}
+
+TEST(nvn_a_vertex_storage_slot_binding_is_a_slot_not_a_driver_bank)
+{
+    CHECK_EQ(nvn_slot_binding(NVN_STAGE_VERTEX, 2), 66u);
+    CHECK(nvn_slot_binding(NVN_STAGE_VERTEX, 0) >= DRIVER_BINDINGS * NVN_STAGES);
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_slot_tables(dir));
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    if (!nvn_vk_ready()) {
+        CHECK(!getenv("RELIFT_VK_REQUIRE"));
+        printf("  skipped: no host Vulkan device\n");
+        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+        return;
+    }
+    char key[65], why[256] = "";
+    for (int i = 0; i < 32; i++)
+        snprintf(key + 2 * i, 3, "%02x", 0xc0 + i);
+    nvn_module *m = nvn_module_get(key, (int)NVN_STAGE_VERTEX, why, sizeof why);
+    if (!m)
+        printf("  %s\n", why);
+    CHECK(m != NULL);
+    if (m) {
+        CHECK_EQ(m->storage_slots, 1u << 2);
+        CHECK_EQ(m->driver, 0u);
+    }
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }

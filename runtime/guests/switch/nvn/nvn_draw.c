@@ -164,7 +164,7 @@ static bool layouts(void)
 {
     if (d.ready)
         return true;
-    VkDescriptorSetLayoutBinding ub[USER_BINDINGS * NVN_STAGES], db[DRIVER_BINDINGS * NVN_STAGES];
+    VkDescriptorSetLayoutBinding ub[USER_BINDINGS * NVN_STAGES], db[DRIVER_BINDINGS * NVN_STAGES + NVN_STORAGE_SLOTS];
     static const VkShaderStageFlags stage_bits[NVN_STAGES] = { VK_SHADER_STAGE_VERTEX_BIT,
                                                                VK_SHADER_STAGE_FRAGMENT_BIT,
                                                                VK_SHADER_STAGE_GEOMETRY_BIT,
@@ -184,6 +184,9 @@ static bool layouts(void)
             db[nd++] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * s + b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
                                                        stage_bits[s], NULL };
     }
+    for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++)
+        db[nd++] = (VkDescriptorSetLayoutBinding){ nvn_slot_binding(NVN_STAGE_VERTEX, k), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                                                   VK_SHADER_STAGE_VERTEX_BIT, NULL };
     VkDescriptorSetLayoutCreateInfo li[2] = {
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nu, .pBindings = ub },
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nd, .pBindings = db },
@@ -201,11 +204,12 @@ static bool layouts(void)
                                        .pPushConstantRanges = &fixed };
     if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &d.layout) != VK_SUCCESS)
         return false;
-    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SET_POOL_SETS * 8 };
+    VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SET_POOL_SETS * 8 },
+                                   { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, SET_POOL_SETS * 2 } };
     VkDescriptorPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                        .maxSets = SET_POOL_SETS,
-                                       .poolSizeCount = 1,
-                                       .pPoolSizes = &ps };
+                                       .poolSizeCount = 2,
+                                       .pPoolSizes = ps };
     for (uint32_t i = 0; i < NVN_SLOTS; i++)
         if (VK(vkCreateDescriptorPool)(g.dev, &pci, NULL, &d.pools[i]) != VK_SUCCESS)
             return false;
@@ -923,12 +927,35 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
     }
     flushes = g.flushes;
     sets[2] = nvn_texset();
-    VkDescriptorBufferInfo bi[(USER_BINDINGS + DRIVER_BINDINGS) * NVN_STAGES];
-    VkWriteDescriptorSet wr[(USER_BINDINGS + DRIVER_BINDINGS) * NVN_STAGES];
+    VkDescriptorBufferInfo bi[(USER_BINDINGS + DRIVER_BINDINGS) * NVN_STAGES + NVN_STORAGE_SLOTS];
+    VkWriteDescriptorSet wr[(USER_BINDINGS + DRIVER_BINDINGS) * NVN_STAGES + NVN_STORAGE_SLOTS];
     uint32_t n = 0;
     for (uint32_t s = 0; s < NVN_STAGES; s++) {
         if (!mods[s])
             continue;
+        for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++) {
+            if (!(mods[s]->storage_slots & (1u << k)))
+                continue;
+            if (s != NVN_STAGE_VERTEX || layouts_in != d.set_layout)
+                return nvn_vk_stop(r, "program %s of stage %u reads storage slot %u through a descriptor, which only plain draws bind",
+                                   mods[s]->key, s, k);
+            VkDeviceSize off = 0;
+            uint64_t size = r->st->gstorage[s][k].size;
+            VkBuffer pb = nvn_draw_pool_span(r->st->gstorage[s][k].addr, size, g.storage_align, &off);
+            if (!pb)
+                return nvn_vk_stop(r, "vertex program %s reads storage slot %u (0x%llx+0x%llx), which no memory pool holds whole",
+                                   mods[s]->key, k, (unsigned long long)r->st->gstorage[s][k].addr,
+                                   (unsigned long long)size);
+            nvn_mirror_written(r->st->gstorage[s][k].addr, size);
+            bi[n] = (VkDescriptorBufferInfo){ pb, off, size };
+            wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                            .dstSet = sets[1],
+                                            .dstBinding = nvn_slot_binding(s, k),
+                                            .descriptorCount = 1,
+                                            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                            .pBufferInfo = &bi[n] };
+            n++;
+        }
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++) {
             if (!(mods[s]->driver & (1u << b)))
                 continue;

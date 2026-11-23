@@ -629,6 +629,16 @@ impl Prep {
         Some(out)
     }
 
+    /// The single constant bank word (bank, byte offset, indexed) uniform
+    /// register `r` holds before instruction `k`, when every load that
+    /// reaches `k` gives it the same word.
+    pub(crate) fn uniform_source(&self, k: usize, r: u8) -> Option<(u32, u32, bool)> {
+        match self.handle_sources(k, r, true)?.as_slice() {
+            [h] => Some((h.bank, h.offset, h.indexed)),
+            _ => None,
+        }
+    }
+
     /// [`Prep::known`] within the block of `k` only.
     fn known_in_block(&self, k: usize, r: u8) -> Option<u32> {
         let mut j = k;

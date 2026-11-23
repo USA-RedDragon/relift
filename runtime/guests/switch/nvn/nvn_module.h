@@ -35,6 +35,11 @@ typedef struct nvn_module {
     bool images, other_sets;
     /** @brief The program reads or writes the compute back end's mesh buffer (set NVN_MESH_BUFFER_SET, binding NVN_MESH_BUFFER_BINDING). */
     bool mesh_buffer;
+    /**
+     * @brief Storage buffer slots (bit k: slot k of its stage) the program loads through set 1 binding
+     * nvn_slot_binding(stage, k) instead of a buffer device address.
+     */
+    uint32_t storage_slots;
     /** @brief Its translation stores through 64-bit global addresses (NVN_IFACE_GLOBAL_STORE). */
     bool global_store;
     /** @brief Those stores also mark their pages in the written-page bitmap (the record's second word is 1). */

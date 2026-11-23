@@ -61,6 +61,8 @@
 /** @brief NVNcounterType of a timestamp taken at the top of the pipe. */
 #define NVN_COUNTER_TIMESTAMP_TOP 16u
 /** @brief The compute stage's NVNshaderStage, and its storage buffer slots. */
+/** @brief The vertex stage, stage 0. */
+#define NVN_STAGE_VERTEX 0u
 #define NVN_STAGE_COMPUTE 5u
 /** @brief VK_EXT_mesh_shader's shader stage bits, which the generated headers do not hold. */
 #define VK_SHADER_STAGE_TASK_BIT_EXT 0x40u
@@ -76,6 +78,10 @@
 #define USER_BINDINGS 22u
 /** @brief Bindings of set 1 (driver banks) each stage owns: stage s's bank c[n] is binding 4 s + n. */
 #define DRIVER_BINDINGS 4u
+/** @brief First binding of set 1 that holds a storage buffer slot (the translator's SLOT_BINDING_BASE). */
+#define NVN_SLOT_BINDING_BASE 64u
+/** @brief The binding of set 1 that holds storage buffer slot k of stage s. */
+static inline uint32_t nvn_slot_binding(uint32_t s, uint32_t k) { return NVN_SLOT_BINDING_BASE + NVN_STORAGE_SLOTS * s + k; }
 
 /** @brief A texture's host image. */
 typedef struct vimg {
@@ -184,6 +190,8 @@ typedef struct nvn_vkdev {
     bool device_fault;
     /** @brief maxStorageBufferRange and maxDrawIndexedIndexValue of the device. */
     uint32_t max_storage_range, max_index_value;
+    /** @brief VkPhysicalDeviceLimits::minStorageBufferOffsetAlignment. */
+    uint64_t storage_align;
     /** @brief vkCmdDrawMeshTasksEXT (loaded with the device when the extension is on). */
     void (*draw_mesh_tasks)(VkCommandBuffer, uint32_t, uint32_t, uint32_t);
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */

@@ -88,6 +88,10 @@ pub const RECORD_REGISTER_HANDLES: u32 = 10;
 /// the bank at the byte offset, or with the last field 1 from any word of
 /// the bank from that offset on.
 pub const RECORD_HANDLE_SOURCE: u32 = 9;
+/// An interface record: the vertex program loads through the storage
+/// buffer descriptor of the vertex storage buffer slot in the second
+/// field (set 1, binding 64 plus the slot).
+pub const RECORD_STORAGE_SLOT: u32 = 11;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -534,6 +538,9 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     }
     for h in &i.handle_sources {
         recs.push([RECORD_HANDLE_SOURCE, h.bank, h.offset, u32::from(h.indexed)]);
+    }
+    for &k in &i.storage_slots {
+        recs.push([RECORD_STORAGE_SLOT, k, 0, 0]);
     }
     recs
 }

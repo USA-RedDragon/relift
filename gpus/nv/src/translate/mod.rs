@@ -132,6 +132,10 @@ pub struct Interface {
     /// where every load that reaches the texture instruction is known: the
     /// runtime keeps the textures those words name in their slots.
     pub handle_sources: BTreeSet<tex::HandleSource>,
+    /// Vertex storage buffer slots the program loads through a storage
+    /// buffer descriptor instead of a buffer device address (see
+    /// [`mem::slots`]).
+    pub storage_slots: BTreeSet<u32>,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
     pub texture_bindings: BTreeSet<u32>,
     /// Specialization constant id per bound handle whose texture's numeric

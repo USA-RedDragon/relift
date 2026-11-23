@@ -396,6 +396,7 @@ static void bring_up(void)
         VkPhysicalDeviceProperties dp;
         VK(vkGetPhysicalDeviceProperties)(g.phys, &dp);
         g.max_storage_range = dp.limits.maxStorageBufferRange;
+        g.storage_align = dp.limits.minStorageBufferOffsetAlignment ? dp.limits.minStorageBufferOffsetAlignment : 16;
         g.max_index_value = dp.limits.maxDrawIndexedIndexValue;
     }
     VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,

@@ -577,3 +577,77 @@ fn segment_index_is_bounded() {
     assert!(count.is_some(), "no segment count constant");
     assert!(!insts(&s.spirv, 169).is_empty(), "no select");
 }
+
+const ACCESS_CHAIN: u32 = 65;
+const CONVERT_U_TO_PTR: u32 = 120;
+const DECORATE: u32 = 71;
+const DECO_BINDING: u32 = 33;
+
+/// A vertex program: `ULDC.64 UR4, c[0x0][slot base]` then
+/// `LDG.E.128 R4, [R5.U32+UR4+0x20]`.
+fn vertex_slot_load(base: u64) -> relift_gpu_nv::translate::Shader {
+    let mut w = [0u32; 32];
+    w[0] = 1 | (4 << 5) | (1 << 10);
+    let mut b: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
+    b.extend(word(
+        0x0b9,
+        5,
+        &[(16, 3, 4), (38, 9, base), (54, 1, 0), (73, 3, 5)],
+    ));
+    b.extend(word(
+        0x181,
+        4,
+        &[
+            (16, 3, 4),
+            (24, 3, 5),
+            (32, 3, 4),
+            (40, 6, 0x20),
+            (72, 1, 1),
+            (73, 3, 6),
+            (81, 3, 7),
+            (91, 1, 1),
+        ],
+    ));
+    finish(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    let t = text(&p);
+    assert!(t[0].contains("ULDC.64 UR4, c[0x0]"), "{}", t[0]);
+    assert!(t[1].contains("LDG.E.EF.128"), "{}", t[1]);
+    translate(&p).unwrap_or_else(|e| panic!("{e}"))
+}
+
+fn decorated_binding(words: &[u32], binding: u32) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let n = ((words[k] >> 16) as usize).max(1);
+        if words[k] & 0xffff == DECORATE && words[k + 2] == DECO_BINDING && words[k + 3] == binding
+        {
+            return true;
+        }
+        k += n;
+    }
+    false
+}
+
+#[test]
+fn a_vertex_load_from_a_storage_slot_base_reads_the_slot_descriptor() {
+    let s = vertex_slot_load(0x130);
+    assert_eq!(
+        s.interface
+            .storage_slots
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    let ops = spirv_ops(&s.spirv);
+    assert!(
+        !ops.contains(&CONVERT_U_TO_PTR),
+        "the load keeps a buffer device address"
+    );
+    assert!(ops.contains(&ACCESS_CHAIN));
+    assert!(decorated_binding(&s.spirv, 66));
+    let other = vertex_slot_load(0x100);
+    assert!(other.interface.storage_slots.is_empty());
+    assert!(spirv_ops(&other.spirv).contains(&CONVERT_U_TO_PTR));
+}

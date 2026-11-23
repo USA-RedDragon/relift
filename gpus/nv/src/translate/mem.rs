@@ -22,6 +22,7 @@ pub(crate) mod lanes;
 pub(crate) mod order;
 mod scratch;
 mod segments;
+pub(crate) mod slots;
 mod warp;
 
 use super::{Ctx, PHYSICAL_STORAGE_BUFFER, Res, bad};
@@ -417,7 +418,10 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         let n = m.size.words();
         let ty = vec_ty(c, n);
-        let p = c.global_ptr(addr, ty);
+        let p = match c.slot_ptr(&a, ty, 4 * n) {
+            Some(p) => p,
+            None => c.global_ptr(addr, ty),
+        };
         let v = c.m.emit(op::LOAD, ty, &[p, ALIGNED, 4 * n]);
         let u = c.u32t();
         (0..n)
