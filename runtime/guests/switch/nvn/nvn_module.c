@@ -15,8 +15,8 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /** @brief What patch_spirv learns of one id: its decorations and, plus one, its storage class. */
 typedef struct spv_var {
-    uint32_t set, binding, location, storage;
-    bool has_set, has_binding, has_location;
+    uint32_t set, binding, location, storage, builtin;
+    bool has_set, has_binding, has_location, has_builtin;
 } spv_var;
 
 bool nvn_spirv_stores(const uint32_t *w, size_t n)
@@ -88,6 +88,8 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
                 x->binding = w[i + 3], x->has_binding = true;
             else if (w[i + 2] == 30)
                 x->location = w[i + 3], x->has_location = true;
+            else if (w[i + 2] == 11)
+                x->builtin = w[i + 3], x->has_builtin = true;
             else if (w[i + 2] == 1 && w[i + 3] == ALPHA_FUNC_SPEC)
                 m->alpha_test = true;
         } else if (op == 59 && len >= 4 && w[i + 2] < bound) {
@@ -131,6 +133,10 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
             m->inputs |= 1u << v[id].location;
         if (v[id].storage == 4 && v[id].has_location && v[id].location < 32)
             m->outputs |= 1u << v[id].location;
+        if (v[id].storage == 4 && v[id].has_builtin) {
+            m->writes_layer |= v[id].builtin == 9;
+            m->writes_viewport |= v[id].builtin == 10;
+        }
     }
     free(v);
     return true;
@@ -269,6 +275,11 @@ uint32_t *nvn_spirv_demote_inputs(const uint32_t *w, size_t n, uint32_t mask, si
  * every location frag reads, else a variant of frag with the unwritten inputs demoted (nvn_spirv_demote_inputs). 0 when it
  * cannot be made.
  */
+const nvn_module *nvn_module_last_stage(nvn_module *const mods[5])
+{
+    return mods[2] ? mods[2] : mods[4] ? mods[4] : mods[0];
+}
+
 VkShaderModule nvn_module_fragment_for(const nvn_module *vert, nvn_module *frag)
 {
     uint32_t missing = frag->inputs & ~vert->outputs;

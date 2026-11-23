@@ -321,6 +321,8 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     }
     g.depth_clamp = feat.f2.features.depthClamp;
     g.wide_lines = feat.f2.features.wideLines;
+    g.geometry_shader = feat.f2.features.geometryShader;
+    g.tessellation_shader = feat.f2.features.tessellationShader;
     g.query_ok = feat.f2.features.pipelineStatisticsQuery && feat.f2.features.geometryShader &&
                  feat.f2.features.tessellationShader && feat.f12.hostQueryReset;
     g.occlusion_precise = feat.f2.features.occlusionQueryPrecise;
@@ -1264,6 +1266,8 @@ static struct {
     const vimg *images[MAX_RT + 1];
     bool has_depth, has_stencil;
     VkRect2D area;
+    /** @brief The layers it renders (more than 1 for a layered draw's 2D array views). */
+    uint32_t layers;
 } open_pass;
 
 static VkImageSubresourceRange range_of(const vimg *v);
@@ -2835,14 +2839,45 @@ VkImageView nvn_vk_view(vimg *v, VkImageViewType t, const nvn_view *nv)
  * @brief Begins dynamic rendering on r's render targets, limited to their common extent; with none (a draw that
  * only writes storage images) over the first viewport's size. A pass left open on the same attachments goes on.
  */
-bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
+static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer, uint32_t count, VkFormat format);
+
+/**
+ * @brief The layers a layered draw renders to: the fewest any bound target spans (a layer past one of them is
+ * undefined on the host, as the console draws nothing there), 1 when a target is missing a view.
+ */
+static uint32_t draw_layers(const nvn_gfx *st)
+{
+    uint32_t n = UINT32_MAX;
+    for (uint32_t i = 0; i < st->ncolor; i++)
+        if (st->color[i].v && st->color[i].layers < n)
+            n = st->color[i].layers;
+    if (st->depth.v && st->depth.layers < n)
+        n = st->depth.layers;
+    return n == UINT32_MAX || !n ? 1 : n;
+}
+
+/** @brief The view of target t a draw over layers layers renders into (layers > 1: a 2D array view). */
+static VkImageView draw_view(rt *t, uint32_t layers)
+{
+    if (!t->v || layers <= 1)
+        return t->view;
+    return sub_view(t->v, t->level, t->layer, layers, t->format ? t->format : t->v->format);
+}
+
+bool nvn_vk_begin_rendering(replay *r, VkRect2D *area) { return nvn_vk_begin_rendering_layered(r, area, false); }
+
+bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
 {
     VkRenderingAttachmentInfo ca[MAX_RT], da = { 0 };
+    VkImageView cv[MAX_RT], dv = NULL;
     uint32_t w = UINT32_MAX, h = UINT32_MAX;
+    uint32_t layers = layered ? draw_layers(r->st) : 1;
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
-        const rt *t = &r->st->color[i];
+        rt *t = &r->st->color[i];
+        if (!(cv[i] = draw_view(t, layers)))
+            return false;
         ca[i] = (VkRenderingAttachmentInfo){ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                             .imageView = t->view,
+                                             .imageView = cv[i],
                                              .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
                                              .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                              .storeOp = VK_ATTACHMENT_STORE_OP_STORE };
@@ -2853,8 +2888,10 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
         }
     }
     if (r->st->depth.v) {
+        if (!(dv = draw_view(&r->st->depth, layers)))
+            return false;
         da = (VkRenderingAttachmentInfo){ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                          .imageView = r->st->depth.view,
+                                          .imageView = dv,
                                           .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
                                           .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                           .storeOp = VK_ATTACHMENT_STORE_OP_STORE };
@@ -2873,17 +2910,17 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
     bool depth = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_DEPTH_BIT);
     *area = (VkRect2D){ { 0, 0 }, { w, h } };
     if (open_pass.open && g_recording && open_pass.ncolor == r->st->ncolor && open_pass.has_depth == depth && open_pass.has_stencil == stencil &&
-        (!(depth || stencil) || open_pass.depth == r->st->depth.view) && open_pass.area.extent.width == w &&
-        open_pass.area.extent.height == h) {
+        (!(depth || stencil) || open_pass.depth == dv) && open_pass.area.extent.width == w &&
+        open_pass.area.extent.height == h && open_pass.layers == layers) {
         bool same = true;
         for (uint32_t i = 0; i < r->st->ncolor && same; i++)
-            same = open_pass.color[i] == r->st->color[i].view;
+            same = open_pass.color[i] == cv[i];
         if (same)
             return true;
     }
     VkRenderingInfo ri = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                            .renderArea = *area,
-                           .layerCount = 1,
+                           .layerCount = layers,
                            .colorAttachmentCount = r->st->ncolor,
                            .pColorAttachments = ca,
                            .pDepthAttachment = depth ? &da : NULL,
@@ -2894,11 +2931,12 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
     open_pass.ncolor = r->st->ncolor;
     memset(open_pass.images, 0, sizeof open_pass.images);
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
-        open_pass.color[i] = r->st->color[i].view;
+        open_pass.color[i] = cv[i];
         open_pass.images[i] = r->st->color[i].v;
     }
     open_pass.images[MAX_RT] = depth || stencil ? r->st->depth.v : NULL;
-    open_pass.depth = depth || stencil ? r->st->depth.view : NULL;
+    open_pass.depth = depth || stencil ? dv : NULL;
+    open_pass.layers = layers;
     open_pass.has_depth = depth;
     open_pass.has_stencil = stencil;
     open_pass.area = *area;
@@ -3025,14 +3063,15 @@ bool nvn_vk_rt_inside(const nvn_tex_desc *d, uint32_t level, uint32_t layer)
 }
 
 /**
- * @brief The view of level and layer of v (a depth slice of a 3D image, which
- * is made 2D array compatible), made the first time.
+ * @brief The view of level and count layers from layer of v (depth slices of a 3D image, which is made 2D array
+ * compatible): 2D for one layer, else a 2D array that a layered draw renders into. Made the first time.
  */
-static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer, VkFormat format)
+static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer, uint32_t count, VkFormat format)
 {
     VkFormat own = format == v->format ? VK_FORMAT_UNDEFINED : format;
     for (uint32_t i = 0; i < v->nsub; i++)
-        if (v->sub[i].level == level && v->sub[i].layer == layer && v->sub[i].format == own)
+        if (v->sub[i].level == level && v->sub[i].layer == layer && v->sub[i].count == count &&
+            v->sub[i].format == own)
             return v->sub[i].view;
     if (v->nsub == v->capsub) {
         uint32_t cap = v->capsub ? 2 * v->capsub : 8;
@@ -3046,13 +3085,13 @@ static VkImageView sub_view(vimg *v, uint32_t level, uint32_t layer, VkFormat fo
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                   .pNext = plain_usage(v, &vu),
                                   .image = v->image,
-                                  .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                  .viewType = count > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
                                   .format = format,
-                                  .subresourceRange = { v->aspect, level, 1, layer, 1 } };
+                                  .subresourceRange = { v->aspect, level, 1, layer, count } };
     VkImageView view;
     if (VK(vkCreateImageView)(g.dev, &vci, NULL, &view) != VK_SUCCESS)
         return NULL;
-    v->sub[v->nsub++] = (struct vsub){ level, layer, view, own };
+    v->sub[v->nsub++] = (struct vsub){ level, layer, count, view, own };
     return view;
 }
 
@@ -3092,6 +3131,7 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
         return RL_PENDING;
     t->format = VK_FORMAT_UNDEFINED;
     nvn_vk_written(t->v);
+    uint32_t view_layers = 0;
     if (view) {
         nvn_view nv;
         int rc = nvn_view_read(r->c, r->mem, view, &nv);
@@ -3124,6 +3164,7 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
                         nv.num_layers);
         t->level = nv.has_levels ? (uint32_t)nv.base_level : 0;
         t->layer = nv.has_layers ? (uint32_t)nv.min_layer : 0;
+        view_layers = nv.has_layers && nv.num_layers > 0 ? (uint32_t)nv.num_layers : 0;
     }
     VkImageSubresourceRange rr = range_of(t->v);
     if (!nvn_vk_rt_inside(&t->v->d, t->level, t->layer))
@@ -3132,7 +3173,11 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
     VkFormat drawn = t->format ? t->format : t->v->format;
     bool whole = rr.levelCount == 1 && rr.layerCount == 1 && t->v->d.target != NVN_TARGET_3D && drawn == t->v->format;
     t->format = drawn;
-    t->view = whole ? t->v->view : sub_view(t->v, t->level, t->layer, drawn);
+    t->view = whole ? t->v->view : sub_view(t->v, t->level, t->layer, 1, drawn);
+    uint32_t total = t->v->d.target == NVN_TARGET_3D ? depth_of(&t->v->d, t->level) : rr.layerCount;
+    t->layers = total - t->layer;
+    if (view_layers && view_layers < t->layers)
+        t->layers = view_layers;
     if (!t->view)
         return nvn_vk_stop(r, "no host view of render target 0x%llx", (unsigned long long)tex);
     return RL_OK;
@@ -3359,7 +3404,7 @@ static int clear_texture(replay *r, const nvn_cmd *e)
     for (uint32_t i = 0; i < layers; i++) {
         rt t = { .v = v, .level = level, .layer = layer + i, .format = v->format };
         VkImageSubresourceRange rr = range_of(v);
-        t.view = rr.levelCount == 1 && rr.layerCount == 1 ? v->view : sub_view(v, level, layer + i, v->format);
+        t.view = rr.levelCount == 1 && rr.layerCount == 1 ? v->view : sub_view(v, level, layer + i, 1, v->format);
         if (!t.view)
             return nvn_vk_stop(r, "no host view of the texture %s clears", nvn_cmd_name(e->op));
         r->st->ncolor = 1;

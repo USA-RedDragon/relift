@@ -10,12 +10,15 @@
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static struct {
     unsigned begins, ends, barriers;
     char order[64];
     unsigned n;
+    /** @brief The layer count of the last pass begun, and the type, first layer and layers of the last view made. */
+    uint32_t pass_layers, view_type, view_layer, view_layers, views;
 } calls;
 
 static void note(char c)
@@ -27,9 +30,20 @@ static void note(char c)
 static void fake_begin(VkCommandBuffer cb, const VkRenderingInfo *ri)
 {
     (void)cb;
-    (void)ri;
     calls.begins++;
+    calls.pass_layers = ri->layerCount;
     note('B');
+}
+
+static VkResult fake_view(VkDevice dev, const VkImageViewCreateInfo *ci, const VkAllocationCallbacks *a, VkImageView *out)
+{
+    (void)dev, (void)a;
+    calls.views++;
+    calls.view_type = (uint32_t)ci->viewType;
+    calls.view_layer = ci->subresourceRange.baseArrayLayer;
+    calls.view_layers = ci->subresourceRange.layerCount;
+    *out = (VkImageView)(uintptr_t)(0x1000 + calls.views);
+    return VK_SUCCESS;
 }
 
 static void fake_end(VkCommandBuffer cb)
@@ -65,6 +79,7 @@ static void setup(fixture *f)
     g.fns.f[VKG_vkCmdBeginRendering] = (void (*)(void))fake_begin;
     g.fns.f[VKG_vkCmdEndRendering] = (void (*)(void))fake_end;
     g.fns.f[VKG_vkCmdPipelineBarrier] = (void (*)(void))fake_barrier;
+    g.fns.f[VKG_vkCreateImageView] = (void (*)(void))fake_view;
     f->a.d.width = f->b.d.width = 64;
     f->a.d.height = f->b.d.height = 32;
     f->st.ncolor = 1;
@@ -100,6 +115,49 @@ TEST(nvn_draws_into_the_same_targets_share_one_pass)
     teardown(&f);
     CHECK_EQ(calls.ends, 1u);
     CHECK_EQ(calls.barriers, 1u);
+}
+
+TEST(nvn_a_layered_draw_renders_every_layer_the_targets_share)
+{
+    static fixture f;
+    setup(&f);
+    f.a.d.target = 8;
+    f.a.d.levels = 1;
+    f.b.d = f.a.d;
+    f.st.color[0] = (rt){ .v = &f.a, .layer = 0, .layers = 6, .view = (VkImageView)(uintptr_t)0x10 };
+    f.st.depth = (rt){ .v = &f.b, .layer = 2, .layers = 4, .view = (VkImageView)(uintptr_t)0x20 };
+    VkRect2D area;
+    CHECK(nvn_vk_begin_rendering(&f.r, &area));
+    CHECK_EQ(calls.pass_layers, 1u);
+    CHECK_EQ(calls.views, 0u);
+    CHECK(nvn_vk_begin_rendering_layered(&f.r, &area, true));
+    CHECK_EQ(calls.begins, 2u);
+    CHECK_EQ(calls.pass_layers, 4u);
+    CHECK_EQ(calls.views, 2u);
+    CHECK_EQ(calls.view_type, (uint32_t)VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+    CHECK_EQ(calls.view_layer, 2u);
+    CHECK_EQ(calls.view_layers, 4u);
+    CHECK(nvn_vk_begin_rendering_layered(&f.r, &area, true));
+    CHECK_EQ(calls.begins, 2u);
+    CHECK_EQ(calls.views, 2u);
+    CHECK(nvn_vk_begin_rendering(&f.r, &area));
+    CHECK_EQ(calls.begins, 3u);
+    CHECK_EQ(calls.pass_layers, 1u);
+    teardown(&f);
+    free(f.a.sub);
+    free(f.b.sub);
+}
+
+TEST(nvn_a_layered_draw_into_one_layer_is_a_plain_pass)
+{
+    static fixture f;
+    setup(&f);
+    f.st.color[0].layers = 1;
+    VkRect2D area;
+    CHECK(nvn_vk_begin_rendering_layered(&f.r, &area, true));
+    CHECK_EQ(calls.pass_layers, 1u);
+    CHECK_EQ(calls.views, 0u);
+    teardown(&f);
 }
 
 TEST(nvn_new_render_targets_end_the_pass_with_its_barrier)

@@ -50,6 +50,8 @@ typedef struct nvn_module {
     bool register_handles;
     /** @brief Output locations the program declares (a vertex program's varyings). */
     uint32_t outputs;
+    /** @brief The program writes the Layer or the ViewportIndex built-in (a geometry program's layered output). */
+    bool writes_layer, writes_viewport;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
     bool alpha_test, fixed_push;
     /** @brief Its interface records (nvn_shader_iface), as many as the translation has. */
@@ -96,6 +98,13 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
  * its dimension 2D. The values a draw sets for textures it binds replace them.
  */
 void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationMapEntry *map, uint32_t *vals);
+
+/**
+ * @brief The last stage before the rasterizer among a draw's programs mods (by NVNshaderStage, 0 vertex to 4
+ * tessellation evaluation): the geometry program, else the tessellation evaluation one, else the vertex one (NULL
+ * when there is none). The fragment program reads its outputs, and its Layer picks the layer drawn to.
+ */
+const nvn_module *nvn_module_last_stage(nvn_module *const mods[5]);
 
 /**
  * @brief The fragment module of frag to draw with after vertex program vert:

@@ -112,7 +112,11 @@ typedef struct nvn_pipe_rec {
 #define NVN_REC_COMPUTE 2u
 #define NVN_REC_PROGRAM 3u
 
-/** @brief Remembers a graphics pipeline the game made (on a device that links libraries it adds nothing the libraries do not already hold, so it is kept only without them). */
+/**
+ * @brief Remembers a graphics pipeline the game made (on a device that links libraries it adds nothing the libraries
+ * do not already hold, so it is kept only without them, or when it has geometry or tessellation programs, which are
+ * made whole).
+ */
 void nvn_pipe_record_graphics(const char *const keys[5], const nvn_pipe_key *k);
 
 /** @brief Remembers a compute pipeline the game made: its program, and n specialization constants sorted by id. */

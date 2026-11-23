@@ -729,10 +729,13 @@ static void maybe_save(void)
     rl_at_process_exit(nvn_pipe_save);
 }
 
+/** @brief A key with geometry or tessellation programs, which the pre-raster library (the vertex program alone) leaves out. */
+static bool extra_stages(const nvn_pipe_key *k) { return k->mods[2] || k->mods[3] || k->mods[4]; }
+
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
 {
     maybe_save();
-    if (!P.gpl || k->mesh_mode) {
+    if (!P.gpl || k->mesh_mode || extra_stages(k)) {
         bool mine;
         entry *e = claim(&P.full, k, sizeof *k, &mine);
         if (!e || !mine)
@@ -921,7 +924,7 @@ bool nvn_pipe_record_program(const char *key, uint32_t stage, const uint32_t wg[
 
 void nvn_pipe_record_graphics(const char *const keys[5], const nvn_pipe_key *k)
 {
-    if (P.gpl)
+    if (P.gpl && !extra_stages(k))
         return;
     nvn_pipe_rec rec;
     memset(&rec, 0, sizeof rec);

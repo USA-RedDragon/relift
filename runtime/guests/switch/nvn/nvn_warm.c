@@ -320,7 +320,7 @@ static bool make_recorded(const nvn_pipe_rec *rec)
             return false;
         k.mods[s] = mods[s]->m;
     }
-    if (mods[1] && mods[0] && !(k.mods[1] = nvn_module_fragment_for(mods[0], mods[1])))
+    if (mods[1] && mods[0] && !(k.mods[1] = nvn_module_fragment_for(nvn_module_last_stage(mods), mods[1])))
         return false;
     return nvn_pipe_graphics(&k) != NULL;
 }

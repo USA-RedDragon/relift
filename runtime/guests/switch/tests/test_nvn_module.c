@@ -141,39 +141,64 @@ static const uint32_t slot_vertex[] = {
     0x00000002u, 0x00000011u, 0x000100fdu, 0x00010038u,
 };
 
-/** Writes dir/table.rlspv holding slot_vertex under the key 0xc0.., with an empty dir/table.rlspi entry. */
-static bool write_slot_tables(const char *dir)
+/** A geometry program that writes Layer 1 and emits one point (written with spirv-as). */
+static const uint32_t layer_geometry[] = {
+    0x07230203u, 0x00010000u, 0x00070000u, 0x00000009u, 0x00000000u, 0x00020011u, 0x00000002u, 0x0003000eu,
+    0x00000000u, 0x00000001u, 0x0006000fu, 0x00000003u, 0x00000001u, 0x6e69616du, 0x00000000u, 0x00000002u,
+    0x00030010u, 0x00000001u, 0x00000016u, 0x00040010u, 0x00000001u, 0x00000000u, 0x00000001u, 0x00030010u,
+    0x00000001u, 0x0000001bu, 0x00040010u, 0x00000001u, 0x0000001au, 0x00000001u, 0x00040047u, 0x00000002u,
+    0x0000000bu, 0x00000009u, 0x00020013u, 0x00000003u, 0x00030021u, 0x00000004u, 0x00000003u, 0x00040015u,
+    0x00000005u, 0x00000020u, 0x00000001u, 0x00040020u, 0x00000006u, 0x00000003u, 0x00000005u, 0x0004003bu,
+    0x00000006u, 0x00000002u, 0x00000003u, 0x0004002bu, 0x00000005u, 0x00000007u, 0x00000001u, 0x00050036u,
+    0x00000003u, 0x00000001u, 0x00000000u, 0x00000004u, 0x000200f8u, 0x00000008u, 0x0003003eu, 0x00000002u,
+    0x00000007u, 0x000100dau, 0x000100fdu, 0x00010038u,
+};
+
+/**
+ * Writes dir/table.rlspv holding the program words (bytes long, 256 to 65791) under the key key0, key0 + 1, ...,
+ * with an empty dir/table.rlspi entry.
+ */
+static bool write_one_table(const char *dir, const uint32_t *words, size_t bytes, uint8_t key0)
 {
-    enum { FRAME = 4 + 3 + 3 + sizeof slot_vertex };
-    uint8_t frame[FRAME] = { 0x28, 0xb5, 0x2f, 0xfd, 0x60 };
-    put_le(frame + 5, sizeof slot_vertex - 256, 2);
-    put_le(frame + 7, (sizeof slot_vertex << 3) | 1, 3);
-    memcpy(frame + 10, slot_vertex, sizeof slot_vertex);
-    uint8_t spv[12 + 48 + FRAME], spi[12 + 40];
-    memset(spv, 0, sizeof spv);
+    size_t frame_n = 4 + 3 + 3 + bytes;
+    uint8_t *frame = calloc(1, frame_n), *spv = calloc(1, 12 + 48 + frame_n);
+    uint8_t spi[12 + 40];
+    if (!frame || !spv) {
+        free(frame);
+        free(spv);
+        return false;
+    }
+    memcpy(frame, (const uint8_t[]){ 0x28, 0xb5, 0x2f, 0xfd, 0x60 }, 5);
+    put_le(frame + 5, bytes - 256, 2);
+    put_le(frame + 7, (bytes << 3) | 1, 3);
+    memcpy(frame + 10, words, bytes);
     memset(spi, 0, sizeof spi);
     memcpy(spv, "RLSPV002", 8);
     put_le(spv + 8, 1, 4);
     memcpy(spi, "RLSPI001", 8);
     put_le(spi + 8, 1, 4);
     for (int i = 0; i < 32; i++)
-        spv[12 + i] = spi[12 + i] = (uint8_t)(0xc0 + i);
+        spv[12 + i] = spi[12 + i] = (uint8_t)(key0 + i);
     put_le(spv + 12 + 32, 12 + 48, 8);
-    put_le(spv + 12 + 40, FRAME, 4);
-    put_le(spv + 12 + 44, sizeof slot_vertex / 4, 4);
-    memcpy(spv + 12 + 48, frame, FRAME);
+    put_le(spv + 12 + 40, frame_n, 4);
+    put_le(spv + 12 + 44, bytes / 4, 4);
+    memcpy(spv + 12 + 48, frame, frame_n);
+    free(frame);
     bool ok = true;
     const struct { const char *name; const uint8_t *bytes; size_t n; } files[2] = {
-        { "table.rlspv", spv, sizeof spv }, { "table.rlspi", spi, sizeof spi } };
+        { "table.rlspv", spv, 12 + 48 + frame_n }, { "table.rlspi", spi, sizeof spi } };
     for (int i = 0; i < 2; i++) {
         char path[PATH_MAX + 16];
         snprintf(path, sizeof path, "%s/%s", dir, files[i].name);
         FILE *f = fopen(path, "wb");
-        if (!f)
-            return false;
+        if (!f) {
+            ok = false;
+            continue;
+        }
         ok = fwrite(files[i].bytes, 1, files[i].n, f) == files[i].n && ok;
         ok = fclose(f) == 0 && ok;
     }
+    free(spv);
     return ok;
 }
 
@@ -183,7 +208,7 @@ TEST(nvn_a_vertex_storage_slot_binding_is_a_slot_not_a_driver_bank)
     CHECK(nvn_slot_binding(NVN_STAGE_VERTEX, 0) >= DRIVER_BINDINGS * NVN_STAGES);
     char dir[PATH_MAX];
     CHECK(make_scratch(dir));
-    CHECK(write_slot_tables(dir));
+    CHECK(write_one_table(dir, slot_vertex, sizeof slot_vertex, 0xc0));
     setenv("RELIFT_NVN_SHADERS", dir, 1);
     if (!nvn_vk_ready()) {
         CHECK(!getenv("RELIFT_VK_REQUIRE"));
@@ -201,6 +226,51 @@ TEST(nvn_a_vertex_storage_slot_binding_is_a_slot_not_a_driver_bank)
     if (m) {
         CHECK_EQ(m->storage_slots, 1u << 2);
         CHECK_EQ(m->driver, 0u);
+        CHECK(!m->writes_layer);
     }
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
+TEST(nvn_a_geometry_program_that_writes_layer_draws_layered_and_feeds_the_fragment_program)
+{
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_one_table(dir, layer_geometry, sizeof layer_geometry, 0xd0));
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    if (!nvn_vk_ready()) {
+        CHECK(!getenv("RELIFT_VK_REQUIRE"));
+        printf("  skipped: no host Vulkan device\n");
+        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+        return;
+    }
+    char key[65], why[256] = "";
+    for (int i = 0; i < 32; i++)
+        snprintf(key + 2 * i, 3, "%02x", 0xd0 + i);
+    nvn_module *gs = nvn_module_get(key, 2, why, sizeof why);
+    if (!gs)
+        printf("  %s\n", why);
+    CHECK(gs != NULL);
+    if (gs) {
+        CHECK(gs->writes_layer);
+        CHECK(!gs->writes_viewport);
+        nvn_module vs = { .stage = 0 }, te = { .stage = 4 };
+        nvn_module *mods[5] = { &vs, NULL, NULL, NULL, NULL };
+        CHECK(nvn_module_last_stage(mods) == &vs);
+        mods[4] = &te;
+        CHECK(nvn_module_last_stage(mods) == &te);
+        mods[2] = gs;
+        CHECK(nvn_module_last_stage(mods) == gs);
+    }
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
+TEST(nvn_a_geometry_program_runs_after_triangles_only)
+{
+    CHECK(nvn_draw_geometry_input_ok(NVN_DRAW_TRIANGLES));
+    CHECK(nvn_draw_geometry_input_ok(NVN_DRAW_TRIANGLE_STRIP));
+    CHECK(nvn_draw_geometry_input_ok(NVN_DRAW_TRIANGLE_FAN));
+    for (uint32_t mode = 0; mode < 4; mode++)
+        CHECK(!nvn_draw_geometry_input_ok(mode));
+    for (uint32_t mode = 10; mode <= NVN_DRAW_PATCHES; mode++)
+        CHECK(!nvn_draw_geometry_input_ok(mode));
 }

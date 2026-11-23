@@ -1432,6 +1432,29 @@ static int prepare_stage(replay *r, pipe_key *k, module **mods, uint32_t s)
     return RL_OK;
 }
 
+bool nvn_draw_geometry_input_ok(uint32_t mode)
+{
+    return mode == NVN_DRAW_TRIANGLES || mode == NVN_DRAW_TRIANGLE_STRIP || mode == NVN_DRAW_TRIANGLE_FAN;
+}
+
+/**
+ * @brief Checks that the host can run geometry program gs after a draw of primitive mode: the device has geometry
+ * shaders, the program writes no viewport index (the layer sets one viewport), and the draw's primitives are the
+ * triangles its translation takes as input (the translator's default geometry input, as NVIDIA takes the input
+ * primitive from the draw and not from the program header).
+ */
+static int geometry_draw(replay *r, const module *gs, uint32_t mode)
+{
+    if (!g.geometry_shader)
+        return nvn_vk_stop(r, "geometry program %s: the host device has no geometry shaders", gs->key);
+    if (gs->writes_viewport)
+        return nvn_vk_stop(r, "geometry program %s writes the viewport index", gs->key);
+    if (!nvn_draw_geometry_input_ok(mode))
+        return nvn_vk_stop(r, "geometry program %s after primitive mode %u; its translation takes triangles", gs->key,
+                           mode);
+    return RL_OK;
+}
+
 /** @brief A draw: mode, then indexed (index type, index address, base vertex) or not (first vertex), and count. */
 static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t iaddr, int32_t base, uint32_t first,
                 uint32_t count)
@@ -1475,12 +1498,15 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     }
     if (!mods[0])
         return nvn_vk_stop(r, "draw without a vertex program");
-    if (mods[3] || mods[4] || mods[2])
-        return nvn_vk_stop(r, "draw with tessellation or geometry programs (control %s, evaluation %s, geometry %s, mode %u)",
+    if (mods[3] || mods[4])
+        return nvn_vk_stop(r, "draw with tessellation programs (control %s, evaluation %s, geometry %s, mode %u)",
                            mods[3] ? mods[3]->key : "none", mods[4] ? mods[4]->key : "none",
                            mods[2] ? mods[2]->key : "none", mode);
-    if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(mods[0], mods[1])))
-        return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the vertex program writes",
+    if (mods[2] && (rc = geometry_draw(r, mods[2], mode)) != RL_OK)
+        return rc;
+    const module *last = nvn_module_last_stage(mods);
+    if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(last, mods[1])))
+        return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the stage before it writes",
                            mods[1]->key);
     fixed_push fp = {
         .point_size = st->point_size,
@@ -1514,7 +1540,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
-    if (!nvn_vk_begin_rendering(r, &area))
+    if (!nvn_vk_begin_rendering_layered(r, &area, last->writes_layer))
         return nvn_vk_stop(r, "draw without render targets (%u color, first %p, depth %p)", st->ncolor,
                            st->ncolor ? (void *)st->color[0].v : NULL, (void *)st->depth.v);
     uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);

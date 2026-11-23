@@ -117,9 +117,9 @@ typedef struct vimg {
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
-    /** @brief Views of single levels and layers (depth slices of a 3D image), for render targets. */
+    /** @brief Views of single levels and of count layers (depth slices of a 3D image) from layer, for render targets. */
     struct vsub {
-        uint32_t level, layer;
+        uint32_t level, layer, count;
         VkImageView view;
         /** @brief The view's format when it is not the image's, else VK_FORMAT_UNDEFINED. */
         VkFormat format;
@@ -134,7 +134,8 @@ typedef struct vimg {
 /** @brief A render target: one level and layer of an image. */
 typedef struct rt {
     vimg *v;
-    uint32_t level, layer;
+    /** @brief The level and first layer drawn to, and the layers from there a layered draw reaches (the view's, else the rest of the image). */
+    uint32_t level, layer, layers;
     VkImageView view;
     /** @brief The format the target is drawn in: its image's, or an sRGB or linear twin a texture view names. */
     VkFormat format;
@@ -186,6 +187,8 @@ typedef struct nvn_vkdev {
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_mesh_shader is on with task and mesh shaders: the native back end of task and mesh programs runs. */
     bool mesh_shader;
+    /** @brief The device has geometry shaders (geometryShader) and tessellation shaders (tessellationShader). */
+    bool geometry_shader, tessellation_shader;
     /** @brief VK_EXT_device_fault's deviceFault is on: a lost device reports what faulted. */
     bool device_fault;
     /** @brief maxStorageBufferRange and maxDrawIndexedIndexValue of the device. */
@@ -594,6 +597,11 @@ VkFormat nvn_vk_format(uint32_t f, VkImageAspectFlags *aspect);
  */
 bool nvn_vk_begin_rendering(replay *r, VkRect2D *area);
 /**
+ * @brief nvn_vk_begin_rendering for a draw whose last pre-raster stage writes Layer when layered: the targets are
+ * seen as 2D arrays over the layers every one of them spans (nvn_vk_begin_rendering when that is one).
+ */
+bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered);
+/**
  * @brief Ends the render pass the draws left open, with a barrier on all commands after it; nothing when none is open.
  * Every command recorded outside a pass ends it first (nvn_vk_begin), as do a submit and the game's barriers.
  */
@@ -782,6 +790,13 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e);
  * stop.
  */
 int nvn_draw_render_enabled(replay *r, bool *run);
+/** @brief NVNdrawPrimitive values a draw takes: triangles, triangle strip, triangle fan and patches. */
+enum { NVN_DRAW_TRIANGLES = 4, NVN_DRAW_TRIANGLE_STRIP = 5, NVN_DRAW_TRIANGLE_FAN = 6, NVN_DRAW_PATCHES = 14 };
+/**
+ * @brief Whether a geometry program's translation runs after a draw of primitive mode: it takes triangles (the
+ * translator's default geometry input; NVIDIA's geometry stage takes its input primitive from the draw).
+ */
+bool nvn_draw_geometry_input_ok(uint32_t mode);
 /**
  * @brief The compute program's driver bank c[0] for a dispatch of groups (see nvn_draw.c): its counts of uniform buffers,
  * storage buffers, texture handles and image handles, and the end byte of its table. *img_lo is where the image
