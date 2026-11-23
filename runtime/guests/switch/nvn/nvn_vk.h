@@ -16,9 +16,17 @@
 
 /**
  * @brief Batches recorded or in flight at once: the layer records the next batch into one slot while the host device
- * runs the one before from the other, as the console's CPU builds commands while its GPU runs earlier ones.
+ * runs the ones before from the others, as the console's CPU builds commands while its GPU runs earlier ones. Android
+ * has 4: a game submits several batches a frame there, and with 2 the replay waited for the batch before last
+ * (Turnip, Adreno 740: replay 42 to 7 ms a present). A build may set its own count.
  */
+#ifndef NVN_SLOTS
+#if defined(__ANDROID__)
+#define NVN_SLOTS 4u
+#else
 #define NVN_SLOTS 2u
+#endif
+#endif
 #define MAX_RT 8u
 /** @brief Graphics, compute, task and mesh stages, in NVNshaderStage order. */
 #define NVN_STAGES 8u

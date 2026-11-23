@@ -2284,17 +2284,20 @@ int nvn_vk_ring_check(void)
     }
     memset(out.map, 0, 4096);
     replay r = { 0 };
-    VkFence a = long_batch(&r, &big, 64, 0);
-    nvn_vk_begin(&r);
-    VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x11111111u);
-    nvn_vk_barrier(g.cb);
+    VkFence a = long_batch(&r, &big, 64, 0), b = NULL;
     if (!a)
         rc = 2;
-    else if (VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
-        rc = 3;
-    VkFence b = g.fence;
-    if (!rc && !nvn_vk_submit(&r))
-        rc = 4;
+    /* The batches after a fill the other slots; the last of them reuses a's slot, so its submit waits for a. */
+    for (uint32_t i = 1; !rc && i < NVN_SLOTS; i++) {
+        nvn_vk_begin(&r);
+        VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x11111111u);
+        nvn_vk_barrier(g.cb);
+        if (i == 1 && VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
+            rc = 3;
+        b = g.fence;
+        if (!rc && !nvn_vk_submit(&r))
+            rc = 4;
+    }
     if (!rc && VK(vkGetFenceStatus)(g.dev, a) != VK_SUCCESS)
         rc = 5;
     if (!rc && (!nvn_vk_settle() || VK(vkGetFenceStatus)(g.dev, b) != VK_SUCCESS || ((uint32_t *)out.map)[1023] != 0x11111111u))
