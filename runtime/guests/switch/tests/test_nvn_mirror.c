@@ -488,3 +488,39 @@ TEST(nvn_registered_textures_cost_nothing_per_frame_until_their_bytes_change)
     CHECK(v && v->hash != before);
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_a_pass_with_an_unbound_color_slot_below_a_bound_one_begins)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100, tex = heap + 0x800;
+    CHECK(nvn_pool_make(pool, at, 0x10000, 0));
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 8, .height = 8, .depth = 1, .levels = 1,
+                       .flags = 1u << 4, .stride = 64, .swizzle = { 2, 3, 4, 5 }, .pool = pool };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    r.st = &st;
+    vimg *v = nvn_vk_image(&r, tex);
+    CHECK(v != NULL);
+    if (!v)
+        return;
+    st.ncolor = 2;
+    st.color[1] = (rt){ .v = v, .layers = 1, .view = v->view, .format = v->format };
+    VkRect2D area;
+    CHECK(nvn_vk_begin_rendering(&r, &area));
+    CHECK_EQ(area.extent.width, 8);
+    CHECK(nvn_vk_begin_rendering_layered(&r, &area, true));
+    nvn_vk_end_rendering();
+    CHECK(nvn_vk_flush(&r));
+}

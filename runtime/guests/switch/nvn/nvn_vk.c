@@ -2874,7 +2874,8 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
     uint32_t layers = layered ? draw_layers(r->st) : 1;
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
         rt *t = &r->st->color[i];
-        if (!(cv[i] = draw_view(t, layers)))
+        cv[i] = draw_view(t, layers);
+        if (t->v && !cv[i])
             return false;
         ca[i] = (VkRenderingAttachmentInfo){ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                              .imageView = cv[i],
