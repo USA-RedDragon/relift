@@ -332,3 +332,59 @@ fn xmad_lowers_to_its_pseudo_instruction() {
         "XMAD with a condition code carry"
     );
 }
+
+/// LEA and LEA.HI lower to the SM86 forms of the same operands; with a
+/// carry they stop.
+#[test]
+fn lea_lowers_to_the_sm86_lea() {
+    let lea = word(
+        Op::Lea,
+        Src::Reg,
+        &[
+            ("Dest", 2),
+            ("SrcA", 8),
+            ("SrcB", 9),
+            ("ImmU5", 3),
+            ("DestPred", 7),
+        ],
+    );
+    let hi = word(
+        Op::LeaHi,
+        Src::CBuf,
+        &[
+            ("Dest", 3),
+            ("SrcA", 8),
+            ("SrcC", 10),
+            ("CbufSlot", 0),
+            ("CbufOffset", 0x154 / 4),
+            ("ImmU5", 3),
+            ("DestPred", 7),
+        ],
+    );
+    let p = program(5, &[lea, hi]);
+    let l = relift_gpu_sm53::lower::program(&p).expect("lowers");
+    assert_eq!(
+        l.code[0].as_ref().unwrap().to_string(),
+        "LEA R2, R8, R9, 0x3"
+    );
+    assert_eq!(
+        l.code[1].as_ref().unwrap().to_string(),
+        "LEA.HI R3, R8, c[0x0][0x154], R10, 0x3"
+    );
+    translated(&p);
+    let cc = word(
+        Op::Lea,
+        Src::Reg,
+        &[
+            ("Dest", 2),
+            ("SrcA", 8),
+            ("SrcB", 9),
+            ("WriteCC", 1),
+            ("DestPred", 7),
+        ],
+    );
+    assert_eq!(
+        relift_gpu_sm53::lower::stops(&program(5, &[cc]))[0].reason,
+        "LEA with a condition code carry"
+    );
+}

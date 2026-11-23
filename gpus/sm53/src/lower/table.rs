@@ -92,6 +92,13 @@ pub fn row(op: Op, src: Src) -> Row {
                        Ra, B, s is the same sum with the same carry out, into the carry flag's \
                        predicate as for IADD. Negated operands stop",
         },
+        (Op::Lea | Op::LeaHi, _) => Row::Exact {
+            to: "LEA",
+            evidence: "Ryujinx's EmitLea gives (SrcA << ImmU5) + the second source and EmitLeaHi \
+                       the high word of (SrcC:SrcA) << ImmU5 plus it; SM86 LEA and LEA.HI of \
+                       the same operands compute the same. Ryujinx leaves .CC, .X and the \
+                       predicate destination unmodeled, so those stop, as does .NEG of A",
+        },
         (Op::Xmad, _) => Row::Pseudo {
             name: "XMAD",
             evidence: "Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; \

@@ -187,11 +187,11 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | LDG | exact | LDG | Ryujinx's EmitLdg loads the words of the size (U8, S8, U16, S16, 32, 64, 128 bits) at the 64-bit address of the register pair (.E) plus Imm24 sign-extended and does not read the cache operation; SM86 LDG.E of the same size at [Ra.64+imm] is a weak load of the same bytes. A 32-bit address, an RZ base, UB128 and .CV stop |
 | LDL | stop | | no semantic check yet |
 | LDS | stop | | no semantic check yet |
-| LEA R | stop | | no semantic check yet |
-| LEA I | stop | | no semantic check yet |
-| LEA C | stop | | no semantic check yet |
-| LEA_HI R | stop | | no semantic check yet |
-| LEA_HI C | stop | | no semantic check yet |
+| LEA R | exact | LEA | Ryujinx's EmitLea gives (SrcA << ImmU5) + the second source and EmitLeaHi the high word of (SrcC:SrcA) << ImmU5 plus it; SM86 LEA and LEA.HI of the same operands compute the same. Ryujinx leaves .CC, .X and the predicate destination unmodeled, so those stop, as does .NEG of A |
+| LEA I | exact | LEA | Ryujinx's EmitLea gives (SrcA << ImmU5) + the second source and EmitLeaHi the high word of (SrcC:SrcA) << ImmU5 plus it; SM86 LEA and LEA.HI of the same operands compute the same. Ryujinx leaves .CC, .X and the predicate destination unmodeled, so those stop, as does .NEG of A |
+| LEA C | exact | LEA | Ryujinx's EmitLea gives (SrcA << ImmU5) + the second source and EmitLeaHi the high word of (SrcC:SrcA) << ImmU5 plus it; SM86 LEA and LEA.HI of the same operands compute the same. Ryujinx leaves .CC, .X and the predicate destination unmodeled, so those stop, as does .NEG of A |
+| LEA_HI R | exact | LEA | Ryujinx's EmitLea gives (SrcA << ImmU5) + the second source and EmitLeaHi the high word of (SrcC:SrcA) << ImmU5 plus it; SM86 LEA and LEA.HI of the same operands compute the same. Ryujinx leaves .CC, .X and the predicate destination unmodeled, so those stop, as does .NEG of A |
+| LEA_HI C | exact | LEA | Ryujinx's EmitLea gives (SrcA << ImmU5) + the second source and EmitLeaHi the high word of (SrcC:SrcA) << ImmU5 plus it; SM86 LEA and LEA.HI of the same operands compute the same. Ryujinx leaves .CC, .X and the predicate destination unmodeled, so those stop, as does .NEG of A |
 | LEPC | stop | | no semantic check yet |
 | LONGJMP | stop | | no semantic check yet |
 | LOP R | stop | | no semantic check yet |
@@ -315,4 +315,4 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | XMAD C | pseudo | XMAD | Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign bits << 16), with MRG the high half replaced by B's low half; XmadRc takes B from SrcC and C from the constant, without PSL and MRG. The translator's XMAD pseudo-instruction computes the same. .X and .CC stop |
 | XMAD RC | pseudo | XMAD | Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign bits << 16), with MRG the high half replaced by B's low half; XmadRc takes B from SrcC and C from the constant, without PSL and MRG. The translator's XMAD pseudo-instruction computes the same. .X and .CC stop |
 
-293 forms: 57 exact, 5 exact and pseudo, 7 pseudo, 224 stop.
+293 forms: 62 exact, 5 exact and pseudo, 7 pseudo, 219 stop.

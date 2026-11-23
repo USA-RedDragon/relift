@@ -164,6 +164,8 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::Ipa, _) => return Some(ipa(i)),
         (Op::Iadd, _) => iadd(i, f),
         (Op::Iscadd, _) => iscadd(i, f),
+        (Op::Lea, _) => lea(i, false),
+        (Op::LeaHi, _) => lea(i, true),
         (Op::Ldg, _) => ldg(i),
         (Op::Xmad, _) => return Some(xmad(i)),
         (Op::Stg, _) => stg(i),
@@ -372,6 +374,36 @@ fn xmad(i: &Inst) -> Lowered {
     p.ops.push(b);
     p.ops.push(c);
     Lowered::Pseudo(p)
+}
+
+/// `LEA Rd, Ra, B, s` and `LEA.HI Rd, Ra, B, Rc, s`: SM86 `LEA` and
+/// `LEA.HI` of the same operands, `(Ra << s) + B` and the high word of
+/// `(Rc:Ra) << s` plus B, as Ryujinx's EmitLea and EmitLeaHi compute them.
+/// Ryujinx does not model `.CC`, `.X` or the predicate destination, so
+/// those, and `.NEG` of A, stop.
+fn lea(i: &Inst, hi: bool) -> Res {
+    if f(i, "WriteCC") != 0 || f(i, "X") != 0 {
+        return Err("LEA with a condition code carry");
+    }
+    if f(i, "NegA") != 0 {
+        return Err("LEA with a negated A");
+    }
+    if f(i, "DestPred") != PT {
+        return Err("LEA with a predicate destination");
+    }
+    let mut p = if hi {
+        with(inst(i, "LEA"), &["HI"])
+    } else {
+        inst(i, "LEA")
+    };
+    p.ops.push(reg(f(i, "Dest")));
+    p.ops.push(reg(f(i, "SrcA")));
+    p.ops.push(int_b(i)?);
+    if hi {
+        p.ops.push(reg(f(i, "SrcC")));
+    }
+    p.ops.push(Operand::Hex(f(i, "ImmU5")));
+    Ok(carry_out(p, PT as u8))
 }
 
 /// The SM86 size modifier of a Maxwell global access size: U8, S8, U16,
