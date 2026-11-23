@@ -207,22 +207,25 @@ fn native_op(c: &mut Ctx, x: u32, f: Option<u32>) -> u32 {
 }
 
 impl Ctx {
-    /// The table as a constant-initialized private array of words, four per
-    /// row: `A` low, `A` high, `B`, `C`.
+    /// The table as a constant-initialized private array of four-word
+    /// vectors, one per row: `A` low, `A` high, `B`, `C`.
     fn mufu_table(&mut self, t: Table) -> u32 {
         let key = TABLE_KEY + t as u32;
         if let Some(&v) = self.builtins.get(&key) {
             return v;
         }
-        let words: Vec<u32> = t
+        let u = self.u32t();
+        let v4 = self.m.t_vec(u, 4);
+        let rows: Vec<u32> = t
             .rows()
             .iter()
-            .flatten()
-            .map(|&w| self.m.c_u32(w))
+            .map(|r| {
+                let ws: Vec<u32> = r.iter().map(|&w| self.m.c_u32(w)).collect();
+                self.m.c_composite(v4, &ws)
+            })
             .collect();
-        let u = self.u32t();
-        let arr = self.m.t_array(u, words.len() as u32);
-        let init = self.m.c_composite(arr, &words);
+        let arr = self.m.t_array(v4, rows.len() as u32);
+        let init = self.m.c_composite(arr, &rows);
         let p = self.m.t_ptr(PRIVATE, arr);
         let var = self.m.id();
         crate::spirv::inst(&mut self.m.types, op::VARIABLE, &[p, var, PRIVATE, init]);
@@ -234,15 +237,11 @@ impl Ctx {
     fn mufu_row(&mut self, t: Table, idx: u32) -> [u32; 4] {
         let var = self.mufu_table(t);
         let u = self.u32t();
-        let p = self.m.t_ptr(PRIVATE, u);
-        let base = self.sh(op::SHIFT_LEFT_LOGICAL, idx, 2);
-        let mut row = [0; 4];
-        for (k, w) in row.iter_mut().enumerate() {
-            let i = self.sh(op::BITWISE_OR, base, k as u32);
-            let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, i]);
-            *w = self.m.emit(op::LOAD, u, &[ptr]);
-        }
-        row
+        let v4 = self.m.t_vec(u, 4);
+        let p = self.m.t_ptr(PRIVATE, v4);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, idx]);
+        let row = self.m.emit(op::LOAD, v4, &[ptr]);
+        std::array::from_fn(|k| self.m.emit(op::COMPOSITE_EXTRACT, u, &[row, k as u32]))
     }
 
     /// The squarer: `t * t` (`t` of `nb` bits) without the partial products
