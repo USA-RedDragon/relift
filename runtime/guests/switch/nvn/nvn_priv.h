@@ -468,6 +468,24 @@ void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control);
  * RELIFT_WARM_THREADS count, 0 when unset.
  */
 bool nvn_warm_maps_note(uint64_t count, uint64_t limit, uint32_t forced, char *buf, size_t n);
+/** @brief What the launch warm-up makes, from RELIFT_PIPELINE_WARM and the counts of recorded pipelines and table programs. */
+typedef struct nvn_warm_plan {
+    /** @brief Items the compile screen counts and the first submit may wait for: the recorded pipelines, and the table when they lead. */
+    uint32_t total;
+    /** @brief The table programs made after them in the background, uncounted, behind every draw-time compile. */
+    uint32_t extra;
+    /** @brief Whether the table leads (counted in total), not follows. */
+    bool table_counted;
+    /** @brief Whether the first submit waits (up to its hold) for the counted items. */
+    bool hold;
+} nvn_warm_plan;
+/**
+ * @brief The launch warm-up's plan: mode is RELIFT_PIPELINE_WARM or NULL. "off" makes nothing; "all" counts the table
+ * after the recorded pipelines; "all-background" does too without holding the first submit. The default
+ * ("registered", or unset) counts the recorded pipelines and holds for them, then makes the rest of the table as
+ * extras; a launch without a record has only the table to go by and counts it.
+ */
+nvn_warm_plan nvn_warm_plan_for(const char *mode, uint32_t nrecorded, uint32_t nshader);
 /** @brief NVNdepthMode and NVNwindowOriginMode of the last device initialized (nvn_dev.c). */
 uint32_t nvn_device_depth_mode(void);
 uint32_t nvn_device_origin_mode(void);

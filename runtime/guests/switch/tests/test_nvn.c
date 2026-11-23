@@ -34,6 +34,32 @@ static uint64_t call(rl_ctx *c, rl_fn_t *fn, uint64_t x0, uint64_t x1, uint64_t 
     return fn(c, t_mem());
 }
 
+TEST(nvn_warm_makes_the_rest_of_the_table_after_the_record_in_the_background)
+{
+    nvn_warm_plan p = nvn_warm_plan_for(NULL, 1100, 12000);
+    CHECK_EQ(p.total, 1100u);
+    CHECK_EQ(p.extra, 12000u);
+    CHECK(p.hold);
+    CHECK(!p.table_counted);
+    p = nvn_warm_plan_for("registered", 1100, 12000);
+    CHECK_EQ(p.total, 1100u);
+    CHECK_EQ(p.extra, 12000u);
+    p = nvn_warm_plan_for(NULL, 0, 12000);
+    CHECK_EQ(p.total, 12000u);
+    CHECK_EQ(p.extra, 0u);
+    CHECK(p.table_counted);
+    p = nvn_warm_plan_for("all", 1100, 12000);
+    CHECK_EQ(p.total, 13100u);
+    CHECK_EQ(p.extra, 0u);
+    CHECK(p.hold);
+    p = nvn_warm_plan_for("all-background", 1100, 12000);
+    CHECK_EQ(p.total, 13100u);
+    CHECK(!p.hold);
+    p = nvn_warm_plan_for("off", 1100, 12000);
+    CHECK_EQ(p.total, 0u);
+    CHECK_EQ(p.extra, 0u);
+}
+
 TEST(nvn_warm_warns_when_mappings_near_the_limit)
 {
     char msg[512] = "untouched";

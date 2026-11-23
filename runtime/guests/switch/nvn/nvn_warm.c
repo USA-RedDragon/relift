@@ -21,12 +21,15 @@
  *   ready before the game asks for any (and finds them in the driver's
  *   pipeline cache). The first submit waits for them for at most HOLD_NS;
  *   past that the game goes on and the workers with it.
- * - With RELIFT_PIPELINE_WARM=all, every program of the build's shader
- *   table, at the first submit.
  *
- * RELIFT_PIPELINE_WARM is "registered" (the default: the first two),
- * "all" (also the table), "all-background" (also the table, and the first
- * submit does not wait at all) or "off".
+ * - The rest of the build's shader table, after the recorded pipelines: in
+ *   the background, behind the draws (the workers drop their priority), and
+ *   neither counted on the compile screen nor waited for by the first submit.
+ *   A combat or scene the record has not seen then finds its programs made.
+ *
+ * RELIFT_PIPELINE_WARM is "registered" (the default: all of the above),
+ * "all" (the table counted and waited for like the record), "all-background"
+ * (as "all", and the first submit does not wait at all) or "off".
  *
  * A draw that needs a library or pipeline a worker is making waits for it;
  * one nobody has started it makes itself.
@@ -56,6 +59,10 @@
 #else
 #include <unistd.h>
 #endif
+#if defined(__linux__)
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#endif
 
 /** @brief A program to warm: its key, stage and, for a compute program, workgroup size. */
 typedef struct job {
@@ -72,6 +79,9 @@ static struct {
     bool pool_started;
     bool launched, all, background;
     uint32_t total, next, done, nrecorded, nshader, failed, started, exited;
+    /** @brief The table programs made after the counted items (nvn_warm_plan.extra), and whether the counted ones are done. */
+    uint32_t extra;
+    bool counted_done;
     /** @brief The launch items the driver refused: how many, and the keys of the first MAX_FAIL_KEYS for the report. */
     uint32_t lfailed, nfailkeys;
     char (*failkeys)[65];
@@ -295,6 +305,31 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
     return stage == 0 ? nvn_pipe_warm_vertex(&k) : nvn_pipe_warm_fragment(&k);
 }
 
+nvn_warm_plan nvn_warm_plan_for(const char *mode, uint32_t nrecorded, uint32_t nshader)
+{
+    nvn_warm_plan p = { 0 };
+    if (mode && !strcmp(mode, "off"))
+        return p;
+    bool all = mode && (!strcmp(mode, "all") || !strcmp(mode, "all-background"));
+    p.table_counted = all || !nrecorded;
+    p.total = nrecorded + (p.table_counted ? nshader : 0);
+    p.extra = p.table_counted ? 0 : nshader;
+    p.hold = !(mode && !strcmp(mode, "all-background"));
+    return p;
+}
+
+/** @brief Drops the calling thread's priority below the game's threads, so a draw's own compile goes first. */
+static void yield_to_draws(void)
+{
+#if defined(_WIN32)
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(__APPLE__)
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#elif defined(__linux__)
+    (void)setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
+#endif
+}
+
 /** @brief Makes the pipeline of a record the earlier launches kept. */
 static bool make_recorded(const nvn_pipe_rec *rec)
 {
@@ -365,17 +400,36 @@ static void make_set(const job *j)
  * @brief Notes that a launch worker is done; the last one logs the warm-up's end and tells the pipelines module, and
  * wakes the first submit if it still waits.
  */
+static void counted_finished(void);
+
 static void launch_exit(void)
 {
     pthread_mutex_lock(&W.lock);
     bool last = ++W.exited == W.started;
-    if (last)
-        progress(true, "done");
+    bool finish = last && !W.counted_done;
+    if (last && W.extra)
+        rl_log(RL_LOG_INFO, "nvn", "shader warm-up: the %u other table programs are made too, %.1f s after launch", W.extra,
+               (rl_clock_ns() - W.t0) / 1e9);
     pthread_cond_broadcast(&W.cv);
     pthread_mutex_unlock(&W.lock);
-    if (!last)
-        return;
+    if (finish)
+        counted_finished();
+}
+
+/**
+ * @brief Ends the counted part of the warm-up once: logs it, writes the report, tells the pipelines module and the
+ * screen, and wakes the first submit. Later compiles count as late from here.
+ */
+static void counted_finished(void)
+{
     pthread_mutex_lock(&W.lock);
+    if (W.counted_done) {
+        pthread_mutex_unlock(&W.lock);
+        return;
+    }
+    W.counted_done = true;
+    progress(true, "done");
+    pthread_cond_broadcast(&W.cv);
     write_failed_report();
     pthread_mutex_unlock(&W.lock);
     uint64_t made, made_ns, late, late_ns;
@@ -407,9 +461,21 @@ static void *launch_worker(void *arg)
         }
         uint32_t i = W.next++;
         pthread_mutex_unlock(&W.lock);
-        if (i >= W.total) {
+        if (i >= W.total + W.extra) {
             launch_exit();
             return NULL;
+        }
+        if (i >= W.total) {
+            static _Thread_local bool lowered;
+            if (!lowered) {
+                lowered = true;
+                yield_to_draws();
+            }
+            char key[65];
+            uint32_t wg[3] = { 0, 0, 0 };
+            if (nvn_shader_key_at(i - W.nrecorded, key))
+                (void)warm_program(key, -1, wg);
+            continue;
         }
         bool ok = true;
         if (i < W.nrecorded) {
@@ -429,7 +495,10 @@ static void *launch_worker(void *arg)
         }
         rl_warmup_done(1, ok ? 0u : 1u);
         progress(false, i < W.nrecorded ? "recorded" : "table");
+        bool counted = W.done == W.total;
         pthread_mutex_unlock(&W.lock);
+        if (counted)
+            counted_finished();
     }
 }
 
@@ -452,7 +521,6 @@ static void launch(void)
 {
     const char *mode = getenv("RELIFT_PIPELINE_WARM");
     bool off = mode && !strcmp(mode, "off");
-    W.all = mode && (!strcmp(mode, "all") || !strcmp(mode, "all-background"));
     W.background = mode && !strcmp(mode, "all-background");
     if (off || !nvn_vk_ready()) {
         nvn_pipe_warmed();
@@ -461,16 +529,16 @@ static void launch(void)
     pthread_mutex_lock(&W.lock);
     W.launched = true;
     W.nrecorded = nvn_pipe_recorded();
-    /* A launch with no record has nothing to go by: its queue is the shader table, so the screen has a total. */
-    if (!W.nrecorded)
-        W.all = true;
-    W.nshader = W.all ? nvn_shader_count() : 0;
-    W.total = W.nrecorded + W.nshader;
+    W.nshader = nvn_shader_count();
+    nvn_warm_plan plan = nvn_warm_plan_for(mode, W.nrecorded, W.nshader);
+    W.all = plan.table_counted;
+    W.total = plan.total;
+    W.extra = plan.extra;
     W.t0 = W.last_log = rl_clock_ns();
     uint32_t total = W.total, nthreads = worker_count();
     pthread_mutex_unlock(&W.lock);
-    if (nthreads > total)
-        nthreads = total;
+    if (nthreads > total + W.extra)
+        nthreads = total + W.extra;
     if (!nthreads) {
         nvn_pipe_warmed();
         return;
@@ -480,8 +548,10 @@ static void launch(void)
     const rlvk_dev *dev = rl_vkdev();
     rl_warmup_set_gpu(dev ? dev->name : "");
     rl_warmup_begin(total, W.wait ? RL_WARMUP_BLOCKING : RL_WARMUP_BACKGROUND);
-    rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u recorded pipelines and %u table programs on %u threads%s",
-           W.nrecorded, W.nshader, nthreads, W.background ? ", the game starts now" : "");
+    rl_log(RL_LOG_INFO, "nvn",
+           "shader warm-up: %u recorded pipelines and %u table programs on %u threads%s, then %u more table programs "
+           "in the background",
+           W.nrecorded, W.all ? W.nshader : 0, nthreads, W.background ? ", the game starts now" : "", W.extra);
     pthread_mutex_lock(&W.lock);
     W.started = nthreads;
     pthread_mutex_unlock(&W.lock);
@@ -499,6 +569,7 @@ static void launch(void)
     if (!started) {
         pthread_mutex_lock(&W.lock);
         W.started = 1;
+        W.extra = 0;
         pthread_mutex_unlock(&W.lock);
         launch_worker(NULL);
         return;
@@ -507,7 +578,7 @@ static void launch(void)
         return;
     uint64_t until = rl_clock_ns() + HOLD_NS;
     pthread_mutex_lock(&W.lock);
-    while (W.exited < W.started && (W.wait || rl_clock_ns() < until)) {
+    while (!W.counted_done && (W.wait || rl_clock_ns() < until)) {
         if (!W.screen && rl_clock_ns() - W.t0 >= SCREEN_NS) {
             W.screen = true;
             pthread_mutex_unlock(&W.lock);
@@ -522,7 +593,7 @@ static void launch(void)
         ts.tv_nsec = (long)(ns % 1000000000ull);
         pthread_cond_timedwait(&W.cv, &W.lock, &ts);
     }
-    bool going = W.exited < W.started;
+    bool going = !W.counted_done;
     if (going)
         progress(true, "the game starts, the warm-up goes on");
     pthread_mutex_unlock(&W.lock);
