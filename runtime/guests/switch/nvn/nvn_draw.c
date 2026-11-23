@@ -2306,7 +2306,7 @@ static void trace_name(uint32_t id, char *s, size_t n)
  * @brief Logs what a traced dispatch of program key found: each instruction with hits, in program order, with the
  * first hit's value, sources and invocation, and which hit came first in time (the lowest sequence number).
  */
-static void trace_report(const char *key, uint32_t words)
+static void trace_report(const replay *r, const char *key, uint32_t words)
 {
     const uint32_t *t = (const uint32_t *)(const void *)d.tbuf.map;
     uint32_t slots = (words - 16u) / 16u - 1u, shown = 0, first = UINT32_MAX, first_seq = UINT32_MAX;
@@ -2321,6 +2321,24 @@ static void trace_report(const char *key, uint32_t words)
         rl_log(RL_LOG_INFO, "gpu-trace", "present %llu command %llu program %.8s: no hits",
                (unsigned long long)d.cmd_present, (unsigned long long)d.cmd_index, key);
         return;
+    }
+    static bool dumped;
+    if (!dumped) {
+        dumped = true;
+        char why[96];
+        snprintf(why, sizeof why, "first traced dispatch with hits (program %.8s)", key);
+        nvn_trace_ring_dump(why);
+        for (uint32_t b = 0; b < NVN_UBO_SLOTS; b++) {
+            uint64_t addr = r->st->ubo[NVN_STAGE_COMPUTE][b].addr, size = r->st->ubo[NVN_STAGE_COMPUTE][b].size;
+            if (!addr)
+                continue;
+            uint32_t w[4] = { 0 };
+            if (nvn_gpu_mapped(addr, 16))
+                memcpy(w, rl_mem_base() + nvn_gpu_guest(addr), 16);
+            rl_log(RL_LOG_INFO, "gpu-trace", "  compute uniform slot %u (c[%u]): gpu 0x%llx guest 0x%llx size %llu: %08x %08x %08x %08x",
+                   b, b + 3, (unsigned long long)addr, (unsigned long long)nvn_gpu_guest(addr), (unsigned long long)size,
+                   w[0], w[1], w[2], w[3]);
+        }
     }
     for (uint32_t k = 0; k < slots && shown < 64; k++) {
         const uint32_t *s = t + 16 + 16 * k;
@@ -2473,7 +2491,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     if (m->trace_words) {
         if (!nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed the traced dispatch of %s", m->key);
-        trace_report(m->key, m->trace_words);
+        trace_report(r, m->key, m->trace_words);
     }
     if (nvn_trace_active) {
         const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];
@@ -2481,7 +2499,10 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
                              .c0 = c0,
                              .c0_bytes = sizeof c0,
                              .c1_guest = k->addr,
-                             .c1_size = k->size };
+                             .c1_size = k->size,
+                             .spec_map = map,
+                             .spec_vals = vals,
+                             .nspec = n };
         tc.keys[NVN_STAGE_COMPUTE] = m->key;
         nvn_trace_end(r, &tc);
     }

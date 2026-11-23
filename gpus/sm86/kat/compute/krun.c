@@ -24,6 +24,15 @@
  *   dump <path>                    the last image's first level, written afterwards
  *   texdims <path>                 the texture dimension table (set 2 binding 31) from a file;
  *                                  zeros without one
+ *   imagefile <type> <w> <h> <d> <levels> <vkformat> <bpp> <path>
+ *                                  an image of that VkFormat number holding the file's texels
+ *                                  (each level in turn, bpp bytes each), as a frame trace dumps them
+ *   texcount <n>                   array elements of each texture binding of set 2 (default 4): a
+ *                                  translation indexes them by the texture's handle id
+ *   plainspecs                     set only the workgroup size and the spec lines, as the runtime does
+ *                                  (first line; else ids 3 and 4 get krun's shared and local sizes)
+ *   trace <path> <words>           the trace buffer of a trace-mode translation (set 3 binding 7),
+ *                                  zeroed, written to path afterwards
  * The device is the first whose name holds the given text. KRUN_CACHE=<path> writes the pipeline
  * cache there. Exits with 77 when the module needs VK_KHR_shader_fma or VK_KHR_cooperative_matrix
  * and the device lacks it. 16-bit float arithmetic and half fused multiply-adds are enabled where the
@@ -37,7 +46,7 @@
 #define CK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) { fprintf(stderr, "%s:%d %s = %d\n", __FILE__, __LINE__, #x, r_); exit(1); } } while (0)
 #define MAXB 16
 #define NBIND 104
-#define COUNT 4
+static uint32_t COUNT = 4;
 
 static VkDevice dev;
 static VkPhysicalDevice pd;
@@ -100,11 +109,19 @@ typedef struct { VkImage im; VkFormat fmt; int type, w, h, d, levels, layers; } 
 
 static const char *TYPES[] = {"1d", "2d", "3d", "cube", "1darr", "2darr", "cubearr"};
 
+static Img mkimage_from(int type, int w, int h, int d, int levels, const char *fs, VkFormat vkf, int fbpp,
+                       const char *file);
 static Img mkimage(int type, int w, int h, int d, int levels, const char *fs) {
+    return mkimage_from(type, w, h, d, levels, fs, 0, 0, 0);
+}
+static Img mkimage_from(int type, int w, int h, int d, int levels, const char *fs, VkFormat vkf, int fbpp,
+                       const char *file) {
     Img r = {0};
     r.type = type; r.w = w; r.h = (type == 0 || type == 4) ? 1 : h; r.levels = levels;
     int is_u8 = !strcmp(fs, "u8"), is_u32 = !strcmp(fs, "u32"), is_r32 = !strcmp(fs, "r32u");
     r.fmt = is_r32 ? VK_FORMAT_R32_UINT : is_u8 ? VK_FORMAT_R8G8B8A8_UNORM : is_u32 ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_R32G32B32A32_SFLOAT;
+    if (file) r.fmt = vkf;
+    size_t fn = 0, fat = 0; unsigned char *fdata = file ? slurp(file, &fn) : 0;
     r.d = type == 2 ? d : 1;
     r.layers = type == 3 ? 6 : (type == 4 || type == 5 || type == 6) ? d : 1;
     VkImageCreateInfo ii = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -120,7 +137,7 @@ static Img mkimage(int type, int w, int h, int d, int levels, const char *fs) {
     VkMemoryAllocateInfo ai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0, mr.size, memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
     VkDeviceMemory m; CK(vkAllocateMemory(dev, &ai, 0, &m));
     CK(vkBindImageMemory(dev, r.im, m, 0));
-    int bpp = (is_u8 || is_r32) ? 4 : 16;
+    int bpp = file ? fbpp : (is_u8 || is_r32) ? 4 : 16;
     VkCommandBuffer cb = begin();
     VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0, r.im, { VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, r.layers } };
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &b);
@@ -132,6 +149,11 @@ static Img mkimage(int type, int w, int h, int d, int levels, const char *fs) {
         int nz = type == 2 ? ld : r.layers;
         stage[l] = mkbuf((size_t)lw * lh * nz * bpp, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         unsigned char *buf = stage[l].map;
+        if (file) {
+            size_t want = (size_t)lw * lh * nz * bpp;
+            if (fat + want <= fn) memcpy(buf, fdata + fat, want);
+            fat += want;
+        } else
         for (int z = 0; z < nz; z++) for (int y = 0; y < lh; y++) for (int x = 0; x < lw; x++) {
             size_t o = (size_t)z * lh * lw + (size_t)y * lw + x;
             if (is_r32) { ((unsigned *)buf)[o] = x + 16 * y + 256 * z; }
@@ -289,10 +311,18 @@ int main(int argc, char **argv) {
     Img imgs[8]; int ni = 0;
     VkWriteDescriptorSet writes[64]; VkDescriptorImageInfo infos[64]; int nw = 0;
     char *save = 0; const char *dump = 0; const char *texdims = 0;
+    Buf tracebuf = {0}; unsigned long tb_bpp = 0;
     for (char *l = strtok_r(spec, "\n", &save); l; l = strtok_r(0, "\n", &save)) {
         char a[512], b[512], c[64]; unsigned long x, y, z, u, t;
         if (sscanf(l, "dump %511s", a) == 1) dump = strdup(a);
         else if (sscanf(l, "texdims %511s", a) == 1) texdims = strdup(a);
+        else if (sscanf(l, "texcount %lu", &x) == 1) COUNT = x;
+        else if (!strncmp(l, "plainspecs", 10)) nspec = 3;
+        else if (sscanf(l, "trace %511s %lu", a, &x) == 2) { tracebuf = mkbuf(4 * x, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT); tracebuf.out = strdup(a); }
+        else if (sscanf(l, "imagefile %63s %lu %lu %lu %lu %lu %lu %511s", c, &x, &y, &z, &u, &t, &tb_bpp, a) == 8) {
+            int ty = -1; for (int k = 0; k < 7; k++) if (!strcmp(c, TYPES[k])) ty = k;
+            imgs[ni++] = mkimage_from(ty, x, y, z, u, "file", (VkFormat)t, (int)tb_bpp, a);
+        }
         else if (sscanf(l, "local %lu %lu %lu", &x, &y, &z) == 3) { sdata[0] = x; sdata[1] = y; sdata[2] = z; }
         else if (sscanf(l, "groups %lu %lu %lu", &x, &y, &z) == 3) { groups[0] = x; groups[1] = y; groups[2] = z; }
         else if (sscanf(l, "shared %lu", &x) == 1) sdata[3] = x / 4;
@@ -384,11 +414,13 @@ int main(int argc, char **argv) {
     VkDescriptorSetLayoutCreateInfo tli = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, &bfi, 0, nt, tb };
     CK(vkCreateDescriptorSetLayout(dev, &tli, 0, &sl[2]));
     {
-        VkDescriptorSetLayoutBinding e[2] = { { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nb ? nb : 1, VK_SHADER_STAGE_ALL, 0 },
-                                              { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 } };
-        VkDescriptorBindingFlags ef[2] = { VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT, 0 };
-        VkDescriptorSetLayoutBindingFlagsCreateInfo efi = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, 0, 2, ef };
-        VkDescriptorSetLayoutCreateInfo l3 = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, &efi, 0, 2, e };
+        VkDescriptorSetLayoutBinding e[3] = { { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nb ? nb : 1, VK_SHADER_STAGE_ALL, 0 },
+                                              { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 },
+                                              { 7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 } };
+        VkDescriptorBindingFlags ef[3] = { VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT, 0, 0 };
+        uint32_t n3 = tracebuf.b ? 3 : 2;
+        VkDescriptorSetLayoutBindingFlagsCreateInfo efi = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, 0, n3, ef };
+        VkDescriptorSetLayoutCreateInfo l3 = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, &efi, 0, n3, e };
         CK(vkCreateDescriptorSetLayout(dev, &l3, 0, &sl[3]));
     }
     Buf locks = mkbuf(16384, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -408,7 +440,7 @@ int main(int argc, char **argv) {
 
     VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 37 }, { VK_DESCRIPTOR_TYPE_SAMPLER, COUNT },
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32 * COUNT }, { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 80 * COUNT },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXB + 18 } };
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXB + 19 } };
     VkDescriptorPoolCreateInfo dpi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, 0, 0, 4, 5, ps };
     VkDescriptorPool dp; CK(vkCreateDescriptorPool(dev, &dpi, 0, &dp));
     VkDescriptorSetAllocateInfo dai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0, dp, 4, sl };
@@ -442,6 +474,11 @@ int main(int argc, char **argv) {
         VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[3], 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bi, 0 };
         vkUpdateDescriptorSets(dev, 1, &w, 0, 0);
     }
+    if (tracebuf.b) {
+        VkDescriptorBufferInfo bi = { tracebuf.b, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[3], 7, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bi, 0 };
+        vkUpdateDescriptorSets(dev, 1, &w, 0, 0);
+    }
     for (int k = 0; k < nb; k++) {
         VkDescriptorBufferInfo bi = { bufs[k].b, 0, VK_WHOLE_SIZE };
         VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[3], 0, k, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bi, 0 };
@@ -468,6 +505,10 @@ int main(int argc, char **argv) {
     for (int k = 0; k < nb; k++) if (bufs[k].out) {
         FILE *f = fopen(bufs[k].out, "wb");
         fwrite(bufs[k].map, 1, bufs[k].n, f); fclose(f);
+    }
+    if (tracebuf.out) {
+        FILE *f = fopen(tracebuf.out, "wb");
+        fwrite(tracebuf.map, 1, tracebuf.n, f); fclose(f);
     }
     return 0;
 }

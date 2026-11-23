@@ -447,10 +447,19 @@ typedef struct nvn_trace_cmd {
     const uint8_t *c0;
     uint32_t c0_bytes;
     uint64_t c1_guest, c1_size;
+    /** @brief A dispatch's specialization constants (the workgroup size is ids 0 to 2): nspec ids and values. */
+    const VkSpecializationMapEntry *spec_map;
+    const uint32_t *spec_vals;
+    uint32_t nspec;
 } nvn_trace_cmd;
 
 /** @brief A frame is being traced (RELIFT_NVN_TRACE). */
 extern bool nvn_trace_active;
+/**
+ * @brief RELIFT_NVN_TRACE_WATCH names a guest range: outside a traced frame each change of it is logged before the
+ * command that first sees it (without waiting for the device), inside one it is a trace line.
+ */
+extern bool nvn_trace_watching;
 /** @brief Draws so far into four or more render targets at once; the trace's G-buffer trigger counts them. */
 extern uint64_t nvn_trace_wide_draws;
 /**
@@ -474,6 +483,10 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
  * the command that changed them or "cpu" for a change between commands.
  */
 void nvn_trace_command(replay *r, const nvn_cmd *e, bool done);
+/** @brief Keeps command e in the GPU trace's list of the present's commands (RELIFT_NVN_GPU_TRACE). */
+void nvn_trace_ring_note(replay *r, const nvn_cmd *e);
+/** @brief Logs the present's commands so far (the last 8192), after the line why. */
+void nvn_trace_ring_dump(const char *why);
 /** @brief The levels and layers of an image's host image (nvn_vk.c). */
 VkImageSubresourceRange nvn_vk_image_range(const vimg *v);
 /**

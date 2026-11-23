@@ -3903,8 +3903,15 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
 {
     replay *r = &((vk_run *)user)->r;
     r->s = s;
-    if (nvn_trace_active)
+    if (nvn_trace_active || nvn_trace_watching)
         nvn_trace_command(r, e, false);
+    static int gpu_trace = -1;
+    if (gpu_trace < 0) {
+        const char *on = getenv("RELIFT_NVN_GPU_TRACE");
+        gpu_trace = on && *on && strcmp(on, "0");
+    }
+    if (gpu_trace)
+        nvn_trace_ring_note(r, e);
     int rc = run_cmd(r, e);
     if (nvn_trace_active)
         nvn_trace_command(r, e, true);

@@ -6,6 +6,7 @@
   python3 -I nvn_trace.py writes FRAME_DIR [ADDRESS]
   python3 -I nvn_trace.py buffer FRAME_DIR COMMAND STAGE:KIND:SLOT [--when pre|post] [--as f32|u32] [--count N]
   python3 -I nvn_trace.py image FRAME_DIR COMMAND STORAGE [--when pre|post] [--level N] [--layer N] [--ppm FILE]
+  python3 -I nvn_trace.py log FRAME_DIR FIRST LAST
 
 FRAME_DIR is the frame-<n> folder holding trace.jsonl. A command is its number in the trace; an address is a GPU
 or guest address of a buffer, or a storage address of an image, as hex. `writes` lists the commands after which a
@@ -13,6 +14,8 @@ buffer or an image with that address (any, when none is given) holds other bytes
 channel's range and mean of the chosen level (default 0) and layer (default 0) and, with --ppm, writes it as a
 picture (values clamped to 0..1). An image file holds level 0 of every layer, then each further level, every layer
 of it, in the host image's format (uncompressed color images; block formats and volumes keep level 0).
+`log` prints the NVN commands the layer replayed before commands FIRST to LAST (names, arguments, the target and
+bytes of inline uniform updates) and each change of the range RELIFT_NVN_TRACE_WATCH names.
 Standard library only.
 """
 
@@ -43,16 +46,29 @@ def small_float(bits, mant):
     return (1 + man / (1 << mant)) * 2.0 ** (exp - 15)
 
 
-def load(frame):
-    """The draws and dispatches of a frame; the raw command lines (kind cmd) carry no programs or number."""
-    cmds = []
+def load_all(frame):
+    out = []
     with open(os.path.join(frame, "trace.jsonl")) as f:
         for line in f:
             if line.strip():
-                c = json.loads(line)
-                if c.get("kind") in ("draw", "dispatch"):
-                    cmds.append(c)
-    return cmds
+                out.append(json.loads(line))
+    return out
+
+
+def load(frame):
+    """The draws and dispatches of the trace, without its command log and watch lines."""
+    return [c for c in load_all(frame) if c["kind"] in ("draw", "dispatch")]
+
+
+def cmd_log(frame, first, last):
+    """Prints the NVN commands replayed before draws or dispatches first..last and the watched range's changes."""
+    for c in load_all(frame):
+        if c["kind"] == "cmd" and first <= c["before"] <= last:
+            extra = " -> %s data %s" % (c["dst"], c.get("data", "")) if "dst" in c else ""
+            print("before %d: %s %s%s" % (c["before"], c["name"], " ".join(c["x"][:6]), extra))
+        elif c["kind"] == "watch" and first <= c["before"] <= last:
+            data = read(frame, c["bytes"])
+            print("before %d: watch %s changed (after %s): %s" % (c["before"], c["guest"], c["after"], data[:64].hex()))
 
 
 def read(frame, name):
@@ -226,6 +242,10 @@ def main():
     p.add_argument("--when", choices=["pre", "post"], default="post")
     p.add_argument("--as", dest="as_type", choices=["f32", "u32"], default="f32")
     p.add_argument("--count", type=int, default=64)
+    p = sub.add_parser("log")
+    p.add_argument("frame")
+    p.add_argument("first", type=int)
+    p.add_argument("last", type=int)
     p = sub.add_parser("image")
     p.add_argument("frame")
     p.add_argument("command", type=int)
@@ -241,6 +261,8 @@ def main():
         cmd_show(a.frame, a.command)
     elif a.cmd == "writes":
         cmd_writes(a.frame, a.address)
+    elif a.cmd == "log":
+        cmd_log(a.frame, a.first, a.last)
     elif a.cmd == "buffer":
         cmd_buffer(a.frame, a.command, a.which, a.when, a.as_type, a.count)
     else:

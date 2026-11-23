@@ -87,6 +87,7 @@ static struct {
 } tr;
 
 bool nvn_trace_active;
+bool nvn_trace_watching;
 uint64_t nvn_trace_wide_draws;
 
 /** @brief The guest range RELIFT_NVN_TRACE_WATCH names (watch_size 0: none) and the hash of its bytes last seen. */
@@ -304,6 +305,7 @@ void nvn_trace_present(replay *r)
             watch_size = strtoull(end + 1, NULL, 0);
         if (watch_size > BUF_CAP)
             watch_size = BUF_CAP;
+        nvn_trace_watching = watch_size != 0;
     }
     if (tr.out) {
         fclose(tr.out);
@@ -339,13 +341,22 @@ void nvn_trace_present(replay *r)
  */
 static void watch_look(const char *after)
 {
-    if (!watch_size || !tr.out)
+    if (!watch_size)
         return;
     const uint8_t *p = rl_mem_base() + watch_at;
     uint64_t h = hash_bytes(p, watch_size);
     if (h == watch_hash)
         return;
     watch_hash = h;
+    if (!tr.out) {
+        char hexs[2 * 64 + 1];
+        uint64_t n = watch_size < 64 ? watch_size : 64;
+        for (uint64_t i = 0; i < n; i++)
+            snprintf(hexs + 2 * i, 3, "%02x", p[i]);
+        rl_log(RL_LOG_INFO, "nvn-watch", "present %llu: 0x%llx changed before %s: %s",
+               (unsigned long long)g.presents, (unsigned long long)watch_at, after, hexs);
+        return;
+    }
     char name[40];
     put_file("bufs", "bin", p, watch_size, name);
     fprintf(tr.out, "{\"kind\":\"watch\",\"before\":%llu,\"after\":\"%s\",\"guest\":\"0x%llx\",\"size\":%llu,\"bytes\":\"%s\"}\n",
@@ -354,8 +365,11 @@ static void watch_look(const char *after)
 
 void nvn_trace_command(replay *r, const nvn_cmd *e, bool done)
 {
-    if (!tr.out)
+    if (!tr.out) {
+        if (!done)
+            watch_look(nvn_cmd_name(e->op));
         return;
+    }
     if (!done) {
         watch_look("cpu");
         fprintf(tr.out, "{\"kind\":\"cmd\",\"before\":%llu,\"name\":\"%s\",\"x\":[", (unsigned long long)tr.cmd,
@@ -378,6 +392,52 @@ void nvn_trace_command(replay *r, const nvn_cmd *e, bool done)
         if (!nvn_vk_flush(r))
             return;
         watch_look(nvn_cmd_name(e->op));
+    }
+}
+
+/** @brief The commands replayed since the last present, for the GPU trace's report (RELIFT_NVN_GPU_TRACE). */
+#define RING 8192u
+static struct {
+    nvn_cmd e[RING];
+    uint64_t dst[RING];
+    uint32_t data[RING][4];
+    uint64_t n, present;
+} ring;
+
+void nvn_trace_ring_note(replay *r, const nvn_cmd *e)
+{
+    if (ring.present != g.presents) {
+        ring.present = g.presents;
+        ring.n = 0;
+    }
+    uint32_t k = (uint32_t)(ring.n++ % RING);
+    ring.e[k] = *e;
+    ring.dst[k] = 0;
+    memset(ring.data[k], 0, sizeof ring.data[k]);
+    if (e->op == NVN_CMD_UPDATE_UNIFORM_BUFFER) {
+        const uint8_t *data = nvn_cmd_bytes(r->s, e->x[5]);
+        ring.dst[k] = nvn_gpu_guest(e->x[1]) + e->x[3];
+        if (data)
+            memcpy(ring.data[k], data, e->x[4] < 16 ? e->x[4] : 16);
+    }
+}
+
+void nvn_trace_ring_dump(const char *why)
+{
+    uint64_t first = ring.n > RING ? ring.n - RING : 0;
+    rl_log(RL_LOG_INFO, "gpu-trace", "%s: the %llu commands replayed in present %llu before it:", why,
+           (unsigned long long)(ring.n - first), (unsigned long long)ring.present);
+    for (uint64_t i = first; i < ring.n; i++) {
+        uint32_t k = (uint32_t)(i % RING);
+        const nvn_cmd *e = &ring.e[k];
+        if (e->op == NVN_CMD_UPDATE_UNIFORM_BUFFER)
+            rl_log(RL_LOG_INFO, "gpu-trace", "  %llu %s guest 0x%llx size %llu: %08x %08x %08x %08x", (unsigned long long)i,
+                   nvn_cmd_name(e->op), (unsigned long long)ring.dst[k], (unsigned long long)e->x[4], ring.data[k][0],
+                   ring.data[k][1], ring.data[k][2], ring.data[k][3]);
+        else
+            rl_log(RL_LOG_INFO, "gpu-trace", "  %llu %s 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx", (unsigned long long)i,
+                   nvn_cmd_name(e->op), (unsigned long long)e->x[1], (unsigned long long)e->x[2],
+                   (unsigned long long)e->x[3], (unsigned long long)e->x[4], (unsigned long long)e->x[5]);
     }
 }
 
@@ -510,6 +570,11 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
             put_file("bufs", "bin", c->c0, c->c0_bytes, name);
             json_file(f, "c0", name);
         }
+        fprintf(f, ",\"specs\":[");
+        for (uint32_t i = 0; i < c->nspec; i++)
+            fprintf(f, "%s[%u,%u]", i ? "," : "", c->spec_map[i].constantID,
+                    c->spec_vals[c->spec_map[i].offset / 4]);
+        fprintf(f, "]");
         if (c->c1_guest && c->c1_size && c->c1_size <= BUF_CAP) {
             put_file("bufs", "bin", rl_mem_base() + c->c1_guest, c->c1_size, name);
             fprintf(f, ",\"c1_guest\":\"0x%llx\"", (unsigned long long)c->c1_guest);
