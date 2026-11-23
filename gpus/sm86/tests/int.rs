@@ -337,26 +337,43 @@ fn uniform_datapath() {
     );
 }
 
-/// The slow path of a 64-bit integer to single conversion is a function the
-/// host calls (`DontInline`): NVIDIA's driver 615 for Ampere miscompiles some
-/// vertex programs that inline it.
+/// The slow path of a 64-bit integer to single conversion is a function a
+/// vertex program calls (`DontInline`), since NVIDIA's driver 615 for Ampere
+/// miscompiles some vertex programs that inline it; fragment programs leave
+/// it to the host to inline.
 #[test]
-fn the_wide_integer_to_float_slow_path_stays_a_call() {
-    let p = program(&[word(
+fn the_wide_integer_to_float_slow_path_stays_a_call_in_vertex_programs() {
+    let i2f = word(
         0x112,
         1,
         &[(16, 8, 6), (32, 8, 4), (74, 1, 1), (84, 3, 3), (75, 3, 2)],
-    )]);
-    let s = translate(&p).expect("i2f 64");
-    let w = &s.spirv;
-    let mut i = 5;
-    let mut calls = 0;
-    while i < w.len() {
-        let (op, len) = (w[i] & 0xffff, (w[i] >> 16) as usize);
-        if op == 54 && len >= 5 && w[i + 3] & 2 != 0 {
-            calls += 1;
+    );
+    for (head, calls) in [(sph(1, 1), true), (sph(2, 5), false)] {
+        let mut b = head;
+        b.extend(i2f);
+        b.extend(word(0x14d, 4, &[(87, 3, 7)]));
+        b.extend(word(0x147, 4, &[(34, 48, 0xffff_ffff_fffc), (87, 3, 7)]));
+        let p = relift_gpu_sm86::program::parse(&b);
+        let s = translate(&p).expect("i2f 64");
+        let w = &s.spirv;
+        let mut i = 5;
+        let mut dont_inline = 0;
+        while i < w.len() {
+            let (op, len) = (w[i] & 0xffff, (w[i] >> 16) as usize);
+            if op == 54 && len >= 5 && w[i + 3] & 2 != 0 {
+                dont_inline += 1;
+            }
+            i += len.max(1);
         }
-        i += len.max(1);
+        assert_eq!(dont_inline > 0, calls, "{:?}", p.stage());
     }
-    assert!(calls >= 1, "no DontInline function in the module");
+}
+
+/// A shader program header of type `kind` (1 vertex, 2 fragment) and
+/// version `version`, with every output written.
+fn sph(kind: u32, version: u32) -> Vec<u8> {
+    let mut w = [0u32; 32];
+    w[0] = kind | (4 << 5) | (version << 10);
+    w[18] = 0xf;
+    w.iter().flat_map(|x| x.to_le_bytes()).collect()
 }

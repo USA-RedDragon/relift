@@ -6,6 +6,7 @@
 //! flushes. Rounding modes are numbered 0 (nearest even), 1 (down), 2 (up)
 //! and 3 (toward zero).
 
+use crate::program::Stage;
 use crate::spirv::{glsl, op};
 use crate::translate::{Ctx, Res, bad};
 use crate::{Inst, Swz};
@@ -300,11 +301,13 @@ impl Ctx {
         let rf = self.ib(op::BITWISE_OR, v, sign);
         self.m.emit_void(op::BRANCH, &[merge]);
         self.m.emit_void(op::LABEL, &[slow]);
-        let rs = self.shared_pure_call(
-            format!("int_to_float {mode} {half}"),
-            &[lo, hi, neg],
-            |c, p| c.int_to_float_body(p[0], p[1], p[2], mode, half),
-        );
+        let key = format!("int_to_float {mode} {half}");
+        let body = |c: &mut Ctx, p: &[u32]| c.int_to_float_body(p[0], p[1], p[2], mode, half);
+        let rs = if self.stage == Stage::Vertex {
+            self.shared_pure_call(key, &[lo, hi, neg], body)
+        } else {
+            self.shared_pure(key, &[lo, hi, neg], body)
+        };
         self.m.emit_void(op::BRANCH, &[merge]);
         self.m.emit_void(op::LABEL, &[merge]);
         self.m.emit(op::PHI, u, &[rf, fast, rs, slow])

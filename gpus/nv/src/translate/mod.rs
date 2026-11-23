@@ -335,9 +335,10 @@ impl Ctx {
     /// some vertex programs that inline the slow path of a 64-bit integer
     /// to float conversion into code feeding an output: the compiled
     /// program jumps to an invalid instruction address and the device is
-    /// lost. Kept as a call, the same SPIR-V compiles correctly; the call
-    /// is on a path taken only for magnitudes past `2^24`, so it costs
-    /// nothing on the usual one.
+    /// lost. Kept as a call, the same SPIR-V compiles correctly. Vertex
+    /// programs only use it: in fragment programs the call costs up to a
+    /// tenth of a draw's time where the slow path runs, and no fragment
+    /// program was seen to miscompile.
     pub(crate) fn shared_pure_call(
         &mut self,
         key: String,
