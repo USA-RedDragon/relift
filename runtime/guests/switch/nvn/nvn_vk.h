@@ -201,6 +201,8 @@ typedef struct nvn_vkdev {
     uint32_t max_storage_range, max_index_value;
     /** @brief maxPerStageDescriptorStorageBuffers of the device (31 on MoltenVK). */
     uint32_t max_stage_storage;
+    /** @brief maxPerStageDescriptorUniformBuffers of the device (31 on MoltenVK). */
+    uint32_t max_stage_uniform;
     /** @brief VkPhysicalDeviceLimits::minStorageBufferOffsetAlignment. */
     uint64_t storage_align;
     /** @brief vkCmdDrawMeshTasksEXT (loaded with the device when the extension is on). */

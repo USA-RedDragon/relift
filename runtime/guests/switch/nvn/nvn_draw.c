@@ -116,6 +116,8 @@ static struct {
     bool mready;
     /** @brief Storage buffer slots per task and mesh program in the mesh layout, where both are compute stages. */
     uint32_t mesh_slots;
+    /** @brief Uniform buffer slots (c[3] on) per task and mesh program in the mesh layout, for the same reason. */
+    uint32_t mesh_ubos;
     VkDescriptorPool pool;
     VkBuffer zero;
     bool ready;
@@ -243,11 +245,15 @@ static bool mesh_layouts(void)
     /* task and mesh are both compute stages here: half of the per-stage storage buffers each, less the mesh buffer */
     uint32_t half = g.max_stage_storage > 1 ? (g.max_stage_storage - 1) / 2 : 0;
     d.mesh_slots = half < NVN_STORAGE_SLOTS ? half : NVN_STORAGE_SLOTS;
-    uint32_t nd = DRIVER_BINDINGS * 3;
+    /* and half of the per-stage uniform buffers each: the driver banks, the push bank, then the slots that fit */
+    uint32_t uhalf = g.max_stage_uniform / 2, ufixed = DRIVER_BINDINGS + 1;
+    d.mesh_ubos = uhalf <= ufixed ? 0 : uhalf - ufixed < NVN_UBO_SLOTS ? uhalf - ufixed : NVN_UBO_SLOTS;
+    uint32_t nd = DRIVER_BINDINGS * 3, nu = 0;
     for (uint32_t i = 0; i < 3; i++) {
         for (uint32_t b = 0; b < USER_BINDINGS; b++)
-            ub[i * USER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * groups[i] + b,
-                                                                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, bits[i], NULL };
+            if (!i || b < d.mesh_ubos || b == PUSH_BINDING)
+                ub[nu++] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * groups[i] + b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                                                           bits[i], NULL };
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++)
             db[i * DRIVER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * groups[i] + b,
                                                                           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, bits[i], NULL };
@@ -258,7 +264,7 @@ static bool mesh_layouts(void)
     VkDescriptorSetLayoutBinding mb = { NVN_MESH_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                                         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, NULL };
     VkDescriptorSetLayoutCreateInfo li[3] = {
-        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = USER_BINDINGS * 3, .pBindings = ub },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nu, .pBindings = ub },
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nd, .pBindings = db },
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &mb },
     };
@@ -1026,6 +1032,10 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
             }
             if (b >= NVN_UBO_SLOTS)
                 return nvn_vk_stop(r, "program %s reads constant bank c[%u]", mods[s]->key, b + 3);
+            if (layouts_in == d.mset_layout && s >= NVN_STAGE_TASK && b >= d.mesh_ubos)
+                return nvn_vk_stop(r, "program %s of stage %u reads constant bank c[%u], past the %u the host device's "
+                                      "uniform buffer limit leaves each mesh pass",
+                                   mods[s]->key, s, b + 3, d.mesh_ubos);
             uint64_t addr = r->st->ubo[s][b].addr, size = r->st->ubo[s][b].size;
             int rc = nvn_ubo_bind(r, s, b, addr, size, &bi[n]);
             if (rc != RL_OK)
