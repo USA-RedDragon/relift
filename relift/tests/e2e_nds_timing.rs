@@ -22,6 +22,8 @@
 mod tiny;
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 fn ok(out: &std::process::Output, what: &str) {
     assert!(
@@ -119,6 +121,12 @@ fn run_and_compare(check: &Path, root: &Path, rom: &Path, flag: Option<&str>) {
 /// Lifts and runs rom under root until the debug port prints `end`; returns
 /// the file of its result lines.
 fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
+    let name = root
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let started = Instant::now();
+    let phase = |what: &str| eprintln!("[{name}] {:>4} s  {what}", started.elapsed().as_secs());
+    phase("import");
     let project = root.join("sample");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let cache = root.join("cache").display().to_string();
@@ -127,21 +135,35 @@ fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
         &["--cache-dir", &cache, "import", &rom.display().to_string()],
     );
     ok(&out, "relift import");
-    let out = tiny::relift(
-        &project,
-        &[
-            "--cache-dir",
-            &cache,
-            "-j",
-            "4",
-            "--emit.line-tables=false",
-            "build",
-            "--dev",
-        ],
-    );
+    phase("lift and compile (the build takes minutes and prints nothing)");
+    let (done, waiting) = mpsc::channel::<()>();
+    let out = std::thread::scope(|scope| {
+        scope.spawn(move || {
+            while waiting.recv_timeout(Duration::from_secs(60))
+                == Err(mpsc::RecvTimeoutError::Timeout)
+            {
+                phase("still lifting and compiling");
+            }
+        });
+        let out = tiny::relift(
+            &project,
+            &[
+                "--cache-dir",
+                &cache,
+                "-j",
+                "4",
+                "--emit.line-tables=false",
+                "build",
+                "--dev",
+            ],
+        );
+        drop(done);
+        out
+    });
     ok(&out, "relift build --dev");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
+    phase("run the test ROM");
     let host = root.join("cache/projects/sample/build/host");
     let out = relift_proc::command(host.join("sample"))
         .args([
@@ -162,6 +184,7 @@ fn lift_and_run(root: &Path, rom: &Path, end: &str) -> PathBuf {
     assert!(csv.contains(end), "the run ends: {csv}");
     let run = root.join("run.csv");
     relift_cache::write_if_changed(&run, csv.as_bytes()).expect("the run is writable");
+    phase("run finished");
     run
 }
 
