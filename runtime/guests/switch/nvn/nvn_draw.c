@@ -114,6 +114,8 @@ static struct {
     uint32_t slot;
     bool moverflow;
     bool mready;
+    /** @brief Storage buffer slots per task and mesh program in the mesh layout, where both are compute stages. */
+    uint32_t mesh_slots;
     VkDescriptorPool pool;
     VkBuffer zero;
     bool ready;
@@ -238,6 +240,10 @@ static bool mesh_layouts(void)
     static const uint32_t groups[3] = { 1, NVN_STAGE_TASK, NVN_STAGE_MESH };
     static const VkShaderStageFlags bits[3] = { VK_SHADER_STAGE_FRAGMENT_BIT, VK_SHADER_STAGE_COMPUTE_BIT,
                                                 VK_SHADER_STAGE_COMPUTE_BIT };
+    /* task and mesh are both compute stages here: half of the per-stage storage buffers each, less the mesh buffer */
+    uint32_t half = g.max_stage_storage > 1 ? (g.max_stage_storage - 1) / 2 : 0;
+    d.mesh_slots = half < NVN_STORAGE_SLOTS ? half : NVN_STORAGE_SLOTS;
+    uint32_t nd = DRIVER_BINDINGS * 3;
     for (uint32_t i = 0; i < 3; i++) {
         for (uint32_t b = 0; b < USER_BINDINGS; b++)
             ub[i * USER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * groups[i] + b,
@@ -245,16 +251,15 @@ static bool mesh_layouts(void)
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++)
             db[i * DRIVER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * groups[i] + b,
                                                                           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, bits[i], NULL };
-        for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++)
-            db[DRIVER_BINDINGS * 3 + i * NVN_STORAGE_SLOTS + k] = (VkDescriptorSetLayoutBinding){
-                nvn_slot_binding(groups[i], k), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, bits[i], NULL
-            };
+        for (uint32_t k = 0; k < (i ? d.mesh_slots : NVN_STORAGE_SLOTS); k++)
+            db[nd++] = (VkDescriptorSetLayoutBinding){ nvn_slot_binding(groups[i], k), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                                                       bits[i], NULL };
     }
     VkDescriptorSetLayoutBinding mb = { NVN_MESH_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                                         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, NULL };
     VkDescriptorSetLayoutCreateInfo li[3] = {
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = USER_BINDINGS * 3, .pBindings = ub },
-        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = (DRIVER_BINDINGS + NVN_STORAGE_SLOTS) * 3, .pBindings = db },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = nd, .pBindings = db },
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &mb },
     };
     if (VK(vkCreateDescriptorSetLayout)(g.dev, &li[0], NULL, &d.mset_layout[0]) != VK_SUCCESS ||
@@ -947,6 +952,10 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
             if (layouts_in != d.set_layout && layouts_in != d.mset_layout)
                 return nvn_vk_stop(r, "program %s of stage %u reaches storage slot %u through a descriptor, which only draws bind",
                                    mods[s]->key, s, k);
+            if (layouts_in == d.mset_layout && s >= NVN_STAGE_TASK && k >= d.mesh_slots)
+                return nvn_vk_stop(r, "program %s of stage %u reaches storage slot %u, past the %u the host device's "
+                                      "storage buffer limit leaves each mesh pass",
+                                   mods[s]->key, s, k, d.mesh_slots);
             VkDeviceSize off = 0;
             uint64_t size = r->st->gstorage[s][k].size;
             VkBuffer pb = nvn_draw_pool_span(r->st->gstorage[s][k].addr, size, g.storage_align, &off);
