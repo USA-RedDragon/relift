@@ -559,12 +559,20 @@ impl Ctx {
     }
 
     /// `r`, or the guest's NaN `0x7fffffff` when `r` or an input is a NaN
-    /// (the host may keep or make another payload).
+    /// (the host may keep or make another payload). Under
+    /// SignedZeroInfNanPreserve the host's `OpIsNan` is exact, one compare
+    /// where the bit test takes two.
     fn canonical_nan(&mut self, r: u32, xs: &[u32]) -> u32 {
         if self.host.canonical_nan {
             return r;
         }
-        let mut nan = self.is_nan_bits(r);
+        let mut nan = if self.denorm.szinp {
+            let f = self.as_float(r);
+            let b = self.boolt();
+            self.m.emit(op::IS_NAN, b, &[f])
+        } else {
+            self.is_nan_bits(r)
+        };
         for &x in xs {
             let n = self.is_nan_bits(x);
             nan = self.or(nan, n);
