@@ -10,6 +10,7 @@
 #include "crash.h"
 
 #include <dirent.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -226,6 +227,45 @@ TEST(vm_block_map_coalesces)
     CHECK_EQ(rl_vm_set(&vm, 0x20000, 0x10000, RL_VM_NONE, 0, RL_VM_DISCARD), 0);
     CHECK_EQ(vm.count, 1);
     CHECK_EQ(rl_vm_set(&vm, 0x20001, 0x2000, RL_VM_R, 0, RL_VM_KEEP), -1);
+    rl_vm_destroy(&vm);
+}
+
+/** @brief The map a kernel write races in vm_kernel_writes_keep_access_while_the_map_changes. */
+typedef struct map_churn {
+    rl_vm *vm;
+    uint64_t at;
+    volatile int stop;
+} map_churn;
+
+/** @brief Changes the tag of one page back and forth, which splits it from its neighbor and merges it again. */
+static void *churn_map(void *arg)
+{
+    map_churn *m = arg;
+    for (uint64_t i = 0; !m->stop; i++)
+        rl_vm_set(m->vm, m->at, m->vm->host_page, RL_VM_RW, i & 1 ? 9 : 8, RL_VM_KEEP);
+    return NULL;
+}
+
+TEST(vm_kernel_writes_keep_access_while_the_map_changes)
+{
+    rl_vm vm;
+    CHECK_EQ(boot(&vm), 0);
+    uint64_t hp = vm.host_page;
+    CHECK_EQ(rl_vm_set(&vm, 2 * hp, 2 * hp, RL_VM_RW, 8, RL_VM_FRESH), 0);
+    for (uint64_t k = 0; k < 256; k++)
+        CHECK_EQ(rl_vm_set(&vm, (8 + k) * hp, hp, RL_VM_RW, 16 + (k & 1), RL_VM_FRESH), 0);
+    uint64_t target = (8 + 255) * hp;
+    map_churn m = { &vm, 2 * hp, 0 };
+    pthread_t t;
+    CHECK_EQ(pthread_create(&t, NULL, churn_map, &m), 0);
+    uint8_t bytes[64];
+    memset(bytes, 0x5a, sizeof bytes);
+    for (int i = 0; i < 4000000; i++)
+        rl_vm_kernel_write(&vm, target, bytes, sizeof bytes);
+    m.stop = 1;
+    pthread_join(t, NULL);
+    CHECK_EQ(rl_vm_host_prot(&vm, target), PROT_READ | PROT_WRITE);
+    CHECK(!t_write(target + 5, 1).faulted);
     rl_vm_destroy(&vm);
 }
 

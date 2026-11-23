@@ -14,6 +14,7 @@
 
 #include <relift/abi_core.h>
 
+#include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -261,6 +262,11 @@ typedef struct rl_vm_block {
  *
  * Host protection follows docs/abi.md section 2: a host page gets the union
  * of the permissions of the guest pages in it.
+ *
+ * Any thread may call the functions below: the map is read and changed under
+ * the space's lock, so a reader on another thread (a service writing guest
+ * memory with rl_vm_kernel_write while the guest changes its map) never sees
+ * a map half way through a change.
  */
 typedef struct rl_vm {
     /** @brief Guest address 0 in host memory: the `mem` lifted code gets. */
@@ -285,6 +291,11 @@ typedef struct rl_vm {
     uint64_t protect_calls;
     /** @brief Counts changes of the guest map (rl_vm_set, rl_vm_map_shm): a host protection made before a change may be gone after it. */
     uint64_t map_gen;
+    /**
+     * @brief Held while the map is read or changed, and through a kernel access's unprotect, copy and protect again.
+     * Recursive: a kernel copy that faults on a watched page runs the fault hooks, which read the map, on its thread.
+     */
+    pthread_mutex_t lock;
 } rl_vm;
 
 /** @brief Low guard below guest address 0 (docs/abi.md section 2). */

@@ -155,16 +155,28 @@ int rl_vm_init_size(rl_vm *vm, uint64_t size, uint64_t host_page)
     }
     vm->blocks[0] = (rl_vm_block){ 0, vm->size, 0, RL_VM_NONE, 0 };
     vm->count = 1;
+    pthread_mutexattr_t a;
+    pthread_mutexattr_init(&a);
+    pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&vm->lock, &a);
+    pthread_mutexattr_destroy(&a);
     return 0;
 }
 
 void rl_vm_destroy(rl_vm *vm)
 {
-    if (vm->map_start)
+    if (vm->map_start) {
         os_release(vm->map_start, vm->map_len);
+        pthread_mutex_destroy(&vm->lock);
+    }
     free(vm->blocks);
     memset(vm, 0, sizeof *vm);
 }
+
+/** @brief Takes the space's lock; the map is const to readers, the lock is not. */
+static void vm_lock(const rl_vm *vm) { pthread_mutex_lock((pthread_mutex_t *)&vm->lock); }
+
+static void vm_unlock(const rl_vm *vm) { pthread_mutex_unlock((pthread_mutex_t *)&vm->lock); }
 
 static uint32_t find(const rl_vm *vm, uint64_t addr)
 {
@@ -240,10 +252,19 @@ static int union_perm(const rl_vm *vm, uint64_t hp_start, uint64_t hp_end)
 
 bool rl_vm_host_writable(const rl_vm *vm, uint64_t addr) { return (rl_vm_host_prot(vm, addr) & PROT_WRITE) != 0; }
 
-int rl_vm_host_prot(const rl_vm *vm, uint64_t addr)
+/** @brief rl_vm_host_prot with the lock held. */
+static int page_prot(const rl_vm *vm, uint64_t addr)
 {
     uint64_t s = align_down(addr, vm->host_page);
     return union_perm(vm, s, s + vm->host_page);
+}
+
+int rl_vm_host_prot(const rl_vm *vm, uint64_t addr)
+{
+    vm_lock(vm);
+    int prot = page_prot(vm, addr);
+    vm_unlock(vm);
+    return prot;
 }
 
 static int host_protect(rl_vm *vm, uint64_t addr, uint64_t len, int prot)
@@ -309,7 +330,7 @@ static int discard(rl_vm *vm, uint64_t addr, uint64_t size)
             continue;
         for (uint64_t p = align_down(a, hp); p < b; p += hp) {
             uint64_t zs = p > a ? p : a, ze = p + hp < b ? p + hp : b;
-            int prot = rl_vm_host_prot(vm, p);
+            int prot = page_prot(vm, p);
             if (!(prot & PROT_WRITE) && host_protect(vm, p, hp, PROT_READ | PROT_WRITE))
                 return -1;
             memset(vm->base + zs, 0, ze - zs);
@@ -320,11 +341,9 @@ static int discard(rl_vm *vm, uint64_t addr, uint64_t size)
     return 0;
 }
 
-int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
+/** @brief rl_vm_set with the lock held. */
+static int set_locked(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
 {
-    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
-    if ((addr | size) & (vm->guest_page - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
-        return -1;
     if (content == RL_VM_DISCARD && discard(vm, addr, size))
         return -1;
     if (reserve(vm, 2))
@@ -342,9 +361,23 @@ int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t t
     return apply_range(vm, addr, size, perm);
 }
 
+int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
+{
+    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    if ((addr | size) & (vm->guest_page - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
+        return -1;
+    vm_lock(vm);
+    int rc = set_locked(vm, addr, size, perm, tag, content);
+    vm_unlock(vm);
+    return rc;
+}
+
 rl_vm_block rl_vm_query(const rl_vm *vm, uint64_t addr)
 {
-    return vm->blocks[find(vm, addr)];
+    vm_lock(vm);
+    rl_vm_block b = vm->blocks[find(vm, addr)];
+    vm_unlock(vm);
+    return b;
 }
 
 bool rl_vm_uniform(const rl_vm *vm, uint64_t addr, uint64_t size, rl_vm_block *out)
@@ -361,7 +394,7 @@ static void unlock_range(rl_vm *vm, uint64_t addr, uint64_t size)
 {
     uint64_t hp = vm->host_page;
     for (uint64_t p = align_down(addr, hp); p < addr + size; p += hp)
-        if ((rl_vm_host_prot(vm, p) & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE))
+        if ((page_prot(vm, p) & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE))
             host_protect(vm, p, hp, PROT_READ | PROT_WRITE);
 }
 
@@ -369,7 +402,7 @@ static void relock_range(rl_vm *vm, uint64_t addr, uint64_t size)
 {
     uint64_t hp = vm->host_page;
     for (uint64_t p = align_down(addr, hp); p < addr + size; p += hp) {
-        int prot = rl_vm_host_prot(vm, p);
+        int prot = page_prot(vm, p);
         if ((prot & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE))
             host_protect(vm, p, hp, prot);
     }
@@ -379,29 +412,35 @@ void rl_vm_kernel_copy(rl_vm *vm, uint64_t dst, uint64_t src, uint64_t size)
 {
     if (!size)
         return;
+    vm_lock(vm);
     unlock_range(vm, src, size);
     unlock_range(vm, dst, size);
     memmove(vm->base + dst, vm->base + src, size);
     relock_range(vm, src, size);
     relock_range(vm, dst, size);
+    vm_unlock(vm);
 }
 
 void rl_vm_kernel_write(rl_vm *vm, uint64_t dst, const void *src, uint64_t size)
 {
     if (!size)
         return;
+    vm_lock(vm);
     unlock_range(vm, dst, size);
     memcpy(vm->base + dst, src, size);
     relock_range(vm, dst, size);
+    vm_unlock(vm);
 }
 
 void rl_vm_kernel_read(rl_vm *vm, void *dst, uint64_t src, uint64_t size)
 {
     if (!size)
         return;
+    vm_lock(vm);
     unlock_range(vm, src, size);
     memcpy(dst, vm->base + src, size);
     relock_range(vm, src, size);
+    vm_unlock(vm);
 }
 
 #if defined(_WIN32)
