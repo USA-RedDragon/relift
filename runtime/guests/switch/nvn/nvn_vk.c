@@ -4109,7 +4109,14 @@ static rl_window *present_window(uint32_t w, uint32_t h)
 
 bool nvn_vk_window_early(void)
 {
-    rl_window *win = present_window(EARLY_WINDOW_W, EARLY_WINDOW_H);
+    uint32_t w = EARLY_WINDOW_W, h = EARLY_WINDOW_H;
+    const char *size = getenv("RELIFT_EARLY_WINDOW_SIZE");
+    unsigned sw, sh;
+    if (size && sscanf(size, "%ux%u", &sw, &sh) == 2 && sw >= 160 && sh >= 160 && sw <= 8192 && sh <= 8192) {
+        w = sw;
+        h = sh;
+    }
+    rl_window *win = present_window(w, h);
     return win && rl_window_presenter(win) != NULL;
 }
 

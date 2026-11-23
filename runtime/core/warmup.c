@@ -372,6 +372,7 @@ static void scene_of(rl_wu_scene *s, uint64_t now)
         rl_wu_eta(g.done, g.total, s->elapsed_ns, &s->eta_s);
     s->dark = g.dark;
     s->fill = !g.started;
+    s->starting = !g.started && g.mode == RL_WARMUP_BACKGROUND;
     s->keyboard = g.keyboard;
     s->note = g.mode == RL_WARMUP_BACKGROUND && g.corner_since && now - g.corner_since < RL_WU_NOTE_NS &&
               (s->state == RL_WU_MEASURING || s->state == RL_WU_COMPILING);

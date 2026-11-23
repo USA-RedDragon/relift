@@ -527,6 +527,16 @@ static float notes(ui *u, const rl_wu_scene *s, float x, float top, float width)
 {
     float r = u->r, px = 2.1f * r, lh = px * 1.45f, y = top;
     const theme *t = u->t;
+    if (s->starting) {
+        run st[2] = { { "Starting now.", true, t->text },
+                      { " Some scenes may pause briefly until this finishes.", false, t->muted } };
+        y += para(u, x, y, width, lh, px, st, 2);
+        y += r;
+        run saved[2] = { { "Your progress is saved as it goes.", true, t->text },
+                         { " If you quit now, the next launch continues from here.", false, t->muted } };
+        y += para(u, x, y, width, lh, px, saved, 2);
+        return y - top;
+    }
     if (s->state == RL_WU_FINISHING) {
         return para1(u, x, y, width, lh, px, "Saving everything so the next launch is instant. Please wait a moment.", false,
                      t->muted);
@@ -664,7 +674,7 @@ static float blocking(ui *u, const rl_wu_scene *s, float x0, float y0, float cw,
     }
 
     /* Buttons. */
-    bool quit = st == RL_WU_MEASURING || st == RL_WU_COMPILING || st == RL_WU_ERROR;
+    bool quit = !s->starting && (st == RL_WU_MEASURING || st == RL_WU_COMPILING || st == RL_WU_ERROR);
     if (quit) {
         y += 3.0f * r;
         float bh = 2.4f * r * LINE_NORMAL + 2.8f * r, right = ix + iw;
@@ -813,11 +823,8 @@ void rl_wu_draw(rl_wu_canvas *c, const rl_wu_scene *s, rl_wu_hits *hits)
     if (r < 7.0f)
         r = 7.0f;
     ui u = { .c = c, .r = r, .t = s->dark ? &k_dark : &k_light, .dry = false };
-    if (s->mode == RL_WARMUP_BLOCKING)
+    if (s->mode == RL_WARMUP_BLOCKING || s->starting)
         draw_blocking(&u, s, hits);
-    else {
-        if (s->fill)
-            fill_background(&u);
+    else
         draw_corner(&u, s, hits);
-    }
 }

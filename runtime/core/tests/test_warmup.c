@@ -169,6 +169,9 @@ TEST(the_corner_card_draws_only_itself_and_leaves_the_game_visible)
     const uint8_t *px = draw(d);
     CHECK(px != NULL);
     CHECK_EQ(alpha_at(px, 10, 1070), 255);
+    /* Held first submit: the card takes no key or tap, the game has not started to take them either. */
+    CHECK(!rl_warmup_key(RL_WARMUP_KEY_ESCAPE));
+    CHECK_EQ(g_quits, 0);
     rl_warmup_game_started();
     CHECK(!g_base_on);
     px = draw(d);
