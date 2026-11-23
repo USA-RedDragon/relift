@@ -285,6 +285,105 @@ pub(crate) struct Prep {
     /// The constant bank load of each instruction that is one (see
     /// [`CbufLoad`]).
     loads: Vec<Option<CbufLoad>>,
+    /// The predicates each instruction writes or may write.
+    pwrites: Vec<Vec<u8>>,
+    /// The address word each instruction makes from a c[0] word, if any
+    /// (see [`BaseWord`]).
+    base_words: Vec<Option<BaseWord>>,
+}
+
+/// One word of a 64-bit address made from a c[0] base: `Lo` is a 32-bit
+/// value plus the c[0] word at `offset`, its carry out in predicate
+/// `carry` (`LEA` without `.HI`, or `IADD3` with a carry out and no
+/// negated source); `Hi` is the c[0] word at `offset` plus that carry
+/// (`IADD3.X dst, RZ, c[0][offset], RZ, carry, !PT` or
+/// `IMAD.X dst, RZ, RZ, c[0][offset], carry`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BaseWord {
+    Lo { dst: u8, carry: u8, offset: u32 },
+    Hi { dst: u8, carry: u8, offset: u32 },
+}
+
+/// The c[0] byte offset operand `o` names, when it is a plain word of
+/// bank 0 with no index and no modifiers.
+fn c0_word(o: &Operand) -> Option<u32> {
+    match o {
+        Operand::CBuf {
+            bank: crate::inst::CBank::Imm(0),
+            index: None,
+            offset,
+            mods,
+            ..
+        } if !mods.neg && !mods.abs && !mods.not && offset % 4 == 0 => u32::try_from(*offset).ok(),
+        _ => None,
+    }
+}
+
+fn plain_reg(o: &Operand) -> bool {
+    match o {
+        Operand::Reg(_, m) => !m.neg && !m.not && !m.abs && m.swz == crate::inst::Swz::None,
+        _ => false,
+    }
+}
+
+fn base_word(i: &Inst) -> Option<BaseWord> {
+    if i.guard.is_some() {
+        return None;
+    }
+    let mods: Vec<&str> = i.mods.iter().copied().filter(|m| *m != "U32").collect();
+    match (i.mnemonic, mods.as_slice(), i.ops.as_slice()) {
+        ("LEA", [], [Operand::Reg(d, _), Operand::Pred(p, false), a, c, s])
+            if *p != 7 && plain_reg(a) && imm_of(s).is_some_and(|s| s < 32) =>
+        {
+            Some(BaseWord::Lo {
+                dst: *d,
+                carry: *p,
+                offset: c0_word(c)?,
+            })
+        }
+        ("IADD3", [], [Operand::Reg(d, _), Operand::Pred(p, false), x, y, z]) if *p != 7 => {
+            let srcs = [x, y, z];
+            let cs: Vec<u32> = srcs.iter().filter_map(|o| c0_word(o)).collect();
+            let rest_ok = srcs.iter().all(|o| c0_word(o).is_some() || plain_reg(o));
+            (cs.len() == 1 && rest_ok).then(|| BaseWord::Lo {
+                dst: *d,
+                carry: *p,
+                offset: cs[0],
+            })
+        }
+        (
+            "IADD3",
+            ["X"],
+            [
+                Operand::Reg(d, _),
+                Operand::Reg(255, _),
+                c,
+                Operand::Reg(255, _),
+                Operand::Pred(p, false),
+                Operand::Pred(7, true),
+            ],
+        ) if *p != 7 => Some(BaseWord::Hi {
+            dst: *d,
+            carry: *p,
+            offset: c0_word(c)?,
+        }),
+        (
+            "IMAD",
+            ["X"],
+            [
+                Operand::Reg(d, _),
+                Operand::Reg(255, _),
+                Operand::Reg(255, _),
+                c,
+                Operand::Pred(p, false),
+            ],
+        ) if *p != 7 => Some(BaseWord::Hi {
+            dst: *d,
+            carry: *p,
+            offset: c0_word(c)?,
+        }),
+        _ => None,
+    }
 }
 
 /// A whole-word constant bank load (LDC or ULDC): `words` registers from
@@ -436,6 +535,19 @@ impl Prep {
                 })
                 .collect(),
             loads: insts.iter().map(cbuf_load).collect(),
+            pwrites: insts
+                .iter()
+                .map(|i| {
+                    uniform::written_locs(i)
+                        .into_iter()
+                        .filter_map(|l| match l {
+                            uniform::Loc::P(n) if n != 7 => Some(n),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .collect(),
+            base_words: insts.iter().map(base_word).collect(),
             preds: successors(code).map(|s| {
                 let mut p = vec![Vec::new(); n];
                 for (k, ts) in s.iter().enumerate() {
@@ -627,6 +739,61 @@ impl Prep {
         out.sort();
         out.dedup();
         Some(out)
+    }
+
+    /// The one instruction that writes what `names` says before
+    /// instruction `k` on every path that reaches `k`, when that writer is
+    /// not guarded and no path comes from the program's entry without it.
+    fn unique_writer(&self, k: usize, names: impl Fn(usize) -> bool) -> Option<usize> {
+        let preds = self.preds.as_ref()?;
+        let mut seen = vec![false; preds.len()];
+        let mut todo = vec![k];
+        let mut found = None;
+        while let Some(at) = todo.pop() {
+            if preds[at].is_empty() {
+                return None;
+            }
+            for &j in &preds[at] {
+                if std::mem::replace(&mut seen[j], true) {
+                    continue;
+                }
+                if !names(j) {
+                    todo.push(j);
+                    continue;
+                }
+                if found.is_some_and(|f| f != j) {
+                    return None;
+                }
+                found = Some(j);
+            }
+        }
+        found
+    }
+
+    /// The c[0] byte offset of the 64-bit base that register pair `r`,
+    /// `r + 1` holds before instruction `k` plus a 32-bit offset, when the
+    /// only writes that reach `k` are a [`BaseWord::Lo`] of `r` from the
+    /// base's low word and a [`BaseWord::Hi`] of `r + 1` from its high
+    /// word with the carry of that same `Lo`.
+    pub(crate) fn pair_base(&self, k: usize, r: u8) -> Option<u32> {
+        if r >= 254 {
+            return None;
+        }
+        let jl = self.unique_writer(k, |j| self.writes[j].contains(&r))?;
+        let jh = self.unique_writer(k, |j| self.writes[j].contains(&(r + 1)))?;
+        let Some(BaseWord::Lo { dst, carry, offset }) = self.base_words[jl] else {
+            return None;
+        };
+        let Some(BaseWord::Hi {
+            dst: hd,
+            carry: hc,
+            offset: ho,
+        }) = self.base_words[jh]
+        else {
+            return None;
+        };
+        let carried = self.unique_writer(jh, |j| self.pwrites[j].contains(&carry)) == Some(jl);
+        (dst == r && hd == r + 1 && hc == carry && ho == offset + 4 && carried).then_some(offset)
     }
 
     /// The single constant bank word (bank, byte offset, indexed) uniform

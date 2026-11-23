@@ -40,7 +40,7 @@ const VIEW_KEY: u32 = 0x3_0000;
 impl Ctx {
     /// The byte size of an access type: `u32`, `u64` or a vector of
     /// `u32`.
-    fn access_bytes(&mut self, ty: u32) -> u32 {
+    pub(crate) fn access_bytes(&mut self, ty: u32) -> u32 {
         let u = self.u32t();
         if ty == u {
             return 4;

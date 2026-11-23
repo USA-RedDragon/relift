@@ -3,7 +3,9 @@
 //!
 //! A global address is a 64-bit GPU virtual address; the runtime gives
 //! every guest memory pool a Vulkan buffer whose device address is the one
-//! the game sees, so LDG/STG become physical storage buffer accesses.
+//! the game sees, so LDG/STG become physical storage buffer accesses,
+//! except those whose address is a driver storage buffer slot's base plus
+//! an offset, which go through the slot's descriptor (see [`slots`]).
 //! Generic `LD`/`ST`/`ATOM` are treated as global: the shared and local
 //! windows of the generic address space are not modeled, so they are
 //! listed in `HostReport::inexact`. How global accesses are ordered is in
@@ -175,8 +177,11 @@ impl Ctx {
         ));
     }
 
-    /// The 64-bit global address of a memory operand.
+    /// The 64-bit global address of a memory operand. The pointers the
+    /// access makes from it go through a storage buffer slot when `a` is a
+    /// slot base plus an offset (see [`slots`]).
     pub(crate) fn global_address(&mut self, a: &Addr) -> Res<u32> {
+        self.route = self.slot_route(a);
         let mut parts = Vec::new();
         if let Some(u) = a.ureg {
             let lo = self.load_ureg(u);
@@ -206,6 +211,11 @@ impl Ctx {
     /// Without buffer device addresses on the host, a pointer into the
     /// guest memory segments instead (see [`segments`]).
     pub(crate) fn global_ptr(&mut self, addr: u32, ty: u32) -> u32 {
+        if let Some(r) = self.route
+            && let Some(p) = self.routed_ptr(r, addr, ty)
+        {
+            return p;
+        }
         if !self.host.bda {
             return self.segment_ptr(addr, ty);
         }
@@ -224,6 +234,12 @@ impl Ctx {
     /// program writes global memory, so a host that mirrors the memory
     /// knows to copy it back.
     pub(crate) fn global_ptr_w(&mut self, addr: u32, ty: u32) -> u32 {
+        if let Some(r) = self.route
+            && let Some(p) = self.routed_ptr(r, addr, ty)
+        {
+            return p;
+        }
+        let route = self.route.take();
         self.iface.global_store = true;
         if self.host.mirror_writes && self.host.bda {
             self.iface.marks_written_pages = true;
@@ -231,7 +247,9 @@ impl Ctx {
             let last = self.addr_add_const(addr, 15);
             self.mark_written(last);
         }
-        self.global_ptr(addr, ty)
+        let p = self.global_ptr(addr, ty);
+        self.route = route;
+        p
     }
 
     /// Sets the bit of the page of `addr` in the written-page bitmap (see
@@ -418,10 +436,7 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         let n = m.size.words();
         let ty = vec_ty(c, n);
-        let p = match c.slot_ptr(&a, ty, 4 * n) {
-            Some(p) => p,
-            None => c.global_ptr(addr, ty),
-        };
+        let p = c.global_ptr(addr, ty);
         let v = c.m.emit(op::LOAD, ty, &[p, ALIGNED, 4 * n]);
         let u = c.u32t();
         (0..n)

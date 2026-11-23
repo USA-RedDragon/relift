@@ -231,6 +231,39 @@ TEST(nvn_a_vertex_storage_slot_binding_is_a_slot_not_a_driver_bank)
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
+TEST(nvn_storage_slot_bindings_of_every_stage_are_their_own)
+{
+    for (uint32_t s = 0; s < NVN_STAGES; s++)
+        for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++) {
+            CHECK(nvn_slot_binding(s, k) >= DRIVER_BINDINGS * NVN_STAGES);
+            for (uint32_t t = 0; t < s; t++)
+                for (uint32_t j = 0; j < NVN_STORAGE_SLOTS; j++)
+                    CHECK(nvn_slot_binding(s, k) != nvn_slot_binding(t, j));
+        }
+    char dir[PATH_MAX];
+    CHECK(make_scratch(dir));
+    CHECK(write_one_table(dir, slot_vertex, sizeof slot_vertex, 0xd0));
+    setenv("RELIFT_NVN_SHADERS", dir, 1);
+    if (!nvn_vk_ready()) {
+        CHECK(!getenv("RELIFT_VK_REQUIRE"));
+        printf("  skipped: no host Vulkan device\n");
+        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+        return;
+    }
+    char key[65], why[256] = "";
+    for (int i = 0; i < 32; i++)
+        snprintf(key + 2 * i, 3, "%02x", 0xd0 + i);
+    nvn_module *m = nvn_module_get(key, 1, why, sizeof why);
+    if (!m)
+        printf("  %s\n", why);
+    CHECK(m != NULL);
+    if (m) {
+        CHECK_EQ(m->storage_slots, 1u << 2);
+        CHECK_EQ(m->driver, 0u);
+    }
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
 TEST(nvn_a_geometry_program_that_writes_layer_draws_layered_and_feeds_the_fragment_program)
 {
     char dir[PATH_MAX];

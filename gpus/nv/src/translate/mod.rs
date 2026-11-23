@@ -132,8 +132,8 @@ pub struct Interface {
     /// where every load that reaches the texture instruction is known: the
     /// runtime keeps the textures those words name in their slots.
     pub handle_sources: BTreeSet<tex::HandleSource>,
-    /// Vertex storage buffer slots the program loads through a storage
-    /// buffer descriptor instead of a buffer device address (see
+    /// Storage buffer slots of the program's stage it reaches through a
+    /// storage buffer descriptor instead of a buffer device address (see
     /// [`mem::slots`]).
     pub storage_slots: BTreeSet<u32>,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
@@ -297,6 +297,9 @@ pub(crate) struct Ctx {
     pub store_guard: Option<u32>,
     /// The last clock value read, low and high words.
     pub clock_vars: Option<(u32, u32)>,
+    /// The storage buffer slot the global access being translated goes
+    /// through (see [`mem::slots`]).
+    pub route: Option<mem::slots::Route>,
     /// Per instruction, whether control flow may reach it with only part
     /// of the warp (see `mem::lanes::divergent`).
     pub divergent: Vec<bool>,
@@ -893,6 +896,7 @@ impl Ctx {
     pub(crate) fn guarded(&mut self, i: &Inst, pc: u64) -> Res<()> {
         self.fields = i.fields;
         self.pc = pc;
+        self.route = None;
         match self.simt_pass() {
             Some(simt::Pass::Collect) => {
                 let g = match &i.guard {
@@ -1079,6 +1083,7 @@ impl Ctx {
             denorm: denorm::State::default(),
             funcs: Vec::new(),
             clock_vars: None,
+            route: None,
             divergent: Vec::new(),
             mem: mem::order::Plan::default(),
             simt: None,

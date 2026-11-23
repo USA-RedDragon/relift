@@ -651,3 +651,188 @@ fn a_vertex_load_from_a_storage_slot_base_reads_the_slot_descriptor() {
     assert!(other.interface.storage_slots.is_empty());
     assert!(spirv_ops(&other.spirv).contains(&CONVERT_U_TO_PTR));
 }
+
+const SPH_VERTEX: u32 = 1 | (4 << 5) | (1 << 10);
+const SPH_FRAGMENT: u32 = 2 | (4 << 5) | (5 << 10);
+
+/// The program of `sph0` (the first header word) with `body` and an exit.
+fn staged(sph0: u32, body: &[[u8; 16]], expect: &[&str]) -> relift_gpu_nv::translate::Shader {
+    let mut w = [0u32; 32];
+    w[0] = sph0;
+    let mut b: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
+    b.extend(body.iter().flatten());
+    finish(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    let t = text(&p);
+    for (n, e) in expect.iter().enumerate() {
+        assert!(t[n].contains(e), "{} lacks {e}", t[n]);
+    }
+    translate(&p).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// `ULDC.64 URu, c[0x0][off]`.
+fn uldc64(u: u64, off: u64) -> [u8; 16] {
+    word(
+        0x0b9,
+        5,
+        &[(16, 6, u), (38, 16, off), (54, 5, 0), (73, 3, 5)],
+    )
+}
+
+/// An instruction word written out as the 16 bytes NVIDIA's compiler
+/// emits (little endian), for forms the field helpers do not build.
+fn hex_word(h: &str) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    for (k, o) in b.iter_mut().enumerate() {
+        *o = u8::from_str_radix(&h[2 * k..2 * k + 2], 16).unwrap();
+    }
+    b
+}
+
+/// `LEA R16, P0, R49, c[0x0][0x560], 0x2`.
+const LEA_R16_P0_C0_560: &str = "117a103100580100ff10800700c80f00";
+/// `IADD3.X R17, RZ, c[0x0][0x564], RZ, P0, !PT`.
+const IADD3X_R17_P0_C0_564: &str = "107a11ff00590100ffe47f0000ca0f00";
+/// `LDG.E.CONSTANT R13, [R16]`.
+const LDG_R13_R16: &str = "81730d100000000000891e0000a20200";
+/// `STG.E.STRONG.SM [R13.U32+UR6], R14`.
+const STG_R13_UR6_R14: &str = "8679000d0e00000006a9100800e20f00";
+
+fn has_psb(s: &relift_gpu_nv::translate::Shader) -> bool {
+    spirv_ops(&s.spirv).contains(&CONVERT_U_TO_PTR)
+}
+
+fn slots_of(s: &relift_gpu_nv::translate::Shader) -> Vec<u32> {
+    s.interface.storage_slots.iter().copied().collect()
+}
+
+/// A fragment program's load from the slot base in a uniform register
+/// pair reads fragment slot `k` (c[0] row 0x51 plus `k`) through a
+/// descriptor; a word outside the fragment rows keeps the address.
+#[test]
+fn a_fragment_load_from_a_storage_slot_base_reads_the_slot_descriptor() {
+    let load = word(
+        0x181,
+        4,
+        &[
+            (16, 8, 4),
+            (24, 8, 5),
+            (32, 6, 4),
+            (40, 24, 0x20),
+            (72, 1, 1),
+            (73, 3, 6),
+            (81, 3, 7),
+            (91, 1, 1),
+        ],
+    );
+    let s = staged(
+        SPH_FRAGMENT,
+        &[uldc64(4, 0x530), load],
+        &["ULDC.64 UR4, c[0x0][0x530]", "LDG"],
+    );
+    assert_eq!(slots_of(&s), vec![2]);
+    assert!(!has_psb(&s), "the load keeps a buffer device address");
+    assert!(decorated_binding(&s.spirv, 66));
+    let vertex_row = staged(SPH_FRAGMENT, &[uldc64(4, 0x130), load], &[]);
+    assert!(slots_of(&vertex_row).is_empty());
+    assert!(has_psb(&vertex_row));
+}
+
+/// A store through a slot base goes through the slot's descriptor, and
+/// does not make the program a global writer (the runtime marks the
+/// slot's span written from the stores to the storage buffer).
+#[test]
+fn a_fragment_store_through_a_storage_slot_base_writes_the_slot_descriptor() {
+    let s = staged(
+        SPH_FRAGMENT,
+        &[uldc64(6, 0x550), hex_word(STG_R13_UR6_R14)],
+        &[
+            "ULDC.64 UR6, c[0x0][0x550]",
+            "STG.E.STRONG.SM [R13.U32+UR6], R14",
+        ],
+    );
+    assert_eq!(slots_of(&s), vec![4]);
+    assert!(!has_psb(&s));
+    assert!(!s.interface.global_store);
+    assert!(spirv_ops(&s.spirv).contains(&62), "no store");
+}
+
+/// A register pair made from slot 5's base words with LEA and IADD3.X
+/// (its carry) is the slot's base plus a 32-bit offset: the load reads the
+/// slot's descriptor at the low word less the base's.
+#[test]
+fn a_load_through_a_register_pair_made_from_a_slot_base_reads_the_slot() {
+    let s = staged(
+        SPH_FRAGMENT,
+        &[
+            hex_word(LEA_R16_P0_C0_560),
+            hex_word(IADD3X_R17_P0_C0_564),
+            hex_word(LDG_R13_R16),
+        ],
+        &[
+            "LEA R16, P0, R49, c[0x0][0x560], 0x2",
+            "IADD3.X R17, RZ, c[0x0][0x564], RZ, P0, !PT",
+            "LDG.E.CONSTANT R13, [R16]",
+        ],
+    );
+    assert_eq!(slots_of(&s), vec![5]);
+    assert!(!has_psb(&s));
+    assert!(
+        spirv_ops(&s.spirv).contains(&130),
+        "no subtraction of the base"
+    );
+}
+
+/// The same pair in a vertex program is not a vertex slot (0x560 is past
+/// the vertex rows), and a pair whose high word is not made from the
+/// next word keeps the buffer device address.
+#[test]
+fn a_register_pair_from_another_stages_rows_keeps_the_address() {
+    let s = staged(
+        SPH_VERTEX,
+        &[
+            hex_word(LEA_R16_P0_C0_560),
+            hex_word(IADD3X_R17_P0_C0_564),
+            hex_word(LDG_R13_R16),
+        ],
+        &[],
+    );
+    assert!(slots_of(&s).is_empty());
+    assert!(has_psb(&s));
+    let s = staged(
+        SPH_FRAGMENT,
+        &[hex_word(LEA_R16_P0_C0_560), hex_word(LDG_R13_R16)],
+        &[],
+    );
+    assert!(slots_of(&s).is_empty());
+    assert!(has_psb(&s));
+}
+
+/// An atomic through a slot base pair is a storage buffer atomic.
+#[test]
+fn an_atomic_through_a_slot_base_pair_uses_the_slot_descriptor() {
+    let red = word(
+        0x18e,
+        1,
+        &[
+            (24, 8, 16),
+            (32, 8, 2),
+            (40, 24, 8),
+            (72, 1, 1),
+            (87, 3, 0),
+            (90, 1, 1),
+        ],
+    );
+    let s = staged(
+        SPH_FRAGMENT,
+        &[
+            hex_word(LEA_R16_P0_C0_560),
+            hex_word(IADD3X_R17_P0_C0_564),
+            red,
+        ],
+        &["LEA", "IADD3.X", "RED.E.ADD"],
+    );
+    assert_eq!(slots_of(&s), vec![5]);
+    assert!(!has_psb(&s));
+    assert!(spirv_ops(&s.spirv).contains(&234), "no atomic add");
+}
