@@ -368,6 +368,7 @@ impl Ctx {
         }
         let kernel = self.stage == Stage::Compute || self.stage.is_mesh_pipeline();
         let warp = match self.stage {
+            _ if !self.host_core_ops() => Warp::Absent,
             Stage::Compute => self.host.warp_compute,
             Stage::Fragment => self.host.warp_fragment,
             Stage::Task | Stage::Mesh if self.io.mesh.path == MeshPath::Compute => {
@@ -487,8 +488,19 @@ impl Ctx {
         }
     }
 
+    /// The host has the subgroup operation classes every subgroup warp
+    /// path emits (basic, vote, ballot, shuffle); without one of them no
+    /// stage uses subgroups.
+    fn host_core_ops(&self) -> bool {
+        let core = crate::translate::host::SUBGROUP_CORE;
+        self.host.subgroup_ops & core == core
+    }
+
     /// The host has subgroup operations in this stage.
     pub(crate) fn host_subgroups(&self) -> bool {
+        if !self.host_core_ops() {
+            return false;
+        }
         let warp = match self.stage {
             Stage::Compute => self.host.warp_compute,
             Stage::Fragment => self.host.warp_fragment,
@@ -958,12 +970,20 @@ impl Ctx {
                 };
                 self.combine(atomic, init, v)
             }
+            WarpPath::Cluster
+                if self.host.subgroup_ops & crate::translate::host::SUBGROUP_CLUSTERED == 0 =>
+            {
+                self.shuffled_reduce(o, v)
+            }
             WarpPath::Cluster => {
                 self.cap(CAP_GROUP_NON_UNIFORM);
                 self.cap(CAP_CLUSTERED);
                 let scope = self.m.c_u32(SCOPE_SUBGROUP);
                 let k32 = self.m.c_u32(32);
                 self.m.emit(o, u, &[scope, CLUSTERED_REDUCE, v, k32])
+            }
+            _ if self.host.subgroup_ops & crate::translate::host::SUBGROUP_ARITHMETIC == 0 => {
+                self.shuffled_reduce(o, v)
             }
             _ => {
                 self.cap(CAP_GROUP_NON_UNIFORM);
@@ -972,5 +992,41 @@ impl Ctx {
                 self.m.emit(o, u, &[scope, 0, v])
             }
         }
+    }
+
+    /// The reduction `o` of `v` over the active lanes of the guest warp
+    /// from one shuffle per lane, for a device without the subgroup
+    /// arithmetic (or clustered) operations the direct form needs: each
+    /// lane's value joins the result when the lane is active. Exact, as
+    /// the operations are associative and commutative on integers.
+    fn shuffled_reduce(&mut self, o: u16, v: u32) -> u32 {
+        let u = self.u32t();
+        let act = self.active();
+        let init = match o {
+            spv::GROUP_AND | spv::GROUP_U_MIN => !0,
+            spv::GROUP_S_MIN => 0x7fff_ffff,
+            spv::GROUP_S_MAX => 0x8000_0000,
+            _ => 0,
+        };
+        let mut acc = self.m.c_u32(init);
+        let z = self.m.c_u32(0);
+        for k in 0..32 {
+            let l = self.m.c_u32(k);
+            let x = self.shuffle(v, l);
+            let joined = match o {
+                spv::GROUP_I_ADD => self.lb(op::I_ADD, acc, x),
+                spv::GROUP_AND => self.lb(op::BITWISE_AND, acc, x),
+                spv::GROUP_OR => self.lb(op::BITWISE_OR, acc, x),
+                spv::GROUP_XOR => self.lb(op::BITWISE_XOR, acc, x),
+                spv::GROUP_S_MIN => self.ext(u, glsl::S_MIN, &[acc, x]),
+                spv::GROUP_U_MIN => self.ext(u, glsl::U_MIN, &[acc, x]),
+                spv::GROUP_S_MAX => self.ext(u, glsl::S_MAX, &[acc, x]),
+                _ => self.ext(u, glsl::U_MAX, &[acc, x]),
+            };
+            let bit = self.lk(op::BITWISE_AND, act, 1 << k);
+            let on = self.lcmp(op::I_NOT_EQUAL, bit, z);
+            acc = self.select(u, on, joined, acc);
+        }
+        acc
     }
 }

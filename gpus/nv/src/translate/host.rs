@@ -75,6 +75,12 @@ pub struct HostProfile {
     pub warp_mesh: Warp,
     /// Subgroup quad operations in the fragment stage.
     pub quad_fragment: bool,
+    /// The subgroup operation classes the device supports
+    /// (`subgroupSupportedOperations`, `VK_SUBGROUP_FEATURE_*_BIT`). A
+    /// device without [`SUBGROUP_CORE`] has no subgroups in any stage (see
+    /// [`Warp::Absent`]); without [`SUBGROUP_ARITHMETIC`] or
+    /// [`SUBGROUP_CLUSTERED`] reductions are made of shuffles.
+    pub subgroup_ops: u32,
     /// `shaderMaximalReconvergence` (VK_KHR_shader_maximal_reconvergence):
     /// invocations that diverge come together again at the merge of the
     /// construct, as guest lanes do at their reconvergence point.
@@ -217,6 +223,7 @@ impl HostProfile {
             mesh_shader: Some(MeshLimits::NVIDIA),
             warp_mesh: Warp::Fixed32,
             quad_fragment: true,
+            subgroup_ops: SUBGROUP_ALL,
             maximal_reconvergence: true,
             demote: true,
             bda: true,
@@ -382,6 +389,8 @@ impl HostProfile {
         HostProfile {
             name: "adreno".into(),
             mirror_writes: true,
+            // No VK_SUBGROUP_FEATURE_CLUSTERED_BIT.
+            subgroup_ops: SUBGROUP_ALL & !SUBGROUP_CLUSTERED,
             warp_compute: Warp::Wide,
             warp_fragment: Warp::Wide,
             warp_graphics: Warp::Absent,
@@ -557,6 +566,7 @@ impl HostProfile {
             mesh_shader: None,
             warp_mesh: Warp::Absent,
             quad_fragment: false,
+            subgroup_ops: SUBGROUP_ALL,
             maximal_reconvergence: false,
             demote: false,
             bda: false,
@@ -641,6 +651,7 @@ impl HostProfile {
             },
             quad_fragment: caps.stages() & STAGE_FRAGMENT != 0
                 && caps.operations() & SUBGROUP_QUAD != 0,
+            subgroup_ops: u32::try_from(caps.operations() & 0xff).unwrap_or(0),
             maximal_reconvergence: caps.extension_on(
                 "VK_KHR_shader_maximal_reconvergence",
                 "shaderMaximalReconvergence",
@@ -737,6 +748,16 @@ pub const STAGE_COMPUTE: u64 = 0x20;
 pub const STAGE_MESH: u64 = 0x80;
 /// `VK_SUBGROUP_FEATURE_QUAD_BIT`.
 pub const SUBGROUP_QUAD: u64 = 0x80;
+/// `VK_SUBGROUP_FEATURE_ARITHMETIC_BIT`.
+pub const SUBGROUP_ARITHMETIC: u32 = 0x4;
+/// `VK_SUBGROUP_FEATURE_CLUSTERED_BIT`.
+pub const SUBGROUP_CLUSTERED: u32 = 0x40;
+/// The classes every warp path that runs on subgroups emits: basic, vote,
+/// ballot and shuffle (`VK_SUBGROUP_FEATURE_*_BIT`).
+pub const SUBGROUP_CORE: u32 = 0x1 | 0x2 | 0x8 | 0x10;
+/// Every subgroup operation class, for the presets of devices that have
+/// them all.
+pub const SUBGROUP_ALL: u32 = 0xff;
 
 /// What a Vulkan device reports, for [`HostProfile::from_device`]: its
 /// extensions, and its feature and property members by their Vulkan names
@@ -825,7 +846,8 @@ impl DeviceCaps {
     }
 
     fn warp(&self, stage: u64) -> Warp {
-        if self.stages() & stage == 0 {
+        let core = u64::from(SUBGROUP_CORE);
+        if self.stages() & stage == 0 || self.operations() & core != core {
             return Warp::Absent;
         }
         let size = self.get("subgroupSize");

@@ -431,6 +431,65 @@ fn capabilities(words: &[u32]) -> Vec<u32> {
 const GROUP_NON_UNIFORM_CAPS: std::ops::RangeInclusive<u32> = 61..=68;
 
 #[test]
+fn a_subgroup_operation_class_the_device_lacks_is_never_emitted() {
+    // VK_SUBGROUP_FEATURE_*_BIT and the SPIR-V capability its instructions declare.
+    const CLASSES: [(u32, u32); 6] = [
+        (0x1, 61),
+        (0x2, 62),
+        (0x4, 63),
+        (0x8, 64),
+        (0x10, 65),
+        (0x40, 67),
+    ];
+    const CORE: u32 = 0x1 | 0x2 | 0x8 | 0x10;
+    let p = warp_program(false);
+    for base in [
+        HostProfile::nvidia(),
+        HostProfile::adreno(),
+        HostProfile::moltenvk(),
+    ] {
+        let full = capabilities(&on(&p, base.clone()).spirv);
+        for (bit, cap) in CLASSES {
+            let mut h = base.clone();
+            h.subgroup_ops &= !bit;
+            let s = on(&p, h);
+            let caps = capabilities(&s.spirv);
+            if CORE & bit != 0 {
+                assert!(
+                    !caps.iter().any(|c| GROUP_NON_UNIFORM_CAPS.contains(c)),
+                    "{} without class {bit:#x}: {caps:?}",
+                    base.name
+                );
+                assert!(matches!(
+                    s.interface.host.warp,
+                    WarpPath::Shared | WarpPath::Simt
+                ));
+            } else {
+                assert!(
+                    !caps.contains(&cap),
+                    "{} without class {bit:#x}: {caps:?}",
+                    base.name
+                );
+                assert_eq!(
+                    s.interface.host.warp,
+                    on(&p, base.clone()).interface.host.warp
+                );
+                assert!(s.interface.host.inexact.is_empty());
+            }
+        }
+        if base.name == "adreno" {
+            assert!(
+                !full.contains(&67),
+                "the adreno capture has no clustered operations: {full:?}"
+            );
+        }
+    }
+    let mut clustered = HostProfile::adreno();
+    clustered.subgroup_ops = 0xff;
+    assert!(capabilities(&on(&p, clustered).spirv).contains(&67));
+}
+
+#[test]
 fn subgroup_capabilities_follow_the_operations_emitted() {
     let mut b = Vec::new();
     b.extend(word(0x119, 1, &[(16, 8, 2), (72, 8, 0x21)]));
