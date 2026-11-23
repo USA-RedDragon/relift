@@ -23,12 +23,18 @@ static bool g_cap_read;
 static char g_cap_dir[PATH_MAX];
 static uint64_t g_cap_every = 1;
 static uint64_t g_cap_frame;
+/** @brief The presents [from, to) that RELIFT_VK_CAPTURE_WINDOW=<from>-<to> limits capturing to; to is 0 without a window. */
+static uint64_t g_cap_from, g_cap_to;
 
 static void set_spec(const char *spec)
 {
     g_cap_dir[0] = 0;
     g_cap_every = 1;
     g_cap_frame = 0;
+    g_cap_from = g_cap_to = 0;
+    const char *win = getenv("RELIFT_VK_CAPTURE_WINDOW");
+    if (win && sscanf(win, "%llu-%llu", (unsigned long long *)&g_cap_from, (unsigned long long *)&g_cap_to) != 2)
+        g_cap_from = g_cap_to = 0;
     if (!spec || !*spec)
         return;
     const char *colon = strrchr(spec, ':');
@@ -140,7 +146,7 @@ bool vkf_capture_due(uint64_t *frame)
         g_cap_read = true;
     }
     uint64_t f = g_cap_frame++;
-    bool due = g_cap_dir[0] && f % g_cap_every == 0;
+    bool due = g_cap_dir[0] && (g_cap_to ? f >= g_cap_from && f < g_cap_to : f % g_cap_every == 0);
     pthread_mutex_unlock(&g_cap_lock);
     *frame = f;
     return due;
