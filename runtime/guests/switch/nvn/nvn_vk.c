@@ -83,12 +83,138 @@ static struct {
 } gpu_ts;
 
 /** @brief Submits si to the guest queue with g.fence, under the core's queue lock when the presenter shares the queue. */
+static void submit_drain(void);
 static VkResult guest_submit(const VkSubmitInfo *si)
 {
     rl_vkdev_guest_queue_lock();
     VkResult r = VK(vkQueueSubmit)(g.queue, 1, si, g.fence);
     rl_vkdev_guest_queue_unlock();
     return r;
+}
+
+/**
+ * @brief The submit thread: batches the game's thread recorded are handed to the queue here, in order, so the game's
+ * thread does not wait in vkQueueSubmit (Turnip on kgsl blocks there for milliseconds per batch). The console's
+ * submit queues the work and returns. Waits stay exact: a fence or timeline value of a batch not yet handed over is
+ * simply not signaled yet, and a present that makes the presenter's GPU work wait on a value first waits until that
+ * value's batch is on the queue (submit_handed_to), so no submit on the queue waits for one behind it.
+ */
+#define SUBMIT_JOBS 16u
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    struct submit_job {
+        VkCommandBuffer cb;
+        VkFence fence;
+        uint64_t signal;
+    } q[SUBMIT_JOBS];
+    uint32_t head, tail;
+    /** @brief The timeline value of the last batch on the queue; jobs handed over in all. */
+    uint64_t handed_value, handed, queued;
+    bool on, started;
+    VkResult err;
+} sth;
+
+static void *submit_main(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&sth.mu);
+    for (;;) {
+        while (sth.head == sth.tail)
+            pthread_cond_wait(&sth.cv, &sth.mu);
+        struct submit_job j = sth.q[sth.head % SUBMIT_JOBS];
+        pthread_mutex_unlock(&sth.mu);
+        VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &j.cb };
+        VkTimelineSemaphoreSubmitInfo tsi = { .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                              .signalSemaphoreValueCount = 1,
+                                              .pSignalSemaphoreValues = &j.signal };
+        if (j.signal) {
+            si.pNext = &tsi;
+            si.signalSemaphoreCount = 1;
+            si.pSignalSemaphores = &g.timeline;
+        }
+        rl_vkdev_guest_queue_lock();
+        VkResult vr = VK(vkQueueSubmit)(g.queue, 1, &si, j.fence);
+        rl_vkdev_guest_queue_unlock();
+        pthread_mutex_lock(&sth.mu);
+        if (vr != VK_SUCCESS && sth.err == VK_SUCCESS) {
+            sth.err = vr;
+            rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit on the submit thread (%d)", (int)vr);
+        }
+        sth.head++;
+        sth.handed++;
+        if (j.signal)
+            sth.handed_value = j.signal;
+        pthread_cond_broadcast(&sth.cv);
+    }
+    return NULL;
+}
+
+/** @brief Whether batches go through the submit thread: on by default on Android; RELIFT_NVN_SUBMIT_THREAD=0 or 1. */
+static bool submit_threaded(void)
+{
+    if (!sth.started) {
+        sth.started = true;
+        pthread_mutex_init(&sth.mu, NULL);
+        pthread_cond_init(&sth.cv, NULL);
+        const char *e = getenv("RELIFT_NVN_SUBMIT_THREAD");
+#if defined(__ANDROID__)
+        sth.on = !(e && *e == '0');
+#else
+        sth.on = e && *e == '1';
+#endif
+        pthread_t th;
+        if (sth.on && pthread_create(&th, NULL, submit_main, NULL) != 0)
+            sth.on = false;
+        else if (sth.on)
+            pthread_detach(th);
+        if (sth.on)
+            rl_log(RL_LOG_INFO, "nvn", "batches are handed to the queue by a submit thread");
+    }
+    return sth.on;
+}
+
+/** @brief Hands the batch in cb to the submit thread; it signals fence and, when signal is not 0, the timeline value. */
+static VkResult submit_queue(VkCommandBuffer cb, VkFence fence, uint64_t signal)
+{
+    pthread_mutex_lock(&sth.mu);
+    while (sth.tail - sth.head == SUBMIT_JOBS)
+        pthread_cond_wait(&sth.cv, &sth.mu);
+    VkResult vr = sth.err;
+    sth.q[sth.tail % SUBMIT_JOBS] = (struct submit_job){ cb, fence, signal };
+    sth.tail++;
+    sth.queued++;
+    pthread_cond_broadcast(&sth.cv);
+    pthread_mutex_unlock(&sth.mu);
+    return vr;
+}
+
+void nvn_vk_wait_idle(void)
+{
+    submit_drain();
+    rl_vkdev_wait_idle(rl_vkdev());
+}
+
+/** @brief Waits until the batch that signals timeline value v is on the queue. */
+static void submit_handed_to(uint64_t v)
+{
+    if (!sth.on)
+        return;
+    pthread_mutex_lock(&sth.mu);
+    while (sth.handed_value < v && sth.head != sth.tail)
+        pthread_cond_wait(&sth.cv, &sth.mu);
+    pthread_mutex_unlock(&sth.mu);
+}
+
+/** @brief Waits until every batch handed to the submit thread is on the queue (a direct submit comes after them). */
+static void submit_drain(void)
+{
+    if (!sth.on)
+        return;
+    pthread_mutex_lock(&sth.mu);
+    while (sth.head != sth.tail)
+        pthread_cond_wait(&sth.cv, &sth.mu);
+    pthread_mutex_unlock(&sth.mu);
 }
 static bool rob2_on;
 
@@ -612,6 +738,7 @@ static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t 
     VK(vkCmdDispatch)(g.cb, groups, 1, 1);
     nvn_vk_barrier(g.cb);
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &g.cb };
+    submit_drain();
     ok = VK(vkEndCommandBuffer)(g.cb) == VK_SUCCESS && VK(vkResetFences)(g.dev, 1, &g.fence) == VK_SUCCESS &&
          guest_submit(&si) == VK_SUCCESS &&
          VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
@@ -1340,7 +1467,7 @@ void nvn_vk_unimport(nvn_import *im) { nvn_vk_unimport_keep(im, true); }
 void nvn_vk_unimport_keep(nvn_import *im, bool keep)
 {
     if (im->buf || im->memory)
-        rl_vkdev_wait_idle(rl_vkdev());
+        nvn_vk_wait_idle();
     if (im->placed)
         unplace(im, keep);
     if (im->buf)
@@ -1895,7 +2022,9 @@ static bool submit_recorded(replay *r)
         si.pSignalSemaphores = &g.timeline;
     }
     int64_t t0 = now_ns();
-    if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) != VK_SUCCESS || (vr = guest_submit(&si)) != VK_SUCCESS) {
+    if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) == VK_SUCCESS)
+        vr = submit_threaded() ? submit_queue(g.cb, g.fence, g.timeline_ok ? signal : 0) : guest_submit(&si);
+    if (vr != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
         if (vr == VK_ERROR_DEVICE_LOST)
             fault_report();
@@ -4701,11 +4830,30 @@ static const uint8_t *present_readback(replay *r, vimg *v)
 }
 
 /**
- * @brief Copies the crop rectangle of v's level 0 into a presenter slot's image on the GPU (RGBA8 images straight,
- * other color formats through a blit), and waits for the copy. The slot ends in TRANSFER_SRC_OPTIMAL.
+ * @brief Whether a present hands its copy over unfinished (present_to_slot). RELIFT_NVN_PRESENT_WAIT=1 waits for it,
+ * as before, for an A/B.
  */
-static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl_present_slot *s, uint64_t frame)
+static bool present_queued(void)
 {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_PRESENT_WAIT");
+        on = !(e && *e == '1');
+    }
+    return on;
+}
+
+/**
+ * @brief Copies the crop rectangle of v's level 0 into a presenter slot's image on the GPU (RGBA8 images straight,
+ * other color formats through a blit). The slot ends in TRANSFER_SRC_OPTIMAL. With the timeline semaphore the copy is
+ * submitted and *after is the value it signals, for the presenter's GPU work to wait on: the console's present queues
+ * the frame and returns, so the game's thread does not wait for its frame here. Without it (*after 0) the copy is
+ * waited for.
+ */
+static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl_present_slot *s, uint64_t *after,
+                             uint64_t frame)
+{
+    *after = 0;
     if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
         return false;
     bool direct = v->format == VK_FORMAT_R8G8B8A8_UNORM || v->format == VK_FORMAT_R8G8B8A8_SRGB;
@@ -4739,7 +4887,13 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
         ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                                  NULL, 1, &ib);
-        ok = nvn_vk_flush(r);
+        if (g.timeline_ok && !tmp && present_queued()) {
+            ok = nvn_vk_submit(r);
+            *after = ok ? g.timeline_value : 0;
+            submit_handed_to(*after);
+        } else {
+            ok = nvn_vk_flush(r);
+        }
     }
     if (tmp)
         VK(vkDestroyImage)(g.dev, tmp, NULL);
@@ -4950,11 +5104,12 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     if (shown && cropped && pres) {
         rl_present_slot slot;
         shown = rl_present_slot_begin(pres, rect[2], rect[3], &slot);
-        if (shown && !present_to_slot(&r, v, rect, &slot, n)) {
+        uint64_t after = 0;
+        if (shown && !present_to_slot(&r, v, rect, &slot, &after, n)) {
             rl_present_slot_abort(pres, &slot);
             shown = false;
         } else if (shown) {
-            rl_present_slot_end(pres, &slot, rect[2], rect[3]);
+            rl_present_slot_end_after(pres, &slot, rect[2], rect[3], after ? (uint64_t)(uintptr_t)g.timeline : 0, after);
             counted = true;
             nvn_flash_presented(&r, n);
         }

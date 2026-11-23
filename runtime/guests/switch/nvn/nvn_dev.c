@@ -202,7 +202,7 @@ static void kept_put(uint64_t memory, uint64_t size, const nvn_import *im)
 {
     /* A finalize returns after the device is done with the pool, as it did when the import was freed: the game may
      * write the pages at once. */
-    rl_vkdev_wait_idle(rl_vkdev());
+    nvn_vk_wait_idle();
     pthread_mutex_lock(&g_kept_lock);
     if (g_kept_n == g_kept_cap) {
         uint32_t cap = g_kept_cap ? 2 * g_kept_cap : 64;

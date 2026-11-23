@@ -684,6 +684,8 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_i
 bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out);
 /** @brief Whether the device maps memory in place (VK_EXT_map_memory_placed with unmap reserve). */
 bool nvn_vk_can_place(void);
+/** @brief Waits until every batch is on the queue and the device is idle. */
+void nvn_vk_wait_idle(void);
 extern uint64_t nvn_dbg_lo, nvn_dbg_hi;
 void nvn_dbg_hit(const char *what, uint64_t at, uint64_t size);
 /**

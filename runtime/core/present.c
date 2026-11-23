@@ -57,6 +57,9 @@ enum { SLOT_FREE, SLOT_FILLING, SLOT_READY, SLOT_SHOWN };
 typedef struct slot {
     image im;
     int state;
+    /** @brief A timeline semaphore and value the slot's copy signals (rl_present_slot_end_after); 0 when finished. */
+    rlvk_handle wait_sem;
+    uint64_t wait_value;
 } slot;
 
 struct rl_present {
@@ -1239,12 +1242,26 @@ static bool draw(rl_present *p, bool capture)
         return false;
     }
     d->vkResetFences(d->device, 1, &p->fence);
-    uint32_t wait_stage = RLVK_PIPELINE_STAGE_TRANSFER_BIT;
+    uint32_t wait_stage[2] = { RLVK_PIPELINE_STAGE_TRANSFER_BIT, RLVK_PIPELINE_STAGE_TRANSFER_BIT };
+    /* A slot whose copy was handed over unfinished: this submit waits on the GPU for it, not the guest's thread. */
+    const slot *src = !p->still_shown && p->cur_slot >= 0 ? &p->slots[p->cur_slot] : NULL;
+    rlvk_handle waits[2] = { p->acquired, src ? src->wait_sem : 0 };
+    uint64_t values[2] = { 0, src ? src->wait_value : 0 };
+    struct {
+        int32_t sType;
+        const void *pNext;
+        uint32_t waitSemaphoreValueCount;
+        const uint64_t *pWaitSemaphoreValues;
+        uint32_t signalSemaphoreValueCount;
+        const uint64_t *pSignalSemaphoreValues;
+    } tsi = { 1000207003, NULL, 2, values, 0, NULL };
+    bool after = src && src->wait_sem;
     rlvk_submit_info sub = {
         .sType = RLVK_ST_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &p->acquired,
-        .pWaitDstStageMask = &wait_stage,
+        .pNext = after ? &tsi : NULL,
+        .waitSemaphoreCount = after ? 2u : 1u,
+        .pWaitSemaphores = waits,
+        .pWaitDstStageMask = wait_stage,
         .commandBufferCount = 1,
         .pCommandBuffers = &p->cmd,
         .signalSemaphoreCount = 1,
@@ -1605,8 +1622,16 @@ void rl_present_slot_abort(rl_present *p, const rl_present_slot *s)
 
 void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h)
 {
+    rl_present_slot_end_after(p, s, shown_w, shown_h, 0, 0);
+}
+
+void rl_present_slot_end_after(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h,
+                               uint64_t semaphore, uint64_t value)
+{
     pthread_mutex_lock(&p->lock);
     slot *sl = &p->slots[s->index];
+    sl->wait_sem = (rlvk_handle)(uintptr_t)semaphore;
+    sl->wait_value = value;
     if (p->fresh)
         p->stats.replaced++;
     if (p->next_slot >= 0)

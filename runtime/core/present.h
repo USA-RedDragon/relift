@@ -128,6 +128,13 @@ typedef struct rl_present_slot {
 bool rl_present_slot_begin(rl_present *p, uint32_t width, uint32_t height, rl_present_slot *out);
 /** @brief Hands the filled slot to the presenter, as a picture shown shown_w by shown_h square pixels. */
 void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h);
+/**
+ * @brief rl_present_slot_end for a copy that is submitted but not finished: the presenter's GPU work waits for
+ * timeline semaphore (a VkSemaphore of the core's device) to reach value before it reads the slot, so the guest's
+ * thread does not wait for its frame. The submission that signals value must already be on the queue.
+ */
+void rl_present_slot_end_after(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h,
+                               uint64_t semaphore, uint64_t value);
 /** @brief How slot pictures (the backend's own way, as rl_window_set_fit says) fill the window: to fit, or by whole multiples. */
 void rl_present_set_fit(rl_present *p, bool fit);
 /**

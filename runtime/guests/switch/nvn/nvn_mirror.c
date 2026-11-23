@@ -207,7 +207,7 @@ void nvn_mirror_free(nvn_import *im)
     pthread_mutex_lock(&mi.lock);
     mirror *m = by_buf(im->buf);
     if (m) {
-        rl_vkdev_wait_idle(rl_vkdev());
+        nvn_vk_wait_idle();
         uint32_t i = 0;
         while (mi.v[i] != m)
             i++;
