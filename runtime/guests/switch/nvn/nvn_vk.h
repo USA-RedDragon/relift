@@ -523,6 +523,16 @@ bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size);
 void nvn_vk_staging_free(staging *s);
 void nvn_vk_barrier(VkCommandBuffer cb);
 /**
+ * @brief vkCmdFillBuffer(cb, buf, off, size, value) with size a byte count (never VK_WHOLE_SIZE) that every driver
+ * runs: the part of the range below NVN_VK_FILL_LIMIT is a fill, the part at or past it copies of a buffer filled with
+ * value. The Adreno 740 driver 0676.53 fails a fill whose range reaches 512 MiB into its buffer (vkEndCommandBuffer
+ * fails, or the next command crashes in the driver) while copies there work; a mirrored memory pool is up to 1 GiB.
+ * Records barriers around the copies; false when the pattern buffer cannot be made.
+ */
+bool nvn_vk_fill(VkCommandBuffer cb, VkBuffer buf, uint64_t off, uint64_t size, uint32_t value);
+/** @brief The offset into a buffer from which nvn_vk_fill copies instead of filling. */
+#define NVN_VK_FILL_LIMIT (512ull << 20)
+/**
  * @brief Records an indirect dispatch of the bound compute pipeline whose group counts are the three u32 at ioff in
  * ibuf, read by the GPU when it runs; when c0 is not NULL, a copy of the counts first fills the 12 bytes at c0_off in
  * c0 (the driver table's group counts), behind a barrier.

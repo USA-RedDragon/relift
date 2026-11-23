@@ -816,3 +816,35 @@ TEST(nvn_a_pass_with_an_unbound_color_slot_below_a_bound_one_begins)
     nvn_vk_end_rendering();
     CHECK(nvn_vk_flush(&r));
 }
+
+TEST(nvn_vk_fill_reaches_past_the_fill_limit_through_copies)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    VkBuffer buf = NULL;
+    VkDeviceMemory mem = NULL;
+    staging rb;
+    const uint64_t at = NVN_VK_FILL_LIMIT - (1u << 20), n = 6ull << 20;
+    CHECK(nvn_vk_gpu_buffer(&buf, &mem, NVN_VK_FILL_LIMIT + (8ull << 20)));
+    CHECK(nvn_vk_readback_new(&rb, n));
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    CHECK(nvn_vk_begin(&r));
+    CHECK(nvn_vk_fill(g.cb, buf, at, n, 0x5eed1234u));
+    VkBufferCopy cp = { .srcOffset = at, .dstOffset = 0, .size = n };
+    VK(vkCmdCopyBuffer)(g.cb, buf, rb.buf, 1, &cp);
+    nvn_vk_barrier(g.cb);
+    CHECK(nvn_vk_flush(&r));
+    const uint32_t *w = (const uint32_t *)rb.map;
+    for (uint64_t i = 0; i < n / 4; i += 4099)
+        CHECK_EQ(w[i], 0x5eed1234u);
+    CHECK_EQ(w[n / 4 - 1], 0x5eed1234u);
+    nvn_vk_staging_free(&rb);
+    VK(vkDestroyBuffer)(g.dev, buf, NULL);
+    VK(vkFreeMemory)(g.dev, mem, NULL);
+}

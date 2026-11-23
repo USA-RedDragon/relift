@@ -1253,6 +1253,40 @@ void nvn_vk_barrier(VkCommandBuffer cb)
                              0, NULL);
 }
 
+/** @brief The size of nvn_vk_fill's pattern buffer, the length of each copy past NVN_VK_FILL_LIMIT. */
+#define FILL_PATTERN (4ull << 20)
+
+bool nvn_vk_fill(VkCommandBuffer cb, VkBuffer buf, uint64_t off, uint64_t size, uint32_t value)
+{
+    static VkBuffer pattern;
+    static VkDeviceMemory pattern_mem;
+    uint64_t low = off < NVN_VK_FILL_LIMIT ? (NVN_VK_FILL_LIMIT - off < size ? NVN_VK_FILL_LIMIT - off : size) : 0;
+    if (low)
+        VK(vkCmdFillBuffer)(cb, buf, off, low, value);
+    if (low == size)
+        return true;
+    if (!pattern && !nvn_vk_gpu_buffer(&pattern, &pattern_mem, FILL_PATTERN)) {
+        pattern = NULL;
+        rl_log(RL_LOG_ERROR, "nvn", "cannot make the buffer that fills past %llu MiB",
+               (unsigned long long)(NVN_VK_FILL_LIMIT >> 20));
+        return false;
+    }
+    nvn_vk_barrier(cb);
+    VK(vkCmdFillBuffer)(cb, pattern, 0, FILL_PATTERN, value);
+    nvn_vk_barrier(cb);
+    VkBufferCopy cp[64];
+    uint32_t n = 0;
+    for (uint64_t at = off + low, end = off + size; at < end; at += FILL_PATTERN) {
+        cp[n++] = (VkBufferCopy){ .srcOffset = 0, .dstOffset = at, .size = end - at < FILL_PATTERN ? end - at : FILL_PATTERN };
+        if (n == sizeof cp / sizeof cp[0] || at + FILL_PATTERN >= end) {
+            VK(vkCmdCopyBuffer)(cb, pattern, buf, n, cp);
+            n = 0;
+        }
+    }
+    nvn_vk_barrier(cb);
+    return true;
+}
+
 void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, VkBuffer c0, uint64_t c0_off)
 {
     if (c0) {
@@ -3481,7 +3515,9 @@ static int clear_buffer(replay *r, const nvn_cmd *e)
     if (size % 4 == 0 && nvn_guest_buffer(at, size, &pool, &off) && off % 4 == 0) {
         nvn_vk_begin(r);
         nvn_vk_barrier(g.cb);
-        VK(vkCmdFillBuffer)(g.cb, (VkBuffer)pool, off, size, value);
+        if (!nvn_vk_fill(g.cb, (VkBuffer)pool, off, size, value))
+            return nvn_vk_stop(r, "the host device cannot clear a buffer past %llu MiB",
+                               (unsigned long long)(NVN_VK_FILL_LIMIT >> 20));
         nvn_vk_mark_write_range(at, size);
         nvn_vk_barrier(g.cb);
         return RL_OK;

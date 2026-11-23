@@ -401,8 +401,8 @@ bool nvn_mirror_sync(replay *r, bool may_flush)
                 continue;
             c.ok = nvn_vk_begin(r);
             if (c.ok) {
-                VK(vkCmdFillBuffer)(g.cb, m->buf, 0, VK_WHOLE_SIZE, 0);
-                m->cleared = true;
+                c.ok = nvn_vk_fill(g.cb, m->buf, 0, m->size & ~3ull, 0);
+                m->cleared = c.ok;
             }
         }
         if (c.ok && nvn_vk_recording())
