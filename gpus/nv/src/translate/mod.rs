@@ -1390,6 +1390,15 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
     }
     let iface = c.iface;
     let spirv = c.m.finish();
+    let spirv = if c.host.int64 {
+        spirv
+    } else {
+        crate::lower64::lower(&spirv).map_err(|e| {
+            Unsupported(format!(
+                "64-bit integers as 32-bit pairs for a host without shaderInt64: {e}"
+            ))
+        })?
+    };
     Ok(Shader {
         stage,
         spirv,

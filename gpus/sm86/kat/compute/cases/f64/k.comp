@@ -1,0 +1,21 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+// Double precision on random bit patterns (every exponent, denormals, infinities, NaNs): DFMA, DADD, DMUL,
+// DSETP and F2F both ways, so the exact model runs as 64-bit integers and as 32-bit pairs alike.
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430) buffer D { double d[]; };
+layout(buffer_reference, std430) buffer W { uint w[]; };
+layout(push_constant) uniform Bank { D a; W f; W unused_pages; D o; };
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    double x = a.d[3u * g], y = a.d[3u * g + 1u], z = a.d[3u * g + 2u];
+    o.d[6u * g] = fma(x, y, z);
+    o.d[6u * g + 1u] = x + y;
+    o.d[6u * g + 2u] = x * z;
+    o.d[6u * g + 3u] = (y - z) * double(uintBitsToFloat(unpackDouble2x32(x).x));
+    o.d[6u * g + 4u] = x - z * 0.25;
+    o.d[6u * g + 5u] = fma(-x, abs(y), 0.5);
+    uint c = (x < y ? 1u : 0u) | (x >= z ? 2u : 0u) | (y == z ? 4u : 0u) | (isnan(x) ? 8u : 0u);
+    f.w[2u * g] = c;
+    f.w[2u * g + 1u] = floatBitsToUint(float(y * z));
+}

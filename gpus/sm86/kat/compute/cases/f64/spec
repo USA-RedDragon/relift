@@ -1,0 +1,16 @@
+input 0 6144 u32 21
+spv SPV
+local 64 1 1
+groups 4 1 1
+buf IN0
+out OUT.f 2048
+out OUT.o 12288
+out OUT.pages 131072
+push 0x0 addr 0
+push 0x8 addr 1
+push 0x18 addr 2
+push 0x10 addr 3
+put 0 0x20 addr 0
+put 0 0x28 addr 1
+put 0 0x30 addr 3
+put 0 0x38 addr 2

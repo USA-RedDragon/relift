@@ -10,6 +10,7 @@
 
 pub mod fields;
 mod inst;
+pub mod lower64;
 pub mod program;
 pub mod spirv;
 pub mod translate;
