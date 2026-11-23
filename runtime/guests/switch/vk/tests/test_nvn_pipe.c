@@ -11,6 +11,7 @@
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -343,4 +344,35 @@ TEST(nvn_the_warm_up_makes_the_libraries_a_first_draw_links)
     nvn_warm_key(&k, &m, 0u);
     CHECK_EQ(k.nspec[0u], 0u);
     CHECK(k.mods[0u] == m.m);
+}
+
+static nvn_pipe_key g_other_key;
+static bool g_other_ok;
+
+static void *make_other(void *arg)
+{
+    (void)arg;
+    g_other_ok = nvn_pipe_warm_fragment(&g_other_key);
+    return NULL;
+}
+
+TEST(nvn_pipe_a_draw_makes_its_pipeline_while_a_warm_up_thread_makes_another)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_draw_layouts());
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_key a;
+    make_key(&a, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 24);
+    make_key(&g_other_key, vs, fs, VK_FORMAT_R16G16B16A16_SFLOAT, 40);
+    g_other_key.sample_mask = 0;
+    pthread_t t;
+    CHECK_EQ(pthread_create(&t, NULL, make_other, NULL), 0);
+    CHECK(nvn_pipe_graphics(&a) != NULL);
+    pthread_join(t, NULL);
+    CHECK(g_other_ok || !nvn_pipe_uses_libraries());
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }

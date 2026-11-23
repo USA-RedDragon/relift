@@ -39,12 +39,11 @@ typedef struct table {
     uint32_t cap, n;
 } table;
 
-static _Thread_local bool t_worker;
 
 static struct {
     VkPipelineLayout layout, clayout, mlayout;
     VkPipelineCache cache;
-    bool gpl, warmed, warming, dirty, cache_ctl;
+    bool gpl, warmed, dirty, cache_ctl;
     pthread_mutex_t lock;
     pthread_cond_t cv;
     table vi, pr, fs, fo, full, comp, mcomp;
@@ -159,15 +158,11 @@ static bool add_locked(table *t, entry *e)
  * one claims it (*mine) and must call finish; when another is making it,
  * waits until that one has finished. NULL when memory runs out.
  */
-static entry *claim_ex(table *t, const void *key, size_t len, bool *mine, bool wait_warm)
+static entry *claim(table *t, const void *key, size_t len, bool *mine)
 {
     uint32_t h = hash_bytes(key, len);
     pthread_mutex_lock(&P.lock);
     entry *e = find_locked(t, key, len, h);
-    while (!e && wait_warm && P.warming && !t_worker) {
-        pthread_cond_wait(&P.cv, &P.lock);
-        e = find_locked(t, key, len, h);
-    }
     *mine = false;
     if (!e) {
         e = calloc(1, sizeof *e);
@@ -192,8 +187,6 @@ static entry *claim_ex(table *t, const void *key, size_t len, bool *mine, bool w
     pthread_mutex_unlock(&P.lock);
     return e;
 }
-
-static entry *claim(table *t, const void *key, size_t len, bool *mine) { return claim_ex(t, key, len, mine, true); }
 
 static void finish(entry *e, VkPipeline p)
 {
@@ -724,7 +717,7 @@ VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializ
 static bool record(const nvn_pipe_rec *rec)
 {
     bool mine;
-    entry *e = claim_ex(&P.seen, rec, sizeof *rec, &mine, false);
+    entry *e = claim(&P.seen, rec, sizeof *rec, &mine);
     if (!e || !mine)
         return false;
     finish(e, NULL);
@@ -788,16 +781,6 @@ void nvn_pipe_record_compute(const char *key, uint32_t n, const VkSpecialization
 uint32_t nvn_pipe_recorded(void) { return P.nold; }
 
 const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i) { return i < P.nold ? &P.old[i] : NULL; }
-
-void nvn_pipe_warming(bool on)
-{
-    pthread_mutex_lock(&P.lock);
-    P.warming = on;
-    pthread_cond_broadcast(&P.cv);
-    pthread_mutex_unlock(&P.lock);
-}
-
-void nvn_pipe_worker(void) { t_worker = true; }
 
 void nvn_pipe_warmed(void)
 {

@@ -93,15 +93,7 @@ VkPipeline nvn_pipe_mesh_compute(VkShaderModule m, uint32_t n, const VkSpecializ
 /** @brief Sets the dynamic state of graphics pipelines that k's pipeline leaves to the command buffer. */
 void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k);
 
-/**
- * @brief While warming is on, a thread that is not a warm-up worker and
- * needs a pipeline or library nobody has started making waits for the warm-up
- * to end instead of compiling it itself.
- */
-void nvn_pipe_warming(bool on);
 
-/** @brief Marks the calling thread as a warm-up worker, which compiles even while warming. */
-void nvn_pipe_worker(void);
 
 /**
  * @brief One pipeline the game made, kept so that a later launch can make it
