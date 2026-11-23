@@ -1136,6 +1136,28 @@ mod tests {
     }
 
     #[test]
+    fn the_settings_pages_keep_the_dark_palette_and_have_a_light_one() {
+        let ui = JAVA.iter().find(|j| j.0 == "Ui").unwrap().1;
+        for (l, d) in [
+            ("0xfff4f5f7", "0xff14161a"),
+            ("0xffffffff", "0xff1e2127"),
+            ("0xff1f5fcc", "0xff8ab4ff"),
+            ("0xff15181d", "0xffffffff"),
+        ] {
+            assert!(ui.contains(&format!("l ? {l} : {d};")), "{l} {d}");
+        }
+        assert!(ui.contains("UI_MODE_NIGHT_MASK"));
+        for (name, java) in JAVA {
+            if name == "Ui" || name == "DataPages" {
+                assert!(
+                    !java.contains("Color.WHITE"),
+                    "{name} draws text in a fixed white"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn presentations_follow_what_the_runtime_asked_for() {
         let d = JAVA[7].1;
         assert!(JAVA[7].0 == "Displays");

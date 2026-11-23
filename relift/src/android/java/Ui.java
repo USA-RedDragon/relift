@@ -39,17 +39,78 @@ import java.util.Locale;
  * are the mockups' pixels at 2.625 pixels per dp.
  */
 final class Ui {
-    static final int BG = 0xff14161a;
-    static final int CARD = 0xff1e2127;
-    static final int CARD2 = 0xff2b2e35;
-    static final int SUB = 0xff9aa1ad;
-    static final int ACC = 0xff8ab4ff;
-    static final int AMBER = 0xffffc233;
-    static final int RED = 0xffff8a80;
-    static final int GREEN = 0xff7ddc9a;
-    static final int LINE = 0xff2f333b;
-    static final int BODY = 0xffd5d9e0;
-    static final int DIALOG = 0xff23262c;
+    /*
+     * The palette: dark or light as the phone is set (see theme). The pages
+     * read these when they draw, so a page drawn after a change has the new
+     * colors.
+     */
+    static int BG;
+    static int CARD;
+    static int CARD2;
+    static int SUB;
+    static int ACC;
+    static int AMBER;
+    static int RED;
+    static int GREEN;
+    static int LINE;
+    static int BODY;
+    static int DIALOG;
+    /** Titles and other main text. */
+    static int TEXT;
+    /** Text on an ACC fill (a primary button, a Default pill). */
+    static int ON_ACC;
+    /** Text on a RED fill. */
+    static int ON_RED;
+    /** The faint line of a primary button's second line. */
+    static int ON_ACC_SUB;
+    /** The outline of a message and a menu. */
+    static int BORDER;
+    /** The empty part of a progress bar. */
+    static int TRACK;
+    /** The three dots of a menu button. */
+    static int DOTS;
+    /** Whether the light palette is in use. */
+    static boolean light;
+    /** The test hook relift_theme ("light" or "dark") in place of the phone's setting; null follows the phone. */
+    static String forced;
+
+    static {
+        palette(false);
+    }
+
+    /** Sets the palette for the phone's light or dark setting, or for forced. */
+    static void theme(Context c) {
+        boolean night = (c.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_NO;
+        palette(forced != null ? "light".equals(forced) : !night);
+    }
+
+    static void palette(boolean l) {
+        light = l;
+        BG = l ? 0xfff4f5f7 : 0xff14161a;
+        CARD = l ? 0xffffffff : 0xff1e2127;
+        CARD2 = l ? 0xffe6e8ec : 0xff2b2e35;
+        SUB = l ? 0xff5b6472 : 0xff9aa1ad;
+        ACC = l ? 0xff1f5fcc : 0xff8ab4ff;
+        AMBER = l ? 0xffb77800 : 0xffffc233;
+        RED = l ? 0xffc62828 : 0xffff8a80;
+        GREEN = l ? 0xff1f8a46 : 0xff7ddc9a;
+        LINE = l ? 0xffd7dae0 : 0xff2f333b;
+        BODY = l ? 0xff2b313b : 0xffd5d9e0;
+        DIALOG = l ? 0xffffffff : 0xff23262c;
+        TEXT = l ? 0xff15181d : 0xffffffff;
+        ON_ACC = l ? 0xffffffff : 0xff0b1a33;
+        ON_RED = l ? 0xffffffff : 0xff33100d;
+        ON_ACC_SUB = l ? 0xffd6e2f7 : 0xff27406b;
+        BORDER = l ? 0xffc9cdd4 : 0xFF555555;
+        TRACK = l ? 0xffd7dae0 : 0xff3a3f48;
+        DOTS = l ? 0xff5b6472 : 0xffc4c8d0;
+    }
+
+    /** The text color of a pill: its own dark color on the dark palette, white on the light one. */
+    static int pillText(String hex) {
+        return light ? 0xffffffff : Color.parseColor(hex);
+    }
     static final int REQ_PICK = 0x5244;
 
     /** What the page needs from the activity it is in. */
@@ -120,6 +181,11 @@ final class Ui {
         CharSequence l = act.getApplicationInfo().loadLabel(act.getPackageManager());
         this.game = l == null ? "this game" : l.toString();
         this.k = act.getResources().getDisplayMetrics().density / 2.625f;
+        String t = act.getIntent() == null ? null : act.getIntent().getStringExtra("relift_theme");
+        if (t != null && !t.isEmpty()) {
+            forced = t;
+        }
+        theme(act);
         this.data = new DataPages(this);
         root = new FrameLayout(act);
         root.setClickable(true);
@@ -257,6 +323,7 @@ final class Ui {
             return;
         }
         saveScrolls();
+        theme(act);
         root.removeAllViews();
         int w = root.getWidth() > 0 ? root.getWidth() : act.getResources().getDisplayMetrics().widthPixels;
         int h = root.getHeight() > 0 ? root.getHeight() : act.getResources().getDisplayMetrics().heightPixels;
@@ -422,7 +489,7 @@ final class Ui {
         card.addView(icon, new LinearLayout.LayoutParams(px(130), px(130)));
         LinearLayout t = vbox();
         t.setPadding(px(30), 0, 0, 0);
-        t.addView(text(game, 44, Color.WHITE, true));
+        t.addView(text(game, 44, TEXT, true));
         String platform = metaString(act, "relift.platform");
         String version = metaString(act, "relift.game_version");
         String line = platform + (version.isEmpty() ? "" : (platform.isEmpty() ? "Version " : " \u00b7 version ") + version);
@@ -788,9 +855,9 @@ final class Ui {
         dim.setBackgroundColor(stack.isEmpty() ? 0 : 0x99000000);
         dim.setClickable(true);
         LinearLayout card = vbox();
-        card.setBackground(round(DIALOG, 40, 0xff555555, 3));
+        card.setBackground(round(DIALOG, 40, BORDER, 3));
         card.setPadding(px(50), px(50), px(50), px(44));
-        card.addView(text(title, 44, Color.WHITE, true));
+        card.addView(text(title, 44, TEXT, true));
         TextView b = text(body, 33, BODY, false);
         b.setPadding(0, px(22), 0, 0);
         b.setLineSpacing(px(10), 1f);
@@ -849,7 +916,7 @@ final class Ui {
         catcher.setClickable(true);
         catcher.setOnClickListener(v -> closePopup());
         LinearLayout box = vbox();
-        box.setBackground(round(CARD2, 24, 0xff555555, 3));
+        box.setBackground(round(CARD2, 24, BORDER, 3));
         for (int i = 0; i < items.length; i++) {
             final Btn it = items[i];
             if (i > 0) {
@@ -857,7 +924,7 @@ final class Ui {
                 line.setBackgroundColor(LINE);
                 box.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, px(2))));
             }
-            TextView t = text(it.label, 36, it.style == Style.DANGER ? RED : Color.WHITE, false);
+            TextView t = text(it.label, 36, it.style == Style.DANGER ? RED : TEXT, false);
             t.setPadding(px(40), px(40), px(60), px(40));
             t.setOnClickListener(v -> {
                 closePopup();
@@ -954,7 +1021,7 @@ final class Ui {
         }
         LinearLayout t = vbox();
         t.setPadding(r.kind == Kind.RADIO ? 0 : px(44), px(34), px(16), px(34));
-        t.addView(text(r.title, 40, Color.WHITE, false));
+        t.addView(text(r.title, 40, TEXT, false));
         for (int i = 0; i < r.subs.size(); i++) {
             String s = r.subs.get(i);
             if (s == null || s.isEmpty()) {
@@ -971,7 +1038,7 @@ final class Ui {
             for (String[] p : r.pills) {
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(48));
                 lp.rightMargin = px(14);
-                pr.addView(pill(p[0], Color.parseColor(p[1]), p[2].equals("green") ? GREEN : p[2].equals("amber")
+                pr.addView(pill(p[0], pillText(p[1]), p[2].equals("green") ? GREEN : p[2].equals("amber")
                         ? AMBER : ACC), lp);
             }
             t.addView(pr);
@@ -1028,7 +1095,7 @@ final class Ui {
         f.addView(bar, bl);
         LinearLayout c = vbox();
         c.setPadding(px(38), px(40), px(40), px(30));
-        c.addView(text(title, 38, Color.WHITE, true));
+        c.addView(text(title, 38, TEXT, true));
         TextView b = text(body, 31, BODY, false);
         b.setPadding(0, px(6), 0, 0);
         b.setLineSpacing(px(8), 1f);
@@ -1057,7 +1124,7 @@ final class Ui {
         c.setBackground(round(CARD, 28, 0, 0));
         c.setPadding(px(44), px(34), px(44), px(34));
         c.addView(text(heading, 28, GREEN, true));
-        TextView n = text(name, 44, Color.WHITE, true);
+        TextView n = text(name, 44, TEXT, true);
         n.setPadding(0, px(14), 0, 0);
         c.addView(n);
         for (String l : lines) {
@@ -1084,10 +1151,10 @@ final class Ui {
         int fg;
         int stroke = 0;
         switch (st) {
-            case PRIMARY: fill = ACC; fg = 0xff0b1a33; break;
-            case DANGER: fill = RED; fg = 0xff33100d; break;
+            case PRIMARY: fill = ACC; fg = ON_ACC; break;
+            case DANGER: fill = RED; fg = ON_RED; break;
             case GHOST: fill = 0; fg = ACC; stroke = ACC; break;
-            default: fill = CARD2; fg = Color.WHITE; break;
+            default: fill = CARD2; fg = TEXT; break;
         }
         TextView t = text(label, size, fg, true);
         t.setGravity(Gravity.CENTER);
@@ -1122,14 +1189,14 @@ final class Ui {
         LinearLayout v = vbox();
         FrameLayout bar = new FrameLayout(act);
         if (withBack) {
-            TextView back = text("\u2039", 80, Color.WHITE, false);
+            TextView back = text("\u2039", 80, TEXT, false);
             back.setGravity(Gravity.CENTER);
             back.setOnClickListener(x -> back());
             back.setContentDescription("Back");
             FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(px(100), ViewGroup.LayoutParams.MATCH_PARENT);
             bar.addView(back, bl);
         }
-        TextView t = text(title, 52, Color.WHITE, true);
+        TextView t = text(title, 52, TEXT, true);
         t.setGravity(Gravity.CENTER_VERTICAL);
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1182,7 +1249,7 @@ final class Ui {
 
         Dots() {
             super(act);
-            p.setColor(0xffc4c8d0);
+            p.setColor(DOTS);
             setClickable(true);
             setContentDescription("More options");
         }
@@ -1209,7 +1276,7 @@ final class Ui {
         @Override
         protected void onDraw(Canvas c) {
             float h = getHeight();
-            p.setColor(0xff3a3f48);
+            p.setColor(TRACK);
             c.drawRoundRect(0, 0, getWidth(), h, h / 2, h / 2, p);
             p.setColor(ACC);
             c.drawRoundRect(0, 0, getWidth() * f, h, h / 2, h / 2, p);

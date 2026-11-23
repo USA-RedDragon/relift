@@ -514,10 +514,10 @@ final class DataPages {
         int subColor;
         int stroke = 0;
         switch (st) {
-            case PRIMARY: fill = Ui.ACC; fg = 0xff0b1a33; subColor = 0xff27406b; break;
-            case DANGER: fill = Ui.RED; fg = 0xff33100d; subColor = fg; break;
+            case PRIMARY: fill = Ui.ACC; fg = Ui.ON_ACC; subColor = Ui.ON_ACC_SUB; break;
+            case DANGER: fill = Ui.RED; fg = Ui.ON_RED; subColor = fg; break;
             case GHOST: fill = 0; fg = Ui.ACC; stroke = Ui.ACC; subColor = fg; break;
-            default: fill = Ui.CARD2; fg = Color.WHITE; subColor = fg; break;
+            default: fill = Ui.CARD2; fg = Ui.TEXT; subColor = fg; break;
         }
         LinearLayout v = ui.vbox();
         v.setGravity(Gravity.CENTER);
@@ -566,7 +566,7 @@ final class DataPages {
         c.setBackground(ui.round(Ui.CARD, 28, 0, 0));
         c.setPadding(ui.px(44), ui.px(32), ui.px(44), ui.px(36));
         c.addView(ui.text(head.toUpperCase(java.util.Locale.US), 28, headColor, true));
-        TextView b = ui.text(big, 52, Color.WHITE, true);
+        TextView b = ui.text(big, 52, Ui.TEXT, true);
         b.setPadding(0, ui.px(34), 0, 0);
         c.addView(b);
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(26));
@@ -602,7 +602,7 @@ final class DataPages {
             line.setMinimumHeight(ui.px(66));
             line.addView(ui.text(r[0], 34, Ui.BODY, false),
                     new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            int col = "green".equals(r[2]) ? Ui.GREEN : "red".equals(r[2]) ? Ui.RED : Color.WHITE;
+            int col = "green".equals(r[2]) ? Ui.GREEN : "red".equals(r[2]) ? Ui.RED : Ui.TEXT;
             TextView v = ui.text(r[1], 34, col, true);
             v.setPadding(ui.px(20), 0, 0, 0);
             line.addView(v);
@@ -627,7 +627,7 @@ final class DataPages {
         card.addView(m, new LinearLayout.LayoutParams(ui.px(48), ui.px(48)));
         LinearLayout t = ui.vbox();
         t.setPadding(ui.px(24), 0, 0, 0);
-        t.addView(ui.text(text, 36, Color.WHITE, false));
+        t.addView(ui.text(text, 36, Ui.TEXT, false));
         if (sub != null) {
             TextView s = ui.text(sub, 28, Ui.SUB, false);
             s.setPadding(0, ui.px(10), 0, 0);
@@ -651,7 +651,7 @@ final class DataPages {
         g.setColor((Ui.GREEN & 0x00ffffff) | 0x2e000000);
         m.setBackground(g);
         c.addView(m, new LinearLayout.LayoutParams(ui.px(128), ui.px(128)));
-        TextView t = ui.text("Game data is ready", 48, Color.WHITE, true);
+        TextView t = ui.text("Game data is ready", 48, Ui.TEXT, true);
         t.setGravity(Gravity.CENTER);
         t.setPadding(0, ui.px(44), 0, 0);
         c.addView(t);
@@ -685,7 +685,7 @@ final class DataPages {
         @Override
         protected void onDraw(android.graphics.Canvas c) {
             float h = getHeight();
-            p.setColor(0xff3a3f48);
+            p.setColor(Ui.TRACK);
             c.drawRoundRect(0, 0, getWidth(), h, h / 2, h / 2, p);
             p.setColor(Ui.ACC);
             c.drawRoundRect(0, 0, Math.max(h, getWidth() * f), h, h / 2, h / 2, p);
