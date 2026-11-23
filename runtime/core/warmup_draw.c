@@ -738,6 +738,71 @@ static void draw_blocking(ui *u, const rl_wu_scene *s, rl_wu_hits *hits)
     blocking(u, s, x0, y0, cw, hits);
 }
 
+/** @brief The widest count line this run can show at size px: done = total with every digit at the widest digit's width. */
+static float widest_count_line(const rl_wu_scene *s, float px)
+{
+    float best = 0;
+    char digit = '0';
+    for (char d = '0'; d <= '9'; d++) {
+        char one[2] = { d, 0 };
+        float w = width_of(one, px, false);
+        if (w > best) {
+            best = w;
+            digit = d;
+        }
+    }
+    uint32_t top = s->total > s->done ? s->total : s->done;
+    char text[32], line[96];
+    rl_wu_count_text(top, text, sizeof text);
+    for (char *c = text; *c; c++)
+        if (*c >= '0' && *c <= '9')
+            *c = digit;
+    snprintf(line, sizeof line, "%s of %s shaders", text, text);
+    return width_of(line, px, false);
+}
+
+/** @brief The widest right-hand words warmup can produce at size px: every time-left phrase and the two state phrases. */
+static float widest_right_words(float px)
+{
+    char buf[96];
+    float best = 0;
+    uint32_t secs = 1;
+    for (;;) {
+        rl_wu_eta_text(secs, buf, sizeof buf);
+        float w = width_of(buf, px, false);
+        if (w > best)
+            best = w;
+        if (secs < 59)
+            secs++;
+        else if (secs < 119 * 60)
+            secs = secs < 60 ? 60 : secs + 60;
+        else if (secs < 99 * 3600)
+            secs = secs < 120 * 60 ? 120 * 60 : secs + 3600;
+        else
+            break;
+    }
+    float w = width_of("Saving...", px, false);
+    best = w > best ? w : best;
+    w = width_of("Measuring speed...", px, false);
+    return w > best ? w : best;
+}
+
+/** @brief The widest one-line count-and-time row this run can show at size px, with the gap between its two items. */
+static float corner_row_width(const rl_wu_scene *s, float px, float r)
+{
+    return widest_count_line(s, px) + 1.4f * r + widest_right_words(px);
+}
+
+/**
+ * @brief The factor (at most 1) that makes the widest count-and-time row fit width iw at size px. The row never wraps,
+ * so a card too narrow for it gets smaller text instead; the factor depends only on the run, never on the frame.
+ */
+static float corner_fit(ui *u, const rl_wu_scene *s, float iw, float px)
+{
+    float w = corner_row_width(s, px, u->r);
+    return w > iw ? iw / w : 1.0f;
+}
+
 /** @brief The corner card with its top left at (x0, y0) and width pw; returns its height. */
 static float corner(ui *u, const rl_wu_scene *s, float x0, float y0, float pw)
 {
@@ -779,15 +844,12 @@ static float corner(ui *u, const rl_wu_scene *s, float x0, float y0, float pw)
     y += 1.2f * r + r;
     snprintf(l, sizeof l, "%s of %s shaders", done_t, total_t);
     bool strong = right_words(s, rt, sizeof rt);
-    float lw = width_of(l, mpx, false), rw = width_of(rt, mpx, false);
+    mpx *= corner_fit(u, s, iw, mpx);
+    mlh = mpx * LINE_NORMAL;
+    float rw = width_of(rt, mpx, false);
     text_line(u, ix, y, mlh, l, mpx, false, t->muted);
-    if (lw + 1.4f * r + rw <= iw + 0.5f) {
-        text_line(u, ix + iw - rw, y, mlh, rt, mpx, false, strong ? t->text : t->muted);
-        y += mlh;
-    } else {
-        text_line(u, ix, y + mlh + r, mlh, rt, mpx, false, strong ? t->text : t->muted);
-        y += 2 * mlh + r;
-    }
+    text_line(u, ix + iw - rw, y, mlh, rt, mpx, false, strong ? t->text : t->muted);
+    y += mlh;
     if (s->note) {
         y += 1.2f * r;
         if (!u->dry)
@@ -806,6 +868,9 @@ static void draw_corner(ui *u, const rl_wu_scene *s, rl_wu_hits *hits)
     float r = u->r, W = (float)c->w, H = (float)c->h;
     bool portrait = H > W;
     float pw = (portrait ? 48.0f : 46.0f) * r;
+    float need = corner_row_width(s, 1.9f * r, r) + 2 * (0.3f * r + 2.2f * r);
+    if (pw < need)
+        pw = need;
     if (pw > W - 2 * r)
         pw = W - 2 * r;
     u->dry = true;

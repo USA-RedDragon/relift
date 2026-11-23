@@ -540,3 +540,61 @@ TEST(a_launch_warm_up_with_late_compiles_beside_it_counts_up_on_the_screen)
     }
     rl_warmup_reset();
 }
+
+/** @brief The corner card's rectangle (x, y, width, height) for a scene on a canvas of w by h. */
+static void card_rect(const rl_wu_scene *s, uint32_t w, uint32_t h, float out[4])
+{
+    static uint8_t px[1920 * 1080 * 4];
+    rl_wu_canvas c = { .px = px, .w = w, .h = h };
+    rl_wu_hits hits;
+    rl_wu_clear(&c);
+    rl_wu_draw(&c, s, &hits);
+    memcpy(out, hits.card, sizeof hits.card);
+}
+
+/** @brief Checks that the card for s keeps the size of want, and the right edge's place on a wide canvas. */
+static void same_card(const rl_wu_scene *s, uint32_t w, uint32_t h, const float want[4])
+{
+    float got[4];
+    card_rect(s, w, h, got);
+    CHECK_EQ((int)got[2], (int)want[2]);
+    CHECK_EQ((int)got[3], (int)want[3]);
+}
+
+TEST(the_corner_card_keeps_one_size_for_every_count_and_time_left)
+{
+    static const uint32_t totals[] = { 2077, 12280, 12487, 99999 };
+    static const uint32_t etas[] = { 1, 2, 9, 59, 60, 89, 91, 150, 3599, 3600, 7199, 7200, 36000, 359999 };
+    static const uint32_t sizes[][2] = { { 1920, 1080 }, { 1280, 800 }, { 480, 800 }, { 400, 300 } };
+    const size_t ne = sizeof etas / sizeof etas[0];
+    for (size_t k = 0; k < sizeof sizes / sizeof sizes[0]; k++) {
+        uint32_t w = sizes[k][0], h = sizes[k][1];
+        {
+            for (size_t ti = 0; ti < sizeof totals / sizeof totals[0]; ti++) {
+                rl_wu_scene s;
+                memset(&s, 0, sizeof s);
+                s.mode = RL_WARMUP_BACKGROUND;
+                s.state = RL_WU_COMPILING;
+                s.total = totals[ti];
+                s.dark = ((k + ti) & 1) != 0;
+                float want[4];
+                card_rect(&s, w, h, want);
+                CHECK(want[3] > 0);
+                size_t n = 0;
+                /* Every count to 40, then a stride that still lands on every digit width and every length. */
+                for (uint32_t d = 0; d <= totals[ti]; d += d < 40 ? 1 : d / 9 + 1) {
+                    s.done = d;
+                    s.eta_s = etas[n++ % ne];
+                    same_card(&s, w, h, want);
+                }
+                s.done = totals[ti];
+                for (size_t e = 0; e < ne; e++) {
+                    s.eta_s = etas[e];
+                    same_card(&s, w, h, want);
+                }
+                s.open = true;
+                same_card(&s, w, h, want);
+            }
+        }
+    }
+}
