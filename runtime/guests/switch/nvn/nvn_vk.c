@@ -4196,14 +4196,22 @@ static void trace_present_costs(void)
     last_pl = pl;
 }
 
-/** @brief The window frames go to, opened with the first one; NULL in a headless run. */
+/**
+ * @brief The window frames go to, opened with the first one; NULL in a headless run. The warm-up thread opens it early
+ * for the compile screen while the game's first present asks for it too: the open is under a lock, or both open one and
+ * the compile screen draws into the window the game never shows.
+ */
 static rl_window *present_window(uint32_t w, uint32_t h)
 {
+    static pthread_mutex_t open_lock = PTHREAD_MUTEX_INITIALIZER;
     static rl_window *win;
     const rl_window_backend *b = rl_window_backend_current();
+    pthread_mutex_lock(&open_lock);
     if (!win && b && b->open)
         win = b->open("relift", w, h);
-    return win;
+    rl_window *got = win;
+    pthread_mutex_unlock(&open_lock);
+    return got;
 }
 
 /** @brief The size an early window opens at: the game's own picture size is not known before its first present. */
