@@ -11,6 +11,7 @@
 
 #include <dirent.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -234,18 +235,32 @@ TEST(vm_block_map_coalesces)
 typedef struct map_churn {
     rl_vm *vm;
     uint64_t at;
-    volatile int stop;
+    uint64_t rounds;
+    uint64_t done;
 } map_churn;
 
-/** @brief Changes the tag of one page back and forth, which splits it from its neighbor and merges it again. */
+/**
+ * @brief Changes the tag of one page back and forth, which splits it from its
+ * neighbor and merges it again, and counts each change in `done`.
+ */
 static void *churn_map(void *arg)
 {
     map_churn *m = arg;
-    for (uint64_t i = 0; !m->stop; i++)
+    for (uint64_t i = 0; i < m->rounds; i++) {
         rl_vm_set(m->vm, m->at, m->vm->host_page, RL_VM_RW, i & 1 ? 9 : 8, RL_VM_KEEP);
+        __atomic_store_n(&m->done, i + 1, __ATOMIC_RELEASE);
+    }
     return NULL;
 }
 
+/**
+ * The writer and the map change take turns: each map change is answered by a
+ * batch of kernel writes, and the writer then waits for the next change. The
+ * work is fixed by the round count, so the run takes the same number of lock
+ * hand-offs however the host schedules the two threads, where a fixed count
+ * of writes against an unbounded change loop ran for seconds to minutes
+ * depending on how the host's lock is handed over.
+ */
 TEST(vm_kernel_writes_keep_access_while_the_map_changes)
 {
     rl_vm vm;
@@ -255,14 +270,20 @@ TEST(vm_kernel_writes_keep_access_while_the_map_changes)
     for (uint64_t k = 0; k < 256; k++)
         CHECK_EQ(rl_vm_set(&vm, (8 + k) * hp, hp, RL_VM_RW, 16 + (k & 1), RL_VM_FRESH), 0);
     uint64_t target = (8 + 255) * hp;
-    map_churn m = { &vm, 2 * hp, 0 };
+    map_churn m = { &vm, 2 * hp, 20000, 0 };
     pthread_t t;
     CHECK_EQ(pthread_create(&t, NULL, churn_map, &m), 0);
     uint8_t bytes[64];
     memset(bytes, 0x5a, sizeof bytes);
-    for (int i = 0; i < 4000000; i++)
-        rl_vm_kernel_write(&vm, target, bytes, sizeof bytes);
-    m.stop = 1;
+    uint64_t seen = 0;
+    while (seen < m.rounds) {
+        for (int i = 0; i < 16; i++)
+            rl_vm_kernel_write(&vm, target, bytes, sizeof bytes);
+        uint64_t now = __atomic_load_n(&m.done, __ATOMIC_ACQUIRE);
+        if (now == seen)
+            sched_yield();
+        seen = now;
+    }
     pthread_join(t, NULL);
     CHECK_EQ(rl_vm_host_prot(&vm, target), PROT_READ | PROT_WRITE);
     CHECK(!t_write(target + 5, 1).faulted);
