@@ -2821,10 +2821,13 @@ bool nvn_vk_bytes_changed(vimg *v, const uint8_t *bytes)
  * a write to a page wholly inside it leads to that hash; a write only to the
  * pages it shares with other bytes compares just its bytes on those pages
  * first. A game writing the same bytes again (as at each scene load) costs a
- * hash, not a fill.
+ * hash, not a fill. A render target whose sync is pending (vimg.sync_pending)
+ * takes the newer images' bytes first, as every read of an image does.
  */
 bool nvn_vk_refresh(replay *r, vimg *v)
 {
+    if (v->sync_pending && !sync_alias(r, v))
+        return false;
     if (!nvn_vk_reading_guest(v->storage, v->d.size))
         return false;
     if (v->d.target == NVN_TARGET_BUFFER)

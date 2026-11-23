@@ -605,6 +605,46 @@ TEST(nvn_an_image_takes_every_newer_write_of_an_alias_even_after_a_quiet_lookup)
     CHECK(nvn_vk_flush(&r));
 }
 
+TEST(nvn_a_render_target_with_its_sync_pending_takes_older_writes_when_it_is_read)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!hos.vm.host_page) {
+        hos.vm.host_page = 4096;
+        hos.vm.size = 0x10000;
+    }
+    static rl_ctx c;
+    static uint8_t mem[0x10000];
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    static replay r;
+    memset(&r, 0, sizeof r);
+    r.c = &c;
+    r.mem = mem;
+    r.st = &st;
+    const uint64_t pool = 0x100, a = 0x200, b = 0x300;
+    CHECK(nvn_pool_make(pool, 0, 0x10000, 0x2a1));
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 4, .height = 4, .depth = 1, .levels = 1, .pool = pool,
+                       .offset = 0x8000 };
+    CHECK(nvn_tex_layout(&d));
+    nvn_tex_desc e = d;
+    e.height = 2;
+    CHECK(nvn_texture_record(a, &d, NULL));
+    CHECK(nvn_texture_record(b, &e, NULL));
+    vimg *va = nvn_vk_image(&r, a), *vb = nvn_vk_image(&r, b);
+    CHECK(va != NULL && vb != NULL && va != vb);
+    nvn_vk_written(vb);
+    va->sync_pending = true;
+    va->sync_since = va->written;
+    nvn_vk_written(va);
+    uint64_t own = va->written;
+    CHECK(nvn_vk_refresh(&r, va));
+    CHECK(!va->sync_pending);
+    CHECK_EQ(va->written, own);
+    CHECK(nvn_vk_flush(&r));
+}
+
 TEST(nvn_a_texture_finds_its_host_image_among_many_by_storage_and_shape)
 {
     nvn_probes probes;
