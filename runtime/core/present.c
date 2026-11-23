@@ -40,6 +40,12 @@
 #define IDLE_WAIT_MS 250
 /** @brief How often an overlay is asked for changes while no frame comes (the pause sheet over a paused game). */
 #define OVERLAY_POLL_MS 16
+/**
+ * @brief The shortest time between two draws for an overlay change alone: one refresh of a 60 Hz display. The
+ * presenter does not know the panel's rate, and in mailbox mode nothing else holds it back, so an animating overlay
+ * would redraw as fast as the GPU allows. New frames, resizes and captures are drawn at once.
+ */
+#define OVERLAY_MIN_NS 16666667ull
 #define SLOT_WAIT_MS 1000
 #define STATS_EVERY_NS 10000000000ull
 #define QUARTER_TURNS (RLVK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | RLVK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
@@ -132,6 +138,8 @@ struct rl_present {
     /** @brief The window's overlay (rl_present_set_overlay) and what its last pixels call gave. */
     rl_present_overlay ov;
     bool ov_on, ov_due, ov_upload_all;
+    /** @brief When the presenter last drew (rl_clock_ns), for OVERLAY_MIN_NS. */
+    uint64_t last_draw_ns;
     const uint8_t *ov_px;
     uint32_t ov_w, ov_h;
     /** @brief The rows changed since the last upload, first and one past the last. */
@@ -1408,6 +1416,10 @@ static void ov_poll(rl_present *p)
     pthread_mutex_lock(&p->lock);
     if (!p->ov_on)
         return;
+    /* An empty overlay keeps size 0, as it is stored below: comparing the size it reports would see a change at every
+     * poll and redraw the picture each time (an idle on-screen controller on Android cost a GPU frame every 2 ms). */
+    if (!px)
+        w = h = 0;
     if (px != p->ov_px || w != p->ov_w || h != p->ov_h) {
         p->ov_upload_all = true;
         p->ov_due = true;
@@ -1456,6 +1468,13 @@ static void *thread_main(void *arg)
             ov_poll(p);
         bool redo = (p->have_frame || p->still_shown) && (p->stale || moved || (p->ov_on && p->ov_due));
         bool still_due = p->still_fresh;
+        uint64_t since = rl_clock_ns() - p->last_draw_ns;
+        if (redo && !p->stale && !moved && !p->fresh && !p->capture_want && !still_due && since < OVERLAY_MIN_NS) {
+            struct timespec t;
+            deadline(&t, (uint32_t)((OVERLAY_MIN_NS - since) / 1000000u) + 1u);
+            pthread_cond_timedwait(&p->cond, &p->lock, &t);
+            continue;
+        }
         if (p->surface_ok && !p->create_failed && (p->fresh || p->capture_want || redo || still_due) &&
             (p->fresh || p->have_frame || p->still_on || p->still_shown)) {
             if (still_due) {
@@ -1506,6 +1525,7 @@ static void *thread_main(void *arg)
             bool capture = p->capture_want;
             p->ov_due = false;
             p->holds = true;
+            p->last_draw_ns = rl_clock_ns();
             pthread_mutex_unlock(&p->lock);
             bool shown = draw(p, capture);
             pthread_mutex_lock(&p->lock);

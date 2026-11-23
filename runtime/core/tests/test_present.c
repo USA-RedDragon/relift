@@ -305,6 +305,8 @@ static uint8_t *diagonal(uint32_t w, uint32_t h)
 static uint8_t *g_ov;
 static int32_t g_ov_place[4] = { 10, 20, 100, 50 };
 static uint32_t g_ov_ver, g_ov_seen;
+/** @brief The overlay draws nothing: no pixels, though it reports the view's size (an idle on-screen controller). */
+static bool g_ov_empty;
 
 static bool ov_place(void *user, int32_t rect[4])
 {
@@ -325,6 +327,10 @@ static const uint8_t *ov_pixels(void *user, uint64_t now_ns, uint32_t *width, ui
     dirty[0] = dirty[1] = 0;
     dirty[2] = changed ? (int32_t)g_w : 0;
     dirty[3] = changed ? (int32_t)g_h : 0;
+    if (g_ov_empty) {
+        dirty[2] = dirty[3] = 0;
+        return NULL;
+    }
     return g_ov;
 }
 
@@ -394,6 +400,16 @@ static void overlay_checks(rl_present *p, int *failures)
     EXPECT(moved && w == g_w && same(px(moved, w, 255, 155), blue));
     EXPECT(moved && w == g_w && same(px(moved, w, 205, 155), black));
     free(moved);
+    /* An overlay that does not change, and one that is empty, make no draws without new frames. */
+    for (int empty = 0; empty < 2; empty++) {
+        g_ov_empty = empty;
+        usleep(100000);
+        rl_present_stats_get(p, &before);
+        usleep(300000);
+        rl_present_stats_get(p, &now);
+        EXPECT(now.presented == before.presented);
+    }
+    g_ov_empty = false;
     rl_present_set_overlay(p, NULL);
     free(g_ov);
     g_ov = NULL;
