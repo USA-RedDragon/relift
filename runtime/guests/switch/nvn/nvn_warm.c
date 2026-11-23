@@ -297,7 +297,10 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
         }
         nvn_module_default_spec(m, &n, map, vals);
         nvn_spec_sort(&n, map, vals);
-        return nvn_pipe_compute(m->m, n, map, vals) != NULL;
+        rl_log(RL_LOG_DEBUG, "nvn", "warm-up: compute program %s, workgroup %ux%ux%u", key, wg[0], wg[1], wg[2]);
+        VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
+        rl_log(RL_LOG_DEBUG, "nvn", "warm-up: compute program %s %s", key, p ? "made" : "refused");
+        return p != NULL;
     }
     if (!nvn_pipe_uses_libraries() || (stage != 0 && stage != 1))
         return true;
