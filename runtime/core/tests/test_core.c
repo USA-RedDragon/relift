@@ -231,6 +231,27 @@ TEST(vm_block_map_coalesces)
     rl_vm_destroy(&vm);
 }
 
+TEST(vm_keeps_the_ranges_of_recent_map_changes)
+{
+    rl_vm vm;
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    CHECK_EQ(rl_vm_init(&vm, 32, 0x4000), 0);
+    uint64_t gen = vm.map_gen;
+    CHECK(!rl_vm_changed_since(&vm, gen, 0x100000, 0x10000));
+    CHECK_EQ(rl_vm_set(&vm, 0x20000, 0x10000, RL_VM_RW, 5, RL_VM_FRESH), 0);
+    CHECK(rl_vm_changed_since(&vm, gen, 0x2c000, 0x8000));
+    CHECK(!rl_vm_changed_since(&vm, gen, 0x30000, 0x8000));
+    CHECK(!rl_vm_changed_since(&vm, gen, 0x10000, 0x10000));
+    gen = vm.map_gen;
+    for (uint32_t i = 0; i < RL_VM_CHANGES; i++)
+        CHECK_EQ(rl_vm_set(&vm, 0x20000, 0x4000, (i & 1) ? RL_VM_R : RL_VM_RW, 5, RL_VM_KEEP), 0);
+    CHECK(!rl_vm_changed_since(&vm, gen, 0x40000, 0x4000));
+    CHECK_EQ(rl_vm_set(&vm, 0x20000, 0x4000, RL_VM_RW, 5, RL_VM_KEEP), 0);
+    /* More changes than the ring holds: every range counts as changed. */
+    CHECK(rl_vm_changed_since(&vm, gen, 0x40000, 0x4000));
+    rl_vm_destroy(&vm);
+}
+
 /** @brief The map a kernel write races in vm_kernel_writes_keep_access_while_the_map_changes. */
 typedef struct map_churn {
     rl_vm *vm;

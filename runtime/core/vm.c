@@ -341,6 +341,31 @@ static int discard(rl_vm *vm, uint64_t addr, uint64_t size)
     return 0;
 }
 
+/** @brief Guards every vm's changes ring; held only for a few stores or a scan of the ring. */
+static pthread_mutex_t g_changes_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/** @brief Counts a map change (map_gen) and keeps its range in the changes ring. */
+static void note_change(rl_vm *vm, uint64_t addr, uint64_t size)
+{
+    pthread_mutex_lock(&g_changes_lock);
+    uint64_t gen = __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    vm->changes[gen % RL_VM_CHANGES] = (rl_vm_change){ gen, addr, size };
+    pthread_mutex_unlock(&g_changes_lock);
+}
+
+bool rl_vm_changed_since(rl_vm *vm, uint64_t gen, uint64_t addr, uint64_t size)
+{
+    pthread_mutex_lock(&g_changes_lock);
+    uint64_t now = __atomic_load_n(&vm->map_gen, __ATOMIC_ACQUIRE);
+    bool hit = now - gen > RL_VM_CHANGES;
+    for (uint64_t g = gen + 1; !hit && g <= now; g++) {
+        const rl_vm_change *k = &vm->changes[g % RL_VM_CHANGES];
+        hit = k->gen != g || (k->addr < addr + size && addr < k->addr + k->size);
+    }
+    pthread_mutex_unlock(&g_changes_lock);
+    return hit;
+}
+
 /** @brief rl_vm_set with the lock held. */
 static int set_locked(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
 {
@@ -363,7 +388,7 @@ static int set_locked(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, ui
 
 int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
 {
-    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    note_change(vm, addr, size);
     if ((addr | size) & (vm->guest_page - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
         return -1;
     void (*hook)(uint64_t, uint64_t) = __atomic_load_n(&vm->discard_hook, __ATOMIC_ACQUIRE);
@@ -479,7 +504,7 @@ void rl_shm_destroy(rl_shm *s)
 
 int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
 {
-    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    note_change(vm, addr, size);
     (void)vm;
     (void)addr;
     (void)size;
@@ -524,7 +549,7 @@ void rl_shm_destroy(rl_shm *s)
 
 int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
 {
-    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    note_change(vm, addr, size);
     if (((addr | size) & (vm->host_page - 1)) || size > s->size || !rl_vm_contains(vm, addr, size))
         return -1;
     vm_address_t at = (vm_address_t)(uintptr_t)(vm->base + addr);
@@ -583,7 +608,7 @@ void rl_shm_destroy(rl_shm *s)
 
 int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
 {
-    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    note_change(vm, addr, size);
     if (((addr | size) & (vm->host_page - 1)) || size > s->size || !rl_vm_contains(vm, addr, size))
         return -1;
     void *p = mmap(vm->base + addr, size, PROT_NONE, MAP_SHARED | MAP_FIXED, s->fd, 0);

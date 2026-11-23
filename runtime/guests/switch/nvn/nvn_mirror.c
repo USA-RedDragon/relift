@@ -351,9 +351,12 @@ bool nvn_mirror_sync(replay *r, bool may_flush)
     pthread_mutex_lock(&mi.lock);
     uint64_t gen = __atomic_load_n(&hos.vm.map_gen, __ATOMIC_ACQUIRE);
     if (gen != mi.map_gen) {
-        mi.map_gen = gen;
+        /* A change of the map can drop a pool's write tracking, so a pool it touched is copied whole; the others
+         * keep their tracking and move only their written pages. */
         for (uint32_t i = 0; i < mi.n; i++)
-            nvn_track_dirty_all(mi.v[i]->guest, mi.v[i]->size);
+            if (rl_vm_changed_since(&hos.vm, mi.map_gen, mi.v[i]->guest, mi.v[i]->size))
+                nvn_track_dirty_all(mi.v[i]->guest, mi.v[i]->size);
+        mi.map_gen = gen;
     }
     uint64_t epoch = nvn_track_epoch();
     bool ok = true;

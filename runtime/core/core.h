@@ -268,6 +268,19 @@ typedef struct rl_vm_block {
  * memory with rl_vm_kernel_write while the guest changes its map) never sees
  * a map half way through a change.
  */
+/** @brief Map changes whose ranges an rl_vm keeps. */
+#define RL_VM_CHANGES 64
+
+/** @brief One change of the guest map: the map_gen it made and its range. */
+typedef struct rl_vm_change {
+    /** @brief map_gen after the change. */
+    uint64_t gen;
+    /** @brief First guest address changed. */
+    uint64_t addr;
+    /** @brief Bytes changed. */
+    uint64_t size;
+} rl_vm_change;
+
 typedef struct rl_vm {
     /** @brief Guest address 0 in host memory: the `mem` lifted code gets. */
     uint8_t *base;
@@ -291,6 +304,8 @@ typedef struct rl_vm {
     uint64_t protect_calls;
     /** @brief Counts changes of the guest map (rl_vm_set, rl_vm_map_shm): a host protection made before a change may be gone after it. */
     uint64_t map_gen;
+    /** @brief The ranges of the last RL_VM_CHANGES map changes, by map_gen, for rl_vm_changed_since. */
+    rl_vm_change changes[RL_VM_CHANGES];
     /**
      * @brief Held while the map is read or changed, and through a kernel access's unprotect, copy and protect again.
      * Recursive: a kernel copy that faults on a watched page runs the fault hooks, which read the map, on its thread.
@@ -327,6 +342,11 @@ RL_RUNTIME_API void rl_vm_destroy(rl_vm *vm);
 /** @brief Sets [addr, addr+size) to perm and tag. Both page aligned. Returns 0 or -1 (host failure). */
 RL_RUNTIME_API int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content);
 /** @brief Returns the coalesced block containing addr (addr < vm->size). */
+/**
+ * @brief Whether a map change since generation gen (a map_gen read earlier) touched [addr, addr + size): true when
+ * one did, or when more changes came than the vm keeps, so the caller must treat its range as changed.
+ */
+RL_RUNTIME_API bool rl_vm_changed_since(rl_vm *vm, uint64_t gen, uint64_t addr, uint64_t size);
 RL_RUNTIME_API rl_vm_block rl_vm_query(const rl_vm *vm, uint64_t addr);
 /** @brief True when [addr, addr+size) lies in one block; *out receives that block. */
 RL_RUNTIME_API bool rl_vm_uniform(const rl_vm *vm, uint64_t addr, uint64_t size, rl_vm_block *out);

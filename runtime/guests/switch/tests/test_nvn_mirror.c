@@ -405,6 +405,41 @@ TEST(nvn_mirror_reads_back_only_the_pages_a_program_marks)
     rl_settings_set("nvn.memory", "auto");
 }
 
+TEST(nvn_mirror_copies_only_written_pages_across_an_unrelated_map_change)
+{
+    rl_ctx *c = t_boot(NULL);
+    CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        rl_settings_set("nvn.memory", "auto");
+        return;
+    }
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    for (uint32_t i = 0; i < 64; i++)
+        rl_st32(m, at + i * hp, i + 1);
+    CHECK(nvn_pool_make(pool, at, 64 * hp, 0));
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    CHECK(nvn_mirror_sync(&r, true) && nvn_vk_flush(&r));
+    uint64_t up0, down0, syncs0, read0, marked0;
+    nvn_mirror_stats(&up0, &down0, &syncs0, &read0, &marked0);
+    /* The heap grows past the pool: the map changes, the pool's pages do not. */
+    t_heap(c, 0x800000);
+    rl_st32(m, at + 40 * hp, 99);
+    CHECK(nvn_mirror_sync(&r, true) && nvn_vk_flush(&r));
+    uint64_t up1, down1, syncs1, read1, marked1;
+    nvn_mirror_stats(&up1, &down1, &syncs1, &read1, &marked1);
+    /* One write opens its group of pages (nvn_watch.c), not the pool. */
+    CHECK(up1 - up0 >= hp && up1 - up0 <= 16 * hp);
+    rl_settings_set("nvn.memory", "auto");
+}
+
 static double ms_now(void)
 {
     struct timespec ts;
