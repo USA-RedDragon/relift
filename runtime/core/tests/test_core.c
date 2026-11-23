@@ -6,6 +6,8 @@
  * whose common block is not at the end. This binary links only the core.
  */
 #include "runner.h"
+#include "hostlib.h"
+#include "capture.h"
 
 #include "crash.h"
 
@@ -229,6 +231,20 @@ TEST(vm_block_map_coalesces)
     CHECK_EQ(vm.count, 1);
     CHECK_EQ(rl_vm_set(&vm, 0x20001, 0x2000, RL_VM_R, 0, RL_VM_KEEP), -1);
     rl_vm_destroy(&vm);
+}
+
+TEST(capture_tool_is_seen_from_renderdocs_layer_variable)
+{
+    const char *was = getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
+    unsetenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
+    static const char *const rd[] = { "librenderdoc.so", NULL };
+    CHECK_EQ(rl_capture_tool(), rl_hostlib_loaded(rd) != NULL);
+    setenv("ENABLE_VULKAN_RENDERDOC_CAPTURE", "1", 1);
+    CHECK(rl_capture_tool());
+    if (was)
+        setenv("ENABLE_VULKAN_RENDERDOC_CAPTURE", was, 1);
+    else
+        unsetenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
 }
 
 TEST(vm_keeps_the_ranges_of_recent_map_changes)

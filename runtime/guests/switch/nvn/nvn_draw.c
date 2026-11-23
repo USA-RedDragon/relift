@@ -1687,6 +1687,12 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdBindVertexBuffers)(g.cb, DEFAULT_BINDING, 1, &g.arena.buf, &dd.def_off);
     for (uint32_t j = 0; j < k.nint; j++)
         VK(vkCmdBindVertexBuffers)(g.cb, NVN_VERTEX_BUFFERS + j, 1, &g.arena.buf, &dd.int_off[j]);
+    if (nvn_label_on()) {
+        const char *keys[6] = { NULL };
+        for (uint32_t s = 0; s < 5; s++)
+            keys[s] = mods[s] ? mods[s]->key : NULL;
+        nvn_label_draw(g.cb, "draw", keys);
+    }
     if (indexed) {
         VK(vkCmdBindIndexBuffer)(g.cb, dd.ibuf, dd.ioff, dd.ivk);
         VK(vkCmdDrawIndexed)(g.cb, count, st->inst_count, 0, base, st->inst_base);
@@ -2600,6 +2606,10 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.clayout, NVN_TRACE_SET, 1, &d.tset, 0, NULL);
     fixed_push fp = { .written_pages = nvn_mirror_written_pages_address() };
     VK(vkCmdPushConstants)(g.cb, d.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof fp, &fp);
+    if (nvn_label_on()) {
+        const char *keys[6] = { NULL, NULL, NULL, NULL, NULL, m->key };
+        nvn_label_draw(g.cb, "dispatch", keys);
+    }
     if (ibuf) {
         nvn_vk_dispatch_indirect(g.cb, ibuf, ioff, dd.c0_at.buffer, dd.c0_at.offset);
     } else {

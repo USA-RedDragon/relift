@@ -20,6 +20,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -117,3 +118,10 @@ static void edge(bool done)
 void rl_capture_present_begin(void) { edge(false); }
 
 void rl_capture_present_end(void) { edge(true); }
+
+bool rl_capture_tool(void)
+{
+    static const char *const names[] = { "librenderdoc.so", "renderdoc.dll", NULL };
+    const char *layer = getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
+    return (layer && strcmp(layer, "1") == 0) || rl_hostlib_loaded(names) != NULL;
+}

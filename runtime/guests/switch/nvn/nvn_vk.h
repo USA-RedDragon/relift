@@ -638,6 +638,14 @@ int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const
  * writes: only the pages written since the last copy. With may_flush and nothing recorded yet, a large upload is
  * submitted in slices. Call it before recording a command that can read a pool. False when the device failed.
  */
+/** @brief Whether draws are labeled and images named for a capture tool (nvn_label.c). */
+bool nvn_label_on(void);
+/** @brief Notes the guest command being replayed: its set, its index in the set and its op, for the labels. */
+void nvn_label_command(const void *set, uint32_t index, uint32_t op);
+/** @brief Labels the next command in cb with the guest command and the program keys by stage (vs tcs tes gs fs cs). */
+void nvn_label_draw(VkCommandBuffer cb, const char *kind, const char *const keys[6]);
+/** @brief Names a Vulkan object for the capture tool (printf format). */
+void nvn_label_object(VkObjectType type, uint64_t handle, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 bool nvn_mirror_sync(replay *r, bool may_flush);
 /** @brief Why the last nvn_mirror_sync failed, for the stop report. */
 const char *nvn_mirror_failure(void);

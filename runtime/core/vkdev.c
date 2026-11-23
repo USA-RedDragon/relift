@@ -6,6 +6,7 @@
 
 #include <relift/window.h>
 
+#include "capture.h"
 #include "core.h"
 #include "hostlib.h"
 
@@ -47,6 +48,8 @@ static uint32_t g_nreq;
 static bool g_shared_queue;
 /** @brief Why a window backend that draws through Vulkan got no swapchains, for the warning; NULL when it did. */
 static const char *g_no_surface;
+/** @brief The instance was made with VK_EXT_debug_utils (rlvk_dev.debug_utils). */
+static bool g_debug_utils;
 
 static bool fail(const char *what, rlvk_result r)
 {
@@ -101,6 +104,10 @@ static uint32_t instance_exts(rlvk_gipa_fn gipa, const char *out[MAX_INSTANCE_EX
     }
     if (listed(e, n, "VK_KHR_portability_enumeration"))
         out[count++] = "VK_KHR_portability_enumeration";
+    if (listed(e, n, "VK_EXT_debug_utils") && rl_capture_tool()) {
+        out[count++] = "VK_EXT_debug_utils";
+        g_debug_utils = true;
+    }
     const rl_window_backend *b = rl_window_backend_current();
     const char *const *want = b && b->vulkan_extensions && b->vulkan_surface ? b->vulkan_extensions() : NULL;
     if (b && b->vulkan_surface && !(want && want[0]))
@@ -380,6 +387,9 @@ const rlvk_dev *rl_vkdev(void)
         if (g_ok)
             rl_log(RL_LOG_INFO, "vulkan", "core device up on %s, queue family %u, %u queue%s, %s", g_dev.name, g_dev.family,
                    g_shared_queue ? 1u : 2u, g_shared_queue ? "" : "s", g_dev.surfaces ? "with swapchains" : "without swapchains");
+        g_dev.debug_utils = g_ok && g_debug_utils;
+        if (g_dev.debug_utils)
+            rl_log(RL_LOG_INFO, "vulkan", "a capture tool is loaded: VK_EXT_debug_utils on, for command labels and object names");
         if (g_ok && !g_dev.surfaces && g_no_surface)
             rl_log(RL_LOG_WARN, "vulkan",
                    "NO SWAPCHAINS: the window shows frames copied through host memory, many times slower than a "

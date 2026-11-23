@@ -2832,6 +2832,9 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
     if ((vr = VK(vkBindImageMemory)(g.dev, v->image, v->memory, 0)) != VK_SUCCESS)
         goto fail;
     v->usage = ci.usage;
+    nvn_label_object(VK_OBJECT_TYPE_IMAGE, (uint64_t)v->image, "nvn 0x%llx format %u %ux%ux%u%s%s",
+                     (unsigned long long)storage, d->format, d->width, d->height, d->depth ? d->depth : 1,
+                     depth ? " depth" : "", target ? " target" : "");
     VkImageViewUsageCreateInfo vu;
     VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                   .pNext = plain_usage(v, &vu),
@@ -4026,6 +4029,8 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
 {
     replay *r = &((vk_run *)user)->r;
     r->s = s;
+    if (s && e >= s->cmds && e < s->cmds + s->n)
+        nvn_label_command(s, (uint32_t)(e - s->cmds), e->op);
     if (nvn_trace_active || nvn_trace_watching)
         nvn_trace_command(r, e, false);
     static int gpu_trace = -1;

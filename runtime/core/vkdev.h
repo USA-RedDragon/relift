@@ -35,6 +35,11 @@ typedef struct rlvk_dev {
     bool surfaces;
     /** @brief VK_KHR_present_id and VK_KHR_present_wait are on, and vkWaitForPresentKHR is loaded: a present chained with a present id can be waited for until the display shows it. */
     bool present_wait;
+    /**
+     * @brief VK_EXT_debug_utils is on because a capture tool (RenderDoc) is in the process: a layer may label its
+     * commands and name its objects for the tool. Off otherwise, so plain runs make no label calls.
+     */
+    bool debug_utils;
     rlvk_result(RLVK_CALL *vkWaitForPresentKHR)(rlvk_handle device, rlvk_handle swapchain, uint64_t id, uint64_t timeout);
 } rlvk_dev;
 
