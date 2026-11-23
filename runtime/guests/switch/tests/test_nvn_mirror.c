@@ -9,10 +9,13 @@
 
 #include <relift/settings.h>
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 /** @brief Bytes of a page of the written-page bitmap. */
 #define PAGE_BYTES 4096u
@@ -465,6 +468,113 @@ TEST(nvn_every_id_of_a_large_texture_pool_keeps_its_own_slot)
     }
     CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
     CHECK(nvn_vk_flush(&r));
+}
+
+/**
+ * @brief The child of nvn_an_image_past_the_old_array_size_keeps_its_own_slot: the shader table in
+ * $RELIFT_NVN_SHADERS says the programs use one storage image array, so the set gives the device's whole storage
+ * image budget to it, and an image registered at id 33067 of a pool of 33068 keeps its id as its slot. Without
+ * $RL_IMAGE_CHILD it is a test that passes.
+ */
+TEST(nvn_image_past_the_old_array_size_child)
+{
+    if (!getenv("RL_IMAGE_CHILD"))
+        return;
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    enum { POOL = 33068, ARRAYS = 54 };
+    CHECK(nvn_texset());
+    VkPhysicalDeviceVulkan12Properties p12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
+    VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &p12 };
+    VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
+    uint32_t budget = p12.maxPerStageDescriptorUpdateAfterBindStorageImages;
+    if (p12.maxDescriptorSetUpdateAfterBindStorageImages < budget)
+        budget = p12.maxDescriptorSetUpdateAfterBindStorageImages;
+    CHECK(nvn_texset_declares_image(32 + 8 * 5 + 3));
+    CHECK(!nvn_texset_declares_image(32));
+    if (budget < POOL || nvn_texset_pinned() < POOL) {
+        printf("  skipped: the device holds %u storage images\n", budget);
+        return;
+    }
+    CHECK(budget / ARRAYS < POOL);
+    CHECK(nvn_texset_images() >= POOL);
+    uint64_t heap = t_heap(c, 0x1000000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, 0x1000 + hp, 0));
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    r.st = &st;
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 8, .height = 8, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 64, .swizzle = { 2, 3, 4, 5 }, .pool = pool, .offset = 0 };
+    CHECK(nvn_tex_layout(&d));
+    uint64_t tex = heap + 0x800000;
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    c->x[1] = POOL - 1;
+    c->x[2] = tex;
+    c->x[3] = 0;
+    nvnh_nvnTexturePoolRegisterImage(c, m);
+    CHECK_EQ(nvn_texset_sync_registered(&r), RL_OK);
+    CHECK(nvn_vk_flush(&r));
+}
+
+/** @brief Writes a shader table interface file whose one program uses storage image array binding. */
+static bool write_image_iface(const char *dir, uint32_t binding)
+{
+    uint8_t b[12 + 40 + 16] = { 0 };
+    memcpy(b, "RLSPI001", 8);
+    b[8] = 1;
+    b[48] = 1;
+    b[52] = 12;
+    memcpy(b + 56, &binding, 4);
+    char path[PATH_MAX + 16];
+    snprintf(path, sizeof path, "%s/table.rlspi", dir);
+    FILE *f = fopen(path, "wb");
+    bool ok = f && fwrite(b, 1, sizeof b, f) == sizeof b;
+    return f && fclose(f) == 0 && ok;
+}
+
+/**
+ * @brief A texture pool of 33068 descriptors whose images reach past the 2^20 / 54 storage images an array held when
+ * the layout declared all 54 arrays: with the arrays the programs use declared, an image at id 33067 keeps its slot.
+ */
+TEST(nvn_an_image_past_the_old_array_size_keeps_its_own_slot)
+{
+    char dir[PATH_MAX], exe[PATH_MAX];
+    const char *base = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/relift-img-XXXXXX", base && *base ? base : "/tmp");
+    CHECK(mkdtemp(dir) != NULL);
+    CHECK(write_image_iface(dir, 32 + 8 * 5 + 3));
+    CHECK(rl_exe_path(exe, sizeof exe));
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid == 0) {
+        setenv("RELIFT_NVN_SHADERS", dir, 1);
+        unsetenv("RELIFT_NVN_TABLES");
+        setenv("RELIFT_TEST_ONE", "nvn_image_past_the_old_array_size_child", 1);
+        setenv("RL_IMAGE_CHILD", "1", 1);
+        char *argv[] = { exe, NULL };
+        execv(exe, argv);
+        _exit(126);
+    }
+    int st = 0;
+    CHECK(waitpid(pid, &st, 0) == pid);
+    CHECK(WIFEXITED(st));
+    CHECK_EQ(WEXITSTATUS(st), 0);
+    char path[PATH_MAX + 16];
+    snprintf(path, sizeof path, "%s/table.rlspi", dir);
+    remove(path);
+    rmdir(dir);
 }
 
 TEST(nvn_registered_textures_cost_nothing_per_frame_until_their_bytes_change)

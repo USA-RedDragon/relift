@@ -580,6 +580,26 @@ uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
     return count;
 }
 
+bool nvn_shader_image_arrays(uint64_t *used)
+{
+    *used = 0;
+    pthread_mutex_lock(&g_lock);
+    table *t = open_table(&g_iface, "table.rlspi", "RLSPI001", true);
+    pthread_mutex_unlock(&g_lock);
+    if (!t)
+        return false;
+    size_t recs = TABLE_HEAD + (size_t)t->n * TABLE_ENTRY;
+    bool any = false;
+    for (size_t at = recs; at + 16 <= t->len; at += 16) {
+        uint32_t b = le32(t->all + at + 4);
+        if (le32(t->all + at) != NVN_IFACE_IMAGE_BINDING || b < 32 || (b - 32) % 8 >= 6 || (b - 32) / 8 >= 9)
+            continue;
+        *used |= 1ull << ((b - 32) / 8 * 6 + (b - 32) % 8);
+        any = true;
+    }
+    return any;
+}
+
 uint32_t nvn_shader_count(void)
 {
     pthread_mutex_lock(&g_lock);

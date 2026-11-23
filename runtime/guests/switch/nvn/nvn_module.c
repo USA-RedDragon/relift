@@ -465,6 +465,17 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
         if (m->recs[i].kind == NVN_IFACE_STORAGE_SLOT && m->recs[i].bank < NVN_STORAGE_SLOTS)
             m->storage_slots |= 1u << m->recs[i].bank;
+        if (m->recs[i].kind == NVN_IFACE_IMAGE_BINDING && !nvn_texset_declares_image(m->recs[i].bank)) {
+            uint32_t b = m->recs[i].bank;
+            free(w);
+            free(m->recs);
+            free(m);
+            why_set(why, why_n,
+                    "translation %s uses storage image array %u, which the texture set does not declare (its layout "
+                    "follows the arrays the shader table's programs use, and this program is not in that table)",
+                    key, b);
+            return NULL;
+        }
     }
     if (!patch_spirv(w, n, stage, m)) {
         free(w);

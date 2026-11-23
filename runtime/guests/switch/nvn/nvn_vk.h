@@ -744,6 +744,10 @@ int nvn_texset_bind_words(replay *r, const uint8_t *bytes, uint32_t size, uint32
 bool nvn_texset_view_fits(const vimg *v, const nvn_view *nv);
 /** @brief How many texture ids sit in a slot of their own number (0 before the set is made). */
 uint32_t nvn_texset_pinned(void);
+/** @brief Whether the texture set's layout declares the storage image array at binding (true when there is no set). */
+bool nvn_texset_declares_image(uint32_t binding);
+/** @brief Texture ids that also hold storage images (0 when the set could not be made). */
+uint32_t nvn_texset_images(void);
 /**
  * @brief The layers a sampling view of v sees: the view's count, else those of the image from the view's first one
  * (an image's layers as its host image has them: six for a cube, whose descriptor depth is 1). nv NULL for no view.

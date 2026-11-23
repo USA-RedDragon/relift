@@ -559,6 +559,14 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
  * any word from there to the bank's end (see nvn_texset_bind_words).
  */
 #define NVN_IFACE_HANDLE_SOURCE 9u
+/** @brief Record kind: the program reads or writes the storage image array at binding `bank` of the texture set. */
+#define NVN_IFACE_IMAGE_BINDING 12u
+/**
+ * @brief The storage image arrays the programs of the shader table use, as bits (binding - 32) / 8 * 6 + (binding - 32)
+ * % 8 of *used; false when the table records none (a table without such records, or no table), and then every array
+ * counts as used.
+ */
+bool nvn_shader_image_arrays(uint64_t *used);
 /**
  * @brief Copies up to max interface records of the translation with key to out (out may be NULL) and returns how
  * many it has, which may be more than max (0 without an entry).

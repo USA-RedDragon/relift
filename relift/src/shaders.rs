@@ -31,7 +31,9 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
-use relift_gpu_nv::translate::{DeviceCaps, HostProfile, Interface, MeshPath};
+use relift_gpu_nv::translate::{
+    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, MeshPath, image_binding,
+};
 use relift_switch_shaders::{ImportSource, Options as ScanOptions, scan};
 
 use crate::import::BoxError;
@@ -92,6 +94,9 @@ pub const RECORD_HANDLE_SOURCE: u32 = 9;
 /// buffer descriptor of the vertex storage buffer slot in the second
 /// field (set 1, binding 64 plus the slot).
 pub const RECORD_STORAGE_SLOT: u32 = 11;
+/// An interface record: the program reads or writes the storage image array
+/// at the binding in the second field (set 2, from binding 32 on).
+pub const RECORD_IMAGE_BINDING: u32 = 12;
 
 /// The environment variable that names the folder the runtime reads the
 /// tables from.
@@ -542,6 +547,10 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     for &k in &i.storage_slots {
         recs.push([RECORD_STORAGE_SLOT, k, 0, 0]);
     }
+    let first_image = image_binding(ImageKind::Float, ImageDim::D1);
+    for &b in i.texture_bindings.range(first_image..) {
+        recs.push([RECORD_IMAGE_BINDING, b, 0, 0]);
+    }
     recs
 }
 
@@ -660,6 +669,18 @@ mod tests {
         assert!(records(&i).iter().all(|r| r[0] != RECORD_BINDLESS));
         i.bindless = true;
         assert!(records(&i).contains(&[RECORD_BINDLESS, 0, 0, 0]));
+    }
+
+    #[test]
+    fn every_storage_image_array_a_program_uses_is_recorded() {
+        let mut i = Interface::default();
+        let image = image_binding(ImageKind::Raw32, ImageDim::D2);
+        i.texture_bindings.extend([1, 31, image]);
+        let recs: Vec<_> = records(&i)
+            .into_iter()
+            .filter(|r| r[0] == RECORD_IMAGE_BINDING)
+            .collect();
+        assert_eq!(recs, [[RECORD_IMAGE_BINDING, image, 0, 0]]);
     }
 
     #[test]

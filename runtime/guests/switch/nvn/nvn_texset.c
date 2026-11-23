@@ -44,8 +44,13 @@ static struct {
      */
     uint32_t ntex;
     /**
+     * @brief The storage image arrays the layout declares (bit k * IMAGE_DIMS + d for kind k and dimension d): those
+     * the shader table's programs use (all when the table does not say).
+     */
+    uint64_t img_used;
+    /**
      * @brief Slots that also hold storage images: as many as the device's update-after-bind storage image budget
-     * allows across the image kind and dimension arrays, at most ntex.
+     * allows across the declared arrays, at most ntex.
      */
     uint32_t nimg;
     /**
@@ -152,6 +157,8 @@ static bool fill_samplers(void)
         }
     for (uint32_t k = 0; k < IMAGE_KINDS; k++)
         for (uint32_t dd = 0; dd < IMAGE_DIMS; dd++) {
+            if (!(t.img_used >> (k * IMAGE_DIMS + dd) & 1))
+                continue;
             w = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                         .dstSet = t.set,
                                         .dstBinding = IMAGE_BINDING(k, dd),
@@ -181,10 +188,13 @@ static bool make(void)
     uint32_t images = p12.maxDescriptorSetUpdateAfterBindStorageImages;
     if (p12.maxPerStageDescriptorUpdateAfterBindStorageImages < images)
         images = p12.maxPerStageDescriptorUpdateAfterBindStorageImages;
-    t.nimg = images / (IMAGE_KINDS * IMAGE_DIMS);
+    if (!nvn_shader_image_arrays(&t.img_used))
+        t.img_used = (1ull << (IMAGE_KINDS * IMAGE_DIMS)) - 1;
+    uint32_t arrays = (uint32_t)__builtin_popcountll(t.img_used);
+    t.nimg = arrays ? images / arrays : t.ntex;
     if (t.nimg > t.ntex)
         t.nimg = t.ntex;
-    rl_log(RL_LOG_INFO, "nvn", "texture set: %u texture ids, %u of them images", t.ntex, t.nimg);
+    rl_log(RL_LOG_INFO, "nvn", "texture set: %u texture ids, %u of them images in %u arrays", t.ntex, t.nimg, arrays);
     VkDescriptorSetLayoutBinding b[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     VkDescriptorBindingFlags f[2 + KINDS * DIMS + IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
@@ -205,6 +215,8 @@ static bool make(void)
     f[n++] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | pending;
     for (uint32_t k = 0; k < IMAGE_KINDS; k++)
         for (uint32_t d = 0; d < IMAGE_DIMS; d++) {
+            if (!(t.img_used >> (k * IMAGE_DIMS + d) & 1))
+                continue;
             b[n] = (VkDescriptorSetLayoutBinding){ IMAGE_BINDING(k, d), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, t.nimg,
                                                    VK_SHADER_STAGE_ALL, NULL };
             f[n++] = partial;
@@ -509,6 +521,8 @@ static void null_rest(uint32_t slot, bool image, uint32_t kind, uint64_t fit)
         uint32_t k = image ? i / IMAGE_DIMS : i / DIMS, d = image ? i % IMAGE_DIMS : i % DIMS;
         if ((image ? fit >> i & 1u : k == kind && fit >> d & 1u) != 0)
             continue;
+        if (image && !(t.img_used >> i & 1))
+            continue;
         w[n++] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                          .dstSet = t.set,
                                          .dstBinding = image ? IMAGE_BINDING(k, d) : 1 + 10 * k + d,
@@ -544,6 +558,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
     VkWriteDescriptorSet w[IMAGE_KINDS * IMAGE_DIMS];
     uint32_t n = 0;
     uint64_t wrote = 0;
+    bool fits = false;
     for (uint32_t k = 0; k < IMAGE_KINDS; k++) {
         VkFormat f = image_format(k, v->format, bpb);
         if (f == VK_FORMAT_UNDEFINED)
@@ -556,6 +571,9 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
             continue;
         for (uint32_t d = 0; d < IMAGE_DIMS; d++) {
             if (!(dims & (1u << d)))
+                continue;
+            fits = true;
+            if (!(t.img_used >> (k * IMAGE_DIMS + d) & 1))
                 continue;
             uint32_t at = 8u * k + d;
             if (t.img_views[slot][at]) {
@@ -580,10 +598,11 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
             n++;
         }
     }
-    if (!n)
+    if (!fits)
         return nvn_vk_stop(r, "image id %u (format %u) has no storage view the host device supports", id,
                            v->d.format);
-    VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
+    if (n)
+        VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
     null_rest(slot, true, 0, wrote);
     if (nvn_trace_active)
         rl_log(RL_LOG_INFO, "nvn", "trace: storage image id %u slot %u (format %u, host format %d, usage 0x%x) has views of kinds/dims mask 0x%llx", id,
@@ -1060,6 +1079,16 @@ int nvn_texset_bind_words(replay *r, const uint8_t *bytes, uint32_t size, uint32
 }
 
 uint32_t nvn_texset_pinned(void) { return t.ok ? t.slots.pinned : 0; }
+
+bool nvn_texset_declares_image(uint32_t binding)
+{
+    if (!make() || binding < IMAGE_BINDING(0, 0))
+        return true;
+    uint32_t k = (binding - IMAGE_BINDING(0, 0)) / 8, d = (binding - IMAGE_BINDING(0, 0)) % 8;
+    return k < IMAGE_KINDS && d < IMAGE_DIMS && (t.img_used >> (k * IMAGE_DIMS + d) & 1);
+}
+
+uint32_t nvn_texset_images(void) { return make() ? t.nimg : 0; }
 
 int nvn_texset_sampler(replay *r, uint32_t id)
 {
