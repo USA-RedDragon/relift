@@ -35,6 +35,10 @@ static struct {
     pthread_mutex_t lock;
     bool init, armed, active;
     uint64_t presents, first, frames;
+    /** @brief renderdoc.capture=file: the file whose appearance asks for a capture of the next present. */
+    char trigger[1100];
+    /** @brief The capture follows the trigger file, again after each capture. */
+    bool trigger_mode;
     RENDERDOC_API_1_1_2 *api;
 } rd = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
@@ -57,6 +61,7 @@ static void set_capture_path(void)
         snprintf(dir, sizeof dir, "%s%ccaptures", user, SEP);
     }
     MKDIR(dir);
+    snprintf(rd.trigger, sizeof rd.trigger, "%s%ccapture-next", dir, SEP);
     int k = snprintf(tmpl, sizeof tmpl, "%s%c%s", dir, SEP, app && *app ? app : "relift");
     if (k > 0 && (size_t)k < sizeof tmpl) {
         rd.api->SetCaptureFilePathTemplate(tmpl);
@@ -71,11 +76,13 @@ static void rd_init(void)
     const char *v = rl_setting_str("renderdoc.capture");
     if (!v || !*v)
         return;
-    char *end;
-    unsigned long long first = strtoull(v, &end, 10), frames = 1;
-    if (end == v || first == 0 || (*end && *end != ':') || (*end == ':' && (frames = strtoull(end + 1, &end, 10)) == 0) ||
-        *end) {
-        rl_log(RL_LOG_WARN, "capture", "renderdoc.capture=%s is not <present>[:<frames>] with both from 1; ignored", v);
+    char *end = NULL;
+    bool on_file = strcmp(v, "file") == 0;
+    unsigned long long first = on_file ? 0 : strtoull(v, &end, 10), frames = 1;
+    if (!on_file && (end == v || first == 0 || (*end && *end != ':') ||
+                     (*end == ':' && (frames = strtoull(end + 1, &end, 10)) == 0) || *end)) {
+        rl_log(RL_LOG_WARN, "capture", "renderdoc.capture=%s is not <present>[:<frames>] with both from 1, or file; ignored",
+               v);
         return;
     }
     static const char *const names[] = { "librenderdoc.so", "renderdoc.dll", NULL };
@@ -99,6 +106,17 @@ static void edge(bool done)
     if (rd.armed) {
         if (done)
             rd.presents++;
+        bool on_file = rd.first == 0 || rd.trigger_mode;
+        if (on_file && done && !rd.active && rd.trigger[0]) {
+            /* renderdoc.capture=file: a capture-next file in the capture folder asks for the next present. */
+            FILE *f = fopen(rd.trigger, "r");
+            if (f) {
+                fclose(f);
+                remove(rd.trigger);
+                rd.trigger_mode = true;
+                rd.first = rd.presents + 1;
+            }
+        }
         bool start = done ? rd.presents + 1 == rd.first : rd.presents == 0 && rd.first == 1;
         if (!rd.active && start) {
             rd.api->StartFrameCapture(NULL, NULL);
@@ -107,7 +125,9 @@ static void edge(bool done)
         } else if (rd.active && done && rd.presents == rd.first + rd.frames - 1) {
             uint32_t ok = rd.api->EndFrameCapture(NULL, NULL);
             rd.active = false;
-            rd.armed = false;
+            rd.armed = rd.trigger_mode;
+            if (rd.trigger_mode)
+                rd.first = 0;
             rl_log(RL_LOG_INFO, "capture", "RenderDoc capture ended after present %llu (%s)",
                    (unsigned long long)rd.presents, ok ? "written" : "failed");
         }

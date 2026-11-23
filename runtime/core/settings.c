@@ -214,7 +214,8 @@ static const rl_setting_def g_runtime_defs[] = {
         .label = "RenderDoc capture",
         .description = "<present>[:<frames>]: when the program runs under RenderDoc, capture that many frames "
                        "(default 1) from the numbered guest present (counting from 1), including runs with no "
-                       "window. Only Vulkan work is captured. Empty: off",
+                       "window. file: capture the next present each time a file named capture-next appears in "
+                       "the capture folder (the program removes it). Only Vulkan work is captured. Empty: off",
         .env = "RELIFT_RENDERDOC_CAPTURE",
     },
     {
