@@ -424,10 +424,9 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
         let wa = c.addr_align(addr, 2);
         let w = match scope {
             Some(s) => c.atomic_load_words(wa, 1, m.order, s)[0],
-            None => {
-                let p = c.global_ptr(wa, u);
-                c.m.emit(op::LOAD, u, &[p, ALIGNED, 4])
-            }
+            None => c.global_op(wa, u, false, &mut |c, p| {
+                vec![c.m.emit(op::LOAD, u, &[p, ALIGNED, 4])]
+            })[0],
         };
         let lo = c.addr_low(addr);
         vec![c.extract_sub(w, lo, m.size)]
@@ -436,18 +435,19 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         let n = m.size.words();
         let ty = vec_ty(c, n);
-        let p = c.global_ptr(addr, ty);
-        let v = c.m.emit(op::LOAD, ty, &[p, ALIGNED, 4 * n]);
         let u = c.u32t();
-        (0..n)
-            .map(|k| {
-                if n == 1 {
-                    v
-                } else {
-                    c.m.emit(op::COMPOSITE_EXTRACT, u, &[v, k])
-                }
-            })
-            .collect()
+        c.global_op(addr, ty, false, &mut |c, p| {
+            let v = c.m.emit(op::LOAD, ty, &[p, ALIGNED, 4 * n]);
+            (0..n)
+                .map(|k| {
+                    if n == 1 {
+                        v
+                    } else {
+                        c.m.emit(op::COMPOSITE_EXTRACT, u, &[v, k])
+                    }
+                })
+                .collect()
+        })
     };
     store_words(c, d, &vals)
 }
@@ -493,8 +493,11 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
         let wa = c.addr_align(addr, 2);
         let lo = c.addr_low(addr);
         let (keep, bits) = c.insert_sub(parts[0], lo, m.size);
-        let p = c.global_ptr_w(wa, u);
-        c.cas_insert(p, scope.unwrap_or(SCOPE_DEVICE), keep, bits);
+        let sc = scope.unwrap_or(SCOPE_DEVICE);
+        c.global_op(wa, u, true, &mut |c, p| {
+            c.cas_insert(p, sc, keep, bits);
+            Vec::new()
+        });
         return Ok(());
     }
     if let Some(s) = scope {
@@ -507,8 +510,10 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         c.m.emit(op::COMPOSITE_CONSTRUCT, ty, &parts)
     };
-    let p = c.global_ptr_w(addr, ty);
-    c.m.emit_void(op::STORE, &[p, v, ALIGNED, 4 * n]);
+    c.global_op(addr, ty, true, &mut |c, p| {
+        c.m.emit_void(op::STORE, &[p, v, ALIGNED, 4 * n]);
+        Vec::new()
+    });
     Ok(())
 }
 

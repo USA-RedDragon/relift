@@ -36,10 +36,12 @@ typedef struct nvn_module {
     /** @brief The program reads or writes the compute back end's mesh buffer (set NVN_MESH_BUFFER_SET, binding NVN_MESH_BUFFER_BINDING). */
     bool mesh_buffer;
     /**
-     * @brief Storage buffer slots (bit k: slot k of its stage) the program loads through set 1 binding
-     * nvn_slot_binding(stage, k) instead of a buffer device address.
+     * @brief Storage buffer slots (bit k: slot k of its stage, from its interface records) the program reaches through
+     * element k of its stage's slot array (set 1 binding nvn_slot_binding(stage)) instead of a buffer device address.
      */
     uint32_t storage_slots;
+    /** @brief It declares its stage's slot array: every element is then bound, to a blank buffer past storage_slots. */
+    bool slot_array;
     /**
      * @brief A compute program's bases (the translator's compute_base_binding): base j is reached through set 1
      * binding NVN_SLOT_BINDING_BASE + j, a storage buffer over the memory from the address in c[0] at byte

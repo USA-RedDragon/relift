@@ -80,8 +80,8 @@
 #define DRIVER_BINDINGS 4u
 /** @brief First binding of set 1 that holds a storage buffer slot (the translator's SLOT_BINDING_BASE). */
 #define NVN_SLOT_BINDING_BASE 64u
-/** @brief The binding of set 1 that holds storage buffer slot k of stage s. */
-static inline uint32_t nvn_slot_binding(uint32_t s, uint32_t k) { return NVN_SLOT_BINDING_BASE + NVN_STORAGE_SLOTS * s + k; }
+/** @brief The binding of set 1 that holds stage s's storage buffer slots, an array of NVN_STORAGE_SLOTS (slot k is element k). */
+static inline uint32_t nvn_slot_binding(uint32_t s) { return NVN_SLOT_BINDING_BASE + s; }
 /** @brief The translator's COMPUTE_BASE_BINDING: binding NVN_COMPUTE_BASE_BINDING + offset / 8 of set 1 is the compute base at c[0] byte offset. */
 #define NVN_COMPUTE_BASE_BINDING 128u
 /** @brief The translator's COMPUTE_BASE_BYTES: compute bases lie below this c[0] byte. */

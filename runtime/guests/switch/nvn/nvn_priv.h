@@ -552,6 +552,8 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
 #define NVN_IFACE_BINDLESS 8u
 /** @brief Record kind: the program reads a texture handle from a register, which can name any registered texture. */
 #define NVN_IFACE_REGISTER_HANDLES 10u
+/** @brief Interface record: the program reaches storage buffer slot bank (the record's second word) of its stage through the slot array. */
+#define NVN_IFACE_STORAGE_SLOT 11u
 /**
  * @brief Record kind: handles in registers are loaded from constant bank `bank` at byte `offset`, or with `spec` 1 from
  * any word from there to the bank's end (see nvn_texset_bind_words).

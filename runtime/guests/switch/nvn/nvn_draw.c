@@ -99,6 +99,9 @@ static struct {
     VkDescriptorSetLayout mset_layout[4];
     VkBuffer mbuf;
     VkDeviceMemory mmem;
+    /** @brief A 16-byte buffer for the storage slots a program never reaches (blank_buffer). */
+    VkBuffer blank;
+    VkDeviceMemory blank_mem;
     VkDescriptorPool mpool;
     VkDescriptorSet mset;
     /**
@@ -191,8 +194,7 @@ static bool layouts(void)
     for (uint32_t s = 0; s < NVN_STAGES; s++) {
         if (!stage_bits[s] || (s >= NVN_STAGE_TASK && !g.mesh_shader))
             continue;
-        for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++)
-            db[nd++] = (VkDescriptorSetLayoutBinding){ nvn_slot_binding(s, k), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+        db[nd++] = (VkDescriptorSetLayoutBinding){ nvn_slot_binding(s), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, NVN_STORAGE_SLOTS,
                                                        stage_bits[s], NULL };
     }
     VkDescriptorSetLayoutCreateInfo li[2] = {
@@ -257,9 +259,9 @@ static bool mesh_layouts(void)
         for (uint32_t b = 0; b < DRIVER_BINDINGS; b++)
             db[i * DRIVER_BINDINGS + b] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * groups[i] + b,
                                                                           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, bits[i], NULL };
-        for (uint32_t k = 0; k < (i ? d.mesh_slots : NVN_STORAGE_SLOTS); k++)
-            db[nd++] = (VkDescriptorSetLayoutBinding){ nvn_slot_binding(groups[i], k), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-                                                       bits[i], NULL };
+        if (!i || d.mesh_slots == NVN_STORAGE_SLOTS)
+            db[nd++] = (VkDescriptorSetLayoutBinding){ nvn_slot_binding(groups[i]), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                       NVN_STORAGE_SLOTS, bits[i], NULL };
     }
     VkDescriptorSetLayoutBinding mb = { NVN_MESH_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                                         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, NULL };
@@ -926,6 +928,12 @@ void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYT
         memcpy(c0 + NVN_C0_BASE_INSTANCE, &st->inst_base, 4);
 }
 
+/** @brief The 16-byte buffer the slots a program never reaches are bound to, made at the first use. */
+static bool blank_buffer(void)
+{
+    return d.blank || nvn_vk_gpu_buffer(&d.blank, &d.blank_mem, 16);
+}
+
 /**
  * @brief Writes the constant banks the bound modules read into new
  * descriptor sets, sets[0] and sets[1], with the texture set in sets[2].
@@ -952,30 +960,36 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
     for (uint32_t s = 0; s < NVN_STAGES; s++) {
         if (!mods[s])
             continue;
-        for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++) {
-            if (!(mods[s]->storage_slots & (1u << k)))
-                continue;
+        for (uint32_t k = 0; mods[s]->slot_array && k < NVN_STORAGE_SLOTS; k++) {
             if (layouts_in != d.set_layout && layouts_in != d.mset_layout)
-                return nvn_vk_stop(r, "program %s of stage %u reaches storage slot %u through a descriptor, which only draws bind",
-                                   mods[s]->key, s, k);
-            if (layouts_in == d.mset_layout && s >= NVN_STAGE_TASK && k >= d.mesh_slots)
-                return nvn_vk_stop(r, "program %s of stage %u reaches storage slot %u, past the %u the host device's "
-                                      "storage buffer limit leaves each mesh pass",
-                                   mods[s]->key, s, k, d.mesh_slots);
+                return nvn_vk_stop(r, "program %s of stage %u reaches its storage slots through descriptors, which only draws bind",
+                                   mods[s]->key, s);
+            if (layouts_in == d.mset_layout && s >= NVN_STAGE_TASK && d.mesh_slots < NVN_STORAGE_SLOTS)
+                return nvn_vk_stop(r, "program %s of stage %u reaches its storage slots through descriptors, which the host "
+                                      "device's storage buffer limit leaves no room for in a mesh pass",
+                                   mods[s]->key, s);
             VkDeviceSize off = 0;
             uint64_t size = r->st->gstorage[s][k].size;
-            VkBuffer pb = nvn_draw_pool_span(r->st->gstorage[s][k].addr, size, g.storage_align, &off);
-            if (!size && g.null_descriptor)
+            VkBuffer pb = size ? nvn_draw_pool_span(r->st->gstorage[s][k].addr, size, g.storage_align, &off) : NULL;
+            if (!pb && (!size || !(mods[s]->storage_slots & (1u << k)))) {
+                /* a slot the program does not reach, or an empty one: never read through */
+                if (!blank_buffer())
+                    return nvn_vk_stop(r, "the host device cannot make a buffer");
+                pb = d.blank;
+                off = 0;
                 size = VK_WHOLE_SIZE;
-            else if (!pb)
+            } else if (!pb) {
                 return nvn_vk_stop(r, "program %s of stage %u reaches storage slot %u (0x%llx+0x%llx), which no memory pool holds whole",
                                    mods[s]->key, s, k, (unsigned long long)r->st->gstorage[s][k].addr,
                                    (unsigned long long)size);
-            nvn_mirror_written(r->st->gstorage[s][k].addr, size);
+            } else {
+                nvn_mirror_written(r->st->gstorage[s][k].addr, size);
+            }
             bi[n] = (VkDescriptorBufferInfo){ pb, off, size };
             wr[n] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                             .dstSet = sets[1],
-                                            .dstBinding = nvn_slot_binding(s, k),
+                                            .dstBinding = nvn_slot_binding(s),
+                                            .dstArrayElement = k,
                                             .descriptorCount = 1,
                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                             .pBufferInfo = &bi[n] };

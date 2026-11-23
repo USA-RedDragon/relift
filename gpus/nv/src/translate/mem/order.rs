@@ -204,10 +204,11 @@ impl Ctx {
             return out;
         }
         (0..words)
-            .map(|k| {
+            .flat_map(|k| {
                 let a = self.word_address(addr, k);
-                let p = self.global_ptr(a, u);
-                self.m.emit(spv::ATOMIC_LOAD, u, &[p, sc, relaxed])
+                self.global_op(a, u, false, &mut |c, p| {
+                    vec![c.m.emit(spv::ATOMIC_LOAD, u, &[p, sc, relaxed])]
+                })
             })
             .collect()
     }
@@ -238,8 +239,10 @@ impl Ctx {
         }
         for (k, &v) in vals.iter().enumerate() {
             let a = self.word_address(addr, k as u32);
-            let p = self.global_ptr_w(a, u);
-            self.m.emit_void(ATOMIC_STORE, &[p, sc, relaxed, v]);
+            self.global_op(a, u, true, &mut |c, p| {
+                c.m.emit_void(ATOMIC_STORE, &[p, sc, relaxed, v]);
+                Vec::new()
+            });
         }
     }
 

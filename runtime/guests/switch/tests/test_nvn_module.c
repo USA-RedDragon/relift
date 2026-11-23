@@ -123,13 +123,13 @@ TEST(nvn_programs_that_read_handles_from_registers_say_so)
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
-/** A vertex program that reads a vec4 from a storage buffer at set 1 binding 66 (the translation's storage slot 2). */
+/** A vertex program that reads a vec4 from a storage buffer at set 1 binding 64 (the translation's slot array). */
 static const uint32_t slot_vertex[] = {
     0x07230203u, 0x00010300u, 0x00070000u, 0x00000012u, 0x00000000u, 0x00020011u, 0x00000001u, 0x0003000eu,
     0x00000000u, 0x00000001u, 0x0006000fu, 0x00000000u, 0x00000001u, 0x6e69616du, 0x00000000u, 0x00000002u,
     0x00040047u, 0x00000002u, 0x0000000bu, 0x00000000u, 0x00040047u, 0x00000003u, 0x00000006u, 0x00000010u,
     0x00030047u, 0x00000004u, 0x00000002u, 0x00050048u, 0x00000004u, 0x00000000u, 0x00000023u, 0x00000000u,
-    0x00040047u, 0x00000005u, 0x00000022u, 0x00000001u, 0x00040047u, 0x00000005u, 0x00000021u, 0x00000042u,
+    0x00040047u, 0x00000005u, 0x00000022u, 0x00000001u, 0x00040047u, 0x00000005u, 0x00000021u, 0x00000040u,
     0x00020013u, 0x00000006u, 0x00030021u, 0x00000007u, 0x00000006u, 0x00030016u, 0x00000008u, 0x00000020u,
     0x00040017u, 0x00000009u, 0x00000008u, 0x00000004u, 0x00040015u, 0x0000000au, 0x00000020u, 0x00000000u,
     0x0003001du, 0x00000003u, 0x00000009u, 0x0003001eu, 0x00000004u, 0x00000003u, 0x00040020u, 0x0000000bu,
@@ -202,44 +202,24 @@ static bool write_one_table(const char *dir, const uint32_t *words, size_t bytes
     return ok;
 }
 
-TEST(nvn_a_vertex_storage_slot_binding_is_a_slot_not_a_driver_bank)
+/** Whether words (n of them) put a variable at set 1 binding b. */
+static bool binds_at(const uint32_t *w, size_t n, uint32_t b)
 {
-    CHECK_EQ(nvn_slot_binding(NVN_STAGE_VERTEX, 2), 66u);
-    CHECK(nvn_slot_binding(NVN_STAGE_VERTEX, 0) >= DRIVER_BINDINGS * NVN_STAGES);
-    char dir[PATH_MAX];
-    CHECK(make_scratch(dir));
-    CHECK(write_one_table(dir, slot_vertex, sizeof slot_vertex, 0xc0));
-    setenv("RELIFT_NVN_SHADERS", dir, 1);
-    if (!nvn_vk_ready()) {
-        CHECK(!getenv("RELIFT_VK_REQUIRE"));
-        printf("  skipped: no host Vulkan device\n");
-        nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
-        return;
-    }
-    char key[65], why[256] = "";
-    for (int i = 0; i < 32; i++)
-        snprintf(key + 2 * i, 3, "%02x", 0xc0 + i);
-    nvn_module *m = nvn_module_get(key, (int)NVN_STAGE_VERTEX, why, sizeof why);
-    if (!m)
-        printf("  %s\n", why);
-    CHECK(m != NULL);
-    if (m) {
-        CHECK_EQ(m->storage_slots, 1u << 2);
-        CHECK_EQ(m->driver, 0u);
-        CHECK(!m->writes_layer);
-    }
-    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+    for (size_t i = 5; i + 3 < n && (w[i] >> 16); i += w[i] >> 16)
+        if ((w[i] & 0xffff) == 71 && w[i + 2] == 33 && w[i + 3] == b)
+            return true;
+    return false;
 }
 
-TEST(nvn_storage_slot_bindings_of_every_stage_are_their_own)
+TEST(nvn_storage_slot_arrays_of_every_stage_are_their_own)
 {
-    for (uint32_t s = 0; s < NVN_STAGES; s++)
-        for (uint32_t k = 0; k < NVN_STORAGE_SLOTS; k++) {
-            CHECK(nvn_slot_binding(s, k) >= DRIVER_BINDINGS * NVN_STAGES);
-            for (uint32_t t = 0; t < s; t++)
-                for (uint32_t j = 0; j < NVN_STORAGE_SLOTS; j++)
-                    CHECK(nvn_slot_binding(s, k) != nvn_slot_binding(t, j));
-        }
+    for (uint32_t s = 0; s < NVN_STAGES; s++) {
+        CHECK(nvn_slot_binding(s) >= DRIVER_BINDINGS * NVN_STAGES);
+        CHECK(nvn_slot_binding(s) < NVN_COMPUTE_BASE_TABLE_BINDING);
+        for (uint32_t t = 0; t < s; t++)
+            CHECK(nvn_slot_binding(s) != nvn_slot_binding(t));
+    }
+    CHECK(binds_at(slot_vertex, sizeof slot_vertex / 4, NVN_SLOT_BINDING_BASE));
     char dir[PATH_MAX];
     CHECK(make_scratch(dir));
     CHECK(write_one_table(dir, slot_vertex, sizeof slot_vertex, 0xd0));
@@ -258,8 +238,10 @@ TEST(nvn_storage_slot_bindings_of_every_stage_are_their_own)
         printf("  %s\n", why);
     CHECK(m != NULL);
     if (m) {
-        CHECK_EQ(m->storage_slots, 1u << 2);
+        CHECK(m->slot_array);
+        CHECK_EQ(m->storage_slots, 0u);
         CHECK_EQ(m->driver, 0u);
+        CHECK(!m->other_sets);
     }
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
@@ -270,7 +252,7 @@ TEST(nvn_a_compute_base_binding_becomes_a_slot_of_the_compute_layout)
     memcpy(words, slot_vertex, sizeof words);
     bool moved = false;
     for (size_t i = 5; i + 3 < sizeof words / 4; i += words[i] >> 16)
-        if ((words[i] & 0xffff) == 71 && words[i + 2] == 33 && words[i + 3] == 0x42) {
+        if ((words[i] & 0xffff) == 71 && words[i + 2] == 33 && words[i + 3] == NVN_SLOT_BINDING_BASE) {
             words[i + 3] = NVN_COMPUTE_BASE_BINDING + 0x1b8 / 8;
             moved = true;
         }

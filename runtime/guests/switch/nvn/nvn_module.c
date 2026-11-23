@@ -107,10 +107,9 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
             if (x->set == 0) {
                 m->user |= 1u << (x->binding & 31);
                 w[i + 3] = USER_BINDINGS * (uint32_t)stage + x->binding;
-            } else if (x->set == 1 && x->binding >= NVN_SLOT_BINDING_BASE &&
-                       x->binding < NVN_SLOT_BINDING_BASE + NVN_STORAGE_SLOTS) {
-                m->storage_slots |= 1u << (x->binding - NVN_SLOT_BINDING_BASE);
-                w[i + 3] = nvn_slot_binding((uint32_t)stage, x->binding - NVN_SLOT_BINDING_BASE);
+            } else if (x->set == 1 && x->binding == NVN_SLOT_BINDING_BASE && stage != (int)NVN_STAGE_COMPUTE) {
+                m->slot_array = true;
+                w[i + 3] = nvn_slot_binding((uint32_t)stage);
             } else if (x->set == 1 && stage == (int)NVN_STAGE_COMPUTE && x->binding == NVN_COMPUTE_BASE_TABLE_BINDING) {
                 m->cbase_table = true;
             } else if (x->set == 1 && stage == (int)NVN_STAGE_COMPUTE && x->binding >= NVN_COMPUTE_BASE_BINDING &&
@@ -464,6 +463,8 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
         m->marks_pages |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE && m->recs[i].bank == 1;
         m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
+        if (m->recs[i].kind == NVN_IFACE_STORAGE_SLOT && m->recs[i].bank < NVN_STORAGE_SLOTS)
+            m->storage_slots |= 1u << m->recs[i].bank;
     }
     if (!patch_spirv(w, n, stage, m)) {
         free(w);

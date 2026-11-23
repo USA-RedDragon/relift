@@ -204,9 +204,10 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<Vec
         let u = c.u32t();
         let xv = c.load_reg(x);
         let yv = y.map(|y| c.load_reg(y));
-        let ptr = c.global_ptr_w(addr, u);
         let scope = c.m.c_u32(SCOPE_DEVICE);
-        return Ok(vec![rmw(c, ptr, scope, s, u, xv, yv)]);
+        return Ok(c.global_op(addr, u, true, &mut |c, ptr| {
+            vec![rmw(c, ptr, scope, s, u, xv, yv)]
+        }));
     }
     let pair = |c: &mut Ctx, r: u8| -> Res<(u32, u32)> {
         Ok((c.load_reg(r), c.load_reg(tuple_reg(r, 1)?)))

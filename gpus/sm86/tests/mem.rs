@@ -646,9 +646,9 @@ fn a_vertex_load_from_a_storage_slot_base_reads_the_slot_descriptor() {
         "the load keeps a buffer device address"
     );
     assert!(ops.contains(&ACCESS_CHAIN));
-    assert!(decorated_binding(&s.spirv, 66));
+    assert!(decorated_binding(&s.spirv, 64));
     let other = vertex_slot_load(0x100);
-    assert!(other.interface.storage_slots.is_empty());
+    assert_eq!(other.interface.storage_slots.len(), 16, "no slot search");
     assert!(spirv_ops(&other.spirv).contains(&CONVERT_U_TO_PTR));
 }
 
@@ -702,6 +702,19 @@ fn has_psb(s: &relift_gpu_nv::translate::Shader) -> bool {
     spirv_ops(&s.spirv).contains(&CONVERT_U_TO_PTR)
 }
 
+/// Whether the program searches its stage's slots at run time for an
+/// access no route takes: every slot recorded, a selection on the hit, an
+/// access chain into the slot array decorated NonUniform, and the buffer
+/// device address only on the miss.
+fn searches(s: &relift_gpu_nv::translate::Shader) -> bool {
+    let ops = spirv_ops(&s.spirv);
+    s.interface.storage_slots.len() == 16
+        && ops.contains(&247)
+        && insts(&s.spirv, DECORATE).iter().any(|d| d[2] == 5300)
+        && decorated_binding(&s.spirv, 64)
+        && has_psb(s)
+}
+
 fn slots_of(s: &relift_gpu_nv::translate::Shader) -> Vec<u32> {
     s.interface.storage_slots.iter().copied().collect()
 }
@@ -732,10 +745,9 @@ fn a_fragment_load_from_a_storage_slot_base_reads_the_slot_descriptor() {
     );
     assert_eq!(slots_of(&s), vec![2]);
     assert!(!has_psb(&s), "the load keeps a buffer device address");
-    assert!(decorated_binding(&s.spirv, 66));
+    assert!(decorated_binding(&s.spirv, 64));
     let vertex_row = staged(SPH_FRAGMENT, &[uldc64(4, 0x130), load], &[]);
-    assert!(slots_of(&vertex_row).is_empty());
-    assert!(has_psb(&vertex_row));
+    assert!(searches(&vertex_row));
 }
 
 /// A store through a slot base goes through the slot's descriptor, and
@@ -784,10 +796,10 @@ fn a_load_through_a_register_pair_made_from_a_slot_base_reads_the_slot() {
 }
 
 /// The same pair in a vertex program is not a vertex slot (0x560 is past
-/// the vertex rows), and a pair whose high word is not made from the
-/// next word keeps the buffer device address.
+/// the vertex rows), nor is a pair whose high word is not made from the
+/// next word: those accesses search the slots at run time.
 #[test]
-fn a_register_pair_from_another_stages_rows_keeps_the_address() {
+fn a_register_pair_from_another_stages_rows_searches_the_slots() {
     let s = staged(
         SPH_VERTEX,
         &[
@@ -797,15 +809,13 @@ fn a_register_pair_from_another_stages_rows_keeps_the_address() {
         ],
         &[],
     );
-    assert!(slots_of(&s).is_empty());
-    assert!(has_psb(&s));
+    assert!(searches(&s));
     let s = staged(
         SPH_FRAGMENT,
         &[hex_word(LEA_R16_P0_C0_560), hex_word(LDG_R13_R16)],
         &[],
     );
-    assert!(slots_of(&s).is_empty());
-    assert!(has_psb(&s));
+    assert!(searches(&s));
 }
 
 /// An atomic through a slot base pair is a storage buffer atomic.
@@ -907,4 +917,40 @@ fn compute_loads_through_other_pairs_keep_the_address() {
     let s = run(&[hex_word(UIADD3_UR4_UP0_24), hex_word(LDG_R0_UR4_24)], &[]);
     assert!(compute_bases(&s).is_empty());
     assert!(has_psb(&s));
+}
+
+/// Plain loads and stores, sub-word stores and atomics through addresses no
+/// route takes, in a graphics stage, all search the slots.
+#[test]
+fn graphics_accesses_off_the_slot_routes_search_the_slots() {
+    let s = staged(SPH_FRAGMENT, &[ldg(SIZE_S16, 2, 4, 2)], &["S16"]);
+    assert!(searches(&s), "sub-word load");
+    let s = staged(SPH_FRAGMENT, &[stg(SIZE_U8, 4, 1, 2)], &["STG.E.EF.U8"]);
+    assert!(searches(&s), "sub-word store");
+    let red = word(
+        0x18e,
+        1,
+        &[
+            (24, 8, 4),
+            (32, 8, 2),
+            (40, 24, 8),
+            (72, 1, 1),
+            (87, 3, 0),
+            (90, 1, 1),
+        ],
+    );
+    let s = staged(SPH_FRAGMENT, &[red], &["RED.E.ADD"]);
+    assert!(searches(&s), "atomic");
+    assert!(spirv_ops(&s.spirv).contains(&234));
+}
+
+/// Compute programs do not search (their slots' place in c\[0\] is the
+/// dispatch's): an address no route takes keeps the buffer device address
+/// alone.
+#[test]
+fn compute_accesses_off_the_routes_keep_the_address() {
+    let s = run(&[ldg(SIZE_S16, 2, 4, 2)], &["S16"]);
+    assert!(s.interface.storage_slots.is_empty());
+    assert!(has_psb(&s));
+    assert!(!spirv_ops(&s.spirv).contains(&247));
 }

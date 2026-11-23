@@ -32,6 +32,11 @@ const DECO_BINDING: u32 = 33;
 const DECO_SET: u32 = 34;
 const DECO_OFFSET: u32 = 35;
 const VIEW_KEY: u32 = 0x4_0000;
+const DECO_NON_UNIFORM: u32 = 5300;
+const FUNCTION_INLINE: u32 = 1;
+const FUNCTION_DONT_INLINE: u32 = 2;
+const CAP_SHADER_NON_UNIFORM: u32 = 5301;
+const CAP_STORAGE_BUFFER_NON_UNIFORM: u32 = 5308;
 
 /// The c\[0\] row (16 bytes each) of vertex storage buffer slot 0.
 pub const VERTEX_SLOT_ROW: u32 = 0x11;
@@ -93,18 +98,24 @@ pub fn compute_base_binding(offset: u32) -> u32 {
     COMPUTE_BASE_BINDING + offset / 8
 }
 
-/// The slot an access goes through: its binding and the low word of the
-/// slot's base address.
+/// The descriptor an access goes through: element `k` of the stage's
+/// slot array (binding [`SLOT_BINDING_BASE`]), or a compute base's own
+/// binding.
+#[derive(Clone, Copy, Debug)]
+enum View {
+    Slot(u32),
+    Binding(u32),
+}
+
+/// The descriptor an access goes through and the low word of the address
+/// it starts at.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Route {
-    binding: u32,
+    view: View,
     base_lo: u32,
 }
 
 impl Ctx {
-    /// The storage buffer slot whose base a global address with uniform
-    /// register `u` adds is, when every load that reaches this instruction
-    /// gives `u` and `u + 1` the slot's address words.
     /// The low word of the address the descriptor of the compute base at
     /// c\[0\] byte `off` starts at, from the base table.
     fn compute_start(&mut self, off: u32) -> u32 {
@@ -150,15 +161,19 @@ impl Ctx {
         }
     }
 
-    fn base_slot(&mut self, u: u8) -> Option<(u32, u32, i64)> {
+    /// The binding, c\[0\] byte and added constant of the storage buffer
+    /// slot whose base a global address with uniform register `u` adds is,
+    /// when every write that reaches this instruction gives `u` and `u + 1`
+    /// the slot's address words (see `tex::Prep::ubase`).
+    fn base_slot(&mut self, u: u8) -> Option<(View, u32, i64)> {
         let (lo, add) = self.tex.ubase((self.pc / 16) as usize, u)?;
         Some((self.slot_at(lo)?, lo, add))
     }
 
-    /// The binding of the slot whose base address is the c\[0\] word at byte
-    /// `lo`, which the interface then records: a graphics stage's slot
+    /// The descriptor of the slot whose base address is the c\[0\] word at
+    /// byte `lo`, which the interface then records: a graphics stage's slot
     /// rows, or any doubleword past compute's group counts.
-    fn slot_at(&mut self, lo: u32) -> Option<u32> {
+    fn slot_at(&mut self, lo: u32) -> Option<View> {
         if self.stage == Stage::Compute {
             let fresh = !self.iface.compute_bases.contains(&lo);
             if !lo.is_multiple_of(8)
@@ -168,7 +183,7 @@ impl Ctx {
                 return None;
             }
             self.iface.compute_bases.insert(lo);
-            return Some(compute_base_binding(lo));
+            return Some(View::Binding(compute_base_binding(lo)));
         }
         let first = slot_row(self.stage)?;
         let row = lo / 16;
@@ -176,7 +191,7 @@ impl Ctx {
             return None;
         }
         self.iface.storage_slots.insert(row - first);
-        Some(slot_binding(row - first))
+        Some(View::Slot(row - first))
     }
 
     /// The slot route of an access at `a`, or `None` when `a` is not a
@@ -191,7 +206,7 @@ impl Ctx {
         }
         match (a.ureg, a.reg) {
             (Some(u), None | Some((_, false))) => {
-                let (binding, off, add) = self.base_slot(u)?;
+                let (view, off, add) = self.base_slot(u)?;
                 if add + a.offset < 0 && !below_ok {
                     return None;
                 }
@@ -201,31 +216,48 @@ impl Ctx {
                     let w = self.load_cbuf(0, i64::from(off)).ok()?;
                     self.start_lo(off, w)
                 };
-                Some(Route { binding, base_lo })
+                Some(Route { view, base_lo })
             }
             (None, Some((r, true))) if a.shift == 0 => {
                 let lo = self.tex.pair_base((self.pc / 16) as usize, r)?;
-                let binding = self.slot_at(lo)?;
+                let view = self.slot_at(lo)?;
                 let word = self.load_cbuf(0, i64::from(lo)).ok()?;
                 let base_lo = self.start_lo(lo, word);
-                Some(Route { binding, base_lo })
+                Some(Route { view, base_lo })
             }
             _ => None,
         }
     }
 
-    fn slot_view(&mut self, binding: u32, ty: u32, size: u32) -> u32 {
-        let key = VIEW_KEY + (binding << 20) + ty;
-        if let Some(&v) = self.builtins.get(&key) {
-            return v;
-        }
+    /// A storage buffer block of a runtime array of `ty` (`size` bytes
+    /// each).
+    fn view_block(&mut self, ty: u32, size: u32) -> u32 {
         let arr = self.m.id();
         crate::spirv::inst(&mut self.m.types, op::TYPE_RUNTIME_ARRAY, &[arr, ty]);
         self.m.deco(arr, DECO_ARRAY_STRIDE, &[size]);
         let st = self.m.t_struct_unique(&[arr]);
         self.m.deco(st, DECO_BLOCK, &[]);
         self.m.member_deco(st, 0, DECO_OFFSET, &[0]);
-        let p = self.m.t_ptr(STORAGE_BUFFER, st);
+        st
+    }
+
+    /// The variable of `ty` accesses through `view`: the stage's slot
+    /// array, or a compute base's binding.
+    fn view_var(&mut self, view: View, ty: u32, size: u32) -> u32 {
+        let (key, binding, array) = match view {
+            View::Slot(_) => (VIEW_KEY + ty, SLOT_BINDING_BASE, true),
+            View::Binding(b) => (VIEW_KEY + (b << 20) + ty, b, false),
+        };
+        if let Some(&v) = self.builtins.get(&key) {
+            return v;
+        }
+        let st = self.view_block(ty, size);
+        let t = if array {
+            self.m.t_array(st, STORAGE_SLOTS)
+        } else {
+            st
+        };
+        let p = self.m.t_ptr(STORAGE_BUFFER, t);
         let var = self.m.global(p, STORAGE_BUFFER);
         self.m.deco(var, DECO_SET, &[DRIVER_CBUF_SET]);
         self.m.deco(var, DECO_BINDING, &[binding]);
@@ -235,21 +267,189 @@ impl Ctx {
         var
     }
 
-    /// A pointer to `ty` at 64-bit address `addr` through the slot of
-    /// `r`, or `None` for a type whose size is not a power of two.
+    /// A pointer to `ty` at 64-bit address `addr` through `r`, or `None`
+    /// for a type whose size is not a power of two.
     pub(crate) fn routed_ptr(&mut self, r: Route, addr: u32, ty: u32) -> Option<u32> {
+        let k = match r.view {
+            View::Slot(k) => Some(self.m.c_u32(k)),
+            View::Binding(_) => None,
+        };
+        self.view_ptr(r.view, k, r.base_lo, addr, ty, false)
+    }
+
+    /// A pointer to `ty` at `addr` through `view` (slot array element `k`
+    /// when it is the slot array) whose descriptor starts at the address
+    /// with low word `base_lo`; `nonuniform` when `k` may differ between
+    /// invocations.
+    fn view_ptr(
+        &mut self,
+        view: View,
+        k: Option<u32>,
+        base_lo: u32,
+        addr: u32,
+        ty: u32,
+        nonuniform: bool,
+    ) -> Option<u32> {
         let bytes = self.access_bytes(ty);
         if !bytes.is_power_of_two() {
             return None;
         }
         let u = self.u32t();
         let lo = self.addr_low(addr);
-        let off = self.m.emit(op::I_SUB, u, &[lo, r.base_lo]);
-        let k = self.m.c_u32(bytes.trailing_zeros());
-        let elem = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[off, k]);
-        let var = self.slot_view(r.binding, ty, bytes);
+        let off = self.m.emit(op::I_SUB, u, &[lo, base_lo]);
+        let sh = self.m.c_u32(bytes.trailing_zeros());
+        let elem = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[off, sh]);
+        let var = self.view_var(view, ty, bytes);
         let z = self.m.c_u32(0);
         let p = self.m.t_ptr(STORAGE_BUFFER, ty);
-        Some(self.m.emit(op::ACCESS_CHAIN, p, &[var, z, elem]))
+        let ptr = match k {
+            Some(k) => self.m.emit(op::ACCESS_CHAIN, p, &[var, k, z, elem]),
+            None => self.m.emit(op::ACCESS_CHAIN, p, &[var, z, elem]),
+        };
+        if nonuniform {
+            self.nonuniform_caps();
+            self.m.deco(ptr, DECO_NON_UNIFORM, &[]);
+        }
+        Some(ptr)
+    }
+
+    fn nonuniform_caps(&mut self) {
+        self.cap(CAP_SHADER_NON_UNIFORM);
+        self.cap(CAP_STORAGE_BUFFER_NON_UNIFORM);
+    }
+
+    /// Whether global accesses that no slot route takes search the
+    /// stage's slots at run time (see [`Ctx::global_op`]): graphics
+    /// stages, where the slots' bases and sizes are in c\[0\].
+    fn searches(&self) -> bool {
+        self.host.bda && slot_row(self.stage).is_some()
+    }
+
+    /// The run-time search of the stage's storage buffer slots for
+    /// `addr`: whether one holds it (its base at or below `addr` and the
+    /// offset below its size), the last such slot, and the low word of its
+    /// base. Every slot is then recorded, so the runtime binds them all.
+    /// The search is one function per program, as the other recompilers
+    /// keep theirs: kept a call (`DontInline`) where NVIDIA's compiler
+    /// took tens of seconds on programs with every access's search
+    /// inlined, and inlined in task and mesh programs, where NVIDIA's
+    /// compiler gave a call's result to the wrong load.
+    fn slot_search(&mut self, addr: u32) -> Option<(u32, u32, u32)> {
+        let first = slot_row(self.stage)?;
+        let u = self.u32t();
+        let b = self.boolt();
+        let (lo, hi) = self.addr_words(addr);
+        let control = if matches!(self.stage, Stage::Task | Stage::Mesh) {
+            FUNCTION_INLINE
+        } else {
+            FUNCTION_DONT_INLINE
+        };
+        let r = self
+            .shared_fn::<super::super::Unsupported>(
+                format!("slot_search_{first}"),
+                &[lo, hi],
+                control,
+                |c, p| {
+                    let (lo, hi) = (p[0], p[1]);
+                    let z = c.m.c_u32(0);
+                    let one = c.m.c_u32(1);
+                    let mut r = z;
+                    for k in 0..STORAGE_SLOTS {
+                        let row = i64::from(16 * (first + k));
+                        let blo = c.load_cbuf(0, row)?;
+                        let bhi = c.load_cbuf(0, row + 4)?;
+                        let size = c.load_cbuf(0, row + 8)?;
+                        let dlo = c.m.emit(op::I_SUB, u, &[lo, blo]);
+                        let borrow = c.m.emit(op::U_LESS_THAN, b, &[lo, blo]);
+                        let bv = c.select(u, borrow, one, z);
+                        let dhi = c.m.emit(op::I_SUB, u, &[hi, bhi]);
+                        let dhi = c.m.emit(op::I_SUB, u, &[dhi, bv]);
+                        let high_ok = c.m.emit(op::I_EQUAL, b, &[dhi, z]);
+                        let low_ok = c.m.emit(op::U_LESS_THAN, b, &[dlo, size]);
+                        let hit = c.m.emit(op::LOGICAL_AND, b, &[high_ok, low_ok]);
+                        let kv = c.m.c_u32(k + 1);
+                        r = c.select(u, hit, kv, r);
+                    }
+                    Ok(r)
+                },
+            )
+            .ok()?;
+        for k in 0..STORAGE_SLOTS {
+            self.iface.storage_slots.insert(k);
+        }
+        let z = self.m.c_u32(0);
+        let one = self.m.c_u32(1);
+        let found = self.m.emit(op::I_NOT_EQUAL, b, &[r, z]);
+        let idx = self.m.emit(op::I_SUB, u, &[r, one]);
+        let idx = self.select(u, found, idx, z);
+        let sixteen = self.m.c_u32(16);
+        let at = self.m.emit(op::I_MUL, u, &[idx, sixteen]);
+        let row0 = self.m.c_u32(16 * first);
+        let at = self.m.emit(op::I_ADD, u, &[at, row0]);
+        let base = self.load_cbuf_dyn(0, at).ok()?;
+        Some((found, idx, base))
+    }
+
+    /// Does `op` on the pointer to `ty` at global address `addr` (a store
+    /// or atomic when `write`) and gives back the words it returns. An
+    /// access no slot route takes searches the stage's slots at run time,
+    /// as the other recompilers do: one that holds the address is accessed
+    /// through its descriptor, and an address in none through the buffer
+    /// device address.
+    pub(crate) fn global_op(
+        &mut self,
+        addr: u32,
+        ty: u32,
+        write: bool,
+        op_fn: &mut dyn FnMut(&mut Ctx, u32) -> Vec<u32>,
+    ) -> Vec<u32> {
+        let direct = |c: &mut Ctx, op_fn: &mut dyn FnMut(&mut Ctx, u32) -> Vec<u32>| {
+            let p = if write {
+                c.global_ptr_w(addr, ty)
+            } else {
+                c.global_ptr(addr, ty)
+            };
+            op_fn(c, p)
+        };
+        if self.route.is_some() || !self.searches() || !self.access_bytes(ty).is_power_of_two() {
+            return direct(self, op_fn);
+        }
+        let Some((found, idx, base)) = self.slot_search(addr) else {
+            return direct(self, op_fn);
+        };
+        let hit = self.m.id();
+        let miss = self.m.id();
+        let merge = self.m.id();
+        self.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        self.m
+            .emit_void(op::BRANCH_CONDITIONAL, &[found, hit, miss]);
+        self.m.emit_void(op::LABEL, &[hit]);
+        let p = self
+            .view_ptr(View::Slot(0), Some(idx), base, addr, ty, true)
+            .expect("the size is a power of two");
+        let words = op_fn(self, p);
+        let vars: Vec<u32> = words
+            .iter()
+            .map(|_| {
+                let v = self.m.id();
+                self.locals.push(v);
+                v
+            })
+            .collect();
+        for (&v, &w) in vars.iter().zip(&words) {
+            self.m.emit_void(op::STORE, &[v, w]);
+        }
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[miss]);
+        let words = direct(self, op_fn);
+        for (&v, &w) in vars.iter().zip(&words) {
+            self.m.emit_void(op::STORE, &[v, w]);
+        }
+        self.m.emit_void(op::BRANCH, &[merge]);
+        self.m.emit_void(op::LABEL, &[merge]);
+        let u = self.u32t();
+        vars.iter()
+            .map(|&v| self.m.emit(op::LOAD, u, &[v]))
+            .collect()
     }
 }
