@@ -1637,7 +1637,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         return rc;
     VkPipeline p = nvn_pipe_graphics(&k);
     if (!p)
-        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw");
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw (vertex %s, fragment %s, geometry %s)",
+                           mods[0] ? mods[0]->key : "none", mods[1] ? mods[1]->key : "none",
+                           mods[2] ? mods[2]->key : "none");
     const char *program_keys[5];
     for (uint32_t s = 0; s < 5; s++)
         program_keys[s] = mods[s] ? mods[s]->key : NULL;
