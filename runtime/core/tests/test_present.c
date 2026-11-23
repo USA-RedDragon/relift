@@ -489,6 +489,43 @@ static int body(void *arg)
     return 0;
 }
 
+/** @brief A still the compile screen put up and took away before the game's first frame must not stop that frame. */
+static int still_body(void *arg)
+{
+    int *failures = arg;
+    rl_present *p = rl_present_open(&g_win);
+    if (!p) {
+        printf("    (no Vulkan with headless surfaces: the swapchain is not run)\n");
+        return 0;
+    }
+    static uint8_t card[16 * 16 * 3];
+    memset(card, 0x40, sizeof card);
+    rl_present_still(p, card, 16, 16);
+    usleep(200000);
+    rl_present_still(p, NULL, 0, 0);
+    usleep(200000);
+    uint32_t w = 0, h = 0;
+    uint8_t *img = capture(p, &w, &h);
+    EXPECT(img != NULL);
+    free(img);
+    return 0;
+}
+
+TEST(a_still_taken_away_before_the_first_frame_lets_the_frame_through)
+{
+    setenv("VK_LOADER_DRIVERS_SELECT", "*lvp*", 0);
+    unsetenv(RL_WINDOW_ENV);
+    rl_settings_reset();
+    rl_settings_declare_runtime();
+    g_win.b = &g_headless;
+    rl_window_set_backend(&g_headless);
+    int failures = 0;
+    CHECK_EQ(rl_window_main(still_body, &failures), 0);
+    CHECK_EQ(failures, 0);
+    rl_window_set_backend(NULL);
+    rl_settings_reset();
+}
+
 TEST(present_headless_swapchain_shows_frames)
 {
     setenv("VK_LOADER_DRIVERS_SELECT", "*lvp*", 0);

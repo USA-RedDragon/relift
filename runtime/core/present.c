@@ -1065,6 +1065,11 @@ static void trace_queue(rlvk_handle swapchain, uint64_t id, uint64_t ready_ns, u
     pthread_mutex_unlock(&g_trace_lock);
 }
 
+/**
+ * @brief Draws one frame of the picture, the still or the overlay. Nothing to draw (a still taken away before the first
+ * frame arrived) is not a failure of the surface: marking it one would stop every later draw, and the frames that follow
+ * would never reach the window.
+ */
 static bool draw(rl_present *p, bool capture)
 {
     const rlvk_dev *d = p->d;
@@ -1081,6 +1086,8 @@ static bool draw(rl_present *p, bool capture)
         p->create_failed = p->surface != 0;
         return false;
     }
+    if (p->still_shown ? !p->still_w || !p->still_h : !p->work_w || !p->work_h)
+        return false;
     if (capture && !p->sc_readable) {
         pthread_mutex_lock(&p->lock);
         p->capture_want = false;
