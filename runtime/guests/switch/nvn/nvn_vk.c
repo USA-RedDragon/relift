@@ -30,6 +30,7 @@
 
 #include <relift/input.h>
 #include <relift/upscale.h>
+#include <relift/warmup.h>
 #include <relift/window.h>
 
 #include "present.h"
@@ -4102,6 +4103,16 @@ static rl_window *present_window(uint32_t w, uint32_t h)
     return win;
 }
 
+/** @brief The size an early window opens at: the game's own picture size is not known before its first present. */
+#define EARLY_WINDOW_W 1280u
+#define EARLY_WINDOW_H 720u
+
+bool nvn_vk_window_early(void)
+{
+    rl_window *win = present_window(EARLY_WINDOW_W, EARLY_WINDOW_H);
+    return win && rl_window_presenter(win) != NULL;
+}
+
 /** @brief Logs the guest's present rate every few seconds (info), so a run's speed shows without a profiler. */
 static void present_rate(uint64_t total)
 {
@@ -4180,6 +4191,8 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     bool counted = false;
     if (cropped && b && b->open) {
         pthread_mutex_unlock(&g.lock);
+        if (rl_warmup_active())
+            rl_warmup_game_started();
         win = present_window(rect[2], rect[3]);
         pres = win ? rl_window_presenter(win) : NULL;
         pthread_mutex_lock(&g.lock);

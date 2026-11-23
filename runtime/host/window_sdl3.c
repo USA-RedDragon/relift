@@ -12,7 +12,8 @@
  * the picture place it names with its overlay on top. While a text entry
  * panel is open (textentry.h), the window's presenter shows the panel over
  * the last picture, typed text and keys go to the panel and the guest gets
- * no input.
+ * no input. The shader compile screen (warmup.h) is drawn the same two ways: the blocking card as the window's whole
+ * picture while the game waits, the corner card as an overlay on the running game's frames.
  */
 #include <relift/appinfo.h>
 #include <relift/input.h>
@@ -20,6 +21,7 @@
 #include <relift/settings.h>
 #include <relift/textentry.h>
 #include <relift/touchpad.h>
+#include <relift/warmup.h>
 #include <relift/window.h>
 
 #ifdef __ANDROID__
@@ -354,6 +356,139 @@ static bool te_event(const SDL_Event *e)
     }
 }
 
+
+/** @brief The compile screen's blocking card shown as the window's picture, and the buffers its drawing uses. */
+static struct {
+    bool still;
+    uint8_t *rgb;
+    size_t cap;
+    uint8_t *comp;
+    size_t comp_cap;
+} g_wu;
+
+/** @brief The first window of the program's own display that has a presenter: where the compile screen shows. */
+static sdl_win *wu_window(void)
+{
+    SDL_LockMutex(g_lock);
+    sdl_win *w = g_wins;
+    while (w && (w->head.extra || !w->pres))
+        w = w->next;
+    SDL_UnlockMutex(g_lock);
+    return w;
+}
+
+/** @brief The compile screen takes the window's whole picture (on) or gives it back. */
+static void wu_base(bool on)
+{
+    __atomic_store_n(&g_wu.still, on, __ATOMIC_RELEASE);
+    if (!on) {
+        sdl_win *w = wu_window();
+        if (w)
+            rl_present_still(w->pres, NULL, 0, 0);
+    }
+    sdl_wake();
+}
+
+/** @brief The player chose Quit on the compile screen: end the program as a window close would. */
+static void wu_quit(void) { rl_window_emit(NULL, RL_WINDOW_CLOSE); }
+
+static void wu_wake(void) { sdl_wake(); }
+
+static const rl_warmup_host g_wu_host = { wu_base, wu_quit, wu_wake };
+
+/** @brief Draws the blocking card into the window's presenter when it changed (loop thread). */
+static void wu_draw(void)
+{
+    if (!__atomic_load_n(&g_wu.still, __ATOMIC_ACQUIRE))
+        return;
+    sdl_win *w = wu_window();
+    if (!w)
+        return;
+    uint32_t W = __atomic_load_n(&w->width, __ATOMIC_RELAXED), H = __atomic_load_n(&w->height, __ATOMIC_RELAXED);
+    if (!W || !H)
+        return;
+    rl_warmup_view(W, H);
+    uint32_t pw = 0, ph = 0;
+    int32_t dirty[4];
+    const uint8_t *px = rl_warmup_pixels(rl_clock_ns(), &pw, &ph, dirty);
+    if (!px || pw != W || ph != H || dirty[2] <= 0 || dirty[3] <= 0)
+        return;
+    size_t need = (size_t)W * H * 3;
+    if (need > g_wu.cap) {
+        uint8_t *g = realloc(g_wu.rgb, need);
+        if (!g)
+            return;
+        g_wu.rgb = g;
+        g_wu.cap = need;
+    }
+    for (size_t i = 0, n = (size_t)W * H; i < n; i++) {
+        g_wu.rgb[i * 3] = px[i * 4];
+        g_wu.rgb[i * 3 + 1] = px[i * 4 + 1];
+        g_wu.rgb[i * 3 + 2] = px[i * 4 + 2];
+    }
+    rl_present_still(w->pres, g_wu.rgb, W, H);
+    if (!__atomic_load_n(&g_wu.still, __ATOMIC_ACQUIRE))
+        rl_present_still(w->pres, NULL, 0, 0);
+}
+
+/**
+ * @brief While the compile screen is up: the keys and taps it uses go to it, and the blocking card keeps all input
+ * from the guest. True when the event is taken.
+ */
+static bool wu_event(const SDL_Event *e)
+{
+    if (!rl_warmup_active())
+        return false;
+    switch (e->type) {
+    case SDL_EVENT_KEY_DOWN: {
+        int k = -1;
+        switch (e->key.key) {
+        case SDLK_ESCAPE:
+        case SDLK_AC_BACK:
+            k = RL_WARMUP_KEY_ESCAPE;
+            break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            k = RL_WARMUP_KEY_ENTER;
+            break;
+        default:
+            break;
+        }
+        if (k >= 0 && rl_warmup_key(k))
+            return true;
+        return rl_warmup_blocking();
+    }
+    case SDL_EVENT_KEY_UP:
+    case SDL_EVENT_TEXT_INPUT:
+    case SDL_EVENT_FINGER_MOTION:
+    case SDL_EVENT_FINGER_UP:
+    case SDL_EVENT_FINGER_CANCELED:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        return rl_warmup_blocking();
+    case SDL_EVENT_FINGER_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+        sdl_win *w = wu_window();
+        if (!w)
+            return false;
+        uint32_t W = __atomic_load_n(&w->width, __ATOMIC_RELAXED), H = __atomic_load_n(&w->height, __ATOMIC_RELAXED);
+        float density = SDL_GetWindowPixelDensity(w->w);
+        float x, y;
+        if (e->type == SDL_EVENT_FINGER_DOWN) {
+            x = e->tfinger.x * (float)W;
+            y = e->tfinger.y * (float)H;
+        } else {
+            x = e->button.x * (density > 0 ? density : 1);
+            y = e->button.y * (density > 0 ? density : 1);
+        }
+        if (rl_warmup_tap(x, y))
+            return true;
+        return rl_warmup_blocking();
+    }
+    default:
+        return false;
+    }
+}
+
 static int sdl_init(void)
 {
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
@@ -368,11 +503,16 @@ static int sdl_init(void)
 #endif
     rl_touchpad_set_host(&g_touch_host);
     rl_text_entry_set_host(&g_te_host);
+    rl_warmup_set_host(&g_wu_host);
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         rl_log(RL_LOG_INFO, "window", "SDL video init failed: %s", SDL_GetError());
         return -1;
     }
     g_loop = SDL_GetCurrentThreadID();
+    rl_warmup_set_dark(SDL_GetSystemTheme() != SDL_SYSTEM_THEME_LIGHT);
+#ifndef RL_MOBILE
+    rl_warmup_set_keyboard(true);
+#endif
     g_lock = SDL_CreateMutex();
     g_wake_event = SDL_RegisterEvents(1);
     g_te.lock = SDL_CreateMutex();
@@ -641,6 +781,10 @@ static void count_host(const SDL_Event *e)
 static void handle(const SDL_Event *e)
 {
     count_host(e);
+    if (e->type == SDL_EVENT_SYSTEM_THEME_CHANGED)
+        rl_warmup_set_dark(SDL_GetSystemTheme() != SDL_SYSTEM_THEME_LIGHT);
+    if (wu_event(e))
+        return;
     if (te_event(e))
         return;
     if (e->type >= SDL_EVENT_WINDOW_FIRST && e->type <= SDL_EVENT_WINDOW_LAST) {
@@ -687,6 +831,7 @@ static void sdl_run(bool (*done)(void *user), void *user)
                 handle(&e);
             publish();
         }
+        wu_draw();
         if (rl_text_entry_active() && (g_te.dirty || rl_clock_ns() - __atomic_load_n(&g_te.drawn_ns, __ATOMIC_RELAXED) >=
                                                             TE_BLINK_NS))
             te_draw();
@@ -734,20 +879,43 @@ static const char *app_title(char tags[TAG_MAX][TAG_LEN])
     return rl_app_title(list, n);
 }
 
-static void set_icon(SDL_Window *sw)
+/** @brief Gives the compile screen the game's name and icon (RGBA8 decoded from the program's PNG). */
+static void warmup_game(const char *name, SDL_Surface *icon)
+{
+    SDL_Surface *rgba = icon ? SDL_ConvertSurface(icon, SDL_PIXELFORMAT_RGBA32) : NULL;
+    if (!rgba || !SDL_LockSurface(rgba)) {
+        rl_warmup_set_game(name, NULL, 0, 0);
+        SDL_DestroySurface(rgba);
+        return;
+    }
+    size_t row = (size_t)rgba->w * 4;
+    uint8_t *tight = malloc(row * (size_t)rgba->h);
+    for (int y = 0; tight && y < rgba->h; y++)
+        memcpy(tight + row * (size_t)y, (const uint8_t *)rgba->pixels + (size_t)y * (size_t)rgba->pitch, row);
+    rl_warmup_set_game(name, tight, (uint32_t)rgba->w, (uint32_t)rgba->h);
+    free(tight);
+    SDL_UnlockSurface(rgba);
+    SDL_DestroySurface(rgba);
+}
+
+static void set_icon(SDL_Window *sw, const char *title)
 {
     size_t n = 0;
     const uint8_t *png = rl_app_icon_png(&n);
-    if (!png)
+    if (!png) {
+        warmup_game(title, NULL);
         return;
+    }
     SDL_IOStream *io = SDL_IOFromConstMem(png, n);
     SDL_Surface *icon = io ? SDL_LoadPNG_IO(io, true) : NULL;
     if (!icon) {
         rl_log(RL_LOG_WARN, "window", "the game's icon could not be read: %s", SDL_GetError());
+        warmup_game(title, NULL);
         return;
     }
     if (!SDL_SetWindowIcon(sw, icon))
         rl_log(RL_LOG_WARN, "window", "SDL could not set the window icon: %s", SDL_GetError());
+    warmup_game(title, icon);
     SDL_DestroySurface(icon);
 }
 
@@ -777,7 +945,7 @@ static void do_open(void *p)
         rl_log(RL_LOG_ERROR, "window", "SDL could not open a window: %s", SDL_GetError());
         return;
     }
-    set_icon(sw);
+    set_icon(sw, title);
     sdl_win *w = calloc(1, sizeof *w);
     if (!w)
         abort();
@@ -1038,10 +1206,75 @@ static bool pad_place(void *user, int32_t rect[4])
     return true;
 }
 
-/** @brief The on-screen controller's overlay, its time moved on first; NULL while it is not in use. */
+/**
+ * @brief The compile screen's corner card laid over the on-screen controller's pixels (premultiplied over) in one
+ * buffer, since a presenter takes one overlay. Returns the buffer, or NULL when the controller's pixels do not match
+ * the card's view.
+ */
+static const uint8_t *wu_over_pad(uint64_t now_ns, const uint8_t *card, uint32_t cw, uint32_t ch, const int32_t cd[4],
+                                  uint32_t *width, uint32_t *height, int32_t dirty[4])
+{
+    rl_touchpad_tick(now_ns);
+    uint32_t pw = 0, ph = 0;
+    int32_t pd[4];
+    const uint8_t *pad = rl_touchpad_pixels(&pw, &ph, pd);
+    if (!pad || pw != cw || ph != ch)
+        return NULL;
+    size_t bytes = (size_t)cw * ch * 4;
+    bool fresh = bytes != g_wu.comp_cap;
+    if (fresh) {
+        uint8_t *g = realloc(g_wu.comp, bytes);
+        if (!g)
+            return NULL;
+        g_wu.comp = g;
+        g_wu.comp_cap = bytes;
+    }
+    *width = cw;
+    *height = ch;
+    memset(dirty, 0, 4 * sizeof *dirty);
+    if (!fresh && !(pd[2] > 0 && pd[3] > 0) && !(cd[2] > 0 && cd[3] > 0))
+        return g_wu.comp;
+    memcpy(g_wu.comp, pad, bytes);
+    int32_t ext[4];
+    rl_warmup_extent(ext);
+    for (int32_t y = ext[1]; y < ext[3] && y < (int32_t)ch; y++)
+        for (int32_t x = ext[0]; x < ext[2] && x < (int32_t)cw; x++) {
+            size_t at = ((size_t)y * cw + (size_t)x) * 4;
+            uint32_t a = card[at + 3];
+            if (!a)
+                continue;
+            for (int k = 0; k < 4; k++)
+                g_wu.comp[at + (size_t)k] = (uint8_t)(card[at + (size_t)k] + g_wu.comp[at + (size_t)k] * (255 - a) / 255);
+        }
+    dirty[2] = (int32_t)cw;
+    dirty[3] = (int32_t)ch;
+    return g_wu.comp;
+}
+
+/**
+ * @brief The window's overlay, its time moved on first: the compile screen's corner card while it shows (over the
+ * on-screen controller when that is in use), else the controller; NULL when neither is.
+ */
 static const uint8_t *pad_pixels(void *user, uint64_t now_ns, uint32_t *width, uint32_t *height, int32_t dirty[4])
 {
-    (void)user;
+    sdl_win *w = user;
+    if (w && !w->head.extra && rl_warmup_active() && !rl_warmup_blocking()) {
+        rl_warmup_view(__atomic_load_n(&w->width, __ATOMIC_RELAXED), __atomic_load_n(&w->height, __ATOMIC_RELAXED));
+        uint32_t cw = 0, ch = 0;
+        int32_t cd[4];
+        const uint8_t *card = rl_warmup_pixels(now_ns, &cw, &ch, cd);
+        if (card) {
+            if (!rl_touchpad_wanted()) {
+                *width = cw;
+                *height = ch;
+                memcpy(dirty, cd, sizeof cd);
+                return card;
+            }
+            const uint8_t *both = wu_over_pad(now_ns, card, cw, ch, cd, width, height, dirty);
+            if (both)
+                return both;
+        }
+    }
     if (!rl_touchpad_wanted())
         return NULL;
     rl_touchpad_tick(now_ns);
@@ -1061,7 +1294,7 @@ static rl_present *sdl_presenter(rl_window *h)
             w->pres = rl_present_open(h);
             if (w->pres) {
                 rl_present_set_fit(w->pres, w->fit);
-                rl_present_overlay ov = { .place = pad_place, .pixels = pad_pixels };
+                rl_present_overlay ov = { .place = pad_place, .pixels = pad_pixels, .user = w };
                 rl_present_set_overlay(w->pres, &ov);
             }
         }

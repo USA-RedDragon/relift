@@ -30,9 +30,22 @@
  *
  * A draw that needs a library or pipeline a worker is making waits for it;
  * one nobody has started it makes itself.
+ *
+ * The compile screen (relift/warmup.h) shows the launch warm-up's own counters, the programs finished and refused of
+ * the total, once it has run for SCREEN_NS: a warm-up the driver's pipeline cache answers ends before that and shows
+ * nothing. With RELIFT_PIPELINE_WARM_WAIT=1 the first submit waits for the whole warm-up (no HOLD_NS), behind the
+ * blocking screen, whose Quit ends the program; otherwise the screen is the corner card, over a plain background
+ * until the game's first picture and over the picture after. The programs the driver refused are listed in a report
+ * file, whose path the screen shows.
  */
 #include "nvn_module.h"
 #include "nvn_pipe.h"
+
+#include <relift/warmup.h>
+
+#include "core.h"
+#include "nvn_vk.h"
+#include "vkdev.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -59,6 +72,11 @@ static struct {
     bool pool_started;
     bool launched, all, background;
     uint32_t total, next, done, nrecorded, nshader, failed, started, exited;
+    /** @brief The launch items the driver refused: how many, and the keys of the first MAX_FAIL_KEYS for the report. */
+    uint32_t lfailed, nfailkeys;
+    char (*failkeys)[65];
+    /** @brief The compile screen is up, and the first submit waits for the whole warm-up. */
+    bool screen, wait;
     /** @brief The RELIFT_WARM_THREADS count, 0 when unset. */
     uint32_t forced;
     uint64_t t0, last_log;
@@ -70,6 +88,55 @@ static struct {
  * not hold the first picture; the workers go on beside the game after it.
  */
 #define HOLD_NS (3ull * 1000000000ull)
+
+/** @brief How long the launch warm-up runs before the compile screen shows: a warm start never shows it. */
+#define SCREEN_NS (1000ull * 1000000ull)
+
+/** @brief The refused programs the report names. */
+#define MAX_FAIL_KEYS 4096
+
+/** @brief Notes a refused launch item for the report (W.lock held): the key of its program, or of its pipeline's first stage. */
+static void note_failed(uint32_t i)
+{
+    const char *key = "";
+    char tablekey[65] = "";
+    if (i < W.nrecorded) {
+        const nvn_pipe_rec *rec = nvn_pipe_recorded_at(i);
+        for (uint32_t k = 0; rec && k < 6 && !key[0]; k++)
+            key = rec->keys[k];
+    } else if (nvn_shader_key_at(i - W.nrecorded, tablekey)) {
+        key = tablekey;
+    }
+    if (!key[0] || W.nfailkeys >= MAX_FAIL_KEYS)
+        return;
+    if (!W.failkeys && !(W.failkeys = calloc(MAX_FAIL_KEYS, sizeof *W.failkeys)))
+        return;
+    snprintf(W.failkeys[W.nfailkeys++], sizeof *W.failkeys, "%s", key);
+}
+
+/** @brief Writes the report of the programs the driver refused and tells the screen where it is (W.lock held). */
+static void write_failed_report(void)
+{
+    if (!W.lfailed)
+        return;
+    size_t cap = 512 + (size_t)W.nfailkeys * 70;
+    char *text = malloc(cap);
+    if (!text)
+        return;
+    int n = snprintf(text, cap,
+                     "relift shader report\n\nThe GPU driver turned down %u of %u shaders while relift prepared the "
+                     "graphics at launch. The game can still run, but some effects may be missing or look wrong. "
+                     "Updating the GPU driver may fix this.\n\n%u shader%s, by their keys in the build's shader "
+                     "table%s:\n",
+                     W.lfailed, W.total, W.lfailed, W.lfailed == 1 ? "" : "s",
+                     W.nfailkeys < W.lfailed ? " (the first ones)" : "");
+    for (uint32_t i = 0; i < W.nfailkeys && n > 0 && (size_t)n + 70 < cap; i++)
+        n += snprintf(text + n, cap - (size_t)n, "%s\n", W.failkeys[i]);
+    char path[1300];
+    if (n > 0 && rl_report_write("relift-shaders", text, (size_t)n, path, sizeof path) == 0)
+        rl_warmup_set_report(path);
+    free(text);
+}
 
 /** @brief Memory one compile may take: a driver compile of a large translated program was measured at 2.4 GiB. */
 #define COMPILE_MEMORY (4ull << 30)
@@ -308,13 +375,19 @@ static void launch_exit(void)
     pthread_mutex_unlock(&W.lock);
     if (!last)
         return;
+    pthread_mutex_lock(&W.lock);
+    write_failed_report();
+    pthread_mutex_unlock(&W.lock);
     uint64_t made, made_ns, late, late_ns;
     nvn_pipe_stats(&made, &made_ns, &late, &late_ns);
     rl_log(RL_LOG_INFO, "nvn",
            "shader warm-up done in %.1f s: %u of %u programs, %u refused; the driver compiled %llu in %.1f s of thread "
            "time",
            (rl_clock_ns() - W.t0) / 1e9, W.done, W.total, W.failed, (unsigned long long)made, made_ns / 1e9);
+    rl_warmup_progress(W.total, W.lfailed);
+    rl_warmup_saving();
     nvn_pipe_warmed();
+    rl_warmup_end();
 }
 
 /**
@@ -350,6 +423,11 @@ static void *launch_worker(void *arg)
         pthread_mutex_lock(&W.lock);
         W.done++;
         W.failed += !ok;
+        if (!ok) {
+            W.lfailed++;
+            note_failed(i);
+        }
+        rl_warmup_progress(W.done, W.lfailed);
         progress(false, i < W.nrecorded ? "recorded" : "table");
         pthread_mutex_unlock(&W.lock);
     }
@@ -393,6 +471,11 @@ static void launch(void)
         nvn_pipe_warmed();
         return;
     }
+    const char *wait = getenv("RELIFT_PIPELINE_WARM_WAIT");
+    W.wait = wait && !strcmp(wait, "1") && !W.background;
+    const rlvk_dev *dev = rl_vkdev();
+    rl_warmup_set_gpu(dev ? dev->name : "");
+    rl_warmup_begin(total, W.wait ? RL_WARMUP_BLOCKING : RL_WARMUP_BACKGROUND);
     rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u recorded pipelines and %u table programs on %u threads%s",
            W.nrecorded, W.nshader, nthreads, W.background ? ", the game starts now" : "");
     pthread_mutex_lock(&W.lock);
@@ -420,7 +503,13 @@ static void launch(void)
         return;
     uint64_t until = rl_clock_ns() + HOLD_NS;
     pthread_mutex_lock(&W.lock);
-    while (W.exited < W.started && rl_clock_ns() < until) {
+    while (W.exited < W.started && (W.wait || rl_clock_ns() < until)) {
+        if (!W.screen && rl_clock_ns() - W.t0 >= SCREEN_NS) {
+            W.screen = true;
+            pthread_mutex_unlock(&W.lock);
+            (void)nvn_vk_window_early();
+            pthread_mutex_lock(&W.lock);
+        }
         uint64_t left = until - rl_clock_ns();
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
@@ -433,6 +522,8 @@ static void launch(void)
     if (going)
         progress(true, "the game starts, the warm-up goes on");
     pthread_mutex_unlock(&W.lock);
+    if (W.wait && rl_warmup_wait() == RL_WARMUP_QUIT)
+        rl_log(RL_LOG_INFO, "nvn", "the player quit from the compile screen");
 }
 
 void nvn_warm_launch(void)

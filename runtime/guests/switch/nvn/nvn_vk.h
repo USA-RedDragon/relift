@@ -265,6 +265,11 @@ extern nvn_vkdev g;
 bool nvn_draw_layouts(void);
 /** @brief Starts the warm-up of the programs the build and earlier launches name, once (nvn_warm.c); returns when the game may go on. */
 void nvn_warm_launch(void);
+/**
+ * @brief Opens the game's window ahead of its first picture, so the compile screen has somewhere to show; true when a
+ * window with a presenter is up (false in a headless run). Any thread.
+ */
+bool nvn_vk_window_early(void);
 /** @brief Brings the host device up if no call has, and makes the pipeline layouts; true when both worked. Safe from any thread. */
 bool nvn_vk_ready(void);
 
