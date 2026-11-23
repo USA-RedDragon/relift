@@ -41,6 +41,30 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
+/// Copies the runtime sources to `to`, leaving out the `build` folder a
+/// `make` in the runtime keeps there: it is not a source of the build, and
+/// another job running in the same checkout creates and removes its files
+/// while the copy walks it.
+fn copy_runtime(to: &Path) {
+    let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
+    std::fs::create_dir_all(to).expect("the copy dir is creatable");
+    for e in std::fs::read_dir(&from)
+        .expect("the runtime reads")
+        .flatten()
+    {
+        let (a, b) = (e.path(), to.join(e.file_name()));
+        if e.file_name() == "build" {
+            continue;
+        }
+        if a.is_dir() {
+            copy_tree(&a, &b);
+        } else {
+            relift_cache::write_if_changed(&b, &std::fs::read(&a).expect("the file reads"))
+                .expect("the file writes");
+        }
+    }
+}
+
 fn run(project: &Path, cache: &Path, args: &[&str]) -> String {
     let cache = cache.display().to_string();
     let mut all = vec!["--cache-dir", &cache, "-j", "4"];
@@ -131,10 +155,7 @@ fn another_copy_of_the_runtime_sources_is_the_same_build() {
     let built = program(&root.join("cache"), "tiny");
 
     let rt: PathBuf = root.join("other relift/runtime");
-    copy_tree(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"),
-        &rt,
-    );
+    copy_runtime(&rt);
     let rt = rt.display().to_string();
     let again = run(
         &project,
@@ -203,10 +224,7 @@ fn rebuilding_one_hard_linked_copy_leaves_the_other_untouched() {
     let before = snapshot(&root.join("linked"));
 
     let rt: PathBuf = root.join("other relift/runtime");
-    copy_tree(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"),
-        &rt,
-    );
+    copy_runtime(&rt);
     let header = rt.join("core/include/relift/abi_core.h");
     let mut text = std::fs::read(&header).expect("the header reads");
     text.extend_from_slice(b"\n#define RL_RELOCATE_TEST 1\n");
