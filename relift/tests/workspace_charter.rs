@@ -710,7 +710,7 @@ const CHARTERS: &[Charter] = &[
             "zstd",
         ],
         dev: &["relift-cpu-z80"],
-        build: NONE,
+        build: &["sha2"],
     },
     Charter {
         member: "relift-override-macros",

@@ -720,7 +720,7 @@ mod tests {
     #[test]
     fn the_stamp_is_the_hash_the_script_computes_for_the_tree() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let Ok(run) = std::process::Command::new("bash")
+        let Ok(run) = relift_proc::command("bash")
             .arg(root.join("scripts/shader-stamp.sh"))
             .arg(&root)
             .output()
