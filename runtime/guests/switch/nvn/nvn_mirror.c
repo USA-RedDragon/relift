@@ -505,8 +505,10 @@ static uint64_t device_bitmap(void)
 
 uint64_t nvn_mirror_written_pages_address(void)
 {
+    /* Made even with no mirror: a table translated for a mirroring host marks pages from any program that stores
+     * through a pointer, and a mark through address 0 faults on the device. */
     uint64_t made = __atomic_load_n(&mi.pages_gpu, __ATOMIC_ACQUIRE);
-    if (made || !mi.n)
+    if (made)
         return made;
     pthread_once(&mi_once, mi_init);
     pthread_mutex_lock(&mi.lock);

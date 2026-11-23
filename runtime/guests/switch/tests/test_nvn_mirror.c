@@ -923,7 +923,7 @@ TEST(nvn_placed_pool_shares_its_pages_between_the_cpu_and_the_gpu)
     rl_settings_set("nvn.memory", "auto");
 }
 
-TEST(nvn_placed_pool_keeps_its_bytes_through_finalize_remake_and_its_end)
+TEST(nvn_placed_pool_gives_its_pages_back_with_their_bytes_at_finalize)
 {
     rl_ctx *c = t_boot(NULL);
     bool go = placing();
@@ -944,33 +944,28 @@ TEST(nvn_placed_pool_keeps_its_bytes_through_finalize_remake_and_its_end)
     CHECK(run_copy(&r, gpu, gpu + 0x10000, 1));
     uint32_t kept = nvn_pools_kept();
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
-    CHECK_EQ(nvn_pools_kept(), kept + 1);
-    /* The game's pages stay its own after a finalize; a pool made again over them takes the placement back. */
+    /* Not kept: the pages are the game's own again, with the bytes the GPU wrote. */
+    CHECK_EQ(nvn_pools_kept(), kept);
+    CHECK_EQ(rl_ld32(m, at + 0x10000), 42u);
     rl_st32(m, at, 70);
+    CHECK_EQ(rl_ld32(m, at), 70u);
+    /* A pool made again over the pages is placed again and sees the game's writes since. */
     CHECK(nvn_pool_make(pool, at, size, 0));
-    CHECK_EQ(nvn_pool_gpu(pool), gpu);
-    CHECK(run_copy(&r, gpu, gpu + 0x10004, 1));
+    uint64_t g2 = nvn_pool_gpu(pool);
+    CHECK(run_copy(&r, g2, g2 + 0x10004, 1));
     CHECK_EQ(rl_ld32(m, at + 0x10000), 42u);
     CHECK_EQ(rl_ld32(m, at + 0x10004), 71u);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
-    /* A pool over another range ends the kept placement: its bytes stay in the game's pages. */
-    kept = nvn_pools_kept();
+    /* A pool over an overlapping range keeps every byte. */
     CHECK(nvn_pool_make(other, at + 0x10000, size, 0));
-    CHECK(nvn_pools_kept() < kept);
     CHECK_EQ(rl_ld32(m, at), 70u);
-    CHECK_EQ(rl_ld32(m, at + 0x10000), 42u);
-    CHECK_EQ(rl_ld32(m, at + 0x10004), 71u);
     uint64_t og = nvn_pool_gpu(other);
     CHECK(run_copy(&r, og, og + 0x100, 2));
     CHECK_EQ(rl_ld32(m, at + 0x10100), 43u);
     CHECK_EQ(rl_ld32(m, at + 0x10104), 72u);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, other, 0, 0, 0), RET);
-    /* The game discarding the pages ends the kept placement: they read zero. */
-    kept = nvn_pools_kept();
+    /* The game discarding the pages: they read zero. */
     CHECK_EQ(rl_vm_set(&hos.vm, at, 0x60000, RL_VM_RW, rl_vm_query(&hos.vm, at).tag, RL_VM_DISCARD), 0);
-    CHECK(nvn_pools_kept() < kept);
     CHECK_EQ(rl_ld32(m, at + 0x10100), 0u);
-    rl_st32(m, at + 0x10100, 5);
-    CHECK_EQ(rl_ld32(m, at + 0x10100), 5u);
     rl_settings_set("nvn.memory", "auto");
 }

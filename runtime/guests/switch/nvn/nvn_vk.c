@@ -927,7 +927,7 @@ static void write_caps(void)
             "\"denormMulFix32\": %u, \"denormFlushMode32\": %s, \"guestMemoryMirrored\": %s },\n",
             B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop), g.probes.denorm32,
             B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix,
-            B(g.probes.denorm_flush_mode32), B(!g.host_import));
+            B(g.probes.denorm_flush_mode32), B(!g.host_import && !g.placed));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, sizeof stages / sizeof stages[0]);
@@ -1313,6 +1313,13 @@ static void unplace(nvn_import *im, bool keep)
                                 .flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT,
                                 .memory = (VkDeviceMemory)im->memory };
     VK(vkUnmapMemory2KHR)(g.dev, &ui);
+    /* The memory is freed before the guest's pages come back: a driver may unmap a freed allocation's last placed
+     * address, which would take the pages given back with it. */
+    if (im->buf)
+        VK(vkDestroyBuffer)(g.dev, (VkBuffer)im->buf, NULL);
+    VK(vkFreeMemory)(g.dev, (VkDeviceMemory)im->memory, NULL);
+    im->buf = NULL;
+    im->memory = NULL;
     /* The guest's own pages come back with each block's state and permissions. */
     for (uint64_t at = guest; at < guest + size;) {
         rl_vm_block b = rl_vm_query(&hos.vm, at);

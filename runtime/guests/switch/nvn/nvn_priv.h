@@ -684,6 +684,8 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_i
 bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out);
 /** @brief Whether the device maps memory in place (VK_EXT_map_memory_placed with unmap reserve). */
 bool nvn_vk_can_place(void);
+extern uint64_t nvn_dbg_lo, nvn_dbg_hi;
+void nvn_dbg_hit(const char *what, uint64_t at, uint64_t size);
 /**
  * @brief Frees an import or a placement. A placement's range gets ordinary guest pages back: with its bytes when keep is
  * set, as zero pages otherwise (the guest discards them).
@@ -730,8 +732,8 @@ uint64_t nvn_mirror_staging_made(void);
 void nvn_mirror_written_marked(void);
 /**
  * @brief The device address of the written-page bitmap, made the first time, which every draw and dispatch pushes to
- * the programs that mark pages; 0 while no pool is mirrored (a device that imports guest memory has no translation that marks pages), and 0
- * (logged) when the device cannot make it.
+ * the programs that mark pages, also when no pool is mirrored (a table made for a mirroring device on a device that
+ * places pools marks pages all the same); 0 (logged) when the device cannot make it.
  */
 uint64_t nvn_mirror_written_pages_address(void);
 /** @brief The guest address of GPU address gpu (an address in a memory pool), or gpu when no pool holds it. */

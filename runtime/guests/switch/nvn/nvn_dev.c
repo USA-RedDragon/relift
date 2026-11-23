@@ -1033,6 +1033,13 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
         } else if (p->mirrored) {
             pools_remove(p->im.gpu, p->size, p->im.buf);
             nvn_mirror_free(&p->im);
+        } else if (p->im.placed) {
+            /* A placement is not kept past its pool: the pages go back to the guest with their bytes, as a mirror
+             * frees its copy. Kept, a finalized placement stalled a scene load on the Thor (Turnip): the game
+             * waited forever on work after it finalized such a pool, with no host mapping change to the range
+             * after the finalize (measured; the mechanism inside the driver is not known). */
+            pools_remove(p->im.gpu, p->size, p->im.buf);
+            nvn_vk_unimport_keep(&p->im, true);
         } else {
             kept_put(p->memory, p->size, &p->im);
             memset(&p->im, 0, sizeof p->im);
