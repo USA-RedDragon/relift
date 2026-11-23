@@ -356,9 +356,17 @@ static void escape_xml(char *dst, size_t n, const char *s)
     dst[o] = 0;
 }
 
+/**
+ * @brief Answers qXfer:threads:read. The text is made at offset 0 and kept for the later pages: threads that wake
+ * and park while the guest is stopped change their state, and pages of two different texts do not parse.
+ */
 static void threads_xml(const char *args)
 {
     static char xml[MAX_THREADS * 320 + 64];
+    if (args[0] != '0' || args[1] != ',') {
+        xfer(xml, args);
+        return;
+    }
     size_t o = (size_t)snprintf(xml, sizeof xml, "<?xml version=\"1.0\"?><threads>");
     pthread_mutex_lock(&G.lock);
     for (uint32_t i = 0; i < G.nth && o < sizeof xml - 400; i++) {

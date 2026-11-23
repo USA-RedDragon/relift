@@ -27,7 +27,7 @@ typedef struct session {
     int port;
     uint64_t heap;
     char xml_head[64], threads[64], qc[32], x0[17], mem[17], wrote[8], memw[8], detach[8];
-    bool ok;
+    bool ok, pages_match;
     volatile int done;
 } session;
 
@@ -90,6 +90,12 @@ static void *client(void *arg)
         snprintf(s->xml_head, sizeof s->xml_head, "%.60s", r);
         s->ok = s->ok && ask(fd, "qfThreadInfo", r, sizeof r);
         snprintf(s->threads, sizeof s->threads, "%s", r);
+        static char whole[8192], first[64], rest[8192];
+        s->ok = s->ok && ask(fd, "qXfer:threads:read::0,1000", whole, sizeof whole) &&
+                ask(fd, "qXfer:threads:read::0,20", first, sizeof first) &&
+                ask(fd, "qXfer:threads:read::20,1000", rest, sizeof rest);
+        s->pages_match = s->ok && first[0] == 'm' && strlen(first) == 33 && strncmp(whole + 1, first + 1, 32) == 0 &&
+                         strcmp(whole + 33, rest + 1) == 0;
         s->ok = s->ok && ask(fd, "qC", r, sizeof r);
         snprintf(s->qc, sizeof s->qc, "%s", r);
         s->ok = s->ok && ask(fd, "p0", r, sizeof r);
@@ -132,6 +138,7 @@ TEST(gdb_server_reads_and_writes_guest_registers_and_memory)
     CHECK(s.ok);
     CHECK(strstr(s.xml_head, "<?xml") != NULL);
     CHECK(s.threads[0] == 'm');
+    CHECK(s.pages_match);
     CHECK(strncmp(s.qc, "QC", 2) == 0);
     CHECK(strcmp(s.x0, "efcdab8967452301") == 0);
     CHECK(strcmp(s.mem, "8877665544332211") == 0);
