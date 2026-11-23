@@ -238,6 +238,25 @@ static const rl_setting_def g_runtime_defs[] = {
         .env = "RELIFT_PRESENT_CAPTURE",
     },
     {
+        .key = "debug.gdb",
+        .type = RL_SETTING_INT,
+        .label = "GDB server port",
+        .description = "A port on 127.0.0.1 where a GDB remote-protocol server waits for gdb or lldb, which then see "
+                       "the guest's threads, registers and memory by guest address. 0: off",
+        .env = "RELIFT_DEBUG_GDB",
+        .def_int = 0,
+        .min_int = 0,
+        .max_int = 65535,
+    },
+    {
+        .key = "debug.gdb_wait",
+        .type = RL_SETTING_BOOL,
+        .label = "Wait for the debugger",
+        .description = "With debug.gdb set, the game starts only once a debugger attached and continued",
+        .env = "RELIFT_DEBUG_GDB_WAIT",
+        .def_int = 0,
+    },
+    {
         .key = "text_entry.text",
         .type = RL_SETTING_STRING,
         .label = "Typed text",

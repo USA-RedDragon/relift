@@ -19,7 +19,7 @@
 #                              needs pkg-config package sdl3). The default has no window backend:
 #                              runs are headless and Vulkan presents to headless surfaces.
 #   make vk-present            run the synthetic Vulkan program (a window with VIDEO=sdl3 and a display)
-#   make gdb-test              check the gdb frame filter (skips without gdb)
+#   make gdb-test              check the gdb frame filter and the GDB server (skip without gdb)
 #   make sched-bench           run the device scheduler microbenchmark
 #   make libs                  only the libraries (static, shared and per layer), no tests: the
 #                              build for TARGET=x86_64-windows-gnu or aarch64-windows-gnu, whose
@@ -646,8 +646,9 @@ vk-present: $(VK_PRESENT)
 charter:
 	$(PYTHON) charter/check.py
 
-gdb-test:
+gdb-test: $(SWITCH_TESTS)
 	CC="$(CC)" sh tools/gdb/test.sh $(BUILD)
+	sh tools/gdb/stub-test.sh $(BUILD)
 
 clean:
 	rm -rf $(BUILD)

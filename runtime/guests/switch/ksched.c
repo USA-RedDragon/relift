@@ -22,6 +22,7 @@
  * The token then goes to the first core after the holder's whose selected
  * thread can run, so the order depends only on what the guest did.
  */
+#include "gdbstub.h"
 #include "hos.h"
 #include "vi.h"
 
@@ -333,10 +334,13 @@ static void release(hos_thread *t)
     kick(c);
 }
 
+static void sched_point(hos_thread *t);
+
 static void preempted(rl_ctx *c)
 {
-    (void)c;
-    hos_sched_point();
+    /* The registers live in the lifted function's locals here; the context holds those of its last call. */
+    rl_gdb_point(c, false);
+    sched_point(hos_current());
 }
 
 void hos_sched_init(void)
@@ -502,9 +506,9 @@ static void fs_point(hos_thread *t)
     hos_unlock();
 }
 
-void hos_sched_point(void)
+/** @brief hos_sched_point after its debugger safe point. */
+static void sched_point(hos_thread *t)
 {
-    hos_thread *t = hos_current();
     hos_sched *s = &hos.sched;
     if (t && s->fixed) {
         fs_point(t);
@@ -531,6 +535,14 @@ void hos_sched_point(void)
     hos_unlock();
 }
 
+void hos_sched_point(void)
+{
+    hos_thread *t = hos_current();
+    if (t)
+        rl_gdb_point(t->rt->ctx, true);
+    sched_point(t);
+}
+
 void hos_sched_leave(void)
 {
     hos_thread *t = hos_current();
@@ -544,6 +556,8 @@ void hos_sched_leave(void)
 void hos_sched_return(void)
 {
     hos_thread *t = hos_current();
+    if (t)
+        rl_gdb_point(t->rt->ctx, true);
     if (!t || hos.sched.free || hos.sched.fixed)
         return;
     hos_lock();

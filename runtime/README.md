@@ -252,6 +252,8 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_RENDERDOC_CAPTURE=<present>[:<frames>]` | The `renderdoc.capture` setting, for every guest. When the program runs under RenderDoc (its library already loaded), start a frame capture before frame `<present>` (counting guest presents from 1; frame k ends at present k) and end it after `<frames>` frames (default 1). A present is counted where a guest hands a finished frame to the shared presenter (`rl_window_present_rgb`, the GPU present slots) and, for a Switch run with no window, in the graphics layer; it works without a window. Only Vulkan work is captured: a guest that draws on the CPU shows nothing but the presenter's own passes, and a run with no window and no Vulkan device has nothing to capture. See "Capturing with RenderDoc" below |
 | `RELIFT_PRESENT_CAPTURE=<folder>[:<every>][:<from>-<to>]` | Debugging: the `present.capture` setting, for every guest. Writes the window's pictures exactly as they reach the screen (the swapchain image after relift's scaling, picture passes and overlays) as `<folder>/present-<frame>-d<draw>.png`, every `<every>`th draw, only for the frames handed to the window from `<from>` to before `<to>` when given (frames count presents, so overlay redraws cannot shift the range), with a log line per file naming the source (slot, host pixels or still), sizes, formats, placement, sampling and the overlay. Each capture waits for the GPU. Unlike `RELIFT_VK_CAPTURE`, which reads the guest's own image, this shows what the presenter made of it |
 | `RELIFT_RENDERDOC_DIR=<folder>` | The `renderdoc.capture_dir` setting: where the captures are written, as `<folder>/<app>_capture.rdc`. Empty (default): the `captures` folder of the user data folder (`~/.local/share/<app>/captures` on Linux) |
+| `RELIFT_DEBUG_GDB=<port>` | The `debug.gdb` setting: a GDB remote-protocol server on `127.0.0.1:<port>`. gdb or lldb attach with `target remote :<port>` and see the guest's threads (`info threads`, with each thread's state and the lifted function at its pc), its registers (A64: x0-x30, sp, pc, cpsr, v0-v31, fpsr, fpcr, tpidr, tpidrro) and its memory by guest address. Attaching or interrupting stops every guest thread at its next safe point (a system call, a runtime entry or a preemption check); `continue` runs it on, `detach` leaves it running. `monitor sym <address>` names the lifted function at a guest address. Built on Linux and macOS desktops (not Windows, Android or iOS); 0 (default): off. See "Debugging guest code with gdb" below |
+| `RELIFT_DEBUG_GDB_WAIT=1` | The `debug.gdb_wait` setting: with `debug.gdb`, the game starts only once a debugger attached and continued |
 | `RELIFT_DATA_VERIFY=hash` | Mobile apps: at start, check the game data against the app's `data-manifest.txt` (written by `relift build` for iOS and Android) by SHA-256 as well as by size. Without it only sizes are checked. A missing or short file stops the app with a message naming it (an Android app opens its game data import instead, where the player picks a folder or zip of the data); `relift push --target <t>` copies the data and checks it the same way |
 | `RELIFT_KERNEL_LAYOUT=compact\|console` | The `kernel.layout` setting (Switch). `compact` (default): the regions the game's address space type has, packed at the lowest bases, so the host reserves tens of GiB instead of 512 GiB (docs/abi.md section 2); `console`: the console's exact region sizes, for comparing against it |
 | `RELIFT_NET=off\|lan` | The `net.mode` setting (Switch). `off` (default): local wireless play finds no one nearby. `lan`: local wireless sessions run over the host network with the ldn_mitm LAN protocol (UDP and TCP port 11452), so other relift instances and consoles running ldn_mitm on the same network can join; the game's sockets then reach the members of the session it is in and no other address |
@@ -337,6 +339,24 @@ any storage with no tree.
   loop that calls, holds another loop or waits on memory, a computed jump,
   a recursive call; docs/abi.md section 14.1); the round robin of
   priorities 59 and 63 runs at svcs. A mutex owner inherits the priority of its waiters.
+
+## Debugging guest code with gdb
+
+With `debug.gdb=<port>` (`RELIFT_DEBUG_GDB`) the runtime serves the GDB remote protocol on `127.0.0.1:<port>` (`core/gdbstub.c`; the CPU layer's registers in `cpus/arm64/gdb.c`, the Switch layer's threads in `guests/switch/kthread.c`):
+
+```
+RELIFT_DEBUG_GDB=2345 <game> &
+gdb -ex 'set architecture aarch64' -ex 'target remote :2345'
+(gdb) info threads
+(gdb) thread 3
+(gdb) p/x $x0
+(gdb) x/8gx $sp
+(gdb) monitor sym 0x8960000
+(gdb) continue        # Ctrl-C stops every guest thread again
+(gdb) detach
+```
+
+A thread's registers are exact where it stopped at a system call or a runtime entry (the thread list says "stopped" or "waiting in the runtime", and pc is the system call's address). A thread stopped at a preemption check shows the registers of its last call, since lifted code keeps the rest in C locals. A guest thread that does not reach a safe point within 2 seconds (a long call-free loop) is listed as running. Breakpoints and watchpoints by guest address are not there yet (.work/design/debug-stub.md). `sh tools/gdb/stub-test.sh` checks the server with a real gdb.
 
 ## Capturing with RenderDoc
 

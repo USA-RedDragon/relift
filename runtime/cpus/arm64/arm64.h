@@ -19,6 +19,10 @@
 /** @brief The A64 CPU descriptor (context layout, 4-byte code granule, little-endian data). */
 RL_RUNTIME_API const rl_cpu_desc *rl_arm64_cpu(void);
 
+struct rl_gdb_cpu;
+/** @brief The A64 registers for the GDB server (core/gdbstub.h), in gdb's aarch64 numbering. */
+RL_RUNTIME_API const struct rl_gdb_cpu *rl_arm64_gdb(void);
+
 /**
  * @brief Whether new contexts run in the reference exact-flags mode
  * (RL_FPCR_EXACT, every guarded block on the slow path): RELIFT_FP_EXACT=1,

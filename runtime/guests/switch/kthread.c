@@ -5,6 +5,7 @@
  *
  * Argument checks follow Ryujinx (MIT) Syscall.CreateThread and friends.
  */
+#include "gdbstub.h"
 #include "hos.h"
 
 #include <stdlib.h>
@@ -352,8 +353,32 @@ void rl_hos_detach_thread(void)
     hos_kobj_unref(&t->obj);
 }
 
+/** @brief The guest's threads for the GDB server: every live thread with its id, context and core. */
+static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
+{
+    uint32_t n = 0;
+    hos_lock();
+    for (hos_thread *t = hos.threads; t; t = t->next_all) {
+        if (!t->rt || !t->rt->ctx)
+            continue;
+        if (n < max)
+            out[n] = (rl_gdb_thread){ .id = t->id,
+                                      .ctx = t->rt->ctx,
+                                      .core = t->cur_core,
+                                      .running = t->cur_core >= 0 || hos.sched.free };
+        n++;
+    }
+    hos_unlock();
+    return n;
+}
+
+static const rl_gdb_guest g_gdb_guest = { .threads = gdb_threads, .vm = &hos.vm };
+
+const rl_gdb_guest *hos_gdb_guest(void) { return &g_gdb_guest; }
+
 int rl_hos_run_main(uint64_t entry, uint64_t stack_top)
 {
+    rl_gdb_start(rl_arm64_gdb(), &g_gdb_guest);
     hos_thread *t = hos_current();
     uint32_t h = 0;
     if (!t)

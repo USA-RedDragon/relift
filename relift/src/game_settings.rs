@@ -259,6 +259,24 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "debug.gdb",
+            "GDB server port",
+            "A port on 127.0.0.1 where a GDB remote-protocol server waits for gdb or lldb, which then see the guest's threads, registers and memory by guest address. 0: off",
+            Value::from(0),
+            SettingKind::Int {
+                min: 0,
+                max: 65535,
+                step: 0,
+            },
+        ),
+        s(
+            "debug.gdb_wait",
+            "Wait for the debugger",
+            "With debug.gdb set, the game starts only once a debugger attached and continued",
+            Value::Bool(false),
+            SettingKind::Bool,
+        ),
+        s(
             "text_entry.text",
             "Typed text",
             "When set, the answer to every text the game asks for (a name, for one), given without showing the text entry panel. Empty: a run with a window and no input script shows the panel",
