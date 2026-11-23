@@ -717,7 +717,10 @@ mod tests {
             .insert("default".into(), "My Game".into());
         let table = root.join("table.rlspv");
         relift_cache::write_if_changed(&table, b"RLSPV002\0\0\0\x01x").unwrap();
-        let shaders = [table];
+        let stamp = root.join(crate::shaders::STAMP_FILE);
+        relift_cache::write_if_changed(&stamp, format!("{}\n", crate::shaders::STAMP).as_bytes())
+            .unwrap();
+        let shaders = [table, stamp];
         let fonts = root.join("fonts");
         std::fs::create_dir_all(&fonts).unwrap();
         relift_cache::write_if_changed(&fonts.join("4.ttf"), b"font").unwrap();
@@ -741,6 +744,7 @@ mod tests {
             "usr/bin/my-game",
             "usr/share/relift/romfs.img",
             "usr/share/relift/shaders/table.rlspv",
+            "usr/share/relift/shaders/table.stamp",
             "usr/share/relift/fonts/4.ttf",
             "usr/share/licenses/my-game/BUNDLED.txt",
             "usr/share/licenses/my-game/relift-LICENSE",

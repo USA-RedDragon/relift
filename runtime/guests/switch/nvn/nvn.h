@@ -128,4 +128,11 @@ struct rl_nvn_driver {
 /** @brief Registers the driver record and its layout; the build's generated nvn_driver.c calls it before main. */
 RL_RUNTIME_API void rl_nvn_set_driver(const struct rl_nvn_driver *d);
 
+/**
+ * @brief Registers the translator stamp the build expects its shader tables to carry (the generated nvn_driver.c
+ * calls it before main; NULL expects none). The runtime reads the table folder's table.stamp, logs it at the first
+ * program it needs, and stops with a named report when it differs, unless RELIFT_NVN_TABLE_STAMP=allow.
+ */
+RL_RUNTIME_API void rl_nvn_set_table_stamp(const char *stamp);
+
 #endif

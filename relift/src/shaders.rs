@@ -56,6 +56,16 @@ const SPOOL: &str = "table.rlspv.frames";
 /// The interface table's file in the folder.
 const INTERFACES: &str = "table.rlspi";
 
+/// The stamp file in the folder: the translator that made the tables.
+pub const STAMP_FILE: &str = "table.stamp";
+
+/// The identity of this relift's shader translator: a hash of the sources of
+/// the `gpus` crates and of this module (`build.rs`), so it changes whenever
+/// the translation of any program could. Every table carries it in
+/// [`STAMP_FILE`], and every program this relift builds expects it there (the
+/// runtime stops on a table with another).
+pub const STAMP: &str = env!("RELIFT_SHADER_STAMP");
+
 /// An interface record: the specialization constant that picks the numeric
 /// kind of the texture a bound handle names.
 pub const RECORD_TEXTURE_KIND: u32 = 0;
@@ -301,7 +311,7 @@ pub fn build_target(out: &Path, target: &str, jobs: usize) -> Result<TargetBuilt
     let dir = target_dir(out, target);
     let device = dir.join("device.json");
     if !device.is_file() {
-        for f in [TABLE, INTERFACES] {
+        for f in [TABLE, INTERFACES, STAMP_FILE] {
             let _ = std::fs::remove_file(dir.join(f));
         }
         return Ok(TargetBuilt::NoDevice(device));
@@ -369,11 +379,26 @@ fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError>
     write_table(&dir.join(TABLE), &spool, &index, &extras)?;
     let _ = std::fs::remove_file(&spool);
     relift_cache::write_if_changed(&dir.join(INTERFACES), &interface_table(&interface))?;
+    write_stamp(dir)?;
     Ok(Built {
         programs: keys.len(),
         translated,
         refused,
     })
+}
+
+/// Writes this relift's [`STAMP`] in `dir`, beside the tables it made.
+fn write_stamp(dir: &Path) -> std::io::Result<()> {
+    relift_cache::write_if_changed(&dir.join(STAMP_FILE), format!("{STAMP}\n").as_bytes()).map(drop)
+}
+
+/// The stamp of the tables in `dir`, or none when they have no stamp (made
+/// by a relift that wrote none).
+#[must_use]
+pub fn stamp_of(dir: &Path) -> Option<String> {
+    let s = std::fs::read_to_string(dir.join(STAMP_FILE)).ok()?;
+    let s = s.trim();
+    (!s.is_empty()).then(|| s.to_string())
 }
 
 /// Writes the table at `path`: the frames of `index` that `spool` holds,
@@ -512,8 +537,9 @@ fn records(i: &Interface) -> Vec<[u32; 4]> {
     recs
 }
 
-/// The table files of the build in `out` that a package carries: both when
-/// the build translated at least one program, else none.
+/// The table files of the build in `out` that a package carries: both
+/// tables and their stamp when the build translated at least one program,
+/// else none.
 #[must_use]
 pub fn tables(out: &Path) -> Vec<PathBuf> {
     tables_in(&out.join(DIR))
@@ -534,7 +560,12 @@ fn tables_in(dir: &Path) -> Vec<PathBuf> {
     let files = [dir.join(TABLE), dir.join(INTERFACES)];
     let head = std::fs::metadata(&files[0]).map_or(0, |m| m.len());
     if head > TABLE_HEAD_BYTES && files[1].is_file() {
-        files.into()
+        let mut files: Vec<PathBuf> = files.into();
+        let stamp = dir.join(STAMP_FILE);
+        if stamp.is_file() {
+            files.push(stamp);
+        }
+        files
     } else {
         Vec::new()
     }
@@ -667,6 +698,54 @@ mod tests {
     }
 
     #[test]
+    fn a_package_carries_the_stamp_beside_the_tables() {
+        let out = scratch("stamp-package");
+        let head = b"RLSPV002\0\0\0\0";
+        relift_cache::write_if_changed(
+            &out.join(DIR).join(TABLE),
+            &[head.as_slice(), b"x"].concat(),
+        )
+        .unwrap();
+        relift_cache::write_if_changed(&out.join(DIR).join(INTERFACES), b"RLSPI001").unwrap();
+        assert_eq!(tables(&out).len(), 2);
+        write_stamp(&out.join(DIR)).unwrap();
+        let t = tables(&out);
+        assert_eq!(t.last().unwrap(), &out.join(DIR).join(STAMP_FILE));
+        let dest = out.join("pkg").join("shaders");
+        install(&t, &dest).unwrap();
+        assert_eq!(stamp_of(&dest).as_deref(), Some(STAMP));
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn the_stamp_is_the_hash_the_script_computes_for_the_tree() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let Ok(run) = std::process::Command::new("bash")
+            .arg(root.join("scripts/shader-stamp.sh"))
+            .arg(&root)
+            .output()
+        else {
+            return;
+        };
+        if !run.status.success() {
+            return;
+        }
+        assert_eq!(String::from_utf8(run.stdout).unwrap().trim(), STAMP);
+    }
+
+    #[test]
+    fn a_table_without_a_stamp_reads_as_unstamped() {
+        let out = scratch("stamp-read");
+        let dir = out.join(DIR);
+        assert_eq!(stamp_of(&dir), None);
+        relift_cache::write_if_changed(&dir.join(STAMP_FILE), b"\n").unwrap();
+        assert_eq!(stamp_of(&dir), None);
+        relift_cache::write_if_changed(&dir.join(STAMP_FILE), b"0123456789abcdef\n").unwrap();
+        assert_eq!(stamp_of(&dir).as_deref(), Some("0123456789abcdef"));
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
     fn a_run_is_pointed_at_the_build_folder() {
         let mut cmd = relift_proc::command("true");
         set_env(&mut cmd, Path::new("/b/host"));
@@ -764,6 +843,14 @@ mod tests {
             1
         );
         assert!(!dir.join(SPOOL).exists());
+        assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
+        relift_cache::write_if_changed(&dir.join(STAMP_FILE), b"0000000000000000\n").unwrap();
+        build(&out, 1).unwrap();
+        assert_eq!(
+            stamp_of(&dir).as_deref(),
+            Some(STAMP),
+            "a rebuild refreshes an old translator's stamp"
+        );
         std::fs::remove_dir_all(&out).unwrap();
     }
 
@@ -786,7 +873,8 @@ mod tests {
         .unwrap();
         relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
         assert_eq!(build(&out, 1).unwrap().translated, 1);
-        assert_eq!(tables_for(&out, None).len(), 2);
+        assert_eq!(tables_for(&out, None).len(), 3);
+        assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
         let want = target_dir(&out, t).join("device.json");
         match build_target(&out, t, 1).unwrap() {
             TargetBuilt::NoDevice(p) => assert_eq!(p, want),
@@ -804,7 +892,8 @@ mod tests {
             files,
             [
                 target_dir(&out, t).join(TABLE),
-                target_dir(&out, t).join(INTERFACES)
+                target_dir(&out, t).join(INTERFACES),
+                target_dir(&out, t).join(STAMP_FILE)
             ]
         );
         std::fs::remove_file(&want).unwrap();
@@ -815,6 +904,10 @@ mod tests {
         assert!(
             tables_for(&out, Some(t)).is_empty(),
             "a stale target table is removed"
+        );
+        assert!(
+            stamp_of(&target_dir(&out, t)).is_none(),
+            "and so is its stamp"
         );
         std::fs::remove_dir_all(&out).unwrap();
     }

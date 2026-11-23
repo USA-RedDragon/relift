@@ -495,6 +495,12 @@ uint32_t nvn_shader_count(void);
 bool nvn_shader_key_at(uint32_t i, char key[65]);
 /** @brief The SHA-256 (hex) of the shader table's index, which names its contents; false without a table. */
 bool nvn_shader_table_hash(char hex[65]);
+/**
+ * @brief Whether the shader tables were made by the translator the build expects (see rl_nvn_set_table_stamp). The
+ * first call logs the table's stamp; a mismatch, or a table with no stamp, is false with the report in why, unless
+ * RELIFT_NVN_TABLE_STAMP=allow, which logs a warning instead. True when the build expects no stamp.
+ */
+bool nvn_shader_stamp_check(char *why, size_t why_n);
 /** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
 uint32_t *nvn_shader_spirv(const char *key, size_t *words);
 /** @brief An interface record of a translation (relift build's "RLSPI001" table). */

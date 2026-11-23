@@ -156,6 +156,8 @@ fn or_none(v: Option<u32>) -> String {
 }
 
 /// The C file for `d`, whose image offsets are in a module loaded at `base`.
+/// It also hands the runtime the translator stamp ([`crate::shaders::STAMP`])
+/// the program expects its shader tables to carry.
 pub fn c_text(d: &Driver, base: u64) -> String {
     let mut s = String::from(
         "#include <stdint.h>\n\
@@ -171,7 +173,8 @@ pub fn c_text(d: &Driver, base: u64) -> String {
          struct rl_nvn_driver {\n    uint32_t generation;\n    int32_t api_major, api_minor;\n    \
          const char *sdk;\n    const struct rl_nvn_layout *layout;\n    const char *layout_error;\n    \
          uint32_t nimpure;\n    const char *const *impure;\n};\n\
-         void rl_nvn_set_driver(const struct rl_nvn_driver *d);\n",
+         void rl_nvn_set_driver(const struct rl_nvn_driver *d);\n\
+         void rl_nvn_set_table_stamp(const char *stamp);\n",
     );
     if let Ok(l) = &d.layout {
         layout_text(&mut s, l, base);
@@ -189,7 +192,7 @@ pub fn c_text(d: &Driver, base: u64) -> String {
         s,
         "    0,\n}};\n\
          static const struct rl_nvn_driver driver = {{ {}, {}, {}, {}, {}, {}, {}, impure }};\n\
-         __attribute__((constructor)) static void rl_nvn_driver_init(void) {{ rl_nvn_set_driver(&driver); }}\n",
+         __attribute__((constructor)) static void rl_nvn_driver_init(void) {{ rl_nvn_set_driver(&driver); rl_nvn_set_table_stamp({}); }}\n",
         d.generation.number(),
         d.api.0,
         d.api.1,
@@ -202,6 +205,7 @@ pub fn c_text(d: &Driver, base: u64) -> String {
             .err()
             .map_or_else(|| "0".into(), |e| crate::shaders::c_string(e)),
         d.impure.len(),
+        crate::shaders::c_string(crate::shaders::STAMP),
     );
     s
 }
@@ -331,5 +335,20 @@ mod tests {
         );
         assert!(c.contains("\"nvnA\", \"calls memcmp\","), "{c}");
         assert!(!c.contains("layout = {"), "{c}");
+    }
+
+    #[test]
+    fn the_c_file_hands_the_runtime_the_translator_stamp() {
+        let d = Driver {
+            generation: Generation::Nvn2,
+            api: (231, 0),
+            sdk: None,
+            layout: Err("no layout".into()),
+            impure: Vec::new(),
+        };
+        let c = c_text(&d, 0x1000);
+        let want = format!("rl_nvn_set_table_stamp(\"{}\");", crate::shaders::STAMP);
+        assert!(c.contains(&want), "{c}");
+        assert_eq!(crate::shaders::STAMP.len(), 16);
     }
 }

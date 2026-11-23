@@ -14,6 +14,10 @@
  * and the module's u32 length in words) or the older uncompressed "RLSPV001"
  * (entries of the key, a u32 offset and the length in words).
  *
+ * The table folder's table.stamp names the translator that made the tables;
+ * the build hands the program the stamp it expects (rl_nvn_set_table_stamp),
+ * and nvn_shader_stamp_check refuses tables of another translator.
+ *
  * Nothing in the program names the build machine's folders. The table folder
  * is $RELIFT_NVN_TABLES when set (what the launchers of a packaged app and
  * the mobile entries set), else the shader folder. The shader folder is
@@ -116,6 +120,78 @@ static bool seek(FILE *f, uint64_t at)
 #else
     return fseeko(f, (off_t)at, SEEK_SET) == 0;
 #endif
+}
+
+static const char *g_expected_stamp;
+/** @brief 0 not checked yet, 1 the stamp is accepted, 2 it is not. */
+static int g_stamp_state;
+static char g_stamp_why[512];
+
+void rl_nvn_set_table_stamp(const char *stamp)
+{
+    pthread_mutex_lock(&g_lock);
+    g_expected_stamp = stamp;
+    g_stamp_state = 0;
+    pthread_mutex_unlock(&g_lock);
+}
+
+/** @brief Reads the table folder's table.stamp (trimmed) into out; false without one. */
+static bool read_stamp(char out[64])
+{
+    char path[1100];
+    snprintf(path, sizeof path, "%s/table.stamp", nvn_shader_table_dir());
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return false;
+    size_t n = fread(out, 1, 63, f);
+    fclose(f);
+    while (n && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' '))
+        n--;
+    out[n] = 0;
+    return n > 0;
+}
+
+bool nvn_shader_stamp_check(char *why, size_t why_n)
+{
+    pthread_mutex_lock(&g_lock);
+    if (!g_stamp_state) {
+        char have[64];
+        bool stamped = read_stamp(have);
+        const char *want = g_expected_stamp;
+        const char *dir = nvn_shader_table_dir();
+        const char *allow = getenv("RELIFT_NVN_TABLE_STAMP");
+        bool allowed = allow && !strcmp(allow, "allow");
+        g_stamp_state = 1;
+        if (stamped)
+            rl_log(RL_LOG_INFO, "nvn", "shader tables in %s: translator stamp %s (this build expects %s)", dir, have,
+                   want ? want : "none");
+        else
+            rl_log(RL_LOG_INFO, "nvn", "shader tables in %s: no translator stamp (this build expects %s)", dir,
+                   want ? want : "none");
+        if (want && (!stamped || strcmp(have, want))) {
+            char made[128];
+            if (stamped)
+                snprintf(made, sizeof made, "were made by translator %s", have);
+            else
+                snprintf(made, sizeof made, "have no translator stamp (made by an older relift)");
+            snprintf(g_stamp_why, sizeof g_stamp_why,
+                     "shader table stamp mismatch: the tables in %s %s, but this program was built by translator %s; "
+                     "run relift shaders and relink with one relift, or set RELIFT_NVN_TABLE_STAMP=allow for a "
+                     "deliberate A/B run",
+                     dir, made, want);
+            if (allowed)
+                rl_log(RL_LOG_WARN, "nvn", "%s (allowed by RELIFT_NVN_TABLE_STAMP=allow)", g_stamp_why);
+            else {
+                g_stamp_state = 2;
+                rl_log(RL_LOG_ERROR, "nvn", "%s", g_stamp_why);
+            }
+        }
+    }
+    bool ok = g_stamp_state == 1;
+    if (!ok && why && why_n)
+        snprintf(why, why_n, "%s", g_stamp_why);
+    pthread_mutex_unlock(&g_lock);
+    return ok;
 }
 
 /** @brief Opens <dir>/name (magic) once; whole reads all of it into memory. */
@@ -536,6 +612,15 @@ bool nvn_shader_table_hash(char hex[65])
     pthread_mutex_unlock(&g_lock);
     if (!t)
         return false;
-    rl_data_sha256(t->head, TABLE_HEAD + (size_t)t->n * t->entry, hex);
+    size_t hb = TABLE_HEAD + (size_t)t->n * t->entry;
+    char stamp[64] = "";
+    read_stamp(stamp);
+    uint8_t *buf = malloc(hb + sizeof stamp);
+    if (!buf)
+        return false;
+    memcpy(buf, t->head, hb);
+    memcpy(buf + hb, stamp, sizeof stamp);
+    rl_data_sha256(buf, hb + sizeof stamp, hex);
+    free(buf);
     return true;
 }
