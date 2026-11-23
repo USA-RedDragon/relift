@@ -779,6 +779,66 @@ void rl_present_set_overlay(rl_present *p, const rl_present_overlay *ov)
     pthread_mutex_unlock(&p->lock);
 }
 
+/** @brief The presenter's timestamps for gpu.profile: two per present, read when its fence is next waited for. */
+static struct {
+    bool tried, pending;
+    rlvk_handle pool;
+    void(RLVK_CALL *write)(rlvk_handle, uint32_t, rlvk_handle, uint32_t);
+    void(RLVK_CALL *reset)(rlvk_handle, rlvk_handle, uint32_t, uint32_t);
+    int32_t(RLVK_CALL *get)(rlvk_handle, rlvk_handle, uint32_t, uint32_t, size_t, void *, uint64_t, uint32_t);
+    uint64_t ticks, presents;
+} g_pt;
+
+static bool gpu_timed(const rlvk_dev *d)
+{
+    if (!g_pt.tried) {
+        g_pt.tried = true;
+        if (!rl_setting_bool("gpu.profile"))
+            return false;
+        int32_t(RLVK_CALL * create)(rlvk_handle, const void *, const void *, rlvk_handle *);
+        void *f = (void *)d->vkGetDeviceProcAddr(d->device, "vkCreateQueryPool");
+        memcpy(&create, &f, sizeof f);
+        f = (void *)d->vkGetDeviceProcAddr(d->device, "vkCmdWriteTimestamp");
+        memcpy(&g_pt.write, &f, sizeof f);
+        f = (void *)d->vkGetDeviceProcAddr(d->device, "vkCmdResetQueryPool");
+        memcpy(&g_pt.reset, &f, sizeof f);
+        f = (void *)d->vkGetDeviceProcAddr(d->device, "vkGetQueryPoolResults");
+        memcpy(&g_pt.get, &f, sizeof f);
+        /* VkQueryPoolCreateInfo: sType 11, query type 2 (timestamp), 2 queries. */
+        struct {
+            int32_t sType;
+            const void *pNext;
+            uint32_t flags;
+            int32_t queryType;
+            uint32_t queryCount;
+            uint32_t stats;
+        } qi = { 11, NULL, 0, 2, 2, 0 };
+        if (!create || !g_pt.write || !g_pt.reset || !g_pt.get || create(d->device, &qi, NULL, &g_pt.pool) != 0)
+            g_pt.pool = 0;
+    }
+    return g_pt.pool != 0;
+}
+
+void rl_present_gpu_stats(uint64_t *ticks, uint64_t *presents)
+{
+    *ticks = __atomic_load_n(&g_pt.ticks, __ATOMIC_RELAXED);
+    *presents = __atomic_load_n(&g_pt.presents, __ATOMIC_RELAXED);
+}
+
+/** @brief Adds the last present's GPU time once its fence was waited for. */
+static void gpu_time_read(const rlvk_dev *d)
+{
+    uint64_t ts[2];
+    if (!g_pt.pending)
+        return;
+    g_pt.pending = false;
+    /* VK_QUERY_RESULT_64_BIT */
+    if (g_pt.get(d->device, g_pt.pool, 0, 2, sizeof ts, ts, sizeof ts[0], 1) == 0 && ts[1] >= ts[0]) {
+        __atomic_add_fetch(&g_pt.ticks, ts[1] - ts[0], __ATOMIC_RELAXED);
+        __atomic_add_fetch(&g_pt.presents, 1, __ATOMIC_RELAXED);
+    }
+}
+
 /** @brief Records the frame into swapchain image index: upload, post passes, clear, scale. A still replaces it. */
 static bool record(rl_present *p, uint32_t index, bool capture)
 {
@@ -868,6 +928,11 @@ static bool record(rl_present *p, uint32_t index, bool capture)
         .flags = RLVK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
     rlvk_result r = d->vkBeginCommandBuffer(p->cmd, &bi);
+    bool timed = r == RLVK_SUCCESS && gpu_timed(d);
+    if (timed) {
+        g_pt.reset(p->cmd, g_pt.pool, 0, 2);
+        g_pt.write(p->cmd, RLVK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_pt.pool, 0);
+    }
     if (r != RLVK_SUCCESS)
         return fail("vkBeginCommandBuffer", r);
     rlvk_handle sc = p->images[index];
@@ -942,6 +1007,10 @@ static bool record(rl_present *p, uint32_t index, bool capture)
     } else {
         layout(p, sc, RLVK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, RLVK_IMAGE_LAYOUT_PRESENT_SRC_KHR, wr, 0, xfer,
                RLVK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+    if (timed) {
+        g_pt.write(p->cmd, RLVK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g_pt.pool, 1);
+        g_pt.pending = true;
     }
     r = d->vkEndCommandBuffer(p->cmd);
     return r == RLVK_SUCCESS || fail("vkEndCommandBuffer", r);
@@ -1218,6 +1287,7 @@ static bool draw(rl_present *p, bool capture)
         capture = false;
     }
     d->vkWaitForFences(d->device, 1, &p->fence, 1, ~(uint64_t)0);
+    gpu_time_read(d);
     release_slots(p);
     uint32_t index = 0;
     rlvk_result r = d->vkAcquireNextImageKHR(d->device, p->swapchain, ~(uint64_t)0, p->acquired, 0, &index);

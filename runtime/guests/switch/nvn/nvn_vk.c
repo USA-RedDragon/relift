@@ -1628,6 +1628,9 @@ static struct {
     VkRect2D area;
     /** @brief The layers it renders (more than 1 for a layered draw's 2D array views). */
     uint32_t layers;
+    /** @brief For gpu.profile: its draws, and the first draw's fragment program key. */
+    uint32_t draws;
+    char fs[9];
 } open_pass;
 
 static VkImageSubresourceRange range_of(const vimg *v);
@@ -1735,6 +1738,7 @@ static void cs_close(void)
     open_cs.done.n = 0;
     open_cs.done.full = false;
     nvn_vk_barrier(g.cb);
+    nvn_gpuprof_mark_kinds();
 }
 
 bool nvn_vk_begin_dispatch(replay *r)
@@ -1742,6 +1746,12 @@ bool nvn_vk_begin_dispatch(replay *r)
     if (g_recording && open_cs.open && r->st->compute_overlap && cs_independent())
         return true;
     return nvn_vk_begin(r);
+}
+
+void nvn_vk_pass_drew(const char *fs)
+{
+    if (!open_pass.draws++ && fs)
+        snprintf(open_pass.fs, sizeof open_pass.fs, "%s", fs);
 }
 
 void nvn_vk_dispatched(void)
@@ -1793,6 +1803,9 @@ void nvn_vk_end_rendering(void)
             nvn_flash_wrote(open_pass.images[i], open_pass.level[i], open_pass.layer[i]);
         nvn_flash_thumbs(NULL, open_pass.what ? open_pass.what : "pass");
     }
+    nvn_gpuprof_mark("pass %ux%u c%u%s %u draws%s%.8s", open_pass.area.extent.width, open_pass.area.extent.height,
+                     open_pass.ncolor, open_pass.depth ? " d" : "", open_pass.draws, open_pass.fs[0] ? " fs " : "",
+                     open_pass.fs);
 }
 
 bool nvn_vk_recording(void) { return g_recording; }
@@ -1822,6 +1835,7 @@ bool nvn_vk_begin(replay *r)
         VK(vkResetQueryPool)(g.dev, gpu_ts.pool, 2 * g.slot, 2);
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot);
     }
+    nvn_gpuprof_batch_begin();
     return true;
 }
 
@@ -2002,6 +2016,8 @@ static bool submit_recorded(replay *r)
     cs_close();
     g_recording = false;
     nvn_counters_close(g.cb);
+    nvn_gpuprof_note("batch end");
+    nvn_gpuprof_mark_kinds();
     if (gpu_ts.pool)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot + 1);
     bool copies = nvn_mirror_readback_pending();
@@ -2070,6 +2086,8 @@ static bool wait_slot(uint32_t s)
         VK(vkGetQueryPoolResults)(g.dev, gpu_ts.pool, 2 * s, 2, sizeof ts, ts, sizeof ts[0], VK_QUERY_RESULT_64_BIT) ==
             VK_SUCCESS)
         tm.gpu_ns += (uint64_t)((double)(ts[1] - ts[0]) * gpu_ts.period_ns);
+    if (ok)
+        nvn_gpuprof_done(s);
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     if (vr == VK_ERROR_DEVICE_LOST)
@@ -2493,7 +2511,11 @@ static bool gpu_moves(void)
 static bool upload(replay *r, vimg *v)
 {
     int64_t t0 = now_ns();
+    if (g_recording && !open_pass.open)
+        nvn_gpuprof_mark_kinds();
     bool ok = upload_body(r, v);
+    if (ok && g_recording && !open_pass.open)
+        nvn_gpuprof_mark("upload");
     ppc.upload_ns += (uint64_t)(now_ns() - t0);
     ppc.uploads++;
     ppc.upload_bytes += v->d.size;
@@ -2668,7 +2690,11 @@ static bool write_back(replay *r, vimg *u)
     if (nvn_vk_wb_current(u))
         return true;
     int64_t t0 = now_ns();
+    if (g_recording && !open_pass.open)
+        nvn_gpuprof_mark_kinds();
     bool ok = write_back_body(r, u);
+    if (ok && g_recording && !open_pass.open)
+        nvn_gpuprof_mark("write-back");
     if (ok)
         nvn_vk_wb_note(u);
     if (nvn_flash_on())
@@ -3532,9 +3558,12 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
                            .pDepthAttachment = depth ? &da : NULL,
                            .pStencilAttachment = stencil ? &da : NULL };
     nvn_vk_begin(r);
+    nvn_gpuprof_mark_kinds();
     VK(vkCmdBeginRendering)(g.cb, &ri);
     open_pass.open = true;
     open_pass.what = NULL;
+    open_pass.draws = 0;
+    open_pass.fs[0] = 0;
     open_pass.ncolor = r->st->ncolor;
     memset(open_pass.images, 0, sizeof open_pass.images);
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
@@ -4153,6 +4182,12 @@ static bool sync_each_command(void)
 
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
+    if (nvn_gpuprof_on()) {
+        const char *nm = nvn_cmd_name(e->op);
+        if (nm && (strstr(nm, "Copy") || strstr(nm, "Clear") || strstr(nm, "Blit") || strstr(nm, "Resolve") ||
+                   strstr(nm, "Downsample")))
+            nvn_gpuprof_note(strncmp(nm, "nvnCommandBuffer", 16) ? nm : nm + 16);
+    }
     switch (e->op) {
     case NVN_CMD_WAIT_EVENT:
     case NVN_CMD_SIGNAL_EVENT:
@@ -4182,8 +4217,14 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return copy_texture_to_texture(r, e);
     case NVN_CMD_COPY_BUFFER_TO_TEXTURE:
         return copy_buffer_to_texture(r, e);
-    case NVN_CMD_EVALUATE_DLSS:
-        return nvn_dlss_run(r, e);
+    case NVN_CMD_EVALUATE_DLSS: {
+        if (g_recording && !open_pass.open)
+            nvn_gpuprof_mark_kinds();
+        int rc = nvn_dlss_run(r, e);
+        if (rc == RL_OK && g_recording && !open_pass.open)
+            nvn_gpuprof_mark("upscaler (DLSS evaluation)");
+        return rc;
+    }
     case NVN_CMD_BARRIER:
         nvn_vk_game_barrier(r);
         return RL_OK;
@@ -4887,6 +4928,7 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
         ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                                  NULL, 1, &ib);
+        nvn_gpuprof_mark("present copy");
         if (g.timeline_ok && !tmp && present_queued()) {
             ok = nvn_vk_submit(r);
             *after = ok ? g.timeline_value : 0;
@@ -5031,6 +5073,7 @@ static void present_rate(uint64_t total)
     pl0 = pl;
     pln0 = pln;
     memset(&tm, 0, sizeof tm);
+    nvn_gpuprof_report(frames);
     uint64_t faults, starts;
     nvn_watch_stats(&faults, &starts);
     {

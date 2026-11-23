@@ -1085,5 +1085,25 @@ VkDescriptorSetLayout nvn_empty_layout(void);
 VkDescriptorSet nvn_pools_set(uint32_t slot);
 /** @brief The pieces of the pool table as written last, and the spans left out of it (no room), for the log. */
 void nvn_pools_counts(uint32_t *pieces, uint32_t *spans, uint32_t *dropped);
+/** @brief Counts a draw into the open render pass, naming the pass by its first fragment program (gpu.profile). */
+void nvn_vk_pass_drew(const char *fs);
+/** @brief Whether gpu.profile is on (nvn_gpuprof.c); made on first use, with the device up. */
+bool nvn_gpuprof_on(void);
+/** @brief Starts the profile of the batch g.cb begins (after vkBeginCommandBuffer). */
+void nvn_gpuprof_batch_begin(void);
+/** @brief Names a kind of command recorded since the last mark, for an interval without a name of its own. */
+void nvn_gpuprof_note(const char *kind);
+/** @brief Ends an interval with a timestamp, named by fmt. Outside a render pass only. */
+void nvn_gpuprof_mark(const char *fmt, ...) RL_PRINTF(1, 2);
+/** @brief Ends an interval with a timestamp, named by the kinds noted since the last mark ("other" for none). */
+void nvn_gpuprof_mark_kinds(void);
+/** @brief Reads slot s's timestamps once its batch finished. */
+void nvn_gpuprof_done(uint32_t s);
+/** @brief Logs the ranking of the parts since the last report, per present over frames presents. */
+void nvn_gpuprof_report(double frames);
+/** @brief The batches' spans, the sum of their parts and the time between batches since the last report (ns). */
+void nvn_gpuprof_sums(double *span_ns, double *parts_ns, double *between_ns);
+/** @brief Forgets the profile and reads gpu.profile again at the next use (a settings change, tests). */
+void nvn_gpuprof_reset(void);
 
 #endif

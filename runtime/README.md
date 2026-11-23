@@ -249,6 +249,7 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_VK_DEVICE=<name part>` | The `vk.device` setting. Host physical device the guest sees (default: the first that has graphics and compute and can present) |
 | `RELIFT_VK_KEEP_ATTACHMENTS=auto\|on\|off` | The `vk.keep_attachments` setting. Pass the guest's DONT_CARE attachment load and store ops as LOAD and STORE (default `auto`: on Apple GPUs only; see `guests/switch/vk/README.md`) |
 | `RELIFT_VK_DECODE_BC=auto\|on\|off` | The `vk.decode_bc` setting. Create BC1 to BC7 images in an uncompressed host format and decode their uploads on the CPU (default `auto`: only for formats the host GPU cannot sample, such as Apple GPUs through MoltenVK; `on` for every BC format; see `guests/switch/vk/README.md`) |
+| `RELIFT_GPU_PROFILE=1` | The `gpu.profile` setting: logs where each Switch 2 batch's GPU time goes, the time between batches and the presenter's GPU time. See "Profiling the GPU" below |
 | `RELIFT_RENDERDOC_CAPTURE=<present>[:<frames>]` | The `renderdoc.capture` setting, for every guest. When the program runs under RenderDoc (its library already loaded), start a frame capture before frame `<present>` (counting guest presents from 1; frame k ends at present k) and end it after `<frames>` frames (default 1). With `file` it captures the next present each time a file named `capture-next` appears in the capture folder (`touch <folder>/capture-next` from a shell or a script; the program removes it), so a capture can be taken at a moment found by watching. A present is counted where a guest hands a finished frame to the shared presenter (`rl_window_present_rgb`, the GPU present slots) and, for a Switch run with no window, in the graphics layer; it works without a window. Only Vulkan work is captured: a guest that draws on the CPU shows nothing but the presenter's own passes, and a run with no window and no Vulkan device has nothing to capture. See "Capturing with RenderDoc" below |
 | `RELIFT_PRESENT_CAPTURE=<folder>[:<every>][:<from>-<to>]` | Debugging: the `present.capture` setting, for every guest. Writes the window's pictures exactly as they reach the screen (the swapchain image after relift's scaling, picture passes and overlays) as `<folder>/present-<frame>-d<draw>.png`, every `<every>`th draw, only for the frames handed to the window from `<from>` to before `<to>` when given (frames count presents, so overlay redraws cannot shift the range), with a log line per file naming the source (slot, host pixels or still), sizes, formats, placement, sampling and the overlay. Each capture waits for the GPU. Unlike `RELIFT_VK_CAPTURE`, which reads the guest's own image, this shows what the presenter made of it |
 | `RELIFT_RENDERDOC_DIR=<folder>` | The `renderdoc.capture_dir` setting: where the captures are written, as `<folder>/<app>_capture.rdc`. Empty (default): the `captures` folder of the user data folder (`~/.local/share/<app>/captures` on Linux) |
@@ -379,3 +380,27 @@ ENABLE_VULKAN_RENDERDOC_CAPTURE=1 RELIFT_NVN_MEMORY=mirror RELIFT_RENDERDOC_CAPT
 Under RenderDoc's layer the window uses X11 (the layer offers no Wayland surfaces, and without a swapchain every frame goes through host memory), the core device turns on `VK_EXT_debug_utils`, and the Switch 2 layer labels each draw and dispatch with the guest command it replays (`draw set <n> cmd <i> (<NVN call>) vs <key> fs <key>`, the first 8 hex digits of each program key) and names each image made for a guest texture or render target (`nvn 0x<GPU address> format <NVN format> <w>x<h>x<d>`, then `depth` and `target` where they apply). The mirror needs a shader table made for the run's own `shaders/device.json` (RenderDoc also hides some device features): a table made for a device that imports guest memory stops the run with an error saying so.
 
 The capture is written to `renderdoc.capture_dir`, by default the `captures` folder of the user data folder, as `<app>_capture.rdc`. Open it with `qrenderdoc file.rdc`, or script it: `qrenderdoc --python script.py` with the `renderdoc` module opens the file, lists the draws and reads textures and buffers (run it under `xvfb-run -a` for no window). The in-application API header is vendored in `third_party/renderdoc` (MIT, see its NOTICE); `core/capture.c` finds `RENDERDOC_GetAPI` in the library the layer loaded into the process and links nothing.
+
+## Profiling the GPU
+
+The `gpu.profile` setting (`RELIFT_GPU_PROFILE=1`) times where a Switch 2 game's GPU time goes, in parts that add up
+to each batch's span on the GPU. Every batch the graphics layer submits writes a timestamp at its start, before and
+after each render pass, after each group of dispatches, after each transfer the layer records (uploads, write-backs,
+the upscaler, the present copy) and at its end; each timestamp waits for the work before it. Every 5 seconds the log
+has, per present:
+
+```
+GPU profile per present: batches 49.81 ms in 7.1 batches, between batches 35.75 ms, presenter 19.91 ms (36.81 presents)
+GPU profile    9.72 ms   12.0 per present  pass 1920x1080 c1 9 draws fs 8478dea7
+GPU profile    2.65 ms   78.5 per present  cs f1d2d75c
+```
+
+`batches` is the sum of the batches' spans and the lines below rank its parts: a pass by its size, color attachment
+count, depth, draws and first fragment program; dispatch groups by their programs (`cs <key>`); transfers by name;
+and commands with no timestamp of their own by the kinds recorded (copies, clears, `batch end`). `between batches` is
+the GPU clock from one batch's end to the next one's start: other work ran then (the presenter, another process) or
+nothing was queued, so it is scheduling, not the game's work. `presenter` is the GPU time of the presenter's own
+command buffers (the picture's copy to the window, the post-processing, the on-screen controller) and how many it drew
+per game present. Timestamps inside a render pass are not used: on a tiling GPU they do not tell when a draw ran. The
+timestamps serialize the work they separate, so a run with the profile on is slower; compare parts, not the frame
+rate.

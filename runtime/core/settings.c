@@ -128,6 +128,17 @@ static const rl_setting_def g_runtime_defs[] = {
         .nchoices = 2,
     },
     {
+        .key = "gpu.profile",
+        .type = RL_SETTING_BOOL,
+        .label = "GPU profile",
+        .description = "Times the GPU work of every batch with timestamps: render passes, dispatches, copies, clears, "
+                       "uploads and the layer's own work (the present copy, the upscaler), plus the time between "
+                       "batches and the presenter's own GPU work, and logs a ranking every 5 seconds. Each timestamp "
+                       "waits for the work before it, so the game runs slower while it is on. Off: no timestamps",
+        .env = "RELIFT_GPU_PROFILE",
+        .def_int = 0,
+    },
+    {
         .key = "picture.aa",
         .type = RL_SETTING_ENUM,
         .label = "Anti-aliasing",

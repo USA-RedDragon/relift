@@ -129,6 +129,11 @@ bool rl_present_slot_begin(rl_present *p, uint32_t width, uint32_t height, rl_pr
 /** @brief Hands the filled slot to the presenter, as a picture shown shown_w by shown_h square pixels. */
 void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h);
 /**
+ * @brief The presenter's GPU time with gpu.profile on, from its timestamps: the sum since the start in ticks of the
+ * device's timestamp clock (the caller scales them by its timestampPeriod), and the presents timed.
+ */
+void rl_present_gpu_stats(uint64_t *ticks, uint64_t *presents);
+/**
  * @brief rl_present_slot_end for a copy that is submitted but not finished: the presenter's GPU work waits for
  * timeline semaphore (a VkSemaphore of the core's device) to reach value before it reads the slot, so the guest's
  * thread does not wait for its frame. The submission that signals value must already be on the queue.

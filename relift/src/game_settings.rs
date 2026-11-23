@@ -144,6 +144,13 @@ pub fn runtime_settings() -> Vec<Setting> {
                 choices: ["exact", "native"].map(String::from).into(),
             },
         ),
+        s(
+            "gpu.profile",
+            "GPU profile",
+            "Times the GPU work of every batch with timestamps: render passes, dispatches, copies, clears, uploads and the layer's own work (the present copy, the upscaler), plus the time between batches and the presenter's own GPU work, and logs a ranking every 5 seconds. Each timestamp waits for the work before it, so the game runs slower while it is on. Off: no timestamps",
+            Value::Bool(false),
+            SettingKind::Bool,
+        ),
         Setting {
             apply: Apply::Live,
             ..s(
@@ -1188,7 +1195,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 38);
+        assert_eq!(section(Vec::new()).runtime.len(), 39);
     }
 
     #[test]

@@ -1746,6 +1746,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     } else {
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
+    nvn_vk_pass_drew(mods[1] ? mods[1]->key : NULL);
     nvn_counters_end(counted);
     if (traced) {
         if (!nvn_vk_flush(r))
@@ -2706,6 +2707,11 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         if (!nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed the traced dispatch of %s", m->key);
         trace_report(r, m->key, NVN_STAGE_COMPUTE, m->trace_words);
+    }
+    if (nvn_gpuprof_on()) {
+        char k[16];
+        snprintf(k, sizeof k, "cs %.8s", m->key);
+        nvn_gpuprof_note(k);
     }
     if (nvn_trace_active) {
         const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];

@@ -12,6 +12,7 @@
 #include <relift/settings.h>
 
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -968,4 +969,39 @@ TEST(nvn_placed_pool_gives_its_pages_back_with_their_bytes_at_finalize)
     CHECK_EQ(rl_vm_set(&hos.vm, at, 0x60000, RL_VM_RW, rl_vm_query(&hos.vm, at).tag, RL_VM_DISCARD), 0);
     CHECK_EQ(rl_ld32(m, at + 0x10100), 0u);
     rl_settings_set("nvn.memory", "auto");
+}
+
+TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
+{
+    t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    CHECK_EQ(rl_settings_set("gpu.profile", "true"), RL_SETTING_OK);
+    nvn_gpuprof_reset();
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.mem = t_mem();
+    staging big;
+    CHECK(nvn_vk_staging_new(&big, 16ull << 20));
+    CHECK(nvn_vk_flush(&r));
+    for (int batch = 0; batch < 2; batch++) {
+        CHECK(nvn_vk_begin(&r));
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, 1);
+        nvn_vk_barrier(g.cb);
+        nvn_gpuprof_mark("fill a");
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, 2);
+        nvn_vk_barrier(g.cb);
+        nvn_gpuprof_mark("fill b");
+        CHECK(nvn_vk_flush(&r));
+    }
+    double span = 0, parts = 0, between = 0;
+    nvn_gpuprof_sums(&span, &parts, &between);
+    CHECK(span > 0);
+    CHECK(fabs(parts - span) <= span * 1e-6);
+    CHECK(between >= 0);
+    nvn_vk_staging_free(&big);
+    rl_settings_set("gpu.profile", "false");
+    nvn_gpuprof_reset();
 }

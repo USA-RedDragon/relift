@@ -155,6 +155,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "video.fullscreen"
                 | "video.gpu_driver"
                 | "gpu.math"
+                | "gpu.profile"
                 | "picture.aa"
                 | "picture.aa_quality"
                 | "picture.filter"
