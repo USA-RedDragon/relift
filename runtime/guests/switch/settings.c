@@ -14,7 +14,7 @@
 
 static const char *const g_keep[] = { "auto", "on", "off" };
 static const char *const g_layout[] = { "compact", "console" };
-static const char *const g_memory[] = { "auto", "import", "mirror" };
+static const char *const g_memory[] = { "auto", "import", "mirror", "placed" };
 
 static const char *const g_pac_choices[] = { "fast", "qarma5" };
 static const char *const g_net_modes[] = { "off", "lan" };
@@ -90,13 +90,15 @@ static const rl_setting_def g_defs[] = {
         .type = RL_SETTING_ENUM,
         .label = "Graphics memory pools",
         .description = "How the game's graphics memory pools reach the host graphics device. import: the device uses the "
-                       "game's pages in place (needs VK_EXT_external_memory_host); mirror: each pool gets a device copy "
-                       "that the layer keeps equal at the game's sync points, for devices without the import (some "
-                       "Android drivers, MoltenVK) and for GPU capture tools that hide it. auto: import where the "
-                       "device has it",
+                       "game's pages in place (needs VK_EXT_external_memory_host); placed: device memory takes the "
+                       "place of the game's pages at their own addresses (needs VK_EXT_map_memory_placed), so the "
+                       "game and the device share them as with an import; mirror: each pool gets a device copy "
+                       "that the layer keeps equal at the game's sync points, for devices with neither (some "
+                       "Android drivers, MoltenVK) and for GPU capture tools that hide them. auto: import where the "
+                       "device has it, else placed, else mirror",
         .env = "RELIFT_NVN_MEMORY",
         .choices = g_memory,
-        .nchoices = 3,
+        .nchoices = 4,
     },
     {
         .key = "kernel.layout",

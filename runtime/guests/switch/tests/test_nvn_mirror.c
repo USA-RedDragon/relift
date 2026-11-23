@@ -1,10 +1,12 @@
 /**
  * @file test_nvn_mirror.c
- * @brief Memory pool mirrors (nvn_mirror.c), forced on a host that could import: a CPU write reaches a compute
- * program that reads it, and the bytes the program writes reach guest memory when the batch completes.
+ * @brief Memory pool mirrors (nvn_mirror.c) and placements (nvn_vk_place), forced on a host that could import: a CPU
+ * write reaches a compute program that reads it, and the bytes the program writes reach guest memory when the batch
+ * completes; a placement keeps its bytes through a finalize, a remake and its end.
  */
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
+#include "nvn/nvn_watch.h"
 #include "tc.h"
 
 #include <relift/settings.h>
@@ -847,4 +849,128 @@ TEST(nvn_vk_fill_reaches_past_the_fill_limit_through_copies)
     nvn_vk_staging_free(&rb);
     VK(vkDestroyBuffer)(g.dev, buf, NULL);
     VK(vkFreeMemory)(g.dev, mem, NULL);
+}
+
+#define RET 0x7000000ull
+
+static uint64_t call(rl_ctx *c, rl_fn_t *fn, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
+{
+    c->x[0] = x0;
+    c->x[1] = x1;
+    c->x[2] = x2;
+    c->x[3] = x3;
+    c->x[30] = RET;
+    return fn(c, t_mem());
+}
+
+/** @brief Forces placed pools; false (the test skipped, the setting back to auto) without a device that places. */
+static bool placing(void)
+{
+    if (rl_settings_set("nvn.memory", "placed") != RL_SETTING_OK)
+        return false;
+    bool up = have_device();
+    if (up && !nvn_vk_can_place())
+        printf("  skipped: the host device has no placed mapping\n");
+    if (!up || !nvn_vk_can_place()) {
+        rl_settings_set("nvn.memory", "auto");
+        return false;
+    }
+    return true;
+}
+
+TEST(nvn_placed_pool_shares_its_pages_between_the_cpu_and_the_gpu)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool go = placing();
+    CHECK(go || nvn_vk_ready() || !getenv("RELIFT_VK_REQUIRE"));
+    if (!go)
+        return;
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x40000 + 0xffff) / 0x10000 * 0x10000;
+    uint64_t size = 0x40000, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    uint32_t n = 3000;
+    for (uint32_t i = 0; i < n; i++)
+        rl_st32(m, at + 4ull * i, 100 + i);
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    CHECK(!nvn_mirror_any());
+    uint64_t gpu = nvn_pool_gpu(pool);
+    CHECK(gpu != at);
+    CHECK_EQ(nvn_gpu_guest(gpu + 0x44), at + 0x44);
+    /* The bytes written before the pool was made are the device's now. */
+    CHECK_EQ(rl_ld32(m, at + 4 * 7), 107u);
+    uint64_t dst = gpu + 0x20000;
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    CHECK(run_copy(&r, gpu, dst, n));
+    CHECK_EQ(rl_ld32(m, at + 0x20000), 101u);
+    CHECK_EQ(rl_ld32(m, at + 0x20000 + 4ull * (n - 1)), 100 + n);
+    rl_st32(m, at + 4 * 5, 555);
+    CHECK(run_copy(&r, gpu, dst, n));
+    CHECK_EQ(rl_ld32(m, at + 0x20000 + 4 * 5), 556u);
+    CHECK_EQ(rl_ld32(m, at + 0x20000 + 4 * 6), 107u);
+    /* A write watch on placed pages sees the game's writes. */
+    nvn_watch w;
+    CHECK(nvn_watch_start(&w, at + 0x30000, 4 * hp));
+    CHECK(!nvn_watch_changed(&w));
+    CHECK(!t_write(at + 0x30000 + hp + 8, 9).faulted);
+    CHECK(nvn_watch_changed(&w));
+    CHECK_EQ(m[at + 0x30000 + hp + 8], 9);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    rl_settings_set("nvn.memory", "auto");
+}
+
+TEST(nvn_placed_pool_keeps_its_bytes_through_finalize_remake_and_its_end)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool go = placing();
+    CHECK(go || nvn_vk_ready() || !getenv("RELIFT_VK_REQUIRE"));
+    if (!go)
+        return;
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t at = (heap + 0x40000 + 0xffff) / 0x10000 * 0x10000;
+    uint64_t size = 0x40000, pool = heap + 0x100, other = heap + 0x200;
+    uint8_t *m = t_mem();
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    rl_st32(m, at, 41);
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    CHECK(run_copy(&r, gpu, gpu + 0x10000, 1));
+    uint32_t kept = nvn_pools_kept();
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    CHECK_EQ(nvn_pools_kept(), kept + 1);
+    /* The game's pages stay its own after a finalize; a pool made again over them takes the placement back. */
+    rl_st32(m, at, 70);
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    CHECK_EQ(nvn_pool_gpu(pool), gpu);
+    CHECK(run_copy(&r, gpu, gpu + 0x10004, 1));
+    CHECK_EQ(rl_ld32(m, at + 0x10000), 42u);
+    CHECK_EQ(rl_ld32(m, at + 0x10004), 71u);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    /* A pool over another range ends the kept placement: its bytes stay in the game's pages. */
+    kept = nvn_pools_kept();
+    CHECK(nvn_pool_make(other, at + 0x10000, size, 0));
+    CHECK(nvn_pools_kept() < kept);
+    CHECK_EQ(rl_ld32(m, at), 70u);
+    CHECK_EQ(rl_ld32(m, at + 0x10000), 42u);
+    CHECK_EQ(rl_ld32(m, at + 0x10004), 71u);
+    uint64_t og = nvn_pool_gpu(other);
+    CHECK(run_copy(&r, og, og + 0x100, 2));
+    CHECK_EQ(rl_ld32(m, at + 0x10100), 43u);
+    CHECK_EQ(rl_ld32(m, at + 0x10104), 72u);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, other, 0, 0, 0), RET);
+    /* The game discarding the pages ends the kept placement: they read zero. */
+    kept = nvn_pools_kept();
+    CHECK_EQ(rl_vm_set(&hos.vm, at, 0x60000, RL_VM_RW, rl_vm_query(&hos.vm, at).tag, RL_VM_DISCARD), 0);
+    CHECK(nvn_pools_kept() < kept);
+    CHECK_EQ(rl_ld32(m, at + 0x10100), 0u);
+    rl_st32(m, at + 0x10100, 5);
+    CHECK_EQ(rl_ld32(m, at + 0x10100), 5u);
+    rl_settings_set("nvn.memory", "auto");
 }

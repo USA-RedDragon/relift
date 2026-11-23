@@ -359,10 +359,12 @@ pub fn runtime_settings() -> Vec<Setting> {
         s(
             "nvn.memory",
             "Graphics memory pools",
-            "How the game's graphics memory pools reach the host graphics device. import: the device uses the game's pages in place (needs VK_EXT_external_memory_host); mirror: each pool gets a device copy that the layer keeps equal at the game's sync points, for devices without the import (some Android drivers, MoltenVK) and for GPU capture tools that hide it. auto: import where the device has it",
+            "How the game's graphics memory pools reach the host graphics device. import: the device uses the game's pages in place (needs VK_EXT_external_memory_host); placed: device memory takes the place of the game's pages at their own addresses (needs VK_EXT_map_memory_placed), so the game and the device share them as with an import; mirror: each pool gets a device copy that the layer keeps equal at the game's sync points, for devices with neither (some Android drivers, MoltenVK) and for GPU capture tools that hide them. auto: import where the device has it, else placed, else mirror",
             Value::String("auto".into()),
             SettingKind::Enum {
-                choices: ["auto", "import", "mirror"].map(String::from).into(),
+                choices: ["auto", "import", "mirror", "placed"]
+                    .map(String::from)
+                    .into(),
             },
         ),
         s(

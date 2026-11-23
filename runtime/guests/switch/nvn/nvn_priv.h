@@ -659,6 +659,12 @@ typedef struct nvn_import {
     uint64_t gpu;
     /** @brief The buffer's and the memory's opaque capture addresses (0 without address replay): what takes the address back. */
     uint64_t buf_opaque, mem_opaque;
+    /**
+     * @brief The memory is driver memory mapped over the guest range [place_guest, place_guest + place_size) in place of
+     * the guest's own pages (nvn_vk_place), not guest pages imported.
+     */
+    bool placed;
+    uint64_t place_guest, place_size;
 } nvn_import;
 /**
  * @brief Imports size guest bytes at guest as a buffer whose device address is
@@ -669,6 +675,20 @@ typedef struct nvn_import {
  * had); NULL asks for no address in particular.
  */
 bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_import *out);
+/**
+ * @brief Gives guest [guest, guest + size) a device buffer by placed mapping (VK_EXT_map_memory_placed): driver memory
+ * that takes the range's bytes is mapped at the range's own host address, so the game's CPU and the device share its
+ * pages as they do an import's. The range must be the game's own readable and writable pages (the caller checks); false
+ * when the device has no placed mapping or the range is not aligned to its placement.
+ */
+bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out);
+/** @brief Whether the device maps memory in place (VK_EXT_map_memory_placed with unmap reserve). */
+bool nvn_vk_can_place(void);
+/**
+ * @brief Frees an import or a placement. A placement's range gets ordinary guest pages back: with its bytes when keep is
+ * set, as zero pages otherwise (the guest discards them).
+ */
+void nvn_vk_unimport_keep(nvn_import *im, bool keep);
 /** @brief Whether the host gives an import the device address of an earlier one (host Vulkan up first). */
 bool nvn_vk_address_replay(void);
 /** @brief Frees an import (waits for the device). */

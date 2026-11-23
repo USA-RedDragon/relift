@@ -234,6 +234,9 @@ typedef struct nvn_vkdev {
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
     bool host_import;
     uint64_t import_align;
+    /** @brief VK_EXT_map_memory_placed is on with memoryMapPlaced and memoryUnmapReserve, with its placement alignment. */
+    bool placed;
+    uint64_t placed_align;
     vkf_fns fns;
     VkInstance instance;
     VkPhysicalDevice phys;

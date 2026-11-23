@@ -164,8 +164,11 @@ static pthread_mutex_t g_kept_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void pools_remove(uint64_t gpu, uint64_t size, void *buf);
 
-/** @brief Frees the kept imports overlapping guest [memory, memory + size), but for one of exactly that range when keep_exact is set. */
-static void kept_release(uint64_t memory, uint64_t size, bool keep_exact)
+/**
+ * @brief Frees the kept imports overlapping guest [memory, memory + size), but for one of exactly that range when
+ * keep_exact is set; a placed one gives its range the bytes back when keep_bytes is set.
+ */
+static void kept_release(uint64_t memory, uint64_t size, bool keep_exact, bool keep_bytes)
 {
     nvn_import gone[16];
     uint64_t gone_size[16];
@@ -187,13 +190,13 @@ static void kept_release(uint64_t memory, uint64_t size, bool keep_exact)
         pthread_mutex_unlock(&g_kept_lock);
         for (uint32_t i = 0; i < n; i++) {
             pools_remove(gone[i].gpu, gone_size[i], gone[i].buf);
-            nvn_vk_unimport(&gone[i]);
+            nvn_vk_unimport_keep(&gone[i], keep_bytes);
         }
     } while (n == 16);
 }
 
 /** @brief The guest discards pages: kept imports over them would hold the old pages, so they go. */
-static void kept_discard(uint64_t addr, uint64_t size) { kept_release(addr, size, false); }
+static void kept_discard(uint64_t addr, uint64_t size) { kept_release(addr, size, false, false); }
 
 static void kept_put(uint64_t memory, uint64_t size, const nvn_import *im)
 {
@@ -222,7 +225,7 @@ static void kept_put(uint64_t memory, uint64_t size, const nvn_import *im)
 /** @brief Takes the kept import of exactly guest [memory, memory + size) into out; frees kept ones that overlap otherwise. */
 static bool kept_take(uint64_t memory, uint64_t size, nvn_import *out)
 {
-    kept_release(memory, size, true);
+    kept_release(memory, size, true, true);
     bool found = false;
     pthread_mutex_lock(&g_kept_lock);
     for (uint32_t i = 0; i < g_kept_n && !found; i++)
@@ -787,19 +790,45 @@ uint64_t nvnh_nvnQueueWaitSync(rl_ctx *c, uint8_t *mem)
 }
 
 /** @brief nvn.memory: how pools reach the host device (see nvn_pool_back). */
-enum { MEMORY_AUTO = 0, MEMORY_IMPORT = 1, MEMORY_MIRROR = 2 };
+enum { MEMORY_AUTO = 0, MEMORY_IMPORT = 1, MEMORY_MIRROR = 2, MEMORY_PLACED = 3 };
 
 /**
- * @brief Gives pool p a device buffer over its guest bytes: an import where the host has one, a mirror otherwise or
- * when nvn.memory says mirror. False when neither works, which leaves the pool's GPU address its guest address.
+ * @brief Whether guest [memory, memory + size) is the game's own private pages, readable and writable, which a
+ * placement may take the place of: heap, normal or module data memory, not shared memory (another view of the same
+ * pages would not see the device's).
+ */
+static bool placeable(uint64_t memory, uint64_t size)
+{
+    for (uint64_t at = memory; at < memory + size;) {
+        rl_vm_block b = rl_vm_query(&hos.vm, at);
+        uint32_t state = (uint32_t)b.tag;
+        if (!b.size || b.addr + b.size <= at || b.perm != RL_VM_RW || (b.tag >> 32) ||
+            (state != MS_HEAP && state != MS_NORMAL && state != MS_CODE_MUTABLE))
+            return false;
+        at = b.addr + b.size;
+    }
+    return true;
+}
+
+/**
+ * @brief Gives pool p a device buffer over its guest bytes: an import where the host has one, else a placement (the
+ * device's memory mapped at the pool's guest address), else a mirror, or what nvn.memory says. False when none works,
+ * which leaves the pool's GPU address its guest address.
  */
 static bool pool_back(nvn_pool *p, uint64_t memory, uint64_t size)
 {
     int mode = rl_setting_enum("nvn.memory");
-    if (mode != MEMORY_MIRROR && kept_take(memory, size, &p->im))
+    bool in_place = mode != MEMORY_MIRROR;
+    if (in_place && kept_take(memory, size, &p->im))
         return true;
-    if (mode != MEMORY_MIRROR && nvn_vk_import(memory, size, NULL, &p->im))
+    if ((mode == MEMORY_AUTO || mode == MEMORY_IMPORT) && nvn_vk_import(memory, size, NULL, &p->im))
         return true;
+    if (in_place && nvn_vk_can_place()) {
+        if (placeable(memory, size) && nvn_vk_place(memory, size, &p->im))
+            return true;
+        rl_log(RL_LOG_INFO, "nvn", "memory pool over 0x%llx (0x%llx bytes) cannot be placed; it is mirrored",
+               (unsigned long long)memory, (unsigned long long)size);
+    }
     if (mode != MEMORY_IMPORT && nvn_mirror_make(memory, size, &p->im)) {
         static bool said;
         if (!said) {
@@ -1138,7 +1167,7 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
                                             "than earlier ones (only one linear range per virtual pool is implemented)",
                                             (unsigned long long)pool, i);
         if (!p->mapped) {
-            if (q->mirrored) {
+            if (q->mirrored || q->im.placed) {
                 p->im = (nvn_import){ .buf = q->im.buf, .memory = NULL, .gpu = q->im.gpu + (poff - voff) };
                 p->alias = true;
             } else if (!q->im.gpu ||

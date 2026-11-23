@@ -214,7 +214,7 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, placed;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -294,6 +294,18 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 rl_vkdev_add_ext(b, up[k]);
                 break;
             }
+    bool map2 = false, placed = false;
+    for (uint32_t i = 0; exts && i < next; i++) {
+        map2 |= !strcmp(exts[i].extensionName, "VK_KHR_map_memory2");
+        placed |= !strcmp(exts[i].extensionName, "VK_EXT_map_memory_placed");
+    }
+    feat.placed = (ext_features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT };
+    if (map2 && placed) {
+        rl_vkdev_add_ext(b, "VK_KHR_map_memory2");
+        rl_vkdev_add_ext(b, "VK_EXT_map_memory_placed");
+        feat.placed.pNext = f13->pNext;
+        f13->pNext = &feat.placed;
+    }
     for (uint32_t i = 0; exts && i < next; i++)
         if (!strcmp(exts[i].extensionName, "VK_EXT_external_memory_host")) {
             rl_vkdev_add_ext(b, "VK_EXT_external_memory_host");
@@ -341,6 +353,9 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     g.mesh_shader = mesh_on && feat.mesh.b[0] && feat.mesh.b[1];
     feat.mesh.b[2] = feat.mesh.b[3] = feat.mesh.b[4] = VK_FALSE;
     g.device_fault = fault_on && feat.fault.b[0];
+    /* memoryMapPlaced, memoryMapRangePlaced, memoryUnmapReserve: placements map whole allocations only. */
+    g.placed = map2 && placed && feat.placed.b[0] && feat.placed.b[2];
+    feat.placed.b[1] = VK_FALSE;
     feat.fault.b[1] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
@@ -436,6 +451,17 @@ static void bring_up(void)
         VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &hp };
         VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
         g.import_align = hp.minImportedHostPointerAlignment ? hp.minImportedHostPointerAlignment : 4096;
+    }
+    if (g.placed) {
+        VkPhysicalDeviceMapMemoryPlacedPropertiesEXT pp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_PROPERTIES_EXT
+        };
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &pp };
+        VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2);
+        g.placed_align = pp.minPlacedMemoryMapAlignment ? pp.minPlacedMemoryMapAlignment : 4096;
+        if (g.placed_align < hos.vm.host_page)
+            g.placed_align = hos.vm.host_page;
+        g.placed = VK(vkMapMemory2KHR) && VK(vkUnmapMemory2KHR);
     }
     for (uint32_t s = 0; s < NVN_SLOTS; s++)
         if (!nvn_vk_staging_new(&g.arenas[s], 64ull << 20)) {
@@ -1154,10 +1180,162 @@ bool nvn_vk_address_replay(void)
     return g.ok && g.address_replay;
 }
 
-void nvn_vk_unimport(nvn_import *im)
+bool nvn_vk_can_place(void)
+{
+    nvn_vk_ready();
+    return g.ok && g.placed;
+}
+
+bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out)
+{
+    memset(out, 0, sizeof *out);
+    pthread_once(&g.once, bring_up);
+    if (!g.ok || !g.placed || !size || guest % g.placed_align || size % g.placed_align)
+        return false;
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = size,
+                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+    VkBuffer buf;
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &buf) != VK_SUCCESS)
+        return false;
+    out->buf = buf;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, buf, &req);
+    /* The game's CPU reads pool memory as its own: cached and coherent where the device has it. */
+    const VkMemoryPropertyFlags vis = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, vis | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    if (t < 0)
+        t = nvn_vk_mem_type(req.memoryTypeBits, vis);
+    /* A placement maps the whole allocation, so it must be exactly the range. */
+    if (t < 0 || req.size > size || size % req.alignment) {
+        rl_log(RL_LOG_WARN, "nvn", "placement of 0x%llx (0x%llx bytes) refused: memory type %d, the buffer needs 0x%llx",
+               (unsigned long long)guest, (unsigned long long)size, t, (unsigned long long)req.size);
+        nvn_vk_unimport_keep(out, true);
+        return false;
+    }
+    VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .pNext = &fl,
+                                 .allocationSize = size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    VkDeviceMemory dm = NULL;
+    VkResult ar = VK(vkAllocateMemory)(g.dev, &mai, NULL, &dm);
+    out->memory = ar == VK_SUCCESS ? dm : NULL;
+    void *p = NULL;
+    if (ar != VK_SUCCESS || VK(vkBindBufferMemory)(g.dev, buf, dm, 0) != VK_SUCCESS ||
+        VK(vkMapMemory)(g.dev, dm, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) {
+        rl_log(RL_LOG_WARN, "nvn", "placement of 0x%llx (0x%llx bytes) failed: allocate %d", (unsigned long long)guest,
+               (unsigned long long)size, (int)ar);
+        nvn_vk_unimport_keep(out, true);
+        return false;
+    }
+    /* The device takes the range's bytes, then its memory takes the range's place. */
+    nvn_watch_release(guest, size);
+    uint8_t *host = rl_mem_base() + guest;
+    memcpy(p, host, size);
+    VK(vkUnmapMemory)(g.dev, dm);
+    VkMemoryMapPlacedInfoEXT pi = { .sType = VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT, .pPlacedAddress = host };
+    VkMemoryMapInfoKHR mi = { .sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+                              .pNext = &pi,
+                              .flags = VK_MEMORY_MAP_PLACED_BIT_EXT,
+                              .memory = dm,
+                              .offset = 0,
+                              .size = VK_WHOLE_SIZE };
+    p = NULL;
+    VkResult mr = VK(vkMapMemory2KHR)(g.dev, &mi, &p);
+    if (mr != VK_SUCCESS || p != host) {
+        /* A failed placed map leaves the guest's pages where they were; one that landed elsewhere is undone. */
+        rl_log(RL_LOG_ERROR, "nvn", "placed map of 0x%llx failed (%d, landed at %p)", (unsigned long long)guest, (int)mr,
+               p);
+        if (mr == VK_SUCCESS)
+            VK(vkUnmapMemory)(g.dev, dm);
+        nvn_vk_unimport_keep(out, true);
+        return false;
+    }
+    out->placed = true;
+    out->place_guest = guest;
+    out->place_size = size;
+    VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
+    out->gpu = VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+    static bool said;
+    if (!said) {
+        said = true;
+        rl_log(RL_LOG_INFO, "nvn", "memory pools are placed device memory at their guest addresses (memory type %d: 0x%x)",
+               t, (unsigned)g.memprops.memoryTypes[t].propertyFlags);
+    }
+    return out->gpu != 0;
+}
+
+/** @brief Gives a placement's range ordinary guest pages again, with its bytes when keep is set (see nvn_vk_unimport_keep). */
+static void unplace(nvn_import *im, bool keep)
+{
+    uint64_t guest = im->place_guest, size = im->place_size, page = hos.vm.host_page;
+    nvn_watch_release(guest, size);
+    /* Only the pages that are not zero are kept: the pages given back read zero already. A page the guest made
+     * unreadable is read through the kernel's view. */
+    uint64_t k = 0, cap = 0, *where = NULL;
+    uint8_t *bytes = NULL, *scratch = keep ? malloc(page) : NULL;
+    bool lost = keep && !scratch;
+    for (uint64_t at = 0; keep && scratch && at < size; at += page) {
+        rl_vm_kernel_read(&hos.vm, scratch, guest + at, page);
+        bool zero = true;
+        for (uint64_t i = 0; i < page && zero; i += 8)
+            zero = !*(const uint64_t *)(scratch + i);
+        if (zero)
+            continue;
+        if (k == cap) {
+            uint64_t c = cap ? 2 * cap : 64;
+            uint64_t *w = realloc(where, c * sizeof *w);
+            uint8_t *b = w ? realloc(bytes, c * page) : NULL;
+            if (w)
+                where = w;
+            if (!w || !b) {
+                lost = true;
+                break;
+            }
+            bytes = b;
+            cap = c;
+        }
+        where[k] = at;
+        memcpy(bytes + k * page, scratch, page);
+        k++;
+    }
+    free(scratch);
+    if (lost)
+        rl_log(RL_LOG_ERROR, "nvn", "out of memory keeping the bytes of placed pool memory at 0x%llx",
+               (unsigned long long)guest);
+    VkMemoryUnmapInfoKHR ui = { .sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO,
+                                .flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT,
+                                .memory = (VkDeviceMemory)im->memory };
+    VK(vkUnmapMemory2KHR)(g.dev, &ui);
+    /* The guest's own pages come back with each block's state and permissions. */
+    for (uint64_t at = guest; at < guest + size;) {
+        rl_vm_block b = rl_vm_query(&hos.vm, at);
+        uint64_t end = b.size && b.addr + b.size < guest + size ? b.addr + b.size : guest + size;
+        if (end <= at)
+            end = guest + size;
+        rl_vm_set(&hos.vm, at, end - at, b.perm, b.tag, RL_VM_DISCARD);
+        at = end;
+    }
+    for (uint64_t i = 0; i < k; i++)
+        rl_vm_kernel_write(&hos.vm, guest + where[i], bytes + i * page, page);
+    free(where);
+    free(bytes);
+}
+
+void nvn_vk_unimport(nvn_import *im) { nvn_vk_unimport_keep(im, true); }
+
+void nvn_vk_unimport_keep(nvn_import *im, bool keep)
 {
     if (im->buf || im->memory)
         rl_vkdev_wait_idle(rl_vkdev());
+    if (im->placed)
+        unplace(im, keep);
     if (im->buf)
         VK(vkDestroyBuffer)(g.dev, (VkBuffer)im->buf, NULL);
     if (im->memory)
