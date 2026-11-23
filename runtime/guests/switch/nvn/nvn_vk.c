@@ -2805,14 +2805,23 @@ fail:
 
 vimg *nvn_vk_image(replay *r, uint64_t tex) { return image_of(r, tex); }
 
+bool nvn_vk_bytes_changed(vimg *v, const uint8_t *bytes)
+{
+    uint64_t h = bytes_hash(bytes, v->d.size);
+    bool changed = h != v->hash;
+    v->hash = h;
+    return changed;
+}
+
 /**
  * @brief Refills v from its storage when the CPU changed the bytes: a
  * buffer texture at every use, any texture the GPU never wrote (the game
  * fills it through the CPU, as a glyph cache) when the hash of its storage
- * differs, checked at most once per presented frame. A watched texture the
- * GPU can fill (nvn_untile_can) is filled once a page wholly inside it was
- * written, without hashing its bytes first; a write only to the pages it
- * shares with other bytes compares just its bytes on those pages.
+ * differs, checked at most once per presented frame. For a watched texture,
+ * a write to a page wholly inside it leads to that hash; a write only to the
+ * pages it shares with other bytes compares just its bytes on those pages
+ * first. A game writing the same bytes again (as at each scene load) costs a
+ * hash, not a fill.
  */
 bool nvn_vk_refresh(replay *r, vimg *v)
 {
@@ -2835,14 +2844,10 @@ bool nvn_vk_refresh(replay *r, vimg *v)
     if (!inner && e == v->edge_hash)
         return true;
     v->edge_hash = e;
-    if (gpu_moves() && v->watch.on && nvn_untile_can(v)) {
-        v->hash = 0;
-        return upload(r, v);
-    }
-    uint64_t h = bytes_hash(r->mem + v->storage, v->d.size);
-    if (h == v->hash)
+    if (!nvn_vk_bytes_changed(v, r->mem + v->storage))
         return true;
-    v->hash = h;
+    if (gpu_moves() && v->watch.on && nvn_untile_can(v))
+        return upload(r, v);
     return v->aspect != VK_IMAGE_ASPECT_COLOR_BIT || upload(r, v);
 }
 

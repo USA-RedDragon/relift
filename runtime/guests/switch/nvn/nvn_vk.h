@@ -685,6 +685,11 @@ vimg *nvn_vk_image(replay *r, uint64_t tex);
  * layout takes them when a draw binds it. False with the game stopped when one cannot be.
  */
 bool nvn_vk_sync_aliases(replay *r, uint64_t since);
+/**
+ * @brief Whether bytes, v's storage, hash other than they did when v was last filled from them; keeps the new hash, so
+ * the next call compares with these bytes.
+ */
+bool nvn_vk_bytes_changed(vimg *v, const uint8_t *bytes);
 bool nvn_vk_refresh(replay *r, vimg *v);
 /**
  * @brief A view of v of type t: over all its levels and the layers t takes

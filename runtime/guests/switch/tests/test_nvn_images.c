@@ -124,3 +124,14 @@ TEST(nvn_an_image_written_back_too_many_write_backs_ago_is_written_back_again)
         nvn_vk_wb_note(&other);
     CHECK(!nvn_vk_wb_current(&u));
 }
+
+TEST(nvn_storage_written_again_with_the_same_bytes_needs_no_refill)
+{
+    vimg v = { .d = { .size = 64 } };
+    uint8_t bytes[64] = { 1 };
+    CHECK(nvn_vk_bytes_changed(&v, bytes));
+    CHECK(!nvn_vk_bytes_changed(&v, bytes));
+    bytes[63] = 2;
+    CHECK(nvn_vk_bytes_changed(&v, bytes));
+    CHECK(!nvn_vk_bytes_changed(&v, bytes));
+}
