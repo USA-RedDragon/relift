@@ -26,11 +26,18 @@
 
 #include "hos.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /** @brief Largest copy recorded into one staging slice, and the size of a staging chunk. */
 #define SLICE (32ull << 20)
+/**
+ * @brief Staging chunks kept between batches. Each chunk is write-combined host memory whose allocation and release
+ * change page attributes in the kernel (milliseconds each), so chunks are reused, not made again for every batch; a
+ * batch's uploads are bounded to SLICE before it is submitted, so it rarely needs more than two.
+ */
+#define KEEP_CHUNKS 4
 /** @brief Bytes of the readback buffer. */
 #define READBACK (128ull << 20)
 #define PAGE 4096u
@@ -85,6 +92,10 @@ static struct {
     /** @brief The batch being recorded runs a program that marks pages, and so the batch that waits to be read. */
     bool marked, marked_sent;
     uint64_t stat_marked_pages, stat_read;
+    /** @brief Staging chunks made so far (each a host allocation of write-combined memory). */
+    uint64_t stat_chunks;
+    /** @brief Why the last sync failed, for the stop report. */
+    char fail[160];
 } mi;
 
 static pthread_once_t mi_once = PTHREAD_ONCE_INIT;
@@ -240,8 +251,12 @@ static bool stage_alloc(uint64_t n, VkBuffer *buf, uint64_t *off, uint8_t **map)
         return false;
     upload_chunk *c = &mi.chunks[mi.nchunks];
     memset(c, 0, sizeof *c);
-    if (!nvn_vk_staging_new(&c->s, n > SLICE ? n : SLICE))
+    if (!nvn_vk_staging_new(&c->s, n > SLICE ? n : SLICE)) {
+        snprintf(mi.fail, sizeof mi.fail, "a %llu MiB staging buffer could not be made (%u in use)",
+                 (unsigned long long)((n > SLICE ? n : SLICE) >> 20), mi.nchunks);
         return false;
+    }
+    mi.stat_chunks++;
     mi.nchunks++;
     c->used = n;
     *buf = c->s.buf;
@@ -259,7 +274,7 @@ void nvn_mirror_flushed(void)
     for (uint32_t i = 0; i < mi.nchunks;) {
         upload_chunk *c = &mi.chunks[i];
         c->used = 0;
-        if (c->s.size > SLICE || i >= 2) {
+        if (c->s.size > SLICE || i >= KEEP_CHUNKS) {
             nvn_vk_staging_free(&c->s);
             memmove(c, c + 1, (mi.nchunks - i - 1) * sizeof *c);
             mi.nchunks--;
@@ -293,6 +308,8 @@ static void upload_piece(sync_ctx *c, mirror *m, uint64_t guest, uint64_t n)
         uint64_t so;
         uint8_t *map;
         if (!stage_alloc(len, &sb, &so, &map) || !nvn_vk_begin(c->r)) {
+            if (!mi.fail[0])
+                snprintf(mi.fail, sizeof mi.fail, "a batch could not be started for the upload");
             c->ok = false;
             return;
         }
@@ -306,6 +323,8 @@ static void upload_piece(sync_ctx *c, mirror *m, uint64_t guest, uint64_t n)
         if (c->can_flush && c->bytes >= SLICE) {
             nvn_vk_barrier(g.cb);
             c->ok = nvn_vk_flush(c->r);
+            if (!c->ok)
+                snprintf(mi.fail, sizeof mi.fail, "the device failed a batch of uploads");
             c->bytes = 0;
         }
     }
@@ -360,9 +379,10 @@ bool nvn_mirror_sync(replay *r, bool may_flush)
     }
     uint64_t epoch = nvn_track_epoch();
     bool ok = true;
+    mi.fail[0] = 0;
     if (epoch != mi.epoch) {
         mi.epoch = epoch;
-        sync_ctx c = { .r = r, .can_flush = may_flush && !nvn_vk_recording(), .ok = true };
+        sync_ctx c = { .r = r, .can_flush = may_flush, .ok = true };
         for (uint32_t i = 0; i < mi.n && c.ok; i++) {
             mirror *m = mi.v[i];
             if (m->cleared)
@@ -656,3 +676,7 @@ void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs, uint64_t *r
     *syncs = mi.stat_syncs;
     *marked = mi.stat_marked_pages;
 }
+
+uint64_t nvn_mirror_staging_made(void) { return mi.stat_chunks; }
+
+const char *nvn_mirror_failure(void) { return mi.fail[0] ? mi.fail : "the device failed"; }

@@ -639,6 +639,8 @@ int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const
  * submitted in slices. Call it before recording a command that can read a pool. False when the device failed.
  */
 bool nvn_mirror_sync(replay *r, bool may_flush);
+/** @brief Why the last nvn_mirror_sync failed, for the stop report. */
+const char *nvn_mirror_failure(void);
 /** @brief Frees the staging of uploads once the batch that used it completed. */
 void nvn_mirror_flushed(void);
 /**

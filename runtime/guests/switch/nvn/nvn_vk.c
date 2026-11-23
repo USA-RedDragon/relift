@@ -1969,8 +1969,9 @@ int nvn_vk_ring_check(void)
 
 int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what)
 {
-    if (!nvn_mirror_sync(r, !g_recording))
-        return nvn_vk_stop(r, "the host device failed to bring a memory pool up to date for %s", what);
+    if (!nvn_mirror_sync(r, true))
+        return nvn_vk_stop(r, "the host device failed to bring a memory pool up to date for %s: %s", what,
+                           nvn_mirror_failure());
     for (int pass = 0; pass < 2; pass++) {
         uint64_t before = g.flushes;
         int rc = stage(r, arg);

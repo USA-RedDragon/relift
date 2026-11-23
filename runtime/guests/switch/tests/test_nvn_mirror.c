@@ -440,6 +440,49 @@ TEST(nvn_mirror_copies_only_written_pages_across_an_unrelated_map_change)
     rl_settings_set("nvn.memory", "auto");
 }
 
+TEST(nvn_mirror_bounds_a_recording_batch_and_reuses_its_staging)
+{
+    rl_ctx *c = t_boot(NULL);
+    CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        rl_settings_set("nvn.memory", "auto");
+        return;
+    }
+    const uint64_t size = 96ull << 20;
+    uint64_t heap = t_heap(c, size + 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    for (uint64_t o = 0; o < size; o += 4096)
+        rl_st32(m, at + o, (uint32_t)(o >> 12) | 1u);
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    /* The pool's first upload, while a batch records: it is sent in slices, so a few chunks carry all 96 MiB. */
+    uint64_t made0 = nvn_mirror_staging_made();
+    CHECK(nvn_vk_begin(&r));
+    CHECK(nvn_mirror_sync(&r, true));
+    CHECK(nvn_vk_flush(&r));
+    uint64_t made1 = nvn_mirror_staging_made();
+    CHECK(made1 - made0 <= 2);
+    /* Every page again: the chunks of the first upload carry it, none is made. */
+    for (uint64_t o = 0; o < size; o += 4096)
+        rl_st32(m, at + o, (uint32_t)(o >> 12) + 7u);
+    CHECK(nvn_vk_begin(&r));
+    CHECK(nvn_mirror_sync(&r, true));
+    CHECK(nvn_vk_flush(&r));
+    CHECK_EQ(nvn_mirror_staging_made(), made1);
+    /* The device holds the second bytes: copy a word from the last slice and read it back. */
+    CHECK(run_copy(&r, gpu + size - 4096, gpu, 1));
+    CHECK_EQ(rl_ld32(m, at), (uint32_t)((size - 4096) >> 12) + 8u);
+    rl_settings_set("nvn.memory", "auto");
+}
+
 static double ms_now(void)
 {
     struct timespec ts;

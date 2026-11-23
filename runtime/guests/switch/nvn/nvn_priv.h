@@ -695,6 +695,8 @@ void nvn_mirror_written(uint64_t gpu, uint64_t size);
 void nvn_mirror_written_guest(uint64_t guest, uint64_t size);
 /** @brief Notes every byte of every mirror as possibly written: a program stores through addresses it builds itself. */
 void nvn_mirror_written_all(void);
+/** @brief Staging chunks the mirror has made so far, for tests: uploads reuse their chunks from batch to batch. */
+uint64_t nvn_mirror_staging_made(void);
 /**
  * @brief Notes that the batch being recorded runs a program that marks the pages it stores to in the written-page
  * bitmap (NVN_IFACE_GLOBAL_STORE with marks): when the batch completes, the mirror pages marked are noted as written.
