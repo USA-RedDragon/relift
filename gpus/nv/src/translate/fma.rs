@@ -205,7 +205,9 @@ impl Ctx {
     ///   negative only for `-0 + -0`; a zero product gives `c`; infinities
     ///   and NaNs come from the host's own multiply and add on the rebuilt
     ///   factors (an infinite or NaN `c` with finite factors is `c`), NaNs
-    ///   as the guest's `0x7fffffff`.
+    ///   as the guest's `0x7fffffff`. For `.FTZ` in a module that runs with
+    ///   the device flushing as `.FTZ` does, the factors as they are: the
+    ///   device reads a denormal one as the zero `.FTZ` asks for.
     pub(crate) fn float_fma(&mut self, a: u32, b: u32, c: u32, ftz: bool) -> u32 {
         let (ma, ea, fa) = self.bl_parts(a, ftz);
         let (mb, eb, fb) = self.bl_parts(b, ftz);
@@ -296,12 +298,16 @@ impl Ctx {
         let fa = self.cmp_k(op::I_EQUAL, fa, 0xff);
         let fb = self.cmp_k(op::I_EQUAL, fb, 0xff);
         let fc = self.cmp_k(op::I_EQUAL, fc, 0xff);
-        let asign = self.and_k(a, SIGN);
-        let bsign = self.and_k(b, SIGN);
-        let xs = self.bpick(az, asign, ma);
-        let xs = self.bpick(fa, a, xs);
-        let ys = self.bpick(bz, bsign, mb);
-        let ys = self.bpick(fb, b, ys);
+        let (xs, ys) = if ftz && self.dn_dmode() == super::Denorm::Flush {
+            (a, b)
+        } else {
+            let asign = self.and_k(a, SIGN);
+            let bsign = self.and_k(b, SIGN);
+            let xs = self.bpick(az, asign, ma);
+            let xs = self.bpick(fa, a, xs);
+            let ys = self.bpick(bz, bsign, mb);
+            (xs, self.bpick(fb, b, ys))
+        };
         let xs = self.as_float(xs);
         let ys = self.as_float(ys);
         let cf = self.as_float(c);

@@ -172,7 +172,7 @@ impl Ctx {
         false
     }
 
-    fn dn_dmode(&self) -> Denorm {
+    pub(crate) fn dn_dmode(&self) -> Denorm {
         self.denorm.mode.unwrap_or(Denorm::Unknown)
     }
 
