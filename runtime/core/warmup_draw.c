@@ -484,6 +484,10 @@ static bool right_words(const rl_wu_scene *s, char *out, size_t n)
 {
     switch (s->state) {
     case RL_WU_COMPILING:
+        if (s->open) {
+            out[0] = 0;
+            return false;
+        }
         rl_wu_eta_text(s->eta_s, out, n);
         return true;
     case RL_WU_FINISHING:
@@ -639,7 +643,10 @@ static float blocking(ui *u, const rl_wu_scene *s, float x0, float y0, float cw,
         y += 0.6f * r;
         rl_wu_time_text(s->elapsed_ns / 1000000000ull, tmp, sizeof tmp);
         snprintf(l, sizeof l, "Time so far %s", tmp);
-        snprintf(rt, sizeof rt, "%u%%", st == RL_WU_FINISHING ? 100u : rl_wu_percent(s->done, s->total));
+        if (s->open)
+            rt[0] = 0;
+        else
+            snprintf(rt, sizeof rt, "%u%%", st == RL_WU_FINISHING ? 100u : rl_wu_percent(s->done, s->total));
         y += row(u, ix, y, iw, px, l, false, t->muted, rt, t->muted);
     }
 

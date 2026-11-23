@@ -11,6 +11,7 @@
 
 #include <relift/datacheck.h>
 #include <relift/settings.h>
+#include <relift/warmup.h>
 
 #include <errno.h>
 #include <pthread.h>
@@ -197,6 +198,28 @@ static void finish(entry *e, VkPipeline p)
     pthread_mutex_unlock(&P.lock);
 }
 
+/** @brief The calling thread makes the warm-up's own items, which the compile screen counts itself. */
+static _Thread_local bool t_quiet;
+
+void nvn_pipe_screen_quiet(void) { t_quiet = true; }
+
+/** @brief A compile the calling thread waits for is queued: the compile screen counts it. */
+static void screen_queue(void)
+{
+    if (!t_quiet)
+        rl_warmup_queue(1);
+}
+
+/** @brief That compile is done; a pass that has run long enough with no window gets one opened. */
+static void screen_done(bool failed)
+{
+    if (t_quiet)
+        return;
+    rl_warmup_done(1, failed ? 1u : 0u);
+    if (rl_warmup_window_due())
+        (void)nvn_vk_window_early();
+}
+
 /** @brief Creates a graphics pipeline, timing it and counting it as late when it compiles after warm-up. */
 static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *what, VkPipeline *out)
 {
@@ -205,15 +228,20 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
     VkPipelineCreateFlags flags = ci->flags;
     if (probe)
         ci->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    else
+        screen_queue();
     VkResult vr = VK(vkCreateGraphicsPipelines)(g.dev, P.cache, 1, ci, NULL, out);
     bool late = false;
     if (vr == VK_PIPELINE_COMPILE_REQUIRED) {
         ci->flags = flags;
+        screen_queue();
         t0 = rl_clock_ns();
         vr = VK(vkCreateGraphicsPipelines)(g.dev, P.cache, 1, ci, NULL, out);
         late = true;
     }
     uint64_t dt = rl_clock_ns() - t0;
+    if (late || !probe)
+        screen_done(vr != VK_SUCCESS);
     pthread_mutex_lock(&P.lock);
     if (late || !probe) {
         P.made++;
@@ -673,16 +701,21 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
     uint64_t t0 = rl_clock_ns();
     if (probe)
         ci.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    else
+        screen_queue();
     VkPipeline p = NULL;
     VkResult vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
     bool late = false;
     if (vr == VK_PIPELINE_COMPILE_REQUIRED) {
         ci.flags = 0;
+        screen_queue();
         t0 = rl_clock_ns();
         vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
         late = true;
     }
     uint64_t dt = rl_clock_ns() - t0;
+    if (late || !probe)
+        screen_done(vr != VK_SUCCESS);
     pthread_mutex_lock(&P.lock);
     if (late || !probe) {
         P.made++;

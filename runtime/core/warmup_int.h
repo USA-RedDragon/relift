@@ -51,6 +51,8 @@ typedef struct rl_wu_scene {
     bool dark, keyboard;
     /** @brief The window has no game picture yet: the corner card is drawn over a plain background of its own. */
     bool fill;
+    /** @brief The total is the compiles queued so far and still grows: no percent and no time left. */
+    bool open;
     /** @brief The first submit is held for the compile and the game has not started: the blocking card with the "Starting now" note and no buttons. */
     bool starting;
     /** @brief For the corner card: the "Starting now" note shows. */

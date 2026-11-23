@@ -442,3 +442,78 @@ TEST(the_blocking_card_places_its_buttons_by_state)
     rl_wu_draw(&c, &s, &hits);
     CHECK(hits.quit[2] == 0 && hits.start[2] == 0);
 }
+
+TEST(queued_compiles_start_a_pass_whose_card_shows_after_a_second)
+{
+    fresh();
+    rl_warmup_game_started();
+    int32_t d[4];
+    rl_warmup_queue(3);
+    rl_warmup_done(1, 0);
+    CHECK(draw(d) == NULL);
+    g_now += SEC / 2;
+    rl_warmup_queue(2);
+    CHECK(draw(d) == NULL);
+    CHECK(!rl_warmup_window_due());
+    g_now += SEC;
+    CHECK(draw(d) != NULL);
+    rl_warmup_reset();
+}
+
+TEST(a_pass_the_queue_started_has_an_open_total_and_ends_when_all_is_done)
+{
+    fresh();
+    rl_warmup_game_started();
+    rl_warmup_queue(10);
+    g_now += 2 * SEC;
+    int32_t d[4];
+    CHECK(draw(d) != NULL);
+    rl_warmup_done(10, 0);
+    g_now += RL_WU_READY_NS / 2;
+    CHECK(draw(d) != NULL);
+    g_now += 2 * SEC;
+    rl_warmup_queue(1);
+    CHECK(draw(d) == NULL);
+    rl_warmup_done(1, 0);
+    g_now += 20 * SEC;
+    CHECK(draw(d) == NULL);
+    CHECK(!rl_warmup_active());
+    rl_warmup_reset();
+}
+
+TEST(a_short_pass_leaves_nothing_behind_and_the_window_is_asked_for_before_the_game)
+{
+    fresh();
+    rl_warmup_queue(4);
+    CHECK(g_base_on);
+    g_now += 2 * SEC;
+    CHECK(rl_warmup_window_due());
+    rl_warmup_game_started();
+    CHECK(!rl_warmup_window_due());
+    rl_warmup_reset();
+    fresh();
+    rl_warmup_game_started();
+    rl_warmup_queue(4);
+    rl_warmup_done(4, 0);
+    g_now += 10 * SEC;
+    int32_t d[4];
+    CHECK(draw(d) == NULL);
+    CHECK(!rl_warmup_active());
+    rl_warmup_reset();
+}
+
+TEST(failed_compiles_of_a_queued_pass_show_as_failures_that_stay)
+{
+    fresh();
+    rl_warmup_game_started();
+    rl_warmup_queue(5);
+    g_now += 2 * SEC;
+    int32_t d[4];
+    CHECK(draw(d) != NULL);
+    rl_warmup_done(5, 2);
+    g_now += 3 * SEC;
+    CHECK(draw(d) != NULL);
+    g_now += 600 * SEC;
+    CHECK(draw(d) != NULL);
+    rl_warmup_reset();
+}

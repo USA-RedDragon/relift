@@ -396,6 +396,57 @@ static void wu_wake(void) { sdl_wake(); }
 
 static const rl_warmup_host g_wu_host = { wu_base, wu_quit, wu_wake };
 
+/**
+ * @brief RELIFT_WARM_SHOTS=<folder>:<seconds>,<seconds>...: writes the window as the presenter shows it (the compile
+ * screen included) to <folder>/shot-<seconds>.png at those seconds after the loop starts; for checking the screen on
+ * a host without a screenshot tool.
+ */
+static void wu_shots(void)
+{
+    static bool parsed, done;
+    static char dir[1024];
+    static uint32_t secs[16], n, taken;
+    static uint64_t t0;
+    if (done)
+        return;
+    if (!parsed) {
+        parsed = true;
+        t0 = rl_clock_ns();
+        const char *e = getenv("RELIFT_WARM_SHOTS");
+        const char *colon = e ? strrchr(e, ':') : NULL;
+        if (!colon || colon == e || (size_t)(colon - e) >= sizeof dir) {
+            done = true;
+            return;
+        }
+        memcpy(dir, e, (size_t)(colon - e));
+        for (const char *p = colon + 1; *p && n < 16; n++) {
+            secs[n] = (uint32_t)strtoul(p, (char **)&p, 10);
+            if (*p == ',')
+                p++;
+        }
+    }
+    if (taken >= n) {
+        done = true;
+        return;
+    }
+    if ((rl_clock_ns() - t0) / 1000000000ull < secs[taken])
+        return;
+    sdl_win *w = wu_window();
+    uint32_t sw = 0, sh = 0;
+    uint8_t *img = w ? rl_present_snapshot(w->pres, 1500, &sw, &sh) : NULL;
+    char path[1200];
+    snprintf(path, sizeof path, "%s/shot-%02u.png", dir, secs[taken]);
+    taken++;
+    if (!img)
+        return;
+    SDL_Surface *surf = SDL_CreateSurfaceFrom((int)sw, (int)sh, SDL_PIXELFORMAT_RGBA32, img, (int)(sw * 4));
+    if (surf) {
+        SDL_SavePNG(surf, path);
+        SDL_DestroySurface(surf);
+    }
+    free(img);
+}
+
 /** @brief Draws the blocking card into the window's presenter when it changed (loop thread). */
 static void wu_draw(void)
 {
@@ -832,6 +883,7 @@ static void sdl_run(bool (*done)(void *user), void *user)
             publish();
         }
         wu_draw();
+        wu_shots();
         if (rl_text_entry_active() && (g_te.dirty || rl_clock_ns() - __atomic_load_n(&g_te.drawn_ns, __ATOMIC_RELAXED) >=
                                                             TE_BLINK_NS))
             te_draw();

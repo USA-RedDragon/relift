@@ -384,7 +384,6 @@ static void launch_exit(void)
            "shader warm-up done in %.1f s: %u of %u programs, %u refused; the driver compiled %llu in %.1f s of thread "
            "time",
            (rl_clock_ns() - W.t0) / 1e9, W.done, W.total, W.failed, (unsigned long long)made, made_ns / 1e9);
-    rl_warmup_progress(W.total, W.lfailed);
     rl_warmup_saving();
     nvn_pipe_warmed();
     rl_warmup_end();
@@ -397,6 +396,7 @@ static void launch_exit(void)
 static void *launch_worker(void *arg)
 {
     (void)arg;
+    nvn_pipe_screen_quiet();
     for (;;) {
         pthread_mutex_lock(&W.lock);
         job j;
@@ -427,7 +427,7 @@ static void *launch_worker(void *arg)
             W.lfailed++;
             note_failed(i);
         }
-        rl_warmup_progress(W.done, W.lfailed);
+        rl_warmup_done(1, ok ? 0u : 1u);
         progress(false, i < W.nrecorded ? "recorded" : "table");
         pthread_mutex_unlock(&W.lock);
     }
@@ -437,6 +437,7 @@ static void *launch_worker(void *arg)
 static void *pool_worker(void *arg)
 {
     (void)arg;
+    nvn_pipe_screen_quiet();
     for (;;) {
         pthread_mutex_lock(&W.lock);
         job j;

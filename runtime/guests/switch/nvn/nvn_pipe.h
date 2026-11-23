@@ -135,6 +135,11 @@ const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i);
 
 /** @brief Tells the machinery that every pipeline the game will start with exists: a compile after this is late, and logged. */
 void nvn_pipe_warmed(void);
+/**
+ * @brief The calling thread makes the warm-up's own items from now on: the compile screen counts those itself, and
+ * the compiles of every other thread (a late compile a draw waits for) are queued on it as they start.
+ */
+void nvn_pipe_screen_quiet(void);
 
 /** @brief Where a vertex attribute's state comes from (nvn_vertex_attrib_source). */
 enum { NVN_ATTRIB_BOUND, NVN_ATTRIB_CONSTANT, NVN_ATTRIB_UNKNOWN };

@@ -19,6 +19,10 @@
 #define REDRAW_NS (100ull * 1000000ull)
 /** @brief The least time between two wakes of the host (ns). */
 #define WAKE_NS (50ull * 1000000ull)
+/** @brief How long a compile pass the queue started runs before its card shows: a few quick compiles show nothing. */
+#define SHOW_AFTER_NS (1000ull * 1000000ull)
+/** @brief How long every queued compile must have been done before a queue-started pass ends (ns). */
+#define IDLE_NS (1500ull * 1000000ull)
 
 static struct {
     pthread_mutex_t lock;
@@ -26,8 +30,8 @@ static struct {
     rl_warmup_host host;
     int phase, mode;
     uint32_t total, done, failed;
-    uint64_t t0, tend, corner_since, last_wake, last_draw, drawn_sig, drawn_lay;
-    bool dark, keyboard, dismissed, answered, wants_base, started;
+    uint64_t t0, tend, show_at, idle_since, corner_since, last_wake, last_draw, drawn_sig, drawn_lay;
+    bool dark, keyboard, dismissed, answered, wants_base, started, game_up, open, auto_end, shown;
     int answer;
     char name[256], gpu[256], report[1100];
     uint8_t *icon;
@@ -200,7 +204,11 @@ void rl_warmup_begin(uint32_t total, int mode)
     g.t0 = now_ns();
     g.tend = 0;
     g.corner_since = 0;
-    g.dismissed = g.answered = g.started = false;
+    g.dismissed = g.answered = false;
+    g.started = g.game_up;
+    g.open = g.auto_end = g.shown = false;
+    g.show_at = g.t0;
+    g.idle_since = 0;
     g.answer = RL_WARMUP_START;
     g.drawn_sig = g.drawn_lay = 0;
     const char *theme = getenv("RELIFT_WARM_THEME");
@@ -209,9 +217,10 @@ void rl_warmup_begin(uint32_t total, int mode)
     else if (theme && !strcmp(theme, "dark"))
         g.dark = true;
     void (*base)(bool) = g.host.base;
-    g.wants_base = true;
+    g.wants_base = !g.started;
+    bool want_base = g.wants_base;
     pthread_mutex_unlock(&g.lock);
-    if (base)
+    if (want_base && base)
         base(true);
     pthread_mutex_lock(&g.lock);
     wake(true);
@@ -227,6 +236,62 @@ void rl_warmup_progress(uint32_t done, uint32_t failed)
         wake(false);
     }
     pthread_mutex_unlock(&g.lock);
+}
+
+void rl_warmup_queue(uint32_t n)
+{
+    if (!n)
+        return;
+    pthread_mutex_lock(&g.lock);
+    uint64_t now = now_ns();
+    if (g.phase == RL_WARMUP_IDLE || g.phase == RL_WARMUP_FINISHED) {
+        g.phase = RL_WARMUP_COMPILING;
+        g.mode = RL_WARMUP_BACKGROUND;
+        g.total = g.done = g.failed = 0;
+        g.t0 = now;
+        g.show_at = now + SHOW_AFTER_NS;
+        g.tend = g.corner_since = g.idle_since = 0;
+        g.dismissed = g.answered = g.shown = false;
+        g.started = g.game_up;
+        g.auto_end = true;
+        g.open = true;
+        g.answer = RL_WARMUP_START;
+        g.drawn_sig = g.drawn_lay = 0;
+        void (*base)(bool) = g.host.base;
+        g.wants_base = !g.started;
+        bool want_base = g.wants_base;
+        pthread_mutex_unlock(&g.lock);
+        if (want_base && base)
+            base(true);
+        pthread_mutex_lock(&g.lock);
+    } else if (g.total) {
+        g.open = true;
+    }
+    g.total += n;
+    g.idle_since = 0;
+    wake(false);
+    pthread_mutex_unlock(&g.lock);
+}
+
+void rl_warmup_done(uint32_t n, uint32_t failed)
+{
+    pthread_mutex_lock(&g.lock);
+    if (g.phase == RL_WARMUP_COMPILING || g.phase == RL_WARMUP_SAVING) {
+        g.done = g.done + n > g.total ? g.total : g.done + n;
+        g.failed = g.failed + failed > g.done ? g.done : g.failed + failed;
+        if (g.done >= g.total)
+            g.idle_since = now_ns();
+        wake(false);
+    }
+    pthread_mutex_unlock(&g.lock);
+}
+
+bool rl_warmup_window_due(void)
+{
+    pthread_mutex_lock(&g.lock);
+    bool due = (g.phase == RL_WARMUP_COMPILING || g.phase == RL_WARMUP_SAVING) && !g.started && now_ns() >= g.show_at;
+    pthread_mutex_unlock(&g.lock);
+    return due;
 }
 
 void rl_warmup_saving(void)
@@ -264,6 +329,7 @@ void rl_warmup_game_started(void)
     void (*base)(bool) = g.host.base;
     bool had = g.wants_base;
     g.started = true;
+    g.game_up = true;
     if (g.mode == RL_WARMUP_BLOCKING && g.phase != RL_WARMUP_IDLE) {
         g.mode = RL_WARMUP_BACKGROUND;
         g.drawn_sig = g.drawn_lay = 0;
@@ -342,8 +408,22 @@ static int state_of(uint64_t now)
         return g.failed ? RL_WU_ERROR : RL_WU_DONE;
     default: {
         uint32_t s;
-        return rl_wu_eta(g.done, g.total, now - g.t0, &s) ? RL_WU_COMPILING : RL_WU_MEASURING;
+        return rl_wu_eta(g.done, g.total, now - g.t0, &s) || g.open ? RL_WU_COMPILING : RL_WU_MEASURING;
     }
+    }
+}
+
+/** @brief Ends a pass the queue started once its work has been done for IDLE_NS, and drops one that never showed (lock held). */
+static void settle(uint64_t now)
+{
+    if (g.auto_end && g.phase == RL_WARMUP_COMPILING && g.idle_since && now - g.idle_since >= IDLE_NS) {
+        g.phase = RL_WARMUP_FINISHED;
+        g.tend = g.idle_since;
+        g.drawn_sig = g.drawn_lay = 0;
+    }
+    if (g.phase == RL_WARMUP_FINISHED && !g.shown && !g.failed && g.auto_end) {
+        g.phase = RL_WARMUP_IDLE;
+        g.wants_base = false;
     }
 }
 
@@ -351,6 +431,8 @@ static int state_of(uint64_t now)
 static bool visible(uint64_t now)
 {
     if (g.phase == RL_WARMUP_IDLE || g.dismissed)
+        return false;
+    if (g.phase != RL_WARMUP_FINISHED && now < g.show_at)
         return false;
     if (g.mode == RL_WARMUP_BACKGROUND && g.phase == RL_WARMUP_FINISHED && !g.failed && now - g.tend >= RL_WU_READY_NS)
         return false;
@@ -368,9 +450,10 @@ static void scene_of(rl_wu_scene *s, uint64_t now)
     s->failed = g.failed;
     uint64_t end = g.phase == RL_WARMUP_FINISHED ? g.tend : now;
     s->elapsed_ns = end > g.t0 ? end - g.t0 : 0;
-    if (s->state == RL_WU_COMPILING)
+    if (s->state == RL_WU_COMPILING && !g.open)
         rl_wu_eta(g.done, g.total, s->elapsed_ns, &s->eta_s);
     s->dark = g.dark;
+    s->open = g.open;
     s->fill = !g.started;
     s->starting = !g.started && g.mode == RL_WARMUP_BACKGROUND;
     s->keyboard = g.keyboard;
@@ -409,6 +492,7 @@ const uint8_t *rl_warmup_pixels(uint64_t now_ns_, uint32_t *width, uint32_t *hei
     *width = g.view_w;
     *height = g.view_h;
     uint64_t now = g_clock ? g_clock() : now_ns_;
+    settle(now);
     if (!visible(now) || !g.view_w || !g.view_h) {
         if (g.phase == RL_WARMUP_FINISHED && g.mode == RL_WARMUP_BACKGROUND && !g.failed &&
             now - g.tend >= RL_WU_READY_NS)
@@ -419,6 +503,7 @@ const uint8_t *rl_warmup_pixels(uint64_t now_ns_, uint32_t *width, uint32_t *hei
         pthread_mutex_unlock(&g.lock);
         return NULL;
     }
+    g.shown = true;
     if (g.mode == RL_WARMUP_BACKGROUND && !g.corner_since)
         g.corner_since = now;
     if (g.cv_px.w != g.view_w || g.cv_px.h != g.view_h) {
@@ -554,7 +639,8 @@ void rl_warmup_reset(void)
     g.mode = RL_WARMUP_BLOCKING;
     g.total = g.done = g.failed = 0;
     g.t0 = g.tend = g.corner_since = g.last_wake = g.last_draw = g.drawn_sig = g.drawn_lay = 0;
-    g.dismissed = g.answered = g.wants_base = g.drawn = g.started = false;
+    g.dismissed = g.answered = g.wants_base = g.drawn = g.started = g.game_up = g.open = g.auto_end = g.shown = false;
+    g.show_at = g.idle_since = 0;
     g.answer = RL_WARMUP_START;
     g.name[0] = g.gpu[0] = g.report[0] = 0;
     g.icon = NULL;

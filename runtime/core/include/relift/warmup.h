@@ -92,6 +92,16 @@ RL_RUNTIME_API void rl_warmup_set_report(const char *path);
 RL_RUNTIME_API void rl_warmup_begin(uint32_t total, int mode);
 /** @brief The queue's counts: done shaders finished, of which failed were turned down. Absolute, not a change. */
 RL_RUNTIME_API void rl_warmup_progress(uint32_t done, uint32_t failed);
+/**
+ * @brief n more compiles are queued, whatever queued them (a late compile a draw waits for, a warm-up item). With no
+ * compile pass running this starts one whose card shows after a second; its total is open, so no time left is given.
+ * The pass ends by itself once every queued compile has been done for a moment.
+ */
+RL_RUNTIME_API void rl_warmup_queue(uint32_t n);
+/** @brief n queued compiles are done, of which failed were turned down by the driver. */
+RL_RUNTIME_API void rl_warmup_done(uint32_t n, uint32_t failed);
+/** @brief True while a pass has run long enough to show but the game has no window yet: the host should open one. */
+RL_RUNTIME_API bool rl_warmup_window_due(void);
 /** @brief The queue is empty and the cache is being written. */
 RL_RUNTIME_API void rl_warmup_saving(void);
 /** @brief The cache is written: the screen shows the result and goes away (after the failures are answered). */
