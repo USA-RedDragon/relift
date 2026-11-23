@@ -1476,7 +1476,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if (!mods[0])
         return nvn_vk_stop(r, "draw without a vertex program");
     if (mods[3] || mods[4] || mods[2])
-        return nvn_vk_stop(r, "draw with tessellation or geometry programs");
+        return nvn_vk_stop(r, "draw with tessellation or geometry programs (control %s, evaluation %s, geometry %s, mode %u)",
+                           mods[3] ? mods[3]->key : "none", mods[4] ? mods[4]->key : "none",
+                           mods[2] ? mods[2]->key : "none", mode);
     if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(mods[0], mods[1])))
         return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the vertex program writes",
                            mods[1]->key);
