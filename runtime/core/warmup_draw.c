@@ -27,6 +27,10 @@ static pthread_mutex_t g_font_lock = PTHREAD_MUTEX_INITIALIZER;
 static rl_ttf g_fonts[FONTS_MAX];
 static uint32_t g_nfonts, g_added;
 static bool g_shipped;
+/** @brief While set, the calling thread lays glyphs out at one fixed advance (a monospace look from the shipped font). */
+static _Thread_local bool t_mono;
+/** @brief The fixed advance of the monospace look, per em. */
+#define MONO_ADVANCE 0.6f
 
 void rl_wu_add_font(const uint8_t *data, size_t size)
 {
@@ -167,7 +171,7 @@ static float width_n(const char *s, size_t n, float px, bool bold)
             uint32_t cp = next_cp(&p), g;
             const rl_ttf *f = glyph_for(cp, &g);
             if (f)
-                w += rl_ttf_advance(f, g, px) * (bold ? BOLD_ADVANCE : 1.0f);
+                w += t_mono ? px * MONO_ADVANCE : rl_ttf_advance(f, g, px) * (bold ? BOLD_ADVANCE : 1.0f);
         }
         pthread_mutex_unlock(&g_font_lock);
         return w;
@@ -239,7 +243,7 @@ static float text_n(ui *u, float x, float top, float lh, const char *s, size_t n
                 }
                 free(b.px);
             }
-            pen += rl_ttf_advance(f, g, px) * (bold ? BOLD_ADVANCE : 1.0f);
+            pen += t_mono ? px * MONO_ADVANCE : rl_ttf_advance(f, g, px) * (bold ? BOLD_ADVANCE : 1.0f);
         }
         pthread_mutex_unlock(&g_font_lock);
         return w;
@@ -471,7 +475,7 @@ static const char *head_of(int state)
     case RL_WU_FINISHING:
         return "Finishing up";
     case RL_WU_ERROR:
-        return "Some graphics could not be prepared";
+        return "Some shaders could not be compiled";
     case RL_WU_DONE:
         return "Graphics are ready";
     default:
@@ -640,14 +644,11 @@ static float blocking(ui *u, const rl_wu_scene *s, float x0, float y0, float cw,
         snprintf(l, sizeof l, "%s of %s shaders", done_t, total_t);
         bool strong = right_words(s, rt, sizeof rt);
         y += row(u, ix, y, iw, px, l, true, t->text, rt, strong ? t->text : t->muted);
-        y += 0.6f * r;
-        rl_wu_time_text(s->elapsed_ns / 1000000000ull, tmp, sizeof tmp);
-        snprintf(l, sizeof l, "Time so far %s", tmp);
-        if (s->open)
-            rt[0] = 0;
-        else
-            snprintf(rt, sizeof rt, "%u%%", st == RL_WU_FINISHING ? 100u : rl_wu_percent(s->done, s->total));
-        y += row(u, ix, y, iw, px, l, false, t->muted, rt, t->muted);
+        if (!s->open) {
+            y += 0.6f * r;
+            snprintf(l, sizeof l, "%u%%", st == RL_WU_FINISHING ? 100u : rl_wu_percent(s->done, s->total));
+            y += row(u, ix, y, iw, px, l, false, t->muted, "", t->muted);
+        }
     }
 
     /* The result of a run with failures: what it means and where the details are. */
@@ -665,11 +666,13 @@ static float blocking(ui *u, const rl_wu_scene *s, float x0, float y0, float cw,
             y += r;
             float ppx = 1.9f * r, plh = ppx * 1.35f, pw = iw - 2.8f * r;
             run pr = { s->report, false, t->text };
+            t_mono = true;
             float ph = para_height(u, pw, plh, ppx, &pr, 1);
             if (!dry) {
                 rrect(u, ix, y, ix + iw, y + ph + 2.0f * r, 1.2f * r, t->track, 1.0f);
                 para(u, ix + 1.4f * r, y + r, pw, plh, ppx, &pr, 1);
             }
+            t_mono = false;
             y += ph + 2.0f * r;
         }
     } else {

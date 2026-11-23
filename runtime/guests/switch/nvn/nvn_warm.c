@@ -461,6 +461,9 @@ static void launch(void)
     pthread_mutex_lock(&W.lock);
     W.launched = true;
     W.nrecorded = nvn_pipe_recorded();
+    /* A launch with no record has nothing to go by: its queue is the shader table, so the screen has a total. */
+    if (!W.nrecorded)
+        W.all = true;
     W.nshader = W.all ? nvn_shader_count() : 0;
     W.total = W.nrecorded + W.nshader;
     W.t0 = W.last_log = rl_clock_ns();

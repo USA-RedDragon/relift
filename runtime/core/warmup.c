@@ -265,7 +265,8 @@ void rl_warmup_queue(uint32_t n)
             base(true);
         pthread_mutex_lock(&g.lock);
     } else if (g.total) {
-        g.open = true;
+        /* Compiles added to a pass whose total the compile queue gave keep that total's rate: they only add to it. */
+        g.open = g.open || g.auto_end;
     }
     g.total += n;
     g.idle_since = 0;
