@@ -768,6 +768,7 @@ uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
                                         (unsigned long long)c->x[1]);
     s->seq = nvn_vk_submitted();
     s->signaled = true;
+    nvn_trace_order("queue", "nvnQueueFenceSync", c->x[0], 0, 0, &c->x[1], 3, 0, true);
     return nvn_ret(c);
 }
 
@@ -775,6 +776,7 @@ uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
 uint64_t nvnh_nvnQueueWaitSync(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
+    nvn_trace_order("queue", "nvnQueueWaitSync", c->x[0], 0, 0, &c->x[1], 1, 0, true);
     c->x[0] = 1;
     return nvn_ret(c);
 }

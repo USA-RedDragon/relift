@@ -11,10 +11,17 @@
  * layer, in the host image's format). Files are named by a hash of their bytes, so a range that did not change
  * is written once. With RELIFT_NVN_TRACE_GBUFFER set, the trace starts at the first frame after a frame that drew into four
  * or more render targets at once (a deferred renderer's G-buffer pass), at or past <present>. Each traced command submits the batch before and after it so the files show the GPU's work.
+ * Beside it, order.jsonl gives the order everything ran in, one line per event with a running "seq": each submit
+ * ("submit": its queue and its number among all submits), each replayed command ("command": the NVN call, its queue,
+ * submit and index "pos" in the flattened set, its first five argument words, and for event waits and signals the
+ * event's word and whether the wait let the set through; a wait that holds the set appears each time it is checked)
+ * and the queue-level nvnQueueFenceSync and nvnQueueWaitSync calls ("queue"). Each draw and dispatch line of
+ * trace.jsonl carries the same "queue", "submit", "pos" and the "seq" of its order line.
  * The reader is runtime/tools/nvn_trace.py.
  */
 #include "nvn_vk.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,6 +102,39 @@ static uint64_t watch_at, watch_size, watch_hash;
 /** @brief RELIFT_NVN_TRACE_WATCH_POISON=<hex word>: the word the watched range is filled with at each present (0: off). */
 static uint32_t watch_poison;
 static void watch_look(const char *after);
+
+/** @brief The order file of the frame being traced, its next line number, and the lock its writers take. */
+static struct {
+    FILE *f;
+    uint64_t seq;
+    pthread_mutex_t lock;
+} ord = { NULL, 0, PTHREAD_MUTEX_INITIALIZER };
+
+uint64_t nvn_trace_order(const char *kind, const char *name, uint64_t queue, uint64_t submit, uint32_t pos,
+                         const uint64_t *args, uint32_t n, uint32_t value, bool met)
+{
+    if (!__atomic_load_n(&nvn_trace_active, __ATOMIC_ACQUIRE))
+        return 0;
+    pthread_mutex_lock(&ord.lock);
+    uint64_t seq = 0;
+    if (ord.f) {
+        seq = ++ord.seq;
+        fprintf(ord.f, "{\"seq\":%llu,\"frame\":%llu,\"kind\":\"%s\",\"name\":\"%s\",\"queue\":\"0x%llx\",\"submit\":%llu",
+                (unsigned long long)seq, (unsigned long long)g.presents, kind, name, (unsigned long long)queue,
+                (unsigned long long)submit);
+        if (!strcmp(kind, "command"))
+            fprintf(ord.f, ",\"pos\":%u", pos);
+        fprintf(ord.f, ",\"args\":[");
+        for (uint32_t i = 0; i < n; i++)
+            fprintf(ord.f, "%s\"0x%llx\"", i ? "," : "", (unsigned long long)args[i]);
+        fprintf(ord.f, "]");
+        if (!strcmp(name, "nvnCommandBufferWaitEvent") || !strcmp(name, "nvnCommandBufferSignalEvent"))
+            fprintf(ord.f, ",\"value\":%u,\"met\":%d", value, (int)met);
+        fprintf(ord.f, "}\n");
+    }
+    pthread_mutex_unlock(&ord.lock);
+    return seq;
+}
 
 void nvn_trace_image_gone(const vimg *v)
 {
@@ -323,6 +363,11 @@ void nvn_trace_present(replay *r)
     if (tr.out) {
         fclose(tr.out);
         tr.out = NULL;
+        pthread_mutex_lock(&ord.lock);
+        if (ord.f)
+            fclose(ord.f);
+        ord.f = NULL;
+        pthread_mutex_unlock(&ord.lock);
         nvn_trace_active = false;
         tr.done++;
     }
@@ -340,6 +385,11 @@ void nvn_trace_present(replay *r)
     make_dir(sub);
     snprintf(sub, sizeof sub, "%s/trace.jsonl", tr.frame_dir);
     tr.out = fopen(sub, "w");
+    snprintf(sub, sizeof sub, "%s/order.jsonl", tr.frame_dir);
+    pthread_mutex_lock(&ord.lock);
+    ord.f = tr.out ? fopen(sub, "w") : NULL;
+    ord.seq = 0;
+    pthread_mutex_unlock(&ord.lock);
     tr.cmd = 0;
     tr.nseen = 0;
     tr.ncache = 0;
@@ -581,6 +631,8 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
         dump_image(r, tr.tex[i].v, !tr.tex[i].image && !is_target(tr.tex[i].v), tr.tex[i].post);
     fprintf(f, "{\"i\":%llu,\"frame\":%llu,\"kind\":\"%s\"", (unsigned long long)tr.cmd++,
             (unsigned long long)g.presents, tr.kind);
+    fprintf(f, ",\"queue\":\"0x%llx\",\"submit\":%llu,\"pos\":%u,\"seq\":%llu", (unsigned long long)r->queue,
+            (unsigned long long)r->submit, r->pos, (unsigned long long)r->seq);
     if (compute) {
         fprintf(f, ",\"groups\":[%u,%u,%u]", c->groups[0], c->groups[1], c->groups[2]);
         char name[40] = "";

@@ -1010,6 +1010,15 @@ const char *nvn_cmd_name(uint32_t op);
 const nvn_cmdset *nvn_cmdset_of(uint64_t handle);
 /** @brief Runs the command set of handle on queue. Returns RL_OK, or RL_PENDING after a stop. */
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle);
+/**
+ * @brief The frame trace's order file (order.jsonl beside trace.jsonl, nvn_trace.c): one line per submit, per replayed
+ * command (with its queue, submit, index in the set, arguments, and for event waits and signals the event's word and
+ * whether a wait let the set through) and per queue-level sync call. Returns the line's number, 0 when no frame is
+ * traced. kind is "submit", "command" or "queue"; name is the NVN call; args holds n words.
+ */
+uint64_t nvn_trace_order(const char *kind, const char *name, uint64_t queue, uint64_t submit, uint32_t pos,
+                         const uint64_t *args, uint32_t n, uint32_t value, bool met);
+
 /** @brief The guest address of a memory pool's storage and its size, or 0. */
 uint64_t nvn_pool_memory(uint64_t pool, uint64_t *size);
 /**

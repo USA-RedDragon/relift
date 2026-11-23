@@ -51,6 +51,13 @@ typedef struct nvn_sched_ops {
     bool (*flush)(void *user);
     /** @brief The guest word at address addr (an event's value), or NULL. */
     uint32_t *(*word)(void *user, uint64_t addr);
+    /**
+     * @brief Optional: told of each item of a run as the replay reaches it, in replay order: pos is its index in the
+     * run, and for an event wait or signal, value is the event's word after it (a wait's word as it was checked) and
+     * met whether a wait let the run through (always true for other items). A wait that holds the run is told each
+     * time it is checked.
+     */
+    void (*note)(void *user, const nvn_cmd *e, uint32_t pos, uint32_t value, bool met);
 } nvn_sched_ops;
 
 /**

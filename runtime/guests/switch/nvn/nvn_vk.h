@@ -433,6 +433,13 @@ typedef struct replay {
     nvn_gfx *st;
     uint64_t syncs[64];
     uint32_t nsyncs;
+    /**
+     * @brief Where the replay stands, for the frame trace's order file: the queue the set was submitted to, the
+     * submit's number (counting every submit of the process from 1), the index of the command being replayed in the
+     * flattened set, and that command's line number in the order file (0 when no frame is traced).
+     */
+    uint64_t queue, submit, seq;
+    uint32_t pos;
     /** @brief The float result (s0) of the last getter. */
     float fret;
 } replay;

@@ -95,7 +95,12 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     st.storage[2].size = 32;
     st.storage[3].addr = gpu + 0x1000000000ull;
     st.storage[3].size = 64;
-    replay r = { .c = c, .mem = t_mem(), .st = &st };
+    replay r = { .c = c, .mem = t_mem(), .st = &st, .queue = 0xabc0, .submit = 9 };
+    uint64_t nsub[1] = { 2 }, clear[5] = { 1, 0, 0, 0, 0 };
+    CHECK_EQ(nvn_trace_order("submit", "nvnQueueSubmitCommands", 0xabc0, 9, 0, nsub, 1, 0, true), 1);
+    r.pos = 1;
+    r.seq = nvn_trace_order("command", "nvnCommandBufferClearDepthStencil", 0xabc0, 9, 0, clear, 5, 0, true);
+    CHECK_EQ(r.seq, 2);
     memset(t_mem() + buf, 0x11, 32);
     nvn_trace_begin(&r, "dispatch");
     memset(t_mem() + buf, 0x22, 32);
@@ -113,6 +118,7 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
         return;
     CHECK(strstr(line, "\"kind\":\"dispatch\"") != NULL);
     CHECK(strstr(line, "\"groups\":[4,2,1]") != NULL);
+    CHECK(strstr(line, "\"queue\":\"0xabc0\",\"submit\":9,\"pos\":1,\"seq\":2") != NULL);
     CHECK(strstr(line, "\"compute\":{\"key\":\"feedc0de\"") != NULL);
     CHECK(strstr(line, "\"stage\":\"compute\",\"kind\":\"storage\",\"slot\":2") != NULL);
     const char *outside = strstr(line, "\"slot\":3");
@@ -148,6 +154,19 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
         fclose(f);
     }
     free(line);
+    snprintf(path, sizeof path, "%s/frame-0/order.jsonl", dir);
+    char *order = slurp(path, &n);
+    CHECK(order != NULL);
+    if (order) {
+        CHECK(strstr(order, "{\"seq\":1,\"frame\":") != NULL);
+        CHECK(strstr(order, "\"kind\":\"submit\",\"name\":\"nvnQueueSubmitCommands\",\"queue\":\"0xabc0\",\"submit\":9,"
+                            "\"args\":[\"0x2\"]}") != NULL);
+        CHECK(strstr(order, "\"seq\":2,") != NULL);
+        CHECK(strstr(order, "\"kind\":\"command\",\"name\":\"nvnCommandBufferClearDepthStencil\",\"queue\":\"0xabc0\","
+                            "\"submit\":9,\"pos\":0,\"args\":[\"0x1\",\"0x0\",\"0x0\",\"0x0\",\"0x0\"]}") != NULL);
+        free(order);
+    }
+    CHECK_EQ(nvn_trace_order("command", "nvnCommandBufferBarrier", 1, 1, 0, NULL, 0, 0, true), 0);
     c->x[0] = heap;
     c->x[30] = 0x7000000ull;
     nvnh_nvnMemoryPoolFinalize(c, t_mem());

@@ -7,6 +7,7 @@
 #include "tc.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #define RET 0x7000000ull
 
@@ -32,7 +33,7 @@ static bool fake_flush(void *user)
 
 static uint32_t *fake_word(void *user, uint64_t addr) { return &((fake *)user)->words[addr - 1]; }
 
-static const nvn_sched_ops ops = { fake_exec, fake_flush, fake_word };
+static const nvn_sched_ops ops = { fake_exec, fake_flush, fake_word, NULL };
 
 typedef struct step {
     uint32_t op;
@@ -288,4 +289,70 @@ TEST(nvn_update_uniform_buffer_keeps_the_data_it_was_recorded_with)
     CHECK(kept != NULL);
     CHECK_EQ(kept[0], 0x10);
     CHECK_EQ(kept[15], 0x1f);
+}
+
+typedef struct noted {
+    uint32_t op[32], pos[32], value[32];
+    bool met[32];
+    uint32_t n;
+} noted;
+
+static noted g_noted;
+
+static void fake_note(void *user, const nvn_cmd *e, uint32_t pos, uint32_t value, bool met)
+{
+    (void)user;
+    if (g_noted.n < 32) {
+        g_noted.op[g_noted.n] = e->op;
+        g_noted.pos[g_noted.n] = pos;
+        g_noted.value[g_noted.n] = value;
+        g_noted.met[g_noted.n] = met;
+        g_noted.n++;
+    }
+}
+
+/**
+ * @brief The note hook (the frame trace's order file) hears every item in replay order: a command before it runs, an
+ * event wait each time it is checked with the word it saw and whether it let the run through, and a signal with the
+ * word it left.
+ */
+TEST(nvn_sched_notes_each_item_in_replay_order)
+{
+    static const nvn_sched_ops noting = { fake_exec, fake_flush, fake_word, fake_note };
+    memset(&g_noted, 0, sizeof g_noted);
+    fake f = { 0 };
+    nvn_sched sc = { 0 };
+    step a[] = { { NVN_CMD_BARRIER, 1, 0, 0 }, { NVN_CMD_WAIT_EVENT, 0, NVN_EVENT_WAIT_EQUAL, 7 },
+                 { NVN_CMD_BARRIER, 2, 0, 0 } };
+    step b[] = { { NVN_CMD_SIGNAL_EVENT, 0, NVN_EVENT_SIGNAL_WRITE, 7 } };
+    nvn_cmdset *sa = make_set(a, 3), *sb = make_set(b, 1);
+    nvn_sched_run *done = NULL;
+    submit(&sc, 1, sa, &f);
+    CHECK_EQ(nvn_sched_pump(&sc, &noting, &done), RL_OK);
+    submit(&sc, 2, sb, &f);
+    CHECK_EQ(nvn_sched_pump(&sc, &noting, &done), RL_OK);
+    CHECK_EQ(sc.pending, 0);
+    /* The barrier, the wait checked unmet by each pump pass that reaches it (twice in the first pump, once in the
+     * second before the other queue's signal), the signal, the wait met, the barrier after it. */
+    static const uint32_t want[] = { NVN_CMD_BARRIER,       NVN_CMD_WAIT_EVENT, NVN_CMD_WAIT_EVENT, NVN_CMD_WAIT_EVENT,
+                                     NVN_CMD_SIGNAL_EVENT, NVN_CMD_WAIT_EVENT, NVN_CMD_BARRIER };
+    CHECK_EQ(g_noted.n, 7);
+    for (uint32_t i = 0; i < 7 && i < g_noted.n; i++)
+        CHECK_EQ(g_noted.op[i], want[i]);
+    for (uint32_t i = 1; i <= 3; i++) {
+        CHECK_EQ(g_noted.pos[i], 1);
+        CHECK_EQ(g_noted.value[i], 0);
+        CHECK(!g_noted.met[i]);
+    }
+    CHECK_EQ(g_noted.value[4], 7);
+    CHECK(g_noted.met[5]);
+    CHECK_EQ(g_noted.value[5], 7);
+    CHECK_EQ(g_noted.pos[6], 2);
+    while (done) {
+        nvn_sched_run *next = done->next;
+        nvn_sched_run_free(done);
+        done = next;
+    }
+    free(sa);
+    free(sb);
 }

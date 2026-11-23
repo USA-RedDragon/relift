@@ -130,16 +130,23 @@ static int advance(nvn_sched_run *r, const nvn_sched_ops *ops, bool *blocked, bo
                 return ops->exec(r->user, e, r->items[r->pos].s);
             if (e->op == NVN_CMD_WAIT_EVENT) {
                 uint32_t cur = __atomic_load_n(w, __ATOMIC_ACQUIRE);
-                if (!nvn_event_wait_met(cur, (uint32_t)e->x[2], (uint32_t)e->x[3])) {
+                bool met = nvn_event_wait_met(cur, (uint32_t)e->x[2], (uint32_t)e->x[3]);
+                if (ops->note)
+                    ops->note(r->user, e, r->pos, cur, met);
+                if (!met) {
                     *blocked = true;
                     return RL_OK;
                 }
-            } else if ((uint32_t)e->x[2] == NVN_EVENT_SIGNAL_ADD) {
-                __atomic_add_fetch(w, (uint32_t)e->x[5], __ATOMIC_RELEASE);
             } else {
-                __atomic_store_n(w, (uint32_t)e->x[5], __ATOMIC_RELEASE);
+                uint32_t now = (uint32_t)e->x[2] == NVN_EVENT_SIGNAL_ADD
+                                   ? __atomic_add_fetch(w, (uint32_t)e->x[5], __ATOMIC_RELEASE)
+                                   : (__atomic_store_n(w, (uint32_t)e->x[5], __ATOMIC_RELEASE), (uint32_t)e->x[5]);
+                if (ops->note)
+                    ops->note(r->user, e, r->pos, now, true);
             }
         } else {
+            if (ops->note)
+                ops->note(r->user, e, r->pos, 0, true);
             int rc = ops->exec(r->user, e, r->items[r->pos].s);
             if (rc != RL_OK)
                 return rc;

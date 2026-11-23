@@ -3926,9 +3926,17 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
 
 static bool sched_flush(void *user) { return nvn_vk_flush(&((vk_run *)user)->r); }
 
+/** @brief Notes the command the replay reaches in the frame trace's order file (nvn_trace_order). */
+static void sched_note(void *user, const nvn_cmd *e, uint32_t pos, uint32_t value, bool met)
+{
+    replay *r = &((vk_run *)user)->r;
+    r->pos = pos;
+    r->seq = nvn_trace_order("command", nvn_cmd_name(e->op), r->queue, r->submit, pos, &e->x[1], 5, value, met);
+}
+
 static uint32_t *sched_word(void *user, uint64_t addr) { return (uint32_t *)(void *)(((vk_run *)user)->r.mem + addr); }
 
-static const nvn_sched_ops sched_ops = { sched_exec, sched_flush, sched_word };
+static const nvn_sched_ops sched_ops = { sched_exec, sched_flush, sched_word, sched_note };
 
 /** @brief Signals the fence syncs of the finished runs, frees them, and returns the first stop a pump found. */
 static void finish_runs(nvn_sched_run *done)
@@ -3967,7 +3975,10 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         nvn_unlock();
         return nvn_vk_fatal(c, st ? "out of memory queueing a submit" : "more than %u queues", MAX_QUEUES);
     }
-    u->r = (replay){ .c = c, .mem = mem, .s = s, .st = st };
+    static uint64_t submits;
+    u->r = (replay){ .c = c, .mem = mem, .s = s, .st = st, .queue = queue, .submit = ++submits };
+    uint64_t what[1] = { n };
+    nvn_trace_order("submit", "nvnQueueSubmitCommands", queue, u->r.submit, 0, what, 1, 0, true);
     nvn_sched_run *done = NULL;
     int64_t t0 = now_ns();
     int rc = nvn_sched_pump(&sched, &sched_ops, &done);

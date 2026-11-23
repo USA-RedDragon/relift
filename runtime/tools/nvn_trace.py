@@ -7,6 +7,7 @@
   python3 -I nvn_trace.py buffer FRAME_DIR COMMAND STAGE:KIND:SLOT [--when pre|post] [--as f32|u32] [--count N]
   python3 -I nvn_trace.py image FRAME_DIR COMMAND STORAGE [--when pre|post] [--level N] [--layer N] [--ppm FILE]
   python3 -I nvn_trace.py log FRAME_DIR FIRST LAST
+  python3 -I nvn_trace.py order FRAME_DIR [--queue Q] [--name TEXT]
 
 FRAME_DIR is the frame-<n> folder holding trace.jsonl. A command is its number in the trace; an address is a GPU
 or guest address of a buffer, or a storage address of an image, as hex. `writes` lists the commands after which a
@@ -16,6 +17,9 @@ picture (values clamped to 0..1). An image file holds level 0 of every layer, th
 of it, in the host image's format (uncompressed color images; block formats and volumes keep level 0).
 `log` prints the NVN commands the layer replayed before commands FIRST to LAST (names, arguments, the target and
 bytes of inline uniform updates) and each change of the range RELIFT_NVN_TRACE_WATCH names.
+`order` prints order.jsonl, the order the frame's submits, commands, event waits and signals and queue syncs ran in,
+one per line with its queue, submit and index in the set; a draw or dispatch shows its command number in trace.jsonl.
+--queue keeps one queue, --name the lines whose call holds TEXT.
 Standard library only.
 """
 
@@ -105,6 +109,28 @@ def decode(data, vk_format, width, height):
         v = struct.unpack("<%dI" % n, data[: 4 * n])
         return 3, [(small_float(w & 2047, 6), small_float(w >> 11 & 2047, 6), small_float(w >> 22, 5)) for w in v]
     raise SystemExit("image format %d is not decoded by this reader" % vk_format)
+
+
+def cmd_order(frame, queue, name):
+    traced = {c["seq"]: c["i"] for c in load(frame) if c.get("seq")}
+    with open(os.path.join(frame, "order.jsonl")) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            o = json.loads(line)
+            if queue is not None and num(o["queue"]) != queue:
+                continue
+            if name and name not in o["name"]:
+                continue
+            where = "submit %d" % o["submit"] if o["kind"] != "queue" else "queue call"
+            if o["kind"] == "command":
+                where += " pos %d" % o["pos"]
+            extra = ""
+            if "value" in o:
+                extra = " word %d%s" % (o["value"], "" if o["met"] else " (waits)")
+            if o["seq"] in traced:
+                extra += " -> trace command %d" % traced[o["seq"]]
+            print("%6d queue %s %-16s %s %s%s" % (o["seq"], o["queue"], where, o["name"], " ".join(o["args"]), extra))
 
 
 def cmd_summary(frame):
@@ -254,6 +280,10 @@ def main():
     p.add_argument("--level", type=int, default=0)
     p.add_argument("--layer", type=int, default=0)
     p.add_argument("--ppm")
+    p = sub.add_parser("order")
+    p.add_argument("frame")
+    p.add_argument("--queue", type=num)
+    p.add_argument("--name")
     a = ap.parse_args()
     if a.cmd == "summary":
         cmd_summary(a.frame)
@@ -265,6 +295,8 @@ def main():
         cmd_log(a.frame, a.first, a.last)
     elif a.cmd == "buffer":
         cmd_buffer(a.frame, a.command, a.which, a.when, a.as_type, a.count)
+    elif a.cmd == "order":
+        cmd_order(a.frame, a.queue, a.name)
     else:
         cmd_image(a.frame, a.command, a.storage, a.when, a.ppm, a.level, a.layer)
 
