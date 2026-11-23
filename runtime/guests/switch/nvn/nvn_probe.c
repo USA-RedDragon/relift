@@ -166,8 +166,9 @@ static uint32_t den_model(uint32_t model, uint32_t op, uint32_t a, uint32_t b)
  * @brief What a translator correction of a multiplication result res (bits of a * b on the device) does: fix bit 0
  * gives a zero result the sign of the exclusive or of the operands' signs; bit 1 turns a result of exactly the
  * smallest normal number into zero when the product, rounded to 24 bits with an unbounded exponent, is below it (a
- * device that rounds to the denormal grid before it flushes). The translator computes that product by scaling the
- * operand of the smaller exponent by 2^64.
+ * device that rounds to the denormal grid before it flushes). The translator computes that product as (a * 2^64) * b,
+ * normal whenever the device's result is that number, and flushes every result whose scaled product is below
+ * 2^-62, which on a device this fix suits changes only those.
  */
 static uint32_t den_fix(uint32_t fix, uint32_t res, uint32_t a, uint32_t b)
 {

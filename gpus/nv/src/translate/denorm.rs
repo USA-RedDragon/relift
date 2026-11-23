@@ -372,29 +372,13 @@ impl Ctx {
             let sign = self.dn_ub(op::BITWISE_AND, x, sm);
             let u = self.u32t();
             if fix & FIX_ROUND_AFTER != 0 {
-                let mag = self.dn_ku(0x7fff_ffff);
-                let m = self.dn_ub(op::BITWISE_AND, res, mag);
-                let min = self.dn_ku(0x0080_0000);
-                let at_min = self.dn_bc(op::I_EQUAL, m, min);
-                let k23 = self.dn_ku(23);
-                let ff = self.dn_ku(0xff);
-                let ea = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, xs[0], k23);
-                let ea = self.dn_ub(op::BITWISE_AND, ea, ff);
-                let eb = self.dn_ub(op::SHIFT_RIGHT_LOGICAL, xs[1], k23);
-                let eb = self.dn_ub(op::BITWISE_AND, eb, ff);
-                let first = self.dn_bc(op::U_LESS_THAN_EQUAL, ea, eb);
                 let up = self.m.c_f32(0x5f80_0000);
-                let fa_up = self.exact(op::F_MUL, fs[0], up);
-                let fb_up = self.exact(op::F_MUL, fs[1], up);
+                let a = self.exact(op::F_MUL, fs[0], up);
+                let q = self.exact(op::F_MUL, a, fs[1]);
                 let f = self.f32t();
-                let a = self.select(f, first, fa_up, fs[0]);
-                let b = self.select(f, first, fs[1], fb_up);
-                let q = self.exact(op::F_MUL, a, b);
-                let qb = self.as_bits(q);
-                let qm = self.dn_ub(op::BITWISE_AND, qb, mag);
-                let lim = self.dn_ku(0x2080_0000);
-                let small = self.dn_bc(op::U_LESS_THAN, qm, lim);
-                let flush = self.and(at_min, small);
+                let q = self.ext(f, glsl::F_ABS, &[q]);
+                let lim = self.m.c_f32(0x2080_0000);
+                let flush = self.fcmp(op::F_ORD_LESS_THAN, q, lim);
                 res = self.select(u, flush, sign, res);
             }
         }
