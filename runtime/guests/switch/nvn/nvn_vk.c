@@ -1259,6 +1259,9 @@ static struct {
 
 static VkImageSubresourceRange range_of(const vimg *v);
 
+/** @brief Whether g.cb holds commands not yet submitted (nvn_vk_recording). */
+static bool g_recording;
+
 /** @brief Guest address ranges of the open dispatches (or the next one's), each read or written. */
 typedef struct cs_set {
     uint32_t n;
@@ -1361,7 +1364,7 @@ static void cs_close(void)
 
 bool nvn_vk_begin_dispatch(replay *r)
 {
-    if (r->recording && open_cs.open && r->st->compute_overlap && cs_independent())
+    if (g_recording && open_cs.open && r->st->compute_overlap && cs_independent())
         return true;
     return nvn_vk_begin(r);
 }
@@ -1388,7 +1391,8 @@ void nvn_vk_reading(const vimg *v)
 
 void nvn_vk_game_barrier(replay *r)
 {
-    if (!r->recording)
+    (void)r;
+    if (!g_recording)
         return;
     if (open_cs.open)
         cs_close();
@@ -1407,9 +1411,14 @@ void nvn_vk_end_rendering(void)
     nvn_vk_barrier(g.cb);
 }
 
+bool nvn_vk_recording(void) { return g_recording; }
+
+void nvn_vk_assume_recording(bool on) { g_recording = on; }
+
 bool nvn_vk_begin(replay *r)
 {
-    if (r->recording) {
+    (void)r;
+    if (g_recording) {
         nvn_vk_end_rendering();
         cs_close();
         return true;
@@ -1418,7 +1427,7 @@ bool nvn_vk_begin(replay *r)
                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &bi) != VK_SUCCESS)
         return false;
-    r->recording = true;
+    g_recording = true;
     if (!gpu_ts.pool && !gpu_ts.failed && gpu_ts.period_ns > 0) {
         VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                      .queryType = VK_QUERY_TYPE_TIMESTAMP,
@@ -1601,12 +1610,13 @@ static void use_slot(uint32_t s)
     nvn_counters_slot(s);
 }
 
-/** @brief Ends r's command buffer and submits it with the slot's fence; false (logged) when the device refuses. */
+/** @brief Ends the command buffer and submits it with the slot's fence; false (logged) when the device refuses. */
 static bool submit_recorded(replay *r)
 {
+    (void)r;
     nvn_vk_end_rendering();
     cs_close();
-    r->recording = false;
+    g_recording = false;
     nvn_counters_close(g.cb);
     if (gpu_ts.pool)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot + 1);
@@ -1758,7 +1768,7 @@ static bool flush_once(replay *r);
 
 bool nvn_vk_submit(replay *r)
 {
-    if (!r->recording)
+    if (!g_recording)
         return nvn_vk_flush(r);
     uint32_t s = g.slot;
     if (!submit_recorded(r))
@@ -1772,10 +1782,10 @@ bool nvn_vk_submit(replay *r)
     return ok;
 }
 
-/** @brief Submits what r recorded and waits for it and every batch before it, then brings the bytes the device wrote to pool mirrors into guest memory. */
+/** @brief Submits what is recorded, by any replay, and waits for it and every batch before it, then brings the bytes the device wrote to pool mirrors into guest memory. */
 bool nvn_vk_flush(replay *r)
 {
-    bool recorded = r->recording;
+    bool recorded = g_recording;
     bool ok = flush_once(r);
     while (ok && recorded && nvn_mirror_readback_pending())
         ok = nvn_vk_begin(r) && flush_once(r);
@@ -1784,9 +1794,9 @@ bool nvn_vk_flush(replay *r)
 
 static bool flush_once(replay *r)
 {
-    if (r->recording && !submit_recorded(r))
+    if (g_recording && !submit_recorded(r))
         return false;
-    if (!r->recording && g.arena_used) {
+    if (!g_recording && g.arena_used) {
         g.arena_used = 0;
         g.flushes++;
     }
@@ -1936,7 +1946,7 @@ int nvn_vk_ring_check(void)
 
 int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const char *what)
 {
-    if (!nvn_mirror_sync(r, !r->recording))
+    if (!nvn_mirror_sync(r, !g_recording))
         return nvn_vk_stop(r, "the host device failed to bring a memory pool up to date for %s", what);
     for (int pass = 0; pass < 2; pass++) {
         uint64_t before = g.flushes;
@@ -2853,7 +2863,7 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area)
     bool stencil = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
     bool depth = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_DEPTH_BIT);
     *area = (VkRect2D){ { 0, 0 }, { w, h } };
-    if (open_pass.open && r->recording && open_pass.ncolor == r->st->ncolor && open_pass.has_depth == depth && open_pass.has_stencil == stencil &&
+    if (open_pass.open && g_recording && open_pass.ncolor == r->st->ncolor && open_pass.has_depth == depth && open_pass.has_stencil == stencil &&
         (!(depth || stencil) || open_pass.depth == r->st->depth.view) && open_pass.area.extent.width == w &&
         open_pass.area.extent.height == h) {
         bool same = true;

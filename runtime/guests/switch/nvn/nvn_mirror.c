@@ -345,7 +345,7 @@ bool nvn_mirror_sync(replay *r, bool may_flush)
     bool ok = true;
     if (epoch != mi.epoch) {
         mi.epoch = epoch;
-        sync_ctx c = { .r = r, .can_flush = may_flush && !r->recording, .ok = true };
+        sync_ctx c = { .r = r, .can_flush = may_flush && !nvn_vk_recording(), .ok = true };
         for (uint32_t i = 0; i < mi.n && c.ok; i++) {
             mirror *m = mi.v[i];
             if (m->cleared)
@@ -356,10 +356,10 @@ bool nvn_mirror_sync(replay *r, bool may_flush)
                 m->cleared = true;
             }
         }
-        if (c.ok && r->recording)
+        if (c.ok && nvn_vk_recording())
             nvn_vk_barrier(g.cb);
         nvn_track_collect(on_run, &c);
-        if (c.ok && r->recording)
+        if (c.ok && nvn_vk_recording())
             nvn_vk_barrier(g.cb);
         mi.stat_syncs++;
         ok = c.ok;

@@ -389,7 +389,6 @@ typedef struct replay {
     uint8_t *mem;
     const nvn_cmdset *s;
     nvn_gfx *st;
-    bool recording;
     uint64_t syncs[64];
     uint32_t nsyncs;
     /** @brief The float result (s0) of the last getter. */
@@ -449,6 +448,14 @@ void nvn_vk_barrier(VkCommandBuffer cb);
  */
 void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, VkBuffer c0, uint64_t c0_off);
 bool nvn_vk_begin(replay *r);
+/**
+ * @brief Whether the host command buffer holds commands not yet submitted. There is one command buffer for every
+ * replay: what one command set recorded is submitted by whichever replay submits next, so commands that ran for a
+ * set the scheduler resumed (after an event wait) are never dropped by another replay beginning a new buffer.
+ */
+bool nvn_vk_recording(void);
+/** @brief Marks the command buffer as recording or not without touching it: for tests that replay over stand-ins of the device calls. */
+void nvn_vk_assume_recording(bool on);
 
 /**
  * @brief Writes n elements of an integer vertex attribute of format f, read from src stride bytes apart, as four
@@ -456,7 +463,7 @@ bool nvn_vk_begin(replay *r);
  */
 void nvn_expand_integer(const uint8_t *src, uint64_t stride, VkFormat f, uint64_t n, uint32_t *out);
 /**
- * @brief Submits what r recorded and waits for it; the arena is free again
+ * @brief Submits what is recorded (by any replay) and waits for it; the arena is free again
  * after. With nothing recorded, it frees what a command put in the arena
  * before recording (that counts as a submit for nvn_vk_stage).
  */
@@ -473,7 +480,7 @@ const char *nvn_vk_lost_text(void);
 /** @brief Stops the game as rl_guest_fatal does, naming the lost device and its fault first when the device was lost. */
 int nvn_vk_fatal(rl_ctx *c, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 /**
- * @brief Submits what r recorded without waiting for it, from the recording slot: the host device runs it while the
+ * @brief Submits what is recorded (by any replay) without waiting for it, from the recording slot: the host device runs it while the
  * guest goes on and the layer records the next batch into the other slot (NVN_SLOTS). The submit first waits for the
  * batch the other slot still holds, and replay waits at nvn_lock only for batches that may write guest memory
  * (nvn_vk_mark_write); a flush, a sync point and nvn_vk_settle wait for every batch. With nothing recorded, as
@@ -561,7 +568,7 @@ void nvn_mirror_apply_readback(void);
 void nvn_mirror_drop_readback(void);
 /** @brief Bytes uploaded and read back and uploads made, for the stats line. */
 void nvn_mirror_stats(uint64_t *up, uint64_t *down, uint64_t *syncs);
-/** @brief Stops the game with a report (after flushing what r recorded). Returns RL_PENDING. */
+/** @brief Stops the game with a report (after flushing what is recorded). Returns RL_PENDING. */
 int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
 /** @brief The host format of an NVNformat; VK_FORMAT_UNDEFINED for one the layer does not map. */
 VkFormat nvn_vk_format(uint32_t f, VkImageAspectFlags *aspect);

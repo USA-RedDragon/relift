@@ -71,12 +71,13 @@ static void setup(fixture *f)
     f->st.color[0] = (rt){ .v = &f->a, .view = (VkImageView)(uintptr_t)0x10 };
     f->st.compute_overlap = 1;
     f->r.st = &f->st;
-    f->r.recording = true;
+    nvn_vk_assume_recording(true);
 }
 
 static void teardown(fixture *f)
 {
     nvn_vk_end_rendering();
+    nvn_vk_assume_recording(false);
     g.fns = f->saved;
 }
 

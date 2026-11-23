@@ -10,6 +10,7 @@
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
 #include "nvn/nvn_module.h"
+#include "nvn/nvn_sched.h"
 #include "tc.h"
 
 #include <relift/ports.h>
@@ -301,6 +302,46 @@ TEST(nvn_update_uniform_buffer_in_a_pool_lands_in_the_order_the_commands_run)
         CHECK_EQ(t_mem()[mem + 0x200 + i], 0x10 + i);
         CHECK_EQ(t_mem()[mem + 0x100 + i], 0x40 + i);
     }
+}
+
+/** @brief Records into cb a wait for an event's value to equal value, or a signal writing it (the event is set later). */
+static void record_event(rl_ctx *c, uint64_t cb, bool wait, uint32_t value)
+{
+    c->x[0] = cb;
+    c->x[1] = 0;
+    c->x[2] = wait ? NVN_EVENT_WAIT_EQUAL : NVN_EVENT_SIGNAL_WRITE;
+    c->x[3] = value;
+    c->x[4] = 0;
+    c->x[5] = value;
+    c->x[30] = RET;
+    CHECK_EQ((wait ? nvnh_nvnCommandBufferWaitEvent : nvnh_nvnCommandBufferSignalEvent)(c, t_mem()), RET);
+}
+
+TEST(nvn_a_command_set_resumed_inside_another_run_is_submitted)
+{
+    RECORDING(c, heap, cb);
+    IMPORTED_POOL(c, heap, gpu, mem, nvn_a_command_set_resumed_inside_another_run_is_submitted);
+    uint64_t data = heap + 0x2000, word = mem + 0x800;
+    for (unsigned i = 0; i < 16; i++)
+        t_mem()[data + i] = (uint8_t)(0x60 + i);
+    record_event(c, cb, true, 1);
+    update_uniform_buffer(c, cb, gpu, 0x100, data, 16);
+    FINISHED(waiting, c, cb);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    record_event(c, cb, false, 1);
+    FINISHED(signaling, c, cb);
+    /* No event object exists here: the commands get the event word nvn_event_word would give one. */
+    ((nvn_cmd *)&waiting->cmds[0])->x[1] = word;
+    ((nvn_cmd *)&signaling->cmds[0])->x[1] = word;
+    memset(t_mem() + mem, 0, 0x1000);
+    CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x800, waiting), RL_OK);
+    CHECK(nvn_vk_settle());
+    CHECK_EQ(t_mem()[mem + 0x100], 0);
+    CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x900, signaling), RL_OK);
+    CHECK(nvn_vk_settle());
+    CHECK_EQ(rl_ld32(t_mem(), word), 1);
+    for (unsigned i = 0; i < 16; i++)
+        CHECK_EQ(t_mem()[mem + 0x100 + i], 0x60 + i);
 }
 
 TEST(nvn_a_square_2d_array_of_six_layers_is_also_sampled_as_a_cube)
