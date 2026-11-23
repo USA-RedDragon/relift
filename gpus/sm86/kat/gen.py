@@ -545,8 +545,27 @@ def fam_mufu64(r):
                                v('MUFU.RSQ64H', s.mufu(12, 5, 'RSQ64H'), [12])])
 
 
+def fam_ftz_chain(r):
+    """A double to float, FMUL by an immediate 1 (with and without FTZ), back to double: float(x) denormal for
+    many rows, where only the FTZ multiply flushes."""
+    rows = []
+    for e in list(range(1023 - 160, 1023 - 120)) + [1023 - 126, 1023 - 127, 1023 - 149, 1023 - 150, 1023, 0, 2047]:
+        for k in range(8):
+            hi = (r.getrandbits(1) << 31) | (e << 20) | r.getrandbits(20)
+            rows.append((r.getrandbits(32), hi, 0, 0))
+    rows += [(0, 0, 0, 0), (0, 0x80000000, 0, 0), (0, 0x3ff00000, 0, 0), (0, 0x36a00000, 0, 0),
+             (0, 0x37f00000, 0, 0), (0, 0x380fffff, 0, 0), (0xffffffff, 0x380fffff, 0, 0)]
+    while len(rows) < 600:
+        rows.append((r.getrandbits(32), r.getrandbits(32), 0, 0))
+    vs = []
+    for ftz in (0, 1):
+        body = [s.f2f(6, 4, 2, 3), s.fmul_imm(7, 6, 0x3f800000, ftz=ftz), s.f2f(12, 7, 3, 2)]
+        vs.append(v(f'F2F.F32.F64, FMUL{".FTZ" if ftz else ""} 1, F2F.F64.F32', body, [12, 13, 6, 7]))
+    return ('ftz_chain', rows, vs)
+
+
 FAMILIES = [fam_fadd, fam_fmul, fam_ffma, fam_fcmp, fam_f2i, fam_f2i_f16, fam_i2f, fam_f2f, fam_frnd, fam_f2fp,
-            fam_half, fam_int, fam_shf, fam_mufu16, fam_mufu64] + \
+            fam_half, fam_int, fam_shf, fam_mufu16, fam_mufu64, fam_ftz_chain] + \
     [fam_mufu(fn) for fn in ('RCP', 'RSQ', 'SQRT', 'EX2', 'LG2', 'SIN', 'COS')]
 
 

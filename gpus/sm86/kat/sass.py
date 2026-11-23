@@ -133,6 +133,11 @@ def fmul(dst, a, b, rnd=0, ftz=0, sat=0, scale=4, nega=0, negb=0):
                         (84, 3, scale), (72, 1, nega), (63, 1, negb)])
 
 
+def fmul_imm(dst, a, imm, rnd=0, ftz=0, sat=0, scale=4, nega=0):
+    return W(0x020, 4, [(16, 8, dst), (24, 8, a), (32, 32, imm), (78, 2, rnd), (80, 1, ftz), (77, 1, sat),
+                        (84, 3, scale), (72, 1, nega)])
+
+
 def ffma(dst, a, b, c, rnd=0, ftz=0, sat=0, nega=0, negb=0, negc=0):
     return W(0x023, 1, [(16, 8, dst), (24, 8, a), (32, 8, b), (64, 8, c), (78, 2, rnd), (80, 1, ftz),
                         (77, 1, sat), (72, 1, nega), (63, 1, negb), (75, 1, negc)])

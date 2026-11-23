@@ -667,6 +667,26 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
         };
         c.sat_bits(r, sat)
     });
+    // A driver folds a multiplication by 1 or -1 and an addition of -0 to the other operand (or its negation), exact
+    // for IEEE arithmetic, so no arithmetic runs: a NaN operand passes with its payload where the guest gives the
+    // canonical NaN, and where the `.FTZ` path relies on the host's own flush, a denormal operand passes unflushed.
+    // Both are restored on the result (a `.FTZ` result is never a denormal).
+    let k = |c: &Ctx, n: usize| c.m.const32(args[n]);
+    let one = |v: Option<u32>| matches!(v, Some(0x3f80_0000 | 0xbf80_0000));
+    let folds = match name {
+        "FMUL" => one(k(c, 0)) || one(k(c, 1)),
+        "FADD" => k(c, 0) == Some(0x8000_0000) || k(c, 1) == Some(0x8000_0000),
+        _ => (one(k(c, 0)) || one(k(c, 1))) && k(c, 2) == Some(0x8000_0000),
+    };
+    let u = if folds {
+        let u = if ftz { c.flush_in(u) } else { u };
+        let ut = c.u32t();
+        let nan = c.is_nan_bits(u);
+        let q = c.m.c_u32(0x7fff_ffff);
+        c.select(ut, nan, q, u)
+    } else {
+        u
+    };
     c.store_dst(&i.ops[0], u)
 }
 

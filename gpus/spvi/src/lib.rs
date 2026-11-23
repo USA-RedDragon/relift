@@ -426,6 +426,11 @@ pub struct Env {
     pub arrays: HashMap<(u32, u32, u64), u64>,
     pub local_id: [u32; 3],
     pub group_id: [u32; 3],
+    /// Fold as drivers do: a 32-bit OpFMul by a constant 1 or -1 gives the
+    /// other operand (negated for -1) and an OpFAdd of a constant -0 the
+    /// other operand, without arithmetic, so no denormal flush (constants
+    /// reach a called function's parameters as the driver inlines it).
+    pub fold_identity: bool,
 }
 
 pub struct Run<'m> {
@@ -435,6 +440,8 @@ pub struct Run<'m> {
     vals: Vec<V>,
     slots: Vec<V>,
     pub steps: u64,
+    /// The ids whose value comes from a constant (see [`Env::fold_identity`]).
+    known: Vec<bool>,
 }
 
 fn mask(w: u32) -> u64 {
@@ -458,6 +465,7 @@ impl<'m> Run<'m> {
             vals: vec![V::Undef; m.bound],
             slots: Vec::new(),
             steps: 0,
+            known: vec![false; m.bound],
         }
     }
 
@@ -465,6 +473,7 @@ impl<'m> Run<'m> {
         let m = self.m;
         for (id, v) in &m.consts {
             self.vals[*id as usize] = v.clone();
+            self.known[*id as usize] = true;
         }
         for &(id, ty, class, init) in &m.globals {
             let Ty::Ptr(pointee) = *m.ty(ty) else {
@@ -513,7 +522,7 @@ impl<'m> Run<'m> {
             };
             self.vals[id as usize] = v;
         }
-        self.call(m.entry, &[]);
+        self.call(m.entry, &[], &[]);
     }
 
     fn vec3(&self, v: [u32; 3]) -> V {
@@ -528,11 +537,12 @@ impl<'m> Run<'m> {
         self.vals[id as usize].s()
     }
 
-    fn call(&mut self, fid: u32, args: &[V]) -> V {
+    fn call(&mut self, fid: u32, args: &[V], known: &[bool]) -> V {
         let m = self.m;
         let f = &m.funcs[&fid];
-        for (p, a) in f.params.iter().zip(args) {
+        for (k, (p, a)) in f.params.iter().zip(args).enumerate() {
             self.vals[*p as usize] = a.clone();
+            self.known[*p as usize] = known.get(k).copied().unwrap_or(false);
         }
         let mut pc = 0;
         let mut prev_label = 0;
@@ -609,7 +619,8 @@ impl<'m> Run<'m> {
                 }
                 57 => {
                     let args: Vec<V> = a[1..].iter().map(|&i| self.val(i)).collect();
-                    let r = self.call(a[0], &args);
+                    let known: Vec<bool> = a[1..].iter().map(|&i| self.known[i as usize]).collect();
+                    let r = self.call(a[0], &args, &known);
                     if ins.id != 0 {
                         self.vals[ins.id as usize] = r;
                     }
@@ -632,6 +643,9 @@ impl<'m> Run<'m> {
                 _ => {
                     let v = self.op(ins);
                     self.vals[ins.id as usize] = v;
+                    if ins.op == 124 || ins.op == 83 {
+                        self.known[ins.id as usize] = self.known[a[0] as usize];
+                    }
                 }
             }
         }
@@ -1052,6 +1066,9 @@ impl<'m> Run<'m> {
             115 if w == 32 => u64::from((f16_to_f64(x[0] as u16) as f32).to_bits()),
             // float arithmetic
             127 => x[0] ^ 0x8000_0000, // FNegate
+            133 | 129 if self.env.fold_identity && self.folds(op, ids, x).is_some() => {
+                self.folds(op, ids, x).unwrap_or(0)
+            }
             129 | 131 | 133 => {
                 let (p, q) = (f(self.flush_in(x[0])), f(self.flush_in(x[1])));
                 let (s, e) = match op {
@@ -1100,6 +1117,23 @@ impl<'m> Run<'m> {
     fn src_width(&self, id: u32) -> u32 {
         let m = self.m;
         m.width(m.scalar_of(m.id_ty[id as usize]))
+    }
+
+    /// What a driver folds a 32-bit OpFMul (133) or OpFAdd (129) of the ids
+    /// `a` with the values `x` to (see [`Env::fold_identity`]), if anything.
+    fn folds(&self, op: u16, a: &[u32], x: &[u64]) -> Option<u64> {
+        for (k, o) in [(0, 1), (1, 0)] {
+            if !self.known[a[k] as usize] {
+                continue;
+            }
+            match (op, x[k]) {
+                (133, 0x3f80_0000) => return Some(x[o]),
+                (133, 0xbf80_0000) => return Some(x[o] ^ 0x8000_0000),
+                (129, 0x8000_0000) => return Some(x[o]),
+                _ => {}
+            }
+        }
+        None
     }
 
     fn flush_in(&self, v: u64) -> u64 {

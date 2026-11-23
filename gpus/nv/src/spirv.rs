@@ -194,6 +194,8 @@ pub struct Module {
     vars: Option<Vars>,
     /// The label of the block being emitted (see [`Module::block`]).
     block: u32,
+    /// The value of each 32-bit `OpConstant` by id (see [`Module::const32`]).
+    consts32: HashMap<u32, u32>,
 }
 
 /// The values of function variables known in the current block, so loads
@@ -269,7 +271,16 @@ impl Module {
         a.extend_from_slice(args);
         inst(&mut self.types, opcode, &a);
         self.cache.insert(key, i);
+        if opcode == op::CONSTANT && args.len() == 1 {
+            self.consts32.insert(i, args[0]);
+        }
         i
+    }
+
+    /// The bits of a 32-bit `OpConstant` made by this module, or none for
+    /// any other id.
+    pub fn const32(&self, id: u32) -> Option<u32> {
+        self.consts32.get(&id).copied()
     }
 
     pub fn t_void(&mut self) -> u32 {

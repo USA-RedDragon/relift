@@ -32,6 +32,9 @@ const REJECTED: &[&str] = &[
     "HMUL2.FMZ",
     "HFMA2.FMZ",
     "HFMA2.BF16_V2",
+    // Rejected on the hosts without shaderInt64 only (the double precision model).
+    "F2F.F32.F64, FMUL 1, F2F.F64.F32",
+    "F2F.F32.F64, FMUL.FTZ 1, F2F.F64.F32",
 ];
 
 /// How a known mismatch may differ from the device.
@@ -217,6 +220,7 @@ fn exec_pools(
         arrays,
         local_id: [0; 3],
         group_id: [0; 3],
+        fold_identity: true,
     };
     let mut r = Run::new(m, &env, mem);
     r.main();
@@ -677,7 +681,7 @@ macro_rules! families {
 
 families!(
     shf, fadd, fmul, ffma, fcmp, f2i, f2i_f16, i2f, f2f, frnd, f2fp, half, int, mufu_f16, mufu_64h,
-    mufu_rcp, mufu_rsq, mufu_sqrt, mufu_ex2, mufu_lg2, mufu_sin, mufu_cos
+    mufu_rcp, mufu_rsq, mufu_sqrt, mufu_ex2, mufu_lg2, mufu_sin, mufu_cos, ftz_chain
 );
 
 /// The families whose results native math should keep close to the
