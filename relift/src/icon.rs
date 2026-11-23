@@ -392,6 +392,20 @@ pub fn icns(icon: Option<&Icon>, seed: &str) -> Vec<u8> {
     out
 }
 
+/// The generated icon for `seed` as a game icon, for a program whose game
+/// has none of its own: its window, compile screen and launcher then show
+/// the same picture.
+#[must_use]
+pub fn generated_icon(seed: &str) -> Icon {
+    let img = generated(seed);
+    Icon {
+        format: "png".into(),
+        width: u32::try_from(img.width).unwrap_or(0),
+        height: u32::try_from(img.height).unwrap_or(0),
+        data: crate::identity::base64(&encode(&img)),
+    }
+}
+
 /// The PNG bytes of the game's icon. `seed` (the game's name) decides the
 /// generated icon of a game without one.
 #[must_use]

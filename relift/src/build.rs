@@ -1515,7 +1515,7 @@ fn lift_and_emit(
     if touchpad && let Some(t) = relift_input::touchpad_port("switch") {
         ports.add_port(t)?;
     }
-    let doc = crate::info::switch_document(
+    let mut doc = crate::info::switch_document(
         &import,
         &game,
         &placed,
@@ -1526,6 +1526,9 @@ fn lift_and_emit(
     )?;
     if let Some(w) = crate::info::identity_gaps(&import, &game, &doc.identity, name) {
         ui.note(&Line::new().text(w));
+    }
+    if doc.identity.icon.is_none() {
+        doc.identity.icon = Some(crate::icon::generated_icon(name));
     }
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(
