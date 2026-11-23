@@ -1,9 +1,10 @@
 /**
  * @file test_upscale_images.c
  * @brief The upscaler stage on image views, as a guest's frame calls it (place 1): every spatial choice runs on images
- * (nearest picks the pixel the mapping names), FSR 2, the FSR 3 upscaler and relift's TAA with depth and motion vectors
- * keep a still flat picture and a still ramp at ratio 1, and all three rebuild a detailed picture from jittered frames
- * at half size closer with the jitter and motion vectors as DLSS takes them than with either one's sign turned.
+ * (nearest picks the pixel the mapping names) and all but nearest take the game's jitter out of a picture drawn with
+ * it, FSR 2, the FSR 3 upscaler and relift's TAA with depth and motion vectors keep a still flat picture and a still
+ * ramp at ratio 1, and all three rebuild a detailed picture from jittered frames at half size closer with the jitter
+ * and motion vectors as DLSS takes them than with either one's sign turned.
  */
 #include "runner.h"
 
@@ -313,6 +314,76 @@ TEST(upscale_images_spatial_choices_run_on_images)
     }
     image_free(&in);
     image_free(&out);
+}
+
+/** @brief A smooth test picture at render pixel position (x, y), for the spatial choices' jitter. */
+static float smooth(float x, float y)
+{
+    const float tau = 6.2831853f;
+    return 0.5f + 0.2f * sinf(tau * x / 13.0f) + 0.2f * cosf(tau * y / 11.0f);
+}
+
+/**
+ * @brief Spatial choice from a W by H frame of smooth() drawn with the jitter (jx, jy) the way DLSS takes it (a render
+ * pixel's center shows the picture at the center minus the jitter) to twice its size, the stage given the jitter
+ * times jsign; the mean channel difference from smooth() at the output pixels' centers, away from the edges.
+ */
+static double spatial_jittered(uint32_t choice, float jx, float jy, float jsign)
+{
+    enum { W = 48, H = 32, DW = 2 * W, DH = 2 * H };
+    static uint32_t frame[W * H], got[DW * DH];
+    for (uint32_t y = 0; y < H; y++)
+        for (uint32_t x = 0; x < W; x++) {
+            uint32_t c = (uint32_t)lrintf(smooth((float)x + 0.5f - jx, (float)y + 0.5f - jy) * 255.0f);
+            frame[y * W + x] = c | c << 8 | c << 16 | 0xff000000u;
+        }
+    img color = image(W, H, VK_FORMAT_R8G8B8A8_UNORM, 4), dst = image(DW, DH, VK_FORMAT_R8G8B8A8_UNORM, 4);
+    fill(&color, frame);
+    fill(&dst, NULL);
+    rl_post_device d = device();
+    rl_upscaler *u = rl_upscaler_new(&d, choice, RL_UPSCALE_IMAGES);
+    double err = 999.0;
+    rl_upscale_inputs ui = { .color = { .handle = (uint64_t)(uintptr_t)color.view, .width = W, .height = H },
+                             .jitter = { jsign * jx, jsign * jy },
+                             .in = { 0, 0, W, H },
+                             .out = { .handle = (uint64_t)(uintptr_t)dst.view, .width = DW, .height = DH },
+                             .out_rect = { 0, 0, DW, DH } };
+    if (u && run_stage(u, &ui)) {
+        read_back(&dst, got);
+        double sum = 0.0;
+        uint32_t n = 0;
+        for (uint32_t y = 6; y + 6 < DH; y++)
+            for (uint32_t x = 6; x + 6 < DW; x++, n++)
+                sum += fabs((double)(got[y * DW + x] & 0xff) -
+                            255.0 * (double)smooth(((float)x + 0.5f) / 2.0f, ((float)y + 0.5f) / 2.0f));
+        err = sum / n;
+    }
+    rl_upscaler_free(u);
+    image_free(&color);
+    image_free(&dst);
+    return err;
+}
+
+TEST(upscale_spatial_choices_take_out_the_jitter_inside_a_frame)
+{
+    if (!start())
+        return;
+    static const uint32_t choices[] = { RL_UPSCALE_BILINEAR, RL_UPSCALE_SHARP_BILINEAR, RL_UPSCALE_LANCZOS,
+                                        RL_UPSCALE_FSR1 };
+    static const float jit[][2] = { { 0.25f, -0.1667f }, { -0.375f, 0.2778f }, { 0.4375f, -0.4630f } };
+    for (size_t c = 0; c < sizeof choices / sizeof choices[0]; c++)
+        for (size_t j = 0; j < sizeof jit / sizeof jit[0]; j++) {
+            double still = spatial_jittered(choices[c], 0.0f, 0.0f, 1.0f);
+            double taken = spatial_jittered(choices[c], jit[j][0], jit[j][1], 1.0f);
+            double left = spatial_jittered(choices[c], jit[j][0], jit[j][1], 0.0f);
+            double turned = spatial_jittered(choices[c], jit[j][0], jit[j][1], -1.0f);
+            printf("    %s jitter %+.4f,%+.4f: mean difference %.2f taken out, %.2f left in, %.2f turned (%.2f "
+                   "without jitter)\n",
+                   rl_upscale_name(choices[c]), (double)jit[j][0], (double)jit[j][1], taken, left, turned, still);
+            CHECK(taken < left);
+            CHECK(left < turned);
+            CHECK(taken < still + 1.5);
+        }
 }
 
 /**

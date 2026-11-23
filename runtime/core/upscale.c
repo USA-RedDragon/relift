@@ -68,7 +68,7 @@ typedef struct params {
     int32_t src[4], dst[4];
     int32_t src_pitch[2], dst_pitch[2];
     int32_t mode, lobes;
-    float step[2], ratio[2];
+    float step[2], ratio[2], offset[2];
 } params;
 
 /** @brief The push constants of fsr1.comp (Params). */
@@ -77,6 +77,7 @@ typedef struct fsr_params {
     int32_t src_pitch[2], dst_pitch[2];
     int32_t pass;
     float stops;
+    float offset[2];
 } fsr_params;
 
 /** @brief upscale.comp's modes. */
@@ -505,7 +506,9 @@ bool rl_upscaler_record(rl_upscaler *u, uint64_t cmd, const rl_upscale_inputs *i
     u->vkCmdBindPipeline(cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, u->pipe);
     u->vkCmdBindDescriptorSets(cmd, RLVK_PIPELINE_BIND_POINT_COMPUTE, u->layout, 0, 1, &set, 0, NULL);
     if (!fsr) {
-        params pc = { .mode = mode_of(u->choice), .lobes = LANCZOS_LOBES };
+        params pc = { .mode = mode_of(u->choice),
+                      .lobes = LANCZOS_LOBES,
+                      .offset = { in->jitter[0], in->jitter[1] } };
         rl_upscale_steps(&in->in, &in->out_rect, pc.step, pc.ratio);
         memcpy(pc.src, src, sizeof src);
         memcpy(pc.dst, dst, sizeof dst);
@@ -516,7 +519,8 @@ bool rl_upscaler_record(rl_upscaler *u, uint64_t cmd, const rl_upscale_inputs *i
         return true;
     }
     fsr_params pc = { .stops = in->sharpness > 0.0f ? 2.0f * (1.0f - (in->sharpness < 1.0f ? in->sharpness : 1.0f))
-                                                    : FSR1_DEFAULT_STOPS };
+                                                    : FSR1_DEFAULT_STOPS,
+                      .offset = { in->jitter[0], in->jitter[1] } };
     memcpy(pc.src, src, sizeof src);
     memcpy(pc.dst, dst, sizeof dst);
     memcpy(pc.src_pitch, pitch, sizeof pc.src_pitch);

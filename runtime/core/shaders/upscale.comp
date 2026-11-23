@@ -5,7 +5,8 @@
  * a copy at the picture's own size, nearest, bilinear, sharp bilinear and
  * Lanczos with clamping to the four nearest pixels against ringing. One
  * invocation writes one pixel of the output rectangle from the input
- * rectangle; reads outside the input rectangle clamp to its edge. Built
+ * rectangle; reads outside the input rectangle clamp to its edge. All but
+ * the copy sample at the mapped position plus an offset (the jitter). Built
  * twice by gen_post_data.py: with RL_BUFFERS the pictures are buffers of
  * RGBA8 words (the window pipeline's), without it a sampled image in and a
  * storage image out. The C reference is runtime/core/tests/upscale_ref.c.
@@ -13,8 +14,10 @@
 layout(local_size_x = 8, local_size_y = 8) in;
 
 /**
- * @brief Rectangles (x, y, width, height), row pitches in pixels, the mode, Lanczos's lobes, and the input pixels per
- * output pixel and output pixels per input pixel (x, y), divided on the CPU so every device maps alike.
+ * @brief Rectangles (x, y, width, height), row pitches in pixels, the mode, Lanczos's lobes, the input pixels per
+ * output pixel and output pixels per input pixel (x, y), divided on the CPU so every device maps alike, and the
+ * offset in input pixels added to every sample position (the game's projection jitter inside a frame, so a picture
+ * drawn a sub-pixel off each frame comes out still; zero for the window).
  */
 layout(push_constant) uniform Params {
     ivec4 src;
@@ -25,6 +28,7 @@ layout(push_constant) uniform Params {
     int lobes;
     vec2 step;
     vec2 ratio;
+    vec2 offset;
 } pc;
 
 #ifdef RL_BUFFERS
@@ -119,7 +123,7 @@ void main()
     if (o.x >= pc.dst.z || o.y >= pc.dst.w)
         return;
     vec2 ratio = pc.ratio;
-    precise vec2 s = (vec2(o) + 0.5) * pc.step + vec2(pc.src.xy);
+    precise vec2 s = (vec2(o) + 0.5) * pc.step + vec2(pc.src.xy) + pc.offset;
     vec4 v;
     if (pc.mode == MODE_COPY)
         v = fetch(o + pc.src.xy);

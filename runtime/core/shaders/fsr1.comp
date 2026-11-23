@@ -17,7 +17,11 @@ layout(local_size_x = 8, local_size_y = 8) in;
 #define A_GLSL 1
 #include "ffx_a.h"
 
-/** @brief The rectangles (x, y, width, height), row pitches in pixels, the pass and RCAS's sharpness in stops. */
+/**
+ * @brief The rectangles (x, y, width, height), row pitches in pixels, the pass, RCAS's sharpness in stops, and the
+ * offset in input pixels added to EASU's sample positions (the game's projection jitter inside a frame; zero for the
+ * window).
+ */
 layout(push_constant) uniform Params {
     ivec4 src;
     ivec4 dst;
@@ -25,6 +29,7 @@ layout(push_constant) uniform Params {
     ivec2 dst_pitch;
     int pass;
     float stops;
+    vec2 offset;
 } pc;
 
 layout(std430, binding = 1) buffer Work { uvec2 px[]; } work;
@@ -88,6 +93,7 @@ void main()
         AU4 con0, con1, con2, con3;
         vec2 size = vec2(pc.src.zw);
         FsrEasuCon(con0, con1, con2, con3, size.x, size.y, size.x, size.y, float(pc.dst.z), float(pc.dst.w));
+        con0.zw = floatBitsToUint(uintBitsToFloat(con0.zw) + pc.offset);
         AF3 c;
         FsrEasuF(c, AU2(o), con0, con1, con2, con3);
         work.px[o.y * pc.dst.z + o.x] = uvec2(packHalf2x16(c.rg), packHalf2x16(vec2(c.b, 1.0)));
