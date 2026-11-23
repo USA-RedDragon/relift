@@ -107,6 +107,13 @@ typedef struct vimg {
     /** @brief The write stamp its bytes were last written back to its storage at (0 for never), and that write-back's number. */
     uint64_t wb_written, wb_seq;
     /**
+     * @brief Made or bound as a render target without taking the bytes of the newer images over its storage: it takes
+     * those written after sync_since and before it when something reads what it held, and never when a clear of all
+     * of it comes first.
+     */
+    bool sync_pending;
+    uint64_t sync_since;
+    /**
      * @brief The other images over any byte of its storage, listed when the set of images was as g.image_epoch was at
      * alias_epoch (sync_alias lists them again once it changes).
      */
@@ -605,9 +612,16 @@ int nvn_vk_stop(replay *r, const char *fmt, ...) RL_PRINTF(2, 3);
 VkFormat nvn_vk_format(uint32_t f, VkImageAspectFlags *aspect);
 /**
  * @brief Begins dynamic rendering on the queue's render targets, or keeps the open pass when it renders to the same
- * attachments; area gets their common extent.
+ * attachments; area gets their common extent. A target whose sync is pending (vimg.sync_pending) takes the bytes of
+ * the newer images over its storage first, as the pass loads what it holds.
  */
 bool nvn_vk_begin_rendering(replay *r, VkRect2D *area);
+/**
+ * @brief Whether a clear of render target t (its whole aspect) writes every byte of its image: one level and layer,
+ * the bound level 0, no scissor cutting it and no smaller target narrowing the render area. Such a clear first
+ * drops a pending sync (vimg.sync_pending): the bytes it would take are all overwritten.
+ */
+bool nvn_vk_clears_all(const replay *r, const rt *t);
 /**
  * @brief nvn_vk_begin_rendering for a draw whose last pre-raster stage writes Layer when layered: the targets are
  * seen as 2D arrays over the layers every one of them spans (nvn_vk_begin_rendering when that is one).

@@ -2278,8 +2278,12 @@ void nvn_vk_wb_note(vimg *u)
     wb_log[i].stamp = u->written;
 }
 
+static vimg *sync_alias(replay *r, vimg *v);
+
 static bool write_back(replay *r, vimg *u)
 {
+    if (u->sync_pending && !sync_alias(r, u))
+        return false;
     if (nvn_vk_wb_current(u))
         return true;
     int64_t t0 = now_ns();
@@ -2380,14 +2384,42 @@ static bool list_aliases(replay *r, vimg *v)
     return true;
 }
 
+static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred);
+
 /**
  * @brief Brings v up to date with the images over its storage that the
  * GPU wrote after v last took their bytes, oldest first: one of the same rows (see
  * same_rows) by an image copy, any other through its guest storage (it is
- * written back and v filled again from the bytes). Returns v, or NULL with
- * the game stopped when the newer image cannot be written back.
+ * written back and v filled again from the bytes). For an image with its sync
+ * pending (defer_sync), the images written after sync_since and before it.
+ * Returns v, or NULL with the game stopped when the newer image cannot be
+ * written back.
  */
 static vimg *sync_alias(replay *r, vimg *v)
+{
+    if (v->sync_pending) {
+        v->sync_pending = false;
+        return sync_from(r, v, v->sync_since, true);
+    }
+    return sync_from(r, v, v->written, false);
+}
+
+/** @brief Defers v's sync_alias as a render target: what it holds is taken only when read (sync_pending). */
+static vimg *defer_sync(vimg *v)
+{
+    if (!v->sync_pending) {
+        v->sync_pending = true;
+        v->sync_since = v->written;
+    }
+    return v;
+}
+
+/**
+ * @brief sync_alias from the images written after since, each source with its own sync pending brought up to date
+ * first; deferred: v's sync was deferred (defer_sync) and it keeps its own write stamp, taking only images written
+ * before it.
+ */
+static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred)
 {
     if (v->alias_epoch != g.image_epoch && !list_aliases(r, v))
         return NULL;
@@ -2395,11 +2427,13 @@ static vimg *sync_alias(replay *r, vimg *v)
         vimg *src = NULL;
         for (uint32_t i = 0; i < v->naliases; i++) {
             vimg *u = v->aliases[i];
-            if (u->written > v->written && (!src || u->written < src->written))
+            if (u->written > since && (!deferred || u->written < v->written) && (!src || u->written < src->written))
                 src = u;
         }
         if (!src)
             return v;
+        if (src->sync_pending && !sync_alias(r, src))
+            return NULL;
         if (src->storage == v->storage && same_rows(&src->d, &v->d) && copy_keeps_bytes(src, v)) {
             uint32_t h = src->d.height < v->d.height ? src->d.height : v->d.height;
             nvn_vk_begin(r);
@@ -2417,13 +2451,15 @@ static vimg *sync_alias(replay *r, vimg *v)
                         src->d.width, src->d.height);
             return NULL;
         }
-        v->written = src->written;
+        since = src->written;
+        if (!deferred)
+            v->written = since;
     }
 }
 
 void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
 
-static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex);
+static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool target);
 
 #define MAX_QUEUES 16u
 
@@ -2545,8 +2581,11 @@ bool nvn_vk_sync_aliases(replay *r, uint64_t since)
     return true;
 }
 
-/** @brief The host image of the texture at guest address tex, made and filled from its storage the first time. */
-static vimg *image_of(replay *r, uint64_t tex)
+/**
+ * @brief The host image of the texture at guest address tex, made and filled from its storage the first time; target:
+ * for a render target, whose sync with the newer images over its storage waits for a read (defer_sync).
+ */
+static vimg *image_of_use(replay *r, uint64_t tex, bool target)
 {
     nvn_tex_desc dd;
     const nvn_tex_desc *d = nvn_texture_desc(tex, &dd) ? &dd : NULL;
@@ -2556,8 +2595,10 @@ static vimg *image_of(replay *r, uint64_t tex)
         nvn_vk_fatal(r->c, "0x%llx is not a texture (%s)", (unsigned long long)tex, gone);
         return NULL;
     }
-    return image_of_desc(r, d, tex);
+    return image_of_desc(r, d, tex, target);
 }
+
+static vimg *image_of(replay *r, uint64_t tex) { return image_of_use(r, tex, false); }
 
 #define IMAGE_BUCKETS 8192u
 
@@ -2593,9 +2634,9 @@ static uint32_t first_at(uint64_t storage)
 
 /**
  * @brief The host image of the texture d describes over its storage, made and filled from the storage the first
- * time; tex names the texture it came from in reports.
+ * time; tex names the texture it came from in reports; target as for image_of_use.
  */
-static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
+static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool target)
 {
     nvn_vk_retire_images();
     uint64_t pool_size = 0;
@@ -2612,7 +2653,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
         if (v->d.format == d->format && v->d.width == d->width && v->d.height == d->height &&
             v->d.depth == d->depth && v->d.levels == d->levels && v->d.target == d->target &&
             v->d.samples == d->samples && v->d.flags == d->flags)
-            return sync_alias(r, v);
+            return target ? defer_sync(v) : sync_alias(r, v);
     }
     VkImageAspectFlags aspect;
     VkFormat f = nvn_vk_format(d->format, &aspect);
@@ -2746,7 +2787,10 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex)
         by_storage.epoch = g.image_epoch + 1;
     }
     g.image_epoch++;
-    sync_alias(r, v);
+    if (target)
+        defer_sync(v);
+    else
+        sync_alias(r, v);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "host image for texture 0x%llx: storage 0x%llx, format %u (%d), %ux%u",
                (unsigned long long)tex, (unsigned long long)storage, d->format, (int)f, d->width, d->height);
@@ -2923,6 +2967,11 @@ bool nvn_vk_begin_rendering(replay *r, VkRect2D *area) { return nvn_vk_begin_ren
 
 bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
 {
+    for (uint32_t i = 0; i < r->st->ncolor; i++)
+        if (r->st->color[i].v && r->st->color[i].v->sync_pending && !sync_alias(r, r->st->color[i].v))
+            return false;
+    if (r->st->depth.v && r->st->depth.v->sync_pending && !sync_alias(r, r->st->depth.v))
+        return false;
     VkRenderingAttachmentInfo ca[MAX_RT], da = { 0 };
     VkImageView cv[MAX_RT], dv = NULL;
     uint32_t w = UINT32_MAX, h = UINT32_MAX;
@@ -3055,6 +3104,24 @@ int nvn_vk_stop(replay *r, const char *fmt, ...)
     return rl_guest_fatal(r->c, "nvn", "%s", msg);
 }
 
+bool nvn_vk_clears_all(const replay *r, const rt *t)
+{
+    VkImageSubresourceRange rr = range_of(t->v);
+    if (rr.levelCount != 1 || rr.layerCount != 1 || t->level || t->v->d.depth > 1)
+        return false;
+    uint32_t w = t->v->d.width, h = t->v->d.height;
+    for (uint32_t i = 0; i < r->st->ncolor; i++) {
+        const rt *o = &r->st->color[i];
+        if (o->v && ((o->v->d.width >> o->level) < w || (o->v->d.height >> o->level) < h))
+            return false;
+    }
+    const rt *d = &r->st->depth;
+    if (d->v && ((d->v->d.width >> d->level) < w || (d->v->d.height >> d->level) < h))
+        return false;
+    VkRect2D full = { { 0, 0 }, { w, h } }, c = clip(r, full);
+    return c.offset.x == 0 && c.offset.y == 0 && c.extent.width == w && c.extent.height == h;
+}
+
 static int clear_color(replay *r, const nvn_cmd *e)
 {
     uint32_t idx = (uint32_t)e->x[1], mask = (uint32_t)e->x[3];
@@ -3067,6 +3134,8 @@ static int clear_color(replay *r, const nvn_cmd *e)
         return RL_OK;
     if (mask != 0xf)
         return nvn_vk_stop(r, "%s with channel mask 0x%x", nvn_cmd_name(e->op), mask);
+    if (r->st->color[idx].v->sync_pending && nvn_vk_clears_all(r, &r->st->color[idx]))
+        r->st->color[idx].v->sync_pending = false;
     VkRect2D area;
     if (!nvn_vk_begin_rendering(r, &area))
         return nvn_vk_stop(r, "%s without render targets", nvn_cmd_name(e->op));
@@ -3100,6 +3169,8 @@ static int clear_depth_stencil(replay *r, const nvn_cmd *e)
         aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
     if (!aspect)
         return RL_OK;
+    if (r->st->depth.v->sync_pending && aspect == r->st->depth.v->aspect && nvn_vk_clears_all(r, &r->st->depth))
+        r->st->depth.v->sync_pending = false;
     VkRect2D area;
     nvn_vk_begin_rendering(r, &area);
     VkClearAttachment ca = { .aspectMask = aspect, .clearValue.depthStencil = { depth, stencil & 0xff } };
@@ -3183,7 +3254,7 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
     memset(t, 0, sizeof *t);
     if (!tex)
         return RL_OK;
-    if (!(t->v = image_of(r, tex)))
+    if (!(t->v = image_of_use(r, tex, true)))
         return RL_PENDING;
     t->format = VK_FORMAT_UNDEFINED;
     nvn_vk_written(t->v);
@@ -3196,7 +3267,7 @@ static int target_of(replay *r, uint64_t tex, const uint8_t *view, rt *t)
         nvn_tex_desc alias_desc;
         if (nv.has_format && nv.format != t->v->d.format && (!nv.has_levels || nv.base_level == 0) &&
             nvn_vk_block_alias(&t->v->d, nv.format, &alias_desc)) {
-            if (!(t->v = image_of_desc(r, &alias_desc, tex)))
+            if (!(t->v = image_of_desc(r, &alias_desc, tex, true)))
                 return RL_PENDING;
             nvn_vk_written(t->v);
         }

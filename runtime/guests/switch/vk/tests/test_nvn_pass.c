@@ -464,3 +464,38 @@ TEST(nvn_dispatches_run_one_after_another_unless_the_game_set_the_overlap_mode)
     CHECK_EQ(calls.barriers, before + 2);
     teardown(&f);
 }
+
+TEST(nvn_a_clear_of_a_whole_one_level_target_writes_all_of_it)
+{
+    static fixture f;
+    setup(&f);
+    f.a.d.target = 1;
+    f.a.d.levels = 1;
+    CHECK(nvn_vk_clears_all(&f.r, &f.st.color[0]));
+    f.st.scissor_set = true;
+    f.st.scissor = (VkRect2D){ { 0, 0 }, { 64, 32 } };
+    CHECK(nvn_vk_clears_all(&f.r, &f.st.color[0]));
+    f.st.scissor.extent.width = 63;
+    CHECK(!nvn_vk_clears_all(&f.r, &f.st.color[0]));
+    f.st.scissor_set = false;
+    f.st.ncolor = 2;
+    f.b.d.width = 32;
+    f.st.color[1] = (rt){ .v = &f.b, .view = (VkImageView)(uintptr_t)0x20 };
+    CHECK(!nvn_vk_clears_all(&f.r, &f.st.color[0]));
+    f.st.ncolor = 1;
+    f.a.d.levels = 2;
+    CHECK(!nvn_vk_clears_all(&f.r, &f.st.color[0]));
+    teardown(&f);
+}
+
+TEST(nvn_a_target_with_its_sync_pending_is_brought_up_to_date_when_its_pass_begins)
+{
+    static fixture f;
+    setup(&f);
+    f.a.sync_pending = true;
+    VkRect2D area;
+    CHECK(nvn_vk_begin_rendering(&f.r, &area));
+    CHECK(!f.a.sync_pending);
+    CHECK_EQ(calls.begins, 1u);
+    teardown(&f);
+}
