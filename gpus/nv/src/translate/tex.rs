@@ -83,7 +83,7 @@
 
 use super::mem::tuple_reg;
 use super::uniform;
-use super::{Code, Ctx, Res, TEXTURE_SET, bad, cfg};
+use super::{Code, Ctx, Res, TEXTURE_SET, UNIFORM, bad, cfg};
 use crate::fields::Handle;
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
@@ -92,6 +92,8 @@ use std::collections::BTreeMap;
 
 const UNIFORM_CONSTANT: u32 = 0;
 const STORAGE_BUFFER: u32 = 12;
+const PRIVATE: u32 = 6;
+const OP_ARRAY_LENGTH: u16 = 68;
 const IMAGE_CLASS: u32 = 11;
 const NON_UNIFORM: u32 = 5300;
 const COHERENT: u32 = 23;
@@ -255,6 +257,10 @@ pub(crate) struct Prep {
     starts: Vec<bool>,
     imm: Vec<Option<(u8, u32)>>,
     vars: BTreeMap<u32, u32>,
+    /// The private variable that holds the numeric kind of each bound
+    /// handle's texture, filled once at the program's entry
+    /// ([`Ctx::kind_prologue`]).
+    kinds: BTreeMap<(u32, u32), u32>,
     /// Instructions that may run just before each instruction; `None` when
     /// the program has control flow this does not follow (indirect
     /// branches, calls, BREAK).
@@ -778,18 +784,98 @@ impl Ctx {
         self.tx_opk(op::BITWISE_AND, w, 0xff)
     }
 
-    /// The [`Kind`] of the texture whose id handle `h` holds, from the
-    /// runtime's table ([`TEXTURE_DIMS_BINDING`]).
-    fn texture_kind_of(&mut self, h: u32) -> u32 {
-        let w = self.texture_word_of(h);
-        self.tx_opk(op::SHIFT_RIGHT_LOGICAL, w, 8)
+    /// The [`Kind`] of the texture bound handle `key` names: a private
+    /// variable [`Ctx::kind_prologue`] fills once at entry, so a fetch in
+    /// a loop reads a value its draw keeps, not the table.
+    fn texture_kind_of(&mut self, key: (u32, u32)) -> u32 {
+        let u = self.u32t();
+        let var = match self.tex.kinds.get(&key) {
+            Some(&v) => v,
+            None => {
+                self.texture_dims_var();
+                self.cbuf_var(key.0).ok();
+                let p = self.m.t_ptr(PRIVATE, u);
+                let var = self.m.id();
+                let z = self.m.c_u32(0);
+                crate::spirv::inst(&mut self.m.types, op::VARIABLE, &[p, var, PRIVATE, z]);
+                self.globals.push(var);
+                self.tex.kinds.insert(key, var);
+                var
+            }
+        };
+        self.m.emit(op::LOAD, u, &[var])
+    }
+
+    /// The instructions that fill the kind variables of
+    /// [`Ctx::texture_kind_of`]: each bound handle's word of its constant
+    /// bank, its texture id (clamped to the table, since a draw may leave
+    /// a handle it never samples unset), and bits 8 and up of that
+    /// texture's word of the runtime's table ([`TEXTURE_DIMS_BINDING`]). Placed at the entry
+    /// of `main`, where only constants are known.
+    pub(crate) fn kind_prologue(&mut self) -> Vec<u32> {
+        let mut out = Vec::new();
+        let kinds: Vec<((u32, u32), u32)> = self.tex.kinds.iter().map(|(&k, &v)| (k, v)).collect();
+        if kinds.is_empty() {
+            return out;
+        }
+        let u = self.u32t();
+        let pu = self.m.t_ptr(UNIFORM, u);
+        let ps = self.m.t_ptr(STORAGE_BUFFER, u);
+        let dims = self.texture_dims_var();
+        let zero = self.m.c_u32(0);
+        let mask = self.m.c_u32(0xfffff);
+        let eight = self.m.c_u32(8);
+        let one = self.m.c_u32(1);
+        let glsl_set = self.glsl;
+        for ((bank, off), var) in kinds {
+            let Ok(cb) = self.cbuf_var(bank) else {
+                continue;
+            };
+            let vi = self.m.c_u32(off / 16);
+            let ci = self.m.c_u32((off / 4) % 4);
+            let (a, h, id, b, w, k) = (
+                self.m.id(),
+                self.m.id(),
+                self.m.id(),
+                self.m.id(),
+                self.m.id(),
+                self.m.id(),
+            );
+            crate::spirv::inst(&mut out, op::ACCESS_CHAIN, &[pu, a, cb, zero, vi, ci]);
+            crate::spirv::inst(&mut out, op::LOAD, &[u, h, a]);
+            crate::spirv::inst(&mut out, op::BITWISE_AND, &[u, id, h, mask]);
+            let (len, last, at) = (self.m.id(), self.m.id(), self.m.id());
+            crate::spirv::inst(&mut out, OP_ARRAY_LENGTH, &[u, len, dims, 0]);
+            crate::spirv::inst(&mut out, op::I_SUB, &[u, last, len, one]);
+            crate::spirv::inst(
+                &mut out,
+                op::EXT_INST,
+                &[u, at, glsl_set, glsl::U_MIN, id, last],
+            );
+            crate::spirv::inst(&mut out, op::ACCESS_CHAIN, &[ps, b, dims, zero, at]);
+            crate::spirv::inst(&mut out, op::LOAD, &[u, w, b]);
+            crate::spirv::inst(&mut out, op::SHIFT_RIGHT_LOGICAL, &[u, k, w, eight]);
+            crate::spirv::inst(&mut out, op::STORE, &[var, k]);
+        }
+        out
     }
 
     /// The word of the runtime's table ([`TEXTURE_DIMS_BINDING`]) for the
     /// texture whose id handle `h` holds.
     fn texture_word_of(&mut self, h: u32) -> u32 {
         let u = self.u32t();
-        let var = match self.tex.vars.get(&TEXTURE_DIMS_BINDING) {
+        let var = self.texture_dims_var();
+        let id = self.and_k(h, 0xfffff);
+        let z = self.m.c_u32(0);
+        let pu = self.m.t_ptr(STORAGE_BUFFER, u);
+        let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, z, id]);
+        self.m.emit(op::LOAD, u, &[p])
+    }
+
+    /// The runtime's table of texture words ([`TEXTURE_DIMS_BINDING`]).
+    fn texture_dims_var(&mut self) -> u32 {
+        let u = self.u32t();
+        match self.tex.vars.get(&TEXTURE_DIMS_BINDING) {
             Some(&v) => v,
             None => {
                 let arr = self.m.t_runtime_array(u);
@@ -807,12 +893,7 @@ impl Ctx {
                 self.iface.texture_bindings.insert(TEXTURE_DIMS_BINDING);
                 var
             }
-        };
-        let id = self.and_k(h, 0xfffff);
-        let z = self.m.c_u32(0);
-        let pu = self.m.t_ptr(STORAGE_BUFFER, u);
-        let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, z, id]);
-        self.m.emit(op::LOAD, u, &[p])
+        }
     }
 
     fn tx_i32(&mut self) -> u32 {
@@ -973,8 +1054,8 @@ impl Ctx {
         let b = self.boolt();
         let zero = self.m.c_u32(0);
         let one = self.m.c_u32(1);
-        let (is_f, is_s) = if let Some(h) = h {
-            let kc = self.texture_kind_of(h);
+        let (is_f, is_s) = if h.is_some() {
+            let kc = self.texture_kind_of(key);
             (
                 self.m.emit(op::I_EQUAL, b, &[kc, zero]),
                 self.m.emit(op::I_EQUAL, b, &[kc, one]),

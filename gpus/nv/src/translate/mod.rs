@@ -1185,7 +1185,10 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
             crate::spirv::inst(&mut decls, op::STORE, &[v, k]);
         }
     }
+    let n = decls.len();
     c.m.body.splice(var_at..var_at, decls);
+    let kinds = c.kind_prologue();
+    c.m.body.splice(var_at + n..var_at + n, kinds);
     io::finish(&mut c, entry);
     io::vtg::modes(&mut c, entry)?;
     let mut iface: Vec<u32> = Vec::new();

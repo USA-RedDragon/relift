@@ -98,6 +98,10 @@ fn bound_texture_uses_the_pools() {
     );
     assert!(insts(&s.spirv, 52).is_empty());
     assert!(!insts(&s.spirv, 194).is_empty());
+    assert!(
+        insts(&s.spirv, 59).iter().any(|v| v.get(3) == Some(&6)),
+        "the kind is kept in a private variable filled at entry"
+    );
 }
 
 #[test]
