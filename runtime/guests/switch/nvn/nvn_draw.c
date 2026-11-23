@@ -1549,18 +1549,21 @@ static void count_command(void);
  * @brief What the graphics stages first to last (task and mesh included) of a draw may write: their global stores
  * (the written-page marks or every page), and their storage buffer slots, as written for the mirror and the guest.
  */
-static void mark_stage_writes(const nvn_gfx *st, module *const *mods, uint32_t first, uint32_t last)
+static int mark_stage_writes(replay *r, const nvn_gfx *st, module *const *mods, uint32_t first, uint32_t last)
 {
     for (uint32_t s = first; s <= last && s < NVN_STAGES; s++) {
         if (s == NVN_STAGE_COMPUTE || !mods[s])
             continue;
         if (mods[s]->marks_pages)
             nvn_mirror_written_marked();
+        else if (mods[s]->global_store && !nvn_mirror_takes_unmarked())
+            return nvn_mirror_refuse_unmarked(r, mods[s]->key);
         else if (mods[s]->global_store)
             nvn_mirror_written_all();
         for (uint32_t j = 0; mods[s]->stores_guest && j < NVN_STORAGE_SLOTS; j++)
             nvn_vk_mark_write_range(nvn_gpu_guest(st->gstorage[s][j].addr), st->gstorage[s][j].size);
     }
+    return RL_OK;
 }
 static void note_last(const char *kind, module *const *mods, uint32_t n);
 static bool trace_buffer(void);
@@ -1661,7 +1664,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
         return rc;
-    mark_stage_writes(st, mods, 0, 4);
+    if ((rc = mark_stage_writes(r, st, mods, 0, 4)) != RL_OK)
+        return rc;
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
@@ -2004,7 +2008,7 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
         rc = draw_mesh_compute(r, mods, &k, &mi, task ? &ti : NULL, first, count);
     }
     if (rc == RL_OK)
-        mark_stage_writes(st, mods, 1, NVN_STAGES - 1);
+        rc = mark_stage_writes(r, st, mods, 1, NVN_STAGES - 1);
     return rc;
 }
 
@@ -2583,8 +2587,8 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     }
     if (m->marks_pages)
         nvn_mirror_written_marked();
-    else if (m->global_store)
-        nvn_mirror_written_all();
+    else if (m->global_store && !nvn_mirror_takes_unmarked())
+        return nvn_mirror_refuse_unmarked(r, m->key);
     if (ibuf)
         nvn_vk_begin(r);
     else

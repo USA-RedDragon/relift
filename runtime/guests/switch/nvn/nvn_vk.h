@@ -641,6 +641,8 @@ int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const
 bool nvn_mirror_sync(replay *r, bool may_flush);
 /** @brief Why the last nvn_mirror_sync failed, for the stop report. */
 const char *nvn_mirror_failure(void);
+/** @brief Stops the replay: program key stores without page marks while pools are mirrored (the table's device imports). */
+int nvn_mirror_refuse_unmarked(replay *r, const char *key);
 /** @brief Frees the staging of uploads once the batch that used it completed. */
 void nvn_mirror_flushed(void);
 /**

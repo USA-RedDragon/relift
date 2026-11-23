@@ -483,6 +483,25 @@ TEST(nvn_mirror_bounds_a_recording_batch_and_reuses_its_staging)
     rl_settings_set("nvn.memory", "auto");
 }
 
+TEST(nvn_mirror_refuses_a_program_that_stores_without_marks)
+{
+    rl_ctx *c = t_boot(NULL);
+    CHECK(nvn_mirror_takes_unmarked());
+    CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        rl_settings_set("nvn.memory", "auto");
+        return;
+    }
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    CHECK(nvn_pool_make(pool, at, 16 * hp, 0));
+    CHECK(!nvn_mirror_takes_unmarked());
+    rl_settings_set("nvn.memory", "auto");
+}
+
 static double ms_now(void)
 {
     struct timespec ts;

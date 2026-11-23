@@ -441,6 +441,19 @@ void nvn_mirror_written_guest(uint64_t guest, uint64_t size)
     pthread_mutex_unlock(&mi.lock);
 }
 
+bool nvn_mirror_takes_unmarked(void) { return __atomic_load_n(&mi.n, __ATOMIC_ACQUIRE) == 0; }
+
+int nvn_mirror_refuse_unmarked(replay *r, const char *key)
+{
+    return nvn_vk_stop(r,
+                       "program %s stores through addresses it builds and its translation does not mark the pages it "
+                       "writes: the shader table was made for a device that imports guest memory, and nvn.memory "
+                       "mirrors the pools here, so every batch would read all of them back. Make the table for this "
+                       "run's shaders/device.json (guestMemoryMirrored true): the on-device translation does that "
+                       "unless RELIFT_NVN_XLATE=off, or run relift shaders with that device.json",
+                       key);
+}
+
 void nvn_mirror_written_all(void)
 {
     if (!mi.n)

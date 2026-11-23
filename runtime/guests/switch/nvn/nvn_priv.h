@@ -695,6 +695,12 @@ void nvn_mirror_written(uint64_t gpu, uint64_t size);
 void nvn_mirror_written_guest(uint64_t guest, uint64_t size);
 /** @brief Notes every byte of every mirror as possibly written: a program stores through addresses it builds itself. */
 void nvn_mirror_written_all(void);
+/**
+ * @brief Whether a program that stores through addresses it builds, without marking the pages it writes, may run:
+ * true with no mirrors. Under mirrors such a program would make every batch read all pools back, so the draw or
+ * dispatch stops with nvn_mirror_refuse_unmarked instead.
+ */
+bool nvn_mirror_takes_unmarked(void);
 /** @brief Staging chunks the mirror has made so far, for tests: uploads reuse their chunks from batch to batch. */
 uint64_t nvn_mirror_staging_made(void);
 /**
