@@ -16,6 +16,11 @@ pub struct Game {
     pub import_dir: String,
     /// The imported modules, by name and build ID.
     pub modules: Vec<ModuleRef>,
+    /// The dump the import came from, when it is a `.nup`: its absolute
+    /// path and the SHA-256 of its table (lowercase hex), which covers the
+    /// hash of every file in it. A build reads the title's name and icon
+    /// from it when the import kept no control data.
+    pub dump: Option<(String, String)>,
 }
 
 /// A module the game is made of.
@@ -54,6 +59,9 @@ impl Game {
             self.version,
             quote(&self.import_dir)
         );
+        if let Some((path, toc)) = &self.dump {
+            s.push_str(&format!("dump = {}\ndump_toc = \"{toc}\"\n", quote(path)));
+        }
         for m in &self.modules {
             s.push_str(&format!(
                 "\n[[game.module]]\nname = {}\nbuild_id = \"{}\"\n",

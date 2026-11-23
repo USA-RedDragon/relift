@@ -153,7 +153,9 @@ fn decode_webp(bytes: &[u8]) -> Option<Rgb> {
     let mut buf = vec![0u8; d.output_buffer_size()?];
     d.read_image(&mut buf).ok()?;
     let pixels = if d.has_alpha() {
-        buf.chunks_exact(4)
+        buf.as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| {
                 let a = u16::from(p[3]);
                 [0, 1, 2].map(|i| u8::try_from(u16::from(p[i]) * a / 255).unwrap_or(255))

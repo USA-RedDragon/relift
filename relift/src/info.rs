@@ -272,16 +272,99 @@ fn no_nacp_identity(title_id: u64, project: &str, icon: Option<&[u8]>) -> Identi
     id
 }
 
-/// What the game will show in place of its own name or icon, when the
-/// import kept no control data for them: an import made by an older relift
-/// (before it kept a package's name) shows the project folder's name, and
-/// one without an icon a generated icon. `None` when both are the title's.
+/// Opens `path` as a `.nup`; `None` when it is not one or cannot be read.
 #[must_use]
-pub fn identity_gaps(import: &Path, id: &Identity, project: &str) -> Option<String> {
+pub fn open_nup(path: &Path) -> Option<relift_switch_formats::nup::Nup> {
+    if path.extension().and_then(|e| e.to_str()) != Some("nup") {
+        return None;
+    }
+    let s = relift_switch_formats::storage::FileStorage::open(path).ok()?;
+    relift_switch_formats::nup::Nup::open(std::sync::Arc::new(s)).ok()
+}
+
+/// The control data of the title in the dump `relift.toml` names
+/// (`dump`, checked against `dump_toc`): its NACP, name and icon, from the
+/// newest update that has each, else the base.
+#[derive(Debug, Default)]
+pub struct DumpControl {
+    pub nacp: Option<Vec<u8>>,
+    pub name: Option<String>,
+    pub icon: Option<Vec<u8>>,
+}
+
+/// The control data of the game's dump. `Ok(None)` when `relift.toml`
+/// names no dump (an import by an older relift, or not a `.nup`); an error
+/// that says why when the dump is gone or is not the one imported.
+///
+/// # Errors
+///
+/// The dump cannot be opened, or its table hash differs from `dump_toc`.
+pub fn dump_control(game: &toml::Table) -> Result<Option<DumpControl>, String> {
+    use relift_switch_formats::nup::{PackageKind, TLV_ICON, TLV_NACP, TLV_NAME};
+    let g = game.get("game").and_then(|g| g.as_table());
+    let (Some(path), Some(toc)) = (
+        g.and_then(|g| g.get("dump")).and_then(|v| v.as_str()),
+        g.and_then(|g| g.get("dump_toc")).and_then(|v| v.as_str()),
+    ) else {
+        return Ok(None);
+    };
+    let nup =
+        open_nup(Path::new(path)).ok_or_else(|| format!("the dump {path} cannot be opened"))?;
+    let have: String = nup
+        .superblock()
+        .toc_sha256
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if have != toc {
+        return Err(format!(
+            "the dump {path} is not the one imported (its table hash changed)"
+        ));
+    }
+    let tid = g
+        .and_then(|g| g.get("title_id"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| u64::from_str_radix(s, 16).ok())
+        .unwrap_or(0);
+    let mut order: Vec<_> = nup
+        .packages()
+        .iter()
+        .filter(|p| {
+            p.record.title_id & !0xfff == tid & !0xfff && p.record.kind != PackageKind::Addon
+        })
+        .collect();
+    order.sort_by_key(|p| p.record.kind != PackageKind::Update);
+    let find = |ty| order.iter().find_map(|p| p.tlv(ty)).map(<[u8]>::to_vec);
+    Ok(Some(DumpControl {
+        nacp: find(TLV_NACP),
+        name: find(TLV_NAME)
+            .and_then(|b| String::from_utf8(b).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        icon: find(TLV_ICON),
+    }))
+}
+
+/// What the game will show in place of its own name or icon, in one
+/// line: a dump without an icon shows a generated one; an import by an
+/// older relift whose dump is unknown, gone or changed shows the project
+/// folder's name. `None` when both are the title's.
+#[must_use]
+pub fn identity_gaps(
+    import: &Path,
+    game: &toml::Table,
+    id: &Identity,
+    project: &str,
+) -> Option<String> {
+    let dump = dump_control(game);
     let named = import.join("control.nacp").is_file()
         || import
             .join(relift_switch_formats::import::CONTROL_TITLE)
-            .is_file();
+            .is_file()
+        || matches!(&dump, Ok(Some(d)) if d.nacp.is_some() || d.name.is_some());
+    if named && id.icon.is_none() {
+        return Some("note: the game's dump carries no icon: a generated one is shown".to_string());
+    }
     let mut gaps = Vec::new();
     if !named {
         gaps.push(format!("its name (shown as \"{project}\")"));
@@ -289,9 +372,13 @@ pub fn identity_gaps(import: &Path, id: &Identity, project: &str) -> Option<Stri
     if id.icon.is_none() {
         gaps.push("its icon (a generated one is shown)".to_string());
     }
+    let why = match &dump {
+        Err(e) => format!(" and {e}"),
+        _ => String::new(),
+    };
     (!gaps.is_empty()).then(|| {
         format!(
-            "warning: the import in {} has no control data for {}: run relift import again from the dump to show the game's own",
+            "warning: the import in {} has no control data for {}{why}: run relift import again from the dump to show the game's own",
             import.display(),
             gaps.join(" or ")
         )
@@ -320,21 +407,28 @@ pub fn switch_document(
         .and_then(|v| v.as_str())
         .and_then(|s| u64::from_str_radix(s, 16).ok())
         .unwrap_or(0);
-    let icon = std::fs::read(import.join("icon.jpg")).ok();
-    let mut id = match std::fs::read(import.join("control.nacp")) {
-        Ok(n) => identity::from_nacp(&n, title_id, icon.as_deref())?,
-        Err(_) => {
-            let named =
-                std::fs::read_to_string(import.join(relift_switch_formats::import::CONTROL_TITLE))
-                    .ok()
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty());
-            no_nacp_identity(
-                title_id,
-                named.as_deref().unwrap_or(project),
-                icon.as_deref(),
-            )
-        }
+    let mut icon = std::fs::read(import.join("icon.jpg")).ok();
+    let mut nacp = std::fs::read(import.join("control.nacp")).ok();
+    let mut named =
+        std::fs::read_to_string(import.join(relift_switch_formats::import::CONTROL_TITLE))
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+    if nacp.is_none()
+        && (named.is_none() || icon.is_none())
+        && let Ok(Some(d)) = dump_control(game)
+    {
+        icon = icon.or(d.icon);
+        nacp = d.nacp;
+        named = named.or(d.name);
+    }
+    let mut id = match nacp {
+        Some(n) => identity::from_nacp(&n, title_id, icon.as_deref())?,
+        None => no_nacp_identity(
+            title_id,
+            named.as_deref().unwrap_or(project),
+            icon.as_deref(),
+        ),
     };
     id.default_language = id.first_language();
     id.version = id.version.or_else(|| {
@@ -681,10 +775,10 @@ mod tests {
         image_webp::WebPEncoder::new(&mut webp)
             .encode(&[200u8; 12 * 6 * 3], 12, 6, image_webp::ColorType::Rgb8)
             .unwrap();
-        std::fs::write(d.join("icon.jpg"), &webp).unwrap();
-        std::fs::write(
-            d.join(relift_switch_formats::import::CONTROL_TITLE),
-            "A Title\n",
+        relift_cache::write_if_changed(&d.join("icon.jpg"), &webp).unwrap();
+        relift_cache::write_if_changed(
+            &d.join(relift_switch_formats::import::CONTROL_TITLE),
+            b"A Title\n",
         )
         .unwrap();
         let game: toml::Table =
@@ -706,12 +800,73 @@ mod tests {
             .as_ref()
             .expect("the title's icon, not a generated one");
         assert_eq!((icon.width, icon.height), (12, 6));
-        assert!(identity_gaps(&d, &info.identity, "fe").is_none());
+        assert!(identity_gaps(&d, &game, &info.identity, "fe").is_none());
         let launcher = crate::icon::launcher_pngs(Some(icon), "fe");
         assert_ne!(launcher, crate::icon::launcher_pngs(None, "fe"));
         std::fs::remove_file(d.join(relift_switch_formats::import::CONTROL_TITLE)).unwrap();
-        let w = identity_gaps(&d, &info.identity, "fe").unwrap();
+        let w = identity_gaps(&d, &game, &info.identity, "fe").unwrap();
         assert!(w.contains("\"fe\"") && w.contains("relift import"), "{w}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn an_old_import_takes_the_name_and_icon_from_its_dump_and_checks_its_hash() {
+        use relift_switch_formats::nup::{self, BuildPackage, PackageKind, TLV_ICON, TLV_NAME};
+        let d = std::env::temp_dir().join(format!("relift-info-dump-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("import")).unwrap();
+        let mut webp = Vec::new();
+        image_webp::WebPEncoder::new(&mut webp)
+            .encode(&[90u8; 4 * 4 * 3], 4, 4, image_webp::ColorType::Rgb8)
+            .unwrap();
+        let bytes = nup::build(&[BuildPackage {
+            title_id: 0x0400_0000_0000_1000,
+            version: 0,
+            kind: PackageKind::Base,
+            standalone: false,
+            files: vec![("exefs/main", b"x".as_slice())],
+            empty_dirs: Vec::new(),
+            meta: vec![(TLV_NAME, b"Dump Title".to_vec()), (TLV_ICON, webp)],
+        }]);
+        let dump = d.join("game.nup");
+        relift_cache::write_if_changed(&dump, &bytes).unwrap();
+        let toc: String = open_nup(&dump)
+            .unwrap()
+            .superblock()
+            .toc_sha256
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let text = format!(
+            "[game]\ntitle_id = \"0400000000001000\"\ndump = {:?}\ndump_toc = \"{toc}\"\n",
+            dump.to_str().unwrap()
+        );
+        let game: toml::Table = toml::from_str(&text).unwrap();
+        let import = d.join("import");
+        let doc = |game: &toml::Table| {
+            switch_document(
+                &import,
+                game,
+                &[],
+                "fe",
+                Vec::new(),
+                &PortSet::default(),
+                Mods::default(),
+            )
+            .unwrap()
+        };
+        let info = doc(&game);
+        assert_eq!(info.identity.title(&[]), Some("Dump Title"));
+        assert_eq!(
+            info.identity.icon.as_ref().map(|i| (i.width, i.height)),
+            Some((4, 4))
+        );
+        assert!(identity_gaps(&import, &game, &info.identity, "fe").is_none());
+        let changed: toml::Table = toml::from_str(&text.replace(&toc, &"0".repeat(64))).unwrap();
+        let info = doc(&changed);
+        assert_eq!(info.identity.title(&[]), Some("fe"));
+        let w = identity_gaps(&import, &changed, &info.identity, "fe").unwrap();
+        assert!(w.contains("not the one imported"), "{w}");
         std::fs::remove_dir_all(&d).unwrap();
     }
 

@@ -41,6 +41,20 @@ pub fn cache_root(settings: &Settings) -> Result<PathBuf, BoxError> {
 /// # Errors
 ///
 /// As [`cache_root`].
+/// The path and table hash of `dump` for `relift.toml`, when it is a
+/// `.nup` that opens; `None` for any other dump.
+fn dump_identity(dump: &Path) -> Option<(String, String)> {
+    let nup = crate::info::open_nup(dump)?;
+    let path = std::fs::canonicalize(dump).ok()?;
+    let toc: String = nup
+        .superblock()
+        .toc_sha256
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Some((path.to_str()?.to_string(), toc))
+}
+
 pub fn import_dir_value(settings: &Settings, dir: &Path) -> Result<String, BoxError> {
     let root = cache_root(settings)?;
     Ok(match dir.strip_prefix(&root) {
@@ -198,6 +212,7 @@ pub fn run(
         title_id: format!("{:016x}", report.program_id),
         version: report.version,
         import_dir: import_dir_value(settings, &out)?,
+        dump: dump_identity(dump),
         modules: report
             .modules
             .iter()

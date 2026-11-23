@@ -131,6 +131,8 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         \x20 main emit     1 shard, 0 overrides, 0 of 2 reused  <time>\n\
         \x20 main cold     1 cold shard, 0 superset functions  <time>\n\
         main: 1024 words: 2 hot entries, 8 cold entries, 1014 traps (1014 zero, 0 padding, 0 undecodable)\n\
+        warning: the import in <root>/cache/projects/tiny/import has no control data for its name (shown as \"tiny\") \
+        or its icon (a generated one is shown): run relift import again from the dump to show the game's own\n\
         window: SDL3 not found, building headless and silent (set RELIFT_SDL3_DIR); \
         opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR); \
         vp9: libvpx off (RELIFT_LIBVPX_DIR=off), VP9 video stays undecoded; \
