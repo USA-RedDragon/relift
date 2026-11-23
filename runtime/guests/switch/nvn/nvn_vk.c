@@ -2639,11 +2639,12 @@ static uint32_t first_at(uint64_t storage)
 static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool target)
 {
     nvn_vk_retire_images();
-    uint64_t pool_size = 0;
-    uint64_t storage = nvn_pool_memory(d->pool, &pool_size) + d->offset;
-    if (!pool_size) {
-        rl_guest_fatal(r->c, "nvn", "texture 0x%llx lies in memory pool 0x%llx, which no longer exists",
-                       (unsigned long long)tex, (unsigned long long)d->pool);
+    uint64_t storage = nvn_tex_storage(d);
+    if (!storage) {
+        rl_guest_fatal(r->c, "nvn",
+                       "texture 0x%llx lies in memory pool 0x%llx, which no longer exists, and no pool covers its "
+                       "storage at 0x%llx",
+                       (unsigned long long)tex, (unsigned long long)d->pool, (unsigned long long)d->storage);
         return NULL;
     }
     for (uint32_t k = first_at(storage); k; k = by_storage.next[k - 1]) {

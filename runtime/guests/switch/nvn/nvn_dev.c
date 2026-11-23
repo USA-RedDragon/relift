@@ -1173,6 +1173,24 @@ uint64_t nvn_pool_gpu(uint64_t pool)
     return p ? pool_gpu(p) : 0;
 }
 
+bool nvn_pool_covers(uint64_t memory, uint64_t size)
+{
+    bool in = false;
+    pthread_rwlock_rdlock(&g_pools.lock);
+    for (uint32_t i = 0; i < g_pools.n && !in; i++)
+        in = g_pools.v[i].memory <= memory && memory + size <= g_pools.v[i].memory + g_pools.v[i].size;
+    pthread_rwlock_unlock(&g_pools.lock);
+    return in;
+}
+
+uint64_t nvn_tex_storage(const nvn_tex_desc *d)
+{
+    uint64_t size = 0, memory = nvn_pool_memory(d->pool, &size);
+    if (size)
+        return memory + d->offset;
+    return d->storage && nvn_pool_covers(d->storage, d->size ? d->size : 1) ? d->storage : 0;
+}
+
 uint64_t nvn_pool_memory(uint64_t pool, uint64_t *size)
 {
     nvn_pool *p = (nvn_pool *)nvn_obj_get(pool, NVN_POOL);

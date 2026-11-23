@@ -1112,6 +1112,51 @@ TEST(nvn_a_pool_made_again_keeps_its_import_and_address)
     CHECK(nvn_pools_kept() < before);
 }
 
+/**
+ * @brief A texture keeps the address it was initialized at, not its pool object: after the game finalizes the pool
+ * object, the texture still reads its bytes while the pool's kept import (or a pool made again over the same range)
+ * covers them, and has no storage once the guest discards the pages, where the console's GPU would read unmapped
+ * memory.
+ */
+TEST(nvn_a_texture_outlives_its_finalized_pool_object)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t pool = heap, again = heap + 0x100, tex = heap + 0x800, region = heap + 0x1000, data = heap + 0x2000;
+    uint64_t storage = heap + 0x100000;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, storage, 0x40000, 0x24));
+    bool imported = nvn_pool_gpu(pool) != storage;
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 8, .height = 8, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 32, .swizzle = { 2, 3, 4, 5 }, .pool = pool, .offset = 0x1000 };
+    CHECK(nvn_tex_layout(&d));
+    d.storage = storage + 0x1000;
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    for (uint32_t i = 0; i < 256; i++)
+        m[storage + 0x1000 + i] = (uint8_t)(i * 7 + 1);
+    CHECK_EQ(nvn_tex_storage(&d), storage + 0x1000);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    if (!imported) {
+        /* Without an import nothing keeps the span: there is no storage, as on unmapped memory. */
+        CHECK_EQ(nvn_tex_storage(&d), 0);
+        return;
+    }
+    CHECK_EQ(nvn_tex_storage(&d), storage + 0x1000);
+    int32_t box[6] = { 0, 0, 0, 8, 8, 1 };
+    memcpy(m + region, box, sizeof box);
+    memset(m + data, 0, 256);
+    CHECK_EQ(call(c, nvnh_nvnTextureReadTexels, tex, 0, region, data), RET);
+    CHECK(memcmp(m + data, m + storage + 0x1000, 256) == 0);
+    /* A pool made again over the same range, under another object, covers it too. */
+    CHECK(nvn_pool_make(again, storage, 0x40000, 0x24));
+    CHECK_EQ(nvn_tex_storage(&d), storage + 0x1000);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, again, 0, 0, 0), RET);
+    CHECK_EQ(nvn_tex_storage(&d), storage + 0x1000);
+    /* The guest discarding the pages frees the kept import: the texture has no storage left. */
+    CHECK_EQ(rl_vm_set(&hos.vm, storage, 0x40000, RL_VM_RW, 0, RL_VM_DISCARD), 0);
+    CHECK_EQ(nvn_tex_storage(&d), 0);
+}
+
 TEST(nvn_pool_mappings_take_a_textures_page_kind)
 {
     rl_ctx *c = t_boot(NULL);

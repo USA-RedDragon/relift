@@ -410,6 +410,8 @@ uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
     rc = read_storage(c, mem, builder, &d, NULL, NULL);
     if (rc != RL_OK)
         return (uint64_t)rc;
+    uint64_t pool_size = 0, pool_memory = nvn_pool_memory(d.pool, &pool_size);
+    d.storage = pool_size ? pool_memory + d.offset : 0;
     bool recorded = nvn_texture_record(tex, &d, nvn_generation() == 1 ? mem + builder : NULL);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "nvnTextureInitialize(0x%llx): target %u format %u %ux%ux%u levels %u flags 0x%x, size 0x%llx",
@@ -940,7 +942,7 @@ static uint64_t texels(rl_ctx *c, uint8_t *mem, bool write, const char *proc)
         return (uint64_t)rc;
     nvn_region r;
     memcpy(&r, mem + region, sizeof r);
-    uint64_t storage = nvn_pool_memory(d->pool, NULL) + d->offset;
+    uint64_t storage = nvn_tex_storage(d);
     if (!storage || !nvn_tex_copy(d, mem + storage, level, layer, &r, mem + data, write))
         return (uint64_t)rl_guest_fatal(c, "nvn", "%s: region %d,%d,%d %dx%dx%d of level %u layer %u is outside texture 0x%llx",
                                         proc, r.x, r.y, r.z, r.width, r.height, r.depth, level, layer,

@@ -733,23 +733,42 @@ static int bind_unwritten(replay *r, uint32_t id, uint32_t sid, uint32_t *kind, 
  * it registered as a texture to an image slot: both are the same texture pool entry).
  */
 /**
- * @brief Whether the texture at tex still lies in a memory pool: false when the pool its descriptor names was finalized
- * (the registration is a descriptor left from before), so the texture has no storage to make a host image from.
+ * @brief Whether the texture at tex still has storage, as the console sees it: a texture keeps the address it was
+ * initialized at, not its pool object, so one whose pool object was finalized still reads its bytes while a live pool or
+ * the kept import of the finalized one covers them (a game finalizes a pool and keeps sampling the textures it made
+ * in it, or makes the pool again over the same bytes). Without one, the console's GPU would read unmapped memory.
+ * pool_live answers for the registered textures the set keeps in their slots (one without storage is reported and reads
+ * zeros); storage_live for one a program binds.
  */
 static bool pool_live(uint32_t id, uint64_t tex)
 {
     nvn_tex_desc d;
     if (!nvn_texture_desc(tex, &d))
         return false;
-    uint64_t size = 0;
-    nvn_pool_memory(d.pool, &size);
-    if (size)
+    if (nvn_tex_storage(&d))
         return true;
     (void)rl_report_unknown(0x4e564e504f4f4c47ull ^ id, "nvn",
-                            "texture id %u (texture 0x%llx) lies in memory pool 0x%llx, which no longer exists: it is not "
-                            "made resident and reads zeros",
-                            id, (unsigned long long)tex, (unsigned long long)d.pool);
+                            "texture id %u (texture 0x%llx) lies in memory pool 0x%llx, which no longer exists, and no "
+                            "pool covers its storage at 0x%llx: it is not made resident and reads zeros",
+                            id, (unsigned long long)tex, (unsigned long long)d.pool, (unsigned long long)d.storage);
     return false;
+}
+
+/**
+ * @brief pool_live for a texture a program binds: RL_OK with *live set when it has storage. One whose storage address
+ * was recorded but that no pool covers any longer is a stop; one with none recorded (its pool was unknown when it was
+ * recorded) reads zeros, as before.
+ */
+static int storage_live(replay *r, uint32_t id, uint64_t tex, bool *live)
+{
+    nvn_tex_desc d;
+    *live = nvn_texture_desc(tex, &d) && nvn_tex_storage(&d);
+    if (*live || !d.storage)
+        return RL_OK;
+    return nvn_vk_stop(r,
+                       "texture id %u (texture 0x%llx) lies in memory pool 0x%llx, which no longer exists, and no pool "
+                       "covers its storage at 0x%llx: the console's GPU would read unmapped memory",
+                       id, (unsigned long long)tex, (unsigned long long)d.pool, (unsigned long long)d.storage);
 }
 
 static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler,
@@ -761,8 +780,16 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     uint8_t view[17] = { 0 };
     bool has_view = false, image = false;
     uint64_t tex = nvn_tex_registered(id, view, &has_view, &image);
-    if (tex && !pool_live(id, tex))
-        tex = 0;
+    if (tex) {
+        bool live = false;
+        int rc = storage_live(r, id, tex, &live);
+        if (rc != RL_OK)
+            return rc;
+        if (!live) {
+            (void)pool_live(id, tex);
+            tex = 0;
+        }
+    }
     if (!tex && !as_image)
         return bind_unwritten(r, id, sid, kind, dim, slot, with_sampler);
     if (!tex)

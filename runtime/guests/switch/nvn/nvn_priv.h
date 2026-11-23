@@ -224,6 +224,12 @@ typedef struct nvn_tex_desc {
     /** @brief NVNdepthStencilMode of the builder, as nvnTextureGetDepthStencilMode answers it. */
     uint32_t ds_mode;
     uint64_t stride, pool, offset;
+    /**
+     * @brief The guest address of the storage's first byte when the texture was initialized (0 when its pool was
+     * unknown then). A texture keeps its address on the console, not its pool object: a texture whose pool object
+     * was finalized still reads the bytes there while a pool's import covers them (see nvn_tex_storage).
+     */
+    uint64_t storage;
     /** @brief Bytes of storage, its alignment and the bytes from one layer to the next. */
     uint64_t size, align, layer_stride;
     /** @brief Block height and depth of level 0 in GOBs; 0 for linear storage. */
@@ -974,6 +980,17 @@ const nvn_cmdset *nvn_cmdset_of(uint64_t handle);
 int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle);
 /** @brief The guest address of a memory pool's storage and its size, or 0. */
 uint64_t nvn_pool_memory(uint64_t pool, uint64_t *size);
+/**
+ * @brief Whether guest [memory, memory + size) lies inside one pool's span: a live pool's, or the kept import of a
+ * finalized one (whose pages stay mapped).
+ */
+bool nvn_pool_covers(uint64_t memory, uint64_t size);
+/**
+ * @brief The guest address of texture d's storage: from its pool object while that lives (a virtual pool's mapping may
+ * have moved it), else the address recorded when it was initialized if a live or kept pool span still covers the
+ * storage, else 0 (the console's GPU would read unmapped memory there).
+ */
+uint64_t nvn_tex_storage(const nvn_tex_desc *d);
 /** @brief The GPU address of a memory pool's first byte. */
 /** @brief Makes the layer's record of a memory pool the driver initialized (imported into the host device unless virtual). */
 bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags);
