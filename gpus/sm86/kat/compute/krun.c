@@ -279,6 +279,9 @@ int main(int argc, char **argv) {
 
     Buf bufs[MAXB]; int nb = 0;
     Buf banks[18]; int have[18] = {0};
+    /* The compute bases: buffer base_buf[j] is the storage buffer at set 1 binding 128 + base_off[j] / 8,
+     * and the base table (set 1 binding 80) holds where each starts. */
+    uint32_t base_off[16], base_buf[16], base_lo[16]; int nbase = 0;
     uint32_t sdata[64] = {1, 1, 1, 4096, 1024}; VkSpecializationMapEntry me[64]; uint32_t nspec = 5;
     for (int k = 0; k < 5; k++) me[k] = (VkSpecializationMapEntry){ k, 4 * k, 4 };
     uint32_t groups[3] = {1, 1, 1};
@@ -340,6 +343,7 @@ int main(int argc, char **argv) {
             if (!strcmp(c, "addr")) {
                 uint64_t ad = segshift >= 0 ? (uint64_t)z << segshift : bufs[z].addr;
                 memcpy((char *)banks[x].map + y, &ad, 8);
+                if (x == 0 && y >= 0x10 && y < 0x800 && nbase < 16) { base_off[nbase] = y; base_buf[nbase++] = z; base_lo[nbase - 1] = (uint32_t)ad; }
             } else { uint32_t v = z; memcpy((char *)banks[x].map + y, &v, 4); }
         }
     }
@@ -347,11 +351,18 @@ int main(int argc, char **argv) {
     VkShaderModule sm; CK(vkCreateShaderModule(dev, &smi, 0, &sm));
 
     VkDescriptorSetLayout sl[4];
-    VkDescriptorSetLayoutBinding lb[2][18]; uint32_t ln[2] = {0, 0};
+    VkDescriptorSetLayoutBinding lb[2][36]; uint32_t ln[2] = {0, 0};
     for (int k = 0; k < 18; k++) if (have[k]) {
         int set = k >= 3 ? 0 : 1; uint32_t bind = k >= 3 ? k - 3 : k;
         VkDescriptorSetLayoutBinding e = { bind, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 };
         lb[set][ln[set]++] = e;
+    }
+    VkDescriptorSetLayoutBinding bb[17]; uint32_t nbb = 0;
+    if (nbase) {
+        bb[nbb++] = (VkDescriptorSetLayoutBinding){ 80, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 };
+        for (int j = 0; j < nbase; j++)
+            bb[nbb++] = (VkDescriptorSetLayoutBinding){ 128 + base_off[j] / 8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, 0 };
+        for (uint32_t k = 0; k < nbb; k++) lb[1][ln[1]++] = bb[k];
     }
     for (int s = 0; s < 2; s++) {
         VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, 0, 0, ln[s], lb[s] };
@@ -395,9 +406,9 @@ int main(int argc, char **argv) {
     VkPipeline pipe; CK(vkCreateComputePipelines(dev, pc, 1, &cpi, 0, &pipe));
     if (cpath) { size_t cs = 0; CK(vkGetPipelineCacheData(dev, pc, &cs, 0)); void *cd = malloc(cs); CK(vkGetPipelineCacheData(dev, pc, &cs, cd)); FILE *cf = fopen(cpath, "wb"); fwrite(cd, 1, cs, cf); fclose(cf); }
 
-    VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 36 }, { VK_DESCRIPTOR_TYPE_SAMPLER, COUNT },
+    VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 37 }, { VK_DESCRIPTOR_TYPE_SAMPLER, COUNT },
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32 * COUNT }, { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 80 * COUNT },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXB + 2 } };
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAXB + 18 } };
     VkDescriptorPoolCreateInfo dpi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, 0, 0, 4, 5, ps };
     VkDescriptorPool dp; CK(vkCreateDescriptorPool(dev, &dpi, 0, &dp));
     VkDescriptorSetAllocateInfo dai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0, dp, 4, sl };
@@ -406,6 +417,18 @@ int main(int argc, char **argv) {
         VkDescriptorBufferInfo bi = { banks[k].b, 0, 65536 };
         VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[k >= 3 ? 0 : 1], k >= 3 ? k - 3 : k, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &bi, 0 };
         vkUpdateDescriptorSets(dev, 1, &w, 0, 0);
+    }
+    if (nbase) {
+        Buf table = mkbuf(65536, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        for (int j = 0; j < nbase; j++) memcpy((char *)table.map + base_off[j] / 8 * 4, &base_lo[j], 4);
+        VkDescriptorBufferInfo ti = { table.b, 0, 65536 };
+        VkWriteDescriptorSet tw = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[1], 80, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &ti, 0 };
+        vkUpdateDescriptorSets(dev, 1, &tw, 0, 0);
+        for (int j = 0; j < nbase; j++) {
+            VkDescriptorBufferInfo si2 = { bufs[base_buf[j]].b, 0, VK_WHOLE_SIZE };
+            VkWriteDescriptorSet sw = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, ds[1], 128 + base_off[j] / 8, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &si2, 0 };
+            vkUpdateDescriptorSets(dev, 1, &sw, 0, 0);
+        }
     }
     for (int k = 0; k < nw; k++) writes[k].dstSet = ds[2];
     vkUpdateDescriptorSets(dev, nw, writes, 0, 0);

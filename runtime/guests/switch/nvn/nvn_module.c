@@ -111,6 +111,20 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
                        x->binding < NVN_SLOT_BINDING_BASE + NVN_STORAGE_SLOTS) {
                 m->storage_slots |= 1u << (x->binding - NVN_SLOT_BINDING_BASE);
                 w[i + 3] = nvn_slot_binding((uint32_t)stage, x->binding - NVN_SLOT_BINDING_BASE);
+            } else if (x->set == 1 && stage == (int)NVN_STAGE_COMPUTE && x->binding == NVN_COMPUTE_BASE_TABLE_BINDING) {
+                m->cbase_table = true;
+            } else if (x->set == 1 && stage == (int)NVN_STAGE_COMPUTE && x->binding >= NVN_COMPUTE_BASE_BINDING &&
+                       x->binding < NVN_COMPUTE_BASE_BINDING + NVN_COMPUTE_BASE_BYTES / 8) {
+                uint16_t off = (uint16_t)(8 * (x->binding - NVN_COMPUTE_BASE_BINDING));
+                uint32_t j = 0;
+                while (j < m->ncbase && m->cbase[j] != off)
+                    j++;
+                if (j == m->ncbase && j < NVN_STORAGE_SLOTS)
+                    m->cbase[m->ncbase++] = off;
+                if (j < NVN_STORAGE_SLOTS)
+                    w[i + 3] = NVN_SLOT_BINDING_BASE + j;
+                else
+                    m->other_sets = true;
             } else if (x->set == 1) {
                 m->driver |= 1u << (x->binding & 31);
                 w[i + 3] = DRIVER_BINDINGS * (uint32_t)stage + x->binding;

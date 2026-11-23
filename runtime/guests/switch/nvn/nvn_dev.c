@@ -333,6 +333,24 @@ bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off)
     return found;
 }
 
+bool nvn_guest_buffer_rest(uint64_t guest, void **buf, uint64_t *off, uint64_t *before, uint64_t *rest)
+{
+    bool found = false;
+    pthread_rwlock_rdlock(&g_pools.lock);
+    for (uint32_t i = 0; i < g_pools.n && !found; i++) {
+        const struct pool_span *p = &g_pools.v[i];
+        if (p->buf && guest >= p->memory && guest - p->memory < p->size) {
+            *buf = p->buf;
+            *off = guest - p->base;
+            *before = guest - p->memory;
+            *rest = p->size - (guest - p->memory);
+            found = true;
+        }
+    }
+    pthread_rwlock_unlock(&g_pools.lock);
+    return found;
+}
+
 /** @brief The GPU address of a pool's first byte. */
 static uint64_t pool_gpu(const nvn_pool *p)
 {

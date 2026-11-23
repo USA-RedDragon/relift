@@ -287,6 +287,12 @@ pub(crate) struct Prep {
     loads: Vec<Option<CbufLoad>>,
     /// The predicates each instruction writes or may write.
     pwrites: Vec<Vec<u8>>,
+    /// The uniform predicates each instruction writes or may write.
+    upwrites: Vec<Vec<u8>>,
+    /// The uniform address arithmetic of each instruction (see [`UAdd`]).
+    uadds: Vec<Option<UAdd>>,
+    /// `0, 1, 2, ...`: each instruction's index, for [`Prep::preds_of`].
+    prev: Vec<usize>,
     /// The address word each instruction makes from a c[0] word, if any
     /// (see [`BaseWord`]).
     base_words: Vec<Option<BaseWord>>,
@@ -296,12 +302,101 @@ pub(crate) struct Prep {
 /// value plus the c[0] word at `offset`, its carry out in predicate
 /// `carry` (`LEA` without `.HI`, or `IADD3` with a carry out and no
 /// negated source); `Hi` is the c[0] word at `offset` plus that carry
-/// (`IADD3.X dst, RZ, c[0][offset], RZ, carry, !PT` or
-/// `IMAD.X dst, RZ, RZ, c[0][offset], carry`).
+/// and the high words of a 64-bit offset (`IADD3.X dst, x, c[0][offset],
+/// y, carry, !PT`, `IMAD.X dst, RZ, RZ, c[0][offset], carry` or
+/// `LEA.HI.X dst, lo, c[0][offset], hi, s, carry`). The access is then
+/// reached at the low word of its address less the base's: exact for an
+/// offset below 4 GiB, which is every offset into one memory pool.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum BaseWord {
-    Lo { dst: u8, carry: u8, offset: u32 },
-    Hi { dst: u8, carry: u8, offset: u32 },
+    Lo {
+        dst: u8,
+        carry: u8,
+        offset: u32,
+    },
+    Hi {
+        dst: u8,
+        carry: u8,
+        offset: u32,
+    },
+    /// Both words at once: `IMAD.WIDE dst, a, b, c[0][offset]` (or
+    /// `.U32`), a 64-bit product plus the base.
+    Wide {
+        dst: u8,
+        offset: u32,
+    },
+}
+
+/// A uniform register pair plus a constant: `Lo` adds `add` to `src`
+/// into `dst` with its carry out in `carry` (`UIADD3 dst, UPcarry, src,
+/// add, URZ`), `Hi` adds that carry to `src` into `dst`
+/// (`UIADD3.X dst, URZ, src, URZ, UPcarry, !UPT`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum UAdd {
+    Lo {
+        dst: u8,
+        src: u8,
+        carry: u8,
+        add: i64,
+    },
+    Hi {
+        dst: u8,
+        src: u8,
+        carry: u8,
+    },
+}
+
+fn plain_ureg(o: &Operand) -> Option<u8> {
+    match o {
+        Operand::UReg(n, m) if *n != 63 && !m.neg && !m.not && !m.abs => Some(*n),
+        _ => None,
+    }
+}
+
+fn uadd(i: &Inst) -> Option<UAdd> {
+    if i.guard.is_some() || i.mnemonic != "UIADD3" {
+        return None;
+    }
+    match (i.mods.as_slice(), i.ops.as_slice()) {
+        (
+            [],
+            [
+                Operand::UReg(d, _),
+                Operand::UPred(p, false),
+                a,
+                k,
+                Operand::UReg(63, _),
+            ],
+        ) if *p != 7 => {
+            let add = match k {
+                Operand::Hex(v) => *v as u32 as i32 as i64,
+                Operand::Int(v) => *v,
+                _ => return None,
+            };
+            Some(UAdd::Lo {
+                dst: *d,
+                src: plain_ureg(a)?,
+                carry: *p,
+                add,
+            })
+        }
+        (
+            ["X"],
+            [
+                Operand::UReg(d, _),
+                Operand::UReg(63, _),
+                a,
+                Operand::UReg(63, _),
+                Operand::UPred(p, false),
+                Operand::UPred(7, true),
+            ],
+        ) if *p != 7 => Some(UAdd::Hi {
+            dst: *d,
+            src: plain_ureg(a)?,
+            carry: *p,
+        }),
+        _ => None,
+    }
 }
 
 /// The c[0] byte offset operand `o` names, when it is a plain word of
@@ -356,17 +451,39 @@ fn base_word(i: &Inst) -> Option<BaseWord> {
             ["X"],
             [
                 Operand::Reg(d, _),
-                Operand::Reg(255, _),
-                c,
-                Operand::Reg(255, _),
+                x,
+                y,
+                z,
                 Operand::Pred(p, false),
                 Operand::Pred(7, true),
             ],
-        ) if *p != 7 => Some(BaseWord::Hi {
-            dst: *d,
-            carry: *p,
-            offset: c0_word(c)?,
-        }),
+        ) if *p != 7 => {
+            let srcs = [x, y, z];
+            let cs: Vec<u32> = srcs.iter().filter_map(|o| c0_word(o)).collect();
+            let rest_ok = srcs.iter().all(|o| c0_word(o).is_some() || plain_reg(o));
+            (cs.len() == 1 && rest_ok).then(|| BaseWord::Hi {
+                dst: *d,
+                carry: *p,
+                offset: cs[0],
+            })
+        }
+        ("IMAD", ["WIDE"], [Operand::Reg(d, _), a, b, c])
+            if plain_reg(a) && (plain_reg(b) || imm_of(b).is_some()) =>
+        {
+            Some(BaseWord::Wide {
+                dst: *d,
+                offset: c0_word(c)?,
+            })
+        }
+        ("LEA", ["HI", "X"], [Operand::Reg(d, _), a, c, b, s, Operand::Pred(p, false)])
+            if *p != 7 && plain_reg(a) && plain_reg(b) && imm_of(s).is_some_and(|s| s < 32) =>
+        {
+            Some(BaseWord::Hi {
+                dst: *d,
+                carry: *p,
+                offset: c0_word(c)?,
+            })
+        }
         (
             "IMAD",
             ["X"],
@@ -548,6 +665,20 @@ impl Prep {
                 })
                 .collect(),
             base_words: insts.iter().map(base_word).collect(),
+            prev: (0..n).collect(),
+            upwrites: insts
+                .iter()
+                .map(|i| {
+                    uniform::written_locs(i)
+                        .into_iter()
+                        .filter_map(|l| match l {
+                            uniform::Loc::Up(n) if n != 7 => Some(n),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .collect(),
+            uadds: insts.iter().map(uadd).collect(),
             preds: successors(code).map(|s| {
                 let mut p = vec![Vec::new(); n];
                 for (k, ts) in s.iter().enumerate() {
@@ -741,19 +872,27 @@ impl Prep {
         Some(out)
     }
 
+    /// The instructions that may run just before instruction `at`, `None`
+    /// at the program's entry. Where the program has control flow
+    /// [`Prep::preds`] does not follow, only the instruction before `at`
+    /// in its straight-line block, and `None` at a block's start.
+    fn preds_of(&self, at: usize) -> Option<&[usize]> {
+        match &self.preds {
+            Some(p) => Some(p[at].as_slice()).filter(|p| !p.is_empty()),
+            None => (at > 0 && !self.starts[at]).then(|| &self.prev[at - 1..at]),
+        }
+    }
+
     /// The one instruction that writes what `names` says before
     /// instruction `k` on every path that reaches `k`, when that writer is
     /// not guarded and no path comes from the program's entry without it.
     fn unique_writer(&self, k: usize, names: impl Fn(usize) -> bool) -> Option<usize> {
-        let preds = self.preds.as_ref()?;
-        let mut seen = vec![false; preds.len()];
+        let mut seen = vec![false; self.writes.len()];
         let mut todo = vec![k];
         let mut found = None;
         while let Some(at) = todo.pop() {
-            if preds[at].is_empty() {
-                return None;
-            }
-            for &j in &preds[at] {
+            let preds = self.preds_of(at)?;
+            for &j in preds {
                 if std::mem::replace(&mut seen[j], true) {
                     continue;
                 }
@@ -770,17 +909,87 @@ impl Prep {
         found
     }
 
+    /// The c[0] byte offset of the 64-bit base that uniform register pair
+    /// `u`, `u + 1` holds before instruction `k`, and the constant added to
+    /// it: a ULDC.64 of the base's words, or such a pair plus a constant
+    /// with its carry (`UIADD3 lo, UPp, lo', k, URZ` and
+    /// `UIADD3.X hi, URZ, hi', URZ, UPp, !UPT`).
+    pub(crate) fn ubase(&self, k: usize, u: u8) -> Option<(u32, i64)> {
+        self.ubase_in(k, u, 8)
+    }
+
+    fn ubase_in(&self, k: usize, u: u8, depth: u32) -> Option<(u32, i64)> {
+        if u >= 62 || depth == 0 {
+            return None;
+        }
+        let jl = self.unique_writer(k, |j| self.uwrites[j].contains(&u))?;
+        let jh = self.unique_writer(k, |j| self.uwrites[j].contains(&(u + 1)))?;
+        if let (Some((0, lo)), Some((0, hi))) =
+            (self.uniform_word(k, u), self.uniform_word(k, u + 1))
+        {
+            return (hi == lo + 4).then_some((lo, 0));
+        }
+        let (
+            UAdd::Lo {
+                dst,
+                src,
+                carry,
+                add,
+            },
+            UAdd::Hi {
+                dst: hd,
+                src: hs,
+                carry: hc,
+            },
+        ) = (self.uadds[jl]?, self.uadds[jh]?)
+        else {
+            return None;
+        };
+        let carried = self.unique_writer(jh, |j| self.upwrites[j].contains(&carry)) == Some(jl);
+        if dst != u || hd != u + 1 || hs != src + 1 || hc != carry || !carried {
+            return None;
+        }
+        let (h_src, _) = (
+            self.unique_writer(jh, |j| self.uwrites[j].contains(&hs)),
+            (),
+        );
+        if h_src != self.unique_writer(jl, |j| self.uwrites[j].contains(&hs)) {
+            return None;
+        }
+        let (off, k0) = self.ubase_in(jl, src, depth - 1)?;
+        Some((off, k0 + add))
+    }
+
+    /// The constant bank word (bank, byte offset) uniform register `r`
+    /// holds before instruction `k`, when its one writer that reaches `k`
+    /// is an unguarded, unindexed ULDC (see [`Prep::preds_of`]).
+    pub(crate) fn uniform_word(&self, k: usize, r: u8) -> Option<(u32, u32)> {
+        let j = self.unique_writer(k, |j| self.uwrites[j].contains(&r))?;
+        let l = self.loads[j]?;
+        if !l.uniform || l.indexed || l.guarded || r < l.dst || r - l.dst >= l.words {
+            return None;
+        }
+        let at = l.offset + 4 * i64::from(r - l.dst);
+        Some((l.bank, u32::try_from(at).ok().filter(|o| o % 4 == 0)?))
+    }
+
     /// The c[0] byte offset of the 64-bit base that register pair `r`,
     /// `r + 1` holds before instruction `k` plus a 32-bit offset, when the
     /// only writes that reach `k` are a [`BaseWord::Lo`] of `r` from the
     /// base's low word and a [`BaseWord::Hi`] of `r + 1` from its high
-    /// word with the carry of that same `Lo`.
+    /// word with the carry of that same `Lo`, or one [`BaseWord::Wide`].
     pub(crate) fn pair_base(&self, k: usize, r: u8) -> Option<u32> {
         if r >= 254 {
             return None;
         }
         let jl = self.unique_writer(k, |j| self.writes[j].contains(&r))?;
         let jh = self.unique_writer(k, |j| self.writes[j].contains(&(r + 1)))?;
+        if jl == jh {
+            return match self.base_words[jl] {
+                Some(BaseWord::Wide { dst, offset }) if dst == r => Some(offset),
+                _ => None,
+            };
+        }
         let Some(BaseWord::Lo { dst, carry, offset }) = self.base_words[jl] else {
             return None;
         };
@@ -794,16 +1003,6 @@ impl Prep {
         };
         let carried = self.unique_writer(jh, |j| self.pwrites[j].contains(&carry)) == Some(jl);
         (dst == r && hd == r + 1 && hc == carry && ho == offset + 4 && carried).then_some(offset)
-    }
-
-    /// The single constant bank word (bank, byte offset, indexed) uniform
-    /// register `r` holds before instruction `k`, when every load that
-    /// reaches `k` gives it the same word.
-    pub(crate) fn uniform_source(&self, k: usize, r: u8) -> Option<(u32, u32, bool)> {
-        match self.handle_sources(k, r, true)?.as_slice() {
-            [h] => Some((h.bank, h.offset, h.indexed)),
-            _ => None,
-        }
     }
 
     /// [`Prep::known`] within the block of `k` only.

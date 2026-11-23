@@ -39,6 +39,10 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use io::{PUSH_WRITTEN_PAGES, WRITTEN_PAGE_BITS};
+pub use mem::slots::{
+    COMPUTE_BASE_BINDING, COMPUTE_BASE_BYTES, COMPUTE_BASE_TABLE_BINDING, SLOT_BINDING_BASE,
+    STORAGE_SLOTS, compute_base_binding, slot_binding, slot_row,
+};
 pub use tex::{
     Dim, HandleSource, ImageDim, ImageKind, KIND_AT_RUN_TIME, Kind, SAMPLER_BINDING,
     TEXTURE_DIM_SPEC, TEXTURE_DIMS_BINDING, TEXTURE_FETCH_KIND_SPEC, TEXTURE_KIND_SPEC,
@@ -136,6 +140,10 @@ pub struct Interface {
     /// storage buffer descriptor instead of a buffer device address (see
     /// [`mem::slots`]).
     pub storage_slots: BTreeSet<u32>,
+    /// The c[0] byte offsets of the base addresses a compute program
+    /// reaches through storage buffer descriptors (see
+    /// [`compute_base_binding`]).
+    pub compute_bases: BTreeSet<u32>,
     /// Bindings of set [`TEXTURE_SET`] the program declares.
     pub texture_bindings: BTreeSet<u32>,
     /// Specialization constant id per bound handle whose texture's numeric

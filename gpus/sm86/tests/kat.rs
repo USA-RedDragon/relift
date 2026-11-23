@@ -71,6 +71,8 @@ fn is_nan(x: u32) -> bool {
 const CBUF: u64 = 0x1_0000_0000;
 const IN: u64 = 0x2_0000_0000;
 const OUT: u64 = 0x3_0000_0000;
+/// Where the compute base table lies (see [`base_bindings`]).
+const BASE_TABLE: u64 = 0x4_0000_0000;
 
 /// The hosts the programs run for: the ones with buffer device addresses
 /// (the interpreter has no segment table). NVIDIA uses the MUFU model too:
@@ -151,14 +153,20 @@ fn exec(
     cb[0x160..0x168].copy_from_slice(&IN.to_le_bytes());
     cb[0x168..0x170].copy_from_slice(&OUT.to_le_bytes());
     let input: Vec<u8> = row.iter().flat_map(|x| x.to_le_bytes()).collect();
+    let (uniforms, table) = base_bindings(&cb);
     let mem = Memory {
-        regions: vec![(CBUF, cb), (IN, input), (OUT, vec![0; 64])],
+        regions: vec![
+            (CBUF, cb),
+            (IN, input),
+            (OUT, vec![0; 64]),
+            (BASE_TABLE, table),
+        ],
     };
     let env = Env {
         denorm: behavior.0,
         canonical_nan,
         mul_zero_positive: behavior.1,
-        uniforms: HashMap::from([((1, 0), CBUF)]),
+        uniforms,
         local_id: [0; 3],
         group_id: [0; 3],
     };
@@ -167,6 +175,32 @@ fn exec(
     (0..outs)
         .map(|k| r.mem.read(OUT + 4 * k as u64, 4) as u32)
         .collect()
+}
+
+/// The buffers a compute program reaches, as the runtime binds them:
+/// c[0] at (1, 0), and for each address in c[0] a storage buffer from that
+/// address at the base's binding, with the base table (where each starts)
+/// at `BASE_TABLE`. The programs then read and write the same bytes as
+/// through the addresses.
+fn base_bindings(cb: &[u8]) -> (HashMap<(u32, u32), u64>, Vec<u8>) {
+    use relift_gpu_nv::translate::{
+        COMPUTE_BASE_BYTES, COMPUTE_BASE_TABLE_BINDING, compute_base_binding,
+    };
+    let mut u = HashMap::from([
+        ((1, 0), CBUF),
+        ((1, COMPUTE_BASE_TABLE_BINDING), BASE_TABLE),
+    ]);
+    let mut table = vec![0u8; 0x10000];
+    for off in (0x10..COMPUTE_BASE_BYTES).step_by(8) {
+        let o = off as usize;
+        let addr = u64::from_le_bytes(cb[o..o + 8].try_into().unwrap());
+        if addr != 0 {
+            u.insert((1, compute_base_binding(off)), addr);
+            let w = o / 8 * 4;
+            table[w..w + 4].copy_from_slice(&(addr as u32).to_le_bytes());
+        }
+    }
+    (u, table)
 }
 
 fn check_family(name: &str) {

@@ -40,6 +40,15 @@ typedef struct nvn_module {
      * nvn_slot_binding(stage, k) instead of a buffer device address.
      */
     uint32_t storage_slots;
+    /**
+     * @brief A compute program's bases (the translator's compute_base_binding): base j is reached through set 1
+     * binding NVN_SLOT_BINDING_BASE + j, a storage buffer over the memory from the address in c[0] at byte
+     * cbase[j]; ncbase of them.
+     */
+    uint16_t cbase[NVN_STORAGE_SLOTS];
+    uint32_t ncbase;
+    /** @brief It reads the compute base table (set 1 binding NVN_COMPUTE_BASE_TABLE_BINDING). */
+    bool cbase_table;
     /** @brief Its translation stores through 64-bit global addresses (NVN_IFACE_GLOBAL_STORE). */
     bool global_store;
     /** @brief Those stores also mark their pages in the written-page bitmap (the record's second word is 1). */

@@ -1908,16 +1908,24 @@ static bool compute_layouts(void)
         return true;
     if (!layouts())
         return false;
-    VkDescriptorSetLayoutBinding ub[USER_BINDINGS], db[DRIVER_BINDINGS];
+    VkDescriptorSetLayoutBinding ub[USER_BINDINGS], db[DRIVER_BINDINGS + NVN_STORAGE_SLOTS + 1];
     for (uint32_t b = 0; b < USER_BINDINGS; b++)
         ub[b] = (VkDescriptorSetLayoutBinding){ USER_BINDINGS * NVN_STAGE_COMPUTE + b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                                 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL };
     for (uint32_t b = 0; b < DRIVER_BINDINGS; b++)
         db[b] = (VkDescriptorSetLayoutBinding){ DRIVER_BINDINGS * NVN_STAGE_COMPUTE + b,
                                                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL };
+    for (uint32_t j = 0; j < NVN_STORAGE_SLOTS; j++)
+        db[DRIVER_BINDINGS + j] = (VkDescriptorSetLayoutBinding){ NVN_SLOT_BINDING_BASE + j, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                                  1, VK_SHADER_STAGE_COMPUTE_BIT, NULL };
+    db[DRIVER_BINDINGS + NVN_STORAGE_SLOTS] = (VkDescriptorSetLayoutBinding){
+        NVN_COMPUTE_BASE_TABLE_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL
+    };
     VkDescriptorSetLayoutCreateInfo li[2] = {
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = USER_BINDINGS, .pBindings = ub },
-        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = DRIVER_BINDINGS, .pBindings = db },
+        { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+          .bindingCount = DRIVER_BINDINGS + NVN_STORAGE_SLOTS + 1,
+          .pBindings = db },
     };
     for (int i = 0; i < 2; i++)
         if (VK(vkCreateDescriptorSetLayout)(g.dev, &li[i], NULL, &d.cset_layout[i]) != VK_SUCCESS)
@@ -1963,6 +1971,58 @@ typedef struct dispatch_data {
 } dispatch_data;
 
 /** @brief Puts a dispatch's constant banks into the batch being recorded (an nvn_vk_stage step). */
+/**
+ * @brief Where the descriptor of a compute program's base at c[0] byte off lies: the buffer (*buf) and offset (*boff)
+ * of the memory from *start (a GPU address at or below the base) for *n bytes. It covers the base's pool from as far
+ * below the base as the device's storage buffer range and alignment allow, so an access at any offset into the pool
+ * reads what the console reads; false when no pool holds the base's address.
+ */
+static bool compute_base_span(const uint8_t *c0, uint32_t off, void **buf, uint64_t *boff, uint64_t *start, uint64_t *n)
+{
+    uint64_t gpu = rl_ld64(c0, off), o, before, rest;
+    if (!gpu || !nvn_guest_buffer_rest(nvn_gpu_guest(gpu), buf, &o, &before, &rest))
+        return false;
+    uint64_t range = g.max_storage_range ? g.max_storage_range : UINT32_MAX, align = g.storage_align;
+    if (rest > range - align)
+        rest = range - align; /* room to start the descriptor at the alignment below the base */
+    uint64_t below = before < range - rest ? before : range - rest;
+    uint64_t lead = (o - below) % align;
+    if (lead && below >= align - lead)
+        below -= align - lead;
+    else if (lead && below + lead <= before && below + lead + rest <= range)
+        below += lead;
+    else if (lead)
+        return false;
+    *boff = o - below;
+    *start = gpu - below;
+    *n = below + rest;
+    return true;
+}
+
+/**
+ * @brief The storage buffer over a compute program's base at c[0] byte off (module.h cbase), and in *start the low word
+ * of the GPU address it starts at (the base table's word). An address of 0 is a null descriptor where the device
+ * allows it.
+ */
+static int nvn_compute_base(replay *r, const module *m, const uint8_t *c0, uint32_t off, VkDescriptorBufferInfo *bi,
+                            uint32_t *start)
+{
+    void *buf = NULL;
+    uint64_t boff, gpu, n;
+    if (!rl_ld64(c0, off) && g.null_descriptor) {
+        *bi = (VkDescriptorBufferInfo){ NULL, 0, VK_WHOLE_SIZE };
+        *start = 0;
+        return RL_OK;
+    }
+    if (!compute_base_span(c0, off, &buf, &boff, &gpu, &n))
+        return nvn_vk_stop(r, "compute program %s reaches the address 0x%llx in c[0] at 0x%x, which no memory pool holds "
+                              "at the storage buffer alignment",
+                           m->key, (unsigned long long)rl_ld64(c0, off), off);
+    *bi = (VkDescriptorBufferInfo){ (VkBuffer)buf, boff, n };
+    *start = (uint32_t)gpu;
+    return RL_OK;
+}
+
 static int stage_dispatch(replay *r, void *arg)
 {
     dispatch_data *dd = arg;
@@ -1980,9 +2040,32 @@ static int stage_dispatch(replay *r, void *arg)
     }
     uint64_t flushes = g.flushes;
     sets[2] = nvn_texset();
-    VkDescriptorBufferInfo bi[USER_BINDINGS + DRIVER_BINDINGS];
-    VkWriteDescriptorSet wr[USER_BINDINGS + DRIVER_BINDINGS];
+    VkDescriptorBufferInfo bi[USER_BINDINGS + DRIVER_BINDINGS + NVN_STORAGE_SLOTS + 1];
+    VkWriteDescriptorSet wr[USER_BINDINGS + DRIVER_BINDINGS + NVN_STORAGE_SLOTS + 1];
     uint32_t nw = 0;
+    uint32_t starts[NVN_COMPUTE_BASE_BYTES / 8] = { 0 };
+    for (uint32_t j = 0; j < m->ncbase; j++) {
+        if ((rc = nvn_compute_base(r, m, dd->c0, m->cbase[j], &bi[nw], &starts[m->cbase[j] / 8])) != RL_OK)
+            return rc;
+        wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                         .dstSet = sets[1],
+                                         .dstBinding = NVN_SLOT_BINDING_BASE + j,
+                                         .descriptorCount = 1,
+                                         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                         .pBufferInfo = &bi[nw] };
+        nw++;
+    }
+    if (m->cbase_table) {
+        if ((rc = bank_of(r, starts, sizeof starts, &bi[nw])) != RL_OK)
+            return rc;
+        wr[nw] = (VkWriteDescriptorSet){ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                         .dstSet = sets[1],
+                                         .dstBinding = NVN_COMPUTE_BASE_TABLE_BINDING,
+                                         .descriptorCount = 1,
+                                         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                         .pBufferInfo = &bi[nw] };
+        nw++;
+    }
     for (uint32_t b = 0; b < DRIVER_BINDINGS; b++) {
         if (!(m->driver & (1u << b)))
             continue;
@@ -2133,6 +2216,13 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         if (st->ubo[NVN_STAGE_COMPUTE][i].addr)
             nvn_vk_dispatch_buffer(nvn_gpu_guest(st->ubo[NVN_STAGE_COMPUTE][i].addr), st->ubo[NVN_STAGE_COMPUTE][i].size,
                                    false);
+    for (uint32_t j = 0; j < m->ncbase; j++) {
+        void *buf;
+        uint64_t boff, gpu, bytes;
+        if (compute_base_span(c0, m->cbase[j], &buf, &boff, &gpu, &bytes))
+            nvn_vk_dispatch_buffer(nvn_gpu_guest(gpu), (uint32_t)(bytes > UINT32_MAX ? UINT32_MAX : bytes),
+                                   m->stores_guest);
+    }
     int rc = m->register_handles ? nvn_texset_sync_registered(r) : RL_OK;
     if (rc != RL_OK)
         return rc;
@@ -2154,6 +2244,18 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         nvn_mirror_written(st->storage[i].addr, st->storage[i].size);
         if (m->stores_guest)
             nvn_vk_mark_write_range(nvn_gpu_guest(st->storage[i].addr), st->storage[i].size);
+    }
+    uint32_t storage_at = end - 8 * (ntex + nimg) - 16 * nssbo;
+    for (uint32_t j = 0; m->stores_guest && j < m->ncbase; j++) {
+        void *buf;
+        uint64_t boff, gpu, bytes;
+        uint32_t off = m->cbase[j];
+        if (off >= storage_at && off < storage_at + 16 * nssbo && (off - storage_at) % 16 == 0)
+            continue; /* a storage buffer of the dispatch, marked whole above */
+        if (compute_base_span(c0, off, &buf, &boff, &gpu, &bytes)) {
+            nvn_mirror_written(gpu, bytes);
+            nvn_vk_mark_write_range(nvn_gpu_guest(gpu), bytes);
+        }
     }
     if (m->marks_pages)
         nvn_mirror_written_marked();

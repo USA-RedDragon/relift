@@ -82,6 +82,12 @@
 #define NVN_SLOT_BINDING_BASE 64u
 /** @brief The binding of set 1 that holds storage buffer slot k of stage s. */
 static inline uint32_t nvn_slot_binding(uint32_t s, uint32_t k) { return NVN_SLOT_BINDING_BASE + NVN_STORAGE_SLOTS * s + k; }
+/** @brief The translator's COMPUTE_BASE_BINDING: binding NVN_COMPUTE_BASE_BINDING + offset / 8 of set 1 is the compute base at c[0] byte offset. */
+#define NVN_COMPUTE_BASE_BINDING 128u
+/** @brief The translator's COMPUTE_BASE_BYTES: compute bases lie below this c[0] byte. */
+#define NVN_COMPUTE_BASE_BYTES 0x800u
+/** @brief The translator's COMPUTE_BASE_TABLE_BINDING: set 1's uniform buffer of where each compute base's descriptor starts. */
+#define NVN_COMPUTE_BASE_TABLE_BINDING 80u
 
 /** @brief A texture's host image. */
 typedef struct vimg {

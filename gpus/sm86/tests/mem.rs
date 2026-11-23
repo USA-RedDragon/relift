@@ -836,3 +836,75 @@ fn an_atomic_through_a_slot_base_pair_uses_the_slot_descriptor() {
     assert!(!has_psb(&s));
     assert!(spirv_ops(&s.spirv).contains(&234), "no atomic add");
 }
+
+/// `ULDC.64 UR4, c[0x0][0x80]`.
+const ULDC64_UR4_C0_80: &str = "b97a040000200000000a000000e40f00";
+/// `LDG.E.STRONG.SM R0, [UR4+0x24]`.
+const LDG_R0_UR4_24: &str = "817900ff0424000000a91e0c00a20e00";
+/// `UIADD3 UR4, UP0, UR4, 0x24, URZ`.
+const UIADD3_UR4_UP0_24: &str = "90780404240000003fe0f10f00e20f00";
+/// `UIADD3.X UR5, URZ, UR5, URZ, UP0, !UPT`.
+const UIADD3X_UR5_UP0: &str = "9072053f050000003fe47f0800e20f00";
+/// `LDG.E.STRONG.SM R23, [UR4+-0x4]`.
+const LDG_R23_UR4_M4: &str = "817917ff04fcffff00a91e0c00a40e00";
+/// `IMAD.WIDE.U32 R10, R0, R11, c[0x0][0x270]`.
+const IMAD_WIDE_R10_C0_270: &str = "25760a00009c00000b008e0700ca0f00";
+/// `LDG.E.U16 R9, [R10.64+0x6]`.
+const LDG_U16_R9_R10_6: &str = "8179090a0406000000151e0c00a80e00";
+
+fn compute_bases(s: &relift_gpu_nv::translate::Shader) -> Vec<u32> {
+    s.interface.compute_bases.iter().copied().collect()
+}
+
+/// A compute program's loads from a base in its c[0] go through the
+/// base's descriptor (binding 128 plus the offset in doublewords), counted
+/// from the start the base table gives, so an offset below the base, or a
+/// constant added to the base pair with its carry, reaches the same bytes.
+#[test]
+fn compute_loads_from_a_c0_base_use_the_base_descriptor() {
+    let s = run(
+        &[
+            hex_word(ULDC64_UR4_C0_80),
+            hex_word(LDG_R0_UR4_24),
+            hex_word(UIADD3_UR4_UP0_24),
+            hex_word(UIADD3X_UR5_UP0),
+            hex_word(LDG_R23_UR4_M4),
+        ],
+        &[
+            "ULDC.64 UR4, c[0x0][0x80]",
+            "LDG.E.STRONG.SM R0, [UR4+0x24]",
+            "UIADD3 UR4, UP0",
+            "UIADD3.X UR5",
+            "[UR4+-0x4]",
+        ],
+    );
+    assert_eq!(compute_bases(&s), vec![0x80]);
+    assert!(s.interface.storage_slots.is_empty());
+    assert!(!has_psb(&s), "a load keeps a buffer device address");
+    assert!(decorated_binding(&s.spirv, 128 + 0x80 / 8));
+    assert!(decorated_binding(&s.spirv, 80), "no base table");
+}
+
+/// A pair made by `IMAD.WIDE.U32` from a c[0] base is that base plus an
+/// offset.
+#[test]
+fn compute_loads_through_a_wide_product_plus_a_base_use_the_base_descriptor() {
+    let s = run(
+        &[hex_word(IMAD_WIDE_R10_C0_270), hex_word(LDG_U16_R9_R10_6)],
+        &[
+            "IMAD.WIDE.U32 R10, R0, R11, c[0x0][0x270]",
+            "LDG.E.U16 R9, [R10.64+0x6]",
+        ],
+    );
+    assert_eq!(compute_bases(&s), vec![0x270]);
+    assert!(!has_psb(&s));
+}
+
+/// A compute base pair whose high word is not the next c[0] word keeps
+/// the buffer device address.
+#[test]
+fn compute_loads_through_other_pairs_keep_the_address() {
+    let s = run(&[hex_word(UIADD3_UR4_UP0_24), hex_word(LDG_R0_UR4_24)], &[]);
+    assert!(compute_bases(&s).is_empty());
+    assert!(has_psb(&s));
+}

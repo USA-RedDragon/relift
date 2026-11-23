@@ -632,6 +632,11 @@ bool nvn_gpu_mapped(uint64_t gpu, uint64_t size);
  * the size guest bytes at guest; false when no imported pool holds them all.
  */
 bool nvn_guest_buffer(uint64_t guest, uint64_t size, void **buf, uint64_t *off);
+/**
+ * @brief The imported buffer (*buf) and offset (*off) of the pool that holds the guest byte at guest, the bytes of
+ * the pool before it (*before) and from it on (*rest); false when no imported pool holds it.
+ */
+bool nvn_guest_buffer_rest(uint64_t guest, void **buf, uint64_t *off, uint64_t *before, uint64_t *rest);
 /** @brief A stage's compiler constants (its constant bank c[1]): GPU address and bytes, 0 and 0 for none. */
 typedef struct nvn_consts {
     uint64_t addr;
