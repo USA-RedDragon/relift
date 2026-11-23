@@ -35,4 +35,16 @@ for dev in "$work"/kat/*/; do
   [ ! -e "$dev/stopped/table.rlspv" ] || { echo "a stopped run wrote a table for $dev"; exit 1; }
 done
 [ "$checked" -gt 0 ] || { echo "no module was compared"; exit 1; }
+
+# The runtime with the library linked: the first start makes the tables a
+# device lacks, byte for byte the Rust ones, and keeps them until the device
+# description or the translator changes (test_nvn_xlate.c).
+export TMPDIR="$work"
+dev=$(ls -d "$work"/kat/*/ | head -1)
+dev=${dev%/}
+ln -sfn "$work/kat/programs/programs" "$dev/programs"
+make -C runtime -j "$(getconf _NPROCESSORS_ONLN)" CC=clang BUILD="$work/runtime" XLATE_LIB="$target/release/librelift_gpu_xlate.a" \
+  "$work/runtime/switch_tests"
+RELIFT_XLATE_KAT="$dev" RELIFT_XLATE_KAT_RUST="$dev/rust" "$work/runtime/switch_tests" nvn_
+
 echo "gpu-xlate: $checked modules and every device's tables match the Rust translator"

@@ -23,6 +23,9 @@
  * host GPU's own float math, whose stamp is the expected one with -native
  * after it. pick_tables is the one place that choice is made.
  *
+ * With the translator linked (nvn_xlate.c), tables that do not fit the device and translator are made again on the
+ * device, and every read of a table waits for that first.
+ *
  * Nothing in the program names the build machine's folders. The table folder
  * is $RELIFT_NVN_TABLES when set (what the launchers of a packaged app and
  * the mobile entries set), else the shader folder. The shader folder is
@@ -86,6 +89,9 @@ const char *nvn_shader_dir(void)
 
 const char *nvn_shader_table_dir(void)
 {
+    const char *made = nvn_xlate_table_dir();
+    if (made)
+        return made;
     const char *d = getenv("RELIFT_NVN_TABLES");
     return d && *d ? d : nvn_shader_dir();
 }
@@ -220,6 +226,14 @@ bool nvn_shader_math_native(void)
     return g_tables.native;
 }
 
+const char *nvn_shader_expected_stamp(void)
+{
+    pthread_mutex_lock(&g_lock);
+    const char *s = g_expected_stamp;
+    pthread_mutex_unlock(&g_lock);
+    return s;
+}
+
 /** @brief Reads the table folder's table.stamp (trimmed) into out; false
  * without one. */
 static bool read_stamp(char *out, size_t size)
@@ -240,6 +254,7 @@ static bool read_stamp(char *out, size_t size)
 bool nvn_shader_stamp_check(char *why, size_t why_n)
 {
     pick_tables();
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     if (!g_stamp_state) {
         char have[96], wantbuf[96];
@@ -407,8 +422,19 @@ static const uint8_t *table_find(const table *t, const char *key)
     return NULL;
 }
 
+void nvn_shader_tables_reopen(void)
+{
+    pthread_mutex_lock(&g_lock);
+    /* What was read of the old tables stays allocated: a lookup that began before may still hold a pointer into it. */
+    memset(&g_spv, 0, sizeof g_spv);
+    memset(&g_iface, 0, sizeof g_iface);
+    g_stamp_state = 0;
+    pthread_mutex_unlock(&g_lock);
+}
+
 static const uint8_t *spirv_entry(const char *key)
 {
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
@@ -679,6 +705,7 @@ void nvn_shader_helper_key(const char *kind, const char *key, char hkey[65])
 
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
 {
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     table *t = open_table(&g_iface, "rlspi", "RLSPI002", true);
     pthread_mutex_unlock(&g_lock);
@@ -699,6 +726,7 @@ uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
 bool nvn_shader_image_arrays(uint64_t *used)
 {
     *used = 0;
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     table *t = open_table(&g_iface, "rlspi", "RLSPI002", true);
     pthread_mutex_unlock(&g_lock);
@@ -718,6 +746,7 @@ bool nvn_shader_image_arrays(uint64_t *used)
 
 uint32_t nvn_shader_count(void)
 {
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
@@ -726,6 +755,7 @@ uint32_t nvn_shader_count(void)
 
 bool nvn_shader_key_at(uint32_t i, char key[65])
 {
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
@@ -743,6 +773,7 @@ bool nvn_shader_key_at(uint32_t i, char key[65])
 
 bool nvn_shader_table_hash(char hex[65])
 {
+    nvn_xlate_wait();
     pthread_mutex_lock(&g_lock);
     table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);

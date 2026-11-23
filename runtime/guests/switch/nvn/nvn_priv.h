@@ -454,8 +454,27 @@ void nvn_mkdirs(const char *dir);
  * "shaders" beside the executable (nvn_shader.c).
  */
 const char *nvn_shader_dir(void);
-/** @brief The folder the translation tables are read from: $RELIFT_NVN_TABLES, else the shader folder. */
+/**
+ * @brief The folder the translation tables are read from: the tables made on this device (nvn_xlate.c) when they are
+ * used, else $RELIFT_NVN_TABLES, else the shader folder.
+ */
 const char *nvn_shader_table_dir(void);
+/**
+ * @brief Reads the tables again from nvn_shader_table_dir: after the tables were made on the device, a lookup that
+ * ran before (and found the old folder's tables) must not keep them.
+ */
+void nvn_shader_tables_reopen(void);
+/** @brief The translator stamp the build expects (rl_nvn_set_table_stamp), or NULL. */
+const char *nvn_shader_expected_stamp(void);
+/**
+ * @brief Makes the shader tables on this device when the linked translator can and no table fits this device
+ * (nvn_xlate.c): right after device.json is written. Does nothing without the translator.
+ */
+void nvn_xlate_start(void);
+/** @brief Waits for a translation nvn_xlate_start began, showing the compile screen while it runs. */
+void nvn_xlate_wait(void);
+/** @brief The folder of the tables made on this device, when the runtime uses them; else NULL. */
+const char *nvn_xlate_table_dir(void);
 /** @brief Bytes of the program at guest address code: its header if it has one and its code through the first BRA to itself; 0 when none ends within 4 MiB. */
 uint64_t nvn_shader_extent(const uint8_t *mem, uint64_t code);
 /** @brief The key (SHA-256 hex) of the program at code and its length; false when it has no end. */

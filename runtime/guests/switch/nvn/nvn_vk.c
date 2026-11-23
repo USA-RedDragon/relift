@@ -446,6 +446,7 @@ static void bring_up(void)
     nvn_pipe_init();
     rl_log(RL_LOG_INFO, "nvn", "NVN2 device on %s (queue family %u)", g.name, g.family);
     write_caps();
+    nvn_xlate_start();
     g.ok = true;
 }
 

@@ -181,16 +181,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "relift-proc"
-version = "0.1.0"
-
-[[package]]
 name = "relift-gpu-xlate"
 version = "0.1.0"
 dependencies = [
  "relift-cache",
  "relift-gpu-table",
 ]
+
+[[package]]
+name = "relift-proc"
+version = "0.1.0"
 
 [[package]]
 name = "serde"

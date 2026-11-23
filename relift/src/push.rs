@@ -445,8 +445,9 @@ fn local_images(
     Ok(out)
 }
 
-/// Adds the build's shader tables to what a push copies, as
-/// `shaders/<file>`; the app reads them from there. Their hash is of the
+/// Adds the build's shader tables and its program pack to what a push
+/// copies, as `shaders/<file>`; the app reads them from there, and makes its
+/// own tables from the pack when the pushed ones do not fit its device. Their hash is of the
 /// file's content, which a push compares with what it last copied (the
 /// app's manifest does not list them).
 fn add_shader_tables(
@@ -455,7 +456,12 @@ fn add_shader_tables(
     entries: &mut Vec<Entry>,
     local: &mut BTreeMap<String, PathBuf>,
 ) -> Result<(), BoxError> {
-    for f in crate::shaders::tables_for(out, Some(target)) {
+    let pack = out.join(crate::shaders::DIR).join(relift_gpu_table::PACK);
+    let pack = pack.is_file().then_some(pack);
+    for f in crate::shaders::tables_for(out, Some(target))
+        .into_iter()
+        .chain(pack)
+    {
         let Some(file) = f.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
@@ -602,11 +608,16 @@ pub fn run_push(
 /// Keeps the capabilities the app on `dev` wrote as the device file of
 /// `target`'s shader table (crate::shaders::target_dir) when they are new or
 /// changed (another driver, an update), and says that a build is due; also
-/// says when the app has no table yet and the device cannot tell.
+/// says when the app has neither a table nor the program pack to make one,
+/// and the device cannot tell.
 fn fetch_caps(dev: &dyn Device, out: &Path, target: &str) -> Result<Option<String>, BoxError> {
     let want = crate::shaders::target_dir(out, target).join("device.json");
     let have = std::fs::read(&want).ok();
-    let table = !crate::shaders::tables_for(out, Some(target)).is_empty();
+    let table = !crate::shaders::tables_for(out, Some(target)).is_empty()
+        || out
+            .join(crate::shaders::DIR)
+            .join(relift_gpu_table::PACK)
+            .is_file();
     match dev.device_caps() {
         Some(caps) if have.as_deref() != Some(caps.as_slice()) => {
             if let Some(d) = want.parent() {
@@ -614,8 +625,8 @@ fn fetch_caps(dev: &dyn Device, out: &Path, target: &str) -> Result<Option<Strin
             }
             relift_cache::write_if_changed(&want, &caps)?;
             Ok(Some(format!(
-                "the app's device capabilities are now {}: build again for a shader table made for this \
-                 device, then push",
+                "the app's device capabilities are now {}; the app makes its shader tables for them \
+                 itself at its next start (or build again and push to ship them made)",
                 want.display()
             )))
         }

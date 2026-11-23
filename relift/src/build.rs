@@ -1573,6 +1573,7 @@ fn lift_and_emit(
             jobs as usize,
             &crate::shaders::host_modes(&settings.shader_math, false),
         )?;
+        crate::shaders::write_pack(out)?;
         if built.programs > 0 {
             let refused: Vec<String> = built
                 .refused
@@ -1964,10 +1965,21 @@ pub(crate) fn build_project(
     } else {
         lifted_flags
     };
-    let extras = match &cross {
+    let mut extras = match &cross {
         Some(c) => c.extras(&rt, true)?,
         None => crate::runtime_link::extras(&rt, &croot)?,
     };
+    if crate::shaders::has_programs(&out) {
+        let lib = crate::xlate::library(&croot, &runtime_dir(settings), cross.as_ref())?;
+        extras.with_xlate(crate::runtime_link::Xlate {
+            lib,
+            include: runtime_dir(settings).join("..").join("gpus/xlate/include"),
+            libs: crate::xlate::system_libs(cross.as_ref().map(crate::cross::Build::triple)),
+        });
+        ui.note(&Line::new().text(
+            "shaders: the program makes its shader tables on the device when they do not fit it",
+        ));
+    }
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
         .iter()
@@ -2385,10 +2397,10 @@ fn target_shaders(settings: &Settings, target: &str, ui: &mut Ui) -> Result<(), 
             ui.note(&Line::new().paint(
                 Paint::Yellow,
                 format!(
-                    "shaders: no table for {target}: the table is made for the device the game runs on; start \
-                     the app once on the device (it stops at its first GPU program and writes its \
-                     shaders/device.json), copy that file to {} (relift push does it for Android), and \
-                     build again",
+                    "shaders: no table for {target}: the app makes its tables on the device at its first \
+                     start, from the program pack relift push copies; to ship them made instead, start \
+                     the app once (it writes its shaders/device.json), copy that file to {} (relift push \
+                     does it for Android), and build again",
                     want.display()
                 ),
             ));

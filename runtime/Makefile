@@ -104,6 +104,15 @@ CFLAGS_BASE += -DRL_VULKAN_LINKED
 LDLIBS += -L$(MOLTENVK_DIR)/lib -Wl,-rpath,$(MOLTENVK_DIR)/lib -lMoltenVK
 endif
 endif
+# The NVIDIA program translator (gpus/xlate) the NVN2 layer makes its shader
+# tables with on the device (nvn_xlate.c): XLATE_LIB=<path to
+# librelift_gpu_xlate.a> links it, and its Zstandard replaces the vendored
+# decoder. Without it the runtime reads only the tables the build made.
+XLATE_LIB ?=
+ifneq ($(XLATE_LIB),)
+CFLAGS_BASE += -DRL_NVN_XLATE -I../gpus/xlate/include
+LDLIBS += $(XLATE_LIB) $(if $(WINDOWS),-lunwind -lws2_32 -lntdll -luserenv -lbcrypt,-ldl)
+endif
 
 # Include paths per layer: a layer sees itself and the layers below it.
 CORE_INC := -Icore/include -Icore
@@ -217,7 +226,7 @@ ARM32_OBJS := $(call obj,$(ARM32_SRCS))
 MIPS_OBJS := $(call obj,$(MIPS_SRCS))
 RSP_OBJS := $(call obj,$(RSP_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
-VK_OBJS := $(call obj,$(VK_SRCS)) $(BUILD)/obj/third_party/zstd/zstddeclib.o
+VK_OBJS := $(call obj,$(VK_SRCS)) $(if $(XLATE_LIB),,$(BUILD)/obj/third_party/zstd/zstddeclib.o)
 GB_OBJS := $(call obj,$(GB_SRCS))
 GBDEV_OBJS := $(call obj,$(GBDEV_SRCS))
 GBX_OBJS := $(call obj,$(GBX_SRCS))

@@ -55,6 +55,34 @@ pub const SHADERS_ENV: &str = "RELIFT_NVN_SHADERS";
 /// What a build's shader table holds.
 pub use relift_gpu_table::Built;
 
+/// Whether the build in `out` has GPU programs to translate (a Switch 2
+/// game), so its program links the on-device translator (`crate::xlate`).
+#[must_use]
+pub fn has_programs(out: &Path) -> bool {
+    std::fs::read_dir(out.join(DIR).join("programs")).is_ok_and(|mut d| d.next().is_some())
+}
+
+/// Writes the program pack (`relift_gpu_table::PACK`) of the build in `out`
+/// beside its programs, when it has any: what a device makes its shader
+/// tables from. It is game data, and goes where the game data goes.
+///
+/// # Errors
+///
+/// A program cannot be read or the pack written.
+pub fn write_pack(out: &Path) -> Result<Option<PathBuf>, BoxError> {
+    if !has_programs(out) {
+        return Ok(None);
+    }
+    let dir = out.join(DIR);
+    let pack = Programs::dir(&dir)?.to_pack(PACK_LEVEL)?;
+    let path = dir.join(relift_gpu_table::PACK);
+    relift_cache::write_if_changed(&path, &pack)?;
+    Ok(Some(path))
+}
+
+/// The zstd level of the program pack.
+const PACK_LEVEL: i32 = 9;
+
 /// The keys of the programs in `dir`/programs (found by the scan or
 /// recorded by a run), sorted.
 fn program_keys(dir: &Path) -> Result<Vec<[u8; 32]>, BoxError> {

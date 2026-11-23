@@ -533,6 +533,21 @@ pub struct Extras {
     /// Whether the runtime has video decoders at all (a Switch runtime), so
     /// the note says what became of them.
     pub video: bool,
+    /// The shader translator library (`crate::xlate`) a Switch 2 program
+    /// links to make its shader tables on the device, and the flags it
+    /// links with.
+    pub xlate: Option<Xlate>,
+}
+
+/// The shader translator library a program links (see [`Extras::with_xlate`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Xlate {
+    /// The static library.
+    pub lib: PathBuf,
+    /// Its C header's folder.
+    pub include: PathBuf,
+    /// The system libraries it needs.
+    pub libs: Vec<String>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -722,6 +737,7 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         vpx,
         dav1d_asm: dav1d.as_ref().and_then(|_| native_dav1d_asm()),
         video: has_video(rt),
+        xlate: None,
         dav1d,
     })
 }
@@ -785,6 +801,7 @@ pub fn android_extras(
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
         dav1d_asm: (target.abi == "arm64-v8a").then(aarch64_dav1d_asm),
         video: has_video(rt),
+        xlate: None,
     })
 }
 
@@ -841,6 +858,7 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
         dav1d: deps.dav1d.clone().filter(|_| has_dav1d_glue(rt)),
         dav1d_asm: None,
         video: has_video(rt),
+        xlate: None,
     })
 }
 
@@ -897,9 +915,22 @@ impl Extras {
             .any(|h| h.file_name().is_some_and(|n| n == name))
     }
 
+    /// Links the shader translator library `x`: the NVN2 layer makes its
+    /// shader tables on the device with it, and reads them with the
+    /// library's Zstandard instead of the vendored decoder.
+    pub fn with_xlate(&mut self, x: Xlate) {
+        self.vk
+            .retain(|s| !s.ends_with(Path::new(ZSTD_DIR).join("zstddeclib.c")));
+        self.xlate = Some(x);
+    }
+
     /// Defines and include paths every runtime file needs.
     pub fn defines(&self) -> Vec<String> {
         let mut d = Vec::new();
+        if let Some(x) = &self.xlate {
+            d.push("-DRL_NVN_XLATE".into());
+            d.push(format!("-I{}", x.include.display()));
+        }
         if self.sdl3.is_some() {
             d.push("-DRL_HOST_VIDEO".into());
         }
@@ -936,6 +967,10 @@ impl Extras {
         }
         if let Some(o) = &self.opus {
             l.extend(o.libs.iter().cloned());
+        }
+        if let Some(x) = &self.xlate {
+            l.push(x.lib.display().to_string());
+            l.extend(x.libs.iter().cloned());
         }
         let android = self.has_host("android_sdl3.c");
         if !l.is_empty() && !android && cfg!(target_vendor = "apple") {
@@ -1348,6 +1383,41 @@ mod tests {
     }
 
     #[test]
+    fn the_translator_library_replaces_the_vendored_decoder() {
+        let rt = Path::new("/rt");
+        let mut e = Extras {
+            vk: vec![
+                rt.join("guests/switch/nvn/nvn_shader.c"),
+                rt.join(ZSTD_DIR).join("zstddeclib.c"),
+            ],
+            window: None,
+            sdl3: None,
+            vulkan: None,
+            host: Vec::new(),
+            opus_src: None,
+            opus: None,
+            adrenotools: None,
+            vpx: None,
+            dav1d: None,
+            dav1d_asm: None,
+            video: true,
+            xlate: None,
+        };
+        e.with_xlate(Xlate {
+            lib: PathBuf::from("/c/librelift_gpu_xlate.a"),
+            include: PathBuf::from("/g/include"),
+            libs: vec!["-ldl".into()],
+        });
+        assert_eq!(e.vk, [rt.join("guests/switch/nvn/nvn_shader.c")]);
+        assert_eq!(e.defines(), ["-DRL_NVN_XLATE", "-I/g/include"]);
+        let mut want = vec!["/c/librelift_gpu_xlate.a", "-ldl"];
+        if cfg!(target_vendor = "apple") {
+            want.push("-Wl,-headerpad_max_install_names");
+        }
+        assert_eq!(e.libs(), want);
+    }
+
+    #[test]
     fn headless_note_says_so_and_adds_nothing() {
         let e = Extras {
             vk: Vec::new(),
@@ -1362,6 +1432,7 @@ mod tests {
             dav1d: None,
             dav1d_asm: None,
             video: true,
+            xlate: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
@@ -1388,6 +1459,7 @@ mod tests {
             dav1d: None,
             dav1d_asm: None,
             video: true,
+            xlate: None,
         };
         assert_eq!(e.defines(), ["-DRL_ADRENOTOOLS", "-I/a/include"]);
         assert_eq!(e.libs(), ["/a/lib/libadrenotools.so"]);
@@ -1411,6 +1483,7 @@ mod tests {
             dav1d: None,
             dav1d_asm: None,
             video: true,
+            xlate: None,
         };
         assert!(e.note().contains("vp9: libvpx (t)"));
         assert_eq!(e.defines(), ["-DRL_HOST_VP9"]);
@@ -1448,6 +1521,7 @@ mod tests {
             }),
             dav1d_asm: None,
             video: true,
+            xlate: None,
         };
         assert!(e.note().contains("av1: dav1d (t)"));
         assert_eq!(e.assembler(), None);
@@ -1496,6 +1570,7 @@ mod tests {
                 config: "x86_64",
             }),
             video: true,
+            xlate: None,
         };
         assert_eq!(e.assembler(), Some(vec!["/bin/nasm".to_string()]));
         let rt = Path::new("/rt");
@@ -1540,6 +1615,7 @@ mod tests {
             }),
             dav1d_asm: Some(aarch64_dav1d_asm()),
             video: true,
+            xlate: None,
         };
         assert_eq!(e.assembler(), None, "no NASM for arm64");
         let rt = Path::new("/rt");
@@ -1632,6 +1708,7 @@ mod tests {
             dav1d: None,
             dav1d_asm: None,
             video: true,
+            xlate: None,
         };
         std::fs::remove_dir_all(&m).unwrap();
         assert!(e.note().contains("MoltenVK linked (t)"));
