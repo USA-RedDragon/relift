@@ -583,6 +583,8 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_i
 bool nvn_vk_address_replay(void);
 /** @brief Frees an import (waits for the device). */
 void nvn_vk_unimport(nvn_import *im);
+/** @brief Imports of finalized pools kept for a pool made again over the same bytes (nvn_dev.c). */
+uint32_t nvn_pools_kept(void);
 /**
  * @brief Makes a device buffer of size bytes whose device address is the GPU address, kept equal to the size guest
  * bytes at guest (nvn_mirror.c), for a host that cannot import guest pages. False when the device refuses.

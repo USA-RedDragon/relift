@@ -1038,7 +1038,7 @@ TEST(nvn_a_pool_made_again_over_the_same_bytes_gets_its_old_address_back)
         return;
     }
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
-    CHECK(!nvn_gpu_mapped(gpu + 0x20, 0x100));
+    CHECK(nvn_gpu_mapped(gpu + 0x20, 0x100));
     CHECK(nvn_pool_make(again, storage, 0x40000, 0x18c));
     CHECK_EQ(nvn_pool_gpu(again), gpu);
     CHECK(nvn_gpu_mapped(gpu + 0x20, 0x40000 - 0x20));
@@ -1047,6 +1047,43 @@ TEST(nvn_a_pool_made_again_over_the_same_bytes_gets_its_old_address_back)
     CHECK(nvn_pool_gpu(other) != gpu);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, again, 0, 0, 0), RET);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, other, 0, 0, 0), RET);
+}
+
+TEST(nvn_a_pool_made_again_keeps_its_import_and_address)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t pool = heap, other = heap + 0x100, storage = heap + 0x100000;
+    CHECK(nvn_pool_make(pool, storage, 0x40000, 0x24));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    if (gpu == storage) {
+        CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+        return;
+    }
+    for (int round = 0; round < 3; round++) {
+        uint32_t kept = nvn_pools_kept();
+        CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+        CHECK_EQ(nvn_pools_kept(), kept + 1);
+        CHECK(nvn_gpu_mapped(gpu, 0x40000));
+        CHECK(nvn_pool_make(other, storage + 0x100000, 0x40000, 0x24));
+        kept = nvn_pools_kept();
+        CHECK(nvn_pool_make(pool, storage, 0x40000, 0x24));
+        CHECK_EQ(nvn_pools_kept(), kept - 1);
+        CHECK_EQ(nvn_pool_gpu(pool), gpu);
+        CHECK_EQ(nvn_gpu_guest(gpu + 0x1230), storage + 0x1230);
+        CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, other, 0, 0, 0), RET);
+    }
+    /* A pool over part of a kept import with another range frees it and imports anew. */
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    uint32_t before = nvn_pools_kept();
+    CHECK(nvn_pool_make(pool, storage + 0x10000, 0x40000, 0x24));
+    CHECK(nvn_pools_kept() < before);
+    CHECK_EQ(nvn_gpu_guest(nvn_pool_gpu(pool) + 0x20), storage + 0x10020);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    /* The guest discarding the pages frees the import kept over them. */
+    before = nvn_pools_kept();
+    CHECK_EQ(rl_vm_set(&hos.vm, storage, 0x80000, RL_VM_RW, 0, RL_VM_DISCARD), 0);
+    CHECK(nvn_pools_kept() < before);
 }
 
 TEST(nvn_pool_mappings_take_a_textures_page_kind)
@@ -1587,6 +1624,10 @@ TEST(nvn_gpu_describe_names_the_live_and_the_freed_pool_that_held_an_address)
     nvn_gpu_describe(gpu + 0x40010, where, sizeof where);
     CHECK(strstr(where, "0x10 past the span") != NULL);
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    /* The finalized pool's import is kept (its span stays) until the guest discards the pages. */
+    nvn_gpu_describe(gpu + 0x20, where, sizeof where);
+    CHECK(strstr(where, "in pool span") != NULL);
+    CHECK_EQ(rl_vm_set(&hos.vm, storage, 0x40000, RL_VM_RW, 0, RL_VM_DISCARD), 0);
     nvn_gpu_describe(gpu + 0x20, where, sizeof where);
     CHECK(strstr(where, "in pool span") == NULL);
     CHECK(strstr(where, "in FREED pool span") != NULL);

@@ -296,6 +296,12 @@ typedef struct rl_vm {
      * Recursive: a kernel copy that faults on a watched page runs the fault hooks, which read the map, on its thread.
      */
     pthread_mutex_t lock;
+    /**
+     * @brief Called with the range before rl_vm_set discards guest pages (RL_VM_DISCARD), before the map lock is
+     * taken: for a host user holding the pages (a device import pins them, and a fresh page under it would go
+     * unseen). NULL for none.
+     */
+    void (*discard_hook)(uint64_t addr, uint64_t size);
 } rl_vm;
 
 /** @brief Low guard below guest address 0 (docs/abi.md section 2). */

@@ -366,6 +366,9 @@ int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t t
     __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
     if ((addr | size) & (vm->guest_page - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
         return -1;
+    void (*hook)(uint64_t, uint64_t) = __atomic_load_n(&vm->discard_hook, __ATOMIC_ACQUIRE);
+    if (content == RL_VM_DISCARD && hook)
+        hook(addr, size);
     vm_lock(vm);
     int rc = set_locked(vm, addr, size, perm, tag, content);
     vm_unlock(vm);

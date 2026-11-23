@@ -12,6 +12,8 @@
  * addresses. Without either a pool's GPU address is its guest address.
  */
 #include "nvn_priv.h"
+#include "nvn_watch.h"
+#include "vkdev.h"
 #include "services.h"
 #include <relift/settings.h>
 #include "vi.h"
@@ -124,43 +126,102 @@ static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf, u
 }
 
 /**
- * @brief The imports of pools the guest finalized, newest last. A console's driver gives a pool that is created again
- * over the same bytes the address range it just freed, and the guest still holds addresses of the old pool (in
- * buffers, constant banks and recorded commands), so an import of the same bytes takes the old device address back.
+ * @brief The imports of pools the guest finalized, kept alive. On Switch 2 a pool's GPU address is its CPU address, so a
+ * pool made again over the same bytes has the address the old one had, and the guest still holds addresses of the old
+ * pool (in buffers, constant banks and recorded commands). The guest's pages stay mapped after a finalize, so the host
+ * import stays valid: a pool made again over exactly the same range takes it back, with its device address. A kept
+ * import is freed when a new pool overlaps it with another range, or when the guest discards any of its pages.
  */
-#define RETIRED_MAX 64
-static struct retired_import {
+static struct kept_import {
     uint64_t memory, size;
     nvn_import im;
-} g_retired[RETIRED_MAX];
-static uint32_t g_retired_n;
-static pthread_mutex_t g_retired_lock = PTHREAD_MUTEX_INITIALIZER;
+} *g_kept;
+static uint32_t g_kept_n, g_kept_cap;
+static pthread_mutex_t g_kept_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void retire_import(uint64_t memory, uint64_t size, const nvn_import *im)
+static void pools_remove(uint64_t gpu, uint64_t size, void *buf);
+
+/** @brief Frees the kept imports overlapping guest [memory, memory + size), but for one of exactly that range when keep_exact is set. */
+static void kept_release(uint64_t memory, uint64_t size, bool keep_exact)
 {
-    if (!im->buf_opaque)
-        return;
-    pthread_mutex_lock(&g_retired_lock);
-    g_retired[g_retired_n++ % RETIRED_MAX] = (struct retired_import){ memory, size, *im };
-    pthread_mutex_unlock(&g_retired_lock);
+    nvn_import gone[16];
+    uint64_t gone_size[16];
+    uint32_t n = 0;
+    do {
+        n = 0;
+        pthread_mutex_lock(&g_kept_lock);
+        for (uint32_t i = 0; i < g_kept_n && n < 16;) {
+            struct kept_import *k = &g_kept[i];
+            bool overlap = k->memory < memory + size && memory < k->memory + k->size;
+            if (overlap && !(keep_exact && k->memory == memory && k->size == size)) {
+                gone_size[n] = k->size;
+                gone[n++] = k->im;
+                *k = g_kept[--g_kept_n];
+            } else {
+                i++;
+            }
+        }
+        pthread_mutex_unlock(&g_kept_lock);
+        for (uint32_t i = 0; i < n; i++) {
+            pools_remove(gone[i].gpu, gone_size[i], gone[i].buf);
+            nvn_vk_unimport(&gone[i]);
+        }
+    } while (n == 16);
 }
 
-/** @brief The newest retired import of exactly these bytes, which stays retired until it is taken. */
-static const nvn_import *retired_of(uint64_t memory, uint64_t size, nvn_import *copy)
+/** @brief The guest discards pages: kept imports over them would hold the old pages, so they go. */
+static void kept_discard(uint64_t addr, uint64_t size) { kept_release(addr, size, false); }
+
+static void kept_put(uint64_t memory, uint64_t size, const nvn_import *im)
 {
-    const nvn_import *found = NULL;
-    pthread_mutex_lock(&g_retired_lock);
-    uint32_t have = g_retired_n < RETIRED_MAX ? g_retired_n : RETIRED_MAX;
-    for (uint32_t k = 0; k < have && !found; k++) {
-        struct retired_import *r = &g_retired[(g_retired_n - 1 - k) % RETIRED_MAX];
-        if (r->im.buf_opaque && r->memory == memory && r->size == size) {
-            *copy = r->im;
-            r->im.buf_opaque = 0;
-            found = copy;
+    /* A finalize returns after the device is done with the pool, as it did when the import was freed: the game may
+     * write the pages at once. */
+    rl_vkdev_wait_idle(rl_vkdev());
+    pthread_mutex_lock(&g_kept_lock);
+    if (g_kept_n == g_kept_cap) {
+        uint32_t cap = g_kept_cap ? 2 * g_kept_cap : 64;
+        struct kept_import *v = realloc(g_kept, cap * sizeof *v);
+        if (!v) {
+            pthread_mutex_unlock(&g_kept_lock);
+            pools_remove(im->gpu, size, im->buf);
+            nvn_import gone = *im;
+            nvn_vk_unimport(&gone);
+            return;
         }
+        g_kept = v;
+        g_kept_cap = cap;
     }
-    pthread_mutex_unlock(&g_retired_lock);
+    g_kept[g_kept_n++] = (struct kept_import){ memory, size, *im };
+    __atomic_store_n(&hos.vm.discard_hook, kept_discard, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&g_kept_lock);
+}
+
+/** @brief Takes the kept import of exactly guest [memory, memory + size) into out; frees kept ones that overlap otherwise. */
+static bool kept_take(uint64_t memory, uint64_t size, nvn_import *out)
+{
+    kept_release(memory, size, true);
+    bool found = false;
+    pthread_mutex_lock(&g_kept_lock);
+    for (uint32_t i = 0; i < g_kept_n && !found; i++)
+        if (g_kept[i].memory == memory && g_kept[i].size == size) {
+            *out = g_kept[i].im;
+            g_kept[i] = g_kept[--g_kept_n];
+            found = true;
+        }
+    pthread_mutex_unlock(&g_kept_lock);
+    if (found) {
+        pools_remove(out->gpu, size, out->buf);
+        nvn_watch_release(memory, size);
+    }
     return found;
+}
+
+uint32_t nvn_pools_kept(void)
+{
+    pthread_mutex_lock(&g_kept_lock);
+    uint32_t n = g_kept_n;
+    pthread_mutex_unlock(&g_kept_lock);
+    return n;
 }
 
 /** @brief The spans of the imports the layer freed, newest last: what a device fault at an address no pool holds names. */
@@ -683,10 +744,12 @@ enum { MEMORY_AUTO = 0, MEMORY_IMPORT = 1, MEMORY_MIRROR = 2 };
  * @brief Gives pool p a device buffer over its guest bytes: an import where the host has one, a mirror otherwise or
  * when nvn.memory says mirror. False when neither works, which leaves the pool's GPU address its guest address.
  */
-static bool pool_back(nvn_pool *p, uint64_t memory, uint64_t size, const nvn_import *again)
+static bool pool_back(nvn_pool *p, uint64_t memory, uint64_t size)
 {
     int mode = rl_setting_enum("nvn.memory");
-    if (mode != MEMORY_MIRROR && nvn_vk_import(memory, size, again, &p->im))
+    if (mode != MEMORY_MIRROR && kept_take(memory, size, &p->im))
+        return true;
+    if (mode != MEMORY_MIRROR && nvn_vk_import(memory, size, NULL, &p->im))
         return true;
     if (mode != MEMORY_IMPORT && nvn_mirror_make(memory, size, &p->im)) {
         static bool said;
@@ -709,8 +772,7 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
         p->size = size;
         p->flags = flags;
         bool virt = p->flags & NVN_POOL_VIRTUAL;
-        nvn_import back;
-        if (!virt && pool_back(p, memory, size, retired_of(memory, size, &back)))
+        if (!virt && pool_back(p, memory, size))
             pools_add(p->im.gpu, size, memory, p->im.buf, memory);
         else if (!virt) {
             rl_log(RL_LOG_WARN, "nvn", "memory pool 0x%llx (0x%llx bytes at 0x%llx) is not imported into the host device; "
@@ -885,15 +947,17 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
     if (p && !p->im.gpu && !(p->flags & NVN_POOL_VIRTUAL))
         pools_remove(p->memory, p->size, NULL);
     if (p && p->im.gpu) {
-        pools_remove(p->im.gpu, p->size, p->im.buf);
+        /* A kept import's span stays in the table: the device may still run commands the game recorded while the
+         * pool lived, and the memory is still there. */
         if (p->alias) {
+            pools_remove(p->im.gpu, p->size, p->im.buf);
             memset(&p->im, 0, sizeof p->im);
         } else if (p->mirrored) {
+            pools_remove(p->im.gpu, p->size, p->im.buf);
             nvn_mirror_free(&p->im);
         } else {
-            nvn_import gone = p->im;
-            nvn_vk_unimport(&p->im);
-            retire_import(p->memory, p->size, &gone);
+            kept_put(p->memory, p->size, &p->im);
+            memset(&p->im, 0, sizeof p->im);
         }
     }
     nvn_obj_free(p ? &p->o : NULL);
@@ -1025,11 +1089,11 @@ uint64_t nvnh_nvnMemoryPoolMapVirtual(rl_ctx *c, uint8_t *mem)
                                             "than earlier ones (only one linear range per virtual pool is implemented)",
                                             (unsigned long long)pool, i);
         if (!p->mapped) {
-            nvn_import back;
             if (q->mirrored) {
                 p->im = (nvn_import){ .buf = q->im.buf, .memory = NULL, .gpu = q->im.gpu + (poff - voff) };
                 p->alias = true;
-            } else if (!q->im.gpu || !nvn_vk_import(memory, p->size, retired_of(memory, p->size, &back), &p->im)) {
+            } else if (!q->im.gpu ||
+                       (!kept_take(memory, p->size, &p->im) && !nvn_vk_import(memory, p->size, NULL, &p->im))) {
                 return (uint64_t)rl_guest_fatal(c, "nvn",
                                                 "nvnMemoryPoolMapVirtual(0x%llx): pool 0x%llx is not in the host "
                                                 "device, or its bytes from 0x%llx cannot be imported again",
