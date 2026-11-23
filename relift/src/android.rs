@@ -47,7 +47,7 @@ const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 /// The Java sources of the app, compiled into `classes.dex` with SDL3's
 /// own classes.
-const JAVA: [(&str, &str); 13] = [
+const JAVA: [(&str, &str); 14] = [
     (
         "MainActivity",
         include_str!("android/java/MainActivity.java"),
@@ -66,6 +66,7 @@ const JAVA: [(&str, &str); 13] = [
     ("DataPages", include_str!("android/java/DataPages.java")),
     ("DataImport", include_str!("android/java/DataImport.java")),
     ("DataService", include_str!("android/java/DataService.java")),
+    ("Maths", include_str!("android/java/Maths.java")),
     (
         "DataActivity",
         include_str!("android/java/DataActivity.java"),
@@ -1155,6 +1156,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_shader_math_choice_reaches_the_runtime_at_start() {
+        let main = JAVA[0].1;
+        assert!(main.contains("args.add(\"gpu.math=\" + launchedMath);"));
+        let maths = JAVA.iter().find(|j| j.0 == "Maths").unwrap().1;
+        assert!(maths.contains("static final String EXACT = \"exact\";"));
+        assert!(maths.contains("static final String NATIVE = \"native\";"));
+        assert!(maths.contains("prefs.getString(\"gpu.math\", EXACT)"));
+        let ui = JAVA.iter().find(|j| j.0 == "Ui").unwrap().1;
+        assert!(ui.contains("\"Takes effect next start\""));
+        assert!(!ui.contains("Same as all games"));
     }
 
     #[test]

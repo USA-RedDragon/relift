@@ -51,6 +51,8 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         return new String[] {"SDL3", name.isEmpty() ? "main" : name};
     }
     private Ui ui;
+    /** The shader math the game started with (gpu.math). */
+    private String launchedMath;
     private Displays displays;
     private DisplayManager.DisplayListener watch;
     private boolean resumed;
@@ -91,8 +93,9 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this);
         }
         String page = getIntent().getStringExtra("relift_open");
-        if ("gpu_driver".equals(page)) {
-            ui.open(Ui.Page.DRIVER);
+        Ui.Page open = Ui.page(page);
+        if (open != null) {
+            ui.open(open);
         }
     }
 
@@ -211,6 +214,14 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         }
         args.add("--relift-set");
         args.add("video.gpu_driver=" + driver.trim());
+        Maths maths = new Maths(this);
+        String math = getIntent().getStringExtra("relift_gpu_math");
+        if (math != null && !math.trim().isEmpty()) {
+            maths.setChoice(math.trim());
+        }
+        launchedMath = maths.choice();
+        args.add("--relift-set");
+        args.add("gpu.math=" + launchedMath);
         String a = getIntent().getStringExtra("relift_args");
         if (a != null && !a.trim().isEmpty()) {
             args.addAll(Arrays.asList(a.trim().split("\\s+")));
@@ -312,6 +323,11 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
     @Override
     public void restart() {
         Restarter.restart(this);
+    }
+
+    @Override
+    public String loadedMath() {
+        return launchedMath;
     }
 
     @Override

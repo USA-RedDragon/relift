@@ -124,6 +124,9 @@ final class Ui {
         /** The driver the running game loaded: "system", a package folder, or null (none yet, or no game running). */
         String loaded();
 
+        /** The shader math the running game started with (Maths.EXACT or Maths.NATIVE), or null (no game running). */
+        String loadedMath();
+
         /**
          * Opens the game data import with an action of DataActivity
          * (ACTION_IMPORT or ACTION_DELETE); a running game closes first.
@@ -132,7 +135,7 @@ final class Ui {
     }
 
     enum Page {
-        HOME, SETTINGS, GRAPHICS, DRIVER, MANAGE, GET, DATA, DATA_CHECK,
+        HOME, SETTINGS, GRAPHICS, DRIVER, MATH, MANAGE, GET, DATA, DATA_CHECK,
         NEEDED, CHOOSE, LOOKING, READY, SPACE, COPYING, STOPPED, DONE
     }
 
@@ -154,6 +157,7 @@ final class Ui {
     final Activity act;
     final FrameLayout root;
     final Drivers drivers;
+    final Maths maths;
     final Host host;
     final boolean launcher;
     final boolean vulkan;
@@ -175,6 +179,7 @@ final class Ui {
     Ui(Activity act, Drivers drivers, Host host, boolean launcher) {
         this.act = act;
         this.drivers = drivers;
+        this.maths = new Maths(act);
         this.host = host;
         this.launcher = launcher;
         this.vulkan = meta(act, "relift.gpu_driver");
@@ -379,6 +384,7 @@ final class Ui {
             case SETTINGS: return "Settings";
             case GRAPHICS: return "Graphics";
             case DRIVER: return "GPU driver";
+            case MATH: return "Shader math";
             case MANAGE: return "Manage GPU drivers";
             case GET: return "Get drivers";
             default: return data.title(p);
@@ -386,7 +392,7 @@ final class Ui {
     }
 
     void build(LinearLayout page, Page p, boolean land) {
-        land = land && p != Page.SETTINGS && p != Page.GRAPHICS;
+        land = land && p != Page.SETTINGS && p != Page.GRAPHICS && (p != Page.MATH || mathPending());
         Col a = new Col();
         Col b = land ? new Col() : a;
         switch (p) {
@@ -394,6 +400,7 @@ final class Ui {
             case SETTINGS: settings(a, b); break;
             case GRAPHICS: graphics(a); break;
             case DRIVER: driver(a, b, land); break;
+            case MATH: math(a, b); break;
             case MANAGE: manage(a, b, land); break;
             case GET: get(a, b, land); break;
             default: data.build(p, a, b, land); break;
@@ -468,6 +475,7 @@ final class Ui {
         a.add(hero(), 26);
         b.label("Graphics");
         driverRow(b);
+        mathRow(b);
         if (data.has()) {
             b.label("Data");
             b.add(data.row(), 26);
@@ -503,7 +511,7 @@ final class Ui {
     }
 
     void settings(Col a, Col b) {
-        a.add(row("Graphics", list("GPU driver"), Kind.NAV, false, null, () -> push(Page.GRAPHICS)), 26);
+        a.add(row("Graphics", list(vulkan ? "GPU driver, shader math" : "GPU driver"), Kind.NAV, false, null, () -> push(Page.GRAPHICS)), 26);
         b.add(row("On-screen controller", list("Opacity, size, layout"), Kind.NAV, false, null,
                 () -> close(MainActivity.NEXT_CONTROLLER)), 26);
         if (data.has()) {
@@ -513,6 +521,82 @@ final class Ui {
 
     void graphics(Col a) {
         driverRow(a);
+        mathRow(a);
+    }
+
+    /** The Shader math row of the Graphics page: the choice for this game and what it means. */
+    void mathRow(Col c) {
+        if (!vulkan) {
+            return;
+        }
+        String m = maths.choice();
+        c.add(row("Shader math", list(Maths.name(m), Maths.sub(m)), Kind.NAV, false, null, () -> push(Page.MATH)), 26);
+    }
+
+    /** The Shader math page: the restart card while the choice differs from the running game's, then the choices. */
+    void math(Col a, Col b) {
+        String ch = maths.choice();
+        String loaded = launcher ? null : host.loadedMath();
+        boolean pending = mathPending();
+        if (pending) {
+            a.add(banner("Restart to use " + Maths.name(ch),
+                    "The game picks its shader math when it starts. Progress you haven't saved in the game is lost.",
+                    new Btn("Restart now", Style.PRIMARY, host::restart),
+                    new Btn("Later", Style.SECONDARY, () -> close(MainActivity.NEXT_RESUME))), 26);
+        }
+        b.note("How the game's shaders do their arithmetic on this phone's GPU.");
+        b.label("For this game");
+        b.add(mathRadio(Maths.EXACT, ch, loaded), 26);
+        b.add(mathRadio(Maths.NATIVE, ch, loaded), 26);
+        if (!pending) {
+            b.note("Applies the next time you start this game.");
+        }
+    }
+
+    /**
+     * The page the extra relift_open names: gpu_driver (the GPU driver page, as the driver shortcut opens it),
+     * shader_math, or a page's own name in lower case (home, settings, graphics, manage, get); null for none.
+     */
+    static Page page(String name) {
+        if (name == null || name.isEmpty()) {
+            return null;
+        }
+        if ("gpu_driver".equals(name)) {
+            return Page.DRIVER;
+        }
+        if ("shader_math".equals(name)) {
+            return Page.MATH;
+        }
+        try {
+            return Page.valueOf(name.toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** The choice differs from the shader math the running game started with: a restart applies it. */
+    boolean mathPending() {
+        String loaded = launcher ? null : host.loadedMath();
+        return loaded != null && !loaded.equals(maths.choice());
+    }
+
+    View mathRadio(final String mode, String chosen, String loaded) {
+        Row r = new Row();
+        r.title = Maths.name(mode);
+        r.subs = list(Maths.sub(mode));
+        r.kind = Kind.RADIO;
+        r.selected = mode.equals(chosen);
+        if (mode.equals(loaded)) {
+            r.pills.add(new String[] { "In use now", "#0b2a17", "green" });
+        }
+        if (r.selected && loaded != null && !mode.equals(loaded)) {
+            r.pills.add(new String[] { "Takes effect next start", "#33260a", "amber" });
+        }
+        r.click = () -> {
+            maths.setChoice(mode);
+            render();
+        };
+        return row(r);
     }
 
     void driverRow(Col c) {

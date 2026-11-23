@@ -24,7 +24,9 @@ public class SettingsActivity extends Activity implements Ui.Host {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT,
                     () -> ui.back());
         }
-        ui.open("gpu_driver".equals(getIntent().getStringExtra("relift_open")) ? Ui.Page.DRIVER : Ui.Page.HOME);
+        String page = getIntent().getStringExtra("relift_open");
+        Ui.Page open = Ui.page(page);
+        ui.open(open != null ? open : Ui.Page.HOME);
     }
 
     @Override
@@ -51,6 +53,11 @@ public class SettingsActivity extends Activity implements Ui.Host {
 
     @Override
     public String loaded() {
+        return null;
+    }
+
+    @Override
+    public String loadedMath() {
         return null;
     }
 

@@ -361,6 +361,11 @@ public class DataActivity extends Activity implements Ui.Host, DataImport.Listen
     }
 
     @Override
+    public String loadedMath() {
+        return null;
+    }
+
+    @Override
     public void openData(String action) {
         if (ACTION_DELETE.equals(action)) {
             DataPages.delete(this, () -> {
