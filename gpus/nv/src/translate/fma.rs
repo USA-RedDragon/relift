@@ -209,6 +209,9 @@ impl Ctx {
     ///   the device flushing as `.FTZ` does, the factors as they are: the
     ///   device reads a denormal one as the zero `.FTZ` asks for.
     pub(crate) fn float_fma(&mut self, a: u32, b: u32, c: u32, ftz: bool) -> u32 {
+        if ftz && self.flushes_as_ftz() {
+            return self.float_fma_flush(a, b, c);
+        }
         let (ma, ea, fa) = self.bl_parts(a, ftz);
         let (mb, eb, fb) = self.bl_parts(b, ftz);
         let (mc, ec, fc) = self.bl_parts(c, ftz);
@@ -324,6 +327,136 @@ impl Ctx {
         let sv = self.bpick(nan, kn, sv);
         let special = self.lor(fab, fc);
         self.bpick(special, sv, out)
+    }
+
+    /// Whether the device's adds and multiplies in this module read a
+    /// denormal as a zero and give zeros their IEEE sign, as `.FTZ` does: a
+    /// module that runs with the device flushing as `.FTZ` does, or a device
+    /// whose own mode flushes so except for its multiply's rounding of
+    /// results just below `2^-126` ([`FIX_ROUND_AFTER`](super::host::FIX_ROUND_AFTER)).
+    fn flushes_as_ftz(&self) -> bool {
+        match self.dn_dmode() {
+            super::Denorm::Flush => true,
+            super::Denorm::Unknown => self
+                .host
+                .flush_fix
+                .is_some_and(|f| f & super::host::FIX_ZERO_SIGN == 0),
+            _ => false,
+        }
+    }
+
+    /// [`Ctx::float_fma`] for `.FTZ` on a device that flushes as `.FTZ`
+    /// does ([`Ctx::flushes_as_ftz`]).
+    ///
+    /// The factors' significands become `x` and `y` in `[1, 2)` by their
+    /// bits, the addend moves to their scale by one add to its exponent
+    /// field (or the sticky `2^-60` of its sign below `2^-50`, or its signed
+    /// zero), and the core is that of [`Ctx::float_fma`]. The result goes
+    /// back to the scale of `a * b` by an add to its exponent field, a
+    /// signed zero below the normal range (and for an exact zero sum) and
+    /// an infinity above it. A zero, infinite or NaN factor, an infinite or
+    /// NaN addend, and an addend more than `2^28` above the product give
+    /// the device's `a * b + c` instead (the addend alone for an infinite or
+    /// NaN one with finite factors, whose product the device could
+    /// overflow), NaNs as the guest's `0x7fffffff`: there the device's
+    /// product is exact, a signed zero, or (with the addend far larger) too
+    /// small to change the sum, so its rounding just below `2^-126` does not
+    /// matter.
+    fn float_fma_flush(&mut self, a: u32, b: u32, c: u32) -> u32 {
+        let u = self.u32t();
+        let ma = self.and_k(a, 0x807f_ffff);
+        let ma = self.sh(op::BITWISE_OR, ma, 0x3f80_0000);
+        let mb = self.and_k(b, 0x807f_ffff);
+        let mb = self.sh(op::BITWISE_OR, mb, 0x3f80_0000);
+        let fa = self.sh(op::SHIFT_RIGHT_LOGICAL, a, 23);
+        let fa = self.and_k(fa, 0xff);
+        let fb = self.sh(op::SHIFT_RIGHT_LOGICAL, b, 23);
+        let fb = self.and_k(fb, 0xff);
+        let fc = self.sh(op::SHIFT_RIGHT_LOGICAL, c, 23);
+        let fc = self.and_k(fc, 0xff);
+        let k = self.ib(op::I_ADD, fa, fb);
+        let k254 = self.kc(254);
+        let t = self.ib(op::I_SUB, k254, k);
+        let t = self.sh(op::SHIFT_LEFT_LOGICAL, t, 23);
+        let zs = self.ib(op::I_ADD, c, t);
+        let dc = self.ib(op::I_SUB, fc, k);
+        let low = self.cmp_k(op::S_LESS_THAN, dc, (-177i32) as u32);
+        let csign = self.and_k(c, SIGN);
+        let sticky = self.sh(op::BITWISE_OR, csign, 67 << 23);
+        let zs = self.bpick(low, sticky, zs);
+        let cz = self.cmp_k(op::I_EQUAL, fc, 0);
+        let zs = self.bpick(cz, csign, zs);
+        let x = self.as_float(ma);
+        let y = self.as_float(mb);
+        let z = self.as_float(zs);
+        let xhb = self.and_k(ma, 0xffff_f000);
+        let yhb = self.and_k(mb, 0xffff_f000);
+        let xh = self.as_float(xhb);
+        let yh = self.as_float(yhb);
+        let xl = self.exact(op::F_SUB, x, xh);
+        let yl = self.exact(op::F_SUB, y, yh);
+        let ph = self.exact(op::F_MUL, x, y);
+        let hh = self.exact(op::F_MUL, xh, yh);
+        let pl = self.exact(op::F_SUB, hh, ph);
+        let hl = self.exact(op::F_MUL, xh, yl);
+        let pl = self.exact(op::F_ADD, pl, hl);
+        let lh = self.exact(op::F_MUL, xl, yh);
+        let pl = self.exact(op::F_ADD, pl, lh);
+        let ll = self.exact(op::F_MUL, xl, yl);
+        let pl = self.exact(op::F_ADD, pl, ll);
+        let (th, tl) = self.two_sum(z, ph);
+        let (vs, ve) = self.two_sum(tl, pl);
+        let vb = self.as_bits(vs);
+        let eb = self.as_bits(ve);
+        let opp = self.ib(op::BITWISE_XOR, vb, eb);
+        let opp = self.sh(op::SHIFT_RIGHT_LOGICAL, opp, 31);
+        let vo = self.ib(op::I_SUB, vb, opp);
+        let vo = self.sh(op::BITWISE_OR, vo, 1);
+        let k0 = self.kc(0);
+        let f0 = self.as_float(k0);
+        let inexact = self.fcmp(op::F_ORD_NOT_EQUAL, ve, f0);
+        let vo = self.bpick(inexact, vo, vb);
+        let v = self.as_float(vo);
+        let r = self.exact(op::F_ADD, th, v);
+        let rb = self.as_bits(r);
+        let fr = self.sh(op::SHIFT_RIGHT_LOGICAL, rb, 23);
+        let fr = self.and_k(fr, 0xff);
+        let ks = self.sh(op::I_SUB, k, 254);
+        let re = self.ib(op::I_ADD, fr, ks);
+        let kf = self.sh(op::SHIFT_LEFT_LOGICAL, ks, 23);
+        let out = self.ib(op::I_ADD, rb, kf);
+        let mn = self.ext(u, glsl::S_MIN, &[re, fr]);
+        let tiny = self.cmp_k(op::S_LESS_THAN, mn, 1);
+        let rsign = self.and_k(rb, SIGN);
+        let out = self.bpick(tiny, rsign, out);
+        let ovf = self.cmp_k(op::S_GREATER_THAN, re, 254);
+        let inf = self.sh(op::BITWISE_OR, rsign, 0x7f80_0000);
+        let out = self.bpick(ovf, inf, out);
+        let ga = self.sh(op::I_SUB, fa, 1);
+        let gb = self.sh(op::I_SUB, fb, 1);
+        let g = self.ext(u, glsl::U_MAX, &[ga, gb]);
+        let edge = self.cmp_k(op::U_GREATER_THAN_EQUAL, g, 254);
+        let cinf = self.cmp_k(op::I_EQUAL, fc, 0xff);
+        let big = self.cmp_k(op::S_GREATER_THAN, dc, (-99i32) as u32);
+        let ncz = self.lnot(cz);
+        let big = self.land(big, ncz);
+        let p = self.lor(edge, cinf);
+        let p = self.lor(p, big);
+        let af = self.as_float(a);
+        let bf = self.as_float(b);
+        let cf = self.as_float(c);
+        let np = self.exact(op::F_MUL, af, bf);
+        let n = self.exact(op::F_ADD, np, cf);
+        let n = self.as_bits(n);
+        let mx = self.ext(u, glsl::U_MAX, &[fa, fb]);
+        let finite = self.cmp_k(op::U_LESS_THAN, mx, 0xff);
+        let only_c = self.land(cinf, finite);
+        let n = self.bpick(only_c, c, n);
+        let n2 = self.sh(op::SHIFT_LEFT_LOGICAL, n, 1);
+        let nan = self.cmp_k(op::U_GREATER_THAN, n2, 0xff00_0000);
+        let kn = self.kc(NAN);
+        let n = self.bpick(nan, kn, n);
+        self.bpick(p, n, out)
     }
 
     /// The bits of `r` (bits `rb`, a 24-bit rounding of a value `w` whose
