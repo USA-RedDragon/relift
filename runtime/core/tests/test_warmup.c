@@ -513,3 +513,30 @@ TEST(failed_compiles_of_a_queued_pass_show_as_failures_that_stay)
     CHECK(draw(d) != NULL);
     rl_warmup_reset();
 }
+
+TEST(a_launch_warm_up_with_late_compiles_beside_it_counts_up_on_the_screen)
+{
+    fresh();
+    rl_warmup_begin(1000, RL_WARMUP_BACKGROUND);
+    rl_warmup_game_started();
+    g_now += 2 * SEC;
+    int32_t d[4];
+    CHECK(draw(d) != NULL);
+    uint32_t last_done = 0;
+    for (int step = 1; step <= 20; step++) {
+        /* A draw's late compile queues and finishes one; the warm-up's workers finish fifty. */
+        rl_warmup_queue(1);
+        rl_warmup_done(1, 0);
+        rl_warmup_done(50, 0);
+        g_now += SEC / 4;
+        CHECK(draw(d) != NULL);
+        CHECK(d[2] > 0 && d[3] > 0);
+        rl_wu_scene s;
+        rl_wu_test_scene(&s);
+        CHECK(s.done > last_done);
+        CHECK_EQ(s.total, 1000u + (uint32_t)step);
+        CHECK_EQ(s.done, (uint32_t)step * 51u);
+        last_done = s.done;
+    }
+    rl_warmup_reset();
+}

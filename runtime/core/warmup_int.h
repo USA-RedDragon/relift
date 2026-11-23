@@ -85,6 +85,9 @@ uint32_t rl_wu_percent(uint32_t done, uint32_t total);
 /** @brief Replaces the clock the model reads, NULL for the real one (tests). */
 void rl_wu_test_clock(uint64_t (*clock)(void));
 
+/** @brief Fills the scene the screen would draw now (tests). */
+void rl_wu_test_scene(rl_wu_scene *s);
+
 /** @brief The canvas the screen is drawn on: premultiplied RGBA8, the window's whole size (the controller overlay's). */
 typedef rl_tp_canvas rl_wu_canvas;
 

@@ -468,6 +468,13 @@ static void scene_of(rl_wu_scene *s, uint64_t now)
     s->icon_h = g.icon_h;
 }
 
+void rl_wu_test_scene(rl_wu_scene *s)
+{
+    pthread_mutex_lock(&g.lock);
+    scene_of(s, now_ns());
+    pthread_mutex_unlock(&g.lock);
+}
+
 /** @brief What changes what the screen looks like, folded into one number (lock held). */
 static uint64_t signature(const rl_wu_scene *s)
 {
