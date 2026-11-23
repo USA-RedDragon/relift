@@ -1633,3 +1633,12 @@ TEST(nvn_gpu_describe_names_the_live_and_the_freed_pool_that_held_an_address)
     CHECK(strstr(where, "in FREED pool span") != NULL);
     CHECK(strstr(where, "0 frees ago") != NULL);
 }
+
+TEST(nvn_device_json_names_the_task_and_mesh_subgroup_stages)
+{
+    CHECK_EQ(strcmp(nvn_vk_stage_flag_name(0), "VK_SHADER_STAGE_VERTEX_BIT"), 0);
+    CHECK_EQ(strcmp(nvn_vk_stage_flag_name(5), "VK_SHADER_STAGE_COMPUTE_BIT"), 0);
+    CHECK_EQ(strcmp(nvn_vk_stage_flag_name(6), "VK_SHADER_STAGE_TASK_BIT_EXT"), 0);
+    CHECK_EQ(strcmp(nvn_vk_stage_flag_name(7), "VK_SHADER_STAGE_MESH_BIT_EXT"), 0);
+    CHECK(nvn_vk_stage_flag_name(8) == NULL);
+}

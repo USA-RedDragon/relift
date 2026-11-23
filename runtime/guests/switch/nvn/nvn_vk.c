@@ -465,10 +465,17 @@ static const char *const subgroup_ops[] = {
     "VK_SUBGROUP_FEATURE_BALLOT_BIT",   "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",       "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT",
     "VK_SUBGROUP_FEATURE_CLUSTERED_BIT", "VK_SUBGROUP_FEATURE_QUAD_BIT",
 };
+/** @brief The VkShaderStageFlagBits names by bit, through the task and mesh stages, which device.json must name too. */
 static const char *const stages[] = {
     "VK_SHADER_STAGE_VERTEX_BIT",   "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT", "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
     "VK_SHADER_STAGE_GEOMETRY_BIT", "VK_SHADER_STAGE_FRAGMENT_BIT",             "VK_SHADER_STAGE_COMPUTE_BIT",
+    "VK_SHADER_STAGE_TASK_BIT_EXT", "VK_SHADER_STAGE_MESH_BIT_EXT",
 };
+
+const char *nvn_vk_stage_flag_name(uint32_t bit)
+{
+    return bit < sizeof stages / sizeof stages[0] ? stages[bit] : NULL;
+}
 
 static const char *driver_name(uint32_t id)
 {
@@ -856,7 +863,7 @@ static void write_caps(void)
     fprintf(f, "    \"VkPhysicalDeviceVulkan11Properties\": { \"subgroupSize\": %u, ", p11.subgroupSize);
     json_flags(f, "subgroupSupportedOperations", p11.subgroupSupportedOperations, subgroup_ops, 8);
     fprintf(f, ", ");
-    json_flags(f, "subgroupSupportedStages", p11.subgroupSupportedStages, stages, 6);
+    json_flags(f, "subgroupSupportedStages", p11.subgroupSupportedStages, stages, sizeof stages / sizeof stages[0]);
     fprintf(f,
             " },\n    \"VkPhysicalDeviceVulkan12Properties\": { \"driverID\": \"%s\", "
             "\"maxDescriptorSetUpdateAfterBindSampledImages\": %u, \"maxDescriptorSetUpdateAfterBindSamplers\": %u, "
@@ -894,7 +901,7 @@ static void write_caps(void)
             B(g.probes.denorm_flush_mode32), B(!g.host_import));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
-    json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, 6);
+    json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, sizeof stages / sizeof stages[0]);
     fprintf(f, " }");
     if (has[6])
         fprintf(f,

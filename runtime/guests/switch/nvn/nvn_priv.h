@@ -370,6 +370,8 @@ typedef struct nvn_probes {
 } nvn_probes;
 /** @brief Brings the host device up and gives its probe results; false without a host Vulkan device. */
 bool nvn_vk_probes(nvn_probes *out);
+/** @brief The name device.json gives VkShaderStageFlagBits bit (VK_SHADER_STAGE_MESH_BIT_EXT for 7), NULL past the mesh stage. */
+const char *nvn_vk_stage_flag_name(uint32_t bit);
 /** @brief Rows of the single-precision NaN probe (three input words and five output words each). */
 uint32_t nvn_probe_nan_rows(void);
 /** @brief Writes the NaN probe's inputs to w[0 .. 3 * rows). */
