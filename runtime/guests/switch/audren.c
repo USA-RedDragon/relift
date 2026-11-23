@@ -304,31 +304,17 @@ static bool sample_offsets_valid(uint32_t format, const ar_wave *w)
     }
 }
 
-static void flush_wave_buffers(ar_voice *v, uint32_t index, uint32_t count)
-{
-    for (uint32_t i = 0; i < count; i++) {
-        ar_wave *w = &v->wb[index];
-        if (w->valid || !w->sent_to_dsp) {
-            v->wb_index = (v->wb_index + 1) % AR_WAVEBUFS;
-            v->wb_consumed++;
-            w->valid = false;
-        }
-        w->sent_to_dsp = true;
-        index = (index + 1) % AR_WAVEBUFS;
-    }
-}
-
+/**
+ * @brief Takes the program's wave buffer in when its sent flag is clear: the program clears the flag when it appends
+ * the buffer and sets it once an update has carried it.
+ */
 static void update_wave(uint32_t format, ar_wave *w, const uint8_t *in)
 {
     if (!w->valid && w->sent_to_dsp && w->addr) {
         w->addr = 0;
         w->size = 0;
     }
-    if (!in[0x1A]) {
-        w->await_clear = false;
-        return;
-    }
-    if (w->await_clear || w->valid || !w->sent_to_dsp)
+    if (in[0x1A])
         return;
     ar_wave n = *w;
     n.addr = le64(in);
@@ -391,9 +377,9 @@ static rl_result update_voices(audren *ar, cursor *in, uint32_t sz, int rev, uin
         v->mix_id = (int32_t)le32(p + w0 + 0x1C);
         for (int c = 0; c < AR_VOICE_CH; c++)
             v->res_id[c] = le32(p + w0 + 0x104 + 4 * c);
-        uint32_t flush = rev >= 5 ? p[w0 + 0x104 + 0x19] : 0;
-        if (flush)
-            flush_wave_buffers(v, le32(p + w0 + 4) % AR_WAVEBUFS, flush > AR_WAVEBUFS ? AR_WAVEBUFS : flush);
+        v->wb_start = le32(p + w0 + 4) % AR_WAVEBUFS;
+        if (rev >= 5)
+            v->flush_pending += p[w0 + 0x104 + 0x19];
         for (int b = 0; b < AR_WAVEBUFS; b++)
             update_wave(v->format, &v->wb[b], p + w0 + 0x24 + b * WAVE_IN);
         if (is_new || v->is_new) {

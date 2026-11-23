@@ -38,8 +38,6 @@ typedef struct ar_wave {
     bool sent_to_dsp;
     /** @brief True while the renderer may play it. */
     bool valid;
-    /** @brief True after the buffer was consumed, until the guest clears its sent flag. */
-    bool await_clear;
 } ar_wave;
 
 /** @brief A voice: the parameters from the last update and the playback state. */
@@ -52,7 +50,11 @@ typedef struct ar_voice {
     uint32_t res_id[AR_VOICE_CH];
     uint64_t ds_addr, ds_size;
     ar_wave wb[AR_WAVEBUFS];
-    uint32_t wb_index, wb_consumed, offset, loop_cnt;
+    /**
+     * @brief wb_index is the buffer playing; wb_start the program's first queued buffer, where the flushes it asked for
+     * (flush_pending, applied at the next frame) begin.
+     */
+    uint32_t wb_index, wb_consumed, offset, loop_cnt, wb_start, flush_pending;
     uint64_t played;
     float frac;
     uint16_t adpcm_pred;

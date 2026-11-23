@@ -120,7 +120,6 @@ done:
 static void end_of_buffer(ar_voice *v, ar_wave *w)
 {
     w->valid = false;
-    w->await_clear = true;
     v->wb_index = (v->wb_index + 1) % AR_WAVEBUFS;
     v->loop_cnt = 0;
     v->wb_consumed++;
@@ -245,11 +244,32 @@ static void fetch_source(ar_voice *v, int need, float *src, uint32_t stride)
     }
 }
 
+/**
+ * @brief Drops count buffers from the program's first queued one: each is marked sent and invalid, and counts as
+ * consumed only when it is the one playing (the playing buffer then moves on), so no buffer is counted twice.
+ */
+static void flush_wave_buffers(ar_voice *v)
+{
+    uint32_t index = v->wb_start;
+    for (uint32_t i = 0; i < v->flush_pending; i++) {
+        v->wb[index].sent_to_dsp = true;
+        if (v->wb_index == index) {
+            v->wb_index = (v->wb_index + 1) % AR_WAVEBUFS;
+            v->wb_consumed++;
+        }
+        v->wb[index].valid = false;
+        index = (index + 1) % AR_WAVEBUFS;
+    }
+    v->flush_pending = 0;
+}
+
 static void voice_prepare(ar_voice *v, bool *active)
 {
     *active = false;
     if (!v->in_use)
         return;
+    if (v->flush_pending)
+        flush_wave_buffers(v);
     switch (v->play) {
     case VP_STARTED:
         for (int i = 0; i < AR_WAVEBUFS; i++)

@@ -16,6 +16,8 @@
 #include <time.h>
 
 #define REV7 0x37564552u
+/** @brief Size of one wave buffer in a voice's update. */
+#define WAVE_IN_FOR_TEST 0x38u
 #define AR_UNUSED_MIX_FOR_TEST 0x7FFFFFFFu
 
 typedef struct msg {
@@ -364,7 +366,11 @@ static void put_f(uint8_t *p, float v) { memcpy(p, &v, 4); }
 static uint32_t g_fmt = 2, g_end = 480;
 static uint64_t g_wave_size = 960, g_ds;
 
-static void build_update(upd *u, bool first, uint64_t wave, uint64_t sink_buf, uint32_t sink_size, bool sent)
+/**
+ * @brief One update of one voice with wave buffer 0 at wave; append sends it as new (its sent flag clear), as the
+ * program does in the first update after appending it. The unused buffer slots stay marked sent, as the program's do.
+ */
+static void build_update(upd *u, bool first, uint64_t wave, uint64_t sink_buf, uint32_t sink_size, bool append)
 {
     memset(u, 0, sizeof *u);
     uint8_t *p = u->in + 0x40;
@@ -392,7 +398,9 @@ static void build_update(upd *u, bool first, uint64_t wave, uint64_t sink_buf, u
     put64(wb + 8, g_wave_size);
     put32(wb + 0x10, 0);
     put32(wb + 0x14, g_end);
-    wb[0x1A] = sent;
+    wb[0x1A] = !append;
+    for (int b = 1; b < 4; b++)
+        wb[b * 0x38 + 0x1A] = 1;
     p += sec_voices;
     put32(p + 4, 1);
     p += 0x20;
@@ -520,6 +528,72 @@ TEST(audren_update_frames_and_mixing)
     for (int i = 480; i < 960; i++)
         CHECK_EQ(s[i], 0);
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 6 }).result, 0);
+    free(u);
+}
+
+/** @brief Sends u and returns the consumed count in the voice's out status (UINT32_MAX when the update fails). */
+static uint32_t send_update(rl_ctx *c, uint32_t rend, uint64_t heap, const upd *u)
+{
+    memcpy(t_mem() + heap + 0x30000, u->in, u->size);
+    msg q = mk(4);
+    q.na = 1;
+    q.a_addr[0] = heap + 0x30000;
+    q.a_size[0] = u->size;
+    q.nb = 1;
+    q.b_addr[0] = heap + 0x40000;
+    q.b_size[0] = 0x1000;
+    if (call(c, rend, &q).result)
+        return UINT32_MAX;
+    return le32(t_mem() + heap + 0x40000 + 0x40 + 4 * 0x10 + 8);
+}
+
+/**
+ * @brief Two long silent buffers are queued at once, so neither ends during the test. Flushing the queued one behind
+ * the playing one drops it uncounted; flushing the playing one counts it once, and the dropped one stays uncounted.
+ */
+TEST(audren_flush_counts_only_the_playing_buffer_once)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    rl_cfg()->trace_os = false;
+    uint32_t h = open_service(c, heap, "audren:u");
+    uint32_t rend = open_renderer(c, heap, h);
+    CHECK(rend);
+    uint32_t ev = call(c, rend, &(msg){ .cmd = 7 }).copy[0];
+    uint32_t end = g_end;
+    uint64_t size = g_wave_size;
+    g_end = 48000;
+    g_wave_size = 96000;
+    memset(t_mem() + heap + 0x100000, 0, 2 * 96000);
+    upd *u = calloc(1, sizeof *u);
+    uint8_t *w0 = u->in + 0x40 + 0x10 + 4 * 0x20 + 0x70 + 0x3C;
+    build_update(u, true, heap + 0x100000, heap + 0x200000, 4800, true);
+    memcpy(w0 + 0x24 + WAVE_IN_FOR_TEST, w0 + 0x24, WAVE_IN_FOR_TEST);
+    put64(w0 + 0x24 + WAVE_IN_FOR_TEST, heap + 0x100000 + 96000);
+    CHECK_EQ(send_update(c, rend, heap, u), 0);
+    CHECK_EQ(call(c, rend, &(msg){ .cmd = 5 }).result, 0);
+    build_update(u, false, heap + 0x100000, heap + 0x200000, 4800, false);
+    memcpy(w0 + 0x24 + WAVE_IN_FOR_TEST, w0 + 0x24, WAVE_IN_FOR_TEST);
+    put64(w0 + 0x24 + WAVE_IN_FOR_TEST, heap + 0x100000 + 96000);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
+    CHECK_EQ(send_update(c, rend, heap, u), 0);
+    w0[0x104 + 0x19] = 1;
+    put32(w0 + 4, 1);
+    send_update(c, rend, heap, u);
+    w0[0x104 + 0x19] = 0;
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
+    CHECK_EQ(send_update(c, rend, heap, u), 0);
+    w0[0x104 + 0x19] = 1;
+    put32(w0 + 4, 0);
+    send_update(c, rend, heap, u);
+    w0[0x104 + 0x19] = 0;
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
+    CHECK_EQ(send_update(c, rend, heap, u), 1);
+    CHECK_EQ(call(c, rend, &(msg){ .cmd = 6 }).result, 0);
+    g_end = end;
+    g_wave_size = size;
     free(u);
 }
 
