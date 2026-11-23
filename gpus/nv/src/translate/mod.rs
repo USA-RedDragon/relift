@@ -202,11 +202,40 @@ pub struct Interface {
     pub host: HostReport,
 }
 
+/// How float arithmetic and the multi-function unit are translated.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Math {
+    /// Bit-exact SM86 results on every host: one rounding for FFMA, the
+    /// unit's own MUFU results (the `mufu` module) and SM86's denormal
+    /// model.
+    #[default]
+    Exact,
+    /// The host's own float math: GLSL `Fma` for FFMA, plain multiplies and
+    /// adds, the GLSL operations for MUFU, and the host's denormal handling
+    /// (DenormFlushToZero where it can be asked for). Faster on GPUs that
+    /// are not NVIDIA's, and results may differ slightly from the
+    /// console's. Directed rounding modes stay exact.
+    Native,
+}
+
+impl Math {
+    /// The mode's name as settings and table folders spell it.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Math::Exact => "exact",
+            Math::Native => "native",
+        }
+    }
+}
+
 /// Translation options.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     /// The device the program is translated for.
     pub host: HostProfile,
+    /// Exact SM86 float math or the host's own (see [`Math`]).
+    pub math: Math,
     /// Build MUFU RCP, RSQ, SQRT, EX2 and LG2 from the integer model of the
     /// SM86 unit instead of the GLSL operations, which only the NVIDIA driver
     /// lowers to the same results (see the `mufu` module). Hosts other
@@ -299,6 +328,7 @@ pub(crate) struct Ctx {
     /// Function-scope `u32` variables beyond the registers, zeroed at entry.
     pub locals: Vec<u32>,
     pub exact_mufu: bool,
+    pub math: Math,
     pub host: HostProfile,
     pub denorm: denorm::State,
     /// Helper functions, emitted after `main`.
@@ -1092,7 +1122,8 @@ impl Ctx {
             tex,
             io: io::State::default(),
             locals: Vec::new(),
-            exact_mufu: o.exact_mufu || !o.host.native_mufu,
+            exact_mufu: o.math == Math::Exact && (o.exact_mufu || !o.host.native_mufu),
+            math: o.math,
             host: o.host.clone(),
             denorm: denorm::State::default(),
             funcs: Vec::new(),

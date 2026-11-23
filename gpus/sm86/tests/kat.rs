@@ -13,8 +13,8 @@ mod spvi;
 use common::translate_with;
 use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS, XMAD};
 use relift_gpu_nv::translate::{
-    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Options, POOL_ARRAY_BINDING,
-    POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST, POOL_TABLE_STRIDE,
+    Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Math, Options,
+    POOL_ARRAY_BINDING, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST, POOL_TABLE_STRIDE,
 };
 use relift_gpu_nv::{Inst, Operand, RegMods};
 use spvi::{Denorm, Env, Memory, Module, Run};
@@ -654,6 +654,105 @@ families!(
     shf, fadd, fmul, ffma, fcmp, f2i, f2i_f16, i2f, f2f, frnd, f2fp, half, int, mufu_f16, mufu_64h,
     mufu_rcp, mufu_rsq, mufu_sqrt, mufu_ex2, mufu_lg2, mufu_sin, mufu_cos
 );
+
+/// The families whose results native math should keep close to the
+/// device's: the float arithmetic and the single-precision MUFU functions.
+const NATIVE_CLOSE: &[&str] = &[
+    "fadd",
+    "fmul",
+    "ffma",
+    "mufu_rcp",
+    "mufu_rsq",
+    "mufu_sqrt",
+    "mufu_ex2",
+    "mufu_lg2",
+    "mufu_sin",
+    "mufu_cos",
+];
+
+/// `got` is within `2^-10` of `want`, relative above one and absolute
+/// below, or both are NaN, or `want` is not finite.
+fn native_close(got: u32, want: u32) -> bool {
+    let (g, w) = (f32::from_bits(got), f32::from_bits(want));
+    if !w.is_finite() || got == want || g.is_nan() && w.is_nan() {
+        return true;
+    }
+    (g - w).abs() <= w.abs().max(1.0) / 1024.0
+}
+
+/// An ordinary input for comparing native math with the device: a normal
+/// float between `2^-20` and `2^10` in magnitude, and positive for the
+/// functions defined only there. Elsewhere the host's own math may differ
+/// as much as it likes (denormals, huge angles, NaN from a negative root).
+fn ordinary(x: u32, family: &str) -> bool {
+    let e = (x >> 23 & 0xff) as i32 - 127;
+    let positive = x & 0x8000_0000 == 0 || !matches!(family, "mufu_rsq" | "mufu_sqrt" | "mufu_lg2");
+    (-20..=10).contains(&e) && positive
+}
+
+/// Native math ([`Math::Native`]) translates and validates every recorded
+/// program on every host (but the variants exact math rejects), and on the
+/// interpreter its float and MUFU results stay close to the device's for
+/// nearly every row: a wrong operation or a sine off by its scale fails.
+#[test]
+fn native_math_translates_every_family() {
+    let mut failures = Vec::new();
+    for name in file::names() {
+        let f = file::load(&name);
+        for v in &f.variants {
+            let p = relift_gpu_sm86::program::parse(&v.code);
+            for host in hosts() {
+                let o = Options {
+                    host: host.clone(),
+                    math: Math::Native,
+                    ..Options::default()
+                };
+                let s = match translate_with(&p, &o) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        if !REJECTED.contains(&v.label.as_str()) {
+                            failures.push(format!(
+                                "{name}: {} on {} rejected: {e}",
+                                v.label, host.name
+                            ));
+                        }
+                        continue;
+                    }
+                };
+                if !NATIVE_CLOSE.contains(&name.as_str()) || v.label.contains(".R") {
+                    continue;
+                }
+                let m = Module::parse(&s.spirv);
+                let d = behaviors(&m, &host)[0];
+                let far = f
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, row)| row[..f.nin].iter().all(|&x| ordinary(x, &name)))
+                    .filter(|(i, row)| {
+                        let got = exec(&m, d, host.canonical_nan, row, v.outs);
+                        let want = &v.expect[i * v.outs..(i + 1) * v.outs];
+                        !got.iter().zip(want).all(|(g, w)| native_close(*g, *w))
+                    })
+                    .count();
+                if far * 50 > f.rows.len() {
+                    failures.push(format!(
+                        "{name}: {} on {}: {far} of {} rows far from the device",
+                        v.label,
+                        host.name,
+                        f.rows.len()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
 
 /// A pseudo-random 32-bit sequence (xorshift32).
 fn xorshift(x: &mut u32) -> u32 {

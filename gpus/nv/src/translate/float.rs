@@ -12,7 +12,7 @@
 //! from finite operands step back to the largest finite value where the
 //! mode says so.
 
-use super::{Ctx, Res, bad};
+use super::{Ctx, Math, Res, bad};
 use crate::Inst;
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
@@ -649,6 +649,12 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     .map_or(0, |(_, s)| *s);
     let sat = i.has("SAT");
     let name = i.mnemonic;
+    if c.math == Math::Native && mode == Round::Nearest {
+        let u = c.shared_pure(format!("native {name} {scale} {sat}"), &args, |c, p| {
+            c.native_arith(name, p, scale, sat)
+        });
+        return c.store_dst(&i.ops[0], u);
+    }
     let key = format!("{name} {mode:?} {ftz} {scale} {sat}");
     let u = c.shared_pure(key, &args, |c, p| {
         let r = match name {
@@ -662,6 +668,33 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
         c.sat_bits(r, sat)
     });
     c.store_dst(&i.ops[0], u)
+}
+
+impl Ctx {
+    /// FADD, FMUL or FFMA on the bits `p` with the host's own arithmetic
+    /// ([`Math::Native`]): GLSL `Fma` for FFMA, plain OpFAdd and OpFMul
+    /// otherwise, the scale of `.D2` to `.M8` as a multiply by its power of
+    /// two, and `.SAT` as a float clamp. `.FTZ` is what the shader's
+    /// denormal mode makes of it.
+    fn native_arith(&mut self, name: &str, p: &[u32], scale: i32, sat: bool) -> u32 {
+        let f = self.f32t();
+        let x: Vec<u32> = p.iter().map(|&v| self.as_float(v)).collect();
+        let mut r = match name {
+            "FADD" => self.m.emit(op::F_ADD, f, &[x[0], x[1]]),
+            "FMUL" => self.m.emit(op::F_MUL, f, &[x[0], x[1]]),
+            _ => self.ext(f, glsl::FMA, &[x[0], x[1], x[2]]),
+        };
+        if scale != 0 {
+            let k = self.m.c_f32(2.0f32.powi(scale).to_bits());
+            r = self.m.emit(op::F_MUL, f, &[r, k]);
+        }
+        if sat {
+            let lo = self.m.c_f32(0);
+            let hi = self.m.c_f32(1.0f32.to_bits());
+            r = self.ext(f, glsl::N_CLAMP, &[r, lo, hi]);
+        }
+        self.as_bits(r)
+    }
 }
 
 /// FMNMX, and with `.NAN` a NaN in either input gives the canonical NaN

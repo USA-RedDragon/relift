@@ -96,6 +96,30 @@ impl Ctx {
                 "FADD" | "FMUL" | "FFMA" | "FSWZADD" | "FSETP" | "FSET" | "FMNMX"
             )
         });
+        if self.math == super::Math::Native {
+            let ftz = insts.iter().any(|i| i.has("FTZ"));
+            let mode = if self.host.denorm == Denorm::Unknown
+                && self.host.denorm_flush_mode
+                && uses_float
+                && ftz
+            {
+                self.cap(CAP_DENORM_FLUSH);
+                self.iface.host.denorm_mode = Some(Denorm::Flush);
+                Denorm::Flush
+            } else {
+                self.host.denorm
+            };
+            self.denorm.mode = Some(mode);
+            if self.host.signed_zero_inf_nan_preserve {
+                self.cap(CAP_SZINP);
+                self.denorm.szinp = true;
+            }
+            self.iface
+                .host
+                .inexact
+                .push("native float math: results may differ from the console's".to_string());
+            return;
+        }
         let mode = match self.host.denorm {
             Denorm::Unknown if self.host.denorm_preserve_mode && uses_float => {
                 self.cap(CAP_DENORM_PRESERVE);

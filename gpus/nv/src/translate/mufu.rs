@@ -44,7 +44,7 @@
 //! comparison differs on 6% of the inputs), and the program is reported
 //! inexact ([`HostReport::inexact`](super::HostReport)).
 
-use super::{Ctx, Res, bad};
+use super::{Ctx, Math, Res, bad};
 use crate::spirv::{glsl, op};
 use crate::{Inst, RegMods, Swz};
 
@@ -172,6 +172,8 @@ fn func_body(c: &mut Ctx, kind: &str, x: u32) -> Res<u32> {
         "SQRT" if native => native_op(c, x, Some(glsl::SQRT)),
         "EX2" if native => native_op(c, x, Some(glsl::EXP2)),
         "LG2" if native => native_op(c, x, Some(glsl::LOG2)),
+        "SIN" if c.math == Math::Native => native_turns(c, x, glsl::SIN),
+        "COS" if c.math == Math::Native => native_turns(c, x, glsl::COS),
         "RCP" => rcp(c, x, F32),
         "RSQ" => rsq(c, x, F32),
         "SQRT" => sqrt(c, x),
@@ -190,6 +192,17 @@ fn func_body(c: &mut Ctx, kind: &str, x: u32) -> Res<u32> {
         }
         k => return bad(format!("MUFU.{k}")),
     })
+}
+
+/// The GLSL sine or cosine `f` of the bits `x`, an angle in turns as the
+/// unit takes it, for [`Math::Native`].
+fn native_turns(c: &mut Ctx, x: u32, f: u32) -> u32 {
+    let ft = c.f32t();
+    let a = c.as_float(x);
+    let k = c.m.c_f32(std::f32::consts::TAU.to_bits());
+    let r = c.m.emit(op::F_MUL, ft, &[a, k]);
+    let s = c.ext(ft, f, &[r]);
+    c.as_bits(s)
 }
 
 /// The GLSL operation `f` (a reciprocal for `None`) on the bits `x`.

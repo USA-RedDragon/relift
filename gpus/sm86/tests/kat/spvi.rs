@@ -1210,6 +1210,20 @@ impl<'m> Run<'m> {
                     u64::from(63 - x[0].leading_zeros())
                 }
             }
+            13 | 14 | 29 | 30 | 31 | 32 => {
+                // Sin, Cos, Exp2, Log2, Sqrt, InverseSqrt: a host's
+                // operation, here the correctly rounded one.
+                let v = f64::from(fi(self, x[0]));
+                let r = match inst {
+                    13 => v.sin(),
+                    14 => v.cos(),
+                    29 => v.exp2(),
+                    30 => v.log2(),
+                    31 => v.sqrt(),
+                    _ => 1.0 / v.sqrt(),
+                };
+                u64::from(self.round(r, 0.0))
+            }
             _ => panic!("unsupported GLSL.std.450 instruction {inst}"),
         }
     }
