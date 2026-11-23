@@ -76,7 +76,7 @@ WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) $(if $(WINDOWS),-DRL_STATIC_RUNTIME,-fPIC) \
 	-fvisibility=hidden -fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME -DRL_CHECKS \
 	-MMD -MP
-LDLIBS := $(if $(or $(WINDOWS),$(ANDROID)),,-lpthread) $(if $(WINDOWS),,-lm)
+LDLIBS := $(if $(or $(WINDOWS),$(ANDROID)),,-lpthread) $(if $(WINDOWS),,-lm) $(if $(WINDOWS),-lws2_32)
 HOST_SRCS :=
 ifeq ($(AUDIO),real)
 HOST_SRCS += host/audio_sdl3.c host/opus_libopus.c
