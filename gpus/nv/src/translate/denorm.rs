@@ -382,7 +382,7 @@ impl Ctx {
                 res = self.select(u, flush, sign, res);
             }
         }
-        self.canonical_nan(res, xs)
+        self.canonical_nan_host(res, xs)
     }
 
     /// A round-to-nearest add, multiply or fused multiply-add without
@@ -422,7 +422,7 @@ impl Ctx {
         self.m.emit_void(op::LABEL, &[check_end]);
         self.m.emit_void(op::BRANCH, &[merge]);
         self.m.emit_void(op::LABEL, &[plain]);
-        let rp = self.canonical_nan(bits, xs);
+        let rp = self.canonical_nan_host(bits, xs);
         self.m.emit_void(op::BRANCH, &[merge]);
         self.m.emit_void(op::LABEL, &[merge]);
         let u = self.u32t();
@@ -472,7 +472,7 @@ impl Ctx {
             };
         let fast_bits = self.as_bits(fast);
         if native {
-            return self.canonical_nan(fast_bits, xs);
+            return self.canonical_nan_host(fast_bits, xs);
         }
         self.iface.host.denorm_fixups += 1;
         let xs: Vec<u32> = if ftz {
@@ -528,6 +528,18 @@ impl Ctx {
         self.m.emit_void(op::LABEL, &[merge]);
         let r = self.m.emit(op::LOAD, u, &[var]);
         self.canonical_nan(r, &xs)
+    }
+
+    /// [`Ctx::canonical_nan`] for `r` the result of the host's own add,
+    /// multiply or fused multiply-add on `xs`. Under SignedZeroInfNanPreserve
+    /// the host keeps IEEE NaN propagation, so `r` is a NaN whenever an input
+    /// is one and only `r` needs the test.
+    fn canonical_nan_host(&mut self, r: u32, xs: &[u32]) -> u32 {
+        if self.denorm.szinp {
+            self.canonical_nan(r, &[])
+        } else {
+            self.canonical_nan(r, xs)
+        }
     }
 
     /// `r`, or the guest's NaN `0x7fffffff` when `r` or an input is a NaN
