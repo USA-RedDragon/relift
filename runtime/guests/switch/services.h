@@ -116,6 +116,8 @@ void rl_srv_install_nsd(void);
 void rl_srv_install_prepo(void);
 /** @brief Installs nfp:user, the NFC service. */
 void rl_srv_install_nfp(void);
+/** @brief Installs ldn:u, local wireless play. */
+void rl_srv_install_ldn(void);
 /** @brief Installs ssl and ssl:s, the TLS services. */
 void rl_srv_install_ssl(void);
 

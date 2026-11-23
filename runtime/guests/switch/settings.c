@@ -17,6 +17,7 @@ static const char *const g_layout[] = { "compact", "console" };
 static const char *const g_memory[] = { "auto", "import", "mirror" };
 
 static const char *const g_pac_choices[] = { "fast", "qarma5" };
+static const char *const g_net_modes[] = { "off", "lan" };
 
 static const rl_setting_def g_defs[] = {
     {
@@ -114,6 +115,26 @@ static const rl_setting_def g_defs[] = {
                        "so two runs with the same input script show the same frames. Slower; vi.follow_display is off",
         .env = "RELIFT_FIXED_STEP",
         .def_int = 0,
+    },
+    {
+        .key = "net.mode",
+        .type = RL_SETTING_ENUM,
+        .label = "Local wireless play",
+        .description = "off: the game finds no one to play with nearby. lan: the game's local wireless sessions run over "
+                       "the host's network with the ldn_mitm LAN protocol, so other relift instances and consoles "
+                       "running ldn_mitm on the same network can join; the game's sockets reach only the members of "
+                       "the session it is in",
+        .env = "RELIFT_NET",
+        .choices = g_net_modes,
+        .nchoices = 2,
+    },
+    {
+        .key = "net.interface",
+        .type = RL_SETTING_STRING,
+        .label = "Local play network interface",
+        .description = "The host network interface (a name or one of its IPv4 addresses) local wireless play uses. "
+                       "Empty: the first interface that is up and has an IPv4 address that is not loopback",
+        .env = "RELIFT_NET_IF",
     },
     {
         .key = "cpu.pac",

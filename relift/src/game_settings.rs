@@ -348,6 +348,22 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::Bool,
         ),
         s(
+            "net.mode",
+            "Local wireless play",
+            "off: the game finds no one to play with nearby. lan: the game's local wireless sessions run over the host's network with the ldn_mitm LAN protocol, so other relift instances and consoles running ldn_mitm on the same network can join; the game's sockets reach only the members of the session it is in",
+            Value::String("off".into()),
+            SettingKind::Enum {
+                choices: ["off", "lan"].map(String::from).into(),
+            },
+        ),
+        s(
+            "net.interface",
+            "Local play network interface",
+            "The host network interface (a name or one of its IPv4 addresses) local wireless play uses. Empty: the first interface that is up and has an IPv4 address that is not loopback",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "cpu.pac",
             "Pointer authentication cipher",
             "fast is a keyed hash; qarma5 is the console's QARMA5. A game sees the same behavior with either, since it cannot learn the keys",
@@ -1127,7 +1143,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 33);
+        assert_eq!(section(Vec::new()).runtime.len(), 35);
     }
 
     #[test]
