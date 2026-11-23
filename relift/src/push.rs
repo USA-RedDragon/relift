@@ -32,6 +32,83 @@ use relift_progress::Line;
 
 const ROUNDS: usize = 3;
 
+/// What a push last copied to one device: each file's name and the SHA-256
+/// of the content it was copied from. The devices list sizes only, so a file
+/// whose content changed but not its size (a new table stamp, a regenerated
+/// table) is told apart by this record: a file whose hash is not the
+/// recorded one is copied again. It is kept in the target's work folder, one
+/// file per device.
+#[derive(Default)]
+struct Pushed {
+    path: PathBuf,
+    files: BTreeMap<String, String>,
+}
+
+impl Pushed {
+    /// The record of `device` in `work`; empty when there is none yet.
+    fn open(work: &Path, device: &str) -> Pushed {
+        let clean: String = device
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let path = work.join(format!("pushed-{clean}.txt"));
+        let files = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| {
+                let (hash, name) = l.split_once(' ')?;
+                Some((name.to_string(), hash.to_string()))
+            })
+            .collect();
+        Pushed { path, files }
+    }
+
+    fn save(&self) -> std::io::Result<()> {
+        let text: String = self
+            .files
+            .iter()
+            .map(|(n, h)| format!("{h} {n}\n"))
+            .collect();
+        relift_cache::write_if_changed(&self.path, text.as_bytes()).map(drop)
+    }
+}
+
+/// The entries to copy: those whose size differs from `have` (name to size)
+/// or that `have` lacks, and those of the right size whose content is not
+/// what `pushed` recorded (an entry without a hash is judged by size alone).
+fn to_copy<'a>(
+    entries: &'a [Entry],
+    have: &BTreeMap<String, u64>,
+    pushed: &Pushed,
+) -> Vec<(&'a Entry, Option<u64>)> {
+    entries
+        .iter()
+        .filter_map(|e| {
+            let got = have.get(&e.name).copied();
+            let same = got == Some(e.size)
+                && (e.sha256.is_empty() || pushed.files.get(&e.name) == Some(&e.sha256));
+            (!same).then_some((e, got))
+        })
+        .collect()
+}
+
+/// The SHA-256 (hex) of the file at `path`, read in blocks.
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::Digest as _;
+    use std::io::Read as _;
+    let mut f = std::fs::File::open(path)?;
+    let mut h = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// A phone the data goes to.
 trait Device {
     fn copy(&self, local: &Path, remote: &str) -> Result<(), BoxError>;
@@ -369,8 +446,9 @@ fn local_images(
 }
 
 /// Adds the build's shader tables to what a push copies, as
-/// `shaders/<file>`; the app reads them from there. Their hash is left empty:
-/// a push compares sizes only, and the app's manifest does not list them.
+/// `shaders/<file>`; the app reads them from there. Their hash is of the
+/// file's content, which a push compares with what it last copied (the
+/// app's manifest does not list them).
 fn add_shader_tables(
     out: &Path,
     target: &str,
@@ -385,7 +463,7 @@ fn add_shader_tables(
         entries.push(Entry {
             name: name.clone(),
             size: std::fs::metadata(&f)?.len(),
-            sha256: String::new(),
+            sha256: sha256_file(&f)?,
         });
         local.insert(name, f);
     }
@@ -396,11 +474,12 @@ fn push_to(
     dev: &dyn Device,
     local: &BTreeMap<String, PathBuf>,
     entries: &[Entry],
+    pushed: &mut Pushed,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let mut have = dev.sizes()?;
     for round in 0..ROUNDS {
-        let bad = datamanifest::mismatches(entries, &have);
+        let bad = to_copy(entries, &have, pushed);
         if bad.is_empty() {
             return opened(dev);
         }
@@ -415,10 +494,13 @@ fn push_to(
                 .get(&e.name)
                 .ok_or_else(|| format!("{}: no local file to copy", e.name))?;
             dev.copy(src, &e.name)?;
+            if !e.sha256.is_empty() {
+                pushed.files.insert(e.name.clone(), e.sha256.clone());
+            }
         }
         have = dev.sizes()?;
     }
-    let bad = datamanifest::mismatches(entries, &have);
+    let bad = to_copy(entries, &have, pushed);
     if bad.is_empty() {
         return opened(dev);
     }
@@ -474,7 +556,10 @@ pub fn run_push(
                 bundle: bundle.clone(),
                 work: work.clone(),
             };
-            push_to(&dev, &local, &entries, ui)?;
+            let mut pushed = Pushed::open(&work, &dev.device);
+            let sent = push_to(&dev, &local, &entries, &mut pushed, ui);
+            pushed.save()?;
+            sent?;
             format!("{bundle} Documents")
         }
         Some(crate::cross::Target::Android(_)) => {
@@ -490,7 +575,10 @@ pub fn run_push(
                 dir: dir.clone(),
                 package,
             };
-            push_to(&dev, &local, &entries, ui)?;
+            let mut pushed = Pushed::open(&work, dev.serial.as_deref().unwrap_or("default"));
+            let sent = push_to(&dev, &local, &entries, &mut pushed, ui);
+            pushed.save()?;
+            sent?;
             if !crate::shaders::tables(&out).is_empty()
                 && let Some(note) = fetch_caps(&dev, &out, target)?
             {
@@ -503,7 +591,7 @@ pub fn run_push(
     ui.done(
         row,
         Line::new().text(format!(
-            "{} files, {} MiB in {what}, all sizes match the manifest",
+            "{} files, {} MiB in {what}, sizes and content match the manifest",
             entries.len(),
             bytes >> 20
         )),
@@ -786,14 +874,14 @@ mod tests {
             copied: Vec::new().into(),
         };
         let local = BTreeMap::new();
-        push_to(&ok, &local, &entries, &mut ui).unwrap();
+        push_to(&ok, &local, &entries, &mut Pushed::default(), &mut ui).unwrap();
         assert_eq!(ok.opened.get(), 1);
         assert!(ok.copied.borrow().is_empty());
         let closed = Fake {
             closed: vec!["dlc".into()],
             ..ok
         };
-        let e = push_to(&closed, &local, &entries, &mut ui).unwrap_err();
+        let e = push_to(&closed, &local, &entries, &mut Pushed::default(), &mut ui).unwrap_err();
         assert!(e.to_string().contains("first: dlc"), "{e}");
     }
 
@@ -830,7 +918,7 @@ mod tests {
             ("dlc/01/0/romfs.img".to_string(), PathBuf::from("/w/d.img")),
         ]
         .into();
-        let e = push_to(&dev, &local, &entries, &mut ui).unwrap_err();
+        let e = push_to(&dev, &local, &entries, &mut Pushed::default(), &mut ui).unwrap_err();
         assert!(e.to_string().contains("romfs.img is missing"), "{e}");
         let copied = dev.copied.borrow();
         assert_eq!(copied.len(), ROUNDS);
@@ -839,5 +927,68 @@ mod tests {
                 .iter()
                 .all(|(l, r)| l == Path::new("/w/romfs.img") && r == "romfs.img")
         );
+    }
+
+    #[test]
+    fn a_file_of_the_same_size_but_other_content_is_copied_again() {
+        let entry = |hash: &str| Entry {
+            name: "shaders/table.stamp".into(),
+            size: 17,
+            sha256: hash.into(),
+        };
+        let mut ui = relift_progress::Reporter::new(
+            std::io::stderr(),
+            Box::new(relift_progress::ManualClock::new()),
+            relift_progress::Mode::Plain,
+            false,
+            80,
+            relift_progress::Verbosity::Quiet,
+        );
+        let dev = Fake {
+            files: [("shaders/table.stamp".to_string(), 17)].into(),
+            closed: Vec::new(),
+            opened: 0.into(),
+            copied: Vec::new().into(),
+        };
+        let local: BTreeMap<String, PathBuf> =
+            [("shaders/table.stamp".to_string(), PathBuf::from("/w/stamp"))].into();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("relift-push-record-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut pushed = Pushed::open(&dir, "dev 1");
+        push_to(&dev, &local, &[entry("aa")], &mut pushed, &mut ui).unwrap();
+        assert_eq!(dev.copied.borrow().len(), 1, "no record: copied");
+        pushed.save().unwrap();
+        let mut pushed = Pushed::open(&dir, "dev 1");
+        push_to(&dev, &local, &[entry("aa")], &mut pushed, &mut ui).unwrap();
+        assert_eq!(dev.copied.borrow().len(), 1, "same content: left alone");
+        push_to(&dev, &local, &[entry("bb")], &mut pushed, &mut ui).unwrap();
+        assert_eq!(
+            dev.copied.borrow().len(),
+            2,
+            "same size, new content: copied"
+        );
+        assert_eq!(pushed.files["shaders/table.stamp"], "bb");
+        pushed.save().unwrap();
+        let other = Pushed::open(&dir, "dev 2");
+        assert!(other.files.is_empty(), "a record belongs to one device");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_files_hash_is_its_content_sha256() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("relift-push-hash-{}", std::process::id()));
+        relift_cache::write_if_changed(&p, b"abc").unwrap();
+        assert_eq!(
+            sha256_file(&p).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        std::fs::remove_file(&p).unwrap();
     }
 }
