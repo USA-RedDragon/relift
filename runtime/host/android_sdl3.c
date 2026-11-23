@@ -95,6 +95,8 @@ static bool call_activity(const char *method, const char *arg)
 
 static void driver_failed(const char *name) { call_activity("reliftGpuDriverFailed", name); }
 
+static void driver_loaded(const char *name) { call_activity("reliftGpuDriverLoaded", name); }
+
 static void *apk_asset(const char *name, size_t *len)
 {
     size_t n = 0;
@@ -114,6 +116,7 @@ static void init_once(void)
 {
     rl_set_asset_loader(apk_asset);
     rl_hostlib_on_gpu_driver_failed(driver_failed);
+    rl_hostlib_on_gpu_driver_loaded(driver_loaded);
     const char *dir = rl_android_files_dir();
     if (dir) {
         setenv("HOME", dir, 1);

@@ -51,6 +51,12 @@ RL_RUNTIME_API const char *rl_hostlib_gpu_driver_loaded(void);
  */
 RL_RUNTIME_API void rl_hostlib_on_gpu_driver_failed(void (*hook)(const char *name));
 
+/**
+ * @brief Calls hook with what rl_hostlib_gpu_driver_loaded then answers, once, when the first rl_hostlib_vulkan_gipa
+ * call has chosen the driver, so a settings page shown before that can show the driver in use.
+ */
+RL_RUNTIME_API void rl_hostlib_on_gpu_driver_loaded(void (*hook)(const char *name));
+
 #if defined(__ANDROID__)
 #include <relift/window.h>
 

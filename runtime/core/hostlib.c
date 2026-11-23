@@ -67,8 +67,20 @@ void *vkGetInstanceProcAddr(void *instance, const char *name);
 static char g_loaded[RL_GPU_DRIVER_NAME_MAX];
 static char g_failed[RL_GPU_DRIVER_NAME_MAX];
 static void (*g_failed_hook)(const char *name);
+static void (*g_loaded_hook)(const char *name);
+static int g_loaded_told;
 
 void rl_hostlib_on_gpu_driver_failed(void (*hook)(const char *name)) { g_failed_hook = hook; }
+
+void rl_hostlib_on_gpu_driver_loaded(void (*hook)(const char *name)) { g_loaded_hook = hook; }
+
+/** @brief Tells the loaded hook the driver in use, the first time one is known. */
+static void tell_loaded(void)
+{
+    void (*hook)(const char *) = g_loaded_hook;
+    if (g_loaded[0] && hook && !__atomic_exchange_n(&g_loaded_told, 1, __ATOMIC_ACQ_REL))
+        hook(g_loaded);
+}
 
 const char *rl_hostlib_gpu_driver_loaded(void) { return g_loaded[0] ? g_loaded : NULL; }
 
@@ -205,10 +217,13 @@ static void *custom_gipa(void)
 void *rl_hostlib_vulkan_gipa(void)
 {
     void *custom = custom_gipa();
-    if (custom)
+    if (custom) {
+        tell_loaded();
         return custom;
+    }
     if (!g_loaded[0])
         snprintf(g_loaded, sizeof g_loaded, "%s", RL_GPU_DRIVER_SYSTEM);
+    tell_loaded();
     const char *env = getenv(RL_VULKAN_LIBRARY_ENV);
     const char *const one[] = { env, NULL };
 #if defined(RL_VULKAN_LINKED)

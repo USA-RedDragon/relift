@@ -211,6 +211,8 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         String driver = getIntent().getStringExtra("relift_gpu_driver");
         if (driver == null || driver.trim().isEmpty()) {
             driver = d.choice();
+        } else {
+            d.setChoice(driver.trim());
         }
         args.add("--relift-set");
         args.add("video.gpu_driver=" + driver.trim());
@@ -258,6 +260,14 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
     /** Called by the runtime (any thread) when the player taps Settings on the pause sheet. */
     public void reliftOpenSettings() {
         runOnUiThread(() -> ui.open(Ui.Page.SETTINGS));
+    }
+
+    /**
+     * Called by the runtime (any thread) once it knows the driver in use: a
+     * page opened before that (the GPU driver page) shows it now.
+     */
+    public void reliftGpuDriverLoaded(String name) {
+        runOnUiThread(ui::refresh);
     }
 
     /**
