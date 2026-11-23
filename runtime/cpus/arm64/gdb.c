@@ -15,6 +15,8 @@
 
 #include "gdbstub.h"
 
+#if defined(RL_DEBUG_STUB)
+
 /** @brief The target description: gdb's aarch64 core and fpu features plus the thread pointers. */
 static const char g_xml[] =
     "<?xml version=\"1.0\"?><!DOCTYPE target SYSTEM \"gdb-target.dtd\">"
@@ -141,3 +143,5 @@ static const rl_gdb_cpu g_gdb = {
 };
 
 const rl_gdb_cpu *rl_arm64_gdb(void) { return &g_gdb; }
+
+#endif

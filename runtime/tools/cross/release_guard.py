@@ -42,6 +42,34 @@ HOTLOAD = b"RELIFT_DEV_SOCKET"
 INTERPRETER = (b"rlgbd_exec_native", b"rlgbd_step_native", b"3cpu7opcodes", b"16step_instruction")
 
 
+DEBUG_STUB_IF = re.compile(rb"^[ \t]*#[ \t]*if[ \t]+defined\([ \t]*RL_DEBUG_STUB[ \t]*\)[ \t]*$")
+COND_IF = re.compile(rb"^[ \t]*#[ \t]*if(?:def|ndef)?\b")
+COND_END = re.compile(rb"^[ \t]*#[ \t]*endif\b")
+COND_ELSE = re.compile(rb"^[ \t]*#[ \t]*(?:else|elif)\b")
+
+
+def player_source(data):
+    """The source as a player package sees it: RL_NO_DEBUG_STUB is defined, so what `#if defined(RL_DEBUG_STUB)`
+    guards (up to its #else or #endif) is left out."""
+    out = []
+    skip = 0
+    for line in data.split(b"\n"):
+        if skip:
+            if COND_IF.match(line):
+                skip += 1
+            elif COND_END.match(line):
+                skip -= 1
+            elif skip == 1 and COND_ELSE.match(line):
+                skip = 0
+            out.append(b"")
+        elif DEBUG_STUB_IF.match(line):
+            skip = 1
+            out.append(b"")
+        else:
+            out.append(line)
+    return b"\n".join(out)
+
+
 def scan_sources(root):
     bad = []
     for dp, dns, fns in os.walk(root):
@@ -51,7 +79,7 @@ def scan_sources(root):
                 continue
             path = os.path.join(dp, fn)
             with open(path, "rb") as f:
-                data = f.read()
+                data = player_source(f.read())
             for m in EXEC_API.finditer(data):
                 bad.append(f"{path}: maps executable memory ({m.group(0).decode()})")
             if fn not in ALLOWED_LOAD:

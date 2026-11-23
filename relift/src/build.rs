@@ -1666,6 +1666,32 @@ fn lift_in_child(out: &Path) -> Result<EmitRecord, BoxError> {
     EmitRecord::parse(&std::fs::read_to_string(&rec)?)
 }
 
+/// The package a cross build always makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Packager {
+    Android,
+    Ios,
+}
+
+/// Whether the runtime's GDB server (runtime/core/gdbstub.c) is built in. A
+/// player's package never has it: an iOS app, an APK signed with the
+/// project's own key (`package.android-keystore`), and a desktop build that
+/// makes an AppImage or a signed .app. Dev builds, desktop builds with
+/// `package.appimage = "never"` (lane and development builds) and APKs with
+/// the debug key keep it; it listens only when `debug.gdb` names a port.
+pub(crate) fn debug_stub_built(
+    dev: bool,
+    cross: Option<Packager>,
+    appimage: &str,
+    android_keystore: &Path,
+) -> bool {
+    match cross {
+        Some(Packager::Ios) => false,
+        Some(Packager::Android) => android_keystore.as_os_str().is_empty(),
+        None => dev || appimage == "never",
+    }
+}
+
 /// How the program is built: shipped, with the runtime linked in and no
 /// code loaded at run time, or dev (`relift run`), with the runtime as a
 /// shared library and the miss path that hot-loads code
@@ -1864,6 +1890,15 @@ pub(crate) fn build_project(
         &["core", "cpus/arm64", "guests/switch", "host", "third_party"],
     )?;
     let dev = mode == Mode::Dev;
+    let stub = debug_stub_built(
+        dev,
+        cross.as_ref().map(|c| match c {
+            crate::cross::Build::Android(_) => Packager::Android,
+            crate::cross::Build::Ios(_) => Packager::Ios,
+        }),
+        &settings.package.appimage,
+        &settings.package.android_keystore,
+    );
     let hotload: Vec<String> = if dev {
         vec!["-DRL_HOTLOAD".into()]
     } else if cfg!(windows) {
@@ -2003,6 +2038,7 @@ pub(crate) fn build_project(
         ])
         .chain(extras.defines())
         .chain(hotload.iter().cloned())
+        .chain((!stub).then(|| "-DRL_NO_DEBUG_STUB".to_string()))
         .collect();
     let lib_flags: Vec<String> = if dev || cross.as_ref().is_some_and(crate::cross::Build::pic) {
         rt_flags
@@ -2728,5 +2764,32 @@ mod font_tests {
         assert!(uses_shared_fonts(&module(b"sm:\0pl:u\0fsp-srv\0", b"")));
         assert!(!uses_shared_fonts(&module(b"pl:user\0", b"")));
         assert!(!uses_shared_fonts(&module(b"fsp-srv\0", b"pl:u\0")));
+    }
+}
+
+#[cfg(test)]
+mod debug_stub_tests {
+    use super::{Packager, debug_stub_built};
+    use std::path::Path;
+
+    #[test]
+    fn player_packages_have_no_debug_stub() {
+        let none = Path::new("");
+        assert!(!debug_stub_built(false, None, "auto", none));
+        assert!(debug_stub_built(true, None, "auto", none));
+        assert!(debug_stub_built(false, None, "never", none));
+        assert!(!debug_stub_built(true, Some(Packager::Ios), "never", none));
+        assert!(debug_stub_built(
+            false,
+            Some(Packager::Android),
+            "auto",
+            none
+        ));
+        assert!(!debug_stub_built(
+            false,
+            Some(Packager::Android),
+            "never",
+            Path::new("release.jks")
+        ));
     }
 }

@@ -353,6 +353,7 @@ void rl_hos_detach_thread(void)
     hos_kobj_unref(&t->obj);
 }
 
+#if defined(RL_DEBUG_STUB)
 /** @brief The guest's threads for the GDB server: every live thread with its id, context and core. */
 static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 {
@@ -375,10 +376,13 @@ static uint32_t gdb_threads(rl_gdb_thread *out, uint32_t max)
 static const rl_gdb_guest g_gdb_guest = { .threads = gdb_threads, .vm = &hos.vm };
 
 const rl_gdb_guest *hos_gdb_guest(void) { return &g_gdb_guest; }
+#endif
 
 int rl_hos_run_main(uint64_t entry, uint64_t stack_top)
 {
+#if defined(RL_DEBUG_STUB)
     rl_gdb_start(rl_arm64_gdb(), &g_gdb_guest);
+#endif
     hos_thread *t = hos_current();
     uint32_t h = 0;
     if (!t)

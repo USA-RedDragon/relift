@@ -11,6 +11,17 @@ set -eu
 
 build=${1:-build/host}
 tests=$build/switch_tests
+here=$(cd "$(dirname "$0")" && pwd)
+core=$here/../../core
+
+# A player package builds the runtime with RL_NO_DEBUG_STUB: no server is in the program.
+mkdir -p "$build/gdb-stub"
+${CC:-cc} -std=c11 -D_GNU_SOURCE -DRL_BUILDING_RUNTIME -DRL_NO_DEBUG_STUB -I"$core/include" -I"$core" -c \
+    "$core/gdbstub.c" -o "$build/gdb-stub/off.o"
+if nm "$build/gdb-stub/off.o" | grep -q 'rl_gdb'; then
+    echo "stub-test: gdbstub.c built with RL_NO_DEBUG_STUB still defines rl_gdb symbols"; exit 1
+fi
+
 if ! command -v gdb >/dev/null 2>&1; then
     echo "stub-test: skipped, gdb is not installed"
     exit 0

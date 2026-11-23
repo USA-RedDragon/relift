@@ -7,9 +7,11 @@
  * threads with an rl_gdb_guest and calls rl_gdb_point at its safe points.
  *
  * Off unless the debug.gdb setting names a port; the server listens on
- * 127.0.0.1 only. Built where RL_DEBUG_STUB is defined (this header defines it
- * on Linux and macOS desktops unless RL_NO_DEBUG_STUB is); elsewhere every call
- * is an empty inline, so phones and Windows carry none of it.
+ * 127.0.0.1 only (on a phone, reach it with adb forward). Built where
+ * RL_DEBUG_STUB is defined: this header defines it on Linux, Android and macOS
+ * unless RL_NO_DEBUG_STUB is, which relift build sets for every player package
+ * (an AppImage, a signed .app, an iOS app, a release-signed APK). Elsewhere
+ * every call is an empty inline and the server is not in the program.
  */
 #ifndef RELIFT_GDBSTUB_H
 #define RELIFT_GDBSTUB_H
@@ -24,7 +26,7 @@
 #include <TargetConditionals.h>
 #endif
 
-#if !defined(RL_NO_DEBUG_STUB) && !defined(RL_DEBUG_STUB) && !defined(_WIN32) && !defined(__ANDROID__) &&             \
+#if !defined(RL_NO_DEBUG_STUB) && !defined(RL_DEBUG_STUB) && !defined(_WIN32) &&                                      \
     !(defined(__APPLE__) && TARGET_OS_IPHONE) && !defined(__wasm__)
 /** @brief The stub is built in. */
 #define RL_DEBUG_STUB 1

@@ -573,7 +573,7 @@ RL_RUNTIME_API int rl_hos_run_main(uint64_t entry, uint64_t stack_top);
 /** @brief The current guest thread, or NULL. */
 hos_thread *hos_current(void);
 struct rl_gdb_guest;
-/** @brief The guest's side of the GDB server (core/gdbstub.h): its threads and address space. */
+/** @brief The guest's side of the GDB server (core/gdbstub.h): its threads and address space. Only with RL_DEBUG_STUB. */
 const struct rl_gdb_guest *hos_gdb_guest(void);
 /** @brief Locks the kernel. */
 void hos_lock(void);

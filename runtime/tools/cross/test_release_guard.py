@@ -22,6 +22,19 @@ class ReleaseGuard(unittest.TestCase):
     def test_a_clean_source_passes(self):
         self.assertEqual(guard("--sources", self.source("int f(void) { return 0; }\n")).returncode, 0)
 
+    def test_executable_memory_in_a_runtime_source_fails(self):
+        r = guard("--sources", self.source("void f(void) { mprotect(0, 1, PROT_EXEC); }\n"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("PROT_EXEC", r.stderr)
+
+    def test_executable_memory_in_the_debug_stub_passes(self):
+        text = "#if defined(RL_DEBUG_STUB)\n#if 1\nint a;\n#endif\nvoid f(void) { mprotect(0, 1, PROT_EXEC); }\n#endif\n"
+        self.assertEqual(guard("--sources", self.source(text)).returncode, 0)
+
+    def test_executable_memory_after_the_debug_stub_fails(self):
+        text = "#if defined(RL_DEBUG_STUB)\nint a;\n#else\nvoid f(void) { mprotect(0, 1, PROT_EXEC); }\n#endif\n"
+        self.assertEqual(guard("--sources", self.source(text)).returncode, 1)
+
     def test_dlopen_in_a_runtime_source_fails(self):
         r = guard("--sources", self.source('void f(void) { dlopen("x", 0); }\n'))
         self.assertEqual(r.returncode, 1)

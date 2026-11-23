@@ -20,7 +20,7 @@
 RL_RUNTIME_API const rl_cpu_desc *rl_arm64_cpu(void);
 
 struct rl_gdb_cpu;
-/** @brief The A64 registers for the GDB server (core/gdbstub.h), in gdb's aarch64 numbering. */
+/** @brief The A64 registers for the GDB server (core/gdbstub.h), in gdb's aarch64 numbering. Only with RL_DEBUG_STUB. */
 RL_RUNTIME_API const struct rl_gdb_cpu *rl_arm64_gdb(void);
 
 /**
