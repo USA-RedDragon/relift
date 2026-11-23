@@ -343,7 +343,8 @@ rl_upscaler *rl_upscaler_new(const rl_post_device *device, uint32_t choice, uint
 #undef UPSCALE_LOAD
     if (rl_upscale_temporal(choice) && kind == RL_UPSCALE_BUFFERS)
         u->choice = rl_upscale_spatial(choice);
-    if (u->choice == RL_UPSCALE_AUTO) {
+    bool picked = u->choice == RL_UPSCALE_AUTO;
+    if (picked) {
         int32_t type = 0;
         uint32_t vendor = 0;
         device_kind(device, &type, &vendor);
@@ -357,8 +358,11 @@ rl_upscaler *rl_upscaler_new(const rl_post_device *device, uint32_t choice, uint
         rl_log(RL_LOG_INFO, "upscale", "the dlss upscaler runs %s instead", g_names[RL_UPSCALE_FALLBACK_TEMPORAL]);
         u->choice = RL_UPSCALE_FALLBACK_TEMPORAL;
     }
-    if (u->choice == RL_UPSCALE_FSR2 && !(u->fsr2 = rl_fsr2_new(device)))
-        rl_log(RL_LOG_WARN, "upscale", "the fsr2 upscaler runs FSR 1 instead");
+    if (u->choice == RL_UPSCALE_FSR2 && !(u->fsr2 = rl_fsr2_new(device))) {
+        rl_log(RL_LOG_WARN, "upscale", "the fsr2 upscaler runs %s instead", picked ? "taa" : "FSR 1");
+        if (picked)
+            u->choice = RL_UPSCALE_TAA;
+    }
     if (u->choice == RL_UPSCALE_FSR3 && !(u->fsr3 = rl_fsr3_new(device)))
         rl_log(RL_LOG_WARN, "upscale", "the fsr3 upscaler runs FSR 1 instead");
     if (u->choice == RL_UPSCALE_TAA && !(u->taa = rl_taa_new(device)))
