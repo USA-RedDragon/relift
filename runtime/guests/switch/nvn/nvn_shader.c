@@ -6,17 +6,22 @@
  * An NVN2 program is its shader program header (when it has one) and its
  * code through the first BRA to itself, read at the GPU address
  * nvnProgramSetShaders names; an NVN1 program is what follows its code
- * header there (nvn_v1_program); its key is the SHA-256 of those bytes. Translations come from the
- * tables relift build wrote, table.rlspv (the SPIR-V, read a module at a
- * time) and table.rlspi (what each translation's interface needs), both sorted
- * by key, in the table folder. table.rlspv is "RLSPV002" (each module a
- * Zstandard frame; entries of the key, the frame's u64 offset, its u32 length
- * and the module's u32 length in words) or the older uncompressed "RLSPV001"
- * (entries of the key, a u32 offset and the length in words).
+ * header there (nvn_v1_program); its key is the SHA-256 of those bytes.
+ * Translations come from the tables relift build wrote, table.rlspv (the
+ * SPIR-V, read a module at a time) and table.rlspi (what each translation's
+ * interface needs), both sorted by key, in the table folder. table.rlspv is
+ * "RLSPV002" (each module a Zstandard frame; entries of the key, the frame's
+ * u64 offset, its u32 length and the module's u32 length in words) or the older
+ * uncompressed "RLSPV001" (entries of the key, a u32 offset and the length in
+ * words).
  *
  * The table folder's table.stamp names the translator that made the tables;
  * the build hands the program the stamp it expects (rl_nvn_set_table_stamp),
- * and nvn_shader_stamp_check refuses tables of another translator.
+ * and nvn_shader_stamp_check refuses tables of another translator. With the
+ * gpu.math setting at native the run reads table-native.rlspv,
+ * table-native.rlspi and table-native.stamp instead, translated with the
+ * host GPU's own float math, whose stamp is the expected one with -native
+ * after it. pick_tables is the one place that choice is made.
  *
  * Nothing in the program names the build machine's folders. The table folder
  * is $RELIFT_NVN_TABLES when set (what the launchers of a packaged app and
@@ -34,6 +39,7 @@
 #include "nvn_priv.h"
 
 #include <relift/datacheck.h>
+#include <relift/settings.h>
 
 #include "zstd.h"
 
@@ -90,13 +96,15 @@ static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] 
 
 static uint64_t le64(const uint8_t *p) { return le32(p) | (uint64_t)le32(p + 4) << 32; }
 
-/** @brief A table file: its head (magic, count, entries) in memory, the file for the rest. */
+/** @brief A table file: its head (magic, count, entries) in memory, the file
+ * for the rest. */
 typedef struct table {
     bool tried;
     FILE *f;
     uint8_t *head;
     uint32_t n;
-    /** @brief For the interface table: all of it (the records follow the entries). */
+    /** @brief For the interface table: all of it (the records follow the
+     * entries). */
     uint8_t *all;
     size_t len;
     /**
@@ -122,6 +130,16 @@ static bool seek(FILE *f, uint64_t at)
 #endif
 }
 
+/** @brief The tables the run reads (pick_tables). */
+static struct {
+    bool native;
+    /** @brief The file names' stem: "table" or "table-native". */
+    char base[16];
+} g_tables;
+static pthread_mutex_t g_tables_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool g_tables_picked;
+static rl_nvn_table_maker g_table_maker;
+
 static const char *g_expected_stamp;
 /** @brief 0 not checked yet, 1 the stamp is accepted, 2 it is not. */
 static int g_stamp_state;
@@ -135,15 +153,83 @@ void rl_nvn_set_table_stamp(const char *stamp)
     pthread_mutex_unlock(&g_lock);
 }
 
-/** @brief Reads the table folder's table.stamp (trimmed) into out; false without one. */
-static bool read_stamp(char out[64])
+void rl_nvn_set_table_maker(rl_nvn_table_maker make) { g_table_maker = make; }
+
+static bool file_exists(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+/**
+ * @brief Picks the tables the run reads, once: the native-math ones when
+ * gpu.math is native, else the exact ones. A native table that is missing goes
+ * to the table maker (rl_nvn_set_table_maker) when one is set; without one, or
+ * when it makes none, the stamp check stops the run with the reason.
+ */
+static void pick_tables_locked(void)
+{
+    if (g_tables_picked)
+        return;
+    g_tables_picked = true;
+    g_tables.native = rl_setting_enum("gpu.math") == 1;
+    snprintf(g_tables.base, sizeof g_tables.base, "%s", g_tables.native ? "table-native" : "table");
+    char want[96];
+    const char *expected = g_expected_stamp;
+    bool stamped = expected != NULL;
+    snprintf(want, sizeof want, "%s-native", stamped ? expected : "");
+    const char *dir = nvn_shader_table_dir();
+    char path[1100];
+    snprintf(path, sizeof path, "%s/%s.rlspv", dir, g_tables.base);
+    if (g_tables.native && !file_exists(path)) {
+        rl_log(RL_LOG_WARN, "nvn", "gpu.math is native but %s has no native-math shader table (%s)", dir, path);
+        if (g_table_maker && g_table_maker(dir, g_tables.base, "native", stamped ? want : NULL))
+            rl_log(RL_LOG_INFO, "nvn", "native-math shader table made in %s", dir);
+    }
+    rl_log(RL_LOG_INFO, "nvn", "shader tables: %s float math (%s/%s.*)", g_tables.native ? "native" : "exact", dir,
+           g_tables.base);
+}
+
+static void pick_tables(void)
+{
+    pthread_mutex_lock(&g_tables_lock);
+    pick_tables_locked();
+    pthread_mutex_unlock(&g_tables_lock);
+}
+
+void nvn_shader_tables_repick(void)
+{
+    pthread_mutex_lock(&g_tables_lock);
+    g_tables_picked = false;
+    pthread_mutex_unlock(&g_tables_lock);
+    pthread_mutex_lock(&g_lock);
+    g_stamp_state = 0;
+    pthread_mutex_unlock(&g_lock);
+}
+
+/** @brief The path of the picked tables' file with extension ext. */
+static void table_path(char *out, size_t n, const char *ext)
+{
+    pick_tables();
+    snprintf(out, n, "%s/%s.%s", nvn_shader_table_dir(), g_tables.base, ext);
+}
+
+bool nvn_shader_math_native(void)
+{
+    pick_tables();
+    return g_tables.native;
+}
+
+/** @brief Reads the table folder's table.stamp (trimmed) into out; false
+ * without one. */
+static bool read_stamp(char *out, size_t size)
 {
     char path[1100];
-    snprintf(path, sizeof path, "%s/table.stamp", nvn_shader_table_dir());
+    table_path(path, sizeof path, "stamp");
     FILE *f = fopen(path, "rb");
     if (!f)
         return false;
-    size_t n = fread(out, 1, 63, f);
+    size_t n = fread(out, 1, size - 1, f);
     fclose(f);
     while (n && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' '))
         n--;
@@ -153,11 +239,16 @@ static bool read_stamp(char out[64])
 
 bool nvn_shader_stamp_check(char *why, size_t why_n)
 {
+    pick_tables();
     pthread_mutex_lock(&g_lock);
     if (!g_stamp_state) {
-        char have[64];
-        bool stamped = read_stamp(have);
-        const char *want = g_expected_stamp;
+        char have[96], wantbuf[96];
+        bool stamped = read_stamp(have, sizeof have);
+        const char *want = NULL;
+        if (g_expected_stamp) {
+            snprintf(wantbuf, sizeof wantbuf, "%s%s", g_expected_stamp, g_tables.native ? "-native" : "");
+            want = wantbuf;
+        }
         const char *dir = nvn_shader_table_dir();
         const char *allow = getenv("RELIFT_NVN_TABLE_STAMP");
         bool allowed = allow && !strcmp(allow, "allow");
@@ -169,7 +260,7 @@ bool nvn_shader_stamp_check(char *why, size_t why_n)
             rl_log(RL_LOG_INFO, "nvn", "shader tables in %s: no translator stamp (this build expects %s)", dir,
                    want ? want : "none");
         char path[1100], magic[8] = { 0 };
-        snprintf(path, sizeof path, "%s/table.rlspi", dir);
+        table_path(path, sizeof path, "rlspi");
         FILE *spi = fopen(path, "rb");
         bool old = spi && fread(magic, 1, 8, spi) == 8 && !memcmp(magic, "RLSPI001", 8);
         if (spi)
@@ -185,11 +276,17 @@ bool nvn_shader_stamp_check(char *why, size_t why_n)
             char made[128];
             if (stamped)
                 snprintf(made, sizeof made, "were made by translator %s", have);
+            else if (g_tables.native)
+                snprintf(made, sizeof made,
+                         "have no native-math table (gpu.math is native; no translator "
+                         "stamp in table-native.stamp)");
             else
                 snprintf(made, sizeof made, "have no translator stamp (made by an older relift)");
             snprintf(g_stamp_why, sizeof g_stamp_why,
-                     "shader table stamp mismatch: the tables in %s %s, but this program was built by translator %s; "
-                     "run relift shaders and relink with one relift, or set RELIFT_NVN_TABLE_STAMP=allow for a "
+                     "shader table stamp mismatch: the tables in %s %s, but this "
+                     "program was built by translator %s; "
+                     "run relift shaders and relink with one relift, or set "
+                     "RELIFT_NVN_TABLE_STAMP=allow for a "
                      "deliberate A/B run",
                      dir, made, want);
             if (allowed)
@@ -207,14 +304,15 @@ bool nvn_shader_stamp_check(char *why, size_t why_n)
     return ok;
 }
 
-/** @brief Opens <dir>/name (magic) once; whole reads all of it into memory. */
-static table *open_table(table *t, const char *name, const char *magic, bool whole)
+/** @brief Opens the picked table file with extension ext (magic) once; whole
+ * reads all of it into memory. */
+static table *open_table(table *t, const char *ext, const char *magic, bool whole)
 {
     if (t->tried)
         return t->head ? t : NULL;
     t->tried = true;
     char path[1100];
-    snprintf(path, sizeof path, "%s/%s", nvn_shader_table_dir(), name);
+    table_path(path, sizeof path, ext);
     FILE *f = fopen(path, "rb");
     uint8_t h[TABLE_HEAD];
     if (!f)
@@ -283,7 +381,8 @@ static table *open_table(table *t, const char *name, const char *magic, bool who
     return t;
 }
 
-/** @brief The entry of key (hex) in t (sorted 40-byte entries of a 32-byte key and two u32), or NULL. */
+/** @brief The entry of key (hex) in t (sorted 40-byte entries of a 32-byte key
+ * and two u32), or NULL. */
 static const uint8_t *table_find(const table *t, const char *key)
 {
     uint8_t k[32];
@@ -311,7 +410,7 @@ static const uint8_t *table_find(const table *t, const char *key)
 static const uint8_t *spirv_entry(const char *key)
 {
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
     return t ? table_find(t, key) : NULL;
 }
@@ -380,7 +479,8 @@ static bool exists(const char *path)
     return stat(path, &st) == 0;
 }
 
-/** @brief Where the bytes of the program at code start and how many there are; false when it has no end. */
+/** @brief Where the bytes of the program at code start and how many there are;
+ * false when it has no end. */
 static bool program_span(const uint8_t *mem, uint64_t code, uint64_t *start, uint64_t *len)
 {
     if (nvn_generation() == 1)
@@ -391,8 +491,9 @@ static bool program_span(const uint8_t *mem, uint64_t code, uint64_t *start, uin
 }
 
 /**
- * @brief A program's key kept by its GPU address, so a draw does not hash the program again: valid while the
- * program's bytes equal the copy kept with it (a compare runs many times faster than SHA-256 and is exact).
+ * @brief A program's key kept by its GPU address, so a draw does not hash the
+ * program again: valid while the program's bytes equal the copy kept with it (a
+ * compare runs many times faster than SHA-256 and is exact).
  */
 typedef struct key_entry {
     uint64_t code, start, len;
@@ -527,7 +628,9 @@ uint32_t *nvn_shader_spirv(const char *key, size_t *words)
         free(frame);
     if (!ok) {
         free(w);
-        rl_log(RL_LOG_ERROR, "nvn", "cannot read translation %s from %s/table.rlspv", key, nvn_shader_table_dir());
+        char path[1100];
+        table_path(path, sizeof path, "rlspv");
+        rl_log(RL_LOG_ERROR, "nvn", "cannot read translation %s from %s", key, path);
         return NULL;
     }
     *words = n;
@@ -577,7 +680,7 @@ void nvn_shader_helper_key(const char *kind, const char *key, char hkey[65])
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
 {
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_iface, "table.rlspi", "RLSPI002", true);
+    table *t = open_table(&g_iface, "rlspi", "RLSPI002", true);
     pthread_mutex_unlock(&g_lock);
     const uint8_t *e = t ? table_find(t, key) : NULL;
     if (!e)
@@ -597,7 +700,7 @@ bool nvn_shader_image_arrays(uint64_t *used)
 {
     *used = 0;
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_iface, "table.rlspi", "RLSPI002", true);
+    table *t = open_table(&g_iface, "rlspi", "RLSPI002", true);
     pthread_mutex_unlock(&g_lock);
     if (!t)
         return false;
@@ -616,7 +719,7 @@ bool nvn_shader_image_arrays(uint64_t *used)
 uint32_t nvn_shader_count(void)
 {
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
     return t ? t->n : 0;
 }
@@ -624,7 +727,7 @@ uint32_t nvn_shader_count(void)
 bool nvn_shader_key_at(uint32_t i, char key[65])
 {
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
     if (!t || i >= t->n)
         return false;
@@ -641,13 +744,13 @@ bool nvn_shader_key_at(uint32_t i, char key[65])
 bool nvn_shader_table_hash(char hex[65])
 {
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_spv, "table.rlspv", "RLSPV001", false);
+    table *t = open_table(&g_spv, "rlspv", "RLSPV001", false);
     pthread_mutex_unlock(&g_lock);
     if (!t)
         return false;
     size_t hb = TABLE_HEAD + (size_t)t->n * t->entry;
     char stamp[64] = "";
-    read_stamp(stamp);
+    read_stamp(stamp, sizeof stamp);
     uint8_t *buf = malloc(hb + sizeof stamp);
     if (!buf)
         return false;

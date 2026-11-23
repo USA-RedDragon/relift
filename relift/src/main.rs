@@ -105,7 +105,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
-        Command::Shaders { build_dir } => relift::shaders::run(build_dir, &mut ui),
+        Command::Shaders { build_dir, math } => relift::shaders::run(build_dir, math, &mut ui),
         Command::Info { binary } => relift::build::run_info(&settings, binary.as_deref()),
         Command::Report {
             file,

@@ -135,4 +135,14 @@ RL_RUNTIME_API void rl_nvn_set_driver(const struct rl_nvn_driver *d);
  */
 RL_RUNTIME_API void rl_nvn_set_table_stamp(const char *stamp);
 
+/**
+ * @brief Makes the shader tables of a float math mode where they are missing: writes <dir>/<base>.rlspv, <base>.rlspi
+ * and <base>.stamp (with stamp, when not NULL) for math ("native"), true when it made them. The run calls it once, at
+ * its first shader table use, when gpu.math asks for a table the folder lacks.
+ */
+typedef bool (*rl_nvn_table_maker)(const char *dir, const char *base, const char *math, const char *stamp);
+
+/** @brief Registers the table maker (see rl_nvn_table_maker), for a runtime that can translate on the device. */
+RL_RUNTIME_API void rl_nvn_set_table_maker(rl_nvn_table_maker make);
+
 #endif

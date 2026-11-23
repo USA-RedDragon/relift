@@ -183,6 +183,10 @@ pub enum Command {
     Shaders {
         /// The build directory (the folder that holds `shaders/`).
         build_dir: PathBuf,
+        /// The float math of the tables to write: exact, native, or both.
+        #[arg(long, value_name = "MODE", default_value = "exact",
+              value_parser = ["exact", "native", "both"])]
+        math: String,
     },
     /// Explain a stop report a shipped build wrote (missed code, an
     /// instruction it could not run) and add the missed target as a root

@@ -1568,7 +1568,11 @@ fn lift_and_emit(
                 )
             }
         )));
-        let built = crate::shaders::build(out, jobs as usize)?;
+        let built = crate::shaders::build(
+            out,
+            jobs as usize,
+            &crate::shaders::host_modes(&settings.shader_math, false),
+        )?;
         if built.programs > 0 {
             let refused: Vec<String> = built
                 .refused
@@ -2413,7 +2417,12 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         .map(|a| a.target.name)
         .or(req.ios.map(|i| i.target.name));
     let shaders = match (req.import, project_out(settings)) {
-        (Some(_), Ok((_, out))) => crate::shaders::tables_for(&out, target),
+        (Some(_), Ok((_, out))) => {
+            if target.is_none() {
+                crate::shaders::ensure_native(&out, relift_proc::workers::jobs().max(1) as usize)?;
+            }
+            crate::shaders::tables_for(&out, target)
+        }
         _ => Vec::new(),
     };
     let fonts = match (req.import, project_out(settings)) {

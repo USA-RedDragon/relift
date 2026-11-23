@@ -39,6 +39,13 @@ pub struct Settings {
     )]
     pub color: String,
 
+    #[configulator(
+        name = "shader-math",
+        default = "exact",
+        description = "the GPU float math of the shader tables a build makes for this machine: exact (the console's results), or native or both (also the table of the host GPU's own math, which a run uses with gpu.math=native). Packages and phone targets always carry both"
+    )]
+    pub shader_math: String,
+
     #[configulator(name = "toolchain", nested)]
     pub toolchain: Toolchain,
 

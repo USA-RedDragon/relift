@@ -529,6 +529,10 @@ bool nvn_shader_table_hash(char hex[65]);
  * RELIFT_NVN_TABLE_STAMP=allow, which logs a warning instead. True when the build expects no stamp.
  */
 bool nvn_shader_stamp_check(char *why, size_t why_n);
+/** @brief The run reads the native-math shader tables (gpu.math is native). */
+bool nvn_shader_math_native(void);
+/** @brief Picks the tables again at their next use, from the gpu.math setting then (for tests: a run picks once). */
+void nvn_shader_tables_repick(void);
 /** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
 uint32_t *nvn_shader_spirv(const char *key, size_t *words);
 /** @brief An interface record of a translation (relift build's "RLSPI002" table). */

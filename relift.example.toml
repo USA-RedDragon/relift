@@ -2,6 +2,7 @@ cache-dir = ""
 jobs = 0
 runtime-dir = ""
 color = "auto"
+shader-math = "exact"
 
 [toolchain]
 clang = ""

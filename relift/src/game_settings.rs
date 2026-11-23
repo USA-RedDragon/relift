@@ -135,6 +135,15 @@ pub fn runtime_settings() -> Vec<Setting> {
             Value::String("system".into()),
             SettingKind::String,
         ),
+        s(
+            "gpu.math",
+            "GPU float math",
+            "exact gives the console GPU's float results bit for bit; native uses this GPU's own multiply-add, special functions and denormal handling, which is faster on GPUs that are not NVIDIA's and changes the picture from the console's. Games that translate shaders read the tables of the mode chosen",
+            Value::String("exact".into()),
+            SettingKind::Enum {
+                choices: ["exact", "native"].map(String::from).into(),
+            },
+        ),
         Setting {
             apply: Apply::Live,
             ..s(
@@ -1143,7 +1152,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 35);
+        assert_eq!(section(Vec::new()).runtime.len(), 36);
     }
 
     #[test]

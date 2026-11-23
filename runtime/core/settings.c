@@ -45,6 +45,7 @@ static const char *const g_present_choices[] = { "auto", "fifo", "relaxed", "lat
 static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
+static const char *const g_gpu_math_choices[] = { "exact", "native" };
 static const char *const g_panel_choices[] = { "auto", "always", "never" };
 static const char *const g_upscaler_choices[] = {
     "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa", "dlss",
@@ -110,6 +111,21 @@ static const rl_setting_def g_runtime_defs[] = {
                        "(a meta.json and its library under the app's gpu_drivers folder) loads that driver instead",
         .env = "RELIFT_GPU_DRIVER",
         .def_str = "system",
+    },
+    {
+        .key = "gpu.math",
+        .type = RL_SETTING_ENUM,
+        .label = "GPU float math",
+        .description = "exact gives the console GPU's float results bit for "
+                       "bit; native uses this GPU's own "
+                       "multiply-add, special functions and denormal handling, "
+                       "which is faster on GPUs that are not "
+                       "NVIDIA's and changes the picture from the console's. "
+                       "Games that translate shaders read the tables of "
+                       "the mode chosen",
+        .env = "RELIFT_GPU_MATH",
+        .choices = g_gpu_math_choices,
+        .nchoices = 2,
     },
     {
         .key = "picture.aa",

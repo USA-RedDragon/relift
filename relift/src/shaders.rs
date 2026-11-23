@@ -14,7 +14,12 @@
 //! * `table.rlspv`, written here: the translations, each module a zstd frame
 //!   (`Table::to_compressed_bytes` at [`ZSTD_LEVEL`]);
 //! * `table.rlspi`, written here: what the runtime must know of each
-//!   translation beyond its SPIR-V (see [`interfaces`]).
+//!   translation beyond its SPIR-V (see [`interfaces`]);
+//! * `table.stamp`, the translator that made them ([`stamp`]);
+//! * `table-native.rlspv`, `table-native.rlspi` and `table-native.stamp`,
+//!   the same for native float math ([`Math::Native`]), which the runtime
+//!   reads instead when its `gpu.math` setting is `native`; `failed-native.txt`
+//!   lists that table's refusals.
 //!
 //! The tables stay files the runtime reads a module at a time (one
 //! program's translation runs to megabytes, a game's to gigabytes). The
@@ -32,7 +37,7 @@ use std::path::{Path, PathBuf};
 
 use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
 use relift_gpu_nv::translate::{
-    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, MeshPath, image_binding,
+    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, Math, MeshPath, Options, image_binding,
 };
 use relift_switch_shaders::{ImportSource, Options as ScanOptions, scan};
 
@@ -60,6 +65,35 @@ const INTERFACES: &str = "table.rlspi";
 
 /// The stamp file in the folder: the translator that made the tables.
 pub const STAMP_FILE: &str = "table.stamp";
+
+/// Both float math modes, exact first: what a package or a phone target
+/// carries, so that the player can pick either on the device.
+pub const BOTH: [Math; 2] = [Math::Exact, Math::Native];
+
+/// The file name of a table file of `math`: `table.<ext>` for exact math,
+/// `table-native.<ext>` for native math. The runtime names them the same way
+/// (nvn_shader.c, nvn_shader_table_file).
+#[must_use]
+pub fn table_file(math: Math, ext: &str) -> String {
+    match (math, ext) {
+        (Math::Exact, "rlspv") => TABLE.into(),
+        (Math::Exact, "rlspi") => INTERFACES.into(),
+        (Math::Exact, "stamp") => STAMP_FILE.into(),
+        (Math::Exact, _) => format!("table.{ext}"),
+        (m, _) => format!("table-{}.{ext}", m.name()),
+    }
+}
+
+/// The stamp the tables of `math` carry and a program expects: [`STAMP`]
+/// for exact math, [`STAMP`] and `-native` for native math, so that a table
+/// of one mode is never read as the other.
+#[must_use]
+pub fn stamp(math: Math) -> String {
+    match math {
+        Math::Exact => STAMP.to_string(),
+        m => format!("{STAMP}-{}", m.name()),
+    }
+}
 
 /// The identity of this relift's shader translator: a hash of the sources of
 /// the `gpus` crates and of this module (`build.rs`), so it changes whenever
@@ -229,6 +263,7 @@ fn translate_one(
     dir: &Path,
     key: [u8; 32],
     pipes: &mesh::Pipelines,
+    math: Math,
 ) -> Result<Item, BoxError> {
     let code = std::fs::read(dir.join("programs").join(format!("{}.bin", hex(&key))))?;
     if relift_switch_formats::sha256(&code) != key {
@@ -239,7 +274,10 @@ fn translate_one(
         &[Input {
             key,
             code,
-            options: pipes.options(&key),
+            options: Options {
+                math,
+                ..pipes.options(&key)
+            },
         }],
         relift_gpu_sm86::program::parse,
     );
@@ -275,17 +313,48 @@ fn translate_one(
 }
 
 /// Translates the programs in `out`/shaders/programs for the device of its
-/// `device.json` and writes the tables beside them, a batch of programs at
-/// a time: a game's translations run to gigabytes, more than memory holds.
-/// Without a device file the table is empty: the game has not run on a
-/// device yet.
+/// `device.json` and writes the tables of each mode in `modes` beside them, a
+/// batch of programs at a time: a game's translations run to gigabytes, more
+/// than memory holds. Without a device file the table is empty: the game has
+/// not run on a device yet. The [`Built`] is that of the first mode.
 ///
 /// # Errors
 ///
 /// A file cannot be read or written, or `device.json` is not capabilities.
-pub fn build(out: &Path, jobs: usize) -> Result<Built, BoxError> {
+pub fn build(out: &Path, jobs: usize, modes: &[Math]) -> Result<Built, BoxError> {
     let dir = out.join(DIR);
-    build_in(&dir, &dir, jobs)
+    build_in(&dir, &dir, jobs, modes)
+}
+
+/// The modes the host build translates: exact math, and native math too
+/// when `math` (the `shader-math` setting of the tool) is `both` or
+/// `native`, or when the build makes a package, which carries both so the
+/// player can pick on the machine it is installed on.
+#[must_use]
+pub fn host_modes(math: &str, package: bool) -> Vec<Math> {
+    if package || matches!(math, "both" | "native") {
+        BOTH.to_vec()
+    } else {
+        vec![Math::Exact]
+    }
+}
+
+/// Translates the native-math tables of the host build in `out` when they
+/// are missing or another translator's, for a package, which carries both
+/// modes.
+///
+/// # Errors
+///
+/// As [`build`].
+pub fn ensure_native(out: &Path, jobs: usize) -> Result<(), BoxError> {
+    let dir = out.join(DIR);
+    if program_keys(&dir)?.is_empty() || !dir.join("device.json").is_file() {
+        return Ok(());
+    }
+    if stamp_of_mode(&dir, Math::Native).as_deref() != Some(stamp(Math::Native).as_str()) {
+        build(out, jobs, &[Math::Native])?;
+    }
+    Ok(())
 }
 
 /// The folder of the tables a build for `target` (an `android-*` or `ios-*`
@@ -308,7 +377,8 @@ pub enum TargetBuilt {
 }
 
 /// Translates the programs of the build in `out` for `target`'s device
-/// (the `device.json` in [`target_dir`]) into that folder's tables.
+/// (the `device.json` in [`target_dir`]) into that folder's tables, of both
+/// modes ([`BOTH`]): the app carries both, and its `gpu.math` setting picks.
 ///
 /// # Errors
 ///
@@ -321,18 +391,31 @@ pub fn build_target(out: &Path, target: &str, jobs: usize) -> Result<TargetBuilt
     let dir = target_dir(out, target);
     let device = dir.join("device.json");
     if !device.is_file() {
-        for f in [TABLE, INTERFACES, STAMP_FILE] {
-            let _ = std::fs::remove_file(dir.join(f));
+        for m in BOTH {
+            for ext in ["rlspv", "rlspi", "stamp"] {
+                let _ = std::fs::remove_file(dir.join(table_file(m, ext)));
+            }
         }
         return Ok(TargetBuilt::NoDevice(device));
     }
-    Ok(TargetBuilt::Built(build_in(&programs, &dir, jobs)?))
+    Ok(TargetBuilt::Built(build_in(&programs, &dir, jobs, &BOTH)?))
 }
 
 /// Translates the programs in `programs`/programs (with the scan's
 /// `meshes.json` there) for the device of `dir`/device.json, writing the
-/// tables and `failed.txt` in `dir`.
-fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError> {
+/// tables of each of `modes` and their `failed.txt` in `dir`. The [`Built`]
+/// is that of the first mode.
+fn build_in(programs: &Path, dir: &Path, jobs: usize, modes: &[Math]) -> Result<Built, BoxError> {
+    let mut first = None;
+    for &m in modes {
+        let b = build_mode(programs, dir, jobs, m)?;
+        first.get_or_insert(b);
+    }
+    first.ok_or_else(|| "no shader math mode to translate".into())
+}
+
+/// [`build_in`] for one mode.
+fn build_mode(programs: &Path, dir: &Path, jobs: usize, math: Math) -> Result<Built, BoxError> {
     std::fs::create_dir_all(programs.join("programs"))?;
     std::fs::create_dir_all(dir)?;
     let keys = program_keys(programs)?;
@@ -342,7 +425,10 @@ fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError>
     let mut index: Vec<Frame> = Vec::new();
     let mut interface: Vec<([u8; 32], Vec<[u32; 4]>)> = Vec::new();
     let mut extras: BTreeMap<[u8; 32], (Vec<u8>, u32)> = BTreeMap::new();
-    let spool = dir.join(SPOOL);
+    let spool = match math {
+        Math::Exact => dir.join(SPOOL),
+        m => dir.join(format!("{}.frames", table_file(m, "rlspv"))),
+    };
     if !keys.is_empty() && device.is_file() {
         let text = std::fs::read_to_string(&device)?;
         let caps =
@@ -352,7 +438,7 @@ fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError>
         let mut spool_file = relift_cache::StreamWriter::new(&spool)?;
         for batch in keys.chunks(jobs.max(1) * 4) {
             let items = relift_proc::workers::parallel_with(jobs, batch, |&k| {
-                translate_one(&host, programs, k, &pipes).map_err(|e| e.to_string())
+                translate_one(&host, programs, k, &pipes, math).map_err(|e| e.to_string())
             });
             for (&key, item) in batch.iter().zip(items) {
                 match item? {
@@ -384,12 +470,24 @@ fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError>
         }
         spool_file.finish()?;
     }
-    relift_cache::write_if_changed(&dir.join("failed.txt"), failed.as_bytes())?;
+    let failed_name = match math {
+        Math::Exact => "failed.txt".to_string(),
+        m => format!("failed-{}.txt", m.name()),
+    };
+    relift_cache::write_if_changed(&dir.join(failed_name), failed.as_bytes())?;
     let translated = index.len();
-    write_table(&dir.join(TABLE), &spool, &index, &extras)?;
+    write_table(
+        &dir.join(table_file(math, "rlspv")),
+        &spool,
+        &index,
+        &extras,
+    )?;
     let _ = std::fs::remove_file(&spool);
-    relift_cache::write_if_changed(&dir.join(INTERFACES), &interface_table(&interface))?;
-    write_stamp(dir)?;
+    relift_cache::write_if_changed(
+        &dir.join(table_file(math, "rlspi")),
+        &interface_table(&interface),
+    )?;
+    write_stamp(dir, math)?;
     Ok(Built {
         programs: keys.len(),
         translated,
@@ -397,16 +495,27 @@ fn build_in(programs: &Path, dir: &Path, jobs: usize) -> Result<Built, BoxError>
     })
 }
 
-/// Writes this relift's [`STAMP`] in `dir`, beside the tables it made.
-fn write_stamp(dir: &Path) -> std::io::Result<()> {
-    relift_cache::write_if_changed(&dir.join(STAMP_FILE), format!("{STAMP}\n").as_bytes()).map(drop)
+/// Writes this relift's [`stamp`] of `math` in `dir`, beside the tables it
+/// made.
+fn write_stamp(dir: &Path, math: Math) -> std::io::Result<()> {
+    relift_cache::write_if_changed(
+        &dir.join(table_file(math, "stamp")),
+        format!("{}\n", stamp(math)).as_bytes(),
+    )
+    .map(drop)
 }
 
-/// The stamp of the tables in `dir`, or none when they have no stamp (made
-/// by a relift that wrote none).
+/// The stamp of the exact tables in `dir`, or none when they have no stamp
+/// (made by a relift that wrote none).
 #[must_use]
 pub fn stamp_of(dir: &Path) -> Option<String> {
-    let s = std::fs::read_to_string(dir.join(STAMP_FILE)).ok()?;
+    stamp_of_mode(dir, Math::Exact)
+}
+
+/// The stamp of the tables of `math` in `dir`, or none without one.
+#[must_use]
+pub fn stamp_of_mode(dir: &Path, math: Math) -> Option<String> {
+    let s = std::fs::read_to_string(dir.join(table_file(math, "stamp"))).ok()?;
     let s = s.trim();
     (!s.is_empty()).then(|| s.to_string())
 }
@@ -480,10 +589,14 @@ fn write_table(
 /// # Errors
 ///
 /// As [`build`].
-pub fn run(out: &Path, ui: &mut crate::ui::Ui) -> Result<(), BoxError> {
+pub fn run(out: &Path, math: &str, ui: &mut crate::ui::Ui) -> Result<(), BoxError> {
     let jobs = relift_proc::workers::jobs().max(1);
     let start = std::time::Instant::now();
-    let built = build(out, jobs)?;
+    let modes = match math {
+        "native" => vec![Math::Native],
+        m => host_modes(m, false),
+    };
+    let built = build(out, jobs, &modes)?;
     ui.note(&relift_progress::Line::new().text(format!(
         "{} of {} programs translated on {jobs} threads in {:.1} s",
         built.translated,
@@ -575,18 +688,22 @@ pub fn tables_for(out: &Path, target: Option<&str>) -> Vec<PathBuf> {
 }
 
 fn tables_in(dir: &Path) -> Vec<PathBuf> {
-    let files = [dir.join(TABLE), dir.join(INTERFACES)];
-    let head = std::fs::metadata(&files[0]).map_or(0, |m| m.len());
-    if head > TABLE_HEAD_BYTES && files[1].is_file() {
-        let mut files: Vec<PathBuf> = files.into();
-        let stamp = dir.join(STAMP_FILE);
-        if stamp.is_file() {
-            files.push(stamp);
+    let mut out = Vec::new();
+    for m in BOTH {
+        let files = [
+            dir.join(table_file(m, "rlspv")),
+            dir.join(table_file(m, "rlspi")),
+        ];
+        let head = std::fs::metadata(&files[0]).map_or(0, |m| m.len());
+        if head > TABLE_HEAD_BYTES && files[1].is_file() {
+            out.extend(files);
+            let stamp = dir.join(table_file(m, "stamp"));
+            if stamp.is_file() {
+                out.push(stamp);
+            }
         }
-        files
-    } else {
-        Vec::new()
     }
+    out
 }
 
 /// The length of a table with no module: its magic and its count.
@@ -649,7 +766,6 @@ pub(crate) fn c_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relift_gpu_nv::translate::Options;
 
     #[test]
     fn a_reason_kind_drops_its_details() {
@@ -738,7 +854,7 @@ mod tests {
         .unwrap();
         relift_cache::write_if_changed(&out.join(DIR).join(INTERFACES), b"RLSPI001").unwrap();
         assert_eq!(tables(&out).len(), 2);
-        write_stamp(&out.join(DIR)).unwrap();
+        write_stamp(&out.join(DIR), Math::Exact).unwrap();
         let t = tables(&out);
         assert_eq!(t.last().unwrap(), &out.join(DIR).join(STAMP_FILE));
         let dest = out.join("pkg").join("shaders");
@@ -847,7 +963,7 @@ mod tests {
                 options: Options::default(),
             });
         }
-        let built = build(&out, 3).unwrap();
+        let built = build(&out, 3, &[Math::Exact]).unwrap();
         assert_eq!((built.programs, built.translated), (3, 2));
         assert_eq!(built.refused.values().sum::<usize>(), 1);
         let host = HostProfile::from_device("device", &DeviceCaps::from_json(CAPS).unwrap());
@@ -875,7 +991,7 @@ mod tests {
         assert!(!dir.join(SPOOL).exists());
         assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
         relift_cache::write_if_changed(&dir.join(STAMP_FILE), b"0000000000000000\n").unwrap();
-        build(&out, 1).unwrap();
+        build(&out, 1, &[Math::Exact]).unwrap();
         assert_eq!(
             stamp_of(&dir).as_deref(),
             Some(STAMP),
@@ -902,7 +1018,7 @@ mod tests {
         )
         .unwrap();
         relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
-        assert_eq!(build(&out, 1).unwrap().translated, 1);
+        assert_eq!(build(&out, 1, &[Math::Exact]).unwrap().translated, 1);
         assert_eq!(tables_for(&out, None).len(), 3);
         assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
         let want = target_dir(&out, t).join("device.json");
@@ -918,14 +1034,20 @@ mod tests {
             _ => panic!("a target with its device file gets a table"),
         }
         let files = tables_for(&out, Some(t));
+        let td = target_dir(&out, t);
         assert_eq!(
             files,
             [
-                target_dir(&out, t).join(TABLE),
-                target_dir(&out, t).join(INTERFACES),
-                target_dir(&out, t).join(STAMP_FILE)
-            ]
+                td.join(TABLE),
+                td.join(INTERFACES),
+                td.join(STAMP_FILE),
+                td.join("table-native.rlspv"),
+                td.join("table-native.rlspi"),
+                td.join("table-native.stamp"),
+            ],
+            "a target carries the tables of both float math modes"
         );
+        assert_eq!(stamp_of_mode(&td, Math::Native), Some(stamp(Math::Native)));
         std::fs::remove_file(&want).unwrap();
         assert!(matches!(
             build_target(&out, t, 1).unwrap(),
@@ -943,6 +1065,43 @@ mod tests {
     }
 
     #[test]
+    fn each_float_math_mode_has_its_own_stamp_and_files() {
+        assert_eq!(stamp(Math::Exact), STAMP);
+        assert_ne!(stamp(Math::Native), stamp(Math::Exact));
+        assert!(stamp(Math::Native).starts_with(STAMP));
+        assert_eq!(table_file(Math::Exact, "rlspv"), TABLE);
+        assert_eq!(table_file(Math::Exact, "stamp"), STAMP_FILE);
+        assert_eq!(table_file(Math::Native, "rlspi"), "table-native.rlspi");
+        assert_eq!(host_modes("exact", false), [Math::Exact]);
+        assert_eq!(host_modes("both", false), BOTH);
+        assert_eq!(host_modes("exact", true), BOTH, "a package carries both");
+    }
+
+    #[test]
+    fn a_native_build_writes_its_own_table_beside_the_exact_one() {
+        let out = scratch("native");
+        let dir = out.join(DIR);
+        std::fs::create_dir_all(dir.join("programs")).unwrap();
+        let code = words(&[exit(), bra_self()]);
+        let key = relift_switch_formats::sha256(&code);
+        relift_cache::write_if_changed(
+            &dir.join("programs").join(format!("{}.bin", hex(&key))),
+            &code,
+        )
+        .unwrap();
+        relift_cache::write_if_changed(&dir.join("device.json"), CAPS.as_bytes()).unwrap();
+        build(&out, 1, &[Math::Exact]).unwrap();
+        assert_eq!(tables(&out).len(), 3);
+        assert_eq!(stamp_of_mode(&dir, Math::Native), None);
+        ensure_native(&out, 1).unwrap();
+        assert_eq!(tables(&out).len(), 6);
+        assert_eq!(stamp_of(&dir).as_deref(), Some(STAMP));
+        assert_eq!(stamp_of_mode(&dir, Math::Native), Some(stamp(Math::Native)));
+        assert!(dir.join("failed-native.txt").is_file());
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
     fn a_build_without_a_device_has_an_empty_table() {
         let out = scratch("nodevice");
         let key = relift_switch_formats::sha256(b"x");
@@ -954,7 +1113,7 @@ mod tests {
             b"x",
         )
         .unwrap();
-        let built = build(&out, 2).unwrap();
+        let built = build(&out, 2, &[Math::Exact]).unwrap();
         assert_eq!((built.programs, built.translated), (1, 0));
         assert!(tables(&out).is_empty());
         std::fs::remove_dir_all(&out).unwrap();
