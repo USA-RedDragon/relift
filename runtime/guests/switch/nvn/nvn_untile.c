@@ -252,6 +252,25 @@ bool nvn_untile_move(replay *r, vimg *v, bool tile)
     return movable(v) && move_at(r, v, guest_address(v->storage, v->d.size), tile);
 }
 
+bool nvn_untile_write_back(replay *r, vimg *v)
+{
+    void *buf;
+    uint64_t off;
+    if (!movable(v) || !nvn_guest_buffer(v->storage, v->d.size, &buf, &off))
+        return false;
+    bool mirror = nvn_mirror_buffer(buf);
+    if (mirror && !nvn_mirror_sync(r, false))
+        return false;
+    VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = (VkBuffer)buf };
+    uint64_t a = VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+    if (!a || !move_at(r, v, a + off, true))
+        return false;
+    nvn_vk_mark_write_range(v->storage, v->d.size);
+    if (mirror)
+        nvn_mirror_written_guest(v->storage, v->d.size);
+    return true;
+}
+
 /** @brief A device-local buffer of size bytes with a device address, kept in U.dead_bufs until the batch has run; 0 when none. */
 static uint64_t packed_new(uint64_t size, VkBuffer *out)
 {

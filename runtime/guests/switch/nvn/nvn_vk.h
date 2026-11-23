@@ -119,6 +119,8 @@ typedef struct vimg {
      * of it comes first.
      */
     bool sync_pending;
+    /** @brief Its index + 1 in the list of images the GPU has written (nvn_vk_unsaved_over searches it), 0 when not in it. */
+    uint32_t written_at;
     uint64_t sync_since;
     /**
      * @brief The other images over any byte of its storage, listed when the set of images was as g.image_epoch was at
@@ -592,6 +594,13 @@ bool nvn_untile_can(const vimg *v);
  */
 bool nvn_untile_move(replay *r, vimg *v, bool tile);
 /**
+ * @brief nvn_untile_move into the storage (a write-back) for a read by later commands of the batch: through an
+ * imported pool, or a mirror (nvn_mirror.c), which is brought up to the guest's writes first and whose moved bytes
+ * are noted for its readback, so guest memory gets them when the batch completes. False, with nothing recorded, when
+ * v's format or storage does not allow it.
+ */
+bool nvn_untile_write_back(replay *r, vimg *v);
+/**
  * @brief Records an upload of v's storage into v's image through a packed device buffer: a shader reads the storage
  * through its pool's device address and writes the texels (or compressed blocks) packed, and a buffer copy puts them
  * into the image, for images no shader can store to (depth, compressed). False, with nothing recorded, when v's
@@ -756,6 +765,21 @@ void nvn_vk_written(vimg *v);
 bool nvn_vk_wb_current(const vimg *u);
 /** @brief Notes that u's bytes were just written back to its storage. */
 void nvn_vk_wb_note(vimg *u);
+/**
+ * @brief The images over any byte of guest bytes [guest, guest + size) that the GPU wrote after their bytes were last
+ * written back to their storage (nvn_vk_wb_current), oldest write first: at most max in out. Returns how many there
+ * are, which is more than max when they do not all fit.
+ */
+uint32_t nvn_vk_unsaved_over(uint64_t guest, uint64_t size, vimg **out, uint32_t max);
+/**
+ * @brief Before a command reads guest bytes [guest, guest + size) through a buffer: writes back the images over them
+ * that the GPU wrote since their last write-back (nvn_vk_unsaved_over), oldest first, so the read sees what was drawn
+ * there, as on the console, whose render targets are those bytes. Each move is recorded on the GPU ahead of the read,
+ * with no wait on the host, and only images in the list of those the GPU wrote are searched. An image whose texels
+ * cannot move as raw words (nvn_untile_write_back) is reported and the read sees the older bytes. RL_OK, or a pending
+ * stop.
+ */
+int nvn_vk_reading_buffer(replay *r, uint64_t guest, uint64_t size);
 /**
  * @brief Takes out of the images a texture can find or copy from every image whose memory pool was removed after it
  * was made (finalized, or another object made at the pool's address). The pool's memory is the game's again, and the

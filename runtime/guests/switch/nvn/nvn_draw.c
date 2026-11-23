@@ -2531,7 +2531,23 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
             nvn_vk_dispatch_buffer(nvn_gpu_guest(gpu), (uint32_t)(bytes > UINT32_MAX ? UINT32_MAX : bytes),
                                    m->stores_guest);
     }
-    int rc = m->register_handles ? nvn_texset_sync_registered(r) : RL_OK;
+    int rc = RL_OK;
+    for (uint32_t i = 0; i < nssbo && rc == RL_OK; i++)
+        if (st->storage[i].addr)
+            rc = nvn_vk_reading_buffer(r, nvn_gpu_guest(st->storage[i].addr), (uint32_t)st->storage[i].size);
+    for (uint32_t i = 0; i < nubo && rc == RL_OK; i++)
+        if (st->ubo[NVN_STAGE_COMPUTE][i].addr)
+            rc = nvn_vk_reading_buffer(r, nvn_gpu_guest(st->ubo[NVN_STAGE_COMPUTE][i].addr),
+                                       st->ubo[NVN_STAGE_COMPUTE][i].size);
+    for (uint32_t j = 0; j < m->ncbase && rc == RL_OK; j++) {
+        void *buf;
+        uint64_t boff, gpu, bytes;
+        if (compute_base_span(c0, m->cbase[j], &buf, &boff, &gpu, &bytes))
+            rc = nvn_vk_reading_buffer(r, nvn_gpu_guest(gpu), bytes);
+    }
+    if (rc != RL_OK)
+        return rc;
+    rc = m->register_handles ? nvn_texset_sync_registered(r) : RL_OK;
     if (rc != RL_OK)
         return rc;
     if ((rc = bind_handle_sources(r, m, NVN_STAGE_COMPUTE, c0, sizeof c0)) != RL_OK)

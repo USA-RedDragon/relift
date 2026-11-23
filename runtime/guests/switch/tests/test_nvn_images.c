@@ -135,3 +135,28 @@ TEST(nvn_storage_written_again_with_the_same_bytes_needs_no_refill)
     CHECK(nvn_vk_bytes_changed(&v, bytes));
     CHECK(!nvn_vk_bytes_changed(&v, bytes));
 }
+
+TEST(nvn_a_buffer_read_finds_the_images_over_it_the_gpu_wrote_since_their_write_back_oldest_first)
+{
+    vimg newer = { .d = { .size = 0x2000 } }, older = { .d = { .size = 0x1000 } }, saved = { .d = { .size = 0x400 } };
+    vimg apart = { .d = { .size = 0x1000 } }, never = { .d = { .size = 0x100 } };
+    add_image(&newer, 0, 0x100000);
+    add_image(&older, 0, 0x101000);
+    add_image(&saved, 0, 0x100800);
+    add_image(&apart, 0, 0x110000);
+    add_image(&never, 0, 0x100a00);
+    nvn_vk_written(&older);
+    nvn_vk_written(&saved);
+    nvn_vk_written(&apart);
+    nvn_vk_written(&newer);
+    nvn_vk_wb_note(&saved);
+    vimg *out[4];
+    CHECK_EQ(nvn_vk_unsaved_over(0x100800, 0xc00, out, 4), 2u);
+    CHECK(out[0] == &older && out[1] == &newer);
+    CHECK_EQ(nvn_vk_unsaved_over(0x102000, 0xe000, out, 4), 0u);
+    CHECK_EQ(nvn_vk_unsaved_over(0x100000, 0x20000, out, 1), 3u);
+    CHECK(out[0] == &older);
+    nvn_vk_wb_note(&older);
+    CHECK_EQ(nvn_vk_unsaved_over(0x100800, 0xc00, out, 4), 1u);
+    CHECK(out[0] == &newer);
+}

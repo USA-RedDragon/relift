@@ -1980,8 +1980,17 @@ int nvn_vk_stage(replay *r, int (*stage)(replay *r, void *arg), void *arg, const
     return nvn_vk_stop(r, "the data of %s does not fit one batch of the upload arena and descriptor pool", what);
 }
 
+/** @brief The listed images the GPU has written (vimg.written_at), which nvn_vk_unsaved_over searches. */
+static struct {
+    vimg **v;
+    uint32_t n, cap;
+} gpu_written;
+
+static void unlist_written(vimg *v);
+
 static void image_free(vimg *v)
 {
+    unlist_written(v);
     for (uint32_t i = 0; i < 7; i++)
         if (v->views[i])
             VK(vkDestroyImageView)(g.dev, v->views[i], NULL);
@@ -2348,6 +2357,65 @@ static bool write_back_body(replay *r, vimg *u)
     return ok;
 }
 
+uint32_t nvn_vk_unsaved_over(uint64_t guest, uint64_t size, vimg **out, uint32_t max)
+{
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < gpu_written.n; i++) {
+        vimg *u = gpu_written.v[i];
+        if (!u->written || u->storage >= guest + size || guest >= u->storage + u->d.size || nvn_vk_wb_current(u))
+            continue;
+        if (n < max) {
+            uint32_t k = n;
+            for (; k > 0 && out[k - 1]->written > u->written; k--)
+                out[k] = out[k - 1];
+            out[k] = u;
+        } else if (max && out[max - 1]->written > u->written) {
+            uint32_t k = max - 1;
+            for (; k > 0 && out[k - 1]->written > u->written; k--)
+                out[k] = out[k - 1];
+            out[k] = u;
+        }
+        n++;
+    }
+    return n;
+}
+
+/** @brief Most images one buffer read writes back. */
+#define READ_WB_MAX 32u
+
+int nvn_vk_reading_buffer(replay *r, uint64_t guest, uint64_t size)
+{
+    vimg *v[READ_WB_MAX];
+    uint32_t n = nvn_vk_unsaved_over(guest, size, v, READ_WB_MAX);
+    if (!n)
+        return RL_OK;
+    if (n > READ_WB_MAX)
+        (void)rl_report_unknown(0x4e564e5242554631ull ^ guest, "nvn",
+                                "a buffer read of 0x%llx (0x%llx bytes) covers %u images the GPU wrote; the newest %u "
+                                "are not written back first",
+                                (unsigned long long)guest, (unsigned long long)size, n, n - READ_WB_MAX);
+    int64_t t0 = now_ns();
+    for (uint32_t i = 0; i < n && i < READ_WB_MAX; i++) {
+        vimg *u = v[i];
+        if (u->sync_pending && !sync_alias(r, u))
+            return RL_PENDING;
+        if (nvn_vk_wb_current(u))
+            continue;
+        if (!nvn_untile_write_back(r, u)) {
+            (void)rl_report_unknown(0x4e564e5242554632ull ^ u->storage, "nvn",
+                                    "a buffer read covers storage 0x%llx of an image the GPU wrote (format %u, %ux%u), "
+                                    "whose texels cannot move on the GPU as raw words: the read sees the bytes from before",
+                                    (unsigned long long)u->storage, u->d.format, u->d.width, u->d.height);
+            continue;
+        }
+        nvn_watch_touch(u->storage, u->d.size);
+        nvn_vk_wb_note(u);
+        ppc.wbs++;
+    }
+    ppc.wb_ns += (uint64_t)(now_ns() - t0);
+    return RL_OK;
+}
+
 /**
  * @brief Whether an image copy between u and v moves their bytes unchanged: one guest format, or color images both
  * kept in the host format that has their guest texels' bytes (not a substitute), whose sizes then agree.
@@ -2458,7 +2526,37 @@ static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred)
     }
 }
 
-void nvn_vk_written(vimg *v) { v->written = ++g.write_stamp; }
+/** @brief Takes v out of the images the GPU has written (it is retired or freed). */
+static void unlist_written(vimg *v)
+{
+    uint32_t i = v->written_at;
+    if (!i)
+        return;
+    vimg *last = gpu_written.v[--gpu_written.n];
+    gpu_written.v[i - 1] = last;
+    last->written_at = i;
+    v->written_at = 0;
+}
+
+void nvn_vk_written(vimg *v)
+{
+    v->written = ++g.write_stamp;
+    if (v->written_at)
+        return;
+    if (gpu_written.n == gpu_written.cap) {
+        uint32_t cap = gpu_written.cap ? 2 * gpu_written.cap : 256;
+        vimg **p = realloc(gpu_written.v, cap * sizeof *p);
+        if (!p) {
+            (void)rl_report_unknown(0x4e564e5752495454ull, "nvn",
+                                    "out of memory listing the images the GPU wrote: a buffer read over one sees older bytes");
+            return;
+        }
+        gpu_written.v = p;
+        gpu_written.cap = cap;
+    }
+    gpu_written.v[gpu_written.n++] = v;
+    v->written_at = gpu_written.n;
+}
 
 static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool target);
 
@@ -2536,6 +2634,7 @@ void nvn_vk_retire_images(void)
             g.capretired = cap;
         }
         v->retire_after = next;
+        unlist_written(v);
         g.retired[g.nretired++] = v;
     }
     if (g.nimages != n)
