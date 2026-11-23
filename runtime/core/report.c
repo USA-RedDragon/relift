@@ -459,7 +459,7 @@ static bool report_dir(char *out, size_t n)
 #endif
 }
 
-static int write_file(const char *text, size_t len, char *path, size_t path_n)
+static int write_file(const char *prefix, const char *text, size_t len, char *path, size_t path_n)
 {
     char dir[1100];
     if (!report_dir(dir, sizeof dir))
@@ -480,7 +480,7 @@ static int write_file(const char *text, size_t len, char *path, size_t path_n)
         char suffix[8] = "";
         if (seq)
             snprintf(suffix, sizeof suffix, "-%d", seq);
-        int k = snprintf(p, sizeof p, "%s%crelift-stop-%04d%02d%02d-%02d%02d%02d-%lu%s.txt", dir, SEP,
+        int k = snprintf(p, sizeof p, "%s%c%s-%04d%02d%02d-%02d%02d%02d-%lu%s.txt", dir, SEP, prefix,
                          tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec, pid,
                          suffix);
         if (k <= 0 || (size_t)k >= sizeof p)
@@ -545,7 +545,7 @@ int rl_report_stop(rl_ctx *c, const char *kind, const char *summary, const rl_mi
     char file[1300], dir[1100];
     file[0] = 0;
     bool files = report_dir(dir, sizeof dir);
-    int rc = files ? write_file(g_text, len, file, sizeof file) : 1;
+    int rc = files ? write_file("relift-stop", g_text, len, file, sizeof file) : 1;
     if (rc == 0)
         rl_log(RL_LOG_ERROR, "stop", "%s: %s; report written to %s", kind, summary, file);
     else if (rc > 0)
@@ -561,6 +561,13 @@ int rl_report_stop(rl_ctx *c, const char *kind, const char *summary, const rl_mi
         copy(path, path_n, file);
     __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
     return rc == 0 ? 0 : -1;
+}
+
+int rl_report_write(const char *prefix, const char *text, size_t len, char *path, size_t path_n)
+{
+    if (path && path_n)
+        path[0] = 0;
+    return write_file(prefix, text, len, path, path_n);
 }
 
 static char g_crash_dir[1100];

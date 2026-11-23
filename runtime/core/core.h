@@ -600,6 +600,12 @@ RL_RUNTIME_API void rl_report_set_dir(const char *dir);
 RL_RUNTIME_API int rl_report_stop(rl_ctx *c, const char *kind, const char *summary, const rl_miss_info *m, char *path,
                                   size_t path_n);
 /**
+ * @brief Writes text (len bytes) to a new file `<prefix>-<date>-<time>-<pid>.txt` in the report folder; path (when not
+ * NULL) gets the file's path, empty when none was written. Returns 0 when the file was written, nonzero when no file
+ * is written (a run that is not a shipped build, with no report folder set) or it could not be.
+ */
+RL_RUNTIME_API int rl_report_write(const char *prefix, const char *text, size_t len, char *path, size_t path_n);
+/**
  * @brief Works out the report folder ahead of a crash (the crash handler
  * cannot): rl_fault_install and rl_report_set_dir call it. Creates the
  * folder when report files are written at all.
