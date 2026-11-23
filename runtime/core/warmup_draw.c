@@ -475,7 +475,7 @@ static const char *head_of(int state)
     case RL_WU_DONE:
         return "Graphics are ready";
     default:
-        return "Preparing graphics for your GPU";
+        return "Compiling shaders";
     }
 }
 
@@ -770,7 +770,7 @@ static float corner(ui *u, const rl_wu_scene *s, float x0, float y0, float pw)
                    false, t->muted);
         return y + pady + bw - y0;
     }
-    y += para1(u, ix, y, iw, tlh, tpx, "Preparing graphics for your GPU", true, t->text);
+    y += para1(u, ix, y, iw, tlh, tpx, "Compiling shaders", true, t->text);
     y += 1.2f * r;
     bar(u, ix, y, iw, 1.2f * r, s, false);
     y += 1.2f * r + r;

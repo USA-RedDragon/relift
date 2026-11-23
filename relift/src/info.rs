@@ -259,6 +259,19 @@ fn decode_hex(s: &str) -> Option<[u8; 32]> {
 
 /// The document of a Switch build.
 ///
+/// The identity of a Switch title whose import holds no NACP: the project name as the only title, and the control
+/// icon when the import has one (a package can carry its icon without its NACP).
+fn no_nacp_identity(title_id: u64, project: &str, icon: Option<&[u8]>) -> Identity {
+    let mut id = Identity {
+        platform: "switch".into(),
+        title_id: Some(format!("{title_id:016x}")),
+        ..Identity::default()
+    };
+    id.names.insert("default".into(), project.to_string());
+    id.icon = icon.and_then(crate::icon::from_jpeg);
+    id
+}
+
 /// The import directory supplies `control.nacp` and `icon.jpg` when it has
 /// them; without a NACP the title is the project name.
 ///
@@ -283,15 +296,7 @@ pub fn switch_document(
     let icon = std::fs::read(import.join("icon.jpg")).ok();
     let mut id = match std::fs::read(import.join("control.nacp")) {
         Ok(n) => identity::from_nacp(&n, title_id, icon.as_deref())?,
-        Err(_) => {
-            let mut id = Identity {
-                platform: "switch".into(),
-                title_id: Some(format!("{title_id:016x}")),
-                ..Identity::default()
-            };
-            id.names.insert("default".into(), project.to_string());
-            id
-        }
+        Err(_) => no_nacp_identity(title_id, project, icon.as_deref()),
     };
     id.default_language = id.first_language();
     id.version = id.version.or_else(|| {
@@ -618,6 +623,15 @@ mod tests {
         assert_eq!(info.settings.game.len(), 1);
         let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p1", "dial"]);
+    }
+
+    #[test]
+    fn an_import_with_an_icon_and_no_nacp_keeps_the_icon_and_the_project_name() {
+        let id = no_nacp_identity(0x1234, "proj", Some(include_bytes!("../tests/icon.jpg")));
+        assert_eq!(id.title(&[]), Some("proj"));
+        let icon = id.icon.expect("the icon");
+        assert_eq!((icon.width, icon.height), (16, 8));
+        assert!(no_nacp_identity(1, "p", None).icon.is_none());
     }
 
     #[test]
