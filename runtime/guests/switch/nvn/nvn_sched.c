@@ -79,6 +79,14 @@ int nvn_sched_flatten(const nvn_cmdset *s, nvn_sched_item **items, uint32_t *n, 
     return rc;
 }
 
+bool nvn_sched_queue_busy(const nvn_sched *s, uint64_t queue)
+{
+    for (const nvn_sched_run *r = s->head; r; r = r->next)
+        if (r->queue == queue)
+            return true;
+    return false;
+}
+
 bool nvn_sched_add(nvn_sched *s, uint64_t queue, nvn_sched_item *items, uint32_t n, void *user)
 {
     nvn_sched_run *r = calloc(1, sizeof *r);
@@ -144,6 +152,14 @@ static int advance(nvn_sched_run *r, const nvn_sched_ops *ops, bool *blocked, bo
                 if (ops->note)
                     ops->note(r->user, e, r->pos, now, true);
             }
+        } else if (e->op == NVN_CMD_WAIT_SYNC && ops->signaled) {
+            bool met = ops->signaled(r->user, e->x[1]);
+            if (ops->note)
+                ops->note(r->user, e, r->pos, 0, met);
+            if (!met) {
+                *blocked = true;
+                return RL_OK;
+            }
         } else {
             if (ops->note)
                 ops->note(r->user, e, r->pos, 0, true);
@@ -184,6 +200,8 @@ int nvn_sched_pump(nvn_sched *s, const nvn_sched_ops *ops, nvn_sched_run **done)
                     blocked[nblocked++] = r->queue;
                 prev = r;
             } else {
+                if (ops->finished)
+                    ops->finished(r->user);
                 unlink_run(s, prev, r);
                 if (done_tail)
                     done_tail->next = r;

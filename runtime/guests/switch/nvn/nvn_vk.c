@@ -3895,6 +3895,8 @@ void nvn_unlock(void)
 /** @brief A submitted command set being replayed: its replay state and the syncs its fences signal when it finishes. */
 typedef struct vk_run {
     replay r;
+    /** @brief The one command of a run nvn_vk_queue_sync makes (a queue's fence or wait sync). */
+    nvn_cmd own;
 } vk_run;
 
 static nvn_sched sched;
@@ -3936,7 +3938,21 @@ static void sched_note(void *user, const nvn_cmd *e, uint32_t pos, uint32_t valu
 
 static uint32_t *sched_word(void *user, uint64_t addr) { return (uint32_t *)(void *)(((vk_run *)user)->r.mem + addr); }
 
-static const nvn_sched_ops sched_ops = { sched_exec, sched_flush, sched_word, sched_note };
+static bool sched_signaled(void *user, uint64_t sync)
+{
+    (void)user;
+    return nvn_sync_is_signaled(sync);
+}
+
+/** @brief A run finished: its fence syncs are signaled with the batch being recorded, so later waits see them. */
+static void sched_finished(void *user)
+{
+    replay *r = &((vk_run *)user)->r;
+    for (uint32_t i = 0; i < r->nsyncs; i++)
+        nvn_sync_signal_at(r->syncs[i], nvn_vk_submitted() + 1);
+}
+
+static const nvn_sched_ops sched_ops = { sched_exec, sched_flush, sched_word, sched_note, sched_signaled, sched_finished };
 
 /** @brief Signals the fence syncs of the finished runs, frees them, and returns the first stop a pump found. */
 static void finish_runs(nvn_sched_run *done)
@@ -3967,6 +3983,9 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
         nvn_unlock();
         return rc;
     }
+    for (uint32_t i = 0; i < n; i++)
+        if (items[i].e->op == NVN_CMD_FENCE_SYNC)
+            nvn_sync_fenced(items[i].e->x[1]);
     vk_run *u = calloc(1, sizeof *u);
     nvn_gfx *st = state_of(queue);
     if (!u || !st || !nvn_sched_add(&sched, queue, items, n, u)) {
@@ -3987,6 +4006,47 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     tm.run_ns += (uint64_t)(now_ns() - t0);
     tm.runs++;
     nvn_trace('U', (uint64_t)(now_ns() - t0), n, 0);
+    nvn_unlock();
+    if (rc == RL_OK)
+        finish_runs(done);
+    return rc;
+}
+
+int nvn_vk_queue_sync(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t sync, bool wait)
+{
+    if (!up(c))
+        return RL_PENDING;
+    nvn_lock();
+    bool behind = wait ? !nvn_sync_is_signaled(sync) : nvn_sched_queue_busy(&sched, queue);
+    if (!behind) {
+        if (!wait)
+            nvn_sync_signal_at(sync, nvn_vk_submitted() + 1);
+        nvn_unlock();
+        return RL_OK;
+    }
+    vk_run *u = calloc(1, sizeof *u);
+    nvn_sched_item *items = calloc(1, sizeof *items);
+    nvn_gfx *st = state_of(queue);
+    if (!u || !items || !st) {
+        free(u);
+        free(items);
+        nvn_unlock();
+        return nvn_vk_fatal(c, "out of memory queueing a queue's %s", wait ? "wait sync" : "fence sync");
+    }
+    u->own.op = wait ? NVN_CMD_WAIT_SYNC : NVN_CMD_FENCE_SYNC;
+    u->own.x[1] = sync;
+    items[0].e = &u->own;
+    u->r = (replay){ .c = c, .mem = mem, .st = st, .queue = queue };
+    if (!wait)
+        nvn_sync_fenced(sync);
+    if (!nvn_sched_add(&sched, queue, items, 1, u)) {
+        free(u);
+        free(items);
+        nvn_unlock();
+        return nvn_vk_fatal(c, "out of memory queueing a queue's sync");
+    }
+    nvn_sched_run *done = NULL;
+    int rc = nvn_sched_pump(&sched, &sched_ops, &done);
     nvn_unlock();
     if (rc == RL_OK)
         finish_runs(done);

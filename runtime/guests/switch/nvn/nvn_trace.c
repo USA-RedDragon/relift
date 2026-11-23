@@ -128,7 +128,8 @@ uint64_t nvn_trace_order(const char *kind, const char *name, uint64_t queue, uin
         for (uint32_t i = 0; i < n; i++)
             fprintf(ord.f, "%s\"0x%llx\"", i ? "," : "", (unsigned long long)args[i]);
         fprintf(ord.f, "]");
-        if (!strcmp(name, "nvnCommandBufferWaitEvent") || !strcmp(name, "nvnCommandBufferSignalEvent"))
+        if (!strcmp(name, "nvnCommandBufferWaitEvent") || !strcmp(name, "nvnCommandBufferSignalEvent") ||
+            !strcmp(name, "nvnCommandBufferWaitSync"))
             fprintf(ord.f, ",\"value\":%u,\"met\":%d", value, (int)met);
         fprintf(ord.f, "}\n");
     }

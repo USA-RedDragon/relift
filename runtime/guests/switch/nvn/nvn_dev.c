@@ -761,22 +761,27 @@ uint64_t nvnh_nvnQueueSubmitCommands(rl_ctx *c, uint8_t *mem)
 /** @brief nvnQueueFenceSync(NVNqueue *, NVNsync *, NVNsyncCondition, int flags): signaled once the work submitted so far finished. */
 uint64_t nvnh_nvnQueueFenceSync(rl_ctx *c, uint8_t *mem)
 {
-    (void)mem;
     nvn_sync *s = (nvn_sync *)nvn_obj_get(c->x[1], NVN_SYNC);
     if (!s)
         return (uint64_t)rl_guest_fatal(c, "nvn", "nvnQueueFenceSync with 0x%llx, not a sync",
                                         (unsigned long long)c->x[1]);
-    s->seq = nvn_vk_submitted();
-    s->signaled = true;
     nvn_trace_order("queue", "nvnQueueFenceSync", c->x[0], 0, 0, &c->x[1], 3, 0, true);
+    int rc = nvn_vk_queue_sync(c, mem, c->x[0], c->x[1], false);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
     return nvn_ret(c);
 }
 
-/** @brief nvnQueueWaitSync(NVNqueue *, const NVNsync *): NVNboolean. */
+/**
+ * @brief nvnQueueWaitSync(NVNqueue *, const NVNsync *): NVNboolean. The queue's later work waits until the sync is
+ * signaled (by another queue's fence): the replay holds the queue's later submits behind it.
+ */
 uint64_t nvnh_nvnQueueWaitSync(rl_ctx *c, uint8_t *mem)
 {
-    (void)mem;
     nvn_trace_order("queue", "nvnQueueWaitSync", c->x[0], 0, 0, &c->x[1], 1, 0, true);
+    int rc = nvn_vk_queue_sync(c, mem, c->x[0], c->x[1], true);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
     c->x[0] = 1;
     return nvn_ret(c);
 }
@@ -1340,6 +1345,28 @@ void nvn_sync_signal(uint64_t sync)
         s->seq = nvn_vk_submitted();
         s->signaled = true;
     }
+}
+
+void nvn_sync_signal_at(uint64_t sync, uint64_t seq)
+{
+    nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
+    if (s) {
+        s->seq = seq;
+        s->signaled = true;
+    }
+}
+
+void nvn_sync_fenced(uint64_t sync)
+{
+    nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
+    if (s)
+        s->signaled = false;
+}
+
+bool nvn_sync_is_signaled(uint64_t sync)
+{
+    nvn_sync *s = sync ? (nvn_sync *)nvn_obj_get(sync, NVN_SYNC) : NULL;
+    return !s || s->signaled;
 }
 
 /** @brief NVNsyncWaitResult values. */

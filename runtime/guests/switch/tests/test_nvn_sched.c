@@ -33,7 +33,7 @@ static bool fake_flush(void *user)
 
 static uint32_t *fake_word(void *user, uint64_t addr) { return &((fake *)user)->words[addr - 1]; }
 
-static const nvn_sched_ops ops = { fake_exec, fake_flush, fake_word, NULL };
+static const nvn_sched_ops ops = { fake_exec, fake_flush, fake_word, NULL, NULL, NULL };
 
 typedef struct step {
     uint32_t op;
@@ -318,7 +318,7 @@ static void fake_note(void *user, const nvn_cmd *e, uint32_t pos, uint32_t value
  */
 TEST(nvn_sched_notes_each_item_in_replay_order)
 {
-    static const nvn_sched_ops noting = { fake_exec, fake_flush, fake_word, fake_note };
+    static const nvn_sched_ops noting = { fake_exec, fake_flush, fake_word, fake_note, NULL, NULL };
     memset(&g_noted, 0, sizeof g_noted);
     fake f = { 0 };
     nvn_sched sc = { 0 };
@@ -355,4 +355,84 @@ TEST(nvn_sched_notes_each_item_in_replay_order)
     }
     free(sa);
     free(sb);
+}
+
+/** @brief The syncs of the fake: index a + 1 is the sync's address, signaled[a] its state; a run that fences sync a
+ * (an item of op FENCE_SYNC, logged as 100 + a) signals it when the run finishes. */
+static bool g_signaled[4];
+static uint64_t g_fenced[4];
+
+static bool fake_signaled(void *user, uint64_t sync)
+{
+    (void)user;
+    return g_signaled[sync - 1];
+}
+
+static int fake_exec_fence(void *user, const nvn_cmd *e, const nvn_cmdset *s)
+{
+    fake *f = user;
+    if (e->op == NVN_CMD_FENCE_SYNC) {
+        g_fenced[e->x[1] - 1] = (uint64_t)(uintptr_t)f;
+        f->log[f->nlog++] = 100 + e->x[1] - 1;
+        return RL_OK;
+    }
+    return fake_exec(user, e, s);
+}
+
+static void fake_finished(void *user)
+{
+    for (uint32_t i = 0; i < 4; i++)
+        if (g_fenced[i] == (uint64_t)(uintptr_t)user) {
+            g_signaled[i] = true;
+            g_fenced[i] = 0;
+        }
+}
+
+/**
+ * @brief A queue that waits on a sync another queue fences behind an event wait (nvnCommandBufferWaitSync, as a
+ * queue's nvnQueueWaitSync is replayed) holds its later work until that queue's run has finished, even though it was
+ * submitted while that run was still waiting; the console would run it only after the fence.
+ */
+TEST(nvn_sched_a_wait_sync_holds_its_queue_until_the_other_queue_fenced)
+{
+    static const nvn_sched_ops syncing = { fake_exec_fence, fake_flush, fake_word, NULL, fake_signaled, fake_finished };
+    memset(g_signaled, 0, sizeof g_signaled);
+    memset(g_fenced, 0, sizeof g_fenced);
+    fake f = { 0 };
+    nvn_sched sc = { 0 };
+    nvn_sched_run *done = NULL;
+    /* Queue 1: copy (1), wait for event 0 to be 5, then fence sync 0. */
+    step a[] = { { NVN_CMD_BARRIER, 1, 0, 0 }, { NVN_CMD_WAIT_EVENT, 0, NVN_EVENT_WAIT_EQUAL, 5 },
+                 { NVN_CMD_FENCE_SYNC, 0, 0, 0 } };
+    nvn_cmdset *sa = make_set(a, 3);
+    sa->cmds[2].x[1] = 1;
+    submit(&sc, 1, sa, &f);
+    CHECK_EQ(nvn_sched_pump(&sc, &syncing, &done), RL_OK);
+    CHECK(nvn_sched_queue_busy(&sc, 1));
+    /* Queue 2: waits on sync 0, then clears (2). */
+    step b[] = { { NVN_CMD_WAIT_SYNC, 0, 0, 0 }, { NVN_CMD_BARRIER, 2, 0, 0 } };
+    nvn_cmdset *sb = make_set(b, 2);
+    sb->cmds[0].x[1] = 1;
+    submit(&sc, 2, sb, &f);
+    CHECK_EQ(nvn_sched_pump(&sc, &syncing, &done), RL_OK);
+    CHECK_EQ(f.nlog, 1);
+    CHECK(nvn_sched_queue_busy(&sc, 2));
+    /* Queue 3 signals the event: queue 1 goes on and fences, then queue 2 clears, in that order. */
+    step c[] = { { NVN_CMD_SIGNAL_EVENT, 0, NVN_EVENT_SIGNAL_WRITE, 5 } };
+    nvn_cmdset *scs = make_set(c, 1);
+    submit(&sc, 3, scs, &f);
+    CHECK_EQ(nvn_sched_pump(&sc, &syncing, &done), RL_OK);
+    CHECK_EQ(sc.pending, 0);
+    CHECK_EQ(f.nlog, 3);
+    CHECK_EQ(f.log[0], 1);
+    CHECK_EQ(f.log[1], 100);
+    CHECK_EQ(f.log[2], 2);
+    while (done) {
+        nvn_sched_run *next = done->next;
+        nvn_sched_run_free(done);
+        done = next;
+    }
+    free(sa);
+    free(sb);
+    free(scs);
 }

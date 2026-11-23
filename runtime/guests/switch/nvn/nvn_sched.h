@@ -58,6 +58,14 @@ typedef struct nvn_sched_ops {
      * time it is checked.
      */
     void (*note)(void *user, const nvn_cmd *e, uint32_t pos, uint32_t value, bool met);
+    /**
+     * @brief Optional: whether sync (an NVNsync) is signaled, for a WAIT_SYNC item (nvnCommandBufferWaitSync, or a
+     * queue's nvnQueueWaitSync queued as a run of its own): the run waits there, holding its queue's later runs, until
+     * it is. Without it WAIT_SYNC items pass.
+     */
+    bool (*signaled)(void *user, uint64_t sync);
+    /** @brief Optional: run user finished its last item; its fence syncs are signaled here, before later waits are checked. */
+    void (*finished)(void *user);
 } nvn_sched_ops;
 
 /**
@@ -65,6 +73,9 @@ typedef struct nvn_sched_ops {
  * place) into *items and *n. Returns 0, or the handle that names no command set in *bad.
  */
 int nvn_sched_flatten(const nvn_cmdset *s, nvn_sched_item **items, uint32_t *n, uint64_t *bad);
+
+/** @brief Whether s holds an unfinished run of queue. */
+bool nvn_sched_queue_busy(const nvn_sched *s, uint64_t queue);
 
 /** @brief Queues a run (items, n, taken over) of queue, behind that queue's earlier runs. */
 bool nvn_sched_add(nvn_sched *s, uint64_t queue, nvn_sched_item *items, uint32_t n, void *user);

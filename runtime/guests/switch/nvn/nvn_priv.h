@@ -119,6 +119,18 @@ void nvn_cmdset_free(uint64_t handle);
 
 /** @brief Marks the sync at guest address sync signaled; 0 does nothing. */
 void nvn_sync_signal(uint64_t sync);
+/** @brief Signals sync as done once the host device finished batch seq. */
+void nvn_sync_signal_at(uint64_t sync, uint64_t seq);
+/** @brief sync was fenced behind work not replayed yet: it is unsignaled until that work finishes. */
+void nvn_sync_fenced(uint64_t sync);
+/** @brief Whether sync is signaled (true for an address that names no sync, which nothing can wait on). */
+bool nvn_sync_is_signaled(uint64_t sync);
+/**
+ * @brief nvnQueueFenceSync and nvnQueueWaitSync on the replay: a fence behind runs of the queue still waiting is
+ * queued as a run of its own and signals once they finished; a wait on a sync not yet signaled holds the queue's
+ * later submits until it is. Returns RL_OK or a stop.
+ */
+int nvn_vk_queue_sync(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t sync, bool wait);
 /** @brief Batches submitted to the host device so far, and the count of them known finished (nvn_vk.c). */
 uint64_t nvn_vk_submitted(void);
 uint64_t nvn_vk_finished(void);
