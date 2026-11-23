@@ -2361,9 +2361,11 @@ static void trace_report(const replay *r, const char *key, uint32_t words)
             uint32_t w[4] = { 0 };
             if (nvn_gpu_mapped(addr, 16))
                 memcpy(w, rl_mem_base() + nvn_gpu_guest(addr), 16);
-            rl_log(RL_LOG_INFO, "gpu-trace", "  compute uniform slot %u (c[%u]): gpu 0x%llx guest 0x%llx size %llu: %08x %08x %08x %08x",
+            char where[512];
+            nvn_gpu_describe(addr, where, sizeof where);
+            rl_log(RL_LOG_INFO, "gpu-trace", "  compute uniform slot %u (c[%u]): gpu 0x%llx guest 0x%llx size %llu: %08x %08x %08x %08x; %s",
                    b, b + 3, (unsigned long long)addr, (unsigned long long)nvn_gpu_guest(addr), (unsigned long long)size,
-                   w[0], w[1], w[2], w[3]);
+                   w[0], w[1], w[2], w[3], where);
         }
     }
     for (uint32_t k = 0; k < slots && shown < 64; k++) {

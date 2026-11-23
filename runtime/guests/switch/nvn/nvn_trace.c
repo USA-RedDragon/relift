@@ -92,6 +92,9 @@ uint64_t nvn_trace_wide_draws;
 
 /** @brief The guest range RELIFT_NVN_TRACE_WATCH names (watch_size 0: none) and the hash of its bytes last seen. */
 static uint64_t watch_at, watch_size, watch_hash;
+/** @brief RELIFT_NVN_TRACE_WATCH_POISON=<hex word>: the word the watched range is filled with at each present (0: off). */
+static uint32_t watch_poison;
+static void watch_look(const char *after);
 
 void nvn_trace_image_gone(const vimg *v)
 {
@@ -306,6 +309,16 @@ void nvn_trace_present(replay *r)
         if (watch_size > BUF_CAP)
             watch_size = BUF_CAP;
         nvn_trace_watching = watch_size != 0;
+        const char *poison = getenv("RELIFT_NVN_TRACE_WATCH_POISON");
+        watch_poison = poison && *poison ? (uint32_t)strtoul(poison, NULL, 16) : 0;
+    }
+    if (watch_size)
+        watch_look("present"); /* a write after the frame's last command and before its present */
+    if (watch_poison && watch_size) {
+        /* every present starts the range as the poison word: a dispatch that reads it shows the game wrote nothing */
+        for (uint64_t i = 0; i + 4 <= watch_size; i += 4)
+            memcpy(rl_mem_base() + watch_at + i, &watch_poison, 4);
+        watch_hash = hash_bytes(rl_mem_base() + watch_at, watch_size);
     }
     if (tr.out) {
         fclose(tr.out);
@@ -353,6 +366,9 @@ static void watch_look(const char *after)
         uint64_t n = watch_size < 64 ? watch_size : 64;
         for (uint64_t i = 0; i < n; i++)
             snprintf(hexs + 2 * i, 3, "%02x", p[i]);
+        static uint32_t logged;
+        if (watch_poison && logged++ > 400)
+            return;
         rl_log(RL_LOG_INFO, "nvn-watch", "present %llu: 0x%llx changed before %s: %s",
                (unsigned long long)g.presents, (unsigned long long)watch_at, after, hexs);
         return;
