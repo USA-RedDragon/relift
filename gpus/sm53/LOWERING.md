@@ -310,9 +310,9 @@ handling in `relift_gpu_nv::translate::pseudo`.
 | VSETP | stop | | no semantic check yet |
 | VSHL | stop | | no semantic check yet |
 | VSHR | stop | | no semantic check yet |
-| XMAD R | stop | | no semantic check yet |
-| XMAD I | stop | | no semantic check yet |
-| XMAD C | stop | | no semantic check yet |
-| XMAD RC | stop | | no semantic check yet |
+| XMAD R | pseudo | XMAD | Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign bits << 16), with MRG the high half replaced by B's low half; XmadRc takes B from SrcC and C from the constant, without PSL and MRG. The translator's XMAD pseudo-instruction computes the same. .X and .CC stop |
+| XMAD I | pseudo | XMAD | Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign bits << 16), with MRG the high half replaced by B's low half; XmadRc takes B from SrcC and C from the constant, without PSL and MRG. The translator's XMAD pseudo-instruction computes the same. .X and .CC stop |
+| XMAD C | pseudo | XMAD | Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign bits << 16), with MRG the high half replaced by B's low half; XmadRc takes B from SrcC and C from the constant, without PSL and MRG. The translator's XMAD pseudo-instruction computes the same. .X and .CC stop |
+| XMAD RC | pseudo | XMAD | Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign bits << 16), with MRG the high half replaced by B's low half; XmadRc takes B from SrcC and C from the constant, without PSL and MRG. The translator's XMAD pseudo-instruction computes the same. .X and .CC stop |
 
-293 forms: 57 exact, 5 exact and pseudo, 3 pseudo, 228 stop.
+293 forms: 57 exact, 5 exact and pseudo, 7 pseudo, 224 stop.

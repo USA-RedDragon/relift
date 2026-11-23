@@ -92,6 +92,17 @@ pub fn row(op: Op, src: Src) -> Row {
                        Ra, B, s is the same sum with the same carry out, into the carry flag's \
                        predicate as for IADD. Negated operands stop",
         },
+        (Op::Xmad, _) => Row::Pseudo {
+            name: "XMAD",
+            evidence: "Ryujinx's EmitXmad: the selected 16-bit halves of A and B (HiloA, HiloB; \
+                       XmadI's Imm16 is B's low half), zero- or sign-extended (ASigned, \
+                       BSigned), multiplied, shifted left 16 with PSL, plus C by the C mode \
+                       (whole, CLO, CHI, CBCC adds B << 16, CSFU subtracts the halves' sign \
+                       bits << 16), with MRG the high half replaced by B's low half; XmadRc \
+                       takes B from SrcC and C from the constant, without PSL and MRG. The \
+                       translator's XMAD pseudo-instruction computes the same. .X and .CC \
+                       stop",
+        },
         (Op::Ldg, _) => Row::Exact {
             to: "LDG",
             evidence: "Ryujinx's EmitLdg loads the words of the size (U8, S8, U16, S16, 32, 64, \

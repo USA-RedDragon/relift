@@ -8,7 +8,7 @@
 
 use relift_gpu_nv::fields::{Fields, Handle, Tex};
 use relift_gpu_nv::translate::pseudo::{
-    I2F_IABS, I2F_INEG, IPA_MUL, IPA_SAT, MUFU_SAT, RRO_EX2, RRO_SINCOS,
+    I2F_IABS, I2F_INEG, IPA_MUL, IPA_SAT, MUFU_SAT, RRO_EX2, RRO_SINCOS, XMAD,
 };
 use relift_gpu_nv::{CBank, Inst as Inst86, Operand, RegMods};
 
@@ -165,6 +165,7 @@ pub fn lower(i: &Inst, f: Option<&Flow>) -> Option<Lowered> {
         (Op::Iadd, _) => iadd(i, f),
         (Op::Iscadd, _) => iscadd(i, f),
         (Op::Ldg, _) => ldg(i),
+        (Op::Xmad, _) => return Some(xmad(i)),
         (Op::Stg, _) => stg(i),
         _ => return None,
     };
@@ -310,6 +311,67 @@ fn iscadd(i: &Inst, fl: Option<&Flow>) -> Res {
     p.ops.push(int_b(i)?);
     p.ops.push(Operand::Hex(f(i, "Imm5")));
     Ok(carry_out(p, out))
+}
+
+/// `XMAD Rd, A, B, C`: the translator's XMAD pseudo-instruction (see
+/// `relift_gpu_nv::translate::pseudo`) with its halves, signs, shift,
+/// merge and C mode as Ryujinx's XmadR, XmadI, XmadC and XmadRc read them
+/// (XmadI's B is Imm16 and its low half, XmadRc's B the register SrcC and
+/// C the constant, without PSL and MRG). `.X` and `.CC` stop.
+fn xmad(i: &Inst) -> Lowered {
+    if f(i, "X") != 0 || f(i, "WriteCC") != 0 {
+        return Lowered::Stop("XMAD with a condition code carry");
+    }
+    let rc = i.enc.src == Src::RegCBuf;
+    let (b, c) = match i.enc.src {
+        Src::Reg => (reg(f(i, "SrcB")), reg(f(i, "SrcC"))),
+        Src::Imm => (Operand::Hex(f(i, "Imm16")), reg(f(i, "SrcC"))),
+        Src::CBuf => match cbuf_of(i, false, false) {
+            Ok(b) => (b, reg(f(i, "SrcC"))),
+            Err(e) => return Lowered::Stop(e),
+        },
+        Src::RegCBuf => match cbuf_of(i, false, false) {
+            Ok(c) => (reg(f(i, "SrcC")), c),
+            Err(e) => return Lowered::Stop(e),
+        },
+        _ => return Lowered::Stop("no SM86 operand form"),
+    };
+    let mode = match f(i, "XmadCop") {
+        0 => "",
+        1 => "CLO",
+        2 => "CHI",
+        3 => "CSFU",
+        4 => "CBCC",
+        _ => return Lowered::Stop("XMAD with an unknown C mode"),
+    };
+    let flag = |n: &str, m: &'static str| if f(i, n) != 0 { m } else { "" };
+    let (psl, mrg) = if rc {
+        ("", "")
+    } else {
+        (flag("Psl", "PSL"), flag("Mrg", "MRG"))
+    };
+    let hb = if i.enc.src == Src::Imm {
+        ""
+    } else {
+        flag("HiloB", "H1B")
+    };
+    let mut p = with(
+        inst(i, XMAD),
+        &[
+            flag("ASigned", "ASIGNED"),
+            flag("BSigned", "BSIGNED"),
+            flag("HiloA", "H1A"),
+            hb,
+            psl,
+            mrg,
+            mode,
+        ],
+    );
+    p.ops.push(reg(f(i, "Dest")));
+    p.ops.push(reg(f(i, "SrcA")));
+    p.ops.push(b);
+    p.ops.push(c);
+    Lowered::Pseudo(p)
 }
 
 /// The SM86 size modifier of a Maxwell global access size: U8, S8, U16,

@@ -275,3 +275,60 @@ fn a_negated_iadd_operand_lowers_without_a_carry() {
         "IADD with a negated operand and a condition code carry"
     );
 }
+
+/// XMAD lowers to the translator's pseudo-instruction with its halves,
+/// signs, shift, merge and C mode, which its known answers check
+/// (`gpus/sm86/tests/kat.rs`); `.CC` stops.
+#[test]
+fn xmad_lowers_to_its_pseudo_instruction() {
+    let x = word(
+        Op::Xmad,
+        Src::Reg,
+        &[
+            ("Dest", 2),
+            ("SrcA", 8),
+            ("SrcB", 9),
+            ("SrcC", 10),
+            ("HiloA", 1),
+            ("Psl", 1),
+            ("XmadCop", 4),
+        ],
+    );
+    let l = relift_gpu_sm53::lower::program(&program(5, &[x])).expect("lowers");
+    assert_eq!(
+        l.code[0].as_ref().unwrap().to_string(),
+        "XMAD.H1A.PSL.CBCC R2, R8, R9, R10"
+    );
+    let rc = word(
+        Op::Xmad,
+        Src::RegCBuf,
+        &[
+            ("Dest", 2),
+            ("SrcA", 8),
+            ("SrcC", 9),
+            ("CbufSlot", 0),
+            ("CbufOffset", 0x40),
+            ("ASigned", 1),
+        ],
+    );
+    let l = relift_gpu_sm53::lower::program(&program(5, &[rc])).expect("lowers");
+    assert_eq!(
+        l.code[0].as_ref().unwrap().to_string(),
+        "XMAD.ASIGNED R2, R8, R9, c[0x0][0x100]"
+    );
+    let cc = word(
+        Op::Xmad,
+        Src::Reg,
+        &[
+            ("Dest", 2),
+            ("SrcA", 8),
+            ("SrcB", 9),
+            ("SrcC", 10),
+            ("WriteCC", 1),
+        ],
+    );
+    assert_eq!(
+        relift_gpu_sm53::lower::stops(&program(5, &[cc]))[0].reason,
+        "XMAD with a condition code carry"
+    );
+}

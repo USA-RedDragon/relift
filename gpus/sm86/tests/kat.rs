@@ -11,7 +11,7 @@ mod file;
 mod spvi;
 
 use common::translate_with;
-use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS};
+use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RRO_SINCOS, XMAD};
 use relift_gpu_nv::translate::{
     Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, HostProfile, Options,
 };
@@ -509,6 +509,100 @@ fn maxwell_i2f_converts_the_integer_abs_and_neg() {
         }
     }
     assert_eq!(checked, 6);
+}
+
+/// Maxwell's `XMAD` as Ryujinx's `EmitXmad` computes it, on 32-bit words.
+fn xmad_ref(a: u32, b: u32, c: u32, m: &[&str]) -> u32 {
+    let has = |x: &str| m.contains(&x);
+    let ext = |v: u32, high: bool, signed: bool| match (high, signed) {
+        (true, true) => ((v as i32) >> 16) as u32,
+        (true, false) => v >> 16,
+        (false, true) => i32::from(v as u16 as i16) as u32,
+        (false, false) => v & 0xffff,
+    };
+    let ea = ext(a, has("H1A"), has("ASIGNED"));
+    let eb = ext(b, has("H1B"), has("BSIGNED"));
+    let mut p = ea.wrapping_mul(eb);
+    if has("PSL") {
+        p <<= 16;
+    }
+    let c = if has("CLO") {
+        c & 0xffff
+    } else if has("CHI") {
+        c >> 16
+    } else if has("CBCC") {
+        c.wrapping_add(b << 16)
+    } else if has("CSFU") {
+        c.wrapping_sub(((ea >> 31) << 16).wrapping_add((eb >> 31) << 16))
+    } else {
+        c
+    };
+    let r = p.wrapping_add(c);
+    if has("MRG") {
+        (r & 0xffff) | (b << 16)
+    } else {
+        r
+    }
+}
+
+/// Maxwell's `XMAD`, the translator's pseudo-instruction in place of the
+/// recorded `IMAD.U32 R12, R4, R5, R6`: on every row and each mode, half,
+/// sign, shift and merge, the module's result equals Ryujinx's `EmitXmad`
+/// computed in Rust.
+#[test]
+fn maxwell_xmad_follows_its_halves_and_modes() {
+    let host = HostProfile::preset("lavapipe").unwrap();
+    let o = Options {
+        host: host.clone(),
+        ..Options::default()
+    };
+    let f = file::load("int");
+    let v = f
+        .variants
+        .iter()
+        .find(|v| v.label == "IMAD")
+        .expect("IMAD recorded");
+    let mut p = relift_gpu_sm86::program::parse(&v.code);
+    let decoded = p.code.clone();
+    let k = decoded
+        .iter()
+        .position(|d| {
+            d.as_ref().is_ok_and(|i| {
+                i.mnemonic == "IMAD" && i.ops.first() == Some(&Operand::Reg(12, RegMods::default()))
+            })
+        })
+        .expect("an IMAD");
+    let imad = decoded[k].clone().unwrap();
+    let cases: &[&[&str]] = &[
+        &[],
+        &["H1A", "H1B"],
+        &["ASIGNED", "BSIGNED"],
+        &["ASIGNED", "H1A", "BSIGNED"],
+        &["PSL", "CLO"],
+        &["CHI", "H1B"],
+        &["CBCC"],
+        &["CSFU", "ASIGNED", "BSIGNED", "H1A"],
+        &["MRG", "PSL", "H1B"],
+    ];
+    for m in cases {
+        let mut i = Inst::new(XMAD);
+        i.mods.extend(m.iter().copied());
+        i.ops = imad.ops[..4].to_vec();
+        p.code[k] = Ok(i);
+        let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{m:?}: {e}"));
+        let module = Module::parse(&s.spirv);
+        for row in &f.rows {
+            let got = exec(
+                &module,
+                (Denorm::Preserve, false),
+                host.canonical_nan,
+                row,
+                v.outs,
+            );
+            let want = xmad_ref(row[0], row[1], row[2], m);
+            assert_eq!(got[0], want, "XMAD {m:?} on {row:08x?}");
+        }
+    }
 }
 
 macro_rules! families {

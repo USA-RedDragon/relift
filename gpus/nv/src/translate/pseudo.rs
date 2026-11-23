@@ -34,6 +34,17 @@ pub const I2F_IABS: &str = "IABS";
 /// integer source (after `IABS` when both are set).
 pub const I2F_INEG: &str = "INEG";
 
+/// Maxwell's `XMAD`, a 16 by 16 bit multiply and a 32-bit add (see
+/// [`xmad`]); its modifiers are [`XMAD_MODS`].
+pub const XMAD: &str = "XMAD";
+
+/// The modifiers of [`XMAD`]: signed A and B halves, the high half of A
+/// and of B, the product shifted left 16 bits, the result's high half
+/// replaced by B's low half, and the C modes (none is the whole C).
+pub const XMAD_MODS: [&str; 10] = [
+    "ASIGNED", "BSIGNED", "H1A", "H1B", "PSL", "MRG", "CLO", "CHI", "CSFU", "CBCC",
+];
+
 /// One turn per radian, `1 / (2 pi)` as a single-precision number.
 const TURNS_PER_RADIAN: u32 = 0x3e22_f983;
 
@@ -50,7 +61,74 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     if i.mnemonic == "I2F" && (i.has(I2F_IABS) || i.has(I2F_INEG)) {
         return Some(i2f(c, i));
     }
+    if i.mnemonic == XMAD {
+        return Some(xmad(c, i));
+    }
     None
+}
+
+/// Maxwell `XMAD Rd, A, B, C` as Ryujinx's `EmitXmad` computes it: the
+/// selected 16-bit halves of A and B, each zero- or sign-extended,
+/// multiplied (wrapping), shifted left 16 bits with `PSL`; plus C, its low
+/// half (`CLO`), its high half (`CHI`), C plus B shifted left 16 (`CBCC`),
+/// or C less the extended halves' sign bits shifted left 16 (`CSFU`); with
+/// `MRG` the result's high half is B's low half. The sources are read
+/// before the destination is written.
+fn xmad(c: &mut Ctx, i: &Inst) -> Res<()> {
+    use crate::spirv::op;
+    for m in &i.mods {
+        if !XMAD_MODS.contains(m) {
+            return bad(format!("XMAD.{m}"));
+        }
+    }
+    if i.ops.len() != 4 {
+        return bad("XMAD form");
+    }
+    let a = c.usrc(&i.ops[1])?;
+    let b = c.usrc(&i.ops[2])?;
+    let cv = c.usrc(&i.ops[3])?;
+    let k16 = c.kc(16);
+    let mask = c.kc(0xffff);
+    let ext = |c: &mut Ctx, v: u32, high: bool, signed: bool| match (high, signed) {
+        (true, true) => c.ib(op::SHIFT_RIGHT_ARITHMETIC, v, k16),
+        (true, false) => c.ib(op::SHIFT_RIGHT_LOGICAL, v, k16),
+        (false, true) => {
+            let up = c.ib(op::SHIFT_LEFT_LOGICAL, v, k16);
+            c.ib(op::SHIFT_RIGHT_ARITHMETIC, up, k16)
+        }
+        (false, false) => c.ib(op::BITWISE_AND, v, mask),
+    };
+    let ea = ext(c, a, i.has("H1A"), i.has("ASIGNED"));
+    let eb = ext(c, b, i.has("H1B"), i.has("BSIGNED"));
+    let mut prod = c.ib(op::I_MUL, ea, eb);
+    if i.has("PSL") {
+        prod = c.ib(op::SHIFT_LEFT_LOGICAL, prod, k16);
+    }
+    let cv = if i.has("CLO") {
+        c.ib(op::BITWISE_AND, cv, mask)
+    } else if i.has("CHI") {
+        c.ib(op::SHIFT_RIGHT_LOGICAL, cv, k16)
+    } else if i.has("CBCC") {
+        let bs = c.ib(op::SHIFT_LEFT_LOGICAL, b, k16);
+        c.ib(op::I_ADD, cv, bs)
+    } else if i.has("CSFU") {
+        let k31 = c.kc(31);
+        let sa = c.ib(op::SHIFT_RIGHT_LOGICAL, ea, k31);
+        let sa = c.ib(op::SHIFT_LEFT_LOGICAL, sa, k16);
+        let sb = c.ib(op::SHIFT_RIGHT_LOGICAL, eb, k31);
+        let sb = c.ib(op::SHIFT_LEFT_LOGICAL, sb, k16);
+        let adj = c.ib(op::I_ADD, sa, sb);
+        c.ib(op::I_SUB, cv, adj)
+    } else {
+        cv
+    };
+    let mut r = c.ib(op::I_ADD, prod, cv);
+    if i.has("MRG") {
+        let lo = c.ib(op::BITWISE_AND, r, mask);
+        let hi = c.ib(op::SHIFT_LEFT_LOGICAL, b, k16);
+        r = c.ib(op::BITWISE_OR, lo, hi);
+    }
+    c.store_dst(&i.ops[0], r)
 }
 
 /// Maxwell `I2F` with an integer `.ABS` or `.NEG` of its source: the SM86

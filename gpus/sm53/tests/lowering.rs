@@ -44,7 +44,7 @@ fn a_program_names_each_form_that_stops_once() {
     let masked = 0x0100_0000_0007_0000u64;
     let mov = masked | 0xf000;
     let exit = 0xe300_0000_0007_000fu64;
-    let unchecked = maxwell(Op::Xmad, Src::Reg, &[]).word;
+    let unchecked = maxwell(Op::Lop, Src::Reg, &[]).word;
     for w in [0u64, masked, mov, masked, unchecked, unchecked, exit, exit] {
         b.extend(w.to_le_bytes());
     }
@@ -55,7 +55,7 @@ fn a_program_names_each_form_that_stops_once() {
         names,
         [
             ("MOV", 8, "MOV32I with a lane mask other than 0xf"),
-            ("XMAD", 40, "no semantic check yet")
+            ("LOP", 40, "no semantic check yet")
         ]
     );
 }
