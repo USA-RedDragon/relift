@@ -480,6 +480,7 @@ static void stage_of(const nvn_pipe_key *k, uint32_t s, stage_key *o)
     o->sample_mask = s == 1 ? k->sample_mask : 0;
     memcpy(o->map, k->spec_map[s], k->nspec[s] * sizeof o->map[0]);
     memcpy(o->val, k->spec[s], k->nspec[s] * sizeof o->val[0]);
+    nvn_spec_sort(&o->nspec, o->map, o->val);
     if (s == 0) {
         o->polygon = k->polygon;
         o->depth_clamp = k->depth_clamp;

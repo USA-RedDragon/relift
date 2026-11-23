@@ -198,6 +198,38 @@ TEST(nvn_pipe_libraries_are_made_once_and_linked_by_every_pipeline)
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
 
+TEST(nvn_pipe_a_fragment_library_is_found_whatever_order_its_constants_come_in)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_draw_layouts());
+    if (!nvn_pipe_uses_libraries())
+        return;
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_key a, b;
+    make_key(&a, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
+    a.nspec[1] = 2;
+    a.spec_map[1][0] = (VkSpecializationMapEntry){ 0x400, 0, 4 };
+    a.spec[1][0] = 8;
+    a.spec_map[1][1] = (VkSpecializationMapEntry){ 0x500, 4, 4 };
+    a.spec[1][1] = 3;
+    b = a;
+    b.spec_map[1][0] = (VkSpecializationMapEntry){ 0x500, 0, 4 };
+    b.spec[1][0] = 3;
+    b.spec_map[1][1] = (VkSpecializationMapEntry){ 0x400, 4, 4 };
+    b.spec[1][1] = 8;
+    uint64_t made0, ns, late, lns, made1;
+    CHECK(nvn_pipe_warm_fragment(&a));
+    nvn_pipe_stats(&made0, &ns, &late, &lns);
+    CHECK(nvn_pipe_warm_fragment(&b));
+    nvn_pipe_stats(&made1, &ns, &late, &lns);
+    CHECK_EQ(made1 - made0, 0u);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+}
+
 TEST(nvn_pipe_a_pipeline_with_a_geometry_program_is_made_whole_once)
 {
     nvn_probes probes;
