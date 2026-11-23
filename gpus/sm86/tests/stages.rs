@@ -1,3 +1,5 @@
+mod common;
+
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::{
     GsInput, Options, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing, translate,
@@ -632,4 +634,21 @@ fn vertex_attributes_read_integers_from_scaled_formats() {
             .any(|(o, a)| *o == 72 && a.get(2) == Some(&35) && a.get(3) == Some(&8)),
         "the unsigned mask at push offset 8"
     );
+}
+
+/// Trace mode and debug info work in vertex and fragment programs too: the
+/// modules validate and write a trace buffer.
+#[test]
+fn trace_mode_and_debug_info_in_graphics_stages() {
+    for stage in [1, 5] {
+        let p = program(stage, &[], &[fmul(4, 1, 2), fadd(5, 4, 3)]);
+        let o = Options {
+            trace: Some(relift_gpu_nv::translate::Trace::parse("nan,inf").unwrap()),
+            debug_info: true,
+            ..Options::default()
+        };
+        let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("stage {stage}: {e}"));
+        common::validate(&s.spirv);
+        assert_eq!(s.interface.trace_words, 16 + 16 * 5, "stage {stage}");
+    }
 }

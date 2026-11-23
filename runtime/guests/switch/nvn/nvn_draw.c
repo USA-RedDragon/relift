@@ -226,11 +226,23 @@ static bool layouts(void)
             return false;
     if (!(d.set_layout[2] = nvn_texset_layout()))
         return false;
-    d.set_layout[3] = nvn_empty_layout();
+    const char *gpu_trace = getenv("RELIFT_NVN_GPU_TRACE");
+    if (gpu_trace && *gpu_trace && strcmp(gpu_trace, "0")) {
+        VkDescriptorSetLayoutBinding tb = { NVN_TRACE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                                            VK_SHADER_STAGE_ALL, NULL };
+        VkDescriptorSetLayoutCreateInfo ti = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                               .bindingCount = 1,
+                                               .pBindings = &tb };
+        if (VK(vkCreateDescriptorSetLayout)(g.dev, &ti, NULL, &d.tset_layout) != VK_SUCCESS)
+            return false;
+        d.trace_on = true;
+    }
+    /* set 3: the trace buffer in a GPU trace, else the empty set before the pools */
+    d.set_layout[3] = d.trace_on ? d.tset_layout : nvn_empty_layout();
     d.set_layout[4] = nvn_pools_layout();
     VkPushConstantRange fixed = { FIXED_STAGES, 0, sizeof(fixed_push) };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                       .setLayoutCount = d.set_layout[3] && d.set_layout[4] ? 5 : 3,
+                                       .setLayoutCount = d.set_layout[3] && d.set_layout[4] ? 5 : d.trace_on ? 4 : 3,
                                        .pSetLayouts = d.set_layout,
                                        .pushConstantRangeCount = 1,
                                        .pPushConstantRanges = &fixed };
@@ -1528,6 +1540,10 @@ static int geometry_draw(replay *r, const module *gs, uint32_t mode)
 }
 
 static void count_command(void);
+static bool trace_buffer(void);
+static void trace_report(const replay *r, const char *key, uint32_t words);
+/** @brief Bytes of the GPU trace buffer: room for a program of 16383 instructions. */
+#define TRACE_BUF_BYTES (4u * (16u + 16u * 16384u))
 
 /** @brief A draw: mode, then indexed (index type, index address, base vertex) or not (first vertex), and count. */
 static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t iaddr, int32_t base, uint32_t first,
@@ -1600,6 +1616,23 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     for (uint32_t s = 0; s < 5; s++)
         program_keys[s] = mods[s] ? mods[s]->key : NULL;
     nvn_pipe_record_graphics(program_keys, &k);
+    /* GPU trace: one traced stage per draw (the stages would share the buffer's slots) */
+    const module *traced = NULL;
+    for (uint32_t s = 0; s < 5; s++)
+        if (mods[s] && mods[s]->trace_words) {
+            if (traced)
+                return nvn_vk_stop(r, "draw with two trace-mode programs (%s, %s): trace one stage per draw",
+                                   traced->key, mods[s]->key);
+            if (s > 1 || !d.trace_on || mods[s]->trace_words * 4u > TRACE_BUF_BYTES)
+                return nvn_vk_stop(r, "program %s is a trace-mode translation: run with RELIFT_NVN_GPU_TRACE=1 "
+                                   "(vertex, fragment and compute programs of up to %u words)", mods[s]->key,
+                                   TRACE_BUF_BYTES / 4u);
+            traced = mods[s];
+        }
+    if (traced && (!trace_buffer() || !nvn_vk_flush(r)))
+        return nvn_vk_stop(r, "cannot make or clear the GPU trace buffer");
+    if (traced)
+        memset(d.tbuf.map, 0, 4u * traced->trace_words);
     draw_data dd = { .k = &k, .mods = mods, .indexed = indexed, .itype = itype, .first = first, .count = count,
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
@@ -1623,6 +1656,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     nvn_pipe_set_dynamic(g.cb, &k);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
+    if (traced)
+        VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, NVN_TRACE_SET, 1, &d.tset, 0, NULL);
     VK(vkCmdPushConstants)(g.cb, d.layout, FIXED_STAGES, 0, sizeof fp, &fp);
     dynamic_state(r, area);
     for (uint32_t i = 0; i < dd.nb; i++)
@@ -1638,6 +1673,11 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
     nvn_counters_end(counted);
+    if (traced) {
+        if (!nvn_vk_flush(r))
+            return nvn_vk_stop(r, "the host device failed the traced draw of %s", traced->key);
+        trace_report(r, traced->key, traced->trace_words);
+    }
     if (nvn_trace_active) {
         nvn_trace_cmd tc = { .mode = mode, .itype = itype, .first = first, .count = count, .base = base, .indexed = indexed };
         for (uint32_t s = 0; s < 5; s++)
@@ -1990,17 +2030,6 @@ static bool compute_layouts(void)
     db[DRIVER_BINDINGS + NVN_STORAGE_SLOTS] = (VkDescriptorSetLayoutBinding){
         NVN_COMPUTE_BASE_TABLE_BINDING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL
     };
-    const char *gpu_trace = getenv("RELIFT_NVN_GPU_TRACE");
-    if (gpu_trace && *gpu_trace && strcmp(gpu_trace, "0")) {
-        VkDescriptorSetLayoutBinding tb = { NVN_TRACE_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-                                            VK_SHADER_STAGE_COMPUTE_BIT, NULL };
-        VkDescriptorSetLayoutCreateInfo ti = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                               .bindingCount = 1,
-                                               .pBindings = &tb };
-        if (VK(vkCreateDescriptorSetLayout)(g.dev, &ti, NULL, &d.tset_layout) != VK_SUCCESS)
-            return false;
-        d.trace_on = true;
-    }
     VkDescriptorSetLayoutCreateInfo li[2] = {
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = USER_BINDINGS, .pBindings = ub },
         { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -2011,7 +2040,7 @@ static bool compute_layouts(void)
         if (VK(vkCreateDescriptorSetLayout)(g.dev, &li[i], NULL, &d.cset_layout[i]) != VK_SUCCESS)
             return false;
     d.cset_layout[2] = d.set_layout[2];
-    d.cset_layout[3] = d.trace_on ? d.tset_layout : d.set_layout[3];
+    d.cset_layout[3] = d.set_layout[3];
     d.cset_layout[4] = d.set_layout[4];
     VkPushConstantRange pages = { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(fixed_push) };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -2246,9 +2275,6 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
  * 0x80 and its handle at 0xf0 (the offsets its translation reads them at).
  * The workgroup size comes from the control section (0x58, 0x5c, 0x60).
  */
-/** @brief Bytes of the GPU trace buffer: room for a program of 16383 instructions. */
-#define TRACE_BUF_BYTES (4u * (16u + 16u * 16384u))
-
 /** @brief The GPU trace buffer and its set, made at the first traced dispatch. */
 static bool trace_buffer(void)
 {
