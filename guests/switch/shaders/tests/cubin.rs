@@ -80,6 +80,11 @@ fn rela(off: u64, sym: u64, kind: u64, addend: i64) -> Vec<u8> {
 
 /// A cubin for `sm` with kernel `k` and function `f`.
 fn elf(sm: u32) -> Vec<u8> {
+    elf_with(sm, true)
+}
+
+/// The test cubin, with or without the kernel's `.nv.info.k` attributes.
+fn elf_with(sm: u32, info: bool) -> Vec<u8> {
     let (k, f) = sections();
     let strtab = b"\0k\0f\0ext\0".to_vec();
     let mut symtab = sym(0, 0, 0, 0);
@@ -152,6 +157,18 @@ fn elf(sm: u32) -> Vec<u8> {
             entsize: 24,
         },
     ];
+    if info {
+        secs.push(Sec {
+            name: ".nv.info.k",
+            kind: 0x7000_0000,
+            flags: 0,
+            data: vec![0x04, 0x2f, 0x08, 0x00, 0x03, 0, 0, 0, 0, 0, 0, 0],
+            link: 3,
+            info: 4,
+            align: 4,
+            entsize: 0,
+        });
+    }
     let mut shstr = vec![0u8];
     let mut names = Vec::new();
     for s in &secs {
@@ -234,6 +251,16 @@ fn kernel_is_linked_with_its_callee() {
     assert_eq!(k.unresolved, vec!["ext".to_string()]);
     assert_eq!(k.code, linked());
     assert!(found.covers(&(0..e.len())));
+}
+
+#[test]
+fn an_entry_without_its_own_attributes_is_no_kernel() {
+    // The driver's trap handler and its other entry points are marked as
+    // entries but have no .nv.info.<name>: no launch starts them.
+    let (_, kernels, _) = cubin::cubin(&elf_with(86, false)).unwrap();
+    assert!(kernels.is_empty());
+    let (_, kernels, _) = cubin::cubin(&elf_with(86, true)).unwrap();
+    assert_eq!(kernels.len(), 1);
 }
 
 #[test]

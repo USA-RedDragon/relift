@@ -5,8 +5,13 @@
 //! fills each absolute code address (a `CALL.ABS` target, a return address
 //! moved into a register) through a relocation at load time, so carving
 //! its bytes gives one fragment per function with unrelocated targets.
-//! Instead each kernel (a function symbol marked as an entry) becomes one
-//! program: its section at address 0, then every code section its code
+//! Instead each kernel becomes one program: a function symbol marked as an
+//! entry that has its own `.nv.info.<name>` attributes, which a launch
+//! reads. The driver's own entry points the CUDA library carries in cubins
+//! (its trap handler, `generic_entry`, `entry_exit`, `cg_entry`,
+//! `tex_entry`, the continuation handlers and the syscall stubs) are marked
+//! as entries too but have no attributes and no parameter bank: no launch
+//! starts them, and they are not programs. A kernel is its section at address 0, then every code section its code
 //! reaches through relocations and every one whose address loaded data
 //! holds (function pointer tables), each at its alignment, with every
 //! relocation into that layout applied. References to anything else (undefined symbols the
@@ -210,6 +215,13 @@ impl<'a> Elf<'a> {
         } else {
             flags & 0xFF
         }
+    }
+
+    /// Whether a section is named `name`.
+    fn has_section(&self, name: &str) -> bool {
+        self.sections
+            .iter()
+            .any(|s| self.cstr(self.shstr + s.name as usize) == name)
     }
 
     fn cstr(&self, at: usize) -> String {
@@ -469,6 +481,7 @@ pub fn cubin(b: &[u8]) -> Option<(u32, Vec<Kernel>, usize)> {
             if k.info & 0xF == STT_FUNC
                 && k.other & STO_CUDA_ENTRY != 0
                 && elf.is_code(k.shndx as usize)
+                && elf.has_section(&format!(".nv.info.{}", sym_name(&elf, t, k)))
             {
                 let mut kernel = link(&elf, &rels, &taken, t, &syms, k);
                 kernel.externs.clone_from(&externs);
