@@ -312,12 +312,13 @@ impl Device for Android {
 
     fn open_up(&self) -> Result<Vec<String>, BoxError> {
         run(
-            self.adb().args(["shell", &android_open_command(&self.dir)]),
+            self.adb()
+                .args(["shell", &android_open_command(&self.dir, &self.package)]),
             "adb shell chmod",
         )?;
         let out = run(
             self.adb()
-                .args(["shell", &android_closed_command(&self.dir)]),
+                .args(["shell", &android_closed_command(&self.dir, &self.package)]),
             "adb shell find",
         )?;
         Ok(android_names(
@@ -371,14 +372,28 @@ fn android_sizes_command(dir: &str) -> String {
     )
 }
 
-/// The device command that gives the app (the owner of `dir`) its data:
-/// as root (a rooted device's adbd), every data file and folder another user
-/// owns is handed to the app's user and group, as the app cannot enter a
-/// folder root made there even when it is open to all; otherwise every data
-/// folder the app does not own and that is not yet open is opened to all.
-fn android_open_command(dir: &str) -> String {
+/// The shell words that set `u` and `g` to the user and group the app
+/// `package` keeps its external files under: its user from the package
+/// manager (the folder `dir` itself may be root's, when a push made it
+/// before the app's first start), else the owner of `dir`; the group of the
+/// app's own folder above `dir`, which the system made.
+fn android_owner(dir: &str, package: &str) -> String {
     format!(
-        "u=$(stat -c %u '{dir}') && g=$(stat -c %g '{dir}') || exit 1; for r in {}; do [ -e \"$r\" ] || continue; if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" -print0 | xargs -0 -r chown \"$u:$g\" || exit 1; fi; [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 -print0 | xargs -0 -r chmod a+rx || exit 1; done",
+        "u=$(pm list packages -U '{package}' | sed -n 's/^package:{package} uid:\\([0-9]*\\).*/\\1/p' | head -n 1); \
+         [ -n \"$u\" ] || u=$(stat -c %u '{dir}') || exit 1; g=$(stat -c %g '{dir}/..') || exit 1"
+    )
+}
+
+/// The device command that gives the app `package` its data: as root (a
+/// rooted device's adbd), `dir` and every data file and folder another user
+/// owns are handed to the app's user and group (see [`android_owner`]), as
+/// the app cannot enter a folder root made there even when it is open to
+/// all; otherwise every data folder the app does not own and that is not
+/// yet open is opened to all.
+fn android_open_command(dir: &str, package: &str) -> String {
+    format!(
+        "{}; if [ \"$(id -u)\" = 0 ] && [ \"$(stat -c %u '{dir}')\" != \"$u\" ]; then chown \"$u:$g\" '{dir}' || exit 1; fi; for r in {}; do [ -e \"$r\" ] || continue; if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" -print0 | xargs -0 -r chown \"$u:$g\" || exit 1; fi; [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 -print0 | xargs -0 -r chmod a+rx || exit 1; done",
+        android_owner(dir, package),
         android_roots(dir)
     )
 }
@@ -386,9 +401,10 @@ fn android_open_command(dir: &str) -> String {
 /// The device command that prints the data the app still cannot use: as
 /// root, anything another user owns; otherwise folders owned by another
 /// user and closed to others.
-fn android_closed_command(dir: &str) -> String {
+fn android_closed_command(dir: &str, package: &str) -> String {
     format!(
-        "u=$(stat -c %u '{dir}') || exit 1; for r in {}; do [ -e \"$r\" ] || continue; if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" || exit 1; elif [ -d \"$r\" ]; then find \"$r\" -type d ! -user \"$u\" ! -perm -005 || exit 1; fi; done",
+        "{}; for r in {}; do [ -e \"$r\" ] || continue; if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" || exit 1; elif [ -d \"$r\" ]; then find \"$r\" -type d ! -user \"$u\" ! -perm -005 || exit 1; fi; done",
+        android_owner(dir, package),
         android_roots(dir)
     )
 }
@@ -764,18 +780,30 @@ mod tests {
     #[test]
     fn android_open_up_only_touches_folders_the_app_does_not_own() {
         for cmd in [
-            android_open_command("/sdcard/x/files"),
-            android_closed_command("/sdcard/x/files"),
+            android_open_command("/sdcard/x/files", "dev.x"),
+            android_closed_command("/sdcard/x/files", "dev.x"),
         ] {
             assert!(
-                cmd.starts_with("u=$(stat -c %u '/sdcard/x/files')"),
+                cmd.starts_with("u=$(pm list packages -U 'dev.x' | sed -n 's/^package:dev.x uid:"),
+                "the app's user comes from the package manager: {cmd}"
+            );
+            assert!(
+                cmd.contains("[ -n \"$u\" ] || u=$(stat -c %u '/sdcard/x/files')"),
+                "{cmd}"
+            );
+            assert!(
+                cmd.contains("g=$(stat -c %g '/sdcard/x/files/..')"),
                 "{cmd}"
             );
             assert!(cmd.contains("-type d ! -user \"$u\" ! -perm -005"), "{cmd}");
             assert!(!cmd.contains("-exec"), "{cmd}");
         }
-        assert!(android_open_command("/d").contains("xargs -0 -r chmod a+rx"));
-        let open = android_open_command("/d");
+        assert!(android_open_command("/d", "p").contains("xargs -0 -r chmod a+rx"));
+        let open = android_open_command("/d", "p");
+        assert!(
+            open.contains("[ \"$(stat -c %u '/d')\" != \"$u\" ]; then chown \"$u:$g\" '/d'"),
+            "a files folder a push made before the app's first start is handed over too: {open}"
+        );
         let root = open
             .find("if [ \"$(id -u)\" = 0 ]")
             .expect("a root shell hands the data over");
@@ -786,8 +814,8 @@ mod tests {
             root < chown && chown < open.find("chmod a+rx").unwrap(),
             "{open}"
         );
-        assert!(open.contains("g=$(stat -c %g '/d')"), "{open}");
-        let closed = android_closed_command("/d");
+        assert!(open.contains("g=$(stat -c %g '/d/..')"), "{open}");
+        let closed = android_closed_command("/d", "p");
         assert!(
             closed.contains("if [ \"$(id -u)\" = 0 ]; then find \"$r\" ! -user \"$u\" ||"),
             "as root anything another user owns is closed to the app: {closed}"
