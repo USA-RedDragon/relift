@@ -294,9 +294,8 @@ fn callee_of(i: &crate::Inst, end: usize) -> Res<usize> {
 
 /// Instruction-level successors, with each BRX going only to the
 /// instruction after it and each CALL to its target and its return point.
-fn plain_succs(code: &Code, end: usize, k: usize) -> Vec<usize> {
+fn plain_succs(code: &Code, end: usize, k: usize) -> impl Iterator<Item = usize> {
     let i = &code.insts[k];
-    let mut v = Vec::new();
     let t = match i.mnemonic {
         "BRA" => bra_target(i, end).ok(),
         "JMP" => calls::jmp_target(i, end).ok(),
@@ -306,12 +305,8 @@ fn plain_succs(code: &Code, end: usize, k: usize) -> Vec<usize> {
         },
         _ => None,
     };
-    v.extend(t);
-    if i.mnemonic == "BRX" || !no_fall(i) {
-        v.push(k + 1);
-    }
-    v.retain(|t| *t < end);
-    v
+    let fall = (i.mnemonic == "BRX" || !no_fall(i)).then_some(k + 1);
+    t.into_iter().chain(fall).filter(move |t| *t < end)
 }
 
 /// The cases of every BRX: the instruction after it and each instruction

@@ -511,6 +511,24 @@ pub(super) fn written_regs(i: &Inst) -> Vec<u8> {
         .collect()
 }
 
+/// The registers, uniform registers, predicates and uniform predicates an
+/// instruction writes or may write (see [`defs`]), without RZ, URZ, PT and
+/// UPT, in the order [`defs`] gives them.
+pub(super) fn written_by_file(i: &Inst) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let (certain, maybe) = defs(i);
+    let mut out = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for l in certain.into_iter().chain(maybe) {
+        match l {
+            Loc::R(n) if n != 255 => out.0.push(n),
+            Loc::Ur(n) if n != 63 => out.1.push(n),
+            Loc::P(n) if n != 7 => out.2.push(n),
+            Loc::Up(n) if n != 7 => out.3.push(n),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The predicates an instruction writes or may write (see [`defs`]).
 pub(super) fn written_preds(i: &Inst) -> Vec<u8> {
     let (certain, maybe) = defs(i);
@@ -831,6 +849,8 @@ pub(crate) struct Plan {
 
 struct Walk<'a> {
     insts: &'a [Inst],
+    /// What each instruction writes ([`defs`]), worked out once.
+    defs: &'a [(Vec<Loc>, Vec<Loc>)],
     readonly: bool,
     /// The instructions of the block being stepped, up to the current one.
     block: std::ops::Range<usize>,
@@ -1127,7 +1147,8 @@ impl Walk<'_> {
     fn step(&mut self, s: &mut St, k: usize) {
         let i = &self.insts[k];
         let mut writes: Vec<(Loc, Cls)> = Vec::new();
-        let (exact, maybe) = defs(i);
+        let all = self.defs;
+        let (exact, maybe) = &all[k];
         let g = i.guard.as_ref().map_or(Cls::U, |g| cls(s, g));
         let under = match &i.guard {
             Some(o @ (Operand::Pred(_, neg) | Operand::UPred(_, neg))) => {
@@ -1167,7 +1188,7 @@ impl Walk<'_> {
             Some(v) => v,
             None => {
                 self.failed = true;
-                exact.iter().chain(&maybe).map(|&l| (l, Cls::Bad)).collect()
+                exact.iter().chain(maybe).map(|&l| (l, Cls::Bad)).collect()
             }
         };
         let readonly = self.readonly;
@@ -1374,13 +1395,14 @@ pub(crate) fn plan(code: &Code, outputs: &[u8]) -> Plan {
         .map(|b| b.succs.iter().map(|t| t.unwrap_or(n)).collect())
         .collect();
     let ip = ipdoms(&succ);
+    let all: Vec<(Vec<Loc>, Vec<Loc>)> = insts.iter().map(defs).collect();
     let defs: Vec<Set> = blocks
         .iter()
         .map(|b| {
             let mut d = Set::default();
             for k in b.insts.clone() {
-                let (e, m) = defs(&insts[k]);
-                for l in e.into_iter().chain(m) {
+                let (e, m) = &all[k];
+                for &l in e.iter().chain(m) {
                     d.add(l);
                 }
             }
@@ -1415,6 +1437,7 @@ pub(crate) fn plan(code: &Code, outputs: &[u8]) -> Plan {
         }
         let mut w = Walk {
             insts,
+            defs: &all,
             readonly: !insts.iter().any(|i| writes_memory(i.mnemonic)),
             block: 0..0,
             failed: bail,

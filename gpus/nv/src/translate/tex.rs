@@ -635,49 +635,29 @@ impl Prep {
     pub(crate) fn new(code: &Code) -> Prep {
         let insts = &code.insts;
         let n = insts.len();
+        let (mut writes, mut uwrites, mut pwrites, mut upwrites) = (
+            Vec::with_capacity(n),
+            Vec::with_capacity(n),
+            Vec::with_capacity(n),
+            Vec::with_capacity(n),
+        );
+        for i in insts {
+            let (r, u, pr, up) = uniform::written_by_file(i);
+            writes.push(r);
+            uwrites.push(u);
+            pwrites.push(pr);
+            upwrites.push(up);
+        }
         let mut p = Prep {
+            writes,
+            uwrites,
+            pwrites,
+            upwrites,
             starts: vec![false; n + 1],
             imm: vec![None; n],
-            writes: insts.iter().map(uniform::written_regs).collect(),
-            uwrites: insts
-                .iter()
-                .map(|i| {
-                    uniform::written_locs(i)
-                        .into_iter()
-                        .filter_map(|l| match l {
-                            uniform::Loc::Ur(n) if n != 63 => Some(n),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .collect(),
             loads: insts.iter().map(cbuf_load).collect(),
-            pwrites: insts
-                .iter()
-                .map(|i| {
-                    uniform::written_locs(i)
-                        .into_iter()
-                        .filter_map(|l| match l {
-                            uniform::Loc::P(n) if n != 7 => Some(n),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .collect(),
             base_words: insts.iter().map(base_word).collect(),
             prev: (0..n).collect(),
-            upwrites: insts
-                .iter()
-                .map(|i| {
-                    uniform::written_locs(i)
-                        .into_iter()
-                        .filter_map(|l| match l {
-                            uniform::Loc::Up(n) if n != 7 => Some(n),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .collect(),
             uadds: insts.iter().map(uadd).collect(),
             preds: successors(code).map(|s| {
                 let mut p = vec![Vec::new(); n];

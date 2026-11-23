@@ -191,6 +191,9 @@ pub struct Module {
     pub types: Vec<u32>,
     pub body: Vec<u32>,
     cache: HashMap<Vec<u32>, u32>,
+    /// The key [`Module::ty`] and [`Module::konst`] look up, kept so a
+    /// lookup that hits allocates nothing.
+    key: Vec<u32>,
     vars: Option<Vars>,
     /// The label of the block being emitted (see [`Module::block`]).
     block: u32,
@@ -221,6 +224,13 @@ pub fn inst(out: &mut Vec<u32>, opcode: u16, args: &[u32]) {
     out.extend_from_slice(args);
 }
 
+/// [`inst`] with the operands `head` then `args`.
+fn inst2(out: &mut Vec<u32>, opcode: u16, head: &[u32], args: &[u32]) {
+    out.push((((head.len() + args.len()) as u32 + 1) << 16) | u32::from(opcode));
+    out.extend_from_slice(head);
+    out.extend_from_slice(args);
+}
+
 pub fn str_words(s: &str) -> Vec<u32> {
     let mut b = s.as_bytes().to_vec();
     b.push(0);
@@ -246,35 +256,47 @@ impl Module {
         i
     }
 
+    /// The id cached for the declaration `key` then `args`, or a new id
+    /// that [`Module::cached`] gives with the declaration's operands.
+    fn cached(&mut self, key: &[u32], args: &[u32]) -> Result<u32, u32> {
+        let mut k = std::mem::take(&mut self.key);
+        k.clear();
+        k.extend_from_slice(key);
+        k.extend_from_slice(args);
+        let hit = self.cache.get(k.as_slice()).copied();
+        let r = match hit {
+            Some(i) => Ok(i),
+            None => {
+                let i = self.id();
+                self.cache.insert(k.clone(), i);
+                Err(i)
+            }
+        };
+        self.key = k;
+        r
+    }
+
     fn ty(&mut self, opcode: u16, args: &[u32]) -> u32 {
-        let mut key = vec![u32::from(opcode)];
-        key.extend_from_slice(args);
-        if let Some(&i) = self.cache.get(&key) {
-            return i;
+        match self.cached(&[u32::from(opcode)], args) {
+            Ok(i) => i,
+            Err(i) => {
+                inst2(&mut self.types, opcode, &[i], args);
+                i
+            }
         }
-        let i = self.id();
-        let mut a = vec![i];
-        a.extend_from_slice(args);
-        inst(&mut self.types, opcode, &a);
-        self.cache.insert(key, i);
-        i
     }
 
     fn konst(&mut self, opcode: u16, ty: u32, args: &[u32]) -> u32 {
-        let mut key = vec![u32::from(opcode), ty];
-        key.extend_from_slice(args);
-        if let Some(&i) = self.cache.get(&key) {
-            return i;
+        match self.cached(&[u32::from(opcode), ty], args) {
+            Ok(i) => i,
+            Err(i) => {
+                inst2(&mut self.types, opcode, &[ty, i], args);
+                if opcode == op::CONSTANT && args.len() == 1 {
+                    self.consts32.insert(i, args[0]);
+                }
+                i
+            }
         }
-        let i = self.id();
-        let mut a = vec![ty, i];
-        a.extend_from_slice(args);
-        inst(&mut self.types, opcode, &a);
-        self.cache.insert(key, i);
-        if opcode == op::CONSTANT && args.len() == 1 {
-            self.consts32.insert(i, args[0]);
-        }
-        i
     }
 
     /// The bits of a 32-bit `OpConstant` made by this module, or none for
@@ -443,9 +465,7 @@ impl Module {
             v.carried = false;
         }
         let i = self.id();
-        let mut a = vec![ty, i];
-        a.extend_from_slice(args);
-        inst(&mut self.body, opcode, &a);
+        inst2(&mut self.body, opcode, &[ty, i], args);
         i
     }
 
