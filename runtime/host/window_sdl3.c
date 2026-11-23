@@ -29,13 +29,12 @@
 #endif
 
 #include "core.h"
+#include "hostlib.h"
 #include "present.h"
 
 #ifdef __ANDROID__
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <vulkan/vulkan.h>
-
-#include "hostlib.h"
 #endif
 
 #include <SDL3/SDL.h>
@@ -540,9 +539,32 @@ static bool wu_event(const SDL_Event *e)
     }
 }
 
+/**
+ * @brief Under RenderDoc on Linux, asks SDL for its X11 driver: RenderDoc's Vulkan layer hides
+ * VK_KHR_wayland_surface, so a Wayland window gets no swapchain and every frame is copied through host memory. The
+ * layer is on when ENABLE_VULKAN_RENDERDOC_CAPTURE is 1 (its enable variable) or when RenderDoc's library is
+ * already in the process (renderdoccmd and qrenderdoc inject it). A user's own SDL_VIDEO_DRIVER wins.
+ */
+static void prefer_x11_under_renderdoc(void)
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+    static const char *const rd[] = { "librenderdoc.so", NULL };
+    const char *layer = getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
+    const char *display = getenv("DISPLAY");
+    if (getenv("SDL_VIDEO_DRIVER") || !display || !*display)
+        return;
+    if ((layer && strcmp(layer, "1") == 0) || rl_hostlib_loaded(rd)) {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
+        rl_log(RL_LOG_INFO, "window", "RenderDoc's layer is on: using X11 (%s), as the layer has no Wayland surfaces",
+               display);
+    }
+#endif
+}
+
 static int sdl_init(void)
 {
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    prefer_x11_under_renderdoc();
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     /* SDL's Android wait re-pushes the poll sentinel on every pump, and each push wakes the wait at once: with
