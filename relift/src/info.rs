@@ -259,7 +259,7 @@ fn decode_hex(s: &str) -> Option<[u8; 32]> {
 
 /// The document of a Switch build.
 ///
-/// The identity of a Switch title whose import holds no NACP: the project name as the only title, and the control
+/// The identity of a Switch title whose import holds no NACP: `name` (the package's name record, else the project name) as the only title, and the control
 /// icon when the import has one (a package can carry its icon without its NACP).
 fn no_nacp_identity(title_id: u64, project: &str, icon: Option<&[u8]>) -> Identity {
     let mut id = Identity {
@@ -296,7 +296,18 @@ pub fn switch_document(
     let icon = std::fs::read(import.join("icon.jpg")).ok();
     let mut id = match std::fs::read(import.join("control.nacp")) {
         Ok(n) => identity::from_nacp(&n, title_id, icon.as_deref())?,
-        Err(_) => no_nacp_identity(title_id, project, icon.as_deref()),
+        Err(_) => {
+            let named =
+                std::fs::read_to_string(import.join(relift_switch_formats::import::CONTROL_TITLE))
+                    .ok()
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty());
+            no_nacp_identity(
+                title_id,
+                named.as_deref().unwrap_or(project),
+                icon.as_deref(),
+            )
+        }
     };
     id.default_language = id.first_language();
     id.version = id.version.or_else(|| {

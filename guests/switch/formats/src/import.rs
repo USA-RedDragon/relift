@@ -35,7 +35,9 @@ use crate::bytes::sha256;
 use crate::error::{Error, Result, malformed};
 use crate::npdm::Npdm;
 use crate::nso::Nso;
-use crate::nup::{Nup, PackageKind, TLV_DISPLAY_VERSION, TLV_ICON, TLV_NACP, UpdateSelect};
+use crate::nup::{
+    Nup, PackageKind, TLV_DISPLAY_VERSION, TLV_ICON, TLV_NACP, TLV_NAME, UpdateSelect,
+};
 use crate::romfs_image;
 use crate::storage::{FileStorage, Shared, Storage, read_vec};
 
@@ -306,6 +308,13 @@ fn import_nup(
     if let Some(bytes) = control(TLV_DISPLAY_VERSION) {
         control_file(out, CONTROL_VERSION, bytes, &mut report)?;
     }
+    // A package can carry its title name without a NACP: keep the name, so the build does not fall back to the
+    // project folder's name.
+    if control(TLV_NACP).is_none()
+        && let Some(bytes) = control(TLV_NAME)
+    {
+        control_file(out, CONTROL_TITLE, bytes, &mut report)?;
+    }
     on(Event::Begin {
         stage: "exefs",
         files: Some(t.exefs.len() as u64),
@@ -384,6 +393,8 @@ fn import_nup(
 /// The control data of a title, as written beside `exefs/`.
 const CONTROL_NACP: &str = "control.nacp";
 const CONTROL_ICON: &str = "icon.jpg";
+/// The title name of a package that has no NACP, as the package's name record holds it (UTF-8).
+pub const CONTROL_TITLE: &str = "title.txt";
 /// The display version a package's meta block holds, kept when the package has it apart from a NACP.
 const CONTROL_VERSION: &str = "display_version.txt";
 

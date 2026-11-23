@@ -135,6 +135,7 @@ fn ls(n: &Nup, json: bool) -> Result<(), BoxError> {
             "title_id": format!("{:016x}", p.record.title_id),
             "version": p.record.version,
             "display_version": p.display_version(),
+            "meta": p.meta.iter().map(|r| json!({"type": r.ty, "size": r.payload.len(), "text": String::from_utf8_lossy(&r.payload[..r.payload.len().min(40)]).to_string()})).collect::<Vec<_>>(),
             "name": p.name(),
             "publisher": p.publisher(),
             "standalone_update": p.standalone_update(),

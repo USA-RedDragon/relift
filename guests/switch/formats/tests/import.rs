@@ -422,6 +422,40 @@ fn a_package_display_version_reaches_the_import_directory() {
     assert!(!out.join("display_version.txt").exists());
 }
 
+#[test]
+fn a_package_name_without_a_nacp_reaches_the_import_directory() {
+    use relift_switch_formats::nup::{self, BuildPackage, PackageKind, TLV_NACP, TLV_NAME};
+    let d = scratch("import-name");
+    let build = |meta: Vec<(u16, Vec<u8>)>| {
+        nup::build(&[BuildPackage {
+            title_id: PROGRAM_ID,
+            version: 0,
+            kind: PackageKind::Base,
+            standalone: false,
+            files: vec![
+                ("exefs/rtld", b"x".as_slice()),
+                ("romfs/a.txt", b"a".as_slice()),
+            ],
+            empty_dirs: vec![],
+            meta,
+        }])
+    };
+    let name = "Tiny Game \u{2019}s".as_bytes().to_vec();
+    let file = put(&d, "a.nup", &build(vec![(TLV_NAME, name.clone())]));
+    let out = d.join("out");
+    import(&file, &out, &Options::default()).expect("import");
+    assert_eq!(read(out.join("title.txt")), name);
+
+    let file = put(
+        &d,
+        "b.nup",
+        &build(vec![(TLV_NACP, vec![0u8; 0x4000]), (TLV_NAME, name)]),
+    );
+    let out = d.join("out-nacp");
+    import(&file, &out, &Options::default()).expect("import");
+    assert!(!out.join("title.txt").exists(), "a NACP names the title");
+}
+
 fn two_program<'a>(
     id: u64,
     npdm: &'a [u8],
