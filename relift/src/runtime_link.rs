@@ -419,7 +419,7 @@ fn ensure_pinned(
         return Ok(());
     }
     let dest = pinned_dir(cache_root, p);
-    let got = fetch_pinned(p, &dest);
+    let got = fetch_pinned(p, &dest, || found(cache_root));
     if got.is_err() && found(cache_root) {
         return Ok(());
     }
@@ -441,7 +441,11 @@ fn ensure_pinned(
     })
 }
 
-fn fetch_pinned(p: &Pinned, dest: &Path) -> Result<(), String> {
+/// Fetches `p` into a part folder beside `dest` and renames it into place.
+/// A rename that loses to another build of the same source is a success
+/// when `complete` says the tree is whole; a folder left at `dest` that is
+/// not whole (a crash, an older relift) is removed and replaced.
+fn fetch_pinned(p: &Pinned, dest: &Path, complete: impl Fn() -> bool) -> Result<(), String> {
     let dir = dest.parent().ok_or("the source has no folder")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let part = dir.join(format!(".part-{}", crate::appimage_runtime::unique()));
@@ -455,7 +459,19 @@ fn fetch_pinned(p: &Pinned, dest: &Path) -> Result<(), String> {
             ));
         }
         unpack(&tarball, &part)?;
-        std::fs::rename(part.join(p.top), dest).map_err(|e| format!("{}: {e}", dest.display()))
+        let from = part.join(p.top);
+        let mut tries = 0;
+        loop {
+            match std::fs::rename(&from, dest) {
+                Ok(()) => break Ok(()),
+                Err(_) if complete() => break Ok(()),
+                Err(e) if tries >= 3 => break Err(format!("{}: {e}", dest.display())),
+                Err(_) => {
+                    tries += 1;
+                    let _ = std::fs::remove_dir_all(dest);
+                }
+            }
+        }
     })();
     let _ = std::fs::remove_file(&tarball);
     let _ = std::fs::remove_dir_all(&part);
@@ -1236,6 +1252,52 @@ mod tests {
             vec![std::ffi::OsString::from("1.0")],
             "no part is left"
         );
+    }
+
+    #[test]
+    fn two_fetches_of_one_pinned_source_at_once_both_succeed() {
+        let root = scratch("pinned-race");
+        let (p, _) = pinned_tarball(&root);
+        let cache = root.join("cache");
+        for round in 0..8 {
+            let cache = cache.join(round.to_string());
+            let gate = std::sync::Barrier::new(4);
+            std::thread::scope(|s| {
+                let hs: Vec<_> = (0..4)
+                    .map(|_| {
+                        s.spawn(|| {
+                            gate.wait();
+                            ensure_pinned(&cache, &p, |r| {
+                                pinned_dir(r, &p).join("sub/a.c").is_file()
+                            })
+                            .map_err(|e| e.to_string())
+                        })
+                    })
+                    .collect();
+                for h in hs {
+                    h.join().unwrap().unwrap();
+                }
+            });
+            let a = pinned_dir(&cache, &p).join("sub").join("a.c");
+            assert_eq!(std::fs::read_to_string(a).unwrap(), "int a;\n");
+            let left = std::fs::read_dir(pinned_dir(&cache, &p).parent().unwrap())
+                .unwrap()
+                .count();
+            assert_eq!(left, 1, "no part is left");
+        }
+    }
+
+    #[test]
+    fn a_half_written_pinned_folder_is_replaced() {
+        let root = scratch("pinned-half");
+        let (p, _) = pinned_tarball(&root);
+        let cache = root.join("cache");
+        let half = pinned_dir(&cache, &p).join("other");
+        std::fs::create_dir_all(&half).unwrap();
+        relift_cache::write_if_changed(&half.join("x.c"), b"int x;\n").unwrap();
+        ensure_pinned(&cache, &p, |r| pinned_dir(r, &p).join("sub/a.c").is_file()).unwrap();
+        assert!(pinned_dir(&cache, &p).join("sub/a.c").is_file());
+        assert!(!pinned_dir(&cache, &p).join("other").exists());
     }
 
     #[test]

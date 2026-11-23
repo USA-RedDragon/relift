@@ -200,7 +200,15 @@ fn begin(root: &Path, key: &str, cache: &Path, host: &Path) -> Option<Builder> {
             {
                 let to = cache.join(d.file_name());
                 if !to.exists() {
-                    let _ = copy_tree(&d.path(), &to, &[]);
+                    // Into a part folder first, so that the build never sees
+                    // a half-copied tree (a source folder that is there but
+                    // not whole is not fetched again).
+                    let part = to.with_extension(format!("part{}", std::process::id()));
+                    let _ = fs::remove_dir_all(&part);
+                    if copy_tree(&d.path(), &part, &[]).is_ok() {
+                        let _ = fs::rename(&part, &to);
+                    }
+                    let _ = fs::remove_dir_all(&part);
                 }
             }
             return None;
