@@ -58,7 +58,7 @@ static bool write_handle_tables(const char *dir)
     memset(spi, 0, sizeof spi);
     memcpy(spv, "RLSPV002", 8);
     put_le(spv + 8, 2, 4);
-    memcpy(spi, "RLSPI001", 8);
+    memcpy(spi, "RLSPI002", 8);
     put_le(spi + 8, 2, 4);
     for (int e = 0; e < 2; e++) {
         uint8_t *v = spv + 12 + 48 * e, *s = spi + 12 + 40 * e, *rec = spi + 12 + 80 + 16 * e;
@@ -175,7 +175,7 @@ static bool write_one_table(const char *dir, const uint32_t *words, size_t bytes
     memset(spi, 0, sizeof spi);
     memcpy(spv, "RLSPV002", 8);
     put_le(spv + 8, 1, 4);
-    memcpy(spi, "RLSPI001", 8);
+    memcpy(spi, "RLSPI002", 8);
     put_le(spi + 8, 1, 4);
     for (int i = 0; i < 32; i++)
         spv[12 + i] = spi[12 + i] = (uint8_t)(key0 + i);

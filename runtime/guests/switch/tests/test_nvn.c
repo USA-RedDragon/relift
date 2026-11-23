@@ -713,7 +713,7 @@ static bool write_iface_table(const char *dir)
     uint8_t *t = calloc(1, len);
     if (!t)
         return false;
-    memcpy(t, "RLSPI001", 8);
+    memcpy(t, "RLSPI002", 8);
     put_le(t + 8, 1, 4);
     for (int i = 0; i < 32; i++)
         t[12 + i] = (uint8_t)(0xa0 + i);

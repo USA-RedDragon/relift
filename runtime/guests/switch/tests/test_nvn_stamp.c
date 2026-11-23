@@ -81,6 +81,30 @@ TEST(nvn_tables_of_another_translator_stop_with_a_named_report)
     nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
 }
 
+/**
+ * @brief An interface table of the old format (RLSPI001, made before relift recorded the storage image arrays each
+ * program uses) is refused even with the expected stamp: the runtime would size the image arrays wrongly.
+ */
+TEST(nvn_tables_without_the_image_array_records_are_refused_by_name)
+{
+    char dir[PATH_MAX], why[512] = "", path[PATH_MAX + 16];
+    CHECK(make_scratch(dir));
+    setenv("RELIFT_NVN_TABLES", dir, 1);
+    unsetenv("RELIFT_NVN_TABLE_STAMP");
+    write_stamp(dir, "0123456789abcdef\n");
+    snprintf(path, sizeof path, "%s/table.rlspi", dir);
+    FILE *f = fopen(path, "wb");
+    CHECK(f && fwrite("RLSPI001\0\0\0\0", 1, 12, f) == 12);
+    CHECK(fclose(f) == 0);
+    rl_nvn_set_table_stamp("0123456789abcdef");
+    CHECK(!nvn_shader_stamp_check(why, sizeof why));
+    CHECK(strstr(why, "storage image array records") != NULL);
+    CHECK(strstr(why, "RLSPI002") != NULL);
+    rl_nvn_set_table_stamp(NULL);
+    unsetenv("RELIFT_NVN_TABLES");
+    nftw(dir, rm_entry, 4, FTW_DEPTH | FTW_PHYS);
+}
+
 TEST(nvn_tables_without_a_stamp_are_refused_when_the_build_expects_one)
 {
     char dir[PATH_MAX], why[512] = "";

@@ -497,7 +497,8 @@ pub fn run(out: &Path, ui: &mut crate::ui::Ui) -> Result<(), BoxError> {
 }
 
 /// What the runtime needs of each translation's interface, all
-/// little-endian: the magic `RLSPI001`, the entry count (u32), per entry
+/// little-endian: the magic `RLSPI002` (`RLSPI001` before storage image array
+/// records), the entry count (u32), per entry
 /// sorted by key the key (32 bytes), the index of its first record and its
 /// record count (u32 each), then the records, four u32 each: the record kind
 /// (`RECORD_*`), the constant bank and byte offset of the bound handle, and
@@ -505,7 +506,7 @@ pub fn run(out: &Path, ui: &mut crate::ui::Ui) -> Result<(), BoxError> {
 pub fn interface_table(entries: &[([u8; 32], Vec<[u32; 4]>)]) -> Vec<u8> {
     let mut head = Vec::new();
     let mut recs: Vec<[u32; 4]> = Vec::new();
-    head.extend(b"RLSPI001");
+    head.extend(b"RLSPI002");
     head.extend((entries.len() as u32).to_le_bytes());
     for (key, rs) in entries {
         head.extend(key);

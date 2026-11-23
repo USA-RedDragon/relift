@@ -168,7 +168,20 @@ bool nvn_shader_stamp_check(char *why, size_t why_n)
         else
             rl_log(RL_LOG_INFO, "nvn", "shader tables in %s: no translator stamp (this build expects %s)", dir,
                    want ? want : "none");
-        if (want && (!stamped || strcmp(have, want))) {
+        char path[1100], magic[8] = { 0 };
+        snprintf(path, sizeof path, "%s/table.rlspi", dir);
+        FILE *spi = fopen(path, "rb");
+        bool old = spi && fread(magic, 1, 8, spi) == 8 && !memcmp(magic, "RLSPI001", 8);
+        if (spi)
+            fclose(spi);
+        if (old) {
+            snprintf(g_stamp_why, sizeof g_stamp_why,
+                     "the shader tables in %s lack the storage image array records (interface table RLSPI001, this "
+                     "runtime needs RLSPI002): they were made by an older relift; run relift shaders with this one",
+                     dir);
+            g_stamp_state = 2;
+            rl_log(RL_LOG_ERROR, "nvn", "%s", g_stamp_why);
+        } else if (want && (!stamped || strcmp(have, want))) {
             char made[128];
             if (stamped)
                 snprintf(made, sizeof made, "were made by translator %s", have);
@@ -564,7 +577,7 @@ void nvn_shader_helper_key(const char *kind, const char *key, char hkey[65])
 uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
 {
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_iface, "table.rlspi", "RLSPI001", true);
+    table *t = open_table(&g_iface, "table.rlspi", "RLSPI002", true);
     pthread_mutex_unlock(&g_lock);
     const uint8_t *e = t ? table_find(t, key) : NULL;
     if (!e)
@@ -584,7 +597,7 @@ bool nvn_shader_image_arrays(uint64_t *used)
 {
     *used = 0;
     pthread_mutex_lock(&g_lock);
-    table *t = open_table(&g_iface, "table.rlspi", "RLSPI001", true);
+    table *t = open_table(&g_iface, "table.rlspi", "RLSPI002", true);
     pthread_mutex_unlock(&g_lock);
     if (!t)
         return false;

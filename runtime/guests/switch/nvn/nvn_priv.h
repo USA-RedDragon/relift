@@ -525,7 +525,7 @@ bool nvn_shader_table_hash(char hex[65]);
 bool nvn_shader_stamp_check(char *why, size_t why_n);
 /** @brief The translation of the program with key (malloc'd SPIR-V words), or NULL. */
 uint32_t *nvn_shader_spirv(const char *key, size_t *words);
-/** @brief An interface record of a translation (relift build's "RLSPI001" table). */
+/** @brief An interface record of a translation (relift build's "RLSPI002" table). */
 typedef struct nvn_iface_rec {
     /** @brief NVN_IFACE_*. */
     uint32_t kind;
