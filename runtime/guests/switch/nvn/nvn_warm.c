@@ -262,13 +262,45 @@ static void progress(bool force, const char *what)
     maps_check();
 }
 
-/** @brief A launch worker: takes the next table program or recorded pipeline until none is left. */
+/**
+ * @brief Takes the program the game set most recently of those still queued (W.lock held): a game sets a program
+ * just before it draws with it, so the newest is the one a draw is about to need.
+ */
+static bool take_set(job *j)
+{
+    if (!W.nqueue)
+        return false;
+    *j = W.queue[--W.nqueue];
+    W.active++;
+    return true;
+}
+
+/** @brief Makes a program take_set gave and accounts for it. */
+static void make_set(const job *j)
+{
+    bool ok = warm_program(j->key, (int)j->stage, j->wg);
+    pthread_mutex_lock(&W.lock);
+    W.active--;
+    if (!ok)
+        W.failed++;
+    pthread_mutex_unlock(&W.lock);
+}
+
+/**
+ * @brief A launch worker: takes the next table program or recorded pipeline until none is left, first making any
+ * program the game has set meanwhile (take_set).
+ */
 static void *launch_worker(void *arg)
 {
     (void)arg;
-    nvn_pipe_worker();
     for (;;) {
         pthread_mutex_lock(&W.lock);
+        job j;
+        if (take_set(&j)) {
+            pthread_mutex_unlock(&W.lock);
+            make_set(&j);
+            continue;
+        }
         uint32_t i = W.next++;
         pthread_mutex_unlock(&W.lock);
         if (i >= W.total)
@@ -290,25 +322,17 @@ static void *launch_worker(void *arg)
     }
 }
 
-/** @brief A pool worker: makes the programs the game registers, in the order it registers them. */
+/** @brief A pool worker: makes the programs the game sets, newest first (take_set). */
 static void *pool_worker(void *arg)
 {
     (void)arg;
-    nvn_pipe_worker();
     for (;;) {
         pthread_mutex_lock(&W.lock);
-        while (!W.nqueue)
+        job j;
+        while (!take_set(&j))
             pthread_cond_wait(&W.cv, &W.lock);
-        job j = W.queue[0];
-        memmove(W.queue, W.queue + 1, --W.nqueue * sizeof *W.queue);
-        W.active++;
         pthread_mutex_unlock(&W.lock);
-        bool ok = warm_program(j.key, (int)j.stage, j.wg);
-        pthread_mutex_lock(&W.lock);
-        W.active--;
-        if (!ok)
-            W.failed++;
-        pthread_mutex_unlock(&W.lock);
+        make_set(&j);
     }
 }
 
@@ -338,7 +362,6 @@ static void launch(void)
     }
     rl_log(RL_LOG_INFO, "nvn", "shader warm-up: %u recorded pipelines and %u table programs on %u threads%s",
            W.nrecorded, W.nshader, nthreads, W.background ? ", the game starts now" : "");
-    nvn_pipe_warming(true);
     pthread_t th[256];
     uint32_t started = 0;
     for (uint32_t i = 0; i < nthreads && i < 256; i++)
@@ -362,7 +385,6 @@ static void launch(void)
            "shader warm-up done in %.1f s: %u of %u programs, %u refused; the driver compiled %llu in %.1f s of thread "
            "time",
            (rl_clock_ns() - W.t0) / 1e9, W.done, W.total, W.failed, (unsigned long long)made, made_ns / 1e9);
-    nvn_pipe_warming(false);
     nvn_pipe_warmed();
 }
 
