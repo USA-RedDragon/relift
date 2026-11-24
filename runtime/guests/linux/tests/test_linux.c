@@ -797,6 +797,21 @@ TEST(fchmodat2_chown_xattrs_sendfile_and_pselect6)
     unlink(file);
 }
 
+TEST(a_child_a_fatal_signal_ends_dies_by_it_quickly_and_without_a_core_dump)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint64_t t0 = rl_clock_ns();
+    int64_t pid = sys(c, NR_clone, L_SIGCHLD, 0, 0, 0, 0, 0);
+    if (pid == 0) {
+        hio_die_by_signal(L_SIGABRT);
+        _exit(9);
+    }
+    CHECK(pid > 0);
+    CHECK_EQ(wait_status(c, pid), L_SIGABRT);
+    CHECK(rl_clock_ns() - t0 < 2000000000ull);
+}
+
 TEST(execve_of_another_program_finds_nothing)
 {
     rl_ctx *c = boot();

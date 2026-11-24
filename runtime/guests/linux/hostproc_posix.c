@@ -2,7 +2,8 @@
  * @file hostproc_posix.c
  * @brief Processes on a POSIX host: fork, wait, kill, exec with a chosen
  * descriptor set, the signal numbers of the host, and the pipe the signals
- * a guest takes from outside arrive on.
+ * a guest takes from outside arrive on. A process a fatal signal ends
+ * leaves no host core dump (see hio_die_by_signal).
  */
 #include "hostio.h"
 
@@ -21,6 +22,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #if defined(__linux__)
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #endif
 #if defined(__APPLE__)
@@ -282,6 +284,13 @@ void hio_die_by_signal(int sig)
         return;
     fflush(stdout);
     fflush(stderr);
+    /* No host core dump: the process reserves the whole guest address
+     * space, and writing that out (to a core_pattern pipe) takes minutes. */
+    struct rlimit no_core = { 0, 0 };
+    setrlimit(RLIMIT_CORE, &no_core);
+#if defined(__linux__)
+    prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+#endif
     signal(h, SIG_DFL);
     sigset_t set;
     sigemptyset(&set);

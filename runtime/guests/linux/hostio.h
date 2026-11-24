@@ -222,7 +222,7 @@ int64_t hio_exec(const char *exe, char *const argv[], char *const envp[], const 
 int64_t hio_signal_pipe(void);
 /** @brief Lets the calling thread (the one that reads the signal pipe) take the routed signals. */
 void hio_signal_accept(void);
-/** @brief Ends the process with host signal sig at its default action, as the kernel does for a fatal signal. */
+/** @brief Ends the process with host signal sig at its default action, as the kernel does for a fatal signal, without a host core dump. */
 void hio_die_by_signal(int sig);
 
 /** @brief The most descriptors one message carries (SCM_MAX_FD). */
