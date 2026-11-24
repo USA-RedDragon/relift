@@ -156,6 +156,17 @@ fn elf_with(sm: u32, info: bool) -> Vec<u8> {
             align: 8,
             entsize: 24,
         },
+        // NOBITS: its bytes are written here too, which the parse ignores.
+        Sec {
+            name: ".nv.shared.k",
+            kind: 8,
+            flags: 3,
+            data: vec![0; 0x6000],
+            link: 0,
+            info: 4,
+            align: 16,
+            entsize: 0,
+        },
     ];
     if info {
         secs.push(Sec {
@@ -249,6 +260,7 @@ fn kernel_is_linked_with_its_callee() {
     assert_eq!(get(&k.code[0x20..0x30], 34, 47) * 4, 0x80, "call target");
     assert_eq!(get(&k.code[0x30..0x40], 34, 47), 0, "external call");
     assert_eq!(k.unresolved, vec!["ext".to_string()]);
+    assert_eq!(k.shared_bytes, 0x6000, "the .nv.shared.k section's size");
     assert_eq!(k.code, linked());
     assert!(found.covers(&(0..e.len())));
 }

@@ -65,6 +65,12 @@ pub struct Kernel {
     /// the module does not define (a function of the CUDA driver, such as
     /// `__assertfail`).
     pub externs: Vec<Extern>,
+    /// Bytes of static shared memory: the size of the kernel's
+    /// `.nv.shared.<name>` section, 0 without one. A launch gives the kernel
+    /// these plus its dynamic shared bytes; the translation's own count of
+    /// constant shared offsets is no size (guarded and register-indexed
+    /// accesses reach past it).
+    pub shared_bytes: u32,
 }
 
 /// A constant bank word that holds the address of an undefined symbol.
@@ -406,7 +412,18 @@ fn link(
         code,
         unresolved: unresolved.into_iter().collect(),
         externs: Vec::new(),
+        shared_bytes: shared_bytes(elf, &sym_name(elf, symtab, k)),
     }
+}
+
+/// The size of the `.nv.shared.<name>` section of kernel `name`, 0 without
+/// one.
+fn shared_bytes(elf: &Elf, name: &str) -> u32 {
+    let want = format!(".nv.shared.{name}");
+    elf.sections
+        .iter()
+        .find(|s| s.kind == SHT_NOBITS && elf.cstr(elf.shstr + s.name as usize) == want)
+        .map_or(0, |s| u32::try_from(s.size).unwrap_or(u32::MAX))
 }
 
 /// The undefined symbols relocated into constant banks through `symtab`.
