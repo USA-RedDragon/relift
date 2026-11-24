@@ -479,6 +479,53 @@ TEST(nvn_pipe_a_draw_makes_its_pipeline_while_a_warm_up_thread_makes_another)
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
 
+static uint64_t g_quiet_late;
+
+/** @brief A warm-up worker after the warm-up: its compile is made but not late. */
+static void *make_quietly(void *arg)
+{
+    (void)arg;
+    nvn_pipe_screen_quiet();
+    uint64_t made, ns, late0, late1, lns;
+    nvn_pipe_stats(&made, &ns, &late0, &lns);
+    g_other_ok = nvn_pipe_warm_fragment(&g_other_key);
+    nvn_pipe_stats(&made, &ns, &late1, &lns);
+    g_quiet_late = late1 - late0;
+    return NULL;
+}
+
+TEST(nvn_pipe_only_a_compile_a_draw_waits_for_after_the_warm_up_is_late)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes) || !nvn_pipe_uses_libraries())
+        return;
+    CHECK(nvn_draw_layouts());
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_set_warmed(true);
+    /* Constants no other test uses, so the driver's cache cannot answer them. */
+    nvn_pipe_key a;
+    make_key(&g_other_key, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
+    g_other_key.nspec[1] = 1;
+    g_other_key.spec_map[1][0] = (VkSpecializationMapEntry){ 0x7001, 0, 4 };
+    g_other_key.spec[1][0] = 0x5eed;
+    pthread_t t;
+    CHECK_EQ(pthread_create(&t, NULL, make_quietly, NULL), 0);
+    pthread_join(t, NULL);
+    CHECK(g_other_ok);
+    CHECK_EQ(g_quiet_late, 0u);
+    a = g_other_key;
+    a.spec[1][0] = 0x5eee;
+    uint64_t made, ns, late0, late1, lns;
+    nvn_pipe_stats(&made, &ns, &late0, &lns);
+    CHECK(nvn_pipe_warm_fragment(&a));
+    nvn_pipe_stats(&made, &ns, &late1, &lns);
+    CHECK_EQ(late1 - late0, 1u);
+    nvn_pipe_set_warmed(false);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+}
+
 TEST(nvn_a_draw_without_its_exact_library_reads_texture_kinds_at_run_time)
 {
     VkSpecializationMapEntry map[3] = { { 0x100, 0, 4 }, { NVN_FETCH_KIND_SPEC, 4, 4 }, { NVN_FETCH_KIND_SPEC + 1, 8, 4 } };

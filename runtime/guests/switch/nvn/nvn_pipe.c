@@ -248,20 +248,22 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
     else
         screen_queue();
     VkResult vr = VK(vkCreateGraphicsPipelines)(g.dev, P.cache, 1, ci, NULL, out);
-    bool late = false;
+    bool compiled = false;
     if (vr == VK_PIPELINE_COMPILE_REQUIRED) {
         ci->flags = flags;
         screen_queue();
         t0 = rl_clock_ns();
         vr = VK(vkCreateGraphicsPipelines)(g.dev, P.cache, 1, ci, NULL, out);
-        late = true;
+        compiled = true;
     }
+    /* Late: a compile after the warm-up that a draw waits for; the warm-up's own workers are not late. */
+    bool late = compiled && !t_quiet;
     uint64_t dt = rl_clock_ns() - t0;
     t_last_result = vr;
-    if (late || !probe)
+    if (compiled || !probe)
         screen_done(vr != VK_SUCCESS);
     pthread_mutex_lock(&P.lock);
-    if (late || !probe) {
+    if (compiled || !probe) {
         P.made++;
         P.made_ns += dt;
         P.dirty = true;
@@ -825,20 +827,21 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
         screen_queue();
     VkPipeline p = NULL;
     VkResult vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
-    bool late = false;
+    bool compiled = false;
     if (vr == VK_PIPELINE_COMPILE_REQUIRED) {
         ci.flags = 0;
         screen_queue();
         t0 = rl_clock_ns();
         vr = VK(vkCreateComputePipelines)(g.dev, P.cache, 1, &ci, NULL, &p);
-        late = true;
+        compiled = true;
     }
+    bool late = compiled && !t_quiet;
     uint64_t dt = rl_clock_ns() - t0;
     t_last_result = vr;
-    if (late || !probe)
+    if (compiled || !probe)
         screen_done(vr != VK_SUCCESS);
     pthread_mutex_lock(&P.lock);
-    if (late || !probe) {
+    if (compiled || !probe) {
         P.made++;
         P.made_ns += dt;
         P.dirty = true;
@@ -966,6 +969,8 @@ void nvn_pipe_warmed(void)
     P.warmed = true;
     nvn_pipe_save();
 }
+
+void nvn_pipe_set_warmed(bool warmed) { P.warmed = warmed; }
 
 void nvn_pipe_stats(uint64_t *made, uint64_t *made_ns, uint64_t *late, uint64_t *late_ns)
 {
