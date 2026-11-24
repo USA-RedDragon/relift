@@ -55,6 +55,12 @@ typedef struct nvn_pipe_key {
     /** @brief The fragment program runs once per sample (nvnProgramSetSampleShading's forced mode). */
     uint32_t sample_shading;
     /**
+     * @brief Programmable sample locations: has_locations, and each sample's position as NVN keeps it (x | y << 4 in
+     * 1/16 pixel), the same in every pixel.
+     */
+    uint32_t has_locations;
+    uint8_t locations[16];
+    /**
      * @brief The samples of a draw with alpha to coverage, plus NVN_A2C_DITHER with the dither, 0 without: the
      * host's own where it is the console's (nvn_a2c_native), the fragment program's (A2C_SPEC) elsewhere.
      */

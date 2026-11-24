@@ -482,6 +482,9 @@ static bool device_hook(void *user, rl_vkdev_build *b)
         } else if (!strcmp(exts[i].extensionName, "VK_EXT_conservative_rasterization")) {
             rl_vkdev_add_ext(b, "VK_EXT_conservative_rasterization");
             g.conservative_raster = true;
+        } else if (!strcmp(exts[i].extensionName, "VK_EXT_sample_locations")) {
+            rl_vkdev_add_ext(b, "VK_EXT_sample_locations");
+            g.sample_locations = true;
         } else if (!strcmp(exts[i].extensionName, "VK_NV_viewport_swizzle")) {
             rl_vkdev_add_ext(b, "VK_NV_viewport_swizzle");
             g.viewport_swizzle = true;
@@ -603,6 +606,16 @@ static void bring_up(void)
         g.sample_shading = feat.f2.features.sampleRateShading;
         g.formatless_write = feat.f2.features.shaderStorageImageWriteWithoutFormat;
         g.nvidia = dp.vendorID == 0x10de;
+        if (g.sample_locations) {
+            VkPhysicalDeviceSampleLocationsPropertiesEXT sl = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT
+            };
+            VkPhysicalDeviceProperties2 p2s = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &sl };
+            VK(vkGetPhysicalDeviceProperties2)(g.phys, &p2s);
+            bool fine = sl.sampleLocationSubPixelBits >= 4 && sl.sampleLocationCoordinateRange[0] <= 0.0f &&
+                        sl.sampleLocationCoordinateRange[1] >= 0.9375f;
+            g.sample_location_counts = fine ? (uint32_t)sl.sampleLocationSampleCounts : 0;
+        }
         rl_log(RL_LOG_INFO, "nvn",
                "multisample: standard sample positions %s, sample shading %s, color sample counts 0x%x",
                g.standard_samples ? "yes" : "no", g.sample_shading ? "yes" : "no",

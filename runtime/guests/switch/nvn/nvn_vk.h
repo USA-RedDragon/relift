@@ -225,6 +225,13 @@ typedef struct nvn_vkdev {
     /** @brief The device shades per sample, and writes storage images declared without a format. */
     bool sample_shading, formatless_write;
     /**
+     * @brief VK_EXT_sample_locations is on and places custom sample locations exactly on NVN's 1/16 pixel grid
+     * (sampleLocationSubPixelBits of at least 4, a coordinate range of [0, 15/16] or wider) for the sample counts in
+     * sample_location_counts.
+     */
+    bool sample_locations;
+    uint32_t sample_location_counts;
+    /**
      * @brief The device is NVIDIA's: its alpha to coverage is the console GPU's dithered one (measured on the RTX 3090
      * by test_nvn_a2c.c: 4n coverage levels spread over a 2x2 pixel footprint, the footprint the driver selects
      * with dither on, SET_ALPHA_TO_COVERAGE_DITHER_CONTROL PIXELS_2X2, clc797.h).
@@ -934,6 +941,16 @@ int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const
  * false when they differ.
  */
 bool nvn_vk_target_samples(const nvn_gfx *st, uint32_t *samples);
+/**
+ * @brief The host sample locations of n samples NVN keeps as nibbles (x | y << 4 in 1/16 pixel, nvnMultisampleState
+ * GetSampleLocations gives each as nibble / 16): each is exactly nibble / 16, which a device of
+ * nvn_vkdev.sample_location_counts places on that 1/16 grid point.
+ */
+static inline void nvn_vk_sample_locations(const uint8_t nib[16], uint32_t n, VkSampleLocationEXT out[16])
+{
+    for (uint32_t i = 0; i < n && i < 16; i++)
+        out[i] = (VkSampleLocationEXT){ (float)(nib[i] & 15u) / 16.0f, (float)(nib[i] >> 4) / 16.0f };
+}
 /** @brief The dither flag of nvn_pipe_key.alpha_to_coverage and of the A2C_SPEC constant. */
 #define NVN_A2C_DITHER 0x100u
 /**

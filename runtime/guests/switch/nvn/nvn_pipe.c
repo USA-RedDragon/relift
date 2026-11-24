@@ -379,6 +379,8 @@ typedef struct state {
         int provokingVertexMode;
     } provoking;
     VkSampleMask sample_mask;
+    VkSampleLocationEXT locations[16];
+    VkPipelineSampleLocationsStateCreateInfoEXT sl;
     VkPipelineRasterizationStateCreateInfo rs;
     VkPipelineMultisampleStateCreateInfo ms;
     VkPipelineDepthStencilStateCreateInfo ds;
@@ -488,6 +490,19 @@ static void fill_state(state *s, const nvn_pipe_key *k)
                                                      .minSampleShading = 1.0f,
                                                      .alphaToCoverageEnable = nvn_a2c_native(k->alpha_to_coverage),
                                                      .pSampleMask = &s->sample_mask };
+    if (k->has_locations && k->samples) {
+        nvn_vk_sample_locations(k->locations, k->samples, s->locations);
+        s->sl = (VkPipelineSampleLocationsStateCreateInfoEXT){
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT,
+            .sampleLocationsEnable = VK_TRUE,
+            .sampleLocationsInfo = { .sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT,
+                                     .sampleLocationsPerPixel = (VkSampleCountFlagBits)k->samples,
+                                     .sampleLocationGridSize = { 1, 1 },
+                                     .sampleLocationsCount = k->samples,
+                                     .pSampleLocations = s->locations },
+        };
+        s->ms.pNext = &s->sl;
+    }
     s->ds = (VkPipelineDepthStencilStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
                                                      .depthBoundsTestEnable = k->depth_bounds != 0,
                                                      .minDepthBounds = 0.0f,
@@ -521,14 +536,16 @@ typedef struct stage_key {
     uint32_t depth_bounds;
     /** @brief The pre-raster stage's library has the shading-rate image on (its viewport state). */
     uint32_t shading_rate;
-    uint32_t samples, alpha_to_coverage, sample_shading;
+    uint32_t samples, alpha_to_coverage, sample_shading, has_locations;
+    uint8_t locations[16];
 } stage_key;
 
 typedef struct fo_key {
     uint32_t ncolor;
     VkFormat color[MAX_RT], depth, stencil;
     VkPipelineColorBlendAttachmentState blend[MAX_RT];
-    uint32_t sample_mask, samples, alpha_to_coverage, sample_shading;
+    uint32_t sample_mask, samples, alpha_to_coverage, sample_shading, has_locations;
+    uint8_t locations[16];
 } fo_key;
 
 static void vi_of(const nvn_pipe_key *k, vi_key *o)
@@ -553,6 +570,9 @@ static void stage_of(const nvn_pipe_key *k, uint32_t s, stage_key *o)
     o->samples = s == 1 ? k->samples : 0;
     o->alpha_to_coverage = s == 1 ? k->alpha_to_coverage : 0;
     o->sample_shading = s == 1 ? k->sample_shading : 0;
+    o->has_locations = s == 1 ? k->has_locations : 0;
+    if (s == 1)
+        memcpy(o->locations, k->locations, sizeof o->locations);
     memcpy(o->map, k->spec_map[s], k->nspec[s] * sizeof o->map[0]);
     memcpy(o->val, k->spec[s], k->nspec[s] * sizeof o->val[0]);
     nvn_spec_sort(&o->nspec, o->map, o->val);
@@ -578,6 +598,8 @@ static void fo_of(const nvn_pipe_key *k, fo_key *o)
     o->samples = k->samples;
     o->alpha_to_coverage = k->alpha_to_coverage;
     o->sample_shading = k->sample_shading;
+    o->has_locations = k->has_locations;
+    memcpy(o->locations, k->locations, sizeof o->locations);
     memcpy(o->blend, k->blend, k->ncolor * sizeof o->blend[0]);
 }
 

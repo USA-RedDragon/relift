@@ -2,8 +2,8 @@
  * @file test_nvn_msaa.c
  * @brief Multisample textures get host images of their own sample count, which draw into them at that count and
  * bind only as multisample textures, where a program reads each sample it was drawn with; their samples move
- * between the image and the guest's storage in NVK's grid cells, both ways, and Downsample averages the driver's
- * taps.
+ * between the image and the guest's storage in NVK's grid cells, both ways, Downsample averages the driver's
+ * taps, and programmable sample locations land on NVN's 1/16 pixel points.
  */
 #include "hos.h"
 #include "nvn_priv.h"
@@ -790,4 +790,374 @@ TEST(nvn_downsample_taps_are_the_middle_of_the_grid)
         cells |= 1u << nvk_cell(16, taps >> (4 * i) & 15u);
     CHECK_EQ(cells, 1u << 5 | 1u << 6 | 1u << 9 | 1u << 10);
     CHECK(!nvn_msaa_downsample_taps(32, &taps, &n));
+}
+
+/**
+ * @brief edge.vert, by `glslc --target-env=vulkan1.3 -O`:
+ *
+ * #version 450
+ * // The half plane left of (axis 0) or above (axis 1) the edge at e pixels of a 1x1 target, as two triangles.
+ * layout(push_constant) uniform P { float e; uint axis; } p;
+ * void main()
+ * {
+ *     const vec2 c[6] = vec2[](vec2(0, 0), vec2(1, 0), vec2(0, 1), vec2(1, 0), vec2(1, 1), vec2(0, 1));
+ *     vec2 q = c[gl_VertexIndex];
+ *     float lo = -3.0, hi = 2.0 * p.e - 1.0;
+ *     vec2 v = p.axis == 0u ? vec2(mix(lo, hi, q.x), mix(-3.0, 3.0, q.y)) : vec2(mix(-3.0, 3.0, q.x), mix(lo, hi, q.y));
+ *     gl_Position = vec4(v, 0.0, 1.0);
+ * }
+ */
+static const uint32_t edge_vert_spv[] = {
+    0x07230203, 0x00010600, 0x000d000b, 0x0000005b, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
+    0x0008000f, 0x00000000, 0x00000004, 0x6e69616d, 0x00000000, 0x00000016, 0x00000023, 0x0000004f,
+    0x00040047, 0x00000016, 0x0000000b, 0x0000002a, 0x00030047, 0x00000019, 0x00000018, 0x00030047,
+    0x00000021, 0x00000002, 0x00050048, 0x00000021, 0x00000000, 0x00000023, 0x00000000, 0x00050048,
+    0x00000021, 0x00000001, 0x00000023, 0x00000004, 0x00030047, 0x0000004d, 0x00000002, 0x00050048,
+    0x0000004d, 0x00000000, 0x0000000b, 0x00000000, 0x00050048, 0x0000004d, 0x00000001, 0x0000000b,
+    0x00000001, 0x00050048, 0x0000004d, 0x00000002, 0x0000000b, 0x00000003, 0x00050048, 0x0000004d,
+    0x00000003, 0x0000000b, 0x00000004, 0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002,
+    0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007, 0x00000006, 0x00000002, 0x00040020,
+    0x00000008, 0x00000007, 0x00000007, 0x00040015, 0x0000000a, 0x00000020, 0x00000000, 0x0004002b,
+    0x0000000a, 0x0000000b, 0x00000006, 0x0004001c, 0x0000000c, 0x00000007, 0x0000000b, 0x0004002b,
+    0x00000006, 0x0000000d, 0x00000000, 0x0005002c, 0x00000007, 0x0000000e, 0x0000000d, 0x0000000d,
+    0x0004002b, 0x00000006, 0x0000000f, 0x3f800000, 0x0005002c, 0x00000007, 0x00000010, 0x0000000f,
+    0x0000000d, 0x0005002c, 0x00000007, 0x00000011, 0x0000000d, 0x0000000f, 0x0005002c, 0x00000007,
+    0x00000012, 0x0000000f, 0x0000000f, 0x0009002c, 0x0000000c, 0x00000013, 0x0000000e, 0x00000010,
+    0x00000011, 0x00000010, 0x00000012, 0x00000011, 0x00040015, 0x00000014, 0x00000020, 0x00000001,
+    0x00040020, 0x00000015, 0x00000001, 0x00000014, 0x0004003b, 0x00000015, 0x00000016, 0x00000001,
+    0x00040020, 0x00000018, 0x00000007, 0x0000000c, 0x0004002b, 0x00000006, 0x0000001e, 0xc0400000,
+    0x0004002b, 0x00000006, 0x00000020, 0x40000000, 0x0004001e, 0x00000021, 0x00000006, 0x0000000a,
+    0x00040020, 0x00000022, 0x00000009, 0x00000021, 0x0004003b, 0x00000022, 0x00000023, 0x00000009,
+    0x0004002b, 0x00000014, 0x00000024, 0x00000000, 0x00040020, 0x00000025, 0x00000009, 0x00000006,
+    0x0004002b, 0x00000014, 0x0000002b, 0x00000001, 0x00040020, 0x0000002c, 0x00000009, 0x0000000a,
+    0x0004002b, 0x0000000a, 0x0000002f, 0x00000000, 0x00020014, 0x00000030, 0x0004002b, 0x00000006,
+    0x0000003a, 0x40400000, 0x0004002b, 0x0000000a, 0x0000003b, 0x00000001, 0x00040017, 0x0000004b,
+    0x00000006, 0x00000004, 0x0004001c, 0x0000004c, 0x00000006, 0x0000003b, 0x0006001e, 0x0000004d,
+    0x0000004b, 0x00000006, 0x0000004c, 0x0000004c, 0x00040020, 0x0000004e, 0x00000003, 0x0000004d,
+    0x0004003b, 0x0000004e, 0x0000004f, 0x00000003, 0x00040020, 0x00000054, 0x00000003, 0x0000004b,
+    0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005, 0x0005003b,
+    0x00000018, 0x00000019, 0x00000007, 0x00000013, 0x0004003d, 0x00000014, 0x00000017, 0x00000016,
+    0x00050041, 0x00000008, 0x0000001a, 0x00000019, 0x00000017, 0x0004003d, 0x00000007, 0x0000001b,
+    0x0000001a, 0x00050041, 0x00000025, 0x00000026, 0x00000023, 0x00000024, 0x0004003d, 0x00000006,
+    0x00000027, 0x00000026, 0x00050085, 0x00000006, 0x00000028, 0x00000020, 0x00000027, 0x00050083,
+    0x00000006, 0x00000029, 0x00000028, 0x0000000f, 0x00050041, 0x0000002c, 0x0000002d, 0x00000023,
+    0x0000002b, 0x0004003d, 0x0000000a, 0x0000002e, 0x0000002d, 0x000500aa, 0x00000030, 0x00000031,
+    0x0000002e, 0x0000002f, 0x000300f7, 0x00000034, 0x00000000, 0x000400fa, 0x00000031, 0x00000033,
+    0x00000040, 0x000200f8, 0x00000033, 0x00050051, 0x00000006, 0x00000038, 0x0000001b, 0x00000000,
+    0x0008000c, 0x00000006, 0x00000039, 0x00000001, 0x0000002e, 0x0000001e, 0x00000029, 0x00000038,
+    0x00050051, 0x00000006, 0x0000003d, 0x0000001b, 0x00000001, 0x0008000c, 0x00000006, 0x0000003e,
+    0x00000001, 0x0000002e, 0x0000001e, 0x0000003a, 0x0000003d, 0x00050050, 0x00000007, 0x0000003f,
+    0x00000039, 0x0000003e, 0x000200f9, 0x00000034, 0x000200f8, 0x00000040, 0x00050051, 0x00000006,
+    0x00000042, 0x0000001b, 0x00000000, 0x0008000c, 0x00000006, 0x00000043, 0x00000001, 0x0000002e,
+    0x0000001e, 0x0000003a, 0x00000042, 0x00050051, 0x00000006, 0x00000047, 0x0000001b, 0x00000001,
+    0x0008000c, 0x00000006, 0x00000048, 0x00000001, 0x0000002e, 0x0000001e, 0x00000029, 0x00000047,
+    0x00050050, 0x00000007, 0x00000049, 0x00000043, 0x00000048, 0x000200f9, 0x00000034, 0x000200f8,
+    0x00000034, 0x000700f5, 0x00000007, 0x0000005a, 0x0000003f, 0x00000033, 0x00000049, 0x00000040,
+    0x00050051, 0x00000006, 0x00000051, 0x0000005a, 0x00000000, 0x00050051, 0x00000006, 0x00000052,
+    0x0000005a, 0x00000001, 0x00070050, 0x0000004b, 0x00000053, 0x00000051, 0x00000052, 0x0000000d,
+    0x0000000f, 0x00050041, 0x00000054, 0x00000055, 0x0000004f, 0x00000024, 0x0003003e, 0x00000055,
+    0x00000053, 0x000100fd, 0x00010038,
+};
+
+/**
+ * @brief mask.comp, by `glslc --target-env=vulkan1.3 -O`:
+ *
+ * #version 450
+ * #extension GL_EXT_samplerless_texture_functions : require
+ * // The mask of the samples of pixel (0, 0) the draw covered.
+ * layout(local_size_x = 1) in;
+ * layout(binding = 0) uniform texture2DMS ms;
+ * layout(binding = 1) buffer Out { uint o; };
+ * layout(push_constant) uniform P { uint samples; } p;
+ * void main()
+ * {
+ *     uint m = 0u;
+ *     for (uint s = 0u; s < p.samples; s++)
+ *         m |= (texelFetch(ms, ivec2(0), int(s)).r > 0.5 ? 1u : 0u) << s;
+ *     o = m;
+ * }
+ */
+static const uint32_t mask_comp_spv[] = {
+    0x07230203, 0x00010600, 0x000d000b, 0x0000003c, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
+    0x0008000f, 0x00000005, 0x00000004, 0x6e69616d, 0x00000000, 0x00000013, 0x0000001e, 0x00000034,
+    0x00060010, 0x00000004, 0x00000011, 0x00000001, 0x00000001, 0x00000001, 0x00030047, 0x00000011,
+    0x00000002, 0x00050048, 0x00000011, 0x00000000, 0x00000023, 0x00000000, 0x00040047, 0x0000001e,
+    0x00000021, 0x00000000, 0x00040047, 0x0000001e, 0x00000022, 0x00000000, 0x00030047, 0x00000032,
+    0x00000002, 0x00050048, 0x00000032, 0x00000000, 0x00000023, 0x00000000, 0x00040047, 0x00000034,
+    0x00000021, 0x00000001, 0x00040047, 0x00000034, 0x00000022, 0x00000000, 0x00020013, 0x00000002,
+    0x00030021, 0x00000003, 0x00000002, 0x00040015, 0x00000006, 0x00000020, 0x00000000, 0x0004002b,
+    0x00000006, 0x00000009, 0x00000000, 0x0003001e, 0x00000011, 0x00000006, 0x00040020, 0x00000012,
+    0x00000009, 0x00000011, 0x0004003b, 0x00000012, 0x00000013, 0x00000009, 0x00040015, 0x00000014,
+    0x00000020, 0x00000001, 0x0004002b, 0x00000014, 0x00000015, 0x00000000, 0x00040020, 0x00000016,
+    0x00000009, 0x00000006, 0x00020014, 0x00000019, 0x00030016, 0x0000001b, 0x00000020, 0x00090019,
+    0x0000001c, 0x0000001b, 0x00000001, 0x00000000, 0x00000000, 0x00000001, 0x00000001, 0x00000000,
+    0x00040020, 0x0000001d, 0x00000000, 0x0000001c, 0x0004003b, 0x0000001d, 0x0000001e, 0x00000000,
+    0x00040017, 0x00000020, 0x00000014, 0x00000002, 0x0005002c, 0x00000020, 0x00000021, 0x00000015,
+    0x00000015, 0x00040017, 0x00000024, 0x0000001b, 0x00000004, 0x0004002b, 0x0000001b, 0x00000027,
+    0x3f000000, 0x0004002b, 0x00000006, 0x00000029, 0x00000001, 0x0004002b, 0x00000014, 0x00000030,
+    0x00000001, 0x0003001e, 0x00000032, 0x00000006, 0x00040020, 0x00000033, 0x0000000c, 0x00000032,
+    0x0004003b, 0x00000033, 0x00000034, 0x0000000c, 0x00040020, 0x00000036, 0x0000000c, 0x00000006,
+    0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005, 0x000200f9,
+    0x0000000b, 0x000200f8, 0x0000000b, 0x000700f5, 0x00000006, 0x0000003b, 0x00000009, 0x00000005,
+    0x0000002e, 0x0000000c, 0x000700f5, 0x00000006, 0x0000003a, 0x00000009, 0x00000005, 0x00000031,
+    0x0000000c, 0x00050041, 0x00000016, 0x00000017, 0x00000013, 0x00000015, 0x0004003d, 0x00000006,
+    0x00000018, 0x00000017, 0x000500b0, 0x00000019, 0x0000001a, 0x0000003a, 0x00000018, 0x000400f6,
+    0x0000000d, 0x0000000c, 0x00000000, 0x000400fa, 0x0000001a, 0x0000000c, 0x0000000d, 0x000200f8,
+    0x0000000c, 0x0004003d, 0x0000001c, 0x0000001f, 0x0000001e, 0x0004007c, 0x00000014, 0x00000023,
+    0x0000003a, 0x0007005f, 0x00000024, 0x00000025, 0x0000001f, 0x00000021, 0x00000040, 0x00000023,
+    0x00050051, 0x0000001b, 0x00000026, 0x00000025, 0x00000000, 0x000500ba, 0x00000019, 0x00000028,
+    0x00000026, 0x00000027, 0x000600a9, 0x00000006, 0x0000002a, 0x00000028, 0x00000029, 0x00000009,
+    0x000500c4, 0x00000006, 0x0000002c, 0x0000002a, 0x0000003a, 0x000500c5, 0x00000006, 0x0000002e,
+    0x0000003b, 0x0000002c, 0x00050080, 0x00000006, 0x00000031, 0x0000003a, 0x00000030, 0x000200f9,
+    0x0000000b, 0x000200f8, 0x0000000d, 0x00050041, 0x00000036, 0x00000037, 0x00000034, 0x00000015,
+    0x0003003e, 0x00000037, 0x0000003b, 0x000100fd, 0x00010038,
+};
+
+/**
+ * @brief one.frag, by `glslc --target-env=vulkan1.3 -O`:
+ *
+ * #version 450
+ * layout(location = 0) out vec4 o;
+ * void main() { o = vec4(1.0); }
+ */
+static const uint32_t one_frag_spv[] = {
+    0x07230203, 0x00010600, 0x000d000b, 0x0000000c, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
+    0x0006000f, 0x00000004, 0x00000004, 0x6e69616d, 0x00000000, 0x00000009, 0x00030010, 0x00000004,
+    0x00000007, 0x00040047, 0x00000009, 0x0000001e, 0x00000000, 0x00020013, 0x00000002, 0x00030021,
+    0x00000003, 0x00000002, 0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007, 0x00000006,
+    0x00000004, 0x00040020, 0x00000008, 0x00000003, 0x00000007, 0x0004003b, 0x00000008, 0x00000009,
+    0x00000003, 0x0004002b, 0x00000006, 0x0000000a, 0x3f800000, 0x0007002c, 0x00000007, 0x0000000b,
+    0x0000000a, 0x0000000a, 0x0000000a, 0x0000000a, 0x00050036, 0x00000002, 0x00000004, 0x00000000,
+    0x00000003, 0x000200f8, 0x00000005, 0x0003003e, 0x00000009, 0x0000000b, 0x000100fd, 0x00010038,
+};
+
+/** @brief A 1x1 target of n samples with a pipeline drawing the half plane before an edge at locs, and a readback. */
+typedef struct loc_rig {
+    VkImage img;
+    VkDeviceMemory img_mem, buf_mem;
+    VkImageView view;
+    VkBuffer buf;
+    uint32_t *map;
+    VkPipelineLayout gpl, cpl;
+    VkPipeline gpipe, cpipe;
+    VkDescriptorSetLayout dsl;
+    VkDescriptorPool pool;
+    VkDescriptorSet set;
+} loc_rig;
+
+static void loc_rig_up(loc_rig *k, uint32_t n, const VkSampleLocationEXT *locs)
+{
+    memset(k, 0, sizeof *k);
+    VkImageCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = { 1, 1, 1 },
+                              .mipLevels = 1, .arrayLayers = 1, .samples = (VkSampleCountFlagBits)n,
+                              .tiling = VK_IMAGE_TILING_OPTIMAL,
+                              .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT };
+    CHECK_EQ(VK(vkCreateImage)(g.dev, &ici, NULL, &k->img), VK_SUCCESS);
+    VkMemoryRequirements req;
+    VK(vkGetImageMemoryRequirements)(g.dev, k->img, &req);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)nvn_vk_mem_type(req.memoryTypeBits,
+                                                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
+    CHECK_EQ(VK(vkAllocateMemory)(g.dev, &mai, NULL, &k->img_mem), VK_SUCCESS);
+    CHECK_EQ(VK(vkBindImageMemory)(g.dev, k->img, k->img_mem, 0), VK_SUCCESS);
+    VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = k->img,
+                                  .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                  .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    CHECK_EQ(VK(vkCreateImageView)(g.dev, &vci, NULL, &k->view), VK_SUCCESS);
+    CHECK(host_buffer(256, &k->buf, &k->buf_mem, &k->map));
+    VkPushConstantRange gpr = { VK_SHADER_STAGE_VERTEX_BIT, 0, 8 };
+    VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                       .pushConstantRangeCount = 1, .pPushConstantRanges = &gpr };
+    CHECK_EQ(VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &k->gpl), VK_SUCCESS);
+    VkShaderModule vs = module_of(edge_vert_spv, sizeof edge_vert_spv), fs = module_of(one_frag_spv, sizeof one_frag_spv);
+    VkPipelineShaderStageCreateInfo st[2] = {
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
+          .module = vs, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+          .module = fs, .pName = "main" },
+    };
+    VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                                                  .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    VkViewport vp = { 0, 0, 1, 1, 0, 1 };
+    VkRect2D sc = { { 0, 0 }, { 1, 1 } };
+    VkPipelineViewportStateCreateInfo vps = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+                                              .viewportCount = 1, .pViewports = &vp, .scissorCount = 1,
+                                              .pScissors = &sc };
+    VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                  .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1 };
+    VkPipelineSampleLocationsStateCreateInfoEXT sl = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT,
+        .sampleLocationsEnable = VK_TRUE,
+        .sampleLocationsInfo = { .sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT,
+                                 .sampleLocationsPerPixel = (VkSampleCountFlagBits)n,
+                                 .sampleLocationGridSize = { 1, 1 }, .sampleLocationsCount = n,
+                                 .pSampleLocations = locs },
+    };
+    VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                                                .pNext = &sl, .rasterizationSamples = (VkSampleCountFlagBits)n };
+    VkPipelineColorBlendAttachmentState ba = { .colorWriteMask = 0xf };
+    VkPipelineColorBlendStateCreateInfo cbs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                                .attachmentCount = 1, .pAttachments = &ba };
+    VkFormat f = VK_FORMAT_R8G8B8A8_UNORM;
+    VkPipelineRenderingCreateInfo ri = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                                         .colorAttachmentCount = 1, .pColorAttachmentFormats = &f };
+    VkGraphicsPipelineCreateInfo gpi = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri,
+                                         .stageCount = 2, .pStages = st, .pVertexInputState = &vi,
+                                         .pInputAssemblyState = &ia, .pViewportState = &vps,
+                                         .pRasterizationState = &rs, .pMultisampleState = &ms,
+                                         .pColorBlendState = &cbs, .layout = k->gpl };
+    CHECK_EQ(VK(vkCreateGraphicsPipelines)(g.dev, NULL, 1, &gpi, NULL, &k->gpipe), VK_SUCCESS);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+    VkDescriptorSetLayoutBinding b[2] = { { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL },
+                                          { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL } };
+    VkDescriptorSetLayoutCreateInfo li = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                           .bindingCount = 2, .pBindings = b };
+    CHECK_EQ(VK(vkCreateDescriptorSetLayout)(g.dev, &li, NULL, &k->dsl), VK_SUCCESS);
+    VkPushConstantRange cpr = { VK_SHADER_STAGE_COMPUTE_BIT, 0, 4 };
+    VkPipelineLayoutCreateInfo cli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                       .pSetLayouts = &k->dsl, .pushConstantRangeCount = 1,
+                                       .pPushConstantRanges = &cpr };
+    CHECK_EQ(VK(vkCreatePipelineLayout)(g.dev, &cli, NULL, &k->cpl), VK_SUCCESS);
+    VkShaderModule cs = module_of(mask_comp_spv, sizeof mask_comp_spv);
+    VkComputePipelineCreateInfo cpi = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                        .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                   .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = cs,
+                                                   .pName = "main" },
+                                        .layout = k->cpl };
+    CHECK_EQ(VK(vkCreateComputePipelines)(g.dev, NULL, 1, &cpi, NULL, &k->cpipe), VK_SUCCESS);
+    VK(vkDestroyShaderModule)(g.dev, cs, NULL);
+    VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } };
+    VkDescriptorPoolCreateInfo dpi = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                       .poolSizeCount = 2, .pPoolSizes = ps };
+    CHECK_EQ(VK(vkCreateDescriptorPool)(g.dev, &dpi, NULL, &k->pool), VK_SUCCESS);
+    VkDescriptorSetAllocateInfo dai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                        .descriptorPool = k->pool, .descriptorSetCount = 1, .pSetLayouts = &k->dsl };
+    CHECK_EQ(VK(vkAllocateDescriptorSets)(g.dev, &dai, &k->set), VK_SUCCESS);
+    VkDescriptorImageInfo ii = { NULL, k->view, VK_IMAGE_LAYOUT_GENERAL };
+    VkDescriptorBufferInfo bi = { k->buf, 0, 256 };
+    VkWriteDescriptorSet w[2] = {
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = k->set, .dstBinding = 0, .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &ii },
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = k->set, .dstBinding = 1, .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bi },
+    };
+    VK(vkUpdateDescriptorSets)(g.dev, 2, w, 0, NULL);
+}
+
+static void loc_rig_down(loc_rig *k)
+{
+    VK(vkDestroyDescriptorPool)(g.dev, k->pool, NULL);
+    VK(vkDestroyPipeline)(g.dev, k->cpipe, NULL);
+    VK(vkDestroyPipeline)(g.dev, k->gpipe, NULL);
+    VK(vkDestroyPipelineLayout)(g.dev, k->cpl, NULL);
+    VK(vkDestroyPipelineLayout)(g.dev, k->gpl, NULL);
+    VK(vkDestroyDescriptorSetLayout)(g.dev, k->dsl, NULL);
+    VK(vkDestroyImageView)(g.dev, k->view, NULL);
+    VK(vkDestroyImage)(g.dev, k->img, NULL);
+    VK(vkFreeMemory)(g.dev, k->img_mem, NULL);
+    VK(vkUnmapMemory)(g.dev, k->buf_mem);
+    VK(vkDestroyBuffer)(g.dev, k->buf, NULL);
+    VK(vkFreeMemory)(g.dev, k->buf_mem, NULL);
+}
+
+/** @brief The samples the half plane before edge e (pixels) on axis covers, into *mask. */
+static void edge_mask(loc_rig *k, uint32_t n, float e, uint32_t axis, uint32_t *mask)
+{
+    *mask = 0;
+    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                        .commandPool = g.pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                        .commandBufferCount = 1 };
+    VkCommandBuffer cb;
+    CHECK_EQ(VK(vkAllocateCommandBuffers)(g.dev, &cai, &cb), VK_SUCCESS);
+    VkCommandBufferBeginInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    VK(vkBeginCommandBuffer)(cb, &cbi);
+    VkImageMemoryBarrier ib = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = k->img,
+                                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    VK(vkCmdPipelineBarrier)(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
+                             NULL, 1, &ib);
+    VkRenderingAttachmentInfo ca = { .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = k->view,
+                                     .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                     .storeOp = VK_ATTACHMENT_STORE_OP_STORE };
+    VkRenderingInfo ri = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = { { 0, 0 }, { 1, 1 } },
+                           .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &ca };
+    VK(vkCmdBeginRendering)(cb, &ri);
+    VK(vkCmdBindPipeline)(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, k->gpipe);
+    struct {
+        float e;
+        uint32_t axis;
+    } pc = { e, axis };
+    VK(vkCmdPushConstants)(cb, k->gpl, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pc, &pc);
+    VK(vkCmdDraw)(cb, 6, 1, 0, 0);
+    VK(vkCmdEndRendering)(cb);
+    nvn_vk_barrier(cb);
+    VK(vkCmdBindPipeline)(cb, VK_PIPELINE_BIND_POINT_COMPUTE, k->cpipe);
+    VK(vkCmdBindDescriptorSets)(cb, VK_PIPELINE_BIND_POINT_COMPUTE, k->cpl, 0, 1, &k->set, 0, NULL);
+    VK(vkCmdPushConstants)(cb, k->cpl, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4, &n);
+    VK(vkCmdDispatch)(cb, 1, 1, 1);
+    nvn_vk_barrier(cb);
+    VK(vkEndCommandBuffer)(cb);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb };
+    VK(vkResetFences)(g.dev, 1, &g.fence);
+    CHECK_EQ(VK(vkQueueSubmit)(g.queue, 1, &si, g.fence), VK_SUCCESS);
+    CHECK_EQ(VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, 10000000000ull), VK_SUCCESS);
+    VK(vkFreeCommandBuffers)(g.dev, g.pool, 1, &cb);
+    *mask = *k->map;
+}
+
+TEST(nvn_programmable_sample_locations_land_on_nvns_sixteenths)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!g.sample_locations || !g.sample_location_counts) {
+        fprintf(stderr, "nvn_programmable_sample_locations_land_on_nvns_sixteenths: no exact sample locations, skipped\n");
+        return;
+    }
+    VkImageFormatProperties ifp;
+    CHECK_EQ(VK(vkGetPhysicalDeviceImageFormatProperties)(g.phys, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
+                                                          VK_IMAGE_TILING_OPTIMAL,
+                                                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                              VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                          0, &ifp),
+             VK_SUCCESS);
+    uint32_t seed = 0x2468ace1u;
+    for (uint32_t n = 2; n <= 16; n *= 2) {
+        if (!(g.sample_location_counts & ifp.sampleCounts & n))
+            continue;
+        for (uint32_t round = 0; round < 3; round++) {
+            uint8_t nib[16];
+            for (uint32_t s = 0; s < n; s++) {
+                seed = seed * 1103515245u + 12345u;
+                nib[s] = (uint8_t)(seed >> 16);
+            }
+            VkSampleLocationEXT locs[16];
+            nvn_vk_sample_locations(nib, n, locs);
+            static loc_rig k;
+            loc_rig_up(&k, n, locs);
+            uint8_t at[16][2];
+            memset(at, 0xff, sizeof at);
+            for (uint32_t axis = 0; axis < 2; axis++)
+                for (uint32_t e = 0; e <= 16; e++) {
+                    uint32_t m;
+                    edge_mask(&k, n, ((float)e + 0.5f) / 16.0f, axis, &m);
+                    for (uint32_t s = 0; s < n; s++)
+                        if ((m >> s & 1) && at[s][axis] == 0xff)
+                            at[s][axis] = (uint8_t)e;
+                }
+            for (uint32_t s = 0; s < n; s++) {
+                CHECK_EQ(at[s][0], nib[s] & 15u);
+                CHECK_EQ(at[s][1], nib[s] >> 4);
+            }
+            loc_rig_down(&k);
+        }
+    }
 }

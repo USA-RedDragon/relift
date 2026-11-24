@@ -709,14 +709,20 @@ static int a2c_spec(replay *r, const module *frag, pipe_key *k)
 /** @brief What a draw takes from the bound multisample state. */
 typedef struct ms_read {
     uint32_t samples;
-    bool a2c, dither;
+    bool a2c, dither, locations_on;
+    /** @brief The programmable sample locations (x | y << 4 in 1/16 pixel), the same for every pixel. */
+    uint8_t locations[16];
 } ms_read;
 
 /**
  * @brief Reads the bound multisample state through the driver's getters, once for each distinct state (the last
  * one read is kept with its bytes). Its fields the layer does not replay stop: each is off in
  * nvnMultisampleStateSetDefaults (SDK 22.2.8 sdk 0x668bf0): raster samples (bits 15 to 19), coverage modulation (13,
- * 14), coverage to color (20), coverage truncation (5) and programmable sample locations (3).
+ * 14), coverage to color (20), coverage truncation (5) and the sample location grid (4). Programmable sample
+ * locations (3) without the grid are the first n of the state's 16, which the driver's BindMultisampleState copies to
+ * every pixel's slots of SET_ANTI_ALIAS_SAMPLE_POSITIONS (sdk 0x69a210 to 0x69a268); with the grid it writes all 16
+ * slots as they are, whose pixel order is in no public source (NVK writes slot n for pixel n / samples of a 2x2 grid,
+ * the driver's GetSampleLocationsGrid names a 16 / samples pixel grid), so the grid stops.
  */
 static int read_multisample(replay *r, ms_read *out)
 {
@@ -736,6 +742,7 @@ static int read_multisample(replay *r, ms_read *out)
         "nvnMultisampleStateGetCoverageModulationMode",
         "nvnMultisampleStateGetCoverageToColorEnable",
         "nvnMultisampleStateGetCoverageTruncationEnable",
+        "nvnMultisampleStateGetSampleLocationsGridEnable",
         "nvnMultisampleStateGetSampleLocationsEnable",
     };
     /* whether the driver has each getter: older NVN1 drivers have no coverage truncation, so their states have none */
@@ -755,9 +762,24 @@ static int read_multisample(replay *r, ms_read *out)
         int rc = nvn_vk_getter(r, getters[i], st->multisample, 24, NULL, 0, 0, NULL, &v[i]);
         if (rc != RL_OK)
             return rc;
-        if (i >= 3 && ((uint32_t)v[i] & 0xff))
+        if (i >= 3 && i < 8 && ((uint32_t)v[i] & 0xff))
             return nvn_vk_stop(r, "multisample state with %s %u, which is not replayed yet", getters[i] + 23,
                                (uint32_t)v[i] & 0xff);
+    }
+    memset(out->locations, 0, sizeof out->locations);
+    out->locations_on = (v[8] & 0xff) != 0;
+    for (uint32_t i = 0; out->locations_on && i < 16; i += 2) {
+        uint64_t args[2] = { i, 2 };
+        uint32_t f[4];
+        int rc = nvn_vk_getter(r, "nvnMultisampleStateGetSampleLocations", st->multisample, 24, args, 2, 1, f, NULL);
+        if (rc != RL_OK)
+            return rc;
+        for (uint32_t k = 0; k < 2; k++) {
+            float x, y;
+            memcpy(&x, &f[2 * k], 4);
+            memcpy(&y, &f[2 * k + 1], 4);
+            out->locations[i + k] = (uint8_t)((uint32_t)(x * 16.0f) | (uint32_t)(y * 16.0f) << 4);
+        }
     }
     out->samples = (uint32_t)v[0] > 1 ? (uint32_t)v[0] : 1;
     out->a2c = (v[1] & 0xff) != 0;
@@ -829,6 +851,7 @@ static int fixed_state(replay *r, pipe_key *k)
     }
     uint32_t state_samples = 1;
     bool a2c_on = false, a2c_dither = false;
+    k->has_locations = 0;
     if (st->have_multisample) {
         ms_read m;
         if ((rc = read_multisample(r, &m)) != RL_OK)
@@ -836,6 +859,8 @@ static int fixed_state(replay *r, pipe_key *k)
         a2c_on = m.a2c;
         a2c_dither = m.dither;
         state_samples = m.samples;
+        k->has_locations = m.locations_on;
+        memcpy(k->locations, m.locations, sizeof k->locations);
     }
     uint32_t drawn;
     if (!nvn_vk_target_samples(st, &drawn))
@@ -848,6 +873,10 @@ static int fixed_state(replay *r, pipe_key *k)
     if (drawn > 1 && !g.standard_samples)
         return nvn_vk_stop(r, "a draw of %u samples on a host device without the standard sample positions", drawn);
     k->samples = drawn > 1 ? drawn : 0;
+    if (k->has_locations && drawn > 1 && !(g.sample_locations && (g.sample_location_counts & drawn)))
+        return nvn_vk_stop(r, "programmable sample locations at %u samples on a host device that cannot place them", drawn);
+    if (drawn < 2)
+        k->has_locations = 0;
     k->sample_shading = drawn > 1 && st->sample_shading == 1;
     if (k->sample_shading && !g.sample_shading)
         return nvn_vk_stop(r, "a program forced to shade per sample on a host device without sample rate shading");
