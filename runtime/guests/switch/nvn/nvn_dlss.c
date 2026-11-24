@@ -17,6 +17,7 @@
 
 #include <math.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 const uint8_t nvn_dlss_texture_offsets[NVN_DLSS_PARAM_TEXTURES] = { 0, 16, 32, 48, 64, 104 };
@@ -82,7 +83,6 @@ static uint64_t callback_probe(rl_ctx *c, uint32_t slot)
         return callback_probe(c, i);                                                                                   \
     }
 CALLBACK(0)
-CALLBACK(1)
 CALLBACK(2)
 CALLBACK(3)
 CALLBACK(4)
@@ -94,15 +94,84 @@ CALLBACK(9)
 CALLBACK(10)
 CALLBACK(11)
 CALLBACK(12)
-CALLBACK(13)
 CALLBACK(14)
 CALLBACK(15)
 CALLBACK(16)
 CALLBACK(17)
-CALLBACK(18)
 CALLBACK(19)
 CALLBACK(20)
 #undef CALLBACK
+
+/** @brief Most CUDA kernels the library loads (it loads 64 modules of one kernel each for FE). */
+#define MAX_KERNELS 256u
+/** @brief The handles relift gives a loaded kernel: its index here plus this tag (the library keeps them opaque). */
+#define KERNEL_TAG 0x6b65726e00000000ull
+
+/** @brief The CUDA kernels the library loaded: name, the key of its translation, the guest image. */
+static struct {
+    char name[128];
+    char key[65];
+    uint64_t image;
+} g_kernels[MAX_KERNELS];
+static uint32_t g_nkernels;
+
+/**
+ * @brief Callback 18(cb, device, image, &module, &function, name): load a CUDA module image and get its kernel. The
+ * console driver runs cuModuleLoadData and cuModuleGetFunction and writes the two handles (sdk 0x65a600). relift finds
+ * the kernel's translation by its name (NVN_IFACE_KERNEL_NAME) and gives the kernel's index as both handles. True on
+ * success.
+ */
+static uint64_t callback_18(rl_ctx *c, uint8_t *mem)
+{
+    char name[128];
+    const char *n = nvn_str(mem, c->x[5], sizeof name);
+    if (!n || strlen(n) >= sizeof name)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library loads a kernel without a readable name");
+    snprintf(name, sizeof name, "%s", n);
+    uint32_t i = 0;
+    while (i < g_nkernels && strcmp(g_kernels[i].name, name))
+        i++;
+    if (i == g_nkernels) {
+        if (g_nkernels == MAX_KERNELS)
+            return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library loads more than %u kernels", MAX_KERNELS);
+        if (!nvn_shader_find_kernel(nvn_kernel_name_hash(name), g_kernels[i].key))
+            return (uint64_t)rl_guest_fatal(c, "nvn",
+                                            "the console DLSS library loads CUDA kernel %s, which the shader table has "
+                                            "no translation of (a table from before kernel name records?)",
+                                            name);
+        snprintf(g_kernels[i].name, sizeof g_kernels[i].name, "%s", name);
+        g_kernels[i].image = c->x[2];
+        g_nkernels++;
+    }
+    rl_st64(mem, c->x[3], KERNEL_TAG | i);
+    rl_st64(mem, c->x[4], KERNEL_TAG | i);
+    if (rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "DLSS library loads kernel %u %s (image 0x%llx): translation %s", i, name,
+               (unsigned long long)c->x[2], g_kernels[i].key);
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/** @brief Callback 1: the console driver's returns 0 (sdk 0x65a030); the library keeps it at +0x120 of its backend. */
+static uint64_t callback_1(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 0;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 13(cb, device): the GPU's architecture code, which the console driver reads from +0xb8 of its
+ * device (sdk 0x65a3b0). The library only compares it (backend 0xa7960): 0x703 and 0x705 pick its sm75 class, 0x806
+ * and 0x809 its sm86 class, anything else class 3; the game ships SM88 cubins only, so the console's code is one of
+ * the others. relift gives 0x808, compute capability 8.8.
+ */
+static uint64_t callback_13(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 0x808;
+    return nvn_ret(c);
+}
 
 rl_fn nvn_dlss_callback(uint32_t i)
 {
@@ -116,9 +185,6 @@ rl_fn nvn_dlss_callback(uint32_t i)
 
 /** @brief The console DLSS library's object, from its Handshake with relift's callbacks; 0 before. */
 static uint64_t g_library;
-
-/** @brief The network whose CreateNetwork is running, for the callbacks that allocate its memory (0 outside one). */
-static uint64_t g_creating;
 
 /** @brief The console library's vtable slots relift calls (.work/dlss/launch.md): init(lib, device), CreateNetwork(lib, desc). */
 enum { LIB_INIT = 0, LIB_CREATE_NETWORK = 4 };
@@ -374,9 +440,7 @@ uint64_t nvnh_nvnDlssNetworkInitialize(rl_ctx *c, uint8_t *mem)
         memset(mem + net, 0, 0x258);
         network_desc(mem, net, builder, opt);
         uint64_t desc = net + 0x210;
-        g_creating = net;
         rc = library_call(c, mem, LIB_CREATE_NETWORK, &desc, 1, &lib_net);
-        g_creating = 0;
         if (rc != RL_OK)
             return (uint64_t)rc;
         rl_st64(mem, net + 0xa0, lib_net);
