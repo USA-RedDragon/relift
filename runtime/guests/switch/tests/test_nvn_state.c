@@ -18,6 +18,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define RET 0x7000000ull
 
@@ -591,4 +592,28 @@ TEST(nvn_after_a_lost_device_a_stop_names_the_loss_and_its_fault_first)
     CHECK(strstr(s, "before the span 0xe000000000") != NULL);
     nvn_vk_lost_note("a second loss", NULL, NULL, NULL, 0);
     CHECK(strstr(nvn_vk_lost_text(), "a second loss") == NULL);
+}
+
+/** @brief The GPU trace report shows 64 hits by default; RELIFT_NVN_GPU_TRACE_LINES and _PCS move the window. */
+TEST(nvn_gpu_trace_report_window_comes_from_the_environment)
+{
+    uint32_t lines, from, to;
+    unsetenv("RELIFT_NVN_GPU_TRACE_LINES");
+    unsetenv("RELIFT_NVN_GPU_TRACE_PCS");
+    trace_window(&lines, &from, &to);
+    CHECK_EQ(lines, 64u);
+    CHECK_EQ(from, 0u);
+    CHECK_EQ(to, UINT32_MAX);
+    setenv("RELIFT_NVN_GPU_TRACE_LINES", "500", 1);
+    setenv("RELIFT_NVN_GPU_TRACE_PCS", "c00-ce0", 1);
+    trace_window(&lines, &from, &to);
+    CHECK_EQ(lines, 500u);
+    CHECK_EQ(from, 0xc00u);
+    CHECK_EQ(to, 0xce0u);
+    setenv("RELIFT_NVN_GPU_TRACE_PCS", "0x62f0", 1);
+    trace_window(&lines, &from, &to);
+    CHECK_EQ(from, 0x62f0u);
+    CHECK_EQ(to, 0x62f0u);
+    unsetenv("RELIFT_NVN_GPU_TRACE_LINES");
+    unsetenv("RELIFT_NVN_GPU_TRACE_PCS");
 }

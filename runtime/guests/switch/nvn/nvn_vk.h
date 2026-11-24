@@ -474,6 +474,8 @@ void nvn_trace_begin(replay *r, const char *kind);
 /** @brief A texture or image the command being traced binds, saved as it is before the command. */
 void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t kind, uint32_t dim, bool image,
                        const uint8_t view[17]);
+/** @brief The GPU trace report's line limit and PC window from the environment (nvn_draw.c). */
+void trace_window(uint32_t *lines, uint32_t *from, uint32_t *to);
 /** @brief After the command is recorded: submits it and writes its line and its files. */
 void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
 /**

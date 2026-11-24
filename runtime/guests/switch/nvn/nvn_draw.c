@@ -2353,6 +2353,24 @@ static void count_command(void)
     }
 }
 
+/**
+ * @brief Which hits a GPU trace report shows: at most RELIFT_NVN_GPU_TRACE_LINES of them (default 64), those whose
+ * instruction lies at RELIFT_NVN_GPU_TRACE_PCS=<from>-<to> (hex, inclusive; default every one), so a report can reach
+ * past a long run of early instructions (a fragment program's handle loads) to the ones in question.
+ */
+void trace_window(uint32_t *lines, uint32_t *from, uint32_t *to)
+{
+    const char *l = getenv("RELIFT_NVN_GPU_TRACE_LINES"), *pcs = getenv("RELIFT_NVN_GPU_TRACE_PCS");
+    *lines = l && *l ? (uint32_t)strtoul(l, NULL, 0) : 64u;
+    *from = 0;
+    *to = UINT32_MAX;
+    if (pcs && *pcs) {
+        char *end = NULL;
+        *from = (uint32_t)strtoul(pcs, &end, 16);
+        *to = end && *end == '-' ? (uint32_t)strtoul(end + 1, NULL, 16) : *from;
+    }
+}
+
 /** @brief A word name for a trace source or destination: R<n>, UR<n> or c<bank>[0x<offset>]. */
 static void trace_name(uint32_t id, char *s, size_t n)
 {
@@ -2404,9 +2422,11 @@ static void trace_report(const replay *r, const char *key, uint32_t words)
                    w[0], w[1], w[2], w[3], where);
         }
     }
-    for (uint32_t k = 0; k < slots && shown < 64; k++) {
+    uint32_t lines, from, to;
+    trace_window(&lines, &from, &to);
+    for (uint32_t k = 0; k < slots && shown < lines; k++) {
         const uint32_t *s = t + 16 + 16 * k;
-        if (!s[0])
+        if (!s[0] || s[2] < from || s[2] > to)
             continue;
         char line[512], name[32];
         float f;
