@@ -48,6 +48,9 @@
 #ifndef _WIN32
 #include <sys/resource.h>
 #endif
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 
 /** @brief A guest thread that keeps its core this long inside the NVN layer is logged. */
 #define HOLD_WARN_NS 20000000ll
@@ -5976,6 +5979,18 @@ static void present_rate(uint64_t total)
            (unsigned long long)total, (double)(total - last_total) * 1e9 / (double)(now - last_ns),
            (double)(now - last_ns) / 1e9, (unsigned long long)starts, (unsigned long long)faults,
            (unsigned long long)rl_input_host_events(RL_INPUT_HOST_KINDS));
+#if defined(__GLIBC__)
+    {
+        struct mallinfo2 mi = mallinfo2();
+        uint32_t libs, gfx, comp;
+        nvn_pipe_held(&libs, &gfx, &comp);
+        rl_log(RL_LOG_INFO, "nvn",
+               "host heap: %.1f MiB in arenas, %.1f MiB in use, %.1f MiB free but kept, %.1f MiB mapped; pipelines held: "
+               "%u libraries, %u graphics, %u compute",
+               (double)mi.arena / 1048576.0, (double)mi.uordblks / 1048576.0, (double)mi.fordblks / 1048576.0,
+               (double)mi.hblkhd / 1048576.0, libs, gfx, comp);
+    }
+#endif
     uint64_t up, down, syncs, read, marked;
     static uint64_t up0, down0, syncs0, read0, marked0;
     nvn_mirror_stats(&up, &down, &syncs, &read, &marked);

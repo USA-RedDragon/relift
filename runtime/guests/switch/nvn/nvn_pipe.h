@@ -227,5 +227,10 @@ bool nvn_pipe_save_due(uint64_t now, uint64_t saved, uint64_t late_at, bool dirt
 
 /** @brief Pipelines the driver compiled, and the time it took (ns), counting those made before and after nvn_pipe_warmed. */
 void nvn_pipe_stats(uint64_t *made, uint64_t *made_ns, uint64_t *late, uint64_t *late_ns);
+/**
+ * @brief The host pipeline objects the layer holds (none is destroyed while the game runs): graphics pipeline
+ * libraries of every part, linked graphics pipelines, and compute pipelines.
+ */
+void nvn_pipe_held(uint32_t *libraries, uint32_t *graphics, uint32_t *compute);
 
 #endif

@@ -1000,6 +1000,15 @@ void nvn_pipe_stats(uint64_t *made, uint64_t *made_ns, uint64_t *late, uint64_t 
     pthread_mutex_unlock(&P.lock);
 }
 
+void nvn_pipe_held(uint32_t *libraries, uint32_t *graphics, uint32_t *compute)
+{
+    pthread_mutex_lock(&P.lock);
+    *libraries = P.vi.n + P.pr.n + P.fs.n + P.fo.n;
+    *graphics = P.full.n;
+    *compute = P.comp.n + P.mcomp.n;
+    pthread_mutex_unlock(&P.lock);
+}
+
 static void le32w(uint8_t *p, uint32_t v)
 {
     for (int i = 0; i < 4; i++)
