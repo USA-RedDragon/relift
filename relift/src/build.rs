@@ -20,6 +20,7 @@ use crate::import::{BoxError, cache_root};
 use crate::mods::stage::{Analyzed, Found, Input, Stage};
 use crate::mods::variants::ModulePlan;
 use crate::settings::Settings;
+use crate::switch::build::SWITCH_LAYERS;
 use crate::ui::Ui;
 
 /// The runtime sources this binary was built beside, used when the
@@ -1118,21 +1119,6 @@ pub(crate) fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, 
     pools
 }
 
-fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
-    let mut out = Vec::new();
-    for layer in ["core", "cpus/arm64", "guests/switch"] {
-        let dir = rt.join(layer);
-        let mut v: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .map_err(|e| format!("{}: {e}", dir.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x == "c" || x == "S"))
-            .collect();
-        v.sort();
-        out.extend(v);
-    }
-    Ok(out)
-}
-
 /// The C compiler command: the configured or `PATH` clang, else `zig cc`
 /// from the configured or `PATH` zig.
 pub(crate) fn c_compiler(t: &crate::settings::Toolchain) -> Result<Vec<String>, BoxError> {
@@ -1894,14 +1880,7 @@ pub(crate) fn build_project(
     let rt = mirror_runtime(
         &runtime_dir(settings),
         &out.join("runtime"),
-        &[
-            "core",
-            "cpus/arm64",
-            "gpuapi",
-            "guests/switch",
-            "host",
-            "third_party",
-        ],
+        SWITCH_LAYERS.mirror,
     )?;
     let dev = mode == Mode::Dev;
     let stub = debug_stub_built(
@@ -1962,7 +1941,7 @@ pub(crate) fn build_project(
             }
         })
         .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))
-        .chain([inc("core/include"), inc("cpus/arm64/include")])
+        .chain(SWITCH_LAYERS.lifted_inc.iter().map(|p| inc(p)))
         .chain(hotload.iter().cloned())
         .collect();
     // Code that produces FPSR flags gets them from host FP operations,
@@ -2043,14 +2022,7 @@ pub(crate) fn build_project(
             ]
             .map(String::from),
         )
-        .chain([
-            inc("core/include"),
-            inc("core"),
-            inc("cpus/arm64/include"),
-            inc("cpus/arm64"),
-            inc("guests/switch"),
-            inc("gpuapi/vk"),
-        ])
+        .chain(SWITCH_LAYERS.rt_inc.iter().map(|p| inc(p)))
         .chain(extras.defines())
         .chain(hotload.iter().cloned())
         .chain((!stub).then(|| "-DRL_NO_DEBUG_STUB".to_string()))
@@ -2127,7 +2099,7 @@ pub(crate) fn build_project(
             stage: 0,
         });
     }
-    let mut rt_compiles: Vec<Compile> = runtime_sources(&rt)?
+    let mut rt_compiles: Vec<Compile> = crate::layers::runtime_sources(&rt, &SWITCH_LAYERS)?
         .into_iter()
         .map(|s| Compile {
             obj: obj(&s, "rt"),
@@ -2317,66 +2289,30 @@ pub fn run_build(
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     check_toolchain(settings)?;
-    if crate::linux::is_project() {
-        if targets.len() > 1 {
-            return Err("one target at a time for a Linux build".into());
-        }
-        let target = match targets.first() {
-            Some(t) => crate::cross::target(t)?,
-            None => None,
-        };
-        crate::linux::build(settings, !dev, target, ui)?;
-        return Ok(());
-    }
-    let handheld = if crate::gb::is_project() {
-        Some("Game Boy")
-    } else if crate::gba::is_project() {
-        Some("Game Boy Advance")
-    } else if crate::n64::is_project() {
-        Some("Nintendo 64")
-    } else if crate::sms::is_project() {
-        Some("Master System")
-    } else if crate::nds::is_project() {
-        Some("Nintendo DS")
-    } else {
-        None
-    };
-    if dev && handheld.is_none() {
+    let guest = crate::guests::of_project();
+    if dev && !guest.is_some_and(|g| g.dev_build) {
         return Err(
             "--dev is for a cartridge ROM project; `relift run` makes the dev build of others"
                 .into(),
         );
     }
-    if let Some(what) = handheld {
+    if let Some(guest) = guest {
         if targets.len() > 1 {
-            return Err(format!("one target at a time for a {what} build").into());
+            return Err(format!("one target at a time for a {} build", guest.label).into());
         }
         let target = match targets.first() {
             Some(t) => crate::cross::target(t)?,
             None => None,
         };
-        let built = if crate::gb::is_project() {
-            crate::gb::build(settings, mods, !dev, target, ui)?
-        } else if crate::sms::is_project() {
-            if !mods.is_empty() {
-                return Err("mods are not supported for Sega 8-bit ROMs yet".into());
-            }
-            crate::sms::build(settings, !dev, target, ui)?
-        } else if crate::gba::is_project() {
-            crate::gba::build(settings, mods, !dev, target, ui)?
-        } else if crate::nds::is_project() {
-            let built = crate::nds::build(settings, mods, !dev, target, ui)?;
-            if built.cross.is_none() {
-                return Ok(());
-            }
-            built
-        } else {
-            let built = crate::n64::build(settings, mods, !dev, target, ui)?;
-            if built.cross.is_none() {
-                return Ok(());
-            }
-            built
+        let built = (guest.build)(settings, mods, !dev, target, ui)?;
+        let packaged = match guest.package {
+            crate::guests::Package::Always => true,
+            crate::guests::Package::Cross => built.cross.is_some(),
+            crate::guests::Package::Never => false,
         };
+        if !packaged {
+            return Ok(());
+        }
         let name = crate::progname::project_name();
         let request = PackageRequest {
             name: &name,
@@ -2595,41 +2531,11 @@ pub fn run_run(
     ui: &mut Ui,
 ) -> Result<i32, BoxError> {
     check_toolchain(settings)?;
-    if crate::linux::is_project() {
+    if let Some(guest) = crate::guests::of_project() {
         if target.is_some_and(|t| t != "host") {
             return Err("only the host target runs so far".into());
         }
-        return crate::linux::run(settings, args, ui);
-    }
-    if crate::gb::is_project() {
-        if target.is_some_and(|t| t != "host") {
-            return Err("only the host target runs so far".into());
-        }
-        return crate::gb::run(settings, ui);
-    }
-    if crate::gba::is_project() {
-        if target.is_some_and(|t| t != "host") {
-            return Err("only the host target runs so far".into());
-        }
-        return crate::gba::run(settings, ui);
-    }
-    if crate::sms::is_project() {
-        if target.is_some_and(|t| t != "host") {
-            return Err("only the host target runs so far".into());
-        }
-        return crate::sms::run(settings, ui);
-    }
-    if crate::n64::is_project() {
-        if target.is_some_and(|t| t != "host") {
-            return Err("only the host target runs so far".into());
-        }
-        return crate::n64::run(settings, ui);
-    }
-    if crate::nds::is_project() {
-        if target.is_some_and(|t| t != "host") {
-            return Err("only the host target runs so far".into());
-        }
-        return crate::nds::run(settings, ui);
+        return (guest.run)(settings, args, ui);
     }
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
     let built = build_project(settings, &targets, &[], Mode::Dev, ui)?;

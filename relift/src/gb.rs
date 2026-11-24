@@ -58,21 +58,6 @@ pub fn is_rom(path: &Path) -> bool {
     named && rom.len() >= 0x150 || relift_gb_formats::Header::parse(&rom).is_ok_and(|h| h.logo_ok)
 }
 
-/// Whether the project's `relift.toml` names the Game Boy guest.
-#[must_use]
-pub fn is_project() -> bool {
-    std::fs::read_to_string("relift.toml")
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| {
-            t.get("game")
-                .and_then(|g| g.get("guest"))
-                .and_then(|g| g.as_str())
-                .map(|g| g == "gb")
-        })
-        .unwrap_or(false)
-}
-
 /// The hardware a ROM starts on: a Game Boy Color for a cartridge whose
 /// CGB flag (`$0143`) knows it, else the original Game Boy.
 #[must_use]

@@ -78,14 +78,6 @@ pub fn is_rom(path: &Path) -> bool {
     })
 }
 
-/// Whether the project's `relift.toml` names this guest.
-#[must_use]
-pub fn is_project() -> bool {
-    project_table()
-        .and_then(|g| g.get("guest").and_then(|v| v.as_str()).map(|g| g == "sms"))
-        .unwrap_or(false)
-}
-
 fn project_table() -> Option<toml::Table> {
     let t: toml::Table = std::fs::read_to_string("relift.toml").ok()?.parse().ok()?;
     t.get("game")?.as_table().cloned()

@@ -128,6 +128,17 @@ impl Layers {
     };
 }
 
+/// The runtime sources of `layers` below the runtime root `rt`: the C and
+/// assembly files of each directory, sorted, then the single files.
+pub(crate) fn runtime_sources(rt: &Path, layers: &Layers) -> Result<Vec<PathBuf>, BoxError> {
+    let mut out = Vec::new();
+    for layer in layers.dirs {
+        out.extend(c_files(&rt.join(layer))?);
+    }
+    out.extend(layers.files.iter().map(|f| rt.join(f)));
+    Ok(out)
+}
+
 /// Compiles the lifted files `lifted` and the program files `prog` of
 /// `cdir` with the runtime layers `layers` and links `game` in `out`.
 pub(crate) fn compile_layers(
@@ -265,11 +276,7 @@ pub(crate) fn compile_layers(
             stage: 0,
         })
         .collect();
-    let mut rt_compiles = Vec::new();
-    for layer in layers.dirs {
-        rt_compiles.extend(c_files(&rt.join(layer))?);
-    }
-    rt_compiles.extend(layers.files.iter().map(|f| rt.join(f)));
+    let rt_compiles = runtime_sources(&rt, layers)?;
     let (prog, resources) = crate::winres::split(prog);
     for s in &prog {
         compiles.push(Compile {

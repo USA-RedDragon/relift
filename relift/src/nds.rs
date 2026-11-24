@@ -82,21 +82,6 @@ pub fn is_rom_image(rom: &[u8], named: bool) -> bool {
     })
 }
 
-/// Whether the project's `relift.toml` names the Nintendo DS guest.
-#[must_use]
-pub fn is_project() -> bool {
-    std::fs::read_to_string("relift.toml")
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| {
-            t.get("game")
-                .and_then(|g| g.get("guest"))
-                .and_then(|g| g.as_str())
-                .map(|g| g == "nds")
-        })
-        .unwrap_or(false)
-}
-
 fn quote(s: &str) -> String {
     toml::Value::String(s.into()).to_string()
 }

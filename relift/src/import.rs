@@ -99,56 +99,26 @@ pub fn run(
     sysroot: Option<&Path>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
-    if sysroot.is_some() && !crate::linux::is_executable(dump) {
+    let guest = crate::guests::of_input(dump);
+    if sysroot.is_some() && !guest.is_some_and(|g| g.sysroot) {
         return Err("--sysroot is for a dynamically linked Linux program".into());
     }
-    let switch_only = |what: &str| -> Result<(), BoxError> {
+    if let Some(guest) = guest {
+        let what = guest.input;
         if system_data.is_some() || program.is_some() {
-            return Err(format!("--system-data and --program are for Switch dumps; {what}").into());
+            let has = what
+                .strip_suffix(" ROM")
+                .or_else(|| what.strip_suffix(" image"))
+                .unwrap_or(what);
+            return Err(format!(
+                "--system-data and --program are for Switch dumps; {has} has no system fonts"
+            )
+            .into());
         }
-        Ok(())
-    };
-    if crate::gb::is_rom(dump) {
-        switch_only("a cartridge has no system fonts")?;
         if update.is_some() {
-            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
+            return Err(format!("--update is for Switch dumps; {what} has no updates").into());
         }
-        return crate::gb::import(settings, dump, ui);
-    }
-    if crate::nds::is_rom(dump) {
-        switch_only("a cartridge has no system fonts")?;
-        if update.is_some() {
-            return Err("--update is for Switch dumps; a cartridge image has no updates".into());
-        }
-        return crate::nds::import(settings, dump, ui);
-    }
-    if crate::gba::is_rom(dump) {
-        switch_only("a cartridge has no system fonts")?;
-        if update.is_some() {
-            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
-        }
-        return crate::gba::import(settings, dump, ui);
-    }
-    if crate::sms::is_rom(dump) {
-        switch_only("a cartridge has no system fonts")?;
-        if update.is_some() {
-            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
-        }
-        return crate::sms::import(settings, dump, ui);
-    }
-    if crate::linux::is_executable(dump) {
-        switch_only("a Linux program has no system fonts")?;
-        if update.is_some() {
-            return Err("--update is for Switch dumps; a Linux program has no updates".into());
-        }
-        return crate::linux::import(settings, dump, sysroot, ui);
-    }
-    if crate::n64::is_rom(dump) {
-        switch_only("a cartridge has no system fonts")?;
-        if update.is_some() {
-            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
-        }
-        return crate::n64::import(settings, dump, ui);
+        return (guest.import)(settings, dump, sysroot, ui);
     }
     let opts = Options {
         update: match update {

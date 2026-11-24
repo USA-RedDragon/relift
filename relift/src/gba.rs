@@ -86,21 +86,6 @@ pub fn rom_hints(
         .collect()
 }
 
-/// Whether the project's `relift.toml` names the Game Boy Advance guest.
-#[must_use]
-pub fn is_project() -> bool {
-    std::fs::read_to_string("relift.toml")
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| {
-            t.get("game")
-                .and_then(|g| g.get("guest"))
-                .and_then(|g| g.as_str())
-                .map(|g| g == "gba")
-        })
-        .unwrap_or(false)
-}
-
 fn title(rom: &[u8]) -> String {
     relift_gba_formats::Header::parse(rom)
         .map(|h| h.title)
