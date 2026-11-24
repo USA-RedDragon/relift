@@ -44,6 +44,17 @@ pub struct LiftFailure {
     pub message: String,
 }
 
+/// An intrinsic a frontend's blocks may call ([`Frontend::intrinsic_list`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntrinsicSig {
+    /// Its name.
+    pub name: &'static str,
+    /// How many arguments it takes.
+    pub args: usize,
+    /// Whether it gives a result.
+    pub result: bool,
+}
+
 /// Where a register slot lives in the lifted-code context.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Home {
@@ -304,6 +315,16 @@ pub trait Frontend {
     fn guard_exit(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
         let _ = (code, pc, insn);
         None
+    }
+
+    /// Every intrinsic the frontend's blocks may call. Code written at run
+    /// time (`relift-rtcode`) evaluates an intrinsic through the C
+    /// [`Frontend::intrinsic`] gives for it, in a function the build
+    /// generates per intrinsic listed here; a block that calls one not
+    /// listed, or with another number of arguments, stops there. Empty by
+    /// default.
+    fn intrinsic_list(&self) -> &'static [IntrinsicSig] {
+        &[]
     }
 }
 
