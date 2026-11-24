@@ -160,6 +160,13 @@ int nvn_vk_grow_check(void);
  * failing step's number, -1 with no device.
  */
 int nvn_vk_done_word_check(void);
+/**
+ * @brief Both timeline signalers (tl in nvn_vk.c): the start probe found that this device's timeline signals do not
+ * wait for the GPU; with the host signaling, a batch's value is not reached while its fence is unsignaled and is
+ * reached after, and a submit returns while an older batch runs; the move to GPU signals waits for the last host
+ * signal and keeps the values in order. 0 when all hold, the failing step's number otherwise, -1 with no device.
+ */
+int nvn_vk_timeline_check(void);
 /** @brief Waits for every batch nvn_vk_submit left running, oldest first; false on a device failure. */
 bool nvn_vk_settle(void);
 /** @brief Waits for the batches in flight when any may write guest memory (what nvn_lock does); false on a failure. */

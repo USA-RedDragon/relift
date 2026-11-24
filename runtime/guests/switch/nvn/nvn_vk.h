@@ -307,8 +307,9 @@ typedef struct nvn_vkdev {
     /** @brief Whether nvn_vk_calibrate reads the GPU clock and the guest clock at one moment. */
     bool calibrated;
     /**
-     * @brief A timeline semaphore every batch signals with the next value (timeline_value after a submit), so a
-     * thread other than the one that submits can wait for a batch without the fence the next submit resets.
+     * @brief A timeline semaphore that reaches each batch's value (timeline_value after a submit), so a thread other
+     * than the one that submits can wait for a batch without the fence the next submit resets. The batch signals it,
+     * or the host after the batch's fence where a GPU signal would wait for the GPU (tl in nvn_vk.c).
      */
     bool timeline_ok;
     /**
@@ -318,6 +319,8 @@ typedef struct nvn_vkdev {
     bool unused_while_pending;
     VkSemaphore timeline;
     uint64_t timeline_value;
+    /** @brief Whether the host signals timeline_value once its batch's fence signals, not the batch (see tl). */
+    bool timeline_host;
     VkPhysicalDeviceMemoryProperties memprops;
     char name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     /** @brief Every host image, capimages of room; there is no limit but memory. */

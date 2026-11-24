@@ -357,6 +357,8 @@ static bool make_device(rlvk_dev *d)
         RLVK_SWAPCHAIN_FNS(RLVK_LOAD_W)
     }
 #undef RLVK_LOAD_W
+    d->vkWaitSemaphores = (rlvk_result(RLVK_CALL *)(rlvk_handle, const void *, uint64_t))d->vkGetDeviceProcAddr(
+        d->device, "vkWaitSemaphores");
     if (present_wait) {
         d->vkWaitForPresentKHR = (rlvk_result(RLVK_CALL *)(rlvk_handle, rlvk_handle, uint64_t, uint64_t))
             d->vkGetDeviceProcAddr(d->device, "vkWaitForPresentKHR");

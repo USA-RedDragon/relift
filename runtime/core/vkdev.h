@@ -51,6 +51,8 @@ typedef struct rlvk_dev {
     uint32_t ndevice_exts;
     /** @brief The pNext chain of the VkDeviceCreateInfo the device was made with (the features the hooks enabled). */
     const void *device_pnext;
+    /** @brief vkWaitSemaphores (Vulkan 1.2), for timeline values the host signals; NULL on an older device. */
+    rlvk_result(RLVK_CALL *vkWaitSemaphores)(rlvk_handle device, const void *wait_info, uint64_t timeout);
 } rlvk_dev;
 
 /** @brief A buffer and its memory; map is set for a host-visible one. */

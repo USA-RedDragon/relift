@@ -67,6 +67,8 @@ typedef struct slot {
     /** @brief A timeline semaphore and value the slot's copy signals (rl_present_slot_end_after); 0 when finished. */
     rlvk_handle wait_sem;
     uint64_t wait_value;
+    /** @brief The value comes from the host: the presenter waits for it on the CPU before its submit. */
+    bool wait_cpu;
 } slot;
 
 struct rl_present {
@@ -1354,6 +1356,21 @@ static bool draw(rl_present *p, bool capture, bool frame)
         const uint64_t *pSignalSemaphoreValues;
     } tsi = { 1000207003, NULL, 2, values, 0, NULL };
     bool after = src && src->wait_sem;
+    if (after && src->wait_cpu) {
+        /* The host signals the value once the copy's batch ended; nothing on the queue waits for that signal. */
+        struct {
+            int32_t sType;
+            const void *pNext;
+            rlvk_flags flags;
+            uint32_t semaphoreCount;
+            const rlvk_handle *pSemaphores;
+            const uint64_t *pValues;
+        } wi = { 1000207004, NULL, 0, 1, &src->wait_sem, &src->wait_value };
+        rlvk_result wr = d->vkWaitSemaphores ? d->vkWaitSemaphores(d->device, &wi, UINT64_MAX) : -1;
+        if (wr != RLVK_SUCCESS)
+            rl_log(RL_LOG_ERROR, "present", "waiting for the frame's copy failed (%d)", (int)wr);
+        after = false;
+    }
     rlvk_submit_info sub = {
         .sType = RLVK_ST_SUBMIT_INFO,
         .pNext = after ? &tsi : NULL,
@@ -1734,16 +1751,17 @@ void rl_present_slot_abort(rl_present *p, const rl_present_slot *s)
 
 void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h)
 {
-    rl_present_slot_end_after(p, s, shown_w, shown_h, 0, 0);
+    rl_present_slot_end_after(p, s, shown_w, shown_h, 0, 0, false);
 }
 
 void rl_present_slot_end_after(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h,
-                               uint64_t semaphore, uint64_t value)
+                               uint64_t semaphore, uint64_t value, bool host_signaled)
 {
     pthread_mutex_lock(&p->lock);
     slot *sl = &p->slots[s->index];
     sl->wait_sem = (rlvk_handle)(uintptr_t)semaphore;
     sl->wait_value = value;
+    sl->wait_cpu = host_signaled && semaphore;
     if (p->fresh)
         p->stats.replaced++;
     if (p->next_slot >= 0)

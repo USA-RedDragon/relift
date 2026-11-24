@@ -1595,6 +1595,16 @@ TEST(nvn_a_submit_never_waits_for_an_old_batch_while_a_slot_can_be_made)
     CHECK_EQ(nvn_vk_grow_check(), 0);
 }
 
+TEST(nvn_a_host_signaled_timeline_value_never_comes_before_its_fence)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_a_host_signaled_timeline_value_never_comes_before_its_fence: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_timeline_check(), 0);
+}
+
 TEST(nvn_a_batch_reads_done_only_once_its_writes_are_visible)
 {
     nvn_probes p;

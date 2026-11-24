@@ -141,12 +141,14 @@ void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown
  */
 void rl_present_gpu_stats(uint64_t *ticks, uint64_t *presents);
 /**
- * @brief rl_present_slot_end for a copy that is submitted but not finished: the presenter's GPU work waits for
- * timeline semaphore (a VkSemaphore of the core's device) to reach value before it reads the slot, so the guest's
- * thread does not wait for its frame. The submission that signals value must already be on the queue.
+ * @brief rl_present_slot_end for a copy that is submitted but not finished: the presenter waits for timeline
+ * semaphore (a VkSemaphore of the core's device) to reach value before it reads the slot, so the guest's thread does
+ * not wait for its frame. Its GPU work waits, and the submission that signals value must already be on the queue; or,
+ * with host_signaled (the value comes from vkSignalSemaphore, maybe later), the presenter's thread waits on the CPU
+ * before it submits, so no submission on the queue waits for a signal not yet made.
  */
 void rl_present_slot_end_after(rl_present *p, const rl_present_slot *s, uint32_t shown_w, uint32_t shown_h,
-                               uint64_t semaphore, uint64_t value);
+                               uint64_t semaphore, uint64_t value, bool host_signaled);
 /** @brief How slot pictures (the backend's own way, as rl_window_set_fit says) fill the window: to fit, or by whole multiples. */
 void rl_present_set_fit(rl_present *p, bool fit);
 /**

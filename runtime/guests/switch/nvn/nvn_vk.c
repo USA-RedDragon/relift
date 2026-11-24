@@ -117,7 +117,8 @@ static struct {
     struct submit_job {
         VkCommandBuffer cb;
         VkFence fence;
-        uint64_t signal;
+        /** @brief The timeline value the batch signals on the GPU, or the host after its fence (retire); 0 for none. */
+        uint64_t signal, retire;
         uint32_t slot;
     } q[SUBMIT_JOBS];
     uint32_t head, tail;
@@ -126,6 +127,8 @@ static struct {
     bool on, started;
     VkResult err;
 } sth;
+
+static void tl_retire(VkFence f, uint64_t v);
 
 static void *submit_main(void *arg)
 {
@@ -150,6 +153,8 @@ static void *submit_main(void *arg)
         VkResult vr = VK(vkQueueSubmit)(g.queue, 1, &si, j.fence);
         rl_vkdev_guest_queue_unlock();
         nvn_gpuprof_handed(j.slot);
+        if (vr == VK_SUCCESS && j.retire)
+            tl_retire(j.fence, j.retire);
         pthread_mutex_lock(&sth.mu);
         if (vr != VK_SUCCESS && sth.err == VK_SUCCESS) {
             sth.err = vr;
@@ -188,14 +193,17 @@ static bool submit_threaded(void)
     return sth.on;
 }
 
-/** @brief Hands the batch in cb to the submit thread; it signals fence and, when signal is not 0, the timeline value. */
-static VkResult submit_queue(VkCommandBuffer cb, VkFence fence, uint64_t signal, uint32_t slot)
+/**
+ * @brief Hands the batch in cb to the submit thread; it signals fence and, when signal is not 0, the timeline value.
+ * When retire is not 0 the host signals that value once fence signals.
+ */
+static VkResult submit_queue(VkCommandBuffer cb, VkFence fence, uint64_t signal, uint64_t retire, uint32_t slot)
 {
     pthread_mutex_lock(&sth.mu);
     while (sth.tail - sth.head == SUBMIT_JOBS)
         pthread_cond_wait(&sth.cv, &sth.mu);
     VkResult vr = sth.err;
-    sth.q[sth.tail % SUBMIT_JOBS] = (struct submit_job){ cb, fence, signal, slot };
+    sth.q[sth.tail % SUBMIT_JOBS] = (struct submit_job){ cb, fence, signal, retire, slot };
     sth.tail++;
     sth.queued++;
     pthread_cond_broadcast(&sth.cv);
@@ -219,6 +227,261 @@ static void submit_handed_to(uint64_t v)
         pthread_cond_wait(&sth.cv, &sth.mu);
     pthread_mutex_unlock(&sth.mu);
 }
+
+/**
+ * @brief Who signals the guest timeline (g.timeline): the batches on the GPU, or the host once each batch's fence
+ * signals.
+ *
+ * Mesa's emulated timelines (Turnip on kgsl) free finished points on every timeline signal in vkQueueSubmit by asking
+ * each older point with a zero timeout; Mesa before 26.3.0 (commit e984ef294) hands that zero to kgsl's
+ * WAITTIMESTAMP, which takes it as a forever wait. Every timeline-signaling submit then waits for the GPU to finish
+ * the batches before it, so the CPU and the GPU never overlap. There the batches signal only their fences and the
+ * retire thread waits for each fence in order and signals the same value from the host: every waiter (reports,
+ * pacing, the presenter) sees the same values, never before the batch's fence.
+ *
+ * Which one is a fact of the driver, found by tl_probe on a thread at bring-up: a batch held on a host-set event
+ * signals a probe timeline, and a second signal of it is submitted; when that submit does not return while the first
+ * is held, timeline signals wait for the GPU. Until the probe ends the host signals; it moves to the GPU only when no
+ * host signal is still to come, so the values stay in order. RELIFT_NVN_TIMELINE=gpu or host sets it.
+ */
+enum { TL_UNKNOWN, TL_GPU, TL_HOST };
+#define RETIRE_JOBS 64u
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    struct {
+        VkFence fence;
+        uint64_t value;
+    } q[RETIRE_JOBS];
+    uint32_t head, tail;
+    /** @brief The last value the host signaled. */
+    uint64_t reached;
+    /** @brief The signaler in use (TL_GPU or TL_HOST) and the probe's finding (TL_UNKNOWN until it ends). */
+    int mode, found;
+    /** @brief The probe's submit-to-return time of the second signal, in nanoseconds (-1 when it did not return). */
+    int64_t probe_ns;
+} tl = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, { { 0 } }, 0, 0, 0, TL_HOST, TL_UNKNOWN, 0 };
+
+static void *retire_main(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&tl.mu);
+    for (;;) {
+        while (tl.head == tl.tail)
+            pthread_cond_wait(&tl.cv, &tl.mu);
+        VkFence f = tl.q[tl.head % RETIRE_JOBS].fence;
+        uint64_t v = tl.q[tl.head % RETIRE_JOBS].value;
+        pthread_mutex_unlock(&tl.mu);
+        /* A failed wait (a lost device) still signals, so no waiter waits forever; the fence's owner reports it. */
+        (void)VK(vkWaitForFences)(g.dev, 1, &f, VK_TRUE, UINT64_MAX);
+        VkSemaphoreSignalInfo si = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, .semaphore = g.timeline, .value = v };
+        VkResult vr = VK(vkSignalSemaphore)(g.dev, &si);
+        if (vr != VK_SUCCESS)
+            rl_log(RL_LOG_ERROR, "nvn", "the host could not signal timeline value %llu (%d)", (unsigned long long)v,
+                   (int)vr);
+        pthread_mutex_lock(&tl.mu);
+        tl.reached = v;
+        tl.head++;
+        pthread_cond_broadcast(&tl.cv);
+    }
+    return NULL;
+}
+
+/**
+ * @brief Whether the next batch signals the timeline on the GPU: the probe found that harmless and no host signal is
+ * still to come. Called by the thread that records batches, before it numbers one.
+ */
+static bool tl_gpu(void)
+{
+    if (__atomic_load_n(&tl.mode, __ATOMIC_ACQUIRE) == TL_GPU)
+        return true;
+    if (__atomic_load_n(&tl.found, __ATOMIC_ACQUIRE) != TL_GPU)
+        return false;
+    pthread_mutex_lock(&tl.mu);
+    bool idle = tl.head == tl.tail;
+    if (idle)
+        __atomic_store_n(&tl.mode, TL_GPU, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&tl.mu);
+    if (idle)
+        rl_log(RL_LOG_INFO, "nvn", "batches signal the timeline on the GPU from value %llu",
+               (unsigned long long)g.timeline_value + 1);
+    return idle;
+}
+
+/** @brief Has the retire thread signal value v once fence f signals; f's batch is already on the queue. */
+static void tl_retire(VkFence f, uint64_t v)
+{
+    pthread_mutex_lock(&tl.mu);
+    while (tl.tail - tl.head == RETIRE_JOBS)
+        pthread_cond_wait(&tl.cv, &tl.mu);
+    tl.q[tl.tail % RETIRE_JOBS].fence = f;
+    tl.q[tl.tail % RETIRE_JOBS].value = v;
+    tl.tail++;
+    pthread_cond_broadcast(&tl.cv);
+    pthread_mutex_unlock(&tl.mu);
+}
+
+/**
+ * @brief Waits until the host signaled value v, a value it signals; the batch's fence may be reset only after this,
+ * as the retire thread waits on it.
+ */
+static void tl_retired(uint64_t v)
+{
+    pthread_mutex_lock(&tl.mu);
+    while (tl.reached < v)
+        pthread_cond_wait(&tl.cv, &tl.mu);
+    pthread_mutex_unlock(&tl.mu);
+}
+
+static struct {
+    VkQueue queue;
+    VkSemaphore sem;
+    bool done;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+} tlp = { NULL, NULL, false, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
+
+/** @brief The probe's second submit: a signal of value 2 with no work. */
+static void *tl_probe_signal(void *arg)
+{
+    (void)arg;
+    uint64_t two = 2;
+    VkTimelineSemaphoreSubmitInfo tsi = { .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                          .signalSemaphoreValueCount = 1,
+                                          .pSignalSemaphoreValues = &two };
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &tsi, .signalSemaphoreCount = 1,
+                        .pSignalSemaphores = &tlp.sem };
+    rl_vkdev_guest_queue_lock();
+    (void)VK(vkQueueSubmit)(tlp.queue, 1, &si, NULL);
+    rl_vkdev_guest_queue_unlock();
+    pthread_mutex_lock(&tlp.mu);
+    tlp.done = true;
+    pthread_cond_broadcast(&tlp.cv);
+    pthread_mutex_unlock(&tlp.mu);
+    return NULL;
+}
+
+/** @brief How long the probe holds its first batch for the second submit to return: far above a submit's cost. */
+#define TL_PROBE_NS 10000000ll
+
+/** @brief Finds whether a timeline signal waits for the GPU (see tl), from its own pool, semaphore and event. */
+static void *tl_probe(void *arg)
+{
+    (void)arg;
+    int found = TL_HOST;
+    VkCommandPool pool = NULL;
+    VkCommandBuffer cb = NULL;
+    VkEvent ev = NULL;
+    VkSemaphoreTypeCreateInfo ti = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE };
+    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti };
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = g.family };
+    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                        .commandBufferCount = 1 };
+    VkEventCreateInfo eci = { .sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO };
+    VkCommandBufferBeginInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    tlp.queue = g.queue;
+    if (VK(vkCreateSemaphore)(g.dev, &sci, NULL, &tlp.sem) != VK_SUCCESS ||
+        VK(vkCreateCommandPool)(g.dev, &pci, NULL, &pool) != VK_SUCCESS ||
+        (cai.commandPool = pool, VK(vkAllocateCommandBuffers)(g.dev, &cai, &cb)) != VK_SUCCESS ||
+        VK(vkCreateEvent)(g.dev, &eci, NULL, &ev) != VK_SUCCESS || VK(vkBeginCommandBuffer)(cb, &cbi) != VK_SUCCESS)
+        goto out;
+    VK(vkCmdWaitEvents)(cb, 1, &ev, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, NULL, 0, NULL, 0,
+                        NULL);
+    if (VK(vkEndCommandBuffer)(cb) != VK_SUCCESS)
+        goto out;
+    uint64_t one = 1;
+    VkTimelineSemaphoreSubmitInfo tsi = { .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                          .signalSemaphoreValueCount = 1,
+                                          .pSignalSemaphoreValues = &one };
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &tsi, .commandBufferCount = 1,
+                        .pCommandBuffers = &cb, .signalSemaphoreCount = 1, .pSignalSemaphores = &tlp.sem };
+    rl_vkdev_guest_queue_lock();
+    VkResult vr = VK(vkQueueSubmit)(tlp.queue, 1, &si, NULL);
+    rl_vkdev_guest_queue_unlock();
+    if (vr != VK_SUCCESS) {
+        VK(vkSetEvent)(g.dev, ev);
+        goto out;
+    }
+    int64_t t0 = now_ns();
+    pthread_t th;
+    if (pthread_create(&th, NULL, tl_probe_signal, NULL) != 0) {
+        VK(vkSetEvent)(g.dev, ev);
+        uint64_t v = 1;
+        VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
+                                   .pSemaphores = &tlp.sem, .pValues = &v };
+        VK(vkWaitSemaphores)(g.dev, &wi, UINT64_MAX);
+        goto out;
+    }
+    struct timespec dl;
+    clock_gettime(CLOCK_REALTIME, &dl);
+    dl.tv_nsec += TL_PROBE_NS;
+    dl.tv_sec += dl.tv_nsec / 1000000000l;
+    dl.tv_nsec %= 1000000000l;
+    pthread_mutex_lock(&tlp.mu);
+    while (!tlp.done && pthread_cond_timedwait(&tlp.cv, &tlp.mu, &dl) == 0)
+        ;
+    bool returned = tlp.done;
+    pthread_mutex_unlock(&tlp.mu);
+    tl.probe_ns = returned ? now_ns() - t0 : -1;
+    VK(vkSetEvent)(g.dev, ev);
+    pthread_join(th, NULL);
+    uint64_t two = 2;
+    VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
+                               .pSemaphores = &tlp.sem, .pValues = &two };
+    VK(vkWaitSemaphores)(g.dev, &wi, UINT64_MAX);
+    found = returned ? TL_GPU : TL_HOST;
+out:
+    if (ev)
+        VK(vkDestroyEvent)(g.dev, ev, NULL);
+    if (pool)
+        VK(vkDestroyCommandPool)(g.dev, pool, NULL);
+    if (tlp.sem)
+        VK(vkDestroySemaphore)(g.dev, tlp.sem, NULL);
+    if (found == TL_GPU)
+        rl_log(RL_LOG_INFO, "nvn", "a timeline signal does not wait for the GPU (submit returned in %.2f ms)",
+               (double)tl.probe_ns / 1e6);
+    else
+        rl_log(RL_LOG_INFO, "nvn",
+               "a timeline signal waits for the GPU's older batches (the driver's emulated timeline): the host signals "
+               "the timeline after each batch's fence");
+    __atomic_store_n(&tl.found, found, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+/** @brief Starts the retire thread; false (logged) when it cannot, and then the batches signal the timeline. */
+static bool tl_start_retire(void)
+{
+    pthread_t th;
+    if (pthread_create(&th, NULL, retire_main, NULL) != 0) {
+        rl_log(RL_LOG_ERROR, "nvn", "no retire thread: the batches signal the timeline themselves");
+        tl.found = tl.mode = TL_GPU;
+        return false;
+    }
+    pthread_detach(th);
+    return true;
+}
+
+/** @brief Sets who signals the timeline from RELIFT_NVN_TIMELINE, else starts the probe; at bring-up. */
+static void tl_start(void)
+{
+    const char *e = getenv("RELIFT_NVN_TIMELINE");
+    if (!tl_start_retire())
+        return;
+    if (e && (!strcmp(e, "gpu") || !strcmp(e, "host"))) {
+        tl.found = tl.mode = !strcmp(e, "gpu") ? TL_GPU : TL_HOST;
+        rl_log(RL_LOG_INFO, "nvn", "the timeline is signaled by the %s (RELIFT_NVN_TIMELINE)", e);
+        return;
+    }
+    pthread_t th;
+    if (pthread_create(&th, NULL, tl_probe, NULL) == 0)
+        pthread_detach(th);
+    else
+        tl.found = TL_HOST;
+}
+
 
 /** @brief Waits until every batch handed to the submit thread is on the queue (a direct submit comes after them). */
 static void submit_drain(void)
@@ -568,6 +831,7 @@ static void bring_up(void)
         VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti };
         g.timeline_ok = VK(vkCreateSemaphore)(g.dev, &sci, NULL, &g.timeline) == VK_SUCCESS;
     }
+    bool tl_probe_due = g.timeline_ok;
     void (*raw)(void) = g.fns.f[VKG_vkGetDeviceProcAddr];
     void *(*gdpa)(void *, const char *);
     memcpy(&gdpa, &raw, sizeof gdpa);
@@ -681,6 +945,9 @@ static void bring_up(void)
     rl_log(RL_LOG_INFO, "nvn", "NVN2 device on %s (queue family %u)", g.name, g.family);
     write_caps();
     nvn_xlate_start();
+    /* After the queue and family are known; the probe runs on its own thread beside the rest of start-up. */
+    if (tl_probe_due)
+        tl_start();
     g.ok = true;
 }
 
@@ -2190,6 +2457,8 @@ static struct {
     /** @brief The timeline value the batch signals (0 without the timeline). */
     uint64_t seq, signal;
     int64_t t1;
+    /** @brief The host signals the value once the fence signals (see tl). */
+    bool host;
 } pending[NVN_SLOTS];
 static uint64_t g_submitted, g_finished;
 /** @brief What the batch being recorded may write (nvn_vk_mark_write, nvn_vk_mark_write_range). */
@@ -2353,7 +2622,8 @@ static bool submit_recorded(replay *r)
     VkTimelineSemaphoreSubmitInfo tsi = { .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
                                           .signalSemaphoreValueCount = 1,
                                           .pSignalSemaphoreValues = &signal };
-    if (g.timeline_ok) {
+    bool host = g.timeline_ok && !tl_gpu();
+    if (g.timeline_ok && !host) {
         si.pNext = &tsi;
         si.signalSemaphoreCount = 1;
         si.pSignalSemaphores = &g.timeline;
@@ -2371,7 +2641,10 @@ static bool submit_recorded(replay *r)
     int64_t t0 = now_ns();
     nvn_gpuprof_queued(g.slot);
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) == VK_SUCCESS)
-        vr = submit_threaded() ? submit_queue(g.cb, g.fence, g.timeline_ok ? signal : 0, g.slot) : guest_submit(&si);
+        vr = submit_threaded() ? submit_queue(g.cb, g.fence, g.timeline_ok && !host ? signal : 0, host ? signal : 0, g.slot)
+                               : guest_submit(&si);
+    if (vr == VK_SUCCESS && host && !submit_threaded())
+        tl_retire(g.fence, signal);
     if (!submit_threaded())
         nvn_gpuprof_handed(g.slot);
     if (vr != VK_SUCCESS) {
@@ -2385,6 +2658,8 @@ static bool submit_recorded(replay *r)
     if (g.timeline_ok)
         g.timeline_value = signal;
     pending[s].signal = g.timeline_ok ? signal : 0;
+    pending[s].host = host;
+    g.timeline_host = host;
     nvn_counters_submitted(g.timeline_ok ? g.timeline_value : 0);
     tm.submit_ns += (uint64_t)(pending[s].t1 - t0);
     pending[s].on = true;
@@ -2416,6 +2691,8 @@ static bool wait_slot(uint32_t s)
     /* Timed around the wait itself: on kgsl even vkGetFenceStatus blocks until the fence signals. */
     int64_t w0 = now_ns();
     VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fences[s], VK_TRUE, UINT64_MAX);
+    if (pending[s].host)
+        tl_retired(pending[s].signal);
     int64_t w1 = now_ns();
     if (w1 - w0 > 50000)
         nvn_gpuprof_waited(w0, w1);
@@ -2794,6 +3071,97 @@ static void held_free(void)
     if (hb.ev)
         VK(vkDestroyEvent)(g.dev, hb.ev, NULL);
     hb.ev = NULL;
+}
+
+/** @brief The guest timeline's value now. */
+static uint64_t tl_value(void)
+{
+    uint64_t v = 0;
+    VK(vkGetSemaphoreCounterValue)(g.dev, g.timeline, &v);
+    return v;
+}
+
+int nvn_vk_timeline_check(void)
+{
+    pthread_once(&g.once, bring_up);
+    if (!g.ok || !g.timeline_ok)
+        return -1;
+    for (int64_t t0 = now_ns(); __atomic_load_n(&tl.found, __ATOMIC_ACQUIRE) == TL_UNKNOWN;)
+        if (now_ns() - t0 > 5000000000ll)
+            return 1;
+    int found = __atomic_load_n(&tl.found, __ATOMIC_ACQUIRE);
+    printf("  timeline probe: %s, the second signal returned in %.3f ms\n", found == TL_GPU ? "GPU signals" : "host signals",
+           (double)tl.probe_ns / 1e6);
+    if (found != TL_GPU && !getenv("RELIFT_NVN_TIMELINE"))
+        return 2; /* this PC's device signals timelines without waiting for the GPU */
+    nvn_lock();
+    nvn_vk_settle();
+    int saved_mode = tl.mode, saved_found = tl.found;
+    __atomic_store_n(&tl.found, TL_HOST, __ATOMIC_RELEASE);
+    __atomic_store_n(&tl.mode, TL_HOST, __ATOMIC_RELEASE);
+    staging big;
+    bool made = nvn_vk_staging_new(&big, 64ull << 20);
+    int rc = made ? 0 : 3;
+    replay r = { 0 };
+    VkFence a = rc ? NULL : long_batch(&r, &big, 64, 0);
+    uint64_t va = g.timeline_value;
+    if (!rc && (!a || !g.timeline_host))
+        rc = 4;
+    /* A short batch behind it: its submit returns while a runs. */
+    if (!rc) {
+        nvn_vk_begin(&r);
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, 4096, 7);
+        if (!nvn_vk_submit(&r))
+            rc = 5;
+    }
+    uint64_t vb = g.timeline_value;
+    bool seen_running = false;
+    /* Until a's fence signals, the timeline stays below a's value (the fence is read first). */
+    for (int64_t t0 = now_ns(); !rc && VK(vkGetFenceStatus)(g.dev, a) == VK_NOT_READY;) {
+        uint64_t now = tl_value();
+        if (VK(vkGetFenceStatus)(g.dev, a) == VK_NOT_READY && now >= va)
+            rc = 6;
+        seen_running = true;
+        if (now_ns() - t0 > 10000000000ll)
+            rc = 7;
+    }
+    if (!rc && !seen_running)
+        printf("  timeline: the long batch finished before the first poll\n");
+    /* Then the host reaches both values. */
+    VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
+                               .pSemaphores = &g.timeline, .pValues = &vb };
+    if (!rc && VK(vkWaitSemaphores)(g.dev, &wi, 10000000000ull) != VK_SUCCESS)
+        rc = 8;
+    /* The move to GPU signals: not while a host signal is still to come, then in order. */
+    if (!rc) {
+        VkFence c = long_batch(&r, &big, 16, 0);
+        uint64_t vc = g.timeline_value;
+        __atomic_store_n(&tl.found, TL_GPU, __ATOMIC_RELEASE);
+        bool moved = tl_gpu();
+        if (!c || (moved && tl_value() < vc))
+            rc = 9;
+    }
+    if (!rc && !nvn_vk_settle())
+        rc = 10;
+    if (!rc && (!tl_gpu() || tl.mode != TL_GPU))
+        rc = 11;
+    uint64_t before = rc ? 0 : g.timeline_value;
+    if (!rc) {
+        nvn_vk_begin(&r);
+        VK(vkCmdFillBuffer)(g.cb, big.buf, 0, 4096, 8);
+        if (!nvn_vk_submit(&r) || g.timeline_host || g.timeline_value != before + 1)
+            rc = 12;
+    }
+    if (!nvn_vk_settle() && !rc)
+        rc = 13;
+    if (!rc && tl_value() != g.timeline_value)
+        rc = 14;
+    if (made)
+        nvn_vk_staging_free(&big);
+    __atomic_store_n(&tl.found, saved_found, __ATOMIC_RELEASE);
+    __atomic_store_n(&tl.mode, saved_mode, __ATOMIC_RELEASE);
+    nvn_unlock();
+    return rc;
 }
 
 int nvn_vk_grow_check(void)
@@ -5929,12 +6297,13 @@ static bool present_queued(void)
  * other color formats through a blit). The slot ends in TRANSFER_SRC_OPTIMAL. With the timeline semaphore the copy is
  * submitted and *after is the value it signals, for the presenter's GPU work to wait on: the console's present queues
  * the frame and returns, so the game's thread does not wait for its frame here. Without it (*after 0) the copy is
- * waited for.
+ * waited for. *host says the host signals that value, so the presenter waits for it on the CPU.
  */
 static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl_present_slot *s, uint64_t *after,
-                             uint64_t frame)
+                             uint64_t frame, bool *host)
 {
     *after = 0;
+    *host = false;
     if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
         return false;
     bool direct = v->format == VK_FORMAT_R8G8B8A8_UNORM || v->format == VK_FORMAT_R8G8B8A8_SRGB;
@@ -5972,7 +6341,10 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
         if (g.timeline_ok && !tmp && present_queued()) {
             ok = nvn_vk_submit(r);
             *after = ok ? g.timeline_value : 0;
-            submit_handed_to(*after);
+            *host = g.timeline_host;
+            /* A value the host signals is waited for on the CPU by the presenter, so it need not be on the queue. */
+            if (!*host)
+                submit_handed_to(*after);
         } else {
             ok = nvn_vk_flush(r);
         }
@@ -6383,11 +6755,13 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
         rl_present_slot slot;
         shown = rl_present_slot_begin(pres, rect[2], rect[3], &slot);
         uint64_t after = 0;
-        if (shown && !present_to_slot(&r, v, rect, &slot, &after, n)) {
+        bool host = false;
+        if (shown && !present_to_slot(&r, v, rect, &slot, &after, n, &host)) {
             rl_present_slot_abort(pres, &slot);
             shown = false;
         } else if (shown) {
-            rl_present_slot_end_after(pres, &slot, rect[2], rect[3], after ? (uint64_t)(uintptr_t)g.timeline : 0, after);
+            rl_present_slot_end_after(pres, &slot, rect[2], rect[3], after ? (uint64_t)(uintptr_t)g.timeline : 0, after,
+                                      host);
             counted = true;
             nvn_flash_presented(&r, n);
         }

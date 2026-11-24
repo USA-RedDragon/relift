@@ -172,19 +172,21 @@ static void walk(uint32_t s, const uint64_t *occ, const uint64_t (*stats)[STATS]
  */
 static void complete(uint32_t s)
 {
+    /* The queries are read with WAIT: a host that signals the timeline before its query results are visible (MoltenVK) would
+     * answer VK_NOT_READY, and the batch's reports would never be written. The batch has finished, so the wait is short. */
     static uint64_t occ[BATCH], stats[BATCH][STATS], ts[EVENTS + 1];
     uint32_t np = qs[s].pending, n = rps[s].n;
     uint64_t seen = rl_guest_clock_ns();
     bool ok = true;
     if (np)
         ok = VK(vkGetQueryPoolResults)(g.dev, qs[s].occ, 0, np, sizeof occ[0] * np, occ, sizeof occ[0],
-                                       VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
+                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS &&
              VK(vkGetQueryPoolResults)(g.dev, qs[s].stats, 0, np, sizeof stats[0] * np, stats, sizeof stats[0],
-                                       VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
+                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS;
     bool stamped = n && !hos_fixed();
     if (ok && stamped)
         ok = VK(vkGetQueryPoolResults)(g.dev, rps[s].pool, 0, n + 1, sizeof ts[0] * (n + 1), ts, sizeof ts[0],
-                                       VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
+                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS;
     if (!ok)
         rl_log(RL_LOG_ERROR, "nvn", "the host device could not read its counter queries; %u reports are not written", n);
     else
