@@ -1113,6 +1113,17 @@ uint64_t nvn_tex_storage(const nvn_tex_desc *d);
 /** @brief The GPU address of a memory pool's first byte. */
 /** @brief Makes the layer's record of a memory pool the driver initialized (imported into the host device unless virtual). */
 bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags);
+/**
+ * @brief RELIFT_NVN_POOL_LOG is set: each memory pool made and finalized, each texture initialized and each texture
+ * id registered is one "nvn-pool" log line, so the guest-visible layout of two runs (a placed and a mirrored one)
+ * compares with diff. GPU addresses are the line's last field, since they differ between backends by nature.
+ */
+bool nvn_pool_log_on(void);
+/**
+ * @brief Writes the pool log's line for the live pool at pool ("pool <what> 0x<pool>: memory, size, flags, backend,
+ * gpu-align and gpu"); -1 when pool is no pool.
+ */
+int nvn_pool_log_line(char *buf, size_t n, const char *what, uint64_t pool);
 uint64_t nvn_pool_gpu(uint64_t pool);
 
 /** @brief Device, queue, memory and object procs (nvn_dev.c). */

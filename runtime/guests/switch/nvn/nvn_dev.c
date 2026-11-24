@@ -22,6 +22,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /**
  * @brief nvnDeviceGetInteger answers by NVNdeviceInfo without a driver
@@ -842,6 +843,55 @@ static bool pool_back(nvn_pool *p, uint64_t memory, uint64_t size)
     return false;
 }
 
+bool nvn_pool_log_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RELIFT_NVN_POOL_LOG");
+        on = e && *e && strcmp(e, "0") != 0;
+    }
+    return on;
+}
+
+/** @brief How pool p reaches the host device, for the pool log. */
+static const char *pool_backend(const nvn_pool *p)
+{
+    if (p->flags & NVN_POOL_VIRTUAL)
+        return p->mapped ? (p->alias ? "virtual-alias" : "virtual-import") : "virtual";
+    if (p->im.placed)
+        return "placed";
+    if (p->mirrored)
+        return "mirror";
+    if (p->alias)
+        return "alias";
+    return p->im.gpu ? "import" : "none";
+}
+
+static int pool_line(char *buf, size_t n, const char *what, uint64_t pool, const nvn_pool *p)
+{
+    uint64_t gpu = pool_gpu(p);
+    return snprintf(buf, n, "pool %s 0x%llx: memory 0x%llx size 0x%llx flags 0x%x backend %s gpu-align 0x%llx gpu 0x%llx",
+                    what, (unsigned long long)pool, (unsigned long long)p->memory, (unsigned long long)p->size,
+                    (unsigned)p->flags, pool_backend(p), (unsigned long long)(gpu ? gpu & -gpu : 0),
+                    (unsigned long long)gpu);
+}
+
+int nvn_pool_log_line(char *buf, size_t n, const char *what, uint64_t pool)
+{
+    const nvn_pool *p = (const nvn_pool *)nvn_obj_get(pool, NVN_POOL);
+    return p ? pool_line(buf, n, what, pool, p) : -1;
+}
+
+/** @brief One pool log line (nvn_pool_log_on) for pool p, the guest's object at pool. */
+static void pool_log(const char *what, uint64_t pool, const nvn_pool *p)
+{
+    if (!nvn_pool_log_on() || !p)
+        return;
+    char line[256];
+    pool_line(line, sizeof line, what, pool, p);
+    rl_log(RL_LOG_INFO, "nvn-pool", "%s", line);
+}
+
 bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags)
 {
     nvn_pool *p = (nvn_pool *)nvn_obj_new(pool, NVN_POOL, sizeof *p);
@@ -858,6 +908,7 @@ bool nvn_pool_make(uint64_t pool, uint64_t memory, uint64_t size, uint32_t flags
                    (unsigned long long)pool, (unsigned long long)size, (unsigned long long)memory);
             pools_add(memory, size, memory, NULL, memory);
         }
+        pool_log("init", pool, p);
     }
     return nvn_obj_publish((nvn_obj *)p) != NULL;
 }
@@ -1022,6 +1073,7 @@ uint64_t nvnh_nvnMemoryPoolFinalize(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     nvn_pool *p = (nvn_pool *)nvn_obj_get(c->x[0], NVN_POOL);
+    pool_log("final", c->x[0], p);
     if (p && !p->im.gpu && !(p->flags & NVN_POOL_VIRTUAL))
         pools_remove(p->memory, p->size, NULL);
     if (p && p->im.gpu) {

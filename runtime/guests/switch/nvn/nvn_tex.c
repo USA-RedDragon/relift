@@ -403,16 +403,27 @@ uint64_t nvnh_nvnTextureInitialize(rl_ctx *c, uint8_t *mem)
     if (rc != RL_OK)
         return (uint64_t)rc;
     if (!ok) {
+        if (nvn_pool_log_on())
+            rl_log(RL_LOG_INFO, "nvn-pool", "tex init 0x%llx: refused by the driver", (unsigned long long)tex);
         c->x[0] = 0;
         return nvn_ret(c);
     }
     nvn_tex_desc d;
-    rc = read_storage(c, mem, builder, &d, NULL, NULL);
+    uint64_t dsize = 0, dalign = 0;
+    rc = read_storage(c, mem, builder, &d, &dsize, &dalign);
     if (rc != RL_OK)
         return (uint64_t)rc;
     uint64_t pool_size = 0, pool_memory = nvn_pool_memory(d.pool, &pool_size);
     d.storage = pool_size ? pool_memory + d.offset : 0;
     bool recorded = nvn_texture_record(tex, &d, nvn_generation() == 1 ? mem + builder : NULL);
+    if (nvn_pool_log_on())
+        rl_log(RL_LOG_INFO, "nvn-pool",
+               "tex init 0x%llx: target %u format %u %ux%ux%u levels %u flags 0x%x pool 0x%llx offset 0x%llx storage "
+               "0x%llx size 0x%llx align 0x%llx",
+               (unsigned long long)tex, d.target, d.format, d.width, d.height, d.depth, d.levels, d.flags,
+               (unsigned long long)d.pool, (unsigned long long)d.offset,
+               (unsigned long long)(nvn_pool_memory(d.pool, NULL) + d.offset), (unsigned long long)dsize,
+               (unsigned long long)dalign);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "nvnTextureInitialize(0x%llx): target %u format %u %ux%ux%u levels %u flags 0x%x, size 0x%llx",
                (unsigned long long)tex, d.target, d.format, d.width, d.height, d.depth, d.levels, d.flags,
@@ -844,6 +855,14 @@ static uint64_t register_texture(rl_ctx *c, uint8_t *mem, bool image)
     reg.image[id] = image;
     note_pending(0, id);
     pthread_mutex_unlock(&reg_lock);
+    if (nvn_pool_log_on()) {
+        nvn_tex_desc d;
+        bool known = nvn_texture_desc(c->x[2], &d);
+        rl_log(RL_LOG_INFO, "nvn-pool", "tex %s %u: texture 0x%llx storage 0x%llx format %u %ux%u", image ? "image" : "id",
+               id, (unsigned long long)c->x[2],
+               (unsigned long long)(known ? nvn_pool_memory(d.pool, NULL) + d.offset : 0), known ? d.format : 0,
+               known ? d.width : 0, known ? d.height : 0);
+    }
     return nvn_ret(c);
 }
 

@@ -1043,3 +1043,30 @@ TEST(nvn_placed_pool_gpu_writes_reach_the_write_watches_over_them)
     CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
     rl_settings_set("nvn.memory", "auto");
 }
+
+TEST(nvn_pool_log_line_names_the_layout_and_backend_of_a_pool)
+{
+    rl_ctx *c = t_boot(NULL);
+    CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        rl_settings_set("nvn.memory", "auto");
+        return;
+    }
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t at = (heap + 0x40000 + 0xffff) / 0x10000 * 0x10000;
+    uint64_t pool = heap + 0x100;
+    CHECK(nvn_pool_make(pool, at, 0x20000, 0xa1));
+    char line[256], want[160];
+    CHECK(nvn_pool_log_line(line, sizeof line, "init", pool) > 0);
+    snprintf(want, sizeof want, "pool init 0x%llx: memory 0x%llx size 0x20000 flags 0xa1 backend mirror gpu-align 0x",
+             (unsigned long long)pool, (unsigned long long)at);
+    CHECK(strncmp(line, want, strlen(want)) == 0);
+    uint64_t gpu = nvn_pool_gpu(pool);
+    snprintf(want, sizeof want, " gpu 0x%llx", (unsigned long long)gpu);
+    CHECK(strlen(line) > strlen(want) && strcmp(line + strlen(line) - strlen(want), want) == 0);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    CHECK_EQ(nvn_pool_log_line(line, sizeof line, "final", pool), -1);
+    rl_settings_set("nvn.memory", "auto");
+}
