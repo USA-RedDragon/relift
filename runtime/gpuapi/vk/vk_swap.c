@@ -27,6 +27,14 @@
  * frame after it is shown. A game that renders faster than 60 frames a
  * second waits in acquire, as it waits in DequeueBuffer on the console.
  *
+ * When the guest's device is the core's (vk_share.c) and the surface
+ * provider gives the window's core presenter, the swapchain has no host
+ * swapchain: each present copies the guest image into a presenter slot
+ * (rl_present_slot_begin), and the presenter places it, draws the on-screen
+ * controller over it, repaints it while the game is paused and paces the
+ * window, and reports when the display showed it for the vi vsync
+ * (rl_present_set_shown_hook). The guest sees no difference.
+ *
  * Guest swapchain handles are ids from this file (0x57 in the top byte).
  */
 #include "vkf.h"
@@ -110,6 +118,8 @@ typedef struct vkf_swap {
     /** @brief 1 + the guest image the last capture copies from, until acquire waits for that copy; 0 for none. */
     uint32_t cap_img;
     vkf_overlay *ov;
+    /** @brief The window's core presenter the images go to, or NULL for a host swapchain of this file's. */
+    struct rl_present *pres;
     VkSemaphore again;
     /** @brief The id of the last host present (VK_KHR_present_id). */
     uint64_t present_id;
@@ -418,7 +428,7 @@ static VkPresentModeKHR pick_mode(vkf_swap *s)
     return (VkPresentModeKHR)rl_present_mode_choose(rl_setting_enum("video.present_mode"), (int32_t)s->mode, modes, n);
 }
 
-static bool have_host(const vkf_swap *s) { return s->offscreen ? s->host_n != 0 : s->host != NULL; }
+static bool have_host(const vkf_swap *s) { return s->pres || (s->offscreen ? s->host_n != 0 : s->host != NULL); }
 
 static void offscreen_destroy(vkf_swap *s)
 {
@@ -540,6 +550,14 @@ static VkResult host_create(vkf_swap *s)
 {
     if (s->offscreen)
         return offscreen_create(s);
+    if (s->pres) {
+        uint32_t guest[2], host[2];
+        vkf_surface_extent((uint64_t)(uintptr_t)s->surface, guest, host, &s->gen);
+        s->stale = false;
+        if (!s->creations++)
+            rl_log(RL_LOG_INFO, "vk", "swapchain 0x%llx shows through the window's presenter", (unsigned long long)s->id);
+        return VK_SUCCESS;
+    }
     if (s->lost) {
         VkResult n = renew(s);
         if (n < 0 || n == VK_NOT_READY)
@@ -833,6 +851,11 @@ uint64_t vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
         old->old = true;
         pthread_mutex_unlock(&old->lock);
     }
+    const rl_vk_surface_provider *sp = vkf.cfg.surfaces;
+    if (!s->offscreen && k.obj->dev->shared && sp && sp->presenter)
+        s->pres = sp->presenter(sp->user, (uint64_t)(uintptr_t)ci->surface);
+    if (s->pres)
+        rl_present_set_shown_hook(vi_host_flip);
     VkResult r = swap_images(s, ci);
     if (r >= 0) {
         r = host_create(s);
@@ -970,7 +993,7 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             if (r < 0)
                 break;
         }
-        if (!s->offscreen && !s->host) {
+        if (!s->offscreen && !s->pres && !s->host) {
             if (!timeout || (timeout != UINT64_MAX && now_ns() - start >= (int64_t)timeout)) {
                 r = timeout ? VK_TIMEOUT : VK_NOT_READY;
                 break;
@@ -1027,7 +1050,9 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             s->cap_img = 0;
         }
         uint32_t hi = 0;
-        if (s->offscreen) {
+        if (s->pres) {
+            r = VK_SUCCESS;
+        } else if (s->offscreen) {
             hi = i % s->host_n;
             r = VK_SUCCESS;
         } else {
@@ -1071,11 +1096,14 @@ static uint32_t family_of(const vkf_dev *d, const vkf_fns *fns, VkDevice dev, Vk
 /** @brief Offscreen swapchains have no host acquire to signal the guest's semaphore and fence: an empty submit does. */
 static VkResult acquire_signal(vkf_call *k, const vkf_swap *s, VkSemaphore sem, VkFence fence)
 {
-    if (!s->offscreen || (!sem && !fence))
+    if ((!s->offscreen && !s->pres) || (!sem && !fence))
         return VK_SUCCESS;
     const vkf_dev *d = k->obj->dev;
     VkQueue q = NULL;
-    DFN(s, vkGetDeviceQueue)(s->dev, d->nqueue_families ? d->queue_families[0] : 0, 0, &q);
+    if (d->shared)
+        q = vkf_share_queue();
+    else
+        DFN(s, vkGetDeviceQueue)(s->dev, d->nqueue_families ? d->queue_families[0] : 0, 0, &q);
     VkSubmitInfo si = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .signalSemaphoreCount = sem ? 1 : 0,
@@ -1141,6 +1169,8 @@ uint64_t vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem)
 
 static uint32_t family_of(const vkf_dev *d, const vkf_fns *fns, VkDevice dev, VkQueue q)
 {
+    if (d->shared)
+        return 0;
     for (uint32_t f = 0; f < d->nqueue_families; f++)
         for (uint32_t i = 0; i < d->queue_counts[f]; i++) {
             VkQueue h = NULL;
@@ -1254,10 +1284,16 @@ static void record(vkf_swap *s, uint32_t i, uint32_t hi)
     DFN(s, vkEndCommandBuffer)(cb);
 }
 
+/**
+ * @brief Gives image i the first vi vsync after now and after the frame before it. A FIFO queue shows one frame a
+ * vsync, so the turn starts half a frame after the last one: a grid the host steered later by a few microseconds
+ * since then still gives the next vsync, not the same one again.
+ */
 static void show(vkf_swap *s, uint32_t i)
 {
     int64_t now = now_ns();
-    int64_t at = vi_vsync_after(now > s->last_shown ? now : s->last_shown);
+    int64_t after = s->any_shown ? s->last_shown + VI_VSYNC_NS / 2 : 0;
+    int64_t at = vi_vsync_after(now > after ? now : after);
     if (rl_trace_on())
         rl_trace('P', (uint64_t)at, (uint64_t)s->last_shown, i | (uint64_t)s->n << 8);
     s->last_shown = at;
@@ -1378,6 +1414,77 @@ static void capture(vkf_swap *s, VkQueue q, uint32_t i, uint64_t frame)
     vkf_capture_queue(&job);
 }
 
+/**
+ * @brief Shows guest image i through the window's presenter: a blit into a presenter slot (which converts the guest's
+ * format to the slot's RGBA8) after the guest's semaphores, waited for, then handed over. A frame the presenter has no
+ * slot for is dropped, as a present to a lost surface is. Lock held.
+ */
+static VkResult present_slot(vkf_swap *s, VkQueue q, const VkSemaphore *waits, uint32_t nwaits, uint32_t i)
+{
+    rl_present_slot slot;
+    bool have = rl_present_slot_begin(s->pres, s->extent.width, s->extent.height, &slot);
+    VkCommandBuffer cb = s->cmd[i];
+    DFN(s, vkResetCommandBuffer)(cb, 0);
+    VkCommandBufferBeginInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    DFN(s, vkBeginCommandBuffer)(cb, &bi);
+    if (have) {
+        VkImage dst = (VkImage)(uintptr_t)slot.image;
+        barrier(s, cb, s->img[i], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
+        barrier(s, cb, dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkImageBlit blit = {
+            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .srcOffsets = { { 0, 0, 0 }, { (int32_t)s->extent.width, (int32_t)s->extent.height, 1 } },
+            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .dstOffsets = { { 0, 0, 0 }, { (int32_t)s->extent.width, (int32_t)s->extent.height, 1 } },
+        };
+        DFN(s, vkCmdBlitImage)(cb, s->img[i], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
+        barrier(s, cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+        barrier(s, cb, s->img[i], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_TRANSFER_READ_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+    DFN(s, vkEndCommandBuffer)(cb);
+    VkPipelineStageFlags stages[16];
+    for (uint32_t w = 0; w < nwaits && w < 16; w++)
+        stages[w] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkSubmitInfo si = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = nwaits < 16 ? nwaits : 16,
+        .pWaitSemaphores = waits,
+        .pWaitDstStageMask = stages,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb,
+    };
+    VkResult r = DFN(s, vkQueueSubmit)(q, 1, &si, s->done[i]);
+    s->held[i] = false;
+    if (r < 0) {
+        if (have)
+            rl_present_slot_abort(s->pres, &slot);
+        return r;
+    }
+    s->busy[i] = true;
+    uint64_t frame;
+    if (vkf_capture_due(&frame))
+        capture(s, q, i, frame);
+    vkf_decode_stats_frame(frame + 1);
+    vkf_shadow_stats_frame(frame + 1);
+    if (have) {
+        DFN(s, vkWaitForFences)(s->dev, 1, &s->done[i], VK_TRUE, UINT64_MAX);
+        rl_present_slot_end(s->pres, &slot, s->extent.width, s->extent.height);
+    }
+    vkf_settle(s->fns, q);
+    show(s, i);
+    return VK_SUCCESS;
+}
+
 static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkSemaphore *waits, uint32_t nwaits,
                              uint32_t i)
 {
@@ -1387,6 +1494,12 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         rl_log(RL_LOG_ERROR, "vk", "vkQueuePresentKHR: image %u of swapchain 0x%llx was not acquired", i,
                (unsigned long long)s->id);
         r = VK_ERROR_UNKNOWN;
+        goto out;
+    }
+    if (s->pres) {
+        r = ensure_pool(s, family_of(d, s->fns, s->dev, q));
+        if (r >= 0)
+            r = present_slot(s, q, waits, nwaits, i);
         goto out;
     }
     if (!s->offscreen && (!s->host || s->lost)) {
@@ -1479,6 +1592,8 @@ out:
  */
 static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
 {
+    if (s->pres)
+        return;
     pthread_mutex_lock(&s->lock);
     if (!s->offscreen && (!s->host || s->stale || s->lost) && !any_held(s)) {
         int64_t at = now_ns();

@@ -119,6 +119,13 @@ typedef struct rl_present_slot {
 } rl_present_slot;
 
 /**
+ * @brief Sets the hook called with the time (rl_clock_ns) each present of any presenter was shown on the display,
+ * where the device can wait for presents (VK_KHR_present_wait); a guest layer locks its vsync timeline to it. NULL
+ * clears it.
+ */
+void rl_present_set_shown_hook(void (*fn)(int64_t shown_ns));
+
+/**
  * @brief Takes a free slot image of width by height for a picture that stays on the GPU. The caller records and runs
  * its copy into slot->image (from UNDEFINED, through TRANSFER_DST, ending in TRANSFER_SRC_OPTIMAL), waits until the
  * GPU has finished it, then calls rl_present_slot_end; rl_present_slot_abort gives the slot back unused. False when

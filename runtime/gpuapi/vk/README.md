@@ -430,7 +430,21 @@ is shown at the next vsync of the vi timeline (`vi_vsync_after`, the one the
 display's vsync event fires on) after the frame before it, and acquire hands
 an image back only once the frame presented after it is shown. A game that
 picks its mode from the list (The Forge prefers immediate when vsync is off)
-gets FIFO, as on the console.
+gets FIFO, as on the console. The turn starts half a frame after the last
+one, so a grid the host display steered later by a few microseconds since
+then never gives two frames the same vsync.
+
+When the guest's device is the core's (see "One host device with the core")
+and the window has the core presenter (`rl_vk_surface_provider.presenter`),
+the swapchain makes no host swapchain: each present blits the guest image
+into a presenter slot (`rl_present_slot_begin`, RGBA8; the blit converts the
+guest's format) after the guest's semaphores, waits for it, and hands the
+slot over. The presenter places the picture, runs the picture options,
+draws the on-screen controller and repaints it while the game is paused, as
+for every other guest, and the times the display showed each new frame
+(`rl_present_set_shown_hook`) steer the vi vsync. A window without a
+presenter, headless surfaces and a guest on its own device keep the host
+swapchain path above.
 
 `vkGetPhysicalDeviceSurfaceFormatsKHR` reports the console layer's fixed list
 too, `R8G8B8A8_SRGB` and `R8G8B8A8_UNORM` in sRGB nonlinear: guest images

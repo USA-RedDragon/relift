@@ -81,6 +81,13 @@ typedef struct rl_vk_surface_provider {
      */
     int32_t (*recreate)(void *user, void *host_instance, void *gipa, uint64_t surface, uint64_t *fresh);
     /**
+     * @brief Optional: the core presenter (core present.h) of the window of
+     * surface, or NULL. When the guest's device is the core's (vk_share.c), a
+     * guest swapchain on such a surface shows its images through the
+     * presenter instead of a host swapchain of its own.
+     */
+    struct rl_present *(*presenter)(void *user, uint64_t surface);
+    /**
      * @brief The surfaces are never shown and have no host surface: the
      * layer makes each guest surface handle itself (create, presents and
      * recreate are not called), answers every surface query, and a guest

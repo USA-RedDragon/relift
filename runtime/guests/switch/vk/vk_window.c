@@ -15,6 +15,7 @@
 #include "am.h"
 #include "vi.h"
 #include "vkf.h"
+#include "present.h"
 
 #include <relift/window.h>
 
@@ -134,10 +135,23 @@ static int32_t window_recreate(void *user, void *host_instance, void *gipa, uint
     return r;
 }
 
+static struct rl_present *window_presenter(void *user, uint64_t surface)
+{
+    (void)user;
+    rl_window *win = NULL;
+    pthread_mutex_lock(&g_lock);
+    for (uint32_t i = g_nsurfaces; i-- > 0 && !win;)
+        if (g_surfaces[i].surface == surface)
+            win = g_surfaces[i].layer->win;
+    pthread_mutex_unlock(&g_lock);
+    return win ? rl_window_presenter(win) : NULL;
+}
+
 static rl_vk_surface_provider g_window_provider = {
     .create = window_create,
     .extent = window_extent,
     .recreate = window_recreate,
+    .presenter = window_presenter,
 };
 
 const rl_vk_surface_provider *rl_vk_window_surfaces(void)

@@ -1107,6 +1107,8 @@ static void release_slots(rl_present *p)
 typedef struct trace_job {
     rlvk_handle swapchain;
     uint64_t id, ready_ns, queued_ns;
+    /** @brief The present showed a new frame (not a repaint of the last one for the overlay). */
+    bool frame;
 } trace_job;
 
 #define TRACE_QUEUE 32u
@@ -1120,7 +1122,14 @@ static bool g_trace_started;
 static FILE *g_trace_file;
 static const rlvk_dev *g_trace_dev;
 
-/** @brief Waits for each traced present to be shown and writes "ready queued shown" in nanoseconds, one line each. */
+/** @brief Called with the time each present was shown (rl_present_set_shown_hook). */
+static void (*g_shown_fn)(int64_t shown_ns);
+static bool g_watch_started;
+
+/**
+ * @brief Waits for each watched present to be shown, writes "ready queued shown" in nanoseconds to the trace file
+ * when one is open and hands the time to the shown hook when one is set.
+ */
 static void *trace_main(void *arg)
 {
     (void)arg;
@@ -1135,45 +1144,55 @@ static void *trace_main(void *arg)
         pthread_mutex_unlock(&g_trace_lock);
         rlvk_result r = g_trace_dev->vkWaitForPresentKHR(g_trace_dev->device, j.swapchain, j.id, TRACE_WAIT_NS);
         uint64_t shown = rl_clock_ns();
-        if (r == RLVK_SUCCESS) {
+        if (r == RLVK_SUCCESS && g_trace_file) {
             fprintf(g_trace_file, "%llu %llu %llu\n", (unsigned long long)j.ready_ns, (unsigned long long)j.queued_ns,
                     (unsigned long long)shown);
             if (++lines % 64 == 0)
                 fflush(g_trace_file);
         }
+        void (*fn)(int64_t) = __atomic_load_n(&g_shown_fn, __ATOMIC_ACQUIRE);
+        if (r == RLVK_SUCCESS && fn && j.frame)
+            fn((int64_t)shown);
         pthread_mutex_lock(&g_trace_lock);
     }
     return NULL;
 }
 
-/** @brief Whether presents are traced (the video.present_trace setting names a file and the device can wait). */
+void rl_present_set_shown_hook(void (*fn)(int64_t shown_ns)) { __atomic_store_n(&g_shown_fn, fn, __ATOMIC_RELEASE); }
+
+/**
+ * @brief Whether presents are watched until shown: the device can wait for presents, and the video.present_trace
+ * setting names a file or a shown hook is set. Starts the watcher thread the first time.
+ */
 static bool trace_on(const rlvk_dev *d)
 {
-    if (g_trace_started)
-        return g_trace_file != NULL;
-    g_trace_started = true;
-    const char *path = rl_setting_str("video.present_trace");
-    if (!path || !path[0] || !d->present_wait)
+    if (!d->present_wait)
         return false;
-    g_trace_file = fopen(path, "w");
-    if (!g_trace_file)
-        return false;
-    g_trace_dev = d;
-    pthread_t t;
-    if (pthread_create(&t, NULL, trace_main, NULL) != 0) {
-        fclose(g_trace_file);
-        g_trace_file = NULL;
-        return false;
+    pthread_mutex_lock(&g_trace_lock);
+    if (!g_trace_started) {
+        g_trace_started = true;
+        const char *path = rl_setting_str("video.present_trace");
+        if (path && path[0])
+            g_trace_file = fopen(path, "w");
     }
-    pthread_detach(t);
-    return true;
+    bool want = g_trace_file || __atomic_load_n(&g_shown_fn, __ATOMIC_ACQUIRE);
+    if (want && !g_watch_started) {
+        g_trace_dev = d;
+        pthread_t t;
+        g_watch_started = pthread_create(&t, NULL, trace_main, NULL) == 0;
+        if (g_watch_started)
+            pthread_detach(t);
+    }
+    bool on = want && g_watch_started;
+    pthread_mutex_unlock(&g_trace_lock);
+    return on;
 }
 
-static void trace_queue(rlvk_handle swapchain, uint64_t id, uint64_t ready_ns, uint64_t queued_ns)
+static void trace_queue(rlvk_handle swapchain, uint64_t id, uint64_t ready_ns, uint64_t queued_ns, bool frame)
 {
     pthread_mutex_lock(&g_trace_lock);
     if (g_trace_count < TRACE_QUEUE) {
-        g_trace_q[(g_trace_head + g_trace_count) % TRACE_QUEUE] = (trace_job){ swapchain, id, ready_ns, queued_ns };
+        g_trace_q[(g_trace_head + g_trace_count) % TRACE_QUEUE] = (trace_job){ swapchain, id, ready_ns, queued_ns, frame };
         g_trace_count++;
         pthread_cond_signal(&g_trace_cond);
     }
@@ -1270,7 +1289,7 @@ static void pc_write(rl_present *p, uint64_t n)
            p->drew.over ? "on" : "off");
 }
 
-static bool draw(rl_present *p, bool capture)
+static bool draw(rl_present *p, bool capture, bool frame)
 {
     const rlvk_dev *d = p->d;
     uint64_t t0 = rl_clock_ns();
@@ -1381,7 +1400,7 @@ static bool draw(rl_present *p, bool capture)
     else if (pr != RLVK_SUCCESS)
         fail("vkQueuePresentKHR", pr);
     if (id && pr == RLVK_SUCCESS)
-        trace_queue(p->swapchain, id, p->work_ready_ns, queued_ns);
+        trace_queue(p->swapchain, id, p->work_ready_ns, queued_ns, frame);
     count_present(p, rl_clock_ns() - t0);
     if (capture || keep)
         d->vkWaitForFences(d->device, 1, &p->fence, 1, ~(uint64_t)0);
@@ -1492,6 +1511,7 @@ static void *thread_main(void *arg)
                 }
                 p->still_shown = p->still_on;
             }
+            bool frame = p->fresh;
             if (p->fresh) {
                 if (p->cur_slot >= 0)
                     p->release_mask |= 1u << p->cur_slot;
@@ -1528,7 +1548,7 @@ static void *thread_main(void *arg)
             p->holds = true;
             p->last_draw_ns = rl_clock_ns();
             pthread_mutex_unlock(&p->lock);
-            bool shown = draw(p, capture);
+            bool shown = draw(p, capture, frame);
             pthread_mutex_lock(&p->lock);
             if (!p->surface)
                 p->holds = false;
