@@ -794,6 +794,8 @@ static int fixed_state(replay *r, pipe_key *k)
     k->depth_bounds = st->depth_bounds && k->depth != VK_FORMAT_UNDEFINED;
     if (k->depth_bounds && !g.depth_bounds)
         return nvn_vk_stop(r, "depth bounds test, which the host device does not have");
+    if ((rc = nvn_shading_rate_state(r, st, &k->shading_rate)) != RL_OK)
+        return rc;
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
     return RL_OK;
 }
@@ -1767,6 +1769,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     uint32_t counted = nvn_counters_begin(st, mods[2] != NULL, mods[3] != NULL || mods[4] != NULL);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, &k);
+    if (k.shading_rate)
+        nvn_shading_rate_bind(st);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
     if (traced)
@@ -1890,6 +1894,8 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
     uint32_t counted = nvn_counters_begin(st, false, false);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     nvn_pipe_set_dynamic(g.cb, k);
+    if (k->shading_rate)
+        nvn_shading_rate_bind(st);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, 0, 3, dd.sets, 0, NULL);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.layout, d.set_layout[4]);
     fixed_push fp = {
@@ -2055,6 +2061,8 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     uint32_t counted = nvn_counters_begin(st, false, false);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gp);
     nvn_pipe_set_dynamic(g.cb, &kg);
+    if (kg.shading_rate)
+        nvn_shading_rate_bind(st);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, 0, 4, sets, 0, NULL);
     bind_pools(VK_PIPELINE_BIND_POINT_GRAPHICS, d.mlayout, d.mset_layout[4]);
     fixed_push fp = {
@@ -3011,12 +3019,59 @@ static int bind_separate(replay *r, const nvn_cmd *e)
     return RL_OK;
 }
 
+static void palette_seen(const uint8_t pal[16]);
+
+bool nvn_shading_rate_khr_has(uint8_t rate) { return rate >= 5 && rate <= 11; }
+
+/**
+ * @brief The shading-rate image runs on the host as on the console with VK_NV_shading_rate_image, whose palette
+ * entries are the hardware's rate codes (NVIDIA's Ampere class header, open-gpu-doc clc797.h,
+ * SET_VARIABLE_PIXEL_RATE_SHADING_INDEX_TO_RATE: 0 cull, 1 to 4 per sample, 5 one per pixel, 6 to 11 one per 2x1 to
+ * 4x4 pixels, the order of VkShadingRatePaletteEntryNV). The image is the bound R8_UINT texture, one index per 16x16
+ * pixels (the host checks its texel size is 16x16; inferred: the console's Ampere tile matches the 3090's). The
+ * console picks the palette by viewport index or by the VPRS table index a program writes
+ * (SET_VARIABLE_PIXEL_RATE_SHADING_TABLE_SELECT); relift draws one viewport, and the translated programs write no
+ * table index, which reads as 0 (inferred), so both pick viewport 0's palette, the one the host gets. Without the
+ * extension every pixel is shaded, which is not the console's result; each palette is logged once with whether
+ * VK_KHR_fragment_shading_rate could give its rates.
+ */
+int nvn_shading_rate_state(replay *r, nvn_gfx *st, uint32_t *on)
+{
+    *on = 0;
+    if (!st->shading.image || !(st->shading.enabled & 1u) || !g.shading_rate_image)
+        return RL_OK;
+    vimg *v = nvn_vk_image(r, st->shading.image);
+    if (!v)
+        return RL_PENDING;
+    VkImageView view = nvn_vk_rate_view(v);
+    if (!view)
+        return nvn_vk_stop(r, "shading-rate image 0x%llx is not a 2D R8_UINT texture the host can use as one",
+                           (unsigned long long)st->shading.image);
+    if (!nvn_vk_refresh(r, v))
+        return nvn_vk_stop(r, "cannot refill shading-rate image 0x%llx from its storage",
+                           (unsigned long long)st->shading.image);
+    st->shading.view = view;
+    *on = 1;
+    return RL_OK;
+}
+
+void nvn_shading_rate_bind(const nvn_gfx *st)
+{
+    uint32_t entries[16];
+    for (uint32_t i = 0; i < 16; i++)
+        entries[i] = st->shading.palette[0][i];
+    struct {
+        uint32_t count;
+        const uint32_t *entries;
+    } pal = { 16, entries };
+    g.bind_shading_rate_image(g.cb, st->shading.view, VK_IMAGE_LAYOUT_GENERAL);
+    g.set_shading_rate_palette(g.cb, 0, 1, &pal);
+}
+
 /**
  * @brief nvnCommandBufferShadingRateImagePalette(NVNcommandBuffer *, int viewport, int count, const int *rates): the
  * driver packs a 16-entry palette of four-bit rates for the viewport, rates[0..count) then 5 (one invocation per pixel)
- * for the rest, all 5 and the palette off when rates is NULL. The host draws every pixel at full rate (reported once
- * when a palette names another rate): coverage, depth and every sample's result stay as the console's, only shading
- * runs more often than the game asked.
+ * for the rest, all 5 and the palette off when rates is NULL. Draws use it through nvn_shading_rate_state.
  */
 static int shading_rate_palette(replay *r, const nvn_cmd *e)
 {
@@ -3034,12 +3089,36 @@ static int shading_rate_palette(replay *r, const nvn_cmd *e)
         st->shading.enabled |= (uint16_t)(1u << vp);
     else
         st->shading.enabled &= (uint16_t)~(1u << vp);
-    if (rates && coarse)
+    if (rates && coarse && !g.shading_rate_image)
         nvn_stats_mark(NVN_STATS_PARTIAL);
-    if (rates && coarse)
-        (void)rl_report_unknown(0x4e564e5352415445ull, "nvn",
-                                "the game shades at reduced rates through a shading-rate image; the host shades every pixel");
+    if (rates)
+        palette_seen(st->shading.palette[vp]);
     return RL_OK;
+}
+
+/** @brief Logs each distinct palette once per run (up to 32): which rates the game uses, and which the host lacks. */
+static void palette_seen(const uint8_t pal[16])
+{
+    static uint64_t seen[32];
+    static uint32_t nseen;
+    uint64_t key = 0;
+    char text[64], *p = text;
+    bool khr = true;
+    for (uint32_t i = 0; i < 16; i++) {
+        key = key << 4 | pal[i];
+        p += snprintf(p, 4, "%x", pal[i]);
+        khr = khr && nvn_shading_rate_khr_has(pal[i]);
+    }
+    for (uint32_t i = 0; i < nseen; i++)
+        if (seen[i] == key)
+            return;
+    if (nseen == 32)
+        return;
+    seen[nseen++] = key;
+    const char *host = g.shading_rate_image ? "applied exactly (VK_NV_shading_rate_image)"
+                       : khr ? "not applied: every pixel is shaded; VK_KHR_fragment_shading_rate could give these rates"
+                             : "not applied: every pixel is shaded; it has rates VK_KHR_fragment_shading_rate lacks";
+    rl_log(RL_LOG_INFO, "nvn", "shading-rate palette %s (index 0 first): %s", text, host);
 }
 
 /** @brief nvn_separate_handles: the bound separate texture words get their slots, the bound sampler ids their sampler. */
@@ -3446,9 +3525,9 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return shading_rate_palette(r, e);
     case NVN_CMD_BIND_SHADING_RATE_IMAGE:
         st->shading.image = e->x[1];
-        return e->x[1] ? nvn_stats_mark(NVN_STATS_PARTIAL) : RL_OK;
+        return e->x[1] && !g.shading_rate_image ? nvn_stats_mark(NVN_STATS_PARTIAL) : RL_OK;
     case NVN_CMD_SET_SHADING_RATE_PALETTE_MODE:
-        st->shading.mode = (uint32_t)e->x[1];
+        st->shading.mode = (uint32_t)e->x[1] == 1 ? 0u : 1u;
         return RL_OK;
     case NVN_CMD_SET_GEOMETRY_PROCESSING_MODE:
         st->geometry_mode = (uint32_t)e->x[1];

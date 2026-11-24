@@ -239,6 +239,11 @@ typedef struct ext_features {
     VkBool32 b[16];
 } ext_features;
 
+/**
+ * @brief VK_IMAGE_USAGE_SHADING_RATE_IMAGE_BIT_NV: every 2D R8_UINT image gets it on a device with the shading-rate
+ * image, so any of them can be the one a game binds (VK_NV_shading_rate_image requires R8_UINT).
+ */
+#define SHADING_RATE_USAGE ((VkImageUsageFlags)0x100u)
 #define STYPE_DEPTH_CLIP_CONTROL ((VkStructureType)1000355000)
 #define STYPE_SHADER_CLOCK ((VkStructureType)1000181000)
 #define STYPE_ATOMIC_FLOAT ((VkStructureType)1000260000)
@@ -350,17 +355,36 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex",
                                            "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library",
                                            "VK_EXT_mesh_shader",                 "VK_EXT_device_fault",
-                                           "VK_EXT_transform_feedback" };
+                                           "VK_EXT_transform_feedback",
+                                           "VK_NV_shading_rate_image" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, xfb, placed;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, xfb, placed, sri;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
     VkPhysicalDeviceFeatures2 f2;
 } feat;
+
+/**
+ * @brief The host's shading-rate image texel is 16x16 pixels, the console's (NVC797 shading-rate index surfaces have
+ * one index per 16x16 tile on Ampere; inferred from the 3090, the same GPU family, which reports 16x16): only then
+ * does a texel of the game's image cover the pixels the console's covers.
+ */
+static bool shading_texel_16(void)
+{
+    struct {
+        VkStructureType sType;
+        void *pNext;
+        VkExtent2D texel;
+        uint32_t palette_size, coarse_samples;
+    } sp = { .sType = (VkStructureType)1000164002 };
+    VkPhysicalDeviceProperties2 pp = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &sp };
+    VK(vkGetPhysicalDeviceProperties2)(g.phys, &pp);
+    return sp.texel.width == 16 && sp.texel.height == 16 && sp.palette_size >= 16;
+}
 
 /** @brief The core's device hook: the extensions and features the NVN layer needs, enabled when the device has them. */
 static bool device_hook(void *user, rl_vkdev_build *b)
@@ -398,10 +422,11 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.gpl = (ext_features){ .sType = STYPE_PIPELINE_LIBRARY };
     feat.mesh = (ext_features){ .sType = STYPE_MESH_SHADER };
     feat.fault = (ext_features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
+    feat.sri = (ext_features){ .sType = (VkStructureType)1000164001 };
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
                                                &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
                                                &feat.provoking,    NULL,        &feat.gpl,          &feat.mesh,
-                                               &feat.fault,        &feat.xfb };
+                                               &feat.fault,        &feat.xfb,          &feat.sri };
     feat.xfb = (ext_features){ .sType = (VkStructureType)1000028000 };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
@@ -411,7 +436,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
     rob2_on = false;
-    bool provoking_on = false, gpl_on = false, mesh_on = false, fault_on = false, xfb_on = false;
+    bool provoking_on = false, gpl_on = false, mesh_on = false, fault_on = false, xfb_on = false, sri_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
@@ -427,6 +452,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 mesh_on |= feats[k] == &feat.mesh;
                 fault_on |= feats[k] == &feat.fault;
                 xfb_on |= feats[k] == &feat.xfb;
+                sri_on |= feats[k] == &feat.sri;
                 break;
             }
     const char *const *up = NULL;
@@ -501,6 +527,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     g.placed = map2 && placed && feat.placed.b[0] && feat.placed.b[2];
     feat.placed.b[1] = VK_FALSE;
     g.transform_feedback = xfb_on && feat.xfb.b[0];
+    g.shading_rate_image = sri_on && feat.sri.b[0];
     feat.fault.b[1] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
@@ -554,6 +581,12 @@ static void bring_up(void)
         memcpy(&g.begin_xfb, &begin, sizeof begin);
         memcpy(&g.end_xfb, &end, sizeof end);
         g.transform_feedback = g.bind_xfb && g.begin_xfb && g.end_xfb;
+    }
+    if (g.shading_rate_image) {
+        void *bind = gdpa(g.dev, "vkCmdBindShadingRateImageNV"), *pal = gdpa(g.dev, "vkCmdSetViewportShadingRatePaletteNV");
+        memcpy(&g.bind_shading_rate_image, &bind, sizeof bind);
+        memcpy(&g.set_shading_rate_palette, &pal, sizeof pal);
+        g.shading_rate_image = g.bind_shading_rate_image && g.set_shading_rate_palette && shading_texel_16();
     }
     if (g.mesh_shader) {
         void *draw = gdpa(g.dev, "vkCmdDrawMeshTasksEXT");
@@ -2903,9 +2936,25 @@ static struct {
 
 static void unlist_written(vimg *v);
 
+VkImageView nvn_vk_rate_view(vimg *v)
+{
+    if (v->rate_view || v->format != VK_FORMAT_R8_UINT || !(v->usage & SHADING_RATE_USAGE))
+        return v->rate_view;
+    VkImageViewCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                 .image = v->image,
+                                 .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                 .format = VK_FORMAT_R8_UINT,
+                                 .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    if (VK(vkCreateImageView)(g.dev, &ci, NULL, &v->rate_view) != VK_SUCCESS)
+        v->rate_view = NULL;
+    return v->rate_view;
+}
+
 static void image_free(vimg *v)
 {
     unlist_written(v);
+    if (v->rate_view)
+        VK(vkDestroyImageView)(g.dev, v->rate_view, NULL);
     for (uint32_t i = 0; i < 7; i++)
         if (v->views[i])
             VK(vkDestroyImageView)(g.dev, v->views[i], NULL);
@@ -3761,7 +3810,8 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | attach |
-                 (can_store ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
+                 (can_store ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
+                 (g.shading_rate_image && f == VK_FORMAT_R8_UINT && d->target == 1 ? SHADING_RATE_USAGE : 0),
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     VkMemoryRequirements req;
@@ -5040,6 +5090,7 @@ void nvn_gfx_init(nvn_gfx *st)
     st->stencil_value_mask[0] = st->stencil_value_mask[1] = 0xff;
     st->stencil_mask[0] = st->stencil_mask[1] = 0xff;
     st->conservative_control = NVN_CONSERVATIVE_CONTROL_DEFAULT;
+    st->shading.mode = NVN_SHADING_TABLE_SELECT_DEFAULT;
 }
 
 bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)

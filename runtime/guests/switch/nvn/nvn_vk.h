@@ -163,6 +163,8 @@ typedef struct vimg {
     uint32_t nsub, capsub;
     /** @brief Sampling views by VkImageViewType (1D to cube array), made when first asked for. */
     VkImageView views[7];
+    /** @brief The view a shading-rate image is bound through (nvn_vk_rate_view), made when first asked for. */
+    VkImageView rate_view;
     /** @brief The texture set keeps it for a registered texture's id (nvn_texset_sync_registered). */
     bool synced;
 } vimg;
@@ -225,6 +227,13 @@ typedef struct nvn_vkdev {
     bool query_ok, occlusion_precise;
     /** @brief VK_EXT_mesh_shader is on with task and mesh shaders: the native back end of task and mesh programs runs. */
     bool mesh_shader;
+    /**
+     * @brief VK_NV_shading_rate_image is on with 16x16 texels and 16 palette entries: a shading-rate image and its
+     * palettes run as the console's (nvn_draw.c, shading_rate).
+     */
+    bool shading_rate_image;
+    void (*bind_shading_rate_image)(VkCommandBuffer, VkImageView, VkImageLayout);
+    void (*set_shading_rate_palette)(VkCommandBuffer, uint32_t, uint32_t, const void *);
     /** @brief The device has geometry shaders (geometryShader) and tessellation shaders (tessellationShader). */
     bool geometry_shader, tessellation_shader;
     /** @brief VK_EXT_device_fault's deviceFault is on: a lost device reports what faulted. */
@@ -464,6 +473,8 @@ typedef struct nvn_gfx {
         uint8_t palette[NVN_SHADING_VIEWPORTS][16];
         uint64_t image;
         uint32_t mode;
+        /** @brief The view of image a draw binds (set where the draw's state is gathered, before its pass begins). */
+        VkImageView view;
     } shading;
     /**
      * @brief Transform feedback (nvn_xfb.c): each buffer bound (GPU address and bytes, 0 for none), whether a
@@ -912,6 +923,8 @@ bool nvn_vk_sync_aliases(replay *r, uint64_t since);
  */
 bool nvn_vk_bytes_changed(vimg *v, const uint8_t *bytes);
 bool nvn_vk_refresh(replay *r, vimg *v);
+/** @brief The single-level 2D R8_UINT view of v a shading-rate image binds through, or NULL when v cannot be one. */
+VkImageView nvn_vk_rate_view(vimg *v);
 /**
  * @brief A view of v of type t: over all its levels and the layers t takes
  * with the texture's swizzle (kept with v), or, given nv, with the levels,
@@ -1084,6 +1097,23 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e);
  * constant at ro 0xbb6ec8 of one game's sdk): post-snap triangles, lines and points, uncertainty region 512, bloat 0.
  */
 #define NVN_CONSERVATIVE_CONTROL_DEFAULT 0x00030000u
+/**
+ * @brief SET_VARIABLE_PIXEL_RATE_SHADING_TABLE_SELECT (NVC797 0x02cc) as the driver's default-state stream leaves it
+ * (one game's sdk ro 0xbb88b8, an inline write of 1): the palette is picked by the VPRS table index.
+ */
+#define NVN_SHADING_TABLE_SELECT_DEFAULT 1u
+/**
+ * @brief Gathers the shading-rate state of a draw into k (nvn_draw.c): on, with the bound image's view in
+ * st->shading.view, when an image is bound and viewport 0 has a palette and the host has VK_NV_shading_rate_image.
+ */
+int nvn_shading_rate_state(replay *r, nvn_gfx *st, uint32_t *on);
+/** @brief Binds st's shading-rate image and viewport 0's palette for a draw whose pipeline has it on. */
+void nvn_shading_rate_bind(const nvn_gfx *st);
+/**
+ * @brief True for a palette rate VK_KHR_fragment_shading_rate can give (one invocation per pixel or per 2x1 to 4x4
+ * pixels, 5 to 11); cull and the per-sample rates (0 to 4) it cannot.
+ */
+bool nvn_shading_rate_khr_has(uint8_t rate);
 /** @brief Draws of the mesh pipeline (mesh) or the vertex pipeline run in geometry processing mode mode. */
 bool nvn_geometry_mode_draws(uint32_t mode, bool mesh);
 /** @brief SET_CONSERVATIVE_RASTER_CONTROL after nvnCommandBufferSetConservativeRasterMode(mode, n) on a register holding cur. */

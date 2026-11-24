@@ -295,7 +295,7 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
     return vr;
 }
 
-/** @brief The dynamic states of every pipeline; one with the depth bounds test adds its range (the last entry). */
+/** @brief The dynamic states of every pipeline (dyn_states adds the optional ones). */
 static const VkDynamicState dynamic_states[] = {
     VK_DYNAMIC_STATE_VIEWPORT,
     VK_DYNAMIC_STATE_SCISSOR,
@@ -314,8 +314,10 @@ static const VkDynamicState dynamic_states[] = {
     VK_DYNAMIC_STATE_STENCIL_OP,
     VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE,
     VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
-    VK_DYNAMIC_STATE_DEPTH_BOUNDS,
 };
+#define BASE_DYNAMIC (sizeof dynamic_states / sizeof dynamic_states[0])
+/** @brief VK_DYNAMIC_STATE_VIEWPORT_SHADING_RATE_PALETTE_NV. */
+#define DYNAMIC_SHADING_RATE_PALETTE ((VkDynamicState)1000164004)
 
 void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k)
 {
@@ -382,8 +384,33 @@ typedef struct state {
     VkPipelineDepthStencilStateCreateInfo ds;
     VkPipelineColorBlendStateCreateInfo cb;
     VkPipelineDynamicStateCreateInfo dy;
+    VkDynamicState dyn[BASE_DYNAMIC + 2];
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        VkBool32 shadingRateImageEnable;
+        uint32_t viewportCount;
+        const void *pShadingRatePalettes;
+    } sri;
     VkPipelineRenderingCreateInfo ri, ri_view;
 } state;
+
+/**
+ * @brief The dynamic states of s: the base ones, the depth bounds range when bounds (the fragment library holds the
+ * test) and the shading-rate palette when palette (the pre-raster library holds the viewport state).
+ */
+static void dyn_states(state *s, bool bounds, bool palette)
+{
+    memcpy(s->dyn, dynamic_states, sizeof dynamic_states);
+    uint32_t n = BASE_DYNAMIC;
+    if (bounds)
+        s->dyn[n++] = VK_DYNAMIC_STATE_DEPTH_BOUNDS;
+    if (palette)
+        s->dyn[n++] = DYNAMIC_SHADING_RATE_PALETTE;
+    s->dy = (VkPipelineDynamicStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+                                                .dynamicStateCount = n,
+                                                .pDynamicStates = s->dyn };
+}
 
 static void fill_state(state *s, const nvn_pipe_key *k)
 {
@@ -429,6 +456,13 @@ static void fill_state(state *s, const nvn_pipe_key *k)
                                                                                  : NULL,
                                                  .viewportCount = 1,
                                                  .scissorCount = 1 };
+    s->sri.sType = (VkStructureType)1000164000;
+    s->sri.pNext = s->vp.pNext;
+    s->sri.shadingRateImageEnable = VK_TRUE;
+    s->sri.viewportCount = 1;
+    s->sri.pShadingRatePalettes = NULL;
+    if (k->shading_rate)
+        s->vp.pNext = &s->sri;
     s->conservative.sType = (VkStructureType)1000101001;
     s->conservative.pNext = NULL;
     s->conservative.flags = 0;
@@ -457,10 +491,7 @@ static void fill_state(state *s, const nvn_pipe_key *k)
     s->cb = (VkPipelineColorBlendStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                                                    .attachmentCount = k->ncolor,
                                                    .pAttachments = k->blend };
-    s->dy = (VkPipelineDynamicStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                                .dynamicStateCount = sizeof dynamic_states / sizeof dynamic_states[0] -
-                                                                     (k->depth_bounds ? 0u : 1u),
-                                                .pDynamicStates = dynamic_states };
+    dyn_states(s, k->depth_bounds, k->shading_rate);
     s->ri = (VkPipelineRenderingCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                                              .colorAttachmentCount = k->ncolor,
                                              .pColorAttachmentFormats = k->color,
@@ -484,6 +515,8 @@ typedef struct stage_key {
     uint32_t polygon, depth_clamp, conservative, negative_one_to_one, conservative_dilate, viewport_swizzle, provoking_last, sample_mask;
     /** @brief The fragment stage's library holds the depth bounds test (its depth-stencil state). */
     uint32_t depth_bounds;
+    /** @brief The pre-raster stage's library has the shading-rate image on (its viewport state). */
+    uint32_t shading_rate;
 } stage_key;
 
 typedef struct fo_key {
@@ -511,6 +544,7 @@ static void stage_of(const nvn_pipe_key *k, uint32_t s, stage_key *o)
     o->nspec = k->nspec[s];
     o->sample_mask = s == 1 ? k->sample_mask : 0;
     o->depth_bounds = s == 1 ? k->depth_bounds : 0;
+    o->shading_rate = s == 0 ? k->shading_rate : 0;
     memcpy(o->map, k->spec_map[s], k->nspec[s] * sizeof o->map[0]);
     memcpy(o->val, k->spec[s], k->nspec[s] * sizeof o->val[0]);
     nvn_spec_sort(&o->nspec, o->map, o->val);
@@ -548,8 +582,8 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
         return e->p;
     state s;
     fill_state(&s, k);
-    if (part != VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)
-        s.dy.dynamicStateCount = sizeof dynamic_states / sizeof dynamic_states[0] - 1u;
+    dyn_states(&s, part == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT && k->depth_bounds,
+               part == VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT && k->shading_rate);
     VkGraphicsPipelineLibraryCreateInfoEXT lib = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
                                                    .flags = part };
     VkGraphicsPipelineCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,

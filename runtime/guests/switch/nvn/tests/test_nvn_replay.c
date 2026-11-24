@@ -112,6 +112,25 @@ TEST(nvn_replay_geometry_processing_mode_picks_the_pipeline_draws_run_in)
     CHECK(!nvn_geometry_mode_draws(3, false));
 }
 
+TEST(nvn_replay_shading_rate_table_select_follows_the_driver)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    CHECK_EQ(st.shading.mode, 1u);
+    nvn_cmd e = { .op = NVN_CMD_SET_SHADING_RATE_PALETTE_MODE, .x = { 0, 1 } };
+    CHECK_EQ(replay_one(&st, &e), RL_OK);
+    CHECK_EQ(st.shading.mode, 0u);
+    e.x[1] = 0;
+    CHECK_EQ(replay_one(&st, &e), RL_OK);
+    CHECK_EQ(st.shading.mode, 1u);
+    CHECK(!nvn_shading_rate_khr_has(0));
+    CHECK(!nvn_shading_rate_khr_has(4));
+    CHECK(nvn_shading_rate_khr_has(5));
+    CHECK(nvn_shading_rate_khr_has(11));
+    CHECK(!nvn_shading_rate_khr_has(12));
+}
+
 TEST(nvn_replay_depth_bounds_are_kept_in_the_state)
 {
     nvn_gfx st;
@@ -778,7 +797,7 @@ TEST(nvn_replay_shading_rate_palettes_fill_the_rest_with_full_rate)
     CHECK_EQ(st.shading.image, 0x1234u);
     nvn_cmd mode = { .op = NVN_CMD_SET_SHADING_RATE_PALETTE_MODE, .x = { 0, 1 } };
     CHECK_EQ(nvn_draw_cmd(&r, &mode), RL_OK);
-    CHECK_EQ(st.shading.mode, 1u);
+    CHECK_EQ(st.shading.mode, 0u);
     free(s->bytes);
     free(s);
 }
