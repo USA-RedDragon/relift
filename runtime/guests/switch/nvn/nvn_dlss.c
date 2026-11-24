@@ -82,10 +82,8 @@ static uint64_t callback_probe(rl_ctx *c, uint32_t slot)
         (void)mem;                                                                                                     \
         return callback_probe(c, i);                                                                                   \
     }
-CALLBACK(2)
 CALLBACK(6)
 CALLBACK(9)
-CALLBACK(10)
 CALLBACK(11)
 CALLBACK(12)
 CALLBACK(15)
@@ -188,15 +186,43 @@ static int proc(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *ret, unsign
  * @brief Takes n bytes aligned to align from the network's storage, as the driver does (its allocator at +0xa8 of the
  * network: the cursor at +0xc8, the bytes left at +0xd0); 0 when they do not fit.
  */
-static uint64_t take(uint8_t *mem, uint64_t net, uint64_t n, uint64_t align)
+static uint64_t take_from(uint8_t *mem, uint64_t alloc, uint64_t n, uint64_t align)
 {
-    uint64_t cur = rl_ld64(mem, net + 0xc8), left = rl_ld64(mem, net + 0xd0);
+    uint64_t cur = rl_ld64(mem, alloc + 0x20), left = rl_ld64(mem, alloc + 0x28);
     uint64_t at = (cur + align - 1) & ~(align - 1), need = at - cur + n;
     if (need > left)
         return 0;
-    rl_st64(mem, net + 0xc8, cur + need);
-    rl_st64(mem, net + 0xd0, left - need);
+    rl_st64(mem, alloc + 0x20, cur + need);
+    rl_st64(mem, alloc + 0x28, left - need);
     return at;
+}
+
+static uint64_t take(uint8_t *mem, uint64_t net, uint64_t n, uint64_t align) { return take_from(mem, net + 0xa8, n, align); }
+
+/** @brief Bytes of the device-wide DLSS arena the driver allocates at a DLSS device's initialize (sdk 0x6550b0). */
+#define DEVICE_ARENA 0xb00000u
+
+/**
+ * @brief The allocator of the device-wide arena (its state at +DEVICE_ARENA of the arena, laid out as a network's
+ * at +0xa8: device at +0x18, cursor +0x20, bytes left +0x28; sdk 0x658950), made at first use in guest memory relift
+ * reserves; 0 when it cannot be made.
+ */
+static uint64_t device_arena(uint8_t *mem, uint64_t device)
+{
+    static uint64_t arena;
+    if (arena)
+        return arena + DEVICE_ARENA;
+    uint64_t at = 0, bytes = DEVICE_ARENA + 0x1000;
+    if (rl_hos_reserve(bytes, 0x10000, &at) != KR_SUCCESS || rl_hos_reserved_set(at, bytes, RL_VM_RW, RL_VM_FRESH) != 0)
+        return 0;
+    uint64_t st = at + DEVICE_ARENA;
+    memset(mem + st, 0, 0x60);
+    rl_st64(mem, st + 0x18, device);
+    rl_st64(mem, st + 0x20, at);
+    rl_st64(mem, st + 0x28, DEVICE_ARENA);
+    rl_st64(mem, st + 0x30, DEVICE_ARENA);
+    arena = at;
+    return st;
 }
 
 /**
@@ -303,7 +329,7 @@ static uint64_t callback_4(rl_ctx *c, uint8_t *mem)
 
 /**
  * @brief Callback 3(cb, desc, &out): a buffer, made as the console driver makes it (sdk 0x65a070, 0x6587a0): a
- * 0x168-byte object from the network's storage (the memory pool at +0x30, the buffer at +0x130), desc+0 bytes rounded
+ * 0x168-byte object from the network's storage (the device-wide arena's when desc+0x14 has bit 1) (the memory pool at +0x30, the buffer at +0x130), desc+0 bytes rounded
  * up to 4 KiB in a pool of kind desc+0x18. True on success.
  */
 static uint64_t callback_3(rl_ctx *c, uint8_t *mem)
@@ -311,10 +337,15 @@ static uint64_t callback_3(rl_ctx *c, uint8_t *mem)
     uint64_t desc = c->x[1], out = c->x[2], net = g_current;
     if (!net)
         return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library makes a buffer outside a network");
-    if (mem[desc + 0x14] & 2)
-        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library makes a device-wide buffer (desc+0x14 bit 1)");
-    uint64_t device = rl_ld64(mem, net + 0xc0), obj = take(mem, net, 0x168, 8);
-    uint64_t bytes = ((uint64_t)rl_ld32(mem, desc) + 0xfff) & ~0xfffull, storage = obj ? take(mem, net, bytes, 0x1000) : 0;
+    uint64_t device = rl_ld64(mem, net + 0xc0), alloc = net + 0xa8;
+    if (mem[desc + 0x14] & 2) {
+        alloc = device_arena(mem, device);
+        if (!alloc)
+            return (uint64_t)rl_guest_fatal(c, "nvn", "no guest memory for the DLSS device arena");
+    }
+    uint64_t obj = take_from(mem, alloc, 0x168, 8);
+    uint64_t bytes = ((uint64_t)rl_ld32(mem, desc) + 0xfff) & ~0xfffull;
+    uint64_t storage = obj ? take_from(mem, alloc, bytes, 0x1000) : 0;
     if (!storage)
         return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS network's storage is full (0x%llx buffer bytes)",
                                         (unsigned long long)bytes);
@@ -334,7 +365,7 @@ static uint64_t callback_3(rl_ctx *c, uint8_t *mem)
     c->sp = sp;
     if (rc != RL_OK)
         return (uint64_t)rc;
-    rl_st64(mem, obj + 0x160, net + 0xa8);
+    rl_st64(mem, obj + 0x160, alloc);
     if (!(ok & 1) || !note_res(obj, false))
         return (uint64_t)rl_guest_fatal(c, "nvn", "a buffer for the console DLSS library did not initialize");
     rl_st64(mem, out, obj);
@@ -424,6 +455,53 @@ static uint64_t callback_8(rl_ctx *c, uint8_t *mem)
         rl_st64(mem, c->x[3], rl_ld64(mem, obj + 0x1c0));
         c->x[0] = 1;
     }
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 10(cb, cmd, size, src, staging, dst, staging_off, dst_off): uploads size bytes from guest memory
+ * src into buffer dst at dst_off, as the console driver does (sdk 0x65a260): without a command buffer straight into
+ * dst's mapping; with one, into the staging buffer's mapping at staging_off and then a copy command into dst. True.
+ */
+static uint64_t callback_10(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t cmd = c->x[1], size = c->x[2], src = c->x[3], staging = c->x[4], dst = c->x[5];
+    uint64_t soff = c->x[6], doff = c->x[7];
+    const dlss_res *d = res_of(dst), *s = cmd ? res_of(staging) : NULL;
+    if (!d || d->texture || (cmd && (!s || s->texture)))
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library uploads to 0x%llx through 0x%llx, which are not relift's buffers",
+                                        (unsigned long long)dst, (unsigned long long)staging);
+    uint64_t into = cmd ? staging + 0x130 : dst + 0x130, off = cmd ? soff : doff, map = 0;
+    int rc = proc(c, mem, "nvnBufferMap", &map, 1, into);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = 0;
+    if (!map)
+        return nvn_ret(c);
+    memmove(mem + map + off, mem + src, size);
+    rc = proc(c, mem, "nvnBufferFlushMappedRange", NULL, 3, into, off, size);
+    if (rc == RL_OK && cmd) {
+        uint64_t from = 0, to = 0;
+        rc = proc(c, mem, "nvnBufferGetAddress", &from, 1, staging + 0x130);
+        if (rc == RL_OK)
+            rc = proc(c, mem, "nvnBufferGetAddress", &to, 1, dst + 0x130);
+        if (rc == RL_OK)
+            rc = proc(c, mem, "nvnCommandBufferCopyBufferToBuffer", NULL, 5, cmd, from + soff, to + doff, size,
+                      (uint64_t)0);
+    }
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/** @brief Callback 2(cb, cmd): a barrier in the command buffer, the one the console driver records (sdk 0x65a040: bits 0x80000031). True. */
+static uint64_t callback_2(rl_ctx *c, uint8_t *mem)
+{
+    int rc = proc(c, mem, "nvnCommandBufferBarrier", NULL, 2, c->x[1], (uint64_t)0x80000031u);
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    c->x[0] = 1;
     return nvn_ret(c);
 }
 
