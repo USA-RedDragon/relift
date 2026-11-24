@@ -38,6 +38,7 @@ if [ -n "$gcc" ]; then
     for dir in "$here"/*/; do
         name=$(basename "$dir")
         [ -f "$dir/main.go" ] && continue
+        [ -f "$dir/i386_only" ] && continue
         if [ -f "$dir/main.cpp" ]; then
             cc=$gxx
             src="$dir/main.cpp"
