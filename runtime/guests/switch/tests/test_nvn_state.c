@@ -22,6 +22,8 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <time.h>
 
 #define RET 0x7000000ull
 
@@ -769,4 +771,79 @@ TEST(nvn_gpu_trace_report_window_comes_from_the_environment)
     CHECK_EQ(to, 0x62f0u);
     unsetenv("RELIFT_NVN_GPU_TRACE_LINES");
     unsetenv("RELIFT_NVN_GPU_TRACE_PCS");
+}
+
+struct pool_maker {
+    uint64_t pool, storage;
+    int done;
+};
+
+static void *make_pool_later(void *arg)
+{
+    struct pool_maker *m = arg;
+    (void)nvn_pool_make(m->pool, m->storage, 0x40000, 0x18c);
+    __atomic_store_n(&m->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+/**
+ * A pool joins or leaves the pool table only once no snapshot of it is held (nvn_pools_hold): the pool table's
+ * descriptors are written from such a snapshot, and a pool that left meanwhile would have its buffer destroyed
+ * under the update.
+ */
+TEST(nvn_a_pool_table_change_waits_for_a_held_snapshot)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    struct pool_maker m = { heap, heap + 0x100000, 0 };
+    nvn_pools_hold();
+    pthread_t t;
+    CHECK_EQ(pthread_create(&t, NULL, make_pool_later, &m), 0);
+    struct timespec wait = { 0, 100 * 1000 * 1000 };
+    nanosleep(&wait, NULL);
+    CHECK_EQ(__atomic_load_n(&m.done, __ATOMIC_ACQUIRE), 0);
+    nvn_pools_release();
+    CHECK_EQ(pthread_join(t, NULL), 0);
+    CHECK_EQ(m.done, 1);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, m.pool, 0, 0, 0), RET);
+}
+
+static struct pool_maker between_maker;
+static pthread_t between_thread;
+static int between_done_at_hook = -1;
+
+static void make_a_pool_between(void)
+{
+    CHECK_EQ(pthread_create(&between_thread, NULL, make_pool_later, &between_maker), 0);
+    struct timespec wait = { 0, 100 * 1000 * 1000 };
+    nanosleep(&wait, NULL);
+    between_done_at_hook = __atomic_load_n(&between_maker.done, __ATOMIC_ACQUIRE);
+}
+
+/**
+ * The pool table's descriptor update writes the pools it snapshotted: a pool made (or finalized) on another thread
+ * between the snapshot and the update waits until the update is done, so no buffer of the snapshot is destroyed under
+ * it. The hook runs between the two; the other thread's pool change must not have finished when it looks.
+ */
+TEST(nvn_the_pool_table_update_holds_its_snapshot_until_written)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    bool up = nvn_vk_ready();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up || !nvn_pools_layout())
+        return; /* no host device, or one without the pool table */
+    between_maker = (struct pool_maker){ heap, heap + 0x100000, 0 };
+    between_done_at_hook = -1;
+    /* a pool change first, so the slot's table is written again */
+    CHECK(nvn_pool_make(heap + 0x100, heap + 0x180000, 0x40000, 0x18c));
+    nvn_pools_between_hook = make_a_pool_between;
+    VkDescriptorSet s = nvn_pools_set(0);
+    nvn_pools_between_hook = NULL;
+    CHECK(s != NULL);
+    CHECK_EQ(pthread_join(between_thread, NULL), 0);
+    CHECK_EQ(between_done_at_hook, 0);
+    CHECK_EQ(between_maker.done, 1);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, between_maker.pool, 0, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, heap + 0x100, 0, 0, 0), RET);
 }

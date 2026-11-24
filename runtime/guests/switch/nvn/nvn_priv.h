@@ -854,6 +854,8 @@ void nvn_pools_hold(void);
 void nvn_pools_release(void);
 /** @brief nvn_pool_spans with the read lock already held (nvn_pools_hold). */
 uint64_t nvn_pool_spans_held(nvn_span *out, uint32_t cap, uint32_t *n);
+/** @brief Tests only: called by the pool table's descriptor update between its snapshot of the pools and the update. */
+extern void (*nvn_pools_between_hook)(void);
 /** @brief The generation of the imported pools' span list: it changes with every pool added or removed. */
 uint64_t nvn_pool_generation(void);
 

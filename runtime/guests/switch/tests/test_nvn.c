@@ -15,7 +15,6 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
-#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1827,39 +1826,4 @@ TEST(nvn_counter_timestamps_are_gpu_ticks_and_convert_to_nanoseconds)
     CHECK_EQ(c->x[0], 3000000000ull + 625);
     CHECK_EQ(nvn_gpu_ticks(1000000000ull), 19200000ull);
     CHECK_EQ(nvn_gpu_ns(nvn_gpu_ticks(77000000ull)), 77000000ull);
-}
-
-struct pool_maker {
-    uint64_t pool, storage;
-    int done;
-};
-
-static void *make_pool_later(void *arg)
-{
-    struct pool_maker *m = arg;
-    (void)nvn_pool_make(m->pool, m->storage, 0x40000, 0x18c);
-    __atomic_store_n(&m->done, 1, __ATOMIC_RELEASE);
-    return NULL;
-}
-
-/**
- * A pool joins or leaves the pool table only once no snapshot of it is held (nvn_pools_hold): the pool table's
- * descriptors are written from such a snapshot, and a pool that left meanwhile would have its buffer destroyed
- * under the update.
- */
-TEST(nvn_a_pool_table_change_waits_for_a_held_snapshot)
-{
-    rl_ctx *c = t_boot(NULL);
-    uint64_t heap = t_heap(c, 0x200000);
-    struct pool_maker m = { heap, heap + 0x100000, 0 };
-    nvn_pools_hold();
-    pthread_t t;
-    CHECK_EQ(pthread_create(&t, NULL, make_pool_later, &m), 0);
-    struct timespec wait = { 0, 100 * 1000 * 1000 };
-    nanosleep(&wait, NULL);
-    CHECK_EQ(__atomic_load_n(&m.done, __ATOMIC_ACQUIRE), 0);
-    nvn_pools_release();
-    CHECK_EQ(pthread_join(t, NULL), 0);
-    CHECK_EQ(m.done, 1);
-    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, m.pool, 0, 0, 0), RET);
 }

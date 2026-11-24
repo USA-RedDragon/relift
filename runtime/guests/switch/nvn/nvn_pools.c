@@ -204,6 +204,8 @@ static bool write_pieces(uint32_t slot, nvn_span *sp, uint32_t n, uint64_t gen)
     return true;
 }
 
+void (*nvn_pools_between_hook)(void);
+
 /** @brief write_slot with the pool table's read lock held (nvn_pools_hold). */
 static bool write_slot_held(uint32_t slot)
 {
@@ -213,6 +215,8 @@ static bool write_slot_held(uint32_t slot)
     if (!sp)
         return false;
     gen = nvn_pool_spans_held(sp, n, &n);
+    if (nvn_pools_between_hook)
+        nvn_pools_between_hook();
     return write_pieces(slot, sp, n, gen);
 }
 
