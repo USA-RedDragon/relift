@@ -41,6 +41,79 @@ const _: () = assert!(emu::DATA == format::DATA && emu::DATA_SIZE == format::DAT
 /// Where the Thor's harness is on the device.
 const THOR_HARNESS: &str = "/data/local/tmp/a64kat/harness-linux";
 
+fn put_state(s: &mut String, st: &State, base: &State) {
+    use std::fmt::Write as _;
+    for i in 0..31 {
+        if st.x[i] != base.x[i] {
+            let _ = write!(s, " x{i}={:x}", st.x[i]);
+        }
+    }
+    if st.sp != base.sp {
+        let _ = write!(s, " sp={:x}", st.sp);
+    }
+    for i in 0..32 {
+        if st.v[i] != base.v[i] {
+            let _ = write!(s, " v{i}={:x}", st.v[i]);
+        }
+    }
+    if st.nzcv != base.nzcv {
+        let _ = write!(s, " nzcv={:x}", st.nzcv);
+    }
+    if st.fpcr != base.fpcr {
+        let _ = write!(s, " fpcr={:x}", st.fpcr);
+    }
+    if st.fpsr != base.fpsr {
+        let _ = write!(s, " fpsr={:x}", st.fpsr);
+    }
+}
+
+/// The line of a case.
+fn format_case(c: &Case, seed: u64) -> String {
+    use std::fmt::Write as _;
+    let mut s = format!("src={} w=", c.src);
+    for (i, w) in c.words.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        let _ = write!(s, "{w:08x}");
+    }
+    let base = State::base();
+    put_state(&mut s, &c.input, &base);
+    let _ = write!(s, " seed={:x} ->", seed);
+    match &c.out {
+        Answer::Fault(sig) => {
+            let _ = write!(s, " fault={sig}");
+        }
+        Answer::Done(o) => {
+            put_state(&mut s, o, &c.input);
+            if o.pc != 4 * c.words.len() as u64 {
+                let _ = write!(s, " pc={:x}", o.pc);
+            }
+            let seed_mem = format::fill_window(seed);
+            let mut i = 0;
+            while i < format::DATA_SIZE {
+                if o.mem[i] == seed_mem[i] {
+                    i += 1;
+                    continue;
+                }
+                let mut j = i;
+                while j < format::DATA_SIZE && o.mem[j] != seed_mem[j] {
+                    j += 1;
+                }
+                let _ = write!(s, " m{i:x}=");
+                for b in &o.mem[i..j] {
+                    let _ = write!(s, "{b:02x}");
+                }
+                i = j;
+            }
+        }
+    }
+    for (r, m) in &c.mask {
+        let _ = write!(s, " mask.{r}={m:x}");
+    }
+    s
+}
+
 /// The class (file) of an encoding.
 pub fn class(enc: Encoding) -> &'static str {
     let n = enc.name();
@@ -328,11 +401,13 @@ fn record(dir: &Path, o: &Opts) -> Result<(), String> {
                         src: o.src.clone(),
                         words: run.words.clone(),
                         input,
-                        seed: run.input.mem_seed.expect("seeded window"),
                         out,
                         mask,
                     };
-                    text.push_str(&format::format(&case));
+                    text.push_str(&format_case(
+                        &case,
+                        run.input.mem_seed.expect("seeded window"),
+                    ));
                     text.push('\n');
                     kept += 1;
                 }
@@ -377,7 +452,7 @@ fn cross(dir: &Path) -> Result<(), String> {
                 fpsr: c.input.fpsr,
                 pc: 0,
                 mem: c.input.mem.clone(),
-                mem_seed: Some(c.seed),
+                mem_seed: None,
             };
             let r = u.run(&[Run {
                 words: c.words.clone(),

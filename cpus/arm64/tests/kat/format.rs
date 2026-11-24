@@ -127,92 +127,10 @@ pub struct Case {
     pub words: Vec<u32>,
     /// The input state.
     pub input: State,
-    /// The seed the input's data window was filled from.
-    pub seed: u64,
     /// The answer.
     pub out: Result,
     /// Bits not to compare, by register name (`x3`, `v7`, `sp`).
     pub mask: BTreeMap<String, u128>,
-}
-
-fn reg_names() -> impl Iterator<Item = String> {
-    (0..31)
-        .map(|i| format!("x{i}"))
-        .chain(std::iter::once("sp".to_string()))
-        .chain((0..32).map(|i| format!("v{i}")))
-}
-
-fn put_state(s: &mut String, st: &State, base: &State, full: bool) {
-    use std::fmt::Write as _;
-    for i in 0..31 {
-        if full || st.x[i] != base.x[i] {
-            let _ = write!(s, " x{i}={:x}", st.x[i]);
-        }
-    }
-    if full || st.sp != base.sp {
-        let _ = write!(s, " sp={:x}", st.sp);
-    }
-    for i in 0..32 {
-        if full || st.v[i] != base.v[i] {
-            let _ = write!(s, " v{i}={:x}", st.v[i]);
-        }
-    }
-    if st.nzcv != base.nzcv {
-        let _ = write!(s, " nzcv={:x}", st.nzcv);
-    }
-    if st.fpcr != base.fpcr {
-        let _ = write!(s, " fpcr={:x}", st.fpcr);
-    }
-    if st.fpsr != base.fpsr {
-        let _ = write!(s, " fpsr={:x}", st.fpsr);
-    }
-}
-
-/// The line of a case.
-pub fn format(c: &Case) -> String {
-    use std::fmt::Write as _;
-    let mut s = format!("src={} w=", c.src);
-    for (i, w) in c.words.iter().enumerate() {
-        if i > 0 {
-            s.push(',');
-        }
-        let _ = write!(s, "{w:08x}");
-    }
-    let base = State::base();
-    put_state(&mut s, &c.input, &base, false);
-    let _ = write!(s, " seed={:x} ->", c.seed);
-    match &c.out {
-        Result::Fault(sig) => {
-            let _ = write!(s, " fault={sig}");
-        }
-        Result::Done(o) => {
-            put_state(&mut s, o, &c.input, false);
-            if o.pc != 4 * c.words.len() as u64 {
-                let _ = write!(s, " pc={:x}", o.pc);
-            }
-            let seed_mem = fill_window(c.seed);
-            let mut i = 0;
-            while i < DATA_SIZE {
-                if o.mem[i] == seed_mem[i] {
-                    i += 1;
-                    continue;
-                }
-                let mut j = i;
-                while j < DATA_SIZE && o.mem[j] != seed_mem[j] {
-                    j += 1;
-                }
-                let _ = write!(s, " m{i:x}=");
-                for b in &o.mem[i..j] {
-                    let _ = write!(s, "{b:02x}");
-                }
-                i = j;
-            }
-        }
-    }
-    for (r, m) in &c.mask {
-        let _ = write!(s, " mask.{r}={m:x}");
-    }
-    s
 }
 
 fn hex(v: &str) -> u128 {
@@ -235,7 +153,7 @@ fn set_reg(st: &mut State, name: &str, v: u128) -> bool {
 /// Reads a case from its line.
 pub fn parse(line: &str) -> Case {
     let (i, o) = line
-        .split_once(" -> ")
+        .split_once(" ->")
         .unwrap_or_else(|| panic!("no arrow: {line}"));
     let mut input = State::base();
     let (mut src, mut words, mut seed) = (String::new(), Vec::new(), 0u64);
@@ -279,12 +197,10 @@ pub fn parse(line: &str) -> Case {
             assert!(set_reg(&mut out, k, hex(v)), "bad output field {t}");
         }
     }
-    debug_assert!(reg_names().count() == 64);
     Case {
         src,
         words,
         input,
-        seed,
         out: match fault {
             Some(s) => Result::Fault(s),
             None => Result::Done(Box::new(out)),
