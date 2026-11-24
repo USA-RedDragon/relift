@@ -120,6 +120,25 @@ uint64_t nvn_pool_spans(nvn_span *out, uint32_t cap, uint32_t *n)
 
 uint64_t nvn_pool_generation(void) { return __atomic_load_n(&g_pools.gen, __ATOMIC_ACQUIRE); }
 
+void nvn_pools_hold(void) { pthread_rwlock_rdlock(&g_pools.lock); }
+
+void nvn_pools_release(void) { pthread_rwlock_unlock(&g_pools.lock); }
+
+uint64_t nvn_pool_spans_held(nvn_span *out, uint32_t cap, uint32_t *n)
+{
+    uint32_t k = 0;
+    for (uint32_t i = 0; i < g_pools.n; i++) {
+        const struct pool_span *p = &g_pools.v[i];
+        if (!p->buf)
+            continue;
+        if (k < cap)
+            out[k] = (nvn_span){ p->gpu, p->size, p->memory, p->buf, p->base };
+        k++;
+    }
+    *n = k;
+    return g_pools.gen;
+}
+
 static void pools_add(uint64_t gpu, uint64_t size, uint64_t memory, void *buf, uint64_t base)
 {
     pthread_rwlock_wrlock(&g_pools.lock);

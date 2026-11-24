@@ -20,6 +20,9 @@
 
 #define MAX_PIECES (1u << NVN_POOL_SEARCH_STEPS)
 
+static bool write_slot_held(uint32_t slot);
+static bool write_pieces(uint32_t slot, nvn_span *sp, uint32_t n, uint64_t gen);
+
 static struct {
     VkDescriptorSetLayout layout, empty;
     VkDescriptorPool pool;
@@ -135,15 +138,23 @@ uint32_t nvn_pool_pieces(const nvn_span *sp, uint32_t n, uint64_t range, uint64_
     return np;
 }
 
-/** @brief Writes slot's table and descriptors for the current pools. */
+/**
+ * @brief Writes slot's table and descriptors for the current pools. The pool table's read lock is held from the spans'
+ * snapshot through the descriptor update: a finalized or discarded pool leaves the table under its write lock before
+ * its buffer is destroyed, so no descriptor is written with a buffer another thread destroyed meanwhile (which the
+ * host driver does not survive).
+ */
 static bool write_slot(uint32_t slot)
 {
-    uint32_t n = 0;
-    uint64_t gen = nvn_pool_spans(NULL, 0, &n);
-    nvn_span *sp = malloc((n ? n : 1) * sizeof *sp);
-    if (!sp)
-        return false;
-    gen = nvn_pool_spans(sp, n, &n);
+    nvn_pools_hold();
+    bool ok = write_slot_held(slot);
+    nvn_pools_release();
+    return ok;
+}
+
+/** @brief Writes slot's table and descriptors for the n spans sp (generation gen), which it frees. */
+static bool write_pieces(uint32_t slot, nvn_span *sp, uint32_t n, uint64_t gen)
+{
     uint64_t range = g.max_storage_range ? g.max_storage_range : UINT32_MAX;
     uint32_t cap = P.cap;
     nvn_pool_piece *pc = malloc(cap * sizeof *pc);
@@ -191,6 +202,18 @@ static bool write_slot(uint32_t slot)
     free(pc);
     free(bi);
     return true;
+}
+
+/** @brief write_slot with the pool table's read lock held (nvn_pools_hold). */
+static bool write_slot_held(uint32_t slot)
+{
+    uint32_t n = 0;
+    uint64_t gen = nvn_pool_spans_held(NULL, 0, &n);
+    nvn_span *sp = malloc((n ? n : 1) * sizeof *sp);
+    if (!sp)
+        return false;
+    gen = nvn_pool_spans_held(sp, n, &n);
+    return write_pieces(slot, sp, n, gen);
 }
 
 VkDescriptorSet nvn_pools_set(uint32_t slot)

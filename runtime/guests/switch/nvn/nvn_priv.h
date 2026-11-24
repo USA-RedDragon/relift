@@ -789,6 +789,11 @@ typedef struct nvn_span {
  * generation of the span list they are, which nvn_pool_generation returns until the list changes.
  */
 uint64_t nvn_pool_spans(nvn_span *out, uint32_t cap, uint32_t *n);
+/** @brief Holds and releases the pool table's read lock: pools neither leave nor arrive meanwhile (nvn_dev.c). */
+void nvn_pools_hold(void);
+void nvn_pools_release(void);
+/** @brief nvn_pool_spans with the read lock already held (nvn_pools_hold). */
+uint64_t nvn_pool_spans_held(nvn_span *out, uint32_t cap, uint32_t *n);
 /** @brief The generation of the imported pools' span list: it changes with every pool added or removed. */
 uint64_t nvn_pool_generation(void);
 
