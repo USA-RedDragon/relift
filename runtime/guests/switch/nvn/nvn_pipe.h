@@ -61,6 +61,12 @@ typedef struct nvn_pipe_key {
     uint32_t has_locations;
     uint8_t locations[16];
     /**
+     * @brief Target independent rasterization: the raster samples when more than the color targets' samples (0
+     * otherwise), the coverage modulation (VkCoverageModulationModeNV, NVN's own values), and coverage to color (1 |
+     * the color target << 1, 0 off).
+     */
+    uint32_t raster_samples, coverage_modulation, coverage_to_color;
+    /**
      * @brief The samples of a draw with alpha to coverage, plus NVN_A2C_DITHER with the dither, 0 without: the
      * host's own where it is the console's (nvn_a2c_native), the fragment program's (A2C_SPEC) elsewhere.
      */

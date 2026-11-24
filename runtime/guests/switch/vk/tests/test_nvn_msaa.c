@@ -3,13 +3,15 @@
  * @brief Multisample textures get host images of their own sample count, which draw into them at that count and
  * bind only as multisample textures, where a program reads each sample it was drawn with; their samples move
  * between the image and the guest's storage in NVK's grid cells, both ways, Downsample averages the driver's
- * taps, and programmable sample locations land on NVN's 1/16 pixel points.
+ * taps, programmable sample locations land on NVN's 1/16 pixel points, and NVIDIA's raster samples give coverage to
+ * color and coverage modulation as their hardware states say.
  */
 #include "hos.h"
 #include "nvn_priv.h"
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +22,18 @@ typedef struct rig {
     nvn_gfx st;
     replay r;
 } rig;
+
+/** @brief Whether the host makes RGBA8 render targets of n samples (lavapipe has no 2). */
+static bool host_samples(uint32_t n)
+{
+    VkImageFormatProperties ifp;
+    return VK(vkGetPhysicalDeviceImageFormatProperties)(g.phys, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
+                                                         VK_IMAGE_TILING_OPTIMAL,
+                                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                             VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                         0, &ifp) == VK_SUCCESS &&
+           (ifp.sampleCounts & n);
+}
 
 static bool rig_up(rig *g_, uint64_t pool)
 {
@@ -43,6 +57,10 @@ TEST(nvn_a_multisample_texture_gets_a_host_image_of_its_sample_count)
     const uint64_t pool = 0x110, tex = 0x210, arr = 0x310;
     if (!rig_up(&k, pool))
         return;
+    if (!host_samples(8)) {
+        fprintf(stderr, "nvn_a_multisample_texture_gets_a_host_image_of_its_sample_count: the host device has no 8-sample color targets, skipped\n");
+        return;
+    }
     nvn_tex_desc d = { .target = NVN_TARGET_2D_MULTISAMPLE, .format = 37, .width = 16, .height = 8, .depth = 1,
                        .levels = 1, .samples = 8, .pool = pool, .offset = 0x1000 };
     CHECK(nvn_tex_layout(&d));
@@ -304,6 +322,10 @@ TEST(nvn_texset_a_multisample_texture_reads_each_sample_it_was_drawn_with)
     const uint64_t pool = 0x120, tex = 0x220;
     if (!rig_up(&k, pool))
         return;
+    if (!host_samples(8)) {
+        fprintf(stderr, "nvn_texset_a_multisample_texture_reads_each_sample_it_was_drawn_with: the host device has no 8-sample color targets, skipped\n");
+        return;
+    }
     CHECK(nvn_texset_layout());
     nvn_tex_desc d = { .target = NVN_TARGET_2D_MULTISAMPLE, .format = 37, .width = 4, .height = 4, .depth = 1,
                        .levels = 1, .samples = 8, .swizzle = { 2, 3, 4, 5 }, .pool = pool, .offset = 0x2000 };
@@ -567,18 +589,6 @@ static void fetch_all(uint32_t id, uint32_t w, uint32_t h, uint32_t samples, uin
     VK(vkDestroyBuffer)(g.dev, buf, NULL);
 }
 
-/** @brief Whether the host makes RGBA8 render targets of n samples (lavapipe has no 2). */
-static bool host_samples(uint32_t n)
-{
-    VkImageFormatProperties ifp;
-    return VK(vkGetPhysicalDeviceImageFormatProperties)(g.phys, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
-                                                         VK_IMAGE_TILING_OPTIMAL,
-                                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                                             VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                         0, &ifp) == VK_SUCCESS &&
-           (ifp.sampleCounts & n);
-}
-
 /** @brief The word the test puts in the guest texel (x, y) of a twin layout. */
 static uint32_t twin_word(uint32_t x, uint32_t y, uint32_t samples) { return 0x80000000u | samples << 24 | y << 12 | x; }
 
@@ -649,6 +659,10 @@ TEST(nvn_a_drawn_sample_is_stored_in_its_grid_cell)
     const uint64_t pool = 0x140, tex = 0x240;
     if (!rig_up(&k, pool))
         return;
+    if (!host_samples(8)) {
+        fprintf(stderr, "nvn_a_drawn_sample_is_stored_in_its_grid_cell: the host device has no 8-sample color targets, skipped\n");
+        return;
+    }
     nvn_tex_desc d = { .target = NVN_TARGET_2D_MULTISAMPLE, .format = 37, .width = 4, .height = 4, .depth = 1,
                        .levels = 1, .samples = 8, .pool = pool, .offset = 0x2000 };
     CHECK(nvn_tex_layout(&d));
@@ -1160,4 +1174,229 @@ TEST(nvn_programmable_sample_locations_land_on_nvns_sixteenths)
             loc_rig_down(&k);
         }
     }
+}
+
+/**
+ * @brief two.frag, by `glslc --target-env=vulkan1.3 -O`:
+ *
+ * #version 450
+ * layout(location = 0) out uvec4 c;
+ * layout(location = 1) out vec4 m;
+ * void main() { c = uvec4(0u); m = vec4(1.0); }
+ */
+static const uint32_t two_frag_spv[] = {
+    0x07230203, 0x00010600, 0x000d000b, 0x00000012, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
+    0x0007000f, 0x00000004, 0x00000004, 0x6e69616d, 0x00000000, 0x00000009, 0x0000000f, 0x00030010,
+    0x00000004, 0x00000007, 0x00040047, 0x00000009, 0x0000001e, 0x00000000, 0x00040047, 0x0000000f,
+    0x0000001e, 0x00000001, 0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00040015,
+    0x00000006, 0x00000020, 0x00000000, 0x00040017, 0x00000007, 0x00000006, 0x00000004, 0x00040020,
+    0x00000008, 0x00000003, 0x00000007, 0x0004003b, 0x00000008, 0x00000009, 0x00000003, 0x0004002b,
+    0x00000006, 0x0000000a, 0x00000000, 0x0007002c, 0x00000007, 0x0000000b, 0x0000000a, 0x0000000a,
+    0x0000000a, 0x0000000a, 0x00030016, 0x0000000c, 0x00000020, 0x00040017, 0x0000000d, 0x0000000c,
+    0x00000004, 0x00040020, 0x0000000e, 0x00000003, 0x0000000d, 0x0004003b, 0x0000000e, 0x0000000f,
+    0x00000003, 0x0004002b, 0x0000000c, 0x00000010, 0x3f800000, 0x0007002c, 0x0000000d, 0x00000011,
+    0x00000010, 0x00000010, 0x00000010, 0x00000010, 0x00050036, 0x00000002, 0x00000004, 0x00000000,
+    0x00000003, 0x000200f8, 0x00000005, 0x0003003e, 0x00000009, 0x0000000b, 0x0003003e, 0x0000000f,
+    0x00000011, 0x000100fd, 0x00010038,
+};
+
+/** @brief A 1x1 single-sample image of format f for a mixed-samples draw, read back through buf. */
+static void tir_image(VkFormat f, VkImage *img, VkDeviceMemory *mem, VkImageView *view)
+{
+    VkImageCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = f,
+                              .extent = { 1, 1, 1 }, .mipLevels = 1, .arrayLayers = 1,
+                              .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                              .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT };
+    CHECK_EQ(VK(vkCreateImage)(g.dev, &ici, NULL, img), VK_SUCCESS);
+    VkMemoryRequirements req;
+    VK(vkGetImageMemoryRequirements)(g.dev, *img, &req);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)nvn_vk_mem_type(req.memoryTypeBits,
+                                                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) };
+    CHECK_EQ(VK(vkAllocateMemory)(g.dev, &mai, NULL, mem), VK_SUCCESS);
+    CHECK_EQ(VK(vkBindImageMemory)(g.dev, *img, *mem, 0), VK_SUCCESS);
+    VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = *img,
+                                  .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = f,
+                                  .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    CHECK_EQ(VK(vkCreateImageView)(g.dev, &vci, NULL, view), VK_SUCCESS);
+}
+
+/**
+ * @brief Draws the half plane left of an edge at e pixels with raster samples n into two single-sample targets: an
+ * R32_UINT one that coverage to color writes, and an RGBA8 one of white modulated by coverage (RGBA). Out: the mask
+ * and the modulated red byte.
+ */
+static void tir_draw(uint32_t n, float e, uint32_t *mask, uint32_t *red)
+{
+    VkImage img[2];
+    VkDeviceMemory mem[2];
+    VkImageView view[2];
+    VkFormat fmt[2] = { VK_FORMAT_R32_UINT, VK_FORMAT_R8G8B8A8_UNORM };
+    for (uint32_t i = 0; i < 2; i++)
+        tir_image(fmt[i], &img[i], &mem[i], &view[i]);
+    VkBuffer buf;
+    VkDeviceMemory bmem;
+    uint32_t *map;
+    CHECK(host_buffer(256, &buf, &bmem, &map));
+    VkPushConstantRange gpr = { VK_SHADER_STAGE_VERTEX_BIT, 0, 8 };
+    VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                       .pushConstantRangeCount = 1, .pPushConstantRanges = &gpr };
+    VkPipelineLayout pl;
+    CHECK_EQ(VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &pl), VK_SUCCESS);
+    VkShaderModule vs = module_of(edge_vert_spv, sizeof edge_vert_spv), fs = module_of(two_frag_spv, sizeof two_frag_spv);
+    VkPipelineShaderStageCreateInfo st[2] = {
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
+          .module = vs, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+          .module = fs, .pName = "main" },
+    };
+    VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                                                  .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    VkViewport vp = { 0, 0, 1, 1, 0, 1 };
+    VkRect2D sc = { { 0, 0 }, { 1, 1 } };
+    VkPipelineViewportStateCreateInfo vps = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+                                              .viewportCount = 1, .pViewports = &vp, .scissorCount = 1,
+                                              .pScissors = &sc };
+    VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                  .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1 };
+    /* the same structures the layer chains (nvn_pipe.c), by their Vulkan values */
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        VkFlags flags;
+        VkBool32 enable;
+        uint32_t location;
+    } c2c = { (VkStructureType)1000149000, NULL, 0, VK_TRUE, 0 };
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        VkFlags flags;
+        int mode;
+        VkBool32 table;
+        uint32_t count;
+        const float *values;
+    } cm = { (VkStructureType)1000152000, &c2c, 0, 3, VK_FALSE, 0, NULL };
+    VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                                                .pNext = &cm, .rasterizationSamples = (VkSampleCountFlagBits)n };
+    VkPipelineColorBlendAttachmentState ba[2] = { { .colorWriteMask = 0xf }, { .colorWriteMask = 0xf } };
+    VkPipelineColorBlendStateCreateInfo cbs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                                .attachmentCount = 2, .pAttachments = ba };
+    VkSampleCountFlagBits one[2] = { VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_1_BIT };
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        uint32_t count;
+        const VkSampleCountFlagBits *colors;
+        VkSampleCountFlagBits depth;
+    } counts = { (VkStructureType)1000044008, NULL, 2, one, (VkSampleCountFlagBits)n };
+    VkPipelineRenderingCreateInfo ri = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, .pNext = &counts,
+                                         .colorAttachmentCount = 2, .pColorAttachmentFormats = fmt };
+    VkGraphicsPipelineCreateInfo gpi = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri,
+                                         .stageCount = 2, .pStages = st, .pVertexInputState = &vi,
+                                         .pInputAssemblyState = &ia, .pViewportState = &vps,
+                                         .pRasterizationState = &rs, .pMultisampleState = &ms,
+                                         .pColorBlendState = &cbs, .layout = pl };
+    VkPipeline pipe;
+    CHECK_EQ(VK(vkCreateGraphicsPipelines)(g.dev, NULL, 1, &gpi, NULL, &pipe), VK_SUCCESS);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                        .commandPool = g.pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                        .commandBufferCount = 1 };
+    VkCommandBuffer cb;
+    CHECK_EQ(VK(vkAllocateCommandBuffers)(g.dev, &cai, &cb), VK_SUCCESS);
+    VkCommandBufferBeginInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    VK(vkBeginCommandBuffer)(cb, &cbi);
+    VkImageMemoryBarrier ib[2];
+    for (uint32_t i = 0; i < 2; i++)
+        ib[i] = (VkImageMemoryBarrier){ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                                        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = img[i],
+                                        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    VK(vkCmdPipelineBarrier)(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
+                             NULL, 2, ib);
+    VkRenderingAttachmentInfo ca[2];
+    for (uint32_t i = 0; i < 2; i++)
+        ca[i] = (VkRenderingAttachmentInfo){ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = view[i],
+                                             .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+                                             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                             .storeOp = VK_ATTACHMENT_STORE_OP_STORE };
+    VkRenderingInfo rinf = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = sc, .layerCount = 1,
+                             .colorAttachmentCount = 2, .pColorAttachments = ca };
+    VK(vkCmdBeginRendering)(cb, &rinf);
+    VK(vkCmdBindPipeline)(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    struct {
+        float e;
+        uint32_t axis;
+    } pc = { e, 0 };
+    VK(vkCmdPushConstants)(cb, pl, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pc, &pc);
+    VK(vkCmdDraw)(cb, 6, 1, 0, 0);
+    VK(vkCmdEndRendering)(cb);
+    nvn_vk_barrier(cb);
+    for (uint32_t i = 0; i < 2; i++) {
+        VkBufferImageCopy bic = { .bufferOffset = 16 * i, .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                                  .imageExtent = { 1, 1, 1 } };
+        VK(vkCmdCopyImageToBuffer)(cb, img[i], VK_IMAGE_LAYOUT_GENERAL, buf, 1, &bic);
+    }
+    nvn_vk_barrier(cb);
+    VK(vkEndCommandBuffer)(cb);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb };
+    VK(vkResetFences)(g.dev, 1, &g.fence);
+    CHECK_EQ(VK(vkQueueSubmit)(g.queue, 1, &si, g.fence), VK_SUCCESS);
+    CHECK_EQ(VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, 10000000000ull), VK_SUCCESS);
+    *mask = map[0];
+    *red = map[4] & 0xffu;
+    VK(vkFreeCommandBuffers)(g.dev, g.pool, 1, &cb);
+    VK(vkDestroyPipeline)(g.dev, pipe, NULL);
+    VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
+    for (uint32_t i = 0; i < 2; i++) {
+        VK(vkDestroyImageView)(g.dev, view[i], NULL);
+        VK(vkDestroyImage)(g.dev, img[i], NULL);
+        VK(vkFreeMemory)(g.dev, mem[i], NULL);
+    }
+    VK(vkUnmapMemory)(g.dev, bmem);
+    VK(vkDestroyBuffer)(g.dev, buf, NULL);
+    VK(vkFreeMemory)(g.dev, bmem, NULL);
+}
+
+TEST(nvn_raster_samples_give_coverage_to_color_and_modulation_by_standard_positions)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    if (!g.mixed_samples || !g.coverage_to_color) {
+        fprintf(stderr, "nvn_raster_samples_give_coverage_to_color_and_modulation: no NVIDIA mixed samples, skipped\n");
+        return;
+    }
+    static const uint8_t standard[3][8] = { { 12, 4 }, { 6, 14, 2, 10 }, { 9, 7, 13, 5, 3, 1, 11, 15 } };
+    /*
+     * The RTX 3090's RGBA8 red byte of white modulated by k of n covered raster samples (measured by this test,
+     * RELIFT_TIR_TABLE): the nearest byte to 255 k / n, ties down (127.5 is 127). The console's TIR modulation is the
+     * same hardware state (SET_TIR_MODULATION).
+     */
+    static const uint8_t modulated[3][9] = { { 0, 127, 255 },
+                                             { 0, 64, 127, 191, 255 },
+                                             { 0, 32, 64, 96, 127, 159, 191, 223, 255 } };
+    const char *path = getenv("RELIFT_TIR_TABLE");
+    FILE *out = path ? fopen(path, "w") : NULL;
+    for (uint32_t c = 0; c < 3; c++) {
+        uint32_t n = 2u << c;
+        for (uint32_t e = 0; e <= 16; e++) {
+            uint32_t mask, red, want = 0;
+            tir_draw(n, ((float)e + 0.5f) / 16.0f, &mask, &red);
+            for (uint32_t s = 0; s < n; s++)
+                want |= (uint32_t)(standard[c][s] <= e) << s;
+            CHECK_EQ(mask, want);
+            uint32_t k = (uint32_t)__builtin_popcount(want);
+            CHECK_EQ(red, modulated[c][k]);
+            if (out)
+                fprintf(out, "%u %u\t%x %u\n", n, e, mask, red);
+        }
+    }
+    if (out)
+        fclose(out);
 }

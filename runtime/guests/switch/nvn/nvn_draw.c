@@ -710,15 +710,18 @@ static int a2c_spec(replay *r, const module *frag, pipe_key *k)
 typedef struct ms_read {
     uint32_t samples;
     bool a2c, dither, locations_on;
+    /** @brief Raster samples (0 when not set), coverage modulation mode, coverage to color enable and target. */
+    uint32_t raster, modulation, c2c, c2c_target;
     /** @brief The programmable sample locations (x | y << 4 in 1/16 pixel), the same for every pixel. */
     uint8_t locations[16];
 } ms_read;
 
 /**
  * @brief Reads the bound multisample state through the driver's getters, once for each distinct state (the last
- * one read is kept with its bytes). Its fields the layer does not replay stop: each is off in
- * nvnMultisampleStateSetDefaults (SDK 22.2.8 sdk 0x668bf0): raster samples (bits 15 to 19), coverage modulation (13,
- * 14), coverage to color (20), coverage truncation (5) and the sample location grid (4). Programmable sample
+ * one read is kept with its bytes). Its fields the layer does not replay stop: coverage truncation (bit 5) and the
+ * sample location grid (4), each off in nvnMultisampleStateSetDefaults (SDK 22.2.8 sdk 0x668bf0). Raster samples
+ * (bits 15 to 19), coverage modulation (13, 14) and coverage to color (20, its target 21 to 23) go to NVIDIA's own
+ * hardware states (nvn_tir). Programmable sample
  * locations (3) without the grid are the first n of the state's 16, which the driver's BindMultisampleState copies to
  * every pixel's slots of SET_ANTI_ALIAS_SAMPLE_POSITIONS (sdk 0x69a210 to 0x69a268); with the grid it writes all 16
  * slots as they are, whose pixel order is in no public source (NVK writes slot n for pixel n / samples of a 2x2 grid,
@@ -762,9 +765,21 @@ static int read_multisample(replay *r, ms_read *out)
         int rc = nvn_vk_getter(r, getters[i], st->multisample, 24, NULL, 0, 0, NULL, &v[i]);
         if (rc != RL_OK)
             return rc;
-        if (i >= 3 && i < 8 && ((uint32_t)v[i] & 0xff))
+        if ((i == 6 || i == 7) && ((uint32_t)v[i] & 0xff))
             return nvn_vk_stop(r, "multisample state with %s %u, which is not replayed yet", getters[i] + 23,
                                (uint32_t)v[i] & 0xff);
+    }
+    out->raster = (uint32_t)v[3] & 0x1f;
+    out->modulation = (uint32_t)v[4] & 3;
+    out->c2c = (uint32_t)v[5] & 0xff;
+    out->c2c_target = 0;
+    if (out->c2c) {
+        uint64_t t = 0;
+        int rc = nvn_vk_getter(r, "nvnMultisampleStateGetCoverageToColorOutput", st->multisample, 24, NULL, 0, 0, NULL,
+                               &t);
+        if (rc != RL_OK)
+            return rc;
+        out->c2c_target = (uint32_t)t & 7;
     }
     memset(out->locations, 0, sizeof out->locations);
     out->locations_on = (v[8] & 0xff) != 0;
@@ -787,6 +802,56 @@ static int read_multisample(replay *r, ms_read *out)
     memcpy(last, st->multisample, sizeof last);
     last_read = *out;
     have = true;
+    return RL_OK;
+}
+
+/**
+ * @brief NVN's target independent rasterization and coverage to color, as the driver's BindMultisampleState programs
+ * them (SDK 22.2.8 sdk 0x69a370 to 0x69a440; clc797.h): with raster samples above the state's samples it sets
+ * SET_ANTI_ALIAS_RASTER to the raster samples' mode, SET_TIR on and SET_TIR_CONTROL to reduce coverage with alpha to
+ * coverage and the Z pass count on raster samples (affinity map reduction; truncation stops before this), and
+ * SET_TIR_MODULATION to the modulation mode (0 none, 1 RGB, 2 alpha, 3 RGBA); SET_COVERAGE_TO_COLOR takes the enable
+ * and the target. The NV extensions give the same hardware states (VK_NV_framebuffer_mixed_samples, whose
+ * reduction is that merge, and VK_NV_fragment_coverage_to_color), so only NVIDIA hosts with them take these; the
+ * modulation table (nvnCommandBufferBindCoverageModulationTable) stops at a draw that modulates with one bound.
+ */
+static int nvn_tir(replay *r, const ms_read *m, pipe_key *k, uint32_t *raster)
+{
+    *raster = 0;
+    if (m->raster > m->samples) {
+        if (!g.mixed_samples)
+            return nvn_vk_stop(r, "%u raster samples over %u color samples on a host without NVIDIA's mixed samples",
+                               m->raster, m->samples);
+        if (m->raster != 2 && m->raster != 4 && m->raster != 8 && m->raster != 16)
+            return nvn_vk_stop(r, "%u raster samples", m->raster);
+        if (m->modulation && r->st->modulation_table)
+            return nvn_vk_stop(r, "coverage modulation through a table (nvnCommandBufferBindCoverageModulationTable), "
+                                  "which is not replayed yet");
+        *raster = m->raster;
+        k->raster_samples = m->raster;
+        k->coverage_modulation = m->modulation;
+    }
+    if (m->c2c) {
+        if (!g.coverage_to_color)
+            return nvn_vk_stop(r, "coverage to color on a host without NVIDIA's coverage to color");
+        k->coverage_to_color = 1u | m->c2c_target << 1;
+    }
+    return RL_OK;
+}
+
+/**
+ * @brief Checks the targets of a draw with raster samples: every color target of the state's samples, a depth or
+ * stencil target (when bound) of the raster samples, as NVIDIA's mixed samples need.
+ */
+static int tir_targets(replay *r, uint32_t samples, uint32_t raster)
+{
+    nvn_gfx *st = r->st;
+    for (uint32_t i = 0; i < st->ncolor; i++)
+        if (st->color[i].v && (uint32_t)nvn_vk_sample_bits(&st->color[i].v->d) != samples)
+            return nvn_vk_stop(r, "raster samples %u with a color target of %u samples, not %u", raster,
+                               st->color[i].v->d.samples, samples);
+    if (st->depth.v && (uint32_t)nvn_vk_sample_bits(&st->depth.v->d) != raster)
+        return nvn_vk_stop(r, "raster samples %u with a depth target of %u samples", raster, st->depth.v->d.samples);
     return RL_OK;
 }
 
@@ -852,6 +917,8 @@ static int fixed_state(replay *r, pipe_key *k)
     uint32_t state_samples = 1;
     bool a2c_on = false, a2c_dither = false;
     k->has_locations = 0;
+    k->raster_samples = k->coverage_modulation = k->coverage_to_color = 0;
+    uint32_t raster = 0;
     if (st->have_multisample) {
         ms_read m;
         if ((rc = read_multisample(r, &m)) != RL_OK)
@@ -861,9 +928,15 @@ static int fixed_state(replay *r, pipe_key *k)
         state_samples = m.samples;
         k->has_locations = m.locations_on;
         memcpy(k->locations, m.locations, sizeof k->locations);
+        if ((rc = nvn_tir(r, &m, k, &raster)) != RL_OK)
+            return rc;
     }
     uint32_t drawn;
-    if (!nvn_vk_target_samples(st, &drawn))
+    if (raster) {
+        if ((rc = tir_targets(r, state_samples, raster)) != RL_OK)
+            return rc;
+        drawn = state_samples;
+    } else if (!nvn_vk_target_samples(st, &drawn))
         return nvn_vk_stop(r, "render targets of different sample counts are bound together");
     if (!drawn)
         drawn = state_samples;
@@ -887,7 +960,7 @@ static int fixed_state(replay *r, pipe_key *k)
      */
     if (a2c_on && drawn < 2)
         return nvn_vk_stop(r, "alpha to coverage at one sample, which is not measured");
-    k->alpha_to_coverage = a2c_on ? drawn | (a2c_dither ? NVN_A2C_DITHER : 0) : 0;
+    k->alpha_to_coverage = a2c_on ? (raster ? raster : drawn) | (a2c_dither ? NVN_A2C_DITHER : 0) : 0;
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;
@@ -908,7 +981,7 @@ static int fixed_state(replay *r, pipe_key *k)
             }
         }
     }
-    k->sample_mask = st->sample_mask & ((1u << drawn) - 1u);
+    k->sample_mask = st->sample_mask & ((1u << (raster ? raster : drawn)) - 1u);
     k->viewport_swizzle = st->viewport_swizzle[0];
     if (k->viewport_swizzle != NVN_VIEWPORT_SWIZZLE_IDENTITY && !g.viewport_swizzle)
         return nvn_vk_stop(r, "viewport swizzle 0x%x, and the host device has no VK_NV_viewport_swizzle",
@@ -3800,6 +3873,8 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         st->geometry_mode = (uint32_t)e->x[1];
         return RL_OK;
     case NVN_CMD_BIND_COVERAGE_MODULATION_TABLE:
+        st->modulation_table = e->x[1] != 0;
+        return RL_OK;
     case NVN_CMD_SET_PATCH_SIZE:
         return nvn_stats_mark(NVN_STATS_IGNORED);
     case NVN_CMD_SET_LINE_WIDTH:

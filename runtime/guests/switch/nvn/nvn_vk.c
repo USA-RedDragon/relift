@@ -745,6 +745,12 @@ static bool device_hook(void *user, rl_vkdev_build *b)
         } else if (!strcmp(exts[i].extensionName, "VK_EXT_conservative_rasterization")) {
             rl_vkdev_add_ext(b, "VK_EXT_conservative_rasterization");
             g.conservative_raster = true;
+        } else if (!strcmp(exts[i].extensionName, "VK_NV_framebuffer_mixed_samples")) {
+            rl_vkdev_add_ext(b, "VK_NV_framebuffer_mixed_samples");
+            g.mixed_samples = true;
+        } else if (!strcmp(exts[i].extensionName, "VK_NV_fragment_coverage_to_color")) {
+            rl_vkdev_add_ext(b, "VK_NV_fragment_coverage_to_color");
+            g.coverage_to_color = true;
         } else if (!strcmp(exts[i].extensionName, "VK_EXT_sample_locations")) {
             rl_vkdev_add_ext(b, "VK_EXT_sample_locations");
             g.sample_locations = true;

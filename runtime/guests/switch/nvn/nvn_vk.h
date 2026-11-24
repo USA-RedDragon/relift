@@ -235,6 +235,12 @@ typedef struct nvn_vkdev {
     bool sample_locations;
     uint32_t sample_location_counts;
     /**
+     * @brief VK_NV_framebuffer_mixed_samples and VK_NV_fragment_coverage_to_color are on: NVIDIA's own target
+     * independent rasterization (more raster samples than color samples, coverage modulation) and coverage to color,
+     * the hardware states NVN's multisample state sets (nvn_tir).
+     */
+    bool mixed_samples, coverage_to_color;
+    /**
      * @brief The device is NVIDIA's: its alpha to coverage is the console GPU's dithered one (measured on the RTX 3090
      * by test_nvn_a2c.c: 4n coverage levels spread over a 2x2 pixel footprint, the footprint the driver selects
      * with dither on, SET_ALPHA_TO_COVERAGE_DITHER_CONTROL PIXELS_2X2, clc797.h).
@@ -454,6 +460,8 @@ typedef struct nvn_gfx {
     bool conservative_raster;
     /** @brief The bound fragment program's sample shading (nvn_program_sample_shading). */
     uint32_t sample_shading;
+    /** @brief A coverage modulation table is bound (not the driver's linear default). */
+    bool modulation_table;
     /** @brief Conservative raster dilate in quarter pixels (0 to 3), as the driver stores it. */
     uint32_t conservative_dilate;
     /** @brief The sample mask (nvnCommandBufferSetSampleMask), 16 bits as the driver writes it. */
