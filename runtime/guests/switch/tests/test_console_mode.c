@@ -172,3 +172,39 @@ TEST(console_mode_input_script_switches_once)
     rl_ports_script_reset();
     rl_settings_reset();
 }
+
+/** @brief Checks the display am and vi:s report: w by h. */
+static void check_display(env *e, uint32_t w, uint32_t h)
+{
+    tc_res r = tc_send(e->c, e->csg, tc_new(60));
+    CHECK_EQ(rc_of(r), 0);
+    CHECK_EQ(tc_u32(&r, 0), w);
+    CHECK_EQ(tc_u32(&r, 4), h);
+    tc_req q = tc_new(3200);
+    tc_put64(&q, 0);
+    r = tc_send(e->c, e->vi_sys, q);
+    CHECK_EQ(rc_of(r), 0);
+    CHECK_EQ(tc_u32(&r, 0), w);
+    CHECK_EQ(tc_u32(&r, 4), h);
+}
+
+TEST(render_resolution_caps_the_display_the_console_reports)
+{
+    env e = { 0 };
+    boot(&e, "docked");
+    CHECK(e.vi_sys.handle);
+    static const struct {
+        const char *res;
+        bool docked;
+        uint32_t w, h;
+    } want[] = {
+        { "original", true, 1920, 1080 }, { "1080p", true, 1920, 1080 },  { "720p", true, 1280, 720 },
+        { "original", false, 1280, 720 }, { "1080p", false, 1280, 720 }, { "720p", false, 1280, 720 },
+    };
+    for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].res), RL_SETTING_OK);
+        rl_am_set_operation_mode(want[i].docked);
+        check_display(&e, want[i].w, want[i].h);
+    }
+    rl_settings_reset();
+}

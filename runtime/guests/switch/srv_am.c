@@ -110,6 +110,17 @@ void rl_am_set_operation_mode(bool docked)
     pthread_mutex_unlock(&am_mu);
 }
 
+uint32_t rl_am_display_cap(void) { return rl_render_resolution_lines(); }
+
+void rl_am_cap_display(uint32_t *w, uint32_t *h)
+{
+    uint32_t cap = rl_am_display_cap();
+    if (!cap || *h <= cap)
+        return;
+    *w = (uint32_t)(((uint64_t)*w * cap + *h / 2) / *h);
+    *h = cap;
+}
+
 bool rl_am_is_docked(void)
 {
     pthread_mutex_lock(&am_mu);

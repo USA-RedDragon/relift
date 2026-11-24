@@ -17,6 +17,7 @@
 #include <relift/settings.h>
 
 #include "core.h"
+#include "gpu_floor.h"
 #include "post_data.h"
 #include "postgpu.h"
 #include "vkdev.h"
@@ -1661,6 +1662,7 @@ void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_
     p->next_ready_ns = rl_clock_ns();
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
+    rl_gpu_floor_frame();
 }
 
 bool rl_present_slot_begin(rl_present *p, uint32_t w, uint32_t h, rl_present_slot *out)
@@ -1738,6 +1740,7 @@ void rl_present_slot_end_after(rl_present *p, const rl_present_slot *s, uint32_t
     p->next_ready_ns = rl_clock_ns();
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
+    rl_gpu_floor_frame();
     rl_capture_present_end();
 }
 

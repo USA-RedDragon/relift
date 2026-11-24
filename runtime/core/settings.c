@@ -46,6 +46,7 @@ static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
 static const char *const g_gpu_math_choices[] = { "exact", "native" };
+static const char *const g_render_res_choices[] = { "original", "1080p", "720p" };
 static const char *const g_panel_choices[] = { "auto", "always", "never" };
 static const char *const g_upscaler_choices[] = {
     "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa", "dlss",
@@ -126,6 +127,30 @@ static const rl_setting_def g_runtime_defs[] = {
         .env = "RELIFT_GPU_MATH",
         .choices = g_gpu_math_choices,
         .nchoices = 2,
+    },
+    {
+        .key = "gpu.clock_floor",
+        .type = RL_SETTING_BOOL,
+        .label = "Keep GPU clock up",
+        .description = "Android: keeps the GPU clock up while a frame's work runs, so the GPU does not clock down "
+                       "between frames and stretch the next one: steadier frame times, more battery. Through "
+                       "VK_QCOM_queue_perf_hint on Qualcomm's driver, else an ADPF performance hint session told each "
+                       "frame's work time against 60 frames a second. Other hosts: no effect",
+        .env = "RELIFT_GPU_CLOCK_FLOOR",
+        .def_int = 1,
+    },
+    {
+        .key = "video.render_resolution",
+        .type = RL_SETTING_ENUM,
+        .label = "Render resolution",
+        .description = "The size the game draws its picture at. original: the game's own size; 1080p and 720p: at "
+                       "most that many lines, lighter on the GPU. Each guest applies it its own way: Console games "
+                       "are told the console shows on a display of that size and size their picture from it; "
+                       "a guest with an internal render scale lowers it; a guest that draws its picture in 2D keeps "
+                       "its size and the upscaler scales it",
+        .env = "RELIFT_RENDER_RESOLUTION",
+        .choices = g_render_res_choices,
+        .nchoices = 3,
     },
     {
         .key = "gpu.profile",
@@ -1560,4 +1585,11 @@ const char *rl_settings_mod(size_t index)
     const char *p = index < g_nmods ? g_mods[index] : NULL;
     pthread_mutex_unlock(&g_lock);
     return p;
+}
+
+uint32_t rl_render_resolution_lines(void)
+{
+    static const uint32_t lines[] = { 0, 1080, 720 };
+    int i = rl_setting_enum("video.render_resolution");
+    return i > 0 && i < 3 ? lines[i] : 0;
 }

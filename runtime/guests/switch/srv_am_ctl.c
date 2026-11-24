@@ -103,9 +103,11 @@ static rl_result csg_end_vr_mode_ex(rl_ipc_req *r)
 static rl_result csg_get_default_display_resolution(rl_ipc_req *r)
 {
     bool docked = rl_am_is_docked();
+    uint32_t w = docked ? 1920 : 1280, h = docked ? 1080 : 720;
+    rl_am_cap_display(&w, &h);
     uint32_t *o = rl_ipc_out(r, 8);
-    o[0] = docked ? 1920 : 1280;
-    o[1] = docked ? 1080 : 720;
+    o[0] = w;
+    o[1] = h;
     return KR_SUCCESS;
 }
 

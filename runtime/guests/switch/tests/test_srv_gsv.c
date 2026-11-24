@@ -9,7 +9,10 @@
 #include "tc.h"
 #include "services.h"
 
+#include <relift/settings.h>
 #include <relift/video.h>
+
+#include <stdlib.h>
 
 #define CUR_PROCESS_HANDLE 0xFFFF8001u
 
@@ -868,4 +871,35 @@ TEST(gsv_a_frame_decoded_before_the_client_says_how_it_reads_is_written_in_that_
     CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
     CHECK(holds_picture(cpu_mem, false));
     rl_vp9_stream_backend_override(NULL);
+}
+
+TEST(gsv_display_buffer_max_resolution_follows_the_render_resolution)
+{
+    rl_settings_reset();
+    unsetenv("RELIFT_RENDER_RESOLUTION");
+    rl_switch_declare_settings();
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t d = display_session(c, heap);
+    CHECK(d != 0);
+    rl_am_set_operation_mode(true);
+    static const struct {
+        const char *res;
+        bool docked;
+        uint64_t mode;
+    } want[] = {
+        { "original", true, 4 }, { "1080p", true, 2 }, { "720p", true, 1 },
+        { "original", false, 2 }, { "1080p", false, 2 }, { "720p", false, 1 },
+    };
+    for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].res), RL_SETTING_OK);
+        rl_am_set_operation_mode(want[i].docked);
+        tc_res r = display_query(c, d, 106, 0x00746c7561666564ull);
+        CHECK_EQ(r.result, 0);
+        CHECK_EQ(tc_u64(&r, 0), want[i].mode);
+    }
+    rl_settings_reset();
 }

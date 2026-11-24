@@ -8,6 +8,7 @@
 
 #include "capture.h"
 #include "core.h"
+#include "gpu_floor.h"
 #include "hostlib.h"
 
 #include <pthread.h>
@@ -299,6 +300,7 @@ static bool make_device(rlvk_dev *d)
         if (g_req[i].hook && !g_req[i].hook(g_req[i].user, &b))
             return fail(g_req[i].who, 0);
     bool present_wait = add_present_wait(d, &b);
+    rl_gpu_floor_build(d, &b);
     rlvk_device_create_info ci = {
         .sType = RLVK_ST_DEVICE_CREATE_INFO,
         .pNext = b.pnext,
@@ -333,6 +335,7 @@ static bool make_device(rlvk_dev *d)
     if (queues > 1)
         d->vkGetDeviceQueue(d->device, d->family, 1, &d->queue);
     g_shared_queue = d->queue == d->guest_queue;
+    rl_gpu_floor_start(d);
     return true;
 }
 
@@ -376,7 +379,11 @@ bool rl_vkdev_add_ext(rl_vkdev_build *b, const char *name)
     return true;
 }
 
-void rl_vkdev_guest_queue_lock(void) { pthread_mutex_lock(g_shared_queue ? &g_queue : &g_guest_queue); }
+void rl_vkdev_guest_queue_lock(void)
+{
+    rl_gpu_floor_work();
+    pthread_mutex_lock(g_shared_queue ? &g_queue : &g_guest_queue);
+}
 
 void rl_vkdev_guest_queue_unlock(void) { pthread_mutex_unlock(g_shared_queue ? &g_queue : &g_guest_queue); }
 

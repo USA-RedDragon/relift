@@ -422,3 +422,18 @@ TEST(settings_save_creates_the_user_file)
     free(old);
     free(oldx);
 }
+
+TEST(render_resolution_is_a_core_setting_any_guest_reads)
+{
+    rl_settings_reset();
+    unsetenv("RELIFT_RENDER_RESOLUTION");
+    rl_settings_declare_runtime();
+    CHECK_EQ(rl_render_resolution_lines(), 0u);
+    CHECK_EQ(rl_settings_set("video.render_resolution", "1080p"), RL_SETTING_OK);
+    CHECK_EQ(rl_render_resolution_lines(), 1080u);
+    setenv("RELIFT_RENDER_RESOLUTION", "720p", 1);
+    CHECK_EQ(rl_render_resolution_lines(), 720u);
+    unsetenv("RELIFT_RENDER_RESOLUTION");
+    CHECK_EQ(rl_settings_set("video.render_resolution", "4k"), RL_SETTING_INVALID);
+    rl_settings_reset();
+}

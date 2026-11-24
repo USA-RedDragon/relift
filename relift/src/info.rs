@@ -478,7 +478,7 @@ pub fn switch_document(
         location: Some("launcher".into()),
         ..Save::default()
     };
-    info.settings = game_settings::section(settings);
+    info.settings = game_settings::switch_section(settings);
     info.input = relift_input::input_section(ports);
     Ok(info)
 }
@@ -766,7 +766,7 @@ mod tests {
         assert_eq!(info.identity.title(&["French"]), Some("My Project"));
         assert_eq!(info.identity.default_language.as_deref(), Some("default"));
         assert!(info.identity.icon.is_none());
-        assert_eq!(info.settings.runtime.len(), 39);
+        assert_eq!(info.settings.runtime.len(), 42);
         assert_eq!(info.settings.game.len(), 1);
         let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p1", "dial"]);

@@ -41,6 +41,16 @@ RL_RUNTIME_API void rl_am_set_operation_mode(bool docked);
 /** @brief True while docked. */
 RL_RUNTIME_API bool rl_am_is_docked(void);
 /**
+ * @brief The tallest display the console reports, in lines: the video.render_resolution setting
+ * (rl_render_resolution_lines), 0 for the console mode's own display.
+ */
+RL_RUNTIME_API uint32_t rl_am_display_cap(void);
+/**
+ * @brief A display size the console reports, w by h, cut to the video.render_resolution setting: a display taller than
+ * the cap becomes the cap's height at the same shape, as a console on a smaller TV reports.
+ */
+RL_RUNTIME_API void rl_am_cap_display(uint32_t *w, uint32_t *h);
+/**
  * @brief The user closed the application. As on the console, a program that is inside an exit request handling section
  * (it called ISelfController LockExit, nn::oe::EnterExitRequestHandlingSection) is asked: the exit request message
  * (RL_AM_MSG_EXIT) is queued, the call returns true, and the program is expected to end itself (the caller bounds the

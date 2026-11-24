@@ -321,6 +321,7 @@ static rl_result sys_get_display_mode(rl_ipc_req *r)
     uint32_t w = 1920, h = 1080;
     if (!rl_am_is_docked())
         vi_get_resolution(&w, &h);
+    rl_am_cap_display(&w, &h);
     float hz = 60.0f;
     uint8_t *o = rl_ipc_out(r, 16);
     memcpy(o, &w, 4);

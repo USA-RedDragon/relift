@@ -225,4 +225,11 @@ RL_RUNTIME_API const char *rl_settings_app(void);
 /** @brief Writes the path of the app's per-user settings file; false without an app name or a base. */
 RL_RUNTIME_API bool rl_settings_user_file(char *out, size_t size);
 
+/**
+ * @brief The video.render_resolution setting as the most lines a guest's picture may have: 0 for original (the game's
+ * own size), else 1080 or 720. Each guest maps it to its own lever: a console guest to the display size the console
+ * reports, a guest with an internal render scale to that scale; a 2D guest ignores it.
+ */
+RL_RUNTIME_API uint32_t rl_render_resolution_lines(void);
+
 #endif

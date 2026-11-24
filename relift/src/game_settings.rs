@@ -145,6 +145,22 @@ pub fn runtime_settings() -> Vec<Setting> {
             },
         ),
         s(
+            "gpu.clock_floor",
+            "Keep GPU clock up",
+            "Android: keeps the GPU clock up while a frame's work runs, so the GPU does not clock down between frames and stretch the next one: steadier frame times, more battery. Through VK_QCOM_queue_perf_hint on Qualcomm's driver, else an ADPF performance hint session told each frame's work time against 60 frames a second. Other hosts: no effect",
+            Value::Bool(true),
+            SettingKind::Bool,
+        ),
+        s(
+            "video.render_resolution",
+            "Render resolution",
+            "The size the game draws its picture at. original: the game's own size; 1080p and 720p: at most that many lines, lighter on the GPU. Each guest applies it its own way: Console games are told the console shows on a display of that size and size their picture from it; a guest with an internal render scale lowers it; a guest that draws its picture in 2D keeps its size and the upscaler scales it",
+            Value::String("original".into()),
+            SettingKind::Enum {
+                choices: ["original", "1080p", "720p"].map(String::from).into(),
+            },
+        ),
+        s(
             "gpu.profile",
             "GPU profile",
             "Times the GPU work of every batch with timestamps: render passes, dispatches, copies, clears, uploads and the layer's own work (the present copy, the upscaler), plus the time between batches and the presenter's own GPU work, and logs a ranking every 5 seconds. Each timestamp waits for the work before it, so the game runs slower while it is on. Off: no timestamps",
@@ -566,9 +582,15 @@ pub fn touch_pad_settings() -> Vec<Setting> {
     ]
 }
 
-/// The `settings` section of the self-description for a game's settings.
+/// The runtime settings that only the Switch and Switch 2 have: the console
+/// mode. No other guest has a docked mode, so [`section`] leaves it out and
+/// [`switch_section`] keeps it.
+pub const SWITCH_ONLY: &[&str] = &["system.console_mode"];
+
+/// The `settings` section of the self-description for a Switch or Switch 2
+/// game's settings.
 #[must_use]
-pub fn section(game: Vec<Setting>) -> relift_info::Settings {
+pub fn switch_section(game: Vec<Setting>) -> relift_info::Settings {
     relift_info::Settings {
         runtime: runtime_settings()
             .into_iter()
@@ -576,6 +598,15 @@ pub fn section(game: Vec<Setting>) -> relift_info::Settings {
             .collect(),
         game,
     }
+}
+
+/// The `settings` section of the self-description for a game of any other
+/// guest: [`switch_section`] without [`SWITCH_ONLY`].
+#[must_use]
+pub fn section(game: Vec<Setting>) -> relift_info::Settings {
+    let mut s = switch_section(game);
+    s.runtime.retain(|r| !SWITCH_ONLY.contains(&r.key.as_str()));
+    s
 }
 
 /// [`section`] for a Game Boy or Game Boy Color game, whose runtime also
@@ -1195,7 +1226,28 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 39);
+        assert_eq!(switch_section(Vec::new()).runtime.len(), 43);
+        assert_eq!(section(Vec::new()).runtime.len(), 42);
+    }
+
+    #[test]
+    fn only_switch_games_list_the_console_mode() {
+        let keys = |s: relift_info::Settings| -> Vec<String> {
+            s.runtime.into_iter().map(|r| r.key).collect()
+        };
+        let switch = keys(switch_section(Vec::new()));
+        let other = keys(section(Vec::new()));
+        for k in SWITCH_ONLY {
+            assert!(switch.iter().any(|s| s == k), "{k}");
+            assert!(!other.iter().any(|s| s == k), "{k}");
+        }
+        assert!(other.iter().any(|s| s == "gpu.clock_floor"));
+        assert!(other.iter().any(|s| s == "video.render_resolution"));
+        let render = runtime_settings()
+            .into_iter()
+            .find(|s| s.key == "video.render_resolution")
+            .unwrap();
+        assert_eq!(render.default, Value::String("original".into()));
     }
 
     #[test]
