@@ -846,3 +846,68 @@ fn offsets_are_followed_through_calls() {
         .map(|e| e.to_string());
     assert!(e.is_some_and(|e| e.contains("offsets")));
 }
+
+/// Trace mode's `handle` condition records the handle word of a texture read through a register handle (one loaded
+/// from memory, as a material table's): the module stores a record with destination `TRACE_HANDLE`. A bound texture
+/// (handle from a constant bank) records nothing, and neither does any other write.
+#[test]
+fn trace_mode_records_register_handles_of_texture_reads() {
+    use relift_gpu_nv::translate::{Options, TRACE_HANDLE, Trace, translate_with};
+    const STORE: u32 = 62;
+    const CONSTANT: u32 = 43;
+    let opts = Options {
+        trace: Some(Trace::parse("handle").unwrap()),
+        ..Options::default()
+    };
+    let build = |w: [u8; 16]| {
+        let mut b = Vec::new();
+        b.extend(w);
+        exit_and_halt(&mut b);
+        translate_with(&relift_gpu_sm86::program::parse(&b), &opts)
+            .unwrap_or_else(|e| panic!("{e}"))
+    };
+    let stores_handle = |s: &relift_gpu_nv::translate::Shader| {
+        let consts: Vec<u32> = insts(&s.spirv, CONSTANT)
+            .iter()
+            .filter(|c| c.len() == 4 && c[3] == TRACE_HANDLE)
+            .map(|c| c[2])
+            .collect();
+        insts(&s.spirv, STORE)
+            .iter()
+            .any(|st| consts.contains(&st[2]))
+    };
+    let mut w = tex(0x161, &[(59, 1, 1), (61, 3, 1), (87, 3, 1)]);
+    w[1] = (w[1] & !0x0e) | (1 << 1);
+    let bindless = build(w);
+    common::validate(&bindless.spirv);
+    assert!(bindless.interface.trace_words > 0, "a trace buffer");
+    assert!(stores_handle(&bindless), "a record of the handle word");
+    let uniform = build(word(
+        0x160,
+        7,
+        &[
+            (64, 8, 2),
+            (24, 8, 8),
+            (32, 8, 4),
+            (40, 6, 6),
+            (60, 1, 1),
+            (61, 3, 1),
+            (72, 4, 0xf),
+            (81, 3, 7),
+            (84, 3, 1),
+            (87, 3, 1),
+        ],
+    ));
+    common::validate(&uniform.spirv);
+    assert!(
+        stores_handle(&uniform),
+        "a record of a uniform register handle"
+    );
+    let bound = build(tex(0x160, &[(60, 1, 1), (61, 3, 1), (87, 3, 1)]));
+    assert!(
+        !stores_handle(&bound),
+        "no handle record for a bound texture"
+    );
+    assert_eq!(bound.interface.trace_words, 0, "nothing traced");
+    assert!(Trace::parse("handle").unwrap().handle);
+}

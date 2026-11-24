@@ -47,6 +47,10 @@ pub const TRACE_MISS: u32 = 0x200;
 pub const TRACE_SOURCE_CBUF: u32 = 0x8000_0000;
 /// Register number offset of uniform registers in sources and destinations.
 pub const TRACE_UREG: u32 = 0x100;
+/// Destination of a `handle` record: the texture handle word a texture or
+/// surface instruction read from a register (one loaded from memory, such as
+/// a material table): the texture id in bits 0..20, the sampler id above.
+pub const TRACE_HANDLE: u32 = 0x202;
 
 const STORAGE_BUFFER: u32 = 12;
 const SCOPE_DEVICE: u32 = 1;
@@ -71,6 +75,9 @@ pub struct Trace {
     /// destination [`TRACE_MISS`], the address's low word as the value and
     /// its high word as the first source.
     pub miss: bool,
+    /// The handle word of every texture or surface read whose handle comes
+    /// from a register (recorded with destination [`TRACE_HANDLE`]).
+    pub handle: bool,
     /// Only the instruction at this byte address.
     pub pc: Option<u64>,
     /// Only writes of this register (`TRACE_UREG + n` for a uniform one).
@@ -99,11 +106,12 @@ impl Trace {
                 "denorm" => t.denorm = true,
                 "any" => t.any = true,
                 "miss" => t.miss = true,
+                "handle" => t.handle = true,
                 "" => {}
                 _ => return Err(format!("trace condition {c:?}")),
             }
         }
-        if !(t.nan || t.inf || t.denorm || t.any || t.miss) {
+        if !(t.nan || t.inf || t.denorm || t.any || t.miss || t.handle) {
             return Err(format!("trace spec {s:?} names no condition"));
         }
         if let Some(p) = pc {
@@ -187,6 +195,14 @@ fn makes_floats(m: &str) -> bool {
     )
 }
 
+/// Instructions that read a texture or surface through a handle.
+fn reads_images(m: &str) -> bool {
+    matches!(
+        m,
+        "TEX" | "TLD" | "TLD4" | "TXD" | "TMML" | "TXQ" | "SULD" | "SUST" | "SUATOM" | "SURED"
+    )
+}
+
 /// Per-translation trace state.
 #[derive(Default)]
 pub(crate) struct State {
@@ -206,7 +222,11 @@ impl Ctx {
     pub(crate) fn trace_begin(&mut self, mnemonic: &str, pc: u64) {
         let on = match &self.trace.spec {
             Some(t) if self.simt.is_none() => {
-                t.pc.is_none_or(|p| p == pc) && (t.any || t.miss || makes_floats(mnemonic))
+                t.pc.is_none_or(|p| p == pc)
+                    && (t.any
+                        || t.miss
+                        || makes_floats(mnemonic)
+                        || (t.handle && reads_images(mnemonic)))
             }
             _ => false,
         };
@@ -296,9 +316,14 @@ impl Ctx {
         if t.reg.is_some_and(|r| r != reg) {
             return;
         }
+        // A handle record is written only under `handle`; with `handle` as the only condition, nothing else is.
+        let only_handles = t.handle && !(t.any || t.nan || t.inf || t.denorm);
+        if (reg == TRACE_HANDLE && !t.handle) || (reg != TRACE_HANDLE && only_handles) {
+            return;
+        }
         let u = self.u32t();
         let b = self.boolt();
-        let mut cond = if t.any {
+        let mut cond = if t.any || reg == TRACE_HANDLE {
             Some(self.m.c_bool(true))
         } else {
             None
@@ -309,7 +334,7 @@ impl Ctx {
                 None => x,
             });
         };
-        if !t.any {
+        if !t.any && reg != TRACE_HANDLE {
             let abs_mask = self.m.c_u32(0x7fff_ffff);
             let inf = self.m.c_u32(0x7f80_0000);
             let abs = self.m.emit(op::BITWISE_AND, u, &[val, abs_mask]);

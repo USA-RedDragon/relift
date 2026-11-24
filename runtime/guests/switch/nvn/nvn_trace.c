@@ -21,6 +21,10 @@
  * command runs), and each counter report the completion writes ("report": the guest address, the counter type, the
  * value written, and whether the counter was valid, in the order the reports thread writes them). Each draw and dispatch line of
  * trace.jsonl carries the same "queue", "submit", "pos" and the "seq" of its order line.
+ * With a trace-mode table built with the `handle` condition (RELIFT_NVN_GPU_TRACE), trace.jsonl also gets an "image
+ * read" line after a traced draw or dispatch for each texture or surface instruction that read through a handle from a
+ * register (a bindless handle loaded from memory): its program and PC, the handle word, the texture and sampler ids it
+ * names and the texture registered under that id, and how many reads it made.
  * The reader is runtime/tools/nvn_trace.py.
  *
  * The ring (nvn_trace_ring_start, used by the flash trigger in nvn_flash.c) keeps the same lines for the last
@@ -237,6 +241,19 @@ bool nvn_trace_ring_write(uint64_t frame, const char *path)
     if (f->dropped)
         fprintf(file, "{\"kind\":\"dropped\",\"lines\":%llu}\n", (unsigned long long)f->dropped);
     return fclose(file) == 0 && ok;
+}
+
+void nvn_trace_image_read(const char *key, uint32_t pc, uint32_t handle, uint32_t reads)
+{
+    if (!tr.out && !nvn_trace_ring_on)
+        return;
+    uint8_t view[17];
+    bool has_view = false, image = false;
+    uint64_t tex = nvn_tex_registered(handle & 0xfffffu, view, &has_view, &image);
+    out("{\"kind\":\"image read\",\"frame\":%llu,\"after\":%llu,\"program\":\"%.8s\",\"pc\":\"0x%04x\","
+            "\"handle\":\"0x%08x\",\"texture_id\":%u,\"sampler_id\":%u,\"texture\":\"0x%llx\",\"reads\":%u}\n",
+            (unsigned long long)g.presents, (unsigned long long)(tr.cmd ? tr.cmd - 1 : 0), key, pc, handle,
+            handle & 0xfffffu, handle >> 20, (unsigned long long)tex, reads);
 }
 
 void nvn_trace_image_gone(const vimg *v)

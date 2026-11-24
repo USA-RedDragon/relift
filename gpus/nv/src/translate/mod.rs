@@ -55,8 +55,8 @@ pub use tex::{
     TEXTURE_KIND_SPEC, image_binding, texture_binding,
 };
 pub use trace::{
-    TRACE_BINDING, TRACE_HEADER_WORDS, TRACE_MISS, TRACE_SLOT_WORDS, TRACE_SOURCE_CBUF,
-    TRACE_STAGE_WORDS, TRACE_UREG, Trace,
+    TRACE_BINDING, TRACE_HANDLE, TRACE_HEADER_WORDS, TRACE_MISS, TRACE_SLOT_WORDS,
+    TRACE_SOURCE_CBUF, TRACE_STAGE_WORDS, TRACE_UREG, Trace,
 };
 
 use crate::program::{Program, Stage};

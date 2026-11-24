@@ -2491,6 +2491,8 @@ static void trace_name(uint32_t id, char *s, size_t n)
         snprintf(s, n, "miss address low");
     else if (id == 0x201u)
         snprintf(s, n, "high");
+    else if (id == 0x202u)
+        snprintf(s, n, "handle");
     else if (id >= 0x100u)
         snprintf(s, n, "UR%u", id - 0x100u);
     else
@@ -2563,6 +2565,14 @@ static void trace_report(const replay *r, const char *key, uint32_t stage, uint3
         rl_log(RL_LOG_INFO, "gpu-trace", "present %llu command %llu program %.8s %s%s",
                (unsigned long long)d.cmd_present, (unsigned long long)d.cmd_index, key, line,
                k == first ? " [first in time]" : "");
+        if (s[3] == 0x200u) {
+            /* A texture or surface read through a handle from a register: the handle and what it names. */
+            rl_log(RL_LOG_INFO, "gpu-trace", "present %llu command %llu program %.8s image read at pc 0x%04x: handle 0x%08x, "
+                   "texture id %u, sampler id %u, %u reads",
+                   (unsigned long long)d.cmd_present, (unsigned long long)d.cmd_index, key, s[2], s[4], s[4] & 0xfffffu,
+                   s[4] >> 20, s[0]);
+            nvn_trace_image_read(key, s[2], s[4], s[0]);
+        }
         shown++;
     }
 }

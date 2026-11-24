@@ -1086,7 +1086,9 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
         && let Handle::UReg { n, .. } = c.fields.tex.handle
     {
         note_register_handle(c, Some(n), true);
-        return Ok((ur_handle(c)?, false));
+        let h = ur_handle(c)?;
+        c.trace_write(super::trace::TRACE_HANDLE, h);
+        return Ok((h, false));
     }
     match key {
         Some((bank, off)) => {
@@ -1095,7 +1097,9 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
         }
         None => {
             note_register_handle(c, s.reg(Slot::Handle), false);
-            Ok((s.get(Slot::Handle)?, true))
+            let h = s.get(Slot::Handle)?;
+            c.trace_write(super::trace::TRACE_HANDLE, h);
+            Ok((h, true))
         }
     }
 }

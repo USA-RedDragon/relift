@@ -509,6 +509,8 @@ void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t 
 void trace_window(uint32_t *lines, uint32_t *from, uint32_t *to);
 /** @brief Replays one command of a set onto r, as the scheduler does (tests replay single commands with it). */
 int nvn_vk_cmd(replay *r, const nvn_cmd *e);
+/** @brief A traced program's read through a register handle: an "image read" line in the frame trace (nvn_trace.c). */
+void nvn_trace_image_read(const char *key, uint32_t pc, uint32_t handle, uint32_t reads);
 /** @brief After the command is recorded: submits it and writes its line and its files. */
 void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
 /**
