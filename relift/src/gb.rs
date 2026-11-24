@@ -829,7 +829,7 @@ fn compile(
         let pools = crate::build::memory_pools(&mut rt_plan_compiles, jobs);
         let plan = Plan {
             cc: cc.clone(),
-            asm: None,
+            asm: extras.assembler(),
             compiles: rt_plan_compiles,
             output: rt_o.clone(),
             link_flags: ["-r", "-nostdlib"].map(String::from).into(),
