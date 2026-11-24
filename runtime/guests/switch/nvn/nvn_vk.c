@@ -5158,10 +5158,15 @@ typedef struct vk_run {
 
 static nvn_sched sched;
 
+static const rl_ctx *g_exec_ctx;
+
+const rl_ctx *nvn_vk_exec_ctx(void) { return g_exec_ctx; }
+
 static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
 {
     replay *r = &((vk_run *)user)->r;
     r->s = s;
+    g_exec_ctx = r->c;
     if (s && e >= s->cmds && e < s->cmds + s->n)
         nvn_label_command(s, (uint32_t)(e - s->cmds), e->op);
     if (nvn_trace_active || nvn_trace_watching)
@@ -5246,6 +5251,20 @@ static void thread_rusage(thread_faults *f)
 #endif
 }
 
+/**
+ * @brief Gives every queued run the calling guest thread's context: a run replays on the thread that pumps it, and
+ * replay calls driver code and writes scratch bytes below the context's stack pointer (view reads, getters), which
+ * must not be another guest thread's, one that may be running guest code meanwhile. Under nvn_lock.
+ */
+static void bind_runs(rl_ctx *c, uint8_t *mem)
+{
+    for (nvn_sched_run *r = sched.head; r; r = r->next) {
+        vk_run *u = r->user;
+        u->r.c = c;
+        u->r.mem = mem;
+    }
+}
+
 int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
 {
     if (!up(c))
@@ -5277,6 +5296,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     uint64_t what[1] = { n };
     nvn_trace_order("submit", "nvnQueueSubmitCommands", queue, u->r.submit, 0, what, 1, 0, true);
     nvn_sched_run *done = NULL;
+    bind_runs(c, mem);
     int64_t t0 = now_ns();
     struct timespec c0, c1;
     thread_faults u0, u1;
@@ -5334,6 +5354,7 @@ int nvn_vk_queue_sync(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t sync, bo
         return nvn_vk_fatal(c, "out of memory queueing a queue's sync");
     }
     nvn_sched_run *done = NULL;
+    bind_runs(c, mem);
     int rc = nvn_sched_pump(&sched, &sched_ops, &done);
     nvn_unlock();
     if (rc == RL_OK)
@@ -5347,11 +5368,7 @@ void nvn_vk_pump(rl_ctx *c, uint8_t *mem)
         return;
     nvn_lock();
     nvn_sched_run *done = NULL;
-    for (nvn_sched_run *r = sched.head; r; r = r->next) {
-        vk_run *u = r->user;
-        u->r.c = c;
-        u->r.mem = mem;
-    }
+    bind_runs(c, mem);
     int rc = sched.head ? nvn_sched_pump(&sched, &sched_ops, &done) : RL_OK;
     nvn_unlock();
     if (rc == RL_OK)

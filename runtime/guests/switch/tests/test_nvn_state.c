@@ -365,6 +365,38 @@ TEST(nvn_a_command_set_resumed_inside_another_run_is_submitted)
         CHECK_EQ(t_mem()[mem + 0x100 + i], 0x60 + i);
 }
 
+/**
+ * A command set queued behind an event by one guest thread and resumed when another thread's submit signals it runs
+ * on the signaling thread's context: replay calls driver code and writes scratch below its context's stack pointer,
+ * and the first thread may be running guest code on its own stack by then.
+ */
+TEST(nvn_a_run_resumed_by_another_threads_submit_replays_on_that_thread)
+{
+    RECORDING(c, heap, cb);
+    IMPORTED_POOL(c, heap, gpu, mem, nvn_a_run_resumed_by_another_threads_submit_replays_on_that_thread);
+    uint64_t data = heap + 0x2000, word = mem + 0x800;
+    record_event(c, cb, true, 1);
+    update_uniform_buffer(c, cb, gpu, 0x100, data, 16);
+    FINISHED(waiting, c, cb);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    record_event(c, cb, false, 1);
+    FINISHED(signaling, c, cb);
+    ((nvn_cmd *)&waiting->cmds[0])->x[1] = word;
+    ((nvn_cmd *)&signaling->cmds[0])->x[1] = word;
+    memset(t_mem() + mem, 0, 0x1000);
+    rl_ctx *other = calloc(1, sizeof *other);
+    CHECK(other != NULL);
+    memcpy(other, c, sizeof *other);
+    other->sp = c->sp - 0x10000;
+    CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x800, waiting), RL_OK);
+    CHECK(nvn_vk_settle());
+    CHECK_EQ(nvn_vk_run(other, t_mem(), heap + 0x900, signaling), RL_OK);
+    CHECK(nvn_vk_settle());
+    CHECK_EQ(rl_ld32(t_mem(), word), 1);
+    CHECK(nvn_vk_exec_ctx() == other);
+    free(other);
+}
+
 TEST(nvn_a_square_2d_array_of_six_layers_is_also_sampled_as_a_cube)
 {
     enum { DIM_CUBE = 3, DIM_2D_ARRAY = 5, DIM_CUBE_ARRAY = 6 };

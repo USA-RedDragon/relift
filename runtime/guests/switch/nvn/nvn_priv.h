@@ -1099,6 +1099,11 @@ uint64_t nvn_event_word(uint64_t event);
 void nvn_vk_pump(rl_ctx *c, uint8_t *mem);
 /** @brief Runs command set s on relift's Vulkan device for queue (nvn_vk.c). Returns RL_OK, or RL_PENDING after a stop. */
 int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s);
+/**
+ * @brief The guest context the last replayed command ran with: always the guest thread that pumped it (a submit, a
+ * queue sync or a pump), whichever thread had queued it, since replay may call driver code on that context.
+ */
+const rl_ctx *nvn_vk_exec_ctx(void);
 
 /** @brief Records the calling proc as op in its command buffer (x0) and returns as the proc. */
 uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op);
