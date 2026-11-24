@@ -29,6 +29,11 @@ pub enum Package {
 pub type BuildFn =
     fn(&Settings, &[PathBuf], bool, Option<cross::Target>, &mut Ui) -> Result<Built, BoxError>;
 
+/// How a guest imports: the settings, the input, the sysroot with the extra
+/// files, and the progress display.
+pub type ImportFn =
+    fn(&Settings, &Path, (Option<&Path>, &[String]), &mut Ui) -> Result<(), BoxError>;
+
 /// One guest of the table.
 pub struct Guest {
     /// The guest's name in `relift.toml` (`[game] guest`).
@@ -47,7 +52,7 @@ pub struct Guest {
     /// Whether `path` is this guest's input.
     pub is_input: fn(&Path) -> bool,
     /// Imports `path`, with the sysroot when [`Guest::sysroot`].
-    pub import: fn(&Settings, &Path, Option<&Path>, &mut Ui) -> Result<(), BoxError>,
+    pub import: ImportFn,
     /// Builds the project with the mods given, as a release build or not,
     /// for the host or a cross target.
     pub build: BuildFn,
@@ -127,7 +132,7 @@ pub const GUESTS: &[Guest] = &[
         package: Package::Never,
         sysroot: true,
         is_input: crate::linux::is_executable,
-        import: crate::linux::import,
+        import: |s, p, (root, extra), ui| crate::linux::import(s, p, root, extra, ui),
         build: |s, _, release, target, ui| {
             let built = crate::linux::build(s, release, target, ui)?;
             Ok(Built {

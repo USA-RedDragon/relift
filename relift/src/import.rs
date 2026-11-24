@@ -96,7 +96,7 @@ pub fn run(
     update: Option<&str>,
     program: Option<&str>,
     system_data: Option<&Path>,
-    sysroot: Option<&Path>,
+    (sysroot, extra): (Option<&Path>, &[String]),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let guest = crate::guests::of_input(dump);
@@ -118,7 +118,7 @@ pub fn run(
         if update.is_some() {
             return Err(format!("--update is for Switch dumps; {what} has no updates").into());
         }
-        return (guest.import)(settings, dump, sysroot, ui);
+        return (guest.import)(settings, dump, (sysroot, extra), ui);
     }
     let opts = Options {
         update: match update {

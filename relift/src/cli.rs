@@ -61,6 +61,14 @@ pub enum Command {
         /// directories) and copied into the import.
         #[arg(long, value_name = "DIR")]
         sysroot: Option<PathBuf>,
+        /// With --sysroot: more files of the sysroot to lift with their
+        /// libraries, those the program loads by a name it builds at run
+        /// time (Python's lib-dynload modules, a browser's plugins). A
+        /// guest path of a file, a directory (every aarch64 ELF file below
+        /// it) or a pattern with `*` or `?` in its last component; repeat
+        /// for several.
+        #[arg(long, value_name = "PATH", requires = "sysroot")]
+        extra: Vec<String>,
     },
     /// Lift, emit and compile the project.
     Build {

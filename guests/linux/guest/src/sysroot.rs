@@ -600,6 +600,89 @@ pub fn closure(
     origin: &str,
     sysroot: &Sysroot,
 ) -> Result<Closure, String> {
+    closure_with(exe, exe_bytes, origin, sysroot, &[])
+}
+
+/// The files the guest paths `patterns` name in the sysroot, for
+/// [`closure_with`]: a file; a directory, for every aarch64 ELF file
+/// below it; or a pattern whose last component holds `*` or `?`, for the
+/// aarch64 ELF files of its directory it matches.
+///
+/// # Errors
+///
+/// A pattern names nothing in the sysroot, or a file that is not an
+/// aarch64 ELF file.
+pub fn expand_extra(sysroot: &Sysroot, patterns: &[String]) -> Result<Vec<String>, String> {
+    fn walk(sysroot: &Sysroot, dir: &str, depth: usize, out: &mut Vec<String>) {
+        for (name, is_dir) in sysroot.list(dir) {
+            let path = format!("{}/{name}", dir.trim_end_matches('/'));
+            if !is_dir {
+                if sysroot
+                    .read(&path)
+                    .is_some_and(|(b, _)| is_aarch64(&b).is_some())
+                {
+                    out.push(path);
+                }
+            } else if depth < 8 {
+                walk(sysroot, &path, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for pat in patterns {
+        let pat = normalize(pat);
+        let (dir, leaf) = pat.rsplit_once('/').unwrap_or(("", &pat));
+        let dir = if dir.is_empty() { "/" } else { dir };
+        let before = out.len();
+        if leaf.contains(['*', '?']) {
+            let mut names: Vec<String> = sysroot
+                .list(dir)
+                .into_iter()
+                .filter(|(n, is_dir)| !is_dir && matches(leaf, n))
+                .map(|(n, _)| format!("{}/{n}", dir.trim_end_matches('/')))
+                .filter(|p| {
+                    sysroot
+                        .read(p)
+                        .is_some_and(|(b, _)| is_aarch64(&b).is_some())
+                })
+                .collect();
+            names.sort();
+            out.extend(names);
+        } else if let Some((bytes, _)) = sysroot.read(&pat) {
+            if is_aarch64(&bytes).is_none() {
+                return Err(format!("{pat} is not an aarch64 ELF file"));
+            }
+            out.push(pat.clone());
+        } else {
+            let mut found = Vec::new();
+            walk(sysroot, &pat, 0, &mut found);
+            found.sort();
+            out.extend(found);
+        }
+        if out.len() == before {
+            return Err(format!("{pat} names no aarch64 ELF file in the sysroot"));
+        }
+    }
+    out.dedup();
+    Ok(out)
+}
+
+/// [`closure`], with the files `extra` (guest paths, as
+/// [`expand_extra`] gives them) added as libraries with their own
+/// closures: the files a program loads by a name it builds at run time
+/// (Python's extension modules), which no file spells.
+///
+/// # Errors
+///
+/// As [`closure`]; an extra file is not in the sysroot or not an aarch64
+/// ELF file.
+pub fn closure_with(
+    exe: &Object,
+    exe_bytes: &[u8],
+    origin: &str,
+    sysroot: &Sysroot,
+    extra: &[String],
+) -> Result<Closure, String> {
     let mut w = Walk {
         out: Closure::default(),
         plugin_dirs: BTreeSet::new(),
@@ -639,6 +722,7 @@ pub fn closure(
         paths.dedup();
         w.out.interpreter = Some(Library { name, paths, bytes });
     }
+    let mut extra = extra.iter();
     let conf = sysroot.conf_dirs();
     let mut pending: Vec<(usize, String)> = Vec::new();
     let mut scanned = 0;
@@ -669,6 +753,17 @@ pub fn closure(
                 };
                 w.add(i, &need, found);
             }
+        }
+        if let Some(path) = extra.next() {
+            // After the closure the loader loads at start, as `dlopen`
+            // adds a file after the libraries already in the search order.
+            let found = find(sysroot, std::slice::from_ref(path))
+                .ok_or_else(|| format!("{path} is not an aarch64 ELF file in the sysroot"))?;
+            let name = file_name(path);
+            if !w.names.contains(&name) {
+                w.add(0, &name, found);
+            }
+            continue;
         }
         let Some(file) = w.files.get(scanned) else {
             let before = w.files.len();
@@ -810,6 +905,38 @@ mod tests {
 
     fn names(libs: &[Library]) -> Vec<&str> {
         libs.iter().map(|l| l.name.as_str()).collect()
+    }
+
+    #[test]
+    fn extra_files_come_with_their_own_needed_libraries() {
+        let exe = elf(&["libc.so.6"], None, None);
+        let dir = root(
+            "extra",
+            &[
+                ("/lib/libc.so.6", elf(&[], None, None)),
+                ("/lib/libssl.so.3", elf(&["libc.so.6"], None, None)),
+                ("/usr/lib/py/dyn/_ssl.so", elf(&["libssl.so.3"], None, None)),
+                ("/usr/lib/py/dyn/_json.so", elf(&[], None, None)),
+                ("/usr/lib/py/dyn/README", b"not code".to_vec()),
+            ],
+        );
+        let s = Sysroot::new(&dir).expect("sysroot");
+        let o = elf::parse(&exe).expect("elf");
+        let all = expand_extra(&s, &["/usr/lib/py/dyn".into()]).expect("dir");
+        assert_eq!(all, ["/usr/lib/py/dyn/_json.so", "/usr/lib/py/dyn/_ssl.so"]);
+        let one = expand_extra(&s, &["/usr/lib/py/dyn/_s*.so".into()]).expect("glob");
+        assert_eq!(one, ["/usr/lib/py/dyn/_ssl.so"]);
+        assert!(expand_extra(&s, &["/usr/lib/py/dyn/README".into()]).is_err());
+        assert!(expand_extra(&s, &["/usr/lib/none".into()]).is_err());
+        let c = closure_with(&o, &exe, "/", &s, &one).expect("closure");
+        assert_eq!(names(&c.libraries), ["libc.so.6", "_ssl.so", "libssl.so.3"]);
+        let ssl = c
+            .libraries
+            .iter()
+            .find(|l| l.name == "_ssl.so")
+            .expect("_ssl");
+        assert!(ssl.paths.contains(&"/usr/lib/py/dyn/_ssl.so".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

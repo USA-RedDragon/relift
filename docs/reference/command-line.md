@@ -208,6 +208,9 @@ Options:
       --sysroot <DIR>
           For a dynamically linked Linux program: the arm64 Linux root file system, or a cross toolchain's sysroot, that holds its program interpreter and libraries. They are found the way the interpreter searches (run paths, the sysroot's ld.so.conf, the default directories) and copied into the import
 
+      --extra <PATH>
+          With --sysroot: more files of the sysroot to lift with their libraries, those the program loads by a name it builds at run time (Python's lib-dynload modules, a browser's plugins). A guest path of a file, a directory (every aarch64 ELF file below it) or a pattern with `*` or `?` in its last component; repeat for several
+
   -c, --config <config>
           config file
           

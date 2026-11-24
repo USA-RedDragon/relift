@@ -122,6 +122,7 @@ pub fn import(
     settings: &Settings,
     path: &Path,
     sysroot_dir: Option<&Path>,
+    extra: &[String],
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -155,7 +156,8 @@ pub fn import(
             .map_or("/", |(d, _)| if d.is_empty() { "/" } else { d });
         let root =
             Sysroot::new(dir)?.with_overlay(origin, path.parent().unwrap_or(Path::new(".")))?;
-        sysroot::closure(&object, &bytes, origin, &root)
+        let extra = sysroot::expand_extra(&root, extra)?;
+        sysroot::closure_with(&object, &bytes, origin, &root, &extra)
             .map_err(|e| format!("{}: {e}", path.display()))?
     } else {
         sysroot::Closure::default()
