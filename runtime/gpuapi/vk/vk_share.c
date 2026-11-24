@@ -4,9 +4,12 @@
  * forwarded Vulkan, the presenter and the picture pipeline use one host
  * device.
  *
- * Only a program that loads forwarded Vulkan asks (vkf_share_ask from
- * rl_vk_init, before the core device is made); every other program's core
- * device is exactly what it is without the layer. The ask adds the
+ * The layer asks at the guest's first vkCreateInstance, and only when the
+ * core device is not made yet; a program that never creates an instance (an
+ * NVN game whose vulkan module is loaded but unused) or whose core device
+ * already exists (the NVN layer made it first) asks for nothing, so its core
+ * device is exactly what it is without the layer, and a guest instance there
+ * gets its own host objects as before. The ask adds the
  * instance extensions the layer forwards and, on the device, the profile's
  * device extensions and the layer's own (placed or imported memory, device
  * fault, exact depth bias, present id and wait, swapchain) that the host

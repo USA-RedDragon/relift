@@ -66,11 +66,13 @@ device is the core's.
 
 A program that loads forwarded Vulkan shares the core's Vulkan instance and
 device (`core/vkdev.h`) with the presenter and the picture pipeline
-(`vk_share.c`). At `rl_vk_init`, before the core device exists, the layer
-asks for its instance extensions, the profile's and its own device
+(`vk_share.c`). At the guest's first `vkCreateInstance`, when the core
+device does not exist yet, the layer asks for its instance extensions, the profile's and its own device
 extensions, and the host's features, minus `robustBufferAccess`,
-`robustImageAccess` and multi-device buffer addresses. A program that
-never loads it asks for nothing, so its core device is unchanged.
+`robustImageAccess` and multi-device buffer addresses. A program that never
+creates an instance (an NVN game with its unused `vulkan` module), or whose
+core device exists already, asks for nothing, so its core device is
+unchanged.
 
 The guest's `vkCreateInstance` and `vkCreateDevice` take the core's objects
 when the final request fits what the core enabled (and the core's queue

@@ -595,7 +595,6 @@ int rl_vk_init(const rl_vk_config *cfg)
         .name = "vulkan-forwarding",
     };
     g_ready = true;
-    vkf_share_ask();
     return 0;
 }
 
@@ -980,6 +979,7 @@ uint64_t vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     if (app->apiVersion < want)
         app->apiVersion = want;
     ci->pApplicationInfo = app;
+    vkf_share_ask();
     VkInstance inst = ci->pNext ? NULL : vkf_share_instance(ci);
     bool shared = inst != NULL;
     VkResult r = shared ? VK_SUCCESS : VKF_FN(&vkf.global, vkCreateInstance)(ci, NULL, &inst);
