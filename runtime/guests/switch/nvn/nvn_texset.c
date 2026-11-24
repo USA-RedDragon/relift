@@ -113,6 +113,8 @@ static struct {
      */
     VkSampler fallback;
     uint64_t (*sampler_bytes)[16];
+    /** @brief The create info of each sampler id's host sampler (its pNext dropped, the reduction mode kept beside). */
+    nvn_sampler_info *sampler_info;
 } t;
 
 /**
@@ -282,6 +284,7 @@ static bool make(void)
     t.img_surface = calloc(t.ntex, sizeof *t.img_surface);
     t.samplers = calloc(SAMPLERS, sizeof *t.samplers);
     t.sampler_bytes = calloc(SAMPLERS, sizeof *t.sampler_bytes);
+    t.sampler_info = calloc(SAMPLERS, sizeof *t.sampler_info);
     bool filled = fill_samplers();
     t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.img_surface && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
@@ -366,6 +369,9 @@ static VkSamplerAddressMode wrap(uint32_t m)
     return m < 8 ? map[m] : VK_SAMPLER_ADDRESS_MODE_REPEAT;
 }
 
+/** @brief The create info of the last sampler make_sampler made, for nvn_texset_sampler_info. */
+static nvn_sampler_info made_info;
+
 /** @brief A host sampler for the NVNsamplerBuilder bytes b, read through the SDK driver's getters. */
 static int make_sampler(replay *r, const uint64_t b[16], VkSampler *out)
 {
@@ -433,7 +439,18 @@ static int make_sampler(replay *r, const uint64_t b[16], VkSampler *out)
     };
     if (VK(vkCreateSampler)(g.dev, &ci, NULL, out) != VK_SUCCESS)
         return nvn_vk_stop(r, "vkCreateSampler failed");
+    made_info.ci = ci;
+    made_info.ci.pNext = NULL;
+    made_info.reduction = (uint32_t)rm.reductionMode;
     return RL_OK;
+}
+
+bool nvn_texset_sampler_info(uint32_t id, nvn_sampler_info *out)
+{
+    if (id >= SAMPLERS || !t.sampler_info || !t.samplers || !t.samplers[id])
+        return false;
+    *out = t.sampler_info[id];
+    return true;
 }
 
 static int bind_sampler(replay *r, uint32_t id)
@@ -472,6 +489,15 @@ static int bind_sampler(replay *r, uint32_t id)
     }
     t.samplers[id] = s;
     memcpy(t.sampler_bytes[id], bytes, 128);
+    if (t.sampler_info) {
+        t.sampler_info[id] = made_info;
+        if (none)
+            t.sampler_info[id] = (nvn_sampler_info){ .ci = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                                             .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                                                             .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                                                             .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                                                             .maxLod = 0.25f } };
+    }
     VkDescriptorImageInfo ii = { s, NULL, VK_IMAGE_LAYOUT_UNDEFINED };
     VkWriteDescriptorSet w = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                .dstSet = t.set,
@@ -891,7 +917,7 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
         nvn_tex_registered(handle & 0xfffffu, view, &has_view, &image);
         view[16] = has_view;
         nvn_diff_texture(t.tex_img[*slot], handle & 0xfffffu, *slot, *kind, *dim, image || as_image,
-                         t.tex_level[*slot], t.tex_layer[*slot], view);
+                         t.tex_level[*slot], t.tex_layer[*slot], view, with_sampler ? handle >> 20 : UINT32_MAX);
     }
     if (rc == RL_OK && nvn_trace_active) {
         uint8_t view[17] = { 0 };

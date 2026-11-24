@@ -6,6 +6,7 @@ Run: python3 -I runtime/tools/test_nvn_diff.py
 
 import json
 import os
+import shutil
 import stat
 import struct
 import subprocess
@@ -41,7 +42,13 @@ for l in spec:
     elif w[0] == "imageout":
         open(w[1], "wb").write(open(last, "rb").read())
 '''
-FAKE_XLATE = "#!/bin/sh\necho ok\n"
+FAKE_XLATE = r'''#!/usr/bin/env python3
+import struct, sys
+# A module that declares SpecIds 0 to 4 (OpDecorate %1 SpecId k), as a translation does.
+w = [0x07230203, 0x10000, 0, 10, 0] + sum(([4 << 16 | 71, 1 + k, 1, k] for k in range(5)), [])
+open(sys.argv[2], "wb").write(struct.pack("<%dI" % len(w), *w))
+print("ok")
+'''
 
 
 def put(path, data):
@@ -132,11 +139,14 @@ class Pieces(unittest.TestCase):
 
 
 class Verdicts(unittest.TestCase):
-    def run_tool(self, game_post, race=False, image=None, extra=(), exact=None):
+    def run_tool(self, game_post, race=False, image=None, extra=(), exact=None, edit=None):
         d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
+        self.addCleanup(shutil.rmtree, d, True)
         cap = os.path.join(d, "cap")
         os.makedirs(cap)
         make_capture(cap, game_post, image, exact)
+        if edit:
+            edit(cap)
         exe(os.path.join(d, "krun"), FAKE_KRUN)
         exe(os.path.join(d, "xlate"), FAKE_XLATE)
         env = dict(os.environ)
@@ -148,11 +158,12 @@ class Verdicts(unittest.TestCase):
                             os.path.join(d, "xlate"), "--repeat", "3"] + list(extra),
                            capture_output=True, text=True, env=env)
         with open(os.path.join(d, "out", "report.json")) as f:
-            return r, json.load(f)
+            rep = json.load(f)
+        return r, rep, d
 
     def test_match(self):
         pre = b"".join(struct.pack("<I", i) for i in range(16))
-        r, rep = self.run_tool(plus_one(pre), extra=["--all"])
+        r, rep, _ = self.run_tool(plus_one(pre), extra=["--all"])
         self.assertEqual(rep["dispatches"][0]["verdict"], "match", r.stdout + r.stderr)
         self.assertIsNone(rep["first_divergent"])
 
@@ -160,7 +171,7 @@ class Verdicts(unittest.TestCase):
         pre = b"".join(struct.pack("<I", i) for i in range(16))
         bad = bytearray(plus_one(pre))
         bad[20:24] = b"\0\0\0\0"
-        r, rep = self.run_tool(bytes(bad), extra=["--all"])
+        r, rep, _ = self.run_tool(bytes(bad), extra=["--all"])
         d0 = rep["dispatches"][0]
         self.assertEqual(d0["verdict"], "sync", r.stdout + r.stderr)
         self.assertEqual(d0["game_vs_gpu"][0]["first_byte"], 20)
@@ -171,16 +182,56 @@ class Verdicts(unittest.TestCase):
         pre = b"".join(struct.pack("<I", i) for i in range(16))
         seen = bytearray(pre)
         seen[8:12] = b"\0\0\0\0"  # someone outside the captured dispatches zeroed word 2 before it ran
-        r, rep = self.run_tool(plus_one(bytes(seen)), exact=bytes(seen), extra=["--all"])
+        r, rep, _ = self.run_tool(plus_one(bytes(seen)), exact=bytes(seen), extra=["--all"])
         d0 = rep["dispatches"][0]
         self.assertEqual(d0["verdict"], "sync", r.stdout + r.stderr)
         self.assertEqual(d0["inputs_changed"][0]["when"], "before")
         self.assertEqual(d0["inputs_changed"][0]["bytes"], [8, 12])
         self.assertEqual(d0["game_vs_gpu"], [], "replayed from what it really read, it matches the game")
 
+    def test_the_replay_gets_every_part_of_the_launch_state(self):
+        pre = b"".join(struct.pack("<I", i) for i in range(16))
+        before = bytes([9]) * (32 * 16 * 4)
+        sampler = {"id": 2, "mag": 1, "min": 0, "mipmap": 1, "address": [0, 2, 3], "lod_bias": 0.5,
+                   "anisotropy": 0, "compare": 0, "compare_op": 0, "min_lod": 0, "max_lod": 4, "border": 0,
+                   "unnormalized": 0, "reduction": 0}
+
+        def edit(cap):
+            with open(os.path.join(cap, "capture.json")) as f:
+                j = json.load(f)
+            e = j["dispatches"][1]
+            e["specs"] = [[0, 64], [1, 1], [2, 1], [3, 9000], [4, 16], [0x500, 1]]
+            e["textures"][0]["sampler"] = sampler
+            e["textures"][0]["image"] = 0
+            e["fixed_push"] = "0000803f" + "00" * 12 + "0010000000700000"
+            with open(os.path.join(cap, "arena.bin"), "ab") as f:
+                at = f.tell()
+                f.write(struct.pack("<3I", 7, 3, 2))
+            j["spans"].append({"what": "indirect", "disp": 1, "guest": "0x0", "gpu": "0x0", "size": 12, "at": at})
+            e["indirect"] = 1
+            with open(os.path.join(cap, "capture.json"), "w") as f:
+                json.dump(j, f)
+
+        r, rep, d = self.run_tool(plus_one(pre), image=(before, before), extra=["--all"], edit=edit)
+        with open(os.path.join(d, "out", "d001", "gpu0", "spec")) as f:
+            spec = f.read().splitlines()
+        self.assertIn("groups 7 3 2", spec, "an indirect dispatch's counts come from its argument buffer")
+        self.assertIn("local 64 1 1", spec)
+        for k, v in ((3, 9000), (4, 16), (0x500, 1)):
+            self.assertIn("spec %d %d" % (k, v), spec)
+        self.assertIn("samplerx 2 1 0 1 0 2 3 0.5 0 0 0 0 4 0 0 0", spec)
+        self.assertIn("pushhex 0 0000803f000000000000000000000000", spec)
+        self.assertIn("push 16 addr 1", spec, "the bitmap address points at the replay's own bitmap")
+        self.assertNotIn("specs_not_captured", rep["dispatches"][1])
+
+    def test_specs_the_capture_lacks_are_named(self):
+        pre = b"".join(struct.pack("<I", i) for i in range(16))
+        r, rep, _ = self.run_tool(plus_one(pre), extra=["--all"])
+        self.assertEqual(rep["dispatches"][0]["specs_not_captured"], [1, 2, 3, 4], r.stderr)
+
     def test_race_when_replays_differ(self):
         pre = b"".join(struct.pack("<I", i) for i in range(16))
-        r, rep = self.run_tool(plus_one(pre), race=True, extra=["--all"])
+        r, rep, _ = self.run_tool(plus_one(pre), race=True, extra=["--all"])
         self.assertEqual(rep["dispatches"][0]["verdict"], "race", r.stdout + r.stderr)
 
     def test_writer_chain_of_the_zero_band_image(self):
@@ -190,7 +241,7 @@ class Verdicts(unittest.TestCase):
         for y in range(16):
             for x in range(4, 8):
                 after[(y * 32 + x) * 4:(y * 32 + x) * 4 + 4] = b"\0\0\0\0"
-        r, rep = self.run_tool(plus_one(pre), image=(before, bytes(after)))
+        r, rep, _ = self.run_tool(plus_one(pre), image=(before, bytes(after)))
         self.assertEqual(rep["zero_bands"]["dispatch"], 1, r.stdout + r.stderr)
         self.assertEqual(rep["selected"], [0, 1])
         d1 = rep["dispatches"][1]

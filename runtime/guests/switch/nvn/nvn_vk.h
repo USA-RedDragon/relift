@@ -694,6 +694,12 @@ typedef struct nvn_diff_dispatch {
     uint32_t nspec;
     /** @brief The guest push data (NVN_PUSH_BYTES), or NULL when the program pushes none. */
     const uint8_t *push;
+    /** @brief The push constants the runtime itself pushes (its fixed_push), and their size. */
+    const void *fixed_push;
+    uint32_t fixed_push_bytes;
+    /** @brief The indirect dispatch's argument buffer and offset (NULL for a direct dispatch). */
+    VkBuffer ibuf;
+    uint64_t ioff;
     const nvn_diff_range *range;
     uint32_t nrange;
 } nvn_diff_dispatch;
@@ -703,7 +709,14 @@ bool nvn_diff_on(void);
 void nvn_diff_dispatch_reset(void);
 /** @brief A texture or storage image (image) the next dispatch binds, at its bound level and layer. */
 void nvn_diff_texture(const vimg *v, uint32_t id, uint32_t slot, uint32_t kind, uint32_t dim, bool image,
-                      uint32_t level, uint32_t layer, const uint8_t view[17]);
+                      uint32_t level, uint32_t layer, const uint8_t view[17], uint32_t sampler);
+/** @brief A sampler id's host sampler as made: its create info (pNext dropped) and reduction mode. */
+typedef struct nvn_sampler_info {
+    VkSamplerCreateInfo ci;
+    uint32_t reduction;
+} nvn_sampler_info;
+/** @brief The host sampler of sampler id `id` as last bound; false when none is. */
+bool nvn_texset_sampler_info(uint32_t id, nvn_sampler_info *out);
 /** @brief Just before the dispatch is recorded: records it and the copies of its not yet captured inputs. */
 void nvn_diff_dispatch_begin(replay *r, const nvn_diff_dispatch *d);
 /** @brief Just after the dispatch is recorded: the copies of what it may have written. */

@@ -52,9 +52,9 @@
 
 /** @brief What a span of the arena holds. */
 enum { SPAN_PRE_BUF, SPAN_POST_BUF, SPAN_PRE_IMG, SPAN_POST_IMG, SPAN_EXACT_BUF, SPAN_EXACT_IMG, SPAN_AFTER_BUF,
-       SPAN_AFTER_IMG };
-static const char *const span_names[] = { "pre",   "post",       "pre_image", "post_image",
-                                          "exact", "exact_image", "after",     "after_image" };
+       SPAN_AFTER_IMG, SPAN_INDIRECT };
+static const char *const span_names[] = { "pre",   "post",        "pre_image", "post_image", "exact",
+                                          "exact_image", "after", "after_image", "indirect" };
 
 /** @brief One copy in the arena: a guest range (buffers) or a texture of a dispatch (images). */
 typedef struct dspan {
@@ -72,6 +72,10 @@ typedef struct dtex {
     uint64_t bytes;
     bool image;
     uint8_t view[17];
+    /** @brief The sampler id bound with it (UINT32_MAX: none) and that sampler as the host made it. */
+    uint32_t sampler;
+    bool has_sampler;
+    nvn_sampler_info si;
 } dtex;
 
 /** @brief A bound buffer range of a dispatch. */
@@ -95,6 +99,9 @@ typedef struct ddisp {
     uint8_t *c1;
     uint8_t push[NVN_PUSH_BYTES];
     bool push_used;
+    /** @brief The runtime's own push constants. */
+    uint8_t fixed_push[64];
+    uint32_t fixed_push_bytes;
     drange range[MAX_RANGES];
     dtex tex[MAX_TEX];
 } ddisp;
@@ -391,7 +398,7 @@ static void size_texture(dtex *t)
 void nvn_diff_dispatch_reset(void) { df.npend = 0; }
 
 void nvn_diff_texture(const vimg *v, uint32_t id, uint32_t slot, uint32_t kind, uint32_t dim, bool image,
-                      uint32_t level, uint32_t layer, const uint8_t view[17])
+                      uint32_t level, uint32_t layer, const uint8_t view[17], uint32_t sampler)
 {
     if (!df.on || !v)
         return;
@@ -406,6 +413,8 @@ void nvn_diff_texture(const vimg *v, uint32_t id, uint32_t slot, uint32_t kind, 
                  .layer = layer, .format = v->d.format, .target = v->d.target, .vk_format = (int32_t)v->format,
                  .image = image };
     memcpy(t->view, view, 17);
+    t->sampler = sampler;
+    t->has_sampler = sampler != UINT32_MAX && nvn_texset_sampler_info(sampler, &t->si);
     size_texture(t);
 }
 
@@ -446,6 +455,10 @@ void nvn_diff_dispatch_begin(replay *r, const nvn_diff_dispatch *d)
         memcpy(e->push, d->push, NVN_PUSH_BYTES);
         e->push_used = true;
     }
+    if (d->fixed_push && d->fixed_push_bytes <= sizeof e->fixed_push) {
+        memcpy(e->fixed_push, d->fixed_push, d->fixed_push_bytes);
+        e->fixed_push_bytes = d->fixed_push_bytes;
+    }
     for (uint32_t i = 0; i < d->nrange && e->nrange < MAX_RANGES; i++) {
         drange *rg = &e->range[e->nrange++];
         *rg = (drange){ .gpu = d->range[i].gpu, .size = d->range[i].size, .kind = d->range[i].kind,
@@ -458,6 +471,13 @@ void nvn_diff_dispatch_begin(replay *r, const nvn_diff_dispatch *d)
     df.npend = 0;
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
+    if (d->ibuf) {
+        uint64_t at = add_span(s, SPAN_INDIRECT, 0, 0, 12, di, UINT32_MAX);
+        if (at != UINT64_MAX) {
+            VkBufferCopy c = { .srcOffset = d->ioff, .dstOffset = at, .size = 12 };
+            VK(vkCmdCopyBuffer)(g.cb, d->ibuf, s->buf, 1, &c);
+        }
+    }
     for (uint32_t i = 0; i < e->nrange; i++)
         if (!e->range[i].unmapped)
             copy_uncovered(s, e->range[i].guest, e->range[i].guest + e->range[i].size, e->range[i].gpu, di);
@@ -604,7 +624,20 @@ static void json_tex(FILE *f, const dtex *t, int64_t pre, int64_t post)
             (unsigned long long)t->bytes);
     for (uint32_t i = 0; i < 17; i++)
         fprintf(f, "%02x", t->view[i]);
-    fprintf(f, "\",\"pre_span\":%lld,\"post_span\":%lld}", (long long)pre, (long long)post);
+    fprintf(f, "\",\"pre_span\":%lld,\"post_span\":%lld", (long long)pre, (long long)post);
+    if (t->has_sampler) {
+        const VkSamplerCreateInfo *c = &t->si.ci;
+        fprintf(f,
+                ",\"sampler\":{\"id\":%u,\"mag\":%d,\"min\":%d,\"mipmap\":%d,\"address\":[%d,%d,%d],\"lod_bias\":%.9g,"
+                "\"anisotropy\":%.9g,\"compare\":%d,\"compare_op\":%d,\"min_lod\":%.9g,\"max_lod\":%.9g,"
+                "\"border\":%d,\"unnormalized\":%d,\"reduction\":%u}",
+                t->sampler, (int)c->magFilter, (int)c->minFilter, (int)c->mipmapMode, (int)c->addressModeU,
+                (int)c->addressModeV, (int)c->addressModeW, (double)c->mipLodBias,
+                c->anisotropyEnable ? (double)c->maxAnisotropy : 0.0, (int)c->compareEnable, (int)c->compareOp,
+                (double)c->minLod, (double)c->maxLod, (int)c->borderColor, (int)c->unnormalizedCoordinates,
+                t->si.reduction);
+    }
+    fprintf(f, "}");
 }
 
 /** @brief Writes n bytes at p to dir/name. */
@@ -679,6 +712,9 @@ static void save(replay *r, dslot *s, const rl_trigger_hit *hit)
         fprintf(f, "],\"push\":\"");
         for (uint32_t k = 0; e->push_used && k < NVN_PUSH_BYTES; k++)
             fprintf(f, "%02x", e->push[k]);
+        fprintf(f, "\",\"fixed_push\":\"");
+        for (uint32_t k = 0; k < e->fixed_push_bytes; k++)
+            fprintf(f, "%02x", e->fixed_push[k]);
         fprintf(f, "\",\"ranges\":[");
         static const char *const kinds[] = { "storage", "uniform", "base" };
         for (uint32_t k = 0; k < e->nrange; k++) {

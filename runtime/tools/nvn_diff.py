@@ -72,6 +72,8 @@ class Capture:
                 r["gpu"] = h(r["gpu"])
             for t in e["textures"]:
                 t["storage"] = h(t["storage"])
+        for e in self.disp:
+            e["groups"] = launch_groups(self, e)
 
     def bytes_of(self, s):
         self.arena.seek(s["at"])
@@ -185,10 +187,33 @@ def dims_bytes(e):
     return (4 * top + 0xFFFF) & ~0xFFFF
 
 
+def spec_ids(spv):
+    """The SpecIds a SPIR-V module declares."""
+    with open(spv, "rb") as f:
+        b = f.read()
+    w = struct.unpack("<%dI" % (len(b) // 4), b)
+    out, i = set(), 5
+    while i < len(w):
+        n = w[i] >> 16
+        if w[i] & 0xFFFF == 71 and n == 4 and w[i + 2] == 1:
+            out.add(w[i + 3])
+        i += max(n, 1)
+    return out
+
+
+def launch_groups(cap, e):
+    """The workgroup counts the dispatch ran with: an indirect dispatch's from its captured argument buffer."""
+    for s in cap.spans:
+        if s["disp"] == e["i"] and s["what"] == "indirect":
+            return list(struct.unpack("<3I", cap.bytes_of(s)))
+    return e["groups"]
+
+
 class Replayer:
     def __init__(self, cap, a, out):
         self.cap, self.a, self.out = cap, a, out
         self.spv = {}
+        self.unset_specs = {}
 
     def binary(self, key):
         """The program file of key, which may be a prefix of its name in --programs."""
@@ -283,7 +308,27 @@ class Replayer:
             top = max(top, t["id"] + 1)
         if top > 4:
             spec.insert(1, "texcount %d" % top)
-            spec.append("sampler 0 1 1 0")
+            samplers = {t["sampler"]["id"]: t["sampler"] for t in e["textures"] if t.get("sampler")}
+            if not samplers:
+                spec.append("sampler 0 1 1 0")
+            for sid, sm in sorted(samplers.items()):
+                spec.append("samplerx %d %d %d %d %d %d %d %r %r %d %d %r %r %d %d %d" % (
+                    sid, sm["mag"], sm["min"], sm["mipmap"], *sm["address"], sm["lod_bias"], sm["anisotropy"],
+                    sm["compare"], sm["compare_op"], sm["min_lod"], sm["max_lod"], sm["border"], sm["unnormalized"],
+                    sm["reduction"]))
+        unset = sorted(spec_ids(spv) - set(specs))
+        if unset:
+            # The capture holds no value for these: the replay takes the translation's defaults, which is only what
+            # the game ran if its runtime also left them (a capture from before the runtime set the shared size).
+            self.unset_specs[e["i"]] = unset
+        if e.get("fixed_push"):
+            # The runtime's push block as it pushed it, but for the written-page bitmap's address (byte 16), which
+            # is the game's: it points at the replay's own zeroed bitmap.
+            fp = bytes.fromhex(e["fixed_push"])
+            spec.append("pushhex 0 " + fp[:16].hex())
+            if any(fp[16:24]):
+                spec.append("out %s %d" % (os.path.join(d, "pages.bin"), 1 << 17))
+                spec.append("push 16 addr %d" % len(regs))
         dims = bytearray(dims_bytes(e))
         for t in e["textures"]:
             if not t["image"]:
@@ -934,6 +979,8 @@ def main():
         else:
             v = "match"
         rec["verdict"] = v
+        if i in rp.unset_specs:
+            rec["specs_not_captured"] = rp.unset_specs[i]
         report["dispatches"].append(rec)
         if v != "match" and first is None:
             first = rec
@@ -969,7 +1016,9 @@ def main():
     else:
         lines.append("no dispatch differs: the game's outputs match every replay")
     for r in report["dispatches"]:
-        lines.append("  d%d %s %s" % (r["i"], r["key"][:16], r["verdict"]))
+        lines.append("  d%d %s %s%s" % (r["i"], r["key"][:16], r["verdict"],
+                                        " (no captured value for SpecIds %s: replayed with the translation's "
+                                        "defaults)" % r["specs_not_captured"] if r.get("specs_not_captured") else ""))
     with open(os.path.join(out, "report.txt"), "w") as f:
         f.write("\n".join(lines) + "\n")
     print("\n".join(lines))

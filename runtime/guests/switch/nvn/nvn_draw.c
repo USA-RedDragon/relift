@@ -2780,9 +2780,9 @@ bool nvn_compute_shared_words(const uint8_t *mem, uint64_t ctl, uint32_t limit, 
 }
 
 /** @brief Hands the dispatch about to be recorded to the differential capture (nvn_diff.c) with its binding table. */
-static void diff_begin(replay *r, const module *m, const uint32_t groups[3], bool indirect, const uint8_t *c0,
-                       uint32_t nubo, uint32_t nssbo, const VkSpecializationMapEntry *map, const uint32_t *vals,
-                       uint32_t n)
+static void diff_begin(replay *r, const module *m, const uint32_t groups[3], VkBuffer ibuf, VkDeviceSize ioff,
+                       const uint8_t *c0, uint32_t nubo, uint32_t nssbo, const VkSpecializationMapEntry *map,
+                       const uint32_t *vals, uint32_t n)
 {
     const nvn_gfx *st = r->st;
     nvn_diff_range rg[NVN_STORAGE_SLOTS + NVN_UBO_SLOTS + 32];
@@ -2803,7 +2803,9 @@ static void diff_begin(replay *r, const module *m, const uint32_t groups[3], boo
     const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];
     nvn_diff_dispatch dd = { .key = m->key,
                             .groups = { groups[0], groups[1], groups[2] },
-                            .indirect = indirect,
+                            .indirect = ibuf != NULL,
+                            .ibuf = ibuf,
+                            .ioff = ioff,
                             .c0 = c0,
                             .c0_bytes = NVN_BANK2_BYTES,
                             .c1_guest = k->addr,
@@ -2814,6 +2816,9 @@ static void diff_begin(replay *r, const module *m, const uint32_t groups[3], boo
                             .push = st->push_used[NVN_STAGE_COMPUTE] ? st->push[NVN_STAGE_COMPUTE][0] : NULL,
                             .range = rg,
                             .nrange = nr };
+    fixed_push fp = { .written_pages = nvn_mirror_written_pages_address() };
+    dd.fixed_push = &fp;
+    dd.fixed_push_bytes = sizeof fp;
     nvn_diff_dispatch_begin(r, &dd);
 }
 
@@ -2951,7 +2956,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     else if (m->global_store && !nvn_mirror_takes_unmarked())
         return nvn_mirror_refuse_unmarked(r, m->key);
     if (nvn_diff_on())
-        diff_begin(r, m, (uint32_t[3]){ x, y, z }, ibuf != NULL, c0, nubo, nssbo, map, vals, n);
+        diff_begin(r, m, (uint32_t[3]){ x, y, z }, ibuf, ioff, c0, nubo, nssbo, map, vals, n);
     if (ibuf)
         nvn_vk_begin(r);
     else
