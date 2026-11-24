@@ -96,6 +96,38 @@ static bool call_activity(const char *method, const char *arg)
     return m != NULL;
 }
 
+/**
+ * @brief Calls the activity's String method() and copies its result into out (n bytes, cut to fit, NUL ended); false
+ * when there is no such method, it threw, or it returned null.
+ */
+static bool rl_android_call_str(const char *method, char *out, size_t n)
+{
+    JNIEnv *env = SDL_GetAndroidJNIEnv();
+    jobject act = SDL_GetAndroidActivity();
+    if (!env || !act || !n)
+        return false;
+    bool ok = false;
+    jclass c = (*env)->GetObjectClass(env, act);
+    jmethodID m = c ? (*env)->GetMethodID(env, c, method, "()Ljava/lang/String;") : NULL;
+    jstring s = m ? (jstring)(*env)->CallObjectMethod(env, act, m) : NULL;
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        s = NULL;
+    }
+    const char *u = s ? (*env)->GetStringUTFChars(env, s, NULL) : NULL;
+    if (u) {
+        snprintf(out, n, "%s", u);
+        (*env)->ReleaseStringUTFChars(env, s, u);
+        ok = true;
+    }
+    if (s)
+        (*env)->DeleteLocalRef(env, s);
+    if (c)
+        (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, act);
+    return ok;
+}
+
 static void driver_failed(const char *name) { call_activity("reliftGpuDriverFailed", name); }
 
 static void driver_loaded(const char *name) { call_activity("reliftGpuDriverLoaded", name); }
