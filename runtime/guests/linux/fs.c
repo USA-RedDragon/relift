@@ -302,6 +302,18 @@ static const rl_linux_module *module_at(const char *path)
 
 static bool vdir_exists(const char *dir);
 
+/** @brief Whether the absolute guest path names a file or directory of the guest root itself (a directory the import's files lie in is then the root's real one, with every file in it). */
+static bool root_real(const char *path)
+{
+    if (!lx.root || path[0] != '/')
+        return false;
+    char hp[PATH_CAP];
+    if (host_path(path, hp, sizeof hp, true) != 0 || strncmp(hp, lx.root, lx.root_len) != 0)
+        return false;
+    l_stat st;
+    return hio_stat(HIO_CWD, hp, false, &st) == 0;
+}
+
 /** @brief Whether the file name is a shared object's: it has a ".so" that ends the name or a version suffix. */
 static bool shared_object_name(const char *leaf)
 {
@@ -350,7 +362,7 @@ static bool loader_miss(rl_ctx *c, const char *path, int64_t *result)
     size_t plen = (size_t)(leaf - norm);
     memcpy(parent, norm, plen);
     parent[plen > 1 ? plen - 1 : plen] = 0;
-    if (plen > 1 && vdir_exists(parent)) {
+    if (plen > 1 && vdir_exists(parent) && !root_real(norm)) {
         *result = -L_ENOENT;
         return true;
     }
@@ -515,7 +527,7 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         }
         return fd;
     }
-    if (vdir_exists(path)) {
+    if (vdir_exists(path) && !root_real(path)) {
         if ((flags & L_O_ACCMODE) != L_O_RDONLY || (flags & (L_O_CREAT | L_O_TRUNC)))
             return -L_EISDIR;
         char norm[PATH_CAP];
@@ -825,7 +837,7 @@ static int64_t stat_of(int64_t dirfd, uint64_t path_addr, uint64_t flags, l_stat
         virt_stat(vm, st);
         return 0;
     }
-    if (vdir_exists(path)) {
+    if (vdir_exists(path) && !root_real(path)) {
         vdir_stat(st);
         return 0;
     }
@@ -1141,7 +1153,7 @@ static int64_t sys_faccessat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return rc;
     if (a[2] & ~7ull)
         return -L_EINVAL;
-    if (module_at(path) || vdir_exists(path))
+    if (module_at(path) || (vdir_exists(path) && !root_real(path)))
         return (a[2] & 2) ? -L_EACCES : 0;
     int64_t miss;
     if (loader_miss(NULL, path, &miss) && miss != LX_PENDING)

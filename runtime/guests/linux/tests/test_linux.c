@@ -519,6 +519,10 @@ TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
     CHECK_EQ(symlink("usr/lib", p), 0);
     snprintf(p, sizeof p, "%s/proc", root);
     mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/usr/lib/gconv", root);
+    mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/usr/lib/gconv/other", root);
+    write_text(p, "real\n");
     prog.root = root;
     rl_ctx *c = boot();
     CHECK(c != NULL);
@@ -528,6 +532,16 @@ TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
     CHECK(fd >= 3);
     CHECK_EQ(sys(c, NR_read, (uint64_t)fd, buf, 64, 0, 0, 0), 11);
     CHECK(memcmp(cstr(buf), "guest file\n", 11) == 0);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    put_str(at, "/lib/gconv/other");
+    fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)fd, buf, 64, 0, 0, 0), 5);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    put_str(at, "/lib/gconv/conf");
+    fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK(lx_virt_fd((int)fd) != NULL);
     CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
     put_str(at, "/usr/lib/absent");
     CHECK_EQ(sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0), -L_ENOENT);
@@ -559,6 +573,10 @@ TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
     unlink(p);
     snprintf(p, sizeof p, "%s/usr/lib/real", root);
     unlink(p);
+    snprintf(p, sizeof p, "%s/usr/lib/gconv/other", root);
+    unlink(p);
+    snprintf(p, sizeof p, "%s/usr/lib/gconv", root);
+    rmdir(p);
     snprintf(p, sizeof p, "%s/lib", root);
     unlink(p);
     snprintf(p, sizeof p, "%s/usr/lib", root);
