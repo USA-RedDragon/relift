@@ -91,6 +91,50 @@ fn code_copied_to_iwram_builds_and_runs() {
     assert_eq!(&ewram[..4], &0x42u32.to_le_bytes(), "the IWRAM routine ran");
 }
 
+/// The runtime with dav1d, the way a player's build has it (the other tests turn dav1d off): on x86-64
+/// Linux with NASM its `.asm` files are in the plan and the plan must name the assembler. Skipped with a note
+/// without a dav1d source (no network); fails instead when `RELIFT_DAV1D_REQUIRE` is set.
+#[test]
+fn the_runtime_builds_with_dav1d() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let root = tiny::scratch("e2e-gba-dav1d");
+    let cache = root.join("cache");
+    let found = relift::runtime_link::ensure_dav1d_source(&cache)
+        .ok()
+        .and_then(|()| relift::runtime_link::find_dav1d(&cache));
+    let Some(dav1d) = found else {
+        assert!(
+            std::env::var_os("RELIFT_DAV1D_REQUIRE").is_none(),
+            "no dav1d source and RELIFT_DAV1D_REQUIRE is set"
+        );
+        eprintln!("skipped: no dav1d source (set RELIFT_DAV1D_DIR or allow the download)");
+        return;
+    };
+    let project = root.join("sample");
+    std::fs::create_dir_all(&project).expect("the project dir is creatable");
+    let image = root.join("ram.gba");
+    relift_cache::write_if_changed(&image, &rom()).expect("the ROM is writable");
+    let cache = cache.display().to_string();
+    let image = image.display().to_string();
+    let src = dav1d.src.display().to_string();
+    let env = [("RELIFT_DAV1D_DIR", src.as_str())];
+    let out = tiny::relift_env(&project, &["--cache-dir", &cache, "import", &image], &env);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = tiny::relift_env(&project, &["--cache-dir", &cache, "-j", "4", "build"], &env);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// A cartridge whose ROM code jumps to an address it computes from
 /// KEYINPUT (`ldrh` of `0x04000130`, masked to `0x100`, plus the ROM base),
 /// which no analysis can follow: the jump at `0x080000D0` reaches
