@@ -254,7 +254,11 @@ pub(crate) fn compile_layers(
         let store = croot.join(format!("{}-lifted", layers.cache));
         let mut entries = Vec::new();
         for (dir, files) in groups {
-            entries.push(shared_lifted(&cc, &lifted_flags, &store, dir, files, jobs)?);
+            let cold = dir
+                .strip_prefix(cdir)
+                .is_ok_and(|r| r.components().any(|c| c.as_os_str() == "cold"));
+            let flags = if cold { &cold_flags } else { &lifted_flags };
+            entries.push(shared_lifted(&cc, flags, &store, dir, files, jobs)?);
         }
         n += build_shared(&entries, (ninja.as_deref(), jobs), (ui, row))?;
         for e in &entries {
