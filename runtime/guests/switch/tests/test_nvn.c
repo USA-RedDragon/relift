@@ -1625,6 +1625,16 @@ TEST(nvn_a_submit_returns_before_the_device_finished_and_a_settle_sees_its_resul
     CHECK_EQ(nvn_vk_async_check(), 0);
 }
 
+TEST(nvn_a_read_of_bytes_the_open_batch_writes_waits_for_it)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_a_read_of_bytes_the_open_batch_writes_waits_for_it: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_open_write_check(), 0);
+}
+
 TEST(nvn_gpu_texel_moves_match_the_cpu_layout_both_ways)
 {
     nvn_probes p;

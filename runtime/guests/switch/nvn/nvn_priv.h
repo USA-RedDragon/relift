@@ -142,6 +142,11 @@ uint64_t nvn_vk_finished(void);
  */
 int nvn_vk_async_check(void);
 /**
+ * @brief Checks that a read of guest bytes the open batch writes (a noted write range) submits that batch and waits
+ * for it, and that a read beside the range leaves it open. 0 when both hold.
+ */
+int nvn_vk_open_write_check(void);
+/**
  * @brief Checks the batch slots, with each long batch held on the GPU by a host-set event (no timing): while one is
  * unfinished, the next ones are recorded without waiting for it until the ring is full; a settle
  * waits for all of them; a wait on writers (nvn_lock's) does not wait for a batch that writes no guest

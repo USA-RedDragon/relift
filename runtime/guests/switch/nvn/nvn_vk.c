@@ -2800,6 +2800,10 @@ bool nvn_vk_pending_write(uint64_t guest, uint64_t size)
 
 bool(nvn_vk_reading_guest)(uint64_t guest, uint64_t size)
 {
+    /* The batch being recorded writes the range too (a write-back moved on the GPU): it is submitted and waited for
+     * with the rest. The flush reads nothing of its replay argument here. */
+    if (g_recording && writes_into(&g_writes, guest, guest + (size ? size : 1)))
+        return (nvn_vk_flush)(NULL);
     for (uint32_t s = 0; s < NVN_SLOTS; s++)
         if (pending[s].on && writes_into(&pending[s].w, guest, guest + (size ? size : 1)))
             return wait_submitted();
@@ -2854,6 +2858,26 @@ bool(nvn_vk_sync_uniforms)(replay *r)
     if (g.uniform_pending)
         return nvn_vk_flush(r);
     return true;
+}
+
+int nvn_vk_open_write_check(void)
+{
+    nvn_lock();
+    int rc = 0;
+    replay r;
+    memset(&r, 0, sizeof r);
+    if (!nvn_vk_settle() || !nvn_vk_begin(&r))
+        rc = 1;
+    /* The open batch writes [0x10004000, 0x10005000): a read beside it leaves the batch open, a read over it
+     * submits the batch and waits for it. */
+    nvn_vk_mark_write_range(0x10004000ull, 0x1000);
+    if (!rc && (!nvn_vk_reading_guest(0x10005000ull, 0x100) || !g_recording))
+        rc = 2;
+    if (!rc && (!nvn_vk_reading_guest(0x10004ff0ull, 0x20) || g_recording || nvn_vk_finished() != nvn_vk_submitted()))
+        rc = 3;
+    nvn_vk_settle();
+    nvn_unlock();
+    return rc;
 }
 
 int nvn_vk_async_check(void)
@@ -3732,7 +3756,10 @@ static bool write_back_body(replay *r, vimg *u)
     if (nvn_vk_sample_bits(d) != VK_SAMPLE_COUNT_1_BIT)
         return nvn_msaa_write_back(r, u);
     if (gpu_moves() && nvn_untile_move(r, u, true)) {
-        bool ok = nvn_vk_flush(r);
+        /* The move's write range is noted (nvn_untile_move), so a CPU read of the bytes waits for it
+         * (nvn_vk_reading_guest) and GPU work recorded later runs after it; only a mirrored pool, whose bytes reach
+         * guest memory by a readback at the wait, is waited for now. */
+        bool ok = !nvn_mirror_any() || nvn_vk_flush(r);
         nvn_watch_touch(u->storage, d->size);
         return ok;
     }
