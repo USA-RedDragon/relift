@@ -483,10 +483,12 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c);
  * the command that changed them or "cpu" for a change between commands.
  */
 void nvn_trace_command(replay *r, const nvn_cmd *e, bool done);
+/** @brief The kind and program keys of the last draw or dispatch the layer recorded (\"draw 1234abcd ...\"). */
+const char *nvn_draw_last(void);
 /** @brief Keeps command e in the GPU trace's list of the present's commands (RELIFT_NVN_GPU_TRACE). */
 void nvn_trace_ring_note(replay *r, const nvn_cmd *e);
-/** @brief Logs the present's commands so far (the last 8192), after the line why. */
-void nvn_trace_ring_dump(const char *why);
+/** @brief Logs the present's commands so far (the last most of them, 0 for up to 8192), after the line why. */
+void nvn_trace_ring_dump(const char *why, uint32_t most);
 /** @brief The levels and layers of an image's host image (nvn_vk.c). */
 VkImageSubresourceRange nvn_vk_image_range(const vimg *v);
 /**

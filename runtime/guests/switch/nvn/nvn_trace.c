@@ -438,9 +438,11 @@ void nvn_trace_ring_note(replay *r, const nvn_cmd *e)
     }
 }
 
-void nvn_trace_ring_dump(const char *why)
+void nvn_trace_ring_dump(const char *why, uint32_t most)
 {
     uint64_t first = ring.n > RING ? ring.n - RING : 0;
+    if (most && ring.n - first > most)
+        first = ring.n - most;
     rl_log(RL_LOG_INFO, "gpu-trace", "%s: the %llu commands replayed in present %llu before it:", why,
            (unsigned long long)(ring.n - first), (unsigned long long)ring.present);
     for (uint64_t i = first; i < ring.n; i++) {

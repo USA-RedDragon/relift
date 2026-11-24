@@ -111,6 +111,8 @@ static struct {
     bool trace_on;
     /** @brief The present and the draw or dispatch index in it of the last command (the trace's command index). */
     uint64_t cmd_present, cmd_index;
+    /** @brief The program keys of the last draw or dispatch recorded (nvn_draw_last), for a device loss report. */
+    char last[512];
     /** @brief A 16-byte buffer for the storage slots a program never reaches (blank_buffer). */
     VkBuffer blank;
     VkDeviceMemory blank_mem;
@@ -1540,6 +1542,7 @@ static int geometry_draw(replay *r, const module *gs, uint32_t mode)
 }
 
 static void count_command(void);
+static void note_last(const char *kind, module *const *mods, uint32_t n);
 static bool trace_buffer(void);
 static void trace_report(const replay *r, const char *key, uint32_t words);
 /** @brief Bytes of the GPU trace buffer: room for a program of 16383 instructions. */
@@ -1616,6 +1619,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     for (uint32_t s = 0; s < 5; s++)
         program_keys[s] = mods[s] ? mods[s]->key : NULL;
     nvn_pipe_record_graphics(program_keys, &k);
+    note_last("draw", mods, 5);
     /* GPU trace: one traced stage per draw (the stages would share the buffer's slots) */
     const module *traced = NULL;
     for (uint32_t s = 0; s < 5; s++)
@@ -1958,6 +1962,20 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
                            mesh->key);
     if ((rc = mesh_alpha(r, &k, mods[1])) != RL_OK)
         return rc;
+    note_last("mesh draw", mods, NVN_STAGES);
+    {
+        size_t at = strlen(d.last);
+        for (uint32_t s = NVN_STAGE_TASK; s < NVN_STAGES; s++)
+            for (uint32_t j = 0; j < 4 && at < sizeof d.last; j++)
+                at += (size_t)snprintf(d.last + at, sizeof d.last - at, "; %s slot %u 0x%llx+0x%llx",
+                                       s == NVN_STAGE_TASK ? "task" : "mesh", j,
+                                       (unsigned long long)st->gstorage[s][j].addr,
+                                       (unsigned long long)st->gstorage[s][j].size);
+        for (uint32_t s = NVN_STAGE_TASK; s < NVN_STAGES && at < sizeof d.last; s++)
+            at += (size_t)snprintf(d.last + at, sizeof d.last - at, "; %s c1 0x%llx",
+                                   s == NVN_STAGE_TASK ? "task" : "mesh",
+                                   (unsigned long long)st->consts[s].addr);
+    }
     if (mi.native) {
         if (!g.mesh_shader)
             return nvn_vk_stop(r, "mesh program %s was translated for VK_EXT_mesh_shader, which the host device lacks",
@@ -2353,7 +2371,7 @@ static void trace_report(const replay *r, const char *key, uint32_t words)
         dumped = true;
         char why[96];
         snprintf(why, sizeof why, "first traced dispatch with hits (program %.8s)", key);
-        nvn_trace_ring_dump(why);
+        nvn_trace_ring_dump(why, 0);
         for (uint32_t b = 0; b < NVN_UBO_SLOTS; b++) {
             uint64_t addr = r->st->ubo[NVN_STAGE_COMPUTE][b].addr, size = r->st->ubo[NVN_STAGE_COMPUTE][b].size;
             if (!addr)
@@ -2393,6 +2411,17 @@ static void trace_report(const replay *r, const char *key, uint32_t words)
     }
 }
 
+const char *nvn_draw_last(void) { return d.last; }
+
+/** @brief Notes the programs of the draw or dispatch being recorded (nvn_draw_last). */
+static void note_last(const char *kind, module *const *mods, uint32_t n)
+{
+    int at = snprintf(d.last, sizeof d.last, "%s", kind);
+    for (uint32_t s = 0; s < n && at > 0 && (size_t)at < sizeof d.last; s++)
+        if (mods[s])
+            at += snprintf(d.last + at, sizeof d.last - (size_t)at, " %.8s", mods[s]->key);
+}
+
 static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer ibuf, VkDeviceSize ioff)
 {
     nvn_gfx *st = r->st;
@@ -2412,6 +2441,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         return RL_PENDING;
     if (m->other_sets)
         return nvn_vk_stop(r, "compute program %s uses a guest memory set, which the layer does not bind yet", m->key);
+    note_last("dispatch", &m, 1);
     if (m->trace_words && (!d.trace_on || m->trace_words * 4u > TRACE_BUF_BYTES))
         return nvn_vk_stop(r, "compute program %s is a trace-mode translation of %u trace words: run with "
                            "RELIFT_NVN_GPU_TRACE=1 (programs up to %u words)", m->key, m->trace_words,

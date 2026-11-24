@@ -3915,8 +3915,11 @@ static int sched_exec(void *user, const nvn_cmd *e, const nvn_cmdset *s)
     int rc = run_cmd(r, e);
     if (nvn_trace_active)
         nvn_trace_command(r, e, true);
-    if (rc == RL_OK && sync_each_command() && !nvn_vk_flush(r))
-        rc = nvn_vk_stop(r, "the host device failed after %s", nvn_cmd_name(e->op));
+    if (rc == RL_OK && sync_each_command() && !nvn_vk_flush(r)) {
+        if (gpu_trace)
+            nvn_trace_ring_dump("the host device failed", 300);
+        rc = nvn_vk_stop(r, "the host device failed after %s (last %s)", nvn_cmd_name(e->op), nvn_draw_last());
+    }
     return rc;
 }
 
