@@ -2,6 +2,8 @@
 //! workgroup's barriers, subgroup shuffles and shared memory, over one
 //! memory all invocations see.
 //!
+//! Memory is [`SharedMemory`]: loads and stores take no lock, so the
+//! invocations run in parallel; atomic instructions take one lock.
 //! Invocations run freely between synchronization points. A barrier
 //! releases when every invocation that has not returned waits at one; a
 //! shuffle releases when every invocation of its subgroup waits at it, or,
@@ -16,7 +18,7 @@
 //! was in.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use crate::{Env, Memory, Module, Run};
@@ -81,9 +83,10 @@ pub struct Group {
     subgroup: usize,
     state: Mutex<State>,
     cv: Condvar,
-    /// Every load and store of the shared memory, and every atomic read,
-    /// modify and write, holds this.
-    pub(crate) mem: Mutex<Memory>,
+    /// The memory every invocation sees, each byte an atomic, so loads and
+    /// stores take no lock.
+    pub(crate) mem: SharedMemory,
+    /// Every atomic read, modify and write holds this.
     pub(crate) atomic: Mutex<()>,
     /// Workgroup variable id -> its address.
     pub(crate) vars: BTreeMap<u32, u64>,
@@ -91,6 +94,68 @@ pub struct Group {
     block: Vec<AtomicU32>,
     stop: AtomicBool,
     steps: Vec<AtomicU64>,
+}
+
+/// Memory many invocations read and write at once: [`Memory`]'s regions,
+/// each byte an atomic accessed with relaxed order. A load or store of
+/// several bytes is not one atomic access, as on a GPU, where only atomic
+/// instructions are.
+pub struct SharedMemory {
+    regions: Vec<(u64, Box<[AtomicU8]>)>,
+}
+
+impl From<Memory> for SharedMemory {
+    fn from(m: Memory) -> SharedMemory {
+        SharedMemory {
+            regions: m
+                .regions
+                .into_iter()
+                .map(|(base, b)| (base, b.into_iter().map(AtomicU8::new).collect()))
+                .collect(),
+        }
+    }
+}
+
+impl SharedMemory {
+    fn at(&self, addr: u64, n: u64) -> &[AtomicU8] {
+        for (base, b) in &self.regions {
+            if addr >= *base && addr + n <= *base + b.len() as u64 {
+                let o = (addr - *base) as usize;
+                return &b[o..o + n as usize];
+            }
+        }
+        panic!("access to unmapped memory {addr:#x}+{n}");
+    }
+
+    /// The `n` bytes at `addr`, little-endian.
+    pub fn read(&self, addr: u64, n: u64) -> u64 {
+        self.at(addr, n).iter().enumerate().fold(0, |v, (k, b)| {
+            v | u64::from(b.load(Ordering::Relaxed)) << (8 * k)
+        })
+    }
+
+    /// Writes the low `n` bytes of `v` at `addr`, little-endian.
+    pub fn write(&self, addr: u64, n: u64, v: u64) {
+        for (k, b) in self.at(addr, n).iter().enumerate() {
+            b.store((v >> (8 * k)) as u8, Ordering::Relaxed);
+        }
+    }
+
+    /// Back to plain memory.
+    pub fn into_memory(self) -> Memory {
+        Memory {
+            regions: self
+                .regions
+                .into_iter()
+                .map(|(base, b)| {
+                    (
+                        base,
+                        b.into_vec().into_iter().map(AtomicU8::into_inner).collect(),
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Locks a mutex, taking it over from a thread that panicked holding it.
@@ -333,7 +398,7 @@ pub fn run_workgroup(
             failed: None,
         }),
         cv: Condvar::new(),
-        mem: Mutex::new(mem),
+        mem: SharedMemory::from(mem),
         atomic: Mutex::new(()),
         vars,
         func: (0..n).map(|_| AtomicU32::new(0)).collect(),
@@ -399,10 +464,7 @@ pub fn run_workgroup(
         });
     }
     Ok(Done {
-        mem: g
-            .mem
-            .into_inner()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        mem: g.mem.into_memory(),
         notes: st.notes,
         steps,
     })

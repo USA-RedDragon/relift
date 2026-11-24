@@ -811,14 +811,14 @@ impl<'m> Run<'m> {
             return u64::from_le_bytes(v);
         }
         match &self.group {
-            Some((g, _)) => group::lock(&g.mem).read(addr, n),
+            Some((g, _)) => g.mem.read(addr, n),
             None => self.mem.read(addr, n),
         }
     }
 
     fn write(&mut self, addr: u64, n: u64, v: u64) {
         match &self.group {
-            Some((g, _)) => group::lock(&g.mem).write(addr, n, v),
+            Some((g, _)) => g.mem.write(addr, n, v),
             None => self.mem.write(addr, n, v),
         }
     }
