@@ -8,6 +8,7 @@
 #include "linux_priv.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -587,6 +588,122 @@ int64_t lx_fill_from_file(int host, uint64_t addr, uint64_t len, uint64_t off)
     return 0;
 }
 
+/** @brief proc_view's answer when the path is not one it rewrites. */
+#define PROC_HOST INT64_MIN
+
+/**
+ * @brief The thread count a guest sees in /proc/<self>/stat and status:
+ * the host process also runs the Linux layer's signal and timer thread,
+ * which is not the program's (CPython warns that a fork is unsafe when the
+ * count is above one).
+ */
+static int proc_threads(void)
+{
+    /* openat runs under lx_big, which guards the count. */
+    int n = lx.live;
+    return n > 0 ? n : 1;
+}
+
+/** @brief Replaces the num_threads field (the 20th) of a /proc stat line in place; the new length. */
+static size_t stat_threads(char *buf, size_t n, size_t cap, int threads)
+{
+    char *rp = NULL;
+    for (size_t i = 0; i < n; i++)
+        if (buf[i] == ')')
+            rp = buf + i;
+    if (!rp)
+        return n;
+    char *p = rp + 1;
+    for (int field = 2; field < 19 && p < buf + n; field++) {
+        p = memchr(p + 1, ' ', (size_t)(buf + n - p - 1));
+        if (!p)
+            return n;
+    }
+    char *start = p + 1, *end = memchr(start, ' ', (size_t)(buf + n - start));
+    if (!end)
+        return n;
+    char num[16];
+    int k = snprintf(num, sizeof num, "%d", threads);
+    size_t tail = (size_t)(buf + n - end);
+    if ((size_t)(start - buf) + (size_t)k + tail > cap)
+        return n;
+    memmove(start + k, end, tail);
+    memcpy(start, num, (size_t)k);
+    return (size_t)(start - buf) + (size_t)k + tail;
+}
+
+/** @brief Replaces the value of the Threads: line of a /proc status file in place; the new length. */
+static size_t status_threads(char *buf, size_t n, size_t cap, int threads)
+{
+    buf[n < cap ? n : cap - 1] = 0;
+    char *line = strstr(buf, "\nThreads:");
+    if (!line)
+        return n;
+    char *start = line + 9;
+    while (*start == '\t' || *start == ' ')
+        start++;
+    char *end = strchr(start, '\n');
+    if (!end)
+        return n;
+    char num[16];
+    int k = snprintf(num, sizeof num, "%d", threads);
+    size_t tail = (size_t)(buf + n - end);
+    if ((size_t)(start - buf) + (size_t)k + tail > cap)
+        return n;
+    memmove(start + k, end, tail);
+    memcpy(start, num, (size_t)k);
+    return (size_t)(start - buf) + (size_t)k + tail;
+}
+
+/**
+ * @brief An open of the process's own /proc stat or status file (self,
+ * thread-self or its pid), read-only: the host's file with the thread
+ * count the guest's own, served from a pipe that holds the whole text. Any
+ * other path gives PROC_HOST.
+ */
+static int64_t proc_view(const char *path, uint32_t flags)
+{
+    char norm[PATH_CAP], own[32];
+    if (!normalize(path, norm, sizeof norm) || strncmp(norm, "/proc/", 6) != 0 || (flags & L_O_ACCMODE) != L_O_RDONLY)
+        return PROC_HOST;
+    const char *rest = norm + 6;
+    snprintf(own, sizeof own, "%d/", (int)lx.pid);
+    if (strncmp(rest, "self/", 5) == 0)
+        rest += 5;
+    else if (strncmp(rest, "thread-self/", 12) == 0)
+        rest += 12;
+    else if (strncmp(rest, own, strlen(own)) == 0)
+        rest += strlen(own);
+    else
+        return PROC_HOST;
+    bool stat = strcmp(rest, "stat") == 0;
+    if (!stat && strcmp(rest, "status") != 0)
+        return PROC_HOST;
+    char host[32];
+    snprintf(host, sizeof host, "/proc/self/%s", rest);
+    int64_t h = hio_open(HIO_CWD, host, L_O_RDONLY, 0);
+    if (h < 0)
+        return h;
+    char buf[8192];
+    size_t n = 0;
+    for (int64_t r; n < sizeof buf - 64 && (r = hio_read((int)h, buf + n, sizeof buf - 64 - n)) > 0;)
+        n += (size_t)r;
+    hio_close((int)h);
+    int threads = proc_threads();
+    n = stat ? stat_threads(buf, n, sizeof buf, threads) : status_threads(buf, n, sizeof buf, threads);
+    int p[2];
+    int64_t rc = hio_pipe(p);
+    if (rc < 0)
+        return rc;
+    int64_t w = hio_write(p[1], buf, n);
+    hio_close(p[1]);
+    if (w != (int64_t)n) {
+        hio_close(p[0]);
+        return w < 0 ? w : -L_EIO;
+    }
+    return alloc_fd(p[0], 0, (flags & L_O_CLOEXEC) != 0);
+}
+
 static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -632,6 +749,9 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t miss;
     if (loader_miss(c, path, &miss))
         return miss;
+    int64_t synth = proc_view(path, flags);
+    if (synth != PROC_HOST)
+        return synth;
     char hp[PATH_CAP];
     rc = host_path(path, hp, sizeof hp, !(flags & L_O_NOFOLLOW) && (flags & (L_O_CREAT | L_O_EXCL)) != (L_O_CREAT | L_O_EXCL));
     if (rc < 0)

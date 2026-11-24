@@ -856,6 +856,52 @@ TEST(record_locks_conflict_between_processes_and_flock_too)
     unlink(file);
 }
 
+/** @brief Opens a guest path read-only and reads it whole into out; the length or -1. */
+static int64_t read_guest_file(rl_ctx *c, const char *path, char *out, size_t cap)
+{
+    put_str(0x401000, path);
+    int64_t fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, 0x401000, L_O_RDONLY, 0, 0, 0);
+    if (fd < 0)
+        return -1;
+    int64_t n = sys(c, NR_read, (uint64_t)fd, 0x402000, cap - 1, 0, 0, 0);
+    sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0);
+    if (n < 0)
+        return -1;
+    memcpy(out, rl_mem_base() + 0x402000, (size_t)n);
+    out[n] = 0;
+    return n;
+}
+
+TEST(proc_stat_and_status_count_the_programs_threads_not_the_runtimes)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    pthread_t th;
+    g_holding = 0;
+    CHECK_EQ(pthread_create(&th, NULL, hold_big_main, NULL), 0);
+    while (!g_holding)
+        rl_sleep_ns(1000000);
+    pthread_join(th, NULL);
+#if !defined(__linux__)
+    return; /* the host has no /proc to count threads in */
+#endif
+    char buf[4096];
+    CHECK(read_guest_file(c, "/proc/self/stat", buf, sizeof buf) > 0);
+    char *p = strrchr(buf, ')');
+    CHECK(p != NULL);
+    int field = 2;
+    for (; p && field < 20; field++)
+        p = strchr(p + 1, ' ');
+    CHECK(p != NULL);
+    CHECK_EQ(atoi(p + 1), lx.live);
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%d/status", (int)lx.pid);
+    CHECK(read_guest_file(c, path, buf, sizeof buf) > 0);
+    char *t = strstr(buf, "\nThreads:");
+    CHECK(t != NULL);
+    CHECK_EQ(atoi(t + 9), lx.live);
+}
+
 TEST(execve_of_another_program_finds_nothing)
 {
     rl_ctx *c = boot();
@@ -949,6 +995,7 @@ TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
     lx.dynamic = false;
     put_str(at, "/usr/lib/absent");
     CHECK_EQ(sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0), -L_ENOENT);
+#if defined(__linux__)
     put_str(at, "/proc/self/status");
     fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
     CHECK(fd >= 3);
