@@ -465,6 +465,7 @@ uint64_t nvn_cmd_record(rl_ctx *c, uint8_t *mem, uint32_t op)
     }
     nvn_cmd *e = &b->cmds[b->n++];
     e->op = op;
+    nvn_stats_cmd(op, NVN_STATS_REC);
     for (unsigned i = 0; i < 8; i++) {
         e->x[i] = c->x[i];
         e->d[i] = c->v[i].d[0];

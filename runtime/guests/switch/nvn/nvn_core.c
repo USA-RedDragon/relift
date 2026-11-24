@@ -24,11 +24,12 @@
 typedef struct nvn_impl {
     const char *name;
     rl_fn fn;
+    nvn_stats_kind kind;
 } nvn_impl;
 
-#define NVN_ENTRY(name) { #name, nvnh_##name },
+#define NVN_ENTRY(name) { #name, nvnh_##name, NVN_STATS_IMPL },
 #define NVN_ENTRY_RECORDED(op, name) NVN_ENTRY(name)
-#define NVN_ENTRY_ZERO(name) { #name, nvn_zero },
+#define NVN_ENTRY_ZERO(name) { #name, nvn_zero, NVN_STATS_ZERO },
 static const nvn_impl impls[] = { NVN_PROCS(NVN_ENTRY) NVN_RECORDED(NVN_ENTRY_RECORDED) NVN_ZERO_PROCS(NVN_ENTRY_ZERO) };
 #undef NVN_ENTRY_ZERO
 #undef NVN_ENTRY_RECORDED
@@ -72,20 +73,31 @@ static uint64_t miss(rl_ctx *c, uint8_t *mem, uint32_t slot)
  */
 #define MISS_SLOT(t)                                                                                                   \
     (((t) / 10000 - 1) * 256 + ((t) / 1000 % 10) * 64 + ((t) / 100 % 10) * 16 + ((t) / 10 % 10) * 4 + (t) % 10)
+#define EACH4(M, i) M(i##0) M(i##1) M(i##2) M(i##3)
+#define EACH16(M, i) EACH4(M, i##0) EACH4(M, i##1) EACH4(M, i##2) EACH4(M, i##3)
+#define EACH64(M, i) EACH16(M, i##0) EACH16(M, i##1) EACH16(M, i##2) EACH16(M, i##3)
+#define EACH256(M, i) EACH64(M, i##0) EACH64(M, i##1) EACH64(M, i##2) EACH64(M, i##3)
+#define EACH_SLOT(M) EACH256(M, 1) EACH256(M, 2) EACH256(M, 3) EACH256(M, 4)
+
 #define MISS1(i)                                                                                                       \
     static uint64_t miss_##i(rl_ctx *c, uint8_t *mem) { return miss(c, mem, MISS_SLOT(i)); }
-#define MISS4(i) MISS1(i##0) MISS1(i##1) MISS1(i##2) MISS1(i##3)
-#define MISS16(i) MISS4(i##0) MISS4(i##1) MISS4(i##2) MISS4(i##3)
-#define MISS64(i) MISS16(i##0) MISS16(i##1) MISS16(i##2) MISS16(i##3)
-#define MISS256(i) MISS64(i##0) MISS64(i##1) MISS64(i##2) MISS64(i##3)
-MISS256(1) MISS256(2) MISS256(3) MISS256(4)
+EACH_SLOT(MISS1)
 
-#define REF1(i) miss_##i,
-#define REF4(i) REF1(i##0) REF1(i##1) REF1(i##2) REF1(i##3)
-#define REF16(i) REF4(i##0) REF4(i##1) REF4(i##2) REF4(i##3)
-#define REF64(i) REF16(i##0) REF16(i##1) REF16(i##2) REF16(i##3)
-#define REF256(i) REF64(i##0) REF64(i##1) REF64(i##2) REF64(i##3)
-static rl_fn const misses[RL_NVN_SLOTS] = { REF256(1) REF256(2) REF256(3) REF256(4) };
+/** @brief Each slot's own function, which the counting functions of RELIFT_NVN_STATS call after counting. */
+static rl_fn slot_fns[RL_NVN_SLOTS];
+
+#define COUNT1(i)                                                                                                      \
+    static uint64_t count_##i(rl_ctx *c, uint8_t *mem)                                                                 \
+    {                                                                                                                  \
+        nvn_stats_call(MISS_SLOT(i));                                                                                  \
+        return slot_fns[MISS_SLOT(i)](c, mem);                                                                         \
+    }
+EACH_SLOT(COUNT1)
+
+#define MISS_REF(i) miss_##i,
+#define COUNT_REF(i) count_##i,
+static rl_fn const misses[RL_NVN_SLOTS] = { EACH_SLOT(MISS_REF) };
+static rl_fn const counts[RL_NVN_SLOTS] = { EACH_SLOT(COUNT_REF) };
 
 static int by_name(const void *a, const void *b)
 {
@@ -140,6 +152,8 @@ uint64_t rl_nvn_proc(const char *name)
     if (!nvn.up || !name)
         return 0;
     int k = find_impl(name);
+    if (k >= 0)
+        nvn_stats_lookup(nvn.sorted[k]->name, nvn.sorted[k]->kind, (uint32_t)k);
     return k >= 0 ? nvn.base + 4u * (uint64_t)k : 0;
 }
 
@@ -205,10 +219,19 @@ static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
     int k = nvn_driver_index(name);
     if (k >= 0 && !nvn_impure(name) && !(nvn_generation() == 1 && nvn_driver_reads_texture(name))) {
         int rc = driver_addr(c, mem, k, name, addr);
+        if (rc == RL_OK && *addr)
+            nvn_stats_lookup(name, NVN_STATS_DRIVER, UINT32_MAX);
         if (rc != RL_OK || *addr)
             return rc;
     }
     *addr = slot_of(name);
+    if (*addr && nvn_stats_on()) {
+        uint32_t slot = (uint32_t)((*addr - nvn.base) / 4u);
+        nvn_stats_kind kind = slot < N_IMPLS ? nvn.sorted[slot]->kind
+                              : nvn.recorded[slot] ? NVN_STATS_RECORDED
+                                                   : NVN_STATS_MISSING;
+        nvn_stats_lookup(slot < N_IMPLS ? nvn.sorted[slot]->name : nvn.names[slot], kind, slot);
+    }
     return RL_OK;
 }
 
@@ -370,9 +393,10 @@ static int hook_start(void *user, uint64_t *code_free)
     for (uint32_t i = 0; i < N_IMPLS; i++)
         nvn.sorted[i] = &impls[i];
     qsort(nvn.sorted, N_IMPLS, sizeof nvn.sorted[0], by_name);
+    bool count = nvn_stats_on();
     for (uint32_t i = 0; i < RL_NVN_SLOTS; i++) {
-        rl_fn fn = i < N_IMPLS ? nvn.sorted[i]->fn : misses[i];
-        nvn.entries[i] = (rl_fn_entry){ nvn.base + 4u * (uint64_t)i, 4, RL_FN_OVERRIDE, fn };
+        slot_fns[i] = i < N_IMPLS ? nvn.sorted[i]->fn : misses[i];
+        nvn.entries[i] = (rl_fn_entry){ nvn.base + 4u * (uint64_t)i, 4, RL_FN_OVERRIDE, count ? counts[i] : slot_fns[i] };
     }
     nvn.used = N_IMPLS;
     nvn.unit = (rl_unit){

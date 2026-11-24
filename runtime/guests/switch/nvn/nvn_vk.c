@@ -4904,7 +4904,10 @@ static bool sync_each_command(void)
     return sync_each;
 }
 
-static int run_cmd(replay *r, const nvn_cmd *e)
+/** @brief Set by run_one when the command reached no host handler. */
+static _Thread_local bool unhandled;
+
+static int run_one(replay *r, const nvn_cmd *e)
 {
     if (nvn_gpuprof_on()) {
         const char *nm = nvn_cmd_name(e->op);
@@ -4971,14 +4974,26 @@ static int run_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_SET_SAMPLER_POOL:
     case NVN_CMD_SET_TILED_CACHE_ACTION:
     case NVN_CMD_SET_TILED_CACHE_TILE_SIZE:
-        return RL_OK;
+        return nvn_stats_mark(NVN_STATS_IGNORED);
     default: {
         int rc = nvn_draw_cmd(r, e);
-        if (rc == NVN_UNHANDLED)
+        if (rc == NVN_UNHANDLED) {
+            unhandled = true;
             return nvn_vk_stop(r, "%s is not handled on the host device yet", nvn_cmd_name(e->op));
+        }
         return rc;
     }
     }
+}
+
+/** @brief Runs one command (run_one) and counts how it ran for RELIFT_NVN_STATS. */
+static int run_cmd(replay *r, const nvn_cmd *e)
+{
+    nvn_stats_begin();
+    unhandled = false;
+    int rc = run_one(r, e);
+    nvn_stats_end(e->op, rc, unhandled);
+    return rc;
 }
 
 /** @brief The draw state of queue, made the first time. */

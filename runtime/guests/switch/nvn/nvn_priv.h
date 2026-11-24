@@ -8,6 +8,7 @@
 
 #include "hos.h"
 #include "nvn.h"
+#include "nvn_stats.h"
 
 #include <stdbool.h>
 #include <stdint.h>

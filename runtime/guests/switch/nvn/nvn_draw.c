@@ -3017,6 +3017,8 @@ static int shading_rate_palette(replay *r, const nvn_cmd *e)
     else
         st->shading.enabled &= (uint16_t)~(1u << vp);
     if (rates && coarse)
+        nvn_stats_mark(NVN_STATS_PARTIAL);
+    if (rates && coarse)
         (void)rl_report_unknown(0x4e564e5352415445ull, "nvn",
                                 "the game shades at reduced rates through a shading-rate image; the host shades every pixel");
     return RL_OK;
@@ -3249,6 +3251,8 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     case NVN_CMD_SET_CONSERVATIVE_RASTER_ENABLE:
         st->conservative_raster = (e->x[1] & 0xff) != 0;
+        if (st->conservative_raster && !g.conservative_raster)
+            nvn_stats_mark(NVN_STATS_PARTIAL);
         if (st->conservative_raster && !g.conservative_raster && !g.conservative_warned) {
             g.conservative_warned = true;
             rl_log(RL_LOG_WARN, "nvn", "conservative rasterization is requested and the host device has no VK_EXT_conservative_rasterization: "
@@ -3276,7 +3280,7 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     case NVN_CMD_SET_RENDER_ENABLE_CONDITIONAL:
         if ((uint32_t)e->x[1] > 1)
-            return RL_OK;
+            return nvn_stats_mark(NVN_STATS_IGNORED);
         st->render_mode = (uint32_t)e->x[1] == 0 ? NVN_RENDER_IF_EQUAL : NVN_RENDER_IF_NOT_EQUAL;
         st->render_addr = e->x[2];
         return RL_OK;
@@ -3307,17 +3311,17 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return shading_rate_palette(r, e);
     case NVN_CMD_BIND_SHADING_RATE_IMAGE:
         st->shading.image = e->x[1];
-        return RL_OK;
+        return e->x[1] ? nvn_stats_mark(NVN_STATS_PARTIAL) : RL_OK;
     case NVN_CMD_SET_SHADING_RATE_PALETTE_MODE:
         st->shading.mode = (uint32_t)e->x[1];
         return RL_OK;
     case NVN_CMD_BIND_COVERAGE_MODULATION_TABLE:
     case NVN_CMD_SET_GEOMETRY_PROCESSING_MODE:
     case NVN_CMD_SET_PATCH_SIZE:
-        return RL_OK;
+        return nvn_stats_mark(NVN_STATS_IGNORED);
     case NVN_CMD_SET_LINE_WIDTH:
         memcpy(&st->line_width, &e->d[0], 4);
-        return RL_OK;
+        return st->line_width != 1.0f && !g.wide_lines ? nvn_stats_mark(NVN_STATS_PARTIAL) : RL_OK;
     case NVN_CMD_SET_BLEND_COLOR:
         for (int i = 0; i < 4; i++)
             memcpy(&st->blend_color[i], &e->d[i], 4);
