@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 /** @brief The client's view of one session, filled by the client thread for the test to check. */
@@ -301,6 +302,91 @@ TEST(gdb_server_stops_at_a_breakpoint_and_a_watchpoint)
     CHECK(strstr(s.stop_w, want) != NULL);
     CHECK_EQ(rl_ld64(m, s.heap + 0x40), 0x5555u);
 }
+
+/** @brief A write watchpoint hit many times in a row: every continue runs the guest on to its next hit. */
+typedef struct repeat {
+    int port;
+    uint64_t heap;
+    int want;
+    bool step;
+    int seen;
+    int bad;
+    bool ok;
+    volatile int done;
+} repeat;
+
+static void *repeat_client(void *arg)
+{
+    repeat *s = arg;
+    char r[4096], m[96], w[48];
+    int fd = fd_of(s->port);
+    s->ok = fd >= 0;
+    if (s->ok) {
+        struct timeval tv = { .tv_sec = 15 };
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        snprintf(m, sizeof m, "Z2,%llx,8", (unsigned long long)(s->heap + 0x40));
+        s->ok = ask(fd, m, r, sizeof r) && strcmp(r, "OK") == 0;
+        snprintf(w, sizeof w, "watch:%llx;", (unsigned long long)(s->heap + 0x40));
+        for (int i = 0; s->ok && i < s->want; i++) {
+            s->ok = ask(fd, "vCont;c", r, sizeof r);
+            if (s->ok && strstr(r, w))
+                s->seen++;
+            else
+                s->bad++;
+            if (s->step && s->ok) {
+                /* The way gdb steps over a hit on AArch64, where a watch traps before the store: it lifts the
+                 * watch, steps the thread, puts the watch back. */
+                snprintf(m, sizeof m, "z2,%llx,8", (unsigned long long)(s->heap + 0x40));
+                s->ok = ask(fd, m, r, sizeof r);
+                s->ok = s->ok && ask(fd, "vCont;s:1", r, sizeof r) && strncmp(r, "T05", 3) == 0;
+                snprintf(m, sizeof m, "Z2,%llx,8", (unsigned long long)(s->heap + 0x40));
+                s->ok = s->ok && ask(fd, m, r, sizeof r);
+            }
+        }
+        snprintf(m, sizeof m, "z2,%llx,8", (unsigned long long)(s->heap + 0x40));
+        s->ok = s->ok && ask(fd, m, r, sizeof r);
+        s->ok = s->ok && ask(fd, "D", r, sizeof r);
+        close(fd);
+    }
+    __atomic_store_n(&s->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+static void continue_after_watch_hits(bool step, int port_bias)
+{
+    enum { ROUNDS = 40 };
+    rl_ctx *c = t_boot(NULL);
+    repeat s = { .port = 20000 + (int)((getpid() + port_bias) % 20000), .want = 6, .step = step };
+    char port[16];
+    snprintf(port, sizeof port, "%d", s.port);
+    CHECK_EQ(rl_settings_set("debug.gdb", port), RL_SETTING_OK);
+    CHECK(rl_gdb_start(rl_arm64_gdb(), hos_gdb_guest()));
+    s.heap = t_heap(c, 0x200000);
+    uint8_t *m = t_mem();
+    pthread_t th;
+    CHECK_EQ(pthread_create(&th, NULL, repeat_client, &s), 0);
+    /* Each round writes another word of the watched page (never a hit), then the watched word. */
+    int round = 0;
+    while (round < ROUNDS) {
+        hos_sched_point();
+        rl_st64(m, s.heap + 0x80, (uint64_t)round);
+        rl_st64(m, s.heap + 0x40, (uint64_t)round);
+        round++;
+        usleep(2000);
+    }
+    while (!__atomic_load_n(&s.done, __ATOMIC_ACQUIRE))
+        hos_sched_point();
+    pthread_join(th, NULL);
+    CHECK(s.ok);
+    CHECK_EQ(s.seen, 6);
+    CHECK_EQ(s.bad, 0);
+    CHECK_EQ(round, (int)ROUNDS);
+    CHECK_EQ(rl_ld64(m, s.heap + 0x80), (uint64_t)(ROUNDS - 1));
+}
+
+TEST(gdb_server_continues_after_each_write_watch_hit) { continue_after_watch_hits(false, 13); }
+
+TEST(gdb_server_steps_over_a_write_watch_hit_and_continues) { continue_after_watch_hits(true, 17); }
 #endif
 
 #endif

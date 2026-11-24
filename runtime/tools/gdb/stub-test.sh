@@ -44,7 +44,7 @@ fi
 gdb -batch -nx -iex "set debuginfod enabled off" -ex "set architecture aarch64" ${GDB_DEBUG:+-ex "set debug remote 1"} \
     -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'p/x $x0' -ex "x/2gx $heap" \
     -ex 'set $x2 = 0x42' -ex 'break *0x8001000' -ex continue -ex 'p/x $pc' -ex delete \
-    -ex "watch *(long *)($heap + 0x40)" -ex continue -ex delete \
+    -ex "watch *(long *)($heap + 0x40)" -ex continue -ex continue -ex continue -ex continue -ex delete \
     -ex "set {int}($heap + 16) = 1" -ex detach >"$out/gdb.log" 2>&1 || true
 wait $pid
 rc=$?
