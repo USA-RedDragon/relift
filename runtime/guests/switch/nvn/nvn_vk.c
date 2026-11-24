@@ -2552,6 +2552,68 @@ int nvn_vk_done_word_check(void)
     return rc;
 }
 
+/** @brief A batch the GPU cannot finish until the host sets its event (hb.ev), with a watchdog that sets it late. */
+static struct {
+    VkEvent ev;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    bool released, by_watchdog;
+} hb = { NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false, false };
+
+/** @brief Sets the hb batch's event once; by_watchdog says whether the watchdog did, after 30 s. */
+static void held_release(bool by_watchdog)
+{
+    pthread_mutex_lock(&hb.mu);
+    if (!hb.released) {
+        hb.released = true;
+        hb.by_watchdog = by_watchdog;
+        VK(vkSetEvent)(g.dev, hb.ev);
+    }
+    pthread_cond_broadcast(&hb.cv);
+    pthread_mutex_unlock(&hb.mu);
+}
+
+/** @brief Releases the hb batch after 30 s, so a submit that waits for it fails the check instead of hanging. */
+static void *held_watchdog(void *arg)
+{
+    (void)arg;
+    struct timespec dl;
+    clock_gettime(CLOCK_REALTIME, &dl);
+    dl.tv_sec += 30;
+    pthread_mutex_lock(&hb.mu);
+    while (!hb.released && pthread_cond_timedwait(&hb.cv, &hb.mu, &dl) == 0)
+        ;
+    pthread_mutex_unlock(&hb.mu);
+    held_release(true);
+    return NULL;
+}
+
+/**
+ * @brief Records and submits a batch that waits on the GPU for a host-set event, so it is unfinished until
+ * held_release however loaded the machine is; its fence, or NULL. *watching says the watchdog *watch runs (to join
+ * after held_release).
+ */
+static VkFence held_batch(replay *r, pthread_t *watch, bool *watching)
+{
+    *watching = false;
+    VkEventCreateInfo eci = { .sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO };
+    hb.released = hb.by_watchdog = false;
+    if (VK(vkCreateEvent)(g.dev, &eci, NULL, &hb.ev) != VK_SUCCESS)
+        return NULL;
+    nvn_vk_begin(r);
+    VK(vkCmdWaitEvents)(g.cb, 1, &hb.ev, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, NULL, 0,
+                        NULL, 0, NULL);
+    VkFence f = g.fence;
+    if (pthread_create(watch, NULL, held_watchdog, NULL) != 0) {
+        hb.released = true;
+        VK(vkSetEvent)(g.dev, hb.ev);
+        nvn_vk_submit(r);
+        return NULL;
+    }
+    *watching = true;
+    return nvn_vk_submit(r) ? f : NULL;
+}
+
 int nvn_vk_grow_check(void)
 {
     pthread_once(&g.once, bring_up);
@@ -2560,13 +2622,16 @@ int nvn_vk_grow_check(void)
     nvn_lock();
     nvn_vk_settle();
     staging big;
-    if (!nvn_vk_staging_new(&big, 64ull << 20)) {
+    if (!nvn_vk_staging_new(&big, 1ull << 20)) {
         nvn_unlock();
         return 1;
     }
     replay r = { 0 };
     uint32_t before = g.slots_made;
-    VkFence a = long_batch(&r, &big, 64, 0);
+    pthread_t watch;
+    bool watching;
+    /* The first batch is held on the GPU until the host lets it go, so it is unfinished through every submit. */
+    VkFence a = held_batch(&r, &watch, &watching);
     int rc = a ? 0 : 2;
     for (uint32_t i = 0; !rc && i < 5; i++) {
         nvn_vk_begin(&r);
@@ -2575,12 +2640,23 @@ int nvn_vk_grow_check(void)
         if (!nvn_vk_submit(&r))
             rc = 3;
     }
-    if (!rc && VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
-        rc = 4; /* a submit waited for the long batch */
+    pthread_mutex_lock(&hb.mu);
+    bool waited = hb.released; /* only the watchdog lets it go before this point */
+    pthread_mutex_unlock(&hb.mu);
+    if (!rc && (waited || VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY))
+        rc = 4; /* a submit waited for the held batch */
     if (!rc && g.slots_made < 6 && g.slots_made <= before)
         rc = 5; /* no slot was made for the batches behind it */
+    if (watching) {
+        held_release(false);
+        pthread_join(watch, NULL);
+    }
     if (!nvn_vk_settle() && !rc)
         rc = 6;
+    if (hb.ev) {
+        VK(vkDestroyEvent)(g.dev, hb.ev, NULL);
+        hb.ev = NULL;
+    }
     nvn_vk_staging_free(&big);
     nvn_unlock();
     return rc;

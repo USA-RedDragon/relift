@@ -148,8 +148,8 @@ int nvn_vk_async_check(void);
  */
 int nvn_vk_ring_check(void);
 /**
- * @brief Checks that batch slots grow on demand: while a long batch runs, five more are submitted without waiting for
- * it, each into a slot made for it. 0 when that holds, else the failing step's number, -1 with no device.
+ * @brief Checks that batch slots grow on demand: while a batch is held on the GPU by a host-set event, five more are
+ * submitted without waiting for it, each into a slot made for it (no timing: the held batch cannot end first). 0 when that holds, else the failing step's number, -1 with no device.
  */
 int nvn_vk_grow_check(void);
 /**
