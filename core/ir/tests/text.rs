@@ -114,6 +114,7 @@ fn everything(exit: Exit, addr: Width) -> Block {
         (Endian::Little, Order::Release),
         (Endian::Big, Order::AcqRel),
         (Endian::Little, Order::SeqCst),
+        (Endian::Little, Order::AcquirePc),
     ] {
         let l = b.load(ad, Width::W32, e, o);
         b.store(ad, l, e, o);

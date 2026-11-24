@@ -901,13 +901,13 @@ impl Arm64Cut for Gen<'_, Arm64> {
             return "Plain";
         };
         let get = |n: &str| f.iter().any(|(k, v)| k == n && *v == V::Bool(true));
-        let acq = get("acqsc") || get("acqpc");
-        let rel = get("relsc");
-        match (acq, rel) {
-            (true, true) => "AcqRel",
-            (true, false) => "Acquire",
-            (false, true) => "Release",
-            (false, false) => "Plain",
+        let (sc, pc, rel) = (get("acqsc"), get("acqpc"), get("relsc"));
+        match (sc, pc, rel) {
+            (true, _, true) | (false, true, true) => "AcqRel",
+            (true, _, false) => "Acquire",
+            (false, true, false) => "AcquirePc",
+            (false, false, true) => "Release",
+            (false, false, false) => "Plain",
         }
     }
 

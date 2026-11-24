@@ -178,6 +178,12 @@ pub enum Order {
     AcqRel,
     /// Acquire and release, in one total order with every other `SeqCst` access.
     SeqCst,
+    /// A load that later accesses are not observed before, with the weaker
+    /// RCpc rule: it may be observed before an earlier `Release` store to a
+    /// different address, which `Acquire` forbids. A host without a
+    /// release-consistent-processor-consistent load lowers it as `Acquire`.
+    /// As a store or fence it is `AcqRel`.
+    AcquirePc,
 }
 
 /// A rounding direction for [`FpOp`] conversions to integral values.

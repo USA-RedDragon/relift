@@ -156,12 +156,13 @@ const FP: [(FpOp, &str); 26] = [
     (FpOp::Convert, "convert"),
 ];
 
-const ORDER: [(Order, &str); 5] = [
+const ORDER: [(Order, &str); 6] = [
     (Order::Plain, "plain"),
     (Order::Acquire, "acquire"),
     (Order::Release, "release"),
     (Order::AcqRel, "acqrel"),
     (Order::SeqCst, "seqcst"),
+    (Order::AcquirePc, "acquirepc"),
 ];
 
 const ATOMIC: [(AtomicOp, &str); 9] = [

@@ -309,3 +309,32 @@ fn fcvtzs_half_to_fixed_zero_extends_unlike_unicorn() {
     step(word, &mut s, &mut mem());
     assert_eq!(s.regs[regs::vreg(d).index()], 0xffde);
 }
+
+/// The ordering of the first load in the IR of `word`.
+fn load_order(word: u32) -> String {
+    let text = lift(word, PC, &ALL).expect("lifts").to_string();
+    let line = text
+        .lines()
+        .find(|l| l.contains("load"))
+        .unwrap_or_else(|| panic!("no load in {text}"));
+    line.to_string()
+}
+
+#[test]
+fn rcpc_loads_keep_their_weaker_ordering_apart_from_ldar() {
+    let ldar = 0xc8df_fc20; // LDAR X0, [X1]
+    let ldapr = 0xf8bf_c020; // LDAPR X0, [X1]
+    let ldapur = 0x1900_0000 | (3 << 30) | (1 << 22) | (1 << 5); // LDAPUR X0, [X1]
+    assert!(load_order(ldar).contains("acquire"), "{}", load_order(ldar));
+    assert!(!load_order(ldar).contains("acquirepc"));
+    assert!(
+        load_order(ldapr).contains("acquirepc"),
+        "{}",
+        load_order(ldapr)
+    );
+    assert!(
+        load_order(ldapur).contains("acquirepc"),
+        "{}",
+        load_order(ldapur)
+    );
+}

@@ -464,6 +464,7 @@ pub(crate) fn emit_op(
             }
             let raw = match order {
                 Order::Plain => format!("rl_ld{}(mem, {ad})", n * 8),
+                Order::AcquirePc if n <= 8 => format!("rl_ldapr(mem, {ad}, {n})"),
                 _ if n <= 8 => format!("rl_ldar(mem, {ad}, {n})"),
                 _ => return Err("an ordered 128-bit load".into()),
             };
@@ -538,7 +539,7 @@ pub(crate) fn emit_op(
             return Ok(Emitted::Stmt(
                 match o {
                     Order::Plain => "(void)0",
-                    Order::Acquire => "rl_dmb_ld()",
+                    Order::Acquire | Order::AcquirePc => "rl_dmb_ld()",
                     Order::Release => "rl_dmb_st()",
                     Order::AcqRel | Order::SeqCst => "rl_dmb_full()",
                 }

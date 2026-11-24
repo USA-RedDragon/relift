@@ -14,6 +14,7 @@
 #include <SDL3/SDL.h>
 
 #include <android/log.h>
+#include <sys/auxv.h>
 #include <jni.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -146,6 +147,13 @@ static void init_once(void)
 
 void rl_android_init(void)
 {
+#if defined(__aarch64__)
+    /* The lifted code is compiled for armv8-a+rcpc (guest LDAPR becomes the host's LDAPR). */
+    if (!(getauxval(AT_HWCAP) & (1UL << 15))) { /* HWCAP_LRCPC */
+        __android_log_print(ANDROID_LOG_FATAL, LOG_TAG, "this CPU lacks FEAT_LRCPC (ARMv8.3 RCpc loads), which the game's code needs");
+        exit(1);
+    }
+#endif
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, init_once);
 }

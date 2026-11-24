@@ -172,7 +172,7 @@ coded! {
     CmpOp: Eq, Ne, Ult, Ule, Slt, Sle;
     ExtKind: Zero, Sign;
     Endian: Little, Big;
-    Order: Plain, Acquire, Release, AcqRel, SeqCst;
+    Order: Plain, Acquire, Release, AcqRel, SeqCst, AcquirePc;
     FpRound: TiesEven, TiesAway, Floor, Ceil, Zero;
     IoKind: Any, Device;
     AtomicOp: Add, Clear, Xor, Or, SMax, SMin, UMax, UMin, Swap;

@@ -25513,7 +25513,7 @@ pub(super) fn LDAPRB_32L_memop(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
     align::check(b, st, v10, 1, false);
-    let v11 = b.load(v10, Width::new(8), Endian::Little, Order::Acquire);
+    let v11 = b.load(v10, Width::new(8), Endian::Little, Order::AcquirePc);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
     Ok(())
@@ -25535,7 +25535,7 @@ pub(super) fn LDAPRH_32L_memop(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
     align::check(b, st, v10, 2, false);
-    let v11 = b.load(v10, Width::new(16), Endian::Little, Order::Acquire);
+    let v11 = b.load(v10, Width::new(16), Endian::Little, Order::AcquirePc);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
     Ok(())
@@ -25557,7 +25557,7 @@ pub(super) fn LDAPR_32L_memop(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
     align::check(b, st, v10, 4, false);
-    let v11 = b.load(v10, Width::new(32), Endian::Little, Order::Acquire);
+    let v11 = b.load(v10, Width::new(32), Endian::Little, Order::AcquirePc);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
 }
@@ -25578,7 +25578,7 @@ pub(super) fn LDAPR_64L_memop(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
     align::check(b, st, v10, 8, false);
-    let v11 = b.load(v10, Width::new(64), Endian::Little, Order::Acquire);
+    let v11 = b.load(v10, Width::new(64), Endian::Little, Order::AcquirePc);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
 }
@@ -25607,7 +25607,7 @@ pub(super) fn LDAPURB_32_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 1, false);
-    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::AcquirePc);
     let v16 = b.zext(v15, Width::new(32));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25637,7 +25637,7 @@ pub(super) fn LDAPURH_32_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 2, false);
-    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::AcquirePc);
     let v16 = b.zext(v15, Width::new(32));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25667,7 +25667,7 @@ pub(super) fn LDAPURSB_32_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 1, false);
-    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::AcquirePc);
     let v16 = b.sext(v15, Width::new(32));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25697,7 +25697,7 @@ pub(super) fn LDAPURSB_64_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 1, false);
-    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::AcquirePc);
     let v16 = b.sext(v15, Width::new(64));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25727,7 +25727,7 @@ pub(super) fn LDAPURSH_32_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 2, false);
-    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::AcquirePc);
     let v16 = b.sext(v15, Width::new(32));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25757,7 +25757,7 @@ pub(super) fn LDAPURSH_64_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 2, false);
-    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::AcquirePc);
     let v16 = b.sext(v15, Width::new(64));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25787,7 +25787,7 @@ pub(super) fn LDAPURSW_64_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 4, false);
-    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::AcquirePc);
     let v16 = b.sext(v15, Width::new(64));
     st.x_set(b, s6 as u32, v16, None);
     Ok(())
@@ -25817,7 +25817,7 @@ pub(super) fn LDAPUR_32_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 4, false);
-    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::AcquirePc);
     st.x_set(b, s6 as u32, v15, None);
     Ok(())
 }
@@ -25846,7 +25846,7 @@ pub(super) fn LDAPUR_64_ldapstl_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     align::check(b, st, v14, 8, false);
-    let v15 = b.load(v14, Width::new(64), Endian::Little, Order::Acquire);
+    let v15 = b.load(v14, Width::new(64), Endian::Little, Order::AcquirePc);
     st.x_set(b, s6 as u32, v15, None);
     Ok(())
 }

@@ -236,6 +236,24 @@ static inline uint64_t rl_ldar(const uint8_t *mem, uint64_t a, unsigned size)
     }
 }
 
+/**
+ * @brief LDAPR/LDAPRB/LDAPRH/LDAPUR: RCpc acquire load of size bytes (1, 2, 4, 8) at a naturally aligned address.
+ *
+ * Weaker than rl_ldar (it may be observed before an earlier STLR to another address). An acquire
+ * load compiles to LDAPR when the host compile enables +rcpc and to LDAR otherwise, which is
+ * stronger, so this is correct on every host.
+ */
+static inline uint64_t rl_ldapr(const uint8_t *mem, uint64_t a, unsigned size)
+{
+    const void *p = mem + a;
+    switch (size) {
+    case 1: return __atomic_load_n((const uint8_t *)p, __ATOMIC_ACQUIRE);
+    case 2: return __atomic_load_n((const uint16_t *)p, __ATOMIC_ACQUIRE);
+    case 4: return __atomic_load_n((const uint32_t *)p, __ATOMIC_ACQUIRE);
+    default: return __atomic_load_n((const uint64_t *)p, __ATOMIC_ACQUIRE);
+    }
+}
+
 /** @brief STLR/STLRB/STLRH: sequentially consistent store of size bytes (1, 2, 4, 8) at a naturally aligned address. */
 static inline void rl_stlr(uint8_t *mem, uint64_t a, unsigned size, uint64_t v)
 {

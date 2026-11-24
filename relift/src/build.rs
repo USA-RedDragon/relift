@@ -1155,6 +1155,25 @@ pub(crate) fn pinned_glibc(cache_root: &Path) -> Option<String> {
 /// time.
 pub(crate) const RELEASE_LIFTED_OPT: &str = "-O2";
 
+/// The architecture flag that lets the compiler lower the guest's RCpc
+/// acquire loads (LDAPR) to the host's LDAPR instead of LDAR, which costs up
+/// to seven times more on Cortex cores. It adds only that one feature.
+const RCPC_ARCH: &str = "-march=armv8-a+rcpc";
+
+/// The RCpc flag for an arm64 cross target, which has a fixed minimum:
+/// Android needs a CPU with FEAT_LRCPC (the runtime checks at start) and iOS
+/// devices from the A12 on have it.
+fn rcpc_arch(target: &str) -> Option<&'static str> {
+    (target.contains("arm64")).then_some(RCPC_ARCH)
+}
+
+/// Whether a native arm64 build targets a host with FEAT_LRCPC: every Apple
+/// M-series chip does, so macOS always; Linux and Windows only when
+/// `RELIFT_RCPC=1` says the build's machine is the run's machine.
+fn host_rcpc() -> bool {
+    cfg!(target_os = "macos") || std::env::var("RELIFT_RCPC").is_ok_and(|v| v == "1")
+}
+
 /// The optimization of a guest's lifted C: [`RELEASE_LIFTED_OPT`] in a
 /// release build, else the guest's dev choice `dev`.
 pub(crate) fn lifted_opt(release: bool, dev: &'static str) -> &'static str {
@@ -1904,10 +1923,12 @@ pub(crate) fn build_project(
         None if dev => c_compiler(&settings.toolchain)?,
         None => release_compiler(settings)?,
     };
-    let arch: Vec<String> = if cross.is_some() {
-        Vec::new()
+    let arch: Vec<String> = if let Some(c) = &cross {
+        rcpc_arch(c.name()).map(String::from).into_iter().collect()
     } else if cfg!(target_arch = "x86_64") {
         vec!["-mcx16".into()]
+    } else if cfg!(target_arch = "aarch64") && host_rcpc() {
+        vec![RCPC_ARCH.into()]
     } else {
         Vec::new()
     };
