@@ -552,6 +552,19 @@ uint64_t nvn_mirror_written_pages_address(void)
     return a;
 }
 
+void nvn_mirror_marks_take(void (*each)(uint64_t gpu_page, void *user), void *user)
+{
+    pthread_once(&mi_once, mi_init);
+    pthread_mutex_lock(&mi.lock);
+    uint32_t *bits = mi.pages_map;
+    for (uint32_t w = 0; bits && w < WRITTEN_PAGE_BITS / 32; w++) {
+        uint32_t v = __atomic_exchange_n(&bits[w], 0u, __ATOMIC_ACQ_REL);
+        for (; v; v &= v - 1)
+            each((uint64_t)w * 32u + (uint64_t)__builtin_ctz(v), user);
+    }
+    pthread_mutex_unlock(&mi.lock);
+}
+
 void nvn_mirror_written_marked(void)
 {
     if (!mi.n)

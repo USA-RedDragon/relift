@@ -686,6 +686,11 @@ bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out);
 bool nvn_vk_can_place(void);
 /** @brief Waits until every batch is on the queue and the device is idle. */
 void nvn_vk_wait_idle(void);
+/**
+ * @brief Calls each with every page number set in the written-page bitmap (a GPU page number modulo the bitmap's
+ * size) and clears it; for placed pools, whose GPU writes no readback brings to the CPU.
+ */
+void nvn_mirror_marks_take(void (*each)(uint64_t gpu_page, void *user), void *user);
 extern uint64_t nvn_dbg_lo, nvn_dbg_hi;
 void nvn_dbg_hit(const char *what, uint64_t at, uint64_t size);
 /**

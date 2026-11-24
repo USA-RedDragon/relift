@@ -1054,7 +1054,7 @@ static void write_caps(void)
             "\"denormMulFix32\": %u, \"denormFlushMode32\": %s, \"guestMemoryMirrored\": %s },\n",
             B(g.probes.canonical_nan32), B(g.probes.exact_f16), B(g.probes.hmma_coop), g.probes.denorm32,
             B(g.probes.denorm_preserve_mode32), B(g.probes.denorm_add_flush), g.probes.denorm_mul_fix,
-            B(g.probes.denorm_flush_mode32), B(!g.host_import && !g.placed));
+            B(g.probes.denorm_flush_mode32), B(!g.host_import));
     fprintf(f, "    \"VkPhysicalDeviceVulkan13Properties\": { \"maxSubgroupSize\": %u, \"minSubgroupSize\": %u, ",
             p13.maxSubgroupSize, p13.minSubgroupSize);
     json_flags(f, "requiredSubgroupSizeStages", p13.requiredSubgroupSizeStages, stages, sizeof stages / sizeof stages[0]);
@@ -1307,6 +1307,77 @@ bool nvn_vk_address_replay(void)
     return g.ok && g.address_replay;
 }
 
+/**
+ * @brief The guest ranges of the live placements. The GPU writes their pages directly, so a write watch over them
+ * (a texture's storage) never faults for it: a finished batch stamps the watches over what it wrote (placed_written).
+ */
+#define PLACED_MAX 1024u
+static struct {
+    pthread_mutex_t lock;
+    uint64_t lo[PLACED_MAX], hi[PLACED_MAX], gpu[PLACED_MAX];
+    uint32_t n;
+} placed = { PTHREAD_MUTEX_INITIALIZER, { 0 }, { 0 }, { 0 }, 0 };
+
+static void placed_add(uint64_t guest, uint64_t size, uint64_t gpu)
+{
+    pthread_mutex_lock(&placed.lock);
+    if (placed.n < PLACED_MAX) {
+        placed.gpu[placed.n] = gpu;
+        placed.lo[placed.n] = guest;
+        placed.hi[placed.n++] = guest + size;
+    } else {
+        rl_log(RL_LOG_ERROR, "nvn", "more than %u placed pools: GPU writes to 0x%llx are not seen by texture watches",
+               PLACED_MAX, (unsigned long long)guest);
+    }
+    pthread_mutex_unlock(&placed.lock);
+}
+
+static void placed_remove(uint64_t guest)
+{
+    pthread_mutex_lock(&placed.lock);
+    for (uint32_t i = 0; i < placed.n; i++)
+        if (placed.lo[i] == guest) {
+            placed.lo[i] = placed.lo[--placed.n];
+            placed.hi[i] = placed.hi[placed.n];
+            placed.gpu[i] = placed.gpu[placed.n];
+            break;
+        }
+    pthread_mutex_unlock(&placed.lock);
+}
+
+/**
+ * @brief Stamps the write watches over the placed memory [lo, hi) a finished batch wrote, as a CPU write would: a
+ * texture over those bytes takes them at its next use, as with a mirror, whose readback writes the guest pages from
+ * the CPU.
+ */
+static void placed_written(uint64_t lo, uint64_t hi)
+{
+    pthread_mutex_lock(&placed.lock);
+    for (uint32_t i = 0; i < placed.n; i++) {
+        uint64_t a = lo < placed.lo[i] ? placed.lo[i] : lo, b = hi > placed.hi[i] ? placed.hi[i] : hi;
+        if (a < b)
+            nvn_watch_touch(a, b - a);
+    }
+    pthread_mutex_unlock(&placed.lock);
+}
+
+/** @brief Bits of the written-page bitmap (the translator's WRITTEN_PAGE_BITS). */
+#define MARK_BITS (1u << 20)
+
+/** @brief nvn_mirror_marks_take's callback: stamps the placed pages whose GPU page number has the marked bit. */
+static void placed_marked(uint64_t bit, void *user)
+{
+    (void)user;
+    for (uint32_t i = 0; i < placed.n; i++) {
+        uint64_t first = placed.gpu[i] >> 12, end = (placed.gpu[i] + (placed.hi[i] - placed.lo[i]) + 4095) >> 12;
+        uint64_t p = first + ((bit - first % MARK_BITS + MARK_BITS) % MARK_BITS);
+        for (; p < end; p += MARK_BITS) {
+            uint64_t guest = placed.lo[i] + ((p << 12) - placed.gpu[i]);
+            nvn_watch_touch(guest, 4096);
+        }
+    }
+}
+
 bool nvn_vk_can_place(void)
 {
     nvn_vk_ready();
@@ -1389,6 +1460,8 @@ bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out)
     out->place_size = size;
     VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buf };
     out->gpu = VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+    if (out->gpu)
+        placed_add(guest, size, out->gpu);
     static bool said;
     if (!said) {
         said = true;
@@ -1402,6 +1475,7 @@ bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out)
 static void unplace(nvn_import *im, bool keep)
 {
     uint64_t guest = im->place_guest, size = im->place_size, page = hos.vm.host_page;
+    placed_remove(guest);
     nvn_watch_release(guest, size);
     /* Only the pages that are not zero are kept: the pages given back read zero already. A page the guest made
      * unreadable is read through the kernel's view. */
@@ -1941,7 +2015,8 @@ static void fault_report(void)
 /** @brief Guest byte ranges a batch's GPU work may write, kept exactly up to WRITE_RANGES of them, else all. */
 #define WRITE_RANGES 64u
 typedef struct write_set {
-    bool all;
+    /** @brief all: anything may be written; overflow: because the ranges ran out (not only by marking stores). */
+    bool all, overflow;
     uint32_t n;
     uint64_t lo[WRITE_RANGES], hi[WRITE_RANGES];
 } write_set;
@@ -1971,7 +2046,7 @@ void nvn_vk_mark_write_range(uint64_t guest, uint64_t size)
             return;
         }
     if (g_writes.n == WRITE_RANGES) {
-        g_writes.all = true;
+        g_writes.all = g_writes.overflow = true;
         return;
     }
     g_writes.lo[g_writes.n] = lo;
@@ -2092,6 +2167,18 @@ static bool wait_slot(uint32_t s)
         rl_log(RL_LOG_ERROR, "nvn", "the host device failed while running a submit (%d: -4 is a lost device)", (int)vr);
     if (vr == VK_ERROR_DEVICE_LOST)
         fault_report();
+    if (ok && placed.n) {
+        /* Stores through built addresses are known by the pages they marked; the rest by their ranges. */
+        if (pending[s].w.all) {
+            pthread_mutex_lock(&placed.lock);
+            nvn_mirror_marks_take(placed_marked, NULL);
+            pthread_mutex_unlock(&placed.lock);
+        }
+        for (uint32_t i = 0; i < pending[s].w.n; i++)
+            placed_written(pending[s].w.lo[i], pending[s].w.hi[i]);
+        if (pending[s].w.overflow)
+            placed_written(0, UINT64_MAX);
+    }
     if (ok && pending[s].readback)
         nvn_mirror_apply_readback();
     else if (pending[s].readback)
