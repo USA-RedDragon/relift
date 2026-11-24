@@ -203,3 +203,79 @@ TEST(nvn_a_pool_without_a_host_device_is_mapped_at_its_guest_address)
     CHECK(waitpid(pid, &st, 0) == pid);
     CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
 }
+
+/**
+ * @brief A texture registered as a texture but bound as a storage image by a dispatch is traced as an image: the
+ * trace never reuses its cached "pre" dump for "post", so what the dispatch wrote shows as different bytes.
+ */
+TEST(nvn_trace_dumps_a_storage_image_bound_from_a_texture_descriptor_again_after)
+{
+    rl_ctx *c = t_boot(NULL);
+    if (!nvn_vk_ready()) {
+        printf("  skipped: no host Vulkan device\n");
+        CHECK(!getenv("RELIFT_VK_REQUIRE"));
+        return;
+    }
+    CHECK(nvn_texset());
+    uint64_t heap = t_heap(c, 0x1000000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, 0x1000 + hp, 0));
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    replay r = { .c = c, .mem = m, .st = &st };
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 8, .height = 8, .depth = 1, .levels = 1, .flags = 1u << 4,
+                       .stride = 64, .swizzle = { 2, 3, 4, 5 }, .pool = pool, .offset = 0 };
+    CHECK(nvn_tex_layout(&d));
+    uint64_t tex = heap + 0x800000;
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    c->x[1] = 7;
+    c->x[2] = tex;
+    c->x[3] = 0;
+    nvnh_nvnTexturePoolRegisterTexture(c, m);
+    char dir[PATH_MAX];
+    const char *base = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/relift-trace-XXXXXX", base && *base ? base : "/tmp");
+    CHECK(mkdtemp(dir) != NULL);
+    char spec[PATH_MAX + 16];
+    snprintf(spec, sizeof spec, "%s:0", dir);
+    setenv("RELIFT_NVN_TRACE", spec, 1);
+    nvn_trace_present(NULL);
+    CHECK(nvn_trace_active);
+    nvn_trace_begin(&r, "dispatch");
+    uint32_t slot = 0, kind = 0, dim = 0;
+    CHECK_EQ(nvn_texset_image(&r, 7, &slot, &kind, &dim), RL_OK);
+    vimg *v = nvn_vk_image(&r, tex);
+    CHECK(v != NULL);
+    if (v) {
+        /* What a dispatch's storage store does: the device image changes. */
+        nvn_vk_begin(&r);
+        nvn_vk_barrier(g.cb);
+        VkClearColorValue red = { .float32 = { 1.0f, 0.0f, 0.0f, 1.0f } };
+        VkImageSubresourceRange all = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 };
+        VK(vkCmdClearColorImage)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, &red, 1, &all);
+        nvn_vk_barrier(g.cb);
+        CHECK(nvn_vk_flush(&r));
+    }
+    nvn_trace_cmd tc = { .groups = { 1, 1, 1 } };
+    tc.keys[NVN_STAGE_COMPUTE] = "feedc0de";
+    nvn_trace_end(&r, &tc);
+    nvn_trace_present(NULL);
+    char path[PATH_MAX + 64];
+    snprintf(path, sizeof path, "%s/frame-0/trace.jsonl", dir);
+    size_t n = 0;
+    char *line = slurp(path, &n);
+    CHECK(line != NULL);
+    if (line) {
+        CHECK(strstr(line, "\"image\":1") != NULL);
+        const char *t = strstr(line, "\"textures\"");
+        char pre[64], post[64];
+        CHECK(t != NULL && field(t, "pre", pre, sizeof pre) != NULL && field(t, "post", post, sizeof post) != NULL);
+        CHECK(strcmp(pre, post) != 0);
+        free(line);
+    }
+    CHECK_EQ(nftw(dir, remove_one, 16, FTW_DEPTH | FTW_PHYS), 0);
+    unsetenv("RELIFT_NVN_TRACE");
+}

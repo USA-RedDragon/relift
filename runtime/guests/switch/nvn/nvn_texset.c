@@ -887,6 +887,7 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
         bool has_view = false, image = false;
         nvn_tex_registered(handle & 0xfffffu, view, &has_view, &image);
         view[16] = has_view;
+        image |= as_image;
         nvn_trace_texture(r, t.tex_img[*slot], handle & 0xfffffu, *slot, *kind, *dim, image, view);
     }
     return rc;
