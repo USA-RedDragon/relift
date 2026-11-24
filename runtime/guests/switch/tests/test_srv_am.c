@@ -5,6 +5,7 @@
  * proxies and their objects, the message queue and the events.
  */
 #include "am.h"
+#include "services.h"
 #include "srv_link.h"
 #include "tc.h"
 
@@ -1125,6 +1126,36 @@ TEST(am_switch2_proxy_and_its_functions)
     CHECK_EQ(set32(&e, e.csg, 66, 2), 0);
     CHECK_EQ(set32(&e, e.csg, 66, 0), 0);
     CHECK_EQ(set32(&e, e.csg, 66, 1), AM_INVALID_PARAMS);
+}
+
+TEST(am_graphics_scale_follows_the_render_resolution)
+{
+    rl_settings_reset();
+    rl_switch_declare_settings();
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    env e;
+    memset(&e, 0, sizeof e);
+    e.c = t_boot(&cfg);
+    e.heap = t_heap(e.c, 0x200000);
+    e.svc = tc_open_service(e.c, e.heap, "appletOE");
+    CHECK(e.svc.handle && tc_to_domain(e.c, &e.svc) == 0);
+    CHECK_EQ(tc_sub(e.c, e.svc, proxy_req(10), &e.proxy), 0);
+    tc_obj scaling;
+    CHECK_EQ(get(&e, e.proxy, 60, &scaling), 0);
+    /* Scale 1 is 1152 lines, over both caps: the game offers 1440, 1152 and 960 lines, so 960 is as low as it goes. */
+    static const struct {
+        const char *res;
+        uint32_t code;
+    } want[] = { { "original", 10 }, { "1080p", 30 }, { "720p", 30 } };
+    for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].res), RL_SETTING_OK);
+        tc_res r = tc_send(e.c, scaling, tc_new(10));
+        CHECK_EQ(rc_of(r), 0);
+        CHECK_EQ(tc_u32(&r, 0), want[i].code);
+    }
+    rl_settings_reset();
 }
 
 TEST(am_switch_has_no_switch2_proxy)

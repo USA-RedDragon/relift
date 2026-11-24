@@ -70,6 +70,8 @@ rl_ipc_object *am_new_process_winding_controller(void);
 rl_ipc_object *am_new_empty(const rl_ipc_class *cls);
 /** @brief Switch 2: IPerformanceFunctions. */
 rl_ipc_object *am_new_performance_functions(void);
+/** @brief The graphics scaling code (10, 20 or 30) nn::oe::GetCurrentGraphicsScale reads for a render resolution cap in lines (0 for none). */
+uint32_t am_graphics_scale_code(uint32_t cap_lines);
 /** @brief Switch 2: IGraphicsScalingParametersFunctions. */
 rl_ipc_object *am_new_graphics_scaling_functions(void);
 /** @brief Resets the Switch 2 interfaces' state. */
