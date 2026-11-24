@@ -70,9 +70,9 @@ uint64_t nvn_track_epoch(void);
 void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, bool fresh), void *user);
 
 /**
- * @brief The guest write watch, a debug tool: RELIFT_GUEST_WRITE_WATCH=<addr>:<len> (hex with 0x, or decimal) names a
- * guest range, and every write the layer makes or lets the GPU make into it is logged with what makes it (what), the
- * range written and the host code that noted it: memory pools whose device buffer covers it (the GPU then writes the
+ * @brief The guest write watch, a debug tool: RELIFT_GUEST_WRITE_WATCH=<addr>:<len>[,<addr>:<len>...] (hex with 0x,
+ * or decimal; up to 8) names guest ranges, and every write the layer makes or lets the GPU make into it is logged with what makes it (what), the
+ * bytes written and the host code that noted it: memory pools whose device buffer covers it (the GPU then writes the
  * guest's bytes in place), GPU batches that may write it, mirror readbacks and the layer's own CPU copies. A CPU
  * write by guest code is not one; a debugger's watchpoint (debug.gdb) catches those. Does nothing when unset. True
  * when [guest, guest + size) meets the watched range (logged for the first 2000 such writes).
@@ -80,6 +80,8 @@ void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, boo
 bool nvn_wwatch_note(uint64_t guest, uint64_t size, const char *what);
 /** @brief Watches [addr, addr + len) instead of what RELIFT_GUEST_WRITE_WATCH names (len 0: nothing), and counts anew. */
 void nvn_wwatch_set(uint64_t addr, uint64_t len);
+/** @brief Watches [addr, addr + len) as well (up to 8 ranges in all). */
+void nvn_wwatch_add(uint64_t addr, uint64_t len);
 /** @brief How many writes met the watched range since it was set. */
 uint32_t nvn_wwatch_hits(void);
 

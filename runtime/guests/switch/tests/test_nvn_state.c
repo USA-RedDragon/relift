@@ -653,6 +653,9 @@ TEST(nvn_guest_write_watch_counts_writes_into_its_range_and_pools_over_it)
     CHECK_EQ(nvn_wwatch_hits(), 1);
     CHECK(nvn_pool_make(heap + 0x100, heap + 0x100000, 0x10000, 0x18c));
     CHECK_EQ(nvn_wwatch_hits(), 2);
+    nvn_wwatch_add(heap + 0x20000, 0x10);
+    CHECK(nvn_wwatch_note(heap + 0x2000c, 4, "a write into a second range"));
+    CHECK_EQ(nvn_wwatch_hits(), 3);
     nvn_wwatch_set(0, 0);
     CHECK(!nvn_wwatch_note(heap + 0x100800, 8, "a write with no watch"));
 }

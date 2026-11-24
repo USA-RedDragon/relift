@@ -335,9 +335,11 @@ void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, boo
     }
 }
 
+#define WW_RANGES 8u
+
 static struct {
-    uint64_t lo, hi;
-    uint32_t hits;
+    uint64_t lo[WW_RANGES], hi[WW_RANGES];
+    uint32_t n, hits;
 } ww;
 static pthread_once_t ww_once = PTHREAD_ONCE_INIT;
 
@@ -346,23 +348,36 @@ static void ww_init(void)
     const char *e = getenv("RELIFT_GUEST_WRITE_WATCH");
     if (!e || !*e)
         return;
-    char *end;
-    uint64_t a = strtoull(e, &end, 0), n = *end == ':' ? strtoull(end + 1, &end, 0) : 0;
-    if (*end || !n) {
-        rl_log(RL_LOG_WARN, "nvn", "RELIFT_GUEST_WRITE_WATCH \"%s\" is not <addr>:<len>; the watch is off", e);
-        return;
+    for (const char *at = e; *at;) {
+        char *end;
+        uint64_t a = strtoull(at, &end, 0), n = *end == ':' ? strtoull(end + 1, &end, 0) : 0;
+        if ((*end && *end != ',') || !n || ww.n == WW_RANGES) {
+            rl_log(RL_LOG_WARN, "nvn", "RELIFT_GUEST_WRITE_WATCH \"%s\" is not up to %u <addr>:<len>, comma separated; the "
+                   "watch is off", e, WW_RANGES);
+            ww.n = 0;
+            return;
+        }
+        nvn_wwatch_add(a, n);
+        at = *end ? end + 1 : end;
     }
-    nvn_wwatch_set(a, n);
 }
 
 void nvn_wwatch_set(uint64_t addr, uint64_t len)
 {
     pthread_once(&ww_once, ww_init);
-    ww.lo = addr;
-    ww.hi = len ? addr + len : 0;
+    ww.n = 0;
     __atomic_store_n(&ww.hits, 0, __ATOMIC_RELAXED);
     if (len)
-        rl_log(RL_LOG_INFO, "nvn", "guest write watch: [0x%" PRIx64 ", 0x%" PRIx64 ")", ww.lo, ww.hi);
+        nvn_wwatch_add(addr, len);
+}
+
+void nvn_wwatch_add(uint64_t addr, uint64_t len)
+{
+    if (!len || ww.n == WW_RANGES)
+        return;
+    ww.lo[ww.n] = addr;
+    ww.hi[ww.n++] = addr + len;
+    rl_log(RL_LOG_INFO, "nvn", "guest write watch: [0x%" PRIx64 ", 0x%" PRIx64 ")", addr, addr + len);
 }
 
 uint32_t nvn_wwatch_hits(void) { return __atomic_load_n(&ww.hits, __ATOMIC_RELAXED); }
@@ -370,7 +385,12 @@ uint32_t nvn_wwatch_hits(void) { return __atomic_load_n(&ww.hits, __ATOMIC_RELAX
 bool nvn_wwatch_note(uint64_t guest, uint64_t size, const char *what)
 {
     pthread_once(&ww_once, ww_init);
-    if (!ww.hi || !size || guest >= ww.hi || guest + size <= ww.lo)
+    if (!size)
+        return false;
+    bool hit = false;
+    for (uint32_t i = 0; i < ww.n && !hit; i++)
+        hit = guest < ww.hi[i] && guest + size > ww.lo[i];
+    if (!hit)
         return false;
     if (__atomic_fetch_add(&ww.hits, 1, __ATOMIC_RELAXED) < 2000)
         rl_log(RL_LOG_WARN, "nvn", "guest write watch: %s writes [0x%" PRIx64 ", 0x%" PRIx64 ") (noted from host %p)",
