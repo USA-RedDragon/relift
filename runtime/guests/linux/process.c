@@ -136,6 +136,7 @@ void lx_process_start(lx_thread *main_thread)
         for (int s = 1; s <= L_NSIG; s++)
             if (bits & (1ull << (s - 1)))
                 lx.sig[s].handler = L_SIG_IGN;
+        lx_itimer_restore(field(exec, "it"));
         hio_unsetenv(EXEC_ENV);
     }
     start_helper();
@@ -289,7 +290,7 @@ static int64_t sys_execve(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
             free(envp[i]);
     static int keep[LX_MAX_FDS][2];
     int n = lx_fs_exec_fds(keep, LX_MAX_FDS);
-    size_t cap = 64 + (size_t)n * 6;
+    size_t cap = 256 + (size_t)n * 6;
     char *state = malloc(cap);
     if (!state) {
         free_strings(argv);
@@ -300,8 +301,10 @@ static int64_t sys_execve(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     for (int s = 1; s <= L_NSIG; s++)
         if (lx.sig[s].handler == L_SIG_IGN)
             ign |= 1ull << (s - 1);
-    size_t at = (size_t)snprintf(state, cap, EXEC_ENV "=mask=%llx;ign=%llx;fds=", (unsigned long long)lx_cur()->blocked,
+    size_t at = (size_t)snprintf(state, cap, EXEC_ENV "=mask=%llx;ign=%llx;it=", (unsigned long long)lx_cur()->blocked,
                                  (unsigned long long)ign);
+    at += (size_t)lx_itimer_save(state + at, cap - at);
+    at += (size_t)snprintf(state + at, cap - at, ";fds=");
     for (int i = 0; i < n && at < cap; i++)
         at += (size_t)snprintf(state + at, cap - at, i ? ",%d" : "%d", keep[i][0]);
     envp[ne++] = state;

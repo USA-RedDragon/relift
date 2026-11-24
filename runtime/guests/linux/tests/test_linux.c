@@ -415,6 +415,15 @@ TEST(the_kernel_header_values_match_the_uapi_headers_where_the_host_has_them)
     CHECK_EQ(NR_linkat, __NR_linkat);
     CHECK_EQ(NR_statfs, __NR_statfs);
     CHECK_EQ(NR_fstatfs, __NR_fstatfs);
+    CHECK_EQ(NR_getitimer, __NR_getitimer);
+    CHECK_EQ(NR_setitimer, __NR_setitimer);
+    CHECK_EQ(NR_execve, __NR_execve);
+    CHECK_EQ(NR_wait4, __NR_wait4);
+    CHECK_EQ(NR_setpgid, __NR_setpgid);
+    CHECK_EQ(NR_getpgid, __NR_getpgid);
+    CHECK_EQ(NR_getsid, __NR_getsid);
+    CHECK_EQ(NR_setsid, __NR_setsid);
+    CHECK_EQ(NR_close_range, __NR_close_range);
 #endif
 #endif
 }
@@ -531,6 +540,56 @@ TEST(a_kill_reaches_a_forked_child_through_its_own_signal_thread)
     rl_sleep_ns(50000000);
     CHECK_EQ(sys(c, NR_kill, (uint64_t)pid, L_SIGTERM, 0, 0, 0, 0), 0);
     CHECK_EQ(wait_status(c, pid), L_SIGTERM);
+}
+
+TEST(an_interval_timer_fires_on_time_and_interrupts_a_blocking_pipe_write)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    lx.sig[L_SIGALRM].handler = 0x400000;
+    int64_t it[4] = { 0, 20000, 0, 20000 };
+    rl_vm_kernel_write(&lx.vm, 0x401000, it, sizeof it);
+    CHECK_EQ(sys(c, NR_setitimer, 0, 0x401000, 0, 0, 0, 0), 0);
+    int fired = 0;
+    uint64_t t0 = rl_clock_ns();
+    while (rl_clock_ns() - t0 < 110000000ull) {
+        if (__atomic_load_n(&lx_cur()->pending[L_SIGALRM].queued, __ATOMIC_ACQUIRE)) {
+            lx_cur()->pending[L_SIGALRM].queued = false;
+            fired++;
+        }
+        rl_sleep_ns(1000000);
+    }
+    CHECK(fired >= 3 && fired <= 6);
+    memset(it, 0, sizeof it);
+    rl_vm_kernel_write(&lx.vm, 0x401000, it, sizeof it);
+    CHECK_EQ(sys(c, NR_setitimer, 0, 0x401000, 0x401100, 0, 0, 0), 0);
+    int64_t old[4];
+    memcpy(old, rl_mem_base() + 0x401100, sizeof old);
+    CHECK(old[1] == 20000 && old[2] == 0 && old[3] > 0 && old[3] <= 20000);
+    CHECK_EQ(sys(c, NR_getitimer, 0, 0x401100, 0, 0, 0, 0), 0);
+    memcpy(old, rl_mem_base() + 0x401100, sizeof old);
+    CHECK(old[0] == 0 && old[1] == 0 && old[2] == 0 && old[3] == 0);
+    lx_cur()->pending[L_SIGALRM].queued = false;
+
+    CHECK_EQ(sys(c, NR_pipe2, 0x401000, 0, 0, 0, 0, 0), 0);
+    int32_t fds[2];
+    memcpy(fds, rl_mem_base() + 0x401000, 8);
+    static uint8_t fill[61440];
+    CHECK_EQ(hio_write(lx_host_fd(fds[1]), fill, sizeof fill), (int64_t)sizeof fill);
+    int64_t once[4] = { 0, 0, 0, 50000 };
+    rl_vm_kernel_write(&lx.vm, 0x401000, once, sizeof once);
+    CHECK_EQ(sys(c, NR_setitimer, 0, 0x401000, 0, 0, 0, 0), 0);
+    uint64_t w[6] = { (uint64_t)fds[1], 0x401000, 8192, 0, 0, 0 };
+    t0 = rl_clock_ns();
+    CHECK_EQ(lx_fs_call(NR_write)(c, rl_mem_base(), w), 4096);
+    CHECK(rl_clock_ns() - t0 >= 40000000ull);
+    CHECK(lx_cur()->pending[L_SIGALRM].queued);
+    lx_cur()->pending[L_SIGALRM].queued = false;
+    rl_vm_kernel_write(&lx.vm, 0x401f00, once, sizeof once);
+    CHECK_EQ(sys(c, NR_setitimer, 0, 0x401f00, 0, 0, 0, 0), 0);
+    CHECK_EQ(lx_fs_call(NR_write)(c, rl_mem_base(), w), -L_ERESTARTSYS);
+    lx_cur()->pending[L_SIGALRM].queued = false;
+    lx.sig[L_SIGALRM].handler = 0;
 }
 
 TEST(execve_of_another_program_finds_nothing)

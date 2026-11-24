@@ -185,6 +185,10 @@ void lx_exit_process(uint32_t code);
 void lx_process_start(lx_thread *main_thread);
 /** @brief The helper thread's timer work: fires the interval timers that are due and returns the nanoseconds until the next, -1 for none (timers.c). */
 int64_t lx_itimer_run(void);
+/** @brief Writes the interval timers (remaining:interval nanoseconds, comma separated) for an execve to pass on; the length. */
+int lx_itimer_save(char *out, size_t cap);
+/** @brief Arms the interval timers an execve passed on (lx_itimer_save's text). */
+void lx_itimer_restore(const char *s);
 /** @brief In a forked child: no interval timers (they are not inherited). */
 void lx_itimer_fork_child(void);
 /** @brief Wakes the helper thread to look at the timers again. */
@@ -268,6 +272,8 @@ lx_sys_fn *lx_fs_call(uint32_t nr);
 lx_sys_fn *lx_proc_call(uint32_t nr);
 /** @brief The process system calls of process.c (execve, wait4, sessions), or NULL. */
 lx_sys_fn *lx_process_call(uint32_t nr);
+/** @brief The interval timer system calls (getitimer, setitimer), or NULL. */
+lx_sys_fn *lx_timer_call(uint32_t nr);
 /** @brief The signal system calls. */
 lx_sys_fn *lx_signal_call(uint32_t nr);
 

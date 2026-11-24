@@ -719,6 +719,36 @@ static int64_t sys_read(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return hio_read(h, mem + a[1], n);
 }
 
+/**
+ * @brief A write that a signal can interrupt, as the kernel's: on a
+ * blocking pipe the bytes go in pieces the pipe has room for (a write of
+ * PIPE_BUF or less in one piece, so it stays atomic) after waiting until
+ * it is writable; a signal before the first byte gives -ERESTARTSYS, after
+ * some the count written. Other descriptors write as they are.
+ */
+static int64_t write_interruptible(int fd, int h, const uint8_t *buf, uint64_t n)
+{
+    if (n == 0 || fd_kind(fd, h) != 3)
+        return hio_write(h, buf, n);
+    int64_t fl = hio_get_status_flags(h);
+    if (fl >= 0 && (fl & L_O_NONBLOCK))
+        return hio_write(h, buf, n);
+    uint64_t done = 0;
+    for (;;) {
+        if (lx_wait(h, L_POLLOUT, -1) == -L_EINTR)
+            return done ? (int64_t)done : -L_ERESTARTSYS;
+        uint64_t piece = n - done;
+        if (n > 4096 && piece > 4096)
+            piece = 4096;
+        int64_t r = hio_write(h, buf + done, piece);
+        if (r < 0)
+            return done ? (int64_t)done : r;
+        done += (uint64_t)r;
+        if (done == n)
+            return (int64_t)done;
+    }
+}
+
 static int64_t sys_write(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -730,7 +760,7 @@ static int64_t sys_write(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         n = 0x7ffff000u;
     if (!lx_ok(a[1], n, RL_VM_R))
         return -L_EFAULT;
-    int64_t r = hio_write(h, mem + a[1], n);
+    int64_t r = write_interruptible((int)a[0], h, mem + a[1], n);
     epipe(r);
     return r;
 }
@@ -843,7 +873,7 @@ static int64_t sys_writev(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         memcpy(buf + at, mem + v[i][0], v[i][1]);
         at += v[i][1];
     }
-    int64_t r = hio_write(h, buf, total);
+    int64_t r = write_interruptible((int)a[0], h, buf, total);
     free(buf);
     epipe(r);
     return r;
