@@ -152,6 +152,8 @@ struct rl_present {
     rlvk_buf ov_buf, fr_buf;
     rlvk_handle ov_set_layout, ov_layout, ov_pipe, ov_dpool, ov_set, ov_bound_fr, ov_bound_ov;
     bool ov_failed;
+    /** @brief A present came back suboptimal with the surface unchanged (logged once). */
+    bool suboptimal_seen;
 };
 
 /** @brief The blend pass's push constants (overlay.comp). */
@@ -671,6 +673,7 @@ static bool ov_ready(rl_present *p, uint32_t w, uint32_t h, int32_t format)
     bool ok = ov_pipeline(p) && image_make(p, &p->frame, w, h, format);
     if (ok && p->fr_buf.size < fbytes) {
         rl_vkdev_buf_free(d, &p->fr_buf);
+        p->ov_bound_fr = 0;
         ok = rl_vkdev_buf_make(d, &p->fr_buf, fbytes,
                                RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT | RLVK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                    RLVK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -678,6 +681,7 @@ static bool ov_ready(rl_present *p, uint32_t w, uint32_t h, int32_t format)
     }
     if (ok && p->ov_buf.size < obytes) {
         rl_vkdev_buf_free(d, &p->ov_buf);
+        p->ov_bound_fr = 0;
         ok = rl_vkdev_buf_make(d, &p->ov_buf, obytes, RLVK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, false);
         p->ov_upload_all = true;
     }
@@ -696,6 +700,7 @@ static bool ov_ready(rl_present *p, uint32_t w, uint32_t h, int32_t format)
     }
     p->ov_upload_all = false;
     p->ov_y0 = p->ov_y1 = 0;
+    /* A buffer made again can get the handle of the one it replaced, so a remake clears ov_bound_fr. */
     if (p->ov_bound_fr != p->fr_buf.buffer || p->ov_bound_ov != p->ov_buf.buffer) {
         rlvk_descriptor_buffer_info info[2] = {
             { .buffer = p->fr_buf.buffer, .range = p->fr_buf.size },
@@ -1410,9 +1415,17 @@ static bool draw(rl_present *p, bool capture, bool frame)
         d->vkCreateFence(d->device, &fi, NULL, &p->fence);
         return fail("vkQueueSubmit", r);
     }
-    if (pr == RLVK_ERROR_OUT_OF_DATE_KHR || (pr == RLVK_SUBOPTIMAL_KHR && caps_moved(p)))
+    if (pr == RLVK_ERROR_OUT_OF_DATE_KHR || (pr == RLVK_SUBOPTIMAL_KHR && caps_moved(p))) {
         p->stale = true;
-    else if (pr == RLVK_ERROR_SURFACE_LOST_KHR)
+    } else if (pr == RLVK_SUBOPTIMAL_KHR) {
+        /* Shown. On Android it means a swapchain transform other than the display's: GPU frames keep identity, as a
+         * blit cannot turn, and the compositor turns them. On the AYN Thor it composes every layer on the GPU even
+         * unturned, so turning them here would only add work. */
+        if (!p->suboptimal_seen)
+            rl_log(RL_LOG_DEBUG, "present", "presents are suboptimal: swapchain transform %#x, display transform %#x",
+                   p->sc_transform, p->made_current);
+        p->suboptimal_seen = true;
+    } else if (pr == RLVK_ERROR_SURFACE_LOST_KHR)
         drop_surface(p);
     else if (pr != RLVK_SUCCESS)
         fail("vkQueuePresentKHR", pr);

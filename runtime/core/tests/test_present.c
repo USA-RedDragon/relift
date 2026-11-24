@@ -410,6 +410,22 @@ static void overlay_checks(rl_present *p, int *failures)
         EXPECT(now.presented == before.presented);
     }
     g_ov_empty = false;
+    /* A wider window makes the blend pass's buffers again; a new buffer can get the old one's handle, and the pass
+     * must still bind the new one (the far blue square is past the old buffers' ends). */
+    free(g_ov);
+    uint32_t old_w = g_w;
+    __atomic_store_n(&g_w, old_w + 40, __ATOMIC_RELAXED);
+    g_ov = calloc((size_t)g_w * g_h, 4);
+    if (g_ov) {
+        ov_paint(old_w + 20);
+        __atomic_add_fetch(&g_win.generation, 1, __ATOMIC_RELEASE);
+        uint8_t *wide = capture_slot(p, g_frame, 4, 2, &sw, &sh);
+        EXPECT(wide && sw == g_w && same(px(wide, sw, old_w + 25, 155), blue));
+        EXPECT(wide && sw == g_w && blended(px(wide, sw, 5, 5), black, 5, 5));
+        free(wide);
+    }
+    __atomic_store_n(&g_w, old_w, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&g_win.generation, 1, __ATOMIC_RELEASE);
     rl_present_set_overlay(p, NULL);
     free(g_ov);
     g_ov = NULL;
