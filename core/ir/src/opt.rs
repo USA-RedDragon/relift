@@ -22,6 +22,18 @@ use crate::{
 /// the result passes [`Block::verify`] whenever the input does and behaves
 /// the same in the interpreter.
 pub fn dce(block: &Block) -> Block {
+    dce_with(block, true)
+}
+
+/// [`dce`] for a block whose loads were emitted for arms the lifter did not
+/// take (a template that loads at every operand size and uses the one the
+/// instruction has): a load whose value nothing uses goes too, since no
+/// fault of it belongs to the instruction.
+pub fn dce_unused_loads(block: &Block) -> Block {
+    dce_with(block, false)
+}
+
+fn dce_with(block: &Block, loads_are_effects: bool) -> Block {
     let n = block.insts.len();
     let mut live = vec![false; n];
     let mark = |live: &mut Vec<bool>, v: Value| {
@@ -36,7 +48,7 @@ pub fn dce(block: &Block) -> Block {
     }
     for i in (0..n).rev() {
         let op = &block.insts[i].op;
-        if op.has_effect() {
+        if op.has_effect() && (loads_are_effects || !matches!(op, Op::Load { .. })) {
             live[i] = true;
         }
         if live[i] {
