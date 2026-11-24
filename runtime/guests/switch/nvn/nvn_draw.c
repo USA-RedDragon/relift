@@ -1048,7 +1048,7 @@ static int write_constants(replay *r, module *const *mods, uint32_t first_task, 
                 nvn_graphics_table(r->st, s, c0);
                 if (s >= NVN_STAGE_TASK)
                     memcpy(c0 + MESH_FIRST_TASK_OFFSET, &first_task, 4);
-                for (uint32_t k = 0; k < NVN_STORAGE_SLOTS && s < 5; k++)
+                for (uint32_t k = 0; k < NVN_STORAGE_SLOTS && s != NVN_STAGE_COMPUTE; k++)
                     nvn_mirror_written(r->st->gstorage[s][k].addr, r->st->gstorage[s][k].size);
                 rc = bank_of(r, c0, sizeof c0, &bi[n]);
             } else {
@@ -1542,6 +1542,24 @@ static int geometry_draw(replay *r, const module *gs, uint32_t mode)
 }
 
 static void count_command(void);
+
+/**
+ * @brief What the graphics stages first to last (task and mesh included) of a draw may write: their global stores
+ * (the written-page marks or every page), and their storage buffer slots, as written for the mirror and the guest.
+ */
+static void mark_stage_writes(const nvn_gfx *st, module *const *mods, uint32_t first, uint32_t last)
+{
+    for (uint32_t s = first; s <= last && s < NVN_STAGES; s++) {
+        if (s == NVN_STAGE_COMPUTE || !mods[s])
+            continue;
+        if (mods[s]->marks_pages)
+            nvn_mirror_written_marked();
+        else if (mods[s]->global_store)
+            nvn_mirror_written_all();
+        for (uint32_t j = 0; mods[s]->stores_guest && j < NVN_STORAGE_SLOTS; j++)
+            nvn_vk_mark_write_range(nvn_gpu_guest(st->gstorage[s][j].addr), st->gstorage[s][j].size);
+    }
+}
 static void note_last(const char *kind, module *const *mods, uint32_t n);
 static bool trace_buffer(void);
 static void trace_report(const replay *r, const char *key, uint32_t words);
@@ -1641,14 +1659,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
                      .base = base, .iaddr = iaddr };
     if ((rc = nvn_vk_stage(r, stage_draw, &dd, "a draw")) != RL_OK)
         return rc;
-    for (uint32_t s = 0; s < 5; s++) {
-        if (mods[s] && mods[s]->marks_pages)
-            nvn_mirror_written_marked();
-        else if (mods[s] && mods[s]->global_store)
-            nvn_mirror_written_all();
-        for (uint32_t j = 0; mods[s] && mods[s]->stores_guest && j < NVN_STORAGE_SLOTS; j++)
-            nvn_vk_mark_write_range(nvn_gpu_guest(st->gstorage[s][j].addr), st->gstorage[s][j].size);
-    }
+    mark_stage_writes(st, mods, 0, 4);
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
@@ -1965,16 +1976,19 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
     note_last("mesh draw", mods, NVN_STAGES);
     {
         size_t at = strlen(d.last);
-        for (uint32_t s = NVN_STAGE_TASK; s < NVN_STAGES; s++)
+        for (uint32_t s = NVN_STAGES; s-- > NVN_STAGE_TASK && at < sizeof d.last;) {
+            const nvn_consts *cb = &st->consts[s];
+            uint32_t w[4] = { 0 };
+            if (cb->addr && cb->size >= 16)
+                memcpy(w, r->mem + cb->addr, 16);
+            at += (size_t)snprintf(d.last + at, sizeof d.last - at, "; %s c1 0x%llx+0x%x: %08x %08x %08x %08x",
+                                   s == NVN_STAGE_TASK ? "task" : "mesh", (unsigned long long)cb->addr, cb->size, w[0],
+                                   w[1], w[2], w[3]);
             for (uint32_t j = 0; j < 4 && at < sizeof d.last; j++)
-                at += (size_t)snprintf(d.last + at, sizeof d.last - at, "; %s slot %u 0x%llx+0x%llx",
-                                       s == NVN_STAGE_TASK ? "task" : "mesh", j,
+                at += (size_t)snprintf(d.last + at, sizeof d.last - at, "; slot %u 0x%llx+0x%llx", j,
                                        (unsigned long long)st->gstorage[s][j].addr,
                                        (unsigned long long)st->gstorage[s][j].size);
-        for (uint32_t s = NVN_STAGE_TASK; s < NVN_STAGES && at < sizeof d.last; s++)
-            at += (size_t)snprintf(d.last + at, sizeof d.last - at, "; %s c1 0x%llx",
-                                   s == NVN_STAGE_TASK ? "task" : "mesh",
-                                   (unsigned long long)st->consts[s].addr);
+        }
     }
     if (mi.native) {
         if (!g.mesh_shader)
@@ -1983,9 +1997,13 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
         if (mods[1] && !(k.mods[1] = nvn_module_fragment_for(mesh, mods[1])))
             return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the mesh program writes",
                                mods[1]->key);
-        return draw_mesh_native(r, mods, &k, first, count);
+        rc = draw_mesh_native(r, mods, &k, first, count);
+    } else {
+        rc = draw_mesh_compute(r, mods, &k, &mi, task ? &ti : NULL, first, count);
     }
-    return draw_mesh_compute(r, mods, &k, &mi, task ? &ti : NULL, first, count);
+    if (rc == RL_OK)
+        mark_stage_writes(st, mods, 1, NVN_STAGES - 1);
+    return rc;
 }
 
 /**
