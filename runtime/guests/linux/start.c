@@ -181,7 +181,7 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
     for (int i = envn - 1; i >= 0; i--)
         envp[i] = push_str(&sp, host_environ[i]);
     for (int i = argc - 1; i >= 0; i--)
-        argp[i] = push_str(&sp, argv[i]);
+        argp[i] = push_str(&sp, i == 0 && lx.root && strchr(argv[0], '/') ? p->exec_path : argv[i]);
     uint64_t platform = push_str(&sp, lx_arch_platform);
     uint8_t rnd[16];
     if (!rl_host_random(rnd, sizeof rnd))
