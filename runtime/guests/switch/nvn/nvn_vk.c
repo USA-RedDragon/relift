@@ -38,6 +38,9 @@
 
 #include <pthread.h>
 #include <stdarg.h>
+#if !defined(_WIN32)
+#include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1384,6 +1387,17 @@ bool nvn_vk_can_place(void)
     return g.ok && g.placed;
 }
 
+/** @brief RELIFT_NVN_PREFAULT=0 leaves a placement's pages untouched after the placed map (a diagnostic). */
+static bool prefault_off(void)
+{
+    static int off = -1;
+    if (off < 0) {
+        const char *e = getenv("RELIFT_NVN_PREFAULT");
+        off = e && !strcmp(e, "0");
+    }
+    return off;
+}
+
 bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out)
 {
     memset(out, 0, sizeof *out);
@@ -1454,6 +1468,31 @@ bool nvn_vk_place(uint64_t guest, uint64_t size, nvn_import *out)
             VK(vkUnmapMemory)(g.dev, dm);
         nvn_vk_unimport_keep(out, true);
         return false;
+    }
+    if (!prefault_off()) {
+        /* KGSL (the Adreno kernel driver, under Turnip and Qualcomm's driver alike) fills a mapping's page on its
+         * first touch with memdesc->pages[(address - vma->vm_start) >> PAGE_SHIFT] (kgsl_paged_vmfault). Once a
+         * write watch's mprotect has split the mapping, vm_start is the start of the piece, so a page first touched
+         * past a split maps another page of the allocation: the CPU then reads and writes bytes the GPU never sees
+         * at that address. Every page is touched now, before any watch splits the range; a page in the page table
+         * keeps its page through later splits. KGSL commits the pages at allocation, so this costs page tables only. */
+        int64_t t0 = now_ns();
+#if defined(MADV_POPULATE_READ)
+        if (madvise(host, size, MADV_POPULATE_READ) != 0)
+#endif
+        {
+            volatile const uint8_t *q = host;
+            uint8_t sum = 0;
+            for (uint64_t at = 0; at < size; at += 4096)
+                sum ^= q[at];
+            (void)sum;
+        }
+        static uint64_t total_bytes, total_ns;
+        total_bytes += size;
+        total_ns += (uint64_t)(now_ns() - t0);
+        if (size >= (256ull << 20))
+            rl_log(RL_LOG_INFO, "nvn", "placed pool memory touched in: %llu MiB in %.1f ms so far",
+                   (unsigned long long)(total_bytes >> 20), (double)total_ns / 1e6);
     }
     out->placed = true;
     out->place_guest = guest;

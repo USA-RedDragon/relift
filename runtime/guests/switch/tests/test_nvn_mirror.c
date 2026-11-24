@@ -1070,3 +1070,37 @@ TEST(nvn_pool_log_line_names_the_layout_and_backend_of_a_pool)
     CHECK_EQ(nvn_pool_log_line(line, sizeof line, "final", pool), -1);
     rl_settings_set("nvn.memory", "auto");
 }
+
+TEST(nvn_placed_pool_pages_first_touched_after_a_watch_split_are_the_gpus)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool go = placing();
+    CHECK(go || nvn_vk_ready() || !getenv("RELIFT_VK_REQUIRE"));
+    if (!go)
+        return;
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x40000 + 0xffff) / 0x10000 * 0x10000;
+    uint64_t size = 0x40000, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    /* A watch over one page splits the placed mapping before the CPU touches the pages past it (on KGSL a page
+     * first touched past a split mapped another page of the allocation). */
+    nvn_watch w;
+    CHECK(nvn_watch_start(&w, at + 4 * hp, hp));
+    uint32_t n = (uint32_t)(0x10000 / 4);
+    for (uint32_t i = 0; i < n; i++)
+        rl_st32(m, at + 0x8000 + 4ull * i, 0x1000 + i);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    CHECK(run_copy(&r, gpu + 0x8000, gpu + 0x20000, n));
+    for (uint32_t i = 0; i < n; i += 61)
+        CHECK_EQ(rl_ld32(m, at + 0x20000 + 4ull * i), 0x1001 + i);
+    CHECK_EQ(rl_ld32(m, at + 0x20000 + 4ull * (n - 1)), 0x1000 + n);
+    nvn_watch_release(at, size);
+    CHECK_EQ(call(c, nvnh_nvnMemoryPoolFinalize, pool, 0, 0, 0), RET);
+    rl_settings_set("nvn.memory", "auto");
+}
