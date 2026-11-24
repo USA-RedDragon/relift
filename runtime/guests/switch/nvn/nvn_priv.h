@@ -141,7 +141,8 @@ uint64_t nvn_vk_finished(void);
  */
 int nvn_vk_async_check(void);
 /**
- * @brief Checks the batch slots: while a long batch runs, the next ones are recorded without waiting for it; a settle
+ * @brief Checks the batch slots, with each long batch held on the GPU by a host-set event (no timing): while one is
+ * unfinished, the next ones are recorded without waiting for it until the ring is full; a settle
  * waits for all of them; a wait on writers (nvn_lock's) does not wait for a batch that writes no guest
  * memory and does wait for one that may write anywhere; a batch that writes a known range is not waited for by
  * nvn_lock nor by a read beside the range, and is by a read that overlaps it. 0 when all hold, the failing step's number otherwise, -1 with no device.
@@ -1257,8 +1258,9 @@ int64_t nvn_vsync_after(int64_t t);
  */
 void nvn_pace_acquire(uint32_t textures);
 /**
- * @brief Checks the window queue pacing: a present returns before its vsync, a texture of three is handed out at once
- * with that present queued, and one of two only once it is shown. 0 when all hold, else the failing step's number.
+ * @brief Checks the window queue pacing, with the present's GPU work held by a host-set event (no timing): a present
+ * returns without waiting for its GPU work, a texture of three is handed out with that present queued, and one of two
+ * only once the present is shown (after its GPU work and a vsync). 0 when all hold, else the failing step's number.
  */
 int nvn_pace_check(void);
 /** @brief One line of the frame trace (stats.trace), with rl_trace's kinds and fields. */

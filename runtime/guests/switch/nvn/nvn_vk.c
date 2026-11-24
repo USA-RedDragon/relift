@@ -2552,66 +2552,127 @@ int nvn_vk_done_word_check(void)
     return rc;
 }
 
-/** @brief A batch the GPU cannot finish until the host sets its event (hb.ev), with a watchdog that sets it late. */
+/**
+ * @brief A batch the GPU cannot finish until the host sets its event (hb.ev), so a check knows it is unfinished
+ * however loaded the machine is. A timer thread sets the event at hb.deadline: 30 s after the submit (so a wait for
+ * the batch fails its check instead of hanging), or sooner by held_release_in.
+ */
 static struct {
     VkEvent ev;
     pthread_mutex_t mu;
     pthread_cond_t cv;
-    bool released, by_watchdog;
-} hb = { NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false, false };
+    bool released;
+    struct timespec deadline;
+} hb = { NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false, { 0, 0 } };
 
-/** @brief Sets the hb batch's event once; by_watchdog says whether the watchdog did, after 30 s. */
-static void held_release(bool by_watchdog)
+/** @brief The held batch and its timer thread. */
+typedef struct held_run {
+    pthread_t timer;
+    bool timing;
+} held_run;
+
+/** @brief Sets the held batch's event, once. */
+static void held_release(void)
 {
     pthread_mutex_lock(&hb.mu);
     if (!hb.released) {
         hb.released = true;
-        hb.by_watchdog = by_watchdog;
         VK(vkSetEvent)(g.dev, hb.ev);
     }
     pthread_cond_broadcast(&hb.cv);
     pthread_mutex_unlock(&hb.mu);
 }
 
-/** @brief Releases the hb batch after 30 s, so a submit that waits for it fails the check instead of hanging. */
-static void *held_watchdog(void *arg)
+/** @brief Whether the held batch's event is set yet. */
+static bool held_out(void)
+{
+    pthread_mutex_lock(&hb.mu);
+    bool out = hb.released;
+    pthread_mutex_unlock(&hb.mu);
+    return out;
+}
+
+static void deadline_in(struct timespec *t, int64_t ms)
+{
+    clock_gettime(CLOCK_REALTIME, t);
+    t->tv_sec += (time_t)(ms / 1000);
+    t->tv_nsec += (long)(ms % 1000) * 1000000l;
+    t->tv_sec += t->tv_nsec / 1000000000l;
+    t->tv_nsec %= 1000000000l;
+}
+
+/** @brief The timer: sets the event at hb.deadline, which held_release_in may move. */
+static void *held_timer(void *arg)
 {
     (void)arg;
-    struct timespec dl;
-    clock_gettime(CLOCK_REALTIME, &dl);
-    dl.tv_sec += 30;
     pthread_mutex_lock(&hb.mu);
-    while (!hb.released && pthread_cond_timedwait(&hb.cv, &hb.mu, &dl) == 0)
-        ;
+    while (!hb.released) {
+        struct timespec now, dl = hb.deadline;
+        clock_gettime(CLOCK_REALTIME, &now);
+        if (now.tv_sec > dl.tv_sec || (now.tv_sec == dl.tv_sec && now.tv_nsec >= dl.tv_nsec))
+            break;
+        pthread_cond_timedwait(&hb.cv, &hb.mu, &dl);
+    }
     pthread_mutex_unlock(&hb.mu);
-    held_release(true);
+    held_release();
     return NULL;
 }
 
 /**
- * @brief Records and submits a batch that waits on the GPU for a host-set event, so it is unfinished until
- * held_release however loaded the machine is; its fence, or NULL. *watching says the watchdog *watch runs (to join
- * after held_release).
+ * @brief Has the timer set the held batch's event ms from now: for a step that must wait for the batch, which then
+ * returns only once the event is set (held_out), never by a timing margin.
  */
-static VkFence held_batch(replay *r, pthread_t *watch, bool *watching)
+static void held_release_in(int64_t ms)
 {
-    *watching = false;
+    pthread_mutex_lock(&hb.mu);
+    deadline_in(&hb.deadline, ms);
+    pthread_cond_broadcast(&hb.cv);
+    pthread_mutex_unlock(&hb.mu);
+}
+
+/**
+ * @brief Records and submits a held batch (marked as long_batch's writer says); its fence, or NULL. Only one is held
+ * at a time; held_end lets it go.
+ */
+static VkFence held_batch(replay *r, int writer, held_run *h)
+{
+    h->timing = false;
     VkEventCreateInfo eci = { .sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO };
-    hb.released = hb.by_watchdog = false;
-    if (VK(vkCreateEvent)(g.dev, &eci, NULL, &hb.ev) != VK_SUCCESS)
+    hb.released = false;
+    deadline_in(&hb.deadline, 30000);
+    if (VK(vkCreateEvent)(g.dev, &eci, NULL, &hb.ev) != VK_SUCCESS) {
+        hb.ev = NULL;
         return NULL;
+    }
     nvn_vk_begin(r);
     VK(vkCmdWaitEvents)(g.cb, 1, &hb.ev, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, NULL, 0,
                         NULL, 0, NULL);
+    if (writer == 1)
+        nvn_vk_mark_write();
+    else if (writer == 2)
+        nvn_vk_mark_write_range(0x10000000ull, 0x2000);
     VkFence f = g.fence;
-    if (pthread_create(watch, NULL, held_watchdog, NULL) != 0) {
-        hb.released = true;
-        VK(vkSetEvent)(g.dev, hb.ev);
-        nvn_vk_submit(r);
-        return NULL;
-    }
-    *watching = true;
-    return nvn_vk_submit(r) ? f : NULL;
+    h->timing = pthread_create(&h->timer, NULL, held_timer, NULL) == 0;
+    if (!h->timing)
+        held_release();
+    return nvn_vk_submit(r) && h->timing ? f : NULL;
+}
+
+/** @brief Lets the held batch go and waits for its timer; the caller settles before the event is destroyed. */
+static void held_end(held_run *h)
+{
+    held_release();
+    if (h->timing)
+        pthread_join(h->timer, NULL);
+    h->timing = false;
+}
+
+/** @brief Destroys the held batch's event once no batch waits on it (after a settle). */
+static void held_free(void)
+{
+    if (hb.ev)
+        VK(vkDestroyEvent)(g.dev, hb.ev, NULL);
+    hb.ev = NULL;
 }
 
 int nvn_vk_grow_check(void)
@@ -2628,10 +2689,9 @@ int nvn_vk_grow_check(void)
     }
     replay r = { 0 };
     uint32_t before = g.slots_made;
-    pthread_t watch;
-    bool watching;
+    held_run h;
     /* The first batch is held on the GPU until the host lets it go, so it is unfinished through every submit. */
-    VkFence a = held_batch(&r, &watch, &watching);
+    VkFence a = held_batch(&r, 0, &h);
     int rc = a ? 0 : 2;
     for (uint32_t i = 0; !rc && i < 5; i++) {
         nvn_vk_begin(&r);
@@ -2640,23 +2700,14 @@ int nvn_vk_grow_check(void)
         if (!nvn_vk_submit(&r))
             rc = 3;
     }
-    pthread_mutex_lock(&hb.mu);
-    bool waited = hb.released; /* only the watchdog lets it go before this point */
-    pthread_mutex_unlock(&hb.mu);
-    if (!rc && (waited || VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY))
-        rc = 4; /* a submit waited for the held batch */
+    if (!rc && (held_out() || VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY))
+        rc = 4; /* a submit waited for the held batch (only the 30 s timer lets it go before this) */
     if (!rc && g.slots_made < 6 && g.slots_made <= before)
         rc = 5; /* no slot was made for the batches behind it */
-    if (watching) {
-        held_release(false);
-        pthread_join(watch, NULL);
-    }
+    held_end(&h);
     if (!nvn_vk_settle() && !rc)
         rc = 6;
-    if (hb.ev) {
-        VK(vkDestroyEvent)(g.dev, hb.ev, NULL);
-        hb.ev = NULL;
-    }
+    held_free();
     nvn_vk_staging_free(&big);
     nvn_unlock();
     return rc;
@@ -2678,38 +2729,67 @@ int nvn_vk_ring_check(void)
     }
     memset(out.map, 0, 4096);
     replay r = { 0 };
-    VkFence a = long_batch(&r, &big, 64, 0), b = NULL;
+    held_run h;
+    /* Each long batch is held on the GPU by a host-set event: unfinished until the check lets it go (held_end), or
+     * until a step that must wait for it has it let go during that wait (held_release_in), so no step needs a timing
+     * margin. A step that wrongly waits for a held batch fails when the 30 s timer lets it go. */
+    VkFence a = held_batch(&r, 0, &h), b = NULL;
     if (!a)
         rc = 2;
-    /* The batches after a go into other slots (new ones while a runs, see nvn_vk_grow_check); none waits for a. */
+    /* The batches after a go into the other slots; none waits for a while a slot is free. The last one fills the
+     * ring, so the next recording needs a's slot: a is let go during that wait. */
     for (uint32_t i = 1; !rc && i < NVN_SLOTS; i++) {
+        if (i == NVN_SLOTS - 1) {
+            if (held_out() || VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
+                rc = 3;
+            held_release_in(20);
+        }
         nvn_vk_begin(&r);
         VK(vkCmdFillBuffer)(g.cb, out.buf, 0, 4096, 0x11111111u);
         nvn_vk_barrier(g.cb);
-        if (i == 1 && VK(vkGetFenceStatus)(g.dev, a) != VK_NOT_READY)
-            rc = 3;
         b = g.fence;
         if (!rc && !nvn_vk_submit(&r))
             rc = 4;
     }
+    held_end(&h);
     if (!rc && (!nvn_vk_settle() || VK(vkGetFenceStatus)(g.dev, b) != VK_SUCCESS || ((uint32_t *)out.map)[1023] != 0x11111111u))
         rc = 6;
-    VkFence c = rc ? NULL : long_batch(&r, &big, 64, 0);
-    if (!rc && (!c || !nvn_vk_settle_writers() || VK(vkGetFenceStatus)(g.dev, c) != VK_NOT_READY))
+    held_free();
+    /* A batch that writes no guest memory: a wait on writers does not wait for it. */
+    VkFence c = rc ? NULL : held_batch(&r, 0, &h);
+    if (!rc && (!c || !nvn_vk_settle_writers() || held_out() || VK(vkGetFenceStatus)(g.dev, c) != VK_NOT_READY))
         rc = 7;
+    if (c)
+        held_end(&h);
     if (!rc && !nvn_vk_settle())
         rc = 8;
-    VkFence w = rc ? NULL : long_batch(&r, &big, 64, 1);
-    if (!rc && (!w || !nvn_vk_settle_writers() || VK(vkGetFenceStatus)(g.dev, w) != VK_SUCCESS))
+    held_free();
+    /* One that may write anywhere: the wait on writers waits for it, so it returns only after its event is set. */
+    VkFence w = rc ? NULL : held_batch(&r, 1, &h);
+    if (w)
+        held_release_in(20);
+    if (!rc && (!w || !nvn_vk_settle_writers() || !held_out() || VK(vkGetFenceStatus)(g.dev, w) != VK_SUCCESS))
         rc = 9;
-    VkFence q = rc ? NULL : long_batch(&r, &big, 64, 2);
-    if (!rc && (!q || !nvn_vk_settle_writers() || VK(vkGetFenceStatus)(g.dev, q) != VK_NOT_READY))
+    if (w)
+        held_end(&h);
+    nvn_vk_settle();
+    held_free();
+    /* One that writes a known range: not waited for by the wait on writers nor by a read beside the range; waited
+     * for by a read that overlaps it. */
+    VkFence q = rc ? NULL : held_batch(&r, 2, &h);
+    if (!rc && (!q || !nvn_vk_settle_writers() || held_out() || VK(vkGetFenceStatus)(g.dev, q) != VK_NOT_READY))
         rc = 10;
-    if (!rc && (!nvn_vk_reading_guest(0x10002000ull, 0x1000) || VK(vkGetFenceStatus)(g.dev, q) != VK_NOT_READY))
+    if (!rc && (!nvn_vk_reading_guest(0x10002000ull, 0x1000) || held_out() || VK(vkGetFenceStatus)(g.dev, q) != VK_NOT_READY))
         rc = 11;
-    if (!rc && (!nvn_pending_check(0x10001ff0ull) || !nvn_vk_reading_guest(0x10001ff0ull, 0x20) ||
+    if (!rc)
+        held_release_in(20);
+    if (!rc && (!nvn_pending_check(0x10001ff0ull) || !nvn_vk_reading_guest(0x10001ff0ull, 0x20) || !held_out() ||
                 VK(vkGetFenceStatus)(g.dev, q) != VK_SUCCESS))
         rc = 12;
+    if (q)
+        held_end(&h);
+    nvn_vk_settle();
+    held_free();
     if (!rc && !nvn_vk_settle())
         rc = 13;
     if (!rc) {
@@ -5726,34 +5806,39 @@ int nvn_pace_check(void)
     memset(&pace, 0, sizeof pace);
     pace.mode = 1;
     int rc = 0;
-    int64_t t0 = now_ns();
-    pace_present(1);
-    int64_t shown = pace_shown(0);
-    if (now_ns() - t0 > 2000000)
-        rc = 1; /* a present returns at once */
-    nvn_pace_acquire(3);
-    if (!rc && now_ns() < shown && now_ns() - t0 > 2000000)
-        rc = 2; /* three textures: one present may wait to be shown */
-    nvn_pace_acquire(2);
-    if (!rc && now_ns() < shown)
-        rc = 3; /* two textures: the next one is free once the present is shown */
-    /* A present whose GPU work is long: its texture is not free before that work ends and a vsync after. */
-    staging big;
-    if (!rc && g.ok && g.timeline_ok && nvn_vk_staging_new(&big, 64ull << 20)) {
+    /* The present's GPU work is held by a host-set event (held_batch), so it is unfinished until the check lets it go:
+     * every step is decided by that event, never by a timing margin. Without a timeline the GPU part is skipped. */
+    bool gpu = g.ok && g.timeline_ok;
+    held_run h = { 0 };
+    VkFence f = NULL;
+    if (gpu) {
         nvn_lock();
         replay r = { 0 };
-        VkFence f = long_batch(&r, &big, 64, 0);
+        f = held_batch(&r, 0, &h);
         nvn_unlock();
-        pace_present(1);
-        nvn_pace_acquire(2);
-        int64_t back = now_ns();
-        if (!f || VK(vkGetFenceStatus)(g.dev, f) != VK_SUCCESS)
-            rc = 4; /* the acquire returned before the batch ended */
-        else if (back < pace.shown[1 % PACE_RING] || pace.shown[1 % PACE_RING] < reaped_at(pace.value[1 % PACE_RING]))
-            rc = 5; /* nor before the vsync after it */
+        if (!f)
+            rc = 6;
+    }
+    pace_present(1);
+    if (!rc && gpu && held_out())
+        rc = 1; /* a present returns without waiting for its GPU work */
+    nvn_pace_acquire(3);
+    if (!rc && gpu && held_out())
+        rc = 2; /* three textures: one present may stay queued, so the next texture is handed out at once */
+    /* Two textures: the next one is free only once the present is shown, after its GPU work and a vsync. */
+    if (gpu)
+        held_release_in(20);
+    nvn_pace_acquire(2);
+    int64_t back = now_ns();
+    if (!rc && gpu && (!held_out() || VK(vkGetFenceStatus)(g.dev, f) != VK_SUCCESS))
+        rc = 4; /* the acquire returned before the batch ended */
+    else if (!rc && (back < pace.shown[0] || (gpu && pace.shown[0] < reaped_at(pace.value[0]))))
+        rc = 5; /* nor before the vsync after it */
+    if (gpu) {
+        held_end(&h);
         nvn_lock();
         nvn_vk_settle();
-        nvn_vk_staging_free(&big);
+        held_free();
         nvn_unlock();
     }
     memset(&pace, 0, sizeof pace);
