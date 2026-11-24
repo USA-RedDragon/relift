@@ -1916,6 +1916,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     int cond = nvn_draw_render_enabled(r, &run);
     if (cond != RL_OK || !run)
         return cond;
+    if (__builtin_expect(nvn_vk_count_on != 0, 0))
+        __atomic_fetch_add(&nvn_vk_count_draws, 1, __ATOMIC_RELAXED);
     if (!nvn_geometry_mode_draws(st->geometry_mode, false))
         return nvn_vk_stop(r, "a vertex draw in geometry processing mode %u, which runs the mesh pipeline",
                            st->geometry_mode);

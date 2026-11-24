@@ -399,6 +399,24 @@ TEST(nvn_mirror_names_the_guest_ranges_its_readback_writes)
     rl_settings_set("nvn.memory", "auto");
 }
 
+TEST(nvn_vk_calls_are_counted_by_command_while_the_counting_is_on)
+{
+    t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up)
+        return;
+    VK(vkDeviceWaitIdle)(g.dev);
+    uint64_t before = nvn_vk_calls[VKG_vkDeviceWaitIdle];
+    CHECK_EQ(before, 0u);
+    nvn_vk_count_on = 1;
+    VK(vkDeviceWaitIdle)(g.dev);
+    VK(vkDeviceWaitIdle)(g.dev);
+    nvn_vk_count_on = 0;
+    VK(vkDeviceWaitIdle)(g.dev);
+    CHECK_EQ(nvn_vk_calls[VKG_vkDeviceWaitIdle], 2u);
+}
+
 TEST(nvn_mirror_reads_back_only_the_pages_a_program_marks)
 {
     rl_ctx *c = t_boot(NULL);

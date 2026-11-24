@@ -5787,6 +5787,8 @@ int nvn_vk_cmd(replay *r, const nvn_cmd *e) { return run_cmd(r, e); }
 /** @brief Runs one command (run_one) and counts how it ran for RELIFT_NVN_STATS. */
 static int run_cmd(replay *r, const nvn_cmd *e)
 {
+    if (__builtin_expect(nvn_vk_count_on != 0, 0))
+        __atomic_fetch_add(&nvn_vk_count_cmds, 1, __ATOMIC_RELAXED);
     nvn_stats_begin();
     unhandled = false;
     int rc = run_one(r, e);
@@ -6821,6 +6823,38 @@ bool nvn_vk_window_early(void)
 }
 
 /** @brief Logs the guest's present rate every few seconds (info), so a run's speed shows without a profiler. */
+uint32_t nvn_vk_count_on;
+uint64_t nvn_vk_calls[VKG_COUNT], nvn_vk_count_cmds, nvn_vk_count_draws;
+
+/** @brief Logs the host Vulkan calls, NVN commands and draws made per present since the last line, most called first. */
+static void log_call_counts(double frames)
+{
+    static uint64_t last[VKG_COUNT], last_cmds, last_draws;
+    uint64_t d[VKG_COUNT], sum = 0;
+    for (unsigned i = 0; i < VKG_COUNT; i++) {
+        uint64_t n = __atomic_load_n(&nvn_vk_calls[i], __ATOMIC_RELAXED);
+        d[i] = n - last[i];
+        last[i] = n;
+        sum += d[i];
+    }
+    uint64_t cmds = nvn_vk_count_cmds - last_cmds, draws = nvn_vk_count_draws - last_draws;
+    last_cmds = nvn_vk_count_cmds;
+    last_draws = nvn_vk_count_draws;
+    rl_log(RL_LOG_INFO, "nvn", "per present: %.1f NVN commands replayed, %.1f draws, %.1f host Vulkan calls (%.2f per draw)",
+           (double)cmds / frames, (double)draws / frames, (double)sum / frames, draws ? (double)sum / (double)draws : 0.0);
+    for (int shown = 0; shown < 16; shown++) {
+        unsigned best = 0;
+        for (unsigned i = 1; i < VKG_COUNT; i++)
+            if (d[i] > d[best])
+                best = i;
+        if (!d[best])
+            break;
+        rl_log(RL_LOG_INFO, "nvn", "host Vulkan calls %8.1f per present  %5.2f per draw  %s", (double)d[best] / frames,
+               draws ? (double)d[best] / (double)draws : 0.0, vkg_cmds[best].name);
+        d[best] = 0;
+    }
+}
+
 static void present_rate(uint64_t total)
 {
     static uint64_t last_ns, last_total;
@@ -6837,6 +6871,10 @@ static void present_rate(uint64_t total)
     double cpu_ms = (double)(cpu.tv_sec - cpu_prev.tv_sec) * 1e3 + (double)(cpu.tv_nsec - cpu_prev.tv_nsec) / 1e6;
     cpu_prev = cpu;
     double frames = (double)(total - last_total);
+    if (!nvn_vk_count_on && nvn_gpuprof_on())
+        nvn_vk_count_on = 1;
+    else if (nvn_vk_count_on)
+        log_call_counts(frames);
     static uint64_t pm0, pn0, pl0, pln0;
     uint64_t pm, pn, pl, pln;
     nvn_pipe_stats(&pm, &pn, &pl, &pln);

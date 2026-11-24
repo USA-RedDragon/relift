@@ -12,7 +12,14 @@
 
 #include <pthread.h>
 
-#define VK(name) VKF_FN(&g.fns, name)
+/**
+ * @brief Whether the layer counts its host Vulkan calls by command (set with the GPU profile, setting gpu.profile),
+ * and the counts since the start: nvn_vk_calls by vkg_cmd, the NVN commands replayed and the draws made.
+ */
+extern uint32_t nvn_vk_count_on;
+extern uint64_t nvn_vk_calls[VKG_COUNT], nvn_vk_count_cmds, nvn_vk_count_draws;
+
+#define VK(name) ((PFN_##name)nvn_vk_fn(VKG_##name))
 
 /**
  * @brief The most batches recorded or in flight at once. The layer records the next batch into a free slot while the
@@ -366,6 +373,14 @@ typedef struct nvn_vkdev {
 } nvn_vkdev;
 
 extern nvn_vkdev g;
+
+/** @brief The host function of cmd, counted when nvn_vk_count_on is set. */
+static inline void (*nvn_vk_fn(unsigned cmd))(void)
+{
+    if (__builtin_expect(nvn_vk_count_on != 0, 0))
+        __atomic_fetch_add(&nvn_vk_calls[cmd], 1, __ATOMIC_RELAXED);
+    return g.fns.f[cmd];
+}
 
 /** @brief nvnCommandBufferSetRenderEnable and SetRenderEnableConditional's state: draws run, are skipped, or follow two counters. */
 #define NVN_RENDER_ALWAYS 0u
