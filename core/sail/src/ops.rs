@@ -74,6 +74,7 @@ impl<C: Cpu> Gen<'_, C> {
             V::Undef(Some(_)) => "0u128".into(),
             V::S(_, e, _) => e.to_string(),
             V::Enum(_, i) => format!("({i}i128)"),
+            V::Poison(m) => return fail(m.to_string()),
             _ => return fail(format!("no static form of {v:?}")),
         })
     }
@@ -89,6 +90,7 @@ impl<C: Cpu> Gen<'_, C> {
             V::S(K::Bool, e, _) => (1, format!("u128::from({e})")),
             V::S(K::Int | K::Enum(_), e, _) => (128, format!("({e}) as u128")),
             V::S(K::Bits(w), e, _) => (*w, e.to_string()),
+            V::Poison(m) => return fail(m.to_string()),
             _ => return fail(format!("no IR form of {v:?}")),
         };
         let name = format!("v{}", self.fresh());
@@ -818,6 +820,17 @@ impl<C: Cpu> Gen<'_, C> {
         self.extract(a, i, 1)
     }
 
+    /// A boolean as the one-bit vector Sail's `bit` is: the evaluator gives
+    /// some `bit` results as booleans.
+    fn bit_of(&mut self, v: &V) -> R<V> {
+        Ok(match v {
+            V::Bool(x) => V::Bits(1, u128::from(*x)),
+            V::S(K::Bool, e, d) => self.st(K::Bits(1), format!("u128::from({e})"), *d),
+            V::D(K::Bool, n) => V::D(K::Bits(1), n.clone()),
+            _ => return fail(format!("not a bool: {v:?}")),
+        })
+    }
+
     /// `c ? a : b` for values of any shape.
     pub fn select(&mut self, c: &V, a: &V, b: &V) -> R<V> {
         let c = self.truth(c)?;
@@ -828,6 +841,8 @@ impl<C: Cpu> Gen<'_, C> {
             return Ok(a.clone());
         }
         match (a, b) {
+            (V::Poison(_), _) => return Ok(a.clone()),
+            (_, V::Poison(_)) => return Ok(b.clone()),
             (V::Undef(_), _) => return Ok(b.clone()),
             (_, V::Undef(_)) => return Ok(a.clone()),
             (V::Tuple(x), V::Tuple(y)) if x.len() == y.len() => {
@@ -866,7 +881,13 @@ impl<C: Cpu> Gen<'_, C> {
             }
             _ => {}
         }
-        let (a, b) = (self.defd(a), self.defd(b));
+        let (mut a, mut b) = (self.defd(a), self.defd(b));
+        if a.kind() == crate::value::Kind::Bool && b.width() == Some(1) {
+            a = self.bit_of(&a)?;
+        }
+        if b.kind() == crate::value::Kind::Bool && a.width() == Some(1) {
+            b = self.bit_of(&b)?;
+        }
         let k = match (a.kind(), b.kind()) {
             (crate::value::Kind::Bool, crate::value::Kind::Bool) => K::Bool,
             (crate::value::Kind::Int, crate::value::Kind::Int) => K::Int,

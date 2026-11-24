@@ -55,6 +55,10 @@ pub enum V {
     /// A bit vector wider than 128 bits, as its parts, least significant
     /// first; each part is at most 128 bits.
     Wide(Rc<Vec<V>>),
+    /// The value of a branch whose arms the evaluator cannot join exactly,
+    /// with the reason: harmless while nothing reads it, an error once
+    /// something does.
+    Poison(Rc<str>),
 }
 
 /// The type class of a value, for signature matching.
@@ -82,6 +86,8 @@ pub enum Kind {
     Union,
     /// `undefined`.
     Undef,
+    /// A branch value that cannot be lowered exactly.
+    Poison,
 }
 
 impl V {
@@ -100,6 +106,7 @@ impl V {
             V::Bf(t, _) => Kind::Bf(t.clone()),
             V::Union(..) => Kind::Union,
             V::Undef(_) => Kind::Undef,
+            V::Poison(_) => Kind::Poison,
         }
     }
 
@@ -127,7 +134,7 @@ impl V {
     /// Whether the value is known while generating.
     pub fn is_concrete(&self) -> bool {
         match self {
-            V::S(..) | V::D(..) => false,
+            V::S(..) | V::D(..) | V::Poison(_) => false,
             V::Wide(ps) => ps.iter().all(V::is_concrete),
             _ => true,
         }

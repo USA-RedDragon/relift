@@ -616,7 +616,9 @@ impl<'m, C: Cpu> Gen<'m, C> {
         };
         match self.select(cond, &vt, &ve) {
             Ok(v) => Ok(v),
-            Err(E::Fail(_)) => Ok(V::Undef(None)),
+            Err(E::Fail(m)) => Ok(V::Poison(
+                format!("the arms of a branch do not join: {m}").into(),
+            )),
             Err(e) => Err(e),
         }
     }
