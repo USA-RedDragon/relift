@@ -3,7 +3,7 @@ mod common;
 use common::{translate, translate_with};
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::pseudo::{IPA_MUL, IPA_SAT};
-use relift_gpu_nv::translate::{ALPHA_FUNC_SPEC, Interp, Kind, Options};
+use relift_gpu_nv::translate::{A2C_SPEC, ALPHA_FUNC_SPEC, HostProfile, Interp, Kind, Options};
 use relift_gpu_nv::{Inst, Operand, RegMods};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -1719,6 +1719,52 @@ fn fragment_alpha_is_tested_by_a_specialized_function() {
     assert!(has_variable_in(&s.spirv, 9), "no push constant block");
     assert!(spirv_has(&s.spirv, 5380), "no OpDemoteToHelperInvocation");
     assert!(s.interface.kills);
+}
+
+/// A fragment program that writes the flat input attribute 0 (a[0x80] to
+/// a[0x8c]) to render target 0, its w as the alpha: the program the
+/// runtime's alpha to coverage test (test_nvn_a2c.c) draws, from the module
+/// this dumps as `fragment_a2c` for the lavapipe profile.
+fn flat_alpha_fragment() -> Vec<u8> {
+    let mut b = sph(2, 5, &[(6, 0x55), (18, 0xf)]);
+    for c in 0..4u64 {
+        b.extend(word(
+            0x126,
+            1,
+            &[
+                (16, 8, c),
+                (64, 8, (0x80 >> 2) + c),
+                (24, 8, 255),
+                (32, 8, 255),
+                (78, 2, 1),
+                (81, 3, 7),
+            ],
+        ));
+    }
+    exit_and_halt(&mut b);
+    b
+}
+
+#[test]
+fn fragment_alpha_to_coverage_is_computed_off_nvidia_hosts() {
+    let p = relift_gpu_sm86::program::parse(&flat_alpha_fragment());
+    let lavapipe = Options {
+        host: HostProfile::lavapipe(),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &lavapipe).unwrap_or_else(|e| panic!("{e}"));
+    dump("fragment_a2c", &s.spirv);
+    assert!(
+        decorates(&s.spirv, 1, Some(A2C_SPEC)),
+        "no alpha to coverage constant"
+    );
+    assert!(s.interface.writes_sample_mask);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        !decorates(&s.spirv, 1, Some(A2C_SPEC)),
+        "an NVIDIA host computes its own"
+    );
+    assert!(!s.interface.writes_sample_mask);
 }
 
 #[test]

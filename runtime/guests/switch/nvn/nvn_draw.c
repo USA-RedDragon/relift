@@ -686,6 +686,26 @@ static int stencil_ops(replay *r, uint64_t face, VkStencilOpState *s)
 }
 
 /** @brief Fills the fixed-function part of k from the queue's state objects. */
+/**
+ * @brief On a host whose alpha to coverage is not the console's, gives fragment program frag the draw's samples as
+ * its A2C_SPEC, which makes it compute the console's mask; a stop when it has no such constant (it writes no alpha
+ * to render target 0, or its table was made for an NVIDIA host).
+ */
+static int a2c_spec(replay *r, const module *frag, pipe_key *k)
+{
+    if (!k->alpha_to_coverage || g.nvidia)
+        return RL_OK;
+    if (!frag || !frag->a2c)
+        return nvn_vk_stop(r, "alpha to coverage with fragment program %s, which computes no coverage of its own",
+                           frag ? frag->key : "none");
+    if (k->nspec[1] == MAX_SPECS)
+        return nvn_vk_stop(r, "program %s has no room for its alpha to coverage constant", frag->key);
+    k->spec_map[1][k->nspec[1]] = (VkSpecializationMapEntry){ A2C_SPEC, 4 * k->nspec[1], 4 };
+    k->spec[1][k->nspec[1]++] = k->alpha_to_coverage;
+    nvn_spec_sort(&k->nspec[1], k->spec_map[1], k->spec[1]);
+    return RL_OK;
+}
+
 static int fixed_state(replay *r, pipe_key *k)
 {
     nvn_gfx *st = r->st;
@@ -776,12 +796,12 @@ static int fixed_state(replay *r, pipe_key *k)
      * from the dither flag (PIXELS_2X2 with it, PIXELS_1X1 without; SDK 22.2.8, sdk 0x69a0f0). Only the dithered
      * pattern of 2, 4 and 8 samples is measured, and only on an NVIDIA host (nvn_vkdev.nvidia).
      */
-    if (a2c_on && (!g.nvidia || !a2c_dither || drawn < 2 || drawn > 8))
+    if (a2c_on && (!a2c_dither || drawn < 2 || drawn > 8))
         return nvn_vk_stop(r,
-                           "alpha to coverage at %u samples, %s dither, on %s: only NVIDIA's dithered pattern of 2, 4 "
-                           "and 8 samples is measured",
-                           drawn, a2c_dither ? "with" : "without", g.nvidia ? "an NVIDIA host" : "a host not NVIDIA's");
-    k->alpha_to_coverage = a2c_on;
+                           "alpha to coverage at %u samples, %s dither: only the dithered pattern of 2, 4 and 8 "
+                           "samples is measured",
+                           drawn, a2c_dither ? "with" : "without");
+    k->alpha_to_coverage = a2c_on ? drawn : 0;
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;
@@ -1749,6 +1769,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     };
     rc = fixed_state(r, &k);
     if (rc == RL_OK)
+        rc = a2c_spec(r, mods[1], &k);
+    if (rc == RL_OK)
         rc = vertex_state(r, mods[0], &k, &fp);
     if (rc != RL_OK)
         return rc;
@@ -1899,7 +1921,7 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
     nvn_gfx *st = r->st;
     int rc;
     k->mesh_mode = 1;
-    if ((rc = fixed_state(r, k)) != RL_OK)
+    if ((rc = fixed_state(r, k)) != RL_OK || (rc = a2c_spec(r, mods[1], k)) != RL_OK)
         return rc;
     nvn_core_leave();
     VkPipeline p = nvn_pipe_graphics(k);
@@ -2035,7 +2057,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
         return nvn_vk_stop(r, "cannot make the fragment program %s for the varyings the helper vertex program writes",
                            mods[1]->key);
     kg.mesh_mode = 2;
-    if ((rc = fixed_state(r, &kg)) != RL_OK)
+    if ((rc = fixed_state(r, &kg)) != RL_OK || (rc = a2c_spec(r, mods[1], &kg)) != RL_OK)
         return rc;
     kg.topology = list[mi->topology];
     nvn_core_leave();

@@ -92,6 +92,59 @@ const PUSH_CONSTANT: u32 = 9;
 /// test away). The runtime sets it from the bound color state.
 pub const ALPHA_FUNC_SPEC: u32 = 0x400;
 
+/// Specialization constant id of a fragment program's alpha to coverage:
+/// the samples of the draw (2, 4 or 8), 0 when it is off, which compiles the
+/// mask away. The runtime sets it on hosts without
+/// [`HostProfile::native_alpha_to_coverage`](super::host::HostProfile).
+pub const A2C_SPEC: u32 = 0x401;
+
+/// The console GPU's alpha to coverage, as the RTX 3090 (NVIDIA 615.78.08)
+/// gives it with NVN's default dithered state: level `L` is the number of
+/// thresholds `t / 4096` alpha is at or above (4n of them for n samples,
+/// measured to the float by bisection in the runtime's test_nvn_a2c.c; NaN,
+/// negative values and zero are level 0, values above 1 the top level). The
+/// levels go to the pixels of each 2x2 footprint in turn, pixel (0, 0),
+/// (1, 1), (1, 0), (0, 1), and each pixel covers its samples in its own
+/// order, [`A2C_FILL`]. The rows are 2, 4 and 8 samples.
+const A2C_THRESHOLDS: [&[u32]; 3] = [
+    &[249, 763, 1277, 1791, 2306, 2820, 3334, 3848],
+    &[
+        121, 378, 635, 892, 1149, 1406, 1663, 1920, 2177, 2434, 2691, 2948, 3205, 3462, 3719, 3976,
+    ],
+    &[
+        57, 185, 314, 442, 571, 699, 828, 956, 1085, 1213, 1342, 1470, 1599, 1727, 1856, 1984,
+        2113, 2241, 2370, 2498, 2627, 2755, 2884, 3012, 3141, 3269, 3398, 3526, 3655, 3783, 3912,
+        4040,
+    ],
+];
+
+/// The order each pixel of the 2x2 footprint (index `(y & 1) * 2 + (x & 1)`)
+/// covers its samples in, per sample count as [`A2C_THRESHOLDS`].
+const A2C_FILL: [[[u32; 8]; 4]; 3] = [
+    [
+        [0, 1, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0, 0, 0],
+    ],
+    [
+        [3, 0, 1, 2, 0, 0, 0, 0],
+        [3, 0, 1, 2, 0, 0, 0, 0],
+        [3, 0, 1, 2, 0, 0, 0, 0],
+        [3, 0, 1, 2, 0, 0, 0, 0],
+    ],
+    [
+        [6, 4, 7, 3, 1, 2, 0, 5],
+        [7, 3, 6, 4, 0, 5, 2, 1],
+        [4, 6, 3, 7, 1, 2, 5, 0],
+        [3, 7, 4, 6, 0, 5, 1, 2],
+    ],
+];
+
+/// Which turn of the footprint each pixel gets a level in (pixel (0, 0)
+/// first, then (1, 1), (1, 0), (0, 1)).
+const A2C_TURN: [u32; 4] = [0, 2, 3, 1];
+
 /// Byte offset in the fixed-state push constant block of the point size a
 /// vertex program that does not write one gets.
 pub const PUSH_POINT_SIZE: u32 = 0;
@@ -686,6 +739,126 @@ impl Ctx {
         let size = self.push_float(0);
         let var = self.scalar_builtin(B_POINT_SIZE, OUTPUT, false);
         self.m.emit_void(op::STORE, &[var, size]);
+    }
+
+    /// Alpha to coverage as the console GPU computes it ([`A2C_THRESHOLDS`]),
+    /// for a host whose own is not the same: the coverage mask of render
+    /// target 0's alpha at the draw's sample count ([`A2C_SPEC`]) is ANDed
+    /// into the sample mask the program writes (all samples when it writes
+    /// none). With the constant 0 the mask is all ones, which the host driver
+    /// folds away.
+    pub(crate) fn alpha_to_coverage(&mut self, targets: u32) {
+        if self.host.native_alpha_to_coverage || targets & 0x8 == 0 {
+            return;
+        }
+        let u = self.u32t();
+        let f = self.f32t();
+        let b = self.boolt();
+        let alpha = {
+            let r = self.load_reg(3);
+            self.as_float(r)
+        };
+        let n = self.m.spec_u32(0, A2C_SPEC);
+        let counts = [2u32, 4, 8];
+        let is: Vec<u32> = counts
+            .iter()
+            .map(|&k| {
+                let kc = self.m.c_u32(k);
+                self.m.spec_op(b, op::I_EQUAL, &[n, kc])
+            })
+            .collect();
+        // A spec constant of the three values, by sample count (`other` otherwise).
+        let pick = |c: &mut Ctx, v: [u32; 3], other: u32, t: u32| {
+            let mut x = other;
+            for k in (0..3).rev() {
+                x = c.m.spec_op(t, op::SELECT, &[is[k], v[k], x]);
+            }
+            x
+        };
+        let one = self.m.c_u32(1);
+        let mut level = self.m.c_u32(0);
+        for i in 0..32 {
+            let t = [0, 1, 2].map(|k| {
+                let tk = A2C_THRESHOLDS[k]
+                    .get(i)
+                    .map_or(0x4000_0000, |&q| (q as f32 / 4096.0).to_bits());
+                self.m.c_f32(tk)
+            });
+            let never = self.m.c_f32(0x4000_0000);
+            let ti = pick(self, t, never, f);
+            let ge = self.m.emit(op::F_ORD_GREATER_THAN_EQUAL, b, &[alpha, ti]);
+            let zero = self.m.c_u32(0);
+            let add = self.m.emit(op::SELECT, u, &[ge, one, zero]);
+            level = self.m.emit(op::I_ADD, u, &[level, add]);
+        }
+        let fc = self.vec_builtin(B_FRAG_COORD, INPUT, 4);
+        let mut bit = [0u32; 2];
+        for (k, out) in bit.iter_mut().enumerate() {
+            let p = self.component_ptr(fc, INPUT, k as u32);
+            let v = self.m.emit(op::LOAD, f, &[p]);
+            let w = self.m.emit(op::CONVERT_F_TO_U, u, &[v]);
+            *out = self.m.emit(op::BITWISE_AND, u, &[w, one]);
+        }
+        let two = self.m.c_u32(2);
+        let y2 = self.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[bit[1], one]);
+        let pix = self.m.emit(op::BITWISE_OR, u, &[y2, bit[0]]);
+        let pix_is: Vec<u32> = (0..4u32)
+            .map(|q| {
+                let qc = self.m.c_u32(q);
+                self.m.emit(op::I_EQUAL, b, &[pix, qc])
+            })
+            .collect();
+        let by_pixel = |c: &mut Ctx, v: [u32; 4]| {
+            let mut x = v[0];
+            for q in 1..4 {
+                x = c.m.emit(op::SELECT, u, &[pix_is[q], v[q], x]);
+            }
+            x
+        };
+        let turns = A2C_TURN.map(|t| self.m.c_u32(t));
+        let turn = by_pixel(self, turns);
+        let three = self.m.c_u32(3);
+        let l3 = self.m.emit(op::I_ADD, u, &[level, three]);
+        let lt = self.m.emit(op::I_SUB, u, &[l3, turn]);
+        let have = self.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[lt, two]);
+        let mut mask = self.m.c_u32(0);
+        for k in 0..8u32 {
+            let bits = [0usize, 1, 2, 3].map(|q| {
+                let v = [0, 1, 2].map(|c| {
+                    let s = A2C_FILL[c][q][k as usize];
+                    let present = k < counts[c];
+                    self.m.c_u32(if present { 1 << s } else { 0 })
+                });
+                let z = self.m.c_u32(0);
+                pick(self, v, z, u)
+            });
+            let sb = by_pixel(self, bits);
+            let kc = self.m.c_u32(k);
+            let got = self.m.emit(op::U_GREATER_THAN, b, &[have, kc]);
+            let z = self.m.c_u32(0);
+            let add = self.m.emit(op::SELECT, u, &[got, sb, z]);
+            mask = self.m.emit(op::BITWISE_OR, u, &[mask, add]);
+        }
+        let zero = self.m.c_u32(0);
+        let off = self.m.spec_op(b, op::I_EQUAL, &[n, zero]);
+        let all = self.m.c_u32(u32::MAX);
+        let mask = self.m.emit(op::SELECT, u, &[off, all, mask]);
+        let i = self.m.t_i32();
+        let arr = self.m.t_array(i, 1);
+        let var = self.builtin(B_SAMPLE_MASK, OUTPUT, arr);
+        let pi = self.m.t_ptr(OUTPUT, i);
+        let p = self.m.emit(op::ACCESS_CHAIN, pi, &[var, zero]);
+        let prev = if self.iface.writes_sample_mask {
+            let v = self.m.emit(op::LOAD, i, &[p]);
+            self.m.emit(op::BITCAST, u, &[v])
+        } else {
+            all
+        };
+        self.iface.writes_sample_mask = true;
+        self.iface.builtins.insert(B_SAMPLE_MASK);
+        let both = self.m.emit(op::BITWISE_AND, u, &[prev, mask]);
+        let v = self.m.emit(op::BITCAST, i, &[both]);
+        self.m.emit_void(op::STORE, &[p, v]);
     }
 
     /// The fixed-function alpha test: the invocation is discarded when its

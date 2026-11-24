@@ -10,6 +10,8 @@
 
 /** @brief The specialization constant id of a fragment program's alpha test compare function (the translator's ALPHA_FUNC_SPEC). */
 #define ALPHA_FUNC_SPEC 0x400u
+/** @brief The specialization constant id of a fragment program's own alpha to coverage, its samples (the translator's A2C_SPEC). */
+#define A2C_SPEC 0x401u
 /** @brief The first specialization constant id of a fetch's texture kind (the translator's TEXTURE_FETCH_KIND_SPEC). */
 #define NVN_FETCH_KIND_SPEC 0x500u
 /** @brief The value of a fetch kind constant that has the program read the kind at run time (KIND_AT_RUN_TIME). */
@@ -81,6 +83,8 @@ typedef struct nvn_module {
      */
     uint32_t xfb_record, xfb_slots;
     uint8_t xfb_select[4][512];
+    /** @brief The program computes the console's alpha to coverage mask itself (A2C_SPEC). */
+    bool a2c;
     /** @brief Its interface records (nvn_shader_iface), as many as the translation has. */
     nvn_iface_rec *recs;
     uint32_t nrecs;

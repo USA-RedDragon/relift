@@ -8,8 +8,10 @@
  */
 #include "hos.h"
 #include "nvn_priv.h"
+#include "nvn_module.h"
 #include "nvn_vk.h"
 #include "runner.h"
+#include "test_nvn_a2c_spv.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -246,11 +248,14 @@ typedef struct rig {
     VkDescriptorSetLayout dsl;
     VkDescriptorPool pool;
     VkDescriptorSet set;
+    /** @brief The translated fragment program computes the mask (A2C_SPEC), not the host's alpha to coverage. */
+    bool translated;
 } rig;
 
-static bool rig_up(rig *k, VkSampleCountFlagBits s)
+static bool rig_up(rig *k, VkSampleCountFlagBits s, bool translated)
 {
     memset(k, 0, sizeof *k);
+    k->translated = translated;
     VkImageCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
                               .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = { SIDE, SIDE, 1 }, .mipLevels = 1,
                               .arrayLayers = 1, .samples = s, .tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -282,17 +287,25 @@ static bool rig_up(rig *k, VkSampleCountFlagBits s)
         VK(vkBindBufferMemory)(g.dev, k->buf, k->buf_mem, 0) != VK_SUCCESS ||
         VK(vkMapMemory)(g.dev, k->buf_mem, 0, bci.size, 0, (void **)&k->map) != VK_SUCCESS)
         return false;
-    VkPushConstantRange gpr = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4 };
+    VkPushConstantRange gpr = { translated ? VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                                           : VK_SHADER_STAGE_FRAGMENT_BIT,
+                                0, translated ? 20 : 4 };
     VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                        .pushConstantRangeCount = 1, .pPushConstantRanges = &gpr };
     if (VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &k->gpl) != VK_SUCCESS)
         return false;
-    VkShaderModule vs = module_of(fill_vert_spv, sizeof fill_vert_spv), fs = module_of(a2c_frag_spv, sizeof a2c_frag_spv);
+    VkShaderModule vs = translated ? module_of(flat_vert_spv, sizeof flat_vert_spv)
+                                   : module_of(fill_vert_spv, sizeof fill_vert_spv);
+    VkShaderModule fs = translated ? module_of(fragment_a2c_spv, sizeof fragment_a2c_spv)
+                                   : module_of(a2c_frag_spv, sizeof a2c_frag_spv);
+    uint32_t spec_n = (uint32_t)s;
+    VkSpecializationMapEntry me = { A2C_SPEC, 0, 4 };
+    VkSpecializationInfo si = { 1, &me, 4, &spec_n };
     VkPipelineShaderStageCreateInfo st[2] = {
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
           .module = vs, .pName = "main" },
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-          .module = fs, .pName = "main" },
+          .module = fs, .pName = "main", .pSpecializationInfo = translated ? &si : NULL },
     };
     VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     VkPipelineInputAssemblyStateCreateInfo ia = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -305,7 +318,7 @@ static bool rig_up(rig *k, VkSampleCountFlagBits s)
     VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
                                                   .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1 };
     VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                                                .rasterizationSamples = s, .alphaToCoverageEnable = VK_TRUE };
+                                                .rasterizationSamples = s, .alphaToCoverageEnable = !translated };
     VkPipelineColorBlendAttachmentState ba = { .colorWriteMask = 0xf };
     VkPipelineColorBlendStateCreateInfo cbs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                                                 .attachmentCount = 1, .pAttachments = &ba };
@@ -380,8 +393,8 @@ static void rig_down(rig *k)
     VK(vkFreeMemory)(g.dev, k->buf_mem, NULL);
 }
 
-/** @brief Draws alpha step a / (STEPS - 1) over the cleared target and reads each pixel's mask into k->map. */
-static void measure(rig *k, uint32_t samples, uint32_t a)
+/** @brief Draws alpha over the cleared target and reads each pixel's mask into k->map. */
+static void measure_at(rig *k, uint32_t samples, float alpha)
 {
     VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                                         .commandPool = g.pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
@@ -406,8 +419,13 @@ static void measure(rig *k, uint32_t samples, uint32_t a)
                            .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &ca };
     VK(vkCmdBeginRendering)(cb, &ri);
     VK(vkCmdBindPipeline)(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, k->gpipe);
-    float alpha = (float)a / (float)(STEPS - 1);
-    VK(vkCmdPushConstants)(cb, k->gpl, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4, &alpha);
+    if (k->translated) {
+        float push[5] = { 0, 0, 0, 0, alpha };
+        VK(vkCmdPushConstants)(cb, k->gpl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof push,
+                               push);
+    } else {
+        VK(vkCmdPushConstants)(cb, k->gpl, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4, &alpha);
+    }
     VK(vkCmdDraw)(cb, 3, 1, 0, 0);
     VK(vkCmdEndRendering)(cb);
     nvn_vk_barrier(cb);
@@ -423,6 +441,43 @@ static void measure(rig *k, uint32_t samples, uint32_t a)
     CHECK_EQ(VK(vkQueueSubmit)(g.queue, 1, &si, g.fence), VK_SUCCESS);
     CHECK_EQ(VK(vkWaitForFences)(g.dev, 1, &g.fence, VK_TRUE, 10000000000ull), VK_SUCCESS);
     VK(vkFreeCommandBuffers)(g.dev, g.pool, 1, &cb);
+}
+
+/** @brief measure_at alpha step a / (STEPS - 1). */
+static void measure(rig *k, uint32_t samples, uint32_t a) { measure_at(k, samples, (float)a / (float)(STEPS - 1)); }
+
+/** @brief The samples covered over the whole target at alpha. */
+static uint32_t covered(rig *k, uint32_t samples, float alpha)
+{
+    measure_at(k, samples, alpha);
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < SIDE * SIDE; i++)
+        total += (uint32_t)__builtin_popcount(k->map[i] & ((1u << samples) - 1u));
+    return total;
+}
+
+static float f32_of(uint32_t b)
+{
+    float f;
+    memcpy(&f, &b, sizeof f);
+    return f;
+}
+
+/**
+ * @brief The least alpha (as its bits, a non-negative float not above 1) at which at least want samples of the
+ * target are covered, by bisection over the float bits (covered grows with alpha).
+ */
+static uint32_t threshold(rig *k, uint32_t samples, uint32_t want)
+{
+    uint32_t lo = 0, hi = 0x3f800000u;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (covered(k, samples, f32_of(mid)) >= want)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    return lo;
 }
 
 TEST(nvn_alpha_to_coverage_covers_more_samples_as_alpha_grows)
@@ -449,7 +504,7 @@ TEST(nvn_alpha_to_coverage_covers_more_samples_as_alpha_grows)
             continue;
         uint32_t n = (uint32_t)counts[c], full = (1u << n) - 1u;
         static rig k;
-        CHECK(rig_up(&k, counts[c]));
+        CHECK(rig_up(&k, counts[c], false));
         uint32_t last = 0;
         for (uint32_t a = 0; a < STEPS; a++) {
             measure(&k, n, a);
@@ -473,8 +528,72 @@ TEST(nvn_alpha_to_coverage_covers_more_samples_as_alpha_grows)
             if (out)
                 fprintf(out, "\n");
         }
+        /* Each level covers one more sample in each 2x2 footprint: SIDE * SIDE / 4 more over the target. */
+        for (uint32_t lvl = 1; out && lvl <= 4 * n; lvl++)
+            fprintf(out, "threshold %u %u\t%08x\n", n, lvl, threshold(&k, n, lvl * SIDE * SIDE / 4));
+        static const uint32_t odd[] = { 0x80000000u, 0xbf800000u, 0x3f800001u, 0x40000000u, 0x7f800000u, 0xff800000u,
+                                        0x7fc00000u, 0xffc00000u, 0x00000001u };
+        for (uint32_t i = 0; out && i < sizeof odd / sizeof odd[0]; i++)
+            fprintf(out, "special %u %08x\t%u\n", n, odd[i], covered(&k, n, f32_of(odd[i])));
         rig_down(&k);
     }
     if (out)
         fclose(out);
+}
+
+/** @brief The console's thresholds (alpha at or above t / 4096 covers one more sample a footprint), as the 3090's. */
+static const uint16_t thresholds[3][32] = {
+    { 249, 763, 1277, 1791, 2306, 2820, 3334, 3848 },
+    { 121, 378, 635, 892, 1149, 1406, 1663, 1920, 2177, 2434, 2691, 2948, 3205, 3462, 3719, 3976 },
+    { 57, 185, 314, 442, 571, 699, 828, 956, 1085, 1213, 1342, 1470, 1599, 1727, 1856, 1984,
+      2113, 2241, 2370, 2498, 2627, 2755, 2884, 3012, 3141, 3269, 3398, 3526, 3655, 3783, 3912, 4040 },
+};
+
+static uint32_t f32_bits(float f)
+{
+    uint32_t b;
+    memcpy(&b, &f, sizeof b);
+    return b;
+}
+
+TEST(nvn_translated_alpha_to_coverage_gives_the_3090s_masks)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    static const VkSampleCountFlagBits counts[3] = { VK_SAMPLE_COUNT_2_BIT, VK_SAMPLE_COUNT_4_BIT,
+                                                     VK_SAMPLE_COUNT_8_BIT };
+    VkImageFormatProperties ifp;
+    CHECK_EQ(VK(vkGetPhysicalDeviceImageFormatProperties)(g.phys, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
+                                                          VK_IMAGE_TILING_OPTIMAL,
+                                                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                              VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                          0, &ifp),
+             VK_SUCCESS);
+    for (uint32_t c = 0; c < 3; c++) {
+        if (!(ifp.sampleCounts & counts[c]))
+            continue;
+        uint32_t n = (uint32_t)counts[c], full = (1u << n) - 1u;
+        static rig k;
+        CHECK(rig_up(&k, counts[c], true));
+        uint32_t off = 0;
+        for (uint32_t a = 0; a < STEPS; a++) {
+            measure(&k, n, a);
+            for (uint32_t i = 0; i < SIDE * SIDE; i++)
+                off += (k.map[i] & full) != nvidia_mask(n, a, i);
+        }
+        CHECK_EQ(off, 0u);
+        for (uint32_t l = 0; l < 4 * n; l++) {
+            float t = (float)thresholds[c][l] / 4096.0f;
+            CHECK_EQ(covered(&k, n, t), (l + 1) * SIDE * SIDE / 4);
+            CHECK_EQ(covered(&k, n, f32_of(f32_bits(t) - 1)), l * SIDE * SIDE / 4);
+        }
+        static const uint32_t none[] = { 0x80000000u, 0xbf800000u, 0xff800000u, 0x7fc00000u, 0xffc00000u, 1u };
+        for (uint32_t i = 0; i < sizeof none / sizeof none[0]; i++)
+            CHECK_EQ(covered(&k, n, f32_of(none[i])), 0u);
+        static const uint32_t all[] = { 0x3f800001u, 0x40000000u, 0x7f800000u };
+        for (uint32_t i = 0; i < sizeof all / sizeof all[0]; i++)
+            CHECK_EQ(covered(&k, n, f32_of(all[i])), n * SIDE * SIDE);
+        rig_down(&k);
+    }
 }

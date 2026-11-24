@@ -92,6 +92,8 @@ static bool patch_spirv(uint32_t *w, size_t n, int stage, nvn_module *m)
                 x->builtin = w[i + 3], x->has_builtin = true;
             else if (w[i + 2] == 1 && w[i + 3] == ALPHA_FUNC_SPEC)
                 m->alpha_test = true;
+            else if (w[i + 2] == 1 && w[i + 3] == A2C_SPEC)
+                m->a2c = true;
         } else if (op == 59 && len >= 4 && w[i + 2] < bound) {
             v[w[i + 2]].storage = w[i + 3] + 1u;
             m->fixed_push |= w[i + 3] == 9;

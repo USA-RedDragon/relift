@@ -34,7 +34,6 @@ pub use host::{
     MeshLimits, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT,
     SEGMENT_SHIFT_SPEC, Warp, WarpPath,
 };
-pub use io::ALPHA_FUNC_SPEC;
 pub use io::mesh::{
     Component, MESH_FIRST_TASK_OFFSET, MeshPath, MeshPipeline, MeshTopology,
     fallback as mesh_fallback, mesh_components,
@@ -44,6 +43,7 @@ pub use io::xfb::{
     Buffer as XfbBuffer, GlslcBuffer as XfbGlslcBuffer, Layout as XfbLayout, PUSH_XFB_SCRATCH,
     SKIP as XFB_SKIP, XfbMemory, record_layout as xfb_record_layout,
 };
+pub use io::{A2C_SPEC, ALPHA_FUNC_SPEC};
 pub use io::{PUSH_WRITTEN_PAGES, WRITTEN_PAGE_BITS};
 pub use mem::pools::{
     POOL_ARRAY_BINDING, POOL_SEARCH_STEPS, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST,
@@ -1034,6 +1034,7 @@ impl Ctx {
         if self.stage == Stage::Fragment {
             let targets = self.sph_words[18];
             self.fragment_outputs(targets);
+            self.alpha_to_coverage(targets);
             self.alpha_test(targets);
         }
         self.fixed_point_size();
