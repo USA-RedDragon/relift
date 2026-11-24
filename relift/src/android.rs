@@ -460,8 +460,16 @@ pub struct About {
     pub platform: String,
     /// The game's version, or empty.
     pub version: String,
-    /// The game draws with Vulkan, so a GPU driver can be chosen for it.
+    /// The game presents through Vulkan, so a GPU driver can be chosen for
+    /// it; true of every guest, whose pictures all reach the screen through
+    /// the runtime's Vulkan presenter.
     pub vulkan: bool,
+    /// The game reaches the network (local play and online services), so
+    /// the app asks the internet permissions.
+    pub internet: bool,
+    /// The program links the guest Vulkan forwarding layer and its
+    /// Zstandard decoder, whose license the app carries.
+    pub forwarding: bool,
     /// The game follows the device's rotation (a tall picture); else the
     /// activity keeps the sensor landscape orientation.
     pub portrait: bool,
@@ -474,6 +482,13 @@ pub struct About {
     /// since API level 26 in favor of the category
     /// (<https://developer.android.com/reference/android/content/pm/ApplicationInfo>).
     pub game: bool,
+}
+
+/// Whether a game of `platform` reaches the network: a Switch game's
+/// local play and services, a Linux program's sockets.
+#[must_use]
+pub fn uses_network(platform: &str) -> bool {
+    matches!(platform, "switch" | "linux")
 }
 
 /// The name the settings pages give a guest platform.
@@ -584,7 +599,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
 "#,
         package = a.package,
         target = sdk.target_sdk,
-        internet = if a.about.vulkan {
+        internet = if a.about.internet {
             "<uses-permission android:name=\"android.permission.INTERNET\"/>\n  <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>\n  "
         } else {
             ""
@@ -742,14 +757,23 @@ pub fn launcher(exe: &Path, seed: &str, label: &str) -> Result<Launcher, BoxErro
     Ok(Launcher {
         label: crate::appimage::display_name(&info, label),
         icons: crate::icon::launcher_pngs(info.identity.icon.as_ref(), seed),
-        about: About {
-            platform: platform_name(&info.identity.platform).to_string(),
-            version: info.identity.version.clone().unwrap_or_default(),
-            vulkan: info.identity.platform == "switch",
-            portrait: info.identity.platform == "nds",
-            game: info.identity.is_game(),
-        },
+        about: about(&info.identity),
     })
+}
+
+/// What the settings pages say about the game of `identity` and offer
+/// for it.
+#[must_use]
+pub fn about(identity: &relift_info::Identity) -> About {
+    About {
+        platform: platform_name(&identity.platform).to_string(),
+        version: identity.version.clone().unwrap_or_default(),
+        vulkan: true,
+        internet: uses_network(&identity.platform),
+        forwarding: identity.platform == "switch",
+        portrait: identity.platform == "nds",
+        game: identity.is_game(),
+    }
 }
 
 /// The strings the manifest and the shortcuts name.
@@ -1059,7 +1083,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
             include_bytes!("../../runtime/host/dav1d/NOTICE").to_vec(),
         );
     }
-    if a.about.vulkan {
+    if a.about.forwarding {
         z.add("assets/licenses/zstd.txt", LICENSE_ZSTD.as_bytes().to_vec());
     }
     let unaligned = w.join("unaligned.apk");
@@ -1260,26 +1284,8 @@ mod tests {
 
     #[test]
     fn the_manifest_names_the_activity_and_the_target() {
-        let sdk = Sdk {
-            aapt2: PathBuf::new(),
-            d8: PathBuf::new(),
-            zipalign: PathBuf::new(),
-            apksigner: PathBuf::new(),
-            android_jar: PathBuf::new(),
-            target_sdk: 36,
-            javac: PathBuf::new(),
-            keytool: PathBuf::new(),
-        };
-        let deps = Deps {
-            sdl3_include: PathBuf::new(),
-            sdl3_lib: PathBuf::new(),
-            sdl3_jar: PathBuf::new(),
-            opus_include: PathBuf::new(),
-            opus_lib: PathBuf::new(),
-            adrenotools: None,
-            vpx: None,
-            dav1d: None,
-        };
+        let sdk = test_sdk();
+        let deps = test_deps();
         let a = Apk {
             package: "dev.relift.game.x",
             label: "A & \"B\"",
@@ -1296,6 +1302,8 @@ mod tests {
                 platform: "Switch".into(),
                 version: "1.0.2".into(),
                 vulkan: true,
+                internet: true,
+                forwarding: true,
                 portrait: false,
                 game: true,
             },
@@ -1339,6 +1347,63 @@ mod tests {
         ));
         assert!(m.contains("android.permission.FOREGROUND_SERVICE_DATA_SYNC"));
         assert!(m.contains("android.permission.POST_NOTIFICATIONS"));
+    }
+
+    fn test_sdk() -> Sdk {
+        Sdk {
+            aapt2: PathBuf::new(),
+            d8: PathBuf::new(),
+            zipalign: PathBuf::new(),
+            apksigner: PathBuf::new(),
+            android_jar: PathBuf::new(),
+            target_sdk: 36,
+            javac: PathBuf::new(),
+            keytool: PathBuf::new(),
+        }
+    }
+
+    fn test_deps() -> Deps {
+        Deps {
+            sdl3_include: PathBuf::new(),
+            sdl3_lib: PathBuf::new(),
+            sdl3_jar: PathBuf::new(),
+            opus_include: PathBuf::new(),
+            opus_lib: PathBuf::new(),
+            adrenotools: None,
+            vpx: None,
+            dav1d: None,
+        }
+    }
+
+    #[test]
+    fn a_gba_app_offers_the_gpu_driver_picker_and_no_internet() {
+        let identity = relift_info::Identity {
+            platform: "gba".into(),
+            ..relift_info::Identity::default()
+        };
+        let about = about(&identity);
+        assert!(about.vulkan);
+        assert!(!about.internet && !about.forwarding);
+        let sdk = test_sdk();
+        let deps = test_deps();
+        let a = Apk {
+            package: "dev.relift.game.gba",
+            label: "GBA",
+            icons: &[],
+            target: target("android-arm64").unwrap(),
+            program: Path::new("p"),
+            stem: "gba",
+            deps: &deps,
+            work: Path::new("w"),
+            output: Path::new("o"),
+            data_manifest: None,
+            fonts: None,
+            about: &about,
+        };
+        let m = manifest(&a, &sdk, false);
+        assert!(m.contains("android:name=\"relift.gpu_driver\" android:value=\"true\""));
+        assert!(!m.contains("android.permission.INTERNET"));
+        assert!(uses_network("switch") && uses_network("linux"));
     }
 
     #[test]
