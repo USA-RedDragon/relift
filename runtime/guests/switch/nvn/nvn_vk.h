@@ -1066,6 +1066,8 @@ void nvn_dlss_slot(uint32_t slot);
  * a draw has run on stops, since the host device does not count.
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
+/** @brief Runs one recorded command of r's command set on the host device, as a submit replays it. */
+int nvn_vk_cmd(replay *r, const nvn_cmd *e);
 /** @brief What nvn_draw_cmd returns for a command it does not run; distinct from RL_OK and RL_PENDING. */
 #define NVN_UNHANDLED (-1)
 /**

@@ -4256,6 +4256,11 @@ static int clear_enabled(replay *r, bool *run)
     return nvn_draw_render_enabled(r, run);
 }
 
+/**
+ * @brief nvnCommandBufferClearColor, Colori and Colorui(index, color, mask): render target index set to color, four
+ * floats, signed or unsigned integers. The 16 bytes go to the host clear as they are: Vulkan reads a clear color as
+ * float, int or uint by the attachment's format, as the console's clear reads it by the target's.
+ */
 static int clear_color(replay *r, const nvn_cmd *e)
 {
     bool run = true;
@@ -4894,8 +4899,6 @@ int nvn_vk_clear_image(replay *r, vimg *v, uint32_t level, uint32_t layer, uint3
  */
 static int run_cmd(replay *r, const nvn_cmd *e);
 
-int nvn_vk_cmd(replay *r, const nvn_cmd *e) { return run_cmd(r, e); }
-
 static bool sync_each_command(void)
 {
     static int sync_each = -1;
@@ -4921,6 +4924,8 @@ static int run_one(replay *r, const nvn_cmd *e)
         return nvn_vk_stop(r, "%s on 0x%llx, which is not an event the layer made", nvn_cmd_name(e->op),
                            (unsigned long long)e->x[1]);
     case NVN_CMD_CLEAR_COLOR:
+    case NVN_CMD_CLEAR_COLORI:
+    case NVN_CMD_CLEAR_COLORUI:
         return clear_color(r, e);
     case NVN_CMD_CLEAR_TEXTURE:
     case NVN_CMD_CLEAR_TEXTUREI:
@@ -4985,6 +4990,8 @@ static int run_one(replay *r, const nvn_cmd *e)
     }
     }
 }
+
+int nvn_vk_cmd(replay *r, const nvn_cmd *e) { return run_cmd(r, e); }
 
 /** @brief Runs one command (run_one) and counts how it ran for RELIFT_NVN_STATS. */
 static int run_cmd(replay *r, const nvn_cmd *e)
