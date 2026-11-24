@@ -5,6 +5,7 @@
  */
 #include "runner.h"
 
+#include <relift/ports.h>
 #include <relift/warmup.h>
 
 #include "warmup_int.h"
@@ -381,6 +382,21 @@ TEST(a_blocking_screen_after_failures_waits_for_start_anyway)
     CHECK(rl_warmup_key(RL_WARMUP_KEY_ENTER));
     CHECK_EQ(rl_warmup_wait(), RL_WARMUP_START);
     CHECK_EQ(g_quits, 0);
+    rl_warmup_reset();
+}
+
+TEST(a_blocking_screen_after_failures_starts_by_itself_when_an_input_script_drives_the_run)
+{
+    fresh();
+    CHECK(rl_ports_set_script("100:p1.a"));
+    rl_warmup_begin(40, RL_WARMUP_BLOCKING);
+    rl_warmup_progress(40, 2);
+    rl_warmup_saving();
+    rl_warmup_end();
+    g_now += RL_WU_DONE_NS;
+    CHECK_EQ(rl_warmup_wait(), RL_WARMUP_START);
+    CHECK_EQ(g_quits, 0);
+    rl_ports_script_reset();
     rl_warmup_reset();
 }
 

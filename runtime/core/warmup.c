@@ -353,9 +353,20 @@ int rl_warmup_wait(void)
 {
     pthread_mutex_lock(&g.lock);
     int answer = RL_WARMUP_START;
+    /* A run an input script drives has nobody to answer the refusal report: it shows for the usual moment and the
+     * game starts, as the text entry panel's auto does. */
+    bool scripted = rl_ports_script_in_use();
+    bool logged = false;
     while (g.mode == RL_WARMUP_BLOCKING && g.phase != RL_WARMUP_IDLE && g.answer != RL_WARMUP_QUIT) {
         if (g.phase == RL_WARMUP_FINISHED) {
-            if (g.failed ? g.answered : now_ns() - g.tend >= RL_WU_DONE_NS)
+            bool timed = now_ns() - g.tend >= RL_WU_DONE_NS;
+            if (g.failed && scripted && timed && !logged) {
+                logged = true;
+                rl_log(RL_LOG_INFO, "warmup",
+                       "%u shaders were refused; an input script drives this run, so the game starts without an answer",
+                       g.failed);
+            }
+            if (g.failed && !scripted ? g.answered : timed)
                 break;
         }
         struct timespec ts;
