@@ -349,12 +349,13 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_KHR_cooperative_matrix",
                                            "VK_EXT_robustness2",                 "VK_EXT_provoking_vertex",
                                            "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library",
-                                           "VK_EXT_mesh_shader",                 "VK_EXT_device_fault" };
+                                           "VK_EXT_mesh_shader",                 "VK_EXT_device_fault",
+                                           "VK_EXT_transform_feedback" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, placed;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, xfb, placed;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -400,7 +401,8 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
                                                &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
                                                &feat.provoking,    NULL,        &feat.gpl,          &feat.mesh,
-                                               &feat.fault };
+                                               &feat.fault,        &feat.xfb };
+    feat.xfb = (ext_features){ .sType = (VkStructureType)1000028000 };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -409,7 +411,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.f13 = (VkPhysicalDeviceVulkan13Features){ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan13Features *f13 = &feat.f13;
     rob2_on = false;
-    bool provoking_on = false, gpl_on = false, mesh_on = false, fault_on = false;
+    bool provoking_on = false, gpl_on = false, mesh_on = false, fault_on = false, xfb_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
             if (!strcmp(exts[i].extensionName, device_exts[k])) {
@@ -424,6 +426,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 gpl_on |= feats[k] == &feat.gpl;
                 mesh_on |= feats[k] == &feat.mesh;
                 fault_on |= feats[k] == &feat.fault;
+                xfb_on |= feats[k] == &feat.xfb;
                 break;
             }
     const char *const *up = NULL;
@@ -496,6 +499,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     /* memoryMapPlaced, memoryMapRangePlaced, memoryUnmapReserve: placements map whole allocations only. */
     g.placed = map2 && placed && feat.placed.b[0] && feat.placed.b[2];
     feat.placed.b[1] = VK_FALSE;
+    g.transform_feedback = xfb_on && feat.xfb.b[0];
     feat.fault.b[1] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
@@ -542,6 +546,14 @@ static void bring_up(void)
             if (f)
                 g.fns.f[i] = f;
         }
+    if (g.transform_feedback) {
+        void *bind = gdpa(g.dev, "vkCmdBindTransformFeedbackBuffersEXT"),
+             *begin = gdpa(g.dev, "vkCmdBeginTransformFeedbackEXT"), *end = gdpa(g.dev, "vkCmdEndTransformFeedbackEXT");
+        memcpy(&g.bind_xfb, &bind, sizeof bind);
+        memcpy(&g.begin_xfb, &begin, sizeof begin);
+        memcpy(&g.end_xfb, &end, sizeof end);
+        g.transform_feedback = g.bind_xfb && g.begin_xfb && g.end_xfb;
+    }
     if (g.mesh_shader) {
         void *draw = gdpa(g.dev, "vkCmdDrawMeshTasksEXT");
         memcpy(&g.draw_mesh_tasks, &draw, sizeof draw);
@@ -1258,7 +1270,8 @@ bool nvn_vk_import(uint64_t guest, uint64_t size, const nvn_import *again, nvn_i
                                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                         VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                        (g.transform_feedback ? NVN_BUFFER_USAGE_XFB : 0) };
     VkBuffer buf;
     VkDeviceMemory dm = NULL;
     if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &buf) != VK_SUCCESS)
@@ -1602,7 +1615,7 @@ void nvn_vk_unimport_keep(nvn_import *im, bool keep)
     memset(im, 0, sizeof *im);
 }
 
-static bool staging_new(staging *s, uint64_t size, bool read);
+static bool staging_with(staging *s, uint64_t size, bool read, VkBufferUsageFlags extra);
 bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size)
 {
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1629,14 +1642,19 @@ bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size)
     return true;
 }
 
+bool nvn_vk_xfb_counters_new(staging *s)
+{
+    return staging_with(s, 4u * NVN_XFB_BUFFERS, true, NVN_BUFFER_USAGE_XFB_COUNTER);
+}
+
 bool nvn_vk_staging_new(staging *s, uint64_t size)
 {
-    return staging_new(s, size, false);
+    return staging_with(s, size, false, 0);
 }
 
 bool nvn_vk_readback_new(staging *s, uint64_t size)
 {
-    return staging_new(s, size, true);
+    return staging_with(s, size, true, 0);
 }
 
 /**
@@ -1644,14 +1662,15 @@ bool nvn_vk_readback_new(staging *s, uint64_t size)
  * from host-cached memory where the device has it, since reading uncached memory runs at a small fraction of the
  * speed.
  */
-static bool staging_new(staging *s, uint64_t size, bool read)
+/** @brief A mapped host-visible buffer of size bytes with the staging usages and extra (host-cached when read). */
+static bool staging_with(staging *s, uint64_t size, bool read, VkBufferUsageFlags extra)
 {
     memset(s, 0, sizeof *s);
     VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                .size = size ? size : 4,
                                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT };
+                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra };
     if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &s->buf) != VK_SUCCESS)
         return false;
     VkMemoryRequirements req;

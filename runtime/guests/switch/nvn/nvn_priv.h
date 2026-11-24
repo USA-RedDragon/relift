@@ -662,6 +662,11 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
 #define NVN_TRACE_SET 3u
 #define NVN_TRACE_BINDING 7u
 /**
+ * @brief Record kind: the program captures transform feedback buffer `bank` with `offset` bytes per vertex, from
+ * vertex stream `spec` (the table's RECORD_XFB; 13 and 14 are other records).
+ */
+#define NVN_IFACE_XFB 15u
+/**
  * @brief The storage image arrays the programs of the shader table use, as bits (binding - 32) / 8 * 6 + (binding - 32)
  * % 8 of *used; false when the table records none (a table without such records, or no table), and then every array
  * counts as used.
@@ -971,6 +976,10 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_MULTI_DRAW_MESH_TASKS_3D_INDIRECT, nvnCommandBufferMultiDrawMeshTasks3DIndirect) \
     X(NVN_CMD_MULTI_DRAW_MESH_TASKS_3D_INDIRECT_COUNT, nvnCommandBufferMultiDrawMeshTasks3DIndirectCount) \
     X(NVN_CMD_END_TRANSFORM_FEEDBACK, nvnCommandBufferEndTransformFeedback) \
+    X(NVN_CMD_PAUSE_TRANSFORM_FEEDBACK, nvnCommandBufferPauseTransformFeedback) \
+    X(NVN_CMD_RESUME_TRANSFORM_FEEDBACK, nvnCommandBufferResumeTransformFeedback) \
+    X(NVN_CMD_BIND_TRANSFORM_FEEDBACK_BUFFERS, nvnCommandBufferBindTransformFeedbackBuffers) \
+    X(NVN_CMD_DRAW_TRANSFORM_FEEDBACK, nvnCommandBufferDrawTransformFeedback) \
     X(NVN_CMD_EVALUATE_DLSS, nvnCommandBufferEvaluateDlss) \
     X(NVN_CMD_FENCE_SYNC, nvnCommandBufferFenceSync) \
     X(NVN_CMD_REPORT_COUNTER, nvnCommandBufferReportCounter) \

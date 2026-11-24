@@ -184,6 +184,11 @@ impl TraceSel {
             .then(|| self.spec.clone())
     }
 }
+/// An interface record: the translation captures transform feedback buffer
+/// (second field) with the stride in bytes in the third field and the
+/// vertex stream in the fourth (`Interface::xfb`). 13 and 14 are taken by
+/// other records.
+pub const RECORD_XFB: u32 = 15;
 
 /// The transform feedback layout of each program the scan's xfb JSON names
 /// (empty for none), as the driver programs it ([`XfbLayout::from_glslc`]).
@@ -784,6 +789,9 @@ pub fn records(i: &Interface) -> Vec<[u32; 4]> {
     for &b in i.texture_bindings.range(first_image..) {
         recs.push([RECORD_IMAGE_BINDING, b, 0, 0]);
     }
+    for (k, &(stride, stream)) in i.xfb.iter().enumerate() {
+        recs.push([RECORD_XFB, k as u32, stride, stream]);
+    }
     recs
 }
 
@@ -849,6 +857,14 @@ pub(crate) mod tests {
             .filter(|r| r[0] == RECORD_IMAGE_BINDING)
             .collect();
         assert_eq!(recs, [[RECORD_IMAGE_BINDING, image, 0, 0]]);
+        let x = Interface {
+            xfb: vec![(16, 0), (24, 1)],
+            ..Interface::default()
+        };
+        assert_eq!(
+            records(&x),
+            [[RECORD_XFB, 0, 16, 0], [RECORD_XFB, 1, 24, 1]]
+        );
     }
 
     #[test]

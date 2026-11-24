@@ -1737,6 +1737,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         return rc;
     if ((rc = mark_stage_writes(r, st, mods, 0, 4)) != RL_OK)
         return rc;
+    nvn_xfb_draw xd;
+    if ((rc = nvn_xfb_draw_prepare(r, last, &xd)) != RL_OK)
+        return rc;
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
@@ -1764,6 +1767,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             keys[s] = mods[s] ? mods[s]->key : NULL;
         nvn_label_draw(g.cb, "draw", keys);
     }
+    nvn_xfb_draw_begin(g.cb, &xd);
     if (indexed) {
         VK(vkCmdBindIndexBuffer)(g.cb, dd.ibuf, dd.ioff, dd.ivk);
         VK(vkCmdDrawIndexed)(g.cb, count, st->inst_count, 0, base, st->inst_base);
@@ -1771,6 +1775,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
     nvn_vk_pass_drew(mods[1] ? mods[1]->key : NULL);
+    nvn_xfb_draw_end(g.cb, &xd);
     nvn_counters_end(counted);
     if (traced) {
         if (!nvn_vk_flush(r))
@@ -1786,6 +1791,15 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         nvn_trace_end(r, &tc);
     }
     return RL_OK;
+}
+
+const nvn_module *nvn_draw_module(replay *r, uint32_t s) { return module_of(r, r->st->code[s], (int)s); }
+
+int nvn_draw_arrays(replay *r, uint32_t mode, uint32_t first, uint32_t count)
+{
+    r->st->inst_base = 0;
+    r->st->inst_count = 1;
+    return draw(r, mode, false, 0, 0, 0, first, count);
 }
 
 static VkPipeline mesh_pass_pipeline(replay *r, const module *m, uint32_t n, const VkSpecializationMapEntry *map,
@@ -3345,6 +3359,6 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
                                      (uint32_t)e->x[3])
                               : RL_OK;
     default:
-        return NVN_UNHANDLED;
+        return nvn_xfb_cmd(r, e);
     }
 }

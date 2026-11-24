@@ -147,7 +147,8 @@ bool nvn_mirror_make(uint64_t guest, uint64_t size, nvn_import *out)
                                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                        (g.transform_feedback ? NVN_BUFFER_USAGE_XFB : 0) };
     if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &m->buf) != VK_SUCCESS) {
         free(m);
         return false;

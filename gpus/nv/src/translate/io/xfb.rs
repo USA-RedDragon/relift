@@ -288,7 +288,11 @@ pub(crate) fn finish(c: &mut Ctx, entry: u32) {
     }
     c.cap(CAP_TRANSFORM_FEEDBACK);
     crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[entry, MODE_XFB]);
-    c.iface.xfb = true;
+    c.iface.xfb = layout
+        .buffers
+        .iter()
+        .map(|b| (b.stride, b.stream))
+        .collect();
 }
 
 #[cfg(test)]

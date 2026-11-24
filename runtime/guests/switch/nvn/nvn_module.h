@@ -69,6 +69,12 @@ typedef struct nvn_module {
     bool writes_layer, writes_viewport;
     /** @brief The program has the alpha test (ALPHA_FUNC_SPEC), and reads the fixed-state push constants. */
     bool alpha_test, fixed_push;
+    /**
+     * @brief The transform feedback buffers it captures to (bit i: buffer i, from its NVN_IFACE_XFB records) and
+     * each one's stride in bytes.
+     */
+    uint32_t xfb_mask;
+    uint32_t xfb_stride[4];
     /** @brief Its interface records (nvn_shader_iface), as many as the translation has. */
     nvn_iface_rec *recs;
     uint32_t nrecs;
@@ -167,4 +173,12 @@ VkShaderModule nvn_module_vertex_for(nvn_module *vert, nvn_module *frag);
  */
 bool nvn_module_link(nvn_module *const mods[5], VkShaderModule out[5]);
 
+
+/**
+ * @brief Before a draw whose last stage before the rasterizer is last: notes its buffer 0 stride and, while a capture
+ * is on and last captures, gathers the buffers it binds into *x and marks them written. RL_OK or a stop.
+ */
+int nvn_xfb_draw_prepare(replay *r, const nvn_module *last, nvn_xfb_draw *x);
+/** @brief The module of the program bound to stage s (nvn_draw.c); NULL when it cannot be had (the replay stopped). */
+const nvn_module *nvn_draw_module(replay *r, uint32_t s);
 #endif

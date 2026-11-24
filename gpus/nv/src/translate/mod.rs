@@ -112,10 +112,11 @@ pub enum Interp {
 /// What a translated shader reads and writes, for the pipeline layout.
 #[derive(Clone, Debug, Default)]
 pub struct Interface {
-    /// The translation captures outputs to transform feedback buffers
-    /// ([`Options::xfb`]): it runs only in a pipeline whose last stage
-    /// before the rasterizer it is.
-    pub xfb: bool,
+    /// The transform feedback buffers the translation captures to
+    /// ([`Options::xfb`]), by buffer: (stride in bytes, stream); empty when
+    /// it captures nothing. A capturing translation runs only in a pipeline
+    /// whose last stage before the rasterizer it is.
+    pub xfb: Vec<(u32, u32)>,
     pub inputs: BTreeMap<u32, Option<Interp>>,
     pub outputs: BTreeSet<u32>,
     /// Constant banks read, by bank number (see [`cbuf_binding`]).

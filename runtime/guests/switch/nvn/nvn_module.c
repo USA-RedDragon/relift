@@ -694,6 +694,10 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
         if (m->recs[i].kind == NVN_IFACE_TRACE)
             m->trace_words = m->recs[i].bank;
+        if (m->recs[i].kind == NVN_IFACE_XFB && m->recs[i].bank < 4) {
+            m->xfb_mask |= 1u << m->recs[i].bank;
+            m->xfb_stride[m->recs[i].bank] = m->recs[i].offset;
+        }
         if (m->recs[i].kind == NVN_IFACE_STORAGE_SLOT && m->recs[i].bank < NVN_STORAGE_SLOTS)
             m->storage_slots |= 1u << m->recs[i].bank;
         if (m->recs[i].kind == NVN_IFACE_IMAGE_BINDING && !nvn_texset_declares_image(m->recs[i].bank)) {

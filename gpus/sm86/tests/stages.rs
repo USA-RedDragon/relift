@@ -761,7 +761,7 @@ fn a_capturing_geometry_program_decorates_its_capture_words() {
     };
     let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
     dump("geometry_xfb", &s.spirv);
-    assert!(s.interface.xfb);
+    assert_eq!(s.interface.xfb, [(24, 0)]);
     assert!(modes(&s.spirv).contains(&vec![11]));
     assert!(insts(&s.spirv).iter().any(|(o, a)| *o == 17 && a[0] == 53));
     let vars = capture_vars(&s.spirv);
@@ -772,7 +772,7 @@ fn a_capturing_geometry_program_decorates_its_capture_words() {
         assert!(d.iter().any(|(k, x)| *k == 30 && x[0] >= 2));
     }
     let without = translate(&p).unwrap_or_else(|e| panic!("{e}"));
-    assert!(!without.interface.xfb && capture_vars(&without.spirv).is_empty());
+    assert!(without.interface.xfb.is_empty() && capture_vars(&without.spirv).is_empty());
     assert!(!modes(&without.spirv).contains(&vec![11]));
 }
 

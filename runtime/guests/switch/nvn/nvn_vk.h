@@ -239,6 +239,12 @@ typedef struct nvn_vkdev {
     uint64_t storage_align;
     /** @brief vkCmdDrawMeshTasksEXT (loaded with the device when the extension is on). */
     void (*draw_mesh_tasks)(VkCommandBuffer, uint32_t, uint32_t, uint32_t);
+    /** @brief VK_EXT_transform_feedback's transformFeedback is on, with its commands (nvn_xfb.c). */
+    bool transform_feedback;
+    void (*bind_xfb)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *,
+                     const VkDeviceSize *);
+    void (*begin_xfb)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *);
+    void (*end_xfb)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *);
     /** @brief VK_EXT_external_memory_host is on, with its pointer alignment. */
     bool host_import;
     uint64_t import_align;
@@ -332,6 +338,12 @@ bool nvn_vk_window_early(void);
 bool nvn_vk_ready(void);
 
 /** @brief Draw state a queue keeps across command sets, as the GPU keeps it. */
+/** @brief Transform feedback buffers of the GPU. */
+#define NVN_XFB_BUFFERS 4u
+/** @brief VK_EXT_transform_feedback's buffer usages (the generated headers do not hold the extension). */
+#define NVN_BUFFER_USAGE_XFB 0x00000800u
+#define NVN_BUFFER_USAGE_XFB_COUNTER 0x00001000u
+
 typedef struct nvn_gfx {
     uint32_t ncolor;
     rt color[MAX_RT];
@@ -441,7 +453,26 @@ typedef struct nvn_gfx {
         uint64_t image;
         uint32_t mode;
     } shading;
+    /**
+     * @brief Transform feedback (nvn_xfb.c): each buffer bound (GPU address and bytes, 0 for none), whether a
+     * capture is on (from Begin or Resume to End or Pause), the shadow SET_STREAM_OUT_CONTROL_STRIDE(0) Begin writes
+     * to the control buffer, and the counters: each buffer's byte count (u32 each), as the console's write pointer.
+     */
+    struct {
+        uint64_t addr[NVN_XFB_BUFFERS], size[NVN_XFB_BUFFERS];
+        bool on;
+        uint32_t stride0;
+        staging counters;
+    } xfb;
 } nvn_gfx;
+
+/** @brief What one draw binds for transform feedback (nvn_xfb_draw_prepare); n 0 when it captures nothing. */
+typedef struct nvn_xfb_draw {
+    uint32_t n;
+    VkBuffer buf[NVN_XFB_BUFFERS];
+    VkDeviceSize off[NVN_XFB_BUFFERS], size[NVN_XFB_BUFFERS];
+    VkBuffer counters;
+} nvn_xfb_draw;
 
 /** @brief Sets a queue's draw state to the GPU's state before any command (nvn_vk.c). */
 void nvn_gfx_init(nvn_gfx *st);
@@ -464,6 +495,21 @@ typedef struct replay {
     /** @brief The float result (s0) of the last getter. */
     float fret;
 } replay;
+
+/**
+ * @brief Runs a transform feedback command (nvn_xfb.c): the buffer binds, Begin, End, Pause, Resume and
+ * DrawTransformFeedback; NVN_UNHANDLED for any other.
+ */
+int nvn_xfb_cmd(replay *r, const nvn_cmd *e);
+/** @brief Binds x's buffers and begins transform feedback with the queue's counters (inside the draw's rendering). */
+void nvn_xfb_draw_begin(VkCommandBuffer cb, const nvn_xfb_draw *x);
+/** @brief Ends transform feedback after the draw, writing the counters. */
+void nvn_xfb_draw_end(VkCommandBuffer cb, const nvn_xfb_draw *x);
+/** @brief A host-visible counter buffer for transform feedback: NVN_XFB_BUFFERS u32 byte counts (nvn_vk.c). */
+bool nvn_vk_xfb_counters_new(staging *s);
+/** @brief Draws count vertices from first as DrawArrays does, once (nvn_draw.c). */
+int nvn_draw_arrays(replay *r, uint32_t mode, uint32_t first, uint32_t count);
+
 
 /** @brief What a traced draw or dispatch tells the trace beyond the draw state (nvn_trace.c). */
 typedef struct nvn_trace_cmd {
