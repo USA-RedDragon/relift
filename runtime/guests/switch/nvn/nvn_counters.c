@@ -365,6 +365,27 @@ void nvn_counters_settle(uint32_t s)
 
 uint32_t nvn_counters_reports_pending(void) { return rps[rec].n; }
 
+bool nvn_counters_report_due(uint64_t guest, uint64_t size)
+{
+    bool due = false;
+    pthread_mutex_lock(&rq.mu);
+    for (uint32_t s = 0; s < NVN_SLOTS && !due; s++) {
+        /* The slot recorded into holds reports not yet submitted; another slot's count only while its completion is
+         * still to run (complete clears n once it wrote them). */
+        if (s != rec && (!rps[s].queued || rps[s].done))
+            continue;
+        /* A completion running now changes the list it reads; count it as due. */
+        if (s != rec && rps[s].claimed) {
+            due = true;
+            break;
+        }
+        for (uint32_t i = 0; i < rps[s].n && !due; i++)
+            due = rps[s].ev[i].report && rps[s].ev[i].addr < guest + size && guest < rps[s].ev[i].addr + 16;
+    }
+    pthread_mutex_unlock(&rq.mu);
+    return due;
+}
+
 void nvn_counters_slot(uint32_t slot) { rec = slot; }
 
 int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
@@ -523,6 +544,49 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
     }
     VK(vkDestroySemaphore)(g.dev, gate, NULL);
     nvn_vk_staging_free(&big);
+    nvn_unlock();
+    return rc;
+}
+
+int nvn_counters_cond_check(uint8_t *mem, uint64_t addr)
+{
+    nvn_lock();
+    int rc = 0;
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    replay r = { .mem = mem, .st = &st };
+    /* A report recorded in the open batch writes 0 over 0xaa..: the check before it ran must wait for it. */
+    memset(mem + addr, 0xaa, 32);
+    rl_st64(mem, addr + 16, 0);
+    nvn_vk_begin(&r);
+    if (nvn_counters_report(&r, 0, addr) != RL_OK)
+        rc = 1;
+    st.render_mode = NVN_RENDER_IF_EQUAL;
+    st.render_addr = addr;
+    bool run = false;
+    if (!rc && (nvn_draw_render_enabled(&r, &run) != RL_OK || !run || rl_ld64(mem, addr) != 0))
+        rc = 2;
+    /* Nothing recorded writes the second pair: the check reads memory as it is and leaves the batch open. */
+    rl_st64(mem, addr + 64, 5);
+    rl_st64(mem, addr + 80, 6);
+    if (!rc && !nvn_vk_begin(&r))
+        rc = 3;
+    st.render_mode = NVN_RENDER_IF_NOT_EQUAL;
+    st.render_addr = addr + 64;
+    if (!rc && (nvn_draw_render_enabled(&r, &run) != RL_OK || !run || !nvn_vk_recording()))
+        rc = 4;
+    st.render_mode = NVN_RENDER_IF_EQUAL;
+    if (!rc && (nvn_draw_render_enabled(&r, &run) != RL_OK || run || !nvn_vk_recording()))
+        rc = 5;
+    /* A report due into the pair's second value waits too. */
+    if (!rc && nvn_counters_report(&r, 0, addr + 80) != RL_OK)
+        rc = 6;
+    rl_st64(mem, addr + 64, 0);
+    if (!rc && (nvn_draw_render_enabled(&r, &run) != RL_OK || !run || nvn_vk_recording()))
+        rc = 7;
+    if (!nvn_vk_settle() && !rc)
+        rc = 8;
     nvn_unlock();
     return rc;
 }

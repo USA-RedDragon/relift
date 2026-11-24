@@ -1541,6 +1541,24 @@ TEST(nvn_deferred_counter_reports_read_what_the_waiting_path_read)
     CHECK_EQ(nvn_counters_order_check(t_mem(), heap + 0x1000), 0);
 }
 
+TEST(nvn_a_conditional_render_waits_only_for_a_report_or_write_still_due_at_its_counters)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_a_conditional_render_waits_only_for_a_report_or_write_still_due_at_its_counters: no host Vulkan device, skipped\n");
+        return;
+    }
+    rl_ctx *c = t_boot(NULL);
+    if (!p.counter_queries) {
+        /* MoltenVK has no pipeline statistics queries: the host device counts nothing, with or without this change. */
+        fprintf(stderr, "nvn_a_conditional_render_waits_only_for_a_report_or_write_still_due_at_its_counters: the host device has no counter queries, skipped\n");
+        return;
+    }
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap != 0);
+    CHECK_EQ(nvn_counters_cond_check(t_mem(), heap + 0x2000), 0);
+}
+
 TEST(nvn_timestamp_reports_land_once_the_gpu_ran_them_without_a_wait)
 {
     nvn_probes p;

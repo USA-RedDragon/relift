@@ -1198,6 +1198,16 @@ void nvn_counters_settle(uint32_t slot);
 void nvn_counters_slot(uint32_t slot);
 /** @brief Timestamp reports the batch being recorded or run holds. */
 uint32_t nvn_counters_reports_pending(void);
+/**
+ * @brief Whether a counter report recorded or in flight, whose completion has not written it yet, writes into guest
+ * bytes [guest, guest + size).
+ */
+bool nvn_counters_report_due(uint64_t guest, uint64_t size);
+/**
+ * @brief Whether work recorded into the open batch or still in flight may write guest bytes [guest, guest + size)
+ * (nvn_vk_mark_write and the write ranges of nvn_vk_pending_write), so a read of them on the CPU must wait.
+ */
+bool nvn_vk_unsettled(uint64_t guest, uint64_t size);
 /** @brief Before a draw's rendering opens: makes room for its queries (submits and reads back a full batch). */
 int nvn_counters_prepare(replay *r);
 /** @brief Inside the draw's rendering, before the draw: starts its queries; the slot to hand to nvn_counters_end, or UINT32_MAX when the queue is not counting. */

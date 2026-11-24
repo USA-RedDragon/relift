@@ -191,6 +191,12 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr);
  * the first wrong report.
  */
 int nvn_counters_order_check(uint8_t *mem, uint64_t addr);
+/**
+ * @brief Checks the conditional render's wait at guest addr (96 bytes): a report recorded before the check in the
+ * same batch is waited for and read, a pair nothing recorded writes is read without a wait in either mode, and a
+ * report into the pair's second value is waited for. 0 when all hold.
+ */
+int nvn_counters_cond_check(uint8_t *mem, uint64_t addr);
 /** @brief Whether the host device gives calibrated timestamps (nvn_vk_calibrate). */
 bool nvn_vk_calibrated(void);
 /**
@@ -408,6 +414,8 @@ typedef struct nvn_probes {
     bool denorm_preserve_mode32;
     /** @brief The DenormFlushToZero execution mode, on top of those, follows the flushing model exactly. */
     bool denorm_flush_mode32;
+    /** @brief The host device counts draws: it has occlusion and pipeline statistics queries (MoltenVK has not). */
+    bool counter_queries;
 } nvn_probes;
 /** @brief Brings the host device up and gives its probe results; false without a host Vulkan device. */
 bool nvn_vk_probes(nvn_probes *out);

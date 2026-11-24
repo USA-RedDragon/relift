@@ -1497,7 +1497,9 @@ static int stage_draw(replay *r, void *arg)
  * @brief Whether draws run now: nvnCommandBufferSetRenderEnable(false) skips them, and a conditional render enable
  * runs them when the two 64-bit counter values at its address (a ReportCounter pair, 16 bytes apart) are equal or
  * unequal. The values are read after the host device finished what was recorded, the way the GPU reads them when the
- * draw reaches it, so a counter the GPU wrote earlier in the stream counts.
+ * draw reaches it, so a counter the GPU wrote earlier in the stream counts. The wait is skipped when nothing recorded or
+ * in flight can still write the 32 bytes (no report due there and no write range of the device's work covers them):
+ * guest memory then already holds what the GPU will read.
  */
 int nvn_draw_render_enabled(replay *r, bool *run)
 {
@@ -1509,9 +1511,10 @@ int nvn_draw_render_enabled(replay *r, bool *run)
         *run = false;
         return RL_OK;
     }
-    if (!nvn_vk_flush(r))
+    uint64_t at = nvn_gpu_guest(st->render_addr);
+    if ((nvn_counters_report_due(at, 32) || nvn_vk_unsettled(at, 32)) && !nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
-    const uint8_t *p = r->mem + nvn_gpu_guest(st->render_addr);
+    const uint8_t *p = r->mem + at;
     bool equal = rl_ld64(p, 0) == rl_ld64(p, 16);
     *run = equal == (st->render_mode == NVN_RENDER_IF_EQUAL);
     uint64_t seen[3] = { st->render_addr, rl_ld64(p, 0), rl_ld64(p, 16) };

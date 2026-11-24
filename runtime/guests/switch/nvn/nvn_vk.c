@@ -1153,6 +1153,7 @@ bool nvn_vk_probes(nvn_probes *out)
 {
     pthread_once(&g.once, bring_up);
     *out = g.probes;
+    out->counter_queries = g.query_ok;
     return g.ok;
 }
 
@@ -2475,6 +2476,11 @@ static bool settle_writers(void)
         if (pending[s].on && pending[s].w.all)
             return wait_submitted();
     return true;
+}
+
+bool nvn_vk_unsettled(uint64_t guest, uint64_t size)
+{
+    return (g_recording && writes_into(&g_writes, guest, guest + (size ? size : 1))) || nvn_vk_pending_write(guest, size);
 }
 
 bool nvn_vk_pending_write(uint64_t guest, uint64_t size)
