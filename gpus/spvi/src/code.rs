@@ -1256,11 +1256,15 @@ impl Cx<'_> {
         };
         match dst {
             Some(Ty::Ptr(_)) if n >= 2 => self.p.code.push(Op::PtrOfVec { d, s }),
-            Some(Ty::Vec(..)) => match self.width(self.scalar_of(src_ty)) {
-                Some(_) => {
-                    self.panic("bitcast between vectors (the reference gives a scalar)".into());
+            Some(Ty::Vec(e, k)) => match (self.width(self.scalar_of(src_ty)), self.width(e)) {
+                (Some(sw), Some(w)) if sw == w && k == n => {
+                    self.p.code.push(Op::CopyK { d, s, n });
                 }
-                None => self.panic(width_err(m, self.scalar_of(src_ty))),
+                (Some(_), Some(_)) => {
+                    self.panic("bitcast between vectors of other widths".into());
+                }
+                (None, _) => self.panic(width_err(m, self.scalar_of(src_ty))),
+                (_, None) => self.panic(width_err(m, e)),
             },
             Some(_) => match self.width(self.scalar_of(src_ty)) {
                 Some(w) => self.p.code.push(Op::Join { d, s, n, w }),
@@ -1346,7 +1350,7 @@ impl Cx<'_> {
             return;
         };
         let Some(w) = self.width(self.scalar_of(ins.ty)) else {
-            self.panic(format!("type %{}", ins.ty));
+            self.panic(width_err(self.m, self.scalar_of(ins.ty)));
             return;
         };
         let needs_src = matches!(op, 173 | 175 | 177 | 179 | 114 | 111 | 112);

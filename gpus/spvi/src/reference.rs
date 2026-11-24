@@ -489,6 +489,14 @@ impl<'m> Run<'m> {
                             (0..n).map(|k| V::S((x >> (w * k)) & mask(w))).collect(),
                         ))
                     }
+                    (V::C(c), Ty::Vec(e, n)) => {
+                        let (src_w, w) = (self.src_width(a[0]), m.width(e));
+                        assert!(
+                            src_w == w && c.len() == n as usize,
+                            "bitcast between vectors of other widths"
+                        );
+                        V::C(Rc::clone(c))
+                    }
                     (V::C(c), _) => {
                         let src_w = self.src_width(a[0]);
                         V::S(
