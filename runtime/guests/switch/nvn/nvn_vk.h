@@ -1410,6 +1410,8 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
  * no statistic for, on a draw that feeds it, stops when it is reported.
  */
 int nvn_counters_reset(replay *r, uint32_t type);
+/** @brief The reports the game has made so far, by counter type (for the call-count log line). */
+void nvn_counters_report_counts(uint64_t out[NVN_COUNTERS]);
 int nvn_counters_report(replay *r, uint32_t type, uint64_t addr);
 /** @brief Before the batch's command buffer ends: writes the timestamp its reports are put on the guest clock by. */
 void nvn_counters_close(VkCommandBuffer cb);
@@ -1443,7 +1445,10 @@ bool nvn_vk_unsettled(uint64_t guest, uint64_t size);
 int nvn_counters_prepare(replay *r);
 /** @brief Inside the draw's rendering, before the draw: starts its queries; the slot to hand to nvn_counters_end, or UINT32_MAX when the queue is not counting. */
 uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellation);
+/** @brief After a draw: nothing; the draw's queries stay open for the next draw of the queue (nvn_counters_close_query). */
 void nvn_counters_end(uint32_t slot);
+/** @brief Ends the open query pair: before a report or reset is recorded, and where the rendering ends. */
+void nvn_counters_close_query(void);
 
 /**
  * @brief Reads v's level 0 back as RGBA8 pixels (rows of 4 * width bytes), for looking at it: RGBA8 images as they

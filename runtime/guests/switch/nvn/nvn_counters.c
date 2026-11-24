@@ -288,6 +288,7 @@ static bool deferrable(replay *r)
 /** @brief Records event e at this place in the stream, with a timestamp query of its index. */
 static void add_event(event e)
 {
+    nvn_counters_close_query();
     nvn_vk_barrier(g.cb);
     VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, rps[rec].pool, rps[rec].n);
     e.slot = qs[rec].pending;
@@ -302,6 +303,15 @@ static int harvest(replay *r)
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     return RL_OK;
+}
+
+/** @brief Reports the game has made, by counter type. */
+static uint64_t reports_by_type[NVN_COUNTERS];
+
+void nvn_counters_report_counts(uint64_t out[NVN_COUNTERS])
+{
+    for (uint32_t i = 0; i < NVN_COUNTERS; i++)
+        out[i] = __atomic_load_n(&reports_by_type[i], __ATOMIC_RELAXED);
 }
 
 int nvn_counters_reset(replay *r, uint32_t type)
@@ -323,6 +333,8 @@ int nvn_counters_reset(replay *r, uint32_t type)
             return rc;
         st->counter_acc[type] = 0;
     }
+    if (!(st->counter_valid >> type & 1u))
+        rl_log(RL_LOG_INFO, "nvn", "counters: the game uses counter type %u (first reset of it on this queue)", type);
     st->counting = true;
     st->counter_valid |= 1u << type;
     st->counter_inexact &= ~(1u << type);
@@ -394,6 +406,8 @@ int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
 {
     nvn_gfx *st = r->st;
     uint64_t value = 0;
+    if (type < NVN_COUNTERS)
+        __atomic_fetch_add(&reports_by_type[type], 1, __ATOMIC_RELAXED);
     bool counted = type != 0 && type != NVN_COUNTER_TIMESTAMP_TOP;
     if (counted) {
         if (type >= NVN_COUNTERS)
@@ -439,6 +453,25 @@ int nvn_counters_prepare(replay *r)
     return harvest(r);
 }
 
+/**
+ * @brief The query pair left open across draws: every draw of one queue with the same stages adds to the same pair,
+ * because a counter is a sum over draws and is read only at a report or a reset, where the pair is closed.
+ */
+static struct {
+    bool open, geom, tess;
+    uint32_t slot;
+    nvn_gfx *owner;
+} oq;
+
+void nvn_counters_close_query(void)
+{
+    if (!oq.open)
+        return;
+    oq.open = false;
+    VK(vkCmdEndQuery)(g.cb, qs[rec].stats, oq.slot);
+    VK(vkCmdEndQuery)(g.cb, qs[rec].occ, oq.slot);
+}
+
 uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellation)
 {
     if (!st->counting) {
@@ -447,24 +480,26 @@ uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellatio
     }
     if (!pools())
         return UINT32_MAX;
+    if (has_tessellation)
+        st->counter_inexact |= 1u << 9 | 1u << 13;
+    if (oq.open && oq.owner == st && oq.geom == has_geometry && oq.tess == has_tessellation)
+        return oq.slot;
+    nvn_counters_close_query();
     uint32_t slot = qs[rec].pending++;
     qs[rec].owner[slot] = st;
     qs[rec].geom[slot] = has_geometry;
     qs[rec].tess[slot] = has_tessellation;
-    if (has_tessellation)
-        st->counter_inexact |= 1u << 9 | 1u << 13;
     VK(vkCmdBeginQuery)(g.cb, qs[rec].occ, slot, g.occlusion_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
     VK(vkCmdBeginQuery)(g.cb, qs[rec].stats, slot, 0);
+    oq.open = true;
+    oq.geom = has_geometry;
+    oq.tess = has_tessellation;
+    oq.slot = slot;
+    oq.owner = st;
     return slot;
 }
 
-void nvn_counters_end(uint32_t slot)
-{
-    if (slot == UINT32_MAX)
-        return;
-    VK(vkCmdEndQuery)(g.cb, qs[rec].stats, slot);
-    VK(vkCmdEndQuery)(g.cb, qs[rec].occ, slot);
-}
+void nvn_counters_end(uint32_t slot) { (void)slot; }
 
 int nvn_counters_stamp_check(replay *r)
 {

@@ -2309,6 +2309,7 @@ void nvn_vk_end_rendering(void)
     if (!open_pass.open)
         return;
     open_pass.open = false;
+    nvn_counters_close_query();
     VK(vkCmdEndRendering)(g.cb);
     nvn_vk_barrier(g.cb);
     if (nvn_flash_on()) {
@@ -6860,6 +6861,17 @@ static void log_call_counts(double frames)
     last_draws = nvn_vk_count_draws;
     rl_log(RL_LOG_INFO, "nvn", "per present: %.1f NVN commands replayed, %.1f draws, %.1f host Vulkan calls (%.2f per draw)",
            (double)cmds / frames, (double)draws / frames, (double)sum / frames, draws ? (double)sum / (double)draws : 0.0);
+    static uint64_t last_reports[NVN_COUNTERS];
+    uint64_t reports[NVN_COUNTERS];
+    char line[160];
+    int len = 0;
+    nvn_counters_report_counts(reports);
+    for (unsigned t = 0; t < NVN_COUNTERS && len < (int)sizeof line - 24; t++) {
+        if (reports[t] != last_reports[t])
+            len += snprintf(line + len, sizeof line - (size_t)len, " %u:%.1f", t, (double)(reports[t] - last_reports[t]) / frames);
+        last_reports[t] = reports[t];
+    }
+    rl_log(RL_LOG_INFO, "nvn", "counter reports per present by type:%s", len ? line : " none");
     for (int shown = 0; shown < 16; shown++) {
         unsigned best = 0;
         for (unsigned i = 1; i < VKG_COUNT; i++)

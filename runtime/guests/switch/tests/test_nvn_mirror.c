@@ -431,6 +431,45 @@ TEST(nvn_dyn_states_are_set_only_when_their_value_changes)
     CHECK(nvn_dyn_changed(NVN_DYN_CULL_MODE, &b, sizeof b));
 }
 
+TEST(nvn_counter_queries_stay_open_across_draws_of_one_queue_and_close_at_a_report)
+{
+    rl_ctx *c = t_boot(NULL);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up || !g.query_ok)
+        return;
+    static nvn_gfx st;
+    static nvn_gfx other;
+    memset(&st, 0, sizeof st);
+    memset(&other, 0, sizeof other);
+    st.counting = other.counting = true;
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    CHECK(nvn_vk_begin(&r));
+    memset(nvn_vk_calls, 0, sizeof nvn_vk_calls);
+    nvn_vk_count_on = 1;
+    uint32_t a = nvn_counters_begin(&st, false, false);
+    uint32_t b = nvn_counters_begin(&st, false, false);
+    CHECK_EQ(a, b);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdBeginQuery], 2u);
+    nvn_counters_end(b);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdEndQuery], 0u);
+    uint32_t d = nvn_counters_begin(&st, true, false);
+    CHECK(d != a);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdEndQuery], 2u);
+    uint32_t e = nvn_counters_begin(&other, true, false);
+    CHECK(e != d);
+    nvn_counters_close_query();
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdBeginQuery], 6u);
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdEndQuery], 6u);
+    nvn_counters_close_query();
+    CHECK_EQ(nvn_vk_calls[VKG_vkCmdEndQuery], 6u);
+    nvn_vk_count_on = 0;
+    CHECK(nvn_vk_flush(&r));
+}
+
 TEST(nvn_mirror_reads_back_only_the_pages_a_program_marks)
 {
     rl_ctx *c = t_boot(NULL);
