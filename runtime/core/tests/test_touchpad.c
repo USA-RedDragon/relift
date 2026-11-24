@@ -61,8 +61,19 @@ static const rl_port_decl g_ports[] = {
 
 static char g_file[512];
 
+/** @brief The test's time: the touchpad reads this instead of the wall clock, so a held press and a toast time out when the test says. */
+static uint64_t g_now;
+
+static void advance_ms(uint64_t ms)
+{
+    g_now += ms * 1000000ull;
+    rl_touchpad_set_clock(g_now);
+}
+
 static void up(void)
 {
+    g_now = 1000000000ull;
+    rl_touchpad_set_clock(g_now);
     rl_touchpad_reset();
     rl_settings_reset();
     rl_ports_reset();
@@ -84,6 +95,7 @@ static void up(void)
 
 static void down(void)
 {
+    rl_touchpad_set_clock(0);
     if (g_file[0])
         unlink(g_file);
 }
@@ -146,7 +158,7 @@ TEST(touchpad_places_groups_in_dp_from_the_edges_and_holds_quick_taps)
     CHECK(rd("a") == 1.0f);
     rl_touchpad_finger(1, RL_TOUCHPAD_UP, 0, 0);
     CHECK(rd("a") == 1.0f);
-    usleep(60000);
+    advance_ms(60);
     CHECK(rd("a") == 0.0f);
     png("landscape");
     down();
@@ -231,7 +243,7 @@ TEST(touchpad_hides_on_a_gamepad_and_releases_held_controls)
     rl_settings_set("input.touch_pad.show", "auto");
     rl_touchpad_finger(1, RL_TOUCHPAD_DOWN, 1820, 540);
     CHECK(rd("a") == 1.0f);
-    usleep(1600000);
+    advance_ms(1600);
     rl_touchpad_gamepad(true, "Pad", 1);
     CHECK(rd("a") == 0.0f);
     png("toast-connected");
@@ -324,7 +336,8 @@ TEST(touchpad_editor_saves_groups_and_detached_buttons)
     rl_touchpad_finger(2, RL_TOUCHPAD_MOVE, cx + 100, cy + 50);
     rl_touchpad_finger(2, RL_TOUCHPAD_UP, cx + 100, cy + 50);
     rl_touchpad_finger(3, RL_TOUCHPAD_DOWN, 1820, 540);
-    rl_touchpad_tick(rl_clock_ns() + 600000000ull);
+    advance_ms(600);
+    rl_touchpad_tick(g_now);
     rl_touchpad_finger(3, RL_TOUCHPAD_MOVE, 1700, 300);
     rl_touchpad_finger(3, RL_TOUCHPAD_UP, 1700, 300);
     png("editor");
@@ -340,7 +353,7 @@ TEST(touchpad_editor_saves_groups_and_detached_buttons)
     rl_touchpad_finger(5, RL_TOUCHPAD_DOWN, 1700, 300);
     CHECK(rd("a") == 1.0f);
     rl_touchpad_finger(5, RL_TOUCHPAD_UP, 1700, 300);
-    usleep(60000);
+    advance_ms(60);
     rl_touchpad_finger(5, RL_TOUCHPAD_DOWN, 1820, 540);
     CHECK(rd("a") == 0.0f);
     down();

@@ -771,6 +771,17 @@ static void set_value(int idx, float v)
         g.values[idx] = v;
 }
 
+/** @brief The clock the touchpad reads: the monotonic clock, or the time a test set with rl_touchpad_set_clock. */
+static uint64_t g_clock_set;
+
+static uint64_t tp_clock(void)
+{
+    uint64_t t = __atomic_load_n(&g_clock_set, __ATOMIC_ACQUIRE);
+    return t ? t : rl_clock_ns();
+}
+
+void rl_touchpad_set_clock(uint64_t ns) { __atomic_store_n(&g_clock_set, ns, __ATOMIC_RELEASE); }
+
 static void press(int idx)
 {
     set_value(idx, 1.0f);
@@ -1527,7 +1538,7 @@ static void after(void)
 void rl_touchpad_finger(uint64_t id, int phase, float x, float y)
 {
     pthread_mutex_lock(&g.lock);
-    g.now = rl_clock_ns();
+    g.now = tp_clock();
     finger *f = find_finger(id, phase == RL_TOUCHPAD_DOWN);
     if (!f || !g.guest) {
         pthread_mutex_unlock(&g.lock);
@@ -1594,7 +1605,7 @@ void rl_touchpad_back(void)
         pthread_mutex_unlock(&g.lock);
         return;
     }
-    g.now = rl_clock_ns();
+    g.now = tp_clock();
     switch (g.ui) {
     case UI_NONE:
         open_ui(UI_PAUSE);
@@ -1657,7 +1668,7 @@ void rl_touchpad_notice(const char *text)
     pthread_mutex_lock(&g.lock);
     if (g.guest && text && *text) {
         snprintf(g.toast, sizeof g.toast, "%s", text);
-        g.toast_at = rl_clock_ns();
+        g.toast_at = tp_clock();
         g.toast_ns = NOTICE_NS;
         g.dirty = true;
     }
@@ -1668,7 +1679,7 @@ void rl_touchpad_host_settings_done(int next)
 {
     pthread_mutex_lock(&g.lock);
     if (g.ui == UI_HOST) {
-        g.now = rl_clock_ns();
+        g.now = tp_clock();
         if (next == RL_TOUCHPAD_HOST_CONTROLLER) {
             open_ui(UI_SETTINGS);
             g.from_host = true;
@@ -1729,7 +1740,7 @@ bool rl_touchpad_tick(uint64_t now_ns)
 void rl_touchpad_gamepad(bool connected, const char *name, uint32_t count)
 {
     pthread_mutex_lock(&g.lock);
-    g.now = rl_clock_ns();
+    g.now = tp_clock();
     bool was = active();
     g.pads = count;
     bool now = active();
@@ -1756,7 +1767,7 @@ void rl_touchpad_view(uint32_t width, uint32_t height, float px_per_dp, const in
     }
     if (!g.have_view) {
         g.have_view = true;
-        g.view_ns = rl_clock_ns();
+        g.view_ns = tp_clock();
     }
     g.w = width;
     g.h = height;
@@ -1805,7 +1816,7 @@ void rl_touchpad_picture(int32_t r[4])
 
 void rl_touchpad_fill(float *values, uint32_t count)
 {
-    uint64_t now = rl_clock_ns();
+    uint64_t now = tp_clock();
     pthread_mutex_lock(&g.lock);
     for (uint32_t i = 0; i < count; i++)
         values[i] = i >= RL_INPUT_TOUCH_PAD ? 0.0f : g.values[i] != 0.0f || now >= g.held_until[i] ? g.values[i] : 1.0f;
@@ -1836,7 +1847,7 @@ uint32_t rl_touchpad_game_touches(rl_input_touch *out, uint32_t max)
         out[n].y = (uint16_t)(py * 65535.0f);
         n++;
     }
-    if (n == 0 && pad && max > 0 && g.ui == UI_NONE && rl_clock_ns() < g.tap_until) {
+    if (n == 0 && pad && max > 0 && g.ui == UI_NONE && tp_clock() < g.tap_until) {
         out[0].id = UINT32_MAX;
         out[0].x = (uint16_t)(g.tap_x * 65535.0f);
         out[0].y = (uint16_t)(g.tap_y * 65535.0f);
@@ -2209,7 +2220,7 @@ const uint8_t *rl_touchpad_pixels(uint32_t *width, uint32_t *height, int32_t dir
     if (g.fade < 0)
         g.fade = active() ? 1.0f : 0.0f;
     if (g.dirty) {
-        g.now = rl_clock_ns();
+        g.now = tp_clock();
         int32_t old[4] = { g.cv.x0, g.cv.y0, g.cv.x1, g.cv.y1 };
         rl_tp_clear(&g.cv);
         if (g.ui == UI_EDIT) {

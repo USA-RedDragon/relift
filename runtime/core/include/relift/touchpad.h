@@ -206,6 +206,11 @@ RL_RUNTIME_API uint32_t rl_touchpad_placed(rl_touchpad_rect *out, uint32_t max);
 RL_RUNTIME_API void rl_touchpad_notice(const char *text);
 /** @brief The host's settings page closed; next is an rl_touchpad_host_next. */
 RL_RUNTIME_API void rl_touchpad_host_settings_done(int next);
+/**
+ * @brief Makes the touchpad read time from ns instead of the monotonic clock (tests: no wall-clock waits); 0 goes back
+ * to the monotonic clock.
+ */
+RL_RUNTIME_API void rl_touchpad_set_clock(uint64_t ns);
 /** @brief Moves time on (fades, toasts, long presses); returns true while something animates or waits. */
 RL_RUNTIME_API bool rl_touchpad_tick(uint64_t now_ns);
 
