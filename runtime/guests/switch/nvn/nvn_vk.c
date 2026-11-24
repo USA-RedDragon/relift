@@ -78,6 +78,9 @@ static struct {
     uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads, gpu_ns;
     /** @brief Replay's own thread CPU time and the page faults it took (minor, major). */
     uint64_t run_cpu_ns, run_minflt, run_majflt;
+    /** @brief Batches that may write guest memory anywhere: by a program that stores through built addresses, by
+     * more ranges than a write set keeps, by mirrored pools or a device that cannot update unused descriptors. */
+    uint64_t all_store, all_ranges, all_device;
 } tm;
 
 /** @brief Per-present costs for the frame trace's T, X and Y lines (stats.trace): uploads from guest bytes and write-backs to them. */
@@ -2447,13 +2450,16 @@ static void fault_report(void)
  * command buffer, arena, descriptor pools and queries stay its batch's until wait_slot waits for it. g_finished is the
  * number of the last batch known finished.
  */
-/** @brief Guest byte ranges a batch's GPU work may write, kept exactly up to WRITE_RANGES of them, else all. */
+/**
+ * @brief Guest byte ranges a batch's GPU work may write, kept exactly: the arrays grow as a batch notes more ranges
+ * (from WRITE_RANGES), so a batch that writes many places still names them, and only a failed allocation makes it all.
+ */
 #define WRITE_RANGES 64u
 typedef struct write_set {
-    /** @brief all: anything may be written; overflow: because the ranges ran out (not only by marking stores). */
+    /** @brief all: anything may be written; overflow: because the ranges could not be kept (not only by marking stores). */
     bool all, overflow;
-    uint32_t n;
-    uint64_t lo[WRITE_RANGES], hi[WRITE_RANGES];
+    uint32_t n, cap;
+    uint64_t *lo, *hi;
 } write_set;
 
 static struct {
@@ -2484,9 +2490,19 @@ void nvn_vk_mark_write_range(uint64_t guest, uint64_t size)
             g_writes.hi[i] = hi > g_writes.hi[i] ? hi : g_writes.hi[i];
             return;
         }
-    if (g_writes.n == WRITE_RANGES) {
-        g_writes.all = g_writes.overflow = true;
-        return;
+    if (g_writes.n == g_writes.cap) {
+        uint32_t cap = g_writes.cap ? 2 * g_writes.cap : WRITE_RANGES;
+        uint64_t *l = realloc(g_writes.lo, sizeof *l * cap);
+        if (l)
+            g_writes.lo = l;
+        uint64_t *h = l ? realloc(g_writes.hi, sizeof *h * cap) : NULL;
+        if (h)
+            g_writes.hi = h;
+        if (!l || !h) {
+            g_writes.all = g_writes.overflow = true;
+            return;
+        }
+        g_writes.cap = cap;
     }
     g_writes.lo[g_writes.n] = lo;
     g_writes.hi[g_writes.n++] = hi;
@@ -2671,18 +2687,26 @@ static bool submit_recorded(replay *r)
     pending[s].on = true;
     pending[s].readback = readback;
     pending[s].copies = copies;
+    /* The slot takes the recorded set; the recording keeps the slot's old arrays for the next batch. */
+    write_set spare = pending[s].w;
     pending[s].w = g_writes;
-    if (!g.unused_while_pending || nvn_mirror_any())
+    tm.all_store += g_writes.all && !g_writes.overflow;
+    tm.all_ranges += g_writes.overflow;
+    if (!g.unused_while_pending || nvn_mirror_any()) {
         pending[s].w.all = true;
-    memset(&g_writes, 0, sizeof g_writes);
+        tm.all_device++;
+    }
+    g_writes = (write_set){ .cap = spare.cap, .lo = spare.lo, .hi = spare.hi };
     g.uniform_pending = false;
     pending[s].seq = __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
     g.arena_used = 0;
     g.flushes++;
     nvn_gpuprof_batch_site();
     uint32_t next = next_slot(s);
+    const char *site = nvn_wait_site;
     nvn_wait_site = "the next batch slot";
     bool ok = wait_slot(next);
+    nvn_wait_site = site;
     use_slot(next);
     return ok;
 }
@@ -3108,6 +3132,9 @@ static VkFence held_batch(replay *r, int writer, held_run *h)
         nvn_vk_mark_write();
     else if (writer == 2)
         nvn_vk_mark_write_range(0x10000000ull, 0x2000);
+    else if (writer == 3)
+        for (uint64_t i = 0; i < 4 * WRITE_RANGES; i++)
+            nvn_vk_mark_write_range(0x20000000ull + i * 0x2000, 0x1000);
     VkFence f = g.fence;
     h->timing = pthread_create(&h->timer, NULL, held_timer, NULL) == 0;
     if (!h->timing)
@@ -3335,6 +3362,22 @@ int nvn_vk_ring_check(void)
                 VK(vkGetFenceStatus)(g.dev, q) != VK_SUCCESS))
         rc = 12;
     if (q)
+        held_end(&h);
+    nvn_vk_settle();
+    held_free();
+    /* One that writes more ranges than the first arrays hold: still known by its ranges, so neither the wait on
+     * writers nor a read between two of them waits for it, and a read of the last one does. */
+    VkFence m = rc ? NULL : held_batch(&r, 3, &h);
+    uint64_t last = 0x20000000ull + (4 * WRITE_RANGES - 1) * 0x2000;
+    if (!rc && (!m || !nvn_vk_settle_writers() || !nvn_vk_reading_guest(last - 0x1000, 0x1000) || held_out() ||
+                VK(vkGetFenceStatus)(g.dev, m) != VK_NOT_READY))
+        rc = 17;
+    if (!rc)
+        held_release_in(20);
+    if (!rc && (!nvn_pending_check(last) || !nvn_vk_reading_guest(last, 0x10) || !held_out() ||
+                VK(vkGetFenceStatus)(g.dev, m) != VK_SUCCESS))
+        rc = 18;
+    if (m)
         held_end(&h);
     nvn_vk_settle();
     held_free();
@@ -5897,6 +5940,7 @@ void nvn_lock(void)
         nvn_gpuprof_span(SPAN_LOCK, t0, now_ns());
     }
     lock_since = now_ns();
+    nvn_wait_site = "nvn_lock: a batch in flight may write guest memory anywhere";
     settle_writers();
 }
 
@@ -6742,6 +6786,10 @@ static void present_rate(uint64_t total)
            (double)(pl - pl0) / frames, (double)(pln - pln0) / 1e6 / frames);
     rl_log(RL_LOG_INFO, "nvn", "per present: replay thread cpu %.2f ms, %.1f minor and %.1f major page faults in replay",
            (double)tm.run_cpu_ns / 1e6 / frames, (double)tm.run_minflt / frames, (double)tm.run_majflt / frames);
+    rl_log(RL_LOG_INFO, "nvn",
+           "per present: batches that may write guest memory anywhere: %.1f by a storing program, %.1f by too many "
+           "ranges, %.1f by mirrored pools or the device",
+           (double)tm.all_store / frames, (double)tm.all_ranges / frames, (double)tm.all_device / frames);
     pm0 = pm;
     pn0 = pn;
     pl0 = pl;

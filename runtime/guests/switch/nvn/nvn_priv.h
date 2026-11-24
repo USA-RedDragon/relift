@@ -153,7 +153,8 @@ int nvn_vk_keep_check(void);
  * unfinished, the next ones are recorded without waiting for it until the ring is full; a settle
  * waits for all of them; a wait on writers (nvn_lock's) does not wait for a batch that writes no guest
  * memory and does wait for one that may write anywhere; a batch that writes a known range is not waited for by
- * nvn_lock nor by a read beside the range, and is by a read that overlaps it. 0 when all hold, the failing step's number otherwise, -1 with no device.
+ * nvn_lock nor by a read beside the range, and is by a read that overlaps it; a batch that writes more ranges than
+ * the first arrays hold is still known by them. 0 when all hold, the failing step's number otherwise, -1 with no device.
  */
 int nvn_vk_ring_check(void);
 /**

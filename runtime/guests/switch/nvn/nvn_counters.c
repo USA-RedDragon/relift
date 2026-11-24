@@ -430,7 +430,13 @@ int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
 
 int nvn_counters_prepare(replay *r)
 {
-    return r->st->counting && qs[rec].pending == BATCH ? harvest(r) : RL_OK;
+    if (!r->st->counting || qs[rec].pending < BATCH)
+        return RL_OK;
+    /* A full query pool goes with its batch: the submit moves recording to the next slot's pools, and the batch's
+     * completion adds its draws before any later batch's (claim_or_wait), so no wait is needed here. */
+    if (!hos_fixed() && deferrable(r))
+        return nvn_vk_submit(r) ? RL_OK : nvn_vk_stop(r, "the host device failed a submit");
+    return harvest(r);
 }
 
 uint32_t nvn_counters_begin(nvn_gfx *st, bool has_geometry, bool has_tessellation)

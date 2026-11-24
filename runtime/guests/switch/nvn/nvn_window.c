@@ -121,6 +121,9 @@ uint64_t nvnh_nvnWindowSetPresentInterval(rl_ctx *c, uint8_t *mem)
     nvn_window *w = win_of(c, c->x[0], "nvnWindowSetPresentInterval");
     if (!w)
         return RL_PENDING;
+    if (w->interval != (uint32_t)c->x[1])
+        rl_log(RL_LOG_INFO, "nvn", "window 0x%llx present interval %u -> %u at present %llu",
+               (unsigned long long)w->o.addr, w->interval, (uint32_t)c->x[1], (unsigned long long)w->presents);
     w->interval = (uint32_t)c->x[1];
     return nvn_ret(c);
 }
