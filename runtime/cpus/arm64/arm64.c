@@ -126,6 +126,7 @@ static int canonical(uint64_t a) { return g_va_bits >= 64 || a >> g_va_bits == 0
 static int abort_report(rl_ctx *c, uint64_t to, uint64_t from, int how)
 {
     static const char *const kind[] = { "from the function entered at", "from the call at", "from the return or jump at" };
+    rl_fault_log_word_sites("the return address", to);
     return rl_guest_fatal(c, "guest",
                           "instruction abort: return to 0x%llx %s guest pc 0x%llx, outside the %u-bit address space (a "
                           "failed pointer authentication of a return address gives such an address)",
@@ -190,11 +191,13 @@ uint64_t rl_arm64_ret_elsewhere(rl_ctx *c, uint64_t to, uint64_t pc)
 
 uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
-    if (!canonical(c->pc))
+    if (!canonical(c->pc)) {
+        rl_fault_log_word_sites("the guest pc", c->pc);
         return rl_guest_fatal(c, "guest",
                               "instruction abort: fetch from guest pc 0x%llx, outside the %u-bit address space (a failed "
                               "pointer authentication of a return address gives such an address)",
                               (unsigned long long)c->pc, g_va_bits);
+    }
     rl_miss_info m = rl_core_miss_classify(c, c->pc, (uintptr_t)__builtin_return_address(0));
     rl_fn f = rl_core_miss_load(c, &m, c->fpcr);
     if (f)

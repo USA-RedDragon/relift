@@ -159,6 +159,45 @@ static void crash_extra(char *buf, size_t n)
         cpu->describe(t->ctx, buf + w, n - (size_t)w);
 }
 
+uint32_t rl_fault_find_word(uint64_t value, uint64_t *out, uint32_t cap)
+{
+    rl_vm *vm = g_vm;
+    uint32_t n = 0;
+    if (!vm)
+        return 0;
+    for (uint32_t i = 0; i < vm->count; i++) {
+        rl_vm_block b = vm->blocks[i];
+        if (!(b.perm & RL_VM_R))
+            continue;
+        const uint64_t *w = (const uint64_t *)(void *)(vm->base + b.addr);
+        for (uint64_t k = 0; k < b.size / 8; k++)
+            if (w[k] == value) {
+                if (n < cap)
+                    out[n] = b.addr + 8 * k;
+                n++;
+            }
+    }
+    return n;
+}
+
+void rl_fault_log_word_sites(const char *what, uint64_t value)
+{
+    uint64_t at[16];
+    uint32_t n = rl_fault_find_word(value, at, 16);
+    rl_log(RL_LOG_WARN, "fault", "%s 0x%llx sits at %u aligned guest addresses%s", what, (unsigned long long)value, n,
+           n ? ", with the words around it:" : "");
+    for (uint32_t i = 0; i < n && i < 16; i++) {
+        const uint64_t *w = (const uint64_t *)(void *)(g_vm->base + at[i]);
+        rl_vm_block b = rl_vm_query(g_vm, at[i] - 16);
+        bool before = b.size && (b.perm & RL_VM_R) && b.addr + b.size >= at[i];
+        b = rl_vm_query(g_vm, at[i] + 16);
+        bool after = b.size && (b.perm & RL_VM_R) && b.addr <= at[i] + 16;
+        rl_log(RL_LOG_WARN, "fault", "  0x%llx: %016llx %016llx [%016llx] %016llx %016llx", (unsigned long long)at[i],
+               before ? (unsigned long long)w[-2] : 0ull, before ? (unsigned long long)w[-1] : 0ull,
+               (unsigned long long)w[0], after ? (unsigned long long)w[1] : 0ull, after ? (unsigned long long)w[2] : 0ull);
+    }
+}
+
 void rl_fault_install(rl_vm *vm)
 {
     g_vm = vm;

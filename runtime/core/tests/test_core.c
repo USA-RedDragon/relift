@@ -198,6 +198,26 @@ TEST(core_faults_report_guest_addresses)
     rl_vm_destroy(&vm);
 }
 
+/** A corrupted value is found wherever else readable guest memory holds it, 8-byte aligned, and nowhere unreadable. */
+TEST(core_fault_finds_every_readable_copy_of_a_word)
+{
+    rl_vm vm;
+    CHECK_EQ(boot(&vm), 0);
+    CHECK_EQ(rl_vm_set(&vm, 0x100000, 0x10000, RL_VM_RW, 0, RL_VM_FRESH), 0);
+    CHECK_EQ(rl_vm_set(&vm, 0x200000, 0x10000, RL_VM_RW, 0, RL_VM_FRESH), 0);
+    const uint64_t v = 0x0300010000010000ull;
+    memcpy(vm.base + 0x100008, &v, 8);
+    memcpy(vm.base + 0x10fff8, &v, 8);
+    memcpy(vm.base + 0x200100, &v, 8);
+    memcpy(vm.base + 0x200204, &v, 8);
+    CHECK_EQ(rl_vm_set(&vm, 0x200000, 0x10000, RL_VM_NONE, 0, RL_VM_KEEP), 0);
+    uint64_t at[4];
+    CHECK_EQ(rl_fault_find_word(v, at, 4), 2);
+    CHECK_EQ(at[0], 0x100008);
+    CHECK_EQ(at[1], 0x10fff8);
+    rl_vm_destroy(&vm);
+}
+
 TEST(core_permissions_are_its_own_encoding)
 {
     rl_vm vm;

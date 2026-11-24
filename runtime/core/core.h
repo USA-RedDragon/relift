@@ -420,6 +420,16 @@ typedef struct rl_fault {
 
 /** @brief Installs SIGSEGV and SIGBUS handlers for the space in vm. Idempotent. */
 RL_RUNTIME_API void rl_fault_install(rl_vm *vm);
+/**
+ * @brief The 8-byte aligned guest addresses of the readable guest memory of the space rl_fault_install was given
+ * that hold value (the first cap of them into out); returns how many there are.
+ */
+RL_RUNTIME_API uint32_t rl_fault_find_word(uint64_t value, uint64_t *out, uint32_t cap);
+/**
+ * @brief Logs, for a stop on a corrupted value (a bad return address or jump target), every guest address that holds
+ * the same 8 bytes and the words around each: the buffer whose bytes landed over the slot the value was read from.
+ */
+RL_RUNTIME_API void rl_fault_log_word_sites(const char *what, uint64_t value);
 /** @brief Gives the calling host thread an alternate signal stack. Idempotent per thread. */
 RL_RUNTIME_API void rl_fault_thread_init(void);
 
