@@ -1981,12 +1981,12 @@ Options:
 
 <!-- docgen:usage crate=relift-gpu-apigen bin=relift-vkgen -->
 ```text
-Generate the Switch runtime's Vulkan forwarding layer from vk.xml
+Generate the GPU-API forwarding of the runtime from the Khronos registries
 
 Usage: relift-vkgen [OPTIONS] --xml <XML> --config <CONFIG> --out <OUT>
 
 Options:
-      --xml <XML>        The registry file (vk.xml at the pinned tag)
+      --xml <XML>        The registry files at their pinned commits: the main one (vk.xml, gl.xml or egl.xml), then each `[[registry.extra]]` file in order
       --config <CONFIG>  Configuration files, merged in order (lists concatenate)
       --out <OUT>        The output directory
       --check            Compare with the files in the output directory instead of writing; exit 1 on any difference

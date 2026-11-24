@@ -247,7 +247,7 @@ const CHARTERS: &[Charter] = &[
     },
     Charter {
         member: "relift-gpu-apigen",
-        why: "generates the runtime's Vulkan forwarding C from the pinned vk.xml; guest-neutral, nothing depends on it; writes through relift-cache",
+        why: "generates the runtime's GPU-API forwarding C (Vulkan, OpenGL, GLX, EGL) from the pinned Khronos registries for each guest ABI; nothing depends on it; writes through relift-cache",
         normal: &["clap", "relift-cache", "roxmltree", "sha2", "toml"],
         dev: NONE,
         build: NONE,

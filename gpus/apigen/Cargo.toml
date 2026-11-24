@@ -1,6 +1,6 @@
 [package]
 name = "relift-gpu-apigen"
-description = "`relift-vkgen`: generates the Vulkan forwarding C in `runtime/gpuapi/vk/gen/` from the pinned `vk.xml`; guest-neutral, nothing depends on it"
+description = "`relift-vkgen`: generates the GPU-API forwarding C (Vulkan for AArch64 and i386 guests, OpenGL, GLX and EGL for i386) from the pinned Khronos registries; nothing depends on it"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
