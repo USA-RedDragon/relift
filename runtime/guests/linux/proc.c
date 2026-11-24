@@ -224,14 +224,6 @@ static int64_t sys_clock_nanosleep(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return sleep_for(a[2], a[3], (a[1] & L_TIMER_ABSTIME) != 0, clk);
 }
 
-static int64_t sys_wait4(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
-{
-    (void)c;
-    (void)mem;
-    (void)a;
-    return -L_ECHILD;
-}
-
 static int64_t sys_sched_yield(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -504,7 +496,6 @@ lx_sys_fn *lx_proc_call(uint32_t nr)
     case NR_gettimeofday: return sys_gettimeofday;
     case NR_nanosleep: return sys_nanosleep;
     case NR_clock_nanosleep: return sys_clock_nanosleep;
-    case NR_wait4: return sys_wait4;
     case NR_sched_yield: return sys_sched_yield;
     case NR_sched_getaffinity: return sys_sched_getaffinity;
     case NR_uname: return sys_uname;

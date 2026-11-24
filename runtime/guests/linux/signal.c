@@ -39,6 +39,33 @@ static void raise_on(lx_thread *t, int sig, int32_t code)
     }
 }
 
+void lx_signal_post(int sig, int32_t code, int32_t pid, uint32_t uid)
+{
+    if (sig < 1 || sig > L_NSIG)
+        return;
+    lx_mutex_lock(&lx_big);
+    lx_thread *pick = NULL;
+    for (lx_thread *t = lx.threads; t; t = t->next) {
+        if (!pick && t->main)
+            pick = t;
+        if (!(t->blocked & bit(sig))) {
+            pick = t;
+            break;
+        }
+    }
+    if (!pick)
+        pick = lx.threads;
+    if (pick) {
+        pick->pending[sig] = (lx_pending_sig){ .code = code, .pid = pid, .uid = uid, .queued = false };
+        __atomic_store_n(&pick->pending[sig].queued, true, __ATOMIC_RELEASE);
+    }
+    lx_mutex_unlock(&lx_big);
+    if (pick) {
+        rl_preempt_request(pick->rt->ctx);
+        lx_thread_kick(pick);
+    }
+}
+
 void lx_signal_raise(int sig, int32_t code)
 {
     if (sig < 1 || sig > L_NSIG)
@@ -211,6 +238,7 @@ static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c)
         return RL_OK;
     }
     if (act.handler == L_SIG_DFL) {
+        lx.death_signal = sig;
         rl_pend_exit_process(c, 128u + (uint32_t)sig);
         return RL_PENDING;
     }
@@ -379,10 +407,10 @@ static int64_t sys_kill(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     int32_t pid = (int32_t)a[0];
     int sig = (int)a[1];
-    if (pid != lx.pid && pid != 0 && pid != -1 && pid != -lx.pid)
-        return -L_ESRCH;
     if (sig < 0 || sig > L_NSIG)
         return -L_EINVAL;
+    if (pid != lx.pid && pid != -1)
+        return hio_kill(pid, sig);
     return send_to(sig ? receiver(sig) : lx_cur(), sig, L_SI_USER);
 }
 

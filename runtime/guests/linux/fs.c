@@ -37,16 +37,63 @@ static void root_init(void)
     lx.root_len = n;
 }
 
+/** @brief Whether guest descriptor fd is in the comma list of an execve's passed descriptors (RELIFT_LINUX_EXEC fds=). */
+static bool passed(const char *list, int fd)
+{
+    for (const char *p = list; p && *p >= '0' && *p <= '9';) {
+        char *end;
+        long v = strtol(p, &end, 10);
+        if (v == fd)
+            return true;
+        p = *end == ',' ? end + 1 : end;
+    }
+    return false;
+}
+
 void lx_fs_init(void)
 {
     root_init();
     for (int i = 0; i < LX_MAX_FDS; i++)
         lx.fds[i].host = -1;
+    const char *exec = getenv("RELIFT_LINUX_EXEC");
+    const char *list = exec ? strstr(exec, "fds=") : NULL;
+    if (list)
+        list += 4;
     for (int i = 0; i < 3; i++) {
+        if (list && !passed(list, i))
+            continue;
         int64_t h = hio_dup(i, 16);
         lx.fds[i].host = h < 0 ? i : (int)h;
     }
+    for (const char *p = list; p && *p >= '0' && *p <= '9';) {
+        char *end;
+        long v = strtol(p, &end, 10);
+        p = *end == ',' ? end + 1 : end;
+        if (v < 3 || v >= LX_MAX_FDS)
+            continue;
+        int64_t h = hio_dup((int)v, 16);
+        if (h >= 0) {
+            hio_close((int)v);
+            lx.fds[v].host = (int)h;
+        }
+    }
 }
+
+int lx_fs_exec_fds(int (*keep)[2], int cap)
+{
+    int n = 0;
+    for (int i = 0; i < LX_MAX_FDS && n < cap; i++)
+        if (lx.fds[i].host >= 0 && !lx.fds[i].cloexec && !lx.fds[i].virt && !lx.fds[i].vdir) {
+            keep[n][0] = i;
+            keep[n][1] = lx.fds[i].host;
+            n++;
+        }
+    return n;
+}
+
+static int64_t host_path(const char *guest, char *out, size_t cap, bool follow);
+
+int64_t lx_host_path(const char *path, char *out, size_t cap) { return host_path(path, out, cap, true); }
 
 void lx_fs_shutdown(void)
 {
@@ -566,6 +613,25 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return alloc_fd((int)h, 0, (flags & L_O_CLOEXEC) != 0);
 }
 
+static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
+
+/** @brief close_range(2): closes the descriptors first to last, or with CLOSE_RANGE_CLOEXEC (4) marks them close-on-exec; CLOSE_RANGE_UNSHARE (2) has nothing to unshare. */
+static int64_t sys_close_range(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    uint32_t first = (uint32_t)a[0], last = (uint32_t)a[1], flags = (uint32_t)a[2];
+    if ((flags & ~6u) || first > last)
+        return -L_EINVAL;
+    for (uint32_t fd = first; fd < LX_MAX_FDS && fd <= last; fd++) {
+        if (lx.fds[fd].host < 0 && !lx.fds[fd].virt && !lx.fds[fd].vdir)
+            continue;
+        if (flags & 4)
+            lx.fds[fd].cloexec = true;
+        else
+            sys_close(c, mem, (uint64_t[6]){ fd });
+    }
+    return 0;
+}
+
 static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -595,15 +661,21 @@ static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
  * read, or -ERESTARTSYS (a read on a pipe, terminal or socket is restarted
  * after a handler with SA_RESTART, signal(7)).
  */
-static int64_t wait_readable(int fd, int h)
+/** @brief The descriptor's kind (lx_fd.kind), looked at once: 1 a regular file or directory, 3 a pipe or FIFO, 2 anything else. */
+static uint8_t fd_kind(int fd, int h)
 {
     lx_fd *f = &lx.fds[fd];
     if (f->kind == 0) {
         l_stat st;
         uint32_t t = hio_fstat(h, &st) == 0 ? st.st_mode & L_S_IFMT : 0;
-        f->kind = (t == L_S_IFREG || t == L_S_IFDIR) ? 1 : 2;
+        f->kind = (t == L_S_IFREG || t == L_S_IFDIR) ? 1 : t == L_S_IFIFO ? 3 : 2;
     }
-    if (f->kind == 1)
+    return f->kind;
+}
+
+static int64_t wait_readable(int fd, int h)
+{
+    if (fd_kind(fd, h) == 1)
         return 0;
     int64_t fl = hio_get_status_flags(h);
     if (fl >= 0 && (fl & L_O_NONBLOCK))
@@ -1570,6 +1642,7 @@ lx_sys_fn *lx_fs_call(uint32_t nr)
     case NR_mknodat: return sys_mknodat;
     case NR_unlinkat: return sys_unlinkat;
     case NR_symlinkat: return sys_symlinkat;
+    case NR_close_range: return sys_close_range;
     case NR_linkat: return sys_linkat;
     case NR_statfs: return sys_statfs;
     case NR_fstatfs: return sys_fstatfs;

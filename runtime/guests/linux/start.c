@@ -256,6 +256,7 @@ int64_t lx_dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6])
     case NR_timerfd_create: return locked(lx_event_call(nr), c, mem, a);
     case NR_openat:
     case NR_close:
+    case NR_close_range:
     case NR_dup:
     case NR_dup3:
     case NR_pipe2:
@@ -272,6 +273,8 @@ int64_t lx_dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6])
         f = lx_proc_call(nr);
     if (!f)
         f = lx_signal_call(nr);
+    if (!f)
+        f = lx_process_call(nr);
     if (f)
         return f(c, mem, a);
     if (rl_report_unknown(0x4c58535900000000ull | nr, "linux", "system call %u is not implemented (returns ENOSYS)", nr))
@@ -408,6 +411,7 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     t->guest = main_thread;
     lx.threads = main_thread;
     lx.live = 1;
+    lx_process_start(main_thread);
     rl_ctx *c = t->ctx;
     char *self[1] = { (char *)p->name };
     if (argc < 1) {
@@ -449,6 +453,6 @@ int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
     }
     lx_fs_shutdown();
     lx_report_cold();
-    rl_process_exit((uint32_t)status);
+    lx_exit_process((uint32_t)status);
     return status;
 }

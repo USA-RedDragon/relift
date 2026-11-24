@@ -31,11 +31,11 @@ typedef struct lx_fd {
     uint64_t virt_pos;
     /** @brief The path of the directory of program files this descriptor lists (a directory the import's paths lie under), or NULL. */
     char *vdir;
-    /** @brief FD_CLOEXEC, which nothing here acts on but fcntl reports. */
+    /** @brief FD_CLOEXEC: an execve does not pass the descriptor on. */
     bool cloexec;
     /** @brief The directory stream getdents64 reads, opened on first use. */
     void *dir;
-    /** @brief 0 not looked at yet, 1 a regular file or directory (never blocks), 2 anything else. */
+    /** @brief 0 not looked at yet, 1 a regular file or directory (never blocks), 3 a pipe or FIFO, 2 anything else. */
     uint8_t kind;
     /** @brief Whether an entry read from the stream waits in stash_*, because it did not fit the last buffer. */
     bool has_stash;
@@ -123,6 +123,8 @@ typedef struct lx_state {
     const rl_linux_module *pending_lib;
     /** @brief Whether the program has a program interpreter. */
     bool dynamic;
+    /** @brief The signal whose default action ends the process, 0 while none has. */
+    int death_signal;
     /** @brief The guest root's host directory without a trailing slash (rl_linux_program.root, or RELIFT_LINUX_ROOT when set; empty disables it), NULL for none. */
     char *root;
     /** @brief Length of root. */
@@ -167,6 +169,32 @@ static inline lx_thread *lx_cur(void) { return rl_thread_current()->guest; }
 
 /** @brief clone for threads. */
 int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
+/** @brief clone without CLONE_THREAD: a fork or vfork over a host fork of the process (process.c). */
+int64_t lx_fork(rl_ctx *c, const uint64_t a[6]);
+/** @brief The threads' locks and list across a host fork (enum rl_fork_step): in the child only the calling thread is left. */
+void lx_threads_fork(int step);
+/** @brief A child process changed state: wakes the waits of lx_child_wait. */
+void lx_child_event(void);
+/** @brief The count of child state changes, for lx_child_wait. */
+uint64_t lx_child_gen(void);
+/** @brief Waits until the count passes gen or a signal is ready for the thread; true for the signal. */
+bool lx_child_wait(uint64_t gen);
+/** @brief Ends the process with code, or by the signal whose default action ended it (lx.death_signal), as the kernel does. */
+void lx_exit_process(uint32_t code);
+/** @brief Starts the helper thread that routes host signals and runs the interval timers, and applies what an execve passed (signal mask, ignored signals); then hides that from the environment. */
+void lx_process_start(lx_thread *main_thread);
+/** @brief The helper thread's timer work: fires the interval timers that are due and returns the nanoseconds until the next, -1 for none (timers.c). */
+int64_t lx_itimer_run(void);
+/** @brief In a forked child: no interval timers (they are not inherited). */
+void lx_itimer_fork_child(void);
+/** @brief Wakes the helper thread to look at the timers again. */
+void lx_helper_kick(void);
+/** @brief Queues signal sig for the process from a thread that is not a guest thread, with the sender's ids and si_code. */
+void lx_signal_post(int sig, int32_t code, int32_t pid, uint32_t uid);
+/** @brief The host path of guest path path under the guest root (symbolic links followed): 0 or -errno. */
+int64_t lx_host_path(const char *path, char *out, size_t cap);
+/** @brief Fills keep with the guest descriptors an execve passes on (open, not close-on-exec, host backed): pairs of guest number and host descriptor; returns the count. */
+int lx_fs_exec_fds(int (*keep)[2], int cap);
 /** @brief Ends the calling thread: clears its tid word, wakes its waiters, leaves the list. */
 void lx_thread_end(lx_thread *t);
 /** @brief Waits until the other threads have ended. */
@@ -238,6 +266,8 @@ int64_t lx_epoll_wait(int ep, hio_epoll_event *out, int max, int64_t timeout_ns)
 lx_sys_fn *lx_fs_call(uint32_t nr);
 /** @brief The process, time and information system calls. */
 lx_sys_fn *lx_proc_call(uint32_t nr);
+/** @brief The process system calls of process.c (execve, wait4, sessions), or NULL. */
+lx_sys_fn *lx_process_call(uint32_t nr);
 /** @brief The signal system calls. */
 lx_sys_fn *lx_signal_call(uint32_t nr);
 

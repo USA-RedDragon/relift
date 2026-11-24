@@ -73,7 +73,13 @@ enum rl_linux_nr {
     NR_clock_nanosleep = 115,
     NR_sched_yield = 124,
     NR_sched_getaffinity = 123,
+    NR_getitimer = 102,
+    NR_setitimer = 103,
     NR_kill = 129,
+    NR_setpgid = 154,
+    NR_getpgid = 155,
+    NR_getsid = 156,
+    NR_setsid = 157,
     NR_tkill = 130,
     NR_tgkill = 131,
     NR_sigaltstack = 132,
@@ -110,8 +116,10 @@ enum rl_linux_nr {
     NR_getrandom = 278,
     NR_statx = 291,
     NR_rseq = 293,
+    NR_execve = 221,
     NR_wait4 = 260,
-    NR_clone3 = 435
+    NR_clone3 = 435,
+    NR_close_range = 436
 };
 
 /** @brief Linux errno values (asm-generic/errno-base.h and errno.h). */

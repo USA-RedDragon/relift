@@ -33,6 +33,25 @@ static void log_lock(void) { pthread_mutex_lock(&g_log_lock); }
 static void log_unlock(void) { pthread_mutex_unlock(&g_log_lock); }
 #endif
 
+void rl_log_fork(int step)
+{
+    switch (step) {
+    case RL_FORK_PREPARE:
+        log_lock();
+        break;
+    case RL_FORK_PARENT:
+        log_unlock();
+        break;
+    default:
+#if defined(_WIN32)
+        InitializeSRWLock(&g_log_lock);
+#else
+        pthread_mutex_init(&g_log_lock, NULL);
+#endif
+        break;
+    }
+}
+
 /** @brief Size of the report-once key set (open addressing). */
 #define ONCE_SLOTS 4096u
 static uint64_t g_once[ONCE_SLOTS];

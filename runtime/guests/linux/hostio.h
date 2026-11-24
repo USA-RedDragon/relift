@@ -165,4 +165,63 @@ uint32_t hio_cpu_count(void);
 /** @brief Sets the process's umask and returns the old one. */
 uint32_t hio_umask(uint32_t mask);
 
+/** @brief Removes name from the process's environment. */
+void hio_unsetenv(const char *name);
+/** @brief The host signal of Linux signal sig, 0 for one the host does not have. */
+int hio_sig_to_host(int sig);
+/** @brief The Linux signal of host signal sig, 0 for none. */
+int hio_sig_from_host(int sig);
+/** @brief fork(2): the child's process id in the parent, 0 in the child, or -errno (-ENOSYS where the host cannot fork). */
+int64_t hio_fork(void);
+/**
+ * @brief wait4(2) with Linux options (WNOHANG, WUNTRACED, WCONTINUED) that
+ * never blocks: the process id, 0 when none has changed, or -errno.
+ * *status gets the Linux status word, cpu_ns the child's user and system
+ * time in nanoseconds (may be NULL).
+ */
+int64_t hio_wait4(int32_t pid, int32_t *status, uint32_t options, int64_t cpu_ns[2]);
+/** @brief kill(2) with a Linux signal (0 checks the target). */
+int64_t hio_kill(int32_t pid, int sig);
+/** @brief setsid(2). */
+int64_t hio_setsid(void);
+/** @brief setpgid(2). */
+int64_t hio_setpgid(int32_t pid, int32_t pgid);
+/** @brief getpgid(2). */
+int64_t hio_getpgid(int32_t pid);
+/** @brief getsid(2). */
+int64_t hio_getsid(int32_t pid);
+/** @brief The absolute host path of the running executable, false when unknown. */
+bool hio_self_exe(char *buf, size_t n);
+/** @brief The canonical absolute host path of path (symbolic links resolved), false when it does not exist. */
+bool hio_realpath(const char *path, char *buf, size_t n);
+/**
+ * @brief Replaces the process with exe, argv and envp (NULL terminated),
+ * with host descriptor keep[i][1] open as number keep[i][0] for each of
+ * the n pairs and every other descriptor closed. Returns -errno only when
+ * nothing changed yet (exe is not executable); a failure after the
+ * descriptors moved ends the process.
+ */
+int64_t hio_exec(const char *exe, char *const argv[], char *const envp[], const int (*keep)[2], int n);
+/**
+ * @brief Routes the host signals a Linux guest takes from outside (hangup,
+ * interrupt, quit, the user signals, terminate, child and window change)
+ * to a pipe: blocks them in the calling thread (every thread made after it
+ * inherits that) and returns the read end, where each signal arrives as
+ * an hio_sig_note; -errno on failure. Called again (in a forked child) it
+ * makes a new pipe.
+ */
+int64_t hio_signal_pipe(void);
+/** @brief Lets the calling thread (the one that reads the signal pipe) take the routed signals. */
+void hio_signal_accept(void);
+/** @brief Ends the process with host signal sig at its default action, as the kernel does for a fatal signal. */
+void hio_die_by_signal(int sig);
+
+/** @brief One routed signal: the Linux signal, the sender's process and user ids and si_code. */
+typedef struct hio_sig_note {
+    int32_t sig;
+    int32_t pid;
+    uint32_t uid;
+    int32_t code;
+} hio_sig_note;
+
 #endif

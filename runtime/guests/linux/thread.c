@@ -7,7 +7,7 @@
  * address space. The child of a clone starts at the instruction after the
  * `svc`, which the build made a function entry (guests/linux lift.rs), with
  * the parent's registers, x0 = 0 and the stack and thread pointer clone
- * gave it. A clone without the flags of a thread (a fork) is not supported.
+ * gave it. A clone without the flags of a thread is a fork (process.c).
  */
 #include "arch.h"
 #include "hostio.h"
@@ -29,6 +29,73 @@ lx_cond lx_ended = LX_COND_INIT;
 static lx_mutex fx_lock = LX_MUTEX_INIT;
 static lx_cond fx_cond = LX_COND_INIT;
 static waiter *fx_waiters;
+static uint64_t g_child_gen;
+
+void lx_child_event(void)
+{
+    lx_mutex_lock(&fx_lock);
+    g_child_gen++;
+    lx_cond_broadcast(&fx_cond);
+    lx_mutex_unlock(&fx_lock);
+}
+
+uint64_t lx_child_gen(void)
+{
+    lx_mutex_lock(&fx_lock);
+    uint64_t g = g_child_gen;
+    lx_mutex_unlock(&fx_lock);
+    return g;
+}
+
+bool lx_child_wait(uint64_t gen)
+{
+    lx_mutex_lock(&fx_lock);
+    while (g_child_gen == gen && !lx_signal_ready())
+        lx_cond_wait(&fx_cond, &fx_lock, -1);
+    bool sig = g_child_gen == gen;
+    lx_mutex_unlock(&fx_lock);
+    return sig;
+}
+
+void lx_threads_fork(int step)
+{
+    static const lx_mutex fresh_mutex = LX_MUTEX_INIT;
+    static const lx_cond fresh_cond = LX_COND_INIT;
+    switch (step) {
+    case RL_FORK_PREPARE:
+        lx_mutex_lock(&lx_big);
+        lx_mutex_lock(&fx_lock);
+        break;
+    case RL_FORK_PARENT:
+        lx_mutex_unlock(&fx_lock);
+        lx_mutex_unlock(&lx_big);
+        break;
+    default: {
+        lx_big = fresh_mutex;
+        fx_lock = fresh_mutex;
+        fx_cond = fresh_cond;
+        lx_ended = fresh_cond;
+        fx_waiters = NULL;
+        lx_thread *me = lx_cur();
+        for (lx_thread *t = lx.threads, *next; t; t = next) {
+            next = t->next;
+            if (t == me)
+                continue;
+            hio_waker_free(t->waker);
+            free(t);
+        }
+        hio_waker_free(me->waker);
+        me->waker = hio_waker_new();
+        me->next = NULL;
+        me->main = true;
+        for (int s = 0; s <= L_NSIG; s++)
+            me->pending[s].queued = false;
+        lx.threads = me;
+        lx.live = 1;
+        break;
+    }
+    }
+}
 
 void lx_thread_kick(lx_thread *t)
 {
@@ -191,7 +258,7 @@ static void thread_body(struct rl_thread *rt)
     rl_ctx *c = rt->ctx;
     int rc = lx_arch_call_guest(c, rl_mem_base(), t->start);
     if (rc == RL_PENDING && c->pend.kind == RL_PEND_EXIT_PROCESS)
-        rl_process_exit(c->pend.code);
+        lx_exit_process(c->pend.code);
     if (rc == RL_PENDING && c->pend.kind == RL_PEND_UNWIND) {
         rl_log(RL_LOG_ERROR, "thread", "guest unwind to pc 0x%llx left the thread", (unsigned long long)c->pend.pc);
         rl_process_exit(RL_EXIT_SOFTWARE);
@@ -203,10 +270,11 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)mem;
     uint64_t flags = a[0];
+    if (!(flags & L_CLONE_THREAD))
+        return lx_fork(c, a);
     if ((flags & L_CLONE_THREAD_SET) != L_CLONE_THREAD_SET || (flags & 0xff)) {
-        rl_report_unknown(0x4c58434c4f4eull, "linux", "clone with flags 0x%llx is not a thread (processes are not supported)",
-                          (unsigned long long)flags);
-        return -L_ENOSYS;
+        rl_report_unknown(0x4c58434c4f4eull, "linux", "clone with flags 0x%llx is neither a thread nor a fork", (unsigned long long)flags);
+        return -L_EINVAL;
     }
     uint64_t site = lx_arch_after_trap(c);
     if (!rl_dispatch_find_ctx(c, site))
@@ -254,4 +322,11 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     }
     rl_thread_detach(rt);
     return t->tid;
+}
+
+void lx_exit_process(uint32_t code)
+{
+    if (lx.death_signal)
+        hio_die_by_signal(lx.death_signal);
+    rl_process_exit(code);
 }

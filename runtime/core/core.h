@@ -38,6 +38,8 @@ enum rl_log_level {
 
 /** @brief Writes one log line to stderr with a level and a subsystem tag. */
 RL_RUNTIME_API void rl_log(int level, const char *tag, const char *fmt, ...) RL_PRINTF(3, 4);
+/** @brief The log's lock across a host fork of the process (enum rl_fork_step, declared with rl_vm_fork). */
+RL_RUNTIME_API void rl_log_fork(int step);
 /** @brief rl_log with a va_list. */
 RL_RUNTIME_API void rl_vlog(int level, const char *tag, const char *fmt, va_list ap);
 
@@ -339,6 +341,18 @@ RL_RUNTIME_API int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page);
 RL_RUNTIME_API int rl_vm_init_size(rl_vm *vm, uint64_t size, uint64_t host_page);
 /** @brief Releases the reservation and the map. */
 RL_RUNTIME_API void rl_vm_destroy(rl_vm *vm);
+
+/** @brief The step of a host fork that rl_vm_fork and rl_log_fork take part in. */
+enum rl_fork_step {
+    /** @brief Before the fork: take the lock, so no other thread holds it mid-change when the process is copied. */
+    RL_FORK_PREPARE,
+    /** @brief In the parent after the fork: release it. */
+    RL_FORK_PARENT,
+    /** @brief In the child: make it new and free (the thread that took it is not the child's thread). */
+    RL_FORK_CHILD
+};
+/** @brief The space's lock across a host fork of the process (enum rl_fork_step). */
+RL_RUNTIME_API void rl_vm_fork(rl_vm *vm, int step);
 /** @brief Sets [addr, addr+size) to perm and tag. Both page aligned. Returns 0 or -1 (host failure). */
 RL_RUNTIME_API int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content);
 /** @brief Returns the coalesced block containing addr (addr < vm->size). */

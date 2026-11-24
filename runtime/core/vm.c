@@ -178,6 +178,26 @@ static void vm_lock(const rl_vm *vm) { pthread_mutex_lock((pthread_mutex_t *)&vm
 
 static void vm_unlock(const rl_vm *vm) { pthread_mutex_unlock((pthread_mutex_t *)&vm->lock); }
 
+void rl_vm_fork(rl_vm *vm, int step)
+{
+    switch (step) {
+    case RL_FORK_PREPARE:
+        vm_lock(vm);
+        break;
+    case RL_FORK_PARENT:
+        vm_unlock(vm);
+        break;
+    default: {
+        pthread_mutexattr_t a;
+        pthread_mutexattr_init(&a);
+        pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+        pthread_mutex_init(&vm->lock, &a);
+        pthread_mutexattr_destroy(&a);
+        break;
+    }
+    }
+}
+
 static uint32_t find(const rl_vm *vm, uint64_t addr)
 {
     uint32_t lo = 0, hi = vm->count;

@@ -454,12 +454,93 @@ TEST(futex_wake_releases_a_waiter_and_a_changed_word_does_not_wait)
     CHECK_EQ(lx_futex_wake(0x401000, 1, ~0u), 0);
 }
 
-TEST(a_clone_that_is_not_a_thread_is_refused)
+#ifndef _WIN32
+static volatile int g_holding;
+
+static void *hold_big_main(void *arg)
+{
+    (void)arg;
+    lx_mutex_lock(&lx_big);
+    g_holding = 1;
+    rl_sleep_ns(200000000);
+    lx_mutex_unlock(&lx_big);
+    return NULL;
+}
+
+/** @brief wait4 of pid from the test thread: the Linux status word, or -1. */
+static int32_t wait_status(rl_ctx *c, int64_t pid)
+{
+    if (sys(c, NR_wait4, (uint64_t)pid, 0x401f00, 0, 0, 0, 0) != pid)
+        return -1;
+    int32_t st;
+    memcpy(&st, rl_mem_base() + 0x401f00, 4);
+    return st;
+}
+
+TEST(a_fork_waits_out_a_lock_another_thread_holds_and_the_child_has_one_thread)
 {
     rl_ctx *c = boot();
     CHECK(c != NULL);
-    CHECK_EQ(sys(c, NR_clone, 17, 0, 0, 0, 0, 0), -L_ENOSYS);
+    pthread_t th;
+    g_holding = 0;
+    CHECK_EQ(pthread_create(&th, NULL, hold_big_main, NULL), 0);
+    while (!g_holding)
+        rl_sleep_ns(1000000);
+    uint64_t t0 = rl_clock_ns();
+    int64_t pid = sys(c, NR_clone, L_SIGCHLD, 0, 0, 0, 0, 0);
+    if (pid == 0) {
+        bool ok = pthread_mutex_trylock(&lx_big.m) == 0 && lx.live == 1 && lx.threads && !lx.threads->next &&
+                  lx.pid == hio_pid() && lx_cur()->tid == lx.pid;
+        _exit(ok ? 0 : 1);
+    }
+    CHECK(pid > 0);
+    CHECK(rl_clock_ns() - t0 >= 150000000ull);
+    pthread_join(th, NULL);
+    CHECK_EQ(wait_status(c, pid), 0);
+    CHECK_EQ(sys(c, NR_wait4, (uint64_t)-1, 0, 1, 0, 0, 0), -L_ECHILD);
 }
+
+TEST(a_vfork_parent_stays_blocked_until_the_child_ends)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint64_t t0 = rl_clock_ns();
+    int64_t pid = sys(c, NR_clone, 0x4000 | 0x100 | L_SIGCHLD, 0, 0, 0, 0, 0);
+    if (pid == 0) {
+        rl_sleep_ns(200000000);
+        _exit(3);
+    }
+    CHECK(pid > 0);
+    CHECK(rl_clock_ns() - t0 >= 150000000ull);
+    CHECK_EQ(wait_status(c, pid), 3 << 8);
+}
+
+TEST(a_kill_reaches_a_forked_child_through_its_own_signal_thread)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    int64_t pid = sys(c, NR_clone, L_SIGCHLD, 0, 0, 0, 0, 0);
+    if (pid == 0) {
+        for (int i = 0; i < 5000 && !lx_signal_ready(); i++)
+            rl_sleep_ns(1000000);
+        if (lx_signal_ready() && lx_cur()->pending[L_SIGTERM].queued && lx_cur()->pending[L_SIGTERM].pid == hio_ppid())
+            hio_die_by_signal(L_SIGTERM);
+        _exit(9);
+    }
+    CHECK(pid > 0);
+    rl_sleep_ns(50000000);
+    CHECK_EQ(sys(c, NR_kill, (uint64_t)pid, L_SIGTERM, 0, 0, 0, 0), 0);
+    CHECK_EQ(wait_status(c, pid), L_SIGTERM);
+}
+
+TEST(execve_of_another_program_finds_nothing)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    put_str(0x401000, "/bin/sh");
+    CHECK_EQ(sys(c, NR_execve, 0x401000, 0, 0, 0, 0, 0), -L_ENOENT);
+}
+#endif
 
 static void *kick_main(void *arg)
 {

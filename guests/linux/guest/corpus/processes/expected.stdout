@@ -1,0 +1,9 @@
+fork: read 21 'hello from the child', waited 1
+fork child: exited 7
+killed child: killed by 15
+aborting child: killed by 6
+exec child: argv[2]=two words env=set fd5=1 fd6=0
+exec child read 4: pass
+vfork exec child: exited 42
+vfork failed exec: exited 127
+no children left: 1
