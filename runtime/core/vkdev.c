@@ -4,6 +4,7 @@
  */
 #include "vkdev.h"
 
+#include <relift/settings.h>
 #include <relift/window.h>
 
 #include "capture.h"
@@ -203,7 +204,8 @@ static bool pick_device(rlvk_dev *d)
     uint32_t need = RLVK_QUEUE_COMPUTE_BIT;
     for (uint32_t i = 0; i < g_nreq; i++)
         need |= g_req[i].queue_flags;
-    const char *want = getenv("RELIFT_VK_DEVICE");
+    rl_settings_declare_runtime();
+    const char *want = rl_setting_str("vk.device");
     for (uint32_t i = 0; r >= RLVK_SUCCESS && i < n; i++) {
         uint32_t nf = 0;
         d->vkGetPhysicalDeviceQueueFamilyProperties(devs[i], &nf, NULL);
