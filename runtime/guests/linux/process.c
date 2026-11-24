@@ -60,11 +60,19 @@ static void route(const hio_sig_note *n)
     lx_signal_post(n->sig, n->code ? n->code : L_SI_USER, n->pid, n->uid);
 }
 
+/** @brief Set to make the helper thread return (before an execve renumbers descriptors); it sets g_helper_gone when it has. */
+static int g_helper_stop;
+static int g_helper_gone;
+
 static void helper_body(struct rl_thread *rt)
 {
     (void)rt;
     hio_signal_accept();
     for (;;) {
+        if (__atomic_load_n(&g_helper_stop, __ATOMIC_ACQUIRE)) {
+            __atomic_store_n(&g_helper_gone, 1, __ATOMIC_RELEASE);
+            return;
+        }
         int64_t left = lx_itimer_run();
         int64_t r = hio_wait(g_sig_fd, L_POLLIN, left, g_helper_waker);
         if (r == -L_EINTR) {
@@ -83,12 +91,15 @@ static void helper_body(struct rl_thread *rt)
 }
 
 /** @brief Starts the helper thread (in a new process or a forked child). */
+static int32_t g_started_in;
+
 static void start_helper(void)
 {
-    static int32_t started_in;
-    if (started_in == hio_pid())
+    if (g_started_in == hio_pid())
         return;
-    started_in = hio_pid();
+    g_started_in = hio_pid();
+    __atomic_store_n(&g_helper_stop, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_helper_gone, 0, __ATOMIC_RELEASE);
     int64_t fd = hio_signal_pipe();
     g_sig_fd = fd < 0 ? -1 : (int)fd;
     if (g_helper_waker)
@@ -100,6 +111,23 @@ static void start_helper(void)
         return;
     }
     rl_thread_detach(rt);
+}
+
+/**
+ * @brief Stops the helper thread and waits until it has returned, so
+ * nothing polls or reads the signal pipe while an execve moves guest
+ * descriptors onto low numbers (the helper would read a guest pipe that
+ * took the signal pipe's number). Up to a second.
+ */
+static void stop_helper(void)
+{
+    if (g_started_in != hio_pid())
+        return;
+    __atomic_store_n(&g_helper_stop, 1, __ATOMIC_RELEASE);
+    lx_helper_kick();
+    for (int i = 0; i < 1000 && !__atomic_load_n(&g_helper_gone, __ATOMIC_ACQUIRE); i++)
+        rl_sleep_ns(1000000);
+    g_started_in = 0;
 }
 
 void lx_helper_kick(void)
@@ -309,7 +337,9 @@ static int64_t sys_execve(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         at += (size_t)snprintf(state + at, cap - at, i ? ",%d" : "%d", keep[i][0]);
     envp[ne++] = state;
     envp[ne] = NULL;
+    stop_helper();
     rc = hio_exec(g_self, argv, envp, (const int (*)[2])keep, n);
+    start_helper();
     free_strings(argv);
     free_strings(envp);
     return rc;
