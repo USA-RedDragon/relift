@@ -34,6 +34,7 @@ pub mod scan;
 pub mod source;
 pub mod sweep;
 pub mod unity;
+pub mod xfb;
 pub mod yaz0;
 pub mod zst;
 

@@ -26,17 +26,18 @@
 mod mesh;
 pub mod pack;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 
 use relift_gpu_nv::translate::build::{Frame, Input, compressed_head, translate_set};
 use relift_gpu_nv::translate::{
-    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, Math, MeshPath, Options, image_binding,
+    DeviceCaps, HostProfile, ImageDim, ImageKind, Interface, Math, MeshPath, Options,
+    XfbGlslcBuffer, XfbLayout, image_binding,
 };
 
-pub use pack::{MESHES, PACK, Programs};
+pub use pack::{KERNELS, MESHES, PACK, Programs, SECTIONS, XFB};
 
 /// An error with its message.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -184,6 +185,60 @@ impl TraceSel {
     }
 }
 
+/// The transform feedback layout of each program the scan's xfb JSON names
+/// (empty for none), as the driver programs it ([`XfbLayout::from_glslc`]).
+fn xfb_layouts(json: &[u8]) -> Result<HashMap<[u8; 32], XfbLayout>, BoxError> {
+    let mut out = HashMap::new();
+    if json.is_empty() {
+        return Ok(out);
+    }
+    let v: serde_json::Value =
+        serde_json::from_slice(json).map_err(|e| format!("{}: {e}", pack::XFB))?;
+    let bytes = |b: &serde_json::Value, k: &str| -> Vec<u8> {
+        b.get(k)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_i64)
+            .map(|x| x as u8)
+            .collect()
+    };
+    for x in v.as_array().into_iter().flatten() {
+        let Some(key) = x
+            .get("program")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| hex_key(&format!("{s}.bin")))
+        else {
+            continue;
+        };
+        let raw = x
+            .get("raw")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let buffers: Vec<XfbGlslcBuffer> = x
+            .get("buffers")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|b| XfbGlslcBuffer {
+                stride: b
+                    .get("stride")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as u16,
+                stream: b
+                    .get("stream")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as u8,
+                attr: bytes(b, "attr").into_iter().map(|a| a as i8).collect(),
+                first: bytes(b, "first"),
+                ncomp: bytes(b, "ncomp"),
+            })
+            .collect();
+        out.insert(key, XfbLayout::from_glslc(raw, &buffers));
+    }
+    Ok(out)
+}
+
 /// The SHA-256 of `b`, the key a program goes by.
 #[must_use]
 pub fn sha256(b: &[u8]) -> [u8; 32] {
@@ -305,6 +360,9 @@ pub enum One {
 pub struct Translator {
     host: HostProfile,
     pipes: mesh::Pipelines,
+    /// Each capturing program's transform feedback layout (the scan's
+    /// `xfb.json`).
+    xfb: HashMap<[u8; 32], XfbLayout>,
     math: Math,
     trace: Option<TraceSel>,
 }
@@ -331,9 +389,11 @@ impl Translator {
     ) -> Result<Translator, BoxError> {
         let host = host_of(device)?;
         let pipes = mesh::Pipelines::read(programs, &host)?;
+        let xfb = xfb_layouts(programs.xfb())?;
         Ok(Translator {
             host,
             pipes,
+            xfb,
             math,
             trace: None,
         })
@@ -371,6 +431,7 @@ impl Translator {
                 options: Options {
                     math: self.math,
                     trace: self.trace.as_ref().and_then(|t| t.of(&key)),
+                    xfb: self.xfb.get(&key).cloned(),
                     ..self.pipes.options(&key)
                 },
             }],

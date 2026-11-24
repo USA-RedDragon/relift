@@ -25,7 +25,7 @@ enum Cmd {
         /// `modules.toml`, whose romfs may be a map).
         input: PathBuf,
         /// The output directory: `<sha256>.bin` per program,
-        /// `manifest.json`, `meshes.json` and `summary.json`.
+        /// `manifest.json`, `meshes.json`, `xfb.json` and `summary.json`.
         #[arg(long)]
         out: PathBuf,
         /// Where per-file results are cached (default: `<out>/.cache`).
@@ -85,6 +85,10 @@ fn body(cli: Cli) -> Result<(), BoxError> {
     relift_cache::write_if_changed(
         &out.join("meshes.json"),
         &serde_json::to_vec(&report.meshes_json())?,
+    )?;
+    relift_cache::write_if_changed(
+        &out.join("xfb.json"),
+        &serde_json::to_vec(&report.xfb_json())?,
     )?;
     let summary = serde_json::to_vec_pretty(&report.summary_json())?;
     relift_cache::write_if_changed(&out.join("summary.json"), &summary)?;

@@ -40,6 +40,9 @@ pub use io::mesh::{
     fallback as mesh_fallback, mesh_components,
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
+pub use io::xfb::{
+    Buffer as XfbBuffer, GlslcBuffer as XfbGlslcBuffer, Layout as XfbLayout, SKIP as XFB_SKIP,
+};
 pub use io::{PUSH_WRITTEN_PAGES, WRITTEN_PAGE_BITS};
 pub use mem::pools::{
     POOL_ARRAY_BINDING, POOL_SEARCH_STEPS, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST,
@@ -109,6 +112,10 @@ pub enum Interp {
 /// What a translated shader reads and writes, for the pipeline layout.
 #[derive(Clone, Debug, Default)]
 pub struct Interface {
+    /// The translation captures outputs to transform feedback buffers
+    /// ([`Options::xfb`]): it runs only in a pipeline whose last stage
+    /// before the rasterizer it is.
+    pub xfb: bool,
     pub inputs: BTreeMap<u32, Option<Interp>>,
     pub outputs: BTreeSet<u32>,
     /// Constant banks read, by bank number (see [`cbuf_binding`]).
@@ -281,6 +288,9 @@ pub struct Options {
     /// the `debug` module). For RenderDoc's shader debugger; never for a
     /// player's tables.
     pub debug_info: bool,
+    /// The program's transform feedback capture, from its GLSLC header (see
+    /// the `io::xfb` module); none for a program that captures nothing.
+    pub xfb: Option<XfbLayout>,
 }
 
 /// A translated program.
@@ -1116,6 +1126,7 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     c.iface.host.host = o.host.name.clone();
     c.io.color_kinds = o.color_kinds.clone();
     c.io.vtg.pipe = o.pipeline.clone();
+    c.io.xfb.layout = o.xfb.clone();
     c.io.mesh.pipe = o.pipeline.mesh.clone();
     io::mesh::prescan(&mut c, o.mesh_compute)?;
     io::vtg::prescan(&mut c, &code.insts)?;
@@ -1308,6 +1319,9 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
         for &v in c.outputs.values() {
             crate::spirv::inst(&mut decls, op::STORE, &[v, k]);
         }
+        for (v, value) in io::xfb::vertex_defaults(&mut c) {
+            crate::spirv::inst(&mut decls, op::STORE, &[v, value]);
+        }
     }
     let n = decls.len();
     c.m.body.splice(var_at..var_at, decls);
@@ -1316,6 +1330,7 @@ fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
     c.m.body.splice(var_at + n..var_at + n, kinds);
     c.debug_finish(main, var_at + n + k);
     io::finish(&mut c, entry);
+    io::xfb::finish(&mut c, entry);
     io::vtg::modes(&mut c, entry)?;
     let mut iface: Vec<u32> = Vec::new();
     iface.extend(c.inputs.values());

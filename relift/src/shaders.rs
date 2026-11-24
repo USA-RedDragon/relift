@@ -123,6 +123,10 @@ pub fn discover(import: &Path, out: &Path) -> Result<Discovered, BoxError> {
         &dir.join(relift_gpu_table::MESHES),
         &serde_json::to_vec(&report.meshes_json())?,
     )?;
+    relift_cache::write_if_changed(
+        &dir.join(relift_gpu_table::XFB),
+        &serde_json::to_vec(&report.xfb_json())?,
+    )?;
     Ok(Discovered {
         programs: report.programs.len(),
         errors: report

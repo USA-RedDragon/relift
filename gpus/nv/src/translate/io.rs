@@ -54,6 +54,7 @@ use super::Ctx;
 
 pub(crate) mod mesh;
 pub(crate) mod vtg;
+pub mod xfb;
 
 const B_POSITION: u32 = 0;
 const B_POINT_SIZE: u32 = 1;
@@ -136,6 +137,7 @@ pub(crate) struct State {
     pub(crate) color_kinds: BTreeMap<u32, Kind>,
     pub vtg: vtg::State,
     pub mesh: mesh::State,
+    pub xfb: xfb::State,
 }
 
 /// Records how each fragment input is sampled before any code is emitted.
@@ -786,6 +788,7 @@ fn ast(c: &mut Ctx, i: &Inst) -> Res<()> {
         let slot = c.output_slot(off + 4 * k)?;
         let u = c.load_reg(tuple_reg(s, k)?);
         c.store_slot(&slot, u);
+        c.xfb_store(off + 4 * k, u);
     }
     Ok(())
 }

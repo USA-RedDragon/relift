@@ -27,7 +27,7 @@ use crate::sha256_hex;
 use crate::source::{Source, SourceFile};
 use crate::{cubin, sarc, sweep, unity, yaz0, zst};
 
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const CODE: [&str; 11] = [
@@ -131,6 +131,9 @@ pub struct Report {
     pub errors: BTreeMap<String, ErrorSummary>,
     /// Task and mesh pipelines of BNSH archives, unique (see [`crate::mesh`]).
     pub meshes: Vec<Value>,
+    /// Transform feedback layouts, unique: [`crate::xfb::layout`] with the
+    /// program's SHA-256 (hex) as `"program"`.
+    pub xfb: Vec<Value>,
     /// Counters.
     pub stats: Stats,
 }
@@ -139,6 +142,11 @@ impl Report {
     /// The task and mesh pipelines, as `meshes.json` holds them.
     pub fn meshes_json(&self) -> Value {
         Value::Array(self.meshes.clone())
+    }
+
+    /// The transform feedback layouts, as `xfb.json` holds them.
+    pub fn xfb_json(&self) -> Value {
+        Value::Array(self.xfb.clone())
     }
 
     /// The manifest: per program SHA-256 its kind, stage, sizes, count and
@@ -186,6 +194,7 @@ struct Out {
     containers: BTreeMap<String, u64>,
     errors: Vec<(String, String)>,
     meshes: Vec<Value>,
+    xfb: Vec<Value>,
 }
 
 impl Out {
@@ -216,6 +225,7 @@ impl Out {
         }
         self.errors.extend(o.errors);
         self.meshes.extend(o.meshes);
+        self.xfb.extend(o.xfb);
     }
 
     fn error(&mut self, msg: String, at: &str) {
@@ -228,7 +238,7 @@ impl Out {
             .iter()
             .map(|(sha, p)| json!([sha, p.kind.name(), p.stage, p.sph, p.size, p.n, p.srcs]))
             .collect();
-        json!({"v": CACHE_VERSION, "programs": programs, "containers": self.containers, "errors": self.errors, "meshes": self.meshes})
+        json!({"v": CACHE_VERSION, "programs": programs, "containers": self.containers, "errors": self.errors, "meshes": self.meshes, "xfb": self.xfb})
     }
 
     fn from_json(v: &Value) -> Option<Out> {
@@ -267,6 +277,7 @@ impl Out {
             ));
         }
         out.meshes = v.get("meshes")?.as_array()?.clone();
+        out.xfb = v.get("xfb")?.as_array()?.clone();
         Some(out)
     }
 }
@@ -407,6 +418,12 @@ impl Ctx<'_> {
                 continue;
             }
             let bytes = &b[f.start..f.end];
+            if f.kind == Kind::Graphics
+                && let Some(mut x) = crate::xfb::layout(b, f.start)
+            {
+                x["program"] = Value::String(crate::sha256_hex(bytes));
+                out.xfb.push(x);
+            }
             self.program(out, name, bytes, f.kind, f.stage(b), f.code - f.start)?;
         }
         Ok(())
@@ -718,12 +735,15 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
             *report.containers.entry(k).or_default() += n;
         }
         report.meshes.extend(out.meshes);
+        report.xfb.extend(out.xfb);
         for (msg, at) in out.errors {
             add_error(&mut report, msg, at);
         }
     }
     report.meshes.sort_by_key(Value::to_string);
     report.meshes.dedup();
+    report.xfb.sort_by_key(Value::to_string);
+    report.xfb.dedup();
     report.stats = Stats {
         files: files.len() as u64,
         jobs: jobs.len() as u64,

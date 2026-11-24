@@ -616,6 +616,7 @@ pub(super) fn ast(c: &mut Ctx, i: &Inst) -> Res<()> {
             (Stage::TessEval | Stage::Geometry, false) => {
                 let slot = c.output_slot(a)?;
                 c.store_slot(&slot, u);
+                c.xfb_store(a, u);
             }
             _ => return bad(format!("{i} in a {:?} shader", c.stage)),
         }

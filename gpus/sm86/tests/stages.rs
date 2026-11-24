@@ -2,8 +2,8 @@ mod common;
 
 use relift_gpu_nv::program::{Program, Stage};
 use relift_gpu_nv::translate::{
-    GsInput, Options, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing, translate,
-    translate_with,
+    GsInput, Options, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing,
+    XfbGlslcBuffer, XfbLayout, translate, translate_with,
 };
 
 const RZ: u64 = 255;
@@ -695,4 +695,98 @@ fn trace_mode_records_global_misses() {
     let without = program(1, &[], &[fmul(4, 1, 2)]);
     let s = translate_with(&without, &o).unwrap();
     assert_eq!(s.interface.trace_words, 0, "nothing to record");
+}
+
+/// The decorations of `id`: (decoration, operands).
+fn decorations_of(words: &[u32], id: u32) -> Vec<(u32, Vec<u32>)> {
+    insts(words)
+        .into_iter()
+        .filter(|(o, a)| *o == 71 && a[0] == id)
+        .map(|(_, a)| (a[1], a[2..].to_vec()))
+        .collect()
+}
+
+/// The variables decorated `XfbBuffer`, by their `Offset`.
+fn capture_vars(words: &[u32]) -> Vec<(u32, u32)> {
+    let mut v: Vec<(u32, u32)> = insts(words)
+        .iter()
+        .filter(|(o, a)| *o == 71 && a.get(1) == Some(&36))
+        .map(|(_, a)| {
+            let off = decorations_of(words, a[0])
+                .into_iter()
+                .find(|(d, _)| *d == 35)
+                .map_or(u32::MAX, |(_, x)| x[0]);
+            (off, a[0])
+        })
+        .collect();
+    v.sort_unstable();
+    v
+}
+
+/// The capture of the two capturing geometry programs found in a game's
+/// GLSLC headers: points in, at most one point out, generic 0 x, y, z and
+/// generic 1 x (stride 16), then generic 2 x, y (stride 24), raw select
+/// bytes.
+fn point_capture(attrs: &[i8], stride: u16) -> XfbLayout {
+    XfbLayout::from_glslc(
+        true,
+        &[XfbGlslcBuffer {
+            stride,
+            stream: 0,
+            attr: attrs.to_vec(),
+            first: vec![0; attrs.len()],
+            ncomp: vec![1; attrs.len()],
+        }],
+    )
+}
+
+#[test]
+fn a_capturing_geometry_program_decorates_its_capture_words() {
+    let mut code = handles(0, &[4]);
+    code.extend([
+        mov_imm(1, 0),
+        ald(8, 0x80, 4, 4, false, false),
+        ald(12, 0x90, 4, 4, false, false),
+        ast(0x80, 8, 1, 4, false),
+        ast(0x90, 12, 1, 4, false),
+        ast(0xa0, 12, 1, 2, false),
+        out(OUT_EMIT, 1, 1),
+        out(OUT_FINAL, RZ, 1),
+    ]);
+    let sph = [(0, 1 << 28), (2, 1 << 24), (3, 1 << 24), (4, 1)];
+    let p = program(4, &sph, &code);
+    let o = Options {
+        xfb: Some(point_capture(&[0x20, 0x21, 0x22, 0x24, 0x28, 0x29], 24)),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    dump("geometry_xfb", &s.spirv);
+    assert!(s.interface.xfb);
+    assert!(modes(&s.spirv).contains(&vec![11]));
+    assert!(insts(&s.spirv).iter().any(|(o, a)| *o == 17 && a[0] == 53));
+    let vars = capture_vars(&s.spirv);
+    assert_eq!(vars.iter().map(|v| v.0).collect::<Vec<_>>(), [0, 16]);
+    for (_, v) in &vars {
+        let d = decorations_of(&s.spirv, *v);
+        assert!(d.contains(&(36, vec![0])) && d.contains(&(37, vec![24])));
+        assert!(d.iter().any(|(k, x)| *k == 30 && x[0] >= 2));
+    }
+    let without = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!without.interface.xfb && capture_vars(&without.spirv).is_empty());
+    assert!(!modes(&without.spirv).contains(&vec![11]));
+}
+
+#[test]
+fn a_capturing_vertex_program_starts_its_capture_words_as_its_outputs() {
+    let code = vec![mov_imm(4, 0), ast(0x80, 4, RZ, 2, false)];
+    let p = program(1, &[], &code);
+    let o = Options {
+        xfb: Some(point_capture(&[0x20, 0x21, 0x22, 0x23], 16)),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    let k = zero_zero_zero_one(&s.spirv).expect("a (0, 0, 0, 1) constant");
+    let vars: Vec<u32> = capture_vars(&s.spirv).into_iter().map(|v| v.1).collect();
+    assert_eq!(vars.len(), 1);
+    assert_eq!(first_stores(&s.spirv, &vars), [Some(k)]);
 }
