@@ -203,6 +203,16 @@ uint64_t lx_find_free(uint64_t size);
 /** @brief One system call: arguments a[0..5], the result or -errno. */
 typedef int64_t lx_sys_fn(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
 
+/**
+ * @brief Maps size bytes (page rounded) of zeroed read-write guest memory in
+ * the mmap area, for host code that puts structures in guest memory (a
+ * library wrapper's strings and shadows): its guest address, or 0. Thread
+ * safe. Callers build any malloc-like layer on top.
+ */
+uint64_t lx_guest_alloc(uint64_t size);
+/** @brief Unmaps what lx_guest_alloc returned. */
+void lx_guest_free(uint64_t addr, uint64_t size);
+
 int64_t lx_sys_brk(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
 int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
 int64_t lx_sys_munmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);

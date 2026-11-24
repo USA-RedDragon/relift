@@ -256,6 +256,27 @@ int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return (int64_t)at;
 }
 
+uint64_t lx_guest_alloc(uint64_t size)
+{
+    uint64_t len = lx_page_up(size);
+    if (len == 0)
+        return 0;
+    lx_mutex_lock(&lx_big);
+    uint64_t at = lx_find_free(len);
+    if (at && lx_map(at, len, L_PROT_READ | L_PROT_WRITE) != 0)
+        at = 0;
+    lx_mutex_unlock(&lx_big);
+    return at;
+}
+
+void lx_guest_free(uint64_t addr, uint64_t size)
+{
+    uint64_t len = lx_page_up(size);
+    lx_mutex_lock(&lx_big);
+    rl_vm_set(&lx.vm, addr, len, RL_VM_NONE, TAG_FREE, RL_VM_DISCARD);
+    lx_mutex_unlock(&lx_big);
+}
+
 int64_t lx_sys_munmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
