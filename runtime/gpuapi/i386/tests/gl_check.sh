@@ -10,7 +10,7 @@
 set -eu
 out=${1:?usage: gl_check.sh <out-dir>}
 here=$(cd "$(dirname "$0")" && pwd)
-root=$(cd "$here/../../../../.." && pwd)
+root=$(cd "$here/../../../.." && pwd)
 zig=${ZIG:-zig}
 cc=${CC:-cc}
 lib32=${LIB32:-/usr/lib32}

@@ -1,6 +1,12 @@
 /**
  * @file gl_hand.c
- * @brief Hand-written GL thunks: buffer mapping. The host maps a buffer in
+ * @brief Hand-written GL pieces: buffer offsets and buffer mapping.
+ *
+ * A pointer argument of a vertex array, index or pixel command is a buffer
+ * offset while a buffer is bound to its target, and a client pointer
+ * otherwise; only the GL state tells which, so tg_gl_offset asks it.
+ *
+ * Buffer mapping: the host maps a buffer in
  * its own memory, outside the guest window, so glMapBuffer gives the guest
  * a copy in guest memory (filled from the mapping unless the access is
  * write-only), glUnmapBuffer writes the copy back (unless read-only) and
@@ -9,6 +15,11 @@
 #include "tg.h"
 
 #include <pthread.h>
+
+/** @brief A GL pointer argument: a buffer offset while a buffer is bound to binding, else a guest pointer. */
+const void *tg_gl_offset(tg_call *k, uint32_t g, uint32_t binding);
+/** @brief A pointer GL gives back: a guest address, or a buffer offset as it is. */
+uint32_t tg_gl_unptr(tg_call *k, const void *h, const char *fn);
 
 /** @brief The GL constants these thunks use. */
 enum {
@@ -64,6 +75,23 @@ static uint32_t tg_gl_bound(uint32_t target)
     if (b)
         ((void (*)(unsigned, int *))tg_gl_fn("glGetIntegerv"))(b, &v);
     return (uint32_t)v;
+}
+
+const void *tg_gl_offset(tg_call *k, uint32_t g, uint32_t binding)
+{
+    int v = 0;
+    ((void (*)(unsigned, int *))tg_gl_fn("glGetIntegerv"))(binding, &v);
+    return v ? (const void *)(uintptr_t)g : tg_ptr(k, g);
+}
+
+uint32_t tg_gl_unptr(tg_call *k, const void *h, const char *fn)
+{
+    uintptr_t d = (uintptr_t)h - (uintptr_t)k->mem;
+    if ((uintptr_t)h >= (uintptr_t)k->mem && d <= UINT32_MAX)
+        return (uint32_t)d;
+    if ((uintptr_t)h <= UINT32_MAX)
+        return (uint32_t)(uintptr_t)h;
+    tg_fail(fn, "GL gave a pointer outside guest memory");
 }
 
 /** @brief The entry of buffer name (a free one for 0); NULL when there is none. */
