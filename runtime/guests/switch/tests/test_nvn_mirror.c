@@ -342,6 +342,63 @@ TEST(nvn_mirror_carries_writes_through_a_pointer_a_program_reads_back_to_the_cpu
     rl_settings_set("nvn.memory", "auto");
 }
 
+/** @brief What nvn_mirror_batch_writes notes. */
+typedef struct noted {
+    uint32_t n;
+    uint64_t at[8], size[8];
+} noted;
+
+static noted g_noted;
+
+static void note_range(uint64_t guest, uint64_t size)
+{
+    if (g_noted.n < 8) {
+        g_noted.at[g_noted.n] = guest;
+        g_noted.size[g_noted.n] = size;
+        g_noted.n++;
+    }
+}
+
+TEST(nvn_mirror_names_the_guest_ranges_its_readback_writes)
+{
+    rl_ctx *c = t_boot(NULL);
+    CHECK_EQ(rl_settings_set("nvn.memory", "mirror"), RL_SETTING_OK);
+    bool up = have_device();
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        rl_settings_set("nvn.memory", "auto");
+        return;
+    }
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp;
+    uint64_t size = 16 * hp, pool = heap + 0x100;
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = t_mem();
+    CHECK(nvn_mirror_sync(&r, false) && nvn_vk_begin(&r));
+    nvn_mirror_written(gpu + 8 * hp, 0x100);
+    CHECK(nvn_mirror_record_readback(g.cb));
+    /* The batch writes the bytes of the noted range and nothing else of the pool. */
+    memset(&g_noted, 0, sizeof g_noted);
+    nvn_mirror_batch_writes(note_range);
+    CHECK_EQ(g_noted.n, 1u);
+    CHECK_EQ(g_noted.at[0], at + 8 * hp);
+    CHECK_EQ(g_noted.size[0], 0x100u);
+    CHECK(nvn_vk_flush(&r));
+    /* A batch with nothing to bring back writes nothing to the guest. */
+    CHECK(nvn_vk_begin(&r));
+    CHECK(nvn_mirror_record_readback(g.cb));
+    memset(&g_noted, 0, sizeof g_noted);
+    nvn_mirror_batch_writes(note_range);
+    CHECK_EQ(g_noted.n, 0u);
+    CHECK(nvn_vk_flush(&r));
+    rl_settings_set("nvn.memory", "auto");
+}
+
 TEST(nvn_mirror_reads_back_only_the_pages_a_program_marks)
 {
     rl_ctx *c = t_boot(NULL);

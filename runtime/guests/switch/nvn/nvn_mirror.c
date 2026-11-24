@@ -696,6 +696,18 @@ bool nvn_mirror_record_readback(VkCommandBuffer cb)
     return ok;
 }
 
+void nvn_mirror_batch_writes(void (*note)(uint64_t guest, uint64_t size))
+{
+    pthread_once(&mi_once, mi_init);
+    pthread_mutex_lock(&mi.lock);
+    for (uint32_t i = 0; i < mi.nseg; i++)
+        note(mi.seg[i].m->guest + mi.seg[i].off, mi.seg[i].len);
+    /* Pages marked by stores through built addresses are known only when the batch that sent them completes. */
+    for (uint32_t i = 0; mi.marked_sent && i < mi.n; i++)
+        note(mi.v[i]->guest, mi.v[i]->size);
+    pthread_mutex_unlock(&mi.lock);
+}
+
 void nvn_mirror_apply_readback(void)
 {
     pthread_once(&mi_once, mi_init);

@@ -79,7 +79,7 @@ static struct {
     /** @brief Replay's own thread CPU time and the page faults it took (minor, major). */
     uint64_t run_cpu_ns, run_minflt, run_majflt;
     /** @brief Batches that may write guest memory anywhere: by a program that stores through built addresses, by
-     * more ranges than a write set keeps, by mirrored pools or a device that cannot update unused descriptors. */
+     * more ranges than could be kept, or a device that cannot update unused descriptors. */
     uint64_t all_store, all_ranges, all_device;
 } tm;
 
@@ -2633,6 +2633,8 @@ static bool submit_recorded(replay *r)
         VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_ts.pool, 2 * g.slot + 1);
     bool copies = nvn_mirror_readback_pending();
     bool readback = nvn_mirror_record_readback(g.cb);
+    if (readback)
+        nvn_mirror_batch_writes(nvn_vk_mark_write_range);
     done_mark(g.slot, __atomic_load_n(&g_submitted, __ATOMIC_ACQUIRE) + 1);
     VkResult vr = VK(vkEndCommandBuffer)(g.cb);
     if (vr != VK_SUCCESS) {
@@ -2692,7 +2694,7 @@ static bool submit_recorded(replay *r)
     pending[s].w = g_writes;
     tm.all_store += g_writes.all && !g_writes.overflow;
     tm.all_ranges += g_writes.overflow;
-    if (!g.unused_while_pending || nvn_mirror_any()) {
+    if (!g.unused_while_pending) {
         pending[s].w.all = true;
         tm.all_device++;
     }
@@ -6788,7 +6790,7 @@ static void present_rate(uint64_t total)
            (double)tm.run_cpu_ns / 1e6 / frames, (double)tm.run_minflt / frames, (double)tm.run_majflt / frames);
     rl_log(RL_LOG_INFO, "nvn",
            "per present: batches that may write guest memory anywhere: %.1f by a storing program, %.1f by too many "
-           "ranges, %.1f by mirrored pools or the device",
+           "ranges, %.1f by a device that cannot update unused descriptors",
            (double)tm.all_store / frames, (double)tm.all_ranges / frames, (double)tm.all_device / frames);
     pm0 = pm;
     pn0 = pn;

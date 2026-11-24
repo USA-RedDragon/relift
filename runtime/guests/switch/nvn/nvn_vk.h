@@ -926,6 +926,11 @@ void nvn_mirror_flushed(void);
 bool nvn_mirror_any(void);
 /** @brief Whether the bytes noted by nvn_mirror_written still wait for a readback. */
 bool nvn_mirror_readback_pending(void);
+/**
+ * @brief Names to note the guest ranges that the readback just recorded (nvn_mirror_record_readback) writes when its
+ * batch completes: the copied segments, and every mirror while a page bitmap is on its way back.
+ */
+void nvn_mirror_batch_writes(void (*note)(uint64_t guest, uint64_t size));
 /** @brief Records copies of the next slice of the noted bytes into cb; they land in guest memory at nvn_mirror_apply_readback. */
 bool nvn_mirror_record_readback(VkCommandBuffer cb);
 /** @brief After the batch completed: writes the readback slice into guest memory, the pages that differ only. */
