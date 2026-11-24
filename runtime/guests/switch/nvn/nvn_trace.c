@@ -15,7 +15,10 @@
  * ("submit": its queue and its number among all submits), each replayed command ("command": the NVN call, its queue,
  * submit and index "pos" in the flattened set, its first five argument words, and for event waits and signals the
  * event's word and whether the wait let the set through; a wait that holds the set appears each time it is checked)
- * and the queue-level nvnQueueFenceSync and nvnQueueWaitSync calls ("queue"). Each draw and dispatch line of
+ * the queue-level nvnQueueFenceSync and nvnQueueWaitSync calls ("queue"), and each conditional render check a draw,
+ * dispatch or clear makes ("render": the counter address, the two 64-bit words compared, and "runs" 1 when the
+ * command runs), and each counter report the completion writes ("report": the guest address, the counter type, the
+ * value written, and whether the counter was valid, in the order the reports thread writes them). Each draw and dispatch line of
  * trace.jsonl carries the same "queue", "submit", "pos" and the "seq" of its order line.
  * The reader is runtime/tools/nvn_trace.py.
  */
@@ -128,8 +131,10 @@ uint64_t nvn_trace_order(const char *kind, const char *name, uint64_t queue, uin
         for (uint32_t i = 0; i < n; i++)
             fprintf(ord.f, "%s\"0x%llx\"", i ? "," : "", (unsigned long long)args[i]);
         fprintf(ord.f, "]");
-        if (!strcmp(name, "nvnCommandBufferWaitEvent") || !strcmp(name, "nvnCommandBufferSignalEvent") ||
-            !strcmp(name, "nvnCommandBufferWaitSync"))
+        if (!strcmp(kind, "render"))
+            fprintf(ord.f, ",\"pos\":%u,\"runs\":%u", pos, value);
+        else if (!strcmp(name, "nvnCommandBufferWaitEvent") || !strcmp(name, "nvnCommandBufferSignalEvent") ||
+                 !strcmp(name, "nvnCommandBufferWaitSync"))
             fprintf(ord.f, ",\"value\":%u,\"met\":%d", value, (int)met);
         fprintf(ord.f, "}\n");
     }

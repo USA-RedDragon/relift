@@ -101,6 +101,16 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     r.pos = 1;
     r.seq = nvn_trace_order("command", "nvnCommandBufferClearDepthStencil", 0xabc0, 9, 0, clear, 5, 0, true);
     CHECK_EQ(r.seq, 2);
+    /* A conditional render check (render if not equal) on two equal counter words skips, and says so. */
+    uint64_t counters = buf + 0x100;
+    rl_st64(t_mem(), counters, 7);
+    rl_st64(t_mem(), counters + 16, 7);
+    st.render_mode = NVN_RENDER_IF_NOT_EQUAL;
+    st.render_addr = gpu + 0x100;
+    bool run = true;
+    CHECK_EQ(nvn_draw_render_enabled(&r, &run), RL_OK);
+    CHECK(!run);
+    st.render_mode = NVN_RENDER_ALWAYS;
     memset(t_mem() + buf, 0x11, 32);
     nvn_trace_begin(&r, "dispatch");
     memset(t_mem() + buf, 0x22, 32);
@@ -162,6 +172,10 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
         CHECK(strstr(order, "\"kind\":\"submit\",\"name\":\"nvnQueueSubmitCommands\",\"queue\":\"0xabc0\",\"submit\":9,"
                             "\"args\":[\"0x2\"]}") != NULL);
         CHECK(strstr(order, "\"seq\":2,") != NULL);
+        char want[160];
+        snprintf(want, sizeof want, "\"kind\":\"render\",\"name\":\"conditional render\",\"queue\":\"0xabc0\",\"submit\":9,"
+                 "\"args\":[\"0x%llx\",\"0x7\",\"0x7\"],\"pos\":1,\"runs\":0}", (unsigned long long)(gpu + 0x100));
+        CHECK(strstr(order, want) != NULL);
         CHECK(strstr(order, "\"kind\":\"command\",\"name\":\"nvnCommandBufferClearDepthStencil\",\"queue\":\"0xabc0\","
                             "\"submit\":9,\"pos\":0,\"args\":[\"0x1\",\"0x0\",\"0x0\",\"0x0\",\"0x0\"]}") != NULL);
         free(order);

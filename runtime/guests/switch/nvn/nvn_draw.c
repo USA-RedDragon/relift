@@ -1474,6 +1474,8 @@ int nvn_draw_render_enabled(replay *r, bool *run)
     const uint8_t *p = r->mem + nvn_gpu_guest(st->render_addr);
     bool equal = rl_ld64(p, 0) == rl_ld64(p, 16);
     *run = equal == (st->render_mode == NVN_RENDER_IF_EQUAL);
+    uint64_t seen[3] = { st->render_addr, rl_ld64(p, 0), rl_ld64(p, 16) };
+    nvn_trace_order("render", "conditional render", r->queue, r->submit, r->pos, seen, 3, *run, true);
     return RL_OK;
 }
 

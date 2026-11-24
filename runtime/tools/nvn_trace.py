@@ -17,7 +17,8 @@ picture (values clamped to 0..1). An image file holds level 0 of every layer, th
 of it, in the host image's format (uncompressed color images; block formats and volumes keep level 0).
 `log` prints the NVN commands the layer replayed before commands FIRST to LAST (names, arguments, the target and
 bytes of inline uniform updates) and each change of the range RELIFT_NVN_TRACE_WATCH names.
-`order` prints order.jsonl, the order the frame's submits, commands, event waits and signals and queue syncs ran in,
+`order` prints order.jsonl, the order the frame's submits, commands, event waits and signals, queue syncs,
+conditional render checks (the counter words compared and whether the command ran) and counter reports written ran in,
 one per line with its queue, submit and index in the set; a draw or dispatch shows its command number in trace.jsonl.
 --queue keeps one queue, --name the lines whose call holds TEXT.
 Standard library only.
@@ -122,10 +123,12 @@ def cmd_order(frame, queue, name):
                 continue
             if name and name not in o["name"]:
                 continue
-            where = "submit %d" % o["submit"] if o["kind"] != "queue" else "queue call"
-            if o["kind"] == "command":
+            where = {"queue": "queue call", "report": "report written"}.get(o["kind"], "submit %d" % o["submit"])
+            if o["kind"] in ("command", "render"):
                 where += " pos %d" % o["pos"]
             extra = ""
+            if "runs" in o:
+                extra = " runs" if o["runs"] else " skipped"
             if "value" in o:
                 extra = " word %d%s" % (o["value"], "" if o["met"] else " (waits)")
             if o["seq"] in traced:
