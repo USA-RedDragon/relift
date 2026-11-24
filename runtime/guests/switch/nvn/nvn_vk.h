@@ -1113,5 +1113,22 @@ void nvn_gpuprof_report(double frames);
 void nvn_gpuprof_sums(double *span_ns, double *parts_ns, double *between_ns);
 /** @brief Forgets the profile and reads gpu.profile again at the next use (a settings change, tests). */
 void nvn_gpuprof_reset(void);
+/** @brief The host's monotonic clock in ns, the one the profile's calibrated GPU times are on. */
+int64_t nvn_gpuprof_now(void);
+/** @brief The batch in slot s is handed to the queue (or the submit thread) now. */
+void nvn_gpuprof_queued(uint32_t s);
+/** @brief vkQueueSubmit of slot s's batch is called now (any thread). */
+void nvn_gpuprof_entered(uint32_t s);
+/** @brief vkQueueSubmit of slot s's batch returned now (any thread). */
+void nvn_gpuprof_handed(uint32_t s);
+/** @brief What a thread was doing for gpu.profile's split of the time between batches, by priority. */
+enum { SPAN_WAIT, SPAN_LOCK, SPAN_CORE, SPAN_BLOCK, SPAN_PACE, SPAN_REPLAY, SPAN_PRESENT, SPAN_KINDS };
+/** @brief The calling thread did kind from lo to hi (host clock, nvn_gpuprof_now); kept while gpu.profile is on. */
+void nvn_gpuprof_span(int kind, int64_t lo, int64_t hi);
+/** @brief A wait for a batch blocked from start_ns to end_ns, at the site nvn_wait_site names. */
+void nvn_gpuprof_waited(int64_t start_ns, int64_t end_ns);
+#define nvn_vk_flush(r) (nvn_wait_site = NVN_SITE, nvn_vk_flush(r))
+#define nvn_vk_reading_guest(a, n) (nvn_wait_site = NVN_SITE, nvn_vk_reading_guest(a, n))
+#define nvn_vk_sync_uniforms(r) (nvn_wait_site = NVN_SITE, nvn_vk_sync_uniforms(r))
 
 #endif

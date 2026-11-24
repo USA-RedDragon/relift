@@ -152,6 +152,16 @@ bool nvn_vk_settle(void);
 /** @brief Waits for the batches in flight when any may write guest memory (what nvn_lock does); false on a failure. */
 bool nvn_vk_settle_writers(void);
 /**
+ * @brief The source line of the flush, settle or read that is waiting for batches on this thread (gpu.profile names
+ * what the game's thread waited for by it). The calls below set it.
+ */
+extern _Thread_local const char *nvn_wait_site;
+#define NVN_SITE_STR2(x) #x
+#define NVN_SITE_STR(x) NVN_SITE_STR2(x)
+#define NVN_SITE (__FILE_NAME__ ":" NVN_SITE_STR(__LINE__))
+#define nvn_vk_settle() (nvn_wait_site = NVN_SITE, nvn_vk_settle())
+#define nvn_vk_settle_writers() (nvn_wait_site = NVN_SITE, nvn_vk_settle_writers())
+/**
  * @brief Checks timestamp reports: two reports at guest address addr and addr + 16 with a long GPU batch between
  * them must be unwritten when recorded, written without any wait once the batch finishes (the check spins on the
  * memory), with value 0 and times in order, apart by at least 0.1 ms and within the check's own span; with

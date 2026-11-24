@@ -405,3 +405,19 @@ command buffers (the picture's copy to the window, the post-processing, the on-s
 per game present. Timestamps inside a render pass are not used: on a tiling GPU they do not tell when a draw ran. The
 timestamps serialize the work they separate, so a run with the profile on is slower; compare parts, not the frame
 rate.
+
+Two more lines say what held the GPU idle between batches and what the game's threads waited for:
+
+```
+GPU profile between batches 19.19 ms: fence wait 0.01, NVN lock 0.00, waiting for a guest core 0.10, guest kernel wait 6.25, present pacing 0.55, replay 0.32, present 0.51, from vkQueueSubmit 2.74, submit thread queue 0.05, game code 8.66 (GPU clock placed within 0.21 ms)
+GPU profile wait    1.29 ms    6.8 per present  the next batch slot
+```
+
+Each gap from a batch's end to the next one's start is split, on the host's clock, into the time after the next batch
+reached vkQueueSubmit, its time queued for the submit thread, and before that what the thread that recorded it was
+doing, by its first match: a fence wait, the NVN lock, waiting for a guest core, a guest kernel wait (svc waits and
+sleeps), present pacing, replay, the present; the rest is the game's own code. Without calibrated timestamps the GPU's
+clock is placed by the batches themselves (none starts before its vkQueueSubmit call, none ends after its fence is
+seen); the bound's spread is in parentheses, and a window where the bounds cross (the GPU clock paused, as Adreno's
+does while it sleeps) logs why instead. `wait` lines rank the source lines (or the named calls) where the game's
+threads blocked on a batch.

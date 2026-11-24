@@ -614,6 +614,11 @@ RL_RUNTIME_API void rl_hos_shmem_unlock(hos_shmem *s);
 void hos_sync_signal(hos_kobj *o);
 /** @brief Blocks t (the caller) until woken or timeout_ns passes (-1 forever). Lock held; returns true if woken. */
 bool hos_block(hos_thread *t, int64_t timeout_ns);
+/**
+ * @brief When set (gpu.profile), hos_block reports each block on the calling thread: blocked from lo until woken at
+ * mid, then waiting for a core until hi (host monotonic ns).
+ */
+extern void (*hos_block_span)(int64_t lo, int64_t mid, int64_t hi);
 /** @brief Wakes t with result r. Lock held. */
 void hos_wake(hos_thread *t, rl_result r);
 

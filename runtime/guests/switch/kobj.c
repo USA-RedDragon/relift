@@ -281,12 +281,27 @@ static bool wait_woken(hos_thread *t, int64_t timeout_ns)
     return true;
 }
 
+void (*hos_block_span)(int64_t lo, int64_t mid, int64_t hi);
+
+/** @brief The host's monotonic clock in ns, for hos_block_span. */
+static int64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
 bool hos_block(hos_thread *t, int64_t timeout_ns)
 {
+    void (*span)(int64_t, int64_t, int64_t) = hos_block_span;
+    int64_t lo = span ? mono_ns() : 0;
     hos_sched_unready(t);
     bool woken = wait_woken(t, timeout_ns);
+    int64_t mid = span ? mono_ns() : 0;
     hos_sched_ready(t);
     hos_sched_run(t);
+    if (span)
+        span(lo, mid, mono_ns());
     return woken;
 }
 

@@ -110,6 +110,7 @@ static struct {
         VkCommandBuffer cb;
         VkFence fence;
         uint64_t signal;
+        uint32_t slot;
     } q[SUBMIT_JOBS];
     uint32_t head, tail;
     /** @brief The timeline value of the last batch on the queue; jobs handed over in all. */
@@ -137,8 +138,10 @@ static void *submit_main(void *arg)
             si.pSignalSemaphores = &g.timeline;
         }
         rl_vkdev_guest_queue_lock();
+        nvn_gpuprof_entered(j.slot);
         VkResult vr = VK(vkQueueSubmit)(g.queue, 1, &si, j.fence);
         rl_vkdev_guest_queue_unlock();
+        nvn_gpuprof_handed(j.slot);
         pthread_mutex_lock(&sth.mu);
         if (vr != VK_SUCCESS && sth.err == VK_SUCCESS) {
             sth.err = vr;
@@ -178,13 +181,13 @@ static bool submit_threaded(void)
 }
 
 /** @brief Hands the batch in cb to the submit thread; it signals fence and, when signal is not 0, the timeline value. */
-static VkResult submit_queue(VkCommandBuffer cb, VkFence fence, uint64_t signal)
+static VkResult submit_queue(VkCommandBuffer cb, VkFence fence, uint64_t signal, uint32_t slot)
 {
     pthread_mutex_lock(&sth.mu);
     while (sth.tail - sth.head == SUBMIT_JOBS)
         pthread_cond_wait(&sth.cv, &sth.mu);
     VkResult vr = sth.err;
-    sth.q[sth.tail % SUBMIT_JOBS] = (struct submit_job){ cb, fence, signal };
+    sth.q[sth.tail % SUBMIT_JOBS] = (struct submit_job){ cb, fence, signal, slot };
     sth.tail++;
     sth.queued++;
     pthread_cond_broadcast(&sth.cv);
@@ -2152,8 +2155,11 @@ static bool submit_recorded(replay *r)
         si.pSignalSemaphores = &g.timeline;
     }
     int64_t t0 = now_ns();
+    nvn_gpuprof_queued(g.slot);
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) == VK_SUCCESS)
-        vr = submit_threaded() ? submit_queue(g.cb, g.fence, g.timeline_ok ? signal : 0) : guest_submit(&si);
+        vr = submit_threaded() ? submit_queue(g.cb, g.fence, g.timeline_ok ? signal : 0, g.slot) : guest_submit(&si);
+    if (!submit_threaded())
+        nvn_gpuprof_handed(g.slot);
     if (vr != VK_SUCCESS) {
         rl_log(RL_LOG_ERROR, "nvn", "the host device refused a submit (%d)", (int)vr);
         if (vr == VK_ERROR_DEVICE_LOST)
@@ -2178,6 +2184,7 @@ static bool submit_recorded(replay *r)
     g.arena_used = 0;
     g.flushes++;
     uint32_t next = (s + 1) % NVN_SLOTS;
+    nvn_wait_site = "the next batch slot";
     bool ok = wait_slot(next);
     use_slot(next);
     return ok;
@@ -2190,7 +2197,10 @@ static bool wait_slot(uint32_t s)
         return true;
     pending[s].on = false;
     nvn_core_leave();
+    int64_t w0 = nvn_gpuprof_on() && VK(vkGetFenceStatus)(g.dev, g.fences[s]) == VK_NOT_READY ? now_ns() : 0;
     VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fences[s], VK_TRUE, UINT64_MAX);
+    if (w0)
+        nvn_gpuprof_waited(w0, now_ns());
     nvn_counters_settle(s);
     tm.wait_ns += (uint64_t)(now_ns() - pending[s].t1);
     tm.flushes++;
@@ -2254,11 +2264,11 @@ static bool wait_submitted(void)
     }
 }
 
-bool nvn_vk_settle(void) { return wait_submitted(); }
+bool(nvn_vk_settle)(void) { return wait_submitted(); }
 
 static bool settle_writers(void);
 
-bool nvn_vk_settle_writers(void) { return settle_writers(); }
+bool(nvn_vk_settle_writers)(void) { return settle_writers(); }
 
 /**
  * @brief Waits for the batches in flight when any of them may write guest memory anywhere (a program that stores
@@ -2282,7 +2292,7 @@ bool nvn_vk_pending_write(uint64_t guest, uint64_t size)
     return false;
 }
 
-bool nvn_vk_reading_guest(uint64_t guest, uint64_t size)
+bool(nvn_vk_reading_guest)(uint64_t guest, uint64_t size)
 {
     for (uint32_t s = 0; s < NVN_SLOTS; s++)
         if (pending[s].on && writes_into(&pending[s].w, guest, guest + (size ? size : 1)))
@@ -2313,7 +2323,7 @@ bool nvn_vk_submit(replay *r)
 }
 
 /** @brief Submits what is recorded, by any replay, and waits for it and every batch before it, then brings the bytes the device wrote to pool mirrors into guest memory. */
-bool nvn_vk_flush(replay *r)
+bool(nvn_vk_flush)(replay *r)
 {
     bool recorded = g_recording;
     bool ok = flush_once(r);
@@ -2333,7 +2343,7 @@ static bool flush_once(replay *r)
     return wait_submitted();
 }
 
-bool nvn_vk_sync_uniforms(replay *r)
+bool(nvn_vk_sync_uniforms)(replay *r)
 {
     if (g.uniform_pending)
         return nvn_vk_flush(r);
@@ -4578,14 +4588,19 @@ void nvn_core_return(void)
     if (!core_left)
         return;
     core_left = false;
+    int64_t t0 = nvn_gpuprof_on() ? now_ns() : 0;
     hos_sched_return();
+    if (t0)
+        nvn_gpuprof_span(SPAN_CORE, t0, now_ns());
 }
 
 void nvn_lock(void)
 {
     if (pthread_mutex_trylock(&g.lock) != 0) {
         nvn_core_leave();
+        int64_t t0 = now_ns();
         pthread_mutex_lock(&g.lock);
+        nvn_gpuprof_span(SPAN_LOCK, t0, now_ns());
     }
     lock_since = now_ns();
     settle_writers();
@@ -4716,6 +4731,7 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     if (rc == RL_OK && !nvn_vk_submit(&u->r))
         rc = nvn_vk_fatal(c, "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
+    nvn_gpuprof_span(SPAN_REPLAY, t0, now_ns());
     tm.runs++;
     nvn_trace('U', (uint64_t)(now_ns() - t0), n, 0);
     nvn_unlock();
@@ -5245,6 +5261,7 @@ static void present_rate(uint64_t total)
 int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const int32_t crop[4], uint32_t interval)
 {
     (void)queue;
+    int64_t pres_t0 = now_ns();
     if (!up(c))
         return RL_PENDING;
     nvn_lock();
@@ -5326,8 +5343,10 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     if (nvn_trace_on())
         trace_present_costs();
     int64_t paced_at = now_ns();
+    nvn_gpuprof_span(SPAN_PRESENT, pres_t0, paced_at);
     pace_present(interval);
     g_last_present_ns = now_ns();
+    nvn_gpuprof_span(SPAN_PACE, paced_at, g_last_present_ns);
     nvn_trace('N', n, (uint64_t)(g_last_present_ns - paced_at), 0);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "present %llu: texture 0x%llx, %ux%u", (unsigned long long)n, (unsigned long long)texture,

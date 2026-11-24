@@ -1475,8 +1475,14 @@ uint64_t nvnh_nvnSyncWait(rl_ctx *c, uint8_t *mem)
     } else if (s && s->seq <= nvn_vk_finished()) {
         rc = SYNC_ALREADY_SIGNALED;
     } else if (s) {
+        uint64_t timeout = c->x[1];
+        bool later = s->seq < nvn_vk_submitted();
+        nvn_wait_site = timeout == 0 ? (later ? "nvnSyncWait timeout 0, later batches queued" : "nvnSyncWait timeout 0")
+                        : timeout == UINT64_MAX ? (later ? "nvnSyncWait no timeout, later batches queued"
+                                                         : "nvnSyncWait no timeout")
+                                                : (later ? "nvnSyncWait timed, later batches queued" : "nvnSyncWait timed");
         nvn_lock();
-        nvn_vk_settle();
+        (nvn_vk_settle)();
         nvn_unlock();
         rc = SYNC_CONDITION_SATISFIED;
     }
