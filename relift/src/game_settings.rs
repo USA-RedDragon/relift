@@ -284,6 +284,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "present.flash",
+            "Flash watch (debugging)",
+            "Debugging: <folder>[:<threshold>] reads back every new frame the window shows and, when one frame differs sharply from the frames on both sides while those two agree, writes the three as <folder>/flash-<frame>/present-<n>.png with flash.json (threshold in luminance steps, default 10). Each new frame waits for the GPU. Empty: off",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "debug.gdb",
             "GDB server port",
             "A port on 127.0.0.1 where a GDB remote-protocol server waits for gdb or lldb, which then see the guest's threads, registers and memory by guest address. 0: off",
@@ -1232,8 +1239,8 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(switch_section(Vec::new()).runtime.len(), 43);
-        assert_eq!(section(Vec::new()).runtime.len(), 42);
+        assert_eq!(switch_section(Vec::new()).runtime.len(), 44);
+        assert_eq!(section(Vec::new()).runtime.len(), 43);
     }
 
     #[test]

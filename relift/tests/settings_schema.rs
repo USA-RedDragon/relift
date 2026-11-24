@@ -176,6 +176,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "renderdoc.capture"
                 | "renderdoc.capture_dir"
                 | "present.capture"
+                | "present.flash"
                 | "debug.gdb"
                 | "debug.gdb_wait"
                 | "text_entry.text"

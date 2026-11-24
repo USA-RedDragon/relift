@@ -274,6 +274,16 @@ picture the game makes itself; no image is scaled by relift",
         .env = "RELIFT_PRESENT_CAPTURE",
     },
     {
+        .key = "present.flash",
+        .type = RL_SETTING_STRING,
+        .label = "Flash watch (debugging)",
+        .description = "Debugging: <folder>[:<threshold>] reads back every new frame the window shows and, when one "
+                       "frame differs sharply from the frames on both sides while those two agree, writes the three as "
+                       "<folder>/flash-<frame>/present-<n>.png with flash.json (threshold in luminance steps, default "
+                       "10). Each new frame waits for the GPU. Empty: off",
+        .env = "RELIFT_PRESENT_FLASH",
+    },
+    {
         .key = "debug.gdb",
         .type = RL_SETTING_INT,
         .label = "GDB server port",

@@ -10,6 +10,7 @@
  * semaphore for the present to wait on.
  */
 #include "capture.h"
+#include "flashwatch.h"
 #include "png.h"
 #include "present.h"
 
@@ -103,6 +104,8 @@ struct rl_present {
     /** @brief present.capture: its folder (empty: off), every how many draws, and the draw window [from, to). */
     char pc_dir[1024];
     uint64_t pc_every, pc_from, pc_to;
+    /** @brief present.flash (flashwatch.h): every new frame read back and checked for a one-frame flash. */
+    rl_flashwatch flash;
     /** @brief What the draw being captured did, for its log line (record fills it). */
     struct {
         const char *source;
@@ -1341,7 +1344,8 @@ static bool draw(rl_present *p, bool capture, bool frame)
     d->vkResetCommandBuffer(p->cmd, 0);
     uint64_t n = ++p->draws;
     bool keep = p->pc_dir[0] && p->sc_readable && rl_present_capture_due(n, p->work_number, p->pc_every, p->pc_from, p->pc_to);
-    if (!record(p, index, capture || keep)) {
+    bool watch = frame && p->sc_readable && rl_flashwatch_on(&p->flash);
+    if (!record(p, index, capture || keep || watch)) {
         drop_surface(p);
         p->create_failed = true;
         return false;
@@ -1432,10 +1436,15 @@ static bool draw(rl_present *p, bool capture, bool frame)
     if (id && pr == RLVK_SUCCESS)
         trace_queue(p->swapchain, id, p->work_ready_ns, queued_ns, frame);
     count_present(p, rl_clock_ns() - t0);
-    if (capture || keep)
+    if (capture || keep || watch)
         d->vkWaitForFences(d->device, 1, &p->fence, 1, ~(uint64_t)0);
     if (keep)
         pc_write(p, n);
+    if (watch) {
+        rl_vkdev_buf_invalidate(p->d, &p->readback);
+        bool bgra = p->sc_format == RLVK_FORMAT_B8G8R8A8_UNORM || p->sc_format == RLVK_FORMAT_B8G8R8A8_SRGB;
+        rl_flashwatch_push(&p->flash, p->work_number, p->readback.map, p->sc_w, p->sc_h, (size_t)p->sc_w * 4, bgra);
+    }
     if (capture)
         keep_capture(p);
     return pr == RLVK_SUCCESS || pr == RLVK_SUBOPTIMAL_KHR;
@@ -1494,6 +1503,7 @@ static void *thread_main(void *arg)
 {
     rl_present *p = arg;
     pc_read(p);
+    rl_flashwatch_open(&p->flash, rl_setting_str("present.flash"));
     pthread_mutex_lock(&p->lock);
     for (;;) {
         if (p->holds && (!p->surface_ok || p->quit)) {
@@ -1646,6 +1656,7 @@ static void free_objects(rl_present *p)
     rl_post_gpu_free(p->post);
     rl_vkdev_buf_free(d, &p->stage);
     rl_vkdev_buf_free(d, &p->readback);
+    rl_flashwatch_close(&p->flash);
     if (p->acquired)
         d->vkDestroySemaphore(d->device, p->acquired, NULL);
     if (p->fence)
