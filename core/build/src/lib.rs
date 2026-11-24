@@ -648,6 +648,14 @@ pub fn build_with(
     jobs: u32,
     on: &mut dyn FnMut(Event),
 ) -> Result<(), Error> {
+    if plan.asm.is_none()
+        && let Some(c) = plan.compiles.iter().find(|c| is_asm(&c.src))
+    {
+        return Err(Error::Failed(format!(
+            "{} is assembly, but the plan names no assembler",
+            c.src.display()
+        )));
+    }
     std::fs::create_dir_all(dir)?;
     for c in &plan.compiles {
         if let Some(p) = c.obj.parent() {
@@ -780,6 +788,20 @@ mod tests {
         assert!(t.contains("build obj/a.o: cc c/a$ b.c"), "{t}");
         p.asm = None;
         assert!(!ninja_file(&p, Path::new(".")).contains("rule asm"));
+    }
+
+    #[test]
+    fn assembly_without_an_assembler_is_refused_before_ninja_runs() {
+        let mut p = plan();
+        p.compiles.push(Compile {
+            src: "s/x86/mc.asm".into(),
+            obj: "obj/mc.o".into(),
+            flags: Vec::new(),
+            pool: None,
+            stage: 0,
+        });
+        let e = build_with(&p, Path::new("unused-dir"), None, 1, &mut |_| {}).expect_err("refused");
+        assert!(e.to_string().contains("mc.asm"), "{e}");
     }
 
     fn moved(root: &str) -> (Plan, PathBuf) {
