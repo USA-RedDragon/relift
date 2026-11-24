@@ -14,10 +14,10 @@
 #include <unistd.h>
 
 /* The layout; keep in step with check/src/emu.rs. */
-#define CODE 0x10010000000ull
+#define CODE 0x7410000000ull
 #define CODE_MAP (CODE - 0x100000ull)
 #define CODE_SIZE 0x200000ull
-#define DATA 0x10020000000ull
+#define DATA 0x7420000000ull
 #define DATA_SIZE 0x4000u
 
 #define REQ_MAGIC 0x514f4c52u /* "RLOQ" */

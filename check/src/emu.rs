@@ -15,22 +15,23 @@ use unicorn_engine::RegisterARM64CP;
 use unicorn_engine::Unicorn;
 use unicorn_engine::unicorn_const::{Arch, Mode, Prot, uc_error};
 
-/// Where the instruction words go. Above 4 GiB, and above 0x70_0000_0000,
-/// since macOS refuses fixed mappings below both; `check/oracle/harness.c`
-/// uses the same layout.
-pub const CODE: u64 = 0x100_1000_0000;
+/// Where the instruction words go. Above 4 GiB, above 0x70_0000_0000 (macOS
+/// refuses fixed mappings below both) and below 2^39 (a 39-bit Linux kernel,
+/// such as the Thor's, refuses them above); `check/oracle/harness.c` uses
+/// the same layout.
+pub const CODE: u64 = 0x74_1000_0000;
 /// The mapped code region around [`CODE`], which covers 19-bit branches.
 pub const CODE_MAP: u64 = CODE - 0x10_0000;
 /// The size of the code region.
 pub const CODE_SIZE: u64 = 0x20_0000;
 /// The data window.
-pub const DATA: u64 = 0x100_2000_0000;
+pub const DATA: u64 = 0x74_2000_0000;
 /// The data window's size.
 pub const DATA_SIZE: usize = 0x4000;
-/// Where pointer authentication runs see the data window a second time:
-/// [`DATA`] has bit 40 set, outside the 39-bit address range the keys are
-/// checked in, so an authenticated pointer can only reach this alias.
-pub const PAUTH_DATA: u64 = 0x20_2000_0000;
+/// Where pointer authentication runs see the data window. [`DATA`] is inside
+/// the 39-bit address range the keys are checked in, so an authenticated
+/// pointer reaches it directly and no alias is mapped.
+pub const PAUTH_DATA: u64 = DATA;
 
 /// The guest state a check compares.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,7 +136,6 @@ impl Emu {
         let mut e = Emu::new()?;
         e.setup_pauth()?;
         e.uc.reg_write(R::PSTATE, EL1H)?;
-        e.uc.mem_map(PAUTH_DATA, DATA_SIZE as u64, Prot::READ | Prot::WRITE)?;
         e.pauth = true;
         Ok(e)
     }

@@ -49,6 +49,7 @@
 mod emu;
 mod gb;
 mod gba;
+mod kat;
 mod mips;
 mod mutate;
 mod oracle;
@@ -353,6 +354,9 @@ fn usage() -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = kat::dispatch(&args) {
+        return code;
+    }
     if let Some(code) = gb::cli::dispatch(&args) {
         return code;
     }
