@@ -129,6 +129,37 @@ jobs:
       - name: on-device shader translator, C ABI against the Rust tables
         run: scripts/ci/tests-gpu-xlate.sh
 
+  tests-gpuapi:
+    name: i386 GPU-API forwarding against native i386 GL, GLX and Vulkan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore the cached packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/apt-debs
+          key: apt-gpuapi-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.job }}
+          restore-keys: apt-gpuapi-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install host and i386 Mesa (GL, EGL, GLX, lavapipe) and Xvfb
+        run: |
+          sudo dpkg --add-architecture i386
+          scripts/ci/apt-install.sh \
+            libegl1 libgl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0 libx11-6 \
+            libegl1:i386 libgl1:i386 libegl-mesa0:i386 libgl1-mesa-dri:i386 libglx-mesa0:i386 libx11-6:i386 \
+            libvulkan1 libvulkan1:i386 mesa-vulkan-drivers mesa-vulkan-drivers:i386 xvfb
+          echo "RELIFT_REQUIRE_NATIVE=1" >> "$GITHUB_ENV"
+
+      - name: Install the pinned zig for the native i386 builds
+        run: scripts/ci/install-zig.sh
+
+      - name: i386 GPU-API forwarding against native i386
+        run: scripts/ci/tests-gpuapi.sh
+
   tests-relift:
     name: tests of relift, without the end-to-end targets
     runs-on: ubuntu-latest
