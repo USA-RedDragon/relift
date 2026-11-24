@@ -616,7 +616,7 @@ static int bind_image(replay *r, uint32_t id, uint32_t slot, vimg *v, uint32_t l
     if (n)
         VK(vkUpdateDescriptorSets)(g.dev, n, w, 0, NULL);
     null_rest(slot, true, 0, wrote);
-    if (nvn_trace_active)
+    if (nvn_trace_active && !nvn_trace_ring_on)
         rl_log(RL_LOG_INFO, "nvn", "trace: storage image id %u slot %u (format %u, host format %d, usage 0x%x) has views of kinds/dims mask 0x%llx", id,
                slot, v->d.format, (int)v->format, (unsigned)v->usage, (unsigned long long)wrote);
     return RL_OK;

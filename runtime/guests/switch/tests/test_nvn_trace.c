@@ -2,7 +2,8 @@
  * @file test_nvn_trace.c
  * @brief The NVN frame trace (RELIFT_NVN_TRACE): its setting, and one traced command that leaves its line and the
  * bytes of the buffer it changed, before and after, in the folder, and marks a binding outside every memory pool
- * instead of reading it; a pool the host device holds no buffer for is still a pool at its guest address.
+ * instead of reading it; a pool the host device holds no buffer for is still a pool at its guest address. The trace
+ * ring keeps each of the last presents' lines and notes in memory and writes one present's on demand.
  */
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
@@ -186,6 +187,63 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     nvnh_nvnMemoryPoolFinalize(c, t_mem());
     CHECK_EQ(nftw(dir, remove_one, 16, FTW_DEPTH | FTW_PHYS), 0);
     unsetenv("RELIFT_NVN_TRACE");
+}
+
+TEST(nvn_trace_ring_keeps_the_last_presents_lines_until_asked)
+{
+    rl_ctx *c = t_boot(NULL);
+    char dir[PATH_MAX];
+    const char *base = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/relift-ring-XXXXXX", base && *base ? base : "/tmp");
+    CHECK(mkdtemp(dir) != NULL);
+    g.presents = 40;
+    nvn_trace_ring_start();
+    CHECK(nvn_trace_active && nvn_trace_ring_on);
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    st.code[NVN_STAGE_COMPUTE] = 0x1000;
+    replay r = { .c = c, .mem = t_mem(), .st = &st };
+    for (uint32_t p = 0; p < NVN_TRACE_RING + 1; p++) {
+        nvn_trace_note("image", "\"storage\":\"0x%x\"", 0x5000 + p);
+        nvn_trace_begin(&r, "dispatch");
+        nvn_trace_cmd tc = { .groups = { p + 1, 1, 1 } };
+        tc.keys[NVN_STAGE_COMPUTE] = "feedc0de";
+        nvn_trace_end(&r, &tc);
+        CHECK_EQ(nvn_trace_cmds(), 1);
+        g.presents++;
+        nvn_trace_present(NULL);
+        CHECK_EQ(nvn_trace_cmds(), 0);
+    }
+    char path[PATH_MAX + 64];
+    snprintf(path, sizeof path, "%s/trace-40.jsonl", dir);
+    CHECK(!nvn_trace_ring_write(40, path));
+    snprintf(path, sizeof path, "%s/trace-42.jsonl", dir);
+    CHECK(nvn_trace_ring_write(42, path));
+    size_t n = 0;
+    char *text = slurp(path, &n);
+    CHECK(text != NULL);
+    if (text) {
+        CHECK(strstr(text, "{\"i\":0,\"frame\":42,\"kind\":\"image\",\"storage\":\"0x5002\"}\n") != NULL);
+        const char *line = strstr(text, "\"kind\":\"dispatch\",\"queue\":\"0x");
+        CHECK(line != NULL);
+        unsigned long long submit, seq;
+        unsigned pos;
+        int used = 0;
+        if (line) {
+            const char *q = strchr(line + 28, '"');
+            CHECK(q != NULL);
+            CHECK(q && sscanf(q, "\",\"submit\":%llu,\"pos\":%u,\"seq\":%llu,\"groups\":[3,1,1]%n", &submit, &pos, &seq,
+                              &used) == 3 && used > 0);
+        }
+        CHECK(strstr(text, "[2,1,1]") == NULL && strstr(text, "[4,1,1]") == NULL);
+        free(text);
+    }
+    CHECK(nvn_trace_ring_write(44, path));
+    text = slurp(path, &n);
+    CHECK(text != NULL && strstr(text, "[5,1,1]") != NULL);
+    free(text);
+    CHECK_EQ(nftw(dir, remove_one, 16, FTW_DEPTH | FTW_PHYS), 0);
 }
 
 /**

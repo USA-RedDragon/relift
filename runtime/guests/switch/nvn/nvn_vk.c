@@ -1308,6 +1308,8 @@ static struct {
     uint32_t ncolor;
     VkImageView color[MAX_RT], depth;
     const vimg *images[MAX_RT + 1];
+    /** @brief The level and layer each color target renders to (the flash trigger's thumbnails). */
+    uint32_t level[MAX_RT], layer[MAX_RT];
     bool has_depth, has_stencil;
     VkRect2D area;
     /** @brief The layers it renders (more than 1 for a layered draw's 2D array views). */
@@ -1369,6 +1371,8 @@ void nvn_vk_dispatch_image(const vimg *v, uint32_t level, bool one_level, uint32
 {
     if (!v)
         return;
+    if (write && nvn_flash_on())
+        nvn_flash_wrote(v, level, layer);
     const nvn_tex_desc *d = &v->d;
     uint32_t nlev = d->levels ? d->levels : 1, nlay = range_of(v).layerCount;
     if (d->target == NVN_TARGET_3D || d->target == NVN_TARGET_BUFFER || !d->layer_stride || nlev > NVN_TEX_MAX_LEVELS ||
@@ -1433,6 +1437,10 @@ void nvn_vk_dispatched(void)
         cs_add(&open_cs.done, open_cs.next.r[i].lo, open_cs.next.r[i].hi - open_cs.next.r[i].lo, open_cs.next.r[i].write);
     open_cs.done.full |= open_cs.next.full;
     nvn_vk_dispatch_reset();
+    if (nvn_flash_pending()) {
+        cs_close();
+        nvn_flash_thumbs(NULL, "dispatch");
+    }
 }
 
 void nvn_vk_reading(const vimg *v)
@@ -1466,6 +1474,11 @@ void nvn_vk_end_rendering(void)
     open_pass.open = false;
     VK(vkCmdEndRendering)(g.cb);
     nvn_vk_barrier(g.cb);
+    if (nvn_flash_on()) {
+        for (uint32_t i = 0; i < open_pass.ncolor; i++)
+            nvn_flash_wrote(open_pass.images[i], open_pass.level[i], open_pass.layer[i]);
+        nvn_flash_thumbs(NULL, "pass");
+    }
 }
 
 bool nvn_vk_recording(void) { return g_recording; }
@@ -2168,6 +2181,13 @@ static bool upload(replay *r, vimg *v)
     ppc.upload_ns += (uint64_t)(now_ns() - t0);
     ppc.uploads++;
     ppc.upload_bytes += v->d.size;
+    if (ok && nvn_flash_on()) {
+        nvn_trace_note("upload", "\"storage\":\"0x%llx\",\"format\":%u,\"width\":%u,\"height\":%u,\"size\":%llu,\"hash\":\"%016llx\"",
+                       (unsigned long long)v->storage, v->d.format, v->d.width, v->d.height,
+                       (unsigned long long)v->d.size, (unsigned long long)bytes_hash(r->mem + v->storage, v->d.size));
+        nvn_flash_wrote(v, 0, 0);
+        nvn_flash_thumbs(r, "upload");
+    }
     return ok;
 }
 
@@ -2335,6 +2355,9 @@ static bool write_back(replay *r, vimg *u)
     bool ok = write_back_body(r, u);
     if (ok)
         nvn_vk_wb_note(u);
+    if (nvn_flash_on())
+        nvn_trace_note("write_back", "\"storage\":\"0x%llx\",\"format\":%u,\"width\":%u,\"height\":%u,\"ok\":%d",
+                       (unsigned long long)u->storage, u->d.format, u->d.width, u->d.height, (int)ok);
     ppc.wb_ns += (uint64_t)(now_ns() - t0);
     ppc.wbs++;
     return ok;
@@ -2547,6 +2570,12 @@ static vimg *sync_from(replay *r, vimg *v, uint64_t since, bool deferred)
             VK(vkCmdCopyImage)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, v->image, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
             nvn_vk_barrier(g.cb);
             ppc.gpu_alias++;
+            if (nvn_flash_on()) {
+                nvn_trace_note("alias", "\"storage\":\"0x%llx\",\"from_format\":%u,\"to_format\":%u,\"rows\":%u",
+                               (unsigned long long)v->storage, src->d.format, v->d.format, h);
+                nvn_flash_wrote(v, 0, 0);
+                nvn_flash_thumbs(r, "alias");
+            }
         } else if (!write_back(r, src) || !upload(r, v)) {
             nvn_vk_stop(r,
                         "texture storage 0x%llx (format %u, %ux%u) was written as format %u, %ux%u, which cannot be "
@@ -2639,6 +2668,10 @@ static void reap_retired(void)
         } else {
             nvn_texset_image_gone(v);
             nvn_trace_image_gone(v);
+            nvn_flash_image_gone(v);
+            if (nvn_flash_on())
+                nvn_trace_note("image_free", "\"storage\":\"0x%llx\",\"format\":%u", (unsigned long long)v->storage,
+                               v->d.format);
             image_free(v);
         }
     }
@@ -2926,6 +2959,11 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
         by_storage.epoch = g.image_epoch + 1;
     }
     g.image_epoch++;
+    if (nvn_flash_on())
+        nvn_trace_note("image", "\"texture\":\"0x%llx\",\"storage\":\"0x%llx\",\"format\":%u,\"vk_format\":%d,\"width\":%u,"
+                       "\"height\":%u,\"levels\":%u,\"target\":%u,\"as_target\":%d,\"size\":%llu",
+                       (unsigned long long)tex, (unsigned long long)storage, d->format, (int)f, d->width, d->height,
+                       d->levels, d->target, (int)target, (unsigned long long)d->size);
     if (target)
         defer_sync(v);
     else
@@ -3185,6 +3223,8 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
         open_pass.color[i] = cv[i];
         open_pass.images[i] = r->st->color[i].v;
+        open_pass.level[i] = r->st->color[i].level;
+        open_pass.layer[i] = r->st->color[i].layer;
     }
     open_pass.images[MAX_RT] = depth || stencil ? r->st->depth.v : NULL;
     open_pass.depth = depth || stencil ? dv : NULL;
@@ -3636,6 +3676,13 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
                            plan.linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     }
     nvn_vk_barrier(g.cb);
+    if (nvn_flash_on()) {
+        nvn_trace_note("copy", "\"from\":\"0x%llx\",\"to\":\"0x%llx\",\"from_format\":%u,\"to_format\":%u,\"texel_copy\":%d",
+                       (unsigned long long)src->storage, (unsigned long long)dst->storage, src->d.format, dst->d.format,
+                       (int)plan.texel_copy);
+        nvn_flash_wrote(dst, dl, dlayer);
+        nvn_flash_thumbs(r, "copy");
+    }
     return RL_OK;
 }
 
@@ -3689,6 +3736,13 @@ static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
     };
     VK(vkCmdCopyBufferToImage)(g.cb, g.arena.buf, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &bic);
     nvn_vk_barrier(g.cb);
+    if (nvn_flash_on()) {
+        nvn_trace_note("copy_buffer", "\"buffer\":\"0x%llx\",\"to\":\"0x%llx\",\"format\":%u,\"bytes\":%llu",
+                       (unsigned long long)e->x[1], (unsigned long long)dst->storage, dst->d.format,
+                       (unsigned long long)p.span);
+        nvn_flash_wrote(dst, level, layer);
+        nvn_flash_thumbs(r, "copy_buffer");
+    }
     return RL_OK;
 }
 
@@ -4455,7 +4509,7 @@ static const uint8_t *present_readback(replay *r, vimg *v)
  * @brief Copies the crop rectangle of v's level 0 into a presenter slot's image on the GPU (RGBA8 images straight,
  * other color formats through a blit), and waits for the copy. The slot ends in TRANSFER_SRC_OPTIMAL.
  */
-static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl_present_slot *s)
+static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl_present_slot *s, uint64_t frame)
 {
     if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT)
         return false;
@@ -4482,6 +4536,8 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
                            .extent = { rect[2], rect[3], 1 } };
         VK(vkCmdCopyImage)(g.cb, direct ? v->image : tmp, VK_IMAGE_LAYOUT_GENERAL, slot,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
+        if (nvn_flash_on())
+            nvn_flash_present_record(r, direct ? v->image : tmp, rect, frame);
         ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         ib.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -4699,12 +4755,13 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
     if (shown && cropped && pres) {
         rl_present_slot slot;
         shown = rl_present_slot_begin(pres, rect[2], rect[3], &slot);
-        if (shown && !present_to_slot(&r, v, rect, &slot)) {
+        if (shown && !present_to_slot(&r, v, rect, &slot, n)) {
             rl_present_slot_abort(pres, &slot);
             shown = false;
         } else if (shown) {
             rl_present_slot_end(pres, &slot, rect[2], rect[3]);
             counted = true;
+            nvn_flash_presented(&r, n);
         }
     }
     bool pixels = capture || (cropped && win && !pres && b->present_rgb);

@@ -527,6 +527,13 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
     }
     nvn_vk_barrier(g.cb);
     nvn_vk_written(out);
+    if (nvn_flash_on()) {
+        nvn_trace_note("upscale", "\"in\":\"0x%llx\",\"out\":\"0x%llx\",\"in_rect\":[%u,%u,%u,%u],\"reset\":%d,\"game_reset\":%d",
+                       (unsigned long long)in->storage, (unsigned long long)out->storage, ui.in.x, ui.in.y, ui.in.width,
+                       ui.in.height, (int)ui.reset, (int)p.reset);
+        nvn_flash_wrote(out, level, 0);
+        nvn_flash_thumbs(r, "upscale");
+    }
     if (!st.evaluations++)
         trace("nvnCommandBufferEvaluateDlss: %ux%u -> %ux%u with %s", ui.in.width, ui.in.height, ui.out_rect.width,
               ui.out_rect.height, rl_upscale_name(rl_upscaler_choice(u)));

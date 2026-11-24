@@ -21,10 +21,16 @@
  * value written, and whether the counter was valid, in the order the reports thread writes them). Each draw and dispatch line of
  * trace.jsonl carries the same "queue", "submit", "pos" and the "seq" of its order line.
  * The reader is runtime/tools/nvn_trace.py.
+ *
+ * The ring (nvn_trace_ring_start, used by the flash trigger in nvn_flash.c) keeps the same lines for the last
+ * NVN_TRACE_RING presents in memory, without the files and without the submits around each command, so a trace
+ * costs no change in the frame's batches. Its lines go to disk only when asked (nvn_trace_ring_write). Notes
+ * (nvn_trace_note) add lines for what happens between commands: images made, uploads, copies, alias syncs.
  */
 #include "nvn_vk.h"
 
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -140,6 +146,96 @@ uint64_t nvn_trace_order(const char *kind, const char *name, uint64_t queue, uin
     }
     pthread_mutex_unlock(&ord.lock);
     return seq;
+}
+
+bool nvn_trace_ring_on;
+uint64_t nvn_trace_wide_draws;
+
+/** @brief The ring's lines of one present: the frame number its commands ran under and the text. */
+static struct ring_frame {
+    uint64_t frame;
+    char *text;
+    size_t len, cap;
+    /** @brief Lines dropped when the text could not grow. */
+    uint64_t dropped;
+} ring[NVN_TRACE_RING];
+
+static struct ring_frame *ring_now;
+
+/** @brief Appends formatted text to the ring's present (when the ring is on) or to the trace file. */
+static void out(const char *fmt, ...) RL_PRINTF(1, 2);
+static void out(const char *fmt, ...)
+{
+    va_list ap;
+    if (!nvn_trace_ring_on) {
+        va_start(ap, fmt);
+        vfprintf(tr.out, fmt, ap);
+        va_end(ap);
+        return;
+    }
+    struct ring_frame *f = ring_now;
+    if (!f)
+        return;
+    for (;;) {
+        va_start(ap, fmt);
+        int n = vsnprintf(f->text ? f->text + f->len : NULL, f->text ? f->cap - f->len : 0, fmt, ap);
+        va_end(ap);
+        if (n < 0)
+            return;
+        if (f->text && f->len + (size_t)n < f->cap) {
+            f->len += (size_t)n;
+            return;
+        }
+        size_t cap = f->cap ? f->cap : 1u << 20;
+        while (cap <= f->len + (size_t)n)
+            cap *= 2;
+        char *grown = realloc(f->text, cap);
+        if (!grown) {
+            f->dropped++;
+            return;
+        }
+        f->text = grown;
+        f->cap = cap;
+    }
+}
+
+void nvn_trace_ring_start(void)
+{
+    nvn_trace_ring_on = true;
+    nvn_trace_active = true;
+    ring_now = &ring[g.presents % NVN_TRACE_RING];
+    ring_now->frame = g.presents;
+    ring_now->len = 0;
+    tr.cmd = 0;
+}
+
+uint64_t nvn_trace_cmds(void) { return tr.cmd; }
+
+void nvn_trace_note(const char *kind, const char *fmt, ...)
+{
+    if (!nvn_trace_ring_on && !tr.out)
+        return;
+    char body[768];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(body, sizeof body, fmt, ap);
+    va_end(ap);
+    out("{\"i\":%llu,\"frame\":%llu,\"kind\":\"%s\",%s}\n", (unsigned long long)tr.cmd, (unsigned long long)g.presents,
+        kind, body);
+}
+
+bool nvn_trace_ring_write(uint64_t frame, const char *path)
+{
+    const struct ring_frame *f = &ring[frame % NVN_TRACE_RING];
+    if (!nvn_trace_ring_on || f->frame != frame)
+        return false;
+    FILE *file = fopen(path, "wb");
+    if (!file)
+        return false;
+    bool ok = fwrite(f->text ? f->text : "", 1, f->len, file) == f->len;
+    if (f->dropped)
+        fprintf(file, "{\"kind\":\"dropped\",\"lines\":%llu}\n", (unsigned long long)f->dropped);
+    return fclose(file) == 0 && ok;
 }
 
 void nvn_trace_image_gone(const vimg *v)
@@ -343,6 +439,10 @@ static bool is_target(const vimg *v)
 void nvn_trace_present(replay *r)
 {
     (void)r;
+    if (nvn_trace_ring_on) {
+        nvn_trace_ring_start();
+        return;
+    }
     if (!tr.parsed) {
         tr.parsed = true;
         if (!nvn_trace_parse(getenv("RELIFT_NVN_TRACE"), tr.dir, sizeof tr.dir, &tr.from, &tr.frames))
@@ -468,46 +568,46 @@ void nvn_trace_command(replay *r, const nvn_cmd *e, bool done)
 }
 
 /** @brief The commands replayed since the last present, for the GPU trace's report (RELIFT_NVN_GPU_TRACE). */
-#define RING 8192u
+#define CMD_RING 8192u
 static struct {
-    nvn_cmd e[RING];
-    uint64_t dst[RING];
-    uint32_t data[RING][4];
+    nvn_cmd e[CMD_RING];
+    uint64_t dst[CMD_RING];
+    uint32_t data[CMD_RING][4];
     uint64_t n, present;
-} ring;
+} cmd_ring;
 
 void nvn_trace_ring_note(replay *r, const nvn_cmd *e)
 {
-    if (ring.present != g.presents) {
-        ring.present = g.presents;
-        ring.n = 0;
+    if (cmd_ring.present != g.presents) {
+        cmd_ring.present = g.presents;
+        cmd_ring.n = 0;
     }
-    uint32_t k = (uint32_t)(ring.n++ % RING);
-    ring.e[k] = *e;
-    ring.dst[k] = 0;
-    memset(ring.data[k], 0, sizeof ring.data[k]);
+    uint32_t k = (uint32_t)(cmd_ring.n++ % CMD_RING);
+    cmd_ring.e[k] = *e;
+    cmd_ring.dst[k] = 0;
+    memset(cmd_ring.data[k], 0, sizeof cmd_ring.data[k]);
     if (e->op == NVN_CMD_UPDATE_UNIFORM_BUFFER) {
         const uint8_t *data = nvn_cmd_bytes(r->s, e->x[5]);
-        ring.dst[k] = nvn_gpu_guest(e->x[1]) + e->x[3];
+        cmd_ring.dst[k] = nvn_gpu_guest(e->x[1]) + e->x[3];
         if (data)
-            memcpy(ring.data[k], data, e->x[4] < 16 ? e->x[4] : 16);
+            memcpy(cmd_ring.data[k], data, e->x[4] < 16 ? e->x[4] : 16);
     }
 }
 
 void nvn_trace_ring_dump(const char *why, uint32_t most)
 {
-    uint64_t first = ring.n > RING ? ring.n - RING : 0;
-    if (most && ring.n - first > most)
-        first = ring.n - most;
+    uint64_t first = cmd_ring.n > CMD_RING ? cmd_ring.n - CMD_RING : 0;
+    if (most && cmd_ring.n - first > most)
+        first = cmd_ring.n - most;
     rl_log(RL_LOG_INFO, "gpu-trace", "%s: the %llu commands replayed in present %llu before it:", why,
-           (unsigned long long)(ring.n - first), (unsigned long long)ring.present);
-    for (uint64_t i = first; i < ring.n; i++) {
-        uint32_t k = (uint32_t)(i % RING);
-        const nvn_cmd *e = &ring.e[k];
+           (unsigned long long)(cmd_ring.n - first), (unsigned long long)cmd_ring.present);
+    for (uint64_t i = first; i < cmd_ring.n; i++) {
+        uint32_t k = (uint32_t)(i % CMD_RING);
+        const nvn_cmd *e = &cmd_ring.e[k];
         if (e->op == NVN_CMD_UPDATE_UNIFORM_BUFFER)
             rl_log(RL_LOG_INFO, "gpu-trace", "  %llu %s guest 0x%llx size %llu: %08x %08x %08x %08x", (unsigned long long)i,
-                   nvn_cmd_name(e->op), (unsigned long long)ring.dst[k], (unsigned long long)e->x[4], ring.data[k][0],
-                   ring.data[k][1], ring.data[k][2], ring.data[k][3]);
+                   nvn_cmd_name(e->op), (unsigned long long)cmd_ring.dst[k], (unsigned long long)e->x[4], cmd_ring.data[k][0],
+                   cmd_ring.data[k][1], cmd_ring.data[k][2], cmd_ring.data[k][3]);
         else
             rl_log(RL_LOG_INFO, "gpu-trace", "  %llu %s 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx", (unsigned long long)i,
                    nvn_cmd_name(e->op), (unsigned long long)e->x[1], (unsigned long long)e->x[2],
@@ -548,7 +648,7 @@ static void collect_buffers(const nvn_gfx *st, uint32_t first, uint32_t last)
         buf_entry *e = &tr.buf[i];
         e->guest = nvn_gpu_guest(e->addr);
         e->unmapped = !nvn_gpu_mapped(e->addr, e->size > BUF_CAP ? BUF_CAP : e->size);
-        if (e->unmapped) {
+        if (e->unmapped && !nvn_trace_ring_on) {
             char where[512];
             nvn_gpu_describe(e->addr, where, sizeof where);
             rl_log(RL_LOG_WARN, "nvn", "trace: present %llu %s stage %u %s slot %u at 0x%llx (0x%llx bytes) is not in one memory pool: %s",
@@ -564,11 +664,11 @@ void nvn_trace_begin(replay *r, const char *kind)
     tr.kind = kind;
     tr.ntex = 0;
     tr.nrt = 0;
-    if (!nvn_vk_flush(r))
+    if (!nvn_trace_ring_on && !nvn_vk_flush(r))
         return;
     bool compute = !strcmp(kind, "dispatch");
     collect_buffers(st, compute ? NVN_STAGE_COMPUTE : 0, compute ? NVN_STAGE_COMPUTE : NVN_STAGE_COMPUTE - 1);
-    for (uint32_t i = 0; i < tr.nbuf; i++)
+    for (uint32_t i = 0; i < tr.nbuf && !nvn_trace_ring_on; i++)
         dump_range(tr.buf[i].addr, tr.buf[i].size, tr.buf[i].pre);
     if (!compute) {
         for (uint32_t i = 0; i < st->ncolor; i++)
@@ -582,7 +682,7 @@ void nvn_trace_begin(replay *r, const char *kind)
             tr.rt[tr.nrt].level = st->depth.level;
             tr.nrt++;
         }
-        for (uint32_t i = 0; i < tr.nrt; i++)
+        for (uint32_t i = 0; i < tr.nrt && !nvn_trace_ring_on; i++)
             dump_image(r, tr.rt[i].v, false, tr.rt[i].pre);
     }
 }
@@ -606,153 +706,167 @@ void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t 
     e->dim = dim;
     e->image = image;
     memcpy(e->view, view, 17);
-    dump_image(r, v, !image && !is_target(v), e->pre);
+    if (!nvn_trace_ring_on)
+        dump_image(r, v, !image && !is_target(v), e->pre);
 }
 
-static void hex(FILE *f, const uint8_t *p, size_t n)
+static void hex(const uint8_t *p, size_t n)
 {
-    for (size_t i = 0; i < n; i++)
-        fprintf(f, "%02x", p[i]);
+    char buf[2 * 256 + 1];
+    static const char digits[] = "0123456789abcdef";
+    while (n) {
+        size_t k = n < 256 ? n : 256;
+        for (size_t i = 0; i < k; i++) {
+            buf[2 * i] = digits[p[i] >> 4];
+            buf[2 * i + 1] = digits[p[i] & 15];
+        }
+        buf[2 * k] = 0;
+        out("%s", buf);
+        p += k;
+        n -= k;
+    }
 }
 
-static void json_file(FILE *f, const char *key, const char *name)
+static void json_file(const char *key, const char *name)
 {
     if (name[0])
-        fprintf(f, ",\"%s\":\"%s\"", key, name);
+        out(",\"%s\":\"%s\"", key, name);
 }
 
 void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
 {
-    FILE *f = tr.out;
     const nvn_gfx *st = r->st;
-    if (!f)
+    if (!tr.out && !nvn_trace_ring_on)
         return;
     bool compute = !strcmp(tr.kind, "dispatch");
-    nvn_vk_flush(r);
-    for (uint32_t i = 0; i < tr.nbuf; i++)
-        dump_range(tr.buf[i].addr, tr.buf[i].size, tr.buf[i].post);
-    for (uint32_t i = 0; i < tr.nrt; i++)
-        dump_image(r, tr.rt[i].v, false, tr.rt[i].post);
-    for (uint32_t i = 0; i < tr.ntex; i++)
-        dump_image(r, tr.tex[i].v, !tr.tex[i].image && !is_target(tr.tex[i].v), tr.tex[i].post);
-    fprintf(f, "{\"i\":%llu,\"frame\":%llu,\"kind\":\"%s\"", (unsigned long long)tr.cmd++,
+    if (!nvn_trace_ring_on) {
+        nvn_vk_flush(r);
+        for (uint32_t i = 0; i < tr.nbuf; i++)
+            dump_range(tr.buf[i].addr, tr.buf[i].size, tr.buf[i].post);
+        for (uint32_t i = 0; i < tr.nrt; i++)
+            dump_image(r, tr.rt[i].v, false, tr.rt[i].post);
+        for (uint32_t i = 0; i < tr.ntex; i++)
+            dump_image(r, tr.tex[i].v, !tr.tex[i].image && !is_target(tr.tex[i].v), tr.tex[i].post);
+    }
+    out("{\"i\":%llu,\"frame\":%llu,\"kind\":\"%s\"", (unsigned long long)tr.cmd++,
             (unsigned long long)g.presents, tr.kind);
-    fprintf(f, ",\"queue\":\"0x%llx\",\"submit\":%llu,\"pos\":%u,\"seq\":%llu", (unsigned long long)r->queue,
+    out(",\"queue\":\"0x%llx\",\"submit\":%llu,\"pos\":%u,\"seq\":%llu", (unsigned long long)r->queue,
             (unsigned long long)r->submit, r->pos, (unsigned long long)r->seq);
     if (compute) {
-        fprintf(f, ",\"groups\":[%u,%u,%u]", c->groups[0], c->groups[1], c->groups[2]);
+        out(",\"groups\":[%u,%u,%u]", c->groups[0], c->groups[1], c->groups[2]);
         char name[40] = "";
         if (c->c0) {
             put_file("bufs", "bin", c->c0, c->c0_bytes, name);
-            json_file(f, "c0", name);
+            json_file("c0", name);
         }
-        fprintf(f, ",\"specs\":[");
+        out(",\"specs\":[");
         for (uint32_t i = 0; i < c->nspec; i++)
-            fprintf(f, "%s[%u,%u]", i ? "," : "", c->spec_map[i].constantID,
+            out("%s[%u,%u]", i ? "," : "", c->spec_map[i].constantID,
                     c->spec_vals[c->spec_map[i].offset / 4]);
-        fprintf(f, "]");
+        out("]");
         if (c->c1_guest && c->c1_size && c->c1_size <= BUF_CAP) {
             put_file("bufs", "bin", rl_mem_base() + c->c1_guest, c->c1_size, name);
-            fprintf(f, ",\"c1_guest\":\"0x%llx\"", (unsigned long long)c->c1_guest);
-            json_file(f, "c1", name);
+            out(",\"c1_guest\":\"0x%llx\"", (unsigned long long)c->c1_guest);
+            json_file("c1", name);
         }
     }
     else
-        fprintf(f, ",\"mode\":%u,\"indexed\":%d,\"index_type\":%u,\"base_vertex\":%d,\"first\":%u,\"count\":%u,"
+        out(",\"mode\":%u,\"indexed\":%d,\"index_type\":%u,\"base_vertex\":%d,\"first\":%u,\"count\":%u,"
                    "\"first_instance\":%u,\"instances\":%u",
                 c->mode, (int)c->indexed, c->itype, c->base, c->first, c->count, st->inst_base, st->inst_count);
-    fprintf(f, ",\"programs\":{");
+    out(",\"programs\":{");
     bool first = true;
     static const char *const names[] = { "vertex", "fragment", "geometry", "tess_control", "tess_eval", "compute" };
     for (uint32_t s = 0; s < NVN_STAGES; s++)
         if (c->keys[s]) {
-            fprintf(f, "%s\"%s\":{\"key\":\"%s\",\"code\":\"0x%llx\"}", first ? "" : ",", names[s], c->keys[s],
+            out("%s\"%s\":{\"key\":\"%s\",\"code\":\"0x%llx\"}", first ? "" : ",", names[s], c->keys[s],
                     (unsigned long long)st->code[s]);
             first = false;
         }
-    fprintf(f, "}");
+    out("}");
     if (!compute) {
-        fprintf(f, ",\"viewport\":[%g,%g,%g,%g],\"depth_range\":[%g,%g],\"scissor\":[%d,%d,%u,%u],\"scissor_set\":%d",
+        out(",\"viewport\":[%g,%g,%g,%g],\"depth_range\":[%g,%g],\"scissor\":[%d,%d,%u,%u],\"scissor_set\":%d",
                 (double)st->viewports[0][0], (double)st->viewports[0][1], (double)st->viewports[0][2],
                 (double)st->viewports[0][3], (double)st->depth_ranges[0][0], (double)st->depth_ranges[0][1],
                 st->scissors[0].offset.x, st->scissors[0].offset.y, st->scissors[0].extent.width,
                 st->scissors[0].extent.height, (int)st->scissor_set);
-        fprintf(f, ",\"state\":{\"depth_stencil\":\"");
-        hex(f, st->depth_stencil, sizeof st->depth_stencil);
-        fprintf(f, "\",\"color_state\":\"");
-        hex(f, st->color_state, sizeof st->color_state);
-        fprintf(f, "\",\"channel_mask\":\"");
-        hex(f, st->channel_mask, sizeof st->channel_mask);
-        fprintf(f, "\",\"polygon\":\"");
-        hex(f, st->polygon, sizeof st->polygon);
-        fprintf(f, "\",\"multisample\":\"");
-        hex(f, st->multisample, sizeof st->multisample);
-        fprintf(f, "\",\"blend\":[");
+        out(",\"state\":{\"depth_stencil\":\"");
+        hex(st->depth_stencil, sizeof st->depth_stencil);
+        out("\",\"color_state\":\"");
+        hex(st->color_state, sizeof st->color_state);
+        out("\",\"channel_mask\":\"");
+        hex(st->channel_mask, sizeof st->channel_mask);
+        out("\",\"polygon\":\"");
+        hex(st->polygon, sizeof st->polygon);
+        out("\",\"multisample\":\"");
+        hex(st->multisample, sizeof st->multisample);
+        out("\",\"blend\":[");
         for (uint32_t i = 0; i < st->ncolor; i++) {
-            fprintf(f, "%s\"", i ? "," : "");
-            hex(f, st->blend[i], sizeof st->blend[i]);
-            fprintf(f, "\"");
+            out("%s\"", i ? "," : "");
+            hex(st->blend[i], sizeof st->blend[i]);
+            out("\"");
         }
-        fprintf(f, "],\"stencil_ref\":[%u,%u],\"alpha_ref\":%g,\"point_size\":%g,\"sample_mask\":%u,\"render_mode\":%u,"
+        out("],\"stencil_ref\":[%u,%u],\"alpha_ref\":%g,\"point_size\":%g,\"sample_mask\":%u,\"render_mode\":%u,"
                    "\"rasterizer_discard\":%d,\"primitive_restart\":%d,\"depth_clamp\":%d}",
                 st->stencil_ref[0], st->stencil_ref[1], (double)st->alpha_ref, (double)st->point_size,
                 st->sample_mask, st->render_mode, (int)st->rasterizer_discard, (int)st->primitive_restart,
                 (int)st->depth_clamp);
-        fprintf(f, ",\"targets\":[");
+        out(",\"targets\":[");
         for (uint32_t i = 0; i < tr.nrt; i++) {
             const vimg *v = tr.rt[i].v;
-            fprintf(f,
+            out(
                     "%s{\"depth\":%d,\"vimg\":\"%p\",\"storage\":\"0x%llx\",\"format\":%u,\"vk_format\":%d,"
                     "\"width\":%u,\"height\":%u,\"level\":%u",
                     i ? "," : "", (int)(v->aspect == VK_IMAGE_ASPECT_DEPTH_BIT), (const void *)v,
                     (unsigned long long)v->storage, v->d.format, (int)v->format, v->d.width, v->d.height,
                     tr.rt[i].level);
-            json_file(f, "pre", tr.rt[i].pre);
-            json_file(f, "post", tr.rt[i].post);
-            fprintf(f, "}");
+            json_file("pre", tr.rt[i].pre);
+            json_file("post", tr.rt[i].post);
+            out("}");
         }
-        fprintf(f, "]");
+        out("]");
     }
-    fprintf(f, ",\"buffers\":[");
+    out(",\"buffers\":[");
     for (uint32_t i = 0; i < tr.nbuf; i++) {
         const buf_entry *e = &tr.buf[i];
-        fprintf(f, "%s{\"stage\":\"%s\",\"kind\":\"%s\",\"slot\":%u,\"gpu\":\"0x%llx\",\"guest\":\"0x%llx\",\"size\":%llu",
+        out("%s{\"stage\":\"%s\",\"kind\":\"%s\",\"slot\":%u,\"gpu\":\"0x%llx\",\"guest\":\"0x%llx\",\"size\":%llu",
                 i ? "," : "", names[e->stage], e->storage ? "storage" : "uniform", e->slot,
                 (unsigned long long)e->addr, (unsigned long long)e->guest, (unsigned long long)e->size);
         if (e->unmapped)
-            fprintf(f, ",\"unmapped\":1");
-        json_file(f, "pre", e->pre);
-        json_file(f, "post", e->post);
-        fprintf(f, "}");
+            out(",\"unmapped\":1");
+        json_file("pre", e->pre);
+        json_file("post", e->post);
+        out("}");
     }
-    fprintf(f, "],\"textures\":[");
+    out("],\"textures\":[");
     for (uint32_t i = 0; i < tr.ntex; i++) {
         const tex_entry *e = &tr.tex[i];
         const vimg *v = e->v;
-        fprintf(f,
+        out(
                 "%s{\"id\":%u,\"slot\":%u,\"image\":%d,\"vimg\":\"%p\",\"storage\":\"0x%llx\",\"format\":%u,"
                 "\"vk_format\":%d,\"width\":%u,\"height\":%u,\"depth\":%u,\"levels\":%u,\"target\":%u,\"kind\":%u,"
                 "\"dim\":%u,\"desc_swizzle\":[%u,%u,%u,%u],\"view\":\"",
                 i ? "," : "", e->id, e->slot, (int)e->image, (const void *)v, (unsigned long long)v->storage,
                 v->d.format, (int)v->format, v->d.width, v->d.height, v->d.depth, v->d.levels, v->d.target, e->kind,
                 e->dim, v->d.swizzle[0], v->d.swizzle[1], v->d.swizzle[2], v->d.swizzle[3]);
-        hex(f, e->view, 17);
-        fprintf(f, "\"");
-        json_file(f, "pre", e->pre);
-        json_file(f, "post", e->post);
-        fprintf(f, "}");
+        hex(e->view, 17);
+        out("\"");
+        json_file("pre", e->pre);
+        json_file("post", e->post);
+        out("}");
     }
-    fprintf(f, "],\"push\":{");
+    out("],\"push\":{");
     first = true;
     for (uint32_t s = 0; s < NVN_STAGES; s++) {
         bool cs = s == NVN_STAGE_COMPUTE;
         if (!c->keys[s] || !(cs ? st->push_used[s] : st->gfx_push_used))
             continue;
-        fprintf(f, "%s\"%s\":\"", first ? "" : ",", names[s]);
-        hex(f, cs ? st->push[s][0] : st->gfx_push[0], NVN_PUSH_BYTES);
-        fprintf(f, "\"");
+        out("%s\"%s\":\"", first ? "" : ",", names[s]);
+        hex(cs ? st->push[s][0] : st->gfx_push[0], NVN_PUSH_BYTES);
+        out("\"");
         first = false;
     }
-    fprintf(f, "}}\n");
-    fflush(f);
+    out("}}\n");
+    if (tr.out)
+        fflush(tr.out);
 }

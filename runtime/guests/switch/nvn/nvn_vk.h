@@ -508,6 +508,39 @@ const char *nvn_draw_last(void);
 void nvn_trace_ring_note(replay *r, const nvn_cmd *e);
 /** @brief Logs the present's commands so far (the last most of them, 0 for up to 8192), after the line why. */
 void nvn_trace_ring_dump(const char *why, uint32_t most);
+/** @brief The flash trigger is on (RELIFT_NVN_FLASH, nvn_flash.c); the first call reads the setting. */
+bool nvn_flash_on(void);
+/** @brief Notes that the GPU wrote level and layer of v: the next nvn_flash_thumbs takes its thumbnail. */
+void nvn_flash_wrote(const vimg *v, uint32_t level, uint32_t layer);
+/** @brief Whether images wait for their thumbnails (nvn_flash_wrote since the last nvn_flash_thumbs). */
+bool nvn_flash_pending(void);
+/**
+ * @brief Records the thumbnails of the images written since the last call, what naming the writer ("pass",
+ * "dispatch", "copy", "upscale", "upload", "alias"). Outside a render pass; r begins a command buffer when none is
+ * recording (NULL when one is).
+ */
+void nvn_flash_thumbs(replay *r, const char *what);
+/** @brief v is freed: it leaves the images waiting for thumbnails. */
+void nvn_flash_image_gone(const vimg *v);
+/** @brief Records, before the present's wait, the copy of the presented rect of src and its signature for frame. */
+void nvn_flash_present_record(replay *r, VkImage src, const uint32_t rect[4], uint64_t frame);
+/** @brief After the present's wait: feeds frame's signature to the detector and saves an outlier's evidence. */
+void nvn_flash_presented(replay *r, uint64_t frame);
+/** @brief Presents whose trace lines the ring keeps in memory. */
+#define NVN_TRACE_RING 4u
+/** @brief The trace ring is on: every draw and dispatch writes its line to memory, without files or submits. */
+extern bool nvn_trace_ring_on;
+/** @brief Turns the trace ring on (for good) and starts the present being drawn. */
+void nvn_trace_ring_start(void);
+/** @brief Lines written for the present being drawn so far. */
+uint64_t nvn_trace_cmds(void);
+/**
+ * @brief Adds a line of kind to the ring (or the frame trace being written) with fmt's text as its other JSON fields,
+ * such as "\"storage\":\"0x10\"". Nothing when neither is on.
+ */
+void nvn_trace_note(const char *kind, const char *fmt, ...) RL_PRINTF(2, 3);
+/** @brief Writes the ring's lines of the present drawn under frame number frame to path; false when the ring no longer has them. */
+bool nvn_trace_ring_write(uint64_t frame, const char *path);
 /** @brief The levels and layers of an image's host image (nvn_vk.c). */
 VkImageSubresourceRange nvn_vk_image_range(const vimg *v);
 /**
