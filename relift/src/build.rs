@@ -2049,6 +2049,7 @@ pub(crate) fn build_project(
             inc("cpus/arm64/include"),
             inc("cpus/arm64"),
             inc("guests/switch"),
+            inc("gpuapi/vk"),
         ])
         .chain(extras.defines())
         .chain(hotload.iter().cloned())

@@ -319,6 +319,40 @@ static const rl_setting_def g_runtime_defs[] = {
         .env = "RELIFT_TEXT_ENTRY_PANEL",
         .choices = g_panel_choices,
         .nchoices = 3,
+    },    {
+        .key = "save.dir",
+        .type = RL_SETTING_STRING,
+        .label = "Save folder",
+        .description = "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, "
+                       "else next to the ROM for a cartridge and ./save for other programs",
+        .env = "RELIFT_SAVE",
+    },
+    {
+        .key = "vk.device",
+        .type = RL_SETTING_STRING,
+        .label = "Graphics device",
+        .description = "A part of the name of the host graphics device the game uses. Empty: the first device that "
+                       "can present",
+        .env = "RELIFT_VK_DEVICE",
+    },
+    {
+        .key = "stats.every",
+        .type = RL_SETTING_INT,
+        .label = "Frame stats",
+        .description = "Every this many guest frames, log the frames per second, the process CPU and the CPU the "
+                       "presenting thread spent per frame over them. 0: off",
+        .env = "RELIFT_STATS",
+        .def_int = 0,
+        .min_int = 0,
+        .max_int = 1000000,
+    },
+    {
+        .key = "stats.trace",
+        .type = RL_SETTING_STRING,
+        .label = "Frame trace",
+        .description = "A file to write the frame trace to: vsyncs, presents and the points each guest layer traces, "
+                       "for finding why a vsync went without a new frame. Empty: off",
+        .env = "RELIFT_FRAME_TRACE",
     },
 };
 

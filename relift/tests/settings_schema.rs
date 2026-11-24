@@ -112,8 +112,14 @@ fn the_runtime_schema_in_c_equals_the_list_in_rust() {
     let Some(mut c) = declared(
         "settings-schema",
         "rl_switch_declare_settings",
-        &["cpus/arm64/include", "cpus/arm64", "guests/switch"],
         &[
+            "cpus/arm64/include",
+            "cpus/arm64",
+            "gpuapi/vk",
+            "guests/switch",
+        ],
+        &[
+            "gpuapi/vk/vk_settings.c",
             "guests/switch/settings.c",
             "guests/switch/touchpad.c",
             "cpus/arm64/pac.c",
@@ -172,6 +178,10 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
                 | "text_entry.text"
                 | "text_entry.default"
                 | "text_entry.panel"
+                | "save.dir"
+                | "vk.device"
+                | "stats.every"
+                | "stats.trace"
         )
     });
     rust.extend(gb_settings());

@@ -325,7 +325,7 @@ pub fn runtime_settings() -> Vec<Setting> {
         s(
             "save.dir",
             "Save folder",
-            "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
+            "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else next to the ROM for a cartridge and ./save for other programs",
             Value::String(String::new()),
             SettingKind::String,
         ),
@@ -348,16 +348,9 @@ pub fn runtime_settings() -> Vec<Setting> {
             },
         ),
         s(
-            "vi.follow_display",
-            "Follow the display's refresh",
-            "Keep the game's 60 Hz vsync in step with the display, where the host reports when it shows a frame, so no frame is shown twice or dropped when the display runs slightly off 60 Hz",
-            Value::Bool(true),
-            SettingKind::Bool,
-        ),
-        s(
             "stats.trace",
             "Frame trace",
-            "A file to write a trace of vsyncs, presents, acquires, scheduler hand-overs and slow svcs to, for finding why a vsync went without a new frame. Empty: off",
+            "A file to write the frame trace to: vsyncs, presents and the points each guest layer traces, for finding why a vsync went without a new frame. Empty: off",
             Value::String(String::new()),
             SettingKind::String,
         ),
@@ -378,6 +371,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::Enum {
                 choices: ["auto", "on", "off"].map(String::from).into(),
             },
+        ),
+        s(
+            "vi.follow_display",
+            "Follow the display's refresh",
+            "Keep the game's 60 Hz vsync in step with the display, where the host reports when it shows a frame, so no frame is shown twice or dropped when the display runs slightly off 60 Hz",
+            Value::Bool(true),
+            SettingKind::Bool,
         ),
         s(
             "nvn.memory",
@@ -1215,7 +1215,11 @@ default = "gamepad:south,key:z"
     fn runtime_settings_match_the_runtime_declarations() {
         let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
         let mut c = String::new();
-        for f in ["core/settings.c", "guests/switch/settings.c"] {
+        for f in [
+            "core/settings.c",
+            "gpuapi/vk/vk_settings.c",
+            "guests/switch/settings.c",
+        ] {
             c.push_str(&std::fs::read_to_string(rt.join(f)).unwrap());
         }
         let declared: Vec<String> = c

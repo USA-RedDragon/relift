@@ -10,7 +10,6 @@
  */
 #include "vkf.h"
 
-#include "services.h"
 
 #include <relift/settings.h>
 
@@ -51,7 +50,7 @@ static VkPhysicalDevice choose(vkf_call *k, VkInstance inst)
     VkPhysicalDevice *all = vkf_alloc(k, n * sizeof *all);
     if (VKF_FN(k->fns, vkEnumeratePhysicalDevices)(inst, &n, all) < 0 || !n)
         return NULL;
-    rl_switch_declare_settings();
+    rl_vk_declare_settings();
     const char *want = rl_setting_str("vk.device");
     VkPhysicalDeviceProperties p;
     VkPhysicalDevice pick = NULL;

@@ -220,20 +220,8 @@ bool rl_n64_cache_path(char *out, size_t size, const char *name)
     return n > 0 && (size_t)n < size;
 }
 
-static const rl_setting_def g_defs[] = {
-    {
-        .key = "save.dir",
-        .type = RL_SETTING_STRING,
-        .label = "Save folder",
-        .description = "Where the game's save files are kept. Empty: <user folder>/save when the program names an app, "
-                       "else next to the ROM",
-        .env = "RELIFT_SAVE",
-    },
-};
-
 void rl_n64_declare_settings(const char *const *picture)
 {
     rl_settings_declare_runtime();
-    rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
     rl_n64_declare_picture(picture);
 }

@@ -283,19 +283,4 @@ bool rl_gba_save_path(char *out, size_t size, const char *rom_path)
     return n > 0 && (size_t)n < size;
 }
 
-static const rl_setting_def g_defs[] = {
-    {
-        .key = "save.dir",
-        .type = RL_SETTING_STRING,
-        .label = "Save folder",
-        .description = "Where the game's save file is kept. Empty: <user folder>/save when the program names an app, "
-                       "else next to the ROM",
-        .env = "RELIFT_SAVE",
-    },
-};
-
-void rl_gba_declare_settings(void)
-{
-    rl_settings_declare_runtime();
-    rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
-}
+void rl_gba_declare_settings(void) { rl_settings_declare_runtime(); }

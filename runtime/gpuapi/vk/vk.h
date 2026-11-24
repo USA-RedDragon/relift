@@ -146,6 +146,9 @@ typedef struct rl_vk_config {
     void *gipa;
 } rl_vk_config;
 
+/** @brief Declares the layer's settings (vk_settings.c) and the core's; a second call does nothing. */
+void rl_vk_declare_settings(void);
+
 /** @brief Starts the layer: loads the host loader and builds the thunk unit. Returns 0, or -1 when no host Vulkan exists. */
 RL_RUNTIME_API int rl_vk_init(const rl_vk_config *cfg);
 /** @brief Destroys what the guest left alive and releases the layer. */

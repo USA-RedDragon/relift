@@ -117,7 +117,7 @@ endif
 # Include paths per layer: a layer sees itself and the layers below it.
 CORE_INC := -Icore/include -Icore
 ARM64_INC := $(CORE_INC) -Icpus/arm64/include -Icpus/arm64
-SWITCH_INC := $(ARM64_INC) -Iguests/switch
+SWITCH_INC := $(ARM64_INC) -Iguests/switch -Igpuapi/vk
 GB_INC := $(CORE_INC) -Iguests/gb
 GBA_INC := $(CORE_INC) -Iguests/gba
 SMS_INC := $(CORE_INC) -Iguests/sms
@@ -149,7 +149,7 @@ MIPS_HDRS := $(CORE_HDRS) $(wildcard cpus/mips/include/relift/mips/*.h cpus/mips
 RSP_SRCS := $(wildcard cpus/rsp/*.c)
 RSP_HDRS := $(CORE_HDRS) $(wildcard cpus/rsp/include/relift/rsp/*.h cpus/rsp/*.h)
 SWITCH_SRCS := $(wildcard guests/switch/*.c)
-SWITCH_HDRS := $(ARM64_HDRS) $(wildcard guests/switch/*.h)
+SWITCH_HDRS := $(ARM64_HDRS) $(wildcard guests/switch/*.h) gpuapi/vk/vk.h
 GB_SRCS := $(filter-out guests/gb/gbdev.c,$(wildcard guests/gb/*.c))
 GB_HDRS := $(CORE_HDRS) $(wildcard guests/gb/*.h)
 GBDEV_SRCS := guests/gb/gbdev.c guests/gb/devtests/lockstep.c

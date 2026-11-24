@@ -14,14 +14,6 @@ static const char *const g_displays[] = {"auto", "swapped", "top_both", "bottom_
 
 static const rl_setting_def g_defs[] = {
     {
-        .key = "save.dir",
-        .type = RL_SETTING_STRING,
-        .label = "Save folder",
-        .description = "Where the game's save file is kept. Empty: <user folder>/save when the program names an app, "
-                       "else next to the ROM",
-        .env = "RELIFT_SAVE",
-    },
-    {
         .key = "save.type",
         .type = RL_SETTING_STRING,
         .label = "Backup chip",
