@@ -54,6 +54,9 @@ pub struct Guest {
     /// Builds the dev program and runs it with the arguments given;
     /// returns its exit code.
     pub run: fn(&Settings, &[String], &mut Ui) -> Result<i32, BoxError>,
+    /// Adds a stop report's missed target as a root of the project, when
+    /// the guest reads roots (`relift report --hint add`).
+    pub report_root: Option<crate::report::ReportRoot>,
 }
 
 /// Every guest besides the Switch, in the order an import asks them
@@ -70,6 +73,7 @@ pub const GUESTS: &[Guest] = &[
         import: |s, p, _, ui| crate::gb::import(s, p, ui),
         build: crate::gb::build,
         run: |s, _, ui| crate::gb::run(s, ui),
+        report_root: Some(crate::report::gb_root),
     },
     Guest {
         key: "nds",
@@ -82,6 +86,7 @@ pub const GUESTS: &[Guest] = &[
         import: |s, p, _, ui| crate::nds::import(s, p, ui),
         build: crate::nds::build,
         run: |s, _, ui| crate::nds::run(s, ui),
+        report_root: None,
     },
     Guest {
         key: "gba",
@@ -94,6 +99,7 @@ pub const GUESTS: &[Guest] = &[
         import: |s, p, _, ui| crate::gba::import(s, p, ui),
         build: crate::gba::build,
         run: |s, _, ui| crate::gba::run(s, ui),
+        report_root: Some(crate::report::gba_root),
     },
     Guest {
         key: "sms",
@@ -111,6 +117,7 @@ pub const GUESTS: &[Guest] = &[
             crate::sms::build(s, release, target, ui)
         },
         run: |s, _, ui| crate::sms::run(s, ui),
+        report_root: None,
     },
     Guest {
         key: "linux",
@@ -131,6 +138,7 @@ pub const GUESTS: &[Guest] = &[
             })
         },
         run: crate::linux::run,
+        report_root: None,
     },
     Guest {
         key: "n64",
@@ -143,6 +151,7 @@ pub const GUESTS: &[Guest] = &[
         import: |s, p, _, ui| crate::n64::import(s, p, ui),
         build: crate::n64::build,
         run: |s, _, ui| crate::n64::run(s, ui),
+        report_root: None,
     },
 ];
 

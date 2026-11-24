@@ -746,57 +746,100 @@ pub fn add_hint(
                 r.get("build").unwrap_or("?")
             )
         });
-    let added = match r.guest() {
-        Some("switch") => {
-            if !r
-                .get("target where")
-                .is_some_and(|w| w.ends_with(" text segment"))
-            {
+    let rooted = match r.guest() {
+        Some("switch") => switch_root(r, &target, project, learned)?,
+        other => match other
+            .and_then(crate::guests::by_key)
+            .and_then(|g| g.report_root)
+        {
+            Some(root) => root(r, &target, project, learned)?,
+            None => {
                 return Ok(format!(
-                    "0x{:x} is not in a module's text segment ({}); no hint added",
-                    target.addr,
-                    r.get("target where").unwrap_or("unknown place")
+                    "the {} build reads no root hints yet; lift 0x{:x} by hand",
+                    other.unwrap_or("?"),
+                    target.addr
                 ));
             }
-            let Some((module, offset)) = target.module else {
-                return Ok(format!(
-                    "0x{:x} lies in no module; no hint added",
-                    target.addr
-                ));
-            };
-            hint(project, Hint { module, offset })?
-        }
-        Some("gba") => {
-            let Some((module, offset)) = target.module.filter(|(m, _)| m == crate::gba::ROM_MODULE)
-            else {
-                return Ok(format!(
-                    "0x{:x} is not in the cartridge ROM; code in RAM is lifted from its copy, so no hint is added",
-                    target.addr
-                ));
-            };
-            hint(project, Hint { module, offset })?
-        }
-        Some("gb") => {
-            let Some(line) = gb_learned(r, target.addr) else {
-                return Ok(format!(
-                    "the report does not say what 0x{:x} holds; no root added",
-                    target.addr
-                ));
-            };
-            let Some(path) = learned else {
-                return Ok("the project has no learned file; no root added".into());
-            };
-            learn(path, &line)?
-        }
-        other => {
-            return Ok(format!(
-                "the {} build reads no root hints yet; lift 0x{:x} by hand",
-                other.unwrap_or("?"),
-                target.addr
-            ));
-        }
+        },
+    };
+    let added = match rooted {
+        Ok(added) => added,
+        Err(why) => return Ok(why),
     };
     Ok(added + &note)
+}
+
+/// What a guest's [`crate::guests::Guest::report_root`] did with a
+/// report's target: the root it added, or why it added none.
+pub type Rooted = Result<String, String>;
+
+/// Adds the target `target` of the report `r` as a root of the project
+/// `project` (with its learned file `learned`), for one guest.
+pub type ReportRoot = fn(&Report, &Place, &Path, Option<&Path>) -> Result<Rooted, BoxError>;
+
+/// A Switch report's target as a hint, when it is in a module's text.
+fn switch_root(
+    r: &Report,
+    target: &Place,
+    project: &Path,
+    _: Option<&Path>,
+) -> Result<Rooted, BoxError> {
+    if !r
+        .get("target where")
+        .is_some_and(|w| w.ends_with(" text segment"))
+    {
+        return Ok(Err(format!(
+            "0x{:x} is not in a module's text segment ({}); no hint added",
+            target.addr,
+            r.get("target where").unwrap_or("unknown place")
+        )));
+    }
+    let Some((module, offset)) = target.module.clone() else {
+        return Ok(Err(format!(
+            "0x{:x} lies in no module; no hint added",
+            target.addr
+        )));
+    };
+    hint(project, Hint { module, offset }).map(Ok)
+}
+
+/// A GBA report's target as a hint, when it is in the cartridge ROM.
+pub(crate) fn gba_root(
+    _: &Report,
+    target: &Place,
+    project: &Path,
+    _: Option<&Path>,
+) -> Result<Rooted, BoxError> {
+    let Some((module, offset)) = target
+        .module
+        .clone()
+        .filter(|(m, _)| m == crate::gba::ROM_MODULE)
+    else {
+        return Ok(Err(format!(
+            "0x{:x} is not in the cartridge ROM; code in RAM is lifted from its copy, so no hint is added",
+            target.addr
+        )));
+    };
+    hint(project, Hint { module, offset }).map(Ok)
+}
+
+/// A Game Boy report's target as a line of the learned file.
+pub(crate) fn gb_root(
+    r: &Report,
+    target: &Place,
+    _: &Path,
+    learned: Option<&Path>,
+) -> Result<Rooted, BoxError> {
+    let Some(line) = gb_learned(r, target.addr) else {
+        return Ok(Err(format!(
+            "the report does not say what 0x{:x} holds; no root added",
+            target.addr
+        )));
+    };
+    let Some(path) = learned else {
+        return Ok(Err("the project has no learned file; no root added".into()));
+    };
+    learn(path, &line).map(Ok)
 }
 
 /// Adds `h` to the hints of the project's relift.toml; says what it did.
