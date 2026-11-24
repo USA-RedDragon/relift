@@ -10,13 +10,14 @@
 
 use std::path::{Path, PathBuf};
 
-use relift_build::{Compile, Plan};
+use relift_build::Compile;
 use relift_n64_formats::{ByteOrder, Rom};
 use relift_progress::{Line, Paint, duration, noun};
 
 use crate::cross;
 use crate::gb::Built;
 use crate::import::{BoxError, cache_root};
+use crate::layers::{Layers, RuntimeCtx, compile_layers};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
@@ -170,16 +171,6 @@ fn project_rom() -> Result<(Vec<u8>, String, String), BoxError> {
         s("title").unwrap_or_default(),
         s("rom").unwrap_or_default(),
     ))
-}
-
-fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "c" || x == "S"))
-        .collect();
-    v.sort();
-    Ok(v)
 }
 
 /// `relift build` of the Nintendo 64 project in the working directory, for
@@ -409,156 +400,65 @@ pub fn build(
     })
 }
 
-fn compile(
-    settings: &Settings,
-    out: &Path,
-    cdir: &Path,
-    lifted: &[PathBuf],
-    prog: &[PathBuf],
-    (release, cross): (bool, Option<&cross::Build>),
-    ui: &mut Ui,
-) -> Result<(), BoxError> {
-    let rt = crate::build::runtime_dir(settings);
-    let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = match cross {
-        Some(c) => c.cc(),
-        None => crate::build::c_compiler(&settings.toolchain)?,
-    };
-    let zig = cc.len() > 1;
-    let pic = cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string());
-    let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
-        .iter()
-        .map(|s| s.to_string())
-        .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
-        .chain(pic.clone())
-        .collect();
-    let static_rt = (cross.is_none() && cfg!(windows)).then_some("-DRL_STATIC_RUNTIME".to_string());
-    let trace = std::env::var_os("RELIFT_N64_TRACE")
+/// The Nintendo 64 runtime, with parallel-rdp's C++ in its object.
+const N64_LAYERS: Layers = Layers {
+    dirs: &LAYERS,
+    lifted_inc: &[
+        "core/include",
+        "cpus/mips/include",
+        "cpus/rsp/include",
+        "guests/n64/run/include",
+    ],
+    rt_inc: &[
+        "core/include",
+        "core",
+        "cpus/mips/include",
+        "cpus/mips",
+        "cpus/rsp/include",
+        "cpus/rsp",
+        "guests/n64",
+        "guests/n64/run",
+        "guests/n64/run/include",
+    ],
+    lifted_opt: LIFTED_OPT,
+    cache: "n64-runtime",
+    release_compiler: false,
+    cross_vk: true,
+    cxx: true,
+    lifted_defines: trace,
+    rt_defines: trace,
+    file_opt: rsp_opt,
+    runtime_extra: Some(parallel_rdp),
+    ..Layers::BASE
+};
+
+/// `RELIFT_N64_TRACE` set (and not `0`) builds the CPU trace.
+fn trace(_: bool) -> Vec<String> {
+    std::env::var_os("RELIFT_N64_TRACE")
         .is_some_and(|v| !v.is_empty() && v != "0")
-        .then(|| "-DRL_N64_TRACE".to_string());
-    let opt = crate::build::lifted_opt(release, LIFTED_OPT);
-    let lifted_flags: Vec<String> = base
-        .iter()
-        .map(|f| if f == "-O2" { opt.into() } else { f.clone() })
-        .chain(
-            [
-                if settings.emit.line_tables {
-                    "-gline-tables-only"
-                } else {
-                    "-g0"
-                },
-                "-fno-omit-frame-pointer",
-            ]
-            .map(String::from),
-        )
-        .chain([
-            inc("core/include"),
-            inc("cpus/mips/include"),
-            inc("cpus/rsp/include"),
-            inc("guests/n64/run/include"),
-        ])
-        .chain(static_rt.clone())
-        .chain(trace.clone())
-        .collect();
-    let mut extras = match cross {
-        Some(c) => c.extras(&rt, true)?,
-        None => crate::runtime_link::extras(&rt, &cache_root(settings)?)?,
-    };
-    extras.vk.clear();
-    ui.note(&Line::new().text(extras.note()));
-    let rt_flags: Vec<String> = base
-        .iter()
-        .cloned()
-        .chain(
-            [
-                "-g",
-                "-fno-omit-frame-pointer",
-                "-D_GNU_SOURCE",
-                "-D_DARWIN_C_SOURCE",
-                "-DRL_BUILDING_RUNTIME",
-                "-DRL_CHECKS",
-            ]
-            .map(String::from),
-        )
-        .chain([
-            inc("core/include"),
-            inc("core"),
-            inc("cpus/mips/include"),
-            inc("cpus/mips"),
-            inc("cpus/rsp/include"),
-            inc("cpus/rsp"),
-            inc("guests/n64"),
-            inc("guests/n64/run"),
-            inc("guests/n64/run/include"),
-        ])
-        .chain(extras.defines())
-        .chain(static_rt.clone())
-        .chain(trace)
-        .collect();
-    let obj = |src: &Path, tag: &str| {
-        let stem = src
-            .strip_prefix(cdir)
-            .or_else(|_| src.strip_prefix(&rt))
-            .unwrap_or(src);
-        out.join("obj").join(tag).join(stem).with_extension("o")
-    };
-    let mut compiles: Vec<Compile> = lifted
-        .iter()
-        .map(|s| Compile {
-            src: s.clone(),
-            obj: obj(s, "lifted"),
-            flags: if rsp_unit(s, cdir) {
-                lifted_flags
-                    .iter()
-                    .map(|f| if f == opt { RSP_OPT.into() } else { f.clone() })
-                    .collect()
-            } else {
-                lifted_flags.clone()
-            },
-            pool: None,
-            stage: 0,
-        })
-        .collect();
-    let mut rt_compiles = Vec::new();
-    for layer in LAYERS {
-        rt_compiles.extend(c_files(&rt.join(layer))?);
-    }
-    for s in prog {
-        compiles.push(Compile {
-            src: s.clone(),
-            obj: obj(s, "prog"),
-            flags: rt_flags.clone(),
-            pool: None,
-            stage: 0,
-        });
-    }
-    let jobs = relift_build::job_count(settings.jobs);
-    let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let shared = cross.is_some() || !cfg!(windows);
-    let key: String =
-        relift_switch_formats::sha256(format!("{cc:?}\n{rt_flags:?}\n{}", rt.display()).as_bytes())
-            [..8]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-    let rt_dir = cache_root(settings)?.join("n64-runtime").join(&key);
-    let rt_obj = |s: &Path| {
-        let stem = s.strip_prefix(&rt).unwrap_or(s);
-        rt_dir.join("obj").join(stem).with_extension("o")
-    };
-    let mut rt_plan_compiles: Vec<Compile> = rt_compiles
-        .iter()
-        .map(|s| Compile {
-            src: s.clone(),
-            obj: if shared { rt_obj(s) } else { obj(s, "rt") },
-            flags: rt_flags.clone(),
-            pool: None,
-            stage: 0,
-        })
-        .collect();
-    rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
-        if shared { rt_obj(s) } else { obj(s, "rt") }
-    }));
+        .then(|| "-DRL_N64_TRACE".to_string())
+        .into_iter()
+        .collect()
+}
+
+fn rsp_opt(src: &Path, cdir: &Path) -> Option<&'static str> {
+    rsp_unit(src, cdir).then_some(RSP_OPT)
+}
+
+/// parallel-rdp's sources, its glue and volk, compiled into the runtime
+/// object with its symbols renamed.
+fn parallel_rdp(ctx: &RuntimeCtx<'_>) -> Result<Vec<Compile>, BoxError> {
+    let RuntimeCtx {
+        settings,
+        rt,
+        rt_dir,
+        zig,
+        ref pic,
+        ref static_rt,
+    } = *ctx;
+    let pic = pic.clone();
+    let inc = |p: &str| format!("-I{}", rt.join(p).display());
+    let mut rt_plan_compiles = Vec::new();
     let prdp = crate::parallel_rdp::ensure(&cache_root(settings)?)?;
     let pinc = crate::parallel_rdp::INCLUDES.map(|p| format!("-I{}", prdp.join(p).display()));
     let cxx: Vec<String> = ["-x", "c++", "-std=c++17", "-O2", "-g0", "-pthread"]
@@ -575,7 +475,6 @@ fn compile(
         .chain(static_rt.clone())
         .collect();
     let names = rt_dir.join("prdp_names.h");
-    std::fs::create_dir_all(&rt_dir)?;
     relift_cache::write_if_changed(
         &names,
         crate::parallel_rdp::renames_header(&prdp)?.as_bytes(),
@@ -607,7 +506,7 @@ fn compile(
     }
     let glue = rt.join("guests/n64/rdp/prdp.cpp");
     rt_plan_compiles.push(Compile {
-        obj: pobj(&glue, &rt),
+        obj: pobj(&glue, rt),
         src: glue,
         flags: cxx.into_iter().chain(renamed).collect(),
         pool: None,
@@ -628,94 +527,27 @@ fn compile(
         pool: None,
         stage: 0,
     });
-    let row = ui.row("");
-    ui.begin(row, "compile");
-    let mut link: Vec<String> = Vec::new();
-    let mut n = 0;
-    let exe = out.join(match cross {
-        Some(c) => c.program(&crate::progname::stem()),
-        None => crate::progname::program(),
-    });
-    if shared {
-        std::fs::create_dir_all(&rt_dir)?;
-        let lock_path = rt_dir.join("lock");
-        relift_cache::write_if_changed(&lock_path, b"")?;
-        let lock = std::fs::File::open(&lock_path)?;
-        lock.lock()?;
-        let rt_o = rt_dir.join("runtime.o");
-        let pools = crate::build::memory_pools(&mut rt_plan_compiles, jobs);
-        let plan = Plan {
-            cc: cc.clone(),
-            asm: extras.assembler(),
-            compiles: rt_plan_compiles,
-            output: rt_o.clone(),
-            link_flags: ["-r", "-nostdlib"].map(String::from).into(),
-            pools,
-            root: None,
-        };
-        n += crate::build::build_plans(
-            ui,
-            row,
-            &[(plan, rt_dir.clone())],
-            ninja.as_deref(),
-            jobs,
-            "",
-        )?;
-        drop(lock);
-        let time = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        if time(&rt_o) > time(&exe) && exe.exists() {
-            std::fs::remove_file(&exe)?;
-        }
-        link.push(rt_o.display().to_string());
-    } else {
-        compiles.extend(rt_plan_compiles);
-    }
-    let pools = crate::build::memory_pools(&mut compiles, jobs);
-    let libs: Vec<String> = if let Some(c) = cross {
-        c.libs(&crate::progname::stem())
-    } else if cfg!(windows) {
-        [
-            "-lpthread",
-            "-lm",
-            "-lws2_32",
-            "-luserenv",
-            "-lntdll",
-            "-lbcrypt",
-        ]
-        .map(String::from)
-        .into()
-    } else {
-        ["-lpthread", "-lm", "-ldl"].map(String::from).into()
-    };
-    let cxx_libs: &[&str] = match cross {
-        Some(cross::Build::Android(_)) => &["-static-libstdc++", "-lc++_static", "-lc++abi"],
-        Some(cross::Build::Ios(_)) => &[],
-        None if zig || cfg!(target_vendor = "apple") => &["-lc++"],
-        None => &["-lstdc++"],
-    };
-    let libs: Vec<String> = libs
-        .into_iter()
-        .chain(cxx_libs.iter().map(|l| (*l).to_string()))
-        .collect();
-    let plan = Plan {
-        cc: cc.clone(),
-        asm: None,
-        compiles,
-        output: exe.clone(),
-        link_flags: link.into_iter().chain(libs).chain(extras.libs()).collect(),
-        pools,
-        root: None,
-    };
-    n += crate::build::build_plans(
+    Ok(rt_plan_compiles)
+}
+
+fn compile(
+    settings: &Settings,
+    out: &Path,
+    cdir: &Path,
+    lifted: &[PathBuf],
+    prog: &[PathBuf],
+    (release, cross): (bool, Option<&cross::Build>),
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
+    compile_layers(
+        settings,
+        out,
+        cdir,
+        (lifted, prog),
+        &N64_LAYERS,
+        (release, cross),
         ui,
-        row,
-        &[(plan, out.to_path_buf())],
-        ninja.as_deref(),
-        jobs,
-        "",
-    )?;
-    ui.done(row, Line::new().text(noun(n as u64, "file")));
-    Ok(())
+    )
 }
 
 /// `relift run` of the Nintendo 64 project: builds, then runs the program.

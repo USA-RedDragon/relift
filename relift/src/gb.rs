@@ -12,11 +12,11 @@
 
 use std::path::{Path, PathBuf};
 
-use relift_build::{Compile, Plan};
 use relift_progress::{Line, Paint, duration, noun};
 
 use crate::cross;
 use crate::import::{BoxError, cache_root, import_dir_value};
+use crate::layers::{Layers, compile_layers};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
@@ -334,16 +334,6 @@ fn device_library(
     Ok(lib)
 }
 
-fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "c" || x == "S"))
-        .collect();
-    v.sort();
-    Ok(v)
-}
-
 /// What a build produced.
 pub struct Built {
     /// The program.
@@ -634,6 +624,56 @@ pub fn build(
     })
 }
 
+/// The Game Boy runtime: compiled from a copy in the cache, with the
+/// device library the program links.
+const GB_LAYERS: Layers = Layers {
+    dirs: &["core", "cpus/sm83", "guests/gb/exact"],
+    files: &["guests/gb/ports_gen.c", "guests/gb/touchpad.c"],
+    mirror: &[
+        "core",
+        "cpus/sm83",
+        "guests/gb",
+        "host",
+        "third_party/renderdoc",
+    ],
+    lifted_inc: &[
+        "core/include",
+        "cpus/sm83/include",
+        "guests/gb/exact/include",
+    ],
+    rt_inc: &[
+        "core/include",
+        "core",
+        "cpus/sm83/include",
+        "cpus/sm83",
+        "guests/gb",
+        "guests/gb/exact",
+        "guests/gb/exact/include",
+    ],
+    lifted_opt: LIFTED_OPT,
+    cache: "gb-runtime",
+    rt_defines: lifted_only,
+    libraries: Some(devices),
+    ..Layers::BASE
+};
+
+/// A release program's runtime runs lifted code only.
+fn lifted_only(release: bool) -> Vec<String> {
+    release
+        .then(|| "-DRL_GB_LIFTED_ONLY".to_string())
+        .into_iter()
+        .collect()
+}
+
+fn devices(
+    settings: &Settings,
+    rt: &Path,
+    triple: Option<&str>,
+    release: bool,
+) -> Result<Vec<PathBuf>, BoxError> {
+    Ok(vec![device_library(settings, rt, triple, release)?])
+}
+
 fn compile(
     settings: &Settings,
     out: &Path,
@@ -643,270 +683,15 @@ fn compile(
     (release, cross): (bool, Option<&cross::Build>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
-    let rt_real = crate::build::runtime_dir(settings);
-    let croot = crate::paths::canonical(cache_root(settings)?)?;
-    let rt = {
-        let base = croot.join("gb-runtime");
-        std::fs::create_dir_all(&base)?;
-        let lock_path = base.join("lock");
-        relift_cache::write_if_changed(&lock_path, b"")?;
-        let lock = std::fs::File::open(&lock_path)?;
-        lock.lock()?;
-        crate::build::mirror_runtime(
-            &rt_real,
-            &base.join("src"),
-            &[
-                "core",
-                "cpus/sm83",
-                "guests/gb",
-                "host",
-                "third_party/renderdoc",
-            ],
-        )?
-    };
-    let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = match cross {
-        Some(c) => c.cc(),
-        None if release => crate::build::release_compiler(settings)?,
-        None => crate::build::c_compiler(&settings.toolchain)?,
-    };
-    let zig = cc.len() > 1;
-    let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
-        .iter()
-        .map(|s| s.to_string())
-        .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
-        .chain(cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string()))
-        .collect();
-    let static_rt = cfg!(windows).then_some("-DRL_STATIC_RUNTIME".to_string());
-    let lifted_flags: Vec<String> = base
-        .iter()
-        .map(|f| {
-            if f == "-O2" {
-                crate::build::lifted_opt(release, LIFTED_OPT).into()
-            } else {
-                f.clone()
-            }
-        })
-        .chain(
-            [
-                if settings.emit.line_tables {
-                    "-gline-tables-only"
-                } else {
-                    "-g0"
-                },
-                "-fno-omit-frame-pointer",
-            ]
-            .map(String::from),
-        )
-        .chain([
-            inc("core/include"),
-            inc("cpus/sm83/include"),
-            inc("guests/gb/exact/include"),
-        ])
-        .chain(static_rt.clone())
-        .collect();
-    let mut extras = match cross {
-        Some(c) => c.extras(&rt, false)?,
-        None => crate::runtime_link::extras(&rt, &croot)?,
-    };
-    extras.vk.clear();
-    ui.note(&Line::new().text(extras.note()));
-    let rt_flags: Vec<String> = base
-        .iter()
-        .cloned()
-        .chain(
-            [
-                "-g",
-                "-fno-omit-frame-pointer",
-                "-D_GNU_SOURCE",
-                "-D_DARWIN_C_SOURCE",
-                "-DRL_BUILDING_RUNTIME",
-                "-DRL_CHECKS",
-            ]
-            .map(String::from),
-        )
-        .chain([
-            inc("core/include"),
-            inc("core"),
-            inc("cpus/sm83/include"),
-            inc("cpus/sm83"),
-            inc("guests/gb"),
-            inc("guests/gb/exact"),
-            inc("guests/gb/exact/include"),
-        ])
-        .chain(extras.defines())
-        .chain(static_rt)
-        .chain((!release && cross.is_none()).then(|| "-DRL_DEV_RUN".to_string()))
-        .chain(release.then(|| "-DRL_GB_LIFTED_ONLY".to_string()))
-        .collect();
-    let obj = |src: &Path, tag: &str| {
-        let stem = src
-            .strip_prefix(cdir)
-            .or_else(|_| src.strip_prefix(&rt))
-            .unwrap_or(src);
-        out.join("obj").join(tag).join(stem).with_extension("o")
-    };
-    let mut compiles: Vec<Compile> = lifted
-        .iter()
-        .map(|s| Compile {
-            src: s.clone(),
-            obj: obj(s, "lifted"),
-            flags: lifted_flags.clone(),
-            pool: None,
-            stage: 0,
-        })
-        .collect();
-    let mut rt_compiles = Vec::new();
-    for layer in ["core", "cpus/sm83", "guests/gb/exact"] {
-        rt_compiles.extend(c_files(&rt.join(layer))?);
-    }
-    rt_compiles.push(rt.join("guests/gb/ports_gen.c"));
-    rt_compiles.push(rt.join("guests/gb/touchpad.c"));
-    let (prog, resources) = crate::winres::split(prog);
-    for s in &prog {
-        compiles.push(Compile {
-            src: s.clone(),
-            obj: obj(s, "prog"),
-            flags: rt_flags
-                .iter()
-                .cloned()
-                .chain([crate::build::build_dir_flag(out)])
-                .collect(),
-            pool: None,
-            stage: 0,
-        });
-    }
-    let jobs = relift_build::job_count(settings.jobs);
-    let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let shared = cross.is_some() || !cfg!(windows);
-    let key: String = relift_switch_formats::sha256(
-        format!(
-            "{cc:?}\n{:?}",
-            rt_flags
-                .iter()
-                .filter(|f| !f.starts_with("-I"))
-                .collect::<Vec<_>>()
-        )
-        .as_bytes(),
-    )[..8]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    let rt_dir = croot.join("gb-runtime").join(&key);
-    let rt_obj = |s: &Path| {
-        let stem = s.strip_prefix(&rt).unwrap_or(s);
-        rt_dir.join("obj").join(stem).with_extension("o")
-    };
-    let mut rt_plan_compiles: Vec<Compile> = rt_compiles
-        .iter()
-        .map(|s| Compile {
-            src: s.clone(),
-            obj: if shared { rt_obj(s) } else { obj(s, "rt") },
-            flags: rt_flags.clone(),
-            pool: None,
-            stage: 0,
-        })
-        .collect();
-    rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
-        if shared { rt_obj(s) } else { obj(s, "rt") }
-    }));
-    let triple = cross.map(cross::Build::triple);
-    let devices = device_library(settings, &rt_real, triple, release)?;
-    let output = out.join(match cross {
-        Some(c) => c.program(&crate::progname::stem()),
-        None => crate::progname::program(),
-    });
-    let row = ui.row("");
-    ui.begin(row, "compile");
-    let mut link: Vec<String> = Vec::new();
-    let mut n = 0;
-    if shared {
-        std::fs::create_dir_all(&rt_dir)?;
-        let lock_path = rt_dir.join("lock");
-        relift_cache::write_if_changed(&lock_path, b"")?;
-        let lock = std::fs::File::open(&lock_path)?;
-        lock.lock()?;
-        let rt_o = rt_dir.join("runtime.o");
-        let pools = crate::build::memory_pools(&mut rt_plan_compiles, jobs);
-        let plan = Plan {
-            cc: cc.clone(),
-            asm: extras.assembler(),
-            compiles: rt_plan_compiles,
-            output: rt_o.clone(),
-            link_flags: ["-r", "-nostdlib"].map(String::from).into(),
-            pools,
-            root: Some(croot.clone()),
-        };
-        n += crate::build::build_plans(
-            ui,
-            row,
-            &[(plan, rt_dir.clone())],
-            ninja.as_deref(),
-            jobs,
-            "",
-        )?;
-        drop(lock);
-        let exe = output.clone();
-        let time = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        let newer = [
-            rt_o.as_path(),
-            &device_library_path(settings, triple, release)?,
-        ]
-        .iter()
-        .any(|p| time(p) > time(&exe));
-        if newer && exe.exists() {
-            std::fs::remove_file(&exe)?;
-        }
-        link.push(rt_o.display().to_string());
-    } else {
-        compiles.extend(rt_plan_compiles);
-    }
-    let pools = crate::build::memory_pools(&mut compiles, jobs);
-    let libs: Vec<String> = if let Some(c) = cross {
-        c.libs(&crate::progname::stem())
-    } else if cfg!(windows) {
-        [
-            "-lpthread",
-            "-lm",
-            "-lws2_32",
-            "-luserenv",
-            "-lntdll",
-            "-lbcrypt",
-        ]
-        .map(String::from)
-        .into()
-    } else {
-        let mut l: Vec<String> = ["-lpthread", "-lm", "-ldl"].map(String::from).into();
-        if cc.len() > 1 && cfg!(target_os = "linux") {
-            l.push("-lunwind".into());
-        }
-        l
-    };
-    let plan = Plan {
-        cc: cc.clone(),
-        asm: None,
-        compiles,
-        output,
-        link_flags: link
-            .into_iter()
-            .chain(resources)
-            .chain(std::iter::once(devices.display().to_string()))
-            .chain(libs)
-            .chain(extras.libs())
-            .collect(),
-        pools,
-        root: Some(croot.clone()),
-    };
-    n += crate::build::build_plans(
+    compile_layers(
+        settings,
+        out,
+        cdir,
+        (lifted, prog),
+        &GB_LAYERS,
+        (release, cross),
         ui,
-        row,
-        &[(plan, out.to_path_buf())],
-        ninja.as_deref(),
-        jobs,
-        "",
-    )?;
-    ui.done(row, Line::new().text(noun(n as u64, "file")));
-    Ok(())
+    )
 }
 
 /// `relift run` of the Game Boy project: builds, then runs the program

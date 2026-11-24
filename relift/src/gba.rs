@@ -383,6 +383,7 @@ const GBA_LAYERS: Layers = Layers {
     cache: "gba-runtime",
     cx16: false,
     share_lifted: false,
+    ..Layers::BASE
 };
 
 fn compile(

@@ -1,7 +1,7 @@
-//! Compiling a handheld or Linux guest's program: the lifted files, the
-//! program files and the runtime layers the guest names ([`Layers`]),
-//! with the runtime and, for a guest that shares them, every lifted
-//! library kept as objects in the cache by content.
+//! Compiling a guest's program outside the Switch pipeline: the lifted
+//! files, the program files and the runtime layers the guest names
+//! ([`Layers`]), with the runtime and, for a guest that shares them, every
+//! lifted library kept as objects in the cache by content.
 
 use std::path::{Path, PathBuf};
 
@@ -23,13 +23,22 @@ fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
     Ok(v)
 }
 
-/// What a handheld guest's program compiles: the runtime directories, the
-/// include directories of lifted code and of the runtime and program files
-/// (below the runtime root), the optimization of lifted code in a dev build
-/// (a release build uses [`crate::build::RELEASE_LIFTED_OPT`]) and the name
-/// of the shared runtime object's cache.
+/// What a guest's program compiles: the runtime directories, the include
+/// directories of lifted code and of the runtime and program files (below
+/// the runtime root), the optimization of lifted code in a dev build (a
+/// release build uses [`crate::build::RELEASE_LIFTED_OPT`]) and the name of
+/// the shared runtime object's cache. A guest names what it needs and
+/// takes the rest from [`Layers::BASE`].
 pub(crate) struct Layers {
     pub(crate) dirs: &'static [&'static str],
+    /// Single runtime files compiled besides the directories `dirs`.
+    pub(crate) files: &'static [&'static str],
+    /// The runtime directories copied into the cache before the build
+    /// ([`crate::build::mirror_runtime`]), so the compile commands name
+    /// files inside the cache and the runtime object is kept whatever path
+    /// the runtime has (its key leaves the include paths out); empty
+    /// compiles the runtime where it is.
+    pub(crate) mirror: &'static [&'static str],
     pub(crate) lifted_inc: &'static [&'static str],
     pub(crate) rt_inc: &'static [&'static str],
     pub(crate) lifted_opt: &'static str,
@@ -42,6 +51,81 @@ pub(crate) struct Layers {
     /// in the shared cache, so a program that lifts the same libraries
     /// again compiles none of them.
     pub(crate) share_lifted: bool,
+    /// Whether a release build uses [`crate::build::release_compiler`]
+    /// (or the host's C compiler, as a dev build does).
+    pub(crate) release_compiler: bool,
+    /// Whether a cross build's backends include the Vulkan loader's
+    /// libraries.
+    pub(crate) cross_vk: bool,
+    /// Whether the program links C++ code, and so the C++ library.
+    pub(crate) cxx: bool,
+    /// Defines of lifted files, by whether the build is a release one.
+    pub(crate) lifted_defines: fn(bool) -> Vec<String>,
+    /// Defines of runtime and program files, by whether the build is a
+    /// release one.
+    pub(crate) rt_defines: fn(bool) -> Vec<String>,
+    /// The optimization of one lifted file (its path and the C directory),
+    /// when it is not the guest's `lifted_opt`.
+    pub(crate) file_opt: fn(&Path, &Path) -> Option<&'static str>,
+    /// Libraries the guest builds itself and the program links, for the
+    /// host or the cross target's triple and by whether the build is a
+    /// release one; a program older than one of them is linked again.
+    pub(crate) libraries: Option<Libraries>,
+    /// Compiles the guest adds to the runtime object.
+    pub(crate) runtime_extra: Option<RuntimeExtra>,
+}
+
+/// Builds the libraries of [`Layers::libraries`]: the settings, the
+/// runtime root, the cross target's triple and whether the build is a
+/// release one.
+pub(crate) type Libraries =
+    fn(&Settings, &Path, Option<&str>, bool) -> Result<Vec<PathBuf>, BoxError>;
+
+/// Lists the compiles of [`Layers::runtime_extra`].
+pub(crate) type RuntimeExtra = fn(&RuntimeCtx<'_>) -> Result<Vec<Compile>, BoxError>;
+
+/// What [`Layers::runtime_extra`] compiles with: the settings, the
+/// runtime root, the runtime object's cache directory, whether the
+/// compiler is zig's, and the position-independent and static-runtime
+/// flags of the build.
+pub(crate) struct RuntimeCtx<'a> {
+    pub(crate) settings: &'a Settings,
+    pub(crate) rt: &'a Path,
+    pub(crate) rt_dir: &'a Path,
+    pub(crate) zig: bool,
+    pub(crate) pic: Option<String>,
+    pub(crate) static_rt: Option<String>,
+}
+
+fn no_defines(_: bool) -> Vec<String> {
+    Vec::new()
+}
+
+fn guest_opt(_: &Path, _: &Path) -> Option<&'static str> {
+    None
+}
+
+impl Layers {
+    /// The layers of a guest that names nothing but its directories.
+    pub(crate) const BASE: Layers = Layers {
+        dirs: &[],
+        files: &[],
+        mirror: &[],
+        lifted_inc: &[],
+        rt_inc: &[],
+        lifted_opt: "-O1",
+        cache: "",
+        cx16: false,
+        share_lifted: false,
+        release_compiler: true,
+        cross_vk: false,
+        cxx: false,
+        lifted_defines: no_defines,
+        rt_defines: no_defines,
+        file_opt: guest_opt,
+        libraries: None,
+        runtime_extra: None,
+    };
 }
 
 /// Compiles the lifted files `lifted` and the program files `prog` of
@@ -55,33 +139,42 @@ pub(crate) fn compile_layers(
     (release, cross): (bool, Option<&cross::Build>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
-    let rt = crate::build::runtime_dir(settings);
+    let rt_real = crate::build::runtime_dir(settings);
     let croot = crate::paths::canonical(cache_root(settings)?)?;
+    let mirrored = !layers.mirror.is_empty();
+    let rt = if mirrored {
+        let base = croot.join(layers.cache);
+        std::fs::create_dir_all(&base)?;
+        let lock_path = base.join("lock");
+        relift_cache::write_if_changed(&lock_path, b"")?;
+        let lock = std::fs::File::open(&lock_path)?;
+        lock.lock()?;
+        crate::build::mirror_runtime(&rt_real, &base.join("src"), layers.mirror)?
+    } else {
+        rt_real.clone()
+    };
+    let root = mirrored.then(|| croot.clone());
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
     let cc = match cross {
         Some(c) => c.cc(),
-        None if release => crate::build::release_compiler(settings)?,
+        None if release && layers.release_compiler => crate::build::release_compiler(settings)?,
         None => crate::build::c_compiler(&settings.toolchain)?,
     };
     let zig = cc.len() > 1;
     let cx16 = layers.cx16 && cross.is_none() && cfg!(target_arch = "x86_64");
+    let pic = cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string());
     let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
         .iter()
         .map(|s| s.to_string())
         .chain(cx16.then(|| "-mcx16".to_string()))
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
-        .chain(cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string()))
+        .chain(pic.clone())
         .collect();
     let static_rt = (cross.is_none() && cfg!(windows)).then_some("-DRL_STATIC_RUNTIME".to_string());
+    let opt = crate::build::lifted_opt(release, layers.lifted_opt);
     let lifted_flags: Vec<String> = base
         .iter()
-        .map(|f| {
-            if f == "-O2" {
-                crate::build::lifted_opt(release, layers.lifted_opt).into()
-            } else {
-                f.clone()
-            }
-        })
+        .map(|f| if f == "-O2" { opt.into() } else { f.clone() })
         .chain(
             ["-fno-omit-frame-pointer"]
                 .into_iter()
@@ -94,9 +187,10 @@ pub(crate) fn compile_layers(
         )
         .chain(layers.lifted_inc.iter().map(|p| inc(p)))
         .chain(static_rt.clone())
+        .chain((layers.lifted_defines)(release))
         .collect();
     let mut extras = match cross {
-        Some(c) => c.extras(&rt, false)?,
+        Some(c) => c.extras(&rt, layers.cross_vk)?,
         None => crate::runtime_link::extras(&rt, &croot)?,
     };
     extras.vk.clear();
@@ -120,8 +214,9 @@ pub(crate) fn compile_layers(
         )
         .chain(layers.rt_inc.iter().map(|p| inc(p)))
         .chain(extras.defines())
-        .chain(static_rt)
+        .chain(static_rt.clone())
         .chain((!release && cross.is_none()).then(|| "-DRL_DEV_RUN".to_string()))
+        .chain((layers.rt_defines)(release))
         .collect();
     let obj = |src: &Path, tag: &str| {
         let stem = src
@@ -149,13 +244,22 @@ pub(crate) fn compile_layers(
         .map(|s| Compile {
             src: (*s).clone(),
             obj: obj(s, "lifted"),
-            flags: if s
-                .strip_prefix(cdir)
-                .is_ok_and(|r| r.components().any(|c| c.as_os_str() == "cold"))
-            {
-                cold_flags.clone()
-            } else {
-                lifted_flags.clone()
+            flags: {
+                let flags = if s
+                    .strip_prefix(cdir)
+                    .is_ok_and(|r| r.components().any(|c| c.as_os_str() == "cold"))
+                {
+                    &cold_flags
+                } else {
+                    &lifted_flags
+                };
+                match (layers.file_opt)(s, cdir) {
+                    Some(o) => flags
+                        .iter()
+                        .map(|f| if f == opt { o.into() } else { f.clone() })
+                        .collect(),
+                    None => flags.clone(),
+                }
             },
             pool: None,
             stage: 0,
@@ -165,6 +269,7 @@ pub(crate) fn compile_layers(
     for layer in layers.dirs {
         rt_compiles.extend(c_files(&rt.join(layer))?);
     }
+    rt_compiles.extend(layers.files.iter().map(|f| rt.join(f)));
     let (prog, resources) = crate::winres::split(prog);
     for s in &prog {
         compiles.push(Compile {
@@ -181,12 +286,21 @@ pub(crate) fn compile_layers(
     }
     let jobs = relift_build::job_count(settings.jobs);
     let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let key: String =
-        relift_switch_formats::sha256(format!("{cc:?}\n{rt_flags:?}\n{}", rt.display()).as_bytes())
-            [..8]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+    let keyed = if mirrored {
+        format!(
+            "{cc:?}\n{:?}",
+            rt_flags
+                .iter()
+                .filter(|f| !f.starts_with("-I"))
+                .collect::<Vec<_>>()
+        )
+    } else {
+        format!("{cc:?}\n{rt_flags:?}\n{}", rt.display())
+    };
+    let key: String = relift_switch_formats::sha256(keyed.as_bytes())[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let rt_dir = croot.join(layers.cache).join(&key);
     let rt_obj = |s: &Path| {
         let stem = s.strip_prefix(&rt).unwrap_or(s);
@@ -205,6 +319,21 @@ pub(crate) fn compile_layers(
     rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
         if shared { rt_obj(s) } else { obj(s, "rt") }
     }));
+    if let Some(extra) = layers.runtime_extra {
+        std::fs::create_dir_all(&rt_dir)?;
+        rt_plan_compiles.extend(extra(&RuntimeCtx {
+            settings,
+            rt: &rt,
+            rt_dir: &rt_dir,
+            zig,
+            pic,
+            static_rt,
+        })?);
+    }
+    let libraries = match layers.libraries {
+        Some(build) => build(settings, &rt_real, cross.map(cross::Build::triple), release)?,
+        None => Vec::new(),
+    };
     let row = ui.row("");
     ui.begin(row, "compile");
     let mut link: Vec<String> = Vec::new();
@@ -228,7 +357,7 @@ pub(crate) fn compile_layers(
             output: rt_o.clone(),
             link_flags: ["-r", "-nostdlib"].map(String::from).into(),
             pools,
-            root: None,
+            root: root.clone(),
         };
         n += crate::build::build_plans(
             ui,
@@ -240,7 +369,10 @@ pub(crate) fn compile_layers(
         )?;
         drop(lock);
         let time = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        if time(&rt_o) > time(&exe) && exe.exists() {
+        let newer = std::iter::once(&rt_o)
+            .chain(&libraries)
+            .any(|p| time(p) > time(&exe));
+        if newer && exe.exists() {
             std::fs::remove_file(&exe)?;
         }
         link.push(rt_o.display().to_string());
@@ -286,10 +418,17 @@ pub(crate) fn compile_layers(
         .into()
     } else {
         let mut l: Vec<String> = ["-lpthread", "-lm", "-ldl"].map(String::from).into();
-        if zig && cfg!(target_os = "linux") {
+        if zig && cfg!(target_os = "linux") && !layers.cxx {
             l.push("-lunwind".into());
         }
         l
+    };
+    let cxx_libs: &[&str] = match cross {
+        _ if !layers.cxx => &[],
+        Some(cross::Build::Android(_)) => &["-static-libstdc++", "-lc++_static", "-lc++abi"],
+        Some(cross::Build::Ios(_)) => &[],
+        None if zig || cfg!(target_vendor = "apple") => &["-lc++"],
+        None => &["-lstdc++"],
     };
     let plan = Plan {
         cc: cc.clone(),
@@ -299,11 +438,13 @@ pub(crate) fn compile_layers(
         link_flags: link
             .into_iter()
             .chain(resources)
+            .chain(libraries.iter().map(|l| l.display().to_string()))
             .chain(libs)
+            .chain(cxx_libs.iter().map(|l| (*l).to_string()))
             .chain(extras.libs())
             .collect(),
         pools,
-        root: None,
+        root,
     };
     n += crate::build::build_plans(
         ui,
