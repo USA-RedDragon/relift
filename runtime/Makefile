@@ -210,7 +210,7 @@ N64R_TEST_SRCS := $(wildcard guests/n64/run/tests/*.c)
 NDSR_TEST_SRCS := $(wildcard guests/nds/run/tests/*.c)
 NDS_TEST_SRCS := $(wildcard guests/nds/tests/*.c)
 NDS_TEST_HDRS := $(wildcard guests/nds/tests/*.h)
-VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
+VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c guests/switch/nvn/tests/*.c)
 VK_DEMO_SRCS := guests/switch/vk/demo/vk_present.c
 VK_CHECK_SRCS := guests/switch/vk/tools/compile_check.c
 
