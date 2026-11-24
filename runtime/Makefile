@@ -212,7 +212,7 @@ NDS_TEST_SRCS := $(wildcard guests/nds/tests/*.c)
 NDS_TEST_HDRS := $(wildcard guests/nds/tests/*.h)
 VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c guests/switch/nvn/tests/*.c)
 VK_DEMO_SRCS := guests/switch/vk/demo/vk_present.c
-VK_CHECK_SRCS := guests/switch/vk/tools/compile_check.c
+VK_CHECK_SRCS := guests/switch/nvn/tools/compile_check.c
 
 obj = $(patsubst %.S,$(BUILD)/obj/%.o,$(patsubst %.c,$(BUILD)/obj/%.o,$(1)))
 CORE_ASM_OBJS := $(call obj,$(CORE_ASM))
