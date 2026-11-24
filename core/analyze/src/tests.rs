@@ -292,6 +292,34 @@ fn an_address_taken_entry_does_not_cut_the_function_around_it() {
 }
 
 #[test]
+fn functions_that_share_code_share_its_blocks_and_lift_as_alone() {
+    let m = module(
+        &[
+            word(0x04, 3, 0x1008), // 0x00 li r3, 0x1008 (address taken)
+            word(0x05, 1, 1),      // 0x04 add r1, r1
+            word(0x05, 1, 1),      // 0x08 add r1, r1
+            word(0x03, 0, 0),      // 0x0c ret
+        ],
+        &[],
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    let (outer, inner) = (&a.functions[&BASE], &a.functions[&(BASE + 8)]);
+    assert_eq!(inner.kind, EntryKind::AddressTaken);
+    for pc in [BASE + 8, BASE + 0xc] {
+        let (Insn::Lifted(x), Insn::Lifted(y)) = (&outer.insts[&pc], &inner.insts[&pc]) else {
+            panic!("{pc:#x} did not lift");
+        };
+        assert!(Arc::ptr_eq(x, y), "{pc:#x} is lifted twice");
+    }
+    let layout = Layout::of(&a, 4);
+    for o in layout.functions.values() {
+        assert_eq!(a.functions[&o.entry], o.lift(&Toy, &m));
+    }
+    assert_eq!(layout.lift(&Toy, &m), a);
+}
+
+#[test]
 fn a_jump_table_check_skips_stores_between_compare_and_branch() {
     // The compiler put a store between the compare and its branch; the
     // check runs the compare and the branch and leaves the store out.

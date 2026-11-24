@@ -189,6 +189,72 @@ impl<'a> Lifter<'a> {
     }
 }
 
+/// How many locks [`Shared`] spreads its instructions over.
+const SHARDS: usize = 64;
+
+/// Lifted instructions by address for every thread lifting the functions
+/// of one module at once, so each instruction is lifted once and one block
+/// serves every function that holds it. Lifting an instruction depends only
+/// on its address and bytes, so the blocks are the ones a lifter of its own
+/// would make.
+struct Shared<'a> {
+    fe: &'a (dyn Frontend + Sync),
+    module: &'a Module,
+    shards: Vec<std::sync::Mutex<HashMap<u64, Insn, PcHash>>>,
+}
+
+impl<'a> Shared<'a> {
+    fn new(fe: &'a (dyn Frontend + Sync), module: &'a Module) -> Shared<'a> {
+        Shared {
+            fe,
+            module,
+            shards: (0..SHARDS).map(|_| std::sync::Mutex::default()).collect(),
+        }
+    }
+
+    fn shard(&self, pc: u64) -> std::sync::MutexGuard<'_, HashMap<u64, Insn, PcHash>> {
+        let k = (pc.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 58) as usize % SHARDS;
+        self.shards[k]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn get(&self, pc: u64) -> Insn {
+        if let Some(i) = self.shard(pc).get(&pc) {
+            return i.clone();
+        }
+        let mut lone = Lifter::new(self.fe, self.module, &NO_PADS);
+        let i = lone.get(pc);
+        self.shard(pc).entry(pc).or_insert(i).clone()
+    }
+
+    fn lift(&self, o: &Outline) -> Function {
+        Function {
+            entry: o.entry,
+            name: o.name.clone(),
+            kind: o.kind,
+            insts: o.pcs().map(|pc| (pc, self.get(pc))).collect(),
+            tables: o.tables.clone(),
+            pads: o.pads.clone(),
+        }
+    }
+}
+
+/// Each of `outlines` lifted again with `fe` from `module`, in order, on up
+/// to the `jobs` setting's threads, as [`Outline::lift`] gives them; every
+/// instruction is lifted once and its block shared by all the functions
+/// that hold it.
+pub fn lift_all(
+    fe: &(dyn Frontend + Sync),
+    module: &Module,
+    outlines: &[&Outline],
+) -> Vec<Function> {
+    let shared = Shared::new(fe, module);
+    grouped(outlines, |group| {
+        group.iter().map(|o| shared.lift(o)).collect()
+    })
+}
+
 /// The successors of `insn` inside the function whose entry is
 /// `entry`: fall-through, branch targets and return points, but not call
 /// targets, other entries (tail calls) or addresses outside code.
@@ -601,7 +667,7 @@ impl Layout {
     pub fn lift(&self, fe: &(dyn Frontend + Sync), module: &Module) -> Analysis {
         let all: Vec<&Outline> = self.functions.values().collect();
         Analysis {
-            functions: each_lifted(fe, module, &all, |_, f| f.clone())
+            functions: lift_all(fe, module, &all)
                 .into_iter()
                 .map(|f| (f.entry, f))
                 .collect(),
@@ -628,10 +694,9 @@ pub fn discover_with(
 ) -> Analysis {
     let layout = outline_with(fe, module, on);
     Analysis {
-        functions: layout
-            .functions
-            .values()
-            .map(|o| (o.entry, o.lift(fe, module)))
+        functions: lift_all(fe, module, &layout.functions.values().collect::<Vec<_>>())
+            .into_iter()
+            .map(|f| (f.entry, f))
             .collect(),
     }
 }
@@ -700,10 +765,9 @@ pub fn discover_more(
         &|_| (),
     );
     Analysis {
-        functions: layout
-            .functions
-            .values()
-            .map(|o| (o.entry, o.lift(fe, module)))
+        functions: lift_all(fe, module, &layout.functions.values().collect::<Vec<_>>())
+            .into_iter()
+            .map(|f| (f.entry, f))
             .collect(),
     }
 }
