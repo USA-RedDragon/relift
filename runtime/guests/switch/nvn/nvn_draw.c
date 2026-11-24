@@ -766,6 +766,8 @@ static int fixed_state(replay *r, pipe_key *k)
     else if (state_samples != drawn)
         return nvn_vk_stop(r, "a multisample state of %u samples draws into render targets of %u", state_samples,
                            drawn);
+    if (drawn > 1 && !g.standard_samples)
+        return nvn_vk_stop(r, "a draw of %u samples on a host device without the standard sample positions", drawn);
     k->samples = drawn > 1 ? drawn : 0;
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;

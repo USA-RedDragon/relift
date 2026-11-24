@@ -213,6 +213,13 @@ typedef struct nvn_vkdev {
     bool depth_bounds;
     /** @brief VK_EXT_conservative_rasterization is on: nvnCommandBufferSetConservativeRasterEnable is honored. */
     bool conservative_raster, conservative_warned;
+    /**
+     * @brief The host rasterizes multisample draws at Vulkan's standard sample positions. NVN's defaults are those
+     * same positions for 2, 4, 8 and 16 samples: the driver's BindMultisampleState writes them, in 1/16 pixel, to
+     * SET_ANTI_ALIAS_SAMPLE_POSITIONS (NVC797 0x11e0, clc797.h) from its tables at sdk 0xc94fa8 to 0xc95008
+     * (SDK 22.2.8 driver).
+     */
+    bool standard_samples;
     /** @brief The largest extra overestimation (pixels) of VK_EXT_conservative_rasterization, and whether a dilate past it was warned of. */
     float conservative_extra_max;
     bool dilate_warned;
