@@ -6339,6 +6339,8 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
         if (nvn_flash_on())
             nvn_flash_present_record(r, direct ? v->image : tmp, rect, frame);
+        if (nvn_diff_on())
+            nvn_diff_present_record(r, direct ? v->image : tmp, rect, frame);
         ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         ib.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -6772,6 +6774,7 @@ int nvn_present(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t texture, const
                                       host);
             counted = true;
             nvn_flash_presented(&r, n);
+            nvn_diff_presented(&r, n);
         }
     }
     bool pixels = capture || (cropped && win && !pres && b->present_rgb);

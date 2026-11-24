@@ -674,6 +674,44 @@ void nvn_flash_image_gone(const vimg *v);
 void nvn_flash_present_record(replay *r, VkImage src, const uint32_t rect[4], uint64_t frame);
 /** @brief After the present's wait: feeds frame's signature to the detector and saves an outlier's evidence. */
 void nvn_flash_presented(replay *r, uint64_t frame);
+/** @brief A bound buffer range of a dispatch for the differential capture: kind 0 storage, 1 uniform, 2 base. */
+typedef struct nvn_diff_range {
+    uint64_t gpu, size;
+    uint32_t kind, slot;
+    bool write;
+} nvn_diff_range;
+/** @brief What the differential capture keeps of a dispatch besides its memory (nvn_diff.c). */
+typedef struct nvn_diff_dispatch {
+    const char *key;
+    uint32_t groups[3];
+    bool indirect;
+    const uint8_t *c0;
+    uint32_t c0_bytes;
+    uint64_t c1_guest;
+    uint32_t c1_size;
+    const VkSpecializationMapEntry *spec_map;
+    const uint32_t *spec_vals;
+    uint32_t nspec;
+    /** @brief The guest push data (NVN_PUSH_BYTES), or NULL when the program pushes none. */
+    const uint8_t *push;
+    const nvn_diff_range *range;
+    uint32_t nrange;
+} nvn_diff_dispatch;
+/** @brief The differential capture is on (RELIFT_NVN_DIFF, nvn_diff.c); the first call reads the setting. */
+bool nvn_diff_on(void);
+/** @brief A dispatch starts binding: the textures noted so far belonged to other commands. */
+void nvn_diff_dispatch_reset(void);
+/** @brief A texture or storage image (image) the next dispatch binds, at its bound level and layer. */
+void nvn_diff_texture(const vimg *v, uint32_t id, uint32_t slot, uint32_t kind, uint32_t dim, bool image,
+                      uint32_t level, uint32_t layer, const uint8_t view[17]);
+/** @brief Just before the dispatch is recorded: records it and the copies of its not yet captured inputs. */
+void nvn_diff_dispatch_begin(replay *r, const nvn_diff_dispatch *d);
+/** @brief Just after the dispatch is recorded: the copies of what it may have written. */
+void nvn_diff_dispatch_end(replay *r);
+/** @brief Records, before the present's wait, the detectors' copy of the presented rect of src. */
+void nvn_diff_present_record(replay *r, VkImage src, const uint32_t rect[4], uint64_t frame);
+/** @brief After the present's wait: runs the detectors and the manual triggers, and saves each frame they name. */
+void nvn_diff_presented(replay *r, uint64_t frame);
 /** @brief Presents whose trace lines the ring keeps in memory. */
 #define NVN_TRACE_RING 4u
 /** @brief The trace ring is on: every draw and dispatch writes its line to memory, without files or submits. */

@@ -885,6 +885,14 @@ static int bind_texture(replay *r, uint32_t handle, uint32_t *kind, uint32_t *di
                         bool as_image)
 {
     int rc = bind_texture_slot(r, handle, kind, dim, slot, with_sampler, as_image);
+    if (rc == RL_OK && nvn_diff_on()) {
+        uint8_t view[17] = { 0 };
+        bool has_view = false, image = false;
+        nvn_tex_registered(handle & 0xfffffu, view, &has_view, &image);
+        view[16] = has_view;
+        nvn_diff_texture(t.tex_img[*slot], handle & 0xfffffu, *slot, *kind, *dim, image || as_image,
+                         t.tex_level[*slot], t.tex_layer[*slot], view);
+    }
     if (rc == RL_OK && nvn_trace_active) {
         uint8_t view[17] = { 0 };
         bool has_view = false, image = false;

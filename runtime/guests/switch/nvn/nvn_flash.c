@@ -18,6 +18,7 @@
 
 #include "framejump.h"
 #include "png.h"
+#include "trigger.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -432,7 +433,11 @@ void nvn_flash_presented(replay *r, uint64_t frame)
     uint8_t sig[RL_JUMP_SIG];
     rl_jump_sig_rgba(fl.sig_buf.map, RL_JUMP_SIG_W, RL_JUMP_SIG_H, (size_t)RL_JUMP_SIG_W * 4, false, sig);
     uint64_t bad;
-    if (rl_jump_push(&fl.jump, frame, sig, &bad) && fl.saved < FLASH_MAX) {
+    if (!rl_jump_push(&fl.jump, frame, sig, &bad))
+        return;
+    rl_trigger_fire(bad, "flash", "differs from both neighbours by %.1f and %.1f luminance steps",
+                    (double)fl.jump.d_prev / 16.0, (double)fl.jump.d_next / 16.0);
+    if (fl.saved < FLASH_MAX) {
         fl.saved++;
         save_flash(r, bad);
     }

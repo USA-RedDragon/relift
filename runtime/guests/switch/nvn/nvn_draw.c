@@ -2779,6 +2779,44 @@ bool nvn_compute_shared_words(const uint8_t *mem, uint64_t ctl, uint32_t limit, 
     return true;
 }
 
+/** @brief Hands the dispatch about to be recorded to the differential capture (nvn_diff.c) with its binding table. */
+static void diff_begin(replay *r, const module *m, const uint32_t groups[3], bool indirect, const uint8_t *c0,
+                       uint32_t nubo, uint32_t nssbo, const VkSpecializationMapEntry *map, const uint32_t *vals,
+                       uint32_t n)
+{
+    const nvn_gfx *st = r->st;
+    nvn_diff_range rg[NVN_STORAGE_SLOTS + NVN_UBO_SLOTS + 32];
+    uint32_t nr = 0;
+    for (uint32_t i = 0; i < nssbo && i < NVN_STORAGE_SLOTS; i++)
+        if (st->storage[i].addr && (uint32_t)st->storage[i].size)
+            rg[nr++] = (nvn_diff_range){ st->storage[i].addr, (uint32_t)st->storage[i].size, 0, i, true };
+    for (uint32_t i = 0; i < nubo && i < NVN_UBO_SLOTS; i++)
+        if (st->ubo[NVN_STAGE_COMPUTE][i].addr && st->ubo[NVN_STAGE_COMPUTE][i].size)
+            rg[nr++] = (nvn_diff_range){ st->ubo[NVN_STAGE_COMPUTE][i].addr, st->ubo[NVN_STAGE_COMPUTE][i].size, 1, i,
+                                         false };
+    for (uint32_t j = 0; j < m->ncbase && nr < sizeof rg / sizeof rg[0]; j++) {
+        void *buf;
+        uint64_t boff, gpu, bytes;
+        if (compute_base_span(c0, m->cbase[j], &buf, &boff, &gpu, &bytes))
+            rg[nr++] = (nvn_diff_range){ gpu, bytes, 2, m->cbase[j], m->stores_guest };
+    }
+    const nvn_consts *k = &st->consts[NVN_STAGE_COMPUTE];
+    nvn_diff_dispatch dd = { .key = m->key,
+                            .groups = { groups[0], groups[1], groups[2] },
+                            .indirect = indirect,
+                            .c0 = c0,
+                            .c0_bytes = NVN_BANK2_BYTES,
+                            .c1_guest = k->addr,
+                            .c1_size = k->size,
+                            .spec_map = map,
+                            .spec_vals = vals,
+                            .nspec = n,
+                            .push = st->push_used[NVN_STAGE_COMPUTE] ? st->push[NVN_STAGE_COMPUTE][0] : NULL,
+                            .range = rg,
+                            .nrange = nr };
+    nvn_diff_dispatch_begin(r, &dd);
+}
+
 static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer ibuf, VkDeviceSize ioff)
 {
     nvn_gfx *st = r->st;
@@ -2788,6 +2826,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         return nvn_vk_stop(r, "cannot make the compute pipeline layout");
     if (nvn_trace_active)
         nvn_trace_begin(r, "dispatch");
+    nvn_diff_dispatch_reset();
     uint64_t code = st->code[NVN_STAGE_COMPUTE], ctl = st->control[NVN_STAGE_COMPUTE];
     if (!code)
         return nvn_vk_stop(r, "dispatch without a compute program");
@@ -2911,6 +2950,8 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         nvn_mirror_written_marked();
     else if (m->global_store && !nvn_mirror_takes_unmarked())
         return nvn_mirror_refuse_unmarked(r, m->key);
+    if (nvn_diff_on())
+        diff_begin(r, m, (uint32_t[3]){ x, y, z }, ibuf != NULL, c0, nubo, nssbo, map, vals, n);
     if (ibuf)
         nvn_vk_begin(r);
     else
@@ -2932,6 +2973,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         VK(vkCmdDispatch)(g.cb, x, y, z);
     }
     nvn_vk_dispatched();
+    nvn_diff_dispatch_end(r);
     if (m->trace_words) {
         if (!nvn_vk_flush(r))
             return nvn_vk_stop(r, "the host device failed the traced dispatch of %s", m->key);
