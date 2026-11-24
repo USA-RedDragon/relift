@@ -1492,7 +1492,8 @@ static void dynamic_state(replay *r, VkRect2D area)
     float w[4];
     nvn_window_viewport(origin, area.extent.height, v, w);
     VkViewport vp = { w[0], w[1], w[2], w[3], v == full ? 0 : st->depth_ranges[0][0], v == full ? 1 : st->depth_ranges[0][1] };
-    VK(vkCmdSetViewport)(g.cb, 0, 1, &vp);
+    if (nvn_dyn_changed(NVN_DYN_VIEWPORT, &vp, sizeof vp))
+        VK(vkCmdSetViewport)(g.cb, 0, 1, &vp);
     VkRect2D sc = area;
     if (st->scissor_set) {
         int64_t x0 = st->scissor.offset.x;
@@ -1505,21 +1506,34 @@ static void dynamic_state(replay *r, VkRect2D area)
         sc = x1 > x0 && y1 > y0 ? (VkRect2D){ { (int32_t)x0, (int32_t)y0 }, { (uint32_t)(x1 - x0), (uint32_t)(y1 - y0) } }
                                 : (VkRect2D){ { 0, 0 }, { 0, 0 } };
     }
-    VK(vkCmdSetScissor)(g.cb, 0, 1, &sc);
-    VK(vkCmdSetStencilCompareMask)(g.cb, VK_STENCIL_FACE_FRONT_BIT, st->stencil_value_mask[0]);
-    VK(vkCmdSetStencilCompareMask)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_value_mask[1]);
-    VK(vkCmdSetStencilWriteMask)(g.cb, VK_STENCIL_FACE_FRONT_BIT, st->stencil_mask[0]);
-    VK(vkCmdSetStencilWriteMask)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_mask[1]);
-    VK(vkCmdSetStencilReference)(g.cb, VK_STENCIL_FACE_FRONT_BIT, st->stencil_ref[0]);
-    VK(vkCmdSetStencilReference)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_ref[1]);
-    VK(vkCmdSetDepthBias)(g.cb, st->polygon_offset[1], st->polygon_offset[2], st->polygon_offset[0]);
-    VK(vkCmdSetBlendConstants)(g.cb, st->blend_color);
-    VK(vkCmdSetLineWidth)(g.cb, g.wide_lines ? st->line_width : 1.0f);
+    if (nvn_dyn_changed(NVN_DYN_SCISSOR, &sc, sizeof sc))
+        VK(vkCmdSetScissor)(g.cb, 0, 1, &sc);
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_COMPARE_FRONT, &st->stencil_value_mask[0], sizeof st->stencil_value_mask[0]))
+        VK(vkCmdSetStencilCompareMask)(g.cb, VK_STENCIL_FACE_FRONT_BIT, st->stencil_value_mask[0]);
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_COMPARE_BACK, &st->stencil_value_mask[1], sizeof st->stencil_value_mask[1]))
+        VK(vkCmdSetStencilCompareMask)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_value_mask[1]);
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_WRITE_FRONT, &st->stencil_mask[0], sizeof st->stencil_mask[0]))
+        VK(vkCmdSetStencilWriteMask)(g.cb, VK_STENCIL_FACE_FRONT_BIT, st->stencil_mask[0]);
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_WRITE_BACK, &st->stencil_mask[1], sizeof st->stencil_mask[1]))
+        VK(vkCmdSetStencilWriteMask)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_mask[1]);
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_REF_FRONT, &st->stencil_ref[0], sizeof st->stencil_ref[0]))
+        VK(vkCmdSetStencilReference)(g.cb, VK_STENCIL_FACE_FRONT_BIT, st->stencil_ref[0]);
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_REF_BACK, &st->stencil_ref[1], sizeof st->stencil_ref[1]))
+        VK(vkCmdSetStencilReference)(g.cb, VK_STENCIL_FACE_BACK_BIT, st->stencil_ref[1]);
+    if (nvn_dyn_changed(NVN_DYN_DEPTH_BIAS, st->polygon_offset, sizeof st->polygon_offset))
+        VK(vkCmdSetDepthBias)(g.cb, st->polygon_offset[1], st->polygon_offset[2], st->polygon_offset[0]);
+    if (nvn_dyn_changed(NVN_DYN_BLEND_CONSTANTS, st->blend_color, sizeof st->blend_color))
+        VK(vkCmdSetBlendConstants)(g.cb, st->blend_color);
+    float line_width = g.wide_lines ? st->line_width : 1.0f;
+    if (nvn_dyn_changed(NVN_DYN_LINE_WIDTH, &line_width, sizeof line_width))
+        VK(vkCmdSetLineWidth)(g.cb, line_width);
     if (st->depth_bounds && g.depth_bounds) {
         float lo = st->depth_bounds_range[0], hi = st->depth_bounds_range[1];
         lo = lo < 0.0f ? 0.0f : lo > 1.0f ? 1.0f : lo;
         hi = hi < 0.0f ? 0.0f : hi > 1.0f ? 1.0f : hi;
-        VK(vkCmdSetDepthBounds)(g.cb, lo, hi);
+        float bounds[2] = { lo, hi };
+        if (nvn_dyn_changed(NVN_DYN_DEPTH_BOUNDS, bounds, sizeof bounds))
+            VK(vkCmdSetDepthBounds)(g.cb, lo, hi);
     }
 }
 

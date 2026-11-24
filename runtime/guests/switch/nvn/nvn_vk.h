@@ -374,6 +374,42 @@ typedef struct nvn_vkdev {
 
 extern nvn_vkdev g;
 
+/**
+ * @brief A dynamic state of the graphics pipelines that the layer sets only when its value differs from the one the
+ * recording command buffer last had set (the shadow is cleared when a command buffer begins or another pipeline
+ * takes over the state).
+ */
+typedef enum nvn_dyn {
+    NVN_DYN_VIEWPORT,
+    NVN_DYN_SCISSOR,
+    NVN_DYN_STENCIL_COMPARE_FRONT,
+    NVN_DYN_STENCIL_COMPARE_BACK,
+    NVN_DYN_STENCIL_WRITE_FRONT,
+    NVN_DYN_STENCIL_WRITE_BACK,
+    NVN_DYN_STENCIL_REF_FRONT,
+    NVN_DYN_STENCIL_REF_BACK,
+    NVN_DYN_DEPTH_BIAS,
+    NVN_DYN_BLEND_CONSTANTS,
+    NVN_DYN_LINE_WIDTH,
+    NVN_DYN_DEPTH_BOUNDS,
+    NVN_DYN_CULL_MODE,
+    NVN_DYN_FRONT_FACE,
+    NVN_DYN_DEPTH_TEST,
+    NVN_DYN_DEPTH_WRITE,
+    NVN_DYN_DEPTH_COMPARE,
+    NVN_DYN_STENCIL_TEST,
+    NVN_DYN_STENCIL_OP_FRONT,
+    NVN_DYN_STENCIL_OP_BACK,
+    NVN_DYN_DEPTH_BIAS_ENABLE,
+    NVN_DYN_RASTERIZER_DISCARD,
+    NVN_DYN_COUNT
+} nvn_dyn;
+
+/** @brief Whether the n bytes at val differ from the shadow of state (or none is kept); keeps val as the shadow. At most 32 bytes. */
+bool nvn_dyn_changed(nvn_dyn state, const void *val, size_t n);
+/** @brief Forgets every shadowed value: the next set of each state is made. */
+void nvn_dyn_reset(void);
+
 /** @brief The host function of cmd, counted when nvn_vk_count_on is set. */
 static inline void (*nvn_vk_fn(unsigned cmd))(void)
 {

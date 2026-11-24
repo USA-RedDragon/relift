@@ -325,18 +325,46 @@ static const VkDynamicState dynamic_states[] = {
 
 void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k)
 {
-    VK(vkCmdSetCullMode)(cb, k->cull);
-    VK(vkCmdSetFrontFace)(cb, (VkFrontFace)k->front);
-    VK(vkCmdSetDepthTestEnable)(cb, k->depth_test);
-    VK(vkCmdSetDepthWriteEnable)(cb, k->depth_write);
-    VK(vkCmdSetDepthCompareOp)(cb, (VkCompareOp)k->depth_func);
-    VK(vkCmdSetStencilTestEnable)(cb, k->stencil_test);
-    VK(vkCmdSetStencilOp)(cb, VK_STENCIL_FACE_FRONT_BIT, k->front_ops.failOp, k->front_ops.passOp,
-                          k->front_ops.depthFailOp, k->front_ops.compareOp);
-    VK(vkCmdSetStencilOp)(cb, VK_STENCIL_FACE_BACK_BIT, k->back_ops.failOp, k->back_ops.passOp, k->back_ops.depthFailOp,
-                          k->back_ops.compareOp);
-    VK(vkCmdSetDepthBiasEnable)(cb, k->bias_enable);
-    VK(vkCmdSetRasterizerDiscardEnable)(cb, k->rasterizer_discard);
+    /* Each state is set when it differs from the value the command buffer last had: most draws change none of them. */
+    uint32_t v[4];
+    v[0] = (uint32_t)k->cull;
+    if (nvn_dyn_changed(NVN_DYN_CULL_MODE, v, sizeof v[0]))
+        VK(vkCmdSetCullMode)(cb, k->cull);
+    v[0] = (uint32_t)k->front;
+    if (nvn_dyn_changed(NVN_DYN_FRONT_FACE, v, sizeof v[0]))
+        VK(vkCmdSetFrontFace)(cb, (VkFrontFace)k->front);
+    v[0] = (uint32_t)k->depth_test;
+    if (nvn_dyn_changed(NVN_DYN_DEPTH_TEST, v, sizeof v[0]))
+        VK(vkCmdSetDepthTestEnable)(cb, k->depth_test);
+    v[0] = (uint32_t)k->depth_write;
+    if (nvn_dyn_changed(NVN_DYN_DEPTH_WRITE, v, sizeof v[0]))
+        VK(vkCmdSetDepthWriteEnable)(cb, k->depth_write);
+    v[0] = (uint32_t)k->depth_func;
+    if (nvn_dyn_changed(NVN_DYN_DEPTH_COMPARE, v, sizeof v[0]))
+        VK(vkCmdSetDepthCompareOp)(cb, (VkCompareOp)k->depth_func);
+    v[0] = (uint32_t)k->stencil_test;
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_TEST, v, sizeof v[0]))
+        VK(vkCmdSetStencilTestEnable)(cb, k->stencil_test);
+    v[0] = (uint32_t)k->front_ops.failOp;
+    v[1] = (uint32_t)k->front_ops.passOp;
+    v[2] = (uint32_t)k->front_ops.depthFailOp;
+    v[3] = (uint32_t)k->front_ops.compareOp;
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_OP_FRONT, v, sizeof v))
+        VK(vkCmdSetStencilOp)(cb, VK_STENCIL_FACE_FRONT_BIT, k->front_ops.failOp, k->front_ops.passOp,
+                              k->front_ops.depthFailOp, k->front_ops.compareOp);
+    v[0] = (uint32_t)k->back_ops.failOp;
+    v[1] = (uint32_t)k->back_ops.passOp;
+    v[2] = (uint32_t)k->back_ops.depthFailOp;
+    v[3] = (uint32_t)k->back_ops.compareOp;
+    if (nvn_dyn_changed(NVN_DYN_STENCIL_OP_BACK, v, sizeof v))
+        VK(vkCmdSetStencilOp)(cb, VK_STENCIL_FACE_BACK_BIT, k->back_ops.failOp, k->back_ops.passOp,
+                              k->back_ops.depthFailOp, k->back_ops.compareOp);
+    v[0] = (uint32_t)k->bias_enable;
+    if (nvn_dyn_changed(NVN_DYN_DEPTH_BIAS_ENABLE, v, sizeof v[0]))
+        VK(vkCmdSetDepthBiasEnable)(cb, k->bias_enable);
+    v[0] = (uint32_t)k->rasterizer_discard;
+    if (nvn_dyn_changed(NVN_DYN_RASTERIZER_DISCARD, v, sizeof v[0]))
+        VK(vkCmdSetRasterizerDiscardEnable)(cb, k->rasterizer_discard);
 }
 
 static const VkShaderStageFlagBits stage_bits[NVN_STAGES] = { VK_SHADER_STAGE_VERTEX_BIT,

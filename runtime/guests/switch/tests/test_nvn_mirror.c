@@ -417,6 +417,20 @@ TEST(nvn_vk_calls_are_counted_by_command_while_the_counting_is_on)
     CHECK_EQ(nvn_vk_calls[VKG_vkDeviceWaitIdle], 2u);
 }
 
+TEST(nvn_dyn_states_are_set_only_when_their_value_changes)
+{
+    uint32_t a = 3, b = 4;
+    nvn_dyn_reset();
+    CHECK(nvn_dyn_changed(NVN_DYN_CULL_MODE, &a, sizeof a));
+    CHECK(!nvn_dyn_changed(NVN_DYN_CULL_MODE, &a, sizeof a));
+    CHECK(nvn_dyn_changed(NVN_DYN_FRONT_FACE, &a, sizeof a));
+    CHECK(nvn_dyn_changed(NVN_DYN_CULL_MODE, &b, sizeof b));
+    CHECK(!nvn_dyn_changed(NVN_DYN_CULL_MODE, &b, sizeof b));
+    CHECK(!nvn_dyn_changed(NVN_DYN_FRONT_FACE, &a, sizeof a));
+    nvn_dyn_reset();
+    CHECK(nvn_dyn_changed(NVN_DYN_CULL_MODE, &b, sizeof b));
+}
+
 TEST(nvn_mirror_reads_back_only_the_pages_a_program_marks)
 {
     rl_ctx *c = t_boot(NULL);
@@ -1091,6 +1105,7 @@ TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
     staging big;
     CHECK(nvn_vk_staging_new(&big, 16ull << 20));
     CHECK(nvn_vk_flush(&r));
+    char site[64];
     for (int batch = 0; batch < 2; batch++) {
         CHECK(nvn_vk_begin(&r));
         VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, 1);
@@ -1099,10 +1114,11 @@ TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
         VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, 2);
         nvn_vk_barrier(g.cb);
         nvn_gpuprof_mark("fill b");
+        snprintf(site, sizeof site, "test_nvn_mirror.c:%d", __LINE__ + 1);
         CHECK(nvn_vk_flush(&r));
     }
     /* Both batches were ended by the flush on the loop's last line, named by its file and line. */
-    CHECK_EQ(nvn_gpuprof_batches_at("test_nvn_mirror.c:1027"), 2u);
+    CHECK_EQ(nvn_gpuprof_batches_at(site), 2u);
     double span = 0, parts = 0, between = 0;
     nvn_gpuprof_sums(&span, &parts, &between);
     CHECK(span > 0);

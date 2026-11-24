@@ -399,6 +399,7 @@ static void draw_into(VkImageView target, uint32_t w, uint32_t h, VkPipeline pip
     VkViewport vp = { 0, 0, (float)w, (float)h, 0, 1 };
     VK(vkCmdBeginRendering)(g.cb, &ri);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    nvn_dyn_reset();
     VK(vkCmdSetViewport)(g.cb, 0, 1, &vp);
     VK(vkCmdSetScissor)(g.cb, 0, 1, &area);
     VK(vkCmdBindDescriptorSets)(g.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl, 0, 1, &set, 0, NULL);

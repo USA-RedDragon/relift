@@ -1087,6 +1087,7 @@ static bool run_probe(const uint32_t *code, size_t size, staging *buf, uint32_t 
     VK(vkUpdateDescriptorSets)(g.dev, 1, &wd, 0, NULL);
     VkCommandBufferBeginInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                      .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    nvn_dyn_reset();
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &cbi) != VK_SUCCESS)
         goto out;
     uint32_t pc[2] = { n, m };
@@ -2334,6 +2335,7 @@ bool nvn_vk_begin(replay *r)
     }
     VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    nvn_dyn_reset();
     if (VK(vkResetCommandBuffer)(g.cb, 0) != VK_SUCCESS || VK(vkBeginCommandBuffer)(g.cb, &bi) != VK_SUCCESS)
         return false;
     g_recording = true;
@@ -6824,6 +6826,22 @@ bool nvn_vk_window_early(void)
 
 /** @brief Logs the guest's present rate every few seconds (info), so a run's speed shows without a profiler. */
 uint32_t nvn_vk_count_on;
+
+static struct {
+    bool valid[NVN_DYN_COUNT];
+    uint8_t v[NVN_DYN_COUNT][32];
+} dyn;
+
+bool nvn_dyn_changed(nvn_dyn state, const void *val, size_t n)
+{
+    if (dyn.valid[state] && !memcmp(dyn.v[state], val, n))
+        return false;
+    memcpy(dyn.v[state], val, n);
+    dyn.valid[state] = true;
+    return true;
+}
+
+void nvn_dyn_reset(void) { memset(dyn.valid, 0, sizeof dyn.valid); }
 uint64_t nvn_vk_calls[VKG_COUNT], nvn_vk_count_cmds, nvn_vk_count_draws;
 
 /** @brief Logs the host Vulkan calls, NVN commands and draws made per present since the last line, most called first. */
