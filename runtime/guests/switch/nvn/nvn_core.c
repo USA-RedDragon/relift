@@ -376,6 +376,15 @@ uint64_t nvn_gpu_device(void)
     return d;
 }
 
+int nvn_proc_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *args, unsigned n, uint64_t *ret)
+{
+    uint64_t a = 0;
+    int rc = proc_addr(c, mem, name, &a);
+    if (rc != RL_OK)
+        return rc;
+    return nvn_guest_call(c, mem, a, args, n, ret);
+}
+
 int nvn_os_library_symbol(rl_ctx *c, uint8_t *mem, const char *lib, const char *sym, uint64_t *addr)
 {
     *addr = 0;

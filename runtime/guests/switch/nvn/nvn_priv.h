@@ -1402,6 +1402,12 @@ int nvn_driver_index(const char *name);
  */
 int nvn_guest_call(rl_ctx *c, uint8_t *mem, uint64_t fn, const uint64_t *args, unsigned n, uint64_t *ret);
 
+/**
+ * @brief Calls proc name as the game would after nvnBootstrapLoader(name): the driver's own function for a proc that
+ * stays the driver's, else relift's. Arguments and the result as nvn_guest_call.
+ */
+int nvn_proc_call(rl_ctx *c, uint8_t *mem, const char *name, const uint64_t *args, unsigned n, uint64_t *ret);
+
 /** @brief Slots of the driver callback object the console's DLSS library gets from Handshake (.work/dlss/launch.md). */
 #define NVN_DLSS_CALLBACKS 21u
 /** @brief Where the callback object's vtable and the object sit in its page (after the thunks, 4 bytes each). */

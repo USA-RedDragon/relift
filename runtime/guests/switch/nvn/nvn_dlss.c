@@ -83,17 +83,11 @@ static uint64_t callback_probe(rl_ctx *c, uint32_t slot)
         return callback_probe(c, i);                                                                                   \
     }
 CALLBACK(2)
-CALLBACK(3)
-CALLBACK(4)
-CALLBACK(5)
 CALLBACK(6)
-CALLBACK(7)
-CALLBACK(8)
 CALLBACK(9)
 CALLBACK(10)
 CALLBACK(11)
 CALLBACK(12)
-CALLBACK(14)
 CALLBACK(15)
 CALLBACK(16)
 CALLBACK(17)
@@ -162,6 +156,274 @@ static uint64_t callback_0(rl_ctx *c, uint8_t *mem)
 {
     uint64_t obj = c->x[1];
     c->x[0] = obj ? rl_ld64(mem, obj + 0x70) : g_current ? rl_ld64(mem, g_current + 8) : 0;
+    return nvn_ret(c);
+}
+
+/** @brief A resource the library made through callback 3 (buffer) or 4 (texture). */
+typedef struct dlss_res {
+    uint64_t obj;
+    bool texture;
+} dlss_res;
+#define MAX_RES 512u
+static dlss_res g_res[MAX_RES];
+static uint32_t g_nres;
+
+/** @brief Calls proc name with up to 8 arguments; RL_OK or a stop, *ret gets x0. */
+static int proc(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *ret, unsigned n, ...)
+{
+    uint64_t a[8] = { 0 };
+    va_list ap;
+    va_start(ap, n);
+    for (unsigned i = 0; i < n && i < 8; i++)
+        a[i] = va_arg(ap, uint64_t);
+    va_end(ap);
+    uint64_t r = 0;
+    int rc = nvn_proc_call(c, mem, name, a, n, &r);
+    if (ret)
+        *ret = r;
+    return rc;
+}
+
+/**
+ * @brief Takes n bytes aligned to align from the network's storage, as the driver does (its allocator at +0xa8 of the
+ * network: the cursor at +0xc8, the bytes left at +0xd0); 0 when they do not fit.
+ */
+static uint64_t take(uint8_t *mem, uint64_t net, uint64_t n, uint64_t align)
+{
+    uint64_t cur = rl_ld64(mem, net + 0xc8), left = rl_ld64(mem, net + 0xd0);
+    uint64_t at = (cur + align - 1) & ~(align - 1), need = at - cur + n;
+    if (need > left)
+        return 0;
+    rl_st64(mem, net + 0xc8, cur + need);
+    rl_st64(mem, net + 0xd0, left - need);
+    return at;
+}
+
+/**
+ * @brief The memory pool over [storage, storage + size) the driver makes for each resource (sdk 0x65a950): flags 0xa1
+ * for kind 1 (0xa2 when the device has its +0x1d70 bit 4), 0xa2 for kind 2, 0xa4 for kind 3. The driver also sets a
+ * private bit (0x800000 at +0x10) of the pool it made, which relift's pool does not have.
+ */
+static int make_pool(rl_ctx *c, uint8_t *mem, uint64_t pool, uint64_t device, uint32_t kind, uint64_t storage,
+                     uint64_t size)
+{
+    uint32_t flags = kind == 3 ? 0xa4u : kind == 2 ? 0xa2u : (mem[device + 0x1d70] & 0x10) ? 0xa2u : 0xa1u;
+    if (kind < 1 || kind > 3)
+        return rl_guest_fatal(c, "nvn", "the console DLSS library asks for a memory pool of kind %u", kind);
+    uint64_t sp = c->sp, b = (sp - 0x100) & ~15ull;
+    c->sp = b;
+    memset(mem + b, 0, 0x100);
+    int rc = proc(c, mem, "nvnMemoryPoolBuilderSetDefaults", NULL, 1, b);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolBuilderSetDevice", NULL, 2, b, device);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolBuilderSetStorage", NULL, 3, b, storage, size);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolBuilderSetFlags", NULL, 2, b, (uint64_t)flags);
+    uint64_t ok = 0;
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolInitialize", &ok, 2, pool, b);
+    c->sp = sp;
+    if (rc == RL_OK && !(ok & 1))
+        return rl_guest_fatal(c, "nvn", "a memory pool for the console DLSS library did not initialize");
+    return rc;
+}
+
+/** @brief Notes a resource; false when there are too many. */
+static bool note_res(uint64_t obj, bool texture)
+{
+    if (g_nres == MAX_RES)
+        return false;
+    g_res[g_nres++] = (dlss_res){ obj, texture };
+    return true;
+}
+
+/**
+ * @brief Callback 4(cb, desc, &out): a texture, made as the console driver makes it (sdk 0x65a100, 0x658520): a
+ * 0x1c8-byte object from the network's storage (the memory pool at +0x30, the texture at +0x130, the storage size at
+ * +0x1c0), a builder with the format desc+0xc names, the size desc+0 and desc+4, levels desc+0x10 and flags 0x208,
+ * its storage from the network's, in a pool of kind desc+0x18. True on success.
+ */
+static uint64_t callback_4(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t desc = c->x[1], out = c->x[2], net = g_current;
+    if (!net)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library makes a texture outside a network");
+    static const struct { uint32_t code, format; } fmts[] = { { 1, 0x2e }, { 2, 0x29 }, { 5, 0x11 }, { 6, 5 },
+                                                             { 0xe, 0x3f }, { 0xf, 0x25 }, { 0x13, 0x3d } };
+    uint32_t code = rl_ld32(mem, desc + 0xc), format = 0;
+    for (size_t i = 0; i < sizeof fmts / sizeof fmts[0]; i++)
+        if (fmts[i].code == code)
+            format = fmts[i].format;
+    if (!format)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library makes a texture of format code %u", code);
+    uint64_t device = rl_ld64(mem, net + 0xc0), obj = take(mem, net, 0x1c8, 8);
+    if (!obj)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS network's storage is full (texture object)");
+    memset(mem + obj, 0, 0x1c8);
+    uint64_t sp = c->sp, b = (sp - 0x100) & ~15ull, size = 0;
+    c->sp = b;
+    memset(mem + b, 0, 0x100);
+    int rc = proc(c, mem, "nvnTextureBuilderSetDefaults", NULL, 1, b);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderSetDevice", NULL, 2, b, device);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderSetFormat", NULL, 2, b, (uint64_t)format);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderSetSize2D", NULL, 3, b, (uint64_t)rl_ld32(mem, desc),
+                  (uint64_t)rl_ld32(mem, desc + 4));
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderSetLevels", NULL, 2, b, (uint64_t)rl_ld32(mem, desc + 0x10));
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderSetFlags", NULL, 2, b, (uint64_t)0x208);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderGetStorageSize", &size, 1, b);
+    uint64_t bytes = (size + 0xfff) & ~0xfffull, storage = rc == RL_OK ? take(mem, net, bytes, 0x1000) : 0;
+    if (rc == RL_OK && !storage)
+        rc = rl_guest_fatal(c, "nvn", "the console DLSS network's storage is full (0x%llx texture bytes)",
+                            (unsigned long long)bytes);
+    if (rc == RL_OK)
+        rc = make_pool(c, mem, obj + 0x30, device, rl_ld32(mem, desc + 0x18), storage, bytes);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureBuilderSetStorage", NULL, 3, b, obj + 0x30, (uint64_t)0);
+    uint64_t ok = 0;
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnTextureInitialize", &ok, 2, obj + 0x130, b);
+    c->sp = sp;
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    rl_st64(mem, obj + 0x1c0, size);
+    rl_st64(mem, obj + 0x1b0, net + 0xa8);
+    if (!(ok & 1) || !note_res(obj, true))
+        return (uint64_t)rl_guest_fatal(c, "nvn", "a texture for the console DLSS library did not initialize");
+    rl_st64(mem, out, obj);
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 3(cb, desc, &out): a buffer, made as the console driver makes it (sdk 0x65a070, 0x6587a0): a
+ * 0x168-byte object from the network's storage (the memory pool at +0x30, the buffer at +0x130), desc+0 bytes rounded
+ * up to 4 KiB in a pool of kind desc+0x18. True on success.
+ */
+static uint64_t callback_3(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t desc = c->x[1], out = c->x[2], net = g_current;
+    if (!net)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library makes a buffer outside a network");
+    if (mem[desc + 0x14] & 2)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library makes a device-wide buffer (desc+0x14 bit 1)");
+    uint64_t device = rl_ld64(mem, net + 0xc0), obj = take(mem, net, 0x168, 8);
+    uint64_t bytes = ((uint64_t)rl_ld32(mem, desc) + 0xfff) & ~0xfffull, storage = obj ? take(mem, net, bytes, 0x1000) : 0;
+    if (!storage)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS network's storage is full (0x%llx buffer bytes)",
+                                        (unsigned long long)bytes);
+    memset(mem + obj, 0, 0x168);
+    int rc = make_pool(c, mem, obj + 0x30, device, rl_ld32(mem, desc + 0x18), storage, bytes);
+    uint64_t sp = c->sp, b = (sp - 0x100) & ~15ull, ok = 0;
+    c->sp = b;
+    memset(mem + b, 0, 0x100);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnBufferBuilderSetDefaults", NULL, 1, b);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnBufferBuilderSetDevice", NULL, 2, b, device);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnBufferBuilderSetStorage", NULL, 4, b, obj + 0x30, (uint64_t)0, bytes);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnBufferInitialize", &ok, 2, obj + 0x130, b);
+    c->sp = sp;
+    if (rc != RL_OK)
+        return (uint64_t)rc;
+    rl_st64(mem, obj + 0x160, net + 0xa8);
+    if (!(ok & 1) || !note_res(obj, false))
+        return (uint64_t)rl_guest_fatal(c, "nvn", "a buffer for the console DLSS library did not initialize");
+    rl_st64(mem, out, obj);
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/** @brief Callback 5(cb, obj): releases a resource of callbacks 3 and 4 (the driver calls its destructor). */
+static uint64_t callback_5(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1];
+    for (uint32_t i = 0; i < g_nres; i++)
+        if (g_res[i].obj == obj) {
+            int rc = proc(c, mem, g_res[i].texture ? "nvnTextureFinalize" : "nvnBufferFinalize", NULL, 1, obj + 0x130);
+            if (rc == RL_OK)
+                rc = proc(c, mem, "nvnMemoryPoolFinalize", NULL, 1, obj + 0x30);
+            if (rc != RL_OK)
+                return (uint64_t)rc;
+            g_res[i] = g_res[--g_nres];
+            c->x[0] = 1;
+            return nvn_ret(c);
+        }
+    return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library releases 0x%llx, which relift never made",
+                                    (unsigned long long)obj);
+}
+
+/** @brief Callback 14(cb, obj, name): the resource's debug name, which the driver copies to +9 of its object (31 bytes, sdk 0x65a3c0). */
+static uint64_t callback_14(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1];
+    const char *n = c->x[2] ? nvn_str(mem, c->x[2], 64) : "";
+    size_t len = n ? strnlen(n, 31) : 0;
+    memset(mem + obj + 9, 0, 32);
+    if (len)
+        memcpy(mem + obj + 9, n, len);
+    return nvn_ret(c);
+}
+
+/** @brief The resource of callbacks 3 and 4 at obj, or NULL. */
+static const dlss_res *res_of(uint64_t obj)
+{
+    for (uint32_t i = 0; i < g_nres; i++)
+        if (g_res[i].obj == obj)
+            return &g_res[i];
+    return NULL;
+}
+
+/**
+ * @brief Callback 7(cb, obj, &addr): a buffer's GPU address (its object's method +0x18 gives the NVNbuffer at +0x130,
+ * then nvnBufferGetAddress; sdk 0x65a1c0); 0 for a texture or no object. True.
+ */
+static uint64_t callback_7(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1], out = c->x[2], addr = 0;
+    const dlss_res *r = obj ? res_of(obj) : NULL;
+    if (obj && !r)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library asks the address of 0x%llx, which relift never made",
+                                        (unsigned long long)obj);
+    if (r && !r->texture) {
+        int rc = proc(c, mem, "nvnBufferGetAddress", &addr, 1, obj + 0x130);
+        if (rc != RL_OK)
+            return (uint64_t)rc;
+    }
+    rl_st64(mem, out, addr);
+    c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/**
+ * @brief Callback 8(cb, obj, &addr, &size): a texture's GPU address and storage size (method +0x30, sdk 0x65ad80:
+ * nvnTextureGetTextureAddress and +0x1c0); false for a buffer, which writes nothing.
+ */
+static uint64_t callback_8(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1];
+    const dlss_res *r = res_of(obj);
+    if (!r)
+        return (uint64_t)rl_guest_fatal(c, "nvn", "the console DLSS library asks the storage of 0x%llx, which relift never made",
+                                        (unsigned long long)obj);
+    c->x[0] = 0;
+    if (r->texture) {
+        uint64_t addr = 0;
+        int rc = proc(c, mem, "nvnTextureGetTextureAddress", &addr, 1, obj + 0x130);
+        if (rc != RL_OK)
+            return (uint64_t)rc;
+        rl_st64(mem, c->x[2], addr);
+        rl_st64(mem, c->x[3], rl_ld64(mem, obj + 0x1c0));
+        c->x[0] = 1;
+    }
     return nvn_ret(c);
 }
 
@@ -254,6 +516,54 @@ typedef struct nvn_dlss_net {
     /** @brief The console library's network (its CreateNetwork result), 0 when relift's upscaler runs. */
     uint64_t lib_net;
 } nvn_dlss_net;
+
+/**
+ * @brief The network's state as the driver's nvnDlssNetworkInitialize sets it (sdk 0x658b20) for the callbacks: the
+ * 0x258 bytes cleared; the device at +8 and +0xc0, the builder's +8 at +0x10, its 0x80 bytes at +0x38 (texture ids and
+ * pool) at +0x18, 0x3f at +0x98, the device's +0x1dd0 at +0xb8; the builder's storage (+0x10, +0x18 bytes) cleared, its
+ * allocator at +0xc8 (cursor) and +0xd0 (bytes left); a memory pool at +0x100 over the first builder+0x34 * 64 KiB of
+ * it (flags 0x21). A builder with native handles (+0xb8) is not done here and stops.
+ */
+static int network_state(rl_ctx *c, uint8_t *mem, uint64_t net, uint64_t builder)
+{
+    uint64_t device = rl_ld64(mem, builder), storage = rl_ld64(mem, builder + 0x10), size = rl_ld64(mem, builder + 0x18);
+    if (rl_ld64(mem, builder + 0xb8))
+        return rl_guest_fatal(c, "nvn", "the game's DLSS network builder gives native memory handles (+0xb8)");
+    memset(mem + net, 0, 0x258);
+    rl_st64(mem, net + 8, device);
+    rl_st64(mem, net + 0x10, rl_ld64(mem, builder + 8));
+    memcpy(mem + net + 0x18, mem + builder + 0x38, 0x80);
+    rl_st32(mem, net + 0x98, 0x3f);
+    rl_st32(mem, net + 0xb8, rl_ld32(mem, device + 0x1dd0));
+    rl_st64(mem, net + 0xc0, device);
+    rl_st64(mem, net + 0xc8, storage);
+    rl_st64(mem, net + 0xd0, size);
+    rl_st64(mem, net + 0xd8, size);
+    memset(mem + storage, 0, size);
+    int32_t units = (int32_t)rl_ld32(mem, builder + 0x34);
+    rl_st32(mem, net + 0x200, (uint32_t)units);
+    uint64_t bytes = (uint64_t)(int64_t)units << 16, at = units > 0 ? take(mem, net, bytes, 0x1000) : 0;
+    if (units <= 0)
+        return RL_OK;
+    if (!at)
+        return rl_guest_fatal(c, "nvn", "the game's DLSS network storage is too small for its pool");
+    uint64_t sp = c->sp, b = (sp - 0x100) & ~15ull, ok = 0;
+    c->sp = b;
+    memset(mem + b, 0, 0x100);
+    int rc = proc(c, mem, "nvnMemoryPoolBuilderSetDefaults", NULL, 1, b);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolBuilderSetDevice", NULL, 2, b, device);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolBuilderSetStorage", NULL, 3, b, at, bytes);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolBuilderSetFlags", NULL, 2, b, (uint64_t)0x21);
+    if (rc == RL_OK)
+        rc = proc(c, mem, "nvnMemoryPoolInitialize", &ok, 2, net + 0x100, b);
+    c->sp = sp;
+    if (rc == RL_OK && !(ok & 1))
+        return rl_guest_fatal(c, "nvn", "the game's DLSS network pool did not initialize");
+    return rc;
+}
 
 /**
  * @brief The network descriptor the driver gives the library's CreateNetwork, at +0x210 of the NVNdlssNetwork (sdk
@@ -450,8 +760,9 @@ uint64_t nvnh_nvnDlssNetworkInitialize(rl_ctx *c, uint8_t *mem)
         rc = library_up(c, mem, rl_ld64(mem, builder));
         if (rc != RL_OK)
             return (uint64_t)rc;
-        memset(mem + net, 0, 0x258);
-        rl_st64(mem, net + 8, rl_ld64(mem, builder));
+        rc = network_state(c, mem, net, builder);
+        if (rc != RL_OK)
+            return (uint64_t)rc;
         network_desc(mem, net, builder, opt);
         uint64_t desc = net + 0x210;
         g_current = net;
