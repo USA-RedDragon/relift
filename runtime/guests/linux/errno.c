@@ -136,6 +136,13 @@ int lx_errno(int e)
 #ifdef EAFNOSUPPORT
         E(EAFNOSUPPORT)
 #endif
+#ifdef ENODATA
+        E(ENODATA)
+#endif
+#if defined(ENOATTR) && (!defined(ENODATA) || ENOATTR != ENODATA)
+    case ENOATTR:
+        return L_ENODATA;
+#endif
 #undef E
     default:
         break;

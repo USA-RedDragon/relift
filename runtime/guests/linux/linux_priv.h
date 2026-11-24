@@ -201,6 +201,10 @@ void lx_helper_kick(void);
 void lx_signal_post(int sig, int32_t code, int32_t pid, uint32_t uid);
 /** @brief The host path of guest path path under the guest root (symbolic links followed): 0 or -errno. */
 int64_t lx_host_path(const char *path, char *out, size_t cap);
+/** @brief As lx_host_path, following a symbolic link at the last component only when follow is set. */
+int64_t lx_host_path_at(const char *path, char *out, size_t cap, bool follow);
+/** @brief The host directory descriptor a *at call's dirfd stands for (HIO_CWD for AT_FDCWD or an absolute path): 0 or -EBADF. */
+int lx_dir_arg(int64_t dirfd, const char *path, int *host);
 /** @brief Fills keep with the guest descriptors an execve passes on (open, not close-on-exec, host backed): pairs of guest number and host descriptor; returns the count. */
 int lx_fs_exec_fds(int (*keep)[2], int cap);
 /** @brief Ends the calling thread: clears its tid word, wakes its waiters, leaves the list. */
@@ -276,6 +280,10 @@ lx_sys_fn *lx_fs_call(uint32_t nr);
 lx_sys_fn *lx_proc_call(uint32_t nr);
 /** @brief The process system calls of process.c (execve, wait4, sessions), or NULL. */
 lx_sys_fn *lx_process_call(uint32_t nr);
+/** @brief write(2) of a host buffer to guest descriptor fd, with write's blocking, signal and SIGPIPE rules. */
+int64_t lx_fd_write(int fd, const uint8_t *buf, uint64_t n);
+/** @brief The file system calls of fsx.c (ownership, extended attributes, fchmod, fchmodat2, sendfile, pselect6), or NULL. */
+lx_sys_fn *lx_fsx_call(uint32_t nr);
 /** @brief The socket system calls of net.c, or NULL. */
 lx_sys_fn *lx_net_call(uint32_t nr);
 /** @brief A write on a socket with the blocking and signal rules of send (net.c). */

@@ -21,6 +21,18 @@
 enum rl_linux_nr {
     NR_getcwd = 17,
     NR_dup = 23,
+    NR_setxattr = 5,
+    NR_lsetxattr = 6,
+    NR_fsetxattr = 7,
+    NR_getxattr = 8,
+    NR_lgetxattr = 9,
+    NR_fgetxattr = 10,
+    NR_listxattr = 11,
+    NR_llistxattr = 12,
+    NR_flistxattr = 13,
+    NR_removexattr = 14,
+    NR_lremovexattr = 15,
+    NR_fremovexattr = 16,
     NR_eventfd2 = 19,
     NR_epoll_create1 = 20,
     NR_epoll_ctl = 21,
@@ -39,7 +51,10 @@ enum rl_linux_nr {
     NR_ftruncate = 46,
     NR_faccessat = 48,
     NR_chdir = 49,
+    NR_fchmod = 52,
     NR_fchmodat = 53,
+    NR_fchownat = 54,
+    NR_fchown = 55,
     NR_openat = 56,
     NR_close = 57,
     NR_pipe2 = 59,
@@ -51,6 +66,8 @@ enum rl_linux_nr {
     NR_writev = 66,
     NR_pread64 = 67,
     NR_pwrite64 = 68,
+    NR_sendfile = 71,
+    NR_pselect6 = 72,
     NR_ppoll = 73,
     NR_readlinkat = 78,
     NR_newfstatat = 79,
@@ -135,7 +152,8 @@ enum rl_linux_nr {
     NR_accept4 = 242,
     NR_wait4 = 260,
     NR_clone3 = 435,
-    NR_close_range = 436
+    NR_close_range = 436,
+    NR_fchmodat2 = 452
 };
 
 /** @brief Linux errno values (asm-generic/errno-base.h and errno.h). */
@@ -178,6 +196,7 @@ enum rl_linux_errno {
     L_ENOSYS = 38,
     L_ENOTEMPTY = 39,
     L_ELOOP = 40,
+    L_ENODATA = 61,
     L_EOVERFLOW = 75,
     L_ENOTSUP = 95,
     L_ENOTSOCK = 88,

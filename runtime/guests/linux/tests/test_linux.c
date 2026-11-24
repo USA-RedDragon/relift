@@ -476,6 +476,16 @@ TEST(futex_wake_releases_a_waiter_and_a_changed_word_does_not_wait)
 }
 
 #ifndef _WIN32
+/** @brief Writes a file of the text at the host path. */
+static void write_text(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fputs(text, f);
+        fclose(f);
+    }
+}
+
 static volatile int g_holding;
 
 static void *hold_big_main(void *arg)
@@ -730,6 +740,63 @@ TEST(tcp_over_loopback_connects_accepts_and_honors_options_timeouts_and_signals)
     CHECK_EQ(net(c, NR_bind, 0, m + 0x10, 16, 0, 0, 0) == -L_ENOTSOCK || net(c, NR_bind, 0, m + 0x10, 16, 0, 0, 0) == -L_EBADF, true);
 }
 
+TEST(fchmodat2_chown_xattrs_sendfile_and_pselect6)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t m = 0x401000;
+    char cwd[1024], file[1100], link[1100];
+    CHECK(getcwd(cwd, sizeof cwd) != NULL);
+    snprintf(file, sizeof file, "%s/fsx.%d", cwd, (int)getpid());
+    snprintf(link, sizeof link, "%s.link", file);
+    write_text(file, "sendfile body");
+    CHECK_EQ(symlink(file, link), 0);
+    put_str(m, link);
+    CHECK_EQ(sys(c, NR_fchmodat2, (uint64_t)(int64_t)L_AT_FDCWD, m, 0600, 0x100, 0, 0), -L_ENOTSUP);
+    CHECK_EQ(sys(c, NR_fchmodat2, (uint64_t)(int64_t)L_AT_FDCWD, m, 0640, 0, 0, 0), 0);
+    struct stat hs;
+    CHECK_EQ(stat(file, &hs), 0);
+    CHECK_EQ(hs.st_mode & 0777, 0640);
+    CHECK_EQ(sys(c, NR_fchownat, (uint64_t)(int64_t)L_AT_FDCWD, m, (uint64_t)-1, (uint64_t)-1, 0, 0), 0);
+    put_str(m, file);
+    put_str(m + 0x200, "user.relift");
+    put_str(m + 0x300, "value");
+    int64_t sr = sys(c, NR_setxattr, m, m + 0x200, m + 0x300, 5, 0, 0);
+    CHECK(sr == 0 || sr == -L_ENOTSUP);
+    if (sr == 0) {
+        CHECK_EQ(sys(c, NR_getxattr, m, m + 0x200, m + 0x400, 64, 0, 0), 5);
+        CHECK(memcmp(cstr(m + 0x400), "value", 5) == 0);
+        CHECK_EQ(sys(c, NR_getxattr, m, m + 0x200, 0, 0, 0, 0), 5);
+        CHECK(sys(c, NR_listxattr, m, m + 0x400, 256, 0, 0, 0) >= 12);
+        CHECK_EQ(sys(c, NR_removexattr, m, m + 0x200, 0, 0, 0, 0), 0);
+        CHECK_EQ(sys(c, NR_getxattr, m, m + 0x200, m + 0x400, 64, 0, 0), -L_ENODATA);
+    }
+    int64_t in = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, m, L_O_RDONLY, 0, 0, 0);
+    CHECK(in >= 3);
+    CHECK_EQ(sys(c, NR_pipe2, m + 0x500, 0, 0, 0, 0, 0), 0);
+    int32_t pp[2];
+    memcpy(pp, rl_mem_base() + m + 0x500, 8);
+    int64_t off = 9;
+    rl_vm_kernel_write(&lx.vm, m + 0x510, &off, 8);
+    CHECK_EQ(sys(c, NR_sendfile, (uint64_t)pp[1], (uint64_t)in, m + 0x510, 100, 0, 0), 4);
+    memcpy(&off, rl_mem_base() + m + 0x510, 8);
+    CHECK_EQ(off, 13);
+    uint64_t rset = 1ull << pp[0];
+    rl_vm_kernel_write(&lx.vm, m + 0x600, &rset, 8);
+    int64_t ts[2] = { 1, 0 };
+    rl_vm_kernel_write(&lx.vm, m + 0x620, ts, sizeof ts);
+    CHECK_EQ(sys(c, NR_pselect6, (uint64_t)pp[0] + 1, m + 0x600, 0, 0, m + 0x620, 0), 1);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)pp[0], m + 0x700, 16, 0, 0, 0), 4);
+    CHECK(memcmp(cstr(m + 0x700), "body", 4) == 0);
+    rl_vm_kernel_write(&lx.vm, m + 0x600, &rset, 8);
+    ts[0] = 0;
+    ts[1] = 20000000;
+    rl_vm_kernel_write(&lx.vm, m + 0x620, ts, sizeof ts);
+    CHECK_EQ(sys(c, NR_pselect6, (uint64_t)pp[0] + 1, m + 0x600, 0, 0, m + 0x620, 0), 0);
+    unlink(link);
+    unlink(file);
+}
+
 TEST(execve_of_another_program_finds_nothing)
 {
     rl_ctx *c = boot();
@@ -774,16 +841,6 @@ TEST(a_signal_interrupts_a_blocking_pipe_read_and_a_sleep)
 }
 
 #ifndef _WIN32
-/** @brief Writes a file of the text at the host path. */
-static void write_text(const char *path, const char *text)
-{
-    FILE *f = fopen(path, "w");
-    if (f) {
-        fputs(text, f);
-        fclose(f);
-    }
-}
-
 TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
 {
     char cwd[1024], root[1200], p[1400];

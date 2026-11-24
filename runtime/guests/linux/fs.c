@@ -118,6 +118,12 @@ int64_t lx_iov_get(uint64_t addr, uint64_t cnt, uint64_t (*v)[2], uint64_t *tota
 
 int64_t lx_host_path(const char *path, char *out, size_t cap) { return host_path(path, out, cap, true); }
 
+static int dir_arg(int64_t dirfd, const char *path, int *host);
+
+int64_t lx_host_path_at(const char *path, char *out, size_t cap, bool follow) { return host_path(path, out, cap, follow); }
+
+int lx_dir_arg(int64_t dirfd, const char *path, int *host) { return dir_arg(dirfd, path, host); }
+
 void lx_fs_shutdown(void)
 {
     for (int i = 0; i < LX_MAX_FDS; i++)
@@ -771,6 +777,16 @@ static int64_t write_interruptible(int fd, int h, const uint8_t *buf, uint64_t n
         if (done == n)
             return (int64_t)done;
     }
+}
+
+int64_t lx_fd_write(int fd, const uint8_t *buf, uint64_t n)
+{
+    int h = lx_host_fd(fd);
+    if (h < 0)
+        return -L_EBADF;
+    int64_t r = write_interruptible(fd, h, buf, n);
+    epipe(r);
+    return r;
 }
 
 static int64_t sys_write(rl_ctx *c, uint8_t *mem, const uint64_t a[6])

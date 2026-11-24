@@ -279,6 +279,8 @@ int64_t lx_dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6])
         f = lx_timer_call(nr);
     if (!f)
         f = lx_net_call(nr);
+    if (!f)
+        f = lx_fsx_call(nr);
     if (f)
         return f(c, mem, a);
     if (rl_report_unknown(0x4c58535900000000ull | nr, "linux", "system call %u is not implemented (returns ENOSYS)", nr))

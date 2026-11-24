@@ -165,6 +165,15 @@ uint32_t hio_cpu_count(void);
 /** @brief Sets the process's umask and returns the old one. */
 uint32_t hio_umask(uint32_t mask);
 
+/** @brief fchownat(2) (nofollow: AT_SYMLINK_NOFOLLOW); -1 leaves an id as it is. */
+int64_t hio_chown(int dir, const char *path, int64_t uid, int64_t gid, bool nofollow);
+/** @brief fchown(2). */
+int64_t hio_fchown(int fd, int64_t uid, int64_t gid);
+/** @brief fchmod(2). */
+int64_t hio_fchmod(int fd, uint32_t mode);
+/** @brief The extended attribute calls, by what: 's'et, 'g'et, 'l'ist or 'r'emove; on path (nofollow for the l* calls) or, with path NULL, on descriptor fd. get and list return the size (with size 0, the size needed). flags are Linux's XATTR_CREATE (1) and XATTR_REPLACE (2). */
+int64_t hio_xattr(char what, int fd, const char *path, bool nofollow, const char *name, void *value, size_t size, int flags);
+
 /** @brief Removes name from the process's environment. */
 void hio_unsetenv(const char *name);
 /** @brief The host signal of Linux signal sig, 0 for one the host does not have. */
