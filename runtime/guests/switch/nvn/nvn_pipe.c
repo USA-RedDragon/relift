@@ -290,10 +290,12 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
         P.late_at = rl_clock_ns();
     }
     pthread_mutex_unlock(&P.lock);
-    if (late || rl_cfg()->trace_os)
-        rl_log(RL_LOG_INFO, "nvn", "%s%s created in %.1f ms", late ? "late compile: " : "", what, dt / 1e6);
-    if (vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS) {
         note_why(what, vr);
+        rl_log(RL_LOG_ERROR, "nvn", "%sthe driver refused the %s: VkResult %d after %.1f ms", late ? "late compile: " : "",
+               what, (int)vr, dt / 1e6);
+    } else if (late || rl_cfg()->trace_os)
+        rl_log(RL_LOG_INFO, "nvn", "%s%s created in %.1f ms", late ? "late compile: " : "", what, dt / 1e6);
     return vr;
 }
 

@@ -1978,9 +1978,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         return rc;
     VkPipeline p = nvn_pipe_graphics(&k);
     if (!p)
-        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw (vertex %s, fragment %s, geometry %s)",
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw (vertex %s, fragment %s, geometry %s): %s",
                            mods[0] ? mods[0]->key : "none", mods[1] ? mods[1]->key : "none",
-                           mods[2] ? mods[2]->key : "none");
+                           mods[2] ? mods[2]->key : "none", nvn_pipe_why());
     const char *program_keys[5];
     for (uint32_t s = 0; s < 5; s++)
         program_keys[s] = mods[s] ? mods[s]->key : NULL;
@@ -2128,7 +2128,7 @@ static int draw_mesh_native(replay *r, module *const *mods, pipe_key *k, uint32_
     nvn_core_leave();
     VkPipeline p = nvn_pipe_graphics(k);
     if (!p)
-        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this mesh draw");
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this mesh draw: %s", nvn_pipe_why());
     bool traced = (mods[NVN_STAGE_TASK] && mods[NVN_STAGE_TASK]->trace_words) ||
                   (mods[NVN_STAGE_MESH] && mods[NVN_STAGE_MESH]->trace_words) || (mods[1] && mods[1]->trace_words);
     if (traced && (!d.trace_on || !trace_buffer() || !nvn_vk_flush(r)))
@@ -2265,7 +2265,7 @@ static int draw_mesh_compute(replay *r, module *const *mods, pipe_key *k, const 
     nvn_core_leave();
     VkPipeline gp = nvn_pipe_graphics(&kg);
     if (!gp)
-        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this mesh draw");
+        return nvn_vk_stop(r, "the host driver cannot make a pipeline for this mesh draw: %s", nvn_pipe_why());
     VkPipeline tp = NULL, sp, mp;
     if (task && !(tp = mesh_pass_pipeline(r, task, k->nspec[NVN_STAGE_TASK], k->spec_map[NVN_STAGE_TASK],
                                           k->spec[NVN_STAGE_TASK])))
@@ -3045,7 +3045,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
     nvn_spec_sort(&n, map, vals);
     VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
     if (!p)
-        return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s", m->key);
+        return nvn_vk_stop(r, "the host driver cannot make a compute pipeline for %s: %s", m->key, nvn_pipe_why());
     nvn_pipe_record_compute(m->key, n, map, vals);
     dispatch_data dd = { .m = m, .c0 = c0, .c0_at = { 0 } };
     if ((rc = nvn_vk_stage(r, stage_dispatch, &dd, "a dispatch")) != RL_OK)
