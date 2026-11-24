@@ -3,8 +3,8 @@
 
     nvn_stats.py <game>=<file> [<game>=<file> ...] [--all]
 
-Prints one table of the gaps (procs relift records with no function or does not implement, and commands the host
-device ignored, ran in part, stopped at or has no handler for), ranked by how many of the games hit each one and then
+Prints one table of the gaps (procs relift records with no function or does not implement that the game called, and
+commands the host device ignored, ran in part, stopped at or has no handler for), ranked by how many of the games hit each one and then
 by its count. With --all every proc and command is listed. A file without a name before '=' is named by its folder.
 """
 
@@ -64,12 +64,12 @@ def main(argv):
     for game, path in runs:
         procs, cmds = read(path)
         for name, row in procs.items():
-            if not (show_all or row["gap"]):
+            if not (show_all or (row["gap"] and row["calls"])):
                 continue
             e = table.setdefault(("proc", name), {"what": row["kind"], "games": {}})
             e["games"][game] = row["calls"] if row["calls"] is not None else row["lookups"]
         for name, row in cmds.items():
-            if not (show_all or row["gap"] or status(row) == "recorded"):
+            if not (show_all or row["gap"]):
                 continue
             e = table.setdefault(("cmd", name), {"what": status(row), "games": {}})
             if status(row) in ("unhandled", "stopped") or e["what"] in ("ok", "recorded", "ignored"):
