@@ -5,6 +5,7 @@ fn main() {
     let mut no_fma = false;
     let mut hmma_staged = false;
     let mut flush_fix = None;
+    let mut no_xfb_host = false;
     let mut raw = std::env::args().peekable();
     let mut kept = Vec::new();
     while let Some(a) = raw.next() {
@@ -17,6 +18,8 @@ fn main() {
             );
         } else if a == "--debug-info" {
             o.debug_info = true;
+        } else if a == "--xfb-memory" {
+            no_xfb_host = true;
         } else if a == "--xfb" {
             let v = raw.next().expect("--xfb <stride>:<select byte>,...");
             let (stride, sel) = v.split_once(':').expect("--xfb <stride>:<select byte>,...");
@@ -64,6 +67,7 @@ fn main() {
         None => HostProfile::default(),
     };
     o.host = host;
+    o.host.transform_feedback &= !no_xfb_host;
     o.host.fused_fma &= !no_fma;
     o.host.hmma_staged |= hmma_staged;
     if let Some(f) = flush_fix {

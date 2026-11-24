@@ -103,6 +103,10 @@
     {
      "extensionName": "VK_EXT_shader_atomic_float",
      "specVersion": 1.0
+    },
+    {
+     "extensionName": "VK_EXT_transform_feedback",
+     "specVersion": 1.0
     }
    ],
    "features": {
@@ -148,8 +152,13 @@
     "maxSubgroupSize": 128.0,
     "minSubgroupSize": 64.0,
     "requiredSubgroupSizeStages": 32.0
+   },
+   "VK_EXT_transform_feedback": {
+    "transformFeedbackFeaturesEXT": {
+     "transformFeedback": 1.0
+    }
    }
   }
  ],
- "source": "adb shell cmd gpu vkjson, Adreno (TM) 740, Qualcomm driver 0676.53, Android 17; ReliftDeviceProbes from the relift denormal probe on the same device"
+ "source": "adb shell cmd gpu vkjson, Adreno (TM) 740, Qualcomm driver 0676.53, Android 17; ReliftDeviceProbes from the relift denormal probe on the same device; VK_EXT_transform_feedback and transformFeedback from adb shell cmd gpu vkjson of the same device (AYN Thor), 2026-11-24"
 }

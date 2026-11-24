@@ -576,8 +576,11 @@ impl Ctx {
         }
         let f = self.f32t();
         let u = self.u32t();
-        let st = if self.host.mirror_writes {
-            let v2 = self.m.t_vec(u, 2);
+        let xfb = self.xfb_memory();
+        let v2 = self.m.t_vec(u, 2);
+        let st = if xfb {
+            self.m.t_struct_unique(&[f, f, u, u, v2, v2])
+        } else if self.host.mirror_writes {
             self.m.t_struct_unique(&[f, f, u, u, v2])
         } else {
             self.m.t_struct_unique(&[f, f, u, u])
@@ -587,8 +590,11 @@ impl Ctx {
         self.m.member_deco(st, 1, 35, &[PUSH_ALPHA_REF]);
         self.m.member_deco(st, 2, 35, &[PUSH_SCALED_UNSIGNED]);
         self.m.member_deco(st, 3, 35, &[PUSH_SCALED_SIGNED]);
-        if self.host.mirror_writes {
+        if self.host.mirror_writes || xfb {
             self.m.member_deco(st, 4, 35, &[PUSH_WRITTEN_PAGES]);
+        }
+        if xfb {
+            self.m.member_deco(st, 5, 35, &[xfb::PUSH_XFB_SCRATCH]);
         }
         let p = self.m.t_ptr(PUSH_CONSTANT, st);
         let var = self.m.global(p, PUSH_CONSTANT);
@@ -640,6 +646,20 @@ impl Ctx {
         let v2 = self.m.t_vec(u, 2);
         let p = self.m.t_ptr(PUSH_CONSTANT, v2);
         let i = self.m.c_u32(4);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, i]);
+        let w = self.m.emit(op::LOAD, v2, &[ptr]);
+        let lo = self.m.emit(op::COMPOSITE_EXTRACT, u, &[w, 0]);
+        let hi = self.m.emit(op::COMPOSITE_EXTRACT, u, &[w, 1]);
+        (lo, hi)
+    }
+
+    /// The (low, high) words of the memory path's scratch address.
+    pub(crate) fn push_xfb_scratch(&mut self) -> (u32, u32) {
+        let var = self.push_block();
+        let u = self.u32t();
+        let v2 = self.m.t_vec(u, 2);
+        let p = self.m.t_ptr(PUSH_CONSTANT, v2);
+        let i = self.m.c_u32(5);
         let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, i]);
         let w = self.m.emit(op::LOAD, v2, &[ptr]);
         let lo = self.m.emit(op::COMPOSITE_EXTRACT, u, &[w, 0]);

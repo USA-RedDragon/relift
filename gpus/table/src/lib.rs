@@ -189,6 +189,14 @@ impl TraceSel {
 /// vertex stream in the fourth (`Interface::xfb`). 13 and 14 are taken by
 /// other records.
 pub const RECORD_XFB: u32 = 15;
+/// An interface record: the translation captures through memory
+/// (`Interface::xfb_memory`): the bytes of a record in the second field and
+/// the records of one input primitive in the third.
+pub const RECORD_XFB_MEMORY: u32 = 16;
+/// An interface record of a memory path capture: buffer (second field)
+/// words from the third field's on take the four layout select bytes of
+/// the fourth (the first in its low byte).
+pub const RECORD_XFB_SELECT: u32 = 17;
 
 /// The transform feedback layout of each program the scan's xfb JSON names
 /// (empty for none), as the driver programs it ([`XfbLayout::from_glslc`]).
@@ -792,6 +800,21 @@ pub fn records(i: &Interface) -> Vec<[u32; 4]> {
     for (k, &(stride, stream)) in i.xfb.iter().enumerate() {
         recs.push([RECORD_XFB, k as u32, stride, stream]);
     }
+    if let Some(m) = &i.xfb_memory {
+        recs.push([RECORD_XFB_MEMORY, m.record_bytes, m.slots_per_primitive, 0]);
+        for (b, sel) in m.select.iter().enumerate() {
+            for (w, four) in sel.chunks(4).enumerate() {
+                let mut v = [0xff_u8; 4];
+                v[..four.len()].copy_from_slice(four);
+                recs.push([
+                    RECORD_XFB_SELECT,
+                    b as u32,
+                    4 * w as u32,
+                    u32::from_le_bytes(v),
+                ]);
+            }
+        }
+    }
     recs
 }
 
@@ -864,6 +887,23 @@ pub(crate) mod tests {
         assert_eq!(
             records(&x),
             [[RECORD_XFB, 0, 16, 0], [RECORD_XFB, 1, 24, 1]]
+        );
+        let m = Interface {
+            xfb: vec![(24, 0)],
+            xfb_memory: Some(relift_gpu_nv::translate::XfbMemory {
+                record_bytes: 28,
+                slots_per_primitive: 1,
+                select: vec![vec![32, 33, 34, 36, 40, 41]],
+            }),
+            ..Interface::default()
+        };
+        assert_eq!(
+            records(&m)[1..],
+            [
+                [RECORD_XFB_MEMORY, 28, 1, 0],
+                [RECORD_XFB_SELECT, 0, 0, 0x2422_2120],
+                [RECORD_XFB_SELECT, 0, 4, 0xffff_2928]
+            ]
         );
     }
 

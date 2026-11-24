@@ -21,8 +21,10 @@ EXTENSIONS = {
     'VK_EXT_shader_atomic_float',
     'VK_EXT_shader_image_atomic_int64',
     'VK_EXT_mesh_shader',
+    'VK_EXT_transform_feedback',
 }
 MEMBERS = {
+    'transformFeedback',
     'deviceName', 'vendorID', 'deviceID', 'driverID',
     'subgroupSize', 'supportedStages', 'supportedOperations', 'subgroupSupportedStages', 'subgroupSupportedOperations',
     'subgroupSizeControl', 'computeFullSubgroups', 'minSubgroupSize', 'maxSubgroupSize',

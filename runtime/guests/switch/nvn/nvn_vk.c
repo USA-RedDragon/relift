@@ -1642,9 +1642,43 @@ bool nvn_vk_gpu_buffer(VkBuffer *buf, VkDeviceMemory *memory, uint64_t size)
     return true;
 }
 
+bool nvn_vk_xfb_scratch_new(staging *s, uint64_t size, uint64_t *gpu)
+{
+    memset(s, 0, sizeof *s);
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = size,
+                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT };
+    if (VK(vkCreateBuffer)(g.dev, &bci, NULL, &s->buf) != VK_SUCCESS)
+        return false;
+    VkMemoryRequirements req;
+    VK(vkGetBufferMemoryRequirements)(g.dev, s->buf, &req);
+    const VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    int32_t t = nvn_vk_mem_type(req.memoryTypeBits, host | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    if (t < 0)
+        t = nvn_vk_mem_type(req.memoryTypeBits, host);
+    VkMemoryAllocateFlagsInfo fl = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                     .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT };
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                 .pNext = &fl,
+                                 .allocationSize = req.size,
+                                 .memoryTypeIndex = (uint32_t)t };
+    void *p = NULL;
+    if (t < 0 || VK(vkAllocateMemory)(g.dev, &mai, NULL, &s->memory) != VK_SUCCESS ||
+        VK(vkBindBufferMemory)(g.dev, s->buf, s->memory, 0) != VK_SUCCESS ||
+        VK(vkMapMemory)(g.dev, s->memory, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) {
+        nvn_vk_staging_free(s);
+        return false;
+    }
+    s->map = p;
+    s->size = size;
+    VkBufferDeviceAddressInfo ai = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = s->buf };
+    *gpu = VK(vkGetBufferDeviceAddress)(g.dev, &ai);
+    return true;
+}
+
 bool nvn_vk_xfb_counters_new(staging *s)
 {
-    return staging_with(s, 4u * NVN_XFB_BUFFERS, true, NVN_BUFFER_USAGE_XFB_COUNTER);
+    return staging_with(s, 4u * NVN_XFB_BUFFERS, true, g.transform_feedback ? NVN_BUFFER_USAGE_XFB_COUNTER : 0);
 }
 
 bool nvn_vk_staging_new(staging *s, uint64_t size)

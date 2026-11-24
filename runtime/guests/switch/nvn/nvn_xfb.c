@@ -25,6 +25,15 @@
  * for the work before them (nvn_vk_flush) and move the counts between it and the counters on the CPU, in command
  * order. The shadow stride is the stride the last capturing program bound gave buffer 0; a program without a
  * transform feedback section leaves it (the driver writes the registers only for a program with one).
+ *
+ * A host without VK_EXT_transform_feedback takes the memory path the translation builds for a geometry program with a
+ * point list output (relift_gpu_nv's io::xfb): the program writes one record per vertex it emits into a scratch buffer,
+ * slot (primitive * invocations + invocation) * max vertices + k, and after the draw the replay waits for it and
+ * writes the records that were written, in slot order, into each buffer at its byte count: the words whose layout
+ * select byte is not 0xff, as the hardware writes them. As the hardware, a vertex that does not fit in a buffer is not
+ * written and its count stops (inferred: the driver's data does not say what the GPU does at the end of a buffer;
+ * Vulkan's transform feedback, which the other path runs on, writes no vertex past the buffer either). The memory path
+ * draws one instance (a geometry program's primitive id restarts with each instance).
  */
 #include "nvn_module.h"
 
@@ -176,7 +185,93 @@ int nvn_xfb_cmd(replay *r, const nvn_cmd *e)
     }
 }
 
-int nvn_xfb_draw_prepare(replay *r, const nvn_module *last, nvn_xfb_draw *x)
+/** @brief The primitives count vertices of NVN draw mode make; false for a mode the memory path does not take. */
+static bool primitives(uint32_t mode, uint32_t count, uint32_t *n)
+{
+    switch (mode) {
+    case 0: *n = count; return true;
+    case 1: *n = count / 2; return true;
+    case 3: *n = count ? count - 1 : 0; return true;
+    case 4: *n = count / 3; return true;
+    case 5:
+    case 6: *n = count > 2 ? count - 2 : 0; return true;
+    default: return false;
+    }
+}
+
+/** @brief The memory path's preparation: the scratch of slots records, zeroed, and its address. */
+static int memory_prepare(replay *r, const nvn_module *last, uint32_t mode, uint32_t count, nvn_xfb_draw *x)
+{
+    nvn_gfx *st = r->st;
+    uint32_t prims;
+    if (!primitives(mode, count, &prims))
+        return nvn_vk_stop(r, "program %s captures transform feedback from draw primitive %u, which the memory path "
+                              "does not take", last->key, mode);
+    if (st->inst_count != 1)
+        return nvn_vk_stop(r, "program %s captures transform feedback in a draw of %u instances, which the memory path "
+                              "does not take", last->key, st->inst_count);
+    uint64_t bytes = (uint64_t)prims * last->xfb_slots * last->xfb_record;
+    if (!bytes)
+        return RL_OK;
+    int rc = settle(r);
+    if (rc != RL_OK)
+        return rc;
+    if (st->xfb.scratch.size < bytes) {
+        if (st->xfb.scratch.buf)
+            nvn_vk_staging_free(&st->xfb.scratch);
+        if (!nvn_vk_xfb_scratch_new(&st->xfb.scratch, bytes, &st->xfb.scratch_gpu))
+            return nvn_vk_stop(r, "cannot make %llu bytes of transform feedback records", (unsigned long long)bytes);
+    }
+    memset(st->xfb.scratch.map, 0, bytes);
+    x->mem = last;
+    x->slots = prims * last->xfb_slots;
+    x->scratch = st->xfb.scratch_gpu;
+    return RL_OK;
+}
+
+void nvn_xfb_pack(const nvn_module *m, const uint8_t *scratch, uint32_t slots, uint8_t *dst[NVN_XFB_BUFFERS],
+                  const uint64_t size[NVN_XFB_BUFFERS], uint32_t count[NVN_XFB_BUFFERS])
+{
+    uint32_t at[NVN_XFB_BUFFERS], n = 0;
+    for (uint32_t i = 0; i < NVN_XFB_BUFFERS; i++) {
+        at[i] = n;
+        if (m->xfb_mask & 1u << i)
+            n += m->xfb_stride[i] + 4;
+    }
+    for (uint32_t s = 0; s < slots; s++) {
+        const uint8_t *rec = scratch + (uint64_t)s * m->xfb_record;
+        for (uint32_t i = 0; i < NVN_XFB_BUFFERS; i++) {
+            uint32_t stride = m->xfb_stride[i];
+            if (!(m->xfb_mask & 1u << i) || rl_ld32(rec, at[i] + stride) != 1 || (uint64_t)count[i] + stride > size[i])
+                continue;
+            for (uint32_t w = 0; w < stride / 4; w++)
+                if (w >= 512 || m->xfb_select[i][w] != 0xff)
+                    memcpy(dst[i] + count[i] + 4u * w, rec + at[i] + 4u * w, 4);
+            count[i] += stride;
+        }
+    }
+}
+
+int nvn_xfb_draw_finish(replay *r, const nvn_xfb_draw *x)
+{
+    nvn_gfx *st = r->st;
+    int rc = settle(r);
+    if (rc != RL_OK)
+        return rc;
+    uint8_t *dst[NVN_XFB_BUFFERS] = { NULL };
+    uint32_t count[NVN_XFB_BUFFERS];
+    for (uint32_t i = 0; i < NVN_XFB_BUFFERS; i++) {
+        count[i] = rl_ld32(st->xfb.counters.map, 4u * i);
+        if (x->mem->xfb_mask & 1u << i)
+            dst[i] = r->mem + nvn_gpu_guest(st->xfb.addr[i]);
+    }
+    nvn_xfb_pack(x->mem, st->xfb.scratch.map, x->slots, dst, st->xfb.size, count);
+    for (uint32_t i = 0; i < NVN_XFB_BUFFERS; i++)
+        rl_st32(st->xfb.counters.map, 4u * i, count[i]);
+    return RL_OK;
+}
+
+int nvn_xfb_draw_prepare(replay *r, const nvn_module *last, uint32_t mode, uint32_t count, nvn_xfb_draw *x)
 {
     nvn_gfx *st = r->st;
     memset(x, 0, sizeof *x);
@@ -184,6 +279,13 @@ int nvn_xfb_draw_prepare(replay *r, const nvn_module *last, nvn_xfb_draw *x)
         st->xfb.stride0 = last->xfb_stride[0];
     if (!st->xfb.on || !last || !last->xfb_mask)
         return RL_OK;
+    if (last->xfb_record) {
+        for (uint32_t i = 0; i < NVN_XFB_BUFFERS; i++)
+            if (last->xfb_mask & 1u << i && (!st->xfb.addr[i] || !nvn_gpu_mapped(st->xfb.addr[i], st->xfb.size[i])))
+                return nvn_vk_stop(r, "program %s captures to transform feedback buffer %u, which is in no pool",
+                                   last->key, i);
+        return memory_prepare(r, last, mode, count, x);
+    }
     if (!g.transform_feedback)
         return nvn_vk_stop(r, "program %s captures transform feedback, which the host device does not have",
                            last->key);

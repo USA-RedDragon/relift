@@ -229,7 +229,7 @@ fn attr(o: &Operand) -> Res<u32> {
 }
 
 impl Ctx {
-    fn sph(&self) -> Sph {
+    pub(super) fn sph(&self) -> Sph {
         Sph {
             words: self.sph_words,
         }
@@ -250,7 +250,7 @@ impl Ctx {
         }
     }
 
-    fn i32_in(&mut self, b: u32) -> u32 {
+    pub(super) fn i32_in(&mut self, b: u32) -> u32 {
         let i = self.m.t_i32();
         self.iface.builtins.insert(b);
         let var = self.builtin(b, INPUT, i);
@@ -669,6 +669,9 @@ pub(super) fn out(c: &mut Ctx, i: &Inst) -> Res<()> {
     };
     let emit = i.has("EMIT") || i.has("EMIT_THEN_CUT");
     let cut = i.has("CUT") || i.has("EMIT_THEN_CUT");
+    if emit {
+        c.xfb_emit(stream);
+    }
     if stream == 0 {
         if emit {
             c.m.emit_void(OP_EMIT_VERTEX, &[]);

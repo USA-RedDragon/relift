@@ -88,6 +88,11 @@ pub struct HostProfile {
     /// `OpDemoteToHelperInvocation` keeps a demoted invocation running as a
     /// helper (false where it maps to a terminating discard).
     pub demote: bool,
+    /// `VK_EXT_transform_feedback` with `transformFeedback`: a capturing
+    /// program's outputs are decorated for the host's capture (`io::xfb`);
+    /// without it a geometry program writes them to memory the runtime
+    /// packs as the capture would.
+    pub transform_feedback: bool,
     /// `bufferDeviceAddress`.
     pub bda: bool,
     /// `shaderInt64`: 64-bit integer types in shaders. Without it guest
@@ -226,6 +231,7 @@ impl HostProfile {
             subgroup_ops: SUBGROUP_ALL,
             maximal_reconvergence: true,
             demote: true,
+            transform_feedback: true,
             bda: true,
             int64: true,
             int64_atomics_buffer: true,
@@ -264,6 +270,7 @@ impl HostProfile {
     pub fn radv() -> HostProfile {
         HostProfile {
             name: "radv".into(),
+            transform_feedback: false,
             warp_graphics: Warp::Varies,
             mesh_shader: Some(MeshLimits {
                 max_task_work_group_invocations: 1024,
@@ -293,6 +300,7 @@ impl HostProfile {
     pub fn amd_pro() -> HostProfile {
         HostProfile {
             name: "amd_pro".into(),
+            transform_feedback: false,
             warp_graphics: Warp::Varies,
             mesh_shader: Some(MeshLimits {
                 max_task_work_group_invocations: 1024,
@@ -323,6 +331,7 @@ impl HostProfile {
     pub fn anv() -> HostProfile {
         HostProfile {
             name: "anv".into(),
+            transform_feedback: false,
             warp_fragment: Warp::Varies,
             warp_graphics: Warp::Varies,
             mesh_shader: Some(MeshLimits {
@@ -356,6 +365,7 @@ impl HostProfile {
     pub fn moltenvk() -> HostProfile {
         HostProfile {
             name: "moltenvk".into(),
+            transform_feedback: false,
             mirror_writes: true,
             warp_compute: Warp::Unchecked32,
             warp_fragment: Warp::Unchecked32,
@@ -429,6 +439,7 @@ impl HostProfile {
     pub fn turnip() -> HostProfile {
         HostProfile {
             name: "turnip".into(),
+            transform_feedback: false,
             mirror_writes: true,
             warp_compute: Warp::Wide,
             warp_fragment: Warp::Wide,
@@ -467,6 +478,7 @@ impl HostProfile {
     pub fn mali() -> HostProfile {
         HostProfile {
             name: "mali".into(),
+            transform_feedback: false,
             mirror_writes: true,
             warp_compute: Warp::Narrow(16),
             warp_fragment: Warp::Narrow(16),
@@ -560,6 +572,7 @@ impl HostProfile {
     pub fn minimal() -> HostProfile {
         HostProfile {
             name: "minimal".into(),
+            transform_feedback: false,
             warp_compute: Warp::Varies,
             warp_fragment: Warp::Absent,
             warp_graphics: Warp::Absent,
@@ -658,6 +671,7 @@ impl HostProfile {
             ),
             demote: caps.on("shaderDemoteToHelperInvocation")
                 && caps.get("driverID") != DRIVER_MOLTENVK,
+            transform_feedback: caps.extension_on("VK_EXT_transform_feedback", "transformFeedback"),
             bda: caps.on("bufferDeviceAddress"),
             int64,
             int64_atomics_buffer: int64 && caps.on("shaderBufferInt64Atomics"),

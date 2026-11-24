@@ -75,6 +75,12 @@ typedef struct nvn_module {
      */
     uint32_t xfb_mask;
     uint32_t xfb_stride[4];
+    /**
+     * @brief The memory path (NVN_IFACE_XFB_MEMORY; 0 bytes when it does not take it): the bytes of a record, the
+     * records of an input primitive, and each buffer's layout select bytes (0xff: a word left as it is).
+     */
+    uint32_t xfb_record, xfb_slots;
+    uint8_t xfb_select[4][512];
     /** @brief Its interface records (nvn_shader_iface), as many as the translation has. */
     nvn_iface_rec *recs;
     uint32_t nrecs;
@@ -176,9 +182,17 @@ bool nvn_module_link(nvn_module *const mods[5], VkShaderModule out[5]);
 
 /**
  * @brief Before a draw whose last stage before the rasterizer is last: notes its buffer 0 stride and, while a capture
- * is on and last captures, gathers the buffers it binds into *x and marks them written. RL_OK or a stop.
+ * is on and last captures, gathers the buffers it binds into *x and marks them written; through the memory path
+ * (count vertices of primitive mode), makes the records' scratch. RL_OK or a stop.
  */
-int nvn_xfb_draw_prepare(replay *r, const nvn_module *last, nvn_xfb_draw *x);
+int nvn_xfb_draw_prepare(replay *r, const nvn_module *last, uint32_t mode, uint32_t count, nvn_xfb_draw *x);
+/**
+ * @brief The memory path's packing (nvn_xfb.c): each record of the slots in scratch that its program wrote goes, in
+ * slot order, to buffer i at dst[i] + count[i] when it fits in size[i] bytes (the words whose layout select byte is not
+ * 0xff), and count[i] grows by the stride.
+ */
+void nvn_xfb_pack(const nvn_module *m, const uint8_t *scratch, uint32_t slots, uint8_t *dst[4], const uint64_t size[4],
+                  uint32_t count[4]);
 /** @brief The module of the program bound to stage s (nvn_draw.c); NULL when it cannot be had (the replay stopped). */
 const nvn_module *nvn_draw_module(replay *r, uint32_t s);
 #endif

@@ -7,7 +7,10 @@ case.json: the stride, the point count and the layout select bytes the GLSL's xf
 driver writes them for a GLSLC header in raw form): compile the GLSL, capture it on the NVIDIA device and draw what it
 captured (xrun.c, the reference), carve the SASS the driver built from its pipeline cache with relift-shaders,
 translate it with the case's layout, validate it with spirv-val, capture and draw the translation the same way, and
-compare the captured bytes, the byte count and the drawn image with the reference, word for word.
+compare the captured bytes, the byte count and the drawn image with the reference, word for word. Then the same
+for the memory path (a host without VK_EXT_transform_feedback): the program translated for it writes its records on
+the NVIDIA device, and the records are packed into the buffer as the runtime does (nvn_xfb.c, nvn_xfb_draw_finish);
+the packed bytes and the count must be the reference's too.
 
 Needs glslangValidator, spirv-val, zstd, a C compiler with the Vulkan headers, and
 `cargo build --release -p relift-switch-shaders -p relift-gpu-sm86 --example xlate` in CARGO_TARGET_DIR (default
@@ -101,8 +104,51 @@ def one(work, name):
     same_count = ref[1] == got[1]
     print('%s: %s bytes captured (reference %s); %d capture words and %d image words differ; %d pixels lit' % (
         name, got[1].decode().strip(), ref[1].decode().strip(), dc, di, lit))
+    mem_ok = memory(work, o, name, case, progs, want, sel, host, tenv, ref)
     subprocess.run(['rm', '-rf', os.path.join(o, 'tree'), os.path.join(o, 'c.bin')])
-    return dc == 0 and di == 0 and same_count and lit > 0
+    return dc == 0 and di == 0 and same_count and lit > 0 and mem_ok
+
+
+def pack(scratch, record, stride, select, size):
+    """The records packed into a zeroed buffer of size bytes as nvn_xfb_draw_finish packs them; and the count."""
+    out, pos = bytearray(size), 0
+    for s in range(len(scratch) // record):
+        rec = scratch[s * record:(s + 1) * record]
+        if struct.unpack_from('<I', rec, stride)[0] != 1 or pos + stride > size:
+            continue
+        for w in range(stride // 4):
+            if w >= len(select) or select[w] != 0xff:
+                out[pos + 4 * w:pos + 4 * w + 4] = rec[4 * w:4 * w + 4]
+        pos += stride
+    return bytes(out), pos
+
+
+def memory(work, o, name, case, progs, want, sel, host, tenv, ref):
+    if want != ['vert', 'geom']:
+        print('%s: memory path: only a geometry program takes it' % name)
+        return True
+    spv = {}
+    for k in want:
+        spv[k] = os.path.join(o, k + '-mem.spv')
+        flags = ['--xfb', sel, '--xfb-memory'] if k == 'geom' else []
+        out = run([XLATE, progs[k][0], spv[k], host] + flags)
+        r = subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', spv[k]], capture_output=True, text=True)
+        if not out.startswith('ok') or r.returncode:
+            sys.exit('%s: memory path %s: %s %s' % (name, k, out[:300], r.stdout + r.stderr))
+    stride = case['stride']
+    record = stride + 4
+    env = dict(tenv, XRUN_MEM='%d:%d' % (record, case['count']))
+    d = os.path.join(o, 'mem')
+    os.makedirs(d, exist_ok=True)
+    run([os.path.join(work, 'xrun'), spv['vert'], spv['geom'], str(stride), str(case['count']),
+         os.path.join(work, 'draw.vert.spv'), os.path.join(work, 'draw.frag.spv'), d], env=env)
+    scratch = open(os.path.join(d, 'scratch.bin'), 'rb').read()
+    packed, count = pack(scratch, record, stride, case['select'], len(ref[0]))
+    words = lambda b: struct.unpack('<%dI' % (len(b) // 4), b)
+    dm = sum(1 for x, y in zip(words(ref[0]), words(packed)) if x != y)
+    ok = dm == 0 and str(count) == ref[1].decode().strip()
+    print('%s: memory path: %d bytes packed (reference %s); %d words differ' % (name, count, ref[1].decode().strip(), dm))
+    return ok
 
 
 def game(work, path):

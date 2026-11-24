@@ -19,8 +19,29 @@
 //! byte `Offset` (and `Stream` past stream 0). Every store to a captured
 //! attribute also stores the value to its capture words, so a vertex the
 //! stage emits carries them with the same bits.
+//!
+//! A host without `VK_EXT_transform_feedback`
+//! ([`HostProfile::transform_feedback`](super::super::HostProfile)) gets
+//! the memory path instead, for a geometry program with a point list
+//! output (the form of every capturing program found): the capture words
+//! are private variables, and each `OUT.EMIT` to a captured stream stores
+//! them to a record in a scratch buffer whose device address the fixed-state
+//! push constants hold at [`PUSH_XFB_SCRATCH`]. The record of the k-th
+//! vertex an invocation emits is slot (primitive id * invocations +
+//! invocation id) * max output vertices + k, so the slots are in the order
+//! the hardware streams the vertices out; per buffer it holds the stride's
+//! words then a word set to 1. After the draw the runtime walks the slots in
+//! order and writes each one's captured words to the buffer at its write
+//! pointer, as the hardware would ([`Interface::xfb_memory`]).
 
 use std::collections::BTreeMap;
+
+/// Byte offset in the fixed-state push constant block of the 64-bit device
+/// address of the memory path's scratch records.
+pub const PUSH_XFB_SCRATCH: u32 = 24;
+const PRIVATE: u32 = 6;
+const B_PRIMITIVE_ID: u32 = 7;
+const B_INVOCATION_ID: u32 = 8;
 
 use super::super::Ctx;
 use super::OUTPUT;
@@ -54,6 +75,17 @@ const ATTR_INDEX: [u8; 130] = [
     0x06, 0x80, 0x06, 0x80, 0x06, 0x80, 0x06, 0x80, 0x06, 0x00, 0x06, 0x80, 0x06, 0x00, 0x06, 0x00,
     0x06, 0x00,
 ];
+
+/// What the runtime needs to finish a memory path capture: the bytes of
+/// one record, the records of one input primitive, and each buffer's
+/// select bytes (a word whose byte is [`SKIP`], or past the list, is not
+/// written).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct XfbMemory {
+    pub record_bytes: u32,
+    pub slots_per_primitive: u32,
+    pub select: Vec<Vec<u8>>,
+}
 
 /// One transform feedback buffer as the hardware is programmed for it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -166,6 +198,20 @@ pub(crate) struct State {
     /// The capture variables, with their buffer, word and width.
     vars: Vec<(u32, u32, u32, u32)>,
     declared: bool,
+    /// The memory path's count of vertices this invocation emitted.
+    emitted: Option<u32>,
+}
+
+/// The memory path's record of one emitted vertex: per buffer, its words
+/// then a word set to 1; and the byte offset of each buffer's part.
+pub fn record_layout(l: &Layout) -> (u32, Vec<u32>) {
+    let mut at = Vec::new();
+    let mut n = 0;
+    for b in &l.buffers {
+        at.push(n);
+        n += b.stride + 4;
+    }
+    (n, at)
 }
 
 /// Whether the stage can be the last before the rasterizer.
@@ -174,6 +220,14 @@ fn captures(s: Stage) -> bool {
 }
 
 impl Ctx {
+    /// Whether the program captures through the memory path.
+    pub(crate) fn xfb_memory(&self) -> bool {
+        self.io.xfb.layout.is_some()
+            && !self.host.transform_feedback
+            && self.stage == Stage::Geometry
+            && self.sph().output_topology() == 1
+    }
+
     fn xfb_declare(&mut self) {
         if self.io.xfb.declared {
             return;
@@ -182,15 +236,16 @@ impl Ctx {
         let Some(layout) = self.io.xfb.layout.clone() else {
             return;
         };
-        if !captures(self.stage) {
+        if !captures(self.stage) || (!self.host.transform_feedback && !self.xfb_memory()) {
             return;
         }
+        let class = if self.xfb_memory() { PRIVATE } else { OUTPUT };
         let f = self.f32t();
         for (buf, word, run) in layout.runs() {
             let n = run.len() as u32;
             let t = if n == 1 { f } else { self.m.t_vec(f, n) };
-            let p = self.m.t_ptr(OUTPUT, t);
-            let var = self.m.global(p, OUTPUT);
+            let p = self.m.t_ptr(class, t);
+            let var = self.m.global(p, class);
             self.globals.push(var);
             for (k, &a) in run.iter().enumerate() {
                 let comp = (n > 1).then_some(k as u32);
@@ -213,7 +268,8 @@ impl Ctx {
         };
         let v = self.as_float(bits);
         let f = self.f32t();
-        let pf = self.m.t_ptr(OUTPUT, f);
+        let class = if self.xfb_memory() { PRIVATE } else { OUTPUT };
+        let pf = self.m.t_ptr(class, f);
         for (var, comp) in words {
             let p = match comp {
                 Some(c) => {
@@ -224,6 +280,81 @@ impl Ctx {
             };
             self.m.emit_void(op::STORE, &[p, v]);
         }
+    }
+}
+
+impl Ctx {
+    /// The memory path at an `OUT.EMIT` to `stream`: stores the capture
+    /// words of the buffers of that stream to the vertex's record.
+    pub(crate) fn xfb_emit(&mut self, stream: u32) {
+        self.xfb_declare();
+        if !self.xfb_memory() || self.io.xfb.vars.is_empty() {
+            return;
+        }
+        let layout = self.io.xfb.layout.clone().unwrap_or_default();
+        let (rec, at) = record_layout(&layout);
+        let u = self.u32t();
+        let emitted = match self.io.xfb.emitted {
+            Some(v) => v,
+            None => {
+                let p = self.m.t_ptr(PRIVATE, u);
+                let zero = self.m.c_u32(0);
+                let v = self.m.id();
+                crate::spirv::inst(&mut self.m.types, op::VARIABLE, &[p, v, PRIVATE, zero]);
+                self.globals.push(v);
+                self.io.xfb.emitted = Some(v);
+                v
+            }
+        };
+        let sph = self.sph();
+        let inv_n = sph.threads_per_input_primitive().max(1);
+        let max = sph.max_output_vertices().max(1);
+        let prim = self.i32_in(B_PRIMITIVE_ID);
+        let inv = self.i32_in(B_INVOCATION_ID);
+        let k_inv = self.m.c_u32(inv_n);
+        let k_max = self.m.c_u32(max);
+        let a = self.m.emit(op::I_MUL, u, &[prim, k_inv]);
+        let a = self.m.emit(op::I_ADD, u, &[a, inv]);
+        let a = self.m.emit(op::I_MUL, u, &[a, k_max]);
+        let n = self.m.emit(op::LOAD, u, &[emitted]);
+        let slot = self.m.emit(op::I_ADD, u, &[a, n]);
+        let k_rec = self.m.c_u32(rec);
+        let off = self.m.emit(op::I_MUL, u, &[slot, k_rec]);
+        let (lo, hi) = self.push_xfb_scratch();
+        let base = self.addr_pair(lo, hi);
+        let off = self.addr_zext(off);
+        let rec_at = self.addr_add(base, off);
+        let f = self.f32t();
+        let one = self.m.c_u32(1);
+        for (var, buf, word, width) in self.io.xfb.vars.clone() {
+            if layout.buffers[buf as usize].stream != stream {
+                continue;
+            }
+            for k in 0..width {
+                let v = if width == 1 {
+                    self.m.emit(op::LOAD, f, &[var])
+                } else {
+                    let pf = self.m.t_ptr(PRIVATE, f);
+                    let kc = self.m.c_u32(k);
+                    let p = self.m.emit(op::ACCESS_CHAIN, pf, &[var, kc]);
+                    self.m.emit(op::LOAD, f, &[p])
+                };
+                let bits = self.as_bits(v);
+                let at_w =
+                    self.addr_add_const(rec_at, u64::from(at[buf as usize] + 4 * (word + k)));
+                let p = self.global_ptr_w(at_w, u);
+                self.m.emit_void(op::STORE, &[p, bits, 2, 4]);
+            }
+        }
+        for (b, buf) in layout.buffers.iter().enumerate() {
+            if buf.stream == stream {
+                let at_v = self.addr_add_const(rec_at, u64::from(at[b] + buf.stride));
+                let p = self.global_ptr_w(at_v, u);
+                self.m.emit_void(op::STORE, &[p, one, 2, 4]);
+            }
+        }
+        let n1 = self.m.emit(op::I_ADD, u, &[n, one]);
+        self.m.emit_void(op::STORE, &[emitted, n1]);
     }
 }
 
@@ -270,10 +401,30 @@ fn is_generic(a: u8) -> bool {
 /// follow the program's own outputs.
 pub(crate) fn finish(c: &mut Ctx, entry: u32) {
     c.xfb_declare();
+    let Some(layout) = c.io.xfb.layout.clone() else {
+        return;
+    };
+    if captures(c.stage) {
+        c.iface.xfb = layout
+            .buffers
+            .iter()
+            .map(|b| (b.stride, b.stream))
+            .collect();
+    }
+    if c.xfb_memory() {
+        let (rec, _) = record_layout(&layout);
+        let sph = c.sph();
+        c.iface.xfb_memory = Some(XfbMemory {
+            record_bytes: rec,
+            slots_per_primitive: sph.threads_per_input_primitive().max(1)
+                * sph.max_output_vertices().max(1),
+            select: layout.buffers.iter().map(|b| b.select.clone()).collect(),
+        });
+        return;
+    }
     if c.io.xfb.vars.is_empty() {
         return;
     }
-    let layout = c.io.xfb.layout.clone().unwrap_or_default();
     let first = c.outputs.keys().next_back().map_or(0, |l| l + 1);
     for (loc, (var, buf, word, _)) in (first..).zip(c.io.xfb.vars.clone()) {
         let b = &layout.buffers[buf as usize];
@@ -288,11 +439,6 @@ pub(crate) fn finish(c: &mut Ctx, entry: u32) {
     }
     c.cap(CAP_TRANSFORM_FEEDBACK);
     crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[entry, MODE_XFB]);
-    c.iface.xfb = layout
-        .buffers
-        .iter()
-        .map(|b| (b.stride, b.stream))
-        .collect();
 }
 
 #[cfg(test)]

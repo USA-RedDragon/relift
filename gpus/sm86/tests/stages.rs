@@ -790,3 +790,33 @@ fn a_capturing_vertex_program_starts_its_capture_words_as_its_outputs() {
     assert_eq!(vars.len(), 1);
     assert_eq!(first_stores(&s.spirv, &vars), [Some(k)]);
 }
+
+#[test]
+fn a_host_without_transform_feedback_captures_a_geometry_program_through_memory() {
+    let mut code = handles(0, &[4]);
+    code.extend([
+        mov_imm(1, 0),
+        ald(8, 0x80, 4, 4, false, false),
+        ald(12, 0x90, 4, 4, false, false),
+        ast(0x80, 8, 1, 4, false),
+        ast(0x90, 12, 1, 4, false),
+        out(OUT_EMIT, 1, 1),
+        out(OUT_FINAL, RZ, 1),
+    ]);
+    let sph = [(0, 1 << 28), (2, 1 << 24), (3, 1 << 24), (4, 1)];
+    let p = program(4, &sph, &code);
+    let o = Options {
+        host: relift_gpu_nv::translate::HostProfile::moltenvk(),
+        xfb: Some(point_capture(&[0x20, 0x21, 0x22, 0x24], 16)),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    dump("geometry_xfb_memory", &s.spirv);
+    assert_eq!(s.interface.xfb, [(16, 0)]);
+    let m = s.interface.xfb_memory.as_ref().expect("the memory path");
+    assert_eq!((m.record_bytes, m.slots_per_primitive), (20, 1));
+    assert_eq!(m.select, [vec![0x20, 0x21, 0x22, 0x24]]);
+    assert!(capture_vars(&s.spirv).is_empty());
+    assert!(!modes(&s.spirv).contains(&vec![11]));
+    assert!(s.interface.global_store);
+}

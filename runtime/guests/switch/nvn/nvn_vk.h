@@ -463,6 +463,9 @@ typedef struct nvn_gfx {
         bool on;
         uint32_t stride0;
         staging counters;
+        /** @brief The memory path's records (host-visible, with a device address) and their address. */
+        staging scratch;
+        uint64_t scratch_gpu;
     } xfb;
 } nvn_gfx;
 
@@ -472,6 +475,10 @@ typedef struct nvn_xfb_draw {
     VkBuffer buf[NVN_XFB_BUFFERS];
     VkDeviceSize off[NVN_XFB_BUFFERS], size[NVN_XFB_BUFFERS];
     VkBuffer counters;
+    /** @brief The memory path: the program capturing, its records and their device address (0: the host's path). */
+    const struct nvn_module *mem;
+    uint32_t slots;
+    uint64_t scratch;
 } nvn_xfb_draw;
 
 /** @brief Sets a queue's draw state to the GPU's state before any command (nvn_vk.c). */
@@ -505,6 +512,13 @@ int nvn_xfb_cmd(replay *r, const nvn_cmd *e);
 void nvn_xfb_draw_begin(VkCommandBuffer cb, const nvn_xfb_draw *x);
 /** @brief Ends transform feedback after the draw, writing the counters. */
 void nvn_xfb_draw_end(VkCommandBuffer cb, const nvn_xfb_draw *x);
+/**
+ * @brief After a draw through the memory path: waits for it and writes each record's captured words to its buffer at
+ * the buffer's byte count, in record order, as the hardware streams them out. RL_OK or a stop.
+ */
+int nvn_xfb_draw_finish(replay *r, const nvn_xfb_draw *x);
+/** @brief A host-visible buffer of size bytes with a device address (*gpu), for the memory path (nvn_vk.c). */
+bool nvn_vk_xfb_scratch_new(staging *s, uint64_t size, uint64_t *gpu);
 /** @brief A host-visible counter buffer for transform feedback: NVN_XFB_BUFFERS u32 byte counts (nvn_vk.c). */
 bool nvn_vk_xfb_counters_new(staging *s);
 /** @brief Draws count vertices from first as DrawArrays does, once (nvn_draw.c). */

@@ -4,7 +4,9 @@
 // buffer holds (count.txt). Then draws the captured vertices (vec4 at byte 0 of each, as attribute 0) as points into a
 // 64x64 RGBA32F target with vkCmdDrawIndirectByteCountEXT, the host's DRAW_AUTO, and writes it (image.raw), for
 // kat.py. XRUN_DEV picks the device by a part of its name (default NVIDIA); XRUN_CACHE=<file> writes the pipeline
-// cache, from which kat.py carves the driver's code.
+// cache, from which kat.py carves the driver's code. XRUN_MEM=<record bytes>:<slots> runs a memory path translation
+// instead: no transform feedback, a zeroed scratch of that many records whose device address goes to the push
+// constants at byte 24, written to scratch.bin; no draw follows.
 #include <vulkan/vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,8 @@ static PFN_vkCmdBindTransformFeedbackBuffersEXT bind_xfb; static PFN_vkCmdBeginT
 static PFN_vkCmdEndTransformFeedbackEXT end_xfb; static PFN_vkCmdDrawIndirectByteCountEXT draw_auto;
 enum { W = 64, H = 64 };
 
+static int mem_rec, mem_slots;
+
 static uint32_t memtype(uint32_t bits, VkMemoryPropertyFlags f) {
     for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
         if ((bits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & f) == f) return i;
@@ -27,9 +31,11 @@ typedef struct { VkBuffer b; VkDeviceMemory m; void *p; } Buf;
 static Buf mkbuf(size_t n, VkBufferUsageFlags u) {
     Buf b;
     VkBufferCreateInfo bi = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0, 0, n, u | VK_BUFFER_USAGE_TRANSFER_DST_BIT };
+    VkMemoryAllocateFlagsInfo fl = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, 0,
+        (u & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT : 0 };
     CK(vkCreateBuffer(dev, &bi, 0, &b.b));
     VkMemoryRequirements r; vkGetBufferMemoryRequirements(dev, b.b, &r);
-    VkMemoryAllocateInfo ai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0, r.size,
+    VkMemoryAllocateInfo ai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &fl, r.size,
         memtype(r.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) };
     CK(vkAllocateMemory(dev, &ai, 0, &b.m));
     CK(vkBindBufferMemory(dev, b.b, b.m, 0));
@@ -117,12 +123,15 @@ int main(int argc, char **argv) {
     float prio = 1;
     VkDeviceQueueCreateInfo qi = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, 0, 0, 0, 1, &prio };
     VkPhysicalDeviceTransformFeedbackFeaturesEXT fx = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, 0, 1, 0 };
-    VkPhysicalDeviceVulkan13Features f13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &fx };
+    if (getenv("XRUN_MEM")) sscanf(getenv("XRUN_MEM"), "%d:%d", &mem_rec, &mem_slots);
+    VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &fx };
+    f12.bufferDeviceAddress = 1;
+    VkPhysicalDeviceVulkan13Features f13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &f12 };
     f13.dynamicRendering = 1;
     VkPhysicalDeviceVulkan11Features f11 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, &f13 };
     f11.shaderDrawParameters = 1;
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f11 };
-    f2.features.geometryShader = 1;
+    f2.features.geometryShader = 1; f2.features.shaderInt64 = 1; f2.features.vertexPipelineStoresAndAtomics = 1;
     const char *ext[] = { "VK_EXT_transform_feedback" };
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2, 0, 1, &qi, 0, 0, 1, ext };
     CK(vkCreateDevice(pd, &dci, 0, &dev));
@@ -167,6 +176,19 @@ int main(int argc, char **argv) {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, cap);
     vkCmdPushConstants(cb, l, VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof push, push);
     VkDeviceSize zero = 0, size = (VkDeviceSize)stride * count;
+    Buf sc = { 0 };
+    if (mem_rec) {
+        sc = mkbuf((size_t)mem_rec * mem_slots, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+        VkBufferDeviceAddressInfo bai = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, 0, sc.b };
+        uint64_t a = vkGetBufferDeviceAddress(dev, &bai);
+        memcpy(push + 24, &a, 8);
+        vkCmdPushConstants(cb, l, VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof push, push);
+        vkCmdDraw(cb, count, 1, 0, 0);
+        vkCmdEndRendering(cb);
+        submit(cb);
+        wrfile(argv[7], "scratch.bin", sc.p, (size_t)mem_rec * mem_slots);
+        return 0;
+    }
     bind_xfb(cb, 0, 1, &xb.b, &zero, &size);
     begin_xfb(cb, 0, 0, 0, 0);
     vkCmdDraw(cb, count, 1, 0, 0);

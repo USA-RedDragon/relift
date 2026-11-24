@@ -41,7 +41,8 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use io::xfb::{
-    Buffer as XfbBuffer, GlslcBuffer as XfbGlslcBuffer, Layout as XfbLayout, SKIP as XFB_SKIP,
+    Buffer as XfbBuffer, GlslcBuffer as XfbGlslcBuffer, Layout as XfbLayout, PUSH_XFB_SCRATCH,
+    SKIP as XFB_SKIP, XfbMemory, record_layout as xfb_record_layout,
 };
 pub use io::{PUSH_WRITTEN_PAGES, WRITTEN_PAGE_BITS};
 pub use mem::pools::{
@@ -117,6 +118,9 @@ pub struct Interface {
     /// it captures nothing. A capturing translation runs only in a pipeline
     /// whose last stage before the rasterizer it is.
     pub xfb: Vec<(u32, u32)>,
+    /// The translation captures through memory instead of the host's
+    /// transform feedback (see the `io::xfb` module), with this record form.
+    pub xfb_memory: Option<XfbMemory>,
     pub inputs: BTreeMap<u32, Option<Interp>>,
     pub outputs: BTreeSet<u32>,
     /// Constant banks read, by bank number (see [`cbuf_binding`]).

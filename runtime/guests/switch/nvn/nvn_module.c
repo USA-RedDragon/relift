@@ -688,12 +688,19 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
         return NULL;
     }
     nvn_shader_iface(key, m->recs, m->nrecs);
+    memset(m->xfb_select, 0xff, sizeof m->xfb_select);
     for (uint32_t i = 0; i < m->nrecs; i++) {
         m->global_store |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE;
         m->marks_pages |= m->recs[i].kind == NVN_IFACE_GLOBAL_STORE && m->recs[i].bank == 1;
         m->register_handles |= m->recs[i].kind == NVN_IFACE_REGISTER_HANDLES;
         if (m->recs[i].kind == NVN_IFACE_TRACE)
             m->trace_words = m->recs[i].bank;
+        if (m->recs[i].kind == NVN_IFACE_XFB_MEMORY) {
+            m->xfb_record = m->recs[i].bank;
+            m->xfb_slots = m->recs[i].offset;
+        }
+        if (m->recs[i].kind == NVN_IFACE_XFB_SELECT && m->recs[i].bank < 4 && m->recs[i].offset + 4 <= 512)
+            memcpy(&m->xfb_select[m->recs[i].bank][m->recs[i].offset], &m->recs[i].spec, 4);
         if (m->recs[i].kind == NVN_IFACE_XFB && m->recs[i].bank < 4) {
             m->xfb_mask |= 1u << m->recs[i].bank;
             m->xfb_stride[m->recs[i].bank] = m->recs[i].offset;

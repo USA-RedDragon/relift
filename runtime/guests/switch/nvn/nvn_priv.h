@@ -666,6 +666,10 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
  * vertex stream `spec` (the table's RECORD_XFB; 13 and 14 are other records).
  */
 #define NVN_IFACE_XFB 15u
+/** @brief Record kind: the program captures through memory, `bank` bytes a record, `offset` records an input primitive. */
+#define NVN_IFACE_XFB_MEMORY 16u
+/** @brief Record kind: memory capture buffer `bank`'s words from `offset` take the four select bytes of `spec`. */
+#define NVN_IFACE_XFB_SELECT 17u
 /**
  * @brief The storage image arrays the programs of the shader table use, as bits (binding - 32) / 8 * 6 + (binding - 32)
  * % 8 of *used; false when the table records none (a table without such records, or no table), and then every array

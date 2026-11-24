@@ -7,7 +7,8 @@
     "VK_EXT_shader_image_atomic_int64": 1,
     "VK_KHR_shader_clock": 1,
     "VK_KHR_shader_fma": 1,
-    "VK_KHR_shader_maximal_reconvergence": 1
+    "VK_KHR_shader_maximal_reconvergence": 1,
+    "VK_EXT_transform_feedback": 1
    },
    "features": {
     "VkPhysicalDeviceBufferDeviceAddressFeaturesEXT": {
@@ -47,6 +48,9 @@
      "computeFullSubgroups": true,
      "shaderDemoteToHelperInvocation": true,
      "subgroupSizeControl": true
+    },
+    "VkPhysicalDeviceTransformFeedbackFeaturesEXT": {
+     "transformFeedback": true
     }
    },
    "properties": {
@@ -148,5 +152,5 @@
    }
   }
  },
- "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux; float16 members from vulkaninfo, driver 615.312.512; ReliftDeviceProbes from the relift runtime probe on the same device"
+ "source": "vulkaninfo --json, NVIDIA GeForce RTX 3090, driver 615.78.08, Linux; float16 members from vulkaninfo, driver 615.312.512; ReliftDeviceProbes from the relift runtime probe on the same device; VK_EXT_transform_feedback and transformFeedback from vulkaninfo --json of the same device, 2026-11-24"
 }

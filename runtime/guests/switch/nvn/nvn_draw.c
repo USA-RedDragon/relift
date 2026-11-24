@@ -87,6 +87,8 @@ typedef struct fixed_push {
     /** @brief The vertex attributes (bit per location) bound with an unsigned or a signed scaled format. */
     uint32_t scaled_unsigned, scaled_signed;
     uint64_t written_pages;
+    /** @brief The device address of a memory path capture's records (nvn_xfb.c), at PUSH_XFB_SCRATCH. */
+    uint64_t xfb_scratch;
 } fixed_push;
 
 typedef nvn_module module;
@@ -1738,8 +1740,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     if ((rc = mark_stage_writes(r, st, mods, 0, 4)) != RL_OK)
         return rc;
     nvn_xfb_draw xd;
-    if ((rc = nvn_xfb_draw_prepare(r, last, &xd)) != RL_OK)
+    if ((rc = nvn_xfb_draw_prepare(r, last, mode, count, &xd)) != RL_OK)
         return rc;
+    fp.xfb_scratch = xd.scratch;
     VkRect2D area;
     if ((rc = nvn_counters_prepare(r)) != RL_OK)
         return rc;
@@ -1784,6 +1787,8 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
             if (mods[s] && mods[s]->trace_words)
                 trace_report(r, mods[s]->key, s, mods[s]->trace_words);
     }
+    if (xd.mem && (rc = nvn_xfb_draw_finish(r, &xd)) != RL_OK)
+        return rc;
     if (nvn_trace_active) {
         nvn_trace_cmd tc = { .mode = mode, .itype = itype, .first = first, .count = count, .base = base, .indexed = indexed };
         for (uint32_t s = 0; s < 5; s++)
