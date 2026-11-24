@@ -342,9 +342,12 @@ static bool module_named(const char *leaf)
  * finds: the loader's configuration and the probes of its library search
  * find nothing (a miss must not reach a file of the machine the program
  * runs on, whose libraries are not the ones the program was lifted with),
- * as does any other name in a directory the import's files lie in, and a shared object the import does not hold at all (a load of an
- * unknown name) stops the program with a report. Returns false when the
- * open goes on to the host file system.
+ * as does any other name in a directory the import's files lie in, and a
+ * shared object the import does not hold at all: a stat or access of it
+ * (c NULL) or an open of one the guest root does not hold finds nothing,
+ * an open of one that exists (a load of an unknown name) stops the
+ * program with a report. Returns false when the open goes on to the host
+ * file system.
  */
 static bool loader_miss(rl_ctx *c, const char *path, int64_t *result)
 {
@@ -369,6 +372,13 @@ static bool loader_miss(rl_ctx *c, const char *path, int64_t *result)
     if (!shared_object_name(leaf))
         return false;
     if (module_named(leaf)) {
+        *result = -L_ENOENT;
+        return true;
+    }
+    if (!c || (lx.root && !root_real(norm))) {
+        /* A stat or access probe, or an open of a name the guest root
+         * does not hold either: nothing is there, as for the loader's own
+         * probes. Only an open of a shared object that exists stops. */
         *result = -L_ENOENT;
         return true;
     }

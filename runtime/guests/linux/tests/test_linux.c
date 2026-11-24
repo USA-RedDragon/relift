@@ -543,6 +543,11 @@ TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
     CHECK(fd >= 3);
     CHECK(lx_virt_fd((int)fd) != NULL);
     CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    lx.dynamic = true;
+    put_str(at, "/usr/lib/py/mod.cpython-313-aarch64-linux-gnu.so");
+    CHECK_EQ(sys(c, NR_newfstatat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 0, 0, 0), -L_ENOENT);
+    CHECK_EQ(sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0), -L_ENOENT);
+    lx.dynamic = false;
     put_str(at, "/usr/lib/absent");
     CHECK_EQ(sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0), -L_ENOENT);
     put_str(at, "/proc/self/status");
