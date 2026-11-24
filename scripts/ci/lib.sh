@@ -37,7 +37,10 @@ fetch() {
   local url=$1 sum=$2 out=$3
   if [ ! -f "$out" ] || ! echo "$sum  $out" | sha256sum -c - >/dev/null 2>&1; then
     mkdir -p "$(dirname "$out")"
-    curl -fsSL -o "$out.part" "$url"
+    # A stalled download aborts and retries (ziglang.org took 13 minutes once)
+    # instead of eating the job's 15 minutes.
+    curl -fsSL --connect-timeout 20 --max-time 180 --speed-limit 200000 --speed-time 20 \
+      --retry 3 --retry-all-errors -o "$out.part" "$url"
     echo "$sum  $out.part" | sha256sum -c -
     mv "$out.part" "$out"
   fi

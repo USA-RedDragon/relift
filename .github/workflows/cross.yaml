@@ -63,6 +63,13 @@ jobs:
       - name: Install the Rust std for the target
         run: rustup target add ${{ matrix.rust }}
 
+      - name: Restore the zig archive
+        if: startsWith(matrix.target, 'windows-')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-*.tar.xz
+          key: zig-${{ hashFiles('scripts/ci/lib.sh') }}
+
       - name: Install zig
         if: startsWith(matrix.target, 'windows-')
         run: scripts/ci/install-zig.sh

@@ -154,6 +154,12 @@ jobs:
             libvulkan1 libvulkan1:i386 mesa-vulkan-drivers mesa-vulkan-drivers:i386 xvfb
           echo "RELIFT_REQUIRE_NATIVE=1" >> "$GITHUB_ENV"
 
+      - name: Restore the zig archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-*.tar.xz
+          key: zig-${{ hashFiles('scripts/ci/lib.sh') }}
+
       - name: Install the pinned zig for the native i386 builds
         run: scripts/ci/install-zig.sh
 
@@ -225,6 +231,13 @@ jobs:
         run: |
           scripts/ci/apt-install.sh gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           echo "RELIFT_LINUX_REQUIRE=1" >> "$GITHUB_ENV"
+
+      - name: Restore the zig archive
+        if: matrix.part == 'linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-*.tar.xz
+          key: zig-${{ hashFiles('scripts/ci/lib.sh') }}
 
       - name: Install the pinned zig for the static corpus programs
         if: matrix.part == 'linux'
