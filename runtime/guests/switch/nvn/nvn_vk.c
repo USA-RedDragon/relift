@@ -2983,8 +2983,14 @@ static bool gpu_moves(void)
     return on;
 }
 
+/** @brief Image uploads from guest bytes since the start (nvn_vk_uploads). */
+static uint64_t uploads_total;
+
+uint64_t nvn_vk_uploads(void) { return __atomic_load_n(&uploads_total, __ATOMIC_RELAXED); }
+
 static bool upload(replay *r, vimg *v)
 {
+    __atomic_fetch_add(&uploads_total, 1, __ATOMIC_RELAXED);
     int64_t t0 = now_ns();
     if (g_recording && !open_pass.open)
         nvn_gpuprof_mark_kinds();

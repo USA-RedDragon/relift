@@ -926,6 +926,8 @@ int nvn_texset_separate_texture(replay *r, uint32_t handle, uint32_t *slot);
  * its own stops, naming the id and the limit. Returns RL_OK, or RL_PENDING after a stop.
  */
 int nvn_texset_sync_registered(replay *r);
+/** @brief Image uploads from guest bytes since the start: the work a refresh did, which tests count. */
+uint64_t nvn_vk_uploads(void);
 /**
  * @brief Keeps in its slot, with its sampler, the registered texture each word of a constant bank's bytes (size of
  * them) names that a program may load as a handle from a register: the word at offset, or with indexed every word from
