@@ -2279,7 +2279,7 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
                        uint32_t *table_end)
 {
     memset(c0, 0, NVN_BANK2_BYTES);
-    memcpy(c0, groups, 12);
+    memcpy(c0 + NVN_C0_GROUPS, groups, 12);
     uint32_t at = 0x10, handles = 8 * (ntex + nimg), buffers = 16 * (nubo + nssbo);
     if (nubo > NVN_UBO_SLOTS || nssbo > NVN_STORAGE_SLOTS || ntex > NVN_IMAGE_SLOTS || nimg > NVN_IMAGE_SLOTS ||
         at + buffers + handles > end || end - at - buffers - handles > NVN_PUSH_BYTES || end > NVN_BANK2_BYTES ||
@@ -2310,10 +2310,11 @@ bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nub
 /**
  * @brief nvnCommandBufferDispatchCompute: the bound compute program's bank
  * c[0] is the driver's per-dispatch table as the compiled code reads it:
- * its first 12 bytes hold the dispatch's group counts x, y and z (the only
- * per-dispatch values in the driver's dispatch record; how the hardware
- * expands that record into c[0][0..0xc] is not visible in the driver, and 140
- * of the FE compute programs read these words); from 0x10 come the constants
+ * word 0 is 0 and the next three hold the dispatch's group counts x, y and z
+ * (NVN_C0_GROUPS; the only per-dispatch values in the driver's dispatch
+ * record; the compute programs that read c[0][0..0xc] as a CUDA kernel's
+ * block size also read its stack and parameter words, which NVN never
+ * fills); from 0x10 come the constants
  * the game pushed (nvnCommandBufferPushComputeConstants, slot 0), then the program's uniform
  * buffers and its storage buffers, 16 bytes each ({GPU address, u32 size}),
  * then its texture handles and its image handles, 8 bytes each; the counts
@@ -2613,7 +2614,7 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
         nvn_label_draw(g.cb, "dispatch", keys);
     }
     if (ibuf) {
-        nvn_vk_dispatch_indirect(g.cb, ibuf, ioff, dd.c0_at.buffer, dd.c0_at.offset);
+        nvn_vk_dispatch_indirect(g.cb, ibuf, ioff, dd.c0_at.buffer, dd.c0_at.offset + NVN_C0_GROUPS);
     } else {
         VK(vkCmdDispatch)(g.cb, x, y, z);
     }

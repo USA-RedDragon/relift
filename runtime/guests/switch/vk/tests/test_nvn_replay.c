@@ -86,9 +86,10 @@ TEST(nvn_compute_table_puts_pushes_then_buffers_then_handles)
     CHECK(nvn_compute_table(&st, groups, 2, 5, 0, 1, 0xf8, c0, &img_lo, &end));
     CHECK_EQ(img_lo, 0xf0);
     CHECK_EQ(end, 0xf8);
-    CHECK_EQ(c0[0], 20);
-    CHECK_EQ(c0[4], 12);
-    CHECK_EQ(c0[8], 16);
+    CHECK_EQ(c0[0], 0);
+    CHECK_EQ(c0[NVN_C0_GROUPS], 20);
+    CHECK_EQ(c0[NVN_C0_GROUPS + 4], 12);
+    CHECK_EQ(c0[NVN_C0_GROUPS + 8], 16);
     CHECK_EQ(c0[0x10], 0x80);
     CHECK_EQ(c0[0x7f], 0x80 + 0x6f);
     uint64_t a;

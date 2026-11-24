@@ -28,6 +28,12 @@
 #define NVN_UBO_SLOTS 14u
 /** @brief Bytes of a stage's driver bank c[2] the layer keeps: bound texture handles from 0x20, 8 bytes apart. */
 #define NVN_BANK2_BYTES 0x968u
+/**
+ * @brief Byte of a compute program's driver bank c[0] where the dispatch's group counts x, y and z start (u32 each,
+ * to 0x10): the light-cluster builder of one game linearizes its group id as (z * c[0][8] + y) * c[0][4] + x into
+ * buffers of x * y * z cells that its lighting pass indexes in the same order.
+ */
+#define NVN_C0_GROUPS 0x4u
 /** @brief Offset in c[2] of the handle bound to texture slot 0 (nvnCommandBufferBindTexture, sdk 0x6022e0). */
 /** @brief Bytes of a graphics stage's driver bank c[0] the layer fills. */
 #define NVN_GFX_C0_BYTES 0x1000u
@@ -535,7 +541,7 @@ bool nvn_vk_fill(VkCommandBuffer cb, VkBuffer buf, uint64_t off, uint64_t size, 
 /**
  * @brief Records an indirect dispatch of the bound compute pipeline whose group counts are the three u32 at ioff in
  * ibuf, read by the GPU when it runs; when c0 is not NULL, a copy of the counts first fills the 12 bytes at c0_off in
- * c0 (the driver table's group counts), behind a barrier.
+ * c0 (the driver table's group counts, NVN_C0_GROUPS past its start), behind a barrier.
  */
 void nvn_vk_dispatch_indirect(VkCommandBuffer cb, VkBuffer ibuf, uint64_t ioff, VkBuffer c0, uint64_t c0_off);
 bool nvn_vk_begin(replay *r);
