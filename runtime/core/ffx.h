@@ -57,7 +57,11 @@
        uint32_t, const rlvk_image_memory_barrier *))                                                                  \
     X(vkCmdUpdateBuffer, void, (rlvk_handle, rlvk_handle, rlvk_size, rlvk_size, const void *))                        \
     X(vkCmdClearColorImage, void,                                                                                     \
-      (rlvk_handle, rlvk_handle, int32_t, const void *, uint32_t, const rlvk_image_subresource_range *))
+      (rlvk_handle, rlvk_handle, int32_t, const void *, uint32_t, const rlvk_image_subresource_range *))              \
+    X(vkCmdCopyImageToBuffer, void,                                                                                   \
+      (rlvk_handle, rlvk_handle, int32_t, rlvk_handle, uint32_t, const rlvk_buffer_image_copy *))                     \
+    X(vkMapMemory, rlvk_result, (rlvk_handle, rlvk_handle, rlvk_size, rlvk_size, rlvk_flags, void **))                \
+    X(vkUnmapMemory, void, (rlvk_handle, rlvk_handle))
 
 /** @brief A device and the functions a port calls on it. */
 typedef struct rl_ffx_vk {
@@ -124,5 +128,45 @@ void rl_ffx_clear(const rl_ffx_vk *vk, uint64_t cmd, rlvk_handle image, float r,
 
 /** @brief The RCAS constants (FsrRcasCon) for sharpness in [0, 1], as the passes' cbRCAS reads them. */
 void rl_ffx_rcas(float sharpness, uint32_t rcas[4]);
+
+/**
+ * @brief One of a port's own images to dump: its FidelityFX resource name, image, format and size, and whether it is a
+ * render-size image (allocated at the maximum render size, used over the frame's render size).
+ */
+typedef struct rl_ffx_dump_image {
+    const char *name;
+    rlvk_handle image;
+    int32_t format;
+    uint32_t width, height;
+    bool render_sized;
+} rl_ffx_dump_image;
+
+/**
+ * @brief The debug dump of a port's own images (RELIFT_UPSCALER_DUMP=<folder>:<first>[-<last>], evaluations counted
+ * from 1 by each port, at most 16): after the passes of each chosen evaluation the port's images are copied to host
+ * memory, and when the GPU has finished them each is written as <folder>/<who>-<evaluation>-<name>.raw (rows packed,
+ * level 0) with one line in <folder>/<who>-manifest.txt: evaluation, name, Vulkan format, width, height, render
+ * width and height, "render" or "other" (whether the image is render-size), file, then the frame's constants as
+ * 32-bit words in hex. runtime/tools/fsr_dump.py turns them into
+ * PNGs and reads pixels.
+ */
+typedef struct rl_ffx_dump rl_ffx_dump;
+
+/** @brief The dump of port who (fsr2, fsr3) when RELIFT_UPSCALER_DUMP is set, else NULL. */
+rl_ffx_dump *rl_ffx_dump_new(const char *who);
+
+/**
+ * @brief Counts one evaluation and, when it is chosen, records copies of the n images (in the general layout, written
+ * by compute passes) into cmd with the barriers around them; render is the frame's render size, consts the constants
+ * (bytes, a multiple of 4). Does nothing for NULL.
+ */
+void rl_ffx_dump_record(rl_ffx_dump *d, const rl_ffx_vk *vk, uint64_t cmd, const rl_ffx_dump_image *images, uint32_t n,
+                        const uint32_t render[2], const void *consts, uint32_t bytes);
+
+/** @brief Writes the files of every recorded evaluation (the GPU has finished them) and frees their buffers. */
+void rl_ffx_dump_retire(rl_ffx_dump *d, const rl_ffx_vk *vk);
+
+/** @brief Frees d (the device must be idle); NULL does nothing. */
+void rl_ffx_dump_free(rl_ffx_dump *d, const rl_ffx_vk *vk);
 
 #endif

@@ -58,6 +58,7 @@ PASSES = [
     ("fsr1_buffers", "fsr1.comp", ["-DRL_BUFFERS"]),
     ("taa", "taa.comp", []),
     ("taa_rcas", "taa_rcas.comp", []),
+    ("changemask", "changemask.comp", []),
     ("overlay", "overlay.comp", []),
 ]
 

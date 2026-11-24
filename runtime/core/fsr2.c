@@ -11,6 +11,7 @@
  */
 #include "fsr2.h"
 
+#include "changemask.h"
 #include "core.h"
 #include "ffx.h"
 #include "fsr2_data.h"
@@ -81,6 +82,29 @@ static const struct {
     [R_DEFAULT_REACTIVITY] = { RLVK_FORMAT_R8_UNORM, SIZE_ONE },
     [R_DEFAULT_EXPOSURE] = { RLVK_FORMAT_R32G32_SFLOAT, SIZE_ONE },
     [R_AUTO_EXPOSURE] = { RLVK_FORMAT_R32G32_SFLOAT, SIZE_ONE },
+};
+
+/** @brief The FidelityFX resource name of each image, as ffx_fsr2.cpp names it (for the debug dump). */
+static const char *const g_image_names[R_COUNT] = {
+    [R_PREPARED_INPUT_COLOR] = "prepared_input_color",
+    [R_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH] = "reconstructed_previous_nearest_depth",
+    [R_DILATED_MOTION_VECTORS_1] = "dilated_motion_vectors_1",
+    [R_DILATED_MOTION_VECTORS_2] = "dilated_motion_vectors_2",
+    [R_DILATED_DEPTH] = "dilated_depth",
+    [R_LOCK_STATUS_1] = "lock_status_1",
+    [R_LOCK_STATUS_2] = "lock_status_2",
+    [R_LOCK_INPUT_LUMA] = "lock_input_luma",
+    [R_NEW_LOCKS] = "new_locks",
+    [R_INTERNAL_UPSCALED_COLOR_1] = "internal_upscaled_color_1",
+    [R_INTERNAL_UPSCALED_COLOR_2] = "internal_upscaled_color_2",
+    [R_SCENE_LUMINANCE] = "scene_luminance",
+    [R_LUMA_HISTORY_1] = "luma_history_1",
+    [R_LUMA_HISTORY_2] = "luma_history_2",
+    [R_SPD_ATOMIC_COUNT] = "spd_atomic_count",
+    [R_DILATED_REACTIVE_MASKS] = "dilated_reactive_masks",
+    [R_DEFAULT_REACTIVITY] = "default_reactivity",
+    [R_DEFAULT_EXPOSURE] = "default_exposure",
+    [R_AUTO_EXPOSURE] = "auto_exposure",
 };
 
 /** @brief What a shader resource name binds (the frame's choice of ping-pong images resolved in view_of). */
@@ -180,6 +204,12 @@ struct rl_fsr2 {
     uint32_t parity;
     cb_fsr2 c;
     float previous_jitter[2];
+    /** @brief The debug dump (RELIFT_UPSCALER_DUMP), or NULL. */
+    rl_ffx_dump *dump;
+    /** @brief relift's moved-surface mask, bound as the transparency and composition mask, or NULL. */
+    rl_changemask *moved;
+    /** @brief This frame's mask view (0 without one). */
+    rlvk_handle composition, composition_image;
 };
 
 static bool failed(rl_fsr2 *f, const char *what, rlvk_result r)
@@ -261,6 +291,8 @@ rl_fsr2 *rl_fsr2_new(const rl_post_device *d)
     if (!rl_ffx_bind_memory(&f->vk, &req, &f->cb_memory) ||
         f->vk.vkBindBufferMemory(f->vk.device, f->cb, f->cb_memory, 0) != RLVK_SUCCESS)
         return failed(f, "the constant buffer's memory", 0), NULL;
+    f->moved = rl_changemask_new(&f->vk);
+    f->dump = rl_ffx_dump_new("fsr2");
     f->first = true;
     return f;
 }
@@ -316,6 +348,29 @@ static bool make_images(rl_fsr2 *f, uint32_t w, uint32_t h)
     return f->sized;
 }
 
+/** @brief Records the debug dump of f's images (rl_ffx_dump_record) for a frame of in. */
+static void dump(rl_fsr2 *f, uint64_t cmd, const rl_upscale_inputs *in)
+{
+    if (!f->dump)
+        return;
+    uint32_t w = f->display[0], h = f->display[1];
+    uint32_t hw = w / 2 ? w / 2 : 1, hh = h / 2 ? h / 2 : 1;
+    rl_ffx_dump_image im[R_COUNT + 1];
+    for (uint32_t i = 0; i < R_COUNT; i++) {
+        uint32_t iw = 1, ih = 1;
+        if (g_images[i].size == SIZE_RENDER || g_images[i].size == SIZE_DISPLAY)
+            iw = w, ih = h;
+        else if (g_images[i].size == SIZE_HALF_RENDER)
+            iw = hw, ih = hh;
+        im[i] = (rl_ffx_dump_image){ g_image_names[i], f->images[i].image, g_images[i].format, iw, ih,
+                                     g_images[i].size == SIZE_RENDER };
+    }
+    uint32_t render[2] = { in->in.width, in->in.height };
+    im[R_COUNT] = (rl_ffx_dump_image){ "transparency_and_composition_mask", f->composition ? f->composition_image : 0,
+                                       RLVK_FORMAT_R16_SFLOAT, w, h, true };
+    rl_ffx_dump_record(f->dump, &f->vk, cmd, im, R_COUNT + 1, render, &f->c, sizeof f->c);
+}
+
 bool rl_fsr2_takes(const rl_upscale_inputs *in)
 {
     return in->depth.handle && in->motion.handle && !in->in.x && !in->in.y && !in->out_rect.x && !in->out_rect.y &&
@@ -340,7 +395,7 @@ static rlvk_handle view_of(const rl_fsr2 *f, uint32_t n, const rl_upscale_inputs
     case N_REACTIVE:
         return in->reactive.handle ? in->reactive.handle : f->images[R_DEFAULT_REACTIVITY].view;
     case N_COMPOSITION:
-        return f->images[R_DEFAULT_REACTIVITY].view;
+        return f->composition ? f->composition : f->images[R_DEFAULT_REACTIVITY].view;
     case N_OUTPUT:
         return in->out.handle;
     case N_MIP_SHADING_CHANGE:
@@ -434,6 +489,29 @@ static bool start_sets(rl_fsr2 *f)
     return true;
 }
 
+/**
+ * @brief The camera FSR 2 is told about for in (ffx_fsr2.cpp's setupDeviceDepthToViewSpaceDepthParams and tanHalfFOV):
+ * device_to_view gets deviceToViewDepth, *tan_half_fov the tangent of half the view angle across the screen.
+ */
+static void camera(const rl_upscale_inputs *in, float device_to_view[4], float *tan_half_fov)
+{
+    float aspect = (float)in->in.width / (float)in->in.height;
+    float fov_x = atanf(tanf(CAMERA_FOV_Y / 2.0f) * aspect) * 2.0f;
+    *tan_half_fov = tanf(fov_x * 0.5f);
+    float lo = CAMERA_NEAR, hi = CAMERA_FAR;
+    if (in->depth_inverted) {
+        float t = lo;
+        lo = hi;
+        hi = t;
+    }
+    float q = hi / (lo - hi);
+    device_to_view[0] = -q;
+    device_to_view[1] = q * lo;
+    float cot = cosf(0.5f * CAMERA_FOV_Y) / sinf(0.5f * CAMERA_FOV_Y);
+    device_to_view[2] = 1.0f / (cot / aspect);
+    device_to_view[3] = 1.0f / cot;
+}
+
 /** @brief Fills the constants of this frame (fsr2Dispatch's), into f->c and spd; reset starts the history again. */
 static void constants(rl_fsr2 *f, const rl_upscale_inputs *in, bool reset, cb_spd *spd, uint32_t rcas[4])
 {
@@ -449,22 +527,8 @@ static void constants(rl_fsr2 *f, const rl_upscale_inputs *in, bool reset, cb_sp
     c->display_size[1] = (int32_t)f->display[1];
     c->input_color_dimensions[0] = (int32_t)in->color.width;
     c->input_color_dimensions[1] = (int32_t)in->color.height;
-    float aspect = rw / rh;
-    float fov_x = atanf(tanf(CAMERA_FOV_Y / 2.0f) * aspect) * 2.0f;
-    c->tan_half_fov = tanf(fov_x * 0.5f);
+    camera(in, c->device_to_view_depth, &c->tan_half_fov);
     c->view_space_to_meters = 1.0f;
-    float lo = CAMERA_NEAR, hi = CAMERA_FAR;
-    if (in->depth_inverted) {
-        float t = lo;
-        lo = hi;
-        hi = t;
-    }
-    float q = hi / (lo - hi);
-    c->device_to_view_depth[0] = -q;
-    c->device_to_view_depth[1] = q * lo;
-    float cot = cosf(0.5f * CAMERA_FOV_Y) / sinf(0.5f * CAMERA_FOV_Y);
-    c->device_to_view_depth[2] = 1.0f / (cot / aspect);
-    c->device_to_view_depth[3] = 1.0f / cot;
     c->downscale[0] = rw / (float)f->display[0];
     c->downscale[1] = rh / (float)f->display[1];
     c->previous_pre_exposure = c->pre_exposure;
@@ -532,6 +596,16 @@ bool rl_fsr2_record(rl_fsr2 *f, uint64_t cmd, const rl_upscale_inputs *in)
     bool sharpen = opts & 8u;
     uint32_t npasses = sharpen ? RL_FSR2_PASSES : RL_FSR2_PASSES - 1;
     bool reset = in->reset || f->first;
+    f->composition = 0;
+    if (f->moved) {
+        float d2v[4], tan_half_fov;
+        camera(in, d2v, &tan_half_fov);
+        rl_changemask_camera cam = { { d2v[0], d2v[1] }, { d2v[2], d2v[3] } };
+        rlvk_handle image = 0;
+        if (!rl_changemask_record(f->moved, cmd, in, &cam, reset, &f->composition, &image))
+            return false;
+        f->composition_image = image;
+    }
     rlvk_handle sets[RL_FSR2_PASSES];
     for (uint32_t p = 0; p < npasses; p++)
         if (!(sets[p] = pass_set(f, mods[p], in)))
@@ -593,6 +667,7 @@ bool rl_fsr2_record(rl_fsr2 *f, uint64_t cmd, const rl_upscale_inputs *in)
         if (p + 1 < npasses)
             rl_ffx_barrier(&f->vk, cmd, cs, rw_access, cs, rw_access);
     }
+    dump(f, cmd, in);
     f->parity++;
     return true;
 }
@@ -602,6 +677,8 @@ void rl_fsr2_retire(rl_fsr2 *f)
     if (!f || !f->pool)
         return;
     f->vk.vkResetDescriptorPool(f->vk.device, f->pool, 0);
+    rl_changemask_retire(f->moved);
+    rl_ffx_dump_retire(f->dump, &f->vk);
     f->set0 = 0;
     f->used = 0;
     f->pending = false;
@@ -611,6 +688,8 @@ void rl_fsr2_free(rl_fsr2 *f)
 {
     if (!f)
         return;
+    rl_ffx_dump_free(f->dump, &f->vk);
+    rl_changemask_free(f->moved);
     drop_images(f);
     for (uint32_t m = 0; m < RL_FSR2_MODULES; m++)
         rl_ffx_pipeline_free(&f->vk, &f->modules[m]);

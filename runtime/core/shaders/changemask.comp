@@ -1,0 +1,126 @@
+#version 450
+/**
+ * @file changemask.comp
+ * @brief relift's moved-surface mask for FSR 2 and FSR 3 (changemask.c), written for relift. Where the motion vectors
+ * miss a move (a game that moves an object without writing its motion), FSR sees no velocity, so it keeps the widest
+ * history clamp (FSR 2 lets history 20 times the neighborhood's spread through at a 2x upscale) and its locks: the
+ * object's history stays where it was and trails. FSR's documented input for pixels whose history must not be
+ * trusted that way is the transparency and composition mask: it tightens the clamp to the neighborhood and drops the
+ * locks there. This pass writes that mask from depth: it keeps each frame's view depth and, per render pixel, finds
+ * the point of the picture its center shows (the center minus the jitter), where the motion vectors put that point last
+ * frame, and the four depth samples around it there. Where the surface seen now is none of them, or the surface last
+ * frame's nearest sample saw is none of the four samples around its point now, another surface took the pixel (an
+ * object arrived or left) and the mask is 1. Where the motion vectors are zero, the same test also runs against the
+ * reference depth (a frame changemask.c picks every few frames), so a surface moving less than a pixel a frame shows
+ * once it has moved enough. The mask stays 1 for the frame it is found and the HOLD - 1 frames after it and the HOLD - 1 frames after it (FSR's widened clamp
+ * would otherwise keep what history the first frame let through next to the object). Depths match within FSR's own
+ * disocclusion tolerance and the four samples cover the jitter, so a still picture, and a picture the motion vectors describe (a camera pan), give 0.
+ */
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform texture2D depth_img;
+layout(binding = 1) uniform texture2D motion_img;
+layout(binding = 2) uniform texture2D previous_img;
+layout(binding = 3) uniform texture2D previous_hold;
+layout(binding = 4, r32f) uniform writeonly image2D depth_out;
+layout(binding = 5, r16f) uniform writeonly image2D mask_out;
+layout(binding = 6, r16f) uniform writeonly image2D hold_out;
+layout(binding = 8) uniform texture2D reference_img;
+layout(binding = 9, r32f) uniform writeonly image2D reference_out;
+
+/**
+ * @brief The render size, the motion vectors' image size, their scale to UV and the jitter they carry in UV, FSR's
+ * device to view depth factors (view depth = y / (device depth - x)), last frame's jitter minus this frame's in render
+ * pixels, the separation per unit of view depth FSR asks of a disocclusion and the power of its falloff, flags (bit 0
+ * last frame's depth is valid, bit 1 the reference depth is, bit 2 this frame's depth becomes the reference) and the
+ * reference frame's jitter minus this frame's, in render pixels.
+ */
+layout(binding = 7, std140) uniform Params {
+    ivec2 render;
+    ivec2 motion_size;
+    vec2 motion_scale;
+    vec2 motion_jitter;
+    vec2 device_to_view;
+    vec2 jitter_shift;
+    float separation;
+    float power;
+    int flags;
+    vec2 reference_shift;
+} pc;
+
+const int PREVIOUS = 1;
+const int REFERENCE = 2;
+const int REFRESH = 4;
+
+/** @brief Frames a pixel stays in the mask after another surface took it. */
+const float HOLD = 4.0;
+
+float view_depth(float d)
+{
+    return abs(pc.device_to_view.y / (d - pc.device_to_view.x));
+}
+
+/** @brief How much a and b look like one surface: 1 within FSR's tolerance, falling to 0 as they part. */
+float same(float a, float b)
+{
+    float diff = abs(a - b);
+    if (diff <= 0.0)
+        return 1.0;
+    return pow(clamp(pc.separation * max(a, b) / diff, 0.0, 1.0), pc.power);
+}
+
+const int NOW = 0;
+const int LAST = 1;
+const int REF = 2;
+
+/** @brief The largest likeness of z to the four samples of which (NOW, LAST or REF) around point. */
+float likeness(float z, vec2 point, int which)
+{
+    ivec2 base = ivec2(floor(point - 0.5));
+    float best = 0.0;
+    for (int y = 0; y <= 1; y++)
+        for (int x = 0; x <= 1; x++) {
+            ivec2 o = clamp(base + ivec2(x, y), ivec2(0), pc.render - 1);
+            float s = which == LAST  ? texelFetch(previous_img, o, 0).r
+                      : which == REF ? texelFetch(reference_img, o, 0).r
+                                     : view_depth(texelFetch(depth_img, o, 0).r);
+            best = max(best, same(z, s));
+        }
+    return best;
+}
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.render)))
+        return;
+    float z = view_depth(texelFetch(depth_img, p, 0).r);
+    imageStore(depth_out, p, vec4(z));
+    float mask = 0.0, hold = 0.0;
+    if ((pc.flags & PREVIOUS) != 0) {
+        ivec2 m = ivec2((vec2(p) + 0.5) * vec2(pc.motion_size) / vec2(pc.render));
+        vec2 mv = texelFetch(motion_img, m, 0).xy * pc.motion_scale - pc.motion_jitter;
+        vec2 shift = mv * vec2(pc.render);
+        vec2 then = vec2(p) + 0.5 + pc.jitter_shift + shift;
+        ivec2 q = ivec2(floor(then));
+        if (all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, pc.render))) {
+            float zq = texelFetch(previous_img, q, 0).r;
+            float now_was = likeness(z, then, LAST);
+            float was_is = likeness(zq, vec2(q) + 0.5 - pc.jitter_shift - shift, NOW);
+            float moved = 1.0 - min(now_was, was_is);
+            if ((pc.flags & REFERENCE) != 0 && dot(shift, shift) < 1e-8) {
+                vec2 at = vec2(p) + 0.5 + pc.reference_shift;
+                float zr = texelFetch(reference_img, p, 0).r;
+                float slow = 1.0 - min(likeness(z, at, REF), likeness(zr, vec2(p) + 0.5 - pc.reference_shift, NOW));
+                moved = max(moved, slow);
+            }
+            hold = moved > 0.5 ? HOLD : max(texelFetch(previous_hold, q, 0).r - 1.0, 0.0);
+            mask = hold > 0.0 ? 1.0 : moved;
+        }
+    }
+    imageStore(mask_out, p, vec4(mask));
+    imageStore(hold_out, p, vec4(hold));
+    imageStore(reference_out, p, vec4((pc.flags & REFRESH) != 0 ? z : texelFetch(reference_img, p, 0).r));
+}

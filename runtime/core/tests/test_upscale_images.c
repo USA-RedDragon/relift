@@ -8,6 +8,8 @@
  */
 #include "runner.h"
 
+#include "changemask.h"
+#include "ffx.h"
 #include "hostlib.h"
 
 #include <relift/settings.h>
@@ -608,6 +610,214 @@ TEST(upscale_fsr3_takes_the_jitter_and_motion_vectors_as_dlss_gives_them)
 {
     if (start())
         takes_dlss_conventions(RL_UPSCALE_FSR3, "fsr3");
+}
+
+/** @brief Distance from (x, y) to the nearest of 4 spokes of length len from (cx, cy) at angle a (radians). */
+static float spoke_distance(float x, float y, float cx, float cy, float len, float a)
+{
+    float best = 1e9f;
+    for (int s = 0; s < 4; s++) {
+        float ang = a + (float)s * 1.5707963f, dx = cosf(ang), dy = sinf(ang);
+        float px = x - cx, py = y - cy, t = px * dx + py * dy;
+        t = t < 0.0f ? 0.0f : t > len ? len : t;
+        float ex = px - t * dx, ey = py - t * dy, d = sqrtf(ex * ex + ey * ey);
+        best = d < best ? d : best;
+    }
+    return best;
+}
+
+/**
+ * @brief Temporal choice over 48 frames at W by H render pixels to twice that: four bright spokes 1 render pixel wide
+ * (nearer than the dark background) turn speed radians a frame around the picture's center while the motion vectors
+ * stay zero, as the clockwork a game turns without motion vectors; Halton jitter as DLSS takes it. The mean value
+ * above the background (25) of the display pixels more than 2 render pixels from every spoke now, inside the circle
+ * the spokes sweep: what the spokes leave behind. -1 when the stage did not run.
+ */
+static double spokes_trail(uint32_t choice, uint32_t w, uint32_t h, float speed)
+{
+    enum { FRAMES = 48, BACK = 25, FRONT = 230 };
+    uint32_t dw = 2 * w, dh = 2 * h;
+    float cx = (float)w / 2.0f, cy = (float)h / 2.0f, len = (float)(w < h ? w : h) * 0.42f;
+    uint32_t *frame = malloc((size_t)w * h * 4), *got = malloc((size_t)dw * dh * 4);
+    float *depth = malloc((size_t)w * h * 4);
+    uint32_t *zero = calloc((size_t)w * h, 4);
+    double trail = -1.0;
+    if (!frame || !got || !depth || !zero)
+        goto out;
+    img color = image(w, h, VK_FORMAT_R8G8B8A8_UNORM, 4), dst = image(dw, dh, VK_FORMAT_R8G8B8A8_UNORM, 4);
+    img dep = image(w, h, VK_FORMAT_R32_SFLOAT, 4), mv = image(w, h, VK_FORMAT_R16G16_SFLOAT, 4);
+    fill(&dst, NULL);
+    fill(&mv, zero);
+    rl_post_device d = device();
+    rl_upscaler *u = rl_upscaler_new(&d, choice, RL_UPSCALE_IMAGES);
+    bool ran = u != NULL;
+    float angle = 0.0f;
+    for (uint32_t k = 0; ran && k < FRAMES; k++) {
+        float jx = halton(k + 1, 2) - 0.5f, jy = halton(k + 1, 3) - 0.5f;
+        angle = speed * (float)k;
+        for (uint32_t y = 0; y < h; y++)
+            for (uint32_t x = 0; x < w; x++) {
+                bool on = spoke_distance((float)x + 0.5f - jx, (float)y + 0.5f - jy, cx, cy, len, angle) < 0.5f;
+                uint32_t c = on ? FRONT : BACK;
+                frame[y * w + x] = c | c << 8 | c << 16 | 0xff000000u;
+                depth[y * w + x] = on ? 0.02f : 0.01f;
+            }
+        fill(&color, frame);
+        fill(&dep, depth);
+        rl_upscale_inputs ui = { .color = { .handle = (uint64_t)(uintptr_t)color.view, .width = w, .height = h },
+                                 .depth = { .handle = (uint64_t)(uintptr_t)dep.view, .width = w, .height = h },
+                                 .depth_inverted = true,
+                                 .motion = { .handle = (uint64_t)(uintptr_t)mv.view, .width = w, .height = h },
+                                 .motion_scale = { 1.0f, 1.0f },
+                                 .pre_exposure = 1.0f,
+                                 .jitter = { jx, jy },
+                                 .reset = k == 0,
+                                 .in = { 0, 0, w, h },
+                                 .out = { .handle = (uint64_t)(uintptr_t)dst.view, .width = dw, .height = dh },
+                                 .out_rect = { 0, 0, dw, dh } };
+        ran = run_stage(u, &ui);
+    }
+    if (ran) {
+        read_back(&dst, got);
+        double sum = 0.0;
+        uint32_t n = 0;
+        for (uint32_t y = 0; y < dh; y++)
+            for (uint32_t x = 0; x < dw; x++) {
+                float sx = ((float)x + 0.5f) / 2.0f, sy = ((float)y + 0.5f) / 2.0f;
+                float r = sqrtf((sx - cx) * (sx - cx) + (sy - cy) * (sy - cy));
+                if (r > len - 1.0f || r < 3.0f || spoke_distance(sx, sy, cx, cy, len, angle) < 2.0f)
+                    continue;
+                sum += (double)(got[y * dw + x] & 0xff) - BACK;
+                n++;
+            }
+        trail = n ? sum / n : 0.0;
+    }
+    rl_upscaler_free(u);
+    image_free(&color);
+    image_free(&dst);
+    image_free(&dep);
+    image_free(&mv);
+out:
+    free(frame);
+    free(got);
+    free(depth);
+    free(zero);
+    return trail;
+}
+
+TEST(upscale_temporal_choices_leave_no_trail_behind_spokes_turned_without_motion_vectors)
+{
+    if (!start())
+        return;
+    enum { W = 64, H = 64 };
+    const struct {
+        uint32_t choice;
+        const char *name;
+    } cs[] = { { RL_UPSCALE_FSR2, "fsr2" }, { RL_UPSCALE_FSR3, "fsr3" }, { RL_UPSCALE_TAA, "taa" } };
+    for (size_t i = 0; i < sizeof cs / sizeof cs[0]; i++) {
+        double still = spokes_trail(cs[i].choice, W, H, 0.0f), turning = spokes_trail(cs[i].choice, W, H, 0.05f);
+        printf("    %s spokes 1 render pixel wide, still: %.2f above the background away from them; turning 0.05 "
+               "radians a frame with zero motion vectors: %.2f\n",
+               cs[i].name, still, turning);
+        CHECK(still >= 0.0 && still < 0.1);
+        CHECK(turning >= 0.0 && turning < 0.1);
+    }
+}
+
+/**
+ * @brief The device depth (inverted) of the test scene at picture point (x, y): stripes 4 pixels wide at view depths
+ * 10 and 7, and, when box_x is not negative, a box 8 pixels wide from box_x nearer at view depth 5.
+ */
+static float mask_scene(float x, float y, float box_x)
+{
+    if (box_x >= 0.0f && x >= box_x && x < box_x + 8.0f && y >= 12.0f && y < 20.0f)
+        return 0.02f;
+    return ((int)floorf(x / 4.0f) & 1) ? 0.0142857f : 0.01f;
+}
+
+/**
+ * @brief Runs changemask.c over 12 frames of W by H with Halton jitter: the scene panned pan (0 or 1.5) render pixels a
+ * frame to the right with motion vectors that say so, and its box (box_speed render pixels a frame from x 8, none when negative)
+ * moved without them. Returns the pixels of the last frame's mask above 0.5, or -1 when it did not run.
+ */
+static int32_t mask_pixels(float pan, float box_speed)
+{
+    enum { W = 64, H = 32, FRAMES = 12 };
+    rl_post_device d = device();
+    rl_ffx_vk vk;
+    if (!rl_ffx_vk_load(&vk, &d, "test"))
+        return -1;
+    rl_changemask *m = rl_changemask_new(&vk);
+    if (!m)
+        return -1;
+    float depth[W * H];
+    uint16_t motion[W * H * 2];
+    uint16_t mv = pan == 0.0f ? 0x0000u : pan == 1.5f ? 0xbe00u : 0x7e00u;
+    for (int i = 0; i < W * H; i++) {
+        motion[2 * i] = mv;
+        motion[2 * i + 1] = 0;
+    }
+    img dep = image(W, H, VK_FORMAT_R32_SFLOAT, 4), mo = image(W, H, VK_FORMAT_R16G16_SFLOAT, 4);
+    fill(&mo, motion);
+    int32_t count = -1;
+    rl_changemask_camera cam = { { 0.0f, 0.0f }, { 0.5774f, 0.3249f } };
+    {
+        float lo = 10000.0f, hi = 0.1f, q = hi / (lo - hi);
+        cam.device_to_view[0] = -q;
+        cam.device_to_view[1] = q * lo;
+    }
+    rlvk_handle view = 0, maskimg = 0;
+    bool ran = true;
+    for (uint32_t k = 0; ran && k < FRAMES; k++) {
+        float jx = halton(k + 1, 2) - 0.5f, jy = halton(k + 1, 3) - 0.5f;
+        float box = box_speed < 0.0f ? -1.0f : 8.0f + box_speed * (float)k;
+        for (uint32_t y = 0; y < H; y++)
+            for (uint32_t x = 0; x < W; x++)
+                depth[y * W + x] = mask_scene((float)x + 0.5f - jx - pan * (float)k, (float)y + 0.5f - jy,
+                                              box);
+        fill(&dep, depth);
+        rl_upscale_inputs ui = { .depth = { .handle = (uint64_t)(uintptr_t)dep.view, .width = W, .height = H },
+                                 .depth_inverted = true,
+                                 .motion = { .handle = (uint64_t)(uintptr_t)mo.view, .width = W, .height = H },
+                                 .motion_scale = { 1.0f, 1.0f },
+                                 .jitter = { jx, jy },
+                                 .in = { 0, 0, W, H },
+                                 .out_rect = { 0, 0, 2 * W, 2 * H } };
+        begin();
+        barrier_all();
+        ran = rl_changemask_record(m, (uint64_t)(uintptr_t)T.cb, &ui, &cam, k == 0, &view, &maskimg);
+        barrier_all();
+        submit();
+        rl_changemask_retire(m);
+    }
+    if (ran) {
+        img out = { .image = (VkImage)(uintptr_t)maskimg, .w = W, .h = H, .bpp = 2 };
+        uint16_t got[W * H];
+        read_back(&out, got);
+        count = 0;
+        for (int i = 0; i < W * H; i++)
+            count += !(got[i] & 0x8000u) && got[i] > 0x3800u;
+    }
+    rl_changemask_free(m);
+    image_free(&dep);
+    image_free(&mo);
+    return count;
+}
+
+TEST(upscale_moved_surface_mask_is_empty_where_motion_vectors_hold_and_marks_unmoved_motion)
+{
+    if (!start())
+        return;
+    int32_t still = mask_pixels(0.0f, -1.0f), pan = mask_pixels(1.5f, -1.0f), box_still = mask_pixels(0.0f, 0.0f);
+    int32_t box_moved = mask_pixels(0.0f, 1.5f), box_moved_pan = mask_pixels(1.5f, 1.5f);
+    printf("    mask pixels of 2048: still %d, camera pan with motion vectors %d, still box %d, box moved without "
+           "motion vectors %d (and under a pan %d)\n",
+           still, pan, box_still, box_moved, box_moved_pan);
+    CHECK_EQ(still, 0);
+    CHECK_EQ(pan, 0);
+    CHECK_EQ(box_still, 0);
+    CHECK(box_moved >= 16);
+    CHECK(box_moved_pan >= 16);
 }
 
 TEST(upscale_dlss_where_it_cannot_run_runs_its_fallback)

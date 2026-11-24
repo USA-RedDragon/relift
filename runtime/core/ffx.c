@@ -9,7 +9,16 @@
 #include "spirvval.h"
 
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define DUMP_MKDIR(p) _mkdir(p)
+#else
+#define DUMP_MKDIR(p) mkdir((p), 0755)
+#endif
 
 /** @brief The loader's vkGetInstanceProcAddr, or NULL. */
 static void *(RLVK_CALL *instance_proc(void))(rlvk_handle, const char *)
@@ -108,7 +117,8 @@ bool rl_ffx_image_new(const rl_ffx_vk *vk, int32_t format, uint32_t w, uint32_t 
         .arrayLayers = 1,
         .samples = RLVK_SAMPLE_COUNT_1_BIT,
         .tiling = RLVK_IMAGE_TILING_OPTIMAL,
-        .usage = RLVK_IMAGE_USAGE_SAMPLED_BIT | RLVK_IMAGE_USAGE_STORAGE_BIT | RLVK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .usage = RLVK_IMAGE_USAGE_SAMPLED_BIT | RLVK_IMAGE_USAGE_STORAGE_BIT | RLVK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 RLVK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .initialLayout = RLVK_IMAGE_LAYOUT_UNDEFINED,
     };
     if (vk->vkCreateImage(vk->device, &ci, NULL, &im->image) != RLVK_SUCCESS)
@@ -230,4 +240,199 @@ void rl_ffx_rcas(float sharpness, uint32_t rcas[4])
     memcpy(&rcas[0], &lin, 4);
     rcas[1] = (uint32_t)half_bits(lin) | (uint32_t)half_bits(lin) << 16;
     rcas[2] = rcas[3] = 0;
+}
+
+#define DUMP_FRAMES 16u
+#define DUMP_IMAGES 32u
+
+/** @brief One evaluation being dumped: a host-visible buffer per image and what to write. */
+typedef struct dump_frame {
+    uint32_t evaluation, n, render[2], nconsts;
+    rl_ffx_dump_image images[DUMP_IMAGES];
+    rlvk_handle buffer[DUMP_IMAGES], memory[DUMP_IMAGES];
+    rlvk_size bytes[DUMP_IMAGES];
+    uint32_t consts[256];
+} dump_frame;
+
+struct rl_ffx_dump {
+    char dir[512], who[16];
+    uint32_t first, last, count, pending;
+    dump_frame frames[DUMP_FRAMES];
+};
+
+/** @brief Bytes per pixel of the formats the ports' images have, 0 for another. */
+static uint32_t dump_bpp(int32_t format)
+{
+    switch (format) {
+    case RLVK_FORMAT_R8_UNORM:
+        return 1;
+    case RLVK_FORMAT_R8G8_UNORM:
+    case RLVK_FORMAT_R16_SFLOAT:
+        return 2;
+    case RLVK_FORMAT_R8G8B8A8_UNORM:
+    case RLVK_FORMAT_R16G16_SFLOAT:
+    case RLVK_FORMAT_R32_SFLOAT:
+    case RLVK_FORMAT_R32_UINT:
+        return 4;
+    case RLVK_FORMAT_R16G16B16A16_SFLOAT:
+    case RLVK_FORMAT_R32G32_SFLOAT:
+        return 8;
+    case RLVK_FORMAT_R32G32B32A32_SFLOAT:
+        return 16;
+    default:
+        return 0;
+    }
+}
+
+rl_ffx_dump *rl_ffx_dump_new(const char *who)
+{
+    const char *e = getenv("RELIFT_UPSCALER_DUMP");
+    const char *colon = e ? strrchr(e, ':') : NULL;
+    if (!colon || colon == e)
+        return NULL;
+    rl_ffx_dump *d = calloc(1, sizeof *d);
+    if (!d)
+        return NULL;
+    size_t len = (size_t)(colon - e) < sizeof d->dir - 1 ? (size_t)(colon - e) : sizeof d->dir - 1;
+    memcpy(d->dir, e, len);
+    snprintf(d->who, sizeof d->who, "%s", who);
+    char *end;
+    d->first = (uint32_t)strtoul(colon + 1, &end, 10);
+    d->last = *end == '-' ? (uint32_t)strtoul(end + 1, NULL, 10) : d->first;
+    if (d->last < d->first)
+        d->last = d->first;
+    if (d->last - d->first >= DUMP_FRAMES)
+        d->last = d->first + DUMP_FRAMES - 1;
+    for (char *s = d->dir + 1; *s; s++)
+        if (*s == '/') {
+            *s = 0;
+            DUMP_MKDIR(d->dir);
+            *s = '/';
+        }
+    DUMP_MKDIR(d->dir);
+    rl_log(RL_LOG_INFO, "upscale", "%s dumps its images of evaluations %u to %u into %s", who, d->first, d->last,
+           d->dir);
+    return d;
+}
+
+/** @brief A host-visible memory type of bits, or -1. */
+static int32_t host_type(const rl_ffx_vk *vk, uint32_t bits)
+{
+    const uint32_t want = RLVK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | RLVK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (uint32_t t = 0; t < vk->mem.memoryTypeCount; t++)
+        if ((bits & (1u << t)) && (vk->mem.memoryTypes[t].propertyFlags & want) == want)
+            return (int32_t)t;
+    return -1;
+}
+
+void rl_ffx_dump_record(rl_ffx_dump *d, const rl_ffx_vk *vk, uint64_t cmd, const rl_ffx_dump_image *images, uint32_t n,
+                        const uint32_t render[2], const void *consts, uint32_t bytes)
+{
+    if (!d)
+        return;
+    uint32_t ev = ++d->count;
+    if (ev < d->first || ev > d->last || d->pending == DUMP_FRAMES)
+        return;
+    dump_frame *f = &d->frames[d->pending];
+    memset(f, 0, sizeof *f);
+    f->evaluation = ev;
+    f->render[0] = render[0];
+    f->render[1] = render[1];
+    f->nconsts = bytes / 4 < 256 ? bytes / 4 : 256;
+    memcpy(f->consts, consts, f->nconsts * 4);
+    const uint32_t cs = RLVK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, xfer = RLVK_PIPELINE_STAGE_TRANSFER_BIT;
+    rl_ffx_barrier(vk, cmd, cs, RLVK_ACCESS_SHADER_WRITE_BIT, xfer, RLVK_ACCESS_TRANSFER_READ_BIT);
+    for (uint32_t i = 0; i < n && f->n < DUMP_IMAGES; i++) {
+        uint32_t bpp = dump_bpp(images[i].format);
+        if (!bpp || !images[i].image)
+            continue;
+        uint32_t k = f->n;
+        rlvk_size size = (rlvk_size)images[i].width * images[i].height * bpp;
+        rlvk_buffer_create_info bi = { .sType = RLVK_ST_BUFFER_CREATE_INFO,
+                                       .size = size,
+                                       .usage = RLVK_BUFFER_USAGE_TRANSFER_DST_BIT };
+        if (vk->vkCreateBuffer(vk->device, &bi, NULL, &f->buffer[k]) != RLVK_SUCCESS)
+            continue;
+        rlvk_memory_requirements req;
+        vk->vkGetBufferMemoryRequirements(vk->device, f->buffer[k], &req);
+        int32_t t = host_type(vk, req.memoryTypeBits);
+        rlvk_memory_allocate_info ai = {
+            .sType = RLVK_ST_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = (uint32_t)t
+        };
+        if (t < 0 || vk->vkAllocateMemory(vk->device, &ai, NULL, &f->memory[k]) != RLVK_SUCCESS ||
+            vk->vkBindBufferMemory(vk->device, f->buffer[k], f->memory[k], 0) != RLVK_SUCCESS) {
+            if (f->memory[k])
+                vk->vkFreeMemory(vk->device, f->memory[k], NULL);
+            vk->vkDestroyBuffer(vk->device, f->buffer[k], NULL);
+            f->buffer[k] = f->memory[k] = 0;
+            continue;
+        }
+        rlvk_buffer_image_copy r = { .imageSubresource = { RLVK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                                     .imageExtent = { images[i].width, images[i].height, 1 } };
+        vk->vkCmdCopyImageToBuffer(cmd, images[i].image, RLVK_IMAGE_LAYOUT_GENERAL, f->buffer[k], 1, &r);
+        f->images[k] = images[i];
+        f->bytes[k] = size;
+        f->n++;
+    }
+    rl_ffx_barrier(vk, cmd, xfer, RLVK_ACCESS_TRANSFER_WRITE_BIT | RLVK_ACCESS_TRANSFER_READ_BIT,
+                   cs | RLVK_PIPELINE_STAGE_HOST_BIT, RLVK_ACCESS_HOST_READ_BIT | RLVK_ACCESS_SHADER_WRITE_BIT);
+    d->pending++;
+}
+
+/** @brief Frees the buffers of f. */
+static void dump_drop(const rl_ffx_vk *vk, dump_frame *f)
+{
+    for (uint32_t k = 0; k < f->n; k++) {
+        vk->vkDestroyBuffer(vk->device, f->buffer[k], NULL);
+        vk->vkFreeMemory(vk->device, f->memory[k], NULL);
+    }
+    f->n = 0;
+}
+
+void rl_ffx_dump_retire(rl_ffx_dump *d, const rl_ffx_vk *vk)
+{
+    if (!d || !d->pending)
+        return;
+    char path[700];
+    snprintf(path, sizeof path, "%s/%s-manifest.txt", d->dir, d->who);
+    FILE *m = fopen(path, "a");
+    for (uint32_t i = 0; i < d->pending; i++) {
+        dump_frame *f = &d->frames[i];
+        for (uint32_t k = 0; k < f->n; k++) {
+            void *p = NULL;
+            if (vk->vkMapMemory(vk->device, f->memory[k], 0, f->bytes[k], 0, &p) != RLVK_SUCCESS)
+                continue;
+            snprintf(path, sizeof path, "%s/%s-%04u-%s.raw", d->dir, d->who, f->evaluation, f->images[k].name);
+            FILE *o = fopen(path, "wb");
+            if (o) {
+                fwrite(p, 1, (size_t)f->bytes[k], o);
+                fclose(o);
+            }
+            vk->vkUnmapMemory(vk->device, f->memory[k]);
+            if (m) {
+                fprintf(m, "%u %s %d %u %u %u %u %s %s-%04u-%s.raw", f->evaluation, f->images[k].name,
+                        (int)f->images[k].format, f->images[k].width, f->images[k].height, f->render[0],
+                        f->render[1], f->images[k].render_sized ? "render" : "other", d->who, f->evaluation,
+                        f->images[k].name);
+                for (uint32_t c = 0; c < f->nconsts; c++)
+                    fprintf(m, " %08x", f->consts[c]);
+                fputc('\n', m);
+            }
+        }
+        rl_log(RL_LOG_INFO, "upscale", "%s dumped evaluation %u: %u images into %s", d->who, f->evaluation, f->n,
+               d->dir);
+        dump_drop(vk, f);
+    }
+    if (m)
+        fclose(m);
+    d->pending = 0;
+}
+
+void rl_ffx_dump_free(rl_ffx_dump *d, const rl_ffx_vk *vk)
+{
+    if (!d)
+        return;
+    for (uint32_t i = 0; i < d->pending; i++)
+        dump_drop(vk, &d->frames[i]);
+    free(d);
 }
