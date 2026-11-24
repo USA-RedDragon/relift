@@ -1388,6 +1388,25 @@ int nvn_driver_index(const char *name);
  */
 int nvn_guest_call(rl_ctx *c, uint8_t *mem, uint64_t fn, const uint64_t *args, unsigned n, uint64_t *ret);
 
+/** @brief Slots of the driver callback object the console's DLSS library gets from Handshake (.work/dlss/launch.md). */
+#define NVN_DLSS_CALLBACKS 21u
+/** @brief Where the callback object's vtable and the object sit in its page (after the thunks, 4 bytes each). */
+#define NVN_DLSS_CB_VTABLE 0x100u
+#define NVN_DLSS_CB_OBJECT 0x200u
+
+/**
+ * @brief The address of symbol sym of the library lib that a module registered with NvOsHosRegisterLibrary, through
+ * the sdk's own NvOsLibraryLoad(name, &entry) (0 on success) and NvOsLibraryGetSymbol(entry, name) (the address, or
+ * 0), run on c with the strings on its stack; *addr is 0 when either fails. RL_OK, RL_PENDING or a stop.
+ */
+int nvn_os_library_symbol(rl_ctx *c, uint8_t *mem, const char *lib, const char *sym, uint64_t *addr);
+
+/** @brief The guest address of the DLSS driver callback object (its vtable written now); 0 before the layer is up. */
+uint64_t nvn_dlss_callbacks(uint8_t *mem);
+
+/** @brief The host function of callback slot i (nvn_dlss.c). */
+rl_fn nvn_dlss_callback(uint32_t i);
+
 /**
  * @brief Opens the GPU as the SDK driver does when its device starts: the
  * program's own NvRmGpuLibOpen, then NvRmGpuDeviceOpen of the default

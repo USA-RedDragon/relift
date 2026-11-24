@@ -58,6 +58,88 @@ enum {
     NVN_DLSS_FLAG_AUTO_EXPOSURE = 1u << 6,
 };
 
+/**
+ * @brief The probe of driver callback slot `slot`: until a slot is implemented, the library's first call to it stops
+ * the run with its arguments and caller, so each slot is filled from what the library really passes.
+ */
+static uint64_t callback_probe(rl_ctx *c, uint32_t slot)
+{
+    return (uint64_t)rl_guest_fatal(c, "nvn",
+                                    "the console DLSS library called driver callback %u, which relift does not "
+                                    "implement yet: x0 0x%llx x1 0x%llx x2 0x%llx x3 0x%llx x4 0x%llx x5 0x%llx "
+                                    "x6 0x%llx x7 0x%llx, from 0x%llx",
+                                    slot, (unsigned long long)c->x[0], (unsigned long long)c->x[1],
+                                    (unsigned long long)c->x[2], (unsigned long long)c->x[3],
+                                    (unsigned long long)c->x[4], (unsigned long long)c->x[5],
+                                    (unsigned long long)c->x[6], (unsigned long long)c->x[7],
+                                    (unsigned long long)c->x[30]);
+}
+
+#define CALLBACK(i)                                                                                                    \
+    static uint64_t callback_##i(rl_ctx *c, uint8_t *mem)                                                              \
+    {                                                                                                                  \
+        (void)mem;                                                                                                     \
+        return callback_probe(c, i);                                                                                   \
+    }
+CALLBACK(0)
+CALLBACK(1)
+CALLBACK(2)
+CALLBACK(3)
+CALLBACK(4)
+CALLBACK(5)
+CALLBACK(6)
+CALLBACK(7)
+CALLBACK(8)
+CALLBACK(9)
+CALLBACK(10)
+CALLBACK(11)
+CALLBACK(12)
+CALLBACK(13)
+CALLBACK(14)
+CALLBACK(15)
+CALLBACK(16)
+CALLBACK(17)
+CALLBACK(18)
+CALLBACK(19)
+CALLBACK(20)
+#undef CALLBACK
+
+rl_fn nvn_dlss_callback(uint32_t i)
+{
+    static const rl_fn fns[NVN_DLSS_CALLBACKS] = {
+        callback_0,  callback_1,  callback_2,  callback_3,  callback_4,  callback_5,  callback_6,
+        callback_7,  callback_8,  callback_9,  callback_10, callback_11, callback_12, callback_13,
+        callback_14, callback_15, callback_16, callback_17, callback_18, callback_19, callback_20,
+    };
+    return i < NVN_DLSS_CALLBACKS ? fns[i] : NULL;
+}
+
+/** @brief The console DLSS library's object, from its Handshake with relift's callbacks; 0 before. */
+static uint64_t g_library;
+
+/** @brief Finds the game's DLSS library ("dlss") and hands it relift's driver callbacks, once. */
+static int library_up(rl_ctx *c, uint8_t *mem)
+{
+    if (g_library)
+        return RL_OK;
+    uint64_t handshake = 0;
+    int rc = nvn_os_library_symbol(c, mem, "dlss", "Handshake", &handshake);
+    if (rc != RL_OK)
+        return rc;
+    if (!handshake)
+        return rl_guest_fatal(c, "nvn", "picture.upscaler is the game's own DLSS, but the game has no DLSS library");
+    uint64_t cb = nvn_dlss_callbacks(mem), lib = 0;
+    rc = nvn_guest_call(c, mem, handshake, &cb, 1, &lib);
+    if (rc != RL_OK)
+        return rc;
+    if (!lib)
+        return rl_guest_fatal(c, "nvn", "the game's DLSS library refused relift's driver callbacks");
+    g_library = lib;
+    rl_log(RL_LOG_INFO, "nvn", "console DLSS library up: Handshake 0x%llx, library object 0x%llx",
+           (unsigned long long)handshake, (unsigned long long)lib);
+    return RL_OK;
+}
+
 /** @brief A network relift initialized: what the builder asked for and the render size of the last Resize. */
 typedef struct nvn_dlss_net {
     nvn_obj o;
@@ -225,6 +307,11 @@ uint64_t nvnh_nvnDlssNetworkInitialize(rl_ctx *c, uint8_t *mem)
         rc = get(c, mem, "nvnDlssNetworkBuilderGetPreset", builder, 0, NULL, &preset);
     if (rc != RL_OK)
         return (uint64_t)rc;
+    if (rl_upscale_resolve(rl_setting_enum("picture.upscaler"), true, false) == RL_UPSCALE_GAME) {
+        rc = library_up(c, mem);
+        if (rc != RL_OK)
+            return (uint64_t)rc;
+    }
     nvn_dlss_net *n = (nvn_dlss_net *)nvn_obj_new(net, NVN_DLSS_NETWORK, sizeof *n);
     if (n) {
         nvn_dlss_optimal(wh[0], wh[1], (uint32_t)method, opt);

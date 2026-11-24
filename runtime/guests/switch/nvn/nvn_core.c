@@ -42,6 +42,12 @@ static struct {
     uint64_t driver_loader;
     /** @brief The SDK's NvRmGpu entry points (0 when the program has none) and the device the layer opened. */
     uint64_t gpu_lib_open, gpu_device_open, gpu_choose_kind, gpu_get_info, gpu_lib, gpu_device;
+    /** @brief The sdk's NvOsLibraryLoad and NvOsLibraryGetSymbol (0 when the program has none). */
+    uint64_t lib_load, lib_symbol;
+    /** @brief The page of the DLSS driver callback object: its thunks, vtable and object (nvn_dlss_callbacks). */
+    uint64_t cb_page;
+    rl_fn_entry cb_entries[NVN_DLSS_CALLBACKS];
+    rl_unit cb_unit;
     uint64_t driver_addrs[NVN_DRIVER_PROC_COUNT];
     pthread_mutex_t lock;
     uint32_t used;
@@ -370,6 +376,40 @@ uint64_t nvn_gpu_device(void)
     return d;
 }
 
+int nvn_os_library_symbol(rl_ctx *c, uint8_t *mem, const char *lib, const char *sym, uint64_t *addr)
+{
+    *addr = 0;
+    if (!nvn.lib_load || !nvn.lib_symbol)
+        return rl_guest_fatal(c, "nvn", "the program has no NvOsLibraryLoad or NvOsLibraryGetSymbol");
+    size_t nl = strlen(lib) + 1, ns = strlen(sym) + 1;
+    uint64_t sp = c->sp, base = (sp - 16 - ((nl + ns + 15) & ~15ull)) & ~15ull, err = 0;
+    uint64_t lib_at = base + 16, sym_at = lib_at + nl;
+    memset(mem + base, 0, 16);
+    memcpy(mem + lib_at, lib, nl);
+    memcpy(mem + sym_at, sym, ns);
+    c->sp = base;
+    uint64_t a[2] = { lib_at, base };
+    int rc = nvn_guest_call(c, mem, nvn.lib_load, a, 2, &err);
+    uint64_t handle = rl_ld64(mem, base);
+    if (rc == RL_OK && !(uint32_t)err && handle) {
+        uint64_t b[2] = { handle, sym_at };
+        rc = nvn_guest_call(c, mem, nvn.lib_symbol, b, 2, addr);
+    }
+    c->sp = sp;
+    return rc;
+}
+
+uint64_t nvn_dlss_callbacks(uint8_t *mem)
+{
+    if (!nvn.cb_page)
+        return 0;
+    uint64_t vt = nvn.cb_page + NVN_DLSS_CB_VTABLE, obj = nvn.cb_page + NVN_DLSS_CB_OBJECT;
+    for (uint32_t i = 0; i < NVN_DLSS_CALLBACKS; i++)
+        rl_st64(mem, vt + 8u * i, nvn.cb_page + 4u * i);
+    rl_st64(mem, obj, vt);
+    return obj;
+}
+
 /** @brief nvnBootstrapLoader(const char *name): the address of any proc, as nvnDeviceGetProcAddress gives it. */
 uint64_t nvnh_nvnBootstrapLoader(rl_ctx *c, uint8_t *mem)
 {
@@ -424,6 +464,24 @@ static int hook_start(void *user, uint64_t *code_free)
     const rl_unit *u = &nvn.unit;
     if (rl_units_register(&u, 1) != 0)
         return -1;
+    if (rl_hos_reserve_at(*code_free, HOS_PAGE) != KR_SUCCESS) {
+        rl_log(RL_LOG_ERROR, "nvn", "no guest address space for the DLSS driver callbacks");
+        return -1;
+    }
+    nvn.cb_page = *code_free;
+    *code_free += HOS_PAGE;
+    for (uint32_t i = 0; i < NVN_DLSS_CALLBACKS; i++)
+        nvn.cb_entries[i] = (rl_fn_entry){ nvn.cb_page + 4u * i, 4, RL_FN_OVERRIDE, nvn_dlss_callback(i) };
+    nvn.cb_unit = (rl_unit){
+        .abi_version = RL_ABI_VERSION,
+        .ctx_size = sizeof(rl_ctx),
+        .fn_count = NVN_DLSS_CALLBACKS,
+        .fns = nvn.cb_entries,
+        .name = "nvn-dlss-callbacks",
+    };
+    const rl_unit *cu = &nvn.cb_unit;
+    if (rl_units_register(&cu, 1) != 0)
+        return -1;
     nvn.up = true;
     rl_log(RL_LOG_INFO, "nvn", "NVN layer up for %s: %u procs implemented, thunks at 0x%llx", nvn_version_name(),
            (unsigned)N_IMPLS, (unsigned long long)nvn.base);
@@ -461,6 +519,10 @@ static void hook_defined(void *user, const char *symbol, uint64_t addr)
         nvn.gpu_choose_kind = addr;
     else if (!strcmp(symbol, "NvRmGpuDeviceGetInfo"))
         nvn.gpu_get_info = addr;
+    else if (!strcmp(symbol, "NvOsLibraryLoad"))
+        nvn.lib_load = addr;
+    else if (!strcmp(symbol, "NvOsLibraryGetSymbol"))
+        nvn.lib_symbol = addr;
 }
 
 static int hook_wants(void *user, const char *symbol)
