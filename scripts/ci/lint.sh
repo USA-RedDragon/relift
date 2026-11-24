@@ -30,11 +30,11 @@ cfg_root="$CI_WORK/configulator-$version"
   "$cfg_root/bin/configulator" --type Settings --sample --format toml --sample-file ../relift.example.toml --check
 )
 
-cfg=guests/switch/vkgen/vkgen.toml
+cfg=gpus/apigen/vkgen.toml
 url=$(sed -n 's/^url = "\(.*\)"$/\1/p' "$cfg")
 sum=$(sed -n 's/^sha256 = "\(.*\)"$/\1/p' "$cfg")
 fetch "$url" "$sum" "$CI_WORK/vk-$sum.xml"
-cargo run --locked -q -p relift-switch-vkgen -- --xml "$CI_WORK/vk-$sum.xml" --config "$cfg" --out runtime/guests/switch/vk/gen --check
+cargo run --locked -q -p relift-gpu-apigen -- --xml "$CI_WORK/vk-$sum.xml" --config "$cfg" --out runtime/guests/switch/vk/gen --check
 
 name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
 dir="$CI_WORK/cargo-deny-$CARGO_DENY_VERSION"

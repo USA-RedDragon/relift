@@ -11,7 +11,7 @@ relift is a static recompiler: guest machine code becomes portable C11, built wi
 | `core/*` | Guest-neutral crates: IR, emitters, analysis, cache, build, input, manifest. Knows no CPU and no guest |
 | `cpus/*` | One crate per CPU (arm64, arm32, mips, rsp, sm83, z80): decoder and lifter to the IR. `cpus/*/gen` are generators run by hand |
 | `gpus/*` | Shader translators (`sm86`, `sm53`) to SPIR-V |
-| `guests/<name>/{formats,analyze,guest,tools}` | One guest: file formats, code discovery, frontend and lifting, small tools. `guests/switch` also has `names`, `shaders`, `vkgen` |
+| `guests/<name>/{formats,analyze,guest,tools}` | One guest: file formats, code discovery, frontend and lifting, small tools. `guests/switch` also has `names`, `shaders` |
 | `runtime/{core,cpus,guests,host}` | The C runtime in three layers plus optional host backends. Built by `runtime/Makefile` |
 | `relift` | The `relift` binary and its end-to-end tests |
 | `check` | Separate Cargo workspace: the differential checker and external oracles |

@@ -1979,7 +1979,7 @@ Options:
 
 ### relift-vkgen
 
-<!-- docgen:usage crate=relift-switch-vkgen bin=relift-vkgen -->
+<!-- docgen:usage crate=relift-gpu-apigen bin=relift-vkgen -->
 ```text
 Generate the Switch runtime's Vulkan forwarding layer from vk.xml
 

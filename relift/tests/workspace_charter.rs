@@ -81,7 +81,6 @@ const STANDALONE: &[&str] = &[
     "relift-sms-tools",
     "relift-switch-shaders",
     "relift-switch-tools",
-    "relift-switch-vkgen",
 ];
 
 const CHARTERS: &[Charter] = &[
@@ -243,6 +242,13 @@ const CHARTERS: &[Charter] = &[
         member: "relift-cpu-sm83",
         why: "the SM83 decoder, opcode table and frontend, over the IR and the guest contract only",
         normal: &["relift-guest", "relift-ir"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-gpu-apigen",
+        why: "generates the runtime's Vulkan forwarding C from the pinned vk.xml; guest-neutral, nothing depends on it; writes through relift-cache",
+        normal: &["clap", "relift-cache", "roxmltree", "sha2", "toml"],
         dev: NONE,
         build: NONE,
     },
@@ -519,13 +525,6 @@ const CHARTERS: &[Charter] = &[
             "serde_json",
             "zstd",
         ],
-        dev: NONE,
-        build: NONE,
-    },
-    Charter {
-        member: "relift-switch-vkgen",
-        why: "generates the Switch runtime's Vulkan forwarding C from vk.xml; writes through relift-cache",
-        normal: &["clap", "relift-cache", "roxmltree", "sha2", "toml"],
         dev: NONE,
         build: NONE,
     },

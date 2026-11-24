@@ -10,7 +10,6 @@ The Nintendo Switch guest. It reads decrypted dumps only and has no keys.
 | `relift-switch` | `guest` | The guest over the formats and `relift-cpu-arm64`: the CPU feature set, module loading, exception-handling tables, the program description |
 | `relift-switch-tools` | `tools` | `relift-nup`, `relift-romfs`, `relift-nso`, `relift-nro`, `relift-npdm` and `relift-ir` |
 | `relift-switch-shaders` | `shaders` | `relift-shaders`: finds the SM86 (Switch 2) or SM53 (Switch 1) shader programs of a game |
-| `relift-switch-vkgen` | `vkgen` | `relift-vkgen`: generates the Vulkan forwarding C from the pinned `vk.xml` |
 
 ```sh
 cargo build --release -p relift-switch-tools

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use relift_switch_vkgen::{Config, generate};
+use relift_gpu_apigen::{Config, generate};
 
 /// Generate the Switch runtime's Vulkan forwarding layer from vk.xml.
 #[derive(Parser, Debug)]

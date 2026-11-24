@@ -1320,6 +1320,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gpu-apigen"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "roxmltree",
+ "sha2 0.11.1",
+ "toml",
+]
+
+[[package]]
 name = "relift-gpu-nv"
 version = "0.1.0"
 dependencies = [
@@ -1625,17 +1636,6 @@ dependencies = [
  "relift-proc",
  "relift-switch-formats",
  "serde_json",
-]
-
-[[package]]
-name = "relift-switch-vkgen"
-version = "0.1.0"
-dependencies = [
- "clap",
- "relift-cache",
- "roxmltree",
- "sha2 0.11.1",
- "toml",
 ]
 
 [[package]]

@@ -61,7 +61,7 @@ relift run        # a dev build, run on this host
 - `relift-check`: the differential checker (`check/`).
 - `relift-nup`, `relift-romfs`, `relift-nso`, `relift-nro`, `relift-npdm`,
   `relift-ir`: Switch file formats and the A64 IR.
-- `relift-vkgen`: generates the Switch Vulkan forwarding C.
+- `relift-vkgen`: generates the Vulkan forwarding C.
 - `relift-gbrom`, `relift-gbarom`: Game Boy and GBA ROM headers and
   function discovery.
 

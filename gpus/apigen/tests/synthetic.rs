@@ -2,10 +2,10 @@
 //! layouts, translation classes, thunk and converter shapes, and the errors
 //! it must raise.
 
-use relift_switch_vkgen::model::Model;
-use relift_switch_vkgen::registry::Registry;
-use relift_switch_vkgen::select::Selection;
-use relift_switch_vkgen::{Config, File, generate, sha256_hex};
+use relift_gpu_apigen::model::Model;
+use relift_gpu_apigen::registry::Registry;
+use relift_gpu_apigen::select::Selection;
+use relift_gpu_apigen::{Config, File, generate, sha256_hex};
 
 const XML: &str = r#"<?xml version="1.0"?>
 <registry>

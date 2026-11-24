@@ -1,4 +1,4 @@
-//! relift-switch-vkgen: generates the Vulkan forwarding layer of the Switch
+//! relift-gpu-apigen: generates the Vulkan forwarding layer of the Switch
 //! runtime (`runtime/guests/switch/vk/gen/`) from the Khronos registry.
 //!
 //! A guest that calls Vulkan through `vkGetInstanceProcAddr` gets guest
