@@ -4,3 +4,6 @@
 
 python3 -I runtime/tools/cross/test_release_guard.py
 python3 -I runtime/tools/cross/release_guard.py --sources runtime
+
+# The Android host layer compiles with the NDK under -Werror (cross jobs skip it).
+scripts/ci/android-host-check.sh

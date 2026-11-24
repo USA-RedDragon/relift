@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: The guard rejects what it should; the runtime sources load no code
+      - name: The guard rejects what it should; the runtime sources load no code; the Android host layer compiles
         run: scripts/ci/release-guard.sh
 
   linux:
