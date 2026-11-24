@@ -2,3 +2,9 @@
 //! compiles and the readers of Switch files.
 
 pub mod build;
+pub mod closed;
+pub mod diff;
+pub mod diff_ir;
+pub mod fonts;
+pub mod nvndriver;
+pub mod shaders;

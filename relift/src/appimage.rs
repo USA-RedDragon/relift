@@ -125,10 +125,10 @@ pub struct Request<'a> {
     /// The import directory of a Switch game, whose romfs and DLC go into
     /// the AppImage as plain images (crate::gamedata).
     pub import: Option<&'a Path>,
-    /// The build's shader tables (crate::shaders::tables), which go into the
+    /// The build's shader tables (crate::switch::shaders::tables), which go into the
     /// AppImage beside the data.
     pub shaders: &'a [PathBuf],
-    /// The build's fallback fonts (crate::fonts::packaged), which go into
+    /// The build's fallback fonts (crate::switch::fonts::packaged), which go into
     /// `usr/share/relift/fonts`, where the program finds them from its own
     /// location.
     pub fonts: Option<&'a Path>,
@@ -457,9 +457,9 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
         None => (false, false),
     };
     let has_shaders = !req.shaders.is_empty();
-    crate::shaders::install(req.shaders, &share.join("shaders"))?;
+    crate::switch::shaders::install(req.shaders, &share.join("shaders"))?;
     if let Some(f) = req.fonts {
-        crate::fonts::install(f, &share.join("fonts"))?;
+        crate::switch::fonts::install(f, &share.join("fonts"))?;
     }
     relift_cache::write_if_changed(&dir.join(INFO_PATH), &info.to_bytes())?;
     write_licenses(dir, &slug, &name, &bundled, platform == "switch")?;
@@ -722,14 +722,17 @@ mod tests {
             .insert("default".into(), "My Game".into());
         let table = root.join("table.rlspv");
         relift_cache::write_if_changed(&table, b"RLSPV002\0\0\0\x01x").unwrap();
-        let stamp = root.join(crate::shaders::STAMP_FILE);
-        relift_cache::write_if_changed(&stamp, format!("{}\n", crate::shaders::STAMP).as_bytes())
-            .unwrap();
+        let stamp = root.join(crate::switch::shaders::STAMP_FILE);
+        relift_cache::write_if_changed(
+            &stamp,
+            format!("{}\n", crate::switch::shaders::STAMP).as_bytes(),
+        )
+        .unwrap();
         let shaders = [table, stamp];
         let fonts = root.join("fonts");
         std::fs::create_dir_all(&fonts).unwrap();
         relift_cache::write_if_changed(&fonts.join("4.ttf"), b"font").unwrap();
-        let packaged = crate::fonts::packaged(&root);
+        let packaged = crate::switch::fonts::packaged(&root);
         let exe = std::env::current_exe().unwrap();
         let req = Request {
             name: "my game",

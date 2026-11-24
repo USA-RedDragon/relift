@@ -1,25 +1,20 @@
 //! The `relift` command's settings and subcommand tree, as a library so the
 //! integration tests can name them.
 
+pub mod a64;
 pub mod android;
 pub mod appimage;
 pub mod appimage_runtime;
 pub mod build;
 pub mod cli;
-pub mod closed;
 pub mod coverage;
 pub mod cross;
 pub mod datamanifest;
 pub mod dev;
 pub mod devsock;
-pub mod diff;
-pub mod diff_ir;
 pub mod display_version;
 pub mod elfdeps;
 pub mod emitstore;
-pub mod fonts;
-pub mod fpcr;
-pub mod fpflags;
 pub mod game_settings;
 pub mod gamedata;
 pub mod gb;
@@ -39,7 +34,6 @@ pub mod mods;
 pub mod n64;
 pub mod n64_picture;
 pub mod nds;
-pub mod nvndriver;
 pub mod parallel_rdp;
 pub mod paths;
 pub mod progname;
@@ -48,7 +42,6 @@ pub mod push;
 pub mod report;
 pub mod runtime_link;
 pub mod settings;
-pub mod shaders;
 pub mod sms;
 pub mod switch;
 pub mod total;

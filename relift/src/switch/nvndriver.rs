@@ -156,7 +156,7 @@ fn or_none(v: Option<u32>) -> String {
 }
 
 /// The C file for `d`, whose image offsets are in a module loaded at `base`.
-/// It also hands the runtime the translator stamp ([`crate::shaders::STAMP`])
+/// It also hands the runtime the translator stamp ([`crate::switch::shaders::STAMP`])
 /// the program expects its shader tables to carry.
 pub fn c_text(d: &Driver, base: u64) -> String {
     let mut s = String::from(
@@ -184,8 +184,8 @@ pub fn c_text(d: &Driver, base: u64) -> String {
         let _ = writeln!(
             s,
             "    {}, {},",
-            crate::shaders::c_string(n),
-            crate::shaders::c_string(why)
+            crate::switch::shaders::c_string(n),
+            crate::switch::shaders::c_string(why)
         );
     }
     let _ = write!(
@@ -198,14 +198,14 @@ pub fn c_text(d: &Driver, base: u64) -> String {
         d.api.1,
         d.sdk
             .as_deref()
-            .map_or_else(|| "0".into(), crate::shaders::c_string),
+            .map_or_else(|| "0".into(), crate::switch::shaders::c_string),
         if d.layout.is_ok() { "&layout" } else { "0" },
         d.layout
             .as_ref()
             .err()
-            .map_or_else(|| "0".into(), |e| crate::shaders::c_string(e)),
+            .map_or_else(|| "0".into(), |e| crate::switch::shaders::c_string(e)),
         d.impure.len(),
-        crate::shaders::c_string(crate::shaders::STAMP),
+        crate::switch::shaders::c_string(crate::switch::shaders::STAMP),
     );
     s
 }
@@ -220,7 +220,7 @@ fn layout_text(s: &mut String, l: &DeviceLayout, base: u64) {
     c_offsets(s, "pool_mappings", &pool.mappings);
     s.push_str("static const char *const settings[] = {\n");
     for k in &l.settings {
-        let _ = writeln!(s, "    {},", crate::shaders::c_string(k));
+        let _ = writeln!(s, "    {},", crate::switch::shaders::c_string(k));
     }
     let ints: Vec<String> = l
         .integers
@@ -347,8 +347,11 @@ mod tests {
             impure: Vec::new(),
         };
         let c = c_text(&d, 0x1000);
-        let want = format!("rl_nvn_set_table_stamp(\"{}\");", crate::shaders::STAMP);
+        let want = format!(
+            "rl_nvn_set_table_stamp(\"{}\");",
+            crate::switch::shaders::STAMP
+        );
         assert!(c.contains(&want), "{c}");
-        assert_eq!(crate::shaders::STAMP.len(), 16);
+        assert_eq!(crate::switch::shaders::STAMP.len(), 16);
     }
 }

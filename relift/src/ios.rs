@@ -719,10 +719,10 @@ pub struct Contents<'a> {
     /// images (a plain image is cloned on APFS), or `None` when the data
     /// goes to Documents later.
     pub data: Option<&'a Path>,
-    /// The build's shader tables (crate::shaders::tables), which go into the
+    /// The build's shader tables (crate::switch::shaders::tables), which go into the
     /// bundle's `shaders/` folder.
     pub shaders: &'a [PathBuf],
-    /// The build's fallback fonts (crate::fonts::packaged), which go into
+    /// The build's fallback fonts (crate::switch::fonts::packaged), which go into
     /// the bundle's `fonts/` folder beside the program.
     pub fonts: Option<&'a Path>,
 }
@@ -767,10 +767,10 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
         crate::gamedata::write_images(d, &app, true)?;
     }
     if !shaders.is_empty() {
-        crate::shaders::install(shaders, &app.join("shaders"))?;
+        crate::switch::shaders::install(shaders, &app.join("shaders"))?;
     }
     if let Some(f) = fonts {
-        crate::fonts::install(f, &app.join("fonts"))?;
+        crate::switch::fonts::install(f, &app.join("fonts"))?;
     }
     for (n, png) in &home.icons {
         relift_cache::write_if_changed(&app.join(n), png)?;

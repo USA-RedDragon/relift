@@ -479,9 +479,9 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
         Some(i) => crate::gamedata::write_images(i, &resources, true)?,
         None => (false, false),
     };
-    crate::shaders::install(req.shaders, &resources.join("shaders"))?;
+    crate::switch::shaders::install(req.shaders, &resources.join("shaders"))?;
     if let Some(f) = req.fonts {
-        crate::fonts::install(f, &resources.join("fonts"))?;
+        crate::switch::fonts::install(f, &resources.join("fonts"))?;
     }
     let script = macos.join(slug);
     relift_cache::write_if_changed(

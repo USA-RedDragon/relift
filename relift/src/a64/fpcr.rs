@@ -13,7 +13,7 @@
 //! extent holds the entry or the instruction before it (which may fall
 //! into it), and a computed transfer through a PLT or GOT
 //! word naming one of the entry's symbols, and a jump-table target. A
-//! function whose address escapes ([`crate::fpflags::Linkage::escaped`])
+//! function whose address escapes ([`crate::a64::fpflags::Linkage::escaped`])
 //! or that starts the program may be entered from anywhere, and the climb
 //! stops there; one with no callers is never entered (a symbol that no
 //! module names is reachable only by a run-time lookup by name, which the
@@ -30,7 +30,7 @@ use relift_cpu_arm64::fpcr::{self, Code, Host};
 use relift_ir::Block;
 use relift_switch::program::Placed;
 
-use crate::fpflags::{Linkage, ModuleFlags};
+use crate::a64::fpflags::{Linkage, ModuleFlags};
 
 /// What the proof keeps of one module.
 struct Mod {
@@ -344,7 +344,7 @@ impl Fpcr {
 #[cfg(test)]
 mod tests {
     use super::{branch_target, lookup_reachable};
-    use crate::fpflags::Linkage;
+    use crate::a64::fpflags::Linkage;
 
     fn linkage(lookup_escapes: bool) -> Linkage {
         let mut l = Linkage::default();

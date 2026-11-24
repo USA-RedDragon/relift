@@ -194,7 +194,8 @@ pub fn run(
     };
     let fonts = match system_data {
         Some(sd) => {
-            let (found, missing) = crate::fonts::import(sd, &out.join(crate::fonts::DIR))?;
+            let (found, missing) =
+                crate::switch::fonts::import(sd, &out.join(crate::switch::fonts::DIR))?;
             let names = |v: &[relift_switch_formats::bfttf::FontType]| {
                 v.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
             };

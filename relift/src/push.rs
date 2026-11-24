@@ -472,9 +472,11 @@ fn add_shader_tables(
     entries: &mut Vec<Entry>,
     local: &mut BTreeMap<String, PathBuf>,
 ) -> Result<(), BoxError> {
-    let pack = out.join(crate::shaders::DIR).join(relift_gpu_table::PACK);
+    let pack = out
+        .join(crate::switch::shaders::DIR)
+        .join(relift_gpu_table::PACK);
     let pack = pack.is_file().then_some(pack);
-    for f in crate::shaders::tables_for(out, Some(target))
+    for f in crate::switch::shaders::tables_for(out, Some(target))
         .into_iter()
         .chain(pack)
     {
@@ -601,7 +603,7 @@ pub fn run_push(
             let sent = push_to(&dev, &local, &entries, &mut pushed, ui);
             pushed.save()?;
             sent?;
-            if !crate::shaders::tables(&out).is_empty()
+            if !crate::switch::shaders::tables(&out).is_empty()
                 && let Some(note) = fetch_caps(&dev, &out, target)?
             {
                 ui.note(&Line::new().paint(relift_progress::Paint::Yellow, note));
@@ -622,16 +624,16 @@ pub fn run_push(
 }
 
 /// Keeps the capabilities the app on `dev` wrote as the device file of
-/// `target`'s shader table (crate::shaders::target_dir) when they are new or
+/// `target`'s shader table (crate::switch::shaders::target_dir) when they are new or
 /// changed (another driver, an update), and says that a build is due; also
 /// says when the app has neither a table nor the program pack to make one,
 /// and the device cannot tell.
 fn fetch_caps(dev: &dyn Device, out: &Path, target: &str) -> Result<Option<String>, BoxError> {
-    let want = crate::shaders::target_dir(out, target).join("device.json");
+    let want = crate::switch::shaders::target_dir(out, target).join("device.json");
     let have = std::fs::read(&want).ok();
-    let table = !crate::shaders::tables_for(out, Some(target)).is_empty()
+    let table = !crate::switch::shaders::tables_for(out, Some(target)).is_empty()
         || out
-            .join(crate::shaders::DIR)
+            .join(crate::switch::shaders::DIR)
             .join(relift_gpu_table::PACK)
             .is_file();
     match dev.device_caps() {
@@ -848,7 +850,7 @@ mod tests {
             .join(format!("relift-push-caps-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out);
         let t = "android-arm64";
-        let want = crate::shaders::target_dir(&out, t).join("device.json");
+        let want = crate::switch::shaders::target_dir(&out, t).join("device.json");
         let none = fetch_caps(&Caps(None), &out, t).unwrap().unwrap();
         assert!(none.contains("no shader table for android-arm64"), "{none}");
         let a = Caps(Some(b"{\"a\": 1}".to_vec()));

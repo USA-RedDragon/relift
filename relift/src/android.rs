@@ -446,7 +446,7 @@ pub struct Apk<'a> {
     pub output: &'a Path,
     /// The game data manifest, shipped as an asset (crate::datamanifest).
     pub data_manifest: Option<&'a [u8]>,
-    /// The build's fallback fonts (crate::fonts::packaged), shipped as the
+    /// The build's fallback fonts (crate::switch::fonts::packaged), shipped as the
     /// assets `fonts/<type>.ttf`.
     pub fonts: Option<&'a Path>,
     /// What the settings pages say about the game.
@@ -1052,7 +1052,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         z.add(&format!("assets/{}", crate::datamanifest::FILE), m.to_vec());
     }
     if let Some(f) = a.fonts {
-        for (name, bytes) in crate::fonts::files(f)? {
+        for (name, bytes) in crate::switch::fonts::files(f)? {
             z.add(&format!("assets/fonts/{name}"), bytes);
         }
     }

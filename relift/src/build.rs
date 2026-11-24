@@ -158,9 +158,9 @@ struct Emitted {
     unlifted: usize,
     unlifted_list: String,
     /// Which functions produce FPSR flags.
-    fpsr: crate::fpflags::Plan,
+    fpsr: crate::a64::fpflags::Plan,
     /// Whether lifted code drops the FPCR guards.
-    fpcr: crate::fpcr::Plan,
+    fpcr: crate::a64::fpcr::Plan,
     /// The entries of every module, one `<module> <address> <kind>` line
     /// each ([`entries_line`]), for the dev server's later discovery.
     entries: String,
@@ -266,8 +266,8 @@ fn emit_modules(
         functions: 0,
         unlifted: 0,
         unlifted_list: String::new(),
-        fpsr: crate::fpflags::Plan::default(),
-        fpcr: crate::fpcr::Plan::default(),
+        fpsr: crate::a64::fpflags::Plan::default(),
+        fpcr: crate::a64::fpcr::Plan::default(),
         entries: String::new(),
         cold_files: Vec::new(),
         cold_units: Vec::new(),
@@ -276,8 +276,8 @@ fn emit_modules(
     };
     let mut census = crate::total::Census::default();
     let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
-    let mut fpsr = crate::fpflags::Fpsr::new(placed);
-    let mut fpcr = crate::fpcr::Fpcr::default();
+    let mut fpsr = crate::a64::fpflags::Fpsr::new(placed);
+    let mut fpcr = crate::a64::fpcr::Fpcr::default();
     let cpu = Arm64 { cpu };
     let bound = program::bound_slots(placed);
     let guess_ranges: Vec<relift_emit::GuessRange> = placed
@@ -1372,7 +1372,7 @@ fn fallback_fonts(
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     use relift_switch_formats::bfttf::FontType;
-    let own = crate::fonts::dir(import);
+    let own = crate::switch::fonts::dir(import);
     let missing: Vec<FontType> = FontType::ALL
         .into_iter()
         .filter(|t| {
@@ -1384,7 +1384,7 @@ fn fallback_fonts(
         return Ok(());
     }
     let names = |v: &[FontType]| v.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ");
-    match crate::fonts::fallback(&cache_root(settings)?, &out.join(crate::fonts::DIR), &missing) {
+    match crate::switch::fonts::fallback(&cache_root(settings)?, &out.join(crate::switch::fonts::DIR), &missing) {
         Ok(made) => {
             let none: Vec<FontType> = missing.iter().copied().filter(|t| !made.contains(t)).collect();
             ui.note(&Line::new().text(format!(
@@ -1425,7 +1425,7 @@ fn lift_and_emit(
         .into());
     }
     let (mut loaded, npdm) = load_slots(&import)?;
-    let closed = crate::closed::check(npdm.as_ref(), &import)?;
+    let closed = crate::switch::closed::check(npdm.as_ref(), &import)?;
     if let Some(n) = closed {
         ui.note(&Line::new().text(n));
     }
@@ -1543,7 +1543,7 @@ fn lift_and_emit(
     }
     if console == relift_switch::cpu::Console::Switch2 {
         let jobs = relift_proc::workers::jobs().max(1);
-        let found = crate::shaders::discover(&import, out)?;
+        let found = crate::switch::shaders::discover(&import, out)?;
         ui.note(&Line::new().text(format!(
             "shaders: {} programs found in the import{}",
             found.programs,
@@ -1561,12 +1561,12 @@ fn lift_and_emit(
                 )
             }
         )));
-        let built = crate::shaders::build(
+        let built = crate::switch::shaders::build(
             out,
             jobs as usize,
-            &crate::shaders::host_modes(&settings.shader_math, false),
+            &crate::switch::shaders::host_modes(&settings.shader_math, false),
         )?;
-        crate::shaders::write_pack(out)?;
+        crate::switch::shaders::write_pack(out)?;
         if built.programs > 0 {
             let refused: Vec<String> = built
                 .refused
@@ -1585,11 +1585,11 @@ fn lift_and_emit(
             )));
         }
     }
-    if let Some((c, d)) = crate::nvndriver::write(&placed, cpu, &cdir)? {
+    if let Some((c, d)) = crate::switch::nvndriver::write(&placed, cpu, &cdir)? {
         if let Err(e) = &d.layout {
             ui.note(&Line::new().text(format!(
                 "nvn driver: NVN{} {}, no device layout ({e})",
-                if d.generation == crate::nvndriver::Generation::Nvn1 {
+                if d.generation == crate::switch::nvndriver::Generation::Nvn1 {
                     1
                 } else {
                     2
@@ -1996,7 +1996,7 @@ pub(crate) fn build_project(
         Some(c) => c.extras(&rt, true)?,
         None => crate::runtime_link::extras(&rt, &croot)?,
     };
-    if crate::shaders::has_programs(&out) {
+    if crate::switch::shaders::has_programs(&out) {
         let lib = crate::xlate::library(&croot, &runtime_dir(settings), cross.as_ref())?;
         extras.with_xlate(crate::runtime_link::Xlate {
             lib,
@@ -2370,16 +2370,16 @@ struct PackageRequest<'a> {
 }
 
 /// Translates a Switch 2 game's GPU programs for the device of a phone
-/// target (crate::shaders::build_target): the build machine's table is made
+/// target (crate::switch::shaders::build_target): the build machine's table is made
 /// for its own GPU and never goes to another device. Without the target's
 /// device file the app carries no table, and the note says where the file
 /// goes: the app writes it at its first start, and `relift push` fetches it.
 fn target_shaders(settings: &Settings, target: &str, ui: &mut Ui) -> Result<(), BoxError> {
     let (_, out) = project_out(settings)?;
     let jobs = relift_proc::workers::jobs().max(1) as usize;
-    match crate::shaders::build_target(&out, target, jobs)? {
-        crate::shaders::TargetBuilt::NoPrograms => {}
-        crate::shaders::TargetBuilt::NoDevice(want) => {
+    match crate::switch::shaders::build_target(&out, target, jobs)? {
+        crate::switch::shaders::TargetBuilt::NoPrograms => {}
+        crate::switch::shaders::TargetBuilt::NoDevice(want) => {
             ui.note(&Line::new().paint(
                 Paint::Yellow,
                 format!(
@@ -2391,7 +2391,7 @@ fn target_shaders(settings: &Settings, target: &str, ui: &mut Ui) -> Result<(), 
                 ),
             ));
         }
-        crate::shaders::TargetBuilt::Built(b) => {
+        crate::switch::shaders::TargetBuilt::Built(b) => {
             ui.note(&Line::new().text(format!(
                 "shaders: {} of {} translated for the {target} device",
                 b.translated, b.programs
@@ -2417,14 +2417,17 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     let shaders = match (req.import, project_out(settings)) {
         (Some(_), Ok((_, out))) => {
             if target.is_none() {
-                crate::shaders::ensure_native(&out, relift_proc::workers::jobs().max(1) as usize)?;
+                crate::switch::shaders::ensure_native(
+                    &out,
+                    relift_proc::workers::jobs().max(1) as usize,
+                )?;
             }
-            crate::shaders::tables_for(&out, target)
+            crate::switch::shaders::tables_for(&out, target)
         }
         _ => Vec::new(),
     };
     let fonts = match (req.import, project_out(settings)) {
-        (Some(_), Ok((_, out))) => crate::fonts::packaged(&out),
+        (Some(_), Ok((_, out))) => crate::switch::fonts::packaged(&out),
         _ => None,
     };
     let data_manifest = match (req.import, req.ios.is_some() || req.android.is_some()) {
@@ -2567,7 +2570,7 @@ pub fn run_run(
     let mut cmd = relift_proc::command(&built.exe);
     cmd.env(crate::dev::SOCKET_ENV, &sock);
     crate::gamedata::set_env(&mut cmd, &import);
-    crate::shaders::set_env(&mut cmd, &built.out);
+    crate::switch::shaders::set_env(&mut cmd, &built.out);
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }

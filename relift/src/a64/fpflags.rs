@@ -59,7 +59,7 @@ pub struct Fpsr {
     /// Whether any module holds an `MRS FPSR`; without one nothing runs.
     on: bool,
     /// Whether the linkage is kept, for this analysis or the FPCR proof
-    /// ([`crate::fpcr`]), which needs it when a module holds an `MSR FPCR`.
+    /// ([`crate::a64::fpcr`]), which needs it when a module holds an `MSR FPCR`.
     linkage: bool,
     /// Every definition of each exported name.
     defs: HashMap<String, Vec<u64>>,

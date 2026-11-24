@@ -564,7 +564,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 #### `relift coverage` and `relift diff` for every guest (medium)
 
 - Missing: both are Switch-only; other guests use `relift-gbrom functions`, `relift-gbarom functions` and the N64 and DS tools.
-- Where: `relift/src/coverage.rs`, `relift/src/diff.rs`, each guest's `tools`.
+- Where: `relift/src/coverage.rs`, `relift/src/switch/diff.rs`, each guest's `tools`.
 - Verify: `relift/tests/coverage.rs` cases on synthetic ROMs.
 
 ### Documentation

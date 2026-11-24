@@ -90,9 +90,9 @@ fn main() -> ExitCode {
             engine,
             serve,
             flip_read,
-        } => match relift::diff::run(
+        } => match relift::switch::diff::run(
             &settings,
-            &relift::diff::Request {
+            &relift::switch::diff::Request {
                 function: function.as_deref(),
                 count: *count,
                 skip: *skip,
@@ -115,9 +115,9 @@ fn main() -> ExitCode {
             chunk,
             timeout,
             ..
-        } => match relift::shaders::check_compile(
+        } => match relift::switch::shaders::check_compile(
             &settings,
-            &relift::shaders::CheckOptions {
+            &relift::switch::shaders::CheckOptions {
                 dir: build_dir,
                 device: device.as_deref(),
                 work: work.as_deref(),
@@ -136,7 +136,7 @@ fn main() -> ExitCode {
             trace,
             trace_dir,
             ..
-        } => relift::shaders::run(
+        } => relift::switch::shaders::run(
             build_dir,
             math,
             trace.as_deref().zip(trace_dir.as_deref()),

@@ -1393,7 +1393,7 @@ are also call boundaries. [inferred]
   FPCR zero starts with the FPCR guard (`sail::SLOW_FPCR`), tested once per
   function entry, call return and FPCR write through the hoisted local
   `g<fpcr>`, written as `RL_FPCR_GUARD(r)`. Once every module is lifted, the
-  build (`relift/src/fpcr.rs`) runs the proof of `cpus/arm64/src/fpcr.rs`:
+  build (`relift/src/a64/fpcr.rs`) runs the proof of `cpus/arm64/src/fpcr.rs`:
   when every `MSR FPCR` of the program writes the default mode, lifted
   code (hot and cold copies, mod variants) is compiled with
   `-DRL_FPCR_CONST`, which makes `RL_FPCR_GUARD` 0, so clang drops every
@@ -1420,7 +1420,7 @@ are also call boundaries. [inferred]
     search climbs from the function holding the write to every function
     that may call it (direct branches, an extent holding the entry or the
     instruction before it, PLT and GOT transfers, jump tables), up to six
-    levels, and stops at an escaped address (`relift/src/fpflags.rs` names
+    levels, and stops at an escaped address (`relift/src/a64/fpflags.rs` names
     them) or the program start. A function with no callers whose address
     does not escape is never entered, unless the program can look a
     function up by name at run time (`nn::ro::LookupSymbol`,
@@ -1471,7 +1471,7 @@ are also call boundaries. [inferred]
 - With one, flags are produced per function, not per program. FPSR's
   flags are sticky, so a read sees every flag raised on its thread since
   the last FPSR write. The flags-live analysis
-  (`cpus/arm64/src/flags/region.rs`, driven by `relift/src/fpflags.rs`)
+  (`cpus/arm64/src/flags/region.rs`, driven by `relift/src/a64/fpflags.rs`)
   walks back from each live read to the writes that bound it: an `MSR
   FPSR`, a callee that writes FPSR on every path, or the start of a thread
   (the program entry, where `bind` has cleared the host flags). A call on

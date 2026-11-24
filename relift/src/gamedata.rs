@@ -148,7 +148,7 @@ pub fn missing_source(import: &Path) -> Result<Option<(PathBuf, PathBuf)>, BoxEr
 /// other programs' romfs, `RELIFT_FONTS` at the shared fonts decoded from
 /// the player's system data.
 pub fn set_env(cmd: &mut std::process::Command, import: &Path) {
-    if let Some(f) = crate::fonts::dir(import) {
+    if let Some(f) = crate::switch::fonts::dir(import) {
         cmd.env("RELIFT_FONTS", f);
     }
     if let Some(r) = romfs(import) {
