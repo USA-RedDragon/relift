@@ -141,7 +141,7 @@ pub struct TraceSel {
 
 impl TraceSel {
     /// Parses `<key prefix>[,<key prefix>...]:<spec>` (see `Trace::parse`
-    /// for the spec).
+    /// for the spec); the prefix `*` selects every program.
     ///
     /// # Errors
     ///
@@ -150,10 +150,20 @@ impl TraceSel {
         let (keys, spec) = s
             .split_once(':')
             .ok_or_else(|| format!("trace {s:?}: <key prefix>[,...]:<condition>"))?;
-        let keys: Vec<String> = keys.split(',').map(str::to_ascii_lowercase).collect();
+        // `*`: every program
+        let keys: Vec<String> = keys
+            .split(',')
+            .map(|k| {
+                if k == "*" {
+                    String::new()
+                } else {
+                    k.to_ascii_lowercase()
+                }
+            })
+            .collect();
         if keys
             .iter()
-            .any(|k| k.is_empty() || !k.bytes().all(|b| b.is_ascii_hexdigit()))
+            .any(|k| !k.bytes().all(|b| b.is_ascii_hexdigit()))
         {
             return Err(format!("trace {s:?}: a key prefix is not hex"));
         }

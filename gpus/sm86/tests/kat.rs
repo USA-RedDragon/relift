@@ -13,7 +13,7 @@ use relift_gpu_nv::translate::pseudo::{I2F_IABS, I2F_INEG, MUFU_SAT, RRO_EX2, RR
 use relift_gpu_nv::translate::{
     Denorm as HostDenorm, FIX_ROUND_AFTER, FIX_ZERO_SIGN, GUEST_MEMORY_SET, HostProfile, Math,
     Options, POOL_ARRAY_BINDING, POOL_SET, POOL_TABLE_BINDING, POOL_TABLE_FIRST, POOL_TABLE_STRIDE,
-    TRACE_BINDING, TRACE_HEADER_WORDS, TRACE_SLOT_WORDS, Trace,
+    TRACE_BINDING, TRACE_HEADER_WORDS, TRACE_SLOT_WORDS, TRACE_STAGE_WORDS, Trace,
 };
 use relift_gpu_nv::{Inst, Operand, RegMods};
 use relift_gpu_spvi::{Denorm, Env, Memory, Module, Run};
@@ -971,7 +971,8 @@ fn trace_misses_leave_the_buffer_alone() {
 /// number, PC, destination, value, invocation id and source pairs.
 fn slot(t: &[u8], k: usize) -> Vec<u32> {
     let w = |i: usize| u32::from_le_bytes(t[4 * i..4 * i + 4].try_into().unwrap());
-    let base = TRACE_HEADER_WORDS as usize + TRACE_SLOT_WORDS as usize * k;
+    let base =
+        (5 * TRACE_STAGE_WORDS + TRACE_HEADER_WORDS) as usize + TRACE_SLOT_WORDS as usize * k;
     (0..TRACE_SLOT_WORDS as usize)
         .map(|i| w(base + i))
         .collect()

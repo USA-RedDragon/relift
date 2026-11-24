@@ -493,6 +493,7 @@ impl Ctx {
         keep(self, words, &mut vars);
         self.m.emit_void(op::BRANCH, &[inner]);
         self.m.emit_void(op::LABEL, &[miss]);
+        self.trace_miss(addr);
         let words = direct(self, op_fn);
         keep(self, words, &mut vars);
         self.m.emit_void(op::BRANCH, &[inner]);

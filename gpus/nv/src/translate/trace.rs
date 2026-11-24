@@ -38,6 +38,11 @@ pub const TRACE_HEADER_WORDS: u32 = 16;
 pub const TRACE_SLOT_WORDS: u32 = 16;
 /// Source pairs per slot.
 const SOURCES: usize = 4;
+/// Words of each stage's region of the trace buffer (see
+/// [`Trace::stage_base`]): a program of up to 16383 instructions.
+pub const TRACE_STAGE_WORDS: u32 = TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * 16384;
+/// Destination of a [`Trace::miss`] record.
+pub const TRACE_MISS: u32 = 0x200;
 /// Source id of a constant bank word.
 pub const TRACE_SOURCE_CBUF: u32 = 0x8000_0000;
 /// Register number offset of uniform registers in sources and destinations.
@@ -60,6 +65,12 @@ pub struct Trace {
     pub denorm: bool,
     /// Every write (with `pc` and `reg`, one register at one instruction).
     pub any: bool,
+    /// A global memory access whose address lies in no pool of the pool
+    /// table nor in a storage buffer slot (graphics programs), which goes
+    /// through the guest address as a device address: recorded with
+    /// destination [`TRACE_MISS`], the address's low word as the value and
+    /// its high word as the first source.
+    pub miss: bool,
     /// Only the instruction at this byte address.
     pub pc: Option<u64>,
     /// Only writes of this register (`TRACE_UREG + n` for a uniform one).
@@ -87,11 +98,12 @@ impl Trace {
                 "inf" => t.inf = true,
                 "denorm" => t.denorm = true,
                 "any" => t.any = true,
+                "miss" => t.miss = true,
                 "" => {}
                 _ => return Err(format!("trace condition {c:?}")),
             }
         }
-        if !(t.nan || t.inf || t.denorm || t.any) {
+        if !(t.nan || t.inf || t.denorm || t.any || t.miss) {
             return Err(format!("trace spec {s:?} names no condition"));
         }
         if let Some(p) = pc {
@@ -117,6 +129,25 @@ impl Trace {
     /// Words of the trace buffer of a program of `insts` instructions.
     pub fn words(insts: usize) -> u32 {
         TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * (insts as u32 + 1)
+    }
+
+    /// The word where stage `stage`'s region of the trace buffer starts:
+    /// every stage of a draw has its own [`TRACE_STAGE_WORDS`] (vertex 0,
+    /// fragment 1, geometry 2, tessellation control 3 and evaluation 4,
+    /// compute 5, task 6, mesh 7, the runtime's stage numbers).
+    pub fn stage_base(stage: super::Stage) -> u32 {
+        use super::Stage;
+        let k = match stage {
+            Stage::Vertex => 0,
+            Stage::Fragment => 1,
+            Stage::Geometry => 2,
+            Stage::TessControl => 3,
+            Stage::TessEval => 4,
+            Stage::Compute => 5,
+            Stage::Task => 6,
+            Stage::Mesh => 7,
+        };
+        k * TRACE_STAGE_WORDS
     }
 }
 
@@ -175,7 +206,7 @@ impl Ctx {
     pub(crate) fn trace_begin(&mut self, mnemonic: &str, pc: u64) {
         let on = match &self.trace.spec {
             Some(t) if self.simt.is_none() => {
-                t.pc.is_none_or(|p| p == pc) && (t.any || makes_floats(mnemonic))
+                t.pc.is_none_or(|p| p == pc) && (t.any || t.miss || makes_floats(mnemonic))
             }
             _ => false,
         };
@@ -210,7 +241,8 @@ impl Ctx {
         self.globals.push(var);
         self.builtins.insert(TRACE_KEY, var);
         self.trace.var = Some(var);
-        self.iface.trace_words = Trace::words(self.trace.slots as usize);
+        self.iface.trace_words =
+            Trace::stage_base(self.stage) + Trace::words(self.trace.slots as usize);
         var
     }
 
@@ -298,30 +330,13 @@ impl Ctx {
                 or(self, x);
             }
         }
-        let mut cond = cond.expect("a condition");
+        let Some(mut cond) = cond else {
+            return; // only `miss`: no register check
+        };
         if let Some(g) = self.store_guard {
             cond = self.m.emit(op::LOGICAL_AND, b, &[cond, g]);
         }
-        let var = self.trace_var();
-        let pu = self.m.t_ptr(STORAGE_BUFFER, u);
-        let zero = self.m.c_u32(0);
-        let one = self.m.c_u32(1);
-        let scope = self.m.c_u32(SCOPE_DEVICE);
-        let sem = self.m.c_u32(0);
-        let k = (self.trace.pc / 16) as u32;
-        let k = if k < self.trace.slots {
-            k
-        } else {
-            self.trace.slots
-        };
-        let _ = one;
-        // Only an invocation that meets the condition touches the buffer, and only the first hit of an instruction
-        // takes a sequence number and writes the record: a device-scope atomic on one shared word for every
-        // invocation of every traced instruction (and every miss storing a record to the trash slot) made a large
-        // fragment program run long enough for the host's watchdog to lose the device.
-        let inv = self.trace_invocation();
         let block = self.m.block();
-        let none = self.m.c_u32(u32::MAX);
         let srcs: Vec<(u32, u32)> = self
             .trace
             .srcs
@@ -330,10 +345,51 @@ impl Ctx {
             .map(|s| (s.0, s.1))
             .take(SOURCES)
             .collect();
+        self.trace_record(cond, reg, val, &srcs);
+    }
+
+    /// A global access of the address `addr` (a 64-bit value) that found no
+    /// pool or slot: a [`Trace::miss`] record.
+    pub(crate) fn trace_miss(&mut self, addr: u32) {
+        if !self.trace.on || self.collecting() || !self.trace.spec.as_ref().is_some_and(|t| t.miss)
+        {
+            return;
+        }
+        let (lo, hi) = self.addr_words(addr);
+        let t = self.m.c_bool(true);
+        self.trace_record(t, TRACE_MISS, lo, &[(TRACE_MISS + 1, hi)]);
+    }
+
+    /// The record of the instruction being translated when `cond` holds: its
+    /// destination id `dst`, the value and up to four (source, value) pairs.
+    fn trace_record(&mut self, cond: u32, dst: u32, val: u32, srcs: &[(u32, u32)]) {
+        let u = self.u32t();
+        let b = self.boolt();
+        let var = self.trace_var();
+        let pu = self.m.t_ptr(STORAGE_BUFFER, u);
+        let zero = self.m.c_u32(0);
+        let scope = self.m.c_u32(SCOPE_DEVICE);
+        let sem = self.m.c_u32(0);
+        let k = (self.trace.pc / 16) as u32;
+        let k = if k < self.trace.slots {
+            k
+        } else {
+            self.trace.slots
+        };
+        // Only an invocation that meets the condition touches the buffer, and only the first hit of an instruction
+        // takes a sequence number and writes the record: a device-scope atomic on one shared word for every
+        // invocation of every traced instruction (and every miss storing a record to the trash slot) made a large
+        // fragment program run long enough for the host's watchdog to lose the device.
+        let inv = self.trace_invocation();
+        let none = self.m.c_u32(u32::MAX);
         let pc = self.m.c_u32(self.trace.pc as u32);
-        let dst = self.m.c_u32(reg);
+        let dst = self.m.c_u32(dst);
         let one = self.m.c_u32(1);
-        let hits_at = self.m.c_u32(TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k);
+        let region = Trace::stage_base(self.stage);
+        let hits_at = self
+            .m
+            .c_u32(region + TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k);
+        let seq_at = self.m.c_u32(region);
         let (hit, first_l, merge_first, merge_hit) =
             (self.m.id(), self.m.id(), self.m.id(), self.m.id());
         self.m.emit_void(op::SELECTION_MERGE, &[merge_hit, 0]);
@@ -347,7 +403,7 @@ impl Ctx {
         self.m
             .emit_void(op::BRANCH_CONDITIONAL, &[was_first, first_l, merge_first]);
         self.m.emit_void(op::LABEL, &[first_l]);
-        let seq_p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, zero]);
+        let seq_p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, seq_at]);
         let seq = self.m.emit(ATOMIC_I_ADD, u, &[seq_p, scope, sem, one]);
         let mut words = vec![seq, pc, dst, val, inv[0], inv[1], inv[2]];
         for n in 0..SOURCES {
@@ -359,7 +415,7 @@ impl Ctx {
                 None => words.extend([none, zero]),
             }
         }
-        let base = TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k;
+        let base = region + TRACE_HEADER_WORDS + TRACE_SLOT_WORDS * k;
         for (n, w) in words.into_iter().enumerate() {
             let at = self.m.c_u32(base + 1 + n as u32);
             let p = self.m.emit(op::ACCESS_CHAIN, pu, &[var, zero, at]);

@@ -649,6 +649,50 @@ fn trace_mode_and_debug_info_in_graphics_stages() {
         };
         let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("stage {stage}: {e}"));
         common::validate(&s.spirv);
-        assert_eq!(s.interface.trace_words, 16 + 16 * 5, "stage {stage}");
+        let base = if stage == 5 {
+            relift_gpu_nv::translate::TRACE_STAGE_WORDS
+        } else {
+            0
+        };
+        assert_eq!(s.interface.trace_words, base + 16 + 16 * 5, "stage {stage}");
     }
+}
+
+/// LDG.E R4, [R2.64] (32 bits): an address in registers, which no slot or
+/// route proves, so a graphics program searches the pool table for it.
+fn ldg_reg(d: u64, a: u64) -> [u8; 16] {
+    w(
+        0x181,
+        &[
+            (9, 3, 4),
+            (16, 8, d),
+            (24, 8, a),
+            (32, 6, 4),
+            (72, 1, 1),
+            (73, 3, 4),
+            (76, 1, 1),
+            (81, 3, 7),
+            (84, 3, 1),
+            (90, 1, 1),
+            (91, 1, 1),
+        ],
+    )
+}
+
+/// Trace mode's `miss` records a global access whose address no pool or
+/// slot holds: a vertex program that loads through a register address gets
+/// a trace buffer, one without global accesses none, and both validate.
+#[test]
+fn trace_mode_records_global_misses() {
+    let o = Options {
+        host: relift_gpu_nv::translate::HostProfile::preset("nvidia").unwrap(),
+        trace: Some(relift_gpu_nv::translate::Trace::parse("miss").unwrap()),
+        ..Options::default()
+    };
+    let with = program(1, &[], &[ldg_reg(4, 2)]);
+    let s = translate_with(&with, &o).unwrap();
+    assert!(s.interface.trace_words > 0, "the load's miss is recorded");
+    let without = program(1, &[], &[fmul(4, 1, 2)]);
+    let s = translate_with(&without, &o).unwrap();
+    assert_eq!(s.interface.trace_words, 0, "nothing to record");
 }
