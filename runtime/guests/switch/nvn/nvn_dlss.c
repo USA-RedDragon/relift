@@ -117,8 +117,27 @@ rl_fn nvn_dlss_callback(uint32_t i)
 /** @brief The console DLSS library's object, from its Handshake with relift's callbacks; 0 before. */
 static uint64_t g_library;
 
-/** @brief Finds the game's DLSS library ("dlss") and hands it relift's driver callbacks, once. */
-static int library_up(rl_ctx *c, uint8_t *mem)
+/** @brief The network whose CreateNetwork is running, for the callbacks that allocate its memory (0 outside one). */
+static uint64_t g_creating;
+
+/** @brief The console library's vtable slots relift calls (.work/dlss/launch.md): init(lib, device), CreateNetwork(lib, desc). */
+enum { LIB_INIT = 0, LIB_CREATE_NETWORK = 4 };
+
+/** @brief Calls slot `slot` of the library object's vtable with the library and up to 7 more arguments. */
+static int library_call(rl_ctx *c, uint8_t *mem, uint32_t slot, const uint64_t *args, unsigned n, uint64_t *ret)
+{
+    uint64_t a[8] = { g_library };
+    for (unsigned i = 0; i < n && i < 7; i++)
+        a[1 + i] = args[i];
+    uint64_t fn = rl_ld64(mem, rl_ld64(mem, g_library) + 8u * slot);
+    return nvn_guest_call(c, mem, fn, a, 1 + n, ret);
+}
+
+/**
+ * @brief Finds the game's DLSS library ("dlss"), hands it relift's driver callbacks, and runs its init with the
+ * device, once, as the driver's nvnDeviceInitialize does for a device that enables DLSS (sdk 0x658390).
+ */
+static int library_up(rl_ctx *c, uint8_t *mem, uint64_t device)
 {
     if (g_library)
         return RL_OK;
@@ -135,8 +154,17 @@ static int library_up(rl_ctx *c, uint8_t *mem)
     if (!lib)
         return rl_guest_fatal(c, "nvn", "the game's DLSS library refused relift's driver callbacks");
     g_library = lib;
-    rl_log(RL_LOG_INFO, "nvn", "console DLSS library up: Handshake 0x%llx, library object 0x%llx",
-           (unsigned long long)handshake, (unsigned long long)lib);
+    uint64_t ok = 0;
+    rc = library_call(c, mem, LIB_INIT, &device, 1, &ok);
+    if (rc != RL_OK)
+        return rc;
+    if (!(ok & 1)) {
+        g_library = 0;
+        return rl_guest_fatal(c, "nvn", "the game's DLSS library failed its init on device 0x%llx",
+                              (unsigned long long)device);
+    }
+    rl_log(RL_LOG_INFO, "nvn", "console DLSS library up: Handshake 0x%llx, library object 0x%llx, device 0x%llx",
+           (unsigned long long)handshake, (unsigned long long)lib, (unsigned long long)device);
     return RL_OK;
 }
 
@@ -144,7 +172,37 @@ static int library_up(rl_ctx *c, uint8_t *mem)
 typedef struct nvn_dlss_net {
     nvn_obj o;
     uint32_t flags, method, preset, out_w, out_h, render_w, render_h;
+    /** @brief The console library's network (its CreateNetwork result), 0 when relift's upscaler runs. */
+    uint64_t lib_net;
 } nvn_dlss_net;
+
+/**
+ * @brief The network descriptor the driver gives the library's CreateNetwork, at +0x210 of the NVNdlssNetwork (sdk
+ * 0x658b20; the driver clears 0x258 bytes of the network first): the builder's flags masked to 0x4e with bit 0 set
+ * when the builder's bit 0 is clear, method, preset, the optimal render size, the output size, the builder's flag bit
+ * 28, the minimum and the maximum render size.
+ */
+static void network_desc(uint8_t *mem, uint64_t net, uint64_t builder, const uint32_t opt[6])
+{
+    uint32_t flags = rl_ld32(mem, builder + 0x20), method = rl_ld32(mem, builder + 0x24);
+    uint32_t f = flags & 0x4eu;
+    if (!(flags & 1u))
+        f |= 1u;
+    uint64_t d = net + 0x210;
+    rl_st32(mem, net + 0x20c, method);
+    rl_st32(mem, d + 0x00, f);
+    rl_st32(mem, d + 0x04, method);
+    rl_st32(mem, d + 0x08, rl_ld32(mem, builder + 0x28));
+    rl_st32(mem, d + 0x0c, opt[0]);
+    rl_st32(mem, d + 0x10, opt[1]);
+    rl_st32(mem, d + 0x14, rl_ld32(mem, builder + 0x2c));
+    rl_st32(mem, d + 0x18, rl_ld32(mem, builder + 0x30));
+    rl_st32(mem, d + 0x1c, (flags >> 28) & 1u);
+    rl_st32(mem, d + 0x20, opt[2]);
+    rl_st32(mem, d + 0x24, opt[3]);
+    rl_st32(mem, d + 0x28, opt[4]);
+    rl_st32(mem, d + 0x2c, opt[5]);
+}
 
 static void trace(const char *fmt, ...) RL_PRINTF(1, 2);
 static void trace(const char *fmt, ...)
@@ -307,14 +365,31 @@ uint64_t nvnh_nvnDlssNetworkInitialize(rl_ctx *c, uint8_t *mem)
         rc = get(c, mem, "nvnDlssNetworkBuilderGetPreset", builder, 0, NULL, &preset);
     if (rc != RL_OK)
         return (uint64_t)rc;
+    nvn_dlss_optimal(wh[0], wh[1], (uint32_t)method, opt);
+    uint64_t lib_net = 0;
     if (rl_upscale_resolve(rl_setting_enum("picture.upscaler"), true, false) == RL_UPSCALE_GAME) {
-        rc = library_up(c, mem);
+        rc = library_up(c, mem, rl_ld64(mem, builder));
         if (rc != RL_OK)
             return (uint64_t)rc;
+        memset(mem + net, 0, 0x258);
+        network_desc(mem, net, builder, opt);
+        uint64_t desc = net + 0x210;
+        g_creating = net;
+        rc = library_call(c, mem, LIB_CREATE_NETWORK, &desc, 1, &lib_net);
+        g_creating = 0;
+        if (rc != RL_OK)
+            return (uint64_t)rc;
+        rl_st64(mem, net + 0xa0, lib_net);
+        rl_log(RL_LOG_INFO, "nvn", "console DLSS network 0x%llx created: 0x%llx", (unsigned long long)net,
+               (unsigned long long)lib_net);
+        if (!lib_net) {
+            c->x[0] = 0;
+            return nvn_ret(c);
+        }
     }
     nvn_dlss_net *n = (nvn_dlss_net *)nvn_obj_new(net, NVN_DLSS_NETWORK, sizeof *n);
     if (n) {
-        nvn_dlss_optimal(wh[0], wh[1], (uint32_t)method, opt);
+        n->lib_net = lib_net;
         n->flags = (uint32_t)flags;
         n->method = (uint32_t)method;
         n->preset = (uint32_t)preset;
