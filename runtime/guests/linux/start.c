@@ -12,7 +12,7 @@
  */
 #include "hostio.h"
 #include "linux_priv.h"
-#include "arm64.h"
+#include "arch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,13 +32,6 @@ enum {
     STACK_GAP = 256u << 20,
     HEAP_ALIGN = 1u << 20,
     TOP_RESERVE = 1u << 20
-};
-
-static const rl_guest_desc linux_guest = {
-    .name = "linux",
-    .page_size = L_PAGE,
-    .address_bits = 39,
-    .tick_hz = RL_CNTFRQ,
 };
 
 static uint32_t vm_perm_of(uint32_t p)
@@ -159,6 +152,17 @@ static uint64_t push_bytes(uint64_t *sp, const void *b, uint64_t n)
 
 static uint64_t push_str(uint64_t *sp, const char *s) { return push_bytes(sp, s, strlen(s) + 1); }
 
+/** @brief Writes n words of the architecture's word size at guest address at; returns the address after them. */
+static uint64_t put_words(uint64_t at, const uint64_t *w, uint64_t n)
+{
+    for (uint64_t i = 0; i < n; i++) {
+        uint32_t w32 = (uint32_t)w[i];
+        rl_vm_kernel_write(&lx.vm, at, lx_arch_word == 8 ? (const void *)&w[i] : (const void *)&w32, lx_arch_word);
+        at += lx_arch_word;
+    }
+    return at;
+}
+
 static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **argv)
 {
     uint64_t top = lx.stack_hi;
@@ -177,7 +181,7 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
         envp[i] = push_str(&sp, host_environ[i]);
     for (int i = argc - 1; i >= 0; i--)
         argp[i] = push_str(&sp, argv[i]);
-    uint64_t platform = push_str(&sp, "aarch64");
+    uint64_t platform = push_str(&sp, lx_arch_platform);
     uint8_t rnd[16];
     if (!rl_host_random(rnd, sizeof rnd))
         memset(rnd, 0x5a, sizeof rnd);
@@ -186,7 +190,7 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
     uint32_t uid = hio_uid(), gid = hio_gid();
     const rl_linux_module *main_module = module_of(p, RL_LINUX_MAIN);
     const rl_linux_module *interp = module_of(p, RL_LINUX_INTERPRETER);
-    uint64_t aux[][2] = {
+    uint64_t aux[24][2] = {
         { L_AT_PHDR, main_module->phdr },
         { L_AT_PHENT, main_module->phent },
         { L_AT_PHNUM, main_module->phnum },
@@ -200,29 +204,27 @@ static int build_stack(rl_ctx *c, const rl_linux_program *p, int argc, char **ar
         { L_AT_EGID, gid },
         { L_AT_SECURE, 0 },
         { L_AT_RANDOM, random },
-        { L_AT_HWCAP, p->hwcap },
-        { L_AT_HWCAP2, 0 },
         { L_AT_PLATFORM, platform },
         { L_AT_EXECFN, execfn },
         { L_AT_CLKTCK, 100 },
-        { L_AT_MINSIGSTKSZ, L_MINSIGSTKSZ },
-        { L_AT_NULL, 0 },
     };
-    uint64_t words = 1 + (uint64_t)argc + 1 + (uint64_t)envn + 1 + sizeof aux / 8;
-    sp -= words * 8;
+    size_t aux_n = 16;
+    aux_n += lx_arch_aux_extra(p, aux + aux_n);
+    aux[aux_n][0] = L_AT_NULL;
+    aux[aux_n][1] = 0;
+    aux_n++;
+    uint64_t words = 1 + (uint64_t)argc + 1 + (uint64_t)envn + 1 + aux_n * 2;
+    sp -= words * lx_arch_word;
     sp &= ~15ull;
     uint64_t at = sp;
     uint64_t n = (uint64_t)argc;
-    rl_vm_kernel_write(&lx.vm, at, &n, 8);
-    at += 8;
-    rl_vm_kernel_write(&lx.vm, at, argp, (uint64_t)argc * 8);
-    at += ((uint64_t)argc + 1) * 8;
-    rl_vm_kernel_write(&lx.vm, at, envp, (uint64_t)envn * 8);
-    at += ((uint64_t)envn + 1) * 8;
-    rl_vm_kernel_write(&lx.vm, at, aux, sizeof aux);
+    at = put_words(at, &n, 1);
+    at = put_words(at, argp, (uint64_t)argc + 1);
+    at = put_words(at, envp, (uint64_t)envn + 1);
+    put_words(at, &aux[0][0], aux_n * 2);
     free(envp);
     free(argp);
-    c->sp = sp;
+    lx_arch_start_regs(c, sp, 0);
     return 0;
 }
 
@@ -234,7 +236,7 @@ static int64_t locked(lx_sys_fn *f, rl_ctx *c, uint8_t *mem, const uint64_t a[6]
     return r;
 }
 
-static int64_t dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6])
+int64_t lx_dispatch(rl_ctx *c, uint8_t *mem, uint32_t nr, const uint64_t a[6])
 {
     int64_t r;
     switch (nr) {
@@ -290,37 +292,39 @@ static bool restarts(int64_t r)
     return r == -L_ERESTARTSYS && (flags & L_SA_RESTART) != 0;
 }
 
-int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
+int lx_syscall_entry(rl_ctx *c, uint8_t *mem)
 {
-    (void)imm;
-    rl_clrex(&c->excl);
-    uint64_t a[6] = { c->x[0], c->x[1], c->x[2], c->x[3], c->x[4], c->x[5] };
-    uint32_t nr = (uint32_t)c->x[8];
+    lx_arch_sys_begin(c);
+    uint64_t a[6];
+    uint32_t nr;
+    lx_arch_sys_args(c, &nr, a);
     for (;;) {
         if (rl_cfg()->trace_os)
-            rl_log(RL_LOG_INFO, "linux", "svc %u (0x%llx, 0x%llx, 0x%llx, 0x%llx)", nr, (unsigned long long)a[0],
+            rl_log(RL_LOG_INFO, "linux", "syscall %u (0x%llx, 0x%llx, 0x%llx, 0x%llx)", nr, (unsigned long long)a[0],
                    (unsigned long long)a[1], (unsigned long long)a[2], (unsigned long long)a[3]);
-        int64_t r = dispatch(c, mem, nr, a);
+        int64_t r = lx_arch_syscall(c, mem, nr, a);
         if (rl_cfg()->trace_os) {
             char path[96] = "";
-            if ((nr == 56 || nr == 79 || nr == 48) && lx_get(path, a[1], sizeof path - 1))
+            if (lx_arch_traces_path(nr) && lx_get(path, a[1], sizeof path - 1))
                 path[sizeof path - 1] = 0;
-            rl_log(RL_LOG_INFO, "linux", "  svc %u = %lld %s", nr, (long long)r, path);
+            rl_log(RL_LOG_INFO, "linux", "  syscall %u = %lld %s", nr, (long long)r, path);
         }
         if (r == LX_PENDING)
             return RL_PENDING;
         bool restart = r == -L_ERESTARTSYS || r == -L_ERESTARTNOHAND || r == -L_ERESTART_RESTARTBLOCK;
         if (!restart) {
-            c->x[0] = (uint64_t)r;
+            lx_arch_sys_result(c, r);
             return lx_signal_deliver(c, mem);
         }
         restart = restarts(r);
-        c->x[0] = restart ? a[0] : (uint64_t)-(int64_t)L_EINTR;
+        if (restart)
+            lx_arch_sys_restart(c, nr, a);
+        else
+            lx_arch_sys_result(c, -(int64_t)L_EINTR);
         int rc = lx_signal_deliver(c, mem);
         if (rc != RL_OK || !restart)
             return rc;
-        c->x[8] = nr;
-        rl_clrex(&c->excl);
+        lx_arch_sys_begin(c);
     }
 }
 
@@ -356,22 +360,17 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
     if (!rl_cfg()->loaded)
         rl_config_load();
     hio_init();
-    if (rl_core_init(&linux_guest, rl_arm64_cpu()) != 0)
+    if (lx_arch_core_init() != 0)
         return log_fail("cannot start the runtime core");
-    unsigned bits = 39;
-    if (rl_vm_init(&lx.vm, bits, 0) != 0) {
-        bits = 36;
-        if (rl_vm_init(&lx.vm, bits, 0) != 0)
-            return log_fail("cannot reserve the guest address space");
-    }
-    rl_arm64_set_va_bits(bits);
+    if (lx_arch_vm_init(&lx.vm) != 0)
+        return log_fail("cannot reserve the guest address space");
     rl_set_mem_base(lx.vm.base);
     rl_fault_install(&lx.vm);
     if (!module_of(p, RL_LINUX_MAIN))
         return log_fail("the program has no executable");
     if (load_image(p) != 0)
         return 1;
-    lx.stack_hi = lx.vm.size - TOP_RESERVE;
+    lx.stack_hi = lx_arch_space_top(&lx.vm) - TOP_RESERVE;
     lx.stack_lo = lx.stack_hi - MAIN_STACK;
     lx.mmap_top = lx.stack_lo - STACK_GAP;
     lx.mmap_floor = lx.brk_limit + STACK_GAP;
@@ -380,7 +379,9 @@ int lx_start(const rl_linux_program *p, int argc, char **argv, rl_ctx **out)
         return log_fail("the address space is too small");
     lx_fs_init();
     lx_signal_init();
-    rl_arm64_set_safepoint_hook(lx_safepoint);
+    lx_arch_install_hooks();
+    if (lx_arch_map_extra() != 0)
+        return log_fail("cannot map the architecture's pages");
     lx_proc_init();
     rl_dispatch_set_image(p->image_id);
     if (rl_dispatch_reserve(p->code_lo, p->code_hi) != 0)
@@ -436,7 +437,7 @@ int rl_linux_main(const rl_linux_program *p, int argc, char **argv)
     const rl_linux_module *start = module_of(p, RL_LINUX_INTERPRETER);
     if (!start)
         start = module_of(p, RL_LINUX_MAIN);
-    int rc = rl_call_guest(c, rl_mem_base(), start->entry);
+    int rc = lx_arch_call_guest(c, rl_mem_base(), start->entry);
     int status = finish(c, rc);
     if (rc == RL_PENDING && c->pend.kind == RL_PEND_EXIT_THREAD) {
         lx_thread_end(lx_cur());

@@ -5,7 +5,7 @@
  * address map (rl_vm). A page is mapped when its block's tag is 1; the
  * unmapped space has tag 0 and no permissions.
  */
-#include "arm64.h"
+#include "arch.h"
 #include "linux_priv.h"
 
 #include <errno.h>
@@ -81,7 +81,7 @@ static uint32_t vm_perm(uint32_t prot)
  */
 static int64_t exec_refused(rl_ctx *c, uint32_t prot)
 {
-    if (!(prot & L_PROT_EXEC) || rl_arm64_trampoline())
+    if (!(prot & L_PROT_EXEC) || lx_arch_trampoline())
         return 0;
     rl_guest_fatal(c, "linux",
                    "the program maps executable memory (protection 0x%x), which a build with direct returns does not take: "

@@ -13,27 +13,10 @@
  * after the svc that delivered it, and a handler that changes it continues
  * there when it returns.
  */
-#include "arm64.h"
+#include "arch.h"
 #include "linux_priv.h"
 
 #include <string.h>
-
-enum {
-    FRAME_INFO = 0,
-    FRAME_UC = L_SIGINFO_BYTES,
-    UC_STACK = 16,
-    UC_SIGMASK = 40,
-    UC_FAULT = L_UCONTEXT_MCONTEXT,
-    UC_REGS = UC_FAULT + 8,
-    UC_SP = UC_REGS + 31 * 8,
-    UC_PC = UC_SP + 8,
-    UC_PSTATE = UC_PC + 8,
-    UC_RESERVED = UC_PSTATE + 16,
-    FRAME_BYTES = L_SIGINFO_BYTES + L_UCONTEXT_MCONTEXT + L_SIGCONTEXT_BYTES
-};
-
-#define LX_FPSIMD_MAGIC 0x46508001u
-#define LX_FPSIMD_SIZE 0x210u
 
 static uint64_t bit(int sig) { return 1ull << (sig - 1); }
 
@@ -137,34 +120,15 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
         sp = lx_cur()->altstack_sp + lx_cur()->altstack_size;
         on_alt = true;
     } else {
-        sp = c->sp;
+        sp = lx_arch_sp(c);
     }
-    uint64_t frame = (sp - FRAME_BYTES) & ~15ull;
-    if (!lx_ok(frame, FRAME_BYTES, RL_VM_W))
+    uint64_t frame = lx_arch_frame_place(sp);
+    if (!lx_ok(frame, lx_arch_frame_bytes(), RL_VM_W))
         return rl_guest_fatal(c, "signal", "no room on the stack to deliver signal %d (sp 0x%llx)", sig, (unsigned long long)sp);
     const uint64_t bias = lx_cur()->resume_bias;
-    const uint64_t resume = c->pc + bias;
-    uint8_t *f = mem + frame;
-    memset(f, 0, FRAME_BYTES);
-    int32_t si[4] = { sig, 0, p->code, 0 };
-    memcpy(f + FRAME_INFO, si, 16);
-    memcpy(f + FRAME_INFO + 16, &p->pid, 4);
-    memcpy(f + FRAME_INFO + 20, &p->uid, 4);
-    uint8_t *uc = f + FRAME_UC;
-    int32_t ss_flags = lx_cur()->on_altstack ? L_SS_ONSTACK : (lx_cur()->altstack_size ? 0 : L_SS_DISABLE);
-    memcpy(uc + UC_STACK, &lx_cur()->altstack_sp, 8);
-    memcpy(uc + UC_STACK + 8, &ss_flags, 4);
-    memcpy(uc + UC_STACK + 16, &lx_cur()->altstack_size, 8);
-    memcpy(uc + UC_SIGMASK, &lx_cur()->blocked, 8);
-    memcpy(uc + UC_REGS, c->x, 31 * 8);
-    memcpy(uc + UC_SP, &c->sp, 8);
-    memcpy(uc + UC_PC, &resume, 8);
-    uint32_t hdr[2] = { LX_FPSIMD_MAGIC, LX_FPSIMD_SIZE };
-    uint32_t fp[2] = { rl_mrs_fpsr(c), (uint32_t)rl_mrs_fpcr(c) };
-    memcpy(uc + UC_RESERVED, hdr, 8);
-    memcpy(uc + UC_RESERVED + 8, fp, 8);
-    for (int i = 0; i < 32; i++)
-        memcpy(uc + UC_RESERVED + 16 + 16 * i, &c->v[i], 16);
+    const uint64_t resume = lx_arch_pc(c) + bias;
+    if (lx_arch_frame_build(c, mem, frame, sig, p, &act, resume) != 0)
+        return rl_guest_fatal(c, "signal", "signal %d cannot be delivered: the handler has no return trampoline", sig);
 
     uint64_t old_blocked = lx_cur()->blocked;
     bool old_on_alt = lx_cur()->on_altstack;
@@ -177,11 +141,6 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     if (on_alt)
         lx_cur()->on_altstack = true;
 
-    c->x[0] = (uint64_t)sig;
-    c->x[1] = frame + FRAME_INFO;
-    c->x[2] = frame + FRAME_UC;
-    c->x[30] = (act.flags & L_SA_RESTORER) ? act.restorer : 0;
-    c->sp = frame;
     int rc = RL_OK;
     for (int more = next_pending(); more; more = next_pending()) {
         lx_pending_sig q;
@@ -196,26 +155,17 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
     if (rc != RL_OK)
         return rc;
     lx_cur()->handlers++;
-    rc = rl_call_guest(c, mem, act.handler);
+    rc = lx_arch_call_guest(c, mem, act.handler);
     lx_cur()->handlers--;
     if (rc != RL_OK)
         return rc;
 
-    uint64_t new_pc;
-    memcpy(&new_pc, uc + UC_PC, 8);
-    memcpy(c->x, uc + UC_REGS, 31 * 8);
-    memcpy(&c->sp, uc + UC_SP, 8);
-    memcpy(fp, uc + UC_RESERVED + 8, 8);
-    rl_msr_fpsr(c, fp[0]);
-    rl_msr_fpcr(c, fp[1]);
-    for (int i = 0; i < 32; i++)
-        memcpy(&c->v[i], uc + UC_RESERVED + 16 + 16 * i, 16);
     uint64_t mask;
-    memcpy(&mask, uc + UC_SIGMASK, 8);
+    uint64_t new_pc = lx_arch_frame_restore(c, mem, frame, &mask);
     lx_cur()->blocked = mask & ~unblockable();
     lx_cur()->on_altstack = old_on_alt;
     (void)old_blocked;
-    if (new_pc != resume && !rl_arm64_trampoline()) {
+    if (new_pc != resume && !lx_arch_trampoline()) {
         rl_guest_fatal(c, "signal",
                        "a signal handler changed the pc to 0x%llx, which a build with direct returns does not take: "
                        "rebuild with emit.trampoline = true",
@@ -223,11 +173,12 @@ static int run_handler(rl_ctx *c, uint8_t *mem, int sig, const lx_pending_sig *p
         return RL_PENDING;
     }
     if (new_pc != resume) {
-        c->pc = resume - bias;
-        c->pend.pc = new_pc;
-        c->pend.sp = RL_SP_NONE;
-        c->pend.kind = RL_PEND_REDIRECT;
-        c->pend.code = 0;
+        lx_arch_redirect(c, resume - bias);
+        rl_ctx_common *k = rl_common(c);
+        k->pend.pc = new_pc;
+        k->pend.sp = RL_SP_NONE;
+        k->pend.kind = RL_PEND_REDIRECT;
+        k->pend.code = 0;
         return RL_PENDING;
     }
     return RL_OK;
@@ -237,7 +188,7 @@ int64_t lx_sigreturn(rl_ctx *c)
 {
     if (lx_cur()->handlers == 0)
         return -L_ENOSYS;
-    c->pend.kind = RL_PEND_RETURN;
+    rl_common(c)->pend.kind = RL_PEND_RETURN;
     return LX_PENDING;
 }
 
@@ -272,7 +223,7 @@ static int take(int sig, lx_pending_sig *p, bool *ignored, rl_ctx *c)
  */
 int lx_signal_deliver(rl_ctx *c, uint8_t *mem)
 {
-    lx_cur()->resume_bias = 4;
+    lx_cur()->resume_bias = lx_arch_trap_bias();
     return lx_signal_deliver_from(c, mem);
 }
 

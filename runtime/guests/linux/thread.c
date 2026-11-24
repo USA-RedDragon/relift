@@ -9,27 +9,13 @@
  * the parent's registers, x0 = 0 and the stack and thread pointer clone
  * gave it. A clone without the flags of a thread (a fork) is not supported.
  */
-#include "arm64.h"
+#include "arch.h"
 #include "hostio.h"
 #include "linux_priv.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-enum {
-    L_CLONE_VM = 0x100,
-    L_CLONE_FS = 0x200,
-    L_CLONE_FILES = 0x400,
-    L_CLONE_SIGHAND = 0x800,
-    L_CLONE_THREAD = 0x10000,
-    L_CLONE_SYSVSEM = 0x40000,
-    L_CLONE_SETTLS = 0x80000,
-    L_CLONE_PARENT_SETTID = 0x100000,
-    L_CLONE_CHILD_CLEARTID = 0x200000,
-    L_CLONE_DETACHED = 0x400000,
-    L_CLONE_CHILD_SETTID = 0x1000000,
-    L_CLONE_THREAD_SET = L_CLONE_VM | L_CLONE_FS | L_CLONE_FILES | L_CLONE_SIGHAND | L_CLONE_THREAD | L_CLONE_SYSVSEM
-};
 
 typedef struct waiter {
     uint64_t addr;
@@ -180,7 +166,7 @@ static void thread_body(struct rl_thread *rt)
 {
     lx_thread *t = rt->guest;
     rl_ctx *c = rt->ctx;
-    int rc = rl_call_guest(c, rl_mem_base(), t->start);
+    int rc = lx_arch_call_guest(c, rl_mem_base(), t->start);
     if (rc == RL_PENDING && c->pend.kind == RL_PEND_EXIT_PROCESS)
         rl_process_exit(c->pend.code);
     if (rc == RL_PENDING && c->pend.kind == RL_PEND_UNWIND) {
@@ -199,8 +185,8 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
                           (unsigned long long)flags);
         return -L_ENOSYS;
     }
-    uint64_t site = c->pc;
-    if (!rl_dispatch_find_ctx(c, site + 4))
+    uint64_t site = lx_arch_after_trap(c);
+    if (!rl_dispatch_find_ctx(c, site))
         return rl_guest_fatal(c, "linux", "clone at 0x%llx: nothing was lifted at the instruction after it", (unsigned long long)site), LX_PENDING;
     lx_thread *t = calloc(1, sizeof *t);
     struct rl_thread *rt = rl_thread_alloc();
@@ -209,14 +195,12 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_ENOMEM;
     }
     rl_ctx *n = rt->ctx;
-    memcpy(n->x, c->x, sizeof n->x);
-    memcpy(n->v, c->v, sizeof n->v);
-    n->fpcr = c->fpcr;
-    n->fpsr = c->fpsr;
-    n->tpidr_el0 = (flags & L_CLONE_SETTLS) ? a[3] : c->tpidr_el0;
-    n->x[0] = 0;
-    n->x[30] = 0;
-    n->sp = a[1] ? a[1] : c->sp;
+    int ar = lx_arch_clone_regs(n, c, flags, a);
+    if (ar != 0) {
+        rl_thread_free(rt);
+        free(t);
+        return ar;
+    }
     t->waker = hio_waker_new();
     if (!t->waker) {
         rl_thread_free(rt);
@@ -224,7 +208,7 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EMFILE;
     }
     t->rt = rt;
-    t->start = site + 4;
+    t->start = site;
     t->blocked = lx_cur()->blocked;
     rt->guest = t;
     lx_mutex_lock(&lx_big);
@@ -236,9 +220,9 @@ int64_t lx_sys_clone(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     if (flags & L_CLONE_PARENT_SETTID)
         lx_put(a[2], &t->tid, 4);
     if (flags & L_CLONE_CHILD_SETTID)
-        lx_put(a[4], &t->tid, 4);
+        lx_put(a[lx_arch_clone_ctid_arg()], &t->tid, 4);
     if (flags & L_CLONE_CHILD_CLEARTID)
-        t->clear_child_tid = a[4];
+        t->clear_child_tid = a[lx_arch_clone_ctid_arg()];
     if (rl_thread_spawn(rt, thread_body) != 0) {
         lx_thread_end(t);
         rl_thread_free(rt);
