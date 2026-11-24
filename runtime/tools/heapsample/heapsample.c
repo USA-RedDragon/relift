@@ -26,7 +26,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#define DEPTH 24
+#define DEPTH 48
 #define SITES 65536u
 #define LIVE (1u << 22)
 
