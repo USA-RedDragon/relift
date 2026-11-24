@@ -973,6 +973,7 @@ int nvn_view_read(rl_ctx *c, uint8_t *mem, const uint8_t view[NVN_VIEW_BYTES], n
     X(NVN_CMD_DRAW_ELEMENTS, nvnCommandBufferDrawElements) \
     X(NVN_CMD_DRAW_ELEMENTS_BASE_VERTEX, nvnCommandBufferDrawElementsBaseVertex) \
     X(NVN_CMD_DRAW_ARRAYS_INDIRECT, nvnCommandBufferDrawArraysIndirect) \
+    X(NVN_CMD_SET_CONSERVATIVE_RASTER_MODE, nvnCommandBufferSetConservativeRasterMode) \
     X(NVN_CMD_DRAW_ELEMENTS_INDIRECT, nvnCommandBufferDrawElementsIndirect) \
     X(NVN_CMD_MULTI_DRAW_ARRAYS_INDIRECT_COUNT, nvnCommandBufferMultiDrawArraysIndirectCount) \
     X(NVN_CMD_MULTI_DRAW_ELEMENTS_INDIRECT_COUNT, nvnCommandBufferMultiDrawElementsIndirectCount) \

@@ -76,6 +76,20 @@ TEST(nvn_indirect_draw_records_read_as_the_gl_commands)
     CHECK_EQ(nvn_indirect_stride(false, 32), 32u);
 }
 
+TEST(nvn_replay_conservative_raster_mode_is_kept_and_only_post_snap_runs)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmd e = { .op = NVN_CMD_SET_CONSERVATIVE_RASTER_MODE, .x = { 0, 2, 0x13 } };
+    CHECK_EQ(replay_one(&st, &e), RL_OK);
+    CHECK_EQ(st.conservative_mode, 2u);
+    CHECK_EQ(st.conservative_mode_bits, 3u);
+    CHECK(nvn_conservative_mode_is_post_snap(0, 0));
+    CHECK(!nvn_conservative_mode_is_post_snap(1, 0));
+    CHECK(!nvn_conservative_mode_is_post_snap(2, 0));
+    CHECK(!nvn_conservative_mode_is_post_snap(0, 1));
+}
+
 TEST(nvn_replay_depth_bounds_are_kept_in_the_state)
 {
     nvn_gfx st;

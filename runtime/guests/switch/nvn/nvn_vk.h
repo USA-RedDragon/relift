@@ -440,6 +440,8 @@ typedef struct nvn_gfx {
     /** @brief nvnCommandBufferSetDepthBounds: the test is on, and the range of stored depth that passes it. */
     bool depth_bounds;
     float depth_bounds_range[2];
+    /** @brief nvnCommandBufferSetConservativeRasterMode's two arguments (nvn_draw.c, set_conservative_mode). */
+    uint32_t conservative_mode, conservative_mode_bits;
     /**
      * @brief The compute overlap mode the game set (nvnCommandBufferSetComputeOverlapMode, its driver's token 0x27):
      * nonzero lets dispatches with no barrier between them run side by side; 0, the mode a queue starts in, runs
@@ -1071,6 +1073,8 @@ void nvn_dlss_slot(uint32_t slot);
  * a draw has run on stops, since the host device does not count.
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
+/** @brief The conservative raster mode (mode, n) that is post-snap rasterization, which the host has. */
+bool nvn_conservative_mode_is_post_snap(uint32_t mode, uint32_t n);
 /** @brief One indirect draw record: the GL indirect command NVN reads. */
 typedef struct nvn_indirect_draw {
     uint32_t count, instances, first, base_instance;

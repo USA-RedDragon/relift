@@ -759,6 +759,10 @@ static int fixed_state(replay *r, pipe_key *k)
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;
+    if (st->conservative_raster && !nvn_conservative_mode_is_post_snap(st->conservative_mode, st->conservative_mode_bits))
+        return nvn_vk_stop(r, "conservative raster mode %u (%u), which programs pre-snap rasterization: the host has "
+                           "only post-snap conservative rasterization", st->conservative_mode,
+                           st->conservative_mode_bits);
     if (k->conservative_raster) {
         uint32_t most = (uint32_t)(g.conservative_extra_max * 4.0f);
         k->conservative_dilate = st->conservative_dilate;
@@ -3059,6 +3063,15 @@ int nvn_separate_handles(replay *r, uint32_t s)
     return RL_OK;
 }
 
+/**
+ * @brief nvnCommandBufferSetConservativeRasterMode(cb, mode, n): the driver (SDK 22.2.0, sdk 0x684470 of one game)
+ * calls macro 0xe60 with (n & 0xf) << 16 | (mode 0: 0, mode 2: 0x1100, any other: 0x1110). Mode 0 with n 0 writes 0,
+ * the value a queue starts with, which is the post-snap rasterization VK_EXT_conservative_rasterization gives
+ * (inferred: the reset value is the default mode, and NVIDIA's pre-snap modes are the ones that add bits). Any other
+ * value has no host equivalent, so a draw with conservative raster on and such a mode stops.
+ */
+bool nvn_conservative_mode_is_post_snap(uint32_t mode, uint32_t n) { return mode == 0 && n == 0; }
+
 uint32_t nvn_indirect_stride(bool indexed, int64_t stride)
 {
     return stride ? (uint32_t)stride : indexed ? 20u : 16u;
@@ -3324,6 +3337,10 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         return RL_OK;
     case NVN_CMD_SET_DEPTH_BOUNDS:
         return set_depth_bounds(st, e);
+    case NVN_CMD_SET_CONSERVATIVE_RASTER_MODE:
+        st->conservative_mode = (uint32_t)e->x[1];
+        st->conservative_mode_bits = (uint32_t)e->x[2] & 0xf;
+        return RL_OK;
     case NVN_CMD_SET_POLYGON_OFFSET_CLAMP:
         for (int i = 0; i < 3; i++)
             memcpy(&st->polygon_offset[i], &e->d[i], 4);
