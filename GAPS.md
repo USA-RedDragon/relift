@@ -440,7 +440,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 ### Cross builds for the Switch (small)
 
-- Missing: the cross matrix covers `gb`, `gba`, `n64`, `nds` and `sms`; the Switch runtime is not built for Windows, Android or iOS in CI.
+- Missing: the cross matrix covers `gb`, `gba`, `n64`, `nds` and `sms` on every host target; the Switch and Linux guests are not built for Windows, Android or iOS in CI (`runtime/tools/cross/gbcross.py` reads one game and one runtime `build.ninja`, while a Switch build links its own runtime library and a Linux build compiles each shared library in its own store entry).
 - Where: `.github/workflows/cross.yaml`, `scripts/ci/all.sh`, `runtime/tools/cross/gbcross.py`.
 - Verify: new `cross-nds-*` jobs; the release guard (`scripts/ci/release-guard.sh`) on each.
 

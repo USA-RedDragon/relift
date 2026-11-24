@@ -113,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        guest: [gb, gba, n64, sms]
+        guest: [gb, gba, n64, nds, sms]
         target: [macos-x64, ios-arm64]
         include:
           - target: macos-x64

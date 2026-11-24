@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cross-build the runtime and a Game Boy program (or with --guest gba a Game
 # Boy Advance program, with --guest n64 a Nintendo 64 program, with --guest
-# sms a Master System program) for one relift
+# nds a Nintendo DS program, with --guest sms a Master System program) for one relift
 # host target, check the release, and run it where the host can (windows-x64
 # under wine).
 # For ios-arm64 it also builds SDL3 and libopus for iOS (and unpacks MoltenVK)
