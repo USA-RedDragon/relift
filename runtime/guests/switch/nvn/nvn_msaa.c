@@ -10,10 +10,8 @@
  * 4X2_D3D and 4X4 for 2, 4, 8 and 16 samples (MULTI_SAMPLE_COUNT, NVC797 texture header bits 235:232, clc797tex.h;
  * written at sdk 0x69a854 to 0x69a8b0), the modes Mesa's NVK picks (image.rs choose_sample_layout, line 60), and the
  * cell (cx, cy) of each sample of those modes is NVK's SampleLayout::sa_offset (image.rs lines 107 to 140, Mesa
- * d31140da86c6), which NVK's storage image lowering uses on the hardware (su_info.rs compute_ms_table). Each sample's
- * cell is also the cell of the grid its position falls in (the driver's positions, nvn_vkdev.standard_samples). For
- * 4X4 NVK has no table (sa_offset: todo) and the positions do not give one (samples 7 and 9 share a cell), so a
- * 16-sample texture's samples are not moved.
+ * d31140da86c6), which NVK's storage image lowering uses on the hardware (su_info.rs compute_ms_table). NVK has no
+ * table for 4X4 (sa_offset: todo); its cells are measured on the RTX 3090 (grid_of).
  *
  * A move goes through a single-sample host image of that larger size over the same storage (the twin), which the
  * layer's own single-sample upload and write-back fill from and store to the storage: an upload then writes each
@@ -27,8 +25,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** @brief Pixels of the sample grid per sample count, and NVK's sample cells (cx | cy << 2 in bits 4s to 4s + 3). */
-static bool grid_of(uint32_t samples, uint32_t *gw, uint32_t *gh, uint32_t *cells)
+/**
+ * @brief Pixels of the sample grid per sample count, and the cell of each sample (cx | cy << 2 in bits 4s to 4s + 3).
+ * 2, 4 and 8 samples are NVK's cells (image.rs sa_offset), and the RTX 3090 shows the same for color and stencil
+ * targets: msaa_cells (switch/devtests/msaa_probe) draws each sample's index into a multisample target and reads the
+ * memory back through a single-sample image over it. 16 samples are the 3090's cells of a 16-sample stencil target,
+ * the only target it makes at 16; NVIDIA's texture header has one 16-sample storage mode (MULTI_SAMPLE_COUNT 4X4,
+ * clc797tex.h), the one the console driver names for 16 samples.
+ */
+static bool grid_of(uint32_t samples, uint32_t *gw, uint32_t *gh, uint64_t *cells)
 {
     switch (samples) {
     case 2:
@@ -43,18 +48,22 @@ static bool grid_of(uint32_t samples, uint32_t *gw, uint32_t *gh, uint32_t *cell
         /* 4X2_D3D: (2,0) (1,1) (3,1) (1,0) (0,1) (0,0) (2,1) (3,0) */
         *gw = 4, *gh = 2, *cells = 0x36041752u;
         return true;
+    case 16:
+        /* 4X4: (2,2) (1,1) (1,2) (2,1) (0,1) (2,3) (3,2) (3,0) (1,3) (2,0) (1,0) (0,3) (0,2) (3,1) (3,3) (0,0) */
+        *gw = 4, *gh = 4, *cells = 0x0f78c12d3be4695aull;
+        return true;
     default:
         return false;
     }
 }
 
-bool nvn_msaa_cells(uint32_t samples, uint32_t *gw, uint32_t *gh, uint32_t *cells)
+bool nvn_msaa_cells(uint32_t samples, uint32_t *gw, uint32_t *gh, uint64_t *cells)
 {
     return grid_of(samples, gw, gh, cells);
 }
 
 typedef struct params {
-    uint32_t cells, gw, gh;
+    uint32_t cells[2], gw, gh;
     int32_t layer;
     uint32_t width, height, n;
 } params;
@@ -262,7 +271,8 @@ void nvn_msaa_free(vimg *v)
 /** @brief The texture whose texels hold the samples of multisample texture d (nvn_tex_layout gives it d's bytes). */
 static bool twin_desc(const nvn_tex_desc *d, nvn_tex_desc *t)
 {
-    uint32_t gw, gh, cells;
+    uint32_t gw, gh;
+    uint64_t cells;
     if (!grid_of(d->samples, &gw, &gh, &cells))
         return false;
     *t = *d;
@@ -410,7 +420,10 @@ bool nvn_msaa_upload(replay *r, vimg *v, const char **why)
     if (!pipe)
         return false;
     params p = { .width = v->d.width, .height = v->d.height };
-    grid_of(v->d.samples, &p.gw, &p.gh, &p.cells);
+    uint64_t cells = 0;
+    grid_of(v->d.samples, &p.gw, &p.gh, &cells);
+    p.cells[0] = (uint32_t)cells;
+    p.cells[1] = (uint32_t)(cells >> 32);
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
     for (uint32_t l = 0; l < m->nlayers; l++) {
@@ -428,7 +441,10 @@ bool nvn_msaa_write_back(replay *r, vimg *v)
     if (!m)
         return false;
     params p = { .width = v->d.width, .height = v->d.height };
-    grid_of(v->d.samples, &p.gw, &p.gh, &p.cells);
+    uint64_t cells = 0;
+    grid_of(v->d.samples, &p.gw, &p.gh, &cells);
+    p.cells[0] = (uint32_t)cells;
+    p.cells[1] = (uint32_t)(cells >> 32);
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
     VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, M.gather_pipe);
@@ -451,9 +467,9 @@ bool nvn_msaa_write_back(replay *r, vimg *v)
  * resolve takes ORIGIN_CORNER with SRC_X0 = x * gw + gw / 2 for the same point (lines 1586 to 1594). Pixel x then
  * filters at x * gw + (gw - 1) / 2 texel centers, half-way between grid columns gw / 2 - 1 and gw / 2 (rows the
  * same; with gh 1, row 0 alone), each tap at weight one half: every sample for 2X1_D3D and 2X2, and for 4X2_D3D the
- * four of the middle two columns, cells (1, 0), (2, 0), (1, 1) and (2, 1), samples 3, 0, 1 and 6 by NVK's cells.
- * Mesa keeps 8-sample resolves off this blit for that reason (nvc0_surface.c line 1744). 16 samples have no known
- * cells.
+ * four of the middle two columns, cells (1, 0), (2, 0), (1, 1) and (2, 1), samples 3, 0, 1 and 6 by NVK's cells,
+ * and for 4X4 the middle 2x2 cells (1, 1), (2, 1), (1, 2) and (2, 2), samples 1, 3, 2 and 0 (grid_of).
+ * Mesa keeps 8-sample resolves off this blit for that reason (nvc0_surface.c line 1744).
  */
 static bool downsample_taps(uint32_t samples, uint32_t *taps, uint32_t *n)
 {
@@ -461,6 +477,7 @@ static bool downsample_taps(uint32_t samples, uint32_t *taps, uint32_t *n)
     case 2: *taps = 0x10u, *n = 2; return true;
     case 4: *taps = 0x3210u, *n = 4; return true;
     case 8: *taps = 0x6103u, *n = 4; return true;
+    case 16: *taps = 0x3210u, *n = 4; return true;
     default: return false;
     }
 }
@@ -471,7 +488,7 @@ bool nvn_msaa_resolve(replay *r, vimg *src, VkImageView target, VkFormat f, uint
 {
     params p = { 0 };
     *why = "it has no known downsample taps";
-    if (!downsample_taps(src->d.samples, &p.cells, &p.n))
+    if (!downsample_taps(src->d.samples, &p.cells[0], &p.n))
         return false;
     nvn_msaa_img *m = moves_of(r, src, why);
     if (!m)

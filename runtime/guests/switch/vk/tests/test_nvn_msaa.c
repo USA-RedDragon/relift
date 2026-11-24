@@ -461,11 +461,36 @@ static const uint32_t fetchall_comp_spv[] = {
     0x0000002a, 0x000200f9, 0x00000012, 0x000200f8, 0x00000014, 0x000100fd, 0x00010038,
 };
 
-/** @brief NVK's cell (cx | cy << 2) of sample s of 2, 4 and 8 samples (src/nouveau/nil/image.rs sa_offset). */
+/**
+ * @brief The cell (cx | cy << 2) of sample s of 2, 4 and 8 samples (NVK's, src/nouveau/nil/image.rs sa_offset) and
+ * of 16 (the RTX 3090's, measured by msaa_cells).
+ */
 static uint32_t nvk_cell(uint32_t samples, uint32_t s)
 {
     static const uint8_t eight[8] = { 2, 5, 7, 1, 4, 0, 6, 3 };
-    return samples == 2 ? 1u - s : samples == 4 ? (s & 1u) | (s >> 1) << 2 : eight[s];
+    static const uint8_t sixteen[16] = { 10, 5, 9, 6, 4, 14, 11, 3, 13, 2, 1, 12, 8, 7, 15, 0 };
+    return samples == 2 ? 1u - s : samples == 4 ? (s & 1u) | (s >> 1) << 2 : samples == 8 ? eight[s] : sixteen[s];
+}
+
+TEST(nvn_multisample_cells_are_nvks_and_the_3090s)
+{
+    static const uint32_t counts[4] = { 2, 4, 8, 16 };
+    for (uint32_t c = 0; c < 4; c++) {
+        uint32_t gw, gh;
+        uint64_t cells;
+        CHECK(nvn_msaa_cells(counts[c], &gw, &gh, &cells));
+        uint32_t seen = 0;
+        for (uint32_t s = 0; s < counts[c]; s++) {
+            uint32_t cell = (uint32_t)(cells >> (4 * s) & 15u);
+            CHECK_EQ(cell, nvk_cell(counts[c], s));
+            CHECK((cell & 3u) < gw && (cell >> 2) < gh);
+            seen |= 1u << cell;
+        }
+        CHECK_EQ((uint32_t)__builtin_popcount(seen), counts[c]);
+    }
+    uint32_t gw, gh;
+    uint64_t cells;
+    CHECK(!nvn_msaa_cells(32, &gw, &gh, &cells));
 }
 
 /** @brief Runs fetchall_comp_spv over texture id (w by h pixels of samples samples) into out. */
@@ -566,7 +591,8 @@ TEST(nvn_multisample_texels_move_between_guest_storage_and_each_sample_both_ways
         if (!rig_up(&k, pool))
             return;
         CHECK(nvn_texset_layout());
-        uint32_t n = counts[c], gw, gh, cells, w = 5, h = 3;
+        uint32_t n = counts[c], gw, gh, w = 5, h = 3;
+        uint64_t cells;
         if (!host_samples(n))
             continue;
         CHECK(nvn_msaa_cells(n, &gw, &gh, &cells));
@@ -676,7 +702,8 @@ TEST(nvn_downsample_averages_the_drivers_taps_of_each_sample_count)
         const uint64_t pool = 0x150, src = 0x250, dst = 0x350;
         if (!rig_up(&k, pool))
             return;
-        uint32_t n = counts[c], gw, gh, cells, taps, ntaps, w = 4, h = 2;
+        uint32_t n = counts[c], gw, gh, taps, ntaps, w = 4, h = 2;
+        uint64_t cells;
         if (!host_samples(n))
             continue;
         CHECK(nvn_msaa_cells(n, &gw, &gh, &cells));
@@ -756,5 +783,11 @@ TEST(nvn_downsample_taps_are_the_middle_of_the_grid)
     for (uint32_t i = 0; i < 4; i++)
         cells |= 1u << nvk_cell(8, taps >> (4 * i) & 15u);
     CHECK_EQ(cells, 1u << 1 | 1u << 2 | 1u << 5 | 1u << 6);
-    CHECK(!nvn_msaa_downsample_taps(16, &taps, &n));
+    CHECK(nvn_msaa_downsample_taps(16, &taps, &n));
+    CHECK_EQ(n, 4u);
+    cells = 0;
+    for (uint32_t i = 0; i < 4; i++)
+        cells |= 1u << nvk_cell(16, taps >> (4 * i) & 15u);
+    CHECK_EQ(cells, 1u << 5 | 1u << 6 | 1u << 9 | 1u << 10);
+    CHECK(!nvn_msaa_downsample_taps(32, &taps, &n));
 }

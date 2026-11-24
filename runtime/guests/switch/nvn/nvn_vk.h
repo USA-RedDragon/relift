@@ -966,9 +966,9 @@ bool nvn_msaa_resolve(replay *r, vimg *src, VkImageView target, VkFormat f, uint
 void nvn_msaa_free(vimg *v);
 /**
  * @brief The guest's sample grid of a texture of samples samples, gw by gh texels a pixel, and the cell of each
- * sample (cx | cy << 2 in bits 4s to 4s + 3); false for a count whose cells are not known (16).
+ * sample (cx | cy << 2 in bits 4s to 4s + 3); false for other counts.
  */
-bool nvn_msaa_cells(uint32_t samples, uint32_t *gw, uint32_t *gh, uint32_t *cells);
+bool nvn_msaa_cells(uint32_t samples, uint32_t *gw, uint32_t *gh, uint64_t *cells);
 /** @brief The layer's single-sample upload of v from its storage (not for multisample images). */
 bool nvn_vk_fill_plain(replay *r, vimg *v);
 /** @brief The layer's single-sample write-back of v to its storage (not for multisample images). */
