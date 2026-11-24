@@ -372,8 +372,24 @@ fn search_dirs(nodes: &[Node], at: usize, conf: &[String]) -> Vec<String> {
     let mut dirs = rpath_chain(nodes, Some(at));
     dirs.extend(run_path(&nodes[at]));
     dirs.extend(conf.iter().cloned());
-    dirs.extend(DEFAULT_DIRS.iter().map(|d| (*d).to_string()));
     dirs
+}
+
+/// The directories the program interpreter searches last, as its own bytes
+/// spell them (glibc's `ld.so` carries its system directories as strings:
+/// `/usr/lib32/` on a multilib distribution). A library found only outside
+/// them is a library the program will not find, however the import placed
+/// it; with no such string the generic [`DEFAULT_DIRS`] stand in.
+fn system_dirs(interp: &[u8]) -> Vec<String> {
+    let dirs: BTreeSet<String> = spelled_strings(interp)
+        .filter(|s| s.starts_with('/') && s.ends_with('/') && s.contains("lib") && !s.contains('%'))
+        .map(normalize)
+        .collect();
+    if dirs.is_empty() {
+        DEFAULT_DIRS.iter().map(|d| (*d).to_string()).collect()
+    } else {
+        dirs.into_iter().collect()
+    }
 }
 
 /// The files under the guest directory `dir`, to a few levels, as guest
@@ -723,7 +739,11 @@ pub fn closure_with(
         w.out.interpreter = Some(Library { name, paths, bytes });
     }
     let mut extra = extra.iter();
-    let conf = sysroot.conf_dirs();
+    let mut conf = sysroot.conf_dirs();
+    conf.extend(match &w.out.interpreter {
+        Some(i) => system_dirs(&i.bytes),
+        None => DEFAULT_DIRS.iter().map(|d| (*d).to_string()).collect(),
+    });
     let mut pending: Vec<(usize, String)> = Vec::new();
     let mut scanned = 0;
     loop {
@@ -992,6 +1012,36 @@ mod tests {
         assert_eq!(c.libraries[0].paths[0], "/opt/private/libx.so");
         assert_eq!(c.libraries.len(), 1);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_library_outside_the_interpreters_system_directories_is_reported_at_import() {
+        let exe = elf(&["libx.so"], None, Some("/lib/ld.so"));
+        let interp = elf(&[], Some(("/usr/lib32/", false)), None);
+        let object = elf::parse(&exe).expect("parses");
+        let lib = elf(&[], None, None);
+        let wrong = root(
+            "sysdirs-wrong",
+            &[
+                ("/lib/ld.so", interp.clone()),
+                ("/lib/libx.so", lib.clone()),
+            ],
+        );
+        let sys = Sysroot::new(&wrong).expect("sysroot");
+        let e = closure(&object, &exe, "/app", &sys).expect_err("not placed");
+        assert!(
+            e.contains("libx.so") && e.contains("/usr/lib32/libx.so"),
+            "{e}"
+        );
+        let right = root(
+            "sysdirs-right",
+            &[("/lib/ld.so", interp), ("/usr/lib32/libx.so", lib)],
+        );
+        let sys = Sysroot::new(&right).expect("sysroot");
+        let c = closure(&object, &exe, "/app", &sys).expect("closure");
+        assert_eq!(c.libraries[0].paths[0], "/usr/lib32/libx.so");
+        let _ = std::fs::remove_dir_all(wrong);
+        let _ = std::fs::remove_dir_all(right);
     }
 
     #[test]
