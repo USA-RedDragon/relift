@@ -429,3 +429,18 @@ does while it sleeps) logs why instead. `wait` lines rank the source lines (or t
 threads blocked on a batch.
 A `by kind` line sums the parts per present by kind (render passes by their target size, dispatches, copies), and a
 `replay thread cpu` line gives replay's own CPU time and page faults, so replay's wall time minus it is its waiting.
+
+## Where a thread waits (Android)
+
+`runtime/tools/offcpu.py` sums a thread's off-CPU time by stack from a simpleperf profile. Record with
+`simpleperf record -p <pid> -e cpu-clock --trace-offcpu --call-graph fp --duration 10`, write the report with
+`simpleperf report-sample --show-callchain -i perf.data > rs.txt`, and read it with the build's unstripped library:
+
+    python3 -I runtime/tools/offcpu.py rs.txt --lib <build>/android-arm64/libfe.so --threads
+    python3 -I runtime/tools/offcpu.py rs.txt --lib libfe.so --pick nvn_vk_run --others --no-kernel --depth 6
+
+`--threads` lists each thread's off-CPU and on-CPU time; `--pick nvn_vk_run` takes the render thread. Frames are named
+by llvm-addr2line with their inline chains, so the runtime's hidden functions get their own names, not the nearest
+exported symbol's. The intervals come from the context switch records, since simpleperf samples only some switches
+out; an interval it did not sample shows as `(no stack sampled)`. `--others` keeps frames of other libraries (the
+driver, libc) by their symbols. `python3 -I runtime/tools/test_offcpu.py` tests it.

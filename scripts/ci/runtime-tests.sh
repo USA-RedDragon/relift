@@ -7,6 +7,7 @@
 jobs=${CI_JOBS:-2}
 make -C runtime -j"$jobs" CC=clang
 make -C runtime test CC=clang
+python3 -I runtime/tools/test_offcpu.py
 if [ "$(uname -s)" = Linux ]; then
   RELIFT_HOST_PAGE=16384 make -C runtime test CC=clang
 fi
