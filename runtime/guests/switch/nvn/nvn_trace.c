@@ -19,7 +19,9 @@
  * the queue-level nvnQueueFenceSync and nvnQueueWaitSync calls ("queue"), and each conditional render check a draw,
  * dispatch or clear makes ("render": the counter address, the two 64-bit words compared, and "runs" 1 when the
  * command runs), and each counter report the completion writes ("report": the guest address, the counter type, the
- * value written, and whether the counter was valid, in the order the reports thread writes them). Each draw and dispatch line of
+ * value written, whether the counter was valid, the time written (19.2 MHz ticks: when the GPU reached the report) and
+ * the guest clock in ticks when the reports thread wrote it, in the order the reports thread writes them; a game that
+ * sizes its frame by those times reads its GPU time from the first two of a pair and its lag from the last). Each draw and dispatch line of
  * trace.jsonl carries the same "queue", "submit", "pos" and the "seq" of its order line.
  * With a trace-mode table built with the `handle` condition (RELIFT_NVN_GPU_TRACE), trace.jsonl also gets an "image
  * read" line after a traced draw or dispatch for each texture or surface instruction that read through a handle from a

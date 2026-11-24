@@ -157,8 +157,8 @@ static void walk(uint32_t s, const uint64_t *occ, const uint64_t (*stats)[STATS]
         }
         __atomic_store_n((uint64_t *)(rq.mem + e->addr), value, __ATOMIC_RELAXED);
         __atomic_store_n((uint64_t *)(rq.mem + e->addr + 8), nvn_gpu_ticks(when), __ATOMIC_RELEASE);
-        uint64_t what[4] = { e->addr, e->type, value, e->valid };
-        nvn_trace_order("report", "counter report written", 0, 0, 0, what, 4, 0, true);
+        uint64_t what[6] = { e->addr, e->type, value, e->valid, nvn_gpu_ticks(when), nvn_gpu_ticks(seen) };
+        nvn_trace_order("report", "counter report written", 0, 0, 0, what, 6, 0, true);
     }
     accumulate(s, occ, stats, at, np);
     if (ts)

@@ -18,7 +18,8 @@ of it, in the host image's format (uncompressed color images; block formats and 
 `log` prints the NVN commands the layer replayed before commands FIRST to LAST (names, arguments, the target and
 bytes of inline uniform updates) and each change of the range RELIFT_NVN_TRACE_WATCH names.
 `order` prints order.jsonl, the order the frame's submits, commands, event waits and signals, queue syncs,
-conditional render checks (the counter words compared and whether the command ran) and counter reports written ran in,
+conditional render checks (the counter words compared and whether the command ran) and counter reports written (with
+their time on the 19.2 MHz clock and how long after it the reports thread wrote them) ran in,
 one per line with its queue, submit and index in the set; a draw or dispatch shows its command number in trace.jsonl.
 --queue keeps one queue, --name the lines whose call holds TEXT.
 Standard library only.
@@ -131,6 +132,9 @@ def cmd_order(frame, queue, name):
                 extra = " runs" if o["runs"] else " skipped"
             if "value" in o:
                 extra = " word %d%s" % (o["value"], "" if o["met"] else " (waits)")
+            if o["kind"] == "report" and len(o["args"]) >= 6:
+                at, seen = num(o["args"][4]), num(o["args"][5])
+                extra += " at %.3f ms, written %.3f ms later" % (at / 19200.0, (seen - at) / 19200.0)
             if o["seq"] in traced:
                 extra += " -> trace command %d" % traced[o["seq"]]
             print("%6d queue %s %-16s %s %s%s" % (o["seq"], o["queue"], where, o["name"], " ".join(o["args"]), extra))

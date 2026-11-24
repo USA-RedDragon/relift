@@ -112,6 +112,8 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
     CHECK_EQ(nvn_draw_render_enabled(&r, &run), RL_OK);
     CHECK(!run);
     st.render_mode = NVN_RENDER_ALWAYS;
+    /* Each counter report written carries its time and the clock when it was written, both in 19.2 MHz ticks. */
+    CHECK_EQ(nvn_counters_order_check(t_mem(), heap + 0x2000), 0);
     memset(t_mem() + buf, 0x11, 32);
     nvn_trace_begin(&r, "dispatch");
     memset(t_mem() + buf, 0x22, 32);
@@ -176,6 +178,11 @@ TEST(nvn_trace_writes_the_buffers_a_command_changed_before_and_after)
         char want[160];
         snprintf(want, sizeof want, "\"kind\":\"render\",\"name\":\"conditional render\",\"queue\":\"0xabc0\",\"submit\":9,"
                  "\"args\":[\"0x%llx\",\"0x7\",\"0x7\"],\"pos\":1,\"runs\":0}", (unsigned long long)(gpu + 0x100));
+        CHECK(strstr(order, want) != NULL);
+        snprintf(want, sizeof want, "\"kind\":\"report\",\"name\":\"counter report written\",\"queue\":\"0x0\",\"submit\":0,"
+                 "\"args\":[\"0x%llx\",\"0x0\",\"0x0\",\"0x0\",\"0x%llx\",\"0x%llx\"]}",
+                 (unsigned long long)(heap + 0x2000), (unsigned long long)nvn_gpu_ticks(77000000),
+                 (unsigned long long)nvn_gpu_ticks(77000000));
         CHECK(strstr(order, want) != NULL);
         CHECK(strstr(order, "\"kind\":\"command\",\"name\":\"nvnCommandBufferClearDepthStencil\",\"queue\":\"0xabc0\","
                             "\"submit\":9,\"pos\":0,\"args\":[\"0x1\",\"0x0\",\"0x0\",\"0x0\",\"0x0\"]}") != NULL);
