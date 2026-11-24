@@ -14,6 +14,7 @@
  * there when it returns.
  */
 #include "arch.h"
+#include "compat.h"
 #include "linux_priv.h"
 
 #include <string.h>
@@ -255,12 +256,12 @@ static int64_t sys_rt_sigaction(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     lx_sigaction old = lx.sig[sig];
     if (a[1]) {
         uint64_t k[4];
-        if (!lx_get(k, a[1], sizeof k))
+        if (!lx_get_sigaction(a[1], k))
             return -L_EFAULT;
         lx_sigaction n = { .handler = k[0], .flags = k[1], .restorer = k[2], .mask = k[3] & ~unblockable() };
         if (a[2]) {
             uint64_t o[4] = { old.handler, old.flags, old.restorer, old.mask };
-            if (!lx_put(a[2], o, sizeof o))
+            if (!lx_put_sigaction(a[2], o))
                 return -L_EFAULT;
         }
         lx.sig[sig] = n;
@@ -270,7 +271,7 @@ static int64_t sys_rt_sigaction(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     }
     if (a[2]) {
         uint64_t o[4] = { old.handler, old.flags, old.restorer, old.mask };
-        if (!lx_put(a[2], o, sizeof o))
+        if (!lx_put_sigaction(a[2], o))
             return -L_EFAULT;
     }
     return 0;
@@ -326,22 +327,14 @@ static int64_t sys_sigaltstack(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     if (a[1]) {
         int32_t flags = lx_cur()->on_altstack ? L_SS_ONSTACK : (lx_cur()->altstack_size ? 0 : L_SS_DISABLE);
-        uint8_t o[24] = { 0 };
-        memcpy(o, &lx_cur()->altstack_sp, 8);
-        memcpy(o + 8, &flags, 4);
-        memcpy(o + 16, &lx_cur()->altstack_size, 8);
-        if (!lx_put(a[1], o, sizeof o))
+        if (!lx_put_stack_t(a[1], lx_cur()->altstack_sp, flags, lx_cur()->altstack_size))
             return -L_EFAULT;
     }
     if (a[0]) {
-        uint8_t n[24];
-        if (!lx_get(n, a[0], sizeof n))
-            return -L_EFAULT;
         uint64_t sp, size;
         int32_t flags;
-        memcpy(&sp, n, 8);
-        memcpy(&flags, n + 8, 4);
-        memcpy(&size, n + 16, 8);
+        if (!lx_get_stack_t(a[0], &sp, &flags, &size))
+            return -L_EFAULT;
         if (lx_cur()->on_altstack)
             return -L_EPERM;
         if (flags & ~L_SS_DISABLE)
@@ -430,8 +423,8 @@ static int64_t sys_rt_sigtimedwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
                     uint8_t info[L_SIGINFO_BYTES] = { 0 };
                     int32_t si[4] = { s, 0, p.code, 0 };
                     memcpy(info, si, 16);
-                    memcpy(info + 16, &p.pid, 4);
-                    memcpy(info + 20, &p.uid, 4);
+                    memcpy(info + lx_siginfo_union_offset(), &p.pid, 4);
+                    memcpy(info + lx_siginfo_union_offset() + 4, &p.uid, 4);
                     if (!lx_put(a[1], info, sizeof info))
                         return -L_EFAULT;
                 }
@@ -442,7 +435,7 @@ static int64_t sys_rt_sigtimedwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
             return LX_PENDING;
         }
         l_timespec ts;
-        if (!lx_get(&ts, a[2], sizeof ts))
+        if (!lx_get_timespec(a[2], &ts))
             return -L_EFAULT;
         if (ts.sec < 0 || ts.nsec < 0 || ts.nsec >= 1000000000)
             return -L_EINVAL;

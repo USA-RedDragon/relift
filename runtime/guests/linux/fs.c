@@ -4,6 +4,7 @@
  * host's descriptors and the system calls that use it.
  */
 #include "hostio.h"
+#include "compat.h"
 #include "linux_priv.h"
 
 #include <errno.h>
@@ -506,7 +507,7 @@ static int64_t iov_get(uint64_t addr, uint64_t cnt, uint64_t (*v)[2], uint64_t *
     *total = 0;
     for (uint64_t i = 0; i < cnt; i++) {
         uint64_t e[2];
-        if (!lx_get(e, addr + 16 * i, 16))
+        if (!lx_get_iov(addr, i, e))
             return -L_EFAULT;
         if (e[1] > 0x7ffff000u || *total + e[1] > 0x7ffff000u)
             return -L_EINVAL;
@@ -601,12 +602,12 @@ static int64_t sys_fstat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     if (vm) {
         l_stat st;
         virt_stat(vm, &st);
-        return lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+        return lx_put_stat(a[1], &st) ? 0 : -L_EFAULT;
     }
     if (lx_vdir_fd((int)a[0])) {
         l_stat st;
         vdir_stat(&st);
-        return lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+        return lx_put_stat(a[1], &st) ? 0 : -L_EFAULT;
     }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)
@@ -615,7 +616,7 @@ static int64_t sys_fstat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t rc = hio_fstat(h, &st);
     if (rc < 0)
         return rc;
-    return lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+    return lx_put_stat(a[1], &st) ? 0 : -L_EFAULT;
 }
 
 static int64_t stat_of(int64_t dirfd, uint64_t path_addr, uint64_t flags, l_stat *st)
@@ -666,7 +667,7 @@ static int64_t sys_newfstatat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t rc = stat_of((int64_t)(int32_t)a[0], a[1], a[3], &st);
     if (rc < 0)
         return rc;
-    return lx_put(a[2], &st, sizeof st) ? 0 : -L_EFAULT;
+    return lx_put_stat(a[2], &st) ? 0 : -L_EFAULT;
 }
 
 static uint32_t dev_major(uint64_t d) { return (uint32_t)(((d >> 8) & 0xfff) | ((d >> 32) & ~0xfffull)); }
@@ -1019,7 +1020,7 @@ static int64_t sys_utimensat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t t[4] = { 0, 0x3fffffff, 0, 0x3fffffff };
     if (a[2]) {
         int64_t in[4];
-        if (!lx_get(in, a[2], sizeof in))
+        if (!lx_get_timespec2(a[2], in))
             return -L_EFAULT;
         memcpy(t, in, sizeof t);
         for (int i = 1; i < 4; i += 2)
@@ -1152,7 +1153,7 @@ static int64_t sys_ppoll(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t timeout = -1;
     if (a[2]) {
         l_timespec ts;
-        if (!lx_get(&ts, a[2], sizeof ts))
+        if (!lx_get_timespec(a[2], &ts))
             return -L_EFAULT;
         if (ts.sec < 0 || ts.nsec < 0 || ts.nsec >= 1000000000)
             return -L_EINVAL;

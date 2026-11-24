@@ -13,7 +13,11 @@
 
 #include <stdint.h>
 
-/** @brief System call numbers (asm-generic/unistd.h). */
+/**
+ * @brief System call ids. These are the asm-generic/unistd.h numbers aarch64
+ * uses; every architecture maps its own numbers to them (arch_*.c), so the
+ * system call files name a call one way.
+ */
 enum rl_linux_nr {
     NR_getcwd = 17,
     NR_dup = 23,

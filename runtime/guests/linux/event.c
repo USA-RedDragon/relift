@@ -6,6 +6,7 @@
  * which gives the host's own object where it has one.
  */
 #include "hostio.h"
+#include "compat.h"
 #include "linux_priv.h"
 
 #include <string.h>
@@ -64,14 +65,14 @@ static int64_t sys_timerfd_settime(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     if ((uint32_t)a[1] & ~(uint32_t)TFD_TIMER_ABSTIME)
         return -L_EINVAL;
     int64_t nv[4], old[4];
-    if (!lx_get(nv, a[2], sizeof nv))
+    if (!lx_get_timespec2(a[2], nv))
         return -L_EFAULT;
     if (nv[1] < 0 || nv[1] >= 1000000000 || nv[3] < 0 || nv[3] >= 1000000000)
         return -L_EINVAL;
     int64_t r = hio_timerfd_settime(h, (uint32_t)a[1], nv, a[3] ? old : NULL);
     if (r < 0)
         return r;
-    if (a[3] && !lx_put(a[3], old, sizeof old))
+    if (a[3] && !(lx_put_timespec(a[3], old[0], old[1]) && lx_put_timespec(a[3] + lx_timespec_bytes(), old[2], old[3])))
         return -L_EFAULT;
     return 0;
 }
@@ -87,7 +88,7 @@ static int64_t sys_timerfd_gettime(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t r = hio_timerfd_gettime(h, v);
     if (r < 0)
         return r;
-    return lx_put(a[1], v, sizeof v) ? 0 : -L_EFAULT;
+    return lx_put_timespec(a[1], v[0], v[1]) && lx_put_timespec(a[1] + lx_timespec_bytes(), v[2], v[3]) ? 0 : -L_EFAULT;
 }
 
 static int64_t sys_epoll_create1(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -106,12 +107,11 @@ static int64_t sys_epoll_ctl(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int ep = lx_host_fd((int)a[0]), h = lx_host_fd((int)a[2]);
     if (ep < 0 || h < 0)
         return -L_EBADF;
-    uint32_t ev[4] = { 0 };
-    if ((int)a[1] != 2 && !lx_get(ev, a[3], 16))
+    uint32_t events = 0;
+    uint64_t data = 0;
+    if ((int)a[1] != 2 && !lx_get_epoll_event(a[3], &events, &data))
         return -L_EFAULT;
-    uint64_t data;
-    memcpy(&data, &ev[2], 8);
-    return hio_epoll_ctl(ep, (int)a[1], h, ev[0], data);
+    return hio_epoll_ctl(ep, (int)a[1], h, events, data);
 }
 
 static int64_t sys_epoll_pwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -124,11 +124,10 @@ static int64_t sys_epoll_pwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EBADF;
     if (max <= 0 || max > EP_MAX_EVENTS)
         return -L_EINVAL;
-    if (!lx_ok(a[1], (uint64_t)max * 16, RL_VM_W))
+    if (!lx_ok(a[1], (uint64_t)max * lx_epoll_event_bytes(), RL_VM_W))
         return -L_EFAULT;
     int64_t end = ms < 0 ? 0 : (int64_t)rl_clock_ns() + ms * 1000000;
     hio_epoll_event ev[EP_MAX_EVENTS];
-    uint32_t out[EP_MAX_EVENTS][4];
     for (;;) {
         int64_t left = ms < 0 ? -1 : end - (int64_t)rl_clock_ns();
         if (ms >= 0 && left < 0)
@@ -139,12 +138,10 @@ static int64_t sys_epoll_pwait(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         if (n < 0)
             return n;
         if (n > 0) {
-            memset(out, 0, (size_t)n * 16);
-            for (int64_t i = 0; i < n; i++) {
-                out[i][0] = ev[i].events;
-                memcpy(&out[i][2], &ev[i].data, 8);
-            }
-            return lx_put(a[1], out, (uint64_t)n * 16) ? n : -L_EFAULT;
+            for (int64_t i = 0; i < n; i++)
+                if (!lx_put_epoll_event(a[1], (uint64_t)i, ev[i].events, ev[i].data))
+                    return -L_EFAULT;
+            return n;
         }
         if (ms >= 0 && (int64_t)rl_clock_ns() >= end)
             return 0;

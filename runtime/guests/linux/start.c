@@ -13,6 +13,7 @@
 #include "hostio.h"
 #include "linux_priv.h"
 #include "arch.h"
+#include "compat.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -294,6 +295,8 @@ static bool restarts(int64_t r)
 
 int lx_syscall_entry(rl_ctx *c, uint8_t *mem)
 {
+    lx_ts32 = false;
+    lx_rlim32 = false;
     lx_arch_sys_begin(c);
     uint64_t a[6];
     uint32_t nr;

@@ -5,6 +5,7 @@
  * rest of what a libc asks the kernel at start-up.
  */
 #include "hostio.h"
+#include "compat.h"
 #include "linux_priv.h"
 
 #include <string.h>
@@ -128,8 +129,7 @@ static int64_t clock_ns(uint32_t clk, int64_t *ns)
 
 static int64_t put_ns(uint64_t addr, int64_t ns)
 {
-    l_timespec ts = { ns / 1000000000, ns % 1000000000 };
-    return lx_put(addr, &ts, sizeof ts) ? 0 : -L_EFAULT;
+    return lx_put_timespec(addr, ns / 1000000000, ns % 1000000000) ? 0 : -L_EFAULT;
 }
 
 static int64_t sys_clock_gettime(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -159,8 +159,7 @@ static int64_t sys_gettimeofday(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     if (a[0]) {
         int64_t ns = hio_realtime_ns();
-        int64_t tv[2] = { ns / 1000000000, (ns % 1000000000) / 1000 };
-        if (!lx_put(a[0], tv, sizeof tv))
+        if (!lx_put_timeval(a[0], ns / 1000000000, (ns % 1000000000) / 1000))
             return -L_EFAULT;
     }
     if (a[1]) {
@@ -180,7 +179,7 @@ static int64_t sys_gettimeofday(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 static int64_t sleep_for(uint64_t req, uint64_t rem, bool absolute, uint32_t clk)
 {
     l_timespec ts;
-    if (!lx_get(&ts, req, sizeof ts))
+    if (!lx_get_timespec(req, &ts))
         return -L_EFAULT;
     if (ts.sec < 0 || ts.nsec < 0 || ts.nsec >= 1000000000)
         return -L_EINVAL;
@@ -196,15 +195,13 @@ static int64_t sleep_for(uint64_t req, uint64_t rem, bool absolute, uint32_t clk
     if (ns > 0 && lx_wait(-1, 0, ns) == -L_EINTR) {
         if (rem && !absolute) {
             int64_t left = ns - ((int64_t)rl_clock_ns() - start);
-            l_timespec r = { left > 0 ? left / 1000000000 : 0, left > 0 ? left % 1000000000 : 0 };
-            if (!lx_put(rem, &r, sizeof r))
+            if (!lx_put_timespec(rem, left > 0 ? left / 1000000000 : 0, left > 0 ? left % 1000000000 : 0))
                 return -L_EFAULT;
         }
         return -L_ERESTART_RESTARTBLOCK;
     }
     if (rem && !absolute) {
-        l_timespec z = { 0, 0 };
-        if (!lx_put(rem, &z, sizeof z))
+        if (!lx_put_timespec(rem, 0, 0))
             return -L_EFAULT;
     }
     return 0;
@@ -294,7 +291,7 @@ static int64_t rlimit_get(uint32_t res, uint64_t out)
 {
     if (res >= L_RLIM_NLIMITS)
         return -L_EINVAL;
-    return lx_put(out, lx.rlim[res], 16) ? 0 : -L_EFAULT;
+    return (lx_rlim32 ? lx_put_ulongs(out, lx.rlim[res], 2) : lx_put(out, lx.rlim[res], 16)) ? 0 : -L_EFAULT;
 }
 
 static int64_t rlimit_set(uint32_t res, uint64_t in)
@@ -302,7 +299,7 @@ static int64_t rlimit_set(uint32_t res, uint64_t in)
     if (res >= L_RLIM_NLIMITS)
         return -L_EINVAL;
     uint64_t v[2];
-    if (!lx_get(v, in, sizeof v))
+    if (!(lx_rlim32 ? lx_get_longs(in, (int64_t *)v, 2) : lx_get(v, in, sizeof v)))
         return -L_EFAULT;
     if (v[0] > v[1])
         return -L_EINVAL;
@@ -350,11 +347,11 @@ static int64_t sys_getrusage(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     if ((int64_t)a[0] != 0 && (int64_t)a[0] != -1 && (int64_t)a[0] != 1)
         return -L_EINVAL;
-    uint64_t ru[18] = { 0 };
+    int64_t ru[18] = { 0 };
     int64_t ns = hio_cputime_ns();
-    ru[0] = (uint64_t)(ns / 1000000000);
-    ru[1] = (uint64_t)((ns % 1000000000) / 1000);
-    return lx_put(a[1], ru, sizeof ru) ? 0 : -L_EFAULT;
+    ru[0] = ns / 1000000000;
+    ru[1] = (ns % 1000000000) / 1000;
+    return lx_put_longs(a[1], ru, 18) ? 0 : -L_EFAULT;
 }
 
 static int64_t sys_times(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -364,7 +361,7 @@ static int64_t sys_times(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t cpu = hio_cputime_ns() / 10000000;
     if (a[0]) {
         int64_t t[4] = { cpu, 0, 0, 0 };
-        if (!lx_put(a[0], t, sizeof t))
+        if (!lx_put_longs(a[0], t, 4))
             return -L_EFAULT;
     }
     return (int64_t)(rl_clock_ns() / 10000000);
@@ -374,17 +371,7 @@ static int64_t sys_sysinfo(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
     (void)mem;
-    uint8_t b[112] = { 0 };
-    uint64_t up = rl_clock_ns() / 1000000000;
-    uint64_t ram = rl_os_memory_bytes();
-    uint64_t procs = 1;
-    uint32_t unit = 1;
-    memcpy(b, &up, 8);
-    memcpy(b + 32, &ram, 8);
-    memcpy(b + 40, &ram, 8);
-    memcpy(b + 80, &procs, 2);
-    memcpy(b + 104, &unit, 4);
-    return lx_put(a[0], b, sizeof b) ? 0 : -L_EFAULT;
+    return lx_put_sysinfo(a[0], rl_clock_ns() / 1000000000, rl_os_memory_bytes(), 1) ? 0 : -L_EFAULT;
 }
 
 static int64_t sys_prctl(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -425,7 +412,7 @@ static int64_t sys_futex(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         int64_t timeout = -1;
         if (a[3]) {
             l_timespec ts;
-            if (!lx_get(&ts, a[3], sizeof ts))
+            if (!lx_get_timespec(a[3], &ts))
                 return -L_EFAULT;
             if (ts.sec < 0 || ts.nsec < 0 || ts.nsec >= 1000000000)
                 return -L_EINVAL;
