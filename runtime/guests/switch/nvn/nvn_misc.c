@@ -62,10 +62,14 @@ uint64_t nvnh_nvnDeviceGetCurrentTimestampInNanoseconds(rl_ctx *c, uint8_t *mem)
     return nvn_ret(c);
 }
 
-/** @brief nvnDeviceGetTimestampInNanoseconds(const NVNdevice *, const NVNcounterData *): the counter's timestamp, which relift writes in nanoseconds. */
+/**
+ * @brief nvnDeviceGetTimestampInNanoseconds(const NVNdevice *, const NVNcounterData *): the counter's timestamp in
+ * nanoseconds. A counter report holds it in GPU ticks of the 19.2 MHz timer, as the console's GPU writes it (a game
+ * may read the word itself), so it is converted here.
+ */
 uint64_t nvnh_nvnDeviceGetTimestampInNanoseconds(rl_ctx *c, uint8_t *mem)
 {
-    c->x[0] = c->x[1] ? rl_ld64(mem, c->x[1] + 8) : 0;
+    c->x[0] = c->x[1] ? nvn_gpu_ns(rl_ld64(mem, c->x[1] + 8)) : 0;
     return nvn_ret(c);
 }
 

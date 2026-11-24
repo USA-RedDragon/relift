@@ -1713,3 +1713,19 @@ TEST(nvn_device_json_names_the_task_and_mesh_subgroup_stages)
     CHECK_EQ(strcmp(nvn_vk_stage_flag_name(7), "VK_SHADER_STAGE_MESH_BIT_EXT"), 0);
     CHECK(nvn_vk_stage_flag_name(8) == NULL);
 }
+
+/**
+ * @brief A counter report's timestamp word holds ticks of the console's 19.2 MHz GPU timer, as its GPU writes it, and
+ * nvnDeviceGetTimestampInNanoseconds converts them: 19,200,000 ticks are one second.
+ */
+TEST(nvn_counter_timestamps_are_gpu_ticks_and_convert_to_nanoseconds)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000), data = heap + 0x100;
+    rl_st64(t_mem(), data, 0);
+    rl_st64(t_mem(), data + 8, 19200000ull * 3 + 12);
+    CHECK_EQ(call(c, nvnh_nvnDeviceGetTimestampInNanoseconds, heap, data, 0, 0), RET);
+    CHECK_EQ(c->x[0], 3000000000ull + 625);
+    CHECK_EQ(nvn_gpu_ticks(1000000000ull), 19200000ull);
+    CHECK_EQ(nvn_gpu_ns(nvn_gpu_ticks(77000000ull)), 77000000ull);
+}

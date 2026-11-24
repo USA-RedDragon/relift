@@ -3,7 +3,8 @@
  * @brief NVN GPU counters on the host device.
  *
  * nvnCommandBufferResetCounter zeroes a counter and nvnCommandBufferReportCounter writes its value and a timestamp
- * (16 bytes) to a GPU address. The driver's ResetCounter writes only a CLEAR_REPORT_VALUE method (SDK 22.2.0): the
+ * (16 bytes) to a GPU address. The timestamp word counts ticks of the console's 19.2 MHz GPU timer, as its GPU writes
+ * it (nvnDeviceGetTimestampInNanoseconds converts; a game may also read the word and convert it itself). The driver's ResetCounter writes only a CLEAR_REPORT_VALUE method (SDK 22.2.0): the
  * counter restarts from zero and no memory changes. The timestamp (type 0) is the guest clock. Every other type
  * counts what the draws since its reset did: once a queue has reset one, each of its draws runs inside an occlusion
  * query and a pipeline statistics query, and a report reads the batch back and adds each statistic to the counters it
@@ -155,7 +156,7 @@ static void walk(uint32_t s, const uint64_t *occ, const uint64_t (*stats)[STATS]
             when = back < seen ? seen - back : 0;
         }
         __atomic_store_n((uint64_t *)(rq.mem + e->addr), value, __ATOMIC_RELAXED);
-        __atomic_store_n((uint64_t *)(rq.mem + e->addr + 8), when, __ATOMIC_RELEASE);
+        __atomic_store_n((uint64_t *)(rq.mem + e->addr + 8), nvn_gpu_ticks(when), __ATOMIC_RELEASE);
         uint64_t what[4] = { e->addr, e->type, value, e->valid };
         nvn_trace_order("report", "counter report written", 0, 0, 0, what, 4, 0, true);
     }
@@ -400,7 +401,7 @@ int nvn_counters_report(replay *r, uint32_t type, uint64_t addr)
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     rl_st64(r->mem, at, value);
-    rl_st64(r->mem, at + 8, rl_guest_clock_ns());
+    rl_st64(r->mem, at + 8, nvn_gpu_ticks(rl_guest_clock_ns()));
     return RL_OK;
 }
 
@@ -482,7 +483,7 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
     uint64_t t1 = rl_guest_clock_ns();
     if (!rc && !nvn_vk_settle())
         rc = 7;
-    uint64_t a = rl_ld64(mem, addr + 8), b = rl_ld64(mem, addr + 24);
+    uint64_t a = nvn_gpu_ns(rl_ld64(mem, addr + 8)), b = nvn_gpu_ns(rl_ld64(mem, addr + 24));
     if (!rc && (rl_ld64(mem, addr) != 0 || rl_ld64(mem, addr + 16) != 0))
         rc = 8;
     else if (!rc && (a < t0 || b < a || b > t1))
@@ -528,7 +529,7 @@ int nvn_counters_order_check(uint8_t *mem, uint64_t addr)
     rps[rec].ev[rps[rec].n++] = (event){ .st = &st, .type = 3, .slot = 2 };
     for (uint32_t t = 0; t < NVN_COUNTERS; t++)
         rps[rec].ev[rps[rec].n++] = (event){ .st = &st, .addr = addr + 256 + 16 * t, .type = t, .slot = 3, .report = true, .valid = t != 0 };
-    walk(rec, occ, stats, NULL, 3, rps[rec].n, 77);
+    walk(rec, occ, stats, NULL, 3, rps[rec].n, 77000000);
     rps[rec].n = 0;
     for (uint32_t r = 0; r < 2; r++)
         for (uint32_t t = 0; t < NVN_COUNTERS; t++) {
@@ -544,7 +545,7 @@ int nvn_counters_order_check(uint8_t *mem, uint64_t addr)
                     want += dr == 1 ? stats[dr][4] : stats[dr][1];
             }
             uint64_t got = rl_ld64(mem, addr + 256 * r + 16 * t), when = rl_ld64(mem, addr + 256 * r + 16 * t + 8);
-            if (got != want || when != 77)
+            if (got != want || when != nvn_gpu_ticks(77000000))
                 return 1 + (int)(r * NVN_COUNTERS + t);
         }
     return 0;

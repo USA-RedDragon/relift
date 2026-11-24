@@ -1031,6 +1031,11 @@ int nvn_cmd_submit(rl_ctx *c, uint8_t *mem, uint64_t queue, uint64_t handle);
 uint64_t nvn_trace_order(const char *kind, const char *name, uint64_t queue, uint64_t submit, uint32_t pos,
                          const uint64_t *args, uint32_t n, uint32_t value, bool met);
 
+/** @brief Nanoseconds as ticks of the console's 19.2 MHz GPU timer, the unit of a counter report's timestamp (12/625 per ns). */
+static inline uint64_t nvn_gpu_ticks(uint64_t ns) { return ns / 625 * 12 + ns % 625 * 12 / 625; }
+/** @brief Ticks of the 19.2 MHz GPU timer as nanoseconds (625/12 per tick). */
+static inline uint64_t nvn_gpu_ns(uint64_t ticks) { return ticks / 12 * 625 + ticks % 12 * 625 / 12; }
+
 /** @brief The guest address of a memory pool's storage and its size, or 0. */
 uint64_t nvn_pool_memory(uint64_t pool, uint64_t *size);
 /**
