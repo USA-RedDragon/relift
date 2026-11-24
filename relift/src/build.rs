@@ -1162,9 +1162,11 @@ const RCPC_ARCH: &str = "-march=armv8-a+rcpc";
 
 /// The RCpc flag for an arm64 cross target, which has a fixed minimum:
 /// Android needs a CPU with FEAT_LRCPC (the runtime checks at start) and iOS
-/// devices from the A12 on have it.
+/// devices from the A12 on have it. `RELIFT_RCPC=0` leaves it off, to
+/// compare builds.
 fn rcpc_arch(target: &str) -> Option<&'static str> {
-    (target.contains("arm64")).then_some(RCPC_ARCH)
+    let off = std::env::var("RELIFT_RCPC").is_ok_and(|v| v == "0");
+    (target.contains("arm64") && !off).then_some(RCPC_ARCH)
 }
 
 /// Whether a native arm64 build targets a host with FEAT_LRCPC: every Apple
