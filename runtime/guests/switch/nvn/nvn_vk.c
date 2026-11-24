@@ -4484,6 +4484,94 @@ static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
 }
 
 /**
+ * @brief nvnCommandBufferCopyTextureToBuffer(src, srcView, srcRegion, buffer, flags): the region's texels (blocks of
+ * a compressed format) written to the buffer in the copy strides the command buffer had when it was recorded, rows
+ * of blocks row_bytes apart and layers or slices image_bytes apart; the bytes between rows and layers are left as
+ * they are. The texture's host texels must be its guest bytes: a color or depth-only or stencil-only texture kept in
+ * its own format (not a substitute such as decoded ASTC or a combined depth-stencil one). In a pool imported into
+ * the host device the copy is a GPU copy into the pool's buffer, in command order; elsewhere the texels are read back
+ * and written to guest memory once the work before the copy is done. The linear filter flag does nothing to a copy
+ * of the region's own size; a mirror flag or an unknown one stops the game.
+ */
+static int copy_texture_to_buffer(replay *r, const nvn_cmd *e)
+{
+    const nvn_region *rg = nvn_cmd_bytes(r->s, e->x[3]);
+    uint32_t flags = (uint32_t)e->x[5];
+    if (!rg)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToBuffer without a region");
+    if (flags & ~NVN_COPY_LINEAR_FILTER)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToBuffer with flags 0x%x", flags);
+    vimg *src = image_of(r, e->x[1]);
+    if (!src)
+        return RL_PENDING;
+    VkImageAspectFlags a;
+    if (src->format != nvn_vk_format(src->d.format, &a) ||
+        (src->aspect != VK_IMAGE_ASPECT_COLOR_BIT && src->aspect != VK_IMAGE_ASPECT_DEPTH_BIT &&
+         src->aspect != VK_IMAGE_ASPECT_STENCIL_BIT))
+        return nvn_vk_stop(r,
+                           "nvnCommandBufferCopyTextureToBuffer of format %u, kept on the host device in VkFormat %d "
+                           "with aspects 0x%x, whose texels are not its guest bytes",
+                           src->d.format, (int)src->format, (unsigned)src->aspect);
+    nvn_copy_pitch p;
+    uint32_t bpb, bw, bh;
+    if (!nvn_tex_format(src->d.format, &bpb, &bw, &bh) ||
+        !nvn_copy_pitch_of(src->d.format, rg, (uint32_t)e->x[NVN_COPY_ROW_STRIDE_ARG],
+                           (uint32_t)e->x[NVN_COPY_IMAGE_STRIDE_ARG], &p))
+        return nvn_vk_stop(r,
+                           "nvnCommandBufferCopyTextureToBuffer of %dx%dx%d texels of format %u with row stride %u "
+                           "and image stride %u",
+                           rg->width, rg->height, rg->depth, src->d.format, (uint32_t)e->x[NVN_COPY_ROW_STRIDE_ARG],
+                           (uint32_t)e->x[NVN_COPY_IMAGE_STRIDE_ARG]);
+    if (!nvn_vk_refresh(r, src))
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToBuffer: the source texture's bytes could not be uploaded");
+    uint32_t level, layer;
+    int rc = copy_side(r, e->x[2], rg, &level, &layer);
+    if (rc != RL_OK)
+        return rc;
+    bool is3d = src->d.target == NVN_TARGET_3D;
+    if (is3d)
+        layer -= (uint32_t)rg->z;
+    uint32_t layers = rg->depth > 0 ? (uint32_t)rg->depth : 1;
+    VkBufferImageCopy bic = {
+        .imageSubresource = { src->aspect, level, layer, is3d ? 1u : layers },
+        .imageOffset = { rg->x, rg->y, is3d ? rg->z : 0 },
+        .imageExtent = { (uint32_t)rg->width, (uint32_t)rg->height, is3d ? layers : 1u },
+    };
+    uint64_t gpu = e->x[4], at = nvn_gpu_guest(gpu), off;
+    void *pool;
+    uint32_t align = src->aspect == VK_IMAGE_ASPECT_COLOR_BIT ? bpb : 4;
+    if (nvn_guest_buffer(at, p.span, &pool, &off) && off % align == 0 && p.row_bytes % bpb == 0 &&
+        p.image_bytes % p.row_bytes == 0) {
+        bic.bufferOffset = off;
+        bic.bufferRowLength = p.row_texels;
+        bic.bufferImageHeight = p.image_rows;
+        nvn_vk_begin(r);
+        nvn_vk_barrier(g.cb);
+        VK(vkCmdCopyImageToBuffer)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, (VkBuffer)pool, 1, &bic);
+        nvn_vk_barrier(g.cb);
+        nvn_mirror_written(gpu, p.span);
+        nvn_vk_mark_write_range(at, p.span);
+        nvn_watch_touch(at, p.span);
+        return RL_OK;
+    }
+    uint64_t row = (uint64_t)((rg->width + bw - 1) / bw) * bpb, rows = (uint64_t)(rg->height + bh - 1) / bh;
+    staging s;
+    if (!nvn_vk_readback_new(&s, row * rows * layers))
+        return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToBuffer of %llu bytes: no readback buffer",
+                           (unsigned long long)(row * rows * layers));
+    nvn_vk_begin(r);
+    nvn_vk_barrier(g.cb);
+    VK(vkCmdCopyImageToBuffer)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, s.buf, 1, &bic);
+    nvn_vk_barrier(g.cb);
+    bool ok = nvn_vk_flush(r) && nvn_vk_reading_guest(at, p.span);
+    for (uint64_t z = 0; ok && z < layers; z++)
+        for (uint64_t y = 0; y < rows; y++)
+            memcpy(r->mem + at + z * p.image_bytes + y * p.row_bytes, s.map + (z * rows + y) * row, row);
+    nvn_vk_staging_free(&s);
+    return ok ? RL_OK : nvn_vk_stop(r, "the host device failed a submit");
+}
+
+/**
  * @brief nvnCommandBufferClearTexture, Texturei and Textureui(texture, view, region, color, mask): the region's
  * texels of each layer it covers set to color (four floats, signed or unsigned integers, the same 16 bytes), through
  * a one-layer render target of the texture in turn.
@@ -4608,6 +4696,8 @@ static int run_cmd(replay *r, const nvn_cmd *e)
         return copy_texture_to_texture(r, e);
     case NVN_CMD_COPY_BUFFER_TO_TEXTURE:
         return copy_buffer_to_texture(r, e);
+    case NVN_CMD_COPY_TEXTURE_TO_BUFFER:
+        return copy_texture_to_buffer(r, e);
     case NVN_CMD_EVALUATE_DLSS: {
         if (g_recording && !open_pass.open)
             nvn_gpuprof_mark_kinds();

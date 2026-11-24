@@ -566,6 +566,77 @@ static const uint32_t spv_ssbo_atomic[] = {
     0x00010038,
 };
 
+/**
+ * @brief Records nvnCommandBufferCopyTextureToBuffer(cb, tex, no view, region, buffer, flags 0) as lifted code calls
+ * it.
+ */
+static void copy_texture_to_buffer(rl_ctx *c, uint64_t cb, uint64_t tex, uint64_t region, uint64_t buffer)
+{
+    c->x[4] = buffer;
+    c->x[5] = 0;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferCopyTextureToBuffer, cb, tex, 0, region), RET);
+}
+
+/**
+ * The console's copy writes each row of the region's texels at the row stride and leaves the bytes between rows as
+ * they are: a region put in a block-linear texture by CopyBufferToTexture comes back the same through
+ * CopyTextureToBuffer, by a GPU copy into the pool (aligned) and by a readback (an address no Vulkan copy may start
+ * at), and a cleared region comes back as the clear color's bytes.
+ */
+TEST(nvn_copy_texture_to_buffer_returns_the_texels_in_the_strides_rows)
+{
+    RECORDING(c, heap, cb);
+    IMPORTED_POOL(c, heap, gpu, mem, nvn_copy_texture_to_buffer_returns_the_texels_in_the_strides_rows);
+    nvn_tex_desc d = { .target = 1, .format = 37, .width = 16, .height = 8, .depth = 1, .levels = 1,
+                       .swizzle = { 2, 3, 4, 5 }, .pool = heap + 0x100, .offset = 0x8000 };
+    CHECK(nvn_tex_layout(&d));
+    CHECK(d.offset + d.size <= 0x10000);
+    uint64_t tex = heap + 0x3000, region = heap + 0x600, clear = heap + 0x700, color = heap + 0x780;
+    nvn_region rg = { 2, 1, 0, 8, 4, 1 }, cr = { 0, 6, 0, 4, 2, 1 };
+    memcpy(t_mem() + region, &rg, sizeof rg);
+    memcpy(t_mem() + clear, &cr, sizeof cr);
+    const float rgba[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
+    memcpy(t_mem() + color, rgba, sizeof rgba);
+    CHECK(nvn_texture_record(tex, &d, NULL));
+    uint8_t *m = t_mem() + mem;
+    memset(m, 0xee, 0x8000);
+    for (unsigned y = 0; y < 4; y++)
+        for (unsigned i = 0; i < 32; i++)
+            m[0x100 + 64 * y + i] = (uint8_t)(y * 32 + i + 1);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetCopyRowStride, cb, 64, 0, 0), RET);
+    c->x[4] = region;
+    c->x[5] = 0;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferCopyBufferToTexture, cb, gpu + 0x100, tex, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetCopyRowStride, cb, 48, 0, 0), RET);
+    copy_texture_to_buffer(c, cb, tex, region, gpu + 0x1000);
+    copy_texture_to_buffer(c, cb, tex, region, gpu + 0x2002);
+    c->x[4] = color;
+    c->x[5] = 0xf;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferClearTexture, cb, tex, 0, clear), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferSetCopyRowStride, cb, 0, 0, 0), RET);
+    copy_texture_to_buffer(c, cb, tex, clear, gpu + 0x3000);
+    FINISHED(s, c, cb);
+    CHECK_EQ(s->n, 5);
+    CHECK_EQ(nvn_vk_run(c, t_mem(), heap + 0x800, s), RL_OK);
+    CHECK(nvn_vk_settle());
+    for (unsigned y = 0; y < 4; y++) {
+        for (unsigned i = 0; i < 32; i++) {
+            CHECK_EQ(m[0x1000 + 48 * y + i], (uint8_t)(y * 32 + i + 1));
+            CHECK_EQ(m[0x2002 + 48 * y + i], (uint8_t)(y * 32 + i + 1));
+        }
+        for (unsigned i = 32; i < 48; i++) {
+            CHECK_EQ(m[0x1000 + 48 * y + i], 0xee);
+            CHECK_EQ(m[0x2002 + 48 * y + i], 0xee);
+        }
+    }
+    CHECK_EQ(m[0x1000 + 48 * 3 + 48], 0xee);
+    CHECK_EQ(m[0x2001], 0xee);
+    static const uint8_t red[4] = { 0xff, 0x00, 0x00, 0xff };
+    for (unsigned i = 0; i < 2 * 4 * 4; i++)
+        CHECK_EQ(m[0x3000 + i], red[i % 4]);
+    CHECK_EQ(m[0x3000 + 32], 0xee);
+}
+
 TEST(nvn_a_program_writes_guest_memory_only_when_it_stores_to_a_guest_buffer)
 {
     CHECK(nvn_spirv_stores(spv_bda_store, sizeof spv_bda_store / 4));
