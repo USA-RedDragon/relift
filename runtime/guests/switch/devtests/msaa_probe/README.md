@@ -30,3 +30,12 @@ are Mesa NVK's cells. Its 16-sample grid is the one in
 
     clang -std=c11 -O2 -Iguests/switch/vk/gen guests/switch/devtests/msaa_probe/msaa_cells.c -ldl -o msaa_cells
     ./msaa_cells 16 s8
+
+## Measured
+
+`measured.json` holds msaa_probe's output for each device it was run on (2026-11-24):
+the RTX 3090 (NVIDIA 615.78.08), lavapipe, and the AYN Thor's Adreno 740 with
+its system driver and with the Turnip 26.0.0 R8 package. Each measures
+Vulkan's standard positions, NVN's defaults, at every sample count it offers.
+The Thor's system driver offers 2 and 4 samples, Turnip offers 2, 4 and 8, and
+neither offers 16.

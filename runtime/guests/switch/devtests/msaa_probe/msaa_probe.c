@@ -10,8 +10,8 @@
  * grid step they fall in.
  *
  * Usage: msaa_probe [driver.so]. Without an argument it loads the system Vulkan loader; with one it loads that
- * Vulkan driver directly (as an installable client driver: vk_icdGetInstanceProcAddr), as relift's Android host
- * loads a Turnip package. RELIFT_VK_DEVICE picks the device whose name contains it. Build: see
+ * Vulkan driver directly: an installable client driver (vk_icdGetInstanceProcAddr), or an Android Vulkan HAL module
+ * (HMI) such as a Turnip package, as relift's Android host loads one. RELIFT_VK_DEVICE picks the device whose name contains it. Build: see
  * runtime/guests/switch/devtests/msaa_probe/README.md.
  */
 #include "vkg_types.h"
@@ -209,6 +209,42 @@ static uint32_t mem_type(uint32_t bits, VkMemoryPropertyFlags want)
     exit(1);
 }
 
+/**
+ * @brief The vkGetInstanceProcAddr of an Android Vulkan HAL module (a driver package such as Turnip exports HMI, the
+ * hw_module_t of hardware/hwvulkan.h): its open method for "vk0" gives the hwvulkan_device_t, whose third function
+ * is GetInstanceProcAddr. NULL when lib is no such module.
+ */
+static PFN_vkGetInstanceProcAddr android_hal(void *lib)
+{
+    typedef struct hw_module {
+        uint32_t tag;
+        uint16_t module_api_version, hal_api_version;
+        const char *id, *name, *author;
+        const struct hw_methods *methods;
+        void *dso;
+        uint64_t reserved[32 - 7];
+    } hw_module;
+    typedef struct hw_device {
+        uint32_t tag, version;
+        hw_module *module;
+        uint64_t reserved[12];
+        int (*close)(struct hw_device *);
+    } hw_device;
+    struct hw_methods {
+        int (*open)(const hw_module *, const char *, hw_device **);
+    };
+    typedef struct hwvulkan_device {
+        hw_device common;
+        void *enumerate_instance_extension_properties, *create_instance;
+        PFN_vkGetInstanceProcAddr get_instance_proc_addr;
+    } hwvulkan_device;
+    hw_module *m = (hw_module *)dlsym(lib, "HMI");
+    hw_device *d = NULL;
+    if (!m || !m->methods || !m->methods->open || m->methods->open(m, "vk0", &d) != 0 || !d)
+        return NULL;
+    return ((hwvulkan_device *)d)->get_instance_proc_addr;
+}
+
 static void open_device(const char *icd)
 {
     void *lib = icd ? dlopen(icd, RTLD_NOW | RTLD_LOCAL) : NULL;
@@ -228,6 +264,8 @@ static void open_device(const char *icd)
         if (neg)
             neg(&v);
         gipa = (PFN_vkGetInstanceProcAddr)dlsym(lib, "vk_icdGetInstanceProcAddr");
+        if (!gipa)
+            gipa = android_hal(lib);
     } else {
         gipa = (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr");
     }

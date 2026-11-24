@@ -1,0 +1,6 @@
+[
+{ "ReliftSamplePositions": { "deviceName": "NVIDIA GeForce RTX 3090", "driverVersion": 2580775424, "standardSampleLocations": true, "framebufferColorSampleCounts": 15, "2": [[12, 12], [4, 4]], "4": [[6, 2], [14, 6], [2, 10], [10, 14]], "8": [[9, 5], [7, 11], [13, 9], [5, 3], [3, 13], [1, 7], [11, 15], [15, 1]], "measuredStandard": true } },
+{ "ReliftSamplePositions": { "deviceName": "llvmpipe (LLVM 23.1.1, 256 bits)", "driverVersion": 109060100, "standardSampleLocations": true, "framebufferColorSampleCounts": 13, "4": [[6, 2], [14, 6], [2, 10], [10, 14]], "8": [[9, 5], [7, 11], [13, 9], [5, 3], [3, 13], [1, 7], [11, 15], [15, 1]], "measuredStandard": true } },
+{ "ReliftSamplePositions": { "deviceName": "Adreno (TM) 740", "driverVersion": 2150252597, "standardSampleLocations": true, "framebufferColorSampleCounts": 7, "2": [[12, 12], [4, 4]], "4": [[6, 2], [14, 6], [2, 10], [10, 14]], "measuredStandard": true } },
+{ "ReliftSamplePositions": { "deviceName": "Turnip Adreno (TM) 740", "driverVersion": 105263203, "standardSampleLocations": true, "framebufferColorSampleCounts": 7, "2": [[12, 12], [4, 4]], "4": [[6, 2], [14, 6], [2, 10], [10, 14]], "8": [[9, 5], [7, 11], [13, 9], [5, 3], [3, 13], [1, 7], [11, 15], [15, 1]], "measuredStandard": true } }
+]

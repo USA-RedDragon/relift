@@ -1081,10 +1081,12 @@ static void write_caps(void)
     fprintf(f,
             "    \"VkPhysicalDeviceProperties\": { \"deviceID\": %u, \"deviceName\": \"%s\", \"vendorID\": %u, \"limits\": "
             "{ \"maxComputeSharedMemorySize\": %u, \"maxComputeWorkGroupInvocations\": %u, \"maxComputeWorkGroupSize\": "
-            "[%u, %u, %u], \"maxStorageBufferRange\": %u } },\n",
+            "[%u, %u, %u], \"maxStorageBufferRange\": %u, \"standardSampleLocations\": %s, "
+            "\"framebufferColorSampleCounts\": %u } },\n",
             p2.properties.deviceID, p2.properties.deviceName, p2.properties.vendorID, l->maxComputeSharedMemorySize,
             l->maxComputeWorkGroupInvocations, l->maxComputeWorkGroupSize[0], l->maxComputeWorkGroupSize[1],
-            l->maxComputeWorkGroupSize[2], l->maxStorageBufferRange);
+            l->maxComputeWorkGroupSize[2], l->maxStorageBufferRange, B(l->standardSampleLocations),
+            (unsigned)l->framebufferColorSampleCounts);
     fprintf(f, "    \"VkPhysicalDeviceVulkan11Properties\": { \"subgroupSize\": %u, ", p11.subgroupSize);
     json_flags(f, "subgroupSupportedOperations", p11.subgroupSupportedOperations, subgroup_ops, 8);
     fprintf(f, ", ");

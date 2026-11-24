@@ -1514,6 +1514,8 @@ TEST(nvn_probes_reach_device_json)
              p.denorm_mul_fix);
     CHECK(strstr(text, want) != NULL);
     fprintf(stderr, "nvn_probes_reach_device_json: %s\n", want);
+    CHECK(strstr(text, "\"standardSampleLocations\": true, \"framebufferColorSampleCounts\": ") ||
+          strstr(text, "\"standardSampleLocations\": false, \"framebufferColorSampleCounts\": "));
 }
 
 TEST(nvn_denorm_probe_holds_on_millions_of_random_rows)
