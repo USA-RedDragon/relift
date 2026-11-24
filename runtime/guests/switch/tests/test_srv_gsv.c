@@ -12,7 +12,9 @@
 #include <relift/settings.h>
 #include <relift/video.h>
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define CUR_PROCESS_HANDLE 0xFFFF8001u
 
@@ -873,7 +875,7 @@ TEST(gsv_a_frame_decoded_before_the_client_says_how_it_reads_is_written_in_that_
     rl_vp9_stream_backend_override(NULL);
 }
 
-TEST(gsv_display_buffer_max_resolution_follows_the_render_resolution)
+TEST(gsv_display_buffer_max_resolution_follows_the_games_render_size)
 {
     rl_settings_reset();
     unsetenv("RELIFT_RENDER_RESOLUTION");
@@ -881,25 +883,36 @@ TEST(gsv_display_buffer_max_resolution_follows_the_render_resolution)
     rl_hos_config cfg;
     rl_hos_default_config(&cfg);
     rl_hos_switch2_config(&cfg);
+    cfg.program_id = UINT64_C(0x04007ef01f8ae000);
     rl_ctx *c = t_boot(&cfg);
     uint64_t heap = t_heap(c, 0x200000);
     uint32_t d = display_session(c, heap);
     CHECK(d != 0);
-    rl_am_set_operation_mode(true);
     static const struct {
-        const char *res;
+        uint32_t lines;
         bool docked;
         uint64_t mode;
     } want[] = {
-        { "original", true, 4 }, { "1080p", true, 2 }, { "720p", true, 1 },
-        { "original", false, 2 }, { "1080p", false, 2 }, { "720p", false, 1 },
+        { 0, true, 4 },    { 1440, true, 4 },  { 1080, true, 2 }, { 900, true, 1 },    { 720, true, 1 },
+        { 0, false, 2 },   { 1080, false, 2 }, { 720, false, 1 }, { 1440, false, 2 },
     };
     for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
-        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].res), RL_SETTING_OK);
+        char v[16];
+        snprintf(v, sizeof v, "%u", want[i].lines);
+        CHECK_EQ(rl_settings_set("video.render_resolution", v), RL_SETTING_OK);
         rl_am_set_operation_mode(want[i].docked);
         tc_res r = display_query(c, d, 106, 0x00746c7561666564ull);
         CHECK_EQ(r.result, 0);
         CHECK_EQ(tc_u64(&r, 0), want[i].mode);
     }
+    /* The settings screen's list for the game: the console's size first. */
+    rl_render_size sizes[4];
+    rl_am_set_operation_mode(true);
+    CHECK_EQ(rl_render_sizes(sizes, 4), 3u);
+    CHECK(sizes[0].console && sizes[0].lines == 1440u && !strcmp(sizes[0].label, "1440 lines (console)"));
+    CHECK(sizes[2].lines == 720u && !sizes[2].console);
+    rl_am_set_operation_mode(false);
+    CHECK_EQ(rl_render_sizes(sizes, 4), 2u);
+    CHECK(sizes[0].lines == 1080u && sizes[0].console);
     rl_settings_reset();
 }

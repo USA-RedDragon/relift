@@ -532,7 +532,8 @@ static rl_result display_query_paper_white(rl_ipc_req *r)
 /**
  * @brief DisplaySession 106 (nn::vi2::QueryDisplayBufferMaxResolution): a u64 display name; a u64 mode of the
  * highest buffer resolution (1 is 1280x720, 2 is 1920x1080, 4 is 2560x1440), 4 docked and 2 handheld (inferred:
- * Eglantine), at most the video.render_resolution setting's display (1080p: 2, 720p: 1). The name must be "default".
+ * Eglantine), cut to the render size the video.render_resolution setting picks (render_sizes.c: 1440 lines is 4, 1080
+ * is 2, 720 is 1). The name must be "default".
  */
 static rl_result display_query_buffer_max_resolution(rl_ipc_req *r)
 {
@@ -546,13 +547,10 @@ static rl_result display_query_buffer_max_resolution(rl_ipc_req *r)
         return SF_RESULT_INVALID_HEADER;
     uint32_t cap = rl_am_display_cap();
     uint64_t mode = rl_am_is_docked() ? 4 : 2;
-    if (cap == 1080 && mode > 2)
-        mode = 2;
-    else if (cap == 720)
-        mode = 1;
+    if (cap)
+        mode = cap >= 1440 ? 4 : cap >= 1080 ? 2 : 1;
     *out = mode;
-    rl_log(RL_LOG_INFO, "gsv", "QueryDisplayBufferMaxResolution: mode %llu (%s, video.render_resolution cap %u)",
-           (unsigned long long)mode, rl_am_is_docked() ? "docked" : "handheld", cap);
+    am_log_render_size("gsv 106 QueryDisplayBufferMaxResolution");
     return KR_SUCCESS;
 }
 

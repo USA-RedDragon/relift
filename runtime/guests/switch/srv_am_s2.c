@@ -43,10 +43,10 @@ static const rl_ipc_class performance_class = {
 #define GRAPHICS_SCALE_CODE_2 30u
 
 /**
- * @brief The scale code for the video.render_resolution setting. Ocarina (Switch 2) fixes its display at 2560x1440 in
- * the game and sizes its frame from that times the factor of the scale this call reports (scale 0 x1, scale 1 x0.8,
- * scale 2 x0.667, so 1440, 1152 and 960 lines); it never asks the display services. The first scale whose height is
- * within the cap is chosen, the smallest when none is: 1080p and 720p both give scale 2, the lowest the game offers.
+ * @brief The scale code for a render size cap in lines (render_sizes.c). Ocarina (Switch 2) fixes its display at
+ * 2560x1440 in the game and sizes its frame from that times the factor of the scale this call reports (scale 0 x1,
+ * scale 1 x0.8, scale 2 x0.667, so 1440, 1152 and 960 lines); it never asks the display services. The first scale
+ * whose height is within the cap is chosen, the smallest when none is.
  */
 uint32_t am_graphics_scale_code(uint32_t cap_lines)
 {
@@ -72,8 +72,7 @@ static rl_result gs_get_graphics_scaling_parameters(rl_ipc_req *r)
     if (!out)
         return SF_RESULT_INVALID_HEADER;
     uint32_t code = am_graphics_scale_code(rl_am_display_cap());
-    rl_log(RL_LOG_INFO, "am", "GetGraphicsScalingParameters: scale code %u (video.render_resolution cap %u)", code,
-           rl_am_display_cap());
+    am_log_render_size("GetGraphicsScalingParameters");
     memset(out, 0, 12);
     memcpy(out, &code, sizeof code);
     return KR_SUCCESS;

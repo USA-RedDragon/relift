@@ -423,17 +423,39 @@ TEST(settings_save_creates_the_user_file)
     free(oldx);
 }
 
+static size_t two_sizes(rl_render_size *out, size_t max)
+{
+    static const rl_render_size sizes[] = { { 1440, "1440 lines (console)", true }, { 720, "720 lines", false } };
+    size_t n = max < 2 ? max : 2;
+    for (size_t i = 0; i < n; i++)
+        out[i] = sizes[i];
+    return n;
+}
+
 TEST(render_resolution_is_a_core_setting_any_guest_reads)
 {
     rl_settings_reset();
     unsetenv("RELIFT_RENDER_RESOLUTION");
     rl_settings_declare_runtime();
     CHECK_EQ(rl_render_resolution_lines(), 0u);
-    CHECK_EQ(rl_settings_set("video.render_resolution", "1080p"), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("video.render_resolution", "1080"), RL_SETTING_OK);
     CHECK_EQ(rl_render_resolution_lines(), 1080u);
-    setenv("RELIFT_RENDER_RESOLUTION", "720p", 1);
+    setenv("RELIFT_RENDER_RESOLUTION", "720", 1);
     CHECK_EQ(rl_render_resolution_lines(), 720u);
     unsetenv("RELIFT_RENDER_RESOLUTION");
     CHECK_EQ(rl_settings_set("video.render_resolution", "4k"), RL_SETTING_INVALID);
     rl_settings_reset();
+}
+
+TEST(render_sizes_are_the_guests_list_and_empty_without_one)
+{
+    rl_render_size sizes[4];
+    rl_render_sizes_register(NULL);
+    CHECK_EQ(rl_render_sizes(sizes, 4), 0u);
+    rl_render_sizes_register(two_sizes);
+    CHECK_EQ(rl_render_sizes(sizes, 4), 2u);
+    CHECK_EQ(sizes[0].lines, 1440u);
+    CHECK(sizes[0].console && !sizes[1].console);
+    CHECK_EQ(sizes[1].lines, 720u);
+    rl_render_sizes_register(NULL);
 }

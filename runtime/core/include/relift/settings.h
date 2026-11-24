@@ -226,10 +226,33 @@ RL_RUNTIME_API const char *rl_settings_app(void);
 RL_RUNTIME_API bool rl_settings_user_file(char *out, size_t size);
 
 /**
- * @brief The video.render_resolution setting as the most lines a guest's picture may have: 0 for original (the game's
- * own size), else 1080 or 720. Each guest maps it to its own lever: a console guest to the display size the console
- * reports, a guest with an internal render scale to that scale; a 2D guest ignores it.
+ * @brief The video.render_resolution setting: the height in lines the player chose, 0 for the console's own size.
+ * Which sizes exist is the game's own fact, so a guest turns the number into its lever through its own list
+ * (rl_render_sizes_register): a guest with a fixed list picks the offered size at or below it.
  */
 RL_RUNTIME_API uint32_t rl_render_resolution_lines(void);
+
+/** @brief One size a game offers for its picture. */
+typedef struct rl_render_size {
+    /** @brief Its height in lines; this is what video.render_resolution stores. */
+    uint32_t lines;
+    /** @brief What the settings screen shows, such as "1440 lines (console)". Static. */
+    const char *label;
+    /** @brief True for the size the console itself uses (the default); the first entry. */
+    bool console;
+} rl_render_size;
+
+/**
+ * @brief Fills out with the sizes the running game offers in the current console mode, console size first, largest to
+ * smallest; returns the count (at most max). A guest sets it with rl_render_sizes_register. Zero means the game has no
+ * known list, and the settings screen shows no render resolution row.
+ */
+typedef size_t (*rl_render_sizes_fn)(rl_render_size *out, size_t max);
+
+/** @brief Registers the guest's list, or NULL for none. */
+RL_RUNTIME_API void rl_render_sizes_register(rl_render_sizes_fn fn);
+
+/** @brief The sizes the running game offers now; 0 when it has no list (see rl_render_sizes_fn). */
+RL_RUNTIME_API size_t rl_render_sizes(rl_render_size *out, size_t max);
 
 #endif

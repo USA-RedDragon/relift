@@ -7,6 +7,9 @@ const HARNESS: &str = r#"#include <stdio.h>
 #include <relift/settings.h>
 void DECLARE(void);
 const rl_guest_desc *rl_core_guest(void) { return NULL; }
+/* The harness links neither the warm-up screen nor the Switch render size list. */
+_Bool rl_warmup_blocking(void) { return 0; }
+size_t rl_switch_render_sizes(rl_render_size *out, size_t max) { (void)out; (void)max; return 0; }
 int main(void)
 {
     static char b[65536];

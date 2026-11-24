@@ -1128,13 +1128,14 @@ TEST(am_switch2_proxy_and_its_functions)
     CHECK_EQ(set32(&e, e.csg, 66, 1), AM_INVALID_PARAMS);
 }
 
-TEST(am_graphics_scale_follows_the_render_resolution)
+TEST(am_graphics_scale_follows_the_games_render_size)
 {
     rl_settings_reset();
     rl_switch_declare_settings();
     rl_hos_config cfg;
     rl_hos_default_config(&cfg);
     rl_hos_switch2_config(&cfg);
+    cfg.program_id = UINT64_C(0x0400486024dec000);
     env e;
     memset(&e, 0, sizeof e);
     e.c = t_boot(&cfg);
@@ -1144,17 +1145,30 @@ TEST(am_graphics_scale_follows_the_render_resolution)
     CHECK_EQ(tc_sub(e.c, e.svc, proxy_req(10), &e.proxy), 0);
     tc_obj scaling;
     CHECK_EQ(get(&e, e.proxy, 60, &scaling), 0);
-    /* Scale 1 is 1152 lines, over both caps: the game offers 1440, 1152 and 960 lines, so 960 is as low as it goes. */
+    rl_am_set_operation_mode(true);
+    /* Scale code 10 is x1 (1440 lines), 20 is x0.8 (1152), 30 is x0.667 (960); a value between sizes takes the one below. */
     static const struct {
-        const char *res;
-        uint32_t code;
-    } want[] = { { "original", 10 }, { "1080p", 30 }, { "720p", 30 } };
+        const char *lines;
+        uint32_t code, rendered;
+    } want[] = {
+        { "0", 10, 1440 }, { "1440", 10, 1440 }, { "1152", 20, 1152 }, { "1080", 30, 960 }, { "960", 30, 960 }, { "720", 30, 960 },
+    };
     for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
-        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].res), RL_SETTING_OK);
+        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].lines), RL_SETTING_OK);
         tc_res r = tc_send(e.c, scaling, tc_new(10));
         CHECK_EQ(rc_of(r), 0);
         CHECK_EQ(tc_u32(&r, 0), want[i].code);
+        CHECK_EQ(rl_am_render_lines(), want[i].rendered);
     }
+    rl_render_size sizes[4];
+    CHECK_EQ(rl_render_sizes(sizes, 4), 3u);
+    CHECK_EQ(sizes[1].lines, 1152u);
+    /* Handheld was not measured: no list, the setting is ignored. */
+    rl_am_set_operation_mode(false);
+    CHECK_EQ(rl_render_sizes(sizes, 4), 0u);
+    CHECK_EQ(rl_am_render_lines(), 0u);
+    tc_res r = tc_send(e.c, scaling, tc_new(10));
+    CHECK_EQ(tc_u32(&r, 0), 10u);
     rl_settings_reset();
 }
 

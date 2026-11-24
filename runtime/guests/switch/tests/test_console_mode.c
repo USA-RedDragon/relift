@@ -14,6 +14,7 @@
 #include <relift/ports.h>
 #include <relift/settings.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 
 #define AM_NO_MSG 0x680u
@@ -193,18 +194,28 @@ TEST(render_resolution_caps_the_display_the_console_reports)
     env e = { 0 };
     boot(&e, "docked");
     CHECK(e.vi_sys.handle);
+    hos.cfg.program_id = UINT64_C(0x04007ef01f8ae000);
     static const struct {
-        const char *res;
+        uint32_t lines;
         bool docked;
         uint32_t w, h;
     } want[] = {
-        { "original", true, 1920, 1080 }, { "1080p", true, 1920, 1080 },  { "720p", true, 1280, 720 },
-        { "original", false, 1280, 720 }, { "1080p", false, 1280, 720 }, { "720p", false, 1280, 720 },
+        { 0, true, 1920, 1080 },    { 1440, true, 1920, 1080 },  { 1080, true, 1920, 1080 },
+        { 720, true, 1280, 720 },   { 0, false, 1280, 720 },     { 1080, false, 1280, 720 },
+        { 720, false, 1280, 720 },
     };
     for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
-        CHECK_EQ(rl_settings_set("video.render_resolution", want[i].res), RL_SETTING_OK);
+        char v[16];
+        snprintf(v, sizeof v, "%u", want[i].lines);
+        CHECK_EQ(rl_settings_set("video.render_resolution", v), RL_SETTING_OK);
         rl_am_set_operation_mode(want[i].docked);
         check_display(&e, want[i].w, want[i].h);
     }
+    /* A game with no list ignores the setting. */
+    hos.cfg.program_id = 1;
+    CHECK_EQ(rl_settings_set("video.render_resolution", "720"), RL_SETTING_OK);
+    rl_am_set_operation_mode(true);
+    check_display(&e, 1920, 1080);
+    CHECK_EQ(rl_am_render_lines(), 0u);
     rl_settings_reset();
 }

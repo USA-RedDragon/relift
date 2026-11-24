@@ -6,6 +6,7 @@
  */
 #include "hid_priv.h"
 #include "services.h"
+#include "am.h"
 #include "vk.h"
 
 #include <relift/arm64/pac.h>
@@ -128,5 +129,6 @@ void rl_switch_declare_settings(void)
     rl_settings_declare_runtime();
     rl_vk_declare_settings();
     rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
+    rl_render_sizes_register(rl_switch_render_sizes);
     rl_touchpad_declare(rl_switch_touchpad());
 }

@@ -154,10 +154,12 @@ pub fn runtime_settings() -> Vec<Setting> {
         s(
             "video.render_resolution",
             "Render resolution",
-            "The size the game draws its picture at. original: the game's own size; 1080p and 720p: at most that many lines, lighter on the GPU. Each guest applies it its own way: Console games are told the console shows on a display of that size and size their picture from it; a guest with an internal render scale lowers it; a guest that draws its picture in 2D keeps its size and the upscaler scales it",
-            Value::String("original".into()),
-            SettingKind::Enum {
-                choices: ["original", "1080p", "720p"].map(String::from).into(),
+            "The height in lines the game draws its picture at, one of the sizes the game itself offers (a guest lists them with rl_render_sizes_register, from facts measured or read from the game's data). 0: the console's own size. A game that offers no sizes ignores it, and its settings screen shows no row. A size is a lighter or sharper picture the game makes itself; no image is scaled by relift",
+            Value::from(0),
+            SettingKind::Int {
+                min: 0,
+                max: 4320,
+                step: 0,
             },
         ),
         s(
@@ -1251,7 +1253,7 @@ default = "gamepad:south,key:z"
             .into_iter()
             .find(|s| s.key == "video.render_resolution")
             .unwrap();
-        assert_eq!(render.default, Value::String("original".into()));
+        assert_eq!(render.default, Value::from(0));
     }
 
     #[test]

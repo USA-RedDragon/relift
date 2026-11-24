@@ -9,6 +9,8 @@
 
 #include "hos.h"
 
+#include <relift/settings.h>
+
 /** @brief Applet messages (nn::am::AppletMessage). */
 enum {
     RL_AM_MSG_CHANGE_INTO_FOREGROUND = 1,
@@ -41,10 +43,17 @@ RL_RUNTIME_API void rl_am_set_operation_mode(bool docked);
 /** @brief True while docked. */
 RL_RUNTIME_API bool rl_am_is_docked(void);
 /**
- * @brief The tallest display the console reports, in lines: the video.render_resolution setting
- * (rl_render_resolution_lines), 0 for the console mode's own display.
+ * @brief The tallest display the console reports, in lines: the offered size the video.render_resolution setting picks
+ * for this game and console mode (the largest at or below it), 0 for the console's own display and for a game with no
+ * list of sizes (render_sizes.c).
  */
 RL_RUNTIME_API uint32_t rl_am_display_cap(void);
+/** @brief The lines the game renders at in this mode: the chosen offered size, 0 for a game with no list. */
+RL_RUNTIME_API uint32_t rl_am_render_lines(void);
+/** @brief The sizes the running game offers in the current mode (rl_render_sizes_fn); registered at declare time. */
+RL_RUNTIME_API size_t rl_switch_render_sizes(rl_render_size *out, size_t max);
+/** @brief Logs "rendering N lines (how); this game offers ..." for a game with a list; how names the call that selects it. */
+void am_log_render_size(const char *how);
 /**
  * @brief A display size the console reports, w by h, cut to the video.render_resolution setting: a display taller than
  * the cap becomes the cap's height at the same shape, as a console on a smaller TV reports.

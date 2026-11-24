@@ -46,7 +46,6 @@ static const char *const g_aa_choices[] = { "off", "fxaa", "smaa" };
 static const char *const g_aa_quality_choices[] = { "low", "medium", "high", "ultra" };
 static const char *const g_filter_choices[] = { "default", "integer", "nearest", "sharp_bilinear" };
 static const char *const g_gpu_math_choices[] = { "exact", "native" };
-static const char *const g_render_res_choices[] = { "original", "1080p", "720p" };
 static const char *const g_panel_choices[] = { "auto", "always", "never" };
 static const char *const g_upscaler_choices[] = {
     "auto", "game", "off", "nearest", "bilinear", "sharp_bilinear", "lanczos", "fsr1", "fsr2", "fsr3", "taa", "dlss",
@@ -141,16 +140,16 @@ static const rl_setting_def g_runtime_defs[] = {
     },
     {
         .key = "video.render_resolution",
-        .type = RL_SETTING_ENUM,
+        .type = RL_SETTING_INT,
         .label = "Render resolution",
-        .description = "The size the game draws its picture at. original: the game's own size; 1080p and 720p: at "
-                       "most that many lines, lighter on the GPU. Each guest applies it its own way: Console games "
-                       "are told the console shows on a display of that size and size their picture from it; "
-                       "a guest with an internal render scale lowers it; a guest that draws its picture in 2D keeps "
-                       "its size and the upscaler scales it",
+        .description = "The height in lines the game draws its picture at, one of the sizes the game itself offers (a \
+guest lists them with rl_render_sizes_register, from facts measured or read from the game's data). 0: the console's own \
+size. A game that offers no sizes ignores it, and its settings screen shows no row. A size is a lighter or sharper \
+picture the game makes itself; no image is scaled by relift",
         .env = "RELIFT_RENDER_RESOLUTION",
-        .choices = g_render_res_choices,
-        .nchoices = 3,
+        .def_int = 0,
+        .min_int = 0,
+        .max_int = 4320,
     },
     {
         .key = "gpu.profile",
@@ -1623,7 +1622,15 @@ const char *rl_settings_mod(size_t index)
 
 uint32_t rl_render_resolution_lines(void)
 {
-    static const uint32_t lines[] = { 0, 1080, 720 };
-    int i = rl_setting_enum("video.render_resolution");
-    return i > 0 && i < 3 ? lines[i] : 0;
+    int64_t v = rl_setting_int("video.render_resolution");
+    return v > 0 ? (uint32_t)v : 0;
+}
+
+static rl_render_sizes_fn g_render_sizes;
+
+void rl_render_sizes_register(rl_render_sizes_fn fn) { g_render_sizes = fn; }
+
+size_t rl_render_sizes(rl_render_size *out, size_t max)
+{
+    return g_render_sizes ? g_render_sizes(out, max) : 0;
 }
