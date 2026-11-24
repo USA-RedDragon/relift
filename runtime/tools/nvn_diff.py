@@ -45,6 +45,8 @@ BPP = {37: 4, 43: 4, 44: 4, 50: 4, 64: 4, 76: 2, 83: 2, 91: 8, 97: 8, 98: 4, 99:
        109: 16, 110: 16, 122: 4, 9: 1, 16: 2, 70: 2, 81: 2, 124: 2, 126: 4, 129: 4, 130: 5, 58: 4, 59: 4,
        13: 1, 14: 1, 15: 1, 20: 2, 21: 2, 22: 2, 74: 2, 75: 2, 77: 2, 82: 2, 84: 2, 88: 2, 95: 8, 96: 8,
        101: 4, 102: 8, 104: 8, 105: 8, 108: 12, 111: 16, 112: 16, 113: 16}
+# The unsigned VkFormat of each texel size: R8, R16, R32, R32G32, R32G32B32A32 UINT.
+RAW_FORMATS = {1: 13, 2: 74, 4: 98, 8: 101, 16: 107}
 TYPES = {0: "1d", 1: "2d", 2: "3d", 3: "cube", 4: "1darr", 5: "2darr", 6: "cubearr"}
 CHUNK = 1 << 16
 
@@ -384,8 +386,9 @@ class Replayer:
         specs = dict((k, v) for k, v in e["specs"])
         args = [self.a.wgrun, spv, "--size", "%d,%d,%d" % (specs.get(0, 1), specs.get(1, 1), specs.get(2, 1)),
                 "--steps", str(steps or self.a.steps), "--log-stores", os.path.join(d, "stores.txt")]
+        declared = spec_ids(spv)
         for k, v in sorted(specs.items()):
-            if k > 2:
+            if k > 2 and k in declared:
                 args += ["--spec", "%d=%d" % (k, v)]
         regs = self.regions(e)
         c0 = os.path.join(self.cap.dir, e["c0"])
@@ -440,9 +443,17 @@ class Replayer:
             binding = bindings[min(t["kind"], len(bindings) - 1)]
             lw = t["width"] >> (t["level"] if t["image"] else 0) or 1
             lh = t["height"] >> (t["level"] if t["image"] else 0) or 1
-            for bnd in bindings:
+            for k, bnd in enumerate(bindings):
+                fmt = t["vk_format"]
+                if t["image"] and k >= 3:
+                    # Binary accesses (Raw8 to Raw128, 32-bit atomics) see the texels as unsigned words of the
+                    # access size: an R*_UINT view, as the runtime makes them.
+                    size = {3: 1, 4: 2, 5: 4, 6: 8, 7: 16, 8: 4}[k]
+                    if size != BPP.get(fmt):
+                        continue
+                    fmt = RAW_FORMATS[size]
                 args += ["--image", "2,%d,%d=%d,%d,%d,%d,%d,%d,%s" % (
-                    bnd, t["id"], t["vk_format"], lw, lh, t["depth"] if t["target"] == 2 else 1,
+                    bnd, t["id"], fmt, lw, lh, t["depth"] if t["target"] == 2 else 1,
                     1 if t["target"] == 2 else t["layers"], t["copy_levels"], p)]
             if t["image"]:
                 o = os.path.join(d, "img%d.bin" % ti)

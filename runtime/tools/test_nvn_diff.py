@@ -138,6 +138,15 @@ class Pieces(unittest.TestCase):
         self.assertEqual(r["tile_cols_128"], [0])
 
 
+class Bindings(unittest.TestCase):
+    def test_storage_images_bind_at_the_translators_image_dimension(self):
+        # A 2D texture's Dim is 1; its storage binding of kind Float is 32 + 0 + ImageDim D2 (3).
+        self.assertEqual(nvn_diff.image_dim({"dim": 1, "target": 1}), 3)
+        self.assertEqual(nvn_diff.image_dim({"dim": 5, "target": 5}), 4)
+        self.assertEqual(nvn_diff.image_dim({"dim": 2, "target": 2}), 5)
+        self.assertEqual(nvn_diff.image_dim({"dim": 0, "target": 10}), 1)
+
+
 class Verdicts(unittest.TestCase):
     def run_tool(self, game_post, race=False, image=None, extra=(), exact=None, edit=None):
         d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
