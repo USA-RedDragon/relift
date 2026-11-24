@@ -706,6 +706,68 @@ static int a2c_spec(replay *r, const module *frag, pipe_key *k)
     return RL_OK;
 }
 
+/** @brief What a draw takes from the bound multisample state. */
+typedef struct ms_read {
+    uint32_t samples;
+    bool a2c, dither;
+} ms_read;
+
+/**
+ * @brief Reads the bound multisample state through the driver's getters, once for each distinct state (the last
+ * one read is kept with its bytes). Its fields the layer does not replay stop: each is off in
+ * nvnMultisampleStateSetDefaults (SDK 22.2.8 sdk 0x668bf0): raster samples (bits 15 to 19), coverage modulation (13,
+ * 14), coverage to color (20), coverage truncation (5) and programmable sample locations (3).
+ */
+static int read_multisample(replay *r, ms_read *out)
+{
+    static uint8_t last[24];
+    static ms_read last_read;
+    static bool have;
+    nvn_gfx *st = r->st;
+    if (have && !memcmp(last, st->multisample, sizeof last)) {
+        *out = last_read;
+        return RL_OK;
+    }
+    static const char *const getters[] = {
+        "nvnMultisampleStateGetSamples",
+        "nvnMultisampleStateGetAlphaToCoverageEnable",
+        "nvnMultisampleStateGetAlphaToCoverageDither",
+        "nvnMultisampleStateGetRasterSamples",
+        "nvnMultisampleStateGetCoverageModulationMode",
+        "nvnMultisampleStateGetCoverageToColorEnable",
+        "nvnMultisampleStateGetCoverageTruncationEnable",
+        "nvnMultisampleStateGetSampleLocationsEnable",
+    };
+    /* whether the driver has each getter: older NVN1 drivers have no coverage truncation, so their states have none */
+    static int8_t present[sizeof getters / sizeof getters[0]];
+    uint64_t v[sizeof getters / sizeof getters[0]];
+    for (uint32_t i = 0; i < sizeof getters / sizeof getters[0]; i++) {
+        v[i] = 0;
+        if (i >= 3 && !present[i]) {
+            uint64_t a = 0;
+            int rc = nvn_driver_lookup(r->c, r->mem, getters[i], &a);
+            if (rc != RL_OK)
+                return rc;
+            present[i] = a ? 1 : -1;
+        }
+        if (present[i] < 0)
+            continue;
+        int rc = nvn_vk_getter(r, getters[i], st->multisample, 24, NULL, 0, 0, NULL, &v[i]);
+        if (rc != RL_OK)
+            return rc;
+        if (i >= 3 && ((uint32_t)v[i] & 0xff))
+            return nvn_vk_stop(r, "multisample state with %s %u, which is not replayed yet", getters[i] + 23,
+                               (uint32_t)v[i] & 0xff);
+    }
+    out->samples = (uint32_t)v[0] > 1 ? (uint32_t)v[0] : 1;
+    out->a2c = (v[1] & 0xff) != 0;
+    out->dither = (v[2] & 0xff) != 0;
+    memcpy(last, st->multisample, sizeof last);
+    last_read = *out;
+    have = true;
+    return RL_OK;
+}
+
 static int fixed_state(replay *r, pipe_key *k)
 {
     nvn_gfx *st = r->st;
@@ -768,17 +830,12 @@ static int fixed_state(replay *r, pipe_key *k)
     uint32_t state_samples = 1;
     bool a2c_on = false, a2c_dither = false;
     if (st->have_multisample) {
-        uint64_t samples = 0, a2c = 0, dither = 0;
-        if ((rc = nvn_vk_getter(r, "nvnMultisampleStateGetSamples", st->multisample, 24, NULL, 0, 0, NULL,
-                                &samples)) != RL_OK ||
-            (rc = nvn_vk_getter(r, "nvnMultisampleStateGetAlphaToCoverageEnable", st->multisample, 24, NULL, 0, 0,
-                                NULL, &a2c)) != RL_OK ||
-            (rc = nvn_vk_getter(r, "nvnMultisampleStateGetAlphaToCoverageDither", st->multisample, 24, NULL, 0, 0,
-                                NULL, &dither)) != RL_OK)
+        ms_read m;
+        if ((rc = read_multisample(r, &m)) != RL_OK)
             return rc;
-        a2c_on = (a2c & 0xff) != 0;
-        a2c_dither = (dither & 0xff) != 0;
-        state_samples = (uint32_t)samples > 1 ? (uint32_t)samples : 1;
+        a2c_on = m.a2c;
+        a2c_dither = m.dither;
+        state_samples = m.samples;
     }
     uint32_t drawn;
     if (!nvn_vk_target_samples(st, &drawn))
