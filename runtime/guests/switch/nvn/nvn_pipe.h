@@ -53,8 +53,8 @@ typedef struct nvn_pipe_key {
     /** @brief The samples of each pixel the draw rasterizes, as a VkSampleCountFlagBits; 0 for one sample. */
     uint32_t samples;
     /**
-     * @brief The samples of a draw with alpha to coverage, 0 without: the host's own on NVIDIA hosts
-     * (nvn_vkdev.nvidia), the fragment program's (A2C_SPEC) elsewhere.
+     * @brief The samples of a draw with alpha to coverage, plus NVN_A2C_DITHER with the dither, 0 without: the
+     * host's own where it is the console's (nvn_a2c_native), the fragment program's (A2C_SPEC) elsewhere.
      */
     uint32_t alpha_to_coverage;
     /** @brief Specialization constants of each stage: id and value, sorted by id (nvn_spec_sort). */

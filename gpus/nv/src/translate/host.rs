@@ -158,12 +158,6 @@ pub struct HostProfile {
     /// The host's transcendental operations give the SM86 MUFU results (see
     /// [`HostProfile::from_device`]).
     pub native_mufu: bool,
-    /// The host's own alpha to coverage is the console GPU's dithered one
-    /// (NVIDIA's proprietary driver: the RTX 3090's masks, measured by the
-    /// runtime's test_nvn_a2c.c, are the 2x2 dithered pattern NVN's default
-    /// state selects). Elsewhere a fragment program that writes render
-    /// target 0's alpha computes those masks itself ([`super::A2C_SPEC`]).
-    pub native_alpha_to_coverage: bool,
     /// Half-precision arithmetic as IEEE 754 binary16 with round to nearest
     /// even and denormals kept (`shaderFloat16`, `shaderDenormPreserveFloat16`,
     /// `shaderRoundingModeRTEFloat16`, `shaderSignedZeroInfNanPreserveFloat16`
@@ -260,7 +254,6 @@ impl HostProfile {
             max_storage_buffers: 1 << 20,
             max_storage_buffer_range: u64::from(u32::MAX),
             native_mufu: true,
-            native_alpha_to_coverage: true,
             native_f16: true,
             canonical_nan: true,
             coop_hmma: false,
@@ -294,7 +287,6 @@ impl HostProfile {
             max_sampled_images: 8_388_606,
             max_storage_buffers: 8_388_606,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -326,7 +318,6 @@ impl HostProfile {
             max_sampled_images: u32::MAX,
             max_storage_buffers: u32::MAX,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -361,7 +352,6 @@ impl HostProfile {
             max_sampled_images: 1 << 25,
             max_storage_buffers: 1 << 25,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -394,7 +384,6 @@ impl HostProfile {
             max_sampled_images: 1_000_000,
             max_storage_buffers: 1_000_000,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -435,7 +424,6 @@ impl HostProfile {
             max_storage_buffers: 1 << 24,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -474,7 +462,6 @@ impl HostProfile {
             max_storage_buffers: 1 << 24,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -511,7 +498,6 @@ impl HostProfile {
             max_storage_buffers: 1 << 23,
             max_storage_buffer_range: 1 << 31,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -549,7 +535,6 @@ impl HostProfile {
             max_storage_buffers: 1_015_808,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -619,7 +604,6 @@ impl HostProfile {
             max_storage_buffers: 1 << 16,
             max_storage_buffer_range: 1 << 27,
             native_mufu: false,
-            native_alpha_to_coverage: false,
             native_f16: false,
             canonical_nan: false,
             coop_hmma: false,
@@ -735,7 +719,6 @@ impl HostProfile {
             max_storage_buffers: caps.get32("maxPerStageDescriptorUpdateAfterBindStorageBuffers"),
             max_storage_buffer_range: caps.get("maxStorageBufferRange"),
             native_mufu: nvidia && caps.get("deviceID") >= 0x2200,
-            native_alpha_to_coverage: nvidia,
             native_f16: caps.on("shaderFloat16")
                 && caps.on("shaderDenormPreserveFloat16")
                 && caps.on("shaderRoundingModeRTEFloat16")

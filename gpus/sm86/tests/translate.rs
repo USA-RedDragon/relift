@@ -1746,7 +1746,7 @@ fn flat_alpha_fragment() -> Vec<u8> {
 }
 
 #[test]
-fn fragment_alpha_to_coverage_is_computed_off_nvidia_hosts() {
+fn fragment_alpha_to_coverage_is_a_specialized_mask() {
     let p = relift_gpu_sm86::program::parse(&flat_alpha_fragment());
     let lavapipe = Options {
         host: HostProfile::lavapipe(),
@@ -1759,12 +1759,16 @@ fn fragment_alpha_to_coverage_is_computed_off_nvidia_hosts() {
         "no alpha to coverage constant"
     );
     assert!(s.interface.writes_sample_mask);
+    let p = relift_gpu_sm86::program::parse(&{
+        let mut b = sph(2, 5, &[(6, 0xaa), (18, 0x7)]);
+        exit_and_halt(&mut b);
+        b
+    });
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert!(
         !decorates(&s.spirv, 1, Some(A2C_SPEC)),
-        "an NVIDIA host computes its own"
+        "no alpha written, no coverage"
     );
-    assert!(!s.interface.writes_sample_mask);
 }
 
 #[test]

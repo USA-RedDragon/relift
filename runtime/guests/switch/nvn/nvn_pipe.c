@@ -484,7 +484,7 @@ static void fill_state(state *s, const nvn_pipe_key *k)
     s->ms = (VkPipelineMultisampleStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                      .rasterizationSamples = k->samples ? (VkSampleCountFlagBits)k->samples
                                                                                         : VK_SAMPLE_COUNT_1_BIT,
-                                                     .alphaToCoverageEnable = k->alpha_to_coverage && g.nvidia,
+                                                     .alphaToCoverageEnable = nvn_a2c_native(k->alpha_to_coverage),
                                                      .pSampleMask = &s->sample_mask };
     s->ds = (VkPipelineDepthStencilStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
                                                      .depthBoundsTestEnable = k->depth_bounds != 0,

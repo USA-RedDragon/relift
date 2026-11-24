@@ -932,6 +932,17 @@ int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const
  * false when they differ.
  */
 bool nvn_vk_target_samples(const nvn_gfx *st, uint32_t *samples);
+/** @brief The dither flag of nvn_pipe_key.alpha_to_coverage and of the A2C_SPEC constant. */
+#define NVN_A2C_DITHER 0x100u
+/**
+ * @brief Whether the host's own alpha to coverage is the console's for a draw of a (nvn_pipe_key.alpha_to_coverage):
+ * NVIDIA's, with the dither, at 2, 4 or 8 samples (the RTX 3090's Vulkan masks are the dithered ones; it has no
+ * 16-sample color targets). Elsewhere the fragment program computes the mask (A2C_SPEC).
+ */
+static inline bool nvn_a2c_native(uint32_t a)
+{
+    return a && g.nvidia && (a & NVN_A2C_DITHER) && (a & 0xffu) <= 8;
+}
 /** @brief The sample count of the host image of a texture of d->samples samples (NVN's 0 and 1 are one sample). */
 static inline VkSampleCountFlagBits nvn_vk_sample_bits(const nvn_tex_desc *d)
 {

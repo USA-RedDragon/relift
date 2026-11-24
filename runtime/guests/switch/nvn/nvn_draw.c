@@ -687,13 +687,13 @@ static int stencil_ops(replay *r, uint64_t face, VkStencilOpState *s)
 
 /** @brief Fills the fixed-function part of k from the queue's state objects. */
 /**
- * @brief On a host whose alpha to coverage is not the console's, gives fragment program frag the draw's samples as
- * its A2C_SPEC, which makes it compute the console's mask; a stop when it has no such constant (it writes no alpha
- * to render target 0, or its table was made for an NVIDIA host).
+ * @brief For a draw whose host alpha to coverage is not the console's (nvn_a2c_native), gives fragment program frag
+ * the draw's samples and dither as its A2C_SPEC, which makes it compute the console's mask; a stop when it has no
+ * such constant (it writes no alpha to render target 0).
  */
 static int a2c_spec(replay *r, const module *frag, pipe_key *k)
 {
-    if (!k->alpha_to_coverage || g.nvidia)
+    if (!k->alpha_to_coverage || nvn_a2c_native(k->alpha_to_coverage))
         return RL_OK;
     if (!frag || !frag->a2c)
         return nvn_vk_stop(r, "alpha to coverage with fragment program %s, which computes no coverage of its own",
@@ -796,12 +796,9 @@ static int fixed_state(replay *r, pipe_key *k)
      * from the dither flag (PIXELS_2X2 with it, PIXELS_1X1 without; SDK 22.2.8, sdk 0x69a0f0). Only the dithered
      * pattern of 2, 4 and 8 samples is measured, and only on an NVIDIA host (nvn_vkdev.nvidia).
      */
-    if (a2c_on && (!a2c_dither || drawn < 2 || drawn > 8))
-        return nvn_vk_stop(r,
-                           "alpha to coverage at %u samples, %s dither: only the dithered pattern of 2, 4 and 8 "
-                           "samples is measured",
-                           drawn, a2c_dither ? "with" : "without");
-    k->alpha_to_coverage = a2c_on ? drawn : 0;
+    if (a2c_on && drawn < 2)
+        return nvn_vk_stop(r, "alpha to coverage at one sample, which is not measured");
+    k->alpha_to_coverage = a2c_on ? drawn | (a2c_dither ? NVN_A2C_DITHER : 0) : 0;
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;

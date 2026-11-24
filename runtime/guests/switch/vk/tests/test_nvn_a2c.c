@@ -4,7 +4,8 @@
  * target, at each sample count the device has. With RELIFT_A2C_TABLE set to a path, the test writes the masks there
  * (one line per sample count and alpha: the 64 masks in hex), the measurement the console's hardware behavior is
  * read from on an NVIDIA host. On an NVIDIA host every mask must be the RTX 3090's (nvidia_a2c), the pattern the
- * layer keeps by drawing with the host's own alpha to coverage there.
+ * layer keeps by drawing with the host's own alpha to coverage there. A translated fragment program that computes
+ * the mask itself (A2C_SPEC) must give runtime/tools/a2c_gl's measured tables, dither on and off, on any host.
  */
 #include "hos.h"
 #include "nvn_priv.h"
@@ -252,7 +253,7 @@ typedef struct rig {
     bool translated;
 } rig;
 
-static bool rig_up(rig *k, VkSampleCountFlagBits s, bool translated)
+static bool rig_up(rig *k, VkSampleCountFlagBits s, bool translated, uint32_t spec)
 {
     memset(k, 0, sizeof *k);
     k->translated = translated;
@@ -298,7 +299,7 @@ static bool rig_up(rig *k, VkSampleCountFlagBits s, bool translated)
                                    : module_of(fill_vert_spv, sizeof fill_vert_spv);
     VkShaderModule fs = translated ? module_of(fragment_a2c_spv, sizeof fragment_a2c_spv)
                                    : module_of(a2c_frag_spv, sizeof a2c_frag_spv);
-    uint32_t spec_n = (uint32_t)s;
+    uint32_t spec_n = spec;
     VkSpecializationMapEntry me = { A2C_SPEC, 0, 4 };
     VkSpecializationInfo si = { 1, &me, 4, &spec_n };
     VkPipelineShaderStageCreateInfo st[2] = {
@@ -504,7 +505,7 @@ TEST(nvn_alpha_to_coverage_covers_more_samples_as_alpha_grows)
             continue;
         uint32_t n = (uint32_t)counts[c], full = (1u << n) - 1u;
         static rig k;
-        CHECK(rig_up(&k, counts[c], false));
+        CHECK(rig_up(&k, counts[c], false, 0));
         uint32_t last = 0;
         for (uint32_t a = 0; a < STEPS; a++) {
             measure(&k, n, a);
@@ -541,13 +542,39 @@ TEST(nvn_alpha_to_coverage_covers_more_samples_as_alpha_grows)
         fclose(out);
 }
 
-/** @brief The console's thresholds (alpha at or above t / 4096 covers one more sample a footprint), as the 3090's. */
-static const uint16_t thresholds[3][32] = {
-    { 249, 763, 1277, 1791, 2306, 2820, 3334, 3848 },
-    { 121, 378, 635, 892, 1149, 1406, 1663, 1920, 2177, 2434, 2691, 2948, 3205, 3462, 3719, 3976 },
-    { 57, 185, 314, 442, 571, 699, 828, 956, 1085, 1213, 1342, 1470, 1599, 1727, 1856, 1984,
-      2113, 2241, 2370, 2498, 2627, 2755, 2884, 3012, 3141, 3269, 3398, 3526, 3655, 3783, 3912, 4040 },
-};
+/** @brief One measured table of runtime/tools/a2c_gl: each sample count's masks per alpha step and thresholds. */
+typedef struct table {
+    uint32_t masks[4][STEPS][SIDE * SIDE];
+    uint32_t thresholds[4][64], nthresholds[4];
+} table;
+
+/** @brief Reads the table at path (relative to runtime/, where the tests run); false when it is missing. */
+static bool load_table(const char *path, table *t)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return false;
+    memset(t, 0, sizeof *t);
+    char line[2048];
+    while (fgets(line, sizeof line, f)) {
+        unsigned n, a, bits;
+        if (sscanf(line, "threshold %u %u\t%x", &n, &a, &bits) == 3) {
+            uint32_t c = (uint32_t)__builtin_ctz(n) - 1;
+            if (c < 4 && t->nthresholds[c] < 64)
+                t->thresholds[c][t->nthresholds[c]++] = bits;
+            continue;
+        }
+        char *p = line;
+        if (sscanf(p, "%u %u", &n, &a) != 2 || line[0] < '0' || line[0] > '9')
+            continue;
+        uint32_t c = (uint32_t)__builtin_ctz(n) - 1;
+        p = strchr(p, '\t');
+        for (uint32_t i = 0; p && c < 4 && a < STEPS && i < SIDE * SIDE; i++)
+            t->masks[c][a][i] = (uint32_t)strtoul(p + 1, &p, 16);
+    }
+    fclose(f);
+    return true;
+}
 
 static uint32_t f32_bits(float f)
 {
@@ -561,8 +588,9 @@ TEST(nvn_translated_alpha_to_coverage_gives_the_3090s_masks)
     nvn_probes probes;
     if (!nvn_vk_probes(&probes))
         return;
-    static const VkSampleCountFlagBits counts[3] = { VK_SAMPLE_COUNT_2_BIT, VK_SAMPLE_COUNT_4_BIT,
-                                                     VK_SAMPLE_COUNT_8_BIT };
+    static table tables[2];
+    CHECK(load_table("tools/a2c_gl/rtx3090-dither-on.tsv", &tables[0]));
+    CHECK(load_table("tools/a2c_gl/rtx3090-dither-off.tsv", &tables[1]));
     VkImageFormatProperties ifp;
     CHECK_EQ(VK(vkGetPhysicalDeviceImageFormatProperties)(g.phys, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TYPE_2D,
                                                           VK_IMAGE_TILING_OPTIMAL,
@@ -570,30 +598,37 @@ TEST(nvn_translated_alpha_to_coverage_gives_the_3090s_masks)
                                                               VK_IMAGE_USAGE_SAMPLED_BIT,
                                                           0, &ifp),
              VK_SUCCESS);
-    for (uint32_t c = 0; c < 3; c++) {
-        if (!(ifp.sampleCounts & counts[c]))
-            continue;
-        uint32_t n = (uint32_t)counts[c], full = (1u << n) - 1u;
-        static rig k;
-        CHECK(rig_up(&k, counts[c], true));
-        uint32_t off = 0;
-        for (uint32_t a = 0; a < STEPS; a++) {
-            measure(&k, n, a);
-            for (uint32_t i = 0; i < SIDE * SIDE; i++)
-                off += (k.map[i] & full) != nvidia_mask(n, a, i);
+    for (uint32_t d = 0; d < 2; d++)
+        for (uint32_t c = 0; c < 4; c++) {
+            uint32_t n = 2u << c, full = (1u << n) - 1u;
+            if (!(ifp.sampleCounts & n))
+                continue;
+            static rig k;
+            CHECK(rig_up(&k, (VkSampleCountFlagBits)n, true, n | (d ? 0 : NVN_A2C_DITHER)));
+            const table *t = &tables[d];
+            uint32_t off = 0;
+            for (uint32_t a = 0; a < STEPS; a++) {
+                measure(&k, n, a);
+                for (uint32_t i = 0; i < SIDE * SIDE; i++)
+                    off += (k.map[i] & full) != t->masks[c][a][i];
+            }
+            CHECK_EQ(off, 0u);
+            CHECK(t->nthresholds[c] > 0);
+            uint32_t last = 0;
+            for (uint32_t l = 0; l < t->nthresholds[c]; l++) {
+                float at = f32_of(t->thresholds[c][l]);
+                uint32_t here = covered(&k, n, at), below = covered(&k, n, f32_of(f32_bits(at) - 1));
+                CHECK(here > below);
+                CHECK_EQ(below, last);
+                last = here;
+            }
+            CHECK_EQ(last, n * SIDE * SIDE);
+            static const uint32_t none[] = { 0x80000000u, 0xbf800000u, 0xff800000u, 0x7fc00000u, 0xffc00000u, 1u };
+            for (uint32_t i = 0; i < sizeof none / sizeof none[0]; i++)
+                CHECK_EQ(covered(&k, n, f32_of(none[i])), 0u);
+            static const uint32_t all[] = { 0x3f800001u, 0x40000000u, 0x7f800000u };
+            for (uint32_t i = 0; i < sizeof all / sizeof all[0]; i++)
+                CHECK_EQ(covered(&k, n, f32_of(all[i])), n * SIDE * SIDE);
+            rig_down(&k);
         }
-        CHECK_EQ(off, 0u);
-        for (uint32_t l = 0; l < 4 * n; l++) {
-            float t = (float)thresholds[c][l] / 4096.0f;
-            CHECK_EQ(covered(&k, n, t), (l + 1) * SIDE * SIDE / 4);
-            CHECK_EQ(covered(&k, n, f32_of(f32_bits(t) - 1)), l * SIDE * SIDE / 4);
-        }
-        static const uint32_t none[] = { 0x80000000u, 0xbf800000u, 0xff800000u, 0x7fc00000u, 0xffc00000u, 1u };
-        for (uint32_t i = 0; i < sizeof none / sizeof none[0]; i++)
-            CHECK_EQ(covered(&k, n, f32_of(none[i])), 0u);
-        static const uint32_t all[] = { 0x3f800001u, 0x40000000u, 0x7f800000u };
-        for (uint32_t i = 0; i < sizeof all / sizeof all[0]; i++)
-            CHECK_EQ(covered(&k, n, f32_of(all[i])), n * SIDE * SIDE);
-        rig_down(&k);
-    }
 }
