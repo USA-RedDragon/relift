@@ -6,5 +6,6 @@ pub mod closed;
 pub mod diff;
 pub mod diff_ir;
 pub mod fonts;
+pub mod nacp;
 pub mod nvndriver;
 pub mod shaders;

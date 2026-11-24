@@ -423,7 +423,7 @@ pub fn switch_document(
         named = named.or(d.name);
     }
     let mut id = match nacp {
-        Some(n) => identity::from_nacp(&n, title_id, icon.as_deref())?,
+        Some(n) => crate::switch::nacp::identity(&n, title_id, icon.as_deref())?,
         None => no_nacp_identity(
             title_id,
             named.as_deref().unwrap_or(project),

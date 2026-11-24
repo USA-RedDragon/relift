@@ -16,8 +16,8 @@
 
 use std::path::Path;
 
-use crate::identity::{NACP_SIZE, NACP_VERSION};
 use crate::import::BoxError;
+use crate::switch::nacp;
 
 /// The file of the import that holds a display version read from a package's
 /// meta block.
@@ -45,19 +45,6 @@ pub fn check(v: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The display version field of a NACP, or `None` when the NACP is too short
-/// to hold it or the field is empty.
-#[must_use]
-pub fn from_nacp(nacp: &[u8]) -> Option<String> {
-    let field = nacp.get(NACP_VERSION..NACP_VERSION + 16)?;
-    if nacp.len() < NACP_SIZE {
-        return None;
-    }
-    let end = field.iter().position(|&c| c == 0).unwrap_or(field.len());
-    let v = String::from_utf8_lossy(&field[..end]).into_owned();
-    (!v.is_empty()).then_some(v)
-}
-
 /// The display version of the program the import and `relift.toml` describe,
 /// or `None` when no source has one.
 ///
@@ -70,7 +57,10 @@ pub fn resolve(import: &Path, game: &toml::Table) -> Result<Option<String>, BoxE
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("{}: {e}", import.join(name).display())),
     };
-    if let Some(v) = read("control.nacp")?.as_deref().and_then(from_nacp) {
+    if let Some(v) = read("control.nacp")?
+        .as_deref()
+        .and_then(nacp::display_version)
+    {
         check(&v).map_err(|e| format!("{}: {e}", import.join("control.nacp").display()))?;
         return Ok(Some(v));
     }
@@ -92,6 +82,7 @@ pub fn resolve(import: &Path, game: &toml::Table) -> Result<Option<String>, BoxE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::switch::nacp::NACP_VERSION;
 
     fn nacp(version: &[u8]) -> Vec<u8> {
         let mut n = vec![0u8; 0x4000];
@@ -112,9 +103,12 @@ mod tests {
 
     #[test]
     fn the_nacp_field_is_read_to_its_terminator() {
-        assert_eq!(from_nacp(&nacp(b"4.5.6")).as_deref(), Some("4.5.6"));
-        assert_eq!(from_nacp(&nacp(b"")), None);
-        assert_eq!(from_nacp(&[0; 16]), None);
+        assert_eq!(
+            nacp::display_version(&nacp(b"4.5.6")).as_deref(),
+            Some("4.5.6")
+        );
+        assert_eq!(nacp::display_version(&nacp(b"")), None);
+        assert_eq!(nacp::display_version(&[0; 16]), None);
     }
 
     #[test]

@@ -1,34 +1,11 @@
-//! The `identity` and `save` sections from what a guest carries: a Switch
-//! control NACP, a Game Boy header or a GBA header, and the identity of a
-//! patched ROM.
+//! The `identity` and `save` sections from what a guest carries: a Game
+//! Boy header, a GBA or DS header, and the identity of a patched ROM (a
+//! Switch control NACP is [`crate::switch::nacp`]'s).
 
 use std::collections::BTreeMap;
 
 use relift_gb_formats::{CgbFlag, Header};
 use relift_info::{Identity, Patch, Save};
-
-const NACP_LANGUAGES: [&str; 16] = [
-    "AmericanEnglish",
-    "BritishEnglish",
-    "Japanese",
-    "French",
-    "German",
-    "LatinAmericanSpanish",
-    "Spanish",
-    "Italian",
-    "Dutch",
-    "CanadianFrench",
-    "Portuguese",
-    "Russian",
-    "Korean",
-    "TraditionalChinese",
-    "SimplifiedChinese",
-    "BrazilianPortuguese",
-];
-const NACP_ENTRY: usize = 0x300;
-const NACP_NAME: usize = 0x200;
-pub(crate) const NACP_VERSION: usize = 0x3060;
-pub(crate) const NACP_SIZE: usize = 0x3070;
 
 /// Why a header did not give an identity.
 #[derive(Debug, PartialEq, Eq)]
@@ -42,7 +19,7 @@ impl std::fmt::Display for Malformed {
 
 impl std::error::Error for Malformed {}
 
-fn text(b: &[u8]) -> String {
+pub(crate) fn text(b: &[u8]) -> String {
     let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
     String::from_utf8_lossy(&b[..end]).trim().to_string()
 }
@@ -65,44 +42,6 @@ pub fn base64(data: &[u8]) -> String {
         }
     }
     out
-}
-
-/// The identity of a Switch title from its control NACP: names and
-/// publishers per language (empty entries skipped), the display version,
-/// and the icon (JPEG bytes) when given.
-///
-/// # Errors
-///
-/// The NACP is shorter than its fixed size.
-pub fn from_nacp(nacp: &[u8], title_id: u64, icon: Option<&[u8]>) -> Result<Identity, Malformed> {
-    if nacp.len() < NACP_SIZE {
-        return Err(Malformed(format!(
-            "a NACP of {} bytes; at least {NACP_SIZE} are needed",
-            nacp.len()
-        )));
-    }
-    let mut id = Identity {
-        platform: "switch".into(),
-        title_id: Some(format!("{title_id:016x}")),
-        ..Identity::default()
-    };
-    for (i, lang) in NACP_LANGUAGES.iter().enumerate() {
-        let e = &nacp[i * NACP_ENTRY..(i + 1) * NACP_ENTRY];
-        let name = text(&e[..NACP_NAME]);
-        if name.is_empty() {
-            continue;
-        }
-        id.names.insert((*lang).into(), name);
-        let publisher = text(&e[NACP_NAME..]);
-        if !publisher.is_empty() {
-            id.publishers.insert((*lang).into(), publisher);
-        }
-    }
-    let version = text(&nacp[NACP_VERSION..NACP_VERSION + 16]);
-    id.version = (!version.is_empty()).then_some(version);
-    id.default_language = id.first_language();
-    id.icon = icon.and_then(crate::icon::from_image);
-    Ok(id)
 }
 
 /// The identity and save of a Game Boy or Game Boy Color cartridge.
@@ -258,42 +197,6 @@ pub fn patched(
 mod tests {
     use super::*;
     use relift_gb_formats::synth::{Spec, rom};
-
-    fn nacp() -> Vec<u8> {
-        let mut n = vec![0u8; 0x4000];
-        n[..5].copy_from_slice(b"Synth");
-        n[0x200..0x205].copy_from_slice(b"Maker");
-        let j = 2 * NACP_ENTRY;
-        n[j..j + 9].copy_from_slice("ゲーム".as_bytes());
-        n[NACP_VERSION..NACP_VERSION + 5].copy_from_slice(b"1.0.2");
-        n
-    }
-
-    #[test]
-    fn a_nacp_gives_names_publishers_version_and_icon() {
-        let jpeg: &[u8] = include_bytes!("../tests/icon.jpg");
-        let id = from_nacp(&nacp(), 0x0100_0000_0000_1234, Some(jpeg)).unwrap();
-        assert_eq!(id.platform, "switch");
-        assert_eq!(id.title_id.as_deref(), Some("0100000000001234"));
-        assert_eq!(id.names["AmericanEnglish"], "Synth");
-        assert_eq!(id.names["Japanese"], "ゲーム");
-        assert_eq!(id.names.len(), 2);
-        assert_eq!(id.publishers["AmericanEnglish"], "Maker");
-        assert_eq!(id.version.as_deref(), Some("1.0.2"));
-        let icon = id.icon.unwrap();
-        assert_eq!(
-            (icon.format.as_str(), icon.width, icon.height),
-            ("png", 16, 8)
-        );
-        assert_eq!(id.default_language.as_deref(), Some("AmericanEnglish"));
-        assert!(
-            from_nacp(&nacp(), 1, Some(b"not a jpeg"))
-                .unwrap()
-                .icon
-                .is_none()
-        );
-        assert!(from_nacp(&[0; 16], 0, None).is_err());
-    }
 
     #[test]
     fn base64_pads() {
