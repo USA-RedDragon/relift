@@ -1297,6 +1297,14 @@ void nvn_gpuprof_span(int kind, int64_t lo, int64_t hi);
 /** @brief A wait for a batch blocked from start_ns to end_ns, at the site nvn_wait_site names. */
 void nvn_gpuprof_waited(int64_t start_ns, int64_t end_ns);
 #define nvn_vk_flush(r) (nvn_wait_site = NVN_SITE, nvn_vk_flush(r))
+#define nvn_vk_submit(r) (nvn_wait_site = NVN_SITE, nvn_vk_submit(r))
+/**
+ * @brief Counts a batch ended at the site nvn_wait_site names (the flush, submit or wait that asked for it), for the
+ * ranking of what splits the work into batches.
+ */
+void nvn_gpuprof_batch_site(void);
+/** @brief The batches counted at site since the last report (tests). */
+uint64_t nvn_gpuprof_batches_at(const char *site);
 #define nvn_vk_reading_guest(a, n) (nvn_wait_site = NVN_SITE, nvn_vk_reading_guest(a, n))
 #define nvn_vk_sync_uniforms(r) (nvn_wait_site = NVN_SITE, nvn_vk_sync_uniforms(r))
 

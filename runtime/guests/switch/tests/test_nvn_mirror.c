@@ -1026,6 +1026,8 @@ TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
         nvn_gpuprof_mark("fill b");
         CHECK(nvn_vk_flush(&r));
     }
+    /* Both batches were ended by the flush on the loop's last line, named by its file and line. */
+    CHECK_EQ(nvn_gpuprof_batches_at("test_nvn_mirror.c:1027"), 2u);
     double span = 0, parts = 0, between = 0;
     nvn_gpuprof_sums(&span, &parts, &between);
     CHECK(span > 0);

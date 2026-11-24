@@ -167,6 +167,42 @@ void nvn_gpuprof_handed(uint32_t s)
         __atomic_store_n(&gp.handed_ns[s], nvn_gpuprof_now(), __ATOMIC_RELEASE);
 }
 
+/** @brief Batches per site that ended them since the last report (nvn_gpuprof_batch_site). */
+static struct {
+    const char *site;
+    uint64_t count;
+} enders[64];
+static uint32_t nenders;
+
+void nvn_gpuprof_batch_site(void)
+{
+    if (gp.on <= 0)
+        return;
+    const char *site = nvn_wait_site ? nvn_wait_site : "(no site)";
+    uint32_t i = 0;
+    while (i < nenders && strcmp(enders[i].site, site))
+        i++;
+    if (i == nenders) {
+        if (nenders == 64) {
+            i = 63;
+            enders[i].site = "(more sites)";
+        } else {
+            i = nenders++;
+            enders[i].site = site;
+            enders[i].count = 0;
+        }
+    }
+    enders[i].count++;
+}
+
+uint64_t nvn_gpuprof_batches_at(const char *site)
+{
+    for (uint32_t i = 0; i < nenders; i++)
+        if (!strcmp(enders[i].site, site))
+            return enders[i].count;
+    return 0;
+}
+
 void nvn_gpuprof_waited(int64_t start_ns, int64_t end_ns)
 {
     if (gp.on <= 0)
@@ -476,6 +512,18 @@ void nvn_gpuprof_report(double frames)
         gp.waits[b].ns = -1;
     }
     gp.nwaits = 0;
+    for (uint32_t k = 0; k < 8 && nenders; k++) {
+        uint32_t b = 0;
+        for (uint32_t i = 1; i < nenders; i++)
+            if (enders[i].count > enders[b].count)
+                b = i;
+        if (!enders[b].count)
+            break;
+        rl_log(RL_LOG_INFO, "nvn", "GPU profile batches %6.1f per present ended at %s", (double)enders[b].count / frames,
+               enders[b].site);
+        enders[b].count = 0;
+    }
+    nenders = 0;
     gp.ntot = 0;
     gp.span_ns = gp.between_ns = 0;
     gp.batches = 0;

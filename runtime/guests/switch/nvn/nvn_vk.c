@@ -2375,6 +2375,7 @@ static bool submit_recorded(replay *r)
     pending[s].seq = __atomic_add_fetch(&g_submitted, 1, __ATOMIC_ACQ_REL);
     g.arena_used = 0;
     g.flushes++;
+    nvn_gpuprof_batch_site();
     uint32_t next = next_slot(s);
     nvn_wait_site = "the next batch slot";
     bool ok = wait_slot(next);
@@ -2505,7 +2506,7 @@ uint64_t nvn_vk_finished(void) { return __atomic_load_n(&g_finished, __ATOMIC_AC
 
 static bool flush_once(replay *r);
 
-bool nvn_vk_submit(replay *r)
+bool(nvn_vk_submit)(replay *r)
 {
     if (!g_recording)
         return nvn_vk_flush(r);
