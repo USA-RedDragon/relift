@@ -163,6 +163,7 @@ enum {
 
 /** @brief VK_API_VERSION_1_0. */
 #define RLVK_API_VERSION_1_0 ((1u << 22) | (0u << 12))
+#define RLVK_API_VERSION_1_1 ((1u << 22) | (1u << 12))
 
 /** @brief VkApplicationInfo. */
 typedef struct rlvk_application_info {

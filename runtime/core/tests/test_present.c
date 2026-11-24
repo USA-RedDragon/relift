@@ -814,3 +814,17 @@ TEST(present_headless_swapchain_frames_pass_validation)
     CHECK(strstr(text, "SYNC-HAZARD") == NULL);
     CHECK(strstr(text, "Validation Error") == NULL);
 }
+
+TEST(vkdev_instance_is_made_for_vulkan_1_1_where_the_loader_has_it)
+{
+    /* Android's loader calls the driver's vkGetPhysicalDeviceImageFormatProperties2 inside
+       vkGetPhysicalDeviceSurfaceFormatsKHR and fills that entry only for a 1.1 instance (or one with
+       VK_KHR_get_physical_device_properties2): a 1.0 instance crashed at swapchain creation on a custom driver. */
+    setenv("VK_LOADER_DRIVERS_SELECT", "*lvp*", 0);
+    const rlvk_dev *d = rl_vkdev();
+    if (!d) {
+        printf("    (no Vulkan device: skipped)\n");
+        return;
+    }
+    CHECK(d->instance_api >= RLVK_API_VERSION_1_1);
+}

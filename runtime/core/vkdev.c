@@ -108,6 +108,11 @@ static uint32_t instance_exts(rlvk_gipa_fn gipa, const char *out[MAX_INSTANCE_EX
         out[count++] = "VK_EXT_debug_utils";
         g_debug_utils = true;
     }
+    /* the 1.1 query functions on a 1.0 loader: Android's loader calls the driver's
+       vkGetPhysicalDeviceImageFormatProperties2 inside vkGetPhysicalDeviceSurfaceFormatsKHR, and fills that entry only
+       for a 1.1 instance or one with this extension */
+    if (listed(e, n, "VK_KHR_get_physical_device_properties2"))
+        out[count++] = "VK_KHR_get_physical_device_properties2";
     const rl_window_backend *b = rl_window_backend_current();
     const char *const *want = b && b->vulkan_extensions && b->vulkan_surface ? b->vulkan_extensions() : NULL;
     if (b && b->vulkan_surface && !(want && want[0]))
@@ -138,12 +143,21 @@ static bool make_instance(rlvk_dev *d)
     uint32_t api = RLVK_API_VERSION_1_0;
     for (uint32_t i = 0; i < g_nreq; i++)
         api = g_req[i].api > api ? g_req[i].api : api;
+    /* At least 1.1 where the loader has it: the device is queried with 1.1 calls (vkGetPhysicalDeviceFeatures2), and
+       Android's loader fills its driver table's 1.1 entry points only for a 1.1 instance, while its own swapchain code
+       calls them (vkGetPhysicalDeviceSurfaceFormatsKHR on a driver loaded beside the system one called a NULL one). */
+    typedef rlvk_result(RLVK_CALL * version_fn)(uint32_t *);
+    version_fn version = (version_fn)d->gipa(0, "vkEnumerateInstanceVersion");
+    uint32_t have = 0;
+    if (version && version(&have) == RLVK_SUCCESS && have >= RLVK_API_VERSION_1_1 && api < RLVK_API_VERSION_1_1)
+        api = RLVK_API_VERSION_1_1;
     rlvk_application_info app = {
         .sType = RLVK_ST_APPLICATION_INFO,
         .pApplicationName = "relift",
         .pEngineName = "relift",
         .apiVersion = api,
     };
+    d->instance_api = api;
     const char *exts[MAX_INSTANCE_EXTS];
     uint32_t n = instance_exts(d->gipa, exts, &d->surfaces);
     bool portability = n && !strcmp(exts[0], "VK_KHR_portability_enumeration");

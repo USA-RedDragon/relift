@@ -32,6 +32,8 @@ typedef struct rlvk_dev {
     char name[256];
     rlvk_memory_properties mem;
     /** @brief The instance has VK_KHR_surface and the backend's surface extensions, the device VK_KHR_swapchain. */
+    /** @brief The API version the instance was made for. */
+    uint32_t instance_api;
     bool surfaces;
     /** @brief VK_KHR_present_id and VK_KHR_present_wait are on, and vkWaitForPresentKHR is loaded: a present chained with a present id can be waited for until the display shows it. */
     bool present_wait;
