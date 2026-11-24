@@ -405,7 +405,6 @@ static int side_view(replay *r, uint64_t tex, uint64_t v, rl_upscale_image *out)
 
 int nvn_dlss_run(replay *r, const nvn_cmd *e)
 {
-    nvn_vk_mark_write();
     const uint8_t *raw = nvn_cmd_bytes(r->s, e->x[2]);
     if (!raw)
         return nvn_vk_stop(r, "nvnCommandBufferEvaluateDlss without parameters");
@@ -534,6 +533,9 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         nvn_flash_wrote(out, level, 0);
         nvn_flash_thumbs(r, "upscale");
     }
+    /* The evaluation writes its output texture and nothing else of the game's: a reader of other guest memory need
+     * not wait for this batch (marking all of it made each frame's replay wait for the GPU, 20 ms a frame on a Thor). */
+    nvn_vk_mark_write_range(out->storage, out->d.size);
     if (!st.evaluations++)
         trace("nvnCommandBufferEvaluateDlss: %ux%u -> %ux%u with %s", ui.in.width, ui.in.height, ui.out_rect.width,
               ui.out_rect.height, rl_upscale_name(rl_upscaler_choice(u)));

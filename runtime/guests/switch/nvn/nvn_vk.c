@@ -3350,12 +3350,14 @@ bool nvn_vk_refresh(replay *r, vimg *v)
 {
     if (v->sync_pending && !sync_alias(r, v))
         return false;
+    /* A texture the GPU wrote, or one checked this frame, is not read from guest memory: no wait for the batches that
+     * write its bytes (the upscaler's output, read by the next pass, made each frame's replay wait for the GPU). */
+    if (v->d.target != NVN_TARGET_BUFFER && (v->written || v->hash_frame == g.presents + 1))
+        return true;
     if (!nvn_vk_reading_guest(v->storage, v->d.size))
         return false;
     if (v->d.target == NVN_TARGET_BUFFER)
         return upload(r, v);
-    if (v->written || v->hash_frame == g.presents + 1)
-        return true;
     v->hash_frame = g.presents + 1;
     uint64_t hp = hos.vm.host_page ? hos.vm.host_page : 4096, end = v->storage + v->d.size;
     uint64_t lo = (v->storage + hp - 1) / hp * hp, hi = end / hp * hp;
