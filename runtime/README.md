@@ -444,3 +444,9 @@ by llvm-addr2line with their inline chains, so the runtime's hidden functions ge
 exported symbol's. The intervals come from the context switch records, since simpleperf samples only some switches
 out; an interval it did not sample shows as `(no stack sampled)`. `--others` keeps frames of other libraries (the
 driver, libc) by their symbols. `python3 -I runtime/tools/test_offcpu.py` tests it.
+
+## Running a lifted Linux program on Android
+
+`relift build --target android-arm64` of a Linux project makes an app library but no app.
+`runtime/tools/android/devtests/soload.c` runs it from `adb shell`: it loads the library and calls its `main`, with the
+shell's standard streams, so a test program's output reaches the terminal. Its comment has the build and run lines.
