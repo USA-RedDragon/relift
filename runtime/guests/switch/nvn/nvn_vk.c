@@ -3084,6 +3084,29 @@ static bool upload_decoded(replay *r, const vimg *v, uint32_t level, uint32_t la
 static bool upload_body(replay *r, vimg *v);
 
 /**
+ * @brief Fills multisample image v from its guest storage. Storage of all zero bytes (a target the game has not drawn
+ * into, in a pool it cleared) is every sample zero: the image is cleared to zero. Other bytes are not uploaded yet:
+ * false.
+ */
+static bool upload_multisample(replay *r, vimg *v)
+{
+    const uint8_t *p = r->mem + v->storage;
+    for (uint64_t i = 0; i < v->d.size; i++)
+        if (p[i])
+            return false;
+    VkImageSubresourceRange rr = range_of(v);
+    nvn_vk_begin(r);
+    nvn_vk_barrier(g.cb);
+    if (v->aspect == VK_IMAGE_ASPECT_COLOR_BIT)
+        VK(vkCmdClearColorImage)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, &(VkClearColorValue){ 0 }, 1, &rr);
+    else
+        VK(vkCmdClearDepthStencilImage)(g.cb, v->image, VK_IMAGE_LAYOUT_GENERAL, &(VkClearDepthStencilValue){ 0 }, 1,
+                                        &rr);
+    nvn_vk_barrier(g.cb);
+    return true;
+}
+
+/**
  * @brief Whether texture bytes move between guest storage and host images on the GPU where they can
  * (nvn_untile.c); RELIFT_NVN_CPU_MOVES=1, a measuring and checking aid, keeps them on the CPU.
  */
@@ -3129,6 +3152,8 @@ static bool upload_body(replay *r, vimg *v)
     const nvn_tex_desc *d = &v->d;
     if (!nvn_vk_reading_guest(v->storage, d->size))
         return false;
+    if (nvn_vk_sample_bits(d) != VK_SAMPLE_COUNT_1_BIT)
+        return upload_multisample(r, v);
     uint32_t bpb, bw, bh;
     if (!nvn_tex_format(d->format, &bpb, &bw, &bh))
         return false;
@@ -3303,6 +3328,8 @@ static bool write_back(replay *r, vimg *u)
 static bool write_back_body(replay *r, vimg *u)
 {
     const nvn_tex_desc *d = &u->d;
+    if (nvn_vk_sample_bits(d) != VK_SAMPLE_COUNT_1_BIT)
+        return false;
     if (gpu_moves() && nvn_untile_move(r, u, true)) {
         bool ok = nvn_vk_flush(r);
         nvn_watch_touch(u->storage, d->size);
@@ -3652,10 +3679,30 @@ uint32_t nvn_vk_retired_count(void) { return g.nretired; }
 bool nvn_vk_can_image(const nvn_tex_desc *d)
 {
     VkImageAspectFlags aspect;
-    return nvn_vk_format(d->format, &aspect) != VK_FORMAT_UNDEFINED && d->samples <= 1 &&
+    if (nvn_vk_format(d->format, &aspect) == VK_FORMAT_UNDEFINED)
+        return false;
+    if (d->target == NVN_TARGET_2D_MULTISAMPLE || d->target == NVN_TARGET_2D_MULTISAMPLE_ARRAY)
+        return (d->samples == 2 || d->samples == 4 || d->samples == 8 || d->samples == 16) &&
+               (d->levels ? d->levels : 1) == 1;
+    return d->samples <= 1 &&
            (d->target == 0 || d->target == 1 || d->target == 3 || d->target == 4 || d->target == 7 ||
             d->target == NVN_TARGET_3D || d->target == NVN_TARGET_CUBEMAP || d->target == NVN_TARGET_CUBEMAP_ARRAY ||
             d->target == NVN_TARGET_BUFFER);
+}
+
+bool nvn_vk_target_samples(const nvn_gfx *st, uint32_t *samples)
+{
+    *samples = 0;
+    for (uint32_t i = 0; i <= st->ncolor; i++) {
+        const vimg *v = i < st->ncolor ? st->color[i].v : st->depth.v;
+        if (!v)
+            continue;
+        uint32_t n = (uint32_t)nvn_vk_sample_bits(&v->d);
+        if (*samples && *samples != n)
+            return false;
+        *samples = n;
+    }
+    return true;
 }
 
 bool nvn_vk_sync_aliases(replay *r, uint64_t since)
@@ -3798,7 +3845,9 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
                                             : 0)
                                      : (ff & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0);
     uint32_t sbpb, sbw, sbh;
-    bool can_store = !depth && !buffer && nvn_tex_format(d->format, &sbpb, &sbw, &sbh) && sbw == 1 && sbh == 1;
+    VkSampleCountFlagBits samples = nvn_vk_sample_bits(d);
+    bool can_store = !depth && !buffer && samples == VK_SAMPLE_COUNT_1_BIT &&
+                     nvn_tex_format(d->format, &sbpb, &sbw, &sbh) && sbw == 1 && sbh == 1;
     v->storage_ok = can_store;
     VkImageCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -3814,7 +3863,7 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
         .extent = { d->width, buffer || line ? 1 : d->height, depth_of(d, 0) },
         .mipLevels = rr.levelCount,
         .arrayLayers = rr.layerCount,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .samples = samples,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | attach |
                  (can_store ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
@@ -3822,8 +3871,15 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     VkMemoryRequirements req;
-    const char *why = "vkCreateImage failed";
-    VkResult vr;
+    const char *why = "the host device has no images of this format and sample count";
+    VkResult vr = VK_ERROR_FORMAT_NOT_SUPPORTED;
+    VkImageFormatProperties ifp;
+    if (samples != VK_SAMPLE_COUNT_1_BIT &&
+        (VK(vkGetPhysicalDeviceImageFormatProperties)(g.phys, f, ci.imageType, ci.tiling, ci.usage, ci.flags, &ifp) !=
+             VK_SUCCESS ||
+         !(ifp.sampleCounts & samples) || !attach))
+        goto fail;
+    why = "vkCreateImage failed";
     if ((vr = VK(vkCreateImage)(g.dev, &ci, NULL, &v->image)) != VK_SUCCESS)
         goto fail;
     VK(vkGetImageMemoryRequirements)(g.dev, v->image, &req);
@@ -3872,8 +3928,13 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
         goto fail;
     v->hash = bytes_hash(r->mem + storage, d->size);
     v->edge_hash = edge_hash(r, v);
-    why = "its upload failed";
+    why = samples != VK_SAMPLE_COUNT_1_BIT ? "its storage holds bytes other than zeros, which are not uploaded into "
+                                             "a multisample image yet"
+                                           : "its upload failed";
     if (!depth && !upload(r, v))
+        goto fail;
+    why = "the host device failed a submit";
+    if (samples != VK_SAMPLE_COUNT_1_BIT && !nvn_vk_flush(r))
         goto fail;
     v->hash_frame = g.presents + 1;
     why = "the host device failed a submit";
@@ -3912,8 +3973,8 @@ static vimg *image_of_desc(replay *r, const nvn_tex_desc *d, uint64_t tex, bool 
     return v;
 fail:
     image_free(v);
-    nvn_vk_fatal(r->c, "cannot make a host image for texture 0x%llx (format %u, target %u, %ux%ux%u, %u levels, %llu bytes): %s (%d)",
-                 (unsigned long long)tex, d->format, d->target, d->width, d->height, d->depth, d->levels,
+    nvn_vk_fatal(r->c, "cannot make a host image for texture 0x%llx (format %u, target %u, %ux%ux%u, %u levels, %u samples, %llu bytes): %s (%d)",
+                 (unsigned long long)tex, d->format, d->target, d->width, d->height, d->depth, d->levels, d->samples,
                  (unsigned long long)d->size, why, (int)vr);
     return NULL;
 }
@@ -4704,6 +4765,12 @@ static int copy_texture_to_texture(replay *r, const nvn_cmd *e)
                           src->aspect == VK_IMAGE_ASPECT_COLOR_BIT, &plan, &why))
         return nvn_vk_stop(r, "nvnCommandBufferCopyTextureToTexture with flags 0x%x from format %u to format %u (%s)",
                            flags, src->d.format, dst->d.format, why);
+    if ((src->d.samples > 1 || dst->d.samples > 1) &&
+        (nvn_vk_sample_bits(&src->d) != nvn_vk_sample_bits(&dst->d) || !plan.texel_copy))
+        return nvn_vk_stop(r,
+                           "nvnCommandBufferCopyTextureToTexture from a texture of %u samples to one of %u, other "
+                           "than a texel copy between equal sample counts",
+                           src->d.samples, dst->d.samples);
     nvn_vk_begin(r);
     nvn_vk_barrier(g.cb);
     VkImageSubresourceLayers ss = { src->aspect, sl, slayer, 1 }, ds = { dst->aspect, dl, dlayer, 1 };
@@ -4746,6 +4813,8 @@ static int copy_buffer_to_texture(replay *r, const nvn_cmd *e)
     vimg *dst = image_of(r, e->x[2]);
     if (!dst)
         return RL_PENDING;
+    if (dst->d.samples > 1)
+        return nvn_vk_stop(r, "nvnCommandBufferCopyBufferToTexture into a texture of %u samples", dst->d.samples);
     nvn_copy_pitch p;
     if (!nvn_copy_pitch_of(dst->d.format, rg, (uint32_t)e->x[NVN_COPY_ROW_STRIDE_ARG],
                            (uint32_t)e->x[NVN_COPY_IMAGE_STRIDE_ARG], &p))

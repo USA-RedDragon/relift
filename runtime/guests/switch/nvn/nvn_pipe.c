@@ -482,7 +482,8 @@ static void fill_state(state *s, const nvn_pipe_key *k)
                                                       .lineWidth = 1.0f };
     s->sample_mask = k->sample_mask;
     s->ms = (VkPipelineMultisampleStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                                                     .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+                                                     .rasterizationSamples = k->samples ? (VkSampleCountFlagBits)k->samples
+                                                                                        : VK_SAMPLE_COUNT_1_BIT,
                                                      .pSampleMask = &s->sample_mask };
     s->ds = (VkPipelineDepthStencilStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
                                                      .depthBoundsTestEnable = k->depth_bounds != 0,
@@ -517,13 +518,14 @@ typedef struct stage_key {
     uint32_t depth_bounds;
     /** @brief The pre-raster stage's library has the shading-rate image on (its viewport state). */
     uint32_t shading_rate;
+    uint32_t samples;
 } stage_key;
 
 typedef struct fo_key {
     uint32_t ncolor;
     VkFormat color[MAX_RT], depth, stencil;
     VkPipelineColorBlendAttachmentState blend[MAX_RT];
-    uint32_t sample_mask;
+    uint32_t sample_mask, samples;
 } fo_key;
 
 static void vi_of(const nvn_pipe_key *k, vi_key *o)
@@ -545,6 +547,7 @@ static void stage_of(const nvn_pipe_key *k, uint32_t s, stage_key *o)
     o->sample_mask = s == 1 ? k->sample_mask : 0;
     o->depth_bounds = s == 1 ? k->depth_bounds : 0;
     o->shading_rate = s == 0 ? k->shading_rate : 0;
+    o->samples = s == 1 ? k->samples : 0;
     memcpy(o->map, k->spec_map[s], k->nspec[s] * sizeof o->map[0]);
     memcpy(o->val, k->spec[s], k->nspec[s] * sizeof o->val[0]);
     nvn_spec_sort(&o->nspec, o->map, o->val);
@@ -567,6 +570,7 @@ static void fo_of(const nvn_pipe_key *k, fo_key *o)
     o->depth = k->depth;
     o->stencil = k->stencil;
     o->sample_mask = k->sample_mask;
+    o->samples = k->samples;
     memcpy(o->blend, k->blend, k->ncolor * sizeof o->blend[0]);
 }
 

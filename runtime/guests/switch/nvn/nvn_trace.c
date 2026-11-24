@@ -364,6 +364,8 @@ static uint64_t image_bytes(const vimg *v, uint32_t *layers)
     if (volume)
         rr.layerCount = v->d.depth ? v->d.depth : 1;
     uint32_t bpb, bw, bh;
+    if (nvn_vk_sample_bits(&v->d) != VK_SAMPLE_COUNT_1_BIT)
+        return 0;
     if (v->aspect == VK_IMAGE_ASPECT_DEPTH_BIT)
         return (uint64_t)v->d.width * v->d.height * 4 * rr.layerCount;
     if (v->aspect != VK_IMAGE_ASPECT_COLOR_BIT || !nvn_tex_format(v->d.format, &bpb, &bw, &bh))

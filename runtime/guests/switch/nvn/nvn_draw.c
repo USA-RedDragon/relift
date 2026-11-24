@@ -745,6 +745,7 @@ static int fixed_state(replay *r, pipe_key *k)
             ((rc = stencil_ops(r, 1, &k->front_ops)) != RL_OK || (rc = stencil_ops(r, 2, &k->back_ops)) != RL_OK))
             return rc;
     }
+    uint32_t state_samples = 1;
     if (st->have_multisample) {
         uint64_t samples = 0, a2c = 0;
         if ((rc = nvn_vk_getter(r, "nvnMultisampleStateGetSamples", st->multisample, 24, NULL, 0, 0, NULL,
@@ -752,10 +753,20 @@ static int fixed_state(replay *r, pipe_key *k)
             (rc = nvn_vk_getter(r, "nvnMultisampleStateGetAlphaToCoverageEnable", st->multisample, 24, NULL, 0, 0,
                                 NULL, &a2c)) != RL_OK)
             return rc;
-        if ((uint32_t)samples > 1 || (a2c & 0xff))
+        if (a2c & 0xff)
             return nvn_vk_stop(r, "multisample state with %u samples, alpha to coverage %u", (uint32_t)samples,
                                (uint32_t)(a2c & 0xff));
+        state_samples = (uint32_t)samples > 1 ? (uint32_t)samples : 1;
     }
+    uint32_t drawn;
+    if (!nvn_vk_target_samples(st, &drawn))
+        return nvn_vk_stop(r, "render targets of different sample counts are bound together");
+    if (!drawn)
+        drawn = state_samples;
+    else if (state_samples != drawn)
+        return nvn_vk_stop(r, "a multisample state of %u samples draws into render targets of %u", state_samples,
+                           drawn);
+    k->samples = drawn > 1 ? drawn : 0;
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;
@@ -776,7 +787,7 @@ static int fixed_state(replay *r, pipe_key *k)
             }
         }
     }
-    k->sample_mask = st->sample_mask & 1u;
+    k->sample_mask = st->sample_mask & ((1u << drawn) - 1u);
     k->viewport_swizzle = st->viewport_swizzle[0];
     if (k->viewport_swizzle != NVN_VIEWPORT_SWIZZLE_IDENTITY && !g.viewport_swizzle)
         return nvn_vk_stop(r, "viewport swizzle 0x%x, and the host device has no VK_NV_viewport_swizzle",

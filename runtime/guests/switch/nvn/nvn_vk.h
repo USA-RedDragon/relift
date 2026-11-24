@@ -61,6 +61,9 @@
 #define NVN_TARGET_CUBEMAP 8u
 /** @brief NVNtextureTarget of a 3D texture. */
 #define NVN_TARGET_3D 2u
+/** @brief NVNtextureTarget of a multisample 2D texture and a multisample 2D array (depth layers). */
+#define NVN_TARGET_2D_MULTISAMPLE 5u
+#define NVN_TARGET_2D_MULTISAMPLE_ARRAY 6u
 #define NVN_TARGET_CUBEMAP_ARRAY 9u
 /** @brief Pushed constant slots of a stage and bytes of each (the driver clamps a push to 0x100 bytes). */
 #define NVN_PUSH_SLOTS 4u
@@ -907,6 +910,16 @@ bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t 
 int nvn_vk_getter(replay *r, const char *name, const void *blob, size_t n, const uint64_t *args, unsigned nargs,
                   unsigned out_n, uint32_t *out, uint64_t *ret);
 /** @brief The host image of the texture at guest address tex, made and filled from its storage the first time; NULL after a stop. */
+/**
+ * @brief The samples of each pixel of the render targets st binds (1 for single-sampled ones), 0 with none bound;
+ * false when they differ.
+ */
+bool nvn_vk_target_samples(const nvn_gfx *st, uint32_t *samples);
+/** @brief The sample count of the host image of a texture of d->samples samples (NVN's 0 and 1 are one sample). */
+static inline VkSampleCountFlagBits nvn_vk_sample_bits(const nvn_tex_desc *d)
+{
+    return d->samples > 1 ? (VkSampleCountFlagBits)d->samples : VK_SAMPLE_COUNT_1_BIT;
+}
 /** @brief Whether the layer can make a host image of the texture d describes (its format, target and samples). */
 bool nvn_vk_can_image(const nvn_tex_desc *d);
 vimg *nvn_vk_image(replay *r, uint64_t tex);

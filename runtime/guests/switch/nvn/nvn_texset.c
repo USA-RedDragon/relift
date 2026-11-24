@@ -833,6 +833,9 @@ static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_
     }
     *kind = kind_of(vf);
     *dim = dim_of(has_view && nv.has_target ? nv.target : v->d.target);
+    if ((*dim == DIM_2D_MS || *dim == DIM_2D_MS_ARRAY) != (nvn_vk_sample_bits(&v->d) != VK_SAMPLE_COUNT_1_BIT))
+        return nvn_vk_stop(r, "texture id %u of %u samples is registered as a view of target %u", id, v->d.samples,
+                           has_view && nv.has_target ? nv.target : v->d.target);
     if (t.tex_img[sl] && !nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
     for (uint32_t d = 0; d < DIMS; d++)

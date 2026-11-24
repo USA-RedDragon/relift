@@ -48,8 +48,10 @@ typedef struct nvn_pipe_key {
      * the image on, with the viewport's palette as dynamic state.
      */
     uint32_t shading_rate;
-    /** @brief The sample mask's bit for the one sample, the conservative dilate in quarter pixels, the first viewport's swizzle and the provoking vertex. */
+    /** @brief The sample mask's bits for the samples drawn, the conservative dilate in quarter pixels, the first viewport's swizzle and the provoking vertex. */
     uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
+    /** @brief The samples of each pixel the draw rasterizes, as a VkSampleCountFlagBits; 0 for one sample. */
+    uint32_t samples;
     /** @brief Specialization constants of each stage: id and value, sorted by id (nvn_spec_sort). */
     uint32_t nspec[NVN_STAGES];
     VkSpecializationMapEntry spec_map[NVN_STAGES][NVN_MAX_SPECS];
