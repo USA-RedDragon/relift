@@ -218,6 +218,8 @@ fn exec_pools(
         arrays,
         local_id: [0; 3],
         group_id: [0; 3],
+        local_index: 0,
+        subgroup_size: 32,
         fold_identity: true,
     };
     let mut r = Run::new(m, &env, mem);

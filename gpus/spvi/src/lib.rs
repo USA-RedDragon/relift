@@ -10,13 +10,19 @@
 //! (+0 and -0) return the second. Denormal handling follows [`Denorm`].
 //! Anything outside the subset panics, so a test never passes by skipping
 //! an operation.
+//!
+//! [`group::run_workgroup`] runs a whole workgroup, each invocation on its
+//! own thread, with barriers, subgroup shuffles and shared memory.
+
+pub mod group;
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// What arithmetic NaN results read as (any NaN is allowed).
 pub const ODD_NAN: u32 = 0xffd5_a5a5;
-const GARBAGE: u64 = 0xa5a5_a5a5_a5a5_a5a5;
+pub(crate) const GARBAGE: u64 = 0xa5a5_a5a5_a5a5_a5a5;
 
 /// How the device treats 32-bit denormals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -162,6 +168,7 @@ fn has_result(op: u16) -> bool {
             | 72
             | 224
             | 225
+            | 228
             | 246
             | 247
             | 249
@@ -382,21 +389,52 @@ impl Module {
     }
 }
 
+/// Sets the default of the specialization constant with SpecId `spec` (a
+/// 32-bit OpSpecConstant) to `value`, as a pipeline's specialization info
+/// does; false when the module has none.
+pub fn specialize(words: &mut [u32], spec: u32, value: u32) -> bool {
+    let mut target = None;
+    let mut i = 5;
+    while i < words.len() {
+        let n = (words[i] >> 16) as usize;
+        if words[i] & 0xffff == u32::from(OP_DECORATE)
+            && n == 4
+            && words[i + 2] == 1
+            && words[i + 3] == spec
+        {
+            target = Some(words[i + 1]);
+        }
+        if words[i] & 0xffff == u32::from(OP_SPEC_CONSTANT)
+            && n == 4
+            && Some(words[i + 2]) == target
+        {
+            words[i + 3] = value;
+            return true;
+        }
+        i += n.max(1);
+    }
+    false
+}
+
 /// Flat memory for explicitly laid out data: (base, bytes) regions.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Memory {
     pub regions: Vec<(u64, Vec<u8>)>,
 }
 
 impl Memory {
-    fn at(&mut self, addr: u64, n: u64) -> &mut [u8] {
+    fn find(&mut self, addr: u64, n: u64) -> Option<&mut [u8]> {
         for (base, b) in &mut self.regions {
             if addr >= *base && addr + n <= *base + b.len() as u64 {
                 let o = (addr - *base) as usize;
-                return &mut b[o..o + n as usize];
+                return Some(&mut b[o..o + n as usize]);
             }
         }
-        panic!("access to unmapped memory {addr:#x}+{n}");
+        None
+    }
+    fn at(&mut self, addr: u64, n: u64) -> &mut [u8] {
+        self.find(addr, n)
+            .unwrap_or_else(|| panic!("access to unmapped memory {addr:#x}+{n}"))
     }
     pub fn read(&mut self, addr: u64, n: u64) -> u64 {
         let b = self.at(addr, n);
@@ -411,6 +449,7 @@ impl Memory {
 }
 
 /// One invocation's inputs.
+#[derive(Clone)]
 pub struct Env {
     pub denorm: Denorm,
     /// Single-precision arithmetic writes `0x7fffffff` for every NaN result
@@ -426,6 +465,10 @@ pub struct Env {
     pub arrays: HashMap<(u32, u32, u64), u64>,
     pub local_id: [u32; 3],
     pub group_id: [u32; 3],
+    /// The invocation's index in its workgroup (x fastest).
+    pub local_index: u32,
+    /// Invocations per subgroup.
+    pub subgroup_size: u32,
     /// Fold as drivers do: a 32-bit OpFMul by a constant 1 or -1 gives the
     /// other operand (negated for -1) and an OpFAdd of a constant -0 the
     /// other operand, without arithmetic, so no denormal flush (constants
@@ -440,6 +483,11 @@ pub struct Run<'m> {
     vals: Vec<V>,
     slots: Vec<V>,
     pub steps: u64,
+    /// The most instructions the invocation may run.
+    pub max_steps: u64,
+    /// The workgroup this invocation runs in, and its index there: memory
+    /// is the group's, and barriers and shuffles wait for the others.
+    pub group: Option<(Arc<group::Group>, usize)>,
     /// The ids whose value comes from a constant (see [`Env::fold_identity`]).
     known: Vec<bool>,
 }
@@ -465,6 +513,8 @@ impl<'m> Run<'m> {
             vals: vec![V::Undef; m.bound],
             slots: Vec::new(),
             steps: 0,
+            max_steps: 50_000_000,
+            group: None,
             known: vec![false; m.bound],
         }
     }
@@ -503,7 +553,14 @@ impl<'m> Run<'m> {
                     let v = match b {
                         27 => self.vec3(self.env.local_id),
                         26 => self.vec3(self.env.group_id),
-                        41 => V::S(u64::from(self.env.local_id[0] % 32)),
+                        41 => V::S(u64::from(
+                            self.env.local_index % self.env.subgroup_size.max(1),
+                        )),
+                        40 => V::S(u64::from(
+                            self.env.local_index / self.env.subgroup_size.max(1),
+                        )),
+                        29 => V::S(u64::from(self.env.local_index)),
+                        36 => V::S(u64::from(self.env.subgroup_size.max(1))),
                         28 => self.vec3([
                             self.env.group_id[0] + self.env.local_id[0],
                             self.env.local_id[1],
@@ -513,6 +570,10 @@ impl<'m> Run<'m> {
                     };
                     self.slots.push(v);
                     V::P(Ptr::Var(self.slots.len() - 1, Rc::new(Vec::new())))
+                }
+                4 if self.group.is_some() => {
+                    let g = &self.group.as_ref().unwrap().0;
+                    V::P(Ptr::Mem(g.vars[&id], pointee))
                 }
                 _ => {
                     let v = init.map_or_else(|| m.zero(pointee), |i| self.vals[i as usize].clone());
@@ -551,12 +612,20 @@ impl<'m> Run<'m> {
             let ins = &f.code[pc];
             pc += 1;
             self.steps += 1;
-            assert!(self.steps < 50_000_000, "runaway");
+            assert!(
+                self.steps < self.max_steps,
+                "runaway: {} steps, in block %{cur_label} of function %{fid}",
+                self.steps
+            );
             let a = &ins.args;
             match ins.op {
                 248 => {
                     prev_label = cur_label;
                     cur_label = a[0];
+                    if let Some((g, i)) = &self.group {
+                        g.enter(*i, fid, cur_label);
+                        g.count(*i, self.steps);
+                    }
                 }
                 247 | 246 => {} // SelectionMerge, LoopMerge
                 249 => {
@@ -625,10 +694,36 @@ impl<'m> Run<'m> {
                         self.vals[ins.id as usize] = r;
                     }
                 }
-                224 | 225 => {} // barriers: one invocation
-                // AtomicIAdd, AtomicCompareExchange, AtomicExchange: one
-                // invocation, so a plain read and write.
+                224 => {
+                    if let Some((g, i)) = &self.group {
+                        g.barrier(*i, cur_label);
+                    }
+                }
+                225 => {} // MemoryBarrier: every access is in order
+                // GroupNonUniformShuffle
+                345 => {
+                    let Some((g, i)) = &self.group else {
+                        panic!("shuffle outside a workgroup run")
+                    };
+                    let v = g.shuffle(*i, cur_label, self.sv(a[1]), self.sv(a[2]) as u32);
+                    self.vals[ins.id as usize] = V::S(v);
+                }
+                // AtomicLoad, AtomicStore: each access is atomic.
+                227 => {
+                    let p = self.val(a[0]);
+                    let v = self.load(&p, ins.ty);
+                    self.vals[ins.id as usize] = v;
+                }
+                228 => {
+                    let p = self.val(a[0]);
+                    let v = self.val(a[3]);
+                    self.store(&p, v);
+                }
+                // AtomicIAdd, AtomicCompareExchange, AtomicExchange: a read
+                // and a write under the group's atomic lock.
                 234 | 230 | 229 => {
+                    let g = self.group.as_ref().map(|(g, _)| Arc::clone(g));
+                    let _held = g.as_ref().map(|g| group::lock(&g.atomic));
                     let p = self.val(a[0]);
                     let old = self.load(&p, ins.ty);
                     let new = match ins.op {
@@ -707,10 +802,31 @@ impl<'m> Run<'m> {
         }
     }
 
+    /// Reads memory: in a workgroup, the invocation's own read-only copy
+    /// (uniform blocks) first, then the group's.
+    fn read(&mut self, addr: u64, n: u64) -> u64 {
+        if let Some(b) = self.mem.find(addr, n) {
+            let mut v = [0u8; 8];
+            v[..n as usize].copy_from_slice(b);
+            return u64::from_le_bytes(v);
+        }
+        match &self.group {
+            Some((g, _)) => group::lock(&g.mem).read(addr, n),
+            None => self.mem.read(addr, n),
+        }
+    }
+
+    fn write(&mut self, addr: u64, n: u64, v: u64) {
+        match &self.group {
+            Some((g, _)) => group::lock(&g.mem).write(addr, n, v),
+            None => self.mem.write(addr, n, v),
+        }
+    }
+
     fn load_mem(&mut self, addr: u64, ty: u32) -> V {
         let m = self.m;
         match m.ty(ty).clone() {
-            Ty::Int(w) | Ty::Float(w) => V::S(self.mem.read(addr, u64::from(w / 8))),
+            Ty::Int(w) | Ty::Float(w) => V::S(self.read(addr, u64::from(w / 8))),
             Ty::Vec(e, n) => {
                 let sz = m.size(e);
                 V::C(Rc::new(
@@ -758,7 +874,7 @@ impl<'m> Run<'m> {
     fn store_mem(&mut self, addr: u64, ty: u32, v: &V) {
         let m = self.m;
         match m.ty(ty).clone() {
-            Ty::Int(w) | Ty::Float(w) => self.mem.write(addr, u64::from(w / 8), v.s()),
+            Ty::Int(w) | Ty::Float(w) => self.write(addr, u64::from(w / 8), v.s()),
             Ty::Vec(e, _) => {
                 let sz = m.size(e);
                 for (k, x) in v.c().iter().enumerate() {
