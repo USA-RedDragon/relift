@@ -1,6 +1,6 @@
 /**
  * @file changemask.c
- * @brief relift's moved-surface mask (shaders/changemask.comp) for the FSR 2 and FSR 3 ports: one pass per frame over
+ * @brief relift's moved-surface mask (shaders/changemask.comp) for the FSR 2 port: one pass per frame over
  * the render rectangle, last frame's view depth, hold count and reference depth in and this frame's out (two images
  * each, swapped each frame), the mask out.
  * The disocclusion tolerance is FSR 2.2's depth clip's (ffx_fsr2_depth_clip.h): a separation of 1.37e-5 times the

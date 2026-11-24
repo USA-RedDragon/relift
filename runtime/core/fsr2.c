@@ -4,8 +4,8 @@
  * dispatch logic of ffx_fsr2.cpp, ported to the stage's Vulkan calls. The passes are FidelityFX's GLSL, unchanged,
  * compiled per option set into fsr2_data.h.
  *
- * What differs from ffx_fsr2.cpp: no reactive mask generation, no transparency and composition mask (the default one
- * is bound), the jittered motion vector path always compiled in with its cancellation zero when the motion vectors
+ * What differs from ffx_fsr2.cpp: relift's moved-surface mask (changemask.h) as the transparency and composition
+ * mask, so objects a game moves without motion vectors do not trail; no reactive mask generation; the jittered motion vector path always compiled in with its cancellation zero when the motion vectors
  * carry no jitter, the maximum render size equal to the display size, and a camera the inputs do not describe (near
  * 0.1, far 10000, a vertical field of view of 60 degrees), which FSR 2 only reads for its disocclusion tolerance.
  */

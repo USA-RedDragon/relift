@@ -1,6 +1,6 @@
 /**
  * @file changemask.h
- * @brief relift's moved-surface mask (shaders/changemask.comp) for the FSR 2 and FSR 3 ports: their transparency and
+ * @brief relift's moved-surface mask (shaders/changemask.comp) for the FSR 2 port: its transparency and
  * composition mask, 1 where another surface took a pixel than the motion vectors say, so objects a game moves without
  * motion vectors do not trail. Private to the core.
  */

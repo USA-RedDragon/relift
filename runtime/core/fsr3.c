@@ -12,7 +12,6 @@
  */
 #include "fsr3.h"
 
-#include "changemask.h"
 #include "core.h"
 #include "ffx.h"
 #include "fsr3_data.h"
@@ -224,10 +223,6 @@ struct rl_fsr3 {
     float pre_exposure, previous_jitter[2];
     /** @brief The debug dump (RELIFT_UPSCALER_DUMP), or NULL. */
     rl_ffx_dump *dump;
-    /** @brief relift's moved-surface mask, bound as the transparency and composition mask, or NULL. */
-    rl_changemask *moved;
-    /** @brief This frame's mask view (0 without one). */
-    rlvk_handle composition, composition_image;
 };
 
 static bool failed(rl_fsr3 *f, const char *what, rlvk_result r)
@@ -307,7 +302,6 @@ rl_fsr3 *rl_fsr3_new(const rl_post_device *d)
     f->c.shading_change_scale = 1.0f;
     f->c.accumulation_added_per_frame = 1.0f / 3.0f;
     f->c.min_disocclusion_accumulation = -1.0f / 3.0f;
-    f->moved = rl_changemask_new(&f->vk);
     f->dump = rl_ffx_dump_new("fsr3");
     f->first = true;
     return f;
@@ -371,7 +365,7 @@ static void dump(rl_fsr3 *f, uint64_t cmd, const rl_upscale_inputs *in)
         return;
     uint32_t w = f->display[0], h = f->display[1];
     uint32_t hw = w / 2 ? w / 2 : 1, hh = h / 2 ? h / 2 : 1;
-    rl_ffx_dump_image im[R_COUNT + 1];
+    rl_ffx_dump_image im[R_COUNT];
     for (uint32_t i = 0; i < R_COUNT; i++) {
         uint32_t iw = 1, ih = 1;
         if (g_images[i].size == SIZE_RENDER || g_images[i].size == SIZE_DISPLAY)
@@ -382,9 +376,7 @@ static void dump(rl_fsr3 *f, uint64_t cmd, const rl_upscale_inputs *in)
                                      g_images[i].size == SIZE_RENDER };
     }
     uint32_t render[2] = { in->in.width, in->in.height };
-    im[R_COUNT] = (rl_ffx_dump_image){ "transparency_and_composition_mask", f->composition ? f->composition_image : 0,
-                                       RLVK_FORMAT_R16_SFLOAT, in->in.width, in->in.height, false };
-    rl_ffx_dump_record(f->dump, &f->vk, cmd, im, R_COUNT + 1, render, &f->c, sizeof f->c);
+    rl_ffx_dump_record(f->dump, &f->vk, cmd, im, R_COUNT, render, &f->c, sizeof f->c);
 }
 
 bool rl_fsr3_takes(const rl_upscale_inputs *in)
@@ -411,7 +403,7 @@ static rlvk_handle view_of(const rl_fsr3 *f, uint32_t n, const rl_upscale_inputs
     case N_REACTIVE:
         return in->reactive.handle ? in->reactive.handle : f->images[R_DEFAULT_REACTIVITY].view;
     case N_COMPOSITION:
-        return f->composition ? f->composition : f->images[R_DEFAULT_REACTIVITY].view;
+        return f->images[R_DEFAULT_REACTIVITY].view;
     case N_OUTPUT:
         return in->out.handle;
     case N_SPD_MIP:
@@ -590,16 +582,6 @@ bool rl_fsr3_record(rl_fsr3 *f, uint64_t cmd, const rl_upscale_inputs *in)
     bool sharpen = opts & 8u;
     uint32_t npasses = sharpen ? RL_FSR3_PASSES : RL_FSR3_PASSES - 1;
     bool reset = in->reset || f->first;
-    f->composition = 0;
-    if (f->moved) {
-        float d2v[4], tan_half_fov;
-        camera(in, d2v, &tan_half_fov);
-        rl_changemask_camera cam = { { d2v[0], d2v[1] }, { d2v[2], d2v[3] } };
-        rlvk_handle image = 0;
-        if (!rl_changemask_record(f->moved, cmd, in, &cam, reset, &f->composition, &image))
-            return false;
-        f->composition_image = image;
-    }
     rlvk_handle sets[RL_FSR3_PASSES];
     for (uint32_t p = 0; p < npasses; p++)
         if (!(sets[p] = pass_set(f, mods[p], in)))
@@ -669,7 +651,6 @@ void rl_fsr3_retire(rl_fsr3 *f)
     if (!f || !f->pool)
         return;
     f->vk.vkResetDescriptorPool(f->vk.device, f->pool, 0);
-    rl_changemask_retire(f->moved);
     rl_ffx_dump_retire(f->dump, &f->vk);
     f->used = 0;
     f->pending = false;
@@ -681,7 +662,6 @@ void rl_fsr3_free(rl_fsr3 *f)
         return;
     if (f->vk.vkDestroyImageView) {
         rl_ffx_dump_free(f->dump, &f->vk);
-    rl_changemask_free(f->moved);
         drop_images(f);
         for (uint32_t m = 0; m < RL_FSR3_MODULES; m++)
             rl_ffx_pipeline_free(&f->vk, &f->modules[m]);

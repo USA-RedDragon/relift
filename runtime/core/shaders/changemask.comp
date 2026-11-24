@@ -1,7 +1,7 @@
 #version 450
 /**
  * @file changemask.comp
- * @brief relift's moved-surface mask for FSR 2 and FSR 3 (changemask.c), written for relift. Where the motion vectors
+ * @brief relift's moved-surface mask for FSR 2 (changemask.c), written for relift. Where the motion vectors
  * miss a move (a game that moves an object without writing its motion), FSR sees no velocity, so it keeps the widest
  * history clamp (FSR 2 lets history 20 times the neighborhood's spread through at a 2x upscale) and its locks: the
  * object's history stays where it was and trails. FSR's documented input for pixels whose history must not be
