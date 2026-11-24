@@ -1068,6 +1068,7 @@ dependencies = [
  "relift-n64",
  "relift-n64-analyze",
  "relift-n64-formats",
+ "relift-names",
  "relift-nds",
  "relift-nds-analyze",
  "relift-nds-formats",
@@ -1080,7 +1081,6 @@ dependencies = [
  "relift-switch",
  "relift-switch-fonts",
  "relift-switch-formats",
- "relift-switch-names",
  "relift-switch-shaders",
  "relift-testguest",
  "serde",
@@ -1471,6 +1471,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-names"
+version = "0.1.0"
+dependencies = [
+ "cpp_demangle",
+ "relift-guest",
+]
+
+[[package]]
 name = "relift-nds"
 version = "0.1.0"
 dependencies = [
@@ -1574,9 +1582,9 @@ dependencies = [
  "relift-cpu-arm64",
  "relift-guest",
  "relift-ir",
+ "relift-names",
  "relift-objfile",
  "relift-switch-formats",
- "relift-switch-names",
 ]
 
 [[package]]
@@ -1598,14 +1606,6 @@ dependencies = [
  "relift-cache",
  "sha2 0.11.1",
  "zstd",
-]
-
-[[package]]
-name = "relift-switch-names"
-version = "0.1.0"
-dependencies = [
- "cpp_demangle",
- "relift-guest",
 ]
 
 [[package]]

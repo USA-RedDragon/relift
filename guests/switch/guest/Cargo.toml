@@ -16,7 +16,7 @@ relift-guest = { workspace = true }
 relift-ir = { workspace = true }
 relift-objfile = { workspace = true }
 relift-switch-formats = { workspace = true }
-relift-switch-names = { workspace = true }
+relift-names = { workspace = true }
 
 [lints]
 workspace = true

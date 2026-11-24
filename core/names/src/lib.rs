@@ -1,4 +1,4 @@
-//! Host names for Switch guest symbols: Itanium names remangled into a
+//! Host names for guest symbols: Itanium names remangled into a
 //! `guest::<module>` namespace.
 //!
 //! A guest symbol in module `M` becomes a host C identifier that is itself a
@@ -63,7 +63,7 @@ const ROOT: &str = "5guest";
 /// The text that starts every suffix tag.
 const SFX: &str = "sfx";
 
-/// The Switch naming scheme as a [`relift_guest::Naming`].
+/// The Itanium naming scheme as a [`relift_guest::Naming`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ItaniumNaming;
 

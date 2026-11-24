@@ -168,7 +168,7 @@ struct Counts {
 /// Runs the scheme over the names in the file `RELIFT_NAMES_CORPUS`, one
 /// `module<TAB>symbol` per line, and prints counts only, never names, so a
 /// corpus taken from a real program stays out of logs. Run it with
-/// `cargo test -p relift-switch-names -- --ignored --nocapture`.
+/// `cargo test -p relift-names -- --ignored --nocapture`.
 #[test]
 #[ignore = "needs RELIFT_NAMES_CORPUS"]
 fn an_outside_corpus_names_and_round_trips() {

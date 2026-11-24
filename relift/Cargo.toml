@@ -58,7 +58,7 @@ relift-switch = { workspace = true }
 relift-switch-fonts = { workspace = true }
 relift-switch-formats = { workspace = true }
 relift-switch-shaders = { workspace = true }
-relift-switch-names = { workspace = true }
+relift-names = { workspace = true }
 relift-testguest = { workspace = true }
 serde_json = { workspace = true }
 

@@ -25,6 +25,7 @@ cargo test --workspace
 | `relift-patch` | `patch` | IPS, IPS32, UPS and BPS patches |
 | `relift-objfile` | `objfile` | Executable and library file formats (ELF now): segments, symbols, relocations, dynamic tags, unwind tables, discovery seeds |
 | `relift-guest` | `guest` | The guest contract: frontends, naming, program description |
+| `relift-names` | `names` | Guest symbol names as host names: Itanium names remangled into `guest::<module>`, the address fallback and the reverse map |
 | `relift-analyze` | `analyze` | Function boundaries, control flow, jump tables, indirect targets |
 | `relift-emit` | `emit` | IR to C: shards, listings, memory strategy per host target |
 | `relift-emit-wasm` | `emit-wasm` | IR to WebAssembly; not linked by `relift` yet |

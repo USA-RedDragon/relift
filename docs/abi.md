@@ -1784,7 +1784,7 @@ Unscoped names are wrapped into nested ones, and `St`, `Sa`, `Sb`, `Ss`,
 `Si`, `So` and `Sd` at the head are written out. A clone suffix such as
 `.cold` becomes an ABI tag `sfx...` on the function's own name. A plain C
 name becomes `_ZN5guest<len><module><len><name>E`, and an unnamed function
-becomes `guest::<module>::fn_<hex address>`. `relift-switch-names`
+becomes `guest::<module>::fn_<hex address>`. `relift-names`
 (`core/names`) gives a name only when it maps back to exactly the
 original module and symbol, so the map has no collisions; anything else
 uses the address name. gdb does not demangle C function names, so

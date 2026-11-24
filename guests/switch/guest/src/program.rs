@@ -516,8 +516,8 @@ fn relr_slots(img: &[u8], start: u64, size: u64) -> Vec<(u64, u64)> {
 pub fn host_name(p: &Placed, symbol: Option<&str>, addr: u64) -> String {
     let module = c_module(&p.name);
     symbol
-        .and_then(|s| relift_switch_names::host_name(&module, s))
-        .unwrap_or_else(|| relift_switch_names::fallback_name(&module, addr - p.base))
+        .and_then(|s| relift_names::host_name(&module, s))
+        .unwrap_or_else(|| relift_names::fallback_name(&module, addr - p.base))
 }
 
 /// The module name as a C identifier, for host names.

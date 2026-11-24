@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use relift_diff::{Wire, serve as serve_wire};
+use relift_names::fallback_name;
 use relift_switch::program::c_module;
-use relift_switch_names::fallback_name;
 
 use crate::build::{Mode, build_project};
 use crate::diff_ir::IrEngine;
@@ -46,7 +46,7 @@ pub fn host_name(what: &str) -> Result<String, BoxError> {
         return Ok(what.to_string());
     }
     if let Some((module, symbol)) = what.split_once(':') {
-        return relift_switch_names::host_name(&c_module(module), symbol)
+        return relift_names::host_name(&c_module(module), symbol)
             .ok_or_else(|| format!("the host-name scheme cannot spell `{symbol}`").into());
     }
     if let Some((module, off)) = what.split_once('+') {
