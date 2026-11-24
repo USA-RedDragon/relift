@@ -17,6 +17,24 @@ fn main() {
             );
         } else if a == "--debug-info" {
             o.debug_info = true;
+        } else if a == "--xfb" {
+            let v = raw.next().expect("--xfb <stride>:<select byte>,...");
+            let (stride, sel) = v.split_once(':').expect("--xfb <stride>:<select byte>,...");
+            let attr = sel
+                .split(',')
+                .map(|b| b.parse::<u8>().expect("a select byte") as i8)
+                .collect::<Vec<_>>();
+            let n = attr.len();
+            o.xfb = Some(relift_gpu_nv::translate::XfbLayout::from_glslc(
+                true,
+                &[relift_gpu_nv::translate::XfbGlslcBuffer {
+                    stride: stride.parse().expect("a stride"),
+                    stream: 0,
+                    attr,
+                    first: vec![0; n],
+                    ncomp: vec![1; n],
+                }],
+            ));
         } else {
             kept.push(a);
         }
