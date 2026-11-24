@@ -299,10 +299,19 @@ pub fn run(
     out: &Path,
     math: &str,
     trace: Option<(&str, &Path)>,
+    import: Option<&Path>,
     ui: &mut crate::ui::Ui,
 ) -> Result<(), BoxError> {
     let jobs = relift_proc::workers::jobs().max(1);
     let start = std::time::Instant::now();
+    if let Some(import) = import {
+        let found = discover(import, out)?;
+        ui.note(&relift_progress::Line::new().text(format!(
+            "{} programs discovered in {:.1} s",
+            found.programs,
+            start.elapsed().as_secs_f64()
+        )));
+    }
     let modes = match math {
         "native" => vec![Math::Native],
         m => host_modes(m, false),

@@ -225,6 +225,10 @@ pub enum Command {
         /// Where the trace-mode table goes (run with RELIFT_NVN_TABLES set to it).
         #[arg(long, value_name = "DIR")]
         trace_dir: Option<PathBuf>,
+        /// Discover the programs again from this import folder first (the project's `import`), as a build
+        /// does: for a build whose scan outputs (programs, meshes.json, kernels.json) predate this relift.
+        #[arg(long, value_name = "IMPORT")]
+        discover: Option<PathBuf>,
     },
     /// Explain a stop report a shipped build wrote (missed code, an
     /// instruction it could not run) and add the missed target as a root
