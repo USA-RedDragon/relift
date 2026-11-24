@@ -18,7 +18,7 @@
  * ends: it reads a close-on-exec pipe whose write end only the child holds.
  *
  * execve runs only the program this binary was built from (its own path,
- * or a link to it under the guest root): the relift binary starts again
+ * a link to it under the guest root, or /proc/self/exe): the relift binary starts again
  * with the new arguments and environment and gets the descriptors that are
  * not close-on-exec at the same numbers, the signal mask and the ignored
  * signals through RELIFT_LINUX_EXEC, which the new process reads and
@@ -291,11 +291,19 @@ static int64_t sys_execve(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     char path[PATH_CAP], hp[PATH_CAP], real[PATH_CAP];
     if (lx_cstr(a[0], path, sizeof path) < 0)
         return -L_EFAULT;
-    int64_t rc = lx_host_path(path, hp, sizeof hp);
-    if (rc < 0)
-        return rc;
-    if (!hio_realpath(hp, real, sizeof real))
-        return -L_ENOENT;
+    char own[32];
+    snprintf(own, sizeof own, "/proc/%d/exe", (int)lx.pid);
+    bool self = strcmp(path, "/proc/self/exe") == 0 || strcmp(path, "/proc/thread-self/exe") == 0 || strcmp(path, own) == 0;
+    int64_t rc = 0;
+    if (self) {
+        snprintf(real, sizeof real, "%s", g_prog);
+    } else {
+        rc = lx_host_path(path, hp, sizeof hp);
+        if (rc < 0)
+            return rc;
+        if (!hio_realpath(hp, real, sizeof real))
+            return -L_ENOENT;
+    }
     if (!g_prog[0] || !g_self[0] || strcmp(real, g_prog) != 0) {
         rl_log(RL_LOG_WARN, "linux", "execve of %s: only the program itself (%s) runs here; ENOENT", path,
                lx.prog ? lx.prog->exec_path : "?");

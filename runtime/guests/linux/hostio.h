@@ -184,6 +184,11 @@ int64_t hio_lock(int fd, bool get, bool ofd, int16_t *type, int16_t whence, int6
 /** @brief flock(2) with Linux LOCK_SH 1, LOCK_EX 2, LOCK_UN 8; never blocks (-EAGAIN when held). */
 int64_t hio_flock(int fd, int op);
 
+/** @brief memfd_create(2) with Linux MFD_CLOEXEC (1, ignored: the host descriptor is always close-on-exec) and MFD_ALLOW_SEALING (2); an unlinked temporary file where the host has no memfd. */
+int64_t hio_memfd(const char *name, uint32_t flags);
+/** @brief F_ADD_SEALS (add) or F_GET_SEALS with Linux seal bits; -EINVAL where the host has no seals. */
+int64_t hio_seals(int fd, bool add, uint32_t seals);
+
 /** @brief Removes name from the process's environment. */
 void hio_unsetenv(const char *name);
 /** @brief The host signal of Linux signal sig, 0 for one the host does not have. */

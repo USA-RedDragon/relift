@@ -97,6 +97,80 @@ static int64_t sys_getgid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return hio_gid();
 }
 
+/** @brief getresuid and getresgid: real, effective and saved ids, all the host's. */
+static int64_t sys_getresuid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    uint32_t id = hio_uid();
+    for (int i = 0; i < 3; i++)
+        if (!lx_put(a[i], &id, 4))
+            return -L_EFAULT;
+    return 0;
+}
+
+static int64_t sys_getresgid(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    uint32_t id = hio_gid();
+    for (int i = 0; i < 3; i++)
+        if (!lx_put(a[i], &id, 4))
+            return -L_EFAULT;
+    return 0;
+}
+
+/** @brief The nice value the process asked for (setpriority), per process as the guest sees it; the host thread priorities are relift's own. */
+static int g_nice;
+
+/** @brief getpriority(2): the kernel's 20 - nice for the process, its threads or its group (PRIO_PROCESS 0, PRIO_PGRP 1, PRIO_USER 2 with who 0 or its own ids). */
+static int64_t sys_getpriority(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    if (a[0] > 2)
+        return -L_EINVAL;
+    return 20 - g_nice;
+}
+
+/** @brief setpriority(2): keeps the value (clamped to -20..19); raising priority above the current needs privilege, as the kernel says (EACCES). */
+static int64_t sys_setpriority(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    if (a[0] > 2)
+        return -L_EINVAL;
+    int v = (int)(int32_t)a[2];
+    v = v < -20 ? -20 : v > 19 ? 19 : v;
+    if (v < g_nice && hio_uid() != 0)
+        return -L_EACCES;
+    g_nice = v;
+    return 0;
+}
+
+/** @brief sched_setaffinity(2): accepted for a mask that names a processor the host has; the host scheduler places the threads. */
+static int64_t sys_sched_setaffinity(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    uint64_t mask = 0;
+    if (a[1] < 8)
+        return -L_EINVAL;
+    if (!lx_get(&mask, a[2], 8))
+        return -L_EFAULT;
+    uint32_t n = hio_cpu_count();
+    uint64_t have = n >= 64 ? ~0ull : ((1ull << n) - 1);
+    return (mask & have) ? 0 : -L_EINVAL;
+}
+
+/** @brief sched_getscheduler(2): SCHED_OTHER. */
+static int64_t sys_sched_getscheduler(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    return (int32_t)a[0] < 0 ? -L_EINVAL : 0;
+}
+
 static int64_t sys_zero(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -491,6 +565,12 @@ lx_sys_fn *lx_proc_call(uint32_t nr)
     case NR_getgid:
     case NR_getegid: return sys_getgid;
     case NR_set_robust_list: return sys_zero;
+    case NR_getresuid: return sys_getresuid;
+    case NR_getresgid: return sys_getresgid;
+    case NR_getpriority: return sys_getpriority;
+    case NR_setpriority: return sys_setpriority;
+    case NR_sched_setaffinity: return sys_sched_setaffinity;
+    case NR_sched_getscheduler: return sys_sched_getscheduler;
     case NR_clock_gettime: return sys_clock_gettime;
     case NR_clock_getres: return sys_clock_getres;
     case NR_gettimeofday: return sys_gettimeofday;

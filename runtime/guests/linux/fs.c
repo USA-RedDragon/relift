@@ -1249,6 +1249,10 @@ static int64_t sys_fcntl(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     case 37:
     case 38:
         return lx_record_lock(h, (uint32_t)a[1], a[2]);
+    case 1033:
+        return hio_seals(h, true, (uint32_t)a[2]);
+    case 1034:
+        return hio_seals(h, false, 0);
     default:
         return -L_EINVAL;
     }

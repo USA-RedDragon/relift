@@ -56,6 +56,21 @@ int64_t hio_flock(int fd, int op)
     return 0;
 }
 
+int64_t hio_memfd(const char *name, uint32_t flags)
+{
+    (void)name;
+    (void)flags;
+    return -L_ENOSYS;
+}
+
+int64_t hio_seals(int fd, bool add, uint32_t seals)
+{
+    (void)fd;
+    (void)add;
+    (void)seals;
+    return -L_EINVAL;
+}
+
 int64_t hio_xattr(char what, int fd, const char *path, bool nofollow, const char *name, void *value, size_t size, int flags)
 {
     (void)what;

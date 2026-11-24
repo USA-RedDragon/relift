@@ -10,8 +10,12 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -65,6 +69,37 @@ int64_t hio_flock(int fd, int op)
 {
     int o = (op & 1 ? LOCK_SH : 0) | (op & 2 ? LOCK_EX : 0) | (op & 8 ? LOCK_UN : 0) | LOCK_NB;
     return flock(fd, o) < 0 ? fail() : 0;
+}
+
+int64_t hio_memfd(const char *name, uint32_t flags)
+{
+#if defined(__linux__) && defined(MFD_CLOEXEC)
+    int r = memfd_create(name, MFD_CLOEXEC | (flags & 2 ? MFD_ALLOW_SEALING : 0));
+    return r < 0 ? fail() : r;
+#else
+    (void)name;
+    (void)flags;
+    char path[] = "/tmp/relift-memfd-XXXXXX";
+    int r = mkstemp(path);
+    if (r < 0)
+        return fail();
+    unlink(path);
+    fcntl(r, F_SETFD, FD_CLOEXEC);
+    return r;
+#endif
+}
+
+int64_t hio_seals(int fd, bool add, uint32_t seals)
+{
+#if defined(__linux__) && defined(F_ADD_SEALS)
+    int r = add ? fcntl(fd, F_ADD_SEALS, (int)seals) : fcntl(fd, F_GET_SEALS);
+    return r < 0 ? fail() : r;
+#else
+    (void)fd;
+    (void)add;
+    (void)seals;
+    return -L_EINVAL;
+#endif
 }
 
 int64_t hio_xattr(char what, int fd, const char *path, bool nofollow, const char *name, void *value, size_t size, int flags)

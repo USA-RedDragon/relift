@@ -902,6 +902,37 @@ TEST(proc_stat_and_status_count_the_programs_threads_not_the_runtimes)
     CHECK_EQ(atoi(t + 9), lx.live);
 }
 
+TEST(memfd_seals_ids_and_priority)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t m = 0x401000;
+    put_str(m, "region");
+    int64_t fd = sys(c, NR_memfd_create, m, 1 | 2, 0, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK(lx.fds[fd].cloexec);
+    put_str(m + 0x100, "shared bytes");
+    CHECK_EQ(sys(c, NR_write, (uint64_t)fd, m + 0x100, 12, 0, 0, 0), 12);
+#if defined(__linux__)
+    CHECK_EQ(sys(c, NR_fcntl, (uint64_t)fd, 1033, 0x8 /* F_SEAL_WRITE */ | 0x2 /* F_SEAL_SHRINK */, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_fcntl, (uint64_t)fd, 1034, 0, 0, 0, 0), 0xa);
+    CHECK_EQ(sys(c, NR_write, (uint64_t)fd, m + 0x100, 1, 0, 0, 0), -L_EPERM);
+#endif
+    CHECK_EQ(sys(c, NR_pread64, (uint64_t)fd, m + 0x200, 12, 0, 0, 0), 12);
+    CHECK(memcmp(cstr(m + 0x200), "shared bytes", 12) == 0);
+    CHECK_EQ(sys(c, NR_memfd_create, m, 4, 0, 0, 0, 0), -L_EINVAL);
+    CHECK_EQ(sys(c, NR_getresuid, m, m + 4, m + 8, 0, 0, 0), 0);
+    uint32_t ids[3];
+    memcpy(ids, rl_mem_base() + m, sizeof ids);
+    CHECK(ids[0] == hio_uid() && ids[1] == ids[0] && ids[2] == ids[0]);
+    CHECK_EQ(sys(c, NR_setpriority, 0, 0, 5, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_getpriority, 0, 0, 0, 0, 0, 0), 15);
+    CHECK_EQ(sys(c, NR_sched_getscheduler, 0, 0, 0, 0, 0, 0), 0);
+    uint64_t mask = 1;
+    rl_vm_kernel_write(&lx.vm, m, &mask, 8);
+    CHECK_EQ(sys(c, NR_sched_setaffinity, 0, 8, m, 0, 0, 0), 0);
+}
+
 TEST(execve_of_another_program_finds_nothing)
 {
     rl_ctx *c = boot();

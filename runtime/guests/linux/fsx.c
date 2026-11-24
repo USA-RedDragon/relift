@@ -332,6 +332,24 @@ static int64_t sys_flock(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     }
 }
 
+/** @brief memfd_create(2): MFD_CLOEXEC and MFD_ALLOW_SEALING; huge pages and the exec flags are refused. */
+static int64_t sys_memfd_create(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    char name[256];
+    int64_t n = lx_cstr(a[0], name, sizeof name);
+    if (n < 0)
+        return n == -L_ENAMETOOLONG ? -L_EINVAL : n;
+    if (n > 249)
+        return -L_EINVAL;
+    uint32_t flags = (uint32_t)a[1];
+    if (flags & ~3u)
+        return -L_EINVAL;
+    int64_t h = hio_memfd(name, flags);
+    return h < 0 ? h : lx_fd_install((int)h, (flags & 1) != 0);
+}
+
 lx_sys_fn *lx_fsx_call(uint32_t nr)
 {
     switch (nr) {
@@ -354,6 +372,7 @@ lx_sys_fn *lx_fsx_call(uint32_t nr)
     case NR_pselect6: return sys_pselect6;
     case NR_fchmodat2: return sys_fchmodat2;
     case NR_flock: return sys_flock;
+    case NR_memfd_create: return sys_memfd_create;
     default: return NULL;
     }
 }
