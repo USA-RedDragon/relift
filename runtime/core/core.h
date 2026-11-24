@@ -367,6 +367,13 @@ RL_RUNTIME_API int rl_vm_host_access(rl_vm *vm, uint64_t addr, uint64_t size, bo
  * rl_vm_host_access. Returns 0 or -1.
  */
 RL_RUNTIME_API int rl_vm_host_watch(rl_vm *vm, uint64_t addr, uint64_t size, bool watch);
+/** @brief True when the guest map gives some guest page of the host page containing addr write access (the code watch aside). */
+RL_RUNTIME_API bool rl_vm_guest_writes(const rl_vm *vm, uint64_t addr);
+/**
+ * @brief Sets the host pages of [addr, addr+size) to the policy's protection again, under the space's lock: after
+ * the code watch changed (codewatch.c). Host-page aligned. Fault-hook safe as rl_vm_host_watch. Returns 0 or -1.
+ */
+RL_RUNTIME_API int rl_vm_host_reapply(rl_vm *vm, uint64_t addr, uint64_t size);
 /** @brief True when guest range [addr, addr+size) is inside the space. */
 static inline bool rl_vm_contains(const rl_vm *vm, uint64_t addr, uint64_t size)
 {
@@ -485,6 +492,79 @@ typedef bool rl_fault_debug_hook(const rl_fault *f, void *host_context);
 RL_RUNTIME_API void rl_fault_set_debug_hook(rl_fault_debug_hook *hook);
 /** @brief True once rl_fault_install has run, so guest faults reach the hook. */
 RL_RUNTIME_API bool rl_fault_installed(void);
+
+/** @brief What a guest page holds for the code watch (codewatch.c, docs/abi.md section 6.1). */
+enum rl_cw_kind {
+    /** @brief No code: the page is not executable, or not registered. */
+    RL_CW_NONE = 0,
+    /** @brief Bytes the build lifted (an executable segment of a module), pristine until written. */
+    RL_CW_FILE = 1,
+    /** @brief Any other executable page: code written at run time runs from it through the interpreter. */
+    RL_CW_RUN = 2
+};
+
+/** @brief Write faults on one page while it holds code after which it is no longer watched: its blocks compare their bytes instead. */
+#define RL_CW_CHECKED_FAULTS 16u
+
+/** @brief One guest page as the code watch sees it. */
+typedef struct rl_cw_page {
+    /** @brief enum rl_cw_kind. */
+    int kind;
+    /** @brief A FILE page whose bytes are still the ones the build lifted. */
+    bool pristine;
+    /** @brief The host page has no write access because of this page. */
+    bool watched;
+    /** @brief Bumped by every invalidation of the page; code taken from it at another generation is stale. */
+    uint32_t gen;
+} rl_cw_page;
+
+/** @brief Counters of the code watch. */
+typedef struct rl_cw_stats {
+    /** @brief Write faults the hook resolved. */
+    uint64_t faults;
+    /** @brief Page invalidations. */
+    uint64_t invalidations;
+} rl_cw_stats;
+
+/**
+ * @brief Binds the code watch to vm (clearing it when vm changes) and adds its fault hook when the fault handler is
+ * installed. Returns 0 or -1.
+ */
+RL_RUNTIME_API int rl_cw_init(rl_vm *vm);
+/**
+ * @brief Registers guest pages [addr, addr+size) (page aligned) as kind: FILE pages become pristine and watched, and
+ * get back the dispatch slots they had when first registered; RUN pages are not watched until rl_cw_watch; NONE ends
+ * their code. Every page's generation is bumped when it held code. Normal context. Returns 0 or -1.
+ */
+RL_RUNTIME_API int rl_cw_set(uint64_t addr, uint64_t size, int kind);
+/** @brief The page holding guest address addr. Lock-free. */
+RL_RUNTIME_API rl_cw_page rl_cw_query(uint64_t addr);
+/**
+ * @brief Watches the code page holding addr (the interpreter took code from it): its next write faults into the
+ * hook. A page that already faulted RL_CW_CHECKED_FAULTS times stays unwatched (rl_cw_checked). Normal context.
+ * Returns 0, or -1 when the page holds no code.
+ */
+RL_RUNTIME_API int rl_cw_watch(uint64_t addr);
+/** @brief True when the page holding addr faulted too often to be watched: code taken from it must check its bytes. */
+RL_RUNTIME_API bool rl_cw_checked(uint64_t addr);
+/**
+ * @brief Before the host or the host kernel writes guest [addr, addr+size) (a system call's output): ends the code
+ * there and gives watched pages their write access back, so the write takes no fault. Normal context.
+ */
+RL_RUNTIME_API void rl_cw_will_write(uint64_t addr, uint64_t size);
+/**
+ * @brief Ends the code on the pages of [addr, addr+size) without changing host protection: the caller reapplies it
+ * (vm.c does). Lock-free. True when a page was watched.
+ */
+RL_RUNTIME_API bool rl_cw_written(uint64_t addr, uint64_t size);
+/** @brief The fault hook rl_cw_init adds: a write to a watched page that the guest may write. */
+RL_RUNTIME_API bool rl_cw_fault(const rl_fault *f);
+/** @brief True when a watched code page lies in [addr, addr+size) of vm: its host pages get no write access. */
+RL_RUNTIME_API bool rl_cw_host_masked(const rl_vm *vm, uint64_t addr, uint64_t size);
+/** @brief True when any page of vm is watched. */
+RL_RUNTIME_API bool rl_cw_any_watched(const rl_vm *vm);
+/** @brief The counters. */
+RL_RUNTIME_API rl_cw_stats rl_cw_stats_get(void);
 
 /** @brief Runtime thread object (guest-neutral part). */
 struct rl_thread {
@@ -716,6 +796,12 @@ RL_RUNTIME_API rl_fn rl_core_miss_load(rl_ctx *c, const rl_miss_info *m, uint32_
 RL_RUNTIME_API void rl_dispatch_set_image(const uint8_t *id);
 /** @brief Drops the dispatch table (tests). */
 RL_RUNTIME_API void rl_units_reset(void);
+/** @brief Keeps a copy of the dispatch table for rl_dispatch_restore (first call only; later calls keep slots filled since). Returns 0 or -1. */
+RL_RUNTIME_API int rl_dispatch_keep(void);
+/** @brief Empties the dispatch slots of guest [lo, lo+size). Lock-free: the code watch's fault hook calls it. */
+RL_RUNTIME_API void rl_dispatch_drop(uint64_t lo, uint64_t size);
+/** @brief Gives the dispatch slots of guest [lo, lo+size) the functions rl_dispatch_keep kept. */
+RL_RUNTIME_API void rl_dispatch_restore(uint64_t lo, uint64_t size);
 /** @brief Copies the dispatch view into c. */
 RL_RUNTIME_API void rl_dispatch_view(rl_ctx *c);
 /** @brief The registered function at guest address a, or NULL (host-side lookup; lifted code uses its CPU layer's inline one). */

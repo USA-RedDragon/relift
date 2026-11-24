@@ -898,3 +898,177 @@ TEST(core_the_process_exit_runs_what_layers_added_once_before_it_ends)
     CHECK_EQ(g_at_exit_runs, 1u);
     rl_set_exit_hook(NULL);
 }
+
+/** @brief Two lifted functions on guest page 2 of a boot() space, registered, and the page made FILE code. */
+static int cw_boot(rl_vm *vm, uint64_t *page)
+{
+    if (boot(vm) != 0 || rl_cw_init(vm) != 0)
+        return -1;
+    uint64_t gp = vm->guest_page;
+    *page = 2 * vm->host_page;
+    static rl_fn_entry fns[2];
+    fns[0] = (rl_fn_entry){ *page, 2, 0, fn_a };
+    fns[1] = (rl_fn_entry){ *page + gp - 2, 2, 0, fn_b };
+    static rl_unit u;
+    u = unit_of(fns, 2, sizeof(struct rl_ctx));
+    const rl_unit *list[] = { &u };
+    if (rl_units_register(list, 1) != 0)
+        return -1;
+    if (rl_vm_set(vm, *page, vm->host_page, RL_VM_RX, 0, RL_VM_FRESH) != 0)
+        return -1;
+    return rl_cw_set(*page, vm->host_page, RL_CW_FILE);
+}
+
+TEST(codewatch_a_write_to_lifted_code_drops_its_dispatch)
+{
+    rl_vm vm;
+    uint64_t pg;
+    CHECK_EQ(cw_boot(&vm, &pg), 0);
+    rl_cw_page q = rl_cw_query(pg);
+    CHECK_EQ(q.kind, RL_CW_FILE);
+    CHECK(q.pristine);
+    CHECK(q.watched);
+    CHECK(t_write(pg + 4, 1).faulted);
+    CHECK_EQ(rl_vm_set(&vm, pg, vm.host_page, RL_VM_RX | RL_VM_W, 0, RL_VM_KEEP), 0);
+    CHECK_EQ(rl_vm_host_prot(&vm, pg), PROT_READ);
+    CHECK(rl_dispatch_find(pg) == fn_a);
+    CHECK(!t_write(pg + 4, 0x77).faulted);
+    CHECK_EQ(t_mem()[pg + 4], 0x77);
+    q = rl_cw_query(pg);
+    CHECK(!q.pristine);
+    CHECK(!q.watched);
+    CHECK_EQ(q.gen, 1);
+    CHECK(rl_dispatch_find(pg) == NULL);
+    CHECK(rl_dispatch_find(pg + vm.guest_page - 2) == NULL);
+    CHECK_EQ(rl_vm_host_prot(&vm, pg), PROT_READ | PROT_WRITE);
+    CHECK_EQ(rl_cw_stats_get().faults, 1);
+    CHECK(!t_write(pg + 5, 0x78).faulted);
+    CHECK_EQ(rl_cw_stats_get().faults, 1);
+    CHECK_EQ(rl_cw_set(pg, vm.host_page, RL_CW_FILE), 0);
+    CHECK(rl_dispatch_find(pg) == fn_a);
+    CHECK(rl_cw_query(pg).pristine);
+    CHECK_EQ(rl_vm_host_prot(&vm, pg), PROT_READ);
+    rl_vm_destroy(&vm);
+}
+
+TEST(codewatch_run_pages_fault_only_while_watched)
+{
+    rl_vm vm;
+    uint64_t pg;
+    CHECK_EQ(cw_boot(&vm, &pg), 0);
+    uint64_t run = 6 * vm.host_page;
+    CHECK_EQ(rl_vm_set(&vm, run, vm.host_page, RL_VM_RW | RL_VM_X, 0, RL_VM_FRESH), 0);
+    CHECK_EQ(rl_cw_set(run, vm.host_page, RL_CW_RUN), 0);
+    CHECK(!rl_cw_query(run).watched);
+    CHECK(!t_write(run, 1).faulted);
+    CHECK_EQ(rl_cw_watch(run), 0);
+    CHECK(rl_cw_query(run).watched);
+    CHECK_EQ(rl_vm_host_prot(&vm, run), PROT_READ);
+    uint32_t g = rl_cw_query(run).gen;
+    CHECK(!t_write(run + 9, 2).faulted);
+    CHECK_EQ(rl_cw_query(run).gen, g + 1);
+    CHECK_EQ(rl_vm_host_prot(&vm, run), PROT_READ | PROT_WRITE);
+    CHECK(rl_dispatch_find(pg) == fn_a);
+    for (uint32_t i = 0; i < RL_CW_CHECKED_FAULTS; i++) {
+        CHECK_EQ(rl_cw_watch(run), 0);
+        CHECK(!t_write(run + 9, (uint8_t)i).faulted);
+    }
+    CHECK(rl_cw_checked(run));
+    CHECK_EQ(rl_cw_watch(run), 0);
+    CHECK(!rl_cw_query(run).watched);
+    CHECK_EQ(rl_cw_watch(4 * vm.host_page), -1);
+    CHECK_EQ(rl_cw_set(run, vm.host_page, RL_CW_NONE), 0);
+    CHECK_EQ(rl_cw_query(run).kind, RL_CW_NONE);
+    CHECK(!rl_cw_checked(run));
+    rl_vm_destroy(&vm);
+}
+
+TEST(codewatch_a_read_only_code_page_still_faults_for_the_guest)
+{
+    rl_vm vm;
+    uint64_t pg;
+    CHECK_EQ(cw_boot(&vm, &pg), 0);
+    t_probe p = t_write(pg + 2, 1);
+    CHECK(p.faulted);
+    CHECK_EQ(p.addr, pg + 2);
+    CHECK(rl_cw_query(pg).pristine);
+    CHECK_EQ(rl_cw_stats_get().faults, 0);
+    rl_vm_destroy(&vm);
+}
+
+TEST(codewatch_kernel_writes_and_remaps_end_the_code)
+{
+    rl_vm vm;
+    uint64_t pg;
+    CHECK_EQ(cw_boot(&vm, &pg), 0);
+    uint8_t b[4] = { 1, 2, 3, 4 };
+    rl_vm_kernel_write(&vm, pg + 8, b, sizeof b);
+    CHECK_EQ(t_mem()[pg + 11], 4);
+    CHECK(!rl_cw_query(pg).pristine);
+    CHECK(rl_dispatch_find(pg) == NULL);
+    CHECK_EQ(rl_vm_host_prot(&vm, pg), PROT_READ);
+    CHECK_EQ(rl_cw_set(pg, vm.host_page, RL_CW_FILE), 0);
+    CHECK_EQ(rl_vm_set(&vm, pg, vm.host_page, RL_VM_NONE, 0, RL_VM_DISCARD), 0);
+    CHECK(!rl_cw_query(pg).pristine);
+    CHECK_EQ(rl_vm_set(&vm, pg, vm.host_page, RL_VM_RW, 0, RL_VM_FRESH), 0);
+    CHECK_EQ(rl_vm_host_prot(&vm, pg), PROT_READ | PROT_WRITE);
+    CHECK_EQ(t_mem()[pg + 11], 0);
+    CHECK_EQ(rl_cw_set(pg, vm.host_page, RL_CW_FILE), 0);
+    CHECK_EQ(rl_vm_set(&vm, pg, vm.host_page, RL_VM_RW | RL_VM_X, 0, RL_VM_KEEP), 0);
+    /* A write into a host page ends the code of all its guest pages (the fault path does the same for the whole host page). */
+    rl_cw_will_write(pg, vm.host_page);
+    CHECK_EQ(rl_vm_host_prot(&vm, pg), PROT_READ | PROT_WRITE);
+    CHECK(rl_dispatch_find(pg) == NULL);
+    rl_vm_destroy(&vm);
+}
+
+/** @brief A thread that watches a code page over and over while the test writes it. */
+typedef struct cw_race {
+    uint64_t page;
+    uint64_t rounds;
+    int stop;
+} cw_race;
+
+static void *cw_rewatch(void *arg)
+{
+    cw_race *r = arg;
+    while (!__atomic_load_n(&r->stop, __ATOMIC_ACQUIRE)) {
+        rl_cw_watch(r->page);
+        __atomic_add_fetch(&r->rounds, 1, __ATOMIC_RELEASE);
+    }
+    return NULL;
+}
+
+/**
+ * The fault hook's unwatch and another thread's watch race; once both stop, the host page has write access exactly
+ * when the page is not watched, so no later write can land on watched code unseen.
+ */
+TEST(codewatch_watch_races_writes_and_ends_consistent)
+{
+    rl_vm vm;
+    uint64_t pg;
+    CHECK_EQ(cw_boot(&vm, &pg), 0);
+    uint64_t run = 6 * vm.host_page;
+    CHECK_EQ(rl_vm_set(&vm, run, vm.host_page, RL_VM_RW | RL_VM_X, 0, RL_VM_FRESH), 0);
+    uint64_t rounds = 0;
+    for (int k = 0; k < 40; k++) {
+        CHECK_EQ(rl_cw_set(run, vm.host_page, RL_CW_RUN), 0);
+        cw_race r = { run, 0, 0 };
+        pthread_t t;
+        CHECK_EQ(pthread_create(&t, NULL, cw_rewatch, &r), 0);
+        /* At least 400 writes, and until the other thread has run once (it may not be scheduled for a while on a loaded
+         * machine); bounded, so a thread that never runs still ends the loop. */
+        for (int i = 0; i < 400 || (i < 100000000 && __atomic_load_n(&r.rounds, __ATOMIC_ACQUIRE) == 0); i++)
+            CHECK(!t_write(run + 1, (uint8_t)i).faulted);
+        __atomic_store_n(&r.stop, 1, __ATOMIC_RELEASE);
+        pthread_join(t, NULL);
+        rounds += r.rounds;
+        bool watched = rl_cw_query(run).watched;
+        CHECK_EQ(rl_vm_host_prot(&vm, run), watched ? PROT_READ : PROT_READ | PROT_WRITE);
+        uint32_t g = rl_cw_query(run).gen;
+        CHECK(!t_write(run + 2, 1).faulted);
+        CHECK(!watched || rl_cw_query(run).gen == g + 1);
+    }
+    CHECK(rounds > 0);
+    rl_vm_destroy(&vm);
+}

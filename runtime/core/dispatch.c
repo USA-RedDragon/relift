@@ -15,6 +15,10 @@
 static rl_fn *g_table;
 static uint64_t g_lo;
 static uint64_t g_count;
+/** @brief The table as rl_dispatch_keep saw it, for the code watch to restore. */
+static rl_fn *g_kept;
+static uint64_t g_kept_lo;
+static uint64_t g_kept_count;
 static uint8_t g_image[RL_IMAGE_ID_BYTES];
 static bool g_have_image;
 /* Dev builds: the cold function of each RL_CODE_COLD slot not dispatched to yet. */
@@ -114,6 +118,9 @@ void rl_units_reset(void)
     rl_fn_maps_reset();
     free(g_table);
     g_table = NULL;
+    free(g_kept);
+    g_kept = NULL;
+    g_kept_count = 0;
     free(g_cold);
     g_cold = NULL;
     g_cold_first = NULL;
@@ -181,6 +188,67 @@ int rl_dispatch_set(uint64_t a, rl_fn fn)
         return -1;
     __atomic_store_n(&g_table[i], fn, __ATOMIC_RELEASE);
     return 0;
+}
+
+int rl_dispatch_keep(void)
+{
+    if (!g_table)
+        return 0;
+    if (g_kept_count != g_count || g_kept_lo != g_lo) {
+        rl_fn *k = calloc(g_count, sizeof *k);
+        if (!k)
+            return -1;
+        if (g_kept) {
+            for (uint64_t i = 0; i < g_kept_count; i++) {
+                uint64_t a = g_kept_lo + (i << rl_core_cpu()->code_shift);
+                if (a >= g_lo && ((a - g_lo) >> rl_core_cpu()->code_shift) < g_count)
+                    k[(a - g_lo) >> rl_core_cpu()->code_shift] = g_kept[i];
+            }
+        }
+        free(g_kept);
+        g_kept = k;
+        g_kept_lo = g_lo;
+        g_kept_count = g_count;
+    }
+    for (uint64_t i = 0; i < g_count; i++) {
+        rl_fn f = __atomic_load_n(&g_table[i], __ATOMIC_ACQUIRE);
+        if (f)
+            g_kept[i] = f;
+    }
+    return 0;
+}
+
+/** @brief The slot range of guest [lo, lo+size) in the table, clipped; false when none. */
+static bool slots_of(uint64_t lo, uint64_t size, uint64_t *first, uint64_t *end)
+{
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    if (!g_table || !cpu || !size)
+        return false;
+    uint32_t sh = cpu->code_shift;
+    uint64_t top = g_lo + (g_count << sh), hi = lo + size;
+    if (hi <= g_lo || lo >= top)
+        return false;
+    *first = lo > g_lo ? (lo - g_lo) >> sh : 0;
+    *end = hi < top ? (hi - g_lo + (1ull << sh) - 1) >> sh : g_count;
+    return true;
+}
+
+void rl_dispatch_drop(uint64_t lo, uint64_t size)
+{
+    uint64_t a, b;
+    if (slots_of(lo, size, &a, &b))
+        for (uint64_t i = a; i < b; i++)
+            __atomic_store_n(&g_table[i], NULL, __ATOMIC_RELEASE);
+}
+
+void rl_dispatch_restore(uint64_t lo, uint64_t size)
+{
+    uint64_t a, b;
+    if (!g_kept || g_kept_lo != g_lo || g_kept_count != g_count || !slots_of(lo, size, &a, &b))
+        return;
+    for (uint64_t i = a; i < b; i++)
+        if (g_kept[i])
+            __atomic_store_n(&g_table[i], g_kept[i], __ATOMIC_RELEASE);
 }
 
 int rl_dispatch_reserve(uint64_t lo, uint64_t hi)

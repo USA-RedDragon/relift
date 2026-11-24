@@ -240,7 +240,8 @@ static void merge_around(rl_vm *vm, uint32_t i)
     }
 }
 
-static int union_perm(const rl_vm *vm, uint64_t hp_start, uint64_t hp_end)
+/** @brief The union of the guest permissions over [hp_start, hp_end) as host protection, before the code watch. */
+static int union_guest(const rl_vm *vm, uint64_t hp_start, uint64_t hp_end)
 {
     uint32_t perm = 0;
     if (hp_end > vm->size)
@@ -248,6 +249,19 @@ static int union_perm(const rl_vm *vm, uint64_t hp_start, uint64_t hp_end)
     for (uint32_t i = find(vm, hp_start); i < vm->count && vm->blocks[i].addr < hp_end; i++)
         perm |= vm->blocks[i].perm;
     return prot_of(perm);
+}
+
+/** @brief prot without write access when a code page in [s, e) is watched (codewatch.c). */
+static int code_mask(const rl_vm *vm, uint64_t s, uint64_t e, int prot)
+{
+    if ((prot & PROT_WRITE) && rl_cw_host_masked(vm, s, e - s))
+        return prot & ~PROT_WRITE;
+    return prot;
+}
+
+static int union_perm(const rl_vm *vm, uint64_t hp_start, uint64_t hp_end)
+{
+    return code_mask(vm, hp_start, hp_end, union_guest(vm, hp_start, hp_end));
 }
 
 bool rl_vm_host_writable(const rl_vm *vm, uint64_t addr) { return (rl_vm_host_prot(vm, addr) & PROT_WRITE) != 0; }
@@ -278,6 +292,29 @@ static int host_protect(rl_vm *vm, uint64_t addr, uint64_t len, int prot)
     return 0;
 }
 
+bool rl_vm_guest_writes(const rl_vm *vm, uint64_t addr)
+{
+    vm_lock(vm);
+    uint64_t s = align_down(addr, vm->host_page);
+    bool w = (union_guest(vm, s, s + vm->host_page) & PROT_WRITE) != 0;
+    vm_unlock(vm);
+    return w;
+}
+
+int rl_vm_host_reapply(rl_vm *vm, uint64_t addr, uint64_t size)
+{
+    uint64_t hp = vm->host_page;
+    if ((addr | size) & (hp - 1) || !rl_vm_contains(vm, addr, size))
+        return -1;
+    int rc = 0;
+    vm_lock(vm);
+    for (uint64_t p = addr; p < addr + size; p += hp)
+        if (os_protect(vm->base + p, hp, page_prot(vm, p)) != 0)
+            rc = -1;
+    vm_unlock(vm);
+    return rc;
+}
+
 int rl_vm_host_access(rl_vm *vm, uint64_t addr, uint64_t size, bool access)
 {
     if ((addr | size) & (vm->host_page - 1) || !rl_vm_contains(vm, addr, size))
@@ -306,8 +343,13 @@ static int apply_range(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm)
     }
     if (s < in_s && host_protect(vm, s, hp, union_perm(vm, s, in_s)))
         rc = -1;
-    if (host_protect(vm, in_s, in_e - in_s, prot_of(perm)))
+    if ((prot_of(perm) & PROT_WRITE) && rl_cw_host_masked(vm, in_s, in_e - in_s)) {
+        for (uint64_t p = in_s; p < in_e; p += hp)
+            if (host_protect(vm, p, hp, union_perm(vm, p, p + hp)))
+                rc = -1;
+    } else if (host_protect(vm, in_s, in_e - in_s, prot_of(perm))) {
         rc = -1;
+    }
     if (in_e < e && host_protect(vm, in_e, hp, union_perm(vm, in_e, e)))
         rc = -1;
     return rc;
@@ -369,6 +411,8 @@ bool rl_vm_changed_since(rl_vm *vm, uint64_t gen, uint64_t addr, uint64_t size)
 /** @brief rl_vm_set with the lock held. */
 static int set_locked(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
 {
+    if (content != RL_VM_KEEP)
+        rl_cw_written(addr, size);
     if (content == RL_VM_DISCARD && discard(vm, addr, size))
         return -1;
     if (reserve(vm, 2))
@@ -440,6 +484,7 @@ void rl_vm_kernel_copy(rl_vm *vm, uint64_t dst, uint64_t src, uint64_t size)
 {
     if (!size)
         return;
+    rl_cw_written(dst, size);
     vm_lock(vm);
     unlock_range(vm, src, size);
     unlock_range(vm, dst, size);
@@ -453,6 +498,7 @@ void rl_vm_kernel_write(rl_vm *vm, uint64_t dst, const void *src, uint64_t size)
 {
     if (!size)
         return;
+    rl_cw_written(dst, size);
     vm_lock(vm);
     unlock_range(vm, dst, size);
     memcpy(vm->base + dst, src, size);

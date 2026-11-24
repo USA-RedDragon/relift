@@ -971,6 +971,37 @@ a jump, against a load, a select and a jump for the former
 `rl_indirect(c, target)(c, mem)`. Computed calls keep `rl_indirect`, whose
 miss is a host call from the lifted caller.
 
+## 6.1 Code written at run time
+
+Code a program writes while it runs (JIT output, self-modifying code,
+unpacked code) is not missed code: it runs through the IR interpreter, and
+later an in-process code generator on desktop and Android. Code present in
+the binary that discovery missed still takes the paths above. Design:
+`.work/design/016-x86-runtime-code.md`. [decided]
+
+- **Code pages** (`runtime/core/codewatch.c`, `rl_cw_*`). One entry per guest
+  page: `FILE` (bytes the build lifted, pristine until written), `RUN` (any
+  other executable page) or none, with a generation bumped by every
+  invalidation. The guest layer registers executable load segments as `FILE`
+  and executable maps as `RUN`; a miss on a pristine `FILE` page is missed
+  binary code, a miss on any other executable page is run-time code.
+- **Writes.** A watched page has no host write access whatever the guest map
+  says (`vm.c` masks it in the policy). `FILE` pages are watched from
+  registration, `RUN` pages from the first time the interpreter takes code
+  from them. The first write faults into the code watch's hook, which bumps
+  the generation, clears pristine, empties the dispatch slots of a `FILE`
+  page and reapplies the policy, so the store retries; a page the guest may
+  not write still faults for the guest. Kernel copies and writes
+  (`rl_vm_kernel_*`) and fresh or discarded maps end the code of their pages
+  the same way; a guest layer calls `rl_cw_will_write` before the host kernel
+  writes guest memory (a system call's output). A page that faults
+  `RL_CW_CHECKED_FAULTS` times is no longer watched: code taken from it
+  compares its bytes at each entry. Host protection of a code page is only
+  ever set from the policy (`rl_vm_host_reapply`), so a watch racing the
+  hook ends as the flags say. [verified: core_tests codewatch_*]
+- **Restoring lifted code.** `rl_cw_set(..., RL_CW_FILE)` gives the pages back
+  the dispatch slots they had when first registered (`rl_dispatch_keep`).
+
 ## 7. Exceptions
 
 From the exceptions prototype [verified on x86-64 Linux and an Apple M2
