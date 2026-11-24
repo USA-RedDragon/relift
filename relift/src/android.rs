@@ -465,6 +465,15 @@ pub struct About {
     /// The game follows the device's rotation (a tall picture); else the
     /// activity keeps the sensor landscape orientation.
     pub portrait: bool,
+    /// The program is a game: the manifest declares the game category, so
+    /// Android's Game Mode and Game Dashboard apply to it. Declared with
+    /// `android:appCategory="game"` on `<application>`
+    /// (<https://developer.android.com/guide/topics/manifest/application-element>,
+    /// <https://developer.android.com/games/optimize/adpf/gamemode/gamemode-api>).
+    /// `android:isGame` is not used: its flag, `FLAG_IS_GAME`, is deprecated
+    /// since API level 26 in favor of the category
+    /// (<https://developer.android.com/reference/android/content/pm/ApplicationInfo>).
+    pub game: bool,
 }
 
 /// The name the settings pages give a guest platform.
@@ -543,6 +552,11 @@ fn xml(s: &str) -> String {
 
 fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
     let label = xml(a.label);
+    let category = if a.about.game {
+        " android:appCategory=\"game\""
+    } else {
+        ""
+    };
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}" android:versionCode="1" android:versionName="1.0">
@@ -550,7 +564,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
   <uses-feature android:glEsVersion="0x00020000"/>
   <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
   <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
-  {internet}{data_permissions}<application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+  {internet}{data_permissions}<application android:label="{label}"{category}{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
     <meta-data android:name="relift.gpu_driver" android:value="{vulkan}"/>
     <meta-data android:name="relift.library" android:value="{stem}"/>
     <meta-data android:name="relift.platform" android:value="{platform}"/>
@@ -733,6 +747,7 @@ pub fn launcher(exe: &Path, seed: &str, label: &str) -> Result<Launcher, BoxErro
             version: info.identity.version.clone().unwrap_or_default(),
             vulkan: info.identity.platform == "switch",
             portrait: info.identity.platform == "nds",
+            game: info.identity.is_game(),
         },
     })
 }
@@ -1282,9 +1297,25 @@ mod tests {
                 version: "1.0.2".into(),
                 vulkan: true,
                 portrait: false,
+                game: true,
             },
         };
         let m = manifest(&a, &sdk, true);
+        assert!(m.contains("android:appCategory=\"game\""));
+        assert!(
+            !manifest(
+                &Apk {
+                    about: &About {
+                        game: false,
+                        ..a.about.clone()
+                    },
+                    ..a
+                },
+                &sdk,
+                true
+            )
+            .contains("appCategory")
+        );
         assert!(m.contains("android:screenOrientation=\"sensorLandscape\""));
         assert!(m.contains("package=\"dev.relift.game.x\""));
         assert!(m.contains("android:targetSdkVersion=\"36\""));

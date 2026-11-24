@@ -73,3 +73,15 @@ TEST(the_icon_is_decoded_from_base64)
     rl_app_set_identity(k_langs, k_names, 7, NULL, bad, sizeof bad - 1);
     CHECK(rl_app_icon_png(&n) == NULL && n == 0);
 }
+
+TEST(a_program_is_not_a_game_until_it_says_so)
+{
+    CHECK(rl_app_is_game() == 0);
+    rl_app_set_game(1);
+    CHECK(rl_app_is_game() == 1);
+    rl_app_set_game(0);
+    CHECK(rl_app_is_game() == 0);
+    rl_app_set_game(7);
+    CHECK(rl_app_is_game() == 1);
+    rl_app_set_game(0);
+}

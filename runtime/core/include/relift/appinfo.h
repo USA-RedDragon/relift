@@ -26,6 +26,19 @@ RL_RUNTIME_API void rl_app_set_identity(const char *const *langs, const char *co
                                         const char *default_lang, const char *icon_b64, size_t icon_b64_len);
 
 /**
+ * @brief Registers whether the program is a game (`game` in the `[game]` table of relift.toml; the generated
+ * info file calls this at start-up). Until it is called the program is not a game.
+ */
+RL_RUNTIME_API void rl_app_set_game(int game);
+
+/**
+ * @brief Whether the program is a game. Only a game offers the pause sheet and its hotkeys (F1, Home, the
+ * Minus+Plus hold, F2, F11) to the person playing; an application keeps all its input and reaches the settings
+ * screen from outside, the app's icon menu.
+ */
+RL_RUNTIME_API int rl_app_is_game(void);
+
+/**
  * @brief Adds one `key: value` header line to every stop report the runtime writes (the program's generated info
  * file gives the relift version, the game, the code mods built in and the build digest). Copies both.
  */

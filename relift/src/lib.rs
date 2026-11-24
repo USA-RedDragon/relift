@@ -30,6 +30,7 @@ pub mod identity;
 pub mod import;
 pub mod info;
 pub mod ios;
+pub mod kind;
 pub mod linux;
 pub mod macapp;
 pub mod mods;

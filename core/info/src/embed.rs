@@ -178,10 +178,12 @@ pub fn c_source(doc: &[u8]) -> String {
         .iter()
         .map(|(k, v)| format!("    rl_report_info({}, {});\n", c_string(k), c_string(v)))
         .collect();
+    let game = info.as_ref().is_none_or(|i| i.identity.is_game());
     let _ = write!(
         t,
-        "__attribute__((constructor)) static void relift_register_identity(void)\n{{\n    rl_app_set_identity(relift_langs, relift_names, {}, {default}, {icon_ref});\n{report}}}\n",
-        titles.len()
+        "__attribute__((constructor)) static void relift_register_identity(void)\n{{\n    rl_app_set_identity(relift_langs, relift_names, {}, {default}, {icon_ref});\n    rl_app_set_game({});\n{report}}}\n",
+        titles.len(),
+        i32::from(game)
     );
     t.push_str(
         "int relift_info_main(void)\n{\n#ifdef _WIN32\n    _setmode(_fileno(stdout), _O_BINARY);\n#endif\n    size_t n = fwrite(&relift_info_doc, 1, sizeof relift_info_doc, stdout);\n    return (n == sizeof relift_info_doc && fflush(stdout) == 0) ? 0 : 1;\n}\n",
@@ -266,5 +268,15 @@ mod tests {
         assert!(c.contains("relift_langs = 0"));
         assert!(!c.contains("icon["));
         assert!(c.contains("rl_app_set_identity(relift_langs, relift_names, 0, 0, 0, 0)"));
+    }
+
+    #[test]
+    fn the_source_registers_whether_the_program_is_a_game() {
+        let mut i = crate::Info::new("0");
+        assert!(c_source(&i.to_bytes()).contains("rl_app_set_game(1)"));
+        i.identity.game = Some(false);
+        assert!(c_source(&i.to_bytes()).contains("rl_app_set_game(0)"));
+        i.identity.game = Some(true);
+        assert!(c_source(&i.to_bytes()).contains("rl_app_set_game(1)"));
     }
 }

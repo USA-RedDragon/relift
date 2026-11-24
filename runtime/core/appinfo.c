@@ -33,6 +33,12 @@ void rl_app_set_identity(const char *const *langs, const char *const *names, siz
     g_png_done = 0;
 }
 
+static int g_game;
+
+void rl_app_set_game(int game) { g_game = game != 0; }
+
+int rl_app_is_game(void) { return g_game; }
+
 static const char *find(const char *key)
 {
     for (size_t i = 0; i < g_count; i++)

@@ -1530,6 +1530,7 @@ fn lift_and_emit(
     if doc.identity.icon.is_none() {
         doc.identity.icon = Some(crate::icon::generated_icon(name));
     }
+    crate::kind::stamp(&mut doc)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(
         &info_c,

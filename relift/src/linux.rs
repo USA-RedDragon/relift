@@ -211,8 +211,18 @@ pub fn import(
         .and_then(|s| s.to_str())
         .unwrap_or("program")
         .to_string();
+    let entry = crate::kind::desktop_entry(path, sysroot_dir);
+    let kind = match &entry {
+        Some((file, game)) => {
+            format!(
+                "# From the desktop entry {}.\ngame = {game}\n",
+                file.display()
+            )
+        }
+        None => String::new(),
+    };
     let text = format!(
-        "# The project file, written by relift import.\n\n[game]\nguest = \"linux\"\ntitle = {}\nimport_dir = {}\nprogram = {}\nprogram_sha256 = \"{sha}\"\n",
+        "# The project file, written by relift import.\n\n[game]\nguest = \"linux\"\ntitle = {}\nimport_dir = {}\nprogram = {}\nprogram_sha256 = \"{sha}\"\n{kind}",
         quote(&title),
         quote(&out.display().to_string()),
         quote(&exec),
@@ -234,6 +244,11 @@ pub fn import(
         if wrote { "; wrote relift.toml" } else { "" },
         duration(ui.elapsed())
     )));
+    ui.summary(&Line::new().text(match &entry {
+        Some((file, true)) => format!("  kind: game (the desktop entry {} lists Game)", file.display()),
+        Some((file, false)) => format!("  kind: application (the desktop entry {} does not list Game)", file.display()),
+        None => "  kind: application (no desktop entry found; set game = true in [game] of relift.toml for a game)".to_string(),
+    }));
     Ok(())
 }
 
@@ -602,6 +617,11 @@ pub fn build(
             prog.push(path);
         }
     }
+    let mut doc = crate::info::linux_document(&p.title);
+    crate::kind::stamp(&mut doc)?;
+    let info_c = cdir.join(crate::info::C_FILE);
+    relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
+    prog.push(info_c);
     compile_layers(
         settings,
         &out,

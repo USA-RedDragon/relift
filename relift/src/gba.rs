@@ -320,7 +320,7 @@ pub fn build(
         ports.add_port(t)?;
     }
     let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
-    let doc = crate::info::handheld_document(
+    let mut doc = crate::info::handheld_document(
         &title,
         &rom,
         true,
@@ -329,6 +329,7 @@ pub fn build(
         relift_info::Mods::default(),
         None,
     )?;
+    crate::kind::stamp(&mut doc)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);

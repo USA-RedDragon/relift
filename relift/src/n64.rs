@@ -364,7 +364,8 @@ pub fn build(
         prog.push(path);
     }
     let ports = relift_input::native_ports("n64")?;
-    let doc = crate::info::n64_document(&title, &rom, game_settings.clone(), &picture, &ports);
+    let mut doc = crate::info::n64_document(&title, &rom, game_settings.clone(), &picture, &ports);
+    crate::kind::stamp(&mut doc)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);

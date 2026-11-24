@@ -140,6 +140,11 @@ pub struct Identity {
     /// applied to.
     #[serde(default)]
     pub base_mismatch: bool,
+    /// Whether the program is a game, which decides the platform's game
+    /// treatment and the runtime's pause sheet and hotkeys. Absent means a
+    /// game, which every program built before the key was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<bool>,
 }
 
 /// The language keys of [`Identity::names`] in the order a reader falls
@@ -164,6 +169,13 @@ pub const LANGUAGES: [&str; 16] = [
 ];
 
 impl Identity {
+    /// Whether the program is a game ([`Identity::game`]; a document without
+    /// the key is one).
+    #[must_use]
+    pub fn is_game(&self) -> bool {
+        self.game.unwrap_or(true)
+    }
+
     /// The title for the first of `wanted` (language keys, best first) the
     /// game has, else the default language's, else the first present in
     /// [`LANGUAGES`] order, else any. Empty titles do not count.

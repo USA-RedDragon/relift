@@ -607,6 +607,8 @@ pub struct Home {
     pub label: String,
     /// A file name in the bundle and the PNG bytes for each size.
     pub icons: Vec<(&'static str, Vec<u8>)>,
+    /// The program is a game ([`info_plist`] marks it so).
+    pub game: bool,
 }
 
 /// The home screen entry of the program `exe`, from the identity it embeds:
@@ -622,6 +624,7 @@ pub fn home(exe: &Path, seed: &str, label: &str) -> Result<Home, BoxError> {
     Ok(Home {
         label: crate::appimage::display_name(&info, label),
         icons: crate::icon::ios_pngs(info.identity.icon.as_ref(), seed),
+        game: info.identity.is_game(),
     })
 }
 
@@ -634,13 +637,24 @@ fn short_name(label: &str) -> String {
     format!("{}\u{2026}", cut.trim_end())
 }
 
-/// The bundle's Info.plist.
+/// The bundle's Info.plist. A game gets the games category
+/// (`LSApplicationCategoryType`, which Apple documents for the App Store
+/// category) and `LSSupportsGameMode` (iOS 18.6 and later; it replaces the
+/// deprecated `GCSupportsGameMode`). An application gets neither.
+/// Sources: <https://developer.apple.com/documentation/bundleresources/information-property-list/lssupportsgamemode>,
+/// <https://developer.apple.com/documentation/bundleresources/information-property-list/gcsupportsgamemode>
+/// and <https://developer.apple.com/documentation/bundleresources/information-property-list/lsapplicationcategorytype>.
 #[must_use]
-pub fn info_plist(b: &IosBuild, exe: &str, label: &str) -> String {
-    plist(&b.bundle_id, b.target, exe, label)
+pub fn info_plist(b: &IosBuild, exe: &str, label: &str, game: bool) -> String {
+    plist(&b.bundle_id, b.target, exe, label, game)
 }
 
-fn plist(bundle_id: &str, target: Target, exe: &str, label: &str) -> String {
+fn plist(bundle_id: &str, target: Target, exe: &str, label: &str, game: bool) -> String {
+    let kind = if game {
+        "  <key>LSApplicationCategoryType</key><string>public.app-category.games</string>\n  <key>LSSupportsGameMode</key><true/>\n"
+    } else {
+        ""
+    };
     let short = xml(&short_name(label));
     let label = xml(label);
     format!(
@@ -661,7 +675,7 @@ fn plist(bundle_id: &str, target: Target, exe: &str, label: &str) -> String {
   <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>
   <key>CFBundleIcons~ipad</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string><string>AppIcon76x76</string><string>AppIcon83.5x83.5</string></array></dict></dict>
   <key>DTPlatformName</key><string>{sdk}</string>
-  <key>LSRequiresIPhoneOS</key><true/>
+{kind}  <key>LSRequiresIPhoneOS</key><true/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
   <key>MinimumOSVersion</key><string>{MIN_IOS}</string>
   <key>UIApplicationSupportsIndirectInputEvents</key><true/>
@@ -734,7 +748,7 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
     executable(&dest)?;
     relift_cache::write_if_changed(
         &app.join("Info.plist"),
-        info_plist(b, exe_name, &home.label).as_bytes(),
+        info_plist(b, exe_name, &home.label, home.game).as_bytes(),
     )?;
     relift_cache::write_if_changed(&app.join("PkgInfo"), b"APPL????")?;
     if let Some(m) = data_manifest {
@@ -935,7 +949,12 @@ mod tests {
             t,
             "example-project-2",
             "A & B Long Title Here",
+            true,
         );
+        assert!(p.contains("public.app-category.games"));
+        assert!(p.contains("<key>LSSupportsGameMode</key><true/>"));
+        let plain = plist("dev.relift.x", t, "x", "X", false);
+        assert!(!plain.contains("app-category") && !plain.contains("GameMode"));
         assert!(
             p.contains("<key>CFBundleDisplayName</key><string>A &amp; B Long Title Here</string>")
         );

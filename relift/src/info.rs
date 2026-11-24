@@ -519,6 +519,21 @@ pub fn handheld_document(
     Ok(info)
 }
 
+/// The document of a Linux program build: the name and the platform; the
+/// program has no header to read more from.
+#[must_use]
+pub fn linux_document(name: &str) -> Info {
+    let mut info = Info::new(env!("CARGO_PKG_VERSION"));
+    info.identity.platform = "linux".into();
+    info.identity.names = std::iter::once(("default".to_string(), name.to_string())).collect();
+    info.identity.default_language = info.identity.first_language();
+    info.save = Save {
+        kind: "none".into(),
+        ..Save::default()
+    };
+    info
+}
+
 /// The document of a Master System, Game Gear or SG-1000 build
 /// (`platform` `sms`, `gg` or `sg1000`): the name, the platform and the input section of its ports;
 /// the cartridge has no title or save information in its header.

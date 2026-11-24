@@ -310,7 +310,7 @@ pub fn app_run(
 
 /// The `.desktop` file.
 #[must_use]
-pub fn desktop_file(slug: &str, name: &str, platform: &str) -> String {
+pub fn desktop_file(slug: &str, name: &str, platform: &str, game: bool) -> String {
     let comment = match platform {
         "switch" => "Nintendo Switch game",
         "gb" => "Game Boy game",
@@ -319,10 +319,12 @@ pub fn desktop_file(slug: &str, name: &str, platform: &str) -> String {
         "sms" => "Master System game",
         "gg" => "Game Gear game",
         "sg1000" => "SG-1000 game",
+        "linux" => "Program",
         _ => "Game",
     };
+    let categories = if game { "Game;" } else { "Utility;" };
     format!(
-        "[Desktop Entry]\nType=Application\nName={name}\nComment={comment}, built with relift\nExec={slug}\nIcon={slug}\nCategories=Game;\nTerminal=false\n"
+        "[Desktop Entry]\nType=Application\nName={name}\nComment={comment}, built with relift\nExec={slug}\nIcon={slug}\nCategories={categories}\nTerminal=false\n"
     )
 }
 
@@ -470,7 +472,7 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
     set_mode(&exe_dest, 0o755)?;
     relift_cache::write_if_changed(
         &dir.join(format!("{slug}.desktop")),
-        desktop_file(&slug, &name, platform).as_bytes(),
+        desktop_file(&slug, &name, platform, info.identity.is_game()).as_bytes(),
     )?;
     let png = crate::icon::png(info.identity.icon.as_ref(), &name);
     relift_cache::write_if_changed(&dir.join(format!("{slug}.png")), &png)?;
@@ -679,8 +681,11 @@ mod tests {
 
     #[test]
     fn the_desktop_file_names_the_icon_and_the_command() {
-        let d = desktop_file("g", "Game", "gb");
+        let d = desktop_file("g", "Game", "gb", true);
         assert!(d.contains("Exec=g\n") && d.contains("Icon=g\n") && d.contains("Name=Game\n"));
+        assert!(d.contains("Categories=Game;\n"));
+        let a = desktop_file("p", "Prog", "linux", false);
+        assert!(a.contains("Categories=Utility;\n") && !a.contains("Game"));
     }
 
     #[test]

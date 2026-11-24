@@ -105,13 +105,19 @@ fn xml(s: &str) -> String {
 /// The game's icon in the bundle's `Contents/Resources`.
 const ICON_FILE: &str = "AppIcon.icns";
 
-/// The bundle's `Info.plist`.
-pub fn info_plist(slug: &str, name: &str) -> String {
+/// The bundle's `Info.plist`. A game gets the games category
+/// (`LSApplicationCategoryType` `public.app-category.games`) and
+/// `LSSupportsGameMode`, which makes macOS turn Game Mode on when the game
+/// runs full screen (macOS 26 and later read the key; earlier macOS uses the
+/// category). An application gets neither and no category.
+/// Sources: <https://developer.apple.com/documentation/bundleresources/information-property-list/lsapplicationcategorytype>
+/// and <https://developer.apple.com/documentation/bundleresources/information-property-list/lssupportsgamemode>.
+pub fn info_plist(slug: &str, name: &str, game: bool) -> String {
     let id: String = slug
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let rows = [
+    let mut rows = vec![
         ("CFBundleName", xml(name)),
         ("CFBundleDisplayName", xml(name)),
         ("CFBundleIdentifier", format!("relift.game.{id}")),
@@ -122,16 +128,21 @@ pub fn info_plist(slug: &str, name: &str) -> String {
         ("CFBundleShortVersionString", "1.0".into()),
         ("CFBundleVersion", "1".into()),
         ("LSMinimumSystemVersion", "11.0".into()),
-        (
+    ];
+    if game {
+        rows.push((
             "LSApplicationCategoryType",
             "public.app-category.games".into(),
-        ),
-    ];
+        ));
+    }
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n",
     );
     for (k, v) in rows {
         s.push_str(&format!("\t<key>{k}</key>\n\t<string>{v}</string>\n"));
+    }
+    if game {
+        s.push_str("\t<key>LSSupportsGameMode</key>\n\t<true/>\n");
     }
     s.push_str("\t<key>NSHighResolutionCapable</key>\n\t<true/>\n</dict>\n</plist>\n");
     s
@@ -487,7 +498,7 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
     crate::appimage::set_mode(&script, 0o755)?;
     relift_cache::write_if_changed(
         &contents.join("Info.plist"),
-        info_plist(slug, name).as_bytes(),
+        info_plist(slug, name, info.identity.is_game()).as_bytes(),
     )?;
     relift_cache::write_if_changed(&contents.join("PkgInfo"), b"APPL????")?;
     relift_cache::write_if_changed(
@@ -589,12 +600,22 @@ mod tests {
 
     #[test]
     fn the_plist_escapes_and_names_the_executable() {
-        let p = info_plist("a-b", "A & B");
+        let p = info_plist("a-b", "A & B", true);
         assert!(p.contains("<string>A &amp; B</string>"));
         assert!(p.contains("<key>CFBundleExecutable</key>\n\t<string>a-b</string>"));
         assert!(p.contains("relift.game.a-b"));
         assert!(p.contains("<key>CFBundleIconFile</key>\n\t<string>AppIcon.icns</string>"));
         assert!(p.contains("<key>CFBundleDisplayName</key>\n\t<string>A &amp; B</string>"));
+        assert!(p.contains("public.app-category.games"));
+        assert!(p.contains("<key>LSSupportsGameMode</key>\n\t<true/>"));
+    }
+
+    #[test]
+    fn an_application_plist_has_no_game_category_or_game_mode() {
+        let p = info_plist("a-b", "A B", false);
+        assert!(!p.contains("app-category"));
+        assert!(!p.contains("GameMode"));
+        assert!(p.contains("<key>CFBundleExecutable</key>"));
     }
 
     #[test]

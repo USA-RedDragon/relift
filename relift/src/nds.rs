@@ -355,7 +355,8 @@ pub fn build(
     {
         ports.add_port(t)?;
     }
-    let doc = crate::info::nds_document(&title, rom, game_settings.clone(), &ports)?;
+    let mut doc = crate::info::nds_document(&title, rom, game_settings.clone(), &ports)?;
+    crate::kind::stamp(&mut doc)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);

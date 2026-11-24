@@ -51,3 +51,38 @@ switches are in [the C runtime](../../runtime/README.md).
 | `package.ios-data`              | string  | `bundle` | `RELIFT_PACKAGE_IOS_DATA`              | `--package.ios-data`              | where an iOS app finds the game data: bundle (copied into the app, sealed by its signature) or documents (added later to the app's Documents, for example with relift push)                                                                               |
 | `package.ios-profile`           | string  |          | `RELIFT_PACKAGE_IOS_PROFILE`           | `--package.ios-profile`           | the provisioning profile of the iOS app (empty: one from Xcode's profile folders that covers the bundle identifier)                                                                                                                                       |
 <!-- /docgen:configulator -->
+
+## Game or application
+
+The `game` key of the `[game]` table says whether the program is a game. It is
+`true` or `false`, and without it the guest decides:
+
+| Guest                                               | Default |
+|-----------------------------------------------------|---------|
+| Switch, Switch 2, GB, GBC, GBA, NDS, N64, SMS/GG    | game    |
+| Linux (and any PC guest)                            | not a game, unless its packaging says so |
+
+A PC program does not say what it is, so for the PC guests the default comes
+from the program's own packaging metadata where there is some, and is false
+where there is none. For the Linux guest that is a desktop entry for the
+program whose `Categories` lists `Game`, found beside the program, in the
+`share/applications` of its folder's parent or in the sysroot given to
+`relift import`; the import writes the result into `relift.toml` as `game` and
+prints which file decided. A Windows guest will read the Game Definition File
+resource of the executable, and an import from a Steam install the app type of
+its manifest, the same way. `game` in `relift.toml` always wins.
+
+What a game gets:
+
+- Android: `android:appCategory="game"` on the application, so Game Mode and
+  the Game Dashboard apply. `android:isGame` is not used; its flag is
+  deprecated since API level 26 in favor of the category.
+- macOS and iOS: the games category and `LSSupportsGameMode`.
+- Linux (AppImage): `Categories=Game;` in the desktop entry; an application
+  has `Categories=Utility;`.
+- Windows: nothing. Microsoft documents no way for an unpackaged program to
+  declare itself a game to Game Mode or the Game Bar (the Game Bar's
+  "Remember this is a game" is the user's own switch).
+- Run time: the pause sheet and its hotkeys take input only in a game
+  (`rl_app_is_game`). An application keeps all its input; its settings screen
+  is reached from outside, the app's icon menu.

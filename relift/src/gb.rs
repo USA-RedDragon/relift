@@ -564,7 +564,7 @@ pub fn build(
             .collect(),
         ..relift_info::Mods::default()
     };
-    let doc = crate::info::handheld_document(
+    let mut doc = crate::info::handheld_document(
         &name,
         &rom,
         false,
@@ -588,6 +588,7 @@ pub fn build(
             hack.as_ref(),
         )
     })?;
+    crate::kind::stamp(&mut doc)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);

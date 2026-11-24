@@ -330,7 +330,8 @@ pub fn build(
     };
     let ports = relift_input::native_ports(platform)?;
     let game_settings = crate::game_settings::read(Path::new("relift.toml"))?;
-    let doc = crate::info::sms_document(&p.title, platform, game_settings.clone(), &ports);
+    let mut doc = crate::info::sms_document(&p.title, platform, game_settings.clone(), &ports);
+    crate::kind::stamp(&mut doc)?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
