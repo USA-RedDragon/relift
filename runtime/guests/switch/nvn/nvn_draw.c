@@ -3059,6 +3059,72 @@ int nvn_separate_handles(replay *r, uint32_t s)
     return RL_OK;
 }
 
+uint32_t nvn_indirect_stride(bool indexed, int64_t stride)
+{
+    return stride ? (uint32_t)stride : indexed ? 20u : 16u;
+}
+
+void nvn_indirect_record(const uint8_t *rec, bool indexed, nvn_indirect_draw *out)
+{
+    out->count = rl_ld32(rec, 0);
+    out->instances = rl_ld32(rec, 4);
+    out->first = rl_ld32(rec, 8);
+    out->base_vertex = indexed ? (int32_t)rl_ld32(rec, 12) : 0;
+    out->base_instance = rl_ld32(rec, indexed ? 16 : 12);
+}
+
+/**
+ * @brief nvnCommandBufferDrawArraysIndirect(cb, mode, indirect), DrawElementsIndirect(cb, mode, type, index, indirect),
+ * MultiDrawArraysIndirectCount(cb, mode, indirect, parameter, max, stride) and MultiDrawElementsIndirectCount(cb, mode,
+ * type, index, indirect, parameter, max, stride). The records at the GPU address indirect are the GL indirect commands
+ * NVN takes (NVNdrawArraysIndirectData: count, instance count, first, base instance; NVNdrawElementsIndirectData: count,
+ * instance count, first index, base vertex, base instance), stride bytes apart (0: packed, 16 or 20 bytes); the multi
+ * forms draw the smaller of max and the u32 at parameter. The GPU reads them when the draw runs, after the work before
+ * it (which may write them), so the replay submits and waits for that work first, then draws each record as the direct
+ * draw with the same values: first index i reads the index buffer from index + i * the index size. Records or a count
+ * outside one memory pool stop, naming what holds the address.
+ */
+static int draw_indirect(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t index, uint64_t indirect,
+                         uint64_t count_addr, uint32_t max, uint64_t stride_in)
+{
+    nvn_gfx *st = r->st;
+    uint32_t stride = nvn_indirect_stride(indexed, (int64_t)stride_in);
+    uint32_t size = indexed ? 20u : 16u;
+    if (!nvn_vk_flush(r))
+        return nvn_vk_stop(r, "the host device failed a submit");
+    uint32_t n = max;
+    if (count_addr) {
+        if (!nvn_gpu_mapped(count_addr, 4)) {
+            char where[512];
+            nvn_gpu_describe(count_addr, where, sizeof where);
+            return nvn_vk_stop(r, "an indirect draw's count at 0x%llx is in no pool: %s",
+                               (unsigned long long)count_addr, where);
+        }
+        uint32_t c = rl_ld32(r->mem + nvn_gpu_guest(count_addr), 0);
+        n = c < max ? c : max;
+    }
+    if (n && !nvn_gpu_mapped(indirect, (uint64_t)(n - 1) * stride + size)) {
+        char where[512];
+        nvn_gpu_describe(indirect, where, sizeof where);
+        return nvn_vk_stop(r, "an indirect draw's %u records of %u bytes at 0x%llx are in no one pool: %s", n, stride,
+                           (unsigned long long)indirect, where);
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        nvn_indirect_draw rec;
+        nvn_indirect_record(r->mem + nvn_gpu_guest(indirect + (uint64_t)i * stride), indexed, &rec);
+        if (!rec.instances || !rec.count)
+            continue;
+        st->inst_base = rec.base_instance;
+        st->inst_count = rec.instances;
+        int rc = indexed ? draw(r, mode, true, itype, index + ((uint64_t)rec.first << (itype > 2 ? 2 : itype)),
+                                rec.base_vertex, 0, rec.count)
+                         : draw(r, mode, false, 0, 0, 0, rec.first, rec.count);
+        if (rc != RL_OK)
+            return rc;
+    }
+    return RL_OK;
+}
+
 /**
  * @brief nvnCommandBufferSetDepthBounds(NVNcommandBuffer *, NVNboolean enable, float n, float f): with the test on, a
  * fragment whose depth target already holds a value outside [n, f] is discarded, the test Vulkan's depth bounds test
@@ -3383,6 +3449,15 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         st->inst_base = 0;
         st->inst_count = 1;
         return draw(r, (uint32_t)e->x[1], true, (uint32_t)e->x[2], e->x[4], (int32_t)e->x[5], 0, (uint32_t)e->x[3]);
+    case NVN_CMD_DRAW_ARRAYS_INDIRECT:
+        return draw_indirect(r, (uint32_t)e->x[1], false, 0, 0, e->x[2], 0, 1, 0);
+    case NVN_CMD_DRAW_ELEMENTS_INDIRECT:
+        return draw_indirect(r, (uint32_t)e->x[1], true, (uint32_t)e->x[2], e->x[3], e->x[4], 0, 1, 0);
+    case NVN_CMD_MULTI_DRAW_ARRAYS_INDIRECT_COUNT:
+        return draw_indirect(r, (uint32_t)e->x[1], false, 0, 0, e->x[2], e->x[3], (uint32_t)e->x[4], e->x[5]);
+    case NVN_CMD_MULTI_DRAW_ELEMENTS_INDIRECT_COUNT:
+        return draw_indirect(r, (uint32_t)e->x[1], true, (uint32_t)e->x[2], e->x[3], e->x[4], e->x[5],
+                             (uint32_t)e->x[6], e->x[7]);
     case NVN_CMD_DRAW_ELEMENTS_INSTANCED:
         st->inst_base = (uint32_t)e->x[6];
         st->inst_count = (uint32_t)e->x[7];

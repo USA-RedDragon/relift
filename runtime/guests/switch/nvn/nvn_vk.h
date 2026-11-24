@@ -1071,6 +1071,15 @@ void nvn_dlss_slot(uint32_t slot);
  * a draw has run on stops, since the host device does not count.
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
+/** @brief One indirect draw record: the GL indirect command NVN reads. */
+typedef struct nvn_indirect_draw {
+    uint32_t count, instances, first, base_instance;
+    int32_t base_vertex;
+} nvn_indirect_draw;
+/** @brief The bytes between indirect draw records: stride, or the packed record size (20 indexed, 16 not) for 0. */
+uint32_t nvn_indirect_stride(bool indexed, int64_t stride);
+/** @brief Reads the indirect draw record at rec (indexed: the elements form with a base vertex). */
+void nvn_indirect_record(const uint8_t *rec, bool indexed, nvn_indirect_draw *out);
 /** @brief Runs one recorded command of r's command set on the host device, as a submit replays it. */
 int nvn_vk_cmd(replay *r, const nvn_cmd *e);
 /** @brief What nvn_draw_cmd returns for a command it does not run; distinct from RL_OK and RL_PENDING. */

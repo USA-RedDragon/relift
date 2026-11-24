@@ -492,6 +492,34 @@ TEST(nvn_command_buffer_records_and_submits)
     CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RL_PENDING);
 }
 
+TEST(nvn_indirect_draws_are_recorded_with_their_arguments)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint64_t cb = heap + 0x400;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferInitialize, cb, heap, 0, 0), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferAddCommandMemory, cb, heap, 0, 0x4000), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferBeginRecording, cb, 0, 0, 0), RET);
+    c->x[4] = 0x5000;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferDrawElementsIndirect, cb, 4, 2, 0x4000), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferDrawArraysIndirect, cb, 4, 0x6000, 0), RET);
+    c->x[4] = 8;
+    c->x[5] = 32;
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferMultiDrawArraysIndirectCount, cb, 4, 0x6000, 0x7000), RET);
+    CHECK_EQ(call(c, nvnh_nvnCommandBufferEndRecording, cb, 0, 0, 0), RET);
+    const nvn_cmdset *s = nvn_cmdset_of(c->x[0]);
+    CHECK(s != NULL);
+    CHECK_EQ(s->n, 3);
+    CHECK_EQ(s->cmds[0].op, NVN_CMD_DRAW_ELEMENTS_INDIRECT);
+    CHECK_EQ(s->cmds[0].x[2], 2);
+    CHECK_EQ(s->cmds[0].x[4], 0x5000);
+    CHECK_EQ(s->cmds[1].op, NVN_CMD_DRAW_ARRAYS_INDIRECT);
+    CHECK_EQ(s->cmds[1].x[2], 0x6000);
+    CHECK_EQ(s->cmds[2].op, NVN_CMD_MULTI_DRAW_ARRAYS_INDIRECT_COUNT);
+    CHECK_EQ(s->cmds[2].x[4], 8);
+    CHECK_EQ(s->cmds[2].x[5], 32);
+}
+
 TEST(nvn_command_buffer_memory_used_follows_the_recording)
 {
     rl_ctx *c = t_boot(NULL);

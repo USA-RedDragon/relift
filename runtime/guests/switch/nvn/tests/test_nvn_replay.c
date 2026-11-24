@@ -55,6 +55,27 @@ TEST(nvn_replay_an_unhandled_command_is_not_a_raised_stop)
     CHECK(rc != RL_OK);
 }
 
+TEST(nvn_indirect_draw_records_read_as_the_gl_commands)
+{
+    uint8_t rec[20];
+    const uint32_t w[5] = { 36, 2, 100, (uint32_t)-4, 7 };
+    memcpy(rec, w, sizeof w);
+    nvn_indirect_draw d;
+    nvn_indirect_record(rec, true, &d);
+    CHECK_EQ(d.count, 36u);
+    CHECK_EQ(d.instances, 2u);
+    CHECK_EQ(d.first, 100u);
+    CHECK_EQ(d.base_vertex, -4);
+    CHECK_EQ(d.base_instance, 7u);
+    nvn_indirect_record(rec, false, &d);
+    CHECK_EQ(d.first, 100u);
+    CHECK_EQ(d.base_vertex, 0);
+    CHECK_EQ(d.base_instance, (uint32_t)-4);
+    CHECK_EQ(nvn_indirect_stride(true, 0), 20u);
+    CHECK_EQ(nvn_indirect_stride(false, 0), 16u);
+    CHECK_EQ(nvn_indirect_stride(false, 32), 32u);
+}
+
 TEST(nvn_replay_depth_bounds_are_kept_in_the_state)
 {
     nvn_gfx st;
