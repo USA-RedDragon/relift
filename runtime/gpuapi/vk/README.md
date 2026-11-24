@@ -432,9 +432,10 @@ is shown at the next vsync of the vi timeline (`vi_vsync_after`, the one the
 display's vsync event fires on) after the frame before it, and acquire hands
 an image back only once the frame presented after it is shown. A game that
 picks its mode from the list (The Forge prefers immediate when vsync is off)
-gets FIFO, as on the console. The turn starts half a frame after the last
-one, so a grid the host display steered later by a few microseconds since
-then never gives two frames the same vsync.
+gets FIFO, as on the console. The turn is counted in vsync numbers, the
+console's rule (`vi_clock_turn`): the first vsync after the present, and a
+higher number than the frame before it got, so steering the grid toward the
+host display never gives two frames one vsync.
 
 When the guest's device is the core's (see "One host device with the core")
 and the window has the core presenter (`rl_vk_surface_provider.presenter`),

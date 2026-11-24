@@ -389,6 +389,8 @@ uint64_t vi_vsync_tick(int64_t t);
  * (rl_am_set_operation_mode queues the change messages only once, however long the step holds).
  */
 void vi_script_frame(uint64_t n);
+/** @brief vi_clock_turn on the vsync timeline: the time a FIFO frame queued at now is shown (*last as there). */
+int64_t vi_vsync_turn(int64_t now, int64_t *last);
 /** @brief The vi vsync grid and its lock to the host display (vi_clock.c). */
 typedef struct vi_clock {
     /** @brief A vsync of the grid; the others are VI_VSYNC_NS apart. */
@@ -417,6 +419,14 @@ int64_t vi_clock_after(const vi_clock *c, int64_t t);
  * Steering moves the grid but not its numbering.
  */
 int64_t vi_clock_index(const vi_clock *c, int64_t t);
+/**
+ * @brief The console's FIFO rule: the number of the vsync a frame queued at now is shown at, given the number the
+ * previous frame got (*last, -1 for none; set to the result). It is the first vsync after now, and never one at or
+ * before the previous frame's, so one frame shows per vsync whatever the grid's steering did in between.
+ */
+int64_t vi_clock_turn(const vi_clock *c, int64_t now, int64_t *last);
+/** @brief The time of vsync number k on the grid as it is now. */
+int64_t vi_clock_at(const vi_clock *c, int64_t k);
 /** @brief Takes a time the host showed a present; returns how far the grid moved (ns). */
 int64_t vi_clock_flip(vi_clock *c, int64_t t);
 /** @brief Whether the grid follows the host now. */

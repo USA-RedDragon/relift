@@ -57,6 +57,17 @@ static int64_t wrap(int64_t d)
     return d;
 }
 
+int64_t vi_clock_at(const vi_clock *c, int64_t k) { return c->epoch + k * VI_VSYNC_NS; }
+
+int64_t vi_clock_turn(const vi_clock *c, int64_t now, int64_t *last)
+{
+    int64_t k = vi_clock_index(c, vi_clock_after(c, now));
+    if (*last >= 0 && k <= *last)
+        k = *last + 1;
+    *last = k;
+    return k;
+}
+
 int64_t vi_clock_flip(vi_clock *c, int64_t t)
 {
     c->flips++;

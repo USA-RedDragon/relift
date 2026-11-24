@@ -89,6 +89,8 @@ typedef struct vkf_swap {
     uint32_t host_idx[SWAP_MAX];
     int64_t free_at[SWAP_MAX];
     int64_t last_shown;
+    /** @brief The vsync number the last frame got (vi_vsync_turn), -1 before the first. */
+    int64_t last_k;
     uint32_t shown;
     bool any_shown;
     uint32_t next;
@@ -813,6 +815,8 @@ uint64_t vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_swap *s = calloc(1, sizeof *s);
+    if (s)
+        s->last_k = -1;
     if (!s)
         abort();
     pthread_mutex_init(&s->lock, NULL);
@@ -835,6 +839,7 @@ uint64_t vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     if (old) {
         pthread_mutex_lock(&old->lock);
         s->last_shown = old->last_shown;
+        s->last_k = old->last_k;
         if (old->surface == s->surface && old->hsurf_own) {
             s->hsurf = old->hsurf;
             s->hsurf_own = true;
@@ -1285,15 +1290,13 @@ static void record(vkf_swap *s, uint32_t i, uint32_t hi)
 }
 
 /**
- * @brief Gives image i the first vi vsync after now and after the frame before it. A FIFO queue shows one frame a
- * vsync, so the turn starts half a frame after the last one: a grid the host steered later by a few microseconds
- * since then still gives the next vsync, not the same one again.
+ * @brief Gives image i its vi vsync by the console's FIFO rule (vi_vsync_turn): the first after now, and a later
+ * one than the frame before it got, counted by vsync number so the grid's steering cannot give two frames one.
  */
 static void show(vkf_swap *s, uint32_t i)
 {
     int64_t now = now_ns();
-    int64_t after = s->any_shown ? s->last_shown + VI_VSYNC_NS / 2 : 0;
-    int64_t at = vi_vsync_after(now > after ? now : after);
+    int64_t at = vi_vsync_turn(now, &s->last_k);
     if (rl_trace_on())
         rl_trace('P', (uint64_t)at, (uint64_t)s->last_shown, i | (uint64_t)s->n << 8);
     s->last_shown = at;

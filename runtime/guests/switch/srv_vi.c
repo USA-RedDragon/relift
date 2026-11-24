@@ -88,6 +88,15 @@ int64_t vi_vsync_after(int64_t t)
     return r;
 }
 
+int64_t vi_vsync_turn(int64_t now, int64_t *last)
+{
+    pthread_mutex_lock(&clock_lock);
+    clock_start();
+    int64_t at = vi_clock_at(&vsync_clock, vi_clock_turn(&vsync_clock, now, last));
+    pthread_mutex_unlock(&clock_lock);
+    return at;
+}
+
 void vi_host_flip(int64_t t)
 {
     if (hos_fixed())

@@ -1089,6 +1089,28 @@ TEST(vi_vsync_index_numbers_the_grid)
     CHECK_EQ(vi_clock_index(&c, 1000 + 7 * VI_VSYNC_NS), 7);
 }
 
+TEST(vi_fifo_turn_gives_one_frame_per_vsync_while_the_grid_is_steered)
+{
+    vi_clock c;
+    vi_clock_init(&c, 1000, false);
+    int64_t last = -1;
+    CHECK_EQ(vi_clock_turn(&c, 1000 + 10, &last), 1);
+    CHECK_EQ(vi_clock_turn(&c, 1000 + 20, &last), 2);
+    c.epoch += 30000;
+    CHECK_EQ(vi_clock_turn(&c, 1000 + 2 * VI_VSYNC_NS + 15000, &last), 3);
+    c.epoch -= 60000;
+    CHECK_EQ(vi_clock_turn(&c, 1000 + 2 * VI_VSYNC_NS + 15000, &last), 4);
+    CHECK_EQ(vi_clock_turn(&c, 1000 + 10 * VI_VSYNC_NS + 5, &last), 11);
+    CHECK_EQ(vi_clock_at(&c, 11), c.epoch + 11 * VI_VSYNC_NS);
+    int64_t prev = -1;
+    for (int n = 0; n < 200; n++) {
+        c.epoch += n % 3 == 0 ? 50000 : -20000;
+        int64_t k = vi_clock_turn(&c, vi_clock_at(&c, last) - 1000, &last);
+        CHECK_EQ(k, prev < 0 ? 12 : prev + 1);
+        prev = k;
+    }
+}
+
 TEST(vi_scaling_and_memory)
 {
     fx f;
