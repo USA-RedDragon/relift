@@ -236,6 +236,11 @@ static inline uint64_t rl_ldar(const uint8_t *mem, uint64_t a, unsigned size)
     }
 }
 
+#ifdef RL_LIFTED_RCPC
+/** @brief Marks lifted code built with +rcpc, for the host's start-up check of the CPU (a weak definition in every unit). */
+__attribute__((weak, visibility("default"))) const int rl_lifted_rcpc = 1;
+#endif
+
 /**
  * @brief LDAPR/LDAPRB/LDAPRH/LDAPUR: RCpc acquire load of size bytes (1, 2, 4, 8) at a naturally aligned address.
  *

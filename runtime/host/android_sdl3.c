@@ -27,6 +27,8 @@
 #define LOG_TAG "relift"
 #define LINE_MAX_BYTES 1024
 
+extern const int rl_lifted_rcpc __attribute__((weak));
+
 static int g_pipe[2] = {-1, -1};
 
 static void *pump(void *arg)
@@ -148,10 +150,16 @@ static void init_once(void)
 void rl_android_init(void)
 {
 #if defined(__aarch64__)
-    /* The lifted code is compiled for armv8-a+rcpc (guest LDAPR becomes the host's LDAPR). */
-    if (!(getauxval(AT_HWCAP) & (1UL << 15))) { /* HWCAP_LRCPC */
-        __android_log_print(ANDROID_LOG_FATAL, LOG_TAG, "this CPU lacks FEAT_LRCPC (ARMv8.3 RCpc loads), which the game's code needs");
-        exit(1);
+    /* Lifted code built with +rcpc runs guest LDAPR as the host's LDAPR, which a CPU without
+     * FEAT_LRCPC cannot execute; a build with RELIFT_RCPC=0 keeps LDAR. */
+    if (&rl_lifted_rcpc != NULL) {
+        if (!(getauxval(AT_HWCAP) & (1UL << 15))) { /* HWCAP_LRCPC */
+            __android_log_print(ANDROID_LOG_FATAL, LOG_TAG, "this CPU lacks FEAT_LRCPC and the game's code was built for it: rebuild with RELIFT_RCPC=0");
+            exit(1);
+        }
+        __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "guest LDAPR runs as the host's LDAPR (FEAT_LRCPC present)");
+    } else {
+        __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "guest LDAPR runs as LDAR (built with RELIFT_RCPC=0)");
     }
 #endif
     static pthread_once_t once = PTHREAD_ONCE_INIT;

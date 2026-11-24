@@ -1160,13 +1160,18 @@ pub(crate) const RELEASE_LIFTED_OPT: &str = "-O2";
 /// to seven times more on Cortex cores. It adds only that one feature.
 const RCPC_ARCH: &str = "-march=armv8-a+rcpc";
 
-/// The RCpc flag for an arm64 cross target, which has a fixed minimum:
-/// Android needs a CPU with FEAT_LRCPC (the runtime checks at start) and iOS
-/// devices from the A12 on have it. `RELIFT_RCPC=0` leaves it off, to
-/// compare builds.
-fn rcpc_arch(target: &str) -> Option<&'static str> {
+/// The compile flags of RCpc lifted code for an arm64 target, which has a
+/// fixed minimum: Android needs a CPU with FEAT_LRCPC (the runtime checks at
+/// start, through the `rl_lifted_rcpc` marker the flags define) and iOS
+/// devices from the A12 on have it. `RELIFT_RCPC=0` leaves it off, so guest
+/// LDAPR stays LDAR, to compare builds.
+fn rcpc_flags(target: &str) -> Vec<String> {
     let off = std::env::var("RELIFT_RCPC").is_ok_and(|v| v == "0");
-    (target.contains("arm64") && !off).then_some(RCPC_ARCH)
+    if target.contains("arm64") && !off {
+        vec![RCPC_ARCH.into(), "-DRL_LIFTED_RCPC=1".into()]
+    } else {
+        Vec::new()
+    }
 }
 
 /// Whether a native arm64 build targets a host with FEAT_LRCPC: every Apple
@@ -1926,11 +1931,11 @@ pub(crate) fn build_project(
         None => release_compiler(settings)?,
     };
     let arch: Vec<String> = if let Some(c) = &cross {
-        rcpc_arch(c.name()).map(String::from).into_iter().collect()
+        rcpc_flags(c.name())
     } else if cfg!(target_arch = "x86_64") {
         vec!["-mcx16".into()]
     } else if cfg!(target_arch = "aarch64") && host_rcpc() {
-        vec![RCPC_ARCH.into()]
+        rcpc_flags("arm64")
     } else {
         Vec::new()
     };
