@@ -1088,3 +1088,103 @@ fn debug_info_validates_and_keeps_outputs() {
     }
     assert!(checked > 50, "{checked} programs");
 }
+
+/// A hand-built SASS instruction: opcode, form and fields `(low bit,
+/// length, value)` over a word with no predicate guard and no barriers.
+fn sass(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
+    let mut w: u128 =
+        u128::from(op) | (u128::from(form) << 9) | (7u128 << 12) | (7u128 << 110) | (7u128 << 113);
+    for &(lo, len, v) in fields {
+        let m = ((1u128 << len) - 1) << lo;
+        w = (w & !m) | ((u128::from(v) << lo) & m);
+    }
+    w.to_le_bytes()
+}
+
+/// A compute program that loads a word from the 64-bit address `addr`
+/// held in R2:R3 (`MOV R2`, `MOV R3`, `LDG.E R4, [R2.64]`): an address no
+/// storage buffer route proves, so it goes to the device as it is.
+fn raw_load(addr: u64) -> relift_gpu_nv::program::Program {
+    let mov = |d: u64, v: u64| sass(0x002, 4, &[(16, 8, d), (32, 32, v), (72, 4, 0xf)]);
+    let ldg = sass(
+        0x181,
+        1,
+        &[(16, 8, 4), (24, 8, 2), (72, 1, 1), (73, 3, 4), (81, 3, 7)],
+    );
+    let mut b: Vec<u8> = [mov(2, addr & 0xffff_ffff), mov(3, addr >> 32), ldg]
+        .iter()
+        .flatten()
+        .copied()
+        .collect();
+    b.extend(sass(0x14d, 4, &[(87, 3, 7)]));
+    b.extend(sass(0x147, 4, &[(34, 48, 0xffff_ffff_fffc), (87, 3, 7)]));
+    relift_gpu_sm86::program::parse(&b)
+}
+
+/// Trace mode's `miss` covers compute programs, whose global accesses
+/// take the raw device address without a pool search: a load from an
+/// address in no pool (the interpreter's base table, which the pool table
+/// leaves out) records the address at its instruction, one from a pool
+/// (the input region) records nothing, and the loaded value is the same
+/// as without the trace.
+#[test]
+fn trace_miss_records_compute_loads_outside_every_pool() {
+    use relift_gpu_nv::translate::TRACE_MISS;
+    let host = unmirrored("nvidia");
+    let o = Options {
+        host: host.clone(),
+        trace: Some(Trace::parse("miss").unwrap()),
+        ..Options::default()
+    };
+    let run = |addr: u64| {
+        let s = translate_with(&raw_load(addr), &o).unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            s.interface.trace_words > 0,
+            "the load at {addr:#x} is checked"
+        );
+        let m = Module::parse(&s.spirv);
+        let d = behaviors(&m, &host)[0];
+        exec_traced(
+            &m,
+            d,
+            false,
+            &[0x1111_1111, 0, 0, 0],
+            0,
+            s.interface.trace_words,
+        )
+        .1
+    };
+    let inside = run(IN);
+    assert!(
+        inside.iter().all(|&b| b == 0),
+        "a load from a pool is no miss"
+    );
+    let t = run(BASE_TABLE + 0x10);
+    let ldg = slot(&t, 2);
+    assert_eq!(ldg[0], 1, "one hit at the LDG: {ldg:08x?}");
+    assert_eq!(ldg[2], 0x20, "the LDG's PC");
+    assert_eq!(ldg[3], TRACE_MISS, "a miss record");
+    assert_eq!(ldg[4], 0x10, "the address's low word");
+    assert_eq!(&ldg[8..10], &[TRACE_MISS + 1, 4], "the address's high word");
+    for k in [0, 1] {
+        assert_eq!(slot(&t, k)[0], 0, "the MOVs record nothing");
+    }
+}
+
+/// A compute load through a storage buffer route (an address a c\[0\]
+/// base proves) is not checked: the route's slot holds it.
+#[test]
+fn trace_miss_leaves_routed_compute_loads_alone() {
+    let f = file::load("fadd");
+    let p = relift_gpu_sm86::program::parse(&f.variants[0].code);
+    let o = Options {
+        host: unmirrored("nvidia"),
+        trace: Some(Trace::parse("miss").unwrap()),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &o).unwrap();
+    assert_eq!(
+        s.interface.trace_words, 0,
+        "routed loads and stores need no check"
+    );
+}

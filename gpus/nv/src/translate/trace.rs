@@ -348,16 +348,30 @@ impl Ctx {
         self.trace_record(cond, reg, val, &srcs);
     }
 
-    /// A global access of the address `addr` (a 64-bit value) that found no
-    /// pool or slot: a [`Trace::miss`] record.
-    pub(crate) fn trace_miss(&mut self, addr: u32) {
-        if !self.trace.on || self.collecting() || !self.trace.spec.as_ref().is_some_and(|t| t.miss)
+    /// A global access of `ty` at the address `addr` (a 64-bit value) that
+    /// goes to the device without a storage buffer route: a
+    /// [`Trace::miss`] record when the pool table holds no piece with the
+    /// address. Every such access is checked, whatever the path that
+    /// chose it: a graphics access whose slot and pool searches failed, a
+    /// compute access (no search outside trace mode), a routed access its
+    /// slot cannot take and a size the search does not handle.
+    pub(crate) fn trace_raw_access(&mut self, addr: u32, ty: u32) {
+        if !self.trace.on
+            || self.collecting()
+            || !self.host.bda
+            || !self.trace.spec.as_ref().is_some_and(|t| t.miss)
         {
             return;
         }
+        let bytes = self.access_bytes(ty);
+        if self.route.is_some() && bytes.is_power_of_two() {
+            return;
+        }
+        let (found, _, _) = self.pool_search(addr);
+        let b = self.boolt();
+        let missed = self.m.emit(op::LOGICAL_NOT, b, &[found]);
         let (lo, hi) = self.addr_words(addr);
-        let t = self.m.c_bool(true);
-        self.trace_record(t, TRACE_MISS, lo, &[(TRACE_MISS + 1, hi)]);
+        self.trace_record(missed, TRACE_MISS, lo, &[(TRACE_MISS + 1, hi)]);
     }
 
     /// The record of the instruction being translated when `cond` holds: its

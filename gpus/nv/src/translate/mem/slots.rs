@@ -421,6 +421,7 @@ impl Ctx {
         op_fn: &mut dyn FnMut(&mut Ctx, u32) -> Vec<u32>,
     ) -> Vec<u32> {
         let direct = |c: &mut Ctx, op_fn: &mut dyn FnMut(&mut Ctx, u32) -> Vec<u32>| {
+            c.trace_raw_access(addr, ty);
             let p = if write {
                 c.global_ptr_w(addr, ty)
             } else {
@@ -493,7 +494,6 @@ impl Ctx {
         keep(self, words, &mut vars);
         self.m.emit_void(op::BRANCH, &[inner]);
         self.m.emit_void(op::LABEL, &[miss]);
-        self.trace_miss(addr);
         let words = direct(self, op_fn);
         keep(self, words, &mut vars);
         self.m.emit_void(op::BRANCH, &[inner]);

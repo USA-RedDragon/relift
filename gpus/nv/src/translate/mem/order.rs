@@ -195,6 +195,7 @@ impl Ctx {
                 }
                 self.cap(CAP_INT64_ATOMICS);
                 let t = self.addr_t();
+                self.trace_raw_access(a, t);
                 let p = self.global_ptr(a, t);
                 let v = self.m.emit(spv::ATOMIC_LOAD, t, &[p, sc, relaxed]);
                 let v2 = self.m.t_vec(u, 2);

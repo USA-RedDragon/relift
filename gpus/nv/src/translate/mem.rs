@@ -580,6 +580,7 @@ fn ldgsts(c: &mut Ctx, i: &Inst) -> Res<()> {
         Some(s) => c.atomic_load_words(ga_addr, n, Order::Weak, s),
         None => {
             let ty = vec_ty(c, n);
+            c.trace_raw_access(ga_addr, ty);
             let gp = c.global_ptr(ga_addr, ty);
             let v = c.m.emit(op::LOAD, ty, &[gp, ALIGNED, 4 * n]);
             (0..n)
