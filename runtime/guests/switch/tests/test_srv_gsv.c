@@ -5,6 +5,7 @@
  * the INvDrv2User session over TIPC.
  */
 #include "am.h"
+#include "nvn/nvn_priv.h"
 #include "tc.h"
 #include "services.h"
 
@@ -748,5 +749,123 @@ TEST(gsv_video_the_submission_ready_event_is_signaled_only_while_there_is_room)
     rl_gsv_video_settle();
     CHECK_EQ(g_decodes, 17);
     CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 0, 0, 0), 0);
+    rl_vp9_stream_backend_override(NULL);
+}
+
+/** @brief Makes a 16x16 decoder pool of count RGBA images over a new native memory at addr; its first image id. */
+static uint32_t rgba_pool(rl_ctx *c, uint32_t h, uint64_t addr, uint32_t count)
+{
+    tc_req q = tc_new(111);
+    q.tipc = true;
+    tc_put32(&q, 0);
+    tc_put64(&q, 0x100000);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    uint32_t mem = tc_u32(&r, 0);
+    q = tc_new(114);
+    q.tipc = true;
+    tc_put32(&q, mem);
+    tc_put64(&q, addr);
+    tc_put64(&q, 0x100000);
+    tc_put64(&q, 0);
+    tc_put64(&q, 0);
+    tc_send(c, (tc_obj){ .handle = h }, q);
+    uint32_t pref[16] = { 0, 0, 15u | (15u << 16) };
+    q = tc_new(911);
+    q.tipc = true;
+    for (int i = 0; i < 16; i++)
+        tc_put32(&q, pref[i]);
+    tc_put32(&q, count);
+    tc_put32(&q, mem);
+    r = tc_send(c, (tc_obj){ .handle = h }, q);
+    return r.result ? 0 : tc_u32(&r, 0);
+}
+
+/** @brief A 16x16 vp9 decoder session (906, 101) on supervisor h. */
+static tc_obj video16(rl_ctx *c, uint32_t h, uint64_t heap)
+{
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, (tc_req){ .cmd = 906, .tipc = true });
+    tc_obj vs = { .handle = r.move[0] };
+    memcpy(t_mem() + heap + 0x100, "video/vp9", 10);
+    tc_req q = tc_new(101);
+    q.tipc = true;
+    q.na = 1;
+    q.a_addr[0] = heap + 0x100;
+    q.a_size[0] = 10;
+    tc_put32(&q, 16);
+    tc_put32(&q, 16);
+    tc_put32(&q, 60);
+    tc_send(c, vs, q);
+    return vs;
+}
+
+/** @brief Hands image to session vs, decodes one frame into it and takes it from GetFrame; the image id it names. */
+static uint32_t decode_into(rl_ctx *c, tc_obj vs, uint64_t heap, uint32_t image)
+{
+    tc_req q = tc_new(311);
+    q.tipc = true;
+    tc_put32(&q, image);
+    tc_send(c, vs, q);
+    submit_frames(c, vs, heap, 0, 1);
+    rl_gsv_video_settle();
+    q = tc_new(213);
+    q.tipc = true;
+    tc_res r = tc_send(c, vs, q);
+    return r.result ? 0 : tc_u32(&r, 0);
+}
+
+/** @brief Whether the 16x16 image at addr holds g_pic (I420 planes, as fake_decode gives them) as RGBA, block-linear (16-GOB blocks, one GOB across) or pitch-linear. */
+static bool holds_picture(uint64_t addr, bool block_linear)
+{
+    uint32_t (*gob)(uint32_t, uint32_t) = nvn_gob_offset_fn();
+    for (uint32_t y = 0; y < 16; y++)
+        for (uint32_t x = 0; x < 16; x++) {
+            uint8_t want[4];
+            rl_gsv_yuv_to_rgba(g_pic[y * 16 + x], g_pic[256 + (y / 2) * 8 + x / 2], g_pic[320 + (y / 2) * 8 + x / 2],
+                               false, want);
+            uint64_t at = block_linear ? (y / 8) * 512u + gob(x * 4, y % 8) : y * 64u + x * 4;
+            if (memcmp(t_mem() + addr + at, want, 4))
+                return false;
+        }
+    return true;
+}
+
+TEST(gsv_a_frame_decoded_before_the_client_says_how_it_reads_is_written_in_that_layout)
+{
+    rl_vp9_stream_backend_override(&g_fake);
+    for (uint32_t i = 0; i < 256; i++)
+        g_pic[i] = (uint8_t)(16 + (i * 37) % 200);
+    for (uint32_t i = 256; i < sizeof g_pic; i++)
+        g_pic[i] = (uint8_t)(100 + (i * 11) % 60);
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    uint64_t size = 64ull * 128, gpu_mem = heap + 0x100000, cpu_mem = heap + 0x200000;
+    uint32_t gpu_pool = rgba_pool(c, h, gpu_mem, 2), cpu_pool = rgba_pool(c, h, cpu_mem, 1);
+    CHECK(gpu_pool != 0 && cpu_pool != 0);
+    tc_obj vs = video16(c, h, heap);
+    /* The movie player's order: the frame is in the image before it asks for the image's native image. */
+    CHECK_EQ(decode_into(c, vs, heap, gpu_pool), gpu_pool);
+    static const uint8_t zero[64];
+    CHECK(!memcmp(t_mem() + gpu_mem, zero, sizeof zero));
+    tc_req q = tc_new(428);
+    q.tipc = true;
+    tc_put32(&q, gpu_pool);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
+    CHECK(holds_picture(gpu_mem, true));
+    /* The pool's other image is read the same way from its first frame on. */
+    CHECK_EQ(decode_into(c, vs, heap, gpu_pool + 1), gpu_pool + 1);
+    CHECK(holds_picture(gpu_mem + size, true));
+    /* An image read on the CPU gets the pool's pitch-linear layout once it asks for the CPU descriptor. */
+    CHECK_EQ(decode_into(c, vs, heap, cpu_pool), cpu_pool);
+    CHECK(!memcmp(t_mem() + cpu_mem, zero, sizeof zero));
+    q = tc_new(961);
+    q.tipc = true;
+    tc_put32(&q, cpu_pool);
+    CHECK_EQ(tc_send(c, (tc_obj){ .handle = h }, q).result, 0);
+    CHECK(holds_picture(cpu_mem, false));
     rl_vp9_stream_backend_override(NULL);
 }

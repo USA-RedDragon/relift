@@ -22,18 +22,37 @@
 #define ROW_ALIGN 64u
 #define PLANE_ROWS 128u
 
+/**
+ * @brief A decoder output image. Its layout follows how the client reads it: block-linear RGBA when it reads it on the
+ * GPU (it asks for the image's native image with 428 or 426, or makes a memory pool of it), the pool's pitch-linear
+ * layout when it reads it on the CPU (it asks for the CPU descriptor with 961). The client asks before it first reads
+ * an image, but it may ask after the decoder has already put a frame into it, so a frame put into an image whose
+ * reader is not known yet is held, not written, and written in the right layout once the reader is known. The images
+ * of one pool (one 911 call) are read the same way, so the first answer for one image counts for the whole pool.
+ */
 typedef struct image {
     bool used;
     uint32_t pref[16];
     uint32_t memory;
     uint64_t offset;
-    /** @brief The client reads the image on the GPU (queried with 428 or 426): it is written as block-linear RGBA. */
+    /** @brief The first image id of the pool it was made in (gsv 911). */
+    uint32_t pool;
+    /** @brief The client reads the image on the GPU: it is written as block-linear RGBA. */
     bool gpu_read;
+    /** @brief The client reads the image on the CPU (asked for its CPU descriptor, 961): it is written pitch-linear. */
+    bool cpu_read;
     uint32_t gpu_maps;
+    /** @brief The newest frame put into it while its reader was not known (NV12, held_w by held_h), else NULL. */
+    uint8_t *held;
+    uint32_t held_w, held_h;
 } image;
 
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
+/** @brief Held by every write of a frame into an image, from the choice of its layout to the last byte, before g_mu. */
+static pthread_mutex_t g_write_mu = PTHREAD_MUTEX_INITIALIZER;
 static image g_images[IMAGES_MAX];
+
+static void reader_known(uint32_t id, bool gpu, const char *how);
 
 typedef struct layout {
     uint32_t code, width, height;
@@ -109,12 +128,17 @@ rl_result rl_gsv_decoder_pool_init(rl_ipc_req *r)
     }
     for (uint32_t i = 0; i < count; i++) {
         image *m = &g_images[first + i];
+        free(m->held);
+        memset(m, 0, sizeof *m);
         m->used = true;
         memcpy(m->pref, in.pref, sizeof m->pref);
         m->memory = in.memory;
         m->offset = l.size * i;
+        m->pool = first;
     }
     pthread_mutex_unlock(&g_mu);
+    rl_log(RL_LOG_INFO, "gsv", "decoder image pool: images %u to %u, %ux%u, layout code %u, preference %08x %08x %08x %08x",
+           first, first + count - 1, l.width, l.height, l.code, in.pref[0], in.pref[1], in.pref[2], in.pref[3]);
     uint32_t *out = rl_ipc_out(r, 4);
     if (!out)
         return SF_RESULT_INVALID_HEADER;
@@ -135,6 +159,7 @@ rl_result rl_gsv_decoder_image_descriptor(rl_ipc_req *r)
     uint8_t *out = rl_ipc_out(r, 128);
     if (!out)
         return SF_RESULT_INVALID_HEADER;
+    reader_known(id, false, "GetCpuUserImageDescriptor");
     pthread_mutex_lock(&g_mu);
     image m = id < IMAGES_MAX ? g_images[id] : (image){ 0 };
     pthread_mutex_unlock(&g_mu);
@@ -575,18 +600,23 @@ static void nv12_to_rgba_tiled(const frame *f, uint32_t w, uint32_t h, uint8_t *
 /** @brief Block height, in GOBs (log2), of a decoder image the GPU reads (inferred: Eglantine writes 16-GOB blocks). */
 #define GPU_READ_BLOCK_LOG2 4u
 
-static bool put_frame(video_session *v, uint32_t image_id, const frame *f)
+/** @brief A buffer kept between frames for the block-linear conversion, and the frame size its padding was zeroed for. */
+typedef struct scratch {
+    uint8_t *p;
+    size_t cap;
+    uint32_t w, h;
+} scratch;
+
+/**
+ * @brief Writes frame f into image m (backed by mem) in the layout its reader needs: block-linear RGBA for a GPU
+ * reader, else the pool's pitch-linear layout. g_write_mu held.
+ */
+static bool write_frame(const image *m, const memory *mem, const frame *f, scratch *s)
 {
-    pthread_mutex_lock(&g_mu);
-    image m = image_id < IMAGES_MAX ? g_images[image_id] : (image){ 0 };
-    memory mem = m.used && m.memory < MEMORIES_MAX ? g_memories[m.memory] : (memory){ 0 };
-    pthread_mutex_unlock(&g_mu);
-    if (!m.used || !mem.addr || !f->data)
-        return false;
-    layout l = image_layout(m.pref);
+    layout l = image_layout(m->pref);
     uint32_t w = f->width < l.width ? f->width : l.width, h = f->height < l.height ? f->height : l.height;
-    uint64_t base = mem.addr + m.offset;
-    if (l.nv12 && !m.gpu_read) {
+    uint64_t base = mem->addr + m->offset;
+    if (l.nv12 && !m->gpu_read) {
         for (uint32_t y = 0; y < h; y++)
             rl_vm_kernel_write(&hos.vm, base + y * l.pitch, f->data + (uint64_t)y * f->width, w);
         const uint8_t *chroma = f->data + (uint64_t)f->width * f->height;
@@ -597,32 +627,123 @@ static bool put_frame(video_session *v, uint32_t image_id, const frame *f)
     uint64_t rows = l.chroma_offset / l.pitch;
     uint64_t gobs_wide = l.pitch / 64, gob_rows = (rows + 7) / 8, block_gobs = 1u << GPU_READ_BLOCK_LOG2;
     uint64_t bytes = (gob_rows + block_gobs - 1) / block_gobs * block_gobs * gobs_wide * 512;
-    uint8_t *linear = m.gpu_read ? NULL : calloc(1, l.pitch * rows), *tiled = NULL;
-    if (m.gpu_read) {
-        if (bytes > v->scratch_cap || w != v->scratch_w || h != v->scratch_h) {
-            free(v->scratch);
-            v->scratch = calloc(1, bytes);
-            v->scratch_cap = v->scratch ? bytes : 0;
-            v->scratch_w = w;
-            v->scratch_h = h;
-        }
-        tiled = v->scratch;
-    }
-    if ((!m.gpu_read && !linear) || (m.gpu_read && !tiled)) {
-        free(linear);
-        return false;
-    }
-    /* An image the GPU reads is sampled through the movie player's view of the native image, an RGBA8 texture (NVN format
-     * 0x38), so its bytes are R, G, B, A whatever the pool's layout code is. */
-    if (m.gpu_read) {
-        nv12_to_rgba_tiled(f, w, h, tiled, l.pitch, gobs_wide, block_gobs);
-        rl_vm_kernel_write(&hos.vm, base, tiled, bytes);
-    } else {
+    if (!m->gpu_read) {
+        uint8_t *linear = calloc(1, l.pitch * rows);
+        if (!linear)
+            return false;
         nv12_to_rgba(f, w, h, linear, l.pitch, l.code == 2 || l.code == 5);
         rl_vm_kernel_write(&hos.vm, base, linear, l.pitch * rows);
+        free(linear);
+        return true;
     }
-    free(linear);
+    if (bytes > s->cap || w != s->w || h != s->h) {
+        free(s->p);
+        s->p = calloc(1, bytes);
+        s->cap = s->p ? bytes : 0;
+        s->w = w;
+        s->h = h;
+    }
+    if (!s->p)
+        return false;
+    /* An image the GPU reads is sampled through the movie player's view of the native image, an RGBA8 texture (NVN format
+     * 0x38), so its bytes are R, G, B, A whatever the pool's layout code is. */
+    nv12_to_rgba_tiled(f, w, h, s->p, l.pitch, gobs_wide, block_gobs);
+    rl_vm_kernel_write(&hos.vm, base, s->p, bytes);
     return true;
+}
+
+/**
+ * @brief Puts the decoded frame f into image image_id: written at once when the image's reader is known, else held in
+ * the image (f's bytes move there) until it is (see image).
+ */
+static bool put_frame(video_session *v, uint32_t image_id, frame *f)
+{
+    pthread_mutex_lock(&g_write_mu);
+    pthread_mutex_lock(&g_mu);
+    image *im = image_id < IMAGES_MAX && g_images[image_id].used ? &g_images[image_id] : NULL;
+    memory mem = im && im->memory < MEMORIES_MAX ? g_memories[im->memory] : (memory){ 0 };
+    if (!im || !mem.addr || !f->data) {
+        pthread_mutex_unlock(&g_mu);
+        pthread_mutex_unlock(&g_write_mu);
+        return false;
+    }
+    free(im->held);
+    im->held = NULL;
+    if (!im->gpu_read && !im->cpu_read) {
+        im->held = f->data;
+        im->held_w = f->width;
+        im->held_h = f->height;
+        f->data = NULL;
+        pthread_mutex_unlock(&g_mu);
+        pthread_mutex_unlock(&g_write_mu);
+        return true;
+    }
+    image m = *im;
+    pthread_mutex_unlock(&g_mu);
+    scratch s = { v->scratch, v->scratch_cap, v->scratch_w, v->scratch_h };
+    bool ok = write_frame(&m, &mem, f, &s);
+    v->scratch = s.p;
+    v->scratch_cap = s.cap;
+    v->scratch_w = s.w;
+    v->scratch_h = s.h;
+    pthread_mutex_unlock(&g_write_mu);
+    return ok;
+}
+
+/**
+ * @brief The client showed how it reads image id (on the GPU when gpu, else on the CPU; how names the call): the image
+ * is marked, the other images of its pool whose reader is not known yet are marked the same way, and the frames held
+ * in any of them are written in that layout. Takes g_write_mu and g_mu.
+ */
+static void reader_known(uint32_t id, bool gpu, const char *how)
+{
+    struct {
+        image m;
+        memory mem;
+    } todo[IMAGES_MAX];
+    uint32_t n = 0;
+    bool first = false;
+    pthread_mutex_lock(&g_write_mu);
+    pthread_mutex_lock(&g_mu);
+    image *im = id < IMAGES_MAX && g_images[id].used ? &g_images[id] : NULL;
+    if (!im) {
+        pthread_mutex_unlock(&g_mu);
+        pthread_mutex_unlock(&g_write_mu);
+        return;
+    }
+    uint32_t pool = im->pool, memory_id = im->memory;
+    for (uint32_t i = 1; i < IMAGES_MAX; i++) {
+        image *o = &g_images[i];
+        if (!o->used || o->pool != pool || o->memory != memory_id || (i != id && (o->gpu_read || o->cpu_read)))
+            continue;
+        first |= !o->gpu_read && !o->cpu_read;
+        if (gpu)
+            o->gpu_read = true;
+        else
+            o->cpu_read = true;
+        if (!o->held)
+            continue;
+        memory mem = o->memory < MEMORIES_MAX ? g_memories[o->memory] : (memory){ 0 };
+        if (mem.addr) {
+            todo[n].m = *o;
+            todo[n++].mem = mem;
+        } else {
+            free(o->held);
+        }
+        o->held = NULL;
+    }
+    pthread_mutex_unlock(&g_mu);
+    if (first)
+        rl_log(RL_LOG_INFO, "gsv", "decoder image pool of image %u: read on the %s (%s first, for image %u); %u held frame%s written",
+               pool, gpu ? "GPU, block-linear RGBA" : "CPU, pitch-linear", how, id, n, n == 1 ? "" : "s");
+    scratch s = { 0 };
+    for (uint32_t i = 0; i < n; i++) {
+        frame f = { .width = todo[i].m.held_w, .height = todo[i].m.held_h, .data = todo[i].m.held };
+        write_frame(&todo[i].m, &todo[i].mem, &f, &s);
+        free(f.data);
+    }
+    free(s.p);
+    pthread_mutex_unlock(&g_write_mu);
 }
 
 /**
@@ -642,11 +763,12 @@ rl_result rl_gsv_native_image_query(rl_ipc_req *r)
     pthread_mutex_lock(&g_mu);
     image *m = handle < IMAGES_MAX && g_images[handle].used ? &g_images[handle] : NULL;
     memory mem = m && m->memory < MEMORIES_MAX ? g_memories[m->memory] : (memory){ 0 };
-    if (m && mem.addr) {
-        m->gpu_read = true;
-        if (map)
-            m->gpu_maps++;
-    }
+    pthread_mutex_unlock(&g_mu);
+    if (m && mem.addr)
+        reader_known(handle, true, map ? "MapNativeImage" : "QueryNativeImage");
+    pthread_mutex_lock(&g_mu);
+    if (m && mem.addr && map)
+        m->gpu_maps++;
     image copy = m ? *m : (image){ 0 };
     pthread_mutex_unlock(&g_mu);
     if (!m || !mem.addr) {
@@ -682,10 +804,10 @@ rl_result rl_gsv_native_image_query(rl_ipc_req *r)
 bool rl_gsv_native_image_region(uint32_t handle, uint64_t *addr, uint64_t *size)
 {
     bool ok = false;
+    reader_known(handle, true, "a memory pool made from it");
     pthread_mutex_lock(&g_mu);
     image *m = handle < IMAGES_MAX && g_images[handle].used ? &g_images[handle] : NULL;
     if (m && m->memory < MEMORIES_MAX && g_memories[m->memory].addr) {
-        m->gpu_read = true;
         *addr = g_memories[m->memory].addr + m->offset;
         *size = image_layout(m->pref).size;
         ok = true;
@@ -701,8 +823,10 @@ rl_result rl_gsv_decoder_image_free(rl_ipc_req *r)
     if (!rl_srv_in(r, &id, 4))
         return SF_RESULT_INVALID_HEADER;
     pthread_mutex_lock(&g_mu);
-    if (id < IMAGES_MAX)
+    if (id < IMAGES_MAX) {
+        free(g_images[id].held);
         memset(&g_images[id], 0, sizeof g_images[id]);
+    }
     pthread_mutex_unlock(&g_mu);
     return KR_SUCCESS;
 }
