@@ -19,6 +19,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #include <stdlib.h>
 
 #define RET 0x7000000ull
@@ -690,6 +692,31 @@ TEST(nvn_guest_write_watch_counts_writes_into_its_range_and_pools_over_it)
     CHECK_EQ(nvn_wwatch_hits(), 3);
     nvn_wwatch_set(0, 0);
     CHECK(!nvn_wwatch_note(heap + 0x100800, 8, "a write with no watch"));
+}
+
+/**
+ * The watch the environment names starts inside the first note (RELIFT_GUEST_WRITE_WATCH), so starting it must not
+ * wait on itself: with the variable set before any note, a note returns and a write into either of two ranges counts.
+ * Run in a child process, whose first note is this test's.
+ */
+TEST(nvn_guest_write_watch_from_the_environment_starts_inside_the_first_note)
+{
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid == 0) {
+        setenv("RELIFT_GUEST_WRITE_WATCH", "0x5000:0x10,0x9000:8", 1);
+        alarm(10);
+        bool ok = !nvn_wwatch_note(0x4000, 8, "a write before both");
+        ok &= nvn_wwatch_note(0x9004, 4, "a write into the second range");
+        ok &= nvn_wwatch_note(0x500c, 8, "a write over the end of the first");
+        ok &= nvn_wwatch_hits() == 2;
+        ok &= !nvn_wwatch_parse("0x5000");
+        _exit(ok ? 0 : 1);
+    }
+    int st = 0;
+    CHECK_EQ(waitpid(pid, &st, 0), pid);
+    CHECK(WIFEXITED(st));
+    CHECK_EQ(WEXITSTATUS(st), 0);
 }
 
 TEST(nvn_a_program_writes_guest_memory_only_when_it_stores_to_a_guest_buffer)

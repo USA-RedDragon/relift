@@ -343,11 +343,9 @@ static struct {
 } ww;
 static pthread_once_t ww_once = PTHREAD_ONCE_INIT;
 
-static void ww_init(void)
+bool nvn_wwatch_parse(const char *e)
 {
-    const char *e = getenv("RELIFT_GUEST_WRITE_WATCH");
-    if (!e || !*e)
-        return;
+    ww.n = 0;
     for (const char *at = e; *at;) {
         char *end;
         uint64_t a = strtoull(at, &end, 0), n = *end == ':' ? strtoull(end + 1, &end, 0) : 0;
@@ -355,11 +353,19 @@ static void ww_init(void)
             rl_log(RL_LOG_WARN, "nvn", "RELIFT_GUEST_WRITE_WATCH \"%s\" is not up to %u <addr>:<len>, comma separated; the "
                    "watch is off", e, WW_RANGES);
             ww.n = 0;
-            return;
+            return false;
         }
         nvn_wwatch_add(a, n);
         at = *end ? end + 1 : end;
     }
+    return ww.n != 0;
+}
+
+static void ww_init(void)
+{
+    const char *e = getenv("RELIFT_GUEST_WRITE_WATCH");
+    if (e && *e)
+        nvn_wwatch_parse(e);
 }
 
 void nvn_wwatch_set(uint64_t addr, uint64_t len)

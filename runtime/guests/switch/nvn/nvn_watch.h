@@ -80,6 +80,12 @@ void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, boo
 bool nvn_wwatch_note(uint64_t guest, uint64_t size, const char *what);
 /** @brief Watches [addr, addr + len) instead of what RELIFT_GUEST_WRITE_WATCH names (len 0: nothing), and counts anew. */
 void nvn_wwatch_set(uint64_t addr, uint64_t len);
+/**
+ * @brief Watches the ranges of a RELIFT_GUEST_WRITE_WATCH value instead of the current ones, as the first note does
+ * with the variable (it runs inside that first note, so it must not wait on the watch's own one-time start). False,
+ * with a warning and no watch, for a value that is not up to 8 comma separated <addr>:<len>.
+ */
+bool nvn_wwatch_parse(const char *value);
 /** @brief Watches [addr, addr + len) as well (up to 8 ranges in all). */
 void nvn_wwatch_add(uint64_t addr, uint64_t len);
 /** @brief How many writes met the watched range since it was set. */
