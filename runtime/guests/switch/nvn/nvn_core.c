@@ -210,7 +210,12 @@ int nvn_driver_lookup(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
     return rc;
 }
 
-/** @brief The guest address the game gets for name: the driver's own function for a kept proc, else a slot. */
+/**
+ * @brief The guest address the game gets for name: the driver's own function for a kept proc, else a slot. A name
+ * relift does not implement and the game's driver does not know (its loader, nvnBootstrapLoaderInternal, answers 0)
+ * is 0: that loader is the console's own code, so its answer is the console's. Games ask for names no NVN driver
+ * has (CUDA interop, the movie decoder's NvRm syncs). A name the driver knows but relift does not serve gets a slot that stops when called.
+ */
 static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
 {
     *addr = 0;
@@ -223,6 +228,16 @@ static int proc_addr(rl_ctx *c, uint8_t *mem, const char *name, uint64_t *addr)
             nvn_stats_lookup(name, NVN_STATS_DRIVER, UINT32_MAX);
         if (rc != RL_OK || *addr)
             return rc;
+    }
+    if (k < 0 && find_impl(name) < 0 && nvn.driver_loader) {
+        int rc = nvn_driver_lookup(c, mem, name, addr);
+        if (rc != RL_OK || !*addr) {
+            if (rc == RL_OK)
+                rl_log(RL_LOG_INFO, "nvn", "%s is not a proc of the game's driver: its address is NULL, as the "
+                       "console's loader answers", name);
+            return rc;
+        }
+        *addr = 0;
     }
     *addr = slot_of(name);
     if (*addr && nvn_stats_on()) {
