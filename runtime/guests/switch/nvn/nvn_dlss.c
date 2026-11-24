@@ -82,7 +82,6 @@ static uint64_t callback_probe(rl_ctx *c, uint32_t slot)
         (void)mem;                                                                                                     \
         return callback_probe(c, i);                                                                                   \
     }
-CALLBACK(0)
 CALLBACK(2)
 CALLBACK(3)
 CALLBACK(4)
@@ -149,6 +148,20 @@ static uint64_t callback_18(rl_ctx *c, uint8_t *mem)
         rl_log(RL_LOG_INFO, "nvn", "DLSS library loads kernel %u %s (image 0x%llx): translation %s", i, name,
                (unsigned long long)c->x[2], g_kernels[i].key);
     c->x[0] = 1;
+    return nvn_ret(c);
+}
+
+/** @brief The network the library is working on (the driver's cb+0x28: set around CreateNetwork), 0 outside one. */
+static uint64_t g_current;
+
+/**
+ * @brief Callback 0(cb, obj): the device, as the console driver gives it (sdk 0x65a000): +0x70 of obj when obj is
+ * given, else +8 of the current network (the device its builder named), else 0.
+ */
+static uint64_t callback_0(rl_ctx *c, uint8_t *mem)
+{
+    uint64_t obj = c->x[1];
+    c->x[0] = obj ? rl_ld64(mem, obj + 0x70) : g_current ? rl_ld64(mem, g_current + 8) : 0;
     return nvn_ret(c);
 }
 
@@ -438,9 +451,12 @@ uint64_t nvnh_nvnDlssNetworkInitialize(rl_ctx *c, uint8_t *mem)
         if (rc != RL_OK)
             return (uint64_t)rc;
         memset(mem + net, 0, 0x258);
+        rl_st64(mem, net + 8, rl_ld64(mem, builder));
         network_desc(mem, net, builder, opt);
         uint64_t desc = net + 0x210;
+        g_current = net;
         rc = library_call(c, mem, LIB_CREATE_NETWORK, &desc, 1, &lib_net);
+        g_current = 0;
         if (rc != RL_OK)
             return (uint64_t)rc;
         rl_st64(mem, net + 0xa0, lib_net);
