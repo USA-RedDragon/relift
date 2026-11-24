@@ -646,6 +646,11 @@ int nvn_vk_fatal(rl_ctx *c, const char *fmt, ...) __attribute__((format(printf, 
  */
 bool nvn_vk_submit(replay *r);
 /**
+ * @brief Makes the next submit wait on the device until the timeline semaphore sem reaches value, which the host
+ * signals: a self-check holds a batch to see what happens before the device runs it. Needs timeline semaphores.
+ */
+void nvn_vk_hold_next_submit(VkSemaphore sem, uint64_t value);
+/**
  * @brief Marks the batch being recorded as one whose GPU work may write guest memory (a program that stores to a
  * guest buffer, a uniform update or a texture write-back into a pool): until it finished, replay waits for it before
  * reading guest memory (nvn_lock).

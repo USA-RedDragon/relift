@@ -449,6 +449,8 @@ int nvn_counters_stamp_check(replay *r)
 
 int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
 {
+    if (!g.timeline_ok)
+        return 0;
     nvn_lock();
     staging big;
     const uint64_t bytes = 64ull << 20;
@@ -457,15 +459,25 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
         nvn_unlock();
         return 1;
     }
+    /* The batch is held on the device by a semaphore the host signals, so what happens before and after the device
+     * runs it is decided by the check, not by how fast a loaded host or device gets there. */
+    VkSemaphoreTypeCreateInfo ti = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE };
+    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &ti };
+    VkSemaphore gate = 0;
+    if (VK(vkCreateSemaphore)(g.dev, &sci, NULL, &gate) != VK_SUCCESS) {
+        nvn_vk_staging_free(&big);
+        nvn_unlock();
+        return 14;
+    }
     memset(mem + addr, 0xaa, 32);
     nvn_gfx st;
     memset(&st, 0, sizeof st);
     replay r = { .mem = mem, .st = &st };
-    uint64_t t0 = rl_guest_clock_ns();
     nvn_vk_begin(&r);
     if (nvn_counters_report(&r, 0, addr) != RL_OK)
         rc = 2;
-    for (uint32_t i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < 8; i++) {
         VK(vkCmdFillBuffer)(g.cb, big.buf, 0, bytes, i);
         nvn_vk_barrier(g.cb);
     }
@@ -474,30 +486,42 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
     if (!rc && rl_ld64(mem, addr + 8) != 0xaaaaaaaaaaaaaaaaull)
         rc = 4;
     uint32_t sub = rec;
+    nvn_vk_hold_next_submit(gate, 1);
     if (!rc && !nvn_vk_submit(&r))
         rc = 5;
-    uint64_t limit = rl_guest_clock_ns() + 5000000000ull;
+    /* Submitted, not run: no report may land while the device is held. */
+    if (!rc && (rl_ld64(mem, addr + 8) != 0xaaaaaaaaaaaaaaaaull || rl_ld64(mem, addr + 24) != 0xaaaaaaaaaaaaaaaaull))
+        rc = 6;
+    VkSemaphoreSignalInfo si = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, .semaphore = gate, .value = 1 };
+    if (!rc && VK(vkSignalSemaphore)(g.dev, &si) != VK_SUCCESS)
+        rc = 15;
+    /* Released: both land with no wait on the batch, from the reports thread. The bound only ends a hang. */
+    uint64_t limit = rl_guest_clock_ns() + 60000000000ull;
     while (!rc && __atomic_load_n((uint64_t *)(mem + addr + 24), __ATOMIC_ACQUIRE) == 0xaaaaaaaaaaaaaaaaull)
         if (rl_guest_clock_ns() > limit)
-            rc = 6;
-    uint64_t t1 = rl_guest_clock_ns();
+            rc = 16;
     if (!rc && !nvn_vk_settle())
         rc = 7;
-    uint64_t a = nvn_gpu_ns(rl_ld64(mem, addr + 8)), b = nvn_gpu_ns(rl_ld64(mem, addr + 24));
+    uint64_t ta = rl_ld64(mem, addr + 8), tb = rl_ld64(mem, addr + 24);
     if (!rc && (rl_ld64(mem, addr) != 0 || rl_ld64(mem, addr + 16) != 0))
         rc = 8;
-    else if (!rc && (a < t0 || b < a || b > t1))
+    else if (!rc && (ta == 0xaaaaaaaaaaaaaaaaull || tb <= ta))
         rc = 9;
-    else if (!rc && b - a < 100000)
-        rc = 10;
-    /* Units, not wall-clock alignment (which a loaded host shifts): with a calibrated pair the interval between the
-     * two reports is the GPU's own timestamp interval, to the timer's 52 ns tick on each end. */
-    if (!rc && g.calibrated) {
+    /* Units: the interval between the two reports, in the console's 19.2 MHz ticks, is the device's own timestamp
+     * interval (the fallback, with no calibrated pair, maps each back from the batch's end, which keeps the
+     * interval), to the rounding of each report down to a tick (52 ns) and the nanoseconds between. */
+    if (!rc) {
         double want = (double)(rps[sub].last_ts[1] - rps[sub].last_ts[0]) * g.timestamp_period_ns;
-        double got = (double)(b - a);
-        if (got - want > 200.0 || want - got > 200.0)
+        double got = (double)(nvn_gpu_ns(tb) - nvn_gpu_ns(ta));
+        if (got - want > 110.0 || want - got > 110.0)
             rc = 12;
     }
+    if (rc == 5 || rc == 6 || rc == 15) {
+        VkSemaphoreSignalInfo release = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, .semaphore = gate, .value = 1 };
+        VK(vkSignalSemaphore)(g.dev, &release);
+        nvn_vk_settle();
+    }
+    VK(vkDestroySemaphore)(g.dev, gate, NULL);
     nvn_vk_staging_free(&big);
     nvn_unlock();
     return rc;

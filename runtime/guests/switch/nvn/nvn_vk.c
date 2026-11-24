@@ -2201,6 +2201,18 @@ static uint32_t next_slot(uint32_t s)
     return next;
 }
 
+/** @brief A timeline semaphore value the next submit waits for (nvn_vk_hold_next_submit), or none. */
+static struct {
+    VkSemaphore sem;
+    uint64_t value;
+} hold;
+
+void nvn_vk_hold_next_submit(VkSemaphore sem, uint64_t value)
+{
+    hold.sem = sem;
+    hold.value = value;
+}
+
 /** @brief Ends the command buffer and submits it with the slot's fence; false (logged) when the device refuses. */
 static bool submit_recorded(replay *r)
 {
@@ -2231,6 +2243,16 @@ static bool submit_recorded(replay *r)
         si.signalSemaphoreCount = 1;
         si.pSignalSemaphores = &g.timeline;
     }
+    VkPipelineStageFlags hold_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkSemaphore hold_sem = hold.sem;
+    if (hold_sem && g.timeline_ok) {
+        tsi.waitSemaphoreValueCount = 1;
+        tsi.pWaitSemaphoreValues = &hold.value;
+        si.waitSemaphoreCount = 1;
+        si.pWaitSemaphores = &hold_sem;
+        si.pWaitDstStageMask = &hold_stage;
+    }
+    hold.sem = 0;
     int64_t t0 = now_ns();
     nvn_gpuprof_queued(g.slot);
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) == VK_SUCCESS)
