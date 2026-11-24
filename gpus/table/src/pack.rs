@@ -1,19 +1,28 @@
 //! The NVN programs a table is translated from, in a folder or in one file
 //! (the program pack of a Switch 2 game).
 //!
-//! A build keeps them as `programs/<key>.bin` with the scan's `meshes.json`
-//! beside (see [`Programs::dir`]). A package carries them as one pack file
-//! ([`PACK`]), all little-endian:
+//! A build keeps them as `programs/<key>.bin` with the scan's JSON files
+//! beside (see [`Programs::dir`] and [`SECTIONS`]). A package carries them
+//! as one pack file ([`PACK`]), all little-endian:
 //!
-//! * the magic `RLSPP001` (8 bytes), the program count and the length of
-//!   the pipelines JSON in bytes (u32 each);
+//! * the magic `RLSPP003` (8 bytes), the program count and the section
+//!   count (u32 each);
+//! * per section: the length of its name, the name (UTF-8), the length of
+//!   its bytes (u32 each but the name) and its bytes; a reader keeps the
+//!   sections it does not know and gives them by name ([`Programs::section`]),
+//!   so a new section needs no new version;
 //! * per program, sorted by key: the key (32 bytes, the SHA-256 of the
 //!   program's bytes), the offset of its zstd frame from the start of the
 //!   file (u64), the frame's length and the program's length in bytes (u32
 //!   each);
-//! * the pipelines JSON (the scan's `meshes.json`);
 //! * the frames, each at a 4-byte boundary.
+//!
+//! Older packs still read: `RLSPP001` (a 16-byte head: magic, program count,
+//! pipelines length; the entries, then the pipelines JSON) and `RLSPP002`
+//! (a 20-byte head that adds the kernels length; the kernels JSON follows
+//! the pipelines JSON).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::{BoxError, hex, hex_key, sha256};
@@ -24,8 +33,20 @@ pub const PACK: &str = "programs.rlsp";
 /// The scan's file of pipelines, in a build's shader folder.
 pub const MESHES: &str = "meshes.json";
 
-const MAGIC: &[u8; 8] = b"RLSPP001";
-const HEAD: usize = 16;
+/// The scan's file of CUDA kernels (name, program key and static shared
+/// bytes of each), in a build's shader folder.
+pub const KERNELS: &str = "kernels.json";
+
+/// The scan's file of transform feedback layouts (each program's GLSLC
+/// transform feedback section), in a build's shader folder.
+pub const XFB: &str = "xfb.json";
+
+/// The sections a build's folder holds as files: section name, file name.
+pub const SECTIONS: [(&str, &str); 3] = [("meshes", MESHES), ("kernels", KERNELS), ("xfb", XFB)];
+
+const MAGIC: &[u8; 8] = b"RLSPP003";
+const MAGIC_2: &[u8; 8] = b"RLSPP002";
+const MAGIC_1: &[u8; 8] = b"RLSPP001";
 const ENTRY: usize = 48;
 
 /// Where the programs are.
@@ -40,7 +61,7 @@ enum Store {
 /// The programs a table is translated from, and their pipelines.
 pub struct Programs {
     keys: Vec<[u8; 32]>,
-    meshes: Vec<u8>,
+    sections: BTreeMap<String, Vec<u8>>,
     store: Store,
 }
 
@@ -50,7 +71,7 @@ fn u32_at(b: &[u8], at: usize) -> Option<usize> {
 
 impl Programs {
     /// The programs of a build's shader folder `dir`: `dir`/programs and
-    /// `dir`/meshes.json, either of which may be missing.
+    /// the files of [`SECTIONS`], any of which may be missing.
     ///
     /// # Errors
     ///
@@ -65,9 +86,15 @@ impl Programs {
             }
         }
         keys.sort_unstable();
+        let mut sections = BTreeMap::new();
+        for (name, file) in SECTIONS {
+            if let Ok(b) = std::fs::read(dir.join(file)) {
+                sections.insert(name.to_owned(), b);
+            }
+        }
         Ok(Programs {
             keys,
-            meshes: std::fs::read(dir.join(MESHES)).unwrap_or_default(),
+            sections,
             store: Store::Dir(dir.join("programs")),
         })
     }
@@ -77,7 +104,7 @@ impl Programs {
     pub fn none() -> Programs {
         Programs {
             keys: Vec::new(),
-            meshes: Vec::new(),
+            sections: BTreeMap::new(),
             store: Store::Pack(Vec::new(), Vec::new()),
         }
     }
@@ -88,26 +115,57 @@ impl Programs {
     ///
     /// The bytes are not a pack, or an entry points past them.
     pub fn pack(bytes: Vec<u8>) -> Result<Programs, BoxError> {
-        if bytes.get(..8) != Some(&MAGIC[..]) {
-            return Err("not a program pack (no RLSPP001 magic)".into());
-        }
         let short = || -> BoxError { "the program pack is cut short".into() };
+        let magic = bytes.get(..8).ok_or_else(short)?;
         let n = u32_at(&bytes, 8).ok_or_else(short)?;
-        let meshes_len = u32_at(&bytes, 12).ok_or_else(short)?;
-        let meshes_at = HEAD + ENTRY * n;
-        let meshes = bytes
-            .get(meshes_at..meshes_at + meshes_len)
-            .ok_or_else(short)?
-            .to_vec();
+        let mut sections = BTreeMap::new();
+        let mut take = |name: &str, at: usize, len: usize| -> Result<(), BoxError> {
+            let b = bytes
+                .get(at..at.checked_add(len).ok_or_else(short)?)
+                .ok_or_else(short)?;
+            sections.insert(name.to_owned(), b.to_vec());
+            Ok(())
+        };
+        let entries = if magic == MAGIC {
+            let count = u32_at(&bytes, 12).ok_or_else(short)?;
+            let mut p = 16;
+            for _ in 0..count {
+                let nlen = u32_at(&bytes, p).ok_or_else(short)?;
+                let name = bytes.get(p + 4..p + 4 + nlen).ok_or_else(short)?;
+                let name =
+                    std::str::from_utf8(name).map_err(|_| "a pack section name is not UTF-8")?;
+                let len = u32_at(&bytes, p + 4 + nlen).ok_or_else(short)?;
+                take(name, p + 8 + nlen, len)?;
+                p += 8 + nlen + len;
+            }
+            p
+        } else if magic == MAGIC_2 || magic == MAGIC_1 {
+            let head = if magic == MAGIC_2 { 20 } else { 16 };
+            let meshes = u32_at(&bytes, 12).ok_or_else(short)?;
+            let kernels = if magic == MAGIC_2 {
+                u32_at(&bytes, 16).ok_or_else(short)?
+            } else {
+                0
+            };
+            let at = head + ENTRY * n;
+            take("meshes", at, meshes)?;
+            if magic == MAGIC_2 {
+                take("kernels", at + meshes, kernels)?;
+            }
+            head
+        } else {
+            return Err("not a program pack (no RLSPP003, RLSPP002 or RLSPP001 magic)".into());
+        };
         let mut keys = Vec::with_capacity(n);
         let mut at = Vec::with_capacity(n);
         for i in 0..n {
-            let e = HEAD + ENTRY * i;
-            let key: [u8; 32] = bytes[e..e + 32].try_into().expect("32 bytes");
-            let off = u64::from_le_bytes(bytes[e + 32..e + 40].try_into().expect("8 bytes"));
+            let e = entries + ENTRY * i;
+            let entry = bytes.get(e..e + ENTRY).ok_or_else(short)?;
+            let key: [u8; 32] = entry[..32].try_into().expect("32 bytes");
+            let off = u64::from_le_bytes(entry[32..40].try_into().expect("8 bytes"));
             let off = usize::try_from(off).map_err(|_| short())?;
-            let frame = u32_at(&bytes, e + 40).ok_or_else(short)?;
-            let len = u32_at(&bytes, e + 44).ok_or_else(short)?;
+            let frame = u32_at(entry, 40).ok_or_else(short)?;
+            let len = u32_at(entry, 44).ok_or_else(short)?;
             if off.checked_add(frame).is_none_or(|end| end > bytes.len()) {
                 return Err(short());
             }
@@ -119,7 +177,7 @@ impl Programs {
         }
         Ok(Programs {
             keys,
-            meshes,
+            sections,
             store: Store::Pack(bytes, at),
         })
     }
@@ -143,10 +201,29 @@ impl Programs {
         &self.keys
     }
 
+    /// The bytes of section `name`, empty when there is none.
+    #[must_use]
+    pub fn section(&self, name: &str) -> &[u8] {
+        self.sections.get(name).map_or(&[], Vec::as_slice)
+    }
+
     /// The scan's pipelines JSON (`meshes.json`), empty when there is none.
     #[must_use]
     pub fn meshes(&self) -> &[u8] {
-        &self.meshes
+        self.section("meshes")
+    }
+
+    /// The scan's kernels JSON (`kernels.json`), empty when there is none.
+    #[must_use]
+    pub fn kernels(&self) -> &[u8] {
+        self.section("kernels")
+    }
+
+    /// The scan's transform feedback JSON (`xfb.json`), empty when there is
+    /// none.
+    #[must_use]
+    pub fn xfb(&self) -> &[u8] {
+        self.section("xfb")
     }
 
     /// The bytes of program `key`, or none when it is not here or its
@@ -189,8 +266,14 @@ impl Programs {
         let mut out = Vec::new();
         out.extend(MAGIC);
         out.extend((frames.len() as u32).to_le_bytes());
-        out.extend((self.meshes.len() as u32).to_le_bytes());
-        let mut at = (HEAD + ENTRY * frames.len() + self.meshes.len()).next_multiple_of(4) as u64;
+        out.extend((self.sections.len() as u32).to_le_bytes());
+        for (name, b) in &self.sections {
+            out.extend((name.len() as u32).to_le_bytes());
+            out.extend(name.as_bytes());
+            out.extend((b.len() as u32).to_le_bytes());
+            out.extend(b);
+        }
+        let mut at = (out.len() + ENTRY * frames.len()).next_multiple_of(4) as u64;
         for (k, f, len) in &frames {
             out.extend(k);
             out.extend(at.to_le_bytes());
@@ -198,7 +281,6 @@ impl Programs {
             out.extend((*len as u32).to_le_bytes());
             at += (f.len() as u64).next_multiple_of(4);
         }
-        out.extend(&self.meshes);
         for (_, f, _) in &frames {
             out.resize(out.len().next_multiple_of(4), 0);
             out.extend(f);
@@ -225,11 +307,14 @@ mod tests {
         }
         relift_cache::write_if_changed(&d.join("programs").join("bad.bin"), b"no key").unwrap();
         relift_cache::write_if_changed(&d.join(MESHES), b"[]").unwrap();
+        relift_cache::write_if_changed(&d.join(XFB), b"[{}]").unwrap();
         let dir = Programs::dir(&d).unwrap();
         assert_eq!(dir.keys().len(), 3);
         let pack = Programs::pack(dir.to_pack(3).unwrap()).unwrap();
         assert_eq!(pack.keys(), dir.keys());
         assert_eq!(pack.meshes(), b"[]");
+        assert_eq!(pack.xfb(), b"[{}]");
+        assert_eq!(pack.kernels(), b"");
         for k in dir.keys() {
             assert_eq!(pack.code(k).unwrap(), dir.code(k).unwrap());
             assert!(pack.code(k).unwrap().is_some());
@@ -239,6 +324,34 @@ mod tests {
         cut.truncate(cut.len() - 2);
         assert!(Programs::pack(cut).is_err());
         assert!(Programs::pack(b"RLSPV002".to_vec()).is_err());
+        let mut old = b"RLSPP001".to_vec();
+        old.extend(0u32.to_le_bytes());
+        old.extend(2u32.to_le_bytes());
+        old.extend(b"[]");
+        let old = Programs::pack(old).unwrap();
+        assert_eq!(
+            (old.keys().len(), old.meshes(), old.kernels()),
+            (0, &b"[]"[..], &b""[..])
+        );
+        let mut two = b"RLSPP002".to_vec();
+        two.extend(0u32.to_le_bytes());
+        two.extend(2u32.to_le_bytes());
+        two.extend(4u32.to_le_bytes());
+        two.extend(b"[][{}]");
+        let two = Programs::pack(two).unwrap();
+        assert_eq!((two.meshes(), two.kernels()), (&b"[]"[..], &b"[{}]"[..]));
+        let mut unknown = b"RLSPP003".to_vec();
+        unknown.extend(0u32.to_le_bytes());
+        unknown.extend(1u32.to_le_bytes());
+        unknown.extend(4u32.to_le_bytes());
+        unknown.extend(b"next");
+        unknown.extend(1u32.to_le_bytes());
+        unknown.extend(b"x");
+        let unknown = Programs::pack(unknown).unwrap();
+        assert_eq!(
+            (unknown.section("next"), unknown.meshes()),
+            (&b"x"[..], &b""[..])
+        );
         std::fs::remove_dir_all(&d).unwrap();
     }
 }
