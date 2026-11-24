@@ -3604,7 +3604,10 @@ static bool upload(replay *r, vimg *v)
 static bool upload_body(replay *r, vimg *v)
 {
     const nvn_tex_desc *d = &v->d;
-    if (!nvn_vk_reading_guest(v->storage, d->size))
+    /* A move on the GPU reads the pool after what the device wrote there (the batches run in order, with a barrier
+     * before the move), so only the CPU's read of the bytes waits for them; a mirrored pool's bytes are the CPU's. */
+    bool mirrored = nvn_mirror_any();
+    if (mirrored && !nvn_vk_reading_guest(v->storage, d->size))
         return false;
     if (nvn_vk_sample_bits(d) != VK_SAMPLE_COUNT_1_BIT)
         return upload_multisample(r, v);
@@ -3613,6 +3616,8 @@ static bool upload_body(replay *r, vimg *v)
         return false;
     if (gpu_moves() && (nvn_untile_move(r, v, false) || nvn_untile_upload_packed(r, v)))
         return true;
+    if (!mirrored && !nvn_vk_reading_guest(v->storage, d->size))
+        return false;
     if (d->target == NVN_TARGET_BUFFER) {
         uint64_t off, bytes = (uint64_t)d->width * bpb;
         void *pool;

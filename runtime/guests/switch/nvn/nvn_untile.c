@@ -538,7 +538,16 @@ static bool check_case(nvn_tex_desc d, uint32_t seed)
                                     .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, layers } };
         VK(vkCmdPipelineBarrier)(g.cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                                  NULL, 1, &ib);
+        /* In, out, and back in from out, in one batch: a write-back and an upload of the same storage after it
+         * need no wait between them (upload_body). */
         ok = move_at(&r, &v, in.addr, false) && move_at(&r, &v, out.addr, true);
+        if (ok) {
+            VkClearColorValue zero = { .uint32 = { 0, 0, 0, 0 } };
+            VkImageSubresourceRange all = { VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, layers };
+            nvn_vk_barrier(g.cb);
+            VK(vkCmdClearColorImage)(g.cb, v.image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
+            ok = move_at(&r, &v, out.addr, false);
+        }
         if (ok) {
             VK(vkCmdCopyImageToBuffer)(g.cb, v.image, VK_IMAGE_LAYOUT_GENERAL, lin.buf, levels, bic);
             nvn_vk_barrier(g.cb);
