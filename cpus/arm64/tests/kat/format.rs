@@ -10,7 +10,7 @@
 //!
 //! `src` names the machine the answers came from (`thor` is the AYN Thor's
 //! Cortex-X3 cluster read over adb; the recorder refuses to write any
-//! other). `w` is the word sequence run from the words' address (`CODE`); the last word is the
+//! other). `w` is the word sequence run from `CODE`; the last word is the
 //! instruction under test and the earlier ones are setup (exclusive
 //! monitors, pointer signing).
 //!
@@ -21,7 +21,7 @@
 //!
 //! Output fields: `fault=<signal>` when the run faulted (nothing else is
 //! compared), else only what changed: registers as in the input,
-//! `nzcv=`, `fpsr=` and `pc=<hex>` (the offset from the words' address (`CODE`)) and `m<hex
+//! `nzcv=`, `fpsr=` and `pc=<hex>` (the offset from `CODE`) and `m<hex
 //! offset>=<hex bytes>` runs of the data window. `mask.x<n>=<hex>`,
 //! `mask.v<n>=<hex>` and `mask.sp` name bits that differ from one run of the
 //! machine to the next (the pointer authentication code field, whose keys
@@ -29,6 +29,8 @@
 
 use std::collections::BTreeMap;
 
+/// Where the words run, as the recorder's harness places them.
+pub const CODE: u64 = 0x74_1000_0000;
 /// The data window.
 pub const DATA: u64 = 0x74_2000_0000;
 /// The data window's size.
@@ -89,7 +91,7 @@ pub struct State {
     pub fpsr: u32,
     /// The data window.
     pub mem: Vec<u8>,
-    /// The offset of the program counter from the words' address (`CODE`) after the run.
+    /// The offset of the program counter from `CODE` after the run.
     pub pc: u64,
 }
 
@@ -123,7 +125,7 @@ pub enum Result {
 pub struct Case {
     /// The machine the answer came from.
     pub src: String,
-    /// The words run from the words' address (`CODE`).
+    /// The words run from `CODE`.
     pub words: Vec<u32>,
     /// The input state.
     pub input: State,
@@ -252,5 +254,45 @@ pub fn diff(got: &Result, want: &Case, fpsr: bool) -> Vec<String> {
             g.mem[o], w.mem[o]
         ));
     }
+    d
+}
+
+/// The bits the code field and the failure code can occupy, with and
+/// without top-byte ignore (canonical ignores the top byte too: with it, XPAC leaves it).
+pub const CODE_BITS: u64 = 0xff7f_ff80_0000_0000;
+
+pub fn canonical(p: u64) -> bool {
+    let top = (p >> 39) & 0x1_ffff;
+    top == 0 || top == 0x1_ffff
+}
+
+/// [`diff`] with the code bits of every register and of the next
+/// address left out, and the canonical state of each compared instead.
+pub fn pac_diff(got: &Result, want: &Case) -> Vec<String> {
+    let (Result::Done(g), Result::Done(w)) = (got, &want.out) else {
+        return diff(got, want, true);
+    };
+    let mut d = Vec::new();
+    for i in 0..31 {
+        let masked = want.mask.get(&format!("x{i}")).map_or(0, |m| *m as u64);
+        if (g.x[i] ^ w.x[i]) & !(CODE_BITS | masked) != 0 {
+            d.push(format!("x{i} got={:#x} want={:#x}", g.x[i], w.x[i]));
+        } else if masked == 0 && canonical(g.x[i]) != canonical(w.x[i]) {
+            d.push(format!(
+                "x{i} canonical got={:#x} want={:#x}",
+                g.x[i], w.x[i]
+            ));
+        }
+    }
+    if canonical(g.pc.wrapping_add(CODE)) != canonical(w.pc.wrapping_add(CODE)) {
+        d.push(format!("pc canonical got={:#x} want={:#x}", g.pc, w.pc));
+    }
+    let (mut g2, mut w2) = (g.clone(), w.clone());
+    (g2.x, w2.x) = ([0; 31], [0; 31]);
+    let strip = |p: u64| (p.wrapping_add(CODE) & !CODE_BITS).wrapping_sub(CODE);
+    (g2.pc, w2.pc) = (strip(g.pc), strip(w.pc));
+    let mut rest = want.clone();
+    rest.out = Result::Done(w2);
+    d.extend(diff(&Result::Done(g2), &rest, true));
     d
 }

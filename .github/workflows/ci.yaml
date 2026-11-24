@@ -340,6 +340,29 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
+  a64-kat:
+    name: A64 known answers from the Thor, on the interpreter and as emitted C
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: a64-kat
+          workspaces: |
+            .
+
+      - name: Replay the recorded known answers
+        run: scripts/ci/a64-kat.sh
+
   mesh-kat:
     name: task, mesh, compute and transform feedback known answers on lavapipe
     runs-on: ubuntu-24.04

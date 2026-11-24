@@ -34,6 +34,23 @@ cortex-a78c --pac-states` runs each word in the model evaluated concretely
 signed and tampered pointers (`src/pac.rs`).
 `relift-diff-unicorn` is a Unicorn engine for `relift diff --engine`.
 
+## A64 known answers
+
+`relift-check kat record cpus/arm64/tests/kat` runs generated cases of every
+liftable A64 encoding the Thor's CPU has (the Cortex-X3 cluster, Android, over
+`adb shell` with `check/oracle/harness.c` built by `oracle/build.sh` and pushed
+to `/data/local/tmp/a64kat/harness-linux`) and writes the hardware's answers
+to `cpus/arm64/tests/kat/<class>.txt`, one case a line, format in
+`cpus/arm64/tests/kat/format.rs`. Every case runs twice in two processes: the
+pointer authentication code bits differ with the process keys and are masked,
+and any other difference drops the case. `kat cross DIR` lists where Unicorn
+disagrees with a recording (Unicorn is a cross-check, never a source).
+`skipped.txt` names the encodings the Thor lacks and the features they need.
+Two replays need no hardware and run in the `a64-kat` CI job:
+`cpus/arm64/tests/kat.rs` (the `relift-ir` interpreter) and
+`relift/tests/emit_a64_kat.rs` (emitted C compiled with clang, FPSR flags and
+FPCR modes through the runtime). Take `~/.cache/relift/thor.lock` while recording.
+
 ## Folders
 
 | Folder | Holds |

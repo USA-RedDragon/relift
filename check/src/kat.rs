@@ -36,7 +36,9 @@ mod format;
 
 use format::{Case, Result as Answer, State};
 
-const _: () = assert!(emu::DATA == format::DATA && emu::DATA_SIZE == format::DATA_SIZE);
+const _: () = assert!(
+    emu::CODE == format::CODE && emu::DATA == format::DATA && emu::DATA_SIZE == format::DATA_SIZE
+);
 
 /// Where the Thor's harness is on the device.
 const THOR_HARNESS: &str = "/data/local/tmp/a64kat/harness-linux";
@@ -428,6 +430,15 @@ fn record(dir: &Path, o: &Opts) -> Result<(), String> {
     Ok(())
 }
 
+/// The class of a case's last word.
+fn class_of_words(c: &Case) -> &'static str {
+    let f = Features::parse(format::THOR_FEATURES).expect("features");
+    c.words
+        .last()
+        .and_then(|w| decode_for(*w, &f))
+        .map_or("other", |i| class(i.encoding))
+}
+
 /// Runs every recorded case on Unicorn and reports the ones that disagree
 /// with the hardware's answer.
 fn cross(dir: &Path) -> Result<(), String> {
@@ -464,7 +475,11 @@ fn cross(dir: &Path) -> Result<(), String> {
                 Outcome::Fault(m) => Answer::Fault(signal(m.as_str())),
                 Outcome::Slow(_) => continue,
             };
-            let d = format::diff(&got, &c, false);
+            let d = if class_of_words(&c) == "pac" {
+                format::pac_diff(&got, &c)
+            } else {
+                format::diff(&got, &c, false)
+            };
             if !d.is_empty() {
                 bad += 1;
                 println!(

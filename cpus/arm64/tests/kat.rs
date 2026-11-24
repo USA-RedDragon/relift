@@ -29,10 +29,8 @@ use relift_ir::{Block, Flow, Op};
 #[path = "kat/format.rs"]
 mod format;
 
-use format::{Case, DATA, DATA_SIZE, Result as Answer};
+use format::{CODE, Case, DATA, DATA_SIZE, Result as Answer};
 
-/// Where the words run, as the recorder's harness places them.
-const CODE: u64 = 0x74_1000_0000;
 /// The mapped code region around [`CODE`].
 const CODE_MAP: u64 = CODE - 0x10_0000;
 const CODE_SIZE: u64 = 0x20_0000;
@@ -215,46 +213,6 @@ fn is_pac(c: &Case, f: &Features) -> bool {
     })
 }
 
-/// The bits the code field and the failure code can occupy, with and
-/// without top-byte ignore (canonical ignores the top byte too: with it, XPAC leaves it).
-const CODE_BITS: u64 = 0xff7f_ff80_0000_0000;
-
-fn canonical(p: u64) -> bool {
-    let top = (p >> 39) & 0x1_ffff;
-    top == 0 || top == 0x1_ffff
-}
-
-/// [`format::diff`] with the code bits of every register and of the next
-/// address left out, and the canonical state of each compared instead.
-fn pac_diff(got: &Answer, want: &Case) -> Vec<String> {
-    let (Answer::Done(g), Answer::Done(w)) = (got, &want.out) else {
-        return format::diff(got, want, true);
-    };
-    let mut d = Vec::new();
-    for i in 0..31 {
-        let masked = want.mask.get(&format!("x{i}")).map_or(0, |m| *m as u64);
-        if (g.x[i] ^ w.x[i]) & !(CODE_BITS | masked) != 0 {
-            d.push(format!("x{i} got={:#x} want={:#x}", g.x[i], w.x[i]));
-        } else if masked == 0 && canonical(g.x[i]) != canonical(w.x[i]) {
-            d.push(format!(
-                "x{i} canonical got={:#x} want={:#x}",
-                g.x[i], w.x[i]
-            ));
-        }
-    }
-    if canonical(g.pc.wrapping_add(CODE)) != canonical(w.pc.wrapping_add(CODE)) {
-        d.push(format!("pc canonical got={:#x} want={:#x}", g.pc, w.pc));
-    }
-    let (mut g2, mut w2) = (g.clone(), w.clone());
-    (g2.x, w2.x) = ([0; 31], [0; 31]);
-    let strip = |p: u64| (p.wrapping_add(CODE) & !CODE_BITS).wrapping_sub(CODE);
-    (g2.pc, w2.pc) = (strip(g.pc), strip(w.pc));
-    let mut rest = want.clone();
-    rest.out = Answer::Done(w2);
-    d.extend(format::diff(&Answer::Done(g2), &rest, true));
-    d
-}
-
 #[test]
 fn lifted_a64_matches_the_thor_on_every_known_answer() {
     let features = Features::parse(format::THOR_FEATURES).expect("the Thor's features");
@@ -290,7 +248,7 @@ fn lifted_a64_matches_the_thor_on_every_known_answer() {
             }
             ran += 1;
             let d = if is_pac(&c, &features) {
-                pac_diff(&r, &c)
+                format::pac_diff(&r, &c)
             } else {
                 format::diff(&r, &c, true)
             };
