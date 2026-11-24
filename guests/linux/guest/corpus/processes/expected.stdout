@@ -5,5 +5,7 @@ aborting child: killed by 6
 exec child: argv[2]=two words env=set fd5=1 fd6=0
 exec child read 4: pass
 vfork exec child: exited 42
+exec child: argv[2]=via /proc/self/exe env=- fd5=0 fd6=0
+exec of /proc/self/exe: exited 42
 vfork failed exec: exited 127
 no children left: 1

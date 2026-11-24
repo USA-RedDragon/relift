@@ -94,6 +94,9 @@ int main(int argc, char **argv)
     }
     if (write(q[1], "pass", 4) != 4)
         return 1;
+    /* The write end stays with this process only: an exec'd child that
+     * held it would wait on itself reading fd 5 after the bytes are gone. */
+    fcntl(q[1], F_SETFD, FD_CLOEXEC);
     pid = vfork();
     if (pid == 0) {
         char *args[] = { self, "child", "two words", NULL };
@@ -103,6 +106,17 @@ int main(int argc, char **argv)
     }
     waitpid(pid, &st, 0);
     report("vfork exec child", st);
+
+    pid = fork();
+    if (pid == 0) {
+        char *args[] = { "processes", "child", "via /proc/self/exe", NULL };
+        char *env[] = { NULL };
+        close(5);
+        execve("/proc/self/exe", args, env);
+        _exit(127);
+    }
+    waitpid(pid, &st, 0);
+    report("exec of /proc/self/exe", st);
 
     pid = vfork();
     if (pid == 0) {
