@@ -71,6 +71,8 @@ typedef struct nvn_pipe_key {
      * host's own where it is the console's (nvn_a2c_native), the fragment program's (A2C_SPEC) elsewhere.
      */
     uint32_t alpha_to_coverage;
+    /** @brief RELIFT_PIPE_STATS names this key's fragment program: the pipeline is made whole with statistics capture. */
+    uint32_t capture_stats;
     /** @brief Specialization constants of each stage: id and value, sorted by id (nvn_spec_sort). */
     uint32_t nspec[NVN_STAGES];
     VkSpecializationMapEntry spec_map[NVN_STAGES][NVN_MAX_SPECS];
@@ -110,6 +112,12 @@ VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k);
 
 /** @brief The VkResult of the calling thread's last pipeline the driver was asked to create (VK_SUCCESS before any). */
 int nvn_pipe_last_result(void);
+/** @brief RELIFT_PIPE_STATS=1 or =<fragment key prefixes, comma separated>: the listed programs' pipelines are made whole (no libraries) with statistics capture, and logged once per pipeline. */
+bool nvn_pipe_stats_on(void);
+/** @brief Whether RELIFT_PIPE_STATS lists the fragment program with key (a prefix match; "1" lists all). */
+bool nvn_pipe_stats_wants(const char *fs_key);
+/** @brief With nvn_pipe_stats_on: logs the driver's executables and statistics of pipeline p once, named by vertex and fragment keys. */
+void nvn_pipe_stats_log(VkPipeline p, const char *vs, const char *fs);
 
 /** @brief Makes (or waits for) the pre-raster library of vertex module k->mods[0] with k's specialization constants and fixed state; false without libraries. */
 bool nvn_pipe_warm_vertex(const nvn_pipe_key *k);

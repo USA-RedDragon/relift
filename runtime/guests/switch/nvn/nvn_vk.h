@@ -322,6 +322,10 @@ typedef struct nvn_vkdev {
     double timestamp_period_ns;
     /** @brief Whether nvn_vk_calibrate reads the GPU clock and the guest clock at one moment. */
     bool calibrated;
+    /** @brief VK_KHR_pipeline_executable_properties is on (RELIFT_PIPE_STATS=1): pipelines are made with statistics capture. */
+    bool pipe_exec;
+    /** @brief VK_KHR_performance_query is on (RELIFT_GPU_COUNTERS is set). */
+    bool perf_query;
     /**
      * @brief A timeline semaphore that reaches each batch's value (timeline_value after a submit), so a thread other
      * than the one that submits can wait for a batch without the fence the next submit resets. The batch signals it,
@@ -1506,9 +1510,22 @@ VkDescriptorSet nvn_pools_set(uint32_t slot);
 /** @brief The pieces of the pool table as written last, and the spans left out of it (no room), for the log. */
 void nvn_pools_counts(uint32_t *pieces, uint32_t *spans, uint32_t *dropped);
 /** @brief Counts a draw into the open render pass, naming the pass by its first fragment program (gpu.profile). */
-void nvn_vk_pass_drew(const char *vs, const char *fs);
-/** @brief With RELIFT_GPU_PROFILE_DRAWS=1: a timestamp after a draw, labelled by its programs and the pass's size. */
-void nvn_gpuprof_draw(const char *vs, const char *fs, uint32_t w, uint32_t h);
+void nvn_vk_pass_drew(const char *vs, const char *fs, uint32_t count);
+/** @brief With RELIFT_GPU_PROFILE_DRAWS=1 (2 adds the vertex count): a timestamp after a draw, labelled by its programs and the pass's size. */
+void nvn_gpuprof_draw(const char *vs, const char *fs, uint32_t w, uint32_t h, uint32_t count);
+/**
+ * @brief Hardware counters per render pass (nvn_gpucount.c, RELIFT_GPU_COUNTERS): whether they are on, the submit
+ * info a batch with counting queries is submitted with (chained in front of next), the batch's queries reset at its
+ * start, a pass's query begun before and ended after it (named by fmt), the batch's results read once it ran, and
+ * the per-pass sums reported with the profile.
+ */
+bool nvn_gpucount_on(void);
+const void *nvn_gpucount_submit_next(const void *next);
+void nvn_gpucount_batch_begin(void);
+void nvn_gpucount_pass_begin(void);
+void nvn_gpucount_pass_end(const char *fmt, ...) RL_PRINTF(1, 2);
+void nvn_gpucount_done(uint32_t s);
+void nvn_gpucount_report(double frames);
 /** @brief Whether gpu.profile is on (nvn_gpuprof.c); made on first use, with the device up. */
 bool nvn_gpuprof_on(void);
 /** @brief Starts the profile of the batch g.cb begins (after vkBeginCommandBuffer). */

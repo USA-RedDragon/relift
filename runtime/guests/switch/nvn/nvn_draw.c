@@ -1992,7 +1992,10 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
         rc = vertex_state(r, mods[0], &k, &fp);
     if (rc != RL_OK)
         return rc;
+    k.capture_stats = g.pipe_exec && nvn_pipe_stats_wants(mods[1] ? mods[1]->key : NULL);
     VkPipeline p = nvn_pipe_graphics(&k);
+    if (k.capture_stats)
+        nvn_pipe_stats_log(p, mods[0] ? mods[0]->key : NULL, mods[1] ? mods[1]->key : NULL);
     if (!p)
         return nvn_vk_stop(r, "the host driver cannot make a pipeline for this draw (vertex %s, fragment %s, geometry %s): %s",
                            mods[0] ? mods[0]->key : "none", mods[1] ? mods[1]->key : "none",
@@ -2065,7 +2068,7 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     } else {
         VK(vkCmdDraw)(g.cb, count, st->inst_count, first, st->inst_base);
     }
-    nvn_vk_pass_drew(mods[0] ? mods[0]->key : NULL, mods[1] ? mods[1]->key : NULL);
+    nvn_vk_pass_drew(mods[0] ? mods[0]->key : NULL, mods[1] ? mods[1]->key : NULL, count);
     nvn_xfb_draw_end(g.cb, &xd);
     nvn_counters_end(counted);
     if (traced) {

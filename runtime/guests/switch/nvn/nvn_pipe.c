@@ -248,6 +248,9 @@ static void screen_done(bool failed)
         (void)nvn_vk_window_early();
 }
 
+/** @brief VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR, which the generated headers do not carry. */
+#define PIPELINE_CAPTURE_STATISTICS 0x40u
+
 /** @brief Creates a graphics pipeline, timing it and counting it as late when it compiles after warm-up. */
 /** @brief The result of the calling thread's last driver pipeline create (nvn_pipe_last_result). */
 static _Thread_local VkResult t_last_result = VK_SUCCESS;
@@ -877,6 +880,8 @@ static VkPipeline monolithic(const nvn_pipe_key *k)
                                         .pColorBlendState = &s.cb,
                                         .pDynamicState = &s.dy,
                                         .layout = k->mesh_mode == 2 ? P.mlayout : P.layout };
+    if (g.pipe_exec && k->capture_stats)
+        ci.flags |= PIPELINE_CAPTURE_STATISTICS;
     VkPipeline p = NULL;
     if (create_graphics(&ci, k->mesh_mode ? "mesh pipeline" : "pipeline", &p) != VK_SUCCESS)
         return NULL;
@@ -928,10 +933,119 @@ static void maybe_save(void)
 /** @brief A key with geometry or tessellation programs, which the pre-raster library (the vertex program alone) leaves out. */
 static bool extra_stages(const nvn_pipe_key *k) { return k->mods[2] || k->mods[3] || k->mods[4]; }
 
+bool nvn_pipe_stats_on(void)
+{
+    const char *e = getenv("RELIFT_PIPE_STATS");
+    return e && *e && *e != '0';
+}
+
+bool nvn_pipe_stats_wants(const char *fs_key)
+{
+    const char *e = getenv("RELIFT_PIPE_STATS");
+    if (!nvn_pipe_stats_on() || !fs_key)
+        return false;
+    if (!strcmp(e, "1"))
+        return true;
+    for (const char *p = e; *p;) {
+        size_t n = strcspn(p, ",");
+        if (n && !strncmp(fs_key, p, n))
+            return true;
+        p += n + (p[n] == ',');
+    }
+    return false;
+}
+
+/** @brief The Vulkan structs of VK_KHR_pipeline_executable_properties, which the generated headers may not carry. */
+typedef struct exe_info {
+    VkStructureType sType;
+    const void *pNext;
+    VkPipeline pipeline;
+    uint32_t index;
+} exe_info;
+
+typedef struct exe_props {
+    VkStructureType sType;
+    void *pNext;
+    uint32_t stages;
+    char name[256];
+    char description[256];
+    uint32_t subgroupSize;
+} exe_props;
+
+typedef struct exe_stat {
+    VkStructureType sType;
+    void *pNext;
+    char name[256];
+    char description[256];
+    uint32_t format;
+    uint64_t value;
+} exe_stat;
+
+void nvn_pipe_stats_log(VkPipeline p, const char *vs, const char *fs)
+{
+    typedef VkResult (*props_fn)(VkDevice, const void *, uint32_t *, exe_props *);
+    typedef VkResult (*stats_fn)(VkDevice, const exe_info *, uint32_t *, exe_stat *);
+    static props_fn pf;
+    static stats_fn sf;
+    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+    static VkPipeline seen[8192];
+    static uint32_t nseen;
+    if (!g.pipe_exec || !p)
+        return;
+    pthread_mutex_lock(&mu);
+    for (uint32_t i = 0; i < nseen; i++)
+        if (seen[i] == p) {
+            pthread_mutex_unlock(&mu);
+            return;
+        }
+    if (nseen < 8192)
+        seen[nseen++] = p;
+    if (!pf) {
+        PFN_vkVoidFunction a = VK(vkGetDeviceProcAddr)(g.dev, "vkGetPipelineExecutablePropertiesKHR");
+        PFN_vkVoidFunction b = VK(vkGetDeviceProcAddr)(g.dev, "vkGetPipelineExecutableStatisticsKHR");
+        memcpy(&pf, &a, sizeof pf);
+        memcpy(&sf, &b, sizeof sf);
+    }
+    if (pf && sf) {
+        struct {
+            VkStructureType sType;
+            const void *pNext;
+            VkPipeline pipeline;
+        } pi = { (VkStructureType)1000269001, NULL, p };
+        uint32_t n = 0;
+        exe_props ex[8];
+        memset(ex, 0, sizeof ex);
+        for (int i = 0; i < 8; i++)
+            ex[i].sType = (VkStructureType)1000269003;
+        if (pf(g.dev, &pi, &n, NULL) == VK_SUCCESS && n && n <= 8 && pf(g.dev, &pi, &n, ex) >= VK_SUCCESS)
+            for (uint32_t e = 0; e < n; e++) {
+                exe_info ei = { (VkStructureType)1000269002, NULL, p, e };
+                uint32_t ns = 0;
+                static exe_stat st[64];
+                memset(st, 0, sizeof st);
+                for (int i = 0; i < 64; i++)
+                    st[i].sType = (VkStructureType)1000269004;
+                if (sf(g.dev, &ei, &ns, NULL) != VK_SUCCESS || !ns)
+                    continue;
+                ns = ns > 64 ? 64 : ns;
+                if (sf(g.dev, &ei, &ns, st) < VK_SUCCESS)
+                    continue;
+                char line[4096];
+                int o = snprintf(line, sizeof line, "pipestat vs %s fs %s exe '%s' subgroup %u:", vs ? vs : "-",
+                                 fs ? fs : "-", ex[e].name, ex[e].subgroupSize);
+                for (uint32_t i = 0; i < ns && o < (int)sizeof line - 80; i++)
+                    o += snprintf(line + o, sizeof line - (size_t)o, " [%s]=%llu", st[i].name,
+                                  (unsigned long long)st[i].value);
+                rl_log(RL_LOG_INFO, "nvn", "%s", line);
+            }
+    }
+    pthread_mutex_unlock(&mu);
+}
+
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k)
 {
     maybe_save();
-    if (!P.gpl || k->mesh_mode || extra_stages(k)) {
+    if (!P.gpl || k->mesh_mode || extra_stages(k) || k->capture_stats) {
         bool mine;
         entry *e = claim(&P.full, k, sizeof *k, &mine);
         if (!e || !mine)

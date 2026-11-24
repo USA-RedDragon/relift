@@ -7,6 +7,8 @@
 #include "nvn/nvn_pipe.h"
 #include "tc.h"
 
+#include <stdlib.h>
+
 TEST(nvn_the_attribute_padding_an_odd_count_is_the_constant_default)
 {
     uint32_t state = 0, constant = 0;
@@ -64,4 +66,21 @@ TEST(nvn_a_stream_whose_pool_is_gone_reads_zeros)
     CHECK_EQ(nvn_vertex_stream_bytes(0, false), NVN_STREAM_UNBOUND);
     CHECK_EQ(nvn_vertex_stream_bytes(0x900000000ull, true), NVN_STREAM_POOL);
     CHECK_EQ(nvn_vertex_stream_bytes(0x900000000ull, false), NVN_STREAM_ZEROS);
+}
+
+TEST(nvn_pipe_stats_names_the_fragment_programs_it_wants_by_key_prefix)
+{
+    unsetenv("RELIFT_PIPE_STATS");
+    CHECK(!nvn_pipe_stats_on());
+    CHECK(!nvn_pipe_stats_wants("ce0e9053aa"));
+    setenv("RELIFT_PIPE_STATS", "1", 1);
+    CHECK(nvn_pipe_stats_wants("ce0e9053aa"));
+    setenv("RELIFT_PIPE_STATS", "ce0e9053,0f0330a8", 1);
+    CHECK(nvn_pipe_stats_wants("ce0e9053aa"));
+    CHECK(nvn_pipe_stats_wants("0f0330a8bb"));
+    CHECK(!nvn_pipe_stats_wants("861aa3b1cc"));
+    CHECK(!nvn_pipe_stats_wants(NULL));
+    setenv("RELIFT_PIPE_STATS", "0", 1);
+    CHECK(!nvn_pipe_stats_on());
+    unsetenv("RELIFT_PIPE_STATS");
 }

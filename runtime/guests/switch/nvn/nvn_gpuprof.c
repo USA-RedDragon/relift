@@ -48,6 +48,8 @@ static struct {
     int on;
     /** @brief RELIFT_GPU_PROFILE_DRAWS: a timestamp after every draw, named by its programs and target size. */
     bool draws;
+    /** @brief RELIFT_GPU_PROFILE_DRAWS=2: the label also names the draw's vertex count, so meshes rank apart. */
+    bool by_count;
     /** @brief One timestamp pool per batch slot: MoltenVK reads every timestamp of a pool of more than 4096 as one. */
     VkQueryPool pool[NVN_SLOTS];
     double period_ns;
@@ -123,6 +125,7 @@ bool nvn_gpuprof_on(void)
         gp.on = rl_setting_bool("gpu.profile") && g.timestamp_period_ns > 0 ? 1 : -1;
         const char *d = getenv("RELIFT_GPU_PROFILE_DRAWS");
         gp.draws = gp.on > 0 && d && *d && *d != '0';
+        gp.by_count = gp.draws && *d == '2';
         if (gp.on > 0) {
             VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                          .queryType = VK_QUERY_TYPE_TIMESTAMP,
@@ -135,6 +138,8 @@ bool nvn_gpuprof_on(void)
                 hos_block_span = block_span;
             rl_log(gp.on > 0 ? RL_LOG_INFO : RL_LOG_WARN, "nvn", "GPU profile %s",
                    gp.on > 0 ? "on: every batch is timed by its parts" : "is off: no timestamp query pool");
+            if (gp.on > 0)
+                (void)nvn_gpucount_on();
         }
     }
     return gp.on > 0;
@@ -148,6 +153,7 @@ void nvn_gpuprof_batch_begin(void)
     VK(vkResetQueryPool)(g.dev, gp.pool[s], 0, MARKS);
     VK(vkCmdWriteTimestamp)(g.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gp.pool[s], 0);
     gp.n[s] = 1;
+    nvn_gpucount_batch_begin();
     gp.kinds[0] = 0;
     gp.rec_ns[s] = nvn_gpuprof_now();
     gp.rec_tid[s] = thread_tag();
@@ -351,12 +357,14 @@ void nvn_gpuprof_mark(const char *fmt, ...)
     mark(lab);
 }
 
-void nvn_gpuprof_draw(const char *vs, const char *fs, uint32_t w, uint32_t h)
+void nvn_gpuprof_draw(const char *vs, const char *fs, uint32_t w, uint32_t h, uint32_t count)
 {
     if (gp.on <= 0 || !gp.draws || !gp.n[g.slot] || gp.n[g.slot] >= MARKS)
         return;
     char lab[LABEL];
-    snprintf(lab, sizeof lab, "draw %ux%u vs %.8s fs %.8s", w, h, vs ? vs : "-", fs ? fs : "-");
+    int o = snprintf(lab, sizeof lab, "draw %ux%u vs %.8s fs %.8s", w, h, vs ? vs : "-", fs ? fs : "-");
+    if (gp.by_count)
+        snprintf(lab + o, sizeof lab - (size_t)o, " n%u", count);
     mark(lab);
 }
 
@@ -399,6 +407,7 @@ bool nvn_gpuprof_total(const char *lab, double *ns, uint64_t *count)
 
 void nvn_gpuprof_done(uint32_t s)
 {
+    nvn_gpucount_done(s);
     uint32_t n = gp.n[s];
     gp.n[s] = 0;
     if (gp.on <= 0 || n < 2)
@@ -517,6 +526,7 @@ void nvn_gpuprof_report(double frames)
         gp.tot[b].ns = -gp.tot[b].ns;
     }
     rl_log(RL_LOG_INFO, "nvn", "GPU profile %7.2f ms in the other labels", (gp.span_ns - shown) / 1e6 / frames);
+    nvn_gpucount_report(frames);
     gap_report(frames);
     gp.nrecs = 0;
     pthread_mutex_lock(&span_mu);

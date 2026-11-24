@@ -151,6 +151,7 @@ static void *submit_main(void *arg)
             si.signalSemaphoreCount = 1;
             si.pSignalSemaphores = &g.timeline;
         }
+        si.pNext = nvn_gpucount_submit_next(si.pNext);
         rl_vkdev_guest_queue_lock();
         nvn_gpuprof_entered(j.slot);
         VkResult vr = VK(vkQueueSubmit)(g.queue, 1, &si, j.fence);
@@ -622,12 +623,14 @@ static const char *const device_exts[] = { "VK_EXT_depth_clip_control",         
                                            "VK_KHR_pipeline_library",            "VK_EXT_graphics_pipeline_library",
                                            "VK_EXT_mesh_shader",                 "VK_EXT_device_fault",
                                            "VK_EXT_transform_feedback",
-                                           "VK_NV_shading_rate_image" };
+                                           "VK_NV_shading_rate_image",
+                                           "VK_KHR_pipeline_executable_properties",
+                                           "VK_KHR_performance_query" };
 #define DEVICE_EXTS (sizeof device_exts / sizeof device_exts[0])
 
 /** @brief The feature chain the device is made with; it lives until the core's vkCreateDevice returns. */
 static struct {
-    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, xfb, placed, sri;
+    ext_features clip_control, clock, afloat, i64, recon, fma, coop, rob2, provoking, gpl, mesh, fault, xfb, placed, sri, pexec, pq;
     VkPhysicalDeviceVulkan13Features f13;
     VkPhysicalDeviceVulkan12Features f12;
     VkPhysicalDeviceVulkan11Features f11;
@@ -692,8 +695,10 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     ext_features *const feats[DEVICE_EXTS] = { &feat.clip_control, &feat.clock, &feat.afloat, &feat.i64,
                                                &feat.recon,        &feat.fma,   &feat.coop,   &feat.rob2,
                                                &feat.provoking,    NULL,        &feat.gpl,          &feat.mesh,
-                                               &feat.fault,        &feat.xfb,          &feat.sri };
+                                               &feat.fault,        &feat.xfb,          &feat.sri,          &feat.pexec,        &feat.pq };
     feat.xfb = (ext_features){ .sType = (VkStructureType)1000028000 };
+    feat.pexec = (ext_features){ .sType = (VkStructureType)1000269000 };
+    feat.pq = (ext_features){ .sType = (VkStructureType)1000116000 };
     uint32_t next = 0;
     VK(vkEnumerateDeviceExtensionProperties)(g.phys, NULL, &next, NULL);
     VkExtensionProperties *exts = calloc(next + 1, sizeof *exts);
@@ -705,7 +710,8 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     bool provoking_on = false, gpl_on = false, mesh_on = false, fault_on = false, xfb_on = false, sri_on = false;
     for (uint32_t k = 0; k < DEVICE_EXTS; k++)
         for (uint32_t i = 0; exts && i < next; i++)
-            if (!strcmp(exts[i].extensionName, device_exts[k])) {
+            if (!strcmp(exts[i].extensionName, device_exts[k]) &&
+                (feats[k] != &feat.pexec || nvn_pipe_stats_on()) && (feats[k] != &feat.pq || getenv("RELIFT_GPU_COUNTERS"))) {
                 rl_vkdev_add_ext(b, device_exts[k]);
                 if (feats[k]) {
                     feats[k]->pNext = f13->pNext;
@@ -729,6 +735,9 @@ static bool device_hook(void *user, rl_vkdev_build *b)
                 rl_vkdev_add_ext(b, up[k]);
                 break;
             }
+    for (uint32_t i = 0; nvn_pipe_stats_on() && exts && i < next; i++)
+        if (strstr(exts[i].extensionName, "performance_query"))
+            rl_log(RL_LOG_INFO, "nvn", "the host driver has %s", exts[i].extensionName);
     bool map2 = false, placed = false;
     for (uint32_t i = 0; exts && i < next; i++) {
         map2 |= !strcmp(exts[i].extensionName, "VK_KHR_map_memory2");
@@ -803,6 +812,9 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     feat.placed.b[1] = VK_FALSE;
     g.transform_feedback = xfb_on && feat.xfb.b[0];
     g.shading_rate_image = sri_on && feat.sri.b[0];
+    g.pipe_exec = nvn_pipe_stats_on() && feat.pexec.b[0];
+    g.perf_query = getenv("RELIFT_GPU_COUNTERS") && feat.pq.b[0];
+    feat.pq.b[1] = VK_FALSE;
     feat.fault.b[1] = VK_FALSE;
     feat.rob2.b[0] = feat.rob2.b[1] = VK_FALSE;
     g.address_replay = feat.f12.bufferDeviceAddress && feat.f12.bufferDeviceAddressCaptureReplay;
@@ -2261,11 +2273,11 @@ bool nvn_vk_begin_dispatch(replay *r)
     return nvn_vk_begin(r);
 }
 
-void nvn_vk_pass_drew(const char *vs, const char *fs)
+void nvn_vk_pass_drew(const char *vs, const char *fs, uint32_t count)
 {
     if (!open_pass.draws++ && fs)
         snprintf(open_pass.fs, sizeof open_pass.fs, "%s", fs);
-    nvn_gpuprof_draw(vs, fs, open_pass.area.extent.width, open_pass.area.extent.height);
+    nvn_gpuprof_draw(vs, fs, open_pass.area.extent.width, open_pass.area.extent.height, count);
 }
 
 void nvn_vk_dispatched(void)
@@ -2312,6 +2324,9 @@ void nvn_vk_end_rendering(void)
     open_pass.open = false;
     nvn_counters_close_query();
     VK(vkCmdEndRendering)(g.cb);
+    nvn_gpucount_pass_end("pass %ux%u c%u%s %u draws%s%.8s", open_pass.area.extent.width, open_pass.area.extent.height,
+                          open_pass.ncolor, open_pass.depth ? " d" : "", open_pass.draws, open_pass.fs[0] ? " fs " : "",
+                          open_pass.fs);
     nvn_vk_barrier(g.cb);
     if (nvn_flash_on()) {
         for (uint32_t i = 0; i < open_pass.ncolor; i++)
@@ -2694,6 +2709,7 @@ static bool submit_recorded(replay *r)
     hold.sem = 0;
     int64_t t0 = now_ns();
     nvn_gpuprof_queued(g.slot);
+    si.pNext = nvn_gpucount_submit_next(si.pNext);
     if ((vr = VK(vkResetFences)(g.dev, 1, &g.fence)) == VK_SUCCESS)
         vr = submit_threaded() ? submit_queue(g.cb, g.fence, g.timeline_ok && !host ? signal : 0, host ? signal : 0, g.slot)
                                : guest_submit(&si);
@@ -4828,6 +4844,7 @@ static bool begin_rendering(replay *r, VkRect2D *area, bool layered, const VkRec
                            .pStencilAttachment = stencil ? &da : NULL };
     nvn_vk_begin(r);
     nvn_gpuprof_mark_kinds();
+    nvn_gpucount_pass_begin();
     VK(vkCmdBeginRendering)(g.cb, &ri);
     open_pass.open = true;
     open_pass.what = NULL;
