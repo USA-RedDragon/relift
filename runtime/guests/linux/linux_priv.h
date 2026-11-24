@@ -35,7 +35,11 @@ typedef struct lx_fd {
     bool cloexec;
     /** @brief The directory stream getdents64 reads, opened on first use. */
     void *dir;
-    /** @brief 0 not looked at yet, 1 a regular file or directory (never blocks), 3 a pipe or FIFO, 2 anything else. */
+    /** @brief SO_RCVTIMEO of a socket in nanoseconds, 0 for none. */
+    int64_t rcv_timeout_ns;
+    /** @brief SO_SNDTIMEO of a socket in nanoseconds, 0 for none. */
+    int64_t snd_timeout_ns;
+    /** @brief 0 not looked at yet, 1 a regular file or directory (never blocks), 3 a pipe or FIFO, 4 a socket, 2 anything else. */
     uint8_t kind;
     /** @brief Whether an entry read from the stream waits in stash_*, because it did not fit the last buffer. */
     bool has_stash;
@@ -272,6 +276,18 @@ lx_sys_fn *lx_fs_call(uint32_t nr);
 lx_sys_fn *lx_proc_call(uint32_t nr);
 /** @brief The process system calls of process.c (execve, wait4, sessions), or NULL. */
 lx_sys_fn *lx_process_call(uint32_t nr);
+/** @brief The socket system calls of net.c, or NULL. */
+lx_sys_fn *lx_net_call(uint32_t nr);
+/** @brief A write on a socket with the blocking and signal rules of send (net.c). */
+int64_t lx_sock_write(int fd, int h, const uint8_t *buf, uint64_t n);
+/** @brief Puts host descriptor host in the lowest free guest slot (takes lx_big); the guest descriptor, or -EMFILE (closing host). */
+int64_t lx_fd_install(int host, bool cloexec);
+/** @brief Closes guest descriptor fd (takes lx_big). */
+void lx_fd_close(int fd);
+/** @brief The guest's name for a host path in place (the guest root's prefix taken off); the new length. */
+size_t lx_guest_name(char *path, size_t len);
+/** @brief Reads and checks a guest iovec array (iov_get of fs.c). */
+int64_t lx_iov_get(uint64_t addr, uint64_t cnt, uint64_t (*v)[2], uint64_t *total, uint32_t need);
 /** @brief The interval timer system calls (getitimer, setitimer), or NULL. */
 lx_sys_fn *lx_timer_call(uint32_t nr);
 /** @brief The signal system calls. */

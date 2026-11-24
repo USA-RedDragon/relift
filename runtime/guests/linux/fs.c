@@ -92,6 +92,29 @@ int lx_fs_exec_fds(int (*keep)[2], int cap)
 }
 
 static int64_t host_path(const char *guest, char *out, size_t cap, bool follow);
+static int64_t alloc_fd(int host, int min, bool cloexec);
+static size_t guest_name(char *path, size_t len);
+static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
+static int64_t iov_get(uint64_t addr, uint64_t cnt, uint64_t (*v)[2], uint64_t *total, uint32_t need);
+
+int64_t lx_fd_install(int host, bool cloexec)
+{
+    lx_mutex_lock(&lx_big);
+    int64_t r = alloc_fd(host, 0, cloexec);
+    lx_mutex_unlock(&lx_big);
+    return r;
+}
+
+void lx_fd_close(int fd)
+{
+    lx_mutex_lock(&lx_big);
+    sys_close(NULL, NULL, (uint64_t[6]){ (uint64_t)fd });
+    lx_mutex_unlock(&lx_big);
+}
+
+size_t lx_guest_name(char *path, size_t len) { return guest_name(path, len); }
+
+int64_t lx_iov_get(uint64_t addr, uint64_t cnt, uint64_t (*v)[2], uint64_t *total, uint32_t need) { return iov_get(addr, cnt, v, total, need); }
 
 int64_t lx_host_path(const char *path, char *out, size_t cap) { return host_path(path, out, cap, true); }
 
@@ -613,8 +636,6 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return alloc_fd((int)h, 0, (flags & L_O_CLOEXEC) != 0);
 }
 
-static int64_t sys_close(rl_ctx *c, uint8_t *mem, const uint64_t a[6]);
-
 /** @brief close_range(2): closes the descriptors first to last, or with CLOSE_RANGE_CLOEXEC (4) marks them close-on-exec; CLOSE_RANGE_UNSHARE (2) has nothing to unshare. */
 static int64_t sys_close_range(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
@@ -668,7 +689,7 @@ static uint8_t fd_kind(int fd, int h)
     if (f->kind == 0) {
         l_stat st;
         uint32_t t = hio_fstat(h, &st) == 0 ? st.st_mode & L_S_IFMT : 0;
-        f->kind = (t == L_S_IFREG || t == L_S_IFDIR) ? 1 : t == L_S_IFIFO ? 3 : 2;
+        f->kind = (t == L_S_IFREG || t == L_S_IFDIR) ? 1 : t == L_S_IFIFO ? 3 : t == L_S_IFSOCK ? 4 : 2;
     }
     return f->kind;
 }
@@ -728,7 +749,10 @@ static int64_t sys_read(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
  */
 static int64_t write_interruptible(int fd, int h, const uint8_t *buf, uint64_t n)
 {
-    if (n == 0 || fd_kind(fd, h) != 3)
+    uint8_t kind = n ? fd_kind(fd, h) : 0;
+    if (kind == 4)
+        return lx_sock_write(fd, h, buf, n);
+    if (kind != 3)
         return hio_write(h, buf, n);
     int64_t fl = hio_get_status_flags(h);
     if (fl >= 0 && (fl & L_O_NONBLOCK))

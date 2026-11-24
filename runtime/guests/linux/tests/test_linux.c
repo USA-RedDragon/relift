@@ -389,6 +389,11 @@ TEST(the_kernel_header_values_match_the_uapi_headers_where_the_host_has_them)
     CHECK_EQ(L_ENOTSUP, 95);
     CHECK_EQ(L_ETIMEDOUT, ETIMEDOUT);
     CHECK_EQ(L_EOVERFLOW, EOVERFLOW);
+    CHECK_EQ(L_EAFNOSUPPORT, EAFNOSUPPORT);
+    CHECK_EQ(L_ECONNREFUSED, ECONNREFUSED);
+    CHECK_EQ(L_EINPROGRESS, EINPROGRESS);
+    CHECK_EQ(L_ENOTCONN, ENOTCONN);
+    CHECK_EQ(L_EADDRINUSE, EADDRINUSE);
 #endif
 #if __has_include(<asm-generic/unistd.h>)
 #define __ARCH_WANT_NEW_STAT
@@ -424,6 +429,13 @@ TEST(the_kernel_header_values_match_the_uapi_headers_where_the_host_has_them)
     CHECK_EQ(NR_getsid, __NR_getsid);
     CHECK_EQ(NR_setsid, __NR_setsid);
     CHECK_EQ(NR_close_range, __NR_close_range);
+    CHECK_EQ(NR_socket, __NR_socket);
+    CHECK_EQ(NR_socketpair, __NR_socketpair);
+    CHECK_EQ(NR_accept4, __NR_accept4);
+    CHECK_EQ(NR_recvmsg, __NR_recvmsg);
+    CHECK_EQ(NR_sendmsg, __NR_sendmsg);
+    CHECK_EQ(NR_shutdown, __NR_shutdown);
+    CHECK_EQ(NR_getsockopt, __NR_getsockopt);
 #endif
 #endif
 }
@@ -590,6 +602,132 @@ TEST(an_interval_timer_fires_on_time_and_interrupts_a_blocking_pipe_write)
     CHECK_EQ(lx_fs_call(NR_write)(c, rl_mem_base(), w), -L_ERESTARTSYS);
     lx_cur()->pending[L_SIGALRM].queued = false;
     lx.sig[L_SIGALRM].handler = 0;
+}
+
+static int64_t net(rl_ctx *c, uint32_t nr, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5)
+{
+    uint64_t a[6] = { a0, a1, a2, a3, a4, a5 };
+    return lx_net_call(nr)(c, rl_mem_base(), a);
+}
+
+TEST(a_unix_socketpair_carries_bytes_and_a_descriptor_and_poll_sees_it)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t m = 0x401000;
+    CHECK_EQ(sys(c, NR_socketpair, 1, 1 | 02000000, 0, m, 0, 0), 0);
+    int32_t sv[2];
+    memcpy(sv, rl_mem_base() + m, 8);
+    CHECK(lx.fds[sv[0]].cloexec);
+    CHECK_EQ(sys(c, NR_pipe2, m, 0, 0, 0, 0, 0), 0);
+    int32_t pp[2];
+    memcpy(pp, rl_mem_base() + m, 8);
+    put_str(m + 0x100, "pipe");
+    CHECK_EQ(sys(c, NR_write, (uint64_t)pp[1], m + 0x100, 4, 0, 0, 0), 4);
+    put_str(m + 0x200, "hello");
+    uint64_t iov[2] = { m + 0x200, 5 };
+    rl_vm_kernel_write(&lx.vm, m + 0x300, iov, sizeof iov);
+    uint8_t ctl[24] = { 0 };
+    uint64_t clen = 20;
+    int32_t lt[3] = { 1, 1, pp[0] };
+    memcpy(ctl, &clen, 8);
+    memcpy(ctl + 8, lt, 12);
+    rl_vm_kernel_write(&lx.vm, m + 0x400, ctl, sizeof ctl);
+    uint64_t hdr[7] = { 0, 0, m + 0x300, 1, m + 0x400, 24, 0 };
+    rl_vm_kernel_write(&lx.vm, m + 0x500, hdr, sizeof hdr);
+    CHECK_EQ(sys(c, NR_sendmsg, (uint64_t)sv[0], m + 0x500, 0, 0, 0, 0), 5);
+    struct { int32_t fd; int16_t ev, rev; } pf = { sv[1], L_POLLIN, 0 };
+    rl_vm_kernel_write(&lx.vm, m + 0x600, &pf, sizeof pf);
+    int64_t zero[2] = { 0, 0 };
+    rl_vm_kernel_write(&lx.vm, m + 0x620, zero, sizeof zero);
+    CHECK_EQ(sys(c, NR_ppoll, m + 0x600, 1, m + 0x620, 0, 8, 0), 1);
+    memcpy(&pf, rl_mem_base() + m + 0x600, sizeof pf);
+    CHECK(pf.rev & L_POLLIN);
+    uint64_t riov[2] = { m + 0x700, 64 };
+    rl_vm_kernel_write(&lx.vm, m + 0x300, riov, sizeof riov);
+    memset(ctl, 0, sizeof ctl);
+    rl_vm_kernel_write(&lx.vm, m + 0x400, ctl, sizeof ctl);
+    uint64_t rhdr[7] = { 0, 0, m + 0x300, 1, m + 0x400, 24, 0 };
+    rl_vm_kernel_write(&lx.vm, m + 0x500, rhdr, sizeof rhdr);
+    CHECK_EQ(sys(c, NR_recvmsg, (uint64_t)sv[1], m + 0x500, 0x40000000, 0, 0, 0), 5);
+    CHECK(memcmp(cstr(m + 0x700), "hello", 5) == 0);
+    memcpy(rhdr, rl_mem_base() + m + 0x500, sizeof rhdr);
+    CHECK(rhdr[5] >= 20);
+    memcpy(lt, rl_mem_base() + m + 0x408, 12);
+    CHECK(lt[0] == 1 && lt[1] == 1 && lt[2] > 2 && lt[2] != pp[0]);
+    CHECK(lx.fds[lt[2]].cloexec);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)lt[2], m + 0x800, 16, 0, 0, 0), 4);
+    CHECK(memcmp(cstr(m + 0x800), "pipe", 4) == 0);
+    CHECK_EQ(sys(c, NR_socketpair, 1, 2, 0, m, 0, 0), 0);
+    memcpy(sv, rl_mem_base() + m, 8);
+    put_str(m + 0x100, "datagram");
+    CHECK_EQ(sys(c, NR_sendto, (uint64_t)sv[0], m + 0x100, 8, 0, 0, 0), 8);
+#if defined(__linux__)
+    CHECK_EQ(sys(c, NR_recvfrom, (uint64_t)sv[1], m + 0x900, 4, 0x20, 0, 0), 8);
+#else
+    /* MSG_TRUNC as an input flag (the full length back) is Linux's: macOS gives the bytes read. */
+    CHECK_EQ(sys(c, NR_recvfrom, (uint64_t)sv[1], m + 0x900, 4, 0x20, 0, 0), 4);
+#endif
+    CHECK(memcmp(cstr(m + 0x900), "data", 4) == 0);
+}
+
+TEST(tcp_over_loopback_connects_accepts_and_honors_options_timeouts_and_signals)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t m = 0x401000;
+    int64_t ls = net(c, NR_socket, 2, 1, 0, 0, 0, 0);
+    CHECK(ls >= 3);
+    int32_t one = 1;
+    rl_vm_kernel_write(&lx.vm, m, &one, 4);
+    CHECK_EQ(net(c, NR_setsockopt, (uint64_t)ls, 1, 2, m, 4, 0), 0);
+    uint8_t sin[16] = { 2, 0, 0, 0, 127, 0, 0, 1 };
+    rl_vm_kernel_write(&lx.vm, m + 0x10, sin, sizeof sin);
+    CHECK_EQ(net(c, NR_bind, (uint64_t)ls, m + 0x10, 16, 0, 0, 0), 0);
+    CHECK_EQ(net(c, NR_listen, (uint64_t)ls, 4, 0, 0, 0, 0), 0);
+    uint32_t len = 16;
+    rl_vm_kernel_write(&lx.vm, m + 0x30, &len, 4);
+    CHECK_EQ(net(c, NR_getsockname, (uint64_t)ls, m + 0x10, m + 0x30, 0, 0, 0), 0);
+    memcpy(sin, rl_mem_base() + m + 0x10, 16);
+    CHECK(sin[0] == 2 && sin[1] == 0 && (sin[2] || sin[3]) && sin[4] == 127);
+    int64_t cs = net(c, NR_socket, 2, 1, 0, 0, 0, 0);
+    CHECK_EQ(net(c, NR_connect, (uint64_t)cs, m + 0x10, 16, 0, 0, 0), 0);
+    rl_vm_kernel_write(&lx.vm, m + 0x30, &len, 4);
+    int64_t as = net(c, NR_accept4, (uint64_t)ls, m + 0x40, m + 0x30, 02000000, 0, 0);
+    CHECK(as >= 3);
+    CHECK(lx.fds[as].cloexec);
+    uint8_t peer[16];
+    memcpy(peer, rl_mem_base() + m + 0x40, 16);
+    CHECK(peer[0] == 2 && peer[4] == 127);
+    put_str(m + 0x100, "ping");
+    CHECK_EQ(sys(c, NR_write, (uint64_t)cs, m + 0x100, 4, 0, 0, 0), 4);
+    CHECK_EQ(net(c, NR_recvfrom, (uint64_t)as, m + 0x200, 64, 0, 0, 0), 4);
+    CHECK(memcmp(cstr(m + 0x200), "ping", 4) == 0);
+    len = 4;
+    rl_vm_kernel_write(&lx.vm, m + 0x30, &len, 4);
+    CHECK_EQ(net(c, NR_getsockopt, (uint64_t)as, 1, 3, m + 0x34, m + 0x30, 0), 0);
+    int32_t type;
+    memcpy(&type, rl_mem_base() + m + 0x34, 4);
+    CHECK_EQ(type, 1);
+    int64_t tv[2] = { 0, 50000 };
+    rl_vm_kernel_write(&lx.vm, m + 0x50, tv, sizeof tv);
+    CHECK_EQ(net(c, NR_setsockopt, (uint64_t)as, 1, 20, m + 0x50, 16, 0), 0);
+    uint64_t t0 = rl_clock_ns();
+    CHECK_EQ(net(c, NR_recvfrom, (uint64_t)as, m + 0x200, 64, 0, 0, 0), -L_EAGAIN);
+    CHECK(rl_clock_ns() - t0 >= 40000000ull);
+    memset(tv, 0, sizeof tv);
+    rl_vm_kernel_write(&lx.vm, m + 0x50, tv, sizeof tv);
+    CHECK_EQ(net(c, NR_setsockopt, (uint64_t)as, 1, 20, m + 0x50, 16, 0), 0);
+    lx.sig[L_SIGALRM].handler = 0x400000;
+    int64_t once[4] = { 0, 0, 0, 30000 };
+    rl_vm_kernel_write(&lx.vm, m + 0x60, once, sizeof once);
+    CHECK_EQ(sys(c, NR_setitimer, 0, m + 0x60, 0, 0, 0, 0), 0);
+    CHECK_EQ(net(c, NR_recvfrom, (uint64_t)as, m + 0x200, 64, 0, 0, 0), -L_ERESTARTSYS);
+    lx_cur()->pending[L_SIGALRM].queued = false;
+    lx.sig[L_SIGALRM].handler = 0;
+    CHECK_EQ(net(c, NR_shutdown, (uint64_t)cs, 1, 0, 0, 0, 0), 0);
+    CHECK_EQ(net(c, NR_recvfrom, (uint64_t)as, m + 0x200, 64, 0, 0, 0), 0);
+    CHECK_EQ(net(c, NR_bind, 0, m + 0x10, 16, 0, 0, 0) == -L_ENOTSOCK || net(c, NR_bind, 0, m + 0x10, 16, 0, 0, 0) == -L_EBADF, true);
 }
 
 TEST(execve_of_another_program_finds_nothing)

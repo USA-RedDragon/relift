@@ -1,0 +1,12 @@
+sendmsg 1
+recvmsg 1 'x', passed fd is new 1, reads 7 'through'
+tcp listening on a port: 1
+accepted from loopback 1, got 23 'request from the child'
+tcp child exited 0
+SO_TYPE stream 1, read after peer closed 0
+udp truncated datagram length 8 from loopback 1
+udp recv with a timeout: -1 EAGAIN
+unix connect 0, listener readable 1
+unix name matches 1
+nonblocking read on empty: -1 EAGAIN
+bad family: -1 EAFNOSUPPORT

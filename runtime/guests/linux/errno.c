@@ -53,6 +53,90 @@ int lx_errno(int e)
         E(EOVERFLOW)
         E(ETIMEDOUT)
 #undef E
+    }
+    switch (e) {
+#define E(name)     \
+    case name:      \
+        return L_##name;
+#ifdef ENOTSOCK
+        E(ENOTSOCK)
+#endif
+#ifdef EDESTADDRREQ
+        E(EDESTADDRREQ)
+#endif
+#ifdef EMSGSIZE
+        E(EMSGSIZE)
+#endif
+#ifdef EPROTOTYPE
+        E(EPROTOTYPE)
+#endif
+#ifdef ENOPROTOOPT
+        E(ENOPROTOOPT)
+#endif
+#ifdef EPROTONOSUPPORT
+        E(EPROTONOSUPPORT)
+#endif
+#ifdef ESOCKTNOSUPPORT
+        E(ESOCKTNOSUPPORT)
+#endif
+#ifdef EPFNOSUPPORT
+        E(EPFNOSUPPORT)
+#endif
+#ifdef EADDRINUSE
+        E(EADDRINUSE)
+#endif
+#ifdef EADDRNOTAVAIL
+        E(EADDRNOTAVAIL)
+#endif
+#ifdef ENETDOWN
+        E(ENETDOWN)
+#endif
+#ifdef ENETUNREACH
+        E(ENETUNREACH)
+#endif
+#ifdef ENETRESET
+        E(ENETRESET)
+#endif
+#ifdef ECONNABORTED
+        E(ECONNABORTED)
+#endif
+#ifdef ECONNRESET
+        E(ECONNRESET)
+#endif
+#ifdef ENOBUFS
+        E(ENOBUFS)
+#endif
+#ifdef EISCONN
+        E(EISCONN)
+#endif
+#ifdef ENOTCONN
+        E(ENOTCONN)
+#endif
+#ifdef ESHUTDOWN
+        E(ESHUTDOWN)
+#endif
+#ifdef ETOOMANYREFS
+        E(ETOOMANYREFS)
+#endif
+#ifdef ECONNREFUSED
+        E(ECONNREFUSED)
+#endif
+#ifdef EHOSTDOWN
+        E(EHOSTDOWN)
+#endif
+#ifdef EHOSTUNREACH
+        E(EHOSTUNREACH)
+#endif
+#ifdef EALREADY
+        E(EALREADY)
+#endif
+#ifdef EINPROGRESS
+        E(EINPROGRESS)
+#endif
+#ifdef EAFNOSUPPORT
+        E(EAFNOSUPPORT)
+#endif
+#undef E
     default:
         break;
     }

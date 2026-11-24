@@ -216,6 +216,52 @@ void hio_signal_accept(void);
 /** @brief Ends the process with host signal sig at its default action, as the kernel does for a fatal signal. */
 void hio_die_by_signal(int sig);
 
+/** @brief The most descriptors one message carries (SCM_MAX_FD). */
+#define HIO_MAX_RIGHTS 253
+
+/** @brief One socket message in a flat buffer, with its address in the guest's sockaddr layout and SCM_RIGHTS descriptors as host descriptors. */
+typedef struct hio_msg {
+    /** @brief The bytes. */
+    void *data;
+    /** @brief Their count (the buffer's size for a receive). */
+    size_t len;
+    /** @brief The peer's address (guest layout), or NULL. */
+    uint8_t *name;
+    /** @brief Its length; a receive sets the address's full length (0 for none). */
+    uint32_t namelen;
+    /** @brief The passed descriptors. */
+    int rights[HIO_MAX_RIGHTS];
+    /** @brief Their count. */
+    int nrights;
+    /** @brief A receive's Linux MSG_ result flags (MSG_TRUNC, MSG_CTRUNC, MSG_OOB, MSG_EOR). */
+    uint32_t flags;
+} hio_msg;
+
+/** @brief socket(2) with Linux domain, type (SOCK_NONBLOCK honored; the host descriptor is close-on-exec) and protocol. */
+int64_t hio_socket(int domain, int type, int protocol);
+/** @brief socketpair(2), as hio_socket. */
+int64_t hio_socketpair(int domain, int type, int protocol, int sv[2]);
+/** @brief bind(2) to a guest-layout address. */
+int64_t hio_bind(int h, const uint8_t *addr, uint32_t len);
+/** @brief connect(2) to a guest-layout address. */
+int64_t hio_connect(int h, const uint8_t *addr, uint32_t len);
+/** @brief listen(2). */
+int64_t hio_listen(int h, int backlog);
+/** @brief accept(2): the new host descriptor, its peer in addr (guest layout, *len in and out), non-blocking when asked. */
+int64_t hio_accept(int h, uint8_t *addr, uint32_t *len, bool nonblock);
+/** @brief getsockname(2) or getpeername(2), guest layout. */
+int64_t hio_sockname(int h, bool peer, uint8_t *addr, uint32_t *len);
+/** @brief shutdown(2). */
+int64_t hio_shutdown(int h, int how);
+/** @brief sendmsg(2) of one flat message with Linux MSG_ flags; never raises SIGPIPE (EPIPE is the guest's to raise). */
+int64_t hio_sendmsg(int h, const hio_msg *m, uint32_t flags);
+/** @brief recvmsg(2) into one flat buffer with Linux MSG_ flags; passed descriptors come close-on-exec. */
+int64_t hio_recvmsg(int h, hio_msg *m, uint32_t flags);
+/** @brief setsockopt(2) with Linux level, name and value layout. */
+int64_t hio_setsockopt(int h, int level, int name, const void *val, uint32_t len);
+/** @brief getsockopt(2) with Linux level, name and value layout; *len in and out. */
+int64_t hio_getsockopt(int h, int level, int name, void *val, uint32_t *len);
+
 /** @brief One routed signal: the Linux signal, the sender's process and user ids and si_code. */
 typedef struct hio_sig_note {
     int32_t sig;
