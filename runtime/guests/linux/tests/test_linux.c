@@ -55,6 +55,7 @@ static rl_linux_program prog = {
     .code_hi = 0x403000,
     .stack_size = 0x800000,
     .hwcap = 0xfb,
+    .hwcap2 = 0x80,
     .image_id = image_id,
 };
 
@@ -160,7 +161,7 @@ TEST(initial_stack_holds_argc_argv_envp_and_auxv)
     }
     CHECK(found);
     uint64_t aux = env + 8;
-    uint64_t pagesz = 0, entry = 0, phdr = 0, phnum = 0, phent = 0, hwcap = 0, random = 0, uid = 99, euid = 98, secure = 99;
+    uint64_t pagesz = 0, entry = 0, phdr = 0, phnum = 0, phent = 0, hwcap = 0, hwcap2 = 0, random = 0, uid = 99, euid = 98, secure = 99;
     int n = 0;
     for (; rd64(aux); aux += 16, n++) {
         uint64_t v = rd64(aux + 8);
@@ -171,6 +172,7 @@ TEST(initial_stack_holds_argc_argv_envp_and_auxv)
         case L_AT_PHNUM: phnum = v; break;
         case L_AT_PHENT: phent = v; break;
         case L_AT_HWCAP: hwcap = v; break;
+        case L_AT_HWCAP2: hwcap2 = v; break;
         case L_AT_RANDOM: random = v; break;
         case L_AT_UID: uid = v; break;
         case L_AT_EUID: euid = v; break;
@@ -186,6 +188,7 @@ TEST(initial_stack_holds_argc_argv_envp_and_auxv)
     CHECK_EQ(phnum, 3);
     CHECK_EQ(phent, 56);
     CHECK_EQ(hwcap, 0xfb);
+    CHECK_EQ(hwcap2, 0x80);
     CHECK_EQ(secure, 0);
     CHECK_EQ(uid, euid);
     CHECK(lx_ok(random, 16, RL_VM_R));

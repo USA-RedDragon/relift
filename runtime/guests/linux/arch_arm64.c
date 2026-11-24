@@ -101,7 +101,7 @@ size_t lx_arch_aux_extra(const rl_linux_program *p, uint64_t (*out)[2])
     out[0][0] = L_AT_HWCAP;
     out[0][1] = p->hwcap;
     out[1][0] = L_AT_HWCAP2;
-    out[1][1] = 0;
+    out[1][1] = p->hwcap2;
     out[2][0] = L_AT_MINSIGSTKSZ;
     out[2][1] = L_MINSIGSTKSZ;
     return 3;

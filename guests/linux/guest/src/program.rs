@@ -282,6 +282,7 @@ pub struct ProgramFile {
 /// `code_maps` lists the cold copies' maps.
 pub fn program_files(
     program: &Program,
+    cpu: crate::cpu::GuestCpu,
     exec_path: &str,
     (units, code_maps): (&[String], &[String]),
     image_id: [u8; 32],
@@ -310,7 +311,15 @@ pub fn program_files(
     }
     out.push(ProgramFile {
         name: "program.c".into(),
-        bytes: program_c(program, exec_path, (units, code_maps), image_id, trampoline).into_bytes(),
+        bytes: program_c(
+            program,
+            cpu,
+            exec_path,
+            (units, code_maps),
+            image_id,
+            trampoline,
+        )
+        .into_bytes(),
     });
     out
 }
@@ -350,6 +359,7 @@ fn role_c(r: Role) -> &'static str {
 /// file, then the stack size, the units and `main`.
 pub fn program_c(
     program: &Program,
+    cpu: crate::cpu::GuestCpu,
     exec_path: &str,
     (units, code_maps): (&[String], &[String]),
     image_id: [u8; 32],
@@ -465,7 +475,7 @@ pub fn program_c(
         .unwrap_or(0);
     let _ = write!(
         t,
-        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .exec_path = {},\n    .modules = modules,\n    .module_count = {}u,\n    .code_lo = UINT64_C({:#x}),\n    .code_hi = UINT64_C({:#x}),\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n    .code_maps = code_maps,\n    .code_map_count = {}u,\n    .root = {},\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
+        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .exec_path = {},\n    .modules = modules,\n    .module_count = {}u,\n    .code_lo = UINT64_C({:#x}),\n    .code_hi = UINT64_C({:#x}),\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .hwcap2 = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n    .code_maps = code_maps,\n    .code_map_count = {}u,\n    .root = {},\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
         id.join(", "),
         c_string(modules.first().map_or("program", |m| m.name.as_str())),
         c_string(exec_path),
@@ -473,7 +483,8 @@ pub fn program_c(
         low & !(PAGE - 1),
         high.div_ceil(PAGE) * PAGE,
         stack,
-        crate::cpu::hwcap(),
+        cpu.hwcap(),
+        cpu.hwcap2(),
         units.len(),
         code_maps.len(),
         program

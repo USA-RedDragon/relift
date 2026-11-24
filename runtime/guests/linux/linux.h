@@ -104,6 +104,8 @@ typedef struct rl_linux_program {
     uint64_t stack_size;
     /** @brief AT_HWCAP: the features of the CPU the program was lifted for. */
     uint64_t hwcap;
+    /** @brief AT_HWCAP2: the rest of those features. */
+    uint64_t hwcap2;
     /** @brief Lifted units to register. */
     const rl_unit *const *units;
     /** @brief Number of units. */

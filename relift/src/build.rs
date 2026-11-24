@@ -1165,7 +1165,7 @@ const RCPC_ARCH: &str = "-march=armv8-a+rcpc";
 /// start, through the `rl_lifted_rcpc` marker the flags define) and iOS
 /// devices from the A12 on have it. `RELIFT_RCPC=0` leaves it off, so guest
 /// LDAPR stays LDAR, to compare builds.
-fn rcpc_flags(target: &str) -> Vec<String> {
+pub(crate) fn rcpc_flags(target: &str) -> Vec<String> {
     let off = std::env::var("RELIFT_RCPC").is_ok_and(|v| v == "0");
     if target.contains("arm64") && !off {
         vec![RCPC_ARCH.into(), "-DRL_LIFTED_RCPC=1".into()]
@@ -1177,7 +1177,7 @@ fn rcpc_flags(target: &str) -> Vec<String> {
 /// Whether a native arm64 build targets a host with FEAT_LRCPC: every Apple
 /// M-series chip does, so macOS always; Linux and Windows only when
 /// `RELIFT_RCPC=1` says the build's machine is the run's machine.
-fn host_rcpc() -> bool {
+pub(crate) fn host_rcpc() -> bool {
     cfg!(target_os = "macos") || std::env::var("RELIFT_RCPC").is_ok_and(|v| v == "1")
 }
 

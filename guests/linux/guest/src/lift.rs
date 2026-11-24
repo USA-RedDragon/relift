@@ -159,9 +159,9 @@ fn mode_reason(
     })
 }
 
-/// The frontend of the program's CPU.
-pub fn frontend() -> Arm64 {
-    Arm64 { cpu: cpu::cpu() }
+/// The frontend of the program's CPU `cpu`.
+pub fn frontend(cpu: cpu::GuestCpu) -> Arm64 {
+    Arm64 { cpu: cpu.cpu() }
 }
 
 /// Discovery of one module, then the escapes found with the other modules
@@ -181,11 +181,12 @@ struct Found {
 /// them all in it. `cold` adds the superset of each module for its cold copy.
 pub fn lift_program(
     placed: &[Placed],
+    cpu: cpu::GuestCpu,
     image_id: [u8; 32],
     force_trampoline: bool,
     cold: bool,
 ) -> Vec<Lifted> {
-    let fe = frontend();
+    let fe = frontend(cpu);
     let slots = program::bound_slots(placed);
     let mut found: Vec<Found> = relift_proc::workers::parallel(placed, |p| {
         let module = program::module(p);

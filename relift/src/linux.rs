@@ -10,6 +10,12 @@
 //! every file's code into a unit of its own (`relift-linux`) and links them
 //! with the runtime's core, A64 and Linux layers, which are the kernel the
 //! program runs on.
+//!
+//! `game.cpu` in `relift.toml` names the CPU the program is lifted for:
+//! `cortex-a57` (Armv8.0-A, the default) or `cortex-a78c` (Armv8.2-A with LSE,
+//! LRCPC2, DotProd and PAuth2). The program sees that CPU in `AT_HWCAP`,
+//! `AT_HWCAP2` and the ID registers an `MRS` reads, and an instruction the
+//! CPU lacks lifts as undefined ([`relift_linux::cpu`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -274,6 +280,8 @@ struct Project {
     title: String,
     /// The import's sysroot, the guest's root file system.
     root: Option<String>,
+    /// `game.cpu`: the CPU the program is lifted for.
+    cpu: relift_linux::cpu::GuestCpu,
 }
 
 fn project() -> Result<Project, BoxError> {
@@ -284,6 +292,12 @@ fn project() -> Result<Project, BoxError> {
     let bytes = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
     let title = s("title").unwrap_or_else(|| "program".into());
+    let cpu = match s("cpu") {
+        None => relift_linux::cpu::GuestCpu::CortexA57,
+        Some(n) => relift_linux::cpu::GuestCpu::from_name(&n).ok_or_else(|| {
+            format!("relift.toml: game.cpu is {n:?}, not \"cortex-a57\" or \"cortex-a78c\"")
+        })?,
+    };
     let mut inputs = vec![Input {
         name: title.clone(),
         role: Role::Main,
@@ -355,6 +369,7 @@ fn project() -> Result<Project, BoxError> {
         exec_path,
         title,
         root,
+        cpu,
     })
 }
 
@@ -375,12 +390,13 @@ fn emit_cold(
     placed: &program::Placed,
     index: usize,
     lifted: &lift::Lifted,
+    cpu: relift_linux::cpu::GuestCpu,
     cdir: &Path,
     ui: &mut Ui,
 ) -> Result<ColdMade, BoxError> {
     let row = ui.row(&format!("{} cold", placed.name));
     ui.begin(row, "cold");
-    let fe = lift::frontend();
+    let fe = lift::frontend(cpu);
     let granule = relift_guest::Frontend::granule(&fe);
     let module = &lifted.module;
     let hot_layout = relift_analyze::Layout::of(&lifted.analysis, granule);
@@ -563,7 +579,9 @@ pub fn build(
     let mut program = program::place(p.inputs, p.data).map_err(|e| format!("{}: {e}", p.title))?;
     program.root = p.root.clone();
     let placed = &program.modules;
-    let mut all = Vec::new();
+    // The image id names the lifted code, so it covers the CPU it was lifted for.
+    let mut all = format!("{:?}", p.cpu).into_bytes();
+    all.push(0);
     for m in placed {
         all.extend_from_slice(m.name.as_bytes());
         all.push(0);
@@ -577,7 +595,13 @@ pub fn build(
     for &row in &rows {
         ui.begin(row, "lift");
     }
-    let results = lift::lift_program(placed, id, settings.emit.trampoline, settings.emit.cold);
+    let results = lift::lift_program(
+        placed,
+        p.cpu,
+        id,
+        settings.emit.trampoline,
+        settings.emit.cold,
+    );
     let mut files = Vec::new();
     let mut units = Vec::new();
     let mut maps = Vec::new();
@@ -605,7 +629,7 @@ pub fn build(
         }
         units.push(lift::unit_symbol(i));
         if settings.emit.cold {
-            let made = emit_cold(&placed[i], i, lifted, &cdir, ui)?;
+            let made = emit_cold(&placed[i], i, lifted, p.cpu, &cdir, ui)?;
             files.extend(made.files);
             units.push(made.unit);
             maps.push(made.map);
@@ -634,6 +658,7 @@ pub fn build(
     let mut prog = Vec::new();
     for f in program::program_files(
         &program,
+        p.cpu,
         &p.exec_path,
         (&units, &maps),
         id,
