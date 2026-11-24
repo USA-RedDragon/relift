@@ -1412,11 +1412,12 @@ int nvn_dlss_run(replay *r, const nvn_cmd *e)
         ui.reset = true;
         rl_log(RL_LOG_INFO, "nvn",
                "DLSS evaluation on network 0x%llx (method %u, preset %u, flags 0x%x): %ux%u of a %ux%u input to %ux%u, "
-               "jitter %g,%g, motion vector scale %g,%g, pre-exposure %g, depth %s, motion vectors %s, exposure %s",
+               "jitter %g,%g, motion vector scale %g,%g, pre-exposure %g, depth %s, motion vectors %s, exposure %s, "
+               "bias mask %s",
                (unsigned long long)e->x[1], n ? n->method : 0, n ? n->preset : 0, n ? n->flags : 0, ui.in.width,
                ui.in.height, iw, ih, ui.out_rect.width, ui.out_rect.height, (double)p.jitter[0], (double)p.jitter[1],
                (double)p.motion_scale[0], (double)p.motion_scale[1], (double)p.pre_exposure, p.depth ? "yes" : "no",
-               p.motion ? "yes" : "no", p.exposure ? "yes" : "no");
+               p.motion ? "yes" : "no", p.exposure ? "yes" : "no", p.bias ? "yes" : "no");
     }
     for (int pass = 0;; pass++) {
         if (pass == 2)
