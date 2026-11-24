@@ -114,6 +114,9 @@ static uint32_t hash_bytes(const void *p, size_t n)
     return (uint32_t)h ^ (uint32_t)(h >> 32);
 }
 
+/** @brief Why the calling thread's last make failed (nvn_pipe_why). */
+static _Thread_local char t_why[160];
+
 /** @brief The entry for key in t; P.lock held. NULL when there is none. */
 static entry *find_locked(table *t, const void *key, size_t len, uint32_t h)
 {
@@ -196,6 +199,8 @@ static entry *claim(table *t, const void *key, size_t len, bool *mine)
     } else {
         while (e->state == 0)
             pthread_cond_wait(&P.cv, &P.lock);
+        if (e->state == 2)
+            snprintf(t_why, sizeof t_why, "an earlier make of the same pipeline or library failed");
     }
     pthread_mutex_unlock(&P.lock);
     return e;
@@ -212,6 +217,15 @@ static void finish(entry *e, VkPipeline p)
 
 /** @brief The calling thread makes the warm-up's own items, which the compile screen counts itself. */
 static _Thread_local bool t_quiet;
+
+
+const char *nvn_pipe_why(void) { return t_why[0] ? t_why : "no reason was noted"; }
+
+/** @brief Notes why a make failed, for nvn_pipe_why. */
+static void note_why(const char *what, VkResult vr)
+{
+    snprintf(t_why, sizeof t_why, "the driver returned %d making the %s", (int)vr, what);
+}
 
 void nvn_pipe_screen_quiet(void) { t_quiet = true; }
 
@@ -276,6 +290,8 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
     pthread_mutex_unlock(&P.lock);
     if (late || rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "%s%s created in %.1f ms", late ? "late compile: " : "", what, dt / 1e6);
+    if (vr != VK_SUCCESS)
+        note_why(what, vr);
     return vr;
 }
 
@@ -854,8 +870,10 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
     pthread_mutex_unlock(&P.lock);
     if (late || rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "nvn", "%scompute pipeline created in %.1f ms", late ? "late compile: " : "", dt / 1e6);
-    if (vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS) {
+        note_why("compute pipeline", vr);
         p = NULL;
+    }
     finish(e, p);
     return p;
 }

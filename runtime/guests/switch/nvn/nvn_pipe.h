@@ -145,6 +145,8 @@ const nvn_pipe_rec *nvn_pipe_recorded_at(uint32_t i);
  * waits for is late, and logged; the warm-up workers' own compiles (nvn_pipe_screen_quiet) are not.
  */
 void nvn_pipe_warmed(void);
+/** @brief Why the calling thread's last failed make of a pipeline or library failed, for the warm-up's report. */
+const char *nvn_pipe_why(void);
 /** @brief Sets or clears what nvn_pipe_warmed set, without saving (tests). */
 void nvn_pipe_set_warmed(bool warmed);
 /**

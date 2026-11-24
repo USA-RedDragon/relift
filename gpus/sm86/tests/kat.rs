@@ -33,8 +33,6 @@ const REJECTED: &[&str] = &[
     "HFMA2.FMZ",
     "HFMA2.BF16_V2",
     // Rejected on the hosts without shaderInt64 only (the double precision model).
-    "F2F.F32.F64, FMUL 1, F2F.F64.F32",
-    "F2F.F32.F64, FMUL.FTZ 1, F2F.F64.F32",
 ];
 
 /// How a known mismatch may differ from the device.

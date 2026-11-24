@@ -84,7 +84,8 @@ static struct {
     bool counted_done;
     /** @brief The launch items the driver refused: how many, and the keys of the first MAX_FAIL_KEYS for the report. */
     uint32_t lfailed, nfailkeys;
-    char (*failkeys)[65];
+    /** @brief Each refused item's key and why, tab separated. */
+    char (*failkeys)[270];
     /** @brief The compile screen is up, and the first submit waits for the whole warm-up. */
     bool screen, wait;
     /** @brief The RELIFT_WARM_THREADS count, 0 when unset. */
@@ -105,7 +106,19 @@ static struct {
 /** @brief The refused programs the report names. */
 #define MAX_FAIL_KEYS 4096
 
-/** @brief Notes a refused launch item for the report (W.lock held): the key of its program, or of its pipeline's first stage. */
+/** @brief Why the calling worker's last item failed, for the report and the log. */
+static _Thread_local char t_fail[200];
+
+/** @brief Notes why the calling worker's item failed. */
+static void fail_why(const char *why)
+{
+    snprintf(t_fail, sizeof t_fail, "%s", why);
+}
+
+/**
+ * @brief Notes a refused launch item for the report (W.lock held): the key of its program, or of its pipeline's first
+ * stage, with why it failed (t_fail).
+ */
 static void note_failed(uint32_t i)
 {
     const char *key = "";
@@ -117,11 +130,13 @@ static void note_failed(uint32_t i)
     } else if (nvn_shader_key_at(i - W.nrecorded, tablekey)) {
         key = tablekey;
     }
+    rl_log(RL_LOG_INFO, "nvn", "warm-up: item %u (%s %s) failed: %s", i, i < W.nrecorded ? "recorded" : "table",
+           key[0] ? key : "with no key", t_fail[0] ? t_fail : "no reason was noted");
     if (!key[0] || W.nfailkeys >= MAX_FAIL_KEYS)
         return;
     if (!W.failkeys && !(W.failkeys = calloc(MAX_FAIL_KEYS, sizeof *W.failkeys)))
         return;
-    snprintf(W.failkeys[W.nfailkeys++], sizeof *W.failkeys, "%s", key);
+    snprintf(W.failkeys[W.nfailkeys++], sizeof *W.failkeys, "%.64s\t%s", key, t_fail[0] ? t_fail : "no reason was noted");
 }
 
 /** @brief Writes the report of the programs the driver refused and tells the screen where it is (W.lock held). */
@@ -129,7 +144,7 @@ static void write_failed_report(void)
 {
     if (!W.lfailed)
         return;
-    size_t cap = 512 + (size_t)W.nfailkeys * 70;
+    size_t cap = 512 + (size_t)W.nfailkeys * 275;
     char *text = malloc(cap);
     if (!text)
         return;
@@ -137,10 +152,10 @@ static void write_failed_report(void)
                      "relift shader report\n\nThe GPU driver turned down %u of %u shaders while relift prepared the "
                      "graphics at launch. The game can still run, but some effects may be missing or look wrong. "
                      "Updating the GPU driver may fix this.\n\n%u shader%s, by their keys in the build's shader "
-                     "table%s:\n",
+                     "table%s, each with why it failed:\n",
                      W.lfailed, W.total, W.lfailed, W.lfailed == 1 ? "" : "s",
                      W.nfailkeys < W.lfailed ? " (the first ones)" : "");
-    for (uint32_t i = 0; i < W.nfailkeys && n > 0 && (size_t)n + 70 < cap; i++)
+    for (uint32_t i = 0; i < W.nfailkeys && n > 0 && (size_t)n + 275 < cap; i++)
         n += snprintf(text + n, cap - (size_t)n, "%s\n", W.failkeys[i]);
     char path[1300];
     if (n > 0 && rl_report_write("relift-shaders", text, (size_t)n, path, sizeof path) == 0)
@@ -282,6 +297,7 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
     nvn_module *m = nvn_module_get(key, stage, why, sizeof why);
     if (!m) {
         rl_log(RL_LOG_ERROR, "nvn", "warm-up: %s", why);
+        fail_why(why);
         return false;
     }
     stage = m->stage;
@@ -300,12 +316,18 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
         rl_log(RL_LOG_DEBUG, "nvn", "warm-up: compute program %s, workgroup %ux%ux%u", key, wg[0], wg[1], wg[2]);
         VkPipeline p = nvn_pipe_compute(m->m, n, map, vals);
         rl_log(RL_LOG_DEBUG, "nvn", "warm-up: compute program %s %s", key, p ? "made" : "refused");
-        return p != NULL;
+        if (p)
+            return true;
+        fail_why(nvn_pipe_why());
+        return false;
     }
     if (!nvn_pipe_uses_libraries() || (stage != 0 && stage != 1))
         return true;
     nvn_warm_key(&k, m, stage);
-    return stage == 0 ? nvn_pipe_warm_vertex(&k) : nvn_pipe_warm_fragment(&k);
+    if (stage == 0 ? nvn_pipe_warm_vertex(&k) : nvn_pipe_warm_fragment(&k))
+        return true;
+    fail_why(nvn_pipe_why());
+    return false;
 }
 
 bool nvn_warm_check(const char *key, char *why, size_t why_n)
@@ -361,26 +383,40 @@ static bool make_recorded(const nvn_pipe_rec *rec)
         return warm_program(rec->keys[5], (int)rec->k.topology, rec->k.spec[0]);
     if (rec->kind == NVN_REC_COMPUTE) {
         nvn_module *m = nvn_module_get(rec->keys[5], (int)NVN_STAGE_COMPUTE, why, sizeof why);
-        if (!m)
+        if (!m) {
+            fail_why(why);
             return false;
+        }
         VkSpecializationMapEntry map[NVN_MAX_SPECS];
         uint32_t vals[NVN_MAX_SPECS], n = rec->k.nspec[0];
         memcpy(map, rec->k.spec_map[0], n * sizeof map[0]);
         memcpy(vals, rec->k.spec[0], n * sizeof vals[0]);
-        return nvn_pipe_compute(m->m, n, map, vals) != NULL;
+        if (nvn_pipe_compute(m->m, n, map, vals))
+            return true;
+        fail_why(nvn_pipe_why());
+        return false;
     }
     nvn_pipe_key k = rec->k;
     nvn_module *mods[5] = { NULL };
     for (uint32_t s = 0; s < 5; s++) {
         if (!rec->keys[s][0])
             continue;
-        if (!(mods[s] = nvn_module_get(rec->keys[s], (int)s, why, sizeof why)))
+        if (!(mods[s] = nvn_module_get(rec->keys[s], (int)s, why, sizeof why))) {
+            char stage_why[220];
+            snprintf(stage_why, sizeof stage_why, "stage %u: %s", s, why);
+            fail_why(stage_why);
             return false;
+        }
         k.mods[s] = mods[s]->m;
     }
-    if (mods[0] && !nvn_module_link(mods, k.mods))
+    if (mods[0] && !nvn_module_link(mods, k.mods)) {
+        fail_why("the pre-raster and fragment programs could not be linked");
         return false;
-    return nvn_pipe_graphics(&k) != NULL;
+    }
+    if (nvn_pipe_graphics(&k))
+        return true;
+    fail_why(nvn_pipe_why());
+    return false;
 }
 
 /** @brief Logs progress at most every two seconds, or at once when force is set; W.lock held. */
@@ -501,6 +537,7 @@ static void *launch_worker(void *arg)
             continue;
         }
         bool ok = true;
+        t_fail[0] = 0;
         if (i < W.nrecorded) {
             ok = make_recorded(nvn_pipe_recorded_at(i));
         } else {
