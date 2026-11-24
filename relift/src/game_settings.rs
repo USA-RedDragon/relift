@@ -392,6 +392,15 @@ pub fn runtime_settings() -> Vec<Setting> {
                 step: 0,
             },
         ),
+        s(
+            "system.console_mode",
+            "Console mode",
+            "Whether the console is docked to a TV or held in the hands, which the game reads as the console's operation and performance mode. docked: the game renders for a TV, usually sharper and costlier on the GPU; handheld: it renders for the built-in screen, usually lighter. The same default on every host. A run can switch while the game runs (rl_am_set_operation_mode, or the input script controls console.docked and console.handheld)",
+            Value::String("handheld".into()),
+            SettingKind::Enum {
+                choices: ["handheld", "docked"].map(String::from).into(),
+            },
+        ),
     ]
 }
 
@@ -1152,7 +1161,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 36);
+        assert_eq!(section(Vec::new()).runtime.len(), 37);
     }
 
     #[test]

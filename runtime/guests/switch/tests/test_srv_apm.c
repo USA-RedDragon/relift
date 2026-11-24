@@ -2,7 +2,9 @@
  * @file test_srv_apm.c
  * @brief apm, apm:am, apm:sys, apm:p and psm driven through IPC the way
  * libnx's apmInitialize, apmGetPerformanceMode and the psm wrappers use them.
+ * The performance mode is the console's: boost docked, normal handheld.
  */
+#include "am.h"
 #include "tc.h"
 
 #define APM_INVALID_PARAMETERS (148u | (1u << 9))
@@ -128,6 +130,12 @@ TEST(apm_sys_requests_and_current_configuration)
     uint32_t mode = 1;
     CHECK_EQ(rc_of(call(&e, sys, 0, &mode, 4)), 0);
     r = call(&e, sys, 7, NULL, 0);
+    CHECK_EQ(tc_u32(&r, 0), 0x00020003);
+    r = call(&e, apm, 1, NULL, 0);
+    CHECK_EQ(tc_u32(&r, 0), 0);
+
+    rl_am_set_operation_mode(true);
+    r = call(&e, sys, 7, NULL, 0);
     CHECK_EQ(tc_u32(&r, 0), 0x00020004);
     r = call(&e, apm, 1, NULL, 0);
     CHECK_EQ(tc_u32(&r, 0), 1);
@@ -142,6 +150,7 @@ TEST(apm_sys_requests_and_current_configuration)
     uint32_t boost = 1;
     CHECK_EQ(rc_of(call(&e, sys, 6, &boost, 4)), 0);
     CHECK_EQ(rc_of(call(&e, sys, 1, NULL, 0)), SF_RESULT_UNKNOWN_COMMAND);
+    rl_am_set_operation_mode(false);
 }
 
 TEST(apm_p_opens_sessions)

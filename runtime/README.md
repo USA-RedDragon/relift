@@ -199,8 +199,8 @@ Run-time settings are typed keys declared with `rl_settings_declare`
 (`core/include/relift/settings.h`): bool, int and float with a range and a
 step, enum, string and key binding. The runtime declares `video`, `language`,
 `video.gpu_driver`, `gpu.math`, `picture.aa`, `picture.aa_quality` and `picture.filter`; the Switch
-layer declares `save.dir`, `vk.device`, `vk.keep_attachments`, `vk.decode_bc` and
-`kernel.layout`; the Game
+layer declares `save.dir`, `vk.device`, `vk.keep_attachments`, `vk.decode_bc`,
+`kernel.layout` and `system.console_mode`; the Game
 Boy layer declares `video.gb_color_correction`; the Nintendo DS layer
 declares `save.dir`, `save.type`, `video.nds_layout`, `video.nds_displays`,
 `video.nds_integer_scale` and `video.nds_lcd_response`; a game adds its own from the
@@ -254,6 +254,7 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_DATA_VERIFY=hash` | Mobile apps: at start, check the game data against the app's `data-manifest.txt` (written by `relift build` for iOS and Android) by SHA-256 as well as by size. Without it only sizes are checked. A missing or short file stops the app with a message naming it (an Android app opens its game data import instead, where the player picks a folder or zip of the data); `relift push --target <t>` copies the data and checks it the same way |
 | `RELIFT_KERNEL_LAYOUT=compact\|console` | The `kernel.layout` setting (Switch). `compact` (default): the regions the game's address space type has, packed at the lowest bases, so the host reserves tens of GiB instead of 512 GiB (docs/abi.md section 2); `console`: the console's exact region sizes, for comparing against it |
 | `RELIFT_NET=off\|lan` | The `net.mode` setting (Switch). `off` (default): local wireless play finds no one nearby. `lan`: local wireless sessions run over the host network with the ldn_mitm LAN protocol (UDP and TCP port 11452), so other relift instances and consoles running ldn_mitm on the same network can join; the game's sockets then reach the members of the session it is in and no other address |
+| `RELIFT_CONSOLE_MODE=handheld\|docked` | The `system.console_mode` setting (Switch and Switch 2, per game and per machine, like `video.gpu_driver`): the console's mode at start. `handheld` (default on every host, never chosen by platform): the game renders for the built-in screen, usually at a lower resolution and lighter on the GPU. `docked`: it renders for a TV, usually sharper and costlier. am (GetOperationMode, GetPerformanceMode, the default display resolution, the performance configuration), apm, vi:s GetDisplayMode, gsv's buffer resolution and the Switch 2 audio output all follow it. While the game runs, `rl_am_set_operation_mode` or the input script controls `console.docked` and `console.handheld` switch it, queuing OperationModeChanged and PerformanceModeChanged once, as docking a console does |
 | `RELIFT_NET_IF=<name or IPv4>` | The `net.interface` setting (Switch): the host interface local wireless play uses (default: the first one that is up with a non-loopback IPv4 address) |
 | `RELIFT_VK_CAPTURE=<dir>[:N]` | Debug: write every Nth presented guest swapchain image (default every one) as `<dir>/frame-<number>-<guest ms>ms.png`. Each capture waits for the GPU, so it slows the game; off when unset |
 | `RELIFT_VK_CAPTURE_WINDOW=<from>-<to>` | Debug: with `RELIFT_VK_CAPTURE`, capture every present from number `from` up to (not including) `to` instead of every Nth |

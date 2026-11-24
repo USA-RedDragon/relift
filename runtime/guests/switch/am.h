@@ -31,7 +31,12 @@ enum { RL_AM_FOCUS_IN = 1, RL_AM_FOCUS_OUT = 2 };
 RL_RUNTIME_API void rl_am_push_message(uint32_t msg);
 /** @brief Changes the focus state and queues FocusStateChanged (and ChangeIntoForeground when focused). */
 RL_RUNTIME_API void rl_am_set_focus(bool in_focus);
-/** @brief Switches docked or handheld; when it changes, queues OperationModeChanged and PerformanceModeChanged and signals the display resolution event. */
+/**
+ * @brief Switches docked or handheld while the game runs, as docking or undocking a console does: when the mode changes,
+ * queues OperationModeChanged and PerformanceModeChanged once and signals the display resolution event. Every service
+ * answer that depends on the mode (am, apm, vi, gsv, audio) follows the new mode at once. The mode a run starts in is
+ * the system.console_mode setting.
+ */
 RL_RUNTIME_API void rl_am_set_operation_mode(bool docked);
 /** @brief True while docked. */
 RL_RUNTIME_API bool rl_am_is_docked(void);

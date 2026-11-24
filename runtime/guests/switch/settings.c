@@ -18,6 +18,7 @@ static const char *const g_memory[] = { "auto", "import", "mirror" };
 
 static const char *const g_pac_choices[] = { "fast", "qarma5" };
 static const char *const g_net_modes[] = { "off", "lan" };
+static const char *const g_console_modes[] = { "handheld", "docked" };
 
 static const rl_setting_def g_defs[] = {
     {
@@ -154,6 +155,19 @@ static const rl_setting_def g_defs[] = {
         .env = "RELIFT_PAC_SEED",
         .min_int = 0,
         .max_int = INT64_MAX,
+    },
+    {
+        .key = "system.console_mode",
+        .type = RL_SETTING_ENUM,
+        .label = "Console mode",
+        .description = "Whether the console is docked to a TV or held in the hands, which the game reads as the "
+                       "console's operation and performance mode. docked: the game renders for a TV, usually sharper "
+                       "and costlier on the GPU; handheld: it renders for the built-in screen, usually lighter. The "
+                       "same default on every host. A run can switch while the game runs (rl_am_set_operation_mode, or "
+                       "the input script controls console.docked and console.handheld)",
+        .env = "RELIFT_CONSOLE_MODE",
+        .choices = g_console_modes,
+        .nchoices = 2,
     },
 };
 

@@ -1,12 +1,15 @@
 /**
  * @file srv_am.c
  * @brief appletOE, appletAE, their proxy objects and the applet manager state
- * (message queue, focus, operation mode).
+ * (message queue, focus, operation mode). The operation mode starts as the
+ * system.console_mode setting says, handheld by default on every host.
  *
  * Command ids and behavior follow Ryujinx (MIT, Copyright (c) Ryujinx Team
  * and Contributors) and libnx (ISC, Copyright (c) libnx Authors).
  */
 #include "srv_am_priv.h"
+
+#include <relift/settings.h>
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -422,7 +425,7 @@ void rl_srv_install_am(void)
     am_qhead = 0;
     am_qcount = 0;
     am_focus = RL_AM_FOCUS_IN;
-    am_docked = false;
+    am_docked = rl_setting_enum("system.console_mode") == 1;
     am_language = RL_AM_LANGUAGE_CODE_EN_US;
     am_user_high = 1;
     am_user_low = 0;

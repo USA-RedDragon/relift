@@ -5,7 +5,14 @@
  * Command ids, defaults and results follow Ryujinx (MIT) Services/Apm and
  * Services/Ptm/Psm, plus the psm commands of libnx (ISC) psm.c. The host has
  * no battery to report, so psm reports a full battery on a charger.
+ *
+ * The performance mode is the console's: boost while docked, normal handheld
+ * (rl_am_is_docked, the system.console_mode setting), as in Ryujinx's
+ * Horizon.ChangeDockedModeState and Eglantine's apm Controller, so
+ * GetPerformanceMode and GetCurrentPerformanceConfiguration follow a mode
+ * switch while the game runs.
  */
+#include "am.h"
 #include "services.h"
 
 #include <stdlib.h>
@@ -24,7 +31,7 @@ enum { MODE_DEFAULT = 0, MODE_BOOST = 1 };
 #define PSM_MAX_PERCENT_CENTI_MILLI 100000u
 
 static struct {
-    uint32_t mode;
+    uint32_t requested;
     uint32_t cpu_boost;
     uint32_t config[2];
     bool overclock;
@@ -45,9 +52,12 @@ static uint32_t config_for(uint32_t mode)
     return mode == MODE_BOOST ? g_apm.config[MODE_BOOST] : g_apm.config[MODE_DEFAULT];
 }
 
+/** @brief The current performance mode: boost while docked, normal handheld. */
+static uint32_t current_mode(void) { return rl_am_is_docked() ? MODE_BOOST : MODE_DEFAULT; }
+
 static rl_result mgr_get_performance_mode(rl_ipc_req *r)
 {
-    *(uint32_t *)rl_ipc_out(r, 4) = g_apm.mode;
+    *(uint32_t *)rl_ipc_out(r, 4) = current_mode();
     return KR_SUCCESS;
 }
 
@@ -118,12 +128,16 @@ static const rl_ipc_class privileged_class = { "apm:p", privileged_cmds,
 
 static rl_ipc_object *privileged_factory(void) { return rl_srv_object(&privileged_class, NULL); }
 
+/**
+ * @brief apm:sys 0: a system program asks for a performance mode. Kept, but the mode reported stays the console's
+ * (docked or handheld), which a request does not change.
+ */
 static rl_result sys_request_performance_mode(rl_ipc_req *r)
 {
     uint32_t mode;
     if (!read_u32(r, 0, &mode))
         return SF_RESULT_INVALID_HEADER;
-    g_apm.mode = mode;
+    g_apm.requested = mode;
     return KR_SUCCESS;
 }
 
@@ -138,7 +152,7 @@ static rl_result sys_set_cpu_boost_mode(rl_ipc_req *r)
 
 static rl_result sys_get_current_performance_configuration(rl_ipc_req *r)
 {
-    *(uint32_t *)rl_ipc_out(r, 4) = config_for(g_apm.mode);
+    *(uint32_t *)rl_ipc_out(r, 4) = config_for(current_mode());
     return KR_SUCCESS;
 }
 

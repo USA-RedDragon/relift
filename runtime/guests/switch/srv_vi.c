@@ -6,6 +6,7 @@
  * Ported from Ryujinx (MIT, Copyright (c) Ryujinx Team and Contributors),
  * Ryujinx.HLE/HOS/Services/Vi. Request layouts follow libnx (ISC) services/vi.c.
  */
+#include "am.h"
 #include "vi.h"
 
 #include "srv_link.h"
@@ -100,6 +101,16 @@ void vi_host_flip(int64_t t)
     vi_trace('F', (uint64_t)phase, (uint64_t)shift, locked);
 }
 
+void vi_script_frame(uint64_t n)
+{
+    rl_ports_script_frame(n);
+    float v;
+    if (rl_ports_script_value("console", "docked", &v) && v > 0.5f)
+        rl_am_set_operation_mode(true);
+    else if (rl_ports_script_value("console", "handheld", &v) && v > 0.5f)
+        rl_am_set_operation_mode(false);
+}
+
 uint64_t vi_vsync_tick(int64_t t)
 {
     pthread_mutex_lock(&clock_lock);
@@ -107,7 +118,7 @@ uint64_t vi_vsync_tick(int64_t t)
     int64_t k = vi_clock_index(&vsync_clock, t);
     pthread_mutex_unlock(&clock_lock);
     uint64_t n = k > 0 ? (uint64_t)k : 0;
-    rl_ports_script_frame(n);
+    vi_script_frame(n);
     return n;
 }
 
@@ -298,13 +309,18 @@ static rl_result get_display_resolution(rl_ipc_req *r)
 
 static rl_result sys_create_stray(rl_ipc_req *r) { return create_stray_layer(r); }
 
+/**
+ * @brief vi:s 3200 GetDisplayMode: the mode of the display the console shows on, 1920x1080 docked (the TV) and the
+ * built-in screen's resolution handheld, at 60 Hz (Eglantine's ISystemDisplayService::GetDisplayMode, inferred).
+ */
 static rl_result sys_get_display_mode(rl_ipc_req *r)
 {
     uint64_t id;
     if (!rl_srv_in(r, &id, 8))
         return SF_RESULT_INVALID_HEADER;
-    uint32_t w, h;
-    vi_get_resolution(&w, &h);
+    uint32_t w = 1920, h = 1080;
+    if (!rl_am_is_docked())
+        vi_get_resolution(&w, &h);
     float hz = 60.0f;
     uint8_t *o = rl_ipc_out(r, 16);
     memcpy(o, &w, 4);

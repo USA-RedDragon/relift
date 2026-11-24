@@ -373,6 +373,12 @@ int64_t vi_vsync_after(int64_t t);
  * the start of the clock, before any guest event for it is signaled. Returns the number.
  */
 uint64_t vi_vsync_tick(int64_t t);
+/**
+ * @brief Tells the input script that vsync n has come, then docks or undocks the console when the script holds
+ * console.docked or console.handheld at it, so a scripted run can switch modes while the game runs
+ * (rl_am_set_operation_mode queues the change messages only once, however long the step holds).
+ */
+void vi_script_frame(uint64_t n);
 /** @brief The vi vsync grid and its lock to the host display (vi_clock.c). */
 typedef struct vi_clock {
     /** @brief A vsync of the grid; the others are VI_VSYNC_NS apart. */
