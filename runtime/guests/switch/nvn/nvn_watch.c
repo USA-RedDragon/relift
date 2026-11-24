@@ -11,6 +11,8 @@
 
 #include "hos.h"
 
+#include <inttypes.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -200,6 +202,7 @@ void nvn_watch_touch(uint64_t addr, uint64_t size)
 {
     if (!ready() || !size)
         return;
+    nvn_wwatch_note(addr, size, "a GPU write to watched texture pages");
     rl_vm *vm = &hos.vm;
     uint64_t hp = vm->host_page, first = addr / hp, end = (addr + size + hp - 1) / hp;
     if (end > g_nchunks * CHUNK_PAGES)
@@ -330,4 +333,47 @@ void nvn_track_collect(void (*run)(void *user, uint64_t addr, uint64_t size, boo
             i = e;
         }
     }
+}
+
+static struct {
+    uint64_t lo, hi;
+    uint32_t hits;
+} ww;
+static pthread_once_t ww_once = PTHREAD_ONCE_INIT;
+
+static void ww_init(void)
+{
+    const char *e = getenv("RELIFT_GUEST_WRITE_WATCH");
+    if (!e || !*e)
+        return;
+    char *end;
+    uint64_t a = strtoull(e, &end, 0), n = *end == ':' ? strtoull(end + 1, &end, 0) : 0;
+    if (*end || !n) {
+        rl_log(RL_LOG_WARN, "nvn", "RELIFT_GUEST_WRITE_WATCH \"%s\" is not <addr>:<len>; the watch is off", e);
+        return;
+    }
+    nvn_wwatch_set(a, n);
+}
+
+void nvn_wwatch_set(uint64_t addr, uint64_t len)
+{
+    pthread_once(&ww_once, ww_init);
+    ww.lo = addr;
+    ww.hi = len ? addr + len : 0;
+    __atomic_store_n(&ww.hits, 0, __ATOMIC_RELAXED);
+    if (len)
+        rl_log(RL_LOG_INFO, "nvn", "guest write watch: [0x%" PRIx64 ", 0x%" PRIx64 ")", ww.lo, ww.hi);
+}
+
+uint32_t nvn_wwatch_hits(void) { return __atomic_load_n(&ww.hits, __ATOMIC_RELAXED); }
+
+bool nvn_wwatch_note(uint64_t guest, uint64_t size, const char *what)
+{
+    pthread_once(&ww_once, ww_init);
+    if (!ww.hi || !size || guest >= ww.hi || guest + size <= ww.lo)
+        return false;
+    if (__atomic_fetch_add(&ww.hits, 1, __ATOMIC_RELAXED) < 2000)
+        rl_log(RL_LOG_WARN, "nvn", "guest write watch: %s writes [0x%" PRIx64 ", 0x%" PRIx64 ") (noted from host %p)",
+               what, guest, guest + size, __builtin_return_address(0));
+    return true;
 }

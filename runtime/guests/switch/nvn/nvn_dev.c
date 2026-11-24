@@ -837,6 +837,7 @@ static bool placeable(uint64_t memory, uint64_t size)
  */
 static bool pool_back(nvn_pool *p, uint64_t memory, uint64_t size)
 {
+    nvn_wwatch_note(memory, size, "a memory pool's device buffer (GPU writes land in guest memory)");
     int mode = rl_setting_enum("nvn.memory");
     bool in_place = mode != MEMORY_MIRROR;
     if (in_place && kept_take(memory, size, &p->im))

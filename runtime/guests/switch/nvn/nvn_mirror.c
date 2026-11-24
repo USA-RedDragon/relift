@@ -25,6 +25,7 @@
 #include "vkdev.h"
 
 #include "hos.h"
+#include "nvn_watch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -709,6 +710,7 @@ void nvn_mirror_apply_readback(void)
             if (n > s->len - done)
                 n = s->len - done;
             if (memcmp(dst + done, src + done, n)) {
+                nvn_wwatch_note(guest, n, "a mirror readback");
                 memcpy(dst + done, src + done, n);
                 mi.stat_down += n;
             }

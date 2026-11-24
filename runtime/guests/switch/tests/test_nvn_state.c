@@ -11,6 +11,7 @@
 #include "nvn/nvn_vk.h"
 #include "nvn/nvn_module.h"
 #include "nvn/nvn_sched.h"
+#include "nvn/nvn_watch.h"
 #include "tc.h"
 
 #include <relift/ports.h>
@@ -635,6 +636,25 @@ TEST(nvn_copy_texture_to_buffer_returns_the_texels_in_the_strides_rows)
     for (unsigned i = 0; i < 2 * 4 * 4; i++)
         CHECK_EQ(m[0x3000 + i], red[i % 4]);
     CHECK_EQ(m[0x3000 + 32], 0xee);
+}
+
+/**
+ * The guest write watch names what writes into its range: a write that meets it counts, one beside it does not, and a
+ * memory pool made over watched bytes (whose device buffer the GPU writes in place) is one.
+ */
+TEST(nvn_guest_write_watch_counts_writes_into_its_range_and_pools_over_it)
+{
+    RECORDING(c, heap, cb);
+    (void)cb;
+    nvn_wwatch_set(heap + 0x100800, 8);
+    CHECK(!nvn_wwatch_note(heap + 0x100808, 8, "a write beside it"));
+    CHECK(!nvn_wwatch_note(heap + 0x1007f8, 8, "a write before it"));
+    CHECK(nvn_wwatch_note(heap + 0x1007fc, 8, "a write over its start"));
+    CHECK_EQ(nvn_wwatch_hits(), 1);
+    CHECK(nvn_pool_make(heap + 0x100, heap + 0x100000, 0x10000, 0x18c));
+    CHECK_EQ(nvn_wwatch_hits(), 2);
+    nvn_wwatch_set(0, 0);
+    CHECK(!nvn_wwatch_note(heap + 0x100800, 8, "a write with no watch"));
 }
 
 TEST(nvn_a_program_writes_guest_memory_only_when_it_stores_to_a_guest_buffer)

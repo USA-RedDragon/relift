@@ -2088,6 +2088,7 @@ void nvn_vk_mark_write(void) { g_writes.all = true; }
 
 void nvn_vk_mark_write_range(uint64_t guest, uint64_t size)
 {
+    nvn_wwatch_note(guest, size, "a GPU batch (storage buffer, uniform update or copy)");
     if (!size || g_writes.all)
         return;
     uint64_t lo = guest, hi = guest + size;
@@ -4461,6 +4462,7 @@ static int copy_buffer_to_buffer(replay *r, const nvn_cmd *e)
     uint64_t src = nvn_gpu_guest(e->x[1]), dst = nvn_gpu_guest(e->x[2]), size = e->x[3];
     if (!nvn_vk_flush(r))
         return nvn_vk_stop(r, "the host device failed a submit");
+    nvn_wwatch_note(dst, size, "nvnCommandBufferCopyBufferToBuffer on the CPU");
     memmove(r->mem + dst, r->mem + src, size);
     return RL_OK;
 }
@@ -4521,6 +4523,7 @@ static int update_uniform_buffer(replay *r, const nvn_cmd *e)
     }
     if (!nvn_vk_reading_guest(at, size))
         return nvn_vk_stop(r, "the host device failed a submit");
+    nvn_wwatch_note(at, size, "nvnCommandBufferUpdateUniformBuffer on the CPU");
     memcpy(r->mem + at, data, size);
     return RL_OK;
 }
@@ -4752,6 +4755,7 @@ static int copy_texture_to_buffer(replay *r, const nvn_cmd *e)
     VK(vkCmdCopyImageToBuffer)(g.cb, src->image, VK_IMAGE_LAYOUT_GENERAL, s.buf, 1, &bic);
     nvn_vk_barrier(g.cb);
     bool ok = nvn_vk_flush(r) && nvn_vk_reading_guest(at, p.span);
+    nvn_wwatch_note(at, p.span, "nvnCommandBufferCopyTextureToBuffer by readback");
     for (uint64_t z = 0; ok && z < layers; z++)
         for (uint64_t y = 0; y < rows; y++)
             memcpy(r->mem + at + z * p.image_bytes + y * p.row_bytes, s.map + (z * rows + y) * row, row);
