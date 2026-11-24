@@ -470,6 +470,11 @@ static int hook_start(void *user, uint64_t *code_free)
     }
     nvn.cb_page = *code_free;
     *code_free += HOS_PAGE;
+    /* The vtable and the object past the thunks are guest data the library reads. */
+    if (rl_hos_reserved_set(nvn.cb_page, HOS_PAGE, RL_VM_RW, RL_VM_FRESH) != 0) {
+        rl_log(RL_LOG_ERROR, "nvn", "cannot map the DLSS driver callback page");
+        return -1;
+    }
     for (uint32_t i = 0; i < NVN_DLSS_CALLBACKS; i++)
         nvn.cb_entries[i] = (rl_fn_entry){ nvn.cb_page + 4u * i, 4, RL_FN_OVERRIDE, nvn_dlss_callback(i) };
     nvn.cb_unit = (rl_unit){
