@@ -146,6 +146,8 @@ int nvn_vk_async_check(void);
  * for it, and that a read beside the range leaves it open. 0 when both hold.
  */
 int nvn_vk_open_write_check(void);
+/** @brief Checks that a buffer kept for the open batch (nvn_untile_keep_buffer) serves the batch's copy and leaves the batch open. 0 when it does. */
+int nvn_vk_keep_check(void);
 /**
  * @brief Checks the batch slots, with each long batch held on the GPU by a host-set event (no timing): while one is
  * unfinished, the next ones are recorded without waiting for it until the ring is full; a settle

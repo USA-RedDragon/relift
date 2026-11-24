@@ -271,6 +271,14 @@ bool nvn_untile_write_back(replay *r, vimg *v)
     return true;
 }
 
+bool nvn_untile_keep_buffer(VkBuffer buf, VkDeviceMemory mem)
+{
+    if (U.ndead_bufs[U.cur] == PACKED_MAX)
+        return false;
+    U.dead_bufs[U.cur][U.ndead_bufs[U.cur]++] = (packed_buf){ .buf = buf, .mem = mem };
+    return true;
+}
+
 /** @brief A device-local buffer of size bytes with a device address, kept in U.dead_bufs until the batch has run; 0 when none. */
 static uint64_t packed_new(uint64_t size, VkBuffer *out)
 {

@@ -2860,6 +2860,35 @@ bool(nvn_vk_sync_uniforms)(replay *r)
     return true;
 }
 
+int nvn_vk_keep_check(void)
+{
+    nvn_lock();
+    int rc = 0;
+    replay r;
+    memset(&r, 0, sizeof r);
+    staging s;
+    if (!nvn_vk_settle() || !nvn_vk_begin(&r) || !nvn_vk_staging_new(&s, 4096))
+        rc = 1;
+    /* A copy from a kept buffer runs when the batch runs, and the buffer lives until then without a wait. */
+    staging out;
+    if (!rc && !nvn_vk_readback_new(&out, 4096))
+        rc = 2;
+    if (!rc) {
+        memset(s.map, 0x5a, 4096);
+        VkBufferCopy bc = { 0, 0, 4096 };
+        VK(vkCmdCopyBuffer)(g.cb, s.buf, out.buf, 1, &bc);
+        nvn_vk_barrier(g.cb);
+        if (!nvn_untile_keep_buffer(s.buf, s.memory) || !g_recording)
+            rc = 3;
+        if (!rc && (!nvn_vk_flush(&r) || out.map[0] != 0x5a || out.map[4095] != 0x5a))
+            rc = 4;
+        nvn_vk_staging_free(&out);
+    }
+    nvn_vk_settle();
+    nvn_unlock();
+    return rc;
+}
+
 int nvn_vk_open_write_check(void)
 {
     nvn_lock();
@@ -3649,6 +3678,9 @@ static bool upload_body(replay *r, vimg *v)
     nvn_vk_begin(r);
     VK(vkCmdCopyBufferToImage)(g.cb, s.buf, v->image, VK_IMAGE_LAYOUT_GENERAL, rr.levelCount, bic);
     nvn_vk_barrier(g.cb);
+    /* The copy reads the staging buffer when the batch runs: it is kept until then instead of waited for. */
+    if (nvn_untile_keep_buffer(s.buf, s.memory))
+        return true;
     bool ok = nvn_vk_flush(r);
     nvn_vk_staging_free(&s);
     return ok;

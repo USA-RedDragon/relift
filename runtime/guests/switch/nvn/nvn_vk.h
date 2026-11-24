@@ -862,6 +862,11 @@ bool nvn_untile_move(replay *r, vimg *v, bool tile);
  */
 bool nvn_untile_write_back(replay *r, vimg *v);
 /**
+ * @brief Keeps buffer buf and its memory until the batch being recorded has run, then frees them (with the moves'
+ * own buffers); false when the list is full and the caller must free them itself.
+ */
+bool nvn_untile_keep_buffer(VkBuffer buf, VkDeviceMemory mem);
+/**
  * @brief Records an upload of v's storage into v's image through a packed device buffer: a shader reads the storage
  * through its pool's device address and writes the texels (or compressed blocks) packed, and a buffer copy puts them
  * into the image, for images no shader can store to (depth, compressed). False, with nothing recorded, when v's

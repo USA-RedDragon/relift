@@ -1635,6 +1635,16 @@ TEST(nvn_a_read_of_bytes_the_open_batch_writes_waits_for_it)
     CHECK_EQ(nvn_vk_open_write_check(), 0);
 }
 
+TEST(nvn_a_staging_buffer_kept_for_its_batch_serves_the_copy_without_a_wait)
+{
+    nvn_probes p;
+    if (!nvn_vk_probes(&p)) {
+        fprintf(stderr, "nvn_a_staging_buffer_kept_for_its_batch_serves_the_copy_without_a_wait: no host Vulkan device, skipped\n");
+        return;
+    }
+    CHECK_EQ(nvn_vk_keep_check(), 0);
+}
+
 TEST(nvn_gpu_texel_moves_match_the_cpu_layout_both_ways)
 {
     nvn_probes p;
