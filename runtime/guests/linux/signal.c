@@ -15,6 +15,7 @@
  */
 #include "arch.h"
 #include "compat.h"
+#include "hostio.h"
 #include "linux_priv.h"
 
 #include <string.h>
@@ -30,7 +31,7 @@ void lx_signal_init(void)
 
 static void raise_on(lx_thread *t, int sig, int32_t code)
 {
-    t->pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = 0, .queued = false };
+    t->pending[sig] = (lx_pending_sig){ .code = code, .pid = lx.pid, .uid = hio_uid(), .queued = false };
     __atomic_store_n(&t->pending[sig].queued, true, __ATOMIC_RELEASE);
     if (t != lx_cur()) {
         rl_preempt_request(t->rt->ctx);
