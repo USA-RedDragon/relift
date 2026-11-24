@@ -169,6 +169,12 @@ void lx_thread_end(lx_thread *t);
 void lx_wait_others(void);
 /** @brief Wakes up to n futex waiters on guest address a; how many woke. */
 int lx_futex_wake(uint64_t a, uint32_t n, uint32_t bits);
+/**
+ * @brief FUTEX_REQUEUE: wakes up to nwake waiters of the futex at a and moves
+ * up to nrequeue more to the one at a2, where a wake of a2 finds them. The
+ * number woken plus moved, as the kernel returns it.
+ */
+int64_t lx_futex_requeue(uint64_t a, uint32_t nwake, uint64_t a2, uint32_t nrequeue);
 /** @brief futex wait: 0, -EAGAIN, -ETIMEDOUT or -EINTR. */
 int64_t lx_futex_wait(uint64_t a, uint32_t val, int64_t timeout_ns, uint32_t bits);
 

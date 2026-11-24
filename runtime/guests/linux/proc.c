@@ -445,7 +445,7 @@ static int64_t sys_futex(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
             if (cur != (uint32_t)a[5])
                 return -L_EAGAIN;
         }
-        return lx_futex_wake(a[0], (uint32_t)a[2], ~0u);
+        return lx_futex_requeue(a[0], (uint32_t)a[2], a[4], (uint32_t)a[3] > 0x7fffffffu ? 0x7fffffffu : (uint32_t)a[3]);
     }
     case L_FUTEX_WAKE_OP: {
         uint32_t v, op2 = (uint32_t)a[5];

@@ -96,6 +96,29 @@ int lx_futex_wake(uint64_t a, uint32_t n, uint32_t bits)
     return woke;
 }
 
+int64_t lx_futex_requeue(uint64_t a, uint32_t nwake, uint64_t a2, uint32_t nrequeue)
+{
+    int64_t done = 0;
+    uint32_t moved = 0;
+    lx_mutex_lock(&fx_lock);
+    for (waiter *w = fx_waiters; w; w = w->next) {
+        if (w->woken || w->addr != a)
+            continue;
+        if ((uint32_t)done < nwake) {
+            w->woken = true;
+            done++;
+        } else if (moved < nrequeue) {
+            w->addr = a2;
+            moved++;
+            done++;
+        }
+    }
+    if (done)
+        lx_cond_broadcast(&fx_cond);
+    lx_mutex_unlock(&fx_lock);
+    return done;
+}
+
 int64_t lx_futex_wait(uint64_t a, uint32_t val, int64_t timeout_ns, uint32_t bits)
 {
     if (!lx_ok(a, 4, RL_VM_R) || (a & 3))
