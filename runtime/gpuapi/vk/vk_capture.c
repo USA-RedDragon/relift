@@ -8,7 +8,7 @@
  * takes the capture does not wait for either.
  */
 #include "vkf.h"
-#include "hostio.h"
+#include "hostio_win.h"
 #include "png.h"
 
 #include <errno.h>

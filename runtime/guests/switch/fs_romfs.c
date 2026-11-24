@@ -24,7 +24,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#include "hostio.h"
+#include "hostio_win.h"
 
 /** @brief Largest piece moved between an image and guest memory in one step. */
 #define STORAGE_CHUNK 0x100000u

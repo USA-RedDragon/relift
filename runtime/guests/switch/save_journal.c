@@ -25,7 +25,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "hostio.h"
+#include "hostio_win.h"
 
 /** @brief Size of the buffer that moves file contents between directories. */
 #define SAVE_COPY_CHUNK 0x10000u

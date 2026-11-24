@@ -30,7 +30,7 @@
 #endif
 #include <unistd.h>
 
-#include "hostio.h"
+#include "hostio_win.h"
 
 /** @brief Size of a guest path buffer (FspPath) in bytes. */
 #define FS_GUEST_PATH 0x301u

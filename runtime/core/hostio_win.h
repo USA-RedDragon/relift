@@ -1,12 +1,11 @@
 /**
- * @file hostio.h
- * @brief The POSIX file calls of the Horizon file system layer that MinGW
- * does not provide, as small wrappers over the Win32 and CRT calls, so
- * fs.c and romfs_image.c read the same on every host. Include it after the
- * system headers.
+ * @file hostio_win.h
+ * @brief The POSIX file calls that MinGW does not provide, as small wrappers
+ * over the Win32 and CRT calls, so a guest's file system code reads the same
+ * on every host. Include it after the system headers.
  */
-#ifndef RL_HOSTIO_H
-#define RL_HOSTIO_H
+#ifndef RL_HOSTIO_WIN_H
+#define RL_HOSTIO_WIN_H
 
 #if defined(_WIN32)
 
