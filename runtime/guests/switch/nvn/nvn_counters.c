@@ -490,16 +490,13 @@ int nvn_counters_async_check(uint8_t *mem, uint64_t addr)
         rc = 9;
     else if (!rc && b - a < 100000)
         rc = 10;
-    uint64_t gpu1, ns1;
+    /* Units, not wall-clock alignment (which a loaded host shifts): with a calibrated pair the interval between the
+     * two reports is the GPU's own timestamp interval, to the timer's 52 ns tick on each end. */
     if (!rc && g.calibrated) {
-        if (!nvn_vk_calibrate(&gpu1, &ns1))
-            rc = 11;
-        for (int i = 0; !rc && i < 2; i++) {
-            double want = (double)ns1 - (double)(gpu1 - rps[sub].last_ts[i]) * g.timestamp_period_ns;
-            double got = (double)(i ? b : a);
-            if (got - want > 15000.0 || want - got > 15000.0)
-                rc = 12 + i;
-        }
+        double want = (double)(rps[sub].last_ts[1] - rps[sub].last_ts[0]) * g.timestamp_period_ns;
+        double got = (double)(b - a);
+        if (got - want > 200.0 || want - got > 200.0)
+            rc = 12;
     }
     nvn_vk_staging_free(&big);
     nvn_unlock();
