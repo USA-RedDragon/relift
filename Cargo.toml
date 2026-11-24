@@ -68,7 +68,7 @@ relift-sail = { path = "core/sail" }
 relift-switch = { path = "guests/switch/guest" }
 relift-switch-fonts = { path = "guests/switch/fonts" }
 relift-switch-formats = { path = "guests/switch/formats" }
-relift-switch-names = { path = "guests/switch/names" }
+relift-switch-names = { path = "core/names" }
 relift-switch-tools = { path = "guests/switch/tools" }
 relift-gpu-apigen = { path = "gpus/apigen" }
 relift-switch-shaders = { path = "guests/switch/shaders" }

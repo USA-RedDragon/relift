@@ -1785,7 +1785,7 @@ Unscoped names are wrapped into nested ones, and `St`, `Sa`, `Sb`, `Ss`,
 `.cold` becomes an ABI tag `sfx...` on the function's own name. A plain C
 name becomes `_ZN5guest<len><module><len><name>E`, and an unnamed function
 becomes `guest::<module>::fn_<hex address>`. `relift-switch-names`
-(`guests/switch/names`) gives a name only when it maps back to exactly the
+(`core/names`) gives a name only when it maps back to exactly the
 original module and symbol, so the map has no collisions; anything else
 uses the address name. gdb does not demangle C function names, so
 `runtime/tools/gdb/relift_frames.py` adds a frame filter for `bt`.
