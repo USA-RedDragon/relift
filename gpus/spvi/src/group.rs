@@ -1,30 +1,35 @@
-//! A whole workgroup: every invocation on its own thread, with the
-//! workgroup's barriers, subgroup shuffles and shared memory, over one
-//! memory all invocations see.
+//! Whole workgroups: every invocation of a workgroup with its barriers,
+//! subgroup shuffles and shared memory, and whole dispatches of
+//! workgroups.
 //!
-//! Memory is [`SharedMemory`]: loads and stores take no lock, so the
-//! invocations run in parallel; atomic instructions take one lock.
-//! Invocations run freely between synchronization points. A barrier
-//! releases when every invocation that has not returned waits at one; a
-//! shuffle releases when every invocation of its subgroup waits at it, or,
-//! when nothing else can run, with the invocations of the subgroup that
-//! wait at it as the active ones (divergent flow). What a device would
-//! leave undefined or a translation would rely on is written down as a
-//! [`Note`]: a barrier some invocations returned before, invocations that
-//! wait at different barriers, a shuffle run by part of its subgroup, a
-//! shuffle that reads an inactive lane. An invocation that runs longer than
-//! its step budget, or touches memory outside every region, stops the
-//! whole workgroup with a [`Failure`] that names the block each invocation
-//! was in.
+//! A workgroup's invocations take turns on one thread: each runs until it
+//! returns or waits at a barrier or shuffle, a subgroup at a time. A
+//! barrier releases when every invocation that has not returned waits at
+//! one; a shuffle releases when every invocation of its subgroup that has
+//! not returned waits at it, or, when nothing else can run, with the
+//! invocations of the subgroup that wait at it as the active ones
+//! (divergent flow). What a device would leave undefined or a translation
+//! would rely on is written down as a [`Note`]: a barrier some invocations
+//! returned before, invocations that wait at different barriers, a shuffle
+//! run by part of its subgroup, a shuffle that reads an inactive lane. An
+//! invocation that runs longer than its step budget, or touches memory
+//! outside every region, stops the whole workgroup with a [`Failure`] that
+//! names the block each invocation was in.
+//!
+//! [`run_dispatch`] runs the workgroups of one dispatch on several threads;
+//! they share only global memory ([`SharedMemory`]), where loads and
+//! stores take no lock and atomic instructions take one lock for the
+//! whole dispatch.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
-use crate::{Env, Memory, Module, Run};
-
-/// What an invocation stopped by another one's failure unwinds with.
-const STOPPED: &str = "workgroup stopped";
+use crate::arith::Fx;
+use crate::code::Program;
+use crate::exec::{Event, Inv, Mem, Plain, find, le};
+use crate::{Env, Memory, Module};
 
 /// Where workgroup variables are placed in the shared memory.
 pub const WORKGROUP_BASE: u64 = 0x7f00_0000_0000_0000;
@@ -74,34 +79,22 @@ struct State {
     wait: Vec<Wait>,
     out: Vec<u64>,
     notes: BTreeMap<Note, u64>,
-    failed: Option<(u32, String)>,
-}
-
-/// The synchronization state of one workgroup.
-pub struct Group {
-    n: usize,
     subgroup: usize,
-    state: Mutex<State>,
-    cv: Condvar,
-    /// The memory every invocation sees, each byte an atomic, so loads and
-    /// stores take no lock.
-    pub(crate) mem: SharedMemory,
-    /// Every atomic read, modify and write holds this.
-    pub(crate) atomic: Mutex<()>,
-    /// Workgroup variable id -> its address.
-    pub(crate) vars: BTreeMap<u32, u64>,
-    func: Vec<AtomicU32>,
-    block: Vec<AtomicU32>,
-    stop: AtomicBool,
-    steps: Vec<AtomicU64>,
 }
 
-/// Memory many invocations read and write at once: [`Memory`]'s regions,
-/// each byte an atomic accessed with relaxed order. A load or store of
-/// several bytes is not one atomic access, as on a GPU, where only atomic
-/// instructions are.
+/// Memory many workgroups read and write at once: [`Memory`]'s regions as
+/// atomic words accessed with relaxed order. A load or store is not one
+/// atomic access, as on a GPU, where only atomic instructions are; each
+/// byte a store writes changes on its own, never its neighbors.
 pub struct SharedMemory {
-    regions: Vec<(u64, Box<[AtomicU8]>)>,
+    regions: Vec<(u64, Words)>,
+    /// Every atomic read, modify and write holds this.
+    atomic: Mutex<()>,
+}
+
+struct Words {
+    len: u64,
+    w: Box<[AtomicU32]>,
 }
 
 impl From<Memory> for SharedMemory {
@@ -110,34 +103,73 @@ impl From<Memory> for SharedMemory {
             regions: m
                 .regions
                 .into_iter()
-                .map(|(base, b)| (base, b.into_iter().map(AtomicU8::new).collect()))
+                .map(|(base, b)| {
+                    let w = b
+                        .chunks(4)
+                        .map(|c| {
+                            let mut x = [0u8; 4];
+                            x[..c.len()].copy_from_slice(c);
+                            AtomicU32::new(u32::from_le_bytes(x))
+                        })
+                        .collect();
+                    (
+                        base,
+                        Words {
+                            len: b.len() as u64,
+                            w,
+                        },
+                    )
+                })
                 .collect(),
+            atomic: Mutex::new(()),
         }
     }
 }
 
 impl SharedMemory {
-    fn at(&self, addr: u64, n: u64) -> &[AtomicU8] {
-        for (base, b) in &self.regions {
-            if addr >= *base && addr + n <= *base + b.len() as u64 {
-                let o = (addr - *base) as usize;
-                return &b[o..o + n as usize];
-            }
+    fn get(&self, addr: u64, n: u64, hint: &mut usize) -> Option<u64> {
+        let (r, o) = find(&self.regions, |w| w.len, addr, n, hint)?;
+        let w = &self.regions[r].1.w;
+        if o % 4 == 0 && n == 4 {
+            return Some(u64::from(w[o / 4].load(Ordering::Relaxed)));
         }
-        panic!("access to unmapped memory {addr:#x}+{n}");
+        let mut v = 0u64;
+        for k in 0..n as usize {
+            let b = (w[(o + k) / 4].load(Ordering::Relaxed) >> (8 * ((o + k) % 4))) & 0xff;
+            v |= u64::from(b) << (8 * k);
+        }
+        Some(v)
+    }
+
+    fn put(&self, addr: u64, n: u64, v: u64, hint: &mut usize) -> bool {
+        let Some((r, o)) = find(&self.regions, |w| w.len, addr, n, hint) else {
+            return false;
+        };
+        let w = &self.regions[r].1.w;
+        if o % 4 == 0 && n == 4 {
+            w[o / 4].store(v as u32, Ordering::Relaxed);
+            return true;
+        }
+        for k in 0..n as usize {
+            let sh = 8 * ((o + k) % 4);
+            let b = ((v >> (8 * k)) & 0xff) as u32;
+            let _ = w[(o + k) / 4].fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| {
+                Some((x & !(0xff << sh)) | (b << sh))
+            });
+        }
+        true
     }
 
     /// The `n` bytes at `addr`, little-endian.
     pub fn read(&self, addr: u64, n: u64) -> u64 {
-        self.at(addr, n).iter().enumerate().fold(0, |v, (k, b)| {
-            v | u64::from(b.load(Ordering::Relaxed)) << (8 * k)
-        })
+        self.get(addr, n, &mut 0)
+            .unwrap_or_else(|| panic!("access to unmapped memory {addr:#x}+{n}"))
     }
 
     /// Writes the low `n` bytes of `v` at `addr`, little-endian.
     pub fn write(&self, addr: u64, n: u64, v: u64) {
-        for (k, b) in self.at(addr, n).iter().enumerate() {
-            b.store((v >> (8 * k)) as u8, Ordering::Relaxed);
+        if !self.put(addr, n, v, &mut 0) {
+            panic!("access to unmapped memory {addr:#x}+{n}");
         }
     }
 
@@ -147,11 +179,14 @@ impl SharedMemory {
             regions: self
                 .regions
                 .into_iter()
-                .map(|(base, b)| {
-                    (
-                        base,
-                        b.into_vec().into_iter().map(AtomicU8::into_inner).collect(),
-                    )
+                .map(|(base, w)| {
+                    let mut b: Vec<u8> =
+                        w.w.into_vec()
+                            .into_iter()
+                            .flat_map(|x| x.into_inner().to_le_bytes())
+                            .collect();
+                    b.truncate(w.len as usize);
+                    (base, b)
                 })
                 .collect(),
         }
@@ -159,145 +194,106 @@ impl SharedMemory {
 }
 
 /// Locks a mutex, taking it over from a thread that panicked holding it.
-pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-impl Group {
-    /// Notes where invocation `i` is (each block it enters).
-    pub(crate) fn enter(&self, i: usize, func: u32, block: u32) {
-        self.func[i].store(func, Ordering::Relaxed);
-        self.block[i].store(block, Ordering::Relaxed);
+/// The memory behind a workgroup's own: one workgroup's [`Memory`], or a
+/// dispatch's [`SharedMemory`].
+trait Global {
+    fn get(&mut self, addr: u64, n: u64) -> Option<u64>;
+    fn put(&mut self, addr: u64, n: u64, v: u64) -> bool;
+}
+
+impl Global for Plain<'_> {
+    fn get(&mut self, addr: u64, n: u64) -> Option<u64> {
+        Plain::get(self, addr, n)
+    }
+    fn put(&mut self, addr: u64, n: u64, v: u64) -> bool {
+        Plain::put(self, addr, n, v)
+    }
+}
+
+struct SharedRef<'a> {
+    m: &'a SharedMemory,
+    hint: usize,
+}
+
+impl Global for SharedRef<'_> {
+    fn get(&mut self, addr: u64, n: u64) -> Option<u64> {
+        self.m.get(addr, n, &mut self.hint)
+    }
+    fn put(&mut self, addr: u64, n: u64, v: u64) -> bool {
+        self.m.put(addr, n, v, &mut self.hint)
+    }
+}
+
+/// What a workgroup's invocations see: the read-only uniform blocks first,
+/// then the global memory, then the workgroup's own shared memory.
+struct GroupMem<'a, G> {
+    uniform: Plain<'a>,
+    global: G,
+    local: Option<(u64, &'a mut Vec<u8>)>,
+    /// What atomic instructions hold (a dispatch's).
+    atomic: Option<&'a Mutex<()>>,
+}
+
+impl<G: Global> Mem for GroupMem<'_, G> {
+    fn read(&mut self, addr: u64, n: u64) -> u64 {
+        if let Some(v) = self.uniform.get(addr, n) {
+            return v;
+        }
+        if let Some(v) = self.global.get(addr, n) {
+            return v;
+        }
+        if let Some((base, b)) = &self.local
+            && addr >= *base
+            && addr + n <= *base + b.len() as u64
+        {
+            let o = (addr - *base) as usize;
+            return le(&b[o..o + n as usize]);
+        }
+        panic!("access to unmapped memory {addr:#x}+{n}")
     }
 
-    /// Notes invocation `i`'s step count, and stops it when another one
-    /// failed.
-    pub(crate) fn count(&self, i: usize, steps: u64) {
-        self.steps[i].store(steps, Ordering::Relaxed);
-        if self.stop.load(Ordering::Relaxed) {
-            std::panic::resume_unwind(Box::new(STOPPED));
+    fn write(&mut self, addr: u64, n: u64, v: u64) {
+        if self.global.put(addr, n, v) {
+            return;
         }
+        if let Some((base, b)) = &mut self.local
+            && addr >= *base
+            && addr + n <= *base + b.len() as u64
+        {
+            let o = (addr - *base) as usize;
+            b[o..o + n as usize].copy_from_slice(&v.to_le_bytes()[..n as usize]);
+            return;
+        }
+        panic!("access to unmapped memory {addr:#x}+{n}")
     }
 
-    fn check(&self, st: &State) {
-        if st.failed.is_some() {
-            // Unwinds without the panic hook: the first failure is the report.
-            std::panic::resume_unwind(Box::new(STOPPED));
-        }
+    fn atomic<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let _held = self.atomic.map(lock);
+        f(self)
     }
+}
 
-    /// Waits at a barrier in `block`.
-    pub(crate) fn barrier(&self, i: usize, block: u32) {
-        let mut st = lock(&self.state);
-        st.wait[i] = Wait::Barrier(block);
-        self.release(&mut st);
-        while st.wait[i] != Wait::Run {
-            self.check(&st);
-            st = self
-                .cv
-                .wait(st)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-    }
+fn message(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_string()))
+        .unwrap_or_else(|| "panic".into())
+}
 
-    /// Runs a shuffle in `block`: gives `value`, reads lane `lane`'s.
-    pub(crate) fn shuffle(&self, i: usize, block: u32, value: u64, lane: u32) -> u64 {
-        let mut st = lock(&self.state);
-        st.wait[i] = Wait::Shuffle { block, value, lane };
-        self.release(&mut st);
-        while st.wait[i] != Wait::Run {
-            self.check(&st);
-            st = self
-                .cv
-                .wait(st)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-        st.out[i]
-    }
-
-    fn finish(&self, i: usize) {
-        let mut st = lock(&self.state);
-        st.wait[i] = Wait::Done;
-        self.release(&mut st);
-    }
-
-    fn fail(&self, i: usize, message: String) {
-        let mut st = lock(&self.state);
-        if st.failed.is_none() {
-            st.failed = Some((i as u32, message));
-        }
-        self.stop.store(true, Ordering::Relaxed);
-        st.wait[i] = Wait::Done;
-        self.cv.notify_all();
-    }
-
-    /// Releases what can go on; called with every change of `st.wait`.
-    fn release(&self, st: &mut State) {
-        let mut any = false;
-        for s in 0..self.n.div_ceil(self.subgroup) {
-            any |= self.release_shuffle(st, s, false);
-        }
-        let running = st.wait.contains(&Wait::Run);
-        if !any && !running {
-            let at_barrier: Vec<u32> = st
-                .wait
-                .iter()
-                .filter_map(|w| match w {
-                    Wait::Barrier(b) => Some(*b),
-                    _ => None,
-                })
-                .collect();
-            let live = st.wait.iter().filter(|w| **w != Wait::Done).count();
-            if !at_barrier.is_empty() && at_barrier.len() == live {
-                let returned = (self.n - live) as u32;
-                let mut blocks = at_barrier.clone();
-                blocks.sort_unstable();
-                blocks.dedup();
-                if returned > 0 {
-                    *st.notes
-                        .entry(Note::BarrierAfterReturn {
-                            block: blocks[0],
-                            returned,
-                        })
-                        .or_default() += 1;
-                }
-                if blocks.len() > 1 {
-                    *st.notes.entry(Note::BarrierBlocks { blocks }).or_default() += 1;
-                }
-                for w in &mut st.wait {
-                    if matches!(w, Wait::Barrier(_)) {
-                        *w = Wait::Run;
-                    }
-                }
-                any = true;
-            } else if live > 0 {
-                // Nothing can run: a subgroup's shuffle goes with the lanes
-                // that wait at it.
-                for s in 0..self.n.div_ceil(self.subgroup) {
-                    if self.release_shuffle(st, s, true) {
-                        any = true;
-                        break;
-                    }
-                }
-                if !any {
-                    st.failed = Some((0, "no invocation can go on".into()));
-                    self.stop.store(true, Ordering::Relaxed);
-                }
-            }
-        }
-        if any || st.failed.is_some() {
-            self.cv.notify_all();
-        }
-    }
-
+impl State {
     /// Releases subgroup `s`'s shuffle when all its live lanes wait at the
     /// same one, or (`partial`) the lowest block's lanes.
-    fn release_shuffle(&self, st: &mut State, s: usize, partial: bool) -> bool {
-        let lanes = s * self.subgroup..((s + 1) * self.subgroup).min(self.n);
+    fn release_shuffle(&mut self, s: usize, partial: bool) -> bool {
+        let n = self.wait.len();
+        let lanes = s * self.subgroup..((s + 1) * self.subgroup).min(n);
         let mut blocks: Vec<u32> = Vec::new();
         let mut live = 0;
         for k in lanes.clone() {
-            match st.wait[k] {
+            match self.wait[k] {
                 Wait::Done => {}
                 Wait::Shuffle { block, .. } => {
                     live += 1;
@@ -316,7 +312,8 @@ impl Group {
             return false;
         }
         if active != self.subgroup {
-            *st.notes
+            *self
+                .notes
                 .entry(Note::PartialShuffle {
                     block,
                     active: active as u32,
@@ -325,7 +322,7 @@ impl Group {
         }
         let vals: Vec<Option<u64>> = lanes
             .clone()
-            .map(|k| match st.wait[k] {
+            .map(|k| match self.wait[k] {
                 Wait::Shuffle {
                     block: b, value, ..
                 } if b == block => Some(value),
@@ -333,29 +330,209 @@ impl Group {
             })
             .collect();
         for k in lanes {
-            if let Wait::Shuffle { block: b, lane, .. } = st.wait[k]
+            if let Wait::Shuffle { block: b, lane, .. } = self.wait[k]
                 && b == block
             {
                 let v = vals.get(lane as usize).copied().flatten();
                 if v.is_none() {
-                    *st.notes.entry(Note::InactiveLane { block }).or_default() += 1;
+                    *self.notes.entry(Note::InactiveLane { block }).or_default() += 1;
                 }
-                st.out[k] = v.unwrap_or(crate::GARBAGE);
-                st.wait[k] = Wait::Run;
+                self.out[k] = v.unwrap_or(crate::GARBAGE);
+                self.wait[k] = Wait::Run;
             }
         }
         true
     }
+
+    /// Nothing runs: releases a barrier every live invocation waits at, or
+    /// else one subgroup's partial shuffle; false when neither can go.
+    fn release_stalled(&mut self) -> bool {
+        let n = self.wait.len();
+        let at_barrier: Vec<u32> = self
+            .wait
+            .iter()
+            .filter_map(|w| match w {
+                Wait::Barrier(b) => Some(*b),
+                _ => None,
+            })
+            .collect();
+        let live = self.wait.iter().filter(|w| **w != Wait::Done).count();
+        if !at_barrier.is_empty() && at_barrier.len() == live {
+            let returned = (n - live) as u32;
+            let mut blocks = at_barrier;
+            blocks.sort_unstable();
+            blocks.dedup();
+            if returned > 0 {
+                *self
+                    .notes
+                    .entry(Note::BarrierAfterReturn {
+                        block: blocks[0],
+                        returned,
+                    })
+                    .or_default() += 1;
+            }
+            if blocks.len() > 1 {
+                *self
+                    .notes
+                    .entry(Note::BarrierBlocks { blocks })
+                    .or_default() += 1;
+            }
+            for w in &mut self.wait {
+                if matches!(w, Wait::Barrier(_)) {
+                    *w = Wait::Run;
+                }
+            }
+            return true;
+        }
+        (0..n.div_ceil(self.subgroup)).any(|s| self.release_shuffle(s, true))
+    }
+}
+
+/// What every workgroup of a run shares.
+struct Setup<'a> {
+    p: &'a Program,
+    vars: &'a BTreeMap<u32, u64>,
+    size: [u32; 3],
+    subgroup: u32,
+    max_steps: u64,
+    /// Set when another workgroup failed.
+    stop: Option<&'a AtomicBool>,
+}
+
+/// One workgroup over `mem`.
+fn run_group<G: Global>(
+    su: &Setup<'_>,
+    env: &Env,
+    mut mem: GroupMem<'_, G>,
+) -> Result<(BTreeMap<Note, u64>, Vec<u64>), Failure> {
+    let Setup {
+        p,
+        vars,
+        size,
+        subgroup,
+        max_steps,
+        stop,
+    } = *su;
+    let n = (size[0] * size[1] * size[2]) as usize;
+    let sg = (subgroup as usize).max(1);
+    let fx = Fx::of(env);
+    let mut invs: Vec<Option<Inv>> = Vec::with_capacity(n);
+    let fail = |invs: &[Option<Inv>], i: usize, message: String| Failure {
+        invocation: i as u32,
+        message,
+        at: invs
+            .iter()
+            .map(|v| v.as_ref().map_or((0, 0), |v| v.at))
+            .chain(std::iter::repeat((0, 0)))
+            .take(n)
+            .collect(),
+        steps: invs
+            .iter()
+            .map(|v| v.as_ref().map_or(0, |v| v.steps))
+            .chain(std::iter::repeat(0))
+            .take(n)
+            .collect(),
+    };
+    for i in 0..n {
+        let mut e = env.clone();
+        let i32_ = i as u32;
+        e.local_id = [
+            i32_ % size[0],
+            (i32_ / size[0]) % size[1],
+            i32_ / (size[0] * size[1]),
+        ];
+        e.local_index = i32_;
+        e.subgroup_size = subgroup;
+        match catch_unwind(AssertUnwindSafe(|| Inv::new(p, &e, Some(vars)))) {
+            Ok(mut v) => {
+                v.max_steps = max_steps;
+                invs.push(Some(v));
+            }
+            Err(e) => {
+                invs.push(None);
+                return Err(fail(&invs, i, message(&*e)));
+            }
+        }
+    }
+    let mut st = State {
+        wait: vec![Wait::Run; n],
+        out: vec![0; n],
+        notes: BTreeMap::new(),
+        subgroup: sg,
+    };
+    let mut resume = vec![false; n];
+    loop {
+        for s in 0..n.div_ceil(sg) {
+            loop {
+                for i in s * sg..((s + 1) * sg).min(n) {
+                    if st.wait[i] != Wait::Run {
+                        continue;
+                    }
+                    let inv = invs[i].as_mut().unwrap_or_else(|| unreachable!());
+                    if resume[i] {
+                        inv.resume(st.out[i]);
+                        resume[i] = false;
+                    }
+                    match catch_unwind(AssertUnwindSafe(|| inv.run(p, &fx, env, &mut mem, true))) {
+                        Ok(Event::Done) => st.wait[i] = Wait::Done,
+                        Ok(Event::Barrier(b)) => st.wait[i] = Wait::Barrier(b),
+                        Ok(Event::Shuffle { block, value, lane }) => {
+                            st.wait[i] = Wait::Shuffle { block, value, lane };
+                            resume[i] = true;
+                        }
+                        Err(e) => return Err(fail(&invs, i, message(&*e))),
+                    }
+                    if stop.is_some_and(|s| s.load(Ordering::Relaxed)) {
+                        return Err(fail(&invs, i, "workgroup stopped".into()));
+                    }
+                }
+                if !st.release_shuffle(s, false) {
+                    break;
+                }
+            }
+        }
+        if st.wait.iter().all(|w| *w == Wait::Done) {
+            break;
+        }
+        if !st.release_stalled() {
+            return Err(fail(&invs, 0, "no invocation can go on".into()));
+        }
+    }
+    let steps = invs
+        .iter()
+        .map(|v| v.as_ref().map_or(0, |v| v.steps))
+        .collect();
+    Ok((st.notes, steps))
+}
+
+/// The workgroup variables of `m`, placed from [`WORKGROUP_BASE`], and
+/// their zeroed bytes.
+fn workgroup_vars(m: &Module) -> (BTreeMap<u32, u64>, Vec<u8>) {
+    let mut vars = BTreeMap::new();
+    let mut at = WORKGROUP_BASE;
+    let mut bytes = Vec::new();
+    for &(id, ty, class, _) in &m.globals {
+        if class != 4 {
+            continue;
+        }
+        let crate::Ty::Ptr(pointee) = *m.ty(ty) else {
+            panic!("variable type")
+        };
+        let sz = m.size(pointee);
+        vars.insert(id, at);
+        bytes.resize(bytes.len() + sz.next_multiple_of(16) as usize, 0);
+        at += sz.next_multiple_of(16);
+    }
+    (vars, bytes)
 }
 
 /// Runs one workgroup of `size` invocations (x fastest) of `words` with
 /// subgroups of `subgroup` invocations. `env` is every invocation's
 /// environment but for its local id; `uniform` is memory each invocation
-/// gets a copy of and only reads (uniform blocks, which stores never
-/// reach); `mem` is the memory all of them see,
-/// to which the workgroup variables are added at [`WORKGROUP_BASE`] (zeroed,
-/// which a device need not do). Each invocation may run `max_steps`
-/// instructions.
+/// only reads (uniform blocks, which stores never reach) and sees before
+/// anything else; `mem` is the memory all of them see, to which the
+/// workgroup variables are added at [`WORKGROUP_BASE`] (zeroed, which a
+/// device need not do). Each invocation may run `max_steps` instructions.
 pub fn run_workgroup(
     words: &[u32],
     env: &Env,
@@ -365,107 +542,155 @@ pub fn run_workgroup(
     subgroup: u32,
     max_steps: u64,
 ) -> Result<Done, Failure> {
-    let n = (size[0] * size[1] * size[2]) as usize;
     let mut mem = mem;
-    let mut vars = BTreeMap::new();
-    {
-        let m = Module::parse(words);
-        let mut at = WORKGROUP_BASE;
-        let mut bytes = Vec::new();
-        for &(id, ty, class, _) in &m.globals {
-            if class != 4 {
-                continue;
-            }
-            let crate::Ty::Ptr(pointee) = *m.ty(ty) else {
-                panic!("variable type")
-            };
-            let sz = m.size(pointee);
-            vars.insert(id, at);
-            bytes.resize(bytes.len() + sz.next_multiple_of(16) as usize, 0);
-            at += sz.next_multiple_of(16);
-        }
-        if !bytes.is_empty() {
-            mem.regions.push((WORKGROUP_BASE, bytes));
-        }
+    let m = Module::parse(words);
+    let (vars, bytes) = workgroup_vars(&m);
+    if !bytes.is_empty() {
+        mem.regions.push((WORKGROUP_BASE, bytes));
     }
-    let g = Arc::new(Group {
-        n,
-        subgroup: subgroup as usize,
-        state: Mutex::new(State {
-            wait: vec![Wait::Run; n],
-            out: vec![0; n],
-            notes: BTreeMap::new(),
-            failed: None,
-        }),
-        cv: Condvar::new(),
-        mem: SharedMemory::from(mem),
-        atomic: Mutex::new(()),
-        vars,
-        func: (0..n).map(|_| AtomicU32::new(0)).collect(),
-        block: (0..n).map(|_| AtomicU32::new(0)).collect(),
-        stop: AtomicBool::new(false),
-        steps: (0..n).map(|_| AtomicU64::new(0)).collect(),
-    });
+    let p = m.program();
+    let mut uni = uniform.clone();
+    let gm = GroupMem {
+        uniform: Plain {
+            mem: &mut uni,
+            hint: 0,
+        },
+        global: Plain {
+            mem: &mut mem,
+            hint: 0,
+        },
+        local: None,
+        atomic: None,
+    };
+    let su = Setup {
+        p,
+        vars: &vars,
+        size,
+        subgroup,
+        max_steps,
+        stop: None,
+    };
+    let (notes, steps) = run_group(&su, env, gm)?;
+    Ok(Done { mem, notes, steps })
+}
+
+/// What one workgroup of a dispatch leaves.
+pub struct GroupDone {
+    pub group: [u32; 3],
+    pub notes: BTreeMap<Note, u64>,
+    /// Steps each invocation ran.
+    pub steps: Vec<u64>,
+}
+
+/// What a finished dispatch leaves.
+pub struct DispatchDone {
+    pub mem: Memory,
+    /// Each workgroup, in the order given.
+    pub groups: Vec<GroupDone>,
+}
+
+/// The shape of a dispatch.
+#[derive(Clone, Debug)]
+pub struct Dispatch {
+    /// Workgroup size (x fastest).
+    pub size: [u32; 3],
+    /// The workgroup ids to run.
+    pub groups: Vec<[u32; 3]>,
+    /// Invocations per subgroup.
+    pub subgroup: u32,
+    /// The most instructions each invocation may run.
+    pub max_steps: u64,
+    /// Threads to run workgroups on.
+    pub threads: usize,
+}
+
+/// Runs the workgroups of dispatch `d` of `words` on its threads, each as
+/// [`run_workgroup`] runs one, over one global memory `mem`. Each
+/// workgroup gets its own zeroed workgroup variables at
+/// [`WORKGROUP_BASE`]. The failure is that of the first workgroup in
+/// `d.groups` that failed (with its index); the others stop.
+pub fn run_dispatch(
+    words: &[u32],
+    env: &Env,
+    uniform: &Memory,
+    mem: Memory,
+    d: &Dispatch,
+) -> Result<DispatchDone, (usize, Failure)> {
+    let groups = &d.groups[..];
+    let threads = d.threads;
+    let m = Module::parse(words);
+    let (vars, bytes) = workgroup_vars(&m);
+    let p = m.program();
+    let shared = SharedMemory::from(mem);
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    type Slot = Option<Result<GroupDone, Failure>>;
+    let results: Mutex<Vec<Slot>> = Mutex::new((0..groups.len()).map(|_| None).collect());
     std::thread::scope(|sc| {
-        for i in 0..n {
-            let g = Arc::clone(&g);
-            let mut e = env.clone();
-            let i32_ = i as u32;
-            e.local_id = [
-                i32_ % size[0],
-                (i32_ / size[0]) % size[1],
-                i32_ / (size[0] * size[1]),
-            ];
-            e.local_index = i32_;
-            e.subgroup_size = subgroup;
-            std::thread::Builder::new()
-                .stack_size(64 << 20)
-                .spawn_scoped(sc, move || {
-                    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let m = Module::parse(words);
-                        let mut run = Run::new(&m, &e, uniform.clone());
-                        run.group = Some((Arc::clone(&g), i));
-                        run.max_steps = max_steps;
-                        run.main();
-                        g.steps[i].store(run.steps, Ordering::Relaxed);
-                    }));
-                    match r {
-                        Ok(()) => g.finish(i),
-                        Err(p) => {
-                            let msg = p
-                                .downcast_ref::<String>()
-                                .cloned()
-                                .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_string()))
-                                .unwrap_or_else(|| "panic".into());
-                            g.fail(i, msg);
-                        }
+        for _ in 0..threads.clamp(1, groups.len().max(1)) {
+            sc.spawn(|| {
+                let mut uni = uniform.clone();
+                loop {
+                    let k = next.fetch_add(1, Ordering::Relaxed);
+                    if k >= groups.len() || stop.load(Ordering::Relaxed) {
+                        break;
                     }
-                })
-                .expect("spawn an invocation");
+                    let mut e = env.clone();
+                    e.group_id = groups[k];
+                    let mut local = bytes.clone();
+                    let gm = GroupMem {
+                        uniform: Plain {
+                            mem: &mut uni,
+                            hint: 0,
+                        },
+                        global: SharedRef {
+                            m: &shared,
+                            hint: 0,
+                        },
+                        local: (!local.is_empty()).then_some((WORKGROUP_BASE, &mut local)),
+                        atomic: Some(&shared.atomic),
+                    };
+                    let su = Setup {
+                        p,
+                        vars: &vars,
+                        size: d.size,
+                        subgroup: d.subgroup,
+                        max_steps: d.max_steps,
+                        stop: Some(&stop),
+                    };
+                    let r = run_group(&su, &e, gm);
+                    let r = r.map(|(notes, steps)| GroupDone {
+                        group: groups[k],
+                        notes,
+                        steps,
+                    });
+                    if r.is_err() {
+                        stop.store(true, Ordering::Relaxed);
+                    }
+                    lock(&results)[k] = Some(r);
+                }
+            });
         }
     });
-    let g = Arc::into_inner(g).expect("the group outlives its invocations");
-    let st = g
-        .state
+    let results = results
         .into_inner()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let steps = g.steps.iter().map(|s| s.load(Ordering::Relaxed)).collect();
-    if let Some((invocation, message)) = st.failed {
-        return Err(Failure {
-            invocation,
-            message,
-            at: g
-                .func
-                .iter()
-                .zip(&g.block)
-                .map(|(f, b)| (f.load(Ordering::Relaxed), b.load(Ordering::Relaxed)))
-                .collect(),
-            steps,
-        });
+    let mut done = Vec::with_capacity(groups.len());
+    let mut first_fail = None;
+    for (k, r) in results.into_iter().enumerate() {
+        match r {
+            Some(Ok(g)) => done.push(g),
+            Some(Err(f)) if f.message != "workgroup stopped" => {
+                first_fail.get_or_insert((k, f));
+            }
+            _ => {}
+        }
     }
-    Ok(Done {
-        mem: g.mem.into_memory(),
-        notes: st.notes,
-        steps,
+    if let Some(f) = first_fail {
+        return Err(f);
+    }
+    Ok(DispatchDone {
+        mem: shared.into_memory(),
+        groups: done,
     })
 }

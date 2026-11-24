@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 
-use relift_gpu_spvi::group::{Note, run_workgroup};
+use relift_gpu_spvi::group::{Dispatch, Note, run_dispatch, run_workgroup};
+use relift_gpu_spvi::reference;
 use relift_gpu_spvi::{Denorm, Env, Memory};
 
 /// glslang (SPIR-V 1.5), 64 invocations: `s[i] = i * 3 + 1`, a barrier,
@@ -122,4 +123,130 @@ fn memory_outside_every_region_stops_the_workgroup() {
     let f = r.err().expect("the store to out has no memory");
     assert!(f.message.contains("unmapped memory"), "{}", f.message);
     assert_eq!(f.at.len(), 64);
+}
+
+/// Memory regions, notes and steps of a finished run.
+type Ended = (Vec<(u64, Vec<u8>)>, String, Vec<u64>);
+
+/// A run's outcome in comparable form: memory, notes and steps, or the
+/// failure message without its addresses (which invocation fails first
+/// is up to the reference's thread order).
+fn outcome(r: Result<(Memory, String, Vec<u64>), String>) -> Result<Ended, String> {
+    r.map(|(m, n, s)| (m.regions, n, s)).map_err(|e| {
+        e.split(' ')
+            .map(|w| if w.starts_with("0x") { "0x" } else { w })
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
+}
+
+#[test]
+fn workgroups_end_as_under_the_reference_interpreter() {
+    for (size, subgroup) in [
+        (64, 32),
+        (48, 32),
+        (40, 16),
+        (64, 8),
+        (33, 4),
+        (1, 32),
+        (64, 1),
+    ] {
+        for regions in [vec![(OUT, vec![0; 256])], vec![]] {
+            let mem = Memory {
+                regions: regions.clone(),
+            };
+            let new = run_workgroup(
+                WG,
+                &env(),
+                &Memory::default(),
+                mem.clone(),
+                [size, 1, 1],
+                subgroup,
+                1_000_000,
+            )
+            .map(|d| (d.mem, format!("{:?}", d.notes), d.steps))
+            .map_err(|f| f.message);
+            let old = reference::group::run_workgroup(
+                WG,
+                &env(),
+                &Memory::default(),
+                mem,
+                [size, 1, 1],
+                subgroup,
+                1_000_000,
+            )
+            .map(|d| (d.mem, format!("{:?}", d.notes), d.steps))
+            .map_err(|f| f.message);
+            assert_eq!(
+                outcome(new),
+                outcome(old),
+                "size {size}, subgroup {subgroup}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_runaway_names_the_same_steps_and_block_as_the_reference() {
+    for steps in [1, 2, 5, 9, 10, 11, 17, 30] {
+        let mem = Memory {
+            regions: vec![(OUT, vec![0; 256])],
+        };
+        let new = run_workgroup(
+            WG,
+            &env(),
+            &Memory::default(),
+            mem.clone(),
+            [64, 1, 1],
+            32,
+            steps,
+        )
+        .err()
+        .map(|f| f.message);
+        let old = reference::group::run_workgroup(
+            WG,
+            &env(),
+            &Memory::default(),
+            mem,
+            [64, 1, 1],
+            32,
+            steps,
+        )
+        .err()
+        .map(|f| f.message);
+        assert_eq!(new, old, "{steps} steps");
+    }
+}
+
+#[test]
+fn a_dispatch_runs_its_workgroups_as_one_at_a_time_would() {
+    let groups: Vec<[u32; 3]> = (0..12).map(|k| [k, 0, 0]).collect();
+    let mem = Memory {
+        regions: vec![(OUT, vec![0; 256])],
+    };
+    let d = Dispatch {
+        size: [64, 1, 1],
+        groups: groups.clone(),
+        subgroup: 32,
+        max_steps: 1_000_000,
+        threads: 4,
+    };
+    let done = run_dispatch(WG, &env(), &Memory::default(), mem.clone(), &d)
+        .unwrap_or_else(|(k, f)| panic!("group {k}: {}", f.message));
+    let one = run_workgroup(
+        WG,
+        &env(),
+        &Memory::default(),
+        mem,
+        [64, 1, 1],
+        32,
+        1_000_000,
+    )
+    .unwrap_or_else(|f| panic!("{}", f.message));
+    assert_eq!(done.mem.regions, one.mem.regions[..1]);
+    assert_eq!(done.groups.len(), 12);
+    for g in &done.groups {
+        assert_eq!(g.steps, one.steps);
+        assert_eq!(g.notes, one.notes);
+    }
 }

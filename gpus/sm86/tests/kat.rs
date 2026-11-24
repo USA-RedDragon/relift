@@ -222,8 +222,15 @@ fn exec_pools(
         subgroup_size: 32,
         fold_identity: true,
     };
+    let mut old = relift_gpu_spvi::reference::Run::new(m, &env, mem.clone());
+    old.main();
     let mut r = Run::new(m, &env, mem);
     r.main();
+    assert_eq!(
+        r.mem.regions, old.mem.regions,
+        "compiled and reference memory"
+    );
+    assert_eq!(r.steps, old.steps, "compiled and reference steps");
     let out = (0..outs)
         .map(|k| r.mem.read(OUT + 4 * k as u64, 4) as u32)
         .collect();
