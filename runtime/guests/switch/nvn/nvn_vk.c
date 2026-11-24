@@ -5039,6 +5039,7 @@ void nvn_gfx_init(nvn_gfx *st)
     }
     st->stencil_value_mask[0] = st->stencil_value_mask[1] = 0xff;
     st->stencil_mask[0] = st->stencil_mask[1] = 0xff;
+    st->conservative_control = NVN_CONSERVATIVE_CONTROL_DEFAULT;
 }
 
 bool nvn_vk_upload(replay *r, uint64_t addr, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off)

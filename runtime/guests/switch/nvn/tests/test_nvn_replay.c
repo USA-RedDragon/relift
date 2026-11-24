@@ -80,14 +80,36 @@ TEST(nvn_replay_conservative_raster_mode_is_kept_and_only_post_snap_runs)
 {
     nvn_gfx st;
     memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    CHECK_EQ(st.conservative_control, 0x00030000u);
+    CHECK(nvn_conservative_control_is_post_snap(st.conservative_control));
+    st.conservative_control |= 2u;
     nvn_cmd e = { .op = NVN_CMD_SET_CONSERVATIVE_RASTER_MODE, .x = { 0, 2, 0x13 } };
     CHECK_EQ(replay_one(&st, &e), RL_OK);
-    CHECK_EQ(st.conservative_mode, 2u);
-    CHECK_EQ(st.conservative_mode_bits, 3u);
-    CHECK(nvn_conservative_mode_is_post_snap(0, 0));
-    CHECK(!nvn_conservative_mode_is_post_snap(1, 0));
-    CHECK(!nvn_conservative_mode_is_post_snap(2, 0));
-    CHECK(!nvn_conservative_mode_is_post_snap(0, 1));
+    CHECK_EQ(st.conservative_control, 0x00031102u);
+    CHECK(!nvn_conservative_control_is_post_snap(st.conservative_control));
+    CHECK_EQ(nvn_conservative_control(0, 1, 0), 0x1110u);
+    CHECK(!nvn_conservative_control_is_post_snap(0x1110u));
+    CHECK_EQ(nvn_conservative_control(0x30001u, 0, 1), 0x10001u);
+    CHECK(nvn_conservative_control_is_post_snap(0x10001u));
+}
+
+TEST(nvn_replay_geometry_processing_mode_picks_the_pipeline_draws_run_in)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_gfx_init(&st);
+    CHECK_EQ(st.geometry_mode, 0u);
+    nvn_cmd e = { .op = NVN_CMD_SET_GEOMETRY_PROCESSING_MODE, .x = { 0, 2 } };
+    CHECK_EQ(replay_one(&st, &e), RL_OK);
+    CHECK_EQ(st.geometry_mode, 2u);
+    CHECK(nvn_geometry_mode_draws(0, false));
+    CHECK(!nvn_geometry_mode_draws(0, true));
+    CHECK(nvn_geometry_mode_draws(1, true));
+    CHECK(nvn_geometry_mode_draws(2, true));
+    CHECK(!nvn_geometry_mode_draws(1, false));
+    CHECK(!nvn_geometry_mode_draws(3, true));
+    CHECK(!nvn_geometry_mode_draws(3, false));
 }
 
 TEST(nvn_replay_depth_bounds_are_kept_in_the_state)

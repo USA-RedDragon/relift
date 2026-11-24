@@ -440,8 +440,13 @@ typedef struct nvn_gfx {
     /** @brief nvnCommandBufferSetDepthBounds: the test is on, and the range of stored depth that passes it. */
     bool depth_bounds;
     float depth_bounds_range[2];
-    /** @brief nvnCommandBufferSetConservativeRasterMode's two arguments (nvn_draw.c, set_conservative_mode). */
-    uint32_t conservative_mode, conservative_mode_bits;
+    /**
+     * @brief The console's SET_CONSERVATIVE_RASTER_CONTROL register (NVC797 0x0230) as nvnCommandBufferSetConservativeRasterMode
+     * leaves it (nvn_draw.c, nvn_conservative_control); NVN_CONSERVATIVE_CONTROL_DEFAULT before the first.
+     */
+    uint32_t conservative_control;
+    /** @brief nvnCommandBufferSetGeometryProcessingMode's mode: 0 (the default) vertex draws, 1 and 2 mesh draws. */
+    uint32_t geometry_mode;
     /**
      * @brief The compute overlap mode the game set (nvnCommandBufferSetComputeOverlapMode, its driver's token 0x27):
      * nonzero lets dispatches with no barrier between them run side by side; 0, the mode a queue starts in, runs
@@ -1074,7 +1079,17 @@ void nvn_dlss_slot(uint32_t slot);
  */
 int nvn_draw_cmd(replay *r, const nvn_cmd *e);
 /** @brief The conservative raster mode (mode, n) that is post-snap rasterization, which the host has. */
-bool nvn_conservative_mode_is_post_snap(uint32_t mode, uint32_t n);
+/**
+ * @brief The value the driver's default-state stream writes to SET_CONSERVATIVE_RASTER_CONTROL before any draw (a
+ * constant at ro 0xbb6ec8 of one game's sdk): post-snap triangles, lines and points, uncertainty region 512, bloat 0.
+ */
+#define NVN_CONSERVATIVE_CONTROL_DEFAULT 0x00030000u
+/** @brief Draws of the mesh pipeline (mesh) or the vertex pipeline run in geometry processing mode mode. */
+bool nvn_geometry_mode_draws(uint32_t mode, bool mesh);
+/** @brief SET_CONSERVATIVE_RASTER_CONTROL after nvnCommandBufferSetConservativeRasterMode(mode, n) on a register holding cur. */
+uint32_t nvn_conservative_control(uint32_t cur, uint32_t mode, uint32_t n);
+/** @brief The register value rasterizes as the host's conservative rasterization does: both snap modes post-snap and no copy of inner to outer. */
+bool nvn_conservative_control_is_post_snap(uint32_t control);
 /** @brief One indirect draw record: the GL indirect command NVN reads. */
 typedef struct nvn_indirect_draw {
     uint32_t count, instances, first, base_instance;

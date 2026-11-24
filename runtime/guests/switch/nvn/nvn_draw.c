@@ -759,10 +759,9 @@ static int fixed_state(replay *r, pipe_key *k)
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;
-    if (st->conservative_raster && !nvn_conservative_mode_is_post_snap(st->conservative_mode, st->conservative_mode_bits))
-        return nvn_vk_stop(r, "conservative raster mode %u (%u), which programs pre-snap rasterization: the host has "
-                           "only post-snap conservative rasterization", st->conservative_mode,
-                           st->conservative_mode_bits);
+    if (st->conservative_raster && !nvn_conservative_control_is_post_snap(st->conservative_control))
+        return nvn_vk_stop(r, "conservative raster control 0x%x, which programs pre-snap rasterization: the host has "
+                           "only post-snap conservative rasterization", st->conservative_control);
     if (k->conservative_raster) {
         uint32_t most = (uint32_t)(g.conservative_extra_max * 4.0f);
         k->conservative_dilate = st->conservative_dilate;
@@ -1664,6 +1663,9 @@ static int draw(replay *r, uint32_t mode, bool indexed, uint32_t itype, uint64_t
     int cond = nvn_draw_render_enabled(r, &run);
     if (cond != RL_OK || !run)
         return cond;
+    if (!nvn_geometry_mode_draws(st->geometry_mode, false))
+        return nvn_vk_stop(r, "a vertex draw in geometry processing mode %u, which runs the mesh pipeline",
+                           st->geometry_mode);
     memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!layouts())
         return nvn_vk_stop(r, "cannot make the pipeline layout");
@@ -2085,6 +2087,9 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
     int rc = nvn_draw_render_enabled(r, &run);
     if (rc != RL_OK || !run || !count)
         return rc;
+    if (!nvn_geometry_mode_draws(st->geometry_mode, true))
+        return nvn_vk_stop(r, "a mesh draw in geometry processing mode %u, which does not run the mesh pipeline",
+                           st->geometry_mode);
     memset(st->ubo_patched, 0, sizeof st->ubo_patched);
     if (!layouts())
         return nvn_vk_stop(r, "cannot make the pipeline layout");
@@ -3065,12 +3070,38 @@ int nvn_separate_handles(replay *r, uint32_t s)
 
 /**
  * @brief nvnCommandBufferSetConservativeRasterMode(cb, mode, n): the driver (SDK 22.2.0, sdk 0x684470 of one game)
- * calls macro 0xe60 with (n & 0xf) << 16 | (mode 0: 0, mode 2: 0x1100, any other: 0x1110). Mode 0 with n 0 writes 0,
- * the value a queue starts with, which is the post-snap rasterization VK_EXT_conservative_rasterization gives
- * (inferred: the reset value is the default mode, and NVIDIA's pre-snap modes are the ones that add bits). Any other
- * value has no host equivalent, so a draw with conservative raster on and such a mode stops.
+ * calls macro 0xe60 with p = (n & 0xf) << 16 | (mode 0: 0, mode 2: 0x1100, any other: 0x1110), and the macro writes
+ * SET_CONSERVATIVE_RASTER_CONTROL = (p & ~0xf) | (current & 0xf), keeping the bloat (decoded from the driver's macro
+ * code). By NVIDIA's Ampere class header (open-gpu-doc clc797.h): bits 10:8 the triangle snap mode, 14:12 the line and
+ * point snap mode (0 post-snap, 1 pre-snap), bit 4 copy inner to outer, 19:16 the uncertainty region size, so mode 0
+ * is post-snap and the others pre-snap.
  */
-bool nvn_conservative_mode_is_post_snap(uint32_t mode, uint32_t n) { return mode == 0 && n == 0; }
+/**
+ * @brief nvnCommandBufferSetGeometryProcessingMode(cb, mode) calls macro 0xe26 with the mode, then 0xed6 and 0xe3e
+ * with 0 (one game's sdk 0x681400). Run on the driver's own macros over its device-init state (the xfb lane's MME
+ * decoder): mode 0 writes nothing over the init state, the vertex pipeline; modes 1 and 2 set SET_MESH_CONTROL to 1
+ * and SET_GS_MODE to 1, turn the vertex, tessellation and geometry pipeline shaders off (SET_PIPELINE_SHADER 0 to
+ * 4), clear the post-VTG attribute skip masks and bind the stage constant buffer groups; 0xed6 writes
+ * SET_OFFSET_RENDER_TARGET_INDEX 0 and 0xe3e SET_USER_CLIP_OP 0, both the init values, for every mode. relift picks
+ * the pipeline by the draw command, so what the mode changes is which draws run: vertex draws in mode 0, mesh draws
+ * in 1 and 2 (one game's frame trace: 1020 vertex draws all in mode 0, 49 mesh draws all in 1 or 2). A draw of the
+ * other kind has the console run its stages with the pipeline off, which relift does not model, so it stops; any
+ * other mode stops at its first draw.
+ */
+bool nvn_geometry_mode_draws(uint32_t mode, bool mesh) { return mesh ? mode == 1 || mode == 2 : mode == 0; }
+
+uint32_t nvn_conservative_control(uint32_t cur, uint32_t mode, uint32_t n)
+{
+    uint32_t p = (n & 0xfu) << 16 | (mode == 0 ? 0u : mode == 2 ? 0x1100u : 0x1110u);
+    return (p & ~0xfu) | (cur & 0xfu);
+}
+
+/**
+ * @brief Post-snap is what VK_EXT_conservative_rasterization rasterizes; the uncertainty region size is not checked,
+ * as it sizes the region around unsnapped vertices that only pre-snap rasterization uses (inferred from the class
+ * header's grouping of the field with the snap modes; no capture compares two sizes in post-snap).
+ */
+bool nvn_conservative_control_is_post_snap(uint32_t control) { return (control & 0x7710u) == 0; }
 
 uint32_t nvn_indirect_stride(bool indexed, int64_t stride)
 {
@@ -3338,8 +3369,7 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_SET_DEPTH_BOUNDS:
         return set_depth_bounds(st, e);
     case NVN_CMD_SET_CONSERVATIVE_RASTER_MODE:
-        st->conservative_mode = (uint32_t)e->x[1];
-        st->conservative_mode_bits = (uint32_t)e->x[2] & 0xf;
+        st->conservative_control = nvn_conservative_control(st->conservative_control, (uint32_t)e->x[1], (uint32_t)e->x[2]);
         return RL_OK;
     case NVN_CMD_SET_POLYGON_OFFSET_CLAMP:
         for (int i = 0; i < 3; i++)
@@ -3420,8 +3450,10 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
     case NVN_CMD_SET_SHADING_RATE_PALETTE_MODE:
         st->shading.mode = (uint32_t)e->x[1];
         return RL_OK;
-    case NVN_CMD_BIND_COVERAGE_MODULATION_TABLE:
     case NVN_CMD_SET_GEOMETRY_PROCESSING_MODE:
+        st->geometry_mode = (uint32_t)e->x[1];
+        return RL_OK;
+    case NVN_CMD_BIND_COVERAGE_MODULATION_TABLE:
     case NVN_CMD_SET_PATCH_SIZE:
         return nvn_stats_mark(NVN_STATS_IGNORED);
     case NVN_CMD_SET_LINE_WIDTH:
