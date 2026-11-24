@@ -1329,6 +1329,9 @@ int nvn_dlss_launch(replay *r, const nvn_cmd *e)
     const uint8_t *params = nvn_cmd_bytes(r->s, e->x[3]);
     if (e->x[4] && !params)
         return nvn_vk_stop(r, "a recorded CUDA launch of %s lost its parameters", g_kernels[i].name);
+    if (getenv("RELIFT_DLSS_NO_LAUNCH"))
+        return nvn_vk_stop(r, "a CUDA launch of %s: RELIFT_DLSS_NO_LAUNCH is set, so the console DLSS kernels do not run",
+                           g_kernels[i].name);
     uint32_t grid[3] = { (uint32_t)e->x[2], (uint32_t)(e->x[2] >> 32), (uint32_t)e->x[5] };
     uint32_t block[3] = { (uint32_t)(e->x[6] & 0xffffu), (uint32_t)((e->x[6] >> 16) & 0xffffu), (uint32_t)(e->x[6] >> 32) };
     return nvn_cuda_dispatch(r, g_kernels[i].key, params, (uint32_t)e->x[4], grid, block, (uint32_t)(e->x[5] >> 32));
