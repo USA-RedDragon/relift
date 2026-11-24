@@ -12,6 +12,11 @@
 //! wgrun PROGRAM.spv [options]
 //!   --size X,Y,Z          workgroup size (sets SpecIds 0, 1 and 2)
 //!   --group X,Y,Z         workgroup id (repeatable; default 0,0,0)
+//!   --grid X,Y,Z          every workgroup id below X,Y,Z
+//!   --reference 1         run on the tree-walking reference interpreter
+//!                         (relift_gpu_spvi::reference), one group at a time
+//!   --threads N           run the workgroups as one dispatch on N threads
+//!                         (they then share memory as on a device)
 //!   --subgroup N          invocations per subgroup (default 32)
 //!   --spec ID=VALUE       a specialization constant (repeatable)
 //!   --uniform S,B=FILE    a uniform block's bytes, from FILE (repeatable)
@@ -28,7 +33,7 @@
 use std::collections::HashMap;
 
 use relift_gpu_nv::translate::{COMPUTE_BASE_TABLE_BINDING, DRIVER_CBUF_SET, compute_base_binding};
-use relift_gpu_spvi::group::run_workgroup;
+use relift_gpu_spvi::group::{Dispatch, run_dispatch, run_workgroup};
 use relift_gpu_spvi::{Denorm, Env, Memory, specialize};
 
 fn triple(s: &str) -> [u32; 3] {
@@ -51,6 +56,18 @@ fn bytes(src: &str) -> Vec<u8> {
     }
 }
 
+/// A reference note as the compiled interpreter's.
+fn note(n: relift_gpu_spvi::reference::group::Note) -> relift_gpu_spvi::group::Note {
+    use relift_gpu_spvi::group::Note as N;
+    use relift_gpu_spvi::reference::group::Note as R;
+    match n {
+        R::BarrierAfterReturn { block, returned } => N::BarrierAfterReturn { block, returned },
+        R::BarrierBlocks { blocks } => N::BarrierBlocks { blocks },
+        R::PartialShuffle { block, active } => N::PartialShuffle { block, active },
+        R::InactiveLane { block } => N::InactiveLane { block },
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut words: Vec<u32> = std::fs::read(&args[0])
@@ -60,6 +77,8 @@ fn main() {
         .collect();
     let (mut size, mut groups, mut subgroup, mut steps) =
         ([1, 1, 1], Vec::new(), 32, 50_000_000u64);
+    let mut threads = None;
+    let mut reference = false;
     let mut mem = Memory::default();
     let mut uniform = Memory::default();
     let mut uniforms = HashMap::new();
@@ -72,6 +91,18 @@ fn main() {
         match a.as_str() {
             "--size" => size = triple(v),
             "--group" => groups.push(triple(v)),
+            "--grid" => {
+                let g = triple(v);
+                for z in 0..g[2] {
+                    for y in 0..g[1] {
+                        for x in 0..g[0] {
+                            groups.push([x, y, z]);
+                        }
+                    }
+                }
+            }
+            "--reference" => reference = v == "1",
+            "--threads" => threads = Some(v.parse::<usize>().expect("a number")),
             "--subgroup" => subgroup = v.parse().expect("a number"),
             "--steps" => steps = v.parse().expect("a number"),
             "--spec" => {
@@ -138,10 +169,66 @@ fn main() {
         subgroup_size: subgroup,
         fold_identity: false,
     };
+    if let Some(threads) = threads {
+        let d = Dispatch {
+            size,
+            groups,
+            subgroup,
+            max_steps: steps,
+            threads,
+        };
+        let t = std::time::Instant::now();
+        match run_dispatch(&words, &env, &uniform, mem, &d) {
+            Ok(done) => {
+                let all = done.groups.iter().flat_map(|g| g.steps.iter());
+                let total: u64 = all.clone().sum();
+                let secs = t.elapsed().as_secs_f64();
+                println!(
+                    "{} groups on {threads} threads: done in {secs:.2} s, steps {:?}..{:?}, {:.0}M steps/s",
+                    done.groups.len(),
+                    all.clone().min(),
+                    all.max(),
+                    total as f64 / secs / 1e6
+                );
+                for g in &done.groups {
+                    for (n, c) in &g.notes {
+                        println!("  group {:?} note {n:?} x{c}", g.group);
+                    }
+                }
+                mem = done.mem;
+            }
+            Err((k, f)) => {
+                println!(
+                    "group {:?}: invocation {} failed: {}",
+                    d.groups[k], f.invocation, f.message
+                );
+                std::process::exit(1);
+            }
+        }
+        groups = Vec::new();
+    }
     for g in groups {
         env.group_id = g;
         let t = std::time::Instant::now();
-        match run_workgroup(&words, &env, &uniform, mem, size, subgroup, steps) {
+        let r = if reference {
+            relift_gpu_spvi::reference::group::run_workgroup(
+                &words, &env, &uniform, mem, size, subgroup, steps,
+            )
+            .map(|d| relift_gpu_spvi::group::Done {
+                mem: d.mem,
+                notes: d.notes.into_iter().map(|(n, c)| (note(n), c)).collect(),
+                steps: d.steps,
+            })
+            .map_err(|f| relift_gpu_spvi::group::Failure {
+                invocation: f.invocation,
+                message: f.message,
+                at: f.at,
+                steps: f.steps,
+            })
+        } else {
+            run_workgroup(&words, &env, &uniform, mem, size, subgroup, steps)
+        };
+        match r {
             Ok(done) => {
                 let (lo, hi) = (done.steps.iter().min(), done.steps.iter().max());
                 println!(

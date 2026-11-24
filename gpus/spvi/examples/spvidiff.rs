@@ -24,6 +24,8 @@ use relift_gpu_spvi::{Denorm, Env, Memory, Module, Run, group, reference, specia
 
 const DATA: u64 = 0x0000_1000_0000_0000;
 const DATA_BYTES: usize = 4 << 20;
+/// Each buffer's bytes; buffers lie back to back.
+const BUF_BYTES: usize = 0x4_0000;
 const BUFS: u64 = 0x0000_2000_0000_0000;
 
 /// Floats a translation must keep exact: -0, quiet and signaling NaNs
@@ -73,7 +75,7 @@ fn inputs(m: &Module, seed: u64) -> Inputs {
     let mut uniform = Memory::default();
     let mut at = BUFS;
     let buf = |r: &mut Rng| {
-        let mut b = vec![0u8; 0x10000];
+        let mut b = vec![0u8; BUF_BYTES];
         for c in b.chunks_mut(8) {
             if r.next().is_multiple_of(5) {
                 c.copy_from_slice(&special(r).to_le_bytes());
@@ -100,12 +102,12 @@ fn inputs(m: &Module, seed: u64) -> Inputs {
             for k in 0..8 {
                 arrays.insert((b.0, b.1, k), at);
                 uniform.regions.push((at, buf(&mut r)));
-                at += 0x10_0000;
+                at += BUF_BYTES as u64;
             }
         } else {
             uniforms.insert(b, at);
             uniform.regions.push((at, buf(&mut r)));
-            at += 0x10_0000;
+            at += BUF_BYTES as u64;
         }
     }
     let denorm = [Denorm::Preserve, Denorm::FlushBefore, Denorm::FlushAfter][(seed % 3) as usize];
@@ -146,18 +148,29 @@ fn single(words: &[u32], inp: &Inputs, steps: u64, old: bool) -> Outcome {
     let m = Module::parse(words);
     let mut mem = inp.mem.clone();
     mem.regions.extend(inp.uniform.regions.iter().cloned());
-    caught(|| {
-        if old {
-            let mut r = reference::Run::new(&m, &inp.env, mem);
-            r.max_steps = steps;
-            r.main();
-            (r.mem.regions, String::new(), vec![r.steps])
-        } else {
-            let mut r = Run::new(&m, &inp.env, mem);
-            r.max_steps = steps;
-            r.main();
-            (r.mem.regions, String::new(), vec![r.steps])
-        }
+    let ended = |r: Result<(), String>, regions: Vec<(u64, Vec<u8>)>, steps: u64| match r {
+        Ok(()) => Ok((regions, String::new(), vec![steps])),
+        Err(e) => Err(format!("{e} (memory {:016x})", hash(&regions))),
+    };
+    if old {
+        let mut r = reference::Run::new(&m, &inp.env, mem);
+        r.max_steps = steps;
+        let res = caught(|| r.main());
+        ended(res, r.mem.regions, r.steps)
+    } else {
+        let mut r = Run::new(&m, &inp.env, mem);
+        r.max_steps = steps;
+        let res = caught(|| r.main());
+        ended(res, r.mem.regions, r.steps)
+    }
+}
+
+/// FNV-1a of every region's base and bytes.
+fn hash(regions: &[(u64, Vec<u8>)]) -> u64 {
+    regions.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, (b, v)| {
+        v.iter().fold(h ^ b, |h, &x| {
+            (h ^ u64::from(x)).wrapping_mul(0x100_0000_01b3)
+        })
     })
 }
 
@@ -200,11 +213,7 @@ fn workgroup(
 fn summary(o: &Outcome) -> String {
     match o {
         Ok((regions, notes, steps)) => {
-            let h = regions.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, (b, v)| {
-                v.iter().fold(h ^ b, |h, &x| {
-                    (h ^ u64::from(x)).wrapping_mul(0x100_0000_01b3)
-                })
-            });
+            let h = hash(regions);
             format!(
                 "ok mem {h:016x} steps {:?}..{:?} notes {notes}",
                 steps.iter().min(),
