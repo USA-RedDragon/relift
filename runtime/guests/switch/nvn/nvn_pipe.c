@@ -295,6 +295,7 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
     return vr;
 }
 
+/** @brief The dynamic states of every pipeline; one with the depth bounds test adds its range (the last entry). */
 static const VkDynamicState dynamic_states[] = {
     VK_DYNAMIC_STATE_VIEWPORT,
     VK_DYNAMIC_STATE_SCISSOR,
@@ -313,6 +314,7 @@ static const VkDynamicState dynamic_states[] = {
     VK_DYNAMIC_STATE_STENCIL_OP,
     VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE,
     VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
+    VK_DYNAMIC_STATE_DEPTH_BOUNDS,
 };
 
 void nvn_pipe_set_dynamic(VkCommandBuffer cb, const nvn_pipe_key *k)
@@ -448,12 +450,16 @@ static void fill_state(state *s, const nvn_pipe_key *k)
     s->ms = (VkPipelineMultisampleStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                      .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
                                                      .pSampleMask = &s->sample_mask };
-    s->ds = (VkPipelineDepthStencilStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    s->ds = (VkPipelineDepthStencilStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+                                                     .depthBoundsTestEnable = k->depth_bounds != 0,
+                                                     .minDepthBounds = 0.0f,
+                                                     .maxDepthBounds = 1.0f };
     s->cb = (VkPipelineColorBlendStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                                                    .attachmentCount = k->ncolor,
                                                    .pAttachments = k->blend };
     s->dy = (VkPipelineDynamicStateCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                                .dynamicStateCount = sizeof dynamic_states / sizeof dynamic_states[0],
+                                                .dynamicStateCount = sizeof dynamic_states / sizeof dynamic_states[0] -
+                                                                     (k->depth_bounds ? 0u : 1u),
                                                 .pDynamicStates = dynamic_states };
     s->ri = (VkPipelineRenderingCreateInfo){ .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
                                              .colorAttachmentCount = k->ncolor,
@@ -476,6 +482,8 @@ typedef struct stage_key {
     VkSpecializationMapEntry map[NVN_MAX_SPECS];
     uint32_t val[NVN_MAX_SPECS];
     uint32_t polygon, depth_clamp, conservative, negative_one_to_one, conservative_dilate, viewport_swizzle, provoking_last, sample_mask;
+    /** @brief The fragment stage's library holds the depth bounds test (its depth-stencil state). */
+    uint32_t depth_bounds;
 } stage_key;
 
 typedef struct fo_key {
@@ -502,6 +510,7 @@ static void stage_of(const nvn_pipe_key *k, uint32_t s, stage_key *o)
     o->m = k->mods[s];
     o->nspec = k->nspec[s];
     o->sample_mask = s == 1 ? k->sample_mask : 0;
+    o->depth_bounds = s == 1 ? k->depth_bounds : 0;
     memcpy(o->map, k->spec_map[s], k->nspec[s] * sizeof o->map[0]);
     memcpy(o->val, k->spec[s], k->nspec[s] * sizeof o->val[0]);
     nvn_spec_sort(&o->nspec, o->map, o->val);
@@ -539,6 +548,8 @@ static VkPipeline library(table *t, const void *key, size_t len, VkGraphicsPipel
         return e->p;
     state s;
     fill_state(&s, k);
+    if (part != VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)
+        s.dy.dynamicStateCount = sizeof dynamic_states / sizeof dynamic_states[0] - 1u;
     VkGraphicsPipelineLibraryCreateInfoEXT lib = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
                                                    .flags = part };
     VkGraphicsPipelineCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,

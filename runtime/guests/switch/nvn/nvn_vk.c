@@ -476,6 +476,7 @@ static bool device_hook(void *user, rl_vkdev_build *b)
     }
     g.depth_clamp = feat.f2.features.depthClamp;
     g.wide_lines = feat.f2.features.wideLines;
+    g.depth_bounds = feat.f2.features.depthBounds;
     g.geometry_shader = feat.f2.features.geometryShader;
     g.tessellation_shader = feat.f2.features.tessellationShader;
     g.query_ok = feat.f2.features.pipelineStatisticsQuery && feat.f2.features.geometryShader &&

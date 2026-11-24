@@ -198,6 +198,35 @@ TEST(nvn_pipe_libraries_are_made_once_and_linked_by_every_pipeline)
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
 
+TEST(nvn_pipe_the_depth_bounds_test_makes_its_own_fragment_library_only)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    CHECK(nvn_draw_layouts());
+    if (!g.depth_bounds)
+        return;
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_key a, b;
+    make_key(&a, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 48);
+    a.depth = VK_FORMAT_D32_SFLOAT;
+    a.depth_test = 1;
+    b = a;
+    b.depth_bounds = 1;
+    uint64_t made0, ns, late, lns, made1;
+    VkPipeline pa = nvn_pipe_graphics(&a);
+    CHECK(pa != NULL);
+    nvn_pipe_stats(&made0, &ns, &late, &lns);
+    VkPipeline pb = nvn_pipe_graphics(&b);
+    CHECK(pb != NULL && pb != pa);
+    nvn_pipe_stats(&made1, &ns, &late, &lns);
+    CHECK_EQ(made1 - made0, nvn_pipe_uses_libraries() ? 2u : 1u);
+    CHECK(nvn_pipe_graphics(&b) == pb);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+}
+
 TEST(nvn_pipe_a_fragment_library_is_found_whatever_order_its_constants_come_in)
 {
     nvn_probes probes;

@@ -41,6 +41,8 @@ typedef struct nvn_pipe_key {
     uint32_t depth_test, depth_write, depth_func, stencil_test;
     VkStencilOpState front_ops, back_ops;
     uint32_t primitive_restart, negative_one_to_one, patch_points, depth_clamp, rasterizer_discard, conservative_raster;
+    /** @brief The depth bounds test is on: the pipeline tests it with the range as dynamic state. */
+    uint32_t depth_bounds;
     /** @brief The sample mask's bit for the one sample, the conservative dilate in quarter pixels, the first viewport's swizzle and the provoking vertex. */
     uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
     /** @brief Specialization constants of each stage: id and value, sorted by id (nvn_spec_sort). */

@@ -788,6 +788,9 @@ static int fixed_state(replay *r, pipe_key *k)
         }
     }
     k->depth_clamp = st->depth_clamp;
+    k->depth_bounds = st->depth_bounds && k->depth != VK_FORMAT_UNDEFINED;
+    if (k->depth_bounds && !g.depth_bounds)
+        return nvn_vk_stop(r, "depth bounds test, which the host device does not have");
     k->negative_one_to_one = nvn_device_depth_mode() == 0;
     return RL_OK;
 }
@@ -1302,6 +1305,12 @@ static void dynamic_state(replay *r, VkRect2D area)
     VK(vkCmdSetDepthBias)(g.cb, st->polygon_offset[1], st->polygon_offset[2], st->polygon_offset[0]);
     VK(vkCmdSetBlendConstants)(g.cb, st->blend_color);
     VK(vkCmdSetLineWidth)(g.cb, g.wide_lines ? st->line_width : 1.0f);
+    if (st->depth_bounds && g.depth_bounds) {
+        float lo = st->depth_bounds_range[0], hi = st->depth_bounds_range[1];
+        lo = lo < 0.0f ? 0.0f : lo > 1.0f ? 1.0f : lo;
+        hi = hi < 0.0f ? 0.0f : hi > 1.0f ? 1.0f : hi;
+        VK(vkCmdSetDepthBounds)(g.cb, lo, hi);
+    }
 }
 
 void nvn_widen_indices(const uint8_t *src, uint32_t n, bool restart, uint16_t *dst)
@@ -3050,6 +3059,21 @@ int nvn_separate_handles(replay *r, uint32_t s)
     return RL_OK;
 }
 
+/**
+ * @brief nvnCommandBufferSetDepthBounds(NVNcommandBuffer *, NVNboolean enable, float n, float f): with the test on, a
+ * fragment whose depth target already holds a value outside [n, f] is discarded, the test Vulkan's depth bounds test
+ * makes (the stored value, not the fragment's). The range goes to the host clamped to [0, 1], which Vulkan requires
+ * without VK_EXT_depth_range_unrestricted; stored depth is in [0, 1] there, so the result is the same. A draw with no
+ * depth target passes the test, as in Vulkan.
+ */
+static int set_depth_bounds(nvn_gfx *st, const nvn_cmd *e)
+{
+    st->depth_bounds = (e->x[1] & 0xff) != 0;
+    memcpy(&st->depth_bounds_range[0], &e->d[0], 4);
+    memcpy(&st->depth_bounds_range[1], &e->d[1], 4);
+    return RL_OK;
+}
+
 int nvn_draw_cmd(replay *r, const nvn_cmd *e)
 {
     nvn_gfx *st = r->st;
@@ -3233,9 +3257,7 @@ int nvn_draw_cmd(replay *r, const nvn_cmd *e)
         faces((uint32_t)e->x[1], (uint32_t)e->x[2], st->stencil_ref);
         return RL_OK;
     case NVN_CMD_SET_DEPTH_BOUNDS:
-        if ((uint32_t)e->x[1] & 0xff)
-            return nvn_vk_stop(r, "depth bounds test");
-        return RL_OK;
+        return set_depth_bounds(st, e);
     case NVN_CMD_SET_POLYGON_OFFSET_CLAMP:
         for (int i = 0; i < 3; i++)
             memcpy(&st->polygon_offset[i], &e->d[i], 4);

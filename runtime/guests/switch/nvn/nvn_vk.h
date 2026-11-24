@@ -204,6 +204,8 @@ typedef struct nvn_vkdev {
     bool depth_clamp;
     /** @brief Line widths other than 1 are allowed (wideLines). */
     bool wide_lines;
+    /** @brief The device has the depth bounds test (depthBounds). */
+    bool depth_bounds;
     /** @brief VK_EXT_conservative_rasterization is on: nvnCommandBufferSetConservativeRasterEnable is honored. */
     bool conservative_raster, conservative_warned;
     /** @brief The largest extra overestimation (pixels) of VK_EXT_conservative_rasterization, and whether a dilate past it was warned of. */
@@ -435,6 +437,9 @@ typedef struct nvn_gfx {
     /** @brief The instances of the draw being replayed: the first and how many. */
     uint32_t inst_base, inst_count;
     bool depth_clamp;
+    /** @brief nvnCommandBufferSetDepthBounds: the test is on, and the range of stored depth that passes it. */
+    bool depth_bounds;
+    float depth_bounds_range[2];
     /**
      * @brief The compute overlap mode the game set (nvnCommandBufferSetComputeOverlapMode, its driver's token 0x27):
      * nonzero lets dispatches with no barrier between them run side by side; 0, the mode a queue starts in, runs

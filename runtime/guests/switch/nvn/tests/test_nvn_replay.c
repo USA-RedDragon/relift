@@ -55,6 +55,23 @@ TEST(nvn_replay_an_unhandled_command_is_not_a_raised_stop)
     CHECK(rc != RL_OK);
 }
 
+TEST(nvn_replay_depth_bounds_are_kept_in_the_state)
+{
+    nvn_gfx st;
+    memset(&st, 0, sizeof st);
+    nvn_cmd e = { .op = NVN_CMD_SET_DEPTH_BOUNDS, .x = { 0, 1 } };
+    float lo = 0.25f, hi = 0.75f;
+    memcpy(&e.d[0], &lo, 4);
+    memcpy(&e.d[1], &hi, 4);
+    CHECK_EQ(replay_one(&st, &e), RL_OK);
+    CHECK(st.depth_bounds);
+    CHECK_EQ(st.depth_bounds_range[0], 0.25f);
+    CHECK_EQ(st.depth_bounds_range[1], 0.75f);
+    e.x[1] = 0x100;
+    CHECK_EQ(replay_one(&st, &e), RL_OK);
+    CHECK(!st.depth_bounds);
+}
+
 TEST(nvn_replay_depth_clamp_is_kept_in_the_state)
 {
     nvn_gfx st;
