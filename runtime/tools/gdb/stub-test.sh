@@ -23,8 +23,29 @@ if nm "$build/gdb-stub/off.o" | grep -q 'rl_gdb'; then
     echo "stub-test: gdbstub.c built with RL_NO_DEBUG_STUB still defines rl_gdb symbols"; exit 1
 fi
 
-if ! command -v gdb >/dev/null 2>&1; then
-    echo "stub-test: skipped, gdb is not installed"
+# The stub speaks AArch64 registers, so the debugger must know that target. A distribution's plain gdb is often
+# built for the host only (Ubuntu's: `set architecture aarch64` is an undefined item) and gdb-multiarch is the one
+# that knows it. GDB=<program> overrides the search.
+gdb_bin=${GDB:-}
+if [ -z "$gdb_bin" ]; then
+    for cand in gdb-multiarch gdb; do
+        if command -v "$cand" >/dev/null 2>&1 && "$cand" -batch -nx -ex "set architecture aarch64" >/dev/null 2>&1; then
+            gdb_bin=$cand
+            break
+        fi
+    done
+fi
+if [ -z "$gdb_bin" ]; then
+    if command -v gdb >/dev/null 2>&1 || command -v gdb-multiarch >/dev/null 2>&1; then
+        msg="no installed gdb knows the aarch64 target (install gdb-multiarch)"
+    else
+        msg="gdb is not installed"
+    fi
+    if [ -n "${CI:-}" ]; then
+        echo "stub-test: failed, $msg"
+        exit 1
+    fi
+    echo "stub-test: skipped, $msg"
     exit 0
 fi
 out=$build/gdb-stub
@@ -41,13 +62,14 @@ done
 if [ -z "$heap" ]; then
     echo "stub-test: the test guest did not start"; cat "$out/serve.log"; kill $pid 2>/dev/null; exit 1
 fi
-gdb -batch -nx -iex "set debuginfod enabled off" -ex "set architecture aarch64" ${GDB_DEBUG:+-ex "set debug remote 1"} \
+"$gdb_bin" -batch -nx -iex "set debuginfod enabled off" -ex "set architecture aarch64" ${GDB_DEBUG:+-ex "set debug remote 1"} \
     -ex "target remote 127.0.0.1:$port" -ex 'info threads' -ex 'p/x $x0' -ex "x/2gx $heap" \
     -ex 'set $x2 = 0x42' -ex 'break *0x8001000' -ex continue -ex 'p/x $pc' -ex delete \
     -ex "watch *(long *)($heap + 0x40)" -ex continue -ex continue -ex continue -ex continue -ex delete \
     -ex "set {int}($heap + 16) = 1" -ex detach >"$out/gdb.log" 2>&1 || true
-wait $pid
-rc=$?
+# The test guest ends when gdb has written its word; a failed run leaves it waiting for 30 s and exiting non-zero.
+rc=0
+wait $pid || rc=$?
 fail=0
 expect() {
     grep -q "$1" "$out/gdb.log" || { echo "stub-test: gdb output lacks: $1"; fail=1; }
@@ -61,6 +83,6 @@ if [ "$(uname -m)" = x86_64 ]; then
     expect 'atchpoint 2: '
     expect 'New value'
 fi
-[ $rc -eq 0 ] || { echo "stub-test: the test guest failed ($rc)"; cat "$out/serve.log"; fail=1; }
+[ $rc -eq 0 ] || { echo "stub-test: the test guest failed ($rc), $gdb_bin did not finish its session"; cat "$out/serve.log"; fail=1; }
 [ $fail -eq 0 ] || { cat "$out/gdb.log"; exit 1; }
 echo "stub-test: ok"

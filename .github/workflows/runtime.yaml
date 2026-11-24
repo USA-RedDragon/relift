@@ -67,7 +67,7 @@ jobs:
 
       - name: Install gdb
         if: runner.os == 'Linux'
-        run: scripts/ci/apt-install.sh gdb
+        run: scripts/ci/apt-install.sh gdb gdb-multiarch
 
       - name: Build the runtime and run its tests in every layout
         run: scripts/ci/runtime-tests.sh
