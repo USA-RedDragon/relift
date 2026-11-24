@@ -933,6 +933,44 @@ TEST(memfd_seals_ids_and_priority)
     CHECK_EQ(sys(c, NR_sched_setaffinity, 0, 8, m, 0, 0, 0), 0);
 }
 
+TEST(shared_mappings_reach_the_file_and_a_forked_child)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t m = 0x401000;
+    /* A shared mapping is whole host pages (RELIFT_HOST_PAGE=16384 simulates a larger host page than the guest's). */
+    const uint64_t hp = lx.vm.host_page > 4096 ? lx.vm.host_page : 4096;
+    put_str(m, "shm");
+    int64_t fd = sys(c, NR_memfd_create, m, 1, 0, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK_EQ(sys(c, NR_ftruncate, (uint64_t)fd, 2 * hp, 0, 0, 0, 0), 0);
+    int64_t at = sys(c, NR_mmap, 0, 2 * hp, L_PROT_READ | L_PROT_WRITE, L_MAP_SHARED, (uint64_t)fd, 0);
+    CHECK(at > 0);
+    memcpy(rl_mem_base() + at + hp, "written through the map", 23);
+    CHECK_EQ(sys(c, NR_pread64, (uint64_t)fd, m + 0x100, 23, hp, 0, 0), 23);
+    CHECK(memcmp(cstr(m + 0x100), "written through the map", 23) == 0);
+    int64_t anon = sys(c, NR_mmap, 0, hp, L_PROT_READ | L_PROT_WRITE, L_MAP_SHARED | L_MAP_ANONYMOUS, (uint64_t)-1, 0);
+    int64_t priv = sys(c, NR_mmap, 0, hp, L_PROT_READ | L_PROT_WRITE, L_MAP_PRIVATE | L_MAP_ANONYMOUS, (uint64_t)-1, 0);
+    CHECK(anon > 0 && priv > 0);
+    int64_t pid = sys(c, NR_clone, L_SIGCHLD, 0, 0, 0, 0, 0);
+    if (pid == 0) {
+        memcpy(rl_mem_base() + anon, "child", 5);
+        memcpy(rl_mem_base() + priv, "child", 5);
+        memcpy(rl_mem_base() + at, "file", 4);
+        _exit(0);
+    }
+    CHECK(pid > 0);
+    CHECK_EQ(wait_status(c, pid), 0);
+    CHECK(memcmp(rl_mem_base() + anon, "child", 5) == 0);
+    CHECK(memcmp(rl_mem_base() + priv, "child", 5) != 0);
+    CHECK(memcmp(rl_mem_base() + at, "file", 4) == 0);
+    CHECK_EQ(sys(c, NR_munmap, (uint64_t)at, 2 * hp, 0, 0, 0, 0), 0);
+    put_str(m, "/proc/self/exe");
+    int64_t ro = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, m, L_O_RDONLY, 0, 0, 0);
+    if (ro >= 0)
+        CHECK_EQ(sys(c, NR_mmap, 0, 4096, L_PROT_READ | L_PROT_WRITE, L_MAP_SHARED, (uint64_t)ro, 0), -L_EACCES);
+}
+
 TEST(execve_of_another_program_finds_nothing)
 {
     rl_ctx *c = boot();

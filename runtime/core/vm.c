@@ -681,3 +681,17 @@ int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
     return p == MAP_FAILED ? -1 : 0;
 }
 #endif
+
+int rl_vm_map_fd(rl_vm *vm, uint64_t addr, uint64_t size, int fd, uint64_t off)
+{
+    __atomic_add_fetch(&vm->map_gen, 1, __ATOMIC_RELEASE);
+    if (((addr | size | off) & (vm->host_page - 1)) || !rl_vm_contains(vm, addr, size))
+        return -1;
+#if defined(_WIN32)
+    (void)fd;
+    return -1;
+#else
+    void *p = mmap(vm->base + addr, size, PROT_NONE, MAP_SHARED | MAP_FIXED, fd, (off_t)off);
+    return p == MAP_FAILED ? -1 : 0;
+#endif
+}

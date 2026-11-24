@@ -424,6 +424,15 @@ RL_RUNTIME_API void rl_shm_destroy(rl_shm *s);
  * gives the permissions). addr and size must be host-page aligned. Returns 0 or -1.
  */
 RL_RUNTIME_API int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s);
+/**
+ * @brief Maps size bytes of the host file fd from offset off over
+ * [addr, addr+size) shared (MAP_SHARED: writes reach the file and every
+ * other mapping of it, also in other processes), inaccessible until
+ * rl_vm_set gives the range a permission with RL_VM_KEEP. addr, size and
+ * off must be host page multiples. 0, or -1 (misaligned or a host failure;
+ * the range is left as it was).
+ */
+RL_RUNTIME_API int rl_vm_map_fd(rl_vm *vm, uint64_t addr, uint64_t size, int fd, uint64_t off);
 
 /** @brief Guest fault description passed to fault hooks and catchers. */
 typedef struct rl_fault {

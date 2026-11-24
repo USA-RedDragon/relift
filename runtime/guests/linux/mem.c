@@ -6,6 +6,7 @@
  * unmapped space has tag 0 and no permissions.
  */
 #include "arch.h"
+#include "hostio.h"
 #include "linux_priv.h"
 
 #include <errno.h>
@@ -181,6 +182,40 @@ static bool fixed_ok(uint64_t addr, uint64_t size)
     return addr >= lx.mmap_floor || (lx.lib_hi && addr >= lx.lib_lo && addr + size <= lx.lib_hi);
 }
 
+/**
+ * @brief Maps [at, at+size) shared: host file host from off, or for host -1
+ * a new anonymous shared object (a memfd) the size of the range. The
+ * address, size and offset must be host page multiples; -ENODEV when they
+ * are not (the caller falls back to a private copy) or the host refuses.
+ */
+static int64_t map_shared(uint64_t at, uint64_t size, int host, uint64_t off, uint32_t prot)
+{
+    uint64_t hp = lx.vm.host_page;
+    if ((at | size | off) & (hp - 1))
+        return -L_ENODEV;
+    int fd = host;
+    if (host < 0) {
+        int64_t m = hio_memfd("relift-shared", 0);
+        if (m < 0)
+            return -L_ENODEV;
+        fd = (int)m;
+        if (hio_ftruncate(fd, size) < 0) {
+            hio_close(fd);
+            return -L_ENOMEM;
+        }
+    }
+    int rc = rl_vm_map_fd(&lx.vm, at, size, fd, off);
+    if (host < 0)
+        hio_close(fd);
+    if (rc != 0)
+        return -L_ENODEV;
+    if (rl_vm_set(&lx.vm, at, size, vm_perm(prot), TAG_MAPPED, RL_VM_KEEP) != 0) {
+        rl_vm_set(&lx.vm, at, size, RL_VM_NONE, TAG_FREE, RL_VM_DISCARD);
+        return -L_ENOMEM;
+    }
+    return (int64_t)at;
+}
+
 int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -203,12 +238,18 @@ int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     bool anon = (flags & L_MAP_ANONYMOUS) != 0;
     int host = -1;
     const rl_linux_module *vm = anon ? NULL : lx_virt_fd(fd);
+    bool shared = type != L_MAP_PRIVATE;
     if (!anon) {
         host = lx_host_fd(fd);
         if (host < 0 && !vm)
             return -L_EBADF;
-        if (type != L_MAP_PRIVATE && (prot & L_PROT_WRITE))
-            return -L_ENODEV;
+        if (shared && vm && (prot & L_PROT_WRITE))
+            return -L_EACCES;
+        if (shared && host >= 0) {
+            int64_t fl = hio_get_status_flags(host);
+            if (fl >= 0 && (prot & L_PROT_WRITE) && (fl & L_O_ACCMODE) != L_O_RDWR)
+                return -L_EACCES;
+        }
     }
     uint64_t at;
     if (flags & (L_MAP_FIXED | L_MAP_FIXED_NOREPLACE)) {
@@ -235,6 +276,15 @@ int64_t lx_sys_mmap(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     }
     if ((flags & L_MAP_FIXED) && !range_free(at, size) && rl_vm_set(&lx.vm, at, size, RL_VM_NONE, TAG_FREE, RL_VM_DISCARD) != 0)
         return -L_ENOMEM;
+    if (shared && !vm) {
+        /* Shared with the file (and, for an anonymous one, with every
+         * process forked after): the host maps the same pages. */
+        int64_t r = map_shared(at, size, anon ? -1 : host, off, prot);
+        if (r != -L_ENODEV)
+            return r;
+        if (!anon && (prot & L_PROT_WRITE))
+            return -L_ENODEV;
+    }
     if (lx_map(at, size, anon ? prot : (L_PROT_READ | L_PROT_WRITE)) != 0)
         return -L_ENOMEM;
     if (vm) {
