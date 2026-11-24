@@ -3,7 +3,9 @@
  * @brief Test runner and the fault probes. Usage: <layer>_tests [substring...].
  * Set RELIFT_TEST_NOFORK=1 to run tests in one process (for a debugger).
  *
- * Each test runs in a child. On Apple hosts the child is a new process
+ * Each test runs in a child. On Linux, after the run, an NVIDIA Xid in the kernel log (a GPU fault the driver
+ * reports and the test does not see) fails the test whose child it named or in whose time it fell (xid_check).
+ * On Apple hosts the child is a new process
  * running only that test (RELIFT_TEST_ONE names it), not a fork: a forked
  * child cannot reach XPC services such as Metal's shader compiler.
  */
@@ -16,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #if defined(__APPLE__)
@@ -115,6 +118,157 @@ t_probe t_write(uint64_t a, uint8_t v)
     return p;
 }
 
+/** @brief The wall clock in seconds since the epoch, as the kernel log's short-unix times. */
+static double wall_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (double)ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+/**
+ * @brief The NVIDIA driver's names for a graphics engine class and one of its methods (NVIDIA's open-gpu-doc class
+ * headers, classes/3d/clc797.h for AMPERE_B), for the Xid failure line; "" when not known.
+ */
+static const char *xid_class_name(unsigned cls)
+{
+    switch (cls) {
+    case 0xc797: return "AMPERE_B (Ampere 3D)";
+    case 0xc7c0: return "AMPERE_COMPUTE_B";
+    case 0xc997: return "ADA_A (Ada 3D)";
+    case 0xc9c0: return "ADA_COMPUTE_A";
+    default: return "";
+    }
+}
+
+static const char *xid_method_name(unsigned cls, unsigned off)
+{
+    if ((cls & 0xff) != 0x97)
+        return "";
+    switch (off) {
+    case 0x0270: return "DRAW_VERTEX_ARRAY_BEGIN_END_A (a draw launch)";
+    case 0x0274: return "DRAW_VERTEX_ARRAY_BEGIN_END_B (a draw launch)";
+    case 0x0278: return "DRAW_VERTEX_ELEMENTS (a draw launch)";
+    case 0x1614: return "DRAW_BEGIN (a draw launch)";
+    case 0x1618: return "DRAW_END";
+    default: return "";
+    }
+}
+
+int t_xid_attribute(const char *log, const char *comm, const t_span *spans, int n, char *why, size_t why_len,
+                    const char **next)
+{
+    *next = NULL;
+    for (const char *line = log; line && *line;) {
+        const char *end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        char buf[1024];
+        if (len >= sizeof buf)
+            len = sizeof buf - 1;
+        memcpy(buf, line, len);
+        buf[len] = 0;
+        line = end ? end + 1 : NULL;
+        const char *x = strstr(buf, "NVRM: Xid");
+        if (!x)
+            continue;
+        double at = strtod(buf, NULL);
+        const char *p = strstr(x, "pid=");
+        long pid = p ? strtol(p + 4, NULL, 10) : -1;
+        const char *nm = strstr(x, "name=");
+        bool ours = false;
+        if (nm && comm) {
+            size_t cl = strcspn(nm + 5, ", ");
+            ours = cl && !strncmp(nm + 5, comm, cl);
+        }
+        int hit = -1;
+        for (int i = 0; i < n && hit < 0; i++)
+            if (spans[i].pid > 0 && spans[i].pid == pid)
+                hit = i;
+        for (int i = 0; i < n && hit < 0 && ours; i++)
+            if (at >= spans[i].start && at <= spans[i].end + 2.0)
+                hit = i;
+        if (hit < 0)
+            continue;
+        unsigned xid = 0, cls = 0, off = 0, data = 0, code = 0;
+        const char *k = strstr(x, "): ");
+        if (k)
+            xid = (unsigned)strtoul(k + 3, NULL, 10);
+        if ((k = strstr(x, "Class ")) && (k = strstr(k + 6, "Class ")))
+            cls = (unsigned)strtoul(k + 6, NULL, 16);
+        if ((k = strstr(x, "Offset ")))
+            off = (unsigned)strtoul(k + 7, NULL, 16);
+        if ((k = strstr(x, "Data ")))
+            data = (unsigned)strtoul(k + 5, NULL, 16);
+        if ((k = strstr(x, "ErrorCode ")))
+            code = (unsigned)strtoul(k + 10, NULL, 16);
+        snprintf(why, why_len, "NVIDIA Xid %u (pid %ld): class %04x %s, method 0x%04x %s, data 0x%x, error code 0x%x", xid,
+                 pid, cls, xid_class_name(cls), off, xid_method_name(cls, off), data, code);
+        *next = line;
+        return hit;
+    }
+    return -1;
+}
+
+#if defined(__linux__) && !defined(__ANDROID__)
+/**
+ * @brief After a run: the kernel log since start (journalctl -k, or RELIFT_TEST_KLOG's command, which gets the start
+ * time as its argument) for NVIDIA Xid errors, each laid to the test whose child it named or in whose time it fell.
+ * A test that faulted the GPU fails though it passed its checks: the driver reports the fault and the test does not
+ * see it. RELIFT_TEST_XID=0 turns the check off. Returns how many passed tests now fail.
+ */
+static int xid_check(const t_span *spans, int n, bool *ok, double start)
+{
+    const char *off = getenv("RELIFT_TEST_XID");
+    if ((off && *off == '0') || !n)
+        return 0;
+    char cmd[512];
+    const char *custom = getenv("RELIFT_TEST_KLOG");
+    if (custom && *custom)
+        snprintf(cmd, sizeof cmd, "%s %.6f", custom, start);
+    else
+        snprintf(cmd, sizeof cmd, "journalctl -k -q --no-pager -o short-unix --since @%.6f 2>/dev/null", start);
+    FILE *f = popen(cmd, "r");
+    if (!f)
+        return 0;
+    size_t cap = 1 << 16, len = 0;
+    char *log = malloc(cap);
+    for (size_t r; log && (r = fread(log + len, 1, cap - len - 1, f)) > 0;) {
+        len += r;
+        if (len + 1 == cap) {
+            char *g = realloc(log, cap *= 2);
+            if (!g)
+                break;
+            log = g;
+        }
+    }
+    pclose(f);
+    if (!log)
+        return 0;
+    log[len] = 0;
+    char comm[32] = "";
+    FILE *c = fopen("/proc/self/comm", "r");
+    if (c) {
+        if (fgets(comm, sizeof comm, c))
+            comm[strcspn(comm, "\n")] = 0;
+        fclose(c);
+    }
+    int newly = 0;
+    for (const char *at = log; at && *at;) {
+        char why[512];
+        const char *next;
+        int i = t_xid_attribute(at, comm, spans, n, why, sizeof why, &next);
+        if (i < 0)
+            break;
+        fprintf(stderr, "FAIL %s faulted the GPU: %s\n", g_tests[spans[i].test].name, why);
+        newly += ok[i];
+        ok[i] = false;
+        at = next;
+    }
+    free(log);
+    return newly;
+}
+#endif
+
 static bool selected(const char *name, int argc, char **argv)
 {
     if (argc < 2)
@@ -202,9 +356,16 @@ int main(int argc, char **argv)
         return 1;
     }
     fprintf(stderr, "relift runtime tests: host page %u\n", rl_os_page_size());
+    t_span *spans = calloc((size_t)g_count + 1, sizeof *spans);
+    bool *oks = calloc((size_t)g_count + 1, sizeof *oks);
+    double start = wall_s();
     for (int i = 0; i < g_count; i++) {
         if (!selected(g_tests[i].name, argc, argv))
             continue;
+        if (spans) {
+            spans[run].test = i;
+            spans[run].start = wall_s();
+        }
         run++;
         uint64_t t0 = rl_clock_ns();
         int ok;
@@ -214,6 +375,8 @@ int main(int argc, char **argv)
             ok = g_failed == 0;
         } else {
             pid_t pid = spawn_one(i);
+            if (spans)
+                spans[run - 1].pid = pid;
             int st = 0;
             if (pid < 0)
                 fprintf(stderr, "  cannot start the test's child\n");
@@ -226,7 +389,18 @@ int main(int argc, char **argv)
         fprintf(stderr, "%s %s (%llu ms)\n", ok ? "ok  " : "FAIL", g_tests[i].name,
                 (unsigned long long)((rl_clock_ns() - t0) / 1000000));
         failed += !ok;
+        if (spans) {
+            spans[run - 1].end = wall_s();
+            oks[run - 1] = ok;
+        }
     }
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (spans && oks && !nofork)
+        failed += xid_check(spans, run, oks, start);
+#endif
+    (void)start;
+    free(spans);
+    free(oks);
     fprintf(stderr, "%d tests, %d failed\n", run, failed);
     return failed ? 1 : 0;
 }

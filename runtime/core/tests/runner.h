@@ -55,6 +55,22 @@ void t_fail(const char *file, int line, const char *expr, unsigned long long a, 
         }                                                                       \
     } while (0)
 
+/** @brief One test's run, for laying a GPU fault in the kernel log to it: its index, child and wall times (s). */
+typedef struct t_span {
+    int test;
+    long pid;
+    double start, end;
+} t_span;
+
+/**
+ * @brief The first NVIDIA Xid line of kernel log text log (journalctl -o short-unix) that names one of the n runs'
+ * children, or, from a process named comm, falls in a run's time (to 2 s after it ends): that run's index, with why
+ * the decoded line (Xid, class and method names from NVIDIA's class headers, data, error code) and next the text after
+ * the line; -1 when none.
+ */
+int t_xid_attribute(const char *log, const char *comm, const t_span *spans, int n, char *why, size_t why_len,
+                    const char **next);
+
 /** @brief Guest memory base of the running test (rl_mem_base). */
 uint8_t *t_mem(void);
 
