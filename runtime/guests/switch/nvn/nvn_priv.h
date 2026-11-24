@@ -1235,6 +1235,16 @@ uint64_t nvn_obj_pools_removed(void);
 bool nvn_obj_gone(uint64_t addr, char *out, size_t n);
 /** @brief The first vi vsync after t (CLOCK_MONOTONIC ns), for the headless pacing measurement mode. */
 int64_t nvn_vsync_after(int64_t t);
+/**
+ * @brief Before a window texture is handed out: waits, as the console's window queue does, until a texture of the
+ * window's textures is free (one is on screen, and at most textures - 2 presents wait to be shown).
+ */
+void nvn_pace_acquire(uint32_t textures);
+/**
+ * @brief Checks the window queue pacing: a present returns before its vsync, a texture of three is handed out at once
+ * with that present queued, and one of two only once it is shown. 0 when all hold, else the failing step's number.
+ */
+int nvn_pace_check(void);
 /** @brief One line of the frame trace (stats.trace), with vi_trace's kinds and fields. */
 void nvn_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
 /** @brief Whether the frame trace (stats.trace) is on. */

@@ -1006,6 +1006,11 @@ TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
     nvn_gpuprof_reset();
 }
 
+TEST(nvn_a_present_returns_at_once_and_a_texture_waits_until_one_is_free)
+{
+    CHECK(nvn_pace_check() == 0);
+}
+
 TEST(nvn_placed_pool_gpu_writes_reach_the_write_watches_over_them)
 {
     rl_ctx *c = t_boot(NULL);

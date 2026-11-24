@@ -5099,24 +5099,95 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
  * grid is the one the vsync event runs on (and follows the host display), so the game's own vsync waits and its
  * presents line up. RELIFT_UNPACED=1, a measuring aid, skips the wait to find the host's cost of a frame.
  */
-static void pace_present(uint32_t interval)
+/**
+ * @brief The display timeline of the presents, as the console's window queue keeps it: each present is shown at the
+ * first vsync after it is made and after its interval since the one before (shown[k % PACE_RING]). Presents return
+ * at once; the game waits only when it asks for a window texture and none is free (nvn_pace_acquire), as dequeueing a
+ * buffer from the console's NvSwapchain does: with n textures one is on screen and the game may hold at most n - 2
+ * queued presents not yet shown. RELIFT_NVN_PACE=present waits at each present for its vsync instead (the older
+ * model, for A/B runs); RELIFT_UNPACED=1 never waits.
+ */
+#define PACE_RING 16u
+static struct {
+    int mode; /* 0 unread, 1 queue, 2 present, 3 off */
+    int64_t last;
+    int64_t shown[PACE_RING];
+    uint64_t n;
+} pace;
+
+static int pace_mode(void)
 {
-    static int off = -1;
-    static int64_t last;
-    if (off < 0) {
-        const char *e = getenv("RELIFT_UNPACED");
-        off = e && *e == '1';
+    if (!pace.mode) {
+        const char *e = getenv("RELIFT_UNPACED"), *m = getenv("RELIFT_NVN_PACE");
+        pace.mode = e && *e == '1' ? 3 : m && !strcmp(m, "present") ? 2 : 1;
     }
-    if (off || interval == 0)
-        return;
+    return pace.mode;
+}
+
+static void sleep_until(int64_t at)
+{
     int64_t now = now_ns();
-    int64_t earliest = last + (int64_t)(interval > 1 ? interval - 1 : 0) * 16666667ll;
-    int64_t at = nvn_vsync_after(now > earliest ? now : earliest);
     if (at > now) {
         struct timespec d = { (time_t)((at - now) / 1000000000ll), (long)((at - now) % 1000000000ll) };
         nanosleep(&d, NULL);
     }
-    last = at;
+}
+
+static void pace_present(uint32_t interval)
+{
+    int mode = pace_mode();
+    if (mode == 3 || interval == 0)
+        return;
+    int64_t now = now_ns();
+    int64_t earliest = pace.last + (int64_t)(interval > 1 ? interval - 1 : 0) * 16666667ll;
+    int64_t at = nvn_vsync_after(now > earliest ? now : earliest);
+    pace.last = at;
+    pace.shown[pace.n++ % PACE_RING] = at;
+    if (mode == 2)
+        sleep_until(at);
+}
+
+void nvn_pace_acquire(uint32_t textures)
+{
+    if (pace_mode() != 1 || !pace.n)
+        return;
+    /* Presents not yet shown, newest last; the game may keep textures - 2 of them queued. */
+    uint64_t keep = textures > 2 ? textures - 2 : 0;
+    int64_t now = now_ns();
+    uint64_t queued = 0;
+    while (queued < pace.n && queued < PACE_RING && pace.shown[(pace.n - 1 - queued) % PACE_RING] > now)
+        queued++;
+    if (queued <= keep)
+        return;
+    /* Wait until the oldest presents shown leave keep queued: the (queued - keep)th oldest is shown. */
+    int64_t at = pace.shown[(pace.n - 1 - keep) % PACE_RING];
+    int64_t t0 = now_ns();
+    nvn_core_leave();
+    sleep_until(at);
+    nvn_core_return();
+    nvn_gpuprof_span(SPAN_PACE, t0, now_ns());
+}
+
+int nvn_pace_check(void)
+{
+    int saved = pace.mode;
+    memset(&pace, 0, sizeof pace);
+    pace.mode = 1;
+    int rc = 0;
+    int64_t t0 = now_ns();
+    pace_present(1);
+    int64_t shown = pace.shown[0];
+    if (now_ns() - t0 > 2000000)
+        rc = 1; /* a present returns at once */
+    nvn_pace_acquire(3);
+    if (!rc && now_ns() < shown && now_ns() - t0 > 2000000)
+        rc = 2; /* three textures: one present may wait to be shown */
+    nvn_pace_acquire(2);
+    if (!rc && now_ns() < shown)
+        rc = 3; /* two textures: the next one is free once the present is shown */
+    memset(&pace, 0, sizeof pace);
+    pace.mode = saved;
+    return rc;
 }
 
 static int64_t g_last_present_ns;

@@ -88,6 +88,7 @@ uint64_t nvnh_nvnWindowAcquireTexture(rl_ctx *c, uint8_t *mem)
     nvn_window *w = win_of(c, c->x[0], "nvnWindowAcquireTexture");
     if (!w)
         return RL_PENDING;
+    nvn_pace_acquire(w->active);
     nvn_sync_signal(c->x[1]);
     rl_st32(mem, c->x[2], w->next);
     w->next = (w->next + 1) % w->active;
@@ -106,6 +107,7 @@ uint64_t nvnh_nvnQueueAcquireTexture(rl_ctx *c, uint8_t *mem)
     nvn_window *w = win_of(c, c->x[1], "nvnQueueAcquireTexture");
     if (!w)
         return RL_PENDING;
+    nvn_pace_acquire(w->active);
     rl_st32(mem, c->x[2], w->next);
     w->next = (w->next + 1) % w->active;
     c->x[0] = ACQUIRE_SUCCESS;
@@ -245,7 +247,7 @@ uint64_t nvnh_nvnQueuePresentTexture(rl_ctx *c, uint8_t *mem)
     if (rc != RL_OK)
         return (uint64_t)rc;
     if (w->presents++ == 0)
-        rl_log(RL_LOG_INFO, "nvn", "first present: window 0x%llx texture %u (0x%llx)", (unsigned long long)w->o.addr,
-               idx, (unsigned long long)w->textures[idx]);
+        rl_log(RL_LOG_INFO, "nvn", "first present: window 0x%llx texture %u (0x%llx), %u textures, %u active, interval %u",
+               (unsigned long long)w->o.addr, idx, (unsigned long long)w->textures[idx], w->n, w->active, w->interval);
     return nvn_ret(c);
 }
