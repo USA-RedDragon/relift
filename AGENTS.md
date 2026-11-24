@@ -43,7 +43,7 @@ Report what you ran and what it returned. If a check needs a host you do not hav
 - No code comments except doc comments and a comment on a genuinely confusing detail. Describe code by what it does.
 - No lint or build-check suppression directives (`#[allow]`, `#pragma` diagnostics, `NOLINT`). Fix the cause. The funnels' `#[expect]` with a reason is the one existing form; do not add more.
 - `std::process::Command::new` only through `relift_proc::command`. File writes only through `relift-cache`. `unsafe` only in crates on the roster in `relift/tests/unsafe_roster.rs`; ceilings only fall.
-- Generated files (`cpus/*/src/**/generated*`, `runtime/guests/switch/vk/gen`) are never edited by hand. Change the generator or the Sail overlay and regenerate.
+- Generated files (`cpus/*/src/**/generated*`, `runtime/gpuapi/vk/gen`) are never edited by hand. Change the generator or the Sail overlay and regenerate.
 - Docgen markers (`<!-- docgen:... -->`) are never edited by hand. Run docgen.
 - Docs: plain US English, no em-dashes, no filler words (leverage, robust, seamless, ensure), describe code by what it does. Units: never mix MiB/GiB with MB/GB.
 - Every CI job sets `timeout-minutes: 15`. Split or speed up a job; never raise the limit.

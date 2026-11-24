@@ -60,7 +60,7 @@ host_extensions = [
 ]
 
 [thunks]
-# Written by hand in runtime/guests/switch/vk/ as vkh_<name>.
+# Written by hand in runtime/gpuapi/vk/ as vkh_<name>.
 hand_commands = [
     "vkGetInstanceProcAddr",
     "vkGetDeviceProcAddr",

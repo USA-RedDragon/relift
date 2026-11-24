@@ -1,4 +1,4 @@
-# Vulkan forwarding (`runtime/guests/switch/vk`)
+# Vulkan forwarding (`runtime/gpuapi/vk`)
 
 A Switch game that renders with Vulkan calls `vkGetInstanceProcAddr` from the
 `vulkan` module and nothing else in it (see 001-devex section 7). With
@@ -12,8 +12,8 @@ host's Vulkan driver.
 |---|---|---|
 | Generator | `gpus/apigen` (`relift-gpu-apigen`, binary `relift-vkgen`) | A guest-neutral GPU-API generator; today it emits the Switch guest's ABI (AArch64 LP64, guest addresses). No crate depends on it and it depends only on `relift-cache`. |
 | Configuration | `gpus/apigen/vkgen.toml` | The registry pin (tag, URL, sha256), core 1.0 to 1.3, the extension list, the hand-written commands and structs, the dropped types and the shadow-memory hooks. A game repository passes a second file with its extra extensions; lists concatenate. |
-| Generated C | `runtime/guests/switch/vk/gen/` (committed, `linguist-generated`) | Types and layout asserts (`vkg_types.h`), the command table (`vkg.h`, `vkg_thunks.c`), the converters (`vkg_convert.c`). CI regenerates them from the pinned `vk.xml` and fails on any difference. |
-| Hand-written C | `runtime/guests/switch/vk/*.c` | Handle table, arena, host loading, instance and device creation, memory mapping, callbacks, surfaces. |
+| Generated C | `runtime/gpuapi/vk/gen/` (committed, `linguist-generated`) | Types and layout asserts (`vkg_types.h`), the command table (`vkg.h`, `vkg_thunks.c`), the converters (`vkg_convert.c`). CI regenerates them from the pinned `vk.xml` and fails on any difference. |
+| Hand-written C | `runtime/gpuapi/vk/*.c` | Handle table, arena, host loading, instance and device creation, memory mapping, callbacks, surfaces. |
 | Host library loading | `runtime/core/hostlib.c` | `dlopen` or `LoadLibrary` and the loader names per host (`libvulkan.so.1`, `libvulkan.1.dylib` or `libMoltenVK.dylib`, `vulkan-1.dll`), overridable with `RELIFT_VULKAN_LIBRARY`. Apple builds link MoltenVK instead (`RL_VULKAN_LINKED`) and load nothing. The guest layer never names a host library. |
 
 The layer belongs to the guest layer, not a new one: it knows Horizon's
@@ -507,7 +507,7 @@ shows it in a window.
 
 ```sh
 curl -fsSLo vk.xml "$(sed -n 's/^url = "\(.*\)"$/\1/p' gpus/apigen/vkgen.toml)"
-cargo run -p relift-gpu-apigen -- --xml vk.xml --config gpus/apigen/vkgen.toml --out runtime/guests/switch/vk/gen
+cargo run -p relift-gpu-apigen -- --xml vk.xml --config gpus/apigen/vkgen.toml --out runtime/gpuapi/vk/gen
 ```
 
 The generator refuses a `vk.xml` whose sha256 differs from the pin. Changing

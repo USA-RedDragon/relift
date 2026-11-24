@@ -1894,7 +1894,14 @@ pub(crate) fn build_project(
     let rt = mirror_runtime(
         &runtime_dir(settings),
         &out.join("runtime"),
-        &["core", "cpus/arm64", "guests/switch", "host", "third_party"],
+        &[
+            "core",
+            "cpus/arm64",
+            "gpuapi",
+            "guests/switch",
+            "host",
+            "third_party",
+        ],
     )?;
     let dev = mode == Mode::Dev;
     let stub = debug_stub_built(

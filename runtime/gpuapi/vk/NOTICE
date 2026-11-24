@@ -1,5 +1,5 @@
 Provenance of third-party code in the Vulkan forwarding layer
-(runtime/guests/switch/vk)
+(runtime/gpuapi/vk)
 
 bcdec.c   the BC1 to BC7 block decoders, ported from bcdec,
           https://github.com/iOrange/bcdec, v0.985, commit

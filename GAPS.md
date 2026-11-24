@@ -67,7 +67,7 @@ Each of these was seen as a stop or a wrong answer in a program, and the cause w
 - The shared font fallback: the `Nintendo extension` font (`pl:u`) has no copy shipped with relift, so a program that draws those symbols with no font in the import shows boxes. Where: `runtime/guests/switch/srv_pl*.c`, the fallback fonts found beside the program. Read first: the licensing of any font you would ship; relift ships only open fonts.
 - `nvnTextureCompare` of a pointer that is not a texture the layer made stops with "not a texture" (`runtime/guests/switch/nvn/nvn_tex.c`), where the console's driver compares the bytes. Verify: a test that compares a texture with a copy of its object.
 - `nvnProgramSetShaders` with a program whose code the layer cannot find an end for stops with "stage 0 has no end" (`nvn_draw.c`). The cause is open: a program in a pool the layer has not seen, or a terminator form the scan misses.
-- Two Switch programs draw their picture into the top-left 1280x720 of a 1080p surface. The cause is unknown: the presenter's scaling, or the surface size the layer reports. Check first. Where: `runtime/guests/switch/vk`, `runtime/core/present*.c`.
+- Two Switch programs draw their picture into the top-left 1280x720 of a 1080p surface. The cause is unknown: the presenter's scaling, or the surface size the layer reports. Check first. Where: `runtime/gpuapi/vk`, `runtime/core/present*.c`.
 
 #### 32-bit address spaces (medium)
 
@@ -111,7 +111,7 @@ The NVN2 graphics layer and the services it needs are in the coordinate-first li
 #### Shading-rate image and palettes (medium, in progress)
 
 - Missing: the NVN shading-rate image and its palettes are accepted and drawn at full rate. Next is `VK_NV_shading_rate_image` on hosts that have it, which keeps the picture exact where the console's rate is full and saves work where it is not; a host without it stays at full rate.
-- Where: `runtime/guests/switch/nvn`, `runtime/guests/switch/vk`.
+- Where: `runtime/guests/switch/nvn`, `runtime/gpuapi/vk`.
 
 #### GPU counter reports (medium, in progress)
 
@@ -359,8 +359,8 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 ### Vulkan forwarding gaps (medium)
 
-- Missing: `runtime/guests/switch/vk/README.md` ("Not done yet") lists commands taking file descriptors or platform handles, image-backed host-visible memory on the import path and guest callbacks from driver threads. Its statement that `relift build` does not compile this folder is out of date (see the docs entry).
-- Where: `runtime/guests/switch/vk`, generated types by `relift-vkgen`.
+- Missing: `runtime/gpuapi/vk/README.md` ("Not done yet") lists commands taking file descriptors or platform handles, image-backed host-visible memory on the import path and guest callbacks from driver threads. Its statement that `relift build` does not compile this folder is out of date (see the docs entry).
+- Where: `runtime/gpuapi/vk`, generated types by `relift-vkgen`.
 - Verify: `switch_vk_tests` on lavapipe and a real driver.
 
 ---
@@ -460,7 +460,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 
 - Missing: `picture.aa` offers off, FXAA and SMAA (`runtime/core/post.c`, `runtime/third_party`); there is no MSAA; a temporal choice is part of the upscaler work below. The Nintendo 64 picture options (`n64.picture.*`) use parallel-rdp's own upscale and supersample controls.
 - Why: players of the Switch games that render through Vulkan have only the post filters.
-- Where: `runtime/core/post.c`, `runtime/core/include/relift/post.h`, `runtime/guests/switch/vk`.
+- Where: `runtime/core/post.c`, `runtime/core/include/relift/post.h`, `runtime/gpuapi/vk`.
 - Read first: how the picture pipeline runs on the host's compute queue; temporal anti-aliasing needs motion vectors and jitter that only some guests provide, so MSAA on the guest's own render passes may be the practical path. Every option stays off by default and says it changes the picture.
 - Verify: golden images (`--shown-png`) with the option on and off, and bit-identical output with it off.
 
@@ -572,7 +572,7 @@ The discovery and 3D work is in the coordinate-first list; these are the rest.
 #### Pages and stale statements (small each; good first issues)
 
 - Missing: `guests/nds` has no README, and the site outline (`docs/nav.md`) omits the N64 and Master System guest pages, the DS, `cpus/z80`, `cpus/rsp` and the `check` guest tables. The README's tool list names only `relift-gbrom` and `relift-gbarom`, not `relift-n64rom`, `relift-ndsrom`, `relift-smsrom` or `relift-shaders`. `docs/guides/usage.md` and `docs/start/03-first-game.md` say `import` takes Switch dumps and `.gb`, `.gbc`, `.gba` ROMs only.
-- Stale statements to fix: `guests/n64/README.md` opens by saying the RDP and audio are not there, while the same page and the runtime document both; `cpus/arm32/README.md` says no guest links the ARMv5TE profile, and the DS guest does; `runtime/guests/switch/vk/README.md` says `relift build` does not compile that folder or `runtime/host`, and `runtime/README.md` says it does; the `check/README.md` table lists four guests. `docs/reference/input.md` native ports table lists no N64 or Master System ports.
+- Stale statements to fix: `guests/n64/README.md` opens by saying the RDP and audio are not there, while the same page and the runtime document both; `cpus/arm32/README.md` says no guest links the ARMv5TE profile, and the DS guest does; `runtime/gpuapi/vk/README.md` says `relift build` does not compile that folder or `runtime/host`, and `runtime/README.md` says it does; the `check/README.md` table lists four guests. `docs/reference/input.md` native ports table lists no N64 or Master System ports.
 - Where: the files named; `docs/nav.md`.
 - Verify: `scripts/ci/all.sh docs`. Facts that come from the code go through docgen markers.
 

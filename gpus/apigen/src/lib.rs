@@ -1,5 +1,5 @@
 //! relift-gpu-apigen: generates the Vulkan forwarding layer of the Switch
-//! runtime (`runtime/guests/switch/vk/gen/`) from the Khronos registry.
+//! runtime (`runtime/gpuapi/vk/gen/`) from the Khronos registry.
 //!
 //! A guest that calls Vulkan through `vkGetInstanceProcAddr` gets guest
 //! addresses of thunks. Each thunk has the lifted-code signature, reads its

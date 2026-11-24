@@ -187,7 +187,8 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 |---|---|---|
 | core | `runtime/core` | Guest memory with its own permission flags, faults at guest addresses, host threads with an opaque CPU context, the clock, dispatch, logging and configuration; names no guest OS and no guest CPU |
 | CPU | `runtime/cpus/arm64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
-| guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:` and the services, the scheduler, the NPDM layout, Horizon's page, clock and permission encodings; `switch/vk` forwards Vulkan to the host |
+| guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:` and the services, the scheduler, the NPDM layout, Horizon's page, clock and permission encodings; `switch/vk` is the console's side of Vulkan forwarding |
+| GPU API | `runtime/gpuapi/vk` | Vulkan forwarding: guest Vulkan calls run on the host driver |
 | CPU | `runtime/cpus/sm83` | The SM83 lifted-code ABI and `rl_ctx`, interrupts, HALT and STOP, over a callback table |
 | CPU | `runtime/cpus/z80` | The Z80 lifted-code ABI and `rl_ctx`, NMI and maskable interrupts through the lifted entry blocks, HALT, ports, over a callback table |
 | guest | `runtime/guests/gb` | The Game Boy memory map, mappers and I/O routed to scheduler device slots; `gb/exact` is the program that runs lifted code with the device library |
@@ -240,7 +241,7 @@ each choice.
 | `relift-gba-analyze` | `guests/gba/analyze` | lib | 0.1.0 | `relift-cpu-arm32`, `relift-cpu-arm32-analyze`, `relift-gba-formats` | Game Boy Advance function discovery: `relift-cpu-arm32-analyze` with the GBA memory map, cartridge ROM mirrors, IRQ vector, BIOS calls (`CpuSet`, `CpuFastSet`, resets) and DMA, from the reset entry or a multiboot image in work RAM | 2 |
 | `relift-gba-formats` | `guests/gba/formats` | lib | 0.1.0 |  | Game Boy Advance cartridge format: header, complement check, logo hash, size and mirror rules with the open-bus read, save library strings, the multiboot entry; reads bytes only | 2 |
 | `relift-gba-tools` | `guests/gba/tools` | lib, bin | 0.1.0 | `relift-gba-analyze`, `relift-gba-formats` | `relift-gbarom`: prints a ROM header as text or JSON, validates logo hash, complement and size, lists the save library strings and the multiboot entry; `functions` runs `relift-gba-analyze`, as a cartridge or with `--multiboot` from work RAM | 2 |
-| `relift-gpu-apigen` | `gpus/apigen` | lib, bin | 0.1.0 | `relift-cache` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; guest-neutral, nothing depends on it | 2 |
+| `relift-gpu-apigen` | `gpus/apigen` | lib, bin | 0.1.0 | `relift-cache` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/gpuapi/vk/gen/` from the pinned `vk.xml`; guest-neutral, nothing depends on it | 2 |
 | `relift-gpu-nv` | `gpus/nv` | lib | 0.1.0 |  | What the NVIDIA shader front ends share: decoded instructions with nvdisasm's text form, programs, and the translator from them to SPIR-V | 2 |
 | `relift-gpu-sm53` | `gpus/sm53` | lib | 0.1.0 | `relift-gpu-nv` | NVIDIA SM53 (Maxwell GM20B, Switch) SASS: NVN programs, bundles and instruction forms; patterns from Ryujinx and envytools (MIT) | 2 |
 | `relift-gpu-sm86` | `gpus/sm86` | lib | 0.1.0 | `relift-gpu-nv` | NVIDIA SM86 (Ampere, Switch 2) SASS decoder into relift-gpu-nv instructions with nvdisasm's text form; field positions from Mesa NAK (MIT) | 2 |

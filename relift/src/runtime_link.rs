@@ -692,8 +692,10 @@ pub fn find_moltenvk(cache_root: &Path) -> Option<LinkedVulkan> {
 /// compressed shader table through.
 fn vk_sources(rt: &Path) -> std::io::Result<Vec<PathBuf>> {
     let switch = rt.join("guests").join("switch");
-    let mut v = c_files(&switch.join("vk"))?;
-    v.extend(c_files(&switch.join("vk").join("gen"))?);
+    let gpuapi = rt.join("gpuapi");
+    let mut v = c_files(&gpuapi.join("vk"))?;
+    v.extend(c_files(&gpuapi.join("vk").join("gen"))?);
+    v.extend(c_files(&switch.join("vk"))?);
     v.extend(c_files(&switch.join("nvn"))?);
     v.push(rt.join(ZSTD_DIR).join("zstddeclib.c"));
     Ok(v)
@@ -989,7 +991,8 @@ impl Extras {
     ) -> Vec<Compile> {
         let vk_inc: Vec<String> = [
             "guests/switch/vk",
-            "guests/switch/vk/gen",
+            "gpuapi/vk",
+            "gpuapi/vk/gen",
             "guests/switch/nvn",
             ZSTD_DIR,
         ]

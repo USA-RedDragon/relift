@@ -1,4 +1,4 @@
-runtime/guests/switch/vk/gen/** linguist-generated=true
+runtime/gpuapi/vk/gen/** linguist-generated=true
 cpus/arm64/src/lift/sail/generated/*.rs linguist-generated=true
 cpus/arm64/src/lift/sail/generated/mod.rs -linguist-generated
 cpus/sm83/src/lift/sail/generated.rs linguist-generated=true
