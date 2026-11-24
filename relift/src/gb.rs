@@ -350,7 +350,7 @@ pub fn build(
     let p = project(settings)?;
     let (name, host_out) = crate::build::project_out(settings)?;
     let cross = target
-        .map(|t| cross::Build::prepare(settings, t, &name))
+        .map(|t| cross::Build::prepare(settings, t, &name, 0))
         .transpose()?;
     let (rom, hack) = patched(p.rom, mods, ui)?;
     let out = match &cross {

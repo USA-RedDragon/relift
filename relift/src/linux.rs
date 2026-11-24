@@ -64,6 +64,17 @@ const LINUX_LAYERS: Layers = Layers {
 /// The largest file read to check whether it is an executable.
 const MAX_IMAGE: u64 = 1 << 30;
 
+/// The guest address space a Linux program for `machine` reserves at start,
+/// at the least: for A64, 36 bits when the host refuses 39
+/// (`runtime/guests/linux/start.c`). An i386 guest's is its 4 GiB and an
+/// x86-64 guest's the same 36-bit fallback, when those guests land.
+#[must_use]
+pub fn reservation(machine: Machine) -> u64 {
+    match machine {
+        Machine::Aarch64 | Machine::Other(_) => 1 << 36,
+    }
+}
+
 /// Whether `path` is an aarch64 ELF executable or shared object.
 #[must_use]
 pub fn is_executable(path: &Path) -> bool {
@@ -505,7 +516,14 @@ pub fn build(
     let p = project()?;
     let (name, host_out) = crate::build::project_out(settings)?;
     let cross = target
-        .map(|t| cross::Build::prepare(settings, t, &name))
+        .map(|t| {
+            let machine = p
+                .inputs
+                .first()
+                .and_then(|i| elf::parse(&i.bytes).ok())
+                .map_or(Machine::Aarch64, |o| o.machine);
+            cross::Build::prepare(settings, t, &name, reservation(machine))
+        })
         .transpose()?;
     let out = match &cross {
         Some(c) => host_out.with_file_name(c.name()),

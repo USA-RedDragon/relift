@@ -3,6 +3,10 @@
 
 use crate::layers::Layers;
 
+/// The guest address space a Switch program reserves at start: the
+/// compact layout's, about 37 GiB.
+pub const RESERVATION: u64 = 37 << 30;
+
 /// The Switch runtime: the directories compiled into the runtime library,
 /// the ones copied into the project's build directory and the include
 /// directories of lifted code and of the runtime.

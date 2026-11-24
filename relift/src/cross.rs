@@ -60,17 +60,28 @@ pub enum Build {
 }
 
 impl Build {
-    /// Finds what `t` needs, or says what is missing.
+    /// Finds what `t` needs for a guest that reserves `reservation` bytes
+    /// of address space at start, or says what is missing.
     ///
     /// # Errors
     ///
-    /// As [`android::AndroidBuild::prepare`] and [`ios::IosBuild::prepare`].
-    pub fn prepare(settings: &Settings, t: Target, name: &str) -> Result<Self, BoxError> {
+    /// As [`android::AndroidBuild::prepare`], [`ios::IosBuild::prepare`]
+    /// and [`ios::IosBuild::for_reservation`].
+    pub fn prepare(
+        settings: &Settings,
+        t: Target,
+        name: &str,
+        reservation: u64,
+    ) -> Result<Self, BoxError> {
         Ok(match t {
             Target::Android(a) => {
                 Self::Android(Box::new(android::AndroidBuild::prepare(settings, a, name)?))
             }
-            Target::Ios(i) => Self::Ios(Box::new(ios::IosBuild::prepare(settings, i, name)?)),
+            Target::Ios(i) => {
+                let mut b = ios::IosBuild::prepare(settings, i, name)?;
+                b.for_reservation(reservation)?;
+                Self::Ios(Box::new(b))
+            }
         })
     }
 

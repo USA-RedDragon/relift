@@ -171,7 +171,7 @@ pub fn build(
     let (rom, project_title, rom_path) = project_rom()?;
     let (name, host_out) = crate::build::project_out(settings)?;
     let cross = target
-        .map(|t| cross::Build::prepare(settings, t, &name))
+        .map(|t| cross::Build::prepare(settings, t, &name, 0))
         .transpose()?;
     let out = match &cross {
         Some(c) => host_out.with_file_name(c.name()),

@@ -241,7 +241,7 @@ pub fn build(
     let p = project()?;
     let (name, host_out) = crate::build::project_out(settings)?;
     let cross = target
-        .map(|t| cross::Build::prepare(settings, t, &name))
+        .map(|t| cross::Build::prepare(settings, t, &name, 0))
         .transpose()?;
     let out = match &cross {
         Some(c) => host_out.with_file_name(c.name()),

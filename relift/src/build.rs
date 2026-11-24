@@ -1850,13 +1850,12 @@ pub(crate) fn build_project(
         [] => None,
         [t] => match crate::cross::target(t)? {
             None => None,
-            Some(c) if mode == Mode::Shipped => {
-                let mut b = crate::cross::Build::prepare(settings, c, &name)?;
-                if let crate::cross::Build::Ios(i) = &mut b {
-                    i.for_switch()?;
-                }
-                Some(b)
-            }
+            Some(c) if mode == Mode::Shipped => Some(crate::cross::Build::prepare(
+                settings,
+                c,
+                &name,
+                crate::switch::build::RESERVATION,
+            )?),
             Some(_) => return Err(format!("relift run does not run on {t} yet").into()),
         },
         [t, ..] => return Err(format!("target {t}: only one target builds at a time").into()),

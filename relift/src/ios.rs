@@ -283,25 +283,28 @@ impl IosBuild {
         })
     }
 
-    /// Signs a device build of a Switch game with the newest covering
-    /// profile that grants [`EXTENDED_VA`], and refuses the build when none
-    /// does: without it iOS lets the app reserve far less than the guest
-    /// address space (the compact layout needs about 37 GiB), and the game
-    /// stops at start-up.
+    /// Signs a device build of a guest that reserves `reservation` bytes
+    /// of address space at start: above [`DEFAULT_RESERVATION`], with the
+    /// newest covering profile that grants [`EXTENDED_VA`], refusing the
+    /// build when none does (without it iOS lets the app reserve far less,
+    /// and the game stops at start-up).
     ///
     /// # Errors
     ///
-    /// No covering profile grants the entitlement.
-    pub fn for_switch(&mut self) -> Result<(), BoxError> {
+    /// The guest needs the entitlement and no covering profile grants it.
+    pub fn for_reservation(&mut self, reservation: u64) -> Result<(), BoxError> {
+        if reservation <= DEFAULT_RESERVATION {
+            return Ok(());
+        }
         let Signing::Identity { profile, .. } = &mut self.signing else {
             return Ok(());
         };
-        match switch_profile(&self.profiles) {
+        match va_profile(&self.profiles) {
             Some(p) => {
                 *profile = p.clone();
                 Ok(())
             }
-            None => switch_profile_ok(profile, &self.bundle_id),
+            None => va_profile_ok(profile, &self.bundle_id, reservation),
         }
     }
 
@@ -491,11 +494,16 @@ fn read_profile(path: &Path, bundle: &str, work: &Path) -> Result<Option<Profile
     }))
 }
 
-/// The entitlement a Switch game needs on an iOS device to reserve its
-/// guest address space.
+/// The most address space a guest reserves without [`EXTENDED_VA`]: a
+/// conservative bound (checked only as far as the handheld guests, which
+/// reserve far less, start on a device without it).
+pub const DEFAULT_RESERVATION: u64 = 4 << 30;
+
+/// The entitlement a guest that reserves more than
+/// [`DEFAULT_RESERVATION`] needs on an iOS device.
 pub const EXTENDED_VA: &str = "com.apple.developer.kernel.extended-virtual-addressing";
 
-/// The entitlement that lets a Switch game use more memory than iOS gives
+/// The entitlement that lets a large game use more memory than iOS gives
 /// an app by default.
 pub const INCREASED_MEMORY: &str = "com.apple.developer.kernel.increased-memory-limit";
 
@@ -507,7 +515,7 @@ fn entitled(xml: &str, key: &str) -> bool {
 }
 
 /// The newest of `profiles` that grants [`EXTENDED_VA`].
-fn switch_profile(profiles: &[Profile]) -> Option<&Profile> {
+fn va_profile(profiles: &[Profile]) -> Option<&Profile> {
     profiles
         .iter()
         .filter(|p| entitled(&p.entitlements, EXTENDED_VA))
@@ -522,13 +530,14 @@ fn default_profile(profiles: &[Profile]) -> Option<&Profile> {
         .max_by(|a, b| (!a.wildcard, &a.created).cmp(&(!b.wildcard, &b.created)))
 }
 
-fn switch_profile_ok(profile: &Profile, bundle: &str) -> Result<(), BoxError> {
+fn va_profile_ok(profile: &Profile, bundle: &str, reservation: u64) -> Result<(), BoxError> {
     if entitled(&profile.entitlements, EXTENDED_VA) {
         return Ok(());
     }
     Err(format!(
-        "the provisioning profile {} for {bundle} does not grant {EXTENDED_VA}, which a Switch game needs to reserve its address space on an iOS device{}; on developer.apple.com create an explicit App ID {bundle} with the capabilities Extended Virtual Addressing ({EXTENDED_VA}) and Increased Memory Limit ({INCREASED_MEMORY}), then a development profile for it, and set package.ios-profile to it or install it",
+        "the provisioning profile {} for {bundle} does not grant {EXTENDED_VA}, which a game that reserves {} GiB of address space needs on an iOS device{}; on developer.apple.com create an explicit App ID {bundle} with the capabilities Extended Virtual Addressing ({EXTENDED_VA}) and Increased Memory Limit ({INCREASED_MEMORY}), then a development profile for it, and set package.ios-profile to it or install it",
         profile.path.display(),
+        reservation >> 30,
         if profile.wildcard {
             " (a wildcard App ID cannot carry it)"
         } else {
@@ -833,14 +842,20 @@ mod tests {
     const WITHOUT_VA: &str = "<dict>\n\t<key>application-identifier</key>\n\t<string>T.dev.relift.*</string>\n\t<key>get-task-allow</key>\n\t<true/>\n</dict>";
 
     #[test]
-    fn a_switch_build_needs_the_extended_address_space_entitlement() {
+    fn a_large_reservation_needs_the_extended_address_space_entitlement() {
         let off = WITH_VA.replace("<true/>", "<false/>");
         assert!(
-            switch_profile_ok(&profile("a", WITH_VA, false, ""), "dev.relift.game.test").is_ok()
+            va_profile_ok(
+                &profile("a", WITH_VA, false, ""),
+                "dev.relift.game.test",
+                37 << 30
+            )
+            .is_ok()
         );
-        let e = switch_profile_ok(
+        let e = va_profile_ok(
             &profile("test", WITHOUT_VA, true, ""),
             "dev.relift.game.test",
+            37 << 30,
         )
         .unwrap_err()
         .to_string();
@@ -849,11 +864,11 @@ mod tests {
         assert!(e.contains("a wildcard App ID cannot carry it"), "{e}");
         assert!(e.contains("explicit App ID dev.relift.game.test"), "{e}");
         assert!(e.contains(INCREASED_MEMORY), "{e}");
-        assert!(switch_profile_ok(&profile("b", &off, false, ""), "x.y").is_err());
+        assert!(va_profile_ok(&profile("b", &off, false, ""), "x.y", 37 << 30).is_err());
     }
 
     #[test]
-    fn a_switch_build_takes_the_newest_profile_that_grants_extended_addressing() {
+    fn a_large_reservation_takes_the_newest_profile_that_grants_extended_addressing() {
         let ps = vec![
             profile("00-old", WITHOUT_VA, false, "2026-01-01T00:00:00Z"),
             profile("11-va", WITH_VA, false, "2026-03-01T00:00:00Z"),
@@ -867,10 +882,10 @@ mod tests {
             Some("/p/33-newest.mobileprovision")
         );
         assert_eq!(
-            name(switch_profile(&ps)).as_deref(),
+            name(va_profile(&ps)).as_deref(),
             Some("/p/22-va-newer.mobileprovision")
         );
-        assert_eq!(switch_profile(&ps[3..]).map(|p| p.created.clone()), None);
+        assert_eq!(va_profile(&ps[3..]).map(|p| p.created.clone()), None);
         let mut b = IosBuild {
             target: target("ios-arm64").expect("target"),
             xcode: Xcode::default(),
@@ -882,7 +897,7 @@ mod tests {
             },
             profiles: ps.clone(),
         };
-        b.for_switch().expect("a profile grants it");
+        b.for_reservation(37 << 30).expect("a profile grants it");
         let Signing::Identity { profile, .. } = &b.signing else {
             panic!("signed")
         };
@@ -891,12 +906,18 @@ mod tests {
             PathBuf::from("/p/22-va-newer.mobileprovision")
         );
         b.profiles.truncate(1);
-        assert!(b.for_switch().is_ok());
+        assert!(b.for_reservation(37 << 30).is_ok());
         b.signing = Signing::Identity {
             identity: "id".into(),
             profile: ps[0].clone(),
         };
-        assert!(b.for_switch().is_err());
+        assert!(b.for_reservation(37 << 30).is_err());
+        assert!(
+            b.for_reservation(crate::linux::reservation(relift_objfile::Machine::Aarch64))
+                .is_err()
+        );
+        assert!(b.for_reservation(DEFAULT_RESERVATION).is_ok());
+        assert!(b.for_reservation(0).is_ok());
     }
 
     #[test]
