@@ -187,6 +187,35 @@ pub enum Command {
         #[arg(long, value_name = "MODE", default_value = "exact",
               value_parser = ["exact", "native", "both"])]
         math: String,
+        /// Instead of translating, make every program of the tables in
+        /// `build_dir` (or `build_dir/shaders`) on this machine's Vulkan
+        /// device, as the launch warm-up does, and name each program the
+        /// driver crashes on, hangs on or refuses. Needs a C compiler and
+        /// make, which build the runtime's check tool on first use.
+        #[arg(long)]
+        check_compile: bool,
+        /// With `--check-compile`: the `device.json` the tables were made
+        /// from, compared with this device's (default: the folder's own).
+        #[arg(long, value_name = "FILE", requires = "check_compile")]
+        device: Option<PathBuf>,
+        /// With `--check-compile`: the folder for the check's scratch files,
+        /// failed programs' SPIR-V and report (default: `compile-check-work`).
+        #[arg(long, value_name = "DIR", requires = "check_compile")]
+        work: Option<PathBuf>,
+        /// With `--check-compile`: children running at once.
+        #[arg(long, value_name = "N", requires = "check_compile")]
+        children: Option<u32>,
+        /// With `--check-compile`: compile threads in each child (the
+        /// warm-up runs many at once; a crash that needs them needs this).
+        #[arg(long, value_name = "N", requires = "check_compile")]
+        threads: Option<u32>,
+        /// With `--check-compile`: programs per child.
+        #[arg(long, value_name = "N", requires = "check_compile")]
+        chunk: Option<u32>,
+        /// With `--check-compile`: seconds without progress before a child
+        /// counts as hung and is killed.
+        #[arg(long, value_name = "S", requires = "check_compile")]
+        timeout: Option<u32>,
     },
     /// Explain a stop report a shipped build wrote (missed code, an
     /// instruction it could not run) and add the missed target as a root

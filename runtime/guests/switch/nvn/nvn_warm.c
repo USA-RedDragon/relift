@@ -305,6 +305,26 @@ static bool warm_program(const char *key, int stage, const uint32_t wg[3])
     return stage == 0 ? nvn_pipe_warm_vertex(&k) : nvn_pipe_warm_fragment(&k);
 }
 
+bool nvn_warm_check(const char *key, char *why, size_t why_n)
+{
+    if (why_n)
+        why[0] = 0;
+    if (!nvn_vk_ready()) {
+        snprintf(why, why_n, "no host Vulkan device");
+        return false;
+    }
+    char reason[200] = "";
+    if (!nvn_module_get(key, -1, reason, sizeof reason)) {
+        snprintf(why, why_n, "module: %s", reason);
+        return false;
+    }
+    uint32_t wg[3] = { 0, 0, 0 };
+    if (warm_program(key, -1, wg))
+        return true;
+    snprintf(why, why_n, "the driver refused the pipeline: VkResult %d", nvn_pipe_last_result());
+    return false;
+}
+
 nvn_warm_plan nvn_warm_plan_for(const char *mode, uint32_t nrecorded, uint32_t nshader)
 {
     nvn_warm_plan p = { 0 };

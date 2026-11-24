@@ -185,6 +185,14 @@ check. Presence controls keep an empty walk or a broken rule from passing: the
 include rule must reject includes in `guests/switch` and `cpus/arm64`, every
 rule must match its own sample, and the denylist must hit files there.
 
+## Shader table compile check
+
+`relift shaders <build or table dir> --check-compile` makes every program of a Switch 2 shader table on this machine's Vulkan device, outside any game, through the launch warm-up's own path (`nvn_warm_check` in `guests/switch/nvn/nvn_warm.c`: the same module patching, layouts, specialization constants and library state), and names each program the driver crashes on, hangs on or refuses. The runtime's tool is `runtime/guests/switch/vk/tools/compile_check.c` (`make -C runtime compile-check`, built into `$BUILD/relift_compile_check`; the subcommand builds it on first use under its work folder).
+
+It runs over chunks of the table in child processes, so a driver crash takes down a child, not the run. Each child keeps a shared state file; when one dies or makes no progress for `--timeout` seconds, the programs it had started are the suspects and each is made alone in a fresh child, which names the one that kills it. Output lines read `crash|hang|refused: program <key> (table index N, <stage>) <reason>; spirv <path>`; the SPIR-V of every named program is written to `<work>/spv/<key>.spv` and the list to `<work>/report.txt`. It also says whether the table's `device.json` (or `--device FILE`) equals this device's. Exit status: 0 all made, 1 some not, 2 usage error.
+
+Options: `--device FILE`, `--work DIR` (default `compile-check-work`), `--children N` (`relift shaders`) or `--jobs N` (the tool) children at once (default 4), `--threads N` compile threads per child (default 1; the warm-up runs one per processor, so a crash that needs concurrent compiles needs this), `--chunk N` programs per child (default 64), `--timeout S` (default 180). Compute programs the warm-up makes only with a workgroup size a game gives are not made. `relift_compile_check --self-test` plants a table with a module that is not SPIR-V and a program that crashes and one that hangs (`RELIFT_COMPILE_CHECK_FAULT=<index>:crash|hang`) and checks all are named; exit 77 without Vulkan.
+
 ## Settings
 
 Run-time settings are typed keys declared with `rl_settings_declare`

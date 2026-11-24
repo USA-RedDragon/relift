@@ -233,6 +233,11 @@ static void screen_done(bool failed)
 }
 
 /** @brief Creates a graphics pipeline, timing it and counting it as late when it compiles after warm-up. */
+/** @brief The result of the calling thread's last driver pipeline create (nvn_pipe_last_result). */
+static _Thread_local VkResult t_last_result = VK_SUCCESS;
+
+int nvn_pipe_last_result(void) { return (int)t_last_result; }
+
 static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *what, VkPipeline *out)
 {
     bool probe = P.warmed && P.cache_ctl;
@@ -252,6 +257,7 @@ static VkResult create_graphics(VkGraphicsPipelineCreateInfo *ci, const char *wh
         late = true;
     }
     uint64_t dt = rl_clock_ns() - t0;
+    t_last_result = vr;
     if (late || !probe)
         screen_done(vr != VK_SUCCESS);
     pthread_mutex_lock(&P.lock);
@@ -828,6 +834,7 @@ static VkPipeline compute_in(table *t, VkPipelineLayout layout, VkShaderModule m
         late = true;
     }
     uint64_t dt = rl_clock_ns() - t0;
+    t_last_result = vr;
     if (late || !probe)
         screen_done(vr != VK_SUCCESS);
     pthread_mutex_lock(&P.lock);

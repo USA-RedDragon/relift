@@ -203,6 +203,7 @@ NDS_TEST_SRCS := $(wildcard guests/nds/tests/*.c)
 NDS_TEST_HDRS := $(wildcard guests/nds/tests/*.h)
 VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
 VK_DEMO_SRCS := guests/switch/vk/demo/vk_present.c
+VK_CHECK_SRCS := guests/switch/vk/tools/compile_check.c
 
 obj = $(patsubst %.S,$(BUILD)/obj/%.o,$(patsubst %.c,$(BUILD)/obj/%.o,$(1)))
 CORE_ASM_OBJS := $(call obj,$(CORE_ASM))
@@ -251,6 +252,7 @@ RSP_TEST_OBJS := $(call obj,$(RSP_TEST_SRCS))
 SWITCH_TEST_OBJS := $(call obj,$(SWITCH_TEST_SRCS))
 VK_TEST_OBJS := $(call obj,$(VK_TEST_SRCS))
 VK_DEMO_OBJS := $(call obj,$(VK_DEMO_SRCS))
+VK_CHECK_OBJS := $(call obj,$(VK_CHECK_SRCS))
 TC_OBJS := $(call obj,guests/switch/tests/tc.c)
 RT_OBJS := $(CORE_OBJS) $(ARM64_OBJS) $(SWITCH_OBJS) $(VK_OBJS)
 
@@ -298,6 +300,7 @@ N64R_TESTS := $(BUILD)/n64_run_tests
 NDSR_TESTS := $(BUILD)/nds_run_tests
 NDS_TESTS := $(BUILD)/nds_tests
 VK_PRESENT := $(BUILD)/vk_present
+VK_CHECK := $(BUILD)/relift_compile_check
 TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(RSP_TESTS) $(SWITCH_TESTS) $(LINUX_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS) $(SMS_PSG_SCRIPT) $(SMS_YM2413_SCRIPT) $(NDS_TESTS) $(NDSR_TESTS) $(VK_PRESENT)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
@@ -316,7 +319,7 @@ GBDEV_ROMS ?=
 GBDEV_FRAMES ?= 60
 GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
 
-.PHONY: all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
+.PHONY: compile-check compile-check-test all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
 all: $(MIPS_FPU_CASES) $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(LINUX_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
 libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(RSP_LIB) $(SWITCH_LIB) $(LINUX_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(SMSR_LIB) $(N64_LIB) $(N64R_LIB) $(NDS_LIB) $(NDSR_LIB) $(STATIC) $(SHARED)
 portable: $(PORTABLE)
@@ -477,6 +480,10 @@ $(VK_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(VK_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
+$(VK_CHECK_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(VK_INC) $(CFLAGS) -c $< -o $@
+
 $(VK_DEMO_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS) $(SWITCH_TEST_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(VK_INC) $(RUNNER_INC) -Iguests/switch/tests $(CFLAGS) -c $< -o $@
@@ -551,6 +558,18 @@ gbdev-lockstep: $(GBDEV_LOCKSTEP)
 
 $(VK_PRESENT): $(VK_DEMO_OBJS) $(TC_OBJS) $(RT_OBJS)
 
+# The shader table compile check (relift shaders --check-compile): not part of `all`, built on request.
+$(VK_CHECK): $(VK_CHECK_OBJS) $(RT_OBJS)
+	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
+
+compile-check: $(VK_CHECK)
+
+# The check tool's self-test (exit 77: no host Vulkan, skipped).
+compile-check-test: $(VK_CHECK)
+	@mkdir -p $(BUILD)/compile-check-work
+	$(abspath $(VK_CHECK)) --self-test --work $(abspath $(BUILD))/compile-check-work; rc=$$?; \
+		if [ $$rc -eq 77 ]; then echo "compile-check self-test skipped: no host Vulkan"; else exit $$rc; fi
+
 # The FPU slow path as a filter for relift-check's differential run against ares
 # (relift-check --oracle ares lift --fp-corpus --c-slow-path FILE).
 $(MIPS_FPU_CASES): $(MIPS_TOOL_OBJS) $(MIPS_OBJS) $(CORE_OBJS)
@@ -593,7 +612,7 @@ test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
 	@for t in $(abspath $(TEST_RUN)); do \
 		echo "$$t"; "$$t" || { rc=$$?; echo "test binary failed: $$t (exit $$rc)"; exit $$rc; }; \
 	done
-	$(MAKE) --no-print-directory vk-tests vk-present
+	$(MAKE) --no-print-directory vk-tests vk-present compile-check-test
 
 # The forwarding layer tests on each host Vulkan device (RELIFT_VK_DEVICE set: that one only).
 vk-tests: $(VK_TESTS)

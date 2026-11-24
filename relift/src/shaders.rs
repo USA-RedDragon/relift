@@ -236,6 +236,78 @@ pub fn run(out: &Path, math: &str, ui: &mut crate::ui::Ui) -> Result<(), BoxErro
     Ok(())
 }
 
+/// What `relift shaders --check-compile` runs with; `None` takes the check
+/// tool's own default.
+pub struct CheckOptions<'a> {
+    /// The build directory, or the folder that holds the tables.
+    pub dir: &'a Path,
+    /// The `device.json` the tables were made from.
+    pub device: Option<&'a Path>,
+    /// The folder for scratch files, SPIR-V of failures and the report.
+    pub work: Option<&'a Path>,
+    /// Children running at once.
+    pub jobs: Option<u32>,
+    /// Compile threads in each child.
+    pub threads: Option<u32>,
+    /// Programs per child.
+    pub chunk: Option<u32>,
+    /// Seconds without progress before a child counts as hung.
+    pub timeout: Option<u32>,
+}
+
+/// Makes every program of the tables in `opts.dir` on this machine's Vulkan
+/// device through the runtime's own warm-up path, in child processes, and
+/// prints each program the driver crashed on, hung on or refused (the
+/// runtime's `compile-check` tool, built on first use under the work
+/// folder). Returns the tool's exit status: 0 when every program was made,
+/// 1 when some were not.
+///
+/// # Errors
+///
+/// The tool cannot be built or started.
+pub fn check_compile(
+    settings: &crate::settings::Settings,
+    opts: &CheckOptions,
+) -> Result<u8, BoxError> {
+    let work = match opts.work {
+        Some(w) => w.to_path_buf(),
+        None => PathBuf::from("compile-check-work"),
+    };
+    std::fs::create_dir_all(&work)?;
+    let work = std::fs::canonicalize(&work)?;
+    let built = work.join("runtime-build");
+    let make = relift_proc::command("make")
+        .arg("-C")
+        .arg(crate::build::runtime_dir(settings))
+        .arg(format!("BUILD={}", built.display()))
+        .arg(format!("-j{}", relift_proc::workers::jobs().max(1)))
+        .arg("compile-check")
+        .status()
+        .map_err(|e| format!("cannot run make to build the check tool: {e}"))?;
+    if !make.success() {
+        return Err("the runtime's compile-check tool did not build".into());
+    }
+    let mut cmd = relift_proc::command(built.join("relift_compile_check"));
+    cmd.arg(opts.dir).arg("--work").arg(&work);
+    if let Some(d) = opts.device {
+        cmd.arg("--device").arg(d);
+    }
+    for (name, v) in [
+        ("--jobs", opts.jobs),
+        ("--threads", opts.threads),
+        ("--chunk", opts.chunk),
+        ("--timeout", opts.timeout),
+    ] {
+        if let Some(v) = v {
+            cmd.arg(name).arg(v.to_string());
+        }
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| format!("cannot run the compile-check tool: {e}"))?;
+    Ok(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1))
+}
+
 /// The table files of the build in `out` that a package carries: both
 /// tables and their stamp when the build translated at least one program,
 /// else none.

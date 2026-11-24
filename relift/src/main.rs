@@ -105,7 +105,34 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
-        Command::Shaders { build_dir, math } => relift::shaders::run(build_dir, math, &mut ui),
+        Command::Shaders {
+            build_dir,
+            check_compile: true,
+            device,
+            work,
+            children,
+            threads,
+            chunk,
+            timeout,
+            ..
+        } => match relift::shaders::check_compile(
+            &settings,
+            &relift::shaders::CheckOptions {
+                dir: build_dir,
+                device: device.as_deref(),
+                work: work.as_deref(),
+                jobs: *children,
+                threads: *threads,
+                chunk: *chunk,
+                timeout: *timeout,
+            },
+        ) {
+            Ok(code) => return ExitCode::from(code),
+            Err(e) => Err(e),
+        },
+        Command::Shaders {
+            build_dir, math, ..
+        } => relift::shaders::run(build_dir, math, &mut ui),
         Command::Info { binary } => relift::build::run_info(&settings, binary.as_deref()),
         Command::Report {
             file,

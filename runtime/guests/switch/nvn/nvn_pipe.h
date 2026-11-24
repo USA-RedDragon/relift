@@ -78,6 +78,9 @@ bool nvn_pipe_uses_libraries(void);
  */
 VkPipeline nvn_pipe_graphics(const nvn_pipe_key *k);
 
+/** @brief The VkResult of the calling thread's last pipeline the driver was asked to create (VK_SUCCESS before any). */
+int nvn_pipe_last_result(void);
+
 /** @brief Makes (or waits for) the pre-raster library of vertex module k->mods[0] with k's specialization constants and fixed state; false without libraries. */
 bool nvn_pipe_warm_vertex(const nvn_pipe_key *k);
 

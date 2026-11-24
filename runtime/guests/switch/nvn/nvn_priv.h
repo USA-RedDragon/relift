@@ -469,6 +469,12 @@ int nvn_shader_stage(const uint8_t *mem, uint64_t code);
  */
 void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control);
 /**
+ * @brief Makes what the launch warm-up makes of the table program with key (hex), by the same path, and tells whether
+ * the driver took it. On false, why holds the reason (the module refused, or the pipeline's VkResult). A compute
+ * program is made only when the game has given a workgroup size, as in the warm-up, so a table-only run skips it.
+ */
+bool nvn_warm_check(const char *key, char *why, size_t why_n);
+/**
  * @brief The warning for count memory mappings of the limit vm.max_map_count allows, written to buf (n bytes), when
  * count is at three quarters of limit or more; false (buf untouched) otherwise or when limit is 0. forced is the
  * RELIFT_WARM_THREADS count, 0 when unset.
