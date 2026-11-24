@@ -5372,26 +5372,88 @@ static bool present_to_slot(replay *r, vimg *v, const uint32_t rect[4], const rl
 #define PRESENT_RATE_NS 5000000000ull
 
 /**
- * @brief Holds a present until the vi vsync grid reaches the frame's turn: interval vsyncs (the window's present
- * interval; 0 does not wait) after the previous present's, as the console's display shows a frame at a vblank. The
- * grid is the one the vsync event runs on (and follows the host display), so the game's own vsync waits and its
- * presents line up. RELIFT_UNPACED=1, a measuring aid, skips the wait to find the host's cost of a frame.
- */
-/**
- * @brief The display timeline of the presents, as the console's window queue keeps it: each present is shown at the
- * first vsync after it is made and after its interval since the one before (shown[k % PACE_RING]). Presents return
- * at once; the game waits only when it asks for a window texture and none is free (nvn_pace_acquire), as dequeueing a
- * buffer from the console's NvSwapchain does: with n textures one is on screen and the game may hold at most n - 2
- * queued presents not yet shown. RELIFT_NVN_PACE=present waits at each present for its vsync instead (the older
- * model, for A/B runs); RELIFT_UNPACED=1 never waits.
+ * @brief The display timeline of the presents, as the console's window queue keeps it. A present is shown at the
+ * first vsync after it was made, after its GPU work finished (the console's display latches a buffer only once its
+ * fence signaled) and after the one before it was shown, its interval apart. Presents return at once; the game waits
+ * only when it asks for a window texture and none is free (nvn_pace_acquire), as dequeueing a buffer from the
+ * console's NvSwapchain does: with n textures one is on screen and the game may hold at most n - 2 queued presents
+ * not yet shown. The GPU end of a present's work is the time the reaper thread saw the guest timeline reach the
+ * present's value. RELIFT_NVN_PACE=present waits at each present for its vsync instead (the older model, for A/B
+ * runs); RELIFT_UNPACED=1 never waits.
  */
 #define PACE_RING 16u
 static struct {
     int mode; /* 0 unread, 1 queue, 2 present, 3 off */
+    /** @brief Per present (k % PACE_RING): its earliest vsync by the present call, its interval, the guest timeline
+     * value its GPU work signals (0: none to wait for) and when it is shown (0 until known). */
+    int64_t call_at[PACE_RING], shown[PACE_RING];
+    uint64_t value[PACE_RING];
+    uint32_t interval[PACE_RING];
     int64_t last;
-    int64_t shown[PACE_RING];
     uint64_t n;
 } pace;
+
+/** @brief The reaper: a thread that waits for each guest timeline value in turn and notes when it was reached. */
+#define REAP_RING 1024u
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    bool started;
+    uint64_t want, reached;
+    int64_t at[REAP_RING];
+} reap = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false, 0, 0, { 0 } };
+
+static void *reap_main(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&reap.mu);
+    for (;;) {
+        while (reap.reached >= reap.want)
+            pthread_cond_wait(&reap.cv, &reap.mu);
+        uint64_t v = reap.reached + 1;
+        pthread_mutex_unlock(&reap.mu);
+        VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+                                   .semaphoreCount = 1,
+                                   .pSemaphores = &g.timeline,
+                                   .pValues = &v };
+        VkResult vr = VK(vkWaitSemaphores)(g.dev, &wi, UINT64_MAX);
+        int64_t t = now_ns();
+        pthread_mutex_lock(&reap.mu);
+        /* A failed wait (a lost device) still moves on, so no acquire waits forever. */
+        (void)vr;
+        reap.at[v % REAP_RING] = t;
+        reap.reached = v;
+        pthread_cond_broadcast(&reap.cv);
+    }
+    return NULL;
+}
+
+/** @brief The host time the guest timeline reached value v (waits for it); 0 without a timeline. */
+static int64_t reaped_at(uint64_t v)
+{
+    if (!v || !g.timeline_ok)
+        return 0;
+    pthread_mutex_lock(&reap.mu);
+    if (!reap.started) {
+        pthread_t th;
+        reap.started = pthread_create(&th, NULL, reap_main, NULL) == 0;
+        if (reap.started)
+            pthread_detach(th);
+    }
+    if (!reap.started || v + REAP_RING <= reap.reached) {
+        pthread_mutex_unlock(&reap.mu);
+        return 0;
+    }
+    if (v > reap.want) {
+        reap.want = v;
+        pthread_cond_broadcast(&reap.cv);
+    }
+    while (reap.reached < v)
+        pthread_cond_wait(&reap.cv, &reap.mu);
+    int64_t t = reap.at[v % REAP_RING];
+    pthread_mutex_unlock(&reap.mu);
+    return t;
+}
 
 static int pace_mode(void)
 {
@@ -5411,6 +5473,25 @@ static void sleep_until(int64_t at)
     }
 }
 
+/** @brief When present k is shown: after its call's vsync, its GPU work and the present before it (waits for the GPU). */
+static int64_t pace_shown(uint64_t k)
+{
+    uint32_t i = k % PACE_RING;
+    if (pace.shown[i])
+        return pace.shown[i];
+    int64_t earliest = pace.call_at[i], done = reaped_at(pace.value[i]);
+    if (done > earliest)
+        earliest = done;
+    if (k && k + PACE_RING > pace.n) {
+        int64_t prev = pace_shown(k - 1);
+        int64_t after = prev + 1 + (int64_t)(pace.interval[i] > 1 ? pace.interval[i] - 1 : 0) * 16666667ll;
+        if (after > earliest)
+            earliest = after;
+    }
+    pace.shown[i] = earliest == pace.call_at[i] ? earliest : nvn_vsync_after(earliest);
+    return pace.shown[i];
+}
+
 static void pace_present(uint32_t interval)
 {
     int mode = pace_mode();
@@ -5420,27 +5501,30 @@ static void pace_present(uint32_t interval)
     int64_t earliest = pace.last + (int64_t)(interval > 1 ? interval - 1 : 0) * 16666667ll;
     int64_t at = nvn_vsync_after(now > earliest ? now : earliest);
     pace.last = at;
-    pace.shown[pace.n++ % PACE_RING] = at;
-    if (mode == 2)
+    if (mode == 2) {
         sleep_until(at);
+        return;
+    }
+    uint32_t i = pace.n % PACE_RING;
+    pace.call_at[i] = at;
+    pace.shown[i] = 0;
+    pace.interval[i] = interval;
+    pace.value[i] = g.timeline_ok ? g.timeline_value : 0;
+    pace.n++;
 }
 
 void nvn_pace_acquire(uint32_t textures)
 {
     if (pace_mode() != 1 || !pace.n)
         return;
-    /* Presents not yet shown, newest last; the game may keep textures - 2 of them queued. */
+    /* One texture is on screen and the game may keep textures - 2 presents queued: the next texture is free once the
+     * present keep presents back from the newest is shown. */
     uint64_t keep = textures > 2 ? textures - 2 : 0;
-    int64_t now = now_ns();
-    uint64_t queued = 0;
-    while (queued < pace.n && queued < PACE_RING && pace.shown[(pace.n - 1 - queued) % PACE_RING] > now)
-        queued++;
-    if (queued <= keep)
+    if (keep >= pace.n)
         return;
-    /* Wait until the oldest presents shown leave keep queued: the (queued - keep)th oldest is shown. */
-    int64_t at = pace.shown[(pace.n - 1 - keep) % PACE_RING];
     int64_t t0 = now_ns();
     nvn_core_leave();
+    int64_t at = pace_shown(pace.n - 1 - keep);
     sleep_until(at);
     nvn_core_return();
     nvn_gpuprof_span(SPAN_PACE, t0, now_ns());
@@ -5448,13 +5532,14 @@ void nvn_pace_acquire(uint32_t textures)
 
 int nvn_pace_check(void)
 {
+    pthread_once(&g.once, bring_up);
     int saved = pace.mode;
     memset(&pace, 0, sizeof pace);
     pace.mode = 1;
     int rc = 0;
     int64_t t0 = now_ns();
     pace_present(1);
-    int64_t shown = pace.shown[0];
+    int64_t shown = pace_shown(0);
     if (now_ns() - t0 > 2000000)
         rc = 1; /* a present returns at once */
     nvn_pace_acquire(3);
@@ -5463,6 +5548,25 @@ int nvn_pace_check(void)
     nvn_pace_acquire(2);
     if (!rc && now_ns() < shown)
         rc = 3; /* two textures: the next one is free once the present is shown */
+    /* A present whose GPU work is long: its texture is not free before that work ends and a vsync after. */
+    staging big;
+    if (!rc && g.ok && g.timeline_ok && nvn_vk_staging_new(&big, 64ull << 20)) {
+        nvn_lock();
+        replay r = { 0 };
+        VkFence f = long_batch(&r, &big, 64, 0);
+        nvn_unlock();
+        pace_present(1);
+        nvn_pace_acquire(2);
+        int64_t back = now_ns();
+        if (!f || VK(vkGetFenceStatus)(g.dev, f) != VK_SUCCESS)
+            rc = 4; /* the acquire returned before the batch ended */
+        else if (back < pace.shown[1 % PACE_RING] || pace.shown[1 % PACE_RING] < reaped_at(pace.value[1 % PACE_RING]))
+            rc = 5; /* nor before the vsync after it */
+        nvn_lock();
+        nvn_vk_settle();
+        nvn_vk_staging_free(&big);
+        nvn_unlock();
+    }
     memset(&pace, 0, sizeof pace);
     pace.mode = saved;
     return rc;
