@@ -484,7 +484,10 @@ extern uint64_t nvn_trace_wide_draws;
 bool nvn_trace_parse(const char *spec, char *dir, size_t dirsz, uint64_t *from, uint64_t *frames);
 /** @brief At every present: ends the frame being traced and starts the next one when the trace is due. */
 void nvn_trace_present(replay *r);
-/** @brief Before a draw or dispatch ("draw", "dispatch"): submits the batch and saves what the command will read. */
+/**
+ * @brief Before a draw, mesh draw or dispatch ("draw", "mesh", "dispatch"): submits the batch and saves what the
+ * command will read.
+ */
 void nvn_trace_begin(replay *r, const char *kind);
 /** @brief A texture or image the command being traced binds, saved as it is before the command. */
 void nvn_trace_texture(replay *r, vimg *v, uint32_t id, uint32_t slot, uint32_t kind, uint32_t dim, bool image,

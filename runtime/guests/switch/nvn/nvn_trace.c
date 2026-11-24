@@ -1,14 +1,15 @@
 /**
  * @file nvn_trace.c
- * @brief The NVN frame trace: one frame's draws and dispatches, with everything they read and write, on disk.
+ * @brief The NVN frame trace: one frame's draws, mesh draws and dispatches, with everything they read and write, on
+ * disk.
  *
  * RELIFT_NVN_TRACE=<dir>:<present>[:<frames>] arms the trace at the first present at or past <present>: the next
- * <frames> frames (default 1) are written to <dir>/frame-<present of the frame>/. Each draw and dispatch becomes
- * one line of trace.jsonl: the programs, the render targets, the fixed-function and dynamic state, every bound
- * uniform and storage buffer with its GPU and guest address, the pushed constants, and every texture and image
- * the command bound with its host image, format, size, view and swizzle. The bytes go to files that the lines
- * name: buffer ranges before and after the command, images and render targets before and after it (every level and
- * layer, in the host image's format). Files are named by a hash of their bytes, so a range that did not change
+ * <frames> frames (default 1) are written to <dir>/frame-<present of the frame>/. Each draw, mesh draw (kind "mesh")
+ * and dispatch becomes one line of trace.jsonl: the programs, the render targets, the fixed-function and dynamic
+ * state, every bound uniform and storage buffer with its GPU and guest address, the pushed constants, and every
+ * texture and image the command bound with its host image, format, size, view and swizzle. The bytes go to files
+ * that the lines name: buffer ranges before and after the command, images and render targets before and after it
+ * (every level and layer, in the host image's format). Files are named by a hash of their bytes, so a range that did not change
  * is written once. With RELIFT_NVN_TRACE_GBUFFER set, the trace starts at the first frame after a frame that drew into four
  * or more render targets at once (a deferred renderer's G-buffer pass), at or past <present>. Each traced command submits the batch before and after it so the files show the GPU's work.
  * Beside it, order.jsonl gives the order everything ran in, one line per event with a running "seq": each submit
@@ -615,11 +616,12 @@ void nvn_trace_ring_dump(const char *why, uint32_t most)
     }
 }
 
-static void collect_buffers(const nvn_gfx *st, uint32_t first, uint32_t last)
+/** @brief Lists the bound uniform and storage buffers of the stages in the mask (bit s for stage s) with a program. */
+static void collect_buffers(const nvn_gfx *st, uint32_t stages)
 {
     tr.nbuf = 0;
-    for (uint32_t s = first; s <= last; s++) {
-        if (!st->code[s])
+    for (uint32_t s = 0; s < NVN_STAGES; s++) {
+        if (!(stages & 1u << s) || !st->code[s])
             continue;
         for (uint32_t b = 0; b < NVN_UBO_SLOTS; b++)
             if (st->ubo[s][b].addr && st->ubo[s][b].size && tr.nbuf < sizeof tr.buf / sizeof tr.buf[0]) {
@@ -667,7 +669,11 @@ void nvn_trace_begin(replay *r, const char *kind)
     if (!nvn_trace_ring_on && !nvn_vk_flush(r))
         return;
     bool compute = !strcmp(kind, "dispatch");
-    collect_buffers(st, compute ? NVN_STAGE_COMPUTE : 0, compute ? NVN_STAGE_COMPUTE : NVN_STAGE_COMPUTE - 1);
+    bool mesh = !strcmp(kind, "mesh");
+    uint32_t stages = compute ? 1u << NVN_STAGE_COMPUTE
+                      : mesh  ? 1u << NVN_STAGE_TASK | 1u << NVN_STAGE_MESH | 1u << 1
+                              : (1u << NVN_STAGE_COMPUTE) - 1;
+    collect_buffers(st, stages);
     for (uint32_t i = 0; i < tr.nbuf && !nvn_trace_ring_on; i++)
         dump_range(tr.buf[i].addr, tr.buf[i].size, tr.buf[i].pre);
     if (!compute) {
@@ -776,7 +782,8 @@ void nvn_trace_end(replay *r, const nvn_trace_cmd *c)
                 c->mode, (int)c->indexed, c->itype, c->base, c->first, c->count, st->inst_base, st->inst_count);
     out(",\"programs\":{");
     bool first = true;
-    static const char *const names[] = { "vertex", "fragment", "geometry", "tess_control", "tess_eval", "compute" };
+    static const char *const names[NVN_STAGES] = { "vertex",    "fragment", "geometry", "tess_control",
+                                                   "tess_eval", "compute",  "task",     "mesh" };
     for (uint32_t s = 0; s < NVN_STAGES; s++)
         if (c->keys[s]) {
             out("%s\"%s\":{\"key\":\"%s\",\"code\":\"0x%llx\"}", first ? "" : ",", names[s], c->keys[s],

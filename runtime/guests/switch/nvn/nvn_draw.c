@@ -2033,6 +2033,8 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
         return nvn_vk_stop(r, "cannot make the pipeline layout");
     if (!st->code[NVN_STAGE_MESH])
         return nvn_vk_stop(r, "a mesh draw without a mesh program");
+    if (nvn_trace_active)
+        nvn_trace_begin(r, "mesh");
     pipe_key k;
     memset(&k, 0, sizeof k);
     module *mods[NVN_STAGES] = { NULL };
@@ -2080,6 +2082,12 @@ static int draw_mesh(replay *r, uint32_t first, uint32_t count)
     }
     if (rc == RL_OK)
         rc = mark_stage_writes(r, st, mods, 1, NVN_STAGES - 1);
+    if (rc == RL_OK && nvn_trace_active) {
+        nvn_trace_cmd tc = { .first = first, .count = count };
+        for (uint32_t s = 0; s < NVN_STAGES; s++)
+            tc.keys[s] = mods[s] ? mods[s]->key : NULL;
+        nvn_trace_end(r, &tc);
+    }
     return rc;
 }
 
