@@ -737,6 +737,31 @@ uint32_t nvn_shader_iface(const char *key, nvn_iface_rec *out, uint32_t max)
     return count;
 }
 
+bool nvn_shader_find_kernel(uint32_t name_hash, char key[65])
+{
+    pthread_mutex_lock(&g_lock);
+    table *t = open_table(&g_iface, "rlspi", "RLSPI002", true);
+    pthread_mutex_unlock(&g_lock);
+    if (!t)
+        return false;
+    size_t recs = TABLE_HEAD + (size_t)t->n * TABLE_ENTRY, room = (t->len - recs) / 16;
+    for (uint32_t i = 0; i < t->n; i++) {
+        const uint8_t *e = t->all + TABLE_HEAD + (size_t)i * TABLE_ENTRY;
+        uint32_t first = le32(e + 32), count = le32(e + 36);
+        if (first > room || count > room - first)
+            continue;
+        for (uint32_t j = 0; j < count; j++) {
+            const uint8_t *r = t->all + recs + 16 * ((size_t)first + j);
+            if (le32(r) == NVN_IFACE_KERNEL_NAME && le32(r + 4) == name_hash) {
+                for (int b = 0; b < 32; b++)
+                    snprintf(key + 2 * b, 3, "%02x", e[b]);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool nvn_shader_image_arrays(uint64_t *used)
 {
     *used = 0;

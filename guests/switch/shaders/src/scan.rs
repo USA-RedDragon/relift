@@ -27,7 +27,7 @@ use crate::sha256_hex;
 use crate::source::{Source, SourceFile};
 use crate::{cubin, sarc, sweep, unity, yaz0, zst};
 
-const CACHE_VERSION: u32 = 5;
+const CACHE_VERSION: u32 = 6;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const CODE: [&str; 11] = [
@@ -134,9 +134,11 @@ pub struct Report {
     /// Transform feedback layouts, unique: [`crate::xfb::layout`] with the
     /// program's SHA-256 (hex) as `"program"`.
     pub xfb: Vec<Value>,
-    /// CUDA kernels, unique: `{"name", "program", "shared"}` each, the
-    /// kernel's symbol, its program's SHA-256 (hex) and its static shared
-    /// bytes (see [`crate::cubin::Kernel::shared_bytes`]).
+    /// CUDA kernels, unique: `{"name", "program", "shared", "externs"}`
+    /// each, the kernel's symbol, its program's SHA-256 (hex), its static
+    /// shared bytes (see [`crate::cubin::Kernel::shared_bytes`]) and the
+    /// constant bank words that hold driver functions' addresses, as
+    /// `[bank, byte offset, symbol]` (see [`crate::cubin::Extern`]).
     pub kernels: Vec<Value>,
     /// Counters.
     pub stats: Stats,
@@ -413,7 +415,12 @@ impl Ctx<'_> {
                     out.error(format!("cubin: not linked into the kernel: {u}"), &src);
                 }
                 self.program(out, &src, &k.code, Kind::Compute, 0, 0)?;
-                out.kernels.push(json!({"name": k.name, "program": sha256_hex(&k.code), "shared": k.shared_bytes}));
+                let externs: Vec<Value> = k
+                    .externs
+                    .iter()
+                    .map(|e| json!([e.bank, e.offset, e.name]))
+                    .collect();
+                out.kernels.push(json!({"name": k.name, "program": sha256_hex(&k.code), "shared": k.shared_bytes, "externs": externs}));
             }
         }
         for f in carve::carve(b) {

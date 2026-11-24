@@ -680,6 +680,20 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
  * fit).
  */
 #define NVN_IFACE_SHARED_DECLARED 14u
+/** @brief Record kind: the program is the CUDA kernel whose symbol name has the FNV-1a hash `bank` (nvn_kernel_name_hash). */
+#define NVN_IFACE_KERNEL_NAME 15u
+
+/** @brief The 32-bit FNV-1a hash of a CUDA kernel's symbol name, as NVN_IFACE_KERNEL_NAME records hold it. */
+static inline uint32_t nvn_kernel_name_hash(const char *name)
+{
+    uint32_t h = 0x811c9dc5u;
+    for (; *name; name++)
+        h = (h ^ (uint8_t)*name) * 0x01000193u;
+    return h;
+}
+
+/** @brief The key of the translation of the CUDA kernel with name hash name_hash in the interface table; false when none. */
+bool nvn_shader_find_kernel(uint32_t name_hash, char key[65]);
 /** @brief The descriptor set and binding of a trace-mode translation's trace buffer. */
 #define NVN_TRACE_SET 3u
 #define NVN_TRACE_BINDING 7u

@@ -137,10 +137,35 @@ pub const RECORD_TRACE: u32 = 13;
 /// is the bytes its constant shared accesses reach past them
 /// (`Interface::shared_beyond_declared`; 0 when they fit).
 pub const RECORD_SHARED_DECLARED: u32 = 14;
+/// An interface record: the program is the CUDA kernel whose symbol name
+/// has the FNV-1a hash ([`kernel_name_hash`]) in the second field, so the
+/// runtime finds the translation of a kernel a library loads by its name.
+pub const RECORD_KERNEL_NAME: u32 = 15;
 
-/// The static shared bytes of each CUDA kernel's program, from the scan's
-/// kernels JSON (empty for none).
-fn kernel_shared(json: &[u8]) -> Result<HashMap<[u8; 32], u32>, BoxError> {
+/// The 32-bit FNV-1a hash of a CUDA kernel's symbol name, as
+/// [`RECORD_KERNEL_NAME`] holds it.
+#[must_use]
+pub fn kernel_name_hash(name: &str) -> u32 {
+    name.bytes().fold(0x811c_9dc5, |h: u32, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    })
+}
+
+/// What the scan knows of a CUDA kernel's program.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct KernelInfo {
+    /// Static shared bytes (the largest of the kernels sharing it).
+    shared: u32,
+    /// The [`kernel_name_hash`] of each kernel it is.
+    names: Vec<u32>,
+    /// Constant bank words holding driver functions' addresses, by (bank,
+    /// byte offset) (`Options::externs`).
+    externs: BTreeMap<(u32, u32), String>,
+}
+
+/// Each CUDA kernel's program, from the scan's kernels JSON (empty for
+/// none).
+fn kernel_shared(json: &[u8]) -> Result<HashMap<[u8; 32], KernelInfo>, BoxError> {
     let mut out = HashMap::new();
     if json.is_empty() {
         return Ok(out);
@@ -156,8 +181,31 @@ fn kernel_shared(json: &[u8]) -> Result<HashMap<[u8; 32], u32>, BoxError> {
             .get("shared")
             .and_then(serde_json::Value::as_u64)
             .and_then(|n| u32::try_from(n).ok());
-        if let (Some(key), Some(shared)) = (key, shared) {
-            out.insert(key, shared);
+        let name = k.get("name").and_then(|n| n.as_str());
+        if let (Some(key), Some(shared), Some(name)) = (key, shared, name) {
+            let e = out.entry(key).or_default();
+            e.shared = e.shared.max(shared);
+            let h = kernel_name_hash(name);
+            if !e.names.contains(&h) {
+                e.names.push(h);
+            }
+            for x in k
+                .get("externs")
+                .and_then(|x| x.as_array())
+                .into_iter()
+                .flatten()
+            {
+                let f = |i: usize| {
+                    x.get(i)
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok())
+                };
+                if let (Some(bank), Some(at), Some(sym)) =
+                    (f(0), f(1), x.get(2).and_then(|s| s.as_str()))
+                {
+                    e.externs.insert((bank, at), sym.to_string());
+                }
+            }
         }
     }
     Ok(out)
@@ -407,9 +455,9 @@ pub struct Translator {
     /// Each capturing program's transform feedback layout (the scan's
     /// `xfb.json`).
     xfb: HashMap<[u8; 32], XfbLayout>,
-    /// Static shared bytes of each CUDA kernel's program (the scan's
-    /// `kernels.json`).
-    shared: HashMap<[u8; 32], u32>,
+    /// Each CUDA kernel's program (the scan's `kernels.json`; kernels whose
+    /// linked code is the same share a program).
+    shared: HashMap<[u8; 32], KernelInfo>,
     math: Math,
     trace: Option<TraceSel>,
 }
@@ -463,12 +511,24 @@ impl Translator {
             Err(why) => One::Failed(why),
             Ok((words, interface)) => {
                 let mut records = records(&interface);
+                records.extend(self.kernel_records(&key));
                 if let Some(m) = self.pipes.member(&key) {
                     records.extend(mesh::records(m, interface.host.mesh, interface.mesh_slots));
                 }
                 One::Done { words, records }
             }
         }
+    }
+
+    /// The [`RECORD_KERNEL_NAME`] records of program `key`, one per CUDA
+    /// kernel it is.
+    fn kernel_records(&self, key: &[u8; 32]) -> Vec<[u32; 4]> {
+        self.shared.get(key).map_or_else(Vec::new, |k| {
+            k.names
+                .iter()
+                .map(|&n| [RECORD_KERNEL_NAME, n, 0, 0])
+                .collect()
+        })
     }
 
     fn raw(&self, key: [u8; 32], code: Vec<u8>) -> Result<(Vec<u32>, Interface), String> {
@@ -481,7 +541,12 @@ impl Translator {
                     math: self.math,
                     trace: self.trace.as_ref().and_then(|t| t.of(&key)),
                     xfb: self.xfb.get(&key).cloned(),
-                    shared_declared: self.shared.get(&key).copied(),
+                    shared_declared: self.shared.get(&key).map(|k| k.shared),
+                    externs: self
+                        .shared
+                        .get(&key)
+                        .map(|k| k.externs.clone())
+                        .unwrap_or_default(),
                     ..self.pipes.options(&key)
                 },
             }],
@@ -505,6 +570,7 @@ impl Translator {
             Err(why) => return Ok(Item::Failed(why)),
         };
         let mut records = records(&interface);
+        records.extend(self.kernel_records(&key));
         let mut helpers = Vec::new();
         if let Some(m) = self.pipes.member(&key) {
             records.extend(mesh::records(m, interface.host.mesh, interface.mesh_slots));
@@ -911,12 +977,24 @@ pub(crate) mod tests {
         assert!(records(&i).contains(&[RECORD_SHARED_DECLARED, 0x6000, 4, 0]));
         let key = [7u8; 32];
         let json = format!(
-            r#"[{{"name": "k", "program": "{}", "shared": 24576}}, {{"name": "x"}}]"#,
+            r#"[{{"name": "k", "program": "{0}", "shared": 24576, "externs": [[4, 0, "__assertfail"]]}}, {{"name": "x"}}, {{"name": "k2", "program": "{0}", "shared": 0}}]"#,
             hex(&key)
         );
         let m = kernel_shared(json.as_bytes()).unwrap();
         assert_eq!(m.len(), 1);
-        assert_eq!(m.get(&key), Some(&0x6000));
+        let k = &m[&key];
+        assert_eq!(k.shared, 0x6000);
+        assert_eq!(
+            k.names,
+            vec![kernel_name_hash("k"), kernel_name_hash("k2")],
+            "kernels with the same code share a program and keep both names"
+        );
+        assert_eq!(
+            k.externs.get(&(4, 0)).map(String::as_str),
+            Some("__assertfail")
+        );
+        assert_eq!(kernel_name_hash(""), 0x811c_9dc5);
+        assert_eq!(kernel_name_hash("a"), 0xe40c_292c);
         assert!(kernel_shared(b"").unwrap().is_empty());
     }
 
