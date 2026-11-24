@@ -84,11 +84,35 @@ static void tell_loaded(void)
 
 const char *rl_hostlib_gpu_driver_loaded(void) { return g_loaded[0] ? g_loaded : NULL; }
 
+/** @brief Whether the app offers a GPU driver choice (rl_hostlib_set_driver_choice); offered until told otherwise. */
+static bool g_offered = true;
+static int g_ignored_warned;
+
+void rl_hostlib_set_driver_choice(bool offered) { __atomic_store_n(&g_offered, offered, __ATOMIC_RELAXED); }
+
 static const char *selected_name(void)
 {
     rl_settings_declare_runtime();
     const char *name = rl_setting_str(RL_GPU_DRIVER_KEY);
-    return name && *name && strcmp(name, RL_GPU_DRIVER_SYSTEM) ? name : NULL;
+    if (!name || !*name || !strcmp(name, RL_GPU_DRIVER_SYSTEM))
+        return NULL;
+    if (!__atomic_load_n(&g_offered, __ATOMIC_RELAXED)) {
+        /* An app that offers no driver choice (relift.gpu_driver false in its manifest) always runs on the system
+           driver, whatever a settings file left behind says. */
+        if (!__atomic_exchange_n(&g_ignored_warned, 1, __ATOMIC_RELAXED))
+            rl_log(RL_LOG_INFO, "hostlib", "%s=%s ignored: this app offers no GPU driver choice; using the system driver",
+                   RL_GPU_DRIVER_KEY, name);
+        return NULL;
+    }
+    return name;
+}
+
+const char *rl_hostlib_selected_driver(void) { return selected_name(); }
+
+void rl_hostlib_test_reset_driver_choice(void)
+{
+    __atomic_store_n(&g_offered, true, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_ignored_warned, 0, __ATOMIC_RELAXED);
 }
 
 #if defined(__ANDROID__)

@@ -4,6 +4,7 @@
  * video.gpu_driver setting.
  */
 #include "gpu_driver.h"
+#include "hostlib.h"
 #include "runner.h"
 
 #include <relift/settings.h>
@@ -129,4 +130,22 @@ TEST(gpu_driver_setting_defaults_to_the_system_driver)
     CHECK(!strcmp(rl_setting_str(RL_GPU_DRIVER_KEY), "turnip"));
     setenv("RELIFT_GPU_DRIVER", "blob", 1);
     CHECK(!strcmp(rl_setting_str(RL_GPU_DRIVER_KEY), "blob"));
+}
+
+TEST(gpu_driver_choice_is_ignored_when_the_app_offers_none)
+{
+    rl_settings_reset();
+    rl_settings_declare_runtime();
+    rl_hostlib_test_reset_driver_choice();
+    CHECK(rl_hostlib_selected_driver() == NULL);
+    CHECK_EQ(rl_settings_set("video.gpu_driver", "Turnip_v26.0.0_R8"), RL_SETTING_OK);
+    CHECK(rl_hostlib_selected_driver() && !strcmp(rl_hostlib_selected_driver(), "Turnip_v26.0.0_R8"));
+    /* an app with no driver choice runs on the system driver whatever the setting says */
+    rl_hostlib_set_driver_choice(false);
+    CHECK(rl_hostlib_selected_driver() == NULL);
+    CHECK(rl_hostlib_selected_driver() == NULL);
+    CHECK_EQ(rl_settings_set("video.gpu_driver", "system"), RL_SETTING_OK);
+    CHECK(rl_hostlib_selected_driver() == NULL);
+    rl_hostlib_test_reset_driver_choice();
+    rl_settings_reset();
 }

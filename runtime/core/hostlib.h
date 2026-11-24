@@ -50,6 +50,16 @@ RL_RUNTIME_API const char *rl_hostlib_gpu_driver_loaded(void);
  * driver is used instead. It runs once, on the thread of the first rl_hostlib_vulkan_gipa call, which waits for it.
  */
 RL_RUNTIME_API void rl_hostlib_on_gpu_driver_failed(void (*hook)(const char *name));
+/**
+ * @brief Whether the app offers a GPU driver choice (Android: the manifest's relift.gpu_driver). Without one the
+ * video.gpu_driver setting is ignored (logged once) and the system driver loads. Call before the first
+ * rl_hostlib_vulkan_gipa; offered until called.
+ */
+RL_RUNTIME_API void rl_hostlib_set_driver_choice(bool offered);
+/** @brief The driver package video.gpu_driver names that would load, or NULL for the system driver. */
+RL_RUNTIME_API const char *rl_hostlib_selected_driver(void);
+/** @brief Tests: the driver choice is offered again and the ignore message may log again. */
+RL_RUNTIME_API void rl_hostlib_test_reset_driver_choice(void);
 
 /**
  * @brief Calls hook with what rl_hostlib_gpu_driver_loaded then answers, once, when the first rl_hostlib_vulkan_gipa

@@ -271,6 +271,14 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
     }
 
     /**
+     * Whether this app offers a GPU driver choice (the manifest's relift.gpu_driver): "false" makes the runtime
+     * ignore video.gpu_driver and load the system driver.
+     */
+    public String reliftGpuDriverOffered() {
+        return Ui.meta(this, "relift.gpu_driver") ? "true" : "false";
+    }
+
+    /**
      * Called by the runtime on the thread that loads the Vulkan driver when the
      * chosen package did not load: the choice goes back to the phone's own
      * driver, and the game waits until the player has read the message.

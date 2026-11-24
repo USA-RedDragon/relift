@@ -117,6 +117,12 @@ static void init_once(void)
     rl_set_asset_loader(apk_asset);
     rl_hostlib_on_gpu_driver_failed(driver_failed);
     rl_hostlib_on_gpu_driver_loaded(driver_loaded);
+    {
+        /* the manifest says whether this app offers a GPU driver choice (relift.gpu_driver) */
+        char offered[8] = "";
+        if (rl_android_call_str("reliftGpuDriverOffered", offered, sizeof offered))
+            rl_hostlib_set_driver_choice(strcmp(offered, "false") != 0);
+    }
     const char *dir = rl_android_files_dir();
     if (dir) {
         setenv("HOME", dir, 1);
