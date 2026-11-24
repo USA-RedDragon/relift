@@ -180,6 +180,11 @@ static bool fill_samplers(void)
     return true;
 }
 
+/** @brief Make only the set layout (nvn_texset_layout_only). */
+static bool g_layout_only;
+
+void nvn_texset_layout_only(void) { g_layout_only = true; }
+
 static bool make(void)
 {
     if (t.tried)
@@ -240,6 +245,10 @@ static bool make(void)
                                            .pBindings = b };
     if (VK(vkCreateDescriptorSetLayout)(g.dev, &li, NULL, &t.layout) != VK_SUCCESS)
         return false;
+    if (g_layout_only) {
+        t.ok = true;
+        return true;
+    }
     VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLER, SAMPLERS },
                                    { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, t.ntex * KINDS * DIMS },
                                    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 },
@@ -289,6 +298,9 @@ static bool make(void)
     t.ok = filled && t.tex_img && t.tex_guest && t.tex_kind && t.tex_view && t.tex_views && t.img_views && t.tex_level && t.tex_target && t.tex_layer && t.tex_layers && t.img_done && t.img_surface && t.is_synced && slots_ok && t.samplers && t.sampler_bytes;
     return t.ok;
 }
+
+/** @brief The whole texture set (its set and per-id tables), which a layout-only process never has. */
+static bool make_whole(void) { return make() && !g_layout_only; }
 
 VkDescriptorSetLayout nvn_texset_layout(void) { return make() ? t.layout : NULL; }
 
@@ -800,7 +812,7 @@ static int storage_live(replay *r, uint32_t id, uint64_t tex, bool *live)
 static int bind_texture_slot(replay *r, uint32_t handle, uint32_t *kind, uint32_t *dim, uint32_t *slot, bool with_sampler,
                              bool as_image)
 {
-    if (!make())
+    if (!make_whole())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t id = handle & 0xfffffu, sid = handle >> 20;
     uint8_t view[17] = { 0 };
@@ -1035,7 +1047,7 @@ static int refresh_synced(replay *r, uint32_t id)
 
 int nvn_texset_sync_registered(replay *r)
 {
-    if (!make())
+    if (!make_whole())
         return nvn_vk_stop(r, "cannot make the texture set");
     uint32_t ids[256], n;
     while ((n = nvn_tex_pending(true, ids, 256)) != 0)
@@ -1127,7 +1139,7 @@ int nvn_texset_sync_registered(replay *r)
 
 int nvn_texset_bind_words(replay *r, const uint8_t *bytes, uint32_t size, uint32_t offset, bool indexed)
 {
-    if (!make())
+    if (!make_whole())
         return nvn_vk_stop(r, "cannot make the texture set");
     for (uint32_t o = offset; o <= size && size - o >= 4; o += 4) {
         uint32_t handle;
@@ -1169,7 +1181,7 @@ uint32_t nvn_texset_images(void) { return make() ? t.nimg : 0; }
 
 int nvn_texset_sampler(replay *r, uint32_t id)
 {
-    if (!make())
+    if (!make_whole())
         return nvn_vk_stop(r, "cannot make the texture set");
     return bind_sampler(r, id);
 }
@@ -1197,12 +1209,12 @@ int nvn_texset_image(replay *r, uint32_t handle, uint32_t *slot, uint32_t *kind,
 
 uint32_t nvn_texset_format(uint32_t slot)
 {
-    return make() && slot < t.ntex && t.tex_img[slot] ? t.tex_img[slot]->d.format : 0;
+    return make_whole() && slot < t.ntex && t.tex_img[slot] ? t.tex_img[slot]->d.format : 0;
 }
 
 uint32_t nvn_texset_surface_kind(uint32_t slot, uint32_t kind)
 {
-    if (!make() || slot >= t.ntex || t.img_surface[slot] == NVN_SURFACE_DIRECT)
+    if (!make_whole() || slot >= t.ntex || t.img_surface[slot] == NVN_SURFACE_DIRECT)
         return kind;
     return t.img_surface[slot] == NVN_SURFACE_RGB9E5 ? NVN_SURFACE_KIND_RGB9E5 : UINT32_MAX;
 }

@@ -652,7 +652,7 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
     pthread_mutex_unlock(&g_lock);
     if (have)
         return have;
-    char stamp_why[512];
+    char stamp_why[3072];
     if (!nvn_shader_stamp_check(stamp_why, sizeof stamp_why)) {
         why_set(why, why_n, "%s", stamp_why);
         return NULL;

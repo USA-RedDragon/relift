@@ -1142,6 +1142,13 @@ bool nvn_vk_upload_bytes(replay *r, const void *src, uint64_t n, uint64_t pad, u
 bool nvn_vk_upload_bank(replay *r, const void *src, uint64_t n, uint64_t pad, uint64_t align, uint64_t *off);
 /** @brief The layout of the texture set (set 2); VK_NULL_HANDLE when it cannot be made (nvn_texset.c). */
 VkDescriptorSetLayout nvn_texset_layout(void);
+/**
+ * @brief The texture set makes only its set layout, not its descriptor pool, set and per-id tables (about 1.7 GB on an
+ * Adreno 740 with 621378 ids): for a process that makes pipelines and never draws (relift_compile_check). A pipeline
+ * depends on the set layout only, which stays the same, so what the driver compiles is the same. Call before the first
+ * nvn_texset_layout; nvn_texset is NULL then.
+ */
+void nvn_texset_layout_only(void);
 /** @brief The texture set, to bind as set 2. */
 VkDescriptorSet nvn_texset(void);
 /**

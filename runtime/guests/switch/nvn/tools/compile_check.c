@@ -12,8 +12,14 @@
  * a time on one thread, which names the program that kills it by itself. The programs a dead child left unstarted go
  * back in the queue.
  *
+ * Each child makes the NVN2 device the warm-up uses, with only the layout of the texture set
+ * (nvn_texset_layout_only), and still takes a few hundred MiB to 2 GiB of memory depending on the driver. --jobs is
+ * the most children; the tool starts one, measures its peak (VmHWM) once it has made a program, and starts more only
+ * while MemAvailable, less what the running children will still grow by, keeps --reserve-mb (4096 on Android, 2048
+ * elsewhere) free (nvn_check_children_fit). With less than that free and nothing running it refuses to start.
+ *
  * Usage: relift_compile_check TABLE_DIR [--device DEVICE_JSON] [--chunk N] [--jobs N] [--threads N] [--timeout S]
- * [--work DIR], or --self-test [--work DIR]. TABLE_DIR holds table.rlspv, table.rlspi and table.stamp, or a build directory whose shaders/ folder
+ * [--reserve-mb M] [--work DIR], or --self-test [--work DIR]. TABLE_DIR holds table.rlspv, table.rlspi and table.stamp, or a build directory whose shaders/ folder
  * does. Exit status: 0 when every program was made, 1 when some were not, 2 on a usage or setup error.
  */
 #include "nvn_priv.h"
@@ -52,6 +58,8 @@ typedef struct state {
 typedef struct opts {
     const char *dir, *device, *work;
     uint32_t chunk, jobs, threads, timeout;
+    /** @brief Memory kept free while children run, in MiB (--reserve-mb). */
+    uint32_t reserve_mb;
 } opts;
 
 /** @brief One program the driver did not take. */
@@ -86,6 +94,39 @@ static bool is_file(const char *path)
 {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+/** @brief A kB value of a "Name:   N kB" line in file path, or fallback when it has none. */
+static uint64_t proc_kb(const char *path, const char *name, uint64_t fallback)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return fallback;
+    char line[256];
+    size_t n = strlen(name);
+    uint64_t v = fallback;
+    while (fgets(line, sizeof line, f))
+        if (!strncmp(line, name, n) && line[n] == ':') {
+            v = strtoull(line + n + 1, NULL, 10);
+            break;
+        }
+    fclose(f);
+    return v;
+}
+
+/** @brief The memory the system has available, in bytes (MemAvailable), or UINT64_MAX when it does not say. */
+static uint64_t mem_available(void)
+{
+    uint64_t kb = proc_kb("/proc/meminfo", "MemAvailable", UINT64_MAX);
+    return kb == UINT64_MAX ? kb : kb * 1024;
+}
+
+/** @brief A child's resident memory now (VmRSS) or at its peak (VmHWM), in bytes; 0 when unknown. */
+static uint64_t child_mem(pid_t pid, const char *which)
+{
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%d/status", (int)pid);
+    return proc_kb(path, which, 0) * 1024;
 }
 
 /** @brief Sets the environment both the tool and its children read the table and the device through. */
@@ -164,6 +205,7 @@ static void *child_thread(void *p)
 /** @brief The child: makes the programs first to first + count on nthreads threads, state in statefile. */
 static int run_child(const char *statefile, uint32_t first, uint32_t count, uint32_t nthreads)
 {
+    nvn_texset_layout_only();
     int fd = open(statefile, O_RDWR);
     if (fd < 0)
         return 2;
@@ -204,6 +246,8 @@ typedef struct job {
     bool hung, active;
     /** @brief Made one program at a time on purpose, to confirm or find a suspect. */
     bool solo;
+    /** @brief The child's peak resident memory, read while it runs. */
+    uint64_t peak;
 } job;
 
 /** @brief The outcome of a finished child, and what the tool does about it. */
@@ -464,8 +508,40 @@ static int run_check(const opts *o, report *r)
     job *jobs = calloc(o->jobs, sizeof *jobs);
     uint32_t serial = 0, total_done = 0, confirmed = 0;
     double t0 = now_s(), last_print = t0;
+    /* A child's footprint: the largest peak of a child that has made a program (its device and tables are up). */
+    uint64_t footprint = 0, reserve = (uint64_t)o->reserve_mb << 20;
+    bool told = false;
     for (;;) {
         bool any = false;
+        uint32_t running = 0;
+        uint64_t growth = 0;
+        for (uint32_t k = 0; k < o->jobs; k++) {
+            job *j = &jobs[k];
+            if (!j->active)
+                continue;
+            running++;
+            uint64_t hwm = child_mem(j->pid, "VmHWM"), rss = child_mem(j->pid, "VmRSS");
+            if (hwm > j->peak)
+                j->peak = hwm;
+            if (atomic_load(&j->st->done) && j->peak > footprint)
+                footprint = j->peak;
+            if (footprint > rss)
+                growth += footprint - rss;
+        }
+        uint64_t avail = mem_available();
+        avail = avail > growth ? avail - growth : 0;
+        uint32_t may = nvn_check_children_fit(avail, reserve, footprint, running, o->jobs);
+        if (!running && !may && q.n) {
+            fprintf(stderr,
+                    "compile-check: refused to start a child: %llu MiB available, %u MiB must stay free (--reserve-mb)%s\n",
+                    (unsigned long long)(avail >> 20), o->reserve_mb, footprint ? "" : ", and a child's size is not known yet");
+            return 2;
+        }
+        if (footprint && !told) {
+            told = true;
+            printf("compile-check: a child takes %llu MiB; %llu MiB available, %u MiB kept free\n",
+                   (unsigned long long)(footprint >> 20), (unsigned long long)(mem_available() >> 20), o->reserve_mb);
+        }
         for (uint32_t k = 0; k < o->jobs; k++) {
             job *j = &jobs[k];
             if (j->active) {
@@ -489,7 +565,8 @@ static int run_check(const opts *o, report *r)
                     munmap(j->st, sizeof(state) + j->count);
                 }
             }
-            if (!j->active && q.n) {
+            if (!j->active && q.n && may) {
+                may--;
                 range rg = q.r[--q.n];
                 if (!start_job(o, j, rg.first, rg.count, rg.solo, serial++)) {
                     fprintf(stderr, "cannot start a child: %s\n", strerror(errno));
@@ -663,7 +740,12 @@ int main(int argc, char **argv)
         return run_child(argv[3], (uint32_t)strtoul(argv[4], NULL, 10), (uint32_t)strtoul(argv[5], NULL, 10),
                          (uint32_t)strtoul(argv[6], NULL, 10));
     }
-    opts o = { .chunk = 64, .jobs = 4, .threads = 1, .timeout = 180, .work = "compile-check-work" };
+#if defined(__ANDROID__)
+    const uint32_t reserve_mb = 4096;
+#else
+    const uint32_t reserve_mb = 2048;
+#endif
+    opts o = { .chunk = 64, .jobs = 4, .threads = 1, .timeout = 180, .work = "compile-check-work", .reserve_mb = reserve_mb };
     char dir[1300];
     bool selftest = false;
     for (int i = 1; i < argc; i++) {
@@ -681,6 +763,8 @@ int main(int argc, char **argv)
             o.threads = number(a, argv[++i], 1, MAX_THREADS);
         else if (!strcmp(a, "--timeout") && has)
             o.timeout = number(a, argv[++i], 1, 86400);
+        else if (!strcmp(a, "--reserve-mb") && has)
+            o.reserve_mb = number(a, argv[++i], 0, 1u << 20);
         else if (!strcmp(a, "--self-test"))
             selftest = true;
         else if (a[0] != '-' && !o.dir)
@@ -688,7 +772,7 @@ int main(int argc, char **argv)
         else {
             fprintf(stderr,
                     "usage: %s TABLE_DIR [--device DEVICE_JSON] [--chunk N] [--jobs N] [--threads N] [--timeout S] "
-                    "[--work DIR]\n",
+                    "[--reserve-mb M] [--work DIR]\n",
                     argv[0]);
             return 2;
         }
@@ -697,7 +781,7 @@ int main(int argc, char **argv)
         return self_test(&o);
     if (!o.dir) {
         fprintf(stderr, "usage: %s TABLE_DIR [--device DEVICE_JSON] [--chunk N] [--jobs N] [--threads N] [--timeout S] "
-                        "[--work DIR]\n", argv[0]);
+                        "[--reserve-mb M] [--work DIR]\n", argv[0]);
         return 2;
     }
     char tp[1300];

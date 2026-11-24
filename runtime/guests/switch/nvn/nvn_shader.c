@@ -21,7 +21,10 @@
  * gpu.math setting at native the run reads table-native.rlspv,
  * table-native.rlspi and table-native.stamp instead, translated with the
  * host GPU's own float math, whose stamp is the expected one with -native
- * after it. pick_tables is the one place that choice is made.
+ * after it. pick_tables is the one place that choice is made. The folder's
+ * table.device, the device.json of the device the tables were made for, must
+ * offer nothing this run's device lacks (nvn_fit.c): a table made for one
+ * driver can use features another driver of the same GPU does not have.
  *
  * With the translator linked (nvn_xlate.c), tables that do not fit the device and translator are made again on the
  * device, and every read of a table waits for that first.
@@ -149,7 +152,7 @@ static rl_nvn_table_maker g_table_maker;
 static const char *g_expected_stamp;
 /** @brief 0 not checked yet, 1 the stamp is accepted, 2 it is not. */
 static int g_stamp_state;
-static char g_stamp_why[512];
+static char g_stamp_why[3072];
 
 void rl_nvn_set_table_stamp(const char *stamp)
 {
@@ -251,6 +254,81 @@ static bool read_stamp(char *out, size_t size)
     return n > 0;
 }
 
+/** @brief The text of file path (malloc'd, NUL-terminated), or NULL when it cannot be read. */
+static char *read_text(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    size_t len = 0, cap = 4096;
+    char *b = malloc(cap);
+    while (b) {
+        len += fread(b + len, 1, cap - len - 1, f);
+        if (len < cap - 1)
+            break;
+        char *nb = realloc(b, cap * 2);
+        if (!nb) {
+            free(b);
+            b = NULL;
+            break;
+        }
+        b = nb;
+        cap *= 2;
+    }
+    fclose(f);
+    if (b)
+        b[len] = 0;
+    return b;
+}
+
+/**
+ * @brief Checks the table folder's table.device against this run's device.json (nvn_fit_compare), with g_lock held:
+ * false, with the report in g_stamp_why, when the tables' device offered something this one lacks, unless
+ * RELIFT_NVN_TABLE_DEVICE=allow, which logs a warning instead. A folder without table.device, or a run that wrote no
+ * device.json, is not checked.
+ */
+static bool device_check_locked(const char *dir)
+{
+    char path[1200];
+    snprintf(path, sizeof path, "%s/table.device", dir);
+    char *theirs = read_text(path);
+    if (!theirs) {
+        rl_log(RL_LOG_INFO, "nvn", "the shader tables in %s do not name the device they were made for (no table.device)",
+               dir);
+        return true;
+    }
+    snprintf(path, sizeof path, "%s/device.json", nvn_shader_dir());
+    char *mine = read_text(path);
+    if (!mine) {
+        free(theirs);
+        return true;
+    }
+    nvn_fit *fit = calloc(1, sizeof *fit);
+    bool ok = true;
+    if (fit && nvn_fit_compare(theirs, mine, fit)) {
+        snprintf(g_stamp_why, sizeof g_stamp_why,
+                 "the shader tables in %s were made for %s, which offers what this device, %s, lacks: %s. The driver "
+                 "refuses or crashes on programs that use it. Make the tables for this run's %s (relift shaders, or "
+                 "the on-device translation), or run on the driver the tables were made for; "
+                 "RELIFT_NVN_TABLE_DEVICE=allow runs them anyway, for a deliberate test",
+                 dir, fit->table_device, fit->this_device, fit->missing, path);
+        const char *allow = getenv("RELIFT_NVN_TABLE_DEVICE");
+        if (allow && !strcmp(allow, "allow"))
+            rl_log(RL_LOG_WARN, "nvn", "%s (allowed by RELIFT_NVN_TABLE_DEVICE=allow)", g_stamp_why);
+        else {
+            rl_log(RL_LOG_ERROR, "nvn", "%s", g_stamp_why);
+            ok = false;
+        }
+    } else if (fit && fit->other_count) {
+        rl_log(RL_LOG_INFO, "nvn", "the shader tables were made for %s; this device is %s, which offers all they use "
+               "(%u other differences: %s)", fit->table_device, fit->this_device, fit->other_count, fit->other);
+    }
+    free(fit);
+    free(theirs);
+    free(mine);
+    return ok;
+}
+
 bool nvn_shader_stamp_check(char *why, size_t why_n)
 {
     pick_tables();
@@ -307,6 +385,8 @@ bool nvn_shader_stamp_check(char *why, size_t why_n)
                 rl_log(RL_LOG_ERROR, "nvn", "%s", g_stamp_why);
             }
         }
+        if (g_stamp_state == 1 && !device_check_locked(dir))
+            g_stamp_state = 2;
     }
     bool ok = g_stamp_state == 1;
     if (!ok && why && why_n)

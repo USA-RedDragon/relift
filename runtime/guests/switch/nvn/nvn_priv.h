@@ -557,6 +557,12 @@ void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control);
  */
 bool nvn_warm_check(const char *key, char *why, size_t why_n);
 /**
+ * @brief How many more compile-check children may start (relift_compile_check): with avail bytes of memory available
+ * (already less what the running children will still grow by), at least reserve bytes kept free, and a child's
+ * measured footprint (0 before one is measured, when only a first child may run), up to wanted children in all.
+ */
+uint32_t nvn_check_children_fit(uint64_t avail, uint64_t reserve, uint64_t footprint, uint32_t running, uint32_t wanted);
+/**
  * @brief The warning for count memory mappings of the limit vm.max_map_count allows, written to buf (n bytes), when
  * count is at three quarters of limit or more; false (buf untouched) otherwise or when limit is 0. forced is the
  * RELIFT_WARM_THREADS count, 0 when unset.
@@ -614,9 +620,28 @@ bool nvn_shader_table_hash(char hex[65]);
 /**
  * @brief Whether the shader tables were made by the translator the build expects (see rl_nvn_set_table_stamp). The
  * first call logs the table's stamp; a mismatch, or a table with no stamp, is false with the report in why, unless
- * RELIFT_NVN_TABLE_STAMP=allow, which logs a warning instead. True when the build expects no stamp.
+ * RELIFT_NVN_TABLE_STAMP=allow, which logs a warning instead. True when the build expects no stamp. Then the tables'
+ * device (table.device) must offer nothing this run's device.json lacks (nvn_fit_compare), else false with the
+ * missing features in why, unless RELIFT_NVN_TABLE_DEVICE=allow.
  */
 bool nvn_shader_stamp_check(char *why, size_t why_n);
+/** @brief How a table's device (its table.device) and this run's device (its device.json) compare (nvn_fit.c). */
+typedef struct nvn_fit {
+    /** @brief What the table's device offered that this one lacks, as a list, and how many. */
+    char missing[1024];
+    unsigned missing_count;
+    /** @brief The other differences, which do not stop a run, and how many. */
+    char other[1024];
+    unsigned other_count;
+    /** @brief Each device's name and driver, as "<name> (<driver>)". */
+    char table_device[200], this_device[200];
+} nvn_fit;
+/**
+ * @brief Compares the device description a table was made for (table_json) with this run's (device_json), both the
+ * JSON nvn_vk.c writes to device.json, into out; returns out->missing_count, the features, extensions, subgroup
+ * stages or operations and limits the table's device had that this one lacks (see nvn_fit.c).
+ */
+unsigned nvn_fit_compare(const char *table_json, const char *device_json, nvn_fit *out);
 /** @brief The run reads the native-math shader tables (gpu.math is native). */
 bool nvn_shader_math_native(void);
 /** @brief Picks the tables again at their next use, from the gpu.math setting then (for tests: a run picks once). */

@@ -709,3 +709,13 @@ void nvn_warm_program(const uint8_t *mem, uint64_t code, uint64_t control)
     pthread_cond_signal(&W.cv);
     pthread_mutex_unlock(&W.lock);
 }
+
+uint32_t nvn_check_children_fit(uint64_t avail, uint64_t reserve, uint64_t footprint, uint32_t running, uint32_t wanted)
+{
+    if (running >= wanted || avail < reserve)
+        return 0;
+    if (!footprint)
+        return running ? 0 : 1;
+    uint64_t n = (avail - reserve) / footprint;
+    return n < wanted - running ? (uint32_t)n : wanted - running;
+}
