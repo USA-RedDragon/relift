@@ -131,6 +131,37 @@ pub const RECORD_IMAGE_BINDING: u32 = 12;
 /// buffer of the word count in the second field (set 3, binding
 /// `TRACE_BINDING`; see `relift_gpu_nv::translate::Trace`).
 pub const RECORD_TRACE: u32 = 13;
+/// An interface record: the CUDA kernel declares the static shared memory
+/// bytes in the second field (its cubin's `.nv.shared` section); a launch
+/// gives it these plus the launch's dynamic shared bytes. The third field
+/// is the bytes its constant shared accesses reach past them
+/// (`Interface::shared_beyond_declared`; 0 when they fit).
+pub const RECORD_SHARED_DECLARED: u32 = 14;
+
+/// The static shared bytes of each CUDA kernel's program, from the scan's
+/// kernels JSON (empty for none).
+fn kernel_shared(json: &[u8]) -> Result<HashMap<[u8; 32], u32>, BoxError> {
+    let mut out = HashMap::new();
+    if json.is_empty() {
+        return Ok(out);
+    }
+    let v: serde_json::Value =
+        serde_json::from_slice(json).map_err(|e| format!("{}: {e}", pack::KERNELS))?;
+    for k in v.as_array().into_iter().flatten() {
+        let key = k
+            .get("program")
+            .and_then(|p| p.as_str())
+            .and_then(|s| hex_key(&format!("{s}.bin")));
+        let shared = k
+            .get("shared")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok());
+        if let (Some(key), Some(shared)) = (key, shared) {
+            out.insert(key, shared);
+        }
+    }
+    Ok(out)
+}
 
 /// Trace mode for some programs of a table (`relift shaders --trace`): the
 /// programs whose key starts with one of `keys`, translated with `spec`.
@@ -376,6 +407,9 @@ pub struct Translator {
     /// Each capturing program's transform feedback layout (the scan's
     /// `xfb.json`).
     xfb: HashMap<[u8; 32], XfbLayout>,
+    /// Static shared bytes of each CUDA kernel's program (the scan's
+    /// `kernels.json`).
+    shared: HashMap<[u8; 32], u32>,
     math: Math,
     trace: Option<TraceSel>,
 }
@@ -403,10 +437,12 @@ impl Translator {
         let host = host_of(device)?;
         let pipes = mesh::Pipelines::read(programs, &host)?;
         let xfb = xfb_layouts(programs.xfb())?;
+        let shared = kernel_shared(programs.kernels())?;
         Ok(Translator {
             host,
             pipes,
             xfb,
+            shared,
             math,
             trace: None,
         })
@@ -445,6 +481,7 @@ impl Translator {
                     math: self.math,
                     trace: self.trace.as_ref().and_then(|t| t.of(&key)),
                     xfb: self.xfb.get(&key).cloned(),
+                    shared_declared: self.shared.get(&key).copied(),
                     ..self.pipes.options(&key)
                 },
             }],
@@ -793,6 +830,9 @@ pub fn records(i: &Interface) -> Vec<[u32; 4]> {
     if i.trace_words != 0 {
         recs.push([RECORD_TRACE, i.trace_words, 0, 0]);
     }
+    if let Some(d) = i.shared_declared {
+        recs.push([RECORD_SHARED_DECLARED, d, i.shared_beyond_declared, 0]);
+    }
     let first_image = image_binding(ImageKind::Float, ImageDim::D1);
     for &b in i.texture_bindings.range(first_image..) {
         recs.push([RECORD_IMAGE_BINDING, b, 0, 0]);
@@ -860,6 +900,24 @@ pub(crate) mod tests {
             "decode at _ _ form"
         );
         assert_eq!(reason_kind("no end"), "no end");
+    }
+
+    #[test]
+    fn a_kernel_s_declared_shared_size_is_recorded() {
+        let mut i = Interface::default();
+        assert!(records(&i).iter().all(|r| r[0] != RECORD_SHARED_DECLARED));
+        i.shared_declared = Some(0x6000);
+        i.shared_beyond_declared = 4;
+        assert!(records(&i).contains(&[RECORD_SHARED_DECLARED, 0x6000, 4, 0]));
+        let key = [7u8; 32];
+        let json = format!(
+            r#"[{{"name": "k", "program": "{}", "shared": 24576}}, {{"name": "x"}}]"#,
+            hex(&key)
+        );
+        let m = kernel_shared(json.as_bytes()).unwrap();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.get(&key), Some(&0x6000));
+        assert!(kernel_shared(b"").unwrap().is_empty());
     }
 
     #[test]

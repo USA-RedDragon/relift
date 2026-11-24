@@ -674,6 +674,12 @@ void nvn_shader_helper_key(const char *kind, const char *key, char helper_key[65
  * words at set NVN_TRACE_SET binding NVN_TRACE_BINDING (the translator's TRACE_BINDING in GUEST_MEMORY_SET).
  */
 #define NVN_IFACE_TRACE 13u
+/**
+ * @brief Record kind: a CUDA kernel declares `bank` bytes of static shared memory (its cubin's .nv.shared section; a
+ * launch adds its dynamic shared bytes), and its constant shared accesses reach `offset` bytes past them (0 when they
+ * fit).
+ */
+#define NVN_IFACE_SHARED_DECLARED 14u
 /** @brief The descriptor set and binding of a trace-mode translation's trace buffer. */
 #define NVN_TRACE_SET 3u
 #define NVN_TRACE_BINDING 7u

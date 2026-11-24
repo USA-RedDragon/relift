@@ -39,6 +39,9 @@ typedef struct nvn_module {
     bool mesh_buffer;
     /** @brief Words of its trace buffer (NVN_IFACE_TRACE); 0 for a translation not in trace mode. */
     uint32_t trace_words;
+    /** @brief A CUDA kernel's static shared bytes (NVN_IFACE_SHARED_DECLARED), when has_shared_declared. */
+    uint32_t shared_declared;
+    bool has_shared_declared;
     /**
      * @brief Storage buffer slots (bit k: slot k of its stage, from its interface records) the program reaches through
      * element k of its stage's slot array (set 1 binding nvn_slot_binding(stage)) instead of a buffer device address.
@@ -199,4 +202,12 @@ void nvn_xfb_pack(const nvn_module *m, const uint8_t *scratch, uint32_t slots, u
                   uint32_t count[4]);
 /** @brief The module of the program bound to stage s (nvn_draw.c); NULL when it cannot be had (the replay stopped). */
 const nvn_module *nvn_draw_module(replay *r, uint32_t s);
+/**
+ * @brief The shared memory words a launch of CUDA kernel m gives it, for its translation's SHARED_SPEC, as the CUDA
+ * driver sizes it: the static bytes its cubin declares (NVN_IFACE_SHARED_DECLARED) plus the launch's dynamic bytes,
+ * rounded up to a word, at least one word. False when m has no declared size (not a CUDA kernel's translation, or a
+ * table from before the record) or the total is more than limit bytes, the device's maxComputeSharedMemorySize.
+ */
+bool nvn_cuda_shared_words(const nvn_module *m, uint32_t dynamic, uint32_t limit, uint32_t *words);
+
 #endif

@@ -707,6 +707,13 @@ nvn_module *nvn_module_get(const char key[65], int stage, char *why, size_t why_
             m->xfb_mask |= 1u << m->recs[i].bank;
             m->xfb_stride[m->recs[i].bank] = m->recs[i].offset;
         }
+        if (m->recs[i].kind == NVN_IFACE_SHARED_DECLARED) {
+            m->shared_declared = m->recs[i].bank;
+            m->has_shared_declared = true;
+            if (m->recs[i].offset)
+                rl_log(RL_LOG_WARN, "nvn", "translation %s: constant shared accesses reach %u bytes past the %u it declares",
+                       key, m->recs[i].offset, m->recs[i].bank);
+        }
         if (m->recs[i].kind == NVN_IFACE_STORAGE_SLOT && m->recs[i].bank < NVN_STORAGE_SLOTS)
             m->storage_slots |= 1u << m->recs[i].bank;
         if (m->recs[i].kind == NVN_IFACE_IMAGE_BINDING && !nvn_texset_declares_image(m->recs[i].bank)) {
@@ -777,4 +784,15 @@ void nvn_module_default_spec(const nvn_module *m, uint32_t *n, VkSpecializationM
                                                                                                        : 0u;
         }
     }
+}
+
+bool nvn_cuda_shared_words(const nvn_module *m, uint32_t dynamic, uint32_t limit, uint32_t *words)
+{
+    if (!m->has_shared_declared)
+        return false;
+    uint64_t bytes = (uint64_t)m->shared_declared + dynamic;
+    if (bytes > limit)
+        return false;
+    *words = bytes ? (uint32_t)((bytes + 3u) / 4u) : 1u;
+    return true;
 }

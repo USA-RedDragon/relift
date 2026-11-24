@@ -134,6 +134,10 @@ pub struct Report {
     /// Transform feedback layouts, unique: [`crate::xfb::layout`] with the
     /// program's SHA-256 (hex) as `"program"`.
     pub xfb: Vec<Value>,
+    /// CUDA kernels, unique: `{"name", "program", "shared"}` each, the
+    /// kernel's symbol, its program's SHA-256 (hex) and its static shared
+    /// bytes (see [`crate::cubin::Kernel::shared_bytes`]).
+    pub kernels: Vec<Value>,
     /// Counters.
     pub stats: Stats,
 }
@@ -147,6 +151,11 @@ impl Report {
     /// The transform feedback layouts, as `xfb.json` holds them.
     pub fn xfb_json(&self) -> Value {
         Value::Array(self.xfb.clone())
+    }
+
+    /// The CUDA kernels, as `kernels.json` holds them.
+    pub fn kernels_json(&self) -> Value {
+        Value::Array(self.kernels.clone())
     }
 
     /// The manifest: per program SHA-256 its kind, stage, sizes, count and
@@ -195,6 +204,7 @@ struct Out {
     errors: Vec<(String, String)>,
     meshes: Vec<Value>,
     xfb: Vec<Value>,
+    kernels: Vec<Value>,
 }
 
 impl Out {
@@ -226,6 +236,7 @@ impl Out {
         self.errors.extend(o.errors);
         self.meshes.extend(o.meshes);
         self.xfb.extend(o.xfb);
+        self.kernels.extend(o.kernels);
     }
 
     fn error(&mut self, msg: String, at: &str) {
@@ -238,7 +249,7 @@ impl Out {
             .iter()
             .map(|(sha, p)| json!([sha, p.kind.name(), p.stage, p.sph, p.size, p.n, p.srcs]))
             .collect();
-        json!({"v": CACHE_VERSION, "programs": programs, "containers": self.containers, "errors": self.errors, "meshes": self.meshes, "xfb": self.xfb})
+        json!({"v": CACHE_VERSION, "programs": programs, "containers": self.containers, "errors": self.errors, "meshes": self.meshes, "xfb": self.xfb, "kernels": self.kernels})
     }
 
     fn from_json(v: &Value) -> Option<Out> {
@@ -278,6 +289,7 @@ impl Out {
         }
         out.meshes = v.get("meshes")?.as_array()?.clone();
         out.xfb = v.get("xfb")?.as_array()?.clone();
+        out.kernels = v.get("kernels")?.as_array()?.clone();
         Some(out)
     }
 }
@@ -401,6 +413,7 @@ impl Ctx<'_> {
                     out.error(format!("cubin: not linked into the kernel: {u}"), &src);
                 }
                 self.program(out, &src, &k.code, Kind::Compute, 0, 0)?;
+                out.kernels.push(json!({"name": k.name, "program": sha256_hex(&k.code), "shared": k.shared_bytes}));
             }
         }
         for f in carve::carve(b) {
@@ -736,6 +749,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         }
         report.meshes.extend(out.meshes);
         report.xfb.extend(out.xfb);
+        report.kernels.extend(out.kernels);
         for (msg, at) in out.errors {
             add_error(&mut report, msg, at);
         }
@@ -744,6 +758,8 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
     report.meshes.dedup();
     report.xfb.sort_by_key(Value::to_string);
     report.xfb.dedup();
+    report.kernels.sort_by_key(Value::to_string);
+    report.kernels.dedup();
     report.stats = Stats {
         files: files.len() as u64,
         jobs: jobs.len() as u64,

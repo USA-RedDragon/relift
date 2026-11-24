@@ -406,3 +406,22 @@ TEST(nvn_a_geometry_program_runs_after_triangles_only)
     for (uint32_t mode = 10; mode <= NVN_DRAW_PATCHES; mode++)
         CHECK(!nvn_draw_geometry_input_ok(mode));
 }
+
+TEST(nvn_a_cuda_launch_gets_the_declared_static_shared_memory_plus_the_dynamic)
+{
+    nvn_module m;
+    memset(&m, 0, sizeof m);
+    uint32_t words = 0;
+    CHECK(!nvn_cuda_shared_words(&m, 0, 49152, &words));
+    m.shared_declared = 0x6000;
+    m.has_shared_declared = true;
+    CHECK(nvn_cuda_shared_words(&m, 0, 49152, &words));
+    CHECK_EQ(words, 0x1800u);
+    CHECK(nvn_cuda_shared_words(&m, 6, 49152, &words));
+    CHECK_EQ(words, 0x1802u);
+    CHECK(!nvn_cuda_shared_words(&m, 0x6001, 49152, &words));
+    m.shared_declared = 0;
+    CHECK(nvn_cuda_shared_words(&m, 0, 49152, &words));
+    CHECK_EQ(words, 1u);
+    CHECK(!nvn_cuda_shared_words(&m, UINT32_MAX, 49152, &words));
+}
