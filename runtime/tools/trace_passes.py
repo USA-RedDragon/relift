@@ -143,7 +143,7 @@ def report_frame(frame, args, rows_out):
                 vol = ((box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2])) / float(dims[0] * dims[1] * dims[2])
                 bs += " (%.0f%% of texels)" % (100 * vol)
             else:
-                bs = "no change recorded" if box == "same" else "changed texels unknown"
+                bs = "unchanged (pre and post identical; traces from before the image-flag fix always show this for compute-written images)" if box == "same" else "changed texels unknown"
             key = ("dispatch", ext, dims)
             msg = "extent %s  image %s  coverage %s  %s" % (
                 fmt_dim(*ext), fmt_dim(*dims), "/".join("%.0f%%" % (100 * c) for c in cov), bs)

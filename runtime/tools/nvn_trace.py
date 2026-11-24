@@ -44,11 +44,14 @@ def small_float(bits, mant):
 
 
 def load(frame):
+    """The draws and dispatches of a frame; the raw command lines (kind cmd) carry no programs or number."""
     cmds = []
     with open(os.path.join(frame, "trace.jsonl")) as f:
         for line in f:
             if line.strip():
-                cmds.append(json.loads(line))
+                c = json.loads(line)
+                if c.get("kind") in ("draw", "dispatch"):
+                    cmds.append(c)
     return cmds
 
 
