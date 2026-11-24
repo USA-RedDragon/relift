@@ -4,7 +4,8 @@
  * picture.filter and in a turned swapchain, and, on a host whose Vulkan has headless surfaces, frames
  * shown through a real swapchain: placed and scaled as planned, sharp
  * bilinear blending only at pixel edges, the surface let go and made again,
- * a resize making a new swapchain, and a caller never waiting on the display.
+ * a resize making a new swapchain, a caller never waiting on the display, and present.capture writing the
+ * swapchain image the window shows.
  * The swapchain test runs on lavapipe (VK_LOADER_DRIVERS_SELECT), whose
  * queues present to headless surfaces as GPU drivers' may not.
  */
@@ -19,10 +20,27 @@
 #include <relift/settings.h>
 #include <relift/window.h>
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+TEST(present_capture_picks_every_nth_draw_of_the_frames_in_its_window)
+{
+    CHECK(rl_present_capture_due(1, 1, 1, 0, 0));
+    CHECK(rl_present_capture_due(7, 3, 1, 0, 0));
+    CHECK(rl_present_capture_due(1, 1, 3, 0, 0));
+    CHECK(!rl_present_capture_due(2, 1, 3, 0, 0));
+    CHECK(rl_present_capture_due(4, 2, 3, 0, 0));
+    CHECK(!rl_present_capture_due(40, 4, 1, 5, 8));
+    CHECK(rl_present_capture_due(41, 5, 1, 5, 8));
+    CHECK(rl_present_capture_due(42, 5, 1, 5, 8));
+    CHECK(rl_present_capture_due(60, 7, 1, 5, 8));
+    CHECK(!rl_present_capture_due(61, 8, 1, 5, 8));
+    CHECK(rl_present_capture_due(43, 6, 2, 5, 8));
+    CHECK(!rl_present_capture_due(44, 6, 2, 5, 8));
+}
 
 TEST(present_place_integer_and_fill)
 {
@@ -521,6 +539,132 @@ TEST(a_still_taken_away_before_the_first_frame_lets_the_frame_through)
     rl_window_set_backend(&g_headless);
     int failures = 0;
     CHECK_EQ(rl_window_main(still_body, &failures), 0);
+    CHECK_EQ(failures, 0);
+    rl_window_set_backend(NULL);
+    rl_settings_reset();
+}
+
+/** @brief The capture folder of the present.capture test, under TMPDIR. */
+static const char *pc_folder(void)
+{
+    static char dir[512];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/relift-present-capture-%d/sub", tmp && *tmp ? tmp : ".", (int)getpid());
+    return dir;
+}
+
+/**
+ * @brief Reads a PNG that rl_png_write_rgb wrote (8-bit RGB, one IDAT of stored deflate blocks, no row filters) into
+ * RGBA rows; NULL when it is not one.
+ */
+static uint8_t *pc_load(const char *path, uint32_t *w, uint32_t *h)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *b = malloc((size_t)n);
+    bool ok = b && fread(b, 1, (size_t)n, f) == (size_t)n;
+    fclose(f);
+    uint8_t *out = NULL;
+#define BE32(q) ((uint32_t)(q)[0] << 24 | (uint32_t)(q)[1] << 16 | (uint32_t)(q)[2] << 8 | (q)[3])
+    if (ok && n > 33 && !memcmp(b, "\x89PNG", 4) && !memcmp(b + 12, "IHDR", 4) && b[24] == 8 && b[25] == 2) {
+        *w = BE32(b + 16);
+        *h = BE32(b + 20);
+        size_t at = 33;
+        while (at + 8 <= (size_t)n && memcmp(b + at + 4, "IDAT", 4))
+            at += 12 + BE32(b + at);
+        size_t row = 1 + (size_t)*w * 3, raw = row * *h, got = 0;
+        uint8_t *rows = malloc(raw);
+        if (rows && at + 8 <= (size_t)n) {
+            const uint8_t *z = b + at + 8 + 2;
+            while (got < raw) {
+                size_t len = (size_t)z[1] | (size_t)z[2] << 8;
+                memcpy(rows + got, z + 5, len);
+                got += len;
+                z += 5 + len;
+            }
+            out = malloc((size_t)*w * *h * 4);
+            for (uint32_t y = 0; out && y < *h; y++)
+                for (uint32_t x = 0; x < *w; x++) {
+                    uint8_t *d = out + ((size_t)y * *w + x) * 4;
+                    memcpy(d, rows + y * row + 1 + x * 3, 3);
+                    d[3] = 255;
+                }
+        }
+        free(rows);
+    }
+#undef BE32
+    free(b);
+    return out;
+}
+
+/** @brief present.capture writes each draw as a PNG equal to the image the presenter read back for the same draw. */
+static int capture_body(void *arg)
+{
+    int *failures = arg;
+    rl_present *p = rl_present_open(&g_win);
+    if (!p) {
+        printf("    (no Vulkan with headless surfaces: the swapchain is not run)\n");
+        return 0;
+    }
+    rl_settings_set("picture.filter", "integer");
+    uint32_t w = 0, h = 0;
+    uint8_t *img = capture(p, &w, &h);
+    EXPECT(img && w == 300 && h == 200);
+    rl_present_close(p);
+    char name[256] = "", best[1024] = "";
+    DIR *dir = opendir(pc_folder());
+    EXPECT(dir != NULL);
+    for (struct dirent *e; dir && (e = readdir(dir));)
+        if (!strncmp(e->d_name, "present-", 8) && strcmp(e->d_name, name) > 0)
+            snprintf(name, sizeof name, "%s", e->d_name);
+    if (dir)
+        closedir(dir);
+    if (name[0])
+        snprintf(best, sizeof best, "%s/%s", pc_folder(), name);
+    EXPECT(best[0]);
+    uint32_t pw = 0, ph = 0;
+    uint8_t *png = best[0] ? pc_load(best, &pw, &ph) : NULL;
+    EXPECT(png && pw == w && ph == h);
+    if (img && png && pw == w && ph == h) {
+        bool equal = true;
+        for (size_t i = 0; i < (size_t)w * h; i++)
+            equal = equal && !memcmp(img + i * 4, png + i * 4, 3);
+        EXPECT(equal);
+    }
+    free(png);
+    free(img);
+    dir = opendir(pc_folder());
+    for (struct dirent *e; dir && (e = readdir(dir));)
+        if (!strncmp(e->d_name, "present-", 8)) {
+            char path[1024];
+            snprintf(path, sizeof path, "%s/%s", pc_folder(), e->d_name);
+            unlink(path);
+        }
+    if (dir)
+        closedir(dir);
+    char parent[512];
+    snprintf(parent, sizeof parent, "%s", pc_folder());
+    rmdir(parent);
+    *strrchr(parent, '/') = 0;
+    rmdir(parent);
+    return 0;
+}
+
+TEST(present_capture_writes_the_swapchain_image_the_window_shows)
+{
+    setenv("VK_LOADER_DRIVERS_SELECT", "*lvp*", 0);
+    unsetenv(RL_WINDOW_ENV);
+    rl_settings_reset();
+    rl_settings_declare_runtime();
+    CHECK(rl_settings_set("present.capture", pc_folder()) == RL_SETTING_OK);
+    g_win.b = &g_headless;
+    rl_window_set_backend(&g_headless);
+    int failures = 0;
+    CHECK_EQ(rl_window_main(capture_body, &failures), 0);
     CHECK_EQ(failures, 0);
     rl_window_set_backend(NULL);
     rl_settings_reset();

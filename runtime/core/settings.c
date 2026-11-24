@@ -226,6 +226,18 @@ static const rl_setting_def g_runtime_defs[] = {
         .env = "RELIFT_RENDERDOC_DIR",
     },
     {
+        .key = "present.capture",
+        .type = RL_SETTING_STRING,
+        .label = "Window capture (debugging)",
+        .description = "Debugging: <folder>[:<every>][:<from>-<to>] writes the window's pictures exactly as they reach "
+                       "the screen, after relift's scaling, picture passes and overlays, as "
+                       "<folder>/present-<frame>-d<draw>.png (frame: the number of the guest frame handed to the "
+                       "window; draw: the number of the swapchain image drawn, counting from 1), every <every>th draw "
+                       "(default 1), only draws of the frames from <from> to before <to> when given, with a log line "
+                       "each saying what the presenter drew. Each capture waits for the GPU. Empty: off",
+        .env = "RELIFT_PRESENT_CAPTURE",
+    },
+    {
         .key = "text_entry.text",
         .type = RL_SETTING_STRING,
         .label = "Typed text",

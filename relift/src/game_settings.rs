@@ -252,6 +252,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "present.capture",
+            "Window capture (debugging)",
+            "Debugging: <folder>[:<every>][:<from>-<to>] writes the window's pictures exactly as they reach the screen, after relift's scaling, picture passes and overlays, as <folder>/present-<frame>-d<draw>.png (frame: the number of the guest frame handed to the window; draw: the number of the swapchain image drawn, counting from 1), every <every>th draw (default 1), only draws of the frames from <from> to before <to> when given, with a log line each saying what the presenter drew. Each capture waits for the GPU. Empty: off",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "text_entry.text",
             "Typed text",
             "When set, the answer to every text the game asks for (a name, for one), given without showing the text entry panel. Empty: a run with a window and no input script shows the panel",
@@ -1161,7 +1168,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 37);
+        assert_eq!(section(Vec::new()).runtime.len(), 38);
     }
 
     #[test]

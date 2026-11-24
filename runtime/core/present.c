@@ -10,6 +10,7 @@
  * semaphore for the present to wait on.
  */
 #include "capture.h"
+#include "png.h"
 #include "present.h"
 
 #include <relift/post.h>
@@ -20,7 +21,15 @@
 #include "postgpu.h"
 #include "vkdev.h"
 
+#include <errno.h>
 #include <pthread.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#else
+#define MKDIR(p) mkdir((p), 0755)
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,6 +86,20 @@ struct rl_present {
     bool capture_want;
     uint8_t *captured;
     uint32_t cap_w, cap_h;
+    /** @brief Frames handed over (rl_present_frame, rl_present_slot_end) and swapchain images drawn, from 1. */
+    uint64_t received, work_number, draws;
+    /** @brief present.capture: its folder (empty: off), every how many draws, and the draw window [from, to). */
+    char pc_dir[1024];
+    uint64_t pc_every, pc_from, pc_to;
+    /** @brief What the draw being captured did, for its log line (record fills it). */
+    struct {
+        const char *source;
+        int slot;
+        int32_t src_format;
+        uint32_t fw, fh, cw, ch, sampling;
+        rl_present_rect at;
+        bool post, over, fresh;
+    } drew;
 
     uint8_t *still_next, *still;
     size_t still_next_cap, still_cap;
@@ -803,6 +826,17 @@ static bool record(rl_present *p, uint32_t index, bool capture)
     }
     int sampling = rl_post_sampling(cw, ch, at.w, at.h);
     bool sharp = sampling == RL_POST_SAMPLE_SHARP;
+    p->drew.source = still ? "still" : gpu ? "slot" : "host pixels";
+    p->drew.slot = gpu ? p->cur_slot : -1;
+    p->drew.src_format = gpu ? p->slots[p->cur_slot].im.format : src_format;
+    p->drew.fw = fw;
+    p->drew.fh = fh;
+    p->drew.cw = cw;
+    p->drew.ch = ch;
+    p->drew.sampling = (uint32_t)sampling;
+    p->drew.at = at;
+    p->drew.post = post;
+    p->drew.over = over;
     uint32_t kx = at.w / cw, ky = at.h / ch;
     kx = kx ? kx : 1;
     ky = ky ? ky : 1;
@@ -1070,6 +1104,91 @@ static void trace_queue(rlvk_handle swapchain, uint64_t id, uint64_t ready_ns, u
  * frame arrived) is not a failure of the surface: marking it one would stop every later draw, and the frames that follow
  * would never reach the window.
  */
+/**
+ * @brief Reads present.capture, `<folder>[:<every>][:<from>-<to>]` (from and to: frame numbers), into p (presenter
+ * thread). An unusable folder
+ * turns it off with a warning.
+ */
+static void pc_read(rl_present *p)
+{
+    const char *spec = rl_setting_str("present.capture");
+    p->pc_dir[0] = 0;
+    p->pc_every = 1;
+    p->pc_from = p->pc_to = 0;
+    if (!spec || !*spec)
+        return;
+    char buf[sizeof p->pc_dir];
+    snprintf(buf, sizeof buf, "%s", spec);
+    char *range = strrchr(buf, ':');
+    if (range && strchr(range, '-') && range != buf) {
+        unsigned long long a = 0, b = 0;
+        if (sscanf(range + 1, "%llu-%llu", &a, &b) == 2 && b > a) {
+            p->pc_from = a;
+            p->pc_to = b;
+            *range = 0;
+        }
+    }
+    char *every = strrchr(buf, ':');
+    if (every && every != buf && every[1] >= '0' && every[1] <= '9') {
+        char *end;
+        unsigned long long e = strtoull(every + 1, &end, 10);
+        if (!*end && e) {
+            p->pc_every = e;
+            *every = 0;
+        }
+    }
+    for (char *s = buf + 1; *s; s++)
+        if (*s == '/' || *s == '\\') {
+            char sep = *s;
+            *s = 0;
+            MKDIR(buf);
+            *s = sep;
+        }
+    if (MKDIR(buf) != 0 && errno != EEXIST) {
+        rl_log(RL_LOG_WARN, "present", "present.capture: cannot make the folder %s (%s); no captures", buf,
+               strerror(errno));
+        return;
+    }
+    memcpy(p->pc_dir, buf, sizeof buf);
+    rl_log(RL_LOG_INFO, "present", "present.capture: every %llu window pictures into %s",
+           (unsigned long long)p->pc_every, p->pc_dir);
+}
+
+bool rl_present_capture_due(uint64_t draw, uint64_t frame, uint64_t every, uint64_t from, uint64_t to)
+{
+    if (to && (frame < from || frame >= to))
+        return false;
+    return (draw - 1) % (every ? every : 1) == 0;
+}
+
+/**
+ * @brief Writes the swapchain image of draw number n, read back after relift's scaling and overlay pass, as
+ * present-<frame>-d<draw>.png (frame: the number of the frame handed over that it shows), and logs what was drawn.
+ */
+static void pc_write(rl_present *p, uint64_t n)
+{
+    rl_vkdev_buf_invalidate(p->d, &p->readback);
+    char path[sizeof p->pc_dir + 64];
+    snprintf(path, sizeof path, "%s/present-%06llu-d%06llu.png", p->pc_dir, (unsigned long long)p->work_number,
+             (unsigned long long)n);
+    bool bgra = p->sc_format == RLVK_FORMAT_B8G8R8A8_UNORM || p->sc_format == RLVK_FORMAT_B8G8R8A8_SRGB;
+    if (!rl_png_write_rgb(path, p->sc_w, p->sc_h, p->readback.map, (size_t)p->sc_w * 4, bgra)) {
+        rl_log(RL_LOG_ERROR, "present", "present.capture: cannot write %s", path);
+        return;
+    }
+    rl_log(RL_LOG_INFO, "present",
+           "present.capture %s: draw %llu, frame %llu (%s), swapchain %ux%u format %d; source %s %d, %ux%u format %d, "
+           "picture %ux%u%s, shown at %u,%u %ux%u (%s), overlay %s",
+           path, (unsigned long long)n, (unsigned long long)p->work_number, p->drew.fresh ? "new" : "drawn again",
+           p->sc_w, p->sc_h, p->sc_format, p->drew.source, p->drew.slot, p->drew.fw,
+           p->drew.fh, p->drew.src_format, p->drew.cw, p->drew.ch, p->drew.post ? " after the picture passes" : "",
+           p->drew.at.x, p->drew.at.y, p->drew.at.w, p->drew.at.h,
+           p->drew.sampling == RL_POST_SAMPLE_SHARP    ? "sharp bilinear"
+           : p->drew.sampling == RL_POST_SAMPLE_LINEAR ? "bilinear"
+                                                       : "nearest",
+           p->drew.over ? "on" : "off");
+}
+
 static bool draw(rl_present *p, bool capture)
 {
     const rlvk_dev *d = p->d;
@@ -1112,7 +1231,9 @@ static bool draw(rl_present *p, bool capture)
     if (r == RLVK_SUBOPTIMAL_KHR && caps_moved(p))
         p->stale = true;
     d->vkResetCommandBuffer(p->cmd, 0);
-    if (!record(p, index, capture)) {
+    uint64_t n = ++p->draws;
+    bool keep = p->pc_dir[0] && p->sc_readable && rl_present_capture_due(n, p->work_number, p->pc_every, p->pc_from, p->pc_to);
+    if (!record(p, index, capture || keep)) {
         drop_surface(p);
         p->create_failed = true;
         return false;
@@ -1166,10 +1287,12 @@ static bool draw(rl_present *p, bool capture)
     if (id && pr == RLVK_SUCCESS)
         trace_queue(p->swapchain, id, p->work_ready_ns, queued_ns);
     count_present(p, rl_clock_ns() - t0);
-    if (capture) {
+    if (capture || keep)
         d->vkWaitForFences(d->device, 1, &p->fence, 1, ~(uint64_t)0);
+    if (keep)
+        pc_write(p, n);
+    if (capture)
         keep_capture(p);
-    }
     return pr == RLVK_SUCCESS || pr == RLVK_SUBOPTIMAL_KHR;
 }
 
@@ -1221,6 +1344,7 @@ static void ov_poll(rl_present *p)
 static void *thread_main(void *arg)
 {
     rl_present *p = arg;
+    pc_read(p);
     pthread_mutex_lock(&p->lock);
     for (;;) {
         if (p->holds && (!p->surface_ok || p->quit)) {
@@ -1286,7 +1410,11 @@ static void *thread_main(void *arg)
                 p->work_fit = p->next_fit;
                 p->fresh = false;
                 p->work_ready_ns = p->next_ready_ns;
+                p->work_number = p->received;
                 p->have_frame = true;
+                p->drew.fresh = true;
+            } else {
+                p->drew.fresh = false;
             }
             bool capture = p->capture_want;
             p->ov_due = false;
@@ -1422,6 +1550,7 @@ void rl_present_frame(rl_present *p, const uint8_t *rgb, uint32_t width, uint32_
     p->next_sh = shown_h ? shown_h : height;
     p->next_fit = fit;
     p->fresh = true;
+    p->received++;
     p->next_ready_ns = rl_clock_ns();
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);
@@ -1490,6 +1619,7 @@ void rl_present_slot_end(rl_present *p, const rl_present_slot *s, uint32_t shown
     p->next_sh = shown_h ? shown_h : sl->im.h;
     p->next_fit = p->fit;
     p->fresh = true;
+    p->received++;
     p->next_ready_ns = rl_clock_ns();
     pthread_cond_broadcast(&p->cond);
     pthread_mutex_unlock(&p->lock);

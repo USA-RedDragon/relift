@@ -158,6 +158,12 @@ void rl_present_stats_get(rl_present *p, rl_present_stats *out);
  */
 uint8_t *rl_present_capture(rl_present *p, uint32_t timeout_ms, uint32_t *width, uint32_t *height);
 /**
+ * @brief Whether present.capture saves draw number draw (counting from 1), which shows handed-over frame number frame:
+ * every `every`th draw, and with a window [from, to) (to not 0) only draws of frames from `from` to before `to`, so
+ * the first and every redraw of those frames are kept.
+ */
+bool rl_present_capture_due(uint64_t draw, uint64_t frame, uint64_t every, uint64_t from, uint64_t to);
+/**
  * @brief The picture the window shows now, upright (the window's own orientation, whatever turn the swapchain
  * takes), as RGBA8 rows of *width words; waits at most timeout_ms. A malloc'd buffer the caller frees, or NULL.
  */
