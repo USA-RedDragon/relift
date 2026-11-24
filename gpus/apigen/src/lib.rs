@@ -1,7 +1,7 @@
 //! relift-gpu-apigen: generates the GPU-API forwarding of the runtime from
 //! the pinned Khronos registries, for each guest ABI ([`abi`]): Vulkan for
-//! the AArch64 guest (`runtime/gpuapi/vk/gen/`) and Vulkan for an
-//! i386 guest.
+//! the AArch64 guest (`runtime/gpuapi/vk/gen/`), and Vulkan, OpenGL,
+//! GLX and EGL for an i386 guest (`runtime/gpuapi/*/gen/i386/`).
 //!
 //! A guest that calls Vulkan through `vkGetInstanceProcAddr` gets guest
 //! addresses of thunks. Each thunk has the lifted-code signature, reads its
@@ -15,8 +15,10 @@
 pub mod abi;
 pub mod config;
 pub mod emit_c;
+pub mod emit_gl;
 pub mod emit_i386;
 pub mod emit_types;
+pub mod glreg;
 pub mod model;
 pub mod registry;
 pub mod select;
@@ -54,6 +56,75 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+fn pinned(file: &str, text: &str, sha: &str) -> Result<(), Error> {
+    let got = sha256_hex(text.as_bytes());
+    if !sha.is_empty() && got != sha {
+        return Err(Error(format!(
+            "{file} sha256 is {got}, the configuration pins {sha}"
+        )));
+    }
+    Ok(())
+}
+
+/// Generates every output file from the registry texts: the main registry
+/// first, then each `[[registry.extra]]` file in order.
+pub fn generate_from(files: &[String], cfg: &Config) -> Result<Vec<File>, Error> {
+    let main = if cfg.registry_file.is_empty() {
+        "vk.xml"
+    } else {
+        cfg.registry_file.as_str()
+    };
+    if files.len() != 1 + cfg.extra.len() {
+        return Err(Error(format!(
+            "{} registry files given, the configuration reads {}",
+            files.len(),
+            1 + cfg.extra.len()
+        )));
+    }
+    let xml = files[0].as_str();
+    if cfg.api.is_empty() || cfg.api == "vulkan" {
+        return generate(xml, cfg);
+    }
+    if cfg.abi != "i386" {
+        return Err(Error(format!(
+            "{} forwarding is only for an i386 guest",
+            cfg.api
+        )));
+    }
+    pinned(main, xml, &cfg.registry_sha256)?;
+    let mut api = glreg::Api::default();
+    glreg::read(
+        xml,
+        &cfg.xml_api,
+        &cfg.features,
+        &cfg.commands,
+        false,
+        &cfg.types,
+        &mut api,
+    )?;
+    for (e, t) in cfg.extra.iter().zip(&files[1..]) {
+        pinned(&e.file, t, &e.sha256)?;
+        glreg::read(
+            t,
+            &e.api,
+            &e.features,
+            &e.commands,
+            e.hand,
+            &cfg.types,
+            &mut api,
+        )?;
+    }
+    let name: &'static str = match cfg.api.as_str() {
+        "gl" => "gl.c",
+        "egl" => "egl.c",
+        a => return Err(Error(format!("unknown API {a}"))),
+    };
+    Ok(vec![File {
+        name,
+        text: emit_gl::emit(&api, cfg, &cfg.registry_tag)?,
+    }])
 }
 
 /// Generates every output file from vk.xml text. Refuses a registry whose

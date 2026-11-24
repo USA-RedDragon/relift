@@ -5,15 +5,16 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use relift_gpu_apigen::{Config, generate};
+use relift_gpu_apigen::{Config, generate_from};
 
-/// Generate the Switch runtime's Vulkan forwarding layer from vk.xml.
+/// Generate the GPU-API forwarding of the runtime from the Khronos registries.
 #[derive(Parser, Debug)]
 #[command(name = "relift-vkgen", version)]
 struct Cli {
-    /// The registry file (vk.xml at the pinned tag).
-    #[arg(long)]
-    xml: PathBuf,
+    /// The registry files at their pinned commits: the main one (vk.xml,
+    /// gl.xml or egl.xml), then each `[[registry.extra]]` file in order.
+    #[arg(long, required = true)]
+    xml: Vec<PathBuf>,
     /// Configuration files, merged in order (lists concatenate).
     #[arg(long, required = true)]
     config: Vec<PathBuf>,
@@ -32,9 +33,12 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
         cfg.merge(&text)
             .map_err(|e| format!("{}: {e}", c.display()))?;
     }
-    let xml =
-        std::fs::read_to_string(&cli.xml).map_err(|e| format!("{}: {e}", cli.xml.display()))?;
-    let files = generate(&xml, &cfg)?;
+    let mut xmls = Vec::new();
+    for x in &cli.xml {
+        let text = std::fs::read_to_string(x).map_err(|e| format!("{}: {e}", x.display()))?;
+        xmls.push(text);
+    }
+    let files = generate_from(&xmls, &cfg)?;
     let mut same = true;
     for f in files {
         let path = cli.out.join(f.name);

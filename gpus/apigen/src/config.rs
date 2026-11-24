@@ -6,12 +6,55 @@ use std::collections::BTreeMap;
 
 use crate::Error;
 
+/// A second registry file a target reads (`glx.xml` beside `gl.xml`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Extra {
+    /// The file name, matched against the `--xml` paths.
+    pub file: String,
+    /// Where CI downloads it from.
+    pub url: String,
+    /// Its sha256, lowercase hex.
+    pub sha256: String,
+    /// The registry's `api` attribute of the features to read (`glx`).
+    pub api: String,
+    /// The features to read.
+    pub features: Vec<String>,
+    /// Extension commands to read too.
+    pub commands: Vec<String>,
+    /// True when every command it selects is written by hand.
+    pub hand: bool,
+}
+
 /// The generator configuration. Several files merge: lists concatenate, and
 /// the registry pin and hooks of a later file win.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Config {
     /// The guest ABI the output is for (`a64` when no file names one).
     pub abi: String,
+    /// The forwarded API: `vulkan` (the default), `gl` or `egl`.
+    pub api: String,
+    /// The soname the guest links (OpenGL and EGL).
+    pub soname: String,
+    /// The host lookup function for commands the library does not export (`glXGetProcAddressARB`).
+    pub proc_address: String,
+    /// The registry file name, matched against the `--xml` paths (`vk.xml` when empty).
+    pub registry_file: String,
+    /// Further registry files.
+    pub extra: Vec<Extra>,
+    /// The registry's `api` attribute of the selected features (`gl`, `egl`).
+    pub xml_api: String,
+    /// Platform types the registry names but does not define, as C types (`EGLint = "int32_t"`).
+    pub types: BTreeMap<String, String>,
+    /// Pointer types the guest passes as integers (`EGLClientBuffer`).
+    pub as_integer: Vec<String>,
+    /// Element counts the registry lacks: `command.param` to a parameter name.
+    pub lens: BTreeMap<String, String>,
+    /// `void *` parameters that point at one pointer-sized integer (an X11 XID): `command.param`.
+    pub word_pointers: Vec<String>,
+    /// Pointer-sized list types terminated by a value at an even index (`EGLAttrib = "0x3038"`).
+    pub terminated: BTreeMap<String, String>,
+    /// GL parameters that hold a buffer offset while a buffer is bound: binding query to `command.param` list.
+    pub offsets: BTreeMap<String, Vec<String>>,
     /// The registry tag the output was generated from (`v1.4.363`).
     pub registry_tag: String,
     /// Where CI downloads vk.xml from.
@@ -22,6 +65,8 @@ pub struct Config {
     pub features: Vec<String>,
     /// Extensions the guest can see.
     pub extensions: Vec<String>,
+    /// Extension commands of an OpenGL-family registry to forward too.
+    pub commands: Vec<String>,
     /// Extensions only the runtime uses on the host: their commands are loaded, never given to the guest.
     pub host_extensions: Vec<String>,
     /// Commands whose thunk is written by hand (`vkh_<name>`).
@@ -70,7 +115,7 @@ fn map(t: &toml::Table, out: &mut BTreeMap<String, String>) -> Result<(), Error>
         out.insert(
             k.clone(),
             v.as_str()
-                .ok_or_else(|| Error(format!("hook {k} must name a function")))?
+                .ok_or_else(|| Error(format!("{k} must be a string")))?
                 .to_string(),
         );
     }
@@ -84,17 +129,27 @@ impl Config {
             .parse()
             .map_err(|e| Error(format!("configuration: {e}")))?;
         for key in t.keys() {
-            if !["target", "registry", "api", "thunks", "hooks"].contains(&key.as_str()) {
+            if !["target", "registry", "api", "thunks", "hooks", "types"].contains(&key.as_str()) {
                 return Err(Error(format!("configuration: unknown section [{key}]")));
             }
         }
-        if let Some(r) = table(&t, "target")?
-            && let Some(v) = r.get("abi")
-        {
-            self.abi = v
-                .as_str()
-                .ok_or_else(|| Error("target.abi must be a string".into()))?
-                .to_string();
+        if let Some(r) = table(&t, "target")? {
+            for (k, out) in [
+                ("abi", &mut self.abi),
+                ("api", &mut self.api),
+                ("soname", &mut self.soname),
+                ("proc_address", &mut self.proc_address),
+            ] {
+                if let Some(v) = r.get(k) {
+                    *out = v
+                        .as_str()
+                        .ok_or_else(|| Error(format!("target.{k} must be a string")))?
+                        .to_string();
+                }
+            }
+        }
+        if let Some(ty) = table(&t, "types")? {
+            map(ty, &mut self.types)?;
         }
         if let Some(r) = table(&t, "registry")? {
             let get = |k: &str| r.get(k).and_then(|v| v.as_str()).map(str::to_string);
@@ -107,16 +162,70 @@ impl Config {
             if let Some(v) = get("sha256") {
                 self.registry_sha256 = v.to_lowercase();
             }
+            if let Some(v) = get("file") {
+                self.registry_file = v;
+            }
+            if let Some(x) = r.get("extra") {
+                let a = x
+                    .as_array()
+                    .ok_or_else(|| Error("registry.extra must be a list of tables".into()))?;
+                for e in a {
+                    let e = e
+                        .as_table()
+                        .ok_or_else(|| Error("registry.extra must be a list of tables".into()))?;
+                    let get = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let mut x = Extra {
+                        file: get("file"),
+                        url: get("url"),
+                        sha256: get("sha256").to_lowercase(),
+                        api: get("api"),
+                        hand: e
+                            .get("hand")
+                            .and_then(toml::Value::as_bool)
+                            .unwrap_or(false),
+                        ..Extra::default()
+                    };
+                    strings(e, "features", &mut x.features)?;
+                    strings(e, "commands", &mut x.commands)?;
+                    self.extra.push(x);
+                }
+            }
         }
         if let Some(a) = table(&t, "api")? {
             strings(a, "features", &mut self.features)?;
             strings(a, "extensions", &mut self.extensions)?;
             strings(a, "host_extensions", &mut self.host_extensions)?;
+            strings(a, "commands", &mut self.commands)?;
+            if let Some(v) = a.get("name") {
+                self.xml_api = v
+                    .as_str()
+                    .ok_or_else(|| Error("api.name must be a string".into()))?
+                    .to_string();
+            }
         }
         if let Some(a) = table(&t, "thunks")? {
             strings(a, "hand_commands", &mut self.hand_commands)?;
             strings(a, "hand_structs", &mut self.hand_structs)?;
             strings(a, "drop_types", &mut self.drop_types)?;
+            strings(a, "as_integer", &mut self.as_integer)?;
+            strings(a, "word_pointers", &mut self.word_pointers)?;
+            if let Some(l) = table(a, "lens")? {
+                map(l, &mut self.lens)?;
+            }
+            if let Some(l) = table(a, "terminated")? {
+                map(l, &mut self.terminated)?;
+            }
+            if let Some(o) = table(a, "offsets")? {
+                for (k, v) in o {
+                    let mut list = Vec::new();
+                    let mut one = toml::Table::new();
+                    one.insert("v".into(), v.clone());
+                    strings(&one, "v", &mut list).map_err(|_| {
+                        Error(format!("thunks.offsets.{k} must be a list of strings"))
+                    })?;
+                    self.offsets.entry(k.clone()).or_default().extend(list);
+                }
+            }
         }
         if let Some(h) = table(&t, "hooks")? {
             if let Some(b) = table(h, "before")? {

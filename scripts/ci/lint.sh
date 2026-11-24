@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fmt, clippy, charter, the Android app's game data import logic (with javac),
-# generated docs and Vulkan forwarding, deny. The tests run in tests-*.sh.
+# generated docs and GPU-API forwarding, deny. The tests run in tests-*.sh.
 . "$(dirname "$0")/lib.sh"
 
 cargo fmt --all --check
@@ -30,12 +30,21 @@ cfg_root="$CI_WORK/configulator-$version"
   "$cfg_root/bin/configulator" --type Settings --sample --format toml --sample-file ../relift.example.toml --check
 )
 
-cfg=gpus/apigen/vkgen.toml
-url=$(sed -n 's/^url = "\(.*\)"$/\1/p' "$cfg")
-sum=$(sed -n 's/^sha256 = "\(.*\)"$/\1/p' "$cfg")
-fetch "$url" "$sum" "$CI_WORK/vk-$sum.xml"
-cargo run --locked -q -p relift-gpu-apigen -- --xml "$CI_WORK/vk-$sum.xml" --config "$cfg" --out runtime/gpuapi/vk/gen --check
-cargo run --locked -q -p relift-gpu-apigen -- --xml "$CI_WORK/vk-$sum.xml" --config gpus/apigen/vk-i386.toml --out runtime/gpuapi/vk/gen/i386 --check
+# Each relift-vkgen configuration against its committed output: the pinned
+# registry files (url and sha256 lines, main first, then each extra) are
+# fetched and passed in order.
+apigen_check() {
+  local cfg=$1 out=$2 xml=() url sum
+  while read -r url && read -r sum; do
+    fetch "$url" "$sum" "$CI_WORK/apigen-$sum.xml"
+    xml+=(--xml "$CI_WORK/apigen-$sum.xml")
+  done < <(sed -n 's/^\(url\|sha256\) = "\(.*\)"$/\2/p' "$cfg")
+  cargo run --locked -q -p relift-gpu-apigen -- "${xml[@]}" --config "$cfg" --out "$out" --check
+}
+apigen_check gpus/apigen/vkgen.toml runtime/gpuapi/vk/gen
+apigen_check gpus/apigen/vk-i386.toml runtime/gpuapi/vk/gen/i386
+apigen_check gpus/apigen/gl.toml runtime/gpuapi/gl/gen/i386
+apigen_check gpus/apigen/egl.toml runtime/gpuapi/egl/gen/i386
 
 name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
 dir="$CI_WORK/cargo-deny-$CARGO_DENY_VERSION"

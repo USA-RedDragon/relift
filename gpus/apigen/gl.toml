@@ -1,0 +1,80 @@
+# relift-vkgen configuration of OpenGL 1.0 to 2.1 (the compatibility API)
+# and GLX 1.4 for an i386 guest. The guest's libGL.so.1 calls go to the
+# host's libGL; commands libGL does not export are looked up through
+# glXGetProcAddressARB, as a program would.
+
+[target]
+abi = "i386"
+api = "gl"
+soname = "libGL.so.1"
+proc_address = "glXGetProcAddressARB"
+
+[registry]
+file = "gl.xml"
+tag = "OpenGL-Registry 6af574a14089"
+url = "https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/6af574a14089ccfee87efe230ebcdd8742859813/xml/gl.xml"
+sha256 = "b9ca2cfa5c676e901c20d34af3407f1687cde0f1336a5ff7a8974d04c7494ad3"
+
+# GLX, all by hand (runtime/gpuapi/i386/glx_hand.c): every command takes
+# the guest's lifted X11 display, bridged to a host connection.
+[[registry.extra]]
+file = "glx.xml"
+url = "https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/6af574a14089ccfee87efe230ebcdd8742859813/xml/glx.xml"
+sha256 = "e977a1518ad70bde5fd25bf29941361cc7ef76836e2611d8ddcd625b3209a598"
+api = "glx"
+features = ["GLX_VERSION_1_0", "GLX_VERSION_1_1", "GLX_VERSION_1_2", "GLX_VERSION_1_3", "GLX_VERSION_1_4"]
+commands = ["glXGetProcAddressARB", "glXCreateContextAttribsARB"]
+hand = true
+
+[api]
+name = "gl"
+features = ["GL_VERSION_1_0", "GL_VERSION_1_1", "GL_VERSION_1_2", "GL_VERSION_1_3", "GL_VERSION_1_4", "GL_VERSION_1_5", "GL_VERSION_2_0", "GL_VERSION_2_1"]
+
+[thunks]
+# Mapped buffers live in host memory outside the guest window: gl_hand.c
+# maps a guest copy and writes it back on unmap.
+hand_commands = ["glMapBuffer", "glUnmapBuffer", "glGetBufferPointerv"]
+
+# Pointer arguments that are buffer offsets while a buffer is bound to the
+# target the binding query names.
+[thunks.offsets]
+GL_ARRAY_BUFFER_BINDING = [
+    "glColorPointer.pointer",
+    "glEdgeFlagPointer.pointer",
+    "glFogCoordPointer.pointer",
+    "glIndexPointer.pointer",
+    "glInterleavedArrays.pointer",
+    "glNormalPointer.pointer",
+    "glSecondaryColorPointer.pointer",
+    "glTexCoordPointer.pointer",
+    "glVertexAttribPointer.pointer",
+    "glVertexPointer.pointer",
+]
+GL_ELEMENT_ARRAY_BUFFER_BINDING = [
+    "glDrawElements.indices",
+    "glDrawRangeElements.indices",
+    "glMultiDrawElements.indices",
+]
+GL_PIXEL_UNPACK_BUFFER_BINDING = [
+    "glBitmap.bitmap",
+    "glCompressedTexImage1D.data",
+    "glCompressedTexImage2D.data",
+    "glCompressedTexImage3D.data",
+    "glCompressedTexSubImage1D.data",
+    "glCompressedTexSubImage2D.data",
+    "glCompressedTexSubImage3D.data",
+    "glDrawPixels.pixels",
+    "glPolygonStipple.mask",
+    "glTexImage1D.pixels",
+    "glTexImage2D.pixels",
+    "glTexImage3D.pixels",
+    "glTexSubImage1D.pixels",
+    "glTexSubImage2D.pixels",
+    "glTexSubImage3D.pixels",
+]
+GL_PIXEL_PACK_BUFFER_BINDING = [
+    "glGetCompressedTexImage.img",
+    "glGetPolygonStipple.mask",
+    "glGetTexImage.pixels",
+    "glReadPixels.pixels",
+]

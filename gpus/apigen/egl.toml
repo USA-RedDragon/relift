@@ -1,0 +1,44 @@
+# relift-vkgen configuration of EGL 1.5 core for an i386 guest: the host's
+# EGL (glvnd) and its GPU driver. Extension commands come through
+# eglGetProcAddress.
+
+[target]
+abi = "i386"
+api = "egl"
+soname = "libEGL.so.1"
+
+[registry]
+file = "egl.xml"
+tag = "EGL-Registry aa39a34729e6"
+url = "https://raw.githubusercontent.com/KhronosGroup/EGL-Registry/aa39a34729e6d20b0b982e279c351976a5c91075/api/egl.xml"
+sha256 = "1cd33bcfd8fdfb5352a4b8088d322bdc3d1ecbba5cdbddb2ecce82987eaad31b"
+
+[api]
+name = "egl"
+features = ["EGL_VERSION_1_0", "EGL_VERSION_1_1", "EGL_VERSION_1_2", "EGL_VERSION_1_3", "EGL_VERSION_1_4", "EGL_VERSION_1_5"]
+
+# The types eglplatform.h defines for X11. The guest's own X11 is lifted, so
+# native windows and pixmaps are XIDs, integers; displays are converted by
+# hand.
+[types]
+EGLint = "int32_t"
+EGLNativeDisplayType = "handle"
+EGLNativeWindowType = "unsigned long"
+EGLNativePixmapType = "unsigned long"
+
+[thunks]
+# egl_hand.c: a guest Display is the guest's lifted X11 connection, and
+# eglGetProcAddress gives guest thunk addresses.
+hand_commands = ["eglGetDisplay", "eglGetPlatformDisplay", "eglGetProcAddress"]
+# A client buffer is an integer name for the client API, not an EGL object.
+as_integer = ["EGLClientBuffer"]
+# The X11 platform passes a pointer to a Window or Pixmap XID.
+word_pointers = ["eglCreatePlatformWindowSurface.native_window", "eglCreatePlatformPixmapSurface.native_pixmap"]
+
+[thunks.lens]
+"eglChooseConfig.configs" = "config_size"
+"eglGetConfigs.configs" = "config_size"
+
+# EGLAttrib lists end with EGL_NONE at an even index.
+[thunks.terminated]
+EGLAttrib = "0x3038"
