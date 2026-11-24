@@ -123,6 +123,10 @@ typedef struct lx_state {
     const rl_linux_module *pending_lib;
     /** @brief Whether the program has a program interpreter. */
     bool dynamic;
+    /** @brief The guest root's host directory without a trailing slash (rl_linux_program.root, or RELIFT_LINUX_ROOT when set; empty disables it), NULL for none. */
+    char *root;
+    /** @brief Length of root. */
+    size_t root_len;
     /** @brief The top of the area mmap takes from, growing down. */
     uint64_t mmap_top;
     /** @brief The lowest address mmap may take. */

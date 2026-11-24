@@ -114,6 +114,13 @@ typedef struct rl_linux_program {
     const rl_code_map *const *code_maps;
     /** @brief Number of code maps. */
     uint32_t code_map_count;
+    /**
+     * @brief The host directory that is the guest's root file system (the
+     * sysroot of the import), or NULL to use the host's paths as they are:
+     * an absolute guest path whose first component the directory holds
+     * opens below it, except /proc, /dev, /sys, /tmp and /run.
+     */
+    const char *root;
 } rl_linux_program;
 
 /**

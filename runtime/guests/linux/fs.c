@@ -15,8 +15,31 @@
 #define NAME_CAP 256u
 #define IOV_MAX_COUNT 1024u
 
+/** @brief Sets the guest root from the program or RELIFT_LINUX_ROOT (a debugging override; empty turns the root off). */
+static void root_init(void)
+{
+    free(lx.root);
+    lx.root = NULL;
+    lx.root_len = 0;
+    const char *r = getenv("RELIFT_LINUX_ROOT");
+    if (!r)
+        r = lx.prog ? lx.prog->root : NULL;
+    if (!r || !*r)
+        return;
+    size_t n = strlen(r);
+    while (n > 1 && r[n - 1] == '/')
+        n--;
+    lx.root = malloc(n + 1);
+    if (!lx.root)
+        return;
+    memcpy(lx.root, r, n);
+    lx.root[n] = 0;
+    lx.root_len = n;
+}
+
 void lx_fs_init(void)
 {
+    root_init();
     for (int i = 0; i < LX_MAX_FDS; i++)
         lx.fds[i].host = -1;
     for (int i = 0; i < 3; i++) {
@@ -107,6 +130,159 @@ static bool normalize(const char *path, char *out, size_t cap)
         out[n++] = '/';
     out[n] = 0;
     return true;
+}
+
+/** @brief The first components that stay the host's under a guest root: the kernel's views and the scratch directories. */
+static const char *const root_passthrough[] = { "proc", "dev", "sys", "tmp", "run" };
+
+/** @brief Whether the normalized absolute guest path lies in the guest root: the root holds its first component and that is not a host view. */
+static bool in_root(const char *norm)
+{
+    const char *first = norm + 1;
+    size_t len = strcspn(first, "/");
+    if (len == 0)
+        return true;
+    for (size_t i = 0; i < sizeof root_passthrough / sizeof *root_passthrough; i++)
+        if (strlen(root_passthrough[i]) == len && memcmp(first, root_passthrough[i], len) == 0)
+            return false;
+    char host[PATH_CAP];
+    if (lx.root_len + 1 + len >= sizeof host)
+        return false;
+    memcpy(host, lx.root, lx.root_len);
+    host[lx.root_len] = '/';
+    memcpy(host + lx.root_len + 1, first, len);
+    host[lx.root_len + 1 + len] = 0;
+    l_stat st;
+    return hio_stat(HIO_CWD, host, true, &st) == 0;
+}
+
+/**
+ * @brief The host path of a guest path under the guest root: an absolute
+ * path in the root (in_root) is looked up component by component below
+ * it, its symbolic links read and followed as the guest sees them (an
+ * absolute target starts again at the root, at most 40 of them), the last
+ * component's only when follow is set; any other path is the host's as it
+ * is. A relative path stays relative to the host's working directory,
+ * which getcwd reports as a guest path. 0, or -ENAMETOOLONG or -ELOOP.
+ */
+static int64_t host_path(const char *guest, char *out, size_t cap, bool follow)
+{
+    char norm[PATH_CAP];
+    if (!lx.root || guest[0] != '/' || !normalize(guest, norm, sizeof norm) || !in_root(norm)) {
+        size_t n = strlen(guest);
+        if (n >= cap)
+            return -L_ENAMETOOLONG;
+        memcpy(out, guest, n + 1);
+        return 0;
+    }
+    size_t glen = strlen(guest);
+    bool slash = glen > 1 && guest[glen - 1] == '/';
+    char done[PATH_CAP], rest[PATH_CAP];
+    size_t dlen = 0;
+    done[0] = 0;
+    memcpy(rest, norm, strlen(norm) + 1);
+    int links = 0;
+    const char *p = rest;
+    for (;;) {
+        while (*p == '/')
+            p++;
+        if (!*p)
+            break;
+        size_t len = strcspn(p, "/");
+        if (len == 2 && p[0] == '.' && p[1] == '.') {
+            while (dlen > 0 && done[dlen - 1] != '/')
+                dlen--;
+            if (dlen > 0)
+                dlen--;
+            done[dlen] = 0;
+            p += len;
+            continue;
+        }
+        if (len == 1 && p[0] == '.') {
+            p += len;
+            continue;
+        }
+        if (dlen + 1 + len >= sizeof done)
+            return -L_ENAMETOOLONG;
+        size_t mark = dlen;
+        done[dlen++] = '/';
+        memcpy(done + dlen, p, len);
+        dlen += len;
+        done[dlen] = 0;
+        p += len;
+        bool last = strspn(p, "/") == strlen(p);
+        if (last && !follow)
+            continue;
+        char host[PATH_CAP], target[PATH_CAP];
+        if (lx.root_len + dlen >= sizeof host)
+            return -L_ENAMETOOLONG;
+        memcpy(host, lx.root, lx.root_len);
+        memcpy(host + lx.root_len, done, dlen + 1);
+        l_stat st;
+        if (hio_stat(HIO_CWD, host, true, &st) != 0 || (st.st_mode & L_S_IFMT) != L_S_IFLNK)
+            continue;
+        if (++links > 40)
+            return -L_ELOOP;
+        int64_t n = hio_readlink(HIO_CWD, host, target, sizeof target - 1);
+        if (n <= 0)
+            continue;
+        target[n] = 0;
+        char next[PATH_CAP];
+        size_t tail = strlen(p);
+        if (target[0] == '/') {
+            dlen = 0;
+        } else {
+            dlen = mark;
+        }
+        done[dlen] = 0;
+        if ((size_t)n + 1 + tail >= sizeof next)
+            return -L_ENAMETOOLONG;
+        memcpy(next, target, (size_t)n);
+        next[n] = '/';
+        memcpy(next + n + 1, p, tail + 1);
+        memcpy(rest, next, strlen(next) + 1);
+        p = rest;
+    }
+    if (dlen == 0) {
+        done[0] = '/';
+        done[1] = 0;
+        dlen = 1;
+    }
+    if (!in_root(done)) {
+        if (dlen + 1 >= cap)
+            return -L_ENAMETOOLONG;
+        memcpy(out, done, dlen + 1);
+        return 0;
+    }
+    size_t n = lx.root_len + (dlen == 1 ? 0 : dlen);
+    if (n + 2 >= cap)
+        return -L_ENAMETOOLONG;
+    memcpy(out, lx.root, lx.root_len);
+    if (dlen == 1)
+        out[lx.root_len] = 0;
+    else
+        memcpy(out + lx.root_len, done, dlen + 1);
+    if (slash || dlen == 1) {
+        out[n] = '/';
+        out[n + 1] = 0;
+    }
+    return 0;
+}
+
+/** @brief The guest's name for a host path: a path below the guest root loses the root's prefix, any other stays; in place, returns the new length. */
+static size_t guest_name(char *path, size_t len)
+{
+    if (!lx.root || len < lx.root_len || memcmp(path, lx.root, lx.root_len) != 0)
+        return len;
+    if (len == lx.root_len) {
+        path[0] = '/';
+        path[1] = 0;
+        return 1;
+    }
+    if (path[lx.root_len] != '/')
+        return len;
+    memmove(path, path + lx.root_len, len - lx.root_len + 1);
+    return len - lx.root_len;
 }
 
 /** @brief The module of the program that answers to the absolute path, NULL when none does. */
@@ -358,7 +534,11 @@ static int64_t sys_openat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t miss;
     if (loader_miss(c, path, &miss))
         return miss;
-    int64_t h = hio_open(dir, path, flags, (flags & L_O_CREAT) ? mode : 0);
+    char hp[PATH_CAP];
+    rc = host_path(path, hp, sizeof hp, !(flags & L_O_NOFOLLOW) && (flags & (L_O_CREAT | L_O_EXCL)) != (L_O_CREAT | L_O_EXCL));
+    if (rc < 0)
+        return rc;
+    int64_t h = hio_open(dir, hp, flags, (flags & L_O_CREAT) ? mode : 0);
     if (h < 0)
         return h;
     return alloc_fd((int)h, 0, (flags & L_O_CLOEXEC) != 0);
@@ -656,7 +836,11 @@ static int64_t stat_of(int64_t dirfd, uint64_t path_addr, uint64_t flags, l_stat
     rc = dir_arg(dirfd, path, &dir);
     if (rc < 0)
         return rc;
-    return hio_stat(dir, path, (flags & L_AT_SYMLINK_NOFOLLOW) != 0, st);
+    char hp[PATH_CAP];
+    rc = host_path(path, hp, sizeof hp, !(flags & L_AT_SYMLINK_NOFOLLOW));
+    if (rc < 0)
+        return rc;
+    return hio_stat(dir, hp, (flags & L_AT_SYMLINK_NOFOLLOW) != 0, st);
 }
 
 static int64_t sys_newfstatat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -870,6 +1054,7 @@ static int64_t sys_getcwd(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     int64_t n = hio_getcwd(buf, sizeof buf);
     if (n < 0)
         return n;
+    n = (int64_t)guest_name(buf, (size_t)n - 1) + 1;
     if ((uint64_t)n > a[1])
         return -L_ERANGE;
     return lx_put(a[0], buf, (uint64_t)n) ? n : -L_EFAULT;
@@ -881,7 +1066,10 @@ static int64_t sys_chdir(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     (void)mem;
     char path[PATH_CAP];
     int64_t rc = path_arg(a[0], path);
-    return rc < 0 ? rc : hio_chdir(path);
+    char hp[PATH_CAP];
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, true);
+    return rc < 0 ? rc : hio_chdir(hp);
 }
 
 static int64_t sys_mkdirat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -894,7 +1082,10 @@ static int64_t sys_mkdirat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return rc;
     int dir;
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
-    return rc < 0 ? rc : hio_mkdir(dir, path, (uint32_t)a[2] & ~lx.umask);
+    char hp[PATH_CAP];
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, false);
+    return rc < 0 ? rc : hio_mkdir(dir, hp, (uint32_t)a[2] & ~lx.umask);
 }
 
 static int64_t sys_unlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -909,7 +1100,10 @@ static int64_t sys_unlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return -L_EINVAL;
     int dir;
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
-    return rc < 0 ? rc : hio_unlink(dir, path, (a[2] & L_AT_REMOVEDIR) != 0);
+    char hp[PATH_CAP];
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, false);
+    return rc < 0 ? rc : hio_unlink(dir, hp, (a[2] & L_AT_REMOVEDIR) != 0);
 }
 
 static int64_t sys_renameat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -930,7 +1124,11 @@ static int64_t sys_renameat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     rc = dir_arg((int64_t)(int32_t)a[2], np, &nd);
     if (rc < 0)
         return rc;
-    return hio_rename(od, op, nd, np);
+    char ho[PATH_CAP], hn[PATH_CAP];
+    rc = host_path(op, ho, sizeof ho, false);
+    if (rc == 0)
+        rc = host_path(np, hn, sizeof hn, false);
+    return rc < 0 ? rc : hio_rename(od, ho, nd, hn);
 }
 
 static int64_t sys_faccessat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -950,7 +1148,10 @@ static int64_t sys_faccessat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return miss;
     int dir;
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
-    return rc < 0 ? rc : hio_access(dir, path, (uint32_t)a[2]);
+    char hp[PATH_CAP];
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, true);
+    return rc < 0 ? rc : hio_access(dir, hp, (uint32_t)a[2]);
 }
 
 static int64_t sys_readlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -972,10 +1173,19 @@ static int64_t sys_readlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
     if (rc < 0)
         return rc;
-    uint64_t cap = a[3] > sizeof out ? sizeof out : a[3];
-    int64_t n = hio_readlink(dir, path, out, cap);
+    char hp[PATH_CAP];
+    rc = host_path(path, hp, sizeof hp, false);
+    if (rc < 0)
+        return rc;
+    int64_t n = hio_readlink(dir, hp, out, sizeof out - 1);
     if (n < 0)
         return n;
+    if (strncmp(path, "/proc/", 6) == 0) {
+        out[n] = 0;
+        n = (int64_t)guest_name(out, (size_t)n);
+    }
+    if ((uint64_t)n > a[3])
+        n = (int64_t)a[3];
     return lx_put(a[2], out, (uint64_t)n) ? n : -L_EFAULT;
 }
 
@@ -1009,7 +1219,10 @@ static int64_t sys_fchmodat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         return rc;
     int dir;
     rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
-    return rc < 0 ? rc : hio_chmod(dir, path, (uint32_t)a[2]);
+    char hp[PATH_CAP];
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, true);
+    return rc < 0 ? rc : hio_chmod(dir, hp, (uint32_t)a[2]);
 }
 
 static int64_t sys_utimensat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
@@ -1035,7 +1248,11 @@ static int64_t sys_utimensat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
         rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
         if (rc < 0)
             return rc;
-        return hio_utimens(dir, path, t, (a[3] & L_AT_SYMLINK_NOFOLLOW) != 0);
+        char hp[PATH_CAP];
+        rc = host_path(path, hp, sizeof hp, !(a[3] & L_AT_SYMLINK_NOFOLLOW));
+        if (rc < 0)
+            return rc;
+        return hio_utimens(dir, hp, t, (a[3] & L_AT_SYMLINK_NOFOLLOW) != 0);
     }
     int h = lx_host_fd((int)a[0]);
     if (h < 0)

@@ -13,6 +13,10 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 static const rl_linux_segment segments[] = {
     { 0x400000, L_PAGE, 0, L_PAGE, RL_LINUX_RX },
@@ -485,3 +489,84 @@ TEST(a_signal_interrupts_a_blocking_pipe_read_and_a_sleep)
     CHECK_EQ(sys(c, NR_write, (uint64_t)fds[1], 0x401100, 1, 0, 0, 0), 1);
     CHECK_EQ(lx_wait(lx_host_fd(fds[0]), L_POLLIN, 1000000000ll), L_POLLIN);
 }
+
+#ifndef _WIN32
+/** @brief Writes a file of the text at the host path. */
+static void write_text(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fputs(text, f);
+        fclose(f);
+    }
+}
+
+TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
+{
+    char cwd[1024], root[1200], p[1400];
+    CHECK(getcwd(cwd, sizeof cwd) != NULL);
+    snprintf(root, sizeof root, "%s/lxroot.XXXXXX", cwd);
+    CHECK(mkdtemp(root) != NULL);
+    snprintf(p, sizeof p, "%s/usr", root);
+    mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/usr/lib", root);
+    mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/usr/lib/real", root);
+    write_text(p, "guest file\n");
+    snprintf(p, sizeof p, "%s/usr/lib/abs", root);
+    CHECK_EQ(symlink("/usr/lib/real", p), 0);
+    snprintf(p, sizeof p, "%s/lib", root);
+    CHECK_EQ(symlink("usr/lib", p), 0);
+    snprintf(p, sizeof p, "%s/proc", root);
+    mkdir(p, 0755);
+    prog.root = root;
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    const uint64_t at = 0x401000, buf = 0x401800;
+    put_str(at, "/lib/abs");
+    int64_t fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK_EQ(sys(c, NR_read, (uint64_t)fd, buf, 64, 0, 0, 0), 11);
+    CHECK(memcmp(cstr(buf), "guest file\n", 11) == 0);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+    put_str(at, "/usr/lib/absent");
+    CHECK_EQ(sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0), -L_ENOENT);
+    put_str(at, "/proc/self/status");
+    fd = sys(c, NR_openat, (uint64_t)(int64_t)L_AT_FDCWD, at, L_O_RDONLY, 0, 0, 0);
+    CHECK(fd >= 3);
+    CHECK_EQ(sys(c, NR_close, (uint64_t)fd, 0, 0, 0, 0, 0), 0);
+#endif
+    put_str(at, cwd);
+    CHECK_EQ(sys(c, NR_newfstatat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 0, 0, 0), 0);
+    put_str(at, "/lib");
+    CHECK_EQ(sys(c, NR_chdir, at, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_getcwd, buf, 256, 0, 0, 0, 0), 9);
+    CHECK(strcmp(cstr(buf), "/usr/lib") == 0);
+#if defined(__linux__)
+    put_str(at, "/proc/self/cwd");
+    CHECK_EQ(sys(c, NR_readlinkat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 256, 0, 0), 8);
+    CHECK(memcmp(cstr(buf), "/usr/lib", 8) == 0);
+    put_str(at, "/proc/self/exe");
+    CHECK_EQ(sys(c, NR_readlinkat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 256, 0, 0), 9);
+    CHECK(memcmp(cstr(buf), "/bin/prog", 9) == 0);
+#endif
+    put_str(at, "abs");
+    CHECK_EQ(sys(c, NR_readlinkat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 256, 0, 0), 13);
+    CHECK(memcmp(cstr(buf), "/usr/lib/real", 13) == 0);
+    CHECK_EQ(chdir(cwd), 0);
+    prog.root = NULL;
+    snprintf(p, sizeof p, "%s/usr/lib/abs", root);
+    unlink(p);
+    snprintf(p, sizeof p, "%s/usr/lib/real", root);
+    unlink(p);
+    snprintf(p, sizeof p, "%s/lib", root);
+    unlink(p);
+    snprintf(p, sizeof p, "%s/usr/lib", root);
+    rmdir(p);
+    snprintf(p, sizeof p, "%s/usr", root);
+    rmdir(p);
+    snprintf(p, sizeof p, "%s/proc", root);
+    rmdir(p);
+    rmdir(root);
+}
+#endif
