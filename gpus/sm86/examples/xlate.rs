@@ -4,6 +4,7 @@ fn main() {
     let mut o = Options::default();
     let mut no_fma = false;
     let mut hmma_staged = false;
+    let mut no_coop = false;
     let mut flush_fix = None;
     let mut no_xfb_host = false;
     let mut raw = std::env::args().peekable();
@@ -40,6 +41,8 @@ fn main() {
                     ncomp: vec![1; n],
                 }],
             ));
+        } else if a == "--no-coop-hmma" {
+            no_coop = true;
         } else {
             kept.push(a);
         }
@@ -72,6 +75,7 @@ fn main() {
     o.host.transform_feedback &= !no_xfb_host;
     o.host.fused_fma &= !no_fma;
     o.host.hmma_staged |= hmma_staged;
+    o.host.coop_hmma &= !no_coop;
     if let Some(f) = flush_fix {
         o.host.denorm = relift_gpu_nv::translate::Denorm::Unknown;
         o.host.denorm_preserve_mode = false;

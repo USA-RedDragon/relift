@@ -11,7 +11,9 @@
  *   out <path> <bytes>             zeroed storage buffer written to path afterwards
  *   outf <path> <bytes> <init>     the same, starting with the bytes of file init
  *   bank <n> <path> | size <bytes> constant bank n (set 0 binding n-3, or set 1 binding n)
- *   put <n> <off> addr <k>         64-bit address of buffer k at byte off of bank n
+ *   put <n> <off> addr <k> [delta] 64-bit address of buffer k (plus delta bytes) at byte off of bank n;
+ *                                  in bank 0 it is also a compute base whose buffer k starts delta bytes
+ *                                  below it
  *   put <n> <off> u32 <v>          32-bit value at byte off of bank n
  *   push <off> addr <k> | u32 <v>  the same in the push constants
  *   segments <shift>               buffer k is element k of set 3 binding 0 and "addr k" is k << shift
@@ -20,19 +22,29 @@
  *                                  texel (x, y, z, level + 100)
  *   view <binding> <index>         a view of the last image at set 2 binding, array element index
  *   sampler <index> <filter> <norm> <cmp>
+ *   samplerx <index> <mag> <min> <mipmap> <u> <v> <w> <bias> <aniso> <cmp> <cmpop> <minlod> <maxlod>
+ *            <border> <unnorm> <reduction>
+ *                                  a sampler of exactly those VkSamplerCreateInfo fields (as the
+ *                                  runtime made it; aniso 0 off, reduction a
+ *                                  VkSamplerReductionMode)
+ *   pushhex <off> <hex>            push constant bytes at off
  *                                  filter 0 nearest 1 linear; cmp 0 off, else VkCompareOp + 1
  *   dump <path>                    the last image's first level, written afterwards
- *   texdims <path>                 the texture dimension table (set 2 binding 31) from a file;
+ *   texdims <path>                 the texture dimension table (set 2 binding 31) from a file, of
+ *                                  its size (at least 4096 bytes);
  *                                  zeros without one
  *   imagefile <type> <w> <h> <d> <levels> <vkformat> <bpp> <path>
  *                                  an image of that VkFormat number holding the file's texels
- *                                  (each level in turn, bpp bytes each), as a frame trace dumps them
+ *                                  (each level in turn, bpp bytes each), as a frame trace dumps them;
+ *                                  its views keep that format
+ *   imageout <path>                the last image's texels, every level in turn, written afterwards
  *   texcount <n>                   array elements of each texture binding of set 2 (default 4): a
  *                                  translation indexes them by the texture's handle id
  *   plainspecs                     set only the workgroup size and the spec lines, as the runtime does
  *                                  (first line; else ids 3 and 4 get krun's shared and local sizes)
  *   trace <path> <words>           the trace buffer of a trace-mode translation (set 3 binding 7),
  *                                  zeroed, written to path afterwards
+ * Each storage buffer's device address is printed as "buf <k> 0x<address>".
  * The device is the first whose name holds the given text. KRUN_CACHE=<path> writes the pipeline
  * cache there. Exits with 77 when the module needs VK_KHR_shader_fma or VK_KHR_cooperative_matrix
  * and the device lacks it. 16-bit float arithmetic and half fused multiply-adds are enabled where the
@@ -105,7 +117,7 @@ static void submit(VkCommandBuffer cb) {
     CK(vkQueueWaitIdle(q));
 }
 
-typedef struct { VkImage im; VkFormat fmt; int type, w, h, d, levels, layers; } Img;
+typedef struct { VkImage im; VkFormat fmt; int type, w, h, d, levels, layers, bpp, fromfile; const char *out; } Img;
 
 static const char *TYPES[] = {"1d", "2d", "3d", "cube", "1darr", "2darr", "cubearr"};
 
@@ -120,7 +132,7 @@ static Img mkimage_from(int type, int w, int h, int d, int levels, const char *f
     r.type = type; r.w = w; r.h = (type == 0 || type == 4) ? 1 : h; r.levels = levels;
     int is_u8 = !strcmp(fs, "u8"), is_u32 = !strcmp(fs, "u32"), is_r32 = !strcmp(fs, "r32u");
     r.fmt = is_r32 ? VK_FORMAT_R32_UINT : is_u8 ? VK_FORMAT_R8G8B8A8_UNORM : is_u32 ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_R32G32B32A32_SFLOAT;
-    if (file) r.fmt = vkf;
+    if (file) { r.fmt = vkf; r.fromfile = 1; r.bpp = fbpp; }
     size_t fn = 0, fat = 0; unsigned char *fdata = file ? slurp(file, &fn) : 0;
     r.d = type == 2 ? d : 1;
     r.layers = type == 3 ? 6 : (type == 4 || type == 5 || type == 6) ? d : 1;
@@ -196,7 +208,7 @@ static VkImageView mkview(Img *im, int binding) {
         layers = (dim == 2 || dim == 4) ? im->layers : 1;
         if (kind > 2) kind = 2;
     }
-    VkImageViewCreateInfo vi = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0, 0, im->im, vt, kind_format(im->fmt, kind) };
+    VkImageViewCreateInfo vi = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0, 0, im->im, vt, im->fromfile ? im->fmt : kind_format(im->fmt, kind) };
     vi.subresourceRange = (VkImageSubresourceRange){ VK_IMAGE_ASPECT_COLOR_BIT, 0, storage ? 1 : im->levels, 0, layers };
     VkImageView v; CK(vkCreateImageView(dev, &vi, 0, &v));
     return v;
@@ -316,6 +328,7 @@ int main(int argc, char **argv) {
         char a[512], b[512], c[64]; unsigned long x, y, z, u, t;
         if (sscanf(l, "dump %511s", a) == 1) dump = strdup(a);
         else if (sscanf(l, "texdims %511s", a) == 1) texdims = strdup(a);
+        else if (sscanf(l, "imageout %511s", a) == 1 && ni) imgs[ni - 1].out = strdup(a);
         else if (sscanf(l, "texcount %lu", &x) == 1) COUNT = x;
         else if (!strncmp(l, "plainspecs", 10)) nspec = 3;
         else if (sscanf(l, "trace %511s %lu", a, &x) == 2) { tracebuf = mkbuf(4 * x, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT); tracebuf.out = strdup(a); }
@@ -336,6 +349,19 @@ int main(int argc, char **argv) {
             infos[nw] = (VkDescriptorImageInfo){ 0, mkview(&imgs[ni - 1], x), VK_IMAGE_LAYOUT_GENERAL };
             writes[nw] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, 0, x, y, 1, x >= 32 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &infos[nw], 0, 0 };
             nw++;
+        } else if (!strncmp(l, "samplerx ", 9)) {
+            unsigned long ix; int mag, mn, mip, au, av, aw, cmp, cop, border, unnorm, red; float bias, aniso, lmin, lmax;
+            if (sscanf(l + 9, "%lu %d %d %d %d %d %d %f %f %d %d %f %f %d %d %d", &ix, &mag, &mn, &mip, &au, &av, &aw, &bias,
+                       &aniso, &cmp, &cop, &lmin, &lmax, &border, &unnorm, &red) != 16) { fprintf(stderr, "bad samplerx\n"); exit(1); }
+            VkSamplerReductionModeCreateInfo rm = { VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO, 0, red };
+            VkSamplerCreateInfo si = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, red ? &rm : 0, 0, mag, mn, mip, au, av, aw, bias,
+                                       aniso > 1, aniso > 1 ? aniso : 1, cmp, cop, lmin, lmax, border, unnorm };
+            VkSampler s; CK(vkCreateSampler(dev, &si, 0, &s));
+            infos[nw] = (VkDescriptorImageInfo){ s, 0, 0 };
+            writes[nw] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0, 0, 0, ix, 1, VK_DESCRIPTOR_TYPE_SAMPLER, &infos[nw], 0, 0 };
+            nw++;
+        } else if (sscanf(l, "pushhex %li %511s", (long *)&y, a) == 2) {
+            for (size_t k = 0; a[2 * k] && a[2 * k + 1] && y + k < sizeof push; k++) { unsigned v; sscanf(a + 2 * k, "%2x", &v); push[y + k] = (unsigned char)v; }
         } else if (sscanf(l, "sampler %lu %lu %lu %lu", &x, &y, &z, &t) == 4) {
             VkSamplerCreateInfo si = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
             si.magFilter = si.minFilter = y ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
@@ -369,14 +395,17 @@ int main(int argc, char **argv) {
             if (!strcmp(c, "addr")) memcpy(push + y, &bufs[z].addr, 8);
             else { uint32_t v = z; memcpy(push + y, &v, 4); }
         } else if (sscanf(l, "put %lu %li %63s %li", &x, (long *)&y, c, (long *)&z) == 4) {
+            long long delta = 0;
+            sscanf(l, "put %*u %*i %*63s %*i %lli", &delta);
             if (!have[x]) { banks[x] = mkbuf(65536, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT); have[x] = 1; }
             if (!strcmp(c, "addr")) {
-                uint64_t ad = segshift >= 0 ? (uint64_t)z << segshift : bufs[z].addr;
+                uint64_t ad = (segshift >= 0 ? (uint64_t)z << segshift : bufs[z].addr) + (uint64_t)delta;
                 memcpy((char *)banks[x].map + y, &ad, 8);
-                if (x == 0 && y >= 0x10 && y < 0x800 && nbase < 16) { base_off[nbase] = y; base_buf[nbase++] = z; base_lo[nbase - 1] = (uint32_t)ad; }
+                if (x == 0 && y >= 0x10 && y < 0x800 && nbase < 16) { base_off[nbase] = y; base_buf[nbase++] = z; base_lo[nbase - 1] = (uint32_t)(ad - (uint64_t)delta); }
             } else { uint32_t v = z; memcpy((char *)banks[x].map + y, &v, 4); }
         }
     }
+    for (int k = 0; k < nb; k++) printf("buf %d 0x%llx\n", k, (unsigned long long)bufs[k].addr);
     VkShaderModuleCreateInfo smi = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, 0, 0, cn, code };
     VkShaderModule sm; CK(vkCreateShaderModule(dev, &smi, 0, &sm));
 
@@ -424,8 +453,11 @@ int main(int argc, char **argv) {
         CK(vkCreateDescriptorSetLayout(dev, &l3, 0, &sl[3]));
     }
     Buf locks = mkbuf(16384, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    Buf dims = mkbuf(4096, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    if (texdims) { size_t fn; void *d = slurp(texdims, &fn); memcpy(dims.map, d, fn < 4096 ? fn : 4096); free(d); }
+    size_t dims_n = 4096;
+    void *dims_file = 0;
+    if (texdims) { dims_file = slurp(texdims, &dims_n); if (dims_n < 4096) dims_n = 4096; }
+    Buf dims = mkbuf(dims_n, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    if (dims_file) { size_t fn; free(dims_file); dims_file = slurp(texdims, &fn); memcpy(dims.map, dims_file, fn); free(dims_file); }
     VkPushConstantRange pr = { VK_SHADER_STAGE_ALL, 0, 128 };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, 0, 0, 4, sl, 1, &pr };
     VkPipelineLayout pl; CK(vkCreatePipelineLayout(dev, &pli, 0, &pl));
@@ -500,7 +532,28 @@ int main(int argc, char **argv) {
         VkBufferImageCopy c = { 0, 0, 0, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, im->type == 2 ? 1 : im->layers }, {0, 0, 0}, { im->w, im->h, im->type == 2 ? im->d : 1 } };
         vkCmdCopyImageToBuffer(cb, im->im, VK_IMAGE_LAYOUT_GENERAL, db.b, 1, &c);
     }
+    Buf ob[8]; int nob = 0;
+    for (int k = 0; k < ni && nob < 8; k++) if (imgs[k].out) {
+        Img *im = &imgs[k];
+        size_t total = 0;
+        VkBufferImageCopy oc[16]; int noc = 0;
+        for (int lv = 0; lv < im->levels && noc < 16; lv++) {
+            int lw = im->w >> lv; if (lw < 1) lw = 1;
+            int lh = im->h >> lv; if (lh < 1) lh = 1;
+            int ld = im->d >> lv; if (ld < 1) ld = 1;
+            int nz = im->type == 2 ? ld : im->layers;
+            oc[noc++] = (VkBufferImageCopy){ total, 0, 0, { VK_IMAGE_ASPECT_COLOR_BIT, lv, 0, im->type == 2 ? 1 : im->layers }, {0, 0, 0}, { lw, lh, im->type == 2 ? ld : 1 } };
+            total += (size_t)lw * lh * nz * im->bpp;
+        }
+        ob[nob] = mkbuf(total, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        ob[nob].out = im->out;
+        VkMemoryBarrier mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER, 0, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT };
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0, 0, 0, 0);
+        vkCmdCopyImageToBuffer(cb, im->im, VK_IMAGE_LAYOUT_GENERAL, ob[nob].b, noc, oc);
+        nob++;
+    }
     submit(cb);
+    for (int k = 0; k < nob; k++) { FILE *f = fopen(ob[k].out, "wb"); fwrite(ob[k].map, 1, ob[k].n, f); fclose(f); }
     if (dump && ni) { FILE *f = fopen(dump, "wb"); fwrite(db.map, 1, db.n, f); fclose(f); }
     for (int k = 0; k < nb; k++) if (bufs[k].out) {
         FILE *f = fopen(bufs[k].out, "wb");
