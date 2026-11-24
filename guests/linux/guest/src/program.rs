@@ -72,6 +72,10 @@ pub struct Program {
     pub modules: Vec<Placed>,
     /// The data files.
     pub data: Vec<Data>,
+    /// The host directory that is the guest's root file system (the
+    /// import's sysroot), for `rl_linux_program.root`; `None` lets the
+    /// program see the host's paths as they are.
+    pub root: Option<String>,
 }
 
 /// A file to place.
@@ -173,7 +177,11 @@ pub fn place(inputs: Vec<Input>, data: Vec<Data>) -> Result<Program, String> {
             image,
         });
     }
-    Ok(Program { modules: out, data })
+    Ok(Program {
+        modules: out,
+        data,
+        root: None,
+    })
 }
 
 /// The analysis view of `p`: its sections and the entries its symbols,
@@ -457,7 +465,7 @@ pub fn program_c(
         .unwrap_or(0);
     let _ = write!(
         t,
-        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .exec_path = {},\n    .modules = modules,\n    .module_count = {}u,\n    .code_lo = UINT64_C({:#x}),\n    .code_hi = UINT64_C({:#x}),\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n    .code_maps = code_maps,\n    .code_map_count = {}u,\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
+        "}};\nstatic const uint8_t image_id[32] = {{ {} }};\nconst rl_linux_program rl_program = {{\n    .name = {},\n    .exec_path = {},\n    .modules = modules,\n    .module_count = {}u,\n    .code_lo = UINT64_C({:#x}),\n    .code_hi = UINT64_C({:#x}),\n    .stack_size = UINT64_C({:#x}),\n    .hwcap = UINT64_C({:#x}),\n    .units = static_units,\n    .unit_count = {}u,\n    .image_id = image_id,\n    .code_maps = code_maps,\n    .code_map_count = {}u,\n    .root = {},\n}};\nRL_TEXT_BOUNDS_DEFINE()\nint main(int argc, char **argv)\n{{\n{}    return rl_linux_main(&rl_program, argc, argv);\n}}\n",
         id.join(", "),
         c_string(modules.first().map_or("program", |m| m.name.as_str())),
         c_string(exec_path),
@@ -468,6 +476,10 @@ pub fn program_c(
         crate::cpu::hwcap(),
         units.len(),
         code_maps.len(),
+        program
+            .root
+            .as_deref()
+            .map_or_else(|| "NULL".to_string(), c_string),
         if trampoline {
             "    rl_arm64_set_trampoline(1);\n"
         } else {

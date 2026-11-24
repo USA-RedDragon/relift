@@ -126,7 +126,17 @@ pub fn import(
 ) -> Result<(), BoxError> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let object = elf::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-    let exec = guest_path(path)?;
+    let mut exec = guest_path(path)?;
+    let root = match sysroot_dir {
+        Some(d) => Some(guest_path(d)?),
+        None => None,
+    };
+    if let Some(r) = &root
+        && let Some(rest) = exec.strip_prefix(r.trim_end_matches('/'))
+        && rest.starts_with('/')
+    {
+        exec = rest.to_string();
+    }
     let dynamic = object.interpreter.is_some()
         || object
             .dynamic
@@ -177,6 +187,9 @@ pub fn import(
         std::fs::remove_dir_all(&mods)?;
     }
     let mut manifest = format!("exec_path = {}\n", quote(&exec));
+    if dynamic && let Some(r) = &root {
+        manifest.push_str(&format!("sysroot = {}\n", quote(r)));
+    }
     let files = closure
         .interpreter
         .iter()
@@ -257,6 +270,8 @@ struct Project {
     data: Vec<program::Data>,
     exec_path: String,
     title: String,
+    /// The import's sysroot, the guest's root file system.
+    root: Option<String>,
 }
 
 fn project() -> Result<Project, BoxError> {
@@ -275,6 +290,7 @@ fn project() -> Result<Project, BoxError> {
     }];
     let mut data = Vec::new();
     let mut exec_path = s("program").unwrap_or_else(|| "/program".into());
+    let mut root = None;
     let list = dir.join(MODULES_FILE);
     if list.exists() {
         let text = std::fs::read_to_string(&list)?;
@@ -284,6 +300,7 @@ fn project() -> Result<Project, BoxError> {
         if let Some(p) = t.get("exec_path").and_then(|v| v.as_str()) {
             exec_path = p.into();
         }
+        root = t.get("sysroot").and_then(|v| v.as_str()).map(String::from);
         for m in t
             .get("module")
             .and_then(|v| v.as_array())
@@ -335,6 +352,7 @@ fn project() -> Result<Project, BoxError> {
         data,
         exec_path,
         title,
+        root,
     })
 }
 
@@ -540,7 +558,8 @@ pub fn build(
             |c| c.name().to_string()
         )
     ));
-    let program = program::place(p.inputs, p.data).map_err(|e| format!("{}: {e}", p.title))?;
+    let mut program = program::place(p.inputs, p.data).map_err(|e| format!("{}: {e}", p.title))?;
+    program.root = p.root.clone();
     let placed = &program.modules;
     let mut all = Vec::new();
     for m in placed {
