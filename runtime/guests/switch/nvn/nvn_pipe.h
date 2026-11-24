@@ -52,6 +52,8 @@ typedef struct nvn_pipe_key {
     uint32_t sample_mask, conservative_dilate, viewport_swizzle, provoking_last;
     /** @brief The samples of each pixel the draw rasterizes, as a VkSampleCountFlagBits; 0 for one sample. */
     uint32_t samples;
+    /** @brief Alpha to coverage, dithered as the console's (only on NVIDIA hosts, nvn_vkdev.nvidia). */
+    uint32_t alpha_to_coverage;
     /** @brief Specialization constants of each stage: id and value, sorted by id (nvn_spec_sort). */
     uint32_t nspec[NVN_STAGES];
     VkSpecializationMapEntry spec_map[NVN_STAGES][NVN_MAX_SPECS];

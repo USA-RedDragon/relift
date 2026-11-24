@@ -224,6 +224,12 @@ typedef struct nvn_vkdev {
     bool standard_samples;
     /** @brief The device shades per sample, and writes storage images declared without a format. */
     bool sample_shading, formatless_write;
+    /**
+     * @brief The device is NVIDIA's: its alpha to coverage is the console GPU's dithered one (measured on the RTX 3090
+     * by test_nvn_a2c.c: 4n coverage levels spread over a 2x2 pixel footprint, the footprint the driver selects
+     * with dither on, SET_ALPHA_TO_COVERAGE_DITHER_CONTROL PIXELS_2X2, clc797.h).
+     */
+    bool nvidia;
     /** @brief The largest extra overestimation (pixels) of VK_EXT_conservative_rasterization, and whether a dilate past it was warned of. */
     float conservative_extra_max;
     bool dilate_warned;

@@ -746,16 +746,18 @@ static int fixed_state(replay *r, pipe_key *k)
             return rc;
     }
     uint32_t state_samples = 1;
+    bool a2c_on = false, a2c_dither = false;
     if (st->have_multisample) {
-        uint64_t samples = 0, a2c = 0;
+        uint64_t samples = 0, a2c = 0, dither = 0;
         if ((rc = nvn_vk_getter(r, "nvnMultisampleStateGetSamples", st->multisample, 24, NULL, 0, 0, NULL,
                                 &samples)) != RL_OK ||
             (rc = nvn_vk_getter(r, "nvnMultisampleStateGetAlphaToCoverageEnable", st->multisample, 24, NULL, 0, 0,
-                                NULL, &a2c)) != RL_OK)
+                                NULL, &a2c)) != RL_OK ||
+            (rc = nvn_vk_getter(r, "nvnMultisampleStateGetAlphaToCoverageDither", st->multisample, 24, NULL, 0, 0,
+                                NULL, &dither)) != RL_OK)
             return rc;
-        if (a2c & 0xff)
-            return nvn_vk_stop(r, "multisample state with %u samples, alpha to coverage %u", (uint32_t)samples,
-                               (uint32_t)(a2c & 0xff));
+        a2c_on = (a2c & 0xff) != 0;
+        a2c_dither = (dither & 0xff) != 0;
         state_samples = (uint32_t)samples > 1 ? (uint32_t)samples : 1;
     }
     uint32_t drawn;
@@ -769,6 +771,17 @@ static int fixed_state(replay *r, pipe_key *k)
     if (drawn > 1 && !g.standard_samples)
         return nvn_vk_stop(r, "a draw of %u samples on a host device without the standard sample positions", drawn);
     k->samples = drawn > 1 ? drawn : 0;
+    /*
+     * The driver's BindMultisampleState sets SET_ANTI_ALIAS_ALPHA_CONTROL from the enable and the dither footprint
+     * from the dither flag (PIXELS_2X2 with it, PIXELS_1X1 without; SDK 22.2.8, sdk 0x69a0f0). Only the dithered
+     * pattern of 2, 4 and 8 samples is measured, and only on an NVIDIA host (nvn_vkdev.nvidia).
+     */
+    if (a2c_on && (!g.nvidia || !a2c_dither || drawn < 2 || drawn > 8))
+        return nvn_vk_stop(r,
+                           "alpha to coverage at %u samples, %s dither, on %s: only NVIDIA's dithered pattern of 2, 4 "
+                           "and 8 samples is measured",
+                           drawn, a2c_dither ? "with" : "without", g.nvidia ? "an NVIDIA host" : "a host not NVIDIA's");
+    k->alpha_to_coverage = a2c_on;
     k->primitive_restart = st->primitive_restart;
     k->rasterizer_discard = st->rasterizer_discard;
     k->conservative_raster = st->conservative_raster && g.conservative_raster;

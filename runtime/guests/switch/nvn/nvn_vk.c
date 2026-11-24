@@ -602,6 +602,7 @@ static void bring_up(void)
         g.standard_samples = dp.limits.standardSampleLocations;
         g.sample_shading = feat.f2.features.sampleRateShading;
         g.formatless_write = feat.f2.features.shaderStorageImageWriteWithoutFormat;
+        g.nvidia = dp.vendorID == 0x10de;
         rl_log(RL_LOG_INFO, "nvn",
                "multisample: standard sample positions %s, sample shading %s, color sample counts 0x%x",
                g.standard_samples ? "yes" : "no", g.sample_shading ? "yes" : "no",
