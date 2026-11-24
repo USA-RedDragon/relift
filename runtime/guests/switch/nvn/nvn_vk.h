@@ -1111,6 +1111,8 @@ void nvn_gpuprof_done(uint32_t s);
 void nvn_gpuprof_report(double frames);
 /** @brief The batches' spans, the sum of their parts and the time between batches since the last report (ns). */
 void nvn_gpuprof_sums(double *span_ns, double *parts_ns, double *between_ns);
+/** @brief The GPU time (ns) and intervals counted under label lab since the last report; false when none were. */
+bool nvn_gpuprof_total(const char *lab, double *ns, uint64_t *count);
 /** @brief Forgets the profile and reads gpu.profile again at the next use (a settings change, tests). */
 void nvn_gpuprof_reset(void);
 /** @brief The host's monotonic clock in ns, the one the profile's calibrated GPU times are on. */

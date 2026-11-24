@@ -319,11 +319,24 @@ static void add(const char *lab, double ns)
     if (i == gp.ntot) {
         if (gp.ntot == TOTALS)
             i = TOTALS - 1, lab = "(more labels)";
-        else
+        else {
+            memset(&gp.tot[i], 0, sizeof gp.tot[i]);
             snprintf(gp.tot[gp.ntot++].lab, LABEL, "%s", lab);
+        }
     }
     gp.tot[i].ns += ns;
     gp.tot[i].count++;
+}
+
+bool nvn_gpuprof_total(const char *lab, double *ns, uint64_t *count)
+{
+    for (uint32_t i = 0; i < gp.ntot; i++)
+        if (!strcmp(gp.tot[i].lab, lab)) {
+            *ns = gp.tot[i].ns;
+            *count = gp.tot[i].count;
+            return true;
+        }
+    return false;
 }
 
 void nvn_gpuprof_done(uint32_t s)

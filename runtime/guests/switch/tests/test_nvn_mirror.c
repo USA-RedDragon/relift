@@ -1001,6 +1001,20 @@ TEST(nvn_gpu_profile_parts_add_up_to_each_batch_span)
     CHECK(span > 0);
     CHECK(fabs(parts - span) <= span * 1e-6);
     CHECK(between >= 0);
+    double ns = 0;
+    uint64_t count = 0;
+    CHECK(nvn_gpuprof_total("fill a", &ns, &count));
+    CHECK_EQ(count, 2u);
+    /* A report forgets the totals: the label's next interval starts a new total, not the reported one's. */
+    nvn_gpuprof_report(1);
+    CHECK(nvn_vk_begin(&r));
+    VK(vkCmdFillBuffer)(g.cb, big.buf, 0, big.size, 3);
+    nvn_vk_barrier(g.cb);
+    nvn_gpuprof_mark("fill a");
+    CHECK(nvn_vk_flush(&r));
+    CHECK(nvn_gpuprof_total("fill a", &ns, &count));
+    CHECK_EQ(count, 1u);
+    CHECK(ns > 0);
     nvn_vk_staging_free(&big);
     rl_settings_set("gpu.profile", "false");
     nvn_gpuprof_reset();
