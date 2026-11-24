@@ -268,12 +268,8 @@ bool nvn_shader_stamp_check(char *why, size_t why_n)
         const char *allow = getenv("RELIFT_NVN_TABLE_STAMP");
         bool allowed = allow && !strcmp(allow, "allow");
         g_stamp_state = 1;
-        if (stamped)
-            rl_log(RL_LOG_INFO, "nvn", "shader tables in %s: translator stamp %s (this build expects %s)", dir, have,
-                   want ? want : "none");
-        else
-            rl_log(RL_LOG_INFO, "nvn", "shader tables in %s: no translator stamp (this build expects %s)", dir,
-                   want ? want : "none");
+        rl_log(RL_LOG_INFO, "nvn", "shader tables loaded: %s math, %s/%s.*, stamp %s (this build expects %s)",
+               g_tables.native ? "native" : "exact", dir, g_tables.base, stamped ? have : "none", want ? want : "none");
         char path[1100], magic[8] = { 0 };
         table_path(path, sizeof path, "rlspi");
         FILE *spi = fopen(path, "rb");
