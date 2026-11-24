@@ -146,6 +146,38 @@ fn shared_memory_sizes_come_from_offsets() {
     let s = run(&[lds, sts], &["LDS.128", "STS.U8"]);
     assert_eq!(s.interface.shared_bytes, 0x50);
     assert!(!s.interface.global_memory);
+    assert_eq!(s.interface.shared_declared, None);
+    assert_eq!(s.interface.shared_beyond_declared, 0);
+}
+
+#[test]
+fn constant_shared_accesses_are_checked_against_the_declared_size() {
+    let lds = word(
+        0x184,
+        4,
+        &[(16, 8, 4), (24, 8, 3), (40, 24, 0x40), (73, 3, 6)],
+    );
+    let mut b: Vec<u8> = lds.to_vec();
+    finish(&mut b);
+    let p = relift_gpu_sm86::program::parse(&b);
+    let with = |declared: u32| {
+        let o = relift_gpu_nv::translate::Options {
+            shared_declared: Some(declared),
+            ..Default::default()
+        };
+        relift_gpu_nv::translate::translate_with(&p, &o)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .interface
+    };
+    let fits = with(0x50);
+    assert_eq!(fits.shared_declared, Some(0x50));
+    assert_eq!(fits.shared_beyond_declared, 0);
+    let short = with(0x48);
+    assert_eq!(short.shared_bytes, 0x50, "the extent is the same");
+    assert_eq!(
+        short.shared_beyond_declared, 8,
+        "LDS.128 at 0x40 reaches 0x50"
+    );
 }
 
 #[test]

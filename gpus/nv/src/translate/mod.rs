@@ -143,8 +143,19 @@ pub struct Interface {
     /// bitmap (see [`PUSH_WRITTEN_PAGES`]), whose address the program reads
     /// from the push constants.
     pub marks_written_pages: bool,
-    /// Bytes of shared memory addressed (compute), rounded up to a word.
+    /// The highest constant shared memory offset an access reaches
+    /// (compute), rounded up to a word. A lower bound, never the size:
+    /// register-indexed accesses go past it, so the runtime sizes the array
+    /// from what the program declares (an NVN control section, a cubin's
+    /// `.nv.shared`) and [`Options::shared_declared`] checks this against it.
     pub shared_bytes: u32,
+    /// The shared memory bytes the program declares, as
+    /// [`Options::shared_declared`] gave them.
+    pub shared_declared: Option<u32>,
+    /// Bytes [`Self::shared_bytes`] reaches past [`Options::shared_declared`]
+    /// (0 when within it or not given): a constant access the program's own
+    /// declaration does not hold, which a device runs out of bounds.
+    pub shared_beyond_declared: u32,
     /// Bytes of local (per-thread) memory addressed.
     pub local_bytes: u32,
     /// Texture handle reads: (bank, byte offset) of each bound handle.
@@ -297,6 +308,10 @@ pub struct Options {
     /// The program's transform feedback capture, from its GLSLC header (see
     /// the `io::xfb` module); none for a program that captures nothing.
     pub xfb: Option<XfbLayout>,
+    /// The shared memory bytes the program declares, when known: the
+    /// translation checks its constant accesses against it (see
+    /// [`Interface::shared_beyond_declared`]).
+    pub shared_declared: Option<u32>,
 }
 
 /// A translated program.
@@ -1166,6 +1181,15 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
         main
     };
     let _ = entry;
+    c.iface.shared_declared = o.shared_declared;
+    if let Some(d) = o.shared_declared {
+        c.iface.shared_beyond_declared = c.iface.shared_bytes.saturating_sub(d.next_multiple_of(4));
+    }
+    let limit = o.host.max_shared_bytes;
+    if limit > 0 {
+        let need = o.shared_declared.unwrap_or(c.iface.shared_bytes);
+        c.iface.host.shared_overflow_bytes = need.saturating_sub(limit);
+    }
     finish(c, main, ep, var_at)
 }
 

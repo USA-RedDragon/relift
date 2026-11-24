@@ -1063,7 +1063,9 @@ pub struct HostReport {
     /// The runtime must check at start-up that the device flushes
     /// denormals as SM86 does (see [`Denorm::Flush`]).
     pub check_flush: bool,
-    /// Workgroup memory the program declares beyond the device's limit.
+    /// Workgroup memory the program needs beyond the device's limit
+    /// (`max_shared_bytes`): its declared size when given
+    /// ([`super::Options::shared_declared`]), else its constant extent.
     pub shared_overflow_bytes: u32,
     /// Constructs that cannot be exact on this host, one line each.
     pub inexact: Vec<String>,
