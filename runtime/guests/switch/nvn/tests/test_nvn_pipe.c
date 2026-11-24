@@ -15,7 +15,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <unistd.h>
+
+/** @brief The cache folder name the tests pick (nvn_pipe_cache_uuid_for_test with zero bytes). */
+#define ZU "00000000000000000000000000000000"
+static const uint8_t zero_uuid[16];
+
+/** @brief Removes a test's cache folder: its driver folders, their files, then the folder. */
+static void rm_cache_dir(const char *dir)
+{
+    DIR *d = opendir(dir);
+    struct dirent *e;
+    while (d && (e = readdir(d))) {
+        if (e->d_name[0] == '.')
+            continue;
+        char sub[400];
+        snprintf(sub, sizeof sub, "%s/%s", dir, e->d_name);
+        DIR *d2 = opendir(sub);
+        struct dirent *e2;
+        while (d2 && (e2 = readdir(d2))) {
+            if (e2->d_name[0] == '.')
+                continue;
+            char f[700];
+            snprintf(f, sizeof f, "%s/%s", sub, e2->d_name);
+            remove(f);
+        }
+        if (d2)
+            closedir(d2);
+        rmdir(sub);
+        remove(sub);
+    }
+    if (d)
+        closedir(d);
+    rmdir(dir);
+}
 
 /** @brief A vertex program: a vec4 position at location 0, passed to location 0 as a color. */
 static const uint32_t vert_spv[] = {
@@ -338,8 +372,9 @@ TEST(nvn_pipe_cache_is_read_back_and_discarded_on_a_changed_header_or_body)
     char dir[] = "nvn_pipe_cache_test_XXXXXX";
     CHECK(mkdtemp(dir) != NULL);
     char path[300];
-    snprintf(path, sizeof path, "%s/pipeline-cache.bin", dir);
+    snprintf(path, sizeof path, "%s/" ZU "/pipeline-cache.bin", dir);
     setenv("RELIFT_PIPELINE_CACHE", dir, 1);
+    nvn_pipe_cache_uuid_for_test(zero_uuid);
     nvn_pipe_init();
     CHECK_EQ(nvn_pipe_cache_bytes(), 0u);
     CHECK(nvn_draw_layouts());
@@ -371,8 +406,60 @@ TEST(nvn_pipe_cache_is_read_back_and_discarded_on_a_changed_header_or_body)
     nvn_pipe_init();
     CHECK_EQ(nvn_pipe_cache_bytes(), 0u);
     unsetenv("RELIFT_PIPELINE_CACHE");
+    nvn_pipe_cache_uuid_for_test(NULL);
     remove(path);
-    rmdir(dir);
+    rm_cache_dir(dir);
+    VK(vkDestroyShaderModule)(g.dev, vs, NULL);
+    VK(vkDestroyShaderModule)(g.dev, fs, NULL);
+}
+
+TEST(nvn_pipe_cache_is_kept_per_driver_and_a_switch_back_reuses_it)
+{
+    nvn_probes probes;
+    if (!nvn_vk_probes(&probes))
+        return;
+    char dir[] = "nvn_pipe_drivers_XXXXXX";
+    CHECK(mkdtemp(dir) != NULL);
+    setenv("RELIFT_PIPELINE_CACHE", dir, 1);
+    uint8_t a[16] = { 0xa1 }, b[16] = { 0xb2 };
+    CHECK(nvn_draw_layouts());
+    VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
+    CHECK(vs && fs);
+    nvn_pipe_key k;
+    make_key(&k, vs, fs, VK_FORMAT_R8G8B8A8_UNORM, 16);
+    /* Driver a fills its cache. */
+    nvn_pipe_cache_uuid_for_test(a);
+    nvn_pipe_init();
+    CHECK(nvn_pipe_graphics(&k) != NULL);
+    nvn_pipe_save();
+    uint64_t written = nvn_pipe_cache_bytes();
+    CHECK(written > 0);
+    /* Driver b starts empty and writes its own. */
+    nvn_pipe_cache_uuid_for_test(b);
+    nvn_pipe_init();
+    CHECK_EQ(nvn_pipe_cache_bytes(), 0u);
+    CHECK(nvn_pipe_graphics(&k) != NULL);
+    nvn_pipe_save();
+    /* Back to a: its cache is read whole. */
+    nvn_pipe_cache_uuid_for_test(a);
+    nvn_pipe_init();
+    CHECK_EQ(nvn_pipe_cache_bytes(), written);
+    /* Three more drivers: the newest three folders are kept, and b, used before a, goes first. */
+    for (uint8_t i = 1; i <= 3; i++) {
+        uint8_t u[16] = { 0xc0, i };
+        nvn_pipe_cache_uuid_for_test(u);
+        nvn_pipe_init();
+        CHECK(nvn_pipe_graphics(&k) != NULL);
+        nvn_pipe_save();
+        char pa[300], pb[300];
+        snprintf(pa, sizeof pa, "%s/a1000000000000000000000000000000/pipeline-cache.bin", dir);
+        snprintf(pb, sizeof pb, "%s/b2000000000000000000000000000000/pipeline-cache.bin", dir);
+        CHECK_EQ(access(pb, F_OK) == 0, i < 2); /* four folders: b, used least lately, goes */
+        CHECK_EQ(access(pa, F_OK) == 0, i < 3); /* then a */
+    }
+    unsetenv("RELIFT_PIPELINE_CACHE");
+    nvn_pipe_cache_uuid_for_test(NULL);
+    rm_cache_dir(dir);
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
@@ -386,6 +473,7 @@ TEST(nvn_pipe_without_libraries_makes_whole_pipelines_and_warms_no_stage)
     CHECK(mkdtemp(dir) != NULL);
     setenv("RELIFT_PIPELINE_MODE", "monolithic", 1);
     setenv("RELIFT_PIPELINE_CACHE", dir, 1);
+    nvn_pipe_cache_uuid_for_test(zero_uuid);
     nvn_pipe_init();
     CHECK(!nvn_pipe_uses_libraries());
     CHECK(nvn_draw_layouts());
@@ -402,11 +490,12 @@ TEST(nvn_pipe_without_libraries_makes_whole_pipelines_and_warms_no_stage)
     CHECK_EQ(made1 - made0, 1u);
     unsetenv("RELIFT_PIPELINE_MODE");
     unsetenv("RELIFT_PIPELINE_CACHE");
+    nvn_pipe_cache_uuid_for_test(NULL);
     nvn_pipe_init();
     char path[300];
-    snprintf(path, sizeof path, "%s/pipeline-cache.bin", dir);
+    snprintf(path, sizeof path, "%s/" ZU "/pipeline-cache.bin", dir);
     remove(path);
-    rmdir(dir);
+    rm_cache_dir(dir);
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }
@@ -420,6 +509,7 @@ TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
     CHECK(mkdtemp(dir) != NULL);
     setenv("RELIFT_PIPELINE_MODE", "monolithic", 1);
     setenv("RELIFT_PIPELINE_CACHE", dir, 1);
+    nvn_pipe_cache_uuid_for_test(zero_uuid);
     nvn_pipe_init();
     CHECK(nvn_draw_layouts());
     VkShaderModule vs = make_module(vert_spv, sizeof vert_spv), fs = make_module(frag_spv, sizeof frag_spv);
@@ -453,17 +543,18 @@ TEST(nvn_pipe_records_what_the_game_made_and_reads_it_back_on_the_same_device)
         CHECK_EQ(b->k.spec[0][0], 7u);
     }
     char path[300];
-    snprintf(path, sizeof path, "%s/pipeline-keys.bin", dir);
+    snprintf(path, sizeof path, "%s/" ZU "/pipeline-keys.bin", dir);
     flip_byte(path, 8 + 3);
     nvn_pipe_init();
     CHECK_EQ(nvn_pipe_recorded(), 0u);
     unsetenv("RELIFT_PIPELINE_MODE");
     unsetenv("RELIFT_PIPELINE_CACHE");
+    nvn_pipe_cache_uuid_for_test(NULL);
     nvn_pipe_init();
     remove(path);
-    snprintf(path, sizeof path, "%s/pipeline-cache.bin", dir);
+    snprintf(path, sizeof path, "%s/" ZU "/pipeline-cache.bin", dir);
     remove(path);
-    rmdir(dir);
+    rm_cache_dir(dir);
     VK(vkDestroyShaderModule)(g.dev, vs, NULL);
     VK(vkDestroyShaderModule)(g.dev, fs, NULL);
 }

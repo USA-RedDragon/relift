@@ -18,6 +18,8 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <dirent.h>
+#include <unistd.h>
 
 #define CACHE_MAGIC "RLPLC001"
 #define CACHE_IDENTITY 112u
@@ -1093,21 +1095,164 @@ static void le32w(uint8_t *p, uint32_t v)
         p[i] = (uint8_t)(v >> (8 * i));
 }
 
-/** @brief The cache file's path, in the folder of the app's per-user data when the app is named, else the shader folder. */
-static bool cache_path(char *out, size_t n)
+/**
+ * @brief Each host driver's cache in a folder of its own, named by its pipelineCacheUUID (the key Vulkan gives for
+ * cache data a driver can read), so a switch to another driver package and back finds the first one's cache whole.
+ * The folders of the newest CACHE_KEEP drivers used are kept (cache_prune).
+ */
+#define CACHE_KEEP 3u
+
+/** @brief A pipelineCacheUUID set by nvn_pipe_cache_uuid_for_test, used in place of the driver's when set. */
+static uint8_t g_test_uuid[16];
+static bool g_test_uuid_on;
+
+void nvn_pipe_cache_uuid_for_test(const uint8_t *uuid)
+{
+    g_test_uuid_on = uuid != NULL;
+    if (uuid)
+        memcpy(g_test_uuid, uuid, 16);
+}
+
+/** @brief The folder that holds every driver's cache folder. */
+static void cache_root(char *dir, size_t n)
 {
     const char *env = getenv("RELIFT_PIPELINE_CACHE");
-    char dir[1024];
     if (env && *env) {
-        snprintf(dir, sizeof dir, "%s", env);
-    } else if (rl_settings_app() && rl_settings_user_dir(dir, sizeof dir, rl_settings_app())) {
+        snprintf(dir, n, "%s", env);
+    } else if (rl_settings_app() && rl_settings_user_dir(dir, n, rl_settings_app())) {
         size_t l = strlen(dir);
-        snprintf(dir + l, sizeof dir - l, "/pipeline-cache");
+        snprintf(dir + l, n - l, "/pipeline-cache");
     } else {
-        snprintf(dir, sizeof dir, "%s", nvn_shader_dir());
+        snprintf(dir, n, "%s", nvn_shader_dir());
     }
+}
+
+/** @brief The host driver's pipelineCacheUUID as 32 hex digits. */
+static void cache_uuid_hex(char hex[33])
+{
+    uint8_t u[16];
+    if (g_test_uuid_on) {
+        memcpy(u, g_test_uuid, 16);
+    } else {
+        VkPhysicalDeviceProperties dp;
+        VK(vkGetPhysicalDeviceProperties)(g.phys, &dp);
+        memcpy(u, dp.pipelineCacheUUID, 16);
+    }
+    for (int i = 0; i < 16; i++)
+        snprintf(hex + 2 * i, 3, "%02x", u[i]);
+}
+
+/** @brief The cache file's path, in the driver's folder (see CACHE_KEEP) under cache_root. */
+static bool cache_path(char *out, size_t n)
+{
+    char dir[1024], hex[33];
+    cache_root(dir, sizeof dir);
+    cache_uuid_hex(hex);
+    size_t l = strlen(dir);
+    snprintf(dir + l, sizeof dir - l, "/%s", hex);
     nvn_mkdirs(dir);
     return snprintf(out, n, "%s/pipeline-cache.bin", dir) < (int)n;
+}
+
+/** @brief The use count in a driver folder's "used" file (0 when none): a higher one was used later. */
+static uint64_t folder_used(const char *root, const char *name)
+{
+    char path[1100];
+    snprintf(path, sizeof path, "%s/%s/used", root, name);
+    FILE *f = fopen(path, "rb");
+    unsigned long long v = 0;
+    if (f) {
+        if (fscanf(f, "%llu", &v) != 1)
+            v = 0;
+        fclose(f);
+    }
+    return v;
+}
+
+static bool is_uuid_name(const char *s);
+
+/** @brief Marks the driver's folder as the one used last, one above every folder's use count, for cache_prune. */
+static void cache_mark_used(void)
+{
+    char root[1024], hex[33];
+    cache_root(root, sizeof root);
+    cache_uuid_hex(hex);
+    uint64_t top = 0;
+    DIR *dp = opendir(root);
+    struct dirent *e;
+    while (dp && (e = readdir(dp)))
+        if (is_uuid_name(e->d_name) && strcmp(e->d_name, hex)) {
+            uint64_t u = folder_used(root, e->d_name);
+            top = u > top ? u : top;
+        }
+    if (dp)
+        closedir(dp);
+    char path[1100];
+    snprintf(path, sizeof path, "%s/%s/used", root, hex);
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        fprintf(f, "%llu\n", (unsigned long long)(top + 1));
+        fclose(f);
+    }
+}
+
+static bool is_uuid_name(const char *s)
+{
+    size_t i = 0;
+    for (; s[i]; i++)
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')))
+            return false;
+    return i == 32;
+}
+
+/**
+ * @brief Keeps the cache folders of the CACHE_KEEP drivers used last (by their use counts, cache_mark_used) and
+ * removes the others, with the single-file cache of builds before the folders.
+ */
+static void cache_prune(void)
+{
+    char root[1024];
+    cache_root(root, sizeof root);
+    char old[1100];
+    snprintf(old, sizeof old, "%s/pipeline-cache.bin", root);
+    remove(old);
+    snprintf(old, sizeof old, "%s/pipeline-keys.bin", root);
+    remove(old);
+    DIR *dp = opendir(root);
+    if (!dp)
+        return;
+    struct {
+        char name[40];
+        uint64_t used;
+    } f[64];
+    uint32_t nf = 0;
+    struct dirent *e;
+    while ((e = readdir(dp)) && nf < 64) {
+        if (!is_uuid_name(e->d_name))
+            continue;
+        uint64_t used = folder_used(root, e->d_name);
+        snprintf(f[nf].name, sizeof f[nf].name, "%s", e->d_name);
+        f[nf++].used = used;
+    }
+    closedir(dp);
+    for (uint32_t i = 0; i < nf; i++) {
+        uint32_t newer = 0;
+        for (uint32_t j = 0; j < nf; j++)
+            if (f[j].used > f[i].used || (f[j].used == f[i].used && strcmp(f[j].name, f[i].name) > 0))
+                newer++;
+        if (newer < CACHE_KEEP)
+            continue;
+        char path[1100];
+        static const char *const files[] = { "pipeline-cache.bin", "pipeline-keys.bin", "pipeline-cache.bin.tmp",
+                                             "pipeline-keys.bin.tmp", "used" };
+        for (size_t k = 0; k < sizeof files / sizeof files[0]; k++) {
+            snprintf(path, sizeof path, "%s/%s/%s", root, f[i].name, files[k]);
+            remove(path);
+        }
+        snprintf(path, sizeof path, "%s/%s", root, f[i].name);
+        if (rmdir(path) == 0)
+            rl_log(RL_LOG_INFO, "nvn", "removed the pipeline cache of an older driver (%s)", f[i].name);
+    }
 }
 
 /** @brief Fills P.identity: what a cache file must have been made for to be read now. */
@@ -1165,6 +1310,8 @@ static void cache_load(void **data, size_t *len)
     }
     free(buf);
     fclose(f);
+    if (*data)
+        cache_mark_used();
     if (!*data)
         rl_log(RL_LOG_INFO, "nvn", "discarded the pipeline cache %s: made for another device, driver or shader table", path);
 }
@@ -1352,5 +1499,7 @@ static void save_locked(void)
     } else {
         P.loaded = n;
         rl_log(RL_LOG_INFO, "nvn", "wrote the pipeline cache: %.1f MiB", n / 1048576.0);
+        cache_mark_used();
+        cache_prune();
     }
 }

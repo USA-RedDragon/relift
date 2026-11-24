@@ -88,6 +88,8 @@ void nvn_pipe_init(void);
 
 /** @brief The bytes of driver cache data the last nvn_pipe_init read from the cache file or nvn_pipe_save wrote. */
 uint64_t nvn_pipe_cache_bytes(void);
+/** @brief For tests: the pipelineCacheUUID that picks the cache folder in place of the driver's; NULL restores it. */
+void nvn_pipe_cache_uuid_for_test(const uint8_t *uuid);
 
 /** @brief Whether graphics pipelines are linked from libraries on this device. */
 bool nvn_pipe_uses_libraries(void);
