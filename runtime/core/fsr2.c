@@ -367,7 +367,7 @@ static void dump(rl_fsr2 *f, uint64_t cmd, const rl_upscale_inputs *in)
     }
     uint32_t render[2] = { in->in.width, in->in.height };
     im[R_COUNT] = (rl_ffx_dump_image){ "transparency_and_composition_mask", f->composition ? f->composition_image : 0,
-                                       RLVK_FORMAT_R16_SFLOAT, w, h, true };
+                                       RLVK_FORMAT_R16_SFLOAT, in->in.width, in->in.height, false };
     rl_ffx_dump_record(f->dump, &f->vk, cmd, im, R_COUNT + 1, render, &f->c, sizeof f->c);
 }
 

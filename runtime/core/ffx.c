@@ -344,7 +344,7 @@ void rl_ffx_dump_record(rl_ffx_dump *d, const rl_ffx_vk *vk, uint64_t cmd, const
     rl_ffx_barrier(vk, cmd, cs, RLVK_ACCESS_SHADER_WRITE_BIT, xfer, RLVK_ACCESS_TRANSFER_READ_BIT);
     for (uint32_t i = 0; i < n && f->n < DUMP_IMAGES; i++) {
         uint32_t bpp = dump_bpp(images[i].format);
-        if (!bpp || !images[i].image)
+        if (!bpp || !images[i].image || !images[i].width || !images[i].height)
             continue;
         uint32_t k = f->n;
         rlvk_size size = (rlvk_size)images[i].width * images[i].height * bpp;

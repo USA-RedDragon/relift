@@ -12,9 +12,9 @@
  * frame's nearest sample saw is none of the four samples around its point now, another surface took the pixel (an
  * object arrived or left) and the mask is 1. Where the motion vectors are zero, the same test also runs against the
  * reference depth (a frame changemask.c picks every few frames), so a surface moving less than a pixel a frame shows
- * once it has moved enough. The mask stays 1 for the frame it is found and the HOLD - 1 frames after it and the HOLD - 1 frames after it (FSR's widened clamp
- * would otherwise keep what history the first frame let through next to the object). Depths match within FSR's own
- * disocclusion tolerance and the four samples cover the jitter, so a still picture, and a picture the motion vectors describe (a camera pan), give 0.
+ * once it has moved enough. The mask then fades by DECAY a frame. Depths match within FSR's own disocclusion
+ * tolerance and the four samples cover the jitter, so a still picture, and a picture the motion vectors describe (a
+ * camera pan), give 0.
  */
 #extension GL_EXT_samplerless_texture_functions : require
 
@@ -54,8 +54,12 @@ const int PREVIOUS = 1;
 const int REFERENCE = 2;
 const int REFRESH = 4;
 
-/** @brief Frames a pixel stays in the mask after another surface took it. */
-const float HOLD = 4.0;
+/**
+ * @brief What is left of a pixel's mask a frame later: the frame another surface takes a pixel drops its history; the
+ * frames after it accumulate again, so edges regain their anti-aliasing within a
+ * few frames while the stale history the first frame let through fades out.
+ */
+const float DECAY = 0.7;
 
 float view_depth(float d)
 {
@@ -116,8 +120,8 @@ void main()
                 float slow = 1.0 - min(likeness(z, at, REF), likeness(zr, vec2(p) + 0.5 - pc.reference_shift, NOW));
                 moved = max(moved, slow);
             }
-            hold = moved > 0.5 ? HOLD : max(texelFetch(previous_hold, q, 0).r - 1.0, 0.0);
-            mask = hold > 0.0 ? 1.0 : moved;
+            hold = max(moved, texelFetch(previous_hold, q, 0).r * DECAY);
+            mask = hold;
         }
     }
     imageStore(mask_out, p, vec4(mask));

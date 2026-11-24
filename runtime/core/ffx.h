@@ -130,8 +130,9 @@ void rl_ffx_clear(const rl_ffx_vk *vk, uint64_t cmd, rlvk_handle image, float r,
 void rl_ffx_rcas(float sharpness, uint32_t rcas[4]);
 
 /**
- * @brief One of a port's own images to dump: its FidelityFX resource name, image, format and size, and whether it is a
- * render-size image (allocated at the maximum render size, used over the frame's render size).
+ * @brief One of a port's own images to dump: its FidelityFX resource name, image, format and the size copied (at most
+ * the image's own), and whether it is a render-size image (allocated at the maximum render size, used over the frame's
+ * render size).
  */
 typedef struct rl_ffx_dump_image {
     const char *name;
