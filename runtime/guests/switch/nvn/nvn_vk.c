@@ -1310,6 +1310,8 @@ static struct {
     const vimg *images[MAX_RT + 1];
     /** @brief The level and layer each color target renders to (the flash trigger's thumbnails). */
     uint32_t level[MAX_RT], layer[MAX_RT];
+    /** @brief What wrote the pass's targets, for the flash trigger's thumbnails: "clear" for a texture clear, else NULL (a pass of draws). */
+    const char *what;
     bool has_depth, has_stencil;
     VkRect2D area;
     /** @brief The layers it renders (more than 1 for a layered draw's 2D array views). */
@@ -1477,7 +1479,7 @@ void nvn_vk_end_rendering(void)
     if (nvn_flash_on()) {
         for (uint32_t i = 0; i < open_pass.ncolor; i++)
             nvn_flash_wrote(open_pass.images[i], open_pass.level[i], open_pass.layer[i]);
-        nvn_flash_thumbs(NULL, "pass");
+        nvn_flash_thumbs(NULL, open_pass.what ? open_pass.what : "pass");
     }
 }
 
@@ -3218,6 +3220,7 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
     nvn_vk_begin(r);
     VK(vkCmdBeginRendering)(g.cb, &ri);
     open_pass.open = true;
+    open_pass.what = NULL;
     open_pass.ncolor = r->st->ncolor;
     memset(open_pass.images, 0, sizeof open_pass.images);
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
@@ -3771,23 +3774,30 @@ static int clear_texture(replay *r, const nvn_cmd *e)
     int rc = copy_side(r, e->x[2], rg, &level, &layer);
     if (rc != RL_OK)
         return rc;
+    VkRect2D clear = { { rg->x, rg->y }, { (uint32_t)rg->width, (uint32_t)rg->height } };
+    return nvn_vk_clear_image(r, v, level, layer, rg->depth > 1 ? (uint32_t)rg->depth : 1, clear, val,
+                              nvn_cmd_name(e->op));
+}
+
+int nvn_vk_clear_image(replay *r, vimg *v, uint32_t level, uint32_t layer, uint32_t layers, VkRect2D clear,
+                       const uint8_t val[16], const char *what)
+{
     nvn_vk_written(v);
     rt saved_color = r->st->color[0], saved_depth = r->st->depth;
     uint32_t saved_n = r->st->ncolor;
-    VkRect2D clear = { { rg->x, rg->y }, { (uint32_t)rg->width, (uint32_t)rg->height } };
-    uint32_t layers = rg->depth > 1 ? (uint32_t)rg->depth : 1;
     for (uint32_t i = 0; i < layers; i++) {
         rt t = { .v = v, .level = level, .layer = layer + i, .format = v->format };
         VkImageSubresourceRange rr = range_of(v);
         t.view = rr.levelCount == 1 && rr.layerCount == 1 ? v->view : sub_view(v, level, layer + i, 1, v->format);
         if (!t.view)
-            return nvn_vk_stop(r, "no host view of the texture %s clears", nvn_cmd_name(e->op));
+            return nvn_vk_stop(r, "no host view of the texture %s clears", what);
         r->st->ncolor = 1;
         r->st->color[0] = t;
         r->st->depth = (rt){ 0 };
         VkRect2D area;
         if (!nvn_vk_begin_rendering(r, &area))
-            return nvn_vk_stop(r, "%s without a target", nvn_cmd_name(e->op));
+            return nvn_vk_stop(r, "%s without a target", what);
+        open_pass.what = "clear";
         VkClearAttachment ca = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0 };
         memcpy(&ca.clearValue.color, val, 16);
         VkClearRect cr = { .rect = clear, .layerCount = 1 };

@@ -508,6 +508,18 @@ const char *nvn_draw_last(void);
 void nvn_trace_ring_note(replay *r, const nvn_cmd *e);
 /** @brief Logs the present's commands so far (the last most of them, 0 for up to 8192), after the line why. */
 void nvn_trace_ring_dump(const char *why, uint32_t most);
+/**
+ * @brief Clears layers layers of level level of v from layer, within the rect clear, to the color val (16 bytes in
+ * the image's format), one host pass per layer; what names the command in errors. The clear of nvnCommandBufferClearTexture.
+ */
+int nvn_vk_clear_image(replay *r, vimg *v, uint32_t level, uint32_t layer, uint32_t layers, VkRect2D clear,
+                       const uint8_t val[16], const char *what);
+/**
+ * @brief Thumbnail k of frame number frame: what wrote it and the image's storage, level and layer; false past the
+ * last one or for a frame the ring no longer holds.
+ */
+bool nvn_flash_thumb_of(uint64_t frame, uint32_t k, const char **what, uint64_t *storage, uint32_t *level,
+                        uint32_t *layer);
 /** @brief The flash trigger is on (RELIFT_NVN_FLASH, nvn_flash.c); the first call reads the setting. */
 bool nvn_flash_on(void);
 /** @brief Notes that the GPU wrote level and layer of v: the next nvn_flash_thumbs takes its thumbnail. */

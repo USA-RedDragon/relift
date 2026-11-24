@@ -4,14 +4,18 @@
  * attachments share one host pass, and the pass ends, with its barrier, only
  * where the game changes targets, calls a barrier or reads a target the pass
  * drew into; dispatches the game puts no barrier between run without one unless
- * one touches what another writes. The device calls go to recording stand-ins.
+ * one touches what another writes. With the flash trigger on, a texture clear's passes and a pass of draws each
+ * leave a thumbnail record of the level and layer they wrote. The device calls go to recording stand-ins.
  */
 #include "nvn_priv.h"
 #include "nvn_vk.h"
 #include "runner.h"
 
+#include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static struct {
     unsigned begins, ends, barriers;
@@ -548,4 +552,118 @@ TEST(nvn_clears_obey_the_render_enable)
     CHECK_EQ(g_clears, 2);
     teardown(&f);
     free(s);
+}
+
+static unsigned g_blits;
+
+static VkResult fake_image(VkDevice d, const VkImageCreateInfo *ci, const VkAllocationCallbacks *a, VkImage *out)
+{
+    (void)d, (void)ci, (void)a;
+    *out = (VkImage)(uintptr_t)0x7000;
+    return VK_SUCCESS;
+}
+
+static void fake_reqs(VkDevice d, VkImage i, VkMemoryRequirements *req)
+{
+    (void)d, (void)i;
+    *req = (VkMemoryRequirements){ .size = 4096, .alignment = 256, .memoryTypeBits = 1 };
+}
+
+static VkResult fake_alloc(VkDevice d, const VkMemoryAllocateInfo *ai, const VkAllocationCallbacks *a, VkDeviceMemory *m)
+{
+    (void)d, (void)ai, (void)a;
+    *m = (VkDeviceMemory)(uintptr_t)0x8000;
+    return VK_SUCCESS;
+}
+
+static VkResult fake_bind(VkDevice d, VkImage i, VkDeviceMemory m, VkDeviceSize o)
+{
+    (void)d, (void)i, (void)m, (void)o;
+    return VK_SUCCESS;
+}
+
+static void fake_clear_color(VkCommandBuffer cb, VkImage i, VkImageLayout l, const VkClearColorValue *c, uint32_t n,
+                             const VkImageSubresourceRange *r)
+{
+    (void)cb, (void)i, (void)l, (void)c, (void)n, (void)r;
+}
+
+static void fake_clear_attachments(VkCommandBuffer cb, uint32_t na, const VkClearAttachment *a, uint32_t nr,
+                                   const VkClearRect *r)
+{
+    (void)cb, (void)na, (void)a, (void)nr, (void)r;
+    g_clears++;
+}
+
+static void fake_blit(VkCommandBuffer cb, VkImage s, VkImageLayout sl, VkImage d, VkImageLayout dl, uint32_t n,
+                      const VkImageBlit *b, VkFilter f)
+{
+    (void)cb, (void)s, (void)sl, (void)d, (void)dl, (void)b, (void)f;
+    g_blits += n;
+}
+
+static void fake_format(VkPhysicalDevice p, VkFormat f, VkFormatProperties *out)
+{
+    (void)p, (void)f;
+    *out = (VkFormatProperties){ .optimalTilingFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT };
+}
+
+TEST(nvn_flash_thumbnails_name_a_texture_clear_and_each_layer_it_wrote)
+{
+    static fixture f;
+    setup(&f);
+    char dir[PATH_MAX];
+    const char *base = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/relift-flash-%d", base && *base ? base : "/tmp", (int)getpid());
+    setenv("RELIFT_NVN_FLASH", dir, 1);
+    g.fns.f[VKG_vkCreateImage] = (void (*)(void))fake_image;
+    g.fns.f[VKG_vkGetImageMemoryRequirements] = (void (*)(void))fake_reqs;
+    g.fns.f[VKG_vkAllocateMemory] = (void (*)(void))fake_alloc;
+    g.fns.f[VKG_vkBindImageMemory] = (void (*)(void))fake_bind;
+    g.fns.f[VKG_vkCmdClearColorImage] = (void (*)(void))fake_clear_color;
+    g.fns.f[VKG_vkCmdClearAttachments] = (void (*)(void))fake_clear_attachments;
+    g.fns.f[VKG_vkCmdBlitImage] = (void (*)(void))fake_blit;
+    g.fns.f[VKG_vkGetPhysicalDeviceFormatProperties] = (void (*)(void))fake_format;
+    g.memprops.memoryTypeCount = 1;
+    g.memprops.memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    g.presents = 7;
+    CHECK(nvn_flash_on());
+    static vimg arr;
+    array_image(&arr, 0x40000);
+    arr.d.width = 64;
+    arr.d.height = 32;
+    arr.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    arr.format = VK_FORMAT_R8G8B8A8_UNORM;
+    arr.image = (VkImage)(uintptr_t)0x6000;
+    f.a.storage = 0x10000;
+    f.a.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    f.a.format = VK_FORMAT_R8G8B8A8_UNORM;
+    f.a.image = (VkImage)(uintptr_t)0x6100;
+    static const uint8_t black[16];
+    CHECK_EQ(nvn_vk_clear_image(&f.r, &arr, 1, 0, 2, (VkRect2D){ { 0, 0 }, { 32, 16 } }, black, "clear"), RL_OK);
+    CHECK_EQ(g_clears, 2u);
+    CHECK(f.st.color[0].v == &f.a);
+    VkRect2D area;
+    CHECK(nvn_vk_begin_rendering(&f.r, &area));
+    nvn_vk_end_rendering();
+    const char *what;
+    uint64_t storage;
+    uint32_t level, layer;
+    CHECK(nvn_flash_thumb_of(7, 0, &what, &storage, &level, &layer));
+    CHECK(!strcmp(what, "clear"));
+    CHECK_EQ(storage, 0x40000);
+    CHECK_EQ(level, 1);
+    CHECK_EQ(layer, 0);
+    CHECK(nvn_flash_thumb_of(7, 1, &what, &storage, &level, &layer));
+    CHECK(!strcmp(what, "clear"));
+    CHECK_EQ(layer, 1);
+    CHECK(nvn_flash_thumb_of(7, 2, &what, &storage, &level, &layer));
+    CHECK(!strcmp(what, "pass"));
+    CHECK_EQ(storage, 0x10000);
+    CHECK(!nvn_flash_thumb_of(7, 3, &what, &storage, &level, &layer));
+    CHECK(!nvn_flash_thumb_of(6, 0, &what, &storage, &level, &layer));
+    CHECK_EQ(g_blits, 3u);
+    teardown(&f);
+    unsetenv("RELIFT_NVN_FLASH");
+    rmdir(dir);
 }

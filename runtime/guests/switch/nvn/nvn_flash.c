@@ -6,8 +6,8 @@
  * presented picture to RL_JUMP_SIG_W by RL_JUMP_SIG_H, luminance read back after the present's own wait) for the
  * frame jump detector (core/framejump.h; <threshold> in luminance steps, default 10). The last NVN_TRACE_RING presents
  * are kept on the GPU in three forms: the presented picture, a thumbnail of every image the frame wrote (each render
- * pass's targets when the pass ends, each dispatch's storage images, the outputs of copies and upscaler
- * evaluations, each upload's image), and the frame trace ring's lines (nvn_trace.c). When a present is an outlier,
+ * pass's targets when the pass ends, labeled "clear" for a texture clear's passes, each dispatch's storage images, the
+ * outputs of copies and upscaler evaluations, each upload's image), and the frame trace ring's lines (nvn_trace.c). When a present is an outlier,
  * <dir>/flash-<present>/ gets, for the present before it, it and the one after it: present-<n>.png, thumbs-<n>.png (a
  * grid of THUMB_W by THUMB_H tiles, THUMB_COLS to a row, in the order the frame wrote them), thumbs-<n>.jsonl (one
  * line per tile: the trace line it follows, what wrote it, the image's storage, format, size, level and layer) and
@@ -284,6 +284,20 @@ void nvn_flash_thumbs(replay *r, const char *what)
     }
     fl.npending = 0;
     nvn_vk_barrier(g.cb);
+}
+
+bool nvn_flash_thumb_of(uint64_t frame, uint32_t k, const char **what, uint64_t *storage, uint32_t *level,
+                        uint32_t *layer)
+{
+    uint32_t slot = (uint32_t)(frame % NVN_TRACE_RING);
+    if (!fl.on || fl.thumb_frame[slot] != frame || k >= fl.nthumbs[slot])
+        return false;
+    const thumb *t = &fl.thumbs[slot][k];
+    *what = t->what;
+    *storage = t->storage;
+    *level = t->level;
+    *layer = t->layer;
+    return true;
 }
 
 void nvn_flash_image_gone(const vimg *v)
