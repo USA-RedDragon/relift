@@ -309,6 +309,8 @@ typedef struct repeat {
     uint64_t heap;
     int want;
     bool step;
+    /** @brief Hits whose stop reply named a thread other than 1. */
+    int from_b;
     int seen;
     int bad;
     bool ok;
@@ -329,8 +331,11 @@ static void *repeat_client(void *arg)
         snprintf(w, sizeof w, "watch:%llx;", (unsigned long long)(s->heap + 0x40));
         for (int i = 0; s->ok && i < s->want; i++) {
             s->ok = ask(fd, "vCont;c", r, sizeof r);
-            if (s->ok && strstr(r, w))
+            if (s->ok && strstr(r, w)) {
                 s->seen++;
+                if (strncmp(r, "T05thread:1;", 12) != 0)
+                    s->from_b++;
+            }
             else
                 s->bad++;
             if (s->step && s->ok) {
@@ -352,7 +357,31 @@ static void *repeat_client(void *arg)
     return NULL;
 }
 
-static void continue_after_watch_hits(bool step, int port_bias)
+/** @brief Which guest threads write the watched word in continue_after_watch_hits. */
+enum { WRITER_MAIN = 1, WRITER_B = 2 };
+
+/** @brief Thread B's state: its heap, its writes done, and the thread id its hits named. */
+static struct {
+    uint64_t heap;
+    int rounds;
+    volatile int done;
+} g_b;
+
+/** @brief Thread B: each round writes another word of the watched page, then the watched word. */
+static uint64_t b_writer(rl_ctx *c, uint8_t *mem)
+{
+    (void)c;
+    for (int i = 0; i < g_b.rounds; i++) {
+        hos_sched_point();
+        rl_st64(mem, g_b.heap + 0x90, (uint64_t)i);
+        rl_st64(mem, g_b.heap + 0x40, (uint64_t)i);
+        usleep(2000);
+    }
+    __atomic_store_n(&g_b.done, 1, __ATOMIC_RELEASE);
+    return RL_OK;
+}
+
+static void continue_after_watch_hits(bool step, int port_bias, int writers)
 {
     enum { ROUNDS = 40 };
     rl_ctx *c = t_boot(NULL);
@@ -363,30 +392,60 @@ static void continue_after_watch_hits(bool step, int port_bias)
     CHECK(rl_gdb_start(rl_arm64_gdb(), hos_gdb_guest()));
     s.heap = t_heap(c, 0x200000);
     uint8_t *m = t_mem();
+    uint32_t handle = 0;
+    if (writers & WRITER_B) {
+        rl_fn fn = b_writer;
+        uint64_t addr = t_code(0);
+        t_guest_fns(&addr, &fn, 1);
+        g_b.heap = s.heap;
+        g_b.rounds = ROUNDS;
+        g_b.done = 0;
+        CHECK_EQ(t_svc(c, SVC_CREATE_THREAD, 0, addr, 0, s.heap + 0x100000, 44, 1), 0u);
+        handle = (uint32_t)c->x[1];
+        CHECK_EQ(t_svc(c, SVC_START_THREAD, handle, 0, 0, 0, 0, 0), 0u);
+    }
     pthread_t th;
     CHECK_EQ(pthread_create(&th, NULL, repeat_client, &s), 0);
-    /* Each round writes another word of the watched page (never a hit), then the watched word. */
     int round = 0;
     while (round < ROUNDS) {
         hos_sched_point();
-        rl_st64(m, s.heap + 0x80, (uint64_t)round);
-        rl_st64(m, s.heap + 0x40, (uint64_t)round);
+        if (writers & WRITER_MAIN) {
+            rl_st64(m, s.heap + 0x80, (uint64_t)round);
+            rl_st64(m, s.heap + 0x40, (uint64_t)round);
+        }
         round++;
         usleep(2000);
     }
     while (!__atomic_load_n(&s.done, __ATOMIC_ACQUIRE))
         hos_sched_point();
     pthread_join(th, NULL);
+    if (writers & WRITER_B) {
+        while (!__atomic_load_n(&g_b.done, __ATOMIC_ACQUIRE))
+            hos_sched_point();
+        CHECK_EQ(rl_ld64(m, s.heap + 0x90), (uint64_t)(ROUNDS - 1));
+    }
     CHECK(s.ok);
     CHECK_EQ(s.seen, 6);
     CHECK_EQ(s.bad, 0);
     CHECK_EQ(round, (int)ROUNDS);
-    CHECK_EQ(rl_ld64(m, s.heap + 0x80), (uint64_t)(ROUNDS - 1));
+    if (writers & WRITER_MAIN)
+        CHECK_EQ(rl_ld64(m, s.heap + 0x80), (uint64_t)(ROUNDS - 1));
+    if (writers == WRITER_B)
+        CHECK_EQ(s.from_b, 6);
 }
 
-TEST(gdb_server_continues_after_each_write_watch_hit) { continue_after_watch_hits(false, 13); }
+TEST(gdb_server_continues_after_each_write_watch_hit) { continue_after_watch_hits(false, 13, WRITER_MAIN); }
 
-TEST(gdb_server_steps_over_a_write_watch_hit_and_continues) { continue_after_watch_hits(true, 17); }
+TEST(gdb_server_steps_over_a_write_watch_hit_and_continues) { continue_after_watch_hits(true, 17, WRITER_MAIN); }
+
+TEST(gdb_server_reports_a_write_watch_hit_of_a_second_thread) { continue_after_watch_hits(false, 23, WRITER_B); }
+
+TEST(gdb_server_continues_after_both_threads_hit_a_write_watch)
+{
+    continue_after_watch_hits(false, 29, WRITER_MAIN | WRITER_B);
+}
+
+TEST(gdb_server_steps_over_hits_of_two_threads) { continue_after_watch_hits(true, 31, WRITER_MAIN | WRITER_B); }
 #endif
 
 #endif
