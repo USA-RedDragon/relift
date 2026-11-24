@@ -1,8 +1,9 @@
 /**
  * @file test_nvn_dispatch.c
- * @brief The indirect compute dispatch the replay records (nvn_vk_dispatch_indirect): a dispatch earlier in the same
- * command buffer writes the group counts, and the indirect dispatch runs that many groups and finds the counts in its
- * copy of the driver table.
+ * @brief Compute dispatches the replay records: the indirect dispatch (nvn_vk_dispatch_indirect), where a dispatch
+ * earlier in the same command buffer writes the group counts and the indirect dispatch runs that many groups and finds
+ * the counts in its copy of the driver table; and the shared memory a dispatch gives a program, the size its GLSLC
+ * control section declares (nvn_compute_shared_words).
  */
 #include "nvn/nvn_priv.h"
 #include "nvn/nvn_vk.h"
@@ -176,6 +177,153 @@ TEST(nvn_indirect_dispatch_runs_the_groups_an_earlier_dispatch_wrote)
     CHECK_EQ(rl_ld32(m, at + 0x304), 3u);
     CHECK_EQ(rl_ld32(m, at + 0x308), 2u);
     CHECK_EQ(rl_ld32(m, at + 0x30c), 1u);
+    VK(vkDestroyPipeline)(g.dev, pipe, NULL);
+    VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
+    VK(vkDestroyShaderModule)(g.dev, sm, NULL);
+}
+
+/**
+ * @brief Compute program (glslang, SPIR-V 1.5), 64 invocations, its shared array as long as specialization constant 3
+ * says: invocation i writes i * 7 + 1 to the array's word length - 64 + i, then after a barrier copies the word of
+ * invocation (i + 1) % 64 to out[i]; invocation 0 writes the length to out[64].
+ */
+static const uint32_t top_spv[] = {
+    0x07230203, 0x00010500, 0x000d000b, 0x00000043, 0x00000000, 0x00020011,
+    0x00000001, 0x00020011, 0x0000000b, 0x00020011, 0x000014e3, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
+    0x000014e4, 0x00000001, 0x0008000f, 0x00000005, 0x00000004, 0x6e69616d,
+    0x00000000, 0x0000000a, 0x0000000f, 0x00000025, 0x00060010, 0x00000004,
+    0x00000011, 0x00000040, 0x00000001, 0x00000001, 0x00040047, 0x0000000a,
+    0x0000000b, 0x0000001d, 0x00040047, 0x0000000c, 0x00000001, 0x00000003,
+    0x00040047, 0x0000001e, 0x00000006, 0x00000004, 0x00030047, 0x0000001f,
+    0x00000002, 0x00050048, 0x0000001f, 0x00000000, 0x00000023, 0x00000000,
+    0x00030047, 0x00000023, 0x00000002, 0x00050048, 0x00000023, 0x00000000,
+    0x00000023, 0x00000000, 0x00040047, 0x00000042, 0x0000000b, 0x00000019,
+    0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00040015,
+    0x00000006, 0x00000020, 0x00000000, 0x00040020, 0x00000009, 0x00000001,
+    0x00000006, 0x0004003b, 0x00000009, 0x0000000a, 0x00000001, 0x00040032,
+    0x00000006, 0x0000000c, 0x00000001, 0x0004001c, 0x0000000d, 0x00000006,
+    0x0000000c, 0x00040020, 0x0000000e, 0x00000004, 0x0000000d, 0x0004003b,
+    0x0000000e, 0x0000000f, 0x00000004, 0x0004002b, 0x00000006, 0x00000010,
+    0x00000040, 0x00060034, 0x00000006, 0x00000011, 0x00000082, 0x0000000c,
+    0x00000010, 0x0004002b, 0x00000006, 0x00000015, 0x00000007, 0x0004002b,
+    0x00000006, 0x00000017, 0x00000001, 0x00040020, 0x00000019, 0x00000004,
+    0x00000006, 0x0004002b, 0x00000006, 0x0000001b, 0x00000002, 0x0004002b,
+    0x00000006, 0x0000001c, 0x00000108, 0x00030027, 0x0000001d, 0x000014e5,
+    0x0003001d, 0x0000001e, 0x00000006, 0x0003001e, 0x0000001f, 0x0000001e,
+    0x00040020, 0x0000001d, 0x000014e5, 0x0000001f, 0x00040015, 0x00000022,
+    0x00000040, 0x00000000, 0x0003001e, 0x00000023, 0x00000022, 0x00040020,
+    0x00000024, 0x00000009, 0x00000023, 0x0004003b, 0x00000024, 0x00000025,
+    0x00000009, 0x00040015, 0x00000026, 0x00000020, 0x00000001, 0x0004002b,
+    0x00000026, 0x00000027, 0x00000000, 0x00040020, 0x00000028, 0x00000009,
+    0x00000022, 0x00060034, 0x00000006, 0x0000002e, 0x00000082, 0x0000000c,
+    0x00000010, 0x0004002b, 0x00000006, 0x00000031, 0x0000003f, 0x00040020,
+    0x00000036, 0x000014e5, 0x00000006, 0x0004002b, 0x00000006, 0x00000039,
+    0x00000000, 0x00020014, 0x0000003a, 0x0004002b, 0x00000026, 0x0000003f,
+    0x00000040, 0x00040017, 0x00000041, 0x00000006, 0x00000003, 0x0006002c,
+    0x00000041, 0x00000042, 0x00000010, 0x00000017, 0x00000017, 0x00050036,
+    0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005,
+    0x0004003d, 0x00000006, 0x0000000b, 0x0000000a, 0x00050080, 0x00000006,
+    0x00000013, 0x00000011, 0x0000000b, 0x00050084, 0x00000006, 0x00000016,
+    0x0000000b, 0x00000015, 0x00050080, 0x00000006, 0x00000018, 0x00000016,
+    0x00000017, 0x00050041, 0x00000019, 0x0000001a, 0x0000000f, 0x00000013,
+    0x0003003e, 0x0000001a, 0x00000018, 0x000400e0, 0x0000001b, 0x0000001b,
+    0x0000001c, 0x00050041, 0x00000028, 0x00000029, 0x00000025, 0x00000027,
+    0x0004003d, 0x00000022, 0x0000002a, 0x00000029, 0x00040078, 0x0000001d,
+    0x0000002b, 0x0000002a, 0x00050080, 0x00000006, 0x00000030, 0x0000000b,
+    0x00000017, 0x000500c7, 0x00000006, 0x00000032, 0x00000030, 0x00000031,
+    0x00050080, 0x00000006, 0x00000033, 0x0000002e, 0x00000032, 0x00050041,
+    0x00000019, 0x00000034, 0x0000000f, 0x00000033, 0x0004003d, 0x00000006,
+    0x00000035, 0x00000034, 0x00060041, 0x00000036, 0x00000037, 0x0000002b,
+    0x00000027, 0x0000000b, 0x0005003e, 0x00000037, 0x00000035, 0x00000002,
+    0x00000004, 0x000500aa, 0x0000003a, 0x0000003b, 0x0000000b, 0x00000039,
+    0x000300f7, 0x0000003d, 0x00000000, 0x000400fa, 0x0000003b, 0x0000003c,
+    0x0000003d, 0x000200f8, 0x0000003c, 0x00060041, 0x00000036, 0x00000040,
+    0x0000002b, 0x00000027, 0x0000003f, 0x0005003e, 0x00000040, 0x0000000c,
+    0x00000002, 0x00000004, 0x000200f9, 0x0000003d, 0x000200f8, 0x0000003d,
+    0x000100fd, 0x00010038,
+};
+
+TEST(nvn_compute_shared_memory_is_the_size_the_control_section_declares)
+{
+    uint8_t ctl[0x100];
+    memset(ctl, 0, sizeof ctl);
+    uint32_t words = 0;
+    rl_st32(ctl, NVN_CONTROL_SHARED_BYTES, 0x6000);
+    CHECK(nvn_compute_shared_words(ctl, 0, 49152, &words));
+    CHECK_EQ(words, 0x1800u);
+    rl_st32(ctl, NVN_CONTROL_SHARED_BYTES, 608);
+    CHECK(nvn_compute_shared_words(ctl, 0, 49152, &words));
+    CHECK_EQ(words, 152u);
+    rl_st32(ctl, NVN_CONTROL_SHARED_BYTES, 6);
+    CHECK(nvn_compute_shared_words(ctl, 0, 49152, &words));
+    CHECK_EQ(words, 2u);
+    rl_st32(ctl, NVN_CONTROL_SHARED_BYTES, 0);
+    CHECK(nvn_compute_shared_words(ctl, 0, 49152, &words));
+    CHECK_EQ(words, 1u);
+    rl_st32(ctl, NVN_CONTROL_SHARED_BYTES, 49156);
+    CHECK(!nvn_compute_shared_words(ctl, 0, 49152, &words));
+}
+
+TEST(nvn_a_program_writing_at_the_top_of_its_declared_shared_memory_keeps_its_data)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint64_t hp = hos.vm.host_page;
+    uint64_t at = (heap + 0x20000 + hp - 1) / hp * hp, size = 4 * hp, pool = heap + 0x100;
+    uint8_t *m = t_mem();
+    CHECK(nvn_pool_make(pool, at, size, 0));
+    uint64_t gpu = nvn_pool_gpu(pool);
+    bool up = gpu != at;
+    CHECK(up || !getenv("RELIFT_VK_REQUIRE"));
+    if (!up) {
+        printf("  skipped: no host Vulkan device imports the pool\n");
+        return;
+    }
+    /* The control section of a program declaring 0x5e80 + 64 * 4 bytes, past the 16 KiB a dispatch gave before. */
+    uint64_t ctl = heap + 0x10000;
+    memset(m + ctl, 0, 0x100);
+    rl_st32(m, ctl + NVN_CONTROL_SHARED_BYTES, 0x5e80 + 0x100);
+    uint32_t words = 0;
+    CHECK(nvn_compute_shared_words(m, ctl, g.max_compute_shared, &words));
+    CHECK_EQ(words, (0x5e80u + 0x100u) / 4u);
+    memset(m + at, 0, 0x400);
+    VkSpecializationMapEntry se = { NVN_SHARED_SPEC, 0, 4 };
+    VkSpecializationInfo si = { .mapEntryCount = 1, .pMapEntries = &se, .dataSize = 4, .pData = &words };
+    VkShaderModuleCreateInfo smi = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                     .codeSize = sizeof top_spv,
+                                     .pCode = top_spv };
+    VkPushConstantRange pcr = { .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 8 };
+    VkPipelineLayoutCreateInfo pli = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                       .pushConstantRangeCount = 1,
+                                       .pPushConstantRanges = &pcr };
+    VkShaderModule sm = 0;
+    VkPipelineLayout pl = 0;
+    VkPipeline pipe = 0;
+    CHECK_EQ(VK(vkCreateShaderModule)(g.dev, &smi, NULL, &sm), VK_SUCCESS);
+    CHECK_EQ(VK(vkCreatePipelineLayout)(g.dev, &pli, NULL, &pl), VK_SUCCESS);
+    VkComputePipelineCreateInfo cpi = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                        .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                                                   .module = sm,
+                                                   .pName = "main",
+                                                   .pSpecializationInfo = &si },
+                                        .layout = pl };
+    CHECK_EQ(VK(vkCreateComputePipelines)(g.dev, NULL, 1, &cpi, NULL, &pipe), VK_SUCCESS);
+    replay r;
+    memset(&r, 0, sizeof r);
+    r.c = c;
+    r.mem = m;
+    CHECK(nvn_vk_begin(&r));
+    uint64_t out = gpu + 0x100;
+    VK(vkCmdBindPipeline)(g.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    VK(vkCmdPushConstants)(g.cb, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof out, &out);
+    VK(vkCmdDispatch)(g.cb, 1, 1, 1);
+    nvn_vk_barrier(g.cb);
+    CHECK(nvn_vk_flush(&r));
+    for (uint32_t i = 0; i < 64; i++)
+        CHECK_EQ(rl_ld32(m, at + 0x100 + 4 * i), ((i + 1) & 63) * 7 + 1);
+    CHECK_EQ(rl_ld32(m, at + 0x100 + 4 * 64), words);
     VK(vkDestroyPipeline)(g.dev, pipe, NULL);
     VK(vkDestroyPipelineLayout)(g.dev, pl, NULL);
     VK(vkDestroyShaderModule)(g.dev, sm, NULL);

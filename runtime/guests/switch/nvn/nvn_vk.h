@@ -233,6 +233,8 @@ typedef struct nvn_vkdev {
     uint32_t max_stage_storage;
     /** @brief maxPerStageDescriptorUniformBuffers of the device (31 on MoltenVK). */
     uint32_t max_stage_uniform;
+    /** @brief maxComputeSharedMemorySize of the device, in bytes. */
+    uint32_t max_compute_shared;
     /** @brief VkPhysicalDeviceLimits::minStorageBufferOffsetAlignment. */
     uint64_t storage_align;
     /** @brief vkCmdDrawMeshTasksEXT (loaded with the device when the extension is on). */
@@ -1018,6 +1020,20 @@ bool nvn_draw_geometry_input_ok(uint32_t mode);
  */
 /** @brief The driver bank c[0] of graphics stage s (see nvn_draw.c): its storage buffers where the driver's per-stage table puts them. */
 void nvn_graphics_table(const nvn_gfx *st, uint32_t s, uint8_t c0[NVN_GFX_C0_BYTES]);
+/** @brief Where a GLSLC control section holds a compute program's shared memory size in bytes. */
+#define NVN_CONTROL_SHARED_BYTES 0x64u
+/** @brief The translator's specialization constant of the shared memory length in words (SHARED_SPEC). */
+#define NVN_SHARED_SPEC 3u
+
+/**
+ * @brief The shared memory words of the compute program whose GLSLC control section is at guest address ctl, for the
+ * translation's SHARED_SPEC: the size the compiler declared (control section +0x64, the size the console's driver
+ * gives the dispatch; read in four games, it covers every constant shared offset each program's guarded accesses
+ * reach), rounded up to a word, at least one word. False when it is more than limit bytes, the device's
+ * maxComputeSharedMemorySize: the program cannot run with its shared memory there.
+ */
+bool nvn_compute_shared_words(const uint8_t *mem, uint64_t ctl, uint32_t limit, uint32_t *words);
+
 bool nvn_compute_table(const nvn_gfx *st, const uint32_t groups[3], uint32_t nubo, uint32_t nssbo, uint32_t ntex,
                        uint32_t nimg, uint32_t end, uint8_t c0[NVN_BANK2_BYTES], uint32_t *img_lo,
                        uint32_t *table_end);

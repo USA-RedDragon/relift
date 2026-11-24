@@ -552,6 +552,7 @@ static void bring_up(void)
         g.max_storage_range = dp.limits.maxStorageBufferRange;
         g.max_stage_storage = dp.limits.maxPerStageDescriptorStorageBuffers;
         g.max_stage_uniform = dp.limits.maxPerStageDescriptorUniformBuffers;
+        g.max_compute_shared = dp.limits.maxComputeSharedMemorySize;
         g.storage_align = dp.limits.minStorageBufferOffsetAlignment ? dp.limits.minStorageBufferOffsetAlignment : 16;
         g.max_index_value = dp.limits.maxDrawIndexedIndexValue;
     }

@@ -2578,6 +2578,15 @@ static void note_last(const char *kind, module *const *mods, uint32_t n)
             at += snprintf(d.last + at, sizeof d.last - (size_t)at, " %.8s", mods[s]->key);
 }
 
+bool nvn_compute_shared_words(const uint8_t *mem, uint64_t ctl, uint32_t limit, uint32_t *words)
+{
+    uint32_t bytes = rl_ld32(mem, ctl + NVN_CONTROL_SHARED_BYTES);
+    if (bytes > limit)
+        return false;
+    *words = bytes ? (bytes + 3u) / 4u : 1u;
+    return true;
+}
+
 static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer ibuf, VkDeviceSize ioff)
 {
     nvn_gfx *st = r->st;
@@ -2629,11 +2638,15 @@ static int dispatch_from(replay *r, uint32_t x, uint32_t y, uint32_t z, VkBuffer
                                m->key, i, (unsigned long long)st->storage[i].addr, (uint32_t)st->storage[i].size, where);
         }
     VkSpecializationMapEntry map[MAX_SPECS];
-    uint32_t vals[MAX_SPECS], n = 3;
+    uint32_t vals[MAX_SPECS], n = 4;
     for (uint32_t i = 0; i < 3; i++) {
         map[i] = (VkSpecializationMapEntry){ i, 4 * i, 4 };
         vals[i] = rl_ld32(r->mem, ctl + 0x58 + 4 * i);
     }
+    map[3] = (VkSpecializationMapEntry){ NVN_SHARED_SPEC, 4 * 3, 4 };
+    if (!nvn_compute_shared_words(r->mem, ctl, g.max_compute_shared, &vals[3]))
+        return nvn_vk_stop(r, "compute program %s declares %u bytes of shared memory, more than the device's %u", m->key,
+                           rl_ld32(r->mem, ctl + NVN_CONTROL_SHARED_BYTES), g.max_compute_shared);
     nvn_vk_dispatch_reset();
     for (uint32_t i = 0; i < m->nrecs; i++)
         if (nvn_dispatch_unbounded(m->recs[i].kind))
