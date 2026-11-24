@@ -119,6 +119,9 @@ pub(crate) enum Event {
         value: u64,
         lane: u32,
     },
+    /// In lockstep, stops before an instruction whose order across lanes
+    /// matters (see [`Inv::lockstep`]).
+    At,
 }
 
 struct Frame {
@@ -148,6 +151,15 @@ pub(crate) struct Inv {
     pub max_steps: u64,
     /// The (function, block) last entered.
     pub at: (u32, u32),
+    /// Stop before every access to memory other invocations see, every
+    /// jump or branch that may go back, call, return and switch, with
+    /// [`Event::At`], so a warp's lanes can run them in lockstep.
+    pub lockstep: bool,
+    /// Runs the instruction it stopped before instead of stopping again.
+    pub pass: bool,
+    /// The code position of the instruction the invocation last stopped
+    /// at (before it, or at a barrier or shuffle).
+    stop_pc: u32,
 }
 
 impl Inv {
@@ -168,6 +180,9 @@ impl Inv {
             steps: 0,
             max_steps: 50_000_000,
             at: (0, 0),
+            lockstep: false,
+            pass: false,
+            stop_pc: 0,
         };
         for g in &p.globals {
             let (r, v) = match g {
@@ -239,6 +254,35 @@ impl Inv {
             None => panic!("no entry point"),
         }
         inv
+    }
+
+    /// Orders invocations by where they stopped: the return positions of
+    /// their calls, outermost first, then the stop's code position. A
+    /// warp runs its lowest lanes first, so divergent paths run in turn
+    /// (the earlier in the code first, a loop until it exits) and lanes
+    /// reconverge where their paths meet.
+    pub fn pos_cmp(&self, o: &Inv) -> std::cmp::Ordering {
+        self.frames
+            .iter()
+            .map(|f| f.pc)
+            .chain([self.stop_pc])
+            .cmp(o.frames.iter().map(|f| f.pc).chain([o.stop_pc]))
+    }
+
+    /// Whether the instruction at `pc` is one a lockstep run stops before.
+    #[inline]
+    fn stops(&self, op: Op, pc: usize) -> bool {
+        match op {
+            Op::Load { p, .. } | Op::Store { p, .. } => self.regs[p as usize] != VAR,
+            Op::Atomic { .. }
+            | Op::Call { .. }
+            | Op::Return
+            | Op::ReturnValue { .. }
+            | Op::Switch { .. } => true,
+            Op::Jump { to } => to as usize <= pc,
+            Op::Branch { t, f, .. } => t as usize <= pc || f as usize <= pc,
+            _ => false,
+        }
     }
 
     /// Gives a shuffle the invocation waits at its result.
@@ -425,6 +469,15 @@ impl Inv {
         let mut pc = self.pc as usize;
         loop {
             let op = code[pc];
+            if self.lockstep && self.stops(op, pc) {
+                if self.pass {
+                    self.pass = false;
+                } else {
+                    self.pc = pc as u32;
+                    self.stop_pc = pc as u32;
+                    return Event::At;
+                }
+            }
             pc += 1;
             match op {
                 Op::Label { label, n } => {
@@ -573,12 +626,14 @@ impl Inv {
                 Op::Barrier => {
                     if group {
                         self.pc = pc as u32;
+                        self.stop_pc = pc as u32 - 1;
                         return Event::Barrier(self.cur);
                     }
                 }
                 Op::Shuffle { d, v, lane } => {
                     assert!(group, "shuffle outside a workgroup run");
                     self.pc = pc as u32;
+                    self.stop_pc = pc as u32 - 1;
                     self.pending = d;
                     return Event::Shuffle {
                         block: self.cur,

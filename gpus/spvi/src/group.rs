@@ -2,13 +2,18 @@
 //! subgroup shuffles and shared memory, and whole dispatches of
 //! workgroups.
 //!
-//! A workgroup's invocations take turns on one thread: each runs until it
-//! returns or waits at a barrier or shuffle, a subgroup at a time. A
-//! barrier releases when every invocation that has not returned waits at
-//! one; a shuffle releases when every invocation of its subgroup that has
-//! not returned waits at it, or, when nothing else can run, with the
-//! invocations of the subgroup that wait at it as the active ones
-//! (divergent flow). What a device would leave undefined or a translation
+//! A workgroup's invocations run on one thread, a subgroup (warp) at a
+//! time, its lanes in lockstep as NVIDIA hardware runs a warp: no lane
+//! runs past an access to memory other invocations see (global or
+//! workgroup), a shuffle, a call or return, or a jump back, before every
+//! lane at the same place has run it. Lanes at different places
+//! (divergent flow) go lowest place first ([`Inv::pos_cmp`]): the earlier
+//! path in the code runs first, a loop runs until its lanes leave, and
+//! lanes meet again where their paths join. A shuffle runs with the lanes
+//! that reach it together as the active ones. Warps run one after another
+//! up to a barrier, which releases when every invocation that has not
+//! returned waits at one.
+//! What a device would leave undefined or a translation
 //! would rely on is written down as a [`Note`]: a barrier some invocations
 //! returned before, invocations that wait at different barriers, a shuffle
 //! run by part of its subgroup, a shuffle that reads an inactive lane. An
@@ -70,8 +75,14 @@ pub struct Done {
 #[derive(Clone, Copy, PartialEq)]
 enum Wait {
     Run,
+    /// Stopped before an instruction its warp runs in lockstep.
+    At,
     Barrier(u32),
-    Shuffle { block: u32, value: u64, lane: u32 },
+    Shuffle {
+        block: u32,
+        value: u64,
+        lane: u32,
+    },
     Done,
 }
 
@@ -285,54 +296,30 @@ fn message(p: &(dyn std::any::Any + Send)) -> String {
 }
 
 impl State {
-    /// Releases subgroup `s`'s shuffle when all its live lanes wait at the
-    /// same one, or (`partial`) the lowest block's lanes.
-    fn release_shuffle(&mut self, s: usize, partial: bool) -> bool {
-        let n = self.wait.len();
-        let lanes = s * self.subgroup..((s + 1) * self.subgroup).min(n);
-        let mut blocks: Vec<u32> = Vec::new();
-        let mut live = 0;
-        for k in lanes.clone() {
-            match self.wait[k] {
-                Wait::Done => {}
-                Wait::Shuffle { block, .. } => {
-                    live += 1;
-                    blocks.push(block);
-                }
-                _ => live += 1,
-            }
-        }
-        if blocks.is_empty() {
-            return false;
-        }
-        blocks.sort_unstable();
-        let block = blocks[0];
-        let active = blocks.iter().filter(|b| **b == block).count();
-        if !partial && active != live {
-            return false;
-        }
-        if active != self.subgroup {
+    /// Runs the shuffle the lanes `active` of subgroup `s` wait at, at
+    /// the same place.
+    fn shuffle(&mut self, s: usize, active: &[usize]) {
+        let base = s * self.subgroup;
+        let Wait::Shuffle { block, .. } = self.wait[active[0]] else {
+            unreachable!()
+        };
+        if active.len() != self.subgroup {
             *self
                 .notes
                 .entry(Note::PartialShuffle {
                     block,
-                    active: active as u32,
+                    active: active.len() as u32,
                 })
                 .or_default() += 1;
         }
-        let vals: Vec<Option<u64>> = lanes
-            .clone()
-            .map(|k| match self.wait[k] {
-                Wait::Shuffle {
-                    block: b, value, ..
-                } if b == block => Some(value),
-                _ => None,
-            })
-            .collect();
-        for k in lanes {
-            if let Wait::Shuffle { block: b, lane, .. } = self.wait[k]
-                && b == block
-            {
+        let mut vals = vec![None; self.subgroup];
+        for &k in active {
+            if let Wait::Shuffle { value, .. } = self.wait[k] {
+                vals[k - base] = Some(value);
+            }
+        }
+        for &k in active {
+            if let Wait::Shuffle { lane, .. } = self.wait[k] {
                 let v = vals.get(lane as usize).copied().flatten();
                 if v.is_none() {
                     *self.notes.entry(Note::InactiveLane { block }).or_default() += 1;
@@ -341,12 +328,11 @@ impl State {
                 self.wait[k] = Wait::Run;
             }
         }
-        true
     }
 
-    /// Nothing runs: releases a barrier every live invocation waits at, or
-    /// else one subgroup's partial shuffle; false when neither can go.
-    fn release_stalled(&mut self) -> bool {
+    /// Every live invocation waits at a barrier: releases them; false when
+    /// some do not.
+    fn release_barrier(&mut self) -> bool {
         let n = self.wait.len();
         let at_barrier: Vec<u32> = self
             .wait
@@ -357,34 +343,34 @@ impl State {
             })
             .collect();
         let live = self.wait.iter().filter(|w| **w != Wait::Done).count();
-        if !at_barrier.is_empty() && at_barrier.len() == live {
-            let returned = (n - live) as u32;
-            let mut blocks = at_barrier;
-            blocks.sort_unstable();
-            blocks.dedup();
-            if returned > 0 {
-                *self
-                    .notes
-                    .entry(Note::BarrierAfterReturn {
-                        block: blocks[0],
-                        returned,
-                    })
-                    .or_default() += 1;
-            }
-            if blocks.len() > 1 {
-                *self
-                    .notes
-                    .entry(Note::BarrierBlocks { blocks })
-                    .or_default() += 1;
-            }
-            for w in &mut self.wait {
-                if matches!(w, Wait::Barrier(_)) {
-                    *w = Wait::Run;
-                }
-            }
-            return true;
+        if at_barrier.is_empty() || at_barrier.len() != live {
+            return false;
         }
-        (0..n.div_ceil(self.subgroup)).any(|s| self.release_shuffle(s, true))
+        let returned = (n - live) as u32;
+        let mut blocks = at_barrier;
+        blocks.sort_unstable();
+        blocks.dedup();
+        if returned > 0 {
+            *self
+                .notes
+                .entry(Note::BarrierAfterReturn {
+                    block: blocks[0],
+                    returned,
+                })
+                .or_default() += 1;
+        }
+        if blocks.len() > 1 {
+            *self
+                .notes
+                .entry(Note::BarrierBlocks { blocks })
+                .or_default() += 1;
+        }
+        for w in &mut self.wait {
+            if matches!(w, Wait::Barrier(_)) {
+                *w = Wait::Run;
+            }
+        }
+        true
     }
 }
 
@@ -461,10 +447,14 @@ fn run_group<G: Global>(
         subgroup: sg,
     };
     let mut resume = vec![false; n];
+    for v in invs.iter_mut().flatten() {
+        v.lockstep = true;
+    }
     loop {
         for s in 0..n.div_ceil(sg) {
+            let lanes = s * sg..((s + 1) * sg).min(n);
             loop {
-                for i in s * sg..((s + 1) * sg).min(n) {
+                for i in lanes.clone() {
                     if st.wait[i] != Wait::Run {
                         continue;
                     }
@@ -476,6 +466,7 @@ fn run_group<G: Global>(
                     match catch_unwind(AssertUnwindSafe(|| inv.run(p, &fx, env, &mut mem, true))) {
                         Ok(Event::Done) => st.wait[i] = Wait::Done,
                         Ok(Event::Barrier(b)) => st.wait[i] = Wait::Barrier(b),
+                        Ok(Event::At) => st.wait[i] = Wait::At,
                         Ok(Event::Shuffle { block, value, lane }) => {
                             st.wait[i] = Wait::Shuffle { block, value, lane };
                             resume[i] = true;
@@ -486,15 +477,33 @@ fn run_group<G: Global>(
                         return Err(fail(&invs, i, "workgroup stopped".into()));
                     }
                 }
-                if !st.release_shuffle(s, false) {
+                let stopped = |w: &Wait| matches!(w, Wait::At | Wait::Shuffle { .. });
+                let pos = |i: usize| invs[i].as_ref().unwrap_or_else(|| unreachable!());
+                let Some(first) = lanes
+                    .clone()
+                    .filter(|&i| stopped(&st.wait[i]))
+                    .min_by(|&a, &b| pos(a).pos_cmp(pos(b)).then(a.cmp(&b)))
+                else {
                     break;
+                };
+                let active: Vec<usize> = lanes
+                    .clone()
+                    .filter(|&i| stopped(&st.wait[i]) && pos(i).pos_cmp(pos(first)).is_eq())
+                    .collect();
+                if matches!(st.wait[first], Wait::Shuffle { .. }) {
+                    st.shuffle(s, &active);
+                } else {
+                    for &i in &active {
+                        invs[i].as_mut().unwrap_or_else(|| unreachable!()).pass = true;
+                        st.wait[i] = Wait::Run;
+                    }
                 }
             }
         }
         if st.wait.iter().all(|w| *w == Wait::Done) {
             break;
         }
-        if !st.release_stalled() {
+        if !st.release_barrier() {
             return Err(fail(&invs, 0, "no invocation can go on".into()));
         }
     }
