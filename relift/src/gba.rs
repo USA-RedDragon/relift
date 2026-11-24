@@ -643,22 +643,17 @@ pub(crate) fn compile_layers(
                 groups.entry(dir).or_default().push(f);
             }
         }
+        let store = croot.join(format!("{}-lifted", layers.cache));
+        let mut entries = Vec::new();
         for (dir, files) in groups {
-            let o = shared_lifted(
-                (
-                    &cc,
-                    &lifted_flags,
-                    &croot.join(format!("{}-lifted", layers.cache)),
-                ),
-                dir,
-                files,
-                (ninja.as_deref(), jobs),
-                (ui, row),
-            )?;
-            if time(&o) > time(&exe) && exe.exists() {
+            entries.push(shared_lifted(&cc, &lifted_flags, &store, dir, files, jobs)?);
+        }
+        n += build_shared(&entries, (ninja.as_deref(), jobs), (ui, row))?;
+        for e in &entries {
+            if time(&e.output) > time(&exe) && exe.exists() {
                 std::fs::remove_file(&exe)?;
             }
-            link.push(o.display().to_string());
+            link.push(e.output.display().to_string());
         }
     } else {
         compiles.extend(rt_plan_compiles);
@@ -710,18 +705,30 @@ pub(crate) fn compile_layers(
     Ok(())
 }
 
-/// The object of the C files `files` of one lifted unit directory `dir`,
-/// compiled once and kept under `store` by the content of the files, the
-/// compiler and the flags: the sources are copied into the entry so the
-/// compile commands do not name the project, and a later build of the same
-/// libraries finds the object and compiles nothing.
+/// One entry of the shared lifted store, ready to build: its plan, its
+/// directory and the lock that keeps another build out of it until it is
+/// built.
+struct SharedEntry {
+    plan: Plan,
+    dir: PathBuf,
+    output: PathBuf,
+    _lock: std::fs::File,
+}
+
+/// The entry of the C files `files` of one lifted unit directory `dir` in
+/// the store `store`, keyed by the content of the files, the compiler and
+/// the flags: the sources are copied into the entry so the compile
+/// commands do not name the project, and a later build of the same
+/// libraries finds the object and compiles nothing. [`build_shared`]
+/// builds it.
 fn shared_lifted(
-    (cc, flags, store): (&[String], &[String], &Path),
+    cc: &[String],
+    flags: &[String],
+    store: &Path,
     dir: &Path,
     files: Vec<&PathBuf>,
-    (ninja, jobs): (Option<&Path>, u32),
-    (ui, row): (&mut Ui, usize),
-) -> Result<PathBuf, BoxError> {
+    jobs: u32,
+) -> Result<SharedEntry, BoxError> {
     let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
     for f in files {
         let name = f
@@ -763,18 +770,165 @@ fn shared_lifted(
     }
     let output = entry.join("module.o");
     let pools = crate::build::memory_pools(&mut compiles, jobs);
-    let plan = Plan {
-        cc: cc.to_vec(),
-        asm: None,
-        compiles,
-        output: output.clone(),
-        link_flags: ["-r", "-nostdlib"].map(String::from).into(),
-        pools,
-        root: None,
+    Ok(SharedEntry {
+        plan: Plan {
+            cc: cc.to_vec(),
+            asm: None,
+            compiles,
+            output: output.clone(),
+            link_flags: ["-r", "-nostdlib"].map(String::from).into(),
+            pools,
+            root: None,
+        },
+        dir: entry,
+        output,
+        _lock: lock,
+    })
+}
+
+/// What one shared entry takes from the build's budget while it builds:
+/// a job per file up to all `jobs`, and the memory of its largest
+/// compiles that many of them run at once, at most `memory` (an entry
+/// larger than the whole budget runs alone, its own pools bounding it).
+fn entry_need(plan: &Plan, jobs: u32, memory: u64) -> (u32, u64) {
+    let want = u32::try_from(plan.compiles.len())
+        .unwrap_or(u32::MAX)
+        .clamp(1, jobs.max(1));
+    let mut needs: Vec<u64> = plan
+        .compiles
+        .iter()
+        .map(|c| relift_build::compile_memory(std::fs::metadata(&c.src).map_or(0, |m| m.len())))
+        .collect();
+    needs.sort_unstable_by(|a, b| b.cmp(a));
+    let mem: u64 = needs.iter().take(want as usize).sum();
+    (want, mem.min(memory))
+}
+
+/// Runs `work` on every item of `items` side by side, never with more than
+/// `jobs` jobs or `memory` bytes taken in all, as `need` says per item;
+/// `on_done` hears each result on the calling thread (with `None` about
+/// every 250 ms while nothing finishes).
+fn side_by_side<T: Sync, R: Send>(
+    items: &[T],
+    (jobs, memory): (u32, u64),
+    need: &(dyn Fn(&T) -> (u32, u64) + Sync),
+    work: &(dyn Fn(&T, u32) -> R + Sync),
+    on_done: &mut dyn FnMut(Option<R>),
+) {
+    use std::sync::{Condvar, Mutex, PoisonError, mpsc};
+    let jobs = jobs.max(1);
+    let free = Mutex::new((jobs, memory));
+    let freed = Condvar::new();
+    let next = Mutex::new(0usize);
+    let (tx, rx) = mpsc::channel::<R>();
+    std::thread::scope(|scope| {
+        for _ in 0..(jobs as usize).min(items.len()) {
+            let tx = tx.clone();
+            let (free, freed, next) = (&free, &freed, &next);
+            scope.spawn(move || {
+                loop {
+                    let i = {
+                        let mut n = next.lock().unwrap_or_else(PoisonError::into_inner);
+                        let i = *n;
+                        *n += 1;
+                        i
+                    };
+                    let Some(item) = items.get(i) else {
+                        return;
+                    };
+                    let (want, mem) = need(item);
+                    let (want, mem) = (want.clamp(1, jobs), mem.min(memory));
+                    {
+                        let mut f = free.lock().unwrap_or_else(PoisonError::into_inner);
+                        while f.0 < want || f.1 < mem {
+                            f = freed.wait(f).unwrap_or_else(PoisonError::into_inner);
+                        }
+                        f.0 -= want;
+                        f.1 -= mem;
+                    }
+                    let r = work(item, want);
+                    {
+                        let mut f = free.lock().unwrap_or_else(PoisonError::into_inner);
+                        f.0 += want;
+                        f.1 += mem;
+                    }
+                    freed.notify_all();
+                    if tx.send(r).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_millis(250)) {
+                Ok(r) => on_done(Some(r)),
+                Err(mpsc::RecvTimeoutError::Timeout) => on_done(None),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+}
+
+/// Builds the shared entries side by side (a program with hundreds of
+/// libraries has hundreds of entries of one or two files each, which one
+/// after another leave all but one core idle), within the build's jobs and
+/// the memory budget of [`crate::build::memory_pools`] (three fifths of
+/// the memory available now). Returns the number of steps run.
+fn build_shared(
+    entries: &[SharedEntry],
+    (ninja, jobs): (Option<&Path>, u32),
+    (ui, row): (&mut Ui, usize),
+) -> Result<usize, BoxError> {
+    let jobs = relift_build::job_count(jobs).max(1);
+    let memory = relift_build::available_memory().map_or(u64::MAX, |m| m / 5 * 3);
+    let compile = relift_progress::Metrics {
+        unit: "libraries",
+        elapsed: true,
+        ..relift_progress::Metrics::default()
     };
-    crate::build::build_plans(ui, row, &[(plan, entry)], ninja, jobs, "")?;
-    drop(lock);
-    Ok(output)
+    ui.update(row, compile.clone());
+    let total = entries.len() as u64;
+    let (mut steps, mut finished, mut failed) = (0, 0u64, None);
+    side_by_side(
+        entries,
+        (jobs, memory),
+        &|e: &SharedEntry| entry_need(&e.plan, jobs, memory),
+        &|e: &SharedEntry, want| {
+            let mut done = 0;
+            relift_build::build_with(&e.plan, &e.dir, ninja, want, &mut |ev| {
+                if let relift_build::Event::Step { done: d, .. } = ev {
+                    done = d;
+                }
+            })
+            .map(|()| done)
+            .map_err(|e| e.to_string())
+        },
+        &mut |r| match r {
+            None => ui.tick(),
+            Some(r) => {
+                finished += 1;
+                match r {
+                    Ok(d) => steps += d,
+                    Err(e) => {
+                        failed.get_or_insert(e);
+                    }
+                }
+                ui.update(
+                    row,
+                    relift_progress::Metrics {
+                        done: finished,
+                        total: Some(total),
+                        ..compile.clone()
+                    },
+                );
+            }
+        },
+    );
+    match failed {
+        Some(e) => Err(e.into()),
+        None => Ok(steps),
+    }
 }
 
 /// `relift run` of the Game Boy Advance project: builds, then runs the
@@ -792,6 +946,46 @@ pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `side_by_side` over `needs` and returns the most items that
+    /// ran at once and the results in finishing order.
+    fn overlap(needs: &[(u32, u64)], budget: (u32, u64)) -> (usize, Vec<usize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let running = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        let items: Vec<usize> = (0..needs.len()).collect();
+        let mut done = Vec::new();
+        side_by_side(
+            &items,
+            budget,
+            &|i: &usize| needs[*i],
+            &|i: &usize, _| {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                running.fetch_sub(1, Ordering::SeqCst);
+                *i
+            },
+            &mut |r| done.extend(r),
+        );
+        (most.load(Ordering::SeqCst), done)
+    }
+
+    #[test]
+    fn two_small_entries_build_side_by_side() {
+        let (most, mut done) = overlap(&[(1, 10), (1, 10)], (16, 100));
+        assert_eq!(most, 2);
+        done.sort_unstable();
+        assert_eq!(done, [0, 1]);
+    }
+
+    #[test]
+    fn entries_wait_for_jobs_and_memory_and_one_larger_than_the_budget_runs_alone() {
+        assert_eq!(overlap(&[(1, 60), (1, 60), (1, 60)], (16, 100)).0, 1);
+        assert_eq!(overlap(&[(8, 10), (8, 10), (8, 10)], (16, 100)).0, 2);
+        let (most, done) = overlap(&[(1, 500), (1, 500)], (16, 100));
+        assert_eq!((most, done.len()), (1, 2));
+    }
 
     #[test]
     fn bytes_without_a_header_are_not_a_rom() {
