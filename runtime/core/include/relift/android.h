@@ -8,6 +8,8 @@
 
 #include <relift/abi_core.h>
 
+#include <stdbool.h>
+
 #ifdef __ANDROID__
 
 /**

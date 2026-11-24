@@ -520,6 +520,21 @@ def diagnostics(text, head=10, tail=30):
     return hits[:head] + [f"... {len(hits) - head - tail} more ..."] + hits[-tail:]
 
 
+def check_headers(tool):
+    """Compiles every public runtime header on its own with the target's compiler: a generated program includes the
+    header of its own target (relift/android.h only in an Android program), which this script's host-generated program
+    never does, so a header that leans on what another header happens to include fails only here."""
+    inc = os.path.join(ROOT, "runtime", "core", "include")
+    bad = []
+    for h in sorted(glob.glob(os.path.join(inc, "relift", "*.h"))):
+        r = subprocess.run(tool.cc + ["-std=c11", "-c", "-o", os.devnull, "-I" + inc, "-x", "c", "-"],
+                           input=f"#include <relift/{os.path.basename(h)}>\n", capture_output=True, text=True, errors="replace")
+        if r.returncode:
+            bad.append(f"relift/{os.path.basename(h)}:\n{r.stderr.strip()}")
+    if bad:
+        sys.exit("public headers that do not compile on their own:\n" + "\n".join(bad))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", required=True, choices=sorted(TARGETS))
@@ -539,6 +554,8 @@ def main():
     try:
         tool = tool_for(args.target)
         print(f"{args.target}: {tool.note}")
+        check_headers(tool)
+        print("public headers compile on their own")
         none = os.path.join(args.work, "no-host-libraries")
         env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS=str(args.jobs), RELIFT_PACKAGE_APPIMAGE="never",
                    RELIFT_SDL3_DIR=none, RELIFT_OPUS_DIR=none, RELIFT_MOLTENVK_DIR=none)
