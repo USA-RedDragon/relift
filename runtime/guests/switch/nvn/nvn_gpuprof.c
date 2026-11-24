@@ -407,6 +407,44 @@ void nvn_gpuprof_report(double frames)
            "(%.2f presents)",
            gp.span_ns / 1e6 / frames, (double)gp.batches / frames, gp.between_ns / 1e6 / frames,
            pres_ns / 1e6 / frames, pres_n / frames);
+    /* By kind: passes by target size, dispatches together, the rest by their first word. */
+    struct {
+        char key[24];
+        double ns;
+    } grp[32];
+    uint32_t ng = 0;
+    for (uint32_t i = 0; i < gp.ntot; i++) {
+        char key[24];
+        const char *l = gp.tot[i].lab;
+        size_t n = strcspn(l, " ");
+        if (!strncmp(l, "pass ", 5))
+            n = 5 + strcspn(l + 5, " ");
+        snprintf(key, sizeof key, "%.*s", (int)n, l);
+        uint32_t k = 0;
+        while (k < ng && strcmp(grp[k].key, key))
+            k++;
+        if (k == ng) {
+            if (ng == 32)
+                continue;
+            snprintf(grp[ng].key, sizeof grp[ng].key, "%s", key);
+            grp[ng++].ns = 0;
+        }
+        grp[k].ns += gp.tot[i].ns;
+    }
+    char line[512];
+    size_t ll = 0;
+    for (uint32_t k = 0; k < 10 && ng; k++) {
+        uint32_t b = 0;
+        for (uint32_t i = 1; i < ng; i++)
+            if (grp[i].ns > grp[b].ns)
+                b = i;
+        if (grp[b].ns <= 0 || ll >= sizeof line)
+            break;
+        ll += (size_t)snprintf(line + ll, sizeof line - ll, "%s%s %.2f", ll ? ", " : "", grp[b].key,
+                               grp[b].ns / 1e6 / frames);
+        grp[b].ns = -1;
+    }
+    rl_log(RL_LOG_INFO, "nvn", "GPU profile by kind (ms per present): %s", line);
     double shown = 0;
     for (uint32_t k = 0; k < 25 && gp.ntot; k++) {
         uint32_t b = 0;

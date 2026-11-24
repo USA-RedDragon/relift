@@ -422,3 +422,5 @@ clock is placed by the batches themselves (none starts before its vkQueueSubmit 
 seen); the bound's spread is in parentheses, and a window where the bounds cross (the GPU clock paused, as Adreno's
 does while it sleeps) logs why instead. `wait` lines rank the source lines (or the named calls) where the game's
 threads blocked on a batch.
+A `by kind` line sums the parts per present by kind (render passes by their target size, dispatches, copies), and a
+`replay thread cpu` line gives replay's own CPU time and page faults, so replay's wall time minus it is its waiting.

@@ -45,6 +45,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
 
 /** @brief A guest thread that keeps its core this long inside the NVN layer is logged. */
 #define HOLD_WARN_NS 20000000ll
@@ -70,6 +73,8 @@ static int64_t now_ns(void);
 /** @brief Where the guest thread's time went, summed between two rate lines (nanoseconds and counts). */
 static struct {
     uint64_t run_ns, wait_ns, submit_ns, flushes, runs, upload_ns, uploads, gpu_ns;
+    /** @brief Replay's own thread CPU time and the page faults it took (minor, major). */
+    uint64_t run_cpu_ns, run_minflt, run_majflt;
 } tm;
 
 /** @brief Per-present costs for the frame trace's T, X and Y lines (stats.trace): uploads from guest bytes and write-backs to them. */
@@ -2197,10 +2202,12 @@ static bool wait_slot(uint32_t s)
         return true;
     pending[s].on = false;
     nvn_core_leave();
-    int64_t w0 = nvn_gpuprof_on() && VK(vkGetFenceStatus)(g.dev, g.fences[s]) == VK_NOT_READY ? now_ns() : 0;
+    /* Timed around the wait itself: on kgsl even vkGetFenceStatus blocks until the fence signals. */
+    int64_t w0 = now_ns();
     VkResult vr = VK(vkWaitForFences)(g.dev, 1, &g.fences[s], VK_TRUE, UINT64_MAX);
-    if (w0)
-        nvn_gpuprof_waited(w0, now_ns());
+    int64_t w1 = now_ns();
+    if (w1 - w0 > 50000)
+        nvn_gpuprof_waited(w0, w1);
     nvn_counters_settle(s);
     tm.wait_ns += (uint64_t)(now_ns() - pending[s].t1);
     tm.flushes++;
@@ -4695,6 +4702,25 @@ static void finish_runs(nvn_sched_run *done)
     }
 }
 
+
+/** @brief This thread's page fault counts. */
+typedef struct {
+    uint64_t minor, major;
+} thread_faults;
+
+/** @brief Reads this thread's page faults; zeros where the host has no per-thread resource use (Windows, Apple). */
+static void thread_rusage(thread_faults *f)
+{
+#ifdef RUSAGE_THREAD
+    struct rusage u;
+    getrusage(RUSAGE_THREAD, &u);
+    f->minor = (uint64_t)u.ru_minflt;
+    f->major = (uint64_t)u.ru_majflt;
+#else
+    f->minor = f->major = 0;
+#endif
+}
+
 int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
 {
     if (!up(c))
@@ -4727,10 +4753,19 @@ int nvn_vk_run(rl_ctx *c, uint8_t *mem, uint64_t queue, const nvn_cmdset *s)
     nvn_trace_order("submit", "nvnQueueSubmitCommands", queue, u->r.submit, 0, what, 1, 0, true);
     nvn_sched_run *done = NULL;
     int64_t t0 = now_ns();
+    struct timespec c0, c1;
+    thread_faults u0, u1;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c0);
+    thread_rusage(&u0);
     int rc = nvn_sched_pump(&sched, &sched_ops, &done);
     if (rc == RL_OK && !nvn_vk_submit(&u->r))
         rc = nvn_vk_fatal(c, "the host device failed a submit");
     tm.run_ns += (uint64_t)(now_ns() - t0);
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1);
+    thread_rusage(&u1);
+    tm.run_cpu_ns += (uint64_t)((c1.tv_sec - c0.tv_sec) * 1000000000ll + (c1.tv_nsec - c0.tv_nsec));
+    tm.run_minflt += (uint64_t)(u1.minor - u0.minor);
+    tm.run_majflt += (uint64_t)(u1.major - u0.major);
     nvn_gpuprof_span(SPAN_REPLAY, t0, now_ns());
     tm.runs++;
     nvn_trace('U', (uint64_t)(now_ns() - t0), n, 0);
@@ -5286,6 +5321,8 @@ static void present_rate(uint64_t total)
            (double)tm.runs / frames, (double)tm.flushes / frames, (double)tm.submit_ns / 1e6 / frames,
            (double)tm.wait_ns / 1e6 / frames, (double)tm.gpu_ns / 1e6 / frames, (double)(pm - pm0) / frames, (double)(pn - pn0) / 1e6 / frames,
            (double)(pl - pl0) / frames, (double)(pln - pln0) / 1e6 / frames);
+    rl_log(RL_LOG_INFO, "nvn", "per present: replay thread cpu %.2f ms, %.1f minor and %.1f major page faults in replay",
+           (double)tm.run_cpu_ns / 1e6 / frames, (double)tm.run_minflt / frames, (double)tm.run_majflt / frames);
     pm0 = pm;
     pn0 = pn;
     pl0 = pl;
