@@ -236,7 +236,9 @@ the count rises by one every 1/60 s of the guest's timeline, so 3600 is a
 minute in. A step is applied before the game can see its vsync, so a press
 that starts at frame N is visible from vsync N on. The GBA, DS and N64
 guests count the console's own video frames; the GB and Master System runners
-have their own `--input` that counts the same. The runtime logs each step as it starts.
+have their own `--input` that counts the same. Frames that pass while the
+blocking shader warm-up screen holds the game back are not counted, so a
+long warm-up does not spend a script's presses. The runtime logs each step as it starts.
 
 ```sh
 RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./my-program

@@ -7,6 +7,7 @@
 
 #include <relift/override.h>
 #include <relift/settings.h>
+#include <relift/warmup.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -230,6 +231,35 @@ TEST(ports_input_script_holds_controls_at_guest_frames)
     rl_ports_script_frame(30);
     CHECK(rl_ports_eval(zr, &s) == 0.0f);
     rl_ports_script_reset();
+}
+
+TEST(ports_input_script_frames_behind_the_blocking_warm_up_screen_do_not_count)
+{
+    rl_ports_reset();
+    rl_ports_script_reset();
+    rl_warmup_reset();
+    CHECK(rl_ports_declare(native, 2));
+    CHECK(rl_ports_set_script("10:p1.a"));
+    rl_input_snapshot s = blank();
+    rl_control_ref a = rl_ports_find("p1", "a");
+    rl_ports_script_frame(5);
+    rl_warmup_begin(100, RL_WARMUP_BLOCKING);
+    CHECK(rl_warmup_blocking());
+    rl_ports_script_frame(6);
+    rl_ports_script_frame(500);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    rl_warmup_progress(100, 0);
+    rl_warmup_saving();
+    rl_warmup_end();
+    rl_warmup_game_started();
+    CHECK(!rl_warmup_blocking());
+    /* The 495 frames from 6 to 500 passed behind the screen: guest frame 505 is the script's frame 10. */
+    rl_ports_script_frame(504);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    rl_ports_script_frame(505);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    rl_ports_script_reset();
+    rl_warmup_reset();
 }
 
 TEST(ports_input_script_refuses_bad_steps)

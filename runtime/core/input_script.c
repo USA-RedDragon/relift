@@ -4,7 +4,9 @@
  * guest frames, so that runs without a person at the controls are
  * reproducible. A guest frame is the guest's own clock, not its presents:
  * for a console with a vsync clock, the number of the vsync counted from the
- * start of that clock, so a script reaches the same scene however slowly the host presents.
+ * start of that clock, so a script reaches the same scene however slowly the host presents. Frames that pass while
+ * the blocking shader warm-up screen holds the game back do not count: the script's frame is the guest frame less
+ * those, so a step meant for the game is not spent behind the screen, however long the warm-up takes.
  *
  * The script comes from RELIFT_INPUT_SCRIPT or rl_ports_set_script: comma
  * separated steps `<frame>[+<frames>]:<port>.<control>[=<value>]`. A
@@ -24,6 +26,7 @@
 #include "core.h"
 
 #include <relift/ports.h>
+#include <relift/warmup.h>
 
 #include <errno.h>
 #include <pthread.h>
@@ -49,6 +52,9 @@ static step *g_steps;
 static uint32_t g_nsteps;
 static bool g_loaded;
 static uint64_t g_frame;
+/** @brief The last guest frame seen and the guest frames that passed behind the blocking warm-up screen. */
+static uint64_t g_guest_last, g_held;
+static bool g_guest_seen, g_guest_seen_logged;
 static FILE *g_follow;
 static char g_pending[SCRIPT_STEP_TEXT_MAX];
 static size_t g_npending;
@@ -298,17 +304,25 @@ static void load_locked(void)
     pthread_mutex_lock(&g_lock);
 }
 
-void rl_ports_script_frame(uint64_t frame)
+void rl_ports_script_frame(uint64_t guest)
 {
+    bool held = rl_warmup_blocking();
     pthread_mutex_lock(&g_lock);
     load_locked();
+    if (g_guest_seen && guest > g_guest_last && held)
+        g_held += guest - g_guest_last;
+    g_guest_seen = true;
+    g_guest_last = guest;
+    uint64_t frame = guest - g_held;
+    bool moved = frame != g_frame || !g_guest_seen_logged;
+    g_guest_seen_logged = true;
     g_frame = frame;
     if (g_follow) {
         drop_done_locked();
         read_follow_locked();
     }
     for (uint32_t i = 0; i < g_nsteps; i++)
-        if (g_steps[i].start == frame)
+        if (moved && g_steps[i].start == frame)
             rl_log(RL_LOG_INFO, "input", "input script: frame %llu: %s.%s = %g for %llu frames",
                    (unsigned long long)frame, g_steps[i].port, g_steps[i].control, (double)g_steps[i].value,
                    (unsigned long long)g_steps[i].frames);
@@ -358,5 +372,7 @@ void rl_ports_script_reset(void)
     g_nsteps = 0;
     g_loaded = false;
     g_frame = 0;
+    g_guest_last = g_held = 0;
+    g_guest_seen = g_guest_seen_logged = false;
     pthread_mutex_unlock(&g_lock);
 }
