@@ -1058,6 +1058,11 @@ void nvn_counters_end(uint32_t slot);
  * formats, integer formats of other sizes and failed submits; the caller frees the pixels.
  */
 uint8_t *nvn_vk_read_rgba8(replay *r, vimg *v);
+/**
+ * @brief Checks scissored clears on color image v (RGBA8, at least 8x8): a clear with a scissor opens its pass over the
+ * scissor only and leaves the pixels outside it as they were. 0 when both hold, else the failing step's number.
+ */
+int nvn_vk_clear_check(replay *r, vimg *v);
 
 /** @brief Images of removed pools not freed yet: a batch that may use them has not finished, or state still names them. */
 uint32_t nvn_vk_retired_count(void);

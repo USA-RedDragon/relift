@@ -3638,9 +3638,29 @@ static VkImageView draw_view(rt *t, uint32_t layers)
     return sub_view(t->v, t->level, t->layer, layers, t->format ? t->format : t->v->format);
 }
 
-bool nvn_vk_begin_rendering(replay *r, VkRect2D *area) { return nvn_vk_begin_rendering_layered(r, area, false); }
+static bool begin_rendering(replay *r, VkRect2D *area, bool layered, const VkRect2D *part);
+
+bool nvn_vk_begin_rendering(replay *r, VkRect2D *area) { return begin_rendering(r, area, false, NULL); }
 
 bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
+{
+    return begin_rendering(r, area, layered, NULL);
+}
+
+/**
+ * @brief Opens rendering into the bound targets; *area is their full extent. With part, the pass's render area is
+ * only part (inside the targets): a tiling GPU loads and stores the render area of every pass, so a pass made for a
+ * small clear of a large texture must not cover all of it.
+ */
+/** @brief Whether rectangle a holds all of b. */
+static bool rect_holds(VkRect2D a, VkRect2D b)
+{
+    return b.offset.x >= a.offset.x && b.offset.y >= a.offset.y &&
+           (int64_t)b.offset.x + b.extent.width <= (int64_t)a.offset.x + a.extent.width &&
+           (int64_t)b.offset.y + b.extent.height <= (int64_t)a.offset.y + a.extent.height;
+}
+
+static bool begin_rendering(replay *r, VkRect2D *area, bool layered, const VkRect2D *part)
 {
     for (uint32_t i = 0; i < r->st->ncolor; i++)
         if (r->st->color[i].v && r->st->color[i].v->sync_pending && !sync_alias(r, r->st->color[i].v))
@@ -3689,9 +3709,14 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
     bool stencil = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
     bool depth = r->st->depth.v && (r->st->depth.v->aspect & VK_IMAGE_ASPECT_DEPTH_BIT);
     *area = (VkRect2D){ { 0, 0 }, { w, h } };
+    VkRect2D ra = *area;
+    if (part && part->offset.x >= 0 && part->offset.y >= 0 && part->extent.width && part->extent.height &&
+        (uint32_t)part->offset.x + part->extent.width <= w && (uint32_t)part->offset.y + part->extent.height <= h)
+        ra = *part;
     if (open_pass.open && g_recording && open_pass.ncolor == r->st->ncolor && open_pass.has_depth == depth && open_pass.has_stencil == stencil &&
-        (!(depth || stencil) || open_pass.depth == dv) && open_pass.area.extent.width == w &&
-        open_pass.area.extent.height == h && open_pass.layers == layers) {
+        (!(depth || stencil) || open_pass.depth == dv) && rect_holds(open_pass.area, ra) &&
+        (part || open_pass.area.extent.width == w) && (part || open_pass.area.extent.height == h) &&
+        open_pass.layers == layers) {
         bool same = true;
         for (uint32_t i = 0; i < r->st->ncolor && same; i++)
             same = open_pass.color[i] == cv[i];
@@ -3699,7 +3724,7 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
             return true;
     }
     VkRenderingInfo ri = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                           .renderArea = *area,
+                           .renderArea = ra,
                            .layerCount = layers,
                            .colorAttachmentCount = r->st->ncolor,
                            .pColorAttachments = ca,
@@ -3711,7 +3736,7 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
     open_pass.open = true;
     open_pass.what = NULL;
     open_pass.draws = 0;
-    open_pass.fs[0] = 0;
+    snprintf(open_pass.fs, sizeof open_pass.fs, "%s", ra.extent.width != w || ra.extent.height != h ? "part" : "");
     open_pass.ncolor = r->st->ncolor;
     memset(open_pass.images, 0, sizeof open_pass.images);
     for (uint32_t i = 0; i < r->st->ncolor; i++) {
@@ -3725,7 +3750,7 @@ bool nvn_vk_begin_rendering_layered(replay *r, VkRect2D *area, bool layered)
     open_pass.layers = layers;
     open_pass.has_depth = depth;
     open_pass.has_stencil = stencil;
-    open_pass.area = *area;
+    open_pass.area = ra;
     return true;
 }
 
@@ -3785,6 +3810,30 @@ int nvn_vk_stop(replay *r, const char *fmt, ...)
     return rl_guest_fatal(r->c, "nvn", "%s", msg);
 }
 
+/**
+ * @brief The part of the bound targets a clear writes (the scissor inside the smallest target), for a pass opened only
+ * for it; empty when there is no target. A pass already open over the targets is kept as it is (begin_rendering).
+ */
+static VkRect2D clear_part(const replay *r)
+{
+    uint32_t w = UINT32_MAX, h = UINT32_MAX;
+    for (uint32_t i = 0; i < r->st->ncolor; i++)
+        if (r->st->color[i].v) {
+            uint32_t lw = r->st->color[i].v->d.width >> r->st->color[i].level;
+            uint32_t lh = r->st->color[i].v->d.height >> r->st->color[i].level;
+            w = (lw ? lw : 1) < w ? (lw ? lw : 1) : w;
+            h = (lh ? lh : 1) < h ? (lh ? lh : 1) : h;
+        }
+    if (r->st->depth.v) {
+        uint32_t lw = r->st->depth.v->d.width >> r->st->depth.level, lh = r->st->depth.v->d.height >> r->st->depth.level;
+        w = (lw ? lw : 1) < w ? (lw ? lw : 1) : w;
+        h = (lh ? lh : 1) < h ? (lh ? lh : 1) : h;
+    }
+    if (w == UINT32_MAX)
+        return (VkRect2D){ 0 };
+    return clip(r, (VkRect2D){ { 0, 0 }, { w, h } });
+}
+
 bool nvn_vk_clears_all(const replay *r, const rt *t)
 {
     VkImageSubresourceRange rr = range_of(t->v);
@@ -3802,6 +3851,8 @@ bool nvn_vk_clears_all(const replay *r, const rt *t)
     VkRect2D full = { { 0, 0 }, { w, h } }, c = clip(r, full);
     return c.offset.x == 0 && c.offset.y == 0 && c.extent.width == w && c.extent.height == h;
 }
+
+static int clear_color_to(replay *r, uint32_t idx, const uint8_t *val);
 
 /**
  * @brief Whether a clear runs: like draws, clears obey the render enable (nvnCommandBufferSetRenderEnable and its
@@ -3829,11 +3880,16 @@ static int clear_color(replay *r, const nvn_cmd *e)
         return RL_OK;
     if (mask != 0xf)
         return nvn_vk_stop(r, "%s with channel mask 0x%x", nvn_cmd_name(e->op), mask);
+    return clear_color_to(r, idx, val);
+}
+
+static int clear_color_to(replay *r, uint32_t idx, const uint8_t *val)
+{
     if (r->st->color[idx].v->sync_pending && nvn_vk_clears_all(r, &r->st->color[idx]))
         r->st->color[idx].v->sync_pending = false;
-    VkRect2D area;
-    if (!nvn_vk_begin_rendering(r, &area))
-        return nvn_vk_stop(r, "%s without render targets", nvn_cmd_name(e->op));
+    VkRect2D area, part = clear_part(r);
+    if (!begin_rendering(r, &area, false, part.extent.width ? &part : NULL))
+        return nvn_vk_stop(r, "a color clear without render targets");
     VkClearAttachment ca = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = idx };
     memcpy(&ca.clearValue.color, val, 16);
     if (rl_cfg()->trace_os)
@@ -3845,6 +3901,43 @@ static int clear_color(replay *r, const nvn_cmd *e)
     if (cr.rect.extent.width && cr.rect.extent.height)
         VK(vkCmdClearAttachments)(g.cb, 1, &ca, 1, &cr);
     return RL_OK;
+}
+
+int nvn_vk_clear_check(replay *r, vimg *v)
+{
+    nvn_gfx *st = r->st;
+    st->ncolor = 1;
+    st->color[0] = (rt){ .v = v, .layers = 1, .view = v->view, .format = v->format };
+    const float red[4] = { 1, 0, 0, 1 }, green[4] = { 0, 1, 0, 1 };
+    st->scissor_set = false;
+    if (clear_color_to(r, 0, (const uint8_t *)red) != RL_OK)
+        return 1;
+    nvn_vk_end_rendering();
+    st->scissor_set = true;
+    st->scissor = (VkRect2D){ { 2, 2 }, { 3, 3 } };
+    VkRect2D want = clip(r, (VkRect2D){ { 0, 0 }, { v->d.width, v->d.height } });
+    if (clear_color_to(r, 0, (const uint8_t *)green) != RL_OK)
+        return 2;
+    bool area_ok = open_pass.open && open_pass.area.offset.x == want.offset.x && open_pass.area.offset.y == want.offset.y &&
+                   open_pass.area.extent.width == want.extent.width && open_pass.area.extent.height == want.extent.height;
+    nvn_vk_end_rendering();
+    st->scissor_set = false;
+    if (!area_ok)
+        return 3; /* the pass covers only the scissor */
+    uint8_t *px = nvn_vk_read_rgba8(r, v);
+    if (!px)
+        return 4;
+    int rc = 0;
+    for (uint32_t y = 0; y < v->d.height && !rc; y++)
+        for (uint32_t x = 0; x < v->d.width && !rc; x++) {
+            bool in = (int32_t)x >= want.offset.x && x < want.offset.x + want.extent.width && (int32_t)y >= want.offset.y &&
+                      y < want.offset.y + want.extent.height;
+            const uint8_t *p = px + ((size_t)y * v->d.width + x) * 4;
+            if (in ? p[1] != 255 || p[0] != 0 : p[0] != 255 || p[1] != 0)
+                rc = 5; /* inside green, outside still red */
+        }
+    free(px);
+    return rc;
 }
 
 static int clear_depth_stencil(replay *r, const nvn_cmd *e)
@@ -3870,8 +3963,8 @@ static int clear_depth_stencil(replay *r, const nvn_cmd *e)
         return RL_OK;
     if (r->st->depth.v->sync_pending && aspect == r->st->depth.v->aspect && nvn_vk_clears_all(r, &r->st->depth))
         r->st->depth.v->sync_pending = false;
-    VkRect2D area;
-    nvn_vk_begin_rendering(r, &area);
+    VkRect2D area, part = clear_part(r);
+    begin_rendering(r, &area, false, part.extent.width ? &part : NULL);
     VkClearAttachment ca = { .aspectMask = aspect, .clearValue.depthStencil = { depth, stencil & 0xff } };
     VkClearRect cr = { .rect = clip(r, area), .layerCount = 1 };
     if (cr.rect.extent.width && cr.rect.extent.height)
@@ -4286,7 +4379,7 @@ int nvn_vk_clear_image(replay *r, vimg *v, uint32_t level, uint32_t layer, uint3
         r->st->color[0] = t;
         r->st->depth = (rt){ 0 };
         VkRect2D area;
-        if (!nvn_vk_begin_rendering(r, &area))
+        if (!begin_rendering(r, &area, false, &clear))
             return nvn_vk_stop(r, "%s without a target", what);
         open_pass.what = "clear";
         VkClearAttachment ca = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0 };
