@@ -50,6 +50,14 @@ int64_t hio_dup2(int fd, int target);
 int64_t hio_pipe(int fds[2]);
 /** @brief mkdirat(2). */
 int64_t hio_mkdir(int dir, const char *path, uint32_t mode);
+/** @brief symlinkat(2): a link at path whose text is target. */
+int64_t hio_symlink(const char *target, int dir, const char *path);
+/** @brief linkat(2); follow follows a symbolic link at the old path. */
+int64_t hio_link(int old_dir, const char *old_path, int new_dir, const char *new_path, bool follow);
+/** @brief mkfifoat(3): a named pipe. */
+int64_t hio_mkfifo(int dir, const char *path, uint32_t mode);
+/** @brief statvfs of the file system that holds path (dir NULL path, or the descriptor fd when path is NULL), in Linux's statfs layout. */
+int64_t hio_statfs(int fd, const char *path, l_statfs *out);
 /** @brief unlinkat(2); remove_dir selects rmdir. */
 int64_t hio_unlink(int dir, const char *path, bool remove_dir);
 /** @brief renameat(2). */

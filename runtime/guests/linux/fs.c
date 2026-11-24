@@ -1128,6 +1128,105 @@ static int64_t sys_unlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
     return rc < 0 ? rc : hio_unlink(dir, hp, (a[2] & L_AT_REMOVEDIR) != 0);
 }
 
+static int64_t sys_symlinkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    char target[PATH_CAP], path[PATH_CAP], hp[PATH_CAP];
+    int64_t rc = path_arg(a[0], target);
+    if (rc == 0)
+        rc = path_arg(a[2], path);
+    int dir;
+    if (rc == 0)
+        rc = dir_arg((int64_t)(int32_t)a[1], path, &dir);
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, false);
+    return rc < 0 ? rc : hio_symlink(target, dir, hp);
+}
+
+static int64_t sys_linkat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    if (a[4] & ~(uint64_t)0x400)
+        return -L_EINVAL;
+    char op[PATH_CAP], np[PATH_CAP], ho[PATH_CAP], hn[PATH_CAP];
+    int64_t rc = path_arg(a[1], op);
+    if (rc == 0)
+        rc = path_arg(a[3], np);
+    int od, nd;
+    if (rc == 0)
+        rc = dir_arg((int64_t)(int32_t)a[0], op, &od);
+    if (rc == 0)
+        rc = dir_arg((int64_t)(int32_t)a[2], np, &nd);
+    if (rc == 0)
+        rc = host_path(op, ho, sizeof ho, (a[4] & 0x400) != 0);
+    if (rc == 0)
+        rc = host_path(np, hn, sizeof hn, false);
+    return rc < 0 ? rc : hio_link(od, ho, nd, hn, (a[4] & 0x400) != 0);
+}
+
+/** @brief mknodat(2): named pipes and plain files; devices need privileges the guest does not have. */
+static int64_t sys_mknodat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    char path[PATH_CAP], hp[PATH_CAP];
+    int64_t rc = path_arg(a[1], path);
+    int dir;
+    if (rc == 0)
+        rc = dir_arg((int64_t)(int32_t)a[0], path, &dir);
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, false);
+    if (rc < 0)
+        return rc;
+    uint32_t mode = (uint32_t)a[2];
+    uint32_t perm = mode & 07777 & ~lx.umask;
+    switch (mode & L_S_IFMT) {
+    case L_S_IFIFO:
+        return hio_mkfifo(dir, hp, perm);
+    case 0:
+    case L_S_IFREG: {
+        int64_t h = hio_open(dir, hp, L_O_CREAT | L_O_EXCL | L_O_WRONLY, perm);
+        return h < 0 ? h : hio_close((int)h);
+    }
+    default:
+        return -L_EPERM;
+    }
+}
+
+static int64_t sys_statfs(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    char path[PATH_CAP], hp[PATH_CAP];
+    int64_t rc = path_arg(a[0], path);
+    if (rc == 0 && (module_at(path) || vdir_exists(path)) && !root_real(path))
+        strcpy(path, "/");
+    if (rc == 0)
+        rc = host_path(path, hp, sizeof hp, true);
+    l_statfs st;
+    if (rc == 0)
+        rc = hio_statfs(-1, hp, &st);
+    return rc < 0 ? rc : lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+}
+
+static int64_t sys_fstatfs(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
+{
+    (void)c;
+    (void)mem;
+    l_statfs st;
+    int64_t rc;
+    int h = lx_host_fd((int)a[0]);
+    if (h >= 0)
+        rc = hio_statfs(h, NULL, &st);
+    else if (lx_virt_fd((int)a[0]) || lx_vdir_fd((int)a[0]))
+        rc = hio_statfs(-1, "/", &st);
+    else
+        rc = -L_EBADF;
+    return rc < 0 ? rc : lx_put(a[1], &st, sizeof st) ? 0 : -L_EFAULT;
+}
+
 static int64_t sys_renameat(rl_ctx *c, uint8_t *mem, const uint64_t a[6])
 {
     (void)c;
@@ -1468,7 +1567,12 @@ lx_sys_fn *lx_fs_call(uint32_t nr)
     case NR_getcwd: return sys_getcwd;
     case NR_chdir: return sys_chdir;
     case NR_mkdirat: return sys_mkdirat;
+    case NR_mknodat: return sys_mknodat;
     case NR_unlinkat: return sys_unlinkat;
+    case NR_symlinkat: return sys_symlinkat;
+    case NR_linkat: return sys_linkat;
+    case NR_statfs: return sys_statfs;
+    case NR_fstatfs: return sys_fstatfs;
     case NR_renameat: return sys_renameat;
     case NR_faccessat: return sys_faccessat;
     case NR_readlinkat: return sys_readlinkat;

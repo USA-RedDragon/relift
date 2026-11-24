@@ -28,9 +28,14 @@ enum rl_linux_nr {
     NR_dup3 = 24,
     NR_fcntl = 25,
     NR_ioctl = 29,
+    NR_mknodat = 33,
     NR_mkdirat = 34,
     NR_unlinkat = 35,
+    NR_symlinkat = 36,
+    NR_linkat = 37,
     NR_renameat = 38,
+    NR_statfs = 43,
+    NR_fstatfs = 44,
     NR_ftruncate = 46,
     NR_faccessat = 48,
     NR_chdir = 49,
@@ -407,6 +412,23 @@ typedef struct l_stat {
     uint32_t unused5;
 } l_stat;
 _Static_assert(sizeof(l_stat) == 128, "l_stat size");
+
+/** @brief struct statfs of aarch64 (the generic 64-bit layout). */
+typedef struct l_statfs {
+    int64_t f_type;
+    int64_t f_bsize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    int32_t f_fsid[2];
+    int64_t f_namelen;
+    int64_t f_frsize;
+    int64_t f_flags;
+    int64_t f_spare[4];
+} l_statfs;
+_Static_assert(sizeof(l_statfs) == 120, "l_statfs size");
 
 /** @brief struct timespec of aarch64: two 64-bit words. */
 typedef struct l_timespec {

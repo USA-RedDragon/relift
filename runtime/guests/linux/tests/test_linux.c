@@ -410,6 +410,11 @@ TEST(the_kernel_header_values_match_the_uapi_headers_where_the_host_has_them)
     CHECK_EQ(NR_statx, __NR_statx);
     CHECK_EQ(NR_futex, __NR_futex);
     CHECK_EQ(NR_ppoll, __NR_ppoll);
+    CHECK_EQ(NR_mknodat, __NR_mknodat);
+    CHECK_EQ(NR_symlinkat, __NR_symlinkat);
+    CHECK_EQ(NR_linkat, __NR_linkat);
+    CHECK_EQ(NR_statfs, __NR_statfs);
+    CHECK_EQ(NR_fstatfs, __NR_fstatfs);
 #endif
 #endif
 }
@@ -572,6 +577,28 @@ TEST(a_guest_root_holds_the_programs_paths_and_the_kernel_views_stay_the_hosts)
     put_str(at, "abs");
     CHECK_EQ(sys(c, NR_readlinkat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 256, 0, 0), 13);
     CHECK(memcmp(cstr(buf), "/usr/lib/real", 13) == 0);
+    put_str(at, "/usr/lib/made");
+    put_str(at + 0x100, "/usr/lib/real");
+    CHECK_EQ(sys(c, NR_symlinkat, at + 0x100, (uint64_t)(int64_t)L_AT_FDCWD, at, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_readlinkat, (uint64_t)(int64_t)L_AT_FDCWD, at, buf, 256, 0, 0), 13);
+    put_str(at + 0x100, "/usr/lib/hard");
+    CHECK_EQ(sys(c, NR_linkat, (uint64_t)(int64_t)L_AT_FDCWD, at, (uint64_t)(int64_t)L_AT_FDCWD, at + 0x100, 0x400, 0), 0);
+    put_str(at + 0x200, "/usr/lib/fifo");
+    CHECK_EQ(sys(c, NR_mknodat, (uint64_t)(int64_t)L_AT_FDCWD, at + 0x200, L_S_IFIFO | 0600, 0, 0, 0), 0);
+    CHECK_EQ(sys(c, NR_newfstatat, (uint64_t)(int64_t)L_AT_FDCWD, at + 0x200, buf, 0, 0, 0), 0);
+    l_stat st;
+    memcpy(&st, cstr(buf), sizeof st);
+    CHECK_EQ(st.st_mode & L_S_IFMT, L_S_IFIFO);
+    CHECK_EQ(sys(c, NR_mknodat, (uint64_t)(int64_t)L_AT_FDCWD, at + 0x200, 0020000 | 0600, 0, 0, 0), -L_EPERM);
+    CHECK_EQ(sys(c, NR_statfs, at, buf, 0, 0, 0, 0), 0);
+    l_statfs sf;
+    memcpy(&sf, cstr(buf), sizeof sf);
+    CHECK(sf.f_bsize > 0 && sf.f_blocks > 0);
+    for (const char *n = "made\0hard\0fifo\0"; *n; n += strlen(n) + 1) {
+        snprintf(p, sizeof p, "%s/usr/lib/%s", root, n);
+        CHECK_EQ(access(p, F_OK) == 0 || n[0] == 'm', true);
+        unlink(p);
+    }
     CHECK_EQ(chdir(cwd), 0);
     prog.root = NULL;
     snprintf(p, sizeof p, "%s/usr/lib/abs", root);

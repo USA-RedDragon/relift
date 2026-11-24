@@ -332,6 +332,52 @@ int64_t hio_mkdir(int dir, const char *path, uint32_t mode)
     return CreateDirectoryW(w, NULL) ? 0 : last_error();
 }
 
+int64_t hio_symlink(const char *target, int dir, const char *path)
+{
+    (void)target;
+    (void)dir;
+    (void)path;
+    return -L_EPERM;
+}
+
+int64_t hio_link(int od, const char *op, int nd, const char *np, bool follow)
+{
+    (void)follow;
+    wchar_t wo[PATH_MAX_W], wn[PATH_MAX_W];
+    int64_t rc = wpath(od, op, wo);
+    if (rc == 0)
+        rc = wpath(nd, np, wn);
+    if (rc < 0)
+        return rc;
+    return CreateHardLinkW(wn, wo, NULL) ? 0 : last_error();
+}
+
+int64_t hio_mkfifo(int dir, const char *path, uint32_t mode)
+{
+    (void)dir;
+    (void)path;
+    (void)mode;
+    return -L_EPERM;
+}
+
+int64_t hio_statfs(int fd, const char *path, l_statfs *out)
+{
+    (void)fd;
+    (void)path;
+    ULARGE_INTEGER avail, total, freeb;
+    if (!GetDiskFreeSpaceExW(NULL, &avail, &total, &freeb))
+        return last_error();
+    memset(out, 0, sizeof *out);
+    out->f_type = 0x5346544e;
+    out->f_bsize = 4096;
+    out->f_frsize = 4096;
+    out->f_blocks = total.QuadPart / 4096;
+    out->f_bfree = freeb.QuadPart / 4096;
+    out->f_bavail = avail.QuadPart / 4096;
+    out->f_namelen = 255;
+    return 0;
+}
+
 int64_t hio_unlink(int dir, const char *path, bool remove_dir)
 {
     wchar_t w[PATH_MAX_W];

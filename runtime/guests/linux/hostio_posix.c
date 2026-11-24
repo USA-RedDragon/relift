@@ -21,6 +21,7 @@
 #include <sys/resource.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
@@ -204,6 +205,45 @@ int64_t hio_pipe(int fds[2])
 }
 
 int64_t hio_mkdir(int dir, const char *path, uint32_t mode) { return mkdirat(dirfd_of(dir), path, (mode_t)mode) < 0 ? fail() : 0; }
+
+int64_t hio_symlink(const char *target, int dir, const char *path) { return symlinkat(target, dirfd_of(dir), path) < 0 ? fail() : 0; }
+
+int64_t hio_link(int od, const char *op, int nd, const char *np, bool follow)
+{
+    return linkat(dirfd_of(od), op, dirfd_of(nd), np, follow ? AT_SYMLINK_FOLLOW : 0) < 0 ? fail() : 0;
+}
+
+int64_t hio_mkfifo(int dir, const char *path, uint32_t mode)
+{
+#if defined(__APPLE__)
+    /* mkfifoat is macOS 13 and iOS 16 and later; the runtime builds for older ones. */
+    if (__builtin_available(macOS 13.0, iOS 16.0, *))
+        return mkfifoat(dirfd_of(dir), path, (mode_t)mode) < 0 ? fail() : 0;
+    errno = ENOSYS;
+    return fail();
+#else
+    return mkfifoat(dirfd_of(dir), path, (mode_t)mode) < 0 ? fail() : 0;
+#endif
+}
+
+int64_t hio_statfs(int fd, const char *path, l_statfs *out)
+{
+    struct statvfs v;
+    if ((path ? statvfs(path, &v) : fstatvfs(fd, &v)) < 0)
+        return fail();
+    memset(out, 0, sizeof *out);
+    out->f_type = 0xef53;
+    out->f_bsize = (int64_t)v.f_bsize;
+    out->f_frsize = (int64_t)(v.f_frsize ? v.f_frsize : v.f_bsize);
+    out->f_blocks = v.f_blocks;
+    out->f_bfree = v.f_bfree;
+    out->f_bavail = v.f_bavail;
+    out->f_files = v.f_files;
+    out->f_ffree = v.f_ffree;
+    out->f_namelen = (int64_t)v.f_namemax;
+    out->f_flags = (v.f_flag & ST_RDONLY) ? 1 : 0;
+    return 0;
+}
 
 int64_t hio_unlink(int dir, const char *path, bool remove_dir)
 {
